@@ -39,7 +39,10 @@ use reth_trie_sparse::{
 use tracing::{debug, debug_span, error, instrument, trace_span};
 
 /// Sparse trie task implementation that uses in-memory sparse trie data to schedule proof fetching.
-pub(super) struct SparseTrieCacheTask<A = ArenaParallelSparseTrie, S = ArenaParallelSparseTrie> {
+pub(super) struct SparseTrieCacheTask<
+    A: SparseTrie = ArenaParallelSparseTrie,
+    S = ArenaParallelSparseTrie,
+> {
     /// Sender for proof results.
     proof_result_tx: ProofResultSender,
     /// Receiver for proof results directly from workers.
@@ -145,6 +148,16 @@ pub(super) struct SparseTrieCacheTask<A = ArenaParallelSparseTrie, S = ArenaPara
     storage_done_tx: CrossbeamSender<StorageJobMessage<S>>,
     /// Receives storage tries coming back from jobs spawned by this task.
     storage_done_rx: CrossbeamReceiver<StorageJobMessage<S>>,
+    /// Number of accounts trie subtries currently owned by a job running off this thread.
+    ///
+    /// While this is non-zero the accounts trie cannot be hashed or preserved, and the updates
+    /// routed into a checked out subtrie are held by the trie itself.
+    account_in_flight: usize,
+    /// Sender handed to accounts subtrie jobs. Kept alive by the task so the receiver never
+    /// disconnects.
+    account_done_tx: CrossbeamSender<AccountJobMessage<A::SubtrieJob>>,
+    /// Receives accounts trie subtries coming back from jobs spawned by this task.
+    account_done_rx: CrossbeamReceiver<AccountJobMessage<A::SubtrieJob>>,
     /// Number of pending execution/prewarming updates received but not yet passed to
     /// `update_leaves`.
     pending_updates: usize,
@@ -163,7 +176,7 @@ pub(super) struct SparseTrieCacheTask<A = ArenaParallelSparseTrie, S = ArenaPara
 
 impl<A, S> SparseTrieCacheTask<A, S>
 where
-    A: SparseTrie + Default,
+    A: SparseTrie + Default + 'static,
     S: SparseTrie + Default + Clone + 'static,
 {
     /// Creates a new sparse trie, pre-populating with an existing [`SparseStateTrie`].
@@ -184,6 +197,7 @@ where
     ) -> Self {
         let (hashed_state_tx, hashed_state_rx) = crossbeam_channel::unbounded();
         let (storage_done_tx, storage_done_rx) = crossbeam_channel::unbounded();
+        let (account_done_tx, account_done_rx) = crossbeam_channel::unbounded();
 
         let parent_span = tracing::Span::current();
         let hashing_metrics = metrics.clone();
@@ -224,6 +238,9 @@ where
             storage_in_flight: 0,
             storage_done_tx,
             storage_done_rx,
+            account_in_flight: 0,
+            account_done_tx,
+            account_done_rx,
             pending_updates: Default::default(),
             initial_updates_applied: false,
             final_hashed_state: Default::default(),
@@ -278,6 +295,10 @@ where
             self.storage.is_empty(),
             "storage tries must be back before the trie is preserved"
         );
+        debug_assert_eq!(
+            self.account_in_flight, 0,
+            "accounts subtries must be back before the trie is preserved"
+        );
         let Self { mut trie, .. } = self;
         let deferred = trie.take_deferred_drops();
         (trie, deferred)
@@ -288,9 +309,10 @@ where
     /// Use this when the payload was invalid or cancelled - we don't want to preserve
     /// potentially invalid trie state, but we keep the allocations for reuse.
     pub(super) fn into_cleared_trie(self) -> (SparseStateTrie<A, S>, DeferredDrops) {
-        let Self { mut trie, storage_done_rx, storage, .. } = self;
+        let Self { mut trie, storage_done_rx, account_done_rx, storage, .. } = self;
         // Disconnect first so tries still out with a job are dropped by that job instead of here.
         drop(storage_done_rx);
+        drop(account_done_rx);
         for (address, slot) in storage {
             if let StorageSlot::Idle(work) = slot {
                 trie.insert_storage_trie(address, work.trie);
@@ -367,6 +389,18 @@ where
                     };
                     self.on_storage_job_message(returned)?;
                 },
+                recv(self.account_done_rx) -> message => {
+                    let wake = Instant::now();
+                    total_idle_time += wake.duration_since(idle_start);
+                    self.metrics
+                        .sparse_trie_channel_wait_duration_histogram
+                        .record(wake.duration_since(t));
+
+                    let Ok(returned) = message else {
+                        unreachable!("we own the sender half")
+                    };
+                    self.on_account_job_message(returned)?;
+                },
                 recv(self.cancel_rx) -> _ => return Err(StateRootTaskError::Canceled),
             }
 
@@ -406,6 +440,18 @@ where
                     };
                     self.on_storage_job_message(returned)?;
                 },
+                recv(self.account_done_rx) -> message => {
+                    let wake = Instant::now();
+                    total_idle_time += wake.duration_since(idle_start);
+                    self.metrics
+                        .sparse_trie_channel_wait_duration_histogram
+                        .record(wake.duration_since(t));
+
+                    let Ok(returned) = message else {
+                        unreachable!("we own the sender half")
+                    };
+                    self.on_account_job_message(returned)?;
+                },
                 recv(self.cancel_rx) -> _ => return Err(StateRootTaskError::Canceled),
             }
 
@@ -416,6 +462,10 @@ where
         debug_assert_eq!(
             self.storage_in_flight, 0,
             "completion must wait for every checked out storage trie"
+        );
+        debug_assert_eq!(
+            self.account_in_flight, 0,
+            "completion must wait for every checked out accounts subtrie"
         );
         self.metrics.sparse_trie_idle_time_seconds.record(total_idle_time.as_secs_f64());
 
@@ -500,6 +550,7 @@ where
         // Absorb a whole burst of returns before the scans below, so one batch of storage jobs
         // costs one promotion pass rather than one per trie.
         self.drain_returned_storage_tries()?;
+        self.drain_returned_account_subtries()?;
 
         let updates_queued = !self.finished_state_updates && !self.updates.is_empty();
 
@@ -531,9 +582,12 @@ where
             self.ensure_not_stalled(updates_queued)?;
 
             // If there's still no pending updates spend some time pre-computing the account
-            // trie upper hashes
+            // subtrie hashes, off this thread so a proof result arriving meanwhile is handled
+            // right away.
             if self.proof_result_rx.is_empty() {
-                self.trie.calculate_subtries(self.new_epoch);
+                let mut jobs = Vec::new();
+                self.trie.take_account_hashing_jobs(&mut jobs);
+                self.spawn_account_jobs(jobs);
             }
         } else if !updates_queued {
             // If we don't have any pending updates, apply them to the trie,
@@ -667,8 +721,10 @@ where
 
     /// Reveals a proof batch.
     ///
-    /// The account trie is revealed here because it can never be checked out. Storage proof nodes
-    /// are queued on their address' slot and revealed by the job that runs for it next.
+    /// Storage proof nodes are queued on their address' slot and revealed by the job that runs for
+    /// it next. Account proof nodes are revealed into the upper levels of the accounts trie here;
+    /// the subtries that receive enough of them are checked out for a job, which also applies the
+    /// leaf updates the reveal unblocks.
     fn reveal_proof_result(&mut self, result: DecodedMultiProofV2) -> SparseStateTrieResult<()> {
         let DecodedMultiProofV2 { account_proofs, storage_proofs } = result;
 
@@ -676,7 +732,10 @@ where
         // Get the workers going before spending this thread on the account trie.
         self.run_ready_storage_work()?;
 
-        self.trie.reveal_account_proof_nodes(account_proofs)
+        let mut jobs = Vec::new();
+        let result = self.trie.reveal_account_proof_nodes_deferred(account_proofs, true, &mut jobs);
+        self.spawn_account_jobs(jobs);
+        result
     }
 
     /// Queues storage proof nodes on the slot of the address they belong to.
@@ -864,48 +923,119 @@ where
 
         let pending_before = account_updates.len() + self.trie.trie_mut().blocked_updates().len();
 
-        self.trie.trie_mut().update_leaves_with_events(
+        let mut jobs = Vec::new();
+        let result = self.trie.trie_mut().update_leaves_deferred(
             account_updates,
             true,
-            |event| match event {
-                LeafUpdateEvent::ProofRequired { key: target, parent } => {
-                    match self.fetched_account_targets.entry(target) {
-                        Entry::Occupied(mut entry) => {
-                            if parent < *entry.get() {
-                                entry.insert(parent);
-                                self.pending_targets.push_account_target(
-                                    ProofV2Target::new(target).with_parent(parent),
-                                );
-                            }
-                        }
-                        Entry::Vacant(entry) => {
-                            entry.insert(parent);
-                            self.pending_targets.push_account_target(
-                                ProofV2Target::new(target).with_parent(parent),
-                            );
-                        }
-                    }
-                }
-                LeafUpdateEvent::Touched { key, value } => {
-                    if self.pending_account_updates.contains_key(&key) {
-                        // The account's own leaf update is applied, so nothing keeps it from
-                        // being promoted any more.
-                        self.promotable_accounts.push(key);
-                        if let Entry::Vacant(entry) = self.existing_accounts.entry(key) {
-                            entry.insert(
-                                value.filter(|value| !value.is_empty()).map(decode_trie_account),
-                            );
-                        }
-                    }
-                }
+            |event| {
+                apply_account_leaf_update_event(
+                    event,
+                    &mut self.fetched_account_targets,
+                    &mut self.pending_targets,
+                    &self.pending_account_updates,
+                    &mut self.promotable_accounts,
+                    &mut self.existing_accounts,
+                )
             },
-        )?;
+            &mut jobs,
+        );
+        self.spawn_account_jobs(jobs);
+        result?;
 
+        let account_updates = if new { &self.new_account_updates } else { &self.account_updates };
         let pending_after = account_updates.len() + self.trie.trie_mut().blocked_updates().len();
         self.account_cache_hits += pending_before.saturating_sub(pending_after) as u64;
         self.account_cache_misses += pending_after as u64;
 
         Ok(pending_after < pending_before)
+    }
+
+    /// Hands checked out accounts subtries to the rayon pool in chunks, like storage tries.
+    fn spawn_account_jobs(&mut self, mut jobs: Vec<A::SubtrieJob>) {
+        if jobs.is_empty() {
+            return;
+        }
+
+        self.account_in_flight += jobs.len();
+        let parent_span = debug_span!("spawn_account_subtrie_jobs", n = jobs.len());
+        let chunk_len = storage_job_chunk_len(jobs.len());
+        let new_epoch = self.new_epoch;
+        while !jobs.is_empty() {
+            let chunk = jobs.split_off(jobs.len().saturating_sub(chunk_len));
+            let account_done_tx = self.account_done_tx.clone();
+            let parent_span = parent_span.clone();
+            rayon::spawn(move || {
+                let _enter = debug_span!(
+                    target: "engine::tree::payload_processor::sparse_trie",
+                    parent: &parent_span,
+                    "account_subtrie_jobs",
+                    n = chunk.len(),
+                )
+                .entered();
+                for job in chunk {
+                    let message = match panic::catch_unwind(AssertUnwindSafe(move || {
+                        let mut job = job;
+                        let result = A::run_subtrie_job(&mut job, new_epoch);
+                        (job, result)
+                    })) {
+                        Ok((job, result)) => AccountJobMessage::Done { job, result },
+                        Err(payload) => AccountJobMessage::Panicked { payload },
+                    };
+                    if account_done_tx.send(message).is_err() {
+                        // Nobody is waiting for the result anymore, drop the rest here.
+                        return;
+                    }
+                }
+            });
+        }
+    }
+
+    /// Handles a message from an accounts subtrie job: puts a finished subtrie back, or resumes a
+    /// panic that happened on the job thread here, where it fails this task like an inline panic
+    /// would.
+    fn on_account_job_message(
+        &mut self,
+        message: AccountJobMessage<A::SubtrieJob>,
+    ) -> SparseTrieResult<()> {
+        match message {
+            AccountJobMessage::Done { job, result } => {
+                self.on_account_subtrie_returned(job);
+                result
+            }
+            AccountJobMessage::Panicked { payload } => {
+                self.account_in_flight -= 1;
+                panic::resume_unwind(payload)
+            }
+        }
+    }
+
+    /// Puts a subtrie back into the accounts trie once its job finished, reporting the proof
+    /// targets and touched values its pass produced.
+    fn on_account_subtrie_returned(&mut self, job: A::SubtrieJob) {
+        self.account_in_flight -= 1;
+        let follow_up = self.trie.trie_mut().restore_subtrie_job(job, |event| {
+            apply_account_leaf_update_event(
+                event,
+                &mut self.fetched_account_targets,
+                &mut self.pending_targets,
+                &self.pending_account_updates,
+                &mut self.promotable_accounts,
+                &mut self.existing_accounts,
+            )
+        });
+
+        if let Some(job) = follow_up {
+            self.spawn_account_jobs(vec![job]);
+        }
+    }
+
+    /// Takes back every subtrie whose job has already finished, without blocking.
+    fn drain_returned_account_subtries(&mut self) -> SparseTrieResult<()> {
+        while let Ok(message) = self.account_done_rx.try_recv() {
+            self.on_account_job_message(message)?;
+        }
+
+        Ok(())
     }
 
     /// Hands checked out storage tries to the rayon pool in chunks.
@@ -1114,6 +1244,9 @@ where
             // update was already drained is normally cached here.
             None => match self.existing_accounts.get(&addr) {
                 Some(reported) => *reported,
+                // The subtrie holding the account is out with a job, so the trie reads as if the
+                // account did not exist. The job reports its value when it comes back.
+                None if self.trie.is_account_subtrie_in_flight(&addr) => return false,
                 None => {
                     self.account_value_fallbacks += 1;
                     self.trie.get_account_value(&addr).map(|value| decode_trie_account(value))
@@ -1170,6 +1303,11 @@ where
     #[cfg(debug_assertions)]
     fn debug_assert_no_promotable_accounts(&self) {
         for (addr, pending) in &self.pending_account_updates {
+            // A job owns the account's leaf update, and reports it when it returns.
+            if self.trie.is_account_subtrie_in_flight(addr) {
+                continue;
+            }
+
             match self.storage.get(addr) {
                 // A job owns the trie, or the trie still has leaf updates to apply.
                 Some(StorageSlot::InFlight(_)) => continue,
@@ -1250,7 +1388,8 @@ where
     /// While this is false no trie can change any more, so every account still waiting for
     /// promotion already has everything it needs.
     fn has_pending_leaf_updates(&self) -> bool {
-        !self.account_updates.is_empty() ||
+        self.account_in_flight > 0 ||
+            !self.account_updates.is_empty() ||
             self.account_blocked_updates().is_some_and(|blocked| !blocked.is_empty()) ||
             self.storage.values().any(|slot| slot.is_pending())
     }
@@ -1284,6 +1423,7 @@ where
             self.in_flight_proof_batches == 0 &&
             self.proof_result_rx.is_empty() &&
             self.storage_in_flight == 0 &&
+            self.account_in_flight == 0 &&
             !self.has_ready_storage_work() &&
             self.has_pending_sparse_trie_updates()
         {
@@ -1332,6 +1472,66 @@ where
 
         Ok(())
     }
+}
+
+/// Records what the accounts trie reported while applying a leaf update.
+///
+/// Free-standing because the accounts trie reports these both while a batch is applied on the task
+/// thread and when a checked out subtrie comes back, and both call sites already borrow the trie.
+fn apply_account_leaf_update_event(
+    event: LeafUpdateEvent<'_>,
+    fetched_account_targets: &mut B256Map<ProofV2TargetParent>,
+    pending_targets: &mut PendingTargets,
+    pending_account_updates: &B256Map<Option<Option<Account>>>,
+    promotable_accounts: &mut Vec<B256>,
+    existing_accounts: &mut B256Map<Option<TrieAccount>>,
+) {
+    match event {
+        LeafUpdateEvent::ProofRequired { key: target, parent } => {
+            match fetched_account_targets.entry(target) {
+                Entry::Occupied(mut entry) => {
+                    if parent < *entry.get() {
+                        entry.insert(parent);
+                        pending_targets
+                            .push_account_target(ProofV2Target::new(target).with_parent(parent));
+                    }
+                }
+                Entry::Vacant(entry) => {
+                    entry.insert(parent);
+                    pending_targets
+                        .push_account_target(ProofV2Target::new(target).with_parent(parent));
+                }
+            }
+        }
+        LeafUpdateEvent::Touched { key, value } => {
+            if pending_account_updates.contains_key(&key) {
+                // The account's own leaf update is applied, so nothing keeps it from being
+                // promoted any more.
+                promotable_accounts.push(key);
+                if let Entry::Vacant(entry) = existing_accounts.entry(key) {
+                    entry.insert(value.filter(|value| !value.is_empty()).map(decode_trie_account));
+                }
+            }
+        }
+    }
+}
+
+/// What a spawned accounts subtrie job sends back to the sparse trie task.
+enum AccountJobMessage<J> {
+    /// The job finished and hands its subtrie back, with the error its pass stopped at, if any.
+    Done {
+        /// The finished job, holding the subtrie to restore.
+        job: J,
+        /// The error the pass stopped at, if any.
+        result: SparseTrieResult<()>,
+    },
+    /// The job panicked and its subtrie is lost. The global rayon pool has no panic handler, so a
+    /// panic escaping a spawned job would abort the process; it is caught and resumed on the task
+    /// thread instead, where it fails the state root calculation like an inline panic.
+    Panicked {
+        /// The panic payload, resumed on the task thread.
+        payload: Box<dyn Any + Send>,
+    },
 }
 
 /// State of one address' storage trie in the sparse trie task.
@@ -2251,6 +2451,95 @@ mod tests {
         drain_sparse_trie_tasks(&runtime);
     }
 
+    #[test]
+    fn run_waits_for_account_subtries_updated_off_thread() {
+        let runtime = reth_tasks::Runtime::test();
+        let provider_factory = create_test_provider_factory();
+        let anchor_hash = init_genesis(&provider_factory).expect("failed to initialize genesis");
+        let state_provider_factory = OverlayStateProviderFactory::new(
+            provider_factory,
+            OverlayManager::<reth_chain_state::EthPrimitives>::default()
+                .overlay_builder(anchor_hash),
+        );
+        let (proof_result_tx, proof_result_rx) = crossbeam_channel::unbounded();
+        let proof_worker_handle = ProofWorkerHandle::new(
+            &runtime,
+            ProofTaskCtx::new(state_provider_factory),
+            false,
+            proof_result_tx.clone(),
+        );
+
+        // Addresses share their first nibble and differ in the second, so each group lands in its
+        // own accounts subtrie and every subtrie gets a batch large enough to be checked out.
+        let address = |group: u8, index: u8| {
+            let mut address = [0u8; 32];
+            address[0] = group;
+            address[1] = index;
+            B256::from(address)
+        };
+        let accounts = (0..8u8)
+            .flat_map(|group| {
+                (0..16u8).map(move |index| {
+                    (
+                        address(group, index),
+                        Account {
+                            nonce: u64::from(group) * 16 + u64::from(index) + 1,
+                            balance: U256::from(index),
+                            bytecode_hash: None,
+                        },
+                    )
+                })
+            })
+            .collect::<Vec<_>>();
+
+        let default_trie = RevealableSparseTrie::<ArenaParallelSparseTrie>::revealed_empty();
+        let trie = SparseStateTrie::default()
+            .with_accounts_trie(default_trie.clone())
+            .with_default_storage_trie(default_trie)
+            .with_updates(true);
+
+        let (updates_tx, updates_rx) = crossbeam_channel::unbounded();
+        let (_cancel_guard, cancel_rx) = crossbeam_channel::bounded::<()>(0);
+        let mut task = SparseTrieCacheTask::new_with_trie(
+            &runtime,
+            updates_rx,
+            cancel_rx,
+            std::sync::mpsc::channel().0,
+            proof_worker_handle,
+            proof_result_tx,
+            proof_result_rx,
+            SparseTrieTaskMetrics::default(),
+            trie,
+            EMPTY_ROOT_HASH,
+            TrieNodeEpoch::new(1),
+            1,
+        );
+
+        // Seed the trie so the subtries exist before the batch that checks them out arrives.
+        let mut seed = HashedPostState::default();
+        for (address, account) in &accounts {
+            seed.accounts.insert(*address, Some(Account { nonce: 1, ..*account }));
+        }
+        updates_tx.send(StateRootMessage::HashedStateUpdate(seed)).unwrap();
+        let mut state = HashedPostState::default();
+        for (address, account) in &accounts {
+            state.accounts.insert(*address, Some(*account));
+        }
+        updates_tx.send(StateRootMessage::HashedStateUpdate(state)).unwrap();
+        updates_tx.send(StateRootMessage::FinishedStateUpdates).unwrap();
+
+        let outcome = task.run().expect("state root computation should succeed");
+
+        let expected = accounts
+            .iter()
+            .map(|(address, account)| (*address, account.into_trie_account(EMPTY_ROOT_HASH)));
+        assert_eq!(outcome.state_root, reth_trie_common::root::state_root_unsorted(expected));
+        assert_eq!(task.account_in_flight, 0, "every accounts subtrie is back");
+
+        drop(updates_tx);
+        drop(task);
+        drain_sparse_trie_tasks(&runtime);
+    }
     #[test]
     fn first_leaf_batch_starts_proofs_before_input_queue_drains() {
         let runtime = reth_tasks::Runtime::test();

@@ -38,6 +38,9 @@ pub(super) enum SeekResult {
     NoChild { child_nibble: u8 },
     /// The target nibble has a revealed subtrie child (now pushed onto the stack).
     RevealedSubtrie,
+    /// The target nibble has a subtrie child that is checked out by a job (now pushed onto the
+    /// stack). Nothing below it can be read or written until it is restored.
+    TakenSubtrie,
 }
 
 /// Result of [`ArenaCursor::next`] describing what the cursor did.
@@ -371,6 +374,9 @@ impl ArenaCursor {
                 ArenaSparseNode::Branch(b) => b,
                 ArenaSparseNode::Subtrie(_) => {
                     return SeekResult::RevealedSubtrie;
+                }
+                ArenaSparseNode::TakenSubtrie => {
+                    return SeekResult::TakenSubtrie;
                 }
                 _ => unreachable!("unexpected node type on stack: {:?}", arena[head_idx]),
             };

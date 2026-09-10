@@ -272,6 +272,66 @@ impl<T: SparseTrieTrait + Default> RevealableSparseTrie<T> {
             }
         }
     }
+
+    /// [`Self::update_leaves_with_events`], checking parts of a revealed trie out into `jobs`.
+    ///
+    /// A blind trie has nothing to check out and behaves like [`Self::update_leaves_with_events`].
+    pub fn update_leaves_deferred(
+        &mut self,
+        updates: &mut B256Map<LeafUpdate>,
+        report_touched: bool,
+        event_fn: impl FnMut(LeafUpdateEvent<'_>),
+        jobs: &mut Vec<T::SubtrieJob>,
+    ) -> SparseTrieResult<()> {
+        match self {
+            Self::Blind(_) => self.update_leaves_with_events(updates, report_touched, event_fn),
+            Self::Revealed(trie) => {
+                trie.update_leaves_deferred(updates, report_touched, event_fn, jobs)
+            }
+        }
+    }
+
+    /// Reveals a batch of V2 proof nodes, checking parts of the trie with enough nodes out into
+    /// `jobs` instead of revealing them on this thread.
+    pub fn reveal_v2_proof_nodes_deferred(
+        &mut self,
+        nodes: &mut [ProofTrieNodeV2],
+        retain_updates: bool,
+        report_touched: bool,
+        jobs: &mut Vec<T::SubtrieJob>,
+    ) -> SparseTrieResult<()> {
+        let trie = if let Some(root_node) = nodes.iter().find(|n| n.path.is_empty()) {
+            self.reveal_root(root_node.node.clone(), root_node.masks, retain_updates)?
+        } else {
+            self.as_revealed_mut().ok_or(SparseTrieErrorKind::Blind)?
+        };
+        trie.reveal_nodes_deferred(nodes, report_touched, jobs)?;
+
+        Ok(())
+    }
+
+    /// Checks every part of a revealed trie whose hash is out of date out into `jobs`.
+    pub fn take_hashing_jobs(&mut self, jobs: &mut Vec<T::SubtrieJob>) {
+        if let Some(trie) = self.as_revealed_mut() {
+            trie.take_hashing_jobs(jobs);
+        }
+    }
+
+    /// Puts a finished job's part back. See [`SparseTrie::restore_subtrie_job`].
+    pub fn restore_subtrie_job(
+        &mut self,
+        job: T::SubtrieJob,
+        event_fn: impl FnMut(LeafUpdateEvent<'_>),
+    ) -> Option<T::SubtrieJob> {
+        self.as_revealed_mut()
+            .expect("a trie that handed out a job is revealed")
+            .restore_subtrie_job(job, event_fn)
+    }
+
+    /// Returns whether the part holding the keys that start with `prefix` is out with a job.
+    pub fn is_prefix_in_flight(&self, prefix: u8) -> bool {
+        self.as_revealed_ref().is_some_and(|trie| trie.is_prefix_in_flight(prefix))
+    }
 }
 
 /// Enum representing sparse trie node type.

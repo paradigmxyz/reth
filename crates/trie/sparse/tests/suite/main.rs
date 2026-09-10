@@ -180,6 +180,7 @@ macro_rules! sparse_trie_tests {
                                 min_revealed_nodes: 1,
                                 min_updates: 1,
                                 min_leaves_for_prune: 1,
+                                ..Default::default()
                             },
                         )
                     });

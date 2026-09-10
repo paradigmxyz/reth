@@ -165,6 +165,12 @@ where
         trie.find_leaf(&path, None).is_ok()
     }
 
+    /// Returns whether the part of the accounts trie holding `account` is out with a job, which
+    /// makes its leaf value unreadable until the job returns.
+    pub fn is_account_subtrie_in_flight(&self, account: &B256) -> bool {
+        self.state.is_prefix_in_flight(account.0[0])
+    }
+
     /// Returns reference to bytes representing leaf value for the target account.
     pub fn get_account_value(&self, account: &B256) -> Option<&Vec<u8>> {
         self.state.as_revealed_ref()?.get_leaf_value(&Nibbles::unpack(account))
@@ -353,6 +359,32 @@ where
         Ok(result?)
     }
 
+    /// [`Self::reveal_account_proof_nodes`], checking subtries with enough nodes out into `jobs`
+    /// instead of revealing them on the calling thread.
+    pub fn reveal_account_proof_nodes_deferred(
+        &mut self,
+        mut nodes: Vec<ProofTrieNodeV2>,
+        report_touched: bool,
+        jobs: &mut Vec<A::SubtrieJob>,
+    ) -> SparseStateTrieResult<()> {
+        if nodes.is_empty() {
+            return Ok(())
+        }
+
+        #[cfg(feature = "metrics")]
+        self.metrics.increment_total_account_nodes(nodes.len() as u64);
+
+        let result = self.state.reveal_v2_proof_nodes_deferred(
+            &mut nodes,
+            self.retain_updates,
+            report_touched,
+            jobs,
+        );
+        self.deferred_drops.proof_nodes_bufs.push(nodes);
+
+        Ok(result?)
+    }
+
     /// Reveals storage trie proof nodes for `address` on the calling thread, creating the trie if
     /// it does not exist yet.
     pub fn reveal_storage_proof_nodes(
@@ -394,6 +426,12 @@ where
         if let RevealableSparseTrie::Revealed(trie) = &mut self.state {
             trie.update_subtrie_hashes(new_epoch);
         }
+    }
+
+    /// [`Self::calculate_subtries`], handing the subtries to `jobs` so the caller can hash them
+    /// off its own thread.
+    pub fn take_account_hashing_jobs(&mut self, jobs: &mut Vec<A::SubtrieJob>) {
+        self.state.take_hashing_jobs(jobs);
     }
 
     /// Returns storage sparse trie root if the trie has been revealed.

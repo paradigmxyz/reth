@@ -48,6 +48,11 @@ impl BlockedLeafUpdates {
         self.position(key).map(|pos| &self.entries[pos].update)
     }
 
+    /// Returns whether an update is blocked for the given key.
+    pub(crate) fn contains(&self, key: &B256) -> bool {
+        self.position(key).is_some()
+    }
+
     /// Returns the keys of all blocked updates.
     pub fn keys(&self) -> impl Iterator<Item = B256> + '_ {
         self.entries.iter().map(|entry| entry.key)
@@ -79,6 +84,81 @@ impl BlockedLeafUpdates {
                 entry.blocked_on = BlockedOn::Retryable;
                 self.num_retryable += 1;
             }
+        }
+    }
+
+    /// Makes every entry that waited for the subtrie holding `prefix` applicable again, now that
+    /// the subtrie is back.
+    pub(crate) fn retry_prefix(&mut self, prefix: u8) {
+        let start = self.prefix_start(prefix);
+        let mut num_retryable = self.num_retryable;
+        for entry in self.entries[start..].iter_mut().take_while(|entry| entry.key.0[0] == prefix) {
+            if entry.blocked_on == BlockedOn::InFlight {
+                entry.blocked_on = BlockedOn::Retryable;
+                num_retryable += 1;
+            }
+        }
+        self.num_retryable = num_retryable;
+    }
+
+    /// Returns whether any update is blocked below `prefix`.
+    pub(crate) fn has_prefix(&self, prefix: u8) -> bool {
+        let start = self.prefix_start(prefix);
+        self.entries.get(start).is_some_and(|entry| entry.key.0[0] == prefix)
+    }
+
+    /// Returns how many retryable entries start with `prefix`, and whether applying them could
+    /// leave nothing behind: at least one is a removal and none of them writes a value.
+    ///
+    /// A caller that applies them where the structural checks of the owning trie do not run needs
+    /// this to tell a batch that can empty a subtrie, which collapses its parent branch, from one
+    /// that cannot.
+    pub(crate) fn prefix_retryable_stats(&self, prefix: u8) -> (usize, bool) {
+        let start = self.prefix_start(prefix);
+        let mut count = 0;
+        let mut removals = 0;
+        let mut writes = 0;
+        for entry in self.entries[start..].iter().take_while(|entry| entry.key.0[0] == prefix) {
+            if entry.blocked_on != BlockedOn::Retryable {
+                continue
+            }
+            count += 1;
+            if let LeafUpdate::Changed(value) = &entry.update {
+                if value.is_empty() {
+                    removals += 1;
+                } else {
+                    writes += 1;
+                }
+            }
+        }
+        (count, removals > 0 && writes == 0)
+    }
+
+    /// Moves the retryable entries starting with `prefix` into `batch`, unsorted.
+    pub(crate) fn take_prefix_retryable(
+        &mut self,
+        prefix: u8,
+        batch: &mut Vec<(B256, Nibbles, LeafUpdate)>,
+    ) {
+        let start = self.prefix_start(prefix);
+        let mut end = start;
+        while self.entries.get(end).is_some_and(|entry| entry.key.0[0] == prefix) {
+            end += 1;
+        }
+
+        // Partition the prefix range so the entries that stay keep their relative order at its
+        // front and the retryable ones end up in the tail, which is then drained into `batch`.
+        let mut write = start;
+        for read in start..end {
+            if self.entries[read].blocked_on == BlockedOn::Retryable {
+                self.num_retryable -= 1;
+            } else {
+                self.entries.swap(write, read);
+                write += 1;
+            }
+        }
+        for entry in self.entries.drain(write..end) {
+            batch.push((entry.key, Nibbles::unpack(entry.key), entry.update));
         }
     }
 
@@ -117,7 +197,7 @@ impl BlockedLeafUpdates {
                     BlockedOn::Retryable => {
                         batch.push((entry.key, Nibbles::default(), entry.update))
                     }
-                    BlockedOn::Reveal(_) => kept.push(entry),
+                    BlockedOn::Reveal(_) | BlockedOn::InFlight => kept.push(entry),
                 }
             }
             self.entries = kept;
@@ -185,6 +265,11 @@ impl BlockedLeafUpdates {
         self.scratch = entries;
     }
 
+    /// Returns the position of the first entry whose key can start with `prefix`.
+    fn prefix_start(&self, prefix: u8) -> usize {
+        self.entries.partition_point(|entry| entry.key.0[0] < prefix)
+    }
+
     /// Returns the position of the given key in [`Self::entries`].
     fn position(&self, key: &B256) -> Option<usize> {
         if self.entries.is_empty() {
@@ -213,6 +298,9 @@ pub(crate) enum BlockedOn {
     /// The entry waits on something that is not on its own path, e.g. the blinded sibling a
     /// branch collapse needs, and is applied again with every batch.
     Retryable,
+    /// The subtrie the entry belongs to is checked out by a job, so the entry cannot be applied
+    /// until it comes back. Restoring the subtrie turns this into [`Self::Retryable`].
+    InFlight,
 }
 
 /// Returns the lowest and highest key that start with the given path.
