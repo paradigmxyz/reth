@@ -6,7 +6,7 @@
 use crate::{
     download::{push_peer, request_options},
     error::db_error,
-    BlockAccessListProgress, SnapGeneration, SnapPhase, SnapStateStore, SnapSyncError,
+    BlockAccessListProgress, SnapDownloadProgress, SnapPhase, SnapStateStore, SnapSyncError,
 };
 use reth_downloaders::snap::{BlockAccessListDownloader, BlockAccessListOutcome};
 use reth_eth_wire_types::snap::GetBlockAccessListsMessage;
@@ -48,7 +48,7 @@ impl<'a, C, F> BlockAccessListCatchUp<'a, C, F> {
     /// Applies the canonical BAL prefix or returns when every eligible peer lacks the next BAL.
     pub async fn run(
         &mut self,
-        generation: SnapGeneration,
+        generation: SnapDownloadProgress,
         target_block: u64,
     ) -> Result<BlockAccessListCatchUpOutcome, SnapSyncError>
     where
@@ -76,7 +76,7 @@ impl<'a, C, F> BlockAccessListCatchUp<'a, C, F> {
     /// Moves a partial account prefix without touching its pending suffix.
     pub async fn advance_pivot(
         &mut self,
-        generation: SnapGeneration,
+        generation: SnapDownloadProgress,
         target_block: u64,
     ) -> Result<BlockAccessListCatchUpOutcome, SnapSyncError>
     where
@@ -104,7 +104,7 @@ impl<'a, C, F> BlockAccessListCatchUp<'a, C, F> {
     // Shares bounded BAL retrieval while preserving each generation phase's write scope.
     async fn run_inner(
         &mut self,
-        mut generation: SnapGeneration,
+        mut generation: SnapDownloadProgress,
         target_block: u64,
         mode: CatchUpMode,
     ) -> Result<CatchUpAttempt, SnapSyncError>
@@ -214,7 +214,7 @@ impl<'a, C, F> BlockAccessListCatchUp<'a, C, F> {
     // Reads one bounded canonical header batch and rejects a reorged generation anchor early.
     fn canonical_headers(
         &self,
-        generation: SnapGeneration,
+        generation: SnapDownloadProgress,
         target_block: u64,
     ) -> Result<
         Vec<reth_primitives_traits::SealedHeader<<F::Provider as HeaderProvider>::Header>>,
@@ -269,12 +269,12 @@ pub enum BlockAccessListCatchUpOutcome {
     /// Every block through the target was applied.
     Complete {
         /// Updated durable generation.
-        generation: SnapGeneration,
+        generation: SnapDownloadProgress,
     },
     /// No eligible peer currently serves the first unapplied block.
     Unavailable {
         /// Last fully applied durable generation position.
-        generation: SnapGeneration,
+        generation: SnapDownloadProgress,
     },
 }
 
@@ -300,9 +300,9 @@ impl CatchUpMode {
 // Keeps the shared retrieval loop independent of its public outcome type.
 enum CatchUpAttempt {
     // Reached the requested block.
-    Complete(SnapGeneration),
+    Complete(SnapDownloadProgress),
     // Stopped before an unavailable block.
-    Unavailable(SnapGeneration),
+    Unavailable(SnapDownloadProgress),
 }
 
 #[cfg(test)]
@@ -394,7 +394,7 @@ mod tests {
         drop(static_files);
 
         let store = SnapStateStore::new(&factory);
-        let generation = SnapGeneration::new(0, hash0, B256::repeat_byte(1));
+        let generation = SnapDownloadProgress::new(0, hash0, B256::repeat_byte(1));
         store.begin_generation(generation).unwrap();
         let hashed_address = keccak256(address);
         let generation = store
@@ -490,7 +490,7 @@ mod tests {
         drop(static_files);
 
         let store = SnapStateStore::new(&factory);
-        let generation = SnapGeneration::new(0, hash0, header0.state_root);
+        let generation = SnapDownloadProgress::new(0, hash0, header0.state_root);
         store.begin_generation(generation).unwrap();
         let generation = store
             .commit_account_range(
@@ -539,7 +539,8 @@ mod tests {
         drop(writer);
         drop(static_files);
         let store = SnapStateStore::new(&factory);
-        let generation = SnapGeneration::new(0, B256::repeat_byte(0xff), B256::repeat_byte(1));
+        let generation =
+            SnapDownloadProgress::new(0, B256::repeat_byte(0xff), B256::repeat_byte(1));
         store.begin_generation(generation).unwrap();
         let generation = store
             .commit_account_range(

@@ -11,7 +11,7 @@ use reth_errors::RethError;
 use reth_network_p2p::{headers::client::HeadersClient, snap::client::SnapClient};
 use reth_provider::{providers::ProviderNodeTypes, ProviderFactory};
 use reth_snap_sync::{
-    NodeSnapContext, SnapPivotPolicy, SnapStateStore, SnapSyncOutcome, SnapSyncSession,
+    NodeSnapContext, SnapBootstrap, SnapPivotPolicy, SnapStateStore, SnapSyncOutcome,
 };
 use reth_stages_api::{Pipeline, PipelineError, PipelineTarget, PipelineWithResult, StageId};
 use reth_tasks::{shutdown::signal, Runtime};
@@ -54,7 +54,7 @@ impl<N: ProviderNodeTypes, C> SnapBackfillSync<N, C> {
             client,
             provider_factory,
             task_spawner,
-            policy: SnapPivotPolicy::new(),
+            policy: SnapPivotPolicy::default(),
             state: SnapBackfillState::Idle(Some(Box::new(pipeline))),
             pending_target: None,
         }
@@ -195,7 +195,7 @@ where
     // The session borrows locals, so the bootstrap owns the clones it was handed.
     let (_signal, shutdown) = signal();
     let context = NodeSnapContext::new(&provider_factory, &client, shutdown);
-    let outcome = SnapSyncSession::new(&client, &provider_factory, context, runtime)
+    let outcome = SnapBootstrap::new(&client, &provider_factory, context, runtime)
         .with_policy(policy)
         .run()
         .await;
@@ -358,8 +358,11 @@ mod tests {
     fn interrupted_bootstrap_keeps_the_snapshot_path() {
         let mut backfill = backfill();
         let store = SnapStateStore::new(&backfill.provider_factory);
-        let generation =
-            reth_snap_sync::SnapGeneration::new(100, B256::repeat_byte(1), B256::repeat_byte(2));
+        let generation = reth_snap_sync::SnapDownloadProgress::new(
+            100,
+            B256::repeat_byte(1),
+            B256::repeat_byte(2),
+        );
         store.begin_generation(generation).unwrap();
 
         backfill.on_action(BackfillAction::Start(PipelineTarget::Sync(B256::repeat_byte(3))));

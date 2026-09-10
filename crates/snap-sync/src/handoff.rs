@@ -96,7 +96,7 @@ pub(crate) fn publish_state_snapshot(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{AccountRangeProgress, SnapGeneration, TrieGenerator};
+    use crate::{AccountRangeProgress, SnapDownloadProgress, TrieGenerator};
     use alloy_consensus::Header;
     use alloy_primitives::{B256, KECCAK256_EMPTY, U256};
     use reth_primitives_traits::Account;
@@ -136,7 +136,7 @@ mod tests {
         drop(static_files);
 
         let store = SnapStateStore::new(&factory);
-        let generation = SnapGeneration::new(1, pivot_hash, state_root);
+        let generation = SnapDownloadProgress::new(1, pivot_hash, state_root);
         store.begin_generation(generation).unwrap();
         let generation = store
             .commit_account_range(
@@ -188,7 +188,7 @@ mod tests {
     fn unfinished_state_is_not_published() {
         let factory = create_test_provider_factory();
         factory.set_storage_settings_cache(StorageSettings::v2());
-        let generation = SnapGeneration::new(7, B256::repeat_byte(1), B256::repeat_byte(2));
+        let generation = SnapDownloadProgress::new(7, B256::repeat_byte(1), B256::repeat_byte(2));
         SnapStateStore::new(&factory).begin_generation(generation).unwrap();
 
         // Still downloading accounts, so the trie phase, and with it publication, is refused.

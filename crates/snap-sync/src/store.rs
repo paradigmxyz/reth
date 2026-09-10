@@ -3,8 +3,11 @@
 //! A generation marker remains present until the downloaded state and rebuilt trie are accepted,
 //! preventing partial hashed tables from being mistaken for canonical state.
 
-use crate::{error::db_error, handoff::publish_state_snapshot, SnapSyncError};
+use crate::{
+    error::db_error, handoff::publish_state_snapshot, SnapGeneration, SnapPhase, SnapSyncError,
+};
 use alloy_eip7928::bal::DecodedBal;
+use alloy_eips::BlockNumHash;
 use alloy_primitives::{keccak256, Bytes, B256};
 use alloy_rlp::{Decodable, Encodable};
 use reth_db_api::{tables, transaction::DbTxMut};
@@ -43,7 +46,7 @@ impl<'a, F> SnapStateStore<'a, F> {
     ///
     /// Refuses to replace executed state or a completed snapshot. An unfinished generation may
     /// be replaced when its pivot is no longer usable.
-    pub fn begin_generation(&self, generation: SnapGeneration) -> Result<(), SnapSyncError>
+    pub fn begin_generation(&self, generation: SnapDownloadProgress) -> Result<(), SnapSyncError>
     where
         F: DatabaseProviderFactory,
         F::ProviderRW: DBProvider<Tx: DbTxMut>
@@ -81,11 +84,11 @@ impl<'a, F> SnapStateStore<'a, F> {
     /// Commits one verified range and advances its account cursor in the same transaction.
     pub fn commit_account_range(
         &self,
-        generation: SnapGeneration,
+        generation: SnapDownloadProgress,
         state: HashedPostState,
         bytecodes: Vec<(B256, Bytes)>,
         progress: AccountRangeProgress,
-    ) -> Result<SnapGeneration, SnapSyncError>
+    ) -> Result<SnapDownloadProgress, SnapSyncError>
     where
         F: DatabaseProviderFactory,
         F::ProviderRW: DBProvider
@@ -116,12 +119,12 @@ impl<'a, F> SnapStateStore<'a, F> {
     /// Applies one authenticated BAL and advances its block cursor in the same transaction.
     pub fn commit_block_access_list(
         &self,
-        generation: SnapGeneration,
+        generation: SnapDownloadProgress,
         block_number: u64,
         block_hash: B256,
         block_access_list: &DecodedBal,
         progress: BlockAccessListProgress,
-    ) -> Result<SnapGeneration, SnapSyncError>
+    ) -> Result<SnapDownloadProgress, SnapSyncError>
     where
         F: DatabaseProviderFactory,
         F::ProviderRW: AccountExtReader
@@ -144,11 +147,11 @@ impl<'a, F> SnapStateStore<'a, F> {
     // Advances a partial account prefix without writing state at or beyond its restart cursor.
     pub(crate) fn commit_pivot_block_access_list(
         &self,
-        generation: SnapGeneration,
+        generation: SnapDownloadProgress,
         block_number: u64,
         block_hash: B256,
         block_access_list: &DecodedBal,
-    ) -> Result<SnapGeneration, SnapSyncError>
+    ) -> Result<SnapDownloadProgress, SnapSyncError>
     where
         F: DatabaseProviderFactory,
         F::ProviderRW: AccountExtReader
@@ -171,8 +174,8 @@ impl<'a, F> SnapStateStore<'a, F> {
     // Enters trie generation when the snapshot pivot already matches the catch-up target.
     pub(crate) fn complete_block_access_lists(
         &self,
-        generation: SnapGeneration,
-    ) -> Result<SnapGeneration, SnapSyncError>
+        generation: SnapDownloadProgress,
+    ) -> Result<SnapDownloadProgress, SnapSyncError>
     where
         F: DatabaseProviderFactory,
         F::ProviderRW: DBProvider
@@ -198,7 +201,10 @@ impl<'a, F> SnapStateStore<'a, F> {
     // Clears the restart marker only after the canonical root and Merkle checkpoint agree, and
     // publishes the frontier in the same transaction so a crash can never leave an accepted state
     // that the pipeline would resume from genesis.
-    pub(crate) fn finish_generation(&self, generation: SnapGeneration) -> Result<(), SnapSyncError>
+    pub(crate) fn finish_generation(
+        &self,
+        generation: SnapDownloadProgress,
+    ) -> Result<(), SnapSyncError>
     where
         F: DatabaseProviderFactory,
         F::ProviderRW: DBProvider
@@ -248,12 +254,12 @@ impl<'a, F> SnapStateStore<'a, F> {
     // Verifies and applies one BAL under the active generation transaction.
     fn commit_verified_block_access_list(
         &self,
-        generation: SnapGeneration,
+        generation: SnapDownloadProgress,
         block_number: u64,
         block_hash: B256,
         block_access_list: &DecodedBal,
         commit: BlockAccessListCommit,
-    ) -> Result<SnapGeneration, SnapSyncError>
+    ) -> Result<SnapDownloadProgress, SnapSyncError>
     where
         F: DatabaseProviderFactory,
         F::ProviderRW: AccountExtReader
@@ -389,7 +395,7 @@ impl<'a, F> SnapStateStore<'a, F> {
     // Stage progress keeps restart data visible to existing database tooling.
     fn save_generation(
         provider: &impl StageCheckpointWriter,
-        generation: SnapGeneration,
+        generation: SnapDownloadProgress,
     ) -> Result<(), SnapSyncError> {
         provider
             .save_stage_checkpoint(SNAP_SYNC_STAGE, StageCheckpoint::new(generation.target_block))
@@ -402,7 +408,7 @@ impl<'a, F> SnapStateStore<'a, F> {
     // Empty progress remains compatible with stages that clear progress without deleting its row.
     fn load_generation(
         provider: &impl StageCheckpointReader,
-    ) -> Result<Option<SnapGeneration>, SnapSyncError> {
+    ) -> Result<Option<SnapDownloadProgress>, SnapSyncError> {
         let Some(encoded) = provider
             .get_stage_checkpoint_progress(SNAP_SYNC_STAGE)
             .map_err(db_error)?
@@ -410,7 +416,7 @@ impl<'a, F> SnapStateStore<'a, F> {
         else {
             return Ok(None)
         };
-        let generation = alloy_rlp::decode_exact::<SnapGeneration>(&encoded)
+        let generation = alloy_rlp::decode_exact::<SnapDownloadProgress>(&encoded)
             .map_err(|error| SnapSyncError::InvalidGeneration(error.to_string()))?;
         generation.validate()?;
         Ok(Some(generation))
@@ -420,7 +426,7 @@ impl<'a, F> SnapStateStore<'a, F> {
     pub(crate) fn ensure_generation(
         &self,
         provider: &impl StageCheckpointReader,
-        generation: SnapGeneration,
+        generation: SnapDownloadProgress,
     ) -> Result<(), SnapSyncError> {
         if Self::load_generation(provider)? == Some(generation) {
             Ok(())
@@ -445,7 +451,7 @@ where
     }
 
     /// Returns the partial generation that must be resumed before state is served.
-    pub fn interrupted_generation(&self) -> Result<Option<SnapGeneration>, SnapSyncError> {
+    pub fn interrupted_generation(&self) -> Result<Option<SnapDownloadProgress>, SnapSyncError> {
         let provider = self.factory.database_provider_ro().map_err(db_error)?;
         Self::load_generation(&provider)
     }
@@ -498,7 +504,7 @@ impl<F> SnapStateStore<'_, F> {
 
 /// Durable identity and restart position of a Snap state generation.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, alloy_rlp::RlpEncodable, alloy_rlp::RlpDecodable)]
-pub struct SnapGeneration {
+pub struct SnapDownloadProgress {
     // Rejects markers written by an incompatible schema.
     version: u8,
     /// Target block number.
@@ -515,7 +521,7 @@ pub struct SnapGeneration {
     pub next_block: u64,
 }
 
-impl SnapGeneration {
+impl SnapDownloadProgress {
     /// Creates a generation beginning at the first account hash.
     pub const fn new(target_block: u64, target_hash: B256, state_root: B256) -> Self {
         Self {
@@ -527,6 +533,12 @@ impl SnapGeneration {
             next_account: B256::ZERO,
             next_block: target_block.saturating_add(1),
         }
+    }
+
+    /// Pivot and phase represented by this durable download progress.
+    pub const fn generation(&self) -> SnapGeneration {
+        SnapGeneration::new(BlockNumHash::new(self.target_block, self.target_hash), self.state_root)
+            .with_phase(self.phase)
     }
 
     // Phase checks keep late asynchronous results from crossing durable boundaries.
@@ -633,18 +645,6 @@ pub enum BlockAccessListProgress {
     Complete,
 }
 
-/// Durable phase of state assembly.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-#[repr(u8)]
-pub enum SnapPhase {
-    /// Account, storage, and bytecode ranges are being downloaded.
-    Accounts = 0,
-    /// Authenticated block access lists are being applied.
-    BlockAccessLists = 1,
-    /// The final state trie is being rebuilt and checked.
-    Trie = 2,
-}
-
 impl Encodable for SnapPhase {
     fn encode(&self, out: &mut dyn alloy_rlp::BufMut) {
         (*self as u8).encode(out);
@@ -707,8 +707,8 @@ mod tests {
     use reth_provider::test_utils::create_test_provider_factory;
     use reth_storage_api::StorageSettings;
 
-    fn generation() -> SnapGeneration {
-        SnapGeneration::new(100, B256::repeat_byte(1), B256::repeat_byte(2))
+    fn generation() -> SnapDownloadProgress {
+        SnapDownloadProgress::new(100, B256::repeat_byte(1), B256::repeat_byte(2))
     }
 
     fn account(nonce: u64) -> Account {

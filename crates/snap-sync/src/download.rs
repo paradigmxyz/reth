@@ -3,7 +3,7 @@
 //! Complete account batches are committed with their restart cursor so an interruption never
 //! exposes a durable range whose dependent state is still missing.
 
-use crate::{AccountRangeProgress, SnapGeneration, SnapPhase, SnapStateStore, SnapSyncError};
+use crate::{AccountRangeProgress, SnapDownloadProgress, SnapPhase, SnapStateStore, SnapSyncError};
 use alloy_primitives::{map::B256Set, Bytes, B256, KECCAK256_EMPTY};
 use reth_downloaders::snap::{
     AccountRangeDownloader, AccountRangeOutcome, BytecodeDownloader, BytecodeOutcome,
@@ -58,7 +58,7 @@ impl<'a, C, F> StateDownloader<'a, C, F> {
     /// eligible peer is unavailable.
     pub async fn run(
         &mut self,
-        mut generation: SnapGeneration,
+        mut generation: SnapDownloadProgress,
         budget: RangeBudget,
     ) -> Result<StateDownloadOutcome, SnapSyncError>
     where
@@ -105,7 +105,7 @@ impl<'a, C, F> StateDownloader<'a, C, F> {
     /// interruption never exposes accounts whose dependencies are still missing.
     async fn download_range(
         &mut self,
-        mut generation: SnapGeneration,
+        mut generation: SnapDownloadProgress,
     ) -> Result<RangeStep, SnapSyncError>
     where
         C: SnapClient,
@@ -387,9 +387,9 @@ fn account_progress(
 /// Whether one account range finished, or ran out of peers part way through its batches.
 enum RangeStep {
     /// Every batch of the range is durable at this generation.
-    Committed(SnapGeneration),
+    Committed(SnapDownloadProgress),
     /// No eligible peer served a batch; the generation is the last one committed.
-    Unavailable(SnapGeneration),
+    Unavailable(SnapDownloadProgress),
 }
 
 /// Terminal result of one state-download attempt.
@@ -398,17 +398,17 @@ pub enum StateDownloadOutcome {
     /// Every account dependency was committed and the generation entered BAL catch-up.
     Complete {
         /// Updated durable generation.
-        generation: SnapGeneration,
+        generation: SnapDownloadProgress,
     },
     /// No eligible peer currently serves the first uncommitted range.
     Unavailable {
         /// Last fully committed generation position.
-        generation: SnapGeneration,
+        generation: SnapDownloadProgress,
     },
     /// The range budget was spent while account ranges remained.
     Paused {
         /// Last fully committed generation position.
-        generation: SnapGeneration,
+        generation: SnapDownloadProgress,
     },
 }
 
@@ -521,7 +521,7 @@ mod tests {
     async fn empty_root_completes_state_download() {
         let factory = create_test_provider_factory();
         factory.set_storage_settings_cache(StorageSettings::v2());
-        let generation = SnapGeneration::new(10, B256::repeat_byte(1), EMPTY_ROOT_HASH);
+        let generation = SnapDownloadProgress::new(10, B256::repeat_byte(1), EMPTY_ROOT_HASH);
         SnapStateStore::new(&factory).begin_generation(generation).unwrap();
         let client = TestSnapClient::new([response(
             PeerId::random(),
@@ -547,7 +547,7 @@ mod tests {
     async fn unavailable_range_excludes_each_peer() {
         let factory = create_test_provider_factory();
         factory.set_storage_settings_cache(StorageSettings::v2());
-        let generation = SnapGeneration::new(10, B256::repeat_byte(1), B256::repeat_byte(2));
+        let generation = SnapDownloadProgress::new(10, B256::repeat_byte(1), B256::repeat_byte(2));
         SnapStateStore::new(&factory).begin_generation(generation).unwrap();
         let first = PeerId::random();
         let second = PeerId::random();
@@ -591,7 +591,7 @@ mod tests {
         let code_hash = keccak256(&code);
         let account = TrieAccount { nonce: 3, balance: U256::from(4), storage_root, code_hash };
         let state_root = trie_root([(account_hash, alloy_rlp::encode(account))]);
-        let generation = SnapGeneration::new(10, B256::repeat_byte(1), state_root);
+        let generation = SnapDownloadProgress::new(10, B256::repeat_byte(1), state_root);
         SnapStateStore::new(&factory).begin_generation(generation).unwrap();
         let peer = PeerId::random();
         let client = TestSnapClient::new([
@@ -667,7 +667,7 @@ mod tests {
             (empty_hash, alloy_rlp::encode(empty)),
             (stored_hash, alloy_rlp::encode(stored)),
         ]);
-        let generation = SnapGeneration::new(10, B256::repeat_byte(1), state_root);
+        let generation = SnapDownloadProgress::new(10, B256::repeat_byte(1), state_root);
         SnapStateStore::new(&factory).begin_generation(generation).unwrap();
         let peer = PeerId::random();
         let client = TestSnapClient::new([
@@ -713,7 +713,7 @@ mod tests {
         let first = (B256::repeat_byte(0x11), empty_account(1));
         let second = (B256::repeat_byte(0x22), empty_account(2));
         let (state_root, proof) = root_and_proof(&[first, second], &[first.0]);
-        let generation = SnapGeneration::new(10, B256::repeat_byte(1), state_root);
+        let generation = SnapDownloadProgress::new(10, B256::repeat_byte(1), state_root);
         SnapStateStore::new(&factory).begin_generation(generation).unwrap();
         let client = TestSnapClient::new([response(
             PeerId::random(),

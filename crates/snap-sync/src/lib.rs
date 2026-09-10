@@ -1,7 +1,30 @@
-//! Coordinates EIP-8189 state bootstrap without changing the default sync path.
+//! snap/2 state synchronization for [EIP-8189](https://eips.ethereum.org/EIPS/eip-8189).
 //!
-//! Verified ranges are persisted as resumable v2 hashed-state generations before BAL catch-up and
-//! final trie validation.
+//! Coordinates a state bootstrap that starts from a recent pivot block, downloads accounts, storage
+//! and bytecode authenticated against that pivot's state root, and advances the pivot with
+//! [EIP-7928 block access lists](https://eips.ethereum.org/EIPS/eip-7928) as the chain moves past
+//! it.
+//!
+//! This crate owns download progress only. Authenticated downloads come from
+//! `reth-downloaders`, and verified state is handed back to node integration once its trie root
+//! matches the target header.
+//!
+//! Downloaded state goes into the hashed state tables, owned by an attempt record that commits
+//! with it. Scheduling, in-flight requests and cancellation stay in memory.
+//!
+//! ```
+//! use reth_snap_sync::SnapPivotPolicy;
+//!
+//! let policy = SnapPivotPolicy::default();
+//! // Without a finalized block, anchor at the EIP's example distance.
+//! assert_eq!(policy.pivot_block(1_000, None), Some(936));
+//! // A recent finalized block is anchored to directly.
+//! assert_eq!(policy.pivot_block(1_000, Some(950)), Some(950));
+//! // Stalled finality falls back to the example distance.
+//! assert_eq!(policy.pivot_block(1_000, Some(500)), Some(936));
+//! // A chain shorter than the head distance has no pivot yet.
+//! assert_eq!(policy.pivot_block(4, None), None);
+//! ```
 
 #![doc(
     html_logo_url = "https://raw.githubusercontent.com/paradigmxyz/reth/main/assets/reth-docs.png",
@@ -10,24 +33,33 @@
 )]
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 
+mod attempt;
+mod bootstrap;
 mod catch_up;
 mod context;
 mod download;
 mod error;
+mod generation;
 mod handoff;
 mod pivot;
 mod session;
 mod store;
 mod trie;
 
+#[cfg(test)]
+mod test_utils;
+
+pub use attempt::{SnapAttemptStore, SnapWrite};
+pub use bootstrap::{SnapBootstrap, SnapSyncContext, SnapSyncOutcome, SnapSyncProvider};
 pub use catch_up::{BlockAccessListCatchUp, BlockAccessListCatchUpOutcome};
 pub use context::NodeSnapContext;
 pub use download::{RangeBudget, StateDownloadOutcome, StateDownloader};
 pub use error::SnapSyncError;
+pub use generation::{SnapGeneration, SnapPhase};
 pub use handoff::SnapPipelineHandoff;
 pub use pivot::SnapPivotPolicy;
-pub use session::{SnapSyncContext, SnapSyncOutcome, SnapSyncProvider, SnapSyncSession};
+pub use session::{SnapSyncSession, SnapSyncSessionState};
 pub use store::{
-    AccountRangeProgress, BlockAccessListProgress, SnapGeneration, SnapPhase, SnapStateStore,
+    AccountRangeProgress, BlockAccessListProgress, SnapDownloadProgress, SnapStateStore,
 };
 pub use trie::TrieGenerator;

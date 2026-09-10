@@ -3,7 +3,7 @@
 //! Stage and Snap checkpoints remain durable independently, while the generation marker is only
 //! cleared after the canonical header root and completed Merkle checkpoint agree.
 
-use crate::{SnapGeneration, SnapPhase, SnapStateStore, SnapSyncError};
+use crate::{SnapDownloadProgress, SnapPhase, SnapStateStore, SnapSyncError};
 use reth_db_api::transaction::DbTxMut;
 use reth_provider::DatabaseProviderFactory;
 use reth_stages::{stages::MerkleStage, ExecInput, Stage};
@@ -29,7 +29,7 @@ impl<'a, F> TrieGenerator<'a, F> {
     }
 
     /// Resumes the Merkle stage and accepts the generation after root validation.
-    pub fn run(&self, generation: SnapGeneration) -> Result<(), SnapSyncError>
+    pub fn run(&self, generation: SnapDownloadProgress) -> Result<(), SnapSyncError>
     where
         F: DatabaseProviderFactory,
         F::ProviderRW: DBProvider<Tx: DbTxMut>
@@ -113,7 +113,7 @@ mod tests {
         drop(static_files);
 
         let store = SnapStateStore::new(&factory);
-        let generation = SnapGeneration::new(1, hash1, state_root);
+        let generation = SnapDownloadProgress::new(1, hash1, state_root);
         store.begin_generation(generation).unwrap();
         let generation = store
             .commit_account_range(
