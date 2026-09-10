@@ -1,6 +1,6 @@
 use crate::{
-    ArenaParallelSparseTrie, LeafUpdate, SparseTrie as SparseTrieTrait, SparseTrieUpdates,
-    TrieNodeEpoch,
+    ArenaParallelSparseTrie, BlockedLeafUpdates, LeafUpdate, SparseTrie as SparseTrieTrait,
+    SparseTrieUpdates, TrieNodeEpoch,
 };
 use alloc::{borrow::Cow, boxed::Box};
 use alloy_primitives::{map::B256Map, B256};
@@ -198,6 +198,14 @@ impl<T: SparseTrieTrait> RevealableSparseTrie<T> {
         Some((revealed.root(new_epoch), revealed.take_updates()))
     }
 
+    /// Returns the leaf updates the trie could not apply yet because they hit a blinded node.
+    ///
+    /// A blind trie never takes ownership of updates, see [`Self::update_leaves`].
+    pub fn blocked_updates(&self) -> &BlockedLeafUpdates {
+        static EMPTY: BlockedLeafUpdates = BlockedLeafUpdates::new();
+        self.as_revealed_ref().map_or(&EMPTY, SparseTrieTrait::blocked_updates)
+    }
+
     /// Clears this trie, setting it to a blind state.
     ///
     /// If this instance was revealed, or was itself a `Blind` with a pre-allocated
@@ -223,7 +231,7 @@ impl<T: SparseTrieTrait + Default> RevealableSparseTrie<T> {
     ///
     /// For revealed tries, delegates to the inner implementation which will:
     /// - Apply updates where possible
-    /// - Keep blocked updates in the map
+    /// - Take ownership of the updates that hit a blinded node
     /// - Emit proof targets for blinded paths
     pub fn update_leaves(
         &mut self,
