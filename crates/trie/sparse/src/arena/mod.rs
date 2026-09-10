@@ -92,6 +92,9 @@ struct ArenaTrieBuffers {
     /// Trie updates built up directly during hashing and structural changes. `Some` when
     /// tracking updates, `None` otherwise. Initialized alongside `updates` in `set_updates`.
     updates: Option<SparseTrieUpdates>,
+    /// Set while this trie (or, for the upper trie, any of its subtries) may hold recorded
+    /// updates. Only ever set while `updates` is `Some`, and reset when updates are taken.
+    updates_recorded: bool,
     /// Reusable buffer for RLP encoding.
     rlp_buf: Vec<u8>,
     /// Reusable buffer for child `RlpNode`s during hashing.
@@ -103,6 +106,7 @@ impl ArenaTrieBuffers {
         if let Some(updates) = self.updates.as_mut() {
             updates.clear();
         }
+        self.updates_recorded = false;
         self.rlp_buf.clear();
         self.rlp_node_buf.clear();
     }
@@ -752,7 +756,7 @@ impl ArenaParallelSparseTrie {
         let ArenaSparseNode::Subtrie(mut subtrie) = node else {
             unreachable!("recycle_subtrie called on non-Subtrie node")
         };
-        Self::merge_subtrie_updates(&mut self.buffers.updates, &mut subtrie.buffers.updates);
+        Self::merge_subtrie_updates(&mut self.buffers, &mut subtrie.buffers);
     }
 
     /// Removes a [`ArenaSparseNode::Subtrie`] from the upper arena at `idx` and recycles it.
@@ -872,10 +876,7 @@ impl ArenaParallelSparseTrie {
                     subtrie.root,
                     Some(child_idx),
                 );
-                Self::merge_subtrie_updates(
-                    &mut self.buffers.updates,
-                    &mut subtrie.buffers.updates,
-                );
+                Self::merge_subtrie_updates(&mut self.buffers, &mut subtrie.buffers);
 
                 // The migrated subtrie root may be a branch whose children now live in
                 // the upper arena at or beyond the subtrie boundary depth. Re-wrap any
@@ -887,30 +888,28 @@ impl ArenaParallelSparseTrie {
     }
 
     /// Merges updates from a subtrie's buffer into the parent's buffer.
-    /// Both `dst` and `src` must be `Some` when updates are being tracked.
+    /// Both buffers must have `updates` set when updates are being tracked.
     ///
     /// Source removals cancel destination insertions (and vice versa) so that
     /// updates accumulated across multiple `root()` calls within a single block
     /// stay consistent.
-    fn merge_subtrie_updates(
-        dst: &mut Option<SparseTrieUpdates>,
-        src: &mut Option<SparseTrieUpdates>,
-    ) {
-        if let Some(dst_updates) = dst.as_mut() {
-            let src_updates = src.as_mut().expect("updates are enabled");
+    fn merge_subtrie_updates(dst: &mut ArenaTrieBuffers, src: &mut ArenaTrieBuffers) {
+        let Some(dst_updates) = dst.updates.as_mut() else { return };
+        let src_updates = src.updates.as_mut().expect("updates are enabled");
 
-            // Source insertions cancel destination removals.
-            for path in src_updates.updated_nodes.keys() {
-                dst_updates.removed_nodes.remove(path);
-            }
-            dst_updates.updated_nodes.extend(src_updates.updated_nodes.drain());
-
-            // Source removals cancel destination insertions.
-            for path in &src_updates.removed_nodes {
-                dst_updates.updated_nodes.remove(path);
-            }
-            dst_updates.removed_nodes.extend(src_updates.removed_nodes.drain());
+        // Source insertions cancel destination removals.
+        for path in src_updates.updated_nodes.keys() {
+            dst_updates.removed_nodes.remove(path);
         }
+        dst_updates.updated_nodes.extend(src_updates.updated_nodes.drain());
+
+        // Source removals cancel destination insertions.
+        for path in &src_updates.removed_nodes {
+            dst_updates.updated_nodes.remove(path);
+        }
+        dst_updates.removed_nodes.extend(src_updates.removed_nodes.drain());
+
+        dst.updates_recorded |= mem::take(&mut src.updates_recorded);
     }
 
     /// Right-pads a nibble path with zeros and packs it into a [`B256`].
@@ -966,6 +965,7 @@ impl ArenaParallelSparseTrie {
         let rlp_buf = &mut buffers.rlp_buf;
         let rlp_node_buf = &mut buffers.rlp_node_buf;
         let updates = &mut buffers.updates;
+        let updates_recorded = &mut buffers.updates_recorded;
 
         rlp_node_buf.clear();
 
@@ -1137,10 +1137,12 @@ impl ArenaParallelSparseTrie {
                     if !prev_branch_masks.is_empty() && new_branch_masks.is_empty() {
                         trie_updates.updated_nodes.remove(&logical_path);
                         trie_updates.removed_nodes.insert(logical_path);
+                        *updates_recorded = true;
                     } else if !new_branch_masks.is_empty() {
                         let compact = arena[head_idx].branch_ref().branch_node_compact(arena);
                         trie_updates.updated_nodes.insert(logical_path, compact);
                         trie_updates.removed_nodes.remove(&logical_path);
+                        *updates_recorded = true;
                     }
                 }
             }
@@ -2090,7 +2092,27 @@ impl ArenaParallelSparseTrie {
             subtrie.update_cached_rlp(new_epoch);
         }
 
-        Self::merge_subtrie_updates(&mut self.buffers.updates, &mut subtrie.buffers.updates);
+        Self::merge_subtrie_updates(&mut self.buffers, &mut subtrie.buffers);
+    }
+
+    /// Asserts that nothing was written into an update buffer without marking the trie as
+    /// having recorded updates, which would make `take_updates` drop them.
+    #[cfg(debug_assertions)]
+    fn debug_assert_no_pending_updates(&self) {
+        fn is_empty(buffers: &ArenaTrieBuffers) -> bool {
+            buffers.updates.as_ref().is_none_or(SparseTrieUpdates::is_empty)
+        }
+
+        debug_assert!(is_empty(&self.buffers), "upper trie holds unrecorded updates");
+        for (_, node) in &self.upper_arena {
+            if let Some(subtrie) = node.as_subtrie() {
+                debug_assert!(
+                    is_empty(&subtrie.buffers),
+                    "subtrie {:?} holds unrecorded updates",
+                    subtrie.path,
+                );
+            }
+        }
     }
 }
 
@@ -2153,6 +2175,7 @@ impl SparseTrie for ArenaParallelSparseTrie {
         } else {
             self.buffers.updates = None;
         }
+        self.buffers.updates_recorded = false;
     }
 
     #[instrument(level = "trace", target = TRACE_TARGET, skip_all, fields(num_nodes = nodes.len()))]
@@ -2431,7 +2454,19 @@ impl SparseTrie for ArenaParallelSparseTrie {
             .map_or(Cow::Owned(SparseTrieUpdates::default()), Cow::Borrowed)
     }
 
+    fn has_updates(&self) -> bool {
+        self.buffers.updates_recorded
+    }
+
     fn take_updates(&mut self) -> SparseTrieUpdates {
+        if !self.buffers.updates_recorded {
+            #[cfg(debug_assertions)]
+            self.debug_assert_no_pending_updates();
+            return SparseTrieUpdates::default();
+        }
+
+        self.buffers.updates_recorded = false;
+
         match self.buffers.updates.take() {
             Some(updates) => {
                 self.buffers.updates = Some(SparseTrieUpdates::with_capacity(
@@ -2612,6 +2647,12 @@ impl SparseTrie for ArenaParallelSparseTrie {
     ) -> SparseTrieResult<()> {
         if updates.is_empty() {
             return Ok(());
+        }
+
+        // Every recorded update originates from a leaf update, so marking here covers the
+        // buffers of the subtries too, which record on their own during hashing and collapses.
+        if self.buffers.updates.is_some() {
+            self.buffers.updates_recorded = true;
         }
 
         // Drain and sort updates lexicographically by nibbles path.
