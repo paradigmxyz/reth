@@ -869,7 +869,7 @@ where
         dispatch_with_chunking(
             targets,
             chunking_length,
-            self.chunk_size,
+            self.dispatch_chunk_size(chunking_length),
             self.max_targets_for_chunking,
             self.proof_worker_handle.has_multiple_idle_account_workers(),
             self.proof_worker_handle.has_multiple_idle_storage_workers(),
@@ -903,6 +903,27 @@ where
         }
 
         Ok(())
+    }
+
+    /// Number of targets that go into one dispatched proof batch.
+    ///
+    /// A batch over [`Self::max_targets_for_chunking`] is chunked whatever the workers are doing,
+    /// and cutting one into `chunk_size` pieces there is what a whole block's targets arriving at
+    /// once turns into: thousands of tiny multiproofs. Each piece costs an account worker a full
+    /// round trip - it dispatches the storage targets of its piece and then blocks until every
+    /// one of them is back - and an address whose slots land in several pieces has its storage
+    /// trie walked once per piece. So an oversized batch is spread over the account workers
+    /// instead, a couple of pieces each so a worker that finishes early finds another one, and
+    /// still capped so no single piece becomes a long job.
+    fn dispatch_chunk_size(&self, chunking_length: usize) -> usize {
+        if chunking_length <= self.max_targets_for_chunking {
+            return self.chunk_size
+        }
+
+        let workers = self.proof_worker_handle.total_account_workers().max(1);
+        chunking_length
+            .div_ceil(workers * BATCHES_PER_ACCOUNT_WORKER)
+            .clamp(self.chunk_size, self.max_targets_for_chunking)
     }
 
     fn has_pending_sparse_trie_updates(&self) -> bool {
@@ -1018,6 +1039,10 @@ pub(super) struct SparseTrieTaskMetrics {
 /// The default max targets, for limiting the number of account and storage proof targets to be
 /// fetched by a single worker. If exceeded, chunking is forced regardless of worker availability.
 const DEFAULT_MAX_TARGETS_FOR_CHUNKING: usize = 300;
+
+/// How many proof batches a target set that exceeds [`DEFAULT_MAX_TARGETS_FOR_CHUNKING`] is cut
+/// into per account worker.
+const BATCHES_PER_ACCOUNT_WORKER: usize = 2;
 
 /// Start proof fetching while the first state-update batch is still arriving.
 const INITIAL_UPDATE_BATCH_SIZE: usize = 64;
@@ -1308,6 +1333,89 @@ mod tests {
         }
         assert_eq!(task.pending_updates, INITIAL_UPDATE_BATCH_SIZE);
         assert_eq!(task.new_account_updates.len(), INITIAL_UPDATE_BATCH_SIZE);
+        drop(updates_tx);
+        drop(task);
+        drain_sparse_trie_tasks(&runtime);
+    }
+
+    #[test]
+    fn a_whole_block_of_targets_is_dispatched_as_worker_sized_batches() {
+        const CHUNK_SIZE: usize = 5;
+        const ACCOUNTS: usize = 64;
+        const SLOTS_PER_ACCOUNT: usize = 15;
+
+        let runtime = reth_tasks::Runtime::test();
+        let provider_factory = create_test_provider_factory();
+        let anchor_hash = init_genesis(&provider_factory).expect("failed to initialize genesis");
+        let state_provider_factory = OverlayStateProviderFactory::new(
+            provider_factory,
+            OverlayManager::<reth_chain_state::EthPrimitives>::default()
+                .overlay_builder(anchor_hash),
+        );
+        let (proof_result_tx, proof_result_rx) = crossbeam_channel::unbounded();
+        let proof_worker_handle = ProofWorkerHandle::new(
+            &runtime,
+            ProofTaskCtx::new(state_provider_factory),
+            false,
+            proof_result_tx.clone(),
+        );
+        let account_workers = proof_worker_handle.total_account_workers();
+
+        let blind = RevealableSparseTrie::blind_from(ArenaParallelSparseTrie::default());
+        let trie = SparseStateTrie::default()
+            .with_accounts_trie(blind.clone())
+            .with_default_storage_trie(blind)
+            .with_updates(true);
+
+        let (updates_tx, updates_rx) = crossbeam_channel::unbounded();
+        let (_cancel_guard, cancel_rx) = crossbeam_channel::bounded::<()>(0);
+        let mut task = SparseTrieCacheTask::new_with_trie(
+            &runtime,
+            updates_rx,
+            cancel_rx,
+            std::sync::mpsc::channel().0,
+            proof_worker_handle,
+            proof_result_tx,
+            proof_result_rx,
+            SparseTrieTaskMetrics::default(),
+            trie,
+            EMPTY_ROOT_HASH,
+            TrieNodeEpoch::UNMODIFIED,
+            CHUNK_SIZE,
+        );
+
+        for account in 0..ACCOUNTS {
+            let address = B256::from(U256::from(account + 1));
+            task.pending_targets.push_account_target(ProofV2Target::new(address));
+            task.pending_targets.extend_storage_targets(
+                &address,
+                (0..SLOTS_PER_ACCOUNT)
+                    .map(|slot| ProofV2Target::new(B256::from(U256::from(slot + 1))))
+                    .collect(),
+            );
+        }
+
+        let targets = ACCOUNTS * (1 + SLOTS_PER_ACCOUNT);
+        assert_eq!(task.pending_targets.len(), targets);
+
+        task.dispatch_pending_targets().unwrap();
+
+        // Every batch is a round trip for one account worker, which dispatches the storage
+        // targets of its batch and then blocks until they are back, so a whole block's targets
+        // go out as a few batches per worker instead of one per `CHUNK_SIZE` targets.
+        assert!(
+            task.in_flight_proof_batches <= account_workers * BATCHES_PER_ACCOUNT_WORKER,
+            "{} batches for {account_workers} account workers",
+            task.in_flight_proof_batches,
+        );
+        assert!(
+            task.in_flight_proof_batches * 8 < targets / CHUNK_SIZE,
+            "chunk-sized pieces would have been {} batches",
+            targets / CHUNK_SIZE,
+        );
+        // A batch that a single worker can take stays whole as before.
+        assert_eq!(task.dispatch_chunk_size(DEFAULT_MAX_TARGETS_FOR_CHUNKING), CHUNK_SIZE);
+
         drop(updates_tx);
         drop(task);
         drain_sparse_trie_tasks(&runtime);
