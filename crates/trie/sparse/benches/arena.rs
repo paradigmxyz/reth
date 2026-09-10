@@ -2,7 +2,12 @@
 //! of leaf updates, learn which proofs are missing, reveal them, retry, and finally hash.
 //!
 //! The dataset sizes can be overridden to shorten a run, e.g.
-//! `ARENA_BENCH_LEAVES=50000 ARENA_BENCH_UPDATES=1000,10000`.
+//! `ARENA_BENCH_LEAVES=50000 ARENA_BENCH_UPDATES=1000,10000`. A criterion filter (`-- <regex>`)
+//! selects scenarios but still pays for preparing every dataset, so narrow both.
+//!
+//! Compare a change by running with `--save-baseline before`, then again with `--baseline before`.
+//! Every scenario but the smallest fans out over rayon, so results move with whatever else the
+//! machine is doing; pin `RAYON_NUM_THREADS` and run the two halves back to back.
 #![allow(missing_docs, unreachable_pub)]
 
 use alloy_primitives::{map::B256Map, B256, U256};
