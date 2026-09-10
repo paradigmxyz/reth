@@ -644,37 +644,71 @@ where
             .map(|(address, updates)| {
                 let trie = self.trie.take_or_create_storage_trie(address);
                 let fetched = self.fetched_storage_targets.remove(address).unwrap_or_default();
-                (*address, trie, fetched, updates, Vec::new(), 0, 0, Ok(()))
+                StorageLeafJob {
+                    address: *address,
+                    trie,
+                    fetched,
+                    updates,
+                    targets: Vec::new(),
+                    hits: 0,
+                    misses: 0,
+                    result: Ok(()),
+                }
             })
             .collect::<Vec<_>>();
 
-        jobs.par_iter_mut().for_each(
-            |(address, trie, fetched, updates, targets, hits, misses, result)| {
-                let _enter = trace_span!(target: "engine::tree::payload_processor::sparse_trie", parent: &span, "storage_trie_leaf_updates", a=%address).entered();
-                let updates_len_before = updates.len();
-                *result = trie.update_leaves(updates, |path, parent| match fetched.entry(path) {
-                    Entry::Occupied(mut entry) => {
-                        if parent < *entry.get() {
-                            entry.insert(parent);
-                            targets.push(ProofV2Target::new(path).with_parent(parent));
-                        }
-                    }
-                    Entry::Vacant(entry) => {
+        let apply = |StorageLeafJob {
+                         address,
+                         trie,
+                         fetched,
+                         updates,
+                         targets,
+                         hits,
+                         misses,
+                         result,
+                     }: &mut StorageLeafJob<'_, S>| {
+            let _enter = trace_span!(target: "engine::tree::payload_processor::sparse_trie", parent: &span, "storage_trie_leaf_updates", a=%address).entered();
+            let updates_len_before = updates.len();
+            *result = trie.update_leaves(updates, |path, parent| match fetched.entry(path) {
+                Entry::Occupied(mut entry) => {
+                    if parent < *entry.get() {
                         entry.insert(parent);
                         targets.push(ProofV2Target::new(path).with_parent(parent));
                     }
-                });
-                if result.is_ok() {
-                    *hits = (updates_len_before - updates.len()) as u64;
-                    *misses = updates.len() as u64;
                 }
-            },
-        );
+                Entry::Vacant(entry) => {
+                    entry.insert(parent);
+                    targets.push(ProofV2Target::new(path).with_parent(parent));
+                }
+            });
+            if result.is_ok() {
+                *hits = (updates_len_before - updates.len()) as u64;
+                *misses = updates.len() as u64;
+            }
+        };
+        if jobs.len() > 1 &&
+            jobs.iter().map(|job| job.updates.len()).sum::<usize>() >=
+                MIN_PARALLEL_STORAGE_LEAVES
+        {
+            jobs.par_iter_mut().for_each(apply);
+        } else {
+            jobs.iter_mut().for_each(apply);
+        }
 
         // All synchronous jobs finish and restore their tries before an error can leave this phase.
         // Each job owns its proof tracking and exclusively borrows its pending updates.
         let mut result = Ok(());
-        for (address, trie, fetched, _, targets, hits, misses, job_result) in jobs {
+        for StorageLeafJob {
+            address,
+            trie,
+            fetched,
+            targets,
+            hits,
+            misses,
+            result: job_result,
+            ..
+        } in jobs
+        {
             self.trie.insert_storage_trie(address, trie);
             self.fetched_storage_targets.insert(address, fetched);
             self.storage_cache_hits += hits;
@@ -1038,6 +1072,9 @@ const DEFAULT_MAX_TARGETS_FOR_CHUNKING: usize = 300;
 /// Start proof fetching while the first state-update batch is still arriving.
 const INITIAL_UPDATE_BATCH_SIZE: usize = 64;
 
+/// Minimum batch work to amortize synchronous cross-account worker scheduling.
+const MIN_PARALLEL_STORAGE_LEAVES: usize = 2048;
+
 /// Dispatches work items as a single unit or in chunks based on target size and worker
 /// availability.
 #[expect(clippy::too_many_arguments)]
@@ -1134,6 +1171,18 @@ enum SparseTrieTaskMessage {
     PrefetchProofs(MultiProofTargetsV2),
     /// Signals that all state updates have been received.
     FinishedStateUpdates,
+}
+
+/// Exclusively owned storage work restored to the cache after synchronous application.
+struct StorageLeafJob<'a, S> {
+    address: B256,
+    trie: RevealableSparseTrie<S>,
+    fetched: B256Map<ProofV2TargetParent>,
+    updates: &'a mut B256Map<LeafUpdate>,
+    targets: Vec<ProofV2Target>,
+    hits: u64,
+    misses: u64,
+    result: SparseTrieResult<()>,
 }
 
 #[cfg(test)]
@@ -1302,7 +1351,7 @@ mod tests {
                 trie.as_revealed_mut().unwrap().set_updates(true);
                 reference.insert(address, trie.clone());
                 task.trie.insert_storage_trie(address, trie);
-                let count = if index == 0 { 1024 } else { 8 };
+                let count = if index == 0 { 4096 } else { 8 };
                 let updates = (0..count)
                     .map(|slot: u64| {
                         (
@@ -1321,7 +1370,7 @@ mod tests {
             }
             task.process_leaf_updates(true).unwrap();
             assert!(task.new_storage_updates.values().all(|updates| updates.is_empty()));
-            assert_eq!(task.storage_cache_hits, 1024 + 31 * 8);
+            assert_eq!(task.storage_cache_hits, 4096 + 31 * 8);
             assert_eq!(task.storage_cache_misses, 0);
             for (address, serial) in &mut reference {
                 let parallel = task.trie.storage_tries_mut().get_mut(address).unwrap();
@@ -1335,7 +1384,7 @@ mod tests {
                 assert_eq!(parallel.take_updates(), serial.take_updates());
             }
             task.process_leaf_updates(true).unwrap();
-            assert_eq!(task.storage_cache_hits, 1024 + 31 * 8);
+            assert_eq!(task.storage_cache_hits, 4096 + 31 * 8);
             for (address, serial) in &mut reference {
                 let updates = B256Map::from_iter([
                     (keccak256(0u64.to_be_bytes()), LeafUpdate::Changed(Vec::new())),
@@ -1417,6 +1466,10 @@ mod tests {
         with_storage_leaf_task(|task| {
             for (name, sizes) in [
                 ("tiny", vec![1; 4]),
+                ("small_64", vec![4; 16]),
+                ("small_256", vec![16; 16]),
+                ("small_512", vec![16; 32]),
+                ("small_1024", vec![16; 64]),
                 ("many_small", vec![16; 256]),
                 ("dominant", vec![4096]),
                 ("mixed", std::iter::once(3072).chain(std::iter::repeat_n(8, 128)).collect()),
