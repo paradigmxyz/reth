@@ -5,6 +5,7 @@ mod custom_genesis;
 mod dev;
 mod eip6780;
 mod eth;
+mod frame_transactions;
 mod invalid_payload;
 mod p2p;
 mod pool;

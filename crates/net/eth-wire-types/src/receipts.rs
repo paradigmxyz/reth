@@ -1,7 +1,11 @@
 //! Implements the `GetReceipts` and `Receipts` message types.
 
 use alloc::vec::Vec;
+#[cfg(any(test, feature = "arbitrary"))]
+use alloy_consensus::TxType;
 use alloy_consensus::{ReceiptWithBloom, RlpDecodableReceipt, RlpEncodableReceipt, TxReceipt};
+#[cfg(any(test, feature = "arbitrary"))]
+use alloy_eips::Typed2718;
 use alloy_primitives::B256;
 use alloy_rlp::{RlpDecodableWrapper, RlpEncodableWrapper};
 use derive_more::{Deref, IntoIterator};
@@ -68,12 +72,30 @@ impl alloy_rlp::Decodable for GetReceipts70 {
 /// requested.
 #[derive(Clone, Debug, PartialEq, Eq, Default, Deref, IntoIterator)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-#[cfg_attr(any(test, feature = "arbitrary"), derive(arbitrary::Arbitrary))]
 #[add_arbitrary_tests(rlp)]
 pub struct Receipts<T = Receipt>(
     /// Each receipt hash should correspond to a block hash in the request.
     pub Vec<Vec<ReceiptWithBloom<T>>>,
 );
+
+#[cfg(any(test, feature = "arbitrary"))]
+impl<'a, T> arbitrary::Arbitrary<'a> for Receipts<T>
+where
+    T: arbitrary::Arbitrary<'a> + TxReceipt + Typed2718,
+{
+    fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
+        let mut receipts = <Vec<Vec<ReceiptWithBloom<T>>> as arbitrary::Arbitrary>::arbitrary(u)?;
+
+        for receipt in receipts.iter_mut().flatten() {
+            if receipt.receipt.ty() == TxType::Eip8141 as u8 {
+                // EIP-8141 omits the top-level bloom and reconstructs it from the frame logs.
+                receipt.logs_bloom = receipt.receipt.bloom();
+            }
+        }
+
+        Ok(Self(receipts))
+    }
+}
 
 impl<T: RlpEncodableReceipt> alloy_rlp::Encodable for Receipts<T> {
     #[inline]
@@ -202,7 +224,7 @@ mod tests {
     #[test]
     fn roundtrip_eip1559() {
         let receipts = Receipts(vec![vec![ReceiptWithBloom {
-            receipt: Receipt { tx_type: TxType::Eip1559, ..Default::default() },
+            receipt: Receipt::standard(TxType::Eip1559, false, 0, vec![]),
             logs_bloom: Default::default(),
         }]]);
 
@@ -263,10 +285,7 @@ mod tests {
             request_id: 1111,
             message: Receipts(vec![vec![
                 ReceiptWithBloom {
-                    receipt: Receipt {
-                        tx_type: TxType::Legacy,
-                        cumulative_gas_used: 0x1u64,
-                        logs: vec![
+                    receipt: Receipt::standard(TxType::Legacy, false, 0x1u64, vec![
                             Log::new_unchecked(
                                 hex!("0000000000000000000000000000000000000011").into(),
                                 vec![
@@ -275,9 +294,7 @@ mod tests {
                                 ],
                                 hex!("0100ff")[..].into(),
                             ),
-                        ],
-                        success: false,
-                    },
+                        ]),
                     logs_bloom: hex!("00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000").into(),
                 },
             ]]),
@@ -300,10 +317,7 @@ mod tests {
                 message: Receipts(vec![
                     vec![
                         ReceiptWithBloom {
-                            receipt: Receipt {
-                                tx_type: TxType::Legacy,
-                                cumulative_gas_used: 0x1u64,
-                                logs: vec![
+                            receipt: Receipt::standard(TxType::Legacy, false, 0x1u64, vec![
                                     Log::new_unchecked(
                                         hex!("0000000000000000000000000000000000000011").into(),
                                         vec![
@@ -312,9 +326,7 @@ mod tests {
                                         ],
                                         hex!("0100ff")[..].into(),
                                     ),
-                                ],
-                                success: false,
-                            },
+                                ]),
                             logs_bloom: hex!("00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000").into(),
                         },
                     ],
@@ -330,12 +342,7 @@ mod tests {
         let request = RequestPair::<Receipts69>::decode(&mut &data[..]).unwrap();
         assert_eq!(
             request.message.0[0][0],
-            Receipt {
-                tx_type: TxType::Eip1559,
-                success: true,
-                cumulative_gas_used: 26000,
-                logs: vec![],
-            }
+            Receipt::standard(TxType::Eip1559, true, 26000, vec![])
         );
 
         let encoded = alloy_rlp::encode(&request);

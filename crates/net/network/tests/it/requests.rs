@@ -327,16 +327,8 @@ async fn test_eth68_get_receipts() {
 
         // Create some test receipts
         let receipts = vec![
-            reth_ethereum_primitives::Receipt {
-                cumulative_gas_used: 21000,
-                success: true,
-                ..Default::default()
-            },
-            reth_ethereum_primitives::Receipt {
-                cumulative_gas_used: 42000,
-                success: false,
-                ..Default::default()
-            },
+            reth_ethereum_primitives::Receipt::standard(Default::default(), true, 21000, vec![]),
+            reth_ethereum_primitives::Receipt::standard(Default::default(), false, 42000, vec![]),
         ];
 
         mock_provider.add_header(block_hash, header.clone());
@@ -357,8 +349,8 @@ async fn test_eth68_get_receipts() {
         assert_eq!(receipts_response.0.len(), 1);
         assert_eq!(receipts_response.0[0].len(), 2);
         // Eth68 receipts should have bloom filters - verify the structure
-        assert_eq!(receipts_response.0[0][0].receipt.cumulative_gas_used, 21000);
-        assert_eq!(receipts_response.0[0][1].receipt.cumulative_gas_used, 42000);
+        assert_eq!(receipts_response.0[0][0].receipt.cumulative_gas_used(), 21000);
+        assert_eq!(receipts_response.0[0][1].receipt.cumulative_gas_used(), 42000);
     }
 }
 
@@ -501,16 +493,8 @@ async fn test_eth69_get_receipts() {
 
         // Create some test receipts
         let receipts = vec![
-            reth_ethereum_primitives::Receipt {
-                cumulative_gas_used: 21000,
-                success: true,
-                ..Default::default()
-            },
-            reth_ethereum_primitives::Receipt {
-                cumulative_gas_used: 42000,
-                success: false,
-                ..Default::default()
-            },
+            reth_ethereum_primitives::Receipt::standard(Default::default(), true, 21000, vec![]),
+            reth_ethereum_primitives::Receipt::standard(Default::default(), false, 42000, vec![]),
         ];
 
         mock_provider.add_header(block_hash, header.clone());
@@ -533,8 +517,8 @@ async fn test_eth69_get_receipts() {
         assert_eq!(receipts_response.0.len(), 1);
         assert_eq!(receipts_response.0[0].len(), 2);
         // ETH69 receipts do not include bloom filters - verify the structure
-        assert_eq!(receipts_response.0[0][0].cumulative_gas_used, 21000);
-        assert_eq!(receipts_response.0[0][1].cumulative_gas_used, 42000);
+        assert_eq!(receipts_response.0[0][0].cumulative_gas_used(), 21000);
+        assert_eq!(receipts_response.0[0][1].cumulative_gas_used(), 42000);
     }
 }
 

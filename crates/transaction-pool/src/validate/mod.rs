@@ -15,9 +15,15 @@ use std::{fmt, fmt::Debug, future::Future, time::Instant};
 
 mod constants;
 mod eth;
+mod frame_inspector;
+mod frame_policy;
+mod frame_state;
 mod task;
 
 pub use eth::*;
+pub use frame_inspector::FrameValidationInspector;
+pub use frame_policy::FrameValidationPolicy;
+pub use frame_state::*;
 
 pub use task::{TransactionValidationTaskExecutor, ValidationTask};
 
@@ -417,6 +423,12 @@ impl<T: PoolTransaction> ValidPoolTransaction<T> {
         self.transaction.is_eip4844()
     }
 
+    /// Whether the transaction references blobs and requires a pooled sidecar.
+    #[inline]
+    pub fn is_blob_transaction(&self) -> bool {
+        self.transaction.is_blob_transaction()
+    }
+
     /// The heap allocated size of this transaction.
     pub(crate) fn size(&self) -> usize {
         self.transaction.size()
@@ -438,14 +450,13 @@ impl<T: PoolTransaction> ValidPoolTransaction<T> {
         self.transaction.authorization_count()
     }
 
-    /// EIP-4844 blob transactions and normal transactions are treated as mutually exclusive per
-    /// account.
+    /// Blob transactions and normal transactions are treated as mutually exclusive per account.
     ///
     /// Returns true if the transaction is an EIP-4844 blob transaction and the other is not, or
     /// vice versa.
     #[inline]
     pub(crate) fn tx_type_conflicts_with(&self, other: &Self) -> bool {
-        self.is_eip4844() != other.is_eip4844()
+        self.is_blob_transaction() != other.is_blob_transaction()
     }
 
     /// Converts to this type into the consensus transaction of the pooled transaction.
@@ -468,6 +479,19 @@ impl<T: PoolTransaction> ValidPoolTransaction<T> {
     /// the blob-specific fees.
     #[inline]
     pub fn is_underpriced(&self, maybe_replacement: &Self, price_bumps: &PriceBumpConfig) -> bool {
+        if self.transaction.frame_transaction().is_some() ||
+            maybe_replacement.transaction.frame_transaction().is_some()
+        {
+            return crate::ordering::frame_replacement_underpriced(
+                &self.transaction,
+                &maybe_replacement.transaction,
+                if self.transaction.is_blob_transaction() {
+                    price_bumps.replace_blob_tx_price_bump
+                } else {
+                    price_bumps.default_price_bump
+                },
+            )
+        }
         // Retrieve the required price bump percentage for this type of transaction.
         //
         // The bump is different for EIP-4844 and other transactions. See `PriceBumpConfig`.

@@ -860,6 +860,18 @@ where
         self.pool.on_canonical_state_change(update);
     }
 
+    fn on_canonical_state_change_with_touched_accounts(
+        &self,
+        update: CanonicalStateUpdate<'_, Self::Block>,
+        touched: &[Address],
+    ) {
+        self.pool.on_canonical_state_change_with_touched_accounts(update, touched);
+    }
+
+    async fn revalidate_frame_transactions(&self) {
+        self.pool.revalidate_frame_transactions().await;
+    }
+
     fn update_accounts(&self, accounts: Vec<ChangedAccount>) {
         self.pool.update_accounts(accounts);
     }

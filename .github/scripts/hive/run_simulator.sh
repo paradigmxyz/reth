@@ -6,6 +6,7 @@ cd hivetests/
 sim="${1}"
 limit="${2}"
 fixture_variant="${3:-}"
+loglevel="${4:-}"
 
 if [[ "${fixture_variant}" == "osaka" && "${sim}" == *"eels"* && "${limit}" == *"tests/amsterdam"* ]]; then
     echo "osaka fixtures do not support amsterdam tests"
@@ -19,11 +20,17 @@ if [[ "${sim}" == *"eels"* ]]; then
 fi
 
 run_hive() {
+    loglevel_args=()
+    if [[ -n "${loglevel}" ]]; then
+        loglevel_args=(--sim.loglevel "${loglevel}")
+    fi
+
     hive \
   --sim "${sim}" \
   --sim.limit "${limit}" \
   --sim.limit.exact=false \
   --sim.parallelism "${parallelism}" \
+  "${loglevel_args[@]}" \
   --client reth \
   2>&1 | tee /tmp/log || true
 }

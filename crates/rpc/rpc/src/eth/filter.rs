@@ -1573,24 +1573,12 @@ mod tests {
         let expected_block_hash_2 = FixedBytes::from([2u8; 32]);
 
         // create mock receipts to test receipt handling
-        let mock_receipt_1 = reth_ethereum_primitives::Receipt {
-            tx_type: TxType::Legacy,
-            cumulative_gas_used: 100_000,
-            logs: vec![],
-            success: true,
-        };
-        let mock_receipt_2 = reth_ethereum_primitives::Receipt {
-            tx_type: TxType::Eip1559,
-            cumulative_gas_used: 200_000,
-            logs: vec![],
-            success: true,
-        };
-        let mock_receipt_3 = reth_ethereum_primitives::Receipt {
-            tx_type: TxType::Eip2930,
-            cumulative_gas_used: 150_000,
-            logs: vec![],
-            success: false, // Different success status
-        };
+        let mock_receipt_1 =
+            reth_ethereum_primitives::Receipt::standard(TxType::Legacy, true, 100_000, vec![]);
+        let mock_receipt_2 =
+            reth_ethereum_primitives::Receipt::standard(TxType::Eip1559, true, 200_000, vec![]);
+        let mock_receipt_3 =
+            reth_ethereum_primitives::Receipt::standard(TxType::Eip2930, false, 150_000, vec![]);
 
         let mock_result_1 = ReceiptBlockResult {
             receipts: Arc::new(vec![mock_receipt_1.clone(), mock_receipt_2.clone()]),
@@ -1629,18 +1617,18 @@ mod tests {
 
         // verify receipts
         assert_eq!(receipt_result1.receipts.len(), 2);
-        assert_eq!(receipt_result1.receipts[0].tx_type, mock_receipt_1.tx_type);
+        assert_eq!(receipt_result1.receipts[0].tx_type(), mock_receipt_1.tx_type());
         assert_eq!(
-            receipt_result1.receipts[0].cumulative_gas_used,
-            mock_receipt_1.cumulative_gas_used
+            receipt_result1.receipts[0].cumulative_gas_used(),
+            mock_receipt_1.cumulative_gas_used()
         );
-        assert_eq!(receipt_result1.receipts[0].success, mock_receipt_1.success);
-        assert_eq!(receipt_result1.receipts[1].tx_type, mock_receipt_2.tx_type);
+        assert_eq!(receipt_result1.receipts[0].success(), mock_receipt_1.success());
+        assert_eq!(receipt_result1.receipts[1].tx_type(), mock_receipt_2.tx_type());
         assert_eq!(
-            receipt_result1.receipts[1].cumulative_gas_used,
-            mock_receipt_2.cumulative_gas_used
+            receipt_result1.receipts[1].cumulative_gas_used(),
+            mock_receipt_2.cumulative_gas_used()
         );
-        assert_eq!(receipt_result1.receipts[1].success, mock_receipt_2.success);
+        assert_eq!(receipt_result1.receipts[1].success(), mock_receipt_2.success());
 
         // second call should return the second queued result
         let result2 = range_mode.next().await;
@@ -1651,12 +1639,12 @@ mod tests {
 
         // verify receipts
         assert_eq!(receipt_result2.receipts.len(), 1);
-        assert_eq!(receipt_result2.receipts[0].tx_type, mock_receipt_3.tx_type);
+        assert_eq!(receipt_result2.receipts[0].tx_type(), mock_receipt_3.tx_type());
         assert_eq!(
-            receipt_result2.receipts[0].cumulative_gas_used,
-            mock_receipt_3.cumulative_gas_used
+            receipt_result2.receipts[0].cumulative_gas_used(),
+            mock_receipt_3.cumulative_gas_used()
         );
-        assert_eq!(receipt_result2.receipts[0].success, mock_receipt_3.success);
+        assert_eq!(receipt_result2.receipts[0].success(), mock_receipt_3.success());
 
         // queue should now be empty
         assert!(range_mode.next.is_empty());
@@ -1717,24 +1705,24 @@ mod tests {
             data: alloy_primitives::LogData::new_unchecked(vec![], alloy_primitives::Bytes::new()),
         };
 
-        let receipt_100_1 = reth_ethereum_primitives::Receipt {
-            tx_type: TxType::Legacy,
-            cumulative_gas_used: 21_000,
-            logs: vec![mock_log.clone()],
-            success: true,
-        };
-        let receipt_100_2 = reth_ethereum_primitives::Receipt {
-            tx_type: TxType::Eip1559,
-            cumulative_gas_used: 42_000,
-            logs: vec![mock_log.clone()],
-            success: true,
-        };
-        let receipt_101_1 = reth_ethereum_primitives::Receipt {
-            tx_type: TxType::Eip2930,
-            cumulative_gas_used: 30_000,
-            logs: vec![mock_log.clone()],
-            success: false,
-        };
+        let receipt_100_1 = reth_ethereum_primitives::Receipt::standard(
+            TxType::Legacy,
+            true,
+            21_000,
+            vec![mock_log.clone()],
+        );
+        let receipt_100_2 = reth_ethereum_primitives::Receipt::standard(
+            TxType::Eip1559,
+            true,
+            42_000,
+            vec![mock_log.clone()],
+        );
+        let receipt_101_1 = reth_ethereum_primitives::Receipt::standard(
+            TxType::Eip2930,
+            false,
+            30_000,
+            vec![mock_log.clone()],
+        );
 
         provider.add_receipts(100, vec![receipt_100_1.clone(), receipt_100_2.clone()]);
         provider.add_receipts(101, vec![receipt_101_1.clone()]);
@@ -1773,19 +1761,19 @@ mod tests {
         assert_eq!(receipt_result.receipts.len(), 2);
 
         // verify receipts
-        assert_eq!(receipt_result.receipts[0].tx_type, receipt_100_1.tx_type);
+        assert_eq!(receipt_result.receipts[0].tx_type(), receipt_100_1.tx_type());
         assert_eq!(
-            receipt_result.receipts[0].cumulative_gas_used,
-            receipt_100_1.cumulative_gas_used
+            receipt_result.receipts[0].cumulative_gas_used(),
+            receipt_100_1.cumulative_gas_used()
         );
-        assert_eq!(receipt_result.receipts[0].success, receipt_100_1.success);
+        assert_eq!(receipt_result.receipts[0].success(), receipt_100_1.success());
 
-        assert_eq!(receipt_result.receipts[1].tx_type, receipt_100_2.tx_type);
+        assert_eq!(receipt_result.receipts[1].tx_type(), receipt_100_2.tx_type());
         assert_eq!(
-            receipt_result.receipts[1].cumulative_gas_used,
-            receipt_100_2.cumulative_gas_used
+            receipt_result.receipts[1].cumulative_gas_used(),
+            receipt_100_2.cumulative_gas_used()
         );
-        assert_eq!(receipt_result.receipts[1].success, receipt_100_2.success);
+        assert_eq!(receipt_result.receipts[1].success(), receipt_100_2.success());
 
         // second call should return the second block with receipts
         let result2 = range_mode.next().await;
@@ -1797,12 +1785,12 @@ mod tests {
         assert_eq!(receipt_result2.receipts.len(), 1);
 
         // verify receipts
-        assert_eq!(receipt_result2.receipts[0].tx_type, receipt_101_1.tx_type);
+        assert_eq!(receipt_result2.receipts[0].tx_type(), receipt_101_1.tx_type());
         assert_eq!(
-            receipt_result2.receipts[0].cumulative_gas_used,
-            receipt_101_1.cumulative_gas_used
+            receipt_result2.receipts[0].cumulative_gas_used(),
+            receipt_101_1.cumulative_gas_used()
         );
-        assert_eq!(receipt_result2.receipts[0].success, receipt_101_1.success);
+        assert_eq!(receipt_result2.receipts[0].success(), receipt_101_1.success());
 
         // third call should return None since no more blocks with receipts
         let result3 = range_mode.next().await;
@@ -1825,12 +1813,8 @@ mod tests {
         provider.add_header(block_hash_101, header_101.clone());
 
         // Add mock receipts so headers are actually processed
-        let mock_receipt = reth_ethereum_primitives::Receipt {
-            tx_type: TxType::Legacy,
-            cumulative_gas_used: 21_000,
-            logs: vec![],
-            success: true,
-        };
+        let mock_receipt =
+            reth_ethereum_primitives::Receipt::standard(TxType::Legacy, true, 21_000, vec![]);
         provider.add_receipts(100, vec![mock_receipt.clone()]);
         provider.add_receipts(101, vec![mock_receipt.clone()]);
 
@@ -1894,12 +1878,12 @@ mod tests {
             data: alloy_primitives::LogData::new_unchecked(vec![], alloy_primitives::Bytes::new()),
         };
 
-        let mock_receipt = reth_ethereum_primitives::Receipt {
-            tx_type: TxType::Legacy,
-            cumulative_gas_used: 21_000,
-            logs: vec![mock_log],
-            success: true,
-        };
+        let mock_receipt = reth_ethereum_primitives::Receipt::standard(
+            TxType::Legacy,
+            true,
+            21_000,
+            vec![mock_log],
+        );
 
         let provider = MockEthProvider::default();
         provider.add_header(test_hash, test_header.header().clone());
@@ -1920,12 +1904,12 @@ mod tests {
         assert_eq!(receipt_block_result.header.hash(), test_hash);
         assert_eq!(receipt_block_result.header.number, test_block_number);
         assert_eq!(receipt_block_result.receipts.len(), 1);
-        assert_eq!(receipt_block_result.receipts[0].tx_type, mock_receipt.tx_type);
+        assert_eq!(receipt_block_result.receipts[0].tx_type(), mock_receipt.tx_type());
         assert_eq!(
-            receipt_block_result.receipts[0].cumulative_gas_used,
-            mock_receipt.cumulative_gas_used
+            receipt_block_result.receipts[0].cumulative_gas_used(),
+            mock_receipt.cumulative_gas_used()
         );
-        assert_eq!(receipt_block_result.receipts[0].success, mock_receipt.success);
+        assert_eq!(receipt_block_result.receipts[0].success(), mock_receipt.success());
 
         // iterator should be exhausted
         let result2 = cached_mode.next().await;
@@ -1976,12 +1960,12 @@ mod tests {
             data: alloy_primitives::LogData::new_unchecked(vec![], alloy_primitives::Bytes::new()),
         };
 
-        let receipt = reth_ethereum_primitives::Receipt {
-            tx_type: TxType::Legacy,
-            cumulative_gas_used: 21_000,
-            logs: vec![mock_log],
-            success: true,
-        };
+        let receipt = reth_ethereum_primitives::Receipt::standard(
+            TxType::Legacy,
+            true,
+            21_000,
+            vec![mock_log],
+        );
 
         let mut prev_hash = alloy_primitives::B256::default();
         for (idx, block_number) in (100u64..=102).enumerate() {
@@ -2089,12 +2073,12 @@ mod tests {
             data: alloy_primitives::LogData::new_unchecked(vec![], alloy_primitives::Bytes::new()),
         };
 
-        let receipt = reth_ethereum_primitives::Receipt {
-            tx_type: TxType::Legacy,
-            cumulative_gas_used: 21_000,
-            logs: vec![mock_log],
-            success: true,
-        };
+        let receipt = reth_ethereum_primitives::Receipt::standard(
+            TxType::Legacy,
+            true,
+            21_000,
+            vec![mock_log],
+        );
 
         provider.add_receipts(100, vec![receipt.clone()]);
         provider.add_receipts(101, vec![]);
@@ -2187,15 +2171,15 @@ mod tests {
             .into(),
             Signature::test_signature(),
         );
-        let receipt = Receipt {
-            tx_type: TxType::Legacy,
-            cumulative_gas_used: 21_000,
-            logs: vec![Log {
+        let receipt = Receipt::standard(
+            TxType::Legacy,
+            true,
+            21_000,
+            vec![Log {
                 address: Address::ZERO,
                 data: LogData::new_unchecked(vec![], Bytes::new()),
             }],
-            success: true,
-        };
+        );
 
         // an empty filter matches every header, so every window is fetched in parallel while
         // only three blocks have logs to return

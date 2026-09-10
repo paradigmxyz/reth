@@ -369,7 +369,7 @@ pub trait LoadPendingBlock:
                 let mut tx_regular_gas_used = 0;
                 let gas_output =
                     match builder.execute_transaction_with_result_closure(tx, |result| {
-                        tx_regular_gas_used = result.result().result.gas().block_regular_gas_used();
+                        tx_regular_gas_used = result.result().result.block_regular_gas_used();
                     }) {
                         Ok(gas_output) => gas_output,
                         Err(BlockExecutionError::Validation(BlockValidationError::InvalidTx {

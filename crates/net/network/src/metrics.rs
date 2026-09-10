@@ -587,6 +587,9 @@ pub struct AnnouncedTxTypesMetrics {
     /// Histogram for tracking frequency of EIP-7702 transaction type
     pub(crate) eip7702: Histogram,
 
+    /// Histogram for tracking frequency of EIP-8141 transaction type
+    pub(crate) eip8141: Histogram,
+
     /// Histogram for tracking frequency of unknown/other transaction types
     pub(crate) other: Histogram,
 }
@@ -612,6 +615,9 @@ pub struct TxTypesCounter {
     /// Count of transactions conforming to EIP-7702 (Restricted Storage Windows).
     pub(crate) eip7702: usize,
 
+    /// Count of EIP-8141 frame transactions.
+    pub(crate) eip8141: usize,
+
     /// Count of unknown/other transaction types not matching any known EIP.
     pub(crate) other: usize,
 }
@@ -634,6 +640,9 @@ impl TxTypesCounter {
             TxType::Eip7702 => {
                 self.eip7702 += 1;
             }
+            TxType::Eip8141 => {
+                self.eip8141 += 1;
+            }
         }
     }
 
@@ -651,6 +660,7 @@ impl AnnouncedTxTypesMetrics {
         self.eip1559.record(tx_types_counter.eip1559 as f64);
         self.eip4844.record(tx_types_counter.eip4844 as f64);
         self.eip7702.record(tx_types_counter.eip7702 as f64);
+        self.eip8141.record(tx_types_counter.eip8141 as f64);
         self.other.record(tx_types_counter.other as f64);
     }
 }

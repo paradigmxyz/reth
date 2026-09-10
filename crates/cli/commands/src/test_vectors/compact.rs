@@ -23,7 +23,7 @@ use reth_db::{
     },
     ClientVersion,
 };
-use reth_ethereum_primitives::{Receipt, Transaction, TransactionSigned, TxType};
+use reth_ethereum_primitives::{EthereumReceipt, Transaction, TransactionSigned, TxType};
 use reth_fs_util as fs;
 use reth_primitives_traits::{Account, Log, LogData, StorageEntry};
 use reth_prune_types::{PruneCheckpoint, PruneMode};
@@ -76,7 +76,7 @@ compact_types!(
     regular: [
         // reth-primitives
         Account,
-        Receipt,
+        EthereumReceipt,
         // reth_codecs::alloy
         Authorization,
         GenesisAccount,

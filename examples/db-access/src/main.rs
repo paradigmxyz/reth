@@ -205,7 +205,7 @@ fn receipts_provider_example<
     // is no instance of any event that matches the filter in the header.
     if filter.matches_bloom(bloom) {
         let receipts = provider.receipt(header_num)?.ok_or(eyre::eyre!("receipt not found"))?;
-        for log in &receipts.logs {
+        for log in receipts.logs() {
             if filter.matches(log) {
                 // Do something with the log e.g. decode it.
                 println!("Matching log found! {log:?}")

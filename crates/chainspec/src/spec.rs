@@ -885,6 +885,11 @@ impl From<Genesis> for ChainSpec {
             None
         };
 
+        // Bogota shares Amsterdam's activation timestamp on the frames devnet. Keep accepting
+        // genesis files that only contain Amsterdam, as older Hive genesis mappers do not emit a
+        // separate Bogota timestamp.
+        let bogota_time = genesis.config.bogota_time.or(genesis.config.amsterdam_time);
+
         // Time-based hardforks
         let time_hardfork_opts = [
             (EthereumHardfork::Shanghai.boxed(), genesis.config.shanghai_time),
@@ -897,7 +902,7 @@ impl From<Genesis> for ChainSpec {
             (EthereumHardfork::Bpo4.boxed(), genesis.config.bpo4_time),
             (EthereumHardfork::Bpo5.boxed(), genesis.config.bpo5_time),
             (EthereumHardfork::Amsterdam.boxed(), genesis.config.amsterdam_time),
-            (EthereumHardfork::Bogota.boxed(), genesis.config.bogota_time),
+            (EthereumHardfork::Bogota.boxed(), bogota_time),
         ];
 
         let mut time_hardforks = time_hardfork_opts

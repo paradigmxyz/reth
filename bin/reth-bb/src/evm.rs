@@ -341,7 +341,7 @@ where
         self.accumulated_requests.extend(result.requests);
 
         let last_receipt_cumulative =
-            result.receipts.last().map(|r| r.cumulative_gas_used).unwrap_or(0);
+            result.receipts.last().map(|r| r.cumulative_gas_used()).unwrap_or(0);
         let seg_block_number = prev_segment.evm_env.block_env.number.saturating_to::<u64>();
         debug!(
             target: "engine::bb::evm",
@@ -425,8 +425,11 @@ where
         self.inner_mut().execute_transaction_without_commit(tx)
     }
 
-    fn commit_transaction(&mut self, output: Self::Result) -> GasOutput {
-        let gas_used = self.inner_mut().commit_transaction(output);
+    fn commit_transaction(
+        &mut self,
+        output: Self::Result,
+    ) -> Result<GasOutput, BlockExecutionError> {
+        let gas_used = self.inner_mut().commit_transaction(output)?;
 
         // Fix up cumulative_gas_used on the just-committed receipt so that
         // the receipt root task (which reads receipts incrementally) sees
@@ -435,7 +438,7 @@ where
         if offset > 0 &&
             let Some(receipt) = self.inner_mut().receipts.last_mut()
         {
-            receipt.cumulative_gas_used += offset;
+            receipt.set_cumulative_gas_used(receipt.cumulative_gas_used() + offset);
         }
 
         self.plan.tx_counter += 1;
@@ -443,10 +446,10 @@ where
         while self.plan.next_segment < self.plan.segments.len() &&
             self.plan.tx_counter == self.plan.segments[self.plan.next_segment].start_tx
         {
-            self.apply_segment_boundary().expect("must succeed");
+            self.apply_segment_boundary()?;
         }
 
-        gas_used
+        Ok(gas_used)
     }
 
     fn finish(
@@ -477,7 +480,7 @@ where
         result.blob_gas_used += self.blob_gas_used_offset;
 
         let last_receipt_cumulative =
-            result.receipts.last().map(|r| r.cumulative_gas_used).unwrap_or(0);
+            result.receipts.last().map(|r| r.cumulative_gas_used()).unwrap_or(0);
         debug!(
             target: "engine::bb::evm",
             last_segment_gas,

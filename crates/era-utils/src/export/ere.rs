@@ -38,7 +38,9 @@ impl EraBlockWriter for Ere {
         // Total difficulty and the accumulator are pre-merge only: post-merge blocks have zero
         // difficulty and the accumulator is frozen at the merge. Difficulty drops to zero
         // monotonically, so the first block decides whether the file carries them at all.
-        let pre_merge = !blocks[0].header.difficulty().is_zero();
+        let first =
+            blocks.first().ok_or_else(|| eyre!("cannot write ERE file from empty block range"))?;
+        let pre_merge = !first.header.difficulty().is_zero();
         // Post-merge blocks are not part of any epoch accumulator, so a merge-spanning file builds
         // its accumulator from the pre-merge prefix only, while total difficulty is kept for every
         // block.
@@ -86,6 +88,10 @@ where
         .receipts
         .iter()
         .map(|receipt| {
+            // The ERE slim format cannot represent a frame receipt's payer or frame outcomes.
+            if receipt.ty() == TxType::Eip8141 as u8 {
+                eyre::bail!("ERE slim receipts do not support EIP-8141 frame receipts");
+            }
             Ok(SlimReceipt {
                 tx_type: TxType::try_from(receipt.ty())
                     .map_err(|e| eyre!("Unexpected transaction type in receipt: {e}"))?,
@@ -239,6 +245,37 @@ mod tests {
         assert!(file.group.accumulator.is_some());
         assert_eq!(file.group.index.component_count(), 4);
         assert!(file.group.blocks.iter().all(|b| b.total_difficulty.is_some()));
+    }
+
+    #[test]
+    fn frame_receipt_export_is_rejected_before_creating_file() {
+        let dir = tempdir().unwrap();
+        let mut block = export_block(0, U256::ZERO);
+        block.receipts = vec![
+            EthReceipt::standard(TxType::Eip1559, true, 21_000, vec![]),
+            alloy_consensus::ReceiptEnvelope::Eip8141(alloy_consensus::FrameReceiptEnvelope::new(
+                Default::default(),
+            ))
+            .into(),
+        ];
+        let error = Ere::write_file("mainnet", MAX_BLOCKS_PER_ERE as u64, &[block], dir.path())
+            .unwrap_err();
+        assert!(error.to_string().contains("ERE slim receipts do not support EIP-8141"));
+        assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 0);
+    }
+
+    #[test]
+    fn empty_export_returns_error() {
+        let dir = tempdir().unwrap();
+        let error = Ere::write_file::<Header, BlockBody, EthReceipt>(
+            "mainnet",
+            MAX_BLOCKS_PER_ERE as u64,
+            &[],
+            dir.path(),
+        )
+        .unwrap_err();
+        assert!(error.to_string().contains("empty block range"));
+        assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 0);
     }
 
     #[test]

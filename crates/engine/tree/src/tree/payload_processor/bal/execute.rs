@@ -159,7 +159,7 @@ where
             gas_tracker.record_result(output.result.result());
             canonical_executor.evm_mut().db_mut().bump_bal_index();
 
-            let _ = canonical_executor.commit_transaction(output.result);
+            canonical_executor.commit_transaction(output.result)?;
             senders.push(output.signer);
 
             let current_len = canonical_executor.receipts().len();
@@ -271,8 +271,8 @@ impl BlockGasTracker {
         }
     }
 
-    /// Verifies that the transaction's gas limit fits the block's remaining gas budget(s): the
-    /// admission check `EthBlockExecutor::execute_transaction_without_commit` performs before
+    /// Verifies that a transaction's gas reservations fit the block's remaining gas budget(s):
+    /// the admission check `EthBlockExecutor::execute_transaction_without_commit` performs before
     /// executing a transaction.
     ///
     /// The commit loop never calls that entry point — workers execute speculatively and their
@@ -284,9 +284,9 @@ impl BlockGasTracker {
     ///
     /// Amsterdam (EIP-8037) splits gas into two lanes, each budgeted at `block_gas_limit`:
     /// - regular: the capped tx gas limit must fit the remaining regular budget
-    /// - state: the full, uncapped tx gas limit must fit the remaining state budget, since state
-    ///   gas is drawn from the reservoir above `tx_gas_limit_cap` (execution-specs
-    ///   `check_block_gas_capacity`)
+    /// - state: the full, uncapped tx gas limit must fit the remaining state budget.
+    ///
+    /// Frame transactions use separate reservations and must use the serial execution path.
     fn validate_tx_limit(&self, tx_gas_limit: u64) -> Result<(), BlockExecutionError> {
         let block_gas_used = if self.enable_amsterdam_eip8037 {
             self.block_regular_gas_used
@@ -322,9 +322,10 @@ impl BlockGasTracker {
 
     const fn record_result<H>(&mut self, result: &ResultAndState<H>) {
         let gas = result.result.gas();
-        self.cumulative_tx_gas_used = self.cumulative_tx_gas_used.saturating_add(gas.tx_gas_used());
+        self.cumulative_tx_gas_used =
+            self.cumulative_tx_gas_used.saturating_add(result.result.tx_gas_used());
         self.block_regular_gas_used =
-            self.block_regular_gas_used.saturating_add(gas.block_regular_gas_used());
+            self.block_regular_gas_used.saturating_add(result.result.block_regular_gas_used());
         self.block_state_gas_used =
             self.block_state_gas_used.saturating_add(gas.block_state_gas_used());
     }
@@ -958,6 +959,13 @@ mod tests {
         let bal_hash = alloy_eip7928::compute_block_access_list_hash(&reference_bal);
         let low_gas_block = empty_amsterdam_block_with_gas_limit(bal_hash, block_gas_limit);
 
+        let mut serial_state = State::builder().with_database(pre_block_db.clone()).build();
+        let mut serial_executor =
+            evm_config.executor_for_block(&mut serial_state, &low_gas_block).unwrap();
+        serial_executor.apply_pre_execution_changes().unwrap();
+        serial_executor.execute_transaction(tx1.clone()).unwrap();
+        let serial_error = serial_executor.execute_transaction(tx2.clone()).unwrap_err();
+
         let result = run_execute_block(
             &Runtime::test(),
             evm_config,
@@ -968,10 +976,13 @@ mod tests {
         );
 
         match result {
-            Err(BalExecutionError::Execution(err)) => assert!(matches!(
-                err.as_validation(),
-                Some(BlockValidationError::TransactionGasLimitMoreThanAvailableBlockGas { .. })
-            )),
+            Err(BalExecutionError::Execution(err)) => {
+                assert!(matches!(
+                    err.as_validation(),
+                    Some(BlockValidationError::TransactionGasLimitMoreThanAvailableBlockGas { .. })
+                ));
+                assert_eq!(err.to_string(), serial_error.to_string());
+            }
             Err(err) => panic!("expected block gas validation error, got {err:?}"),
             Ok(_) => panic!("expected block gas validation error, got Ok"),
         }
@@ -1202,6 +1213,50 @@ mod tests {
             matches!(result, Err(BalExecutionError::Execution(BlockExecutionError::Validation(_)))),
             "expected validation error from tx recovery failure, got {result:?}",
         );
+    }
+
+    #[test]
+    fn invalid_frame_structure_precedes_missing_bal_sender() {
+        use revm::{
+            context::{result::EVMError, TxEnv},
+            primitives::{hardfork::SpecId, TxKind},
+        };
+
+        let evm_config = EthEvmConfig::mainnet();
+        let block = empty_amsterdam_block(B256::ZERO);
+        let mut env = evm_config.evm_env(block.header()).unwrap();
+        env.cfg_env.set_spec_and_mainnet_gas_params(SpecId::BOGOTA);
+        env.block_env = revm::context::BlockEnv::default();
+        let sender = Address::from([0x81; 20]);
+        let tx = TxEnv::builder()
+            .tx_type(Some(0x06))
+            .caller(sender)
+            .kind(TxKind::Call(sender))
+            .gas_limit(100_000)
+            .gas_priority_fee(Some(0))
+            .frame_transaction(Default::default())
+            .build()
+            .unwrap();
+
+        // An empty frame list is invalid before any state access. Neither the serial database
+        // nor the strict worker BAL contains the sender; both must report the transaction error.
+        for with_bal in [false, true] {
+            let mut state = State::builder().with_database(system_contracts_db()).build();
+            if with_bal {
+                state.set_bal(Some(Arc::new(RevmBal::new())));
+                state.set_bal_index(BlockAccessIndex::new(1));
+            }
+            let mut evm = evm_config.evm_with_env(&mut state, env.clone());
+            let err = evm.transact(tx.clone()).expect_err("empty frame list must fail");
+            match err {
+                EVMError::Transaction(err) => assert_eq!(
+                    err.to_string(),
+                    "EIP-8141 frame count must be in 1..=64",
+                    "with_bal={with_bal}",
+                ),
+                err => panic!("expected transaction error, with_bal={with_bal}: {err:?}"),
+            }
+        }
     }
 
     #[test]

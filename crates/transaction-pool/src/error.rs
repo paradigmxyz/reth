@@ -245,6 +245,20 @@ pub enum Eip7702PoolTransactionError {
     AuthorityReserved,
 }
 
+/// Errors raised while validating EIP-8141 transactions for the pool.
+#[derive(Debug, thiserror::Error)]
+pub enum Eip8141PoolTransactionError {
+    /// The transaction violates a structural EIP-8141 constraint.
+    #[error("invalid EIP-8141 transaction: {0}")]
+    InvalidTransaction(&'static str),
+    /// Public admission requires EIP-8141 validation-frame simulation.
+    #[error("public EIP-8141 mempool validation is unavailable")]
+    PublicMempoolValidationUnavailable,
+    /// The transaction does not satisfy public-pool policy at the current head.
+    #[error("EIP-8141 public mempool policy: {0}")]
+    PublicMempoolPolicy(&'static str),
+}
+
 /// Represents errors that can happen when validating transactions for the pool
 ///
 /// See [`TransactionValidator`](crate::TransactionValidator).
@@ -304,6 +318,9 @@ pub enum InvalidPoolTransactionError {
     /// EIP-7702 related errors
     #[error(transparent)]
     Eip7702(#[from] Eip7702PoolTransactionError),
+    /// EIP-8141 related errors
+    #[error(transparent)]
+    Eip8141(#[from] Eip8141PoolTransactionError),
     /// Any other error that occurred while inserting/validating that is transaction specific
     #[error(transparent)]
     Other(Box<dyn PoolTransactionError>),
@@ -434,6 +451,11 @@ impl InvalidPoolTransactionError {
                 Eip7702PoolTransactionError::OutOfOrderTxFromDelegated => false,
                 Eip7702PoolTransactionError::InflightTxLimitReached => false,
                 Eip7702PoolTransactionError::AuthorityReserved => false,
+            },
+            Self::Eip8141(eip8141_err) => match eip8141_err {
+                Eip8141PoolTransactionError::InvalidTransaction(_) => true,
+                Eip8141PoolTransactionError::PublicMempoolValidationUnavailable |
+                Eip8141PoolTransactionError::PublicMempoolPolicy(_) => false,
             },
             Self::PriorityFeeBelowMinimum { .. } => false,
         }

@@ -79,23 +79,34 @@ impl<ChainSpec> EthReceiptConverter<ChainSpec> {
         Self {
             chain_spec,
             build_rpc_receipt: |receipt: Receipt, next_log_index, meta: TransactionMeta| {
+                if let Some(frame_receipt) = receipt.as_eip8141() {
+                    tracing::info!(
+                        target: "reth::eip8141::receipt",
+                        tx_hash = ?meta.tx_hash,
+                        block_hash = ?meta.block_hash,
+                        block_number = meta.block_number,
+                        transaction_index = meta.index,
+                        payer = ?frame_receipt.payer,
+                        frame_count = frame_receipt.frame_receipts.len(),
+                        cumulative_gas_used = frame_receipt.cumulative_gas_used,
+                        "converting EIP-8141 receipt for RPC"
+                    );
+                }
                 let mut log_index = next_log_index;
-                receipt
-                    .map_logs(|log| {
-                        let idx = log_index;
-                        log_index += 1;
-                        Log {
-                            inner: log,
-                            block_hash: Some(meta.block_hash),
-                            block_number: Some(meta.block_number),
-                            block_timestamp: Some(meta.timestamp),
-                            transaction_hash: Some(meta.tx_hash),
-                            transaction_index: Some(meta.index),
-                            log_index: Some(idx as u64),
-                            removed: false,
-                        }
-                    })
-                    .into()
+                ReceiptEnvelope::from(receipt).map_logs(|log| {
+                    let idx = log_index;
+                    log_index += 1;
+                    Log {
+                        inner: log,
+                        block_hash: Some(meta.block_hash),
+                        block_number: Some(meta.block_number),
+                        block_timestamp: Some(meta.timestamp),
+                        transaction_hash: Some(meta.tx_hash),
+                        transaction_index: Some(meta.index),
+                        log_index: Some(idx as u64),
+                        removed: false,
+                    }
+                })
             },
         }
     }
@@ -142,5 +153,62 @@ where
         }
 
         Ok(receipts)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use alloy_consensus::TxType;
+    use alloy_eips::eip8141::{FrameGasUsed, FrameReceipt, FrameReceiptPayload, FrameStatus};
+    use alloy_primitives::{bytes, B256};
+
+    #[test]
+    fn owned_receipt_conversion_preserves_logs_and_rpc_indices() {
+        let logs = vec![
+            alloy_primitives::Log::new_unchecked(Address::repeat_byte(1), vec![], bytes!("01")),
+            alloy_primitives::Log::new_unchecked(Address::repeat_byte(2), vec![], bytes!("02")),
+        ];
+        let standard = Receipt::standard(TxType::Eip1559, true, 42_000, logs.clone());
+        let frame = Receipt::from(ReceiptEnvelope::Eip8141(
+            FrameReceiptPayload {
+                cumulative_gas_used: 42_000,
+                payer: Address::repeat_byte(3),
+                frame_receipts: logs
+                    .iter()
+                    .map(|log| FrameReceipt {
+                        status: FrameStatus::Success,
+                        gas_used: FrameGasUsed { execution: 21_000, state: 0 },
+                        logs: vec![log.clone()],
+                    })
+                    .collect(),
+            }
+            .into(),
+        ));
+        let meta = TransactionMeta {
+            tx_hash: B256::repeat_byte(4),
+            block_hash: B256::repeat_byte(5),
+            block_number: 12,
+            timestamp: 34,
+            index: 2,
+            ..Default::default()
+        };
+        let converter = EthReceiptConverter::new(Arc::new(()));
+        for receipt in [standard, frame] {
+            let expected = receipt.to_envelope();
+            let rpc = (converter.build_rpc_receipt)(receipt, 7, meta);
+            assert_eq!(rpc.logs().len(), logs.len());
+            for (index, log) in rpc.logs().iter().enumerate() {
+                assert_eq!(log.inner, logs[index]);
+                assert_eq!(log.log_index, Some(7 + index as u64));
+                assert_eq!(log.transaction_index, Some(meta.index));
+                assert_eq!(log.transaction_hash, Some(meta.tx_hash));
+                assert_eq!(log.block_hash, Some(meta.block_hash));
+                assert_eq!(log.block_number, Some(meta.block_number));
+                assert_eq!(log.block_timestamp, Some(meta.timestamp));
+                assert!(!log.removed);
+            }
+            assert_eq!(rpc.map_logs(|log| log.inner), expected);
+        }
     }
 }

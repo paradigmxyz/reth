@@ -87,7 +87,7 @@ where
                 .iter()
                 .map(|r| Bytes::from(r.with_bloom_ref().encoded_2718()))
                 .collect::<Vec<_>>();
-            tracing::debug!(%error, ?receipts, "receipts verification failed");
+            tracing::info!(%error, ?receipts, "Receipts verification failed; encoded receipts are shown for comparison");
             return Err(error)
         }
     }
@@ -160,6 +160,12 @@ pub fn compare_receipts_root_and_logs_bloom(
     expected_logs_bloom: Bloom,
 ) -> Result<(), ConsensusError> {
     if calculated_receipts_root != expected_receipts_root {
+        tracing::info!(
+            target: "reth::consensus",
+            %calculated_receipts_root,
+            %expected_receipts_root,
+            "Receipt root mismatch"
+        );
         return Err(ConsensusError::BodyReceiptRootDiff(
             GotExpected { got: calculated_receipts_root, expected: expected_receipts_root }.into(),
         ))

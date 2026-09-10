@@ -3,7 +3,7 @@
 use super::{Call, LoadPendingBlock};
 use crate::{AsEthApiError, FromEthApiError, IntoEthApiError};
 use alloy_evm::overrides::{apply_block_overrides, apply_state_overrides};
-use alloy_network::TransactionBuilder;
+use alloy_network::{NetworkTransactionBuilder, TransactionBuilder};
 use alloy_primitives::{TxKind, U256};
 use alloy_rpc_types_eth::{state::EvmOverrides, BlockId};
 use futures::Future;
@@ -71,7 +71,10 @@ pub trait EstimateCall: Call {
         evm_env.cfg_env.disable_fee_charge = true;
 
         // set nonce to None so that the correct nonce is chosen by the EVM
-        request.as_mut().take_nonce();
+        let is_frame = Into::<u8>::into(request.as_ref().output_tx_type()) == 0x06;
+        if !is_frame {
+            request.as_mut().take_nonce();
+        }
 
         // Keep a copy of gas related request values
         let tx_request_gas_limit = request.as_ref().gas_limit();
@@ -117,7 +120,8 @@ pub trait EstimateCall: Call {
         let mut tx_env = self.create_txn_env(&evm_env, request, &mut db)?;
 
         // Check whether this is a basic transfer: empty input to an account without bytecode.
-        let is_basic_transfer = if tx_env.input().is_empty() &&
+        let is_basic_transfer = if !is_frame &&
+            tx_env.input().is_empty() &&
             let TxKind::Call(to) = tx_env.kind()
         {
             // Fetch the account through `Database::basic` so the state overrides applied above
@@ -134,14 +138,20 @@ pub trait EstimateCall: Call {
         // Check funds of the sender (only useful to check if transaction gas price is more than 0).
         //
         // The caller allowance is check by doing `(account.balance - tx.value) / tx.gas_price`
-        if tx_env.gas_price() > 0 {
+        if !is_frame && tx_env.gas_price() > 0 {
             // cap the highest gas limit by max gas caller can afford with given gas price
             highest_gas_limit =
                 highest_gas_limit.min(self.caller_gas_allowance(&mut db, &evm_env, &tx_env)?);
         }
 
         // If the provided gas limit is less than computed cap, use that
-        tx_env.set_gas_limit(tx_env.gas_limit().min(highest_gas_limit));
+        if !is_frame {
+            tx_env.set_gas_limit(tx_env.gas_limit().min(highest_gas_limit));
+        } else if self.call_gas_limit() != 0 && tx_env.gas_limit() > self.call_gas_limit() {
+            return Err(Self::Error::from_eth_err(EthApiError::InvalidParams(
+                "frame transaction exceeds the RPC gas cap".into(),
+            )));
+        }
 
         // Create EVM instance once and reuse it throughout the entire estimation process
         let mut evm = self.evm_config().evm_with_env(&mut db, evm_env);
@@ -171,7 +181,8 @@ pub trait EstimateCall: Call {
             // retry the transaction with the block's gas limit to determine if
             // the failure was due to insufficient gas.
             Err(err)
-                if err.is_gas_too_high() &&
+                if !is_frame &&
+                    err.is_gas_too_high() &&
                     (tx_request_gas_limit.is_some() || tx_request_gas_price.is_some()) =>
             {
                 return Self::map_out_of_gas_err(&mut evm, tx_env, max_gas_limit);
@@ -190,8 +201,15 @@ pub trait EstimateCall: Call {
             ethres => ethres?,
         };
 
+        // A frame envelope has exactly one canonical outer limit. Validate that envelope once;
+        // scalar binary search would invalidate its declared frame limits and authorizations.
+        if is_frame && matches!(&res.result, ExecutionResult::FrameTransaction { .. }) {
+            return Ok(U256::from(tx_env.gas_limit()));
+        }
+
         let gas_refund = match res.result {
-            ExecutionResult::Success { gas, .. } => gas.final_refunded(),
+            ExecutionResult::Success { gas, .. } |
+            ExecutionResult::FrameTransaction { gas, .. } => gas.final_refunded(),
             ExecutionResult::Halt { reason, .. } => {
                 // here we don't check for invalid opcode because already executed with highest gas
                 // limit
@@ -200,7 +218,9 @@ pub trait EstimateCall: Call {
             ExecutionResult::Revert { output, .. } => {
                 // if price or limit was included in the request then we can execute the request
                 // again with the block's gas limit to check if revert is gas related or not
-                return if tx_request_gas_limit.is_some() || tx_request_gas_price.is_some() {
+                return if !is_frame &&
+                    (tx_request_gas_limit.is_some() || tx_request_gas_price.is_some())
+                {
                     Self::map_out_of_gas_err(&mut evm, tx_env, max_gas_limit)
                 } else {
                     // the transaction did revert
@@ -341,7 +361,7 @@ pub trait EstimateCall: Call {
         let retry_res = evm.transact(tx_env).map_err(Self::Error::from_evm_err)?;
 
         match retry_res.result {
-            ExecutionResult::Success { .. } => {
+            ExecutionResult::Success { .. } | ExecutionResult::FrameTransaction { .. } => {
                 // Transaction succeeded by manually increasing the gas limit,
                 // which means the caller lacks funds to pay for the tx
                 Err(RpcInvalidTransactionError::BasicOutOfGas(req_gas_limit).into_eth_err())
@@ -370,7 +390,7 @@ pub fn update_estimated_gas_range<Halt>(
     lowest_gas_limit: &mut u64,
 ) -> Result<(), EthApiError> {
     match result {
-        ExecutionResult::Success { .. } => {
+        ExecutionResult::Success { .. } | ExecutionResult::FrameTransaction { .. } => {
             // Cap the highest gas limit with the succeeding gas limit.
             *highest_gas_limit = tx_gas_limit;
         }

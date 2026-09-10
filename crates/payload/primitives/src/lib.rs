@@ -190,25 +190,10 @@ pub fn validate_payload_timestamp(
 
     let is_bogota = chain_spec.is_bogota_active_at_timestamp(timestamp);
 
-    // Staggered endpoint upgrades must reject Bogota payloads until the Bogota-specific method
-    // version is used.
-    //
-    // From the Engine API spec:
-    // <https://github.com/ethereum/execution-apis/blob/main/src/engine/bogota.md#update-the-methods-of-previous-forks>
-    //
-    // For `engine_newPayloadV5` and `engine_forkchoiceUpdatedV4`:
-    //
-    // 1. Client software MUST return -38005: Unsupported fork error if the timestamp of payload is
-    //    greater than or equal to the Bogota activation timestamp.
-    if is_bogota &&
-        matches!(
-            (version, kind),
-            (EngineApiMessageVersion::V4, MessageValidationKind::PayloadAttributes) |
-                (EngineApiMessageVersion::V5, MessageValidationKind::Payload)
-        )
-    {
-        return Err(EngineObjectValidationError::UnsupportedFork)
-    }
+    // The frames devnet currently activates EIP-8141 under Bogota while
+    // driving the Amsterdam engine methods (`newPayloadV5` and
+    // `forkchoiceUpdatedV4`). Keep those method versions accepted
+    // temporarily so the execution fixtures can reach frame validation.
 
     if !is_bogota &&
         matches!(
@@ -841,23 +826,23 @@ mod tests {
     fn validate_bogota_staggered_version_restrictions() {
         let chain_spec = ChainSpecBuilder::mainnet().bogota_activated().build();
 
-        // `engine_newPayloadV5` must reject Bogota payloads
+        // The frames devnet temporarily uses the Amsterdam method versions
+        // while Bogota is active.
         let res = validate_payload_timestamp(
             &chain_spec,
             EngineApiMessageVersion::V5,
             0,
             MessageValidationKind::Payload,
         );
-        assert_matches!(res, Err(EngineObjectValidationError::UnsupportedFork));
+        assert_matches!(res, Ok(()));
 
-        // `engine_forkchoiceUpdatedV4` must reject Bogota payload attributes
         let res = validate_payload_timestamp(
             &chain_spec,
             EngineApiMessageVersion::V4,
             0,
             MessageValidationKind::PayloadAttributes,
         );
-        assert_matches!(res, Err(EngineObjectValidationError::UnsupportedFork));
+        assert_matches!(res, Ok(()));
 
         // the Bogota-specific methods are accepted
         let res = validate_payload_timestamp(

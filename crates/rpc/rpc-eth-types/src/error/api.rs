@@ -129,6 +129,7 @@ pub trait FromEvmError<Evm: ConfigureEvm>:
             ExecutionResult::Halt { reason, gas, .. } => {
                 Err(Self::from_evm_halt(reason, gas.tx_gas_used()))
             }
+            ExecutionResult::FrameTransaction { .. } => Ok(Bytes::new()),
         }
     }
 }

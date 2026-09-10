@@ -726,7 +726,9 @@ where
         let blob_store =
             reth_node_builder::components::create_blob_store_with_cache(ctx, blob_cache_size)?;
 
-        let validator =
+        let frame_evm = evm_config.clone();
+        let frame_provider = ctx.provider().clone();
+        let mut validator =
             TransactionValidationTaskExecutor::eth_builder(ctx.provider().clone(), evm_config)
                 .set_eip4844(!blobs_disabled)
                 .kzg_settings(ctx.kzg_settings()?)
@@ -735,8 +737,15 @@ where
                 .set_tx_fee_cap(ctx.config().rpc.rpc_tx_fee_cap)
                 .with_max_tx_gas_limit(ctx.config().txpool.max_tx_gas_limit)
                 .with_minimum_priority_fee(ctx.config().txpool.minimum_priority_fee)
-                .with_additional_tasks(ctx.config().txpool.additional_validation_tasks)
-                .build_with_tasks(ctx.task_executor().clone(), blob_store.clone());
+                .build(blob_store.clone());
+        validator.set_frame_validation(Arc::new(move |tx| {
+            crate::frame_validation::validate::<Node, Evm>(&frame_provider, &frame_evm, tx)
+        }));
+        let validator = TransactionValidationTaskExecutor::spawn(
+            validator,
+            ctx.task_executor(),
+            ctx.config().txpool.additional_validation_tasks,
+        );
 
         if validator.validator().eip4844() || self.init_kzg_settings {
             // initializing the KZG settings can be expensive, this should be done upfront so that

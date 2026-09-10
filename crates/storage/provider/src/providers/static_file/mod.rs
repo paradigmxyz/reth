@@ -364,7 +364,7 @@ mod tests {
                         }
                         StaticFileSegment::Receipts => {
                             // Used as ID for validation
-                            receipt.cumulative_gas_used = *next_tx_num;
+                            receipt.set_cumulative_gas_used(*next_tx_num);
                             writer.append_receipt(*next_tx_num, &receipt).unwrap();
                         }
                         StaticFileSegment::TransactionSenders => {
@@ -508,7 +508,7 @@ mod tests {
                     )?,
                     StaticFileSegment::Receipts => assert_eyre(
                         expected_tx_tip,
-                        sf_rw.receipt(id)?.map(|r| r.cumulative_gas_used),
+                        sf_rw.receipt(id)?.map(|r| r.cumulative_gas_used()),
                         "receipt mismatch",
                     )?,
                     StaticFileSegment::TransactionSenders => assert_eyre(

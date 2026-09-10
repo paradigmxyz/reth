@@ -83,7 +83,9 @@ use crate::{
         AllPoolTransactions, BestTransactionsAttributes, BlockInfo, GetPooledTransactionLimit,
         NewBlobSidecar, PoolSize, PoolTransaction, PropagatedTransactions, TransactionOrigin,
     },
-    validate::{TransactionValidationOutcome, ValidPoolTransaction, ValidTransaction},
+    validate::{
+        FrameDependencies, TransactionValidationOutcome, ValidPoolTransaction, ValidTransaction,
+    },
     CanonicalStateUpdate, EthPoolTransaction, PoolConfig, TransactionOrdering,
     TransactionValidator,
 };
@@ -96,7 +98,7 @@ use parking_lot::{Mutex, RwLock, RwLockReadGuard, RwLockWriteGuard};
 use reth_eth_wire_types::HandleMempoolData;
 use reth_execution_types::ChangedAccount;
 
-use alloy_eips::{eip7594::BlobTransactionSidecarVariant, Typed2718};
+use alloy_eips::eip7594::BlobTransactionSidecarVariant;
 use reth_primitives_traits::Recovered;
 use rustc_hash::FxHashMap;
 use std::{
@@ -110,9 +112,11 @@ use std::{
 use tokio::sync::mpsc;
 use tracing::{debug, trace, warn};
 mod events;
+mod frame_revalidation;
 pub use best::{BestTransactionFilter, BestTransactionsWithPrioritizedSenders};
 pub use blob::{blob_tx_priority, fee_delta, BlobOrd, BlobTransactions};
 pub use events::{FullTransactionEvent, NewTransactionEvent, TransactionEvent};
+use frame_revalidation::FrameRevalidationQueue;
 pub use listener::{AllTransactionsEvents, TransactionEvents, TransactionListenerKind};
 pub use parked::{BasefeeOrd, ParkedOrd, ParkedPool, QueuedOrd};
 pub use pending::PendingPool;
@@ -149,6 +153,8 @@ where
     blob_store: S,
     /// The internal pool that manages all transactions.
     pool: RwLock<TxPool<T>>,
+    /// Withdrawn frames awaiting revalidation; always lock after `pool` when holding both.
+    frame_revalidation: Mutex<FrameRevalidationQueue<T::Transaction>>,
     /// Pool settings.
     config: PoolConfig,
     /// Manages listeners for transaction state change events.
@@ -181,6 +187,7 @@ where
             event_listener: Default::default(),
             has_event_listeners: AtomicBool::new(false),
             pool: RwLock::new(TxPool::new(ordering, config.clone())),
+            frame_revalidation: Default::default(),
             pending_transaction_listener: Default::default(),
             transaction_listener: Default::default(),
             blob_transaction_sidecar_listener: Default::default(),
@@ -208,8 +215,19 @@ where
     ///
     /// This will also notify subscribers about any transactions that were promoted to the pending
     /// pool due to fee changes.
+    /// A head change withdraws public frames until [`Self::revalidate_frame_transactions`] runs.
     pub fn set_block_info(&self, info: BlockInfo) {
-        let outcome = self.pool.write().set_block_info(info);
+        let outcome = {
+            let mut pool = self.pool.write();
+            if pool.block_info().last_seen_block_hash != info.last_seen_block_hash {
+                let hashes = pool.frame_transaction_hashes();
+                let mut queue = self.frame_revalidation.lock();
+                for tx in pool.remove_transactions(hashes) {
+                    queue.insert(tx);
+                }
+            }
+            pool.set_block_info(info)
+        };
 
         // Notify subscribers about promoted transactions due to fee changes
         self.notify_on_transaction_updates(outcome.promoted, outcome.discarded);
@@ -484,9 +502,9 @@ where
     where
         <V as TransactionValidator>::Transaction: EthPoolTransaction,
     {
-        if transaction.is_eip4844() {
+        if transaction.is_blob_transaction() {
             let sidecar = self.blob_store.get(*transaction.hash()).ok()??;
-            transaction.transaction.clone().try_into_pooled_eip4844(sidecar)
+            transaction.transaction.clone().try_into_pooled_blob(sidecar)
         } else {
             transaction
                 .transaction
@@ -530,23 +548,52 @@ where
 
     /// Updates the entire pool after a new block was executed.
     pub fn on_canonical_state_change(&self, update: CanonicalStateUpdate<'_, V::Block>) {
+        self.on_canonical_state_change_with_touched_accounts(update, &[]);
+    }
+
+    /// Withdraws affected frames atomically with advancing the pool's canonical head.
+    pub fn on_canonical_state_change_with_touched_accounts(
+        &self,
+        update: CanonicalStateUpdate<'_, V::Block>,
+        touched: &[Address],
+    ) {
         trace!(target: "txpool", ?update, "updating pool on canonical state change");
 
         let block_info = update.block_info();
+        let timestamp = update.timestamp();
         let CanonicalStateUpdate {
             new_tip, changed_accounts, mined_transactions, update_kind, ..
         } = update;
         self.validator.on_new_head_block(new_tip);
 
+        let mut dependencies = FrameDependencies::default();
+        dependencies.accounts.extend_from_slice(touched);
+        dependencies.accounts.extend(changed_accounts.iter().map(|account| account.address));
         let changed_senders = self.changed_senders(changed_accounts.into_iter());
 
         // update the pool
-        let outcome = self.pool.write().on_canonical_state_change(
-            block_info,
-            mined_transactions,
-            changed_senders,
-            update_kind,
-        );
+        let outcome = {
+            let mut pool = self.pool.write();
+            let affected = pool.affected_frame_transactions(&dependencies, timestamp);
+            let mut queue = self.frame_revalidation.lock();
+            for hash in &mined_transactions {
+                queue.cancel(hash);
+            }
+            if !affected.is_empty() {
+                let mined: HashSet<_> = mined_transactions.iter().copied().collect();
+                for tx in pool.remove_transactions(affected) {
+                    if !mined.contains(tx.hash()) {
+                        queue.insert(tx);
+                    }
+                }
+            }
+            pool.on_canonical_state_change(
+                block_info,
+                mined_transactions,
+                changed_senders,
+                update_kind,
+            )
+        };
 
         // This will discard outdated transactions based on the account's nonce
         self.delete_discarded_blobs(outcome.discarded.iter());
@@ -555,15 +602,64 @@ where
         self.notify_on_new_state(outcome);
     }
 
+    /// Revalidates withdrawn transactions without restoring cancelled attempts.
+    pub async fn revalidate_frame_transactions(&self) {
+        let candidates = self.frame_revalidation.lock().snapshot();
+        for candidate in candidates {
+            let validation = self
+                .validator
+                .validate_transaction(candidate.origin, candidate.transaction.clone())
+                .await;
+            let (meta, discarded) = {
+                let mut pool = self.pool.write();
+                // Explicit removal or a newer sender transaction cancels this exact attempt.
+                if !self.frame_revalidation.lock().take_current(&candidate) {
+                    continue
+                }
+                let (_, meta) = self.add_transaction(&mut pool, candidate.origin, validation);
+                let discarded = if meta.is_some() {
+                    let discarded = pool.discard_worst();
+                    pool.update_size_metrics();
+                    discarded
+                } else {
+                    // Withdrawn transactions still own their blob sidecars. Failed re-admission
+                    // is a real eviction and must release those resources and notify listeners.
+                    vec![Arc::clone(&candidate)]
+                };
+                (meta, discarded)
+            };
+            if let Some(meta) = meta &&
+                !discarded.iter().any(|tx| tx.hash() == meta.added.hash())
+            {
+                self.on_added_transaction(meta);
+            }
+            if !discarded.is_empty() {
+                self.delete_discarded_blobs(discarded.iter());
+                self.with_event_listener(|listener| listener.discarded_many(&discarded));
+            }
+        }
+    }
+
     /// Performs account updates on the pool.
     ///
     /// This will either promote or discard transactions based on the new account state.
     ///
     /// This should be invoked when the pool drifted and accounts are updated manually
     pub fn update_accounts(&self, accounts: Vec<ChangedAccount>) {
+        let dependencies = FrameDependencies {
+            accounts: accounts.iter().map(|account| account.address).collect(),
+            ..Default::default()
+        };
         let changed_senders = self.changed_senders(accounts.into_iter());
-        let UpdateOutcome { promoted, discarded } =
-            self.pool.write().update_accounts(changed_senders);
+        let UpdateOutcome { promoted, discarded } = {
+            let mut pool = self.pool.write();
+            let affected = pool.affected_frame_transactions(&dependencies, 0);
+            let mut queue = self.frame_revalidation.lock();
+            for tx in pool.remove_transactions(affected) {
+                queue.insert(tx);
+            }
+            pool.update_accounts(changed_senders)
+        };
 
         self.notify_on_transaction_updates(promoted, discarded);
     }
@@ -598,8 +694,8 @@ where
                     ValidTransaction::Valid(tx) => (tx, None),
                     ValidTransaction::ValidWithSidecar { transaction, sidecar } => {
                         debug_assert!(
-                            transaction.is_eip4844(),
-                            "validator returned sidecar for non EIP-4844 transaction"
+                            transaction.is_blob_transaction(),
+                            "validator returned sidecar for a transaction without blobs"
                         );
                         (transaction, Some(sidecar))
                     }
@@ -614,14 +710,16 @@ where
                     authority_ids: authorities.map(|auths| self.get_sender_ids(auths)),
                 };
 
+                let tx_sender = tx.sender();
                 let added = match pool.add_transaction(tx, balance, state_nonce, bytecode_hash) {
                     Ok(added) => added,
                     Err(err) => return (Err(err), None),
                 };
                 let hash = *added.hash();
+                let cancelled_frame = self.frame_revalidation.lock().cancel_sender(tx_sender);
                 let state = added.transaction_state();
 
-                let meta = AddedTransactionMeta { added, blob_sidecar };
+                let meta = AddedTransactionMeta { added, blob_sidecar, cancelled_frame };
 
                 (Ok(AddedTransactionOutcome { hash, state }), Some(meta))
             }
@@ -743,6 +841,12 @@ where
     /// Performs blob storage operations and sends all notifications. This should be called
     /// after the pool write lock has been released to avoid blocking pool operations.
     fn on_added_transaction(&self, meta: AddedTransactionMeta<T::Transaction>) {
+        if let Some(cancelled) = meta.cancelled_frame &&
+            cancelled.hash() != meta.added.hash()
+        {
+            self.delete_discarded_blobs(std::iter::once(&cancelled));
+            self.with_event_listener(|listener| listener.replaced(cancelled, *meta.added.hash()));
+        }
         // Handle blob sidecar storage and notifications for EIP-4844 transactions
         if let Some(sidecar) = meta.blob_sidecar {
             let hash = *meta.added.hash();
@@ -1085,7 +1189,16 @@ where
         if hashes.is_empty() {
             return Vec::new()
         }
-        let removed = self.pool.write().remove_transactions(hashes);
+        let removed = {
+            let mut pool = self.pool.write();
+            let mut queue = self.frame_revalidation.lock();
+            let mut removed = Vec::new();
+            for hash in &hashes {
+                removed.extend(queue.remove(hash));
+            }
+            removed.extend(pool.remove_transactions(hashes));
+            removed
+        };
 
         self.with_event_listener(|listener| listener.discarded_many(&removed));
 
@@ -1101,7 +1214,23 @@ where
         if hashes.is_empty() {
             return Vec::new()
         }
-        let removed = self.pool.write().remove_transactions_and_descendants(hashes);
+        let removed = {
+            let mut pool = self.pool.write();
+            let mut queue = self.frame_revalidation.lock();
+            let mut cancelled = Vec::new();
+            for hash in &hashes {
+                if let Some(tx) = queue.remove(hash) {
+                    pool.remove_descendants(tx.id(), &mut cancelled);
+                    cancelled.push(tx);
+                }
+            }
+            let mut removed = pool.remove_transactions_and_descendants(hashes);
+            for tx in &removed {
+                cancelled.extend(queue.cancel_sender(tx.sender()));
+            }
+            removed.extend(cancelled);
+            removed
+        };
 
         self.with_event_listener(|listener| {
             for tx in &removed {
@@ -1118,7 +1247,12 @@ where
         sender: Address,
     ) -> Vec<Arc<ValidPoolTransaction<T::Transaction>>> {
         let Some(sender_id) = self.sender_id(&sender) else { return Vec::new() };
-        let removed = self.pool.write().remove_transactions_by_sender(sender_id);
+        let removed = {
+            let mut pool = self.pool.write();
+            let mut removed = pool.remove_transactions_by_sender(sender_id);
+            removed.extend(self.frame_revalidation.lock().cancel_sender(sender));
+            removed
+        };
 
         self.with_event_listener(|listener| listener.discarded_many(&removed));
 
@@ -1137,7 +1271,12 @@ where
             return Vec::new()
         }
 
-        self.pool.write().prune_transactions(hashes)
+        let mut pool = self.pool.write();
+        let mut queue = self.frame_revalidation.lock();
+        for hash in &hashes {
+            queue.cancel(hash);
+        }
+        pool.prune_transactions(hashes)
     }
 
     /// Retains only transactions that are not present in the pool.
@@ -1354,7 +1493,7 @@ where
     ) {
         let blob_txs = transactions
             .into_iter()
-            .filter(|tx| tx.transaction.is_eip4844())
+            .filter(|tx| tx.transaction.is_blob_transaction())
             .map(|tx| *tx.hash())
             .collect();
         self.delete_blobs(blob_txs);
@@ -1377,6 +1516,8 @@ struct AddedTransactionMeta<T: PoolTransaction> {
     added: AddedTransaction<T>,
     /// Optional blob sidecar for EIP-4844 transactions
     blob_sidecar: Option<PooledBlobSidecar>,
+    /// An in-flight revalidation superseded by this newly admitted sender transaction.
+    cancelled_frame: Option<Arc<ValidPoolTransaction<T>>>,
 }
 
 /// Tracks an added transaction and all graph changes caused by adding it.
@@ -1503,7 +1644,9 @@ impl<T: PoolTransaction> AddedTransaction<T> {
 
     /// Returns the hash of the replaced transaction if it is a blob transaction.
     pub(crate) fn replaced_blob_transaction(&self) -> Option<B256> {
-        self.replaced().filter(|tx| tx.transaction.is_eip4844()).map(|tx| *tx.transaction.hash())
+        self.replaced()
+            .filter(|tx| tx.transaction.is_blob_transaction())
+            .map(|tx| *tx.transaction.hash())
     }
 
     /// Returns the hash of the transaction

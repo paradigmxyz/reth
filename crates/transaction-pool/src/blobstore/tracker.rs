@@ -1,6 +1,6 @@
 //! Support for maintaining the blob pool.
 
-use alloy_consensus::{transaction::TxHashRef, Typed2718};
+use alloy_consensus::{transaction::TxHashRef, Transaction, Typed2718};
 use alloy_primitives::{BlockNumber, B256};
 use reth_execution_types::ChainBlocks;
 use reth_primitives_traits::{Block, BlockBody, SignedTransaction};
@@ -48,7 +48,7 @@ impl BlobStoreCanonTracker {
                 .body()
                 .transactions()
                 .iter()
-                .filter(|tx| tx.is_eip4844())
+                .filter(|tx| tx.is_eip4844() || (*tx).blob_count().is_some_and(|count| count > 0))
                 .map(|tx| *tx.tx_hash());
             (*num, iter)
         });
@@ -89,7 +89,7 @@ pub enum BlobStoreUpdates {
 mod tests {
     use super::*;
     use alloy_consensus::{Header, Signed};
-    use alloy_primitives::Signature;
+    use alloy_primitives::{Sealable, Signature};
     use reth_ethereum_primitives::Transaction;
     use reth_execution_types::Chain;
     use reth_primitives_traits::{RecoveredBlock, SealedBlock, SealedHeader};
@@ -111,6 +111,36 @@ mod tests {
             tracker.on_finalized_block(3),
             BlobStoreUpdates::Finalized(block2.into_iter().chain(block3).collect::<Vec<_>>())
         );
+    }
+
+    #[test]
+    fn tracks_only_blob_bearing_frame_transactions() {
+        use alloy_consensus::TxEip8141;
+        use reth_ethereum_primitives::TransactionSigned;
+
+        let with_blobs = TransactionSigned::Eip8141(
+            TxEip8141 { blob_versioned_hashes: vec![B256::repeat_byte(1)], ..Default::default() }
+                .seal_slow(),
+        );
+        let hash = *with_blobs.tx_hash();
+        let without_blobs = TransactionSigned::Eip8141(TxEip8141::default().seal_slow());
+        let block = RecoveredBlock::new_sealed(
+            SealedBlock::from_sealed_parts(
+                SealedHeader::new(Header { number: 10, ..Default::default() }, B256::random()),
+                alloy_consensus::BlockBody {
+                    transactions: vec![with_blobs, without_blobs],
+                    ..Default::default()
+                },
+            ),
+            Default::default(),
+        );
+        let chain: Chain = Chain::new(vec![block], Default::default(), BTreeMap::new());
+        let blocks = chain.into_inner().0;
+        let mut tracker = BlobStoreCanonTracker::default();
+        tracker.add_new_chain_blocks(&blocks);
+        assert_eq!(tracker.blob_txs_in_blocks.get(&10).unwrap(), &vec![hash]);
+        assert_eq!(tracker.on_finalized_block(10), BlobStoreUpdates::Finalized(vec![hash]));
+        assert_eq!(tracker.on_finalized_block(10), BlobStoreUpdates::None);
     }
 
     #[test]

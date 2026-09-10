@@ -9,6 +9,8 @@
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 #![cfg_attr(not(feature = "std"), no_std)]
 
+extern crate alloc;
+
 // Feature-only dep: activated by `reth-codec` feature for downstream consumers.
 #[cfg(feature = "reth-codec")]
 use reth_codecs as _;
@@ -16,19 +18,17 @@ use reth_codecs as _;
 mod receipt;
 pub use receipt::*;
 
+mod pooled;
+pub use pooled::*;
+
+use alloy_consensus::TxEip4844;
 pub use alloy_consensus::{transaction::PooledTransaction, TxType};
-use alloy_consensus::{TxEip4844, TxEip4844WithSidecar};
-use alloy_eips::eip7594::BlobTransactionSidecarVariant;
 
 /// Typed Transaction type without a signature
 pub type Transaction = alloy_consensus::EthereumTypedTransaction<TxEip4844>;
 
 /// Signed transaction.
 pub type TransactionSigned = alloy_consensus::EthereumTxEnvelope<TxEip4844>;
-
-/// A type alias for [`PooledTransaction`] that's also generic over blob sidecar.
-pub type PooledTransactionVariant =
-    alloy_consensus::EthereumTxEnvelope<TxEip4844WithSidecar<BlobTransactionSidecarVariant>>;
 
 /// Type alias for the ethereum block
 pub type Block = alloy_consensus::Block<TransactionSigned>;

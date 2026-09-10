@@ -16,7 +16,7 @@ pub use execution_witness::ExecutionWitnessMode;
 
 /// Lazy initialization wrapper for trie data.
 mod trie_data;
-pub use trie_data::{ComputedTrieData, LazyTrieData, SortedTrieData};
+pub use trie_data::{ComputedTrieData, LazyTrieData, LazyTrieDataProducer, SortedTrieData};
 
 /// In-memory hashed state.
 mod hashed_state;

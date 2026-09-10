@@ -3,8 +3,8 @@
 use crate::{
     config::{LocalTransactionConfig, TXPOOL_MAX_ACCOUNT_SLOTS_PER_SENDER},
     error::{
-        Eip4844PoolTransactionError, Eip7702PoolTransactionError, InvalidPoolTransactionError,
-        PoolError, PoolErrorKind,
+        Eip4844PoolTransactionError, Eip7702PoolTransactionError, Eip8141PoolTransactionError,
+        InvalidPoolTransactionError, PoolError, PoolErrorKind,
     },
     identifier::{SenderId, TransactionId},
     metrics::{AllTransactionsMetrics, TxPoolMetrics},
@@ -18,6 +18,7 @@ use crate::{
         AddedPendingTransaction, AddedTransaction, OnNewCanonicalStateOutcome,
     },
     traits::{BestTransactionsAttributes, BlockInfo, PoolSize},
+    validate::{FrameDependencies, FrameReservations},
     PoolConfig, PoolResult, PoolTransaction, PoolUpdateKind, PriceBumpConfig, TransactionOrdering,
     ValidPoolTransaction, U256,
 };
@@ -29,11 +30,9 @@ use alloy_eips::{
     eip1559::{ETHEREUM_BLOCK_GAS_LIMIT_30M, MIN_PROTOCOL_BASE_FEE},
     eip4844::BLOB_TX_MIN_BLOB_GASPRICE,
 };
-#[cfg(test)]
-use alloy_primitives::Address;
 use alloy_primitives::{
     map::{AddressSet, B256Map, B256Set},
-    TxHash, B256,
+    Address, TxHash, B256,
 };
 use rustc_hash::FxHashMap;
 use smallvec::SmallVec;
@@ -46,7 +45,7 @@ use std::{
     ops::Bound::{Excluded, Unbounded},
     sync::Arc,
 };
-use tracing::{trace, warn};
+use tracing::{info, trace, warn};
 
 #[cfg_attr(doc, aquamarine::aquamarine)]
 // TODO: Inlined diagram due to a bug in aquamarine library, should become an include when it's
@@ -187,6 +186,24 @@ impl<T: TransactionOrdering> TxPool<T> {
     /// Returns access to the [`AllTransactions`] container.
     pub(crate) const fn all(&self) -> &AllTransactions<T::Transaction> {
         &self.all_transactions
+    }
+
+    /// Returns publicly validated frame transactions affected by the supplied state changes.
+    pub(crate) fn affected_frame_transactions(
+        &self,
+        dependencies: &FrameDependencies,
+        timestamp: u64,
+    ) -> Vec<TxHash> {
+        self.all_transactions
+            .frame_reservations
+            .affected(dependencies, timestamp)
+            .into_iter()
+            .collect()
+    }
+
+    /// Returns every transaction currently holding a public frame reservation.
+    pub(crate) fn frame_transaction_hashes(&self) -> Vec<TxHash> {
+        self.all_transactions.frame_reservations.hashes().collect()
     }
 
     /// Returns all senders in the pool
@@ -810,6 +827,21 @@ impl<T: TransactionOrdering> TxPool<T> {
                         *transaction.hash(),
                         PoolErrorKind::ReplacementUnderpriced,
                     )),
+                    InsertErr::FramePolicy { transaction, reason } => {
+                        info!(
+                            target: "reth::eip8141::pool",
+                            tx_hash = ?transaction.hash(),
+                            sender = ?transaction.sender(),
+                            reason,
+                            "rejected EIP-8141 transaction during pool reservation"
+                        );
+                        Err(PoolError::new(
+                            *transaction.hash(),
+                            PoolErrorKind::InvalidTransaction(
+                                Eip8141PoolTransactionError::PublicMempoolPolicy(reason).into(),
+                            ),
+                        ))
+                    }
                     InsertErr::FeeCapBelowMinimumProtocolFeeCap { transaction, fee_cap } => {
                         Err(PoolError::new(
                             *transaction.hash(),
@@ -1153,7 +1185,7 @@ impl<T: TransactionOrdering> TxPool<T> {
     /// Removes _only_ the descendants of the given transaction from the __entire__ pool.
     ///
     /// All removed transactions are added to the `removed` vec.
-    fn remove_descendants(
+    pub(super) fn remove_descendants(
         &mut self,
         tx: &TransactionId,
         removed: &mut Vec<Arc<ValidPoolTransaction<T::Transaction>>>,
@@ -1226,10 +1258,25 @@ impl<T: TransactionOrdering> TxPool<T> {
 
         // Helper macro that discards the worst transactions for the pools
         macro_rules! discard_worst {
-            ($this:ident, $removed:ident, [$($limit:ident => ($pool:ident, $metric:ident)),* $(,)*]) => {
+            ($this:ident, $removed:ident, [$($limit:ident => ($pool:ident, $kind:ident, $metric:ident)),* $(,)*]) => {
                 $ (
                 while $this.$pool.exceeds(&$this.config.$limit)
                     {
+                        // Invalid frames are already withdrawn on head updates. Under pressure,
+                        // evict public frames with the nearest deadline before fee ordering.
+                        // Preserve the pending pool's existing preference for local transactions.
+                        let expiring = $this.all_transactions.frame_reservations.expiring_hashes()
+                            .find(|hash| $this.all_transactions.by_hash.get(hash).is_some_and(|tx| {
+                                $this.all_transactions.txs.get(tx.id()).is_some_and(|entry| {
+                                    entry.subpool == SubPool::$kind &&
+                                        (SubPool::$kind != SubPool::Pending || !tx.is_local())
+                                })
+                            }));
+                        if let Some(hash) = expiring {
+                            $removed.extend($this.remove_transactions_and_descendants(vec![hash]));
+                            $this.metrics.$metric.increment(1);
+                            continue
+                        }
                         trace!(
                             target: "txpool",
                             "discarding transactions from {}, limit: {:?}, curr size: {}, curr len: {}",
@@ -1273,10 +1320,10 @@ impl<T: TransactionOrdering> TxPool<T> {
 
         discard_worst!(
             self, removed, [
-                pending_limit => (pending_pool, pending_transactions_evicted),
-                basefee_limit => (basefee_pool, basefee_transactions_evicted),
-                blob_limit    => (blob_pool, blob_transactions_evicted),
-                queued_limit  => (queued_pool, queued_transactions_evicted),
+                pending_limit => (pending_pool, Pending, pending_transactions_evicted),
+                basefee_limit => (basefee_pool, BaseFee, basefee_transactions_evicted),
+                blob_limit    => (blob_pool, Blob, blob_transactions_evicted),
+                queued_limit  => (queued_pool, Queued, queued_transactions_evicted),
             ]
         );
 
@@ -1385,6 +1432,10 @@ pub(crate) struct AllTransactions<T: PoolTransaction> {
     sender_info: FxHashMap<SenderId, SenderInfo>,
     /// Tracks the number of transactions by sender that are currently in the pool.
     tx_counter: FxHashMap<SenderId, usize>,
+    /// Sender IDs currently represented in the pool, indexed by address for payer accounting.
+    sender_ids: FxHashMap<Address, SenderId>,
+    /// Indexed state reservations for publicly validated frame transactions.
+    frame_reservations: FrameReservations,
     /// The current block number the pool keeps track of.
     last_seen_block_number: u64,
     /// The current block hash the pool keeps track of.
@@ -1452,19 +1503,23 @@ impl<T: PoolTransaction> AllTransactions<T> {
     }
 
     /// Increments the transaction counter for the sender
-    pub(crate) fn tx_inc(&mut self, sender: SenderId) {
+    pub(crate) fn tx_inc(&mut self, sender: SenderId, address: Address) {
         let count = self.tx_counter.entry(sender).or_default();
+        if *count == 0 {
+            self.sender_ids.insert(address, sender);
+        }
         *count += 1;
         self.metrics.all_transactions_by_all_senders.increment(1.0);
     }
 
     /// Decrements the transaction counter for the sender
-    pub(crate) fn tx_decr(&mut self, sender: SenderId) {
+    pub(crate) fn tx_decr(&mut self, sender: SenderId, address: Address) {
         if let hash_map::Entry::Occupied(mut entry) = self.tx_counter.entry(sender) {
             let count = entry.get_mut();
             if *count == 1 {
                 entry.remove();
                 self.sender_info.remove(&sender);
+                self.sender_ids.remove(&address);
                 self.metrics.all_transactions_by_all_senders.decrement(1.0);
                 return
             }
@@ -1797,11 +1852,12 @@ impl<T: PoolTransaction> AllTransactions<T> {
         tx_hash: &B256,
     ) -> Option<(Arc<ValidPoolTransaction<T>>, SubPool)> {
         let tx = self.by_hash.remove(tx_hash)?;
+        self.frame_reservations.remove(tx.hash());
         let internal = self.txs.remove(&tx.transaction_id)?;
         self.remove_auths(&internal);
         self.tx_type_counts.dec(internal.transaction.transaction.ty());
         // decrement the counter for the sender.
-        self.tx_decr(tx.sender_id());
+        self.tx_decr(tx.sender_id(), tx.sender());
         Some((tx, internal.subpool))
     }
 
@@ -1814,10 +1870,11 @@ impl<T: PoolTransaction> AllTransactions<T> {
     ) -> Option<(Arc<ValidPoolTransaction<T>>, SubPool)> {
         let internal = self.txs.remove(tx_id)?;
         let tx = self.by_hash.remove(internal.transaction.hash())?;
+        self.frame_reservations.remove(tx.hash());
         self.remove_auths(&internal);
         self.tx_type_counts.dec(internal.transaction.transaction.ty());
         // decrement the counter for the sender.
-        self.tx_decr(tx.sender_id());
+        self.tx_decr(tx.sender_id(), tx.sender());
         Some((tx, internal.subpool))
     }
 
@@ -1859,9 +1916,10 @@ impl<T: PoolTransaction> AllTransactions<T> {
         id: &TransactionId,
     ) -> Option<(Arc<ValidPoolTransaction<T>>, SubPool)> {
         let internal = self.txs.remove(id)?;
+        self.frame_reservations.remove(internal.transaction.hash());
 
         // decrement the counter for the sender.
-        self.tx_decr(internal.transaction.sender_id());
+        self.tx_decr(internal.transaction.sender_id(), internal.transaction.sender());
         self.tx_type_counts.dec(internal.transaction.transaction.ty());
 
         let result =
@@ -1926,10 +1984,12 @@ impl<T: PoolTransaction> AllTransactions<T> {
                 })
             }
         }
-        if transaction.gas_limit() > self.block_gas_limit {
+        let (execution_reservation, state_reservation) = transaction.transaction.gas_reservations();
+        let block_reservation = execution_reservation.max(state_reservation);
+        if block_reservation > self.block_gas_limit {
             return Err(InsertErr::TxGasLimitMoreThanAvailableBlockGas {
                 block_gas_limit: self.block_gas_limit,
-                tx_gas_limit: transaction.gas_limit(),
+                tx_gas_limit: block_reservation,
                 transaction: Arc::new(transaction),
             })
         }
@@ -1953,6 +2013,7 @@ impl<T: PoolTransaction> AllTransactions<T> {
         on_chain_balance: U256,
         ancestor: Option<TransactionId>,
     ) -> Result<ValidPoolTransaction<T>, InsertErr<T>> {
+        let enforce_sender_balance = !new_blob_tx.transaction.is_eip8141();
         if let Some(ancestor) = ancestor {
             let Some(ancestor_tx) = self.txs.get(&ancestor) else {
                 // ancestor tx is missing, so we can't insert the new blob
@@ -1970,7 +2031,7 @@ impl<T: PoolTransaction> AllTransactions<T> {
             let mut cumulative_cost = ancestor_tx.next_cumulative_cost() + new_blob_tx.cost();
 
             // check if the new blob would go into overdraft
-            if cumulative_cost > on_chain_balance {
+            if enforce_sender_balance && cumulative_cost > on_chain_balance {
                 // the transaction would go into overdraft
                 return Err(InsertErr::Overdraft { transaction: Arc::new(new_blob_tx) })
             }
@@ -1988,18 +2049,38 @@ impl<T: PoolTransaction> AllTransactions<T> {
                 // check if any of descendant blob transactions should be shifted into overdraft
                 for (_, tx) in descendants {
                     cumulative_cost += tx.transaction.cost();
-                    if tx.transaction.is_eip4844() && cumulative_cost > on_chain_balance {
+                    if enforce_sender_balance &&
+                        tx.transaction.is_blob_transaction() &&
+                        cumulative_cost > on_chain_balance
+                    {
                         // the transaction would shift
                         return Err(InsertErr::Overdraft { transaction: Arc::new(new_blob_tx) })
                     }
                 }
             }
-        } else if new_blob_tx.cost() > &on_chain_balance {
+        } else if enforce_sender_balance && new_blob_tx.cost() > &on_chain_balance {
             // the transaction would go into overdraft
             return Err(InsertErr::Overdraft { transaction: Arc::new(new_blob_tx) })
         }
 
         Ok(new_blob_tx)
+    }
+
+    /// Returns the cost of ordinary transactions for `payer`, optionally omitting a replacement.
+    ///
+    /// The sender range is bounded by the per-account slot limit; frame transactions are excluded
+    /// because their costs are represented by `frame_reservations`.
+    fn ordinary_payer_cost(
+        &self,
+        payer: Address,
+        excluding: Option<TransactionId>,
+    ) -> Option<U256> {
+        let Some(sender) = self.sender_ids.get(&payer).copied() else { return Some(U256::ZERO) };
+        self.txs_iter(sender)
+            .filter(|(id, tx)| {
+                Some(**id) != excluding && tx.transaction.transaction.frame_validation().is_none()
+            })
+            .try_fold(U256::ZERO, |total, (_, tx)| total.checked_add(*tx.transaction.cost()))
     }
 
     /// Inserts a new _valid_ transaction into the pool.
@@ -2060,7 +2141,7 @@ impl<T: PoolTransaction> AllTransactions<T> {
 
         // before attempting to insert a blob transaction, we need to ensure that additional
         // constraints are met that only apply to blob transactions
-        if transaction.is_eip4844() {
+        if transaction.is_blob_transaction() {
             state.insert(TxState::BLOB_TRANSACTION);
 
             transaction =
@@ -2092,6 +2173,104 @@ impl<T: PoolTransaction> AllTransactions<T> {
             state.insert(TxState::ENOUGH_FEE_CAP_BLOCK);
         }
 
+        // Check replacement pricing before changing frame reservations. A failed replacement must
+        // leave both the old pool entry and its reservation untouched.
+        let existing = self.txs.get(transaction.id()).map(|tx| &tx.transaction);
+        if let Some(existing) = &existing &&
+            existing.is_underpriced(&transaction, &self.price_bumps)
+        {
+            return Err(InsertErr::Underpriced { transaction, existing: *existing.hash() })
+        }
+
+        if let Some(metadata) = transaction.transaction.frame_validation() {
+            let ordinary_payer_cost = self
+                .ordinary_payer_cost(metadata.payer, Some(*transaction.id()))
+                .ok_or_else(|| InsertErr::FramePolicy {
+                    transaction: Arc::clone(&transaction),
+                    reason: "ordinary payer cost overflow",
+                })?;
+            let replaces = existing
+                .as_ref()
+                .filter(|existing| existing.transaction.frame_validation().is_some())
+                .map(|existing| *existing.hash());
+            info!(
+                target: "reth::eip8141::pool",
+                tx_hash = ?transaction.hash(),
+                sender = ?metadata.sender,
+                payer = ?metadata.payer,
+                max_cost = ?metadata.max_cost,
+                ordinary_payer_cost = ?ordinary_payer_cost,
+                replaces = ?replaces,
+                "reserving EIP-8141 public-pool payer capacity"
+            );
+            self.frame_reservations
+                .replace(
+                    *transaction.hash(),
+                    Arc::clone(metadata),
+                    replaces,
+                    ordinary_payer_cost,
+                    self.last_seen_block_hash,
+                )
+                .map_err(|reason| InsertErr::FramePolicy {
+                    transaction: Arc::clone(&transaction),
+                    reason,
+                })?;
+            info!(
+                target: "reth::eip8141::pool",
+                tx_hash = ?transaction.hash(),
+                payer = ?metadata.payer,
+                max_cost = ?metadata.max_cost,
+                "reserved EIP-8141 public-pool payer capacity"
+            );
+        } else {
+            let usage = self.frame_reservations.payer_usage(&transaction.sender());
+            if usage.frame_count != 0 {
+                let ordinary_payer_cost = self
+                    .ordinary_payer_cost(transaction.sender(), Some(*transaction.id()))
+                    .ok_or_else(|| InsertErr::FramePolicy {
+                        transaction: Arc::clone(&transaction),
+                        reason: "ordinary payer cost overflow",
+                    })?
+                    .checked_add(*transaction.cost())
+                    .ok_or_else(|| InsertErr::FramePolicy {
+                        transaction: Arc::clone(&transaction),
+                        reason: "ordinary payer cost overflow",
+                    })?;
+                let released = existing
+                    .as_ref()
+                    .and_then(|old| old.transaction.frame_validation())
+                    .filter(|metadata| metadata.payer == transaction.sender())
+                    .map_or(U256::ZERO, |metadata| metadata.max_cost);
+                let remaining = usage.frame_cost.checked_sub(released).ok_or_else(|| {
+                    InsertErr::FramePolicy {
+                        transaction: Arc::clone(&transaction),
+                        reason: "reservation accounting error",
+                    }
+                })?;
+                let total_cost = ordinary_payer_cost.checked_add(remaining).ok_or_else(|| {
+                    InsertErr::FramePolicy {
+                        transaction: Arc::clone(&transaction),
+                        reason: "payer cost overflow",
+                    }
+                })?;
+                if total_cost > on_chain_balance.min(usage.balance) {
+                    return Err(InsertErr::FramePolicy {
+                        transaction,
+                        reason: "payer balance exceeded",
+                    })
+                }
+            }
+
+            // A frame reservation survives the ordinary transaction's admission checks so a
+            // rejected replacement cannot release it. It is no longer needed once the ordinary
+            // replacement is known to be admissible.
+            if let Some(existing) = &existing &&
+                existing.transaction.frame_validation().is_some()
+            {
+                self.frame_reservations.remove(existing.hash());
+            }
+        }
+
         // placeholder for the replaced transaction, if any
         let mut replaced_tx = None;
 
@@ -2111,17 +2290,7 @@ impl<T: PoolTransaction> AllTransactions<T> {
                 entry.insert(pool_tx);
             }
             Entry::Occupied(mut entry) => {
-                // Transaction with the same nonce already exists: replacement candidate
-                let existing_transaction = entry.get().transaction.as_ref();
-                let maybe_replacement = transaction.as_ref();
-
-                // Ensure the new transaction is not underpriced
-                if existing_transaction.is_underpriced(maybe_replacement, &self.price_bumps) {
-                    return Err(InsertErr::Underpriced {
-                        transaction: pool_tx.transaction,
-                        existing: *entry.get().transaction.hash(),
-                    })
-                }
+                // Replacement pricing was checked before changing reservations.
                 let new_hash = *pool_tx.transaction.hash();
                 let new_transaction = pool_tx.transaction.clone();
                 self.tx_type_counts.inc(pool_tx.transaction.transaction.ty());
@@ -2178,11 +2347,11 @@ impl<T: PoolTransaction> AllTransactions<T> {
                 // Update for next transaction
                 cumulative_cost = tx.next_cumulative_cost();
 
-                if cumulative_cost > on_chain_balance {
+                if tx.transaction.transaction.is_eip8141() || cumulative_cost <= on_chain_balance {
+                    tx.state.insert(TxState::ENOUGH_BALANCE);
+                } else {
                     // sender lacks sufficient funds to pay for this transaction
                     tx.state.remove(TxState::ENOUGH_BALANCE);
-                } else {
-                    tx.state.insert(TxState::ENOUGH_BALANCE);
                 }
 
                 // Update ancestor condition.
@@ -2219,7 +2388,7 @@ impl<T: PoolTransaction> AllTransactions<T> {
 
         // If this wasn't a replacement transaction we need to update the counter.
         if replaced_tx.is_none() {
-            self.tx_inc(inserted_tx_id.sender);
+            self.tx_inc(inserted_tx_id.sender, transaction.sender());
         }
 
         Ok(InsertOk { transaction, move_to: state.into(), state, replaced_tx, updates })
@@ -2263,6 +2432,8 @@ impl<T: PoolTransaction> Default for AllTransactions<T> {
             txs: Default::default(),
             sender_info: Default::default(),
             tx_counter: Default::default(),
+            sender_ids: Default::default(),
+            frame_reservations: Default::default(),
             last_seen_block_number: Default::default(),
             last_seen_block_hash: Default::default(),
             pending_fees: Default::default(),
@@ -2343,6 +2514,8 @@ pub(crate) enum InsertErr<T: PoolTransaction> {
         #[expect(dead_code)]
         existing: TxHash,
     },
+    /// The transaction violates public frame-mempool reservation policy.
+    FramePolicy { transaction: Arc<ValidPoolTransaction<T>>, reason: &'static str },
     /// Attempted to insert a blob transaction with a nonce gap
     BlobTxHasNonceGap { transaction: Arc<ValidPoolTransaction<T>> },
     /// Attempted to insert a transaction that would overdraft the sender's balance at the time of
@@ -2403,7 +2576,11 @@ pub(crate) struct PoolInternalTransaction<T: PoolTransaction> {
 
 impl<T: PoolTransaction> PoolInternalTransaction<T> {
     fn next_cumulative_cost(&self) -> U256 {
-        self.cumulative_cost + self.transaction.cost()
+        if self.transaction.transaction.is_eip8141() {
+            self.cumulative_cost
+        } else {
+            self.cumulative_cost + self.transaction.cost()
+        }
     }
 }
 
@@ -2430,11 +2607,122 @@ mod tests {
     use super::*;
     use crate::{
         test_utils::{MockOrdering, MockTransaction, MockTransactionFactory, MockTransactionSet},
-        traits::TransactionOrigin,
-        SubPoolLimit,
+        traits::{PoolTransaction, TransactionOrigin},
+        EthPooledTransaction, SubPoolLimit,
     };
-    use alloy_consensus::{Transaction, TxType};
-    use alloy_primitives::address;
+    use alloy_consensus::{Transaction, TxEip8141, TxType};
+    use alloy_eips::eip8141::{Frame, TransactionFees};
+    use alloy_primitives::{address, Sealable};
+    use reth_ethereum_primitives::TransactionSigned;
+
+    fn validated_frame(
+        sender: Address,
+        sender_id: SenderId,
+        nonce: u64,
+        fee: u64,
+        max_cost: u64,
+    ) -> ValidPoolTransaction<EthPooledTransaction> {
+        let tx = TxEip8141 {
+            chain_id: 1,
+            sender,
+            nonce,
+            frames: vec![Frame::default()],
+            fees: TransactionFees {
+                max_priority_fee_per_gas: U256::ZERO,
+                max_fee_per_gas: U256::from(fee),
+                max_fee_per_blob_gas: U256::ZERO,
+            },
+            ..Default::default()
+        };
+        let mut transaction = EthPooledTransaction::new(
+            alloy_consensus::transaction::Recovered::new_unchecked(
+                TransactionSigned::Eip8141(tx.seal_slow()),
+                sender,
+            ),
+            0,
+        );
+        transaction
+            .set_frame_validation(Arc::new(crate::validate::FrameValidation {
+                sender,
+                sender_nonce: nonce,
+                state_nonce: nonce,
+                sender_balance: U256::from(max_cost),
+                sender_code_hash: None,
+                payer: sender,
+                max_cost: U256::from(max_cost),
+                payer_balance: U256::from(max_cost),
+                head_hash: B256::ZERO,
+                dependencies: Default::default(),
+                expires_at: None,
+                exclusive_payer: false,
+            }))
+            .unwrap();
+        ValidPoolTransaction {
+            transaction,
+            transaction_id: TransactionId::new(sender_id, nonce),
+            propagate: true,
+            timestamp: std::time::Instant::now(),
+            origin: TransactionOrigin::External,
+            authority_ids: None,
+        }
+    }
+
+    #[test]
+    fn frame_reservation_is_indexed_and_released_on_removal() {
+        let sender = Address::repeat_byte(0x11);
+        let tx = validated_frame(sender, SenderId::from(1), 0, 100, 5);
+        let hash = *tx.hash();
+        let mut pool = AllTransactions::default();
+
+        pool.insert_tx(tx, U256::from(5), 0).unwrap();
+        assert_eq!(pool.frame_reservations.hashes().collect::<Vec<_>>(), vec![hash]);
+
+        pool.remove_transaction_by_hash(&hash).unwrap();
+        assert!(pool.frame_reservations.hashes().next().is_none());
+    }
+
+    #[test]
+    fn rejected_frame_replacement_preserves_old_reservation() {
+        let sender = Address::repeat_byte(0x12);
+        let sender_id = SenderId::from(2);
+        let first = validated_frame(sender, sender_id, 0, 100, 5);
+        let first_hash = *first.hash();
+        let replacement = validated_frame(sender, sender_id, 0, 101, 5);
+        let mut pool = AllTransactions::default();
+
+        pool.insert_tx(first, U256::from(5), 0).unwrap();
+        assert!(matches!(
+            pool.insert_tx(replacement, U256::from(5), 0),
+            Err(InsertErr::Underpriced { .. })
+        ));
+        assert_eq!(pool.frame_reservations.hashes().collect::<Vec<_>>(), vec![first_hash]);
+    }
+
+    #[test]
+    fn frame_capacity_eviction_prefers_nearest_expiry() {
+        let mut pool = TxPool::new(crate::CoinbaseTipOrdering::default(), PoolConfig::default());
+        let mut hashes = Vec::new();
+        for (sender, fee, deadline) in [(1, 1_000, 10), (2, 100, 20)] {
+            let mut tx = validated_frame(
+                Address::repeat_byte(sender),
+                SenderId::from(sender as u64),
+                0,
+                fee,
+                5,
+            );
+            Arc::make_mut(tx.transaction.frame_validation.as_mut().unwrap()).expires_at =
+                Some(deadline);
+            hashes.push(*tx.hash());
+            pool.add_transaction(tx, U256::from(5), 0, None).unwrap();
+        }
+        assert_eq!(pool.pending_pool.len(), 2);
+        pool.config.pending_limit.max_txs = 1;
+        let discarded = pool.discard_worst();
+        assert_eq!(discarded.len(), 1);
+        assert_eq!(*discarded[0].hash(), hashes[0]);
+        assert_eq!(pool.frame_transaction_hashes(), vec![hashes[1]]);
+        pool.assert_invariants();
+    }
 
     #[test]
     fn test_insert_blob() {

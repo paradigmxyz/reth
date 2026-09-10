@@ -21,6 +21,7 @@ reth-primitives-traits = { workspace = true, features = ["secp256k1", "rayon"] }
 reth-node-builder.workspace = true
 reth-tracing.workspace = true
 reth-provider.workspace = true
+reth-storage-api.workspace = true
 reth-transaction-pool.workspace = true
 reth-network.workspace = true
 reth-evm.workspace = true
@@ -82,6 +83,7 @@ alloy-primitives.workspace = true
 alloy-provider.workspace = true
 alloy-genesis.workspace = true
 alloy-signer.workspace = true
+alloy-signer-local.workspace = true
 alloy-sol-types.workspace = true
 alloy-contract.workspace = true
 alloy-rpc-types-beacon = { workspace = true, features = ["ssz"] }
