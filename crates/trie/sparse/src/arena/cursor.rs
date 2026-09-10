@@ -1,6 +1,6 @@
 use super::{
     branch_child_idx::{BranchChildIdx, BranchChildIter},
-    ArenaSparseNode, ArenaSparseNodeBranchChild, ArenaSparseNodeState, Index, NodeArena,
+    ArenaSparseNode, ArenaSparseNodeState, BranchChild, Index, NodeArena,
 };
 use alloc::vec::Vec;
 use reth_trie_common::Nibbles;
@@ -210,16 +210,13 @@ impl ArenaCursor {
         let child_idx = BranchChildIdx::new(parent_branch.state_mask, child_nibble)
             .expect("child nibble not found in parent state_mask");
 
-        debug_assert!(
-            matches!(
-                parent_branch.children[child_idx],
-                ArenaSparseNodeBranchChild::Revealed(idx)
-                if idx == old_idx
-            ),
+        debug_assert_eq!(
+            parent_branch.children[child_idx].revealed_index(),
+            Some(old_idx),
             "parent child at nibble {child_nibble} does not match old_idx",
         );
 
-        parent_branch.children[child_idx] = ArenaSparseNodeBranchChild::Revealed(new_idx);
+        parent_branch.children[child_idx] = BranchChild::revealed(new_idx);
     }
 
     /// Advances the DFS traversal to the next actionable node.
@@ -267,9 +264,10 @@ impl ArenaCursor {
                     continue;
                 }
 
-                let child_idx = match &arena[head_idx].branch_ref().children[branch_child_idx] {
-                    ArenaSparseNodeBranchChild::Revealed(child_idx) => *child_idx,
-                    ArenaSparseNodeBranchChild::Blinded(_) => continue,
+                let Some(child_idx) =
+                    arena[head_idx].branch_ref().children[branch_child_idx].revealed_index()
+                else {
+                    continue;
                 };
 
                 if should_descend(child_depth, &arena[child_idx]) {
@@ -344,16 +342,11 @@ impl ArenaCursor {
                 return SeekResult::NoChild { child_nibble };
             };
 
-            match &head_branch.children[branch_child_idx] {
-                ArenaSparseNodeBranchChild::Blinded(_) => {
-                    return SeekResult::Blinded;
-                }
-                ArenaSparseNodeBranchChild::Revealed(child_idx) => {
-                    let child_idx = *child_idx;
-                    let path = self.child_path(arena, child_nibble);
-                    self.push(arena, child_idx, path);
-                }
-            }
+            let Some(child_idx) = head_branch.children[branch_child_idx].revealed_index() else {
+                return SeekResult::Blinded;
+            };
+            let path = self.child_path(arena, child_nibble);
+            self.push(arena, child_idx, path);
         }
     }
 }
