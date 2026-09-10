@@ -31,6 +31,7 @@
 
 use crate::{
     error::StateRootTaskError,
+    storage_trie_job::{StorageProver, StorageTrieWorkerJob},
     value_encoder::{AsyncAccountValueEncoder, ValueEncoderStats},
 };
 use alloy_primitives::{
@@ -348,7 +349,9 @@ impl ProofWorkerHandle {
         self.storage_work_tx
             .send(StorageWorkerJob::StorageProof { input, proof_result_sender })
             .map_err(|err| {
-                let StorageWorkerJob::StorageProof { proof_result_sender, .. } = err.0;
+                let StorageWorkerJob::StorageProof { proof_result_sender, .. } = err.0 else {
+                    unreachable!("just sent a storage proof job")
+                };
                 let _ = proof_result_sender.send(StorageProofResultMessage {
                     hashed_address,
                     result: Err(
@@ -358,6 +361,23 @@ impl ProofWorkerHandle {
 
                 ProviderError::other(std::io::Error::other("storage workers unavailable"))
             })
+    }
+
+    /// Dispatch a job that owns a storage trie to the storage worker pool, where it can prove the
+    /// targets it needs on the worker's cursors.
+    ///
+    /// Returns the job back if no worker can take it, so the caller can still run it and account
+    /// for whatever the job owns.
+    pub fn dispatch_storage_trie_work(
+        &self,
+        job: Box<dyn StorageTrieWorkerJob>,
+    ) -> Result<(), Box<dyn StorageTrieWorkerJob>> {
+        self.storage_work_tx.send(StorageWorkerJob::TrieWork { job }).map_err(|err| {
+            let StorageWorkerJob::TrieWork { job } = err.0 else {
+                unreachable!("just sent a trie work job")
+            };
+            job
+        })
     }
 
     /// Dispatch an account multiproof computation
@@ -565,7 +585,6 @@ pub struct StorageProofResultMessage {
 }
 
 /// Internal message for storage workers.
-#[derive(Debug)]
 pub(crate) enum StorageWorkerJob {
     /// Storage proof computation request
     StorageProof {
@@ -574,6 +593,50 @@ pub(crate) enum StorageWorkerJob {
         /// Context for sending the proof result.
         proof_result_sender: CrossbeamSender<StorageProofResultMessage>,
     },
+    /// Work that owns a storage trie and proves what that trie needs on the worker's cursors.
+    TrieWork {
+        /// The job to run.
+        job: Box<dyn StorageTrieWorkerJob>,
+    },
+}
+
+impl core::fmt::Debug for StorageWorkerJob {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            Self::StorageProof { input, .. } => {
+                f.debug_struct("StorageProof").field("input", input).finish_non_exhaustive()
+            }
+            Self::TrieWork { .. } => f.debug_struct("TrieWork").finish_non_exhaustive(),
+        }
+    }
+}
+
+/// Computes storage proofs on a worker's cursors, caching the storage roots it observes so that
+/// account proofs can encode account leaves without recomputing them.
+struct WorkerStorageProver<'a, TC, HC> {
+    calculator: &'a mut proof_v2::StorageProofCalculator<TC, HC>,
+    cached_storage_roots: &'a DashMap<B256, B256>,
+}
+
+impl<TC, HC> StorageProver for WorkerStorageProver<'_, TC, HC>
+where
+    TC: TrieStorageCursor,
+    HC: HashedStorageCursor<Value = U256>,
+{
+    fn storage_proof(
+        &mut self,
+        hashed_address: B256,
+        targets: &mut [ProofV2Target],
+    ) -> Result<Vec<ProofTrieNodeV2>, StateProofError> {
+        let proof = self.calculator.storage_proof(hashed_address, targets)?;
+        // A proof that starts below the root does not carry it, which is fine: only the first
+        // round for an address asks for the whole trie, and that is the round the account proofs
+        // race against.
+        if let Some(root) = self.calculator.compute_root_hash(&proof)? {
+            self.cached_storage_roots.insert(hashed_address, root);
+        }
+        Ok(proof)
+    }
 }
 
 /// Worker for storage trie operations.
@@ -703,6 +766,13 @@ where
                         proof_result_sender,
                         &mut storage_proofs_processed,
                     );
+                }
+                StorageWorkerJob::TrieWork { job } => {
+                    let mut prover = WorkerStorageProver {
+                        calculator: &mut v2_calculator,
+                        cached_storage_roots: &self.cached_storage_roots,
+                    };
+                    job.run(Some(&mut prover));
                 }
             }
 
