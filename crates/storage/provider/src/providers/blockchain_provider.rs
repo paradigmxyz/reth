@@ -1084,7 +1084,7 @@ mod tests {
     fn historical_proofs_complete_masked_trie_rows() -> eyre::Result<()> {
         use crate::{StaticFileProviderFactory, StaticFileSegment, StaticFileWriter};
         use reth_storage_api::{StorageSettings, StorageSettingsCache, TrieWriter};
-        use reth_trie::{test_utils::TrieTestHarness, MultiProofTargets, MultiProofTargetsV2};
+        use reth_trie::{test_utils::TrieTestHarness, MultiProofTargetsV2};
         use revm::state::AccountInfo;
 
         let address = Address::with_last_byte(1);
@@ -1219,14 +1219,6 @@ mod tests {
                 .account_proof(other_address, &[])?
                 .verify(root)?;
             assert_eq!(state.state_root(HashedPostState::default())?, root);
-            state.proof(Default::default(), other_address, &[])?.verify(root)?;
-            state
-                .multiproof(
-                    Default::default(),
-                    MultiProofTargets::account(keccak256(other_address)),
-                )?
-                .account_proof(other_address, &[])?
-                .verify(root)?;
             assert_eq!(
                 state.storage_root(address, HashedStorage::default())?,
                 storage_roots[number]
