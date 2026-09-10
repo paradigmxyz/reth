@@ -1415,6 +1415,33 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> DatabaseProvider<TX, N> {
     }
 }
 
+impl<TX: DbTx, N: NodeTypes> DatabaseProvider<TX, N> {
+    /// Rejects advances of either the Finish block number or its state/trie frontier while a
+    /// persisted snap attempt is unverified. A missing partial frontier equals the block
+    /// number, so clearing it can advance state even when the block number stays put or rewinds.
+    /// Updates that advance neither frontier are allowed.
+    fn ensure_finish_may_advance(&self, proposed: &StageCheckpoint) -> ProviderResult<()> {
+        let current = self.get_stage_checkpoint(StageId::Finish)?.unwrap_or_default();
+        let state_trie_frontier = |checkpoint: &StageCheckpoint| {
+            checkpoint
+                .finish_stage_checkpoint()
+                .and_then(|finish| finish.partial_state_trie())
+                .unwrap_or(checkpoint.block_number)
+        };
+        if proposed.block_number <= current.block_number &&
+            state_trie_frontier(proposed) <= state_trie_frontier(&current)
+        {
+            return Ok(())
+        }
+        match self.snap_attempt()? {
+            Some(attempt) if !attempt.is_verified() => {
+                Err(ProviderError::UnverifiedSnapState { attempt: attempt.id().into() })
+            }
+            _ => Ok(()),
+        }
+    }
+}
+
 impl<TX: DbTx, N: NodeTypes> AccountReader for DatabaseProvider<TX, N> {
     fn basic_account(&self, address: &Address) -> ProviderResult<Option<Account>> {
         if self.cached_storage_settings().use_hashed_state() {
@@ -2233,13 +2260,16 @@ impl<TX: DbTx, N: NodeTypes> StageCheckpointReader for DatabaseProvider<TX, N> {
     }
 }
 
-impl<TX: DbTxMut, N: NodeTypes> StageCheckpointWriter for DatabaseProvider<TX, N> {
+impl<TX: DbTxMut + DbTx, N: NodeTypes> StageCheckpointWriter for DatabaseProvider<TX, N> {
     /// Save stage checkpoint.
     fn save_stage_checkpoint(
         &self,
         id: StageId,
         checkpoint: StageCheckpoint,
     ) -> ProviderResult<()> {
+        if id == StageId::Finish {
+            self.ensure_finish_may_advance(&checkpoint)?;
+        }
         Ok(self.tx.put::<tables::StageCheckpoints>(id.to_string(), checkpoint)?)
     }
 
@@ -2258,6 +2288,13 @@ impl<TX: DbTxMut, N: NodeTypes> StageCheckpointWriter for DatabaseProvider<TX, N
         block_number: BlockNumber,
         drop_stage_checkpoint: bool,
     ) -> ProviderResult<()> {
+        let current = self.get_stage_checkpoint(StageId::Finish)?.unwrap_or_default();
+        let proposed = StageCheckpoint {
+            block_number,
+            ..if drop_stage_checkpoint { Default::default() } else { current }
+        };
+        self.ensure_finish_may_advance(&proposed)?;
+
         // iterate over all existing stages in the table and update its progress.
         let mut cursor = self.tx.cursor_write::<tables::StageCheckpoints>()?;
         for stage_id in StageId::ALL {
@@ -3965,7 +4002,7 @@ mod tests {
     use reth_ethereum_primitives::Receipt;
     use reth_execution_types::{AccountRevertInit, BlockExecutionOutput, BlockExecutionResult};
     use reth_primitives_traits::SealedBlock;
-    use reth_storage_api::{MetadataProvider, MetadataWriter};
+    use reth_storage_api::{DatabaseProviderFactory, MetadataProvider, MetadataWriter};
     use reth_testing_utils::generators::{self, random_block, BlockParams};
     use reth_trie::{
         HashedPostState, KeccakKeyHasher, Nibbles, SortedTrieData, StoredNibbles,
@@ -3992,6 +4029,117 @@ mod tests {
             None,
             SaveBlocksMode::Full,
         )
+    }
+
+    #[test]
+    fn snap_attempt_guards_finish_checkpoint_writers() {
+        use alloy_eips::BlockNumHash;
+        use reth_db_api::models::SnapAttempt;
+
+        let factory = create_test_provider_factory();
+        let provider = factory.database_provider_rw().unwrap();
+        provider.update_pipeline_stages(5, false).unwrap();
+        let mut attempt = SnapAttempt::start(
+            None,
+            BlockNumHash::new(10, B256::repeat_byte(1)),
+            B256::repeat_byte(2),
+        );
+        provider.write_snap_attempt(&attempt).unwrap();
+        provider.commit().unwrap();
+
+        let provider = factory.database_provider_rw().unwrap();
+        let refused = provider.save_stage_checkpoint(StageId::Finish, StageCheckpoint::new(10));
+        assert!(matches!(refused, Err(ProviderError::UnverifiedSnapState { attempt: 0 })));
+        let refused = provider.update_pipeline_stages(10, false);
+        assert!(matches!(refused, Err(ProviderError::UnverifiedSnapState { attempt: 0 })));
+        for stage in [StageId::Finish, StageId::Headers] {
+            assert_eq!(provider.get_stage_checkpoint(stage).unwrap().unwrap().block_number, 5);
+        }
+
+        // Rewinding claims nothing about the downloaded state, through either writer.
+        provider.update_pipeline_stages(4, true).unwrap();
+        provider.save_stage_checkpoint(StageId::Finish, StageCheckpoint::new(3)).unwrap();
+        assert_eq!(
+            provider.get_stage_checkpoint(StageId::Finish).unwrap().unwrap().block_number,
+            3
+        );
+
+        // Abandoned leftovers are still not complete state.
+        attempt.abandon();
+        provider.write_snap_attempt(&attempt).unwrap();
+        let refused = provider.save_stage_checkpoint(StageId::Finish, StageCheckpoint::new(10));
+        assert!(matches!(refused, Err(ProviderError::UnverifiedSnapState { attempt: 0 })));
+
+        // Header progress does not claim the downloaded state is complete.
+        provider.save_stage_checkpoint(StageId::Headers, StageCheckpoint::new(10)).unwrap();
+        attempt.verify();
+        provider.write_snap_attempt(&attempt).unwrap();
+        provider.save_stage_checkpoint(StageId::Finish, StageCheckpoint::new(10)).unwrap();
+        provider.update_pipeline_stages(11, false).unwrap();
+        provider.commit().unwrap();
+
+        let provider = factory.database_provider_ro().unwrap();
+        assert_eq!(
+            provider.get_stage_checkpoint(StageId::Finish).unwrap().unwrap().block_number,
+            11
+        );
+    }
+
+    #[test]
+    fn snap_attempt_guards_partial_state_trie_advances() {
+        use alloy_eips::BlockNumHash;
+        use reth_db_api::models::SnapAttempt;
+
+        for abandoned in [false, true] {
+            let factory = create_test_provider_factory();
+            let provider = factory.database_provider_rw().unwrap();
+            provider.update_pipeline_stages(100, false).unwrap();
+            let checkpoint = StageCheckpoint::new(100)
+                .with_finish_stage_checkpoint(FinishCheckpoint { partial_state_trie: Some(50) });
+            provider.save_stage_checkpoint(StageId::Finish, checkpoint).unwrap();
+            let mut attempt = SnapAttempt::start(None, BlockNumHash::default(), B256::ZERO);
+            if abandoned {
+                attempt.abandon();
+            }
+            provider.write_snap_attempt(&attempt).unwrap();
+
+            for block in [100, 90] {
+                let result =
+                    provider.save_stage_checkpoint(StageId::Finish, StageCheckpoint::new(block));
+                assert!(matches!(result, Err(ProviderError::UnverifiedSnapState { .. })));
+                let result = provider.update_pipeline_stages(block, true);
+                assert!(matches!(result, Err(ProviderError::UnverifiedSnapState { .. })));
+                for stage in [StageId::Finish, StageId::Headers] {
+                    assert_eq!(
+                        provider.get_stage_checkpoint(stage).unwrap().unwrap().block_number,
+                        100
+                    );
+                }
+                assert_eq!(
+                    provider.get_stage_checkpoint(StageId::Finish).unwrap(),
+                    Some(checkpoint)
+                );
+            }
+
+            let advanced = StageCheckpoint::new(100)
+                .with_finish_stage_checkpoint(FinishCheckpoint { partial_state_trie: Some(60) });
+            assert!(matches!(
+                provider.save_stage_checkpoint(StageId::Finish, advanced),
+                Err(ProviderError::UnverifiedSnapState { .. })
+            ));
+
+            // Retaining the partial frontier does not claim additional state progress.
+            provider.update_pipeline_stages(90, false).unwrap();
+            let rewind = StageCheckpoint::new(80)
+                .with_finish_stage_checkpoint(FinishCheckpoint { partial_state_trie: Some(40) });
+            provider.save_stage_checkpoint(StageId::Finish, rewind).unwrap();
+            provider.update_pipeline_stages(30, true).unwrap();
+
+            attempt.verify();
+            provider.write_snap_attempt(&attempt).unwrap();
+            provider.save_stage_checkpoint(StageId::Finish, advanced).unwrap();
+            provider.update_pipeline_stages(100, true).unwrap();
+        }
     }
 
     #[test]

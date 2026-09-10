@@ -94,7 +94,7 @@ fn extension_only_genesis_account_proof() {
             assert_eq!(restored.info.as_ref().unwrap().extension, extension);
             assert_eq!(restored.verify(root), Ok(()));
 
-            let mut tampered = proof.clone().into_eip1186_response(Vec::new());
+            let mut tampered = proof.into_eip1186_response(Vec::new());
             tampered.balance = U256::from(1);
             assert!(AccountProof::from_eip1186_proof(tampered).verify(root).is_err());
         }
