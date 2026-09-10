@@ -332,6 +332,60 @@ where
         any_err
     }
 
+    /// Reveals account trie proof nodes on the calling thread.
+    ///
+    /// Unlike [`Self::reveal_decoded_multiproof_v2`] this touches only the account trie, so a
+    /// caller that owns some of the storage tries itself can reveal the two halves separately.
+    pub fn reveal_account_proof_nodes(
+        &mut self,
+        mut nodes: Vec<ProofTrieNodeV2>,
+    ) -> SparseStateTrieResult<()> {
+        if nodes.is_empty() {
+            return Ok(())
+        }
+
+        #[cfg(feature = "metrics")]
+        self.metrics.increment_total_account_nodes(nodes.len() as u64);
+
+        let result = self.state.reveal_v2_proof_nodes(&mut nodes, self.retain_updates);
+        self.deferred_drops.proof_nodes_bufs.push(nodes);
+
+        Ok(result?)
+    }
+
+    /// Reveals storage trie proof nodes for `address` on the calling thread, creating the trie if
+    /// it does not exist yet.
+    pub fn reveal_storage_proof_nodes(
+        &mut self,
+        address: B256,
+        mut nodes: Vec<ProofTrieNodeV2>,
+    ) -> SparseStateTrieResult<()> {
+        if nodes.is_empty() {
+            return Ok(())
+        }
+
+        #[cfg(feature = "metrics")]
+        self.metrics.increment_total_storage_nodes(nodes.len() as u64);
+
+        let retain_updates = self.retain_updates;
+        let result = self
+            .storage
+            .get_or_create_trie_mut(address)
+            .reveal_v2_proof_nodes(&mut nodes, retain_updates);
+        self.deferred_drops.proof_nodes_bufs.push(nodes);
+
+        Ok(result?)
+    }
+
+    /// Records storage trie nodes that were revealed into a trie taken out of this state trie, so
+    /// the reveal metrics stay complete.
+    pub const fn record_revealed_storage_nodes(&mut self, nodes: usize) {
+        #[cfg(feature = "metrics")]
+        self.metrics.increment_total_storage_nodes(nodes as u64);
+        #[cfg(not(feature = "metrics"))]
+        let _ = nodes;
+    }
+
     /// Calculates the hashes of subtries.
     ///
     /// If the trie has not been revealed, this function does nothing.
