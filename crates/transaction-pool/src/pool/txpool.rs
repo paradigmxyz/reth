@@ -770,22 +770,22 @@ impl<T: TransactionOrdering> TxPool<T> {
             let Some(info) = self.all_transactions.sender_info.get(&tx.sender_id()) &&
             info.state_nonce > on_chain_nonce
         {
+            // Below the tracked nonce the transaction was validated against outdated state;
+            // inserted as pending it would shadow the sender's executable transactions in the
+            // payload builder.
+            if tx.nonce() < info.state_nonce {
+                return Err(PoolError::new(
+                    *tx.hash(),
+                    InvalidPoolTransactionError::Consensus(
+                        InvalidTransactionError::NonceNotConsistent {
+                            tx: tx.nonce(),
+                            state: info.state_nonce,
+                        },
+                    ),
+                ))
+            }
             on_chain_nonce = info.state_nonce;
             on_chain_balance = info.balance;
-        }
-
-        // Below the tracked nonce the transaction was validated against outdated state; inserted
-        // as pending it would shadow the sender's executable transactions in the payload builder.
-        if tx.nonce() < on_chain_nonce {
-            return Err(PoolError::new(
-                *tx.hash(),
-                InvalidPoolTransactionError::Consensus(
-                    InvalidTransactionError::NonceNotConsistent {
-                        tx: tx.nonce(),
-                        state: on_chain_nonce,
-                    },
-                ),
-            ))
         }
 
         self.validate_auth(&tx, on_chain_nonce, on_chain_code_hash)?;
