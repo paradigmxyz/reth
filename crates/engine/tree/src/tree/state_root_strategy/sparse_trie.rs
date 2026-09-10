@@ -105,6 +105,14 @@ pub(super) struct SparseTrieCacheTask<A = ArenaParallelSparseTrie, S = ArenaPara
     /// not applied yet. Promotion instead writes the value it just encoded, which is always the
     /// newest one.
     existing_accounts: B256Map<Option<TrieAccount>>,
+    /// Accounts from [`Self::pending_account_updates`] that may have become promotable.
+    ///
+    /// Promotion pops from here instead of scanning every pending account on every round. An
+    /// address is queued when its pending entry appears, when its storage trie drains and when
+    /// its account leaf update is applied, which are the only transitions that can unblock it.
+    /// Queuing an account that is not ready yet is harmless: it is dropped again and re-queued
+    /// by the transition that finally unblocks it.
+    promotable_accounts: Vec<B256>,
     /// Cache of account proof targets that were already fetched/requested from the proof workers.
     /// Account to the broadest requested parent context (an unknown parent sorts before every
     /// known parent).
@@ -197,6 +205,7 @@ where
             new_storage_updates: Default::default(),
             pending_account_updates: Default::default(),
             existing_accounts: Default::default(),
+            promotable_accounts: Default::default(),
             fetched_account_targets: Default::default(),
             fetched_storage_targets: Default::default(),
             account_rlp_buf: Vec::with_capacity(TRIE_ACCOUNT_RLP_MAX_SIZE),
@@ -452,8 +461,18 @@ where
             self.promote_pending_account_updates()?;
             self.metrics.sparse_trie_process_updates_duration_histogram.record(t.elapsed());
 
-            if self.finished_state_updates && !self.has_pending_sparse_trie_updates() {
-                return Ok(true);
+            if self.finished_state_updates && !self.has_pending_leaf_updates() {
+                if self.pending_account_updates.is_empty() {
+                    return Ok(true);
+                }
+
+                // No leaf update is left that could unblock an account, so everything still
+                // pending must be promotable. Requeuing all of them turns a transition the
+                // ready queue missed into a full scan instead of a stalled task.
+                self.promote_all_pending_accounts()?;
+                if !self.has_pending_sparse_trie_updates() {
+                    return Ok(true);
+                }
             }
 
             self.dispatch_pending_targets()?;
@@ -566,7 +585,10 @@ where
 
             // Make sure account is tracked in `pending_account_updates` so that once storage root
             // is computed, it will be updated in the accounts trie.
-            self.pending_account_updates.entry(address).or_insert(None);
+            if let Entry::Vacant(entry) = self.pending_account_updates.entry(address) {
+                entry.insert(None);
+                self.promotable_accounts.push(address);
+            }
         }
 
         for (&address, &account) in &hashed_state_update.accounts {
@@ -578,7 +600,13 @@ where
 
             // Track account in `pending_account_updates` so that once storage root is computed,
             // it will be updated in the accounts trie.
-            self.pending_account_updates.insert(address, Some(account));
+            //
+            // A known account can be promoted as soon as its storage trie is drained, so an entry
+            // that only awaited a storage root has to be queued again.
+            if !matches!(self.pending_account_updates.insert(address, Some(account)), Some(Some(_)))
+            {
+                self.promotable_accounts.push(address);
+            }
         }
 
         self.final_hashed_state.extend(hashed_state_update);
@@ -743,6 +771,10 @@ where
             self.blocked_storage_updates.insert(address);
         } else {
             self.blocked_storage_updates.remove(&address);
+            if updates.is_empty() {
+                // The storage root is final now, so the account waiting for it can be promoted.
+                self.promotable_accounts.push(address);
+            }
         }
         if has_retryable {
             // These updates wait on a node that is not on their own path, so no reveal will
@@ -794,12 +826,15 @@ where
                     }
                 }
                 LeafUpdateEvent::Touched { key, value } => {
-                    if self.pending_account_updates.contains_key(&key) &&
-                        let Entry::Vacant(entry) = self.existing_accounts.entry(key)
-                    {
-                        entry.insert(
-                            value.filter(|value| !value.is_empty()).map(decode_trie_account),
-                        );
+                    if self.pending_account_updates.contains_key(&key) {
+                        // The account's own leaf update is applied, so nothing keeps it from
+                        // being promoted any more.
+                        self.promotable_accounts.push(key);
+                        if let Entry::Vacant(entry) = self.existing_accounts.entry(key) {
+                            entry.insert(
+                                value.filter(|value| !value.is_empty()).map(decode_trie_account),
+                            );
+                        }
                     }
                 }
             },
@@ -890,70 +925,28 @@ where
         }
 
         self.compute_drained_storage_roots();
+        self.drain_promotable_accounts()?;
 
+        #[cfg(debug_assertions)]
+        self.debug_assert_no_promotable_accounts();
+
+        Ok(())
+    }
+
+    /// Requeues every account still awaiting promotion and promotes what it can.
+    fn promote_all_pending_accounts(&mut self) -> SparseTrieResult<()> {
+        self.promotable_accounts.extend(self.pending_account_updates.keys().copied());
+        self.drain_promotable_accounts()
+    }
+
+    /// Promotes queued accounts until neither the queue nor the accounts trie makes progress.
+    fn drain_promotable_accounts(&mut self) -> SparseTrieResult<()> {
         loop {
             let span = trace_span!("promote_updates", promoted = tracing::field::Empty).entered();
-            // Now handle pending account updates that can be upgraded to a proper update.
-            let account_rlp_buf = &mut self.account_rlp_buf;
-            let existing_accounts = &mut self.existing_accounts;
-            let account_value_fallbacks = &mut self.account_value_fallbacks;
             let mut num_promoted = 0;
-            self.pending_account_updates.retain(|addr, account| {
-                if let Some(updates) = self.storage_updates.get(addr) {
-                    if !updates.is_empty() || self.blocked_storage_updates.contains(addr) {
-                        // If account has pending storage updates, it is still pending.
-                        return true;
-                    } else if let Some(account) = account.take() {
-                        let storage_root = self.trie.storage_root(addr, self.new_epoch).expect("updates are drained, storage trie should be revealed by now");
-                        promote_account_leaf(&mut self.account_updates, existing_accounts, account_rlp_buf, *addr, account, storage_root);
-                        num_promoted += 1;
-                        return false;
-                    }
-                }
-
-                // Get the current account state either from the trie or from latest account
-                // update, which the accounts trie may be holding on to until it is revealed.
-                let pending_update = match self.account_updates.get(addr) {
-                    Some(update) => Some(update),
-                    None => self
-                        .trie
-                        .state_trie_ref()
-                        .and_then(|trie| trie.blocked_updates().get(addr)),
-                };
-                let trie_account = match pending_update {
-                    Some(LeafUpdate::Changed(encoded)) => Some(encoded)
-                        .filter(|encoded| !encoded.is_empty())
-                        .map(|encoded| decode_trie_account(encoded)),
-                    // Needs to be revealed first
-                    Some(LeafUpdate::Touched) => return true,
-                    // The trie reports the value of every touched leaf it applies, so an
-                    // account whose update was already drained is normally cached here.
-                    None => match existing_accounts.get(addr) {
-                        Some(reported) => *reported,
-                        None => {
-                            *account_value_fallbacks += 1;
-                            self.trie.get_account_value(addr).map(|value| decode_trie_account(value))
-                        }
-                    },
-                };
-
-                let (account, storage_root) = if let Some(account) = account.take() {
-                    // If account is Some(_) here it means it didn't have any storage updates
-                    // and we can fetch the storage root directly from the account trie.
-                    //
-                    // If it did have storage updates, we would've had processed it above when iterating over storage tries.
-                    let storage_root = trie_account.map(|account| account.storage_root).unwrap_or(EMPTY_ROOT_HASH);
-
-                    (account, storage_root)
-                } else {
-                    (trie_account.map(Into::into), self.trie.storage_root(addr, self.new_epoch).expect("account had storage updates that were applied to its trie, storage root must be revealed by now"))
-                };
-
-                promote_account_leaf(&mut self.account_updates, existing_accounts, account_rlp_buf, *addr, account, storage_root);
-                num_promoted += 1;
-
-                false
-            });
+            while let Some(addr) = self.promotable_accounts.pop() {
+                num_promoted += usize::from(self.promote_account(addr));
+            }
             span.record("promoted", num_promoted);
             drop(span);
 
@@ -967,6 +960,115 @@ where
         }
 
         Ok(())
+    }
+
+    /// Turns the pending update for `addr` into an accounts trie leaf update, if its storage
+    /// root and its current account fields are both known by now.
+    ///
+    /// Returns whether the account was promoted. An account that is not ready stays pending and
+    /// is queued again by whichever transition unblocks it.
+    fn promote_account(&mut self, addr: B256) -> bool {
+        let Some(mut pending) = self.pending_account_updates.get(&addr).copied() else {
+            return false
+        };
+
+        if let Some(updates) = self.storage_updates.get(&addr) {
+            if !updates.is_empty() || self.blocked_storage_updates.contains(&addr) {
+                // If account has pending storage updates, it is still pending.
+                return false;
+            } else if let Some(account) = pending.take() {
+                let storage_root = self
+                    .trie
+                    .storage_root(&addr, self.new_epoch)
+                    .expect("updates are drained, storage trie should be revealed by now");
+                self.write_account_leaf(addr, account, storage_root);
+                return true;
+            }
+        }
+
+        // Get the current account state either from the trie or from latest account
+        // update, which the accounts trie may be holding on to until it is revealed.
+        let pending_update = match self.account_updates.get(&addr) {
+            Some(update) => Some(update),
+            None => self.trie.state_trie_ref().and_then(|trie| trie.blocked_updates().get(&addr)),
+        };
+        let trie_account = match pending_update {
+            Some(LeafUpdate::Changed(encoded)) => Some(encoded)
+                .filter(|encoded| !encoded.is_empty())
+                .map(|encoded| decode_trie_account(encoded)),
+            // Needs to be revealed first
+            Some(LeafUpdate::Touched) => return false,
+            // The trie reports the value of every touched leaf it applies, so an account whose
+            // update was already drained is normally cached here.
+            None => match self.existing_accounts.get(&addr) {
+                Some(reported) => *reported,
+                None => {
+                    self.account_value_fallbacks += 1;
+                    self.trie.get_account_value(&addr).map(|value| decode_trie_account(value))
+                }
+            },
+        };
+
+        let (account, storage_root) = if let Some(account) = pending.take() {
+            // If account is Some(_) here it means it didn't have any storage updates
+            // and we can fetch the storage root directly from the account trie.
+            //
+            // If it did have storage updates, we would've had processed it above when iterating
+            // over storage tries.
+            (account, trie_account.map_or(EMPTY_ROOT_HASH, |account| account.storage_root))
+        } else {
+            (
+                trie_account.map(Into::into),
+                self.trie.storage_root(&addr, self.new_epoch).expect(
+                    "account had storage updates that were applied to its trie, storage root must be revealed by now",
+                ),
+            )
+        };
+
+        self.write_account_leaf(addr, account, storage_root);
+        true
+    }
+
+    /// Queues the promoted account leaf value for the accounts trie, records it as the trie's
+    /// value for `addr` so a later promotion does not have to read it back, and clears the
+    /// account's pending entry.
+    fn write_account_leaf(&mut self, addr: B256, account: Option<Account>, storage_root: B256) {
+        let encoded = encode_account_leaf_value(account, storage_root, &mut self.account_rlp_buf);
+        self.existing_accounts.insert(
+            addr,
+            (!encoded.is_empty())
+                .then(|| account.unwrap_or_default().into_trie_account(storage_root)),
+        );
+        self.account_updates.insert(addr, LeafUpdate::Changed(encoded));
+        self.pending_account_updates.remove(&addr);
+    }
+
+    /// Asserts the ready queue did not miss a transition: every account left pending must still
+    /// be waiting for its storage trie to drain or for its own leaf update to be applied.
+    #[cfg(debug_assertions)]
+    fn debug_assert_no_promotable_accounts(&self) {
+        for (addr, pending) in &self.pending_account_updates {
+            if self.storage_updates.get(addr).is_some_and(|updates| !updates.is_empty()) ||
+                self.blocked_storage_updates.contains(addr)
+            {
+                continue
+            }
+
+            assert!(
+                !(self.storage_updates.contains_key(addr) && pending.is_some()),
+                "account {addr:?} could be promoted from its drained storage trie but was not queued",
+            );
+            assert!(
+                self.account_updates
+                    .get(addr)
+                    .or_else(|| self
+                        .trie
+                        .state_trie_ref()
+                        .and_then(|trie| trie.blocked_updates().get(addr)))
+                    .is_some_and(LeafUpdate::is_touched),
+                "account {addr:?} could be promoted but was not queued",
+            );
+        }
     }
 
     fn dispatch_pending_targets(&mut self) -> Result<(), StateRootTaskError> {
@@ -1017,11 +1119,18 @@ where
     }
 
     fn has_pending_sparse_trie_updates(&self) -> bool {
+        self.has_pending_leaf_updates() || !self.pending_account_updates.is_empty()
+    }
+
+    /// Returns whether any leaf update is still waiting to be applied to one of the tries.
+    ///
+    /// While this is false no trie can change any more, so every account still waiting for
+    /// promotion already has everything it needs.
+    fn has_pending_leaf_updates(&self) -> bool {
         !self.account_updates.is_empty() ||
             !self.blocked_storage_updates.is_empty() ||
             self.account_blocked_updates().is_some_and(|blocked| !blocked.is_empty()) ||
-            self.storage_updates.values().any(|updates| !updates.is_empty()) ||
-            !self.pending_account_updates.is_empty()
+            self.storage_updates.values().any(|updates| !updates.is_empty())
     }
 
     /// Returns the leaf updates the accounts trie could not apply yet, if it is revealed.
@@ -1178,24 +1287,6 @@ fn dispatch_with_chunking<T, I>(
     }
 
     dispatch(items);
-}
-
-/// Queues the promoted account leaf value for the accounts trie and records it as the trie's
-/// value for `addr`, so a later promotion of the same account does not have to read it back.
-fn promote_account_leaf(
-    account_updates: &mut B256Map<LeafUpdate>,
-    existing_accounts: &mut B256Map<Option<TrieAccount>>,
-    account_rlp_buf: &mut Vec<u8>,
-    addr: B256,
-    account: Option<Account>,
-    storage_root: B256,
-) {
-    let encoded = encode_account_leaf_value(account, storage_root, account_rlp_buf);
-    existing_accounts.insert(
-        addr,
-        (!encoded.is_empty()).then(|| account.unwrap_or_default().into_trie_account(storage_root)),
-    );
-    account_updates.insert(addr, LeafUpdate::Changed(encoded));
 }
 
 /// Decodes an account trie leaf value.
