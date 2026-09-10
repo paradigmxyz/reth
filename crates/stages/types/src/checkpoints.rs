@@ -76,8 +76,9 @@ impl reth_codecs::Compact for MerkleCheckpoint {
         len
     }
 
-    fn from_compact(mut buf: &[u8], _len: usize) -> (Self, &[u8]) {
+    fn from_compact(buf: &[u8], len: usize) -> (Self, &[u8]) {
         use bytes::Buf;
+        let (mut buf, trailing) = if len == 0 { (buf, &[][..]) } else { buf.split_at(len) };
         let target_block = buf.get_u64();
 
         let last_account_key = B256::from_slice(&buf[..32]);
@@ -106,7 +107,10 @@ impl reth_codecs::Compact for MerkleCheckpoint {
             }
         };
 
-        (Self { target_block, last_account_key, walker_stack, state, storage_root_checkpoint }, buf)
+        (
+            Self { target_block, last_account_key, walker_stack, state, storage_root_checkpoint },
+            if len == 0 { buf } else { trailing },
+        )
     }
 }
 
@@ -196,8 +200,9 @@ impl reth_codecs::Compact for StorageRootMerkleCheckpoint {
         len
     }
 
-    fn from_compact(mut buf: &[u8], _len: usize) -> (Self, &[u8]) {
+    fn from_compact(buf: &[u8], len: usize) -> (Self, &[u8]) {
         use bytes::Buf;
+        let (mut buf, trailing) = if len == 0 { (buf, &[][..]) } else { buf.split_at(len) };
 
         let last_storage_key = B256::from_slice(&buf[..32]);
         buf.advance(32);
@@ -239,7 +244,7 @@ impl reth_codecs::Compact for StorageRootMerkleCheckpoint {
                 #[cfg(feature = "account-ext")]
                 account_extension,
             },
-            buf,
+            if len == 0 { buf } else { trailing },
         )
     }
 }
@@ -689,6 +694,11 @@ mod tests {
             let empty_encoded = empty_checkpoint.to_compact(&mut empty_buf);
             assert_eq!(encoded, empty_encoded + 2 + checkpoint.account_extension.len());
             assert_eq!(empty_encoded, empty_buf.len());
+            empty_buf.extend_from_slice(&[0x12, 0x34]);
+            let (decoded, rest) =
+                StorageRootMerkleCheckpoint::from_compact(&empty_buf, empty_encoded);
+            assert_eq!(decoded, empty_checkpoint);
+            assert_eq!(rest, &[0x12, 0x34]);
         }
 
         buf.extend_from_slice(&[0x12, 0x34]);
