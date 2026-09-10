@@ -34,7 +34,7 @@ const SEED: u64 = 0xA11CE;
 
 fn arena_benches(c: &mut Criterion) {
     let mut group = c.benchmark_group("arena");
-    group.sample_size(10).warm_up_time(Duration::from_millis(300));
+    group.warm_up_time(Duration::from_millis(300));
 
     for leaves in env_sizes("ARENA_BENCH_LEAVES", DEFAULT_LEAVES) {
         let started = Instant::now();
@@ -53,7 +53,12 @@ fn arena_benches(c: &mut Criterion) {
             let id = format!("{}/{}", label(leaves), label(updates));
             let started = Instant::now();
             let prepared = Prepared::new(&harness, &cold, random_updates(&keys, updates, &mut rng));
-            eprintln!("prepared {id} in {:.1?}", started.elapsed());
+            eprintln!(
+                "prepared {id} in {:.1?}: {} proof nodes, {} of {updates} updates still blocked on retry",
+                started.elapsed(),
+                prepared.cold_proofs.len(),
+                prepared.retry_blocked,
+            );
 
             bench_combination(&mut group, &prepared, &id);
         }
@@ -79,6 +84,8 @@ struct Prepared {
     dirty: ArenaParallelSparseTrie,
     /// [`Self::dirty`] after hashing, with the recorded updates still in place.
     hashed: ArenaParallelSparseTrie,
+    /// How many updates still block on [`Self::half_revealed`].
+    retry_blocked: usize,
 }
 
 impl Prepared {
@@ -118,12 +125,22 @@ impl Prepared {
         let mut hashed = dirty.clone();
         hashed.root(ROOT_EPOCH);
 
-        Self { cold: cold.clone(), updates, cold_proofs, half_revealed, warm, dirty, hashed }
+        let retry_blocked = required_targets(&half_revealed, &updates).len();
+        Self {
+            cold: cold.clone(),
+            updates,
+            cold_proofs,
+            half_revealed,
+            warm,
+            dirty,
+            hashed,
+            retry_blocked,
+        }
     }
 }
 
 fn bench_combination(group: &mut BenchGroup<'_>, prepared: &Prepared, id: &str) {
-    group.measurement_time(Duration::from_secs(1));
+    group.sample_size(20).measurement_time(Duration::from_millis(1500));
 
     group.bench_function(BenchmarkId::new("update_leaves/cold", id), |b| {
         b.iter_batched(
@@ -165,9 +182,10 @@ fn bench_combination(group: &mut BenchGroup<'_>, prepared: &Prepared, id: &str) 
         )
     });
 
-    // `take_updates` is orders of magnitude cheaper than cloning its input, so cap the number of
-    // iterations criterion asks for instead of letting it target the group's measurement time.
-    group.measurement_time(Duration::from_millis(10));
+    // `take_updates` is orders of magnitude cheaper than cloning its input, and criterion sizes
+    // the run from the measured time alone. A tiny measurement time keeps it at criterion's
+    // floor of `sample_size * (sample_size + 1) / 2` iterations.
+    group.sample_size(10).measurement_time(Duration::from_millis(10));
     group.bench_function(BenchmarkId::new("take_updates", id), |b| {
         b.iter_batched(
             || prepared.hashed.clone(),
@@ -178,7 +196,7 @@ fn bench_combination(group: &mut BenchGroup<'_>, prepared: &Prepared, id: &str) 
 }
 
 fn bench_root_small_dirty(group: &mut BenchGroup<'_>, prepared: &Prepared, id: &str) {
-    group.measurement_time(Duration::from_secs(1));
+    group.sample_size(20).measurement_time(Duration::from_millis(1500));
     group.bench_function(BenchmarkId::new("root/small_dirty", id), |b| {
         b.iter_batched(
             || prepared.dirty.clone(),
@@ -269,7 +287,7 @@ fn env_sizes(var: &str, default: &[usize]) -> Vec<usize> {
 }
 
 fn label(count: usize) -> String {
-    if count >= 1_000 && count % 1_000 == 0 {
+    if count >= 1_000 && count.is_multiple_of(1_000) {
         format!("{}k", count / 1_000)
     } else {
         count.to_string()
