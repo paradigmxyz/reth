@@ -168,7 +168,9 @@ pub enum AccountRangeStep {
 /// attempt that was active when it was requested, never a later one.
 #[derive(Debug)]
 pub struct VerifiedRange {
+    // Write the attempt accepted when the range was requested.
     write: SnapWrite,
+    // Accounts authenticated against that attempt's root.
     range: VerifiedAccountRange,
 }
 

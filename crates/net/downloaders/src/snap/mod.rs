@@ -299,8 +299,11 @@ fn verify_account_range(
         .collect::<Result<Vec<_>, _>>()?;
     let next = verify_proof(request, &accounts, &response.proof)?;
 
-    // Authenticate the boundary account before removing it from the requested range.
-    accounts.truncate(accounts.partition_point(|(hash, _)| *hash <= request.limit_hash));
+    // Authenticate the boundary account before removing it from the requested range. Once
+    // removed, it is the first key after the response, so resuming from it cannot skip it.
+    let kept = accounts.partition_point(|(hash, _)| *hash <= request.limit_hash);
+    let next = accounts.get(kept).map(|(hash, _)| *hash).or(next);
+    accounts.truncate(kept);
     let has_more = next.is_some_and(|next| next <= request.limit_hash);
 
     Ok(VerifiedAccountRange {
@@ -566,7 +569,7 @@ mod tests {
                 origin: B256::ZERO,
                 accounts: vec![accounts[0]],
                 has_more: false,
-                next: Some(key(4)),
+                next: Some(key(3)),
             })
         );
         assert!(client.reported().is_empty());
@@ -655,7 +658,7 @@ mod tests {
                 origin: key(3),
                 accounts: Vec::new(),
                 has_more: false,
-                next: None,
+                next: Some(key(9)),
             })
         );
         assert!(client.reported().is_empty());

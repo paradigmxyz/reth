@@ -8,7 +8,6 @@ use alloy_primitives::{
     B256, KECCAK256_EMPTY,
 };
 use reth_db_api::{
-    cursor::DbCursorRO,
     tables,
     transaction::{DbTx, DbTxMut},
     RawKey, RawTable,
@@ -18,11 +17,18 @@ use reth_primitives_traits::Account;
 use reth_storage_api::{DBProvider, MetadataProvider, MetadataWriter, SnapAttemptId, StateWriter};
 use reth_storage_errors::provider::ProviderError;
 use reth_trie_common::{
-    root::storage_root_unsorted, HashedPostState, HashedStorage, EMPTY_ROOT_HASH,
+    root::storage_root, HashedPostState, HashedPostStateSorted, HashedStorage, TrieAccount,
+    EMPTY_ROOT_HASH,
 };
 use revm::{bytecode::Bytecode, database::states::StateChangeset};
 use serde::{Deserialize, Serialize};
 use std::ops::Bound;
+
+// Metadata key of the coverage record.
+const COVERAGE_KEY: &str = "snap_account_coverage";
+
+// Encoding version of the coverage record this build writes.
+const COVERAGE_VERSION: u32 = 1;
 
 /// Persistence for the account ranges an attempt downloads.
 ///
@@ -75,23 +81,41 @@ impl AccountCoverage {
     pub const fn is_complete(&self) -> bool {
         self.next.is_none()
     }
+
+    // The coverage after `range`, which must start at this cursor and end past it.
+    fn advance(&self, range: &VerifiedAccountRange) -> Result<Self, SnapSyncError> {
+        let origin = range.origin();
+        if self.next != Some(origin) {
+            return Err(SnapSyncError::OutOfOrderRange { expected: self.next, got: origin })
+        }
+        if range.next().is_some_and(|next| next <= origin) {
+            return Err(SnapSyncError::NoProgress { origin })
+        }
+        Ok(Self { next: range.next() })
+    }
+
+    // Keys from this cursor up to `to`, which a range proved hold only its own accounts.
+    fn interval_to(&self, to: &Self) -> (Bound<B256>, Bound<B256>) {
+        (
+            self.next.map_or(Bound::Unbounded, Bound::Included),
+            to.next.map_or(Bound::Unbounded, Bound::Excluded),
+        )
+    }
 }
-
-// Metadata key of the coverage record.
-const COVERAGE_KEY: &str = "snap_account_coverage";
-
-// Encoding version of the coverage record this build writes.
-const COVERAGE_VERSION: u32 = 1;
 
 // The coverage record as persisted, tied to the attempt that recorded it.
 #[derive(Serialize, Deserialize)]
 struct StoredCoverage {
+    // Encoding version, checked before the rest is decoded.
     version: u32,
+    // Attempt the coverage belongs to.
     attempt: SnapAttemptId,
+    // How far that attempt has downloaded.
     coverage: AccountCoverage,
 }
 
 impl StoredCoverage {
+    // Serializes `coverage` for `attempt` at this build's version.
     fn encode(attempt: SnapAttemptId, coverage: AccountCoverage) -> Result<Vec<u8>, SnapSyncError> {
         let stored = Self { version: COVERAGE_VERSION, attempt, coverage };
         Ok(serde_json::to_vec(&stored).map_err(ProviderError::other)?)
@@ -110,6 +134,7 @@ impl StoredCoverage {
 }
 
 impl<T: MetadataProvider> SnapAccountStore for T {
+    // Resumes the recorded coverage, so restarting an attempt keeps its progress.
     fn start_account_coverage(&self, write: SnapWrite) -> Result<AccountCoverage, SnapSyncError>
     where
         Self: MetadataWriter,
@@ -122,6 +147,7 @@ impl<T: MetadataProvider> SnapAccountStore for T {
         Ok(start)
     }
 
+    // A record left by another attempt reads as no coverage.
     fn account_coverage(&self, write: SnapWrite) -> Result<Option<AccountCoverage>, SnapSyncError> {
         self.authorize_snap_write(write)?;
         let Some(bytes) = self.get_metadata(COVERAGE_KEY)? else { return Ok(None) };
@@ -129,6 +155,7 @@ impl<T: MetadataProvider> SnapAccountStore for T {
         Ok((stored.attempt == write.attempt()).then_some(stored.coverage))
     }
 
+    // Every check runs before the first write, so a refused range changes nothing.
     fn commit_account_range(
         &self,
         write: SnapWrite,
@@ -147,82 +174,115 @@ impl<T: MetadataProvider> SnapAccountStore for T {
             })
         }
         let coverage = self.account_coverage(write)?.ok_or(SnapSyncError::NoCoverage)?;
-        let origin = range.origin();
-        if coverage.next != Some(origin) {
-            return Err(SnapSyncError::OutOfOrderRange { expected: coverage.next, got: origin })
-        }
-        if range.next().is_some_and(|next| next <= origin) {
-            return Err(SnapSyncError::NoProgress { origin })
-        }
+        let advanced = coverage.advance(range)?;
+        let dependencies = RangeDependencies::new(range.accounts(), storages, bytecodes);
+        dependencies.verify(range.accounts(), self.tx_ref())?;
 
-        // Code known to be available: supplied and hashed, or already in the table.
-        let mut available = B256Set::default();
-        for (hash, code) in &bytecodes {
+        let interval = coverage.interval_to(&advanced);
+        self.remove::<tables::HashedAccounts>(interval)?;
+        self.remove::<tables::HashedStorages>(interval)?;
+        dependencies.write(self)?;
+        self.write_metadata(COVERAGE_KEY, StoredCoverage::encode(write.attempt(), advanced)?)?;
+        Ok(advanced)
+    }
+}
+
+// Accounts of a range with the storage and code supplied for them.
+struct RangeDependencies {
+    // Accounts and storage, sorted once for both the root checks and the write.
+    state: HashedPostStateSorted,
+    // Code keyed by the hash it was supplied under.
+    bytecodes: Vec<(B256, Bytecode)>,
+}
+
+impl RangeDependencies {
+    fn new(
+        accounts: &[(B256, TrieAccount)],
+        storages: B256Map<HashedStorage>,
+        bytecodes: Vec<(B256, Bytecode)>,
+    ) -> Self {
+        let state = HashedPostState::default()
+            .with_accounts(
+                accounts.iter().map(|(hash, account)| (*hash, Some(Account::from(*account)))),
+            )
+            .with_storages(storages)
+            .into_sorted();
+        Self { state, bytecodes }
+    }
+
+    // Checks storage against each account's root, and code against its hash or the table.
+    fn verify(
+        &self,
+        accounts: &[(B256, TrieAccount)],
+        tx: &impl DbTx,
+    ) -> Result<(), SnapSyncError> {
+        let mut available = self.supplied_code()?;
+        let mut contracts = B256Set::default();
+        for (hash, account) in accounts {
+            if self.verify_storage(*hash, account)? {
+                contracts.insert(*hash);
+            }
+            // Only presence matters, so stored code is not decoded.
+            if account.code_hash != KECCAK256_EMPTY &&
+                available.insert(account.code_hash) &&
+                tx.get::<RawTable<tables::Bytecodes>>(RawKey::new(account.code_hash))?.is_none()
+            {
+                return Err(SnapSyncError::MissingCode { hash: account.code_hash })
+            }
+        }
+        if let Some(account) =
+            self.state.account_storages().keys().find(|hash| !contracts.contains(*hash))
+        {
+            return Err(SnapSyncError::UnexpectedStorage { account: *account })
+        }
+        Ok(())
+    }
+
+    // Hashes of the supplied code, refusing code filed under a hash it does not hash to.
+    fn supplied_code(&self) -> Result<B256Set, SnapSyncError> {
+        let mut hashes = B256Set::default();
+        for (hash, code) in &self.bytecodes {
             let got = code.hash_slow();
             if got != *hash {
                 return Err(SnapSyncError::CodeMismatch { expected: *hash, got })
             }
-            available.insert(*hash);
+            hashes.insert(*hash);
         }
-        let mut contracts = B256Set::default();
-        for (hash, account) in range.accounts() {
-            if account.storage_root != EMPTY_ROOT_HASH {
-                let storage =
-                    storages.get(hash).ok_or(SnapSyncError::MissingStorage { account: *hash })?;
-                let got = storage_root_unsorted(
-                    storage.storage.iter().filter(|(_, v)| !v.is_zero()).map(|(k, v)| (*k, *v)),
-                );
-                if got != account.storage_root {
-                    return Err(SnapSyncError::StorageRootMismatch {
-                        account: *hash,
-                        expected: account.storage_root,
-                        got,
-                    })
-                }
-                contracts.insert(*hash);
-            }
-            if account.code_hash != KECCAK256_EMPTY && !available.contains(&account.code_hash) {
-                // Only presence matters, so the code is not decoded.
-                let key = RawKey::new(account.code_hash);
-                if self.tx_ref().get::<RawTable<tables::Bytecodes>>(key)?.is_none() {
-                    return Err(SnapSyncError::MissingCode { hash: account.code_hash })
-                }
-                available.insert(account.code_hash);
-            }
-        }
-        if let Some(account) = storages.keys().find(|hash| !contracts.contains(*hash)) {
-            return Err(SnapSyncError::UnexpectedStorage { account: *account })
-        }
+        Ok(hashes)
+    }
 
-        // The range proves its interval holds only its accounts, so drop what an earlier
-        // attempt left there.
-        let interval =
-            (Bound::Included(origin), range.next().map_or(Bound::Unbounded, Bound::Excluded));
-        let mut accounts = self.tx_ref().cursor_write::<tables::HashedAccounts>()?;
-        let mut walker = accounts.walk_range(interval)?;
-        while walker.next().transpose()?.is_some() {
-            walker.delete_current()?;
+    // Whether `account` has storage, which must be supplied and hash to its root.
+    fn verify_storage(&self, hash: B256, account: &TrieAccount) -> Result<bool, SnapSyncError> {
+        if account.storage_root == EMPTY_ROOT_HASH {
+            return Ok(false)
         }
-        let mut slots = self.tx_ref().cursor_dup_write::<tables::HashedStorages>()?;
-        let mut walker = slots.walk_range(interval)?;
-        while walker.next().transpose()?.is_some() {
-            walker.delete_current()?;
+        let storage = self
+            .state
+            .account_storages()
+            .get(&hash)
+            .ok_or(SnapSyncError::MissingStorage { account: hash })?;
+        // Zero slots are deletions, which the trie does not hold.
+        let got = storage_root(
+            storage.storage_slots_ref().iter().filter(|(_, value)| !value.is_zero()).copied(),
+        );
+        if got != account.storage_root {
+            return Err(SnapSyncError::StorageRootMismatch {
+                account: hash,
+                expected: account.storage_root,
+                got,
+            })
         }
+        Ok(true)
+    }
 
-        let state = HashedPostState::default()
-            .with_accounts(
-                range
-                    .accounts()
-                    .iter()
-                    .map(|(hash, account)| (*hash, Some(Account::from(*account)))),
-            )
-            .with_storages(storages);
-        self.write_hashed_state(&state.into_sorted())?;
-        self.write_state_changes(StateChangeset { contracts: bytecodes, ..Default::default() })?;
-
-        let coverage = AccountCoverage { next: range.next() };
-        self.write_metadata(COVERAGE_KEY, StoredCoverage::encode(write.attempt(), coverage)?)?;
-        Ok(coverage)
+    // Writes the accounts with their storage and code.
+    fn write(self, writer: &impl StateWriter) -> Result<(), SnapSyncError> {
+        writer.write_hashed_state(&self.state)?;
+        writer.write_state_changes(StateChangeset {
+            contracts: self.bytecodes,
+            ..Default::default()
+        })?;
+        Ok(())
     }
 }
 
@@ -234,10 +294,11 @@ mod tests {
         SnapGeneration,
     };
     use alloy_primitives::{Bytes, U256};
+    use reth_db_api::cursor::DbCursorRO;
     use reth_provider::{
         test_utils::MockNodeTypesWithDB, DatabaseProviderFactory, ProviderFactory,
     };
-    use reth_trie_common::TrieAccount;
+    use reth_trie_common::root::storage_root_unsorted;
 
     const FAR: B256 = B256::repeat_byte(0xaa);
     const SLOT: B256 = B256::repeat_byte(0x55);
@@ -422,7 +483,7 @@ mod tests {
 
         // A slot short of the storage root, as a partial download would be.
         let partial = B256Map::from_iter([(key(2), HashedStorage::default())]);
-        let short = provider.commit_account_range(write, &range, partial, bytecodes.clone());
+        let short = provider.commit_account_range(write, &range, partial, bytecodes);
         assert!(matches!(
             short,
             Err(SnapSyncError::StorageRootMismatch { account, expected, .. })
