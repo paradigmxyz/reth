@@ -1,6 +1,10 @@
 //! Sparse Trie task related functionality.
 
-use std::sync::Arc;
+use std::{
+    any::Any,
+    panic::{self, AssertUnwindSafe},
+    sync::Arc,
+};
 
 use super::{evm_state_to_hashed_post_state, StateRootComputeOutcome, StateRootMessage};
 use alloy_primitives::{
@@ -119,9 +123,9 @@ pub(super) struct SparseTrieCacheTask<A = ArenaParallelSparseTrie, S = ArenaPara
     /// address has to treat it as unavailable until the job hands it back.
     in_flight_storage: B256Map<InFlightStorage>,
     /// Sender handed to storage jobs. Kept alive by the task so the receiver never disconnects.
-    storage_done_tx: CrossbeamSender<StorageTrieJobDone<S>>,
+    storage_done_tx: CrossbeamSender<StorageJobMessage<S>>,
     /// Receives storage tries coming back from jobs spawned by this task.
-    storage_done_rx: CrossbeamReceiver<StorageTrieJobDone<S>>,
+    storage_done_rx: CrossbeamReceiver<StorageJobMessage<S>>,
     /// Whether blocked storage leaf updates are worth retrying, see
     /// [`Self::process_leaf_updates`].
     storage_retry_armed: bool,
@@ -339,7 +343,7 @@ where
                     let Ok(returned) = message else {
                         unreachable!("we own the sender half")
                     };
-                    self.on_storage_trie_returned(returned)?;
+                    self.on_storage_job_message(returned)?;
                 },
                 recv(self.cancel_rx) -> _ => return Err(StateRootTaskError::Canceled),
             }
@@ -378,7 +382,7 @@ where
                     let Ok(returned) = message else {
                         unreachable!("we own the sender half")
                     };
-                    self.on_storage_trie_returned(returned)?;
+                    self.on_storage_job_message(returned)?;
                 },
                 recv(self.cancel_rx) -> _ => return Err(StateRootTaskError::Canceled),
             }
@@ -898,12 +902,31 @@ where
                 )
                 .entered();
                 for job in chunk {
-                    if storage_done_tx.send(job.run(new_epoch, retain_updates)).is_err() {
+                    let address = job.address;
+                    let message = match panic::catch_unwind(AssertUnwindSafe(|| {
+                        job.run(new_epoch, retain_updates)
+                    })) {
+                        Ok(done) => StorageJobMessage::Done(done),
+                        Err(payload) => StorageJobMessage::Panicked { address, payload },
+                    };
+                    if storage_done_tx.send(message).is_err() {
                         // Nobody is waiting for the result anymore, drop the rest here.
                         return;
                     }
                 }
             });
+        }
+    }
+
+    /// Handles a message from a storage job: puts a finished trie back, or resumes a panic that
+    /// happened on the job thread here, where it fails this task like an inline panic would.
+    fn on_storage_job_message(&mut self, message: StorageJobMessage<S>) -> SparseTrieResult<()> {
+        match message {
+            StorageJobMessage::Done(done) => self.on_storage_trie_returned(done),
+            StorageJobMessage::Panicked { address, payload } => {
+                self.in_flight_storage.remove(&address);
+                panic::resume_unwind(payload)
+            }
         }
     }
 
@@ -944,8 +967,8 @@ where
 
     /// Reinstates every storage trie whose job has already finished, without blocking.
     fn drain_returned_storage_tries(&mut self) -> SparseTrieResult<()> {
-        while let Ok(done) = self.storage_done_rx.try_recv() {
-            self.on_storage_trie_returned(done)?;
+        while let Ok(message) = self.storage_done_rx.try_recv() {
+            self.on_storage_job_message(message)?;
         }
 
         Ok(())
@@ -1207,6 +1230,21 @@ enum StorageJobKind {
     Root,
     /// Reveal these proof nodes into the trie.
     Reveal(Vec<ProofTrieNodeV2>),
+}
+
+/// What a spawned storage job sends back to the sparse trie task.
+enum StorageJobMessage<S> {
+    /// The job finished and hands its trie back.
+    Done(StorageTrieJobDone<S>),
+    /// The job panicked and its trie is lost. The global rayon pool has no panic handler, so a
+    /// panic escaping a spawned job would abort the process; it is caught and resumed on the task
+    /// thread instead, where it fails the state root calculation like an inline panic.
+    Panicked {
+        /// Hashed address of the trie the job owned.
+        address: B256,
+        /// The panic payload, resumed on the task thread.
+        payload: Box<dyn Any + Send>,
+    },
 }
 
 /// A storage trie coming back to the sparse trie task after its job finished.
