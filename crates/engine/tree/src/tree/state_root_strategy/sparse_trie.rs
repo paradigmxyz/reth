@@ -1365,13 +1365,15 @@ mod tests {
                         .collect(),
                 );
             }
+            let failing_address = *task.new_storage_updates.keys().next().unwrap();
+            task.trie.storage_trie_mut(&failing_address).unwrap().fail = true;
             task.new_account_updates.insert(B256::ZERO, LeafUpdate::Touched);
             assert!(task.process_leaf_updates(true).is_err());
             assert_eq!(task.trie.storage_tries_mut().len(), 3);
             assert_eq!(task.fetched_storage_targets.len(), 3);
-            assert_eq!(task.new_storage_updates[&B256::ZERO].len(), 0);
-            assert_eq!(task.new_storage_updates[&B256::repeat_byte(1)].len(), 1024);
-            assert_eq!(task.new_storage_updates[&B256::repeat_byte(2)].len(), 0);
+            for (address, updates) in &task.new_storage_updates {
+                assert_eq!(updates.len(), if *address == failing_address { 1024 } else { 0 });
+            }
             assert_eq!(task.storage_cache_hits, 2048);
             assert_eq!(task.new_account_updates.len(), 1);
         });
