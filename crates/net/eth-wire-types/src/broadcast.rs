@@ -824,7 +824,10 @@ impl proptest::prelude::Arbitrary for NewPooledTransactionHashes72 {
                 // Map the usize values to the range 0..131072(0x20000)
                 let sizes_vec = vec(proptest::num::usize::ANY.prop_map(|x| x % 131072), len..=len);
                 let hashes_vec = vec(any::<B256>(), len..=len);
-                let cell_mask = any::<Option<B128>>();
+                // A zero mask is spelled `None`, so generating `Some(ZERO)` would produce a
+                // value that cannot survive its own encoding.
+                let cell_mask =
+                    any::<Option<B128>>().prop_map(|mask| mask.filter(|mask| !mask.is_zero()));
 
                 (types_vec, sizes_vec, hashes_vec, cell_mask)
             })
@@ -1667,6 +1670,26 @@ mod tests {
         for vector in vectors {
             test_encoding_vector(vector);
         }
+    }
+
+    #[test]
+    fn eth_72_zero_cell_mask_decodes_as_none() {
+        // The wire cannot tell a zero mask from an absent one, so `None` is the only
+        // representation that survives a round trip.
+        let zero = NewPooledTransactionHashes72 {
+            types: vec![],
+            sizes: vec![],
+            hashes: vec![],
+            cell_mask: Some(B128::ZERO),
+        };
+
+        let mut encoded = Vec::new();
+        zero.encode(&mut encoded);
+
+        let decoded = NewPooledTransactionHashes72::decode(&mut &encoded[..]).unwrap();
+
+        assert_eq!(decoded.cell_mask, None);
+        assert_eq!(encoded, hex!("d480c0c09000000000000000000000000000000000"));
     }
 
     #[test]
