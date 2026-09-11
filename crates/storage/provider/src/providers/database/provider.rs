@@ -2172,10 +2172,18 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> ReceiptProvider for DatabasePr
 
         // collect block body indices for each block in the range
         let range_len = block_range.end().saturating_sub(*block_range.start()) as usize + 1;
+        let range_end = *block_range.end();
         let mut block_body_indices = Vec::with_capacity(range_len);
+        let mut cursor = self.tx.cursor_read::<tables::BlockBodyIndices>()?;
+        let mut walker = cursor.walk_range(block_range.clone())?;
+        let mut next_indices = walker.next().transpose()?;
         for block_num in block_range {
-            if let Some(indices) = self.block_body_indices(block_num)? {
+            if next_indices.as_ref().is_some_and(|(number, _)| *number == block_num) {
+                let (_, indices) = next_indices.take().expect("block number checked above");
                 block_body_indices.push(indices);
+                if block_num < range_end {
+                    next_indices = walker.next().transpose()?;
+                }
             } else {
                 // use default indices for missing blocks (empty block)
                 block_body_indices.push(StoredBlockBodyIndices::default());
@@ -4200,6 +4208,40 @@ mod tests {
         // non-existent blocks should return empty vecs for each block
         let result = provider.receipts_by_block_range(10..=12).unwrap();
         assert_eq!(result, vec![vec![], vec![], vec![]]);
+    }
+
+    #[test]
+    fn test_receipts_by_block_range_missing_block_body_indices() {
+        let factory = create_test_provider_factory();
+        let provider_rw = factory.provider_rw().unwrap();
+
+        let receipt_1 = Receipt { cumulative_gas_used: 1, ..Default::default() };
+        let receipt_3 = Receipt { cumulative_gas_used: 3, ..Default::default() };
+        provider_rw
+            .tx
+            .put::<tables::BlockBodyIndices>(
+                1,
+                StoredBlockBodyIndices { first_tx_num: 0, tx_count: 1 },
+            )
+            .unwrap();
+        provider_rw
+            .tx
+            .put::<tables::BlockBodyIndices>(
+                3,
+                StoredBlockBodyIndices { first_tx_num: 1, tx_count: 1 },
+            )
+            .unwrap();
+        provider_rw.tx.put::<tables::Receipts<Receipt>>(0, receipt_1.clone()).unwrap();
+        provider_rw.tx.put::<tables::Receipts<Receipt>>(1, receipt_3.clone()).unwrap();
+        provider_rw.commit().unwrap();
+
+        let provider = factory.provider().unwrap();
+        let result = provider.receipts_by_block_range(1..=3).unwrap();
+
+        assert_eq!(result.len(), 3);
+        assert_eq!(result[0], vec![receipt_1]);
+        assert!(result[1].is_empty());
+        assert_eq!(result[2], vec![receipt_3]);
     }
 
     #[test]
