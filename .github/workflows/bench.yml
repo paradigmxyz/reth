@@ -1166,6 +1166,23 @@ jobs:
             exit 1
           fi
 
+      - name: Validate linked MDBX library on Linux
+        if: runner.os == 'Linux'
+        run: |
+          for label in baseline feature; do
+            source_dir="$(cd "../reth-$label" && pwd)"
+            if [ ! -f "$source_dir/crates/storage/libmdbx-rs/mdbx-sys/tests/no_mincore_integration.c" ]; then
+              continue
+            fi
+            echo "Running linked MDBX tests for $label"
+            (
+              cd "$source_dir"
+              CARGO_TARGET_DIR="$RUNNER_TEMP/mdbx-linked-tests/$label" \
+                RUSTFLAGS="-C target-cpu=native" \
+                cargo test --locked -p reth-libmdbx --all-features
+            )
+          done
+
       - name: Sync snapshot
         id: snapshot-check
         run: |
