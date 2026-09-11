@@ -43,6 +43,11 @@ impl BlockedLeafUpdates {
         self.num_retryable > 0
     }
 
+    /// Returns how many of the blocked updates can be applied again.
+    pub const fn retryable_len(&self) -> usize {
+        self.num_retryable
+    }
+
     /// Returns the blocked update for the given key, if there is one.
     pub fn get(&self, key: &B256) -> Option<&LeafUpdate> {
         self.position(key).map(|pos| &self.entries[pos].update)

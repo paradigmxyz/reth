@@ -823,6 +823,10 @@ where
             jobs.push(StorageTrieJob { address, work });
         }
 
+        if inline_round {
+            self.metrics.sparse_trie_inline_storage_duration_histogram.record(started.elapsed());
+        }
+
         self.submit_storage_jobs(jobs);
 
         Ok(())
@@ -1397,6 +1401,9 @@ struct StorageTrieWork<S> {
     /// Whether this address ever had storage leaf updates queued, which is what makes promotion
     /// of its account wait for a recomputed storage root.
     updated: bool,
+    /// Leaf updates applied to `trie` since its root was last computed, which is what the next
+    /// [`RevealableSparseTrie::root`] has to walk.
+    dirty_leaves: usize,
 }
 
 impl<S: SparseTrie + Default> StorageTrieWork<S> {
@@ -1408,13 +1415,14 @@ impl<S: SparseTrie + Default> StorageTrieWork<S> {
             fetched: Default::default(),
             dirty: false,
             updated: false,
+            dirty_leaves: 0,
         }
     }
 
     /// Reveals the queued proof nodes, applies the leaf updates that are not blocked by a blinded
     /// node, and recomputes the root once nothing is left to apply.
     fn run(&mut self, new_epoch: TrieNodeEpoch, retain_updates: bool) -> StorageWorkOutput {
-        let Self { trie, pending, proofs, fetched, dirty, .. } = self;
+        let Self { trie, pending, proofs, fetched, dirty, dirty_leaves, .. } = self;
         *dirty = false;
         let mut output = StorageWorkOutput::default();
 
@@ -1444,8 +1452,10 @@ impl<S: SparseTrie + Default> StorageTrieWork<S> {
                 }
             });
             let pending_after = pending.len() + trie.blocked_updates().len();
-            output.cache_hits = pending_before.saturating_sub(pending_after) as u64;
+            let applied = pending_before.saturating_sub(pending_after);
+            output.cache_hits = applied as u64;
             output.cache_misses = pending_after as u64;
+            *dirty_leaves += applied;
             if output.result.is_err() {
                 return output
             }
@@ -1453,6 +1463,7 @@ impl<S: SparseTrie + Default> StorageTrieWork<S> {
 
         if self.needs_root() {
             self.trie.root(new_epoch);
+            self.dirty_leaves = 0;
         }
 
         output
@@ -1510,7 +1521,19 @@ impl<S: SparseTrie + Default> StorageTrieWork<S> {
     /// Only a trie this block changed is hashed here: for the others the root the account leaf
     /// already carries is still correct.
     fn needs_root(&self) -> bool {
-        self.updated && self.is_drained() && self.trie.is_revealed() && !self.trie.is_root_cached()
+        self.is_drained() && self.may_hash()
+    }
+
+    /// Returns whether a pass could end by recomputing the root.
+    ///
+    /// A pass hashes the trie as soon as it applies the last update, so the cost belongs to that
+    /// pass and not to a later one: by the time [`Self::needs_root`] holds on its own the hash
+    /// has already been paid. The one case where this pass certainly does not hash is an update
+    /// blocked on a node it does not reveal, because only a reveal can unblock one.
+    fn may_hash(&self) -> bool {
+        let blocked = self.trie.blocked_updates();
+        let stays_blocked = self.proofs.is_empty() && blocked.len() > blocked.retryable_len();
+        self.updated && !stays_blocked && self.trie.is_revealed() && !self.trie.is_root_cached()
     }
 
     /// Returns whether a pass would only turn pending updates into proof targets.
@@ -1523,17 +1546,19 @@ impl<S: SparseTrie + Default> StorageTrieWork<S> {
 
     /// Rough cost of the next pass, for deciding whether it is worth a handoff.
     fn work_units(&self) -> usize {
-        // Hashing walks everything the applied updates dirtied, which is the work the handoff
-        // exists for.
-        if self.needs_root() {
-            return INLINE_STORAGE_WORK_UNITS + 1
-        }
+        let blocked = self.trie.blocked_updates();
 
         // A retry rebuilds and resorts the whole blocked set, not only the entries a reveal
-        // unblocked, so its cost scales with that set.
-        let blocked = self.trie.blocked_updates();
-        let retry = if blocked.has_retryable() { blocked.len() } else { 0 };
-        self.proofs.len() + self.pending.len() + retry
+        // unblocked, so its cost scales with that set. Queued proof nodes are what makes entries
+        // retryable in the first place, and they are revealed before the retry runs.
+        let retry =
+            if blocked.has_retryable() || !self.proofs.is_empty() { blocked.len() } else { 0 };
+
+        // Hashing walks everything the block dirtied in this trie, which is the work the handoff
+        // exists for, and what it costs has nothing to do with how much this pass applies.
+        let hash = if self.may_hash() { self.dirty_leaves } else { 0 };
+
+        self.proofs.len() + self.pending.len() + retry + hash
     }
 }
 
@@ -1785,6 +1810,9 @@ pub(super) struct SparseTrieTaskMetrics {
     pub(super) sparse_trie_process_updates_duration_histogram: Histogram,
     /// Histogram of durations storage tries spend checked out for a job on another thread.
     pub(super) sparse_trie_storage_job_duration_histogram: Histogram,
+    /// Histogram of durations of the storage rounds the task runs itself instead of handing them
+    /// to a shard, which is what [`INLINE_STORAGE_WORK_UNITS`] is meant to bound.
+    pub(super) sparse_trie_inline_storage_duration_histogram: Histogram,
     /// Histogram of how many storage tries a shard hands back in one message, which is how many
     /// tries the task takes back per wakeup.
     pub(super) sparse_trie_storage_return_batch_size: Histogram,
@@ -1828,9 +1856,10 @@ const DEFAULT_MAX_TARGETS_FOR_CHUNKING: usize = 300;
 /// Start proof fetching while the first state-update batch is still arriving.
 const INITIAL_UPDATE_BATCH_SIZE: usize = 64;
 
-/// A round of storage passes that would do at most this much work - proof nodes to reveal plus
-/// leaf updates to apply - runs on the sparse trie task itself, because handing the tries to
-/// another thread and waiting for them to come back costs more than the work.
+/// A round of storage passes that would do at most this much work - proof nodes to reveal, leaf
+/// updates to apply, blocked updates to retry and dirtied leaves to hash - runs on the sparse
+/// trie task itself, because handing the tries to another thread and waiting for them to come
+/// back costs more than the work. See [`StorageTrieWork::work_units`].
 const INLINE_STORAGE_WORK_UNITS: usize = 16;
 
 /// Dispatches work items as a single unit or in chunks based on target size and worker
@@ -1943,7 +1972,7 @@ mod tests {
     use reth_db_common::init::init_genesis;
     use reth_provider::test_utils::create_test_provider_factory;
     use reth_storage_overlay::{OverlayManager, OverlayStateProviderFactory};
-    use reth_trie_common::{LeafNode, Nibbles, TrieNodeV2};
+    use reth_trie_common::{BranchNodeV2, LeafNode, Nibbles, RlpNode, TrieMask, TrieNodeV2};
     use reth_trie_parallel::proof_task::ProofTaskCtx;
     use reth_trie_sparse::ArenaParallelSparseTrie;
 
@@ -1997,6 +2026,44 @@ mod tests {
             panic!("payload is out with a job")
         };
         work.trie.root(TrieNodeEpoch::new(1)).expect("storage trie must be revealed")
+    }
+
+    /// Leaf updates for the keys made of each of `bytes` repeated.
+    fn changed_updates(bytes: impl IntoIterator<Item = u8>) -> B256Map<LeafUpdate> {
+        bytes
+            .into_iter()
+            .map(|byte| (B256::repeat_byte(byte), LeafUpdate::Changed(leaf_value(byte))))
+            .collect()
+    }
+
+    fn leaf_value(byte: u8) -> Vec<u8> {
+        alloy_rlp::encode_fixed_size(&U256::from(u16::from(byte) + 1)).to_vec()
+    }
+
+    /// A payload whose trie is a root branch with blinded children at nibbles 0 and 1: an update
+    /// for a key starting with one of them blocks, any other key applies without a proof.
+    fn work_with_blinded_root() -> StorageTrieWork<ArenaParallelSparseTrie> {
+        let state_mask = TrieMask::new(0b0011);
+        let children = vec![
+            RlpNode::word_rlp(&B256::repeat_byte(0xAA)),
+            RlpNode::word_rlp(&B256::repeat_byte(0xBB)),
+        ];
+        let root =
+            TrieNodeV2::Branch(BranchNodeV2::new(Nibbles::default(), children, state_mask, None));
+        let mut trie = RevealableSparseTrie::<ArenaParallelSparseTrie>::blind();
+        trie.reveal_root(root, None, false).expect("root reveals");
+        StorageTrieWork::new(trie)
+    }
+
+    /// A proof node revealing the blinded child of [`work_with_blinded_root`] that the key made
+    /// of `byte` repeated is blocked on.
+    fn blinded_child_proof(byte: u8) -> ProofTrieNodeV2 {
+        let key = Nibbles::unpack(B256::repeat_byte(byte));
+        ProofTrieNodeV2 {
+            path: key.slice(..1),
+            node: TrieNodeV2::Leaf(LeafNode::new(key.slice(1..), leaf_value(byte))),
+            masks: None,
+        }
     }
 
     /// Builds a job for `address` whose pass applies one leaf update to a revealed empty trie.
@@ -2314,6 +2381,69 @@ mod tests {
         drop(updates_tx);
         drop(task);
         drain_sparse_trie_tasks(&runtime);
+    }
+
+    #[test]
+    fn a_pass_over_a_few_updates_stays_on_the_task() {
+        let mut work =
+            StorageTrieWork::new(RevealableSparseTrie::<ArenaParallelSparseTrie>::revealed_empty());
+        work.queue_updates(changed_updates(0..3));
+        assert_eq!(work.work_units(), 3);
+
+        work.run(TrieNodeEpoch::new(1), false).result.unwrap();
+        assert!(work.is_drained());
+        assert!(work.trie.is_root_cached());
+        assert_eq!(work.dirty_leaves, 0, "the pass hashed what it dirtied");
+
+        // The trie now holds three leaves, but the next update only dirties its own path again.
+        work.queue_updates(changed_updates(3..4));
+        assert_eq!(work.work_units(), 1);
+    }
+
+    #[test]
+    fn buffered_proof_nodes_are_charged_for_the_retry_they_trigger() {
+        let mut work = work_with_blinded_root();
+        work.queue_updates(changed_updates(0..20));
+        work.run(TrieNodeEpoch::new(1), false).result.unwrap();
+        assert_eq!(work.trie.blocked_updates().len(), 20, "every key sits below a blinded child");
+
+        // Nothing can be applied until a proof arrives, and a retry on its own would only resort
+        // the set again.
+        assert!(!work.has_work());
+        assert_eq!(work.work_units(), 0);
+
+        // Revealing the child makes the entries below it retryable, so the pass that reveals is
+        // the one that pays for rebuilding the whole set.
+        work.queue_proofs(&mut vec![blinded_child_proof(0)]);
+        assert_eq!(work.work_units(), 21);
+        assert!(work.work_units() > INLINE_STORAGE_WORK_UNITS);
+    }
+
+    #[test]
+    fn the_pass_that_drains_a_trie_is_charged_for_hashing_it() {
+        let mut work = work_with_blinded_root();
+        // One update below a blinded child, the rest below nibbles the root branch does not have
+        // a child for yet, which apply without a proof.
+        work.queue_updates(changed_updates((0..1).chain(0x20..0x30)));
+        work.run(TrieNodeEpoch::new(1), false).result.unwrap();
+        assert_eq!(work.dirty_leaves, 16);
+        assert_eq!(work.trie.blocked_updates().len(), 1);
+        assert!(!work.trie.is_root_cached(), "the trie was changed and not hashed");
+
+        // The blocked update keeps the trie from draining, so no pass hashes it until its proof
+        // arrives.
+        assert_eq!(work.work_units(), 0);
+
+        // With the proof the pass applies the last update, drains the trie and hashes everything
+        // the block dirtied in it.
+        work.queue_proofs(&mut vec![blinded_child_proof(0)]);
+        assert_eq!(work.work_units(), 1 + 1 + 16);
+        assert!(work.work_units() > INLINE_STORAGE_WORK_UNITS);
+
+        work.run(TrieNodeEpoch::new(1), false).result.unwrap();
+        assert!(work.is_drained());
+        assert!(work.trie.is_root_cached());
+        assert_eq!(work.dirty_leaves, 0);
     }
 
     #[test]
