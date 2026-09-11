@@ -22417,14 +22417,15 @@ static inline pgr_t page_alloc_finalize(MDBX_env *const env, MDBX_txn *const txn
       size_t file_offset = pgno2bytes(env, pgno);
       if (likely(num == 1)) {
         bool source_prefault = false;
-#if defined(__linux__)
+#if defined(__linux__) && !MDBX_MMAP_INCOHERENT_CPU_CACHE && !MDBX_MMAP_INCOHERENT_FILE_WRITE
         source_prefault = source && !need_clean && env->ps >= globals.sys_pagesize;
 #endif
         if (source_prefault || !mincore_probe(env, pgno)) {
-#if defined(__linux__)
+#if defined(__linux__) && !MDBX_MMAP_INCOHERENT_CPU_CACHE && !MDBX_MMAP_INCOHERENT_FILE_WRITE
           /* A full OS-page overwrite avoids reading old destination bytes.
            * Copy useful data during the prefault instead of overwriting a
-           * pattern through the mapping. Keep PAGEPERTURB's unused space. */
+           * pattern through the mapping. This requires coherent mappings
+           * after file writes. Keep PAGEPERTURB's unused space. */
           if (source_prefault)
             copied = osal_pwrite(env->lazy_fd, source, env->ps, file_offset) == MDBX_SUCCESS;
           else
