@@ -50,6 +50,7 @@ use reth_storage_api::{
     StorageChangeSetReader, StorageSettingsCache,
 };
 use reth_storage_errors::provider::{ProviderError, ProviderResult, StaticFileWriterError};
+use revm::database::states::PlainStateReverts;
 use std::{
     collections::BTreeMap,
     fmt::Debug,
@@ -516,16 +517,19 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
     fn write_account_changesets(
         w: &mut StaticFileProviderRWRefMut<'_, N>,
         blocks: &[ExecutedBlock<N>],
+        reverts: &[PlainStateReverts],
     ) -> ProviderResult<()> {
-        for block in blocks {
+        for (block, reverts) in blocks.iter().zip(reverts) {
             let block_number = block.recovered_block().number();
-            let reverts = block.execution_outcome().state.reverts.to_plain_state_reverts();
 
             let changeset: Vec<_> = reverts
                 .accounts
-                .into_iter()
+                .iter()
                 .flatten()
-                .map(|(address, info)| AccountBeforeTx { address, info: info.map(Into::into) })
+                .map(|(address, info)| AccountBeforeTx {
+                    address: *address,
+                    info: info.clone().map(Into::into),
+                })
                 .collect();
             w.append_account_changeset(changeset, block_number)?;
         }
@@ -537,22 +541,20 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
     fn write_storage_changesets(
         w: &mut StaticFileProviderRWRefMut<'_, N>,
         blocks: &[ExecutedBlock<N>],
+        reverts: &[PlainStateReverts],
     ) -> ProviderResult<()> {
-        for block in blocks {
+        for (block, reverts) in blocks.iter().zip(reverts) {
             let block_number = block.recovered_block().number();
-            let reverts = block.execution_outcome().state.reverts.to_plain_state_reverts();
 
             let changeset: Vec<_> = reverts
                 .storage
-                .into_iter()
+                .iter()
                 .flatten()
                 .flat_map(|revert| {
-                    revert.storage_revert.into_iter().map(move |(key, revert_to_slot)| {
-                        StorageBeforeTx {
-                            address: revert.address,
-                            key: B256::from(key.to_be_bytes()),
-                            value: revert_to_slot.to_previous_value(),
-                        }
+                    revert.storage_revert.iter().map(move |(key, revert_to_slot)| StorageBeforeTx {
+                        address: revert.address,
+                        key: B256::from(key.to_be_bytes()),
+                        value: revert_to_slot.to_previous_value(),
                     })
                 })
                 .collect();
@@ -590,6 +592,7 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
         blocks: &[ExecutedBlock<N>],
         tx_nums: &[TxNumber],
         ctx: StaticFileWriteCtx,
+        reverts: Option<&[PlainStateReverts]>,
         runtime: &reth_tasks::Runtime,
     ) -> ProviderResult<()> {
         if blocks.is_empty() {
@@ -654,7 +657,13 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
                     r_account_changesets = Some(self.write_segment(
                         StaticFileSegment::AccountChangeSets,
                         first_block_number,
-                        |w| Self::write_account_changesets(w, blocks),
+                        |w| {
+                            Self::write_account_changesets(
+                                w,
+                                blocks,
+                                reverts.expect("state reverts are required for account changesets"),
+                            )
+                        },
                     ));
                 });
             }
@@ -665,7 +674,13 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
                     r_storage_changesets = Some(self.write_segment(
                         StaticFileSegment::StorageChangeSets,
                         first_block_number,
-                        |w| Self::write_storage_changesets(w, blocks),
+                        |w| {
+                            Self::write_storage_changesets(
+                                w,
+                                blocks,
+                                reverts.expect("state reverts are required for storage changesets"),
+                            )
+                        },
                     ));
                 });
             }
