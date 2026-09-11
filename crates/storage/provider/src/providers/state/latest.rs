@@ -71,6 +71,9 @@ impl<Provider: DBProvider + StorageSettingsCache> AccountReader
 {
     /// Get basic account information.
     fn basic_account(&self, address: &Address) -> ProviderResult<Option<Account>> {
+        if let Some(reads) = super::super::FLAT_STATE_READS.get() {
+            return (reads.account)(address)
+        }
         if self.0.cached_storage_settings().use_hashed_state() {
             let hashed_address = alloy_primitives::keccak256(address);
             self.tx()
@@ -287,6 +290,9 @@ impl<Provider: DBProvider + BlockHashReader + StorageSettingsCache> StateProvide
         account: Address,
         storage_key: StorageKey,
     ) -> ProviderResult<Option<StorageValue>> {
+        if let Some(reads) = super::super::FLAT_STATE_READS.get() {
+            return (reads.storage)(account, storage_key)
+        }
         if self.0.cached_storage_settings().use_hashed_state() {
             self.hashed_storage_lookup(
                 alloy_primitives::keccak256(account),
