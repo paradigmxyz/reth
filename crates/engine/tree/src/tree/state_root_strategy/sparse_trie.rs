@@ -111,7 +111,12 @@ pub(super) struct SparseTrieCacheTask<A = ArenaParallelSparseTrie, S = ArenaPara
     /// Cache of account proof targets that were already fetched/requested from the proof workers.
     /// Account to the broadest requested parent context (an unknown parent sorts before every
     /// known parent).
-    fetched_account_targets: B256Map<ProofV2TargetParent>,
+    fetched_account_targets: B256Map<FetchedTarget>,
+    /// How many proof round trips the account keys of this block needed.
+    account_proof_rounds: ProofRounds,
+    /// How many proof round trips the storage keys of this block needed, summed over all
+    /// addresses when their tries are handed back.
+    storage_proof_rounds: ProofRounds,
     /// Reusable buffer for RLP encoding of accounts.
     account_rlp_buf: Vec<u8>,
     /// Whether the last state update has been received.
@@ -211,6 +216,8 @@ where
             existing_accounts: Default::default(),
             promotable_accounts: Default::default(),
             fetched_account_targets: Default::default(),
+            account_proof_rounds: Default::default(),
+            storage_proof_rounds: Default::default(),
             account_rlp_buf: Vec::with_capacity(TRIE_ACCOUNT_RLP_MAX_SIZE),
             finished_state_updates: Default::default(),
             account_cache_hits: 0,
@@ -459,6 +466,8 @@ where
         self.storage_cache_hits = 0;
         self.storage_cache_misses = 0;
         self.account_value_fallbacks = 0;
+
+        self.record_proof_rounds();
 
         Ok(StateRootComputeOutcome {
             state_root,
@@ -869,17 +878,24 @@ where
             true,
             |event| match event {
                 LeafUpdateEvent::ProofRequired { key: target, parent } => {
+                    let rounds = &mut self.account_proof_rounds;
                     match self.fetched_account_targets.entry(target) {
                         Entry::Occupied(mut entry) => {
-                            if parent < *entry.get() {
-                                entry.insert(parent);
+                            let fetched = entry.get_mut();
+                            if parent < fetched.parent {
+                                rounds.repeat_target(fetched.rounds);
+                                fetched.parent = parent;
+                                fetched.rounds = fetched.rounds.saturating_add(1);
                                 self.pending_targets.push_account_target(
                                     ProofV2Target::new(target).with_parent(parent),
                                 );
+                            } else {
+                                rounds.dropped_target(parent, fetched.parent);
                             }
                         }
                         Entry::Vacant(entry) => {
-                            entry.insert(parent);
+                            entry.insert(FetchedTarget::new(parent));
+                            rounds.first_target(parent);
                             self.pending_targets.push_account_target(
                                 ProofV2Target::new(target).with_parent(parent),
                             );
@@ -1010,11 +1026,12 @@ where
     /// The final root and everything after it - trie updates, preservation, pruning - reads the
     /// storage tries through [`SparseStateTrie`], so no address may be left in a slot.
     fn return_storage_tries(&mut self) {
-        let Self { storage, trie, .. } = self;
+        let Self { storage, trie, storage_proof_rounds, .. } = self;
         for (address, slot) in storage.drain() {
             // A payload still out with a job is only reachable on the cancellation path, where
             // the job drops it.
             if let StorageSlot::Idle(work) = slot {
+                storage_proof_rounds.merge(&work.rounds);
                 trie.insert_storage_trie(address, work.trie);
             }
         }
@@ -1306,26 +1323,28 @@ where
                 .keys()
                 .copied()
                 .chain(self.account_blocked_updates().into_iter().flat_map(|b| b.keys()))
-                .map(|target| (target, self.fetched_account_targets.get(&target).copied()))
+                .map(|target| (target, self.fetched_account_targets.get(&target).map(|f| f.parent)))
                 .collect::<Vec<_>>();
             account_targets.sort_unstable();
             let account_targets_truncated =
                 account_targets.len().saturating_sub(MAX_STALLED_PROOF_TARGETS_TO_LOG);
             account_targets.truncate(MAX_STALLED_PROOF_TARGETS_TO_LOG);
 
-            let mut storage_targets =
-                self.storage
-                    .iter()
-                    .filter_map(|(address, slot)| match slot {
-                        StorageSlot::Idle(work) => Some((address, work)),
-                        StorageSlot::InFlight(_) => None,
-                    })
-                    .flat_map(|(address, work)| {
-                        work.pending.keys().copied().chain(work.trie.blocked_updates().keys()).map(
-                            move |target| (*address, target, work.fetched.get(&target).copied()),
-                        )
-                    })
-                    .collect::<Vec<_>>();
+            let mut storage_targets = self
+                .storage
+                .iter()
+                .filter_map(|(address, slot)| match slot {
+                    StorageSlot::Idle(work) => Some((address, work)),
+                    StorageSlot::InFlight(_) => None,
+                })
+                .flat_map(|(address, work)| {
+                    work.pending.keys().copied().chain(work.trie.blocked_updates().keys()).map(
+                        move |target| {
+                            (*address, target, work.fetched.get(&target).map(|f| f.parent))
+                        },
+                    )
+                })
+                .collect::<Vec<_>>();
             storage_targets.sort_unstable();
             let storage_targets_truncated =
                 storage_targets.len().saturating_sub(MAX_STALLED_PROOF_TARGETS_TO_LOG);
@@ -1343,6 +1362,33 @@ where
         }
 
         Ok(())
+    }
+
+    /// Reports how many proof round trips this block's leaf keys needed.
+    fn record_proof_rounds(&mut self) {
+        let account = &self.account_proof_rounds;
+        let storage = &self.storage_proof_rounds;
+
+        self.metrics.sparse_trie_account_proof_keys.record(account.keys() as f64);
+        self.metrics.sparse_trie_account_multi_round_keys.record(account.multi_round_keys() as f64);
+        self.metrics
+            .sparse_trie_account_deeper_proof_asks
+            .record(account.dropped_deeper_parent as f64);
+        self.metrics.sparse_trie_storage_proof_keys.record(storage.keys() as f64);
+        self.metrics.sparse_trie_storage_multi_round_keys.record(storage.multi_round_keys() as f64);
+        self.metrics
+            .sparse_trie_storage_deeper_proof_asks
+            .record(storage.dropped_deeper_parent as f64);
+
+        debug!(
+            target: "engine::root",
+            ?account,
+            ?storage,
+            "Proof rounds per leaf",
+        );
+
+        self.account_proof_rounds = Default::default();
+        self.storage_proof_rounds = Default::default();
     }
 }
 
@@ -1386,7 +1432,9 @@ struct StorageTrieWork<S> {
     proofs: Vec<ProofTrieNodeV2>,
     /// Slots whose proof was already requested, mapped to the broadest requested parent context
     /// (an unknown parent sorts before every known parent).
-    fetched: B256Map<ProofV2TargetParent>,
+    fetched: B256Map<FetchedTarget>,
+    /// How many proof round trips the slots of this trie needed.
+    rounds: ProofRounds,
     /// Whether a pass could act on something: proof nodes to reveal, or leaf updates that were
     /// not tried against the current state of the trie yet.
     ///
@@ -1406,6 +1454,7 @@ impl<S: SparseTrie + Default> StorageTrieWork<S> {
             pending: Default::default(),
             proofs: Vec::new(),
             fetched: Default::default(),
+            rounds: Default::default(),
             dirty: false,
             updated: false,
         }
@@ -1414,7 +1463,7 @@ impl<S: SparseTrie + Default> StorageTrieWork<S> {
     /// Reveals the queued proof nodes, applies the leaf updates that are not blocked by a blinded
     /// node, and recomputes the root once nothing is left to apply.
     fn run(&mut self, new_epoch: TrieNodeEpoch, retain_updates: bool) -> StorageWorkOutput {
-        let Self { trie, pending, proofs, fetched, dirty, .. } = self;
+        let Self { trie, pending, proofs, fetched, rounds, dirty, .. } = self;
         *dirty = false;
         let mut output = StorageWorkOutput::default();
 
@@ -1433,13 +1482,19 @@ impl<S: SparseTrie + Default> StorageTrieWork<S> {
             let targets = &mut output.targets;
             output.result = trie.update_leaves(pending, |path, parent| match fetched.entry(path) {
                 Entry::Occupied(mut entry) => {
-                    if parent < *entry.get() {
-                        entry.insert(parent);
+                    let fetched = entry.get_mut();
+                    if parent < fetched.parent {
+                        rounds.repeat_target(fetched.rounds);
+                        fetched.parent = parent;
+                        fetched.rounds = fetched.rounds.saturating_add(1);
                         targets.push(ProofV2Target::new(path).with_parent(parent));
+                    } else {
+                        rounds.dropped_target(parent, fetched.parent);
                     }
                 }
                 Entry::Vacant(entry) => {
-                    entry.insert(parent);
+                    entry.insert(FetchedTarget::new(parent));
+                    rounds.first_target(parent);
                     targets.push(ProofV2Target::new(path).with_parent(parent));
                 }
             });
@@ -1817,6 +1872,21 @@ pub(super) struct SparseTrieTaskMetrics {
     /// trie never reported them while applying a touched update.
     pub(super) sparse_trie_account_value_fallbacks: Histogram,
 
+    /// Number of account keys a proof target was dispatched for.
+    pub(super) sparse_trie_account_proof_keys: Histogram,
+    /// Number of account keys that needed more than one proof target.
+    pub(super) sparse_trie_account_multi_round_keys: Histogram,
+    /// Number of times the accounts trie asked for a proof below an already requested parent,
+    /// which no target is dispatched for.
+    pub(super) sparse_trie_account_deeper_proof_asks: Histogram,
+    /// Number of storage keys a proof target was dispatched for.
+    pub(super) sparse_trie_storage_proof_keys: Histogram,
+    /// Number of storage keys that needed more than one proof target.
+    pub(super) sparse_trie_storage_multi_round_keys: Histogram,
+    /// Number of times a storage trie asked for a proof below an already requested parent,
+    /// which no target is dispatched for.
+    pub(super) sparse_trie_storage_deeper_proof_asks: Histogram,
+
     /// Number of storage tries retained in the preserved sparse trie cache.
     pub(super) sparse_trie_retained_storage_tries: Gauge,
 }
@@ -1923,6 +1993,117 @@ impl PendingTargets {
     fn extend_storage_targets(&mut self, address: &B256, targets: Vec<ProofV2Target>) {
         self.len += targets.len();
         self.targets.storage_targets.entry(*address).or_default().extend(targets);
+    }
+}
+
+/// What one trie already asked the proof workers for one leaf key.
+#[derive(Debug, Clone, Copy)]
+struct FetchedTarget {
+    /// Broadest parent context requested so far. An unknown parent sorts before every known
+    /// parent, so this only ever moves towards the trie root.
+    parent: ProofV2TargetParent,
+    /// Proof targets dispatched for this key, saturating.
+    rounds: u8,
+}
+
+impl FetchedTarget {
+    /// Records the first dispatched target for a key.
+    const fn new(parent: ProofV2TargetParent) -> Self {
+        Self { parent, rounds: 1 }
+    }
+}
+
+/// Number of round buckets in [`ProofRounds`]; the last one absorbs everything above it.
+const PROOF_ROUND_BUCKETS: usize = 4;
+
+/// Number of parent depth buckets in [`ProofRounds`]; the last one absorbs everything deeper.
+const PARENT_DEPTH_BUCKETS: usize = 12;
+
+/// How many proof round trips the leaf keys of one or more tries needed in this block.
+///
+/// A leaf update that hits a blinded node makes the trie ask for a proof for its key. The ask is
+/// only turned into a target when no proof for that key was requested from an equally broad or
+/// broader parent yet, so a key needing more than one target means one proof did not reveal
+/// enough of its path. An ask that was dropped instead is counted separately: with a strictly
+/// deeper parent it is the trie finding the next blinded node further down the same path, which
+/// no target would be dispatched for.
+#[derive(Debug, Default, Clone, Copy)]
+struct ProofRounds {
+    /// Keys by dispatched target count; index `i` holds the keys with `i + 1` targets.
+    keys_by_round: [u32; PROOF_ROUND_BUCKETS],
+    /// Asks dropped because the key was already requested from the same parent.
+    dropped_same_parent: u32,
+    /// Asks dropped because the key was already requested from a shallower parent.
+    dropped_deeper_parent: u32,
+    /// First targets of a key that had to include the trie root.
+    root_targets: u32,
+    /// First targets of a key by the depth of their parent hint.
+    first_targets_by_parent_depth: [u32; PARENT_DEPTH_BUCKETS],
+    /// Sum of the parent hint depths counted in [`Self::first_targets_by_parent_depth`].
+    parent_depth_sum: u64,
+}
+
+impl ProofRounds {
+    /// Records the first target dispatched for a key.
+    fn first_target(&mut self, parent: ProofV2TargetParent) {
+        self.keys_by_round[0] += 1;
+        match parent.path_len() {
+            Some(depth) => {
+                self.first_targets_by_parent_depth[depth.min(PARENT_DEPTH_BUCKETS - 1)] += 1;
+                self.parent_depth_sum += depth as u64;
+            }
+            None => self.root_targets += 1,
+        }
+    }
+
+    /// Records another target dispatched for a key that already had `rounds` of them.
+    fn repeat_target(&mut self, rounds: u8) {
+        let from = Self::bucket(rounds);
+        let to = Self::bucket(rounds.saturating_add(1));
+        if from != to {
+            self.keys_by_round[from] -= 1;
+            self.keys_by_round[to] += 1;
+        }
+    }
+
+    /// Records an ask that was dropped in favour of the target already dispatched from `fetched`.
+    fn dropped_target(&mut self, parent: ProofV2TargetParent, fetched: ProofV2TargetParent) {
+        if parent > fetched {
+            self.dropped_deeper_parent += 1;
+        } else {
+            self.dropped_same_parent += 1;
+        }
+    }
+
+    /// Adds another trie's counts to these.
+    fn merge(&mut self, other: &Self) {
+        for (total, count) in self.keys_by_round.iter_mut().zip(other.keys_by_round) {
+            *total += count;
+        }
+        for (total, count) in
+            self.first_targets_by_parent_depth.iter_mut().zip(other.first_targets_by_parent_depth)
+        {
+            *total += count;
+        }
+        self.dropped_same_parent += other.dropped_same_parent;
+        self.dropped_deeper_parent += other.dropped_deeper_parent;
+        self.root_targets += other.root_targets;
+        self.parent_depth_sum += other.parent_depth_sum;
+    }
+
+    /// Returns the number of keys a proof was requested for.
+    fn keys(&self) -> u32 {
+        self.keys_by_round.iter().sum()
+    }
+
+    /// Returns the number of keys that needed more than one dispatched target.
+    fn multi_round_keys(&self) -> u32 {
+        self.keys_by_round[1..].iter().sum()
+    }
+
+    /// Returns the bucket a key with the given number of dispatched targets belongs in.
+    fn bucket(rounds: u8) -> usize {
+        (rounds.max(1) as usize - 1).min(PROOF_ROUND_BUCKETS - 1)
     }
 }
 
@@ -2765,7 +2946,8 @@ mod tests {
         task.finished_state_updates = true;
         task.account_updates.insert(account, LeafUpdate::Touched);
         task.pending_account_updates.insert(account, None);
-        task.fetched_account_targets.insert(account_target, ProofV2TargetParent::NONE);
+        task.fetched_account_targets
+            .insert(account_target, FetchedTarget::new(ProofV2TargetParent::NONE));
 
         // A storage leaf that stayed blocked after its pass ran, so no pass is ready to run.
         let StorageSlot::Idle(work) = task.storage_slot_mut(account) else {
@@ -2773,7 +2955,7 @@ mod tests {
         };
         work.updated = true;
         work.pending.insert(slot, LeafUpdate::Touched);
-        work.fetched.insert(storage_target, ProofV2TargetParent::new(11));
+        work.fetched.insert(storage_target, FetchedTarget::new(ProofV2TargetParent::new(11)));
         task.in_flight_proof_batches = 1;
 
         assert!(task.ensure_not_stalled(false).is_ok());
@@ -3010,5 +3192,37 @@ mod tests {
         alive_rx
             .recv_timeout(std::time::Duration::from_secs(5))
             .expect("the shard must keep serving its queue");
+    }
+
+    #[test]
+    fn a_key_stays_counted_once_while_it_moves_through_the_round_buckets() {
+        let mut rounds = ProofRounds::default();
+        rounds.first_target(ProofV2TargetParent::new(3));
+        rounds.first_target(ProofV2TargetParent::NONE);
+        assert_eq!(rounds.keys(), 2);
+        assert_eq!(rounds.multi_round_keys(), 0);
+        assert_eq!(rounds.root_targets, 1);
+        assert_eq!(rounds.first_targets_by_parent_depth[3], 1);
+        assert_eq!(rounds.parent_depth_sum, 3);
+
+        // One key needs more targets than there are buckets; the last bucket absorbs them.
+        for round in 1..=(PROOF_ROUND_BUCKETS as u8 + 1) {
+            rounds.repeat_target(round);
+            assert_eq!(rounds.keys(), 2, "round {round} lost or duplicated a key");
+        }
+        assert_eq!(rounds.multi_round_keys(), 1);
+        assert_eq!(rounds.keys_by_round[PROOF_ROUND_BUCKETS - 1], 1);
+
+        rounds.dropped_target(ProofV2TargetParent::new(5), ProofV2TargetParent::new(3));
+        rounds.dropped_target(ProofV2TargetParent::new(3), ProofV2TargetParent::new(3));
+        assert_eq!(rounds.dropped_deeper_parent, 1);
+        assert_eq!(rounds.dropped_same_parent, 1);
+
+        let mut total = ProofRounds::default();
+        total.merge(&rounds);
+        total.merge(&rounds);
+        assert_eq!(total.keys(), 4);
+        assert_eq!(total.multi_round_keys(), 2);
+        assert_eq!(total.parent_depth_sum, 6);
     }
 }
