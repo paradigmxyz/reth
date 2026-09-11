@@ -91,7 +91,7 @@ on:
         default: "false"
         type: boolean
       tracy:
-        description: "Tracy capture: zones only (on) or zones plus system tracing (full)"
+        description: "Tracy capture: zones (on), system tracing (full), or system tracing plus TLB/IPI events (full-tlb)"
         required: false
         default: "off"
         type: choice
@@ -99,6 +99,7 @@ on:
           - "off"
           - "on"
           - "full"
+          - "full-tlb"
       cores:
         description: "Limit reth to N CPU cores (0 = all available)"
         required: false
@@ -812,7 +813,8 @@ jobs:
       BENCH_WARMUP_BLOCKS: ${{ needs.bench-ack.outputs.warmup }}
       BENCH_SAMPLY: ${{ needs.bench-ack.outputs.samply }}
       BENCH_TRACING_CHROME: ${{ needs.bench-ack.outputs.tracing-chrome }}
-      BENCH_TRACY: ${{ inputs.tracy || 'off' }}
+      BENCH_TRACY: ${{ inputs.tracy == 'full-tlb' && 'full' || inputs.tracy || 'off' }}
+      BENCH_TLB_TRACE: ${{ inputs.tracy == 'full-tlb' && 'true' || 'false' }}
       BENCH_TRACY_FILTER: debug
       BENCH_TRACY_SAMPLING_HZ: "1000"
       BENCH_CORES: ${{ needs.bench-ack.outputs.cores }}
