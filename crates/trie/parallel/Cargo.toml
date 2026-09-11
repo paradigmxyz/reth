@@ -19,6 +19,7 @@ reth-provider.workspace = true
 reth-storage-errors.workspace = true
 reth-tasks = { workspace = true, features = ["rayon"] }
 reth-trie.workspace = true
+reth-trie-sparse = { workspace = true, features = ["metrics"] }
 
 # alloy
 alloy-evm.workspace = true
@@ -46,6 +47,7 @@ rand = { workspace = true, optional = true }
 [dev-dependencies]
 # reth
 reth-chainspec.workspace = true
+reth-db-common.workspace = true
 reth-ethereum-primitives.workspace = true
 reth-primitives-traits.workspace = true
 reth-provider = { workspace = true, features = ["test-utils"] }
@@ -66,6 +68,7 @@ test-utils = [
     "reth-primitives-traits/test-utils",
     "reth-provider/test-utils",
     "reth-trie/test-utils",
+    "reth-trie-sparse/test-utils",
     "reth-tasks/test-utils",
     "reth-chainspec/test-utils",
     "reth-ethereum-primitives/test-utils",

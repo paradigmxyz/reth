@@ -49,6 +49,7 @@ use reth_trie::{
     trie_cursor::{InstrumentedTrieCursor, TrieCursorFactory, TrieStorageCursor},
     DecodedMultiProofV2, HashedPostState, MultiProofTargetsV2, ProofTrieNodeV2, ProofV2Target,
 };
+use reth_trie_sparse::activity::{current_parent, ActivityGuard};
 use std::{
     cell::RefCell,
     rc::Rc,
@@ -197,6 +198,7 @@ impl ProofWorkerHandle {
             storage_worker_count,
             account_worker_count,
             halve_workers,
+            cores = std::thread::available_parallelism().map_or(0, |cores| cores.get()),
             "Spawning proof worker pools"
         );
 
@@ -346,7 +348,11 @@ impl ProofWorkerHandle {
     ) -> Result<(), ProviderError> {
         let hashed_address = input.hashed_address;
         self.storage_work_tx
-            .send(StorageWorkerJob::StorageProof { input, proof_result_sender })
+            .send(StorageWorkerJob::StorageProof {
+                input,
+                proof_result_sender,
+                dispatch: ProofDispatch::now(),
+            })
             .map_err(|err| {
                 let StorageWorkerJob::StorageProof { proof_result_sender, .. } = err.0;
                 let _ = proof_result_sender.send(StorageProofResultMessage {
@@ -368,12 +374,15 @@ impl ProofWorkerHandle {
         input: AccountMultiproofInput,
     ) -> Result<(), ProviderError> {
         self.account_work_tx
-            .send(AccountWorkerJob::AccountMultiproof { input: Box::new(input) })
+            .send(AccountWorkerJob::AccountMultiproof {
+                input: Box::new(input),
+                dispatch: ProofDispatch::now(),
+            })
             .map_err(|err| {
                 let error =
                     ProviderError::other(std::io::Error::other("account workers unavailable"));
 
-                let AccountWorkerJob::AccountMultiproof { input } = err.0;
+                let AccountWorkerJob::AccountMultiproof { input, .. } = err.0;
                 let ProofResultContext { sender: result_tx, state, start_time: start } =
                     input.into_proof_result_sender();
 
@@ -385,6 +394,27 @@ impl ProofWorkerHandle {
 
                 error
             })
+    }
+}
+
+/// Diagnostic stamp that travels with a queued proof job.
+///
+/// A worker cannot read the dispatching thread's activity stack or clock, so both are taken at
+/// the moment the job is queued and handed to the worker with it.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct ProofDispatch {
+    parent: u64,
+    at: Instant,
+}
+
+impl ProofDispatch {
+    fn now() -> Self {
+        Self { parent: current_parent(), at: Instant::now() }
+    }
+
+    /// Opens the record for the chunk this job became, on the worker that picked it up.
+    fn chunk(self, phase: &'static str, units: usize) -> ActivityGuard {
+        ActivityGuard::chunk(phase, self.parent, units, self.at.elapsed())
     }
 }
 
@@ -459,6 +489,7 @@ where
 
         // If targets is empty it means the caller only wants the root node.
         let (proof, root) = if targets.is_empty() {
+            let _detail = ActivityGuard::detail("storage_root_node");
             let root_node = calculator.storage_root_node(hashed_address)?;
             let root = calculator.compute_root_hash(core::slice::from_ref(&root_node))?;
             (vec![root_node], root)
@@ -467,14 +498,23 @@ where
             // changing the target's parent context, then reset the storage cursors by starting the
             // targeted proof.
             let root = if needs_root && targets.iter().all(|target| target.parent.is_known()) {
+                let _detail = ActivityGuard::detail("storage_root_node");
                 let root_node = calculator.storage_root_node(hashed_address)?;
                 calculator.compute_root_hash(core::slice::from_ref(&root_node))?
             } else {
                 None
             };
 
-            let proof = calculator.storage_proof(hashed_address, &mut targets)?;
-            let root = if root.is_some() { root } else { calculator.compute_root_hash(&proof)? };
+            let proof = {
+                let _detail = ActivityGuard::detail("storage_proof_walk");
+                calculator.storage_proof(hashed_address, &mut targets)?
+            };
+            let root = if root.is_some() {
+                root
+            } else {
+                let _detail = ActivityGuard::detail("storage_proof_hash");
+                calculator.compute_root_hash(&proof)?
+            };
             (proof, root)
         };
 
@@ -573,6 +613,8 @@ pub(crate) enum StorageWorkerJob {
         input: StorageProofInput,
         /// Context for sending the proof result.
         proof_result_sender: CrossbeamSender<StorageProofResultMessage>,
+        /// Where and when this job was queued.
+        dispatch: ProofDispatch,
     },
 }
 
@@ -695,13 +737,14 @@ where
             }
 
             match job {
-                StorageWorkerJob::StorageProof { input, proof_result_sender } => {
+                StorageWorkerJob::StorageProof { input, proof_result_sender, dispatch } => {
                     self.process_storage_proof(
                         &proof_tx,
                         &mut v2_calculator,
                         input,
                         proof_result_sender,
                         &mut storage_proofs_processed,
+                        dispatch,
                     );
                 }
             }
@@ -740,12 +783,14 @@ where
         input: StorageProofInput,
         proof_result_sender: CrossbeamSender<StorageProofResultMessage>,
         storage_proofs_processed: &mut u64,
+        dispatch: ProofDispatch,
     ) where
         Provider: TrieCursorFactory + HashedCursorFactory,
         TC: TrieStorageCursor,
         HC: HashedStorageCursor<Value = U256>,
     {
         let hashed_address = input.hashed_address;
+        let _activity = dispatch.chunk("storage_proof", input.targets.len());
         let proof_start = Instant::now();
 
         trace!(
@@ -946,12 +991,13 @@ where
             }
 
             match job {
-                AccountWorkerJob::AccountMultiproof { input } => {
+                AccountWorkerJob::AccountMultiproof { input, dispatch } => {
                     let value_encoder_stats = self.process_account_multiproof::<Factory::Provider>(
                         &mut v2_account_calculator,
                         v2_storage_calculator.clone(),
                         *input,
                         &mut account_proofs_processed,
+                        dispatch,
                     );
                     total_idle_time += value_encoder_stats.storage_wait_time;
                     value_encoder_stats_cache.extend(&value_encoder_stats);
@@ -1016,10 +1062,15 @@ where
             v2_storage_calculator,
         );
 
-        let account_proofs =
-            v2_account_calculator.proof(&mut value_encoder, &mut account_targets)?;
+        let account_proofs = {
+            let _detail = ActivityGuard::detail("account_proof_walk");
+            v2_account_calculator.proof(&mut value_encoder, &mut account_targets)?
+        };
 
-        let (storage_proofs, value_encoder_stats) = value_encoder.finalize()?;
+        let (storage_proofs, value_encoder_stats) = {
+            let _detail = ActivityGuard::detail("account_proof_finalize");
+            value_encoder.finalize()?
+        };
 
         let proof = DecodedMultiProofV2 { account_proofs, storage_proofs };
 
@@ -1035,13 +1086,15 @@ where
         v2_storage_calculator: Rc<RefCell<V2StorageProofCalculator<'a, Provider>>>,
         input: AccountMultiproofInput,
         account_proofs_processed: &mut u64,
+        dispatch: ProofDispatch,
     ) -> ValueEncoderStats
     where
         Provider: TrieCursorFactory + HashedCursorFactory + 'a,
     {
+        let AccountMultiproofInput { targets, proof_result_sender } = input;
+        let activity = dispatch.chunk("account_multiproof", targets.chunking_length());
         let proof_start = Instant::now();
 
-        let AccountMultiproofInput { targets, proof_result_sender } = input;
         let (result, value_encoder_stats) = match self.compute_v2_account_multiproof::<Provider>(
             v2_account_calculator,
             v2_storage_calculator,
@@ -1050,6 +1103,10 @@ where
             Ok((proof, stats)) => (Ok(proof), stats),
             Err(e) => (Err(e), ValueEncoderStats::default()),
         };
+        activity.record_worker_wait(
+            value_encoder_stats.storage_wait_time,
+            value_encoder_stats.sync_count + value_encoder_stats.dispatched_missing_root_count,
+        );
 
         let ProofResultContext { sender: result_tx, state, start_time: start } =
             proof_result_sender;
@@ -1110,6 +1167,7 @@ fn dispatch_v2_storage_proofs(
     sorted_storage_targets.sort_unstable_by_key(|(addr, _)| *addr);
 
     // Dispatch all proofs for targeted storage slots
+    let dispatch = ProofDispatch::now();
     for (hashed_address, targets) in sorted_storage_targets {
         // Create channel for receiving StorageProofResultMessage
         let (result_tx, result_rx) = crossbeam_channel::unbounded();
@@ -1117,7 +1175,11 @@ fn dispatch_v2_storage_proofs(
         let input = StorageProofInput::new(hashed_address, targets, needs_root);
 
         storage_work_tx
-            .send(StorageWorkerJob::StorageProof { input, proof_result_sender: result_tx })
+            .send(StorageWorkerJob::StorageProof {
+                input,
+                proof_result_sender: result_tx,
+                dispatch,
+            })
             .map_err(|_| {
                 StateRootTaskError::Other(format!(
                     "Failed to queue storage proof for {hashed_address:?}: storage worker pool unavailable",
@@ -1171,6 +1233,8 @@ enum AccountWorkerJob {
     AccountMultiproof {
         /// Account multiproof input parameters
         input: Box<AccountMultiproofInput>,
+        /// Where and when this job was queued.
+        dispatch: ProofDispatch,
     },
 }
 
@@ -1209,5 +1273,120 @@ mod tests {
 
         // Workers shut down automatically when handle is dropped
         drop(proof_handle);
+    }
+
+    /// Ensures a dispatched chunk is recorded on the worker that ran it, and that a storage proof
+    /// is linked to the account multiproof that queued it.
+    #[test]
+    fn proof_workers_record_their_chunks() {
+        let records = RecordedActivity::default();
+        tracing::subscriber::set_global_default(records.clone())
+            .expect("no other subscriber in this test binary");
+
+        let provider_factory =
+            create_test_provider_factory_with_chain_spec(Arc::new(ChainSpec::default()));
+        let anchor_hash = reth_db_common::init::init_genesis(&provider_factory).unwrap();
+        let factory = reth_storage_overlay::OverlayStateProviderFactory::new(
+            provider_factory,
+            reth_storage_overlay::OverlayManager::<
+                reth_ethereum_primitives::EthPrimitives,
+            >::default()
+            .overlay_builder(anchor_hash),
+        );
+
+        let runtime = reth_tasks::Runtime::test();
+        let (proof_result_tx, proof_result_rx) = unbounded();
+        let proof_handle =
+            ProofWorkerHandle::new(&runtime, test_ctx(factory), false, proof_result_tx.clone());
+
+        proof_handle
+            .dispatch_account_multiproof(AccountMultiproofInput {
+                targets: MultiProofTargetsV2 {
+                    account_targets: vec![ProofV2Target::new(B256::ZERO)],
+                    storage_targets: B256Map::from_iter([(
+                        B256::ZERO,
+                        vec![ProofV2Target::new(B256::ZERO)],
+                    )]),
+                },
+                proof_result_sender: ProofResultContext::new(
+                    proof_result_tx,
+                    HashedPostState::default(),
+                    Instant::now(),
+                ),
+            })
+            .unwrap();
+
+        proof_result_rx
+            .recv_timeout(Duration::from_secs(30))
+            .expect("proof result")
+            .result
+            .expect("proof");
+
+        let recorded = records.0.lock().unwrap().clone();
+        let account = recorded
+            .iter()
+            .find(|record| record.phase == "account_multiproof")
+            .expect("account chunk record");
+        assert_eq!(account.units, 2, "both targets of the chunk are counted");
+
+        let storage = recorded
+            .iter()
+            .find(|record| record.phase == "storage_proof")
+            .expect("storage chunk record");
+        assert_eq!(
+            storage.parent_id, account.id,
+            "the storage proof is linked to the chunk that queued it",
+        );
+    }
+
+    /// Captures activity records, which are emitted on pool threads that a thread-local
+    /// subscriber would not see.
+    #[derive(Clone, Default)]
+    struct RecordedActivity(Arc<std::sync::Mutex<Vec<ActivityRecord>>>);
+
+    #[derive(Clone, Default)]
+    struct ActivityRecord {
+        phase: String,
+        id: u64,
+        parent_id: u64,
+        units: u64,
+    }
+
+    impl tracing::Subscriber for RecordedActivity {
+        fn enabled(&self, metadata: &tracing::Metadata<'_>) -> bool {
+            metadata.target() == "engine::tree::activity"
+        }
+
+        fn new_span(&self, span: &tracing::span::Attributes<'_>) -> tracing::span::Id {
+            let mut record = ActivityRecord::default();
+            span.record(&mut record);
+            self.0.lock().unwrap().push(record);
+            tracing::span::Id::from_u64(1)
+        }
+
+        fn record(&self, _: &tracing::span::Id, _: &tracing::span::Record<'_>) {}
+        fn record_follows_from(&self, _: &tracing::span::Id, _: &tracing::span::Id) {}
+        fn event(&self, _: &tracing::Event<'_>) {}
+        fn enter(&self, _: &tracing::span::Id) {}
+        fn exit(&self, _: &tracing::span::Id) {}
+    }
+
+    impl tracing::field::Visit for ActivityRecord {
+        fn record_u64(&mut self, field: &tracing::field::Field, value: u64) {
+            match field.name() {
+                "id" => self.id = value,
+                "parent_id" => self.parent_id = value,
+                "units" => self.units = value,
+                _ => {}
+            }
+        }
+
+        fn record_str(&mut self, field: &tracing::field::Field, value: &str) {
+            if field.name() == "phase" {
+                self.phase = value.to_string();
+            }
+        }
+
+        fn record_debug(&mut self, _: &tracing::field::Field, _: &dyn std::fmt::Debug) {}
     }
 }

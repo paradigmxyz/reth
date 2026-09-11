@@ -51,6 +51,23 @@ impl ActivityGuard {
         Self::start(phase, parent, units, queued, false)
     }
 
+    /// Measures one chunk of work on a pool worker, linked to the record that dispatched it.
+    ///
+    /// Unlike [`Self::linked`] this keeps the scheduler counters: the point of a worker record is
+    /// to split the chunk's wall time into the time it ran, the time it was runnable but not
+    /// scheduled, and the time it was blocked.
+    pub fn chunk(phase: &'static str, parent: u64, units: usize, queued: Duration) -> Self {
+        Self::start(phase, parent, units, queued, true)
+    }
+
+    /// Records what a worker chunk did other than its own work: time blocked on another worker's
+    /// result, and jobs it ran itself rather than waiting for one. Both are part of its wall time.
+    pub fn record_worker_wait(&self, blocked: Duration, inline_jobs: u64) {
+        let Some(active) = &self.active else { return };
+        active.span.record("blocked_us", blocked.as_secs_f64() * 1e6);
+        active.span.record("inline_jobs", inline_jobs);
+    }
+
     fn start(
         phase: &'static str,
         parent: u64,
@@ -72,6 +89,7 @@ impl ActivityGuard {
             runqueue_us = tracing::field::Empty, voluntary = tracing::field::Empty,
             involuntary = tracing::field::Empty, minor_faults = tracing::field::Empty,
             major_faults = tracing::field::Empty, input_ops = tracing::field::Empty,
+            blocked_us = tracing::field::Empty, inline_jobs = tracing::field::Empty,
         )
         .entered();
         let previous = PARENT.with(|p| p.replace(id));
@@ -159,6 +177,14 @@ impl WallTally {
 /// Whether diagnostic activity accounting is enabled.
 pub fn enabled() -> bool {
     tracing::enabled!(target: "engine::tree::activity", tracing::Level::TRACE)
+}
+
+/// The record a phase started on this thread right now would attach to.
+///
+/// A job handed to a worker pool has to carry this with it, because the worker cannot read the
+/// dispatching thread's stack.
+pub fn current_parent() -> u64 {
+    PARENT.with(Cell::get)
 }
 
 /// Whether per-job activity accounting is enabled on top of [`enabled`].
