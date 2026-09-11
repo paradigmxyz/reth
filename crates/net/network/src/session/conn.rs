@@ -62,6 +62,16 @@ impl<N: NetworkPrimitives> EthRlpxConnection<N> {
         matches!(self, Self::EthSnap(_))
     }
 
+    /// Returns the maximum encoded ETH frame size accepted by this connection.
+    #[inline]
+    pub(crate) const fn max_message_size(&self) -> usize {
+        match self {
+            Self::EthOnly(conn) => conn.max_message_size(),
+            Self::EthSnap(conn) => conn.max_message_size(),
+            Self::Satellite(conn) => conn.primary().max_message_size(),
+        }
+    }
+
     /// Consumes this type and returns the wrapped [`P2PStream`].
     #[inline]
     pub(crate) fn into_inner(self) -> P2PStream<ECIESStream<TcpStream>> {
@@ -181,10 +191,10 @@ macro_rules! delegate_call {
 }
 
 impl<N: NetworkPrimitives> Stream for EthRlpxConnection<N> {
-    type Item = Result<EthSnapMessage<N>, EthStreamError>;
+    type Item = Result<RawCapabilityMessage, EthStreamError>;
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        delegate_call!(self.poll_next_unpin(cx) => lift_eth)
+        delegate_call!(self.poll_next_unpin(cx))
     }
 }
 
@@ -212,14 +222,6 @@ impl<N: NetworkPrimitives> Sink<EthMessage<N>> for EthRlpxConnection<N> {
     }
 }
 
-/// Lifts a polled `eth` item into the shared [`EthSnapMessage`] item type.
-#[inline]
-fn lift_eth<N: NetworkPrimitives>(
-    poll: Poll<Option<Result<EthMessage<N>, EthStreamError>>>,
-) -> Poll<Option<Result<EthSnapMessage<N>, EthStreamError>>> {
-    poll.map(|opt| opt.map(|res| res.map(EthSnapMessage::Eth)))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -227,14 +229,14 @@ mod tests {
     const fn assert_eth_stream<N, St>()
     where
         N: NetworkPrimitives,
-        St: Stream<Item = Result<EthMessage<N>, EthStreamError>> + Sink<EthMessage<N>>,
+        St: Stream<Item = Result<RawCapabilityMessage, EthStreamError>> + Sink<EthMessage<N>>,
     {
     }
 
     const fn assert_eth_snap_stream<N, St>()
     where
         N: NetworkPrimitives,
-        St: Stream<Item = Result<EthSnapMessage<N>, EthStreamError>> + Sink<EthMessage<N>>,
+        St: Stream<Item = Result<RawCapabilityMessage, EthStreamError>> + Sink<EthMessage<N>>,
     {
     }
 

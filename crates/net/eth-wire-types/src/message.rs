@@ -111,7 +111,16 @@ impl<N: NetworkPrimitives> ProtocolMessage<N> {
         tx_memory_budget: usize,
     ) -> Result<Self, MessageError> {
         let message_type = EthMessageID::decode(buf)?;
+        Self::decode_payload_with_tx_memory_budget(version, message_type, buf, tx_memory_budget)
+    }
 
+    /// Decodes a message payload after its ETH message ID was read by the transport.
+    pub fn decode_payload_with_tx_memory_budget(
+        version: EthVersion,
+        message_type: EthMessageID,
+        buf: &mut &[u8],
+        tx_memory_budget: usize,
+    ) -> Result<Self, MessageError> {
         // For EIP-7642 (https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7642.md):
         // pre-merge (legacy) status messages include total difficulty, whereas eth/69 omits it.
         let message = match message_type {

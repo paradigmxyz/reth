@@ -138,10 +138,35 @@ where
         self.version
     }
 
+    /// Returns the maximum encoded ETH frame size accepted by this stream.
+    #[inline]
+    pub const fn max_message_size(&self) -> usize {
+        self.max_message_size
+    }
+
     /// Sets whether to reject block announcement messages (`NewBlock`, `NewBlockHashes`) before
     /// RLP decoding.
     pub const fn set_reject_block_announcements(&mut self, reject: bool) {
         self.reject_block_announcements = reject;
+    }
+
+    /// Validates an inbound ETH frame without decoding its RLP payload.
+    pub fn decode_raw_message(
+        &self,
+        mut bytes: BytesMut,
+    ) -> Result<RawCapabilityMessage, EthStreamError> {
+        if bytes.len() > self.max_message_size {
+            return Err(EthStreamError::MessageTooBig(bytes.len()));
+        }
+        let Some(&id) = bytes.first() else {
+            return Err(EthStreamError::InvalidMessage(alloy_rlp::Error::InputTooShort.into()))
+        };
+        if self.reject_block_announcements &&
+            (id == EthMessageID::NewBlock.to_u8() || id == EthMessageID::NewBlockHashes.to_u8())
+        {
+            return Err(EthStreamError::UnsupportedMessage { message_id: id });
+        }
+        Ok(RawCapabilityMessage::new(id as usize, bytes.split_off(1).freeze()))
     }
 
     /// Decodes incoming bytes into an [`EthMessage`].
@@ -232,6 +257,12 @@ impl<S, N: NetworkPrimitives> EthStream<S, N> {
         self.eth.version()
     }
 
+    /// Returns the maximum encoded ETH frame size accepted by this stream.
+    #[inline]
+    pub const fn max_message_size(&self) -> usize {
+        self.eth.max_message_size()
+    }
+
     /// Sets whether to reject block announcement messages (`NewBlock`, `NewBlockHashes`) before
     /// RLP decoding.
     pub const fn set_reject_block_announcements(&mut self, reject: bool) {
@@ -285,14 +316,14 @@ where
     EthStreamError: From<E>,
     N: NetworkPrimitives,
 {
-    type Item = Result<EthMessage<N>, EthStreamError>;
+    type Item = Result<RawCapabilityMessage, EthStreamError>;
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let this = self.project();
         let res = ready!(this.inner.poll_next(cx));
 
         match res {
-            Some(Ok(bytes)) => Poll::Ready(Some(this.eth.decode_message(bytes))),
+            Some(Ok(bytes)) => Poll::Ready(Some(this.eth.decode_raw_message(bytes))),
             Some(Err(err)) => Poll::Ready(Some(Err(err.into()))),
             None => Poll::Ready(None),
         }
@@ -548,16 +579,17 @@ mod tests {
             .into(),
         );
 
-        let test_msg_clone = test_msg.clone();
+        let expected =
+            RawCapabilityMessage::eth(test_msg.message_id(), alloy_rlp::encode(&test_msg).into());
         let handle = tokio::spawn(async move {
             // roughly based off of the design of tokio::net::TcpListener
             let (incoming, _) = listener.accept().await.unwrap();
             let stream = PassthroughCodec::default().framed(incoming);
-            let mut stream = EthStream::new(EthVersion::Eth67, stream);
+            let mut stream = EthStream::<_, EthNetworkPrimitives>::new(EthVersion::Eth67, stream);
 
             // use the stream to get the next message
             let message = stream.next().await.unwrap().unwrap();
-            assert_eq!(message, test_msg_clone);
+            assert_eq!(message, expected);
         });
 
         let outgoing = TcpStream::connect(local_addr).await.unwrap();
@@ -583,16 +615,17 @@ mod tests {
             .into(),
         );
 
-        let test_msg_clone = test_msg.clone();
+        let expected =
+            RawCapabilityMessage::eth(test_msg.message_id(), alloy_rlp::encode(&test_msg).into());
         let handle = tokio::spawn(async move {
             // roughly based off of the design of tokio::net::TcpListener
             let (incoming, _) = listener.accept().await.unwrap();
             let stream = ECIESStream::incoming(incoming, server_key).await.unwrap();
-            let mut stream = EthStream::new(EthVersion::Eth67, stream);
+            let mut stream = EthStream::<_, EthNetworkPrimitives>::new(EthVersion::Eth67, stream);
 
             // use the stream to get the next message
             let message = stream.next().await.unwrap().unwrap();
-            assert_eq!(message, test_msg_clone);
+            assert_eq!(message, expected);
         });
 
         // create the server pubkey
@@ -641,7 +674,8 @@ mod tests {
 
         let status_copy = unified_status;
         let fork_filter_clone = fork_filter.clone();
-        let test_msg_clone = test_msg.clone();
+        let expected =
+            RawCapabilityMessage::eth(test_msg.message_id(), alloy_rlp::encode(&test_msg).into());
         let handle = tokio::spawn(async move {
             // roughly based off of the design of tokio::net::TcpListener
             let (incoming, _) = listener.accept().await.unwrap();
@@ -658,13 +692,13 @@ mod tests {
             let unauthed_stream = UnauthedP2PStream::new(stream);
             let (p2p_stream, _) = unauthed_stream.handshake(server_hello).await.unwrap();
             let (mut eth_stream, _) = UnauthedEthStream::new(p2p_stream)
-                .handshake(status_copy, fork_filter_clone)
+                .handshake::<EthNetworkPrimitives>(status_copy, fork_filter_clone)
                 .await
                 .unwrap();
 
             // use the stream to get the next message
             let message = eth_stream.next().await.unwrap().unwrap();
-            assert_eq!(message, test_msg_clone);
+            assert_eq!(message, expected);
         });
 
         // create the server pubkey

@@ -15,10 +15,9 @@ use crate::{
 };
 use alloy_primitives::bytes::{Bytes, BytesMut};
 use futures::{Sink, SinkExt, Stream, StreamExt};
-use reth_eth_wire_types::{
-    snap::{SnapProtocolMessage, SnapVersion},
-    RawCapabilityMessage,
-};
+#[cfg(test)]
+use reth_eth_wire_types::snap::SnapVersion;
+use reth_eth_wire_types::{snap::SnapProtocolMessage, RawCapabilityMessage};
 use reth_ethereum_forks::ForkFilter;
 use std::{
     io,
@@ -30,9 +29,8 @@ use std::{
 /// A dedicated stream that carries `eth` as the primary protocol and `snap/2` (EIP-8189) as a typed
 /// side-channel on the same `RLPx` connection.
 ///
-/// Both protocols are exposed through the [`Stream`]/[`Sink`] impls, which yield and accept
-/// [`EthSnapMessage`] (an `eth` message or a `snap/2` message). A single poll surfaces whichever
-/// protocol the next inbound frame belongs to, so the owner drives one stream rather than two.
+/// Inbound frames are exposed as [`RawCapabilityMessage`]s; the session that owns request state
+/// admits and decodes them. Outbound messages remain typed [`EthSnapMessage`]s.
 #[derive(Debug)]
 pub struct EthSnapStream<St, N: NetworkPrimitives = EthNetworkPrimitives> {
     /// The raw `RLPx` stream carrying both `eth` and `snap/2` frames.
@@ -79,6 +77,12 @@ impl<St, N: NetworkPrimitives> EthSnapStream<St, N> {
     #[inline]
     pub const fn version(&self) -> EthVersion {
         self.eth.version()
+    }
+
+    /// Returns the maximum encoded ETH frame size accepted by this stream.
+    #[inline]
+    pub const fn max_message_size(&self) -> usize {
+        self.eth.max_message_size()
     }
 
     /// Sets whether to reject block announcement messages before RLP decoding.
@@ -139,7 +143,7 @@ where
     St: Stream<Item = io::Result<BytesMut>> + Sink<Bytes, Error = io::Error> + Unpin,
     N: NetworkPrimitives,
 {
-    type Item = Result<EthSnapMessage<N>, EthStreamError>;
+    type Item = Result<RawCapabilityMessage, EthStreamError>;
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let this = self.get_mut();
@@ -153,18 +157,7 @@ where
             return Poll::Ready(Some(Err(P2PStreamError::EmptyProtocolMessage.into())))
         };
 
-        // `eth` occupies ids below the snap offset and is decoded by the shared codec. Ids at or
-        // above it are snap: rebased to snap-relative (`0x00..`) and validated by
-        // `decode_versioned`, which rejects ids that are out of range or invalid for `snap/2`.
-        let Some(snap_id) = id.checked_sub(this.snap_offset) else {
-            return Poll::Ready(Some(this.eth.decode_message(bytes).map(EthSnapMessage::Eth)))
-        };
-        bytes[0] = snap_id;
-        Poll::Ready(Some(
-            SnapProtocolMessage::decode_versioned(SnapVersion::V2, &bytes)
-                .map(EthSnapMessage::Snap)
-                .map_err(Into::into),
-        ))
+        Poll::Ready(Some(Ok(RawCapabilityMessage::new(id as usize, bytes.split_off(1).freeze()))))
     }
 }
 
@@ -353,7 +346,11 @@ mod tests {
             .unwrap();
 
             while let Some(Ok(msg)) = stream.next().await {
-                if let EthSnapMessage::Snap(SnapProtocolMessage::GetBlockAccessLists(req)) = msg {
+                let mut frame = vec![(msg.id - stream.snap_offset as usize) as u8];
+                frame.extend_from_slice(&msg.payload);
+                if let SnapProtocolMessage::GetBlockAccessLists(req) =
+                    SnapProtocolMessage::decode_versioned(SnapVersion::V2, &frame).unwrap()
+                {
                     let response = SnapProtocolMessage::BlockAccessLists(BlockAccessListsMessage {
                         request_id: req.request_id,
                         block_access_lists: reth_eth_wire_types::BlockAccessLists(vec![None]),
@@ -387,10 +384,13 @@ mod tests {
             .unwrap();
 
         let response = loop {
-            if let EthSnapMessage::Snap(SnapProtocolMessage::BlockAccessLists(resp)) =
-                stream.next().await.unwrap().unwrap()
+            let msg = stream.next().await.unwrap().unwrap();
+            let mut frame = vec![(msg.id - stream.snap_offset as usize) as u8];
+            frame.extend_from_slice(&msg.payload);
+            if let SnapProtocolMessage::BlockAccessLists(resp) =
+                SnapProtocolMessage::decode_versioned(SnapVersion::V2, &frame).unwrap()
             {
-                break resp;
+                break resp
             }
         };
         assert_eq!(response.request_id, 7);
@@ -398,10 +398,10 @@ mod tests {
         server.abort();
     }
 
-    /// End-to-end: message ids removed by snap/2 are rejected after capability negotiation rather
-    /// than being decoded as trie-node requests or responses.
+    /// End-to-end: the stream preserves unknown `snap/2` frames for the session, which owns
+    /// request correlation and protocol-message decoding.
     #[tokio::test(flavor = "multi_thread")]
-    async fn snap_two_rejects_removed_trie_node_messages_over_the_wire() {
+    async fn snap_two_preserves_removed_trie_node_message_ids_over_the_wire() {
         reth_tracing::init_test_tracing();
 
         for removed_snap_id in [0x06, 0x07] {
@@ -426,7 +426,7 @@ mod tests {
                 .await
                 .unwrap();
 
-                stream.next().await.expect("peer should send a frame").unwrap_err()
+                stream.next().await.expect("peer should send a frame").unwrap()
             });
 
             let conn = connect_passthrough(local_addr, eth_snap_hello()).await;
@@ -449,11 +449,9 @@ mod tests {
                 .unwrap();
             stream.flush().await.unwrap();
 
-            let error = server.await.unwrap();
-            assert!(
-                error.to_string().contains("invalid for snap"),
-                "unexpected error for removed snap id {removed_snap_id:#x}: {error}"
-            );
+            let message = server.await.unwrap();
+            assert_eq!(message.id, combined_id);
+            assert_eq!(message.payload, Bytes::from_static(&[alloy_rlp::EMPTY_LIST_CODE]));
         }
     }
 }

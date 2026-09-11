@@ -2,8 +2,8 @@
 
 use reth_eth_wire_types::{
     message::RequestPair, snap::SnapProtocolMessage, BlockAccessLists, BlockBodies, BlockHeaders,
-    Capabilities, Cells, DisconnectReason, EthMessage, EthNetworkPrimitives, EthVersion,
-    GetBlockAccessLists, GetBlockBodies, GetBlockHeaders, GetCells, GetNodeData,
+    Capabilities, Cells, DisconnectReason, EthMessage, EthMessageID, EthNetworkPrimitives,
+    EthVersion, GetBlockAccessLists, GetBlockBodies, GetBlockHeaders, GetCells, GetNodeData,
     GetPooledTransactions, GetReceipts, GetReceipts70, NetworkPrimitives, NodeData,
     PooledTransactions, Receipts, Receipts69, Receipts70, UnifiedStatus,
 };
@@ -298,6 +298,36 @@ pub enum RequestMessage<N: NetworkPrimitives = EthNetworkPrimitives> {
 // === impl PeerRequest ===
 
 impl<N: NetworkPrimitives> PeerRequest<N> {
+    /// Returns the ETH response message ID and maximum number of top-level response items.
+    pub fn eth_response_bound(&self) -> Option<(EthMessageID, u64)> {
+        match self {
+            Self::GetBlockHeaders { request, .. } => {
+                Some((EthMessageID::BlockHeaders, request.limit))
+            }
+            Self::GetBlockBodies { request, .. } => {
+                Some((EthMessageID::BlockBodies, request.0.len() as u64))
+            }
+            Self::GetPooledTransactions { request, .. } => {
+                Some((EthMessageID::PooledTransactions, request.0.len() as u64))
+            }
+            Self::GetNodeData { request, .. } => {
+                Some((EthMessageID::NodeData, request.0.len() as u64))
+            }
+            Self::GetReceipts { request, .. } | Self::GetReceipts69 { request, .. } => {
+                Some((EthMessageID::Receipts, request.0.len() as u64))
+            }
+            Self::GetReceipts70 { request, .. } => {
+                Some((EthMessageID::Receipts, request.block_hashes.len() as u64))
+            }
+            Self::GetBlockAccessLists { request, .. } => {
+                Some((EthMessageID::BlockAccessLists, request.0.len() as u64))
+            }
+            Self::GetCells { request, .. } => {
+                Some((EthMessageID::Cells, request.hashes.len() as u64))
+            }
+            Self::GetSnap { .. } => None,
+        }
+    }
     /// Invoked if we received a response which does not match the request
     pub fn send_bad_response(self) {
         self.send_err_response(RequestError::BadResponse)
