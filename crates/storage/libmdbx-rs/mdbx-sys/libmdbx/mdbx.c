@@ -21656,6 +21656,9 @@ __cold int env_close(MDBX_env *env, bool resurrect_after_fork) {
  * Проверка размещения/расположения отображенных страниц БД в ОЗУ (mem-in-core),
  * с кешированием этой информации. */
 
+/* Bound the work per cache miss while retaining selective prefault writes. */
+#define MINCORE_CACHE_UNITS 8
+
 static inline bool bit_tas(uint64_t *field, char bit) {
   const uint64_t m = UINT64_C(1) << bit;
   const bool r = (*field & m) != 0;
@@ -21667,7 +21670,7 @@ static bool mincore_fetch(MDBX_env *const env, const size_t unit_begin) {
   lck_t *const lck = env->lck;
   for (size_t i = 1; i < ARRAY_LENGTH(lck->mincore_cache.begin); ++i) {
     const ptrdiff_t dist = unit_begin - lck->mincore_cache.begin[i];
-    if (likely(dist >= 0 && dist < 64)) {
+    if (likely(dist >= 0 && dist < MINCORE_CACHE_UNITS)) {
       const pgno_t tmp_begin = lck->mincore_cache.begin[i];
       const uint64_t tmp_mask = lck->mincore_cache.mask[i];
       do {
@@ -21680,7 +21683,7 @@ static bool mincore_fetch(MDBX_env *const env, const size_t unit_begin) {
     }
   }
 
-  size_t pages = 64;
+  size_t pages = MINCORE_CACHE_UNITS;
   unsigned unit_log = globals.sys_pagesize_ln2;
   unsigned shift = 0;
   if (env->ps > globals.sys_pagesize) {
@@ -21733,7 +21736,7 @@ MDBX_MAYBE_UNUSED static inline bool mincore_probe(MDBX_env *const env, const pg
   const size_t unit_begin = offset_aligned >> unit_log2;
   eASSERT(env, (unit_begin << unit_log2) == offset_aligned);
   const ptrdiff_t dist = unit_begin - env->lck->mincore_cache.begin[0];
-  if (likely(dist >= 0 && dist < 64))
+  if (likely(dist >= 0 && dist < MINCORE_CACHE_UNITS))
     return bit_tas(env->lck->mincore_cache.mask, (char)dist);
   return mincore_fetch(env, unit_begin);
 #else
