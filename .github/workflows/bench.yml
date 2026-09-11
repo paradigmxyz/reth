@@ -1639,6 +1639,22 @@ jobs:
           # shellcheck disable=SC2086
           python3 .github/scripts/bench-reth-summary.py $SUMMARY_ARGS
 
+      - name: Upload compact results
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: bench-compact-results
+          path: |
+            ${{ env.BENCH_WORK_DIR }}/summary.json
+            ${{ env.BENCH_WORK_DIR }}/run_order.txt
+            ${{ env.BENCH_WORK_DIR }}/*/report.json
+            ${{ env.BENCH_WORK_DIR }}/*/txgen/warmup-report.json
+            ${{ env.BENCH_WORK_DIR }}/*/persistence-drain.json
+            ${{ env.BENCH_WORK_DIR }}/*/resource-summary.json
+            ${{ env.BENCH_WORK_DIR }}/*/tracing-chrome-profile.json
+            ${{ env.BENCH_WORK_DIR }}/*/target-metrics-range.json
+          if-no-files-found: ignore
+
       - name: Generate charts
         if: success()
         env:
