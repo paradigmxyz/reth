@@ -29,7 +29,8 @@ use rocksdb::{
     BlockBasedOptions, Cache, ColumnFamilyDescriptor, CompactionPri, DBCompressionType,
     DBRawIteratorWithThreadMode, IteratorMode, OptimisticTransactionDB,
     OptimisticTransactionOptions, Options, SnapshotWithThreadMode, Transaction,
-    WriteBatchWithTransaction, WriteBufferManager, WriteOptions, DB, DEFAULT_COLUMN_FAMILY_NAME,
+    WriteBatchIteratorCf, WriteBatchWithTransaction, WriteBufferManager, WriteOptions, DB,
+    DEFAULT_COLUMN_FAMILY_NAME,
 };
 use std::{
     collections::BTreeMap,
@@ -48,6 +49,33 @@ fn synced_write_options() -> WriteOptions {
 
 /// Pending `RocksDB` batches type alias.
 pub(crate) type PendingRocksDBBatches = Arc<Mutex<Vec<WriteBatchWithTransaction<true>>>>;
+
+fn append_batch(
+    target: &mut WriteBatchWithTransaction<true>,
+    source: &WriteBatchWithTransaction<true>,
+    column_family: &rocksdb::ColumnFamily,
+) {
+    struct Appender<'a> {
+        target: &'a mut WriteBatchWithTransaction<true>,
+        column_family: &'a rocksdb::ColumnFamily,
+    }
+
+    impl WriteBatchIteratorCf for Appender<'_> {
+        fn put_cf(&mut self, _cf_id: u32, key: &[u8], value: &[u8]) {
+            self.target.put_cf(self.column_family, key, value);
+        }
+
+        fn delete_cf(&mut self, _cf_id: u32, key: &[u8]) {
+            self.target.delete_cf(self.column_family, key);
+        }
+
+        fn merge_cf(&mut self, _cf_id: u32, key: &[u8], value: &[u8]) {
+            self.target.merge_cf(self.column_family, key, value);
+        }
+    }
+
+    source.iterate_cf(&mut Appender { target, column_family });
+}
 
 /// Raw key-value result from a `RocksDB` iterator.
 type RawKVResult = Result<(Box<[u8]>, Box<[u8]>), rocksdb::Error>;
@@ -1397,7 +1425,7 @@ impl RocksDBProvider {
             if write_tx_hash {
                 s.spawn(|_| {
                     let _guard = span.enter();
-                    r_tx_hash = Some(self.write_tx_hash_numbers(blocks, tx_nums, &ctx));
+                    r_tx_hash = Some(self.write_tx_hash_numbers(blocks, tx_nums));
                 });
             }
 
@@ -1416,27 +1444,49 @@ impl RocksDBProvider {
             }
         });
 
-        if write_tx_hash {
-            r_tx_hash.ok_or_else(|| {
+        let tx_hash_batch = if write_tx_hash {
+            Some(r_tx_hash.ok_or_else(|| {
                 ProviderError::Database(DatabaseError::Other(
                     "rocksdb tx-hash write thread panicked".into(),
                 ))
-            })??;
-        }
-        if write_account_history {
-            r_account_history.ok_or_else(|| {
+            })??)
+        } else {
+            None
+        };
+        let account_history_batch = if write_account_history {
+            Some(r_account_history.ok_or_else(|| {
                 ProviderError::Database(DatabaseError::Other(
                     "rocksdb account-history write thread panicked".into(),
                 ))
-            })??;
-        }
-        if write_storage_history {
-            r_storage_history.ok_or_else(|| {
+            })??)
+        } else {
+            None
+        };
+        let storage_history_batch = if write_storage_history {
+            Some(r_storage_history.ok_or_else(|| {
                 ProviderError::Database(DatabaseError::Other(
                     "rocksdb storage-history write thread panicked".into(),
                 ))
-            })??;
+            })??)
+        } else {
+            None
+        };
+
+        let mut batch = WriteBatchWithTransaction::default();
+        if let Some(source) = tx_hash_batch.as_ref() {
+            append_batch(
+                &mut batch,
+                source,
+                self.get_cf_handle::<tables::TransactionHashNumbers>()?,
+            );
         }
+        if let Some(source) = account_history_batch.as_ref() {
+            append_batch(&mut batch, source, self.get_cf_handle::<tables::AccountsHistory>()?);
+        }
+        if let Some(source) = storage_history_batch.as_ref() {
+            append_batch(&mut batch, source, self.get_cf_handle::<tables::StoragesHistory>()?);
+        }
+        ctx.pending_batches.lock().push(batch);
 
         Ok(())
     }
@@ -1447,8 +1497,7 @@ impl RocksDBProvider {
         &self,
         blocks: &[ExecutedBlock<N>],
         tx_nums: &[TxNumber],
-        ctx: &RocksDBWriteCtx,
-    ) -> ProviderResult<()> {
+    ) -> ProviderResult<WriteBatchWithTransaction<true>> {
         let mut batch = self.batch();
         for (block, &first_tx_num) in blocks.iter().zip(tx_nums) {
             let body = block.recovered_block().body();
@@ -1456,8 +1505,7 @@ impl RocksDBProvider {
                 batch.put::<tables::TransactionHashNumbers>(*transaction.tx_hash(), &tx_num)?;
             }
         }
-        ctx.pending_batches.lock().push(batch.into_inner());
-        Ok(())
+        Ok(batch.into_inner())
     }
 
     /// Writes account history indices for the given blocks.
@@ -1468,7 +1516,7 @@ impl RocksDBProvider {
         &self,
         blocks: &[ExecutedBlock<N>],
         ctx: &RocksDBWriteCtx,
-    ) -> ProviderResult<()> {
+    ) -> ProviderResult<WriteBatchWithTransaction<true>> {
         let mut batch = self.batch();
         let mut account_history: BTreeMap<Address, Vec<u64>> = BTreeMap::new();
 
@@ -1489,8 +1537,7 @@ impl RocksDBProvider {
         for (address, indices) in account_history {
             batch.append_account_history_shard(address, indices)?;
         }
-        ctx.pending_batches.lock().push(batch.into_inner());
-        Ok(())
+        Ok(batch.into_inner())
     }
 
     /// Writes storage history indices for the given blocks.
@@ -1501,7 +1548,7 @@ impl RocksDBProvider {
         &self,
         blocks: &[ExecutedBlock<N>],
         ctx: &RocksDBWriteCtx,
-    ) -> ProviderResult<()> {
+    ) -> ProviderResult<WriteBatchWithTransaction<true>> {
         let mut storage_history: BTreeMap<(Address, B256), Vec<u64>> = BTreeMap::new();
 
         for (block_idx, block) in blocks.iter().enumerate() {
@@ -1536,8 +1583,7 @@ impl RocksDBProvider {
                 batch.put::<tables::StoragesHistory>(key, &shard)?;
             }
         }
-        ctx.pending_batches.lock().push(batch.into_inner());
-        Ok(())
+        Ok(batch.into_inner())
     }
 
     /// Prepares storage history shard writes by reading the current last shard and appending
@@ -3058,6 +3104,77 @@ mod tests {
         assert!(!column_families
             .iter()
             .any(|name| name == tables::BlockAccessListBlockNumbers::NAME));
+    }
+
+    #[test]
+    fn append_batch_preserves_operations_across_column_families() {
+        let temp_dir = TempDir::new().unwrap();
+        let provider = RocksDBBuilder::new(temp_dir.path()).with_default_tables().build().unwrap();
+
+        let tx_hash = B256::with_last_byte(1);
+        let account = Address::with_last_byte(2);
+        let retained_account_key = ShardedKey::last(account);
+        let removed_account_key = ShardedKey::last(Address::with_last_byte(3));
+        let storage_key = StorageShardedKey::last(account, B256::with_last_byte(4));
+        let history = IntegerList::new_pre_sorted([1]);
+
+        provider.put::<tables::AccountsHistory>(removed_account_key.clone(), &history).unwrap();
+
+        let mut transaction_batch = provider.batch();
+        transaction_batch.put::<tables::TransactionHashNumbers>(tx_hash, &1).unwrap();
+
+        let mut account_batch = provider.batch();
+        account_batch
+            .put::<tables::AccountsHistory>(retained_account_key.clone(), &history)
+            .unwrap();
+        account_batch.delete::<tables::AccountsHistory>(removed_account_key.clone()).unwrap();
+
+        let mut storage_batch = provider.batch();
+        storage_batch.put::<tables::StoragesHistory>(storage_key.clone(), &history).unwrap();
+
+        let mut combined = WriteBatchWithTransaction::default();
+        append_batch(
+            &mut combined,
+            &transaction_batch.into_inner(),
+            provider.get_cf_handle::<tables::TransactionHashNumbers>().unwrap(),
+        );
+        append_batch(
+            &mut combined,
+            &account_batch.into_inner(),
+            provider.get_cf_handle::<tables::AccountsHistory>().unwrap(),
+        );
+        append_batch(
+            &mut combined,
+            &storage_batch.into_inner(),
+            provider.get_cf_handle::<tables::StoragesHistory>().unwrap(),
+        );
+
+        provider.commit_batch(combined).unwrap();
+
+        assert_eq!(provider.get::<tables::TransactionHashNumbers>(tx_hash).unwrap(), Some(1));
+        assert!(provider.get::<tables::AccountsHistory>(retained_account_key).unwrap().is_some());
+        assert!(provider.get::<tables::AccountsHistory>(removed_account_key).unwrap().is_none());
+        assert!(provider.get::<tables::StoragesHistory>(storage_key).unwrap().is_some());
+    }
+
+    #[test]
+    fn write_blocks_data_queues_one_combined_batch() {
+        let temp_dir = TempDir::new().unwrap();
+        let provider = RocksDBBuilder::new(temp_dir.path()).with_default_tables().build().unwrap();
+        let pending_batches = PendingRocksDBBatches::default();
+        let blocks: Vec<_> = reth_chain_state::test_utils::TestBlockBuilder::eth()
+            .get_executed_blocks(1..2)
+            .collect();
+        let ctx = RocksDBWriteCtx {
+            first_block_number: 1,
+            prune_tx_lookup: None,
+            storage_settings: StorageSettings::v2(),
+            pending_batches: pending_batches.clone(),
+        };
+
+        provider.write_blocks_data(&blocks, &[0], ctx, &reth_tasks::Runtime::test()).unwrap();
+
+        assert_eq!(pending_batches.lock().len(), 1);
     }
 
     #[test]
