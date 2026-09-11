@@ -21,7 +21,7 @@ use std::{
 
 use alloy_eips::BlockNumHash;
 use alloy_primitives::B256;
-use parking_lot::{RwLock, RwLockReadGuard};
+use parking_lot::{Mutex, RwLock, RwLockReadGuard};
 use reth_exex_types::ExExNotification;
 use reth_tracing::tracing::{debug, instrument};
 
@@ -86,6 +86,8 @@ struct WalInner<N: NodePrimitives> {
     next_file_id: AtomicU32,
     /// The underlying WAL storage backed by a file.
     storage: Storage<N>,
+    /// Serializes WAL mutations without blocking readers on storage I/O.
+    write_lock: Mutex<()>,
     /// WAL block cache. See [`cache::BlockCache`] docs for more details.
     block_cache: RwLock<BlockCache>,
     metrics: Metrics,
@@ -99,6 +101,7 @@ where
         let wal = Self {
             next_file_id: AtomicU32::new(0),
             storage: Storage::new(directory)?,
+            write_lock: Mutex::new(()),
             block_cache: RwLock::new(BlockCache::default()),
             metrics: Metrics::default(),
         };
@@ -149,11 +152,12 @@ where
         committed_block_range = ?notification.committed_chain().as_ref().map(|chain| chain.range())
     ))]
     fn commit(&self, notification: &ExExNotification<N>) -> WalResult<()> {
-        let mut block_cache = self.block_cache.write();
+        let _write_lock = self.write_lock.lock();
 
         let file_id = self.next_file_id.fetch_add(1, Ordering::Relaxed);
         let size = self.storage.write_notification(file_id, notification)?;
 
+        let mut block_cache = self.block_cache.write();
         debug!(target: "exex::wal", ?file_id, "Inserting notification blocks into the block cache");
         block_cache.insert_notification_blocks_with_file_id(file_id, notification);
 
@@ -164,6 +168,7 @@ where
 
     #[instrument(skip(self))]
     fn finalize(&self, to_block: BlockNumHash) -> WalResult<()> {
+        let _write_lock = self.write_lock.lock();
         let mut block_cache = self.block_cache.write();
         let file_ids = block_cache.remove_before(to_block.number);
 
@@ -243,7 +248,11 @@ mod tests {
     use reth_testing_utils::generators::{
         self, random_block, random_block_range, BlockParams, BlockRangeParams,
     };
-    use std::{collections::BTreeMap, sync::Arc};
+    use std::{
+        collections::BTreeMap,
+        sync::{mpsc, Arc},
+        time::Duration,
+    };
 
     fn read_notifications(wal: &Wal) -> WalResult<Vec<ExExNotification>> {
         wal.inner
@@ -557,6 +566,35 @@ mod tests {
 
         wal.commit(&commit_two)?;
         assert_eq!(wal.inner.storage.file_ids()?, vec![0, 1, 3, 4]);
+
+        Ok(())
+    }
+
+    #[test]
+    fn read_does_not_wait_for_wal_writer() -> eyre::Result<()> {
+        let temp_dir = tempfile::tempdir()?;
+        let wal = Wal::<EthPrimitives>::new(&temp_dir)?;
+        let block = random_block(&mut generators::rng(), 1, Default::default()).try_recover()?;
+        let notification = ExExNotification::ChainCommitted {
+            new: Arc::new(Chain::new(vec![block.clone()], Default::default(), BTreeMap::new())),
+        };
+        wal.commit(&notification)?;
+
+        let handle = wal.handle();
+        let _writer = wal.inner.write_lock.lock();
+        let (tx, rx) = mpsc::channel();
+        std::thread::scope(|scope| {
+            scope.spawn(|| {
+                tx.send(handle.get_committed_notification_by_block_hash(&block.hash()))
+                    .expect("reader should receive its result")
+            });
+
+            let received = rx
+                .recv_timeout(Duration::from_secs(1))
+                .expect("cache reader should not wait for a WAL writer")?;
+            assert_eq!(received, Some(notification));
+            Ok::<_, eyre::Report>(())
+        })?;
 
         Ok(())
     }
