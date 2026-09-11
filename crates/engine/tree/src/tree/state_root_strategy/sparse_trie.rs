@@ -159,8 +159,8 @@ pub(super) struct SparseTrieCacheTask<A = ArenaParallelSparseTrie, S = ArenaPara
     /// Post-state storage root of every account whose leaf this task rewrote.
     ///
     /// Handed to [`StorageRootCache::advance`](reth_trie_parallel::storage_root_cache::StorageRootCache::advance)
-    /// so the roots the proof workers cached for the parent state are replaced wherever this
-    /// block moved them.
+    /// so the next block's proof workers can read the roots this block produced instead of
+    /// walking those storage tries again.
     updated_storage_roots: B256Map<B256>,
 
     /// Metrics for the sparse trie.
