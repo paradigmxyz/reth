@@ -411,10 +411,9 @@ impl ArenaSparseSubtrie {
                     self.num_dirty_leaves =
                         (self.num_dirty_leaves as i64 + deltas.num_dirty_leaves_delta) as u64;
 
-                    if let RemoveLeafResult::NeedsProof { key, proof_key, parent } = result {
-                        // The collapse waits for a blinded sibling, which is not on the removed
-                        // leaf's own path, so the update is retried with every batch.
-                        let blocked_on = BlockedOn::Retryable;
+                    if let RemoveLeafResult::NeedsProof { key, proof_key, parent, blocked_on } =
+                        result
+                    {
                         self.required_proofs
                             .push((idx, ArenaRequiredProof { key: proof_key, parent, blocked_on }));
                         self.required_proofs
@@ -569,7 +568,7 @@ enum RemoveLeafResult {
     NotFound,
     /// The branch collapse requires revealing a blinded sibling. The caller must request a
     /// proof for the given key below the revealed logical parent branch.
-    NeedsProof { key: B256, proof_key: B256, parent: ProofV2TargetParent },
+    NeedsProof { key: B256, proof_key: B256, parent: ProofV2TargetParent, blocked_on: BlockedOn },
 }
 
 /// A proof request generated during leaf updates when a blinded node is encountered.
@@ -1638,6 +1637,7 @@ impl ArenaParallelSparseTrie {
                                         .checked_sub(1)
                                         .expect("sibling path has a child nibble"),
                                 ),
+                                blocked_on: BlockedOn::sibling(&sibling_path),
                             },
                             SubtrieCounterDeltas::default(),
                         );
@@ -1762,7 +1762,7 @@ impl ArenaParallelSparseTrie {
             parent: ProofV2TargetParent::new(
                 sibling_path.len().checked_sub(1).expect("sibling path has a child nibble"),
             ),
-            blocked_on: BlockedOn::Retryable,
+            blocked_on: BlockedOn::sibling(&sibling_path),
         })
     }
 
@@ -2869,11 +2869,11 @@ impl SparseTrie for ArenaParallelSparseTrie {
                             &mut self.buffers.updates,
                         );
                         match result {
-                            RemoveLeafResult::NeedsProof { proof_key, parent, .. } => {
+                            RemoveLeafResult::NeedsProof {
+                                proof_key, parent, blocked_on, ..
+                            } => {
                                 event_fn(LeafUpdateEvent::ProofRequired { key: proof_key, parent });
-                                // The collapse waits for a blinded sibling, which is not on the
-                                // removed leaf's own path.
-                                newly_blocked.push((update_idx as u32, BlockedOn::Retryable));
+                                newly_blocked.push((update_idx as u32, blocked_on));
                             }
                             RemoveLeafResult::Removed => {
                                 // remove_leaf may have called collapse_branch, which

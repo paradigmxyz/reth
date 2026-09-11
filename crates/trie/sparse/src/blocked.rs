@@ -18,6 +18,9 @@ pub struct BlockedLeafUpdates {
     entries: Vec<BlockedLeafUpdate>,
     /// Buffer reused while rebuilding [`Self::entries`].
     scratch: Vec<BlockedLeafUpdate>,
+    /// Keys of the [`BlockedOn::Sibling`] entries by the path of the node they wait for, sorted
+    /// by that path. Their node is not on their own key path, so they cannot be found by it.
+    siblings: Vec<(Nibbles, B256)>,
     /// Number of entries in [`Self::entries`] that are ready to be applied again.
     num_retryable: usize,
 }
@@ -25,7 +28,7 @@ pub struct BlockedLeafUpdates {
 impl BlockedLeafUpdates {
     /// Creates an empty set of blocked updates.
     pub const fn new() -> Self {
-        Self { entries: Vec::new(), scratch: Vec::new(), num_retryable: 0 }
+        Self { entries: Vec::new(), scratch: Vec::new(), siblings: Vec::new(), num_retryable: 0 }
     }
 
     /// Returns the number of blocked updates.
@@ -57,6 +60,7 @@ impl BlockedLeafUpdates {
     pub fn clear(&mut self) {
         self.entries.clear();
         self.scratch.clear();
+        self.siblings.clear();
         self.num_retryable = 0;
     }
 
@@ -80,6 +84,31 @@ impl BlockedLeafUpdates {
                 self.num_retryable += 1;
             }
         }
+
+        if !self.siblings.is_empty() {
+            self.mark_sibling_revealed(path);
+        }
+    }
+
+    /// Marks the entries whose branch collapse waits for the node at `path` as retryable.
+    fn mark_sibling_revealed(&mut self, path: &Nibbles) {
+        let start = self.siblings.partition_point(|(sibling, _)| sibling < path);
+        let mut end = start;
+        while self.siblings.get(end).is_some_and(|(sibling, _)| sibling == path) {
+            end += 1;
+        }
+
+        for index in start..end {
+            let key = self.siblings[index].1;
+            let Some(pos) = self.position(&key) else { continue };
+            let entry = &mut self.entries[pos];
+            if matches!(entry.blocked_on, BlockedOn::Sibling { .. }) {
+                entry.blocked_on = BlockedOn::Retryable;
+                self.num_retryable += 1;
+            }
+        }
+
+        self.siblings.drain(start..end);
     }
 
     /// Moves `updates` and all retryable entries into `batch`, sorted by key and with their
@@ -117,7 +146,7 @@ impl BlockedLeafUpdates {
                     BlockedOn::Retryable => {
                         batch.push((entry.key, Nibbles::default(), entry.update))
                     }
-                    BlockedOn::Reveal(_) => kept.push(entry),
+                    BlockedOn::Reveal(_) | BlockedOn::Sibling { .. } => kept.push(entry),
                 }
             }
             self.entries = kept;
@@ -154,14 +183,16 @@ impl BlockedLeafUpdates {
         #[expect(clippy::iter_with_drain, reason = "retain the scratch buffer allocation")]
         let mut blocked = entries.drain(..).peekable();
         let mut last_index = None;
+        let num_siblings = self.siblings.len();
         for &(index, blocked_on) in indices.iter() {
             if last_index == Some(index) {
                 continue
             }
             last_index = Some(index);
 
-            let (key, _, update) = &mut batch[index as usize];
+            let (key, path, update) = &mut batch[index as usize];
             let key = *key;
+            let path = *path;
             while blocked.peek().is_some_and(|entry| entry.key < key) {
                 merged.push(blocked.next().expect("peeked"));
             }
@@ -170,8 +201,15 @@ impl BlockedLeafUpdates {
                 "leaf update blocked twice for the same key",
             );
 
-            if blocked_on == BlockedOn::Retryable {
-                self.num_retryable += 1;
+            match blocked_on {
+                BlockedOn::Retryable => self.num_retryable += 1,
+                // The sibling is not on this key's path, so index the entry by it.
+                BlockedOn::Sibling { depth, nibble } => {
+                    let mut sibling = path.slice(..depth as usize - 1);
+                    sibling.push_unchecked(nibble);
+                    self.siblings.push((sibling, key));
+                }
+                BlockedOn::Reveal(_) => {}
             }
             merged.push(BlockedLeafUpdate {
                 key,
@@ -183,6 +221,9 @@ impl BlockedLeafUpdates {
 
         self.entries = merged;
         self.scratch = entries;
+        if self.siblings.len() != num_siblings {
+            self.siblings.sort_unstable();
+        }
     }
 
     /// Returns the position of the given key in [`Self::entries`].
@@ -210,9 +251,21 @@ struct BlockedLeafUpdate {
 pub(crate) enum BlockedOn {
     /// A node covering the first N nibbles of the entry's key must be revealed.
     Reveal(u8),
-    /// The entry waits on something that is not on its own path, e.g. the blinded sibling a
-    /// branch collapse needs, and is applied again with every batch.
+    /// The blinded sibling a branch collapse needs must be revealed. It sits at `depth`, where
+    /// it shares the first `depth - 1` nibbles of the entry's key and continues with `nibble`.
+    Sibling { depth: u8, nibble: u8 },
+    /// The entry can be applied again with the next batch.
     Retryable,
+}
+
+impl BlockedOn {
+    /// Waits for the blinded sibling at the given path.
+    pub(crate) fn sibling(path: &Nibbles) -> Self {
+        Self::Sibling {
+            depth: path.len() as u8,
+            nibble: path.last().expect("sibling path has a child nibble"),
+        }
+    }
 }
 
 /// Returns the lowest and highest key that start with the given path.
@@ -278,6 +331,29 @@ mod tests {
         assert_eq!(batch.len(), 1);
         assert_eq!(batch[0].0, key(0x11));
         assert_eq!(blocked.len(), 1);
+    }
+
+    #[test]
+    fn sibling_entries_wait_for_the_node_they_collapse_onto() {
+        let sibling = Nibbles::from_nibbles([0x1, 0x2]);
+        let mut blocked = BlockedLeafUpdates::new();
+        let mut batch =
+            vec![(key(0x11), Nibbles::unpack(key(0x11)), LeafUpdate::Changed(Vec::new()))];
+        blocked.block(&mut batch, &mut [(0, BlockedOn::sibling(&sibling))]);
+        assert!(!blocked.has_retryable());
+
+        // Revealing the entry's own path does not unblock the collapse.
+        blocked.mark_revealed(&Nibbles::from_nibbles([0x1, 0x1]));
+        assert!(!blocked.has_retryable());
+
+        blocked.mark_revealed(&sibling);
+        assert!(blocked.has_retryable());
+
+        let mut updates = B256Map::default();
+        blocked.take_batch(&mut updates, &mut batch);
+        assert_eq!(batch.len(), 1);
+        assert_eq!(batch[0].0, key(0x11));
+        assert!(blocked.is_empty());
     }
 
     #[test]

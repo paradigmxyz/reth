@@ -316,4 +316,5 @@ sparse_trie_tests! {
     test_get_leaf_value_for_storage_root_lookup,
     test_find_leaf_before_update_to_check_existence,
     test_prune_then_reuse_for_next_block,
+    test_collapse_asks_for_blinded_sibling_once,
 }
