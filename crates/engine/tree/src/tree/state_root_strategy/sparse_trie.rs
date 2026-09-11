@@ -3,7 +3,10 @@
 use std::{
     any::Any,
     panic::{self, AssertUnwindSafe},
-    sync::{Arc, OnceLock},
+    sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc, OnceLock,
+    },
 };
 
 use super::{evm_state_to_hashed_post_state, StateRootComputeOutcome, StateRootMessage};
@@ -13,7 +16,7 @@ use alloy_primitives::{
 };
 use alloy_rlp::{Decodable, Encodable};
 use crossbeam_channel::{Receiver as CrossbeamReceiver, Sender as CrossbeamSender};
-use metrics::{Gauge, Histogram};
+use metrics::{Counter, Gauge, Histogram};
 use reth_metrics::Metrics;
 use reth_primitives_traits::{Account, FastInstant as Instant};
 use reth_tasks::Runtime;
@@ -908,12 +911,13 @@ where
         Ok(pending_after < pending_before)
     }
 
-    /// Hands checked out storage tries to the shard that owns their address.
+    /// Hands checked out storage tries to the shard pool, grouped by the shard their address
+    /// prefers.
     ///
-    /// A round costs one queue push per shard that has work, instead of one spawn per chunk of
-    /// tries, and the shard hands its results back in batches instead of waking this thread once
-    /// per trie. Because the shard of an address never changes, the pass for a storage trie runs
-    /// on the thread that ran its previous pass.
+    /// A round costs one queue push per group, instead of one spawn per chunk of tries, and the
+    /// shard hands its results back in batches instead of waking this thread once per trie. A
+    /// group whose home shard is still working goes to an idle one, so a round is bounded by the
+    /// pool and not by whichever shard the leading bytes of its addresses picked.
     fn submit_storage_jobs(&self, jobs: Vec<StorageTrieJob<S>>) {
         if jobs.is_empty() {
             return;
@@ -921,30 +925,36 @@ where
 
         let pool = storage_shard_pool();
         let parent_span = debug_span!("submit_storage_jobs", n = jobs.len());
-        let mut by_shard = (0..pool.len()).map(|_| Vec::new()).collect::<Vec<_>>();
+        let mut by_home = (0..pool.len()).map(|_| Vec::new()).collect::<Vec<_>>();
         for job in jobs {
-            by_shard[pool.shard_of(&job.address)].push(job);
+            by_home[pool.home_of(&job.address)].push(job);
         }
 
         let new_epoch = self.new_epoch;
         let retain_updates = self.trie.retains_updates();
-        for (shard, group) in by_shard.into_iter().enumerate() {
+        for (home, group) in by_home.into_iter().enumerate() {
             if group.is_empty() {
                 continue;
             }
 
+            let tries = group.len();
             let storage_done_tx = self.storage_done_tx.clone();
             let parent_span = parent_span.clone();
-            pool.submit(shard, move || {
+            let placement = pool.submit(home, tries, move || {
                 let _enter = debug_span!(
                     target: "engine::tree::payload_processor::sparse_trie",
                     parent: &parent_span,
                     "storage_jobs",
-                    n = group.len(),
+                    n = tries,
                 )
                 .entered();
                 run_storage_jobs(group, &storage_done_tx, new_epoch, retain_updates);
             });
+
+            self.metrics.sparse_trie_storage_shard_queue_depth.record(placement.behind as f64);
+            if placement.shard != home {
+                self.metrics.sparse_trie_storage_shard_diversions.increment(1);
+            }
         }
     }
 
@@ -1683,10 +1693,15 @@ fn merge_leaf_updates(queued: &mut B256Map<LeafUpdate>, updates: B256Map<LeafUpd
 ///
 /// The sparse trie task used to hand every pass to the global rayon pool, which meant a spawn per
 /// chunk of tries, a wakeup per finished trie and CPU shared with everything else execution runs
-/// there. A shard instead owns a queue and a thread: a round is one push per shard, results come
-/// back in batches, and because a hashed address always maps to the same shard, the pass for a
-/// storage trie runs on the thread that ran its previous pass and finds its arena in that core's
-/// caches.
+/// there. A shard instead owns a queue and a thread: a round is one push per group of tries and
+/// results come back in batches.
+///
+/// A hashed address has a home shard, so the pass for a storage trie normally runs on the thread
+/// that ran its previous pass and finds its arena in that core's caches. The home is a preference
+/// and not an owner: a group whose home is already working goes to the least loaded shard
+/// instead. The payload is moved into its job and the task never checks an address out twice, so
+/// nothing but the warm arena ties a trie to a thread, and in the tail of a block the pool is
+/// mostly idle, where waiting for a busy home shard costs more than a cold arena does.
 ///
 /// The pool is process wide. A sparse trie task exists for one block, its shards do not, so a
 /// block pays neither thread creation nor a cold cache for a trie the previous block touched.
@@ -1696,8 +1711,8 @@ fn merge_leaf_updates(queued: &mut B256Map<LeafUpdate>, updates: B256Map<LeafUpd
 /// done. That is the intended split: the many small tries never touch rayon at all, and the few
 /// that are worth splitting keep the parallelism they had.
 struct StorageShardPool {
-    /// Work queue of each shard, indexed by shard.
-    shards: Vec<CrossbeamSender<ShardJob>>,
+    /// The shards, indexed by shard number.
+    shards: Vec<StorageShard>,
 }
 
 impl StorageShardPool {
@@ -1706,16 +1721,18 @@ impl StorageShardPool {
         let shards = (0..shards)
             .map(|shard| {
                 let (job_tx, job_rx) = crossbeam_channel::unbounded::<ShardJob>();
+                let outstanding = Arc::new(AtomicUsize::new(0));
+                let shard_outstanding = Arc::clone(&outstanding);
                 reth_tasks::spawn_os_thread(&format!("sparse-shard-{shard:02}"), move || {
-                    while let Ok(job) = job_rx.recv() {
+                    while let Ok(ShardJob { tries, run }) = job_rx.recv() {
                         // A panicking pass is caught by the job itself and resumed on the sparse
                         // trie task. This is only the net that keeps a panic anywhere else in a
-                        // job from taking the shard down and wedging every later block whose
-                        // addresses map to it.
-                        let _ = panic::catch_unwind(AssertUnwindSafe(job));
+                        // job from taking the shard down and wedging every later block.
+                        let _ = panic::catch_unwind(AssertUnwindSafe(run));
+                        shard_outstanding.fetch_sub(tries, Ordering::Relaxed);
                     }
                 });
-                job_tx
+                StorageShard { jobs: job_tx, outstanding }
             })
             .collect();
 
@@ -1723,27 +1740,85 @@ impl StorageShardPool {
     }
 
     /// Returns the number of shards.
-    fn len(&self) -> usize {
+    const fn len(&self) -> usize {
         self.shards.len()
     }
 
-    /// Returns the shard that owns `address`.
-    fn shard_of(&self, address: &B256) -> usize {
+    /// Returns the shard an address prefers.
+    fn home_of(&self, address: &B256) -> usize {
         usize::from(address[0]) % self.shards.len()
     }
 
-    /// Queues a job on `shard`, to run after everything already queued there.
-    fn submit(&self, shard: usize, job: impl FnOnce() + Send + 'static) {
+    /// Returns how many tries are queued or running on `shard`.
+    fn outstanding(&self, shard: usize) -> usize {
+        self.shards[shard].outstanding.load(Ordering::Relaxed)
+    }
+
+    /// Queues a group of `tries` passes and reports where it landed.
+    fn submit(
+        &self,
+        home: usize,
+        tries: usize,
+        job: impl FnOnce() + Send + 'static,
+    ) -> ShardPlacement {
+        let shard = self.pick(home);
+        let behind = self.shards[shard].outstanding.fetch_add(tries, Ordering::Relaxed);
         // The shard threads only exit when the pool is dropped, which never happens.
-        let _ = self.shards[shard].send(Box::new(job));
+        let _ = self.shards[shard].jobs.send(ShardJob { tries, run: Box::new(job) });
+
+        ShardPlacement { shard, behind }
+    }
+
+    /// Picks the least loaded shard, keeping `home` unless another one is strictly freer.
+    fn pick(&self, home: usize) -> usize {
+        let mut best = home;
+        let mut best_outstanding = self.outstanding(home);
+        for shard in 0..self.shards.len() {
+            if best_outstanding == 0 {
+                break
+            }
+
+            let outstanding = self.outstanding(shard);
+            if outstanding < best_outstanding {
+                best = shard;
+                best_outstanding = outstanding;
+            }
+        }
+
+        best
     }
 }
 
+/// One shard of [`StorageShardPool`]: a queue served by one thread.
+struct StorageShard {
+    /// Work queue of this shard.
+    jobs: CrossbeamSender<ShardJob>,
+    /// Tries queued or running here, raised when a group is pushed and lowered when the shard
+    /// finishes it. Only a hint for [`StorageShardPool::pick`], so a stale read costs a worse
+    /// shard and nothing else.
+    outstanding: Arc<AtomicUsize>,
+}
+
 /// A unit of work handed to a shard thread.
-///
-/// Erased because the pool outlives every sparse trie task and cannot be generic over the trie
-/// type a task was built with.
-type ShardJob = Box<dyn FnOnce() + Send>;
+struct ShardJob {
+    /// How many storage tries the group carries, taken off the shard's outstanding count once it
+    /// has run.
+    tries: usize,
+    /// The passes themselves.
+    ///
+    /// Erased because the pool outlives every sparse trie task and cannot be generic over the
+    /// trie type a task was built with.
+    run: Box<dyn FnOnce() + Send>,
+}
+
+/// Where [`StorageShardPool::submit`] put a group of storage passes.
+struct ShardPlacement {
+    /// The shard that will run the group.
+    shard: usize,
+    /// Tries that were already queued or running there. Zero means the group starts as soon as
+    /// the shard picks it up.
+    behind: usize,
+}
 
 /// Returns the process wide storage shard pool, starting its threads on first use.
 fn storage_shard_pool() -> &'static StorageShardPool {
@@ -1788,6 +1863,12 @@ pub(super) struct SparseTrieTaskMetrics {
     /// Histogram of how many storage tries a shard hands back in one message, which is how many
     /// tries the task takes back per wakeup.
     pub(super) sparse_trie_storage_return_batch_size: Histogram,
+    /// Histogram of how many storage tries were already queued or running on the shard a group of
+    /// passes was pushed to. Anything above zero is a group that has to wait for its shard.
+    pub(super) sparse_trie_storage_shard_queue_depth: Histogram,
+    /// Number of groups that went to a shard other than the one their addresses prefer, because
+    /// the preferred shard was busy and another was freer.
+    pub(super) sparse_trie_storage_shard_diversions: Counter,
     /// Histogram of sparse trie final update durations.
     pub(super) sparse_trie_final_update_duration_histogram: Histogram,
     /// Histogram of sparse trie total durations.
@@ -2309,6 +2390,117 @@ mod tests {
         }
         for (address, slot, value) in &leaves {
             assert_eq!(storage_slot_value(&task, address, slot).as_ref(), Some(value));
+        }
+
+        drop(updates_tx);
+        drop(task);
+        drain_sparse_trie_tasks(&runtime);
+    }
+
+    /// The shard a group runs on is picked by load, so nothing in the pool keeps an address on
+    /// one thread. What does is the checkout: the payload is moved out of its slot for the whole
+    /// pass, and a slot that is out with a job is never picked up by another round.
+    #[test]
+    fn an_address_out_with_a_job_is_never_checked_out_again() {
+        let runtime = reth_tasks::Runtime::test();
+        let provider_factory = create_test_provider_factory();
+        let anchor_hash = init_genesis(&provider_factory).expect("failed to initialize genesis");
+        let state_provider_factory = OverlayStateProviderFactory::new(
+            provider_factory,
+            OverlayManager::<reth_chain_state::EthPrimitives>::default()
+                .overlay_builder(anchor_hash),
+        );
+        let (proof_result_tx, proof_result_rx) = crossbeam_channel::unbounded();
+        let proof_worker_handle = ProofWorkerHandle::new(
+            &runtime,
+            ProofTaskCtx::new(state_provider_factory),
+            false,
+            proof_result_tx.clone(),
+        );
+
+        let trie = SparseStateTrie::default()
+            .with_accounts_trie(RevealableSparseTrie::<ArenaParallelSparseTrie>::revealed_empty())
+            .with_default_storage_trie(RevealableSparseTrie::blind_from(
+                ArenaParallelSparseTrie::default(),
+            ))
+            .with_updates(true);
+
+        let (updates_tx, updates_rx) = crossbeam_channel::unbounded();
+        let (_cancel_guard, cancel_rx) = crossbeam_channel::bounded::<()>(0);
+        let mut task = SparseTrieCacheTask::new_with_trie(
+            &runtime,
+            updates_rx,
+            cancel_rx,
+            std::sync::mpsc::channel().0,
+            proof_worker_handle,
+            proof_result_tx,
+            proof_result_rx,
+            SparseTrieTaskMetrics::default(),
+            trie,
+            EMPTY_ROOT_HASH,
+            TrieNodeEpoch::new(1),
+            1,
+        );
+
+        // One leaf per address, enough of them to exceed the inline budget. The addresses repeat
+        // one byte, so they cover several home shards.
+        let leaves = (0..=INLINE_STORAGE_WORK_UNITS as u8)
+            .map(|index| {
+                let address = B256::repeat_byte(0x10 + index);
+                let slot = B256::repeat_byte(0x80 + index);
+                let value = alloy_rlp::encode_fixed_size(&U256::from(index + 1)).to_vec();
+                (address, slot, value)
+            })
+            .collect::<Vec<_>>();
+        let storage_proofs = leaves
+            .iter()
+            .map(|(address, slot, value)| {
+                let leaf = ProofTrieNodeV2 {
+                    path: Nibbles::default(),
+                    node: TrieNodeV2::Leaf(LeafNode::new(Nibbles::unpack(slot), value.clone())),
+                    masks: None,
+                };
+                (*address, vec![leaf])
+            })
+            .collect();
+
+        task.on_proof_result(DecodedMultiProofV2 { account_proofs: Vec::new(), storage_proofs })
+            .unwrap();
+        assert_eq!(task.storage_in_flight, leaves.len());
+
+        // A job owns every payload now. New updates for those addresses are buffered, and a
+        // round that runs before the payloads come back must not hand any of them out again.
+        let late_slot = B256::repeat_byte(0x21);
+        let mut state = HashedPostState::default();
+        for (address, ..) in &leaves {
+            state.storages.entry(*address).or_default().storage.insert(late_slot, U256::from(9));
+        }
+        task.on_hashed_state_update(state);
+        task.pending_updates = 1;
+        task.process_new_updates().unwrap();
+        task.run_ready_storage_work().unwrap();
+
+        assert_eq!(task.storage_in_flight, leaves.len(), "no address is out with two jobs");
+        for (address, ..) in &leaves {
+            assert!(
+                matches!(task.storage[address], StorageSlot::InFlight(_)),
+                "{address} must still be out with its first job"
+            );
+        }
+
+        while task.storage_in_flight > 0 {
+            task.drain_returned_storage_tries().unwrap();
+        }
+        // Only now is the buffered update applied, by a pass that may run on any shard.
+        task.run_ready_storage_work().unwrap();
+        while task.storage_in_flight > 0 {
+            task.drain_returned_storage_tries().unwrap();
+        }
+
+        let late_value = alloy_rlp::encode_fixed_size(&U256::from(9)).to_vec();
+        for (address, slot, value) in &leaves {
+            assert_eq!(storage_slot_value(&task, address, slot).as_ref(), Some(value));
+            assert_eq!(storage_slot_value(&task, address, &late_slot).as_ref(), Some(&late_value));
         }
 
         drop(updates_tx);
@@ -2926,29 +3118,81 @@ mod tests {
         drain_sparse_trie_tasks(&runtime);
     }
 
-    #[test]
-    fn addresses_of_one_shard_are_processed_in_order_on_its_thread() {
-        let pool = storage_shard_pool();
-        // Two addresses that share a leading byte always share a shard.
+    /// Two addresses that share a leading byte, and therefore a home shard.
+    fn addresses_sharing_a_home() -> (B256, B256) {
         let first = B256::repeat_byte(0x5a);
         let mut second = B256::repeat_byte(0x5a);
         second[31] = 0x01;
-        let shard = pool.shard_of(&first);
-        assert_eq!(shard, pool.shard_of(&second));
+        (first, second)
+    }
+
+    /// Spins until `shard` has nothing queued or running.
+    fn wait_until_shard_is_idle(pool: &StorageShardPool, shard: usize) {
+        let start = std::time::Instant::now();
+        while pool.outstanding(shard) > 0 {
+            assert!(
+                start.elapsed() < std::time::Duration::from_secs(5),
+                "shard {shard} never finished its group"
+            );
+            std::thread::yield_now();
+        }
+    }
+
+    #[test]
+    fn an_idle_home_shard_runs_every_pass_of_an_address() {
+        let pool = StorageShardPool::new(2);
+        let (first, second) = addresses_sharing_a_home();
+        let home = pool.home_of(&first);
+        assert_eq!(home, pool.home_of(&second));
 
         let (run_tx, run_rx) = crossbeam_channel::unbounded();
         for address in [first, second] {
             let run_tx = run_tx.clone();
-            pool.submit(shard, move || {
+            let placement = pool.submit(pool.home_of(&address), 1, move || {
                 let _ = run_tx.send((address, std::thread::current().id()));
             });
+            assert_eq!(placement.shard, home, "an idle pool keeps a group on its home shard");
+            assert_eq!(placement.behind, 0);
+            wait_until_shard_is_idle(&pool, home);
         }
         drop(run_tx);
 
         let (first_address, first_thread) = run_rx.recv().expect("first job must run");
         let (second_address, second_thread) = run_rx.recv().expect("second job must run");
         assert_eq!([first_address, second_address], [first, second]);
-        assert_eq!(first_thread, second_thread, "a shard is one thread");
+        assert_eq!(first_thread, second_thread, "a warm arena stays on one thread");
+    }
+
+    #[test]
+    fn a_busy_home_shard_hands_its_group_to_an_idle_one() {
+        let pool = StorageShardPool::new(2);
+        let (first, second) = addresses_sharing_a_home();
+        let home = pool.home_of(&first);
+        assert_eq!(home, pool.home_of(&second));
+
+        // Occupy the home shard with a group that only finishes when this test lets it.
+        let (running_tx, running_rx) = crossbeam_channel::bounded(1);
+        let (release_tx, release_rx) = crossbeam_channel::bounded::<()>(1);
+        let placement = pool.submit(home, 1, move || {
+            let _ = running_tx.send(());
+            let _ = release_rx.recv();
+        });
+        assert_eq!(placement.shard, home);
+        running_rx
+            .recv_timeout(std::time::Duration::from_secs(5))
+            .expect("the home shard must pick the first group up");
+
+        let (done_tx, done_rx) = crossbeam_channel::bounded(1);
+        let placement = pool.submit(pool.home_of(&second), 1, move || {
+            let _ = done_tx.send(());
+        });
+        assert_ne!(placement.shard, home, "a busy home shard must not hold the second group");
+        assert_eq!(placement.behind, 0, "the group went to an idle shard");
+        done_rx
+            .recv_timeout(std::time::Duration::from_secs(5))
+            .expect("the second group runs while the first is still blocked");
+
+        let _ = release_tx.send(());
     }
 
     #[test]
@@ -2998,17 +3242,21 @@ mod tests {
 
     #[test]
     fn a_shard_thread_survives_a_panicking_job() {
-        let pool = storage_shard_pool();
-        let shard = pool.shard_of(&B256::repeat_byte(0xc3));
+        // One shard, so the second group cannot go anywhere else.
+        let pool = StorageShardPool::new(1);
+        let shard = pool.home_of(&B256::repeat_byte(0xc3));
 
-        pool.submit(shard, || panic!("pass panicked"));
+        pool.submit(shard, 1, || panic!("pass panicked"));
 
         let (alive_tx, alive_rx) = crossbeam_channel::bounded(1);
-        pool.submit(shard, move || {
+        pool.submit(shard, 1, move || {
             let _ = alive_tx.send(());
         });
         alive_rx
             .recv_timeout(std::time::Duration::from_secs(5))
             .expect("the shard must keep serving its queue");
+        // A panicking job must still give its tries back, or the shard looks busy forever and
+        // every later group avoids it.
+        wait_until_shard_is_idle(&pool, shard);
     }
 }
