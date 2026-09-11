@@ -54,8 +54,12 @@
 //! Sparse-trie cache pruning uses node epochs to retain the in-memory block range.
 
 mod sparse_trie;
+mod trie_prewarm;
 
-use self::sparse_trie::{SparseTrieCacheTask, SparseTrieTaskMetrics};
+use self::{
+    sparse_trie::{SparseTrieCacheTask, SparseTrieTaskMetrics},
+    trie_prewarm::TriePrewarmPool,
+};
 use crate::tree::{metrics::BlockValidationMetrics, EngineApiTreeState, ExecutionEnv, TreeConfig};
 use alloy_primitives::B256;
 use crossbeam_channel::{Receiver as CrossbeamReceiver, Sender as CrossbeamSender};
@@ -92,7 +96,7 @@ use std::{
     fmt,
     sync::{
         mpsc::{self, RecvTimeoutError},
-        Arc,
+        Arc, OnceLock,
     },
     time::Duration,
 };
@@ -469,6 +473,9 @@ type SerialFallbackRx = mpsc::Receiver<ProviderResult<(B256, TrieUpdates, Arc<Ha
 #[derive(Default)]
 pub struct DefaultStateRootStrategy {
     metrics: SparseTrieTaskMetrics,
+    /// Pool that warms the trie-table pages of a block's access list, created on the first block
+    /// when [`TreeConfig::trie_prewarm_threads`] is non-zero.
+    trie_prewarm_pool: OnceLock<Option<Arc<TriePrewarmPool>>>,
 }
 
 impl fmt::Debug for DefaultStateRootStrategy {
@@ -481,6 +488,14 @@ impl DefaultStateRootStrategy {
     /// Transaction count threshold below which proof workers are halved, since fewer transactions
     /// produce fewer state changes and most workers would be idle overhead.
     const SMALL_BLOCK_PROOF_WORKER_TX_THRESHOLD: usize = 30;
+
+    /// Returns the trie page prewarm pool, spawning its threads on first use, or `None` when the
+    /// prewarm is disabled.
+    fn trie_prewarm_pool(&self, num_threads: usize) -> Option<&Arc<TriePrewarmPool>> {
+        self.trie_prewarm_pool
+            .get_or_init(|| (num_threads > 0).then(|| TriePrewarmPool::new(num_threads)))
+            .as_ref()
+    }
 
     /// Spawns the default state-root computation pipeline.
     ///
@@ -849,6 +864,14 @@ where
         } else {
             state_provider_factory.clone()
         };
+
+        // Warming runs while the block executes, so it is dispatched before anything the block
+        // needs and reads through the same factory the proof workers will use.
+        if let Some(bal) = env.decoded_bal.clone() &&
+            let Some(pool) = self.trie_prewarm_pool(config.trie_prewarm_threads())
+        {
+            pool.dispatch(bal, proof_state_provider_factory.clone());
+        }
 
         let mut handle = self.spawn_state_root(
             executor,
@@ -1408,6 +1431,17 @@ mod tests {
 
     #[test]
     fn state_root_task_matches_serial_root() {
+        assert_state_root_task_matches_serial_root(false);
+    }
+
+    /// The trie page prewarm only reads, so warming the paths of every account the block writes
+    /// plus one it never touches must leave the state root untouched.
+    #[test]
+    fn trie_page_prewarm_does_not_change_state_root() {
+        assert_state_root_task_matches_serial_root(true);
+    }
+
+    fn assert_state_root_task_matches_serial_root(prewarm_trie_pages: bool) {
         reth_tracing::init_test_tracing();
 
         let factory = create_test_provider_factory_with_chain_spec(Arc::new(ChainSpec::default()));
@@ -1456,13 +1490,46 @@ mod tests {
         let env: ExecutionEnv<EthEvmConfig> = ExecutionEnv::test_default();
         let runtime = reth_tasks::Runtime::test();
         let overlay_manager = OverlayManager::<EthPrimitives>::default();
+        let state_provider_factory = OverlayStateProviderFactory::new(
+            provider_factory,
+            overlay_manager.overlay_builder(genesis_hash),
+        );
+
+        if prewarm_trie_pages {
+            let mut accounts: Vec<_> = accumulated_state
+                .iter()
+                .map(|(address, (_, storage))| {
+                    let mut changes = alloy_eip7928::AccountChanges::new(*address);
+                    changes.storage_changes = storage
+                        .keys()
+                        .map(|slot| alloy_eip7928::SlotChanges {
+                            slot: U256::from_be_bytes(slot.0),
+                            changes: Vec::new(),
+                        })
+                        .collect();
+                    changes
+                })
+                .collect();
+            accounts.push(alloy_eip7928::AccountChanges::new(Address::repeat_byte(0xaa)));
+            let warmed = trie_prewarm::warm_trie_pages_blocking(
+                &state_provider_factory.database_provider_ro().unwrap(),
+                Arc::new(alloy_eip7928::bal::DecodedBal::new(
+                    alloy_eip7928::bal::Bal::from(accounts),
+                    Default::default(),
+                )),
+            );
+            assert_eq!(warmed.accounts, accumulated_state.len() + 1);
+            assert_eq!(
+                warmed.slots,
+                accumulated_state.values().map(|(_, storage)| storage.len()).sum::<usize>()
+            );
+            assert_eq!(warmed.errors, 0);
+        }
+
         let mut state_root_handle = DefaultStateRootStrategy::default().spawn_state_root(
             &runtime,
             &overlay_manager,
-            OverlayStateProviderFactory::new(
-                provider_factory,
-                overlay_manager.overlay_builder(genesis_hash),
-            ),
+            state_provider_factory,
             StateRootTaskOptions {
                 parent_header: SealedHeader::new(Default::default(), genesis_hash),
                 preserved_sparse_trie: None,

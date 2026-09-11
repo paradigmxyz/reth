@@ -564,6 +564,11 @@ pub struct EngineArgs {
     #[arg(long = "engine.disable-bal-batch-io", default_value_t = false)]
     pub disable_bal_batch_io: bool,
 
+    /// Number of threads that warm the trie table pages a block's proofs will read, walking the
+    /// paths named by the block access list while the block executes. 0 disables it.
+    #[arg(long = "engine.trie-prewarm-threads", default_value_t = 0)]
+    pub trie_prewarm_threads: usize,
+
     /// Add random jitter before each proof computation (trie-debug only).
     /// Each proof worker sleeps for a random duration up to this value before
     /// starting work. Useful for stress-testing timing-sensitive proof logic.
@@ -654,6 +659,7 @@ impl Default for EngineArgs {
             bal_parallel_execution_disabled,
             bal_parallel_state_root_disabled,
             disable_bal_batch_io: false,
+            trie_prewarm_threads: 0,
             #[cfg(feature = "trie-debug")]
             proof_jitter: None,
         }
@@ -753,7 +759,8 @@ impl EngineArgs {
             .with_suppress_persistence_during_build(self.suppress_persistence_during_build)
             .without_bal_parallel_execution(self.bal_parallel_execution_disabled)
             .without_bal_parallel_state_root(self.bal_parallel_state_root_disabled)
-            .without_bal_batch_io(self.disable_bal_batch_io);
+            .without_bal_batch_io(self.disable_bal_batch_io)
+            .with_trie_prewarm_threads(self.trie_prewarm_threads);
         #[cfg(feature = "trie-debug")]
         let config = config.with_proof_jitter(self.proof_jitter);
         config
@@ -914,6 +921,7 @@ mod tests {
             bal_parallel_execution_disabled: true,
             bal_parallel_state_root_disabled: true,
             disable_bal_batch_io: true,
+            trie_prewarm_threads: 32,
             #[cfg(feature = "trie-debug")]
             proof_jitter: None,
         };
@@ -958,6 +966,8 @@ mod tests {
             "--engine.disable-bal-parallel-execution",
             "--engine.disable-bal-parallel-state-root",
             "--engine.disable-bal-batch-io",
+            "--engine.trie-prewarm-threads",
+            "32",
         ])
         .args;
 

@@ -214,6 +214,9 @@ pub struct TreeConfig {
     /// This trusts the block header's state root. It is intended for experiments that measure
     /// execution without trie state-root work.
     skip_state_root: bool,
+    /// Number of threads that warm the trie-table pages a block's proofs will read, driven by
+    /// the block access list. Zero disables the prewarm.
+    trie_prewarm_threads: usize,
     /// Maximum random jitter applied before each proof computation (trie-debug only).
     /// When set, each proof worker sleeps for a random duration up to this value
     /// before starting a proof calculation.
@@ -266,6 +269,7 @@ impl Default for TreeConfig {
             disable_bal_parallel_state_root: false,
             disable_bal_batch_io: false,
             skip_state_root: false,
+            trie_prewarm_threads: 0,
             #[cfg(feature = "trie-debug")]
             proof_jitter: None,
         }
@@ -346,6 +350,7 @@ impl TreeConfig {
             disable_bal_parallel_state_root: false,
             disable_bal_batch_io: false,
             skip_state_root: false,
+            trie_prewarm_threads: 0,
             #[cfg(feature = "trie-debug")]
             proof_jitter: None,
         }
@@ -795,6 +800,17 @@ impl TreeConfig {
     /// Setter for whether to skip trie state-root computation during engine validation.
     pub const fn with_skip_state_root(mut self, skip_state_root: bool) -> Self {
         self.skip_state_root = skip_state_root;
+        self
+    }
+
+    /// Returns the number of threads warming trie-table pages ahead of the proof workers.
+    pub const fn trie_prewarm_threads(&self) -> usize {
+        self.trie_prewarm_threads
+    }
+
+    /// Setter for the number of threads warming trie-table pages ahead of the proof workers.
+    pub const fn with_trie_prewarm_threads(mut self, trie_prewarm_threads: usize) -> Self {
+        self.trie_prewarm_threads = trie_prewarm_threads;
         self
     }
 

@@ -1147,6 +1147,11 @@ Engine:
       --engine.disable-bal-batch-io
           Disable BAL (Block Access List) storage prefetch IO during prewarming. When set, BAL storage slots are not read into the execution cache
 
+      --engine.trie-prewarm-threads <TRIE_PREWARM_THREADS>
+          Number of threads that warm the trie table pages a block's proofs will read, walking the paths named by the block access list while the block executes. 0 disables it
+
+          [default: 0]
+
 ERA:
       --era.enable
           Enable import from ERA1 files
