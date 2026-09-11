@@ -380,3 +380,59 @@ fn test_stat_dupsort() {
         assert_eq!(stat.entries(), 8);
     }
 }
+
+#[test]
+fn test_writemap_reclaimed_pages_preserve_reader_and_abort() {
+    let dir = tempdir().unwrap();
+    {
+        let env = Environment::builder()
+            .write_map()
+            .set_geometry(Geometry { size: Some(64 * 1024 * 1024..), ..Default::default() })
+            .open(dir.path())
+            .unwrap();
+        let initial = vec![1u8; 8192];
+        let tx = env.begin_rw_txn().unwrap();
+        let db = tx.open_db(None).unwrap().dbi();
+        for key in 0u32..128 {
+            tx.put(db, key.to_be_bytes(), &initial, WriteFlags::empty()).unwrap();
+        }
+        tx.commit().unwrap();
+        let reader = env.begin_ro_txn().unwrap();
+        let reader_db = reader.open_db(None).unwrap().dbi();
+        for generation in 2u8..5 {
+            let value = vec![generation; 8192];
+            let tx = env.begin_rw_txn().unwrap();
+            let db = tx.open_db(None).unwrap().dbi();
+            for key in 0u32..128 {
+                tx.put(db, key.to_be_bytes(), &value, WriteFlags::empty()).unwrap();
+            }
+            tx.commit().unwrap();
+        }
+        for key in 0u32..128 {
+            assert_eq!(
+                reader.get::<Vec<u8>>(reader_db, &key.to_be_bytes()).unwrap(),
+                Some(initial.clone())
+            );
+        }
+        drop(reader);
+        // Reuse pages after the old reader releases its snapshot, then abort an update.
+        for generation in 5u8..8 {
+            let value = vec![generation; 8192];
+            let tx = env.begin_rw_txn().unwrap();
+            let db = tx.open_db(None).unwrap().dbi();
+            for key in 0u32..128 {
+                tx.put(db, key.to_be_bytes(), &value, WriteFlags::empty()).unwrap();
+            }
+            if generation != 7 {
+                tx.commit().unwrap();
+            }
+        }
+        env.sync(true).unwrap();
+    }
+    let env = Environment::builder().write_map().open(dir.path()).unwrap();
+    let tx = env.begin_ro_txn().unwrap();
+    let db = tx.open_db(None).unwrap().dbi();
+    for key in 0u32..128 {
+        assert_eq!(tx.get::<Vec<u8>>(db, &key.to_be_bytes()).unwrap(), Some(vec![6; 8192]));
+    }
+}

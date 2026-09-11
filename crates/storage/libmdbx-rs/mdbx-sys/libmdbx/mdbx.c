@@ -22369,6 +22369,41 @@ __hot static pgno_t repnl_get_sequence(MDBX_txn *txn, const size_t num, uint8_t 
   return 0;
 }
 
+/* Speculate only within the reclaimed list: these pages are no longer visible
+ * to readers, and remain free if the transaction aborts or never allocates them. */
+static bool page_prefault_single(MDBX_env *env, const MDBX_txn *txn, const MDBX_cursor *mc, pgno_t pgno,
+                                void *pattern) {
+  struct iovec iov[8];
+  iov[0].iov_base = pattern;
+  iov[0].iov_len = env->ps;
+  size_t n = 1;
+  if (MDBX_USE_MINCORE && mc && env->ps == globals.sys_pagesize && !txn->tw.loose_count &&
+      mc->tree != &txn->dbs[FREE_DBI]) {
+    const size_t len = MDBX_PNL_GETSIZE(txn->tw.repnl);
+    const pgno_t *const edge = MDBX_PNL_EDGE(txn->tw.repnl);
+    /* Limit speculative writes to eight pages and 32 KiB per allocation. */
+    while (n < ARRAY_LENGTH(iov) && n * env->ps < 32768 && n <= len) {
+      const pgno_t next = pgno + (pgno_t)n;
+      if (edge[MDBX_PNL_ASCENDING ? (ptrdiff_t)n - 1 : 1 - (ptrdiff_t)n] != next ||
+          next >= txn->geo.first_unallocated || pgno2bytes(env, next + 1) > env->dxb_mmap.current ||
+          mincore_probe(env, next))
+        break;
+      iov[n++] = iov[0];
+    }
+  }
+  const int err = n == 1 ? osal_pwrite(env->lazy_fd, pattern, env->ps, pgno2bytes(env, pgno))
+                         : osal_pwritev(env->lazy_fd, iov, n, pgno2bytes(env, pgno));
+#if MDBX_ENABLE_PGOP_STAT
+  env->lck->pgops.prefault.weak += 1;
+#endif /* MDBX_ENABLE_PGOP_STAT */
+  if (unlikely(err != MDBX_SUCCESS)) {
+    /* Probe marks cold pages as resident before the write; retry after failure. */
+    memset(env->lck->mincore_cache.begin, -1, sizeof(env->lck->mincore_cache.begin));
+    return false;
+  }
+  return true;
+}
+
 static inline pgr_t page_alloc_finalize(MDBX_env *const env, MDBX_txn *const txn, const MDBX_cursor *const mc,
                                         const pgno_t pgno, const size_t num) {
 #if MDBX_ENABLE_PROFGC
@@ -22414,13 +22449,8 @@ static inline pgr_t page_alloc_finalize(MDBX_env *const env, MDBX_txn *const txn
       void *const pattern = ptr_disp(env->page_auxbuf, need_clean ? env->ps : env->ps * 2);
       size_t file_offset = pgno2bytes(env, pgno);
       if (likely(num == 1)) {
-        if (!mincore_probe(env, pgno)) {
-          osal_pwrite(env->lazy_fd, pattern, env->ps, file_offset);
-#if MDBX_ENABLE_PGOP_STAT
-          env->lck->pgops.prefault.weak += 1;
-#endif /* MDBX_ENABLE_PGOP_STAT */
+        if (!mincore_probe(env, pgno) && page_prefault_single(env, txn, mc, pgno, pattern))
           need_clean = false;
-        }
       } else {
         struct iovec iov[MDBX_AUXILARY_IOV_MAX];
         size_t n = 0, cleared = 0;
