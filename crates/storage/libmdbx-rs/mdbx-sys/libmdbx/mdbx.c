@@ -22455,25 +22455,22 @@ static inline pgr_t page_alloc_finalize(MDBX_env *const env, MDBX_txn *const txn
         struct iovec iov[MDBX_AUXILARY_IOV_MAX];
         size_t n = 0, cleared = 0;
         for (size_t i = 0; i < num; ++i) {
-          if (!mincore_probe(env, pgno + (pgno_t)i)) {
+          const bool resident = mincore_probe(env, pgno + (pgno_t)i);
+          if (!resident) {
+            if (n == 0)
+              file_offset = pgno2bytes(env, pgno + (pgno_t)i);
             ++cleared;
             iov[n].iov_len = env->ps;
-            iov[n].iov_base = pattern;
-            if (unlikely(++n == MDBX_AUXILARY_IOV_MAX)) {
-              osal_pwritev(env->lazy_fd, iov, MDBX_AUXILARY_IOV_MAX, file_offset);
-#if MDBX_ENABLE_PGOP_STAT
-              env->lck->pgops.prefault.weak += 1;
-#endif /* MDBX_ENABLE_PGOP_STAT */
-              file_offset += pgno2bytes(env, MDBX_AUXILARY_IOV_MAX);
-              n = 0;
-            }
+            iov[n++].iov_base = pattern;
           }
-        }
-        if (likely(n > 0)) {
-          osal_pwritev(env->lazy_fd, iov, n, file_offset);
+          /* A vectored write covers a contiguous range; resident gaps end the run. */
+          if (n && (resident || n == MDBX_AUXILARY_IOV_MAX || i + 1 == num)) {
+            osal_pwritev(env->lazy_fd, iov, n, file_offset);
 #if MDBX_ENABLE_PGOP_STAT
-          env->lck->pgops.prefault.weak += 1;
+            env->lck->pgops.prefault.weak += 1;
 #endif /* MDBX_ENABLE_PGOP_STAT */
+            n = 0;
+          }
         }
         if (cleared == num)
           need_clean = false;
