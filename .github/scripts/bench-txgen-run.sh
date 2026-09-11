@@ -13,7 +13,7 @@
 #               BENCH_FEATURE_ARGS, BENCH_OTLP_TRACES_ENDPOINT,
 #               BENCH_OTLP_LOGS_ENDPOINT, BENCH_OTLP_DISABLED,
 #               BENCH_TRACING_CHROME, BENCH_TRACY,
-#               BENCH_TRACY_FILTER, BENCH_TRACY_SAMPLING_HZ, BENCH_TLB_TRACE,
+#               BENCH_TRACY_FILTER, BENCH_TRACY_SAMPLING_HZ, BENCH_TLB_TRACE, BENCH_IO_TRACE,
 #               BENCH_POST_WARMUP_SLEEP_SECONDS,
 #               TXGEN_PAYLOADS_DIR (pre-extracted payloads; skips extraction),
 #               BENCH_TARGET_METRICS_SCRAPE_INTERVAL_MS (optional txgen override)
@@ -587,18 +587,11 @@ if [ "${BENCH_TRACY:-off}" != "off" ]; then
   fi
 fi
 
-if [ "${BENCH_TLB_TRACE:-false}" = "true" ]; then
+if [ "${BENCH_TLB_TRACE:-false}" = "true" ] || [ "${BENCH_IO_TRACE:-false}" = "true" ]; then
   # Attach only to the benchmark's engine, trie and transaction-manager threads.
   # sched_switch provides clock-alignment anchors for the matching Tracy capture.
   PERF_EVENTS=(tlb:tlb_flush irq_vectors:call_function_entry irq_vectors:call_function_exit
     irq_vectors:call_function_single_entry irq_vectors:call_function_single_exit sched:sched_switch)
-  PERF_ARGS=()
-  for event in "${PERF_EVENTS[@]}"; do
-    event_path="${event/:/\/}"
-    sudo test -r "/sys/kernel/tracing/events/$event_path/id"
-    sudo cat "/sys/kernel/tracing/events/$event_path/format" >> "$OUTPUT_DIR/tlb-event-formats.txt"
-    PERF_ARGS+=(-e "$event")
-  done
   RETH_CGROUP=$(sudo systemctl show "$RETH_SCOPE" -p ControlGroup --value)
   test -n "$RETH_CGROUP"
   RETH_PID=
@@ -621,15 +614,32 @@ if [ "${BENCH_TLB_TRACE:-false}" = "true" ]; then
   done
   test "${#PERF_TIDS[@]}" -eq 3
   PERF_TID_LIST=$(IFS=,; echo "${PERF_TIDS[*]}")
+  PERF_SCOPE=(-t "$PERF_TID_LIST")
+  if [ "${BENCH_IO_TRACE:-false}" = "true" ]; then
+    # Completion runs on interrupt/worker contexts, so task-scoped recording
+    # would omit it. Keep the shared artifact names for collector compatibility.
+    PERF_SCOPE=(-a)
+    PERF_EVENTS=(block:block_rq_issue block:block_rq_complete block:block_rq_requeue
+      syscalls:sys_enter_msync syscalls:sys_exit_msync)
+    lsblk -o NAME,MAJ:MIN,SIZE,TYPE,MOUNTPOINTS > "$OUTPUT_DIR/block-devices.txt"
+    findmnt -T "$DATADIR" > "$OUTPUT_DIR/datadir-mount.txt"
+  fi
+  PERF_ARGS=()
+  for event in "${PERF_EVENTS[@]}"; do
+    event_path="${event/:/\/}"
+    sudo test -r "/sys/kernel/tracing/events/$event_path/id"
+    sudo cat "/sys/kernel/tracing/events/$event_path/format" >> "$OUTPUT_DIR/tlb-event-formats.txt"
+    PERF_ARGS+=(-e "$event")
+  done
   sudo sh -c 'echo $$ > "$1"; shift; exec "$@"' sh "$OUTPUT_DIR/tlb-perf.pid" \
-    perf record --clockid CLOCK_MONOTONIC_RAW -m 1024 -t "$PERF_TID_LIST" \
+    perf record --clockid CLOCK_MONOTONIC_RAW -m 4096 "${PERF_SCOPE[@]}" \
     "${PERF_ARGS[@]}" -o "$OUTPUT_DIR/tlb-perf.data" \
     > "$OUTPUT_DIR/tlb-perf.log" 2>&1 &
   TLB_WRAPPER_PID=$!
   sleep 0.5
   if ! kill -0 "$TLB_WRAPPER_PID" 2>/dev/null; then
     cat "$OUTPUT_DIR/tlb-perf.log"
-    echo "::error::TLB/IPI recorder exited before block replay"
+    echo "::error::Kernel event recorder exited before block replay"
     exit 1
   fi
 fi
