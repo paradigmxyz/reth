@@ -407,8 +407,8 @@ impl DatabaseEnv {
         let mode = match kind {
             DatabaseEnvKind::RO => Mode::ReadOnly,
             DatabaseEnvKind::RW => {
-                // enable writemap mode in RW mode
-                inner_env.write_map();
+                // Shadow pages avoid writable-map faults and prefault writes. MDBX batches
+                // their contents into writes at spill/commit using the configured sync mode.
                 Mode::ReadWrite { sync_mode: args.sync_mode }
             }
         };
@@ -727,6 +727,88 @@ mod tests {
     #[test]
     fn db_creation() {
         let _tempdir = create_test_db(DatabaseEnvKind::RW);
+    }
+
+    #[test]
+    fn buffered_writes_spill_abort_and_reopen() {
+        use reth_libmdbx::WriteFlags;
+
+        let tempdir = TempDir::new().unwrap();
+        let args = DatabaseArguments::test();
+        let env = DatabaseEnv::open(tempdir.path(), DatabaseEnvKind::RW, args.clone()).unwrap();
+        assert!(!env.inner.is_write_map());
+        assert!(matches!(
+            env.inner.info().unwrap().mode(),
+            Mode::ReadWrite { sync_mode: SyncMode::Durable }
+        ));
+        env.inner.with_raw_env_ptr(|ptr| {
+            // SAFETY: the environment is live and has no active transaction. The small dirty
+            // list forces spills without allocating a large DB.
+            assert_eq!(
+                unsafe { ffi::mdbx_env_set_option(ptr, ffi::MDBX_opt_txn_dp_limit, 128) },
+                0
+            );
+        });
+        let original = vec![0x42; 12 * KILOBYTE];
+        let updated = vec![0x24; 16 * KILOBYTE];
+        let tx = env.inner.begin_rw_txn().unwrap();
+        let db = tx.create_db(Some("BufferedWrites"), DatabaseFlags::empty()).unwrap();
+        for key in 0u64..512 {
+            tx.put(db.dbi(), key.to_be_bytes(), &original, WriteFlags::empty()).unwrap();
+        }
+        tx.commit().unwrap();
+        assert!(env.inner.info().unwrap().page_ops().spill > 0);
+
+        let snapshot = env.inner.begin_ro_txn().unwrap();
+        // Exercise rollback even after shadow pages have already been spilled to the file.
+        for commit in [false, true] {
+            let tx = env.inner.begin_rw_txn().unwrap();
+            for key in 0u64..512 {
+                if key % 2 == 0 {
+                    tx.put(db.dbi(), key.to_be_bytes(), &updated, WriteFlags::empty()).unwrap();
+                    assert_eq!(
+                        tx.get::<Vec<u8>>(db.dbi(), &key.to_be_bytes()).unwrap(),
+                        Some(updated.clone())
+                    );
+                } else {
+                    assert!(tx.del(db.dbi(), key.to_be_bytes(), None).unwrap());
+                }
+            }
+            if commit {
+                tx.commit().unwrap();
+            } else {
+                drop(tx);
+                let reader = env.inner.begin_ro_txn().unwrap();
+                for key in 0u64..512 {
+                    assert_eq!(
+                        reader.get::<Vec<u8>>(db.dbi(), &key.to_be_bytes()).unwrap(),
+                        Some(original.clone())
+                    );
+                }
+            }
+            for key in 0u64..512 {
+                assert_eq!(
+                    snapshot.get::<Vec<u8>>(db.dbi(), &key.to_be_bytes()).unwrap(),
+                    Some(original.clone())
+                );
+            }
+        }
+        drop(snapshot);
+        drop(db);
+        drop(env);
+
+        for kind in [DatabaseEnvKind::RO, DatabaseEnvKind::RW] {
+            let env = DatabaseEnv::open(tempdir.path(), kind, args.clone()).unwrap();
+            // Repeated reads also exercise transaction recycling after reopening.
+            for _ in 0..3 {
+                let tx = env.inner.begin_ro_txn().unwrap();
+                let db = tx.open_db(Some("BufferedWrites")).unwrap();
+                for key in 0u64..512 {
+                    let expected = (key % 2 == 0).then(|| updated.clone());
+                    assert_eq!(tx.get::<Vec<u8>>(db.dbi(), &key.to_be_bytes()).unwrap(), expected);
+                }
+            }
+        }
     }
 
     #[test]
