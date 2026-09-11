@@ -6,9 +6,9 @@
 
 use crate::SnapSyncError;
 use alloy_eip7928::AccountChanges;
-use alloy_primitives::{keccak256, map::B256Map, Bytes, B256, KECCAK256_EMPTY, U256};
+use alloy_primitives::{keccak256, map::B256Map, Bytes, B256, KECCAK256_EMPTY};
 use reth_primitives_traits::Account;
-use reth_trie_common::{HashedPostState, HashedStorage};
+use reth_trie_common::{bal::BalAccountState, HashedPostState, HashedStorage};
 
 /// Changes one block access list makes to the downloaded state.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -31,7 +31,7 @@ impl BalStateUpdate {
     ) -> Result<Self, SnapSyncError> {
         let mut update = Self::default();
         for account_changes in bal {
-            let account_fields = BalAccountStateFields::from_changes(account_changes);
+            let account_fields = BalAccountState::from_changes(account_changes);
             // Read-only entries record accesses, not changes.
             if !account_fields.changes_state_root(account_changes) {
                 continue
@@ -48,21 +48,21 @@ impl BalStateUpdate {
                 DownloadedAccount::Present(account) => Some(account),
             };
 
-            let account = account_fields.into_account(existing_account);
+            let mut account = account_fields.merge_onto(existing_account.as_ref());
+            // Persist accounts without code using the storage representation.
+            account.bytecode_hash = account.bytecode_hash.filter(|hash| *hash != KECCAK256_EMPTY);
             // Execution removes accounts a block leaves empty, see EIP-161.
             update.state.accounts.insert(hashed_address, (!account.is_empty()).then_some(account));
             if !account_changes.storage_changes().is_empty() {
-                update.state.storages.insert(
-                    hashed_address,
-                    HashedStorage::from_iter(
-                        account_changes
-                            .storage_post_states()
-                            .map(|(slot, value)| (keccak256(B256::from(slot)), value)),
-                    ),
-                );
+                update
+                    .state
+                    .storages
+                    .insert(hashed_address, HashedStorage::from_account_changes(account_changes));
             }
-            if let Some(code) = account_changes.code_post_state().filter(|code| !code.is_empty()) {
-                update.bytecodes.insert(keccak256(code), code.clone());
+            if let Some((code_hash, code)) =
+                account_fields.code_hash().flatten().zip(account_changes.code_post_state())
+            {
+                update.bytecodes.insert(code_hash, code.clone());
             }
         }
         Ok(update)
@@ -93,55 +93,6 @@ pub enum DownloadedAccount {
     Absent,
     /// The downloaded account.
     Present(Account),
-}
-
-// Account fields the entry changes, mirroring engine prewarm.
-#[derive(Clone, Copy, Debug)]
-struct BalAccountStateFields {
-    // Post-block balance, when changed.
-    balance: Option<U256>,
-    // Post-block nonce, when changed.
-    nonce: Option<u64>,
-    // Post-block code hash, when changed.
-    code_hash: Option<B256>,
-}
-
-impl BalAccountStateFields {
-    fn from_changes(account_changes: &AccountChanges) -> Self {
-        Self {
-            balance: account_changes.balance_post_state(),
-            nonce: account_changes.nonce_post_state(),
-            code_hash: account_changes.code_post_state().map(|code| {
-                if code.is_empty() {
-                    KECCAK256_EMPTY
-                } else {
-                    keccak256(code)
-                }
-            }),
-        }
-    }
-
-    const fn is_empty(self) -> bool {
-        self.balance.is_none() && self.nonce.is_none() && self.code_hash.is_none()
-    }
-
-    const fn changes_state_root(self, account_changes: &AccountChanges) -> bool {
-        !self.is_empty() || !account_changes.storage_changes.is_empty()
-    }
-
-    // Unlike prewarm, which only hashes the result, accounts without code keep no code hash as
-    // they are stored.
-    fn into_account(self, existing_account: Option<Account>) -> Account {
-        let existing_account = existing_account.unwrap_or_default();
-        Account {
-            balance: self.balance.unwrap_or(existing_account.balance),
-            nonce: self.nonce.unwrap_or(existing_account.nonce),
-            bytecode_hash: self
-                .code_hash
-                .or(existing_account.bytecode_hash)
-                .filter(|hash| *hash != KECCAK256_EMPTY),
-        }
-    }
 }
 
 #[cfg(test)]

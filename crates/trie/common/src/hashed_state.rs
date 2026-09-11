@@ -416,6 +416,14 @@ impl HashedStorage {
 
         HashedStorageSorted { storage_slots }
     }
+
+    /// Creates hashed storage from an account's BAL storage changes.
+    #[cfg(feature = "eip7928")]
+    pub fn from_account_changes(changes: &alloy_eip7928::AccountChanges) -> Self {
+        Self::from_iter(
+            changes.storage_post_states().map(|(slot, value)| (keccak256(B256::from(slot)), value)),
+        )
+    }
 }
 
 /// Sorted hashed post state optimized for iterating during state trie calculation.
