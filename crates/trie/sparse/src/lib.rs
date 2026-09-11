@@ -36,3 +36,7 @@ pub mod errors {
         SparseTrieErrorKind, SparseTrieResult,
     };
 }
+
+/// Diagnostic wall/CPU accounting for trie phases.
+#[cfg(feature = "metrics")]
+pub mod activity;

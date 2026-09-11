@@ -30,13 +30,14 @@ use reth_trie_parallel::{
     },
 };
 use reth_trie_sparse::{
+    activity::{ActivityGuard, WallTally},
     errors::{
         SparseStateTrieErrorKind, SparseStateTrieResult, SparseTrieErrorKind, SparseTrieResult,
     },
     ArenaParallelSparseTrie, BlockedLeafUpdates, DeferredDrops, LeafUpdate, LeafUpdateEvent,
     RevealableSparseTrie, SparseStateTrie, SparseTrie, TrieNodeEpoch,
 };
-use tracing::{debug, debug_span, error, instrument, trace_span};
+use tracing::{debug, debug_span, error, instrument, trace, trace_span};
 
 /// Sparse trie task implementation that uses in-memory sparse trie data to schedule proof fetching.
 pub(super) struct SparseTrieCacheTask<A = ArenaParallelSparseTrie, S = ArenaParallelSparseTrie> {
@@ -157,6 +158,9 @@ pub(super) struct SparseTrieCacheTask<A = ArenaParallelSparseTrie, S = ArenaPara
     /// hashing work.
     final_hashed_state: HashedPostState,
 
+    /// Diagnostic timeline of this block's task, see [`BlockTimeline`].
+    timeline: BlockTimeline,
+
     /// Metrics for the sparse trie.
     metrics: SparseTrieTaskMetrics,
 }
@@ -227,6 +231,7 @@ where
             pending_updates: Default::default(),
             initial_updates_applied: false,
             final_hashed_state: Default::default(),
+            timeline: BlockTimeline::new(new_epoch.get()),
             metrics,
         }
     }
@@ -314,6 +319,9 @@ where
         skip_all
     )]
     pub(super) fn run(&mut self) -> Result<StateRootComputeOutcome, StateRootTaskError> {
+        let _activity = ActivityGuard::new("task");
+        self.timeline.task_start_ns = BlockTimeline::now();
+
         let now = Instant::now();
 
         let mut total_idle_time = std::time::Duration::ZERO;
@@ -326,8 +334,12 @@ where
         // marker means they died without finishing the stream.
         while !self.finished_state_updates {
             let mut t = Instant::now();
+            let wait_activity = self.would_block().then(|| ActivityGuard::new("loop_receive"));
+            let wait = trace_span!(target: "engine::tree::critical", "trie_wait_stream").entered();
             crossbeam_channel::select_biased! {
                 recv(self.updates) -> message => {
+                    drop(wait);
+                    drop(wait_activity);
                     let wake = Instant::now();
                     total_idle_time += wake.duration_since(idle_start);
                     self.metrics
@@ -343,6 +355,8 @@ where
                     self.pending_updates += 1;
                 }
                 recv(self.proof_result_rx) -> message => {
+                    drop(wait);
+                    drop(wait_activity);
                     let wake = Instant::now();
                     total_idle_time += wake.duration_since(idle_start);
                     self.metrics
@@ -356,6 +370,8 @@ where
                     self.on_proof_results(result, &mut t)?;
                 },
                 recv(self.storage_done_rx) -> message => {
+                    drop(wait);
+                    drop(wait_activity);
                     let wake = Instant::now();
                     total_idle_time += wake.duration_since(idle_start);
                     self.metrics
@@ -380,8 +396,14 @@ where
         // are ignored: with all updates known, prefetching has nothing left to help.
         while !done {
             let mut t = Instant::now();
+            let wait_activity = (self.proof_result_rx.is_empty() &&
+                self.storage_done_rx.is_empty())
+            .then(|| ActivityGuard::new("loop_receive"));
+            let wait = trace_span!(target: "engine::tree::critical", "trie_wait_proofs").entered();
             crossbeam_channel::select_biased! {
                 recv(self.proof_result_rx) -> message => {
+                    drop(wait);
+                    drop(wait_activity);
                     let wake = Instant::now();
                     total_idle_time += wake.duration_since(idle_start);
                     self.metrics
@@ -395,6 +417,8 @@ where
                     self.on_proof_results(result, &mut t)?;
                 },
                 recv(self.storage_done_rx) -> message => {
+                    drop(wait);
+                    drop(wait_activity);
                     let wake = Instant::now();
                     total_idle_time += wake.duration_since(idle_start);
                     self.metrics
@@ -422,7 +446,12 @@ where
         debug!(target: "engine::root", "All proofs processed, ending calculation");
 
         let start = Instant::now();
-        self.return_storage_tries();
+        self.timeline.root_start_ns = BlockTimeline::now();
+        {
+            let _activity = ActivityGuard::sized("return_storage_tries", self.storage.len());
+            self.return_storage_tries();
+        }
+        let final_activity = ActivityGuard::new("final_root_updates");
         let (state_root, trie_updates) = match self.trie.root_with_updates(self.new_epoch) {
             Ok(result) => result,
             Err(err)
@@ -443,7 +472,9 @@ where
             }
         };
 
+        drop(final_activity);
         let end = Instant::now();
+        self.timeline.emit();
         self.metrics.sparse_trie_final_update_duration_histogram.record(end.duration_since(start));
         self.metrics.sparse_trie_total_duration_histogram.record(end.duration_since(now));
 
@@ -470,11 +501,19 @@ where
 
     /// Handles a received proof result: coalesces everything already queued, reveals the
     /// proof in the trie, and records timing metrics.
+    #[instrument(
+        level = "trace",
+        target = "engine::tree::critical",
+        skip_all,
+        name = "trie_on_proof_results"
+    )]
     fn on_proof_results(
         &mut self,
         message: ProofResultMessage,
         t: &mut Instant,
     ) -> Result<(), StateRootTaskError> {
+        let _activity = ActivityGuard::new("proof_coalesce_reveal");
+
         let mut result = self.on_proof_result_message(message)?;
         while let Ok(next) = self.proof_result_rx.try_recv() {
             let res = self.on_proof_result_message(next)?;
@@ -487,7 +526,10 @@ where
             .record(phase_end.duration_since(*t));
         *t = phase_end;
 
-        self.on_proof_result(result)?;
+        {
+            let _activity = ActivityGuard::new("proof_reveal");
+            self.on_proof_result(result)?;
+        }
         self.metrics.sparse_trie_reveal_multiproof_duration_histogram.record(t.elapsed());
         Ok(())
     }
@@ -533,6 +575,7 @@ where
             // If there's still no pending updates spend some time pre-computing the account
             // trie upper hashes
             if self.proof_result_rx.is_empty() {
+                let _activity = ActivityGuard::new("account_subtries");
                 self.trie.calculate_subtries(self.new_epoch);
             }
         } else if !updates_queued {
@@ -562,14 +605,21 @@ where
     fn on_message(&mut self, message: SparseTrieTaskMessage) -> Option<Arc<HashedPostState>> {
         match message {
             SparseTrieTaskMessage::PrefetchProofs(targets) => {
+                let started = WallTally::start();
                 self.on_prewarm_targets(targets);
+                self.timeline.prefetch_ingest.add(started);
                 None
             }
             SparseTrieTaskMessage::HashedState(hashed_state) => {
+                let started = WallTally::start();
+                let detail = ActivityGuard::detail("hashed_state_ingest");
                 self.on_hashed_state_update(hashed_state);
+                drop(detail);
+                self.timeline.mark_state_message(started);
                 None
             }
             SparseTrieTaskMessage::FinishedStateUpdates => {
+                self.timeline.finish_marker_ns = BlockTimeline::now();
                 let hashed_state = Arc::new(core::mem::take(&mut self.final_hashed_state));
                 let _ = self.final_hashed_state_tx.take().unwrap().send(Arc::clone(&hashed_state));
                 self.finished_state_updates = true;
@@ -672,10 +722,14 @@ where
     fn reveal_proof_result(&mut self, result: DecodedMultiProofV2) -> SparseStateTrieResult<()> {
         let DecodedMultiProofV2 { account_proofs, storage_proofs } = result;
 
-        self.queue_storage_proofs(storage_proofs);
+        {
+            let _activity = ActivityGuard::sized("proof_queue_storage", storage_proofs.len());
+            self.queue_storage_proofs(storage_proofs);
+        }
         // Get the workers going before spending this thread on the account trie.
         self.run_ready_storage_work()?;
 
+        let _activity = ActivityGuard::sized("account_proof_reveal", account_proofs.len());
         self.trie.reveal_account_proof_nodes(account_proofs)
     }
 
@@ -711,6 +765,7 @@ where
         &mut self,
         message: ProofResultMessage,
     ) -> Result<DecodedMultiProofV2, StateRootTaskError> {
+        self.timeline.mark_proof_result();
         let result = message.result?;
         debug_assert!(
             self.in_flight_proof_batches > 0,
@@ -726,6 +781,7 @@ where
         }
 
         let _span = debug_span!("process_new_updates").entered();
+        let _activity = ActivityGuard::sized("new_updates", self.pending_updates);
         self.pending_updates = 0;
         self.initial_updates_applied = true;
 
@@ -796,6 +852,7 @@ where
             return Ok(())
         }
 
+        let _activity = ActivityGuard::sized("storage_work", job_units);
         let inline_round = job_units <= INLINE_STORAGE_WORK_UNITS;
         let new_epoch = self.new_epoch;
         let retain_updates = self.trie.retains_updates();
@@ -808,7 +865,11 @@ where
             };
 
             if inline_round || work.is_target_only() {
-                let output = work.run(new_epoch, retain_updates);
+                let output = {
+                    let _activity = ActivityGuard::detail("storage_inline_pass");
+                    work.run(new_epoch, retain_updates)
+                };
+                self.timeline.storage_inline_passes += 1;
                 self.apply_storage_output(address, output)?;
                 continue;
             }
@@ -863,6 +924,7 @@ where
             if new { &mut self.new_account_updates } else { &mut self.account_updates };
 
         let pending_before = account_updates.len() + self.trie.trie_mut().blocked_updates().len();
+        let _activity = ActivityGuard::sized("account_leaves", pending_before);
 
         self.trie.trie_mut().update_leaves_with_events(
             account_updates,
@@ -921,6 +983,9 @@ where
 
         let pool = storage_shard_pool();
         let parent_span = debug_span!("submit_storage_jobs", n = jobs.len());
+        let activity = ActivityGuard::sized("storage_submit", jobs.len());
+        let batch_id = activity.id();
+        let submitted = std::time::Instant::now();
         let mut by_shard = (0..pool.len()).map(|_| Vec::new()).collect::<Vec<_>>();
         for job in jobs {
             by_shard[pool.shard_of(&job.address)].push(job);
@@ -943,7 +1008,13 @@ where
                     n = group.len(),
                 )
                 .entered();
-                run_storage_jobs(group, &storage_done_tx, new_epoch, retain_updates);
+                let _activity = ActivityGuard::linked(
+                    "storage_group",
+                    batch_id,
+                    group.len(),
+                    submitted.elapsed(),
+                );
+                run_storage_jobs(group, &storage_done_tx, new_epoch, retain_updates, batch_id);
             });
         }
     }
@@ -957,6 +1028,8 @@ where
     fn on_storage_job_message(&mut self, message: StorageJobMessage<S>) -> SparseTrieResult<()> {
         match message {
             StorageJobMessage::Done(batch) => {
+                let _activity = ActivityGuard::sized("storage_return", batch.len());
+                self.timeline.mark_storage_return(batch.len() as u64);
                 self.metrics.sparse_trie_storage_return_batch_size.record(batch.len() as f64);
                 let mut result = Ok(());
                 for done in batch {
@@ -1031,6 +1104,8 @@ where
         skip_all
     )]
     fn promote_pending_account_updates(&mut self) -> SparseTrieResult<()> {
+        let _activity = ActivityGuard::sized("promotion", self.pending_account_updates.len());
+
         self.process_account_leaf_updates(false)?;
 
         if self.pending_account_updates.is_empty() {
@@ -1054,11 +1129,19 @@ where
     /// Promotes queued accounts until neither the queue nor the accounts trie makes progress.
     fn drain_promotable_accounts(&mut self) -> SparseTrieResult<()> {
         loop {
-            let span = trace_span!("promote_updates", promoted = tracing::field::Empty).entered();
+            let span = trace_span!(
+                target: "engine::tree::critical",
+                "promote_updates",
+                queued = self.promotable_accounts.len(),
+                promoted = tracing::field::Empty
+            )
+            .entered();
+            let activity = ActivityGuard::sized("promote_accounts", self.promotable_accounts.len());
             let mut num_promoted = 0;
             while let Some(addr) = self.promotable_accounts.pop() {
                 num_promoted += usize::from(self.promote_account(addr));
             }
+            drop(activity);
             span.record("promoted", num_promoted);
             drop(span);
 
@@ -1212,6 +1295,9 @@ where
         }
 
         let _span = trace_span!("dispatch_pending_targets").entered();
+        let _activity = ActivityGuard::sized("proof_dispatch", self.pending_targets.len());
+        trace!(target: "engine::tree::critical", phase = "trie_proof_targets_ready", targets = self.pending_targets.len());
+        self.timeline.mark_dispatch();
         let (targets, chunking_length) = self.pending_targets.take();
         let mut dispatch_error = None;
         dispatch_with_chunking(
@@ -1237,6 +1323,7 @@ where
                 }) {
                     Ok(()) => {
                         self.in_flight_proof_batches += 1;
+                        self.timeline.proof_batches += 1;
                     }
                     Err(e) => {
                         error!("failed to dispatch account multiproof: {e:?}");
@@ -1270,6 +1357,14 @@ where
     /// Returns the leaf updates the accounts trie could not apply yet, if it is revealed.
     fn account_blocked_updates(&self) -> Option<&BlockedLeafUpdates> {
         self.trie.state_trie_ref().map(SparseTrie::blocked_updates)
+    }
+
+    /// Returns whether the streaming loop is about to park instead of taking a queued message,
+    /// which is what separates receive time from the time the task spends idle by accident.
+    fn would_block(&self) -> bool {
+        self.updates.is_empty() &&
+            self.proof_result_rx.is_empty() &&
+            self.storage_done_rx.is_empty()
     }
 
     /// Returns whether any idle slot has a pass to run, which is progress that has not been made
@@ -1343,6 +1438,134 @@ where
         }
 
         Ok(())
+    }
+}
+
+/// The moments that bound one block's sparse trie task, stamped against the process-wide clock
+/// of [`reth_trie_sparse::activity`] so they can be laid over the engine's root wait and over the
+/// phase records taken on the shard and proof worker threads.
+///
+/// A zero timestamp means the event did not happen for this block. The tallies cover phases that
+/// run once per streamed message, which is far too often for a phase record each.
+#[derive(Debug, Default)]
+struct BlockTimeline {
+    /// Number of the block this task computes the root for.
+    block: u64,
+    /// When [`SparseTrieCacheTask::run`] was entered.
+    task_start_ns: u64,
+    /// When the first hashed state update was taken off the channel.
+    first_state_ns: u64,
+    /// When the last hashed state update was taken off the channel.
+    last_state_ns: u64,
+    /// When the producers' finish marker was taken off the channel.
+    finish_marker_ns: u64,
+    /// When the first proof target batch was dispatched.
+    first_dispatch_ns: u64,
+    /// When the last proof target batch was dispatched.
+    last_dispatch_ns: u64,
+    /// When the first proof result was taken off the channel.
+    first_proof_ns: u64,
+    /// When the last proof result was taken off the channel.
+    last_proof_ns: u64,
+    /// When the last batch of storage tries came back from a shard.
+    last_storage_return_ns: u64,
+    /// When the task started the final root, after the last message.
+    root_start_ns: u64,
+    /// When the root and the trie updates were ready to be sent.
+    root_ready_ns: u64,
+    /// Wall time spent ingesting hashed state updates.
+    state_ingest: WallTally,
+    /// Wall time spent ingesting prefetch hints.
+    prefetch_ingest: WallTally,
+    /// Proof result messages taken off the channel.
+    proof_results: u64,
+    /// Proof target batches handed to the proof workers.
+    proof_batches: u64,
+    /// Batches of storage tries taken back from the shards.
+    storage_return_batches: u64,
+    /// Storage tries taken back from the shards.
+    storage_returns: u64,
+    /// Storage passes the task ran itself instead of handing them to a shard.
+    storage_inline_passes: u64,
+}
+
+impl BlockTimeline {
+    fn new(block: u64) -> Self {
+        Self { block, ..Default::default() }
+    }
+
+    fn mark_state_message(&mut self, started: Option<std::time::Instant>) {
+        let Some(started) = started else { return };
+        let at = reth_trie_sparse::activity::ns_since_epoch(started);
+        if self.first_state_ns == 0 {
+            self.first_state_ns = at;
+        }
+        self.last_state_ns = at;
+        self.state_ingest.add(Some(started));
+    }
+
+    fn mark_proof_result(&mut self) {
+        self.proof_results += 1;
+        let now = Self::now();
+        if self.first_proof_ns == 0 {
+            self.first_proof_ns = now;
+        }
+        self.last_proof_ns = now;
+    }
+
+    fn mark_dispatch(&mut self) {
+        let now = Self::now();
+        if self.first_dispatch_ns == 0 {
+            self.first_dispatch_ns = now;
+        }
+        self.last_dispatch_ns = now;
+    }
+
+    fn mark_storage_return(&mut self, tries: u64) {
+        self.storage_return_batches += 1;
+        self.storage_returns += tries;
+        self.last_storage_return_ns = Self::now();
+    }
+
+    /// Timestamp of an event, or zero while diagnostics are off.
+    fn now() -> u64 {
+        if reth_trie_sparse::activity::enabled() {
+            reth_trie_sparse::activity::epoch_ns()
+        } else {
+            0
+        }
+    }
+
+    fn emit(&mut self) {
+        if !reth_trie_sparse::activity::enabled() {
+            return;
+        }
+        self.root_ready_ns = reth_trie_sparse::activity::epoch_ns();
+        trace!(
+            target: "engine::tree::activity",
+            block = self.block,
+            task_start_ns = self.task_start_ns,
+            first_state_ns = self.first_state_ns,
+            last_state_ns = self.last_state_ns,
+            finish_marker_ns = self.finish_marker_ns,
+            first_dispatch_ns = self.first_dispatch_ns,
+            last_dispatch_ns = self.last_dispatch_ns,
+            first_proof_ns = self.first_proof_ns,
+            last_proof_ns = self.last_proof_ns,
+            last_storage_return_ns = self.last_storage_return_ns,
+            root_start_ns = self.root_start_ns,
+            root_ready_ns = self.root_ready_ns,
+            state_messages = self.state_ingest.count,
+            state_ingest_us = self.state_ingest.wall.as_secs_f64() * 1e6,
+            prefetch_messages = self.prefetch_ingest.count,
+            prefetch_ingest_us = self.prefetch_ingest.wall.as_secs_f64() * 1e6,
+            proof_results = self.proof_results,
+            proof_batches = self.proof_batches,
+            storage_return_batches = self.storage_return_batches,
+            storage_returns = self.storage_returns,
+            storage_inline_passes = self.storage_inline_passes,
+            "trie_block_timeline",
+        );
     }
 }
 
@@ -1624,12 +1847,24 @@ fn run_storage_jobs<S: SparseTrie + Default>(
     storage_done_tx: &CrossbeamSender<StorageJobMessage<S>>,
     new_epoch: TrieNodeEpoch,
     retain_updates: bool,
+    batch_id: u64,
 ) {
+    let group_start = std::time::Instant::now();
     let mut batch_len = 1;
     let mut done = Vec::with_capacity(batch_len);
     for job in group {
         let address = job.address;
-        match panic::catch_unwind(AssertUnwindSafe(|| job.run(new_epoch, retain_updates))) {
+        let activity = reth_trie_sparse::activity::detail_enabled().then(|| {
+            ActivityGuard::job(
+                "storage_job",
+                batch_id,
+                job.work.work_units(),
+                group_start.elapsed(),
+            )
+        });
+        let finished = panic::catch_unwind(AssertUnwindSafe(|| job.run(new_epoch, retain_updates)));
+        drop(activity);
+        match finished {
             Ok(finished) => done.push(finished),
             Err(payload) => {
                 // The task fails on the panic, but the payloads whose passes did finish are
@@ -2962,6 +3197,7 @@ mod tests {
             &done_tx,
             TrieNodeEpoch::new(1),
             false,
+            0,
         );
         drop(done_tx);
 
@@ -2993,6 +3229,7 @@ mod tests {
             &done_tx,
             TrieNodeEpoch::new(1),
             false,
+            0,
         );
     }
 

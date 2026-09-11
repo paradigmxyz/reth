@@ -96,7 +96,7 @@ use std::{
     },
     time::Duration,
 };
-use tracing::{debug, debug_span, instrument, warn, Span};
+use tracing::{debug, debug_span, instrument, trace, warn, Span};
 
 /// Handle to a [`HashedPostState`] computed on a background thread.
 pub type LazyHashedPostState = reth_tasks::LazyHandle<Arc<HashedPostState>>;
@@ -656,6 +656,12 @@ impl DefaultStateRootStrategy {
             );
 
             let result = task.run();
+            trace!(
+                target: "engine::tree::activity",
+                block = new_epoch.get(),
+                root_done_ns = reth_trie_sparse::activity::epoch_ns(),
+                "trie_root_done",
+            );
             let task_result = result.as_ref().ok().cloned();
 
             // Publish a handle before sending the result so the next block can inspect the
@@ -691,6 +697,12 @@ impl DefaultStateRootStrategy {
                 executor.spawn_drop(deferred);
                 return;
             }
+            trace!(
+                target: "engine::tree::activity",
+                block = new_epoch.get(),
+                root_sent_ns = reth_trie_sparse::activity::epoch_ns(),
+                "trie_root_sent",
+            );
 
             let _enter =
                 debug_span!(target: "engine::tree::payload_processor", "preserve").entered();
@@ -1138,7 +1150,7 @@ where
         _hashed_state: &LazyHashedPostState,
     ) -> ProviderResult<StateRootJobOutcome> {
         if self.timeout.is_none() {
-            return match self.handle.state_root() {
+            return match timed_root_wait(block.number(), || self.handle.state_root()) {
                 Ok(outcome) => self.verified_sparse_outcome(block, &output, outcome),
                 Err(err) => {
                     debug!(target: "engine::tree::state_root_strategy", %err, "State root task failed, falling back to serial root");
@@ -1149,7 +1161,7 @@ where
 
         let timeout = self.timeout.expect("checked above");
         let task_rx = self.handle.take_state_root_rx();
-        let fallback_rx = match task_rx.recv_timeout(timeout) {
+        let fallback_rx = match timed_root_wait(block.number(), || task_rx.recv_timeout(timeout)) {
             Ok(Ok(outcome)) => return self.verified_sparse_outcome(block, &output, outcome),
             Ok(Err(err)) => {
                 debug!(target: "engine::tree::state_root_strategy", %err, "State root task failed, falling back to serial root");
@@ -1211,6 +1223,25 @@ where
             std::thread::sleep(Duration::from_millis(1));
         }
     }
+}
+
+/// Waits for the sparse trie task's root and records the window that wait covered on the shared
+/// diagnostic clock of [`reth_trie_sparse::activity`], so a capture can tell which of the task's
+/// phases the engine thread actually waited for.
+fn timed_root_wait<T>(block: u64, wait: impl FnOnce() -> T) -> T {
+    let _span =
+        tracing::trace_span!(target: "engine::tree::critical", "np_wait_sparse_root").entered();
+    let _activity = reth_trie_sparse::activity::ActivityGuard::new("engine_root_wait");
+    let wait_start_ns = reth_trie_sparse::activity::epoch_ns();
+    let outcome = wait();
+    tracing::trace!(
+        target: "engine::tree::activity",
+        block,
+        wait_start_ns,
+        wait_end_ns = reth_trie_sparse::activity::epoch_ns(),
+        "engine_root_wait_window",
+    );
+    outcome
 }
 
 fn compare_trie_updates_with_serial<N, P>(
