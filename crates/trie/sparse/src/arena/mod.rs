@@ -549,7 +549,7 @@ impl Default for ArenaParallelismThresholds {
 ///
 /// ## Structure
 ///
-/// Uses arena allocation ([`NodeArena`]) for node storage with direct index-based child
+/// Uses arena allocation (`NodeArena`) for node storage with direct index-based child
 /// pointers, avoiding the per-node hashing overhead of a `HashMap`-based trie. The trie is split
 /// into two tiers:
 ///
@@ -568,7 +568,7 @@ impl Default for ArenaParallelismThresholds {
 ///
 /// Nodes are lazily revealed from proof data via [`SparseTrie::reveal_nodes`]. Each node is
 /// placed into the upper arena or delegated to its subtrie based on path depth. Unrevealed
-/// children are stored as blinded [`BranchChild`]s referencing their RLP encoding.
+/// children are stored as blinded `BranchChild`s referencing their RLP encoding.
 /// When multiple subtries have pending reveals, they are processed in parallel using rayon
 /// (controlled by [`ArenaParallelismThresholds::min_revealed_nodes`]).
 ///
@@ -598,7 +598,7 @@ impl Default for ArenaParallelismThresholds {
 /// ## Pruning
 ///
 /// [`SparseTrie::prune`] replaces nodes older than its epoch cutoff with
-/// blinded [`BranchChild`] entries using their cached RLP, then compacts the
+/// blinded `BranchChild` entries using their cached RLP, then compacts the
 /// arenas. Subtries are pruned in parallel when their leaf count exceeds
 /// [`ArenaParallelismThresholds::min_leaves_for_prune`].
 #[derive(Debug, Clone)]
