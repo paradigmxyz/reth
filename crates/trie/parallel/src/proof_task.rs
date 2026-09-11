@@ -183,11 +183,14 @@ impl ProofWorkerHandle {
         let (account_work_tx, account_work_rx) = unbounded::<AccountWorkerJob>();
         let cached_storage_roots = Arc::<DashMap<_, _>>::default();
 
-        let divisor = if halve_workers { 2 } else { 1 };
-        let storage_worker_count =
-            runtime.proof_storage_worker_pool().current_num_threads() / divisor;
-        let account_worker_count =
-            runtime.proof_account_worker_pool().current_num_threads() / divisor;
+        let storage_worker_count = proof_worker_count(
+            runtime.proof_storage_worker_pool().current_num_threads(),
+            halve_workers,
+        );
+        let account_worker_count = proof_worker_count(
+            runtime.proof_account_worker_pool().current_num_threads(),
+            halve_workers,
+        );
 
         let storage_availability = Arc::new(AvailabilitySheet::new(storage_worker_count));
         let account_availability = Arc::new(AvailabilitySheet::new(account_worker_count));
@@ -1173,6 +1176,17 @@ enum AccountWorkerJob {
     },
 }
 
+/// Returns the number of proof workers to spawn for a task.
+///
+/// Small blocks use half of the configured pool, but must still retain a worker to make progress.
+const fn proof_worker_count(worker_count: usize, halve_workers: bool) -> usize {
+    if halve_workers {
+        if worker_count > 1 { worker_count / 2 } else { 1 }
+    } else {
+        worker_count
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1182,6 +1196,11 @@ mod tests {
 
     fn test_ctx<Factory>(factory: Factory) -> ProofTaskCtx<Factory> {
         ProofTaskCtx::new(factory)
+    }
+
+    #[test]
+    fn halving_one_proof_worker_keeps_one_worker() {
+        assert_eq!(proof_worker_count(1, true), 1);
     }
 
     /// Ensures `ProofWorkerHandle::new` spawns workers correctly.
