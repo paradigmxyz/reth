@@ -622,12 +622,16 @@ if [ "${BENCH_TLB_TRACE:-false}" = "true" ]; then
   test "${#PERF_TIDS[@]}" -eq 3
   PERF_TID_LIST=$(IFS=,; echo "${PERF_TIDS[*]}")
   sudo sh -c 'echo $$ > "$1"; shift; exec "$@"' sh "$OUTPUT_DIR/tlb-perf.pid" \
-    perf record --clockid mono_raw -m 1024 -t "$PERF_TID_LIST" \
+    perf record --clockid CLOCK_MONOTONIC_RAW -m 1024 -t "$PERF_TID_LIST" \
     "${PERF_ARGS[@]}" -o "$OUTPUT_DIR/tlb-perf.data" \
     > "$OUTPUT_DIR/tlb-perf.log" 2>&1 &
   TLB_WRAPPER_PID=$!
   sleep 0.5
-  kill -0 "$TLB_WRAPPER_PID"
+  if ! kill -0 "$TLB_WRAPPER_PID" 2>/dev/null; then
+    cat "$OUTPUT_DIR/tlb-perf.log"
+    echo "::error::TLB/IPI recorder exited before block replay"
+    exit 1
+  fi
 fi
 
 # TODO(txgen): expose microsecond client-side FCU latency to avoid ms rounding.
