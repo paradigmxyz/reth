@@ -2,7 +2,7 @@
 
 use core::fmt::Debug;
 
-use crate::BlockedLeafUpdates;
+use crate::{BlockedLeafUpdates, SiblingStats};
 use alloc::{borrow::Cow, vec::Vec};
 use alloy_primitives::{
     map::{B256Map, HashMap, HashSet},
@@ -289,6 +289,10 @@ pub trait SparseTrie: Sized + Debug + Send + Sync {
 
     /// Returns the leaf updates that could not be applied yet because they hit a blinded node.
     fn blocked_updates(&self) -> &BlockedLeafUpdates;
+
+    /// Returns and resets the counters for the blocked updates whose branch collapse waits for a
+    /// blinded sibling.
+    fn take_sibling_stats(&mut self) -> SiblingStats;
 }
 
 /// Tracks modifications to the sparse trie structure.

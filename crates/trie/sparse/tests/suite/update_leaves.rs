@@ -708,6 +708,72 @@ pub(super) fn test_remove_leaf_blinded_sibling_requires_reveal<T: SparseTrie>(ne
     );
 }
 
+/// A removal whose branch collapse waits for a blinded sibling applies without that sibling's
+/// proof once another leaf lands under the same branch.
+pub(super) fn test_collapse_blocked_removal_applies_after_branch_gains_leaf<T: SparseTrie>(
+    new_trie: fn() -> T,
+) {
+    // Root branch: nibble 0x1 = one revealed leaf, nibble 0x2 = 16 blinded keys (hash node).
+    let mut base_storage = BTreeMap::new();
+
+    let revealed_key = {
+        let mut key = B256::ZERO;
+        key.0[0] = 0x10;
+        key
+    };
+    base_storage.insert(revealed_key, U256::from(1));
+
+    for i in 0u8..16 {
+        let mut key = B256::ZERO;
+        key.0[0] = 0x20 | i;
+        base_storage.insert(key, U256::from(i as u64 + 100));
+    }
+
+    let harness = SuiteTestHarness::new(base_storage.clone());
+    let mut trie: T = harness.init_trie_with_targets(&[revealed_key], false, new_trie);
+
+    // Removing the only revealed leaf would collapse the root branch onto the blinded sibling.
+    let mut leaf_updates =
+        SuiteTestHarness::leaf_updates(&BTreeMap::from([(revealed_key, U256::ZERO)]));
+    let mut targets: Vec<ProofV2Target> = Vec::new();
+    trie.update_leaves(&mut leaf_updates, |key, parent| {
+        targets.push(ProofV2Target::new(key).with_parent(parent));
+    })
+    .expect("update_leaves should succeed");
+    assert!(!targets.is_empty(), "callback should fire for blinded sibling");
+    assert_eq!(trie.blocked_updates().len(), 1, "the removal should be blocked on the sibling");
+
+    // A leaf at a free nibble of the same branch leaves it with another child, so the removal
+    // does not collapse it any more. The sibling's proof is never revealed.
+    let new_key = {
+        let mut key = B256::ZERO;
+        key.0[0] = 0x30;
+        key
+    };
+    let mut leaf_updates =
+        SuiteTestHarness::leaf_updates(&BTreeMap::from([(new_key, U256::from(7))]));
+    let mut asks = 0usize;
+    trie.update_leaves(&mut leaf_updates, |_, _| asks += 1).expect("update_leaves should succeed");
+    assert!(
+        trie.blocked_updates().has_retryable(),
+        "the blocked removal should be retried after its branch received a leaf",
+    );
+
+    trie.update_leaves(&mut B256Map::default(), |_, _| asks += 1)
+        .expect("update_leaves should succeed");
+    assert_eq!(asks, 0, "no further proof should be asked for");
+    assert!(
+        trie.blocked_updates().is_empty(),
+        "the removal should apply without the sibling's proof",
+    );
+
+    let mut expected_storage = base_storage;
+    expected_storage.remove(&revealed_key);
+    expected_storage.insert(new_key, U256::from(7));
+    let expected = SuiteTestHarness::new(expected_storage);
+    assert_eq!(trie.root(epoch(0)), expected.original_root(), "root should match the reference");
+}
+
 /// Atomic rollback preserves a revealed leaf when its sibling is blinded.
 ///
 /// The update remains pending until the sibling can be revealed.

@@ -34,7 +34,7 @@ use reth_trie_sparse::{
         SparseStateTrieErrorKind, SparseStateTrieResult, SparseTrieErrorKind, SparseTrieResult,
     },
     ArenaParallelSparseTrie, BlockedLeafUpdates, DeferredDrops, LeafUpdate, LeafUpdateEvent,
-    RevealableSparseTrie, SparseStateTrie, SparseTrie, TrieNodeEpoch,
+    RevealableSparseTrie, SiblingStats, SparseStateTrie, SparseTrie, TrieNodeEpoch,
 };
 use tracing::{debug, debug_span, error, instrument, trace_span};
 
@@ -917,6 +917,9 @@ where
             },
         )?;
 
+        let sibling_stats = self.trie.trie_mut().take_sibling_stats();
+        self.account_proof_rounds.siblings.merge(&sibling_stats);
+
         let pending_after = account_updates.len() + self.trie.trie_mut().blocked_updates().len();
         self.account_cache_hits += pending_before.saturating_sub(pending_after) as u64;
         self.account_cache_misses += pending_after as u64;
@@ -1498,6 +1501,8 @@ impl<S: SparseTrie + Default> StorageTrieWork<S> {
                     targets.push(ProofV2Target::new(path).with_parent(parent));
                 }
             });
+            rounds.siblings.merge(&trie.take_sibling_stats());
+
             let pending_after = pending.len() + trie.blocked_updates().len();
             output.cache_hits = pending_before.saturating_sub(pending_after) as u64;
             output.cache_misses = pending_after as u64;
@@ -2041,6 +2046,8 @@ struct ProofRounds {
     first_targets_by_parent_depth: [u32; PARENT_DEPTH_BUCKETS],
     /// Sum of the parent hint depths counted in [`Self::first_targets_by_parent_depth`].
     parent_depth_sum: u64,
+    /// Counters for the blocked removals whose branch collapse waits for a blinded sibling.
+    siblings: SiblingStats,
 }
 
 impl ProofRounds {
@@ -2089,6 +2096,7 @@ impl ProofRounds {
         self.dropped_deeper_parent += other.dropped_deeper_parent;
         self.root_targets += other.root_targets;
         self.parent_depth_sum += other.parent_depth_sum;
+        self.siblings.merge(&other.siblings);
     }
 
     /// Returns the number of keys a proof was requested for.

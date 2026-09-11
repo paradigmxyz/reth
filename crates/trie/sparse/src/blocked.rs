@@ -21,14 +21,25 @@ pub struct BlockedLeafUpdates {
     /// Keys of the [`BlockedOn::Sibling`] entries by the path of the node they wait for, sorted
     /// by that path. Their node is not on their own key path, so they cannot be found by it.
     siblings: Vec<(Nibbles, B256)>,
+    /// Buffer reused for the keys applied by a pass, sorted.
+    applied: Vec<B256>,
     /// Number of entries in [`Self::entries`] that are ready to be applied again.
     num_retryable: usize,
+    /// Counters for the [`BlockedOn::Sibling`] entries.
+    stats: SiblingStats,
 }
 
 impl BlockedLeafUpdates {
     /// Creates an empty set of blocked updates.
     pub const fn new() -> Self {
-        Self { entries: Vec::new(), scratch: Vec::new(), siblings: Vec::new(), num_retryable: 0 }
+        Self {
+            entries: Vec::new(),
+            scratch: Vec::new(),
+            siblings: Vec::new(),
+            applied: Vec::new(),
+            num_retryable: 0,
+            stats: SiblingStats::new(),
+        }
     }
 
     /// Returns the number of blocked updates.
@@ -61,7 +72,13 @@ impl BlockedLeafUpdates {
         self.entries.clear();
         self.scratch.clear();
         self.siblings.clear();
+        self.applied.clear();
         self.num_retryable = 0;
+    }
+
+    /// Returns and resets the counters for the entries whose collapse waits on a blinded sibling.
+    pub fn take_stats(&mut self) -> SiblingStats {
+        mem::take(&mut self.stats)
     }
 
     /// Marks every entry waiting for a node at `path` as retryable.
@@ -105,10 +122,63 @@ impl BlockedLeafUpdates {
             if matches!(entry.blocked_on, BlockedOn::Sibling { .. }) {
                 entry.blocked_on = BlockedOn::Retryable;
                 self.num_retryable += 1;
+                self.stats.promoted_by_reveal += 1;
             }
         }
 
         self.siblings.drain(start..end);
+    }
+
+    /// Closes a pass of leaf updates, after [`Self::block`] took the batch's blocked entries out
+    /// of `batch`.
+    ///
+    /// A collapse only needs its blinded sibling for as long as the branch it collapses has no
+    /// other child, so a leaf applied under that branch — at a free nibble of the branch, or
+    /// splitting the path of the leaf being removed — can make the removal apply without the
+    /// sibling's proof. Such an entry is marked retryable so the next pass walks it again, where
+    /// it either applies or blocks on the same sibling without asking for it a second time.
+    pub(crate) fn end_pass(&mut self, batch: &[(B256, Nibbles, LeafUpdate)]) {
+        self.stats.passes += 1;
+
+        if !self.siblings.is_empty() {
+            self.mark_branches_updated(batch);
+
+            let blocked = self.siblings.len() as u32;
+            self.stats.blocked_after_pass += blocked as u64;
+            self.stats.max_blocked = self.stats.max_blocked.max(blocked);
+        }
+    }
+
+    /// Marks every entry whose branch received one of the leaves `batch` applied as retryable.
+    fn mark_branches_updated(&mut self, batch: &[(B256, Nibbles, LeafUpdate)]) {
+        let Self { entries, siblings, applied, num_retryable, stats, .. } = self;
+
+        applied.clear();
+        applied.extend(
+            batch
+                .iter()
+                .filter(|(_, _, update)| matches!(update, LeafUpdate::Changed(v) if !v.is_empty()))
+                .map(|&(key, ..)| key),
+        );
+        if applied.is_empty() {
+            return
+        }
+
+        siblings.retain(|(sibling, key)| {
+            if !branch_gained_leaf(applied, sibling) {
+                return true
+            }
+            let Ok(pos) = entries.binary_search_by(|entry| entry.key.cmp(key)) else {
+                return false
+            };
+            let entry = &mut entries[pos];
+            if matches!(entry.blocked_on, BlockedOn::Sibling { .. }) {
+                entry.blocked_on = BlockedOn::Retryable;
+                *num_retryable += 1;
+                stats.promoted_by_branch += 1;
+            }
+            false
+        });
     }
 
     /// Moves `updates` and all retryable entries into `batch`, sorted by key and with their
@@ -235,6 +305,43 @@ impl BlockedLeafUpdates {
     }
 }
 
+/// Counters for the entries whose branch collapse waits for a blinded sibling.
+#[derive(Debug, Default, Clone, Copy)]
+pub struct SiblingStats {
+    /// Passes of leaf updates the trie ran.
+    pub passes: u32,
+    /// Entries promoted because the sibling they wait for was revealed.
+    pub promoted_by_reveal: u32,
+    /// Entries promoted because their branch received another leaf.
+    pub promoted_by_branch: u32,
+    /// Entries still waiting for their sibling, summed over [`Self::passes`].
+    pub blocked_after_pass: u64,
+    /// Most entries waiting for their sibling at the end of a pass.
+    pub max_blocked: u32,
+}
+
+impl SiblingStats {
+    /// Creates zeroed counters.
+    pub const fn new() -> Self {
+        Self {
+            passes: 0,
+            promoted_by_reveal: 0,
+            promoted_by_branch: 0,
+            blocked_after_pass: 0,
+            max_blocked: 0,
+        }
+    }
+
+    /// Adds another trie's counts to these.
+    pub fn merge(&mut self, other: &Self) {
+        self.passes += other.passes;
+        self.promoted_by_reveal += other.promoted_by_reveal;
+        self.promoted_by_branch += other.promoted_by_branch;
+        self.blocked_after_pass += other.blocked_after_pass;
+        self.max_blocked = self.max_blocked.max(other.max_blocked);
+    }
+}
+
 /// A leaf update waiting for a blinded node to be revealed.
 #[derive(Debug, Clone)]
 struct BlockedLeafUpdate {
@@ -266,6 +373,24 @@ impl BlockedOn {
             nibble: path.last().expect("sibling path has a child nibble"),
         }
     }
+}
+
+/// Returns whether one of the applied keys sits under the branch the node at `sibling` is a child
+/// of, but not under that node itself.
+///
+/// A key under the blinded sibling was applied inside it rather than added to the branch, so it
+/// leaves the collapse unchanged. `applied` must be sorted.
+fn branch_gained_leaf(applied: &[B256], sibling: &Nibbles) -> bool {
+    let (branch_lower, branch_upper) = prefix_range(&sibling.slice(..sibling.len() - 1));
+    let start = applied.partition_point(|key| *key < branch_lower);
+    let end = applied.partition_point(|key| *key <= branch_upper);
+    if start == end {
+        return false
+    }
+
+    // The keys under the branch are sorted, so only their ends can fall outside the sibling.
+    let (lower, upper) = prefix_range(sibling);
+    applied[start] < lower || applied[end - 1] > upper
 }
 
 /// Returns the lowest and highest key that start with the given path.
@@ -354,6 +479,27 @@ mod tests {
         assert_eq!(batch.len(), 1);
         assert_eq!(batch[0].0, key(0x11));
         assert!(blocked.is_empty());
+    }
+
+    #[test]
+    fn only_a_leaf_outside_the_sibling_promotes_the_collapse() {
+        let sibling = Nibbles::from_nibbles([0x1, 0x2]);
+        let mut blocked = BlockedLeafUpdates::new();
+        let mut batch =
+            vec![(key(0x11), Nibbles::unpack(key(0x11)), LeafUpdate::Changed(Vec::new()))];
+        blocked.block(&mut batch, &mut [(0, BlockedOn::sibling(&sibling))]);
+
+        // A leaf applied inside the blinded sibling leaves the branch's child count unchanged.
+        blocked.end_pass(&[(key(0x12), Nibbles::unpack(key(0x12)), LeafUpdate::Changed(vec![1]))]);
+        assert!(!blocked.has_retryable());
+
+        // A leaf at another nibble of the same branch gives it a child the collapse can keep.
+        blocked.end_pass(&[(key(0x13), Nibbles::unpack(key(0x13)), LeafUpdate::Changed(vec![1]))]);
+        assert!(blocked.has_retryable());
+
+        let stats = blocked.take_stats();
+        assert_eq!(stats.promoted_by_branch, 1);
+        assert_eq!(stats.promoted_by_reveal, 0);
     }
 
     #[test]

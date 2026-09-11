@@ -10,7 +10,7 @@ use nodes::{ArenaSparseNode, ArenaSparseNodeBranch, ArenaSparseNodeState};
 
 use crate::{
     blocked::BlockedOn, BlockedLeafUpdates, LeafLookup, LeafLookupError, LeafUpdate,
-    LeafUpdateEvent, SparseTrie, SparseTrieUpdates, TrieNodeEpoch,
+    LeafUpdateEvent, SiblingStats, SparseTrie, SparseTrieUpdates, TrieNodeEpoch,
 };
 use alloc::{borrow::Cow, boxed::Box, collections::VecDeque, vec::Vec};
 use alloy_primitives::{keccak256, map::B256Map, B256};
@@ -2919,6 +2919,7 @@ impl SparseTrie for ArenaParallelSparseTrie {
 
         if taken.is_empty() {
             self.blocked.block(&mut sorted, &mut newly_blocked);
+            self.blocked.end_pass(&sorted);
 
             #[cfg(debug_assertions)]
             self.debug_assert_subtrie_structure();
@@ -2999,6 +3000,7 @@ impl SparseTrie for ArenaParallelSparseTrie {
         }
 
         self.blocked.block(&mut sorted, &mut newly_blocked);
+        self.blocked.end_pass(&sorted);
 
         #[cfg(debug_assertions)]
         self.debug_assert_subtrie_structure();
@@ -3008,6 +3010,10 @@ impl SparseTrie for ArenaParallelSparseTrie {
 
     fn blocked_updates(&self) -> &BlockedLeafUpdates {
         &self.blocked
+    }
+
+    fn take_sibling_stats(&mut self) -> SiblingStats {
+        self.blocked.take_stats()
     }
 }
 

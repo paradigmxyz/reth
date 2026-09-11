@@ -1,5 +1,5 @@
 use crate::{
-    ArenaParallelSparseTrie, BlockedLeafUpdates, LeafUpdate, LeafUpdateEvent,
+    ArenaParallelSparseTrie, BlockedLeafUpdates, LeafUpdate, LeafUpdateEvent, SiblingStats,
     SparseTrie as SparseTrieTrait, SparseTrieUpdates, TrieNodeEpoch,
 };
 use alloc::{borrow::Cow, boxed::Box};
@@ -204,6 +204,12 @@ impl<T: SparseTrieTrait> RevealableSparseTrie<T> {
     pub fn blocked_updates(&self) -> &BlockedLeafUpdates {
         static EMPTY: BlockedLeafUpdates = BlockedLeafUpdates::new();
         self.as_revealed_ref().map_or(&EMPTY, SparseTrieTrait::blocked_updates)
+    }
+
+    /// Returns and resets the counters for the blocked updates whose branch collapse waits for a
+    /// blinded sibling.
+    pub fn take_sibling_stats(&mut self) -> SiblingStats {
+        self.as_revealed_mut().map(SparseTrieTrait::take_sibling_stats).unwrap_or_default()
     }
 
     /// Clears this trie, setting it to a blind state.
