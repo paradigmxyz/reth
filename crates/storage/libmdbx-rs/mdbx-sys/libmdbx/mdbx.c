@@ -1705,6 +1705,18 @@ MDBX_MAYBE_UNUSED MDBX_NOTHROW_PURE_FUNCTION static inline uint32_t osal_bswap32
 #error MDBX_USE_MINCORE must be defined as 0 or 1
 #endif /* MDBX_USE_MINCORE */
 
+/* Retain prefault hints without querying residency on Linux. The override also
+ * allows testing both policies on other platforms. */
+#ifndef MDBX_MINCORE_CACHE_ONLY
+#if defined(__linux__) || defined(__gnu_linux__)
+#define MDBX_MINCORE_CACHE_ONLY 1
+#else
+#define MDBX_MINCORE_CACHE_ONLY 0
+#endif
+#elif !(MDBX_MINCORE_CACHE_ONLY == 0 || MDBX_MINCORE_CACHE_ONLY == 1)
+#error MDBX_MINCORE_CACHE_ONLY must be defined as 0 or 1
+#endif /* MDBX_MINCORE_CACHE_ONLY */
+
 /** Enables chunking long list of retired pages during huge transactions commit
  * to avoid use sequences of pages. */
 #ifndef MDBX_ENABLE_BIGFOOT
@@ -21680,6 +21692,11 @@ static bool mincore_fetch(MDBX_env *const env, const size_t unit_begin) {
     }
   }
 
+#if MDBX_MINCORE_CACHE_ONLY
+  /* A cache miss is treated as cold. Hints are advisory: pages can be evicted,
+   * and another writer may populate this shared cache using real mincore(). */
+  const uint64_t mask = UINT64_MAX;
+#else
   size_t pages = 64;
   unsigned unit_log = globals.sys_pagesize_ln2;
   unsigned shift = 0;
@@ -21705,12 +21722,6 @@ static bool mincore_fetch(MDBX_env *const env, const size_t unit_begin) {
     return false;
   }
 
-  for (size_t i = ARRAY_LENGTH(lck->mincore_cache.begin) - 1; i > 0; --i) {
-    lck->mincore_cache.begin[i] = lck->mincore_cache.begin[i - 1];
-    lck->mincore_cache.mask[i] = lck->mincore_cache.mask[i - 1];
-  }
-  lck->mincore_cache.begin[0] = unit_begin;
-
   uint64_t mask = 0;
 #ifdef MINCORE_INCORE
   STATIC_ASSERT(MINCORE_INCORE == 1);
@@ -21720,6 +21731,14 @@ static bool mincore_fetch(MDBX_env *const env, const size_t unit_begin) {
     bit <<= i >> shift;
     mask |= bit;
   }
+
+#endif /* MDBX_MINCORE_CACHE_ONLY */
+
+  for (size_t i = ARRAY_LENGTH(lck->mincore_cache.begin) - 1; i > 0; --i) {
+    lck->mincore_cache.begin[i] = lck->mincore_cache.begin[i - 1];
+    lck->mincore_cache.mask[i] = lck->mincore_cache.mask[i - 1];
+  }
+  lck->mincore_cache.begin[0] = unit_begin;
 
   lck->mincore_cache.mask[0] = ~mask;
   return bit_tas(lck->mincore_cache.mask, 0);
@@ -22454,6 +22473,7 @@ static inline pgr_t page_alloc_finalize(MDBX_env *const env, MDBX_txn *const txn
       } else {
         struct iovec iov[MDBX_AUXILARY_IOV_MAX];
         size_t n = 0, cleared = 0;
+        bool prefault_failed = false;
         for (size_t i = 0; i < num; ++i) {
           const bool resident = mincore_probe(env, pgno + (pgno_t)i);
           if (!resident) {
@@ -22465,14 +22485,17 @@ static inline pgr_t page_alloc_finalize(MDBX_env *const env, MDBX_txn *const txn
           }
           /* A vectored write covers a contiguous range; resident gaps end the run. */
           if (n && (resident || n == MDBX_AUXILARY_IOV_MAX || i + 1 == num)) {
-            osal_pwritev(env->lazy_fd, iov, n, file_offset);
+            if (unlikely(osal_pwritev(env->lazy_fd, iov, n, file_offset) != MDBX_SUCCESS)) {
+              memset(env->lck->mincore_cache.begin, -1, sizeof(env->lck->mincore_cache.begin));
+              prefault_failed = true;
+            }
 #if MDBX_ENABLE_PGOP_STAT
             env->lck->pgops.prefault.weak += 1;
 #endif /* MDBX_ENABLE_PGOP_STAT */
             n = 0;
           }
         }
-        if (cleared == num)
+        if (cleared == num && !prefault_failed)
           need_clean = false;
       }
     }
@@ -24364,6 +24387,7 @@ __dll_export
     " MDBX_AVOID_MSYNC=" MDBX_STRINGIFY(MDBX_AVOID_MSYNC)
     " MDBX_ENABLE_REFUND=" MDBX_STRINGIFY(MDBX_ENABLE_REFUND)
     " MDBX_USE_MINCORE=" MDBX_STRINGIFY(MDBX_USE_MINCORE)
+    " MDBX_MINCORE_CACHE_ONLY=" MDBX_STRINGIFY(MDBX_MINCORE_CACHE_ONLY)
     " MDBX_ENABLE_PGOP_STAT=" MDBX_STRINGIFY(MDBX_ENABLE_PGOP_STAT)
     " MDBX_ENABLE_PROFGC=" MDBX_STRINGIFY(MDBX_ENABLE_PROFGC)
 #if MDBX_DISABLE_VALIDATION

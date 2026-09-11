@@ -23,12 +23,14 @@ static ssize_t test_pwritev(int fd, const struct iovec *iov, int count,
 #undef pwritev
 
 static char *mapping;
-static size_t writes;
+static size_t writes, probes;
+static bool perturb;
 static unsigned fail_write;
 static unsigned resident_pgno;
 static size_t db_pagesize;
 
 static int test_mincore(void *address, size_t length, void *vector) {
+  ++probes;
   const size_t offset = (char *)address - mapping;
   for (size_t i = 0; i < length / globals.sys_pagesize; ++i)
     ((unsigned char *)vector)[i] =
@@ -72,12 +74,15 @@ static void check(size_t len, unsigned gap, unsigned resident, bool gc,
   globals.sys_pagesize = (size_t)1 << os_log;
   globals.sys_pagesize_ln2 = os_log;
   env.flags = txn.flags = MDBX_WRITEMAP;
+  if (perturb)
+    env.flags |= MDBX_PAGEPERTURB;
   env.lck = &lck;
   env.lazy_fd = fileno(file);
   env.dxb_mmap.base = mapping;
   env.dxb_mmap.current = (size_t)end << db_log;
   env.page_auxbuf = calloc(3, env.ps);
   assert(env.page_auxbuf);
+  memset(ptr_disp(env.page_auxbuf, env.ps), -1, env.ps);
   txn.env = &env;
   txn.dbs = dbs;
   txn.front_txnid = 1;
@@ -102,18 +107,19 @@ static void check(size_t len, unsigned gap, unsigned resident, bool gc,
   for (size_t i = 0; i < 32; ++i)
     assert(fwrite(page, env.ps, 1, file) == 1);
   assert(fflush(file) == 0);
-  writes = 0;
+  writes = probes = 0;
   fail_write = fail;
   const pgr_t result = page_alloc_finalize(&env, &txn, &mc, 8, 1);
   assert(result.err == MDBX_SUCCESS);
   assert(writes == 1);
+  assert(MDBX_MINCORE_CACHE_ONLY ? probes == 0 : probes > 0);
   assert(memcmp(saved, txn.tw.repnl, MDBX_PNL_SIZEOF(txn.tw.repnl)) == 0);
   for (size_t i = 0; i < 32; ++i) {
     assert(pread(env.lazy_fd, page, env.ps, i * env.ps) == (ssize_t)env.ps);
     for (size_t j = 0; j < env.ps; ++j)
       assert(page[j] ==
              (((!fail && i >= 8 && i < 8 + expected) || (fail == 2 && i == 8))
-                  ? 0
+                  ? (perturb ? (char)0xff : 0)
                   : 0x5a));
   }
   if (fail) {
@@ -126,9 +132,13 @@ static void check(size_t len, unsigned gap, unsigned resident, bool gc,
      */
     for (size_t i = 1; i < expected; ++i) {
       assert(repnl_get_single(&txn) == 8 + i);
+      if (perturb)
+        memset(mapping + (8 + i) * env.ps, 0x5a, env.ps);
       assert(page_alloc_finalize(&env, &txn, &mc, 8 + (pgno_t)i, 1).err ==
              MDBX_SUCCESS);
       assert(writes == 1);
+      if (perturb)
+        assert((unsigned char)mapping[(9 + i) * env.ps - 1] == 0xff);
     }
   }
   free(page);
@@ -137,12 +147,41 @@ static void check(size_t len, unsigned gap, unsigned resident, bool gc,
   fclose(file);
 }
 
+#if MDBX_MINCORE_CACHE_ONLY
+static void check_cache_policy(void) {
+  MDBX_env env = {0};
+  lck_t lck = {0};
+  env.ps = globals.sys_pagesize = 4096;
+  env.ps2ln = globals.sys_pagesize_ln2 = 12;
+  env.lck = &lck;
+  env.dxb_mmap.base = mapping;
+  env.dxb_mmap.current = 1024 * 4096;
+  memset(lck.mincore_cache.begin, -1, sizeof(lck.mincore_cache.begin));
+  probes = 0;
+  for (pgno_t i = 1; i <= 4; ++i)
+    assert(!mincore_probe(&env, i * 128));
+  for (pgno_t i = 1; i <= 4; ++i)
+    assert(mincore_probe(&env, i * 128));
+  assert(!mincore_probe(&env, 129));
+  assert(!mincore_probe(&env, 640));
+  assert(!mincore_probe(&env, 256));
+  /* Real-mincore writers share the same advisory mask representation. */
+  lck.mincore_cache.begin[0] = 768;
+  lck.mincore_cache.mask[0] = UINT64_MAX;
+  assert(mincore_probe(&env, 768));
+  assert(mincore_probe(&env, 831));
+  assert(!mincore_probe(&env, 832));
+  assert(probes == 0);
+}
+#endif
+
 int main(void) {
   mapping = calloc(256, 65536);
   assert(mapping);
   check(10, 0, 0, false, false, 12, 12, 256, false, 8);
   check(10, 11, 0, false, false, 12, 12, 256, false, 3);
-  check(10, 0, 11, false, false, 12, 12, 256, false, 3);
+  check(10, 0, 11, false, false, 12, 12, 256, false,
+        MDBX_MINCORE_CACHE_ONLY ? 8 : 3);
   check(0, 0, 0, false, false, 12, 12, 256, false, 1);
   check(10, 0, 0, true, false, 12, 12, 256, false, 1);
   check(10, 0, 0, false, true, 12, 12, 256, false, 1);
@@ -153,6 +192,11 @@ int main(void) {
   check(10, 0, 0, false, false, 12, 12, 11, false, 3);
   check(10, 0, 0, false, false, 12, 12, 256, true, 8);
   check(10, 0, 0, false, false, 12, 12, 256, 2, 8);
+#if MDBX_MINCORE_CACHE_ONLY
+  check_cache_policy();
+#endif
+  perturb = true;
+  check(10, 0, 0, false, false, 12, 12, 256, false, 8);
   free(mapping);
   puts("bounded reclaimed-page prefault, guards, cache reuse, and write "
        "failure tests passed");
