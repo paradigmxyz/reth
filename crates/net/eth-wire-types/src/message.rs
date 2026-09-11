@@ -29,6 +29,10 @@ use core::fmt::Debug;
 // https://github.com/ethereum/go-ethereum/blob/30602163d5d8321fbc68afdcbbaf2362b2641bde/eth/protocols/eth/protocol.go#L50
 pub const MAX_MESSAGE_SIZE: usize = 10 * 1024 * 1024;
 
+/// Multiplier applied to `max_message_size` to derive the in-memory budget for decoding messages
+/// whose RLP representation can expand substantially in memory.
+pub const MESSAGE_MEMORY_BUDGET_MULTIPLIER: usize = 2;
+
 /// Multiplier applied to `max_message_size` to derive the in-memory budget for decoding
 /// `Transactions` and `PooledTransactions` messages.
 ///
@@ -36,7 +40,7 @@ pub const MAX_MESSAGE_SIZE: usize = 10 * 1024 * 1024;
 /// allocations. With many peers in flight this can cause significant memory pressure, so we
 /// stop decoding once the cumulative in-memory size of decoded transactions exceeds
 /// `max_message_size * TX_MEMORY_BUDGET_MULTIPLIER`. Remaining transactions are silently dropped.
-pub const TX_MEMORY_BUDGET_MULTIPLIER: usize = 2;
+pub const TX_MEMORY_BUDGET_MULTIPLIER: usize = MESSAGE_MEMORY_BUDGET_MULTIPLIER;
 
 /// Error when sending/receiving a message
 #[derive(thiserror::Error, Debug)]
@@ -97,7 +101,7 @@ impl<N: NetworkPrimitives> ProtocolMessage<N> {
     ///
     /// This will enforce decoding according to the given [`EthVersion`] of the connection.
     pub fn decode_message(version: EthVersion, buf: &mut &[u8]) -> Result<Self, MessageError> {
-        Self::decode_message_with_tx_memory_budget(version, buf, usize::MAX)
+        Self::decode_message_with_memory_budgets(version, buf, usize::MAX, usize::MAX)
     }
 
     /// Like [`Self::decode_message`], but caps the cumulative in-memory size of decoded
@@ -109,6 +113,27 @@ impl<N: NetworkPrimitives> ProtocolMessage<N> {
         version: EthVersion,
         buf: &mut &[u8],
         tx_memory_budget: usize,
+    ) -> Result<Self, MessageError> {
+        Self::decode_message_with_memory_budgets(version, buf, tx_memory_budget, usize::MAX)
+    }
+
+    /// Like [`Self::decode_message`], but caps the cumulative in-memory size of decoded
+    /// transactions and block bodies. Once exceeded, remaining list items are silently dropped.
+    ///
+    /// Use [`MESSAGE_MEMORY_BUDGET_MULTIPLIER`] to derive a reasonable default.
+    pub fn decode_message_with_memory_budget(
+        version: EthVersion,
+        buf: &mut &[u8],
+        memory_budget: usize,
+    ) -> Result<Self, MessageError> {
+        Self::decode_message_with_memory_budgets(version, buf, memory_budget, memory_budget)
+    }
+
+    fn decode_message_with_memory_budgets(
+        version: EthVersion,
+        buf: &mut &[u8],
+        tx_memory_budget: usize,
+        block_bodies_memory_budget: usize,
     ) -> Result<Self, MessageError> {
         let message_type = EthMessageID::decode(buf)?;
 
@@ -147,7 +172,11 @@ impl<N: NetworkPrimitives> ProtocolMessage<N> {
             EthMessageID::GetBlockHeaders => EthMessage::GetBlockHeaders(RequestPair::decode(buf)?),
             EthMessageID::BlockHeaders => EthMessage::BlockHeaders(RequestPair::decode(buf)?),
             EthMessageID::GetBlockBodies => EthMessage::GetBlockBodies(RequestPair::decode(buf)?),
-            EthMessageID::BlockBodies => EthMessage::BlockBodies(RequestPair::decode(buf)?),
+            EthMessageID::BlockBodies => {
+                EthMessage::BlockBodies(RequestPair::decode_with(buf, |buf| {
+                    BlockBodies::decode_with_memory_budget(buf, block_bodies_memory_budget)
+                })?)
+            }
             EthMessageID::GetPooledTransactions => {
                 EthMessage::GetPooledTransactions(RequestPair::decode(buf)?)
             }
@@ -1062,6 +1091,29 @@ mod tests {
         let decoded =
             ProtocolMessage::decode_message(EthVersion::Eth68, &mut buf.as_slice()).unwrap();
         assert_eq!(empty_block_bodies, decoded);
+    }
+
+    #[test]
+    fn block_bodies_protocol_memory_budget() {
+        let block_bodies =
+            ProtocolMessage::from(EthMessage::<EthNetworkPrimitives>::BlockBodies(RequestPair {
+                request_id: 0,
+                message: vec![BlockBody::default(); 3].into(),
+            }));
+        let mut buf = Vec::new();
+        block_bodies.encode(&mut buf);
+
+        let decoded = ProtocolMessage::<EthNetworkPrimitives>::decode_message_with_memory_budget(
+            EthVersion::Eth68,
+            &mut buf.as_slice(),
+            core::mem::size_of::<BlockBody>(),
+        )
+        .unwrap();
+        let EthMessage::BlockBodies(decoded) = decoded.message else {
+            panic!("expected block bodies response")
+        };
+
+        assert_eq!(decoded.message.len(), 1);
     }
 
     #[test]

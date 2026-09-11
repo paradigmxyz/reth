@@ -168,7 +168,8 @@ impl<T: Decodable + InMemorySize> Transactions<T> {
 }
 
 /// Decodes an RLP list, stopping once the cumulative [`InMemorySize`] of decoded items exceeds
-/// `memory_budget` bytes. Any remaining items in the payload are skipped.
+/// `memory_budget` bytes. [`core::mem::size_of`] is used as a lower bound for each item to account
+/// for its inline storage. Any remaining items in the payload are skipped.
 pub fn decode_list_with_memory_budget<T: Decodable + InMemorySize>(
     buf: &mut &[u8],
     memory_budget: usize,
@@ -184,36 +185,41 @@ pub fn decode_list_with_memory_budget<T: Decodable + InMemorySize>(
     let (payload, rest) = buf.split_at(header.payload_length);
     let mut payload = payload;
 
-    let mut txs = Vec::with_capacity(estimated_transaction_list_capacity(header.payload_length));
+    let mut items = Vec::with_capacity(estimated_list_capacity(header.payload_length));
     let mut total_size = 0usize;
 
     while !payload.is_empty() {
+        let minimum_item_size = core::mem::size_of::<T>();
+        if total_size.saturating_add(minimum_item_size) > memory_budget {
+            break;
+        }
+
         let item = T::decode(&mut payload)?;
-        total_size = total_size.saturating_add(item.size());
+        total_size = total_size.saturating_add(item.size().max(minimum_item_size));
 
         if total_size > memory_budget {
             break;
         }
 
-        txs.push(item);
+        items.push(item);
     }
 
     *buf = rest;
-    Ok(txs)
+    Ok(items)
 }
 
 // Keep this as a conservative hint: small lists stay allocation-free until the first push, while
 // large untrusted payloads cannot force an outsized preallocation.
-const MIN_TRANSACTION_RLP_SIZE_ESTIMATE: usize = 128;
-const MIN_PREALLOCATED_TRANSACTIONS: usize = 4;
-const MAX_PREALLOCATED_TRANSACTIONS: usize = 1024;
+const MIN_RLP_ITEM_SIZE_ESTIMATE: usize = 128;
+const MIN_PREALLOCATED_ITEMS: usize = 4;
+const MAX_PREALLOCATED_ITEMS: usize = 1024;
 
-const fn estimated_transaction_list_capacity(payload_length: usize) -> usize {
-    let estimate = payload_length / MIN_TRANSACTION_RLP_SIZE_ESTIMATE;
-    if estimate < MIN_PREALLOCATED_TRANSACTIONS {
+const fn estimated_list_capacity(payload_length: usize) -> usize {
+    let estimate = payload_length / MIN_RLP_ITEM_SIZE_ESTIMATE;
+    if estimate < MIN_PREALLOCATED_ITEMS {
         0
-    } else if estimate > MAX_PREALLOCATED_TRANSACTIONS {
-        MAX_PREALLOCATED_TRANSACTIONS
+    } else if estimate > MAX_PREALLOCATED_ITEMS {
+        MAX_PREALLOCATED_ITEMS
     } else {
         estimate
     }
