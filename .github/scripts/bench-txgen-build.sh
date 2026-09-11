@@ -30,17 +30,19 @@ fi
 
 build_node_binary() {
   local features_arg=""
-  local workspace_arg=""
+  local tracy_packages=""
 
   cd "$SOURCE_DIR"
   if [ -n "$EXTRA_FEATURES" ]; then
     features_arg="--features ${EXTRA_FEATURES}"
-    workspace_arg="--workspace"
+    # Select the feature-owning packages without building unrelated workspace
+    # binaries. reth-bb does not itself expose a tracy feature.
+    tracy_packages="-p reth-tracing -p reth-ethereum-cli -p reth-node-core"
   fi
 
   # shellcheck disable=SC2086
   RUSTFLAGS="-C target-cpu=native${EXTRA_RUSTFLAGS}" \
-    cargo build --locked --profile profiling $NODE_PKG $workspace_arg $features_arg
+    cargo build --locked --profile profiling $NODE_PKG $tracy_packages $features_arg
 }
 
 case "$MODE" in

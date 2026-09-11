@@ -13,7 +13,7 @@
 #               BENCH_FEATURE_ARGS, BENCH_OTLP_TRACES_ENDPOINT,
 #               BENCH_OTLP_LOGS_ENDPOINT, BENCH_OTLP_DISABLED,
 #               BENCH_TRACING_CHROME, BENCH_TRACY,
-#               BENCH_TRACY_FILTER, BENCH_TRACY_SAMPLING_HZ,
+#               BENCH_TRACY_FILTER, BENCH_TRACY_SAMPLING_HZ, BENCH_TLB_TRACE, BENCH_IO_TRACE,
 #               BENCH_POST_WARMUP_SLEEP_SECONDS,
 #               TXGEN_PAYLOADS_DIR (pre-extracted payloads; skips extraction),
 #               BENCH_TARGET_METRICS_SCRAPE_INTERVAL_MS (optional txgen override)
@@ -181,6 +181,20 @@ call_reth_jit() {
 
 cleanup() {
   kill "${TAIL_PID:-}" 2>/dev/null || true
+  if [ -n "${TLB_WRAPPER_PID:-}" ]; then
+    if [ -s "$OUTPUT_DIR/tlb-perf.pid" ]; then
+      TLB_PERF_PID=$(<"$OUTPUT_DIR/tlb-perf.pid")
+      sudo kill -INT "$TLB_PERF_PID" 2>/dev/null || true
+      for i in $(seq 1 30); do
+        sudo kill -0 "$TLB_PERF_PID" 2>/dev/null || break
+        sleep 1
+      done
+      sudo kill -KILL "$TLB_PERF_PID" 2>/dev/null || true
+    fi
+    wait "$TLB_WRAPPER_PID" 2>/dev/null || true
+    sudo perf script --ns -i "$OUTPUT_DIR/tlb-perf.data" \
+      > "$OUTPUT_DIR/tlb-events.txt" 2> "$OUTPUT_DIR/tlb-decode.log" || true
+  fi
   if [ -n "${TRACY_PID:-}" ] && kill -0 "$TRACY_PID" 2>/dev/null; then
     echo "Stopping tracy-capture..."
     kill -INT "$TRACY_PID" 2>/dev/null || true
@@ -219,6 +233,7 @@ cleanup() {
 }
 TAIL_PID=
 TRACY_PID=
+TLB_WRAPPER_PID=
 trap cleanup EXIT
 
 sudo systemctl stop "$RETH_SCOPE" 2>/dev/null || true
@@ -328,6 +343,11 @@ else
 fi
 
 SUDO_ENV=()
+if [ "${BENCH_TRACY:-off}" = "on" ]; then
+  SUDO_ENV+=("TRACY_NO_SYS_TRACE=1")
+elif [ "${BENCH_TRACY:-off}" = "full" ]; then
+  SUDO_ENV+=("TRACY_NO_SYS_TRACE=0" "TRACY_SAMPLING_HZ=${BENCH_TRACY_SAMPLING_HZ:-1000}")
+fi
 if [ -n "${OTEL_RESOURCE_ATTRIBUTES:-}" ]; then
   SUDO_ENV+=("OTEL_RESOURCE_ATTRIBUTES=${OTEL_RESOURCE_ATTRIBUTES}")
   SUDO_ENV+=("OTEL_BSP_MAX_QUEUE_SIZE=65536" "OTEL_BLRP_MAX_QUEUE_SIZE=65536")
@@ -558,9 +578,70 @@ fi
 
 if [ "${BENCH_TRACY:-off}" != "off" ]; then
   echo "Starting tracy-capture..."
-  tracy-capture -f -o "$OUTPUT_DIR/tracy-profile.tracy" &
+  tracy-capture -f -o "$OUTPUT_DIR/tracy-profile.tracy" > "$OUTPUT_DIR/tracy-capture.log" 2>&1 &
   TRACY_PID=$!
   sleep 0.5
+  if ! kill -0 "$TRACY_PID" 2>/dev/null; then
+    echo "::error::Tracy capture exited before block replay"
+    exit 1
+  fi
+fi
+
+if [ "${BENCH_TLB_TRACE:-false}" = "true" ] || [ "${BENCH_IO_TRACE:-false}" = "true" ]; then
+  # Attach only to the benchmark's engine, trie and transaction-manager threads.
+  # sched_switch provides clock-alignment anchors for the matching Tracy capture.
+  PERF_EVENTS=(tlb:tlb_flush irq_vectors:call_function_entry irq_vectors:call_function_exit
+    irq_vectors:call_function_single_entry irq_vectors:call_function_single_exit sched:sched_switch)
+  RETH_CGROUP=$(sudo systemctl show "$RETH_SCOPE" -p ControlGroup --value)
+  test -n "$RETH_CGROUP"
+  RETH_PID=
+  while read -r candidate; do
+    if [ "$(sudo readlink "/proc/$candidate/exe")" = "$(realpath "$BINARY")" ]; then
+      RETH_PID="$candidate"
+      break
+    fi
+  done < <(sudo cat "/sys/fs/cgroup$RETH_CGROUP/cgroup.procs")
+  test -n "$RETH_PID"
+  PERF_TIDS=()
+  for task in /proc/"$RETH_PID"/task/*; do
+    task_name=$(<"$task/comm")
+    case "$task_name" in
+      engine|sparse-trie|mdbx-rs-txn-mgr)
+        PERF_TIDS+=("${task##*/}")
+        printf '%s\t%s\n' "${task##*/}" "$task_name" >> "$OUTPUT_DIR/tlb-thread-names.tsv"
+        ;;
+    esac
+  done
+  test "${#PERF_TIDS[@]}" -eq 3
+  PERF_TID_LIST=$(IFS=,; echo "${PERF_TIDS[*]}")
+  PERF_SCOPE=(-t "$PERF_TID_LIST")
+  if [ "${BENCH_IO_TRACE:-false}" = "true" ]; then
+    # Completion runs on interrupt/worker contexts, so task-scoped recording
+    # would omit it. Keep the shared artifact names for collector compatibility.
+    PERF_SCOPE=(-a)
+    PERF_EVENTS=(block:block_rq_issue block:block_rq_complete block:block_rq_requeue
+      syscalls:sys_enter_msync syscalls:sys_exit_msync)
+    lsblk -o NAME,MAJ:MIN,SIZE,TYPE,MOUNTPOINTS > "$OUTPUT_DIR/block-devices.txt"
+    findmnt -T "$DATADIR" > "$OUTPUT_DIR/datadir-mount.txt"
+  fi
+  PERF_ARGS=()
+  for event in "${PERF_EVENTS[@]}"; do
+    event_path="${event/:/\/}"
+    sudo test -r "/sys/kernel/tracing/events/$event_path/id"
+    sudo cat "/sys/kernel/tracing/events/$event_path/format" >> "$OUTPUT_DIR/tlb-event-formats.txt"
+    PERF_ARGS+=(-e "$event")
+  done
+  sudo sh -c 'echo $$ > "$1"; shift; exec "$@"' sh "$OUTPUT_DIR/tlb-perf.pid" \
+    perf record --clockid CLOCK_MONOTONIC_RAW -m 4096 "${PERF_SCOPE[@]}" \
+    "${PERF_ARGS[@]}" -o "$OUTPUT_DIR/tlb-perf.data" \
+    > "$OUTPUT_DIR/tlb-perf.log" 2>&1 &
+  TLB_WRAPPER_PID=$!
+  sleep 0.5
+  if ! kill -0 "$TLB_WRAPPER_PID" 2>/dev/null; then
+    cat "$OUTPUT_DIR/tlb-perf.log"
+    echo "::error::Kernel event recorder exited before block replay"
+    exit 1
+  fi
 fi
 
 # TODO(txgen): expose microsecond client-side FCU latency to avoid ms rounding.
