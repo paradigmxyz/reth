@@ -33,7 +33,10 @@ mod validation;
 mod web3;
 
 pub use reth::RethJitAction;
-pub use testing::{TestingBuildBlockRequestV1, TESTING_BUILD_BLOCK_V1, TESTING_COMMIT_BLOCK_V1};
+pub use testing::{
+    TestingBuildBlockRequestV1, TestingBuildBlockResponse, TESTING_BUILD_BLOCK_V1,
+    TESTING_COMMIT_BLOCK_V1,
+};
 
 /// re-export of all server traits
 pub use servers::*;
