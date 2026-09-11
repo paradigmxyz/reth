@@ -25,6 +25,16 @@ pub struct NodeCommand<C: ChainSpecParser, Ext: clap::Args + fmt::Debug = NoArgs
     #[arg(long, value_name = "FILE", verbatim_doc_comment)]
     pub config: Option<PathBuf>,
 
+    /// Enable or disable historical block access list downloading.
+    #[arg(
+        long = "historical-bal",
+        value_name = "true|false",
+        num_args = 0..=1,
+        default_missing_value = "true",
+        require_equals = true
+    )]
+    pub historical_bal: Option<bool>,
+
     /// The chain this node is running.
     ///
     /// Possible values are either a built-in chain or the path to a chain specification file.
@@ -163,6 +173,7 @@ where
         let Self {
             datadir,
             config,
+            historical_bal,
             chain,
             metrics,
             instance,
@@ -189,6 +200,7 @@ where
         let mut node_config = NodeConfig {
             datadir,
             config,
+            historical_bal,
             chain,
             metrics,
             instance,
@@ -367,6 +379,29 @@ mod tests {
         let config_path = cmd.config.clone().unwrap_or_else(|| data_dir.config());
         let end = format!("{}/reth.toml", SUPPORTED_CHAINS[0]);
         assert!(config_path.ends_with(end), "{:?}", cmd.config);
+    }
+
+    #[test]
+    fn parse_historical_bal_override() {
+        for (args, expected) in [
+            (&["reth"][..], None),
+            (&["reth", "--historical-bal"][..], Some(true)),
+            (&["reth", "--historical-bal=true"][..], Some(true)),
+            (&["reth", "--historical-bal=false"][..], Some(false)),
+        ] {
+            let command =
+                NodeCommand::<EthereumChainSpecParser>::try_parse_args_from(args).unwrap();
+            assert_eq!(command.historical_bal, expected, "args: {args:?}");
+        }
+    }
+
+    #[test]
+    fn historical_bal_help_uses_optional_equals_value() {
+        let help = NodeCommand::<EthereumChainSpecParser>::try_parse_args_from(["reth", "--help"])
+            .unwrap_err()
+            .to_string();
+
+        assert!(help.contains("--historical-bal[=<true|false>]"), "{help}");
     }
 
     #[test]

@@ -95,6 +95,9 @@ pub struct NodeConfig<ChainSpec> {
     /// The path to the configuration file to use.
     pub config: Option<PathBuf>,
 
+    /// Optional override for historical block access list downloading.
+    pub historical_bal: Option<bool>,
+
     /// The chain this node is running.
     ///
     /// Possible values are either a built-in chain or the path to a chain specification file.
@@ -174,6 +177,7 @@ impl<ChainSpec> NodeConfig<ChainSpec> {
     pub fn new(chain: Arc<ChainSpec>) -> Self {
         Self {
             config: None,
+            historical_bal: None,
             chain,
             metrics: MetricArgs::default(),
             instance: None,
@@ -246,6 +250,12 @@ impl<ChainSpec> NodeConfig<ChainSpec> {
         self
     }
 
+    /// Set the optional historical block access list downloading override.
+    pub const fn with_historical_bal(mut self, enabled: Option<bool>) -> Self {
+        self.historical_bal = enabled;
+        self
+    }
+
     /// Set the [`ChainSpec`] for the node
     pub fn with_chain(mut self, chain: impl Into<Arc<ChainSpec>>) -> Self {
         self.chain = chain.into();
@@ -257,6 +267,7 @@ impl<ChainSpec> NodeConfig<ChainSpec> {
         let Self {
             datadir,
             config,
+            historical_bal,
             metrics,
             instance,
             network,
@@ -277,6 +288,7 @@ impl<ChainSpec> NodeConfig<ChainSpec> {
         NodeConfig {
             datadir,
             config,
+            historical_bal,
             chain: chain.into(),
             metrics,
             instance,
@@ -577,6 +589,7 @@ impl<ChainSpec> NodeConfig<ChainSpec> {
             chain,
             datadir: self.datadir,
             config: self.config,
+            historical_bal: self.historical_bal,
             metrics: self.metrics,
             instance: self.instance,
             network: self.network,
@@ -619,6 +632,7 @@ impl<ChainSpec> Clone for NodeConfig<ChainSpec> {
         Self {
             chain: self.chain.clone(),
             config: self.config.clone(),
+            historical_bal: self.historical_bal,
             metrics: self.metrics.clone(),
             instance: self.instance,
             network: self.network.clone(),

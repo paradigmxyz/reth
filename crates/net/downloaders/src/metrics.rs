@@ -143,3 +143,19 @@ impl HeaderDownloaderMetrics {
         }
     }
 }
+
+/// Metrics for the best-effort historical BAL downloader.
+#[derive(Clone, Metrics)]
+#[metrics(scope = "downloaders.historical_bal")]
+pub struct HistoricalBalDownloaderMetrics {
+    /// Number of block hashes requested from peers.
+    pub requested: Counter,
+    /// Number of BAL values that passed strict decoding and commitment validation.
+    pub downloaded: Counter,
+    /// Number of candidates excluded before requesting.
+    pub skipped: Counter,
+    /// Number of explicit, short-tail, or request-error unavailable values.
+    pub unavailable: Counter,
+    /// Number of malformed, overlong, or mismatched responses.
+    pub invalid: Counter,
+}

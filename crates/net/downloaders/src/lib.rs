@@ -22,6 +22,9 @@ pub mod bodies;
 /// The collection of algorithms for downloading block headers.
 pub mod headers;
 
+/// Best-effort downloading of historical block access lists.
+pub mod historical_bal;
+
 /// Common downloader metrics.
 pub mod metrics;
 
