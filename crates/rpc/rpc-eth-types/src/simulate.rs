@@ -9,11 +9,13 @@ use alloy_consensus::{transaction::TxHashRef, BlockHeader, Transaction as _};
 use alloy_eips::eip2718::WithEncoded;
 use alloy_evm::{block::TxResult, precompiles::PrecompilesMap};
 use alloy_network::{NetworkTransactionBuilder, TransactionBuilder};
+use alloy_primitives::{Log, LogData, B256};
 use alloy_rpc_types_eth::{
     simulate::{SimBlock, SimCallResult, SimulateError, SimulatedBlock},
     state::StateOverride,
     BlockId, BlockOverrides, BlockTransactionsKind,
 };
+use alloy_sol_types::SolValue;
 use jsonrpsee_types::{error::INTERNAL_ERROR_CODE, ErrorObject};
 use reth_evm::{
     execute::{BlockBuilder, BlockBuilderOutcome, BlockExecutor},
@@ -28,8 +30,11 @@ use reth_storage_api::{noop::NoopProvider, StateProvider};
 use revm::{
     context::Block,
     context_interface::result::ExecutionResult,
-    primitives::{Address, Bytes, TxKind, U256},
+    primitives::{eip7708::ETH_TRANSFER_LOG_ADDRESS, Address, Bytes, TxKind, U256},
     Database,
+};
+use revm_inspectors::transfer::{
+    TransferInspector, TransferKind, TransferOperation, TRANSFER_EVENT_TOPIC, TRANSFER_LOG_EMITTER,
 };
 
 /// Fallback seconds added between simulated block timestamps when neither the user nor the chain
@@ -298,6 +303,72 @@ pub fn apply_precompile_overrides(
     Ok(())
 }
 
+/// Adds newly observed ETH transfers to the cloned simulation result as RPC-only logs.
+///
+/// The underlying `TransferInspector` does not write these synthetic logs to the journal, so
+/// simulated receipts, blooms, and block hashes continue to reflect only contract-emitted logs.
+pub fn append_transfer_logs<HaltReasonTy>(
+    inspector: &TransferInspector,
+    result: &mut ExecutionResult<HaltReasonTy>,
+    next_transfer: &mut usize,
+) {
+    let transfers = inspector.transfers();
+    if *next_transfer >= transfers.len() {
+        return
+    }
+
+    let ExecutionResult::Success { logs, .. } = result else {
+        *next_transfer = transfers.len();
+        return
+    };
+
+    append_transfer_logs_to_result(logs, &transfers[*next_transfer..]);
+    *next_transfer = transfers.len();
+}
+
+/// Inserts synthetic transfer logs alongside their EIP-7708 counterparts when available.
+///
+/// `traceTransfers` predates EIP-7708 and uses a distinct emitter. Geth returns synthetic logs
+/// before their protocol counterparts for calls and creates, but after them for self-destructs.
+/// The fallback preserves pre-Amsterdam behavior, where no protocol transfer log exists.
+fn append_transfer_logs_to_result(logs: &mut Vec<Log>, transfers: &[TransferOperation]) {
+    let mut protocol_log_start = 0;
+
+    for transfer in transfers {
+        let synthetic_log = transfer_to_log(transfer);
+        let matching_protocol_log =
+            logs.iter().enumerate().skip(protocol_log_start).find_map(|(index, log)| {
+                (log.address == ETH_TRANSFER_LOG_ADDRESS &&
+                    log.data.topics() == synthetic_log.data.topics() &&
+                    log.data.data == synthetic_log.data.data)
+                    .then_some(index)
+            });
+
+        if let Some(index) = matching_protocol_log {
+            let insertion_index =
+                if matches!(transfer.kind, TransferKind::SelfDestruct) { index + 1 } else { index };
+            logs.insert(insertion_index, synthetic_log);
+            // Skip the inserted synthetic log and its matched protocol log before pairing the
+            // next transfer. This also handles multiple identical transfers deterministically.
+            protocol_log_start = index + 2;
+        } else {
+            logs.push(synthetic_log);
+            protocol_log_start = logs.len();
+        }
+    }
+}
+
+fn transfer_to_log(transfer: &TransferOperation) -> Log {
+    let from = B256::from_slice(&transfer.from.abi_encode());
+    let to = B256::from_slice(&transfer.to.abi_encode());
+    let data = transfer.value.abi_encode();
+
+    Log {
+        address: TRANSFER_LOG_EMITTER,
+        data: LogData::new_unchecked(vec![TRANSFER_EVENT_TOPIC, from, to], data.into()),
+    }
+}
+
 /// Converts all [`TransactionRequest`]s into [`Recovered`] transactions and applies them to the
 /// given [`BlockExecutor`].
 ///
@@ -309,8 +380,8 @@ pub fn apply_precompile_overrides(
 /// geth's per-call `sanitizeCall` behavior.
 ///
 /// [`TransactionRequest`]: alloy_rpc_types_eth::TransactionRequest
-#[expect(clippy::type_complexity)]
-pub fn execute_transactions<S, T>(
+#[expect(clippy::too_many_arguments, clippy::type_complexity)]
+pub fn execute_transactions<S, T, F>(
     mut builder: S,
     state_provider: impl StateProvider,
     calls: Vec<RpcTxReq<T::Network>>,
@@ -318,6 +389,7 @@ pub fn execute_transactions<S, T>(
     chain_id: u64,
     compute_state_root: bool,
     converter: &T,
+    mut process_result: F,
 ) -> Result<
     (
         BlockBuilderOutcome<S::Primitives>,
@@ -328,6 +400,10 @@ pub fn execute_transactions<S, T>(
 where
     S: BlockBuilder<Executor: BlockExecutor<Evm: Evm<DB: Database<Error: Into<EthApiError>>>>>,
     T: RpcConvert<Primitives = S::Primitives>,
+    F: FnMut(
+        &<<S::Executor as BlockExecutor>::Evm as Evm>::Inspector,
+        &mut ExecutionResult<<<S::Executor as BlockExecutor>::Evm as Evm>::HaltReason>,
+    ),
 {
     builder.apply_pre_execution_changes()?;
 
@@ -394,6 +470,10 @@ where
             tx_regular_gas_used = result.result().result.gas().block_regular_gas_used();
             results.push(result.result().result.clone())
         })?;
+
+        if let Some(result) = results.last_mut() {
+            process_result(builder.evm().inspector(), result);
+        }
 
         let gas_used = gas_output.tx_gas_used();
         if let Some(remaining_call_gas_limit) = remaining_call_gas_limit.as_mut() {
@@ -586,20 +666,73 @@ where
 #[cfg(test)]
 mod tests {
     use super::{
-        apply_precompile_overrides, sanitize_chain, EthSimulateError, INTERNAL_ERROR_CODE,
+        append_transfer_logs_to_result, apply_precompile_overrides, sanitize_chain,
+        transfer_to_log, EthSimulateError, INTERNAL_ERROR_CODE,
     };
     use crate::{error::ToRpcError, EthApiError};
     use alloy_chains::Chain;
     use alloy_consensus::Header;
     use alloy_evm::precompiles::PrecompilesMap;
-    use alloy_primitives::{address, U256};
+    use alloy_primitives::{address, Address, U256};
     use alloy_rpc_types_eth::{
         simulate::SimBlock,
         state::{AccountOverride, StateOverride},
         BlockOverrides, TransactionRequest,
     };
     use reth_primitives_traits::SealedHeader;
-    use revm::precompile::Precompiles;
+    use revm::{precompile::Precompiles, primitives::eip7708::ETH_TRANSFER_LOG_ADDRESS};
+    use revm_inspectors::transfer::{TransferKind, TransferOperation, TRANSFER_LOG_EMITTER};
+
+    #[test]
+    fn trace_transfer_logs_precede_matching_eip7708_logs() {
+        let first = TransferOperation {
+            kind: TransferKind::Call,
+            from: address!("c000000000000000000000000000000000000000"),
+            to: address!("c100000000000000000000000000000000000000"),
+            value: U256::from(1),
+        };
+        let second = TransferOperation {
+            kind: TransferKind::Call,
+            from: first.to,
+            to: address!("c200000000000000000000000000000000000000"),
+            value: U256::from(2),
+        };
+        let mut first_protocol_log = transfer_to_log(&first);
+        first_protocol_log.address = ETH_TRANSFER_LOG_ADDRESS;
+        let mut second_protocol_log = transfer_to_log(&second);
+        second_protocol_log.address = ETH_TRANSFER_LOG_ADDRESS;
+        let mut logs = vec![first_protocol_log, second_protocol_log];
+
+        append_transfer_logs_to_result(&mut logs, &[first.clone(), second.clone()]);
+
+        assert_eq!(logs.len(), 4);
+        assert_eq!(logs[0], transfer_to_log(&first));
+        assert_eq!(logs[1].address, ETH_TRANSFER_LOG_ADDRESS);
+        assert_eq!(logs[2], transfer_to_log(&second));
+        assert_eq!(logs[3].address, ETH_TRANSFER_LOG_ADDRESS);
+        assert_eq!(logs[0].address, TRANSFER_LOG_EMITTER);
+        assert_eq!(logs[2].address, TRANSFER_LOG_EMITTER);
+    }
+
+    #[test]
+    fn trace_selfdestruct_log_follows_matching_eip7708_log() {
+        let transfer = TransferOperation {
+            kind: TransferKind::SelfDestruct,
+            from: address!("c200000000000000000000000000000000000000"),
+            to: Address::ZERO,
+            value: U256::from(2_000_000),
+        };
+        let mut protocol_log = transfer_to_log(&transfer);
+        protocol_log.address = ETH_TRANSFER_LOG_ADDRESS;
+        let mut logs = vec![protocol_log];
+
+        append_transfer_logs_to_result(&mut logs, std::slice::from_ref(&transfer));
+
+        assert_eq!(logs.len(), 2);
+        assert_eq!(logs[0].address, ETH_TRANSFER_LOG_ADDRESS);
+        assert_eq!(logs[1], transfer_to_log(&transfer));
+        assert_eq!(logs[1].address, TRANSFER_LOG_EMITTER);
+    }
 
     #[test]
     fn nonce_max_value_error_uses_internal_error_code() {
