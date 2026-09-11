@@ -470,6 +470,8 @@ impl DatabaseEnv {
             // worsens it for random access (which is our access pattern outside of sync)
             no_rdahead: true,
             coalesce: true,
+            // Reuse recently freed pages that are no longer needed by readers.
+            liforeclaim: true,
             exclusive: args.exclusive.unwrap_or_default(),
             ..Default::default()
         });
@@ -727,6 +729,66 @@ mod tests {
     #[test]
     fn db_creation() {
         let _tempdir = create_test_db(DatabaseEnvKind::RW);
+    }
+
+    #[test]
+    fn lifo_reclaim_preserves_snapshots_and_aborted_updates() {
+        let dir = TempDir::new().unwrap();
+        let args = DatabaseArguments::test();
+        let mut db = DatabaseEnv::open(dir.path(), DatabaseEnvKind::RW, args.clone()).unwrap();
+        db.create_tables().unwrap();
+        assert!(matches!(
+            db.info().unwrap().mode(),
+            Mode::ReadWrite { sync_mode: SyncMode::Durable }
+        ));
+        let tx = db.tx_mut().unwrap();
+        for key in 0..8192 {
+            tx.put::<CanonicalHeaders>(key, B256::ZERO).unwrap();
+        }
+        tx.commit().unwrap();
+        let snapshot = db.tx().unwrap();
+        for generation in 1..=8 {
+            let tx = db.tx_mut().unwrap();
+            for key in 0..8192 {
+                if key % 2 == 0 {
+                    tx.put::<CanonicalHeaders>(key, B256::repeat_byte(generation)).unwrap();
+                } else {
+                    tx.delete::<CanonicalHeaders>(key, None).unwrap();
+                }
+            }
+            tx.commit().unwrap();
+        }
+        for key in 0..8192 {
+            assert_eq!(snapshot.get::<CanonicalHeaders>(key).unwrap(), Some(B256::ZERO));
+        }
+        drop(snapshot);
+        // Release the old snapshot, then repeatedly recycle its now-eligible pages.
+        for generation in 9..=16 {
+            let tx = db.tx_mut().unwrap();
+            for key in 0..8192 {
+                tx.put::<CanonicalHeaders>(key, B256::repeat_byte(generation)).unwrap();
+            }
+            tx.commit().unwrap();
+        }
+        let tx = db.tx_mut().unwrap();
+        for key in 0..8192 {
+            if key % 2 == 0 {
+                tx.delete::<CanonicalHeaders>(key, None).unwrap();
+            } else {
+                tx.put::<CanonicalHeaders>(key, B256::repeat_byte(0xff)).unwrap();
+            }
+        }
+        tx.put::<CanonicalHeaders>(8192, B256::repeat_byte(0xff)).unwrap();
+        tx.abort();
+        drop(db);
+        for kind in [DatabaseEnvKind::RO, DatabaseEnvKind::RW] {
+            let db = DatabaseEnv::open(dir.path(), kind, args.clone()).unwrap();
+            let tx = db.tx().unwrap();
+            for key in 0..8192 {
+                assert_eq!(tx.get::<CanonicalHeaders>(key).unwrap(), Some(B256::repeat_byte(16)));
+            }
+            assert_eq!(tx.get::<CanonicalHeaders>(8192).unwrap(), None);
+        }
     }
 
     #[test]
