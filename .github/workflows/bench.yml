@@ -90,6 +90,15 @@ on:
         required: false
         default: "false"
         type: boolean
+      tracy:
+        description: "Tracy capture: zones only (on) or zones plus system tracing (full)"
+        required: false
+        default: "off"
+        type: choice
+        options:
+          - "off"
+          - "on"
+          - "full"
       cores:
         description: "Limit reth to N CPU cores (0 = all available)"
         required: false
@@ -803,6 +812,9 @@ jobs:
       BENCH_WARMUP_BLOCKS: ${{ needs.bench-ack.outputs.warmup }}
       BENCH_SAMPLY: ${{ needs.bench-ack.outputs.samply }}
       BENCH_TRACING_CHROME: ${{ needs.bench-ack.outputs.tracing-chrome }}
+      BENCH_TRACY: ${{ inputs.tracy || 'off' }}
+      BENCH_TRACY_FILTER: debug
+      BENCH_TRACY_SAMPLING_HZ: "1000"
       BENCH_CORES: ${{ needs.bench-ack.outputs.cores }}
       BENCH_BIG_BLOCKS: ${{ needs.bench-ack.outputs.big-blocks }}
       BENCH_BIG_BLOCKS_TARGET_GAS: ${{ needs.bench-ack.outputs.big-blocks-target-gas }}
@@ -1008,6 +1020,21 @@ jobs:
             cargo install samply --git https://github.com/DaniPopes/samply --branch edge --locked
             sudo install "$HOME/.cargo/bin/samply" /usr/local/bin/
           fi
+
+      - name: Install matching Tracy capture
+        if: env.BENCH_TRACY != 'off'
+        run: |
+          sudo apt-get install -y --no-install-recommends cmake ninja-build pkg-config libfreetype6-dev libcurl4-openssl-dev libpugixml-dev
+          TRACY_BUILD_ROOT="$(mktemp -d /tmp/reth-tracy-build.XXXXXX)"
+          git init "$TRACY_BUILD_ROOT/source"
+          git -C "$TRACY_BUILD_ROOT/source" remote add origin https://github.com/wolfpld/tracy.git
+          # Tracy 0.13.1, matching the pinned tracy-client-sys 0.28.0.
+          git -C "$TRACY_BUILD_ROOT/source" fetch --depth 1 origin 05cceee0df3b8d7c6fa87e9638af311dbabc63cb
+          git -C "$TRACY_BUILD_ROOT/source" checkout --detach FETCH_HEAD
+          cmake -S "$TRACY_BUILD_ROOT/source/capture" -B "$TRACY_BUILD_ROOT/build" -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release -DNO_FILESELECTOR=ON -DUSE_WAYLAND=ON
+          cmake --build "$TRACY_BUILD_ROOT/build" --target tracy-capture -j 4
+          echo "$TRACY_BUILD_ROOT/build" >> "$GITHUB_PATH"
 
       # Verify all required tools are available
       - name: Check dependencies
@@ -1353,6 +1380,12 @@ jobs:
           {"benchmark_run":"${run_label}","run_type":"${run_type}","git_ref":"${ref}","bench_sha":"${ref}","benchmark_id":"${BENCH_ID}","run_start_epoch":"${LAST_RUN_START}","reference_epoch":"${BENCH_REFERENCE_EPOCH}"}
           LABELS
             taskset -c 0 .github/scripts/bench-txgen-run.sh "$run_type" "$binary" "$BENCH_WORK_DIR/${run_label}"
+            if [ "${BENCH_TRACY:-off}" != "off" ]; then
+              test -s "$BENCH_WORK_DIR/${run_label}/tracy-profile.tracy" || {
+                echo "::error::Missing Tracy capture for ${run_label}"
+                exit 1
+              }
+            fi
           done
 
           .github/scripts/bench-update-status.sh "Finalizing results..."

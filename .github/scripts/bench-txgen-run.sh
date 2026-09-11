@@ -328,6 +328,11 @@ else
 fi
 
 SUDO_ENV=()
+if [ "${BENCH_TRACY:-off}" = "on" ]; then
+  SUDO_ENV+=("TRACY_NO_SYS_TRACE=1")
+elif [ "${BENCH_TRACY:-off}" = "full" ]; then
+  SUDO_ENV+=("TRACY_NO_SYS_TRACE=0" "TRACY_SAMPLING_HZ=${BENCH_TRACY_SAMPLING_HZ:-1000}")
+fi
 if [ -n "${OTEL_RESOURCE_ATTRIBUTES:-}" ]; then
   SUDO_ENV+=("OTEL_RESOURCE_ATTRIBUTES=${OTEL_RESOURCE_ATTRIBUTES}")
   SUDO_ENV+=("OTEL_BSP_MAX_QUEUE_SIZE=65536" "OTEL_BLRP_MAX_QUEUE_SIZE=65536")
@@ -558,9 +563,13 @@ fi
 
 if [ "${BENCH_TRACY:-off}" != "off" ]; then
   echo "Starting tracy-capture..."
-  tracy-capture -f -o "$OUTPUT_DIR/tracy-profile.tracy" &
+  tracy-capture -f -o "$OUTPUT_DIR/tracy-profile.tracy" > "$OUTPUT_DIR/tracy-capture.log" 2>&1 &
   TRACY_PID=$!
   sleep 0.5
+  if ! kill -0 "$TRACY_PID" 2>/dev/null; then
+    echo "::error::Tracy capture exited before block replay"
+    exit 1
+  fi
 fi
 
 # TODO(txgen): expose microsecond client-side FCU latency to avoid ms rounding.
