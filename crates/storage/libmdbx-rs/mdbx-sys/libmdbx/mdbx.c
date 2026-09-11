@@ -22370,7 +22370,7 @@ __hot static pgno_t repnl_get_sequence(MDBX_txn *txn, const size_t num, uint8_t 
 }
 
 static inline pgr_t page_alloc_finalize(MDBX_env *const env, MDBX_txn *const txn, const MDBX_cursor *const mc,
-                                        const pgno_t pgno, const size_t num) {
+                                        const pgno_t pgno, const size_t num, const page_t *const source) {
 #if MDBX_ENABLE_PROFGC
   size_t majflt_before;
   const uint64_t cputime_before = osal_cputime(&majflt_before);
@@ -22382,7 +22382,9 @@ static inline pgr_t page_alloc_finalize(MDBX_env *const env, MDBX_txn *const txn
   ENSURE(env, pgno >= NUM_METAS);
 
   pgr_t ret;
+  bool copied = false;
   bool need_clean = (env->flags & MDBX_PAGEPERTURB) != 0;
+  tASSERT(txn, !source || (num == 1 && source->pgno != pgno));
   if (env->flags & MDBX_WRITEMAP) {
     ret.page = pgno2page(env, pgno);
     MDBX_ASAN_UNPOISON_MEMORY_REGION(ret.page, pgno2bytes(env, num));
@@ -22415,7 +22417,15 @@ static inline pgr_t page_alloc_finalize(MDBX_env *const env, MDBX_txn *const txn
       size_t file_offset = pgno2bytes(env, pgno);
       if (likely(num == 1)) {
         if (!mincore_probe(env, pgno)) {
-          osal_pwrite(env->lazy_fd, pattern, env->ps, file_offset);
+#if defined(__linux__)
+          /* A full OS-page overwrite avoids reading old destination bytes.
+           * Copy useful data during the prefault instead of overwriting a
+           * pattern through the mapping. Keep PAGEPERTURB's unused space. */
+          if (source && !need_clean && env->ps >= globals.sys_pagesize)
+            copied = osal_pwrite(env->lazy_fd, source, env->ps, file_offset) == MDBX_SUCCESS;
+          else
+#endif
+            osal_pwrite(env->lazy_fd, pattern, env->ps, file_offset);
 #if MDBX_ENABLE_PGOP_STAT
           env->lck->pgops.prefault.weak += 1;
 #endif /* MDBX_ENABLE_PGOP_STAT */
@@ -22461,13 +22471,20 @@ static inline pgr_t page_alloc_finalize(MDBX_env *const env, MDBX_txn *const txn
     memset(ret.page, -1, pgno2bytes(env, num));
 
   VALGRIND_MAKE_MEM_UNDEFINED(ret.page, pgno2bytes(env, num));
-  ret.page->pgno = pgno;
-  ret.page->dupfix_ksize = 0;
-  ret.page->flags = 0;
-  if ((ASSERT_ENABLED() || AUDIT_ENABLED()) && num > 1) {
-    ret.page->pages = (pgno_t)num;
-    ret.page->flags = P_LARGE;
+  if (source) {
+    if (copied)
+      VALGRIND_MAKE_MEM_DEFINED(ret.page, env->ps);
+    else
+      page_copy(ret.page, source, env->ps);
+  } else {
+    ret.page->dupfix_ksize = 0;
+    ret.page->flags = 0;
+    if ((ASSERT_ENABLED() || AUDIT_ENABLED()) && num > 1) {
+      ret.page->pages = (pgno_t)num;
+      ret.page->flags = P_LARGE;
+    }
   }
+  ret.page->pgno = pgno;
 
   ret.err = page_dirty(txn, ret.page, (pgno_t)num);
 bailout:
@@ -22916,7 +22933,7 @@ done:
       eASSERT(env, pgno >= NUM_METAS && pgno + num <= txn->geo.first_unallocated);
     }
 
-    ret = page_alloc_finalize(env, txn, mc, pgno, num);
+    ret = page_alloc_finalize(env, txn, mc, pgno, num, nullptr);
     if (unlikely(ret.err != MDBX_SUCCESS)) {
     fail:
       eASSERT(env, ret.err != MDBX_SUCCESS);
@@ -22986,7 +23003,7 @@ __hot pgr_t gc_alloc_single(const MDBX_cursor *const mc) {
   }
 
   if (likely(MDBX_PNL_GETSIZE(txn->tw.repnl) > 0))
-    return page_alloc_finalize(txn->env, txn, mc, repnl_get_single(txn), 1);
+    return page_alloc_finalize(txn->env, txn, mc, repnl_get_single(txn), 1, nullptr);
 
   return gc_alloc_ex(mc, 1, ALLOC_DEFAULT);
 }
@@ -32198,7 +32215,13 @@ __hot int page_touch_unmodifable(MDBX_txn *txn, MDBX_cursor *mc, const page_t *c
     rc = pnl_need(&txn->tw.retired_pages, 1);
     if (unlikely(rc != MDBX_SUCCESS))
       goto fail;
-    const pgr_t par = gc_alloc_single(mc);
+    /* Only the reclaimed-page fast path can consume the source without
+     * passing it through recursive GC allocation. */
+    const bool copy_during_alloc = (txn->flags & MDBX_WRITEMAP) && !txn->tw.loose_pages &&
+                                   MDBX_PNL_GETSIZE(txn->tw.repnl) > 0;
+    const pgr_t par = copy_during_alloc
+                          ? page_alloc_finalize(txn->env, txn, mc, repnl_get_single(txn), 1, mp)
+                          : gc_alloc_single(mc);
     rc = par.err;
     np = par.page;
     if (unlikely(rc != MDBX_SUCCESS))
@@ -32220,7 +32243,8 @@ __hot int page_touch_unmodifable(MDBX_txn *txn, MDBX_cursor *mc, const page_t *c
 #if MDBX_ENABLE_PGOP_STAT
     txn->env->lck->pgops.cow.weak += 1;
 #endif /* MDBX_ENABLE_PGOP_STAT */
-    page_copy(np, mp, txn->env->ps);
+    if (!copy_during_alloc)
+      page_copy(np, mp, txn->env->ps);
     np->pgno = pgno;
     np->txnid = txn->front_txnid;
   } else if (is_spilled(txn, mp)) {

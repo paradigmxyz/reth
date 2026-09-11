@@ -380,3 +380,56 @@ fn test_stat_dupsort() {
         assert_eq!(stat.entries(), 8);
     }
 }
+
+#[test]
+fn test_writemap_reclaimed_cow_snapshot_abort_reopen() {
+    for page_size in [512, 4096, 16384] {
+        let dir = tempdir().unwrap();
+        let mut builder = Environment::builder();
+        builder.write_map().set_geometry(Geometry {
+            size: Some(0..64 * 1024 * 1024),
+            page_size: Some(PageSize::Set(page_size)),
+            ..Default::default()
+        });
+        let env = builder.open(dir.path()).unwrap();
+        // Repeated commits provide pages that later CoW operations can reclaim.
+        for generation in 0u8..8 {
+            let txn = env.begin_rw_txn().unwrap();
+            let db = txn.open_db(None).unwrap();
+            for key in 0u32..512 {
+                let value = vec![generation; if key % 17 == 0 { 8192 } else { 96 }];
+                txn.put(db.dbi(), key.to_be_bytes(), value, WriteFlags::empty()).unwrap();
+            }
+            txn.commit().unwrap();
+        }
+        let snapshot = env.begin_ro_txn().unwrap();
+        let snapshot_db = snapshot.open_db(None).unwrap().dbi();
+        for generation in [8u8, 9] {
+            let txn = env.begin_rw_txn().unwrap();
+            let db = txn.open_db(None).unwrap();
+            for key in 0u32..512 {
+                let value = vec![generation; if key % 17 == 0 { 8192 } else { 96 }];
+                txn.put(db.dbi(), key.to_be_bytes(), value, WriteFlags::empty()).unwrap();
+            }
+            if generation == 8 {
+                txn.commit().unwrap();
+            }
+        }
+        for key in 0u32..512 {
+            let expected = vec![7u8; if key % 17 == 0 { 8192 } else { 96 }];
+            assert_eq!(
+                snapshot.get::<Vec<u8>>(snapshot_db, &key.to_be_bytes()).unwrap(),
+                Some(expected)
+            );
+        }
+        drop(snapshot);
+        drop(env);
+        let env = builder.open(dir.path()).unwrap();
+        let txn = env.begin_ro_txn().unwrap();
+        let db = txn.open_db(None).unwrap();
+        for key in 0u32..512 {
+            let expected = vec![8u8; if key % 17 == 0 { 8192 } else { 96 }];
+            assert_eq!(txn.get::<Vec<u8>>(db.dbi(), &key.to_be_bytes()).unwrap(), Some(expected));
+        }
+    }
+}
