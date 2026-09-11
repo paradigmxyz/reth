@@ -1301,6 +1301,14 @@ where
             return
         }
 
+        // This snapshot is gossip, so it answers to the propagation policy like any other
+        // announcement. Without this check a `Trusted` or `None` policy would still hand every
+        // newly connected peer a view of the pending pool.
+        if !self.policies.propagation_policy().can_propagate(peer) {
+            trace!(target: "net::tx", ?peer_id, "Skipping transaction broadcast: propagation policy");
+            return
+        }
+
         // Get transactions to broadcast
         let pooled_txs = self.pool.pooled_transactions_max(
             SOFT_LIMIT_COUNT_HASHES_IN_NEW_POOLED_TRANSACTIONS_BROADCAST_MESSAGE,
@@ -2456,6 +2464,20 @@ mod tests {
         TransactionsManager<EthTestPool, EthNetworkPrimitives>,
         NetworkManager<EthNetworkPrimitives>,
     ) {
+        new_eth_tx_manager_with_policy(
+            TransactionPropagationKind::default(),
+            OkValidator::default(),
+        )
+        .await
+    }
+
+    async fn new_eth_tx_manager_with_policy(
+        propagation_policy: TransactionPropagationKind,
+        validator: OkValidator<EthPooledTransaction>,
+    ) -> (
+        TransactionsManager<EthTestPool, EthNetworkPrimitives>,
+        NetworkManager<EthNetworkPrimitives>,
+    ) {
         let secret_key = SecretKey::new(&mut rand_08::thread_rng());
         let client = NoopProvider::default();
 
@@ -2465,7 +2487,7 @@ mod tests {
             .build(client);
 
         let pool = Pool::new(
-            OkValidator::default(),
+            validator,
             CoinbaseTipOrdering::default(),
             InMemoryBlobStore::default(),
             Default::default(),
@@ -2476,7 +2498,7 @@ mod tests {
             .await
             .unwrap()
             .into_builder()
-            .transactions(pool.clone(), transactions_manager_config)
+            .transactions_with_policy(pool.clone(), transactions_manager_config, propagation_policy)
             .split_with_handle();
 
         (transactions, network)
@@ -3481,6 +3503,75 @@ mod tests {
 
         let peer = tx_manager.peers.get(&peer_id).expect("peer should exist");
         assert!(peer.seen_transactions.contains(&tx_hash));
+    }
+
+    /// Establishes a session with `peer_kind` under `policy` and reports whether the pending
+    /// pool was announced to that peer.
+    async fn session_announces_pooled_tx(
+        policy: TransactionPropagationKind,
+        peer_kind: PeerKind,
+    ) -> bool {
+        // only propagatable transactions are eligible for the snapshot
+        let validator = OkValidator::default().set_propagate_transactions(true);
+        let (mut tx_manager, network) = new_eth_tx_manager_with_policy(policy, validator).await;
+        let peer_id = PeerId::random();
+
+        // the snapshot is skipped while syncing, which would mask what the policy does
+        network.handle().update_sync_state(SyncState::Idle);
+
+        let mut tx_gen = TransactionGenerator::new(rand::rng());
+        let tx = gen_eip1559_pooled_with_nonce(&mut tx_gen, 0);
+        let tx_hash = *tx.hash();
+        tx_manager
+            .pool
+            .add_transaction(TransactionOrigin::External, tx)
+            .await
+            .expect("transaction should be accepted into the pool");
+
+        let (to_peer, _rx) = mpsc::channel::<PeerRequest>(1);
+        let session_info = SessionInfo {
+            peer_id,
+            remote_addr: SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0),
+            client_version: Arc::from(""),
+            capabilities: Arc::new(vec![].into()),
+            status: Arc::new(Default::default()),
+            version: EthVersion::Eth68,
+            peer_kind,
+        };
+        tx_manager.handle_peer_session(session_info, PeerRequestSender::new(peer_id, to_peer));
+
+        tx_manager
+            .peers
+            .get(&peer_id)
+            .expect("peer should exist")
+            .seen_transactions
+            .contains(&tx_hash)
+    }
+
+    #[tokio::test]
+    async fn test_session_snapshot_respects_propagation_policy() {
+        reth_tracing::init_test_tracing();
+
+        // peers the policy allows keep receiving the snapshot on connect
+        assert!(
+            session_announces_pooled_tx(TransactionPropagationKind::All, PeerKind::Basic).await
+        );
+        assert!(
+            session_announces_pooled_tx(TransactionPropagationKind::Trusted, PeerKind::Trusted)
+                .await
+        );
+
+        // peers the policy excludes must not learn the pending pool from the snapshot either
+        assert!(
+            !session_announces_pooled_tx(TransactionPropagationKind::Trusted, PeerKind::Basic)
+                .await
+        );
+        assert!(
+            !session_announces_pooled_tx(TransactionPropagationKind::None, PeerKind::Basic).await
+        );
+        assert!(
+            !session_announces_pooled_tx(TransactionPropagationKind::None, PeerKind::Trusted).await
+        );
     }
 
     #[tokio::test]
