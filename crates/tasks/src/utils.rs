@@ -34,6 +34,24 @@ pub fn increase_thread_priority() {
     }
 }
 
+/// Lowers the current thread's priority to `value` on the crossplatform `0..=99` scale, where a
+/// higher value means more CPU.
+///
+/// On Linux the scale maps onto niceness, `nice = floor(39 * (99 - value) / 99) - 20`: 0 is
+/// nice +19, 35 is nice +5, 47 is nice 0, 62 is nice -6. An unprivileged process cannot raise
+/// itself above nice 0, so values above the process default fail. Failures are logged at
+/// `debug` level.
+pub fn lower_thread_priority(value: u8) {
+    let Ok(priority) = ThreadPriorityValue::try_from(value) else {
+        tracing::debug!(value, "thread priority out of range");
+        return
+    };
+    if let Err(err) = ThreadPriority::Crossplatform(priority).set_for_current() {
+        let thread_name = std::thread::current().name().unwrap_or("unnamed").to_string();
+        tracing::debug!(%thread_name, value, ?err, "failed to set thread priority");
+    }
+}
+
 /// Deprioritizes known background threads spawned by third-party libraries (`OpenTelemetry`,
 /// `tracing-appender`, `reqwest`) by scanning `/proc/<pid>/task/` for matching thread names and
 /// setting `SCHED_IDLE` scheduling policy + maximum niceness on them.

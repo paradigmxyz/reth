@@ -148,7 +148,10 @@ where
     fn bal_prewarm_pool(&self) -> Arc<bal_prewarm_pool::BalPrewarmPool> {
         self.bal_prewarm_pool
             .get_or_init(|| {
-                bal_prewarm_pool::BalPrewarmPool::new(bal_prewarm_pool::DEFAULT_BAL_PREWARM_THREADS)
+                bal_prewarm_pool::BalPrewarmPool::new(
+                    bal_prewarm_pool::DEFAULT_BAL_PREWARM_THREADS,
+                    self.executor.execution_thread_priority(),
+                )
             })
             .clone()
     }

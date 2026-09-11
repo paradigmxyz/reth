@@ -182,6 +182,7 @@ pub struct WorkerPool {
     metrics: OnceLock<WorkerPoolMetrics>,
     num_threads: usize,
     thread_name_prefix: &'static str,
+    thread_priority: Option<u8>,
 }
 
 impl WorkerPool {
@@ -190,18 +191,33 @@ impl WorkerPool {
     /// The underlying rayon pool is not created until the first method that requires it is called.
     /// Thread names follow the pattern `"{prefix}-{index:02}"`.
     pub const fn new(num_threads: usize, thread_name_prefix: &'static str) -> Self {
-        Self { pool: OnceLock::new(), metrics: OnceLock::new(), num_threads, thread_name_prefix }
+        Self {
+            pool: OnceLock::new(),
+            metrics: OnceLock::new(),
+            num_threads,
+            thread_name_prefix,
+            thread_priority: None,
+        }
+    }
+
+    /// Sets the priority every worker thread of this pool applies to itself when it starts.
+    ///
+    /// See [`lower_thread_priority`](crate::utils::lower_thread_priority) for the scale.
+    pub const fn with_thread_priority(mut self, thread_priority: Option<u8>) -> Self {
+        self.thread_priority = thread_priority;
+        self
     }
 
     /// Returns a reference to the underlying rayon pool, creating it on first access.
     fn pool(&self) -> &rayon::ThreadPool {
         self.pool.get_or_init(|| {
             let prefix = self.thread_name_prefix;
-            build_pool_with_panic_handler(
+            build_pool_with_panic_handler(with_thread_priority(
                 rayon::ThreadPoolBuilder::new()
                     .num_threads(self.num_threads)
                     .thread_name(move |i| format!("{prefix}-{i:02}")),
-            )
+                self.thread_priority,
+            ))
             .unwrap_or_else(|err| panic!("failed to build {prefix} worker pool: {err}"))
         })
     }
@@ -421,6 +437,21 @@ pub fn build_pool_with_panic_handler(
     builder.panic_handler(|_| {}).build()
 }
 
+/// Makes every worker thread of the pool apply `priority` to itself once, when it starts.
+///
+/// `None` leaves the pool's threads at the process default.
+pub fn with_thread_priority(
+    builder: rayon::ThreadPoolBuilder,
+    priority: Option<u8>,
+) -> rayon::ThreadPoolBuilder {
+    match priority {
+        Some(priority) => {
+            builder.start_handler(move |_| crate::utils::lower_thread_priority(priority))
+        }
+        None => builder,
+    }
+}
+
 /// Per-thread state container for a [`WorkerPool`].
 ///
 /// Holds a type-erased `Box<dyn Any>` that can be initialized and accessed with concrete types
@@ -622,5 +653,35 @@ mod tests {
         });
 
         assert_eq!(thread_name, "target-00");
+    }
+
+    #[test]
+    fn worker_pool_thread_priority_runs_on_every_thread() {
+        const THREADS: usize = 4;
+        // Nice +5 on linux; a process can always lower its own priority.
+        const PRIORITY: u8 = 35;
+
+        let pool = WorkerPool::new(THREADS, "prio").with_thread_priority(Some(PRIORITY));
+
+        let observed = std::sync::Mutex::new(Vec::new());
+        pool.broadcast(THREADS, |_| {
+            observed.lock().unwrap().push(current_niceness());
+        });
+
+        let observed = observed.into_inner().unwrap();
+        assert_eq!(observed.len(), THREADS);
+        assert!(observed.iter().all(|nice| nice.is_none_or(|nice| nice == 5)), "{observed:?}");
+    }
+
+    /// The calling thread's nice value, on platforms that expose one.
+    #[cfg(target_os = "linux")]
+    fn current_niceness() -> Option<i32> {
+        // SAFETY: getpriority on the calling thread cannot fail with these arguments.
+        Some(unsafe { libc::getpriority(libc::PRIO_PROCESS, 0) })
+    }
+
+    #[cfg(not(target_os = "linux"))]
+    const fn current_niceness() -> Option<i32> {
+        None
     }
 }
