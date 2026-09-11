@@ -1155,6 +1155,12 @@ jobs:
 
           .github/scripts/bench-txgen-install.sh
 
+          if [ "${BENCH_TRACY:-off}" != "off" ]; then
+            CARGO_BUILD_JOBS=8 .github/scripts/bench-txgen-build.sh baseline "${BASELINE_DIR}" "${{ steps.refs.outputs.baseline-ref }}"
+            CARGO_BUILD_JOBS=8 .github/scripts/bench-txgen-build.sh feature "${FEATURE_DIR}" "${{ steps.refs.outputs.feature-ref }}"
+            exit 0
+          fi
+
           .github/scripts/bench-txgen-build.sh baseline "${BASELINE_DIR}" "${{ steps.refs.outputs.baseline-ref }}" &
           PID_BASELINE=$!
           .github/scripts/bench-txgen-build.sh feature "${FEATURE_DIR}" "${{ steps.refs.outputs.feature-ref }}" &
