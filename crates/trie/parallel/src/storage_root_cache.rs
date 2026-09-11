@@ -2,28 +2,28 @@ use alloy_primitives::{map::B256Map, B256};
 use reth_primitives_traits::dashmap::DashMap;
 use std::sync::Arc;
 
-/// Number of past blocks whose computed storage roots stay available to the proof workers.
+/// Number of past blocks whose storage roots stay available to the proof workers.
 const GENERATIONS: usize = 8;
 
-/// Storage roots of accounts that the proof workers did not have to walk for themselves.
+/// Storage roots the proof workers can use instead of walking an account's storage trie.
 ///
-/// A proof is computed against the parent state of the block being validated, so a cached root is
-/// the root of that account's storage trie in the parent state. It stays correct for every later
-/// block until the account's storage changes, which is why [`Self::advance`] takes the roots the
-/// state root task just computed for the accounts this block wrote to: after that the whole cache
-/// describes the block's post state, which is the next block's parent state.
+/// Roots a worker computes itself are only shared with the other workers of the same block. What
+/// survives the block are the roots the state root task computed for the account leaves it
+/// rewrote: those are post-state roots of the block that produced them, and they stay correct
+/// until that account's storage changes again, at which point the block that changes it publishes
+/// the new root in a newer generation. Reads take the newest generation holding the account, so a
+/// republished root shadows every older copy of it.
 ///
-/// Roots computed while validating the current block go into `live`. [`Self::advance`] copies
-/// `live` into a new generation rather than handing the map itself over, so a worker that outlives
-/// its block cannot publish a root of an already-superseded state.
+/// A worker's own roots cannot be carried over. When the sparse trie is reused the proof providers
+/// skip the in-memory overlay (see `with_skip_overlay_for_reused_sparse_trie`), so a worker reads
+/// the durable state rather than the parent state; that is sound for the proof it is building,
+/// because the sparse trie already holds every leaf the two states disagree on, but it is not a
+/// root the next block may believe.
 #[derive(Clone, Debug)]
 pub struct StorageRootCache {
-    /// Roots computed while validating the current block.
+    /// Roots computed while validating the current block. Dropped with the block.
     live: Arc<DashMap<B256, B256>>,
-    /// Roots computed for earlier blocks, newest first.
-    ///
-    /// Reads take the first match, so a root re-published by [`Self::advance`] shadows every
-    /// older copy of it and stale entries never have to be hunted down in older generations.
+    /// Roots published by the state root tasks of earlier blocks, newest first.
     generations: Arc<[Arc<B256Map<B256>>]>,
 }
 
@@ -46,7 +46,7 @@ impl StorageRootCache {
             .map(|root| CachedStorageRoot { root: *root, carried: true })
     }
 
-    /// Records a storage root computed against the current block's parent state.
+    /// Shares a storage root a worker computed with the other workers of this block.
     pub fn insert(&self, hashed_address: B256, root: B256) {
         self.live.insert(hashed_address, root);
     }
@@ -54,27 +54,17 @@ impl StorageRootCache {
     /// Returns the cache the next block's proofs should use.
     ///
     /// `updated_storage_roots` must hold the post-state storage root of every account whose
-    /// storage this block changed; those roots replace what the workers cached for the parent
-    /// state. Any account missing from it keeps the root it was cached with, which is only
-    /// correct if the block left its storage alone.
-    pub fn advance(&self, updated_storage_roots: &B256Map<B256>) -> Self {
-        let mut generation = B256Map::with_capacity_and_hasher(
-            self.live.len() + updated_storage_roots.len(),
-            Default::default(),
-        );
-        for entry in self.live.iter() {
-            generation.insert(*entry.key(), *entry.value());
-        }
-        generation.extend(updated_storage_roots.iter().map(|(address, root)| (*address, *root)));
-
+    /// storage this block changed, so that no generation is left answering with a root this block
+    /// moved.
+    pub fn advance(&self, updated_storage_roots: B256Map<B256>) -> Self {
         let mut generations = Vec::with_capacity(GENERATIONS);
-        generations.push(Arc::new(generation));
+        generations.push(Arc::new(updated_storage_roots));
         generations.extend(self.generations.iter().take(GENERATIONS - 1).cloned());
 
         Self { live: Default::default(), generations: generations.into() }
     }
 
-    /// Returns the number of carried entries, counting an account cached in several generations
+    /// Returns the number of carried entries, counting an account held by several generations
     /// once per generation.
     pub fn carried_len(&self) -> usize {
         self.generations.iter().map(|generation| generation.len()).sum()
@@ -86,7 +76,7 @@ impl StorageRootCache {
 pub struct CachedStorageRoot {
     /// The storage root.
     pub root: B256,
-    /// Whether the root was computed while validating an earlier block.
+    /// Whether the root was published by an earlier block rather than computed for this one.
     pub carried: bool,
 }
 
@@ -103,7 +93,7 @@ mod tests {
     }
 
     #[test]
-    fn live_roots_become_carried_on_advance() {
+    fn only_the_published_roots_survive_the_block() {
         let cache = StorageRootCache::default();
         cache.insert(address(1), root(1));
 
@@ -111,25 +101,23 @@ mod tests {
         assert_eq!(hit.root, root(1));
         assert!(!hit.carried);
 
-        let next = cache.advance(&B256Map::default());
-        let hit = next.get(&address(1)).unwrap();
-        assert_eq!(hit.root, root(1));
-        assert!(hit.carried);
-        assert!(cache.get(&address(2)).is_none());
+        let next = cache.advance(B256Map::from_iter([(address(2), root(2))]));
+        assert!(
+            next.get(&address(1)).is_none(),
+            "a root a worker read from the durable state must not outlive its block"
+        );
+        assert!(next.get(&address(2)).unwrap().carried);
     }
 
     #[test]
     fn a_changed_root_shadows_every_older_copy() {
         let mut cache = StorageRootCache::default();
-        cache.insert(address(1), root(1));
 
-        // Carry the same account through enough generations that several of them hold the stale
-        // root, then change it.
+        // Carry the same account through several generations, then change it.
         for _ in 0..3 {
-            cache = cache.advance(&B256Map::default());
-            cache.insert(address(1), root(1));
+            cache = cache.advance(B256Map::from_iter([(address(1), root(1))]));
         }
-        cache = cache.advance(&B256Map::from_iter([(address(1), root(9))]));
+        cache = cache.advance(B256Map::from_iter([(address(1), root(9))]));
 
         assert_eq!(cache.get(&address(1)).unwrap().root, root(9));
     }
@@ -137,7 +125,7 @@ mod tests {
     #[test]
     fn a_worker_finishing_after_advance_cannot_publish_into_the_next_block() {
         let cache = StorageRootCache::default();
-        let next = cache.advance(&B256Map::from_iter([(address(1), root(9))]));
+        let next = cache.advance(B256Map::from_iter([(address(1), root(9))]));
 
         // A storage worker of the finished block still holds the old cache.
         cache.insert(address(1), root(1));
@@ -147,14 +135,14 @@ mod tests {
 
     #[test]
     fn entries_age_out_after_the_generation_window() {
-        let mut cache = StorageRootCache::default();
-        cache.insert(address(1), root(1));
+        let mut cache =
+            StorageRootCache::default().advance(B256Map::from_iter([(address(1), root(1))]));
 
-        for _ in 0..GENERATIONS {
-            cache = cache.advance(&B256Map::default());
+        for _ in 1..GENERATIONS {
+            cache = cache.advance(B256Map::default());
             assert!(cache.get(&address(1)).is_some());
         }
-        cache = cache.advance(&B256Map::default());
+        cache = cache.advance(B256Map::default());
 
         assert!(cache.get(&address(1)).is_none());
     }

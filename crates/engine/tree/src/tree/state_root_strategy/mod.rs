@@ -712,13 +712,10 @@ impl DefaultStateRootStrategy {
             let _enter =
                 debug_span!(target: "engine::tree::payload_processor", "preserve").entered();
 
-            // The workers cached storage roots of the parent state. Replacing the roots this
-            // block moved makes the cache describe the block's post state, which is the state
+            // The storage roots this block computed describe its post state, which is the state
             // the next payload's proofs are computed against.
             if let Some(result) = &task_result {
-                let start = Instant::now();
-                let next = storage_root_cache.advance(&task.take_updated_storage_roots());
-                trie_metrics.storage_root_cache_advance_duration_histogram.record(start.elapsed());
+                let next = storage_root_cache.advance(task.take_updated_storage_roots());
                 trie_metrics.storage_root_cache_entries.set(next.carried_len() as f64);
                 *storage_root_cache_slot.lock() = Some((result.state_root, next));
             }
@@ -1371,15 +1368,17 @@ mod tests {
         let state_root = B256::with_last_byte(1);
         let address = B256::repeat_byte(0x11);
 
-        let cache = StorageRootCache::default();
-        cache.insert(address, B256::with_last_byte(7));
-        let published = cache.advance(&B256Map::default());
-        *strategy.storage_root_cache.lock() = Some((state_root, published));
+        let published = StorageRootCache::default()
+            .advance(B256Map::from_iter([(address, B256::with_last_byte(7))]));
+        *strategy.storage_root_cache.lock() = Some((state_root, published.clone()));
 
         // A payload on a different branch must not reuse roots of the state it replaces.
         assert!(strategy.take_storage_root_cache(B256::with_last_byte(2)).get(&address).is_none());
-        // Taking clears the slot, so the block after a reorg starts cold as well.
+        // Taking clears the slot, so the payload after a reorg starts cold as well.
         assert!(strategy.take_storage_root_cache(state_root).get(&address).is_none());
+
+        *strategy.storage_root_cache.lock() = Some((state_root, published));
+        assert!(strategy.take_storage_root_cache(state_root).get(&address).is_some());
     }
 
     #[test]

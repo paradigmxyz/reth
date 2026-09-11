@@ -1811,8 +1811,6 @@ pub(super) struct SparseTrieTaskMetrics {
     pub(super) into_trie_for_reuse_duration_histogram: Histogram,
     /// Time spent pruning the sparse trie by node epoch.
     pub(super) sparse_trie_prune_duration_histogram: Histogram,
-    /// Time spent publishing this block's storage roots for the next block's proof workers.
-    pub(super) storage_root_cache_advance_duration_histogram: Histogram,
     /// Time spent waiting for preserved sparse trie cache to become available.
     pub(super) sparse_trie_cache_wait_duration_histogram: Histogram,
     /// Histogram for sparse trie task idle time in seconds (waiting for updates or proof
@@ -2700,9 +2698,8 @@ mod tests {
         let account = Account { nonce: 7, balance: U256::from(42), bytecode_hash: None };
 
         // What a proof worker would have cached for this account while proving the parent state.
-        let cache = StorageRootCache::default();
-        cache.insert(address, EMPTY_ROOT_HASH);
-        let parent_state = cache.advance(&B256Map::default());
+        let parent_state =
+            StorageRootCache::default().advance(B256Map::from_iter([(address, EMPTY_ROOT_HASH)]));
         assert_eq!(parent_state.get(&address).unwrap().root, EMPTY_ROOT_HASH);
 
         let proof_worker_handle = ProofWorkerHandle::new(
@@ -2764,7 +2761,7 @@ mod tests {
         let new_root = TrieAccount::decode(&mut &promoted[..]).unwrap().storage_root;
         assert_ne!(new_root, EMPTY_ROOT_HASH, "the storage change must be applied");
 
-        let next = parent_state.advance(&task.take_updated_storage_roots());
+        let next = parent_state.advance(task.take_updated_storage_roots());
         assert_eq!(
             next.get(&address).unwrap().root,
             new_root,
