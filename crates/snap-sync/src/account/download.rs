@@ -16,11 +16,11 @@ use reth_trie_common::HashedStorage;
 use revm::bytecode::Bytecode;
 use std::fmt;
 
-// Matches the soft response limit peers commonly serve.
-pub(crate) const DEFAULT_RESPONSE_BYTES: u64 = 512 * 1024;
+/// Default soft response limit for account-range requests, matching common peer limits.
+pub const DEFAULT_RESPONSE_BYTES: u64 = 512 * 1024;
 
-// Keeps account requests inclusive through the full trie keyspace.
-pub(crate) const MAX_HASH: B256 = B256::new([0xff; B256::len_bytes()]);
+/// Inclusive upper bound covering the full account trie keyspace.
+pub const MAX_HASH: B256 = B256::new([0xff; B256::len_bytes()]);
 
 /// Downloads the account ranges an attempt still needs, one at a time in key order.
 ///

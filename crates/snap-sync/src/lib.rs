@@ -35,8 +35,7 @@
 )]
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 
-mod account_store;
-mod accounts;
+mod account;
 mod attempt;
 mod error;
 mod generation;
@@ -46,8 +45,10 @@ mod session;
 #[cfg(test)]
 mod test_utils;
 
-pub use account_store::{AccountCoverage, SnapAccountStore};
-pub use accounts::{AccountRangeDownload, AccountRangeStep, VerifiedRange};
+pub use account::{
+    AccountCoverage, AccountRangeDownload, AccountRangeStep, SnapAccountStore, VerifiedRange,
+    DEFAULT_RESPONSE_BYTES, MAX_HASH,
+};
 pub use attempt::{SnapAttemptStore, SnapWrite};
 pub use error::SnapSyncError;
 pub use generation::{SnapGeneration, SnapPhase};

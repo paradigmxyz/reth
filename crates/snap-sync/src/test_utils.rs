@@ -1,7 +1,7 @@
 //! Fixtures shared by the crate's tests: headers, an account trie and a scripted snap client.
 
 use crate::{
-    accounts::{DEFAULT_RESPONSE_BYTES, MAX_HASH},
+    account::{DEFAULT_RESPONSE_BYTES, MAX_HASH},
     SnapGeneration, SnapPivotPolicy,
 };
 use alloy_consensus::Header;
