@@ -139,6 +139,15 @@ pub(super) struct SparseTrieCacheTask<A = ArenaParallelSparseTrie, S = ArenaPara
     /// trie map, never both. Everything that reads a storage trie goes through its slot until
     /// [`Self::return_storage_tries`] hands them all back.
     storage: B256Map<StorageSlot<S>>,
+    /// Addresses whose slot is idle and has a pass to run, mirroring
+    /// [`StorageTrieWork::has_work`].
+    ///
+    /// Maintained at the slot transitions - a queued update or proof, a checkout, a return, a
+    /// finished pass - instead of scanning [`Self::storage`] on every round.
+    storage_ready: Vec<B256>,
+    /// Number of idle slots that still have leaf updates to apply, mirroring
+    /// `!`[`StorageTrieWork::is_drained`]. Maintained alongside [`Self::storage_ready`].
+    storage_undrained: usize,
     /// Number of slots currently owned by a job running off this thread.
     storage_in_flight: usize,
     /// Sender handed to storage jobs. Kept alive by the task so the receiver never disconnects.
@@ -221,6 +230,8 @@ where
             pending_targets: Default::default(),
             in_flight_proof_batches: 0,
             storage: Default::default(),
+            storage_ready: Vec::new(),
+            storage_undrained: 0,
             storage_in_flight: 0,
             storage_done_tx,
             storage_done_rx,
@@ -501,6 +512,9 @@ where
         // costs one promotion pass rather than one per trie.
         self.drain_returned_storage_tries()?;
 
+        #[cfg(debug_assertions)]
+        self.debug_assert_storage_bookkeeping();
+
         let updates_queued = !self.finished_state_updates && !self.updates.is_empty();
 
         if !updates_queued && self.proof_result_rx.is_empty() {
@@ -692,6 +706,7 @@ where
                 StorageSlot::Idle(work) => work.queue_proofs(&mut nodes),
                 StorageSlot::InFlight(in_flight) => in_flight.proofs.append(&mut nodes),
             }
+            self.refresh_storage_slot(address);
         }
         self.trie.record_revealed_storage_nodes(revealed_nodes);
     }
@@ -730,7 +745,8 @@ where
         self.initial_updates_applied = true;
 
         // Queue the new storage updates on their slots; the jobs apply them to the tries.
-        let Self { storage, trie, new_storage_updates, .. } = self;
+        let Self { storage, trie, new_storage_updates, storage_ready, storage_undrained, .. } =
+            self;
         for (address, new) in new_storage_updates.drain() {
             if new.is_empty() {
                 continue;
@@ -742,7 +758,10 @@ where
                 )))
             });
             match slot {
-                StorageSlot::Idle(work) => work.queue_updates(new),
+                StorageSlot::Idle(work) => {
+                    work.queue_updates(new);
+                    refresh_slot(address, work, storage_ready, storage_undrained);
+                }
                 StorageSlot::InFlight(in_flight) => merge_leaf_updates(&mut in_flight.updates, new),
             }
         }
@@ -780,20 +799,21 @@ where
         skip_all
     )]
     fn run_ready_storage_work(&mut self) -> SparseTrieResult<()> {
-        let mut ready = Vec::new();
+        if self.storage_ready.is_empty() {
+            return Ok(())
+        }
+
+        let mut ready = core::mem::take(&mut self.storage_ready);
         let mut job_units = 0;
-        for (address, slot) in &self.storage {
-            let StorageSlot::Idle(work) = slot else { continue };
-            if !work.has_work() {
-                continue;
-            }
+        for address in &ready {
+            let Some(StorageSlot::Idle(work)) = self.storage.get_mut(address) else {
+                unreachable!("a ready slot stays idle until its pass runs")
+            };
+            // Taking the set above already took every slot out of it.
+            work.flags.ready = false;
             if !work.is_target_only() {
                 job_units += work.work_units();
             }
-            ready.push(*address);
-        }
-        if ready.is_empty() {
-            return Ok(())
         }
 
         let inline_round = job_units <= INLINE_STORAGE_WORK_UNITS;
@@ -801,7 +821,7 @@ where
         let retain_updates = self.trie.retains_updates();
         let started = Instant::now();
         let mut jobs = Vec::new();
-        for address in ready {
+        for &address in &ready {
             let slot = self.storage.get_mut(&address).expect("slot was just seen");
             let StorageSlot::Idle(work) = slot else {
                 unreachable!("an idle slot is only checked out from here")
@@ -809,23 +829,54 @@ where
 
             if inline_round || work.is_target_only() {
                 let output = work.run(new_epoch, retain_updates);
+                self.refresh_storage_slot(address);
                 self.apply_storage_output(address, output)?;
                 continue;
             }
 
-            let StorageSlot::Idle(work) = core::mem::replace(
+            let StorageSlot::Idle(mut work) = core::mem::replace(
                 slot,
                 StorageSlot::InFlight(Box::new(InFlightStorage::new(started))),
             ) else {
                 unreachable!("just matched")
             };
+            self.check_out_slot(address, &mut work);
             self.storage_in_flight += 1;
             jobs.push(StorageTrieJob { address, work });
+        }
+
+        if self.storage_ready.is_empty() {
+            // Keep the buffer for the next round, unless a pass above queued into the new one.
+            ready.clear();
+            self.storage_ready = ready;
         }
 
         self.submit_storage_jobs(jobs);
 
         Ok(())
+    }
+
+    /// Brings the maintained ready set and undrained count back in line with `address`' slot
+    /// after the slot changed.
+    fn refresh_storage_slot(&mut self, address: B256) {
+        let Self { storage, storage_ready, storage_undrained, .. } = self;
+        if let Some(StorageSlot::Idle(work)) = storage.get_mut(&address) {
+            refresh_slot(address, work, storage_ready, storage_undrained);
+        }
+    }
+
+    /// Drops what a payload contributed to the maintained bookkeeping as it is handed to a job.
+    ///
+    /// A slot out with a job has no pass this thread could run, and it counts as not drained
+    /// through [`Self::storage_in_flight`] instead.
+    fn check_out_slot(&mut self, address: B256, work: &mut StorageTrieWork<S>) {
+        apply_slot_flags(
+            address,
+            core::mem::take(&mut work.flags),
+            SlotFlags::default(),
+            &mut self.storage_ready,
+            &mut self.storage_undrained,
+        );
     }
 
     /// Records what a storage pass produced: the proof targets it discovered and its cache
@@ -981,7 +1032,8 @@ where
     fn on_storage_trie_returned(&mut self, done: StorageTrieJobDone<S>) -> SparseTrieResult<()> {
         let StorageTrieJobDone { address, work, output } = done;
 
-        let Entry::Occupied(mut entry) = self.storage.entry(address) else {
+        let Self { storage, storage_ready, storage_undrained, .. } = self;
+        let Entry::Occupied(mut entry) = storage.entry(address) else {
             unreachable!("a returned payload was checked out of its slot")
         };
         let StorageSlot::InFlight(in_flight) = entry.insert(StorageSlot::Idle(work)) else {
@@ -990,6 +1042,7 @@ where
         let started = in_flight.started;
         let StorageSlot::Idle(work) = entry.into_mut() else { unreachable!("just inserted") };
         work.take_buffered(*in_flight);
+        refresh_slot(address, work, storage_ready, storage_undrained);
         self.storage_in_flight -= 1;
         self.metrics.sparse_trie_storage_job_duration_histogram.record(started.elapsed());
 
@@ -1010,7 +1063,9 @@ where
     /// The final root and everything after it - trie updates, preservation, pruning - reads the
     /// storage tries through [`SparseStateTrie`], so no address may be left in a slot.
     fn return_storage_tries(&mut self) {
-        let Self { storage, trie, .. } = self;
+        let Self { storage, trie, storage_ready, storage_undrained, .. } = self;
+        storage_ready.clear();
+        *storage_undrained = 0;
         for (address, slot) in storage.drain() {
             // A payload still out with a job is only reachable on the cancellation path, where
             // the job drops it.
@@ -1102,6 +1157,11 @@ where
             }
             _ => None,
         };
+        if updated_storage_root.is_some() {
+            // Hashing the trie above is the one thing outside a pass that can take a slot's last
+            // piece of work away from it.
+            self.refresh_storage_slot(addr);
+        }
 
         if let Some(storage_root) = updated_storage_root &&
             let Some(account) = pending.take()
@@ -1261,10 +1321,16 @@ where
     ///
     /// While this is false no trie can change any more, so every account still waiting for
     /// promotion already has everything it needs.
+    ///
+    /// A storage slot owes the state root something exactly when it is out with a job, when its
+    /// leaves are not drained or when a pass is ready for it, which is what the three maintained
+    /// storage terms are.
     fn has_pending_leaf_updates(&self) -> bool {
         !self.account_updates.is_empty() ||
             self.account_blocked_updates().is_some_and(|blocked| !blocked.is_empty()) ||
-            self.storage.values().any(|slot| slot.is_pending())
+            self.storage_in_flight > 0 ||
+            self.storage_undrained > 0 ||
+            !self.storage_ready.is_empty()
     }
 
     /// Returns the leaf updates the accounts trie could not apply yet, if it is revealed.
@@ -1274,11 +1340,44 @@ where
 
     /// Returns whether any idle slot has a pass to run, which is progress that has not been made
     /// yet rather than a stall.
+    ///
+    /// Untried work is a subset of the work a pass would do, so the maintained ready set holds
+    /// every candidate.
     fn has_ready_storage_work(&self) -> bool {
-        self.storage.values().any(|slot| match slot {
-            StorageSlot::Idle(work) => work.has_untried_work(),
-            StorageSlot::InFlight(_) => false,
+        self.storage_ready.iter().any(|address| match self.storage.get(address) {
+            Some(StorageSlot::Idle(work)) => work.has_untried_work(),
+            _ => unreachable!("a ready slot stays idle until its pass runs"),
         })
+    }
+
+    /// Asserts the maintained ready set and undrained count, and the readers that are built on
+    /// them, still say what a scan of every slot would.
+    #[cfg(debug_assertions)]
+    fn debug_assert_storage_bookkeeping(&self) {
+        let mut ready = 0;
+        let mut undrained = 0;
+        let mut untried = false;
+        for (address, slot) in &self.storage {
+            let StorageSlot::Idle(work) = slot else { continue };
+            assert_eq!(
+                work.has_work(),
+                self.storage_ready.contains(address),
+                "ready set disagrees with the slot of {address:?}",
+            );
+            ready += usize::from(work.has_work());
+            undrained += usize::from(!work.is_drained());
+            untried |= work.has_untried_work();
+        }
+        assert_eq!(self.storage_ready.len(), ready, "ready set holds an address twice");
+        assert_eq!(self.storage_undrained, undrained, "undrained slot count drifted");
+        assert_eq!(untried, self.has_ready_storage_work(), "untried work went unnoticed");
+        assert_eq!(
+            self.storage.values().any(StorageSlot::is_pending),
+            self.storage_in_flight > 0 ||
+                self.storage_undrained > 0 ||
+                !self.storage_ready.is_empty(),
+            "a pending storage slot went unnoticed",
+        );
     }
 
     /// Errors when pending trie updates remain but nothing can deliver them: no update
@@ -1357,6 +1456,10 @@ enum StorageSlot<S> {
 
 impl<S: SparseTrie + Default> StorageSlot<S> {
     /// Returns whether the address still owes the state root some work.
+    ///
+    /// This is what the task's maintained ready set, undrained count and in flight count add up
+    /// to, and it is kept as the definition the debug assertion checks them against.
+    #[cfg(debug_assertions)]
     fn is_pending(&self) -> bool {
         match self {
             Self::InFlight(_) => true,
@@ -1397,6 +1500,9 @@ struct StorageTrieWork<S> {
     /// Whether this address ever had storage leaf updates queued, which is what makes promotion
     /// of its account wait for a recomputed storage root.
     updated: bool,
+    /// What this payload contributed to the task's maintained bookkeeping when its slot was last
+    /// refreshed, see [`SlotFlags`].
+    flags: SlotFlags,
 }
 
 impl<S: SparseTrie + Default> StorageTrieWork<S> {
@@ -1408,6 +1514,7 @@ impl<S: SparseTrie + Default> StorageTrieWork<S> {
             fetched: Default::default(),
             dirty: false,
             updated: false,
+            flags: SlotFlags::default(),
         }
     }
 
@@ -1534,6 +1641,65 @@ impl<S: SparseTrie + Default> StorageTrieWork<S> {
         let blocked = self.trie.blocked_updates();
         let retry = if blocked.has_retryable() { blocked.len() } else { 0 };
         self.proofs.len() + self.pending.len() + retry
+    }
+}
+
+/// What one idle slot contributes to the task's maintained storage bookkeeping.
+///
+/// Kept on the payload so a transition only has to compare the slot's two properties against
+/// what they were, instead of the task rescanning every slot to find out.
+#[derive(Clone, Copy, Default, PartialEq, Eq)]
+struct SlotFlags {
+    /// Whether the address is listed in [`SparseTrieCacheTask::storage_ready`], mirroring
+    /// [`StorageTrieWork::has_work`].
+    ready: bool,
+    /// Whether the slot is counted in [`SparseTrieCacheTask::storage_undrained`], mirroring
+    /// `!`[`StorageTrieWork::is_drained`].
+    undrained: bool,
+}
+
+impl SlotFlags {
+    /// Reads the current state of an idle slot.
+    fn of<S: SparseTrie + Default>(work: &StorageTrieWork<S>) -> Self {
+        Self { ready: work.has_work(), undrained: !work.is_drained() }
+    }
+}
+
+/// Recomputes what an idle payload contributes to the maintained ready set and undrained count.
+fn refresh_slot<S: SparseTrie + Default>(
+    address: B256,
+    work: &mut StorageTrieWork<S>,
+    ready: &mut Vec<B256>,
+    undrained: &mut usize,
+) {
+    let flags = SlotFlags::of(work);
+    apply_slot_flags(address, core::mem::replace(&mut work.flags, flags), flags, ready, undrained);
+}
+
+/// Moves the maintained ready set and undrained count from one slot state to another.
+fn apply_slot_flags(
+    address: B256,
+    before: SlotFlags,
+    after: SlotFlags,
+    ready: &mut Vec<B256>,
+    undrained: &mut usize,
+) {
+    if before.ready != after.ready {
+        if after.ready {
+            ready.push(address);
+        } else if let Some(position) = ready.iter().position(|queued| *queued == address) {
+            // A slot leaves the set by being run or checked out, both of which take it out
+            // first, so this only runs for one whose root a promotion hashed early.
+            ready.swap_remove(position);
+        }
+    }
+
+    if before.undrained != after.undrained {
+        if after.undrained {
+            *undrained += 1;
+        } else {
+            *undrained -= 1;
+        }
     }
 }
 
@@ -1959,12 +2125,13 @@ mod tests {
         address: B256,
     ) -> Box<StorageTrieWork<ArenaParallelSparseTrie>> {
         let slot = task.storage.get_mut(&address).expect("address must have a slot");
-        let StorageSlot::Idle(work) = core::mem::replace(
+        let StorageSlot::Idle(mut work) = core::mem::replace(
             slot,
             StorageSlot::InFlight(Box::new(InFlightStorage::new(Instant::now()))),
         ) else {
             panic!("slot must be idle")
         };
+        task.check_out_slot(address, &mut work);
         task.storage_in_flight += 1;
         work
     }
@@ -1996,7 +2163,9 @@ mod tests {
         let StorageSlot::Idle(work) = task.storage.get_mut(&address).expect("slot") else {
             panic!("payload is out with a job")
         };
-        work.trie.root(TrieNodeEpoch::new(1)).expect("storage trie must be revealed")
+        let root = work.trie.root(TrieNodeEpoch::new(1)).expect("storage trie must be revealed");
+        task.refresh_storage_slot(address);
+        root
     }
 
     /// Builds a job for `address` whose pass applies one leaf update to a revealed empty trie.
@@ -2229,6 +2398,100 @@ mod tests {
         task.run_ready_storage_work().unwrap();
         assert_eq!(storage_slot_value(&task, &address, &late_slot), Some(later_value));
         assert_ne!(storage_root_of(&mut task, address), root_before);
+
+        drop(updates_tx);
+        drop(task);
+        drain_sparse_trie_tasks(&runtime);
+    }
+
+    #[test]
+    fn ready_set_follows_the_storage_slot_transitions() {
+        let runtime = reth_tasks::Runtime::test();
+        let provider_factory = create_test_provider_factory();
+        let anchor_hash = init_genesis(&provider_factory).expect("failed to initialize genesis");
+        let state_provider_factory = OverlayStateProviderFactory::new(
+            provider_factory,
+            OverlayManager::<reth_chain_state::EthPrimitives>::default()
+                .overlay_builder(anchor_hash),
+        );
+        let (proof_result_tx, proof_result_rx) = crossbeam_channel::unbounded();
+        let proof_worker_handle = ProofWorkerHandle::new(
+            &runtime,
+            ProofTaskCtx::new(state_provider_factory),
+            false,
+            proof_result_tx.clone(),
+        );
+
+        let default_trie = RevealableSparseTrie::<ArenaParallelSparseTrie>::revealed_empty();
+        let trie = SparseStateTrie::default()
+            .with_accounts_trie(default_trie.clone())
+            .with_default_storage_trie(default_trie)
+            .with_updates(true);
+
+        let (updates_tx, updates_rx) = crossbeam_channel::unbounded();
+        let (_cancel_guard, cancel_rx) = crossbeam_channel::bounded::<()>(0);
+        let mut task = SparseTrieCacheTask::new_with_trie(
+            &runtime,
+            updates_rx,
+            cancel_rx,
+            std::sync::mpsc::channel().0,
+            proof_worker_handle,
+            proof_result_tx,
+            proof_result_rx,
+            SparseTrieTaskMetrics::default(),
+            trie,
+            EMPTY_ROOT_HASH,
+            TrieNodeEpoch::new(1),
+            1,
+        );
+
+        let address = B256::repeat_byte(0x11);
+        let slot = B256::repeat_byte(0x22);
+        let write = |task: &mut SparseTrieCacheTask, value: u64| {
+            let mut state = HashedPostState::default();
+            state.storages.entry(address).or_default().storage.insert(slot, U256::from(value));
+            task.on_hashed_state_update(state);
+            task.pending_updates = 1;
+            task.process_new_updates().unwrap();
+        };
+
+        assert!(task.storage_ready.is_empty());
+        assert_eq!(task.storage_undrained, 0);
+
+        // A queued update makes a fresh slot ready and leaves it undrained.
+        write(&mut task, 1);
+        assert_eq!(task.storage_ready, vec![address]);
+        assert_eq!(task.storage_undrained, 1);
+        assert!(task.has_pending_leaf_updates());
+
+        // A payload out with a job contributes neither; the in flight counter speaks for it.
+        let mut work = check_out_storage(&mut task, address);
+        assert!(task.storage_ready.is_empty());
+        assert_eq!(task.storage_undrained, 0);
+        assert!(task.has_pending_leaf_updates());
+
+        // Returning a payload whose pass drained it leaves nothing to do for the address.
+        assert!(work.run(task.new_epoch, true).result.is_ok());
+        return_storage(&mut task, address, work);
+        assert!(task.storage_ready.is_empty());
+        assert_eq!(task.storage_undrained, 0);
+        assert!(!task.has_pending_leaf_updates());
+
+        // An update that arrives while the payload is out is folded in when it comes back.
+        let work = check_out_storage(&mut task, address);
+        write(&mut task, 2);
+        assert!(task.storage_ready.is_empty(), "the buffered update waits for the return");
+        assert_eq!(task.storage_undrained, 0);
+        return_storage(&mut task, address, work);
+        assert_eq!(task.storage_ready, vec![address]);
+        assert_eq!(task.storage_undrained, 1);
+
+        // Running the pass drains the slot again.
+        task.run_ready_storage_work().unwrap();
+        assert!(task.storage_ready.is_empty());
+        assert_eq!(task.storage_undrained, 0);
+        assert!(!task.has_pending_leaf_updates());
+        assert_eq!(storage_slot_value(&task, &address, &slot), Some(vec![2]));
 
         drop(updates_tx);
         drop(task);
@@ -2774,6 +3037,7 @@ mod tests {
         work.updated = true;
         work.pending.insert(slot, LeafUpdate::Touched);
         work.fetched.insert(storage_target, ProofV2TargetParent::new(11));
+        task.refresh_storage_slot(account);
         task.in_flight_proof_batches = 1;
 
         assert!(task.ensure_not_stalled(false).is_ok());
