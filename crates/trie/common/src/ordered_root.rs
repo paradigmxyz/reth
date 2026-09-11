@@ -75,6 +75,22 @@ impl OrderedTrieRootEncodedBuilder {
         Self::default()
     }
 
+    /// Creates an empty builder with enough internal stack capacity for `items` leaves.
+    ///
+    /// Ordered transaction and receipt trie keys are compact RLP-encoded indices. Even very large
+    /// blocks only need a small trie depth, but reserving it up front avoids growing the hash
+    /// builder stacks while the receipt-root task is on the critical path.
+    pub fn with_capacity(items: usize) -> Self {
+        let mut hb = HashBuilder::default();
+        let depth = ordered_index_depth_hint(items);
+        hb.stack.reserve(depth);
+        hb.state_masks.reserve(depth);
+        hb.tree_masks.reserve(depth);
+        hb.hash_masks.reserve(depth);
+
+        Self { len: 0, zero: None, hb }
+    }
+
     /// Pushes the next pre-encoded item.
     ///
     /// Items must be pushed in their final contiguous order.
@@ -141,6 +157,17 @@ impl OrderedTrieRootEncodedBuilder {
     }
 }
 
+#[inline]
+const fn ordered_index_depth_hint(items: usize) -> usize {
+    if items == 0 {
+        return 0;
+    }
+
+    // RLP-encoded ordered-root indices are at most `usize::BITS / 8 + 1` bytes; unpacking to
+    // nibbles doubles that length. Add one slot for the root branch.
+    ((usize::BITS as usize / 8) + 1) * 2 + 1
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -204,6 +231,23 @@ mod tests {
 
         builder.push_next(b"item_1");
         assert_eq!(builder.pushed_count(), 2);
+    }
+
+    #[test]
+    fn capacity_builder_matches_default_builder() {
+        for len in [0, 1, 2, 127, 128, 129, 1024, 16_384] {
+            let items = items(len);
+            let mut default_builder = OrderedTrieRootEncodedBuilder::new();
+            let mut capacity_builder = OrderedTrieRootEncodedBuilder::with_capacity(len);
+
+            for item in &items {
+                default_builder.push_next(item);
+                capacity_builder.push_next(item);
+            }
+
+            assert_eq!(capacity_builder.pushed_count(), len);
+            assert_eq!(capacity_builder.finalize(), default_builder.finalize());
+        }
     }
 
     #[test]
