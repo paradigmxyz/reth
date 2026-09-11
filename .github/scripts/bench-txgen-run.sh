@@ -667,3 +667,17 @@ if [ -n "$TARGET_METRICS_START_MS" ]; then
 fi
 
 python3 .github/scripts/bench-txgen-report-to-reth-csv.py "$OUTPUT_DIR/report.json" "$OUTPUT_DIR"
+
+# Keep drain work outside txgen's timed replay and target-metric window. The
+# shutdown buffer still uses the node's normal graceful shutdown semantics.
+if [ "$EXECUTION_MODE" = "engine" ] && [ -z "${BENCH_REORG:-}" ] && [ "${BENCH_TRACING_CHROME:-false}" = "true" ]; then
+  DRAIN_METRICS_ARGS=()
+  if [ -n "${BENCH_METRICS_ADDR:-}" ]; then
+    DRAIN_METRICS_ARGS=(--metrics-url "http://${BENCH_METRICS_ADDR}/metrics")
+  fi
+  python3 .github/scripts/bench-persistence-drain.py settle --output-dir "$OUTPUT_DIR" \
+    "${DRAIN_METRICS_ARGS[@]}"
+  cleanup
+  trap - EXIT
+  python3 .github/scripts/bench-persistence-drain.py audit --output-dir "$OUTPUT_DIR"
+fi
