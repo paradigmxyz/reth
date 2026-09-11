@@ -99,7 +99,7 @@ static void check_copy(unsigned pagesize, unsigned flags, unsigned scenario) {
   CHECK(memcmp(snapshot, source, pagesize) == 0);
 
   bool eligible = false;
-#if defined(__linux__)
+#if defined(__linux__) && !MDBX_MMAP_INCOHERENT_CPU_CACHE && !MDBX_MMAP_INCOHERENT_FILE_WRITE
   eligible = pagesize >= globals.sys_pagesize && !perturb;
 #endif
 #if !MDBX_USE_MINCORE
