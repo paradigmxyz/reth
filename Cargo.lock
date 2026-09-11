@@ -10916,6 +10916,7 @@ dependencies = [
  "metrics",
  "rand 0.9.4",
  "reth-chainspec",
+ "reth-db-common",
  "reth-ethereum-primitives",
  "reth-execution-errors",
  "reth-metrics",
