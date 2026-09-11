@@ -156,6 +156,12 @@ pub(super) struct SparseTrieCacheTask<A = ArenaParallelSparseTrie, S = ArenaPara
     /// final [`HashedPostState`] and share it with main engine thread without requiring any extra
     /// hashing work.
     final_hashed_state: HashedPostState,
+    /// Post-state storage root of every account whose leaf this task rewrote.
+    ///
+    /// Handed to [`StorageRootCache::advance`](reth_trie_parallel::storage_root_cache::StorageRootCache::advance)
+    /// so the roots the proof workers cached for the parent state are replaced wherever this
+    /// block moved them.
+    updated_storage_roots: B256Map<B256>,
 
     /// Metrics for the sparse trie.
     metrics: SparseTrieTaskMetrics,
@@ -227,6 +233,7 @@ where
             pending_updates: Default::default(),
             initial_updates_applied: false,
             final_hashed_state: Default::default(),
+            updated_storage_roots: Default::default(),
             metrics,
         }
     }
@@ -268,6 +275,13 @@ where
         }
 
         metrics.hashing_task_idle_time_seconds.record(total_idle_time.as_secs_f64());
+    }
+
+    /// Returns the post-state storage root of every account whose leaf this task rewrote.
+    ///
+    /// Should be called after the state root result has been sent.
+    pub(super) fn take_updated_storage_roots(&mut self) -> B256Map<B256> {
+        std::mem::take(&mut self.updated_storage_roots)
     }
 
     /// Returns the trie for reuse in the next payload built on top of this one.
@@ -1168,6 +1182,7 @@ where
     /// account's pending entry.
     fn write_account_leaf(&mut self, addr: B256, account: Option<Account>, storage_root: B256) {
         let encoded = encode_account_leaf_value(account, storage_root, &mut self.account_rlp_buf);
+        self.updated_storage_roots.insert(addr, storage_root);
         self.existing_accounts.insert(
             addr,
             (!encoded.is_empty())
@@ -1796,6 +1811,8 @@ pub(super) struct SparseTrieTaskMetrics {
     pub(super) into_trie_for_reuse_duration_histogram: Histogram,
     /// Time spent pruning the sparse trie by node epoch.
     pub(super) sparse_trie_prune_duration_histogram: Histogram,
+    /// Time spent publishing this block's storage roots for the next block's proof workers.
+    pub(super) storage_root_cache_advance_duration_histogram: Histogram,
     /// Time spent waiting for preserved sparse trie cache to become available.
     pub(super) sparse_trie_cache_wait_duration_histogram: Histogram,
     /// Histogram for sparse trie task idle time in seconds (waiting for updates or proof
@@ -1819,6 +1836,8 @@ pub(super) struct SparseTrieTaskMetrics {
 
     /// Number of storage tries retained in the preserved sparse trie cache.
     pub(super) sparse_trie_retained_storage_tries: Gauge,
+    /// Number of storage roots carried over for the next block's proof workers.
+    pub(super) storage_root_cache_entries: Gauge,
 }
 
 /// The default max targets, for limiting the number of account and storage proof targets to be
@@ -1944,7 +1963,7 @@ mod tests {
     use reth_provider::test_utils::create_test_provider_factory;
     use reth_storage_overlay::{OverlayManager, OverlayStateProviderFactory};
     use reth_trie_common::{LeafNode, Nibbles, TrieNodeV2};
-    use reth_trie_parallel::proof_task::ProofTaskCtx;
+    use reth_trie_parallel::{proof_task::ProofTaskCtx, storage_root_cache::StorageRootCache};
     use reth_trie_sparse::ArenaParallelSparseTrie;
 
     fn drain_sparse_trie_tasks(runtime: &Runtime) {
@@ -2117,6 +2136,7 @@ mod tests {
             &runtime,
             ProofTaskCtx::new(state_provider_factory),
             false,
+            Default::default(),
             proof_result_tx.clone(),
         );
 
@@ -2250,6 +2270,7 @@ mod tests {
             &runtime,
             ProofTaskCtx::new(state_provider_factory),
             false,
+            Default::default(),
             proof_result_tx.clone(),
         );
 
@@ -2331,6 +2352,7 @@ mod tests {
             &runtime,
             ProofTaskCtx::new(state_provider_factory),
             false,
+            Default::default(),
             proof_result_tx.clone(),
         );
 
@@ -2416,6 +2438,7 @@ mod tests {
             &runtime,
             ProofTaskCtx::new(state_provider_factory),
             false,
+            Default::default(),
             proof_result_tx.clone(),
         );
 
@@ -2500,6 +2523,7 @@ mod tests {
             &runtime,
             ProofTaskCtx::new(state_provider_factory),
             false,
+            Default::default(),
             proof_result_tx.clone(),
         );
 
@@ -2583,6 +2607,7 @@ mod tests {
             &runtime,
             ProofTaskCtx::new(state_provider_factory),
             false,
+            Default::default(),
             proof_result_tx.clone(),
         );
 
@@ -2660,6 +2685,98 @@ mod tests {
     }
 
     #[test]
+    fn advancing_the_storage_root_cache_replaces_the_root_of_a_changed_account() {
+        let runtime = reth_tasks::Runtime::test();
+        let provider_factory = create_test_provider_factory();
+        let anchor_hash = init_genesis(&provider_factory).expect("failed to initialize genesis");
+        let state_provider_factory = OverlayStateProviderFactory::new(
+            provider_factory,
+            OverlayManager::<reth_chain_state::EthPrimitives>::default()
+                .overlay_builder(anchor_hash),
+        );
+        let (proof_result_tx, proof_result_rx) = crossbeam_channel::unbounded();
+
+        let address = B256::repeat_byte(0x11);
+        let account = Account { nonce: 7, balance: U256::from(42), bytecode_hash: None };
+
+        // What a proof worker would have cached for this account while proving the parent state.
+        let cache = StorageRootCache::default();
+        cache.insert(address, EMPTY_ROOT_HASH);
+        let parent_state = cache.advance(&B256Map::default());
+        assert_eq!(parent_state.get(&address).unwrap().root, EMPTY_ROOT_HASH);
+
+        let proof_worker_handle = ProofWorkerHandle::new(
+            &runtime,
+            ProofTaskCtx::new(state_provider_factory),
+            false,
+            parent_state.clone(),
+            proof_result_tx.clone(),
+        );
+
+        let mut accounts_trie = RevealableSparseTrie::<ArenaParallelSparseTrie>::revealed_empty();
+        let mut seed = B256Map::from_iter([(
+            address,
+            LeafUpdate::Changed(encode_account_leaf_value(
+                Some(account),
+                EMPTY_ROOT_HASH,
+                &mut Vec::new(),
+            )),
+        )]);
+        accounts_trie
+            .update_leaves(&mut seed, |_, _| panic!("a revealed empty trie needs no proofs"))
+            .unwrap();
+
+        let trie = SparseStateTrie::default()
+            .with_accounts_trie(accounts_trie)
+            .with_default_storage_trie(
+                RevealableSparseTrie::<ArenaParallelSparseTrie>::revealed_empty(),
+            )
+            .with_updates(true);
+
+        let (updates_tx, updates_rx) = crossbeam_channel::unbounded();
+        let (_cancel_guard, cancel_rx) = crossbeam_channel::bounded::<()>(0);
+        let mut task = SparseTrieCacheTask::new_with_trie(
+            &runtime,
+            updates_rx,
+            cancel_rx,
+            std::sync::mpsc::channel().0,
+            proof_worker_handle,
+            proof_result_tx,
+            proof_result_rx,
+            SparseTrieTaskMetrics::default(),
+            trie,
+            B256::from([0x55; 32]),
+            TrieNodeEpoch::UNMODIFIED,
+            1,
+        );
+
+        let mut hashed_state = HashedPostState::default();
+        let mut storage = reth_trie::HashedStorage::default();
+        storage.storage.insert(B256::repeat_byte(0x22), U256::from(5));
+        hashed_state.storages.insert(address, storage);
+        task.on_hashed_state_update(hashed_state);
+        task.pending_updates = 1;
+        task.process_new_updates().unwrap();
+        task.run_ready_storage_work().unwrap();
+        task.promote_pending_account_updates().unwrap();
+
+        let promoted = task.trie.get_account_value(&address).expect("account leaf was written");
+        let new_root = TrieAccount::decode(&mut &promoted[..]).unwrap().storage_root;
+        assert_ne!(new_root, EMPTY_ROOT_HASH, "the storage change must be applied");
+
+        let next = parent_state.advance(&task.take_updated_storage_roots());
+        assert_eq!(
+            next.get(&address).unwrap().root,
+            new_root,
+            "the next block must not see the parent state's root for a changed account"
+        );
+
+        drop(updates_tx);
+        drop(task);
+        drain_sparse_trie_tasks(&runtime);
+    }
+
+    #[test]
     fn run_returns_parent_root_without_revealing_blind_trie_when_no_state_updates() {
         let runtime = reth_tasks::Runtime::test();
         let provider_factory = create_test_provider_factory();
@@ -2674,6 +2791,7 @@ mod tests {
             &runtime,
             ProofTaskCtx::new(state_provider_factory),
             false,
+            Default::default(),
             proof_result_tx.clone(),
         );
 
@@ -2729,6 +2847,7 @@ mod tests {
             &runtime,
             ProofTaskCtx::new(state_provider_factory),
             false,
+            Default::default(),
             proof_result_tx.clone(),
         );
 
@@ -2820,6 +2939,7 @@ mod tests {
             &runtime,
             ProofTaskCtx::new(state_provider_factory),
             false,
+            Default::default(),
             proof_result_tx.clone(),
         );
 
@@ -2873,6 +2993,7 @@ mod tests {
             &runtime,
             ProofTaskCtx::new(state_provider_factory),
             false,
+            Default::default(),
             proof_result_tx.clone(),
         );
 
