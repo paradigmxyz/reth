@@ -177,6 +177,28 @@ pub fn sanitize_chain<TxReq, H>(
 where
     H: BlockHeader,
 {
+    sanitize_chain_with_timestamp_policy(
+        blocks,
+        parent,
+        chain_id,
+        max_simulate_blocks,
+        |_, prev_timestamp, _, timestamp_increment| prev_timestamp.checked_add(timestamp_increment),
+        |timestamp, prev_timestamp| timestamp > prev_timestamp,
+    )
+}
+
+/// Sanitizes a chain using chain-specific timestamp generation and validation policies.
+pub fn sanitize_chain_with_timestamp_policy<TxReq, H>(
+    blocks: Vec<SimBlock<TxReq>>,
+    parent: &SealedHeader<H>,
+    chain_id: u64,
+    max_simulate_blocks: u64,
+    mut next_timestamp: impl FnMut(u64, u64, u64, u64) -> Option<u64>,
+    mut timestamp_is_valid: impl FnMut(u64, u64) -> bool,
+) -> Result<Vec<SimBlock<TxReq>>, EthApiError>
+where
+    H: BlockHeader,
+{
     let timestamp_increment = Chain::from(chain_id)
         .average_blocktime_hint()
         .map(|d| d.as_secs().saturating_add(u64::from(d.subsec_nanos() > 0)))
@@ -216,13 +238,18 @@ where
         if gap > 1 {
             for i in 1..gap {
                 let filler_number = prev_number + i;
-                let filler_time =
-                    prev_timestamp.checked_add(timestamp_increment).ok_or_else(|| {
-                        EthApiError::other(EthSimulateError::BlockTimestampInvalid {
-                            got: prev_timestamp,
-                            parent: prev_timestamp,
-                        })
-                    })?;
+                let filler_time = next_timestamp(
+                    prev_number + i - 1,
+                    prev_timestamp,
+                    filler_number,
+                    timestamp_increment,
+                )
+                .ok_or_else(|| {
+                    EthApiError::other(EthSimulateError::BlockTimestampInvalid {
+                        got: prev_timestamp,
+                        parent: prev_timestamp,
+                    })
+                })?;
                 out.push(SimBlock {
                     block_overrides: Some(BlockOverrides {
                         number: Some(U256::from(filler_number)),
@@ -239,7 +266,7 @@ where
         prev_number = target_number;
         // Default timestamp to prev + increment if not specified, otherwise validate ordering.
         let block_time = if let Some(t) = overrides.time {
-            if t <= prev_timestamp {
+            if !timestamp_is_valid(t, prev_timestamp) {
                 return Err(EthApiError::other(EthSimulateError::BlockTimestampInvalid {
                     got: t,
                     parent: prev_timestamp,
@@ -247,7 +274,13 @@ where
             }
             t
         } else {
-            let t = prev_timestamp.checked_add(timestamp_increment).ok_or_else(|| {
+            let t = next_timestamp(
+                prev_number.saturating_sub(1),
+                prev_timestamp,
+                prev_number,
+                timestamp_increment,
+            )
+            .ok_or_else(|| {
                 EthApiError::other(EthSimulateError::BlockTimestampInvalid {
                     got: prev_timestamp,
                     parent: prev_timestamp,
@@ -744,6 +777,27 @@ mod tests {
         let times: Vec<u64> =
             out.iter().map(|b| b.block_overrides.as_ref().unwrap().time.unwrap()).collect();
         assert_eq!(times, vec![1, 2, 3]);
+    }
+
+    #[test]
+    fn sanitize_chain_supports_chain_specific_repeated_timestamps() {
+        let parent = parent_at(10, 100);
+        let blocks = vec![SimBlock::<()> {
+            block_overrides: Some(BlockOverrides { time: Some(100), ..Default::default() }),
+            ..Default::default()
+        }];
+
+        let out = super::sanitize_chain_with_timestamp_policy(
+            blocks,
+            &parent,
+            Chain::mainnet().id(),
+            256,
+            |_, parent_timestamp, _, _| Some(parent_timestamp),
+            |timestamp, parent_timestamp| timestamp >= parent_timestamp,
+        )
+        .unwrap();
+
+        assert_eq!(out[0].block_overrides.as_ref().unwrap().time, Some(100));
     }
 
     #[test]
