@@ -213,10 +213,16 @@ cleanup() {
     sudo systemctl stop "$RETH_SCOPE" 2>/dev/null || true
     sleep 1
   fi
+  if [ -n "${RESOURCE_PID:-}" ]; then
+    touch "$OUTPUT_DIR/resource-sampler.stop"
+    wait "$RESOURCE_PID" || echo "::warning::Resource sampler did not complete"
+    rm -f "$OUTPUT_DIR/resource-sampler.stop"
+  fi
   sudo systemctl reset-failed "$RETH_SCOPE" 2>/dev/null || true
   sudo chown -R "$(id -un):$(id -gn)" "$OUTPUT_DIR" 2>/dev/null || true
   sudo schelk recover -y --kill || true
 }
+RESOURCE_PID=
 TAIL_PID=
 TRACY_PID=
 trap cleanup EXIT
@@ -351,6 +357,15 @@ if [ "${BENCH_TRACING_CHROME:-false}" = "true" ]; then
     echo "Chrome trace recording requested, but ${LABEL} binary rejected --log.tracing-chrome; skipping"
   fi
 fi
+
+# Keep sampling outside the node scope so shutdown/final persistence remains visible.
+# The same sampler and existing memory limit apply to baseline and feature binaries.
+rm -f "$OUTPUT_DIR/resource-sampler.stop"
+sudo taskset -c 0 python3 .github/scripts/bench-resource-sampler.py \
+  --scope "$RETH_SCOPE" --binary "$BINARY" --output-dir "$OUTPUT_DIR" \
+  --stop-file "$OUTPUT_DIR/resource-sampler.stop" \
+  > "$OUTPUT_DIR/resource-sampler.log" 2>&1 &
+RESOURCE_PID=$!
 
 if [ "${BENCH_SAMPLY:-false}" = "true" ]; then
   SAMPLY="$(which samply)"
