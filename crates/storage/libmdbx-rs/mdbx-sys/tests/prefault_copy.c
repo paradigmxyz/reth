@@ -4,7 +4,7 @@
 #define _GNU_SOURCE 1
 #define MDBX_BUILD_FLAGS "prefault-copy regression"
 #ifndef TEST_UNCONDITIONAL_COW
-#define TEST_UNCONDITIONAL_COW 0
+#define TEST_UNCONDITIONAL_COW 1
 #endif
 #include <sys/types.h>
 #include <unistd.h>

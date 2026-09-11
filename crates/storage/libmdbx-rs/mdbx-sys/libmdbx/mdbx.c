@@ -22416,12 +22416,16 @@ static inline pgr_t page_alloc_finalize(MDBX_env *const env, MDBX_txn *const txn
       void *const pattern = ptr_disp(env->page_auxbuf, need_clean ? env->ps : env->ps * 2);
       size_t file_offset = pgno2bytes(env, pgno);
       if (likely(num == 1)) {
-        if (!mincore_probe(env, pgno)) {
+        bool source_prefault = false;
+#if defined(__linux__)
+        source_prefault = source && !need_clean && env->ps >= globals.sys_pagesize;
+#endif
+        if (source_prefault || !mincore_probe(env, pgno)) {
 #if defined(__linux__)
           /* A full OS-page overwrite avoids reading old destination bytes.
            * Copy useful data during the prefault instead of overwriting a
            * pattern through the mapping. Keep PAGEPERTURB's unused space. */
-          if (source && !need_clean && env->ps >= globals.sys_pagesize)
+          if (source_prefault)
             copied = osal_pwrite(env->lazy_fd, source, env->ps, file_offset) == MDBX_SUCCESS;
           else
 #endif
