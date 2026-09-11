@@ -1008,13 +1008,14 @@ where
                     n = group.len(),
                 )
                 .entered();
-                let _activity = ActivityGuard::linked(
+                let group_activity = ActivityGuard::linked(
                     "storage_group",
                     batch_id,
                     group.len(),
                     submitted.elapsed(),
                 );
-                run_storage_jobs(group, &storage_done_tx, new_epoch, retain_updates, batch_id);
+                let group_id = group_activity.id();
+                run_storage_jobs(group, &storage_done_tx, new_epoch, retain_updates, group_id);
             });
         }
     }
@@ -1847,7 +1848,7 @@ fn run_storage_jobs<S: SparseTrie + Default>(
     storage_done_tx: &CrossbeamSender<StorageJobMessage<S>>,
     new_epoch: TrieNodeEpoch,
     retain_updates: bool,
-    batch_id: u64,
+    group_id: u64,
 ) {
     let group_start = std::time::Instant::now();
     let mut batch_len = 1;
@@ -1857,7 +1858,7 @@ fn run_storage_jobs<S: SparseTrie + Default>(
         let activity = reth_trie_sparse::activity::detail_enabled().then(|| {
             ActivityGuard::job(
                 "storage_job",
-                batch_id,
+                group_id,
                 job.work.work_units(),
                 group_start.elapsed(),
             )
