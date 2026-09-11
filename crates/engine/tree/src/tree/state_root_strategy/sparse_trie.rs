@@ -492,6 +492,11 @@ where
         Ok(())
     }
 
+    /// Whether the stream is still running and has left updates the task has not read yet.
+    fn state_updates_queued(&self) -> bool {
+        !self.finished_state_updates && !self.updates.is_empty()
+    }
+
     /// Applies buffered updates to the trie and dispatches proof targets.
     ///
     /// Messages queued after the finish marker are best-effort hints and are not actionable.
@@ -501,7 +506,7 @@ where
         // costs one promotion pass rather than one per trie.
         self.drain_returned_storage_tries()?;
 
-        let updates_queued = !self.finished_state_updates && !self.updates.is_empty();
+        let updates_queued = self.state_updates_queued();
 
         if !updates_queued && self.proof_result_rx.is_empty() {
             // If we don't have any pending messages, we can spend some time on computing
@@ -530,10 +535,17 @@ where
             self.dispatch_pending_targets()?;
             self.ensure_not_stalled(updates_queued)?;
 
-            // If there's still no pending updates spend some time pre-computing the account
-            // trie upper hashes
-            if self.proof_result_rx.is_empty() {
-                self.trie.calculate_subtries(self.new_epoch);
+            // If there's still no pending updates spend some time pre-computing account
+            // subtrie hashes. One chunk at a time, so whatever arrives next waits for the
+            // chunk in flight instead of for every dirty subtrie.
+            while self.proof_result_rx.is_empty() &&
+                self.storage_done_rx.is_empty() &&
+                !self.state_updates_queued()
+            {
+                if self.trie.prehash_dirty_subtries(self.new_epoch, PREHASH_DIRTY_LEAF_BUDGET) == 0
+                {
+                    break;
+                }
             }
         } else if !updates_queued {
             // If we don't have any pending updates, apply them to the trie,
@@ -1832,6 +1844,11 @@ const INITIAL_UPDATE_BATCH_SIZE: usize = 64;
 /// leaf updates to apply - runs on the sparse trie task itself, because handing the tries to
 /// another thread and waiting for them to come back costs more than the work.
 const INLINE_STORAGE_WORK_UNITS: usize = 16;
+
+/// Dirty account leaves one chunk of opportunistic subtrie pre-hashing may cover. Sized so a
+/// chunk takes on the order of a hundred microseconds, which is how long an arriving proof
+/// result or storage trie can end up waiting for it.
+const PREHASH_DIRTY_LEAF_BUDGET: u64 = 128;
 
 /// Dispatches work items as a single unit or in chunks based on target size and worker
 /// availability.

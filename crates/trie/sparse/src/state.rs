@@ -386,13 +386,21 @@ where
         let _ = nodes;
     }
 
-    /// Calculates the hashes of subtries.
+    /// Hashes dirty subtries of the accounts trie until `dirty_leaf_budget` dirty leaves have
+    /// been covered, and returns how many were covered.
     ///
-    /// If the trie has not been revealed, this function does nothing.
+    /// See [`SparseTrieTrait::prehash_dirty_subtries`]. If the trie has not been revealed, this
+    /// function does nothing.
     #[instrument(level = "debug", target = "trie::sparse", skip_all)]
-    pub fn calculate_subtries(&mut self, new_epoch: TrieNodeEpoch) {
+    pub fn prehash_dirty_subtries(
+        &mut self,
+        new_epoch: TrieNodeEpoch,
+        dirty_leaf_budget: u64,
+    ) -> u64 {
         if let RevealableSparseTrie::Revealed(trie) = &mut self.state {
-            trie.update_subtrie_hashes(new_epoch);
+            trie.prehash_dirty_subtries(new_epoch, dirty_leaf_budget)
+        } else {
+            0
         }
     }
 

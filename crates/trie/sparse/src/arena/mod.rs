@@ -2487,6 +2487,31 @@ impl SparseTrie for ArenaParallelSparseTrie {
         }
     }
 
+    #[instrument(level = "trace", target = TRACE_TARGET, skip_all)]
+    fn prehash_dirty_subtries(&mut self, new_epoch: TrieNodeEpoch, dirty_leaf_budget: u64) -> u64 {
+        let mut dirty_leaves = 0;
+
+        // Hashing stays on this thread: a budgeted batch does not pay for a rayon round trip,
+        // and joining one would block the caller for longer than hashing it here takes.
+        for (_, node) in self.upper_arena.iter_mut() {
+            if dirty_leaves >= dirty_leaf_budget {
+                break;
+            }
+            let ArenaSparseNode::Subtrie(subtrie) = node else { continue };
+            if subtrie.num_dirty_leaves == 0 {
+                continue;
+            }
+            dirty_leaves += subtrie.num_dirty_leaves;
+            subtrie.update_cached_rlp(new_epoch);
+
+            // A hashed subtrie reads as cached, so the walk in `update_subtrie_hashes` will not
+            // descend into it again and its updates have to be merged here instead.
+            Self::merge_subtrie_updates(&mut self.buffers.updates, &mut subtrie.buffers.updates);
+        }
+
+        dirty_leaves
+    }
+
     fn get_leaf_value(&self, full_path: &Nibbles) -> Option<&Vec<u8>> {
         Self::get_leaf_value_in_arena(&self.upper_arena, self.root, full_path, 0)
     }

@@ -269,6 +269,7 @@ sparse_trie_tests! {
     test_root_after_single_leaf_update,
     test_root_deterministic_across_update_orders,
     test_root_handles_small_root_node_without_hash,
+    test_prehash_dirty_subtries_stops_at_budget,
 
     // take_updates
     test_take_updates_returns_empty_when_not_tracking,

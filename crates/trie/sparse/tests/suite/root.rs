@@ -148,3 +148,77 @@ pub(super) fn test_root_handles_small_root_node_without_hash<T: SparseTrie>(new_
     let root2 = trie.root(epoch(0));
     assert_eq!(root2, root1, "second root() should return cached result without panic");
 }
+
+/// Bounded pre-hashing covers the dirty trie a budget at a time.
+///
+/// One `prehash_dirty_subtries` call must stop once its budget is met instead of hashing every
+/// dirty subtrie, repeated calls must cover every dirty leaf exactly once, and the root and
+/// updates that follow must match a trie that only ever hashed from `root()`.
+pub(super) fn test_prehash_dirty_subtries_stops_at_budget<T: SparseTrie>(new_trie: fn() -> T) {
+    const BUDGET: u64 = 8;
+
+    // Four leaves under each of 64 two-nibble prefixes, so the trie holds many small subtries.
+    let storage: BTreeMap<B256, U256> = (0..64u8)
+        .flat_map(|hi| {
+            (0..4u8).map(move |lo| {
+                let mut key = B256::ZERO;
+                key.0[0] = hi;
+                key.0[1] = lo;
+                (key, U256::from(u64::from(hi) * 4 + u64::from(lo) + 1))
+            })
+        })
+        .collect();
+    let changes: BTreeMap<B256, U256> =
+        storage.iter().map(|(&key, &value)| (key, value + U256::from(1))).collect();
+
+    let harness = SuiteTestHarness::new(storage);
+    let dirtied = |new_trie: fn() -> T| {
+        let mut trie: T = harness.init_trie_fully_revealed(true, new_trie);
+        harness.reveal_and_update(&mut trie, &mut SuiteTestHarness::leaf_updates(&changes));
+        trie
+    };
+
+    // A budget of one takes a single subtrie per call, so the largest return is the most dirty
+    // leaves one subtrie holds - which is how far past its budget a bounded call may go.
+    let mut probe = dirtied(new_trie);
+    let (mut largest_subtrie, mut total_dirty) = (0, 0);
+    loop {
+        let hashed = probe.prehash_dirty_subtries(epoch(1), 1);
+        if hashed == 0 {
+            break;
+        }
+        largest_subtrie = largest_subtrie.max(hashed);
+        total_dirty += hashed;
+    }
+    assert!(total_dirty > BUDGET, "the changeset must dirty more than one budget of leaves");
+
+    let mut trie = dirtied(new_trie);
+    let (mut calls, mut hashed_total) = (0, 0);
+    loop {
+        let hashed = trie.prehash_dirty_subtries(epoch(1), BUDGET);
+        if hashed == 0 {
+            break;
+        }
+        assert!(
+            hashed < BUDGET + largest_subtrie,
+            "a call on a budget of {BUDGET} hashed {hashed} dirty leaves"
+        );
+        calls += 1;
+        hashed_total += hashed;
+    }
+    assert!(
+        calls > 1,
+        "a budget of {BUDGET} must not cover {total_dirty} dirty leaves in one call"
+    );
+    assert_eq!(hashed_total, total_dirty, "bounded calls must cover every dirty leaf exactly once");
+
+    let mut unbounded = dirtied(new_trie);
+    let expected = SuiteTestHarness::new(changes);
+    assert_eq!(trie.root(epoch(1)), expected.original_root(), "root should match reference trie");
+    assert_eq!(unbounded.root(epoch(1)), expected.original_root(), "reference path disagrees");
+    assert_eq!(
+        trie.take_updates(),
+        unbounded.take_updates(),
+        "pre-hashing must not change the trie updates"
+    );
+}

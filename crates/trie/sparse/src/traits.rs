@@ -168,6 +168,16 @@ pub trait SparseTrie: Sized + Debug + Send + Sync {
     /// hash recalculations after localized changes to the trie structure.
     fn update_subtrie_hashes(&mut self, new_epoch: TrieNodeEpoch);
 
+    /// Hashes dirty subtries until `dirty_leaf_budget` dirty leaves have been covered and
+    /// returns how many were covered.
+    ///
+    /// Unlike [`Self::update_subtrie_hashes`] this leaves the rest of the trie, including
+    /// every node above the subtries, untouched, so a caller that hashes opportunistically
+    /// between other work can bound how long one call takes. The subtrie that carries the
+    /// budget's last dirty leaf is still hashed whole, so the returned count can exceed the
+    /// budget, and a budget of zero hashes nothing.
+    fn prehash_dirty_subtries(&mut self, new_epoch: TrieNodeEpoch, dirty_leaf_budget: u64) -> u64;
+
     /// Retrieves a reference to the leaf value at the specified path.
     ///
     /// # Arguments
