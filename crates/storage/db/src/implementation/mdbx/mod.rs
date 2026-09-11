@@ -409,6 +409,10 @@ impl DatabaseEnv {
             DatabaseEnvKind::RW => {
                 // Shadow pages avoid writable-map faults and prefault writes. MDBX batches
                 // their contents into writes at spill/commit using the configured sync mode.
+                // Limit dirty-list growth independently of host RAM. At 4 KiB per page this
+                // allows about 256 MiB of single-page buffers; overflow allocations can span
+                // multiple pages, so this is not a hard byte limit.
+                inner_env.set_txn_dp_limit(64 * 1024);
                 Mode::ReadWrite { sync_mode: args.sync_mode }
             }
         };
