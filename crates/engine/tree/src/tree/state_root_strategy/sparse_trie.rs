@@ -2,13 +2,14 @@
 
 use std::{
     any::Any,
+    collections::VecDeque,
     panic::{self, AssertUnwindSafe},
     sync::{Arc, OnceLock},
 };
 
 use super::{evm_state_to_hashed_post_state, StateRootComputeOutcome, StateRootMessage};
 use alloy_primitives::{
-    map::{hash_map::Entry, B256Map},
+    map::{hash_map::Entry, B256Map, B256Set},
     B256,
 };
 use alloy_rlp::{Decodable, Encodable};
@@ -44,6 +45,11 @@ pub(super) struct SparseTrieCacheTask<A = ArenaParallelSparseTrie, S = ArenaPara
     proof_result_tx: ProofResultSender,
     /// Receiver for proof results directly from workers.
     proof_result_rx: CrossbeamReceiver<ProofResultMessage>,
+    /// Sender handed to the workers computing account path prefetches.
+    prefetch_result_tx: ProofResultSender,
+    /// Receiver for prefetch proof results. Separate from [`Self::proof_result_rx`] so the event
+    /// loop can prefer live results and so prefetch batches can be counted on their own.
+    prefetch_result_rx: CrossbeamReceiver<ProofResultMessage>,
     /// Receives updates from execution and prewarming.
     updates: CrossbeamReceiver<SparseTrieTaskMessage>,
     /// Fires (by disconnecting) when the consumer drops its cancel guard, meaning nobody is
@@ -127,10 +133,25 @@ pub(super) struct SparseTrieCacheTask<A = ArenaParallelSparseTrie, S = ArenaPara
     /// Number of times promotion had to read an account value back from the accounts trie
     /// because [`Self::existing_accounts`] held no report for it.
     account_value_fallbacks: u64,
+    /// Accumulated account paths sent to the workers as a prefetch.
+    prefetched_paths: u64,
+    /// Accumulated prefetch batches dispatched.
+    prefetch_batches: u64,
+    /// Accumulated live account targets that needed no proof request because a prefetch had
+    /// already asked for the path.
+    prefetch_hits: u64,
     /// Pending proof targets queued for dispatch to proof workers.
     pending_targets: PendingTargets,
     /// Proof batches dispatched to workers and not yet received.
     in_flight_proof_batches: usize,
+    /// Chunks of hashed accounts whose account trie path a producer asked to reveal early, in
+    /// arrival order. Only dispatched while no live target is queued.
+    pending_prefetch: VecDeque<Vec<B256>>,
+    /// Accounts a prefetch batch asked for, removed again when a live update for the same
+    /// account finds the path already requested.
+    prefetched_accounts: B256Set,
+    /// Prefetch batches dispatched to workers and not yet received.
+    prefetch_in_flight: usize,
     /// Everything the task knows about a storage trie touched by this block: the trie itself, its
     /// queued leaf updates, the proof nodes waiting to be revealed into it and its proof target
     /// cache. See [`StorageSlot`].
@@ -184,6 +205,7 @@ where
     ) -> Self {
         let (hashed_state_tx, hashed_state_rx) = crossbeam_channel::unbounded();
         let (storage_done_tx, storage_done_rx) = crossbeam_channel::unbounded();
+        let (prefetch_result_tx, prefetch_result_rx) = crossbeam_channel::unbounded();
 
         let parent_span = tracing::Span::current();
         let hashing_metrics = metrics.clone();
@@ -195,6 +217,8 @@ where
         Self {
             proof_result_tx,
             proof_result_rx,
+            prefetch_result_tx,
+            prefetch_result_rx,
             updates: hashed_state_rx,
             cancel_rx,
             proof_worker_handle,
@@ -218,8 +242,14 @@ where
             storage_cache_hits: 0,
             storage_cache_misses: 0,
             account_value_fallbacks: 0,
+            prefetched_paths: 0,
+            prefetch_batches: 0,
+            prefetch_hits: 0,
             pending_targets: Default::default(),
             in_flight_proof_batches: 0,
+            pending_prefetch: Default::default(),
+            prefetched_accounts: Default::default(),
+            prefetch_in_flight: 0,
             storage: Default::default(),
             storage_in_flight: 0,
             storage_done_tx,
@@ -247,6 +277,9 @@ where
             let msg = match message {
                 StateRootMessage::PrefetchProofs(targets) => {
                     SparseTrieTaskMessage::PrefetchProofs(targets)
+                }
+                StateRootMessage::PrefetchAccountPaths(accounts) => {
+                    SparseTrieTaskMessage::PrefetchAccountPaths(accounts)
                 }
                 StateRootMessage::StateUpdate(state) => {
                     let _span = trace_span!(target: "engine::tree::payload_processor::sparse_trie", "hashing_state_update", n = state.len()).entered();
@@ -353,7 +386,7 @@ where
                     let Ok(result) = message else {
                         unreachable!("we own the sender half")
                     };
-                    self.on_proof_results(result, &mut t)?;
+                    self.on_proof_results(result, &mut t, false)?;
                 },
                 recv(self.storage_done_rx) -> message => {
                     let wake = Instant::now();
@@ -366,6 +399,19 @@ where
                         unreachable!("we own the sender half")
                     };
                     self.on_storage_job_message(returned)?;
+                },
+                recv(self.prefetch_result_rx) -> message => {
+                    let wake = Instant::now();
+                    total_idle_time += wake.duration_since(idle_start);
+                    self.metrics
+                        .sparse_trie_channel_wait_duration_histogram
+                        .record(wake.duration_since(t));
+                    t = wake;
+
+                    let Ok(result) = message else {
+                        unreachable!("we own the sender half")
+                    };
+                    self.on_proof_results(result, &mut t, true)?;
                 },
                 recv(self.cancel_rx) -> _ => return Err(StateRootTaskError::Canceled),
             }
@@ -392,7 +438,7 @@ where
                     let Ok(result) = message else {
                         unreachable!("we own the sender half")
                     };
-                    self.on_proof_results(result, &mut t)?;
+                    self.on_proof_results(result, &mut t, false)?;
                 },
                 recv(self.storage_done_rx) -> message => {
                     let wake = Instant::now();
@@ -405,6 +451,19 @@ where
                         unreachable!("we own the sender half")
                     };
                     self.on_storage_job_message(returned)?;
+                },
+                recv(self.prefetch_result_rx) -> message => {
+                    let wake = Instant::now();
+                    total_idle_time += wake.duration_since(idle_start);
+                    self.metrics
+                        .sparse_trie_channel_wait_duration_histogram
+                        .record(wake.duration_since(t));
+                    t = wake;
+
+                    let Ok(result) = message else {
+                        unreachable!("we own the sender half")
+                    };
+                    self.on_proof_results(result, &mut t, true)?;
                 },
                 recv(self.cancel_rx) -> _ => return Err(StateRootTaskError::Canceled),
             }
@@ -454,11 +513,17 @@ where
         self.metrics
             .sparse_trie_account_value_fallbacks
             .record(self.account_value_fallbacks as f64);
+        self.metrics.sparse_trie_prefetched_account_paths.record(self.prefetched_paths as f64);
+        self.metrics.sparse_trie_account_path_prefetch_batches.record(self.prefetch_batches as f64);
+        self.metrics.sparse_trie_prefetched_account_path_hits.record(self.prefetch_hits as f64);
         self.account_cache_hits = 0;
         self.account_cache_misses = 0;
         self.storage_cache_hits = 0;
         self.storage_cache_misses = 0;
         self.account_value_fallbacks = 0;
+        self.prefetched_paths = 0;
+        self.prefetch_batches = 0;
+        self.prefetch_hits = 0;
 
         Ok(StateRootComputeOutcome {
             state_root,
@@ -474,10 +539,17 @@ where
         &mut self,
         message: ProofResultMessage,
         t: &mut Instant,
+        prefetch: bool,
     ) -> Result<(), StateRootTaskError> {
-        let mut result = self.on_proof_result_message(message)?;
+        let mut result = self.on_proof_result_message(message, prefetch)?;
         while let Ok(next) = self.proof_result_rx.try_recv() {
-            let res = self.on_proof_result_message(next)?;
+            let res = self.on_proof_result_message(next, false)?;
+            result.extend(res);
+        }
+        // Prefetched paths already back are revealed in the same pass, which costs nothing
+        // extra and frees their in-flight slots right away.
+        while let Ok(next) = self.prefetch_result_rx.try_recv() {
+            let res = self.on_proof_result_message(next, true)?;
             result.extend(res);
         }
 
@@ -531,8 +603,9 @@ where
             self.ensure_not_stalled(updates_queued)?;
 
             // If there's still no pending updates spend some time pre-computing the account
-            // trie upper hashes
-            if self.proof_result_rx.is_empty() {
+            // trie upper hashes. A prefetched path waiting to be revealed would dirty them
+            // again, so it is revealed first.
+            if self.proof_result_rx.is_empty() && self.prefetch_result_rx.is_empty() {
                 self.trie.calculate_subtries(self.new_epoch);
             }
         } else if !updates_queued {
@@ -563,6 +636,12 @@ where
         match message {
             SparseTrieTaskMessage::PrefetchProofs(targets) => {
                 self.on_prewarm_targets(targets);
+                None
+            }
+            SparseTrieTaskMessage::PrefetchAccountPaths(accounts) => {
+                if !accounts.is_empty() {
+                    self.pending_prefetch.push_back(accounts);
+                }
                 None
             }
             SparseTrieTaskMessage::HashedState(hashed_state) => {
@@ -710,13 +789,13 @@ where
     fn on_proof_result_message(
         &mut self,
         message: ProofResultMessage,
+        prefetch: bool,
     ) -> Result<DecodedMultiProofV2, StateRootTaskError> {
         let result = message.result?;
-        debug_assert!(
-            self.in_flight_proof_batches > 0,
-            "received proof result without an in-flight proof batch"
-        );
-        self.in_flight_proof_batches = self.in_flight_proof_batches.saturating_sub(1);
+        let in_flight =
+            if prefetch { &mut self.prefetch_in_flight } else { &mut self.in_flight_proof_batches };
+        debug_assert!(*in_flight > 0, "received proof result without an in-flight proof batch");
+        *in_flight = in_flight.saturating_sub(1);
         Ok(result)
     }
 
@@ -876,6 +955,8 @@ where
                                 self.pending_targets.push_account_target(
                                     ProofV2Target::new(target).with_parent(parent),
                                 );
+                            } else if self.prefetched_accounts.remove(&target) {
+                                self.prefetch_hits += 1;
                             }
                         }
                         Entry::Vacant(entry) => {
@@ -1208,7 +1289,9 @@ where
 
     fn dispatch_pending_targets(&mut self) -> Result<(), StateRootTaskError> {
         if self.pending_targets.is_empty() {
-            return Ok(())
+            // The only place prefetch batches go out: with no live target queued, one can
+            // never be put on a worker ahead of a target the block actually needs.
+            return self.dispatch_prefetch_chunks()
         }
 
         let _span = trace_span!("dispatch_pending_targets").entered();
@@ -1248,6 +1331,49 @@ where
 
         if let Some(error) = dispatch_error {
             return Err(error)
+        }
+
+        Ok(())
+    }
+
+    /// Asks the workers to reveal the account trie paths a producer named up front.
+    ///
+    /// A chunk goes out whole, without chunking: it is one round trip for one account worker,
+    /// and the cap on batches in flight is what keeps the workers available for live targets.
+    /// Paths already requested are dropped here rather than when the chunk arrived, so a live
+    /// request that happened in between wins.
+    fn dispatch_prefetch_chunks(&mut self) -> Result<(), StateRootTaskError> {
+        while self.prefetch_in_flight < MAX_IN_FLIGHT_PREFETCH_BATCHES {
+            let Some(chunk) = self.pending_prefetch.pop_front() else { break };
+
+            let mut account_targets = Vec::with_capacity(chunk.len());
+            for account in chunk {
+                if let Entry::Vacant(entry) = self.fetched_account_targets.entry(account) {
+                    entry.insert(ProofV2TargetParent::NONE);
+                    self.prefetched_accounts.insert(account);
+                    account_targets.push(ProofV2Target::new(account));
+                }
+            }
+            if account_targets.is_empty() {
+                continue;
+            }
+
+            self.prefetched_paths += account_targets.len() as u64;
+            self.prefetch_batches += 1;
+            self.proof_worker_handle
+                .dispatch_account_multiproof(AccountMultiproofInput {
+                    targets: MultiProofTargetsV2 { account_targets, ..Default::default() },
+                    proof_result_sender: ProofResultContext::new(
+                        self.prefetch_result_tx.clone(),
+                        HashedPostState::default(),
+                        Instant::now(),
+                    ),
+                })
+                .map_err(|e| {
+                    error!("failed to dispatch account path prefetch: {e:?}");
+                    StateRootTaskError::ProofDispatch(e)
+                })?;
+            self.prefetch_in_flight += 1;
         }
 
         Ok(())
@@ -1295,6 +1421,10 @@ where
             self.pending_targets.is_empty() &&
             self.in_flight_proof_batches == 0 &&
             self.proof_result_rx.is_empty() &&
+            // A path a prefetch asked for counts as fetched, so an update blocked on it is
+            // waiting for that batch and not stalled.
+            self.prefetch_in_flight == 0 &&
+            self.prefetch_result_rx.is_empty() &&
             self.storage_in_flight == 0 &&
             !self.has_ready_storage_work() &&
             self.has_pending_sparse_trie_updates()
@@ -1817,6 +1947,14 @@ pub(super) struct SparseTrieTaskMetrics {
     /// trie never reported them while applying a touched update.
     pub(super) sparse_trie_account_value_fallbacks: Histogram,
 
+    /// Number of account trie paths asked for ahead of the values that will change them.
+    pub(super) sparse_trie_prefetched_account_paths: Histogram,
+    /// Number of proof batches those prefetched paths were dispatched in.
+    pub(super) sparse_trie_account_path_prefetch_batches: Histogram,
+    /// Number of account leaf updates that found their path already requested by a prefetch,
+    /// so they cost no proof round trip of their own.
+    pub(super) sparse_trie_prefetched_account_path_hits: Histogram,
+
     /// Number of storage tries retained in the preserved sparse trie cache.
     pub(super) sparse_trie_retained_storage_tries: Gauge,
 }
@@ -1827,6 +1965,14 @@ const DEFAULT_MAX_TARGETS_FOR_CHUNKING: usize = 300;
 
 /// Start proof fetching while the first state-update batch is still arriving.
 const INITIAL_UPDATE_BATCH_SIZE: usize = 64;
+
+/// How many account path prefetch batches may be with the workers at once.
+///
+/// A prefetch batch occupies an account worker for a full round trip, so the queue is only
+/// allowed to keep a couple of them moving: enough that the paths keep coming while the task is
+/// idle, few enough that a live target arriving right after one never waits behind more than
+/// that.
+const MAX_IN_FLIGHT_PREFETCH_BATCHES: usize = 2;
 
 /// A round of storage passes that would do at most this much work - proof nodes to reveal plus
 /// leaf updates to apply - runs on the sparse trie task itself, because handing the tries to
@@ -1932,6 +2078,8 @@ enum SparseTrieTaskMessage {
     HashedState(HashedPostState),
     /// Prefetch proof targets (passed through directly).
     PrefetchProofs(MultiProofTargetsV2),
+    /// Hashed accounts whose account trie path to reveal early (passed through directly).
+    PrefetchAccountPaths(Vec<B256>),
     /// Signals that all state updates have been received.
     FinishedStateUpdates,
 }
@@ -2783,7 +2931,7 @@ mod tests {
             elapsed: std::time::Duration::ZERO,
             state: HashedPostState::default(),
         };
-        task.on_proof_result_message(result).expect("proof result should be ok");
+        task.on_proof_result_message(result, false).expect("proof result should be ok");
 
         assert_eq!(task.in_flight_proof_batches, 0);
         let error = task.ensure_not_stalled(false).expect_err("task should be stalled");
@@ -2994,6 +3142,82 @@ mod tests {
             TrieNodeEpoch::new(1),
             false,
         );
+    }
+
+    #[test]
+    fn a_live_target_is_dispatched_before_the_next_prefetch_chunk() {
+        let runtime = reth_tasks::Runtime::test();
+        let provider_factory = create_test_provider_factory();
+        let anchor_hash = init_genesis(&provider_factory).expect("failed to initialize genesis");
+        let state_provider_factory = OverlayStateProviderFactory::new(
+            provider_factory,
+            OverlayManager::<reth_chain_state::EthPrimitives>::default()
+                .overlay_builder(anchor_hash),
+        );
+        let (proof_result_tx, proof_result_rx) = crossbeam_channel::unbounded();
+        let proof_worker_handle = ProofWorkerHandle::new(
+            &runtime,
+            ProofTaskCtx::new(state_provider_factory),
+            false,
+            proof_result_tx.clone(),
+        );
+
+        let default_trie = RevealableSparseTrie::blind_from(ArenaParallelSparseTrie::default());
+        let trie = SparseStateTrie::default()
+            .with_accounts_trie(default_trie.clone())
+            .with_default_storage_trie(default_trie);
+
+        let (_updates_tx, updates_rx) = crossbeam_channel::unbounded();
+        let (_cancel_guard, cancel_rx) = crossbeam_channel::bounded::<()>(0);
+        let mut task = SparseTrieCacheTask::new_with_trie(
+            &runtime,
+            updates_rx,
+            cancel_rx,
+            std::sync::mpsc::channel().0,
+            proof_worker_handle,
+            proof_result_tx,
+            proof_result_rx,
+            SparseTrieTaskMetrics::default(),
+            trie,
+            EMPTY_ROOT_HASH,
+            TrieNodeEpoch::new(1),
+            5,
+        );
+
+        let live = B256::repeat_byte(0xf0);
+        let chunk = |byte: u8| vec![B256::repeat_byte(byte), B256::repeat_byte(byte + 1)];
+        for accounts in [chunk(0x10), chunk(0x20), vec![B256::repeat_byte(0x30), live]] {
+            task.on_message(SparseTrieTaskMessage::PrefetchAccountPaths(accounts));
+        }
+        assert_eq!(task.pending_prefetch.len(), 3);
+
+        task.dispatch_pending_targets().unwrap();
+        assert_eq!(task.prefetch_in_flight, MAX_IN_FLIGHT_PREFETCH_BATCHES);
+        assert_eq!(task.pending_prefetch.len(), 1, "the cap holds the rest of the queue back");
+        assert_eq!(task.prefetched_paths, 4);
+
+        // Free a slot, so only the live target's priority can keep the last chunk waiting.
+        task.on_proof_result_message(prefetch_result(), true).unwrap();
+        task.fetched_account_targets.insert(live, ProofV2TargetParent::NONE);
+        task.pending_targets.push_account_target(ProofV2Target::new(live));
+
+        task.dispatch_pending_targets().unwrap();
+        assert_eq!(task.in_flight_proof_batches, 1, "the live target goes out");
+        assert_eq!(task.pending_prefetch.len(), 1, "and the prefetch chunk does not");
+        assert_eq!(task.prefetch_in_flight, MAX_IN_FLIGHT_PREFETCH_BATCHES - 1);
+
+        task.dispatch_pending_targets().unwrap();
+        assert!(task.pending_prefetch.is_empty(), "with nothing live queued the chunk goes out");
+        assert_eq!(task.prefetch_in_flight, MAX_IN_FLIGHT_PREFETCH_BATCHES);
+        assert_eq!(task.prefetched_paths, 5, "the live target is not requested a second time");
+    }
+
+    fn prefetch_result() -> ProofResultMessage {
+        ProofResultMessage {
+            result: Ok(DecodedMultiProofV2::default()),
+            elapsed: std::time::Duration::ZERO,
+            state: HashedPostState::default(),
+        }
     }
 
     #[test]

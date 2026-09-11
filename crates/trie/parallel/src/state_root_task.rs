@@ -22,6 +22,9 @@ use tracing::trace;
 pub enum StateRootMessage {
     /// Prefetch proof targets
     PrefetchProofs(MultiProofTargetsV2),
+    /// Hashed accounts whose account trie path may be worth revealing before the block's values
+    /// arrive. Carries no values and never becomes a leaf update.
+    PrefetchAccountPaths(Vec<B256>),
     /// New state update from transaction execution.
     StateUpdate(EvmState),
     /// Pre-hashed state update from BAL conversion that can be applied directly without proofs.
@@ -339,6 +342,10 @@ pub trait StateRootSink: Send + Sync + 'static {
     /// Best-effort access hint from transaction prewarming.
     fn on_access_hint(&self, _hint: StateAccessHint) {}
 
+    /// Best-effort hint that these hashed accounts will be written later in the block, so their
+    /// account trie paths can be revealed while the task has nothing else to ask for.
+    fn on_account_path_prefetch(&self, _accounts: Vec<B256>) {}
+
     /// Authoritative state update from normal block execution.
     fn on_state_update(&self, state: EvmState);
 
@@ -370,6 +377,12 @@ impl StateRootHintStream {
     /// Emits a best-effort access hint.
     pub fn on_access_hint(&self, hint: StateAccessHint) {
         self.inner.on_access_hint(hint);
+    }
+
+    /// Emits a best-effort chunk of hashed accounts whose account trie path may be worth
+    /// revealing early.
+    pub fn on_account_path_prefetch(&self, accounts: Vec<B256>) {
+        self.inner.on_account_path_prefetch(accounts);
     }
 }
 
@@ -472,6 +485,10 @@ impl SparseTrieStateRootSink {
 impl StateRootSink for SparseTrieStateRootSink {
     fn on_access_hint(&self, hint: StateAccessHint) {
         let _ = self.sender.send(StateRootMessage::PrefetchProofs(hint.into()));
+    }
+
+    fn on_account_path_prefetch(&self, accounts: Vec<B256>) {
+        let _ = self.sender.send(StateRootMessage::PrefetchAccountPaths(accounts));
     }
 
     fn on_state_update(&self, state: EvmState) {

@@ -1288,7 +1288,7 @@ where
 mod tests {
     use super::*;
     use alloy_consensus::constants::KECCAK_EMPTY;
-    use alloy_primitives::{map::HashMap, Address, U256};
+    use alloy_primitives::{keccak256, map::HashMap, Address, U256};
     use rand::Rng;
     use reth_chain_state::test_utils::TestBlockBuilder;
     use reth_chainspec::ChainSpec;
@@ -1408,6 +1408,17 @@ mod tests {
 
     #[test]
     fn state_root_task_matches_serial_root() {
+        run_state_root_task_against_serial_root(false);
+    }
+
+    /// A prefetched path is a reveal and never a value, so asking for the paths of every account
+    /// the block writes plus one it never touches must leave the root where it was.
+    #[test]
+    fn state_root_task_matches_serial_root_with_account_path_prefetch() {
+        run_state_root_task_against_serial_root(true);
+    }
+
+    fn run_state_root_task_against_serial_root(prefetch_account_paths: bool) {
         reth_tracing::init_test_tracing();
 
         let factory = create_test_provider_factory_with_chain_spec(Arc::new(ChainSpec::default()));
@@ -1472,11 +1483,19 @@ mod tests {
             },
         );
 
+        let hint_stream = state_root_handle.take_hint_stream();
+        if prefetch_account_paths {
+            let mut paths: Vec<B256> = accumulated_state.keys().map(keccak256).collect();
+            paths.push(keccak256(Address::random()));
+            hint_stream.on_account_path_prefetch(paths);
+        }
+
         let mut state_hook = state_root_handle.take_execution_hook();
         for update in state_updates {
             state_hook.on_state(update);
         }
         drop(state_hook);
+        drop(hint_stream);
 
         let root_from_task = state_root_handle.state_root().expect("task failed").state_root;
         let root_from_regular = state_root(accumulated_state);
