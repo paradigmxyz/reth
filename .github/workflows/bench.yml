@@ -1112,6 +1112,23 @@ jobs:
           FEATURE_REF="${{ steps.refs.outputs.feature-ref }}"
           prepare_source_dir ../reth-feature "$FEATURE_REF"
 
+      - name: Run MDBX C regression tests
+        run: |
+          mkdir -p "$BENCH_WORK_DIR/c-tests"
+          for label in baseline feature; do
+            source_dir="../reth-$label/crates/storage/libmdbx-rs/mdbx-sys"
+            for test_source in "$source_dir"/tests/*.c; do
+              [ -f "$test_source" ] || continue
+              test_name="$(basename "$test_source" .c)"
+              test_binary="$BENCH_WORK_DIR/c-tests/$label-$test_name"
+              cc -D_GNU_SOURCE -DMDBX_DEBUG=1 -DMDBX_USE_FALLOCATE=0 \
+                -std=c11 -O1 -g -pthread "$test_source" \
+                -o "$test_binary" -lm -ldl -lrt
+              timeout 60 "$test_binary" 2>&1 | tee "$test_binary.log"
+              rm "$test_binary"
+            done
+          done
+
       - name: Build binaries
         id: build
         env:
