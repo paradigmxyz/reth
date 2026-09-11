@@ -40,6 +40,8 @@ jobs:
 
       - name: Install Rust nightly
         uses: dtolnay/rust-toolchain@nightly
+        with:
+          toolchain: nightly-2026-08-17
 
       - name: Build docs
         run: cd docs/vocs && bash scripts/build-cargo-docs.sh
