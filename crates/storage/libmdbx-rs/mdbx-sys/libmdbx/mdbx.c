@@ -4367,6 +4367,13 @@ enum env_flags {
   ENV_USABLE_FLAGS = ENV_CHANGEABLE_FLAGS | ENV_CHANGELESS_FLAGS
 };
 
+#ifndef MDBX_MINCORE_DIAGNOSTICS
+#define MDBX_MINCORE_DIAGNOSTICS 0
+#endif
+#if MDBX_USE_MINCORE && MDBX_MINCORE_DIAGNOSTICS
+#include "../mincore_diagnostics.h"
+#endif
+
 /* The database environment. */
 struct MDBX_env {
   /* ----------------------------------------------------- mostly static part */
@@ -4381,6 +4388,12 @@ struct MDBX_env {
 #endif                  /* Windows */
   osal_mmap_t lck_mmap; /* The lock file */
   lck_t *lck;
+#if MDBX_USE_MINCORE && MDBX_MINCORE_DIAGNOSTICS
+  /* Process-local: preserve the shared lock-file format. The pointer allows
+   * existing const-env cache invalidation paths to update their diagnostics. */
+  mincore_diagnostics_t mincore_diagnostics_storage;
+  mincore_diagnostics_t *mincore_diagnostics;
+#endif
 
   uint16_t leaf_nodemax;   /* max size of a leaf-node */
   uint16_t branch_nodemax; /* max size of a branch-node */
@@ -9583,6 +9596,9 @@ __cold int mdbx_env_create(MDBX_env **penv) {
   MDBX_env *env = osal_calloc(1, sizeof(MDBX_env));
   if (unlikely(!env))
     return LOG_IFERR(MDBX_ENOMEM);
+#if MDBX_USE_MINCORE && MDBX_MINCORE_DIAGNOSTICS
+  env->mincore_diagnostics = &env->mincore_diagnostics_storage;
+#endif
 
   env->max_readers = DEFAULT_READERS;
   env->max_dbi = env->n_dbi = CORE_DBS;
@@ -21670,6 +21686,10 @@ static bool mincore_fetch(MDBX_env *const env, const size_t unit_begin) {
     if (likely(dist >= 0 && dist < 64)) {
       const pgno_t tmp_begin = lck->mincore_cache.begin[i];
       const uint64_t tmp_mask = lck->mincore_cache.mask[i];
+#if MDBX_MINCORE_DIAGNOSTICS
+      mincore_diag_hit(env->mincore_diagnostics, i, tmp_begin, (unsigned)dist,
+                       (tmp_mask & (UINT64_C(1) << dist)) != 0);
+#endif
       do {
         lck->mincore_cache.begin[i] = lck->mincore_cache.begin[i - 1];
         lck->mincore_cache.mask[i] = lck->mincore_cache.mask[i - 1];
@@ -21699,8 +21719,14 @@ static bool mincore_fetch(MDBX_env *const env, const size_t unit_begin) {
 #if MDBX_ENABLE_PGOP_STAT
   env->lck->pgops.mincore.weak += 1;
 #endif /* MDBX_ENABLE_PGOP_STAT */
+#if MDBX_MINCORE_DIAGNOSTICS
+  mincore_diag_miss(env->mincore_diagnostics, unit_begin);
+#endif
   uint8_t *const vector = alloca(pages);
   if (unlikely(mincore(ptr_disp(env->dxb_mmap.base, offset), length, (void *)vector))) {
+#if MDBX_MINCORE_DIAGNOSTICS
+    ++env->mincore_diagnostics->errors;
+#endif
     NOTICE("mincore(+%zu, %zu), err %d", offset, length, errno);
     return false;
   }
@@ -21722,6 +21748,9 @@ static bool mincore_fetch(MDBX_env *const env, const size_t unit_begin) {
   }
 
   lck->mincore_cache.mask[0] = ~mask;
+#if MDBX_MINCORE_DIAGNOSTICS
+  mincore_diag_fetch(env->mincore_diagnostics, unit_begin, pages, shift, vector, mask);
+#endif
   return bit_tas(lck->mincore_cache.mask, 0);
 }
 #endif /* MDBX_USE_MINCORE */
@@ -21733,6 +21762,12 @@ MDBX_MAYBE_UNUSED static inline bool mincore_probe(MDBX_env *const env, const pg
   const size_t unit_begin = offset_aligned >> unit_log2;
   eASSERT(env, (unit_begin << unit_log2) == offset_aligned);
   const ptrdiff_t dist = unit_begin - env->lck->mincore_cache.begin[0];
+#if MDBX_MINCORE_DIAGNOSTICS
+  ++env->mincore_diagnostics->probes;
+  if (likely(dist >= 0 && dist < 64))
+    mincore_diag_hit(env->mincore_diagnostics, 0, env->lck->mincore_cache.begin[0], (unsigned)dist,
+                     (env->lck->mincore_cache.mask[0] & (UINT64_C(1) << dist)) != 0);
+#endif
   if (likely(dist >= 0 && dist < 64))
     return bit_tas(env->lck->mincore_cache.mask, (char)dist);
   return mincore_fetch(env, unit_begin);
@@ -26111,6 +26146,9 @@ __cold int lck_setup(MDBX_env *env, mdbx_mode_t mode) {
 }
 
 void mincore_clean_cache(const MDBX_env *const env) {
+#if MDBX_USE_MINCORE && MDBX_MINCORE_DIAGNOSTICS
+  mincore_diag_clear(env->mincore_diagnostics);
+#endif
   memset(env->lck->mincore_cache.begin, -1, sizeof(env->lck->mincore_cache.begin));
 }
 /// \copyright SPDX-License-Identifier: Apache-2.0
@@ -37002,6 +37040,9 @@ int txn_end(MDBX_txn *txn, unsigned mode) {
       if (!(env->flags & MDBX_WRITEMAP))
         dpl_release_shadows(txn);
       /* The writer mutex was locked in mdbx_txn_begin. */
+#if MDBX_USE_MINCORE && MDBX_MINCORE_DIAGNOSTICS
+      mincore_diag_report(env->mincore_diagnostics, txn->txnid, mode & TXN_END_OPMASK, env->ps, globals.sys_pagesize);
+#endif
       lck_txn_unlock(env);
     } else {
       eASSERT(env, txn->parent != nullptr);

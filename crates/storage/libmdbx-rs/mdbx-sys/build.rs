@@ -8,6 +8,7 @@ fn main() {
     let mdbx = manifest_dir.join("libmdbx");
 
     println!("cargo:rerun-if-changed={}", mdbx.display());
+    println!("cargo:rerun-if-changed=mincore_diagnostics.h");
 
     let bindings = PathBuf::from(std::env::var("OUT_DIR").unwrap()).join("bindings.rs");
     generate_bindings(&mdbx, &bindings);
@@ -22,6 +23,8 @@ fn main() {
     let flags = format!("{:?}", cc.get_compiler().cflags_env());
     cc.define("MDBX_BUILD_FLAGS", flags.as_str())
         .define("MDBX_TXN_CHECKOWNER", "0")
+        // Experimental branch: aggregate residency-cache diagnostics per write transaction.
+        .define("MDBX_MINCORE_DIAGNOSTICS", "1")
         // Disable posix_fallocate() usage. On filesystems that do not support fallocate (e.g. ZFS),
         // glibc's posix_fallocate() emulates it by writing zeros, which can spuriously fail with
         // ENOSPC even when sufficient disk space is available. The fallback path uses ftruncate()
