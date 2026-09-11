@@ -13,7 +13,7 @@ use alloy_rpc_types_eth::{Block, BlockTransactions, Index};
 use futures::Future;
 use reth_node_api::BlockBody;
 use reth_primitives_traits::{AlloyBlockHeader, RecoveredBlock, SealedHeader, TransactionMeta};
-use reth_rpc_convert::{transaction::ConvertReceiptInput, RpcConvert, RpcHeader};
+use reth_rpc_convert::{transaction::ConvertReceiptInput, RpcConvert, RpcHeader, SizedHeader};
 use reth_storage_api::{BlockIdReader, BlockReader, ProviderHeader, ProviderReceipt, ProviderTx};
 use reth_transaction_pool::{PoolTransaction, TransactionPool};
 use revm::state::bal::Bal as RevmBal;
@@ -43,8 +43,11 @@ pub trait EthBlocks: LoadBlock<RpcConvert: RpcConvert<Primitives = Self::Primiti
     {
         async move {
             let Some(block) = self.recovered_block(block_id).await? else { return Ok(None) };
-            let header =
+            let mut header =
                 self.converter().convert_header(block.clone_sealed_header(), block.rlp_length())?;
+            // Header responses carry no size field, unlike block responses that embed the same
+            // type: https://github.com/ethereum/execution-apis/pull/877
+            header.clear_size();
             Ok(Some(header))
         }
     }
