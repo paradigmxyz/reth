@@ -133,11 +133,6 @@ impl RpcModuleSelection {
     /// Returns true if both selections are identical.
     pub fn are_identical(http: Option<&Self>, ws: Option<&Self>) -> bool {
         match (http, ws) {
-            // Shortcut for common case to avoid iterating later
-            (Some(Self::All), Some(other)) | (Some(other), Some(Self::All)) => {
-                other.len() == RethRpcModule::variant_count()
-            }
-
             // If either side is disabled, then the other must be empty
             (Some(some), None) | (None, Some(some)) => some.is_empty(),
 
@@ -673,6 +668,25 @@ mod test {
         let full_selection =
             RpcModuleSelection::from(RethRpcModule::modules().into_iter().collect::<HashSet<_>>());
         assert!(RpcModuleSelection::are_identical(Some(&all_modules), Some(&full_selection)));
+
+        // Test scenario: `All` vs a same-sized selection containing a custom module
+        //
+        // `variant_count` only counts the standard variants, so a selection that drops a standard
+        // module and adds an `Other` module has the same length as `All` without selecting the
+        // same modules. It must not be considered identical to `All`.
+        let mut same_len_with_custom = RpcModuleSelection::all_modules();
+        same_len_with_custom.remove(&RethRpcModule::Eth);
+        same_len_with_custom.insert(RethRpcModule::Other("custom".to_string()));
+        let same_len_with_custom = RpcModuleSelection::from(same_len_with_custom);
+        assert_eq!(same_len_with_custom.len(), all_modules.len());
+        assert!(!RpcModuleSelection::are_identical(
+            Some(&all_modules),
+            Some(&same_len_with_custom)
+        ));
+        assert!(!RpcModuleSelection::are_identical(
+            Some(&same_len_with_custom),
+            Some(&all_modules)
+        ));
 
         // Test scenario: different non-empty selections
         //
