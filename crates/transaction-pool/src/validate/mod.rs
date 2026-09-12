@@ -460,52 +460,14 @@ impl<T: PoolTransaction> ValidPoolTransaction<T> {
         self.transaction.encoded_2718_consensus()
     }
 
-    /// Determines whether a candidate transaction (`maybe_replacement`) is underpriced compared to
-    /// an existing transaction in the pool.
-    ///
-    /// A transaction is considered underpriced if it doesn't meet the required fee bump threshold.
-    /// This applies to both standard gas fees and, for blob-carrying transactions (EIP-4844),
-    /// the blob-specific fees.
+    /// Returns whether `maybe_replacement` is underpriced relative to this transaction.
     #[inline]
-    pub fn is_underpriced(&self, maybe_replacement: &Self, price_bumps: &PriceBumpConfig) -> bool {
-        // Retrieve the required price bump percentage for this type of transaction.
-        //
-        // The bump is different for EIP-4844 and other transactions. See `PriceBumpConfig`.
-        let price_bump = price_bumps.price_bump(self.tx_type());
-        let required_bumped_fee =
-            |existing_fee: u128| existing_fee.saturating_mul(100 + price_bump).div_ceil(100);
-
-        // Check if the max fee per gas is underpriced.
-        if maybe_replacement.max_fee_per_gas() < required_bumped_fee(self.max_fee_per_gas()) {
-            return true
-        }
-
-        let existing_max_priority_fee_per_gas =
-            self.transaction.max_priority_fee_per_gas().unwrap_or_default();
-        let replacement_max_priority_fee_per_gas =
-            maybe_replacement.transaction.max_priority_fee_per_gas().unwrap_or_default();
-
-        // Check max priority fee per gas (relevant for EIP-1559 transactions only)
-        if existing_max_priority_fee_per_gas != 0 &&
-            replacement_max_priority_fee_per_gas != 0 &&
-            replacement_max_priority_fee_per_gas <
-                required_bumped_fee(existing_max_priority_fee_per_gas)
-        {
-            return true
-        }
-
-        // Check max blob fee per gas
-        if let Some(existing_max_blob_fee_per_gas) = self.transaction.max_fee_per_blob_gas() {
-            // This enforces that blob txs can only be replaced by blob txs
-            let replacement_max_blob_fee_per_gas =
-                maybe_replacement.transaction.max_fee_per_blob_gas().unwrap_or_default();
-            if replacement_max_blob_fee_per_gas < required_bumped_fee(existing_max_blob_fee_per_gas)
-            {
-                return true
-            }
-        }
-
-        false
+    pub fn is_replacement_underpriced(
+        &self,
+        maybe_replacement: &Self,
+        price_bumps: &PriceBumpConfig,
+    ) -> bool {
+        self.transaction.is_replacement_underpriced(&maybe_replacement.transaction, price_bumps)
     }
 }
 
