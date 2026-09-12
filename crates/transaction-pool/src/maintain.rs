@@ -8,7 +8,7 @@ use crate::{
     AllPoolTransactions, BlobTransactionSidecarVariant, BlockInfo, PoolTransaction, PoolUpdateKind,
     TransactionOrigin,
 };
-use alloy_consensus::{transaction::TxHashRef, BlockHeader, Typed2718};
+use alloy_consensus::{transaction::TxHashRef, BlockHeader, Transaction, Typed2718};
 use alloy_eips::{BlockNumberOrTag, Decodable2718};
 use alloy_primitives::{
     map::{AddressSet, HashSet},
@@ -40,6 +40,56 @@ use tokio::{
     time::{self, Duration},
 };
 use tracing::{debug, error, info, trace, warn};
+
+/// Restores persisted blob bodies with their sparse sidecars through normal pool validation.
+async fn restore_blob_transactions<
+    P: TransactionPool<Transaction: EthPoolTransaction>,
+    C: BlockReaderIdExt,
+>(
+    pool: P,
+    client: C,
+) {
+    let store = pool.blob_store();
+    let mut transactions = Vec::new();
+    for (hash, body) in store.transactions() {
+        if client.transaction_by_hash(hash).is_ok_and(|tx| tx.is_some()) {
+            continue
+        }
+
+        let Some(tx) =
+            <P::Transaction as PoolTransaction>::Consensus::decode_2718(&mut body.as_ref())
+                .ok()
+                .filter(|tx| *tx.tx_hash() == hash)
+                .and_then(|tx| tx.try_into_recovered().ok())
+        else {
+            let _ = store.delete(hash);
+            continue
+        };
+        transactions.push((hash, tx));
+    }
+    // Blob admission rejects nonce gaps, while the disk index is ordered by hash.
+    transactions.sort_unstable_by_key(|(_, tx)| (tx.signer(), tx.nonce()));
+    for (hash, tx) in transactions {
+        if pool.get(&hash).is_some() {
+            continue
+        }
+        let Ok(Some(sidecar)) = store.get_pooled_sidecar(hash) else { continue };
+        let Some(mut tx) = P::Transaction::try_from_eip4844(tx, sidecar.elided_sidecar()) else {
+            let _ = store.delete(hash);
+            continue
+        };
+        tx.set_blob_sidecar(sidecar.as_ref().clone());
+        if let Err(err) = pool.add_transaction(sidecar.origin(), tx).await {
+            debug!(target: "txpool", %hash, %err, "Failed to restore persisted blob transaction");
+            if pool.get(&hash).is_none() &&
+                client.transaction_by_hash(hash).is_ok_and(|tx| tx.is_none())
+            {
+                let _ = store.delete(hash);
+            }
+        }
+    }
+    store.cleanup();
+}
 
 /// Maximum amount of time non-executable transaction are queued.
 pub const MAX_QUEUED_TRANSACTION_LIFETIME: Duration = Duration::from_secs(3 * 60 * 60);
@@ -158,8 +208,28 @@ pub async fn maintain_transaction_pool<N, Client, P, St>(
         pool.set_block_info(info);
     }
 
+    let restore_pool = pool.clone();
+    let restore_client = client.clone();
+    task_spawner.spawn_blocking_task(async move {
+        restore_blob_transactions(restore_pool, restore_client).await;
+    });
+
     // keeps track of mined blob transaction so we can clean finalized transactions
     let mut blob_store_tracker = BlobStoreCanonTracker::default();
+    let finalized = client.finalized_block_number().ok().flatten().unwrap_or_default();
+    let mut mined = std::collections::BTreeMap::<u64, Vec<alloy_primitives::B256>>::new();
+    let store = pool.blob_store();
+    for hash in store.transaction_hashes() {
+        if let Ok(Some((_, meta))) = client.transaction_by_hash_with_meta(hash) {
+            if meta.block_number <= finalized {
+                let _ = store.delete(hash);
+            } else {
+                mined.entry(meta.block_number).or_default().push(hash);
+            }
+        }
+    }
+    blob_store_tracker.add_blocks(mined);
+    store.cleanup();
 
     // keeps track of the latest finalized block
     let mut last_finalized_block =
@@ -176,6 +246,8 @@ pub async fn maintain_transaction_pool<N, Client, P, St>(
 
     // eviction interval for stale non local txs
     let mut stale_eviction_interval = time::interval(config.max_tx_lifetime);
+    let mut blob_cache_interval = time::interval(Duration::from_secs(1));
+    let blob_cache_permit = Arc::new(tokio::sync::Semaphore::new(1));
 
     // toggle for the first notification
     let mut first_event = true;
@@ -254,6 +326,20 @@ pub async fn maintain_transaction_pool<N, Client, P, St>(
         // select of account reloads and new canonical state updates which should arrive at the rate
         // of the block time
         tokio::select! {
+            _ = blob_cache_interval.tick() => {
+                if let Ok(permit) = blob_cache_permit.clone().try_acquire_owned() {
+                    let cache_pool = pool.clone();
+                    task_spawner.spawn_blocking_task(async move {
+                        let _permit = permit;
+                        let mut candidates = cache_pool.pending_transactions();
+                        candidates.retain(|tx| tx.is_eip4844());
+                        candidates.sort_unstable_by_key(|tx| std::cmp::Reverse(tx.transaction.effective_tip_per_gas(cache_pool.block_info().pending_basefee)));
+                        let mut hashes: Vec<_> = candidates.iter().take(64).map(|tx| *tx.hash()).collect();
+                        hashes.reverse();
+                        cache_pool.blob_store().warm_transactions(&hashes);
+                    });
+                }
+            }
             res = &mut reload_accounts_fut =>  {
                 reloaded = Some(res);
             }
@@ -392,20 +478,15 @@ pub async fn maintain_transaction_pool<N, Client, P, St>(
                     .filter_map(|(signer, tx)| {
                         let tx = tx.clone().with_signer(*signer);
                         if tx.is_eip4844() {
-                            // reorged blobs no longer include the blob, which is necessary for
-                            // validating the transaction. Even though the transaction could have
-                            // been validated previously, we still need the blob in order to
-                            // accurately set the transaction's
-                            // encoded-length which is propagated over the network.
-                            pool.get_blob(*tx.tx_hash())
-                                .ok()
-                                .flatten()
-                                .map(Arc::unwrap_or_clone)
-                                .and_then(|sidecar| {
-                                    <P as TransactionPool>::Transaction::try_from_eip4844(
-                                        tx, sidecar,
-                                    )
-                                })
+                            let stored =
+                                pool.blob_store().get_pooled_sidecar(*tx.tx_hash()).ok()??;
+                            let mut transaction =
+                                <P as TransactionPool>::Transaction::try_from_eip4844(
+                                    tx,
+                                    stored.elided_sidecar(),
+                                )?;
+                            transaction.set_blob_sidecar(stored.as_ref().clone());
+                            Some(transaction)
                         } else {
                             <P as TransactionPool>::Transaction::try_from_consensus(tx).ok()
                         }

@@ -2,7 +2,7 @@
 
 use super::constants::DEFAULT_MAX_TX_INPUT_BYTES;
 use crate::{
-    blobstore::{BlobStore, PooledBlobSidecar},
+    blobstore::{BlobStore, BlobTxCellSidecar, PooledBlobSidecar},
     error::{
         Eip4844PoolTransactionError, Eip7702PoolTransactionError, InvalidPoolTransactionError,
     },
@@ -811,15 +811,18 @@ where
                     // is stripped from the transaction and not included in a block.
                     // check if the blob is in the store, if it's included we previously validated
                     // it and inserted it
-                    if self.blob_store.contains(*transaction.hash()).is_ok_and(|c| c) {
-                        // validated transaction is already in the store
+                    if let Ok(Some(stored)) =
+                        self.blob_store.get_pooled_sidecar(*transaction.hash())
+                    {
+                        transaction.set_blob_sidecar(stored.as_ref().clone());
+                        transaction.take_blob();
                     } else {
                         return Err(InvalidPoolTransactionError::Eip4844(
                             Eip4844PoolTransactionError::MissingEip4844BlobSidecar,
                         ))
                     }
                 }
-                EthBlobTransactionSidecar::Present(sidecar) => {
+                EthBlobTransactionSidecar::Present(mut sidecar) => {
                     let now = Instant::now();
 
                     // EIP-7594 sidecar version handling
@@ -845,12 +848,33 @@ where
                         }
                     }
 
+                    if sidecar.cells().is_none() &&
+                        let Some(full) = sidecar.as_eip7594()
+                    {
+                        let cells = BlobTxCellSidecar::from_full(full, self.kzg_settings.get())
+                            .map_err(|err| {
+                                InvalidPoolTransactionError::Eip4844(
+                                    Eip4844PoolTransactionError::InvalidEip4844Blob(err),
+                                )
+                            })?;
+                        sidecar = PooledBlobSidecar::from_cells(cells);
+                    }
                     // validate the blob
-                    if let Err(err) = transaction.validate_blob(&sidecar, self.kzg_settings.get()) {
+                    let validation = if let Some(cells) = sidecar.cells() {
+                        cells.validate(
+                            transaction.blob_versioned_hashes().unwrap_or_default(),
+                            self.kzg_settings.get(),
+                        )
+                    } else {
+                        transaction.validate_blob(&sidecar, self.kzg_settings.get())
+                    };
+                    if let Err(err) = validation {
                         return Err(InvalidPoolTransactionError::Eip4844(
                             Eip4844PoolTransactionError::InvalidEip4844Blob(err),
                         ))
                     }
+                    transaction.set_blob_sidecar(sidecar.clone());
+                    transaction.take_blob();
                     // Record the duration of successful blob validation as histogram
                     self.validation_metrics.blob_validation_duration.record(now.elapsed());
                     // store the extracted blob

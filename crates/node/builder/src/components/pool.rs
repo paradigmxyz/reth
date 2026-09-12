@@ -220,13 +220,14 @@ pub fn create_blob_store_with_cache<Node: FullNodeTypes>(
     cache_size: Option<u32>,
 ) -> eyre::Result<DiskFileBlobStore> {
     let data_dir = ctx.config().datadir();
-    let config = if let Some(cache_size) = cache_size {
+    let mut config = if let Some(cache_size) = cache_size {
         reth_transaction_pool::blobstore::DiskFileBlobStoreConfig::default()
             .with_max_cached_entries(cache_size)
     } else {
         Default::default()
     };
 
+    config.open = reth_transaction_pool::blobstore::OpenDiskFileBlobStore::ReIndex;
     Ok(reth_transaction_pool::blobstore::DiskFileBlobStore::open(data_dir.blobstore(), config)?)
 }
 

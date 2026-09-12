@@ -10,7 +10,7 @@ use super::{
     broadcast::NewBlockHashes, BlockAccessLists, BlockBodies, BlockHeaders, GetBlockAccessLists,
     GetBlockBodies, GetBlockHeaders, GetNodeData, GetPooledTransactions, GetReceipts,
     GetReceipts70, NewPooledTransactionHashes66, NewPooledTransactionHashes68, NodeData,
-    PooledTransactions, Receipts, Status, StatusEth69, Transactions,
+    PooledTransactions, PooledTransactionsEth72, Receipts, Status, StatusEth69, Transactions,
 };
 use crate::{
     status::StatusMessage, BlockRangeUpdate, BroadcastPoolTransactions, Cells,
@@ -152,9 +152,15 @@ impl<N: NetworkPrimitives> ProtocolMessage<N> {
                 EthMessage::GetPooledTransactions(RequestPair::decode(buf)?)
             }
             EthMessageID::PooledTransactions => {
-                EthMessage::PooledTransactions(RequestPair::decode_with(buf, |buf| {
-                    PooledTransactions::decode_with_memory_budget(buf, tx_memory_budget)
-                })?)
+                if version >= EthVersion::Eth72 {
+                    EthMessage::PooledTransactionsEth72(RequestPair::decode_with(buf, |buf| {
+                        PooledTransactionsEth72::decode_with_memory_budget(buf, tx_memory_budget)
+                    })?)
+                } else {
+                    EthMessage::PooledTransactions(RequestPair::decode_with(buf, |buf| {
+                        PooledTransactions::decode_with_memory_budget(buf, tx_memory_budget)
+                    })?)
+                }
             }
             EthMessageID::GetNodeData => {
                 if version >= EthVersion::Eth67 {
@@ -215,13 +221,24 @@ impl<N: NetworkPrimitives> ProtocolMessage<N> {
                 if version < EthVersion::Eth72 {
                     return Err(MessageError::Invalid(version, EthMessageID::Cells))
                 }
-                EthMessage::Cells(RequestPair::decode(buf)?)
+                EthMessage::Cells(RequestPair::decode_with(buf, |buf| {
+                    Ok(Cells {
+                        hashes: Decodable::decode(buf)?,
+                        cells: Decodable::decode(buf)?,
+                        cell_mask: Decodable::decode(buf)?,
+                    })
+                })?)
             }
             EthMessageID::GetCells => {
                 if version < EthVersion::Eth72 {
                     return Err(MessageError::Invalid(version, EthMessageID::GetCells))
                 }
-                EthMessage::GetCells(RequestPair::decode(buf)?)
+                EthMessage::GetCells(RequestPair::decode_with(buf, |buf| {
+                    Ok(GetCells {
+                        hashes: Decodable::decode(buf)?,
+                        cell_mask: Decodable::decode(buf)?,
+                    })
+                })?)
             }
             EthMessageID::Other(_) => {
                 let raw_payload = Bytes::copy_from_slice(buf);
@@ -358,6 +375,12 @@ pub enum EthMessage<N: NetworkPrimitives = EthNetworkPrimitives> {
         serde(bound = "N::PooledTransaction: serde::Serialize + serde::de::DeserializeOwned")
     )]
     PooledTransactions(RequestPair<PooledTransactions<N::PooledTransaction>>),
+    /// Represents an eth/72 `PooledTransactions` response.
+    ///
+    /// This is kept separate from [`Self::PooledTransactions`] only to select the eth/72 wire
+    /// encoding. It uses the same protocol message ID and is normalized back to the regular typed
+    /// response after decoding.
+    PooledTransactionsEth72(RequestPair<PooledTransactionsEth72<N::PooledTransaction>>),
     /// Represents a `GetNodeData` request-response pair.
     GetNodeData(RequestPair<GetNodeData>),
     /// Represents a `NodeData` request-response pair.
@@ -426,7 +449,9 @@ impl<N: NetworkPrimitives> EthMessage<N> {
             Self::GetBlockBodies(_) => EthMessageID::GetBlockBodies,
             Self::BlockBodies(_) => EthMessageID::BlockBodies,
             Self::GetPooledTransactions(_) => EthMessageID::GetPooledTransactions,
-            Self::PooledTransactions(_) => EthMessageID::PooledTransactions,
+            Self::PooledTransactions(_) | Self::PooledTransactionsEth72(_) => {
+                EthMessageID::PooledTransactions
+            }
             Self::GetNodeData(_) => EthMessageID::GetNodeData,
             Self::NodeData(_) => EthMessageID::NodeData,
             Self::GetReceipts(_) | Self::GetReceipts70(_) => EthMessageID::GetReceipts,
@@ -460,6 +485,7 @@ impl<N: NetworkPrimitives> EthMessage<N> {
         matches!(
             self,
             Self::PooledTransactions(_) |
+                Self::PooledTransactionsEth72(_) |
                 Self::Receipts(_) |
                 Self::Receipts69(_) |
                 Self::Receipts70(_) |
@@ -481,6 +507,15 @@ impl<N: NetworkPrimitives> EthMessage<N> {
         // user-facing `PeerRequest` API unchanged.
         if version >= EthVersion::Eth70 {
             return match self {
+                Self::PooledTransactions(pair) if version >= EthVersion::Eth72 => {
+                    // The request/response API remains version-neutral. Only the final wire
+                    // representation changes for an eth/72 peer.
+                    let RequestPair { request_id, message } = pair;
+                    Self::PooledTransactionsEth72(RequestPair {
+                        request_id,
+                        message: PooledTransactionsEth72::from_transactions(message),
+                    })
+                }
                 Self::GetReceipts(pair) => {
                     let RequestPair { request_id, message } = pair;
                     let req = RequestPair {
@@ -516,18 +551,45 @@ impl<N: NetworkPrimitives> Encodable for EthMessage<N> {
             Self::BlockBodies(bodies) => bodies.encode(out),
             Self::GetPooledTransactions(request) => request.encode(out),
             Self::PooledTransactions(transactions) => transactions.encode(out),
+            Self::PooledTransactionsEth72(transactions) => transactions.encode(out),
             Self::GetNodeData(request) => request.encode(out),
             Self::NodeData(data) => data.encode(out),
             Self::GetReceipts(request) => request.encode(out),
             Self::GetReceipts70(request) => request.encode(out),
             Self::GetBlockAccessLists(request) => request.encode(out),
-            Self::GetCells(request) => request.encode(out),
+            Self::GetCells(request) => {
+                // ETH/72 cell packets put their fields directly after the request ID.
+                Header {
+                    list: true,
+                    payload_length: request.request_id.length() +
+                        request.message.hashes.length() +
+                        request.message.cell_mask.length(),
+                }
+                .encode(out);
+                request.request_id.encode(out);
+                request.message.hashes.encode(out);
+                request.message.cell_mask.encode(out);
+            }
             Self::Receipts(receipts) => receipts.encode(out),
             Self::Receipts69(receipt69) => receipt69.encode(out),
             Self::Receipts70(receipt70) => receipt70.encode(out),
             Self::BlockAccessLists(block_access_lists) => block_access_lists.encode(out),
             Self::BlockRangeUpdate(block_range_update) => block_range_update.encode(out),
-            Self::Cells(cells) => cells.encode(out),
+            Self::Cells(cells) => {
+                // ETH/72 cell packets put their fields directly after the request ID.
+                Header {
+                    list: true,
+                    payload_length: cells.request_id.length() +
+                        cells.message.hashes.length() +
+                        cells.message.cells.length() +
+                        cells.message.cell_mask.length(),
+                }
+                .encode(out);
+                cells.request_id.encode(out);
+                cells.message.hashes.encode(out);
+                cells.message.cells.encode(out);
+                cells.message.cell_mask.encode(out);
+            }
             Self::Other(unknown) => out.put_slice(&unknown.payload),
         }
     }
@@ -546,18 +608,30 @@ impl<N: NetworkPrimitives> Encodable for EthMessage<N> {
             Self::BlockBodies(bodies) => bodies.length(),
             Self::GetPooledTransactions(request) => request.length(),
             Self::PooledTransactions(transactions) => transactions.length(),
+            Self::PooledTransactionsEth72(transactions) => transactions.length(),
             Self::GetNodeData(request) => request.length(),
             Self::NodeData(data) => data.length(),
             Self::GetReceipts(request) => request.length(),
             Self::GetReceipts70(request) => request.length(),
             Self::GetBlockAccessLists(request) => request.length(),
-            Self::GetCells(request) => request.length(),
+            Self::GetCells(request) => {
+                let length = request.request_id.length() +
+                    request.message.hashes.length() +
+                    request.message.cell_mask.length();
+                length + length_of_length(length)
+            }
             Self::Receipts(receipts) => receipts.length(),
             Self::Receipts69(receipt69) => receipt69.length(),
             Self::Receipts70(receipt70) => receipt70.length(),
             Self::BlockAccessLists(block_access_lists) => block_access_lists.length(),
             Self::BlockRangeUpdate(block_range_update) => block_range_update.length(),
-            Self::Cells(cells) => cells.length(),
+            Self::Cells(cells) => {
+                let length = cells.request_id.length() +
+                    cells.message.hashes.length() +
+                    cells.message.cells.length() +
+                    cells.message.cell_mask.length();
+                length + length_of_length(length)
+            }
             Self::Other(unknown) => unknown.length(),
         }
     }
@@ -903,6 +977,77 @@ mod tests {
         let mut buf = vec![];
         value.encode(&mut buf);
         buf
+    }
+
+    #[test]
+    fn eth72_cell_packets_match_geth_vectors() {
+        use crate::{Cells, GetCells};
+        use alloy_eips::eip7594::Cell;
+        use alloy_primitives::{keccak256, B128, B256};
+
+        // Generated with Geth 24b38e763fdd7dee8b91007d5f1a94cd21c9a7f0.
+        let mask = B128::from((1u128 | (1 << 8) | (1 << 127)).to_le_bytes());
+        let hash =
+            B256::from(hex!("0000000000000000000000000000000000000000000000000000000000001234"));
+        let request = EthMessage::<EthNetworkPrimitives>::GetCells(RequestPair {
+            request_id: 42,
+            message: GetCells { hashes: vec![hash], cell_mask: mask },
+        });
+        let empty = EthMessage::Cells(RequestPair {
+            request_id: 42,
+            message: Cells { cell_mask: mask, ..Default::default() },
+        });
+        assert_eq!(alloy_rlp::encode(&request), hex!("f42ae1a000000000000000000000000000000000000000000000000000000000000012349001010000000000000000000000000080"));
+        assert_eq!(alloy_rlp::encode(&empty), hex!("d42ac0c09001010000000000000000000000000080"));
+        let mut cell = Cell::default();
+        cell[0] = 1;
+        cell[2047] = 2;
+        let response = EthMessage::Cells(RequestPair {
+            request_id: 42,
+            message: Cells { hashes: vec![hash], cells: vec![vec![cell; 3]], cell_mask: mask },
+        });
+        let encoded = alloy_rlp::encode(&response);
+        assert_eq!(encoded.len(), 6214);
+        assert_eq!(
+            keccak256(&encoded),
+            B256::from(hex!("72c2afa3c896b0666ae473f075c1fc48133563f4bc8d22f7c1abb2aaf215dc3f"))
+        );
+        for message in [request, empty, response] {
+            let encoded = alloy_rlp::encode(&message);
+            assert_eq!(encoded.len(), message.length());
+            let mut packet = vec![message.message_id().to_u8()];
+            packet.extend_from_slice(&encoded);
+            let mut input = packet.as_slice();
+            assert_eq!(
+                ProtocolMessage::decode_message(EthVersion::Eth72, &mut input).unwrap().message,
+                message
+            );
+            assert!(input.is_empty());
+            assert!(ProtocolMessage::<EthNetworkPrimitives>::decode_message(
+                EthVersion::Eth71,
+                &mut packet.as_slice()
+            )
+            .is_err());
+        }
+    }
+
+    #[test]
+    fn eth72_cell_packets_reject_nested_fields() {
+        use crate::{Cells, GetCells};
+        let request = RequestPair { request_id: 42, message: GetCells::default() };
+        let response = RequestPair { request_id: 42, message: Cells::default() };
+        for (id, encoded) in [
+            (EthMessageID::GetCells, alloy_rlp::encode(request)),
+            (EthMessageID::Cells, alloy_rlp::encode(response)),
+        ] {
+            let mut packet = vec![id.to_u8()];
+            packet.extend(encoded);
+            assert!(ProtocolMessage::<EthNetworkPrimitives>::decode_message(
+                EthVersion::Eth72,
+                &mut packet.as_slice()
+            )
+            .is_err());
+        }
     }
 
     #[test]

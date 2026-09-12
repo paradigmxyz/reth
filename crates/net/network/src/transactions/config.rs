@@ -32,6 +32,10 @@ pub struct TransactionsManagerConfig {
     /// Max number of transactions allowed to be imported concurrently.
     #[cfg_attr(feature = "serde", serde(default = "default_max_pending_pool_imports"))]
     pub max_pending_pool_imports: usize,
+    /// Percentage of blob transactions fetched in full, with a minimum of 15; 100 disables
+    /// sampling.
+    #[cfg_attr(feature = "serde", serde(default = "default_blob_fetch_probability"))]
+    pub blob_fetch_probability: u8,
     /// How new pending transactions are propagated.
     #[cfg_attr(feature = "serde", serde(default))]
     pub propagation_mode: TransactionPropagationMode,
@@ -56,12 +60,17 @@ const fn default_tx_channel_memory_limit_bytes() -> usize {
     DEFAULT_TX_MANAGER_CHANNEL_MEMORY_LIMIT_BYTES
 }
 
+const fn default_blob_fetch_probability() -> u8 {
+    15
+}
+
 impl Default for TransactionsManagerConfig {
     fn default() -> Self {
         Self {
             transaction_fetcher_config: TransactionFetcherConfig::default(),
             max_transactions_seen_by_peer_history: DEFAULT_MAX_COUNT_TRANSACTIONS_SEEN_BY_PEER,
             max_pending_pool_imports: DEFAULT_MAX_COUNT_PENDING_POOL_IMPORTS,
+            blob_fetch_probability: default_blob_fetch_probability(),
             propagation_mode: TransactionPropagationMode::default(),
             ingress_policy: TransactionIngressPolicy::default(),
             tx_channel_memory_limit_bytes: DEFAULT_TX_MANAGER_CHANNEL_MEMORY_LIMIT_BYTES,

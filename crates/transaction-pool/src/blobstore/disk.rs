@@ -1,4 +1,4 @@
-//! A simple diskstore for blobs
+//! Persistent full and cell-based blob sidecars.
 
 use crate::blobstore::{
     BlobStore, BlobStoreCleanupStat, BlobStoreError, BlobStoreSize, PooledBlobSidecar,
@@ -6,767 +6,412 @@ use crate::blobstore::{
 use alloy_eips::{
     eip4844::{BlobAndProofV1, BlobAndProofV2, BlobCellsAndProofsV1},
     eip7594::{BlobCellMask, BlobTransactionSidecarVariant, Cell},
-    eip7840::BlobParams,
-    merge::EPOCH_SLOTS,
 };
-use alloy_primitives::{map::B256Set, TxHash, B256};
+use alloy_primitives::{
+    map::{B256Map, B256Set},
+    TxHash, B256,
+};
 use parking_lot::{Mutex, RwLock};
-use schnellru::{ByLength, LruMap};
-use std::{fmt, fs, io, path::PathBuf, sync::Arc};
-use tracing::{debug, trace};
+use schnellru::{Limiter, LruMap};
+use std::{
+    fs,
+    io::{self, Write},
+    path::PathBuf,
+    sync::Arc,
+};
+use tracing::debug;
 
-/// How many [`BlobTransactionSidecarVariant`] to cache in memory.
+/// Maximum number of sidecars retained in the memory cache by default.
 pub const DEFAULT_MAX_CACHED_BLOBS: u32 = 100;
 
-/// A cache size heuristic based on the highest blob params
+/// A disk-backed blob store with a bounded decoded-sidecar cache.
 ///
-/// This uses the max blobs per tx and max blobs per block over 16 epochs: `21 * 6 * 512 = 64512`
-/// This should be ~4MB
-const VERSIONED_HASH_TO_TX_HASH_CACHE_SIZE: u64 =
-    BlobParams::bpo2().max_blobs_per_tx * BlobParams::bpo2().max_blob_count * EPOCH_SLOTS * 16;
-
-/// A blob store that stores blob data on disk.
-///
-/// The type uses deferred deletion, meaning that blobs are not immediately deleted from disk, but
-/// it's expected that the maintenance task will call [`BlobStore::cleanup`] to remove the deleted
-/// blobs from disk.
+/// Cell-backed entries are served without reconstructing blobs. Full blobs are reconstructed only
+/// for legacy consumers, then memoized with the cached sidecar. Deletion is deferred to cleanup.
 #[derive(Clone, Debug)]
 pub struct DiskFileBlobStore {
     inner: Arc<DiskFileBlobStoreInner>,
 }
 
 impl DiskFileBlobStore {
-    /// Opens and initializes a new disk file blob store according to the given options.
+    /// Opens the store, optionally retaining and re-indexing existing sidecars.
     pub fn open(
         blob_dir: impl Into<PathBuf>,
         opts: DiskFileBlobStoreConfig,
     ) -> Result<Self, DiskFileBlobStoreError> {
         let blob_dir = blob_dir.into();
-        let DiskFileBlobStoreConfig { max_cached_entries, .. } = opts;
-        let inner = DiskFileBlobStoreInner::new(blob_dir, max_cached_entries);
-
-        // initialize the blob store
-        inner.delete_all()?;
-        inner.create_blob_dir()?;
-
-        Ok(Self { inner: Arc::new(inner) })
+        if opts.open == OpenDiskFileBlobStore::Clear {
+            match fs::remove_dir_all(&blob_dir) {
+                Ok(()) => {}
+                Err(e) if e.kind() == io::ErrorKind::NotFound => {}
+                Err(e) => return Err(DiskFileBlobStoreError::Open(blob_dir, e)),
+            }
+        }
+        reth_fs_util::create_dir_all(&blob_dir)
+            .map_err(|e| DiskFileBlobStoreError::Open(blob_dir.clone(), io::Error::other(e)))?;
+        let store = Self {
+            inner: Arc::new(DiskFileBlobStoreInner {
+                blob_dir: blob_dir.clone(),
+                blob_cache: Mutex::new(LruMap::new(SidecarCacheLimit {
+                    max_entries: opts.max_cached_entries,
+                    bytes: 0,
+                })),
+                size_tracker: Default::default(),
+                file_lock: Default::default(),
+                txs_to_delete: Default::default(),
+                versioned_hashes_to_txhash: Default::default(),
+                transactions: Default::default(),
+                pinned: Default::default(),
+                cell_mode: Default::default(),
+            }),
+        };
+        if opts.open == OpenDiskFileBlobStore::ReIndex {
+            for entry in reth_fs_util::read_dir(&blob_dir)
+                .map_err(|e| DiskFileBlobStoreError::Open(blob_dir.clone(), io::Error::other(e)))?
+            {
+                let entry = entry.map_err(|e| DiskFileBlobStoreError::Open(blob_dir.clone(), e))?;
+                let Some(name) = entry.file_name().to_str().map(str::to_owned) else { continue };
+                let Ok(tx) = name.parse::<B256>() else { continue };
+                let data = reth_fs_util::read(entry.path())
+                    .map_err(|e| DiskFileBlobStoreError::Open(entry.path(), io::Error::other(e)))?;
+                match PooledBlobSidecar::decode_stored(&data) {
+                    Ok(sidecar) => {
+                        store.inner.index(tx, &sidecar);
+                        store.inner.size_tracker.add_size(data.len());
+                        store.inner.size_tracker.inc_len(1);
+                    }
+                    Err(err) => {
+                        debug!(target: "txpool::blob", %tx, %err, "Discarding corrupt blob sidecar");
+                        reth_fs_util::remove_file(entry.path()).map_err(|e| {
+                            DiskFileBlobStoreError::Open(entry.path(), io::Error::other(e))
+                        })?;
+                    }
+                }
+            }
+        }
+        Ok(store)
     }
 
     #[cfg(test)]
     fn is_cached(&self, tx: &B256) -> bool {
         self.inner.blob_cache.lock().get(tx).is_some()
     }
-
     #[cfg(test)]
     fn clear_cache(&self) {
-        self.inner.blob_cache.lock().clear()
+        self.inner.blob_cache.lock().clear();
     }
 
-    /// Look up EIP-7594 blobs by their versioned hashes.
-    ///
-    /// This returns a result vector with the **same length and order** as the input
-    /// `versioned_hashes`. Each element is `Some(BlobAndProofV2)` if the blob is available, or
-    /// `None` if it is missing or an older sidecar version.
-    ///
-    /// The lookup first scans the in-memory cache and, if not all blobs are found, falls back to
-    /// reading candidate sidecars from disk using the `versioned_hash -> tx_hash` index.
-    fn get_by_versioned_hashes_eip7594(
-        &self,
-        versioned_hashes: &[B256],
-    ) -> Result<Vec<Option<BlobAndProofV2>>, BlobStoreError> {
-        // we must return the blobs in order but we don't necessarily find them in the requested
-        // order
-        let mut result = vec![None; versioned_hashes.len()];
-        let mut missing_count = result.len();
-        // first scan all cached full sidecars
-        for (_tx_hash, blob_sidecar) in self.inner.blob_cache.lock().iter() {
-            if let Some(blob_sidecar) = blob_sidecar.as_eip7594() {
-                for (hash_idx, match_result) in
-                    blob_sidecar.match_versioned_hashes(versioned_hashes)
-                {
-                    let slot = &mut result[hash_idx];
-                    if slot.is_none() {
-                        missing_count -= 1;
-                    }
-                    *slot = Some(match_result);
-                }
-            }
-
-            // return early if all blobs are found.
-            if missing_count == 0 {
-                // since versioned_hashes may have duplicates, we double check here
-                if result.iter().all(|blob| blob.is_some()) {
-                    return Ok(result);
-                }
+    fn candidates(&self, hashes: &[B256]) -> Result<Vec<Arc<PooledBlobSidecar>>, BlobStoreError> {
+        let txs: B256Set = {
+            let index = self.inner.versioned_hashes_to_txhash.read();
+            hashes.iter().filter_map(|hash| index.get(hash)).flatten().copied().collect()
+        };
+        let mut result = Vec::with_capacity(txs.len());
+        for tx in txs {
+            if let Some(sidecar) = self.get_pooled_sidecar(tx)? {
+                result.push(sidecar);
             }
         }
-
-        // not all versioned hashes were found, try to look up a matching tx
-        let mut missing_tx_hashes = Vec::new();
-        let mut seen_missing_tx_hashes = B256Set::default();
-
-        {
-            let mut versioned_to_txhashes = self.inner.versioned_hashes_to_txhash.lock();
-            for (idx, _) in
-                result.iter().enumerate().filter(|(_, blob_and_proof)| blob_and_proof.is_none())
-            {
-                // this is safe because the result vec has the same len
-                let versioned_hash = versioned_hashes[idx];
-                if let Some(tx_hash) = versioned_to_txhashes.get(&versioned_hash).copied() &&
-                    seen_missing_tx_hashes.insert(tx_hash)
-                {
-                    missing_tx_hashes.push(tx_hash);
-                }
-            }
-        }
-
-        // if we have missing blobs, try to read them from disk and try again
-        if !missing_tx_hashes.is_empty() {
-            let blobs_from_disk = self.inner.read_many_decoded(missing_tx_hashes);
-            for (_, blob_sidecar) in blobs_from_disk {
-                if let Some(blob_sidecar) = blob_sidecar.as_eip7594() {
-                    for (hash_idx, match_result) in
-                        blob_sidecar.match_versioned_hashes(versioned_hashes)
-                    {
-                        if result[hash_idx].is_none() {
-                            result[hash_idx] = Some(match_result);
-                        }
-                    }
-                }
-            }
-        }
-
-        Ok(result)
-    }
-
-    /// Look up EIP-7594 blob cells by their versioned hashes.
-    fn get_by_versioned_hashes_cells_eip7594(
-        &self,
-        versioned_hashes: &[B256],
-        cell_mask: BlobCellMask,
-    ) -> Result<Vec<Option<BlobCellsAndProofsV1>>, BlobStoreError> {
-        let mut result = vec![None; versioned_hashes.len()];
-        let mut missing_count = result.len();
-
-        let cached_blob_sidecars = self
-            .inner
-            .blob_cache
-            .lock()
-            .iter()
-            .map(|(_, blob_sidecar)| Arc::clone(blob_sidecar))
-            .collect::<Vec<_>>();
-        for blob_sidecar in cached_blob_sidecars {
-            if let Some(blob_sidecar) = blob_sidecar.as_eip7594() {
-                for (hash_idx, match_result) in blob_sidecar
-                    .match_versioned_hashes_cells(versioned_hashes, cell_mask)
-                    .map_err(|err| BlobStoreError::Other(Box::new(err)))?
-                {
-                    let slot = &mut result[hash_idx];
-                    if slot.is_none() {
-                        missing_count -= 1;
-                    }
-                    *slot = Some(match_result);
-                }
-            }
-
-            if missing_count == 0 && result.iter().all(Option::is_some) {
-                return Ok(result)
-            }
-        }
-
-        let mut missing_tx_hashes = Vec::new();
-        let mut seen_missing_tx_hashes = B256Set::default();
-        {
-            let mut versioned_to_txhashes = self.inner.versioned_hashes_to_txhash.lock();
-            for (idx, _) in
-                result.iter().enumerate().filter(|(_, cells_and_proofs)| cells_and_proofs.is_none())
-            {
-                let versioned_hash = versioned_hashes[idx];
-                if let Some(tx_hash) = versioned_to_txhashes.get(&versioned_hash).copied() &&
-                    seen_missing_tx_hashes.insert(tx_hash)
-                {
-                    missing_tx_hashes.push(tx_hash);
-                }
-            }
-        }
-
-        if !missing_tx_hashes.is_empty() {
-            let blobs_from_disk = self.inner.read_many_decoded(missing_tx_hashes);
-            for (_, blob_sidecar) in blobs_from_disk {
-                if let Some(blob_sidecar) = blob_sidecar.as_eip7594() {
-                    for (hash_idx, match_result) in blob_sidecar
-                        .match_versioned_hashes_cells(versioned_hashes, cell_mask)
-                        .map_err(|err| BlobStoreError::Other(Box::new(err)))?
-                    {
-                        if result[hash_idx].is_none() {
-                            result[hash_idx] = Some(match_result);
-                        }
-                    }
-                }
-            }
-        }
-
         Ok(result)
     }
 }
 
 impl BlobStore for DiskFileBlobStore {
+    fn set_cell_mode(&self) {
+        self.inner.cell_mode.store(true, std::sync::atomic::Ordering::Relaxed);
+    }
+
+    fn warm_transactions(&self, hashes: &[B256]) {
+        for hash in hashes {
+            if let Ok(Some(sidecar)) = self.get_pooled_sidecar(*hash) &&
+                !self.inner.cell_mode.load(std::sync::atomic::Ordering::Relaxed)
+            {
+                let _ = sidecar.full_sidecar();
+            }
+        }
+    }
+
+    fn warm_versioned_hashes(&self, hashes: &[B256]) {
+        let txs: B256Set = self
+            .inner
+            .versioned_hashes_to_txhash
+            .read()
+            .iter()
+            .filter(|(hash, _)| hashes.contains(hash))
+            .flat_map(|(_, txs)| txs.iter().copied())
+            .collect();
+        for tx in txs {
+            let Ok(Some(sidecar)) = self.get_pooled_sidecar(tx) else { continue };
+            if !self.inner.cell_mode.load(std::sync::atomic::Ordering::Relaxed) {
+                let _ = sidecar.full_sidecar();
+            }
+            let _lock = self.inner.file_lock.read();
+            if !self
+                .inner
+                .blob_cache
+                .lock()
+                .peek(&tx)
+                .is_some_and(|current| Arc::ptr_eq(current, &sidecar))
+            {
+                continue
+            }
+            let now = std::time::Instant::now();
+            let mut pinned = self.inner.pinned.lock();
+            pinned.retain(|_, (expires, _)| *expires > now);
+            let used: usize = pinned
+                .iter()
+                .filter(|(hash, _)| **hash != tx)
+                .map(|(_, (_, sidecar))| SidecarCacheLimit::cost(sidecar))
+                .sum();
+            if used + SidecarCacheLimit::cost(&sidecar) <= SidecarCacheLimit::MAX_BYTES {
+                pinned.insert(tx, (now + std::time::Duration::from_secs(1), sidecar));
+            }
+        }
+    }
+
+    fn transaction_hashes(&self) -> Vec<B256> {
+        self.inner
+            .versioned_hashes_to_txhash
+            .read()
+            .values()
+            .flatten()
+            .copied()
+            .collect::<B256Set>()
+            .into_iter()
+            .collect()
+    }
+
+    fn transactions(&self) -> Vec<(B256, alloy_primitives::Bytes)> {
+        self.inner.transactions.read().iter().map(|(hash, body)| (*hash, body.clone())).collect()
+    }
+
     fn insert(&self, tx: B256, data: PooledBlobSidecar) -> Result<(), BlobStoreError> {
-        self.inner.insert_one(tx, data.into_sidecar())
+        let encoded = data.encode_stored();
+        let _lock = self.inner.file_lock.write();
+        let path = self.inner.blob_disk_file(tx);
+        let previous_size = fs::metadata(&path).ok().map(|m| m.len() as usize);
+        reth_fs_util::atomic_write_file(&path, |file| file.write_all(&encoded))
+            .map_err(|e| BlobStoreError::Other(Box::new(e)))?;
+        self.inner.index(tx, &data);
+        self.inner.pinned.lock().remove(&tx);
+        self.inner.blob_cache.lock().insert(tx, Arc::new(data));
+        self.inner.txs_to_delete.write().remove(&tx);
+        if let Some(size) = previous_size {
+            self.inner.size_tracker.sub_size(size);
+        } else {
+            self.inner.size_tracker.inc_len(1);
+        }
+        self.inner.size_tracker.add_size(encoded.len());
+        Ok(())
     }
 
     fn insert_all(&self, txs: Vec<(B256, PooledBlobSidecar)>) -> Result<(), BlobStoreError> {
-        if txs.is_empty() {
-            return Ok(())
+        for (tx, sidecar) in txs {
+            self.insert(tx, sidecar)?;
         }
-        let txs = txs.into_iter().map(|(tx, data)| (tx, data.into_sidecar())).collect();
-        self.inner.insert_many(txs)
+        Ok(())
     }
 
     fn delete(&self, tx: B256) -> Result<(), BlobStoreError> {
-        if self.inner.contains(tx)? {
+        let _lock = self.inner.file_lock.read();
+        if self.inner.blob_disk_file(tx).is_file() {
             self.inner.txs_to_delete.write().insert(tx);
         }
         Ok(())
     }
 
     fn delete_all(&self, txs: Vec<B256>) -> Result<(), BlobStoreError> {
-        if txs.is_empty() {
-            return Ok(())
+        for tx in txs {
+            self.delete(tx)?;
         }
-        let txs = self.inner.retain_existing(txs)?;
-        self.inner.txs_to_delete.write().extend(txs);
         Ok(())
     }
 
     fn cleanup(&self) -> BlobStoreCleanupStat {
-        let txs_to_delete = std::mem::take(&mut *self.inner.txs_to_delete.write());
-        let mut stat = BlobStoreCleanupStat::default();
-        let mut subsize = 0;
-        debug!(target:"txpool::blob", num_blobs=%txs_to_delete.len(), "Removing blobs from disk");
-        for tx in txs_to_delete {
+        let _lock = self.inner.file_lock.write();
+        let txs = std::mem::take(&mut *self.inner.txs_to_delete.write());
+        let mut result = BlobStoreCleanupStat::default();
+        for tx in txs {
             let path = self.inner.blob_disk_file(tx);
-            let filesize = fs::metadata(&path).map_or(0, |meta| meta.len());
+            let size = fs::metadata(&path).ok().map(|m| m.len() as usize);
             match fs::remove_file(&path) {
-                Ok(_) => {
-                    stat.delete_succeed += 1;
-                    subsize += filesize;
+                Ok(()) => {}
+                Err(e) if e.kind() == io::ErrorKind::NotFound => {}
+                Err(err) => {
+                    debug!(target: "txpool::blob", %tx, %err, "Failed to delete blob sidecar");
+                    self.inner.txs_to_delete.write().insert(tx);
+                    result.delete_failed += 1;
+                    continue
                 }
-                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-                    // Already deleted by a concurrent cleanup task
-                    stat.delete_succeed += 1;
-                }
-                Err(e) => {
-                    stat.delete_failed += 1;
-                    let err = DiskFileBlobStoreError::DeleteFile(tx, path, e);
-                    debug!(target:"txpool::blob", %err);
-                }
-            };
+            }
+            self.inner.pinned.lock().remove(&tx);
+            self.inner.blob_cache.lock().remove(&tx);
+            self.inner.transactions.write().remove(&tx);
+            self.inner.versioned_hashes_to_txhash.write().retain(|_, txs| {
+                txs.remove(&tx);
+                !txs.is_empty()
+            });
+            if let Some(size) = size {
+                self.inner.size_tracker.sub_size(size);
+                self.inner.size_tracker.sub_len(1);
+            }
+            result.delete_succeed += 1;
         }
-        self.inner.size_tracker.sub_size(subsize as usize);
-        self.inner.size_tracker.sub_len(stat.delete_succeed);
-        stat
+        result
+    }
+
+    fn get_pooled_sidecar(
+        &self,
+        tx: B256,
+    ) -> Result<Option<Arc<PooledBlobSidecar>>, BlobStoreError> {
+        let _lock = self.inner.file_lock.read();
+        if let Some((expires, sidecar)) = self.inner.pinned.lock().get(&tx) &&
+            *expires > std::time::Instant::now()
+        {
+            return Ok(Some(sidecar.clone()))
+        }
+        if let Some(sidecar) = self.inner.blob_cache.lock().get(&tx).cloned() {
+            return Ok(Some(sidecar))
+        }
+        let path = self.inner.blob_disk_file(tx);
+        let encoded = match reth_fs_util::read(&path) {
+            Ok(data) => data,
+            Err(reth_fs_util::FsPathError::Read { source, .. })
+                if source.kind() == io::ErrorKind::NotFound =>
+            {
+                return Ok(None)
+            }
+            Err(err) => return Err(BlobStoreError::Other(Box::new(err))),
+        };
+        let sidecar = Arc::new(PooledBlobSidecar::decode_stored(&encoded)?);
+        self.inner.blob_cache.lock().insert(tx, sidecar.clone());
+        Ok(Some(sidecar))
     }
 
     fn get(&self, tx: B256) -> Result<Option<Arc<BlobTransactionSidecarVariant>>, BlobStoreError> {
-        self.inner.get_one(tx)
+        self.get_pooled_sidecar(tx)?.map(|s| s.full_sidecar()).transpose().map(Option::flatten)
     }
 
     fn contains(&self, tx: B256) -> Result<bool, BlobStoreError> {
-        self.inner.contains(tx)
+        let _lock = self.inner.file_lock.read();
+        Ok(self.inner.blob_disk_file(tx).is_file())
     }
 
     fn get_all(
         &self,
         txs: Vec<B256>,
     ) -> Result<Vec<(B256, Arc<BlobTransactionSidecarVariant>)>, BlobStoreError> {
-        if txs.is_empty() {
-            return Ok(Vec::new())
+        let mut result = Vec::new();
+        for tx in txs {
+            if let Some(sidecar) = self.get(tx)? {
+                result.push((tx, sidecar));
+            }
         }
-        self.inner.get_all(txs)
+        Ok(result)
     }
 
     fn get_exact(
         &self,
         txs: Vec<B256>,
     ) -> Result<Vec<Arc<BlobTransactionSidecarVariant>>, BlobStoreError> {
-        if txs.is_empty() {
-            return Ok(Vec::new())
-        }
-        self.inner.get_exact(txs)
+        txs.into_iter().map(|tx| self.get(tx)?.ok_or(BlobStoreError::MissingSidecar(tx))).collect()
     }
 
     fn get_by_versioned_hashes_v1(
         &self,
-        versioned_hashes: &[B256],
+        hashes: &[B256],
     ) -> Result<Vec<Option<BlobAndProofV1>>, BlobStoreError> {
-        // the response must always be the same len as the request, misses must be None
-        let mut result = vec![None; versioned_hashes.len()];
-
-        // first scan all cached full sidecars
-        for (_tx_hash, blob_sidecar) in self.inner.blob_cache.lock().iter() {
-            if let Some(blob_sidecar) = blob_sidecar.as_eip4844() {
-                for (hash_idx, match_result) in
-                    blob_sidecar.match_versioned_hashes(versioned_hashes)
-                {
-                    result[hash_idx] = Some(match_result);
-                }
-            }
-
-            // return early if all blobs are found.
-            if result.iter().all(|blob| blob.is_some()) {
-                return Ok(result);
-            }
-        }
-
-        // not all versioned hashes were be found, try to look up a matching tx
-
-        let mut missing_tx_hashes = Vec::new();
-        let mut seen_missing_tx_hashes = B256Set::default();
-
-        {
-            let mut versioned_to_txhashes = self.inner.versioned_hashes_to_txhash.lock();
-            for (idx, _) in
-                result.iter().enumerate().filter(|(_, blob_and_proof)| blob_and_proof.is_none())
-            {
-                // this is safe because the result vec has the same len
-                let versioned_hash = versioned_hashes[idx];
-                if let Some(tx_hash) = versioned_to_txhashes.get(&versioned_hash).copied() &&
-                    seen_missing_tx_hashes.insert(tx_hash)
-                {
-                    missing_tx_hashes.push(tx_hash);
+        let mut result = vec![None; hashes.len()];
+        for stored in self.candidates(hashes)? {
+            if let Some(sidecar) = stored.sidecar().as_eip4844() {
+                for (index, value) in sidecar.match_versioned_hashes(hashes) {
+                    result[index] = Some(value);
                 }
             }
         }
-
-        // if we have missing blobs, try to read them from disk and try again
-        if !missing_tx_hashes.is_empty() {
-            let blobs_from_disk = self.inner.read_many_decoded(missing_tx_hashes);
-            for (_, blob_sidecar) in blobs_from_disk {
-                if let Some(blob_sidecar) = blob_sidecar.as_eip4844() {
-                    for (hash_idx, match_result) in
-                        blob_sidecar.match_versioned_hashes(versioned_hashes)
-                    {
-                        if result[hash_idx].is_none() {
-                            result[hash_idx] = Some(match_result);
-                        }
-                    }
-                }
-            }
-        }
-
         Ok(result)
     }
 
     fn get_by_versioned_hashes_v2(
         &self,
-        versioned_hashes: &[B256],
+        hashes: &[B256],
     ) -> Result<Option<Vec<BlobAndProofV2>>, BlobStoreError> {
-        let result = self.get_by_versioned_hashes_eip7594(versioned_hashes)?;
-
-        // only return the blobs if we found all requested versioned hashes
-        if result.iter().all(|blob| blob.is_some()) {
-            Ok(Some(result.into_iter().map(Option::unwrap).collect()))
-        } else {
-            Ok(None)
-        }
+        Ok(self.get_by_versioned_hashes_v3(hashes)?.into_iter().collect())
     }
 
     fn get_by_versioned_hashes_v3(
         &self,
-        versioned_hashes: &[B256],
+        hashes: &[B256],
     ) -> Result<Vec<Option<BlobAndProofV2>>, BlobStoreError> {
-        self.get_by_versioned_hashes_eip7594(versioned_hashes)
+        let mut result = vec![None; hashes.len()];
+        for stored in self.candidates(hashes)? {
+            if let Some(full) = stored.full_sidecar()? &&
+                let Some(sidecar) = full.as_eip7594()
+            {
+                for (index, value) in sidecar.match_versioned_hashes(hashes) {
+                    result[index] = Some(value);
+                }
+            }
+        }
+        Ok(result)
     }
 
     fn get_by_versioned_hashes_v4(
         &self,
-        versioned_hashes: &[B256],
-        cell_mask: BlobCellMask,
+        hashes: &[B256],
+        mask: BlobCellMask,
     ) -> Result<Vec<Option<BlobCellsAndProofsV1>>, BlobStoreError> {
-        self.get_by_versioned_hashes_cells_eip7594(versioned_hashes, cell_mask)
-    }
-
-    fn has_versioned_hashes(&self, versioned_hashes: &[B256]) -> Result<Vec<bool>, BlobStoreError> {
-        let mut result = vec![false; versioned_hashes.len()];
-        for (_tx_hash, blob_sidecar) in self.inner.blob_cache.lock().iter() {
-            for available_hash in blob_sidecar.versioned_hashes() {
-                for (idx, requested_hash) in versioned_hashes.iter().enumerate() {
-                    if !result[idx] && *requested_hash == available_hash {
-                        result[idx] = true;
-                    }
-                }
-            }
-
-            if result.iter().all(|available| *available) {
-                return Ok(result)
+        let mut result = vec![None; hashes.len()];
+        for stored in self.candidates(hashes)? {
+            for (index, value) in stored.matching_cells(hashes, mask)? {
+                super::merge_cell_response(&mut result[index], value);
             }
         }
-
-        let mut missing_tx_hashes = Vec::new();
-        {
-            let mut versioned_to_txhashes = self.inner.versioned_hashes_to_txhash.lock();
-            for (idx, requested_hash) in versioned_hashes.iter().enumerate() {
-                if !result[idx] &&
-                    let Some(tx_hash) = versioned_to_txhashes.get(requested_hash).copied()
-                {
-                    missing_tx_hashes.push((idx, tx_hash));
-                }
-            }
-        }
-
-        for (idx, tx_hash) in missing_tx_hashes {
-            if self.inner.contains(tx_hash)? {
-                result[idx] = true;
-            }
-        }
-
         Ok(result)
     }
 
-    fn get_cells(
-        &self,
-        tx: B256,
-        cell_mask: BlobCellMask,
-    ) -> Result<Option<Vec<Cell>>, BlobStoreError> {
-        let Some(sidecar) = self.get(tx)? else {
-            return Ok(None);
-        };
+    fn has_versioned_hashes(&self, hashes: &[B256]) -> Result<Vec<bool>, BlobStoreError> {
+        let index = self.inner.versioned_hashes_to_txhash.read();
+        Ok(hashes.iter().map(|h| index.get(h).is_some_and(|txs| !txs.is_empty())).collect())
+    }
 
-        let Some(sidecar) = sidecar.as_eip7594() else {
-            return Ok(None);
-        };
-
-        sidecar
-            .compute_matching_cells(cell_mask)
-            .map(Some)
-            .map_err(|err| BlobStoreError::Other(Box::new(err)))
+    fn get_cells(&self, tx: B256, mask: BlobCellMask) -> Result<Option<Vec<Cell>>, BlobStoreError> {
+        self.get_pooled_sidecar(tx)?.map(|s| s.get_cells(mask)).transpose().map(Option::flatten)
     }
 
     fn data_size_hint(&self) -> Option<usize> {
         Some(self.inner.size_tracker.data_size())
     }
-
     fn blobs_len(&self) -> usize {
         self.inner.size_tracker.blobs_len()
     }
 }
 
+#[derive(Debug)]
 struct DiskFileBlobStoreInner {
+    cell_mode: std::sync::atomic::AtomicBool,
     blob_dir: PathBuf,
-    blob_cache: Mutex<LruMap<TxHash, Arc<BlobTransactionSidecarVariant>, ByLength>>,
+    blob_cache: Mutex<LruMap<TxHash, Arc<PooledBlobSidecar>, SidecarCacheLimit>>,
     size_tracker: BlobStoreSize,
     file_lock: RwLock<()>,
     txs_to_delete: RwLock<B256Set>,
-    /// Tracks of known versioned hashes and a transaction they exist in
-    ///
-    /// Note: It is possible that one blob can appear in multiple transactions but this only tracks
-    /// the most recent one.
-    versioned_hashes_to_txhash: Mutex<LruMap<B256, B256>>,
+    versioned_hashes_to_txhash: RwLock<B256Map<B256Set>>,
+    transactions: RwLock<B256Map<alloy_primitives::Bytes>>,
+    pinned: Mutex<B256Map<(std::time::Instant, Arc<PooledBlobSidecar>)>>,
 }
 
 impl DiskFileBlobStoreInner {
-    /// Creates a new empty disk file blob store with the given maximum length of the blob cache.
-    fn new(blob_dir: PathBuf, max_length: u32) -> Self {
-        Self {
-            blob_dir,
-            blob_cache: Mutex::new(LruMap::new(ByLength::new(max_length))),
-            size_tracker: Default::default(),
-            file_lock: Default::default(),
-            txs_to_delete: Default::default(),
-            versioned_hashes_to_txhash: Mutex::new(LruMap::new(ByLength::new(
-                VERSIONED_HASH_TO_TX_HASH_CACHE_SIZE as u32,
-            ))),
-        }
-    }
-
-    /// Creates the directory where blobs will be stored on disk.
-    fn create_blob_dir(&self) -> Result<(), DiskFileBlobStoreError> {
-        debug!(target:"txpool::blob", blob_dir = ?self.blob_dir, "Creating blob store");
-        fs::create_dir_all(&self.blob_dir)
-            .map_err(|e| DiskFileBlobStoreError::Open(self.blob_dir.clone(), e))
-    }
-
-    /// Deletes the entire blob store.
-    fn delete_all(&self) -> Result<(), DiskFileBlobStoreError> {
-        match fs::remove_dir_all(&self.blob_dir) {
-            Ok(_) => {
-                debug!(target:"txpool::blob", blob_dir = ?self.blob_dir, "Removed blob store directory");
-            }
-            Err(err) if err.kind() == io::ErrorKind::NotFound => {}
-            Err(err) => return Err(DiskFileBlobStoreError::Open(self.blob_dir.clone(), err)),
-        }
-        Ok(())
-    }
-
-    /// Ensures blob is in the blob cache and written to the disk.
-    fn insert_one(
-        &self,
-        tx: B256,
-        data: BlobTransactionSidecarVariant,
-    ) -> Result<(), BlobStoreError> {
-        let mut buf = Vec::with_capacity(data.rlp_encoded_fields_length());
-        data.rlp_encode_fields(&mut buf);
-
-        {
-            // cache the versioned hashes to tx hash
-            let mut map = self.versioned_hashes_to_txhash.lock();
-            data.versioned_hashes().for_each(|hash| {
-                map.insert(hash, tx);
-            });
-        }
-
-        self.blob_cache.lock().insert(tx, Arc::new(data));
-
-        let size = self.write_one_encoded(tx, &buf)?;
-
-        self.size_tracker.add_size(size);
-        self.size_tracker.inc_len(1);
-        Ok(())
-    }
-
-    /// Ensures blobs are in the blob cache and written to the disk.
-    fn insert_many(
-        &self,
-        txs: Vec<(B256, BlobTransactionSidecarVariant)>,
-    ) -> Result<(), BlobStoreError> {
-        let raw = txs
-            .iter()
-            .map(|(tx, data)| {
-                let mut buf = Vec::with_capacity(data.rlp_encoded_fields_length());
-                data.rlp_encode_fields(&mut buf);
-                (self.blob_disk_file(*tx), buf)
-            })
-            .collect::<Vec<_>>();
-
-        {
-            // cache versioned hashes to tx hash
-            let mut map = self.versioned_hashes_to_txhash.lock();
-            for (tx, data) in &txs {
-                data.versioned_hashes().for_each(|hash| {
-                    map.insert(hash, *tx);
-                });
-            }
-        }
-
-        {
-            // cache blobs
-            let mut cache = self.blob_cache.lock();
-            for (tx, data) in txs {
-                cache.insert(tx, Arc::new(data));
-            }
-        }
-
-        let mut add = 0;
-        let mut num = 0;
-        {
-            let _lock = self.file_lock.write();
-            for (path, data) in raw {
-                if path.exists() {
-                    debug!(target:"txpool::blob", ?path, "Blob already exists");
-                } else if let Err(err) = fs::write(&path, &data) {
-                    debug!(target:"txpool::blob", %err, ?path, "Failed to write blob file");
-                } else {
-                    add += data.len();
-                    num += 1;
-                }
-            }
-        }
-        self.size_tracker.add_size(add);
-        self.size_tracker.inc_len(num);
-
-        Ok(())
-    }
-
-    /// Returns true if the blob for the given transaction hash is in the blob cache or on disk.
-    fn contains(&self, tx: B256) -> Result<bool, BlobStoreError> {
-        if self.blob_cache.lock().get(&tx).is_some() {
-            return Ok(true)
-        }
-        // we only check if the file exists and assume it's valid
-        Ok(self.blob_disk_file(tx).is_file())
-    }
-
-    /// Returns all the blob transactions which are in the cache or on the disk.
-    fn retain_existing(&self, txs: Vec<B256>) -> Result<Vec<B256>, BlobStoreError> {
-        let (in_cache, not_in_cache): (Vec<B256>, Vec<B256>) = {
-            let mut cache = self.blob_cache.lock();
-            txs.into_iter().partition(|tx| cache.get(tx).is_some())
-        };
-
-        let mut existing = in_cache;
-        for tx in not_in_cache {
-            if self.blob_disk_file(tx).is_file() {
-                existing.push(tx);
-            }
-        }
-
-        Ok(existing)
-    }
-
-    /// Retrieves the blob for the given transaction hash from the blob cache or disk.
-    fn get_one(
-        &self,
-        tx: B256,
-    ) -> Result<Option<Arc<BlobTransactionSidecarVariant>>, BlobStoreError> {
-        if let Some(blob) = self.blob_cache.lock().get(&tx) {
-            return Ok(Some(blob.clone()))
-        }
-
-        if let Some(blob) = self.read_one(tx)? {
-            let blob_arc = Arc::new(blob);
-            self.blob_cache.lock().insert(tx, blob_arc.clone());
-            return Ok(Some(blob_arc))
-        }
-
-        Ok(None)
-    }
-
-    /// Returns the path to the blob file for the given transaction hash.
-    #[inline]
     fn blob_disk_file(&self, tx: B256) -> PathBuf {
         self.blob_dir.join(format!("{tx:x}"))
     }
-
-    /// Retrieves the blob data for the given transaction hash.
-    #[inline]
-    fn read_one(&self, tx: B256) -> Result<Option<BlobTransactionSidecarVariant>, BlobStoreError> {
-        let path = self.blob_disk_file(tx);
-        let data = {
-            let _lock = self.file_lock.read();
-            match fs::read(&path) {
-                Ok(data) => data,
-                Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(None),
-                Err(e) => {
-                    return Err(BlobStoreError::Other(Box::new(DiskFileBlobStoreError::ReadFile(
-                        tx, path, e,
-                    ))))
-                }
-            }
-        };
-        BlobTransactionSidecarVariant::rlp_decode_fields(&mut data.as_slice())
-            .map(Some)
-            .map_err(BlobStoreError::DecodeError)
-    }
-
-    /// Returns decoded blobs read from disk.
-    ///
-    /// Only returns sidecars that were found and successfully decoded.
-    fn read_many_decoded(&self, txs: Vec<TxHash>) -> Vec<(TxHash, BlobTransactionSidecarVariant)> {
-        self.read_many_raw(txs)
-            .into_iter()
-            .filter_map(|(tx, data)| {
-                BlobTransactionSidecarVariant::rlp_decode_fields(&mut data.as_slice())
-                    .map(|sidecar| (tx, sidecar))
-                    .ok()
-            })
-            .collect()
-    }
-
-    /// Retrieves the raw blob data for the given transaction hashes.
-    ///
-    /// Only returns the blobs that were found in file.
-    #[inline]
-    fn read_many_raw(&self, txs: Vec<TxHash>) -> Vec<(TxHash, Vec<u8>)> {
-        let mut res = Vec::with_capacity(txs.len());
-        let _lock = self.file_lock.read();
-        for tx in txs {
-            let path = self.blob_disk_file(tx);
-            match fs::read(&path) {
-                Ok(data) => {
-                    res.push((tx, data));
-                }
-                Err(err) => {
-                    debug!(target:"txpool::blob", %err, ?tx, "Failed to read blob file");
-                }
-            };
+    fn index(&self, tx: B256, sidecar: &PooledBlobSidecar) {
+        if let Some(body) = sidecar.transaction() {
+            self.transactions.write().insert(tx, body.clone());
         }
-        res
-    }
-
-    /// Writes the blob data for the given transaction hash to the disk.
-    #[inline]
-    fn write_one_encoded(&self, tx: B256, data: &[u8]) -> Result<usize, DiskFileBlobStoreError> {
-        trace!(target:"txpool::blob", "[{:?}] writing blob file", tx);
-        let mut add = 0;
-        let path = self.blob_disk_file(tx);
-        {
-            let _lock = self.file_lock.write();
-            if !path.exists() {
-                fs::write(&path, data)
-                    .map_err(|e| DiskFileBlobStoreError::WriteFile(tx, path, e))?;
-                add = data.len();
-            }
+        let mut index = self.versioned_hashes_to_txhash.write();
+        for hash in sidecar.versioned_hashes() {
+            index.entry(hash).or_default().insert(tx);
         }
-        Ok(add)
-    }
-
-    /// Retrieves blobs for the given transaction hashes from the blob cache or disk.
-    ///
-    /// This will not return an error if there are missing blobs. Therefore, the result may be a
-    /// subset of the request or an empty vector if none of the blobs were found.
-    #[inline]
-    fn get_all(
-        &self,
-        txs: Vec<B256>,
-    ) -> Result<Vec<(B256, Arc<BlobTransactionSidecarVariant>)>, BlobStoreError> {
-        let mut res = Vec::with_capacity(txs.len());
-        let mut cache_miss = Vec::new();
-        {
-            let mut cache = self.blob_cache.lock();
-            for tx in txs {
-                if let Some(blob) = cache.get(&tx) {
-                    res.push((tx, blob.clone()));
-                } else {
-                    cache_miss.push(tx)
-                }
-            }
-        }
-        if cache_miss.is_empty() {
-            return Ok(res)
-        }
-        let from_disk = self.read_many_decoded(cache_miss);
-        if from_disk.is_empty() {
-            return Ok(res)
-        }
-        let from_disk = from_disk
-            .into_iter()
-            .map(|(tx, data)| {
-                let data = Arc::new(data);
-                res.push((tx, data.clone()));
-                (tx, data)
-            })
-            .collect::<Vec<_>>();
-
-        let mut cache = self.blob_cache.lock();
-        for (tx, data) in from_disk {
-            cache.insert(tx, data);
-        }
-
-        Ok(res)
-    }
-
-    /// Retrieves blobs for the given transaction hashes from the blob cache or disk.
-    ///
-    /// Returns an error if there are any missing blobs.
-    #[inline]
-    fn get_exact(
-        &self,
-        txs: Vec<B256>,
-    ) -> Result<Vec<Arc<BlobTransactionSidecarVariant>>, BlobStoreError> {
-        txs.into_iter()
-            .map(|tx| self.get_one(tx)?.ok_or(BlobStoreError::MissingSidecar(tx)))
-            .collect()
-    }
-}
-
-impl fmt::Debug for DiskFileBlobStoreInner {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("DiskFileBlobStoreInner")
-            .field("blob_dir", &self.blob_dir)
-            .field("cached_blobs", &self.blob_cache.try_lock().map(|lock| lock.len()))
-            .field("txs_to_delete", &self.txs_to_delete.try_read())
-            .finish()
     }
 }
 
@@ -947,14 +592,7 @@ mod tests {
         store.cleanup();
 
         let result = store.get(tx).unwrap();
-        assert_eq!(
-            result,
-            Some(Arc::new(BlobTransactionSidecarVariant::Eip4844(BlobTransactionSidecar {
-                blobs: vec![],
-                commitments: vec![],
-                proofs: vec![]
-            })))
-        );
+        assert_eq!(result, None);
     }
 
     #[test]
@@ -974,14 +612,7 @@ mod tests {
 
         for tx in txs {
             let result = store.get(tx).unwrap();
-            assert_eq!(
-                result,
-                Some(Arc::new(BlobTransactionSidecarVariant::Eip4844(BlobTransactionSidecar {
-                    blobs: vec![],
-                    commitments: vec![],
-                    proofs: vec![]
-                })))
-            );
+            assert_eq!(result, None);
         }
     }
 
@@ -1089,10 +720,10 @@ mod tests {
         let (sidecar, versioned_hash, _) = eip7594_single_blob_sidecar();
         store.insert(TxHash::random(), sidecar.into()).unwrap();
 
-        let cell_mask = BlobCellMask::from_bits((1u128 << 0) | (1u128 << 7));
+        let indices_bitarray = BlobCellMask::from_bits((1u128 << 0) | (1u128 << 7));
         let request = vec![versioned_hash, B256::ZERO];
 
-        let v4 = store.get_by_versioned_hashes_v4(&request, cell_mask).unwrap();
+        let v4 = store.get_by_versioned_hashes_v4(&request, indices_bitarray).unwrap();
         assert_eq!(v4.len(), request.len());
         assert!(v4[1].is_none());
 
@@ -1165,9 +796,9 @@ mod tests {
         let (sidecar, versioned_hash, _) = eip7594_single_blob_sidecar();
         store.insert(tx_hash, sidecar.into()).unwrap();
 
-        let cell_mask = BlobCellMask::from_bits((1u128 << 0) | (1u128 << 7));
+        let indices_bitarray = BlobCellMask::from_bits((1u128 << 0) | (1u128 << 7));
         let expected = store
-            .get_by_versioned_hashes_v4(&[versioned_hash], cell_mask)
+            .get_by_versioned_hashes_v4(&[versioned_hash], indices_bitarray)
             .unwrap()
             .pop()
             .unwrap()
@@ -1179,7 +810,7 @@ mod tests {
 
         store.clear_cache();
 
-        assert_eq!(store.get_cells(tx_hash, cell_mask).unwrap(), Some(expected));
+        assert_eq!(store.get_cells(tx_hash, indices_bitarray).unwrap(), Some(expected));
     }
 
     #[test]
@@ -1206,5 +837,65 @@ mod tests {
         let stat2 = store.cleanup();
         assert_eq!(stat2.delete_succeed, 5);
         assert_eq!(stat2.delete_failed, 0);
+    }
+}
+
+/// Charges the worst-case reconstructed representation up front, including heap allocations.
+#[derive(Debug)]
+struct SidecarCacheLimit {
+    max_entries: u32,
+    bytes: usize,
+}
+impl SidecarCacheLimit {
+    const MAX_BYTES: usize = 16 * 1024 * 1024;
+    fn cost(sidecar: &PooledBlobSidecar) -> usize {
+        let blobs = sidecar.versioned_hashes().count();
+        sidecar.size() +
+            sidecar.sidecar().size() +
+            blobs * (alloy_eips::eip4844::BYTES_PER_BLOB + 129 * 48)
+    }
+}
+impl Limiter<TxHash, Arc<PooledBlobSidecar>> for SidecarCacheLimit {
+    type KeyToInsert<'a> = TxHash;
+    type LinkType = u32;
+    fn is_over_the_limit(&self, length: usize) -> bool {
+        length > self.max_entries as usize || self.bytes > Self::MAX_BYTES
+    }
+    fn on_insert(
+        &mut self,
+        _: usize,
+        key: TxHash,
+        value: Arc<PooledBlobSidecar>,
+    ) -> Option<(TxHash, Arc<PooledBlobSidecar>)> {
+        let bytes = Self::cost(&value);
+        if self.max_entries == 0 || bytes > Self::MAX_BYTES {
+            return None
+        }
+        self.bytes += bytes;
+        Some((key, value))
+    }
+    fn on_replace(
+        &mut self,
+        _: usize,
+        _: &mut TxHash,
+        _: TxHash,
+        old: &mut Arc<PooledBlobSidecar>,
+        new: &mut Arc<PooledBlobSidecar>,
+    ) -> bool {
+        let bytes = Self::cost(new);
+        if bytes > Self::MAX_BYTES {
+            return false
+        }
+        self.bytes = self.bytes - Self::cost(old) + bytes;
+        true
+    }
+    fn on_removed(&mut self, _: &mut TxHash, value: &mut Arc<PooledBlobSidecar>) {
+        self.bytes -= Self::cost(value);
+    }
+    fn on_cleared(&mut self) {
+        self.bytes = 0;
+    }
+    fn on_grow(&mut self, _: usize) -> bool {
+        true
     }
 }

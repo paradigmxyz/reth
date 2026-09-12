@@ -325,6 +325,11 @@ Networking:
 
           [default: 4096]
 
+      --blob-fetch-probability <BLOB_FETCH_PROBABILITY>
+          Percentage of blob transactions fetched in full. Use 100 to disable sparse sampling
+
+          [default: 15]
+
       --pooled-tx-response-soft-limit <BYTES>
           Experimental, for usage in research. Sets the max accumulated byte size of transactions
           to pack in one response.

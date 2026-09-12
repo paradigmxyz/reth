@@ -416,8 +416,14 @@ where
         let transactions = self.get_all_propagatable(tx_hashes);
         let mut size = 0;
         for transaction in transactions {
-            let encoded_len = transaction.encoded_length();
-            let Some(pooled) = self.to_pooled_transaction(transaction) else {
+            let encoded_len = if limit.is_eth72() {
+                transaction.transaction.eth72_encoded_length()
+            } else {
+                transaction.encoded_length()
+            };
+            let Some(pooled) =
+                self.to_pooled_transaction_with_version(transaction, limit.is_eth72())
+            else {
                 continue;
             };
 
@@ -484,8 +490,25 @@ where
     where
         <V as TransactionValidator>::Transaction: EthPoolTransaction,
     {
+        self.to_pooled_transaction_with_version(transaction, false)
+    }
+
+    fn to_pooled_transaction_with_version(
+        &self,
+        transaction: Arc<ValidPoolTransaction<T::Transaction>>,
+        eth72: bool,
+    ) -> Option<Recovered<<<V as TransactionValidator>::Transaction as PoolTransaction>::Pooled>>
+    where
+        <V as TransactionValidator>::Transaction: EthPoolTransaction,
+    {
         if transaction.is_eip4844() {
-            let sidecar = self.blob_store.get(*transaction.hash()).ok()??;
+            let sidecar = if eth72 {
+                Arc::new(
+                    self.blob_store.get_pooled_sidecar(*transaction.hash()).ok()??.elided_sidecar(),
+                )
+            } else {
+                self.blob_store.get(*transaction.hash()).ok()??
+            };
             transaction.transaction.clone().try_into_pooled_eip4844(sidecar)
         } else {
             transaction
@@ -706,8 +729,27 @@ where
             (results, added_metas, discarded)
         };
 
+        let mut failed = alloy_primitives::map::B256Set::default();
         for meta in added_metas {
-            self.on_added_transaction(meta);
+            let hash = *meta.added.hash();
+            if failed.contains(&hash) {
+                continue
+            }
+            if let Err(err) = self.on_added_transaction(meta) {
+                let removed = self.remove_transactions_and_descendants(vec![hash]);
+                self.delete_discarded_blobs(removed.iter());
+                for tx in removed {
+                    failed.insert(*tx.hash());
+                }
+                failed.insert(hash);
+                for result in &mut results {
+                    if let Ok(added) = result &&
+                        failed.contains(&added.hash)
+                    {
+                        *result = Err(PoolError::other(added.hash, err.to_string()));
+                    }
+                }
+            }
         }
 
         if !discarded.is_empty() {
@@ -742,12 +784,27 @@ where
     ///
     /// Performs blob storage operations and sends all notifications. This should be called
     /// after the pool write lock has been released to avoid blocking pool operations.
-    fn on_added_transaction(&self, meta: AddedTransactionMeta<T::Transaction>) {
+    fn on_added_transaction(
+        &self,
+        meta: AddedTransactionMeta<T::Transaction>,
+    ) -> Result<(), crate::blobstore::BlobStoreError> {
         // Handle blob sidecar storage and notifications for EIP-4844 transactions
         if let Some(sidecar) = meta.blob_sidecar {
             let hash = *meta.added.hash();
-            self.on_new_blob_sidecar(&hash, &sidecar);
-            self.insert_blob(hash, sidecar);
+            let notification = if self.blob_transaction_sidecar_listener.lock().is_empty() {
+                None
+            } else {
+                sidecar.full_sidecar()?
+            };
+            self.insert_blob(
+                hash,
+                sidecar
+                    .with_transaction(meta.added.transaction().encoded_2718_consensus())
+                    .with_origin(meta.added.origin()),
+            )?;
+            if let Some(full) = notification {
+                self.on_new_blob_sidecar(&hash, &full);
+            }
         }
 
         // Delete replaced blob sidecar if any
@@ -771,6 +828,7 @@ where
 
         // Notify new transaction listeners
         self.on_new_transaction(meta.added.into_new_transaction_event());
+        Ok(())
     }
 
     /// Notify all listeners about a new pending transaction.
@@ -1314,13 +1372,19 @@ where
     }
 
     /// Inserts a blob transaction into the blob store
-    fn insert_blob(&self, hash: TxHash, blob: PooledBlobSidecar) {
+    fn insert_blob(
+        &self,
+        hash: TxHash,
+        blob: PooledBlobSidecar,
+    ) -> Result<(), crate::blobstore::BlobStoreError> {
         debug!(target: "txpool", "[{:?}] storing blob sidecar", hash);
-        if let Err(err) = self.blob_store.insert(hash, blob) {
+        let result = self.blob_store.insert(hash, blob);
+        if let Err(err) = &result {
             warn!(target: "txpool", %err, "[{:?}] failed to insert blob", hash);
             self.blob_store_metrics.blobstore_failed_inserts.increment(1);
         }
         self.update_blob_store_metrics();
+        result
     }
 
     /// Delete a blob from the blob store
@@ -1477,6 +1541,22 @@ pub enum AddedTransaction<T: PoolTransaction> {
 }
 
 impl<T: PoolTransaction> AddedTransaction<T> {
+    /// Returns the admission source.
+    pub fn origin(&self) -> TransactionOrigin {
+        match self {
+            Self::Pending(tx) => tx.transaction.origin,
+            Self::Parked { transaction, .. } => transaction.origin,
+        }
+    }
+
+    /// Returns the admitted transaction.
+    pub fn transaction(&self) -> &T {
+        match self {
+            Self::Pending(tx) => &tx.transaction.transaction,
+            Self::Parked { transaction, .. } => &transaction.transaction,
+        }
+    }
+
     /// Returns whether the transaction has been added to the pending pool.
     pub const fn as_pending(&self) -> Option<&AddedPendingTransaction<T>> {
         match self {
@@ -1684,7 +1764,7 @@ mod tests {
         identifier::SenderId,
         test_utils::{testing_pool, MockTransaction, TestPoolBuilder},
         validate::ValidTransaction,
-        BlockInfo, PoolConfig, SubPoolLimit, TransactionOrigin, TransactionPool,
+        BlockInfo, PoolConfig, PoolTransaction, SubPoolLimit, TransactionOrigin, TransactionPool,
         TransactionPoolExt, TransactionValidationOutcome, ValidPoolTransaction, U256,
     };
     use alloy_consensus::Transaction;
@@ -1726,6 +1806,45 @@ mod tests {
     }
 
     #[test]
+    fn failed_blob_write_removes_nonce_descendants_before_notification() {
+        use crate::{
+            blobstore::DiskFileBlobStore, noop::MockTransactionValidator, test_utils::MockOrdering,
+        };
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("blobs");
+        let store = DiskFileBlobStore::open(path.clone(), Default::default()).unwrap();
+        // An unavailable storage directory makes the atomic sidecar write fail.
+        reth_fs_util::remove_dir_all(&path).unwrap();
+        reth_fs_util::write(&path, b"not a directory").unwrap();
+        let pool = super::PoolInner::new(
+            MockTransactionValidator::default(),
+            MockOrdering::default(),
+            store,
+            PoolConfig::default(),
+        );
+        let mut listener = pool.add_pending_listener(crate::TransactionListenerKind::All);
+        let sidecar = BlobTransactionSidecarVariant::Eip4844(BlobTransactionSidecar::default());
+        let sender = Address::random();
+        let outcomes = (0..2).map(|nonce| TransactionValidationOutcome::Valid {
+            balance: U256::MAX,
+            state_nonce: 0,
+            bytecode_hash: None,
+            transaction: ValidTransaction::ValidWithSidecar {
+                transaction: MockTransaction::eip4844_with_sidecar(sidecar.clone())
+                    .with_sender(sender)
+                    .with_nonce(nonce),
+                sidecar: PooledBlobSidecar::from(sidecar.clone()),
+            },
+            propagate: true,
+            authorities: None,
+        });
+        let results = pool.add_transactions(TransactionOrigin::External, outcomes);
+        assert!(results.iter().all(Result::is_err));
+        assert_eq!(pool.size().total, 0);
+        assert!(listener.try_recv().is_err());
+    }
+
+    #[test]
     fn test_discard_blobs_on_blob_tx_eviction() {
         let blobs = {
             // Read the contents of the JSON file into a string.
@@ -1760,7 +1879,11 @@ mod tests {
 
         // Create a test pool with default configuration and the specified blob limit.
         let test_pool = &TestPoolBuilder::default()
-            .with_config(PoolConfig { blob_limit, ..Default::default() })
+            .with_config(PoolConfig {
+                blob_limit,
+                max_blob_storage_size: usize::MAX,
+                ..Default::default()
+            })
             .pool;
 
         // Set the block info for the pool, including a pending blob fee.
@@ -1780,7 +1903,14 @@ mod tests {
 
             // Insert the sidecar into the blob store if the current index is within the blob limit.
             if n < blob_limit.max_txs {
-                blob_store.insert(*tx.get_hash(), sidecar.clone().into()).unwrap();
+                blob_store
+                    .insert(
+                        *tx.get_hash(),
+                        PooledBlobSidecar::from(sidecar.clone())
+                            .with_transaction(tx.encoded_2718_consensus())
+                            .with_origin(TransactionOrigin::External),
+                    )
+                    .unwrap();
             }
 
             // Add the transaction to the pool with external origin and valid outcome.

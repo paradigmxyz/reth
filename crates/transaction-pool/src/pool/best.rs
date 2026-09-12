@@ -229,7 +229,12 @@ impl<T: TransactionOrdering> BestTransactions<T> {
                 self.independent.insert(unlocked.clone());
             }
 
-            if self.skip_blobs && best.transaction.is_eip4844() {
+            if (self.skip_blobs && best.transaction.is_eip4844()) ||
+                best.transaction
+                    .transaction
+                    .blob_cell_availability()
+                    .is_some_and(|availability| !availability.is_recoverable())
+            {
                 // blobs should be skipped, marking them as invalid will ensure that no dependent
                 // transactions are returned
                 self.mark_invalid(

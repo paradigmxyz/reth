@@ -226,6 +226,11 @@ Networking:
 
           [default: 4096]
 
+      --blob-fetch-probability <BLOB_FETCH_PROBABILITY>
+          Percentage of blob transactions fetched in full. Use 100 to disable sparse sampling
+
+          [default: 15]
+
       --pooled-tx-response-soft-limit <BYTES>
           Experimental, for usage in research. Sets the max accumulated byte size of transactions
           to pack in one response.
@@ -641,6 +646,16 @@ TxPool:
 
       --txpool.blob-cache-size <BLOB_CACHE_SIZE>
           Max number of entries for the in memory cache of the blob store
+
+      --txpool.blob-storage-size <BLOB_STORAGE_SIZE>
+          Soft cap for stored blob cells across all subpools, in MiB
+
+          [default: 2560]
+
+      --txpool.blocked-blob-storage-percent <BLOCKED_BLOB_STORAGE_PERCENT>
+          Maximum percentage of blob storage occupied by nonce suffixes blocked on missing cells
+
+          [default: 50]
 
       --txpool.disable-blobs-support
           Disable EIP-4844 blob transaction support
