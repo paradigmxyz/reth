@@ -111,6 +111,24 @@ impl<N: NetworkPrimitives> ProtocolMessage<N> {
         tx_memory_budget: usize,
     ) -> Result<Self, MessageError> {
         let message_type = EthMessageID::decode(buf)?;
+        let message = Self::decode_payload(version, message_type, buf, tx_memory_budget)?;
+        Ok(Self { message_type, message })
+    }
+
+    /// Decodes the payload of the message with the given id, that is the bytes following the
+    /// message id on the wire, according to the given [`EthVersion`].
+    ///
+    /// Returns [`MessageError::Invalid`] if the message id is not part of `version`. See
+    /// [`Self::decode_message_with_tx_memory_budget`] for `tx_memory_budget`.
+    pub fn decode_payload(
+        version: EthVersion,
+        message_type: EthMessageID,
+        buf: &mut &[u8],
+        tx_memory_budget: usize,
+    ) -> Result<EthMessage<N>, MessageError> {
+        if !message_type.is_valid_for_version(version) {
+            return Err(MessageError::Invalid(version, message_type))
+        }
 
         // For EIP-7642 (https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7642.md):
         // pre-merge (legacy) status messages include total difficulty, whereas eth/69 omits it.
@@ -156,18 +174,8 @@ impl<N: NetworkPrimitives> ProtocolMessage<N> {
                     PooledTransactions::decode_with_memory_budget(buf, tx_memory_budget)
                 })?)
             }
-            EthMessageID::GetNodeData => {
-                if version >= EthVersion::Eth67 {
-                    return Err(MessageError::Invalid(version, EthMessageID::GetNodeData))
-                }
-                EthMessage::GetNodeData(RequestPair::decode(buf)?)
-            }
-            EthMessageID::NodeData => {
-                if version >= EthVersion::Eth67 {
-                    return Err(MessageError::Invalid(version, EthMessageID::NodeData))
-                }
-                EthMessage::NodeData(RequestPair::decode(buf)?)
-            }
+            EthMessageID::GetNodeData => EthMessage::GetNodeData(RequestPair::decode(buf)?),
+            EthMessageID::NodeData => EthMessage::NodeData(RequestPair::decode(buf)?),
             EthMessageID::GetReceipts => {
                 if version >= EthVersion::Eth70 {
                     EthMessage::GetReceipts70(RequestPair::decode(buf)?)
@@ -194,35 +202,16 @@ impl<N: NetworkPrimitives> ProtocolMessage<N> {
                 }
             }
             EthMessageID::BlockRangeUpdate => {
-                if version < EthVersion::Eth69 {
-                    return Err(MessageError::Invalid(version, EthMessageID::BlockRangeUpdate))
-                }
                 EthMessage::BlockRangeUpdate(BlockRangeUpdate::decode(buf)?)
             }
             EthMessageID::GetBlockAccessLists => {
-                if version < EthVersion::Eth71 {
-                    return Err(MessageError::Invalid(version, EthMessageID::GetBlockAccessLists))
-                }
                 EthMessage::GetBlockAccessLists(RequestPair::decode(buf)?)
             }
             EthMessageID::BlockAccessLists => {
-                if version < EthVersion::Eth71 {
-                    return Err(MessageError::Invalid(version, EthMessageID::BlockAccessLists))
-                }
                 EthMessage::BlockAccessLists(RequestPair::decode(buf)?)
             }
-            EthMessageID::Cells => {
-                if version < EthVersion::Eth72 {
-                    return Err(MessageError::Invalid(version, EthMessageID::Cells))
-                }
-                EthMessage::Cells(RequestPair::decode(buf)?)
-            }
-            EthMessageID::GetCells => {
-                if version < EthVersion::Eth72 {
-                    return Err(MessageError::Invalid(version, EthMessageID::GetCells))
-                }
-                EthMessage::GetCells(RequestPair::decode(buf)?)
-            }
+            EthMessageID::Cells => EthMessage::Cells(RequestPair::decode(buf)?),
+            EthMessageID::GetCells => EthMessage::GetCells(RequestPair::decode(buf)?),
             EthMessageID::Other(_) => {
                 let raw_payload = Bytes::copy_from_slice(buf);
                 buf.advance(raw_payload.len());
@@ -232,7 +221,7 @@ impl<N: NetworkPrimitives> ProtocolMessage<N> {
                 ))
             }
         };
-        Ok(Self { message_type, message })
+        Ok(message)
     }
 }
 
@@ -406,6 +395,10 @@ pub enum EthMessage<N: NetworkPrimitives = EthNetworkPrimitives> {
         serde(bound = "N::BroadcastedTransaction: serde::Serialize + serde::de::DeserializeOwned")
     )]
     BlockRangeUpdate(BlockRangeUpdate),
+    /// Represents a response message whose payload is still RLP encoded.
+    ///
+    /// Only produced by streams that defer response decoding, see [`RawResponse`].
+    RawResponse(RawResponse),
     /// Represents an encoded message that doesn't match any other variant
     Other(RawCapabilityMessage),
 }
@@ -436,39 +429,19 @@ impl<N: NetworkPrimitives> EthMessage<N> {
             Self::BlockAccessLists(_) => EthMessageID::BlockAccessLists,
             Self::Cells(_) => EthMessageID::Cells,
             Self::GetCells(_) => EthMessageID::GetCells,
+            Self::RawResponse(resp) => resp.message_id(),
             Self::Other(msg) => EthMessageID::Other(msg.id as u8),
         }
     }
 
     /// Returns true if the message variant is a request.
     pub const fn is_request(&self) -> bool {
-        matches!(
-            self,
-            Self::GetBlockBodies(_) |
-                Self::GetBlockHeaders(_) |
-                Self::GetReceipts(_) |
-                Self::GetReceipts70(_) |
-                Self::GetBlockAccessLists(_) |
-                Self::GetCells(_) |
-                Self::GetPooledTransactions(_) |
-                Self::GetNodeData(_)
-        )
+        self.message_id().is_request()
     }
 
     /// Returns true if the message variant is a response to a request.
     pub const fn is_response(&self) -> bool {
-        matches!(
-            self,
-            Self::PooledTransactions(_) |
-                Self::Receipts(_) |
-                Self::Receipts69(_) |
-                Self::Receipts70(_) |
-                Self::BlockAccessLists(_) |
-                Self::BlockHeaders(_) |
-                Self::BlockBodies(_) |
-                Self::NodeData(_) |
-                Self::Cells(_)
-        )
+        self.message_id().is_response()
     }
 
     /// Converts the message types where applicable.
@@ -528,6 +501,7 @@ impl<N: NetworkPrimitives> Encodable for EthMessage<N> {
             Self::BlockAccessLists(block_access_lists) => block_access_lists.encode(out),
             Self::BlockRangeUpdate(block_range_update) => block_range_update.encode(out),
             Self::Cells(cells) => cells.encode(out),
+            Self::RawResponse(resp) => out.put_slice(resp.payload()),
             Self::Other(unknown) => out.put_slice(&unknown.payload),
         }
     }
@@ -558,6 +532,7 @@ impl<N: NetworkPrimitives> Encodable for EthMessage<N> {
             Self::BlockAccessLists(block_access_lists) => block_access_lists.length(),
             Self::BlockRangeUpdate(block_range_update) => block_range_update.length(),
             Self::Cells(cells) => cells.length(),
+            Self::RawResponse(resp) => resp.payload().len(),
             Self::Other(unknown) => unknown.length(),
         }
     }
@@ -726,6 +701,48 @@ impl EthMessageID {
     pub const fn message_count(version: EthVersion) -> u8 {
         Self::max(version) + 1
     }
+
+    /// Returns `true` if this is the id of a request message.
+    pub const fn is_request(&self) -> bool {
+        matches!(
+            self,
+            Self::GetBlockHeaders |
+                Self::GetBlockBodies |
+                Self::GetPooledTransactions |
+                Self::GetNodeData |
+                Self::GetReceipts |
+                Self::GetBlockAccessLists |
+                Self::GetCells
+        )
+    }
+
+    /// Returns `true` if this is the id of a response message.
+    pub const fn is_response(&self) -> bool {
+        matches!(
+            self,
+            Self::BlockHeaders |
+                Self::BlockBodies |
+                Self::PooledTransactions |
+                Self::NodeData |
+                Self::Receipts |
+                Self::BlockAccessLists |
+                Self::Cells
+        )
+    }
+
+    /// Returns `true` if this message id is part of the given protocol version.
+    ///
+    /// `GetNodeData`/`NodeData` were removed in eth/67, `BlockRangeUpdate` was added in eth/69,
+    /// the block access list messages in eth/71 and the cell messages in eth/72.
+    pub fn is_valid_for_version(&self, version: EthVersion) -> bool {
+        match self {
+            Self::GetNodeData | Self::NodeData => version < EthVersion::Eth67,
+            Self::BlockRangeUpdate => version >= EthVersion::Eth69,
+            Self::GetBlockAccessLists | Self::BlockAccessLists => version >= EthVersion::Eth71,
+            Self::GetCells | Self::Cells => version >= EthVersion::Eth72,
+            _ => true,
+        }
+    }
 }
 
 impl Encodable for EthMessageID {
@@ -887,13 +904,110 @@ where
     }
 }
 
+/// A response message read from the wire whose payload is still RLP encoded.
+///
+/// Decoding a response is only worth it if it answers a request that is actually pending, so this
+/// keeps the payload encoded and only exposes the [message id](Self::message_id) and the
+/// [request id](Self::request_id), which is decoded on demand without touching the rest of the
+/// payload. The full payload is decoded with [`Self::decode`] once the response is known to be
+/// wanted.
+#[derive(Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct RawResponse {
+    /// The id of the response message.
+    #[cfg_attr(feature = "serde", serde(deserialize_with = "deserialize_response_id"))]
+    message_id: EthMessageID,
+    /// The RLP encoded `[request-id, payload...]` list.
+    payload: Bytes,
+}
+
+impl RawResponse {
+    /// Creates a new raw response from the message id and the RLP encoded
+    /// `[request-id, payload...]` list that follows the id on the wire.
+    ///
+    /// Returns `None` if `message_id` is not the id of a [response](EthMessageID::is_response).
+    pub fn new(message_id: EthMessageID, payload: Bytes) -> Option<Self> {
+        message_id.is_response().then_some(Self { message_id, payload })
+    }
+
+    /// Returns the id of the response message.
+    pub const fn message_id(&self) -> EthMessageID {
+        self.message_id
+    }
+
+    /// Returns the RLP encoded `[request-id, payload...]` list.
+    pub const fn payload(&self) -> &Bytes {
+        &self.payload
+    }
+
+    /// Decodes the request id, the first element of the response list, without decoding the rest
+    /// of the payload.
+    ///
+    /// The id is read from within the list's declared payload, so an id that merely follows an
+    /// under-declared list is rejected instead of being taken at face value.
+    pub fn request_id(&self) -> alloy_rlp::Result<u64> {
+        let mut list = Header::decode_bytes(&mut self.payload.as_ref(), true)?;
+        u64::decode(&mut list)
+    }
+
+    /// Decodes the response into its typed [`EthMessage`] variant according to the given
+    /// [`EthVersion`].
+    ///
+    /// See also [`ProtocolMessage::decode_message`].
+    pub fn decode<N: NetworkPrimitives>(
+        &self,
+        version: EthVersion,
+    ) -> Result<EthMessage<N>, MessageError> {
+        self.decode_with_tx_memory_budget(version, usize::MAX)
+    }
+
+    /// Like [`Self::decode`], but caps the cumulative in-memory size of decoded transactions in
+    /// `PooledTransactions` responses, see
+    /// [`ProtocolMessage::decode_message_with_tx_memory_budget`].
+    pub fn decode_with_tx_memory_budget<N: NetworkPrimitives>(
+        &self,
+        version: EthVersion,
+        tx_memory_budget: usize,
+    ) -> Result<EthMessage<N>, MessageError> {
+        ProtocolMessage::<N>::decode_payload(
+            version,
+            self.message_id,
+            &mut self.payload.as_ref(),
+            tx_memory_budget,
+        )
+    }
+}
+
+impl Debug for RawResponse {
+    /// Prints the payload length instead of the payload, which can be several MB.
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("RawResponse")
+            .field("message_id", &self.message_id)
+            .field("payload_len", &self.payload.len())
+            .finish()
+    }
+}
+
+/// Deserializes the id of a [`RawResponse`], upholding that it is a response id.
+#[cfg(feature = "serde")]
+fn deserialize_response_id<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<EthMessageID, D::Error> {
+    use serde::Deserialize;
+    let message_id = EthMessageID::deserialize(deserializer)?;
+    if !message_id.is_response() {
+        return Err(serde::de::Error::custom("not a response message id"))
+    }
+    Ok(message_id)
+}
+
 #[cfg(test)]
 mod tests {
     use super::MessageError;
     use crate::{
         message::RequestPair, BlockAccessLists, EthMessage, EthMessageID, EthNetworkPrimitives,
         EthVersion, GetBlockAccessLists, GetNodeData, NodeData, ProtocolMessage,
-        RawCapabilityMessage,
+        RawCapabilityMessage, RawResponse,
     };
     use alloy_primitives::hex;
     use alloy_rlp::{Decodable, Encodable, Error};
@@ -1167,5 +1281,54 @@ mod tests {
             result,
             Err(MessageError::ExpectedStatusMessage(EthMessageID::GetBlockBodies))
         ));
+    }
+
+    #[test]
+    fn raw_response_request_id_and_decode() {
+        let msg = EthMessage::<EthNetworkPrimitives>::BlockBodies(RequestPair {
+            request_id: 1337,
+            message: vec![BlockBody {
+                transactions: vec![],
+                ommers: vec![],
+                withdrawals: Some(Default::default()),
+            }]
+            .into(),
+        });
+        let encoded = encode(ProtocolMessage::from(msg.clone()));
+
+        // the raw response is the encoded message without the leading message id
+        let raw =
+            RawResponse::new(EthMessageID::BlockBodies, encoded[1..].to_vec().into()).unwrap();
+        assert_eq!(raw.request_id().unwrap(), 1337);
+        assert_eq!(raw.decode::<EthNetworkPrimitives>(EthVersion::Eth68).unwrap(), msg);
+    }
+
+    #[test]
+    fn raw_response_request_id_rejects_malformed_payload() {
+        let raw = |payload: &[u8]| {
+            RawResponse::new(EthMessageID::BlockBodies, payload.to_vec().into()).unwrap()
+        };
+
+        // a string instead of the `[request-id, payload]` list
+        assert!(matches!(raw(&hex!("820539")).request_id(), Err(Error::UnexpectedString)));
+
+        // an empty list without a request id
+        assert!(matches!(raw(&hex!("c0")).request_id(), Err(Error::InputTooShort)));
+
+        // a list header that claims more bytes than the payload holds
+        assert!(matches!(raw(&hex!("c5820539")).request_id(), Err(Error::InputTooShort)));
+
+        // an under-declared list: the id only follows the empty list instead of being in it
+        assert!(matches!(raw(&hex!("c005")).request_id(), Err(Error::InputTooShort)));
+
+        // bytes after the list are ignored, same as the full decoder does
+        assert_eq!(raw(&hex!("c105ff")).request_id().unwrap(), 5);
+    }
+
+    #[test]
+    fn raw_response_requires_response_id() {
+        assert!(RawResponse::new(EthMessageID::GetBlockBodies, hex!("c0").into()).is_none());
+        assert!(RawResponse::new(EthMessageID::Status, hex!("c0").into()).is_none());
+        assert!(RawResponse::new(EthMessageID::BlockBodies, hex!("c0").into()).is_some());
     }
 }

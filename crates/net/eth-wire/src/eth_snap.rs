@@ -17,7 +17,7 @@ use alloy_primitives::bytes::{Bytes, BytesMut};
 use futures::{Sink, SinkExt, Stream, StreamExt};
 use reth_eth_wire_types::{
     snap::{SnapProtocolMessage, SnapVersion},
-    RawCapabilityMessage,
+    RawCapabilityMessage, RawResponse,
 };
 use reth_ethereum_forks::ForkFilter;
 use std::{
@@ -85,6 +85,23 @@ impl<St, N: NetworkPrimitives> EthSnapStream<St, N> {
     #[inline]
     pub const fn set_reject_block_announcements(&mut self, reject: bool) {
         self.eth.set_reject_block_announcements(reject);
+    }
+
+    /// Sets whether to defer decoding of `eth` response messages, see
+    /// [`EthStreamInner::set_lazy_responses`].
+    #[inline]
+    pub const fn set_lazy_responses(&mut self, lazy: bool) {
+        self.eth.set_lazy_responses(lazy);
+    }
+
+    /// Decodes an `eth` response yielded as [`EthMessage::RawResponse`], see
+    /// [`EthStreamInner::decode_raw_response`].
+    #[inline]
+    pub fn decode_raw_response(
+        &self,
+        response: &RawResponse,
+    ) -> Result<EthMessage<N>, EthStreamError> {
+        self.eth.decode_raw_response(response)
     }
 
     /// Returns a reference to the underlying [`P2PStream`].
