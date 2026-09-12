@@ -1493,6 +1493,8 @@ pub trait PoolTransaction:
 
     /// Returns whether `replacement` is underpriced relative to this transaction.
     ///
+    /// Called on the existing transaction when another transaction would replace it.
+    /// By default, delegates to [`PriceBumpConfig::is_replacement_underpriced`].
     /// Implementations may override this to define transaction-specific replacement semantics.
     fn is_replacement_underpriced(
         &self,
