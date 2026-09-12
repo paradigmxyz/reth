@@ -197,6 +197,12 @@ pub struct TransactionsManagerMetrics {
     /// The time it took to prepare transactions for import. This is mostly sender recovery.
     pub(crate) pool_import_prepare_duration: Histogram,
 
+    /* ================ ETH/72 BLOB BUFFER ================ */
+    /// Number of blobless eth/72 transaction bodies currently buffered pending cell delivery.
+    pub(crate) buffered_blob_txs: Gauge,
+    /// Total number of buffered blobless bodies evicted due to TTL expiry.
+    pub(crate) buffered_blob_txs_evicted: Counter,
+
     /* ================ POLL DURATION ================ */
 
     /* -- Total poll duration of `TransactionsManager` future -- */
