@@ -2116,7 +2116,9 @@ impl<T: PoolTransaction> AllTransactions<T> {
                 let maybe_replacement = transaction.as_ref();
 
                 // Ensure the new transaction is not underpriced
-                if existing_transaction.is_underpriced(maybe_replacement, &self.price_bumps) {
+                if existing_transaction
+                    .is_replacement_underpriced(maybe_replacement, &self.price_bumps)
+                {
                     return Err(InsertErr::Underpriced {
                         transaction: pool_tx.transaction,
                         existing: *entry.get().transaction.hash(),
