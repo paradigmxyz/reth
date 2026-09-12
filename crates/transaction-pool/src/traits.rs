@@ -1504,6 +1504,14 @@ pub trait PoolTransaction:
         price_bumps.is_replacement_underpriced(self, replacement)
     }
 
+    /// Whether the transaction's nonce must be below [`u64::MAX`] according to EIP-2681.
+    ///
+    /// Defaults to `true`. Transactions with alternative nonce semantics can override this
+    /// independently of the sender nonce check in [`Self::requires_nonce_check`].
+    fn requires_nonce_bound_check(&self) -> bool {
+        true
+    }
+
     /// Allows to communicate to the pool that the transaction doesn't require a nonce check.
     fn requires_nonce_check(&self) -> bool {
         true
