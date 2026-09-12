@@ -1,10 +1,10 @@
-use crate::proof_task::StorageProofResultMessage;
+use crate::{proof_task::StorageProofResultMessage, storage_root_cache::StorageRootCache};
 use alloy_primitives::{map::B256Map, B256};
 use alloy_rlp::Encodable;
 use core::cell::RefCell;
 use crossbeam_channel::Receiver as CrossbeamReceiver;
 use reth_execution_errors::trie::StateProofError;
-use reth_primitives_traits::{dashmap::DashMap, Account};
+use reth_primitives_traits::Account;
 use reth_storage_errors::db::DatabaseError;
 use reth_trie::{
     hashed_cursor::HashedStorageCursor,
@@ -14,7 +14,6 @@ use reth_trie::{
 };
 use std::{
     rc::Rc,
-    sync::Arc,
     time::{Duration, Instant},
 };
 
@@ -29,6 +28,9 @@ pub(crate) struct ValueEncoderStats {
     pub(crate) dispatched_count: u64,
     /// Number of times the `FromCache` variant was used (storage root already cached).
     pub(crate) from_cache_count: u64,
+    /// Number of times the `FromCache` variant was served by a root computed for an earlier
+    /// block.
+    pub(crate) from_carried_cache_count: u64,
     /// Number of times the `Sync` variant was used (synchronous computation).
     pub(crate) sync_count: u64,
     /// Number of times a dispatched storage proof had no root node and fell back to sync
@@ -42,6 +44,7 @@ impl ValueEncoderStats {
         self.storage_wait_time += other.storage_wait_time;
         self.dispatched_count += other.dispatched_count;
         self.from_cache_count += other.from_cache_count;
+        self.from_carried_cache_count += other.from_carried_cache_count;
         self.sync_count += other.sync_count;
         self.dispatched_missing_root_count += other.dispatched_missing_root_count;
     }
@@ -66,7 +69,7 @@ pub(crate) enum AsyncAccountDeferredValueEncoder<TC, HC> {
         /// root.
         storage_calculator: Rc<RefCell<StorageProofCalculator<TC, HC>>>,
         /// Cache to store computed storage roots for future reuse.
-        cached_storage_roots: Arc<DashMap<B256, B256>>,
+        cached_storage_roots: StorageRootCache,
     },
     /// The storage root was found in cache.
     FromCache { account: Account, root: B256 },
@@ -77,7 +80,7 @@ pub(crate) enum AsyncAccountDeferredValueEncoder<TC, HC> {
         hashed_address: B256,
         account: Account,
         /// Cache to store computed storage roots for future reuse.
-        cached_storage_roots: Arc<DashMap<B256, B256>>,
+        cached_storage_roots: StorageRootCache,
     },
 }
 
@@ -215,7 +218,7 @@ pub(crate) struct AsyncAccountValueEncoder<TC, HC> {
     dispatched: B256Map<CrossbeamReceiver<StorageProofResultMessage>>,
     /// Storage roots which have already been computed. This can be used only if a storage proof
     /// wasn't dispatched for an account, otherwise we must consume the proof result.
-    cached_storage_roots: Arc<DashMap<B256, B256>>,
+    cached_storage_roots: StorageRootCache,
     /// Tracks storage proof results received from the storage workers. [`Rc`] + [`RefCell`] is
     /// required because [`DeferredValueEncoder`] cannot have a lifetime.
     storage_proof_results: Rc<RefCell<B256Map<Vec<ProofTrieNodeV2>>>>,
@@ -236,7 +239,7 @@ impl<TC, HC> AsyncAccountValueEncoder<TC, HC> {
     /// - `storage_calculator`: Shared storage proof calculator for synchronous computation
     pub(crate) fn new(
         dispatched: B256Map<CrossbeamReceiver<StorageProofResultMessage>>,
-        cached_storage_roots: Arc<DashMap<B256, B256>>,
+        cached_storage_roots: StorageRootCache,
         storage_calculator: Rc<RefCell<StorageProofCalculator<TC, HC>>>,
     ) -> Self {
         Self {
@@ -321,9 +324,12 @@ where
         // and we only need its root.
 
         // If the root is already calculated then just use it directly
-        if let Some(root) = self.cached_storage_roots.get(&hashed_address) {
-            self.stats.borrow_mut().from_cache_count += 1;
-            return AsyncAccountDeferredValueEncoder::FromCache { account, root: *root }
+        if let Some(hit) = self.cached_storage_roots.get(&hashed_address) {
+            let mut stats = self.stats.borrow_mut();
+            stats.from_cache_count += 1;
+            stats.from_carried_cache_count += u64::from(hit.carried);
+            drop(stats);
+            return AsyncAccountDeferredValueEncoder::FromCache { account, root: hit.root }
         }
 
         // Compute storage root synchronously using the shared calculator

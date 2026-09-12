@@ -76,7 +76,6 @@ use reth_trie::{
     hashed_cursor::HashedCursorFactory, trie_cursor::TrieCursorFactory, updates::TrieUpdates,
     HashedPostState,
 };
-use reth_trie_parallel::proof_task::{ProofResultMessage, ProofTaskCtx, ProofWorkerHandle};
 pub use reth_trie_parallel::{
     error::StateRootTaskError,
     state_root_task::{
@@ -84,6 +83,10 @@ pub use reth_trie_parallel::{
         StateRootComputeOutcome, StateRootHandle, StateRootHintStream, StateRootMessage,
         StateRootSink, StateRootTaskCancelGuard, StateRootUpdateHook, StateRootUpdateStream,
     },
+};
+use reth_trie_parallel::{
+    proof_task::{ProofResultMessage, ProofTaskCtx, ProofWorkerHandle},
+    storage_root_cache::StorageRootCache,
 };
 use reth_trie_sparse::{
     ArenaParallelSparseTrie, RevealableSparseTrie, SparseStateTrie, TrieNodeEpoch,
@@ -469,6 +472,11 @@ type SerialFallbackRx = mpsc::Receiver<ProviderResult<(B256, TrieUpdates, Arc<Ha
 #[derive(Default)]
 pub struct DefaultStateRootStrategy {
     metrics: SparseTrieTaskMetrics,
+    /// Storage roots computed for the last block, keyed by the state root they describe.
+    ///
+    /// A payload only takes them when it builds on that state, so a reorg, a failed block or a
+    /// payload that arrives before the previous one published simply starts from an empty cache.
+    storage_root_cache: Arc<parking_lot::Mutex<Option<(B256, StorageRootCache)>>>,
 }
 
 impl fmt::Debug for DefaultStateRootStrategy {
@@ -520,12 +528,18 @@ impl DefaultStateRootStrategy {
         let task_ctx = task_ctx.with_proof_jitter(config.proof_jitter());
         let halve_workers = transaction_count
             .is_some_and(|count| count <= Self::SMALL_BLOCK_PROOF_WORKER_TX_THRESHOLD);
-        let proof_handle =
-            ProofWorkerHandle::new(executor, task_ctx, halve_workers, proof_result_tx.clone());
+        let parent_state_root = parent_header.state_root();
+        let storage_root_cache = self.take_storage_root_cache(parent_state_root);
+        let proof_handle = ProofWorkerHandle::new(
+            executor,
+            task_ctx,
+            halve_workers,
+            storage_root_cache.clone(),
+            proof_result_tx.clone(),
+        );
 
         let (state_root_tx, state_root_rx) = mpsc::channel();
         let (hashed_state_tx, hashed_state_rx) = mpsc::channel();
-        let parent_state_root = parent_header.state_root();
 
         self.spawn_sparse_trie_task(
             executor,
@@ -540,6 +554,7 @@ impl DefaultStateRootStrategy {
             SparseTrieTaskOptions {
                 parent_header,
                 preserved_sparse_trie,
+                storage_root_cache,
                 chunk_size: config.multiproof_chunk_size(),
                 pending_sparse_trie_prune_blocks: if config.disable_sparse_trie_cache_pruning() {
                     None
@@ -576,9 +591,11 @@ impl DefaultStateRootStrategy {
         let SparseTrieTaskOptions {
             parent_header,
             preserved_sparse_trie,
+            storage_root_cache,
             chunk_size,
             pending_sparse_trie_prune_blocks,
         } = options;
+        let storage_root_cache_slot = self.storage_root_cache.clone();
         let overlay_manager = overlay_manager.clone();
         let trie_metrics = self.metrics.clone();
         let executor = executor.clone();
@@ -694,6 +711,15 @@ impl DefaultStateRootStrategy {
 
             let _enter =
                 debug_span!(target: "engine::tree::payload_processor", "preserve").entered();
+
+            // The storage roots this block computed describe its post state, which is the state
+            // the next payload's proofs are computed against.
+            if let Some(result) = &task_result {
+                let next = storage_root_cache.advance(task.take_updated_storage_roots());
+                trie_metrics.storage_root_cache_entries.set(next.carried_len() as f64);
+                *storage_root_cache_slot.lock() = Some((result.state_root, next));
+            }
+
             let mut trie_to_drop = None;
             let deferred = if task_result.is_some() {
                 let pending_trie =
@@ -732,11 +758,23 @@ impl DefaultStateRootStrategy {
             executor.spawn_drop(deferred);
         });
     }
+
+    /// Takes the storage roots published by the previous block, if they describe the state this
+    /// payload builds on.
+    fn take_storage_root_cache(&self, parent_state_root: B256) -> StorageRootCache {
+        self.storage_root_cache
+            .lock()
+            .take()
+            .filter(|(state_root, _)| *state_root == parent_state_root)
+            .map(|(_, cache)| cache)
+            .unwrap_or_default()
+    }
 }
 
 struct SparseTrieTaskOptions<N: NodePrimitives> {
     parent_header: SealedHeader<N::BlockHeader>,
     preserved_sparse_trie: Option<PreservedSparseTrie>,
+    storage_root_cache: StorageRootCache,
     chunk_size: usize,
     /// `None` disables pruning. `Some(Vec::new())` prunes nodes older than the current block.
     pending_sparse_trie_prune_blocks: Option<Vec<ExecutedBlock<N>>>,
@@ -1288,7 +1326,10 @@ where
 mod tests {
     use super::*;
     use alloy_consensus::constants::KECCAK_EMPTY;
-    use alloy_primitives::{map::HashMap, Address, U256};
+    use alloy_primitives::{
+        map::{B256Map, HashMap},
+        Address, U256,
+    };
     use rand::Rng;
     use reth_chain_state::test_utils::TestBlockBuilder;
     use reth_chainspec::ChainSpec;
@@ -1319,6 +1360,25 @@ mod tests {
         blocks.reverse();
 
         assert_eq!(sparse_trie_prune_before(Some(&blocks), new_epoch), Some(TrieNodeEpoch::new(7)));
+    }
+
+    #[test]
+    fn storage_roots_are_only_taken_for_the_state_they_describe() {
+        let strategy = DefaultStateRootStrategy::default();
+        let state_root = B256::with_last_byte(1);
+        let address = B256::repeat_byte(0x11);
+
+        let published = StorageRootCache::default()
+            .advance(B256Map::from_iter([(address, B256::with_last_byte(7))]));
+        *strategy.storage_root_cache.lock() = Some((state_root, published.clone()));
+
+        // A payload on a different branch must not reuse roots of the state it replaces.
+        assert!(strategy.take_storage_root_cache(B256::with_last_byte(2)).get(&address).is_none());
+        // Taking clears the slot, so the payload after a reorg starts cold as well.
+        assert!(strategy.take_storage_root_cache(state_root).get(&address).is_none());
+
+        *strategy.storage_root_cache.lock() = Some((state_root, published));
+        assert!(strategy.take_storage_root_cache(state_root).get(&address).is_some());
     }
 
     #[test]

@@ -20,6 +20,8 @@ pub struct ProofTaskTrieMetrics {
     deferred_encoder_dispatched: Histogram,
     /// Histogram for `FromCache` deferred encoder variant count.
     deferred_encoder_from_cache: Histogram,
+    /// Histogram for `FromCache` hits served by a root computed for an earlier block.
+    deferred_encoder_from_carried_cache: Histogram,
     /// Histogram for `Sync` deferred encoder variant count.
     deferred_encoder_sync: Histogram,
     /// Histogram for dispatched storage proofs that fell back to sync due to missing root.
@@ -45,6 +47,7 @@ impl ProofTaskTrieMetrics {
     pub(crate) fn record_value_encoder_stats(&self, stats: &ValueEncoderStats) {
         self.deferred_encoder_dispatched.record(stats.dispatched_count as f64);
         self.deferred_encoder_from_cache.record(stats.from_cache_count as f64);
+        self.deferred_encoder_from_carried_cache.record(stats.from_carried_cache_count as f64);
         self.deferred_encoder_sync.record(stats.sync_count as f64);
         self.deferred_encoder_dispatched_missing_root
             .record(stats.dispatched_missing_root_count as f64);

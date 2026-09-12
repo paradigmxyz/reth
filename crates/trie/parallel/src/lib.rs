@@ -17,6 +17,9 @@ pub mod proof_task;
 /// State root task interface types shared between the engine tree and the payload builder.
 pub mod state_root_task;
 
+/// Storage roots shared by the proof workers of consecutive blocks.
+pub mod storage_root_cache;
+
 /// Async value encoder for V2 proofs.
 pub(crate) mod value_encoder;
 
