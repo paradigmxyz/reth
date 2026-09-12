@@ -28,7 +28,7 @@ jobs:
     secrets: inherit
 
   prepare-hive:
-    if: github.repository == 'paradigmxyz/reth'
+    if: github.repository == 'paradigmxyz/reth' || github.event_name == 'workflow_dispatch'
     timeout-minutes: 45
     runs-on: ${{ github.repository == 'paradigmxyz/reth' && 'depot-ubuntu-latest-16' || 'ubuntu-latest' }}
     permissions:
@@ -472,7 +472,7 @@ jobs:
     needs:
       - test-amsterdam
       - test-osaka
-    if: failure()
+    if: failure() && github.repository == 'paradigmxyz/reth'
     runs-on: ubuntu-latest
     steps:
       - name: Slack Webhook Action
