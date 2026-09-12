@@ -32,6 +32,9 @@ mod payload;
 /// Helper for setting up nodes with pre-imported chain data
 pub mod setup_import;
 
+/// Helpers for producing logs and driving the `eth_getLogs` and filter RPC surface
+pub mod logs;
+
 /// Helper for network operations
 mod network;
 
