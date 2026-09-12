@@ -167,3 +167,15 @@ fn test_freelist() {
     freelist = env.freelist().unwrap();
     assert!(freelist > 0);
 }
+
+#[cfg(target_os = "linux")]
+#[test]
+fn test_linux_build_disables_residency_probes() {
+    // SAFETY: MDBX exposes its build options as a static, NUL-terminated string.
+    let options = unsafe { std::ffi::CStr::from_ptr(ffi::mdbx_build.options) };
+    assert!(options
+        .to_str()
+        .unwrap()
+        .split_whitespace()
+        .any(|option| option == "MDBX_USE_MINCORE=0"));
+}
