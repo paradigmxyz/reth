@@ -5,7 +5,7 @@
 
 use crate::{SnapDownloadProgress, SnapPhase, SnapStateStore, SnapSyncError};
 use reth_db_api::transaction::DbTxMut;
-use reth_provider::DatabaseProviderFactory;
+use reth_provider::{DatabaseProviderFactory, StaticFileProviderFactory};
 use reth_stages::{stages::MerkleStage, ExecInput, Stage};
 use reth_stages_types::StageId;
 use reth_storage_api::{
@@ -41,6 +41,7 @@ impl<'a, F> TrieGenerator<'a, F> {
             + StatsReader
             + StorageChangeSetReader
             + StorageSettingsCache
+            + StaticFileProviderFactory
             + TrieWriter,
     {
         if generation.phase != SnapPhase::Trie {

@@ -102,6 +102,8 @@ jobs:
           - sim: ethereum/sync
           - sim: devp2p
             limit: discv4
+          - sim: devp2p
+            limit: '^snap2$'
           # started failing after https://github.com/ethereum/go-ethereum/pull/31843, no
           # action on our side, remove from here when we get unexpected passes on these tests
           # - sim: devp2p

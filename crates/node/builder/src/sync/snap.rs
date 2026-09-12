@@ -16,7 +16,7 @@ use reth_snap_sync::{
 use reth_stages_api::{Pipeline, PipelineError, PipelineTarget, PipelineWithResult, StageId};
 use reth_tasks::{shutdown::signal, Runtime};
 use std::task::{ready, Context, Poll};
-use tokio::sync::oneshot;
+use tokio::sync::{oneshot, watch};
 use tracing::{debug, info};
 
 /// Drives a snapshot bootstrap through the engine's backfill interface.
@@ -40,6 +40,8 @@ pub struct SnapBackfillSync<N: ProviderNodeTypes, C> {
     state: SnapBackfillState<N>,
     /// Target requested while a run was already in flight.
     pending_target: Option<PipelineTarget>,
+    /// Coalesces target updates while the bootstrap owns the pipeline.
+    active_target: Option<watch::Sender<PipelineTarget>>,
 }
 
 impl<N: ProviderNodeTypes, C> SnapBackfillSync<N, C> {
@@ -57,6 +59,7 @@ impl<N: ProviderNodeTypes, C> SnapBackfillSync<N, C> {
             policy: SnapPivotPolicy::default(),
             state: SnapBackfillState::Idle(Some(Box::new(pipeline))),
             pending_target: None,
+            active_target: None,
         }
     }
 
@@ -103,6 +106,8 @@ where
         let pipeline = pipeline.take().expect("idle backfill owns its pipeline");
 
         let (tx, rx) = oneshot::channel();
+        let (target_tx, target_rx) = watch::channel(target);
+        self.active_target = Some(target_tx);
         let client = self.client.clone();
         let provider_factory = self.provider_factory.clone();
         let runtime = self.task_spawner.clone();
@@ -110,7 +115,7 @@ where
 
         self.task_spawner.spawn_critical_blocking_task("snap backfill task", async move {
             let result =
-                bootstrap(*pipeline, client, provider_factory, runtime, policy, target).await;
+                bootstrap(*pipeline, client, provider_factory, runtime, policy, target_rx).await;
             let _ = tx.send(result);
         });
         self.state = SnapBackfillState::Running(rx);
@@ -123,6 +128,7 @@ where
         let SnapBackfillState::Running(rx) = &mut self.state else { return Poll::Pending };
         let event = match ready!(rx.poll_unpin(cx)) {
             Ok((pipeline, result)) => {
+                self.active_target = None;
                 self.state = SnapBackfillState::Idle(Some(Box::new(pipeline)));
                 BackfillEvent::Finished(result)
             }
@@ -144,6 +150,20 @@ where
         }
         match action {
             BackfillAction::Start(target) => self.set_target(target),
+            BackfillAction::UpdateTarget(target) => {
+                if target.sync_target().is_some_and(|hash| hash.is_zero()) {
+                    return
+                }
+                if let Some(sender) = &self.active_target {
+                    sender.send_if_modified(|current| {
+                        if *current == target {
+                            return false
+                        }
+                        *current = target;
+                        true
+                    });
+                }
+            }
         }
     }
 
@@ -180,44 +200,68 @@ async fn bootstrap<N, C>(
     provider_factory: ProviderFactory<N>,
     runtime: Runtime,
     policy: SnapPivotPolicy,
-    target: PipelineTarget,
+    mut targets: watch::Receiver<PipelineTarget>,
 ) -> PipelineWithResult<N>
 where
     N: ProviderNodeTypes,
     C: SnapClient + HeadersClient,
 {
-    // Snap needs canonical headers and their BAL commitments, but nothing below the pivot may be
-    // executed, so only the header prefix of the pipeline runs first.
-    if let Err(error) = pipeline.run_until(StageId::Headers, Some(target)).await {
-        return (pipeline, Err(error))
-    }
-
-    // The session borrows locals, so the bootstrap owns the clones it was handed.
-    let (_signal, shutdown) = signal();
-    let context = NodeSnapContext::new(&provider_factory, &client, shutdown);
-    let outcome = SnapBootstrap::new(&client, &provider_factory, context, runtime)
-        .with_policy(policy)
-        .run()
-        .await;
-
-    match outcome {
-        Ok(SnapSyncOutcome::Complete { generation }) => {
-            info!(
-                target: "sync::snap",
-                block_number = generation.target_block,
-                "Snap state published, resuming the pipeline above the pivot"
-            );
+    let mut target;
+    loop {
+        target = *targets.borrow_and_update();
+        // Snap needs canonical headers and their BAL commitments, but nothing below the pivot may
+        // be executed, so only the header prefix of the pipeline runs first.
+        if let Err(error) = pipeline.run_until(StageId::Headers, Some(target)).await {
+            return (pipeline, Err(error))
         }
-        Ok(SnapSyncOutcome::Stalled { generation }) => {
-            // A stalled bootstrap leaves its generation resumable, so the remaining stages still
-            // run and the next backfill request picks the download back up.
-            debug!(
-                target: "sync::snap",
-                resumable = generation.is_some(),
-                "Snap state download made no further progress"
-            );
+
+        // The session borrows locals, so the bootstrap owns the clones it was handed.
+        let (signal, shutdown) = signal();
+        let context = NodeSnapContext::new(&provider_factory, &client, shutdown);
+        let mut session = SnapBootstrap::new(&client, &provider_factory, context, runtime.clone())
+            .with_policy(policy);
+        let mut run = std::pin::pin!(session.run());
+        let (outcome, updated) = tokio::select! {
+            biased;
+            changed = targets.changed() => {
+                let updated = changed.is_ok();
+                if updated {
+                    target = *targets.borrow_and_update();
+                }
+                // Let in-flight verification and writes finish before headers take the database.
+                signal.fire();
+                (run.await, updated)
+            }
+            outcome = &mut run => (outcome, false),
+        };
+
+        match outcome {
+            Ok(SnapSyncOutcome::Complete { generation }) => {
+                info!(
+                    target: "sync::snap",
+                    block_number = generation.target_block,
+                    "Snap state published, resuming the pipeline above the pivot"
+                );
+                break
+            }
+            Ok(SnapSyncOutcome::Stalled { generation }) => {
+                debug!(
+                    target: "sync::snap",
+                    resumable = generation.is_some(),
+                    generation = ?generation,
+                    "Snap state download made no further progress"
+                );
+                if !updated {
+                    return (
+                        pipeline,
+                        Err(PipelineError::Internal(RethError::msg(
+                            "Snap bootstrap interrupted before state publication",
+                        ))),
+                    )
+                }
+            }
+            Err(error) => return (pipeline, Err(PipelineError::Internal(RethError::other(error)))),
         }
-        Err(error) => return (pipeline, Err(PipelineError::Internal(RethError::other(error)))),
     }
 
     // Stages the published frontier satisfies skip straight to the pivot, so this only executes
@@ -258,6 +302,24 @@ mod tests {
         let waker = Waker::noop();
 
         assert!(backfill.poll(&mut Context::from_waker(waker)).is_pending());
+    }
+
+    #[test]
+    fn target_updates_only_notify_an_active_bootstrap() {
+        let mut backfill = backfill();
+        let first = PipelineTarget::Sync(B256::repeat_byte(1));
+        let next = PipelineTarget::Sync(B256::repeat_byte(2));
+        backfill.on_action(BackfillAction::UpdateTarget(next));
+        assert!(backfill.pending_target.is_none());
+
+        let (sender, mut receiver) = watch::channel(first);
+        backfill.active_target = Some(sender);
+        backfill.on_action(BackfillAction::UpdateTarget(next));
+        assert!(receiver.has_changed().unwrap());
+        assert_eq!(*receiver.borrow_and_update(), next);
+        backfill.on_action(BackfillAction::UpdateTarget(next));
+        assert!(!receiver.has_changed().unwrap());
+        assert!(backfill.pending_target.is_none());
     }
 
     #[test]

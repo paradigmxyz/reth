@@ -4,7 +4,12 @@
 //! database and the Snap client's peer count between shutdown-aware waits.
 
 use crate::{error::db_error, SnapSyncContext, SnapSyncError};
-use core::time::Duration;
+use core::{
+    future::Future,
+    pin::Pin,
+    task::{Context, Waker},
+    time::Duration,
+};
 use reth_network_p2p::download::DownloadClient;
 use reth_provider::DatabaseProviderFactory;
 use reth_storage_api::BlockNumReader;
@@ -45,6 +50,12 @@ where
     F: DatabaseProviderFactory<Provider: BlockNumReader>,
     C: DownloadClient,
 {
+    fn is_cancelled(&self) -> bool {
+        Pin::new(&mut self.shutdown.clone())
+            .poll(&mut Context::from_waker(Waker::noop()))
+            .is_ready()
+    }
+
     fn canonical_head(&self) -> Result<u64, SnapSyncError> {
         let provider = self.factory.database_provider_ro().map_err(db_error)?;
         provider.last_block_number().map_err(db_error)
@@ -153,8 +164,10 @@ mod tests {
         let (signal, shutdown) = signal();
         let mut context =
             NodeSnapContext::new(&factory, &client, shutdown).with_interval(TEST_INTERVAL);
+        assert!(!context.is_cancelled());
         signal.fire();
 
+        assert!(context.is_cancelled());
         assert!(!context.wait_for_progress(0).await);
     }
 

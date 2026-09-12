@@ -8,10 +8,14 @@
 //! consistency check, or answer historical queries from data that is not there.
 
 use crate::{error::db_error, SnapStateStore, SnapSyncError};
-use reth_provider::DatabaseProviderFactory;
+use reth_db_api::{tables, transaction::DbTxMut};
+use reth_provider::{DatabaseProviderFactory, StaticFileProviderFactory, StaticFileWriter};
 use reth_prune_types::{PruneCheckpoint, PruneMode, PruneSegment};
 use reth_stages_types::{StageCheckpoint, StageId};
-use reth_storage_api::{PruneCheckpointWriter, StageCheckpointReader, StageCheckpointWriter};
+use reth_static_file_types::StaticFileSegment;
+use reth_storage_api::{
+    DBProvider, PruneCheckpointWriter, StageCheckpointReader, StageCheckpointWriter,
+};
 use tracing::info;
 
 // Stages a snap sync satisfies beyond those any externally supplied state covers: nothing below
@@ -64,12 +68,31 @@ impl<'a, F> SnapPipelineHandoff<'a, F> {
 /// stage looks for rows that were never downloaded. The prune checkpoints double as the unwind
 /// floor: `PruneModes::ensure_unwind_target_unpruned` refuses to rewind past them.
 ///
-/// Writes through `provider` without committing, so the caller can make publication atomic with
-/// whatever else accepts the state.
+/// Initializes static file anchors before writing checkpoints through `provider`. The caller
+/// commits the database together with the accepted state; an interrupted publication can repeat
+/// the static file initialization from the saved generation.
 pub(crate) fn publish_state_snapshot(
-    provider: &(impl PruneCheckpointWriter + StageCheckpointWriter),
+    provider: &(impl DBProvider<Tx: DbTxMut>
+          + PruneCheckpointWriter
+          + StageCheckpointWriter
+          + StaticFileProviderFactory),
     block_number: u64,
 ) -> Result<(), SnapSyncError> {
+    // Bootstrap has no executed history to retain. Start each non-header segment at the pivot
+    // with no rows, so the next append accepts pivot + 1 without materializing empty history.
+    // A retry before the database commit can repeat this initialization from the saved generation.
+    let static_files = provider.static_file_provider();
+    for segment in StaticFileSegment::iter().filter(|segment| !segment.is_headers()) {
+        static_files.delete_segment(segment).map_err(db_error)?;
+        let mut writer = static_files.get_writer(block_number, segment).map_err(db_error)?;
+        writer.initialize_pruned_anchor(block_number).map_err(db_error)?;
+    }
+    // A previous body-only download may have allocated transaction IDs without executing state.
+    // Those indices must restart with the empty transaction segment as well.
+    provider.tx_ref().clear::<tables::BlockBodyIndices>().map_err(db_error)?;
+    provider.tx_ref().clear::<tables::TransactionBlocks>().map_err(db_error)?;
+    provider.tx_ref().clear::<tables::TransactionHashNumbers>().map_err(db_error)?;
+
     let checkpoint = StageCheckpoint::new(block_number);
     for stage in StageId::STATE_REQUIRED.into_iter().chain(EXTRA_STATE_STAGES) {
         provider.save_stage_checkpoint(stage, checkpoint).map_err(db_error)?;
@@ -185,6 +208,50 @@ mod tests {
     }
 
     #[test]
+    fn published_snapshot_accepts_the_next_body_and_reopens() {
+        use reth_storage_api::BlockWriter;
+
+        let (factory, pivot) = snap_synced_factory();
+        let provider = factory.database_provider_rw().unwrap();
+        let body = Default::default();
+        provider.append_block_bodies(vec![(pivot + 1, Some(&body))]).unwrap();
+        provider.commit().unwrap();
+
+        let files = factory.static_file_provider();
+        let reopened = reopen(&files);
+        assert_eq!(
+            reopened.get_highest_static_file_block(StaticFileSegment::Transactions),
+            Some(pivot + 1)
+        );
+    }
+
+    #[test]
+    fn snapshot_segments_resume_across_file_boundaries() {
+        for pivot in [256, 600_001] {
+            let factory = create_test_provider_factory();
+            let provider = factory.database_provider_rw().unwrap();
+            publish_state_snapshot(&provider, pivot).unwrap();
+            provider.commit().unwrap();
+
+            let files = factory.static_file_provider();
+            for segment in StaticFileSegment::iter().filter(|segment| !segment.is_headers()) {
+                let mut writer = files.get_writer(pivot + 1, segment).unwrap();
+                writer.increment_block(pivot + 1).unwrap();
+                writer.commit().unwrap();
+            }
+            let reopened = reopen(&files);
+            for segment in StaticFileSegment::iter().filter(|segment| !segment.is_headers()) {
+                assert_eq!(reopened.get_highest_static_file_block(segment), Some(pivot + 1));
+                let jar =
+                    reopened.get_segment_provider_for_block(segment, pivot + 1, None).unwrap();
+                if segment.is_change_based() {
+                    assert_eq!(jar.read_changeset_offsets().unwrap().unwrap().len(), 2);
+                }
+            }
+        }
+    }
+
+    #[test]
     fn unfinished_state_is_not_published() {
         let factory = create_test_provider_factory();
         factory.set_storage_settings_cache(StorageSettings::v2());
@@ -198,5 +265,11 @@ mod tests {
         let provider = factory.database_provider_ro().unwrap();
         assert_eq!(provider.get_stage_checkpoint(StageId::Execution).unwrap(), None);
         assert_eq!(SnapPipelineHandoff::new(&factory).published_block().unwrap(), None);
+    }
+
+    fn reopen<N: reth_primitives_traits::NodePrimitives>(
+        files: &reth_provider::providers::StaticFileProvider<N>,
+    ) -> reth_provider::providers::StaticFileProvider<N> {
+        reth_provider::providers::StaticFileProvider::read_only(files.directory()).unwrap()
     }
 }

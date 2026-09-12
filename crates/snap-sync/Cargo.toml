@@ -23,6 +23,7 @@ reth-prune-types.workspace = true
 reth-provider.workspace = true
 reth-stages.workspace = true
 reth-stages-types.workspace = true
+reth-static-file-types.workspace = true
 reth-storage-api = { workspace = true, features = ["db-api"] }
 reth-storage-errors.workspace = true
 reth-tasks.workspace = true
@@ -48,7 +49,6 @@ alloy-consensus.workspace = true
 reth-db-api = { workspace = true, features = ["test-utils"] }
 reth-downloaders = { workspace = true, features = ["test-utils"] }
 reth-provider = { workspace = true, features = ["test-utils"] }
-reth-static-file-types.workspace = true
 tokio = { workspace = true, features = ["macros", "rt"] }
 
 [features]

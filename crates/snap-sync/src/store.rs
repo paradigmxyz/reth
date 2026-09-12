@@ -12,7 +12,7 @@ use alloy_primitives::{keccak256, Bytes, B256};
 use alloy_rlp::{Decodable, Encodable};
 use reth_db_api::{tables, transaction::DbTxMut};
 use reth_primitives_traits::AlloyBlockHeader;
-use reth_provider::DatabaseProviderFactory;
+use reth_provider::{DatabaseProviderFactory, StaticFileProviderFactory};
 use reth_stages_types::{StageCheckpoint, StageId};
 use reth_storage_api::{
     AccountExtReader, DBProvider, HeaderProvider, PruneCheckpointWriter, StageCheckpointReader,
@@ -207,12 +207,13 @@ impl<'a, F> SnapStateStore<'a, F> {
     ) -> Result<(), SnapSyncError>
     where
         F: DatabaseProviderFactory,
-        F::ProviderRW: DBProvider
+        F::ProviderRW: DBProvider<Tx: DbTxMut>
             + HeaderProvider
             + PruneCheckpointWriter
             + StageCheckpointReader
             + StageCheckpointWriter
-            + StorageSettingsCache,
+            + StorageSettingsCache
+            + StaticFileProviderFactory,
     {
         generation.validate()?;
         generation.ensure_phase(SnapPhase::Trie)?;

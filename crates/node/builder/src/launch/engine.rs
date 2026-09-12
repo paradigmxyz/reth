@@ -5,6 +5,7 @@ use crate::{
     hooks::NodeHooks,
     rpc::{EngineShutdown, EngineValidatorAddOn, EngineValidatorBuilder, RethRpcAddOns, RpcHandle},
     setup::build_networked_pipeline,
+    sync::NodeBackfillSync,
     AddOns, AddOnsContext, FullNode, LaunchContext, LaunchNode, Node, NodeAdapter,
     NodeBuilderWithComponents, NodeComponents, NodeComponentsBuilder, NodeHandle, NodeTypesAdapter,
     RethFullAdapter,
@@ -16,7 +17,7 @@ use reth_db::{database_metrics::DatabaseMetrics, Database};
 use reth_engine_tree::{
     chain::{ChainEvent, FromOrchestrator},
     engine::{EngineApiKind, EngineApiRequest, EngineRequestHandler},
-    launch::{build_engine_orchestrator, EngineOrchestratorConfig},
+    launch::{build_engine_orchestrator_with_backfill, EngineOrchestratorConfig},
     tree::TreeConfig,
 };
 use reth_engine_util::EngineMessageStreamExt;
@@ -244,7 +245,14 @@ impl EngineNodeLauncher {
             EngineApiKind::Ethereum
         };
 
-        let mut orchestrator = build_engine_orchestrator(
+        let backfill_sync = NodeBackfillSync::new(
+            node_config.network.snap_v2,
+            pipeline,
+            network_client.clone(),
+            ctx.provider_factory().clone(),
+            ctx.task_executor().clone(),
+        );
+        let mut orchestrator = build_engine_orchestrator_with_backfill(
             EngineOrchestratorConfig {
                 engine_kind,
                 consensus: consensus.clone(),
@@ -261,8 +269,7 @@ impl EngineNodeLauncher {
                 evm_config: ctx.components().evm_config().clone(),
                 runtime: ctx.task_executor().clone(),
             },
-            pipeline,
-            ctx.task_executor().clone(),
+            backfill_sync,
         );
 
         info!(target: "reth::cli", "Consensus engine initialized");

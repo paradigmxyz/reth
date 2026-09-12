@@ -12,7 +12,7 @@ use crate::{
 use core::future::Future;
 use reth_db_api::transaction::DbTxMut;
 use reth_network_p2p::snap::client::SnapClient;
-use reth_provider::DatabaseProviderFactory;
+use reth_provider::{DatabaseProviderFactory, StaticFileProviderFactory};
 use reth_storage_api::{
     AccountExtReader, ChangeSetReader, DBProvider, HeaderProvider, PruneCheckpointWriter,
     StageCheckpointReader, StageCheckpointWriter, StateWriter, StatsReader, StorageChangeSetReader,
@@ -205,6 +205,9 @@ impl<'a, C, F, X> SnapBootstrap<'a, C, F, X> {
             BlockAccessListCatchUp::new(self.client, self.factory, self.runtime.clone());
 
         loop {
+            if self.context.is_cancelled() {
+                return Ok(SessionStep::Stalled(generation))
+            }
             match generation.phase {
                 SnapPhase::Accounts => {
                     if !self.policy.is_catchable(generation.generation(), head) {
@@ -213,6 +216,7 @@ impl<'a, C, F, X> SnapBootstrap<'a, C, F, X> {
                     if let Some(target) = self.pending_advance(generation, head) {
                         match catch_up.advance_pivot(generation, target).await? {
                             BlockAccessListCatchUpOutcome::Complete { generation: next } => {
+                                info!(target: "snap::session", from = generation.target_block, to = next.target_block, "Advanced snap pivot using block access lists");
                                 generation = next;
                             }
                             BlockAccessListCatchUpOutcome::Unavailable { generation: next } => {
@@ -249,6 +253,9 @@ impl<'a, C, F, X> SnapBootstrap<'a, C, F, X> {
                         self.advance_target(generation, head).unwrap_or(generation.target_block);
                     match catch_up.run(generation, target).await? {
                         BlockAccessListCatchUpOutcome::Complete { generation: next } => {
+                            if next.target_block > generation.target_block {
+                                info!(target: "snap::session", from = generation.target_block, to = next.target_block, "Applied block access lists to downloaded snap state");
+                            }
                             generation = next;
                         }
                         BlockAccessListCatchUpOutcome::Unavailable { generation: next } => {
@@ -331,6 +338,11 @@ pub enum SnapSyncOutcome {
 /// The node owning the session implements this so that stalled phases wait on real network or
 /// chain events rather than polling.
 pub trait SnapSyncContext {
+    /// Whether the session should stop at the next durable phase boundary.
+    fn is_cancelled(&self) -> bool {
+        false
+    }
+
     /// Returns the highest canonical block whose header is available locally.
     fn canonical_head(&self) -> Result<u64, SnapSyncError>;
 
@@ -353,6 +365,7 @@ pub trait SnapSyncProvider:
     + StatsReader
     + StorageChangeSetReader
     + StorageSettingsCache
+    + StaticFileProviderFactory
     + TrieWriter
 {
 }
@@ -369,6 +382,7 @@ impl<T> SnapSyncProvider for T where
         + StatsReader
         + StorageChangeSetReader
         + StorageSettingsCache
+        + StaticFileProviderFactory
         + TrieWriter
 {
 }
@@ -542,6 +556,58 @@ mod tests {
             provider.tx_ref().get::<tables::HashedAccounts>(account_hash).unwrap(),
             Some(Account::from(account))
         );
+    }
+
+    #[tokio::test]
+    async fn cancellation_preserves_the_committed_download_for_resume() {
+        struct CancelledContext;
+        impl SnapSyncContext for CancelledContext {
+            fn canonical_head(&self) -> Result<u64, SnapSyncError> {
+                Ok(2)
+            }
+            fn is_cancelled(&self) -> bool {
+                true
+            }
+            async fn wait_for_progress(&mut self, _: u64) -> bool {
+                false
+            }
+        }
+
+        let factory = create_test_provider_factory();
+        factory.set_storage_settings_cache(StorageSettings::v2());
+        let hash = B256::repeat_byte(0x11);
+        let account = account();
+        let root = state_root(hash, &account);
+        let blocks = chain(&factory, [B256::ZERO, root], true);
+        let store = SnapStateStore::new(&factory);
+        let generation = SnapDownloadProgress::new(1, blocks[1].hash_slow(), root);
+        store.begin_generation(generation).unwrap();
+        let generation = store
+            .commit_account_range(
+                generation,
+                HashedPostState::default().with_accounts([(hash, Some(Account::from(account)))]),
+                Vec::new(),
+                AccountRangeProgress::More { next_account: B256::repeat_byte(0x22) },
+            )
+            .unwrap();
+        let client = TestSnapClient::new([]);
+        let outcome = SnapBootstrap::new(&client, &factory, CancelledContext, Runtime::test())
+            .with_policy(policy())
+            .run()
+            .await
+            .unwrap();
+        assert!(
+            matches!(outcome, SnapSyncOutcome::Stalled { generation: Some(saved) } if saved == generation)
+        );
+        assert_eq!(store.interrupted_generation().unwrap(), Some(generation));
+        assert!(store.completed_block().unwrap().is_none());
+        assert!(factory
+            .database_provider_ro()
+            .unwrap()
+            .tx_ref()
+            .get::<tables::HashedAccounts>(hash)
+            .unwrap()
+            .is_some());
     }
 
     #[tokio::test]
