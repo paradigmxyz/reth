@@ -4950,12 +4950,12 @@ mod tests {
         let write_receipts = |provider_rw: DatabaseProviderRW<_, _>, block: u64| {
             let outcome = ExecutionOutcome {
                 first_block: block,
-                receipts: vec![vec![Receipt {
-                    tx_type: Default::default(),
-                    success: true,
-                    cumulative_gas_used: block, // identifier to assert against
-                    logs: vec![],
-                }]],
+                receipts: vec![vec![Receipt::standard(
+                    Default::default(),
+                    true,
+                    block, // identifier to assert against
+                    vec![],
+                )]],
                 ..Default::default()
             };
             provider_rw
@@ -5065,7 +5065,7 @@ mod tests {
 
                 let receipt = provider.receipt(num).unwrap();
                 if has_receipt {
-                    assert!(receipt.is_some_and(|r| r.cumulative_gas_used == num));
+                    assert!(receipt.is_some_and(|r| r.cumulative_gas_used() == num));
                 } else {
                     assert!(receipt.is_none());
                 }

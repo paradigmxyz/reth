@@ -10,7 +10,7 @@ use crate::{
 use alloy_consensus::{transaction::TxHashRef, BlockHeader};
 use alloy_eips::eip2930::AccessListResult;
 use alloy_evm::overrides::{apply_block_overrides, apply_state_overrides, OverrideBlockHashes};
-use alloy_network::TransactionBuilder;
+use alloy_network::{NetworkTransactionBuilder, TransactionBuilder};
 use alloy_primitives::{Bytes, B256, U256};
 use alloy_rpc_types_eth::{
     simulate::{SimBlock, SimulatePayload, SimulatedBlock},
@@ -849,16 +849,19 @@ pub trait Call:
     {
         // track whether the request has a gas limit set
         let request_has_gas_limit = request.as_ref().gas_limit().is_some();
+        let is_frame = Into::<u8>::into(request.as_ref().output_tx_type()) == 0x06;
 
-        if let Some(requested_gas) = request.as_ref().gas_limit() {
-            let global_gas_cap = self.call_gas_limit();
-            if global_gas_cap != 0 && global_gas_cap < requested_gas {
-                warn!(target: "rpc::eth::call", ?request, ?global_gas_cap, "Capping gas limit to global gas cap");
-                request.as_mut().set_gas_limit(global_gas_cap);
+        if !is_frame {
+            if let Some(requested_gas) = request.as_ref().gas_limit() {
+                let global_gas_cap = self.call_gas_limit();
+                if global_gas_cap != 0 && global_gas_cap < requested_gas {
+                    warn!(target: "rpc::eth::call", ?request, ?global_gas_cap, "Capping gas limit to global gas cap");
+                    request.as_mut().set_gas_limit(global_gas_cap);
+                }
+            } else {
+                // cap request's gas limit to call gas limit
+                request.as_mut().set_gas_limit(self.call_gas_limit());
             }
-        } else {
-            // cap request's gas limit to call gas limit
-            request.as_mut().set_gas_limit(self.call_gas_limit());
         }
 
         // Disable block gas limit check to allow executing transactions with higher gas limit (call
@@ -885,7 +888,9 @@ pub trait Call:
         evm_env.cfg_env.memory_limit = self.evm_memory_limit();
 
         // set nonce to None so that the correct nonce is chosen by the EVM
-        request.as_mut().take_nonce();
+        if !is_frame {
+            request.as_mut().take_nonce();
+        }
 
         if let Some(block_overrides) = overrides.block {
             apply_block_overrides(*block_overrides, db, evm_env.block_env.inner_mut());
@@ -896,13 +901,20 @@ pub trait Call:
         }
 
         let mut tx_env = self.create_txn_env(&evm_env, request, &mut *db)?;
+        // Frame limits are part of the signed envelope. Reject an excessive request instead of
+        // changing its canonical gas limit or charging its allowance to an unrelated sender.
+        if is_frame && self.call_gas_limit() != 0 && tx_env.gas_limit() > self.call_gas_limit() {
+            return Err(Self::Error::from(EthApiError::InvalidParams(
+                "frame transaction exceeds the RPC gas cap".into(),
+            )));
+        }
 
         // lower the basefee to 0 to avoid breaking EVM invariants (basefee < gasprice): <https://github.com/ethereum/go-ethereum/blob/355228b011ef9a85ebc0f21e7196f892038d49f0/internal/ethapi/api.go#L700-L704>
         if tx_env.gas_price() == 0 {
             evm_env.block_env.inner_mut().basefee = 0;
         }
 
-        if !request_has_gas_limit {
+        if !is_frame && !request_has_gas_limit {
             // No gas limit was provided in the request, so we need to cap the transaction gas limit
             if tx_env.gas_price() > 0 {
                 // If gas price is specified, cap transaction gas limit with caller allowance

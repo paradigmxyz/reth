@@ -112,7 +112,7 @@ use alloy_eip7928::{
     bal::{Bal, DecodedBal},
     BlockAccessList,
 };
-use alloy_eips::{eip1898::BlockWithParent, eip4895::Withdrawal, NumHash};
+use alloy_eips::{eip1898::BlockWithParent, eip2718::Typed2718, eip4895::Withdrawal, NumHash};
 use alloy_evm::Evm;
 use alloy_primitives::{
     map::{AddressMap, B256Set},
@@ -607,8 +607,16 @@ where
 
         // Get an iterator over the transactions in the payload
         let txs = self.tx_iterator_for(&input)?;
+        let has_eip8141_transactions = match &input {
+            BlockOrPayload::Payload(payload) => payload.has_eip8141_transactions(),
+            BlockOrPayload::Block(block) => {
+                block.body().transactions().iter().any(|tx| tx.is_eip8141())
+            }
+        };
 
-        let parallel_bal_execution = ensure_ok!(self.bal_path_eligible(env.decoded_bal.as_deref()));
+        let parallel_bal_execution = ensure_ok!(
+            self.bal_path_eligible(env.decoded_bal.as_deref(), has_eip8141_transactions)
+        );
 
         // Prepare the state-root job before execution so it can provide streaming hooks.
         let mut state_root_job =
@@ -1113,9 +1121,18 @@ where
     //   - Tx-count threshold (`bal_execute_path_min_tx_count`): below the parallelism break-even
     //     point, provider setup and worker scheduling overhead can exceed the gain. Tune
     //     empirically once workers are parallel; meaningless while the commit loop is sequential.
-    fn bal_path_eligible(&self, bal: Option<&DecodedBal>) -> Result<bool, InsertBlockErrorKind> {
+    fn bal_path_eligible(
+        &self,
+        bal: Option<&DecodedBal>,
+        has_eip8141_transactions: bool,
+    ) -> Result<bool, InsertBlockErrorKind> {
         let has_bal = bal.is_some();
-        let parallel_execution = has_bal && !self.config.disable_bal_parallel_execution();
+        // Frame transactions reserve execution and state gas separately. The ordered commit
+        // loop only replays standard transaction limits, so mixed blocks must execute serially.
+        // Enabling frames also requires preserving serial admission/transaction error ordering:
+        // workers currently forward execution failures before the ordered admission check.
+        let parallel_execution =
+            has_bal && !has_eip8141_transactions && !self.config.disable_bal_parallel_execution();
         if parallel_execution && self.config.disable_bal_parallel_state_root() {
             return Err(InsertBlockErrorKind::Other(
                 "disabling parallel state root is impossible when parallel execution is enabled"

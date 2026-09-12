@@ -1304,6 +1304,7 @@ struct TxFetcherSearchDurations {
 mod test {
     use super::*;
     use crate::test_utils::transactions::{buffer_hash_to_tx_fetcher, new_mock_session};
+    use alloy_consensus::transaction::TxHashRef;
     use alloy_primitives::{
         hex,
         map::{B256Map, B256Set, HashMap},
@@ -1574,7 +1575,7 @@ mod test {
         let request_hashes = [
             B256::from_str("0x3b9aca00f0671c9a2a1b817a0a78d3fe0c0f776cccb2a8c3c1b412a4f4e67890")
                 .unwrap(),
-            *signed_tx_1.hash(),
+            *signed_tx_1.tx_hash(),
             B256::from_str("0x3b9aca00f0671c9a2a1b817a0a78d3fe0c0f776cccb2a8c3c1b412a4f4e12345")
                 .unwrap(),
             B256::from_str("0x3b9aca00f0671c9a2a1b817a0a78d3fe0c0f776cccb2a8c3c1b412a4f4edabe3")
@@ -1582,7 +1583,7 @@ mod test {
         ];
 
         for hash in &request_hashes {
-            assert_ne!(hash, signed_tx_2.hash())
+            assert_ne!(hash, signed_tx_2.tx_hash())
         }
 
         let request_hashes = RequestTxHashes::new(request_hashes.into_iter().collect());

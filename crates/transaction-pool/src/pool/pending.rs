@@ -181,7 +181,8 @@ impl<T: TransactionOrdering> PendingPool<T> {
         let mut highest: Option<TransactionId> = None;
         while let Some((id, tx)) = transactions_iter.next() {
             self.flush_highest_nonce(&mut highest, Some(id.sender));
-            if tx.transaction.is_eip4844() && tx.transaction.max_fee_per_blob_gas() < Some(blob_fee)
+            if tx.transaction.is_blob_transaction() &&
+                tx.transaction.max_fee_per_blob_gas() < Some(blob_fee)
             {
                 // Add this tx to the removed collection since it no longer satisfies the blob fee
                 // condition. Decrease the total pool size.

@@ -1,7 +1,7 @@
 [workspace.package]
 version = "2.5.2"
 edition = "2024"
-rust-version = "1.95"
+rust-version = "1.96"
 license = "MIT OR Apache-2.0"
 homepage = "https://paradigmxyz.github.io/reth"
 repository = "https://github.com/paradigmxyz/reth"
@@ -433,8 +433,8 @@ reth-trie-sparse = { path = "crates/trie/sparse", default-features = false }
 reth-zstd-compressors = { version = "0.7.0", default-features = false }
 
 # revm
-revm = { version = "43.0.2", default-features = false }
-revmc = { git = "https://github.com/paradigmxyz/revmc", branch = "main", default-features = false, features = ["llvm-prefer-static"] }
+revm = { version = "43.0.0", default-features = false }
+revmc = { git = "https://github.com/Soubhik-10/revmc", rev = "4535866267866ae437cc3f72ac0eb51bdd7f1fdb", default-features = false, features = ["llvm-prefer-static"] }
 revm-inspectors = "0.43.0"
 
 # eth
@@ -451,34 +451,34 @@ alloy-trie = { version = "0.9.4", default-features = false }
 
 alloy-hardforks = "0.4.8"
 
-alloy-consensus = { version = "2.4.2", default-features = false }
-alloy-contract = { version = "2.4.2", default-features = false }
-alloy-eips = { version = "2.4.2", default-features = false }
-alloy-genesis = { version = "2.4.2", default-features = false }
-alloy-json-rpc = { version = "2.4.2", default-features = false }
-alloy-network = { version = "2.4.2", default-features = false }
-alloy-network-primitives = { version = "2.4.2", default-features = false }
-alloy-node-bindings = "2.4.2"
-alloy-provider = { version = "2.4.2", features = ["reqwest", "debug-api"], default-features = false }
-alloy-pubsub = { version = "2.4.2", default-features = false }
-alloy-rpc-client = { version = "2.4.2", default-features = false }
-alloy-rpc-types = { version = "2.4.2", features = ["eth"], default-features = false }
-alloy-rpc-types-admin = { version = "2.4.2", default-features = false }
-alloy-rpc-types-anvil = { version = "2.4.2", default-features = false }
-alloy-rpc-types-beacon = { version = "2.4.2", default-features = false }
-alloy-rpc-types-debug = { version = "2.4.2", default-features = false }
-alloy-rpc-types-engine = { version = "2.4.2", default-features = false }
-alloy-rpc-types-eth = { version = "2.4.2", default-features = false }
-alloy-rpc-types-mev = { version = "2.4.2", default-features = false }
-alloy-rpc-types-trace = { version = "2.4.2", default-features = false }
-alloy-rpc-types-txpool = { version = "2.4.2", default-features = false }
-alloy-serde = { version = "2.4.2", default-features = false }
-alloy-signer = { version = "2.4.2", default-features = false }
-alloy-signer-local = { version = "2.4.2", default-features = false }
-alloy-transport = { version = "2.4.2" }
-alloy-transport-http = { version = "2.4.2", features = ["reqwest-rustls-tls"], default-features = false }
-alloy-transport-ipc = { version = "2.4.2", default-features = false }
-alloy-transport-ws = { version = "2.4.2", default-features = false }
+alloy-consensus = { version = "2.4.1", default-features = false }
+alloy-contract = { version = "2.4.1", default-features = false }
+alloy-eips = { version = "2.4.1", default-features = false }
+alloy-genesis = { version = "2.4.1", default-features = false }
+alloy-json-rpc = { version = "2.4.1", default-features = false }
+alloy-network = { version = "2.4.1", default-features = false }
+alloy-network-primitives = { version = "2.4.1", default-features = false }
+alloy-node-bindings = "2.4.1"
+alloy-provider = { version = "2.4.1", features = ["reqwest", "debug-api"], default-features = false }
+alloy-pubsub = { version = "2.4.1", default-features = false }
+alloy-rpc-client = { version = "2.4.1", default-features = false }
+alloy-rpc-types = { version = "2.4.1", features = ["eth"], default-features = false }
+alloy-rpc-types-admin = { version = "2.4.1", default-features = false }
+alloy-rpc-types-anvil = { version = "2.4.1", default-features = false }
+alloy-rpc-types-beacon = { version = "2.4.1", default-features = false }
+alloy-rpc-types-debug = { version = "2.4.1", default-features = false }
+alloy-rpc-types-engine = { version = "2.4.1", default-features = false }
+alloy-rpc-types-eth = { version = "2.4.1", default-features = false }
+alloy-rpc-types-mev = { version = "2.4.1", default-features = false }
+alloy-rpc-types-trace = { version = "2.4.1", default-features = false }
+alloy-rpc-types-txpool = { version = "2.4.1", default-features = false }
+alloy-serde = { version = "2.4.1", default-features = false }
+alloy-signer = { version = "2.4.1", default-features = false }
+alloy-signer-local = { version = "2.4.1", default-features = false }
+alloy-transport = { version = "2.4.1" }
+alloy-transport-http = { version = "2.4.1", features = ["reqwest-rustls-tls"], default-features = false }
+alloy-transport-ipc = { version = "2.4.1", default-features = false }
+alloy-transport-ws = { version = "2.4.1", default-features = false }
 
 # misc
 either = { version = "1.16.0", default-features = false }
@@ -696,3 +696,58 @@ vergen-git2 = "10.0.1"
 
 # networking
 ipnet = "2.11"
+
+[patch.crates-io]
+revm-inspectors = { git = "https://github.com/Soubhik-10/revm-inspectors", rev = "4607ce46d4f95b017d2341a86997941f9b7ef678" }
+# EIP-8141 Alloy consensus, networking, RPC, signer, and transport stack.
+alloy-consensus = { git = "https://github.com/Rimeeeeee/alloy", rev = "b5f71a1b1e044edf2b24afeed9ab804fd7c9c3f8" }
+alloy-consensus-any = { git = "https://github.com/Rimeeeeee/alloy", rev = "b5f71a1b1e044edf2b24afeed9ab804fd7c9c3f8" }
+alloy-contract = { git = "https://github.com/Rimeeeeee/alloy", rev = "b5f71a1b1e044edf2b24afeed9ab804fd7c9c3f8" }
+alloy-eips = { git = "https://github.com/Rimeeeeee/alloy", rev = "b5f71a1b1e044edf2b24afeed9ab804fd7c9c3f8" }
+alloy-genesis = { git = "https://github.com/Rimeeeeee/alloy", rev = "b5f71a1b1e044edf2b24afeed9ab804fd7c9c3f8" }
+alloy-json-rpc = { git = "https://github.com/Rimeeeeee/alloy", rev = "b5f71a1b1e044edf2b24afeed9ab804fd7c9c3f8" }
+alloy-network = { git = "https://github.com/Rimeeeeee/alloy", rev = "b5f71a1b1e044edf2b24afeed9ab804fd7c9c3f8" }
+alloy-network-primitives = { git = "https://github.com/Rimeeeeee/alloy", rev = "b5f71a1b1e044edf2b24afeed9ab804fd7c9c3f8" }
+alloy-node-bindings = { git = "https://github.com/Rimeeeeee/alloy", rev = "b5f71a1b1e044edf2b24afeed9ab804fd7c9c3f8" }
+alloy-provider = { git = "https://github.com/Rimeeeeee/alloy", rev = "b5f71a1b1e044edf2b24afeed9ab804fd7c9c3f8" }
+alloy-pubsub = { git = "https://github.com/Rimeeeeee/alloy", rev = "b5f71a1b1e044edf2b24afeed9ab804fd7c9c3f8" }
+alloy-rpc-client = { git = "https://github.com/Rimeeeeee/alloy", rev = "b5f71a1b1e044edf2b24afeed9ab804fd7c9c3f8" }
+alloy-rpc-types = { git = "https://github.com/Rimeeeeee/alloy", rev = "b5f71a1b1e044edf2b24afeed9ab804fd7c9c3f8" }
+alloy-rpc-types-admin = { git = "https://github.com/Rimeeeeee/alloy", rev = "b5f71a1b1e044edf2b24afeed9ab804fd7c9c3f8" }
+alloy-rpc-types-anvil = { git = "https://github.com/Rimeeeeee/alloy", rev = "b5f71a1b1e044edf2b24afeed9ab804fd7c9c3f8" }
+alloy-rpc-types-any = { git = "https://github.com/Rimeeeeee/alloy", rev = "b5f71a1b1e044edf2b24afeed9ab804fd7c9c3f8" }
+alloy-rpc-types-beacon = { git = "https://github.com/Rimeeeeee/alloy", rev = "b5f71a1b1e044edf2b24afeed9ab804fd7c9c3f8" }
+alloy-rpc-types-debug = { git = "https://github.com/Rimeeeeee/alloy", rev = "b5f71a1b1e044edf2b24afeed9ab804fd7c9c3f8" }
+alloy-rpc-types-engine = { git = "https://github.com/Rimeeeeee/alloy", rev = "b5f71a1b1e044edf2b24afeed9ab804fd7c9c3f8" }
+alloy-rpc-types-eth = { git = "https://github.com/Rimeeeeee/alloy", rev = "b5f71a1b1e044edf2b24afeed9ab804fd7c9c3f8" }
+alloy-rpc-types-mev = { git = "https://github.com/Rimeeeeee/alloy", rev = "b5f71a1b1e044edf2b24afeed9ab804fd7c9c3f8" }
+alloy-rpc-types-trace = { git = "https://github.com/Rimeeeeee/alloy", rev = "b5f71a1b1e044edf2b24afeed9ab804fd7c9c3f8" }
+alloy-rpc-types-txpool = { git = "https://github.com/Rimeeeeee/alloy", rev = "b5f71a1b1e044edf2b24afeed9ab804fd7c9c3f8" }
+alloy-serde = { git = "https://github.com/Rimeeeeee/alloy", rev = "b5f71a1b1e044edf2b24afeed9ab804fd7c9c3f8" }
+alloy-signer = { git = "https://github.com/Rimeeeeee/alloy", rev = "b5f71a1b1e044edf2b24afeed9ab804fd7c9c3f8" }
+alloy-signer-local = { git = "https://github.com/Rimeeeeee/alloy", rev = "b5f71a1b1e044edf2b24afeed9ab804fd7c9c3f8" }
+alloy-transport = { git = "https://github.com/Rimeeeeee/alloy", rev = "b5f71a1b1e044edf2b24afeed9ab804fd7c9c3f8" }
+alloy-transport-http = { git = "https://github.com/Rimeeeeee/alloy", rev = "b5f71a1b1e044edf2b24afeed9ab804fd7c9c3f8" }
+alloy-transport-ipc = { git = "https://github.com/Rimeeeeee/alloy", rev = "b5f71a1b1e044edf2b24afeed9ab804fd7c9c3f8" }
+alloy-transport-ws = { git = "https://github.com/Rimeeeeee/alloy", rev = "b5f71a1b1e044edf2b24afeed9ab804fd7c9c3f8" }
+alloy-tx-macros = { git = "https://github.com/Rimeeeeee/alloy", rev = "b5f71a1b1e044edf2b24afeed9ab804fd7c9c3f8" }
+
+# EIP-8141 execution adapter and VM.
+alloy-evm = { git = "https://github.com/Soubhik-10/evm", rev = "5ad553f277fcdf5d69e2cdf2ad20a11bb8ebfee1" }
+reth-codecs = { git = "https://github.com/Soubhik-10/reth-core", rev = "bea4a854fea738bc8493989dfbad83298cd76636" }
+reth-codecs-derive = { git = "https://github.com/Soubhik-10/reth-core", rev = "bea4a854fea738bc8493989dfbad83298cd76636" }
+reth-primitives-traits = { git = "https://github.com/Soubhik-10/reth-core", rev = "bea4a854fea738bc8493989dfbad83298cd76636" }
+reth-rpc-traits = { git = "https://github.com/Soubhik-10/reth-core", rev = "bea4a854fea738bc8493989dfbad83298cd76636" }
+reth-zstd-compressors = { git = "https://github.com/Soubhik-10/reth-core", rev = "bea4a854fea738bc8493989dfbad83298cd76636" }
+revm = { git = "https://github.com/Soubhik-10/revm", rev = "1076959073242fa4cddc93d6309351a839a6fa54" }
+revm-bytecode = { git = "https://github.com/Soubhik-10/revm", rev = "1076959073242fa4cddc93d6309351a839a6fa54" }
+revm-context = { git = "https://github.com/Soubhik-10/revm", rev = "1076959073242fa4cddc93d6309351a839a6fa54" }
+revm-context-interface = { git = "https://github.com/Soubhik-10/revm", rev = "1076959073242fa4cddc93d6309351a839a6fa54" }
+revm-database = { git = "https://github.com/Soubhik-10/revm", rev = "1076959073242fa4cddc93d6309351a839a6fa54" }
+revm-database-interface = { git = "https://github.com/Soubhik-10/revm", rev = "1076959073242fa4cddc93d6309351a839a6fa54" }
+revm-handler = { git = "https://github.com/Soubhik-10/revm", rev = "1076959073242fa4cddc93d6309351a839a6fa54" }
+revm-inspector = { git = "https://github.com/Soubhik-10/revm", rev = "1076959073242fa4cddc93d6309351a839a6fa54" }
+revm-interpreter = { git = "https://github.com/Soubhik-10/revm", rev = "1076959073242fa4cddc93d6309351a839a6fa54" }
+revm-precompile = { git = "https://github.com/Soubhik-10/revm", rev = "1076959073242fa4cddc93d6309351a839a6fa54" }
+revm-primitives = { git = "https://github.com/Soubhik-10/revm", rev = "1076959073242fa4cddc93d6309351a839a6fa54" }
+revm-state = { git = "https://github.com/Soubhik-10/revm", rev = "1076959073242fa4cddc93d6309351a839a6fa54" }

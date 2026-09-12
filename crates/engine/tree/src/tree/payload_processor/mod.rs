@@ -32,6 +32,7 @@ pub use reth_trie_parallel::{
         StateRootSink, StateRootTaskCancelGuard, StateRootUpdateHook, StateRootUpdateStream,
     },
 };
+use revm::context_interface::cfg::GasParams;
 use std::{
     ops::Not,
     sync::{
@@ -39,7 +40,7 @@ use std::{
         mpsc, Arc, OnceLock,
     },
 };
-use tracing::{debug, instrument, trace, warn, Span};
+use tracing::{debug, info, instrument, trace, warn, Span};
 
 pub mod bal;
 pub mod bal_prewarm_pool;
@@ -186,6 +187,13 @@ where
             + HistoryReader
             + 'static,
     {
+        info!(
+            target: "engine::tree::payload_processor",
+            block = ?env.hash,
+            transactions = env.transaction_count,
+            parallel_bal_execution,
+            "Starting payload processor"
+        );
         let prewarm_transactions =
             self.prewarms_transactions(env.transaction_count, parallel_bal_execution);
         let (prewarm_rx, execution_rx) = self.spawn_tx_iterator(
@@ -193,6 +201,7 @@ where
             env.transaction_count,
             parallel_bal_execution,
             prewarm_transactions,
+            env.evm_env.cfg_env.gas_params.clone(),
         );
         let prewarm_handle = self.spawn_caching_with(
             env,
@@ -259,12 +268,14 @@ where
         transaction_count: usize,
         parallel_bal_execution: bool,
         prewarm_transactions: bool,
+        gas_params: GasParams,
     ) -> (Option<IteratorPrewarmTxReceiver<Evm, I>>, IteratorExecuteTxReceiver<Evm, I>) {
         let (prewarm_tx, prewarm_rx) =
             prewarm_transactions.then(|| mpsc::sync_channel(transaction_count)).unzip();
         let (execute_tx, execute_rx) = crossbeam_channel::bounded(transaction_count);
 
         if transaction_count == 0 {
+            info!(target: "engine::tree::payload_processor", "Payload has no transactions");
             // Empty block — nothing to do.
         } else if transaction_count < Self::SMALL_BLOCK_TX_THRESHOLD {
             // Sequential path for small blocks — avoids rayon work-stealing setup and
@@ -274,6 +285,11 @@ where
                 transaction_count,
                 "using sequential sig recovery for small block"
             );
+            info!(
+                target: "engine::tree::payload_processor",
+                transaction_count,
+                "Using sequential transaction conversion"
+            );
             self.executor.spawn_blocking_named("tx-iterator", move || {
                 let (transactions, convert) = transactions.into_parts();
                 convert_serial(
@@ -281,11 +297,18 @@ where
                     &convert,
                     prewarm_tx.as_ref(),
                     &execute_tx,
+                    &gas_params,
                 );
             });
         } else {
             // Parallel path — recover signatures in parallel on rayon, stream results
             // to prewarming and execution.
+            info!(
+                target: "engine::tree::payload_processor",
+                transaction_count,
+                parallel_bal_execution,
+                "Using parallel transaction conversion"
+            );
             let executor = self.executor.clone();
             self.executor.spawn_blocking_named("tx-iterator", move || {
                 let (transactions, convert) = transactions.into_parts();
@@ -297,7 +320,7 @@ where
                             .into_par_iter()
                             .enumerate()
                             .try_for_each(|(idx, tx)| {
-                                let tx = convert.convert(tx).map(WithTxEnv::new);
+                                let tx = convert.convert(tx).map(|tx| WithTxEnv::new_with_gas_params(tx, &gas_params));
                                 let failed = tx.is_err();
                                 if let (Some(prewarm_tx), Ok(tx)) = (&prewarm_tx, &tx) {
                                     let _ = prewarm_tx.send((idx, tx.clone()));
@@ -325,6 +348,7 @@ where
                         &convert,
                         prewarm_tx.as_ref(),
                         &execute_tx,
+                        &gas_params,
                     ) {
                         return
                     }
@@ -351,7 +375,9 @@ where
                                 .into_par_iter()
                                 .map(|(i, tx)| {
                                     let idx = i + prefetch;
-                                    let tx = convert.convert(tx).map(WithTxEnv::new);
+                                    let tx = convert.convert(tx).map(|tx| {
+                                        WithTxEnv::new_with_gas_params(tx, &gas_params)
+                                    });
                                     (idx, tx)
                                 })
                                 .collect::<Vec<_>>();
@@ -535,6 +561,7 @@ fn convert_serial<RawTx, Tx, TxEnv, InnerTx, Recovered, Err, C>(
     convert: &C,
     prewarm_tx: Option<&mpsc::SyncSender<(usize, WithTxEnv<TxEnv, Recovered>)>>,
     execute_tx: &ExecuteTxSender<TxEnv, Recovered, Err>,
+    gas_params: &GasParams,
 ) -> bool
 where
     Tx: ExecutableTxParts<TxEnv, InnerTx, Recovered = Recovered>,
@@ -544,7 +571,7 @@ where
     for (idx, raw_tx) in iter.enumerate() {
         let tx = convert.convert(raw_tx);
         let failed = tx.is_err();
-        let tx = tx.map(WithTxEnv::new);
+        let tx = tx.map(|tx| WithTxEnv::new_with_gas_params(tx, gas_params));
         if let (Some(prewarm_tx), Ok(tx)) = (prewarm_tx, &tx) {
             let _ = prewarm_tx.send((idx, tx.clone()));
         }
@@ -735,6 +762,7 @@ mod tests {
                 count,
                 bal,
                 true,
+                Default::default(),
             );
             let mut indices = Vec::new();
             for _ in 0..count {
@@ -767,6 +795,7 @@ mod tests {
                 count,
                 bal,
                 false,
+                Default::default(),
             );
             let mut results = Vec::new();
             loop {
@@ -807,6 +836,7 @@ mod tests {
                 count,
                 bal,
                 false,
+                Default::default(),
             );
             let handle = super::PayloadHandle {
                 prewarm_handle: super::CacheTaskHandle::<()> {

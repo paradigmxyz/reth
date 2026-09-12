@@ -237,6 +237,10 @@ impl ExecutionPayload for BigBlockData<ExecutionData> {
         self.env_switches.iter().map(|data| data.transaction_count()).sum()
     }
 
+    fn has_eip8141_transactions(&self) -> bool {
+        self.env_switches.iter().any(|data| data.has_eip8141_transactions())
+    }
+
     fn slot_number(&self) -> Option<u64> {
         self.env_switches[0].payload.slot_number()
     }

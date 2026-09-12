@@ -754,13 +754,14 @@ mod tests {
             compressed_receipts.decode().expect("Failed to decode compressed receipt");
 
         // Verify that the decoded receipt matches the original
-        assert_eq!(decoded_receipt.tx_type, test_receipt.tx_type);
-        assert_eq!(decoded_receipt.success, test_receipt.success);
-        assert_eq!(decoded_receipt.cumulative_gas_used, test_receipt.cumulative_gas_used);
-        assert_eq!(decoded_receipt.logs.len(), test_receipt.logs.len());
+        assert_eq!(decoded_receipt.tx_type(), test_receipt.tx_type());
+        assert_eq!(decoded_receipt.success(), test_receipt.success());
+        assert_eq!(decoded_receipt.cumulative_gas_used(), test_receipt.cumulative_gas_used());
+        assert_eq!(decoded_receipt.logs().len(), test_receipt.logs().len());
 
         // Verify each log
-        for (original_log, decoded_log) in test_receipt.logs.iter().zip(decoded_receipt.logs.iter())
+        for (original_log, decoded_log) in
+            test_receipt.logs().iter().zip(decoded_receipt.logs().iter())
         {
             assert_eq!(decoded_log.address, original_log.address);
             assert_eq!(decoded_log.data.topics(), original_log.data.topics());
@@ -823,12 +824,12 @@ mod tests {
         assert_eq!(decoded_receipts.len(), receipts.len());
 
         for (original, decoded) in receipts.iter().zip(decoded_receipts.iter()) {
-            assert_eq!(decoded.tx_type, original.tx_type);
-            assert_eq!(decoded.success, original.success);
-            assert_eq!(decoded.cumulative_gas_used, original.cumulative_gas_used);
-            assert_eq!(decoded.logs.len(), original.logs.len());
+            assert_eq!(decoded.tx_type(), original.tx_type());
+            assert_eq!(decoded.success(), original.success());
+            assert_eq!(decoded.cumulative_gas_used(), original.cumulative_gas_used());
+            assert_eq!(decoded.logs().len(), original.logs().len());
 
-            for (original_log, decoded_log) in original.logs.iter().zip(decoded.logs.iter()) {
+            for (original_log, decoded_log) in original.logs().iter().zip(decoded.logs().iter()) {
                 assert_eq!(decoded_log.address, original_log.address);
                 assert_eq!(decoded_log.data.topics(), original_log.data.topics());
             }

@@ -17,8 +17,9 @@ use reth_rpc_server_types::result::{
     internal_rpc_err, invalid_params_rpc_err, rpc_err, rpc_error_with_code,
 };
 use reth_transaction_pool::error::{
-    Eip4844PoolTransactionError, Eip7702PoolTransactionError, InvalidPoolTransactionError,
-    PoolError, PoolErrorKind, PoolTransactionError, RawPoolTransactionError,
+    Eip4844PoolTransactionError, Eip7702PoolTransactionError, Eip8141PoolTransactionError,
+    InvalidPoolTransactionError, PoolError, PoolErrorKind, PoolTransactionError,
+    RawPoolTransactionError,
 };
 use revm::{
     context_interface::result::{
@@ -437,6 +438,7 @@ impl From<EthTxEnvError> for EthApiError {
                 Self::InvalidTransaction(RpcInvalidTransactionError::TipVeryHigh)
             }
             EthTxEnvError::Input(err) => Self::TransactionInputError(err),
+            err @ EthTxEnvError::Eip8141InvalidOuterFields => Self::InvalidParams(err.to_string()),
         }
     }
 }
@@ -773,6 +775,9 @@ pub enum RpcInvalidTransactionError {
     /// EIP-7702 transaction has invalid fields set.
     #[error("EIP-7702 authorization list has invalid fields")]
     AuthorizationListInvalidFields,
+    /// EIP-8141 transaction has invalid outer fields.
+    #[error("EIP-8141 frame transaction has invalid outer fields")]
+    Eip8141InvalidFields,
     /// Transaction priority fee is below the minimum required priority fee.
     #[error("transaction priority fee below minimum required priority fee {minimum_priority_fee}")]
     PriorityFeeBelowMinimum {
@@ -905,7 +910,9 @@ impl From<InvalidTransaction> for RpcInvalidTransactionError {
             InvalidTransaction::Eip1559NotSupported |
             InvalidTransaction::Eip4844NotSupported |
             InvalidTransaction::Eip7702NotSupported |
+            InvalidTransaction::Eip8141NotSupported |
             InvalidTransaction::Eip7873NotSupported => Self::TxTypeNotSupported,
+            InvalidTransaction::Eip8141InvalidFields => Self::Eip8141InvalidFields,
             InvalidTransaction::Eip7873MissingTarget => {
                 Self::other(internal_rpc_err(err.to_string()))
             }
@@ -1053,6 +1060,9 @@ pub enum RpcPoolError {
     /// EIP-7702 related error
     #[error(transparent)]
     Eip7702(#[from] Eip7702PoolTransactionError),
+    /// EIP-8141 related error
+    #[error(transparent)]
+    Eip8141(#[from] Eip8141PoolTransactionError),
     /// Thrown if a conflicting transaction type is already in the pool
     ///
     /// In other words, thrown if a transaction with the same sender that violates the exclusivity
@@ -1084,6 +1094,7 @@ impl From<RpcPoolError> for jsonrpsee_types::error::ErrorObject<'static> {
             RpcPoolError::PoolTransactionError(_) |
             RpcPoolError::Eip4844(_) |
             RpcPoolError::Eip7702(_) |
+            RpcPoolError::Eip8141(_) |
             RpcPoolError::AddressAlreadyReserved => {
                 rpc_error_with_code(EthRpcErrorCode::InvalidInput.code(), error.to_string())
             }
@@ -1133,6 +1144,7 @@ impl From<InvalidPoolTransactionError> for RpcPoolError {
             InvalidPoolTransactionError::Other(err) => Self::PoolTransactionError(err),
             InvalidPoolTransactionError::Eip4844(err) => Self::Eip4844(err),
             InvalidPoolTransactionError::Eip7702(err) => Self::Eip7702(err),
+            InvalidPoolTransactionError::Eip8141(err) => Self::Eip8141(err),
             InvalidPoolTransactionError::Overdraft { cost, balance } => {
                 Self::Invalid(RpcInvalidTransactionError::InsufficientFunds { cost, balance })
             }
@@ -1181,6 +1193,17 @@ mod tests {
     fn timed_out_error() {
         let err = EthApiError::ExecutionTimedOut(Duration::from_secs(10));
         assert_eq!(err.to_string(), "execution aborted (timeout = 10s)");
+    }
+
+    #[test]
+    fn frame_outer_fields_error_is_invalid_params() {
+        let err = EthApiError::from(EthTxEnvError::Eip8141InvalidOuterFields);
+        let err: jsonrpsee_types::error::ErrorObject<'static> = err.into();
+        assert_eq!(err.code(), -32602);
+        assert_eq!(
+            err.message(),
+            "EIP-8141 transaction request contains non-canonical outer fields"
+        );
     }
 
     #[test]

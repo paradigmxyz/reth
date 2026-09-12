@@ -817,20 +817,10 @@ mod tests {
         block2.set_hash(block2_hash);
 
         // Create a random receipt object, receipt1
-        let receipt1 = Receipt {
-            tx_type: TxType::Legacy,
-            cumulative_gas_used: 46913,
-            logs: vec![],
-            success: true,
-        };
+        let receipt1 = Receipt::standard(TxType::Legacy, true, 46913, vec![]);
 
         // Create another random receipt object, receipt2
-        let receipt2 = Receipt {
-            tx_type: TxType::Legacy,
-            cumulative_gas_used: 1325345,
-            logs: vec![],
-            success: true,
-        };
+        let receipt2 = Receipt::standard(TxType::Legacy, true, 1325345, vec![]);
 
         // Create a Receipts object with a vector of receipt vectors
         let receipts = vec![vec![receipt1.clone()], vec![receipt2]];

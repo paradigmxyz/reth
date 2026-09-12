@@ -35,7 +35,8 @@ async fn testing_rpc_build_block_works() -> eyre::Result<()> {
         rocksdb_path: Some(tempdir.path().join("rocksdb")),
         pprof_dumps_path: Some(tempdir.path().join("pprof")),
     };
-    let config = NodeConfig::test().with_datadir_args(datadir_args).with_rpc(rpc_args);
+    let config =
+        NodeConfig::test().with_unused_ports().with_datadir_args(datadir_args).with_rpc(rpc_args);
     let db = create_test_rw_db();
 
     let (tx, rx): (
@@ -116,6 +117,7 @@ async fn testing_rpc_commit_block_works() -> eyre::Result<()> {
             .build(),
     );
     let config = NodeConfig::test()
+        .with_unused_ports()
         .with_chain(chain_spec)
         .with_datadir_args(datadir_args)
         .with_rpc(rpc_args);

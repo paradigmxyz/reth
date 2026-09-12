@@ -117,10 +117,10 @@ where
             Ok(blobs) => {
                 actions_to_queue.reserve_exact(txs.len());
                 for ((tx, _), sidecar) in txs.iter().zip(blobs) {
-                    if let PooledTransactionVariant::Eip4844(transaction) = tx
+                    if let Ok(PooledTransactionVariant::Eip4844(transaction)) = tx
                         .clone()
                         .try_into_pooled_eip4844(Arc::unwrap_or_clone(sidecar))
-                        .expect("should not fail to convert blob tx if it is already eip4844")
+                        .map(PooledTransactionVariant::from)
                     {
                         let block_metadata = BlockMetadata {
                             block_hash: block.hash(),
@@ -272,10 +272,10 @@ async fn fetch_blobs_for_block(
         .iter()
         .filter_map(|(tx, blob_len)| {
             sidecar_iterator.next_sidecar(*blob_len).and_then(|sidecar| {
-                if let PooledTransactionVariant::Eip4844(transaction) = tx
+                if let Ok(PooledTransactionVariant::Eip4844(transaction)) = tx
                     .clone()
                     .try_into_pooled_eip4844(BlobTransactionSidecarVariant::Eip4844(sidecar))
-                    .expect("should not fail to convert blob tx if it is already eip4844")
+                    .map(PooledTransactionVariant::from)
                 {
                     let block_metadata = BlockMetadata {
                         block_hash: block.hash(),

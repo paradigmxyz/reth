@@ -90,6 +90,13 @@ unknown-git = "deny"
 unused-allowed-source = "allow"
 # Frequently patched dependencies
 allow-git = [
+    "https://github.com/Rimeeeeee/alloy",
+    "https://github.com/Soubhik-10/eips",
+    "https://github.com/Soubhik-10/evm",
+    "https://github.com/Soubhik-10/reth-core",
+    "https://github.com/Soubhik-10/revm",
+    "https://github.com/Soubhik-10/revm-inspectors",
+    "https://github.com/Soubhik-10/revmc",
     "https://github.com/alloy-rs/alloy",
     "https://github.com/foundry-rs/block-explorers",
     "https://github.com/bluealloy/revm",

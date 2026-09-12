@@ -7,7 +7,9 @@ use crate::{
 use alloy_chains::Chain;
 use alloy_consensus::{transaction::TxHashRef, BlockHeader, Transaction as _};
 use alloy_eips::eip2718::WithEncoded;
-use alloy_evm::{block::TxResult, precompiles::PrecompilesMap};
+use alloy_evm::{
+    block::TxResult, eth::transaction_gas_reservation, precompiles::PrecompilesMap, TransactionTr,
+};
 use alloy_network::{NetworkTransactionBuilder, TransactionBuilder};
 use alloy_rpc_types_eth::{
     simulate::{SimBlock, SimCallResult, SimulateError, SimulatedBlock},
@@ -16,7 +18,7 @@ use alloy_rpc_types_eth::{
 };
 use jsonrpsee_types::{error::INTERNAL_ERROR_CODE, ErrorObject};
 use reth_evm::{
-    execute::{BlockBuilder, BlockBuilderOutcome, BlockExecutor},
+    execute::{BlockBuilder, BlockBuilderOutcome, BlockExecutor, ExecutorTx},
     Evm, HaltReasonFor,
 };
 use reth_primitives_traits::{
@@ -326,7 +328,11 @@ pub fn execute_transactions<S, T>(
     EthApiError,
 >
 where
-    S: BlockBuilder<Executor: BlockExecutor<Evm: Evm<DB: Database<Error: Into<EthApiError>>>>>,
+    S: BlockBuilder<
+        Executor: BlockExecutor<
+            Evm: Evm<DB: Database<Error: Into<EthApiError>>, Tx: TransactionTr>,
+        >,
+    >,
     T: RpcConvert<Primitives = S::Primitives>,
 {
     builder.apply_pre_execution_changes()?;
@@ -339,6 +345,7 @@ where
     let is_amsterdam = builder.evm().cfg_env().enable_amsterdam_eip8037;
     let tx_gas_limit_cap = builder.evm().cfg_env().tx_gas_limit_cap.unwrap_or(u64::MAX);
     for mut call in calls {
+        let is_frame = Into::<u8>::into(call.as_ref().output_tx_type()) == 0x06;
         let block_gas_remaining = if is_amsterdam {
             block_gas_limit
                 .saturating_sub(block_regular_gas_used)
@@ -348,7 +355,7 @@ where
         };
         let mut default_gas_limit = block_gas_remaining;
 
-        if let Some(gas_limit) = call.as_ref().gas_limit() {
+        if !is_frame && let Some(gas_limit) = call.as_ref().gas_limit() {
             let exceeds_gas_limit = if is_amsterdam {
                 let regular_available_gas = block_gas_limit.saturating_sub(block_regular_gas_used);
                 let state_available_gas = block_gas_limit.saturating_sub(block_state_gas_used);
@@ -364,7 +371,7 @@ where
             }
         }
 
-        if let Some(remaining_call_gas_limit) = *remaining_call_gas_limit {
+        if !is_frame && let Some(remaining_call_gas_limit) = *remaining_call_gas_limit {
             if let Some(gas_limit) = call.as_ref().gas_limit() {
                 if gas_limit > remaining_call_gas_limit {
                     call.as_mut().set_gas_limit(remaining_call_gas_limit);
@@ -388,12 +395,33 @@ where
         // Create transaction with an empty envelope.
         // The effect for a layer-2 execution client is that it does not charge L1 cost.
         let tx = WithEncoded::new(Default::default(), tx);
+        let (tx_env, tx) = <_ as ExecutorTx<S::Executor>>::into_parts_with_gas_params(
+            tx,
+            &builder.evm().cfg_env().gas_params,
+        );
+        if is_frame {
+            // Resolve the signed envelope before checking limits: its outer gas may be omitted,
+            // and its execution and state reservations must not be combined for block admission.
+            ensure_frame_simulation_gas(
+                &tx_env,
+                *remaining_call_gas_limit,
+                if is_amsterdam {
+                    (
+                        block_gas_limit.saturating_sub(block_regular_gas_used),
+                        block_gas_limit.saturating_sub(block_state_gas_used),
+                    )
+                } else {
+                    (block_gas_remaining, block_gas_remaining)
+                },
+            )?;
+        }
 
         let mut tx_regular_gas_used = 0;
-        let gas_output = builder.execute_transaction_with_result_closure(tx, |result| {
-            tx_regular_gas_used = result.result().result.gas().block_regular_gas_used();
-            results.push(result.result().result.clone())
-        })?;
+        let gas_output =
+            builder.execute_transaction_with_result_closure((tx_env, tx), |result| {
+                tx_regular_gas_used = result.result().result.block_regular_gas_used();
+                results.push(result.result().result.clone())
+            })?;
 
         let gas_used = gas_output.tx_gas_used();
         if let Some(remaining_call_gas_limit) = remaining_call_gas_limit.as_mut() {
@@ -415,6 +443,22 @@ where
     };
 
     Ok((result, results))
+}
+
+/// Checks the canonical frame budget before executing any simulated bytecode.
+fn ensure_frame_simulation_gas(
+    tx: &impl TransactionTr,
+    remaining_call_gas_limit: Option<u64>,
+    available: (u64, u64),
+) -> Result<(), EthApiError> {
+    if remaining_call_gas_limit.is_some_and(|remaining| tx.gas_limit() > remaining) {
+        return Err(EthApiError::other(EthSimulateError::GasLimitReached));
+    }
+    let (execution, state) = transaction_gas_reservation(tx, u64::MAX);
+    if execution > available.0 || state > available.1 {
+        return Err(EthApiError::other(EthSimulateError::BlockGasLimitExceeded));
+    }
+    Ok(())
 }
 
 /// Goes over the list of [`TransactionRequest`]s and populates missing fields trying to resolve
@@ -439,6 +483,7 @@ where
     // If we're missing any fields we try to fill nonce, gas and
     // gas price.
     let tx_type = tx.as_ref().output_tx_type();
+    let is_frame = Into::<u8>::into(tx_type) == 0x06;
 
     let from = if let Some(from) = tx.as_ref().from() {
         from
@@ -453,11 +498,11 @@ where
         );
     }
     // eth_simulateV1 validation-off mode behaves like eth_call; avoid revm's max-nonce guard.
-    if disable_nonce_check && tx.as_ref().nonce() == Some(u64::MAX) {
+    if !is_frame && disable_nonce_check && tx.as_ref().nonce() == Some(u64::MAX) {
         tx.as_mut().set_nonce(0);
     }
 
-    if tx.as_ref().gas_limit().is_none() {
+    if !is_frame && tx.as_ref().gas_limit().is_none() {
         tx.as_mut().set_gas_limit(default_gas_limit);
     }
 
@@ -465,7 +510,7 @@ where
         tx.as_mut().set_chain_id(chain_id);
     }
 
-    if tx.as_ref().kind().is_none() {
+    if !is_frame && tx.as_ref().kind().is_none() {
         tx.as_mut().set_kind(TxKind::Create);
     }
 
@@ -570,6 +615,29 @@ where
                     .collect(),
                 status: true,
             },
+            ExecutionResult::FrameTransaction { gas, logs, .. } => SimCallResult {
+                return_data: Bytes::new(),
+                error: None,
+                gas_used: gas.frame_tx_gas_used(),
+                max_used_gas: Some(gas.total_gas_spent().max(gas.floor_gas())),
+                logs: logs
+                    .into_iter()
+                    .map(|log| {
+                        log_index += 1;
+                        alloy_rpc_types_eth::Log {
+                            inner: log,
+                            log_index: Some(log_index - 1),
+                            transaction_index: Some(index as u64),
+                            transaction_hash: Some(*tx.tx_hash()),
+                            block_hash: Some(block.hash()),
+                            block_number: Some(block.header().number()),
+                            block_timestamp: Some(block.header().timestamp()),
+                            ..Default::default()
+                        }
+                    })
+                    .collect(),
+                status: true,
+            },
         };
 
         calls.push(call);
@@ -586,7 +654,8 @@ where
 #[cfg(test)]
 mod tests {
     use super::{
-        apply_precompile_overrides, sanitize_chain, EthSimulateError, INTERNAL_ERROR_CODE,
+        apply_precompile_overrides, ensure_frame_simulation_gas, sanitize_chain, EthSimulateError,
+        INTERNAL_ERROR_CODE,
     };
     use crate::{error::ToRpcError, EthApiError};
     use alloy_chains::Chain;
@@ -600,6 +669,43 @@ mod tests {
     };
     use reth_primitives_traits::SealedHeader;
     use revm::precompile::Precompiles;
+
+    #[test]
+    fn frame_simulation_checks_resolved_budget_and_separate_dimensions() {
+        use alloy_eips::eip8141::{Frame, FrameLimits};
+        use revm::context::{transaction::FrameTransaction, TxEnv};
+
+        let frame = FrameTransaction {
+            frames: vec![Frame {
+                limits: FrameLimits { execution: 50_000, state: 7_000 },
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        let gas_limit = frame.gas_limit(Default::default()).unwrap();
+        let tx =
+            TxEnv { gas_limit, frame_transaction: Some(Box::new(frame)), ..Default::default() };
+        let available = (gas_limit - 7_000, 7_000);
+        assert!(ensure_frame_simulation_gas(&tx, Some(gas_limit), available).is_ok());
+        assert!(ensure_frame_simulation_gas(&tx, None, available).is_ok());
+        assert_eq!(
+            ensure_frame_simulation_gas(&tx, Some(gas_limit - 1), available)
+                .unwrap_err()
+                .into_rpc_err()
+                .code(),
+            EthSimulateError::GasLimitReached.error_code()
+        );
+        for available in [(available.0 - 1, available.1), (available.0, available.1 - 1)] {
+            assert_eq!(
+                ensure_frame_simulation_gas(&tx, None, available)
+                    .unwrap_err()
+                    .into_rpc_err()
+                    .code(),
+                EthSimulateError::BlockGasLimitExceeded.error_code()
+            );
+        }
+        assert_eq!(tx.gas_limit, gas_limit);
+    }
 
     #[test]
     fn nonce_max_value_error_uses_internal_error_code() {

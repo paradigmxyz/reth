@@ -372,6 +372,14 @@ where
                 })
             }
             let bal_hash = built_bal.as_ref().map(|bal| bal.compute_hash_with_buf(&mut bal_buf));
+            info!(
+                target: "sync::stages::execution",
+                block = block_number,
+                built_bal_accounts = built_bal.as_ref().map_or(0, |bal| bal.len()),
+                built_bal_hash = ?bal_hash,
+                expected_header_bal_hash = ?block.header().block_access_list_hash(),
+                "Comparing generated BAL with block header"
+            );
 
             if let Err(err) =
                 self.consensus.validate_block_post_execution(&block, &result, None, bal_hash)

@@ -260,9 +260,11 @@ pub struct SlimReceipt {
     pub logs: Vec<Log>,
 }
 
-impl From<SlimReceipt> for ReceiptEnvelope {
+impl TryFrom<SlimReceipt> for ReceiptEnvelope {
+    type Error = alloy_consensus::error::ValueError<alloy_consensus::ReceiptWithBloom<Receipt>>;
+
     /// Restores the bloom that the slim form omits, recomputing it from the logs.
-    fn from(receipt: SlimReceipt) -> Self {
+    fn try_from(receipt: SlimReceipt) -> Result<Self, Self::Error> {
         let SlimReceipt { tx_type, status, cumulative_gas_used, logs } = receipt;
         let receipt = Receipt { status, cumulative_gas_used, logs };
 
@@ -773,13 +775,14 @@ mod tests {
             compressed_receipts.decode().expect("Failed to decode compressed receipt");
 
         // Verify that the decoded receipt matches the original
-        assert_eq!(decoded_receipt.tx_type, test_receipt.tx_type);
-        assert_eq!(decoded_receipt.success, test_receipt.success);
-        assert_eq!(decoded_receipt.cumulative_gas_used, test_receipt.cumulative_gas_used);
-        assert_eq!(decoded_receipt.logs.len(), test_receipt.logs.len());
+        assert_eq!(decoded_receipt.tx_type(), test_receipt.tx_type());
+        assert_eq!(decoded_receipt.success(), test_receipt.success());
+        assert_eq!(decoded_receipt.cumulative_gas_used(), test_receipt.cumulative_gas_used());
+        assert_eq!(decoded_receipt.logs().len(), test_receipt.logs().len());
 
         // Verify each log
-        for (original_log, decoded_log) in test_receipt.logs.iter().zip(decoded_receipt.logs.iter())
+        for (original_log, decoded_log) in
+            test_receipt.logs().iter().zip(decoded_receipt.logs().iter())
         {
             assert_eq!(decoded_log.address, original_log.address);
             assert_eq!(decoded_log.data.topics(), original_log.data.topics());
@@ -798,10 +801,10 @@ mod tests {
 
         // Hand-build rlp([tx-type, status, cumulative-gas, logs]) in spec field order.
         let mut fields = Vec::new();
-        (receipt.tx_type as u8).encode(&mut fields);
-        receipt.success.encode(&mut fields);
-        receipt.cumulative_gas_used.encode(&mut fields);
-        receipt.logs.encode(&mut fields);
+        (receipt.tx_type() as u8).encode(&mut fields);
+        receipt.success().encode(&mut fields);
+        receipt.cumulative_gas_used().encode(&mut fields);
+        receipt.logs().to_vec().encode(&mut fields);
         let mut expected = Vec::new();
         alloy_rlp::Header { list: true, payload_length: fields.len() }.encode(&mut expected);
         expected.extend_from_slice(&fields);
@@ -960,12 +963,12 @@ mod tests {
         assert_eq!(decoded_receipts.len(), receipts.len());
 
         for (original, decoded) in receipts.iter().zip(decoded_receipts.iter()) {
-            assert_eq!(decoded.tx_type, original.tx_type);
-            assert_eq!(decoded.success, original.success);
-            assert_eq!(decoded.cumulative_gas_used, original.cumulative_gas_used);
-            assert_eq!(decoded.logs.len(), original.logs.len());
+            assert_eq!(decoded.tx_type(), original.tx_type());
+            assert_eq!(decoded.success(), original.success());
+            assert_eq!(decoded.cumulative_gas_used(), original.cumulative_gas_used());
+            assert_eq!(decoded.logs().len(), original.logs().len());
 
-            for (original_log, decoded_log) in original.logs.iter().zip(decoded.logs.iter()) {
+            for (original_log, decoded_log) in original.logs().iter().zip(decoded.logs().iter()) {
                 assert_eq!(decoded_log.address, original_log.address);
                 assert_eq!(decoded_log.data.topics(), original_log.data.topics());
             }

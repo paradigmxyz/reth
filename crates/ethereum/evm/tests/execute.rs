@@ -676,7 +676,7 @@ fn eip_7002() {
         .unwrap();
 
     let receipt = receipts.first().unwrap();
-    assert!(receipt.success);
+    assert!(receipt.success());
 
     // There should be exactly one entry with withdrawal requests
     assert_eq!(requests.len(), 1);

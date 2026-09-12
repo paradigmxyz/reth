@@ -8,7 +8,7 @@
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 #![cfg_attr(docsrs, feature(doc_cfg))]
 
-use alloy_consensus::{BlockHeader, Transaction};
+use alloy_consensus::{BlockHeader, Transaction, Typed2718};
 use alloy_primitives::{Bytes, U256};
 use alloy_rlp::Encodable;
 use alloy_rpc_types_engine::PayloadAttributes as EthPayloadAttributes;
@@ -40,7 +40,7 @@ use reth_transaction_pool::{
 };
 use revm::context_interface::{Block as _, Cfg as _};
 use std::sync::Arc;
-use tracing::{debug, trace, warn};
+use tracing::{debug, info, trace, warn};
 
 mod config;
 pub use config::*;
@@ -256,7 +256,11 @@ where
 
     while let Some(pool_tx) = best_txs.next() {
         // ensure we still have capacity for this transaction
-        let exceeds_gas_limit = if is_amsterdam {
+        // The executor derives frame reservations from the active gas schedule. A combined
+        // frame limit is not a reservation for either individual gas dimension.
+        let exceeds_gas_limit = if pool_tx.transaction.is_eip8141() {
+            None
+        } else if is_amsterdam {
             let regular_available_gas = block_gas_limit.saturating_sub(block_regular_gas_used);
             let state_available_gas = block_gas_limit.saturating_sub(block_state_gas_used);
             let regular_tx_gas_limit = pool_tx.gas_limit().min(tx_gas_limit_cap);
@@ -317,7 +321,7 @@ where
         let mut blob_tx_sidecar = None;
         let tx_blob_count = tx.blob_count();
 
-        if let Some(tx_blob_count) = tx_blob_count {
+        if let Some(tx_blob_count) = tx_blob_count.filter(|count| *count != 0 || tx.is_eip4844()) {
             if block_blob_count + tx_blob_count > max_blob_count {
                 // we can't fit this _blob_ transaction into the block, so we mark it as
                 // invalid, which removes its dependent transactions from
@@ -365,12 +369,24 @@ where
             };
         }
 
-        let miner_fee = tx.effective_tip_per_gas(base_fee);
+        let miner_fee = if tx.is_eip8141() {
+            tx.effective_tip_per_gas_u256(base_fee)
+        } else {
+            tx.effective_tip_per_gas(base_fee).map(U256::from)
+        };
         let tx_hash = *tx.tx_hash();
+        let is_eip8141 = tx.is_eip8141();
+        if is_eip8141 {
+            info!(
+                target: "reth::eip8141::payload",
+                ?tx_hash,
+                "executing EIP-8141 transaction for payload"
+            );
+        }
 
         let mut tx_regular_gas_used = 0;
         let gas_output = match builder.execute_transaction_with_result_closure(tx, |result| {
-            tx_regular_gas_used = result.result().result.gas().block_regular_gas_used();
+            tx_regular_gas_used = result.result().result.block_regular_gas_used();
         }) {
             Ok(gas_output) => gas_output,
             Err(BlockExecutionError::Validation(BlockValidationError::InvalidTx {
@@ -413,6 +429,16 @@ where
             // this is an error that we should treat as fatal for this attempt
             Err(err) => return Err(PayloadBuilderError::evm(err)),
         };
+        if is_eip8141 {
+            info!(
+                target: "reth::eip8141::payload",
+                ?tx_hash,
+                tx_gas_used = gas_output.tx_gas_used(),
+                regular_gas_used = tx_regular_gas_used,
+                state_gas_used = gas_output.state_gas_used(),
+                "executed EIP-8141 transaction for payload"
+            );
+        }
 
         // add to the total blob gas used if the transaction successfully executed
         if let Some(blob_count) = tx_blob_count {
@@ -429,7 +455,7 @@ where
         // update and add to total fees
         let gas_used = gas_output.tx_gas_used();
         let miner_fee = miner_fee.expect("fee is always valid; execution succeeded");
-        total_fees += U256::from(miner_fee) * U256::from(gas_used);
+        total_fees = total_fees.saturating_add(miner_fee.saturating_mul(U256::from(gas_used)));
         cumulative_tx_gas_used += gas_used;
         block_regular_gas_used += tx_regular_gas_used;
         block_state_gas_used += gas_output.state_gas_used();
