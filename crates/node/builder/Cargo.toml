@@ -47,7 +47,10 @@ reth-rpc-builder.workspace = true
 reth-rpc-engine-api.workspace = true
 reth-rpc-eth-types.workspace = true
 reth-rpc-layer.workspace = true
+reth-errors.workspace = true
+reth-snap-sync.workspace = true
 reth-stages.workspace = true
+reth-stages-api.workspace = true
 reth-static-file.workspace = true
 reth-storage-overlay = { workspace = true, features = ["rayon"] }
 reth-tasks = { workspace = true, features = ["rayon"] }
@@ -112,6 +115,7 @@ test-utils = [
     "reth-network-p2p/test-utils",
     "reth-payload-builder/test-utils",
     "reth-stages/test-utils",
+    "reth-stages-api/test-utils",
     "reth-db-api/test-utils",
     "reth-provider/test-utils",
     "reth-transaction-pool/test-utils",

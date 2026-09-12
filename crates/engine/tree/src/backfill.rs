@@ -66,6 +66,8 @@ pub trait BackfillSync: Send {
 pub enum BackfillAction {
     /// Start backfilling with the given target.
     Start(PipelineTarget),
+    /// Updates the target of an active bootstrap without starting another backfill run.
+    UpdateTarget(PipelineTarget),
 }
 
 /// The events that can be emitted on backfill sync.
@@ -187,6 +189,8 @@ impl<N: ProviderNodeTypes> BackfillSync for PipelineSync<N> {
     fn on_action(&mut self, event: BackfillAction) {
         match event {
             BackfillAction::Start(target) => self.set_pipeline_sync_target(target),
+            // Ordinary backfill finishes its current range before the engine re-evaluates FCU.
+            BackfillAction::UpdateTarget(_) => {}
         }
     }
 

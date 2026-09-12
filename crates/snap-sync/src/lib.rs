@@ -34,16 +34,32 @@
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 
 mod attempt;
+mod bootstrap;
+mod catch_up;
+mod context;
+mod download;
 mod error;
 mod generation;
+mod handoff;
 mod pivot;
 mod session;
+mod store;
+mod trie;
 
 #[cfg(test)]
 mod test_utils;
 
 pub use attempt::{SnapAttemptStore, SnapWrite};
+pub use bootstrap::{SnapBootstrap, SnapSyncContext, SnapSyncOutcome, SnapSyncProvider};
+pub use catch_up::{BlockAccessListCatchUp, BlockAccessListCatchUpOutcome};
+pub use context::NodeSnapContext;
+pub use download::{RangeBudget, StateDownloadOutcome, StateDownloader};
 pub use error::SnapSyncError;
 pub use generation::{SnapGeneration, SnapPhase};
+pub use handoff::SnapPipelineHandoff;
 pub use pivot::SnapPivotPolicy;
 pub use session::{SnapSyncSession, SnapSyncSessionState};
+pub use store::{
+    AccountRangeProgress, BlockAccessListProgress, SnapDownloadProgress, SnapStateStore,
+};
+pub use trie::TrieGenerator;

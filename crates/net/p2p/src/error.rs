@@ -59,13 +59,16 @@ impl<H: BlockHeader> EthResponseValidator for RequestResult<Vec<H>> {
     ///
     /// [`RequestError::UnsupportedCapability`] is also used for locally rejected optional requests,
     /// which should not affect peer reputation.
+    ///
+    /// [`RequestError::Internal`] originates locally and cannot be attributed to the peer.
     fn reputation_change_err(&self) -> Option<ReputationChangeKind> {
         if let Err(err) = self {
             match err {
                 RequestError::ChannelClosed |
                 RequestError::ConnectionDropped |
                 RequestError::UnsupportedCapability |
-                RequestError::BadResponse => None,
+                RequestError::BadResponse |
+                RequestError::Internal => None,
                 RequestError::Timeout => Some(ReputationChangeKind::Timeout),
             }
         } else {
@@ -99,6 +102,12 @@ pub enum RequestError {
     /// Indicates a bad response was received.
     #[display("received bad response")]
     BadResponse,
+    /// The request failed locally, without the peer being at fault.
+    ///
+    /// Covers work the node does on a response's behalf — verification on the blocking pool, for
+    /// instance — panicking or being cancelled during shutdown.
+    #[display("request failed locally")]
+    Internal,
 }
 
 // === impl RequestError ===
@@ -242,5 +251,12 @@ mod tests {
             HeadersRequest { start: 0u64.into(), limit: 1, direction: Default::default() };
         let headers = vec![Header::default(), Header::default()];
         assert!(Ok(headers).is_likely_bad_headers_response(&request));
+    }
+
+    #[test]
+    fn internal_request_error_does_not_change_peer_reputation() {
+        let response: RequestResult<Vec<Header>> = Err(RequestError::Internal);
+
+        assert_eq!(response.reputation_change_err(), None);
     }
 }

@@ -6,12 +6,12 @@
 use futures::FutureExt;
 use reth_eth_wire_types::snap::{
     GetAccountRangeMessage, GetBlockAccessListsMessage, GetByteCodesMessage,
-    GetStorageRangesMessage,
+    GetStorageRangesMessage, SnapProtocolMessage,
 };
 use reth_network_p2p::{
     error::RequestError,
     priority::Priority,
-    snap::client::{SnapClient, SnapResponse},
+    snap::client::{SnapClient, SnapRequestOptions, SnapResponse},
 };
 use reth_network_peers::PeerId;
 use reth_tasks::Runtime;
@@ -38,6 +38,10 @@ pub(super) struct VerifyingRequest<C: SnapClient, V: SnapVerifier> {
     fut: C::Output,
     // Present only while a response is being authenticated.
     verification: Option<VerificationTask<V::Output>>,
+    // Peers unavailable to this request, including responders that failed verification.
+    excluded_peers: Vec<PeerId>,
+    // Preserves peer fault attribution if retries exhaust the remaining peers.
+    last_verification_error: Option<RequestError>,
     // Attempts already spent against `MAX_RETRIES`.
     retries: u8,
 }
@@ -47,10 +51,27 @@ where
     C: SnapClient,
     V: SnapVerifier,
 {
-    /// Submits `request` and prepares to authenticate its response with `verifier`.
-    pub(super) fn new(client: C, request: V::Request, verifier: V, runtime: Runtime) -> Self {
-        let fut = request.send(&client, Priority::Normal);
-        Self { client, runtime, request, verifier, fut, verification: None, retries: 0 }
+    /// Submits `request` with custom peer selection options.
+    pub(super) fn new_with_options(
+        client: C,
+        request: V::Request,
+        verifier: V,
+        runtime: Runtime,
+        options: SnapRequestOptions,
+    ) -> Self {
+        let excluded_peers = options.excluded_peers.clone();
+        let fut = request.send(&client, options);
+        Self {
+            client,
+            runtime,
+            request,
+            verifier,
+            fut,
+            verification: None,
+            excluded_peers,
+            last_verification_error: None,
+            retries: 0,
+        }
     }
 
     /// Polls until the request yields a verified response or a terminal error.
@@ -85,6 +106,12 @@ where
                         return Poll::Ready(Err(error))
                     }
                 }
+                Err(RequestError::UnsupportedCapability) => {
+                    return Poll::Ready(Err(self
+                        .last_verification_error
+                        .clone()
+                        .unwrap_or(RequestError::UnsupportedCapability)))
+                }
                 Err(error) => return Poll::Ready(Err(error)),
             }
         }
@@ -96,7 +123,9 @@ where
             return false
         }
         self.retries += 1;
-        self.fut = self.request.send(&self.client, Priority::High);
+        let options = SnapRequestOptions::new(Priority::High)
+            .with_excluded_peers(self.excluded_peers.iter().copied());
+        self.fut = self.request.send(&self.client, options);
         true
     }
 
@@ -115,6 +144,10 @@ where
             Ok(Err(error)) => {
                 debug!(target: "downloaders::snap", ?peer_id, %error, "Invalid snap response");
                 self.client.report_bad_message(peer_id);
+                self.last_verification_error = Some(error.clone());
+                if !self.excluded_peers.contains(&peer_id) {
+                    self.excluded_peers.push(peer_id);
+                }
                 Poll::Ready(self.retry().then_some(None).ok_or(error))
             }
             // A panic or a shutting-down runtime is local, so it must not penalize the responder.
@@ -139,6 +172,8 @@ where
             .field("request", &self.request)
             .field("verifier", &self.verifier)
             .field("verifying", &self.verification.is_some())
+            .field("excluded_peers", &self.excluded_peers)
+            .field("last_verification_error", &self.last_verification_error)
             .field("retries", &self.retries)
             .finish_non_exhaustive()
     }
@@ -147,30 +182,30 @@ where
 /// A snap request that can be reissued at a chosen priority.
 pub(super) trait SnapRequest {
     /// Sends this request through `client`.
-    fn send<C: SnapClient>(&self, client: &C, priority: Priority) -> C::Output;
+    fn send<C: SnapClient>(&self, client: &C, options: SnapRequestOptions) -> C::Output;
 }
 
 impl SnapRequest for GetAccountRangeMessage {
-    fn send<C: SnapClient>(&self, client: &C, priority: Priority) -> C::Output {
-        client.get_account_range_with_priority(self.clone(), priority)
+    fn send<C: SnapClient>(&self, client: &C, options: SnapRequestOptions) -> C::Output {
+        client.request_snap(SnapProtocolMessage::GetAccountRange(self.clone()), options)
     }
 }
 
 impl SnapRequest for GetStorageRangesMessage {
-    fn send<C: SnapClient>(&self, client: &C, priority: Priority) -> C::Output {
-        client.get_storage_ranges_with_priority(self.clone(), priority)
-    }
-}
-
-impl SnapRequest for GetBlockAccessListsMessage {
-    fn send<C: SnapClient>(&self, client: &C, priority: Priority) -> C::Output {
-        client.get_block_access_lists_with_priority(self.clone(), priority)
+    fn send<C: SnapClient>(&self, client: &C, options: SnapRequestOptions) -> C::Output {
+        client.request_snap(SnapProtocolMessage::GetStorageRanges(self.clone()), options)
     }
 }
 
 impl SnapRequest for GetByteCodesMessage {
-    fn send<C: SnapClient>(&self, client: &C, priority: Priority) -> C::Output {
-        client.get_byte_codes_with_priority(self.clone(), priority)
+    fn send<C: SnapClient>(&self, client: &C, options: SnapRequestOptions) -> C::Output {
+        client.request_snap(SnapProtocolMessage::GetByteCodes(self.clone()), options)
+    }
+}
+
+impl SnapRequest for GetBlockAccessListsMessage {
+    fn send<C: SnapClient>(&self, client: &C, options: SnapRequestOptions) -> C::Output {
+        client.request_snap(SnapProtocolMessage::GetBlockAccessLists(self.clone()), options)
     }
 }
 

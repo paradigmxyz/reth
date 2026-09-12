@@ -1,11 +1,14 @@
-//! Engine orchestrator launch helper.
+//! Engine orchestrator launch helpers.
 //!
-//! Provides [`build_engine_orchestrator`](crate::launch::build_engine_orchestrator) which wires
-//! together all engine components and returns a
-//! [`ChainOrchestrator`](crate::chain::ChainOrchestrator) ready to be polled as a `Stream`.
+//! Both wire the engine components into a [`ChainOrchestrator`](crate::chain::ChainOrchestrator)
+//! ready to be polled as a `Stream`. They differ only in how the node backfills:
+//! [`build_engine_orchestrator`](crate::launch::build_engine_orchestrator) uses the staged
+//! [`Pipeline`](reth_stages_api::Pipeline), while
+//! [`build_engine_orchestrator_with_backfill`](crate::launch::build_engine_orchestrator_with_backfill)
+//! takes any [`BackfillSync`](crate::backfill::BackfillSync).
 
 use crate::{
-    backfill::PipelineSync,
+    backfill::{BackfillSync, PipelineSync},
     chain::ChainOrchestrator,
     download::BasicBlockDownloader,
     engine::{EngineApiKind, EngineApiRequest, EngineApiRequestHandler, EngineHandler},
@@ -29,50 +32,68 @@ use reth_storage_overlay::OverlayManager;
 use reth_tasks::Runtime;
 use std::sync::Arc;
 
-/// Builds the engine [`ChainOrchestrator`] that drives the chain forward.
+/// The [`EngineHandler`] the orchestrator drives.
+pub type EngineChainHandler<Payload, Primitives, S, Client> = EngineHandler<
+    EngineApiRequestHandler<EngineApiRequest<Payload, Primitives>, Primitives>,
+    S,
+    BasicBlockDownloader<Client, <Primitives as NodePrimitives>::Block>,
+>;
+
+/// The [`ChainOrchestrator`] returned by the launch helpers, generic over its backfill mechanism.
+pub type EngineOrchestrator<Payload, Primitives, S, Client, B> =
+    ChainOrchestrator<EngineChainHandler<Payload, Primitives, S, Client>, B>;
+
+/// The components an engine [`ChainOrchestrator`] is assembled from.
+#[derive(Debug)]
+pub struct EngineOrchestratorConfig<N: ProviderNodeTypes, Client, S, V, C> {
+    /// Selects Ethereum or OP Stack engine API semantics.
+    pub engine_kind: EngineApiKind,
+    /// Validates blocks against consensus rules.
+    pub consensus: Arc<dyn FullConsensus<N::Primitives>>,
+    /// Downloads blocks on demand during live sync.
+    pub client: Client,
+    /// Stream of messages from the consensus layer.
+    pub incoming_requests: S,
+    /// Database handle the persistence service writes through.
+    pub provider: ProviderFactory<N>,
+    /// Provider the tree handler reads canonical and in-memory state from.
+    pub blockchain_db: BlockchainProvider<N>,
+    /// Prunes historical data outside the consensus path.
+    pub pruner: PrunerWithFactory<ProviderFactory<N>>,
+    /// Handle used to request payload builds.
+    pub payload_builder: PayloadBuilderHandle<N::Payload>,
+    /// Validates engine API payloads.
+    pub payload_validator: V,
+    /// Tracks state overlays for in-memory blocks.
+    pub overlay_manager: OverlayManager<N::Primitives>,
+    /// Tuning for the engine tree handler.
+    pub tree_config: TreeConfig,
+    /// Sink for sync metrics.
+    pub sync_metrics_tx: MetricEventsSender,
+    /// EVM configuration used to execute payloads.
+    pub evm_config: C,
+    /// Spawns the engine's background tasks.
+    pub runtime: Runtime,
+}
+
+/// Builds the engine [`ChainOrchestrator`], backfilling with the staged [`Pipeline`].
 ///
-/// This spawns and wires together the following components:
+/// Spawns and wires together:
 ///
-/// - **[`BasicBlockDownloader`]** — downloads blocks on demand from the network during live sync.
-/// - **[`PersistenceHandle`]** — spawns the persistence service on a background thread for writing
-///   blocks and performing pruning outside the critical consensus path.
-/// - **[`EngineApiTreeHandler`]** — spawns the tree handler that processes engine API requests
-///   (`newPayload`, `forkchoiceUpdated`) and maintains the in-memory chain state.
-/// - **[`EngineApiRequestHandler`]** + **[`EngineHandler`]** — glue that routes incoming CL
-///   messages to the tree handler and manages download requests.
-/// - **[`PipelineSync`]** — wraps the staged sync [`Pipeline`] for backfill sync when the node
-///   needs to catch up over large block ranges.
+/// - **[`BasicBlockDownloader`]** — downloads blocks on demand during live sync.
+/// - **[`PersistenceHandle`]** — writes blocks and prunes off the consensus path.
+/// - **[`EngineApiTreeHandler`]** — serves engine API requests and owns in-memory chain state.
+/// - **[`EngineApiRequestHandler`]** + **[`EngineHandler`]** — route CL messages to the tree.
+/// - **[`PipelineSync`]** — backfills over large block ranges.
 ///
-/// The returned orchestrator implements [`Stream`] and yields
-/// [`ChainEvent`]s.
+/// The result yields [`ChainEvent`]s as a [`Stream`].
 ///
 /// [`ChainEvent`]: crate::chain::ChainEvent
-#[expect(clippy::too_many_arguments, clippy::type_complexity)]
 pub fn build_engine_orchestrator<N, Client, S, V, C>(
-    engine_kind: EngineApiKind,
-    consensus: Arc<dyn FullConsensus<N::Primitives>>,
-    client: Client,
-    incoming_requests: S,
+    config: EngineOrchestratorConfig<N, Client, S, V, C>,
     pipeline: Pipeline<N>,
     pipeline_task_spawner: Runtime,
-    provider: ProviderFactory<N>,
-    blockchain_db: BlockchainProvider<N>,
-    pruner: PrunerWithFactory<ProviderFactory<N>>,
-    payload_builder: PayloadBuilderHandle<N::Payload>,
-    payload_validator: V,
-    overlay_manager: OverlayManager<N::Primitives>,
-    tree_config: TreeConfig,
-    sync_metrics_tx: MetricEventsSender,
-    evm_config: C,
-    runtime: Runtime,
-) -> ChainOrchestrator<
-    EngineHandler<
-        EngineApiRequestHandler<EngineApiRequest<N::Payload, N::Primitives>, N::Primitives>,
-        S,
-        BasicBlockDownloader<Client, <N::Primitives as NodePrimitives>::Block>,
-    >,
-    PipelineSync<N>,
->
+) -> EngineOrchestrator<N::Payload, N::Primitives, S, Client, PipelineSync<N>>
 where
     N: ProviderNodeTypes,
     Client: BlockClient<Block = <N::Primitives as NodePrimitives>::Block>
@@ -82,6 +103,47 @@ where
     V: EngineValidator<N::Payload> + WaitForCaches,
     C: ConfigureEvm<Primitives = N::Primitives> + 'static,
 {
+    build_engine_orchestrator_with_backfill(
+        config,
+        PipelineSync::new(pipeline, pipeline_task_spawner),
+    )
+}
+
+/// Builds the engine [`ChainOrchestrator`] on a caller-supplied [`BackfillSync`].
+///
+/// Wires the same components as [`build_engine_orchestrator`], letting the node substitute a
+/// backfill mechanism — a snapshot bootstrap, say — that this crate does not depend on.
+pub fn build_engine_orchestrator_with_backfill<N, Client, S, V, C, B>(
+    config: EngineOrchestratorConfig<N, Client, S, V, C>,
+    backfill_sync: B,
+) -> EngineOrchestrator<N::Payload, N::Primitives, S, Client, B>
+where
+    N: ProviderNodeTypes,
+    Client: BlockClient<Block = <N::Primitives as NodePrimitives>::Block>
+        + BlockAccessListsClient
+        + 'static,
+    S: Stream<Item = BeaconEngineMessage<N::Payload>> + Send + Sync + Unpin + 'static,
+    V: EngineValidator<N::Payload> + WaitForCaches,
+    C: ConfigureEvm<Primitives = N::Primitives> + 'static,
+    B: BackfillSync + Unpin,
+{
+    let EngineOrchestratorConfig {
+        engine_kind,
+        consensus,
+        client,
+        incoming_requests,
+        provider,
+        blockchain_db,
+        pruner,
+        payload_builder,
+        payload_validator,
+        overlay_manager,
+        tree_config,
+        sync_metrics_tx,
+        evm_config,
+        runtime,
+    } = config;
+
     let downloader = BasicBlockDownloader::new(client, consensus.clone());
 
     let persistence_handle =
@@ -105,8 +167,6 @@ where
 
     let engine_handler = EngineApiRequestHandler::new(to_tree_tx, from_tree);
     let handler = EngineHandler::new(engine_handler, downloader, incoming_requests);
-
-    let backfill_sync = PipelineSync::new(pipeline, pipeline_task_spawner);
 
     ChainOrchestrator::new(handler, backfill_sync)
 }

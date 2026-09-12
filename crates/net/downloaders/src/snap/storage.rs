@@ -14,7 +14,7 @@ use reth_eth_wire_types::snap::{
 };
 use reth_network_p2p::{
     error::RequestError,
-    snap::client::{SnapClient, SnapResponse},
+    snap::client::{SnapClient, SnapRequestOptions, SnapResponse},
 };
 use reth_network_peers::PeerId;
 use reth_tasks::Runtime;
@@ -48,6 +48,17 @@ impl<C: SnapClient> StorageRangeDownloader<C> {
         batch: &VerifiedAccountBatch<'_>,
         runtime: Runtime,
     ) -> Result<Self, InvalidStorageRangeRequest> {
+        Self::new_with_options(client, request, batch, runtime, SnapRequestOptions::default())
+    }
+
+    /// Validates the authenticated batch and submits it with custom request options.
+    pub fn new_with_options(
+        client: C,
+        request: GetStorageRangesMessage,
+        batch: &VerifiedAccountBatch<'_>,
+        runtime: Runtime,
+        options: SnapRequestOptions,
+    ) -> Result<Self, InvalidStorageRangeRequest> {
         let origin = request.starting_hash.unwrap_or(B256::ZERO);
         let limit = request.limit_hash.unwrap_or(MAX_HASH);
         if origin > limit {
@@ -76,7 +87,7 @@ impl<C: SnapClient> StorageRangeDownloader<C> {
         }
 
         let verifier = StorageRangeVerifier { request: request.clone(), storage_roots };
-        Ok(Self(VerifyingRequest::new(client, request, verifier, runtime)))
+        Ok(Self(VerifyingRequest::new_with_options(client, request, verifier, runtime, options)))
     }
 }
 

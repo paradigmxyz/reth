@@ -18,7 +18,7 @@ use reth_network_p2p::{
     headers::client::HeadersRequest,
     priority::Priority,
     receipts::client::ReceiptsResponse,
-    snap::client::SnapResponse,
+    snap::client::{SnapRequestOptions, SnapResponse},
 };
 use reth_network_peers::PeerId;
 use reth_network_types::ReputationChangeKind;
@@ -168,12 +168,23 @@ impl<N: NetworkPrimitives> StateFetcher<N> {
     /// prioritizing those with the lowest timeout/latency and those that recently responded with
     /// adequate data. Additionally, if full blocks are required this prioritizes peers that have
     /// full history available
+    #[cfg(test)]
     fn next_best_peer(&self, requirement: BestPeerRequirements) -> Option<PeerId> {
+        self.next_best_peer_excluding(requirement, &[])
+    }
+
+    /// Returns the best idle peer not already rejected for this logical request.
+    fn next_best_peer_excluding(
+        &self,
+        requirement: BestPeerRequirements,
+        excluded_peers: &[PeerId],
+    ) -> Option<PeerId> {
         // filter out peers that aren't idle or don't meet the requirement
-        let mut idle = self
-            .peers
-            .iter()
-            .filter(|(_, peer)| peer.state.is_idle() && peer.satisfies(&requirement));
+        let mut idle = self.peers.iter().filter(|(peer_id, peer)| {
+            peer.state.is_idle() &&
+                peer.satisfies(&requirement) &&
+                !excluded_peers.contains(peer_id)
+        });
 
         let mut best_peer = idle.next()?;
 
@@ -217,7 +228,9 @@ impl<N: NetworkPrimitives> StateFetcher<N> {
         }
 
         let request = self.queued_requests.pop_front().expect("not empty");
-        let Some(peer_id) = self.next_best_peer(request.best_peer_requirements()) else {
+        let Some(peer_id) = self
+            .next_best_peer_excluding(request.best_peer_requirements(), request.excluded_peers())
+        else {
             // Optional BAL/snap requests can lose their capable peer while queued; complete them
             // instead of waiting for future peer churn.
             if self.should_fail_fast(&request) {
@@ -285,18 +298,20 @@ impl<N: NetworkPrimitives> StateFetcher<N> {
         }
     }
 
-    /// Returns whether any connected peer negotiated `snap/2`.
-    fn has_snap_peer(&self) -> bool {
-        self.peers
-            .values()
-            .any(|peer| !matches!(peer.state, PeerState::Closing) && peer.supports_snap)
+    /// Returns whether a connected Snap peer remains usable for this logical request.
+    fn has_snap_peer_excluding(&self, excluded_peers: &[PeerId]) -> bool {
+        self.peers.iter().any(|(peer_id, peer)| {
+            !matches!(peer.state, PeerState::Closing) &&
+                peer.supports_snap &&
+                !excluded_peers.contains(peer_id)
+        })
     }
 
     /// Returns `true` if `request` cannot be served by any currently connected peer and should
     /// fail immediately instead of waiting for future peer churn.
     fn should_fail_fast(&self, request: &DownloadRequest<N>) -> bool {
         (request.is_optional_bal() && !self.has_eth71_peer()) ||
-            (request.is_snap() && !self.has_snap_peer())
+            (request.is_snap() && !self.has_snap_peer_excluding(request.excluded_peers()))
     }
 
     /// Handles a new request to a peer.
@@ -363,7 +378,8 @@ impl<N: NetworkPrimitives> StateFetcher<N> {
         let peer = self.peers.get_mut(&peer_id)?;
         let req_idx = self.queued_requests.iter().position(|req| {
             // Find the first queued request this peer can serve.
-            peer.satisfies(&req.best_peer_requirements())
+            peer.satisfies(&req.best_peer_requirements()) &&
+                !req.excluded_peers().contains(&peer_id)
         })?;
         let req = self.queued_requests.remove(req_idx).expect("valid request index");
 
@@ -735,7 +751,7 @@ pub(crate) enum DownloadRequest<N: NetworkPrimitives> {
     GetSnap {
         request: SnapProtocolMessage,
         response: oneshot::Sender<PeerRequestResult<SnapResponse>>,
-        priority: Priority,
+        options: SnapRequestOptions,
     },
 }
 
@@ -759,8 +775,8 @@ impl<N: NetworkPrimitives> DownloadRequest<N> {
             Self::GetBlockHeaders { priority, .. } |
             Self::GetBlockBodies { priority, .. } |
             Self::GetBlockAccessLists { priority, .. } |
-            Self::GetReceipts { priority, .. } |
-            Self::GetSnap { priority, .. } => priority,
+            Self::GetReceipts { priority, .. } => priority,
+            Self::GetSnap { options, .. } => &options.priority,
         }
     }
 
@@ -777,6 +793,14 @@ impl<N: NetworkPrimitives> DownloadRequest<N> {
     /// Returns `true` if this is a `snap/2` request.
     const fn is_snap(&self) -> bool {
         matches!(self, Self::GetSnap { .. })
+    }
+
+    /// Returns peers already rejected for this logical Snap request.
+    fn excluded_peers(&self) -> &[PeerId] {
+        match self {
+            Self::GetSnap { options, .. } => &options.excluded_peers,
+            _ => &[],
+        }
     }
 
     /// Sends an error response to the waiting caller.
@@ -2118,6 +2142,97 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_snap_peer_exclusion_overrides_latency() {
+        let manager = PeersManager::new(PeersConfig::default());
+        let mut fetcher =
+            StateFetcher::<EthNetworkPrimitives>::new(manager.handle(), Default::default());
+        let fast = B512::random();
+        let fallback = B512::random();
+
+        for (peer_id, timeout) in [(fast, 5), (fallback, 50)] {
+            fetcher.new_active_peer(NewPeerInfo {
+                peer_id,
+                best_hash: B256::random(),
+                best_number: 100,
+                capabilities: Arc::new(Capabilities::new(vec![])),
+                timeout: Arc::new(AtomicU64::new(timeout)),
+                range_info: None,
+                supports_snap: true,
+            });
+        }
+
+        assert_eq!(
+            fetcher.next_best_peer_excluding(BestPeerRequirements::SupportsSnap, &[fast]),
+            Some(fallback)
+        );
+    }
+
+    #[tokio::test]
+    async fn test_snap_request_fails_when_every_capable_peer_is_excluded() {
+        let manager = PeersManager::new(PeersConfig::default());
+        let mut fetcher =
+            StateFetcher::<EthNetworkPrimitives>::new(manager.handle(), Default::default());
+        let peer_id = B512::random();
+
+        fetcher.new_active_peer(NewPeerInfo {
+            peer_id,
+            best_hash: B256::random(),
+            best_number: 100,
+            capabilities: Arc::new(Capabilities::new(vec![])),
+            timeout: Arc::new(AtomicU64::new(10)),
+            range_info: None,
+            supports_snap: true,
+        });
+        fetcher.peers.get_mut(&peer_id).expect("peer exists").state = PeerState::GetBlockHeaders;
+
+        let request = DownloadRequest::<EthNetworkPrimitives>::GetSnap {
+            request: SnapProtocolMessage::GetAccountRange(GetAccountRangeMessage {
+                request_id: 0,
+                root_hash: B256::ZERO,
+                starting_hash: B256::ZERO,
+                limit_hash: B256::ZERO,
+                response_bytes: 0,
+            }),
+            response: oneshot::channel().0,
+            options: SnapRequestOptions::default().with_excluded_peers([peer_id]),
+        };
+
+        assert!(fetcher.should_fail_fast(&request));
+    }
+
+    #[tokio::test]
+    async fn test_snap_followup_skips_excluded_peer() {
+        let manager = PeersManager::new(PeersConfig::default());
+        let mut fetcher =
+            StateFetcher::<EthNetworkPrimitives>::new(manager.handle(), Default::default());
+        let peer_id = B512::random();
+
+        fetcher.new_active_peer(NewPeerInfo {
+            peer_id,
+            best_hash: B256::random(),
+            best_number: 100,
+            capabilities: Arc::new(Capabilities::new(vec![])),
+            timeout: Arc::new(AtomicU64::new(10)),
+            range_info: None,
+            supports_snap: true,
+        });
+        fetcher.queued_requests.push_back(DownloadRequest::GetSnap {
+            request: SnapProtocolMessage::GetAccountRange(GetAccountRangeMessage {
+                request_id: 0,
+                root_hash: B256::ZERO,
+                starting_hash: B256::ZERO,
+                limit_hash: B256::ZERO,
+                response_bytes: 0,
+            }),
+            response: oneshot::channel().0,
+            options: SnapRequestOptions::default().with_excluded_peers([peer_id]),
+        });
+
+        assert!(fetcher.followup_request(peer_id).is_none());
+        assert_eq!(fetcher.queued_requests.len(), 1);
+    }
+
+    #[tokio::test]
     async fn test_snap_request_rejected_without_snap_peer() {
         use futures::task::noop_waker;
         use std::task::{Context, Poll};
@@ -2149,7 +2264,7 @@ mod tests {
                     response_bytes: 0,
                 }),
                 response: tx,
-                priority: Priority::Normal,
+                options: SnapRequestOptions::default(),
             })
             .unwrap();
 
@@ -2189,7 +2304,7 @@ mod tests {
                 response_bytes: 0,
             }),
             response: followup_tx,
-            priority: Priority::Normal,
+            options: SnapRequestOptions::default(),
         });
 
         let (tx, mut rx) = oneshot::channel();
@@ -2241,7 +2356,7 @@ mod tests {
                     response_bytes: 0,
                 }),
                 response: tx,
-                priority: Priority::Normal,
+                options: SnapRequestOptions::default(),
             })
             .unwrap();
 

@@ -24,7 +24,19 @@ esac
 mkdir hive_assets/
 
 cd hivetests
+# Keep the devp2p test tool and its chain fixtures on the tested geth revision.
+geth_clone="RUN git clone --depth 1 --branch v1.17.5 https://github.com/ethereum/go-ethereum.git /go-ethereum"
+sed -i "s|^RUN git clone --depth 1 https://github.com/ethereum/go-ethereum.git /go-ethereum$|${geth_clone}|" simulators/devp2p/Dockerfile
+grep -Fxq "$geth_clone" simulators/devp2p/Dockerfile
 go build .
+
+if [[ "${2:-}" == "devp2p" ]]; then
+    # Focused runs build and test in the same job, without exporting simulator images.
+    ./hive --client reth --sim '^devp2p$' --sim.limit '^snap2$' \
+        --sim.timelimit 1s --results-root ../hive_assets/build-logs || true
+    mv ./hive ../hive_assets/
+    exit 0
+fi
 
 ./hive -client reth # first builds and caches the client
 

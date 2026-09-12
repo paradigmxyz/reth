@@ -10,7 +10,7 @@ use futures::Future;
 use reth_eth_wire_types::snap::GetByteCodesMessage;
 use reth_network_p2p::{
     error::RequestError,
-    snap::client::{SnapClient, SnapResponse},
+    snap::client::{SnapClient, SnapRequestOptions, SnapResponse},
 };
 use reth_network_peers::PeerId;
 use reth_tasks::Runtime;
@@ -33,13 +33,23 @@ impl<C: SnapClient> BytecodeDownloader<C> {
         request: GetByteCodesMessage,
         runtime: Runtime,
     ) -> Result<Self, InvalidBytecodeRequest> {
+        Self::new_with_options(client, request, runtime, SnapRequestOptions::default())
+    }
+
+    /// Submits a bytecode request with custom peer-selection options.
+    pub fn new_with_options(
+        client: C,
+        request: GetByteCodesMessage,
+        runtime: Runtime,
+        options: SnapRequestOptions,
+    ) -> Result<Self, InvalidBytecodeRequest> {
         if request.hashes.is_empty() {
             return Err(InvalidBytecodeRequest::NoHashes)
         }
 
         let verifier =
             BytecodeVerifier { request_id: request.request_id, hashes: request.hashes.clone() };
-        Ok(Self(VerifyingRequest::new(client, request, verifier, runtime)))
+        Ok(Self(VerifyingRequest::new_with_options(client, request, verifier, runtime, options)))
     }
 }
 
@@ -288,6 +298,7 @@ mod tests {
         assert_eq!(verified(outcome).codes().len(), 1);
         assert_eq!(*client.reported(), [bad_peer]);
         assert_eq!(*client.priorities(), [Priority::Normal, Priority::High]);
+        assert_eq!(*client.exclusions(), [vec![], vec![bad_peer]]);
     }
 
     #[tokio::test]

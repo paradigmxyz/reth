@@ -56,7 +56,6 @@ impl SnapGeneration {
     }
 
     /// Returns this generation moved to `phase`.
-    #[cfg(test)]
     pub(crate) const fn with_phase(mut self, phase: SnapPhase) -> Self {
         self.phase = phase;
         self
