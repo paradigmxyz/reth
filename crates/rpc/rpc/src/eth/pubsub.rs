@@ -21,7 +21,8 @@ use reth_rpc_eth_api::{
     RpcTransaction,
 };
 use reth_rpc_server_types::result::{internal_rpc_err, invalid_params_rpc_err};
-use reth_storage_api::BlockNumReader;
+use reth_stages_types::StageId;
+use reth_storage_api::{BlockNumReader, StageCheckpointReader};
 use reth_tasks::Runtime;
 use reth_transaction_pool::{NewTransactionEvent, TransactionPool};
 use serde::Serialize;
@@ -313,11 +314,17 @@ where
                 .chain_info()
                 .map(|info| info.best_number)
                 .unwrap_or_default();
+            let highest_block = self
+                .eth_api
+                .provider()
+                .get_stage_checkpoint(StageId::Headers)
+                .unwrap_or_default()
+                .map_or(current_block, |checkpoint| checkpoint.block_number.max(current_block));
             PubSubSyncStatus::Detailed(SyncStatusMetadata {
                 syncing: true,
                 starting_block: 0,
                 current_block,
-                highest_block: Some(current_block),
+                highest_block: Some(highest_block),
             })
         } else {
             PubSubSyncStatus::Simple(false)
