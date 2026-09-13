@@ -2,6 +2,7 @@
 
 use core::fmt::Debug;
 
+use crate::BlockedLeafUpdates;
 use alloc::{borrow::Cow, vec::Vec};
 use alloy_primitives::{
     map::{B256Map, HashMap, HashSet},
@@ -61,6 +62,28 @@ impl LeafUpdate {
     pub const fn is_touched(&self) -> bool {
         matches!(self, Self::Touched)
     }
+}
+
+/// An event reported by [`SparseTrie::update_leaves_with_events`] while applying a batch of leaf
+/// updates.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LeafUpdateEvent<'a> {
+    /// The update for `key` hit a blinded node and a proof below `parent` is required before it
+    /// can be applied.
+    ProofRequired {
+        /// The full 32-byte hashed key that requires a proof.
+        key: B256,
+        /// The revealed logical parent branch of the blinded node.
+        parent: ProofV2TargetParent,
+    },
+    /// A [`LeafUpdate::Touched`] entry was applied, reporting the leaf value the trie holds for
+    /// its key.
+    Touched {
+        /// The full 32-byte hashed key of the touched leaf.
+        key: B256,
+        /// The leaf value at `key`, or `None` when the revealed trie has no leaf there.
+        value: Option<&'a [u8]>,
+    },
 }
 
 /// Trait defining common operations for revealed sparse trie implementations.
@@ -145,6 +168,16 @@ pub trait SparseTrie: Sized + Debug + Send + Sync {
     /// hash recalculations after localized changes to the trie structure.
     fn update_subtrie_hashes(&mut self, new_epoch: TrieNodeEpoch);
 
+    /// Hashes dirty subtries until `dirty_leaf_budget` dirty leaves have been covered and
+    /// returns how many were covered.
+    ///
+    /// Unlike [`Self::update_subtrie_hashes`] this leaves the rest of the trie, including
+    /// every node above the subtries, untouched, so a caller that hashes opportunistically
+    /// between other work can bound how long one call takes. The subtrie that carries the
+    /// budget's last dirty leaf is still hashed whole, so the returned count can exceed the
+    /// budget, and a budget of zero hashes nothing.
+    fn prehash_dirty_subtries(&mut self, new_epoch: TrieNodeEpoch, dirty_leaf_budget: u64) -> u64;
+
     /// Retrieves a reference to the leaf value at the specified path.
     ///
     /// # Arguments
@@ -223,12 +256,13 @@ pub trait SparseTrie: Sized + Debug + Send + Sync {
 
     /// Applies leaf updates to the sparse trie.
     ///
-    /// When a [`LeafUpdate::Changed`] is successfully applied, it is removed from the
-    /// given [`B256Map`]. If it could not be applied due to blinded nodes, it remains
-    /// in the map and the callback is invoked with the required proof target.
+    /// The given [`B256Map`] is drained: updates that could not be applied because they hit a
+    /// blinded node are moved into [`SparseTrie::blocked_updates`] and the callback is invoked
+    /// with the required proof target. An update for a key that is already blocked replaces the
+    /// blocked one.
     ///
-    /// Once that proof is calculated and revealed via [`SparseTrie::reveal_nodes`], the same
-    /// `updates` map can be reused to retry the update.
+    /// Once the proof is revealed via [`SparseTrie::reveal_nodes`], the affected blocked updates
+    /// are applied by the next call to this method, even when `updates` is empty.
     ///
     /// The callback receives `(key, parent)` where `key` is the full 32-byte hashed key
     /// (right-padded with zeros from the blinded path) and `parent` identifies the revealed logical
@@ -242,8 +276,29 @@ pub trait SparseTrie: Sized + Debug + Send + Sync {
     fn update_leaves(
         &mut self,
         updates: &mut B256Map<LeafUpdate>,
-        proof_required_fn: impl FnMut(B256, ProofV2TargetParent),
+        mut proof_required_fn: impl FnMut(B256, ProofV2TargetParent),
+    ) -> SparseTrieResult<()> {
+        self.update_leaves_with_events(updates, false, |event| {
+            if let LeafUpdateEvent::ProofRequired { key, parent } = event {
+                proof_required_fn(key, parent)
+            }
+        })
+    }
+
+    /// [`SparseTrie::update_leaves`], reporting every applied [`LeafUpdate::Touched`] entry with
+    /// the leaf value found at its key when `report_touched` is set.
+    ///
+    /// Collecting those values costs an extra lookup per touched entry, so callers that only need
+    /// proof targets should use [`SparseTrie::update_leaves`].
+    fn update_leaves_with_events(
+        &mut self,
+        updates: &mut B256Map<LeafUpdate>,
+        report_touched: bool,
+        event_fn: impl FnMut(LeafUpdateEvent<'_>),
     ) -> SparseTrieResult<()>;
+
+    /// Returns the leaf updates that could not be applied yet because they hit a blinded node.
+    fn blocked_updates(&self) -> &BlockedLeafUpdates;
 }
 
 /// Tracks modifications to the sparse trie structure.
