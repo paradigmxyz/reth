@@ -36,7 +36,7 @@
 # Required env: SCHELK_MOUNT, BENCH_RPC_URL, BENCH_BLOCKS, BENCH_WARMUP_BLOCKS
 # Optional env: BENCH_EXECUTION_MODE, BENCH_BIG_BLOCKS, BENCH_BIG_BLOCKS_TARGET_GAS, BENCH_BAL,
 #               BENCH_CORPUS, BENCH_CORPUS_DIR, BENCH_CALL_CLASS, BENCH_CALL_METHODS, BENCH_CALL_TOP_GAS,
-#               BENCH_CALL_TRACER, BENCH_CALL_TRACER_CONFIG, BENCH_CALL_TRACE_OPTIONS
+#               BENCH_CALL_TRACER, BENCH_CALL_TRACER_CONFIG, BENCH_CALL_TRACE_OPTIONS, BENCH_CALL_NAMESPACE
 set -euxo pipefail
 
 BINARY="$1"
@@ -329,6 +329,7 @@ if [ "$EXECUTION_MODE" = "call" ]; then
     --arg tip_hash "$HEAD_HASH" \
     --argjson top_gas "${BENCH_CALL_TOP_GAS:-null}" \
     --arg tracer "${BENCH_CALL_TRACER:-}" \
+    --arg namespace "${BENCH_CALL_NAMESPACE:-}" \
     --argjson tracer_config "${BENCH_CALL_TRACER_CONFIG:-null}" \
     --argjson trace_options "${BENCH_CALL_TRACE_OPTIONS:-null}" \
     '{
@@ -342,6 +343,7 @@ if [ "$EXECUTION_MODE" = "call" ]; then
       tip_hash: $tip_hash,
       top_gas: $top_gas,
       tracer: (if $tracer == "" then null else ($tracer | split(",")) end),
+      namespace: (if $namespace == "" then null else $namespace end),
       tracer_config: $tracer_config,
       trace_options: $trace_options,
     }' > "$OUTPUT_DIR/corpus.meta.json"

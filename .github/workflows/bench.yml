@@ -196,6 +196,7 @@ jobs:
       tracer: ${{ steps.args.outputs.tracer }}
       tracer-config: ${{ steps.args.outputs.tracer-config }}
       trace-options: ${{ steps.args.outputs.trace-options }}
+      namespace: ${{ steps.args.outputs.namespace }}
       txgen-ref: ${{ steps.args.outputs.txgen-ref }}
       comment-id: ${{ steps.ack.outputs.comment-id }}
       pr-head-sha: ${{ steps.args.outputs.pr-head-sha }}
@@ -297,6 +298,7 @@ jobs:
             const validSlackModes = new Set(['always', 'on-win', 'on-error', 'never']);
             const validModes = new Set(['engine', 'rpc', 'call']);
             const validCallClasses = new Set(['call', 'tracecall', 'tracetx', 'traceblock']);
+            const validNamespaces = new Set(['debug', 'trace']);
             const validCallMethods = new Set([
               'eth_call', 'eth_estimateGas', 'eth_createAccessList',
               'debug_traceCall', 'trace_call',
@@ -306,7 +308,7 @@ jobs:
             // Per class request shape defaults: method set, open-loop rate and closed-loop workers.
             const callClassDefaults = {
               call: { methods: 'eth_call', rps: '100', concurrency: '16' },
-              tracecall: { methods: 'debug_traceCall', rps: '20', concurrency: '8' },
+              tracecall: { methods: 'debug_traceCall,trace_call', rps: '20', concurrency: '8' },
               tracetx: { methods: 'debug_traceTransaction,trace_transaction', rps: '20', concurrency: '8' },
               traceblock: { methods: 'debug_traceBlockByNumber,trace_block', rps: '2', concurrency: '2' },
             };
@@ -318,10 +320,10 @@ jobs:
             const jsonObjectValid = (value) => {
               try { const parsed = JSON.parse(value); return parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed); } catch { return false; }
             };
-            const usage = '`@decofe bench [mode=engine|rpc|call] [blocks=N] [big-blocks[=true|false|100M|2G]] [reorg[=N]] [bal=true|false|feature|baseline] [warmup=N] [baseline=REF] [feature=REF] [samply] [tracing-chrome] [skip-state-root] [slack=always|on-win|on-error|never] [cores=N] [run-pairs=N] [otlp=true|false] [metrics[=true|false]] [wait-time=DURATION] [block-time=DURATION] [baseline-args="..."] [feature-args="..."] [corpus=static|NAME] [class=call|tracecall|tracetx|traceblock] [methods=a,b] [rps=N] [duration=DUR] [passes=N] [concurrency=N] [top-gas=N] [tracer=SPEC[,SPEC]] [tracer-config=JSON] [trace-options=JSON] [txgen-ref=REF]`';
+            const usage = '`@decofe bench [mode=engine|rpc|call] [blocks=N] [big-blocks[=true|false|100M|2G]] [reorg[=N]] [bal=true|false|feature|baseline] [warmup=N] [baseline=REF] [feature=REF] [samply] [tracing-chrome] [skip-state-root] [slack=always|on-win|on-error|never] [cores=N] [run-pairs=N] [otlp=true|false] [metrics[=true|false]] [wait-time=DURATION] [block-time=DURATION] [baseline-args="..."] [feature-args="..."] [corpus=static|NAME] [class=call|tracecall|tracetx|traceblock] [namespace=debug|trace] [methods=a,b] [rps=N] [duration=DUR] [passes=N] [concurrency=N] [top-gas=N] [tracer=SPEC[,SPEC]] [tracer-config=JSON] [trace-options=JSON] [txgen-ref=REF]`';
             let pr, actor, blocks, warmup, baseline, feature, samply, tracingChrome, cores, bigBlocks, bal;
             let corpus, callClass, callMethods, callRps, callDuration, callPasses, callConcurrency, callTopGas;
-            let callTracer, callTracerConfig, callTraceOptions;
+            let callTracer, callTracerConfig, callTraceOptions, callNamespace;
             let bigBlocksTargetGas = '';
             let reorg = '';
             let explicitBlocks = false;
@@ -390,7 +392,7 @@ jobs:
               var txgenRef = '${{ github.event.inputs.txgen_ref }}' || '';
               // call_args carries the call-mode keys a comment would, validated the same way.
               const callArgErrors = [];
-              const callArgValues = { corpus: '', class: '', methods: '', rps: '', duration: '', passes: '', concurrency: '', 'top-gas': '', tracer: '', 'tracer-config': '', 'trace-options': '' };
+              const callArgValues = { corpus: '', class: '', methods: '', rps: '', duration: '', passes: '', concurrency: '', 'top-gas': '', tracer: '', 'tracer-config': '', 'trace-options': '', namespace: '' };
               const callArgParts = [];
               const callArgRegex = /(\S+?="[^"]*"|\S+?='[^']*'|\S+)/g;
               let callArgMatch;
@@ -414,6 +416,8 @@ jobs:
                   callArgErrors.push(`\`${part}\` (must be a duration like 500ms, 1s, 2m)`);
                 } else if (['rps', 'passes', 'concurrency', 'top-gas'].includes(key) && !/^\d+$/.test(value)) {
                   callArgErrors.push(`\`${part}\` (must be a positive integer)`);
+                } else if (key === 'namespace' && !validNamespaces.has(value)) {
+                  callArgErrors.push(`\`${part}\` (must be debug or trace)`);
                 } else if (key === 'tracer' && !tracerSpecValid(value)) {
                   callArgErrors.push(`\`${part}\` (must be comma separated tracer specs: a tracer name, structlog, or js:NAME)`);
                 } else if ((key === 'tracer-config' || key === 'trace-options') && !jsonObjectValid(value)) {
@@ -437,6 +441,7 @@ jobs:
               callTracer = callArgValues.tracer;
               callTracerConfig = callArgValues['tracer-config'];
               callTraceOptions = callArgValues['trace-options'];
+              callNamespace = callArgValues.namespace;
 
               // Find PR for the selected branch
               const branch = '${{ github.ref_name }}';
@@ -459,10 +464,10 @@ jobs:
               const intArgs = new Set(['warmup', 'cores', 'blocks', 'run-pairs', 'rps', 'passes', 'concurrency', 'top-gas']);
               const refArgs = new Set(['baseline', 'feature']);
               const boolArgs = new Set(['samply', 'tracing-chrome', 'otlp', 'metrics', 'skip-state-root']);
-              const enumArgs = new Map([['bal', validBalModes], ['slack', validSlackModes], ['mode', validModes], ['class', validCallClasses]]);
+              const enumArgs = new Map([['bal', validBalModes], ['slack', validSlackModes], ['mode', validModes], ['class', validCallClasses], ['namespace', validNamespaces]]);
               const durationArgs = new Set(['wait-time', 'block-time', 'duration']);
               const stringArgs = new Set(['baseline-args', 'feature-args', 'txgen-ref']);
-              const defaults = { mode: 'engine', blocks: '', warmup: '', baseline: '', feature: '', samply: 'false', 'tracing-chrome': 'false', slack: 'always', 'big-blocks': 'false', reorg: '', bal: 'false', cores: '0', 'run-pairs': '', otlp: 'true', metrics: 'false', 'skip-state-root': 'false', 'wait-time': '', 'block-time': '', 'baseline-args': '', 'feature-args': '', 'txgen-ref': '', corpus: '', class: '', methods: '', rps: '', duration: '', passes: '', concurrency: '', 'top-gas': '', tracer: '', 'tracer-config': '', 'trace-options': '' };
+              const defaults = { mode: 'engine', blocks: '', warmup: '', baseline: '', feature: '', samply: 'false', 'tracing-chrome': 'false', slack: 'always', 'big-blocks': 'false', reorg: '', bal: 'false', cores: '0', 'run-pairs': '', otlp: 'true', metrics: 'false', 'skip-state-root': 'false', 'wait-time': '', 'block-time': '', 'baseline-args': '', 'feature-args': '', 'txgen-ref': '', corpus: '', class: '', methods: '', rps: '', duration: '', passes: '', concurrency: '', 'top-gas': '', tracer: '', 'tracer-config': '', 'trace-options': '', namespace: '' };
               const unknown = [];
               const invalid = [];
               const args = body.replace(/^(?:@decofe|derek) bench\s*/, '');
@@ -620,6 +625,7 @@ jobs:
               callTracer = defaults.tracer;
               callTracerConfig = defaults['tracer-config'];
               callTraceOptions = defaults['trace-options'];
+              callNamespace = defaults.namespace;
             }
 
             if (skipStateRoot === 'true') {
@@ -681,13 +687,26 @@ jobs:
             const callArgs = {
               corpus, class: callClass, methods: callMethods,
               rps: callRps, duration: callDuration, passes: callPasses, concurrency: callConcurrency,
-              'top-gas': callTopGas, tracer: callTracer, 'tracer-config': callTracerConfig, 'trace-options': callTraceOptions,
+              'top-gas': callTopGas, tracer: callTracer, 'tracer-config': callTracerConfig, 'trace-options': callTraceOptions, namespace: callNamespace,
             };
             if (isCall) {
               if (!corpus) corpus = 'static';
               if (!callClass) callClass = 'call';
               const classDefaults = callClassDefaults[callClass];
-              if (!callMethods) callMethods = classDefaults.methods;
+              if (callNamespace && callClass === 'call') {
+                core.setFailed('namespace applies to the tracecall, tracetx and traceblock classes');
+                return;
+              }
+              if (!callMethods) {
+                // The namespace narrows the class default to one tracing API.
+                callMethods = classDefaults.methods.split(',').filter(m => !callNamespace || m.startsWith(`${callNamespace}_`)).join(',');
+              } else if (callNamespace) {
+                const outside = callMethods.split(',').filter(m => !m.startsWith(`${callNamespace}_`));
+                if (outside.length) {
+                  core.setFailed(`methods outside the ${callNamespace} namespace: ${outside.join(', ')}`);
+                  return;
+                }
+              }
               if (!callRps) callRps = classDefaults.rps;
               if (!callConcurrency) callConcurrency = classDefaults.concurrency;
               if (!callDuration) callDuration = '120s';
@@ -765,6 +784,7 @@ jobs:
             core.setOutput('tracer', callTracer);
             core.setOutput('tracer-config', callTracerConfig);
             core.setOutput('trace-options', callTraceOptions);
+            core.setOutput('namespace', callNamespace);
             core.setOutput('txgen-ref', txgenRef);
 
       - name: Acknowledge request
@@ -1034,6 +1054,7 @@ jobs:
       BENCH_CALL_TRACER: ${{ needs.bench-ack.outputs.tracer }}
       BENCH_CALL_TRACER_CONFIG: ${{ needs.bench-ack.outputs.tracer-config }}
       BENCH_CALL_TRACE_OPTIONS: ${{ needs.bench-ack.outputs.trace-options }}
+      BENCH_CALL_NAMESPACE: ${{ needs.bench-ack.outputs.namespace }}
       BENCH_SNAPSHOT_MANIFEST_URL: ${{ secrets.BENCH_SNAPSHOT_MANIFEST_URL }}
       BENCH_METRICS_ADDR: "127.0.0.1:9001"
       BENCH_TARGET_METRICS_CONFIG: .github/config/bench-metrics-targets.json
@@ -1496,6 +1517,7 @@ jobs:
             [ -n "$BENCH_CALL_TRACER" ] && derek_cmd+=(tracer="$BENCH_CALL_TRACER")
             [ -n "$BENCH_CALL_TRACER_CONFIG" ] && derek_cmd+=("tracer-config='$BENCH_CALL_TRACER_CONFIG'")
             [ -n "$BENCH_CALL_TRACE_OPTIONS" ] && derek_cmd+=("trace-options='$BENCH_CALL_TRACE_OPTIONS'")
+            [ -n "$BENCH_CALL_NAMESPACE" ] && derek_cmd+=(namespace="$BENCH_CALL_NAMESPACE")
           fi
           [ "$BENCH_SAMPLY" = "true" ] && derek_cmd+=(samply)
           [ "$BENCH_TRACING_CHROME" = "true" ] && derek_cmd+=(tracing-chrome)
