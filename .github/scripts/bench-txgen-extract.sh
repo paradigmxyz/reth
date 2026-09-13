@@ -148,10 +148,19 @@ block_is_traceable() {
     echo "Block ${block} has no transactions, skipping traceability probe"
     return 0
   fi
+  # The block class never resolves hashes, so it probes the block-addressed
+  # method it will replay; the transaction class probes by hash, which also
+  # detects a pruned transaction lookup.
+  local probe
+  if [ "$CALL_CLASS" = "traceblock" ]; then
+    probe="{\"jsonrpc\":\"2.0\",\"method\":\"debug_traceBlockByNumber\",\"params\":[\"${block_hex}\",{\"tracer\":\"callTracer\",\"tracerConfig\":{\"onlyTopCall\":true}}],\"id\":1}"
+  else
+    probe="{\"jsonrpc\":\"2.0\",\"method\":\"debug_traceTransaction\",\"params\":[\"${tx_hash}\",{\"tracer\":\"callTracer\"}],\"id\":1}"
+  fi
   if ! response=$(curl -sf http://127.0.0.1:8545 -X POST \
     -H 'Content-Type: application/json' \
-    -d "{\"jsonrpc\":\"2.0\",\"method\":\"debug_traceTransaction\",\"params\":[\"${tx_hash}\",{\"tracer\":\"callTracer\"}],\"id\":1}"); then
-    echo "debug_traceTransaction request for block ${block} failed"
+    -d "$probe"); then
+    echo "traceability probe request for block ${block} failed"
     return 1
   fi
   if jq -e 'has("error")' <<< "$response" > /dev/null 2>&1; then
