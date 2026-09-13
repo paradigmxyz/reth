@@ -78,6 +78,12 @@ TARGET_METRICS_RANGE="$OUTPUT_DIR/target-metrics-range.json"
 
 RETH_SCOPE="${RETH_SCOPE:-reth-bench.scope}"
 BENCH_TARGET_METRICS_SCRAPE_INTERVAL_MS="${BENCH_TARGET_METRICS_SCRAPE_INTERVAL_MS:-}"
+TARGET_METRICS_CONFIG="${BENCH_TARGET_METRICS_CONFIG:-}"
+if [ "$EXECUTION_MODE" = "call" ]; then
+  # The target metric queries describe block execution and nothing in call mode
+  # reads the scrapes, so they are not collected.
+  TARGET_METRICS_CONFIG=""
+fi
 
 capture_unix_time_ms() {
   python3 -c 'import time; print(time.time_ns() // 1_000_000)'
@@ -86,7 +92,7 @@ capture_unix_time_ms() {
 record_target_metric_range() {
   local start_ms="$1"
   local end_ms="$2"
-  if [ -z "${BENCH_TARGET_METRICS_CONFIG:-}" ]; then
+  if [ -z "$TARGET_METRICS_CONFIG" ]; then
     return 0
   fi
 
@@ -131,7 +137,7 @@ extract_target_metric_scrapes() {
     return 1
   fi
 
-  filter_output="$(python3 .github/scripts/bench-target-metric-sample-filter.py "$BENCH_TARGET_METRICS_CONFIG")"
+  filter_output="$(python3 .github/scripts/bench-target-metric-sample-filter.py "$TARGET_METRICS_CONFIG")"
   mapfile -t filter_lines <<< "$filter_output"
   sample_grep="${filter_lines[0]}"
   sample_names_json="${filter_lines[1]}"
@@ -703,7 +709,7 @@ METRICS_ARGS=()
 PROMETHEUS_REPORT=()
 PROMETHEUS_METADATA=()
 METRICS_URL_ADDED=false
-if [ -n "${BENCH_TARGET_METRICS_CONFIG:-}" ] || [ -n "${BENCH_VICTORIAMETRICS_URL:-}" ]; then
+if [ -n "$TARGET_METRICS_CONFIG" ] || [ -n "${BENCH_VICTORIAMETRICS_URL:-}" ]; then
   if [ -z "${BENCH_METRICS_ADDR:-}" ]; then
     echo "::error::BENCH_METRICS_ADDR is required when benchmark metrics are enabled"
     exit 1
@@ -713,7 +719,7 @@ if [ -n "${BENCH_TARGET_METRICS_CONFIG:-}" ] || [ -n "${BENCH_VICTORIAMETRICS_UR
   METRICS_URL_ADDED=true
 fi
 
-if [ -n "${BENCH_TARGET_METRICS_CONFIG:-}" ]; then
+if [ -n "$TARGET_METRICS_CONFIG" ]; then
   TARGET_METRICS_START_MS="$(capture_unix_time_ms)"
   if [ "$METRICS_URL_ADDED" = true ] && [ -n "$BENCH_TARGET_METRICS_SCRAPE_INTERVAL_MS" ]; then
     METRICS_ARGS+=(--scrape-interval-ms "$BENCH_TARGET_METRICS_SCRAPE_INTERVAL_MS")
