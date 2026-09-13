@@ -30,7 +30,7 @@ use reth_rpc_eth_types::{error::EthApiError, utils::recover_raw_transaction, Eth
 use reth_storage_api::{BlockNumReader, BlockReader};
 use reth_tasks::pool::BlockingTaskGuard;
 use reth_transaction_pool::{PoolPooledTx, PoolTransaction, TransactionPool};
-use revm::DatabaseCommit;
+use revm::{context::result::ResultAndState, DatabaseCommit};
 use revm_inspectors::{
     opcode::OpcodeGasInspector,
     storage::StorageInspector,
@@ -569,17 +569,24 @@ where
                 None,
                 TracingInspectorConfig::from_parity_config(&trace_types),
                 move |tx_info, mut ctx| {
-                    let mut full_trace = ctx
-                        .take_inspector()
-                        .into_parity_builder()
-                        .into_trace_results(&ctx.result, &trace_types);
-
-                    // If statediffs were requested, populate them with the account balance and
-                    // nonce from pre-state
-                    if let Some(ref mut state_diff) = full_trace.state_diff {
-                        populate_state_diff(state_diff, &ctx.db, ctx.state.iter())
-                            .map_err(Eth::Error::from_eth_err)?;
-                    }
+                    let builder = ctx.take_inspector().into_parity_builder();
+                    let full_trace = if trace_types.contains(&TraceType::VmTrace) {
+                        // VM traces need the execution database to resolve bytecode, including
+                        // code reached through CALLCODE and DELEGATECALL.
+                        let res = ResultAndState { result: ctx.result, state: ctx.state.clone() };
+                        builder
+                            .into_trace_results_with_state(&res, &trace_types, &ctx.db)
+                            .map_err(Eth::Error::from_eth_err)?
+                    } else {
+                        let mut full_trace = builder.into_trace_results(&ctx.result, &trace_types);
+                        // Preserve the pre-state balance and nonce without cloning state for
+                        // requests that do not need VM bytecode.
+                        if let Some(ref mut state_diff) = full_trace.state_diff {
+                            populate_state_diff(state_diff, &ctx.db, ctx.state.iter())
+                                .map_err(Eth::Error::from_eth_err)?;
+                        }
+                        full_trace
+                    };
 
                     let trace = TraceResultsWithTransactionHash {
                         transaction_hash: tx_info.hash.expect("tx hash is set"),
@@ -1166,5 +1173,121 @@ mod tests {
             apply_trace_filter_pagination(&mut all_traces, &mut after, Some(1)).unwrap();
 
         assert_eq!(trace_order(&paginated), vec![(1, None, true)]);
+    }
+
+    #[tokio::test]
+    async fn replay_block_vmtrace_includes_root_and_callcode_bytecode() {
+        use crate::EthApiBuilder;
+        use alloy_consensus::{Header, TxLegacy};
+        use alloy_primitives::{hex, Signature, TxKind};
+        use reth_chain_state::CanonStateNotification;
+        use reth_ethereum_primitives::{Block, BlockBody, TransactionSigned};
+        use reth_evm_ethereum::EthEvmConfig;
+        use reth_execution_types::{Chain, ExecutionOutcome};
+        use reth_network_api::noop::NoopNetwork;
+        use reth_primitives_traits::{RecoveredBlock, SignerRecoverable};
+        use reth_provider::test_utils::{ExtendedAccount, MockEthProvider};
+        use reth_rpc_eth_types::cache::cache_new_blocks_task;
+        use reth_transaction_pool::test_utils::testing_pool;
+
+        let provider = MockEthProvider::default();
+        let target = Address::with_last_byte(0x42);
+        let child = Address::with_last_byte(0x43);
+        // Increment slot zero, CALLCODE the child, then return the incremented value.
+        let root_code: Bytes =
+            hex!("60005460010160005560006000600060006000604361fffff25060005460005260206000f3")
+                .into();
+        let child_code: Bytes = hex!("60025000").into();
+        provider.add_account(
+            target,
+            ExtendedAccount::new(0, U256::ZERO).with_bytecode(root_code.clone()),
+        );
+        provider.add_account(
+            child,
+            ExtendedAccount::new(0, U256::ZERO).with_bytecode(child_code.clone()),
+        );
+        let mut transactions = Vec::new();
+        for nonce in 0..2 {
+            let tx = TransactionSigned::new_unhashed(
+                TxLegacy {
+                    nonce,
+                    gas_limit: 500_000,
+                    to: TxKind::Call(target),
+                    ..Default::default()
+                }
+                .into(),
+                Signature::test_signature(),
+            );
+            provider.add_account(
+                tx.recover_signer().unwrap(),
+                ExtendedAccount::new(nonce, U256::from(1_000_000)),
+            );
+            transactions.push(tx);
+        }
+        let parent = Header { gas_limit: 30_000_000, ..Default::default() };
+        let parent_hash = parent.hash_slow();
+        provider.add_header(parent_hash, parent);
+        let block = Block {
+            header: Header { parent_hash, number: 1, gas_limit: 30_000_000, ..Default::default() },
+            body: BlockBody { transactions, ..Default::default() },
+        };
+        let block_hash = block.header.hash_slow();
+        let senders =
+            block.body.transactions.iter().map(|tx| tx.recover_signer().unwrap()).collect();
+        provider.add_block(block_hash, block.clone());
+        let recovered = RecoveredBlock::new_unhashed(block, senders);
+        let eth_api = EthApiBuilder::new(
+            provider.clone(),
+            testing_pool(),
+            NoopNetwork::default(),
+            EthEvmConfig::new(provider.chain_spec()),
+        )
+        .build();
+        // Seed the RPC cache: MockEthProvider does not implement recovered_block.
+        cache_new_blocks_task(
+            eth_api.cache().clone(),
+            futures::stream::iter([CanonStateNotification::Commit {
+                new: Arc::new(Chain::new(
+                    [recovered],
+                    ExecutionOutcome {
+                        receipts: vec![vec![]],
+                        first_block: 1,
+                        ..Default::default()
+                    },
+                    Default::default(),
+                )),
+            }]),
+        )
+        .await;
+        let api = TraceApi::new(eth_api, BlockingTaskGuard::new(1), EthConfig::default());
+        for types in [
+            HashSet::from_iter([TraceType::VmTrace]),
+            HashSet::from_iter([TraceType::VmTrace, TraceType::Trace, TraceType::StateDiff]),
+            HashSet::from_iter([TraceType::Trace, TraceType::StateDiff]),
+        ] {
+            let traces = api
+                .replay_block_transactions(block_hash.into(), types.clone())
+                .await
+                .unwrap()
+                .unwrap();
+            assert_eq!(traces.len(), 2);
+            for (index, trace) in traces.into_iter().enumerate() {
+                assert_eq!(
+                    trace.full_trace.output.as_ref(),
+                    U256::from(index + 1).to_be_bytes::<32>()
+                );
+                if types.contains(&TraceType::VmTrace) {
+                    let vm = trace.full_trace.vm_trace.as_ref().unwrap();
+                    assert_eq!(vm.code, root_code);
+                    assert_eq!(
+                        vm.ops.iter().find_map(|op| op.sub.as_ref()).unwrap().code,
+                        child_code
+                    );
+                }
+                let individual =
+                    api.replay_transaction(trace.transaction_hash, types.clone()).await.unwrap();
+                assert_eq!(trace.full_trace, individual);
+            }
+        }
     }
 }
