@@ -185,8 +185,9 @@ where
     canonical_state.merge_transitions(BundleRetention::Reverts);
     let output =
         BlockExecutionOutput { state: canonical_state.take_bundle(), result: block_result };
-    // The canonical cache is block-sized; free it off this thread like the serial path does.
-    runtime.spawn_drop(core::mem::take(&mut canonical_state.cache));
+    // The canonical cache and both forms of the received BAL are block-sized. Workers may still
+    // hold BAL clones while they wind down; whichever reference is last frees it off this thread.
+    runtime.spawn_drop((core::mem::take(&mut canonical_state.cache), input_bal_revm, input_bal));
     Ok((output, senders, built_bal))
 }
 
