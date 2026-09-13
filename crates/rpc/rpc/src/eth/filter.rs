@@ -232,6 +232,32 @@ where
         FilterChanges<RpcTransaction<Eth::NetworkTypes>, RpcLog<Eth::NetworkTypes>>,
         EthFilterError,
     > {
+        // Pending transaction filters are driven by the transaction pool rather than the chain
+        // head, so they must be polled independently of block progress.
+        let pending = {
+            let mut filters = self.inner.active_filters.inner.lock().await;
+            let filter =
+                filters.get_mut(&id).ok_or_else(|| EthFilterError::FilterNotFound(id.clone()))?;
+            filter.last_poll_timestamp = Instant::now();
+
+            if let FilterKind::PendingTransaction(pending) = &filter.kind {
+                Some(pending.clone())
+            } else {
+                None
+            }
+        };
+
+        if let Some(pending) = pending {
+            return Ok(match pending.drain().await {
+                FilterChanges::Empty => FilterChanges::Empty,
+                FilterChanges::Hashes(hashes) => FilterChanges::Hashes(hashes),
+                FilterChanges::Transactions(transactions) => {
+                    FilterChanges::Transactions(transactions)
+                }
+                FilterChanges::Logs(_) => unreachable!("pending transaction filter returned logs"),
+            })
+        }
+
         let info = self.provider().chain_info()?;
         let best_number = info.best_number;
 
@@ -251,20 +277,12 @@ where
             // block to `best_block +1`, the next from which we should start fetching changes again
             let mut block = best_number + 1;
             std::mem::swap(&mut filter.block, &mut block);
-            filter.last_poll_timestamp = Instant::now();
 
             (block, filter.kind.clone())
         };
 
         match kind {
-            FilterKind::PendingTransaction(filter) => Ok(match filter.drain().await {
-                FilterChanges::Empty => FilterChanges::Empty,
-                FilterChanges::Hashes(hashes) => FilterChanges::Hashes(hashes),
-                FilterChanges::Transactions(transactions) => {
-                    FilterChanges::Transactions(transactions)
-                }
-                FilterChanges::Logs(_) => unreachable!("pending transaction filter returned logs"),
-            }),
+            FilterKind::PendingTransaction(_) => unreachable!("pending filters are handled above"),
             FilterKind::Block => {
                 // Note: we need to fetch the block hashes from inclusive range
                 // [start_block..best_block]
@@ -1452,7 +1470,10 @@ mod tests {
     use reth_rpc_eth_types::receipt::EthReceiptConverter;
     use reth_tasks::Runtime;
     use reth_testing_utils::generators;
-    use reth_transaction_pool::test_utils::{testing_pool, TestPool};
+    use reth_transaction_pool::{
+        test_utils::{testing_pool, MockTransactionFactory, TestPool},
+        TransactionOrigin,
+    };
     use std::{collections::VecDeque, sync::Arc};
 
     #[test]
@@ -1514,6 +1535,70 @@ mod tests {
         let filter = Filter::new().from_block(100u64).to_block(BlockNumberOrTag::Latest);
         let result = eth_filter.inner.clone().logs_for_filter(filter, QueryLimits::default()).await;
         assert!(matches!(result, Err(EthFilterError::InvalidBlockRangeParams)), "{result:?}");
+    }
+
+    #[tokio::test]
+    async fn pending_transaction_filter_changes_do_not_require_new_block() {
+        let provider = MockEthProvider::default();
+        provider.add_header(FixedBytes::from([0u8; 32]), alloy_consensus::Header::default());
+        let eth_api = build_test_eth_api(provider);
+        let eth_filter =
+            super::EthFilter::new(eth_api, EthFilterConfig::default(), Runtime::test());
+
+        let filter_id = eth_filter
+            .new_pending_transaction_filter(None)
+            .await
+            .expect("pending transaction filter should install");
+
+        let initial_changes = eth_filter
+            .filter_changes(filter_id.clone())
+            .await
+            .expect("initial poll should succeed");
+        assert!(matches!(initial_changes, FilterChanges::Hashes(hashes) if hashes.is_empty()));
+
+        let transaction = MockTransactionFactory::default().create_eip1559().transaction;
+        let transaction_hash = *transaction.hash();
+        eth_filter
+            .pool()
+            .add_transaction(TransactionOrigin::External, transaction)
+            .await
+            .expect("transaction should be added to the pool");
+
+        let changes = eth_filter
+            .filter_changes(filter_id)
+            .await
+            .expect("pending transaction poll should succeed");
+        assert_eq!(changes, FilterChanges::Hashes(vec![transaction_hash]));
+    }
+
+    #[tokio::test]
+    async fn empty_filter_changes_poll_refreshes_ttl() {
+        let provider = MockEthProvider::default();
+        provider.add_header(FixedBytes::from([0u8; 32]), alloy_consensus::Header::default());
+        let eth_api = build_test_eth_api(provider);
+        let eth_filter =
+            super::EthFilter::new(eth_api, EthFilterConfig::default(), Runtime::test());
+        let filter_id = eth_filter
+            .inner
+            .install_filter(FilterKind::<RpcTransaction<Ethereum>>::Block)
+            .await
+            .expect("block filter should install");
+        let previous_poll = Instant::now() - Duration::from_secs(60);
+
+        {
+            let mut filters = eth_filter.inner.active_filters.inner.lock().await;
+            let filter = filters.get_mut(&filter_id).expect("filter should be installed");
+            filter.block += 1;
+            filter.last_poll_timestamp = previous_poll;
+        }
+
+        let changes =
+            eth_filter.filter_changes(filter_id.clone()).await.expect("empty poll should succeed");
+        assert!(matches!(changes, FilterChanges::Empty));
+
+        let filters = eth_filter.inner.active_filters.inner.lock().await;
+        let filter = filters.get(&filter_id).expect("filter should remain installed");
+        assert!(filter.last_poll_timestamp > previous_poll);
     }
 
     #[tokio::test]
