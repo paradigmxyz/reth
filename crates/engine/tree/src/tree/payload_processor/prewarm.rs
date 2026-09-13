@@ -62,6 +62,8 @@ pub enum PrewarmMode<Tx> {
         bal: Arc<DecodedBal>,
         /// Authoritative pre-hashed updates derived from the BAL.
         updates: Option<StateRootUpdateStream>,
+        /// Best-effort account path prefetch hints derived from the BAL.
+        hints: Option<StateRootHintStream>,
     },
     /// Transaction prewarming is skipped (e.g. small blocks where the overhead exceeds the
     /// benefit). No workers are spawned.
@@ -347,6 +349,7 @@ where
         decoded_bal: Arc<DecodedBal>,
         actions_tx: Sender<PrewarmTaskEvent<N::Receipt>>,
         hashed_update_stream: Option<StateRootUpdateStream>,
+        account_path_hints: Option<StateRootHintStream>,
     ) {
         let bal = decoded_bal.as_bal();
         if bal.is_empty() {
@@ -404,6 +407,16 @@ where
             let _ = stream_tx.send(());
         }
 
+        // Spawned after the value stream so it cannot delay the first value, and off the
+        // streaming pool so its keccaks do not compete with them.
+        let account_paths =
+            account_path_hints.filter(|_| !ctx.disable_bal_parallel_state_root).map(|hints| {
+                let bal = Arc::clone(&decoded_bal);
+                executor.spawn_blocking_named("bal-account-paths", move || {
+                    send_bal_account_paths(bal.as_bal(), &hints)
+                })
+            });
+
         if let Some(saved_cache) = ctx.saved_cache &&
             !ctx.disable_bal_batch_io &&
             let Some(pool) = ctx.bal_prewarm_pool.as_ref()
@@ -441,6 +454,12 @@ where
             .blocking_recv()
             .expect("BAL hashed-state streaming task dropped without signaling completion");
 
+        // Joined so the hint capability, and with it the task's update channel, is released here
+        // rather than whenever the worker thread happens to get around to it.
+        if let Some(account_paths) = account_paths {
+            account_paths.get();
+        }
+
         // Drop the per-thread providers
         executor.bal_streaming_pool().clear();
 
@@ -469,8 +488,8 @@ where
             PrewarmMode::Transactions { pending, hints } => {
                 self.spawn_txs_prewarm(pending, actions_tx, hints);
             }
-            PrewarmMode::BlockAccessList { bal, updates } => {
-                self.run_bal_prewarm(bal, actions_tx, updates);
+            PrewarmMode::BlockAccessList { bal, updates, hints } => {
+                self.run_bal_prewarm(bal, actions_tx, updates, hints);
             }
             PrewarmMode::Skipped => {
                 let _ = actions_tx
@@ -521,6 +540,32 @@ where
         if let Some(Some((execution_outcome, valid_block_rx))) = final_execution_outcome {
             self.save_cache(execution_outcome, valid_block_rx);
         }
+    }
+}
+
+/// Hashes the addresses the access list names and sends them to the state-root task in chunks.
+///
+/// Every one of them gets an account leaf update eventually, and the account half of a block is
+/// the last thing the trie can finish, so the task uses these to reveal their paths while it is
+/// idle instead of paying a proof round trip for a still-blind path at the end. Chunking keeps
+/// the first paths moving after tens of microseconds rather than after the whole list.
+fn send_bal_account_paths(bal: &alloy_eip7928::bal::Bal, hints: &StateRootHintStream) {
+    /// Addresses hashed before the first chunk goes out.
+    const CHUNK: usize = 256;
+
+    let mut chunk = Vec::with_capacity(CHUNK.min(bal.len()));
+    for account_changes in bal {
+        chunk.push(keccak256(account_changes.address));
+        if chunk.len() == CHUNK {
+            hints.on_account_path_prefetch(core::mem::replace(
+                &mut chunk,
+                Vec::with_capacity(CHUNK),
+            ));
+        }
+    }
+
+    if !chunk.is_empty() {
+        hints.on_account_path_prefetch(chunk);
     }
 }
 

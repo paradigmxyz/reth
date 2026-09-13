@@ -409,6 +409,7 @@ where
             PrewarmMode::BlockAccessList {
                 bal: env.decoded_bal.clone().expect("BAL dispatch implies decoded BAL"),
                 updates: hashed_update_stream,
+                hints: hint_stream,
             }
         } else if let Some(pending) = transactions {
             PrewarmMode::Transactions { pending, hints: hint_stream }
