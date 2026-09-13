@@ -541,6 +541,9 @@ where
         .with_overlay_manager(overlay_manager)
         .with_bal_store(bal_store);
 
+        // The consistency check below may heal or unwind the state tables.
+        factory.ensure_no_snap_attempt()?;
+
         // Check consistency between the database and static files, returning
         // the unwind targets for each storage layer if inconsistencies are
         // found.

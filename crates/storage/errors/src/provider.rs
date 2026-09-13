@@ -206,6 +206,12 @@ pub enum ProviderError {
         /// Attempt that owns the unverified state.
         attempt: u64,
     },
+    /// The database holds snap state that normal node activity must not use yet.
+    #[error("database holds state of snap attempt {attempt}, which the node cannot use yet")]
+    UnavailableSnapState {
+        /// Attempt that wrote the state.
+        attempt: u64,
+    },
     /// Any other error type wrapped into a cloneable [`AnyError`].
     #[error(transparent)]
     Other(#[from] AnyError),

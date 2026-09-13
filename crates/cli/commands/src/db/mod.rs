@@ -171,7 +171,8 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C>
                     }
                 }
 
-                db_exec!(self.env, tool, N, AccessRights::RW, {
+                // Dropping needs no healing and must work on databases holding snap state.
+                db_exec!(self.env, tool, N, AccessRights::RwInconsistent, {
                     tool.drop(db_path, static_files_path, exex_wal_path)?;
                 });
             }

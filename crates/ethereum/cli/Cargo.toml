@@ -32,6 +32,9 @@ eyre.workspace = true
 tracing.workspace = true
 
 [dev-dependencies]
+reth-provider.workspace = true
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+
 # fs
 tempfile.workspace = true
 
@@ -52,6 +55,7 @@ asm-keccak = [
 jemalloc = [
     "reth-node-core/jemalloc",
     "reth-node-metrics/jemalloc",
+    "reth-provider/jemalloc",
 ]
 jemalloc-prof = [
     "jemalloc",
