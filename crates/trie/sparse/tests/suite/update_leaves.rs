@@ -815,6 +815,89 @@ pub(super) fn test_update_leaves_multiple_keys_same_blinded_node<T: SparseTrie>(
     assert_eq!(leaf_updates.len(), 3, "all keys should remain in map after blinded hit");
 }
 
+/// Batched seeks through blinded paths preserve per-key proofs, pending values, and siblings.
+pub(super) fn test_update_leaves_blinded_groups_match_individual_updates<T: SparseTrie>(
+    new_trie: fn() -> T,
+) {
+    // Exercise upper-arena branches, subtries, and compressed paths inside subtries.
+    for depth in [0, 1, 2, 7, 60] {
+        let key = |group: u8, slot: u8| {
+            let mut nibbles = [0xa; 64];
+            nibbles[depth] = group;
+            nibbles[depth + 1] = slot;
+            B256::from_slice(&Nibbles::from_nibbles(nibbles).pack())
+        };
+        let mut storage = BTreeMap::new();
+        for group in 1..=3 {
+            for slot in 0..8 {
+                // Keep leaves hashed even when their paths are short.
+                storage.insert(key(group, slot), U256::MAX);
+            }
+        }
+        storage.insert(B256::repeat_byte(0xee), U256::MAX);
+        let harness = SuiteTestHarness::new(storage.clone());
+        let revealed: Vec<_> = (0..8).map(|slot| key(2, slot)).collect();
+        let mut batched = harness.init_trie_with_targets(&revealed, true, new_trie);
+        let mut individual = harness.init_trie_with_targets(&revealed, true, new_trie);
+        let mut pending = B256Map::default();
+        for group in [1, 3] {
+            for slot in 0..=8 {
+                let update = match slot {
+                    0 => LeafUpdate::Touched,
+                    1 => {
+                        storage.remove(&key(group, slot));
+                        LeafUpdate::Changed(Vec::new())
+                    }
+                    _ => {
+                        storage.insert(key(group, slot), U256::from(123));
+                        LeafUpdate::Changed(encode_fixed_size(&U256::from(123)).to_vec())
+                    }
+                };
+                pending.insert(key(group, slot), update);
+            }
+        }
+        // The revealed sibling sorts between the two blinded groups and must still progress.
+        pending.insert(key(2, 0), LeafUpdate::Changed(Vec::new()));
+        storage.remove(&key(2, 0));
+
+        let mut expected_pending = B256Map::default();
+        let mut expected_targets = Vec::new();
+        let mut sorted: Vec<_> = pending.iter().collect();
+        sorted.sort_unstable_by_key(|(key, _)| **key);
+        for (&key, update) in sorted {
+            let mut one = B256Map::from_iter([(key, update.clone())]);
+            individual
+                .update_leaves(&mut one, |key, parent| expected_targets.push((key, parent)))
+                .unwrap();
+            expected_pending.extend(one);
+        }
+
+        let mut targets = Vec::new();
+        batched.update_leaves(&mut pending, |key, parent| targets.push((key, parent))).unwrap();
+        targets.sort_unstable_by_key(|(key, _)| *key);
+        expected_targets.sort_unstable_by_key(|(key, _)| *key);
+        assert_eq!(targets, expected_targets, "proof targets at depth {depth}");
+        assert_eq!(targets.len(), 18, "every blinded key needs a target at depth {depth}");
+        assert_eq!(pending, expected_pending, "pending values at depth {depth}");
+        assert!(!pending.contains_key(&key(2, 0)), "revealed sibling must progress");
+
+        // A later streamed update supersedes a blocked value before its proof arrives.
+        let superseded = key(1, 2);
+        let latest = LeafUpdate::Changed(encode_fixed_size(&U256::from(456)).to_vec());
+        pending.insert(superseded, latest.clone());
+        expected_pending.insert(superseded, latest);
+        storage.insert(superseded, U256::from(456));
+        harness.reveal_and_update(&mut batched, &mut pending);
+        harness.reveal_and_update(&mut individual, &mut expected_pending);
+        assert!(pending.is_empty());
+        assert!(expected_pending.is_empty());
+        let expected_root = SuiteTestHarness::new(storage).original_root();
+        assert_eq!(batched.root(epoch(1)), expected_root, "batched root at depth {depth}");
+        assert_eq!(individual.root(epoch(1)), expected_root, "individual root at depth {depth}");
+        assert_eq!(batched.take_updates(), individual.take_updates(), "updates at depth {depth}");
+    }
+}
+
 /// `LeafUpdate::Touched` on a fully revealed path should be a no-op.
 pub(super) fn test_update_leaves_touched_fully_revealed<T: SparseTrie>(new_trie: fn() -> T) {
     let key1 = B256::with_last_byte(0x10);
