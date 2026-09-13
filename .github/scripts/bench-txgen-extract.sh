@@ -155,7 +155,16 @@ block_is_traceable() {
     return 1
   fi
   if jq -e 'has("error")' <<< "$response" > /dev/null 2>&1; then
-    echo "Block ${block} is not traceable: $(jq -r '.error.message' <<< "$response")"
+    local message
+    message="$(jq -r '.error.message' <<< "$response")"
+    # A transaction the node just listed in the block but cannot find by hash
+    # means the transaction lookup index is pruned, so no block in the range
+    # will do any better; report that instead of shrinking the range.
+    if [[ "$message" == *"transaction not found"* ]]; then
+      echo "::error::Snapshot has no transaction hash index (transaction lookup is pruned); hash-addressed classes cannot run on it. Use class=tracecall or class=traceblock, or a snapshot that keeps the transaction lookup."
+      exit 1
+    fi
+    echo "Block ${block} is not traceable: ${message}"
     return 1
   fi
   return 0
