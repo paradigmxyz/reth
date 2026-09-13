@@ -1,0 +1,29 @@
+{
+  "schema_id": "pureth-receipt-v0",
+  "root_type": "ReceiptsSSZ",
+  "receipt_count": 1,
+  "receipts": [
+    {
+      "tx_type": 0,
+      "success": true,
+      "gas_used": 21000,
+      "contract_address": null,
+      "logs": [
+        {
+          "address": "0x1111111111111111111111111111111111111111",
+          "topics": [
+            "0x2222222222222222222222222222222222222222222222222222222222222222"
+          ],
+          "data": "0x010203"
+        }
+      ]
+    }
+  ],
+  "first_target": {
+    "receipt_index": 0,
+    "log_index": 0,
+    "field": "address"
+  },
+  "source_scenario": "successful legacy call transaction"
+}
+

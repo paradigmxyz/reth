@@ -1,0 +1,10 @@
+{
+  "case_id": "value_mutation",
+  "expected_result": "mutated_root_differs_and_old_proof_fails_against_original_root",
+  "format_version": "pureth_receipt_proof_vectors_v0",
+  "mutated_fixture_sha256": "0x147b34d81858612a3c56963e36170760ab2b29a8b5cb89d59cded61998fb10d5",
+  "mutated_root": "0x7f96afc14483fcbe9a22937cb5aca3d03bdbf360b4d1422b502da2f8592d325d",
+  "old_branch_with_mutated_value_derived_root": "0x7f96afc14483fcbe9a22937cb5aca3d03bdbf360b4d1422b502da2f8592d325d",
+  "original_fixture_sha256": "0x24659c1023667969131cab2cc0510463d4be105c6047970fcd4ad5a09b01bfff",
+  "original_root": "0x5036e5a260a45255df46094662d27826bb1f417e3dccb4b3a4fc313876cd4e33"
+}

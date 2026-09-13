@@ -1,0 +1,28 @@
+{
+  "first_target": {
+    "field": "address",
+    "log_index": 0,
+    "receipt_index": 0
+  },
+  "receipt_count": 1,
+  "receipts": [
+    {
+      "contract_address": null,
+      "gas_used": 21000,
+      "logs": [
+        {
+          "address": "0x1011111111111111111111111111111111111111",
+          "data": "0x010203",
+          "topics": [
+            "0x2222222222222222222222222222222222222222222222222222222222222222"
+          ]
+        }
+      ],
+      "success": true,
+      "tx_type": 0
+    }
+  ],
+  "root_type": "ReceiptsSSZ",
+  "schema_id": "pureth-receipt-v0",
+  "source_scenario": "baseline with only the first address byte changed from 0x11 to 0x10"
+}

@@ -1,0 +1,44 @@
+{
+  "format_version": "pureth_receipt_proof_vectors_v0",
+  "case_id": "singleton_baseline",
+  "schema_id": "pureth-receipt-v0",
+  "schema_digest": "0xffc41ae4abb3e6f04594d5658814b7d0446f1dabcc347982e7a37ef23ee0dace",
+  "fixture_sha256": "0x24659c1023667969131cab2cc0510463d4be105c6047970fcd4ad5a09b01bfff",
+  "object_kind": "receipts",
+  "root_type": "ReceiptsSSZ",
+  "path": "[0].logs[0].address",
+  "target_type": "ExecutionAddress",
+  "value_ssz": "0x1111111111111111111111111111111111111111",
+  "receipt_count": 1,
+  "log_counts": [
+    1
+  ],
+  "gindex": "576",
+  "target_node": "0x1111111111111111111111111111111111111111000000000000000000000000",
+  "branch_gindices": [
+    577,
+    289,
+    145,
+    73,
+    37,
+    19,
+    8,
+    5,
+    3
+  ],
+  "proof": [
+    "0xa48111926253919152be5c26543604338b03a25791b6c6f4444bfdafacc5f771",
+    "0x37cb3fcfce36a2c4aed31728b918c2572b0dd37ca5f38c8dc042f717a4624fa0",
+    "0x0000000000000000000000000000000000000000000000000000000000000000",
+    "0x0100000000000000000000000000000000000000000000000000000000000000",
+    "0x0000000000000000000000000000000000000000000000000000000000000000",
+    "0xf5a5fd42d16a20302798ef6ed309979b43003d2320d9f0e8ea9831a92759fb4b",
+    "0x046cc3ec2d1bdde5d07df87754e5c8eb35ec226dd3aa569fe908394bd2c88a12",
+    "0x0000000000000000000000000000000000000000000000000000000000000000",
+    "0x0100000000000000000000000000000000000000000000000000000000000000"
+  ],
+  "root": "0x5036e5a260a45255df46094662d27826bb1f417e3dccb4b3a4fc313876cd4e33",
+  "proof_format": "merkle_branch_v0",
+  "root_context": "deterministic_test_data",
+  "expected_result": "verify"
+}

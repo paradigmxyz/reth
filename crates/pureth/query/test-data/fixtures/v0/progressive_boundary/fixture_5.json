@@ -1,0 +1,83 @@
+{
+  "receipt_count": 5,
+  "receipts": [
+    {
+      "contract_address": null,
+      "gas_used": 21000,
+      "logs": [
+        {
+          "address": "0x1111111111111111111111111111111111111111",
+          "data": "0x31",
+          "topics": [
+            "0x2121212121212121212121212121212121212121212121212121212121212121"
+          ]
+        }
+      ],
+      "success": true,
+      "tx_type": 0
+    },
+    {
+      "contract_address": null,
+      "gas_used": 21001,
+      "logs": [
+        {
+          "address": "0x1212121212121212121212121212121212121212",
+          "data": "0x32",
+          "topics": [
+            "0x2222222222222222222222222222222222222222222222222222222222222222"
+          ]
+        }
+      ],
+      "success": true,
+      "tx_type": 1
+    },
+    {
+      "contract_address": null,
+      "gas_used": 21002,
+      "logs": [
+        {
+          "address": "0x1313131313131313131313131313131313131313",
+          "data": "0x33",
+          "topics": [
+            "0x2323232323232323232323232323232323232323232323232323232323232323"
+          ]
+        }
+      ],
+      "success": true,
+      "tx_type": 2
+    },
+    {
+      "contract_address": null,
+      "gas_used": 21003,
+      "logs": [
+        {
+          "address": "0x1414141414141414141414141414141414141414",
+          "data": "0x34",
+          "topics": [
+            "0x2424242424242424242424242424242424242424242424242424242424242424"
+          ]
+        }
+      ],
+      "success": true,
+      "tx_type": 3
+    },
+    {
+      "contract_address": null,
+      "gas_used": 21004,
+      "logs": [
+        {
+          "address": "0x1515151515151515151515151515151515151515",
+          "data": "0x35",
+          "topics": [
+            "0x2525252525252525252525252525252525252525252525252525252525252525"
+          ]
+        }
+      ],
+      "success": true,
+      "tx_type": 4
+    }
+  ],
+  "root_type": "ReceiptsSSZ",
+  "schema_id": "pureth-receipt-v0",
+  "source_scenario": "five receipts fill the first 1+4 progressive groups"
+}
