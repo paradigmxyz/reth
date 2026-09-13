@@ -1157,7 +1157,7 @@ async fn test_holesky_payload() {
 }
 
 #[test]
-fn test_backpressure_waits_for_persistence_before_reading_incoming() {
+fn test_backpressure_does_not_block_incoming_before_validation() {
     let blocks: Vec<_> = TestBlockBuilder::eth().get_executed_blocks(1..4).collect();
     let mut test_harness = TestHarness::new(MAINNET.clone()).with_blocks(blocks.clone());
     test_harness.tree.config = test_harness
@@ -1167,10 +1167,12 @@ fn test_backpressure_waits_for_persistence_before_reading_incoming() {
         .with_memory_block_buffer_target(0)
         .with_persistence_backpressure_threshold(1);
 
-    let (persist_tx, persist_rx) = crossbeam_channel::bounded(1);
+    let (_persist_tx, persist_rx) = crossbeam_channel::bounded(1);
     let persisted = blocks.last().unwrap().recovered_block().num_hash();
     test_harness.tree.persistence_state.start_save(persisted, persist_rx);
-    assert!(test_harness.tree.should_backpressure());
+    for _ in 0..2 {
+        test_harness.tree.persistence_pacing.record(Duration::from_millis(100), 1);
+    }
 
     let (tx, mut rx) = oneshot::channel();
     test_harness
@@ -1188,63 +1190,65 @@ fn test_backpressure_waits_for_persistence_before_reading_incoming() {
             .into(),
         ))
         .unwrap();
-    test_harness.to_tree_tx.send(FromEngine::DownloadedBlocks(vec![])).unwrap();
-    assert_eq!(test_harness.tree.incoming.len(), 2);
-
-    std::thread::spawn(move || {
-        std::thread::sleep(Duration::from_millis(10));
-        persist_tx
-            .send(PersistenceResult {
-                last_block: persisted,
-                last_state_trie_block: persisted,
-                commit_duration: Some(Duration::ZERO),
-            })
-            .unwrap();
-    });
-
-    let event = test_harness.tree.wait_for_persistence_event();
-    assert!(matches!(event, super::LoopEvent::PersistenceComplete { .. }));
-    assert_eq!(test_harness.tree.incoming.len(), 2);
-
-    let super::LoopEvent::PersistenceComplete { result, start_time } = event else {
-        unreachable!()
-    };
-    test_harness.tree.on_persistence_complete(result, start_time).unwrap();
 
     let super::LoopEvent::EngineMessage(message) = test_harness.tree.wait_for_event() else {
-        panic!("expected queued engine message")
+        panic!("expected queued engine message without waiting for persistence")
     };
     let _ = test_harness.tree.on_engine_message(message).unwrap();
-    let msg = rx.try_recv();
-    assert!(msg.is_ok());
-    assert_eq!(test_harness.tree.incoming.len(), 1);
-
-    let super::LoopEvent::EngineMessage(message) = test_harness.tree.wait_for_event() else {
-        panic!("expected queued engine message")
-    };
-    let _ = test_harness.tree.on_engine_message(message).unwrap();
-    assert_eq!(test_harness.tree.incoming.len(), 0);
+    assert!(rx.try_recv().is_ok());
+    assert!(test_harness.tree.persistence_state.in_progress());
+    assert_eq!(test_harness.tree.persistence_pacing.total_wait, Duration::ZERO);
 }
 
 #[test]
-fn test_backpressure_excludes_in_memory_buffer() {
-    for (canonical_tip, expected_backpressure) in [(14_u64, false), (15, true)] {
-        let blocks: Vec<_> =
-            TestBlockBuilder::eth().get_executed_blocks(1..canonical_tip + 1).collect();
-        let mut test_harness = TestHarness::new(MAINNET.clone()).with_blocks(blocks.clone());
-        test_harness.tree.config = test_harness
-            .tree
-            .config
-            .with_persistence_threshold(0)
-            .with_memory_block_buffer_target(5)
-            .with_persistence_backpressure_threshold(10);
-
-        let (_persist_tx, persist_rx) = crossbeam_channel::bounded(1);
-        let persisted = blocks.last().unwrap().recovered_block().num_hash();
-        test_harness.tree.persistence_state.start_save(persisted, persist_rx);
-
-        assert_eq!(test_harness.tree.should_backpressure(), expected_backpressure);
+fn test_backpressure_uses_persistence_throughput_independent_of_threshold() {
+    let mut test_harness = TestHarness::new(MAINNET.clone());
+    test_harness.tree.config =
+        test_harness.tree.config.with_persistence_backpressure_threshold(u64::MAX);
+    for _ in 0..2 {
+        test_harness.tree.persistence_pacing.record(Duration::from_millis(10), 1);
     }
+
+    test_harness.tree.pace_validation(Duration::from_millis(20));
+    assert_eq!(test_harness.tree.persistence_pacing.total_wait, Duration::ZERO);
+    test_harness.tree.pace_validation(Duration::from_millis(5));
+    assert!(test_harness.tree.persistence_pacing.total_wait >= Duration::from_millis(5));
+}
+
+#[test]
+fn test_backpressure_after_successful_block_validation_only() {
+    let blocks: Vec<_> = TestBlockBuilder::eth().get_executed_blocks(1..3).collect();
+    let mut test_harness = TestHarness::new(MAINNET.clone()).with_blocks(vec![blocks[0].clone()]);
+    for _ in 0..2 {
+        test_harness.tree.persistence_pacing.record(Duration::from_secs(1), 1);
+    }
+    let block = blocks[1].clone();
+    let block_id = BlockWithParent {
+        block: block.recovered_block().num_hash(),
+        parent: block.recovered_block().parent_hash(),
+    };
+    let start = Instant::now();
+    let result: Result<_, InsertBlockError<Block>> = test_harness.tree.insert_block_or_payload(
+        block_id,
+        (),
+        |_, (), _| {
+            Ok(ValidationOutput {
+                executed_block: block.clone(),
+                execution_timing_stats: None,
+                raw_bal: None,
+            })
+        },
+        |_, ()| unreachable!("new block with a known parent"),
+    );
+    assert_eq!(result.unwrap(), InsertPayloadOk::Inserted(BlockStatus::Valid));
+    assert!(start.elapsed() >= Duration::from_secs(1));
+    let wait = test_harness.tree.persistence_pacing.total_wait;
+    assert!(!wait.is_zero());
+
+    let sealed = block.recovered_block().clone_sealed_block();
+    let result = test_harness.tree.insert_block(sealed.into()).unwrap();
+    assert_eq!(result, InsertPayloadOk::AlreadySeen(BlockStatus::Valid));
+    assert_eq!(test_harness.tree.persistence_pacing.total_wait, wait);
 }
 
 #[tokio::test]
@@ -1553,7 +1557,7 @@ fn test_threshold_persistence_with_state_masking_blocks() {
         .send(PersistenceResult {
             last_block: persisted_tip,
             last_state_trie_block: state_trie_tip,
-            commit_duration: Some(Duration::ZERO),
+            commit_duration: Some(Duration::from_millis(40)),
         })
         .unwrap();
     test_harness.tree.try_poll_persistence().unwrap();
@@ -1571,6 +1575,45 @@ fn test_threshold_persistence_with_state_masking_blocks() {
     assert!(test_harness.tree.state.tree_state.executed_block_by_hash(retained_hash).is_some());
     assert!(test_harness.tree.canonical_in_memory_state.state_by_hash(removed_hash).is_none());
     assert!(test_harness.tree.canonical_in_memory_state.state_by_hash(retained_hash).is_some());
+
+    // Four blocks became fully persisted (1 -> 5), although non-state outputs advanced 3 -> 7
+    // and the in-memory chain extended to 8. One sample is not enough to apply backpressure.
+    assert_eq!(test_harness.tree.persistence_pacing.delay(Duration::ZERO), Duration::ZERO);
+
+    // A save without state/trie progress and a removal must not become throughput samples.
+    for commit_duration in [Some(Duration::from_secs(1)), None] {
+        test_harness
+            .tree
+            .on_persistence_complete(
+                PersistenceResult {
+                    last_block: persisted_tip,
+                    last_state_trie_block: state_trie_tip,
+                    commit_duration,
+                },
+                Instant::now(),
+            )
+            .unwrap();
+        assert_eq!(test_harness.tree.persistence_pacing.delay(Duration::ZERO), Duration::ZERO);
+    }
+
+    // Catching up state/trie from 5 -> 8 releases three blocks, although only one additional
+    // block's non-state outputs is persisted. Both saves therefore cost 10ms per released block.
+    let tip = blocks[8].recovered_block().num_hash();
+    test_harness
+        .tree
+        .on_persistence_complete(
+            PersistenceResult {
+                last_block: tip,
+                last_state_trie_block: tip,
+                commit_duration: Some(Duration::from_millis(30)),
+            },
+            Instant::now(),
+        )
+        .unwrap();
+    assert_eq!(
+        test_harness.tree.persistence_pacing.delay(Duration::ZERO),
+        Duration::from_millis(10)
+    );
 }
 
 #[tokio::test]

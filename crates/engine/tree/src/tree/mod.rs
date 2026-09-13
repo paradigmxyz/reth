@@ -82,6 +82,7 @@ pub use invalid_headers::InvalidHeaderCache;
 pub use metrics::EngineApiMetrics;
 pub use payload_processor::*;
 pub use payload_validator::{BasicEngineValidator, EngineValidator};
+use persistence_state::PersistencePacing;
 pub use persistence_state::PersistenceState;
 pub use reth_engine_primitives::TreeConfig;
 pub use reth_execution_cache::{
@@ -306,6 +307,8 @@ where
     persistence: PersistenceHandle<N>,
     /// Tracks the state changes of the persistence task.
     persistence_state: PersistenceState,
+    /// Recent save throughput and time spent pacing validation.
+    persistence_pacing: PersistencePacing,
     /// Flag indicating the state of the node's backfill synchronization process.
     backfill_sync_state: BackfillSyncState,
     /// Keeps track of the state of the canonical chain that isn't persisted yet.
@@ -349,6 +352,7 @@ where
             .field("incoming_tx", &self.incoming_tx)
             .field("persistence", &self.persistence)
             .field("persistence_state", &self.persistence_state)
+            .field("persistence_pacing", &self.persistence_pacing)
             .field("backfill_sync_state", &self.backfill_sync_state)
             .field("canonical_in_memory_state", &self.canonical_in_memory_state)
             .field("payload_builder", &self.payload_builder)
@@ -413,6 +417,7 @@ where
             outgoing,
             persistence,
             persistence_state,
+            persistence_pacing: PersistencePacing::default(),
             backfill_sync_state: BackfillSyncState::Idle,
             state,
             canonical_in_memory_state,
@@ -504,28 +509,19 @@ where
         self.incoming_tx.clone()
     }
 
-    /// How many blocks the canonical tip is ahead of the last persisted block. A large gap means
-    /// persistence is falling behind execution.
-    const fn persistence_gap(&self) -> u64 {
-        self.state
-            .tree_state
-            .canonical_block_number()
-            .saturating_sub(self.persistence_state.last_persisted_block.number)
-    }
-
-    /// How many blocks beyond the configured in-memory buffer are awaiting persistence.
-    const fn persistence_backpressure_gap(&self) -> u64 {
-        self.persistence_gap().saturating_sub(self.config.memory_block_buffer_target())
-    }
-
-    /// Returns `true` when the main loop should stop draining the tree input channel.
-    ///
-    /// This is the case when persistence is already running and the number of blocks beyond the
-    /// configured in-memory buffer has reached the configured threshold.
-    const fn should_backpressure(&self) -> bool {
-        self.persistence_state.in_progress() &&
-            self.persistence_backpressure_gap() >=
-                self.config.persistence_backpressure_threshold()
+    /// Apply persistence backpressure after validation, accounting for time already spent working.
+    fn pace_validation(&mut self, validation_duration: Duration) {
+        let delay = self.persistence_pacing.delay(validation_duration);
+        if delay.is_zero() {
+            return;
+        }
+        self.metrics.engine.backpressure_active.set(1.0);
+        let start = Instant::now();
+        std::thread::sleep(delay);
+        let elapsed = start.elapsed();
+        self.persistence_pacing.total_wait += elapsed;
+        self.metrics.engine.backpressure_stall_duration.record(elapsed);
+        self.metrics.engine.backpressure_active.set(0.0);
     }
 
     /// Run the engine API handler.
@@ -533,30 +529,8 @@ where
     /// This will block the current thread and process incoming messages.
     pub fn run(mut self) {
         loop {
-            // Each iteration has three phases:
-            //
-            // 1. Non-blocking poll for persistence completion. If the background flush already
-            //    landed, absorb the result now so the gap calculation below is fresh.
-            // 2. Decide how to wait for the next event. When the canonical-to-persisted gap beyond
-            //    the in-memory buffer reaches the backpressure threshold we only block on the
-            //    persistence receiver, leaving new engine requests sitting in the unbounded
-            //    upstream channel.
-            // 3. Handle the event (engine message or persistence completion) and kick off a new
-            //    persistence cycle if the threshold is met again.
-            //
-            // The net effect: when the unbuffered persistence gap reaches the threshold, we stop
-            // processing incoming messages and let them queue in the channel. This is only a soft
-            // form of backpressure: it delays replies and, more importantly, prevents executing
-            // further blocks that would pile up in the persistence queue - where each block
-            // carries heavier state (eg. trie updates) than the raw payload sitting in the engine
-            // channel.
-            //
-            // Standard Ethereum CLs won't truly back off - the engine API has no
-            // backpressure semantics, and CLs typically timeout after ≈8s and resend - so
-            // this cannot prevent the incoming channel from growing under sustained load.
-            // But it shifts the bottleneck to the lighter-weight incoming queue rather than
-            // the costlier persistence pipeline. Other clients that respect reply latency
-            // can treat the delayed responses as a signal to chill out.
+            // Absorb completed saves before handling the next request so validation uses the
+            // latest persistence throughput. Backpressure is applied after each validated block.
             match self.try_poll_persistence() {
                 Ok(true) => {
                     if let Err(err) = self.advance_persistence() {
@@ -572,18 +546,7 @@ where
                 }
             }
 
-            let event = if self.should_backpressure() {
-                self.metrics.engine.backpressure_active.set(1.0);
-                let stall_start = Instant::now();
-                let event = self.wait_for_persistence_event();
-                self.metrics.engine.backpressure_stall_duration.record(stall_start.elapsed());
-                event
-            } else {
-                self.metrics.engine.backpressure_active.set(0.0);
-                self.wait_for_event()
-            };
-
-            match event {
+            match self.wait_for_event() {
                 LoopEvent::EngineMessage(msg) => {
                     debug!(target: "engine::tree", %msg, "received new engine message");
                     match self.on_engine_message(msg) {
@@ -616,24 +579,6 @@ where
                 error!(target: "engine::tree", %err, "Advancing persistence failed");
                 return
             }
-        }
-    }
-
-    /// Blocks until the in-flight persistence task completes, used when we are under
-    /// backpressure.
-    ///
-    /// Unlike `wait_for_event`, this deliberately does not read from the tree input channel. Any
-    /// requests sent to the tree remain queued upstream until persistence catches up.
-    fn wait_for_persistence_event(&mut self) -> LoopEvent<T, N> {
-        let maybe_persistence = self.persistence_state.rx.take();
-
-        if let Some((persistence_rx, start_time, _action)) = maybe_persistence {
-            match persistence_rx.recv() {
-                Ok(result) => LoopEvent::PersistenceComplete { result, start_time },
-                Err(_) => LoopEvent::Disconnected,
-            }
-        } else {
-            self.wait_for_event()
         }
     }
 
@@ -756,6 +701,7 @@ where
 
         // start timing for the new payload process
         let start = Instant::now();
+        let pacing_before = self.persistence_pacing.total_wait;
 
         // Ensures that the given payload does not violate any consensus rules that concern the
         // block's layout, like:
@@ -815,7 +761,11 @@ where
         }
 
         // record total newPayload duration
-        self.metrics.block_validation.total_duration.record(start.elapsed().as_secs_f64());
+        let pacing_wait = self.persistence_pacing.total_wait - pacing_before;
+        self.metrics
+            .block_validation
+            .total_duration
+            .record(start.elapsed().saturating_sub(pacing_wait).as_secs_f64());
 
         Ok(outcome)
     }
@@ -1538,6 +1488,11 @@ where
         self.metrics.engine.persistence_duration.record(start_time.elapsed());
 
         let PersistenceResult { last_block, last_state_trie_block, commit_duration } = result;
+        // Only state/trie-complete blocks can leave memory. Masked blocks may already have
+        // durable non-state outputs but must not dilute the per-block persistence cost.
+        let persisted_blocks = last_state_trie_block
+            .number
+            .saturating_sub(self.persistence_state.last_state_trie_persisted_block.number);
         debug_assert!(
             last_state_trie_block.number <= last_block.number,
             "state/trie frontier cannot exceed the last persisted block"
@@ -1569,7 +1524,11 @@ where
         );
         self.state.tree_state.overlay_manager.evict_cached_changesets(eviction_threshold);
 
-        self.on_new_persisted_block()?;
+        if self.on_new_persisted_block()? &&
+            let Some(duration) = commit_duration
+        {
+            self.persistence_pacing.record(duration, persisted_blocks);
+        }
 
         self.purge_timing_stats(last_block_number, commit_duration);
 
@@ -1689,9 +1648,11 @@ where
                                 let start = Instant::now();
                                 let gas_used = payload.gas_used();
                                 let num_hash = payload.num_hash();
+                                let pacing_before = self.persistence_pacing.total_wait;
                                 let mut output = self.on_new_payload(payload);
                                 self.metrics.engine.new_payload.update_response_metrics(
                                     start,
+                                    self.persistence_pacing.total_wait - pacing_before,
                                     &mut self.metrics.engine.forkchoice_updated.latest_finish_at,
                                     &output,
                                     gas_used,
@@ -1767,10 +1728,14 @@ where
                                 let start = Instant::now();
                                 let gas_used = payload.gas_used();
                                 let num_hash = payload.num_hash();
+                                let pacing_before = self.persistence_pacing.total_wait;
                                 let mut output = self.on_new_payload(payload);
-                                let latency = start.elapsed();
+                                let pacing_wait =
+                                    self.persistence_pacing.total_wait - pacing_before;
+                                let latency = start.elapsed().saturating_sub(pacing_wait);
                                 self.metrics.engine.new_payload.update_response_metrics(
                                     start,
+                                    pacing_wait,
                                     &mut self.metrics.engine.forkchoice_updated.latest_finish_at,
                                     &output,
                                     gas_used,
@@ -1781,7 +1746,9 @@ where
 
                                 let timings = NewPayloadTimings {
                                     latency,
-                                    persistence_wait: backpressure_wait + explicit_persistence_wait,
+                                    persistence_wait: backpressure_wait +
+                                        explicit_persistence_wait +
+                                        pacing_wait,
                                     execution_cache_wait: cache_wait
                                         .map(|wait| wait.execution_cache),
                                     sparse_trie_wait: cache_wait.map(|wait| wait.sparse_trie),
@@ -2307,15 +2274,17 @@ where
     /// This also updates the canonical in-memory state to reflect the newest persisted block
     /// height.
     ///
-    /// Assumes that `finish` has been called on the `persistence_state` at least once
-    fn on_new_persisted_block(&mut self) -> ProviderResult<()> {
+    /// Returns whether persisted blocks could be removed from memory, rather than requiring a
+    /// disk reorg first. Assumes that `finish` has been called on `persistence_state` at least
+    /// once.
+    fn on_new_persisted_block(&mut self) -> ProviderResult<bool> {
         let in_memory_persisted_block = self.persistence_state.last_state_trie_persisted_block;
 
         // If we have an on-disk reorg, we need to handle it first before touching the in-memory
         // state.
         if let Some(remove_above) = self.find_disk_reorg()? {
             self.remove_blocks(remove_above);
-            return Ok(())
+            return Ok(false)
         }
 
         let finalized = self.state.forkchoice_state_tracker.last_valid_finalized();
@@ -2325,7 +2294,7 @@ where
             in_memory_persisted_block.number,
         );
         self.state.set_pending_sparse_trie_prune(self.should_prune_sparse_trie());
-        Ok(())
+        Ok(true)
     }
 
     /// Returns whether sparse trie pruning should be attempted by the next sparse trie task.
@@ -3264,6 +3233,7 @@ where
             .block_insert_total_duration
             .record(block_insert_start.elapsed().as_secs_f64());
         debug!(target: "engine::tree", block=?block_num_hash, "Finished inserting block");
+        self.pace_validation(block_insert_start.elapsed());
         Ok(InsertPayloadOk::Inserted(BlockStatus::Valid))
     }
 

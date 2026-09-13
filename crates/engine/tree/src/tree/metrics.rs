@@ -174,7 +174,7 @@ pub struct EngineMetrics {
     pub(crate) persistence_duration: Histogram,
     /// Whether the engine loop is currently stalled on persistence backpressure.
     pub(crate) backpressure_active: Gauge,
-    /// Time spent blocked waiting on persistence because backpressure was active.
+    /// Time spent sleeping after validation to match persistence throughput.
     pub(crate) backpressure_stall_duration: Histogram,
     /// Tracks the how often we failed to deliver a newPayload response.
     ///
@@ -442,12 +442,14 @@ impl NewPayloadStatusMetrics {
     pub(crate) fn update_response_metrics(
         &mut self,
         start: Instant,
+        persistence_wait: Duration,
         latest_forkchoice_updated_at: &mut Option<Instant>,
         result: &Result<TreeOutcome<PayloadStatus>, InsertBlockProcessingError>,
         gas_used: u64,
     ) {
         let finish = Instant::now();
-        let elapsed = finish - start;
+        // Persistence pacing is reported separately from validation latency and throughput.
+        let elapsed = (finish - start).saturating_sub(persistence_wait);
 
         if let Some(prev_finish) = self.latest_finish_at {
             self.time_between_new_payloads.record(start - prev_finish);
@@ -633,7 +635,7 @@ pub(crate) struct BlockBufferMetrics {
 mod tests {
     use super::*;
     use alloy_eips::eip7685::Requests;
-    use metrics_util::debugging::{DebuggingRecorder, Snapshotter};
+    use metrics_util::debugging::{DebugValue, DebuggingRecorder, Snapshotter};
     use reth_ethereum_primitives::Receipt;
     use reth_execution_types::BlockExecutionResult;
     use reth_revm::db::BundleState;
@@ -648,7 +650,7 @@ mod tests {
     #[test]
     fn test_record_block_execution_metrics() {
         let snapshotter = setup_test_recorder();
-        let metrics = EngineApiMetrics::default();
+        let mut metrics = EngineApiMetrics::default();
 
         // Pre-populate some metrics to ensure they exist
         metrics.executor.gas_processed_total.increment(0);
@@ -676,8 +678,23 @@ mod tests {
             block_input_operations: 7,
             block_output_operations: 8,
         });
+        metrics.engine.new_payload.update_response_metrics(
+            Instant::now() - Duration::from_secs(3),
+            Duration::from_secs(2),
+            &mut None,
+            &Ok(TreeOutcome::new(PayloadStatus::from_status(PayloadStatusEnum::Valid))),
+            1_000_000,
+        );
 
         let snapshot = snapshotter.snapshot().into_vec();
+        let (_, _, _, DebugValue::Gauge(latency)) = snapshot
+            .iter()
+            .find(|(key, ..)| key.key().name() == "consensus.engine.beacon.new_payload_last")
+            .expect("newPayload latency metric")
+        else {
+            panic!("expected latency gauge")
+        };
+        assert!((1.0..2.0).contains(&latency.0), "pacing must not count as validation latency");
 
         // Verify that metrics were registered
         let mut found_execution_metrics = false;
