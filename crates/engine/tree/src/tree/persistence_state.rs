@@ -24,6 +24,7 @@ use crate::persistence::PersistenceResult;
 use alloy_eips::BlockNumHash;
 use crossbeam_channel::Receiver as CrossbeamReceiver;
 use reth_primitives_traits::FastInstant as Instant;
+use std::{collections::VecDeque, time::Duration};
 use tracing::trace;
 
 /// The state of the persistence task.
@@ -106,4 +107,73 @@ pub(crate) enum CurrentPersistenceAction {
         /// The tip, above which we are removing blocks.
         new_tip_num: u64,
     },
+}
+
+/// Paces validation using the last ten successful saves that released blocks from memory.
+#[derive(Debug, Default)]
+pub(crate) struct PersistencePacing {
+    /// Oldest sample first; each sample is save duration per fully persisted block.
+    samples: VecDeque<Duration>,
+    /// Cumulative sleep, allowing an RPC to account for all blocks it connects.
+    pub(crate) total_wait: Duration,
+}
+
+impl PersistencePacing {
+    const WINDOW: usize = 10;
+    const ALPHA: f64 = 2.0 / (Self::WINDOW as f64 + 1.0);
+
+    pub(crate) fn record(&mut self, duration: Duration, blocks: u64) {
+        if blocks == 0 {
+            return;
+        }
+        if self.samples.len() == Self::WINDOW {
+            self.samples.pop_front();
+        }
+        self.samples.push_back(duration.div_f64(blocks as f64));
+    }
+
+    /// Recompute the EMA over the bounded window so older saves no longer affect pacing.
+    pub(crate) fn delay(&self, validation_duration: Duration) -> Duration {
+        if self.samples.len() < 2 {
+            return Duration::ZERO;
+        }
+        let mut samples = self.samples.iter().map(Duration::as_secs_f64);
+        let first = samples.next().expect("at least two samples");
+        let ema =
+            samples.fold(first, |ema, sample| Self::ALPHA * sample + (1.0 - Self::ALPHA) * ema);
+        Duration::from_secs_f64(ema).saturating_sub(validation_duration)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::PersistencePacing;
+    use std::time::Duration;
+
+    #[test]
+    fn persistence_pacing_requires_two_saves_that_release_blocks() {
+        let mut pacing = PersistencePacing::default();
+        assert_eq!(pacing.delay(Duration::ZERO), Duration::ZERO);
+        pacing.record(Duration::from_secs(1), 0);
+        pacing.record(Duration::from_millis(100), 10);
+        assert_eq!(pacing.delay(Duration::ZERO), Duration::ZERO);
+        pacing.record(Duration::from_millis(200), 20);
+        assert_eq!(pacing.delay(Duration::from_millis(4)), Duration::from_millis(6));
+        assert_eq!(pacing.delay(Duration::from_millis(10)), Duration::ZERO);
+        assert_eq!(pacing.delay(Duration::from_millis(20)), Duration::ZERO);
+    }
+
+    #[test]
+    fn persistence_pacing_weights_recent_saves_and_expires_old_samples() {
+        let mut pacing = PersistencePacing::default();
+        pacing.record(Duration::from_millis(110), 1);
+        pacing.record(Duration::from_millis(220), 1);
+        assert_eq!(pacing.delay(Duration::ZERO), Duration::from_millis(130));
+
+        for _ in 0..10 {
+            pacing.record(Duration::from_millis(10), 1);
+        }
+        assert_eq!(pacing.samples.len(), 10);
+        assert_eq!(pacing.delay(Duration::ZERO), Duration::from_millis(10));
+    }
 }
