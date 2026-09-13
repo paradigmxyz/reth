@@ -80,9 +80,10 @@ use reth_trie_parallel::proof_task::{ProofResultMessage, ProofTaskCtx, ProofWork
 pub use reth_trie_parallel::{
     error::StateRootTaskError,
     state_root_task::{
-        evm_state_to_hashed_post_state, PayloadStateRootHandle, StateAccessHint,
-        StateRootComputeOutcome, StateRootHandle, StateRootHintStream, StateRootMessage,
-        StateRootSink, StateRootTaskCancelGuard, StateRootUpdateHook, StateRootUpdateStream,
+        evm_state_to_hashed_post_state, BlockUpdateSchedule, PayloadStateRootHandle,
+        StateAccessHint, StateRootComputeOutcome, StateRootHandle, StateRootHintStream,
+        StateRootMessage, StateRootSink, StateRootTaskCancelGuard, StateRootUpdateHook,
+        StateRootUpdateStream,
     },
 };
 use reth_trie_sparse::{

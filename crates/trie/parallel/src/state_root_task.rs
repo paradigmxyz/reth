@@ -22,6 +22,8 @@ use tracing::trace;
 pub enum StateRootMessage {
     /// Prefetch proof targets
     PrefetchProofs(MultiProofTargetsV2),
+    /// The keys the block will change, sent once before the values.
+    UpdateSchedule(Arc<BlockUpdateSchedule>),
     /// New state update from transaction execution.
     StateUpdate(EvmState),
     /// Pre-hashed state update from BAL conversion that can be applied directly without proofs.
@@ -31,6 +33,29 @@ pub enum StateRootMessage {
     /// This is triggered by block execution, indicating that no additional state updates are
     /// expected.
     FinishedStateUpdates,
+}
+
+/// The keys of every account and storage leaf a block changes.
+///
+/// A block that carries an EIP-7928 block access list knows this before it executes, while the
+/// values still have to be hashed and, for accounts the list does not fully describe, read from
+/// the parent state. Sending the keys first lets a task reveal the leaves and request the proofs
+/// for the whole block while the values are still being produced.
+///
+/// The schedule carries no values, so a task may treat it as a prefetch: an entry that never
+/// receives a value only costs the proof it fetched.
+///
+/// It is shared rather than handed over so that the producer of the values can look its own
+/// hashed keys up here instead of hashing them a second time.
+#[derive(Debug, Default)]
+pub struct BlockUpdateSchedule {
+    /// Hashed addresses of the accounts the block changes.
+    ///
+    /// Every address in [`Self::storages`] is listed here too: a changed storage trie changes
+    /// the account's storage root, and so its account leaf.
+    pub accounts: Vec<B256>,
+    /// Hashed storage slots the block changes, by hashed address.
+    pub storages: B256Map<Vec<B256>>,
 }
 
 /// Outcome of the state root computation, including the state root itself with
@@ -339,6 +364,9 @@ pub trait StateRootSink: Send + Sync + 'static {
     /// Best-effort access hint from transaction prewarming.
     fn on_access_hint(&self, _hint: StateAccessHint) {}
 
+    /// The keys the block will change, known before their values.
+    fn on_update_schedule(&self, _schedule: Arc<BlockUpdateSchedule>) {}
+
     /// Authoritative state update from normal block execution.
     fn on_state_update(&self, state: EvmState);
 
@@ -398,6 +426,16 @@ impl StateRootUpdateStream {
     /// Creates a new authoritative update stream backed by the given sink.
     pub fn new(inner: Arc<dyn StateRootSink>) -> Self {
         Self { inner }
+    }
+
+    /// Emits the keys the block will change.
+    ///
+    /// The schedule only saves a task work if it arrives before the values it describes, so it
+    /// goes through the update capability rather than the hint capability: both reach the task
+    /// through one channel, and the producer of the values is the only one that can order
+    /// itself against them.
+    pub fn on_update_schedule(&self, schedule: Arc<BlockUpdateSchedule>) {
+        self.inner.on_update_schedule(schedule);
     }
 
     /// Emits an authoritative pre-hashed state update.
@@ -472,6 +510,10 @@ impl SparseTrieStateRootSink {
 impl StateRootSink for SparseTrieStateRootSink {
     fn on_access_hint(&self, hint: StateAccessHint) {
         let _ = self.sender.send(StateRootMessage::PrefetchProofs(hint.into()));
+    }
+
+    fn on_update_schedule(&self, schedule: Arc<BlockUpdateSchedule>) {
+        let _ = self.sender.send(StateRootMessage::UpdateSchedule(schedule));
     }
 
     fn on_state_update(&self, state: EvmState) {
