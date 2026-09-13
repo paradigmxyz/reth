@@ -471,11 +471,13 @@ def compute_changes(
         if change:
             changes[name] = change
 
+    # The closed-loop delta is paired per record, so its interval comes from a
+    # bootstrap over records rather than over runs.
     paired = paired_record_delta(rng, baseline_runs, feature_runs, method)
-    if paired and paired["baseline_ms"] > 0:
+    if paired:
         change = make_change(
-            paired["baseline_ms"],
-            paired["baseline_ms"] + paired["delta_ms"],
+            baseline_stats.get("record_median_ms"),
+            feature_stats.get("record_median_ms"),
             paired["ci_ms"],
             PRACTICAL_FLOOR_PCT["record_median"],
             True,
@@ -483,6 +485,7 @@ def compute_changes(
         )
         if change:
             change["records"] = paired["records"]
+            change["paired_delta_ms"] = round(paired["delta_ms"], 6)
             changes["record_median"] = change
     return changes
 
