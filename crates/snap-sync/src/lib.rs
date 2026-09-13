@@ -34,6 +34,7 @@
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 
 mod attempt;
+mod bal;
 mod error;
 mod generation;
 mod pivot;
@@ -43,6 +44,7 @@ mod session;
 mod test_utils;
 
 pub use attempt::{SnapAttemptStore, SnapWrite};
+pub use bal::{BalStateUpdate, DownloadedAccount};
 pub use error::SnapSyncError;
 pub use generation::{SnapGeneration, SnapPhase};
 pub use pivot::SnapPivotPolicy;
