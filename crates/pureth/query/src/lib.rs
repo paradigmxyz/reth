@@ -6,6 +6,7 @@ mod proof;
 mod proof_access;
 mod query_service;
 mod receipt_resolution;
+#[cfg(not(target_arch = "wasm32"))]
 mod rpc;
 mod schema;
 #[cfg(test)]
@@ -24,6 +25,7 @@ pub use query_service::{
     ResponseVerificationError,
 };
 pub use receipt_resolution::{resolve_receipt_log_address, ReceiptResolutionError, ReceiptsSsz};
+#[cfg(not(target_arch = "wasm32"))]
 pub use rpc::{PurethApiServer, PurethRpc};
 pub use schema::{
     branch_positions, compose_gindices, container_field_gindex, progressive_chunk_gindex,

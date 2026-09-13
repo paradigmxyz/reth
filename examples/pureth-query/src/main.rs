@@ -47,7 +47,7 @@ async fn run() -> eyre::Result<()> {
     };
     let response: QueryResponse = client.request("pureth_query", rpc_params![request]).await?;
     eyre::ensure!(response.block_hash == SINGLETON_BLOCK_HASH);
-    eyre::ensure!(response.value_ssz.as_ref() == &[0x11; 20]);
+    eyre::ensure!(response.value_ssz.as_ref() == [0x11; 20]);
     eyre::ensure!(response.gindex == "576");
     eyre::ensure!(
         response.root.to_string() ==

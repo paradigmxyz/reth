@@ -9,10 +9,12 @@ repository.workspace = true
 
 [dependencies]
 alloy-primitives = { workspace = true, features = ["serde"] }
-jsonrpsee = { workspace = true, features = ["server", "macros"] }
 reth-pureth-receipt.workspace = true
 serde = { workspace = true, features = ["derive"] }
 sha2.workspace = true
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+jsonrpsee = { workspace = true, features = ["server", "macros"] }
 
 [dev-dependencies]
 alloy-consensus.workspace = true
