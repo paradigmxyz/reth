@@ -635,7 +635,7 @@ pub(crate) struct BlockBufferMetrics {
 mod tests {
     use super::*;
     use alloy_eips::eip7685::Requests;
-    use metrics_util::debugging::{DebuggingRecorder, Snapshotter};
+    use metrics_util::debugging::{DebugValue, DebuggingRecorder, Snapshotter};
     use reth_ethereum_primitives::Receipt;
     use reth_execution_types::BlockExecutionResult;
     use reth_revm::db::BundleState;
@@ -648,35 +648,9 @@ mod tests {
     }
 
     #[test]
-    fn test_new_payload_metrics_exclude_persistence_pacing() {
-        use metrics_util::debugging::DebugValue;
-        let recorder = DebuggingRecorder::new();
-        let snapshotter = recorder.snapshotter();
-        reth_metrics::metrics::with_local_recorder(&recorder, || {
-            let mut metrics = EngineApiMetrics::default();
-            metrics.engine.new_payload.update_response_metrics(
-                Instant::now() - Duration::from_secs(3),
-                Duration::from_secs(2),
-                &mut None,
-                &Ok(TreeOutcome::new(PayloadStatus::from_status(PayloadStatusEnum::Valid))),
-                1_000_000,
-            );
-        });
-        let snapshot = snapshotter.snapshot().into_vec();
-        let (_, _, _, DebugValue::Gauge(latency)) = snapshot
-            .iter()
-            .find(|(key, ..)| key.key().name() == "consensus.engine.beacon.new_payload_last")
-            .expect("newPayload latency metric")
-        else {
-            panic!("expected latency gauge")
-        };
-        assert!((1.0..2.0).contains(&latency.0), "pacing must not count as validation latency");
-    }
-
-    #[test]
     fn test_record_block_execution_metrics() {
         let snapshotter = setup_test_recorder();
-        let metrics = EngineApiMetrics::default();
+        let mut metrics = EngineApiMetrics::default();
 
         // Pre-populate some metrics to ensure they exist
         metrics.executor.gas_processed_total.increment(0);
@@ -704,8 +678,23 @@ mod tests {
             block_input_operations: 7,
             block_output_operations: 8,
         });
+        metrics.engine.new_payload.update_response_metrics(
+            Instant::now() - Duration::from_secs(3),
+            Duration::from_secs(2),
+            &mut None,
+            &Ok(TreeOutcome::new(PayloadStatus::from_status(PayloadStatusEnum::Valid))),
+            1_000_000,
+        );
 
         let snapshot = snapshotter.snapshot().into_vec();
+        let (_, _, _, DebugValue::Gauge(latency)) = snapshot
+            .iter()
+            .find(|(key, ..)| key.key().name() == "consensus.engine.beacon.new_payload_last")
+            .expect("newPayload latency metric")
+        else {
+            panic!("expected latency gauge")
+        };
+        assert!((1.0..2.0).contains(&latency.0), "pacing must not count as validation latency");
 
         // Verify that metrics were registered
         let mut found_execution_metrics = false;
