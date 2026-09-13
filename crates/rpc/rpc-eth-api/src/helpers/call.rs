@@ -121,11 +121,22 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
                 // explicit `number` and `time` override and the chain is contiguous (see the
                 // execution-apis spec note: "If the block number is increased more than 1 compared
                 // to the previous block, new empty blocks are generated in between.").
-                let block_state_calls = simulate::sanitize_chain(
+                let block_state_calls = simulate::sanitize_chain_with_timestamp_policy(
                     block_state_calls,
                     &parent,
                     chain_id,
                     max_simulate_blocks,
+                    |parent_number, parent_timestamp, block_number, timestamp_increment| {
+                        this.next_simulate_block_timestamp(
+                            parent_number,
+                            parent_timestamp,
+                            block_number,
+                            timestamp_increment,
+                        )
+                    },
+                    |timestamp, parent_timestamp| {
+                        this.is_simulate_block_timestamp_valid(timestamp, parent_timestamp)
+                    },
                 )?;
 
                 let mut blocks: Vec<SimulatedBlock<RpcBlock<Self::NetworkTypes>>> =
@@ -530,6 +541,22 @@ pub trait Call:
                    + From<ProviderError>,
     > + SpawnBlocking
 {
+    /// Returns the timestamp to use when a simulated block omits a timestamp override.
+    fn next_simulate_block_timestamp(
+        &self,
+        _parent_number: u64,
+        parent_timestamp: u64,
+        _block_number: u64,
+        timestamp_increment: u64,
+    ) -> Option<u64> {
+        parent_timestamp.checked_add(timestamp_increment)
+    }
+
+    /// Returns whether a simulated block timestamp is valid relative to its parent.
+    fn is_simulate_block_timestamp_valid(&self, timestamp: u64, parent_timestamp: u64) -> bool {
+        timestamp > parent_timestamp
+    }
+
     /// Returns default gas limit to use for `eth_call` and tracing RPC methods.
     ///
     /// Data access in default trait method implementations.
