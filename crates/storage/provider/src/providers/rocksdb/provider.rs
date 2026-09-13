@@ -1749,6 +1749,7 @@ impl<'db> RocksReadSnapshot<'db> {
     /// `iter_cache` holds the raw iterator for `T`'s column family. Seeking an existing iterator
     /// is much cheaper than constructing one, so the iterator is created on the first lookup and
     /// reused by every later lookup through this snapshot.
+    #[expect(clippy::too_many_arguments)]
     fn history_info<T>(
         &self,
         iter_cache: &Mutex<Option<RocksDBRawIterEnum<'db>>>,
