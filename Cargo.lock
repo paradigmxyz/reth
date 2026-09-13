@@ -3825,6 +3825,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "example-pureth-query"
+version = "0.0.0"
+dependencies = [
+ "eyre",
+ "jsonrpsee",
+ "reth-ethereum",
+ "reth-pureth-query",
+ "reth-pureth-receipt",
+ "tokio",
+]
+
+[[package]]
 name = "example-rpc-db"
 version = "0.0.0"
 dependencies = [
@@ -9865,12 +9877,14 @@ version = "2.5.2"
 dependencies = [
  "alloy-consensus",
  "alloy-primitives",
+ "jsonrpsee",
  "reth-ethereum-primitives",
  "reth-primitives-traits",
  "reth-pureth-receipt",
  "serde",
  "serde_json",
  "sha2 0.10.9",
+ "tokio",
 ]
 
 [[package]]
