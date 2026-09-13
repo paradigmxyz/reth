@@ -99,7 +99,7 @@ impl<N: NodePrimitives> OverlayManager<N> {
         OverlayBuilder::new(parent_hash, self.block_state(parent_hash), self.clone())
     }
 
-    fn block_state(&self, parent_hash: B256) -> Option<BlockState<N>> {
+    pub(crate) fn block_state(&self, parent_hash: B256) -> Option<BlockState<N>> {
         let mut blocks = self.parent_chain(parent_hash).collect::<Vec<_>>();
         blocks.pop().map(|oldest| {
             blocks.into_iter().rev().fold(BlockState::new(oldest), |parent, block| {
@@ -675,9 +675,9 @@ impl Default for OverlayCacheConfig {
 #[derive(Debug)]
 pub(crate) struct StateTrieOverlayError {
     /// Requested in-memory tip hash.
-    tip_hash: B256,
+    pub(crate) tip_hash: B256,
     /// Requested anchor hash.
-    anchor_hash: B256,
+    pub(crate) anchor_hash: B256,
 }
 
 impl fmt::Display for StateTrieOverlayError {
