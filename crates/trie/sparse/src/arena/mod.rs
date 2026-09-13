@@ -13,7 +13,7 @@ use crate::{
 };
 use alloc::{borrow::Cow, boxed::Box, collections::VecDeque, vec::Vec};
 use alloy_primitives::{keccak256, map::B256Map, B256};
-use alloy_trie::TrieMask;
+use alloy_trie::{BranchNodeCompact, TrieMask};
 use core::{cmp::Reverse, mem};
 use reth_execution_errors::SparseTrieResult;
 use reth_trie_common::{
@@ -920,28 +920,6 @@ impl ArenaParallelSparseTrie {
         B256::from(bytes)
     }
 
-    /// Returns the [`BranchNodeMasks`] for a branch based on the status of its children.
-    fn get_branch_masks(arena: &NodeArena, branch: &ArenaSparseNodeBranch) -> BranchNodeMasks {
-        let mut masks = BranchNodeMasks::default();
-
-        for (nibble, child) in branch.child_iter() {
-            let (hash_bit, tree_bit) = match child {
-                ArenaSparseNodeBranchChild::Blinded(_) => (
-                    branch.branch_masks.hash_mask.is_bit_set(nibble),
-                    branch.branch_masks.tree_mask.is_bit_set(nibble),
-                ),
-                ArenaSparseNodeBranchChild::Revealed(child_idx) => {
-                    let child = &arena[*child_idx];
-                    (child.hash_mask_bit(), child.tree_mask_bit())
-                }
-            };
-
-            masks.set_child_bits(nibble, hash_bit, tree_bit);
-        }
-
-        masks
-    }
-
     /// Computes and caches `RlpNode` for all dirty nodes reachable from `root` in `arena`.
     ///
     /// Uses the cursor's stack to walk dirty branches depth-first. For each branch,
@@ -1001,11 +979,15 @@ impl ArenaParallelSparseTrie {
 
         cursor.reset(arena, root, base_path);
 
-        // Step 2: Walk dirty branches depth-first using `cursor.next`. Only dirty branches
+        // Scratch for the child hashes of the branch being encoded. A branch has at most 16
+        // children, so this never spills to the heap.
+        let mut hashes = SmallVec::<[B256; 16]>::new();
+
+        // Step 2: Walk dirty branches depth-first using `cursor.next_clean`. Only dirty branches
         // are descended into; all other children (leaves, cached branches, blinded, subtries)
         // are encoded when their parent branch is popped.
         loop {
-            let result = cursor.next(&mut *arena, |_, node| {
+            let result = cursor.next_clean(&mut *arena, |_, node| {
                 matches!(
                     node,
                     ArenaSparseNode::Branch(b) if matches!(b.state, ArenaSparseNodeState::Dirty)
@@ -1027,79 +1009,34 @@ impl ArenaParallelSparseTrie {
             // The branch at `head_idx` is exhausted. All its dirty child branches
             // have already been encoded and cached. Collect all children's RLP nodes
             // and encode the branch.
-            trace!(
-                target: TRACE_TARGET,
-                branch_path = ?head_path,
-                branch_short_key = ?arena[head_idx].short_key().expect("head is a branch"),
-                state_mask = ?arena[head_idx].branch_ref().state_mask,
-                "Calculating branch RlpNode",
-            );
-
-            rlp_node_buf.clear();
-            let mut node_epoch = TrieNodeEpoch::UNMODIFIED;
-            let state_mask = arena[head_idx].branch_ref().state_mask;
-            for (child_idx, _nibble) in BranchChildIter::new(state_mask) {
-                match &arena[head_idx].branch_ref().children[child_idx] {
-                    ArenaSparseNodeBranchChild::Blinded(rlp_node) => {
-                        rlp_node_buf.push(rlp_node.clone());
-                    }
-                    ArenaSparseNodeBranchChild::Revealed(child_idx) => {
-                        let child_idx = *child_idx;
-                        match &arena[child_idx] {
-                            ArenaSparseNode::Leaf { .. } => {
-                                Self::encode_leaf(
-                                    arena,
-                                    child_idx,
-                                    rlp_buf,
-                                    rlp_node_buf,
-                                    new_epoch,
-                                );
-                            }
-                            ArenaSparseNode::Branch(child_b) => {
-                                let ArenaSparseNodeState::Cached { rlp_node, .. } = &child_b.state
-                                else {
-                                    panic!("child branch must be cached after DFS");
-                                };
-                                let rlp_node = rlp_node.clone();
-                                rlp_node_buf.push(rlp_node);
-                            }
-                            ArenaSparseNode::Subtrie(subtrie) => {
-                                let subtrie_root = &subtrie.arena[subtrie.root];
-                                match subtrie_root {
-                                    ArenaSparseNode::Branch(ArenaSparseNodeBranch {
-                                        state: ArenaSparseNodeState::Cached { rlp_node, .. },
-                                        ..
-                                    }) |
-                                    ArenaSparseNode::Leaf {
-                                        state: ArenaSparseNodeState::Cached { rlp_node, .. },
-                                        ..
-                                    } => {
-                                        rlp_node_buf.push(rlp_node.clone());
-                                    }
-                                    _ => panic!("subtrie root must be a cached Branch or Leaf"),
-                                }
-                            }
-                            ArenaSparseNode::TakenSubtrie | ArenaSparseNode::EmptyRoot { .. } => {
-                                unreachable!("Unexpected child {:?}", arena[child_idx]);
-                            }
-                        }
-                        let Some(ArenaSparseNodeState::Cached { epoch: child_epoch, .. }) =
-                            arena[child_idx].state_ref()
-                        else {
-                            panic!("revealed child must be cached after encoding");
-                        };
-                        node_epoch = node_epoch.max(*child_epoch);
-                    }
-                }
-            }
-
-            // Encode the branch, optionally wrapping in an extension if it has a short_key.
             let b = arena[head_idx].branch_ref();
             let short_key = b.short_key;
             let state_mask = b.state_mask;
             let prev_branch_masks = b.branch_masks;
-            let new_branch_masks = Self::get_branch_masks(arena, b);
             let was_dirty = matches!(b.state, ArenaSparseNodeState::Dirty);
+
+            trace!(
+                target: TRACE_TARGET,
+                branch_path = ?head_path,
+                branch_short_key = ?short_key,
+                ?state_mask,
+                "Calculating branch RlpNode",
+            );
+
+            // Child hashes are only needed for branches that end up in the trie updates, which
+            // requires the same conditions as the update recording below.
+            let record_hashes =
+                was_dirty && updates.is_some() && !(head_path.is_empty() && short_key.is_empty());
+            hashes.clear();
+
+            let (mut node_epoch, new_branch_masks) = Self::hash_branch_children(
+                arena,
+                head_idx,
+                rlp_buf,
+                rlp_node_buf,
+                record_hashes.then_some(&mut hashes),
+                new_epoch,
+            );
             if was_dirty {
                 node_epoch = node_epoch.max(new_epoch);
             }
@@ -1117,7 +1054,7 @@ impl ArenaParallelSparseTrie {
             trace!(
                 target: TRACE_TARGET,
                 path = ?head_path,
-                short_key = ?arena[head_idx].short_key(),
+                ?short_key,
                 children = ?state_mask.iter().zip(rlp_node_buf.iter()).collect::<Vec<_>>(),
                 rlp_node = ?rlp_node,
                 "Calculated branch RlpNode",
@@ -1138,7 +1075,13 @@ impl ArenaParallelSparseTrie {
                         trie_updates.updated_nodes.remove(&logical_path);
                         trie_updates.removed_nodes.insert(logical_path);
                     } else if !new_branch_masks.is_empty() {
-                        let compact = arena[head_idx].branch_ref().branch_node_compact(arena);
+                        let compact = BranchNodeCompact::new(
+                            state_mask,
+                            new_branch_masks.tree_mask,
+                            new_branch_masks.hash_mask,
+                            hashes.to_vec(),
+                            None,
+                        );
                         trie_updates.updated_nodes.insert(logical_path, compact);
                         trie_updates.removed_nodes.remove(&logical_path);
                     }
@@ -1150,6 +1093,130 @@ impl ArenaParallelSparseTrie {
             panic!("root must be cached after update_cached_rlp");
         };
         rlp_node.clone()
+    }
+
+    /// Walks the children of the branch at `head_idx` once, pushing each child's `RlpNode` onto
+    /// `rlp_node_buf` and returning the branch's epoch (the max epoch across its revealed
+    /// children) together with its recomputed [`BranchNodeMasks`]. When `hashes` is `Some`, the
+    /// hashes of the children selected by the new hash mask are appended to it in nibble order,
+    /// ready for the branch's [`BranchNodeCompact`].
+    ///
+    /// Dirty leaf children are encoded during the walk but their cached state is written back
+    /// afterwards, because the walk holds a shared borrow of the branch.
+    fn hash_branch_children(
+        arena: &mut NodeArena,
+        head_idx: Index,
+        rlp_buf: &mut Vec<u8>,
+        rlp_node_buf: &mut Vec<RlpNode>,
+        mut hashes: Option<&mut SmallVec<[B256; 16]>>,
+        new_epoch: TrieNodeEpoch,
+    ) -> (TrieNodeEpoch, BranchNodeMasks) {
+        let mut node_epoch = TrieNodeEpoch::UNMODIFIED;
+        let mut masks = BranchNodeMasks::default();
+        let mut encoded_leaves = SmallVec::<[(Index, RlpNode, TrieNodeEpoch); 16]>::new();
+
+        rlp_node_buf.clear();
+
+        let branch = arena[head_idx].branch_ref();
+        for (dense_idx, nibble) in BranchChildIter::new(branch.state_mask) {
+            let (hash_bit, tree_bit) = match &branch.children[dense_idx] {
+                ArenaSparseNodeBranchChild::Blinded(rlp_node) => {
+                    rlp_node_buf.push(rlp_node.clone());
+                    (
+                        branch.branch_masks.hash_mask.is_bit_set(nibble),
+                        branch.branch_masks.tree_mask.is_bit_set(nibble),
+                    )
+                }
+                ArenaSparseNodeBranchChild::Revealed(child_idx) => {
+                    let child_idx = *child_idx;
+                    let (child_epoch, bits) = match &arena[child_idx] {
+                        ArenaSparseNode::Leaf { state, key, value } => {
+                            let epoch = match state {
+                                ArenaSparseNodeState::Cached { rlp_node, epoch } => {
+                                    rlp_node_buf.push(rlp_node.clone());
+                                    *epoch
+                                }
+                                ArenaSparseNodeState::Revealed | ArenaSparseNodeState::Dirty => {
+                                    let epoch = if matches!(state, ArenaSparseNodeState::Dirty) {
+                                        new_epoch
+                                    } else {
+                                        TrieNodeEpoch::UNMODIFIED
+                                    };
+                                    rlp_buf.clear();
+                                    let rlp_node = LeafNodeRef { key, value }.rlp(rlp_buf);
+                                    encoded_leaves.push((child_idx, rlp_node.clone(), epoch));
+                                    rlp_node_buf.push(rlp_node);
+                                    epoch
+                                }
+                            };
+                            (epoch, (false, false))
+                        }
+                        ArenaSparseNode::Branch(child_branch) => {
+                            let ArenaSparseNodeState::Cached { rlp_node, epoch } =
+                                &child_branch.state
+                            else {
+                                panic!("child branch must be cached after DFS");
+                            };
+                            let bits = (
+                                child_branch.short_key.is_empty() && rlp_node.is_hash(),
+                                !child_branch.branch_masks.is_empty(),
+                            );
+                            rlp_node_buf.push(rlp_node.clone());
+                            (*epoch, bits)
+                        }
+                        ArenaSparseNode::Subtrie(subtrie) => match &subtrie.arena[subtrie.root] {
+                            ArenaSparseNode::Branch(ArenaSparseNodeBranch {
+                                state: ArenaSparseNodeState::Cached { rlp_node, epoch },
+                                short_key,
+                                branch_masks,
+                                ..
+                            }) => {
+                                let bits = (
+                                    short_key.is_empty() && rlp_node.is_hash(),
+                                    !branch_masks.is_empty(),
+                                );
+                                rlp_node_buf.push(rlp_node.clone());
+                                (*epoch, bits)
+                            }
+                            ArenaSparseNode::Leaf {
+                                state: ArenaSparseNodeState::Cached { rlp_node, epoch },
+                                ..
+                            } => {
+                                rlp_node_buf.push(rlp_node.clone());
+                                (*epoch, (false, false))
+                            }
+                            _ => panic!("subtrie root must be a cached Branch or Leaf"),
+                        },
+                        node @ (ArenaSparseNode::TakenSubtrie |
+                        ArenaSparseNode::EmptyRoot { .. }) => {
+                            unreachable!("Unexpected child {node:?}");
+                        }
+                    };
+                    node_epoch = node_epoch.max(child_epoch);
+                    bits
+                }
+            };
+
+            masks.set_child_bits(nibble, hash_bit, tree_bit);
+
+            // A child only carries a hash mask bit if its `RlpNode` is a hash, so the hash for
+            // the branch's `BranchNodeCompact` is the node that was just pushed.
+            if hash_bit && let Some(hashes) = hashes.as_mut() {
+                hashes.push(
+                    rlp_node_buf
+                        .last()
+                        .expect("child RlpNode was just pushed")
+                        .as_hash()
+                        .expect("hash mask child must be a hash"),
+                );
+            }
+        }
+
+        for (child_idx, rlp_node, epoch) in encoded_leaves {
+            *arena[child_idx].state_mut() = ArenaSparseNodeState::Cached { rlp_node, epoch };
+        }
+
+        (node_epoch, masks)
     }
 
     /// Immutable traversal to find a leaf value at `full_path` starting from `root` in `arena`.
