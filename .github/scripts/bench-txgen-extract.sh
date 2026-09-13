@@ -27,6 +27,7 @@
 #
 #   <name>.jsonl.gz   the corpus itself, gzip optional
 #   <name>.sha256     optional checksum, verified before the corpus is used
+#   tracers/<name>.js  JavaScript tracers selectable as tracer=js:<name>
 #
 # Provisioning that directory is manual (copy the file onto the runner). Names
 # must not contain path separators. Corpus contents are never logged and never
@@ -34,7 +35,8 @@
 #
 # Required env: SCHELK_MOUNT, BENCH_RPC_URL, BENCH_BLOCKS, BENCH_WARMUP_BLOCKS
 # Optional env: BENCH_EXECUTION_MODE, BENCH_BIG_BLOCKS, BENCH_BIG_BLOCKS_TARGET_GAS, BENCH_BAL,
-#               BENCH_CORPUS, BENCH_CORPUS_DIR, BENCH_CALL_CLASS, BENCH_CALL_METHODS, BENCH_CALL_TOP_GAS
+#               BENCH_CORPUS, BENCH_CORPUS_DIR, BENCH_CALL_CLASS, BENCH_CALL_METHODS, BENCH_CALL_TOP_GAS,
+#               BENCH_CALL_TRACER, BENCH_CALL_TRACER_CONFIG, BENCH_CALL_TRACE_OPTIONS
 set -euxo pipefail
 
 BINARY="$1"
@@ -231,6 +233,39 @@ if [ "$EXECUTION_MODE" = "call" ]; then
     if [ -n "${BENCH_CALL_TOP_GAS:-}" ]; then
       CORPUS_METHOD_ARGS+=(--top-gas "$BENCH_CALL_TOP_GAS")
     fi
+    if [ -n "${BENCH_CALL_TRACER:-}" ]; then
+      IFS=',' read -r -a tracer_specs <<< "$BENCH_CALL_TRACER"
+      for spec in "${tracer_specs[@]}"; do
+        spec="${spec// /}"
+        [ -z "$spec" ] && continue
+        case "$spec" in
+          js:*)
+            tracer_name="${spec#js:}"
+            case "$tracer_name" in
+              */*|.*|"")
+                echo "::error::Invalid tracer name: ${spec}"
+                exit 1
+                ;;
+            esac
+            tracer_file="${BENCH_CORPUS_DIR:-/reth-bench/corpora}/tracers/${tracer_name}.js"
+            if [ ! -f "$tracer_file" ]; then
+              echo "::error::JS tracer ${tracer_name} not found at ${tracer_file}"
+              exit 1
+            fi
+            CORPUS_METHOD_ARGS+=(--tracer "js:${tracer_file}")
+            ;;
+          *)
+            CORPUS_METHOD_ARGS+=(--tracer "$spec")
+            ;;
+        esac
+      done
+    fi
+    if [ -n "${BENCH_CALL_TRACER_CONFIG:-}" ]; then
+      CORPUS_METHOD_ARGS+=(--tracer-config "$BENCH_CALL_TRACER_CONFIG")
+    fi
+    if [ -n "${BENCH_CALL_TRACE_OPTIONS:-}" ]; then
+      CORPUS_METHOD_ARGS+=(--trace-options "$BENCH_CALL_TRACE_OPTIONS")
+    fi
     echo "Generating ${CALL_CLASS} corpus from blocks ${CORPUS_FROM}..${CORPUS_TO} (methods: ${CALL_METHODS:-default})"
     "$TXGEN_ETHEREUM" extract \
       --rpc "$BENCH_RPC_URL" \
@@ -293,6 +328,9 @@ if [ "$EXECUTION_MODE" = "call" ]; then
     --argjson tip "$HEAD_DEC" \
     --arg tip_hash "$HEAD_HASH" \
     --argjson top_gas "${BENCH_CALL_TOP_GAS:-null}" \
+    --arg tracer "${BENCH_CALL_TRACER:-}" \
+    --argjson tracer_config "${BENCH_CALL_TRACER_CONFIG:-null}" \
+    --argjson trace_options "${BENCH_CALL_TRACE_OPTIONS:-null}" \
     '{
       source: (if $source == "static" then "static" else "custom" end),
       name: $name,
@@ -303,6 +341,9 @@ if [ "$EXECUTION_MODE" = "call" ]; then
       tip: $tip,
       tip_hash: $tip_hash,
       top_gas: $top_gas,
+      tracer: (if $tracer == "" then null else ($tracer | split(",")) end),
+      tracer_config: $tracer_config,
+      trace_options: $trace_options,
     }' > "$OUTPUT_DIR/corpus.meta.json"
 
   echo "Corpus staged: ${CORPUS_RECORDS} records in ${CORPUS_FILE}"
