@@ -162,14 +162,21 @@ def parse_responses(path: Path) -> dict[int, dict]:
     return responses
 
 
+def call_section(report: dict) -> dict:
+    """The replay section of a report; `bench call` nests its fields under `call`."""
+    section = report.get("call")
+    return section if isinstance(section, dict) else report
+
+
 def report_field(report: dict, key: str):
-    """Look a field up in the report, tolerating a nested metadata block."""
-    if key in report:
-        return report[key]
-    for nested in ("identity", "metadata", "meta"):
-        block = report.get(nested)
-        if isinstance(block, dict) and key in block:
-            return block[key]
+    """Look a field up in the report, tolerating the nested `call` and identity blocks."""
+    for scope in (report, call_section(report)):
+        if key in scope:
+            return scope[key]
+        for nested in ("identity", "metadata", "meta"):
+            block = scope.get(nested)
+            if isinstance(block, dict) and key in block:
+                return block[key]
     return None
 
 
@@ -246,9 +253,11 @@ def run_stats(run: dict, method: str | None = None) -> dict:
         closed_loop_rps = report_field(report, "closed_loop_rps")
         dropped = report_field(report, "dropped")
     else:
-        methods = report.get("methods") or {}
+        methods = call_section(report).get("methods") or {}
         entry = methods.get(method) or {}
         closed_loop_rps = entry.get("closed_loop_rps")
+        if closed_loop_rps is None and isinstance(entry.get("closed_loop"), dict):
+            closed_loop_rps = entry["closed_loop"].get("rps")
         dropped = entry.get("dropped")
     if isinstance(closed_loop_rps, (int, float)):
         stats["closed_loop_rps"] = float(closed_loop_rps)
@@ -508,14 +517,30 @@ def compare_responses(reference: dict[int, dict], other: dict[int, dict]) -> dic
         actual = other.get(index)
         if actual is None:
             entry["missing"] += 1
-            continue
-        if actual["kind"] != expected["kind"]:
+        elif actual["kind"] != expected["kind"]:
             entry["kind_mismatch"] += 1
         elif actual["digest"] != expected["digest"]:
             entry["content_mismatch"] += 1
         else:
             entry["matched"] += 1
             continue
+        if len(entry["divergent_records"]) < MAX_DIVERGENT_REPORTED:
+            entry["divergent_records"].append(index)
+    # A record the reference run never answered but this run did is just as divergent.
+    for index, actual in other.items():
+        if index in reference:
+            continue
+        entry = per_method.setdefault(
+            actual["method"],
+            {
+                "matched": 0,
+                "content_mismatch": 0,
+                "kind_mismatch": 0,
+                "missing": 0,
+                "divergent_records": [],
+            },
+        )
+        entry["missing"] += 1
         if len(entry["divergent_records"]) < MAX_DIVERGENT_REPORTED:
             entry["divergent_records"].append(index)
     return per_method
@@ -545,7 +570,8 @@ def parity_totals(per_method: dict) -> dict:
     for counts in per_method.values():
         for key in totals:
             totals[key] += counts[key]
-    totals["mismatched"] = totals["content_mismatch"] + totals["kind_mismatch"]
+    # A record answered in only one of the two runs counts as a divergence.
+    totals["mismatched"] = totals["content_mismatch"] + totals["kind_mismatch"] + totals["missing"]
     return totals
 
 
@@ -601,7 +627,7 @@ def parity_line(
     nondeterministic: int,
     feature_parity: dict,
 ) -> str:
-    checked = feature_totals["matched"] + feature_totals["mismatched"] + feature_totals["missing"]
+    checked = feature_totals["matched"] + feature_totals["mismatched"]
     if status == "matched":
         return (
             f"✅ matched {feature_totals['matched']}/{checked} responses "
@@ -610,16 +636,17 @@ def parity_line(
 
     details = []
     for method, counts in sorted(feature_parity.items()):
-        mismatched = counts["content_mismatch"] + counts["kind_mismatch"]
+        mismatched = counts["content_mismatch"] + counts["kind_mismatch"] + counts["missing"]
         if not mismatched:
             continue
         indexes = ", ".join(str(index) for index in counts["divergent_records"])
         details.append(f"`{method}`: {mismatched} (records {indexes})")
 
     if status == "mismatch":
-        return "❌ {} content, {} kind mismatches — {}".format(
+        return "❌ {} content, {} kind mismatches, {} answered in one arm only — {}".format(
             feature_totals["content_mismatch"],
             feature_totals["kind_mismatch"],
+            feature_totals["missing"],
             "; ".join(details) if details else "no per-method detail",
         )
 

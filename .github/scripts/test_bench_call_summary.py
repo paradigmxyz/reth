@@ -258,6 +258,53 @@ class CallSummaryTest(unittest.TestCase):
             self.run_summary()
         self.assertIn("different chain tips", str(ctx.exception))
 
+    def test_nested_call_report_schema_is_read(self):
+        self.write_arms(["eth_call"] * 4)
+        for run in ("baseline-1", "baseline-2", "feature-1", "feature-2"):
+            report_path = self.work / run / "report.json"
+            flat = json.loads(report_path.read_text())
+            nested = {
+                "metadata": {"scenario": "call-replay"},
+                "call": {
+                    "identity": {"chain_id": 1, "head": 25_490_000, "head_hash": flat["head_hash"]},
+                    "closed_loop_rps": flat["closed_loop_rps"],
+                    "dropped": 0,
+                    "nondeterministic": [],
+                    "nondeterministic_total": 0,
+                    "methods": {
+                        method: {"closed_loop": {"rps": entry["closed_loop_rps"]}, "dropped": 0}
+                        for method, entry in flat["methods"].items()
+                    },
+                },
+            }
+            report_path.write_text(json.dumps(nested))
+        summary, _ = self.run_summary()
+
+        self.assertIn("closed_loop_rps", summary["baseline"]["stats"])
+        self.assertIn("closed_loop_rps", summary["feature"]["stats"])
+        self.assertEqual(summary["parity"]["status"], "matched")
+
+        nested_feature = json.loads((self.work / "feature-1" / "report.json").read_text())
+        nested_feature["call"]["identity"]["head_hash"] = "0x" + "cd" * 32
+        (self.work / "feature-1" / "report.json").write_text(json.dumps(nested_feature))
+        with self.assertRaises(SystemExit):
+            self.run_summary()
+
+    def test_record_answered_in_one_arm_only_is_a_divergence(self):
+        self.write_arms(["eth_call"] * 4)
+        for run in ("feature-1", "feature-2"):
+            path = self.work / run / "responses.ndjson"
+            kept = [line for line in path.read_text().splitlines() if json.loads(line)["record_index"] != 2]
+            path.write_text("\n".join(kept) + "\n")
+        summary, comment = self.run_summary()
+
+        self.assertEqual(summary["parity"]["status"], "mismatch")
+        totals = summary["parity"]["feature"]["totals"]
+        self.assertEqual(totals["missing"], 2)
+        self.assertEqual(totals["mismatched"], 2)
+        self.assertIn(2, summary["parity"]["feature"]["methods"]["eth_call"]["divergent_records"])
+        self.assertIn("answered in one arm only", comment)
+
     def test_corpus_metadata_is_included(self):
         self.write_arms(["eth_call"] * 8)
         meta_path = self.work / "corpus.meta.json"
