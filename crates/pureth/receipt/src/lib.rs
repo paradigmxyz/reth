@@ -5,6 +5,8 @@ use alloy_primitives::{Address, Bytes, B256};
 use reth_ethereum_primitives::{Block, Receipt};
 use reth_primitives_traits::RecoveredBlock;
 
+pub const RECEIPT_SCHEMA_ID: &str = "pureth-receipt-v0";
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ReceiptsSsz(Vec<ReceiptSsz>);
 
@@ -134,12 +136,18 @@ pub fn convert_receipts(
     Ok(ReceiptsSsz(converted))
 }
 
+mod provider;
 mod snapshot;
 mod tree;
 
 #[cfg(test)]
 mod fixture_tests;
 
+pub use provider::{
+    CanonicalityStatus, DeterministicProvider, LookupError, ObjectKind, ProviderBuildError,
+    ProviderSnapshot, RootContext, DETERMINISTIC_PRODUCER_REVISION, MULTIPLE_LOGS_BLOCK_HASH,
+    PROGRESSIVE_RECEIPTS_BLOCK_HASH, SINGLETON_BLOCK_HASH,
+};
 pub use snapshot::ReceiptSnapshot;
 pub use tree::{RetainedNode, TreeConstructionError};
 
