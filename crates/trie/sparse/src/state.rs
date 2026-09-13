@@ -80,6 +80,11 @@ impl<A, S> SparseStateTrie<A, S> {
         self
     }
 
+    /// Returns whether branch node updates and deletions are retained.
+    pub const fn retains_updates(&self) -> bool {
+        self.retain_updates
+    }
+
     /// Set the accounts trie to the given `RevealableSparseTrie`.
     pub fn set_accounts_trie(&mut self, trie: RevealableSparseTrie<A>) {
         self.state = trie;
@@ -110,6 +115,14 @@ impl<A, S> SparseStateTrie<A, S> {
     /// calculating the state root.
     pub fn take_deferred_drops(&mut self) -> DeferredDrops {
         core::mem::take(&mut self.deferred_drops)
+    }
+
+    /// Queues a proof node buffer for deferred dropping.
+    ///
+    /// Callers that reveal proof nodes into a storage trie taken out of this state trie should
+    /// hand the buffer back here so it is dropped with the rest of them.
+    pub fn defer_drop_proof_nodes(&mut self, nodes: Vec<ProofTrieNodeV2>) {
+        self.deferred_drops.proof_nodes_bufs.push(nodes);
     }
 }
 
@@ -150,6 +163,12 @@ where
         };
 
         trie.find_leaf(&path, None).is_ok()
+    }
+
+    /// Returns whether the part of the accounts trie holding `account` is out with a job, which
+    /// makes its leaf value unreadable until the job returns.
+    pub fn is_account_subtrie_in_flight(&self, account: &B256) -> bool {
+        self.state.is_prefix_in_flight(account.0[0])
     }
 
     /// Returns reference to bytes representing leaf value for the target account.
@@ -319,6 +338,86 @@ where
         any_err
     }
 
+    /// Reveals account trie proof nodes on the calling thread.
+    ///
+    /// Unlike [`Self::reveal_decoded_multiproof_v2`] this touches only the account trie, so a
+    /// caller that owns some of the storage tries itself can reveal the two halves separately.
+    pub fn reveal_account_proof_nodes(
+        &mut self,
+        mut nodes: Vec<ProofTrieNodeV2>,
+    ) -> SparseStateTrieResult<()> {
+        if nodes.is_empty() {
+            return Ok(())
+        }
+
+        #[cfg(feature = "metrics")]
+        self.metrics.increment_total_account_nodes(nodes.len() as u64);
+
+        let result = self.state.reveal_v2_proof_nodes(&mut nodes, self.retain_updates);
+        self.deferred_drops.proof_nodes_bufs.push(nodes);
+
+        Ok(result?)
+    }
+
+    /// [`Self::reveal_account_proof_nodes`], checking subtries with enough nodes out into `jobs`
+    /// instead of revealing them on the calling thread.
+    pub fn reveal_account_proof_nodes_deferred(
+        &mut self,
+        mut nodes: Vec<ProofTrieNodeV2>,
+        report_touched: bool,
+        jobs: &mut Vec<A::SubtrieJob>,
+    ) -> SparseStateTrieResult<()> {
+        if nodes.is_empty() {
+            return Ok(())
+        }
+
+        #[cfg(feature = "metrics")]
+        self.metrics.increment_total_account_nodes(nodes.len() as u64);
+
+        let result = self.state.reveal_v2_proof_nodes_deferred(
+            &mut nodes,
+            self.retain_updates,
+            report_touched,
+            jobs,
+        );
+        self.deferred_drops.proof_nodes_bufs.push(nodes);
+
+        Ok(result?)
+    }
+
+    /// Reveals storage trie proof nodes for `address` on the calling thread, creating the trie if
+    /// it does not exist yet.
+    pub fn reveal_storage_proof_nodes(
+        &mut self,
+        address: B256,
+        mut nodes: Vec<ProofTrieNodeV2>,
+    ) -> SparseStateTrieResult<()> {
+        if nodes.is_empty() {
+            return Ok(())
+        }
+
+        #[cfg(feature = "metrics")]
+        self.metrics.increment_total_storage_nodes(nodes.len() as u64);
+
+        let retain_updates = self.retain_updates;
+        let result = self
+            .storage
+            .get_or_create_trie_mut(address)
+            .reveal_v2_proof_nodes(&mut nodes, retain_updates);
+        self.deferred_drops.proof_nodes_bufs.push(nodes);
+
+        Ok(result?)
+    }
+
+    /// Records storage trie nodes that were revealed into a trie taken out of this state trie, so
+    /// the reveal metrics stay complete.
+    pub const fn record_revealed_storage_nodes(&mut self, nodes: usize) {
+        #[cfg(feature = "metrics")]
+        self.metrics.increment_total_storage_nodes(nodes as u64);
+        #[cfg(not(feature = "metrics"))]
+        let _ = nodes;
+    }
+
     /// Calculates the hashes of subtries.
     ///
     /// If the trie has not been revealed, this function does nothing.
@@ -327,6 +426,12 @@ where
         if let RevealableSparseTrie::Revealed(trie) = &mut self.state {
             trie.update_subtrie_hashes(new_epoch);
         }
+    }
+
+    /// [`Self::calculate_subtries`], handing the subtries to `jobs` so the caller can hash them
+    /// off its own thread.
+    pub fn take_account_hashing_jobs(&mut self, jobs: &mut Vec<A::SubtrieJob>) {
+        self.state.take_hashing_jobs(jobs);
     }
 
     /// Returns storage sparse trie root if the trie has been revealed.

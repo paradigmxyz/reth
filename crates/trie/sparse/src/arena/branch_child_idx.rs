@@ -3,7 +3,7 @@ use core::{
     iter::Enumerate,
     ops::{Index, IndexMut},
 };
-use smallvec::SmallVec;
+use smallvec::{Array, SmallVec};
 
 /// A dense index into a branch node's children array.
 ///
@@ -49,15 +49,15 @@ impl BranchChildIdx {
     }
 }
 
-impl<T> Index<BranchChildIdx> for SmallVec<[T; 4]> {
-    type Output = T;
+impl<A: Array> Index<BranchChildIdx> for SmallVec<A> {
+    type Output = A::Item;
 
     fn index(&self, idx: BranchChildIdx) -> &Self::Output {
         &self.as_slice()[idx.get()]
     }
 }
 
-impl<T> IndexMut<BranchChildIdx> for SmallVec<[T; 4]> {
+impl<A: Array> IndexMut<BranchChildIdx> for SmallVec<A> {
     fn index_mut(&mut self, idx: BranchChildIdx) -> &mut Self::Output {
         &mut self.as_mut_slice()[idx.get()]
     }

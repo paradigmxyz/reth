@@ -2,6 +2,7 @@
 
 use core::fmt::Debug;
 
+use crate::BlockedLeafUpdates;
 use alloc::{borrow::Cow, vec::Vec};
 use alloy_primitives::{
     map::{B256Map, HashMap, HashSet},
@@ -63,11 +64,40 @@ impl LeafUpdate {
     }
 }
 
+/// An event reported by [`SparseTrie::update_leaves_with_events`] while applying a batch of leaf
+/// updates.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LeafUpdateEvent<'a> {
+    /// The update for `key` hit a blinded node and a proof below `parent` is required before it
+    /// can be applied.
+    ProofRequired {
+        /// The full 32-byte hashed key that requires a proof.
+        key: B256,
+        /// The revealed logical parent branch of the blinded node.
+        parent: ProofV2TargetParent,
+    },
+    /// A [`LeafUpdate::Touched`] entry was applied, reporting the leaf value the trie holds for
+    /// its key.
+    Touched {
+        /// The full 32-byte hashed key of the touched leaf.
+        key: B256,
+        /// The leaf value at `key`, or `None` when the revealed trie has no leaf there.
+        value: Option<&'a [u8]>,
+    },
+}
+
 /// Trait defining common operations for revealed sparse trie implementations.
 ///
 /// This trait provides a unified interface for the core trie operations needed by
 /// `RevealableSparseTrie`.
 pub trait SparseTrie: Sized + Debug + Send + Sync {
+    /// A part of this trie checked out for a pass that runs on another thread.
+    ///
+    /// While a job exists the trie buffers everything routed into the checked-out part, so the
+    /// job owns it exclusively until [`SparseTrie::restore_subtrie_job`] takes it back. The trie
+    /// cannot be hashed, pruned or preserved while any job is out.
+    type SubtrieJob: Debug + Send + 'static;
+
     /// Configures the trie to have the given root node revealed.
     ///
     /// # Arguments
@@ -223,12 +253,13 @@ pub trait SparseTrie: Sized + Debug + Send + Sync {
 
     /// Applies leaf updates to the sparse trie.
     ///
-    /// When a [`LeafUpdate::Changed`] is successfully applied, it is removed from the
-    /// given [`B256Map`]. If it could not be applied due to blinded nodes, it remains
-    /// in the map and the callback is invoked with the required proof target.
+    /// The given [`B256Map`] is drained: updates that could not be applied because they hit a
+    /// blinded node are moved into [`SparseTrie::blocked_updates`] and the callback is invoked
+    /// with the required proof target. An update for a key that is already blocked replaces the
+    /// blocked one.
     ///
-    /// Once that proof is calculated and revealed via [`SparseTrie::reveal_nodes`], the same
-    /// `updates` map can be reused to retry the update.
+    /// Once the proof is revealed via [`SparseTrie::reveal_nodes`], the affected blocked updates
+    /// are applied by the next call to this method, even when `updates` is empty.
     ///
     /// The callback receives `(key, parent)` where `key` is the full 32-byte hashed key
     /// (right-padded with zeros from the blinded path) and `parent` identifies the revealed logical
@@ -242,8 +273,83 @@ pub trait SparseTrie: Sized + Debug + Send + Sync {
     fn update_leaves(
         &mut self,
         updates: &mut B256Map<LeafUpdate>,
-        proof_required_fn: impl FnMut(B256, ProofV2TargetParent),
+        mut proof_required_fn: impl FnMut(B256, ProofV2TargetParent),
+    ) -> SparseTrieResult<()> {
+        self.update_leaves_with_events(updates, false, |event| {
+            if let LeafUpdateEvent::ProofRequired { key, parent } = event {
+                proof_required_fn(key, parent)
+            }
+        })
+    }
+
+    /// [`SparseTrie::update_leaves`], reporting every applied [`LeafUpdate::Touched`] entry with
+    /// the leaf value found at its key when `report_touched` is set.
+    ///
+    /// Collecting those values costs an extra lookup per touched entry, so callers that only need
+    /// proof targets should use [`SparseTrie::update_leaves`].
+    fn update_leaves_with_events(
+        &mut self,
+        updates: &mut B256Map<LeafUpdate>,
+        report_touched: bool,
+        event_fn: impl FnMut(LeafUpdateEvent<'_>),
     ) -> SparseTrieResult<()>;
+
+    /// Returns the leaf updates that could not be applied yet because they hit a blinded node.
+    fn blocked_updates(&self) -> &BlockedLeafUpdates;
+
+    /// [`Self::update_leaves_with_events`], checking the parts of the trie whose batch is worth a
+    /// separate thread out into `jobs` instead of applying them on this thread.
+    ///
+    /// Updates routed into a part that is already checked out are held by the trie and applied
+    /// after [`Self::restore_subtrie_job`] takes that part back.
+    fn update_leaves_deferred(
+        &mut self,
+        updates: &mut B256Map<LeafUpdate>,
+        report_touched: bool,
+        event_fn: impl FnMut(LeafUpdateEvent<'_>),
+        jobs: &mut Vec<Self::SubtrieJob>,
+    ) -> SparseTrieResult<()>;
+
+    /// [`Self::reveal_nodes`], checking the parts of the trie with enough nodes out into `jobs`
+    /// instead of revealing them on this thread.
+    ///
+    /// A checked-out part also takes the blocked updates the reveal makes applicable again, so
+    /// revealing and applying them costs one handoff instead of two.
+    fn reveal_nodes_deferred(
+        &mut self,
+        nodes: &mut [ProofTrieNodeV2],
+        report_touched: bool,
+        jobs: &mut Vec<Self::SubtrieJob>,
+    ) -> SparseTrieResult<()>;
+
+    /// Checks every part of the trie whose hash is out of date and that owes no updates out into
+    /// `jobs`.
+    ///
+    /// This is the deferred form of [`Self::update_subtrie_hashes`].
+    fn take_hashing_jobs(&mut self, jobs: &mut Vec<Self::SubtrieJob>);
+
+    /// Runs a checked-out job's pass. Called off this trie's own thread.
+    fn run_subtrie_job(
+        job: &mut Self::SubtrieJob,
+        new_epoch: TrieNodeEpoch,
+    ) -> SparseTrieResult<()>;
+
+    /// Puts a finished job's part back, reporting what its pass produced.
+    ///
+    /// Returns a follow-up job when work arrived for that part while it was gone and has to run
+    /// before anything else touches it.
+    fn restore_subtrie_job(
+        &mut self,
+        job: Self::SubtrieJob,
+        event_fn: impl FnMut(LeafUpdateEvent<'_>),
+    ) -> Option<Self::SubtrieJob>;
+
+    /// Returns the number of parts currently checked out by a job.
+    fn subtries_in_flight(&self) -> usize;
+
+    /// Returns whether the part holding the keys that start with `prefix` is out with a job,
+    /// which makes everything below it unreadable until it is back.
+    fn is_prefix_in_flight(&self, prefix: u8) -> bool;
 }
 
 /// Tracks modifications to the sparse trie structure.
