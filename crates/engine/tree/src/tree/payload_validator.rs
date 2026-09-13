@@ -1096,6 +1096,9 @@ where
 
         let built_bal = if has_bal { db.take_built_alloy_bal() } else { None };
         let output = BlockExecutionOutput { result, state: db.take_bundle() };
+        // The cache still holds every account, slot and bytecode the block touched. Free it off
+        // this thread so the deallocation does not delay the state root handoff.
+        self.runtime.spawn_drop(core::mem::take(&mut db.cache));
 
         let execution_duration = execution_start.elapsed();
         self.metrics.record_block_execution(&output, execution_duration);
