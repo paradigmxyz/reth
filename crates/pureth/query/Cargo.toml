@@ -8,16 +8,18 @@ homepage.workspace = true
 repository.workspace = true
 
 [dependencies]
-alloy-primitives.workspace = true
+alloy-primitives = { workspace = true, features = ["serde"] }
+jsonrpsee = { workspace = true, features = ["server", "macros"] }
 reth-pureth-receipt.workspace = true
+serde = { workspace = true, features = ["derive"] }
 sha2.workspace = true
 
 [dev-dependencies]
 alloy-consensus.workspace = true
 reth-ethereum-primitives.workspace = true
 reth-primitives-traits.workspace = true
-serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true
+tokio = { workspace = true, features = ["macros", "rt"] }
 
 [lints]
 workspace = true

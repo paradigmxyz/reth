@@ -145,6 +145,7 @@ members = [
     "examples/node-custom-rpc/",
     "examples/node-event-hooks/",
     "examples/polygon-p2p/",
+    "examples/pureth-query/",
     "examples/rpc-db/",
     "examples/txpool-tracing/",
     "examples/custom-beacon-withdrawals",
