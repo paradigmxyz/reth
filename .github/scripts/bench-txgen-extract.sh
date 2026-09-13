@@ -191,12 +191,16 @@ if [ "$EXECUTION_MODE" = "call" ] && [ "$CORPUS_SOURCE" = "static" ]; then
   esac
 fi
 
-# Stop the throwaway node and recover snapshot before extraction.
-sudo systemctl stop "$RETH_SCOPE" 2>/dev/null || true
-sudo systemctl reset-failed "$RETH_SCOPE" 2>/dev/null || true
-kill "${TAIL_PID:-}" 2>/dev/null || true
-TAIL_PID=
-sudo schelk recover -y --kill || true
+# Stop the throwaway node and recover the snapshot before extraction. Call mode
+# keeps it up: the trace classes read their blocks from it, and the exit trap
+# stops it once the corpus is staged.
+if [ "$EXECUTION_MODE" != "call" ]; then
+  sudo systemctl stop "$RETH_SCOPE" 2>/dev/null || true
+  sudo systemctl reset-failed "$RETH_SCOPE" 2>/dev/null || true
+  kill "${TAIL_PID:-}" 2>/dev/null || true
+  TAIL_PID=
+  sudo schelk recover -y --kill || true
+fi
 
 # --- Stage the call corpus ---
 
@@ -220,15 +224,20 @@ if [ "$EXECUTION_MODE" = "call" ]; then
     case "$CALL_CLASS" in
       call|tracecall)
         # Transactions of the blocks after the tip are exactly the calls a
-        # client would have served against the tip state.
+        # client would have served against the tip state; only the archive
+        # node has those blocks.
         CORPUS_FROM=$(( HEAD_DEC + 1 ))
         CORPUS_TO=$(( HEAD_DEC + CALL_BLOCKS ))
         CORPUS_FORMAT=calls
+        CORPUS_RPC="$BENCH_RPC_URL"
         ;;
       tracetx|traceblock)
+        # These blocks are on the snapshot, so the throwaway node serves them
+        # and the archive node is not needed.
         CORPUS_FROM=$(( HEAD_DEC - CALL_BLOCKS + 1 ))
         CORPUS_TO="$HEAD_DEC"
         CORPUS_FORMAT=traces
+        CORPUS_RPC="http://127.0.0.1:8545"
         ;;
       *)
         echo "::error::Unknown call class: ${CALL_CLASS}"
@@ -277,7 +286,7 @@ if [ "$EXECUTION_MODE" = "call" ]; then
     fi
     echo "Generating ${CALL_CLASS} corpus from blocks ${CORPUS_FROM}..${CORPUS_TO} (methods: ${CALL_METHODS:-default})"
     "$TXGEN_ETHEREUM" extract \
-      --rpc "$BENCH_RPC_URL" \
+      --rpc "$CORPUS_RPC" \
       --from "$CORPUS_FROM" \
       --to "$CORPUS_TO" \
       --format "$CORPUS_FORMAT" \
