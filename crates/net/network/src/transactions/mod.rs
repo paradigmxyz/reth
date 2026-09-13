@@ -1,7 +1,7 @@
 //! Transactions management for the p2p network.
 
 use alloy_consensus::{constants::EIP4844_TX_TYPE_ID, transaction::TxHashRef};
-use rayon::iter::{IntoParallelIterator, ParallelIterator};
+use rayon::iter::{IndexedParallelIterator, IntoParallelIterator, ParallelIterator};
 use smallvec::SmallVec;
 
 /// Aggregation on configurable parameters for [`TransactionsManager`].
@@ -1532,7 +1532,13 @@ where
             }
         };
 
-        let new_txs = transactions.into_par_iter().filter_map(recover).collect::<Vec<_>>();
+        // Avoid waking the global pool for small gossip batches and amortize work stealing
+        // over multiple recoveries for larger batches.
+        let new_txs = if txs_len < 16 {
+            transactions.into_iter().filter_map(recover).collect::<Vec<_>>()
+        } else {
+            transactions.into_par_iter().with_min_len(16).filter_map(recover).collect::<Vec<_>>()
+        };
 
         has_bad_transactions |= new_txs.len() != txs_len;
 
