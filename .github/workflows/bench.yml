@@ -325,14 +325,14 @@ jobs:
               'eth_call', 'eth_estimateGas', 'eth_createAccessList',
               'debug_traceCall', 'trace_call',
               'debug_traceTransaction', 'trace_transaction', 'trace_replayTransaction',
-              'debug_traceBlockByNumber', 'trace_block',
+              'debug_traceBlockByNumber', 'trace_block', 'trace_replayBlockTransactions',
             ]);
             // Per class request shape defaults: method set, open-loop rate and closed-loop workers.
             const callClassDefaults = {
               call: { methods: 'eth_call', rps: '100', concurrency: '16' },
               tracecall: { methods: 'debug_traceCall,trace_call', rps: '20', concurrency: '8' },
               tracetx: { methods: 'debug_traceTransaction,trace_transaction', rps: '20', concurrency: '8' },
-              traceblock: { methods: 'debug_traceBlockByNumber,trace_block', rps: '2', concurrency: '2' },
+              traceblock: { methods: 'debug_traceBlockByNumber,trace_block,trace_replayBlockTransactions', rps: '2', concurrency: '2' },
             };
             // A tracer spec is a tracer name, `structlog`, or `js:NAME` for a script staged on the runner.
             const tracerSpecValid = (value) => {
