@@ -272,6 +272,7 @@ sparse_trie_tests! {
     test_take_updates_contains_updated_and_removed_nodes,
     test_take_updates_no_duplicate_updated_and_removed_nodes,
     test_take_updates_cross_cancellation_across_root_calls,
+    test_has_updates_reports_pending_updates,
 
 
     // prune

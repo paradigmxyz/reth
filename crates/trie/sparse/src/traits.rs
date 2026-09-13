@@ -193,6 +193,12 @@ pub trait SparseTrie: Sized + Debug + Send + Sync {
     /// If no updates have been made/recorded, returns an empty update set.
     fn updates_ref(&self) -> Cow<'_, SparseTrieUpdates>;
 
+    /// Returns whether [`Self::take_updates`] may return a non-empty update set.
+    ///
+    /// Implementations may over-report, but must never report `false` while updates are
+    /// pending. Callers holding many tries use this to skip untouched ones.
+    fn has_updates(&self) -> bool;
+
     /// Consumes and returns the currently accumulated trie updates.
     ///
     /// This is useful when you want to apply the updates to an external database
