@@ -191,12 +191,15 @@ where
     Provider: BlockReaderIdExt
         + ChangeSetReader
         + StateProviderFactory
-        + BlockReader<Block = <Provider::Primitives as NodePrimitives>::Block>
-        + CanonStateSubscriptions
-        + ForkChoiceSubscriptions<Header = <Provider::Primitives as NodePrimitives>::BlockHeader>
+        + BlockReader<
+            Block = <<Provider as CanonStateSubscriptions>::Primitives as NodePrimitives>::Block,
+        > + CanonStateSubscriptions
+        + ForkChoiceSubscriptions<
+            Header = <<Provider as CanonStateSubscriptions>::Primitives as NodePrimitives>::BlockHeader,
+        >
         + PersistedBlockSubscriptions
         + 'static,
-    EvmConfig: ConfigureEvm<Primitives = Provider::Primitives> + 'static,
+    EvmConfig: ConfigureEvm<Primitives = <Provider as CanonStateSubscriptions>::Primitives> + 'static,
 {
     /// Handler for `reth_getBalanceChangesInBlock`
     async fn reth_get_balance_changes_in_block(

@@ -1271,6 +1271,32 @@ mod tests {
     }
 
     #[test]
+    fn builder_appends_block_to_parent_state() {
+        let manager = OverlayManager::default();
+        let blocks = test_blocks();
+        for block in &blocks[2..=4] {
+            manager.insert_block(block.clone());
+        }
+
+        let block = TestBlockBuilder::eth().get_executed_block_with_number(
+            blocks[4].recovered_block().number() + 1,
+            blocks[4].recovered_block().hash(),
+        );
+        let builder = manager
+            .overlay_builder(block.recovered_block().parent_hash())
+            .with_appended_block(block.clone());
+
+        assert_eq!(builder.parent_hash, block.recovered_block().hash());
+        assert_eq!(
+            builder.parent_state.unwrap().chain().map(BlockState::hash).collect::<Vec<_>>(),
+            std::iter::once(&block)
+                .chain(blocks[2..=4].iter().rev())
+                .map(|block| block.recovered_block().hash())
+                .collect::<Vec<_>>(),
+        );
+    }
+
+    #[test]
     fn overlay_after_state_trie_frontier_requires_managed_coverage() {
         let (factory, blocks) = setup_frontiers(1, 3);
         let provider = factory.provider().unwrap();
