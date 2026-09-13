@@ -1,3 +1,6 @@
+// Accounts are only Copy when account-ext is disabled.
+#![cfg_attr(not(feature = "account-ext"), allow(clippy::clone_on_copy))]
+
 use alloc::vec::Vec;
 use alloy_primitives::{
     keccak256,
@@ -48,7 +51,7 @@ impl StateProviderTest {
 
 impl AccountReader for StateProviderTest {
     fn basic_account(&self, address: &Address) -> ProviderResult<Option<Account>> {
-        Ok(self.accounts.get(address).map(|(_, acc)| *acc))
+        Ok(self.accounts.get(address).map(|(_, acc)| acc.clone()))
     }
 }
 

@@ -1,3 +1,6 @@
+// Accounts are only Copy when account-ext is disabled.
+#![cfg_attr(not(feature = "account-ext"), allow(clippy::clone_on_copy))]
+
 //! Sparse Trie task related functionality.
 
 use std::sync::Arc;
@@ -540,7 +543,7 @@ where
             self.pending_account_updates.entry(address).or_insert(None);
         }
 
-        for (&address, &account) in &hashed_state_update.accounts {
+        for (&address, account) in &hashed_state_update.accounts {
             // Track account as touched.
             //
             // This might overwrite an existing update, which is fine, because storage root from it
@@ -549,7 +552,7 @@ where
 
             // Track account in `pending_account_updates` so that once storage root is computed,
             // it will be updated in the accounts trie.
-            self.pending_account_updates.insert(address, Some(account));
+            self.pending_account_updates.insert(address, Some(account.clone()));
         }
 
         self.final_hashed_state.extend(hashed_state_update);
@@ -1063,7 +1066,8 @@ fn encode_account_leaf_value(
     storage_root: B256,
     account_rlp_buf: &mut Vec<u8>,
 ) -> Vec<u8> {
-    if account.is_none_or(|account| account.is_empty()) && storage_root == EMPTY_ROOT_HASH {
+    if account.as_ref().is_none_or(|account| account.is_empty()) && storage_root == EMPTY_ROOT_HASH
+    {
         return Vec::new();
     }
 
@@ -1148,7 +1152,13 @@ mod tests {
         let mut hashed_state = HashedPostState::default();
         hashed_state.accounts.insert(
             address,
-            Some(Account { balance: U256::from(100), nonce: 1, bytecode_hash: None }),
+            Some(Account {
+                balance: U256::from(100),
+                nonce: 1,
+                bytecode_hash: None,
+                #[cfg(feature = "account-ext")]
+                extension: Default::default(),
+            }),
         );
         let mut storage = reth_trie::HashedStorage::default();
         storage.storage.insert(slot, value);
@@ -1172,9 +1182,9 @@ mod tests {
             panic!("expected HashedState message");
         };
 
-        let account = received.accounts.get(&address).unwrap().unwrap();
-        assert_eq!(account.balance, expected_state.accounts[&address].unwrap().balance);
-        assert_eq!(account.nonce, expected_state.accounts[&address].unwrap().nonce);
+        let account = received.accounts.get(&address).unwrap().as_ref().unwrap();
+        assert_eq!(account.balance, expected_state.accounts[&address].as_ref().unwrap().balance);
+        assert_eq!(account.nonce, expected_state.accounts[&address].as_ref().unwrap().nonce);
 
         let storage = received.storages.get(&address).unwrap();
         assert_eq!(*storage.storage.get(&slot).unwrap(), value);
@@ -1217,6 +1227,8 @@ mod tests {
             nonce: 7,
             balance: U256::from(42),
             bytecode_hash: Some(B256::from([0xAA; 32])),
+            #[cfg(feature = "account-ext")]
+            extension: Default::default(),
         });
         let mut account_rlp_buf = vec![0x00, 0x01];
 

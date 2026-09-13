@@ -453,6 +453,8 @@ mod tests {
                     code_hash: account.bytecode_hash.unwrap_or_default(),
                     code: None,
                     account_id: None,
+                    #[cfg(feature = "account-ext")]
+                    extension: Default::default(),
                 }),
                 original_info: (i == 0).then(|| AccountInfo {
                     balance: account.balance.checked_div(U256::from(2)).unwrap_or(U256::ZERO),
@@ -460,6 +462,8 @@ mod tests {
                     code_hash: account.bytecode_hash.unwrap_or_default(),
                     code: None,
                     account_id: None,
+                    #[cfg(feature = "account-ext")]
+                    extension: Default::default(),
                 }),
                 storage,
                 status: AccountStatus::default(),

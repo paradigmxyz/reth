@@ -17,3 +17,6 @@ reth-storage-errors.workspace = true
 
 # misc
 thiserror.workspace = true
+
+[features]
+account-ext = ["reth-consensus/account-ext", "reth-execution-errors/account-ext"]

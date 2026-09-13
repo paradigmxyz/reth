@@ -20,6 +20,7 @@ use reth_eth_wire_types::message::MAX_MESSAGE_SIZE;
 use reth_ethereum_forks::{ForkFilter, Head};
 use reth_network_peers::{mainnet_nodes, pk2id, sepolia_nodes, PeerId, TrustedPeer};
 use reth_network_types::{PeersConfig, SessionsConfig};
+use reth_primitives_traits::ensure_no_account_extensions;
 use reth_storage_api::{
     noop::NoopProvider, BalProvider, BlockNumReader, BlockReader, HeaderProvider,
     StateProviderFactory, StateRangeProviderFactory,
@@ -563,6 +564,10 @@ impl<N: NetworkPrimitives> NetworkConfigBuilder<N> {
     ///
     /// Default off: snap/2 is only negotiated with peers when explicitly enabled.
     pub const fn with_snap(mut self, snap_enabled: bool) -> Self {
+        assert!(
+            !snap_enabled || matches!(ensure_no_account_extensions(), Ok(())),
+            "snap does not support account extensions"
+        );
         self.snap_enabled = snap_enabled;
         self
     }
@@ -704,6 +709,10 @@ impl<N: NetworkPrimitives> NetworkConfigBuilder<N> {
         let mut hello_message =
             hello_message.unwrap_or_else(|| HelloMessage::builder(peer_id).build());
         hello_message.port = listener_addr.port();
+        assert!(
+            !snap_enabled || matches!(ensure_no_account_extensions(), Ok(())),
+            "snap does not support account extensions"
+        );
         hello_message = hello_message.with_snap(snap_enabled);
 
         // set the status
@@ -808,6 +817,10 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(
+        feature = "account-ext",
+        should_panic(expected = "snap does not support account extensions")
+    )]
     fn test_snap_advertisement_when_enabled() {
         let config = builder().with_snap(true).build(NoopProvider::default());
         let snap_caps =

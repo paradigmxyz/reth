@@ -46,6 +46,69 @@ fn convert_to_proof<'a>(path: impl IntoIterator<Item = &'a str>) -> Vec<Bytes> {
 }
 
 #[test]
+#[cfg(feature = "account-ext")]
+fn extension_only_genesis_account_proof() {
+    let target = Address::with_last_byte(1);
+    let extension = reth_primitives_traits::AccountExtension::copy_from_slice(&[0x82, 0xaa]);
+    let mut spec = ChainSpec::default();
+    spec.genesis.alloc.entry(target).or_default().extension = extension.clone();
+    spec.genesis.alloc.entry(Address::with_last_byte(3)).or_default().balance = U256::from(1);
+    let expected_root =
+        reth_chainspec::make_genesis_header(&spec.genesis, &spec.hardforks).state_root;
+    let factory = create_test_provider_factory();
+    let root = insert_genesis(&factory, Arc::new(spec)).unwrap();
+    assert_eq!(root, expected_root);
+
+    let provider = factory.provider().unwrap();
+    reth_trie_db::with_adapter!(provider, |A| {
+        let proof = <DbProof<'_, _, A> as DatabaseProof>::from_tx(provider.tx_ref())
+            .account_proof(target, &[])
+            .unwrap();
+        let account = proof.info.as_ref().unwrap();
+        assert_eq!(account.extension, extension);
+        assert!(!account.is_empty());
+        assert_eq!(proof.verify(root), Ok(()));
+
+        let witness = proof.proof.iter().map(|node| (keccak256(node), node.clone())).collect();
+        let decoded = reth_trie::DecodedMultiProofV2::from_witness(root, &witness).unwrap();
+        let witness_proof = decoded.account_proof(target, &[]).unwrap();
+        assert_eq!(witness_proof.info, proof.info);
+        assert_eq!(witness_proof.verify(root), Ok(()));
+
+        let multiproof = <DbProof<'_, _, A> as DatabaseProof>::from_tx(provider.tx_ref())
+            .overlay_multiproof_v2(
+                TrieInput::default(),
+                MultiProofTargetsV2 {
+                    account_targets: vec![ProofV2Target::new(keccak256(target))],
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        let multiproof = multiproof.account_proof(target, &[]).unwrap();
+        assert_eq!(multiproof.info, proof.info);
+        assert_eq!(multiproof.verify(root), Ok(()));
+        for proof in [proof, multiproof] {
+            let response = proof.clone().into_eip1186_response(Vec::new());
+            assert_eq!(response.account_proof, proof.proof);
+            let restored = AccountProof::from_eip1186_proof(response);
+            assert_eq!(restored.info.as_ref().unwrap().extension, extension);
+            assert_eq!(restored.verify(root), Ok(()));
+
+            let mut tampered = proof.into_eip1186_response(Vec::new());
+            tampered.balance = U256::from(1);
+            assert!(AccountProof::from_eip1186_proof(tampered).verify(root).is_err());
+        }
+        let absent = Address::with_last_byte(2);
+        let proof = <DbProof<'_, _, A> as DatabaseProof>::from_tx(provider.tx_ref())
+            .account_proof(absent, &[])
+            .unwrap();
+        let restored = AccountProof::from_eip1186_proof(proof.into_eip1186_response(Vec::new()));
+        assert!(restored.info.is_none());
+        assert_eq!(restored.verify(root), Ok(()));
+    });
+}
+
+#[test]
 fn testspec_proofs() {
     // Create test database and insert genesis accounts.
     let factory = create_test_provider_factory();
@@ -286,9 +349,12 @@ fn holesky_deposit_contract_proof() {
     let expected = AccountProof {
         address: target,
         info: Some(Account {
+
             balance: U256::ZERO,
             nonce: 0,
-            bytecode_hash: Some(b256!("0x2034f79e0e33b0ae6bef948532021baceb116adf2616478703bec6b17329f1cc"))
+            bytecode_hash: Some(b256!("0x2034f79e0e33b0ae6bef948532021baceb116adf2616478703bec6b17329f1cc")),
+#[cfg(feature = "account-ext")]
+extension: Default::default(),
         }),
         storage_root: b256!("0x556a482068355939c95a3412bdb21213a301483edb1b64402fb66ac9f3583599"),
         proof: convert_to_proof([

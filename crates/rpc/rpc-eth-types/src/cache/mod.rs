@@ -253,9 +253,11 @@ impl<N: NodePrimitives> EthStateCache<N> {
     ) -> ProviderResult<Option<Arc<DecodedBal<Arc<RevmBal>>>>> {
         let (response_tx, rx) = oneshot::channel();
         let _ = self.to_service.send(CacheAction::GetBal { block_hash, response_tx });
-        rx.await
-            .map_err(|_| CacheServiceUnavailable)?
-            .map(|maybe_bal| maybe_bal.map(|cached| cached.0))
+        let maybe_bal = rx.await.map_err(|_| CacheServiceUnavailable)??;
+        if maybe_bal.is_some() {
+            reth_storage_api::ensure_no_account_extensions("BAL")?;
+        }
+        Ok(maybe_bal.map(|cached| cached.0))
     }
 }
 /// Thrown when the cache service task dropped.
@@ -1004,6 +1006,15 @@ mod tests {
         );
         let block_hash = B256::repeat_byte(0x66);
 
+        if cfg!(feature = "account-ext") {
+            assert!(matches!(
+                cache.get_bal(block_hash).await,
+                Err(ProviderError::AccountExtensionsUnsupported("BAL"))
+            ));
+            assert_eq!(fetches.load(Ordering::SeqCst), 1);
+            return;
+        }
+
         assert!(cache.get_bal(block_hash).await.unwrap().is_some());
         assert!(cache.get_bal(block_hash).await.unwrap().is_some());
 
@@ -1037,6 +1048,15 @@ mod tests {
         assert!(bal.is_none());
         assert_eq!(bal_fetches.load(Ordering::SeqCst), 0);
 
+        if cfg!(feature = "account-ext") {
+            assert!(matches!(
+                cache.get_bal(block_hash).await,
+                Err(ProviderError::AccountExtensionsUnsupported("BAL"))
+            ));
+            assert_eq!(bal_fetches.load(Ordering::SeqCst), 1);
+            return;
+        }
+
         assert!(cache.get_bal(block_hash).await.unwrap().is_some());
 
         let (_, bal) = cache
@@ -1066,6 +1086,13 @@ mod tests {
         let block_hash = B256::repeat_byte(0x77);
 
         let (first, second) = tokio::join!(cache.get_bal(block_hash), cache.get_bal(block_hash));
+
+        if cfg!(feature = "account-ext") {
+            assert!(matches!(first, Err(ProviderError::AccountExtensionsUnsupported("BAL"))));
+            assert!(matches!(second, Err(ProviderError::AccountExtensionsUnsupported("BAL"))));
+            assert_eq!(fetches.load(Ordering::SeqCst), 1);
+            return;
+        }
 
         assert!(first.unwrap().is_some());
         assert!(second.unwrap().is_some());

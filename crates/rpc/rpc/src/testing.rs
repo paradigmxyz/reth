@@ -138,6 +138,9 @@ where
                     .is_amsterdam_active_at_timestamp(request.payload_attributes.timestamp);
                 let is_osaka =
                     chain_spec.is_osaka_active_at_timestamp(request.payload_attributes.timestamp);
+                if is_amsterdam {
+                    reth_storage_api::ensure_no_account_extensions("BAL")?;
+                }
                 let mut db = State::builder()
                     .with_bundle_update()
                     .with_database(StateProviderDatabase::new(&state))

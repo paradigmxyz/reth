@@ -1,3 +1,6 @@
+// Accounts are only Copy when account-ext is disabled.
+#![cfg_attr(not(feature = "account-ext"), allow(clippy::clone_on_copy))]
+
 //! Reth genesis initialization utility functions.
 
 use alloy_consensus::BlockHeader;
@@ -412,6 +415,8 @@ where
                     nonce: account.nonce.unwrap_or_default(),
                     balance: account.balance,
                     bytecode_hash,
+                    #[cfg(feature = "account-ext")]
+                    extension: account.extension.clone(),
                 }),
                 storage,
             ),
@@ -997,12 +1002,14 @@ fn write_account_to_db<TX: DbTxMut>(
         nonce: genesis_account.nonce.unwrap_or_default(),
         balance: genesis_account.balance,
         bytecode_hash,
+        #[cfg(feature = "account-ext")]
+        extension: genesis_account.extension.clone(),
     };
 
     let hashed_address = keccak256(address);
 
     // plain state — sorted by address (ETL order), use append
-    tx.put::<tables::PlainAccountState>(*address, account)?;
+    tx.put::<tables::PlainAccountState>(*address, account.clone())?;
 
     // hashed state — unsorted (keccak scrambles order), must use put
     tx.put::<tables::HashedAccounts>(hashed_address, account)?;
@@ -1085,6 +1092,8 @@ where
         nonce: genesis_account.nonce.unwrap_or_default(),
         balance: genesis_account.balance,
         bytecode_hash,
+        #[cfg(feature = "account-ext")]
+        extension: genesis_account.extension.clone(),
     };
 
     let hashed_address = keccak256(address);

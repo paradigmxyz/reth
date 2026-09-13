@@ -264,17 +264,13 @@ pub trait EthState: LoadState + SpawnBlocking {
                 let account = state.basic_account(&address).map_err(Self::Error::from_eth_err)?;
                 let Some(account) = account else { return Ok(None) };
 
-                let balance = account.balance;
-                let nonce = account.nonce;
-                let code_hash = account.bytecode_hash.unwrap_or(KECCAK_EMPTY);
-
                 // Provide a default `HashedStorage` value in order to
                 // get the storage root hash of the current state.
                 let storage_root = state
                     .storage_root(address, Default::default())
                     .map_err(Self::Error::from_eth_err)?;
 
-                Ok(Some(Account { balance, nonce, code_hash, storage_root }))
+                Ok(Some(account.into_trie_account(storage_root)))
             })
             .await
         }
@@ -305,7 +301,13 @@ pub trait EthState: LoadState + SpawnBlocking {
                     .original_bytes()
             };
 
-            Ok(AccountInfo { balance, nonce, code })
+            Ok(AccountInfo {
+                balance,
+                nonce,
+                code,
+                #[cfg(feature = "account-ext")]
+                extension: account.extension,
+            })
         })
     }
 }

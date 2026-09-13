@@ -1,9 +1,13 @@
+// Accounts are only Copy when account-ext is disabled.
+#![cfg_attr(not(feature = "account-ext"), allow(clippy::clone_on_copy))]
+
 //! Merkle trie proofs.
 
 use crate::{
     BranchNodeMasks, BranchNodeMasksMap, Nibbles, ProofTrieNodeV2, TrieAccount, TrieNodeV2,
 };
 use alloc::{borrow::Cow, collections::VecDeque, vec::Vec};
+#[cfg(feature = "eip1186")]
 use alloy_consensus::constants::KECCAK_EMPTY;
 use alloy_primitives::{
     keccak256,
@@ -246,11 +250,7 @@ impl MultiProof {
                 nibbles.ends_with(&leaf.key)
             {
                 let account = TrieAccount::decode(&mut &leaf.value[..])?;
-                break 'info Some(Account {
-                    balance: account.balance,
-                    nonce: account.nonce,
-                    bytecode_hash: (account.code_hash != KECCAK_EMPTY).then_some(account.code_hash),
-                })
+                break 'info Some(Account::from(account))
             }
             None
         };
@@ -375,11 +375,7 @@ impl DecodedMultiProof {
                 nibbles.ends_with(&leaf.key)
             {
                 let account = TrieAccount::decode(&mut &leaf.value[..])?;
-                break 'info Some(Account {
-                    balance: account.balance,
-                    nonce: account.nonce,
-                    bytecode_hash: (account.code_hash != KECCAK_EMPTY).then_some(account.code_hash),
-                })
+                break 'info Some(Account::from(account))
             }
             None
         };
@@ -484,15 +480,8 @@ impl DecodedMultiProofV2 {
                 nibbles.ends_with(&leaf.key)
             {
                 let account = TrieAccount::decode(&mut &leaf.value[..])?;
-                break 'account (
-                    Some(Account {
-                        balance: account.balance,
-                        nonce: account.nonce,
-                        bytecode_hash: (account.code_hash != KECCAK_EMPTY)
-                            .then_some(account.code_hash),
-                    }),
-                    account.storage_root,
-                )
+                let storage_root = account.storage_root;
+                break 'account (Some(Account::from(account)), storage_root)
             }
             (None, EMPTY_ROOT_HASH)
         };
@@ -857,6 +846,8 @@ impl AccountProof {
         slots: Vec<alloy_serde::JsonStorageKey>,
         zero_empty_account: bool,
     ) -> alloy_rpc_types_eth::EIP1186AccountProofResponse {
+        // The raw proof nodes include the complete account RLP, including any extension.
+        // Clients must understand the chain's account encoding to verify these proofs.
         let is_non_existent = self.info.is_none();
         let info = self.info.unwrap_or_default();
         let (code_hash, storage_hash) = if is_non_existent && zero_empty_account {
@@ -900,10 +891,37 @@ impl AccountProof {
         } = proof;
         let storage_proofs = storage_proof.into_iter().map(Into::into).collect();
 
+        // EIP-1186's summary fields omit the extension. Recover it from an inclusion proof,
+        // checking the full address path so exclusion proofs cannot supply another account's
+        // extension. This does not authenticate the root; callers must still call `verify`.
+        #[cfg(feature = "account-ext")]
+        let extension = (|| {
+            let root = keccak256(account_proof.first()?);
+            let TrieNode::Leaf(leaf) =
+                alloy_rlp::decode_exact::<TrieNode>(account_proof.last()?).ok()?
+            else {
+                return None;
+            };
+            verify_proof(
+                root,
+                Nibbles::unpack(keccak256(address)),
+                Some(leaf.value.clone()),
+                &account_proof,
+            )
+            .ok()?;
+            Some(alloy_rlp::decode_exact::<TrieAccount>(&leaf.value).ok()?.extension)
+        })()
+        .unwrap_or_default();
+        #[cfg(feature = "account-ext")]
+        let has_extension = !extension.is_empty();
+        #[cfg(not(feature = "account-ext"))]
+        let has_extension = false;
+
         let (storage_root, info) = if nonce == 0 &&
             balance.is_zero() &&
             (storage_hash.is_zero() || storage_hash == EMPTY_ROOT_HASH) &&
-            (code_hash == KECCAK_EMPTY || code_hash.is_zero())
+            (code_hash == KECCAK_EMPTY || code_hash.is_zero()) &&
+            !has_extension
         {
             // Account does not exist in state. Return `None` here to prevent proof
             // verification.
@@ -915,7 +933,16 @@ impl AccountProof {
             // See: https://github.com/ethereum/go-ethereum/issues/28441
             (EMPTY_ROOT_HASH, None)
         } else {
-            (storage_hash, Some(Account { nonce, balance, bytecode_hash: code_hash.into() }))
+            (
+                storage_hash,
+                Some(Account {
+                    nonce,
+                    balance,
+                    bytecode_hash: code_hash.into(),
+                    #[cfg(feature = "account-ext")]
+                    extension,
+                }),
+            )
         };
 
         Self { address, info, proof: account_proof, storage_root, storage_proofs }
@@ -959,7 +986,7 @@ impl AccountProof {
             None
         } else {
             Some(alloy_rlp::encode(
-                self.info.unwrap_or_default().into_trie_account(self.storage_root),
+                self.info.clone().unwrap_or_default().into_trie_account(self.storage_root),
             ))
         };
         let nibbles = Nibbles::unpack(keccak256(self.address));
@@ -1423,7 +1450,13 @@ mod tests {
             address: Address::random(),
             info: Some(
                 // non-empty account
-                Account { nonce: 100, balance: U256::ZERO, bytecode_hash: Some(KECCAK_EMPTY) },
+                Account {
+                    nonce: 100,
+                    balance: U256::ZERO,
+                    bytecode_hash: Some(KECCAK_EMPTY),
+                    #[cfg(feature = "account-ext")]
+                    extension: Default::default(),
+                },
             ),
             proof: vec![],
             storage_root: B256::ZERO,
@@ -1518,6 +1551,8 @@ mod tests {
                 nonce: 42,
                 balance: U256::from(100),
                 bytecode_hash: Some(KECCAK_EMPTY),
+                #[cfg(feature = "account-ext")]
+                extension: Default::default(),
             }),
             proof: vec![],
             storage_root: B256::random(),

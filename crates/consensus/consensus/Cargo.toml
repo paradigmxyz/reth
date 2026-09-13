@@ -35,3 +35,4 @@ std = [
     "alloy-eip7928/std",
 ]
 test-utils = ["reth-primitives-traits/test-utils"]
+account-ext = ["reth-execution-types/account-ext"]

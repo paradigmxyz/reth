@@ -1,3 +1,6 @@
+// Accounts are only Copy when account-ext is disabled.
+#![cfg_attr(not(feature = "account-ext"), allow(clippy::clone_on_copy))]
+
 use crate::proof_task::StorageProofResultMessage;
 use alloy_primitives::{map::B256Map, B256};
 use alloy_rlp::Encodable;
@@ -139,7 +142,7 @@ where
                 cached_storage_roots,
             } => {
                 let hashed_address = *hashed_address;
-                let account = *account;
+                let account = account.clone();
                 // Take the receiver so Drop won't try to receive on it again
                 let proof_result_rx = proof_result_rx
                     .take()
@@ -181,10 +184,10 @@ where
 
                 (account, root)
             }
-            Self::FromCache { account, root } => (*account, *root),
+            Self::FromCache { account, root } => (account.clone(), *root),
             Self::Sync { storage_calculator, hashed_address, account, cached_storage_roots } => {
                 let hashed_address = *hashed_address;
-                let account = *account;
+                let account = account.clone();
                 let mut calculator = storage_calculator.borrow_mut();
                 let root_node = calculator.storage_root_node(hashed_address)?;
                 let storage_root = calculator

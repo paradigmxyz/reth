@@ -65,3 +65,8 @@ arbitrary = [
 test-utils = [
     "reth-primitives-traits/test-utils",
 ]
+account-ext = [
+    "alloy-genesis/account-ext",
+    "alloy-trie/account-ext",
+    "reth-primitives-traits/account-ext",
+]

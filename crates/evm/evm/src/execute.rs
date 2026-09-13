@@ -511,6 +511,10 @@ where
         db.merge_transitions(BundleRetention::Reverts);
 
         let block_access_list = db.take_built_alloy_bal();
+        if block_access_list.is_some() {
+            reth_storage_api::ensure_no_account_extensions("BAL")
+                .map_err(BlockExecutionError::other)?;
+        }
         let block_access_list_hash =
             block_access_list.as_ref().map(|bal| compute_block_access_list_hash(bal.as_slice()));
 
@@ -599,6 +603,10 @@ where
             .map_err(BlockExecutionError::other)?;
 
         let has_bal = block.header().block_access_list_hash().is_some();
+        if has_bal {
+            reth_storage_api::ensure_no_account_extensions("BAL")
+                .map_err(BlockExecutionError::other)?;
+        }
 
         if has_bal {
             executor.evm_mut().db_mut().bal_state.bal_builder = Some(Bal::new());

@@ -32,3 +32,6 @@ reth-db-api.workspace = true
 reth-provider = { workspace = true, features = ["test-utils"] }
 reth-trie-common.workspace = true
 revm.workspace = true
+
+[features]
+account-ext = ["reth-storage-api/account-ext"]

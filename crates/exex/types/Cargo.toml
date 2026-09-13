@@ -49,3 +49,4 @@ serde-bincode-compat = [
     "serde_with",
     "alloy-eips/serde-bincode-compat",
 ]
+account-ext = ["reth-chain-state/account-ext"]

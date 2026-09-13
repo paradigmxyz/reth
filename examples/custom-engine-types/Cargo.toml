@@ -19,3 +19,6 @@ eyre.workspace = true
 tokio.workspace = true
 thiserror.workspace = true
 serde.workspace = true
+
+[features]
+account-ext = ["reth-ethereum/account-ext", "reth-ethereum-payload-builder/account-ext"]

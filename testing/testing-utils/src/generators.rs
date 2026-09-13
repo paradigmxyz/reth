@@ -1,3 +1,6 @@
+// Accounts are only Copy when account-ext is disabled.
+#![cfg_attr(not(feature = "account-ext"), allow(clippy::clone_on_copy))]
+
 //! Generators for different data structures like block headers, block bodies and ranges of those.
 
 // TODO(rand): update ::random calls after rand_09 migration
@@ -331,7 +334,7 @@ where
 
         // extract from sending account
         let (prev_from, _) = state.get_mut(&from).unwrap();
-        changeset.push((from, *prev_from, Vec::new()));
+        changeset.push((from, prev_from.clone(), Vec::new()));
 
         transfer = max(min(transfer, prev_from.balance), U256::from(1));
         prev_from.balance = prev_from.balance.wrapping_sub(transfer);
@@ -356,7 +359,7 @@ where
             .collect();
         old_entries.sort_by_key(|entry| entry.key);
 
-        changeset.push((to, *prev_to, old_entries));
+        changeset.push((to, prev_to.clone(), old_entries));
 
         changeset.sort_by_key(|(address, _, _)| *address);
 
@@ -421,7 +424,7 @@ pub fn random_eoa_account<R: Rng>(rng: &mut R) -> (Address, Account) {
     let balance = U256::from(rng.random::<u32>());
     let addr = Address::random();
 
-    (addr, Account { nonce, balance, bytecode_hash: None })
+    (addr, Account { nonce, balance, ..Default::default() })
 }
 
 /// Generate random Externally Owned Accounts

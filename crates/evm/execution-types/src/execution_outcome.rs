@@ -942,6 +942,8 @@ mod tests {
             code_hash: B256::ZERO,
             code: None,
             account_id: None,
+            #[cfg(feature = "account-ext")]
+            extension: Default::default(),
         };
         let account_info2 = AccountInfo {
             nonce: 2,
@@ -949,6 +951,8 @@ mod tests {
             code_hash: B256::ZERO,
             code: None,
             account_id: None,
+            #[cfg(feature = "account-ext")]
+            extension: Default::default(),
         };
 
         // Set up the bundle state with these accounts

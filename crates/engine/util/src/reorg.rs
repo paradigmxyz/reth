@@ -268,6 +268,9 @@ where
 
     // Configure state
     let has_bal = reorg_target.header().block_access_list_hash().is_some();
+    if has_bal {
+        reth_storage_api::ensure_no_account_extensions("BAL")?;
+    }
     let state_provider = provider.state_by_block_hash(reorg_target.header().parent_hash())?;
     let mut state = State::builder()
         .with_database_ref(StateProviderDatabase::new(&state_provider))

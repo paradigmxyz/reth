@@ -91,6 +91,9 @@ mod utils;
 /// `bincode` crate allows for more efficient serialization of trie types, because it allows
 /// non-string map keys.
 ///
+/// With `account-ext`, account-containing values require MessagePack instead of bincode,
+/// because empty account extensions are omitted.
+///
 /// Read more: <https://github.com/paradigmxyz/reth/issues/11370>
 #[cfg(all(feature = "serde", feature = "serde-bincode-compat"))]
 pub mod serde_bincode_compat {

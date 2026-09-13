@@ -45,3 +45,6 @@ itertools.workspace = true
 
 # tracing
 tracing.workspace = true
+
+[features]
+account-ext = ["reth-engine-tree/account-ext"]

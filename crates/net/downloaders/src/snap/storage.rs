@@ -499,7 +499,14 @@ mod tests {
     }
 
     fn account(storage_root: B256) -> TrieAccount {
-        TrieAccount { nonce: 1, balance: U256::from(2), storage_root, code_hash: KECCAK256_EMPTY }
+        TrieAccount {
+            nonce: 1,
+            balance: U256::from(2),
+            storage_root,
+            code_hash: KECCAK256_EMPTY,
+            #[cfg(feature = "account-ext")]
+            extension: Default::default(),
+        }
     }
 
     fn wire_slots(slots: &[(B256, U256)]) -> Vec<StorageData> {

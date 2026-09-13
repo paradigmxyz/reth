@@ -473,10 +473,17 @@ impl ExtendedAccount {
     /// Create new instance of extended account
     pub fn new(nonce: u64, balance: U256) -> Self {
         Self {
-            account: Account { nonce, balance, bytecode_hash: None },
+            account: Account { nonce, balance, ..Default::default() },
             bytecode: None,
             storage: Default::default(),
         }
+    }
+
+    /// Set the chain-specific account payload.
+    #[cfg(feature = "account-ext")]
+    pub fn with_extension(mut self, extension: reth_primitives_traits::AccountExtension) -> Self {
+        self.account.extension = extension;
+        self
     }
 
     /// Set bytecode and bytecode hash on the extended account

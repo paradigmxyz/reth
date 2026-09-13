@@ -70,7 +70,10 @@ impl reth_codecs::Compact for HashBuilderState {
     {
         let mut len = 0;
 
-        len += self.key.to_compact(buf);
+        // Collection codecs return flag bits, not their encoded byte length.
+        let start = buf.as_mut().len();
+        self.key.to_compact(buf);
+        len += buf.as_mut().len() - start;
 
         buf.put_u16(self.stack.len() as u16);
         len += 2;
@@ -80,7 +83,9 @@ impl reth_codecs::Compact for HashBuilderState {
             len += 2 + item.len();
         }
 
-        len += self.value.to_compact(buf);
+        let start = buf.as_mut().len();
+        self.value.to_compact(buf);
+        len += buf.as_mut().len() - start;
 
         buf.put_u16(self.groups.len() as u16);
         len += 2;

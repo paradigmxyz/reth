@@ -56,3 +56,4 @@ serde = [
     "reth-network-api/serde",
     "reth-ethereum-primitives/serde",
 ]
+account-ext = ["reth-network/account-ext", "reth-provider/account-ext"]

@@ -784,7 +784,10 @@ impl BalAccountStateFields {
     }
 
     const fn needs_parent_account(self) -> bool {
-        self.balance.is_none() || self.nonce.is_none() || self.code_hash.is_none()
+        Account::EXTENSIONS_ENABLED ||
+            self.balance.is_none() ||
+            self.nonce.is_none() ||
+            self.code_hash.is_none()
     }
 
     fn into_account(self, existing_account: Option<Account>) -> Account {
@@ -803,6 +806,10 @@ impl BalAccountStateFields {
                     .and_then(|account| account.bytecode_hash)
                     .or(Some(alloy_consensus::constants::KECCAK_EMPTY))
             }),
+            #[cfg(feature = "account-ext")]
+            extension: existing_account
+                .map(|account| account.extension.clone())
+                .unwrap_or_default(),
         }
     }
 }
@@ -899,7 +906,7 @@ mod tests {
         let fields = BalAccountStateFields::from_changes(&changes);
 
         assert!(bal_account_changes_state_root(&changes, fields));
-        assert!(!fields.needs_parent_account());
+        assert_eq!(fields.needs_parent_account(), cfg!(feature = "account-ext"));
     }
 
     #[test]
@@ -924,6 +931,8 @@ mod tests {
             balance: U256::from(1),
             nonce: 3,
             bytecode_hash: Some(B256::repeat_byte(0xaa)),
+            #[cfg(feature = "account-ext")]
+            extension: Default::default(),
         }));
 
         assert_eq!(account.balance, U256::from(10));

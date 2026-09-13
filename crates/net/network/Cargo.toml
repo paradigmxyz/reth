@@ -11,6 +11,10 @@ description = "Ethereum network support"
 [lints]
 workspace = true
 
+[package.metadata.cargo-udeps.ignore]
+# Used by snap integration tests, which are unavailable with account-ext.
+development = ["reth-testing-utils"]
+
 [dependencies]
 # reth
 reth-chainspec.workspace = true
@@ -152,4 +156,10 @@ test-utils = [
     "reth-stages-types/test-utils",
     "reth-trie/test-utils",
     "reth-evm/test-utils",
+]
+account-ext = [
+    "reth-eth-wire/account-ext",
+    "reth-transaction-pool/account-ext",
+    "reth-discv5/account-ext",
+    "reth-network-api/account-ext",
 ]

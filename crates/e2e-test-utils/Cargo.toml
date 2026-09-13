@@ -77,3 +77,6 @@ path = "tests/e2e-testsuite/main.rs"
 [[test]]
 name = "rocksdb"
 path = "tests/rocksdb/main.rs"
+
+[features]
+account-ext = ["reth-cli-commands/account-ext", "reth-node-ethereum/account-ext"]

@@ -66,3 +66,4 @@ serde = [
     "alloy-primitives/serde",
     "reth-codecs?/serde",
 ]
+account-ext = ["reth-codecs?/account-ext"]

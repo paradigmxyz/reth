@@ -1,3 +1,6 @@
+// Accounts are only Copy when account-ext is disabled.
+#![cfg_attr(not(feature = "account-ext"), allow(clippy::clone_on_copy))]
+
 //! Downloads and verifies snap/2 ranges against
 //! [EIP-8189](https://eips.ethereum.org/EIPS/eip-8189) pivot state roots.
 //!
@@ -312,7 +315,8 @@ fn verify_proof(
         })
 }
 
-#[cfg(test)]
+// Snap account ranges cannot represent account extensions.
+#[cfg(all(test, not(feature = "account-ext")))]
 mod tests {
     use super::{request::MAX_RETRIES, test_utils::TestSnapClient, *};
     use alloy_primitives::{Bytes, KECCAK256_EMPTY, U256};
@@ -334,6 +338,8 @@ mod tests {
             balance: U256::from(1),
             storage_root: EMPTY_ROOT_HASH,
             code_hash: KECCAK256_EMPTY,
+            #[cfg(feature = "account-ext")]
+            extension: Default::default(),
         }
     }
 
@@ -361,7 +367,7 @@ mod tests {
         (root, proof)
     }
 
-    fn request(root_hash: B256) -> GetAccountRangeMessage {
+    const fn request(root_hash: B256) -> GetAccountRangeMessage {
         GetAccountRangeMessage {
             request_id: 1,
             root_hash,
@@ -371,7 +377,10 @@ mod tests {
         }
     }
 
-    fn response(peer: PeerId, message: AccountRangeMessage) -> PeerRequestResult<SnapResponse> {
+    const fn response(
+        peer: PeerId,
+        message: AccountRangeMessage,
+    ) -> PeerRequestResult<SnapResponse> {
         Ok(WithPeerId::new(peer, SnapResponse::AccountRange(message)))
     }
 
@@ -542,7 +551,7 @@ mod tests {
             outcome,
             AccountRangeOutcome::Verified(VerifiedAccountRange {
                 state_root: root_hash,
-                accounts: vec![accounts[0]],
+                accounts: vec![accounts[0].clone()],
                 has_more: false,
                 next: Some(key(4)),
             })
@@ -683,7 +692,7 @@ mod tests {
             outcome,
             AccountRangeOutcome::Verified(VerifiedAccountRange {
                 state_root: root_hash,
-                accounts: vec![accounts[0]],
+                accounts: vec![accounts[0].clone()],
                 has_more: false,
                 next: Some(key(9)),
             })
@@ -710,7 +719,7 @@ mod tests {
             outcome,
             AccountRangeOutcome::Verified(VerifiedAccountRange {
                 state_root: root_hash,
-                accounts: vec![accounts[0]],
+                accounts: vec![accounts[0].clone()],
                 has_more: true,
                 next: Some(key(3)),
             })

@@ -26,3 +26,6 @@ jsonrpsee-types.workspace = true
 # misc
 strum = { workspace = true, features = ["derive"] }
 serde = { workspace = true, features = ["derive"] }
+
+[features]
+account-ext = []

@@ -42,6 +42,8 @@ mod tests {
             code: Some(Bytes::from(vec![0x60, 0x61])),
             storage: Some(storage),
             private_key: None,
+            #[cfg(feature = "account-ext")]
+            extension: Default::default(),
         };
 
         // Convert the GenesisAccount to a TrieAccount
@@ -63,7 +65,9 @@ mod tests {
             Account {
                 nonce: 10,
                 balance: U256::from(1000),
-                bytecode_hash: Some(keccak256([0x60, 0x61]))
+                bytecode_hash: Some(keccak256([0x60, 0x61])),
+                #[cfg(feature = "account-ext")]
+                extension: Default::default(),
             }
             .into_trie_account(expected_storage_root),
             trie_account
@@ -81,6 +85,8 @@ mod tests {
             code: None,
             storage: Some(storage),
             private_key: None,
+            #[cfg(feature = "account-ext")]
+            extension: Default::default(),
         };
 
         // Convert the GenesisAccount to a TrieAccount

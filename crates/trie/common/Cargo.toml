@@ -104,7 +104,7 @@ serde = [
     "revm/serde",
     "alloy-eips/serde",
 ]
-reth-codec = ["dep:reth-codecs", "dep:bytes", "dep:arrayvec"]
+reth-codec = ["dep:reth-codecs", "reth-codecs/alloy", "dep:bytes", "dep:arrayvec"]
 serde-bincode-compat = [
     "serde",
     "alloy-consensus/serde-bincode-compat",
@@ -136,3 +136,9 @@ arbitrary = [
     "revm/arbitrary",
 ]
 rayon = ["dep:rayon"]
+account-ext = [
+    "alloy-trie/account-ext",
+    "reth-codecs?/account-ext",
+    "reth-primitives-traits/account-ext",
+    "revm/account-ext",
+]

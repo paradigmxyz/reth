@@ -72,3 +72,4 @@ std = [
     "alloy-evm/std",
     "alloy-rlp?/std",
 ]
+account-ext = ["reth-ethereum-primitives/account-ext", "reth-trie-common/account-ext"]

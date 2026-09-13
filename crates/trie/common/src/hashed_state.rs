@@ -1,3 +1,6 @@
+// Accounts are only Copy when account-ext is disabled.
+#![cfg_attr(not(feature = "account-ext"), allow(clippy::clone_on_copy))]
+
 use crate::{
     prefix_set::{PrefixSetMut, TriePrefixSetsMut},
     utils::{extend_sorted_vec, kway_merge_disjoint_sorted, kway_merge_sorted},
@@ -194,7 +197,7 @@ impl HashedPostState {
     }
 
     fn extend_inner(&mut self, other: Cow<'_, Self>) {
-        self.accounts.extend(other.accounts.iter().map(|(&k, &v)| (k, v)));
+        self.accounts.extend(other.accounts.iter().map(|(&k, v)| (k, v.clone())));
 
         self.storages.reserve(other.storages.len());
         match other {
@@ -232,7 +235,7 @@ impl HashedPostState {
 
         // Insert accounts (Some = updated, None = destroyed)
         for (address, account) in &sorted.accounts {
-            self.accounts.insert(*address, *account);
+            self.accounts.insert(*address, account.clone());
         }
 
         // Reserve capacity for storages
@@ -270,7 +273,7 @@ impl HashedPostState {
     /// Creates a sorted copy without consuming self.
     /// More efficient than `.clone().into_sorted()` as it avoids cloning `HashMap` metadata.
     pub fn clone_into_sorted(&self) -> HashedPostStateSorted {
-        let mut accounts: Vec<_> = self.accounts.iter().map(|(&k, &v)| (k, v)).collect();
+        let mut accounts: Vec<_> = self.accounts.iter().map(|(&k, v)| (k, v.clone())).collect();
         accounts.sort_unstable_by_key(|(address, _)| *address);
 
         let storages = self
@@ -852,6 +855,8 @@ mod tests {
             code_hash: B256::random(),
             code: Some(Bytecode::new_raw(Bytes::from(vec![1, 2]))),
             account_id: None,
+            #[cfg(feature = "account-ext")]
+            extension: Default::default(),
         };
 
         let mut storage = StorageWithOriginalValues::default();
@@ -958,6 +963,8 @@ mod tests {
             code_hash: B256::random(),
             code: None,
             account_id: None,
+            #[cfg(feature = "account-ext")]
+            extension: Default::default(),
         };
 
         // Create hashed accounts with addresses.
@@ -1192,7 +1199,7 @@ mod tests {
         assert_eq!(state1.accounts[0].0, B256::from([1; 32]));
         assert_eq!(state1.accounts[1].0, B256::from([2; 32]));
         assert_eq!(state1.accounts[2].0, B256::from([3; 32]));
-        assert_eq!(state1.accounts[2].1.unwrap().nonce, 1); // Should have state2's value
+        assert_eq!(state1.accounts[2].1.as_ref().unwrap().nonce, 1); // Should have state2's value
         assert_eq!(state1.accounts[3].0, B256::from([4; 32]));
         assert_eq!(state1.accounts[4].0, B256::from([5; 32]));
         assert_eq!(state1.accounts[4].1, None);
@@ -1275,7 +1282,13 @@ mod tests {
     #[test]
     fn test_hashed_post_state_sorted_disjointed_merge_batch() {
         fn account(nonce: u64) -> Account {
-            Account { nonce, balance: U256::ZERO, bytecode_hash: None }
+            Account {
+                nonce,
+                balance: U256::ZERO,
+                bytecode_hash: None,
+                #[cfg(feature = "account-ext")]
+                extension: Default::default(),
+            }
         }
 
         let kept_account = B256::with_last_byte(1);
@@ -1358,7 +1371,13 @@ mod tests {
     #[test]
     fn test_hashed_post_state_sorted_disjointed_merge_batch_removes_overlapping_batch_key() {
         fn account(nonce: u64) -> Account {
-            Account { nonce, balance: U256::ZERO, bytecode_hash: None }
+            Account {
+                nonce,
+                balance: U256::ZERO,
+                bytecode_hash: None,
+                #[cfg(feature = "account-ext")]
+                extension: Default::default(),
+            }
         }
 
         let overlapping_account = B256::with_last_byte(21);
@@ -1384,7 +1403,13 @@ mod tests {
     #[test]
     fn test_hashed_post_state_sorted_disjointed_merge_batch_keeps_equal_overlaps() {
         fn account(nonce: u64) -> Account {
-            Account { nonce, balance: U256::ZERO, bytecode_hash: None }
+            Account {
+                nonce,
+                balance: U256::ZERO,
+                bytecode_hash: None,
+                #[cfg(feature = "account-ext")]
+                extension: Default::default(),
+            }
         }
 
         let address = B256::with_last_byte(21);
@@ -1542,7 +1567,16 @@ mod tests {
 
         let state = HashedPostState {
             accounts: B256Map::from_iter([
-                (addr1, Some(Account { nonce: 1, balance: U256::from(100), bytecode_hash: None })),
+                (
+                    addr1,
+                    Some(Account {
+                        nonce: 1,
+                        balance: U256::from(100),
+                        bytecode_hash: None,
+                        #[cfg(feature = "account-ext")]
+                        extension: Default::default(),
+                    }),
+                ),
                 (addr2, None),
                 (addr3, Some(Account::default())),
             ]),
@@ -1877,17 +1911,20 @@ pub mod serde_bincode_compat {
 
     #[cfg(test)]
     mod tests {
+        #[cfg(not(feature = "account-ext"))]
+        use crate::hashed_state::{HashedPostState, HashedPostStateSorted};
         use crate::{
-            hashed_state::{
-                HashedPostState, HashedPostStateSorted, HashedStorage, HashedStorageSorted,
-            },
+            hashed_state::{HashedStorage, HashedStorageSorted},
             serde_bincode_compat,
         };
         use alloy_primitives::{B256, U256};
+        #[cfg(not(feature = "account-ext"))]
         use reth_primitives_traits::Account;
         use serde::{Deserialize, Serialize};
         use serde_with::serde_as;
 
+        // Bincode cannot delimit an account with an omitted extension field.
+        #[cfg(not(feature = "account-ext"))]
         #[test]
         fn test_hashed_post_state_bincode_roundtrip() {
             #[serde_as]
@@ -1933,6 +1970,8 @@ pub mod serde_bincode_compat {
             assert_eq!(decoded, data);
         }
 
+        // Bincode cannot delimit an account with an omitted extension field.
+        #[cfg(not(feature = "account-ext"))]
         #[test]
         fn test_hashed_post_state_sorted_bincode_roundtrip() {
             #[serde_as]

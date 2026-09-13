@@ -19,6 +19,7 @@ reth-primitives-traits.workspace = true
 reth-payload-primitives.workspace = true
 
 [features]
+account-ext = ["reth-db-api/account-ext", "reth-engine-primitives/account-ext"]
 default = ["std"]
 std = [
     "reth-primitives-traits/std",

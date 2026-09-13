@@ -103,4 +103,25 @@ mod tests {
         let account = eth_api.get_account(address, Default::default()).await.unwrap();
         assert!(account.is_none());
     }
+
+    #[cfg(feature = "account-ext")]
+    #[tokio::test]
+    async fn test_get_account_info_extension_only() {
+        let address = Address::random();
+        let extension: reth_primitives_traits::AccountExtension = vec![0x01].into();
+        let api = mock_eth_api(AddressMap::from_iter([(
+            address,
+            ExtendedAccount::new(0, U256::ZERO).with_extension(extension.clone()),
+        )]));
+        let info = api.get_account_info(address, Default::default()).await.unwrap();
+        assert!(!info.is_empty());
+        assert_eq!(info.extension, extension);
+        let json = serde_json::to_value(&info).unwrap();
+        assert_eq!(json["extension"], "0x01");
+        let decoded: alloy_rpc_types_eth::AccountInfo = serde_json::from_value(json).unwrap();
+        assert_eq!(decoded, info);
+        let missing = api.get_account_info(Address::random(), Default::default()).await.unwrap();
+        assert!(missing.is_empty());
+        assert!(serde_json::to_value(missing).unwrap().get("extension").is_none());
+    }
 }
