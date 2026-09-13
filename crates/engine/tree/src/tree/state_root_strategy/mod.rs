@@ -80,9 +80,10 @@ use reth_trie_parallel::proof_task::{ProofResultMessage, ProofTaskCtx, ProofWork
 pub use reth_trie_parallel::{
     error::StateRootTaskError,
     state_root_task::{
-        evm_state_to_hashed_post_state, PayloadStateRootHandle, StateAccessHint,
-        StateRootComputeOutcome, StateRootHandle, StateRootHintStream, StateRootMessage,
-        StateRootSink, StateRootTaskCancelGuard, StateRootUpdateHook, StateRootUpdateStream,
+        evm_state_to_hashed_post_state, AccountDelta, BlockAccountUpdates, BlockUpdateSchedule,
+        PayloadStateRootHandle, StateAccessHint, StateRootComputeOutcome, StateRootHandle,
+        StateRootHintStream, StateRootMessage, StateRootSink, StateRootTaskCancelGuard,
+        StateRootUpdateHook, StateRootUpdateStream,
     },
 };
 use reth_trie_sparse::{
@@ -1288,7 +1289,7 @@ where
 mod tests {
     use super::*;
     use alloy_consensus::constants::KECCAK_EMPTY;
-    use alloy_primitives::{map::HashMap, Address, U256};
+    use alloy_primitives::{keccak256, map::HashMap, Address, U256};
     use rand::Rng;
     use reth_chain_state::test_utils::TestBlockBuilder;
     use reth_chainspec::ChainSpec;
@@ -1298,7 +1299,8 @@ mod tests {
     use reth_evm_ethereum::EthEvmConfig;
     use reth_primitives_traits::{Account, StorageEntry};
     use reth_provider::{
-        providers::BlockchainProvider, test_utils::create_test_provider_factory_with_chain_spec,
+        providers::BlockchainProvider,
+        test_utils::{create_test_provider_factory_with_chain_spec, MockNodeTypesWithDB},
         HashingWriter,
     };
     use reth_storage_overlay::{OverlayManager, OverlayStateProviderFactory};
@@ -1481,5 +1483,211 @@ mod tests {
         let root_from_task = state_root_handle.state_root().expect("task failed").state_root;
         let root_from_regular = state_root(accumulated_state);
         assert_eq!(root_from_task, root_from_regular);
+    }
+
+    /// One address' changes as a block access list describes them.
+    struct BalChange {
+        address: Address,
+        /// The parent state of the account, which the delta path must recover from the trie.
+        parent: Option<(Account, Vec<(B256, U256)>)>,
+        delta: AccountDelta,
+        storage: Vec<(B256, U256)>,
+    }
+
+    #[test]
+    fn assembled_account_values_match_the_values_they_replace() {
+        reth_tracing::init_test_tracing();
+
+        let with_code = Account {
+            balance: U256::from(7),
+            nonce: 1,
+            bytecode_hash: Some(B256::repeat_byte(0xcc)),
+        };
+        let changes = vec![
+            // Balance-only change to an existing account: the delta path has to recover the
+            // nonce and the code hash from the account's leaf.
+            BalChange {
+                address: Address::repeat_byte(0x11),
+                parent: Some((
+                    Account { balance: U256::from(100), nonce: 3, bytecode_hash: None },
+                    Vec::new(),
+                )),
+                delta: AccountDelta { balance: Some(U256::from(250)), ..Default::default() },
+                storage: Vec::new(),
+            },
+            // Nonce change plus a storage write, so the assembled account also has to pick up a
+            // recomputed storage root.
+            BalChange {
+                address: Address::repeat_byte(0x22),
+                parent: Some((
+                    with_code,
+                    vec![
+                        (B256::with_last_byte(1), U256::from(11)),
+                        (B256::with_last_byte(2), U256::from(22)),
+                    ],
+                )),
+                delta: AccountDelta { nonce: Some(2), ..Default::default() },
+                storage: vec![(B256::with_last_byte(1), U256::from(99))],
+            },
+            // Storage-only change: the delta is empty and the account keeps every field.
+            BalChange {
+                address: Address::repeat_byte(0x33),
+                parent: Some((
+                    Account { balance: U256::from(5), nonce: 0, bytecode_hash: None },
+                    vec![(B256::with_last_byte(3), U256::from(33))],
+                )),
+                delta: AccountDelta::default(),
+                storage: vec![(B256::with_last_byte(3), U256::from(44))],
+            },
+            // Created by this block, so there is no leaf to recover anything from.
+            BalChange {
+                address: Address::repeat_byte(0x44),
+                parent: None,
+                delta: AccountDelta {
+                    balance: Some(U256::from(1)),
+                    nonce: Some(1),
+                    ..Default::default()
+                },
+                storage: vec![(B256::with_last_byte(7), U256::from(7))],
+            },
+            // Emptied by this block: the assembled account is all zero, which deletes the leaf.
+            BalChange {
+                address: Address::repeat_byte(0x55),
+                parent: Some((
+                    Account { balance: U256::from(9), nonce: 0, bytecode_hash: None },
+                    Vec::new(),
+                )),
+                delta: AccountDelta { balance: Some(U256::ZERO), ..Default::default() },
+                storage: Vec::new(),
+            },
+        ];
+
+        let factory = create_test_provider_factory_with_chain_spec(Arc::new(ChainSpec::default()));
+        let genesis_hash = init_genesis(&factory).unwrap();
+        {
+            let provider_rw = factory.provider_rw().expect("failed to get provider");
+            provider_rw
+                .insert_account_for_hashing(changes.iter().filter_map(|change| {
+                    change.parent.as_ref().map(|(account, _)| (change.address, Some(*account)))
+                }))
+                .expect("failed to insert accounts");
+            provider_rw
+                .insert_storage_for_hashing(changes.iter().filter_map(|change| {
+                    change.parent.as_ref().map(|(_, storage)| {
+                        let entries = storage
+                            .iter()
+                            .map(|(key, value)| StorageEntry { key: *key, value: *value });
+                        (change.address, entries)
+                    })
+                }))
+                .expect("failed to insert storage");
+            provider_rw.commit().expect("failed to commit changes");
+        }
+
+        let expected_root = state_root(changes.iter().filter_map(|change| {
+            let parent = change.parent.as_ref();
+            let account = change.delta.into_account(parent.map(|(account, _)| *account));
+            if account.is_empty() {
+                return None;
+            }
+
+            let mut storage: HashMap<B256, U256> =
+                parent.into_iter().flat_map(|(_, storage)| storage.iter().copied()).collect();
+            storage.extend(change.storage.iter().copied());
+            Some((change.address, (account, storage)))
+        }));
+
+        let provider_factory = BlockchainProvider::new(factory).unwrap();
+        let runtime = reth_tasks::Runtime::test();
+        let hashed_storages = |change: &BalChange| {
+            let mut state = HashedPostState::default();
+            if !change.storage.is_empty() {
+                state.storages.insert(
+                    keccak256(change.address),
+                    reth_trie::HashedStorage::from_iter(
+                        change.storage.iter().map(|(slot, value)| (keccak256(slot), *value)),
+                    ),
+                );
+            }
+            state
+        };
+
+        // The shape the producer sends when it reads every account's parent state itself.
+        let from_values = run_bal_state_root(&provider_factory, genesis_hash, &runtime, |stream| {
+            for change in &changes {
+                stream.on_hashed_state_update(hashed_storages(change));
+
+                let account =
+                    change.delta.into_account(change.parent.as_ref().map(|(account, _)| *account));
+                let mut state = HashedPostState::default();
+                state
+                    .accounts
+                    .insert(keccak256(change.address), (!account.is_empty()).then_some(account));
+                stream.on_hashed_state_update(state);
+            }
+        });
+
+        // The shape it sends when the task assembles the values from the leaves it reveals.
+        let from_deltas = run_bal_state_root(&provider_factory, genesis_hash, &runtime, |stream| {
+            stream.on_account_updates(BlockAccountUpdates {
+                values: Vec::new(),
+                deltas: changes
+                    .iter()
+                    .map(|change| (keccak256(change.address), change.delta))
+                    .collect(),
+            });
+            stream.on_update_schedule(Arc::new(BlockUpdateSchedule {
+                accounts: changes.iter().map(|change| keccak256(change.address)).collect(),
+                storages: changes
+                    .iter()
+                    .filter(|change| !change.storage.is_empty())
+                    .map(|change| {
+                        (
+                            keccak256(change.address),
+                            change.storage.iter().map(|(slot, _)| keccak256(slot)).collect(),
+                        )
+                    })
+                    .collect(),
+            }));
+            for change in &changes {
+                stream.on_hashed_state_update(hashed_storages(change));
+            }
+        });
+
+        assert_eq!(from_values.state_root, expected_root);
+        assert_eq!(from_deltas.state_root, expected_root);
+        // The assembled values are also what the block reports as its hashed post state.
+        assert_eq!(from_deltas.hashed_state, from_values.hashed_state);
+    }
+
+    /// Runs the state-root task over one block of updates sent the way the BAL path sends them.
+    fn run_bal_state_root(
+        provider_factory: &BlockchainProvider<MockNodeTypesWithDB>,
+        genesis_hash: B256,
+        runtime: &reth_tasks::Runtime,
+        send: impl FnOnce(&StateRootUpdateStream),
+    ) -> StateRootComputeOutcome {
+        let env: ExecutionEnv<EthEvmConfig> = ExecutionEnv::test_default();
+        let overlay_manager = OverlayManager::<EthPrimitives>::default();
+        let mut handle = DefaultStateRootStrategy::default().spawn_state_root(
+            runtime,
+            &overlay_manager,
+            OverlayStateProviderFactory::new(
+                provider_factory.clone(),
+                overlay_manager.overlay_builder(genesis_hash),
+            ),
+            StateRootTaskOptions {
+                parent_header: SealedHeader::new(Default::default(), genesis_hash),
+                preserved_sparse_trie: None,
+                transaction_count: Some(env.transaction_count),
+                config: &TreeConfig::default(),
+                pending_sparse_trie_prune_blocks: None,
+            },
+        );
+
+        let stream = handle.take_hashed_update_stream();
+        send(&stream);
+        stream.finish();
+        handle.state_root().expect("task failed")
     }
 }

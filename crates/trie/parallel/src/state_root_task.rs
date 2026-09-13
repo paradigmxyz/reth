@@ -9,7 +9,8 @@
 
 use crate::error::StateRootTaskError;
 use alloy_evm::block::OnStateHook;
-use alloy_primitives::{keccak256, map::B256Map, B256};
+use alloy_primitives::{keccak256, map::B256Map, B256, KECCAK256_EMPTY, U256};
+use reth_primitives_traits::Account;
 use reth_trie::{
     updates::TrieUpdates, HashedPostState, HashedStorage, MultiProofTargetsV2, ProofV2Target,
 };
@@ -22,6 +23,10 @@ use tracing::trace;
 pub enum StateRootMessage {
     /// Prefetch proof targets
     PrefetchProofs(MultiProofTargetsV2),
+    /// The keys the block will change, sent once before the values.
+    UpdateSchedule(Arc<BlockUpdateSchedule>),
+    /// The block's account changes, sent once, as values or as deltas over the parent state.
+    AccountUpdates(BlockAccountUpdates),
     /// New state update from transaction execution.
     StateUpdate(EvmState),
     /// Pre-hashed state update from BAL conversion that can be applied directly without proofs.
@@ -31,6 +36,86 @@ pub enum StateRootMessage {
     /// This is triggered by block execution, indicating that no additional state updates are
     /// expected.
     FinishedStateUpdates,
+}
+
+/// The keys of every account and storage leaf a block changes.
+///
+/// A block that carries an EIP-7928 block access list knows this before it executes, while the
+/// values still have to be hashed and, for accounts the list does not fully describe, read from
+/// the parent state. Sending the keys first lets a task reveal the leaves and request the proofs
+/// for the whole block while the values are still being produced.
+///
+/// The schedule carries no values, so a task may treat it as a prefetch: an entry that never
+/// receives a value only costs the proof it fetched.
+///
+/// It is shared rather than handed over so that the producer of the values can look its own
+/// hashed keys up here instead of hashing them a second time.
+#[derive(Debug, Default)]
+pub struct BlockUpdateSchedule {
+    /// Hashed addresses of the accounts the block changes.
+    ///
+    /// Every address in [`Self::storages`] is listed here too: a changed storage trie changes
+    /// the account's storage root, and so its account leaf.
+    pub accounts: Vec<B256>,
+    /// Hashed storage slots the block changes, by hashed address.
+    pub storages: B256Map<Vec<B256>>,
+}
+
+/// The account half of a block whose changes are known from its access list.
+///
+/// A producer that can name the block's account changes without executing it can also send them
+/// in one go, but it can rarely name their final values: an access list records the fields a
+/// block writes, and an account whose balance changed keeps the nonce and code hash it had in
+/// the parent state. Reading those from the parent is what makes the last account values of a
+/// block reach a state-root task late, so the fields that did change are sent as an
+/// [`AccountDelta`] instead, for a consumer that can resolve the parent account itself.
+#[derive(Debug, Default)]
+pub struct BlockAccountUpdates {
+    /// Final account values, by hashed address. `None` deletes the account.
+    pub values: Vec<(B256, Option<Account>)>,
+    /// The fields the block changed, by hashed address, for the accounts whose final value
+    /// depends on the parent state.
+    pub deltas: Vec<(B256, AccountDelta)>,
+}
+
+/// The account fields a block changed, as an overlay over the account's parent state.
+///
+/// A field that is `None` was not written by the block and keeps its parent value.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct AccountDelta {
+    /// The balance the block last wrote.
+    pub balance: Option<U256>,
+    /// The nonce the block last wrote.
+    pub nonce: Option<u64>,
+    /// The hash of the code the block last wrote.
+    pub code_hash: Option<B256>,
+}
+
+impl AccountDelta {
+    /// Returns whether the parent state has to be known to turn this delta into an account.
+    pub const fn needs_parent_account(&self) -> bool {
+        self.balance.is_none() || self.nonce.is_none() || self.code_hash.is_none()
+    }
+
+    /// Applies the delta to the account's parent state, which is `None` for an account that did
+    /// not exist.
+    ///
+    /// The result can be empty, which means the account is deleted: post-merge state has no
+    /// empty accounts (EIP-7523), and a block can leave one behind, for example by funding a new
+    /// account and destroying it again.
+    pub fn into_account(self, parent: Option<Account>) -> Account {
+        let parent = parent.as_ref();
+        Account {
+            balance: self
+                .balance
+                .unwrap_or_else(|| parent.map_or(U256::ZERO, |account| account.balance)),
+            nonce: self.nonce.unwrap_or_else(|| parent.map_or(0, |account| account.nonce)),
+            bytecode_hash: self
+                .code_hash
+                .or_else(|| parent.and_then(|account| account.bytecode_hash))
+                .or(Some(KECCAK256_EMPTY)),
+        }
+    }
 }
 
 /// Outcome of the state root computation, including the state root itself with
@@ -339,6 +424,13 @@ pub trait StateRootSink: Send + Sync + 'static {
     /// Best-effort access hint from transaction prewarming.
     fn on_access_hint(&self, _hint: StateAccessHint) {}
 
+    /// The keys the block will change, known before their values.
+    fn on_update_schedule(&self, _schedule: Arc<BlockUpdateSchedule>) {}
+
+    /// Authoritative account changes for the whole block, as values or as deltas over the
+    /// parent state.
+    fn on_account_updates(&self, _updates: BlockAccountUpdates) {}
+
     /// Authoritative state update from normal block execution.
     fn on_state_update(&self, state: EvmState);
 
@@ -398,6 +490,25 @@ impl StateRootUpdateStream {
     /// Creates a new authoritative update stream backed by the given sink.
     pub fn new(inner: Arc<dyn StateRootSink>) -> Self {
         Self { inner }
+    }
+
+    /// Emits the keys the block will change.
+    ///
+    /// The schedule only saves a task work if it arrives before the values it describes, so it
+    /// goes through the update capability rather than the hint capability: both reach the task
+    /// through one channel, and the producer of the values is the only one that can order
+    /// itself against them.
+    pub fn on_update_schedule(&self, schedule: Arc<BlockUpdateSchedule>) {
+        self.inner.on_update_schedule(schedule);
+    }
+
+    /// Emits the block's account changes.
+    ///
+    /// A delta is only resolvable against the parent state the consumer works on, so this is
+    /// authoritative in the same sense as a value: the consumer, not the producer, decides what
+    /// the account ends up as.
+    pub fn on_account_updates(&self, updates: BlockAccountUpdates) {
+        self.inner.on_account_updates(updates);
     }
 
     /// Emits an authoritative pre-hashed state update.
@@ -472,6 +583,14 @@ impl SparseTrieStateRootSink {
 impl StateRootSink for SparseTrieStateRootSink {
     fn on_access_hint(&self, hint: StateAccessHint) {
         let _ = self.sender.send(StateRootMessage::PrefetchProofs(hint.into()));
+    }
+
+    fn on_update_schedule(&self, schedule: Arc<BlockUpdateSchedule>) {
+        let _ = self.sender.send(StateRootMessage::UpdateSchedule(schedule));
+    }
+
+    fn on_account_updates(&self, updates: BlockAccountUpdates) {
+        let _ = self.sender.send(StateRootMessage::AccountUpdates(updates));
     }
 
     fn on_state_update(&self, state: EvmState) {
