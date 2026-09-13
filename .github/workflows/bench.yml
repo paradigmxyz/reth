@@ -885,8 +885,16 @@ jobs:
             const callDuration = '${{ steps.args.outputs.duration }}';
             const callPasses = '${{ steps.args.outputs.passes }}';
             const callConcurrency = '${{ steps.args.outputs.concurrency }}';
+            const callTopGas = '${{ steps.args.outputs.top-gas }}';
+            const callNamespace = '${{ steps.args.outputs.namespace }}';
+            const callTracer = '${{ steps.args.outputs.tracer }}';
+            const callExtras = [
+              callTopGas ? `top-gas: \`${callTopGas}\`` : '',
+              callNamespace ? `namespace: \`${callNamespace}\`` : '',
+              callTracer ? `tracer: \`${callTracer}\`` : '',
+            ].filter(Boolean).map(note => `, ${note}`).join('');
             const callNote = mode === 'call'
-              ? `, corpus: \`${corpus}\`, class: \`${callClass}\`, methods: \`${callMethods}\`, rps: \`${callRps}\`, duration: \`${callDuration}\`, passes: \`${callPasses}\`, concurrency: \`${callConcurrency}\``
+              ? `, corpus: \`${corpus}\`, class: \`${callClass}\`, methods: \`${callMethods}\`, rps: \`${callRps}\`, duration: \`${callDuration}\`, passes: \`${callPasses}\`, concurrency: \`${callConcurrency}\`${callExtras}`
               : '';
             const cores = '${{ steps.args.outputs.cores }}';
             const coresNote = cores && cores !== '0' ? `, cores: \`${cores}\`` : '';
@@ -952,8 +960,16 @@ jobs:
             const callDuration = '${{ steps.args.outputs.duration }}';
             const callPasses = '${{ steps.args.outputs.passes }}';
             const callConcurrency = '${{ steps.args.outputs.concurrency }}';
+            const callTopGas = '${{ steps.args.outputs.top-gas }}';
+            const callNamespace = '${{ steps.args.outputs.namespace }}';
+            const callTracer = '${{ steps.args.outputs.tracer }}';
+            const callExtras = [
+              callTopGas ? `top-gas: \`${callTopGas}\`` : '',
+              callNamespace ? `namespace: \`${callNamespace}\`` : '',
+              callTracer ? `tracer: \`${callTracer}\`` : '',
+            ].filter(Boolean).map(note => `, ${note}`).join('');
             const callNote = mode === 'call'
-              ? `, corpus: \`${corpus}\`, class: \`${callClass}\`, methods: \`${callMethods}\`, rps: \`${callRps}\`, duration: \`${callDuration}\`, passes: \`${callPasses}\`, concurrency: \`${callConcurrency}\``
+              ? `, corpus: \`${corpus}\`, class: \`${callClass}\`, methods: \`${callMethods}\`, rps: \`${callRps}\`, duration: \`${callDuration}\`, passes: \`${callPasses}\`, concurrency: \`${callConcurrency}\`${callExtras}`
               : '';
             const cores = '${{ steps.args.outputs.cores }}';
             const coresNote = cores && cores !== '0' ? `, cores: \`${cores}\`` : '';
@@ -1157,8 +1173,16 @@ jobs:
             const callDuration = process.env.BENCH_CALL_DURATION || '';
             const callPasses = process.env.BENCH_CALL_PASSES || '';
             const callConcurrency = process.env.BENCH_CALL_CONCURRENCY || '';
+            const callTopGas = process.env.BENCH_CALL_TOP_GAS || '';
+            const callNamespace = process.env.BENCH_CALL_NAMESPACE || '';
+            const callTracer = process.env.BENCH_CALL_TRACER || '';
+            const callExtras = [
+              callTopGas ? `top-gas: \`${callTopGas}\`` : '',
+              callNamespace ? `namespace: \`${callNamespace}\`` : '',
+              callTracer ? `tracer: \`${callTracer}\`` : '',
+            ].filter(Boolean).map(note => `, ${note}`).join('');
             const callNote = mode === 'call'
-              ? `, corpus: \`${corpus}\`, class: \`${callClass}\`, methods: \`${callMethods}\`, rps: \`${callRps}\`, duration: \`${callDuration}\`, passes: \`${callPasses}\`, concurrency: \`${callConcurrency}\``
+              ? `, corpus: \`${corpus}\`, class: \`${callClass}\`, methods: \`${callMethods}\`, rps: \`${callRps}\`, duration: \`${callDuration}\`, passes: \`${callPasses}\`, concurrency: \`${callConcurrency}\`${callExtras}`
               : '';
             const cores = process.env.BENCH_CORES || '0';
             const coresNote = cores && cores !== '0' ? `, cores: \`${cores}\`` : '';
