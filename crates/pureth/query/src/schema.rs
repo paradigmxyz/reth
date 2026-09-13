@@ -1,6 +1,7 @@
 use crate::path::PathToken;
+use reth_pureth_receipt::RECEIPT_SCHEMA_ID;
 
-pub const SCHEMA_ID: &str = "pureth-receipt-v0";
+pub const SCHEMA_ID: &str = RECEIPT_SCHEMA_ID;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ResolvedPath {
