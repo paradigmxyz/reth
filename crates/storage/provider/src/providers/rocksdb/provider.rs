@@ -1748,7 +1748,8 @@ impl<'db> RocksReadSnapshot<'db> {
     ///
     /// `iter_cache` holds the raw iterator for `T`'s column family. Seeking an existing iterator
     /// is much cheaper than constructing one, so the iterator is created on the first lookup and
-    /// reused by every later lookup through this snapshot.
+    /// reused by every later lookup through this snapshot. A lookup that finds the cache held by
+    /// another thread uses a private iterator instead of waiting.
     #[expect(clippy::too_many_arguments)]
     fn history_info<T>(
         &self,
@@ -1773,8 +1774,17 @@ impl<'db> RocksReadSnapshot<'db> {
         };
 
         let cf = self.cf_handle::<T>()?;
-        let mut guard = iter_cache.lock();
-        let iter = guard.get_or_insert_with(|| self.new_raw_iterator_cf(cf));
+        // A lookup on another thread may be holding the cached iterator; a private iterator costs
+        // what every lookup used to cost, whereas waiting would serialize the two lookups.
+        let mut guard = iter_cache.try_lock();
+        let mut private_iter;
+        let iter = match guard.as_mut() {
+            Some(cached) => cached.get_or_insert_with(|| self.new_raw_iterator_cf(cf)),
+            None => {
+                private_iter = self.new_raw_iterator_cf(cf);
+                &mut private_iter
+            }
+        };
 
         iter.seek(encoded_key);
         iter.status().map_err(|e| {
