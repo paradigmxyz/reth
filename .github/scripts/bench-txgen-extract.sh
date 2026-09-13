@@ -185,17 +185,29 @@ CORPUS_SOURCE="${BENCH_CORPUS:-static}"
 if [ "$EXECUTION_MODE" = "call" ] && [ "$CORPUS_SOURCE" = "static" ]; then
   case "$CALL_CLASS" in
     tracetx|traceblock)
-      # The snapshot is a pruned full node, so only verify empirically how far
-      # back it can still trace instead of trusting the unwind distance.
-      while ! block_is_traceable $(( HEAD_DEC - CALL_BLOCKS + 1 )); do
-        if [ "$CALL_BLOCKS" -le 1 ]; then
-          echo "::error::Snapshot cannot trace block ${HEAD_DEC}, class ${CALL_CLASS} is unusable"
+      # The snapshot is a pruned full node whose persisted state can lag its
+      # header tip, so the newest blocks may trace against stale state ("nonce
+      # too high"). Walk down from the tip to the newest block that actually
+      # traces, then window below it; also shrink the window if its oldest
+      # block has fallen past the retained history floor.
+      CORPUS_TOP="$HEAD_DEC"
+      probe_budget="${BENCH_TRACE_PROBE_DEPTH:-1024}"
+      while ! block_is_traceable "$CORPUS_TOP"; do
+        probe_budget=$(( probe_budget - 1 ))
+        if [ "$probe_budget" -le 0 ] || [ "$CORPUS_TOP" -le 1 ]; then
+          echo "::error::Snapshot has no traceable block near its tip ${HEAD_DEC} (searched down to ${CORPUS_TOP}); its persisted state lags too far behind the header for class ${CALL_CLASS}."
           exit 1
         fi
+        CORPUS_TOP=$(( CORPUS_TOP - 1 ))
+      done
+      if [ "$CORPUS_TOP" -ne "$HEAD_DEC" ]; then
+        echo "Newest traceable block is ${CORPUS_TOP}, $(( HEAD_DEC - CORPUS_TOP )) below the tip"
+      fi
+      while [ "$CALL_BLOCKS" -gt 1 ] && ! block_is_traceable $(( CORPUS_TOP - CALL_BLOCKS + 1 )); do
         CALL_BLOCKS=$(( CALL_BLOCKS / 2 ))
         echo "Retrying traceability probe with ${CALL_BLOCKS} source blocks"
       done
-      echo "Snapshot traces back to block $(( HEAD_DEC - CALL_BLOCKS + 1 ))"
+      echo "Snapshot traces blocks $(( CORPUS_TOP - CALL_BLOCKS + 1 ))..${CORPUS_TOP}"
       ;;
   esac
 fi
@@ -242,9 +254,10 @@ if [ "$EXECUTION_MODE" = "call" ]; then
         ;;
       tracetx|traceblock)
         # These blocks are on the snapshot, so the throwaway node serves them
-        # and the archive node is not needed.
-        CORPUS_FROM=$(( HEAD_DEC - CALL_BLOCKS + 1 ))
-        CORPUS_TO="$HEAD_DEC"
+        # and the archive node is not needed. CORPUS_TOP is the newest block the
+        # probe found traceable, which may sit below the header tip.
+        CORPUS_FROM=$(( CORPUS_TOP - CALL_BLOCKS + 1 ))
+        CORPUS_TO="$CORPUS_TOP"
         CORPUS_FORMAT=traces
         CORPUS_RPC="http://127.0.0.1:8545"
         ;;
