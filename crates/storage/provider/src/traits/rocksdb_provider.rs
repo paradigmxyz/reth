@@ -40,9 +40,8 @@ pub trait RocksDBProviderFactory {
         F: FnOnce(RocksDBRefArg<'_>) -> ProviderResult<R>,
     {
         if self.cached_storage_settings().storage_v2 {
-            let rocksdb = self.rocksdb_provider();
-            let snapshot = rocksdb.snapshot();
-            return f(Some(snapshot));
+            let snapshot = self.rocksdb_provider().owned_snapshot();
+            return f(Some(&snapshot));
         }
         f(None)
     }

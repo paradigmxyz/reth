@@ -77,7 +77,7 @@ pub type RawRocksDBBatch = rocksdb::WriteBatchWithTransaction<true>;
 ///
 /// The `Option` allows callers to skip `RocksDB` access when it isn't needed
 /// (e.g., on legacy MDBX-only nodes).
-pub type RocksDBRefArg<'a> = Option<crate::providers::rocksdb::RocksReadSnapshot<'a>>;
+pub type RocksDBRefArg<'a> = Option<&'a crate::providers::rocksdb::OwnedRocksReadSnapshot>;
 
 /// Represents a destination for writing data, either to database, static files, or `RocksDB`.
 #[derive(Debug, Display)]
@@ -678,7 +678,7 @@ pub enum EitherReader<'a, CURSOR, N> {
     /// Read from static file
     StaticFile(StaticFileProvider<N>, PhantomData<&'a ()>),
     /// Read from `RocksDB` snapshot (works in both read-only and read-write modes)
-    RocksDB(crate::providers::rocksdb::RocksReadSnapshot<'a>),
+    RocksDB(&'a crate::providers::rocksdb::OwnedRocksReadSnapshot),
 }
 
 impl<'a> EitherReader<'a, (), ()> {
@@ -825,7 +825,9 @@ where
         match self {
             Self::Database(cursor, _) => Ok(cursor.seek_exact(hash)?.map(|(_, v)| v)),
             Self::StaticFile(_, _) => Err(ProviderError::UnsupportedProvider),
-            Self::RocksDB(snapshot) => snapshot.get::<tables::TransactionHashNumbers>(hash),
+            Self::RocksDB(snapshot) => {
+                snapshot.as_snapshot().get::<tables::TransactionHashNumbers>(hash)
+            }
         }
     }
 }
@@ -842,7 +844,7 @@ where
         match self {
             Self::Database(cursor, _) => Ok(cursor.seek_exact(key)?.map(|(_, v)| v)),
             Self::StaticFile(_, _) => Err(ProviderError::UnsupportedProvider),
-            Self::RocksDB(snapshot) => snapshot.get::<tables::StoragesHistory>(key),
+            Self::RocksDB(snapshot) => snapshot.as_snapshot().get::<tables::StoragesHistory>(key),
         }
     }
 
@@ -867,7 +869,7 @@ where
                 )
             }
             Self::StaticFile(_, _) => Err(ProviderError::UnsupportedProvider),
-            Self::RocksDB(snapshot) => snapshot.storage_history_info(
+            Self::RocksDB(snapshot) => snapshot.as_snapshot().storage_history_info(
                 address,
                 storage_key,
                 block_number,
@@ -890,7 +892,7 @@ where
         match self {
             Self::Database(cursor, _) => Ok(cursor.seek_exact(key)?.map(|(_, v)| v)),
             Self::StaticFile(_, _) => Err(ProviderError::UnsupportedProvider),
-            Self::RocksDB(snapshot) => snapshot.get::<tables::AccountsHistory>(key),
+            Self::RocksDB(snapshot) => snapshot.as_snapshot().get::<tables::AccountsHistory>(key),
         }
     }
 
@@ -914,7 +916,7 @@ where
                 )
             }
             Self::StaticFile(_, _) => Err(ProviderError::UnsupportedProvider),
-            Self::RocksDB(snapshot) => snapshot.account_history_info(
+            Self::RocksDB(snapshot) => snapshot.as_snapshot().account_history_info(
                 address,
                 block_number,
                 lowest_available_block_number,

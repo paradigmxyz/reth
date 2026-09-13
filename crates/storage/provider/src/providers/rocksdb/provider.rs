@@ -28,7 +28,7 @@ use reth_storage_errors::{
 use rocksdb::{
     BlockBasedOptions, Cache, ColumnFamilyDescriptor, CompactionPri, DBCompressionType,
     DBRawIteratorWithThreadMode, IteratorMode, OptimisticTransactionDB,
-    OptimisticTransactionOptions, Options, SnapshotWithThreadMode, Transaction,
+    OptimisticTransactionOptions, Options, ReadOptions, SnapshotWithThreadMode, Transaction,
     WriteBatchWithTransaction, WriteBufferManager, WriteOptions, DB, DEFAULT_COLUMN_FAMILY_NAME,
 };
 use std::{
@@ -830,7 +830,20 @@ impl RocksDBProvider {
     ///
     /// Lighter weight than [`RocksTx`] — no write-conflict tracking, and `Send + Sync`.
     pub fn snapshot(&self) -> RocksReadSnapshot<'_> {
-        RocksReadSnapshot { inner: self.0.snapshot(), provider: self }
+        RocksReadSnapshot {
+            accounts_history_iter: Mutex::new(None),
+            storages_history_iter: Mutex::new(None),
+            inner: self.0.snapshot(),
+            provider: self,
+        }
+    }
+
+    /// Returns a read-only, point-in-time snapshot that owns the provider handle it reads through.
+    ///
+    /// Lets a reader keep one snapshot (and the iterators cached in it) alive for its whole
+    /// lifetime, instead of creating a snapshot per lookup.
+    pub fn owned_snapshot(&self) -> OwnedRocksReadSnapshot {
+        OwnedRocksReadSnapshot::new(self)
     }
 
     /// Creates a new transaction with MDBX-like semantics (read-your-writes, rollback).
@@ -1596,6 +1609,14 @@ impl RocksDBProvider {
 ///
 /// Lighter weight than [`RocksTx`] — no transaction overhead, no write support.
 pub struct RocksReadSnapshot<'db> {
+    /// Raw iterator reused across account history lookups.
+    ///
+    /// Declared before `inner` so it is dropped before the snapshot it reads from.
+    accounts_history_iter: Mutex<Option<RocksDBRawIterEnum<'db>>>,
+    /// Raw iterator reused across storage history lookups.
+    ///
+    /// Declared before `inner` so it is dropped before the snapshot it reads from.
+    storages_history_iter: Mutex<Option<RocksDBRawIterEnum<'db>>>,
     inner: RocksReadSnapshotInner<'db>,
     provider: &'db RocksDBProvider,
 }
@@ -1606,16 +1627,6 @@ enum RocksReadSnapshotInner<'db> {
     ReadWrite(SnapshotWithThreadMode<'db, OptimisticTransactionDB>),
     /// Direct reads from a secondary `DB` instance (no snapshot).
     Secondary(&'db DB),
-}
-
-impl<'db> RocksReadSnapshotInner<'db> {
-    /// Returns a raw iterator over a column family.
-    fn raw_iterator_cf(&self, cf: &rocksdb::ColumnFamily) -> RocksDBRawIterEnum<'_> {
-        match self {
-            Self::ReadWrite(snap) => RocksDBRawIterEnum::ReadWrite(snap.raw_iterator_cf(cf)),
-            Self::Secondary(db) => RocksDBRawIterEnum::ReadOnly(db.raw_iterator_cf(cf)),
-        }
-    }
 }
 
 impl fmt::Debug for RocksReadSnapshot<'_> {
@@ -1630,6 +1641,27 @@ impl<'db> RocksReadSnapshot<'db> {
     /// Gets the column family handle for a table.
     fn cf_handle<T: Table>(&self) -> Result<&'db rocksdb::ColumnFamily, DatabaseError> {
         self.provider.get_cf_handle::<T>()
+    }
+
+    /// Creates a raw iterator over `cf` that observes this snapshot.
+    ///
+    /// The iterator is created from the database handle rather than from the snapshot value, so
+    /// its lifetime is tied to the database and it can be cached in `self`. The snapshot is
+    /// attached through [`ReadOptions`], giving the same point-in-time view as reading through the
+    /// snapshot directly.
+    fn new_raw_iterator_cf(&self, cf: &rocksdb::ColumnFamily) -> RocksDBRawIterEnum<'db> {
+        match &self.inner {
+            RocksReadSnapshotInner::ReadWrite(snap) => {
+                let mut readopts = ReadOptions::default();
+                readopts.set_snapshot(snap);
+                RocksDBRawIterEnum::ReadWrite(
+                    self.provider.0.db_rw().raw_iterator_cf_opt(cf, readopts),
+                )
+            }
+            RocksReadSnapshotInner::Secondary(db) => {
+                RocksDBRawIterEnum::ReadOnly((*db).raw_iterator_cf(cf))
+            }
+        }
     }
 
     /// Gets a value from the specified table.
@@ -1663,6 +1695,7 @@ impl<'db> RocksReadSnapshot<'db> {
     ) -> ProviderResult<HistoryInfo> {
         let key = ShardedKey::new(address, block_number);
         self.history_info::<tables::AccountsHistory>(
+            &self.accounts_history_iter,
             key.encode().as_ref(),
             block_number,
             lowest_available_block_number,
@@ -1690,6 +1723,7 @@ impl<'db> RocksReadSnapshot<'db> {
     ) -> ProviderResult<HistoryInfo> {
         let key = StorageShardedKey::new(address, storage_key, block_number);
         self.history_info::<tables::StoragesHistory>(
+            &self.storages_history_iter,
             key.encode().as_ref(),
             block_number,
             lowest_available_block_number,
@@ -1711,8 +1745,13 @@ impl<'db> RocksReadSnapshot<'db> {
     /// The result is derived from the history that is visible through `visible_tip`, not from the
     /// full contents of `RocksDB`. This lets a reader combine an older MDBX snapshot with a newer
     /// Rocks snapshot without routing through history entries that MDBX cannot see yet.
+    ///
+    /// `iter_cache` holds the raw iterator for `T`'s column family. Seeking an existing iterator
+    /// is much cheaper than constructing one, so the iterator is created on the first lookup and
+    /// reused by every later lookup through this snapshot.
     fn history_info<T>(
         &self,
+        iter_cache: &Mutex<Option<RocksDBRawIterEnum<'db>>>,
         encoded_key: &[u8],
         block_number: BlockNumber,
         lowest_available_block_number: Option<BlockNumber>,
@@ -1733,7 +1772,8 @@ impl<'db> RocksReadSnapshot<'db> {
         };
 
         let cf = self.cf_handle::<T>()?;
-        let mut iter = self.inner.raw_iterator_cf(cf);
+        let mut guard = iter_cache.lock();
+        let iter = guard.get_or_insert_with(|| self.new_raw_iterator_cf(cf));
 
         iter.seek(encoded_key);
         iter.status().map_err(|e| {
@@ -1790,6 +1830,50 @@ impl<'db> RocksReadSnapshot<'db> {
             is_before_first_write,
             lowest_available_block_number,
         ))
+    }
+}
+
+/// A [`RocksReadSnapshot`] that owns the [`RocksDBProvider`] handle it reads through.
+///
+/// [`RocksDBProvider::snapshot`] borrows the provider, so a reader that wants to keep a single
+/// snapshot alive has to keep the provider handle next to it. This type does that, which lets the
+/// snapshot cache its history iterators across lookups.
+pub struct OwnedRocksReadSnapshot {
+    /// Borrows from `provider`, so it must be declared first: struct fields are dropped in
+    /// declaration order, and the snapshot and its iterators must be released before the database
+    /// handle they read from.
+    snapshot: RocksReadSnapshot<'static>,
+    provider: Box<RocksDBProvider>,
+}
+
+impl fmt::Debug for OwnedRocksReadSnapshot {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("OwnedRocksReadSnapshot").field("provider", &self.provider).finish()
+    }
+}
+
+impl OwnedRocksReadSnapshot {
+    fn new(provider: &RocksDBProvider) -> Self {
+        let provider = Box::new(provider.clone());
+        let snapshot = provider.snapshot();
+        // SAFETY: `snapshot` borrows the boxed `RocksDBProvider`, which is never moved out of or
+        // handed out mutably, and whose `Arc` keeps the database open for as long as `self` lives.
+        // `snapshot` is declared before `provider`, so it is dropped first.
+        let snapshot = unsafe {
+            std::mem::transmute::<RocksReadSnapshot<'_>, RocksReadSnapshot<'static>>(snapshot)
+        };
+        Self { snapshot, provider }
+    }
+
+    /// Returns the borrowed snapshot.
+    pub fn as_snapshot(&self) -> &RocksReadSnapshot<'_> {
+        // SAFETY: shortening the snapshot's lifetime to this borrow of `self` is sound; the owned
+        // provider handle keeps the database open for at least that long.
+        unsafe {
+            std::mem::transmute::<&RocksReadSnapshot<'static>, &RocksReadSnapshot<'_>>(
+                &self.snapshot,
+            )
+        }
     }
 }
 
