@@ -3,7 +3,7 @@ use alloy_consensus::{
 };
 use alloy_eip7928::{bal::DecodedBal, compute_block_access_list_hash};
 use alloy_eips::eip7685::RequestsOrHash;
-use alloy_primitives::{map::AddressSet, Address, B256, U256};
+use alloy_primitives::{map::AddressSet, Address, Bytes, B256, U256};
 use alloy_rpc_types_beacon::relay::{
     BidTrace, BuilderBlockValidationRequest, BuilderBlockValidationRequestV2,
     BuilderBlockValidationRequestV3, BuilderBlockValidationRequestV4,
@@ -475,9 +475,10 @@ where
         let payload = ExecutionPayload::V4(request.request.execution_payload);
         validate_message_against_payload(&request.request.message, &payload)?;
 
-        let decoded_bal =
-            DecodedBal::from_rlp_bytes(payload.as_v4().unwrap().block_access_list.clone())
-                .map_err(ValidationApiError::InvalidBlockAccessList)?;
+        decode_and_validate_bal_gas_limit(
+            payload.as_v4().unwrap().block_access_list.clone(),
+            payload.as_v1().gas_limit,
+        )?;
 
         let block = self.payload_validator.ensure_well_formed_payload(ExecutionData {
             payload,
@@ -510,7 +511,7 @@ where
             block,
             request.request.message,
             request.registered_gas_limit,
-            Some(decoded_bal),
+            None,
         )
         .await
     }
@@ -639,6 +640,17 @@ pub struct ValidationApiInner<Provider, E: ConfigureEvm, T: PayloadTypes> {
     task_spawner: Runtime,
     /// Validation metrics
     metrics: ValidationMetrics,
+}
+
+/// Decodes the submitted BAL and checks its EIP-7928 item budget before blob verification.
+fn decode_and_validate_bal_gas_limit(
+    bytes: Bytes,
+    gas_limit: u64,
+) -> Result<(), ValidationApiError> {
+    let decoded_bal =
+        DecodedBal::from_rlp_bytes(bytes).map_err(ValidationApiError::InvalidBlockAccessList)?;
+    decoded_bal.as_bal().validate_gas_limit(gas_limit).map_err(ConsensusError::from)?;
+    Ok(())
 }
 
 /// Ensures that the raw execution payload fields match the corresponding [`BidTrace`] fields.
@@ -799,11 +811,42 @@ pub(crate) struct ValidationMetrics {
 #[cfg(test)]
 mod tests {
     use super::{
-        hash_disallow_list, validate_message_against_payload, AddressSet, ValidationApiError,
+        decode_and_validate_bal_gas_limit, hash_disallow_list, validate_message_against_payload,
+        AddressSet, ValidationApiError,
     };
-    use alloy_primitives::{Address, B256};
+    use alloy_eip7928::{bal::Bal, AccountChanges, BlockAccessListGasError, ITEM_COST};
+    use alloy_primitives::{Address, B256, U256};
     use alloy_rpc_types_beacon::relay::BidTrace;
     use alloy_rpc_types_engine::{ExecutionPayload, ExecutionPayloadV1};
+    use reth_errors::ConsensusError;
+
+    #[test]
+    fn test_bal_gas_budget_boundary() {
+        let bal = Bal::new(vec![AccountChanges::new(Address::ZERO)
+            .with_storage_read(U256::from(1))
+            .with_storage_read(U256::from(2))]);
+        assert_eq!(bal.total_bal_items(), 3);
+
+        decode_and_validate_bal_gas_limit(alloy_rlp::encode(&bal).into(), 3 * ITEM_COST as u64)
+            .unwrap();
+    }
+
+    #[test]
+    fn test_bal_gas_budget_boundary_plus_one() {
+        let bal = Bal::new(vec![AccountChanges::new(Address::ZERO)
+            .with_storage_read(U256::from(1))
+            .with_storage_read(U256::from(2))
+            .with_storage_read(U256::from(3))]);
+        let gas_limit = 3 * ITEM_COST as u64;
+        let err = decode_and_validate_bal_gas_limit(alloy_rlp::encode(&bal).into(), gas_limit)
+            .unwrap_err();
+        let ValidationApiError::Consensus(ConsensusError::BlockAccessListCostMoreThanGasLimit(err)) =
+            err
+        else {
+            panic!("expected BAL gas-limit error, got {err:?}");
+        };
+        assert_eq!(*err, BlockAccessListGasError::new(4, gas_limit));
+    }
 
     fn test_execution_payload() -> ExecutionPayload {
         ExecutionPayload::V1(ExecutionPayloadV1 {
