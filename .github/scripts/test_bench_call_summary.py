@@ -1,0 +1,286 @@
+#!/usr/bin/env python3
+"""Tests for bench-call-summary.py.
+
+Run with: python3 -m unittest discover -s .github/scripts
+"""
+
+from __future__ import annotations
+
+import csv
+import importlib.util
+import json
+from pathlib import Path
+import tempfile
+import unittest
+
+
+def _load_module():
+    path = Path(__file__).resolve().with_name("bench-call-summary.py")
+    spec = importlib.util.spec_from_file_location("bench_call_summary", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+summary_script = _load_module()
+
+HEAD_HASH = "0x" + "ab" * 32
+PASSES = 3
+
+
+def digest_for(record_index: int) -> str:
+    return "0x" + f"{record_index:064x}"
+
+
+def write_run(
+    directory: Path,
+    methods: list[str],
+    latency_us: int,
+    digests: dict[int, str] | None = None,
+    kinds: dict[int, str] | None = None,
+    head_hash: str = HEAD_HASH,
+    usage_usec: int = 2_000_000,
+    nondeterministic: list[int] | None = None,
+) -> Path:
+    """Write one synthetic `bench call` run directory."""
+    directory.mkdir(parents=True, exist_ok=True)
+    digests = digests or {}
+    kinds = kinds or {}
+    records = list(enumerate(methods, start=1))
+
+    with (directory / "responses.ndjson").open("w") as f:
+        for index, method in records:
+            f.write(
+                json.dumps(
+                    {
+                        "record_index": index,
+                        "method": method,
+                        "kind": kinds.get(index, "ok"),
+                        "digest": digests.get(index, digest_for(index)),
+                        "len": 1024 + index,
+                    }
+                )
+                + "\n"
+            )
+
+    with (directory / "record_timings.csv").open("w", newline="") as f:
+        writer = csv.writer(f)
+        writer.writerow(["record_index", "method", "pass", "latency_us", "status"])
+        for index, method in records:
+            for pass_index in range(1, PASSES + 1):
+                writer.writerow([index, method, pass_index, latency_us + index, "ok"])
+
+    with (directory / "requests.csv").open("w", newline="") as f:
+        writer = csv.writer(f)
+        writer.writerow(["offset_ms", "record_index", "method", "latency_us", "status"])
+        offset = 0
+        for repeat in range(4):
+            for index, method in records:
+                offset += 10
+                status = "ok" if not (repeat == 3 and index == 1) else "rpc_error"
+                writer.writerow([offset, index, method, latency_us + index, status])
+
+    report = {
+        "chain_id": 1,
+        "head": 25_490_000,
+        "head_hash": head_hash,
+        "closed_loop_rps": 1_000_000 / latency_us,
+        "dropped": 0,
+        "nondeterministic": nondeterministic or [],
+        "methods": {
+            method: {"closed_loop_rps": 1_000_000 / latency_us, "dropped": 0}
+            for method in set(methods)
+        },
+    }
+    (directory / "report.json").write_text(json.dumps(report))
+
+    requests_ok = len(records) * PASSES + len(records) * 4 - 1
+    (directory / "cpu.json").write_text(
+        json.dumps(
+            {
+                "usage_usec_start": 0,
+                "usage_usec_end": usage_usec,
+                "usage_usec_delta": usage_usec,
+                "requests_total": requests_ok + 1,
+                "requests_ok": requests_ok,
+            }
+        )
+    )
+    return directory
+
+
+class CallSummaryTest(unittest.TestCase):
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.work = Path(self._tmp.name)
+        self.addCleanup(self._tmp.cleanup)
+
+    def run_summary(self, extra_args: list[str] | None = None) -> tuple[dict, str]:
+        summary_path = self.work / "summary.json"
+        comment_path = self.work / "comment.md"
+        argv = [
+            "--baseline-dir",
+            str(self.work / "baseline-1"),
+            str(self.work / "baseline-2"),
+            "--feature-dir",
+            str(self.work / "feature-1"),
+            str(self.work / "feature-2"),
+            "--output-summary",
+            str(summary_path),
+            "--output-markdown",
+            str(comment_path),
+            "--class",
+            "call",
+            "--rps",
+            "100",
+            "--duration",
+            "120s",
+            "--passes",
+            "20",
+            "--concurrency",
+            "16",
+            "--warmup-seconds",
+            "60",
+            "--run-pairs",
+            "2",
+        ]
+        argv.extend(extra_args or [])
+        self.assertEqual(summary_script.main(argv), 0)
+        with summary_path.open() as f:
+            return json.load(f), comment_path.read_text()
+
+    def write_arms(
+        self,
+        methods: list[str],
+        feature_digests: dict[int, str] | None = None,
+        baseline_2_digests: dict[int, str] | None = None,
+        feature_head_hash: str = HEAD_HASH,
+    ) -> None:
+        write_run(self.work / "baseline-1", methods, 1_000)
+        write_run(self.work / "baseline-2", methods, 1_010, digests=baseline_2_digests)
+        write_run(
+            self.work / "feature-1",
+            methods,
+            1_005,
+            digests=feature_digests,
+            head_hash=feature_head_hash,
+        )
+        write_run(
+            self.work / "feature-2",
+            methods,
+            1_015,
+            digests=feature_digests,
+            head_hash=feature_head_hash,
+        )
+
+    def test_matching_runs_report_no_mismatches(self):
+        self.write_arms(["eth_call"] * 8)
+        summary, comment = self.run_summary()
+
+        self.assertEqual(summary["mode"], "call")
+        self.assertEqual(summary["parity"]["status"], "matched")
+        totals = summary["parity"]["feature"]["totals"]
+        self.assertEqual(totals["content_mismatch"], 0)
+        self.assertEqual(totals["kind_mismatch"], 0)
+        self.assertEqual(totals["matched"], 16)
+        self.assertEqual(summary["changes"]["parity"]["sig"], "neutral")
+        self.assertIn("matched", comment)
+        self.assertIn("mode: call", comment)
+        # Latency and CPU metrics are present for the whole corpus.
+        for key in ("mean_ms", "p50_ms", "record_median_ms", "cpu_ms_per_request"):
+            self.assertIn(key, summary["baseline"]["stats"])
+            self.assertIn(key, summary["feature"]["stats"])
+
+    def test_feature_content_mismatch_fails_the_verdict(self):
+        self.write_arms(["eth_call"] * 8, feature_digests={3: "0x" + "ff" * 32})
+        summary, comment = self.run_summary()
+
+        self.assertEqual(summary["parity"]["status"], "mismatch")
+        self.assertEqual(summary["changes"]["parity"]["sig"], "bad")
+        totals = summary["parity"]["feature"]["totals"]
+        self.assertEqual(totals["content_mismatch"], 2)
+        self.assertEqual(totals["kind_mismatch"], 0)
+        per_method = summary["parity"]["feature"]["methods"]["eth_call"]
+        self.assertEqual(per_method["divergent_records"], [3])
+        self.assertIn("eth_call", comment)
+        self.assertIn("records 3", comment)
+
+    def test_kind_mismatch_is_reported_separately(self):
+        self.write_arms(["eth_call"] * 8)
+        write_run(
+            self.work / "feature-1",
+            ["eth_call"] * 8,
+            1_005,
+            kinds={2: "rpc_error"},
+        )
+        summary, _ = self.run_summary()
+
+        totals = summary["parity"]["feature"]["totals"]
+        self.assertEqual(totals["kind_mismatch"], 1)
+        self.assertEqual(summary["parity"]["status"], "mismatch")
+
+    def test_baseline_mismatch_is_inconclusive(self):
+        self.write_arms(
+            ["eth_call"] * 8,
+            feature_digests={5: "0x" + "ee" * 32},
+            baseline_2_digests={5: "0x" + "dd" * 32},
+        )
+        summary, comment = self.run_summary()
+
+        self.assertEqual(summary["parity"]["status"], "inconclusive")
+        self.assertEqual(summary["changes"]["parity"]["sig"], "neutral")
+        self.assertTrue(summary["changes"]["parity"]["informational"])
+        self.assertIn("inconclusive", comment)
+
+    def test_mixed_method_corpus_reports_per_method(self):
+        methods = ["eth_call", "eth_call", "debug_traceCall", "debug_traceCall"]
+        self.write_arms(methods)
+        summary, comment = self.run_summary()
+
+        self.assertEqual(sorted(summary["methods"]), ["debug_traceCall", "eth_call"])
+        for entry in summary["methods"].values():
+            self.assertIn("mean_ms", entry["baseline"])
+            self.assertIn("mean", entry["changes"])
+            self.assertEqual(entry["parity"]["content_mismatch"], 0)
+        self.assertIn("### Per-method", comment)
+        self.assertIn("`debug_traceCall`", comment)
+
+    def test_single_method_corpus_omits_per_method_table(self):
+        self.write_arms(["eth_call"] * 8)
+        summary, comment = self.run_summary()
+
+        self.assertEqual(summary["methods"], {})
+        self.assertNotIn("### Per-method", comment)
+
+    def test_head_hash_mismatch_is_refused(self):
+        self.write_arms(["eth_call"] * 8, feature_head_hash="0x" + "cd" * 32)
+        with self.assertRaises(SystemExit) as ctx:
+            self.run_summary()
+        self.assertIn("different chain tips", str(ctx.exception))
+
+    def test_corpus_metadata_is_included(self):
+        self.write_arms(["eth_call"] * 8)
+        meta_path = self.work / "corpus.meta.json"
+        meta_path.write_text(
+            json.dumps(
+                {
+                    "source": "custom",
+                    "name": "captured",
+                    "class": "call",
+                    "methods": ["eth_call"],
+                    "records": 8,
+                    "records_per_method": {"eth_call": 8},
+                    "tip": 25_490_000,
+                    "tip_hash": HEAD_HASH,
+                }
+            )
+        )
+        summary, comment = self.run_summary(["--corpus-meta", str(meta_path)])
+
+        self.assertEqual(summary["corpus"]["name"], "captured")
+        self.assertEqual(summary["corpus"]["source"], "custom")
+        self.assertIn("captured", comment)
+
+
+if __name__ == "__main__":
+    unittest.main()
