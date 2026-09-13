@@ -696,3 +696,7 @@ vergen-git2 = "10.0.1"
 
 # networking
 ipnet = "2.11"
+
+[patch.crates-io]
+# https://github.com/alloy-rs/eips/pull/127
+alloy-eip7928 = { git = "https://github.com/alloy-rs/eips", rev = "cb3e57ef42c3ca13800b637f05586b882fc0a72c" }

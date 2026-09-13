@@ -18,9 +18,9 @@ use crate::tree::{
     PayloadExecutionCache, SavedCache,
 };
 use alloy_consensus::transaction::TxHashRef;
-use alloy_eip7928::bal::DecodedBal;
+use alloy_eip7928::{bal::DecodedBal, BalAccountInfo};
 use alloy_eips::eip4895::Withdrawal;
-use alloy_primitives::{keccak256, B256, U256};
+use alloy_primitives::{keccak256, U256};
 use metrics::{Counter, Gauge, Histogram};
 use rayon::prelude::*;
 use reth_evm::{execute::ExecutableTxFor, ConfigureEvm, Evm, EvmFor, RecoveredTx, SpecFor};
@@ -673,16 +673,16 @@ where
         }
         let address = account_changes.address;
         let mut hashed_address = None;
-        let account_fields = BalAccountStateFields::from_changes(account_changes);
+        let account_info = account_changes.account_info();
 
-        if !bal_account_changes_state_root(account_changes, account_fields) {
+        if !account_info.changes_state_root(account_changes) {
             return;
         }
 
         // If there are any storage changes we can assume that the resulting account info will be
         // non-empty, so the account will exist, and therefore we can pre-emptively send out storage
         // changes to start processing them before potentially hitting the db in the next step.
-        if !account_changes.storage_changes.is_empty() {
+        if account_changes.has_storage_changes() {
             let hashed_address = *hashed_address.get_or_insert_with(|| keccak256(address));
             let storage_map = reth_trie::HashedStorage::from_iter(
                 account_changes
@@ -695,7 +695,9 @@ where
             hashed_update_stream.on_hashed_state_update(hashed_state);
         }
 
-        let existing_account = if account_fields.needs_parent_account() {
+        let existing_account = if account_info.is_complete() {
+            None
+        } else {
             if provider.is_none() {
                 let _span = debug_span!(
                     target: "engine::tree::payload_processor::prewarm",
@@ -731,11 +733,9 @@ where
             }
             let account_reader = provider.as_ref().expect("provider just initialized");
             account_reader.basic_account(&address).ok().flatten()
-        } else {
-            None
         };
 
-        let account = account_fields.into_account(existing_account);
+        let account = bal_account(account_info, existing_account.as_ref());
         let hashed_address = hashed_address.unwrap_or_else(|| keccak256(address));
 
         // It is possible for the resulting account info to be empty. This can happen when, in the
@@ -757,61 +757,20 @@ where
     }
 }
 
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
-struct BalAccountStateFields {
-    balance: Option<U256>,
-    nonce: Option<u64>,
-    code_hash: Option<B256>,
-}
-
-impl BalAccountStateFields {
-    fn from_changes(account_changes: &alloy_eip7928::AccountChanges) -> Self {
-        Self {
-            balance: account_changes.balance_post_state(),
-            nonce: account_changes.nonce_post_state(),
-            code_hash: account_changes.code_post_state().map(|code| {
-                if code.is_empty() {
-                    alloy_consensus::constants::KECCAK_EMPTY
-                } else {
-                    keccak256(code)
-                }
-            }),
-        }
+/// Applies the account fields an EIP-7928 entry changed on top of `existing`, the account as it
+/// was before the block. Fields the block did not change keep their previous values.
+fn bal_account(info: BalAccountInfo, existing: Option<&Account>) -> Account {
+    Account {
+        balance: info
+            .balance
+            .or_else(|| existing.map(|account| account.balance))
+            .unwrap_or(U256::ZERO),
+        nonce: info.nonce.or_else(|| existing.map(|account| account.nonce)).unwrap_or(0),
+        bytecode_hash: info
+            .code_hash
+            .or_else(|| existing.and_then(|account| account.bytecode_hash))
+            .or(Some(alloy_consensus::constants::KECCAK_EMPTY)),
     }
-
-    const fn is_empty(self) -> bool {
-        self.balance.is_none() && self.nonce.is_none() && self.code_hash.is_none()
-    }
-
-    const fn needs_parent_account(self) -> bool {
-        self.balance.is_none() || self.nonce.is_none() || self.code_hash.is_none()
-    }
-
-    fn into_account(self, existing_account: Option<Account>) -> Account {
-        let existing_account = existing_account.as_ref();
-        Account {
-            balance: self.balance.unwrap_or_else(|| {
-                existing_account
-                    .map(|account| account.balance)
-                    .unwrap_or(alloy_primitives::U256::ZERO)
-            }),
-            nonce: self
-                .nonce
-                .unwrap_or_else(|| existing_account.map(|account| account.nonce).unwrap_or(0)),
-            bytecode_hash: self.code_hash.or_else(|| {
-                existing_account
-                    .and_then(|account| account.bytecode_hash)
-                    .or(Some(alloy_consensus::constants::KECCAK_EMPTY))
-            }),
-        }
-    }
-}
-
-const fn bal_account_changes_state_root(
-    account_changes: &alloy_eip7928::AccountChanges,
-    account_fields: BalAccountStateFields,
-) -> bool {
-    !account_fields.is_empty() || !account_changes.storage_changes.is_empty()
 }
 
 /// Returns [`MultiProofTargetsV2`] for withdrawal addresses.
@@ -829,11 +788,8 @@ fn multiproof_targets_from_withdrawals(withdrawals: &[Withdrawal]) -> MultiProof
 mod tests {
     use super::*;
     use alloy_consensus::transaction::Recovered;
-    use alloy_eip7928::{
-        AccountChanges, BalanceChange, BlockAccessIndex, CodeChange, NonceChange, SlotChanges,
-        StorageChange,
-    };
-    use alloy_primitives::{address, bytes};
+    use alloy_eip7928::{AccountChanges, BalanceChange, BlockAccessIndex};
+    use alloy_primitives::{address, B256};
     use reth_chainspec::ChainSpec;
     use reth_ethereum_primitives::TransactionSigned;
     use reth_evm::{execute::WithTxEnv, TxEnvFor};
@@ -884,47 +840,25 @@ mod tests {
     fn bal_read_only_account_does_not_change_state_root() {
         let changes = AccountChanges::new(address!("0000000000000000000000000000000000000001"))
             .with_storage_read(U256::from(1));
-        let fields = BalAccountStateFields::from_changes(&changes);
 
-        assert!(fields.is_empty());
-        assert!(!bal_account_changes_state_root(&changes, fields));
-    }
-
-    #[test]
-    fn bal_account_with_all_leaf_fields_does_not_need_parent_account() {
-        let changes = AccountChanges::new(address!("0000000000000000000000000000000000000001"))
-            .with_balance_change(BalanceChange::new(BlockAccessIndex::new(1), U256::from(10)))
-            .with_nonce_change(NonceChange::new(BlockAccessIndex::new(1), 7))
-            .with_code_change(CodeChange::new(BlockAccessIndex::new(1), bytes!("6001600155")));
-        let fields = BalAccountStateFields::from_changes(&changes);
-
-        assert!(bal_account_changes_state_root(&changes, fields));
-        assert!(!fields.needs_parent_account());
-    }
-
-    #[test]
-    fn bal_storage_change_needs_parent_account_when_leaf_fields_missing() {
-        let changes = AccountChanges::new(address!("0000000000000000000000000000000000000001"))
-            .with_storage_change(SlotChanges::new(
-                U256::from(1),
-                vec![StorageChange::new(BlockAccessIndex::new(1), U256::from(2))],
-            ));
-        let fields = BalAccountStateFields::from_changes(&changes);
-
-        assert!(bal_account_changes_state_root(&changes, fields));
-        assert!(fields.needs_parent_account());
+        assert!(!changes.account_info().changes_state_root(&changes));
     }
 
     #[test]
     fn bal_account_uses_existing_fields_only_when_missing() {
         let changes = AccountChanges::new(address!("0000000000000000000000000000000000000001"))
             .with_balance_change(BalanceChange::new(BlockAccessIndex::new(1), U256::from(10)));
-        let fields = BalAccountStateFields::from_changes(&changes);
-        let account = fields.into_account(Some(Account {
-            balance: U256::from(1),
-            nonce: 3,
-            bytecode_hash: Some(B256::repeat_byte(0xaa)),
-        }));
+        let info = changes.account_info();
+
+        assert!(!info.is_complete());
+        let account = bal_account(
+            info,
+            Some(&Account {
+                balance: U256::from(1),
+                nonce: 3,
+                bytecode_hash: Some(B256::repeat_byte(0xaa)),
+            }),
+        );
 
         assert_eq!(account.balance, U256::from(10));
         assert_eq!(account.nonce, 3);
