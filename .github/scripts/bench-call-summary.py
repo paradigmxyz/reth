@@ -804,9 +804,10 @@ def generate_markdown(
     if derek_command:
         lines.append(f"- Derek command: `{derek_command}`")
     methods = ", ".join(corpus.get("methods") or summary.get("replayed_methods") or []) or "all"
+    top_gas_note = f" (top-gas {corpus['top_gas']})" if corpus.get("top_gas") else ""
     lines.append(
         f"- Corpus: `{corpus.get('name', 'static')}` ({corpus.get('source', 'static')}), "
-        f"class `{corpus.get('class', 'call')}`, {corpus.get('records', summary['records'])} records, "
+        f"class `{corpus.get('class', 'call')}`{top_gas_note}, {corpus.get('records', summary['records'])} records, "
         f"methods: {methods}"
     )
     lines.append(

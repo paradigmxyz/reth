@@ -34,7 +34,7 @@
 #
 # Required env: SCHELK_MOUNT, BENCH_RPC_URL, BENCH_BLOCKS, BENCH_WARMUP_BLOCKS
 # Optional env: BENCH_EXECUTION_MODE, BENCH_BIG_BLOCKS, BENCH_BIG_BLOCKS_TARGET_GAS, BENCH_BAL,
-#               BENCH_CORPUS, BENCH_CORPUS_DIR, BENCH_CALL_CLASS, BENCH_CALL_METHODS
+#               BENCH_CORPUS, BENCH_CORPUS_DIR, BENCH_CALL_CLASS, BENCH_CALL_METHODS, BENCH_CALL_TOP_GAS
 set -euxo pipefail
 
 BINARY="$1"
@@ -228,6 +228,9 @@ if [ "$EXECUTION_MODE" = "call" ]; then
     if [ -n "$CALL_METHODS" ]; then
       CORPUS_METHOD_ARGS+=(--methods "$CALL_METHODS")
     fi
+    if [ -n "${BENCH_CALL_TOP_GAS:-}" ]; then
+      CORPUS_METHOD_ARGS+=(--top-gas "$BENCH_CALL_TOP_GAS")
+    fi
     echo "Generating ${CALL_CLASS} corpus from blocks ${CORPUS_FROM}..${CORPUS_TO} (methods: ${CALL_METHODS:-default})"
     "$TXGEN_ETHEREUM" extract \
       --rpc "$BENCH_RPC_URL" \
@@ -289,6 +292,7 @@ if [ "$EXECUTION_MODE" = "call" ]; then
     --argjson records_per_method "$CORPUS_RECORDS_PER_METHOD" \
     --argjson tip "$HEAD_DEC" \
     --arg tip_hash "$HEAD_HASH" \
+    --argjson top_gas "${BENCH_CALL_TOP_GAS:-null}" \
     '{
       source: (if $source == "static" then "static" else "custom" end),
       name: $name,
@@ -298,6 +302,7 @@ if [ "$EXECUTION_MODE" = "call" ]; then
       records_per_method: $records_per_method,
       tip: $tip,
       tip_hash: $tip_hash,
+      top_gas: $top_gas,
     }' > "$OUTPUT_DIR/corpus.meta.json"
 
   echo "Corpus staged: ${CORPUS_RECORDS} records in ${CORPUS_FILE}"
