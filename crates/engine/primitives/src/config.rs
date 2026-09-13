@@ -36,6 +36,10 @@ pub const DEFAULT_RESERVED_CPU_CORES: usize = 1;
 /// Depth 4 means we keep roughly 16^4 = 65536 potential branch paths at most.
 pub const DEFAULT_SPARSE_TRIE_PRUNE_DEPTH: usize = 4;
 
+/// Default number of recent blocks whose trie nodes stay in the sparse trie cache after those
+/// blocks are persisted. Zero keeps only what the unpersisted in-memory chain touched.
+pub const DEFAULT_SPARSE_TRIE_RETAIN_BLOCKS: u64 = 0;
+
 /// Default timeout for the state root task before spawning a sequential fallback.
 pub const DEFAULT_STATE_ROOT_TASK_TIMEOUT: Duration = Duration::from_secs(1);
 
@@ -179,6 +183,9 @@ pub struct TreeConfig {
     disable_cache_metrics: bool,
     /// Depth for sparse trie pruning after state root computation.
     sparse_trie_prune_depth: usize,
+    /// Number of recent blocks whose trie nodes stay in the sparse trie cache after those blocks
+    /// are persisted.
+    sparse_trie_retain_blocks: u64,
     /// When set, blocks whose total processing time (execution + state reads + state root +
     /// DB commit) exceeds this duration trigger a structured `warn!` log with detailed timing,
     /// state-operation counts, and cache hit-rate metrics. `Duration::ZERO` logs every block.
@@ -256,6 +263,7 @@ impl Default for TreeConfig {
             allow_unwind_canonical_header: false,
             disable_cache_metrics: false,
             sparse_trie_prune_depth: DEFAULT_SPARSE_TRIE_PRUNE_DEPTH,
+            sparse_trie_retain_blocks: DEFAULT_SPARSE_TRIE_RETAIN_BLOCKS,
             slow_block_threshold: None,
             disable_sparse_trie_cache_pruning: false,
             state_root_task_timeout: Some(DEFAULT_STATE_ROOT_TASK_TIMEOUT),
@@ -336,6 +344,7 @@ impl TreeConfig {
             allow_unwind_canonical_header,
             disable_cache_metrics,
             sparse_trie_prune_depth,
+            sparse_trie_retain_blocks: DEFAULT_SPARSE_TRIE_RETAIN_BLOCKS,
             slow_block_threshold,
             disable_sparse_trie_cache_pruning: false,
             state_root_task_timeout,
@@ -665,6 +674,19 @@ impl TreeConfig {
     /// Setter for sparse trie prune depth.
     pub const fn with_sparse_trie_prune_depth(mut self, depth: usize) -> Self {
         self.sparse_trie_prune_depth = depth;
+        self
+    }
+
+    /// Returns the number of recent blocks whose trie nodes stay in the sparse trie cache after
+    /// those blocks are persisted.
+    pub const fn sparse_trie_retain_blocks(&self) -> u64 {
+        self.sparse_trie_retain_blocks
+    }
+
+    /// Setter for the number of recent blocks whose trie nodes stay in the sparse trie cache
+    /// after those blocks are persisted.
+    pub const fn with_sparse_trie_retain_blocks(mut self, blocks: u64) -> Self {
+        self.sparse_trie_retain_blocks = blocks;
         self
     }
 

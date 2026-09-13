@@ -1108,6 +1108,11 @@ Engine:
       --engine.disable-sparse-trie-cache-pruning
           Fully disable sparse trie cache pruning. When set, the cached sparse trie is preserved without any node pruning or storage trie eviction between blocks. Useful for benchmarking the effects of retaining the full trie cache
 
+      --engine.sparse-trie-retain-blocks <SPARSE_TRIE_RETAIN_BLOCKS>
+          Keep trie nodes touched within this many recent blocks in the sparse trie cache even after those blocks are persisted. The cache always keeps what the unpersisted in-memory chain touched; a larger window needs fewer proofs per block at the cost of memory
+
+          [default: 0]
+
       --engine.state-root-task-timeout <STATE_ROOT_TASK_TIMEOUT>
           Configure the timeout for the state root task before spawning a sequential fallback. If the state root task takes longer than this, a sequential computation starts in parallel and whichever finishes first is used.
 
