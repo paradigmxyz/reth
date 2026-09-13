@@ -9,7 +9,8 @@ use nodes::{
 };
 
 use crate::{
-    LeafLookup, LeafLookupError, LeafUpdate, SparseTrie, SparseTrieUpdates, TrieNodeEpoch,
+    blocked::BlockedOn, BlockedLeafUpdates, LeafLookup, LeafLookupError, LeafUpdate, SparseTrie,
+    SparseTrieUpdates, TrieNodeEpoch,
 };
 use alloc::{borrow::Cow, boxed::Box, collections::VecDeque, vec::Vec};
 use alloy_primitives::{keccak256, map::B256Map, B256};
@@ -352,7 +353,11 @@ impl ArenaSparseSubtrie {
                 let logical_len = self.buffers.cursor.head_logical_branch_path_len(&self.arena);
                 self.required_proofs.push((
                     idx,
-                    ArenaRequiredProof { key, parent: ProofV2TargetParent::new(logical_len) },
+                    ArenaRequiredProof {
+                        key,
+                        parent: ProofV2TargetParent::new(logical_len),
+                        blocked_on: BlockedOn::Reveal((logical_len + 1) as u8),
+                    },
                 ));
                 continue;
             }
@@ -387,9 +392,13 @@ impl ArenaSparseSubtrie {
                         (self.num_dirty_leaves as i64 + deltas.num_dirty_leaves_delta) as u64;
 
                     if let RemoveLeafResult::NeedsProof { key, proof_key, parent } = result {
+                        // The collapse waits for a blinded sibling, which is not on the removed
+                        // leaf's own path, so the update is retried with every batch.
+                        let blocked_on = BlockedOn::Retryable;
                         self.required_proofs
-                            .push((idx, ArenaRequiredProof { key: proof_key, parent }));
-                        self.required_proofs.push((idx, ArenaRequiredProof { key, parent }));
+                            .push((idx, ArenaRequiredProof { key: proof_key, parent, blocked_on }));
+                        self.required_proofs
+                            .push((idx, ArenaRequiredProof { key, parent, blocked_on }));
                     }
                 }
                 LeafUpdate::Touched => {}
@@ -501,6 +510,8 @@ struct ArenaRequiredProof {
     key: B256,
     /// The revealed logical parent branch.
     parent: ProofV2TargetParent,
+    /// What the update that triggered this request is waiting for.
+    blocked_on: BlockedOn,
 }
 
 /// An arena-based parallel sparse trie.
@@ -602,6 +613,8 @@ pub struct ArenaParallelSparseTrie {
     root: Index,
     /// Reusable buffers for traversal, RLP encoding, and update actions.
     buffers: ArenaTrieBuffers,
+    /// Leaf updates that hit a blinded node, waiting for it to be revealed.
+    blocked: BlockedLeafUpdates,
     /// Thresholds controlling when parallelism is enabled for different operations.
     parallelism_thresholds: ArenaParallelismThresholds,
 }
@@ -1703,6 +1716,7 @@ impl ArenaParallelSparseTrie {
             parent: ProofV2TargetParent::new(
                 sibling_path.len().checked_sub(1).expect("sibling path has a child nibble"),
             ),
+            blocked_on: BlockedOn::Retryable,
         })
     }
 
@@ -2074,6 +2088,7 @@ impl Default for ArenaParallelSparseTrie {
             upper_arena,
             root,
             buffers: ArenaTrieBuffers::default(),
+            blocked: BlockedLeafUpdates::new(),
             parallelism_thresholds: ArenaParallelismThresholds::default(),
         }
     }
@@ -2168,6 +2183,14 @@ impl SparseTrie for ArenaParallelSparseTrie {
 
         // Sort nodes lexicographically by path.
         nodes.sort_unstable_by_key(|n| n.path);
+
+        // Leaf updates that stopped at one of these paths can be applied again. Nodes that end
+        // up being skipped below only cause a superfluous retry.
+        if !self.blocked.is_empty() {
+            for node in nodes.iter() {
+                self.blocked.mark_revealed(&node.path);
+            }
+        }
 
         let threshold = self.parallelism_thresholds.min_revealed_nodes;
 
@@ -2451,6 +2474,7 @@ impl SparseTrie for ArenaParallelSparseTrie {
             .upper_arena
             .insert(ArenaSparseNode::EmptyRoot { state: ArenaSparseNodeState::Revealed });
         self.buffers.clear();
+        self.blocked.clear();
     }
 
     #[instrument(
@@ -2461,6 +2485,8 @@ impl SparseTrie for ArenaParallelSparseTrie {
     )]
     fn prune(&mut self, prune_before: TrieNodeEpoch) -> usize {
         assert!(self.root_epoch().is_some(), "prune cannot run on a dirty trie");
+        // Pruning re-blinds nodes, which would strand updates waiting for a reveal.
+        debug_assert!(self.blocked.is_empty(), "prune cannot run with blocked leaf updates");
 
         // Only descend if the root is a branch; otherwise there are no subtries.
         if !matches!(&self.upper_arena[self.root], ArenaSparseNode::Branch(_)) {
@@ -2610,14 +2636,20 @@ impl SparseTrie for ArenaParallelSparseTrie {
         updates: &mut B256Map<LeafUpdate>,
         mut proof_required_fn: impl FnMut(B256, ProofV2TargetParent),
     ) -> SparseTrieResult<()> {
-        if updates.is_empty() {
+        if updates.is_empty() && !self.blocked.has_retryable() {
             return Ok(());
         }
 
-        // Drain and sort updates lexicographically by nibbles path.
-        let mut sorted: Vec<_> =
-            updates.drain().map(|(key, update)| (key, Nibbles::unpack(key), update)).collect();
-        sorted.sort_unstable_by_key(|entry| entry.1);
+        // Drain the new updates and the blocked updates that can be applied again into one batch,
+        // sorted lexicographically by nibbles path (which is the order of their packed keys).
+        let mut sorted = Vec::new();
+        self.blocked.take_batch(updates, &mut sorted);
+        if sorted.is_empty() {
+            return Ok(());
+        }
+
+        // Batch indices of the updates that hit a blinded node, filled during the walk below.
+        let mut newly_blocked = Vec::new();
 
         let threshold = self.parallelism_thresholds.min_updates;
         let parallelize_distributed_updates = sorted.len() >= threshold.saturating_mul(4);
@@ -2641,7 +2673,8 @@ impl SparseTrie for ArenaParallelSparseTrie {
                     let parent = ProofV2TargetParent::new(logical_len);
                     trace!(target: TRACE_TARGET, ?key, ?parent, "Update hit blinded node, requesting proof");
                     proof_required_fn(key, parent);
-                    updates.insert(key, update.clone());
+                    newly_blocked
+                        .push((update_idx as u32, BlockedOn::Reveal((logical_len + 1) as u8)));
                 }
                 // Subtrie — forward all consecutive updates under this subtrie's prefix.
                 SeekResult::RevealedSubtrie => {
@@ -2668,9 +2701,9 @@ impl SparseTrie for ArenaParallelSparseTrie {
                     ) {
                         trace!(target: TRACE_TARGET, proof_key = ?proof.key, proof_parent = ?proof.parent, "Subtrie collapse would need blinded sibling, requesting proof");
                         proof_required_fn(proof.key, proof.parent);
-                        for &(key, _, ref update) in subtrie_updates {
-                            updates.insert(key, update.clone());
-                        }
+                        newly_blocked.extend(
+                            (subtrie_start..update_idx).map(|idx| (idx as u32, proof.blocked_on)),
+                        );
                         // Pop the subtrie entry before continuing.
                         continue;
                     }
@@ -2718,8 +2751,8 @@ impl SparseTrie for ArenaParallelSparseTrie {
 
                         for (target_idx, proof) in subtrie.required_proofs.drain(..) {
                             proof_required_fn(proof.key, proof.parent);
-                            let (key, _, ref update) = subtrie_updates[target_idx];
-                            updates.insert(key, update.clone());
+                            newly_blocked
+                                .push(((subtrie_start + target_idx) as u32, proof.blocked_on));
                         }
 
                         // Check if the subtrie's root became empty after updates.
@@ -2776,11 +2809,11 @@ impl SparseTrie for ArenaParallelSparseTrie {
                             &mut self.buffers.updates,
                         );
                         match result {
-                            RemoveLeafResult::NeedsProof { key, proof_key, parent } => {
+                            RemoveLeafResult::NeedsProof { proof_key, parent, .. } => {
                                 proof_required_fn(proof_key, parent);
-                                let update =
-                                    mem::replace(&mut sorted[update_idx].2, LeafUpdate::Touched);
-                                updates.insert(key, update);
+                                // The collapse waits for a blinded sibling, which is not on the
+                                // removed leaf's own path.
+                                newly_blocked.push((update_idx as u32, BlockedOn::Retryable));
                             }
                             RemoveLeafResult::Removed => {
                                 // remove_leaf may have called collapse_branch, which
@@ -2811,6 +2844,8 @@ impl SparseTrie for ArenaParallelSparseTrie {
         self.buffers.cursor = cursor;
 
         if taken.is_empty() {
+            self.blocked.block(&mut sorted, &mut newly_blocked);
+
             #[cfg(debug_assertions)]
             self.debug_assert_subtrie_structure();
 
@@ -2835,11 +2870,9 @@ impl SparseTrie for ArenaParallelSparseTrie {
         // process required proofs.
         let taken_paths: Vec<Nibbles> = taken.iter().map(|(_, s, _)| s.path).collect();
         for (child_idx, mut subtrie, range) in taken {
-            let subtrie_updates = &sorted[range];
             for (target_idx, proof) in subtrie.required_proofs.drain(..) {
                 proof_required_fn(proof.key, proof.parent);
-                let (key, _, ref update) = subtrie_updates[target_idx];
-                updates.insert(key, update.clone());
+                newly_blocked.push(((range.start + target_idx) as u32, proof.blocked_on));
             }
 
             // Restore the subtrie into the upper arena.
@@ -2888,10 +2921,16 @@ impl SparseTrie for ArenaParallelSparseTrie {
             self.buffers.cursor = cursor;
         }
 
+        self.blocked.block(&mut sorted, &mut newly_blocked);
+
         #[cfg(debug_assertions)]
         self.debug_assert_subtrie_structure();
 
         Ok(())
+    }
+
+    fn blocked_updates(&self) -> &BlockedLeafUpdates {
+        &self.blocked
     }
 }
 
