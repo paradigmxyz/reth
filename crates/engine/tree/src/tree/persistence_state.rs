@@ -139,8 +139,8 @@ impl PersistencePacing {
         }
         let mut samples = self.samples.iter().map(Duration::as_secs_f64);
         let first = samples.next().expect("at least two samples");
-        let ema =
-            samples.fold(first, |ema, sample| Self::ALPHA * sample + (1.0 - Self::ALPHA) * ema);
+        let ema = samples
+            .fold(first, |ema, sample| (1.0 - Self::ALPHA).mul_add(ema, Self::ALPHA * sample));
         Duration::from_secs_f64(ema).saturating_sub(validation_duration)
     }
 }
