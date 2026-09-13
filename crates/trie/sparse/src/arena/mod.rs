@@ -2614,10 +2614,11 @@ impl SparseTrie for ArenaParallelSparseTrie {
             return Ok(());
         }
 
-        // Drain and sort updates lexicographically by nibbles path.
+        // Fixed-length packed keys have the same byte-lexicographic order as their nibble paths.
+        let mut packed: Vec<_> = updates.drain().collect();
+        packed.sort_unstable_by_key(|entry| entry.0);
         let mut sorted: Vec<_> =
-            updates.drain().map(|(key, update)| (key, Nibbles::unpack(key), update)).collect();
-        sorted.sort_unstable_by_key(|entry| entry.1);
+            packed.into_iter().map(|(key, update)| (key, Nibbles::unpack(key), update)).collect();
 
         let threshold = self.parallelism_thresholds.min_updates;
         let parallelize_distributed_updates = sorted.len() >= threshold.saturating_mul(4);
@@ -2904,7 +2905,7 @@ mod tests {
     use alloy_primitives::{map::B256Map, B256, U256};
     use rand::{seq::SliceRandom, Rng, SeedableRng};
     use reth_trie::test_utils::TrieTestHarness;
-    use reth_trie_common::ProofV2Target;
+    use reth_trie_common::{Nibbles, ProofV2Target};
     use std::collections::BTreeMap;
     use tracing::{info, trace};
 
@@ -3060,9 +3061,81 @@ mod tests {
         changeset
     }
 
+    #[test]
+    fn packed_leaf_order_matches_nibble_order() {
+        let mut keys = (0u64..1024)
+            .map(|key| alloy_primitives::keccak256(key.to_be_bytes()))
+            .collect::<Vec<_>>();
+        // Exercise each byte position, including prefixes crossing machine-word boundaries.
+        for byte in 0..32 {
+            for value in [0, 1, 15, 16, 127, 128, 255] {
+                let mut key = B256::ZERO;
+                key[byte] = value;
+                keys.push(key);
+            }
+        }
+        let mut nibble_order = keys.clone();
+        keys.sort_unstable();
+        nibble_order.sort_unstable_by_key(|key| Nibbles::unpack(key));
+        assert_eq!(keys, nibble_order);
+    }
+
+    #[test]
+    #[ignore = "focused compact sorting benchmark"]
+    #[expect(
+        clippy::unnecessary_sort_by,
+        reason = "matches the existing packed-comparator experiment"
+    )]
+    fn bench_compact_leaf_sort() {
+        for count in [16u64, 256, 4096, 32768] {
+            let seed = (0..count)
+                .map(|key| {
+                    (
+                        alloy_primitives::keccak256(key.to_be_bytes()),
+                        LeafUpdate::Changed(alloy_rlp::encode(key + 1)),
+                    )
+                })
+                .collect::<alloy_primitives::map::B256Map<_>>();
+            let mut samples = [Vec::new(), Vec::new(), Vec::new()];
+            for iteration in 0..60 {
+                for offset in 0..3 {
+                    let variant = (iteration + offset) % 3;
+                    let mut input = seed.clone();
+                    let start = std::time::Instant::now();
+                    let result = if variant == 2 {
+                        let mut packed = input.drain().collect::<Vec<_>>();
+                        packed.sort_unstable_by_key(|entry| entry.0);
+                        packed
+                            .into_iter()
+                            .map(|(key, value)| (key, Nibbles::unpack(key), value))
+                            .collect::<Vec<_>>()
+                    } else {
+                        let mut unpacked = input
+                            .drain()
+                            .map(|(key, value)| (key, Nibbles::unpack(key), value))
+                            .collect::<Vec<_>>();
+                        if variant == 0 {
+                            unpacked.sort_unstable_by_key(|entry| entry.1);
+                        } else {
+                            unpacked.sort_unstable_by(|a, b| a.0.cmp(&b.0));
+                        }
+                        unpacked
+                    };
+                    std::hint::black_box(&result);
+                    let elapsed = start.elapsed().as_secs_f64() * 1e6;
+                    if iteration >= 10 {
+                        samples[variant].push(elapsed);
+                    }
+                }
+            }
+            let mean = |values: &[f64]| values.iter().sum::<f64>() / values.len() as f64;
+            eprintln!("compact_sort_bench entries={count} nibble_us={:.3} existing_packed_comparator_us={:.3} compact_entries_us={:.3}", mean(&samples[0]), mean(&samples[1]), mean(&samples[2]));
+        }
+    }
+
     proptest! {
         #![proptest_config(ProptestConfig::with_cases(1000))]
-        #[test]
+    #[test]
         fn arena_trie_proptest(
             initial in proptest::collection::btree_map(arb::<B256>(), arb::<U256>(), 0..=100usize),
             changeset1_new_keys in proptest::collection::btree_map(arb::<B256>(), arb::<U256>(), 0..=30usize),
