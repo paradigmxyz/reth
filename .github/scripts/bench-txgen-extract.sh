@@ -136,6 +136,15 @@ HEAD_HASH=$(curl -sf http://127.0.0.1:8545 -X POST \
 
 # Returns non-zero when the snapshot can no longer trace the given block, which
 # happens once the block falls out of the retained account and storage history.
+# The archive node serves the blocks after the snapshot tip for the call
+# classes; probe it once so an outage falls back instead of failing the run.
+archive_rpc_reachable() {
+  local response
+  response=$(curl -sf -m 15 "$BENCH_RPC_URL" -X POST -H 'Content-Type: application/json' \
+    --data '{"jsonrpc":"2.0","id":1,"method":"eth_chainId","params":[]}' 2>/dev/null) || return 1
+  [[ "$response" == *'"result"'* ]]
+}
+
 block_is_traceable() {
   local block="$1"
   local block_hex tx_hash response
@@ -246,11 +255,22 @@ if [ "$EXECUTION_MODE" = "call" ]; then
       call|tracecall)
         # Transactions of the blocks after the tip are exactly the calls a
         # client would have served against the tip state; only the archive
-        # node has those blocks.
-        CORPUS_FROM=$(( HEAD_DEC + 1 ))
-        CORPUS_TO=$(( HEAD_DEC + CALL_BLOCKS ))
+        # node has those blocks. When it is unreachable, the blocks just below
+        # the tip on the snapshot stand in: their calls replay against the tip
+        # state too, only with more reverts.
         CORPUS_FORMAT=calls
-        CORPUS_RPC="$BENCH_RPC_URL"
+        if archive_rpc_reachable; then
+          CORPUS_FROM=$(( HEAD_DEC + 1 ))
+          CORPUS_TO=$(( HEAD_DEC + CALL_BLOCKS ))
+          CORPUS_RPC="$BENCH_RPC_URL"
+          CORPUS_BLOCKS_SOURCE=archive
+        else
+          echo "::warning::Archive node ${BENCH_RPC_URL} is unreachable; building the ${CALL_CLASS} corpus from snapshot blocks below the tip"
+          CORPUS_FROM=$(( HEAD_DEC - CALL_BLOCKS + 1 ))
+          CORPUS_TO="$HEAD_DEC"
+          CORPUS_RPC="http://127.0.0.1:8545"
+          CORPUS_BLOCKS_SOURCE=snapshot
+        fi
         ;;
       tracetx|traceblock)
         # These blocks are on the snapshot, so the throwaway node serves them
@@ -260,6 +280,7 @@ if [ "$EXECUTION_MODE" = "call" ]; then
         CORPUS_TO="$CORPUS_TOP"
         CORPUS_FORMAT=traces
         CORPUS_RPC="http://127.0.0.1:8545"
+        CORPUS_BLOCKS_SOURCE=snapshot
         ;;
       *)
         echo "::error::Unknown call class: ${CALL_CLASS}"
@@ -367,6 +388,9 @@ if [ "$EXECUTION_MODE" = "call" ]; then
     --argjson records_per_method "$CORPUS_RECORDS_PER_METHOD" \
     --argjson tip "$HEAD_DEC" \
     --arg tip_hash "$HEAD_HASH" \
+    --arg blocks_source "${CORPUS_BLOCKS_SOURCE:-}" \
+    --argjson corpus_from "${CORPUS_FROM:-null}" \
+    --argjson corpus_to "${CORPUS_TO:-null}" \
     --argjson top_gas "${BENCH_CALL_TOP_GAS:-null}" \
     --arg tracer "${BENCH_CALL_TRACER:-}" \
     --arg namespace "${BENCH_CALL_NAMESPACE:-}" \
@@ -381,6 +405,9 @@ if [ "$EXECUTION_MODE" = "call" ]; then
       records_per_method: $records_per_method,
       tip: $tip,
       tip_hash: $tip_hash,
+      blocks_source: (if $blocks_source == "" then null else $blocks_source end),
+      corpus_from: $corpus_from,
+      corpus_to: $corpus_to,
       top_gas: $top_gas,
       tracer: (if $tracer == "" then null else ($tracer | split(",")) end),
       namespace: (if $namespace == "" then null else $namespace end),
