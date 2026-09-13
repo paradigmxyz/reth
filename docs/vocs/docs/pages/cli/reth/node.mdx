@@ -1147,6 +1147,11 @@ Engine:
       --engine.disable-bal-batch-io
           Disable BAL (Block Access List) storage prefetch IO during prewarming. When set, BAL storage slots are not read into the execution cache
 
+      --engine.execution-thread-priority <EXECUTION_THREAD_PRIORITY>
+          Priority of the execution side worker threads (CPU, prewarming, BAL streaming and BAL read-set prefetch pools), on a 0-99 scale where a higher value means more CPU.
+
+          The proof workers and the sparse trie keep the process default, so lowering this leaves them more of the machine while a block executes. On Linux the scale is niceness: 47 is nice 0, 35 is nice +5, 0 is nice +19. Unset leaves every pool at the default.
+
 ERA:
       --era.enable
           Enable import from ERA1 files

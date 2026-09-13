@@ -7,7 +7,10 @@
 //! - [`BlockingTaskGuard`] for rate-limiting expensive operations (with `rayon` feature)
 
 #[cfg(feature = "rayon")]
-use crate::pool::{build_pool_with_panic_handler, BlockingTaskGuard, BlockingTaskPool, WorkerPool};
+use crate::pool::{
+    build_pool_with_panic_handler, with_thread_priority, BlockingTaskGuard, BlockingTaskPool,
+    WorkerPool,
+};
 use crate::{
     metrics::{IncCounterOnDrop, TaskExecutorMetrics},
     shutdown::{GracefulShutdown, GracefulShutdownGuard, Shutdown},
@@ -122,6 +125,13 @@ pub struct RayonConfig {
     /// Number of threads for the state trie overlay worker pool.
     /// If `None`, uses [`DEFAULT_STATE_TRIE_OVERLAY_WORKER_THREADS`].
     pub state_trie_overlay_worker_threads: Option<usize>,
+    /// Thread priority for the execution side pools (CPU, prewarming, BAL streaming) on the
+    /// crossplatform `0..=99` scale of
+    /// [`lower_thread_priority`](crate::utils::lower_thread_priority).
+    ///
+    /// Lowering it leaves more of the machine to the proof worker pools while a block executes.
+    /// If `None`, every pool runs at the process default.
+    pub execution_thread_priority: Option<u8>,
 }
 
 #[cfg(feature = "rayon")]
@@ -138,6 +148,7 @@ impl Default for RayonConfig {
             prewarming_threads: None,
             bal_streaming_threads: None,
             state_trie_overlay_worker_threads: None,
+            execution_thread_priority: None,
         }
     }
 }
@@ -204,6 +215,12 @@ impl RayonConfig {
         state_trie_overlay_worker_threads: usize,
     ) -> Self {
         self.state_trie_overlay_worker_threads = Some(state_trie_overlay_worker_threads);
+        self
+    }
+
+    /// Set the thread priority of the execution side pools.
+    pub const fn with_execution_thread_priority(mut self, execution_thread_priority: u8) -> Self {
+        self.execution_thread_priority = Some(execution_thread_priority);
         self
     }
 
@@ -295,6 +312,10 @@ struct RuntimeInner {
     /// State trie overlay worker pool.
     #[cfg(feature = "rayon")]
     state_trie_overlay_worker_pool: Arc<WorkerPool>,
+    /// Thread priority the execution side pools were built with, for pools that are spawned
+    /// outside this runtime.
+    #[cfg(feature = "rayon")]
+    execution_thread_priority: Option<u8>,
     /// Named single-thread worker map. Each unique name gets a dedicated OS thread
     /// that is reused across all tasks submitted under that name.
     worker_map: WorkerMap,
@@ -391,6 +412,12 @@ impl Runtime {
     pub fn state_trie_overlay_worker_pool(&self) -> Arc<WorkerPool> {
         Arc::clone(&self.0.state_trie_overlay_worker_pool)
     }
+
+    /// Get the thread priority configured for the execution side pools, if any.
+    #[cfg(feature = "rayon")]
+    pub fn execution_thread_priority(&self) -> Option<u8> {
+        self.0.execution_thread_priority
+    }
 }
 
 // ── Test helpers ──────────────────────────────────────────────────────
@@ -427,6 +454,7 @@ impl Runtime {
                 prewarming_threads: Some(2),
                 bal_streaming_threads: Some(2),
                 state_trie_overlay_worker_threads: Some(2),
+                execution_thread_priority: None,
             },
         }
     }
@@ -898,12 +926,14 @@ impl RuntimeBuilder {
         ) = {
             let default_threads = config.rayon.default_thread_count();
             let rpc_threads = config.rayon.rpc_threads.unwrap_or(default_threads);
+            let execution_thread_priority = config.rayon.execution_thread_priority;
 
-            let cpu_pool = build_pool_with_panic_handler(
+            let cpu_pool = build_pool_with_panic_handler(with_thread_priority(
                 rayon::ThreadPoolBuilder::new()
                     .num_threads(default_threads)
                     .thread_name(|i| format!("cpu-{i:02}")),
-            )?;
+                execution_thread_priority,
+            ))?;
 
             let rpc_raw = build_pool_with_panic_handler(
                 rayon::ThreadPoolBuilder::new()
@@ -933,11 +963,13 @@ impl RuntimeBuilder {
                 WorkerPool::new(proof_account_worker_threads, "proof-acct");
 
             let prewarming_threads = config.rayon.prewarming_threads.unwrap_or(default_threads);
-            let prewarming_pool = WorkerPool::new(prewarming_threads, "prewarm");
+            let prewarming_pool = WorkerPool::new(prewarming_threads, "prewarm")
+                .with_thread_priority(execution_thread_priority);
 
             let bal_streaming_threads =
                 config.rayon.bal_streaming_threads.unwrap_or(default_threads);
-            let bal_streaming_pool = WorkerPool::new(bal_streaming_threads, "bal-stream");
+            let bal_streaming_pool = WorkerPool::new(bal_streaming_threads, "bal-stream")
+                .with_thread_priority(execution_thread_priority);
 
             let state_trie_overlay_worker_threads = config
                 .rayon
@@ -955,6 +987,7 @@ impl RuntimeBuilder {
                 prewarming_threads,
                 bal_streaming_threads,
                 state_trie_overlay_worker_threads,
+                ?execution_thread_priority,
                 max_blocking_tasks = config.rayon.max_blocking_tasks,
                 "Configured lazy rayon worker pools"
             );
@@ -1005,6 +1038,8 @@ impl RuntimeBuilder {
             bal_streaming_pool,
             #[cfg(feature = "rayon")]
             state_trie_overlay_worker_pool,
+            #[cfg(feature = "rayon")]
+            execution_thread_priority: config.rayon.execution_thread_priority,
             worker_map: WorkerMap::new(),
             task_manager_handle: Mutex::new(Some(task_manager_handle)),
         };

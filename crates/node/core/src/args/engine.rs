@@ -564,6 +564,15 @@ pub struct EngineArgs {
     #[arg(long = "engine.disable-bal-batch-io", default_value_t = false)]
     pub disable_bal_batch_io: bool,
 
+    /// Priority of the execution side worker threads (CPU, prewarming, BAL streaming and BAL
+    /// read-set prefetch pools), on a 0-99 scale where a higher value means more CPU.
+    ///
+    /// The proof workers and the sparse trie keep the process default, so lowering this leaves
+    /// them more of the machine while a block executes. On Linux the scale is niceness: 47 is
+    /// nice 0, 35 is nice +5, 0 is nice +19. Unset leaves every pool at the default.
+    #[arg(long = "engine.execution-thread-priority", value_parser = RangedU64ValueParser::<u8>::new().range(0..=99))]
+    pub execution_thread_priority: Option<u8>,
+
     /// Add random jitter before each proof computation (trie-debug only).
     /// Each proof worker sleeps for a random duration up to this value before
     /// starting work. Useful for stress-testing timing-sensitive proof logic.
@@ -654,6 +663,7 @@ impl Default for EngineArgs {
             bal_parallel_execution_disabled,
             bal_parallel_state_root_disabled,
             disable_bal_batch_io: false,
+            execution_thread_priority: None,
             #[cfg(feature = "trie-debug")]
             proof_jitter: None,
         }
@@ -914,6 +924,7 @@ mod tests {
             bal_parallel_execution_disabled: true,
             bal_parallel_state_root_disabled: true,
             disable_bal_batch_io: true,
+            execution_thread_priority: Some(35),
             #[cfg(feature = "trie-debug")]
             proof_jitter: None,
         };
@@ -958,6 +969,8 @@ mod tests {
             "--engine.disable-bal-parallel-execution",
             "--engine.disable-bal-parallel-state-root",
             "--engine.disable-bal-batch-io",
+            "--engine.execution-thread-priority",
+            "35",
         ])
         .args;
 

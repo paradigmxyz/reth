@@ -5,6 +5,7 @@ use reth_execution_cache::{CachedStateProvider, ExecutionCache, TxPoolPrewarmCac
 use reth_provider::{
     AccountReader, BytecodeReader, ProviderResult, StateProvider, StateProviderBox,
 };
+use reth_tasks::utils::lower_thread_priority;
 use std::{
     sync::{
         atomic::{AtomicUsize, Ordering},
@@ -54,7 +55,10 @@ pub struct BalPrewarmPool {
 impl BalPrewarmPool {
     /// Spawns `num_threads` long-lived blocking worker threads. Owned by the
     /// [`PayloadProcessor`](super::PayloadProcessor); the threads exit when the pool is dropped.
-    pub fn new(num_threads: usize) -> Arc<Self> {
+    ///
+    /// Each worker applies `thread_priority` to itself, see
+    /// [`lower_thread_priority`](reth_tasks::utils::lower_thread_priority).
+    pub fn new(num_threads: usize, thread_priority: Option<u8>) -> Arc<Self> {
         let mut workers = Vec::with_capacity(num_threads);
         let mut handles = Vec::with_capacity(num_threads);
         for i in 0..num_threads {
@@ -63,7 +67,12 @@ impl BalPrewarmPool {
             handles.push(
                 std::thread::Builder::new()
                     .name(format!("bal-prewarm-{i:03}"))
-                    .spawn(move || prewarm_loop(rx))
+                    .spawn(move || {
+                        if let Some(priority) = thread_priority {
+                            lower_thread_priority(priority);
+                        }
+                        prewarm_loop(rx)
+                    })
                     .expect("spawn bal-prewarm thread"),
             );
         }
