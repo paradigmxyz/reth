@@ -8,13 +8,13 @@ use eyre::ensure;
 use reth_cli_util::{parse_duration_from_secs_or_ms, parsers::format_duration_as_secs_or_ms};
 use reth_engine_primitives::{
     TreeConfig, DEFAULT_INVALID_HEADER_HIT_EVICTION_THRESHOLD, DEFAULT_MULTIPROOF_TASK_CHUNK_SIZE,
-    DEFAULT_PERSISTENCE_BACKPRESSURE_THRESHOLD,
+    DEFAULT_NUM_STATE_MASKING_BLOCKS, DEFAULT_PERSISTENCE_BACKPRESSURE_THRESHOLD,
 };
 use std::{sync::OnceLock, time::Duration};
 
 use crate::node_config::{
     DEFAULT_CROSS_BLOCK_CACHE_SIZE_MB, DEFAULT_MEMORY_BLOCK_BUFFER_TARGET,
-    DEFAULT_RESERVED_CPU_CORES,
+    DEFAULT_PERSISTENCE_THRESHOLD, DEFAULT_RESERVED_CPU_CORES,
 };
 
 /// Global static engine defaults
@@ -262,9 +262,9 @@ impl DefaultEngineValues {
 impl Default for DefaultEngineValues {
     fn default() -> Self {
         Self {
-            persistence_threshold: 50,
+            persistence_threshold: DEFAULT_PERSISTENCE_THRESHOLD,
             persistence_backpressure_threshold: DEFAULT_PERSISTENCE_BACKPRESSURE_THRESHOLD,
-            num_state_masking_blocks: 40,
+            num_state_masking_blocks: DEFAULT_NUM_STATE_MASKING_BLOCKS,
             memory_block_buffer_target: DEFAULT_MEMORY_BLOCK_BUFFER_TARGET,
             invalid_header_hit_eviction_threshold: DEFAULT_INVALID_HEADER_HIT_EVICTION_THRESHOLD,
             state_cache_disabled: false,
@@ -721,6 +721,9 @@ impl EngineArgs {
             tracing::warn!(target: "reth::cli", "--engine.legacy-state-root has no effect anymore, use --engine.state-root-fallback to force synchronous state root computation");
         }
         let config = TreeConfig::default()
+            // Clear the default window before applying overrides that may be smaller than it.
+            .with_num_state_masking_blocks(0)
+            .with_persistence_threshold(0)
             .with_persistence_backpressure_threshold(self.persistence_backpressure_threshold())
             .with_persistence_threshold(self.persistence_threshold)
             .with_memory_block_buffer_target(self.memory_block_buffer_target())
@@ -881,7 +884,7 @@ mod tests {
         let args = EngineArgs {
             persistence_threshold: 100,
             persistence_backpressure_threshold: Some(101),
-            num_state_masking_blocks: 40,
+            num_state_masking_blocks: DEFAULT_NUM_STATE_MASKING_BLOCKS,
             memory_block_buffer_target: Some(50),
             invalid_header_hit_eviction_threshold: 7,
             legacy_state_root_task_enabled: true,
@@ -1050,6 +1053,27 @@ mod tests {
         assert_eq!(args.memory_block_buffer_target(), 4);
         assert_eq!(args.tree_config().memory_block_buffer_target(), 4);
         args.validate().unwrap();
+    }
+
+    #[test]
+    fn explicit_persistence_settings_can_be_lower_than_defaults() {
+        let args = CommandParser::<EngineArgs>::parse_from([
+            "reth",
+            "--engine.persistence-threshold",
+            "0",
+            "--engine.num-state-masking-blocks",
+            "0",
+            "--engine.persistence-backpressure-threshold",
+            "1",
+        ])
+        .args;
+
+        args.validate().unwrap();
+        let config = args.tree_config();
+        assert_eq!(config.persistence_threshold(), 0);
+        assert_eq!(config.num_state_masking_blocks(), 0);
+        assert_eq!(config.memory_block_buffer_target(), 0);
+        assert_eq!(config.persistence_backpressure_threshold(), 1);
     }
 
     #[test]
