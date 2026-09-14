@@ -3,14 +3,9 @@
 #![allow(dead_code)]
 
 use crate::{
-    cache::LruCache,
     transactions::{
-        constants::{
-            tx_fetcher::DEFAULT_MAX_COUNT_FALLBACK_PEERS,
-            tx_manager::DEFAULT_MAX_COUNT_TRANSACTIONS_SEEN_BY_PEER,
-        },
-        fetcher::{TransactionFetcher, TxFetchMetadata},
-        PeerMetadata, TransactionsManager,
+        constants::tx_manager::DEFAULT_MAX_COUNT_TRANSACTIONS_SEEN_BY_PEER,
+        fetcher::TransactionFetcher, PeerMetadata, TransactionsManager, TransactionsManagerConfig,
     },
     NetworkConfigBuilder, NetworkManager,
 };
@@ -25,10 +20,16 @@ use reth_transaction_pool::test_utils::{testing_pool, TestPool};
 use secp256k1::SecretKey;
 use std::sync::Arc;
 use tokio::sync::mpsc;
-use tracing::trace;
 
 /// A new tx manager for testing.
 pub async fn new_tx_manager(
+) -> (TransactionsManager<TestPool, EthNetworkPrimitives>, NetworkManager<EthNetworkPrimitives>) {
+    new_tx_manager_with_config(TransactionsManagerConfig::default()).await
+}
+
+/// A new tx manager for testing with the given config.
+pub async fn new_tx_manager_with_config(
+    transactions_manager_config: TransactionsManagerConfig,
 ) -> (TransactionsManager<TestPool, EthNetworkPrimitives>, NetworkManager<EthNetworkPrimitives>) {
     let secret_key = SecretKey::new(&mut rand_08::thread_rng());
     let client = NoopProvider::default();
@@ -41,7 +42,6 @@ pub async fn new_tx_manager(
 
     let pool = testing_pool();
 
-    let transactions_manager_config = config.transactions_manager_config.clone();
     let (_network_handle, network, transactions, _) = NetworkManager::new(config)
         .await
         .unwrap()
@@ -52,34 +52,14 @@ pub async fn new_tx_manager(
     (transactions, network)
 }
 
-/// Directly buffer hash into tx fetcher for testing.
+/// Announces a hash to the tx fetcher on behalf of the given peer, without sending a request.
 pub fn buffer_hash_to_tx_fetcher(
     tx_fetcher: &mut TransactionFetcher,
     hash: TxHash,
     peer_id: PeerId,
-    retries: u8,
     tx_encoded_length: Option<usize>,
 ) {
-    match tx_fetcher.hashes_fetch_inflight_and_pending_fetch.get_or_insert(hash, || {
-        TxFetchMetadata::new(
-            retries,
-            LruCache::with_hasher(DEFAULT_MAX_COUNT_FALLBACK_PEERS as u32, Default::default()),
-            tx_encoded_length,
-        )
-    }) {
-        Some(metadata) => {
-            metadata.fallback_peers_mut().insert(peer_id);
-        }
-        None => {
-            trace!(target: "net::tx",
-                    peer_id=format!("{peer_id:#}"),
-                    %hash,
-                    "failed to insert hash from peer in schnellru::LruMap, dropping hash"
-            )
-        }
-    }
-
-    tx_fetcher.hashes_pending_fetch.insert(hash);
+    tx_fetcher.on_announcement(peer_id, [(hash, tx_encoded_length.map(|size| (0u8, size)))]);
 }
 
 /// Mock a new session, returns (peer, channel-to-send-get-pooled-tx-response-on).
@@ -87,7 +67,17 @@ pub fn new_mock_session(
     peer_id: PeerId,
     version: EthVersion,
 ) -> (PeerMetadata<EthNetworkPrimitives>, mpsc::Receiver<PeerRequest>) {
-    let (to_mock_session_tx, to_mock_session_rx) = mpsc::channel(1);
+    new_mock_session_with_capacity(peer_id, version, 1)
+}
+
+/// Mock a new session whose request channel buffers up to `capacity` requests, returns (peer,
+/// channel-to-send-get-pooled-tx-response-on).
+pub fn new_mock_session_with_capacity(
+    peer_id: PeerId,
+    version: EthVersion,
+    capacity: usize,
+) -> (PeerMetadata<EthNetworkPrimitives>, mpsc::Receiver<PeerRequest>) {
+    let (to_mock_session_tx, to_mock_session_rx) = mpsc::channel(capacity);
 
     (
         PeerMetadata::new(
