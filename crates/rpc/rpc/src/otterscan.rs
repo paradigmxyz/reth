@@ -389,7 +389,7 @@ fn find_contract_creator(
 ///
 /// Pages are selected from the end of the block, retaining block order within each page.
 /// The frontend reverses each page and uses this ordering for transaction-index links.
-fn block_transaction_page_range(
+const fn block_transaction_page_range(
     tx_len: usize,
     page_number: usize,
     page_size: usize,
