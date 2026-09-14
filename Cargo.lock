@@ -221,9 +221,9 @@ dependencies = [
 
 [[package]]
 name = "alloy-eip2930"
-version = "0.2.3"
+version = "0.2.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9441120fa82df73e8959ae0e4ab8ade03de2aaae61be313fbf5746277847ce25"
+checksum = "e64579d931b3f8eacc7c9ab0b220e87e9c4816e5c724ede1947b55c2f8e92ae5"
 dependencies = [
  "alloy-primitives",
  "alloy-rlp",
@@ -11116,9 +11116,9 @@ dependencies = [
 [[package]]
 name = "revm-inspectors"
 version = "0.43.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "79b609cb78fcb3a8c10f3190847c9bb0223423cf46e2de30a61ea9e37a3e6736"
+source = "git+https://github.com/paradigmxyz/revm-inspectors?rev=061fee6184930e53e95d987a8b57172534d8a659#061fee6184930e53e95d987a8b57172534d8a659"
 dependencies = [
+ "alloy-eip2930",
  "alloy-primitives",
  "alloy-rpc-types-eth",
  "alloy-rpc-types-trace",
@@ -11127,7 +11127,9 @@ dependencies = [
  "boa_engine",
  "boa_gc",
  "colorchoice",
+ "num-bigint",
  "revm",
+ "ruint",
  "serde",
  "serde_json",
  "thiserror 2.0.20",
