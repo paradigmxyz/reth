@@ -1399,7 +1399,8 @@ impl SavedCache {
         self.caches
     }
 
-    /// Returns whether both handles refer to the same cache allocation, regardless of block hash.
+    /// Returns whether `self` and `other` refer to the same [`ExecutionCache`] data,
+    /// regardless of their block hashes.
     pub fn shares_cache_with(&self, other: &Self) -> bool {
         Arc::ptr_eq(&self.caches.0, &other.caches.0)
     }

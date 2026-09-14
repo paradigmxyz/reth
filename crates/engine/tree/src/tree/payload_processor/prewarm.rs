@@ -277,8 +277,8 @@ where
     /// 1. All prewarming tasks have completed execution
     /// 2. No other concurrent operations are accessing the cache
     ///
-    /// This moves the task's cache handle into `self.execution_cache` when the block is valid,
-    /// without retaining an extra reference that would prevent reuse after unlocking.
+    /// This moves the task's `ExecutionCache` into `self.execution_cache` when the block is valid,
+    /// without retaining an extra Arc reference that would prevent reuse after unlocking.
     /// This method is called from `run()` only after all execution tasks are complete.
     ///
     /// State insertion and block validation run under the mutex because the cache being updated
@@ -904,7 +904,7 @@ mod tests {
         let address = address!("0000000000000000000000000000000000000001");
         saved.cache().insert_storage(address, B256::ZERO, Some(U256::from(7)));
         execution_cache.update_with_guard(|slot| *slot = Some(saved.clone()));
-        // Keep the drop worker occupied: deferring a redundant handle must not delay reuse.
+        // Keep the drop worker occupied: a queued SavedCache would delay cache reuse.
         let (release_tx, release_rx) = mpsc::channel::<()>();
         runtime.spawn_blocking_named("drop", move || {
             let _ = release_rx.recv();
@@ -933,17 +933,17 @@ mod tests {
     }
 
     #[test]
-    fn save_cache_preserves_other_cache_handles() {
+    fn save_cache_blocks_reuse_while_execution_cache_is_cloned() {
         let runtime = Runtime::test();
         let execution_cache = PayloadExecutionCache::default();
         let saved = SavedCache::new(B256::repeat_byte(1), crate::tree::ExecutionCache::new(1_000));
         execution_cache.update_with_guard(|slot| *slot = Some(saved.clone()));
-        let other_handle = saved.cache().clone();
+        let other_cache_clone = saved.cache().clone();
 
         save_test_cache(&runtime, &execution_cache, saved, Default::default(), true, Gauge::noop());
 
         assert!(execution_cache.get_cache_for(B256::repeat_byte(2)).is_none());
-        drop(other_handle);
+        drop(other_cache_clone);
         assert!(execution_cache.get_cache_for(B256::repeat_byte(2)).is_some());
     }
 
@@ -1032,7 +1032,7 @@ mod tests {
         if !expect_saved_cache {
             drops.push(observe_cache_drop(&cache_to_save, &execution_cache, expect_saved_cache));
         }
-        // Drop our extra handle so save_cache can free the old cache.
+        // Retaining this SavedCache would prevent save_cache from freeing the old cache.
         drop(distinct_previous);
 
         // Cleanup must finish even when the shared background drop worker is occupied.

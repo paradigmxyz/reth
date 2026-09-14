@@ -104,11 +104,11 @@ impl PayloadExecutionCache {
         None
     }
 
-    /// Waits for the current update of the shared cache slot to release its mutex.
+    /// Waits for the mutex protecting the stored `Option<SavedCache>` to be released.
     ///
-    /// This does not wait for checked-out cache handles or for removed allocations to be
-    /// destroyed after unlocking. A subsequent checkout can still miss and allocate a new cache
-    /// while cleanup runs.
+    /// This does not wait for other users to drop their [`ExecutionCache`] clones or for removed
+    /// caches to finish dropping after unlocking. A subsequent [`Self::get_cache_for`] can still
+    /// return `None`, causing its caller to allocate a new cache while those drops run.
     ///
     /// Returns only the time spent waiting for the mutex, excluding post-unlock cleanup.
     pub fn wait_for_availability(&self) -> Duration {
@@ -130,8 +130,9 @@ impl PayloadExecutionCache {
     /// Returns the closure's result after releasing the mutex, allowing removed caches to be
     /// dropped outside the lock.
     ///
-    /// Drop extra handles to the cache left in the `Option` before the closure returns:
-    /// [`Self::get_cache_for`] can only reuse it when its Arc reference count is one.
+    /// Drop extra [`SavedCache`] or [`ExecutionCache`] clones of the stored cache before the
+    /// closure returns: [`Self::get_cache_for`] requires that cache's Arc strong reference
+    /// count to be one.
     ///
     /// ## CRITICAL SAFETY REQUIREMENT
     ///
