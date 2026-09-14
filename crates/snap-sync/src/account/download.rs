@@ -175,6 +175,16 @@ pub struct VerifiedRange {
 }
 
 impl VerifiedRange {
+    #[cfg(test)]
+    pub(crate) const fn new(write: SnapWrite, range: VerifiedAccountRange) -> Self {
+        Self { write, range }
+    }
+
+    /// Write the attempt accepted when the range was requested.
+    pub(crate) const fn write(&self) -> SnapWrite {
+        self.write
+    }
+
     /// Key the range was requested from.
     pub const fn origin(&self) -> B256 {
         self.range.origin()
