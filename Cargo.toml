@@ -699,4 +699,4 @@ ipnet = "2.11"
 
 # Temporary: bench-only pin to measure unreleased revm-inspectors perf commits.
 [patch.crates-io]
-revm-inspectors = { git = "https://github.com/paradigmxyz/revm-inspectors", rev = "8865141c577b1ef4c9b86dd865619fd9e53564df" }
+revm-inspectors = { git = "https://github.com/paradigmxyz/revm-inspectors", rev = "bad1891e8b947a1fd741c789affa4bb5e7ed6a58" }
