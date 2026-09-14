@@ -119,7 +119,7 @@ where
     /// Cache actors own their speculative workers until all providers and caches are released.
     cooperative_tasks: Mutex<Vec<TaskHandle<()>>>,
     /// Successful speculative EVM executions observed in the cooperative profile.
-    #[cfg(test)]
+    #[cfg(any(test, feature = "dst"))]
     prewarmed_transactions: Arc<AtomicUsize>,
 }
 
@@ -153,7 +153,7 @@ where
             sequential_execution: false,
             cooperative_runtime: None,
             cooperative_tasks: Mutex::new(Vec::new()),
-            #[cfg(test)]
+            #[cfg(any(test, feature = "dst"))]
             prewarmed_transactions: Arc::new(AtomicUsize::new(0)),
         }
     }
@@ -205,17 +205,17 @@ where
     }
 
     /// Number of actual speculative transactions completed by cooperative workers.
-    #[cfg(test)]
+    #[cfg(any(test, feature = "dst"))]
     pub(crate) fn prewarming_counter(&self) -> Arc<AtomicUsize> {
         Arc::clone(&self.prewarmed_transactions)
     }
 
     fn new_execution_cache(&self) -> ExecutionCache {
+        #[cfg(feature = "dst")]
         if self.cooperative_runtime.is_some() {
-            ExecutionCache::new_deterministic(self.cross_block_cache_size)
-        } else {
-            ExecutionCache::new(self.cross_block_cache_size)
+            return ExecutionCache::new_deterministic(self.cross_block_cache_size)
         }
+        ExecutionCache::new(self.cross_block_cache_size)
     }
 
     /// Returns the dedicated BAL read-set prewarm pool, spawning its blocking worker threads on
@@ -571,7 +571,7 @@ where
             precompile_cache_map: self.precompile_cache_map.clone(),
             disable_bal_parallel_state_root: self.disable_bal_parallel_state_root,
             disable_bal_batch_io: self.disable_bal_batch_io,
-            #[cfg(test)]
+            #[cfg(any(test, feature = "dst"))]
             cooperative_transactions: self
                 .cooperative_runtime
                 .as_ref()

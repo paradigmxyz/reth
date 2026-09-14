@@ -14,8 +14,7 @@ use alloy_primitives::{Address, Signature, TxKind, B256, U256};
 use commonware_runtime::{deterministic, reschedule, Runner, Spawner, Supervisor};
 use reth_chain_state::{ExecutedBlock, NewCanonicalChain};
 use reth_ethereum_primitives::{
-    calculate_receipt_root_no_memo, Block, BlockBody, EthPrimitives, Receipt, Transaction,
-    TransactionSigned,
+    Block, BlockBody, EthPrimitives, Receipt, Transaction, TransactionSigned,
 };
 use reth_execution_types::{BlockExecutionOutput, BlockExecutionResult, ExecutionOutcome};
 use reth_primitives_traits::{proofs::calculate_transaction_root, Block as _, RecoveredBlock};
@@ -85,7 +84,7 @@ impl Campaign {
                     gas_limit: 30_000_000,
                     gas_used: tx_count * 21_000,
                     transactions_root: calculate_transaction_root(&block_transactions),
-                    receipts_root: calculate_receipt_root_no_memo(&block_receipts),
+                    receipts_root: Receipt::calculate_receipt_root_no_memo(&block_receipts),
                     ..Default::default()
                 },
                 body: BlockBody { transactions: block_transactions.clone(), ..Default::default() },

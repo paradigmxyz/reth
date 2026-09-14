@@ -46,4 +46,4 @@ rayon = ["dep:reth-rayon", "dep:rayon", "dep:crossbeam-utils", "pin-project"]
 test-utils = [
     "commonware-runtime?/test-utils",
 ]
-deterministic = ["dep:commonware-runtime", "dep:reth-rayon"]
+dst = ["dep:commonware-runtime", "dep:reth-rayon", "reth-rayon/dst"]

@@ -118,7 +118,7 @@ where
 
     /// Negotiates the regular `RLPx` capabilities with deadlines and ping timers driven by
     /// `runtime`.
-    #[cfg(any(test, feature = "test-utils"))]
+    #[cfg(any(test, feature = "dst"))]
     pub async fn handshake_with_runtime(
         self,
         hello: HelloMessageWithProtocols,
@@ -141,7 +141,7 @@ where
             ProtocolClock::Native => tokio::time::timeout(HANDSHAKE_TIMEOUT, self.inner.next())
                 .await
                 .or(Err(P2PStreamError::HandshakeError(P2PHandshakeError::Timeout)))?,
-            #[cfg(any(test, feature = "test-utils"))]
+            #[cfg(any(test, feature = "dst"))]
             ProtocolClock::Runtime(ref runtime) => tokio::select! {
                 biased;
                 message = self.inner.next() => message,
@@ -347,7 +347,7 @@ impl<S> P2PStream<S> {
         let now = clock.now();
         let pinger = match clock {
             ProtocolClock::Native => Pinger::new(PING_INTERVAL, PING_TIMEOUT),
-            #[cfg(any(test, feature = "test-utils"))]
+            #[cfg(any(test, feature = "dst"))]
             runtime => Pinger::with_clock(PING_INTERVAL, PING_TIMEOUT, runtime),
         };
         Self {

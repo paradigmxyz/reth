@@ -85,7 +85,7 @@ where
     ///
     /// This is exclusively for simulation. Seeded keys and nonces must never be used for a
     /// connection carrying private data. The caller must enforce its simulated deadline.
-    #[cfg(feature = "test-utils")]
+    #[cfg(feature = "dst")]
     pub async fn connect_seeded(
         transport: Io,
         secret_key: SecretKey,
@@ -141,7 +141,7 @@ where
     /// Accepts a connection with reproducible handshake entropy for simulation only.
     ///
     /// See [`Self::connect_seeded`] for the entropy and timeout requirements.
-    #[cfg(feature = "test-utils")]
+    #[cfg(feature = "dst")]
     pub async fn incoming_seeded(
         transport: Io,
         secret_key: SecretKey,

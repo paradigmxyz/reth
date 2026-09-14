@@ -5,9 +5,11 @@ use alloy_eips::BlockHashOrNumber;
 use alloy_primitives::{B256, B512};
 use futures::{future::BoxFuture, stream::FuturesUnordered, FutureExt, SinkExt, StreamExt};
 use reth_chainspec::{ForkFilter, Head};
+#[cfg(test)]
+use reth_eth_wire::simulation::LinkStats;
 use reth_eth_wire::{
     message::RequestPair,
-    simulation::{authenticated_pair, LinkConfig, LinkStats, SimulatedLink},
+    simulation::{authenticated_pair, LinkConfig, SimulatedLink},
     BlockBodies, BlockHeaders, EthMessage, EthNetworkPrimitives, GetBlockBodies, GetBlockHeaders,
     UnauthedEthStream, UnifiedStatus,
 };
@@ -354,14 +356,24 @@ impl WirePeer {
         self.link.as_ref().unwrap().disconnect();
     }
 
+    pub(super) fn corrupt_next_response(&self) {
+        self.link.as_ref().unwrap().corrupt_next(1);
+    }
+
+    pub(super) fn is_connected(&self) -> bool {
+        !self.state.closed.load(Ordering::Acquire)
+    }
+
     pub(super) fn trace(&self) -> Vec<WireEvent> {
         self.state.trace.lock().unwrap().clone()
     }
 
+    #[cfg(test)]
     pub(super) fn stats(&self) -> LinkStats {
         self.link.as_ref().unwrap().stats()
     }
 
+    #[cfg(test)]
     pub(super) fn bad_messages(&self) -> usize {
         self.state.bad_messages.load(Ordering::Relaxed)
     }

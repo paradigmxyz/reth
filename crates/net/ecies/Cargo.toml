@@ -42,4 +42,4 @@ cipher.workspace = true
 tokio = { workspace = true, features = ["net", "rt", "macros"] }
 
 [features]
-test-utils = []
+dst = []

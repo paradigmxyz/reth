@@ -1,0 +1,79 @@
+[package]
+name = "reth-dst-runner"
+description = "Long-running deterministic node simulation campaigns for Reth"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+[features]
+default = []
+dst = [
+    "reth-engine-tree/dst",
+    "reth-eth-wire/dst",
+    "reth-tasks/dst",
+]
+native-differential = ["dst", "commonware-runtime/external"]
+
+[dependencies]
+abi-fuzz.workspace = true
+alloy-consensus.workspace = true
+alloy-dyn-abi.workspace = true
+alloy-eips.workspace = true
+alloy-genesis.workspace = true
+alloy-primitives.workspace = true
+alloy-rpc-types-engine.workspace = true
+alloy-signer.workspace = true
+commonware-runtime = { workspace = true, features = ["test-utils"] }
+crossbeam-channel.workspace = true
+futures.workspace = true
+metrics.workspace = true
+rand.workspace = true
+serde_json.workspace = true
+tempfile.workspace = true
+tokio = { workspace = true, features = ["rt", "rt-multi-thread", "sync", "macros"] }
+tokio-stream.workspace = true
+txgen-core.workspace = true
+
+reth-basic-payload-builder.workspace = true
+reth-chain-state = { workspace = true, features = ["test-utils"] }
+reth-chainspec = { workspace = true, features = ["test-utils"] }
+reth-db = { workspace = true, features = ["test-utils"] }
+reth-db-api = { workspace = true, features = ["test-utils"] }
+reth-db-common.workspace = true
+reth-dst.workspace = true
+reth-engine-primitives.workspace = true
+reth-engine-tree = { workspace = true, features = ["test-utils"] }
+reth-eth-wire.workspace = true
+reth-ethereum-consensus.workspace = true
+reth-ethereum-engine-primitives.workspace = true
+reth-ethereum-payload-builder.workspace = true
+reth-ethereum-primitives = { workspace = true, features = ["test-utils"] }
+reth-evm-ethereum = { workspace = true, features = ["test-utils"] }
+reth-exex-types.workspace = true
+reth-fs-util.workspace = true
+reth-network-p2p = { workspace = true, features = ["test-utils"] }
+reth-node-ethereum = { workspace = true, features = ["test-utils"] }
+reth-payload-builder.workspace = true
+reth-payload-primitives.workspace = true
+reth-primitives-traits = { workspace = true, features = ["test-utils"] }
+reth-provider = { workspace = true, features = ["test-utils"] }
+reth-prune.workspace = true
+reth-rayon.workspace = true
+reth-stages.workspace = true
+reth-storage-errors.workspace = true
+reth-storage-overlay.workspace = true
+reth-tasks.workspace = true
+reth-transaction-pool = { workspace = true, features = ["test-utils"] }
+reth-trie.workspace = true
+reth-tracing.workspace = true
+
+[[bin]]
+name = "reth-dst-node"
+path = "src/main.rs"
+required-features = ["dst"]

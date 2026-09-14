@@ -151,7 +151,7 @@ where
         self.control.snapshot(parent_hash)
     }
 
-    #[cfg(test)]
+    #[cfg(any(test, feature = "dst"))]
     pub(crate) fn snapshot_observer(
         &self,
     ) -> impl Fn(B256) -> Option<TxPoolPrewarmCacheSnapshot> + Send + Sync + 'static {

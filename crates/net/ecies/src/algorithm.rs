@@ -74,7 +74,7 @@ pub struct ECIES {
 
     body_size: Option<usize>,
     /// Explicit entropy for simulation; ordinary connections use the production RNGs.
-    #[cfg(feature = "test-utils")]
+    #[cfg(feature = "dst")]
     simulation_rng: Option<Box<rand_08::rngs::StdRng>>,
 }
 
@@ -309,7 +309,7 @@ impl ECIES {
             ingress_aes: None,
             egress_mac: None,
             ingress_mac: None,
-            #[cfg(feature = "test-utils")]
+            #[cfg(feature = "dst")]
             simulation_rng: None,
         })
     }
@@ -353,7 +353,7 @@ impl ECIES {
             ingress_aes: None,
             egress_mac: None,
             ingress_mac: None,
-            #[cfg(feature = "test-utils")]
+            #[cfg(feature = "dst")]
             simulation_rng: None,
         })
     }
@@ -366,7 +366,7 @@ impl ECIES {
         Self::new_static_server(secret_key, nonce, ephemeral_secret_key)
     }
 
-    #[cfg(feature = "test-utils")]
+    #[cfg(feature = "dst")]
     pub(crate) fn new_seeded(
         secret_key: SecretKey,
         remote_id: Option<PeerId>,
@@ -421,7 +421,7 @@ impl ECIES {
     }
 
     fn encryption_entropy(&mut self) -> (SecretKey, B128) {
-        #[cfg(feature = "test-utils")]
+        #[cfg(feature = "dst")]
         if let Some(random) = self.simulation_rng.as_mut() {
             use rand_08::RngCore;
             let secret = SecretKey::new(random);
@@ -433,7 +433,7 @@ impl ECIES {
     }
 
     fn auth_padding(&mut self) -> usize {
-        #[cfg(feature = "test-utils")]
+        #[cfg(feature = "dst")]
         if let Some(random) = self.simulation_rng.as_mut() {
             return random.gen_range(100..=300);
         }

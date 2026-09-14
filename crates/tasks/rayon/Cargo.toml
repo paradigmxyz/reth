@@ -13,3 +13,6 @@ workspace = true
 
 [dependencies]
 rayon.workspace = true
+
+[features]
+dst = []

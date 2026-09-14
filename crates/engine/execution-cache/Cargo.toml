@@ -33,6 +33,7 @@ reth-revm = { workspace = true, features = ["test-utils"] }
 revm.workspace = true
 
 [features]
+dst = []
 test-utils = [
     "reth-primitives-traits/test-utils",
     "reth-revm/test-utils",

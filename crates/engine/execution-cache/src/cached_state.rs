@@ -1019,6 +1019,7 @@ impl ExecutionCache {
     /// Callers must schedule concurrent cache users deterministically. Individual cache operations
     /// remain synchronous; this does not simulate races inside the cache's atomic instructions.
     /// Fixed hash seeds are intended for controlled testing rather than untrusted workloads.
+    #[cfg(feature = "dst")]
     pub fn new_deterministic(total_cache_size: usize) -> Self {
         Self::new_inner(total_cache_size, true)
     }
@@ -1352,7 +1353,7 @@ impl SavedCache {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "dst"))]
 mod deterministic;
 
 #[cfg(test)]

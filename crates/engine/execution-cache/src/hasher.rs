@@ -1,18 +1,25 @@
 //! Hash selection for replayable fixed-cache collision eviction.
 
+#[cfg(feature = "dst")]
 use alloy_primitives::map::foldhash::fast::{FixedState, FoldHasher};
 use std::hash::{BuildHasher, Hash, Hasher};
 
 /// Keeps the native hash builder unless deterministic cache construction is requested.
 pub(super) enum CacheHashBuilder<H> {
     Native(H),
+    #[cfg(feature = "dst")]
     Deterministic,
 }
 
 impl<H: Default> CacheHashBuilder<H> {
     pub(super) fn new(deterministic: bool) -> Self {
         if deterministic {
-            Self::Deterministic
+            #[cfg(feature = "dst")]
+            {
+                return Self::Deterministic
+            }
+            #[cfg(not(feature = "dst"))]
+            unreachable!("deterministic cache hashing requires the dst feature");
         } else {
             Self::Native(H::default())
         }
@@ -25,6 +32,7 @@ impl<H: BuildHasher> BuildHasher for CacheHashBuilder<H> {
     fn build_hasher(&self) -> Self::Hasher {
         match self {
             Self::Native(hasher) => CacheHasher::Native(hasher.build_hasher()),
+            #[cfg(feature = "dst")]
             Self::Deterministic => CacheHasher::Deterministic(FixedState::default().build_hasher()),
         }
     }
@@ -35,6 +43,7 @@ impl<H: BuildHasher> BuildHasher for CacheHashBuilder<H> {
     fn hash_one<T: Hash>(&self, value: T) -> u64 {
         match self {
             Self::Native(hasher) => hasher.hash_one(value),
+            #[cfg(feature = "dst")]
             Self::Deterministic => FixedState::default().hash_one(value),
         }
     }
@@ -42,6 +51,7 @@ impl<H: BuildHasher> BuildHasher for CacheHashBuilder<H> {
 
 pub(super) enum CacheHasher<H> {
     Native(H),
+    #[cfg(feature = "dst")]
     Deterministic(FoldHasher<'static>),
 }
 
@@ -50,6 +60,7 @@ macro_rules! forward_writes {
         fn $method(&mut self, value: $ty) {
             match self {
                 Self::Native(hasher) => hasher.$method(value),
+                #[cfg(feature = "dst")]
                 Self::Deterministic(hasher) => hasher.$method(value),
             }
         }
@@ -76,6 +87,7 @@ impl<H: Hasher> Hasher for CacheHasher<H> {
     fn finish(&self) -> u64 {
         match self {
             Self::Native(hasher) => hasher.finish(),
+            #[cfg(feature = "dst")]
             Self::Deterministic(hasher) => hasher.finish(),
         }
     }

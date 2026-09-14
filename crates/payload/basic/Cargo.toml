@@ -45,4 +45,4 @@ serde.workspace = true
 [dev-dependencies]
 commonware-runtime.workspace = true
 reth-ethereum-engine-primitives.workspace = true
-reth-tasks = { workspace = true, features = ["deterministic"] }
+reth-tasks = { workspace = true, features = ["dst"] }

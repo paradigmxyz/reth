@@ -452,13 +452,15 @@ where
         self
     }
 
-    #[cfg(test)]
-    pub(crate) fn prewarming_counter(&self) -> Arc<AtomicUsize> {
+    #[cfg(any(test, feature = "dst"))]
+    /// Returns a counter of speculative transactions completed by cooperative prewarming.
+    pub fn prewarming_counter(&self) -> Arc<AtomicUsize> {
         self.payload_processor.prewarming_counter()
     }
 
-    #[cfg(test)]
-    pub(crate) fn txpool_snapshot_observer(
+    #[cfg(any(test, feature = "dst"))]
+    /// Returns an observer for the latest fully published transaction-pool cache snapshot.
+    pub fn txpool_snapshot_observer(
         &self,
     ) -> Box<dyn Fn(B256) -> Option<crate::tree::TxPoolPrewarmCacheSnapshot> + Send + Sync> {
         Box::new(

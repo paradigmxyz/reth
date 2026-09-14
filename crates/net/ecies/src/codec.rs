@@ -43,7 +43,7 @@ pub enum ECIESState {
 }
 
 impl ECIESCodec {
-    #[cfg(feature = "test-utils")]
+    #[cfg(feature = "dst")]
     pub(crate) fn new_seeded(
         secret_key: SecretKey,
         remote_id: Option<PeerId>,

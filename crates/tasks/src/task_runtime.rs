@@ -22,7 +22,7 @@ use std::{
 };
 use tokio::sync::{mpsc, oneshot};
 
-#[cfg(feature = "deterministic")]
+#[cfg(feature = "dst")]
 use {
     commonware_runtime::{Clock, Spawner, Supervisor},
     parking_lot::Mutex,
@@ -48,7 +48,7 @@ impl TaskRuntime {
     ///
     /// Keep this handle inside the context's runner. All associated tasks are stopped when that
     /// runner exits. No production executor is constructed or accessible through this handle.
-    #[cfg(feature = "deterministic")]
+    #[cfg(feature = "dst")]
     pub fn deterministic(context: commonware_runtime::deterministic::Context) -> Self {
         Self(Arc::new(Backend::Deterministic(Simulation {
             context,
@@ -61,7 +61,7 @@ impl TaskRuntime {
     pub async fn scope<F: Future>(&self, future: F) -> F::Output {
         match self.0.as_ref() {
             Backend::Production(_) => future.await,
-            #[cfg(feature = "deterministic")]
+            #[cfg(feature = "dst")]
             Backend::Deterministic(_) => reth_rayon::deterministic(future).await,
         }
     }
@@ -144,7 +144,7 @@ impl TaskRuntime {
                     }
                 }
             }
-            #[cfg(feature = "deterministic")]
+            #[cfg(feature = "dst")]
             Backend::Deterministic(simulation) => {
                 if matches!(kind, AsyncKind::Named) {
                     simulation.spawn_named(name, Box::pin(reth_rayon::deterministic(future)));
@@ -221,7 +221,7 @@ impl TaskRuntime {
     pub fn now(&self) -> SystemTime {
         match self.0.as_ref() {
             Backend::Production(_) => SystemTime::now(),
-            #[cfg(feature = "deterministic")]
+            #[cfg(feature = "dst")]
             Backend::Deterministic(simulation) => simulation.context.current(),
         }
     }
@@ -236,7 +236,7 @@ impl TaskRuntime {
                 };
                 sleep.await;
             }
-            #[cfg(feature = "deterministic")]
+            #[cfg(feature = "dst")]
             Backend::Deterministic(simulation) => simulation.context.sleep(duration).await,
         }
     }
@@ -290,7 +290,7 @@ impl TaskRuntime {
                     drop(crate::spawn_os_thread(name, job));
                 }
             },
-            #[cfg(feature = "deterministic")]
+            #[cfg(feature = "dst")]
             Backend::Deterministic(simulation) => {
                 if matches!(kind, JobKind::Named) {
                     simulation.spawn_named(
@@ -322,7 +322,7 @@ impl std::fmt::Debug for TaskRuntime {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self.0.as_ref() {
             Backend::Production(_) => f.write_str("TaskRuntime::Production"),
-            #[cfg(feature = "deterministic")]
+            #[cfg(feature = "dst")]
             Backend::Deterministic(_) => f.write_str("TaskRuntime::Deterministic"),
         }
     }
@@ -424,7 +424,7 @@ pub enum TaskError {
 
 enum Backend {
     Production(Runtime),
-    #[cfg(feature = "deterministic")]
+    #[cfg(feature = "dst")]
     Deterministic(Simulation),
 }
 
@@ -444,17 +444,17 @@ enum JobKind {
     Dedicated,
 }
 
-#[cfg(feature = "deterministic")]
+#[cfg(feature = "dst")]
 type NamedTask = Pin<Box<dyn Future<Output = ()> + Send + 'static>>;
 
-#[cfg(feature = "deterministic")]
+#[cfg(feature = "dst")]
 struct Simulation {
     context: commonware_runtime::deterministic::Context,
     // Stable drop order also preserves the order in which idle lane receivers are woken.
     workers: Mutex<BTreeMap<&'static str, mpsc::UnboundedSender<NamedTask>>>,
 }
 
-#[cfg(feature = "deterministic")]
+#[cfg(feature = "dst")]
 impl Simulation {
     fn spawn_named(&self, name: &'static str, task: NamedTask) {
         let mut workers = self.workers.lock();
@@ -693,7 +693,7 @@ mod tests {
         finished_rx.await.unwrap();
     }
 
-    #[cfg(feature = "deterministic")]
+    #[cfg(feature = "dst")]
     #[test]
     fn deterministic_tasks() {
         use commonware_runtime::{deterministic, Runner};

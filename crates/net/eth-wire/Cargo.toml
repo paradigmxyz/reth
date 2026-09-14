@@ -50,8 +50,8 @@ arbitrary = { workspace = true, features = ["derive"], optional = true }
 reth-primitives-traits = { workspace = true, features = ["arbitrary"] }
 reth-eth-wire-types = { workspace = true, features = ["arbitrary"] }
 reth-tracing.workspace = true
-reth-tasks = { workspace = true, features = ["deterministic"] }
-reth-ecies = { workspace = true, features = ["test-utils"] }
+reth-tasks = { workspace = true, features = ["dst"] }
+reth-ecies = { workspace = true, features = ["dst"] }
 commonware-runtime.workspace = true
 
 alloy-consensus.workspace = true
@@ -69,15 +69,17 @@ serde.workspace = true
 alloy-eips.workspace = true
 
 [features]
-test-utils = [
+dst = [
     "dep:reth-tasks",
     "dep:rand",
     "dep:secp256k1",
-    "reth-ecies/test-utils",
-    "commonware-runtime/test-utils",
+    "reth-ecies/dst",
+]
+test-utils = [
     "reth-codecs/test-utils",
     "reth-primitives-traits/test-utils",
     "reth-tasks?/test-utils",
+    "commonware-runtime/test-utils",
 ]
 arbitrary = [
     "reth-eth-wire-types/arbitrary",

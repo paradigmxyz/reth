@@ -51,7 +51,7 @@ reth-primitives-traits.workspace = true
 reth-provider = { workspace = true, features = ["test-utils"] }
 reth-storage-overlay.workspace = true
 reth-trie = { workspace = true, features = ["test-utils"] }
-reth-tasks = { workspace = true, features = ["deterministic"] }
+reth-tasks = { workspace = true, features = ["dst"] }
 
 # misc
 rand.workspace = true

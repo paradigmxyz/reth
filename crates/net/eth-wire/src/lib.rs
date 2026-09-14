@@ -26,7 +26,7 @@ mod p2pstream;
 mod pinger;
 pub mod protocol;
 
-#[cfg(any(test, feature = "test-utils"))]
+#[cfg(any(test, feature = "dst"))]
 pub mod simulation;
 
 /// Handshake logic
