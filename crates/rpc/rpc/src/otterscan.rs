@@ -6,9 +6,8 @@ use alloy_primitives::{Address, Bytes, TxHash, B256, U256};
 use alloy_rpc_types_eth::{BlockTransactions, TransactionReceipt};
 use alloy_rpc_types_trace::{
     otterscan::{
-        BlockDetails, ContractCreator, InternalIssuance, InternalOperation, OperationType,
-        OtsBlockTransactions, OtsReceipt, OtsTransactionReceipt, TraceEntry,
-        TransactionsWithReceipts,
+        BlockDetails, ContractCreator, InternalIssuance, InternalOperation, OtsBlockTransactions,
+        OtsReceipt, OtsTransactionReceipt, TraceEntry, TransactionsWithReceipts,
     },
     parity::{Action, CreateAction, CreateOutput, LocalizedTransactionTrace, TraceOutput},
 };
@@ -24,15 +23,13 @@ use reth_rpc_eth_api::{
 };
 use reth_rpc_eth_types::{utils::binary_search, EthApiError};
 use reth_rpc_server_types::result::internal_rpc_err;
-use revm::{
-    context::JournalTr,
-    context_interface::{result::ExecutionResult, ContextTr},
-    interpreter::{CallInputs, CallOutcome, CallScheme, CreateInputs, CreateOutcome, CreateScheme},
-    Inspector,
-};
-use revm_inspectors::tracing::{
-    types::{CallKind, CallTraceNode},
-    TracingInspectorConfig,
+use revm::context_interface::result::ExecutionResult;
+use revm_inspectors::{
+    otterscan::InternalOperationsInspector,
+    tracing::{
+        types::{CallKind, CallTraceNode},
+        TracingInspectorConfig,
+    },
 };
 
 const API_LEVEL: u64 = 8;
@@ -139,7 +136,7 @@ where
             .spawn_trace_transaction_in_block_with_inspector(
                 tx_hash,
                 InternalOperationsInspector::default(),
-                |_tx_info, inspector, _, _| Ok(inspector.operations),
+                |_tx_info, inspector, _, _| Ok(inspector.into_operations()),
             )
             .await
             .map_err(Into::into)
@@ -351,58 +348,6 @@ where
         // Code-presence search assumes a single deployment. It cannot reliably identify
         // the first deployment of contracts that were destroyed and recreated.
         Ok(traces.flatten())
-    }
-}
-
-/// Records attempted internal operations without retaining call inputs or outputs.
-#[derive(Debug, Default)]
-struct InternalOperationsInspector {
-    operations: Vec<InternalOperation>,
-}
-
-impl<CTX: ContextTr> Inspector<CTX> for InternalOperationsInspector {
-    fn call(&mut self, context: &mut CTX, inputs: &mut CallInputs) -> Option<CallOutcome> {
-        if context.journal().depth() > 0 &&
-            inputs.scheme == CallScheme::Call &&
-            let Some(value) = inputs.transfer_value() &&
-            !value.is_zero()
-        {
-            self.operations.push(InternalOperation {
-                from: inputs.transfer_from(),
-                to: inputs.transfer_to(),
-                value,
-                r#type: OperationType::OpTransfer,
-            });
-        }
-        None
-    }
-
-    fn create(&mut self, context: &mut CTX, inputs: &mut CreateInputs) -> Option<CreateOutcome> {
-        if context.journal().depth() == 0 {
-            return None
-        }
-        let r#type = match inputs.scheme() {
-            CreateScheme::Create => OperationType::OpCreate,
-            CreateScheme::Create2 { .. } => OperationType::OpCreate2,
-            CreateScheme::Custom { .. } => return None,
-        };
-        let nonce = context.journal_mut().load_account(inputs.caller()).ok()?.info.nonce;
-        self.operations.push(InternalOperation {
-            from: inputs.caller(),
-            to: inputs.created_address(nonce),
-            value: inputs.value(),
-            r#type,
-        });
-        None
-    }
-
-    fn selfdestruct(&mut self, contract: Address, target: Address, value: U256) {
-        self.operations.push(InternalOperation {
-            from: contract,
-            to: target,
-            value,
-            r#type: OperationType::OpSelfDestruct,
-        });
     }
 }
 
@@ -789,10 +734,7 @@ mod tests {
         assert_eq!(issuance.uncle_reward, U256::from(2_250_000_000_000_000_000u128));
     }
 
-    fn execute(
-        code: Bytes,
-        spec: SpecId,
-    ) -> (ExecutionResult, Vec<TraceEntry>, Vec<InternalOperation>) {
+    fn execute(code: Bytes, spec: SpecId) -> (ExecutionResult, Vec<TraceEntry>) {
         let contract = Address::repeat_byte(0x11);
         let mut db = InMemoryDB::default();
         db.insert_account_info(
@@ -810,9 +752,8 @@ mod tests {
         let mut evm = Context::mainnet()
             .modify_cfg_chained(|cfg| cfg.spec = spec)
             .with_db(db)
-            .build_mainnet_with_inspector((
-                TracingInspector::new(TracingInspectorConfig::default_parity()),
-                InternalOperationsInspector::default(),
+            .build_mainnet_with_inspector(TracingInspector::new(
+                TracingInspectorConfig::default_parity(),
             ));
         let result = evm
             .inspect_tx(TxEnv {
@@ -823,35 +764,13 @@ mod tests {
             })
             .unwrap();
         let (_, inspector) = evm.ctx_inspector();
-        (
-            result.result,
-            otterscan_traces(inspector.0.traces().nodes().to_vec()),
-            std::mem::take(&mut inspector.1.operations),
-        )
-    }
-
-    #[test]
-    fn internal_operations_exclude_root_and_include_zero_value_creates() {
-        // CREATE and CREATE2 with empty initcode and zero endowment.
-        let (result, _, operations) =
-            execute(hex!("600060006000f0506000600060006000f55000").into(), SpecId::CANCUN);
-        assert!(result.is_success());
-        assert_eq!(operations.len(), 2);
-        assert_eq!(operations[0].r#type, OperationType::OpCreate);
-        assert_eq!(operations[1].r#type, OperationType::OpCreate2);
-        for operation in operations {
-            assert_eq!(operation.from, Address::repeat_byte(0x11));
-            assert_eq!(operation.value, U256::ZERO);
-            assert_ne!(operation.to, Address::ZERO);
-        }
-        let (_, _, operations) = execute(hex!("00").into(), SpecId::CANCUN);
-        assert!(operations.is_empty());
+        (result.result, otterscan_traces(inspector.traces().nodes().to_vec()))
     }
 
     #[test]
     fn selfdestruct_preserves_enclosing_call_and_beneficiary() {
         for spec in [SpecId::SHANGHAI, SpecId::CANCUN] {
-            let (result, traces, operations) = execute(hex!("6022ff").into(), spec);
+            let (result, traces) = execute(hex!("6022ff").into(), spec);
             assert!(result.is_success());
             assert_eq!(traces.len(), 2);
             assert_eq!(traces[0].r#type, "CALL");
@@ -862,11 +781,6 @@ mod tests {
             assert_eq!(traces[1].from, Address::repeat_byte(0x11));
             assert_eq!(traces[1].to, Address::with_last_byte(0x22));
             assert_eq!(traces[1].value, Some(U256::from(107)));
-            assert_eq!(operations.len(), 1);
-            assert_eq!(operations[0].r#type, OperationType::OpSelfDestruct);
-            assert_eq!(operations[0].from, traces[1].from);
-            assert_eq!(operations[0].to, traces[1].to);
-            assert_eq!(operations[0].value, U256::from(107));
         }
     }
 
@@ -874,7 +788,7 @@ mod tests {
     fn selfdestruct_after_a_child_call_uses_enclosing_depth() {
         // Call another account, then destroy the root contract. The destruction is a sibling
         // of that call, not its child.
-        let (result, traces, _) =
+        let (result, traces) =
             execute(hex!("60006000600060006000603361fffff1506022ff").into(), SpecId::CANCUN);
         assert!(result.is_success());
         assert_eq!(traces.len(), 3);
@@ -931,23 +845,11 @@ mod tests {
 
     #[test]
     fn precompile_calls_remain_in_transaction_traces() {
-        let (result, traces, operations) =
+        let (result, traces) =
             execute(hex!("60006000600060006000600461fffff15000").into(), SpecId::CANCUN);
         assert!(result.is_success());
         assert_eq!(traces.len(), 2);
         assert_eq!(traces[1].to, Address::with_last_byte(4));
-        assert!(operations.is_empty());
-    }
-
-    #[test]
-    fn reverted_internal_transfers_are_retained() {
-        // CALL value 1 to 0x22, then revert the enclosing transaction.
-        let (result, _, operations) =
-            execute(hex!("60006000600060006001602261fffff15060006000fd").into(), SpecId::CANCUN);
-        assert!(!result.is_success());
-        assert_eq!(operations.len(), 1);
-        assert_eq!(operations[0].to, Address::with_last_byte(0x22));
-        assert_eq!(operations[0].value, U256::from(1));
     }
 
     #[test]
@@ -1005,7 +907,7 @@ mod tests {
     #[test]
     fn static_and_delegate_calls_have_no_value() {
         // STATICCALL, DELEGATECALL and CALLCODE to 0x22 do not transfer ETH.
-        let (result, traces, operations) = execute(
+        let (result, traces) = execute(
             hex!("6000600060006000602261fffffa506000600060006000602261fffff45060006000600060006001602261fffff25000").into(),
             SpecId::CANCUN,
         );
@@ -1017,46 +919,5 @@ mod tests {
         assert_eq!(traces[2].value, None);
         assert_eq!(traces[3].r#type, "CALLCODE");
         assert_eq!(traces[3].value, Some(U256::from(1)));
-        assert!(operations.is_empty());
-    }
-
-    #[test]
-    fn internal_operations_preserve_execution_order() {
-        // Create a contract whose initcode self-destructs, transfer 1 wei, then self-destruct.
-        let (result, _, operations) = execute(
-            hex!("626022ff6000526003601d6000f05060006000600060006001603361fffff1506044ff").into(),
-            SpecId::CANCUN,
-        );
-        assert!(result.is_success());
-        assert_eq!(operations.len(), 4);
-        assert_eq!(operations[0].r#type, OperationType::OpCreate);
-        assert_eq!(operations[0].value, U256::ZERO);
-        assert_eq!(
-            operations[1],
-            InternalOperation {
-                from: operations[0].to,
-                to: Address::with_last_byte(0x22),
-                value: U256::ZERO,
-                r#type: OperationType::OpSelfDestruct,
-            }
-        );
-        assert_eq!(
-            operations[2],
-            InternalOperation {
-                from: Address::repeat_byte(0x11),
-                to: Address::with_last_byte(0x33),
-                value: U256::from(1),
-                r#type: OperationType::OpTransfer,
-            }
-        );
-        assert_eq!(
-            operations[3],
-            InternalOperation {
-                from: Address::repeat_byte(0x11),
-                to: Address::with_last_byte(0x44),
-                value: U256::from(106),
-                r#type: OperationType::OpSelfDestruct,
-            }
-        );
     }
 }
