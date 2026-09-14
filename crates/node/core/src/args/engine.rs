@@ -330,7 +330,7 @@ pub struct EngineArgs {
     #[arg(long = "engine.persistence-backpressure-threshold")]
     pub persistence_backpressure_threshold: Option<u64>,
 
-    /// EXPERIMENTAL: Configure how many of the blocks being persisted should only mask state/trie
+    /// Configure how many of the blocks being persisted should only mask state/trie
     /// writes instead of durably persisting their state/trie updates in the current cycle.
     #[arg(
         long = "engine.num-state-masking-blocks",
