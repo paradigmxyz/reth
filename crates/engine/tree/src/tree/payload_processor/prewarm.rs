@@ -270,7 +270,16 @@ where
         });
     }
 
-    /// Saves the warmed cache after execution and prewarming tasks have stopped accessing it.
+    /// Saves the warmed caches back into the shared slot after prewarming completes.
+    ///
+    /// This method calls [`PayloadExecutionCache::update_with_guard`], which requires exclusive
+    /// access. It should only be called after ensuring that:
+    /// 1. All prewarming tasks have completed execution
+    /// 2. No other concurrent operations are accessing the cache
+    ///
+    /// This consumes the `SavedCache` held by the task and transfers its cache handle into the
+    /// shared slot, so the task retains no extra reference after publication.
+    /// This method is called from `run()` only after all execution tasks are complete.
     ///
     /// Holds the cache mutex through state insertion and block validation because the candidate
     /// may share storage with the published cache. Removed caches are dropped after unlocking,
@@ -310,12 +319,14 @@ where
                     return (cached.take(), Some(new_cache));
                 }
 
+                // A duplicate of the published allocation must be released before unlock or
+                // the next payload will see it as busy and allocate a fresh cache.
+                // A different allocation must instead survive the lock to be destroyed outside it.
                 let reused =
                     cached.as_ref().is_some_and(|previous| previous.shares_cache_with(&new_cache));
                 let previous = cached.replace(new_cache);
                 if reused {
                     // The published handle keeps the allocation alive, so this drop is cheap.
-                    // Release the duplicate before unlocking to make the cache reusable at once.
                     drop(previous);
                     (None, None)
                 } else {
