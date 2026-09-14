@@ -590,9 +590,11 @@ impl<N: NetworkPrimitives> TransactionFetcher<N> {
                 heap.push((current, key));
             }
         };
-        if self.peers.get(&announcer).is_some_and(|peer| peer.tracked >= tracked) {
+        if let Some(peer) = self.peers.get(&announcer) &&
+            peer.tracked >= tracked
+        {
             key = announcer;
-            tracked = self.peers.get(&key).map_or(0, |peer| peer.tracked);
+            tracked = peer.tracked;
         }
         if tracked == 0 {
             return self.evict_oldest_pending()
