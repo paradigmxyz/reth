@@ -112,6 +112,15 @@ const DEFAULT_CACHE_SIZE: usize = 128 << 20;
 /// Default block size for `RocksDB` tables (16 KB).
 const DEFAULT_BLOCK_SIZE: usize = 16 * 1024;
 
+/// Estimated average charge of a block cache entry, used to size the `HyperClockCache` hash
+/// table at creation.
+///
+/// `RocksDB` recommends the larger of the data block size and the metadata block size (4 KB by
+/// default), and erring towards the low side: underestimating only raises per-entry metadata
+/// overhead, while overestimating leaves too few table slots and forces evictions that cost hit
+/// rate.
+const DEFAULT_ESTIMATED_ENTRY_CHARGE: usize = DEFAULT_BLOCK_SIZE;
+
 /// Default max background jobs for `RocksDB` compaction and flushing.
 const DEFAULT_MAX_BACKGROUND_JOBS: i32 = 6;
 
@@ -193,7 +202,7 @@ impl fmt::Debug for RocksDBBuilder {
 impl RocksDBBuilder {
     /// Creates a new builder with optimized default options.
     pub fn new(path: impl AsRef<Path>) -> Self {
-        let cache = Cache::new_lru_cache(DEFAULT_CACHE_SIZE);
+        let cache = Self::new_block_cache(DEFAULT_CACHE_SIZE);
         Self {
             path: path.as_ref().to_path_buf(),
             column_families: Vec::new(),
@@ -203,6 +212,15 @@ impl RocksDBBuilder {
             block_cache: cache,
             read_only: false,
         }
+    }
+
+    /// Creates the shared block cache.
+    ///
+    /// Uses `HyperClockCache`, which serves lookups without taking a lock, unlike the LRU cache
+    /// where every lookup locks the shard mutex and updates the LRU list. The returned cache must
+    /// only be installed as a block cache: `HyperClockCache` is not a general purpose cache.
+    fn new_block_cache(capacity_bytes: usize) -> Cache {
+        Cache::new_hyper_clock_cache(capacity_bytes, DEFAULT_ESTIMATED_ENTRY_CHARGE)
     }
 
     /// Creates default table options with shared block cache.
@@ -351,7 +369,7 @@ impl RocksDBBuilder {
 
     /// Sets a custom block cache size.
     pub fn with_block_cache_size(mut self, capacity_bytes: usize) -> Self {
-        self.block_cache = Cache::new_lru_cache(capacity_bytes);
+        self.block_cache = Self::new_block_cache(capacity_bytes);
         self
     }
 
