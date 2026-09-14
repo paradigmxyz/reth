@@ -224,14 +224,7 @@ impl<N: ProviderNodeTypes> Pipeline<N> {
         self.run_loop_until(None).await
     }
 
-    /// Runs the pipeline through `last_stage` and stops, leaving later stages untouched.
-    ///
-    /// Lets a hybrid backfill take only the prefix it needs when something else supplies the
-    /// state the remaining stages would have produced.
-    ///
-    /// # Errors
-    ///
-    /// [`PipelineError::MissingStage`] if `last_stage` is not in this pipeline.
+    /// Runs through `last_stage`, leaving later stages untouched; errors if the stage is absent.
     pub async fn run_until(
         &mut self,
         last_stage: StageId,

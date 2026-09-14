@@ -1,32 +1,8 @@
 //! snap/2 state synchronization for [EIP-8189](https://eips.ethereum.org/EIPS/eip-8189).
-//!
-//! Coordinates a state bootstrap that starts from a recent pivot block, downloads accounts, storage
-//! and bytecode authenticated against that pivot's state root, and advances the pivot with
-//! [EIP-7928 block access lists](https://eips.ethereum.org/EIPS/eip-7928) as the chain moves past
-//! it.
-//!
-//! This crate owns download progress only. Authenticated downloads come from
-//! `reth-downloaders`, and verified state is handed back to node integration once its trie root
-//! matches the target header.
-//!
-//! Downloaded state goes into the hashed state tables, owned by an attempt record that commits
-//! with it, along with how far the account key space has been downloaded. An account range only
-//! commits with storage matching its accounts' roots and code matching their hashes, so committed
-//! progress never depends on work still pending.
-//!
-//! ```
-//! use reth_snap_sync::SnapPivotPolicy;
-//!
-//! let policy = SnapPivotPolicy::default();
-//! // Without a finalized block, anchor at the EIP's example distance.
-//! assert_eq!(policy.pivot_block(1_000, None), Some(936));
-//! // A recent finalized block is anchored to directly.
-//! assert_eq!(policy.pivot_block(1_000, Some(950)), Some(950));
-//! // Stalled finality falls back to the example distance.
-//! assert_eq!(policy.pivot_block(1_000, Some(500)), Some(936));
-//! // A chain shorter than the head distance has no pivot yet.
-//! assert_eq!(policy.pivot_block(4, None), None);
-//! ```
+//! Downloads accounts, storage and bytecode authenticated against a canonical pivot.
+//! [EIP-7928 block access lists](https://eips.ethereum.org/EIPS/eip-7928) advance the downloaded state.
+//! Domain modules separate downloads from persistence; progress commits with its state.
+//! The rebuilt trie must match the target header before handing state to the pipeline.
 
 #![doc(
     html_logo_url = "https://raw.githubusercontent.com/paradigmxyz/reth/main/assets/reth-docs.png",
@@ -39,36 +15,37 @@ mod account;
 mod attempt;
 mod bal;
 mod bootstrap;
+mod bytecode;
 mod catch_up;
 mod context;
-mod download;
 mod error;
 mod generation;
 mod handoff;
 mod pivot;
+mod request;
 mod session;
-mod store;
+mod storage;
 mod trie;
 
 #[cfg(test)]
 mod test_utils;
 
 pub use account::{
-    AccountCoverage, AccountRangeDownload, AccountRangeStep, SnapAccountStore, VerifiedRange,
-    DEFAULT_RESPONSE_BYTES, MAX_HASH,
+    AccountCoverage, AccountRangeDownload, AccountRangeProgress, AccountRangeStep,
+    SnapAccountStore, VerifiedRange, DEFAULT_RESPONSE_BYTES, MAX_HASH,
 };
 pub use attempt::{SnapAttemptStore, SnapWrite};
 pub use bal::{BalStateUpdate, DownloadedAccount};
 pub use bootstrap::{SnapBootstrap, SnapSyncContext, SnapSyncOutcome, SnapSyncProvider};
-pub use catch_up::{BlockAccessListCatchUp, BlockAccessListCatchUpOutcome};
+pub use catch_up::{
+    BlockAccessListCatchUp, BlockAccessListCatchUpOutcome, BlockAccessListProgress,
+};
 pub use context::NodeSnapContext;
-pub use download::{RangeBudget, StateDownloadOutcome, StateDownloader};
 pub use error::SnapSyncError;
-pub use generation::{SnapGeneration, SnapPhase};
+pub use generation::{SnapDownloadProgress, SnapGeneration, SnapPhase, SnapStateStore};
 pub use handoff::SnapPipelineHandoff;
 pub use pivot::SnapPivotPolicy;
-pub use session::{SnapSyncSession, SnapSyncSessionState};
-pub use store::{
-    AccountRangeProgress, BlockAccessListProgress, SnapDownloadProgress, SnapStateStore,
+pub use session::{
+    RangeBudget, SnapSyncSession, SnapSyncSessionState, StateDownloadOutcome, StateDownloader,
 };
 pub use trie::TrieGenerator;

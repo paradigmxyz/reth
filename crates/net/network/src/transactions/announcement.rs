@@ -5,10 +5,7 @@ use alloy_primitives::{map::B256Set, TxHash, B128};
 use derive_more::IntoIterator;
 use reth_eth_wire::{EthVersion, HandleMempoolData, NewPooledTransactionHashes};
 
-/// An announcement with unique hashes in the order supplied by the peer.
-///
-/// Metadata comes from the wire message. Network-specific validation is performed by the
-/// transaction manager's announcement policy.
+/// Unique transaction hashes in peer order, with metadata validated by the announcement policy.
 #[derive(Debug, IntoIterator)]
 pub struct TransactionAnnouncement {
     #[into_iterator(owned, ref)]
@@ -18,11 +15,8 @@ pub struct TransactionAnnouncement {
 }
 
 impl TransactionAnnouncement {
-    /// Normalizes a wire announcement, keeping the first occurrence of each hash and its metadata.
-    /// The scratch set is cleared before use and its allocation is kept for subsequent messages,
-    /// unless an oversized announcement grew it past twice the announcement soft limit.
-    ///
-    /// Returns an error if the hash, type and size arrays have different lengths.
+    /// Keeps the first entry per hash using reusable scratch space; oversized allocations are
+    /// shrunk. Returns an error if the hash, type and size arrays differ in length.
     pub fn from_message(
         msg: &NewPooledTransactionHashes,
         seen: &mut B256Set,
@@ -128,8 +122,7 @@ pub struct TransactionMetadata {
     pub size: usize,
 }
 
-/// Scratch capacity kept between messages. Only oversized announcements grow the set past this
-/// bound, and dropping it avoids pinning their allocation for the caller's lifetime.
+// Avoid retaining oversized announcement allocations between messages.
 const MAX_RETAINED_SCRATCH_CAPACITY: usize =
     2 * SOFT_LIMIT_COUNT_HASHES_IN_NEW_POOLED_TRANSACTIONS_BROADCAST_MESSAGE;
 

@@ -1,18 +1,22 @@
 //! Downloads account ranges in key order and commits each under the write it was fetched with.
 
-use crate::{AccountCoverage, SnapAccountStore, SnapAttemptStore, SnapSyncError, SnapWrite};
+use crate::{
+    request::{push_peer, request_options, SnapRequests},
+    AccountCoverage, AccountRangeProgress, SnapAccountStore, SnapAttemptStore, SnapSyncError,
+    SnapWrite,
+};
 use alloy_primitives::{map::B256Map, B256};
 use reth_db_api::transaction::DbTxMut;
 use reth_downloaders::snap::{AccountRangeDownloader, AccountRangeOutcome, VerifiedAccountRange};
 use reth_eth_wire_types::snap::GetAccountRangeMessage;
-use reth_network_p2p::snap::client::SnapClient;
+use reth_network_p2p::{error::RequestError, snap::client::SnapClient};
 use reth_network_peers::PeerId;
 use reth_storage_api::{
     DBProvider, DatabaseProviderFactory, MetadataProvider, MetadataWriter, StateWriter,
 };
 use reth_storage_errors::provider::ProviderError;
 use reth_tasks::Runtime;
-use reth_trie_common::HashedStorage;
+use reth_trie_common::{HashedStorage, TrieAccount};
 use revm::bytecode::Bytecode;
 use std::fmt;
 
@@ -22,10 +26,8 @@ pub const DEFAULT_RESPONSE_BYTES: u64 = 512 * 1024;
 /// Inclusive upper bound covering the full account trie keyspace.
 pub const MAX_HASH: B256 = B256::new([0xff; B256::len_bytes()]);
 
-/// Downloads the account ranges an attempt still needs, one at a time in key order.
-///
-/// [`Self::next`] fetches the range at the coverage cursor the store records; the caller resolves
-/// its storage and code, then [`Self::commit`] persists everything and moves the cursor.
+/// Downloads account ranges in key order; callers resolve dependencies before committing each
+/// range.
 pub struct AccountRangeDownload<C, F> {
     client: C,
     factory: F,
@@ -70,10 +72,8 @@ where
     F::Provider: MetadataProvider,
     F::ProviderRW: MetadataProvider + MetadataWriter + StateWriter + DBProvider<Tx: DbTxMut>,
 {
-    /// Fetches the range at the coverage cursor.
-    ///
-    /// `Ok(None)` once every account is downloaded. A failed request leaves the cursor where it
-    /// was, so the download can be resumed from the persisted coverage.
+    /// Fetches the next range, or returns `None` at completion; failures preserve the durable
+    /// cursor.
     pub async fn next(&mut self) -> Result<Option<AccountRangeStep>, SnapSyncError> {
         let (write, root_hash, coverage) = self.active_write()?;
         self.coverage = Some(coverage);
@@ -101,10 +101,8 @@ where
         }))
     }
 
-    /// Commits `verified` with the storage and code resolved for it, moving the cursor past it.
-    ///
-    /// Refused, with the coverage unchanged, when the attempt no longer accepts the write the
-    /// range was fetched under or a dependency is missing.
+    /// Commits a range and its dependencies; stale attempts or missing dependencies leave coverage
+    /// intact.
     pub async fn commit(
         &mut self,
         verified: VerifiedRange,
@@ -162,10 +160,7 @@ pub enum AccountRangeStep {
     },
 }
 
-/// A verified range with the write it was fetched under.
-///
-/// Only [`AccountRangeDownload::commit`] consumes it, so the range is committed under the
-/// attempt that was active when it was requested, never a later one.
+/// A verified range bound to the attempt that requested it, checked again at commit.
 #[derive(Debug)]
 pub struct VerifiedRange {
     // Write the attempt accepted when the range was requested.
@@ -184,6 +179,71 @@ impl VerifiedRange {
     pub const fn range(&self) -> &VerifiedAccountRange {
         &self.range
     }
+}
+
+impl<C: SnapClient> SnapRequests<'_, C> {
+    // Retries unavailable roots across distinct peers without penalizing them.
+    pub(crate) async fn download_account_range(
+        &mut self,
+        root: B256,
+        origin: B256,
+        limit: B256,
+    ) -> Result<Option<VerifiedAccountRange>, SnapSyncError> {
+        let mut excluded = Vec::new();
+        loop {
+            let request = GetAccountRangeMessage {
+                request_id: self.next_id()?,
+                root_hash: root,
+                starting_hash: origin,
+                limit_hash: limit,
+                response_bytes: DEFAULT_RESPONSE_BYTES,
+            };
+            let downloader = AccountRangeDownloader::new_with_options(
+                self.client,
+                request,
+                self.runtime.clone(),
+                request_options(&excluded),
+            )
+            .map_err(|error| SnapSyncError::InvalidRequest(error.to_string()))?;
+            match downloader.await {
+                Ok(AccountRangeOutcome::Verified(range)) => return Ok(Some(range)),
+                Ok(AccountRangeOutcome::Unavailable { peer_id }) => {
+                    push_peer(&mut excluded, peer_id)
+                }
+                Err(RequestError::UnsupportedCapability) => return Ok(None),
+                Err(error) => return Err(error.into()),
+            }
+        }
+    }
+}
+
+// Resumes at the hash after the last committed account, unless the range exhausted the trie.
+pub(crate) fn account_progress(
+    accounts: &[(B256, TrieAccount)],
+    complete: bool,
+) -> Result<AccountRangeProgress, SnapSyncError> {
+    if complete {
+        return Ok(AccountRangeProgress::Complete)
+    }
+    let last = accounts.last().expect("account batch is non-empty").0;
+    let next_account = next_hash(last).ok_or_else(|| {
+        SnapSyncError::InvalidRequest("account range continues past the maximum hash".to_string())
+    })?;
+    Ok(AccountRangeProgress::More { next_account })
+}
+
+// Returns the next trie key, or `None` when the inclusive keyspace is exhausted.
+fn next_hash(hash: B256) -> Option<B256> {
+    let mut bytes = [0u8; B256::len_bytes()];
+    bytes.copy_from_slice(hash.as_slice());
+    for byte in bytes.iter_mut().rev() {
+        let (next, overflow) = byte.overflowing_add(1);
+        *byte = next;
+        if !overflow {
+            return Some(B256::new(bytes))
+        }
+    }
+    None
 }
 
 #[cfg(test)]
@@ -402,5 +462,10 @@ mod tests {
         assert!(download.next().await.unwrap().is_none());
         assert_eq!(download.coverage(), Some(AccountCoverage::COMPLETE));
         assert!(client.origins().is_empty());
+    }
+    #[test]
+    fn next_hash_stops_at_keyspace_end() {
+        assert_eq!(next_hash(B256::ZERO), Some(B256::with_last_byte(1)));
+        assert_eq!(next_hash(MAX_HASH), None);
     }
 }

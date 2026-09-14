@@ -1,9 +1,5 @@
-//! Snapshot bootstrap wired into the engine's backfill slot.
-//!
-//! Snap assembles state from peers instead of executing history, but it still needs canonical
-//! headers first and the ordinary stages afterwards. Running it as a [`BackfillSync`] gives that
-//! sequence the same exclusive database access the staged pipeline gets, so the engine buffers
-//! payloads for the whole bootstrap rather than racing it.
+//! Runs snapshot bootstrap under the engine's exclusive backfill database access.
+//! Canonical headers precede state download; ordinary stages resume above the published pivot.
 
 use futures::FutureExt;
 use reth_engine_tree::backfill::{BackfillAction, BackfillEvent, BackfillSync, PipelineSync};
@@ -19,13 +15,8 @@ use std::task::{ready, Context, Poll};
 use tokio::sync::{oneshot, watch};
 use tracing::{debug, info};
 
-/// Drives a snapshot bootstrap through the engine's backfill interface.
-///
-/// One backfill run is headers, then state download, then the remaining stages above the published
-/// pivot. [`BackfillEvent::Finished`] is only emitted once all three are done, so the engine never
-/// treats the persisted chain as ready while stage bookkeeping is still inconsistent.
-/// Once state is published, subsequent backfills delegate to [`PipelineSync`]. Databases with
-/// existing execution progress use [`PipelineSync`] without starting a snapshot.
+/// Bootstraps headers, state and remaining stages before reporting backfill completion.
+/// Completed snapshots and databases with execution progress delegate to [`PipelineSync`].
 #[derive(Debug)]
 pub struct SnapBackfillSync<N: ProviderNodeTypes, C> {
     /// Serves the snap requests, and reports peer counts to the session.
@@ -179,10 +170,7 @@ where
     }
 }
 
-/// Owns the pipeline while idle and the bootstrap's result channel while running.
-///
-/// The distinction matters for the same reason it does for the staged pipeline: a running
-/// bootstrap holds the database write lock, so no other component may write while it is active.
+// Owns the idle pipeline or the running bootstrap, which holds the database write lock.
 #[derive(Debug)]
 enum SnapBackfillState<N: ProviderNodeTypes> {
     /// No bootstrap in flight; the pipeline is parked here.

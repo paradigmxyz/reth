@@ -1,11 +1,5 @@
-//! Engine orchestrator launch helpers.
-//!
-//! Both wire the engine components into a [`ChainOrchestrator`](crate::chain::ChainOrchestrator)
-//! ready to be polled as a `Stream`. They differ only in how the node backfills:
-//! [`build_engine_orchestrator`](crate::launch::build_engine_orchestrator) uses the staged
-//! [`Pipeline`](reth_stages_api::Pipeline), while
-//! [`build_engine_orchestrator_with_backfill`](crate::launch::build_engine_orchestrator_with_backfill)
-//! takes any [`BackfillSync`](crate::backfill::BackfillSync).
+//! Engine launch helpers for staged or caller-supplied backfill.
+//! Both builders return a `ChainOrchestrator` stream with the same live-sync components.
 
 use crate::{
     backfill::{BackfillSync, PipelineSync},
@@ -76,19 +70,7 @@ pub struct EngineOrchestratorConfig<N: ProviderNodeTypes, Client, S, V, C> {
     pub runtime: Runtime,
 }
 
-/// Builds the engine [`ChainOrchestrator`], backfilling with the staged [`Pipeline`].
-///
-/// Spawns and wires together:
-///
-/// - **[`BasicBlockDownloader`]** — downloads blocks on demand during live sync.
-/// - **[`PersistenceHandle`]** — writes blocks and prunes off the consensus path.
-/// - **[`EngineApiTreeHandler`]** — serves engine API requests and owns in-memory chain state.
-/// - **[`EngineApiRequestHandler`]** + **[`EngineHandler`]** — route CL messages to the tree.
-/// - **[`PipelineSync`]** — backfills over large block ranges.
-///
-/// The result yields [`ChainEvent`]s as a [`Stream`].
-///
-/// [`ChainEvent`]: crate::chain::ChainEvent
+/// Builds the engine [`ChainOrchestrator`] with staged [`Pipeline`] backfill and live-sync tasks.
 pub fn build_engine_orchestrator<N, Client, S, V, C>(
     config: EngineOrchestratorConfig<N, Client, S, V, C>,
     pipeline: Pipeline<N>,
@@ -109,10 +91,7 @@ where
     )
 }
 
-/// Builds the engine [`ChainOrchestrator`] on a caller-supplied [`BackfillSync`].
-///
-/// Wires the same components as [`build_engine_orchestrator`], letting the node substitute a
-/// backfill mechanism — a snapshot bootstrap, say — that this crate does not depend on.
+/// Builds the engine [`ChainOrchestrator`] with a caller-supplied [`BackfillSync`].
 pub fn build_engine_orchestrator_with_backfill<N, Client, S, V, C, B>(
     config: EngineOrchestratorConfig<N, Client, S, V, C>,
     backfill_sync: B,

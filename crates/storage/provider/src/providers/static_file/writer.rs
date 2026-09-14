@@ -775,11 +775,8 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
         Ok(())
     }
 
-    /// Initializes a fresh non-header segment with an empty anchor after pruned history.
-    ///
-    /// The next block append starts at `block + 1`. The file's expected range stays unchanged so
-    /// its index still resolves to the same filename after reopening. No rows for skipped history
-    /// are created. Returns an error if the segment already contains blocks or rows.
+    /// Anchors an empty non-header segment so the next append starts at `block + 1`.
+    /// Preserves the file's expected range; refuses segments containing blocks or rows.
     pub fn initialize_pruned_anchor(&mut self, block: BlockNumber) -> ProviderResult<()> {
         let header = self.user_header();
         if header.segment().is_headers() ||

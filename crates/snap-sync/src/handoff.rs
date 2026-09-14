@@ -1,11 +1,6 @@
-//! Publishes a completed generation as the staged pipeline's starting point.
-//!
-//! Bodies, receipts, senders, change sets and history indexes below the pivot were never
-//! downloaded, so they are declared pruned rather than synced. History that is not available
-//! locally is already representable: `earliest_history_height` follows the lowest static file
-//! block, stages consult prune checkpoints before assuming a range exists, and the engine publishes
-//! the served range to peers. Claiming the range was synced instead would fail the static file
-//! consistency check, or answer historical queries from data that is not there.
+//! Publishes completed snap state as the staged pipeline's starting point.
+//! Undownloaded history below the pivot is marked pruned, establishing the unwind floor.
+//! Static file anchors and stage checkpoints let the pipeline resume above the pivot.
 
 use crate::{error::db_error, SnapStateStore, SnapSyncError};
 use reth_db_api::{tables, transaction::DbTxMut};
@@ -47,13 +42,7 @@ impl<'a, F> SnapPipelineHandoff<'a, F> {
         Self { store: SnapStateStore::new(factory) }
     }
 
-    /// Returns the block the pipeline was handed, if this node was snap synced.
-    ///
-    /// Nothing below it can be re-executed: the change sets a rewind replays were never
-    /// downloaded, so an unwind must treat it as a floor and require a fresh snap sync.
-    ///
-    /// `geth` stops at its own pivot for the same reason, returning genesis as the new head
-    /// rather than rewinding towards it when no persistent state exists below.
+    /// Returns the published pivot, below which missing change sets prevent rewinding.
     pub fn published_block(&self) -> Result<Option<u64>, SnapSyncError>
     where
         F: DatabaseProviderFactory<Provider: StageCheckpointReader>,
@@ -62,15 +51,8 @@ impl<'a, F> SnapPipelineHandoff<'a, F> {
     }
 }
 
-/// Publishes the state at `block_number` as the frontier every state stage starts from.
-///
-/// The pipeline resumes at `block_number + 1`, and everything below it is recorded as pruned so no
-/// stage looks for rows that were never downloaded. The prune checkpoints double as the unwind
-/// floor: `PruneModes::ensure_unwind_target_unpruned` refuses to rewind past them.
-///
-/// Initializes static file anchors before writing checkpoints through `provider`. The caller
-/// commits the database together with the accepted state; an interrupted publication can repeat
-/// the static file initialization from the saved generation.
+// Publishes the pivot and prune floor; the caller commits checkpoints with the accepted state.
+// Static file initialization is repeatable if publication is interrupted.
 pub(crate) fn publish_state_snapshot(
     provider: &(impl DBProvider<Tx: DbTxMut>
           + PruneCheckpointWriter

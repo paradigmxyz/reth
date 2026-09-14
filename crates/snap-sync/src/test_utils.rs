@@ -31,12 +31,12 @@ use std::{
     sync::{Mutex, MutexGuard},
 };
 
-/// Small bounds keep header fixtures short without changing the policy's decisions.
+// Small bounds keep header fixtures short without changing the policy's decisions.
 pub(crate) fn policy() -> SnapPivotPolicy {
     SnapPivotPolicy::default().with_head_distance(1).with_advance_after(4).with_history(8)
 }
 
-/// A header with a state root distinctive to its number, and a commitment when one is given.
+// A header with a state root distinctive to its number, and a commitment when one is given.
 pub(crate) fn header(
     number: u64,
     parent_hash: B256,
@@ -51,7 +51,7 @@ pub(crate) fn header(
     }
 }
 
-/// Blocks `0..=3`, carrying a block access list commitment from `bal_from` onwards.
+// Blocks `0..=3`, carrying a block access list commitment from `bal_from` onwards.
 pub(crate) fn chain(bal_from: Option<u64>) -> Vec<Header> {
     let mut headers = Vec::new();
     let mut parent = B256::ZERO;
@@ -71,12 +71,12 @@ pub(crate) fn provider_with(headers: impl IntoIterator<Item = Header>) -> MockEt
     provider
 }
 
-/// A generation anchored to `block`, downloading against `state_root`.
+// A generation anchored to `block`, downloading against `state_root`.
 pub(crate) fn generation(block: u64, state_root: B256) -> SnapGeneration {
     SnapGeneration::new(BlockNumHash::new(block, B256::repeat_byte(block as u8)), state_root)
 }
 
-/// A database using the hashed state layout snap writes into.
+// A database using the hashed state layout snap writes into.
 pub(crate) fn hashed_factory() -> ProviderFactory<MockNodeTypesWithDB> {
     let factory = create_test_provider_factory();
     let provider = factory.database_provider_rw().unwrap();
@@ -87,12 +87,12 @@ pub(crate) fn hashed_factory() -> ProviderFactory<MockNodeTypesWithDB> {
     factory
 }
 
-/// A hashed account key in the lowest part of the key space.
+// A hashed account key in the lowest part of the key space.
 pub(crate) fn key(value: u64) -> B256 {
     B256::left_padding_from(&value.to_be_bytes())
 }
 
-/// An account without storage or code, distinguished by its nonce.
+// An account without storage or code, distinguished by its nonce.
 pub(crate) fn account(nonce: u64) -> TrieAccount {
     TrieAccount {
         nonce,
@@ -102,7 +102,7 @@ pub(crate) fn account(nonce: u64) -> TrieAccount {
     }
 }
 
-/// Root of the account trie holding `accounts`.
+// Root of the account trie holding `accounts`.
 pub(crate) fn state_root(accounts: &[(B256, TrieAccount)]) -> B256 {
     root_and_proof(accounts, &[]).0
 }
@@ -120,8 +120,8 @@ fn root_and_proof(accounts: &[(B256, TrieAccount)], targets: &[B256]) -> (B256, 
     (root, proof)
 }
 
-/// A peer's answer serving `accounts[served]` out of the trie holding `accounts`, proven along
-/// the paths to `proof_targets`. No targets means the whole trie is served without a proof.
+// A peer's answer serving `accounts[served]` out of the trie holding `accounts`, proven along
+// the paths to `proof_targets`. No targets means the whole trie is served without a proof.
 pub(crate) fn account_range(
     request_id: u64,
     accounts: &[(B256, TrieAccount)],
@@ -145,8 +145,8 @@ pub(crate) fn account_range(
     Ok(WithPeerId::new(PeerId::random(), SnapResponse::AccountRange(message)))
 }
 
-/// Runs the same verification production uses on [`account_range`]'s answer to a request from
-/// `origin` through the end of the key space.
+// Runs the same verification production uses on [`account_range`]'s answer to a request from
+// `origin` through the end of the key space.
 pub(crate) fn verified_range(
     accounts: &[(B256, TrieAccount)],
     served: Range<usize>,
@@ -184,7 +184,7 @@ impl ScriptedSnapClient {
         }
     }
 
-    /// Origins of the account range requests sent so far.
+    // Origins of the account range requests sent so far.
     pub(crate) fn origins(&self) -> MutexGuard<'_, Vec<B256>> {
         self.origins.lock().unwrap()
     }

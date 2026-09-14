@@ -51,16 +51,7 @@ impl<H: BlockHeader> EthResponseValidator for RequestResult<Vec<H>> {
         }
     }
 
-    /// [`RequestError::ChannelClosed`] is not possible here since these errors are mapped to
-    /// `ConnectionDropped`, which will be handled when the dropped connection is cleaned up.
-    ///
-    /// [`RequestError::ConnectionDropped`] should be ignored here because this is already handled
-    /// when the dropped connection is handled.
-    ///
-    /// [`RequestError::UnsupportedCapability`] is also used for locally rejected optional requests,
-    /// which should not affect peer reputation.
-    ///
-    /// [`RequestError::Internal`] originates locally and cannot be attributed to the peer.
+    /// Ignores local failures and dropped connections, which are handled outside peer reputation.
     fn reputation_change_err(&self) -> Option<ReputationChangeKind> {
         if let Err(err) = self {
             match err {
@@ -102,10 +93,7 @@ pub enum RequestError {
     /// Indicates a bad response was received.
     #[display("received bad response")]
     BadResponse,
-    /// The request failed locally, without the peer being at fault.
-    ///
-    /// Covers work the node does on a response's behalf — verification on the blocking pool, for
-    /// instance — panicking or being cancelled during shutdown.
+    /// Local request failure, including cancelled or panicked verification.
     #[display("request failed locally")]
     Internal,
 }

@@ -9,10 +9,7 @@ use reth_storage_api::{
     MetadataProvider, MetadataWriter, SnapAttempt, SnapAttemptId, StorageSettings,
 };
 
-/// Persistence for the attempt that owns downloaded snap state.
-///
-/// Blanket-implemented over node metadata access, so these writes join the caller's transaction:
-/// state, bytecode and the attempt record commit together or not at all.
+/// Persists attempt ownership alongside state and bytecode in the caller's transaction.
 pub trait SnapAttemptStore {
     /// Starts an attempt anchored to `generation`, superseding any already recorded.
     fn start_snap_attempt(&self, generation: SnapGeneration) -> Result<SnapWrite, SnapSyncError>

@@ -69,16 +69,8 @@ impl<'a, C, F, X> SnapBootstrap<'a, C, F, X> {
         self
     }
 
-    /// Runs until the state is validated or the context reports no further progress.
-    ///
-    /// Returns [`SnapSyncError::ExistingState`] if bootstrap has already completed or ordinary
-    /// execution has populated the database. Such nodes must continue with ordinary backfill.
-    ///
-    /// A pivot that leaves the canonical chain, or falls behind the block access list history
-    /// peers serve, is abandoned and replaced by a fresh generation rather than failing the
-    /// session. EIP-8189 also describes restoring an orphaned pivot from the fork's block access
-    /// lists; restarting is the simpler policy and costs a re-download only when a reorg runs
-    /// deeper than the pivot distance.
+    /// Runs until state validation or no further progress, restarting unusable pivots.
+    /// Returns `ExistingState` for executed databases or completed snapshots.
     pub async fn run(&mut self) -> Result<SnapSyncOutcome, SnapSyncError>
     where
         C: SnapClient,
@@ -333,10 +325,7 @@ pub enum SnapSyncOutcome {
     },
 }
 
-/// Canonical head and peer progress observed by a Snap session.
-///
-/// The node owning the session implements this so that stalled phases wait on real network or
-/// chain events rather than polling.
+/// Canonical head and peer events used to resume stalled snap sessions.
 pub trait SnapSyncContext {
     /// Whether the session should stop at the next durable phase boundary.
     fn is_cancelled(&self) -> bool {
@@ -346,9 +335,7 @@ pub trait SnapSyncContext {
     /// Returns the highest canonical block whose header is available locally.
     fn canonical_head(&self) -> Result<u64, SnapSyncError>;
 
-    /// Resolves when the head may have advanced past `head`, or new peers became available.
-    ///
-    /// Returning `false` ends the session, leaving any durable generation resumable.
+    /// Waits for head or peer progress; `false` ends the session with durable progress resumable.
     fn wait_for_progress(&mut self, head: u64) -> impl Future<Output = bool> + Send;
 }
 
@@ -417,7 +404,7 @@ const fn is_reorg(error: &SnapSyncError) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{store::SNAP_SYNC_STAGE, AccountRangeProgress, SnapPipelineHandoff};
+    use crate::{generation::SNAP_SYNC_STAGE, AccountRangeProgress, SnapPipelineHandoff};
     use alloy_consensus::Header;
     use alloy_primitives::{B256, KECCAK256_EMPTY, U256};
     use reth_db_api::{tables, transaction::DbTx};
