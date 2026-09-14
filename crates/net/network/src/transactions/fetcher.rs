@@ -47,6 +47,7 @@
 //!   recent fallback sources does not allow unlimited retries
 
 use super::{
+    announcement::{AnnouncedTransaction, TransactionMetadata},
     config::TransactionFetcherConfig,
     constants::{
         tx_fetcher::{
@@ -65,7 +66,7 @@ use alloy_primitives::{
     TxHash,
 };
 use futures::{stream::FuturesUnordered, Future, FutureExt, Stream, StreamExt};
-use reth_eth_wire::{Eth68TxMetadata, EthVersion, GetPooledTransactions, PooledTransactions};
+use reth_eth_wire::{EthVersion, GetPooledTransactions, PooledTransactions};
 use reth_eth_wire_types::{EthNetworkPrimitives, NetworkPrimitives};
 use reth_network_api::PeerRequest;
 use reth_network_p2p::error::{RequestError, RequestResult};
@@ -192,7 +193,7 @@ impl<N: NetworkPrimitives> TransactionFetcher<N> {
     pub fn on_announcement(
         &mut self,
         peer_id: PeerId,
-        announcement: impl IntoIterator<Item = (TxHash, Eth68TxMetadata)>,
+        announcement: impl IntoIterator<Item = AnnouncedTransaction>,
     ) {
         let key = self.peer_key(peer_id);
         let max_per_peer = self.config.max_announced_hashes_per_peer as usize;
@@ -217,7 +218,7 @@ impl<N: NetworkPrimitives> TransactionFetcher<N> {
         // that peer's accounting once, flushing before eviction needs up-to-date counts.
         let mut retired_candidates = DeferredCandidateRemovals::default();
 
-        for (hash, metadata) in announcement {
+        for AnnouncedTransaction { hash, metadata } in announcement {
             let size = announced_size(metadata);
             let at_capacity = self.hashes.len() >= max_total;
 
@@ -1405,9 +1406,10 @@ struct ResolvedRequest<T> {
 
 /// Returns the announced transaction size used for request packing, capped at the response soft
 /// limit, or 0 if the announcement carried no size.
-fn announced_size(metadata: Eth68TxMetadata) -> u32 {
-    metadata
-        .map_or(0, |(_, size)| size.min(SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE) as u32)
+fn announced_size(metadata: Option<TransactionMetadata>) -> u32 {
+    metadata.map_or(0, |metadata| {
+        metadata.size.min(SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE) as u32
+    })
 }
 
 /// Filters a response down to the transactions that were requested, dropping duplicates.
@@ -1545,13 +1547,19 @@ mod tests {
         ) {
             self.fetcher.on_announcement(
                 peer_id,
-                entries.into_iter().map(|(h, size)| (h, Some((2, size)))),
+                entries.into_iter().map(|(hash, size)| AnnouncedTransaction {
+                    hash,
+                    metadata: Some(TransactionMetadata { tx_type: 2, size }),
+                }),
             );
             self.verify();
         }
 
         fn announce_unsized(&mut self, peer_id: PeerId, hashes: &[TxHash]) {
-            self.fetcher.on_announcement(peer_id, hashes.iter().map(|hash| (*hash, None)));
+            self.fetcher.on_announcement(
+                peer_id,
+                hashes.iter().map(|&hash| AnnouncedTransaction { hash, metadata: None }),
+            );
             self.verify();
         }
 

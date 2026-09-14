@@ -273,8 +273,8 @@ where
     /// Saves the warmed cache after execution and prewarming tasks have stopped accessing it.
     ///
     /// Holds the cache mutex through state insertion and block validation because the candidate
-    /// may share storage with the published cache. Removed allocations are destroyed after
-    /// unlocking, before the next task on the prewarm worker starts.
+    /// may share storage with the published cache. Removed caches are dropped after unlocking,
+    /// before the next task on the prewarm worker starts.
     #[instrument(level = "debug", target = "engine::tree::payload_processor::prewarm", skip_all)]
     fn save_cache(
         self,
@@ -323,8 +323,9 @@ where
                 }
             });
 
-            // Destroy removed allocations on this worker before starting the next prewarm task.
-            // At most two allocations are retired by this save; none queue on the drop worker.
+            // Drop removed caches here before starting the next prewarm task. If a handle is the
+            // last owner, its allocation is destroyed here; at most two can be retired per save.
+            // No retired handles queue on the shared drop worker.
             // A new checkout/allocation may overlap cleanup after unlock. Cache waits exclude
             // this cleanup, while cache_saving_duration below includes it.
             drop((previous, rejected));
@@ -1171,7 +1172,7 @@ pub struct PrewarmMetrics {
     pub(crate) execution_duration: Histogram,
     /// A histogram for prefetch targets per transaction prewarming
     pub(crate) prefetch_storage_targets: Histogram,
-    /// Cache saving duration, including destruction of removed allocations after unlocking.
+    /// Cache saving duration, including cleanup of removed caches after unlocking.
     pub(crate) cache_saving_duration: Gauge,
     /// Counter for transaction execution errors during prewarming
     pub(crate) transaction_errors: Counter,
