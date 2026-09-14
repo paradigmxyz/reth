@@ -119,6 +119,10 @@ pub trait LoadPendingBlock:
                 return Ok(None);
             };
 
+            if let Some(factory) = pending_block.state_provider_factory() {
+                return Ok(Some(factory.state_provider().map_err(Self::Error::from_eth_err)?))
+            }
+
             Ok(Some(
                 self.provider()
                     .state_with_block_appended(
@@ -180,6 +184,7 @@ pub trait LoadPendingBlock:
                 }
             }
 
+            let parent_hash = parent.hash();
             let executed_block = match self
                 .spawn_blocking_io(move |this| {
                     // we rebuild the block
@@ -194,10 +199,21 @@ pub trait LoadPendingBlock:
                 }
             };
 
+            let state_provider_factory = self
+                .provider()
+                .state_provider_factory_with_block_appended(parent_hash, executed_block.clone())
+                .unwrap_or_else(|err| {
+                    debug!(target: "rpc", %err, "Failed to create pending state-provider factory");
+                    None
+                });
             let pending = PendingBlock::with_executed_block(
                 Instant::now() + Duration::from_secs(1),
                 executed_block,
             );
+            let pending = match state_provider_factory {
+                Some(factory) => pending.with_state_provider_factory(factory),
+                None => pending,
+            };
 
             *lock = Some(pending.clone());
 

@@ -605,22 +605,27 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
             + BlockNumReader,
     {
         let (state_trie_tip_block, finish_tip_block) = database_state_frontiers(provider)?;
-        self.execution_overlay_at_frontiers(provider, state_trie_tip_block, finish_tip_block)
+        let (anchor_hash, fallback_block_number) = self.execution_overlay_anchor_at_frontiers(
+            provider,
+            state_trie_tip_block,
+            finish_tip_block,
+        )?;
+        Ok((self.resolve_execution_overlay(anchor_hash)?, fallback_block_number))
     }
 
-    /// Returns the in-memory execution overlay using frontiers already read from the provider.
+    /// Returns the execution overlay anchor and any required historical fallback block.
     #[instrument(
         level = "trace",
         target = "storage::overlay",
         skip_all,
         fields(?state_trie_tip_block, ?finish_tip_block, parent_hash = ?self.parent_hash)
     )]
-    pub(crate) fn execution_overlay_at_frontiers<Provider>(
+    pub(crate) fn execution_overlay_anchor_at_frontiers<Provider>(
         &self,
         provider: &Provider,
         state_trie_tip_block: BlockNumHash,
         finish_tip_block: BlockNumHash,
-    ) -> ProviderResult<(Arc<ExecutionOverlay>, Option<BlockNumber>)>
+    ) -> ProviderResult<(BlockHash, Option<BlockNumber>)>
     where
         Provider: ChangeSetReader
             + StorageChangeSetReader
@@ -636,7 +641,7 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
             }
             AnchorForParent::NoReverts { anchor } => (anchor.hash, None),
         };
-        Ok((self.resolve_execution_overlay(anchor_hash)?, fallback_block_number))
+        Ok((anchor_hash, fallback_block_number))
     }
 
     /// Resolves the effective overlay (trie updates, hashed state).
@@ -659,7 +664,7 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
     }
 
     /// Resolves the execution overlay for the configured in-memory source.
-    fn resolve_execution_overlay(
+    pub(crate) fn resolve_execution_overlay(
         &self,
         anchor_hash: BlockHash,
     ) -> ProviderResult<Arc<ExecutionOverlay>> {

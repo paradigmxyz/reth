@@ -30,9 +30,9 @@ use reth_prune_types::{PruneCheckpoint, PruneSegment};
 use reth_stages_types::{StageCheckpoint, StageId};
 use reth_static_file_types::StaticFileSegment;
 use reth_storage_api::{
-    BlockBodyIndicesProvider, DatabaseProviderROFactory, NodePrimitivesProvider, RangeEnd,
-    RangeResponse, RangeResult, StateRangeProvider, StateRangeProviderFactory, StateRangeView,
-    StorageChangeSetReader, StorageRangeResult,
+    AppendedBlockStateProviderFactory, BlockBodyIndicesProvider, DatabaseProviderROFactory,
+    NodePrimitivesProvider, RangeEnd, RangeResponse, RangeResult, StateRangeProvider,
+    StateRangeProviderFactory, StateRangeView, StorageChangeSetReader, StorageRangeResult,
 };
 use reth_storage_errors::provider::ProviderResult;
 use reth_storage_overlay::{OverlayStateProvider, OverlayStateProviderFactory, OwnedProvider};
@@ -748,6 +748,17 @@ impl<N: ProviderNodeTypes> StateProviderFactory for BlockchainProvider<N> {
             self.database.overlay_manager().overlay_builder(parent_hash).with_appended_block(block),
         );
         Ok(Box::new(state_provider_factory.database_provider_ro()?))
+    }
+
+    fn state_provider_factory_with_block_appended(
+        &self,
+        parent_hash: BlockHash,
+        block: ExecutedBlock<N::Primitives>,
+    ) -> ProviderResult<Option<Arc<dyn AppendedBlockStateProviderFactory>>> {
+        Ok(Some(Arc::new(OverlayStateProviderFactory::new(
+            self.database.clone(),
+            self.database.overlay_manager().overlay_builder(parent_hash).with_appended_block(block),
+        ))))
     }
 
     /// Returns a [`StateProviderBox`] indexed by the given block number or tag.

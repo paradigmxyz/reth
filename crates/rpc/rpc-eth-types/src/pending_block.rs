@@ -2,7 +2,7 @@
 //!
 //! Types used in block building.
 
-use std::{sync::Arc, time::Instant};
+use std::{fmt, sync::Arc, time::Instant};
 
 use crate::block::BlockAndReceipts;
 use alloy_consensus::BlockHeader;
@@ -16,6 +16,7 @@ use reth_primitives_traits::{
     Block, BlockTy, IndexedTx, NodePrimitives, ReceiptTy, RecoveredBlock, SealedHeader,
 };
 use reth_rpc_convert::{RpcConvert, RpcTypes};
+use reth_storage_api::AppendedBlockStateProviderFactory;
 
 /// Configured [`reth_evm::EvmEnv`] for a pending block.
 #[derive(Debug, Clone, Constructor)]
@@ -83,7 +84,7 @@ impl<B: Block, R> PendingBlockEnvOrigin<B, R> {
 pub type PendingBlockAndReceipts<N> = BlockAndReceipts<N>;
 
 /// Locally built pending block for `pending` tag.
-#[derive(Debug, Clone, Constructor)]
+#[derive(Clone)]
 pub struct PendingBlock<N: NodePrimitives> {
     /// Timestamp when the pending block is considered outdated.
     pub expires_at: Instant,
@@ -91,6 +92,8 @@ pub struct PendingBlock<N: NodePrimitives> {
     pub receipts: Arc<Vec<ReceiptTy<N>>>,
     /// The locally built pending block with execution output.
     pub executed_block: ExecutedBlock<N>,
+    /// Reusable state-provider factory for this exact pending block.
+    state_provider_factory: Option<Arc<dyn AppendedBlockStateProviderFactory>>,
 }
 
 impl<N: NodePrimitives> PendingBlock<N> {
@@ -101,7 +104,22 @@ impl<N: NodePrimitives> PendingBlock<N> {
             expires_at,
             receipts: Arc::new(executed_block.execution_output.receipts.clone()),
             executed_block,
+            state_provider_factory: None,
         }
+    }
+
+    /// Attaches a reusable state-provider factory for this pending block.
+    pub fn with_state_provider_factory(
+        mut self,
+        state_provider_factory: Arc<dyn AppendedBlockStateProviderFactory>,
+    ) -> Self {
+        self.state_provider_factory = Some(state_provider_factory);
+        self
+    }
+
+    /// Returns the reusable state-provider factory, if available.
+    pub fn state_provider_factory(&self) -> Option<&dyn AppendedBlockStateProviderFactory> {
+        self.state_provider_factory.as_deref()
     }
 
     /// Returns the locally built pending [`RecoveredBlock`].
@@ -154,6 +172,17 @@ impl<N: NodePrimitives> PendingBlock<N> {
         C: RpcConvert<Primitives = N>,
     {
         self.to_block_and_receipts().find_and_convert_transaction_receipt(tx_hash, converter)
+    }
+}
+
+impl<N: NodePrimitives> fmt::Debug for PendingBlock<N> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("PendingBlock")
+            .field("expires_at", &self.expires_at)
+            .field("receipts", &self.receipts)
+            .field("executed_block", &self.executed_block)
+            .field("has_state_provider_factory", &self.state_provider_factory.is_some())
+            .finish()
     }
 }
 
