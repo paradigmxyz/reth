@@ -781,14 +781,14 @@ mod tests {
         let args = CommandParser::<EngineArgs>::parse_from(["reth"]).args;
         assert_eq!(args, default_args);
         assert_eq!(args.persistence_threshold, 50);
-        assert_eq!(args.num_state_masking_blocks, 40);
+        assert_eq!(args.num_state_masking_blocks, 30);
         assert_eq!(args.memory_block_buffer_target, None);
         assert_eq!(args.memory_block_buffer_target(), 5);
         assert_eq!(args.persistence_backpressure_threshold(), 100);
         args.validate().unwrap();
         let config = args.tree_config();
         assert_eq!(config.persistence_threshold(), 50);
-        assert_eq!(config.num_state_masking_blocks(), 40);
+        assert_eq!(config.num_state_masking_blocks(), 30);
         assert_eq!(config.persistence_backpressure_threshold(), 100);
     }
 

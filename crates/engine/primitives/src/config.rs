@@ -7,7 +7,7 @@ use core::time::Duration;
 pub const DEFAULT_PERSISTENCE_THRESHOLD: u64 = 50;
 
 /// Number of persisted blocks whose state/trie writes are masked by an in-memory suffix.
-pub const DEFAULT_NUM_STATE_MASKING_BLOCKS: u64 = 40;
+pub const DEFAULT_NUM_STATE_MASKING_BLOCKS: u64 = 30;
 
 /// Maximum number of blocks beyond the in-memory buffer target awaiting persistence before engine
 /// API processing is stalled.
@@ -851,7 +851,7 @@ mod tests {
     fn default_persistence_settings() {
         let config = TreeConfig::default();
         assert_eq!(config.persistence_threshold(), 50);
-        assert_eq!(config.num_state_masking_blocks(), 40);
+        assert_eq!(config.num_state_masking_blocks(), 30);
         assert_eq!(config.persistence_backpressure_threshold(), 100);
     }
 
