@@ -834,7 +834,7 @@ impl RocksDBProvider {
             accounts_history_iter: Mutex::new(None),
             storages_history_iter: Mutex::new(None),
             inner: self.0.snapshot(),
-            provider: self,
+            provider: &self.0,
         }
     }
 
@@ -1618,7 +1618,7 @@ pub struct RocksReadSnapshot<'db> {
     /// Declared before `inner` so it is dropped before the snapshot it reads from.
     storages_history_iter: Mutex<Option<RocksDBRawIterEnum<'db>>>,
     inner: RocksReadSnapshotInner<'db>,
-    provider: &'db RocksDBProvider,
+    provider: &'db RocksDBProviderInner,
 }
 
 /// Inner enum to hold the snapshot for either read-write or secondary mode.
@@ -1640,7 +1640,7 @@ impl fmt::Debug for RocksReadSnapshot<'_> {
 impl<'db> RocksReadSnapshot<'db> {
     /// Gets the column family handle for a table.
     fn cf_handle<T: Table>(&self) -> Result<&'db rocksdb::ColumnFamily, DatabaseError> {
-        self.provider.get_cf_handle::<T>()
+        self.provider.cf_handle::<T>()
     }
 
     /// Creates a raw iterator over `cf` that observes this snapshot.
@@ -1655,7 +1655,7 @@ impl<'db> RocksReadSnapshot<'db> {
                 let mut readopts = ReadOptions::default();
                 readopts.set_snapshot(snap);
                 RocksDBRawIterEnum::ReadWrite(
-                    self.provider.0.db_rw().raw_iterator_cf_opt(cf, readopts),
+                    self.provider.db_rw().raw_iterator_cf_opt(cf, readopts),
                 )
             }
             RocksReadSnapshotInner::Secondary(db) => {
@@ -1850,11 +1850,11 @@ impl<'db> RocksReadSnapshot<'db> {
 /// snapshot alive has to keep the provider handle next to it. This type does that, which lets the
 /// snapshot cache its history iterators across lookups.
 pub struct OwnedRocksReadSnapshot {
-    /// Borrows from `provider`, so it must be declared first: struct fields are dropped in
-    /// declaration order, and the snapshot and its iterators must be released before the database
-    /// handle they read from.
-    snapshot: RocksReadSnapshot<'static>,
-    provider: Box<RocksDBProvider>,
+    /// Borrows the allocation retained by `provider`. Declared first so the snapshot and its
+    /// iterators are released before the owning database handle. Boxing keeps its internal
+    /// references out of the movable owner, including when the owner is passed by value.
+    snapshot: Box<RocksReadSnapshot<'static>>,
+    provider: RocksDBProvider,
 }
 
 impl fmt::Debug for OwnedRocksReadSnapshot {
@@ -1865,15 +1865,16 @@ impl fmt::Debug for OwnedRocksReadSnapshot {
 
 impl OwnedRocksReadSnapshot {
     fn new(provider: &RocksDBProvider) -> Self {
-        let provider = Box::new(provider.clone());
+        let provider = provider.clone();
         let snapshot = provider.snapshot();
-        // SAFETY: `snapshot` borrows the boxed `RocksDBProvider`, which is never moved out of or
-        // handed out mutably, and whose `Arc` keeps the database open for as long as `self` lives.
-        // `snapshot` is declared before `provider`, so it is dropped first.
+        // SAFETY: Every reference in `snapshot` points into the Arc allocation retained by
+        // `provider`, not into the movable provider handle. The handle is private and never
+        // replaced, and `snapshot` is dropped before it. `as_snapshot` restricts access to the
+        // lifetime of a borrow of this owner.
         let snapshot = unsafe {
             std::mem::transmute::<RocksReadSnapshot<'_>, RocksReadSnapshot<'static>>(snapshot)
         };
-        Self { snapshot, provider }
+        Self { snapshot: Box::new(snapshot), provider }
     }
 
     /// Returns the borrowed snapshot.
@@ -3519,6 +3520,94 @@ mod tests {
         // Last should return the largest key
         let last = provider.last::<TestTable>().unwrap();
         assert_eq!(last, Some((20, b"value_20".to_vec())));
+    }
+
+    #[test]
+    fn test_owned_history_snapshot_outlives_provider() {
+        let temp_dir = TempDir::new().unwrap();
+        let provider = RocksDBBuilder::new(temp_dir.path()).with_default_tables().build().unwrap();
+        let address = Address::repeat_byte(0x42);
+        let slot = B256::repeat_byte(0x43);
+        let chunk = IntegerList::new([100, 200, 300]).unwrap();
+        provider
+            .put::<tables::AccountsHistory>(ShardedKey::new(address, u64::MAX), &chunk)
+            .unwrap();
+        provider
+            .put::<tables::StoragesHistory>(StorageShardedKey::new(address, slot, u64::MAX), &chunk)
+            .unwrap();
+
+        let owned = provider.owned_snapshot();
+        let snapshot = owned.as_snapshot();
+        assert_eq!(
+            snapshot.account_history_info(address, 200, None, u64::MAX).unwrap(),
+            HistoryInfo::InChangeset(200)
+        );
+        assert_eq!(
+            snapshot.storage_history_info(address, slot, 200, None, u64::MAX).unwrap(),
+            HistoryInfo::InChangeset(200)
+        );
+        drop(provider);
+
+        // Move the owner with populated iterator caches, then seek both forwards and backwards.
+        std::thread::spawn(move || {
+            let snapshot = owned.as_snapshot();
+            for (block, expected) in [
+                (400, HistoryInfo::InPlainState),
+                (50, HistoryInfo::NotYetWritten),
+                (200, HistoryInfo::InChangeset(200)),
+            ] {
+                assert_eq!(
+                    snapshot.account_history_info(address, block, None, u64::MAX).unwrap(),
+                    expected
+                );
+                assert_eq!(
+                    snapshot.storage_history_info(address, slot, block, None, u64::MAX).unwrap(),
+                    expected
+                );
+            }
+        })
+        .join()
+        .unwrap();
+    }
+
+    #[test]
+    fn test_history_snapshot_cached_and_private_iterators_keep_same_view() {
+        let temp_dir = TempDir::new().unwrap();
+        let provider = RocksDBBuilder::new(temp_dir.path()).with_default_tables().build().unwrap();
+        let address = Address::repeat_byte(0x42);
+        let slot = B256::repeat_byte(0x43);
+        let account_key = ShardedKey::new(address, u64::MAX);
+        let storage_key = StorageShardedKey::new(address, slot, u64::MAX);
+        let chunk = IntegerList::new([100, 200]).unwrap();
+        provider.put::<tables::AccountsHistory>(account_key.clone(), &chunk).unwrap();
+        provider.put::<tables::StoragesHistory>(storage_key.clone(), &chunk).unwrap();
+
+        let owned = provider.owned_snapshot();
+        let snapshot = owned.as_snapshot();
+        let check = |snapshot: &RocksReadSnapshot<'_>, expected| {
+            assert_eq!(
+                snapshot.account_history_info(address, 125, None, u64::MAX).unwrap(),
+                expected
+            );
+            assert_eq!(
+                snapshot.storage_history_info(address, slot, 125, None, u64::MAX).unwrap(),
+                expected
+            );
+        };
+        check(snapshot, HistoryInfo::InChangeset(200));
+
+        let updated = IntegerList::new([100, 150, 200]).unwrap();
+        provider.put::<tables::AccountsHistory>(account_key, &updated).unwrap();
+        provider.put::<tables::StoragesHistory>(storage_key, &updated).unwrap();
+        check(&provider.snapshot(), HistoryInfo::InChangeset(150));
+        check(snapshot, HistoryInfo::InChangeset(200));
+
+        // Force another thread to use private iterators after the database has changed.
+        let _accounts = snapshot.accounts_history_iter.lock();
+        let _storages = snapshot.storages_history_iter.lock();
+        std::thread::scope(|scope| {
+            scope.spawn(|| check(snapshot, HistoryInfo::InChangeset(200))).join().unwrap();
+        });
     }
 
     /// Tests the edge case where block < `lowest_available_block_number`.

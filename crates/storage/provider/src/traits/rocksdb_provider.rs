@@ -37,10 +37,11 @@ pub trait RocksDBProviderFactory {
     fn with_rocksdb_snapshot<F, R>(&self, f: F) -> ProviderResult<R>
     where
         Self: StorageSettingsCache,
-        F: FnOnce(RocksDBRefArg<'_>) -> ProviderResult<R>,
+        F: FnOnce(RocksDBRefArg<'_, '_>) -> ProviderResult<R>,
     {
         if self.cached_storage_settings().storage_v2 {
-            let snapshot = self.rocksdb_provider().owned_snapshot();
+            let rocksdb = self.rocksdb_provider();
+            let snapshot = rocksdb.snapshot();
             return f(Some(&snapshot));
         }
         f(None)
