@@ -274,7 +274,7 @@ impl<N: NodePrimitives> OverlayManager<N> {
         #[cfg(feature = "rayon")]
         {
             for anchor_hash in cached_parent_overlays {
-                self.spawn_execution_overlay(hash, anchor_hash);
+                self.precompute_execution_overlay(hash, anchor_hash);
             }
         }
     }
@@ -285,7 +285,7 @@ impl<N: NodePrimitives> OverlayManager<N> {
     /// or when the tip is already persisted at the anchor. A concurrent persistence or reorg may
     /// make the requested range unavailable, in which case the background task skips it.
     #[cfg(feature = "rayon")]
-    pub fn spawn_execution_overlay(&self, tip_hash: B256, anchor_hash: B256) {
+    pub fn precompute_execution_overlay(&self, tip_hash: B256, anchor_hash: B256) {
         if tip_hash == anchor_hash {
             return
         }
@@ -1298,7 +1298,7 @@ mod tests {
             .entries
             .contains_key(&OverlayCacheKey { anchor_hash: old_anchor, tip_hash }));
 
-        manager.spawn_execution_overlay(tip_hash, new_anchor);
+        manager.precompute_execution_overlay(tip_hash, new_anchor);
 
         let key = OverlayCacheKey { anchor_hash: new_anchor, tip_hash };
         let deadline = std::time::Instant::now() + Duration::from_secs(1);
