@@ -28,6 +28,15 @@ use reth_primitives_traits::FastInstant as Instant;
 use std::{sync::Arc, time::Duration};
 use tracing::{debug, instrument, warn};
 
+/// Whether to publish an updated cache or discard it and clear the shared slot.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CacheUpdate {
+    /// Publish the updated cache for subsequent payloads.
+    Publish,
+    /// Discard the candidate and clear the shared slot because its contents may be invalid.
+    Discard,
+}
+
 /// A guarded, thread-safe cache of execution state that tracks the most recent block's caches.
 ///
 /// This is the cross-block cache used to accelerate sequential payload processing.
@@ -123,6 +132,34 @@ impl PayloadExecutionCache {
             );
         }
         elapsed
+    }
+
+    /// Updates the candidate while holding the cache mutex.
+    ///
+    /// Publishes it on [`CacheUpdate::Publish`], or clears the shared slot on
+    /// [`CacheUpdate::Discard`]. Removed handles are released before unlocking, and their
+    /// owned contents are destroyed afterward on the calling thread.
+    ///
+    /// Requires the same exclusive cache access as [`Self::update_with_guard`].
+    pub fn update_and_publish(
+        &self,
+        candidate: SavedCache,
+        update: impl FnOnce(&SavedCache) -> CacheUpdate,
+    ) {
+        let cleanup = {
+            let mut slot = self.inner.lock();
+
+            let removed = match update(&candidate) {
+                CacheUpdate::Publish => [slot.replace(candidate), None],
+                CacheUpdate::Discard => [slot.take(), Some(candidate)],
+            };
+
+            // Release duplicate handles now so a reused cache is available at unlock.
+            // Take ownership of any last handle's contents to destroy outside the lock.
+            removed.map(|cache| cache.and_then(SavedCache::into_inner))
+        };
+
+        drop(cleanup);
     }
 
     /// Updates the cache with a closure that has exclusive access to the guard.

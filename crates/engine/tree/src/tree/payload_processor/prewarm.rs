@@ -24,6 +24,7 @@ use alloy_primitives::keccak256;
 use metrics::{Counter, Gauge, Histogram};
 use rayon::prelude::*;
 use reth_evm::{execute::ExecutableTxFor, ConfigureEvm, Evm, EvmFor, RecoveredTx, SpecFor};
+use reth_execution_cache::CacheUpdate;
 use reth_metrics::Metrics;
 use reth_primitives_traits::{FastInstant as Instant, NodePrimitives};
 use reth_provider::{
@@ -270,7 +271,7 @@ where
         });
     }
 
-    /// This method calls `PayloadExecutionCache::update_with_guard` which requires exclusive
+    /// This method calls `PayloadExecutionCache::update_and_publish` which requires exclusive
     /// access. It should only be called after ensuring that:
     /// 1. All prewarming tasks have completed execution
     /// 2. No other concurrent operations are accessing the cache
@@ -298,50 +299,28 @@ where
 
         if let Some(saved_cache) = saved_cache {
             debug!(target: "engine::caching", parent_hash=?hash, "Updating execution cache");
-            let mut retired_previous = None;
-            let mut retired_candidate = None;
-            execution_cache.update_with_guard(|cached| {
-                // consumes the `SavedCache` held by the prewarming task, which releases its cache
-                // handle
-                let caches = saved_cache.into_cache();
-                let new_cache = SavedCache::new(hash, caches);
+            let new_cache = SavedCache::new(hash, saved_cache.into_cache());
 
+            execution_cache.update_and_publish(new_cache, |cache| {
                 // Insert state into cache while holding the lock
                 // Access the BundleState through the shared ExecutionOutcome
-                if new_cache.cache().insert_state(&execution_outcome.state).is_err() {
+                if cache.cache().insert_state(&execution_outcome.state).is_err() {
                     // Clear the cache on error to prevent having a polluted cache
-                    retired_previous = cached.take();
-                    retired_candidate = Some(new_cache);
                     debug!(target: "engine::caching", "cleared execution cache on update error");
-                    return;
+                    return CacheUpdate::Discard;
                 }
 
-                new_cache.update_metrics(cache_state_metrics.as_ref());
+                cache.update_metrics(cache_state_metrics.as_ref());
 
-                if valid_block_rx.recv().is_ok() {
-                    let reused = cached
-                        .as_ref()
-                        .is_some_and(|previous| previous.shares_cache_with(&new_cache));
-                    let previous = cached.replace(new_cache);
-                    if reused {
-                        // The published handle keeps this allocation alive, so this drop is cheap.
-                        // Retaining it past unlock would briefly make the reused cache unavailable.
-                        drop(previous);
-                    } else {
-                        retired_previous = previous;
-                    }
-                } else {
+                if valid_block_rx.recv().is_err() {
                     // Block was invalid; caches were already mutated by insert_state above,
                     // so we must clear to prevent using polluted state
-                    retired_previous = cached.take();
-                    retired_candidate = Some(new_cache);
                     debug!(target: "engine::caching", "cleared execution cache on invalid block");
+                    return CacheUpdate::Discard;
                 }
-            });
 
-            // Destroy retired allocations after unlocking, on this worker, so cleanup neither
-            // blocks cache access nor queues large allocations on the shared drop worker.
-            drop((retired_previous, retired_candidate));
+                CacheUpdate::Publish
+            });
 
             let elapsed = start.elapsed();
             debug!(target: "engine::caching", parent_hash=?hash, elapsed=?elapsed, "Updated execution cache");

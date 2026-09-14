@@ -1082,7 +1082,7 @@ pub struct ExecutionCache(Arc<ExecutionCacheInner>);
 
 /// Inner state of the [`ExecutionCache`], wrapped in a single [`Arc`].
 #[derive(Debug)]
-struct ExecutionCacheInner {
+pub(crate) struct ExecutionCacheInner {
     /// Cache for contract bytecode, keyed by code hash.
     code_cache: FixedCache<B256, Option<Bytecode>, FbBuildHasher<32>>,
 
@@ -1394,14 +1394,15 @@ impl SavedCache {
         &self.caches
     }
 
-    /// Returns whether both handles refer to the same cache allocation, regardless of block hash.
-    pub fn shares_cache_with(&self, other: &Self) -> bool {
-        Arc::ptr_eq(&self.caches.0, &other.caches.0)
-    }
-
     /// Consumes the saved cache and returns its [`ExecutionCache`].
     pub fn into_cache(self) -> ExecutionCache {
         self.caches
+    }
+
+    /// Releases this handle, returning the contents if it was the last handle.
+    #[must_use]
+    pub(crate) fn into_inner(self) -> Option<ExecutionCacheInner> {
+        Arc::into_inner(self.caches.0)
     }
 
     /// Updates the cache metrics (size/capacity/collisions) from the stats handlers.
