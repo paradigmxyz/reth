@@ -26,8 +26,8 @@ use reth_storage_errors::{
     provider::{ProviderError, ProviderResult},
 };
 use rocksdb::{
-    BlockBasedOptions, Cache, ColumnFamilyDescriptor, CompactionPri, DBCompressionType,
-    DBRawIteratorWithThreadMode, IteratorMode, OptimisticTransactionDB,
+    statistics::StatsLevel, BlockBasedOptions, Cache, ColumnFamilyDescriptor, CompactionPri,
+    DBCompressionType, DBRawIteratorWithThreadMode, IteratorMode, OptimisticTransactionDB,
     OptimisticTransactionOptions, Options, ReadOptions, SnapshotWithThreadMode, Transaction,
     WriteBatchWithTransaction, WriteBufferManager, WriteOptions, DB, DEFAULT_COLUMN_FAMILY_NAME,
 };
@@ -252,6 +252,16 @@ impl RocksDBBuilder {
         // Statistics can view from RocksDB log file
         if enable_statistics {
             options.enable_statistics();
+            // Nothing reads the statistics programmatically, they only end up in the periodic
+            // LOG dump, so collect the counters but not the timer histograms: at the default
+            // level every `Get`, `Seek` and write wraps itself in a `StopWatch` that reads the
+            // clock twice, while the tickers are plain atomic increments.
+            //
+            // Note: the discriminants of `rocksdb::StatsLevel` are one higher than the levels the
+            // C API defines, so this variant selects "except timers". Should that ever be
+            // corrected upstream it selects "except histogram or timers", which also keeps the
+            // tickers and drops the timers.
+            options.set_statistics_level(StatsLevel::ExceptHistogramOrTimers);
         }
 
         options
@@ -3357,6 +3367,27 @@ mod tests {
             // Verify write is visible
             assert_eq!(provider.get::<TestTable>(i).unwrap(), Some(value));
         }
+    }
+
+    /// Guards the statistics level: the counters must keep working, the per-operation timer
+    /// histograms must stay empty. `rocksdb`'s `StatsLevel` discriminants do not line up with the
+    /// levels the C API defines, so the variant name alone does not tell us what was selected.
+    #[test]
+    fn test_statistics_level_skips_timers() {
+        use rocksdb::statistics::{Histogram, Ticker};
+
+        let temp_dir = TempDir::new().unwrap();
+        let cache = Cache::new_lru_cache(1 << 20);
+        let options = RocksDBBuilder::default_options(rocksdb::LogLevel::Info, &cache, true);
+
+        let db = DB::open(&options, temp_dir.path()).unwrap();
+        for i in 0..10u8 {
+            db.put([i], [i]).unwrap();
+            assert_eq!(db.get([i]).unwrap(), Some(vec![i]));
+        }
+
+        assert!(options.get_ticker_count(Ticker::NumberKeysRead) > 0);
+        assert_eq!(options.get_histogram_data(Histogram::DbGet).count(), 0);
     }
 
     #[test]
