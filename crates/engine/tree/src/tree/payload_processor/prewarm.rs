@@ -301,10 +301,7 @@ where
             let mut retired_previous = None;
             let mut retired_candidate = None;
             execution_cache.update_with_guard(|cached| {
-                let caches = saved_cache.cache().clone();
-                // Release the task's handle before unlocking so the published cache is immediately
-                // available to the next payload, even while we record the save duration below.
-                drop(saved_cache);
+                let caches = saved_cache.into_cache();
                 let new_cache = SavedCache::new(hash, caches);
 
                 // Insert state into cache while holding the lock
