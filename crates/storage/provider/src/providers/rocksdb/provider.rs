@@ -169,6 +169,9 @@ const DEFAULT_BAL_MIN_BLOB_SIZE: u64 = 4 * 1024;
 /// Target BAL blob file size.
 const DEFAULT_BAL_BLOB_FILE_SIZE: u64 = 256 * 1024 * 1024;
 
+/// Bits per key for the history bloom filters, the `RocksDB` default (~1% false positive rate).
+const BLOOM_FILTER_BITS_PER_KEY: f64 = 10.0;
+
 /// Builder for [`RocksDBProvider`].
 pub struct RocksDBBuilder {
     path: PathBuf,
@@ -272,6 +275,20 @@ impl RocksDBBuilder {
         cf_options.set_bottommost_zstd_max_train_bytes(0, true);
         cf_options.set_write_buffer_size(DEFAULT_WRITE_BUFFER_SIZE);
 
+        cf_options
+    }
+
+    /// Creates column family options for the sharded history indexes.
+    ///
+    /// Every history lookup starts with a point lookup of the key's last shard, and a key that has
+    /// no history at all misses in every file. The bloom filter answers those misses from the
+    /// filter block instead of reading a data block per level.
+    fn history_column_family_options(cache: &Cache) -> Options {
+        let mut table_options = Self::default_table_options(cache);
+        table_options.set_bloom_filter(BLOOM_FILTER_BITS_PER_KEY, false);
+
+        let mut cf_options = Self::default_column_family_options(cache);
+        cf_options.set_block_based_table_factory(&table_options);
         cf_options
     }
 
@@ -380,6 +397,10 @@ impl RocksDBBuilder {
                     Self::tx_hash_numbers_column_family_options(&self.block_cache)
                 } else if name == tables::BlockAccessLists::NAME {
                     Self::block_access_lists_column_family_options(&self.block_cache)
+                } else if name == tables::AccountsHistory::NAME ||
+                    name == tables::StoragesHistory::NAME
+                {
+                    Self::history_column_family_options(&self.block_cache)
                 } else {
                     Self::default_column_family_options(&self.block_cache)
                 };
@@ -1697,6 +1718,7 @@ impl<'db> RocksReadSnapshot<'db> {
         self.history_info::<tables::AccountsHistory>(
             &self.accounts_history_iter,
             key.encode().as_ref(),
+            ShardedKey::last(address).encode().as_ref(),
             block_number,
             lowest_available_block_number,
             visible_tip,
@@ -1725,6 +1747,7 @@ impl<'db> RocksReadSnapshot<'db> {
         self.history_info::<tables::StoragesHistory>(
             &self.storages_history_iter,
             key.encode().as_ref(),
+            StorageShardedKey::last(address, storage_key).encode().as_ref(),
             block_number,
             lowest_available_block_number,
             visible_tip,
@@ -1750,11 +1773,15 @@ impl<'db> RocksReadSnapshot<'db> {
     /// is much cheaper than constructing one, so the iterator is created on the first lookup and
     /// reused by every later lookup through this snapshot. A lookup that finds the cache held by
     /// another thread uses a private iterator instead of waiting.
+    ///
+    /// `last_shard_key` is the encoded key of the key's last shard, which answers most lookups on
+    /// its own; see [`Self::history_info_from_last_shard`].
     #[expect(clippy::too_many_arguments)]
     fn history_info<T>(
         &self,
         iter_cache: &Mutex<Option<RocksDBRawIterEnum<'db>>>,
         encoded_key: &[u8],
+        last_shard_key: &[u8],
         block_number: BlockNumber,
         lowest_available_block_number: Option<BlockNumber>,
         visible_tip: BlockNumber,
@@ -1774,6 +1801,17 @@ impl<'db> RocksReadSnapshot<'db> {
         };
 
         let cf = self.cf_handle::<T>()?;
+
+        if let Some(info) = self.history_info_from_last_shard(
+            cf,
+            last_shard_key,
+            block_number,
+            lowest_available_block_number,
+            visible_tip,
+        )? {
+            return Ok(info)
+        }
+
         // A lookup on another thread may be holding the cached iterator; a private iterator costs
         // what every lookup used to cost, whereas waiting would serialize the two lookups.
         let mut guard = iter_cache.try_lock();
@@ -1841,6 +1879,48 @@ impl<'db> RocksReadSnapshot<'db> {
             is_before_first_write,
             lowest_available_block_number,
         ))
+    }
+
+    /// Answers a history lookup from the key's last shard alone, or returns `None` when the seek
+    /// path has to run.
+    ///
+    /// The writer keys a key's last shard `u64::MAX` and fills the earlier ones in block order, so
+    /// every earlier shard ends below the last shard's first block. When `block_number` is above
+    /// that first block, every earlier shard ends below `block_number` too, which is exactly the
+    /// condition under which the seek lands on this shard; its rank is then non-zero, so the
+    /// previous-shard check the seek path performs cannot apply either. A miss, an empty shard, or
+    /// a `block_number` at or below the first block falls back to the seek, so correctness does
+    /// not depend on the last shard being keyed `u64::MAX`.
+    fn history_info_from_last_shard(
+        &self,
+        cf: &rocksdb::ColumnFamily,
+        last_shard_key: &[u8],
+        block_number: BlockNumber,
+        lowest_available_block_number: Option<BlockNumber>,
+        visible_tip: BlockNumber,
+    ) -> ProviderResult<Option<HistoryInfo>> {
+        let value = match &self.inner {
+            RocksReadSnapshotInner::ReadWrite(snap) => snap.get_cf(cf, last_shard_key),
+            RocksReadSnapshotInner::Secondary(db) => db.get_cf(cf, last_shard_key),
+        }
+        .map_err(|e| {
+            ProviderError::Database(DatabaseError::Read(DatabaseErrorInfo {
+                message: e.to_string().into(),
+                code: -1,
+            }))
+        })?;
+
+        let Some(value) = value else { return Ok(None) };
+        let chunk = BlockNumberList::decompress(&value)?;
+        if chunk.min().is_none_or(|first_block| block_number <= first_block) {
+            return Ok(None)
+        }
+
+        let (_, found_block) = compute_history_rank(&chunk, block_number);
+        // Ignore later Rocks history that is ahead of the companion MDBX snapshot.
+        let found_block = found_block.filter(|block| *block <= visible_tip);
+
+        Ok(Some(HistoryInfo::from_lookup(found_block, false, lowest_available_block_number)))
     }
 }
 
@@ -3660,6 +3740,119 @@ mod tests {
         let result =
             provider.snapshot().account_history_info(address, 150, Some(100), 150).unwrap();
         assert_eq!(result, HistoryInfo::MaybeInPlainState);
+    }
+
+    /// Runs an account history lookup with the last-shard fast path defeated, so the result comes
+    /// from the seek path alone.
+    fn account_history_info_via_seek(
+        snapshot: &RocksReadSnapshot<'_>,
+        address: Address,
+        block_number: BlockNumber,
+        lowest_available_block_number: Option<BlockNumber>,
+        visible_tip: BlockNumber,
+    ) -> HistoryInfo {
+        // The last-shard key of an address that is never written always misses, so the fast path
+        // declines and the seek runs with the real key.
+        let absent_last_shard = ShardedKey::last(Address::from([0xff; 20]));
+        snapshot
+            .history_info::<tables::AccountsHistory>(
+                &snapshot.accounts_history_iter,
+                ShardedKey::new(address, block_number).encode().as_ref(),
+                absent_last_shard.encode().as_ref(),
+                block_number,
+                lowest_available_block_number,
+                visible_tip,
+                |key_bytes| Ok(<ShardedKey<Address> as Decode>::decode(key_bytes)?.key == address),
+                |prev_bytes| {
+                    <ShardedKey<Address> as Decode>::decode(prev_bytes)
+                        .map(|k| k.key == address)
+                        .unwrap_or(false)
+                },
+            )
+            .unwrap()
+    }
+
+    /// The last-shard fast path must answer exactly what the seek path answers.
+    #[test]
+    fn test_account_history_info_last_shard_fast_path_matches_seek() {
+        let temp_dir = TempDir::new().unwrap();
+        let provider = RocksDBBuilder::new(temp_dir.path()).with_default_tables().build().unwrap();
+
+        // Two full shards followed by the sentinel shard.
+        let sharded = Address::from([0x42; 20]);
+        let limit = NUM_OF_INDICES_IN_SHARD as u64;
+        let first_shard: Vec<u64> = (1..=limit).map(|i| i * 2).collect();
+        let second_shard: Vec<u64> = (limit + 1..=2 * limit).map(|i| i * 2).collect();
+        let last_shard = vec![4 * limit + 2, 4 * limit + 4, 4 * limit + 6];
+        for (highest, blocks) in [
+            (*first_shard.last().unwrap(), &first_shard),
+            (*second_shard.last().unwrap(), &second_shard),
+            (u64::MAX, &last_shard),
+        ] {
+            provider
+                .put::<tables::AccountsHistory>(
+                    ShardedKey::new(sharded, highest),
+                    &IntegerList::new(blocks.clone()).unwrap(),
+                )
+                .unwrap();
+        }
+
+        // A key whose only shard is the sentinel.
+        let single = Address::from([0x43; 20]);
+        provider
+            .put::<tables::AccountsHistory>(
+                ShardedKey::new(single, u64::MAX),
+                &IntegerList::new([50, 60, 70]).unwrap(),
+            )
+            .unwrap();
+
+        // A key with no history at all.
+        let absent = Address::from([0x44; 20]);
+
+        let shard_boundaries = [first_shard[0], *first_shard.last().unwrap(), second_shard[0]];
+        let last_shard_boundaries = [*second_shard.last().unwrap(), last_shard[0], last_shard[1]];
+        let mut targets: Vec<u64> = [0, 1, limit, limit + 1, *last_shard.last().unwrap(), u64::MAX]
+            .into_iter()
+            .chain(
+                shard_boundaries
+                    .into_iter()
+                    .chain(last_shard_boundaries)
+                    .flat_map(|block| [block.saturating_sub(1), block, block + 1]),
+            )
+            .collect();
+        // The single-shard key's own boundaries.
+        targets.extend([10, 49, 50, 51, 59, 60, 61, 70, 71, 100]);
+
+        let snapshot = provider.snapshot();
+        for address in [sharded, single, absent] {
+            for block_number in targets.iter().copied() {
+                for lowest_available in [None, Some(1u64)] {
+                    // A tip below the found block must hide it the same way on both paths.
+                    for visible_tip in [u64::MAX, block_number, block_number.saturating_add(1)] {
+                        let fast = snapshot
+                            .account_history_info(
+                                address,
+                                block_number,
+                                lowest_available,
+                                visible_tip,
+                            )
+                            .unwrap();
+                        let seek = account_history_info_via_seek(
+                            &snapshot,
+                            address,
+                            block_number,
+                            lowest_available,
+                            visible_tip,
+                        );
+                        assert_eq!(
+                            fast, seek,
+                            "fast path diverged for {address} at block {block_number} \
+                             (lowest_available={lowest_available:?}, visible_tip={visible_tip})"
+                        );
+                    }
+                }
+            }
+        }
     }
 
     #[test]
