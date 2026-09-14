@@ -275,7 +275,7 @@ pub struct TransactionFetcherMetrics {
     pub(crate) fetched_transactions: Counter,
     /// Total number of transactions that were received in
     /// [`PooledTransactions`](reth_eth_wire::PooledTransactions) responses, that weren't
-    /// requested.
+    /// requested or repeated a requested transaction.
     pub(crate) unsolicited_transactions: Counter,
     /// Total number of pending hashes that were evicted for newly announced hashes because the
     /// fetcher already tracks the maximum number of hashes.
