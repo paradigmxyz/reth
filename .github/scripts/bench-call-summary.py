@@ -815,6 +815,8 @@ def generate_markdown(
     blocks_note = ""
     if corpus.get("blocks_source"):
         blocks_note = f", blocks {corpus.get('corpus_from')}..{corpus.get('corpus_to')} from {corpus['blocks_source']}"
+        if corpus.get("block_param") == "parent":
+            blocks_note += " at parent-block state"
     lines.append(
         f"- Corpus: `{corpus.get('name', 'static')}` ({corpus.get('source', 'static')}), "
         f"class `{corpus.get('class', 'call')}`{top_gas_note}{tracer_note}{blocks_note}, {corpus.get('records', summary['records'])} records, "

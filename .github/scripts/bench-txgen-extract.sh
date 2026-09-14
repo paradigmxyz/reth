@@ -270,6 +270,10 @@ if [ "$EXECUTION_MODE" = "call" ]; then
           CORPUS_TO="$HEAD_DEC"
           CORPUS_RPC="http://127.0.0.1:8545"
           CORPUS_BLOCKS_SOURCE=snapshot
+          # These transactions already executed, so replay each against the
+          # state before its block instead of the tip, where its preconditions
+          # no longer hold.
+          CORPUS_BLOCK_PARAM=parent
         fi
         ;;
       tracetx|traceblock)
@@ -323,6 +327,9 @@ if [ "$EXECUTION_MODE" = "call" ]; then
     fi
     if [ -n "${BENCH_CALL_TRACER_CONFIG:-}" ]; then
       CORPUS_METHOD_ARGS+=(--tracer-config "$BENCH_CALL_TRACER_CONFIG")
+    fi
+    if [ -n "${CORPUS_BLOCK_PARAM:-}" ]; then
+      CORPUS_METHOD_ARGS+=(--block-param "$CORPUS_BLOCK_PARAM")
     fi
     if [ -n "${BENCH_CALL_TRACE_OPTIONS:-}" ]; then
       CORPUS_METHOD_ARGS+=(--trace-options "$BENCH_CALL_TRACE_OPTIONS")
@@ -389,6 +396,7 @@ if [ "$EXECUTION_MODE" = "call" ]; then
     --argjson tip "$HEAD_DEC" \
     --arg tip_hash "$HEAD_HASH" \
     --arg blocks_source "${CORPUS_BLOCKS_SOURCE:-}" \
+    --arg block_param "${CORPUS_BLOCK_PARAM:-}" \
     --argjson corpus_from "${CORPUS_FROM:-null}" \
     --argjson corpus_to "${CORPUS_TO:-null}" \
     --argjson top_gas "${BENCH_CALL_TOP_GAS:-null}" \
@@ -406,6 +414,7 @@ if [ "$EXECUTION_MODE" = "call" ]; then
       tip: $tip,
       tip_hash: $tip_hash,
       blocks_source: (if $blocks_source == "" then null else $blocks_source end),
+      block_param: (if $block_param == "" then null else $block_param end),
       corpus_from: $corpus_from,
       corpus_to: $corpus_to,
       top_gas: $top_gas,
