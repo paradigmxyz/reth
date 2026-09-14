@@ -282,8 +282,9 @@ where
     /// This method is called from `run()` only after all execution tasks are complete.
     ///
     /// State insertion and block validation run under the mutex because the cache being updated
-    /// may also be stored in `self.execution_cache`. Removed caches are dropped after unlocking,
-    /// before the next task on the prewarm worker starts.
+    /// may also be stored in `self.execution_cache`. Removed `SavedCache` values are dropped after
+    /// unlocking, before the next prewarm task. Their contents are freed only when the last
+    /// `ExecutionCache` clone is dropped, which may happen later on another thread.
     #[instrument(level = "debug", target = "engine::tree::payload_processor::prewarm", skip_all)]
     fn save_cache(
         self,
@@ -334,10 +335,10 @@ where
                 }
             });
 
-            // Drop up to two removed caches here before this worker starts its next task.
-            // This keeps large caches out of the shared drop worker's queue.
+            // Drop these SavedCache values on this worker, without a background drop queue.
+            // This frees their contents only if no other ExecutionCache clones remain.
+            // Otherwise, the thread dropping the last ExecutionCache clone frees them later.
             // Another payload may access or allocate a cache while these drops run.
-            // wait_for_availability excludes this time; cache_saving_duration includes it.
             drop((previous, rejected));
 
             let elapsed = start.elapsed();
@@ -789,7 +790,7 @@ mod tests {
     use alloy_eip7928::{AccountChanges, BalanceChange, BlockAccessIndex};
     use alloy_primitives::{address, B256, U256};
     use reth_chainspec::ChainSpec;
-    use reth_ethereum_primitives::TransactionSigned;
+    use reth_ethereum_primitives::{EthPrimitives, TransactionSigned};
     use reth_evm::{execute::WithTxEnv, TxEnvFor};
     use reth_evm_ethereum::EthEvmConfig;
     use reth_primitives_traits::Account;
@@ -835,15 +836,11 @@ mod tests {
         assert!(terminate_execution.load(Ordering::Relaxed));
     }
 
-    fn save_test_cache(
-        runtime: &Runtime,
-        execution_cache: &PayloadExecutionCache,
+    fn test_prewarm_context(
         saved_cache: SavedCache,
-        state: reth_revm::db::BundleState,
-        valid: bool,
         saving_duration: Gauge,
-    ) {
-        let ctx = PrewarmContext {
+    ) -> PrewarmContext<EthPrimitives, MockEthProvider, EthEvmConfig> {
+        PrewarmContext {
             env: ExecutionEnv { hash: B256::repeat_byte(2), ..ExecutionEnv::test_default() },
             evm_config: EthEvmConfig::new(Arc::new(ChainSpec::default())),
             saved_cache: Some(saved_cache),
@@ -864,7 +861,18 @@ mod tests {
             precompile_cache_map: PrecompileCacheMap::default(),
             disable_bal_parallel_state_root: false,
             disable_bal_batch_io: false,
-        };
+        }
+    }
+
+    fn save_test_cache(
+        runtime: &Runtime,
+        execution_cache: &PayloadExecutionCache,
+        saved_cache: SavedCache,
+        state: reth_revm::db::BundleState,
+        valid: bool,
+        saving_duration: Gauge,
+    ) {
+        let ctx = test_prewarm_context(saved_cache, saving_duration);
         let (task, _) = PrewarmCacheTask::new(runtime.clone(), execution_cache.clone(), ctx);
         let (valid_tx, valid_rx) = mpsc::channel();
         if valid {
@@ -1004,6 +1012,57 @@ mod tests {
             .cache()
             .insert_code(B256::repeat_byte(3), Some(reth_primitives_traits::Bytecode(code)));
         (result_rx, reader)
+    }
+
+    #[test]
+    fn save_cache_freeing_waits_for_validator_cache_references() {
+        use crate::tree::payload_processor::{CacheTaskHandle, PayloadHandle};
+
+        let runtime = Runtime::test();
+        let execution_cache = PayloadExecutionCache::default();
+        let saved = SavedCache::new(B256::repeat_byte(1), crate::tree::ExecutionCache::new(1_000));
+        execution_cache.update_with_guard(|cached| *cached = Some(saved.clone()));
+        let (dropped, reader) = observe_cache_drop(&saved, &execution_cache, false);
+        let ctx = test_prewarm_context(saved, Gauge::noop());
+        let (task, actions_tx) =
+            PrewarmCacheTask::new(runtime.clone(), execution_cache.clone(), ctx);
+        let mut payload = PayloadHandle {
+            prewarm_handle: CacheTaskHandle {
+                saved_cache: task.ctx.saved_cache.clone(),
+                to_prewarm_task: Some(actions_tx.clone()),
+                executed_tx_index: task.ctx.executed_tx_index.clone(),
+                cache_metrics: None,
+            },
+            transactions: crossbeam_channel::never::<(usize, Result<(), ()>)>(),
+            _span: Span::none(),
+        };
+        // The validator keeps this ExecutionCache clone after calling terminate_caching.
+        let validator_cache = payload.caches().unwrap();
+        let valid_block_tx = payload.terminate_caching(Some(Arc::new(BlockExecutionOutput {
+            state: Default::default(),
+            result: Default::default(),
+        })));
+        drop(valid_block_tx);
+        let prewarm = runtime.spawn_blocking_named("prewarm", move || {
+            task.run::<WithTxEnv<TxEnvFor<EthEvmConfig>, Recovered<TransactionSigned>>>(
+                PrewarmMode::Skipped,
+                actions_tx,
+            );
+            std::thread::current().id()
+        });
+        let prewarm_thread = *prewarm.get();
+
+        execution_cache.update_with_guard(|cached| assert!(cached.is_none()));
+        assert_eq!(payload.prewarm_handle.saved_cache.as_ref().unwrap().usage_count(), 2);
+        assert!(matches!(dropped.try_recv(), Err(mpsc::TryRecvError::Empty)));
+        drop(payload);
+        assert!(matches!(dropped.try_recv(), Err(mpsc::TryRecvError::Empty)));
+
+        drop(validator_cache);
+        assert!(dropped.try_recv().expect("last ExecutionCache drop must free the cache"));
+        let drop_thread = reader.join().unwrap();
+        assert_eq!(drop_thread, std::thread::current().id());
+        assert_ne!(drop_thread, prewarm_thread);
     }
 
     fn assert_save_cache_drops_removed_caches(slot: CacheSlot, valid: bool, insert_error: bool) {
@@ -1185,7 +1244,8 @@ pub struct PrewarmMetrics {
     pub(crate) execution_duration: Histogram,
     /// A histogram for prefetch targets per transaction prewarming
     pub(crate) prefetch_storage_targets: Histogram,
-    /// Cache saving duration, including cleanup of removed caches after unlocking.
+    /// Time spent in save_cache, including dropping its removed SavedCache values.
+    /// Excludes any later freeing of cache contents by other ExecutionCache clones.
     pub(crate) cache_saving_duration: Gauge,
     /// Counter for transaction execution errors during prewarming
     pub(crate) transaction_errors: Counter,
