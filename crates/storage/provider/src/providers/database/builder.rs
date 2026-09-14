@@ -31,6 +31,8 @@ impl<N> ProviderFactoryBuilder<N> {
 
     /// Opens the database with the given chainspec and [`ReadOnlyConfig`].
     ///
+    /// Refuses a database holding snap state, see [`ProviderFactory::ensure_no_snap_attempt`].
+    ///
     /// # Open a monitored instance
     ///
     /// This is recommended when the new read-only instance is used with an active node.
@@ -112,6 +114,7 @@ impl<N> ProviderFactoryBuilder<N> {
         let factory =
             ProviderFactory::new(db, chainspec, static_file_provider, rocksdb_provider, runtime)?
                 .with_read_only_sync(watch);
+        factory.ensure_no_snap_attempt()?;
         Ok(factory)
     }
 }

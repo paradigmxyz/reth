@@ -130,6 +130,6 @@ enum SnapBootstrapStatus {
     Unfinished,
     // The reconstructed trie root matched the target header.
     Verified,
-    // Downloads were given up, leaving incomplete state behind for cleanup.
+    // Downloads were given up, leaving incomplete state behind until the database is dropped.
     Abandoned,
 }

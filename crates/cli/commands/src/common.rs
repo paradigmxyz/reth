@@ -212,6 +212,11 @@ impl<C: ChainSpecParser> EnvironmentArgs<C> {
         .with_minimum_pruning_distance(config.prune.minimum_pruning_distance)
         .with_bal_store(bal_store);
 
+        // Checked read-write access heals below, which may unwind the state tables.
+        if matches!(access, AccessRights::RW) {
+            factory.ensure_no_snap_attempt()?;
+        }
+
         // Check for consistency between database and static files.
         if !access.skips_consistency_check() &&
             let Some(unwind_target) =

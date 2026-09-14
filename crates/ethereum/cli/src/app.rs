@@ -233,7 +233,13 @@ mod tests {
     use super::*;
     use crate::chainspec::EthereumChainSpecParser;
     use clap::Parser;
-    use reth_cli_commands::node::NoArgs;
+    use reth_cli_commands::{
+        common::{AccessRights, EnvironmentArgs},
+        node::NoArgs,
+        re_execute,
+    };
+    use reth_db::models::SnapAttempt;
+    use reth_provider::{MetadataWriter, ProviderError};
 
     #[test]
     fn test_cli_app_creation() {
@@ -272,5 +278,53 @@ mod tests {
         // After taking layers (simulating initialization), access should error
         app.layers = None;
         assert!(app.access_tracing_layers().is_err());
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn re_execute_refuses_snap_state() {
+        let datadir = tempfile::tempdir().unwrap();
+        let args = ["reth", "--chain", "dev", "--datadir", datadir.path().to_str().unwrap()];
+        let env = || EnvironmentArgs::<EthereumChainSpecParser>::parse_from(args);
+        let command = || {
+            re_execute::Command::<EthereumChainSpecParser>::parse_from(
+                args.iter().copied().chain(["--from", "0"]),
+            )
+        };
+        let components = |spec: Arc<ChainSpec>| {
+            let (evm_config, _) =
+                reth_node_ethereum::node::build_evm_config(spec.clone(), &Default::default(), None)
+                    .unwrap();
+            (evm_config, Arc::new(EthBeaconConsensus::new(spec)))
+        };
+        let runtime = reth_tasks::Runtime::test();
+
+        drop(env().init::<EthereumNode>(AccessRights::RW, runtime.clone()).unwrap());
+        command().execute::<EthereumNode>(components, runtime.clone()).await.unwrap();
+
+        let unfinished = SnapAttempt::start(None, Default::default(), Default::default());
+        let mut verified = unfinished;
+        verified.verify();
+        let mut abandoned = unfinished;
+        abandoned.abandon();
+
+        for attempt in [unfinished, verified, abandoned] {
+            let factory = env()
+                .init::<EthereumNode>(AccessRights::RwInconsistent, runtime.clone())
+                .unwrap()
+                .provider_factory;
+            let provider = factory.provider_rw().unwrap();
+            provider.write_snap_attempt(&attempt).unwrap();
+            provider.commit().unwrap();
+            drop(factory);
+
+            let err = command().execute::<EthereumNode>(components, runtime.clone()).await;
+            assert!(
+                matches!(
+                    err.unwrap_err().downcast_ref(),
+                    Some(ProviderError::UnavailableSnapState { attempt: 0 })
+                ),
+                "{attempt:?}"
+            );
+        }
     }
 }

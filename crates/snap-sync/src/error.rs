@@ -15,6 +15,12 @@ pub enum SnapSyncError {
     /// No attempt owns the persisted state.
     #[error("no snap attempt owns the persisted state")]
     NoAttempt,
+    /// The database already holds an attempt's state, which a new attempt would adopt.
+    #[error("database already holds state of snap attempt {attempt}")]
+    ExistingAttempt {
+        /// Attempt that wrote the state.
+        attempt: SnapAttemptId,
+    },
     /// A write was presented for an attempt or pivot that no longer owns the persisted state.
     #[error("stale snap write for attempt {attempt} at state version {state_version}")]
     StaleWrite {
