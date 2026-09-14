@@ -2,7 +2,7 @@ use crate::utils::{
     advance_with_random_transactions, eth_payload_attributes, eth_payload_attributes_amsterdam,
 };
 use alloy_consensus::{SignableTransaction, TxEip1559, TxEnvelope};
-use alloy_eips::Encodable2718;
+use alloy_eips::{BlockNumberOrTag, Encodable2718};
 use alloy_network::TxSignerSync;
 use alloy_primitives::B256;
 use alloy_provider::{Provider, ProviderBuilder};
@@ -327,6 +327,70 @@ async fn test_long_reorg() -> eyre::Result<()> {
     // Ensure that it works the other way around too.
     advance_with_random_transactions(&mut first_node, 20, &mut rng, true).await?;
     second_node.sync_to(first_node.block_hash(100)).await?;
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_pipeline_sync_target_head_becomes_finalized() -> eyre::Result<()> {
+    reth_tracing::init_test_tracing();
+
+    const TARGET_BLOCK: u64 = 100;
+
+    let seed: [u8; 32] = rand::rng().random();
+    let mut rng = StdRng::from_seed(seed);
+    println!("Seed: {seed:?}");
+
+    let chain_spec = Arc::new(
+        ChainSpecBuilder::default()
+            .chain(MAINNET.chain)
+            .genesis(serde_json::from_str(include_str!("../assets/genesis.json")).unwrap())
+            .cancun_activated()
+            .prague_activated()
+            .build(),
+    );
+
+    let (mut nodes, _) = setup_engine::<EthereumNode>(
+        2,
+        chain_spec.clone(),
+        false,
+        Default::default(),
+        eth_payload_attributes,
+    )
+    .await?;
+
+    let mut first_node = nodes.pop().unwrap();
+    let second_node = nodes.pop().unwrap();
+
+    let first_provider = ProviderBuilder::new().connect_http(first_node.rpc_url());
+    let second_provider = ProviderBuilder::new().connect_http(second_node.rpc_url());
+
+    advance_with_random_transactions(&mut first_node, TARGET_BLOCK as usize, &mut rng, false)
+        .await?;
+
+    assert_eq!(second_provider.get_block_number().await?, 0);
+
+    let target = first_provider.get_block_by_number(TARGET_BLOCK.into()).await?.unwrap();
+
+    // Send exactly one FCU with an unknown head == safe == finalized. The node must promote this
+    // FCU when pipeline sync completes, without relying on another FCU.
+    second_node.update_forkchoice(target.header.hash, target.header.hash).await?;
+
+    tokio::time::timeout(Duration::from_secs(40), async {
+        while second_provider.get_block_number().await? != TARGET_BLOCK {
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+        eyre::Ok(())
+    })
+    .await
+    .map_err(|_| eyre::eyre!("timed out waiting for pipeline sync to block {TARGET_BLOCK}"))??;
+
+    let finalized = second_provider
+        .get_block_by_number(BlockNumberOrTag::Finalized)
+        .await?
+        .ok_or_else(|| eyre::eyre!("finalized block not found"))?;
+    assert_eq!(finalized.header.number, TARGET_BLOCK);
+    assert_eq!(finalized.header.hash, target.header.hash);
 
     Ok(())
 }

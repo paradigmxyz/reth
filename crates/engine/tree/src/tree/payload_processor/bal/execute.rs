@@ -117,6 +117,13 @@ where
         .with_bundle_update()
         .with_bal_builder()
         .build();
+    canonical_state
+        .bal_state
+        .bal_builder
+        .as_mut()
+        .expect("with_bal_builder set")
+        .accounts
+        .reserve(bal.len());
 
     let (block_result, senders) = {
         let (result_tx, result_rx) = crossbeam_channel::unbounded();

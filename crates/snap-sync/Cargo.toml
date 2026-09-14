@@ -1,0 +1,50 @@
+[package]
+name = "reth-snap-sync"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
+description = "snap/2 state synchronization"
+
+[lints]
+workspace = true
+
+[dependencies]
+# reth
+reth-db-api.workspace = true
+reth-downloaders.workspace = true
+reth-eth-wire-types.workspace = true
+reth-network-p2p.workspace = true
+reth-network-peers.workspace = true
+reth-primitives-traits = { workspace = true, features = ["eip7928"] }
+reth-storage-api = { workspace = true, features = ["db-api"] }
+reth-storage-errors.workspace = true
+reth-tasks.workspace = true
+reth-trie-common.workspace = true
+
+# alloy
+alloy-eip7928.workspace = true
+alloy-eips.workspace = true
+alloy-primitives.workspace = true
+
+# revm
+revm.workspace = true
+
+# misc
+serde = { workspace = true, features = ["derive"] }
+serde_json.workspace = true
+thiserror.workspace = true
+tokio-util.workspace = true
+
+[dev-dependencies]
+alloy-consensus.workspace = true
+alloy-rlp.workspace = true
+futures.workspace = true
+reth-chainspec.workspace = true
+reth-ethereum-primitives.workspace = true
+reth-evm.workspace = true
+reth-evm-ethereum.workspace = true
+reth-provider = { workspace = true, features = ["test-utils"] }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }

@@ -36,6 +36,12 @@ where
         return Ok(vec![])
     }
 
+    // An empty address/topic set matches any bloom, so this can only skip blocks that have no
+    // matching logs.
+    if !filter.matches_bloom(header.logs_bloom()) {
+        return Ok(vec![])
+    }
+
     let mut all_logs = Vec::new();
     // Tracks the index of a log in the entire block.
     let mut log_index: u64 = 0;

@@ -24,6 +24,8 @@ where
     metrics: CacheMetrics,
     // Tracked heap usage
     memory_usage: usize,
+    /// Whether the cached count or memory usage changed since the gauges were last published.
+    metrics_dirty: bool,
 }
 
 impl<K, V, L, S> Debug for MultiConsumerLruCache<K, V, L, S>
@@ -68,9 +70,10 @@ where
     where
         V: InMemorySize,
     {
-        self.cache
-            .remove(key)
-            .inspect(|value| self.memory_usage = self.memory_usage.saturating_sub(value.size()));
+        self.cache.remove(key).inspect(|value| {
+            self.memory_usage = self.memory_usage.saturating_sub(value.size());
+            self.metrics_dirty = true;
+        });
         self.queued
             .remove(key)
             .inspect(|removed| self.metrics.queued_consumers_count.decrement(removed.len() as f64))
@@ -105,10 +108,12 @@ where
         {
             // update tracked memory with the evicted value
             self.memory_usage = self.memory_usage.saturating_sub(evicted.size());
+            self.metrics_dirty = true;
         }
 
         if self.cache.insert(key, value) {
             self.memory_usage = self.memory_usage.saturating_add(size);
+            self.metrics_dirty = true;
             true
         } else {
             false
@@ -121,11 +126,18 @@ where
         self.queued.shrink_to(min_capacity);
     }
 
-    /// Update metrics for the inner cache.
+    /// Publishes the cached count and memory usage gauges if either changed since the last call.
+    ///
+    /// Returns whether the gauges were written, so lookups that only hit the cache cost nothing.
     #[inline]
-    pub fn update_cached_metrics(&self) {
+    pub fn update_cached_metrics(&mut self) -> bool {
+        if !self.metrics_dirty {
+            return false
+        }
+        self.metrics_dirty = false;
         self.metrics.cached_count.set(self.cache.len() as f64);
         self.metrics.memory_usage.set(self.memory_usage as f64);
+        true
     }
 }
 
@@ -140,6 +152,32 @@ where
             queued: Default::default(),
             metrics: CacheMetrics::new_with_labels(&[("cache", cache_id.to_string())]),
             memory_usage: 0,
+            metrics_dirty: false,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use alloy_primitives::B256;
+
+    #[test]
+    fn gauges_only_republished_after_cache_changes() {
+        let mut cache: MultiConsumerLruCache<B256, B256, ByLength, ()> =
+            MultiConsumerLruCache::new(2, "test");
+        assert!(!cache.update_cached_metrics());
+
+        assert!(cache.insert(B256::ZERO, B256::ZERO));
+        assert!(cache.update_cached_metrics());
+        assert!(!cache.update_cached_metrics());
+
+        // hits do not touch the gauges
+        assert!(cache.get(&B256::ZERO).is_some());
+        assert!(cache.get(&B256::with_last_byte(1)).is_none());
+        assert!(!cache.update_cached_metrics());
+
+        assert!(cache.remove(&B256::ZERO).is_none());
+        assert!(cache.update_cached_metrics());
     }
 }

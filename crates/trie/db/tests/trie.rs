@@ -837,7 +837,7 @@ proptest! {
         let mut hashed_account_cursor = tx.tx_ref().cursor_write::<tables::HashedAccounts>().unwrap();
 
         let mut state = BTreeMap::default();
-        for accounts in account_changes {
+        for mut accounts in account_changes {
             let should_generate_changeset = !state.is_empty();
             let mut changes = PrefixSetMut::default();
             for (hashed_address, balance) in accounts.clone() {
@@ -854,7 +854,7 @@ proptest! {
                     .unwrap()
             });
 
-            state.append(&mut accounts.clone());
+            state.append(&mut accounts);
             let expected_root = state_root_prehashed(
                 state.iter().map(|(&key, &balance)| (key, (Account { balance, ..Default::default() }, std::iter::empty())))
             );

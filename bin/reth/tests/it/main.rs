@@ -2,6 +2,8 @@
 
 use std::{fs, path::Path, process::Command};
 
+mod download;
+
 const RETH: &str = env!("CARGO_BIN_EXE_reth");
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
