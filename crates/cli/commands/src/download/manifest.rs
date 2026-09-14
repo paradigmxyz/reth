@@ -257,28 +257,6 @@ impl SnapshotComponentType {
         matches!(self, Self::State | Self::Headers)
     }
 
-    /// Returns the default selection for this component in the minimal download preset.
-    ///
-    /// Matches the `--minimal` prune configuration:
-    /// - State/Headers: always All (required)
-    /// - Transactions/Changesets: Distance(10_064) (`MINIMUM_UNWIND_SAFE_DISTANCE`)
-    /// - Receipts: Distance(64) (`MINIMUM_DISTANCE`)
-    /// - TransactionSenders: None (only downloaded for archive nodes)
-    /// - RocksdbIndices: None (only downloaded for archive nodes)
-    ///
-    /// `tx_lookup` and `sender_recovery` are always pruned full regardless.
-    pub const fn minimal_selection(&self) -> ComponentSelection {
-        match self {
-            Self::State | Self::Headers => ComponentSelection::All,
-            Self::Transactions | Self::AccountChangesets | Self::StorageChangesets => {
-                ComponentSelection::Distance(10_064)
-            }
-            Self::Receipts => ComponentSelection::Distance(64),
-            Self::TransactionSenders => ComponentSelection::None,
-            Self::RocksdbIndices => ComponentSelection::None,
-        }
-    }
-
     /// Whether this component type uses chunked archives.
     pub const fn is_chunked(&self) -> bool {
         !matches!(self, Self::State | Self::RocksdbIndices)

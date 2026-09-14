@@ -2,23 +2,158 @@
 
 mod fcu_finalized_blocks;
 
-use alloy_rpc_types_engine::PayloadStatusEnum;
+use alloy_rpc_types_engine::{
+    CancunPayloadFields, ExecutionData, ExecutionPayloadEnvelopeV3, ExecutionPayloadSidecar,
+    PayloadStatusEnum,
+};
 use eyre::Result;
+use futures::future::BoxFuture;
 use reth_chainspec::{ChainSpecBuilder, MAINNET};
-use reth_e2e_test_utils::testsuite::{
-    actions::{
-        AssertChainTip, BlockReference, CaptureBlock, CompareNodeChainTips, CreateFork,
-        ExpectFcuStatus, FinalizeBlock, MakeCanonical, ProduceBlocks, ProduceBlocksLocally,
-        ProduceInvalidBlocks, ReorgTo, SelectActiveNode, SendForkchoiceUpdate, SendNewPayloads,
-        SetForkBase, UpdateBlockInfo, ValidateCanonicalTag, WaitForSync,
+use reth_e2e_test_utils::{
+    testsuite::{
+        actions::{
+            Action, AssertChainTip, BlockReference, CaptureBlock, CompareNodeChainTips, CreateFork,
+            ExpectFcuStatus, FinalizeBlock, MakeCanonical, ProduceBlocks, ProduceBlocksLocally,
+            ProduceInvalidBlocks, ReorgTo, SelectActiveNode, SendForkchoiceUpdate, SendNewPayloads,
+            SetForkBase, UpdateBlockInfo, ValidateCanonicalTag, WaitForSync,
+        },
+        setup::{NetworkSetup, Setup},
+        Environment, TestBuilder,
     },
-    setup::{NetworkSetup, Setup},
-    TestBuilder,
+    transaction::TransactionTestContext,
+    wallet::Wallet,
 };
 use reth_engine_tree::tree::TreeConfig;
 use reth_ethereum_engine_primitives::EthEngineTypes;
 use reth_node_ethereum::EthereumNode;
 use std::sync::Arc;
+
+/// Waits for in-flight persistence by resubmitting the latest built payload to a node.
+#[derive(Debug)]
+struct WaitForPersistence {
+    node_idx: usize,
+}
+
+impl WaitForPersistence {
+    const fn new(node_idx: usize) -> Self {
+        Self { node_idx }
+    }
+}
+
+impl Action<EthEngineTypes> for WaitForPersistence {
+    fn execute<'a>(
+        &'a mut self,
+        env: &'a mut Environment<EthEngineTypes>,
+    ) -> BoxFuture<'a, Result<()>> {
+        Box::pin(async move {
+            let node = env
+                .node_clients
+                .get(self.node_idx)
+                .ok_or_else(|| eyre::eyre!("Node index {} out of bounds", self.node_idx))?;
+            let engine = node
+                .beacon_engine_handle
+                .clone()
+                .ok_or_else(|| eyre::eyre!("Node {} has no beacon engine handle", self.node_idx))?;
+            let state = env.active_node_state()?;
+            let envelope: ExecutionPayloadEnvelopeV3 = state
+                .latest_payload_envelope
+                .clone()
+                .ok_or_else(|| eyre::eyre!("No latest payload envelope available"))?;
+            let parent_beacon_block_root = state
+                .latest_payload_built
+                .as_ref()
+                .and_then(|attrs| attrs.parent_beacon_block_root)
+                .ok_or_else(|| eyre::eyre!("No parent beacon block root available"))?;
+            let versioned_hashes = envelope.blobs_bundle.versioned_hashes();
+            let payload = ExecutionData::new(
+                envelope.execution_payload.into(),
+                ExecutionPayloadSidecar::v3(CancunPayloadFields {
+                    parent_beacon_block_root,
+                    versioned_hashes,
+                }),
+            );
+
+            let (status, _) = engine.reth_new_payload(payload, true, false).await?;
+            eyre::ensure!(
+                status.is_valid(),
+                "Persistence barrier payload was not valid: {status:?}"
+            );
+            Ok(())
+        })
+    }
+}
+
+/// Submits a funded transfer to the node that will produce the next shared block.
+#[derive(Debug)]
+struct SubmitTransfer {
+    node_idx: usize,
+}
+
+impl SubmitTransfer {
+    const fn new(node_idx: usize) -> Self {
+        Self { node_idx }
+    }
+}
+
+impl Action<EthEngineTypes> for SubmitTransfer {
+    fn execute<'a>(
+        &'a mut self,
+        env: &'a mut Environment<EthEngineTypes>,
+    ) -> BoxFuture<'a, Result<()>> {
+        Box::pin(async move {
+            let node = env
+                .node_clients
+                .get(self.node_idx)
+                .ok_or_else(|| eyre::eyre!("Node index {} out of bounds", self.node_idx))?;
+            let signer = Wallet::default()
+                .with_chain_id(1)
+                .wallet_gen()
+                .into_iter()
+                .next()
+                .expect("default wallet has one signer");
+            let raw_tx = TransactionTestContext::transfer_tx_bytes_with_nonce(1, signer, 0).await;
+            node.send_raw_transaction(raw_tx).await?;
+            Ok(())
+        })
+    }
+}
+
+/// Verifies that the masked persistence suffix contains a state-changing transaction.
+#[derive(Debug)]
+struct AssertBlockHasTransactions {
+    node_idx: usize,
+    block_number: u64,
+}
+
+impl AssertBlockHasTransactions {
+    const fn new(node_idx: usize, block_number: u64) -> Self {
+        Self { node_idx, block_number }
+    }
+}
+
+impl Action<EthEngineTypes> for AssertBlockHasTransactions {
+    fn execute<'a>(
+        &'a mut self,
+        env: &'a mut Environment<EthEngineTypes>,
+    ) -> BoxFuture<'a, Result<()>> {
+        Box::pin(async move {
+            let node = env
+                .node_clients
+                .get(self.node_idx)
+                .ok_or_else(|| eyre::eyre!("Node index {} out of bounds", self.node_idx))?;
+            let block = node
+                .get_block_by_number(alloy_eips::BlockNumberOrTag::Number(self.block_number))
+                .await?
+                .ok_or_else(|| eyre::eyre!("Block {} not found", self.block_number))?;
+            eyre::ensure!(
+                !block.transactions.is_empty(),
+                "Block {} contains no transactions",
+                self.block_number
+            );
+            Ok(())
+        })
+    }
+}
 
 /// Creates the standard setup for engine tree e2e tests.
 fn default_engine_tree_setup() -> Setup<EthEngineTypes> {
@@ -354,6 +489,84 @@ async fn test_engine_tree_live_sync_transition_eventually_canonical_e2e() -> Res
         // Wait for Node 1 to sync with Node 0
         .with_action(WaitForSync::new(0, 1).with_timeout(60))
         // Verify both nodes end up with the same canonical chain
+        .with_action(CompareNodeChainTips::expect_same(0, 1));
+
+    test.run::<EthereumNode>().await?;
+
+    Ok(())
+}
+
+/// Verifies that pipeline sync starts only after masked state/trie updates reach the persisted
+/// block frontier.
+#[tokio::test]
+async fn test_engine_tree_pipeline_sync_catches_up_masked_state_e2e() -> Result<()> {
+    reth_tracing::init_test_tracing();
+
+    const PERSISTENCE_THRESHOLD: u64 = 4;
+    const MEMORY_BLOCK_BUFFER_TARGET: u64 = 1;
+    const NUM_STATE_MASKING_BLOCKS: u64 = 2;
+    const MASKED_TRANSACTION_BLOCK: u64 = 3;
+    const SHARED_BLOCKS: u64 = 5;
+    const MIN_BLOCKS_FOR_PIPELINE_RUN: u64 = 32; // EPOCH_SLOTS from alloy-eips
+    const BLOCKS_AFTER_FINALIZED: u64 = 5;
+
+    let test = TestBuilder::new()
+        .with_setup(
+            Setup::default()
+                .with_chain_spec(Arc::new(
+                    ChainSpecBuilder::default()
+                        .chain(MAINNET.chain)
+                        .genesis(
+                            serde_json::from_str(include_str!(
+                                "../../../../e2e-test-utils/src/testsuite/assets/genesis.json"
+                            ))
+                            .unwrap(),
+                        )
+                        .cancun_activated()
+                        .build(),
+                ))
+                .with_network(NetworkSetup::multi_node(2))
+                .with_storage_v2()
+                .with_tree_config(
+                    TreeConfig::default()
+                        .with_persistence_threshold(PERSISTENCE_THRESHOLD)
+                        .with_memory_block_buffer_target(MEMORY_BLOCK_BUFFER_TARGET)
+                        .with_num_state_masking_blocks(NUM_STATE_MASKING_BLOCKS)
+                        .with_has_enough_parallelism(true),
+                ),
+        )
+        // Put a state transition in block 3, then canonicalize five shared blocks. This starts a
+        // persistence cycle on node 1 with block data through block 4 but state/trie updates only
+        // through block 2, leaving the transaction's state changes in the masked suffix.
+        .with_action(ProduceBlocks::<EthEngineTypes>::new(MASKED_TRANSACTION_BLOCK - 1))
+        .with_action(SubmitTransfer::new(1))
+        .with_action(ProduceBlocks::<EthEngineTypes>::new(
+            SHARED_BLOCKS - (MASKED_TRANSACTION_BLOCK - 1),
+        ))
+        .with_action(MakeCanonical::new())
+        .with_action(AssertBlockHasTransactions::new(1, MASKED_TRANSACTION_BLOCK))
+        .with_action(WaitForPersistence::new(1))
+        // Node 0 privately extends the shared chain. The finalized target is strictly more than
+        // EPOCH_SLOTS ahead of node 1, so receiving it triggers pipeline sync.
+        .with_action(SelectActiveNode::new(0))
+        .with_action(ProduceBlocksLocally::<EthEngineTypes>::new(MIN_BLOCKS_FOR_PIPELINE_RUN + 1))
+        .with_action(MakeCanonical::with_active_node())
+        .with_action(CaptureBlock::new("finalized_target"))
+        .with_action(ProduceBlocksLocally::<EthEngineTypes>::new(BLOCKS_AFTER_FINALIZED))
+        .with_action(MakeCanonical::with_active_node())
+        .with_action(CaptureBlock::new("source_head"))
+        .with_action(SelectActiveNode::new(1))
+        .with_action(CompareNodeChainTips::expect_different(0, 1))
+        .with_action(
+            SendForkchoiceUpdate::<EthEngineTypes>::new(
+                BlockReference::Tag("finalized_target".into()),
+                BlockReference::Tag("source_head".into()),
+                BlockReference::Tag("source_head".into()),
+            )
+            .with_expected_status(PayloadStatusEnum::Syncing)
+            .with_node_idx(1),
+        )
+        .with_action(WaitForSync::new(0, 1).with_timeout(60))
         .with_action(CompareNodeChainTips::expect_same(0, 1));
 
     test.run::<EthereumNode>().await?;

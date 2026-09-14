@@ -40,7 +40,7 @@ pub trait SpawnBlocking: EthApiTypes + Clone + Send + Sync + 'static {
     /// Returns handle to semaphore for blocking IO tasks.
     ///
     /// This semaphore is used to limit concurrent blocking IO operations like `eth_call`,
-    /// `eth_estimateGas`, and similar methods that require EVM execution.
+    /// `eth_estimateGas` and the `eth_getLogs` range scans.
     fn blocking_io_task_guard(&self) -> &Arc<Semaphore>;
 
     /// Acquires a permit from the tracing task semaphore.
@@ -80,8 +80,8 @@ pub trait SpawnBlocking: EthApiTypes + Clone + Send + Sync + 'static {
 
     /// Acquires a permit from the blocking IO request semaphore.
     ///
-    /// This should be used for operations like `eth_call`, `eth_estimateGas`, and similar methods
-    /// that require EVM execution and are spawned as blocking tasks.
+    /// This should be used for operations like `eth_call`, `eth_estimateGas` and the `eth_getLogs`
+    /// range scans, which are spawned as blocking tasks.
     ///
     /// See also [`Semaphore::acquire_owned`](`tokio::sync::Semaphore::acquire_owned`).
     fn acquire_owned_blocking_io(

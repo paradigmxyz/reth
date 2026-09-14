@@ -2,7 +2,7 @@
 
 use crate::table::{Compress, Decompress};
 use bytes::BufMut;
-use core::fmt;
+use core::{fmt, ops::RangeBounds};
 use derive_more::Deref;
 use reth_codecs::DecompressError;
 use roaring::RoaringTreemap;
@@ -66,6 +66,11 @@ impl IntegerList {
     /// Clears the list.
     pub fn clear(&mut self) {
         self.0.clear();
+    }
+
+    /// Removes the integers in the given range, returning how many were removed.
+    pub fn remove_range<R: RangeBounds<u64>>(&mut self, range: R) -> u64 {
+        self.0.remove_range(range)
     }
 
     /// Serializes an [`IntegerList`] into a sequence of bytes.
@@ -198,5 +203,28 @@ mod tests {
 
         let blist = ef_list.to_bytes();
         assert_eq!(IntegerList::from_bytes(&blist).unwrap(), ef_list)
+    }
+
+    #[test]
+    fn remove_range_matches_filtering() {
+        // Spans more than one 2^16 roaring container so multi-container removal is covered.
+        let values = [1u64, 2, 100, 65_535, 65_536, 70_000, 200_000];
+
+        for to_block in [0u64, 1, 99, 100, 65_535, 65_536, 199_999, 200_000, 200_001] {
+            let mut list = IntegerList::new(values).unwrap();
+            let removed = list.remove_range(0..=to_block);
+
+            let expected = values.into_iter().filter(|value| *value > to_block).collect::<Vec<_>>();
+            assert_eq!(list.iter().collect::<Vec<_>>(), expected, "to_block {to_block}");
+            assert_eq!(removed, (values.len() - expected.len()) as u64, "to_block {to_block}");
+            assert_eq!(list.is_empty(), expected.is_empty(), "to_block {to_block}");
+        }
+    }
+
+    #[test]
+    fn remove_range_on_empty_list_removes_nothing() {
+        let mut list = IntegerList::empty();
+        assert_eq!(list.remove_range(0..=100), 0);
+        assert!(list.is_empty());
     }
 }

@@ -2123,10 +2123,14 @@ impl<'a> RocksDBBatch<'a> {
     /// Generic implementation for both account and storage history pruning.
     /// Mirrors MDBX `prune_shard` semantics. After pruning, the last remaining shard
     /// (if any) will have the sentinel key (`u64::MAX`).
+    ///
+    /// `shards_complete` must be `false` when `shards` stops short of the key's last shard, so the
+    /// survivor is not re-keyed over a sentinel that is still on disk.
     #[expect(clippy::too_many_arguments)]
     fn prune_history_shards_inner<K>(
         &mut self,
         shards: Vec<(K, BlockNumberList)>,
+        shards_complete: bool,
         to_block: BlockNumber,
         get_highest: impl Fn(&K) -> u64,
         is_sentinel: impl Fn(&K) -> bool,
@@ -2145,21 +2149,19 @@ impl<'a> RocksDBBatch<'a> {
         let mut updated = false;
         let mut last_remaining: Option<(K, BlockNumberList)> = None;
 
-        for (key, block_list) in shards {
+        for (key, mut block_list) in shards {
             if !is_sentinel(&key) && get_highest(&key) <= to_block {
                 delete_shard(self, key)?;
                 deleted = true;
             } else {
-                let original_len = block_list.len();
-                let filtered =
-                    BlockNumberList::new_pre_sorted(block_list.iter().filter(|&b| b > to_block));
+                let removed = block_list.remove_range(0..=to_block);
 
-                if filtered.is_empty() {
+                if block_list.is_empty() {
                     delete_shard(self, key)?;
                     deleted = true;
-                } else if filtered.len() < original_len {
-                    put_shard(self, key.clone(), &filtered)?;
-                    last_remaining = Some((key, filtered));
+                } else if removed > 0 {
+                    put_shard(self, key.clone(), &block_list)?;
+                    last_remaining = Some((key, block_list));
                     updated = true;
                 } else {
                     last_remaining = Some((key, block_list));
@@ -2167,7 +2169,8 @@ impl<'a> RocksDBBatch<'a> {
             }
         }
 
-        if let Some((last_key, last_value)) = last_remaining &&
+        if shards_complete &&
+            let Some((last_key, last_value)) = last_remaining &&
             !is_sentinel(&last_key)
         {
             delete_shard(self, last_key)?;
@@ -2196,6 +2199,7 @@ impl<'a> RocksDBBatch<'a> {
         let shards = self.provider.account_history_shards(address)?;
         self.prune_history_shards_inner(
             shards,
+            true,
             to_block,
             |key| key.highest_block_number,
             |key| key.highest_block_number == u64::MAX,
@@ -2211,8 +2215,8 @@ impl<'a> RocksDBBatch<'a> {
     /// because it reuses a single raw iterator and skips seeks when the iterator is already
     /// positioned correctly (which happens when targets are sorted and adjacent in key order).
     ///
-    /// `targets` MUST be sorted by address for correctness and optimal performance
-    /// (matches on-disk key order).
+    /// `targets` MUST be sorted by address and contain each address at most once, for
+    /// correctness and optimal performance (matches on-disk key order).
     pub fn prune_account_history_batch(
         &mut self,
         targets: &[(Address, BlockNumber)],
@@ -2222,8 +2226,8 @@ impl<'a> RocksDBBatch<'a> {
         }
 
         debug_assert!(
-            targets.windows(2).all(|w| w[0].0 <= w[1].0),
-            "prune_account_history_batch: targets must be sorted by address"
+            targets.windows(2).all(|w| w[0].0 < w[1].0),
+            "prune_account_history_batch: targets must be sorted and unique"
         );
 
         // ShardedKey<Address> layout: [address: 20][block: 8] = 28 bytes
@@ -2242,7 +2246,9 @@ impl<'a> RocksDBBatch<'a> {
             // Check if we need to seek or if the iterator is already positioned correctly.
             // After processing the previous target, the iterator is either:
             // 1. Positioned at a key with a different prefix (we iterated past our shards)
-            // 2. Invalid (no more keys)
+            // 2. Positioned on a later shard of the previous target (we stopped early), whose
+            //    prefix is below ours because targets are sorted and unique
+            // 3. Invalid (no more keys)
             // If the current key's prefix >= our target prefix, we may be able to skip the seek.
             let needs_seek = if iter.valid() {
                 if let Some(current_key) = iter.key() {
@@ -2267,8 +2273,10 @@ impl<'a> RocksDBBatch<'a> {
                 })?;
             }
 
-            // Collect all shards for this address using raw prefix comparison
+            // Collect the shards for this address that pruning can touch, using raw prefix
+            // comparison
             let mut shards = Vec::new();
+            let mut shards_complete = true;
             while iter.valid() {
                 let Some(key_bytes) = iter.key() else { break };
 
@@ -2286,12 +2294,36 @@ impl<'a> RocksDBBatch<'a> {
                 let value = BlockNumberList::decompress(value_bytes)
                     .map_err(|_| ProviderError::Database(DatabaseError::Decode))?;
 
+                let highest = key.highest_block_number;
                 shards.push((key, value));
+
                 iter.next();
+
+                // Shards are ordered by their highest block and their contents partition the
+                // address's history, so this is the last shard holding anything at or below the
+                // target. Peek past it only to tell whether it was the address's last shard,
+                // which decides whether a survivor may be re-keyed to the sentinel.
+                if highest > *to_block {
+                    shards_complete = iter.key().and_then(|next_key| next_key.get(..PREFIX_LEN)) !=
+                        Some(target_prefix);
+                    break;
+                }
+            }
+
+            // The iterator also goes invalid on a read error, which would otherwise pass a
+            // truncated shard list off as the key's complete one.
+            if !iter.valid() {
+                iter.status().map_err(|e| {
+                    ProviderError::Database(DatabaseError::Read(DatabaseErrorInfo {
+                        message: e.to_string().into(),
+                        code: -1,
+                    }))
+                })?;
             }
 
             match self.prune_history_shards_inner(
                 shards,
+                shards_complete,
                 *to_block,
                 |key| key.highest_block_number,
                 |key| key.highest_block_number == u64::MAX,
@@ -2322,6 +2354,7 @@ impl<'a> RocksDBBatch<'a> {
         let shards = self.provider.storage_history_shards(address, storage_key)?;
         self.prune_history_shards_inner(
             shards,
+            true,
             to_block,
             |key| key.sharded_key.highest_block_number,
             |key| key.sharded_key.highest_block_number == u64::MAX,
@@ -2338,8 +2371,8 @@ impl<'a> RocksDBBatch<'a> {
     /// because it reuses a single raw iterator and skips seeks when the iterator is already
     /// positioned correctly (which happens when targets are sorted and adjacent in key order).
     ///
-    /// `targets` MUST be sorted by (address, `storage_key`) for correctness and optimal
-    /// performance (matches on-disk key order).
+    /// `targets` MUST be sorted by (address, `storage_key`) and contain each pair at most once,
+    /// for correctness and optimal performance (matches on-disk key order).
     pub fn prune_storage_history_batch(
         &mut self,
         targets: &[((Address, B256), BlockNumber)],
@@ -2349,8 +2382,8 @@ impl<'a> RocksDBBatch<'a> {
         }
 
         debug_assert!(
-            targets.windows(2).all(|w| w[0].0 <= w[1].0),
-            "prune_storage_history_batch: targets must be sorted by (address, storage_key)"
+            targets.windows(2).all(|w| w[0].0 < w[1].0),
+            "prune_storage_history_batch: targets must be sorted and unique"
         );
 
         // StorageShardedKey layout: [address: 20][storage_key: 32][block: 8] = 60 bytes
@@ -2369,7 +2402,9 @@ impl<'a> RocksDBBatch<'a> {
             // Check if we need to seek or if the iterator is already positioned correctly.
             // After processing the previous target, the iterator is either:
             // 1. Positioned at a key with a different prefix (we iterated past our shards)
-            // 2. Invalid (no more keys)
+            // 2. Positioned on a later shard of the previous target (we stopped early), whose
+            //    prefix is below ours because targets are sorted and unique
+            // 3. Invalid (no more keys)
             // If the current key's prefix >= our target prefix, we may be able to skip the seek.
             let needs_seek = if iter.valid() {
                 if let Some(current_key) = iter.key() {
@@ -2394,8 +2429,10 @@ impl<'a> RocksDBBatch<'a> {
                 })?;
             }
 
-            // Collect all shards for this (address, storage_key) pair using prefix comparison
+            // Collect the shards for this (address, storage_key) pair that pruning can touch,
+            // using prefix comparison
             let mut shards = Vec::new();
+            let mut shards_complete = true;
             while iter.valid() {
                 let Some(key_bytes) = iter.key() else { break };
 
@@ -2413,13 +2450,37 @@ impl<'a> RocksDBBatch<'a> {
                 let value = BlockNumberList::decompress(value_bytes)
                     .map_err(|_| ProviderError::Database(DatabaseError::Decode))?;
 
+                let highest = key.sharded_key.highest_block_number;
                 shards.push((key, value));
+
                 iter.next();
+
+                // Shards are ordered by their highest block and their contents partition the
+                // key's history, so this is the last shard holding anything at or below the
+                // target. Peek past it only to tell whether it was the key's last shard, which
+                // decides whether a survivor may be re-keyed to the sentinel.
+                if highest > *to_block {
+                    shards_complete = iter.key().and_then(|next_key| next_key.get(..PREFIX_LEN)) !=
+                        Some(target_prefix);
+                    break;
+                }
+            }
+
+            // The iterator also goes invalid on a read error, which would otherwise pass a
+            // truncated shard list off as the key's complete one.
+            if !iter.valid() {
+                iter.status().map_err(|e| {
+                    ProviderError::Database(DatabaseError::Read(DatabaseErrorInfo {
+                        message: e.to_string().into(),
+                        code: -1,
+                    }))
+                })?;
             }
 
             // Use existing prune_history_shards_inner logic
             match self.prune_history_shards_inner(
                 shards,
+                shards_complete,
                 *to_block,
                 |key| key.sharded_key.highest_block_number,
                 |key| key.sharded_key.highest_block_number == u64::MAX,
@@ -3366,8 +3427,9 @@ mod tests {
     }
 
     /// Tests the edge case where block < `lowest_available_block_number`.
-    /// This case cannot be tested via `HistoricalStateProviderRef` (which errors before lookup),
-    /// so we keep this RocksDB-specific test to verify the low-level behavior.
+    ///
+    /// State queries reject this before the `RocksDB` lookup, so this verifies the low-level
+    /// behavior directly.
     #[test]
     fn test_account_history_info_pruned_before_first_entry() {
         let temp_dir = TempDir::new().unwrap();
@@ -4611,5 +4673,205 @@ mod tests {
 
         let shards2 = provider.storage_history_shards(addr, slot2).unwrap();
         assert_eq!(shards2[0].1.iter().collect::<Vec<_>>(), vec![15, 25]);
+    }
+
+    /// Shards for one address, keyed by highest block, as `(highest, blocks)`.
+    fn account_shard_layout(provider: &RocksDBProvider, address: Address) -> Vec<(u64, Vec<u64>)> {
+        provider
+            .account_history_shards(address)
+            .unwrap()
+            .into_iter()
+            .map(|(key, list)| (key.highest_block_number, list.iter().collect::<Vec<_>>()))
+            .collect()
+    }
+
+    /// Shards for one storage slot, keyed by highest block, as `(highest, blocks)`.
+    fn storage_shard_layout(
+        provider: &RocksDBProvider,
+        address: Address,
+        storage_key: B256,
+    ) -> Vec<(u64, Vec<u64>)> {
+        provider
+            .storage_history_shards(address, storage_key)
+            .unwrap()
+            .into_iter()
+            .map(|(key, list)| {
+                (key.sharded_key.highest_block_number, list.iter().collect::<Vec<_>>())
+            })
+            .collect()
+    }
+
+    fn seed_three_storage_shards(provider: &RocksDBProvider, address: Address, storage_key: B256) {
+        let mut batch = provider.batch();
+        batch
+            .put::<tables::StoragesHistory>(
+                StorageShardedKey::new(address, storage_key, 100),
+                &BlockNumberList::new_pre_sorted([10, 50, 100]),
+            )
+            .unwrap();
+        batch
+            .put::<tables::StoragesHistory>(
+                StorageShardedKey::new(address, storage_key, 200),
+                &BlockNumberList::new_pre_sorted([150, 200]),
+            )
+            .unwrap();
+        batch
+            .put::<tables::StoragesHistory>(
+                StorageShardedKey::last(address, storage_key),
+                &BlockNumberList::new_pre_sorted([250, 300]),
+            )
+            .unwrap();
+        batch.commit().unwrap();
+    }
+
+    #[test]
+    fn test_prune_storage_history_batch_leaves_shards_above_target_untouched() {
+        let temp_dir = TempDir::new().unwrap();
+        let provider = RocksDBBuilder::new(temp_dir.path()).with_default_tables().build().unwrap();
+
+        let addr = Address::from([0x42; 20]);
+        let slot = B256::from([0x01; 32]);
+        seed_three_storage_shards(&provider, addr, slot);
+
+        // Only the oldest shard holds blocks at or below the target.
+        let mut batch = provider.batch();
+        let outcomes = batch.prune_storage_history_batch(&[((addr, slot), 50)]).unwrap();
+        batch.commit().unwrap();
+
+        assert_eq!(outcomes.updated, 1);
+        // The trimmed shard keeps its own key. Re-keying it to the sentinel here would overwrite
+        // the sentinel's blocks.
+        assert_eq!(
+            storage_shard_layout(&provider, addr, slot),
+            vec![(100, vec![100]), (200, vec![150, 200]), (u64::MAX, vec![250, 300])]
+        );
+    }
+
+    #[test]
+    fn test_prune_storage_history_batch_trims_sentinel_once_earlier_shards_expire() {
+        let temp_dir = TempDir::new().unwrap();
+        let provider = RocksDBBuilder::new(temp_dir.path()).with_default_tables().build().unwrap();
+
+        let addr = Address::from([0x42; 20]);
+        let slot = B256::from([0x01; 32]);
+        seed_three_storage_shards(&provider, addr, slot);
+
+        // Every non-sentinel shard expires whole and the sentinel loses its lowest block.
+        let mut batch = provider.batch();
+        let outcomes = batch.prune_storage_history_batch(&[((addr, slot), 250)]).unwrap();
+        batch.commit().unwrap();
+
+        assert_eq!(outcomes.deleted, 1);
+        assert_eq!(storage_shard_layout(&provider, addr, slot), vec![(u64::MAX, vec![300])]);
+    }
+
+    #[test]
+    fn test_prune_account_history_batch_leaves_shards_above_target_untouched() {
+        let temp_dir = TempDir::new().unwrap();
+        let provider = RocksDBBuilder::new(temp_dir.path()).with_default_tables().build().unwrap();
+
+        let addr = Address::from([0x42; 20]);
+
+        let mut batch = provider.batch();
+        batch
+            .put::<tables::AccountsHistory>(
+                ShardedKey::new(addr, 100),
+                &BlockNumberList::new_pre_sorted([10, 50, 100]),
+            )
+            .unwrap();
+        batch
+            .put::<tables::AccountsHistory>(
+                ShardedKey::new(addr, u64::MAX),
+                &BlockNumberList::new_pre_sorted([250, 300]),
+            )
+            .unwrap();
+        batch.commit().unwrap();
+
+        let mut batch = provider.batch();
+        let outcomes = batch.prune_account_history_batch(&[(addr, 50)]).unwrap();
+        batch.commit().unwrap();
+
+        assert_eq!(outcomes.updated, 1);
+        assert_eq!(
+            account_shard_layout(&provider, addr),
+            vec![(100, vec![100]), (u64::MAX, vec![250, 300])]
+        );
+    }
+
+    #[test]
+    fn test_prune_account_history_batch_seeks_after_stopping_early() {
+        let temp_dir = TempDir::new().unwrap();
+        let provider = RocksDBBuilder::new(temp_dir.path()).with_default_tables().build().unwrap();
+
+        let addr1 = Address::from([0x01; 20]);
+        let addr2 = Address::from([0x02; 20]);
+
+        let mut batch = provider.batch();
+        batch
+            .put::<tables::AccountsHistory>(
+                ShardedKey::new(addr1, 100),
+                &BlockNumberList::new_pre_sorted([10, 50, 100]),
+            )
+            .unwrap();
+        batch
+            .put::<tables::AccountsHistory>(
+                ShardedKey::new(addr1, u64::MAX),
+                &BlockNumberList::new_pre_sorted([250, 300]),
+            )
+            .unwrap();
+        batch
+            .put::<tables::AccountsHistory>(
+                ShardedKey::new(addr2, u64::MAX),
+                &BlockNumberList::new_pre_sorted([5, 10, 15]),
+            )
+            .unwrap();
+        batch.commit().unwrap();
+
+        // The first target stops on addr1's oldest shard, leaving the iterator on addr1's
+        // sentinel. The second target must seek past it instead of skipping addr2.
+        let mut batch = provider.batch();
+        let outcomes = batch.prune_account_history_batch(&[(addr1, 50), (addr2, 10)]).unwrap();
+        batch.commit().unwrap();
+
+        assert_eq!(outcomes.updated, 2);
+        assert_eq!(
+            account_shard_layout(&provider, addr1),
+            vec![(100, vec![100]), (u64::MAX, vec![250, 300])]
+        );
+        assert_eq!(account_shard_layout(&provider, addr2), vec![(u64::MAX, vec![15])]);
+    }
+
+    #[test]
+    fn test_prune_storage_history_batch_seeks_after_stopping_early() {
+        let temp_dir = TempDir::new().unwrap();
+        let provider = RocksDBBuilder::new(temp_dir.path()).with_default_tables().build().unwrap();
+
+        let addr = Address::from([0x42; 20]);
+        let slot1 = B256::from([0x01; 32]);
+        let slot2 = B256::from([0x02; 32]);
+        seed_three_storage_shards(&provider, addr, slot1);
+
+        let mut batch = provider.batch();
+        batch
+            .put::<tables::StoragesHistory>(
+                StorageShardedKey::last(addr, slot2),
+                &BlockNumberList::new_pre_sorted([20, 40]),
+            )
+            .unwrap();
+        batch.commit().unwrap();
+
+        // The first target stops on slot1's oldest shard, leaving the iterator on slot1's next
+        // shard. The second target must seek past it instead of skipping slot2.
+        let mut batch = provider.batch();
+        let outcomes =
+            batch.prune_storage_history_batch(&[((addr, slot1), 50), ((addr, slot2), 30)]).unwrap();
+        batch.commit().unwrap();
+
+        assert_eq!(outcomes.updated, 2);
+        assert_eq!(
+            storage_shard_layout(&provider, addr, slot1),
+            vec![(100, vec![100]), (200, vec![150, 200]), (u64::MAX, vec![250, 300])]
+        );
+        assert_eq!(storage_shard_layout(&provider, addr, slot2), vec![(u64::MAX, vec![40])]);
     }
 }
