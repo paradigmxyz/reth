@@ -72,17 +72,13 @@ pub struct PoolConfig {
     ///
     /// This restricts how many executable transaction a delegated sender can stack.
     pub max_inflight_delegated_slot_limit: usize,
-    /// Whether to reject transactions validated against account state that is older than the
-    /// pool's last canonical update.
+    /// Whether to enforce the sender nonce tracked from canonical updates over the nonce a
+    /// transaction was validated against, rejecting transactions below it.
     ///
-    /// Validation reads state outside the pool lock, so a result can arrive after a block already
-    /// advanced the sender's nonce. When enabled, the pool prefers the sender state it tracked
-    /// from canonical updates and rejects transactions below that nonce instead of inserting them
-    /// as pending, where they would shadow the sender's executable transactions.
-    ///
-    /// Disabled by default because a reorg can lower a sender's nonce, in which case the tracked
-    /// state is not newer than the validation snapshot. Intended for chains without reorgs.
-    pub reject_stale_validation: bool,
+    /// Closes the window in which a validation result that predates a block inserts an already
+    /// mined nonce as pending. Assumes sender nonces only move forward, so this is primarily
+    /// recommended for chains without reorgs and very low block times. Disabled by default.
+    pub enforce_tracked_nonce: bool,
 }
 
 impl PoolConfig {
@@ -111,10 +107,10 @@ impl PoolConfig {
         self
     }
 
-    /// Configures whether transactions validated against outdated account state are rejected,
-    /// see [`Self::reject_stale_validation`].
-    pub const fn with_reject_stale_validation(mut self, reject: bool) -> Self {
-        self.reject_stale_validation = reject;
+    /// Configures whether the sender nonce tracked from canonical updates is enforced on
+    /// insertion, see [`Self::enforce_tracked_nonce`].
+    pub const fn with_enforce_tracked_nonce(mut self, enforce: bool) -> Self {
+        self.enforce_tracked_nonce = enforce;
         self
     }
 
@@ -147,7 +143,7 @@ impl Default for PoolConfig {
             max_new_pending_txs_notifications: MAX_NEW_PENDING_TXS_NOTIFICATIONS,
             max_queued_lifetime: MAX_QUEUED_TRANSACTION_LIFETIME,
             max_inflight_delegated_slot_limit: DEFAULT_MAX_INFLIGHT_DELEGATED_SLOTS,
-            reject_stale_validation: false,
+            enforce_tracked_nonce: false,
         }
     }
 }

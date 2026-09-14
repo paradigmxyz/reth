@@ -649,7 +649,7 @@ impl<T: TransactionOrdering> TxPool<T> {
 
         // Process the sub-pool updates
         let mut outcome = UpdateOutcome::default();
-        if self.config.reject_stale_validation {
+        if self.config.enforce_tracked_nonce {
             // Track the changed accounts only after the discards: a discard that removes the
             // sender's last transaction also removes its info, and the tracked nonce must survive
             // for `add_transaction` to reject a stale validation result.
@@ -760,7 +760,7 @@ impl<T: TransactionOrdering> TxPool<T> {
         // Validation reads state outside the pool lock, so its snapshot can predate the last
         // canonical update. Opt-in because it assumes nonces only move forward, which a reorg
         // breaks. Transactions exempt from the nonce check keep the validator's verdict.
-        if self.config.reject_stale_validation &&
+        if self.config.enforce_tracked_nonce &&
             tx.transaction.requires_nonce_check() &&
             let Some(info) = self.all_transactions.sender_info.get(&tx.sender_id()) &&
             info.state_nonce > on_chain_nonce
@@ -1417,7 +1417,7 @@ pub(crate) struct AllTransactions<T: PoolTransaction> {
     txs: BTreeMap<TransactionId, PoolInternalTransaction<T>>,
     /// Contains the currently known information about the senders.
     ///
-    /// With `PoolConfig::reject_stale_validation` entries outlive a sender's transactions when an
+    /// With `PoolConfig::enforce_tracked_nonce` entries outlive a sender's transactions when an
     /// account update discards them, so a validation result computed against older state cannot
     /// regress the tracked nonce.
     sender_info: FxHashMap<SenderId, SenderInfo>,
@@ -4255,11 +4255,11 @@ mod tests {
         assert_eq!(pool.pending_pool.len(), 1);
     }
 
-    /// Pool with stale validation rejection enabled.
+    /// Pool with `enforce_tracked_nonce` enabled.
     fn stale_validation_pool() -> TxPool<MockOrdering> {
         TxPool::new(
             MockOrdering::default(),
-            PoolConfig { reject_stale_validation: true, ..Default::default() },
+            PoolConfig { enforce_tracked_nonce: true, ..Default::default() },
         )
     }
 
