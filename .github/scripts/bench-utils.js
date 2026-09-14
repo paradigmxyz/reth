@@ -45,10 +45,6 @@ function loadSamplyUrls(workDir) {
   return loadProfileUrls(workDir, 'samply-profile-url.txt');
 }
 
-function loadTracingChromeUrls(workDir) {
-  return loadProfileUrls(workDir, 'tracing-chrome-profile-url.txt');
-}
-
 function loadProfileUrls(workDir, fileName) {
   const urls = {};
   let runs = [];
@@ -140,7 +136,6 @@ module.exports = {
   verdict,
   isWin,
   loadSamplyUrls,
-  loadTracingChromeUrls,
   blocksLabel,
   metricRows,
   waitTimeRows,

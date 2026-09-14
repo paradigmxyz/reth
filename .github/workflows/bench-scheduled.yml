@@ -9,9 +9,9 @@
 #   release — Compares the latest GitHub release tag against the current nightly
 #             Docker build. Runs daily to track nightly vs release performance.
 #
-# State is persisted between runs via the decofe/reth-bench-charts repo: each
-# successful run saves the feature commit SHA so the next run knows what to
-# compare against.
+# State is an Actions artifact containing the feature SHA from a successful run,
+# scoped by mode and branch. After 90 days without retained state, the existing
+# first-run baseline rules apply. No PAT or separate repository is needed.
 
 on:
   schedule:
@@ -144,7 +144,6 @@ jobs:
         id: refs
         env:
           GH_TOKEN: ${{ github.token }}
-          DEREK_TOKEN: ${{ secrets.DEREK_TOKEN }}
           GITHUB_REPOSITORY: ${{ github.repository }}
           GITHUB_RUN_ID: ${{ github.run_id }}
           INPUT_FORCE: ${{ inputs.force || 'false' }}
@@ -361,6 +360,7 @@ jobs:
 
           # apt packages
           sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends gh
           sudo apt-get install -y --no-install-recommends \
             python3 make jq zstd curl dmsetup m4 \
             linux-tools-"$(uname -r)" || \
@@ -402,7 +402,7 @@ jobs:
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
           echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
           missing=()
-          for cmd in mc schelk cpupower taskset stdbuf python3 curl make uv jq m4; do
+          for cmd in mc schelk cpupower taskset stdbuf python3 curl make uv jq m4 gh; do
             command -v "$cmd" &>/dev/null || missing+=("$cmd")
           done
           if [ ${#missing[@]} -gt 0 ]; then
@@ -726,51 +726,12 @@ jobs:
           name: bench-scheduled-results
           path: ${{ env.BENCH_WORK_DIR }}
 
-      - name: Push charts
-        id: push-charts
+      - name: Upload chart attachments
+        id: upload-charts
         if: success() && env.BENCH_MODE != 'hourly'
         env:
-          DEREK_TOKEN: ${{ secrets.DEREK_TOKEN }}
-          RUN_ID: ${{ github.run_id }}
-        run: |
-          CHART_DIR="${BENCH_MODE}/${RUN_ID}"
-          CHARTS_REPO="https://x-access-token:${DEREK_TOKEN}@github.com/decofe/reth-bench-charts.git"
-
-          TMP_DIR=""
-          prepare_charts() {
-            if [ -n "${TMP_DIR}" ]; then
-              rm -rf "${TMP_DIR}"
-            fi
-
-            TMP_DIR=$(mktemp -d)
-            if git clone --depth 1 "${CHARTS_REPO}" "${TMP_DIR}" 2>/dev/null; then
-              true
-            else
-              git init "${TMP_DIR}"
-              git -C "${TMP_DIR}" remote add origin "${CHARTS_REPO}"
-            fi
-            .github/scripts/configure-git-token-user.sh "${TMP_DIR}" "${DEREK_TOKEN}"
-
-            mkdir -p "${TMP_DIR}/${CHART_DIR}"
-            cp "$BENCH_WORK_DIR"/charts/*.png "${TMP_DIR}/${CHART_DIR}/"
-            git -C "${TMP_DIR}" add "${CHART_DIR}"
-          }
-
-          for attempt in 1 2 3 4 5; do
-            prepare_charts
-            git -C "${TMP_DIR}" commit -m "nightly bench charts for run ${RUN_ID}"
-            if git -C "${TMP_DIR}" push origin HEAD:main; then
-              break
-            fi
-            if [ "$attempt" -eq 5 ]; then
-              echo "::error::Failed to push charts after ${attempt} attempts"
-              rm -rf "${TMP_DIR}"
-              exit 1
-            fi
-            sleep "$attempt"
-          done
-          echo "sha=$(git -C "${TMP_DIR}" rev-parse HEAD)" >> "$GITHUB_OUTPUT"
-          rm -rf "${TMP_DIR}"
+          GH_TOKEN: ${{ secrets.DEREK_PAT }}
+        run: bash .github/scripts/bench-upload-charts.sh "$GITHUB_REPOSITORY" "$BENCH_WORK_DIR/charts" > "$BENCH_WORK_DIR/charts.md"
 
       - name: Write job summary
         if: success()
@@ -821,22 +782,8 @@ jobs:
               md += '\n';
             }
 
-            // Charts
-            const chartSha = '${{ steps.push-charts.outputs.sha }}';
-            if (chartSha) {
-              const runId = '${{ github.run_id }}';
-              const baseUrl = `https://raw.githubusercontent.com/decofe/reth-bench-charts/${chartSha}/nightly/${runId}`;
-              const charts = [
-                { file: 'latency_throughput.png', label: 'Latency, Throughput & Diff' },
-                { file: 'wait_breakdown.png', label: 'Wait Time Breakdown' },
-                { file: 'gas_vs_latency.png', label: 'Gas vs Latency' },
-              ];
-              md += `### Charts\n\n`;
-              for (const chart of charts) {
-                md += `<details><summary>${chart.label}</summary>\n\n`;
-                md += `![${chart.label}](${baseUrl}/${chart.file})\n\n`;
-                md += `</details>\n\n`;
-              }
+            if (process.env.BENCH_MODE !== 'hourly') {
+              md += fs.readFileSync(process.env.BENCH_WORK_DIR + '/charts.md', 'utf8');
             }
 
             const grafanaUrl = '${{ steps.metrics.outputs.grafana-url }}';
@@ -1092,34 +1039,21 @@ jobs:
     if: success()
     name: save-state
     runs-on: ubuntu-latest
+    permissions: {}
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-          sparse-checkout: .github/scripts
-          sparse-checkout-cone-mode: true
-
-      - name: Push state to charts repo
+      - name: Prepare benchmark state
         env:
-          DEREK_TOKEN: ${{ secrets.DEREK_TOKEN }}
+          FEATURE_REF: ${{ needs.resolve-refs.outputs.feature-ref }}
         run: |
-          MODE="${{ needs.resolve-refs.outputs.mode }}"
-          FEATURE_REF="${{ needs.resolve-refs.outputs.feature-ref }}"
-          CHARTS_REPO="https://x-access-token:${DEREK_TOKEN}@github.com/decofe/reth-bench-charts.git"
+          [[ "$FEATURE_REF" =~ ^[0-9a-f]{40}$ ]] || exit 1
+          mkdir -p "$RUNNER_TEMP/bench-state"
+          printf '%s\n' "$FEATURE_REF" > "$RUNNER_TEMP/bench-state/feature-ref"
 
-          TMP_DIR=$(mktemp -d)
-          if git clone --depth 1 --branch state "${CHARTS_REPO}" "${TMP_DIR}" 2>/dev/null; then
-            true
-          else
-            git init "${TMP_DIR}"
-            git -C "${TMP_DIR}" remote add origin "${CHARTS_REPO}"
-          fi
-          .github/scripts/configure-git-token-user.sh "${TMP_DIR}" "${DEREK_TOKEN}"
-
-          mkdir -p "${TMP_DIR}/state"
-          echo "${FEATURE_REF}" > "${TMP_DIR}/state/${MODE}-last-feature-ref"
-          git -C "${TMP_DIR}" add state/
-          git -C "${TMP_DIR}" diff --cached --quiet && echo "No state change" && exit 0
-          git -C "${TMP_DIR}" commit -m "bench: update ${MODE} state to ${FEATURE_REF}"
-          git -C "${TMP_DIR}" push origin HEAD:state
-          rm -rf "${TMP_DIR}"
+      - name: Save benchmark state
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: bench-state-${{ needs.resolve-refs.outputs.mode }}
+          path: ${{ runner.temp }}/bench-state/feature-ref
+          retention-days: 90
+          if-no-files-found: error
+          overwrite: true
