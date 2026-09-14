@@ -236,6 +236,98 @@ where
         &mut self,
         multiproof: reth_trie_common::DecodedMultiProofV2,
     ) -> SparseStateTrieResult<()> {
+        let reth_trie_common::DecodedMultiProofV2 { account_proofs, storage_proofs, .. } =
+            multiproof;
+
+        // Own only the addressed tries so preparation scales with the incoming proof batch.
+        let mut storage_targets = storage_proofs
+            .into_iter()
+            .map(|(account, nodes)| (account, self.take_or_create_storage_trie(&account), nodes))
+            .collect::<Vec<_>>();
+
+        // Collect `(trie, proof_nodes)` pairs for both the account trie and every storage trie
+        // touched by this multiproof.
+        let mut targets = Vec::with_capacity(storage_targets.len() + 1);
+
+        if !account_proofs.is_empty() {
+            #[cfg(feature = "metrics")]
+            self.metrics.increment_total_account_nodes(account_proofs.len() as u64);
+            targets.push((None, Either::Left(&mut self.state), account_proofs));
+        }
+
+        for (account, trie, nodes) in &mut storage_targets {
+            #[cfg(feature = "metrics")]
+            self.metrics.increment_total_storage_nodes(nodes.len() as u64);
+            targets.push((Some(*account), Either::Right(trie), core::mem::take(nodes)));
+        }
+
+        let retain_updates = self.retain_updates;
+
+        #[cfg(not(feature = "std"))]
+        let results: Vec<_> = targets
+            .into_iter()
+            .map(|(_, target, mut nodes)| {
+                let result = match target {
+                    Either::Left(trie) => trie.reveal_v2_proof_nodes(&mut nodes, retain_updates),
+                    Either::Right(trie) => trie.reveal_v2_proof_nodes(&mut nodes, retain_updates),
+                };
+                (result, nodes)
+            })
+            .collect();
+
+        #[cfg(feature = "std")]
+        let results: Vec<_> = {
+            use rayon::iter::ParallelIterator;
+            use reth_primitives_traits::ParallelBridgeBuffered;
+
+            let parent_span = tracing::Span::current();
+            targets
+                .into_iter()
+                .par_bridge_buffered()
+                .map(|(hashed_address, target, mut nodes)| {
+                    let _span = tracing::trace_span!(
+                        target: "trie::sparse",
+                        parent: &parent_span,
+                        "reveal_v2_proof_nodes",
+                        ?hashed_address,
+                    )
+                    .entered();
+
+                    let result = match target {
+                        Either::Left(trie) => {
+                            trie.reveal_v2_proof_nodes(&mut nodes, retain_updates)
+                        }
+                        Either::Right(trie) => {
+                            trie.reveal_v2_proof_nodes(&mut nodes, retain_updates)
+                        }
+                    };
+                    (result, nodes)
+                })
+                .collect()
+        };
+
+        // Restore every trie, including failed revelations, before propagating any error.
+        for (account, trie, _) in storage_targets {
+            self.insert_storage_trie(account, trie);
+        }
+
+        // Accumulate the first error and defer dropping the proof node buffers.
+        let mut any_err = Ok(());
+        for (result, nodes) in results {
+            if result.is_err() && any_err.is_ok() {
+                any_err = result.map_err(Into::into);
+            }
+            self.deferred_drops.proof_nodes_bufs.push(nodes);
+        }
+
+        any_err
+    }
+
+    #[cfg(test)]
+    fn reveal_decoded_multiproof_v2_scanning(
+        &mut self,
+        multiproof: reth_trie_common::DecodedMultiProofV2,
+    ) -> SparseStateTrieResult<()> {
         let reth_trie_common::DecodedMultiProofV2 { account_proofs, mut storage_proofs, .. } =
             multiproof;
 
@@ -967,6 +1059,140 @@ mod tests {
             .unwrap()
             .get_leaf_value(&full_path_0)
             .is_none());
+    }
+
+    #[test]
+    fn targeted_revelation_restores_tries_on_error() {
+        let mut sparse = SparseStateTrie::<ArenaParallelSparseTrie>::default().with_updates(true);
+        let existing = B256::repeat_byte(1);
+        let missing = B256::repeat_byte(2);
+        let untouched = B256::repeat_byte(3);
+        sparse.get_or_create_storage_trie_mut(existing);
+        sparse.get_or_create_storage_trie_mut(untouched);
+        let result = sparse.reveal_decoded_multiproof_v2(reth_trie_common::DecodedMultiProofV2 {
+            account_proofs: vec![ProofTrieNodeV2::empty()],
+            storage_proofs: B256Map::from_iter([
+                (existing, vec![ProofTrieNodeV2::empty()]),
+                // An empty proof cannot reveal the newly created blind trie.
+                (missing, Vec::new()),
+            ]),
+        });
+        assert!(result.is_err());
+        assert_eq!(sparse.storage.tries.len(), 3);
+        assert!(sparse.storage_trie_ref(&existing).is_some());
+        assert!(sparse.storage.tries[&missing].is_blind());
+        assert!(sparse.storage.tries[&untouched].is_blind());
+        assert!(sparse.state_trie_ref().is_some());
+        assert_eq!(sparse.deferred_drops.proof_nodes_bufs.len(), 3);
+    }
+
+    #[test]
+    fn targeted_revelation_matches_scanning_roots_and_persistence() {
+        let mut targeted = SparseStateTrie::<ArenaParallelSparseTrie>::default().with_updates(true);
+        let mut scanning = SparseStateTrie::<ArenaParallelSparseTrie>::default().with_updates(true);
+        for account in 0..128u64 {
+            let address = alloy_primitives::keccak256(account.to_be_bytes());
+            targeted.get_or_create_storage_trie_mut(address);
+            scanning.get_or_create_storage_trie_mut(address);
+        }
+        let proof = reth_trie_common::DecodedMultiProofV2 {
+            account_proofs: vec![ProofTrieNodeV2::empty()],
+            storage_proofs: (0..16u64)
+                .map(|account| {
+                    (
+                        alloy_primitives::keccak256(account.to_be_bytes()),
+                        vec![ProofTrieNodeV2::empty()],
+                    )
+                })
+                .collect(),
+        };
+        targeted.reveal_decoded_multiproof_v2(proof.clone()).unwrap();
+        scanning.reveal_decoded_multiproof_v2_scanning(proof).unwrap();
+        for account in 0..16u64 {
+            let address = alloy_primitives::keccak256(account.to_be_bytes());
+            let changes = B256Map::from_iter([
+                (B256::ZERO, LeafUpdate::Changed(alloy_rlp::encode(42u64))),
+                (B256::repeat_byte(1), LeafUpdate::Changed(alloy_rlp::encode(13u64))),
+            ]);
+            for trie in [&mut targeted, &mut scanning] {
+                trie.storage_trie_mut(&address)
+                    .unwrap()
+                    .update_leaves(&mut changes.clone(), |_, _| panic!("unexpected proof"))
+                    .unwrap();
+            }
+            assert_eq!(
+                targeted.storage_root(&address, epoch(1)),
+                scanning.storage_root(&address, epoch(1))
+            );
+            assert_eq!(
+                targeted.storage_trie_mut(&address).unwrap().take_updates(),
+                scanning.storage_trie_mut(&address).unwrap().take_updates()
+            );
+            assert_eq!(
+                targeted.storage_trie_mut(&address).unwrap().take_updates(),
+                scanning.storage_trie_mut(&address).unwrap().take_updates()
+            );
+        }
+        assert_eq!(targeted.storage.tries.len(), 128);
+    }
+
+    #[test]
+    #[ignore = "focused proof-batch/cache-size scaling benchmark"]
+    fn bench_targeted_revelation_scaling() {
+        for cache_size in [64u64, 4096, 65536] {
+            for batch_size in [1u64, 16, 64] {
+                let mut seed =
+                    SparseStateTrie::<ArenaParallelSparseTrie>::default().with_updates(true);
+                for account in 0..cache_size {
+                    seed.get_or_create_storage_trie_mut(alloy_primitives::keccak256(
+                        account.to_be_bytes(),
+                    ));
+                }
+                let proof = reth_trie_common::DecodedMultiProofV2 {
+                    account_proofs: vec![ProofTrieNodeV2::empty()],
+                    storage_proofs: (0..batch_size)
+                        .map(|account| {
+                            let node = ProofTrieNodeV2 {
+                                path: Nibbles::default(),
+                                node: TrieNodeV2::Leaf(LeafNode::new(
+                                    Nibbles::unpack(B256::ZERO),
+                                    alloy_rlp::encode(42u64),
+                                )),
+                                masks: None,
+                            };
+                            (alloy_primitives::keccak256(account.to_be_bytes()), vec![node])
+                        })
+                        .collect(),
+                };
+                let mut scanning = Vec::new();
+                let mut targeted = Vec::new();
+                for iteration in 0..30 {
+                    for target in [iteration % 2 == 0, iteration % 2 != 0] {
+                        let mut sparse = SparseStateTrie::<ArenaParallelSparseTrie>::default()
+                            .with_updates(true);
+                        sparse.storage.tries = seed.storage.tries.clone();
+                        let proof = proof.clone();
+                        let start = std::time::Instant::now();
+                        if target {
+                            sparse.reveal_decoded_multiproof_v2(proof).unwrap();
+                        } else {
+                            sparse.reveal_decoded_multiproof_v2_scanning(proof).unwrap();
+                        }
+                        let elapsed = start.elapsed().as_secs_f64() * 1e6;
+                        if iteration >= 5 {
+                            if target {
+                                targeted.push(elapsed);
+                            } else {
+                                scanning.push(elapsed);
+                            }
+                        }
+                        assert_eq!(sparse.storage.tries.len(), cache_size as usize);
+                    }
+                }
+                let mean = |values: &[f64]| values.iter().sum::<f64>() / values.len() as f64;
+                eprintln!("revelation_bench cache={cache_size} batch={batch_size} scan_us={:.3} targeted_us={:.3}", mean(&scanning), mean(&targeted));
+            }
+        }
     }
 
     #[test]
