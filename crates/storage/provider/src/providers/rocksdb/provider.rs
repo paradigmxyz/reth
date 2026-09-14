@@ -365,6 +365,15 @@ impl RocksDBBuilder {
         self
     }
 
+    /// Sets a custom block cache size if provided, otherwise keeps the current cache.
+    pub fn with_block_cache_size_opt(self, capacity_bytes: Option<usize>) -> Self {
+        if let Some(capacity_bytes) = capacity_bytes {
+            self.with_block_cache_size(capacity_bytes)
+        } else {
+            self
+        }
+    }
+
     /// Sets read-only mode.
     ///
     /// Opens the database as a secondary instance, which supports catching up
