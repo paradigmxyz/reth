@@ -463,7 +463,7 @@ def compute_changes(
         rng,
         per_run_values(baseline_runs, method),
         per_run_values(feature_runs, method),
-        tuple(stat_key for _, stat_key, _ in metrics),
+        tuple(stat_key for _, stat_key, _ in metrics) + ("record_median_ms",),
     )
     spread = aa_spread(baseline_runs, method)
 
@@ -480,40 +480,55 @@ def compute_changes(
         if change:
             changes[name] = change
 
-    # The closed-loop delta is paired per record, so its interval comes from a
-    # bootstrap over records rather than over runs.
-    paired = paired_record_delta(rng, baseline_runs, feature_runs, method)
-    if paired:
-        change = make_change(
-            baseline_stats.get("record_median_ms"),
-            feature_stats.get("record_median_ms"),
-            paired["ci_ms"],
-            PRACTICAL_FLOOR_PCT["record_median"],
-            True,
-            spread.get("record_median_ms"),
-        )
-        if change:
+    # The point estimate is the per-run record median averaged over runs, so its
+    # interval comes from the same whole-run bootstrap as the other metrics; the
+    # per-record pairing is kept as supplementary detail only.
+    change = make_change(
+        baseline_stats.get("record_median_ms"),
+        feature_stats.get("record_median_ms"),
+        ci.get("record_median_ms", 0.0),
+        PRACTICAL_FLOOR_PCT["record_median"],
+        True,
+        spread.get("record_median_ms"),
+    )
+    if change:
+        paired = paired_record_delta(rng, baseline_runs, feature_runs, method)
+        if paired:
             change["records"] = paired["records"]
             change["paired_delta_ms"] = round(paired["delta_ms"], 6)
-            changes["record_median"] = change
+        changes["record_median"] = change
     return changes
 
 
-def compare_responses(reference: dict[int, dict], other: dict[int, dict]) -> dict:
-    """Compare one run's digests against the reference run, per method."""
+def parity_entry() -> dict:
+    return {
+        "matched": 0,
+        "content_mismatch": 0,
+        "kind_mismatch": 0,
+        "missing": 0,
+        "nondeterministic": 0,
+        "excluded": 0,
+        "divergent_records": [],
+    }
+
+
+def compare_responses(
+    reference: dict[int, dict],
+    other: dict[int, dict],
+    exclude: frozenset[int] = frozenset(),
+) -> dict:
+    """Compare one run's digests against the reference run, per method.
+
+    Records in `exclude` are unstable in the baseline itself and are only counted,
+    never judged.
+    """
     per_method: dict[str, dict] = {}
     for index, expected in reference.items():
         method = expected["method"]
-        entry = per_method.setdefault(
-            method,
-            {
-                "matched": 0,
-                "content_mismatch": 0,
-                "kind_mismatch": 0,
-                "missing": 0,
-                "divergent_records": [],
-            },
-        )
+        entry = per_method.setdefault(method, parity_entry())
+        if index in exclude:
+            entry["excluded"] += 1
+            continue
         actual = other.get(index)
         if actual is None:
             entry["missing"] += 1
@@ -530,16 +545,10 @@ def compare_responses(reference: dict[int, dict], other: dict[int, dict]) -> dic
     for index, actual in other.items():
         if index in reference:
             continue
-        entry = per_method.setdefault(
-            actual["method"],
-            {
-                "matched": 0,
-                "content_mismatch": 0,
-                "kind_mismatch": 0,
-                "missing": 0,
-                "divergent_records": [],
-            },
-        )
+        entry = per_method.setdefault(actual["method"], parity_entry())
+        if index in exclude:
+            entry["excluded"] += 1
+            continue
         entry["missing"] += 1
         if len(entry["divergent_records"]) < MAX_DIVERGENT_REPORTED:
             entry["divergent_records"].append(index)
@@ -548,30 +557,31 @@ def compare_responses(reference: dict[int, dict], other: dict[int, dict]) -> dic
 
 def merge_parity(target: dict, addition: dict) -> None:
     for method, counts in addition.items():
-        entry = target.setdefault(
-            method,
-            {
-                "matched": 0,
-                "content_mismatch": 0,
-                "kind_mismatch": 0,
-                "missing": 0,
-                "divergent_records": [],
-            },
-        )
-        for key in ("matched", "content_mismatch", "kind_mismatch", "missing"):
-            entry[key] += counts[key]
+        entry = target.setdefault(method, parity_entry())
+        for key in ("matched", "content_mismatch", "kind_mismatch", "missing", "nondeterministic", "excluded"):
+            entry[key] += counts.get(key, 0)
         for index in counts["divergent_records"]:
             if index not in entry["divergent_records"] and len(entry["divergent_records"]) < MAX_DIVERGENT_REPORTED:
                 entry["divergent_records"].append(index)
 
 
 def parity_totals(per_method: dict) -> dict:
-    totals = {"matched": 0, "content_mismatch": 0, "kind_mismatch": 0, "missing": 0}
+    totals = {
+        "matched": 0,
+        "content_mismatch": 0,
+        "kind_mismatch": 0,
+        "missing": 0,
+        "nondeterministic": 0,
+        "excluded": 0,
+    }
     for counts in per_method.values():
         for key in totals:
-            totals[key] += counts[key]
-    # A record answered in only one of the two runs counts as a divergence.
-    totals["mismatched"] = totals["content_mismatch"] + totals["kind_mismatch"] + totals["missing"]
+            totals[key] += counts.get(key, 0)
+    # A record answered in only one of the two runs, or answered differently
+    # within the feature runs alone, counts as a divergence.
+    totals["mismatched"] = (
+        totals["content_mismatch"] + totals["kind_mismatch"] + totals["missing"] + totals["nondeterministic"]
+    )
     return totals
 
 
@@ -586,36 +596,85 @@ def nondeterministic_count(runs: list[dict]) -> int:
     return total
 
 
+def nondeterministic_records(runs: list[dict]) -> tuple[set[int], bool]:
+    """Record indexes a run answered differently within itself.
+
+    The second value is true when a run only reported a count, so the records
+    cannot be identified.
+    """
+    indexes: set[int] = set()
+    unknown = False
+    for run in runs:
+        entries = report_field(run["report"], "nondeterministic")
+        if isinstance(entries, list):
+            indexes.update(int(index) for index in entries)
+            total = report_field(run["report"], "nondeterministic_total")
+            if isinstance(total, int) and total > len(entries):
+                unknown = True
+        elif isinstance(entries, int) and entries > 0:
+            unknown = True
+    return indexes, unknown
+
+
 def compute_parity(baseline_runs: list[dict], feature_runs: list[dict]) -> dict:
-    """Compare every run's digests against the first baseline run."""
+    """Compare every run's digests against the first baseline run.
+
+    Records that are unstable in the baseline itself, answered differently
+    between baseline runs or within one, are excluded from the decision and
+    reported; the feature is judged on the remaining stable records, where its
+    own nondeterminism counts as a divergence.
+    """
     reference = baseline_runs[0]["responses"]
 
-    feature_parity: dict[str, dict] = {}
-    for run in feature_runs:
-        merge_parity(feature_parity, compare_responses(reference, run["responses"]))
     baseline_parity: dict[str, dict] = {}
     for run in baseline_runs[1:]:
         merge_parity(baseline_parity, compare_responses(reference, run["responses"]))
-
-    feature_totals = parity_totals(feature_parity)
+    baseline_nondeterministic, baseline_unknown = nondeterministic_records(baseline_runs)
+    unstable = set(baseline_nondeterministic)
+    for counts in baseline_parity.values():
+        unstable.update(counts["divergent_records"])
     baseline_totals = parity_totals(baseline_parity)
+    if baseline_totals["mismatched"] > sum(len(c["divergent_records"]) for c in baseline_parity.values()):
+        # More baseline divergences than we could list: the unstable set is incomplete.
+        baseline_unknown = True
+
+    feature_nondeterministic, feature_unknown = nondeterministic_records(feature_runs)
+    excluded = frozenset(unstable)
+    feature_parity: dict[str, dict] = {}
+    for run in feature_runs:
+        merge_parity(feature_parity, compare_responses(reference, run["responses"], excluded))
+    for index in sorted(feature_nondeterministic - unstable):
+        expected = reference.get(index)
+        if expected is None:
+            continue
+        entry = feature_parity.setdefault(expected["method"], parity_entry())
+        entry["nondeterministic"] += 1
+        if index not in entry["divergent_records"] and len(entry["divergent_records"]) < MAX_DIVERGENT_REPORTED:
+            entry["divergent_records"].append(index)
+    feature_totals = parity_totals(feature_parity)
     nondeterministic = nondeterministic_count(baseline_runs + feature_runs)
 
     records = len(reference)
-    if baseline_totals["mismatched"] or nondeterministic:
+    stable_records = records - len(unstable & set(reference))
+    if baseline_unknown or feature_unknown or (unstable and stable_records == 0):
         status = "inconclusive"
     elif feature_totals["mismatched"]:
         status = "mismatch"
     else:
         status = "matched"
 
+    excluded_list = sorted(unstable)
     return {
         "status": status,
         "records": records,
         "feature": {"totals": feature_totals, "methods": feature_parity},
         "baseline": {"totals": baseline_totals, "methods": baseline_parity},
         "nondeterministic": nondeterministic,
-        "line": parity_line(status, records, feature_totals, baseline_totals, nondeterministic, feature_parity),
+        "excluded": excluded_list[:MAX_DIVERGENT_REPORTED],
+        "excluded_count": len(excluded_list),
+        "line": parity_line(
+            status, records, feature_totals, baseline_totals, nondeterministic, feature_parity, excluded_list
+        ),
     }
 
 
@@ -626,28 +685,38 @@ def parity_line(
     baseline_totals: dict,
     nondeterministic: int,
     feature_parity: dict,
+    excluded: list[int] | None = None,
 ) -> str:
+    excluded = excluded or []
+    excluded_note = ""
+    if excluded:
+        shown = ", ".join(str(index) for index in excluded[:MAX_DIVERGENT_REPORTED])
+        excluded_note = f"; {len(excluded)} unstable in the baseline, excluded (records {shown})"
     checked = feature_totals["matched"] + feature_totals["mismatched"]
     if status == "matched":
         return (
             f"✅ matched {feature_totals['matched']}/{checked} responses "
-            f"over {records} records"
+            f"over {records} records{excluded_note}"
         )
 
     details = []
     for method, counts in sorted(feature_parity.items()):
-        mismatched = counts["content_mismatch"] + counts["kind_mismatch"] + counts["missing"]
+        mismatched = (
+            counts["content_mismatch"] + counts["kind_mismatch"] + counts["missing"] + counts.get("nondeterministic", 0)
+        )
         if not mismatched:
             continue
         indexes = ", ".join(str(index) for index in counts["divergent_records"])
         details.append(f"`{method}`: {mismatched} (records {indexes})")
 
     if status == "mismatch":
-        return "❌ {} content, {} kind mismatches, {} answered in one arm only — {}".format(
+        return "❌ {} content, {} kind mismatches, {} answered in one arm only, {} nondeterministic in the feature only — {}{}".format(
             feature_totals["content_mismatch"],
             feature_totals["kind_mismatch"],
             feature_totals["missing"],
+            feature_totals.get("nondeterministic", 0),
             "; ".join(details) if details else "no per-method detail",
+            excluded_note,
         )
 
     reasons = []
@@ -655,6 +724,8 @@ def parity_line(
         reasons.append(f"{baseline_totals['mismatched']} baseline-vs-baseline mismatches")
     if nondeterministic:
         reasons.append(f"{nondeterministic} records answered differently within a run")
+    if not reasons:
+        reasons.append("no stable records to judge")
     suffix = f"; feature mismatches: {feature_totals['mismatched']}" if feature_totals["mismatched"] else ""
     return "⚠️ inconclusive — " + ", ".join(reasons) + suffix
 
@@ -668,6 +739,7 @@ def parity_change(parity: dict) -> dict:
         "floor_pct": 0.0,
         "sig": "bad" if parity["status"] == "mismatch" else "neutral",
         "mismatched": totals["mismatched"],
+        "excluded": parity.get("excluded_count", 0),
     }
     if parity["status"] == "inconclusive":
         change["informational"] = True

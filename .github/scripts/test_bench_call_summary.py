@@ -41,12 +41,17 @@ def write_run(
     head_hash: str = HEAD_HASH,
     usage_usec: int = 2_000_000,
     nondeterministic: list[int] | None = None,
+    record_latency_us: dict[int, int] | None = None,
 ) -> Path:
     """Write one synthetic `bench call` run directory."""
     directory.mkdir(parents=True, exist_ok=True)
     digests = digests or {}
     kinds = kinds or {}
+    record_latency_us = record_latency_us or {}
     records = list(enumerate(methods, start=1))
+
+    def latency(index: int) -> int:
+        return record_latency_us.get(index, latency_us + index)
 
     with (directory / "responses.ndjson").open("w") as f:
         for index, method in records:
@@ -68,7 +73,7 @@ def write_run(
         writer.writerow(["record_index", "method", "pass", "latency_us", "status"])
         for index, method in records:
             for pass_index in range(1, PASSES + 1):
-                writer.writerow([index, method, pass_index, latency_us + index, "ok"])
+                writer.writerow([index, method, pass_index, latency(index), "ok"])
 
     with (directory / "requests.csv").open("w", newline="") as f:
         writer = csv.writer(f)
@@ -78,7 +83,7 @@ def write_run(
             for index, method in records:
                 offset += 10
                 status = "ok" if not (repeat == 3 and index == 1) else "rpc_error"
-                writer.writerow([offset, index, method, latency_us + index, status])
+                writer.writerow([offset, index, method, latency(index), status])
 
     report = {
         "chain_id": 1,
@@ -219,7 +224,9 @@ class CallSummaryTest(unittest.TestCase):
         self.assertEqual(totals["kind_mismatch"], 1)
         self.assertEqual(summary["parity"]["status"], "mismatch")
 
-    def test_baseline_mismatch_is_inconclusive(self):
+    def test_unstable_record_is_excluded_from_parity(self):
+        # Record 5 differs between the baseline runs, so its feature mismatch is
+        # not judged; the other records still match.
         self.write_arms(
             ["eth_call"] * 8,
             feature_digests={5: "0x" + "ee" * 32},
@@ -227,10 +234,94 @@ class CallSummaryTest(unittest.TestCase):
         )
         summary, comment = self.run_summary()
 
-        self.assertEqual(summary["parity"]["status"], "inconclusive")
+        self.assertEqual(summary["parity"]["status"], "matched")
+        self.assertEqual(summary["parity"]["excluded"], [5])
+        self.assertEqual(summary["parity"]["feature"]["totals"]["excluded"], 2)
         self.assertEqual(summary["changes"]["parity"]["sig"], "neutral")
+        self.assertNotIn("informational", summary["changes"]["parity"])
+        self.assertIn("unstable in the baseline, excluded (records 5)", comment)
+
+    def test_stable_record_regression_survives_an_unstable_record(self):
+        # Record 2 is noisy in the baseline; record 1 agrees across baselines and
+        # changes in the feature, which must still fail parity.
+        self.write_arms(
+            ["eth_call"] * 8,
+            feature_digests={1: "0x" + "ff" * 32},
+            baseline_2_digests={2: "0x" + "dd" * 32},
+        )
+        summary, comment = self.run_summary()
+
+        self.assertEqual(summary["parity"]["status"], "mismatch")
+        self.assertEqual(summary["changes"]["parity"]["sig"], "bad")
+        self.assertEqual(summary["parity"]["excluded"], [2])
+        per_method = summary["parity"]["feature"]["methods"]["eth_call"]
+        self.assertEqual(per_method["divergent_records"], [1])
+        self.assertEqual(per_method["content_mismatch"], 2)
+        self.assertIn("records 1", comment)
+
+    def test_feature_only_nondeterminism_on_a_stable_record_is_a_mismatch(self):
+        self.write_arms(["eth_call"] * 8)
+        write_run(self.work / "feature-1", ["eth_call"] * 8, 1_005, nondeterministic=[4])
+        summary, comment = self.run_summary()
+
+        self.assertEqual(summary["parity"]["status"], "mismatch")
+        self.assertEqual(summary["changes"]["parity"]["sig"], "bad")
+        totals = summary["parity"]["feature"]["totals"]
+        self.assertEqual(totals["nondeterministic"], 1)
+        self.assertEqual(totals["content_mismatch"], 0)
+        self.assertIn(4, summary["parity"]["feature"]["methods"]["eth_call"]["divergent_records"])
+        self.assertIn("nondeterministic in the feature only", comment)
+
+    def test_baseline_nondeterminism_only_excludes_that_record(self):
+        self.write_arms(["eth_call"] * 8, feature_digests={4: "0x" + "ee" * 32})
+        write_run(self.work / "baseline-1", ["eth_call"] * 8, 1_000, nondeterministic=[4])
+        summary, _ = self.run_summary()
+
+        self.assertEqual(summary["parity"]["status"], "matched")
+        self.assertEqual(summary["parity"]["excluded"], [4])
+
+    def test_all_records_unstable_is_inconclusive(self):
+        self.write_arms(
+            ["eth_call"] * 2,
+            baseline_2_digests={1: "0x" + "aa" * 32, 2: "0x" + "bb" * 32},
+        )
+        summary, comment = self.run_summary()
+
+        self.assertEqual(summary["parity"]["status"], "inconclusive")
         self.assertTrue(summary["changes"]["parity"]["informational"])
         self.assertIn("inconclusive", comment)
+
+    def test_record_median_interval_follows_run_to_run_noise(self):
+        # Baseline runs at 10 and 20 ms, feature runs both at 20 ms: the point
+        # estimate says +33% but the runs disagree by 100%, so it is not a verdict.
+        methods = ["eth_call"] * 8
+        write_run(self.work / "baseline-1", methods, 10_000)
+        write_run(self.work / "baseline-2", methods, 20_000)
+        write_run(self.work / "feature-1", methods, 20_000)
+        write_run(self.work / "feature-2", methods, 20_000)
+        summary, _ = self.run_summary()
+
+        change = summary["changes"]["record_median"]
+        self.assertEqual(change["sig"], "neutral")
+        self.assertGreater(change["ci_pct"], 10.0)
+        self.assertAlmostEqual(change["aa_pct"], 100.0, delta=1.0)
+
+    def test_record_median_regression_is_not_hidden_by_record_spread(self):
+        # Every run repeats the same three records; the feature doubles each of
+        # them, which is a 100% slowdown no matter how spread the records are.
+        methods = ["eth_call"] * 3
+        baseline = {1: 1_000, 2: 2_000, 3: 100_000}
+        feature = {1: 2_000, 2: 4_000, 3: 200_000}
+        write_run(self.work / "baseline-1", methods, 1_000, record_latency_us=baseline)
+        write_run(self.work / "baseline-2", methods, 1_000, record_latency_us=baseline)
+        write_run(self.work / "feature-1", methods, 1_000, record_latency_us=feature)
+        write_run(self.work / "feature-2", methods, 1_000, record_latency_us=feature)
+        summary, _ = self.run_summary()
+
+        change = summary["changes"]["record_median"]
+        self.assertEqual(change["sig"], "bad")
+        self.assertAlmostEqual(change["pct"], 100.0, delta=1.0)
+        self.assertLess(change["ci_pct"], 1.0)
 
     def test_mixed_method_corpus_reports_per_method(self):
         methods = ["eth_call", "eth_call", "debug_traceCall", "debug_traceCall"]
