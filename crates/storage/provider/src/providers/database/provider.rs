@@ -204,7 +204,7 @@ pub struct DatabaseProvider<TX, N: NodeTypes> {
     /// `RocksDB` provider
     rocksdb_provider: RocksDBProvider,
     /// `RocksDB` snapshot shared by all history lookups made through this provider.
-    rocksdb_history_snapshot: OnceLock<OwnedRocksReadSnapshot>,
+    rocksdb_history_snapshot: OnceLock<Option<OwnedRocksReadSnapshot>>,
     /// Manager for state trie overlays and cached changesets.
     overlay_manager: OverlayManager<N::Primitives>,
     /// Task runtime for spawning parallel I/O work.
@@ -1652,11 +1652,16 @@ impl<TX: DbTx + 'static, N: NodeTypes> DatabaseProvider<TX, N> {
     ///
     /// A reading provider serves a single request, so one snapshot is created for all of its
     /// history lookups instead of one per lookup. The snapshot also caches the raw iterator of
-    /// each history column family, which is what makes repeated lookups cheap.
+    /// each history column family, which is what makes repeated lookups cheap. The storage
+    /// settings are read once here as well, so a lookup does not take the settings lock.
     fn history_rocksdb_snapshot(&self) -> Option<&OwnedRocksReadSnapshot> {
-        self.cached_storage_settings().storage_v2.then(|| {
-            self.rocksdb_history_snapshot.get_or_init(|| self.rocksdb_provider.owned_snapshot())
-        })
+        self.rocksdb_history_snapshot
+            .get_or_init(|| {
+                self.cached_storage_settings()
+                    .storage_v2
+                    .then(|| self.rocksdb_provider.owned_snapshot())
+            })
+            .as_ref()
     }
 }
 
