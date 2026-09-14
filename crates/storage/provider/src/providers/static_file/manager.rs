@@ -1031,12 +1031,12 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
                     // Validate while holding the entry's shard lock so clearing the cache cannot
                     // slip between validation and insertion. If invalidated, reload once under
                     // this lock rather than retrying unboundedly during frequent pruning.
-                    let loaded = if self.cache_generation.load(Ordering::Acquire) != generation {
+                    let loaded = if self.cache_generation.load(Ordering::Acquire) == generation {
+                        loaded
+                    } else {
                         trace!(target: "providers::static_file", ?segment, ?fixed_block_range, generation, "Reloading jar after cache invalidation");
                         drop(loaded);
                         LoadedJar::new(NippyJar::load(&path).map_err(ProviderError::other)?)?
-                    } else {
-                        loaded
                     };
                     #[cfg(test)]
                     self.after_cache_validation.fire(segment);
