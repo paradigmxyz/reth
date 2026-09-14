@@ -290,7 +290,6 @@ where
         let start = Instant::now();
 
         let Self {
-            executor,
             execution_cache,
             ctx: PrewarmContext { env, metrics, cache_state_metrics, saved_cache, .. },
             ..
@@ -327,7 +326,7 @@ where
                     let previous = cached.replace(new_cache);
                     if reused {
                         // The published handle keeps this allocation alive, so this drop is cheap.
-                        // Deferring it would keep the reused cache unavailable until cleanup runs.
+                        // Retaining it past unlock would briefly make the reused cache unavailable.
                         drop(previous);
                     } else {
                         retired_previous = previous;
@@ -341,10 +340,9 @@ where
                 }
             });
 
-            // Retired allocations can be large; never destroy them while holding the cache mutex.
-            if retired_previous.is_some() || retired_candidate.is_some() {
-                executor.spawn_drop((retired_previous, retired_candidate));
-            }
+            // Destroy retired allocations after unlocking, on this worker, so cleanup neither
+            // blocks cache access nor queues large allocations on the shared drop worker.
+            drop((retired_previous, retired_candidate));
 
             let elapsed = start.elapsed();
             debug!(target: "engine::caching", parent_hash=?hash, elapsed=?elapsed, "Updated execution cache");
@@ -937,9 +935,56 @@ mod tests {
         Distinct,
     }
 
+    // EIP-7702 bytecode preserves its owned buffer, letting us observe actual cache destruction.
+    struct CacheDropProbe {
+        started: Sender<std::thread::ThreadId>,
+        inspected: Receiver<()>,
+        result: Sender<bool>,
+    }
+
+    impl AsRef<[u8]> for CacheDropProbe {
+        fn as_ref(&self) -> &[u8] {
+            &[0xef, 0x01, 0x00, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+        }
+    }
+
+    impl Drop for CacheDropProbe {
+        fn drop(&mut self) {
+            let _ = self.started.send(std::thread::current().id());
+            // A timeout turns destruction under the mutex into a failure instead of a deadlock.
+            let unlocked = self.inspected.recv_timeout(std::time::Duration::from_secs(5)).is_ok();
+            let _ = self.result.send(unlocked);
+        }
+    }
+
+    fn observe_cache_drop(
+        saved: &SavedCache,
+        execution_cache: &PayloadExecutionCache,
+    ) -> (Receiver<bool>, std::thread::JoinHandle<std::thread::ThreadId>) {
+        let (started_tx, started_rx) = mpsc::channel();
+        let (inspected_tx, inspected_rx) = mpsc::channel();
+        let (result_tx, result_rx) = mpsc::channel();
+        let cache = execution_cache.clone();
+        let reader = std::thread::spawn(move || {
+            let drop_thread = started_rx.recv().unwrap();
+            cache.update_with_guard(|_| ());
+            let _ = inspected_tx.send(());
+            drop_thread
+        });
+        let bytes = alloy_primitives::bytes::Bytes::from_owner(CacheDropProbe {
+            started: started_tx,
+            inspected: inspected_rx,
+            result: result_tx,
+        });
+        let code = reth_revm::bytecode::Bytecode::new_eip7702_raw(bytes.into()).unwrap();
+        saved
+            .cache()
+            .insert_code(B256::repeat_byte(3), Some(reth_primitives_traits::Bytecode(code)));
+        (result_rx, reader)
+    }
+
     fn assert_save_cache_retires_allocations(slot: CacheSlot, valid: bool, insert_error: bool) {
         use reth_revm::db::{AccountStatus, BundleAccount, BundleState};
-        use std::time::Duration;
 
         let runtime = Runtime::test();
         let execution_cache = PayloadExecutionCache::default();
@@ -955,6 +1000,18 @@ mod tests {
                 CacheSlot::Distinct => distinct_previous.clone(),
             };
         });
+        let should_publish = valid && !insert_error;
+        let mut drops = Vec::new();
+        if let Some(previous) = &distinct_previous {
+            drops.push(observe_cache_drop(previous, &execution_cache));
+        }
+        if !should_publish {
+            drops.push(observe_cache_drop(&candidate, &execution_cache));
+        }
+        // Leave only the handles owned by the slot and saving task so retirement destroys data.
+        drop(distinct_previous);
+
+        // Cleanup must finish even when the shared background drop worker is occupied.
         let (release_tx, release_rx) = mpsc::channel::<()>();
         runtime.spawn_blocking_named("drop", move || {
             let _ = release_rx.recv();
@@ -968,67 +1025,49 @@ mod tests {
                 BundleAccount::new(None, None, Default::default(), AccountStatus::Changed),
             );
         }
-        save_test_cache(&runtime, &execution_cache, candidate.clone(), state, valid, Gauge::noop());
+        save_test_cache(&runtime, &execution_cache, candidate, state, valid, Gauge::noop());
 
-        let should_publish = valid && !insert_error;
-        if let Some(previous) = &distinct_previous {
-            assert_eq!(
-                previous.usage_count(),
-                2,
-                "old cache must be retained for background destruction"
+        for (result, reader) in drops {
+            assert!(
+                result.try_recv().expect("retired cache must be destroyed before save returns"),
+                "cache mutex must be unlocked during destruction"
             );
+            assert_eq!(reader.join().unwrap(), std::thread::current().id());
         }
-        // On shared-cache failure, both the old slot and the rejected candidate are queued.
-        // Otherwise only the published or retired candidate remains alongside our test handle.
-        let expected_users =
-            if matches!(slot, CacheSlot::Shared) && !should_publish { 3 } else { 2 };
-        assert_eq!(candidate.usage_count(), expected_users, "slot: {slot:?}");
         execution_cache.update_with_guard(|slot| {
             if should_publish {
                 let published = slot.as_ref().expect("valid cache published");
-                assert!(published.shares_cache_with(&candidate));
                 assert_eq!(published.executed_block_hash(), B256::repeat_byte(2));
             } else {
                 assert!(slot.is_none(), "polluted cache must not be published");
             }
         });
-
-        let (drained_tx, drained_rx) = mpsc::channel();
-        runtime.spawn_blocking_named("drop", move || {
-            let _ = drained_tx.send(());
-        });
-        drop(release_tx);
-        drained_rx.recv_timeout(Duration::from_secs(10)).unwrap();
-        if let Some(previous) = &distinct_previous {
-            assert_eq!(previous.usage_count(), 1);
-        }
-        assert_eq!(candidate.usage_count(), if should_publish { 2 } else { 1 });
-        drop(candidate);
         assert_eq!(execution_cache.get_cache_for(B256::repeat_byte(2)).is_some(), should_publish);
+        drop(release_tx);
     }
 
     #[test]
-    fn save_cache_defers_replaced_allocation() {
+    fn save_cache_drops_replaced_allocation_after_unlock() {
         assert_save_cache_retires_allocations(CacheSlot::Distinct, true, false);
     }
 
     #[test]
-    fn save_cache_defers_invalid_allocations() {
+    fn save_cache_drops_invalid_allocations_after_unlock() {
         assert_save_cache_retires_allocations(CacheSlot::Distinct, false, false);
     }
 
     #[test]
-    fn save_cache_defers_allocations_on_insert_error() {
+    fn save_cache_drops_allocations_after_unlock_on_insert_error() {
         assert_save_cache_retires_allocations(CacheSlot::Distinct, true, true);
     }
 
     #[test]
-    fn save_cache_defers_shared_allocation_on_invalid_block() {
+    fn save_cache_drops_shared_allocation_after_unlock_on_invalid_block() {
         assert_save_cache_retires_allocations(CacheSlot::Shared, false, false);
     }
 
     #[test]
-    fn save_cache_defers_shared_allocation_on_insert_error() {
+    fn save_cache_drops_shared_allocation_after_unlock_on_insert_error() {
         assert_save_cache_retires_allocations(CacheSlot::Shared, true, true);
     }
 
