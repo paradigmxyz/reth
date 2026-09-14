@@ -1394,6 +1394,11 @@ impl SavedCache {
         &self.caches
     }
 
+    /// Returns whether both handles refer to the same cache allocation, regardless of block hash.
+    pub fn shares_cache_with(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.caches.0, &other.caches.0)
+    }
+
     /// Updates the cache metrics (size/capacity/collisions) from the stats handlers.
     pub fn update_metrics(&self, metrics: Option<&CachedStateCacheMetrics>) {
         if let Some(metrics) = metrics {

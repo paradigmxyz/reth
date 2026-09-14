@@ -290,6 +290,7 @@ where
         let start = Instant::now();
 
         let Self {
+            executor,
             execution_cache,
             ctx: PrewarmContext { env, metrics, cache_state_metrics, saved_cache, .. },
             ..
@@ -298,17 +299,19 @@ where
 
         if let Some(saved_cache) = saved_cache {
             debug!(target: "engine::caching", parent_hash=?hash, "Updating execution cache");
+            let mut retired = (None, None);
             execution_cache.update_with_guard(|cached| {
-                // consumes the `SavedCache` held by the prewarming task, which releases its cache
-                // handle
                 let caches = saved_cache.cache().clone();
+                // Release the task's handle before unlocking so the published cache is immediately
+                // available to the next payload, even while we record the save duration below.
+                drop(saved_cache);
                 let new_cache = SavedCache::new(hash, caches);
 
                 // Insert state into cache while holding the lock
                 // Access the BundleState through the shared ExecutionOutcome
                 if new_cache.cache().insert_state(&execution_outcome.state).is_err() {
                     // Clear the cache on error to prevent having a polluted cache
-                    *cached = None;
+                    retired = (cached.take(), Some(new_cache));
                     debug!(target: "engine::caching", "cleared execution cache on update error");
                     return;
                 }
@@ -316,16 +319,29 @@ where
                 new_cache.update_metrics(cache_state_metrics.as_ref());
 
                 if valid_block_rx.recv().is_ok() {
-                    // Replace the shared cache with the new one; the previous cache (if any) is
-                    // dropped.
-                    *cached = Some(new_cache);
+                    let reused = cached
+                        .as_ref()
+                        .is_some_and(|previous| previous.shares_cache_with(&new_cache));
+                    let previous = cached.replace(new_cache);
+                    if reused {
+                        // The published handle keeps this allocation alive, so this drop is cheap.
+                        // Deferring it would keep the reused cache unavailable until cleanup runs.
+                        drop(previous);
+                    } else {
+                        retired.0 = previous;
+                    }
                 } else {
                     // Block was invalid; caches were already mutated by insert_state above,
                     // so we must clear to prevent using polluted state
-                    *cached = None;
+                    retired = (cached.take(), Some(new_cache));
                     debug!(target: "engine::caching", "cleared execution cache on invalid block");
                 }
             });
+
+            // Retired allocations can be large; never destroy them while holding the cache mutex.
+            if retired.0.is_some() || retired.1.is_some() {
+                executor.spawn_drop(retired);
+            }
 
             let elapsed = start.elapsed();
             debug!(target: "engine::caching", parent_hash=?hash, elapsed=?elapsed, "Updated execution cache");
@@ -820,6 +836,156 @@ mod tests {
         );
 
         assert!(terminate_execution.load(Ordering::Relaxed));
+    }
+
+    fn save_test_cache(
+        runtime: &Runtime,
+        execution_cache: &PayloadExecutionCache,
+        saved_cache: SavedCache,
+        state: reth_revm::db::BundleState,
+        valid: bool,
+        saving_duration: Gauge,
+    ) {
+        let ctx = PrewarmContext {
+            env: ExecutionEnv { hash: B256::repeat_byte(2), ..ExecutionEnv::test_default() },
+            evm_config: EthEvmConfig::new(Arc::new(ChainSpec::default())),
+            saved_cache: Some(saved_cache),
+            provider: OverlayStateProviderFactory::new(
+                MockEthProvider::default(),
+                OverlayManager::default().overlay_builder(B256::ZERO),
+            ),
+            bal_prewarm_pool: None,
+            metrics: PrewarmMetrics {
+                cache_saving_duration: saving_duration,
+                ..Default::default()
+            },
+            cache_metrics: None,
+            cache_state_metrics: None,
+            terminate_execution: Arc::new(AtomicBool::new(false)),
+            executed_tx_index: Arc::new(AtomicUsize::new(0)),
+            precompile_cache_disabled: false,
+            precompile_cache_map: PrecompileCacheMap::default(),
+            disable_bal_parallel_state_root: false,
+            disable_bal_batch_io: false,
+        };
+        let (task, _) = PrewarmCacheTask::new(runtime.clone(), execution_cache.clone(), ctx);
+        let (valid_tx, valid_rx) = mpsc::channel();
+        if valid {
+            valid_tx.send(()).unwrap();
+        }
+        drop(valid_tx);
+        task.save_cache(
+            Arc::new(BlockExecutionOutput { state, result: Default::default() }),
+            valid_rx,
+        );
+    }
+
+    // Observe the handoff before save_cache returns and drops its local variables. A check after
+    // return would miss the window where the saving task still owns an extra reference.
+    struct CacheSaveObserver {
+        cache: PayloadExecutionCache,
+        observed: Arc<AtomicBool>,
+    }
+
+    impl metrics::GaugeFn for CacheSaveObserver {
+        fn increment(&self, _: f64) {}
+        fn decrement(&self, _: f64) {}
+        fn set(&self, _: f64) {
+            assert!(
+                self.cache.get_cache_for(B256::repeat_byte(2)).is_some(),
+                "published cache must be available before the saving task returns"
+            );
+            self.observed.store(true, Ordering::Relaxed);
+        }
+    }
+
+    #[test]
+    fn save_cache_releases_warm_cache_before_duration_metric() {
+        let runtime = Runtime::test();
+        let execution_cache = PayloadExecutionCache::default();
+        let saved = SavedCache::new(B256::repeat_byte(1), crate::tree::ExecutionCache::new(1_000));
+        execution_cache.update_with_guard(|slot| *slot = Some(saved.clone()));
+        // Keep the drop worker occupied: deferring a redundant handle must not delay reuse.
+        let (release_tx, release_rx) = mpsc::channel::<()>();
+        runtime.spawn_blocking_named("drop", move || {
+            let _ = release_rx.recv();
+        });
+        let observed = Arc::new(AtomicBool::new(false));
+        let observer = Arc::new(CacheSaveObserver {
+            cache: execution_cache.clone(),
+            observed: observed.clone(),
+        });
+        save_test_cache(
+            &runtime,
+            &execution_cache,
+            saved,
+            Default::default(),
+            true,
+            Gauge::from_arc(observer),
+        );
+        assert!(observed.load(Ordering::Relaxed), "save duration was not recorded");
+        drop(release_tx);
+    }
+
+    fn assert_save_cache_retires_allocations(valid: bool, insert_error: bool) {
+        use reth_revm::db::{AccountStatus, BundleAccount, BundleState};
+        use std::time::Duration;
+
+        let runtime = Runtime::test();
+        let execution_cache = PayloadExecutionCache::default();
+        let old = SavedCache::new(B256::repeat_byte(1), crate::tree::ExecutionCache::new(1_000));
+        let fresh = SavedCache::new(B256::repeat_byte(1), crate::tree::ExecutionCache::new(1_000));
+        execution_cache.update_with_guard(|slot| *slot = Some(old.clone()));
+        let (release_tx, release_rx) = mpsc::channel::<()>();
+        runtime.spawn_blocking_named("drop", move || {
+            let _ = release_rx.recv();
+        });
+
+        let mut state = BundleState::default();
+        if insert_error {
+            // Modified accounts without current info are rejected by insert_state.
+            state.state.insert(
+                address!("0000000000000000000000000000000000000001"),
+                BundleAccount::new(None, None, Default::default(), AccountStatus::Changed),
+            );
+        }
+        save_test_cache(&runtime, &execution_cache, fresh.clone(), state, valid, Gauge::noop());
+
+        assert_eq!(old.usage_count(), 2, "old cache must be retained for background destruction");
+        assert_eq!(fresh.usage_count(), 2);
+        execution_cache.update_with_guard(|slot| {
+            if valid && !insert_error {
+                let published = slot.as_ref().expect("valid cache published");
+                assert!(published.shares_cache_with(&fresh));
+                assert_eq!(published.executed_block_hash(), B256::repeat_byte(2));
+            } else {
+                assert!(slot.is_none(), "polluted cache must not be published");
+            }
+        });
+
+        let (drained_tx, drained_rx) = mpsc::channel();
+        runtime.spawn_blocking_named("drop", move || {
+            let _ = drained_tx.send(());
+        });
+        drop(release_tx);
+        drained_rx.recv_timeout(Duration::from_secs(10)).unwrap();
+        assert_eq!(old.usage_count(), 1);
+        assert_eq!(fresh.usage_count(), if valid && !insert_error { 2 } else { 1 });
+    }
+
+    #[test]
+    fn save_cache_defers_replaced_allocation() {
+        assert_save_cache_retires_allocations(true, false);
+    }
+
+    #[test]
+    fn save_cache_defers_invalid_allocations() {
+        assert_save_cache_retires_allocations(false, false);
+    }
+
+    #[test]
+    fn save_cache_defers_allocations_on_insert_error() {
+        assert_save_cache_retires_allocations(true, true);
     }
 
     #[test]
