@@ -24,7 +24,12 @@ use reth_rpc_eth_api::{
 };
 use reth_rpc_eth_types::{utils::binary_search, EthApiError};
 use reth_rpc_server_types::result::internal_rpc_err;
-use revm::context_interface::result::ExecutionResult;
+use revm::{
+    context::JournalTr,
+    context_interface::{result::ExecutionResult, ContextTr},
+    interpreter::{CallInputs, CallOutcome, CallScheme, CreateInputs, CreateOutcome, CreateScheme},
+    Inspector,
+};
 use revm_inspectors::tracing::{
     types::{CallKind, CallTraceNode},
     TracingInspectorConfig,
@@ -70,19 +75,19 @@ where
             base_block_reward(&chain_spec, block.header.number())
         };
         let issuance = if let Some(reward) = reward {
-            let ommers = if block.uncles.is_empty() {
-                Vec::new()
+            let recovered = if block.uncles.is_empty() {
+                None
             } else {
-                self.eth
-                    .recovered_block(block.header.hash().into())
-                    .await
-                    .map_err(Into::<ErrorObjectOwned>::into)?
-                    .ok_or(EthApiError::HeaderNotFound(block.header.hash().into()))?
-                    .body()
-                    .ommers()
-                    .unwrap_or_default()
-                    .to_vec()
+                Some(
+                    self.eth
+                        .recovered_block(block.header.hash().into())
+                        .await
+                        .map_err(Into::<ErrorObjectOwned>::into)?
+                        .ok_or(EthApiError::HeaderNotFound(block.header.hash().into()))?,
+                )
             };
+            let ommers =
+                recovered.as_ref().and_then(|block| block.body().ommers()).unwrap_or_default();
             calculate_issuance(
                 reward,
                 block.header.number(),
@@ -131,12 +136,10 @@ where
     /// Handler for `ots_getInternalOperations`
     async fn get_internal_operations(&self, tx_hash: TxHash) -> RpcResult<Vec<InternalOperation>> {
         self.eth
-            .spawn_trace_transaction_in_block(
+            .spawn_trace_transaction_in_block_with_inspector(
                 tx_hash,
-                TracingInspectorConfig::default_parity(),
-                |_tx_info, inspector, _, _| {
-                    Ok(internal_operations(otterscan_traces(inspector.into_traces().into_nodes())))
-                },
+                InternalOperationsInspector::default(),
+                |_tx_info, inspector, _, _| Ok(inspector.operations),
             )
             .await
             .map_err(Into::into)
@@ -171,7 +174,7 @@ where
         block_number: LenientBlockNumberOrTag,
     ) -> RpcResult<BlockDetails<RpcHeader<Eth::NetworkTypes>>> {
         let block_number = block_number.into_inner();
-        let block = self.eth.block_by_number(block_number, true);
+        let block = self.eth.block_by_number(block_number, false);
         let block_id = block_number.into();
         let receipts = self.eth.block_receipts(block_id);
         let (block, receipts) = futures::try_join!(block, receipts)?;
@@ -187,7 +190,7 @@ where
         &self,
         block_hash: B256,
     ) -> RpcResult<BlockDetails<RpcHeader<Eth::NetworkTypes>>> {
-        let block = self.eth.block_by_hash(block_hash, true);
+        let block = self.eth.block_by_hash(block_hash, false);
         let block_id = block_hash.into();
         let receipts = self.eth.block_receipts(block_id);
         let (block, receipts) = futures::try_join!(block, receipts)?;
@@ -351,6 +354,58 @@ where
     }
 }
 
+/// Records attempted internal operations without retaining call inputs or outputs.
+#[derive(Debug, Default)]
+struct InternalOperationsInspector {
+    operations: Vec<InternalOperation>,
+}
+
+impl<CTX: ContextTr> Inspector<CTX> for InternalOperationsInspector {
+    fn call(&mut self, context: &mut CTX, inputs: &mut CallInputs) -> Option<CallOutcome> {
+        if context.journal().depth() > 0 &&
+            inputs.scheme == CallScheme::Call &&
+            let Some(value) = inputs.transfer_value() &&
+            !value.is_zero()
+        {
+            self.operations.push(InternalOperation {
+                from: inputs.transfer_from(),
+                to: inputs.transfer_to(),
+                value,
+                r#type: OperationType::OpTransfer,
+            });
+        }
+        None
+    }
+
+    fn create(&mut self, context: &mut CTX, inputs: &mut CreateInputs) -> Option<CreateOutcome> {
+        if context.journal().depth() == 0 {
+            return None
+        }
+        let r#type = match inputs.scheme() {
+            CreateScheme::Create => OperationType::OpCreate,
+            CreateScheme::Create2 { .. } => OperationType::OpCreate2,
+            CreateScheme::Custom { .. } => return None,
+        };
+        let nonce = context.journal_mut().load_account(inputs.caller()).ok()?.info.nonce;
+        self.operations.push(InternalOperation {
+            from: inputs.caller(),
+            to: inputs.created_address(nonce),
+            value: inputs.value(),
+            r#type,
+        });
+        None
+    }
+
+    fn selfdestruct(&mut self, contract: Address, target: Address, value: U256) {
+        self.operations.push(InternalOperation {
+            from: contract,
+            to: target,
+            value,
+            r#type: OperationType::OpSelfDestruct,
+        });
+    }
+}
+
 /// Finds a creation that was not rolled back by its own frame or an enclosing frame.
 fn find_contract_creator(
     address: Address,
@@ -403,16 +458,11 @@ const fn block_transaction_page_range(
 fn calculate_issuance(
     reward: u128,
     number: u64,
-    ommer_numbers: impl Iterator<Item = u64>,
+    ommer_numbers: impl ExactSizeIterator<Item = u64>,
 ) -> InternalIssuance {
-    let mut count = 0;
-    let uncle_reward = ommer_numbers
-        .map(|ommer| {
-            count += 1;
-            U256::from(ommer_reward(reward, number, ommer))
-        })
-        .sum::<U256>();
-    let block_reward = U256::from(block_reward(reward, count));
+    let block_reward = U256::from(block_reward(reward, ommer_numbers.len()));
+    let uncle_reward =
+        ommer_numbers.map(|ommer| U256::from(ommer_reward(reward, number, ommer))).sum::<U256>();
     InternalIssuance { block_reward, uncle_reward, issuance: block_reward + uncle_reward }
 }
 
@@ -457,26 +507,6 @@ fn otterscan_traces(nodes: Vec<CallTraceNode>) -> Vec<TraceEntry> {
     }
     entries.extend(selfdestructs.into_iter().rev());
     entries
-}
-
-fn internal_operations(traces: Vec<TraceEntry>) -> Vec<InternalOperation> {
-    traces
-        .into_iter()
-        .filter_map(|trace| {
-            if trace.depth == 0 {
-                return None
-            }
-            let value = trace.value.unwrap_or_default();
-            let r#type = match trace.r#type.as_str() {
-                "CALL" if !value.is_zero() => OperationType::OpTransfer,
-                "CREATE" => OperationType::OpCreate,
-                "CREATE2" => OperationType::OpCreate2,
-                "SELFDESTRUCT" => OperationType::OpSelfDestruct,
-                _ => return None,
-            };
-            Some(InternalOperation { from: trace.from, to: trace.to, value, r#type })
-        })
-        .collect()
 }
 
 #[cfg(test)]
@@ -759,7 +789,10 @@ mod tests {
         assert_eq!(issuance.uncle_reward, U256::from(2_250_000_000_000_000_000u128));
     }
 
-    fn execute(code: Bytes, spec: SpecId) -> (ExecutionResult, Vec<TraceEntry>) {
+    fn execute(
+        code: Bytes,
+        spec: SpecId,
+    ) -> (ExecutionResult, Vec<TraceEntry>, Vec<InternalOperation>) {
         let contract = Address::repeat_byte(0x11);
         let mut db = InMemoryDB::default();
         db.insert_account_info(
@@ -777,8 +810,9 @@ mod tests {
         let mut evm = Context::mainnet()
             .modify_cfg_chained(|cfg| cfg.spec = spec)
             .with_db(db)
-            .build_mainnet_with_inspector(TracingInspector::new(
-                TracingInspectorConfig::default_parity(),
+            .build_mainnet_with_inspector((
+                TracingInspector::new(TracingInspectorConfig::default_parity()),
+                InternalOperationsInspector::default(),
             ));
         let result = evm
             .inspect_tx(TxEnv {
@@ -789,16 +823,19 @@ mod tests {
             })
             .unwrap();
         let (_, inspector) = evm.ctx_inspector();
-        (result.result, otterscan_traces(inspector.traces().nodes().to_vec()))
+        (
+            result.result,
+            otterscan_traces(inspector.0.traces().nodes().to_vec()),
+            std::mem::take(&mut inspector.1.operations),
+        )
     }
 
     #[test]
     fn internal_operations_exclude_root_and_include_zero_value_creates() {
         // CREATE and CREATE2 with empty initcode and zero endowment.
-        let (result, traces) =
+        let (result, _, operations) =
             execute(hex!("600060006000f0506000600060006000f55000").into(), SpecId::CANCUN);
         assert!(result.is_success());
-        let operations = internal_operations(traces);
         assert_eq!(operations.len(), 2);
         assert_eq!(operations[0].r#type, OperationType::OpCreate);
         assert_eq!(operations[1].r#type, OperationType::OpCreate2);
@@ -807,14 +844,14 @@ mod tests {
             assert_eq!(operation.value, U256::ZERO);
             assert_ne!(operation.to, Address::ZERO);
         }
-        let (_, traces) = execute(hex!("00").into(), SpecId::CANCUN);
-        assert!(internal_operations(traces).is_empty());
+        let (_, _, operations) = execute(hex!("00").into(), SpecId::CANCUN);
+        assert!(operations.is_empty());
     }
 
     #[test]
     fn selfdestruct_preserves_enclosing_call_and_beneficiary() {
         for spec in [SpecId::SHANGHAI, SpecId::CANCUN] {
-            let (result, traces) = execute(hex!("6022ff").into(), spec);
+            let (result, traces, operations) = execute(hex!("6022ff").into(), spec);
             assert!(result.is_success());
             assert_eq!(traces.len(), 2);
             assert_eq!(traces[0].r#type, "CALL");
@@ -825,9 +862,11 @@ mod tests {
             assert_eq!(traces[1].from, Address::repeat_byte(0x11));
             assert_eq!(traces[1].to, Address::with_last_byte(0x22));
             assert_eq!(traces[1].value, Some(U256::from(107)));
-            let operations = internal_operations(traces);
             assert_eq!(operations.len(), 1);
             assert_eq!(operations[0].r#type, OperationType::OpSelfDestruct);
+            assert_eq!(operations[0].from, traces[1].from);
+            assert_eq!(operations[0].to, traces[1].to);
+            assert_eq!(operations[0].value, U256::from(107));
         }
     }
 
@@ -835,7 +874,7 @@ mod tests {
     fn selfdestruct_after_a_child_call_uses_enclosing_depth() {
         // Call another account, then destroy the root contract. The destruction is a sibling
         // of that call, not its child.
-        let (result, traces) =
+        let (result, traces, _) =
             execute(hex!("60006000600060006000603361fffff1506022ff").into(), SpecId::CANCUN);
         assert!(result.is_success());
         assert_eq!(traces.len(), 3);
@@ -880,29 +919,32 @@ mod tests {
                 ("SELFDESTRUCT", 1)
             ]
         );
-        let operations = internal_operations(traces);
         assert_eq!(
-            operations.iter().map(|op| op.from).collect::<Vec<_>>(),
+            traces
+                .iter()
+                .filter(|trace| trace.r#type == "SELFDESTRUCT")
+                .map(|trace| trace.from)
+                .collect::<Vec<_>>(),
             [Address::with_last_byte(2), Address::with_last_byte(1), Address::ZERO]
         );
     }
 
     #[test]
     fn precompile_calls_remain_in_transaction_traces() {
-        let (result, traces) =
+        let (result, traces, operations) =
             execute(hex!("60006000600060006000600461fffff15000").into(), SpecId::CANCUN);
         assert!(result.is_success());
         assert_eq!(traces.len(), 2);
         assert_eq!(traces[1].to, Address::with_last_byte(4));
+        assert!(operations.is_empty());
     }
 
     #[test]
     fn reverted_internal_transfers_are_retained() {
         // CALL value 1 to 0x22, then revert the enclosing transaction.
-        let (result, traces) =
+        let (result, _, operations) =
             execute(hex!("60006000600060006001602261fffff15060006000fd").into(), SpecId::CANCUN);
         assert!(!result.is_success());
-        let operations = internal_operations(traces);
         assert_eq!(operations.len(), 1);
         assert_eq!(operations[0].to, Address::with_last_byte(0x22));
         assert_eq!(operations[0].value, U256::from(1));
@@ -962,17 +1004,59 @@ mod tests {
 
     #[test]
     fn static_and_delegate_calls_have_no_value() {
-        // STATICCALL and DELEGATECALL to 0x22; DELEGATECALL inherits the root's value.
-        let (result, traces) = execute(
-            hex!("6000600060006000602261fffffa506000600060006000602261fffff45000").into(),
+        // STATICCALL, DELEGATECALL and CALLCODE to 0x22 do not transfer ETH.
+        let (result, traces, operations) = execute(
+            hex!("6000600060006000602261fffffa506000600060006000602261fffff45060006000600060006001602261fffff25000").into(),
             SpecId::CANCUN,
         );
         assert!(result.is_success());
-        assert_eq!(traces.len(), 3);
+        assert_eq!(traces.len(), 4);
         assert_eq!(traces[1].r#type, "STATICCALL");
         assert_eq!(traces[1].value, None);
         assert_eq!(traces[2].r#type, "DELEGATECALL");
         assert_eq!(traces[2].value, None);
-        assert!(internal_operations(traces).is_empty());
+        assert_eq!(traces[3].r#type, "CALLCODE");
+        assert_eq!(traces[3].value, Some(U256::from(1)));
+        assert!(operations.is_empty());
+    }
+
+    #[test]
+    fn internal_operations_preserve_execution_order() {
+        // Create a contract whose initcode self-destructs, transfer 1 wei, then self-destruct.
+        let (result, _, operations) = execute(
+            hex!("626022ff6000526003601d6000f05060006000600060006001603361fffff1506044ff").into(),
+            SpecId::CANCUN,
+        );
+        assert!(result.is_success());
+        assert_eq!(operations.len(), 4);
+        assert_eq!(operations[0].r#type, OperationType::OpCreate);
+        assert_eq!(operations[0].value, U256::ZERO);
+        assert_eq!(
+            operations[1],
+            InternalOperation {
+                from: operations[0].to,
+                to: Address::with_last_byte(0x22),
+                value: U256::ZERO,
+                r#type: OperationType::OpSelfDestruct,
+            }
+        );
+        assert_eq!(
+            operations[2],
+            InternalOperation {
+                from: Address::repeat_byte(0x11),
+                to: Address::with_last_byte(0x33),
+                value: U256::from(1),
+                r#type: OperationType::OpTransfer,
+            }
+        );
+        assert_eq!(
+            operations[3],
+            InternalOperation {
+                from: Address::repeat_byte(0x11),
+                to: Address::with_last_byte(0x44),
+                value: U256::from(106),
+                r#type: OperationType::OpSelfDestruct,
+            }
+        );
     }
 }
