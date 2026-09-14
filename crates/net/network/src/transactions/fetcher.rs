@@ -872,6 +872,8 @@ impl<N: NetworkPrimitives> TransactionFetcher<N> {
         remaining: Option<&B256Set>,
         timed_out: bool,
     ) {
+        // A response that delivered nothing, the common retry case, needs no lookups.
+        let remaining = remaining.filter(|remaining| remaining.len() < requested.len());
         let delivered_count = remaining.map_or(0, |remaining| requested.len() - remaining.len());
         let was_delivered =
             |hash: &TxHash| remaining.is_some_and(|remaining| !remaining.contains(hash));
