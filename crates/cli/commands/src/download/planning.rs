@@ -205,15 +205,20 @@ pub(crate) fn collect_planned_archives(
             continue;
         };
 
-        if let Some(ComponentManifest::Chunked(chunked)) = manifest.component(*ty) &&
-            !chunked.chunk_files_are_consistent()
-        {
-            eyre::bail!(
-                "Invalid modular manifest: {} chunk_files length ({}) does not match chunk count ({})",
-                ty.key(),
-                chunked.chunk_files.len(),
-                chunked.num_chunks()
+        if let Some(ComponentManifest::Chunked(chunked)) = manifest.component(*ty) {
+            eyre::ensure!(
+                chunked.blocks_per_file > 0,
+                "Invalid modular manifest: component '{}' has blocks_per_file = 0; must be greater than zero",
+                ty.key()
             );
+            if !chunked.chunk_files_are_consistent() {
+                eyre::bail!(
+                    "Invalid modular manifest: {} chunk_files length ({}) does not match chunk count ({})",
+                    ty.key(),
+                    chunked.chunk_files.len(),
+                    chunked.num_chunks()
+                );
+            }
         }
 
         total_download_size += manifest.size_for_distance(*ty, distance);

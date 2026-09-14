@@ -595,6 +595,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> DownloadCo
             "Snapshot chain ID {} does not match selected chain ID {chain_id}",
             manifest.chain_id
         );
+        manifest.validate()?;
         manifest.base_url = Some(resolve_manifest_base_url(&manifest, &manifest_source)?);
 
         info!(target: "reth::cli",
