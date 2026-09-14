@@ -37,6 +37,7 @@
 
 mod account;
 mod attempt;
+mod bal;
 mod error;
 mod generation;
 mod pivot;
@@ -50,6 +51,7 @@ pub use account::{
     DEFAULT_RESPONSE_BYTES, MAX_HASH,
 };
 pub use attempt::{SnapAttemptStore, SnapWrite};
+pub use bal::{BalStateUpdate, DownloadedAccount};
 pub use error::SnapSyncError;
 pub use generation::{SnapGeneration, SnapPhase};
 pub use pivot::SnapPivotPolicy;
