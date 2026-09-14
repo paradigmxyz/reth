@@ -1011,7 +1011,7 @@ mod tests {
 
         let runtime = Runtime::test();
         let execution_cache = PayloadExecutionCache::default();
-        let candidate =
+        let cache_to_save =
             SavedCache::new(B256::repeat_byte(1), crate::tree::ExecutionCache::new(1_000));
         let distinct_previous = matches!(slot, CacheSlot::Distinct).then(|| {
             // The same block hash does not imply the same allocation.
@@ -1020,7 +1020,7 @@ mod tests {
         execution_cache.update_with_guard(|cached| {
             *cached = match slot {
                 CacheSlot::Empty => None,
-                CacheSlot::Shared => Some(candidate.clone()),
+                CacheSlot::Shared => Some(cache_to_save.clone()),
                 CacheSlot::Distinct => distinct_previous.clone(),
             };
         });
@@ -1030,7 +1030,7 @@ mod tests {
             drops.push(observe_cache_drop(previous, &execution_cache, expect_saved_cache));
         }
         if !expect_saved_cache {
-            drops.push(observe_cache_drop(&candidate, &execution_cache, expect_saved_cache));
+            drops.push(observe_cache_drop(&cache_to_save, &execution_cache, expect_saved_cache));
         }
         // Drop our extra handle so save_cache can free the old cache.
         drop(distinct_previous);
@@ -1049,7 +1049,7 @@ mod tests {
                 BundleAccount::new(None, None, Default::default(), AccountStatus::Changed),
             );
         }
-        save_test_cache(&runtime, &execution_cache, candidate, state, valid, Gauge::noop());
+        save_test_cache(&runtime, &execution_cache, cache_to_save, state, valid, Gauge::noop());
 
         for (result, reader) in drops {
             assert!(
