@@ -300,7 +300,9 @@ pub(crate) fn streaming_download_and_extract(
                 }
                 last_error = Some(err);
                 if attempt < MAX_DOWNLOAD_RETRIES {
-                    std::thread::sleep(Duration::from_secs(RETRY_BACKOFF_SECS));
+                    std::thread::sleep(
+                        session.retry_delay(Duration::from_secs(RETRY_BACKOFF_SECS)),
+                    );
                 }
                 continue;
             }
@@ -342,7 +344,9 @@ pub(crate) fn streaming_download_and_extract(
                 }
                 last_error = Some(error);
                 if attempt < MAX_DOWNLOAD_RETRIES {
-                    std::thread::sleep(Duration::from_secs(RETRY_BACKOFF_SECS));
+                    std::thread::sleep(
+                        session.retry_delay(Duration::from_secs(RETRY_BACKOFF_SECS)),
+                    );
                 }
             }
         }
@@ -417,13 +421,15 @@ fn blocking_download_and_extract(
     resumable: bool,
     request_limiter: Option<Arc<DownloadRequestLimiter>>,
     cancel_token: CancellationToken,
+    retry_backoff: Option<Duration>,
 ) -> Result<()> {
     let format = CompressionFormat::from_url(url)?;
 
     if let Ok(parsed_url) = Url::parse(url) &&
         parsed_url.scheme() == "file"
     {
-        let session = DownloadSession::new(shared, request_limiter, cancel_token);
+        let session = DownloadSession::new(shared, request_limiter, cancel_token)
+            .with_retry_backoff(retry_backoff);
         let file_path = parsed_url
             .to_file_path()
             .map_err(|_| eyre::eyre!("Invalid file:// URL path: {}", url))?;
@@ -437,14 +443,17 @@ fn blocking_download_and_extract(
             url,
             format,
             target_dir,
-            DownloadSession::new(shared, Some(request_limiter), cancel_token),
+            DownloadSession::new(shared, Some(request_limiter), cancel_token)
+                .with_retry_backoff(retry_backoff),
         )
     } else if resumable {
         let session =
-            DownloadSession::new(shared, Some(DownloadRequestLimiter::new(1)), cancel_token);
+            DownloadSession::new(shared, Some(DownloadRequestLimiter::new(1)), cancel_token)
+                .with_retry_backoff(retry_backoff);
         download_and_extract(url, format, target_dir, session)
     } else {
-        let session = DownloadSession::new(shared, None, cancel_token);
+        let session =
+            DownloadSession::new(shared, None, cancel_token).with_retry_backoff(retry_backoff);
         let result = streaming_download_and_extract(url, format, target_dir, &session);
         if result.is_ok() {
             session.record_archive_output_complete(0);
@@ -465,6 +474,7 @@ pub(crate) async fn stream_and_extract(
     resumable: bool,
     request_limiter: Option<Arc<DownloadRequestLimiter>>,
     cancel_token: CancellationToken,
+    retry_backoff: Option<Duration>,
 ) -> Result<()> {
     let target_dir = target_dir.to_path_buf();
     let url = url.to_string();
@@ -476,6 +486,7 @@ pub(crate) async fn stream_and_extract(
             resumable,
             request_limiter,
             cancel_token,
+            retry_backoff,
         )
     })
     .await??;

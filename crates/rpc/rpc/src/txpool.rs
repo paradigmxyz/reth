@@ -10,7 +10,7 @@ use async_trait::async_trait;
 use jsonrpsee::core::RpcResult;
 use reth_primitives_traits::NodePrimitives;
 use reth_rpc_api::TxPoolApiServer;
-use reth_rpc_convert::{RpcConvert, RpcTypes};
+use reth_rpc_convert::RpcConvert;
 use reth_rpc_eth_api::RpcTransaction;
 use reth_transaction_pool::{
     AllPoolTransactions, PoolConsensusTx, PoolTransaction, TransactionPool,
@@ -40,38 +40,49 @@ where
     Eth: RpcConvert<Primitives: NodePrimitives<SignedTx = PoolConsensusTx<Pool>>>,
 {
     fn content(&self) -> Result<TxpoolContent<RpcTransaction<Eth::Network>>, Eth::Error> {
-        #[inline]
-        fn insert<Tx, RpcTxB>(
-            tx: &Tx,
-            content: &mut BTreeMap<
-                Address,
-                BTreeMap<String, <RpcTxB::Network as RpcTypes>::TransactionResponse>,
-            >,
-            resp_builder: &RpcTxB,
-        ) -> Result<(), RpcTxB::Error>
-        where
-            Tx: PoolTransaction,
-            RpcTxB: RpcConvert<Primitives: NodePrimitives<SignedTx = Tx::Consensus>>,
-        {
-            content.entry(tx.sender()).or_default().insert(
-                tx.nonce().to_string(),
-                resp_builder.fill_pending(tx.clone_into_consensus())?,
-            );
-
-            Ok(())
-        }
-
         let AllPoolTransactions { pending, queued } = self.pool.all_transactions();
 
         let mut content = TxpoolContent::default();
-        for pending in pending {
-            insert::<_, Eth>(&pending.transaction, &mut content.pending, &self.converter)?;
+        for tx in pending {
+            let sender = tx.transaction.sender();
+            self.insert_by_nonce(&tx.transaction, content.pending.entry(sender).or_default())?;
         }
-        for queued in queued {
-            insert::<_, Eth>(&queued.transaction, &mut content.queued, &self.converter)?;
+        for tx in queued {
+            let sender = tx.transaction.sender();
+            self.insert_by_nonce(&tx.transaction, content.queued.entry(sender).or_default())?;
         }
 
         Ok(content)
+    }
+
+    fn content_from(
+        &self,
+        from: Address,
+    ) -> Result<TxpoolContentFrom<RpcTransaction<Eth::Network>>, Eth::Error> {
+        let mut content = TxpoolContentFrom::default();
+        // one snapshot for both sides, so a transaction moving between sub-pools meanwhile is
+        // reported on exactly one of them
+        let AllPoolTransactions { pending, queued } = self.pool.all_transactions_by_sender(from);
+        for tx in pending {
+            self.insert_by_nonce(&tx.transaction, &mut content.pending)?;
+        }
+        for tx in queued {
+            self.insert_by_nonce(&tx.transaction, &mut content.queued)?;
+        }
+
+        Ok(content)
+    }
+
+    /// Converts the pool transaction and inserts it into the given map, keyed by its nonce.
+    #[inline]
+    fn insert_by_nonce(
+        &self,
+        tx: &Pool::Transaction,
+        txs: &mut BTreeMap<String, RpcTransaction<Eth::Network>>,
+    ) -> Result<(), Eth::Error> {
+        txs.insert(tx.nonce().to_string(), self.converter.fill_pending(tx.clone_into_consensus())?);
+
+        Ok(())
     }
 }
 
@@ -135,7 +146,7 @@ where
         from: Address,
     ) -> RpcResult<TxpoolContentFrom<RpcTransaction<Eth::Network>>> {
         trace!(target: "rpc::eth", ?from, "Serving txpool_contentFrom");
-        Ok(self.content().map_err(Into::into)?.remove_from(&from))
+        Ok(self.content_from(from).map_err(Into::into)?)
     }
 
     /// Returns the details of all transactions currently pending for inclusion in the next
@@ -152,5 +163,45 @@ where
 impl<Pool, Eth> fmt::Debug for TxPoolApi<Pool, Eth> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("TxpoolApi").finish_non_exhaustive()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::eth::helpers::types::EthRpcConverter;
+    use reth_chainspec::MAINNET;
+    use reth_rpc_eth_types::receipt::EthReceiptConverter;
+    use reth_transaction_pool::{
+        test_utils::{testing_pool, MockTransaction},
+        TransactionOrigin,
+    };
+
+    #[tokio::test]
+    async fn content_from_matches_content() {
+        let senders = [Address::with_last_byte(1), Address::with_last_byte(2)];
+
+        let pool = testing_pool();
+        for sender in senders {
+            // nonces 0 and 1 end up in the pending sub-pool, the gapped nonce 9 in a parked one
+            for nonce in [0, 1, 9] {
+                let tx = MockTransaction::legacy()
+                    .with_sender(sender)
+                    .with_nonce(nonce)
+                    .with_gas_price(100);
+                pool.add_transaction(TransactionOrigin::External, tx).await.unwrap();
+            }
+        }
+
+        let api =
+            TxPoolApi::new(pool, EthRpcConverter::new(EthReceiptConverter::new(MAINNET.clone())));
+        let mut content = api.content().unwrap();
+        // guards the fixture: both sub-pools must be populated for the comparison to mean anything
+        assert_eq!((content.pending.len(), content.queued.len()), (senders.len(), senders.len()));
+
+        // the unknown sender must yield the same empty result as the whole-pool path
+        for sender in senders.into_iter().chain([Address::with_last_byte(3)]) {
+            assert_eq!(api.content_from(sender).unwrap(), content.remove_from(&sender));
+        }
     }
 }

@@ -3,12 +3,12 @@ use crate::{
         ConsistentProvider, ProviderNodeTypes, RocksDBProvider, StaticFileProvider,
         StaticFileProviderRWRefMut,
     },
-    BalProvider, BalStoreHandle, BlockHashReader, BlockIdReader, BlockNumReader, BlockReader,
-    BlockReaderIdExt, BlockSource, CanonChainTracker, CanonStateNotifications,
+    AccountReader, BalProvider, BalStoreHandle, BlockHashReader, BlockIdReader, BlockNumReader,
+    BlockReader, BlockReaderIdExt, BlockSource, CanonChainTracker, CanonStateNotifications,
     CanonStateSubscriptions, ChainSpecProvider, ChainStateBlockReader, ChangeSetReader,
     DatabaseProviderFactory, HeaderProvider, ProviderError, ProviderFactory, PruneCheckpointReader,
     ReceiptProvider, ReceiptProviderIdExt, RocksDBProviderFactory, StageCheckpointReader,
-    StateProviderBox, StateProviderFactory, StateReader, StaticFileProviderFactory,
+    StateProvider, StateProviderBox, StateProviderFactory, StateReader, StaticFileProviderFactory,
     TransactionVariant, TransactionsProvider,
 };
 use alloy_consensus::{transaction::TransactionMeta, BlockHeader};
@@ -16,7 +16,7 @@ use alloy_eips::{BlockHashOrNumber, BlockId, BlockNumHash, BlockNumberOrTag};
 use alloy_primitives::{Address, BlockHash, BlockNumber, Bytes, TxHash, TxNumber, B256};
 use alloy_rpc_types_engine::ForkchoiceState;
 use reth_chain_state::{
-    BlockState, CanonicalInMemoryState, ForkChoiceNotifications, ForkChoiceSubscriptions,
+    CanonicalInMemoryState, ForkChoiceNotifications, ForkChoiceSubscriptions,
     PersistedBlockNotifications, PersistedBlockSubscriptions,
 };
 use reth_chainspec::ChainInfo;
@@ -40,7 +40,7 @@ use reth_trie::{
     hashed_cursor::{HashedCursor, HashedCursorFactory},
     metrics::TrieRootMetrics,
     proof::{Proof, StorageProof},
-    MultiProofTargets, StorageRoot, TrieInput, TrieInputSorted, TrieType,
+    MultiProofTargets, StorageRoot, TrieType,
 };
 use std::{
     ops::{RangeBounds, RangeInclusive},
@@ -149,20 +149,28 @@ impl<N: ProviderNodeTypes> BlockchainProvider<N> {
         ConsistentProvider::new(self.database.clone(), self.canonical_in_memory_state())
     }
 
-    /// This uses a given [`BlockState`] to initialize a state provider for that block.
-    fn block_state_provider(
-        &self,
-        state: &BlockState<N::Primitives>,
-    ) -> ProviderResult<StateProviderBox> {
+    /// Returns a state provider for the post-state of `block_hash`.
+    fn state_provider_at_block_hash(&self, block_hash: B256) -> ProviderResult<StateProviderBox> {
         let state_provider_factory = OverlayStateProviderFactory::new(
             self.database.clone(),
-            self.database.overlay_manager().overlay_builder(state.hash()),
+            self.database.overlay_manager().overlay_builder(block_hash),
         );
         Ok(Box::new(state_provider_factory.database_provider_ro()?))
     }
 
-    /// Returns a cursor-backed state view for a state root still only in canonical in-memory
-    /// blocks, overlaying their merged trie state on the persisted anchor.
+    /// Returns a historical state provider using an existing database snapshot.
+    pub fn state_provider_from_database(
+        &self,
+        provider: StateRangeDbProvider<N>,
+        block_hash: B256,
+    ) -> StateProviderBox {
+        Box::new(OverlayStateProvider::new(
+            provider,
+            self.database.overlay_manager().overlay_builder(block_hash),
+        ))
+    }
+
+    /// Returns a cursor-backed state view for a state root still in canonical in-memory blocks.
     fn block_state_range_provider(
         &self,
         state_root: B256,
@@ -175,23 +183,9 @@ impl<N: ProviderNodeTypes> BlockchainProvider<N> {
             return Ok(None)
         };
 
-        // Merge each in-memory block's trie delta, anchor to `matched`, oldest to newest.
-        let blocks: Vec<_> = matched.chain().map(|state| state.block()).collect();
-        let sorted: Vec<_> =
-            blocks.iter().rev().map(|block| (block.hashed_state(), block.trie_updates())).collect();
-        let input = TrieInput::from_blocks_sorted(
-            sorted.iter().map(|(state, nodes)| (state.as_ref(), nodes.as_ref())),
-        );
-        let merged = TrieInputSorted::from_unsorted(input);
-
-        // Anchor at the persisted block; the overlay reverts any db-tip advancement past it
-        // via changesets, then the merged in-memory delta applies on top.
         let state_provider_factory = OverlayStateProviderFactory::new(
             self.database.clone(),
-            self.database
-                .overlay_manager()
-                .overlay_builder(matched.anchor().hash)
-                .with_immediate_state_trie_overlay(merged.state, merged.nodes),
+            self.database.overlay_manager().overlay_builder(matched.hash()),
         );
         state_provider_factory.database_provider_ro().map(Some)
     }
@@ -735,7 +729,7 @@ impl<N: ProviderNodeTypes> StateProviderFactory for BlockchainProvider<N> {
         // use latest state provider if the head state exists
         if let Some(state) = self.canonical_in_memory_state.head_state() {
             trace!(target: "providers::blockchain", "Using head state for latest state provider");
-            self.block_state_provider(&state)
+            self.state_provider_at_block_hash(state.hash())
         } else {
             trace!(target: "providers::blockchain", "Using database state for latest state provider");
             self.database.latest()
@@ -782,18 +776,20 @@ impl<N: ProviderNodeTypes> StateProviderFactory for BlockchainProvider<N> {
         let hash = provider
             .block_hash(block_number)?
             .ok_or_else(|| ProviderError::HeaderNotFound(block_number.into()))?;
-        provider.into_state_provider_at_block_hash(hash)
+        Ok(self.state_provider_from_database(provider.into_database_provider(), hash))
     }
 
     fn history_by_block_hash(&self, block_hash: BlockHash) -> ProviderResult<StateProviderBox> {
         trace!(target: "providers::blockchain", ?block_hash, "Getting history by block hash");
-        self.consistent_provider()?.into_state_provider_at_block_hash(block_hash)
+        let provider = self.consistent_provider()?;
+        provider.block_number(block_hash)?.ok_or(ProviderError::BlockHashNotFound(block_hash))?;
+        Ok(self.state_provider_from_database(provider.into_database_provider(), block_hash))
     }
 
     fn state_by_block_hash(&self, hash: BlockHash) -> ProviderResult<StateProviderBox> {
         trace!(target: "providers::blockchain", ?hash, "Getting state by block hash");
         if let Some(state) = self.canonical_in_memory_state.state_by_hash(hash) {
-            self.block_state_provider(&state)
+            self.state_provider_at_block_hash(state.hash())
         } else if let Ok(state) = self.history_by_block_hash(hash) {
             // This could be tracked by a historical block
             Ok(state)
@@ -815,7 +811,7 @@ impl<N: ProviderNodeTypes> StateProviderFactory for BlockchainProvider<N> {
 
         if let Some(pending) = self.canonical_in_memory_state.pending_state() {
             // we have a pending block
-            return self.block_state_provider(&pending);
+            return self.state_provider_at_block_hash(pending.hash());
         }
 
         // fallback to latest state if the pending block is not available
@@ -826,14 +822,14 @@ impl<N: ProviderNodeTypes> StateProviderFactory for BlockchainProvider<N> {
         if let Some(pending) = self.canonical_in_memory_state.pending_state() &&
             pending.hash() == block_hash
         {
-            return self.block_state_provider(&pending).map(Some);
+            return self.state_provider_at_block_hash(pending.hash()).map(Some);
         }
         Ok(None)
     }
 
     fn maybe_pending(&self) -> ProviderResult<Option<StateProviderBox>> {
         if let Some(pending) = self.canonical_in_memory_state.pending_state() {
-            return self.block_state_provider(&pending).map(Some)
+            return self.state_provider_at_block_hash(pending.hash()).map(Some)
         }
 
         Ok(None)
@@ -991,7 +987,45 @@ impl<N: ProviderNodeTypes> StateReader for BlockchainProvider<N> {
         &self,
         block: BlockNumber,
     ) -> ProviderResult<Option<ExecutionOutcome<Self::Receipt>>> {
-        self.consistent_provider()?.get_state(block)
+        if let Some(head) = self.canonical_in_memory_state.head_state() &&
+            let Some(state) = head.block_on_chain(block.into())
+        {
+            return Ok(Some(ExecutionOutcome::from((
+                state.block_ref().execution_outcome().clone(),
+                block,
+            ))))
+        }
+
+        let provider = self.database.provider()?;
+        let Some(block_body) = provider.block_body_indices(block)? else { return Ok(None) };
+
+        let from_transaction_num = block_body.first_tx_num();
+        let to_transaction_num = block_body.last_tx_num();
+        let account_changeset = provider.account_changesets_range(block..=block)?;
+        let storage_changeset = provider.storage_changeset(block)?;
+
+        let Some(block_hash) = provider.block_hash(block)? else { return Ok(None) };
+        let state_provider = OverlayStateProvider::<&_, N::Primitives>::new_ref(
+            &provider,
+            self.database.overlay_manager().overlay_builder(block_hash),
+        );
+        let (state, reverts) = provider.populate_bundle_state(
+            account_changeset,
+            storage_changeset,
+            |address| state_provider.basic_account(&address),
+            |address, storage_key| state_provider.storage(address, storage_key),
+        )?;
+        let receipts = provider.receipts_by_tx_range(from_transaction_num..=to_transaction_num)?;
+
+        Ok(Some(ExecutionOutcome::new_init(
+            state,
+            reverts,
+            // We skip new contracts since we never delete them from the database
+            Vec::new(),
+            vec![receipts],
+            block,
+            Vec::new(),
+        )))
     }
 }
 
@@ -3083,6 +3117,7 @@ mod tests {
             state: Default::default(),
         };
         let executed = ExecutedBlock::new(Arc::new(block), Arc::new(execution_output), trie_data);
+        provider.database.overlay_manager().insert_block(executed.clone());
         provider
             .canonical_in_memory_state
             .update_chain(NewCanonicalChain::Commit { new: vec![executed] });
@@ -3131,6 +3166,7 @@ mod tests {
             state: Default::default(),
         };
         let executed = ExecutedBlock::new(Arc::new(block), Arc::new(execution_output), trie_data);
+        provider.database.overlay_manager().insert_block(executed.clone());
         provider
             .canonical_in_memory_state
             .update_chain(NewCanonicalChain::Commit { new: vec![executed] });

@@ -166,7 +166,7 @@ pub trait EthState: LoadState + SpawnBlocking {
         Self: EthApiSpec,
     {
         Ok(async move {
-            let _permit = self
+            let permit = self
                 .acquire_owned_tracing()
                 .await
                 .map_err(RethError::other)
@@ -175,7 +175,8 @@ pub trait EthState: LoadState + SpawnBlocking {
             let block_id = block_id.unwrap_or_default();
             self.ensure_within_proof_window(block_id)?;
 
-            self.spawn_blocking_io_fut(async move |this| {
+            self.spawn_blocking_io_fut(move |this| async move {
+                let _permit = permit;
                 let state = this.state_at_block_id(block_id).await?;
                 let storage_keys = keys.iter().map(|key| key.as_b256()).collect::<Vec<_>>();
                 let proof = state
@@ -200,7 +201,7 @@ pub trait EthState: LoadState + SpawnBlocking {
         Self: EthApiSpec,
     {
         Ok(async move {
-            let _permit = self
+            let permit = self
                 .acquire_owned_tracing()
                 .await
                 .map_err(RethError::other)
@@ -209,7 +210,8 @@ pub trait EthState: LoadState + SpawnBlocking {
             let block_id = block_id.unwrap_or_default();
             self.ensure_within_proof_window(block_id)?;
 
-            self.spawn_blocking_io_fut(async move |this| {
+            self.spawn_blocking_io_fut(move |this| async move {
+                let _permit = permit;
                 let state = this.state_at_block_id(block_id).await?;
                 let mut proof_targets = MultiProofTargetsV2::default();
                 proof_targets.account_targets.reserve(targets.len());
