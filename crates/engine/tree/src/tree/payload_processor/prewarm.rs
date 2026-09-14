@@ -319,17 +319,15 @@ where
                     return (cached.take(), Some(new_cache));
                 }
 
-                // A duplicate of the published allocation must be released before unlock or
-                // the next payload will see it as busy and allocate a fresh cache.
-                // A different allocation must instead survive the lock to be destroyed outside it.
                 let reused =
                     cached.as_ref().is_some_and(|previous| previous.shares_cache_with(&new_cache));
                 let previous = cached.replace(new_cache);
                 if reused {
-                    // The published handle keeps the allocation alive, so this drop is cheap.
+                    // Drop the extra handle before unlocking so it doesn't block cache reuse.
                     drop(previous);
                     (None, None)
                 } else {
+                    // Drop the old cache after unlocking; freeing it may be expensive.
                     (previous, None)
                 }
             });
