@@ -312,8 +312,9 @@ where
 
                 new_cache.update_metrics(cache_state_metrics.as_ref());
 
-                // `new_cache` may use the same cache as `cached`, already modified by insert_state.
-                // Keep the lock until validation succeeds or we clear `cached`.
+                // `cached` and `new_cache` can point to the same cache.
+                // insert_state has already applied this block's changes to it, so keep the mutex
+                // locked until validation succeeds or we clear `cached` on failure.
                 if valid_block_rx.recv().is_err() {
                     debug!(target: "engine::caching", "cleared execution cache on invalid block");
                     return (cached.take(), Some(new_cache));
