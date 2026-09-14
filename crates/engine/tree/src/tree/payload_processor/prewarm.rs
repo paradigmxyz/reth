@@ -270,8 +270,8 @@ where
         });
     }
 
-    /// This method calls `ExecutionCache::update_with_guard` which requires exclusive access.
-    /// It should only be called after ensuring that:
+    /// This method calls `PayloadExecutionCache::update_with_guard` which requires exclusive
+    /// access. It should only be called after ensuring that:
     /// 1. All prewarming tasks have completed execution
     /// 2. No other concurrent operations are accessing the cache
     ///
@@ -299,7 +299,8 @@ where
 
         if let Some(saved_cache) = saved_cache {
             debug!(target: "engine::caching", parent_hash=?hash, "Updating execution cache");
-            let mut retired = (None, None);
+            let mut retired_previous = None;
+            let mut retired_candidate = None;
             execution_cache.update_with_guard(|cached| {
                 let caches = saved_cache.cache().clone();
                 // Release the task's handle before unlocking so the published cache is immediately
@@ -311,7 +312,8 @@ where
                 // Access the BundleState through the shared ExecutionOutcome
                 if new_cache.cache().insert_state(&execution_outcome.state).is_err() {
                     // Clear the cache on error to prevent having a polluted cache
-                    retired = (cached.take(), Some(new_cache));
+                    retired_previous = cached.take();
+                    retired_candidate = Some(new_cache);
                     debug!(target: "engine::caching", "cleared execution cache on update error");
                     return;
                 }
@@ -328,19 +330,20 @@ where
                         // Deferring it would keep the reused cache unavailable until cleanup runs.
                         drop(previous);
                     } else {
-                        retired.0 = previous;
+                        retired_previous = previous;
                     }
                 } else {
                     // Block was invalid; caches were already mutated by insert_state above,
                     // so we must clear to prevent using polluted state
-                    retired = (cached.take(), Some(new_cache));
+                    retired_previous = cached.take();
+                    retired_candidate = Some(new_cache);
                     debug!(target: "engine::caching", "cleared execution cache on invalid block");
                 }
             });
 
             // Retired allocations can be large; never destroy them while holding the cache mutex.
-            if retired.0.is_some() || retired.1.is_some() {
-                executor.spawn_drop(retired);
+            if retired_previous.is_some() || retired_candidate.is_some() {
+                executor.spawn_drop((retired_previous, retired_candidate));
             }
 
             let elapsed = start.elapsed();
@@ -927,15 +930,31 @@ mod tests {
         drop(release_tx);
     }
 
-    fn assert_save_cache_retires_allocations(valid: bool, insert_error: bool) {
+    #[derive(Clone, Copy, Debug)]
+    enum CacheSlot {
+        Empty,
+        Shared,
+        Distinct,
+    }
+
+    fn assert_save_cache_retires_allocations(slot: CacheSlot, valid: bool, insert_error: bool) {
         use reth_revm::db::{AccountStatus, BundleAccount, BundleState};
         use std::time::Duration;
 
         let runtime = Runtime::test();
         let execution_cache = PayloadExecutionCache::default();
-        let old = SavedCache::new(B256::repeat_byte(1), crate::tree::ExecutionCache::new(1_000));
-        let fresh = SavedCache::new(B256::repeat_byte(1), crate::tree::ExecutionCache::new(1_000));
-        execution_cache.update_with_guard(|slot| *slot = Some(old.clone()));
+        let candidate =
+            SavedCache::new(B256::repeat_byte(1), crate::tree::ExecutionCache::new(1_000));
+        let distinct_previous = matches!(slot, CacheSlot::Distinct).then(|| {
+            SavedCache::new(B256::repeat_byte(1), crate::tree::ExecutionCache::new(1_000))
+        });
+        execution_cache.update_with_guard(|cached| {
+            *cached = match slot {
+                CacheSlot::Empty => None,
+                CacheSlot::Shared => Some(candidate.clone()),
+                CacheSlot::Distinct => distinct_previous.clone(),
+            };
+        });
         let (release_tx, release_rx) = mpsc::channel::<()>();
         runtime.spawn_blocking_named("drop", move || {
             let _ = release_rx.recv();
@@ -949,14 +968,25 @@ mod tests {
                 BundleAccount::new(None, None, Default::default(), AccountStatus::Changed),
             );
         }
-        save_test_cache(&runtime, &execution_cache, fresh.clone(), state, valid, Gauge::noop());
+        save_test_cache(&runtime, &execution_cache, candidate.clone(), state, valid, Gauge::noop());
 
-        assert_eq!(old.usage_count(), 2, "old cache must be retained for background destruction");
-        assert_eq!(fresh.usage_count(), 2);
+        let should_publish = valid && !insert_error;
+        if let Some(previous) = &distinct_previous {
+            assert_eq!(
+                previous.usage_count(),
+                2,
+                "old cache must be retained for background destruction"
+            );
+        }
+        // On shared-cache failure, both the old slot and the rejected candidate are queued.
+        // Otherwise only the published or retired candidate remains alongside our test handle.
+        let expected_users =
+            if matches!(slot, CacheSlot::Shared) && !should_publish { 3 } else { 2 };
+        assert_eq!(candidate.usage_count(), expected_users, "slot: {slot:?}");
         execution_cache.update_with_guard(|slot| {
-            if valid && !insert_error {
+            if should_publish {
                 let published = slot.as_ref().expect("valid cache published");
-                assert!(published.shares_cache_with(&fresh));
+                assert!(published.shares_cache_with(&candidate));
                 assert_eq!(published.executed_block_hash(), B256::repeat_byte(2));
             } else {
                 assert!(slot.is_none(), "polluted cache must not be published");
@@ -969,23 +999,44 @@ mod tests {
         });
         drop(release_tx);
         drained_rx.recv_timeout(Duration::from_secs(10)).unwrap();
-        assert_eq!(old.usage_count(), 1);
-        assert_eq!(fresh.usage_count(), if valid && !insert_error { 2 } else { 1 });
+        if let Some(previous) = &distinct_previous {
+            assert_eq!(previous.usage_count(), 1);
+        }
+        assert_eq!(candidate.usage_count(), if should_publish { 2 } else { 1 });
+        drop(candidate);
+        assert_eq!(execution_cache.get_cache_for(B256::repeat_byte(2)).is_some(), should_publish);
     }
 
     #[test]
     fn save_cache_defers_replaced_allocation() {
-        assert_save_cache_retires_allocations(true, false);
+        assert_save_cache_retires_allocations(CacheSlot::Distinct, true, false);
     }
 
     #[test]
     fn save_cache_defers_invalid_allocations() {
-        assert_save_cache_retires_allocations(false, false);
+        assert_save_cache_retires_allocations(CacheSlot::Distinct, false, false);
     }
 
     #[test]
     fn save_cache_defers_allocations_on_insert_error() {
-        assert_save_cache_retires_allocations(true, true);
+        assert_save_cache_retires_allocations(CacheSlot::Distinct, true, true);
+    }
+
+    #[test]
+    fn save_cache_defers_shared_allocation_on_invalid_block() {
+        assert_save_cache_retires_allocations(CacheSlot::Shared, false, false);
+    }
+
+    #[test]
+    fn save_cache_defers_shared_allocation_on_insert_error() {
+        assert_save_cache_retires_allocations(CacheSlot::Shared, true, true);
+    }
+
+    #[test]
+    fn save_cache_handles_empty_slot() {
+        for (valid, insert_error) in [(true, false), (false, false), (true, true)] {
+            assert_save_cache_retires_allocations(CacheSlot::Empty, valid, insert_error);
+        }
     }
 
     #[test]
