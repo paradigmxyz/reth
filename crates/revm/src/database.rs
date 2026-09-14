@@ -1,4 +1,5 @@
 use crate::primitives::alloy_primitives::{BlockNumber, StorageKey, StorageValue};
+use alloc::boxed::Box;
 use alloy_primitives::{Address, B256, U256};
 use core::ops::{Deref, DerefMut};
 use reth_primitives_traits::Account;
@@ -31,6 +32,60 @@ pub trait EvmStateProvider {
         account: Address,
         storage_key: StorageKey,
     ) -> ProviderResult<Option<StorageValue>>;
+}
+
+/// Type-erased provider for EVM execution.
+pub struct EvmStateProviderBox<P: ?Sized = dyn EvmStateProvider + Send>(Box<P>);
+
+impl EvmStateProviderBox {
+    /// Boxes an EVM state provider.
+    pub fn new<T>(provider: T) -> Self
+    where
+        T: EvmStateProvider + Send + 'static,
+    {
+        Self(Box::new(provider))
+    }
+}
+
+impl<'a> EvmStateProviderBox<dyn EvmStateProvider + 'a> {
+    /// Boxes a borrowed EVM state provider.
+    pub fn from_ref<T>(provider: &'a T) -> Self
+    where
+        T: EvmStateProvider + ?Sized,
+    {
+        Self(Box::new(EvmStateProviderRef(provider)))
+    }
+}
+
+impl<P: ?Sized> core::fmt::Debug for EvmStateProviderBox<P> {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("EvmStateProviderBox").finish_non_exhaustive()
+    }
+}
+
+impl<P: EvmStateProvider + ?Sized> EvmStateProvider for EvmStateProviderBox<P> {
+    fn basic_account(&self, address: &Address) -> ProviderResult<Option<Account>> {
+        self.0.basic_account(address)
+    }
+
+    fn block_hash(&self, number: BlockNumber) -> ProviderResult<Option<B256>> {
+        self.0.block_hash(number)
+    }
+
+    fn bytecode_by_hash(
+        &self,
+        code_hash: &B256,
+    ) -> ProviderResult<Option<reth_primitives_traits::Bytecode>> {
+        self.0.bytecode_by_hash(code_hash)
+    }
+
+    fn storage(
+        &self,
+        account: Address,
+        storage_key: StorageKey,
+    ) -> ProviderResult<Option<StorageValue>> {
+        self.0.storage(account, storage_key)
+    }
 }
 
 // Blanket implementation of EvmStateProvider for any type that implements StateProvider.
@@ -223,6 +278,33 @@ where
         code_hash: &B256,
     ) -> ProviderResult<Option<reth_primitives_traits::Bytecode>> {
         Ok(Some(reth_primitives_traits::Bytecode(self.0.code_by_hash_ref(*code_hash)?)))
+    }
+}
+
+struct EvmStateProviderRef<'a, P: ?Sized>(&'a P);
+
+impl<P: EvmStateProvider + ?Sized> EvmStateProvider for EvmStateProviderRef<'_, P> {
+    fn basic_account(&self, address: &Address) -> ProviderResult<Option<Account>> {
+        self.0.basic_account(address)
+    }
+
+    fn block_hash(&self, number: BlockNumber) -> ProviderResult<Option<B256>> {
+        self.0.block_hash(number)
+    }
+
+    fn bytecode_by_hash(
+        &self,
+        code_hash: &B256,
+    ) -> ProviderResult<Option<reth_primitives_traits::Bytecode>> {
+        self.0.bytecode_by_hash(code_hash)
+    }
+
+    fn storage(
+        &self,
+        account: Address,
+        storage_key: StorageKey,
+    ) -> ProviderResult<Option<StorageValue>> {
+        self.0.storage(account, storage_key)
     }
 }
 
