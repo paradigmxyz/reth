@@ -516,6 +516,9 @@ start_node() {
     grep -qF -- '--engine.persistence-threshold' <<< "$node_help" &&
     grep -qF -- '--engine.persistence-backpressure-threshold' <<< "$node_help"; then
     reth_args+=(--engine.persistence-threshold 0 --engine.persistence-backpressure-threshold 1)
+    if grep -qF -- '--engine.num-state-masking-blocks' <<< "$node_help"; then
+      reth_args+=(--engine.num-state-masking-blocks 0)
+    fi
   fi
 
   local extra_node_args=""

@@ -8,13 +8,13 @@ use eyre::ensure;
 use reth_cli_util::{parse_duration_from_secs_or_ms, parsers::format_duration_as_secs_or_ms};
 use reth_engine_primitives::{
     TreeConfig, DEFAULT_INVALID_HEADER_HIT_EVICTION_THRESHOLD, DEFAULT_MULTIPROOF_TASK_CHUNK_SIZE,
-    DEFAULT_NUM_STATE_MASKING_BLOCKS, DEFAULT_PERSISTENCE_BACKPRESSURE_THRESHOLD,
+    DEFAULT_PERSISTENCE_BACKPRESSURE_THRESHOLD,
 };
 use std::{sync::OnceLock, time::Duration};
 
 use crate::node_config::{
     DEFAULT_CROSS_BLOCK_CACHE_SIZE_MB, DEFAULT_MEMORY_BLOCK_BUFFER_TARGET,
-    DEFAULT_PERSISTENCE_THRESHOLD, DEFAULT_RESERVED_CPU_CORES,
+    DEFAULT_RESERVED_CPU_CORES,
 };
 
 /// Global static engine defaults
@@ -262,9 +262,9 @@ impl DefaultEngineValues {
 impl Default for DefaultEngineValues {
     fn default() -> Self {
         Self {
-            persistence_threshold: DEFAULT_PERSISTENCE_THRESHOLD,
+            persistence_threshold: 50,
             persistence_backpressure_threshold: DEFAULT_PERSISTENCE_BACKPRESSURE_THRESHOLD,
-            num_state_masking_blocks: DEFAULT_NUM_STATE_MASKING_BLOCKS,
+            num_state_masking_blocks: 30,
             memory_block_buffer_target: DEFAULT_MEMORY_BLOCK_BUFFER_TARGET,
             invalid_header_hit_eviction_threshold: DEFAULT_INVALID_HEADER_HIT_EVICTION_THRESHOLD,
             state_cache_disabled: false,
@@ -311,8 +311,8 @@ pub struct EngineArgs {
     /// must be in-memory, ahead of the last persisted block, before flushing canonical blocks to
     /// disk again.
     ///
-    /// To persist blocks as fast as the node receives them, set this value to zero. This will
-    /// cause more frequent DB writes.
+    /// To persist blocks as fast as the node receives them, set this value and
+    /// `--engine.num-state-masking-blocks` to zero. This will cause more frequent DB writes.
     #[arg(
         long = "engine.persistence-threshold",
         env = "RETH_ENGINE_PERSISTENCE_THRESHOLD",
@@ -777,13 +777,16 @@ mod tests {
         let default_args = EngineArgs::default();
         let args = CommandParser::<EngineArgs>::parse_from(["reth"]).args;
         assert_eq!(args, default_args);
-        assert_eq!(args.persistence_threshold, 7);
+        assert_eq!(args.persistence_threshold, 50);
+        assert_eq!(args.num_state_masking_blocks, 30);
         assert_eq!(args.memory_block_buffer_target, None);
         assert_eq!(args.memory_block_buffer_target(), 5);
-        assert_eq!(
-            args.persistence_backpressure_threshold(),
-            DefaultEngineValues::get_global().persistence_backpressure_threshold
-        );
+        assert_eq!(args.persistence_backpressure_threshold(), 100);
+        args.validate().unwrap();
+        let config = args.tree_config();
+        assert_eq!(config.persistence_threshold(), 50);
+        assert_eq!(config.num_state_masking_blocks(), 30);
+        assert_eq!(config.persistence_backpressure_threshold(), 100);
     }
 
     #[test]
@@ -878,7 +881,7 @@ mod tests {
         let args = EngineArgs {
             persistence_threshold: 100,
             persistence_backpressure_threshold: Some(101),
-            num_state_masking_blocks: DEFAULT_NUM_STATE_MASKING_BLOCKS,
+            num_state_masking_blocks: 30,
             memory_block_buffer_target: Some(50),
             invalid_header_hit_eviction_threshold: 7,
             legacy_state_root_task_enabled: true,
@@ -981,6 +984,7 @@ mod tests {
     fn validate_memory_block_buffer_target() {
         let args = EngineArgs {
             persistence_threshold: 4,
+            num_state_masking_blocks: 0,
             memory_block_buffer_target: Some(4),
             ..EngineArgs::default()
         };
@@ -1037,6 +1041,8 @@ mod tests {
             "reth",
             "--engine.persistence-threshold",
             "4",
+            "--engine.num-state-masking-blocks",
+            "0",
         ])
         .args;
 
