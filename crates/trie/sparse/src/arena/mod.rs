@@ -2641,7 +2641,8 @@ impl SparseTrie for ArenaParallelSparseTrie {
                     let parent = ProofV2TargetParent::new(logical_len);
                     trace!(target: TRACE_TARGET, ?key, ?parent, "Update hit blinded node, requesting proof");
                     proof_required_fn(key, parent);
-                    updates.insert(key, update.clone());
+                    let update = mem::replace(&mut sorted[update_idx].2, LeafUpdate::Touched);
+                    updates.insert(key, update);
                 }
                 // Subtrie — forward all consecutive updates under this subtrie's prefix.
                 SeekResult::RevealedSubtrie => {
@@ -2656,7 +2657,7 @@ impl SparseTrie for ArenaParallelSparseTrie {
                         update_idx += 1;
                     }
 
-                    let subtrie_updates = &sorted[subtrie_start..update_idx];
+                    let subtrie_updates = &mut sorted[subtrie_start..update_idx];
 
                     // Edge-case: if all updates are removals that could empty the
                     // subtrie and collapse the parent onto a blinded sibling, request
@@ -2668,8 +2669,8 @@ impl SparseTrie for ArenaParallelSparseTrie {
                     ) {
                         trace!(target: TRACE_TARGET, proof_key = ?proof.key, proof_parent = ?proof.parent, "Subtrie collapse would need blinded sibling, requesting proof");
                         proof_required_fn(proof.key, proof.parent);
-                        for &(key, _, ref update) in subtrie_updates {
-                            updates.insert(key, update.clone());
+                        for (key, _, update) in subtrie_updates {
+                            updates.insert(*key, mem::replace(update, LeafUpdate::Touched));
                         }
                         // Pop the subtrie entry before continuing.
                         continue;
@@ -2718,8 +2719,11 @@ impl SparseTrie for ArenaParallelSparseTrie {
 
                         for (target_idx, proof) in subtrie.required_proofs.drain(..) {
                             proof_required_fn(proof.key, proof.parent);
-                            let (key, _, ref update) = subtrie_updates[target_idx];
-                            updates.insert(key, update.clone());
+                            let (key, _, update) = &mut subtrie_updates[target_idx];
+                            // A blocked deletion can request both its own and its sibling's proof.
+                            updates
+                                .entry(*key)
+                                .or_insert_with(|| mem::replace(update, LeafUpdate::Touched));
                         }
 
                         // Check if the subtrie's root became empty after updates.
@@ -2835,11 +2839,12 @@ impl SparseTrie for ArenaParallelSparseTrie {
         // process required proofs.
         let taken_paths: Vec<Nibbles> = taken.iter().map(|(_, s, _)| s.path).collect();
         for (child_idx, mut subtrie, range) in taken {
-            let subtrie_updates = &sorted[range];
+            let subtrie_updates = &mut sorted[range];
             for (target_idx, proof) in subtrie.required_proofs.drain(..) {
                 proof_required_fn(proof.key, proof.parent);
-                let (key, _, ref update) = subtrie_updates[target_idx];
-                updates.insert(key, update.clone());
+                let (key, _, update) = &mut subtrie_updates[target_idx];
+                // A blocked deletion can request both its own and its sibling's proof.
+                updates.entry(*key).or_insert_with(|| mem::replace(update, LeafUpdate::Touched));
             }
 
             // Restore the subtrie into the upper arena.
