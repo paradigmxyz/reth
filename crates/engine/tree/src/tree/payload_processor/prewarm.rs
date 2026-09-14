@@ -301,6 +301,8 @@ where
             let mut retired_previous = None;
             let mut retired_candidate = None;
             execution_cache.update_with_guard(|cached| {
+                // consumes the `SavedCache` held by the prewarming task, which releases its cache
+                // handle
                 let caches = saved_cache.into_cache();
                 let new_cache = SavedCache::new(hash, caches);
 
