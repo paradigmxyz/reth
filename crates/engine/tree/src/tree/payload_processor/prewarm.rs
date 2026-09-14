@@ -24,7 +24,6 @@ use alloy_primitives::keccak256;
 use metrics::{Counter, Gauge, Histogram};
 use rayon::prelude::*;
 use reth_evm::{execute::ExecutableTxFor, ConfigureEvm, Evm, EvmFor, RecoveredTx, SpecFor};
-use reth_execution_cache::CacheUpdate;
 use reth_metrics::Metrics;
 use reth_primitives_traits::{FastInstant as Instant, NodePrimitives};
 use reth_provider::{
@@ -271,17 +270,11 @@ where
         });
     }
 
-    /// This method calls `PayloadExecutionCache::update_and_publish` which requires exclusive
-    /// access. It should only be called after ensuring that:
-    /// 1. All prewarming tasks have completed execution
-    /// 2. No other concurrent operations are accessing the cache
+    /// Saves the warmed cache after execution and prewarming tasks have stopped accessing it.
     ///
-    /// Saves the warmed caches back into the shared slot after prewarming completes.
-    ///
-    /// This consumes the `SavedCache` held by the task, which releases its cache handle and allows
-    /// the new, warmed cache to be inserted.
-    ///
-    /// This method is called from `run()` only after all execution tasks are complete.
+    /// Holds the cache mutex through state insertion and block validation because the candidate
+    /// may share storage with the published cache. Removed allocations are destroyed after
+    /// unlocking, before the next task on the prewarm worker starts.
     #[instrument(level = "debug", target = "engine::tree::payload_processor::prewarm", skip_all)]
     fn save_cache(
         self,
@@ -299,28 +292,42 @@ where
 
         if let Some(saved_cache) = saved_cache {
             debug!(target: "engine::caching", parent_hash=?hash, "Updating execution cache");
-            let new_cache = SavedCache::new(hash, saved_cache.into_cache());
+            let (previous, rejected) = execution_cache.update_with_guard(|cached| {
+                let new_cache = SavedCache::new(hash, saved_cache.into_cache());
 
-            execution_cache.update_and_publish(new_cache, |cache| {
-                // Insert state into cache while holding the lock
-                // Access the BundleState through the shared ExecutionOutcome
-                if cache.cache().insert_state(&execution_outcome.state).is_err() {
-                    // Clear the cache on error to prevent having a polluted cache
+                // Update under the mutex so no checkout can observe partially updated state.
+                if new_cache.cache().insert_state(&execution_outcome.state).is_err() {
                     debug!(target: "engine::caching", "cleared execution cache on update error");
-                    return CacheUpdate::Discard;
+                    return (cached.take(), Some(new_cache));
                 }
 
-                cache.update_metrics(cache_state_metrics.as_ref());
+                new_cache.update_metrics(cache_state_metrics.as_ref());
 
+                // The candidate can share the slot's allocation, which is already mutated.
+                // Keep the mutex until validation decides whether to publish or discard it.
                 if valid_block_rx.recv().is_err() {
-                    // Block was invalid; caches were already mutated by insert_state above,
-                    // so we must clear to prevent using polluted state
                     debug!(target: "engine::caching", "cleared execution cache on invalid block");
-                    return CacheUpdate::Discard;
+                    return (cached.take(), Some(new_cache));
                 }
 
-                CacheUpdate::Publish
+                let reused =
+                    cached.as_ref().is_some_and(|previous| previous.shares_cache_with(&new_cache));
+                let previous = cached.replace(new_cache);
+                if reused {
+                    // The published handle keeps the allocation alive, so this drop is cheap.
+                    // Release the duplicate before unlocking to make the cache reusable at once.
+                    drop(previous);
+                    (None, None)
+                } else {
+                    (previous, None)
+                }
             });
+
+            // Destroy removed allocations on this worker before starting the next prewarm task.
+            // At most two allocations are retired by this save; none queue on the drop worker.
+            // A new checkout/allocation may overlap cleanup after unlock. Cache waits exclude
+            // this cleanup, while cache_saving_duration below includes it.
+            drop((previous, rejected));
 
             let elapsed = start.elapsed();
             debug!(target: "engine::caching", parent_hash=?hash, elapsed=?elapsed, "Updated execution cache");
@@ -883,6 +890,8 @@ mod tests {
         let runtime = Runtime::test();
         let execution_cache = PayloadExecutionCache::default();
         let saved = SavedCache::new(B256::repeat_byte(1), crate::tree::ExecutionCache::new(1_000));
+        let address = address!("0000000000000000000000000000000000000001");
+        saved.cache().insert_storage(address, B256::ZERO, Some(U256::from(7)));
         execution_cache.update_with_guard(|slot| *slot = Some(saved.clone()));
         // Keep the drop worker occupied: deferring a redundant handle must not delay reuse.
         let (release_tx, release_rx) = mpsc::channel::<()>();
@@ -903,7 +912,28 @@ mod tests {
             Gauge::from_arc(observer),
         );
         assert!(observed.load(Ordering::Relaxed), "save duration was not recorded");
+        let published = execution_cache.get_cache_for(B256::repeat_byte(2)).unwrap();
+        assert_eq!(
+            published.cache().get_or_try_insert_storage_with(address, B256::ZERO, || Err(())),
+            Ok(reth_execution_cache::CachedStatus::Cached(U256::from(7))),
+            "handoff must preserve the warmed contents",
+        );
         drop(release_tx);
+    }
+
+    #[test]
+    fn save_cache_preserves_other_cache_handles() {
+        let runtime = Runtime::test();
+        let execution_cache = PayloadExecutionCache::default();
+        let saved = SavedCache::new(B256::repeat_byte(1), crate::tree::ExecutionCache::new(1_000));
+        execution_cache.update_with_guard(|slot| *slot = Some(saved.clone()));
+        let other_handle = saved.cache().clone();
+
+        save_test_cache(&runtime, &execution_cache, saved, Default::default(), true, Gauge::noop());
+
+        assert!(execution_cache.get_cache_for(B256::repeat_byte(2)).is_none());
+        drop(other_handle);
+        assert!(execution_cache.get_cache_for(B256::repeat_byte(2)).is_some());
     }
 
     #[derive(Clone, Copy, Debug)]
@@ -938,6 +968,7 @@ mod tests {
     fn observe_cache_drop(
         saved: &SavedCache,
         execution_cache: &PayloadExecutionCache,
+        should_publish: bool,
     ) -> (Receiver<bool>, std::thread::JoinHandle<std::thread::ThreadId>) {
         let (started_tx, started_rx) = mpsc::channel();
         let (inspected_tx, inspected_rx) = mpsc::channel();
@@ -945,7 +976,10 @@ mod tests {
         let cache = execution_cache.clone();
         let reader = std::thread::spawn(move || {
             let drop_thread = started_rx.recv().unwrap();
-            cache.update_with_guard(|_| ());
+            // Cache waits synchronize publication, not destruction of removed allocations.
+            cache.wait_for_availability();
+            assert_eq!(cache.get_cache_for(B256::repeat_byte(2)).is_some(), should_publish);
+            cache.update_with_guard(|slot| assert_eq!(slot.is_some(), should_publish));
             let _ = inspected_tx.send(());
             drop_thread
         });
@@ -969,7 +1003,8 @@ mod tests {
         let candidate =
             SavedCache::new(B256::repeat_byte(1), crate::tree::ExecutionCache::new(1_000));
         let distinct_previous = matches!(slot, CacheSlot::Distinct).then(|| {
-            SavedCache::new(B256::repeat_byte(1), crate::tree::ExecutionCache::new(1_000))
+            // The same block hash does not imply the same allocation.
+            SavedCache::new(B256::repeat_byte(2), crate::tree::ExecutionCache::new(1_000))
         });
         execution_cache.update_with_guard(|cached| {
             *cached = match slot {
@@ -981,10 +1016,10 @@ mod tests {
         let should_publish = valid && !insert_error;
         let mut drops = Vec::new();
         if let Some(previous) = &distinct_previous {
-            drops.push(observe_cache_drop(previous, &execution_cache));
+            drops.push(observe_cache_drop(previous, &execution_cache, should_publish));
         }
         if !should_publish {
-            drops.push(observe_cache_drop(&candidate, &execution_cache));
+            drops.push(observe_cache_drop(&candidate, &execution_cache, should_publish));
         }
         // Leave only the handles owned by the slot and saving task so retirement destroys data.
         drop(distinct_previous);
@@ -1136,7 +1171,7 @@ pub struct PrewarmMetrics {
     pub(crate) execution_duration: Histogram,
     /// A histogram for prefetch targets per transaction prewarming
     pub(crate) prefetch_storage_targets: Histogram,
-    /// A histogram of duration for cache saving
+    /// Cache saving duration, including destruction of removed allocations after unlocking.
     pub(crate) cache_saving_duration: Gauge,
     /// Counter for transaction execution errors during prewarming
     pub(crate) transaction_errors: Counter,
