@@ -3,7 +3,9 @@ use crate::{
     changesets_utils::StorageRevertsIter,
     providers::{
         database::{chain::ChainStorage, metrics, DatabaseProviderMetrics},
-        rocksdb::{PendingRocksDBBatches, RocksDBProvider, RocksDBWriteCtx},
+        rocksdb::{
+            PendingRocksDBBatches, PendingRocksDBHistoryCache, RocksDBProvider, RocksDBWriteCtx,
+        },
         static_file::{StaticFileWriteCtx, StaticFileWriter},
         NodeTypesForProvider, StaticFileProvider,
     },
@@ -209,6 +211,8 @@ pub struct DatabaseProvider<TX, N: NodeTypes> {
     db_path: PathBuf,
     /// Pending `RocksDB` batches to be committed at provider commit time.
     pending_rocksdb_batches: PendingRocksDBBatches,
+    /// Latest uncommitted history shards written by this provider transaction.
+    pending_rocksdb_history: PendingRocksDBHistoryCache,
     /// Commit order for database operations.
     commit_order: CommitOrder,
     /// Minimum distance from tip required for pruning
@@ -382,6 +386,7 @@ impl<TX: DbTxMut, N: NodeTypes> DatabaseProvider<TX, N> {
             runtime,
             db_path,
             pending_rocksdb_batches: Default::default(),
+            pending_rocksdb_history: Default::default(),
             commit_order,
             minimum_pruning_distance: MINIMUM_UNWIND_SAFE_DISTANCE,
             metrics,
@@ -515,6 +520,7 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
             prune_tx_lookup: self.prune_modes.transaction_lookup,
             storage_settings: self.cached_storage_settings(),
             pending_batches: self.pending_rocksdb_batches.clone(),
+            pending_history: self.pending_rocksdb_history.clone(),
         }
     }
 
@@ -1030,6 +1036,7 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> DatabaseProvider<TX, N> {
             runtime,
             db_path,
             pending_rocksdb_batches: Default::default(),
+            pending_rocksdb_history: Default::default(),
             commit_order: CommitOrder::Normal,
             minimum_pruning_distance: MINIMUM_UNWIND_SAFE_DISTANCE,
             metrics,
@@ -3995,7 +4002,7 @@ mod tests {
         U256,
     };
     use reth_chain_state::{test_utils::TestBlockBuilder, ExecutedBlock};
-    use reth_db_api::models::StorageSettings;
+    use reth_db_api::models::{sharded_key::NUM_OF_INDICES_IN_SHARD, StorageSettings};
     use reth_ethereum_primitives::Receipt;
     use reth_execution_types::{AccountRevertInit, BlockExecutionOutput, BlockExecutionResult};
     use reth_primitives_traits::SealedBlock;
@@ -5707,6 +5714,157 @@ mod tests {
     #[test]
     fn test_save_blocks_v2_table_assertions() {
         run_save_blocks_and_verify(StorageMode::V2);
+    }
+
+    fn block_with_revert(
+        number: u64,
+        parent_hash: B256,
+        address: Address,
+        slot: U256,
+    ) -> ExecutedBlock {
+        use alloy_primitives::map::{FbBuildHasher, HashMap};
+
+        let bundle = BundleState::builder(number..=number)
+            .state_present_account_info(
+                address,
+                AccountInfo { nonce: number, balance: U256::from(number), ..Default::default() },
+            )
+            .revert_account_info(number, address, Some(None))
+            .state_storage(
+                address,
+                HashMap::<U256, (U256, U256), FbBuildHasher<32>>::from_iter([(
+                    slot,
+                    (U256::ZERO, U256::from(number)),
+                )]),
+            )
+            .revert_storage(number, address, vec![(slot, U256::ZERO)])
+            .build();
+        let hashed_state =
+            HashedPostState::from_bundle_state::<KeccakKeyHasher>(bundle.state()).into_sorted();
+        let block = SealedBlock::<reth_ethereum_primitives::Block>::seal_parts(
+            Header { number, parent_hash, difficulty: U256::from(1), ..Default::default() },
+            Default::default(),
+        );
+
+        ExecutedBlock::new(
+            Arc::new(block.try_recover().unwrap()),
+            Arc::new(BlockExecutionOutput {
+                result: BlockExecutionResult {
+                    receipts: vec![],
+                    requests: Default::default(),
+                    gas_used: 0,
+                    blob_gas_used: 0,
+                },
+                state: bundle,
+            }),
+            ComputedTrieData {
+                sorted: SortedTrieData::new(Arc::new(hashed_state), Default::default()),
+            },
+        )
+    }
+
+    #[test]
+    fn test_save_blocks_preserves_pending_rocksdb_history() {
+        let factory = create_test_provider_factory();
+        factory.set_storage_settings_cache(StorageSettings::v2());
+
+        let genesis = ExecutedBlock::new(
+            Arc::new(
+                SealedBlock::<reth_ethereum_primitives::Block>::from_sealed_parts(
+                    SealedHeader::new(
+                        Header { number: 0, difficulty: U256::from(1), ..Default::default() },
+                        B256::ZERO,
+                    ),
+                    Default::default(),
+                )
+                .try_recover()
+                .unwrap(),
+            ),
+            Arc::new(BlockExecutionOutput {
+                result: BlockExecutionResult {
+                    receipts: vec![],
+                    requests: Default::default(),
+                    gas_used: 0,
+                    blob_gas_used: 0,
+                },
+                state: Default::default(),
+            }),
+            ComputedTrieData::default(),
+        );
+        let provider_rw = factory.provider_rw().unwrap();
+        save_genesis(&provider_rw, &genesis).unwrap();
+        provider_rw.commit().unwrap();
+
+        let address = Address::with_last_byte(1);
+        let slot = U256::from(1);
+        let block_1 = block_with_revert(1, B256::ZERO, address, slot);
+        let block_2 = block_with_revert(2, block_1.recovered_block().hash(), address, slot);
+
+        let provider_rw = factory.provider_rw().unwrap();
+        provider_rw.save_blocks(&SaveBlocksInput::new(vec![block_1], 0, 0, 1, 1)).unwrap();
+        provider_rw.save_blocks(&SaveBlocksInput::new(vec![block_2], 1, 1, 2, 2)).unwrap();
+        provider_rw.commit().unwrap();
+
+        let rocksdb = factory.rocksdb_provider();
+        let account_indices: Vec<_> = rocksdb
+            .account_history_shards(address)
+            .unwrap()
+            .into_iter()
+            .flat_map(|(_, shard)| shard.iter().collect::<Vec<_>>())
+            .collect();
+        assert_eq!(account_indices, [1, 2]);
+
+        let storage_indices: Vec<_> = rocksdb
+            .storage_history_shards(address, B256::from(slot))
+            .unwrap()
+            .into_iter()
+            .flat_map(|(_, shard)| shard.iter().collect::<Vec<_>>())
+            .collect();
+        assert_eq!(storage_indices, [1, 2]);
+    }
+
+    #[test]
+    fn test_rocksdb_history_preserves_pending_shard_after_split() {
+        let factory = create_test_provider_factory();
+        factory.set_storage_settings_cache(StorageSettings::v2());
+
+        let address = Address::with_last_byte(1);
+        let slot = U256::from(1);
+        let block = block_with_revert(1, B256::ZERO, address, slot);
+        let provider_rw = factory.provider_rw().unwrap();
+        let rocksdb = factory.rocksdb_provider();
+        let runtime = reth_tasks::Runtime::test();
+        let blocks = vec![block.clone(); NUM_OF_INDICES_IN_SHARD];
+        let tx_nums = vec![0; NUM_OF_INDICES_IN_SHARD];
+
+        rocksdb
+            .write_blocks_data(&blocks, &tx_nums, provider_rw.rocksdb_write_ctx(1), &runtime)
+            .unwrap();
+        rocksdb
+            .write_blocks_data(
+                std::slice::from_ref(&block),
+                &[0],
+                provider_rw.rocksdb_write_ctx(NUM_OF_INDICES_IN_SHARD as u64 + 1),
+                &runtime,
+            )
+            .unwrap();
+        provider_rw.commit_pending_rocksdb_batches().unwrap();
+
+        let account_shards = rocksdb.account_history_shards(address).unwrap();
+        assert_eq!(account_shards.len(), 2);
+        assert_eq!(account_shards[0].1.len(), NUM_OF_INDICES_IN_SHARD as u64);
+        assert_eq!(
+            account_shards[1].1.iter().collect::<Vec<_>>(),
+            [NUM_OF_INDICES_IN_SHARD as u64 + 1]
+        );
+
+        let storage_shards = rocksdb.storage_history_shards(address, B256::from(slot)).unwrap();
+        assert_eq!(storage_shards.len(), 2);
+        assert_eq!(storage_shards[0].1.len(), NUM_OF_INDICES_IN_SHARD as u64);
+        assert_eq!(
+            storage_shards[1].1.iter().collect::<Vec<_>>(),
+            [NUM_OF_INDICES_IN_SHARD as u64 + 1]
+        );
     }
 
     #[test]

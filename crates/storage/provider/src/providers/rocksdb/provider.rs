@@ -49,6 +49,17 @@ fn synced_write_options() -> WriteOptions {
 /// Pending `RocksDB` batches type alias.
 pub(crate) type PendingRocksDBBatches = Arc<Mutex<Vec<WriteBatchWithTransaction<true>>>>;
 
+/// Latest uncommitted history shards, shared by all `save_blocks` calls in one provider
+/// transaction.
+#[derive(Debug, Default)]
+pub(crate) struct PendingRocksDBHistory {
+    account_shards: BTreeMap<Address, BlockNumberList>,
+    storage_shards: BTreeMap<(Address, B256), BlockNumberList>,
+}
+
+/// Pending history cache type alias.
+pub(crate) type PendingRocksDBHistoryCache = Arc<Mutex<PendingRocksDBHistory>>;
+
 /// Raw key-value result from a `RocksDB` iterator.
 type RawKVResult = Result<(Box<[u8]>, Box<[u8]>), rocksdb::Error>;
 
@@ -93,6 +104,8 @@ pub(crate) struct RocksDBWriteCtx {
     pub storage_settings: StorageSettings,
     /// Pending batches to push to after writing.
     pub pending_batches: PendingRocksDBBatches,
+    /// Latest history shards written by earlier `save_blocks` calls in this transaction.
+    pub pending_history: PendingRocksDBHistoryCache,
 }
 
 impl fmt::Debug for RocksDBWriteCtx {
@@ -102,6 +115,7 @@ impl fmt::Debug for RocksDBWriteCtx {
             .field("prune_tx_lookup", &self.prune_tx_lookup)
             .field("storage_settings", &self.storage_settings)
             .field("pending_batches", &"<pending batches>")
+            .field("pending_history", &"<pending history shards>")
             .finish()
     }
 }
@@ -1485,9 +1499,19 @@ impl RocksDBProvider {
             }
         }
 
-        // Write account history using proper shard append logic
+        let mut pending_history = ctx.pending_history.lock();
         for (address, indices) in account_history {
-            batch.append_account_history_shard(address, indices)?;
+            let last_shard = match pending_history.account_shards.get(&address) {
+                Some(shard) => Some(shard.clone()),
+                None => self.get::<tables::AccountsHistory>(ShardedKey::new(address, u64::MAX))?,
+            };
+            let shards = self.account_history_shards_to_put(address, last_shard, indices)?;
+            let last_shard =
+                shards.last().expect("non-empty indices produce a sentinel shard").1.clone();
+            for (key, shard) in shards {
+                batch.put::<tables::AccountsHistory>(key, &shard)?;
+            }
+            pending_history.account_shards.insert(address, last_shard);
         }
         ctx.pending_batches.lock().push(batch.into_inner());
         Ok(())
@@ -1526,26 +1550,69 @@ impl RocksDBProvider {
         let shard_puts = storage_history
             .into_par_iter()
             .map(|((address, slot), indices)| {
-                self.storage_history_shards_to_put(address, slot, indices)
+                let last_shard =
+                    ctx.pending_history.lock().storage_shards.get(&(address, slot)).cloned();
+                let last_shard = match last_shard {
+                    Some(shard) => Some(shard),
+                    None => {
+                        self.get::<tables::StoragesHistory>(StorageShardedKey::last(address, slot))?
+                    }
+                };
+                self.storage_history_shards_to_put(address, slot, last_shard, indices)
+                    .map(|shards| ((address, slot), shards))
             })
             .collect::<ProviderResult<Vec<_>>>()?;
 
         let mut batch = self.batch();
-        for shards in shard_puts {
+        let mut pending_history = ctx.pending_history.lock();
+        for ((address, slot), shards) in shard_puts {
+            let last_shard =
+                shards.last().expect("non-empty indices produce a sentinel shard").1.clone();
             for (key, shard) in shards {
                 batch.put::<tables::StoragesHistory>(key, &shard)?;
             }
+            pending_history.storage_shards.insert((address, slot), last_shard);
         }
         ctx.pending_batches.lock().push(batch.into_inner());
         Ok(())
     }
 
-    /// Prepares storage history shard writes by reading the current last shard and appending
-    /// indices.
+    /// Prepares account history shard writes from the last committed or pending shard.
+    fn account_history_shards_to_put(
+        &self,
+        address: Address,
+        last_shard: Option<BlockNumberList>,
+        indices: Vec<u64>,
+    ) -> ProviderResult<Vec<(ShardedKey<Address>, BlockNumberList)>> {
+        let mut last_shard = last_shard.unwrap_or_else(BlockNumberList::empty);
+        last_shard.append(indices).map_err(ProviderError::other)?;
+
+        if last_shard.len() <= NUM_OF_INDICES_IN_SHARD as u64 {
+            return Ok(vec![(ShardedKey::new(address, u64::MAX), last_shard)]);
+        }
+
+        let chunks = last_shard.iter().chunks(NUM_OF_INDICES_IN_SHARD);
+        let mut chunks = chunks.into_iter().peekable();
+        let mut shards = Vec::new();
+        while let Some(chunk) = chunks.next() {
+            let shard = BlockNumberList::new_pre_sorted(chunk);
+            let highest_block_number = if chunks.peek().is_some() {
+                shard.iter().next_back().expect("chunks do not return empty lists")
+            } else {
+                u64::MAX
+            };
+            shards.push((ShardedKey::new(address, highest_block_number), shard));
+        }
+
+        Ok(shards)
+    }
+
+    /// Prepares storage history shard writes from the last committed or pending shard.
     fn storage_history_shards_to_put(
         &self,
         address: Address,
         storage_key: B256,
+        last_shard: Option<BlockNumberList>,
         indices: Vec<u64>,
     ) -> ProviderResult<Vec<(StorageShardedKey, BlockNumberList)>> {
         if indices.is_empty() {
@@ -1558,14 +1625,12 @@ impl RocksDBProvider {
             indices
         );
 
-        let last_key = StorageShardedKey::last(address, storage_key);
-        let last_shard_opt = self.get::<tables::StoragesHistory>(last_key.clone())?;
-        let mut last_shard = last_shard_opt.unwrap_or_else(BlockNumberList::empty);
+        let mut last_shard = last_shard.unwrap_or_else(BlockNumberList::empty);
 
         last_shard.append(indices).map_err(ProviderError::other)?;
 
         if last_shard.len() <= NUM_OF_INDICES_IN_SHARD as u64 {
-            return Ok(vec![(last_key, last_shard)]);
+            return Ok(vec![(StorageShardedKey::last(address, storage_key), last_shard)]);
         }
 
         let chunks = last_shard.iter().chunks(NUM_OF_INDICES_IN_SHARD);
@@ -1983,34 +2048,12 @@ impl<'a> RocksDBBatch<'a> {
             indices
         );
 
-        let last_key = ShardedKey::new(address, u64::MAX);
-        let last_shard_opt = self.provider.get::<tables::AccountsHistory>(last_key.clone())?;
-        let mut last_shard = last_shard_opt.unwrap_or_else(BlockNumberList::empty);
-
-        last_shard.append(indices).map_err(ProviderError::other)?;
-
-        // Fast path: all indices fit in one shard
-        if last_shard.len() <= NUM_OF_INDICES_IN_SHARD as u64 {
-            self.put::<tables::AccountsHistory>(last_key, &last_shard)?;
-            return Ok(());
-        }
-
-        // Slow path: rechunk into multiple shards
-        let chunks = last_shard.iter().chunks(NUM_OF_INDICES_IN_SHARD);
-        let mut chunks_peekable = chunks.into_iter().peekable();
-
-        while let Some(chunk) = chunks_peekable.next() {
-            let shard = BlockNumberList::new_pre_sorted(chunk);
-            let highest_block_number = if chunks_peekable.peek().is_some() {
-                shard.iter().next_back().expect("`chunks` does not return empty list")
-            } else {
-                u64::MAX
-            };
-
-            self.put::<tables::AccountsHistory>(
-                ShardedKey::new(address, highest_block_number),
-                &shard,
-            )?;
+        let last_shard =
+            self.provider.get::<tables::AccountsHistory>(ShardedKey::new(address, u64::MAX))?;
+        for (key, shard) in
+            self.provider.account_history_shards_to_put(address, last_shard, indices)?
+        {
+            self.put::<tables::AccountsHistory>(key, &shard)?;
         }
 
         Ok(())
@@ -2034,10 +2077,16 @@ impl<'a> RocksDBBatch<'a> {
         indices: impl IntoIterator<Item = u64>,
     ) -> ProviderResult<()> {
         let indices: Vec<u64> = indices.into_iter().collect();
+        let last_shard = self
+            .provider
+            .get::<tables::StoragesHistory>(StorageShardedKey::last(address, storage_key))?;
 
-        for (key, shard) in
-            self.provider.storage_history_shards_to_put(address, storage_key, indices)?
-        {
+        for (key, shard) in self.provider.storage_history_shards_to_put(
+            address,
+            storage_key,
+            last_shard,
+            indices,
+        )? {
             self.put::<tables::StoragesHistory>(key, &shard)?;
         }
 
