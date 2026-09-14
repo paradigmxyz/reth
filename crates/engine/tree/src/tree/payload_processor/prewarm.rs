@@ -270,19 +270,19 @@ where
         });
     }
 
-    /// Saves the warmed caches back into the shared slot after prewarming completes.
+    /// Saves the warmed cache in `self.execution_cache` after prewarming completes.
     ///
     /// This method calls [`PayloadExecutionCache::update_with_guard`], which requires exclusive
     /// access. It should only be called after ensuring that:
     /// 1. All prewarming tasks have completed execution
     /// 2. No other concurrent operations are accessing the cache
     ///
-    /// This consumes the `SavedCache` held by the task and transfers its cache handle into the
-    /// shared slot, so the task retains no extra reference after publication.
+    /// This moves the task's cache handle into `self.execution_cache` when the block is valid,
+    /// without retaining an extra reference that would prevent reuse after unlocking.
     /// This method is called from `run()` only after all execution tasks are complete.
     ///
-    /// Holds the cache mutex through state insertion and block validation because the candidate
-    /// may share storage with the published cache. Removed caches are dropped after unlocking,
+    /// State insertion and block validation run under the mutex because the cache being updated
+    /// may also be stored in `self.execution_cache`. Removed caches are dropped after unlocking,
     /// before the next task on the prewarm worker starts.
     #[instrument(level = "debug", target = "engine::tree::payload_processor::prewarm", skip_all)]
     fn save_cache(
@@ -312,8 +312,8 @@ where
 
                 new_cache.update_metrics(cache_state_metrics.as_ref());
 
-                // The candidate can share the slot's allocation, which is already mutated.
-                // Keep the mutex until validation decides whether to publish or discard it.
+                // `new_cache` may use the same cache as `cached`, already modified by insert_state.
+                // Keep the lock until validation succeeds or we clear `cached`.
                 if valid_block_rx.recv().is_err() {
                     debug!(target: "engine::caching", "cleared execution cache on invalid block");
                     return (cached.take(), Some(new_cache));
@@ -323,7 +323,8 @@ where
                     cached.as_ref().is_some_and(|previous| previous.shares_cache_with(&new_cache));
                 let previous = cached.replace(new_cache);
                 if reused {
-                    // Drop the extra handle before unlocking so it doesn't block cache reuse.
+                    // `cached` and `previous` hold the same cache. Drop the extra Arc reference
+                    // before unlocking so get_cache_for can reuse it.
                     drop(previous);
                     (None, None)
                 } else {
@@ -332,11 +333,10 @@ where
                 }
             });
 
-            // Drop removed caches here before starting the next prewarm task. If a handle is the
-            // last owner, its allocation is destroyed here; at most two can be retired per save.
-            // No retired handles queue on the shared drop worker.
-            // A new checkout/allocation may overlap cleanup after unlock. Cache waits exclude
-            // this cleanup, while cache_saving_duration below includes it.
+            // Drop up to two removed caches here before this worker starts its next task.
+            // This keeps large caches out of the shared drop worker's queue.
+            // Another payload may access or allocate a cache while these drops run.
+            // wait_for_availability excludes this time; cache_saving_duration includes it.
             drop((previous, rejected));
 
             let elapsed = start.elapsed();
@@ -889,7 +889,7 @@ mod tests {
         fn set(&self, _: f64) {
             assert!(
                 self.cache.get_cache_for(B256::repeat_byte(2)).is_some(),
-                "published cache must be available before the saving task returns"
+                "saved cache must be available before the saving task returns"
             );
             self.observed.store(true, Ordering::Relaxed);
         }
@@ -922,9 +922,9 @@ mod tests {
             Gauge::from_arc(observer),
         );
         assert!(observed.load(Ordering::Relaxed), "save duration was not recorded");
-        let published = execution_cache.get_cache_for(B256::repeat_byte(2)).unwrap();
+        let saved = execution_cache.get_cache_for(B256::repeat_byte(2)).unwrap();
         assert_eq!(
-            published.cache().get_or_try_insert_storage_with(address, B256::ZERO, || Err(())),
+            saved.cache().get_or_try_insert_storage_with(address, B256::ZERO, || Err(())),
             Ok(reth_execution_cache::CachedStatus::Cached(U256::from(7))),
             "handoff must preserve the warmed contents",
         );
@@ -978,7 +978,7 @@ mod tests {
     fn observe_cache_drop(
         saved: &SavedCache,
         execution_cache: &PayloadExecutionCache,
-        should_publish: bool,
+        expect_saved_cache: bool,
     ) -> (Receiver<bool>, std::thread::JoinHandle<std::thread::ThreadId>) {
         let (started_tx, started_rx) = mpsc::channel();
         let (inspected_tx, inspected_rx) = mpsc::channel();
@@ -986,10 +986,10 @@ mod tests {
         let cache = execution_cache.clone();
         let reader = std::thread::spawn(move || {
             let drop_thread = started_rx.recv().unwrap();
-            // Cache waits synchronize publication, not destruction of removed allocations.
+            // Waiting for the mutex must return while the removed cache is still being dropped.
             cache.wait_for_availability();
-            assert_eq!(cache.get_cache_for(B256::repeat_byte(2)).is_some(), should_publish);
-            cache.update_with_guard(|slot| assert_eq!(slot.is_some(), should_publish));
+            assert_eq!(cache.get_cache_for(B256::repeat_byte(2)).is_some(), expect_saved_cache);
+            cache.update_with_guard(|slot| assert_eq!(slot.is_some(), expect_saved_cache));
             let _ = inspected_tx.send(());
             drop_thread
         });
@@ -1005,7 +1005,7 @@ mod tests {
         (result_rx, reader)
     }
 
-    fn assert_save_cache_retires_allocations(slot: CacheSlot, valid: bool, insert_error: bool) {
+    fn assert_save_cache_drops_removed_caches(slot: CacheSlot, valid: bool, insert_error: bool) {
         use reth_revm::db::{AccountStatus, BundleAccount, BundleState};
 
         let runtime = Runtime::test();
@@ -1023,15 +1023,15 @@ mod tests {
                 CacheSlot::Distinct => distinct_previous.clone(),
             };
         });
-        let should_publish = valid && !insert_error;
+        let expect_saved_cache = valid && !insert_error;
         let mut drops = Vec::new();
         if let Some(previous) = &distinct_previous {
-            drops.push(observe_cache_drop(previous, &execution_cache, should_publish));
+            drops.push(observe_cache_drop(previous, &execution_cache, expect_saved_cache));
         }
-        if !should_publish {
-            drops.push(observe_cache_drop(&candidate, &execution_cache, should_publish));
+        if !expect_saved_cache {
+            drops.push(observe_cache_drop(&candidate, &execution_cache, expect_saved_cache));
         }
-        // Leave only the handles owned by the slot and saving task so retirement destroys data.
+        // Drop our extra handle so save_cache can free the old cache.
         drop(distinct_previous);
 
         // Cleanup must finish even when the shared background drop worker is occupied.
@@ -1052,52 +1052,55 @@ mod tests {
 
         for (result, reader) in drops {
             assert!(
-                result.try_recv().expect("retired cache must be destroyed before save returns"),
+                result.try_recv().expect("removed cache must be destroyed before save returns"),
                 "cache mutex must be unlocked during destruction"
             );
             assert_eq!(reader.join().unwrap(), std::thread::current().id());
         }
         execution_cache.update_with_guard(|slot| {
-            if should_publish {
-                let published = slot.as_ref().expect("valid cache published");
-                assert_eq!(published.executed_block_hash(), B256::repeat_byte(2));
+            if expect_saved_cache {
+                let saved = slot.as_ref().expect("valid cache saved");
+                assert_eq!(saved.executed_block_hash(), B256::repeat_byte(2));
             } else {
-                assert!(slot.is_none(), "polluted cache must not be published");
+                assert!(slot.is_none(), "polluted cache must be removed");
             }
         });
-        assert_eq!(execution_cache.get_cache_for(B256::repeat_byte(2)).is_some(), should_publish);
+        assert_eq!(
+            execution_cache.get_cache_for(B256::repeat_byte(2)).is_some(),
+            expect_saved_cache
+        );
         drop(release_tx);
     }
 
     #[test]
     fn save_cache_drops_replaced_allocation_after_unlock() {
-        assert_save_cache_retires_allocations(CacheSlot::Distinct, true, false);
+        assert_save_cache_drops_removed_caches(CacheSlot::Distinct, true, false);
     }
 
     #[test]
     fn save_cache_drops_invalid_allocations_after_unlock() {
-        assert_save_cache_retires_allocations(CacheSlot::Distinct, false, false);
+        assert_save_cache_drops_removed_caches(CacheSlot::Distinct, false, false);
     }
 
     #[test]
     fn save_cache_drops_allocations_after_unlock_on_insert_error() {
-        assert_save_cache_retires_allocations(CacheSlot::Distinct, true, true);
+        assert_save_cache_drops_removed_caches(CacheSlot::Distinct, true, true);
     }
 
     #[test]
     fn save_cache_drops_shared_allocation_after_unlock_on_invalid_block() {
-        assert_save_cache_retires_allocations(CacheSlot::Shared, false, false);
+        assert_save_cache_drops_removed_caches(CacheSlot::Shared, false, false);
     }
 
     #[test]
     fn save_cache_drops_shared_allocation_after_unlock_on_insert_error() {
-        assert_save_cache_retires_allocations(CacheSlot::Shared, true, true);
+        assert_save_cache_drops_removed_caches(CacheSlot::Shared, true, true);
     }
 
     #[test]
     fn save_cache_handles_empty_slot() {
         for (valid, insert_error) in [(true, false), (false, false), (true, true)] {
-            assert_save_cache_retires_allocations(CacheSlot::Empty, valid, insert_error);
+            assert_save_cache_drops_removed_caches(CacheSlot::Empty, valid, insert_error);
         }
     }
 

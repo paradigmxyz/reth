@@ -126,10 +126,12 @@ impl PayloadExecutionCache {
         elapsed
     }
 
-    /// Updates the cache with a closure that has exclusive access to the guard.
-    /// Returns the closure's result after releasing the mutex. Removed caches can be returned
-    /// for destruction outside the lock. Release redundant handles to the published allocation
-    /// before unlocking: retaining them in the result would delay reuse of that cache.
+    /// Runs `update_fn` with mutable access to the stored `Option<SavedCache>` under the mutex.
+    /// Returns the closure's result after releasing the mutex, allowing removed caches to be
+    /// dropped outside the lock.
+    ///
+    /// Drop extra handles to the cache left in the `Option` before the closure returns:
+    /// [`Self::get_cache_for`] can only reuse it when its Arc reference count is one.
     ///
     /// ## CRITICAL SAFETY REQUIREMENT
     ///
