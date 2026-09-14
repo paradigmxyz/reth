@@ -18,14 +18,14 @@ use crate::tree::{
     PayloadExecutionCache, SavedCache,
 };
 use alloy_consensus::transaction::TxHashRef;
-use alloy_eip7928::{bal::DecodedBal, BalAccountInfo};
+use alloy_eip7928::bal::DecodedBal;
 use alloy_eips::eip4895::Withdrawal;
-use alloy_primitives::{keccak256, U256};
+use alloy_primitives::keccak256;
 use metrics::{Counter, Gauge, Histogram};
 use rayon::prelude::*;
 use reth_evm::{execute::ExecutableTxFor, ConfigureEvm, Evm, EvmFor, RecoveredTx, SpecFor};
 use reth_metrics::Metrics;
-use reth_primitives_traits::{Account, FastInstant as Instant, NodePrimitives};
+use reth_primitives_traits::{FastInstant as Instant, NodePrimitives};
 use reth_provider::{
     AccountReader, BlockExecutionOutput, BlockNumReader, ChangeSetReader, DatabaseProviderFactory,
     DatabaseProviderROFactory, HistoryReader, PruneCheckpointReader, StageCheckpointReader,
@@ -735,7 +735,8 @@ where
             account_reader.basic_account(&address).ok().flatten()
         };
 
-        let account = bal_account(account_info, existing_account.as_ref());
+        let mut account = existing_account.unwrap_or_default();
+        account.apply_bal_info(account_info);
         let hashed_address = hashed_address.unwrap_or_else(|| keccak256(address));
 
         // It is possible for the resulting account info to be empty. This can happen when, in the
@@ -757,22 +758,6 @@ where
     }
 }
 
-/// Applies the account fields an EIP-7928 entry changed on top of `existing`, the account as it
-/// was before the block. Fields the block did not change keep their previous values.
-fn bal_account(info: BalAccountInfo, existing: Option<&Account>) -> Account {
-    Account {
-        balance: info
-            .balance
-            .or_else(|| existing.map(|account| account.balance))
-            .unwrap_or(U256::ZERO),
-        nonce: info.nonce.or_else(|| existing.map(|account| account.nonce)).unwrap_or(0),
-        bytecode_hash: info
-            .code_hash
-            .or_else(|| existing.and_then(|account| account.bytecode_hash))
-            .or(Some(alloy_consensus::constants::KECCAK_EMPTY)),
-    }
-}
-
 /// Returns [`MultiProofTargetsV2`] for withdrawal addresses.
 ///
 /// Withdrawals only modify account balances (no storage), so the targets contain
@@ -789,11 +774,12 @@ mod tests {
     use super::*;
     use alloy_consensus::transaction::Recovered;
     use alloy_eip7928::{AccountChanges, BalanceChange, BlockAccessIndex};
-    use alloy_primitives::{address, B256};
+    use alloy_primitives::{address, B256, U256};
     use reth_chainspec::ChainSpec;
     use reth_ethereum_primitives::TransactionSigned;
     use reth_evm::{execute::WithTxEnv, TxEnvFor};
     use reth_evm_ethereum::EthEvmConfig;
+    use reth_primitives_traits::Account;
     use reth_provider::test_utils::MockEthProvider;
     use reth_storage_overlay::OverlayManager;
 
@@ -851,14 +837,12 @@ mod tests {
         let info = changes.account_info();
 
         assert!(!info.is_complete());
-        let account = bal_account(
-            info,
-            Some(&Account {
-                balance: U256::from(1),
-                nonce: 3,
-                bytecode_hash: Some(B256::repeat_byte(0xaa)),
-            }),
-        );
+        let mut account = Account {
+            balance: U256::from(1),
+            nonce: 3,
+            bytecode_hash: Some(B256::repeat_byte(0xaa)),
+        };
+        account.apply_bal_info(info);
 
         assert_eq!(account.balance, U256::from(10));
         assert_eq!(account.nonce, 3);
