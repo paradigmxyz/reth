@@ -299,9 +299,7 @@ where
         if let Some(saved_cache) = saved_cache {
             debug!(target: "engine::caching", parent_hash=?hash, "Updating execution cache");
             execution_cache.update_with_guard(|cached| {
-                // consumes the `SavedCache` held by the prewarming task, which releases its cache
-                // handle
-                let caches = saved_cache.cache().clone();
+                let caches = saved_cache.into_cache();
                 let new_cache = SavedCache::new(hash, caches);
 
                 // Insert state into cache while holding the lock
