@@ -114,6 +114,8 @@ pub(crate) enum CurrentPersistenceAction {
 pub(crate) struct PersistencePacing {
     /// Oldest sample first; each sample is save duration per fully persisted block.
     samples: VecDeque<Duration>,
+    /// Completion before any pacing sleep, including locally built blocks inserted directly.
+    pub(super) last_validation_completed_at: Option<Instant>,
     /// Cumulative sleep, allowing an RPC to account for all blocks it connects.
     pub(crate) total_wait: Duration,
 }
@@ -121,6 +123,16 @@ pub(crate) struct PersistencePacing {
 impl PersistencePacing {
     const WINDOW: usize = 10;
     const ALPHA: f64 = 2.0 / (Self::WINDOW as f64 + 1.0);
+
+    /// Record every completion, including those below the backpressure threshold. Time between
+    /// completions includes payload building, idle time, and the previous block's pacing sleep.
+    pub(crate) fn on_validation_completed(&mut self, now: Instant, backpressure: bool) -> Duration {
+        let previous = self.last_validation_completed_at.replace(now);
+        match previous {
+            Some(previous) if backpressure => self.delay(now.duration_since(previous)),
+            _ => Duration::ZERO,
+        }
+    }
 
     pub(crate) fn record(&mut self, duration: Duration, blocks: u64) {
         if blocks == 0 {
@@ -133,7 +145,7 @@ impl PersistencePacing {
     }
 
     /// Recompute the EMA over the bounded window so older saves no longer affect pacing.
-    pub(crate) fn delay(&self, validation_duration: Duration) -> Duration {
+    pub(crate) fn delay(&self, completion_interval: Duration) -> Duration {
         if self.samples.len() < 2 {
             return Duration::ZERO;
         }
@@ -141,14 +153,39 @@ impl PersistencePacing {
         let first = samples.next().expect("at least two samples");
         let ema = samples
             .fold(first, |ema, sample| (1.0 - Self::ALPHA).mul_add(ema, Self::ALPHA * sample));
-        Duration::from_secs_f64(ema).saturating_sub(validation_duration)
+        Duration::from_secs_f64(ema).saturating_sub(completion_interval)
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::PersistencePacing;
+    use reth_primitives_traits::FastInstant as Instant;
     use std::time::Duration;
+
+    #[test]
+    fn persistence_pacing_counts_time_between_completions() {
+        let mut pacing = PersistencePacing::default();
+        for _ in 0..2 {
+            pacing.record(Duration::from_millis(100), 1);
+        }
+        let start = Instant::now();
+        assert_eq!(pacing.on_validation_completed(start, true), Duration::ZERO);
+        // Below-threshold blocks still establish the next interval's start.
+        assert_eq!(
+            pacing.on_validation_completed(start + Duration::from_millis(10), false),
+            Duration::ZERO
+        );
+        assert_eq!(
+            pacing.on_validation_completed(start + Duration::from_millis(30), true),
+            Duration::from_millis(80)
+        );
+        // Previous sleep plus building/validation already fills the target interval.
+        assert_eq!(
+            pacing.on_validation_completed(start + Duration::from_millis(140), true),
+            Duration::ZERO
+        );
+    }
 
     #[test]
     fn persistence_pacing_requires_two_saves_that_release_blocks() {

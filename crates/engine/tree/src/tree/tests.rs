@@ -1201,27 +1201,49 @@ fn test_backpressure_does_not_block_incoming_before_validation() {
 }
 
 #[test]
-fn test_backpressure_uses_persistence_throughput_independent_of_threshold() {
-    let mut test_harness = TestHarness::new(MAINNET.clone());
-    test_harness.tree.config =
-        test_harness.tree.config.with_persistence_backpressure_threshold(u64::MAX);
-    for _ in 0..2 {
-        test_harness.tree.persistence_pacing.record(Duration::from_millis(10), 1);
+fn test_backpressure_tail_wait_requires_threshold() {
+    for (tip, expected) in [(14, false), (15, true)] {
+        let blocks: Vec<_> = TestBlockBuilder::eth().get_executed_blocks(1..tip + 1).collect();
+        let mut harness = TestHarness::new(MAINNET.clone()).with_blocks(blocks.clone());
+        harness.tree.config = harness
+            .tree
+            .config
+            .with_memory_block_buffer_target(5)
+            .with_persistence_backpressure_threshold(10);
+        let (_tx, rx) = crossbeam_channel::bounded(1);
+        harness
+            .tree
+            .persistence_state
+            .start_save(blocks.last().unwrap().recovered_block().num_hash(), rx);
+        for _ in 0..2 {
+            harness.tree.persistence_pacing.record(Duration::from_millis(100), 1);
+        }
+        assert_eq!(harness.tree.should_backpressure(), expected);
+        harness.tree.pace_validation(); // First completion never sleeps.
+        assert_eq!(harness.tree.persistence_pacing.total_wait, Duration::ZERO);
+        harness.tree.pace_validation();
+        assert_eq!(!harness.tree.persistence_pacing.total_wait.is_zero(), expected);
+        harness.tree.persistence_state.rx.take();
+        assert!(!harness.tree.should_backpressure());
     }
-
-    test_harness.tree.pace_validation(Duration::from_millis(20));
-    assert_eq!(test_harness.tree.persistence_pacing.total_wait, Duration::ZERO);
-    test_harness.tree.pace_validation(Duration::from_millis(5));
-    assert!(test_harness.tree.persistence_pacing.total_wait >= Duration::from_millis(5));
 }
 
 #[test]
 fn test_backpressure_after_successful_block_validation_only() {
     let blocks: Vec<_> = TestBlockBuilder::eth().get_executed_blocks(1..3).collect();
     let mut test_harness = TestHarness::new(MAINNET.clone()).with_blocks(vec![blocks[0].clone()]);
+    test_harness.tree.config = test_harness
+        .tree
+        .config
+        .with_persistence_threshold(0)
+        .with_memory_block_buffer_target(0)
+        .with_persistence_backpressure_threshold(1);
+    let (_tx, rx) = crossbeam_channel::bounded(1);
+    test_harness.tree.persistence_state.start_save(blocks[0].recovered_block().num_hash(), rx);
     for _ in 0..2 {
         test_harness.tree.persistence_pacing.record(Duration::from_secs(1), 1);
     }
+    test_harness.tree.persistence_pacing.last_validation_completed_at = Some(Instant::now());
     let block = blocks[1].clone();
     let block_id = BlockWithParent {
         block: block.recovered_block().num_hash(),
@@ -1241,14 +1263,68 @@ fn test_backpressure_after_successful_block_validation_only() {
         |_, ()| unreachable!("new block with a known parent"),
     );
     assert_eq!(result.unwrap(), InsertPayloadOk::Inserted(BlockStatus::Valid));
-    assert!(start.elapsed() >= Duration::from_secs(1));
+    assert!(start.elapsed() >= Duration::from_millis(900));
     let wait = test_harness.tree.persistence_pacing.total_wait;
+    let completion = test_harness.tree.persistence_pacing.last_validation_completed_at;
     assert!(!wait.is_zero());
 
     let sealed = block.recovered_block().clone_sealed_block();
     let result = test_harness.tree.insert_block(sealed.into()).unwrap();
     assert_eq!(result, InsertPayloadOk::AlreadySeen(BlockStatus::Valid));
     assert_eq!(test_harness.tree.persistence_pacing.total_wait, wait);
+    assert_eq!(test_harness.tree.persistence_pacing.last_validation_completed_at, completion);
+}
+
+#[tokio::test]
+async fn test_backpressure_counts_built_blocks_without_revalidation() {
+    let blocks: Vec<_> = TestBlockBuilder::eth().get_executed_blocks(1..4).collect();
+    let mut harness = TestHarness::new(MAINNET.clone()).with_blocks(vec![blocks[0].clone()]);
+    harness.tree.config = harness
+        .tree
+        .config
+        .with_persistence_threshold(0)
+        .with_memory_block_buffer_target(0)
+        .with_persistence_backpressure_threshold(1);
+    let (_tx, rx) = crossbeam_channel::bounded(1);
+    harness.tree.persistence_state.start_save(blocks[0].recovered_block().num_hash(), rx);
+    for _ in 0..2 {
+        harness.tree.persistence_pacing.record(Duration::from_millis(100), 1);
+    }
+    // A slow payload build fills the interval even though direct insertion itself is fast.
+    harness.tree.persistence_pacing.last_validation_completed_at =
+        Some(Instant::now() - Duration::from_secs(1));
+    let block = &blocks[1];
+    let payload = reth_payload_primitives::BuiltPayloadExecutedBlock {
+        recovered_block: Arc::new(block.recovered_block().clone()),
+        execution_output: Arc::new(Default::default()),
+        hashed_state: Arc::new(Default::default()),
+        trie_updates: Arc::new(Default::default()),
+    };
+    let _ = harness
+        .tree
+        .on_engine_message(FromEngine::Request(EngineApiRequest::InsertExecutedBlock(
+            payload.clone(),
+        )))
+        .unwrap();
+    let completion = harness.tree.persistence_pacing.last_validation_completed_at;
+    assert!(completion.is_some());
+    assert_eq!(harness.tree.persistence_pacing.total_wait, Duration::ZERO);
+    let _ = harness
+        .tree
+        .on_engine_message(FromEngine::Request(EngineApiRequest::InsertExecutedBlock(
+            payload.clone(),
+        )))
+        .unwrap();
+    assert_eq!(harness.tree.persistence_pacing.last_validation_completed_at, completion);
+    let payload = reth_payload_primitives::BuiltPayloadExecutedBlock {
+        recovered_block: Arc::new(blocks[2].recovered_block().clone()),
+        ..payload
+    };
+    let _ = harness
+        .tree
+        .on_engine_message(FromEngine::Request(EngineApiRequest::InsertExecutedBlock(payload)))
+        .unwrap();
+    assert!(!harness.tree.persistence_pacing.total_wait.is_zero());
 }
 
 #[tokio::test]

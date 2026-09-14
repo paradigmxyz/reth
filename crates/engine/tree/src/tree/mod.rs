@@ -509,9 +509,21 @@ where
         self.incoming_tx.clone()
     }
 
-    /// Apply persistence backpressure after validation, accounting for time already spent working.
-    fn pace_validation(&mut self, validation_duration: Duration) {
-        let delay = self.persistence_pacing.delay(validation_duration);
+    /// Whether the unbuffered canonical persistence gap has reached the backpressure threshold.
+    const fn should_backpressure(&self) -> bool {
+        self.persistence_state.in_progress() &&
+            self.state
+                .tree_state
+                .canonical_block_number()
+                .saturating_sub(self.persistence_state.last_persisted_block.number)
+                .saturating_sub(self.config.memory_block_buffer_target()) >=
+                self.config.persistence_backpressure_threshold()
+    }
+
+    /// Apply tail backpressure using elapsed time since the previous block completed validation.
+    fn pace_validation(&mut self) {
+        let backpressure = self.should_backpressure();
+        let delay = self.persistence_pacing.on_validation_completed(Instant::now(), backpressure);
         if delay.is_zero() {
             return;
         }
@@ -1598,6 +1610,7 @@ where
                         self.emit_event(EngineApiEvent::BeaconConsensus(
                             ConsensusEngineEvent::CanonicalBlockAdded(block, now.elapsed()),
                         ));
+                        self.pace_validation();
                     }
                     EngineApiRequest::Beacon(request) => {
                         match request {
@@ -3233,7 +3246,7 @@ where
             .block_insert_total_duration
             .record(block_insert_start.elapsed().as_secs_f64());
         debug!(target: "engine::tree", block=?block_num_hash, "Finished inserting block");
-        self.pace_validation(block_insert_start.elapsed());
+        self.pace_validation();
         Ok(InsertPayloadOk::Inserted(BlockStatus::Valid))
     }
 
