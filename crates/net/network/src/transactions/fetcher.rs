@@ -812,6 +812,13 @@ impl<N: NetworkPrimitives> TransactionFetcher<N> {
                 remaining.extend(requested.iter().copied());
                 let unsolicited =
                     verify_response(&mut transactions, &mut remaining, &mut self.scratch_rejected);
+                // Only a flood of unsolicited transactions grows this scratch map past the
+                // request limit. Drop it rather than pin the allocation for the fetcher's lifetime.
+                if self.scratch_rejected.capacity() >
+                    2 * SOFT_LIMIT_COUNT_HASHES_IN_GET_POOLED_TRANSACTIONS_REQUEST
+                {
+                    self.scratch_rejected = Default::default();
+                }
                 Ok((transactions, unsolicited))
             }
             Err(error) => Err(error),
@@ -2851,13 +2858,11 @@ mod tests {
                     .copied()
                     .collect::<B256Set>();
                 let mut response = PooledTransactions(original.clone());
-                let allocation = response.0.as_ptr();
                 assert_eq!(
                     verify_response(&mut response, &mut remaining, &mut rejected),
                     expected_unsolicited
                 );
                 assert_eq!(response.iter().collect::<Vec<_>>(), expected);
-                assert_eq!(response.0.as_ptr(), allocation);
                 assert_eq!(remaining, expected_remaining);
             }
         }

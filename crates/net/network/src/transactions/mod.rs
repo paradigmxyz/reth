@@ -2043,8 +2043,8 @@ impl PooledTransactionsHashesBuilder {
     fn is_empty(&self) -> bool {
         match self {
             Self::Eth66(hashes) => hashes.is_empty(),
-            Self::Eth68(hashes) => hashes.hashes.is_empty(),
-            Self::Eth72(hashes) => hashes.hashes.is_empty(),
+            Self::Eth68(hashes) => hashes.is_empty(),
+            Self::Eth72(hashes) => hashes.is_empty(),
         }
     }
 
@@ -2052,8 +2052,8 @@ impl PooledTransactionsHashesBuilder {
     fn len(&self) -> usize {
         match self {
             Self::Eth66(hashes) => hashes.len(),
-            Self::Eth68(hashes) => hashes.hashes.len(),
-            Self::Eth72(hashes) => hashes.hashes.len(),
+            Self::Eth68(hashes) => hashes.len(),
+            Self::Eth72(hashes) => hashes.len(),
         }
     }
 
