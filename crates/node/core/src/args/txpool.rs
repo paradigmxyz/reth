@@ -543,6 +543,7 @@ impl RethTransactionPoolConfig for TxPoolArgs {
             max_new_pending_txs_notifications: self.max_new_pending_txs_notifications,
             max_queued_lifetime: self.max_queued_lifetime,
             max_inflight_delegated_slot_limit: default_config.max_inflight_delegated_slot_limit,
+            reject_stale_validation: default_config.reject_stale_validation,
         }
     }
 

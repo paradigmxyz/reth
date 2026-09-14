@@ -1026,18 +1026,6 @@ pub enum PoolUpdateKind {
     Reorg,
 }
 
-impl PoolUpdateKind {
-    /// Returns `true` if the update was due to a block commit.
-    pub const fn is_commit(&self) -> bool {
-        matches!(self, Self::Commit)
-    }
-
-    /// Returns `true` if the update was due to a reorganization.
-    pub const fn is_reorg(&self) -> bool {
-        matches!(self, Self::Reorg)
-    }
-}
-
 /// Represents changes after a new canonical block or range of canonical blocks was added to the
 /// chain.
 ///
