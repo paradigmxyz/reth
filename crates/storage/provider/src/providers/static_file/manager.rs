@@ -337,6 +337,8 @@ pub struct StaticFileProviderInner<N> {
     genesis_block_number: u64,
     #[cfg(test)]
     before_cache_insert: BeforeCacheInsertHook,
+    #[cfg(test)]
+    after_cache_validation: BeforeCacheInsertHook,
 }
 
 impl<N: NodePrimitives> StaticFileProviderInner<N> {
@@ -367,6 +369,8 @@ impl<N: NodePrimitives> StaticFileProviderInner<N> {
             genesis_block_number: 0,
             #[cfg(test)]
             before_cache_insert: Default::default(),
+            #[cfg(test)]
+            after_cache_validation: Default::default(),
         };
 
         Ok(provider)
@@ -1004,14 +1008,12 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
     ) -> ProviderResult<StaticFileJarProvider<'_, N>> {
         let key = (fixed_block_range.end(), segment);
 
-        let mut provider: StaticFileJarProvider<'_, N> = loop {
-            // Avoid using `entry` directly to avoid a write lock in the common case.
-            trace!(target: "providers::static_file", ?segment, ?fixed_block_range, "Getting provider");
-            if let Some(jar) = self.map.get(&key) {
-                trace!(target: "providers::static_file", ?segment, ?fixed_block_range, "Jar found in cache");
-                break jar.into()
-            }
-
+        // Avoid using `entry` directly to avoid a write lock in the common case.
+        trace!(target: "providers::static_file", ?segment, ?fixed_block_range, "Getting provider");
+        let mut provider: StaticFileJarProvider<'_, N> = if let Some(jar) = self.map.get(&key) {
+            trace!(target: "providers::static_file", ?segment, ?fixed_block_range, "Jar found in cache");
+            jar.into()
+        } else {
             let generation = self.cache_generation.load(Ordering::Acquire);
             trace!(target: "providers::static_file", ?segment, ?fixed_block_range, generation, "Creating jar from scratch");
             let path = self.path.join(segment.filename(fixed_block_range));
@@ -1020,15 +1022,28 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
             #[cfg(test)]
             self.before_cache_insert.fire(segment);
 
-            if self.cache_generation.load(Ordering::Acquire) != generation {
-                trace!(target: "providers::static_file", ?segment, ?fixed_block_range, generation, "Discarding jar loaded before cache invalidation");
-                continue
-            }
-
             // The cache may have been populated since the initial miss, including by
             // `update_index` publishing a newer snapshot while we loaded this jar without a lock.
             // Preserve that entry instead of overwriting it with our potentially stale snapshot.
-            break self.map.entry(key).or_insert(loaded).downgrade().into()
+            self.map
+                .entry(key)
+                .or_try_insert_with(|| -> ProviderResult<_> {
+                    // Validate while holding the entry's shard lock so clearing the cache cannot
+                    // slip between validation and insertion. If invalidated, reload once under
+                    // this lock rather than retrying unboundedly during frequent pruning.
+                    let loaded = if self.cache_generation.load(Ordering::Acquire) != generation {
+                        trace!(target: "providers::static_file", ?segment, ?fixed_block_range, generation, "Reloading jar after cache invalidation");
+                        drop(loaded);
+                        LoadedJar::new(NippyJar::load(&path).map_err(ProviderError::other)?)?
+                    } else {
+                        loaded
+                    };
+                    #[cfg(test)]
+                    self.after_cache_validation.fire(segment);
+                    Ok(loaded)
+                })?
+                .downgrade()
+                .into()
         };
 
         if let Some(metrics) = &self.metrics {
@@ -1272,7 +1287,8 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
         }
 
         // If this is a re-initialization, invalidate in-flight cache fills before clearing the
-        // cache. A fill that started before this point will observe the new generation and reload.
+        // cache. A fill that started before this point either reloads under its shard lock or
+        // publishes before the clear reaches that shard and is removed by it.
         self.cache_generation.fetch_add(1, Ordering::AcqRel);
         self.map.clear();
 
@@ -3116,7 +3132,12 @@ where
 
 #[cfg(test)]
 mod tests {
-    use std::{collections::BTreeMap, sync::mpsc, thread};
+    use std::{
+        collections::BTreeMap,
+        sync::{atomic::Ordering, mpsc},
+        thread,
+        time::{Duration, Instant},
+    };
 
     use alloy_consensus::Header;
     use alloy_primitives::B256;
@@ -3160,13 +3181,17 @@ mod tests {
         static_files.before_cache_insert.set(move |segment| {
             assert_eq!(segment, StaticFileSegment::Headers);
             loaded_tx.send(()).expect("test controller dropped");
-            resume_rx.recv().expect("test controller dropped");
+            resume_rx
+                .recv_timeout(Duration::from_secs(10))
+                .expect("test controller did not resume");
         });
 
         // Pause a cache fill after it loads the header jar containing only block 0.
         let reader_static_files = static_files.clone();
         let reader = thread::spawn(move || reader_static_files.block_hash(0));
-        loaded_rx.recv().expect("reader did not reach cache-fill hook");
+        loaded_rx
+            .recv_timeout(Duration::from_secs(10))
+            .expect("reader did not reach cache-fill hook");
 
         // Publish a newer snapshot of the same header jar, then simulate unrelated segment
         // pruning invalidating the whole cache while the old load remains in flight.
@@ -3186,6 +3211,58 @@ mod tests {
             Some(hash_1),
             "cache fill started before reinitialization repopulated an invalidated jar"
         );
+
+        Ok(())
+    }
+
+    #[test]
+    fn cache_fill_validation_is_serialized_with_index_reinitialization() -> eyre::Result<()> {
+        let (static_dir, _) = create_test_static_files_dir();
+        let static_files: StaticFileProvider<EthPrimitives> =
+            StaticFileProviderBuilder::read_write(&static_dir).with_blocks_per_file(10).build()?;
+        let hash = B256::from([0x10; 32]);
+        {
+            let mut writer = static_files.latest_writer(StaticFileSegment::Headers)?;
+            writer.append_header(&Header::default(), &hash)?;
+            writer.commit()?;
+        }
+        static_files.remove_cached_provider(StaticFileSegment::Headers, 9);
+
+        let generation = static_files.cache_generation.load(Ordering::Acquire);
+        let (validated_tx, validated_rx) = mpsc::sync_channel(0);
+        let (resume_tx, resume_rx) = mpsc::sync_channel(0);
+        static_files.after_cache_validation.set(move |segment| {
+            assert_eq!(segment, StaticFileSegment::Headers);
+            validated_tx.send(()).expect("test controller dropped");
+            resume_rx
+                .recv_timeout(Duration::from_secs(10))
+                .expect("test controller did not resume");
+        });
+
+        let reader_static_files = static_files.clone();
+        let reader = thread::spawn(move || reader_static_files.block_hash(0));
+        validated_rx
+            .recv_timeout(Duration::from_secs(10))
+            .expect("reader did not reach cache validation");
+
+        // The shard must remain locked between checking the generation and inserting the jar.
+        // Otherwise a clear can finish here and the reader can repopulate the cache afterward.
+        assert!(static_files.map.try_get(&(9, StaticFileSegment::Headers)).is_locked());
+        let invalidator_static_files = static_files.clone();
+        let invalidator = thread::spawn(move || invalidator_static_files.initialize_index());
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while static_files.cache_generation.load(Ordering::Acquire) == generation {
+            assert!(Instant::now() < deadline, "reinitialization did not invalidate the cache");
+            thread::sleep(Duration::from_millis(1));
+        }
+
+        // Invalidation has started, but clearing this shard must wait for publication and the
+        // reader's guard to be released. The published snapshot must not survive that clear.
+        resume_tx.send(()).expect("reader dropped before cache publication");
+        assert_eq!(reader.join().expect("reader panicked")?, Some(hash));
+        invalidator.join().expect("invalidator panicked")?;
+        assert!(static_files.map.is_empty());
+        assert_eq!(static_files.block_hash(0)?, Some(hash));
 
         Ok(())
     }
