@@ -1,12 +1,13 @@
 pub use alloy_eips::eip1559::BaseFeeParams;
 use alloy_evm::eth::spec::EthExecutorSpec;
 
+#[cfg(feature = "std")]
+use crate::ephemery::{
+    current_ephemery_period, ephemery_blob_params, ephemery_genesis, ephemery_hardforks,
+};
 use crate::{
     constants::{MAINNET_DEPOSIT_CONTRACT, MAINNET_PRUNE_DELETE_LIMIT},
-    ephemery::{
-        current_ephemery_period, ephemery_blob_params, ephemery_genesis, ephemery_hardforks,
-        is_ephemery_chain_id,
-    },
+    ephemery::is_ephemery_chain_id,
     ethereum::SEPOLIA_PARIS_TTD,
     holesky, hoodi, mainnet,
     mainnet::{MAINNET_PARIS_BLOCK, MAINNET_PARIS_TTD},
@@ -246,6 +247,7 @@ pub static HOODI: LazyLock<Arc<ChainSpec>> = LazyLock::new(|| {
 });
 
 /// The Ephemery spec
+#[cfg(feature = "std")]
 pub static EPHEMERY: LazyLock<Arc<ChainSpec>> = LazyLock::new(|| {
     let genesis = ephemery_genesis(
         serde_json::from_str(include_str!("../res/genesis/ephemery.json"))
@@ -505,6 +507,12 @@ impl ChainSpec {
 
     /// Map a chain ID to a known chain spec, if available.
     pub fn from_chain_id(chain_id: u64) -> Option<Arc<Self>> {
+        // Ephemery uses a dynamic chain ID that won't match any NamedChain
+        #[cfg(feature = "std")]
+        if chain_id == EPHEMERY.chain.id() {
+            return Some(EPHEMERY.clone());
+        }
+
         match NamedChain::try_from(chain_id).ok()? {
             NamedChain::Mainnet => Some(MAINNET.clone()),
             NamedChain::Sepolia => Some(SEPOLIA.clone()),
@@ -525,7 +533,7 @@ impl<H: BlockHeader> ChainSpec<H> {
     /// Returns `true` if this chain contains Ethereum configuration.
     #[inline]
     pub const fn is_ethereum(&self) -> bool {
-        self.chain.is_ethereum()
+        self.chain.is_ethereum() || is_ephemery_chain_id(self.chain().id())
     }
 
     /// Returns `true` if this chain is Optimism mainnet.
@@ -815,7 +823,7 @@ impl<H: BlockHeader> ChainSpec<H> {
     pub fn bootnodes(&self) -> Option<Vec<NodeRecord>> {
         use NamedChain as C;
 
-        // Ephemery uses a dynamic chain ID that won't match any NamedChain, so it's checked separately before the match.
+        // Ephemery's chain ID is dynamic and matches no NamedChain, so check it separately.
         if is_ephemery_chain_id(self.chain.id()) {
             return Some(ephemery_nodes());
         }
@@ -1349,6 +1357,7 @@ pub fn test_fork_ids(spec: &ChainSpec, cases: &[(Head, ForkId)]) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ephemery::{current_ephemery_period, EPHEMERY_BASE_CHAIN_ID};
     use alloy_chains::Chain;
     use alloy_consensus::constants::ETH_TO_WEI;
     use alloy_eips::{eip4844::BLOB_TX_MIN_BLOB_GASPRICE, eip7840::BlobParams};
@@ -2738,6 +2747,44 @@ Post-merge hard forks (timestamp based):
     }
 
     #[test]
+    fn ephemery_paris_activated_at_genesis() {
+        assert!(EPHEMERY
+            .fork(EthereumHardfork::Paris)
+            .active_at_ttd(EPHEMERY.genesis.difficulty, EPHEMERY.genesis.difficulty));
+    }
+
+    #[test]
+    fn ephemery_spec_matches_current_period() {
+        let (_, chain_id, genesis_timestamp) = current_ephemery_period();
+        assert_eq!(EPHEMERY.chain.id(), chain_id);
+        assert_eq!(EPHEMERY.genesis.timestamp, genesis_timestamp);
+    }
+
+    #[test]
+    fn ephemery_spec_is_recognized_as_ephemery() {
+        assert!(is_ephemery_chain_id(EPHEMERY.chain.id()));
+        assert!(EPHEMERY.is_ethereum());
+    }
+
+    #[test]
+    fn ephemery_has_bootnodes() {
+        let nodes = EPHEMERY.bootnodes().expect("ephemery should have bootnodes");
+        assert!(!nodes.is_empty());
+    }
+
+    #[test]
+    fn ephemery_from_chain_id_matches_current_period_only() {
+        let chain_id = EPHEMERY.chain.id();
+        assert_eq!(ChainSpec::from_chain_id(chain_id).unwrap().chain.id(), chain_id);
+
+        // an in-range ID from another period has no spec
+        assert!(
+            ChainSpec::from_chain_id(EPHEMERY_BASE_CHAIN_ID).is_none()
+                || chain_id == EPHEMERY_BASE_CHAIN_ID
+        );
+    }
+
+    #[test]
     fn test_genesis_format_deserialization() {
         // custom genesis with chain config
         let config = ChainConfig {
@@ -2837,6 +2884,12 @@ Post-merge hard forks (timestamp based):
     fn latest_sepolia_mainnet_fork_id() {
         // BPO2
         assert_eq!(ForkId { hash: ForkHash(hex!("0x268956b6")), next: 0 }, SEPOLIA.latest_fork_id())
+    }
+
+    #[test]
+    fn ephemery_latest_fork_id() {
+        // Just verify it doesn't panic since the hash changes each period
+        let _ = EPHEMERY.latest_fork_id();
     }
 
     #[test]

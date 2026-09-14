@@ -35,8 +35,13 @@ pub use spec::test_fork_ids;
 pub use spec::{
     blob_params_to_schedule, create_chain_config, mainnet_chain_config, make_genesis_header,
     BaseFeeParams, BaseFeeParamsKind, ChainSpec, ChainSpecBuilder, ChainSpecProvider,
-    DepositContract, ForkBaseFeeParams, DEV, EPHEMERY, HOLESKY, HOODI, MAINNET, SEPOLIA,
+    DepositContract, ForkBaseFeeParams, DEV, HOLESKY, HOODI, MAINNET, SEPOLIA,
 };
+
+/// The Ephemery spec is only available with `std`, since its chain ID and genesis
+/// timestamp are derived from wall-clock time.
+#[cfg(feature = "std")]
+pub use spec::EPHEMERY;
 
 #[cfg(test)]
 mod tests {
