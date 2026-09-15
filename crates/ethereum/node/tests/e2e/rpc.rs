@@ -711,6 +711,25 @@ async fn test_flashbots_validate_v6() -> eyre::Result<()> {
         .unwrap_err();
     assert!(err.to_string().contains("invalid KZG proof"), "{err}");
 
+    // A zero item budget must reject the BAL before checking the invalid cell proof.
+    let mut over_budget_request = invalid_proof_request;
+    over_budget_request
+        .request
+        .execution_payload
+        .payload_inner
+        .payload_inner
+        .payload_inner
+        .gas_limit = 0;
+    over_budget_request.request.message.gas_limit = 0;
+    let err = provider
+        .raw_request::<_, ()>(
+            "flashbots_validateBuilderSubmissionV6".into(),
+            (&over_budget_request,),
+        )
+        .await
+        .unwrap_err();
+    assert!(err.to_string().contains("block access list item cost exceeds gas limit"), "{err}");
+
     request.registered_gas_limit -= 1;
     assert!(provider
         .raw_request::<_, ()>("flashbots_validateBuilderSubmissionV6".into(), (&request,))
