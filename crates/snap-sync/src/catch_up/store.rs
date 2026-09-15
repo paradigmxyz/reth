@@ -5,18 +5,16 @@ use crate::{
     error::db_error, state::bytecode::store::write_bytecodes, SnapDownloadProgress, SnapPhase,
     SnapStateStore, SnapSyncError,
 };
-use alloy_eip7928::bal::DecodedBal;
+use alloy_eip7928::{bal::DecodedBal, AccountChanges};
 use alloy_primitives::{keccak256, B256};
 use reth_provider::DatabaseProviderFactory;
 use reth_storage_api::{
     AccountExtReader, DBProvider, HeaderProvider, StageCheckpointReader, StageCheckpointWriter,
     StateWriter, StorageSettingsCache,
 };
-use reth_trie_common::{
-    bal::{deployed_bytecode, hashed_storage_changes, BalAccountState},
-    HashedPostState, HashedStorage,
-};
+use reth_trie_common::{HashedPostState, HashedStorage};
 use revm::bytecode::Bytecode;
+use std::borrow::Cow;
 
 impl<F> SnapStateStore<'_, F> {
     /// Applies one authenticated BAL and advances its block cursor in the same transaction.
@@ -174,17 +172,26 @@ impl<F> SnapStateStore<'_, F> {
         let mut contracts = Vec::new();
 
         for ((changes, hashed_address), (_, existing)) in changes.into_iter().zip(accounts) {
-            let account_fields = BalAccountState::from_changes(changes);
+            let changes = ordered_changes(changes);
+            let account_fields = changes.account_info();
             if !account_fields.is_empty() {
-                let account = account_fields.merge_onto(existing.as_ref());
+                let mut account = existing.unwrap_or_default();
+                account.apply_bal_info(account_fields);
                 state.accounts.insert(hashed_address, (!account.is_empty()).then_some(account));
             }
             if !changes.storage_changes.is_empty() {
                 let mut storage = HashedStorage::default();
-                storage.storage.extend(hashed_storage_changes(changes));
+                storage.storage.extend(
+                    changes
+                        .storage_post_states()
+                        .map(|(slot, value)| (keccak256(B256::from(slot)), value)),
+                );
                 state.storages.insert(hashed_address, storage);
             }
-            if let Some((hash, code)) = deployed_bytecode(changes) {
+            if let Some((hash, code)) = account_fields
+                .code_hash
+                .zip(changes.code_post_state().filter(|code| !code.is_empty()))
+            {
                 contracts.push((hash, Bytecode::new_raw(code.clone())));
             }
         }
@@ -229,4 +236,21 @@ impl BlockAccessListCommit {
             Self::Pivot => Some(next_account),
         }
     }
+}
+
+// alloy reads the last change; normalize unordered entries without cloning canonical ones.
+fn ordered_changes(changes: &AccountChanges) -> Cow<'_, AccountChanges> {
+    if changes.balance_changes.is_sorted_by_key(|change| change.block_access_index) &&
+        changes.nonce_changes.is_sorted_by_key(|change| change.block_access_index) &&
+        changes.code_changes.is_sorted_by_key(|change| change.block_access_index) &&
+        changes
+            .storage_changes
+            .iter()
+            .all(|slot| slot.changes.is_sorted_by_key(|change| change.block_access_index))
+    {
+        return Cow::Borrowed(changes)
+    }
+    let mut ordered = changes.clone();
+    ordered.sort();
+    Cow::Owned(ordered)
 }

@@ -362,16 +362,25 @@ mod tests {
         let slot = U256::from(7);
         let code = Bytes::from_static(&[0x60, 0x00]);
         let index = BlockAccessIndex::new(1);
+        let later = BlockAccessIndex::new(2);
+        // Unordered entries must still apply the highest-index account, code and slot changes.
         let first_changes = AccountChanges::new(address)
-            .with_balance_change(BalanceChange::new(index, U256::from(9)))
-            .with_nonce_change(NonceChange::new(index, 3))
-            .with_code_change(CodeChange::new(index, code.clone()))
+            .with_balance_change(BalanceChange::new(later, U256::from(9)))
+            .with_balance_change(BalanceChange::new(index, U256::from(2)))
+            .with_nonce_change(NonceChange::new(later, 3))
+            .with_nonce_change(NonceChange::new(index, 1))
+            .with_code_change(CodeChange::new(later, code.clone()))
+            .with_code_change(CodeChange::new(index, Bytes::new()))
             .with_storage_change(SlotChanges::new(
                 slot,
-                vec![StorageChange::new(index, U256::from(11))],
+                vec![
+                    StorageChange::new(later, U256::from(11)),
+                    StorageChange::new(index, U256::from(5)),
+                ],
             ));
         let second_changes = AccountChanges::new(address)
-            .with_balance_change(BalanceChange::new(index, U256::from(10)));
+            .with_balance_change(BalanceChange::new(later, U256::from(10)))
+            .with_balance_change(BalanceChange::new(index, U256::from(4)));
         let (first_bal, first_raw) = decoded_bal(first_changes);
         let (second_bal, second_raw) = decoded_bal(second_changes);
         let header0 = Header { number: 0, ..Default::default() };
