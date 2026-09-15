@@ -486,31 +486,16 @@ impl DefaultStateRootStrategy {
 
     /// Gas used at or above which a block also gets the overflow proof worker pool.
     ///
-    /// The proof workers are I/O bound, so a block that queues up proofs faster than they drain
-    /// wants the queue depth: on 300M-gas BAL blocks the doubled worker count is worth -4.7% mean
-    /// newPayload latency, with the state root wait falling from 31 to 24 ms. Blocks that never
-    /// build up a queue pay for it instead, because the pools are rebuilt per block and every
-    /// worker opens an MDBX read transaction and cursors: on regular mainnet blocks the same count
-    /// costs +2.0% P50 and +1.7% mean, with read-only transactions +73%.
+    /// More workers help drain the proof queue on large blocks while storage reads are blocked.
+    /// Keeping that capacity in a separate pool avoids waking unused threads on regular blocks.
     const LARGE_BLOCK_PROOF_WORKER_GAS_THRESHOLD: u64 = 100_000_000;
 
     /// Returns how many workers to spawn for the block being validated from one kind of proof
     /// worker pool, given the base pool size and the size of the overflow pool extending it.
     ///
-    /// The share a block gets depends on the proof queue it is expected to build up. Blocks at or
-    /// above [`Self::LARGE_BLOCK_PROOF_WORKER_GAS_THRESHOLD`] gas take the base and the overflow
-    /// pool, blocks with at most [`Self::SMALL_BLOCK_PROOF_WORKER_TX_THRESHOLD`] transactions take
-    /// half the base pool, and everything else, including blocks whose transaction count and gas
-    /// are not known yet, takes the base pool, which is the count every block gets on main. The
-    /// transaction count is checked first, so a small block stays small no matter how much gas it
-    /// burns.
-    ///
-    /// Only large blocks name the overflow pool, so its threads are never created on a node that
-    /// never sees one.
-    ///
-    /// A count the operator pinned with `--engine.storage-worker-count` or
-    /// `--engine.account-worker-count` is used verbatim for every block; the pools are sized to
-    /// hold it.
+    /// Explicit counts take precedence. Otherwise, small transaction counts use half the base
+    /// pool, large gas usage uses both pools, and unknown or regular block sizes use the base pool.
+    /// The transaction threshold is checked first, regardless of gas usage.
     const fn proof_worker_count(
         base_pool_threads: usize,
         overflow_pool_threads: usize,

@@ -159,7 +159,8 @@ impl ProofWorkerHandle {
     /// # Parameters
     /// - `runtime`: The centralized runtime used to spawn blocking worker tasks
     /// - `task_ctx`: Shared context with database view and prefix sets
-    /// - `worker_counts`: How many workers of each pool to spawn for this block
+    /// - `worker_counts`: How many workers of each pool to spawn for this block, with a minimum of
+    ///   one worker of each kind
     #[instrument(
         name = "ProofWorkerHandle::new",
         level = "debug",
@@ -184,12 +185,12 @@ impl ProofWorkerHandle {
         let cached_storage_roots = Arc::<DashMap<_, _>>::default();
 
         let (storage_base_count, storage_overflow_count) = split_worker_count(
-            worker_counts.storage,
+            worker_counts.storage.max(1),
             runtime.proof_storage_worker_pool(),
             runtime.proof_storage_overflow_worker_pool(),
         );
         let (account_base_count, account_overflow_count) = split_worker_count(
-            worker_counts.account,
+            worker_counts.account.max(1),
             runtime.proof_account_worker_pool(),
             runtime.proof_account_overflow_worker_pool(),
         );
@@ -257,8 +258,8 @@ impl ProofWorkerHandle {
             }
         };
 
-        // broadcast blocks until all workers exit (channel close), so run on
-        // tokio's blocking pool.
+        // Broadcast blocks until all workers exit (channel close), so run each pool on its
+        // own named blocking thread.
         let storage_rt = runtime.clone();
         let spawn_storage_base = spawn_storage_workers.clone();
         runtime.spawn_blocking_named("storage-workers", move || {
@@ -428,24 +429,12 @@ impl ProofWorkerHandle {
     }
 }
 
-/// Splits `count` workers over a base pool and the overflow pool that extends it, capped by what
-/// the pools hold.
-fn split_worker_count(
-    count: usize,
-    base: &WorkerPool,
-    overflow: Option<&WorkerPool>,
-) -> (usize, usize) {
-    let base_count = count.min(base.num_threads());
-    let overflow_count =
-        overflow.map_or(0, |pool| count.saturating_sub(base_count).min(pool.num_threads()));
-    (base_count, overflow_count)
-}
-
 /// How many workers [`ProofWorkerHandle::new`] spawns for a block.
 ///
-/// The worker pools are rebuilt for every block and every worker opens a database transaction and
-/// trie cursors, so the counts are sized per block by the caller. A count larger than the base
-/// pool spills into the overflow pool, and the two pool sizes together cap it.
+/// Worker instances are recreated for each block on persistent thread pools. Each worker opens a
+/// database transaction and trie cursors, so the caller sizes the counts per block. Counts are
+/// clamped to at least one worker of each kind and capped by the combined base and overflow
+/// capacity.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ProofWorkerCounts {
     /// Number of storage proof workers to spawn.
@@ -1170,6 +1159,19 @@ where
     }
 }
 
+/// Splits `count` workers over a base pool and the overflow pool that extends it, capped by what
+/// the pools hold.
+fn split_worker_count(
+    count: usize,
+    base: &WorkerPool,
+    overflow: Option<&WorkerPool>,
+) -> (usize, usize) {
+    let base_count = count.min(base.num_threads());
+    let overflow_count =
+        overflow.map_or(0, |pool| count.saturating_sub(base_count).min(pool.num_threads()));
+    (base_count, overflow_count)
+}
+
 /// Queues V2 storage proofs for all accounts in the targets and returns receivers.
 ///
 /// This function queues all storage proof tasks to the worker pool but returns immediately
@@ -1309,15 +1311,13 @@ mod tests {
     /// hold.
     #[test]
     fn overflow_pool_serves_counts_beyond_the_base_pool() {
-        let chain_spec = Arc::new(ChainSpec::default());
-        let anchor_hash = chain_spec.genesis_hash();
-        let provider_factory = create_test_provider_factory_with_chain_spec(chain_spec);
+        let provider_factory =
+            create_test_provider_factory_with_chain_spec(Arc::new(ChainSpec::default()));
+        let anchor_hash = reth_db_common::init::init_genesis(&provider_factory).unwrap();
         let factory = reth_storage_overlay::OverlayStateProviderFactory::new(
             provider_factory,
-            reth_storage_overlay::OverlayManager::<
-                reth_ethereum_primitives::EthPrimitives,
-            >::default()
-            .overlay_builder(anchor_hash),
+            reth_storage_overlay::OverlayManager::<reth_ethereum_primitives::EthPrimitives>::default()
+                .overlay_builder(anchor_hash),
         );
         let ctx = test_ctx(factory);
 
@@ -1331,33 +1331,92 @@ mod tests {
         assert_eq!(runtime.proof_storage_overflow_worker_pool().unwrap().num_threads(), base);
         assert_eq!(runtime.proof_account_overflow_worker_pool().unwrap().num_threads(), base);
 
-        let (proof_result_tx, _proof_result_rx) = unbounded();
-        let handle = ProofWorkerHandle::new(
-            &runtime,
-            ctx.clone(),
+        for counts in [
+            ProofWorkerCounts::new(0, 0),
             ProofWorkerCounts::new(base, base),
-            proof_result_tx.clone(),
-        );
-        assert_eq!(handle.total_storage_workers(), base);
-        assert_eq!(handle.total_account_workers(), base);
-        assert!(!runtime.proof_storage_overflow_worker_pool().unwrap().is_initialized());
-        assert!(!runtime.proof_account_overflow_worker_pool().unwrap().is_initialized());
-        drop(handle);
+            ProofWorkerCounts::new(base + 1, base + 2),
+            ProofWorkerCounts::full(&runtime),
+        ] {
+            // Occupy every base thread so the partial-overflow case must complete its proofs
+            // using overflow workers. Dropping the sender releases the threads even on panic.
+            let release_base =
+                (counts.storage == base + 1).then(|| block_base_proof_workers(&runtime));
+            let (proof_result_tx, proof_result_rx) = unbounded();
+            let handle =
+                ProofWorkerHandle::new(&runtime, ctx.clone(), counts, proof_result_tx.clone());
+            assert_eq!(handle.total_storage_workers(), counts.storage.max(1));
+            assert_eq!(handle.total_account_workers(), counts.account.max(1));
+            if counts.storage <= base {
+                assert!(!runtime.proof_storage_overflow_worker_pool().unwrap().is_initialized());
+                assert!(!runtime.proof_account_overflow_worker_pool().unwrap().is_initialized());
+            }
 
-        let counts = ProofWorkerCounts::full(&runtime);
-        assert_eq!(counts, ProofWorkerCounts::new(base * 2, base * 2));
-        let handle = ProofWorkerHandle::new(&runtime, ctx, counts, proof_result_tx);
-        assert_eq!(handle.total_storage_workers(), base * 2);
-        assert_eq!(handle.total_account_workers(), base * 2);
+            let address = B256::ZERO;
+            let slot = ProofV2Target::new(B256::ZERO);
+            let (storage_tx, storage_rx) = unbounded();
+            handle
+                .dispatch_storage_proof(
+                    StorageProofInput::new(address, vec![slot], true),
+                    storage_tx,
+                )
+                .unwrap();
+            let storage = storage_rx.recv_timeout(Duration::from_secs(30)).unwrap().result.unwrap();
+            assert_eq!(storage.root(), Some(reth_trie::EMPTY_ROOT_HASH));
 
-        let deadline = std::time::Instant::now() + Duration::from_secs(30);
-        while !runtime.proof_storage_overflow_worker_pool().unwrap().is_initialized() ||
-            !runtime.proof_account_overflow_worker_pool().unwrap().is_initialized()
-        {
-            assert!(std::time::Instant::now() < deadline, "overflow workers never started");
-            std::thread::sleep(Duration::from_millis(10));
+            handle
+                .dispatch_account_multiproof(AccountMultiproofInput {
+                    targets: MultiProofTargetsV2 {
+                        account_targets: vec![ProofV2Target::new(address)],
+                        storage_targets: std::iter::once((address, vec![slot])).collect(),
+                    },
+                    proof_result_sender: ProofResultContext::new(
+                        proof_result_tx.clone(),
+                        HashedPostState::default(),
+                        Instant::now(),
+                    ),
+                })
+                .unwrap();
+            let proof =
+                proof_result_rx.recv_timeout(Duration::from_secs(30)).unwrap().result.unwrap();
+            assert!(proof.storage_proofs.contains_key(&address));
+
+            drop(release_base);
+            drop(handle);
+            drop(proof_result_tx);
+            // Every broadcast holds a result sender until all its workers have exited. An
+            // initialization error is a message here, rather than a successful shutdown.
+            assert!(matches!(
+                proof_result_rx.recv_timeout(Duration::from_secs(30)),
+                Err(crossbeam_channel::RecvTimeoutError::Disconnected)
+            ));
         }
+    }
 
-        drop(handle);
+    fn block_base_proof_workers(runtime: &Runtime) -> CrossbeamSender<()> {
+        let (release_tx, release_rx) = unbounded();
+        let (started_tx, started_rx) = unbounded();
+        let count = runtime.proof_storage_worker_pool().num_threads() +
+            runtime.proof_account_worker_pool().num_threads();
+        for storage in [true, false] {
+            let rt = runtime.clone();
+            let release_rx = release_rx.clone();
+            let started_tx = started_tx.clone();
+            let name = if storage { "block-storage-workers" } else { "block-account-workers" };
+            runtime.spawn_blocking_named(name, move || {
+                let pool = if storage {
+                    rt.proof_storage_worker_pool()
+                } else {
+                    rt.proof_account_worker_pool()
+                };
+                pool.broadcast(pool.num_threads(), |_| {
+                    started_tx.send(()).unwrap();
+                    let _ = release_rx.recv();
+                });
+            });
+        }
+        for _ in 0..count {
+            started_rx.recv_timeout(Duration::from_secs(30)).unwrap();
+        }
+        release_tx
     }
 }
