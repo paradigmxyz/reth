@@ -840,12 +840,22 @@ where
         } = ctx;
 
         let preserved_sparse_trie = overlay_manager.take_sparse_trie();
-        let proof_state_provider_factory = if let Some(anchor_hash) = preserved_sparse_trie
-            .as_ref()
-            .filter(|trie| trie.state_root() == env.parent_state_root)
-            .map(|trie| trie.anchor_hash())
-        {
-            state_provider_factory.clone().with_skip_overlay_for_reused_sparse_trie(anchor_hash)
+        // Pruning can blind a subtree at a state newer than the preserved trie's original
+        // anchor. In that case proofs must use the complete parent overlay; the durable database
+        // at the anchor can return an empty partial proof for a subtree present in the parent.
+        let proof_state_provider_factory = if pending_sparse_trie_prune_blocks.is_none() {
+            preserved_sparse_trie
+                .as_ref()
+                .filter(|trie| trie.state_root() == env.parent_state_root)
+                .map(|trie| trie.anchor_hash())
+                .map_or_else(
+                    || state_provider_factory.clone(),
+                    |anchor_hash| {
+                        state_provider_factory
+                            .clone()
+                            .with_skip_overlay_for_reused_sparse_trie(anchor_hash)
+                    },
+                )
         } else {
             state_provider_factory.clone()
         };
@@ -915,12 +925,19 @@ where
         let parent_state_root = ctx.parent_state_root();
         let parent_header = SealedHeader::new(ctx.parent_header().clone(), ctx.parent_hash());
         let preserved_sparse_trie = ctx.overlay_manager.take_sparse_trie();
-        let proof_state_provider_factory = if let Some(anchor_hash) = preserved_sparse_trie
-            .as_ref()
-            .filter(|trie| trie.state_root() == parent_state_root)
-            .map(|trie| trie.anchor_hash())
-        {
-            ctx.state_provider_factory.clone().with_skip_overlay_for_reused_sparse_trie(anchor_hash)
+        let proof_state_provider_factory = if pending_sparse_trie_prune_blocks.is_none() {
+            preserved_sparse_trie
+                .as_ref()
+                .filter(|trie| trie.state_root() == parent_state_root)
+                .map(|trie| trie.anchor_hash())
+                .map_or_else(
+                    || ctx.state_provider_factory.clone(),
+                    |anchor_hash| {
+                        ctx.state_provider_factory
+                            .clone()
+                            .with_skip_overlay_for_reused_sparse_trie(anchor_hash)
+                    },
+                )
         } else {
             ctx.state_provider_factory.clone()
         };
