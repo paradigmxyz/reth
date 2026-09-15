@@ -44,6 +44,49 @@ closed-loop passes with concurrency two. Both binaries are pinned to commit IDs.
 | Engine API replay with depth-5 reorgs | [35003194833](https://github.com/paradigmxyz/reth/actions/runs/35003194833) |
 | Historical `debug_traceBlockByNumber` | [35003197593](https://github.com/paradigmxyz/reth/actions/runs/35003197593) |
 
+## Results
+
+All three workflows completed successfully. This implementation substantially
+regresses every measured workload, so it should remain an experiment.
+
+Changes below are relative to upstream. The `±` values are the workflow's 95%
+bootstrap confidence-interval half-widths, in percentage points. MGas/s means
+million gas processed per second; RPC throughput is closed-loop requests/second.
+
+| Workload / metric | Upstream | Direct I/O | Change (95% CI half-width) |
+| --- | ---: | ---: | ---: |
+| Engine mean block latency | 27.24 ms | 57.54 ms | +111.24% ±4.31 pp |
+| Engine throughput | 1,230.57 MGas/s | 534.62 MGas/s | −56.56% ±0.89 pp |
+| Depth-5 reorg mean block latency | 19.84 ms | 40.90 ms | +106.12% ±4.06 pp |
+| Depth-5 reorg throughput | 1,569.16 MGas/s | 762.13 MGas/s | −51.43% ±1.14 pp |
+| Historical trace mean latency | 34.57 ms | 466.92 ms | +1,250.75% ±33.51 pp |
+| Historical trace P99 latency | 72.69 ms | 1,147.66 ms | +1,478.77% ±126.31 pp |
+| Historical trace throughput | 56.93 requests/s | 3.62 requests/s | −93.65% ±0.49 pp |
+
+The source data are `comment.md` and `summary.json` in each linked workflow's
+`bench-results` artifact. Each comparison runs baseline and candidate on the same
+runner and snapshot; absolute results across the different workloads should not
+be compared as if they were the same test.
+
+The historical corpus contains 20 consecutive blocks, 25,976,732–25,976,751,
+using `debug_traceBlockByNumber` with `callTracer`. It has zero RPC errors on
+both versions, all 80 candidate response comparisons match, and no records were
+excluded for nondeterminism. CPU time per request rises from 30.54 ms to 82.50 ms
+(+170.15%). Neither engine artifact contains a node-error report from the
+workflow's panic/ERROR scan.
+
+Startup is excluded from the replay measurements. On the engine runner,
+read-ahead completes startup in 27–28 seconds across the six candidate runs,
+versus 8–9 seconds for upstream. The snapshot requires history-index rebuilding;
+these times are specific to that startup workload. The earlier unbuffered
+implementation did not finish within the unchanged 300-second limit.
+
+These measurements show that the existing higher-level caches do not hide the
+cost of this implementation on these workloads. Aligned read amplification,
+copying/allocation, and additional file operations are all possible contributors;
+these runs do not isolate their individual effects. A different buffering or
+file-layout strategy would require a new comparison.
+
 ## Earlier experiment findings
 
 The initial implementation issued separate direct reads for each offset and
