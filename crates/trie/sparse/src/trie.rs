@@ -1,6 +1,6 @@
 use crate::{
-    ArenaParallelSparseTrie, LeafUpdate, SparseTrie as SparseTrieTrait, SparseTrieUpdates,
-    TrieNodeEpoch,
+    ArenaParallelSparseTrie, BlockedLeafUpdates, LeafUpdate, LeafUpdateEvent,
+    SparseTrie as SparseTrieTrait, SparseTrieUpdates, TrieNodeEpoch,
 };
 use alloc::{borrow::Cow, boxed::Box};
 use alloy_primitives::{map::B256Map, B256};
@@ -198,6 +198,14 @@ impl<T: SparseTrieTrait> RevealableSparseTrie<T> {
         Some((revealed.root(new_epoch), revealed.take_updates()))
     }
 
+    /// Returns the leaf updates the trie could not apply yet because they hit a blinded node.
+    ///
+    /// A blind trie never takes ownership of updates, see [`Self::update_leaves`].
+    pub fn blocked_updates(&self) -> &BlockedLeafUpdates {
+        static EMPTY: BlockedLeafUpdates = BlockedLeafUpdates::new();
+        self.as_revealed_ref().map_or(&EMPTY, SparseTrieTrait::blocked_updates)
+    }
+
     /// Clears this trie, setting it to a blind state.
     ///
     /// If this instance was revealed, or was itself a `Blind` with a pre-allocated
@@ -223,24 +231,106 @@ impl<T: SparseTrieTrait + Default> RevealableSparseTrie<T> {
     ///
     /// For revealed tries, delegates to the inner implementation which will:
     /// - Apply updates where possible
-    /// - Keep blocked updates in the map
+    /// - Take ownership of the updates that hit a blinded node
     /// - Emit proof targets for blinded paths
     pub fn update_leaves(
         &mut self,
         updates: &mut B256Map<LeafUpdate>,
         mut proof_required_fn: impl FnMut(B256, ProofV2TargetParent),
     ) -> SparseTrieResult<()> {
+        self.update_leaves_with_events(updates, false, |event| {
+            if let LeafUpdateEvent::ProofRequired { key, parent } = event {
+                proof_required_fn(key, parent)
+            }
+        })
+    }
+
+    /// [`Self::update_leaves`], reporting every applied [`LeafUpdate::Touched`] entry with the
+    /// leaf value found at its key when `report_touched` is set.
+    ///
+    /// A blind trie reveals nothing, so it never reports a touched value.
+    pub fn update_leaves_with_events(
+        &mut self,
+        updates: &mut B256Map<LeafUpdate>,
+        report_touched: bool,
+        mut event_fn: impl FnMut(LeafUpdateEvent<'_>),
+    ) -> SparseTrieResult<()> {
         match self {
             Self::Blind(_) => {
                 // Nothing is revealed - emit proof targets for all keys without a known parent.
                 for key in updates.keys() {
-                    proof_required_fn(*key, ProofV2TargetParent::NONE);
+                    event_fn(LeafUpdateEvent::ProofRequired {
+                        key: *key,
+                        parent: ProofV2TargetParent::NONE,
+                    });
                 }
                 // All updates remain in the map for retry after proofs are fetched
                 Ok(())
             }
-            Self::Revealed(trie) => trie.update_leaves(updates, proof_required_fn),
+            Self::Revealed(trie) => {
+                trie.update_leaves_with_events(updates, report_touched, event_fn)
+            }
         }
+    }
+
+    /// [`Self::update_leaves_with_events`], checking parts of a revealed trie out into `jobs`.
+    ///
+    /// A blind trie has nothing to check out and behaves like [`Self::update_leaves_with_events`].
+    pub fn update_leaves_deferred(
+        &mut self,
+        updates: &mut B256Map<LeafUpdate>,
+        report_touched: bool,
+        event_fn: impl FnMut(LeafUpdateEvent<'_>),
+        jobs: &mut Vec<T::SubtrieJob>,
+    ) -> SparseTrieResult<()> {
+        match self {
+            Self::Blind(_) => self.update_leaves_with_events(updates, report_touched, event_fn),
+            Self::Revealed(trie) => {
+                trie.update_leaves_deferred(updates, report_touched, event_fn, jobs)
+            }
+        }
+    }
+
+    /// Reveals a batch of V2 proof nodes, checking parts of the trie with enough nodes out into
+    /// `jobs` instead of revealing them on this thread.
+    pub fn reveal_v2_proof_nodes_deferred(
+        &mut self,
+        nodes: &mut [ProofTrieNodeV2],
+        retain_updates: bool,
+        report_touched: bool,
+        jobs: &mut Vec<T::SubtrieJob>,
+    ) -> SparseTrieResult<()> {
+        let trie = if let Some(root_node) = nodes.iter().find(|n| n.path.is_empty()) {
+            self.reveal_root(root_node.node.clone(), root_node.masks, retain_updates)?
+        } else {
+            self.as_revealed_mut().ok_or(SparseTrieErrorKind::Blind)?
+        };
+        trie.reveal_nodes_deferred(nodes, report_touched, jobs)?;
+
+        Ok(())
+    }
+
+    /// Checks every part of a revealed trie whose hash is out of date out into `jobs`.
+    pub fn take_hashing_jobs(&mut self, jobs: &mut Vec<T::SubtrieJob>) {
+        if let Some(trie) = self.as_revealed_mut() {
+            trie.take_hashing_jobs(jobs);
+        }
+    }
+
+    /// Puts a finished job's part back. See [`SparseTrie::restore_subtrie_job`].
+    pub fn restore_subtrie_job(
+        &mut self,
+        job: T::SubtrieJob,
+        event_fn: impl FnMut(LeafUpdateEvent<'_>),
+    ) -> Option<T::SubtrieJob> {
+        self.as_revealed_mut()
+            .expect("a trie that handed out a job is revealed")
+            .restore_subtrie_job(job, event_fn)
+    }
+
+    /// Returns whether the part holding the keys that start with `prefix` is out with a job.
+    pub fn is_prefix_in_flight(&self, prefix: u8) -> bool {
+        self.as_revealed_ref().is_some_and(|trie| trie.is_prefix_in_flight(prefix))
     }
 }
 
