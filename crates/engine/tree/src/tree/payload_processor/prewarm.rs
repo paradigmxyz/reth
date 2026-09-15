@@ -18,14 +18,14 @@ use crate::tree::{
     PayloadExecutionCache, SavedCache,
 };
 use alloy_consensus::transaction::TxHashRef;
-use alloy_eip7928::bal::DecodedBal;
+use alloy_eip7928::{bal::DecodedBal, BalAccountInfo};
 use alloy_eips::eip4895::Withdrawal;
 use alloy_primitives::keccak256;
 use metrics::{Counter, Gauge, Histogram};
 use rayon::prelude::*;
 use reth_evm::{execute::ExecutableTxFor, ConfigureEvm, Evm, EvmFor, RecoveredTx, SpecFor};
 use reth_metrics::Metrics;
-use reth_primitives_traits::{FastInstant as Instant, NodePrimitives};
+use reth_primitives_traits::{Account, FastInstant as Instant, NodePrimitives};
 use reth_provider::{
     AccountReader, BlockExecutionOutput, BlockNumReader, ChangeSetReader, DatabaseProviderFactory,
     DatabaseProviderROFactory, HistoryReader, PruneCheckpointReader, StageCheckpointReader,
@@ -750,7 +750,7 @@ where
         };
 
         let mut account = existing_account.unwrap_or_default();
-        account.apply_bal_info(account_info);
+        apply_bal_info(&mut account, account_info);
         let hashed_address = hashed_address.unwrap_or_else(|| keccak256(address));
 
         // It is possible for the resulting account info to be empty. This can happen when, in the
@@ -770,6 +770,17 @@ where
         hashed_state.accounts.insert(hashed_address, account);
         hashed_update_stream.on_hashed_state_update(hashed_state);
     }
+}
+
+fn apply_bal_info(account: &mut Account, info: BalAccountInfo) {
+    if let Some(balance) = info.balance {
+        account.balance = balance;
+    }
+    if let Some(nonce) = info.nonce {
+        account.nonce = nonce;
+    }
+    account.bytecode_hash =
+        info.code_hash.or(account.bytecode_hash).or(Some(alloy_consensus::constants::KECCAK_EMPTY));
 }
 
 /// Returns [`MultiProofTargetsV2`] for withdrawal addresses.
@@ -793,7 +804,6 @@ mod tests {
     use reth_ethereum_primitives::{EthPrimitives, TransactionSigned};
     use reth_evm::{execute::WithTxEnv, TxEnvFor};
     use reth_evm_ethereum::EthEvmConfig;
-    use reth_primitives_traits::Account;
     use reth_provider::test_utils::MockEthProvider;
     use reth_storage_overlay::OverlayManager;
 
@@ -1184,7 +1194,7 @@ mod tests {
             nonce: 3,
             bytecode_hash: Some(B256::repeat_byte(0xaa)),
         };
-        account.apply_bal_info(info);
+        apply_bal_info(&mut account, info);
 
         assert_eq!(account.balance, U256::from(10));
         assert_eq!(account.nonce, 3);

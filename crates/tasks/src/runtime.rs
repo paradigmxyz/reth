@@ -48,6 +48,15 @@ pub const DEFAULT_STATE_TRIE_OVERLAY_WORKER_THREADS: usize = 4;
 /// Default maximum number of concurrent blocking tasks (for RPC tracing guard).
 pub const DEFAULT_MAX_BLOCKING_TASKS: usize = 512;
 
+/// Minimum default size of the proof worker pools.
+///
+/// Proof workers spend most of their time blocked on database reads, so the pool
+/// size acts as an I/O queue depth, not a CPU budget. Deriving it only from
+/// available parallelism starves the disk on small CPU allocations (e.g. the
+/// 6-core EIP-7870 profile yields 12 workers, leaving multiproof computation
+/// dominated by serialized read latency).
+pub const DEFAULT_MIN_PROOF_WORKERS: usize = 128;
+
 /// Configuration for the tokio runtime.
 #[derive(Debug, Clone)]
 pub enum TokioConfig {
@@ -108,10 +117,12 @@ pub struct RayonConfig {
     /// Maximum number of concurrent blocking tasks for the RPC guard semaphore.
     pub max_blocking_tasks: usize,
     /// Number of threads for the proof storage worker pool (trie storage proof workers).
-    /// If `None`, derived from available parallelism.
+    /// If `None`, twice the available parallelism, with a floor of
+    /// [`DEFAULT_MIN_PROOF_WORKERS`].
     pub proof_storage_worker_threads: Option<usize>,
     /// Number of threads for the proof account worker pool (trie account proof workers).
-    /// If `None`, derived from available parallelism.
+    /// If `None`, twice the available parallelism, with a floor of
+    /// [`DEFAULT_MIN_PROOF_WORKERS`].
     pub proof_account_worker_threads: Option<usize>,
     /// Number of threads for the prewarming pool (execution prewarming workers).
     /// If `None`, derived from available parallelism.
@@ -922,13 +933,17 @@ impl RuntimeBuilder {
 
             let blocking_guard = BlockingTaskGuard::new(config.rayon.max_blocking_tasks);
 
-            let proof_storage_worker_threads =
-                config.rayon.proof_storage_worker_threads.unwrap_or(default_threads * 2);
+            let proof_storage_worker_threads = config
+                .rayon
+                .proof_storage_worker_threads
+                .unwrap_or_else(|| (default_threads * 2).max(DEFAULT_MIN_PROOF_WORKERS));
             let proof_storage_worker_pool =
                 WorkerPool::new(proof_storage_worker_threads, "proof-strg");
 
-            let proof_account_worker_threads =
-                config.rayon.proof_account_worker_threads.unwrap_or(default_threads * 2);
+            let proof_account_worker_threads = config
+                .rayon
+                .proof_account_worker_threads
+                .unwrap_or_else(|| (default_threads * 2).max(DEFAULT_MIN_PROOF_WORKERS));
             let proof_account_worker_pool =
                 WorkerPool::new(proof_account_worker_threads, "proof-acct");
 
