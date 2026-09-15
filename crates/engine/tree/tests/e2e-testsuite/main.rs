@@ -2,10 +2,12 @@
 
 mod fcu_finalized_blocks;
 
+use alloy_primitives::{hex, Address, Bytes, U256};
 use alloy_rpc_types_engine::{
     CancunPayloadFields, ExecutionData, ExecutionPayloadEnvelopeV3, ExecutionPayloadSidecar,
     PayloadStatusEnum,
 };
+use alloy_rpc_types_eth::TransactionRequest;
 use eyre::Result;
 use futures::future::BoxFuture;
 use reth_chainspec::{ChainSpecBuilder, MAINNET};
@@ -26,7 +28,7 @@ use reth_e2e_test_utils::{
 use reth_engine_tree::tree::TreeConfig;
 use reth_ethereum_engine_primitives::EthEngineTypes;
 use reth_node_ethereum::EthereumNode;
-use std::sync::Arc;
+use std::{sync::Arc, time::Duration};
 
 /// Waits for in-flight persistence by resubmitting the latest built payload to a node.
 #[derive(Debug)]
@@ -116,6 +118,74 @@ impl Action<EthEngineTypes> for SubmitTransfer {
             Ok(())
         })
     }
+}
+
+const STORAGE_WRITER: Address = Address::new([0x11; 20]);
+const STORAGE_BRANCH_SLOT: U256 =
+    U256::from_be_bytes(hex!("00000000000000000000000000000000000000000000003476802fad57c46a62"));
+const STORAGE_TARGET_SLOT: U256 =
+    U256::from_be_bytes(hex!("0000000000000000000000000000000000000000000001a2aff679ac526243a9"));
+
+/// Sends a call to the predeployed contract which stores `1` at the calldata word.
+#[derive(Debug)]
+struct SubmitStorageWrite {
+    node_idx: usize,
+    nonce: u64,
+    slot: U256,
+}
+
+impl SubmitStorageWrite {
+    const fn new(node_idx: usize, nonce: u64, slot: U256) -> Self {
+        Self { node_idx, nonce, slot }
+    }
+}
+
+impl Action<EthEngineTypes> for SubmitStorageWrite {
+    fn execute<'a>(
+        &'a mut self,
+        env: &'a mut Environment<EthEngineTypes>,
+    ) -> BoxFuture<'a, Result<()>> {
+        Box::pin(async move {
+            let signer =
+                Wallet::default().with_chain_id(1).wallet_gen().into_iter().next().unwrap();
+            let request = TransactionRequest::default()
+                .with_nonce(self.nonce)
+                .with_to(STORAGE_WRITER)
+                .with_gas_limit(100_000)
+                .with_max_fee_per_gas(1_000_000_000_000u128)
+                .with_max_priority_fee_per_gas(20_000_000_000u128)
+                .with_chain_id(1)
+                .with_input(Bytes::copy_from_slice(&self.slot.to_be_bytes::<32>()));
+            let raw = TransactionTestContext::sign_tx(signer, request).await.encoded_2718().into();
+            env.node_clients[self.node_idx].send_raw_transaction(raw).await
+        })
+    }
+}
+
+fn sparse_trie_reorg_setup() -> Setup<EthEngineTypes> {
+    let mut genesis: serde_json::Value = serde_json::from_str(include_str!(
+        "../../../../e2e-test-utils/src/testsuite/assets/genesis.json"
+    ))
+    .unwrap();
+    genesis["alloc"][format!("{STORAGE_WRITER:#x}")] = serde_json::json!({
+        "balance": "0x1", "code": "0x6000356001905500"
+    });
+    Setup::default()
+        .with_chain_spec(Arc::new(
+            ChainSpecBuilder::default()
+                .chain(MAINNET.chain)
+                .genesis(serde_json::from_value(genesis).unwrap())
+                .cancun_activated()
+                .build(),
+        ))
+        .with_network(NetworkSetup::multi_node_unconnected(3))
+        .with_storage_v2()
+        .with_tree_config(
+            TreeConfig::default()
+                .with_memory_block_buffer_target(0)
+                .with_persistence_threshold(1)
+                .with_has_enough_parallelism(true),
+        )
 }
 
 /// Verifies that the masked persistence suffix contains a state-changing transaction.
@@ -571,6 +641,89 @@ async fn test_engine_tree_pipeline_sync_catches_up_masked_state_e2e() -> Result<
 
     test.run::<EthereumNode>().await?;
 
+    Ok(())
+}
+
+/// Reproduces sparse-trie proof starvation after a persisted-chain reorg.
+#[tokio::test]
+async fn test_sparse_trie_reorg_pruned_storage_branch_e2e() -> Result<()> {
+    reth_tracing::init_test_tracing();
+    let test = TestBuilder::new()
+        .with_setup(sparse_trie_reorg_setup())
+        .with_action(SelectActiveNode::new(1))
+        .with_action(ProduceBlocks::<EthEngineTypes>::new(2))
+        .with_action(MakeCanonical::with_active_node())
+        .with_action(SubmitStorageWrite::new(1, 0, STORAGE_BRANCH_SLOT))
+        .with_action(ProduceBlocks::<EthEngineTypes>::new(1))
+        .with_action(MakeCanonical::with_active_node())
+        .with_action(WaitForPersistence::new(1))
+        .with_action(ProduceBlocks::<EthEngineTypes>::new(1))
+        .with_action(MakeCanonical::with_active_node())
+        .with_action(CaptureBlock::new("main_b4"))
+        .with_action(
+            SendNewPayloads::<EthEngineTypes>::new()
+                .with_source_node(1)
+                .with_target_node(0)
+                .with_start_block(1)
+                .with_total_blocks(4),
+        )
+        .with_action(
+            SendForkchoiceUpdate::<EthEngineTypes>::new(
+                BlockReference::Hash(B256::ZERO),
+                BlockReference::Hash(B256::ZERO),
+                BlockReference::Tag("main_b4".into()),
+            )
+            .with_expected_status(PayloadStatusEnum::Valid)
+            .with_node_idx(0),
+        )
+        .with_action(SelectActiveNode::new(2))
+        .with_action(ProduceBlocks::<EthEngineTypes>::new(1))
+        .with_action(MakeCanonical::with_active_node())
+        .with_action(CaptureBlock::new("alternate_b1"))
+        .with_action(
+            SendNewPayloads::<EthEngineTypes>::new()
+                .with_source_node(2)
+                .with_target_node(0)
+                .with_start_block(1)
+                .with_total_blocks(1),
+        )
+        .with_action(
+            SendForkchoiceUpdate::<EthEngineTypes>::new(
+                BlockReference::Hash(B256::ZERO),
+                BlockReference::Hash(B256::ZERO),
+                BlockReference::Tag("alternate_b1".into()),
+            )
+            .with_expected_status(PayloadStatusEnum::Valid)
+            .with_node_idx(0),
+        )
+        .with_action(
+            SendNewPayloads::<EthEngineTypes>::new()
+                .with_source_node(1)
+                .with_target_node(0)
+                .with_start_block(1)
+                .with_total_blocks(4),
+        )
+        .with_action(
+            SendForkchoiceUpdate::<EthEngineTypes>::new(
+                BlockReference::Hash(B256::ZERO),
+                BlockReference::Hash(B256::ZERO),
+                BlockReference::Tag("main_b4".into()),
+            )
+            .with_expected_status(PayloadStatusEnum::Valid)
+            .with_node_idx(0),
+        )
+        .with_action(SelectActiveNode::new(1))
+        .with_action(SubmitStorageWrite::new(1, 1, STORAGE_TARGET_SLOT))
+        .with_action(ProduceBlocks::<EthEngineTypes>::new(1))
+        .with_action(MakeCanonical::with_active_node())
+        .with_action(
+            SendNewPayloads::<EthEngineTypes>::new()
+                .with_source_node(1)
+                .with_target_node(0)
+                .with_start_block(5)
+                .with_total_blocks(1),
+        );
+    tokio::time::timeout(Duration::from_secs(20), test.run::<EthereumNode>()).await??;
     Ok(())
 }
 
