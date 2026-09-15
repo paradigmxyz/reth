@@ -1,4 +1,7 @@
 //! Versioned progress records kept in the metadata table.
+//!
+//! [`read_record`] reports a record written by another build version instead of misreading it
+//! when a download resumes.
 
 use crate::SnapSyncError;
 use reth_storage_api::{MetadataProvider, MetadataWriter};

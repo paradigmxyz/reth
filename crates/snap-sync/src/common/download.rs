@@ -1,4 +1,8 @@
-//! Network and database access shared by every domain download.
+//! Client, database and request settings shared by the account, storage, bytecode and block
+//! access list downloads.
+//!
+//! [`DownloadContext`] numbers requests and commits verified responses on the blocking pool, and
+//! [`SnapRequests`] shares one request id sequence and the unavailable-peer exclusions.
 
 use crate::SnapSyncError;
 use alloy_primitives::B256;
