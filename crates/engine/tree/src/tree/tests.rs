@@ -1226,6 +1226,7 @@ fn test_tail_wait_starts_at_persistence_threshold_before_full_backpressure() {
         harness.tree.config = harness
             .tree
             .config
+            .with_num_state_masking_blocks(0)
             .with_memory_block_buffer_target(5)
             .with_persistence_threshold(10)
             .with_persistence_backpressure_threshold(20);
