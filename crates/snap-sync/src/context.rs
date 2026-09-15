@@ -3,21 +3,75 @@
 //! Header downloads publish no notification of their own, so progress is sampled from the local
 //! database and the Snap client's peer count between shutdown-aware waits.
 
-use crate::{error::db_error, SnapSyncContext, SnapSyncError};
+use crate::{error::db_error, SnapSyncError};
 use core::{
     future::Future,
     pin::Pin,
     task::{Context, Waker},
     time::Duration,
 };
+use reth_db_api::transaction::DbTxMut;
 use reth_network_p2p::download::DownloadClient;
-use reth_provider::DatabaseProviderFactory;
-use reth_storage_api::BlockNumReader;
+use reth_provider::{DatabaseProviderFactory, StaticFileProviderFactory};
+use reth_storage_api::{
+    AccountExtReader, BlockNumReader, ChangeSetReader, DBProvider, HeaderProvider,
+    PruneCheckpointWriter, StageCheckpointReader, StageCheckpointWriter, StateWriter, StatsReader,
+    StorageChangeSetReader, StorageSettingsCache, TrieWriter,
+};
 use reth_tasks::shutdown::Shutdown;
 use tracing::debug;
 
 // Sampling well below the block time keeps a resumed phase close to the head it waited for.
 const DEFAULT_SAMPLE_INTERVAL: Duration = Duration::from_secs(2);
+
+/// Canonical head and peer events used to resume stalled snap sessions.
+pub trait SnapSyncContext {
+    /// Whether the session should stop at the next durable phase boundary.
+    fn is_cancelled(&self) -> bool {
+        false
+    }
+
+    /// Returns the highest canonical block whose header is available locally.
+    fn canonical_head(&self) -> Result<u64, SnapSyncError>;
+
+    /// Waits for head or peer progress; `false` ends the session with durable progress resumable.
+    fn wait_for_progress(&mut self, head: u64) -> impl Future<Output = bool> + Send;
+}
+
+/// Provider capabilities a Snap session needs to assemble and validate state.
+pub trait SnapSyncProvider:
+    DBProvider<Tx: DbTxMut>
+    + AccountExtReader
+    + ChangeSetReader
+    + HeaderProvider
+    + PruneCheckpointWriter
+    + StageCheckpointReader
+    + StageCheckpointWriter
+    + StateWriter
+    + StatsReader
+    + StorageChangeSetReader
+    + StorageSettingsCache
+    + StaticFileProviderFactory
+    + TrieWriter
+{
+}
+
+impl<T> SnapSyncProvider for T where
+    T: DBProvider<Tx: DbTxMut>
+        + AccountExtReader
+        + ChangeSetReader
+        + HeaderProvider
+        + PruneCheckpointWriter
+        + StageCheckpointReader
+        + StageCheckpointWriter
+        + StateWriter
+        + StatsReader
+        + StorageChangeSetReader
+        + StorageSettingsCache
+        + StaticFileProviderFactory
+        + TrieWriter
+{
+}
 
 /// Observes head and peer progress through the node's provider factory and Snap client.
 #[derive(Debug)]

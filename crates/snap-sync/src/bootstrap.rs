@@ -6,18 +6,12 @@
 
 use crate::{
     error::db_error, BlockAccessListCatchUp, BlockAccessListCatchUpOutcome, RangeBudget,
-    SnapDownloadProgress, SnapPhase, SnapPivotPolicy, SnapStateStore, SnapSyncError,
-    StateDownloadOutcome, StateDownloader, TrieGenerator,
+    SnapDownloadProgress, SnapPhase, SnapPivotPolicy, SnapStateStore, SnapSyncContext,
+    SnapSyncError, SnapSyncProvider, StateDownloadOutcome, StateDownloader, TrieGenerator,
 };
-use core::future::Future;
-use reth_db_api::transaction::DbTxMut;
 use reth_network_p2p::snap::client::SnapClient;
-use reth_provider::{DatabaseProviderFactory, StaticFileProviderFactory};
-use reth_storage_api::{
-    AccountExtReader, ChangeSetReader, DBProvider, HeaderProvider, PruneCheckpointWriter,
-    StageCheckpointReader, StageCheckpointWriter, StateWriter, StatsReader, StorageChangeSetReader,
-    StorageSettingsCache, TrieWriter,
-};
+use reth_provider::DatabaseProviderFactory;
+use reth_storage_api::{HeaderProvider, StageCheckpointReader};
 use reth_tasks::Runtime;
 use tracing::{debug, info};
 
@@ -325,55 +319,6 @@ pub enum SnapSyncOutcome {
     },
 }
 
-/// Canonical head and peer events used to resume stalled snap sessions.
-pub trait SnapSyncContext {
-    /// Whether the session should stop at the next durable phase boundary.
-    fn is_cancelled(&self) -> bool {
-        false
-    }
-
-    /// Returns the highest canonical block whose header is available locally.
-    fn canonical_head(&self) -> Result<u64, SnapSyncError>;
-
-    /// Waits for head or peer progress; `false` ends the session with durable progress resumable.
-    fn wait_for_progress(&mut self, head: u64) -> impl Future<Output = bool> + Send;
-}
-
-/// Provider capabilities a Snap session needs to assemble and validate state.
-pub trait SnapSyncProvider:
-    DBProvider<Tx: DbTxMut>
-    + AccountExtReader
-    + ChangeSetReader
-    + HeaderProvider
-    + PruneCheckpointWriter
-    + StageCheckpointReader
-    + StageCheckpointWriter
-    + StateWriter
-    + StatsReader
-    + StorageChangeSetReader
-    + StorageSettingsCache
-    + StaticFileProviderFactory
-    + TrieWriter
-{
-}
-
-impl<T> SnapSyncProvider for T where
-    T: DBProvider<Tx: DbTxMut>
-        + AccountExtReader
-        + ChangeSetReader
-        + HeaderProvider
-        + PruneCheckpointWriter
-        + StageCheckpointReader
-        + StageCheckpointWriter
-        + StateWriter
-        + StatsReader
-        + StorageChangeSetReader
-        + StorageSettingsCache
-        + StaticFileProviderFactory
-        + TrieWriter
-{
-}
-
 // Distinguishes a generation that can continue from a chain that cannot yet be pivoted on.
 enum Resolved {
     // Ready to be driven.
@@ -419,7 +364,9 @@ mod tests {
     };
     use reth_stages_types::{StageCheckpoint, StageId};
     use reth_static_file_types::StaticFileSegment;
-    use reth_storage_api::StorageSettings;
+    use reth_storage_api::{
+        DBProvider, StageCheckpointWriter, StateWriter, StorageSettings, StorageSettingsCache,
+    };
     use reth_trie_common::{HashBuilder, HashedPostState, Nibbles, TrieAccount, EMPTY_ROOT_HASH};
     use std::{
         collections::VecDeque,

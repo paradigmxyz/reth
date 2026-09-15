@@ -3,10 +3,12 @@
 //! Each range replaces its key interval, and ranges commit in key order.
 
 use crate::{
-    bytecode::store::{require_code, supplied_code, write_bytecodes},
     common::{read_record, write_record},
     error::db_error,
-    storage::store::verify_storage,
+    state::{
+        bytecode::store::{require_code, supplied_code, write_bytecodes},
+        storage::store::verify_storage,
+    },
     SnapAttemptStore, SnapDownloadProgress, SnapPhase, SnapStateStore, SnapSyncError, SnapWrite,
 };
 use alloy_primitives::{

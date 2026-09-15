@@ -11,11 +11,8 @@
 )]
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 
-mod account;
 mod attempt;
-mod bal;
 mod bootstrap;
-mod bytecode;
 mod catch_up;
 mod common;
 mod context;
@@ -24,29 +21,27 @@ mod generation;
 mod handoff;
 mod pivot;
 mod session;
-mod storage;
+mod state;
 mod trie;
 
 #[cfg(test)]
 mod test_utils;
 
-pub use account::{
-    AccountCoverage, AccountRangeDownload, AccountRangeProgress, AccountRangeStep,
-    SnapAccountStore, VerifiedRange,
-};
 pub use attempt::{SnapAttemptStore, SnapWrite};
-pub use bal::{BalStateUpdate, DownloadedAccount};
-pub use bootstrap::{SnapBootstrap, SnapSyncContext, SnapSyncOutcome, SnapSyncProvider};
+pub use bootstrap::{SnapBootstrap, SnapSyncOutcome};
 pub use catch_up::{
-    BlockAccessListCatchUp, BlockAccessListCatchUpOutcome, BlockAccessListProgress,
+    BalStateUpdate, BlockAccessListCatchUp, BlockAccessListCatchUpOutcome, BlockAccessListProgress,
+    DownloadedAccount,
 };
 pub use common::{DEFAULT_RESPONSE_BYTES, MAX_HASH};
-pub use context::NodeSnapContext;
+pub use context::{NodeSnapContext, SnapSyncContext, SnapSyncProvider};
 pub use error::SnapSyncError;
 pub use generation::{SnapDownloadProgress, SnapGeneration, SnapPhase, SnapStateStore};
 pub use handoff::SnapPipelineHandoff;
 pub use pivot::SnapPivotPolicy;
-pub use session::{
-    RangeBudget, SnapSyncSession, SnapSyncSessionState, StateDownloadOutcome, StateDownloader,
+pub use session::{SnapSyncSession, SnapSyncSessionState};
+pub use state::{
+    AccountCoverage, AccountRangeDownload, AccountRangeProgress, AccountRangeStep, RangeBudget,
+    SnapAccountStore, StateDownloadOutcome, StateDownloader, VerifiedRange,
 };
 pub use trie::TrieGenerator;
