@@ -3,7 +3,7 @@
 //! Progress is tied to the attempt, its pivot and the range, so slots proved against a superseded
 //! root are never resumed.
 
-use crate::{SnapAccountStore, SnapAttemptStore, SnapSyncError, SnapWrite};
+use crate::{common::SnapRecord, SnapAccountStore, SnapAttemptStore, SnapSyncError, SnapWrite};
 use alloy_primitives::{B256, U256};
 use reth_db_api::{
     cursor::DbDupCursorRO,
@@ -11,15 +11,8 @@ use reth_db_api::{
     transaction::{DbTx, DbTxMut},
 };
 use reth_storage_api::{DBProvider, MetadataProvider, MetadataWriter, SnapAttemptId, StateWriter};
-use reth_storage_errors::provider::ProviderError;
 use reth_trie_common::{root::storage_root, HashedPostState, HashedStorage, EMPTY_ROOT_HASH};
 use serde::{Deserialize, Serialize};
-
-// Metadata key of the storage progress record.
-const PROGRESS_KEY: &str = "snap_storage_progress";
-
-// Encoding version of the storage progress record this build writes.
-const PROGRESS_VERSION: u32 = 1;
 
 /// Persistence for contract storage downloaded ahead of its account range.
 ///
@@ -165,32 +158,21 @@ struct StoredProgress {
     progress: StorageProgress,
 }
 
+impl SnapRecord for StoredProgress {
+    const KEY: &'static str = "snap_storage_progress";
+    const VERSION: u32 = 1;
+}
+
 impl StoredProgress {
-    // Serializes `progress` for `write`'s range at `origin` at this build's version.
-    fn encode(
-        write: SnapWrite,
-        origin: B256,
-        progress: StorageProgress,
-    ) -> Result<Vec<u8>, SnapSyncError> {
-        let stored = Self {
-            version: PROGRESS_VERSION,
+    // `progress` for `write`'s range at `origin` at this build's version.
+    const fn new(write: SnapWrite, origin: B256, progress: StorageProgress) -> Self {
+        Self {
+            version: Self::VERSION,
             attempt: write.attempt(),
             state_version: write.state_version(),
             origin,
             progress,
-        };
-        Ok(serde_json::to_vec(&stored).map_err(ProviderError::other)?)
-    }
-
-    // Checks the version first, so a record from another build is reported rather than misread.
-    fn decode(bytes: &[u8]) -> Result<Self, SnapSyncError> {
-        let value: serde_json::Value =
-            serde_json::from_slice(bytes).map_err(ProviderError::other)?;
-        let version = value.get("version").and_then(serde_json::Value::as_u64);
-        if version != Some(PROGRESS_VERSION as u64) {
-            return Err(SnapSyncError::UnsupportedStorageProgress { version })
         }
-        Ok(serde_json::from_value(value).map_err(ProviderError::other)?)
     }
 
     fn belongs_to(&self, write: SnapWrite, origin: B256) -> bool {
@@ -208,10 +190,7 @@ impl<T: MetadataProvider> SnapStorageStore for T {
         origin: B256,
     ) -> Result<StorageProgress, SnapSyncError> {
         self.authorize_snap_write(write)?;
-        let Some(bytes) = self.get_metadata(PROGRESS_KEY)? else {
-            return Ok(StorageProgress::START)
-        };
-        let stored = StoredProgress::decode(&bytes)?;
+        let Some(stored) = StoredProgress::read(self)? else { return Ok(StorageProgress::START) };
         Ok(if stored.belongs_to(write, origin) { stored.progress } else { StorageProgress::START })
     }
 
@@ -241,7 +220,7 @@ impl<T: MetadataProvider> SnapStorageStore for T {
             .with_storages([(chunk.account, HashedStorage::from_iter(chunk.slots))])
             .into_sorted();
         self.write_hashed_state(&state)?;
-        self.write_metadata(PROGRESS_KEY, StoredProgress::encode(write, origin, progress)?)?;
+        StoredProgress::new(write, origin, progress).write(self)?;
         Ok(progress)
     }
 }
@@ -419,11 +398,11 @@ mod tests {
 
         for record in [br#"{"version":999}"#.to_vec(), b"{}".to_vec()] {
             let provider = factory.database_provider_rw().unwrap();
-            provider.write_metadata(PROGRESS_KEY, record).unwrap();
+            provider.write_metadata(StoredProgress::KEY, record).unwrap();
 
             assert!(matches!(
                 provider.storage_progress(write, B256::ZERO),
-                Err(SnapSyncError::UnsupportedStorageProgress { .. })
+                Err(SnapSyncError::UnsupportedRecord { .. })
             ));
         }
     }
