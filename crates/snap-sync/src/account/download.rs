@@ -233,7 +233,7 @@ pub(crate) fn account_progress(
 }
 
 // Returns the next trie key, or `None` when the inclusive keyspace is exhausted.
-fn next_hash(hash: B256) -> Option<B256> {
+pub(crate) fn next_hash(hash: B256) -> Option<B256> {
     let mut bytes = [0u8; B256::len_bytes()];
     bytes.copy_from_slice(hash.as_slice());
     for byte in bytes.iter_mut().rev() {

@@ -417,6 +417,7 @@ mod tests {
 #[cfg(test)]
 mod state_tests {
     use super::*;
+    use crate::account::next_hash;
     use alloy_primitives::{keccak256, KECCAK256_EMPTY, U256};
     use reth_db_api::{cursor::DbDupCursorRO, tables, transaction::DbTx};
     use reth_downloaders::snap::test_utils::TestSnapClient;

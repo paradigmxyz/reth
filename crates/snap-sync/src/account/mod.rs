@@ -9,3 +9,5 @@ pub use download::{
 pub use store::{AccountCoverage, AccountRangeProgress, SnapAccountStore};
 
 pub(crate) use download::account_progress;
+#[cfg(test)]
+pub(crate) use download::next_hash;
