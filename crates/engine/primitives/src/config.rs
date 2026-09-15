@@ -303,6 +303,8 @@ impl TreeConfig {
         share_execution_cache_with_payload_builder: bool,
         share_sparse_trie_with_payload_builder: bool,
     ) -> Self {
+        let num_state_masking_blocks =
+            if persistence_threshold == 0 { 0 } else { num_state_masking_blocks };
         assert_backpressure_threshold_invariant(
             persistence_threshold,
             persistence_backpressure_threshold,
@@ -471,9 +473,12 @@ impl TreeConfig {
         self.allow_unwind_canonical_header
     }
 
-    /// Setter for persistence threshold.
+    /// Setter for persistence threshold. Setting this to zero disables state masking.
     pub const fn with_persistence_threshold(mut self, persistence_threshold: u64) -> Self {
         self.persistence_threshold = persistence_threshold;
+        if persistence_threshold == 0 {
+            self.num_state_masking_blocks = 0;
+        }
         assert_backpressure_threshold_invariant(
             self.persistence_threshold,
             self.persistence_backpressure_threshold,
@@ -487,8 +492,10 @@ impl TreeConfig {
     }
 
     /// Setter for the number of persisted blocks whose state/trie writes are masked.
+    /// State masking is disabled when the persistence threshold is zero.
     pub const fn with_num_state_masking_blocks(mut self, num_state_masking_blocks: u64) -> Self {
-        self.num_state_masking_blocks = num_state_masking_blocks;
+        self.num_state_masking_blocks =
+            if self.persistence_threshold == 0 { 0 } else { num_state_masking_blocks };
         assert_state_masking_invariant(
             self.persistence_threshold,
             self.num_state_masking_blocks,
@@ -853,6 +860,16 @@ mod tests {
         assert_eq!(config.persistence_threshold(), 50);
         assert_eq!(config.num_state_masking_blocks(), 30);
         assert_eq!(config.persistence_backpressure_threshold(), 100);
+    }
+
+    #[test]
+    fn zero_persistence_threshold_disables_state_masking() {
+        let config = TreeConfig::default().with_persistence_threshold(0);
+        assert_eq!(config.num_state_masking_blocks(), 0);
+        let config = config.with_num_state_masking_blocks(u64::MAX);
+        assert_eq!(config.num_state_masking_blocks(), 0);
+        let config = config.with_memory_block_buffer_target(0);
+        assert_eq!(config.num_state_masking_blocks(), 0);
     }
 
     #[test]

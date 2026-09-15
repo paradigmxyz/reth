@@ -191,10 +191,7 @@ async fn test_rocksdb_transaction_queries() -> Result<()> {
     )
     .with_storage_v2()
     .with_tree_config_modifier(|config| {
-        config
-            .with_num_state_masking_blocks(0)
-            .with_persistence_threshold(0)
-            .with_memory_block_buffer_target(0)
+        config.with_persistence_threshold(0).with_memory_block_buffer_target(0)
     })
     .build()
     .await?;
@@ -263,10 +260,7 @@ async fn test_rocksdb_multi_tx_same_block() -> Result<()> {
     )
     .with_storage_v2()
     .with_tree_config_modifier(|config| {
-        config
-            .with_num_state_masking_blocks(0)
-            .with_persistence_threshold(0)
-            .with_memory_block_buffer_target(0)
+        config.with_persistence_threshold(0).with_memory_block_buffer_target(0)
     })
     .build()
     .await?;
@@ -336,10 +330,7 @@ async fn test_rocksdb_txs_across_blocks() -> Result<()> {
     )
     .with_storage_v2()
     .with_tree_config_modifier(|config| {
-        config
-            .with_num_state_masking_blocks(0)
-            .with_persistence_threshold(0)
-            .with_memory_block_buffer_target(0)
+        config.with_persistence_threshold(0).with_memory_block_buffer_target(0)
     })
     .build()
     .await?;
@@ -426,10 +417,7 @@ async fn test_rocksdb_pending_tx_not_in_storage() -> Result<()> {
     )
     .with_storage_v2()
     .with_tree_config_modifier(|config| {
-        config
-            .with_num_state_masking_blocks(0)
-            .with_persistence_threshold(0)
-            .with_memory_block_buffer_target(0)
+        config.with_persistence_threshold(0).with_memory_block_buffer_target(0)
     })
     .build()
     .await?;
@@ -495,10 +483,7 @@ async fn test_rocksdb_reorg_unwind() -> Result<()> {
     )
     .with_storage_v2()
     .with_tree_config_modifier(|config| {
-        config
-            .with_num_state_masking_blocks(0)
-            .with_persistence_threshold(0)
-            .with_memory_block_buffer_target(0)
+        config.with_persistence_threshold(0).with_memory_block_buffer_target(0)
     })
     .build()
     .await?;
@@ -623,10 +608,7 @@ async fn test_rocksdb_historical_account_queries() -> Result<()> {
     )
     .with_storage_v2()
     .with_tree_config_modifier(|config| {
-        config
-            .with_num_state_masking_blocks(0)
-            .with_persistence_threshold(0)
-            .with_memory_block_buffer_target(0)
+        config.with_persistence_threshold(0).with_memory_block_buffer_target(0)
     })
     .build()
     .await?;
@@ -775,10 +757,7 @@ async fn test_rocksdb_account_history_pruning() -> Result<()> {
     )
     .with_storage_v2()
     .with_tree_config_modifier(|config| {
-        config
-            .with_num_state_masking_blocks(0)
-            .with_persistence_threshold(0)
-            .with_memory_block_buffer_target(0)
+        config.with_persistence_threshold(0).with_memory_block_buffer_target(0)
     })
     .with_node_config_modifier(|mut config| {
         config.pruning.account_history_distance = Some(PRUNE_DISTANCE);
@@ -877,10 +856,7 @@ async fn test_rocksdb_storage_history_pruning() -> Result<()> {
     )
     .with_storage_v2()
     .with_tree_config_modifier(|config| {
-        config
-            .with_num_state_masking_blocks(0)
-            .with_persistence_threshold(0)
-            .with_memory_block_buffer_target(0)
+        config.with_persistence_threshold(0).with_memory_block_buffer_target(0)
     })
     .with_node_config_modifier(|mut config| {
         config.pruning.storage_history_distance = Some(PRUNE_DISTANCE);

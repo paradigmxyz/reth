@@ -311,8 +311,8 @@ pub struct EngineArgs {
     /// must be in-memory, ahead of the last persisted block, before flushing canonical blocks to
     /// disk again.
     ///
-    /// To persist blocks as fast as the node receives them, set this value and
-    /// `--engine.num-state-masking-blocks` to zero. This will cause more frequent DB writes.
+    /// To persist blocks as fast as the node receives them, set this value to zero. This disables
+    /// state masking and causes more frequent DB writes.
     #[arg(
         long = "engine.persistence-threshold",
         env = "RETH_ENGINE_PERSISTENCE_THRESHOLD",
@@ -661,6 +661,15 @@ impl Default for EngineArgs {
 }
 
 impl EngineArgs {
+    /// Returns the effective state masking window, disabled when persistence is immediate.
+    pub const fn num_state_masking_blocks(&self) -> u64 {
+        if self.persistence_threshold == 0 {
+            0
+        } else {
+            self.num_state_masking_blocks
+        }
+    }
+
     /// Returns the effective memory block buffer target.
     pub fn memory_block_buffer_target(&self) -> u64 {
         self.memory_block_buffer_target.unwrap_or_else(|| {
@@ -680,6 +689,7 @@ impl EngineArgs {
     pub fn validate(&self) -> eyre::Result<()> {
         let persistence_backpressure_threshold = self.persistence_backpressure_threshold();
         let memory_block_buffer_target = self.memory_block_buffer_target();
+        let num_state_masking_blocks = self.num_state_masking_blocks();
         ensure!(
             persistence_backpressure_threshold > self.persistence_threshold,
             "--engine.persistence-backpressure-threshold ({}) must be greater than --engine.persistence-threshold ({})",
@@ -693,13 +703,13 @@ impl EngineArgs {
             self.persistence_threshold,
         );
         ensure!(
-            self.num_state_masking_blocks == 0 ||
+            num_state_masking_blocks == 0 ||
                 matches!(
-                    self.num_state_masking_blocks.checked_add(memory_block_buffer_target),
+                    num_state_masking_blocks.checked_add(memory_block_buffer_target),
                     Some(window) if window < self.persistence_threshold
                 ),
             "--engine.num-state-masking-blocks ({}) + --engine.memory-block-buffer-target ({}) must be less than --engine.persistence-threshold ({})",
-            self.num_state_masking_blocks,
+            num_state_masking_blocks,
             memory_block_buffer_target,
             self.persistence_threshold,
         );
@@ -722,12 +732,11 @@ impl EngineArgs {
         }
         let config = TreeConfig::default()
             // Clear the default window before applying overrides that may be smaller than it.
-            .with_num_state_masking_blocks(0)
             .with_persistence_threshold(0)
             .with_persistence_backpressure_threshold(self.persistence_backpressure_threshold())
             .with_persistence_threshold(self.persistence_threshold)
             .with_memory_block_buffer_target(self.memory_block_buffer_target())
-            .with_num_state_masking_blocks(self.num_state_masking_blocks)
+            .with_num_state_masking_blocks(self.num_state_masking_blocks())
             .with_invalid_header_hit_eviction_threshold(self.invalid_header_hit_eviction_threshold)
             .without_state_cache(self.state_cache_disabled)
             .without_prewarming(self.prewarming_disabled)
@@ -1061,8 +1070,6 @@ mod tests {
             "reth",
             "--engine.persistence-threshold",
             "0",
-            "--engine.num-state-masking-blocks",
-            "0",
             "--engine.persistence-backpressure-threshold",
             "1",
         ])
@@ -1074,6 +1081,17 @@ mod tests {
         assert_eq!(config.num_state_masking_blocks(), 0);
         assert_eq!(config.memory_block_buffer_target(), 0);
         assert_eq!(config.persistence_backpressure_threshold(), 1);
+    }
+
+    #[test]
+    fn zero_persistence_threshold_disables_explicit_state_masking() {
+        let args = EngineArgs {
+            persistence_threshold: 0,
+            num_state_masking_blocks: u64::MAX,
+            ..EngineArgs::default()
+        };
+        args.validate().unwrap();
+        assert_eq!(args.tree_config().num_state_masking_blocks(), 0);
     }
 
     #[test]

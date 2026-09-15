@@ -689,7 +689,6 @@ fn payload_build_tracker_notifies_after_last_lease_drops() {
 fn persistence_completion_does_not_wait_for_active_payload_jobs() {
     let config = TreeConfig::default()
         .with_has_enough_parallelism(true)
-        .with_num_state_masking_blocks(0)
         .with_persistence_threshold(0)
         .with_memory_block_buffer_target(0);
     let blocks: Vec<_> = TestBlockBuilder::eth().get_executed_blocks(1..4).collect();
@@ -928,7 +927,6 @@ fn backfill_request_is_preserved_while_persistence_is_in_flight() {
 fn configured_persistence_suppression_tracks_payload_job_lifetime() {
     let config = TreeConfig::default()
         .with_has_enough_parallelism(true)
-        .with_num_state_masking_blocks(0)
         .with_persistence_threshold(0)
         .with_memory_block_buffer_target(0)
         .with_suppress_persistence_during_build(true);
@@ -1168,7 +1166,6 @@ fn test_backpressure_waits_for_persistence_before_reading_incoming() {
     test_harness.tree.config = test_harness
         .tree
         .config
-        .with_num_state_masking_blocks(0)
         .with_persistence_threshold(0)
         .with_memory_block_buffer_target(0)
         .with_persistence_backpressure_threshold(1);
@@ -1241,7 +1238,6 @@ fn test_backpressure_excludes_in_memory_buffer() {
         test_harness.tree.config = test_harness
             .tree
             .config
-            .with_num_state_masking_blocks(0)
             .with_persistence_threshold(0)
             .with_memory_block_buffer_target(5)
             .with_persistence_backpressure_threshold(10);
