@@ -6,6 +6,8 @@ use reth_metrics::Metrics;
 pub(crate) struct EngineApiMetrics {
     /// Engine API latency metrics
     pub(crate) latency: EngineApiLatencyMetrics,
+    /// Inclusion list metrics
+    pub(crate) inclusion_list: InclusionListMetrics,
     /// Blob-related metrics
     pub(crate) blob_metrics: BlobMetrics,
 }
@@ -68,6 +70,16 @@ pub(crate) struct EngineApiLatencyMetrics {
     pub(crate) get_blobs_v4: Histogram,
     /// Latency for `engine_hasBlobs`
     pub(crate) has_blobs: Histogram,
+}
+
+/// Inclusion list metrics.
+#[derive(Metrics)]
+#[metrics(scope = "engine.rpc.inclusion_list")]
+pub(crate) struct InclusionListMetrics {
+    /// Number of transactions returned by `engine_getInclusionListV1`
+    pub(crate) transaction_count: Histogram,
+    /// Total EIP-2718 transaction bytes returned by `engine_getInclusionListV1`
+    pub(crate) encoded_size_bytes: Histogram,
 }
 
 #[derive(Metrics)]
