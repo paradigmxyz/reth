@@ -9,18 +9,7 @@ use reth_trie_common::RlpNode;
 /// Bits per word of a [`BlindedMarks`] bitmap.
 const WORD_BITS: usize = u64::BITS as usize;
 
-/// A reference to a node inside a [`NodeArena`].
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub(super) struct Index(u32);
-
-impl Index {
-    /// Returns the index as a `usize`, suitable for indexing into the arena's backing vector.
-    pub(super) const fn get(self) -> usize {
-        self.0 as usize
-    }
-}
-
-/// Arena of trie nodes addressed by a [`Index`].
+/// Arena of trie nodes addressed by an [`Index`].
 ///
 /// Nodes live in a flat vector; [`NodeArena::remove`] leaves an [`ArenaSparseNode::Free`] tombstone
 /// behind and pushes the slot onto a LIFO free list. Unlike a slotmap there are no generation
@@ -51,7 +40,7 @@ impl NodeArena {
             self.nodes[idx.get()] = node;
             return idx;
         }
-        let idx = Index(self.nodes.len() as u32);
+        let idx = Index::new(self.nodes.len());
         self.nodes.push(node);
         idx
     }
@@ -120,8 +109,10 @@ impl NodeArena {
             self.blinded[slot as usize] = rlp;
             slot
         } else {
+            let slot = self.blinded.len();
+            assert!(slot < BranchChild::BLINDED as usize, "blinded slot overflows the tag bit");
             self.blinded.push(rlp);
-            (self.blinded.len() - 1) as u32
+            slot as u32
         };
         BranchChild::blinded(slot)
     }
@@ -192,6 +183,9 @@ impl NodeArena {
                 self.blinded_free.push(idx as u32 * u64::BITS + bit);
             }
         }
+
+        shrink_excess_capacity(&mut self.blinded);
+        shrink_excess_capacity(&mut self.blinded_free);
     }
 }
 
@@ -212,6 +206,27 @@ impl IndexMut<Index> for NodeArena {
         let node = &mut self.nodes[idx.get()];
         debug_assert!(!matches!(node, ArenaSparseNode::Free), "indexed a free arena slot");
         node
+    }
+}
+
+/// A reference to a node inside a [`NodeArena`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub(super) struct Index(u32);
+
+impl Index {
+    /// Creates an index that fits below the blinded-child tag bit.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `index` is at least 2^31.
+    pub(super) const fn new(index: usize) -> Self {
+        assert!(index < BranchChild::BLINDED as usize, "arena index overflows the blinded tag bit");
+        Self(index as u32)
+    }
+
+    /// Returns the index as a `usize`, suitable for indexing into the arena's backing vector.
+    pub(super) const fn get(self) -> usize {
+        self.0 as usize
     }
 }
 
@@ -295,6 +310,15 @@ impl fmt::Debug for BranchChild {
     }
 }
 
+/// Reclaims capacity after a large contraction while leaving room for subsequent growth.
+fn shrink_excess_capacity<T>(vec: &mut Vec<T>) {
+    // Shrink at quarter-full to avoid reallocating on small prunes. Empty vectors release all
+    // capacity; non-empty vectors retain room for twice their current length.
+    if vec.len() <= vec.capacity() / 4 {
+        vec.shrink_to(vec.len() * 2);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -318,6 +342,18 @@ mod tests {
         assert_ne!(third, second);
         assert_eq!(arena.len(), 2);
         assert_eq!(arena.iter().count(), 2);
+    }
+
+    #[test]
+    fn largest_arena_index_is_revealed() {
+        let index = Index::new((1 << 31) - 1);
+        assert_eq!(BranchChild::revealed(index).revealed_index(), Some(index));
+    }
+
+    #[test]
+    #[should_panic(expected = "arena index overflows the blinded tag bit")]
+    fn arena_index_rejects_blinded_tag_bit() {
+        Index::new(1 << 31);
     }
 
     #[test]
@@ -364,5 +400,51 @@ mod tests {
         for (byte, child) in (0..200u8).step_by(3).zip(children.iter().step_by(3)) {
             assert_eq!(dst.blinded(*child), &RlpNode::word_rlp(&B256::repeat_byte(byte)));
         }
+    }
+
+    #[test]
+    fn sweeping_releases_excess_side_table_capacity() {
+        let mut src = NodeArena::new();
+        let rlp = RlpNode::word_rlp(&B256::repeat_byte(1));
+        let children: Vec<_> = (0..4096).map(|_| src.insert_blinded(rlp.clone())).collect();
+        for child in &children[2048..] {
+            src.take_blinded(*child);
+        }
+
+        let mut dst = NodeArena::new();
+        let mut marks = dst.adopt_blinded(&mut src);
+        for child in children[..64].iter().step_by(2) {
+            marks.mark(*child);
+        }
+        dst.sweep_blinded(marks);
+
+        assert!(dst.blinded.capacity() <= 128, "release the discarded RLP capacity");
+        assert!(dst.blinded_free.capacity() <= 64, "release the discarded free-list capacity");
+        for child in children[..64].iter().step_by(2) {
+            assert_eq!(dst.blinded(*child), &rlp);
+        }
+        for slot in (1..63).step_by(2) {
+            assert_eq!(dst.insert_blinded(rlp.clone()).blinded_slot(), Some(slot));
+        }
+
+        let mut empty = NodeArena::new();
+        let marks = empty.adopt_blinded(&mut dst);
+        empty.sweep_blinded(marks);
+        assert_eq!(empty.blinded.capacity(), 0);
+        assert_eq!(empty.blinded_free.capacity(), 0);
+    }
+
+    #[test]
+    fn sweeping_keeps_capacity_for_small_contractions() {
+        let mut src = NodeArena::new();
+        let children: Vec<_> = (0..128).map(|_| src.insert_blinded(RlpNode::default())).collect();
+        let capacity = src.blinded.capacity();
+        let mut dst = NodeArena::new();
+        let mut marks = dst.adopt_blinded(&mut src);
+        for child in &children[..96] {
+            marks.mark(*child);
+        }
+        dst.sweep_blinded(marks);
+        assert_eq!(dst.blinded.capacity(), capacity);
     }
 }

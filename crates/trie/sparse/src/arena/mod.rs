@@ -11,7 +11,7 @@ use nodes::{ArenaSparseNode, ArenaSparseNodeBranch, ArenaSparseNodeState};
 use crate::{
     LeafLookup, LeafLookupError, LeafUpdate, SparseTrie, SparseTrieUpdates, TrieNodeEpoch,
 };
-use alloc::{borrow::Cow, boxed::Box, collections::VecDeque, vec::Vec};
+use alloc::{borrow::Cow, boxed::Box, vec::Vec};
 use alloy_primitives::{keccak256, map::B256Map, B256};
 use alloy_trie::TrieMask;
 use core::{cmp::Reverse, mem};
@@ -35,17 +35,15 @@ const UPPER_TRIE_MAX_DEPTH: usize = 2;
 fn compact_arena(arena: &mut NodeArena, root: &mut Index) {
     let mut new_arena = NodeArena::with_capacity(arena.len());
     let mut marks = new_arena.adopt_blinded(arena);
-    let mut queue = VecDeque::new();
-
     let root_node = arena.drain_node(*root);
     let new_root = new_arena.insert(root_node);
-    queue.push_back(new_root);
 
-    while let Some(new_idx) = queue.pop_front() {
-        // Invariant: any node popped from `queue` has been moved into `new_arena` but
-        // its Branch.children have not been rewritten yet — every Revealed(idx) here is
-        // still an old-arena index, and the child is still present in `arena` because
-        // only this parent's iteration can remove it (each child has exactly one parent).
+    // Nodes append consecutively without removals, so the destination vector is also the BFS
+    // queue. Each visited node's children still reference the source arena until rewritten.
+    let mut next = 0;
+    while next < new_arena.len() {
+        let new_idx = Index::new(next);
+        next += 1;
         let old_children: SmallVec<[(usize, Index); 16]> = match &new_arena[new_idx] {
             ArenaSparseNode::Branch(b) => b
                 .children
@@ -66,7 +64,6 @@ fn compact_arena(arena: &mut NodeArena, root: &mut Index) {
         for (child_pos, old_child_idx) in old_children {
             let child_node = arena.drain_node(old_child_idx);
             let new_child_idx = new_arena.insert(child_node);
-            queue.push_back(new_child_idx);
             let ArenaSparseNode::Branch(b) = &mut new_arena[new_idx] else { unreachable!() };
             b.children[child_pos] = BranchChild::revealed(new_child_idx);
         }

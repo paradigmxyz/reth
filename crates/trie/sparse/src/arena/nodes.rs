@@ -98,7 +98,7 @@ impl ArenaSparseNodeBranch {
         self.state = ArenaSparseNodeState::Dirty;
     }
 
-    /// Returns a reference to the sibling child in a branch with exactly 2 children.
+    /// Returns the sibling child in a branch with exactly 2 children.
     ///
     /// # Panics
     ///
