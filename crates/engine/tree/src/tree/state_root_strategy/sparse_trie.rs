@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use super::{evm_state_to_hashed_post_state, StateRootComputeOutcome, StateRootMessage};
 use alloy_primitives::{
-    map::{hash_map::Entry, B256Map},
+    map::{hash_map::Entry, B256Map, B256Set},
     B256,
 };
 use alloy_rlp::{Decodable, Encodable};
@@ -28,8 +28,8 @@ use reth_trie_parallel::{
 };
 use reth_trie_sparse::{
     errors::{SparseStateTrieErrorKind, SparseTrieErrorKind, SparseTrieResult},
-    ArenaParallelSparseTrie, DeferredDrops, LeafUpdate, RevealableSparseTrie, SparseStateTrie,
-    SparseTrie, TrieNodeEpoch,
+    ArenaParallelSparseTrie, BlockedLeafUpdates, DeferredDrops, LeafUpdate, RevealableSparseTrie,
+    SparseStateTrie, SparseTrie, TrieNodeEpoch,
 };
 use tracing::{debug, debug_span, error, instrument, trace_span};
 
@@ -67,7 +67,15 @@ pub(super) struct SparseTrieCacheTask<A = ArenaParallelSparseTrie, S = ArenaPara
     /// Account trie updates.
     account_updates: B256Map<LeafUpdate>,
     /// Storage trie updates. hashed address -> slot -> update.
+    ///
+    /// A revealed trie takes ownership of the updates it could not apply, so entries only
+    /// remain here while the storage trie is still blind.
     storage_updates: B256Map<B256Map<LeafUpdate>>,
+    /// Storage tries that hold leaf updates they could not apply yet.
+    blocked_storage_updates: B256Set,
+    /// Storage tries whose blocked leaf updates may be applicable now, because the trie received
+    /// a proof or still holds updates that do not depend on one.
+    retry_storage_updates: B256Set,
 
     /// Account updates that are buffered but were not yet applied to the trie.
     new_account_updates: B256Map<LeafUpdate>,
@@ -79,7 +87,8 @@ pub(super) struct SparseTrieCacheTask<A = ArenaParallelSparseTrie, S = ArenaPara
     /// are revealed and/or calculated.
     ///
     /// Invariant: for each entry in `pending_account_updates` account must either be already
-    /// revealed in the trie or have an entry in `account_updates`.
+    /// revealed in the trie, have an entry in `account_updates`, or have a leaf update blocked
+    /// inside the accounts trie.
     ///
     /// Values can be either of:
     ///   - None: account had a storage update and is awaiting storage root calculation and/or
@@ -170,6 +179,8 @@ where
             max_targets_for_chunking: DEFAULT_MAX_TARGETS_FOR_CHUNKING,
             account_updates: Default::default(),
             storage_updates: Default::default(),
+            blocked_storage_updates: Default::default(),
+            retry_storage_updates: Default::default(),
             new_account_updates: Default::default(),
             new_storage_updates: Default::default(),
             pending_account_updates: Default::default(),
@@ -556,6 +567,8 @@ where
     }
 
     fn on_proof_result(&mut self, result: DecodedMultiProofV2) -> Result<(), StateRootTaskError> {
+        // Revealing these tries can unblock leaf updates they hold on to.
+        self.retry_storage_updates.extend(result.storage_proofs.keys().copied());
         self.trie
             .reveal_decoded_multiproof_v2(result)
             .map_err(|e| StateRootTaskError::Other(format!("could not reveal multiproof: {e:?}")))
@@ -633,47 +646,95 @@ where
         skip_all
     )]
     fn process_leaf_updates(&mut self, new: bool) -> SparseTrieResult<()> {
-        let storage_updates =
-            if new { &mut self.new_storage_updates } else { &mut self.storage_updates };
-
-        // Process all storage updates, skipping tries with no pending updates.
         let span = trace_span!("process_storage_leaf_updates").entered();
-        for (address, updates) in storage_updates {
-            if updates.is_empty() {
-                continue;
-            }
-            let _enter = trace_span!(target: "engine::tree::payload_processor::sparse_trie", parent: &span, "storage_trie_leaf_updates", a=%address).entered();
 
-            let trie = self.trie.get_or_create_storage_trie_mut(*address);
-            let fetched = self.fetched_storage_targets.entry(*address).or_default();
-            let mut targets = Vec::new();
-
-            let updates_len_before = updates.len();
-            trie.update_leaves(updates, |path, parent| match fetched.entry(path) {
-                Entry::Occupied(mut entry) => {
-                    if parent < *entry.get() {
-                        entry.insert(parent);
-                        targets.push(ProofV2Target::new(path).with_parent(parent));
+        let result = if new {
+            // Process all new storage updates, skipping tries with no pending updates.
+            let mut new_storage_updates = core::mem::take(&mut self.new_storage_updates);
+            let result = new_storage_updates
+                .iter_mut()
+                .filter(|(_, updates)| !updates.is_empty())
+                .try_for_each(|(address, updates)| {
+                    self.apply_storage_leaf_updates(*address, updates)
+                });
+            self.new_storage_updates = new_storage_updates;
+            result
+        } else {
+            // Only tries that received a proof or hold updates waiting on something else than a
+            // reveal can make progress, all other blocked updates would hit the same blinded
+            // node again.
+            let mut storage_updates = core::mem::take(&mut self.storage_updates);
+            let result = core::mem::take(&mut self.retry_storage_updates).into_iter().try_for_each(
+                |address| {
+                    let Some(updates) = storage_updates.get_mut(&address) else { return Ok(()) };
+                    if updates.is_empty() && !self.blocked_storage_updates.contains(&address) {
+                        return Ok(())
                     }
-                }
-                Entry::Vacant(entry) => {
-                    entry.insert(parent);
-                    targets.push(ProofV2Target::new(path).with_parent(parent));
-                }
-            })?;
-            let updates_len_after = updates.len();
-            self.storage_cache_hits += (updates_len_before - updates_len_after) as u64;
-            self.storage_cache_misses += updates_len_after as u64;
-
-            if !targets.is_empty() {
-                self.pending_targets.extend_storage_targets(address, targets);
-            }
-        }
+                    self.apply_storage_leaf_updates(address, updates)
+                },
+            );
+            self.storage_updates = storage_updates;
+            result
+        };
 
         drop(span);
+        result?;
 
         // Process account trie updates and fill the account targets.
         self.process_account_leaf_updates(new)?;
+
+        Ok(())
+    }
+
+    /// Applies the given leaf updates to the storage trie of `address` and queues the proof
+    /// targets they require.
+    fn apply_storage_leaf_updates(
+        &mut self,
+        address: B256,
+        updates: &mut B256Map<LeafUpdate>,
+    ) -> SparseTrieResult<()> {
+        let _enter = trace_span!(target: "engine::tree::payload_processor::sparse_trie", "storage_trie_leaf_updates", a=%address).entered();
+
+        let trie = self.trie.get_or_create_storage_trie_mut(address);
+        let fetched = self.fetched_storage_targets.entry(address).or_default();
+        let mut targets = Vec::new();
+
+        let pending_before = updates.len() + trie.blocked_updates().len();
+        trie.update_leaves(updates, |path, parent| match fetched.entry(path) {
+            Entry::Occupied(mut entry) => {
+                if parent < *entry.get() {
+                    entry.insert(parent);
+                    targets.push(ProofV2Target::new(path).with_parent(parent));
+                }
+            }
+            Entry::Vacant(entry) => {
+                entry.insert(parent);
+                targets.push(ProofV2Target::new(path).with_parent(parent));
+            }
+        })?;
+
+        let blocked = trie.blocked_updates();
+        let pending_after = updates.len() + blocked.len();
+        let has_retryable = blocked.has_retryable();
+        let is_blocked = !blocked.is_empty();
+
+        self.storage_cache_hits += pending_before.saturating_sub(pending_after) as u64;
+        self.storage_cache_misses += pending_after as u64;
+
+        if is_blocked {
+            self.blocked_storage_updates.insert(address);
+        } else {
+            self.blocked_storage_updates.remove(&address);
+        }
+        if has_retryable {
+            // These updates wait on a node that is not on their own path, so no reveal will
+            // report them and the trie has to be visited again regardless.
+            self.retry_storage_updates.insert(address);
+        }
+
+        if !targets.is_empty() {
+            self.pending_targets.extend_storage_targets(&address, targets);
+        }
 
         Ok(())
     }
@@ -690,7 +751,7 @@ where
         let account_updates =
             if new { &mut self.new_account_updates } else { &mut self.account_updates };
 
-        let updates_len_before = account_updates.len();
+        let pending_before = account_updates.len() + self.trie.trie_mut().blocked_updates().len();
 
         self.trie.trie_mut().update_leaves(account_updates, |target, parent| {
             match self.fetched_account_targets.entry(target) {
@@ -709,11 +770,11 @@ where
             }
         })?;
 
-        let updates_len_after = account_updates.len();
-        self.account_cache_hits += (updates_len_before - updates_len_after) as u64;
-        self.account_cache_misses += updates_len_after as u64;
+        let pending_after = account_updates.len() + self.trie.trie_mut().blocked_updates().len();
+        self.account_cache_hits += pending_before.saturating_sub(pending_after) as u64;
+        self.account_cache_misses += pending_after as u64;
 
-        Ok(updates_len_after < updates_len_before)
+        Ok(pending_after < pending_before)
     }
 
     /// Computes storage roots for accounts whose storage updates are fully drained.
@@ -734,6 +795,7 @@ where
         for (address, updates) in &self.storage_updates {
             if updates.is_empty() &&
                 let Some(trie) = self.trie.storage_tries_mut().get_mut(address) &&
+                trie.blocked_updates().is_empty() &&
                 !trie.is_root_cached()
             {
                 tries_to_compute_roots.push((*address, SendStorageTriePtr(trie)));
@@ -801,7 +863,7 @@ where
             let mut num_promoted = 0;
             self.pending_account_updates.retain(|addr, account| {
                 if let Some(updates) = self.storage_updates.get(addr) {
-                    if !updates.is_empty() {
+                    if !updates.is_empty() || self.blocked_storage_updates.contains(addr) {
                         // If account has pending storage updates, it is still pending.
                         return true;
                     } else if let Some(account) = account.take() {
@@ -813,8 +875,16 @@ where
                     }
                 }
 
-                // Get the current account state either from the trie or from latest account update.
-                let trie_account = match self.account_updates.get(addr) {
+                // Get the current account state either from the trie or from latest account
+                // update, which the accounts trie may be holding on to until it is revealed.
+                let pending_update = match self.account_updates.get(addr) {
+                    Some(update) => Some(update),
+                    None => self
+                        .trie
+                        .state_trie_ref()
+                        .and_then(|trie| trie.blocked_updates().get(addr)),
+                };
+                let trie_account = match pending_update {
                     Some(LeafUpdate::Changed(encoded)) => {
                         Some(encoded).filter(|encoded| !encoded.is_empty())
                     }
@@ -907,8 +977,15 @@ where
 
     fn has_pending_sparse_trie_updates(&self) -> bool {
         !self.account_updates.is_empty() ||
+            !self.blocked_storage_updates.is_empty() ||
+            self.account_blocked_updates().is_some_and(|blocked| !blocked.is_empty()) ||
             self.storage_updates.values().any(|updates| !updates.is_empty()) ||
             !self.pending_account_updates.is_empty()
+    }
+
+    /// Returns the leaf updates the accounts trie could not apply yet, if it is revealed.
+    fn account_blocked_updates(&self) -> Option<&BlockedLeafUpdates> {
+        self.trie.state_trie_ref().map(SparseTrie::blocked_updates)
     }
 
     /// Errors when pending trie updates remain but nothing can deliver them: no update
@@ -932,7 +1009,9 @@ where
             let mut account_targets = self
                 .account_updates
                 .keys()
-                .map(|target| (*target, self.fetched_account_targets.get(target).copied()))
+                .copied()
+                .chain(self.account_blocked_updates().into_iter().flat_map(|b| b.keys()))
+                .map(|target| (target, self.fetched_account_targets.get(&target).copied()))
                 .collect::<Vec<_>>();
             account_targets.sort_unstable();
             let account_targets_truncated =
@@ -944,11 +1023,16 @@ where
                 .iter()
                 .flat_map(|(address, updates)| {
                     let fetched_targets = self.fetched_storage_targets.get(address);
-                    updates.keys().map(move |target| {
+                    let blocked = self
+                        .trie
+                        .storage_trie_ref(address)
+                        .into_iter()
+                        .flat_map(|trie| trie.blocked_updates().keys());
+                    updates.keys().copied().chain(blocked).map(move |target| {
                         (
                             *address,
-                            *target,
-                            fetched_targets.and_then(|targets| targets.get(target)).copied(),
+                            target,
+                            fetched_targets.and_then(|targets| targets.get(&target)).copied(),
                         )
                     })
                 })
@@ -1308,6 +1392,83 @@ mod tests {
         }
         assert_eq!(task.pending_updates, INITIAL_UPDATE_BATCH_SIZE);
         assert_eq!(task.new_account_updates.len(), INITIAL_UPDATE_BATCH_SIZE);
+        drop(updates_tx);
+        drop(task);
+        drain_sparse_trie_tasks(&runtime);
+    }
+
+    #[test]
+    fn storage_leaves_retry_only_after_a_proof_for_their_trie() {
+        let runtime = reth_tasks::Runtime::test();
+        let provider_factory = create_test_provider_factory();
+        let anchor_hash = init_genesis(&provider_factory).expect("failed to initialize genesis");
+        let state_provider_factory = OverlayStateProviderFactory::new(
+            provider_factory,
+            OverlayManager::<reth_chain_state::EthPrimitives>::default()
+                .overlay_builder(anchor_hash),
+        );
+        let (proof_result_tx, proof_result_rx) = crossbeam_channel::unbounded();
+        let proof_worker_handle = ProofWorkerHandle::new(
+            &runtime,
+            ProofTaskCtx::new(state_provider_factory),
+            false,
+            proof_result_tx.clone(),
+        );
+
+        let default_trie = RevealableSparseTrie::blind_from(ArenaParallelSparseTrie::default());
+        let trie = SparseStateTrie::default()
+            .with_accounts_trie(default_trie.clone())
+            .with_default_storage_trie(default_trie)
+            .with_updates(true);
+
+        let (updates_tx, updates_rx) = crossbeam_channel::unbounded();
+        let (_cancel_guard, cancel_rx) = crossbeam_channel::bounded::<()>(0);
+        let mut task = SparseTrieCacheTask::new_with_trie(
+            &runtime,
+            updates_rx,
+            cancel_rx,
+            std::sync::mpsc::channel().0,
+            proof_worker_handle,
+            proof_result_tx,
+            proof_result_rx,
+            SparseTrieTaskMetrics::default(),
+            trie,
+            B256::from([0x55; 32]),
+            TrieNodeEpoch::UNMODIFIED,
+            1,
+        );
+
+        let first = B256::repeat_byte(0x11);
+        let second = B256::repeat_byte(0x22);
+        let slot = B256::repeat_byte(0x33);
+        task.on_prewarm_targets(MultiProofTargetsV2 {
+            storage_targets: B256Map::from_iter([
+                (first, vec![ProofV2Target::new(slot)]),
+                (second, vec![ProofV2Target::new(slot)]),
+            ]),
+            ..Default::default()
+        });
+        task.pending_updates = 1;
+        task.process_new_updates().unwrap();
+
+        let misses = task.storage_cache_misses;
+        task.process_leaf_updates(false).unwrap();
+        assert_eq!(task.storage_cache_misses, misses, "tries without a proof must not be visited");
+
+        // Revealing one storage trie must drain its pending touch without visiting the other.
+        task.on_proof_result(DecodedMultiProofV2 {
+            storage_proofs: B256Map::from_iter([(
+                first,
+                vec![reth_trie_common::ProofTrieNodeV2::empty()],
+            )]),
+            ..Default::default()
+        })
+        .unwrap();
+        task.process_leaf_updates(false).unwrap();
+        assert!(task.storage_updates[&first].is_empty());
+        assert_eq!(task.storage_updates[&second].len(), 1);
+        assert_eq!(task.storage_cache_misses, misses);
+
         drop(updates_tx);
         drop(task);
         drain_sparse_trie_tasks(&runtime);
