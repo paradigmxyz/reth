@@ -240,6 +240,10 @@ fn positional_read(file: &File, buf: &mut [u8], offset: u64) -> io::Result<usize
     {
         file.seek_read(buf, offset)
     }
+    #[cfg(not(any(unix, windows)))]
+    {
+        with_position(file, offset, |file| file.read(buf))
+    }
 }
 
 fn positional_write(file: &File, buf: &[u8], offset: u64) -> io::Result<usize> {
@@ -251,6 +255,26 @@ fn positional_write(file: &File, buf: &[u8], offset: u64) -> io::Result<usize> {
     {
         file.seek_write(buf, offset)
     }
+    #[cfg(not(any(unix, windows)))]
+    {
+        with_position(file, offset, |file| file.write(buf))
+    }
+}
+
+#[cfg(not(any(unix, windows)))]
+fn with_position<T>(
+    file: &File,
+    offset: u64,
+    operation: impl FnOnce(&mut &File) -> io::Result<T>,
+) -> io::Result<T> {
+    // Platforms without FileExt need a seek/read or seek/write pair. Serialize
+    // the pair so shared readers cannot race on the descriptor's stream position.
+    static POSITION_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    let _guard =
+        POSITION_LOCK.lock().map_err(|_| io::Error::other("file position lock poisoned"))?;
+    let mut file = file;
+    file.seek(SeekFrom::Start(offset))?;
+    operation(&mut file)
 }
 
 #[cfg(test)]
