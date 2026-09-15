@@ -43,9 +43,11 @@ pub enum SnapSyncError {
     /// No account coverage is recorded for the attempt.
     #[error("no account coverage is recorded for the attempt")]
     NoCoverage,
-    /// A persisted coverage record this build cannot read.
-    #[error("account coverage record version {version:?} is not supported")]
-    UnsupportedCoverage {
+    /// A persisted progress record this build cannot read.
+    #[error("{key} record version {version:?} is not supported")]
+    UnsupportedRecord {
+        /// Metadata key the record is stored under.
+        key: &'static str,
         /// Version found on disk, absent when the record carries no numeric version.
         version: Option<u64>,
     },
@@ -70,12 +72,6 @@ pub enum SnapSyncError {
         account: B256,
         /// Slot the storage was requested from.
         from: B256,
-    },
-    /// A persisted storage progress record this build cannot read.
-    #[error("storage progress record version {version:?} is not supported")]
-    UnsupportedStorageProgress {
-        /// Version found on disk, absent when the record carries no numeric version.
-        version: Option<u64>,
     },
     /// An account with storage was committed without it.
     #[error("account {account} has storage that was not downloaded")]
