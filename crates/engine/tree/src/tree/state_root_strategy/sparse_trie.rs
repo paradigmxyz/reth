@@ -566,7 +566,6 @@ where
             self.dispatch_pending_targets()?;
             let t = Instant::now();
             self.process_new_updates()?;
-            self.run_ready_storage_work()?;
             self.promote_pending_account_updates()?;
             self.metrics.sparse_trie_process_updates_duration_histogram.record(t.elapsed());
 
@@ -586,7 +585,6 @@ where
             // If we don't have any pending updates, apply them to the trie,
             let t = Instant::now();
             self.process_new_updates()?;
-            self.run_ready_storage_work()?;
             self.metrics.sparse_trie_process_updates_duration_histogram.record(t.elapsed());
             self.dispatch_pending_targets()?;
         } else if !self.initial_updates_applied && self.pending_updates >= INITIAL_UPDATE_BATCH_SIZE
@@ -595,7 +593,6 @@ where
             // batches retain the usual coalescing policy to avoid repeatedly sorting small maps.
             let t = Instant::now();
             self.process_new_updates()?;
-            self.run_ready_storage_work()?;
             self.metrics.sparse_trie_process_updates_duration_histogram.record(t.elapsed());
             self.dispatch_pending_targets()?;
         } else if self.pending_targets.len() > self.chunk_size {
@@ -758,7 +755,15 @@ where
         Ok(result)
     }
 
+    /// Applies buffered input and runs ready storage work, including work buffered while a job
+    /// was in flight even if no new input messages were received.
     fn process_new_updates(&mut self) -> SparseTrieResult<()> {
+        self.apply_new_updates()?;
+        self.run_ready_storage_work()
+    }
+
+    /// Applies new account updates and queues new storage updates on their address' entry.
+    fn apply_new_updates(&mut self) -> SparseTrieResult<()> {
         if self.pending_updates == 0 {
             return Ok(());
         }
@@ -1887,7 +1892,7 @@ mod tests {
         state.storages.entry(address).or_default().storage.insert(revealed_slot, U256::from(7));
         task.on_hashed_state_update(state);
         task.pending_updates = 1;
-        task.process_new_updates().unwrap();
+        task.apply_new_updates().unwrap();
 
         // Check the payload out by hand so the test does not race a spawned job.
         let work = check_out_storage(&mut task, address);
@@ -1925,7 +1930,7 @@ mod tests {
         state.storages.entry(address).or_default().storage.insert(late_slot, U256::from(9));
         task.on_hashed_state_update(state);
         task.pending_updates = 1;
-        task.process_new_updates().unwrap();
+        task.apply_new_updates().unwrap();
         let StorageTrieState::InFlight(in_flight) = &task.storage[&address] else {
             panic!("payload is out with a job")
         };
@@ -1934,9 +1939,9 @@ mod tests {
         return_storage(&mut task, address, work);
         assert_eq!(task.storage_in_flight, 0);
 
-        // The next pass reveals what was buffered and applies both the update it was checked out
-        // with and the one that arrived meanwhile.
-        task.run_ready_storage_work().unwrap();
+        // Returned work must run even without new input messages.
+        assert_eq!(task.pending_updates, 0);
+        task.process_new_updates().unwrap();
         assert_eq!(storage_slot_value(&task, &address, &revealed_slot), Some(revealed_value));
         assert_eq!(storage_slot_value(&task, &address, &late_slot), Some(late_value));
 
@@ -1953,7 +1958,7 @@ mod tests {
         state.storages.entry(address).or_default().storage.insert(late_slot, U256::from(11));
         task.on_hashed_state_update(state);
         task.pending_updates = 1;
-        task.process_new_updates().unwrap();
+        task.apply_new_updates().unwrap();
         return_storage(&mut task, address, work);
 
         let StorageTrieState::Idle(work) = &task.storage[&address] else {
@@ -1961,7 +1966,7 @@ mod tests {
         };
         assert!(work.has_work(), "a buffered update makes the payload ready again");
 
-        task.run_ready_storage_work().unwrap();
+        task.process_new_updates().unwrap();
         assert_eq!(storage_slot_value(&task, &address, &late_slot), Some(later_value));
         assert_ne!(storage_root_of(&mut task, address), root_before);
 
@@ -2004,7 +2009,7 @@ mod tests {
         ]);
         task.on_hashed_state_update(state);
         task.pending_updates = 1;
-        task.process_new_updates().unwrap();
+        task.apply_new_updates().unwrap();
 
         let mut work = check_out_storage(&mut task, address);
         let output = work.run(task.new_epoch, true);
@@ -2021,7 +2026,7 @@ mod tests {
             .extend([(removed_slot, U256::ZERO), (changed_slot, U256::from(11))]);
         task.on_hashed_state_update(state);
         task.pending_updates = 1;
-        task.process_new_updates().unwrap();
+        task.apply_new_updates().unwrap();
         task.on_prewarm_targets(MultiProofTargetsV2 {
             storage_targets: B256Map::from_iter([(
                 address,
@@ -2030,7 +2035,7 @@ mod tests {
             ..Default::default()
         });
         task.pending_updates = 1;
-        task.process_new_updates().unwrap();
+        task.apply_new_updates().unwrap();
 
         task.on_storage_trie_returned(StorageTrieJobDone { address, work, output }).unwrap();
         // Deliver the requested parent proof directly so the interleaving is deterministic.
