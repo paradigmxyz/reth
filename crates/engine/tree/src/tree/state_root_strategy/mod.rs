@@ -71,7 +71,7 @@ use reth_provider::{
     StageCheckpointReader, StateRootProvider, StorageChangeSetReader, StorageSettingsCache,
 };
 use reth_storage_overlay::{OverlayManager, OverlayStateProviderFactory};
-use reth_tasks::utils::increase_thread_priority;
+use reth_tasks::{utils::increase_thread_priority, WorkerPool};
 use reth_trie::{
     hashed_cursor::HashedCursorFactory, trie_cursor::TrieCursorFactory, updates::TrieUpdates,
     HashedPostState,
@@ -480,34 +480,40 @@ impl fmt::Debug for DefaultStateRootStrategy {
 }
 
 impl DefaultStateRootStrategy {
-    /// Transaction count at or below which a block gets a quarter of the proof worker pool, since
+    /// Transaction count at or below which a block gets half the base proof worker pool, since
     /// fewer transactions produce fewer state changes and most workers would be idle overhead.
     const SMALL_BLOCK_PROOF_WORKER_TX_THRESHOLD: usize = 30;
 
-    /// Gas used at or above which a block gets the whole proof worker pool.
+    /// Gas used at or above which a block also gets the overflow proof worker pool.
     ///
     /// The proof workers are I/O bound, so a block that queues up proofs faster than they drain
-    /// wants the queue depth: on 300M-gas BAL blocks the full pool is worth -4.7% mean newPayload
-    /// latency, with the state root wait falling from 31 to 24 ms. Blocks that never build up a
-    /// queue pay for it instead, because the pools are rebuilt per block and every worker opens an
-    /// MDBX read transaction and cursors: on regular mainnet blocks the same count costs +2.0% P50
-    /// and +1.7% mean, with read-only transactions +73%.
+    /// wants the queue depth: on 300M-gas BAL blocks the doubled worker count is worth -4.7% mean
+    /// newPayload latency, with the state root wait falling from 31 to 24 ms. Blocks that never
+    /// build up a queue pay for it instead, because the pools are rebuilt per block and every
+    /// worker opens an MDBX read transaction and cursors: on regular mainnet blocks the same count
+    /// costs +2.0% P50 and +1.7% mean, with read-only transactions +73%.
     const LARGE_BLOCK_PROOF_WORKER_GAS_THRESHOLD: u64 = 100_000_000;
 
-    /// Returns how many workers to spawn from one proof worker pool for the block being validated.
+    /// Returns how many workers to spawn for the block being validated from one kind of proof
+    /// worker pool, given the base pool size and the size of the overflow pool extending it.
     ///
-    /// The pool holds four workers per default thread and is only the cap; the share a block gets
-    /// depends on the proof queue it is expected to build up. Blocks at or above
-    /// [`Self::LARGE_BLOCK_PROOF_WORKER_GAS_THRESHOLD`] gas take the whole pool, blocks with at
-    /// most [`Self::SMALL_BLOCK_PROOF_WORKER_TX_THRESHOLD`] transactions take a quarter of it, and
-    /// everything else, including blocks whose transaction count and gas are not known yet, takes
-    /// half, which is the count every block used to get. The transaction count is checked first,
-    /// so a small block stays small no matter how much gas it burns.
+    /// The share a block gets depends on the proof queue it is expected to build up. Blocks at or
+    /// above [`Self::LARGE_BLOCK_PROOF_WORKER_GAS_THRESHOLD`] gas take the base and the overflow
+    /// pool, blocks with at most [`Self::SMALL_BLOCK_PROOF_WORKER_TX_THRESHOLD`] transactions take
+    /// half the base pool, and everything else, including blocks whose transaction count and gas
+    /// are not known yet, takes the base pool, which is the count every block gets on main. The
+    /// transaction count is checked first, so a small block stays small no matter how much gas it
+    /// burns.
     ///
-    /// A pool size the operator pinned with `--engine.storage-worker-count` or
-    /// `--engine.account-worker-count` is used verbatim for every block.
+    /// Only large blocks name the overflow pool, so its threads are never created on a node that
+    /// never sees one.
+    ///
+    /// A count the operator pinned with `--engine.storage-worker-count` or
+    /// `--engine.account-worker-count` is used verbatim for every block; the pools are sized to
+    /// hold it.
     const fn proof_worker_count(
-        pool_threads: usize,
+        base_pool_threads: usize,
+        overflow_pool_threads: usize,
         configured_threads: Option<usize>,
         transaction_count: Option<usize>,
         gas_used: Option<u64>,
@@ -516,14 +522,17 @@ impl DefaultStateRootStrategy {
             return configured_threads
         }
 
-        let divisor = match (transaction_count, gas_used) {
-            (Some(count), _) if count <= Self::SMALL_BLOCK_PROOF_WORKER_TX_THRESHOLD => 4,
-            (_, Some(gas)) if gas >= Self::LARGE_BLOCK_PROOF_WORKER_GAS_THRESHOLD => 1,
-            _ => 2,
+        let count = match (transaction_count, gas_used) {
+            (Some(count), _) if count <= Self::SMALL_BLOCK_PROOF_WORKER_TX_THRESHOLD => {
+                base_pool_threads / 2
+            }
+            (_, Some(gas)) if gas >= Self::LARGE_BLOCK_PROOF_WORKER_GAS_THRESHOLD => {
+                base_pool_threads + overflow_pool_threads
+            }
+            _ => base_pool_threads,
         };
 
-        // Pools can be smaller than the divisor, and a pool without workers stalls the proofs.
-        let count = pool_threads / divisor;
+        // Pools can be smaller than two threads, and a block without workers stalls the proofs.
         if count == 0 {
             1
         } else {
@@ -569,13 +578,15 @@ impl DefaultStateRootStrategy {
         let task_ctx = task_ctx.with_proof_jitter(config.proof_jitter());
         let worker_counts = ProofWorkerCounts::new(
             Self::proof_worker_count(
-                executor.proof_storage_worker_pool().current_num_threads(),
+                executor.proof_storage_worker_pool().num_threads(),
+                executor.proof_storage_overflow_worker_pool().map_or(0, WorkerPool::num_threads),
                 executor.proof_storage_worker_threads_override(),
                 transaction_count,
                 gas_used,
             ),
             Self::proof_worker_count(
-                executor.proof_account_worker_pool().current_num_threads(),
+                executor.proof_account_worker_pool().num_threads(),
+                executor.proof_account_overflow_worker_pool().map_or(0, WorkerPool::num_threads),
                 executor.proof_account_worker_threads_override(),
                 transaction_count,
                 gas_used,
@@ -1374,25 +1385,28 @@ mod tests {
 
     #[test]
     fn proof_worker_count_scales_with_block_gas() {
-        let pool_threads = 64;
+        let base_pool_threads = 32;
+        let overflow_pool_threads = 32;
         let count = |transaction_count, gas_used| {
             DefaultStateRootStrategy::proof_worker_count(
-                pool_threads,
+                base_pool_threads,
+                overflow_pool_threads,
                 None,
                 transaction_count,
                 gas_used,
             )
         };
 
-        // Small blocks keep a quarter of the pool, whatever their gas.
+        // Small blocks keep half the base pool, whatever their gas.
         assert_eq!(count(Some(30), Some(1_000_000)), 16);
         assert_eq!(count(Some(30), Some(300_000_000)), 16);
 
-        // Gas heavy blocks take the whole pool.
+        // Gas heavy blocks spill into the overflow pool.
         assert_eq!(count(Some(1_000), Some(100_000_000)), 64);
         assert_eq!(count(Some(1_000), Some(300_000_000)), 64);
 
-        // Everything else, including a block whose size is not known yet, takes half.
+        // Everything else, including a block whose size is not known yet, stays in the base pool
+        // and never names the overflow pool.
         assert_eq!(count(Some(31), Some(99_999_999)), 32);
         assert_eq!(count(Some(1_000), Some(15_000_000)), 32);
         assert_eq!(count(None, None), 32);
@@ -1403,7 +1417,8 @@ mod tests {
         {
             assert_eq!(
                 DefaultStateRootStrategy::proof_worker_count(
-                    48,
+                    32,
+                    16,
                     Some(48),
                     transaction_count,
                     gas_used
@@ -1412,9 +1427,9 @@ mod tests {
             );
         }
 
-        // Pools smaller than the divisor still get a worker.
+        // Pools smaller than two threads still get a worker.
         assert_eq!(
-            DefaultStateRootStrategy::proof_worker_count(2, None, Some(1), Some(1_000_000)),
+            DefaultStateRootStrategy::proof_worker_count(1, 0, None, Some(1), Some(1_000_000)),
             1
         );
     }
