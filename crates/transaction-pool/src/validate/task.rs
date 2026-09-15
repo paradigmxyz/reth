@@ -60,7 +60,11 @@ impl ValidationTask {
     ///
     /// This will run as long as the channel is alive and is expected to be spawned as a task.
     pub async fn run(self) {
-        while let Some(task) = self.validation_jobs.lock().await.next().await {
+        loop {
+            // Release the shared receiver before running the job, so other workers
+            // can dequeue validations while this worker is busy.
+            let task = { self.validation_jobs.lock().await.next().await };
+            let Some(task) = task else { break };
             task.await;
         }
     }
@@ -245,14 +249,12 @@ where
         let (tx, rx) = oneshot::channel();
         {
             let res = {
-                let to_validation_task = self.to_validation_task.clone();
                 let validator = self.validator.clone();
                 let fut = Box::pin(async move {
                     let res = validator.validate_transaction(origin, transaction).await;
                     let _ = tx.send(res);
                 });
-                let to_validation_task = to_validation_task.lock().await;
-                to_validation_task.send(fut).await
+                self.to_validation_task.lock().await.send(fut).await
             };
             if res.is_err() {
                 return TransactionValidationOutcome::Error(
@@ -281,44 +283,65 @@ where
         let (tx, rx) = oneshot::channel();
         {
             let res = {
-                let to_validation_task = self.to_validation_task.clone();
                 let validator = self.validator.clone();
                 let fut = Box::pin(async move {
                     let res = validator.validate_transactions(transactions).await;
                     let _ = tx.send(res);
                 });
-                let to_validation_task = to_validation_task.lock().await;
-                to_validation_task.send(fut).await
+                self.to_validation_task.lock().await.send(fut).await
             };
             if res.is_err() {
-                return hashes
-                    .into_iter()
-                    .map(|hash| {
-                        TransactionValidationOutcome::Error(
-                            hash,
-                            Box::new(TransactionValidatorError::ValidationServiceUnreachable),
-                        )
-                    })
-                    .collect();
+                return validation_service_error_outcomes(hashes)
             }
         }
         match rx.await {
             Ok(res) => res,
-            Err(_) => hashes
-                .into_iter()
-                .map(|hash| {
-                    TransactionValidationOutcome::Error(
-                        hash,
-                        Box::new(TransactionValidatorError::ValidationServiceUnreachable),
-                    )
-                })
-                .collect(),
+            Err(_) => validation_service_error_outcomes(hashes),
+        }
+    }
+
+    async fn validate_transactions_with_origin(
+        &self,
+        origin: TransactionOrigin,
+        transactions: impl IntoIterator<Item = Self::Transaction, IntoIter: Send> + Send,
+    ) -> Vec<TransactionValidationOutcome<Self::Transaction>> {
+        let transactions: Vec<_> = transactions.into_iter().collect();
+        let hashes: Vec<_> = transactions.iter().map(|tx| *tx.hash()).collect();
+        let (tx, rx) = oneshot::channel();
+        let validator = self.validator.clone();
+        let fut = Box::pin(async move {
+            let res = validator.validate_transactions_with_origin(origin, transactions).await;
+            let _ = tx.send(res);
+        });
+
+        if self.to_validation_task.lock().await.send(fut).await.is_err() {
+            return validation_service_error_outcomes(hashes)
+        }
+
+        match rx.await {
+            Ok(res) => res,
+            Err(_) => validation_service_error_outcomes(hashes),
         }
     }
 
     fn on_new_head_block(&self, new_tip_block: &SealedBlock<Self::Block>) {
         self.validator.on_new_head_block(new_tip_block)
     }
+}
+
+#[inline]
+fn validation_service_error_outcomes<T: PoolTransaction>(
+    hashes: Vec<alloy_primitives::TxHash>,
+) -> Vec<TransactionValidationOutcome<T>> {
+    hashes
+        .into_iter()
+        .map(|hash| {
+            TransactionValidationOutcome::Error(
+                hash,
+                Box::new(TransactionValidatorError::ValidationServiceUnreachable),
+            )
+        })
+        .collect()
 }
 
 #[cfg(test)]
@@ -330,6 +353,47 @@ mod tests {
         TransactionOrigin,
     };
     use alloy_primitives::{Address, U256};
+
+    #[tokio::test]
+    async fn cloned_workers_validate_while_another_job_is_blocked() {
+        let (sender, task) = ValidationTask::new();
+        let first_worker = tokio::spawn(task.clone().run());
+        let second_worker = tokio::spawn(task.run());
+        let (started_tx, started_rx) = oneshot::channel();
+        let (release_tx, release_rx) = oneshot::channel();
+        sender
+            .send(Box::pin(async move {
+                started_tx.send(()).unwrap();
+                release_rx.await.unwrap();
+            }))
+            .await
+            .unwrap();
+        started_rx.await.unwrap();
+
+        // The first validation remains blocked. A second configured worker must
+        // independently dequeue and finish this job without releasing the first.
+        let (completed_tx, completed_rx) = oneshot::channel();
+        sender
+            .send(Box::pin(async move {
+                completed_tx.send(()).unwrap();
+            }))
+            .await
+            .unwrap();
+        tokio::time::timeout(std::time::Duration::from_secs(1), completed_rx)
+            .await
+            .expect("second worker cannot dequeue while first validation holds receiver lock")
+            .unwrap();
+
+        release_tx.send(()).unwrap();
+        drop(sender);
+        // Closing the bounded channel still shuts every worker down cleanly.
+        tokio::time::timeout(std::time::Duration::from_secs(1), async {
+            first_worker.await.unwrap();
+            second_worker.await.unwrap();
+        })
+        .await
+        .unwrap();
+    }
 
     #[derive(Debug)]
     struct NoopValidator;
@@ -376,5 +440,60 @@ mod tests {
         let out = executor.validate_transactions(txs).await;
         assert_eq!(out.len(), 2);
         assert!(out.iter().all(|o| matches!(o, TransactionValidationOutcome::Valid { .. })));
+    }
+
+    #[derive(Debug)]
+    struct SameOriginBatchValidator;
+
+    impl TransactionValidator for SameOriginBatchValidator {
+        type Transaction = MockTransaction;
+        type Block = reth_ethereum_primitives::Block;
+
+        async fn validate_transaction(
+            &self,
+            _origin: TransactionOrigin,
+            _transaction: Self::Transaction,
+        ) -> TransactionValidationOutcome<Self::Transaction> {
+            panic!("same-origin batches must use the batch validator")
+        }
+
+        async fn validate_transactions_with_origin(
+            &self,
+            origin: TransactionOrigin,
+            transactions: impl IntoIterator<Item = Self::Transaction, IntoIter: Send> + Send,
+        ) -> Vec<TransactionValidationOutcome<Self::Transaction>> {
+            transactions
+                .into_iter()
+                .map(|transaction| TransactionValidationOutcome::Valid {
+                    balance: U256::ZERO,
+                    state_nonce: 0,
+                    bytecode_hash: None,
+                    transaction: ValidTransaction::Valid(transaction),
+                    propagate: matches!(origin, TransactionOrigin::Local),
+                    authorities: None,
+                })
+                .collect()
+        }
+    }
+
+    #[tokio::test]
+    async fn executor_forwards_same_origin_batches() {
+        let (executor, task) = TransactionValidationTaskExecutor::new(SameOriginBatchValidator);
+        tokio::spawn(task.run());
+
+        let transactions = vec![MockTransaction::legacy(), MockTransaction::eip1559()];
+        let expected_hashes = transactions.iter().map(|tx| *tx.hash()).collect::<Vec<_>>();
+        let outcomes = executor
+            .validate_transactions_with_origin(TransactionOrigin::Local, transactions)
+            .await;
+
+        assert_eq!(outcomes.len(), expected_hashes.len());
+        assert!(outcomes.into_iter().zip(expected_hashes).all(|(outcome, expected_hash)| {
+            matches!(
+                outcome,
+                TransactionValidationOutcome::Valid { transaction, propagate: true, .. }
+                    if transaction.hash() == &expected_hash
+            )
+        }));
     }
 }

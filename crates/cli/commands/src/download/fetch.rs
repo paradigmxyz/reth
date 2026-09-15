@@ -125,6 +125,18 @@ impl ArchiveFetcher {
         &self,
         download_progress: Option<&mut ArchiveDownloadProgress<'_>>,
     ) -> Result<DownloadedArchive> {
+        if let Some(path) = archive_file_url_path(&self.url)? {
+            let size = fs::metadata(&path)?.len();
+            if !self.quiet() {
+                info!(target: "reth::cli",
+                    file = %path.display(),
+                    size = %DownloadProgress::format_size(size),
+                    "Using local archive"
+                );
+            }
+            return Ok(DownloadedArchive { path, size })
+        }
+
         let Some(request_limiter) = self.session.request_limiter() else {
             return self.download_sequential(super::MAX_DOWNLOAD_RETRIES, download_progress)
         };
@@ -235,9 +247,12 @@ impl ArchiveFetcher {
                     if attempt < max_download_retries {
                         info!(target: "reth::cli",
                             file = %self.paths.file_name(),
-                            "Download failed, retrying in {RETRY_BACKOFF_SECS}s..."
+                            retry_delay = ?self.session.retry_delay(Duration::from_secs(RETRY_BACKOFF_SECS)),
+                            "Download failed, retrying"
                         );
-                        std::thread::sleep(Duration::from_secs(RETRY_BACKOFF_SECS));
+                        std::thread::sleep(
+                            self.session.retry_delay(Duration::from_secs(RETRY_BACKOFF_SECS)),
+                        );
                     }
                     continue;
                 }
@@ -316,9 +331,12 @@ impl ArchiveFetcher {
                 if attempt < max_download_retries {
                     info!(target: "reth::cli",
                         file = %self.paths.file_name(),
-                        "Download interrupted, retrying in {RETRY_BACKOFF_SECS}s..."
+                        retry_delay = ?self.session.retry_delay(Duration::from_secs(RETRY_BACKOFF_SECS)),
+                        "Download interrupted, retrying"
                     );
-                    std::thread::sleep(Duration::from_secs(RETRY_BACKOFF_SECS));
+                    std::thread::sleep(
+                        self.session.retry_delay(Duration::from_secs(RETRY_BACKOFF_SECS)),
+                    );
                 }
                 continue;
             }
@@ -393,6 +411,19 @@ impl ArchiveFetcher {
     fn quiet(&self) -> bool {
         self.session.progress().is_some()
     }
+}
+
+/// Resolves a `file://` archive URL to its local path.
+fn archive_file_url_path(url: &str) -> Result<Option<PathBuf>> {
+    let Ok(parsed) = Url::parse(url) else { return Ok(None) };
+    if parsed.scheme() != "file" {
+        return Ok(None)
+    }
+
+    parsed
+        .to_file_path()
+        .map(Some)
+        .map_err(|_| eyre::eyre!("Invalid file:// archive URL path: {url}"))
 }
 
 /// The final path and size of one archive fetched to disk.
@@ -525,6 +556,8 @@ struct SegmentedWorkerContext<'a> {
     request_limiter: &'a DownloadRequestLimiter,
     /// Cancellation token shared by the whole command.
     cancel_token: &'a CancellationToken,
+    /// Session carrying the retry-delay override.
+    session: &'a DownloadSession,
 }
 
 impl SegmentedDownload {
@@ -563,6 +596,7 @@ impl SegmentedDownload {
         let worker_context = SegmentedWorkerContext {
             url,
             part_path: paths.part_path(),
+            session: &session,
             shared,
             request_limiter: request_limiter.as_ref(),
             cancel_token,
@@ -644,6 +678,7 @@ impl SegmentedDownload {
                 &piece_progress_bytes,
                 context.request_limiter,
                 context.cancel_token,
+                context.session,
             ) {
                 state.note_terminal_failure();
                 terminal_failure.record(error);
@@ -666,6 +701,7 @@ impl SegmentedDownload {
         piece_progress_bytes: &AtomicU64,
         request_limiter: &DownloadRequestLimiter,
         cancel_token: &CancellationToken,
+        session: &DownloadSession,
     ) -> Result<()> {
         for attempt in 1..=SEGMENT_RETRY_ATTEMPTS {
             if cancel_token.is_cancelled() {
@@ -686,7 +722,9 @@ impl SegmentedDownload {
                 Err(PieceAttemptFailure::Retryable { error: _, throttled })
                     if attempt < SEGMENT_RETRY_ATTEMPTS =>
                 {
-                    std::thread::sleep(piece_retry_backoff(attempt, throttled));
+                    std::thread::sleep(
+                        session.retry_delay(piece_retry_backoff(attempt, throttled)),
+                    );
                 }
                 Err(PieceAttemptFailure::Retryable { error, .. }) => return Err(error),
                 Err(PieceAttemptFailure::Terminal(error)) => return Err(error),
@@ -956,6 +994,8 @@ fn panic_payload_message(payload: Box<dyn Any + Send + 'static>) -> String {
 mod tests {
     use super::*;
     use reqwest::StatusCode;
+    use reth_cli_util::cancellation::CancellationToken;
+    use std::io::Write;
 
     #[test]
     fn segmented_plan_skips_small_files() {
@@ -1014,5 +1054,28 @@ mod tests {
             strategy,
             FetchStrategy::Sequential(SequentialDownloadFallback::NoRangeSupport)
         ));
+    }
+
+    #[test]
+    fn archive_fetcher_uses_file_url_archive_directly() {
+        let dir = tempfile::tempdir().unwrap();
+        let archive_path = dir.path().join("state.tar.zst");
+        {
+            let mut archive = std::fs::File::create(&archive_path).unwrap();
+            archive.write_all(b"local archive bytes").unwrap();
+        }
+
+        let cache_dir = dir.path().join("cache");
+        std::fs::create_dir(&cache_dir).unwrap();
+        let url = Url::from_file_path(&archive_path).unwrap().to_string();
+        let session = DownloadSession::new(None, None, CancellationToken::new());
+        let fetcher = ArchiveFetcher::new(url, &cache_dir, session);
+
+        let downloaded = fetcher.download(None).unwrap();
+
+        assert_eq!(downloaded.path, archive_path);
+        assert_eq!(downloaded.size, b"local archive bytes".len() as u64);
+        assert!(!cache_dir.join("state.tar.zst").exists());
+        assert!(!cache_dir.join("state.tar.zst.part").exists());
     }
 }

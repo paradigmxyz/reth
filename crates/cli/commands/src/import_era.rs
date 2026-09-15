@@ -6,7 +6,8 @@ use eyre::eyre;
 use reqwest::{Client, Url};
 use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_cli::chainspec::ChainSpecParser;
-use reth_era_downloader::{read_dir, EraClient, EraStream, EraStreamConfig};
+use reth_era::common::file_ops::EraFileType;
+use reth_era_downloader::{read_dir, read_era_dir, EraClient, EraStream, EraStreamConfig};
 use reth_era_utils as era;
 use reth_etl::Collector;
 use reth_fs_util as fs;
@@ -24,6 +25,22 @@ pub struct ImportEraCommand<C: ChainSpecParser> {
 
     #[clap(flatten)]
     import: ImportArgs,
+
+    /// Stop the import after this block height has been reached.
+    ///
+    /// The file containing the block is imported up to and including this height, then the
+    /// import ends. By default all available blocks are imported.
+    #[arg(long, value_name = "TO_BLOCK", verbatim_doc_comment)]
+    to_block: Option<u64>,
+
+    /// Backfill the `Receipts` static file segment from its tip up to the Execution checkpoint.
+    ///
+    /// Only a missing tail is detected and repaired, never a gap inside the existing segment. The
+    /// backfill must reach the checkpoint exactly, so this cannot bootstrap a fresh database:
+    /// above the checkpoint receipts are pruned on the next node start, below it the node cannot
+    /// start. Byzantium onwards only, from `.era1` or `.ere` files that carry receipts.
+    #[arg(long, verbatim_doc_comment)]
+    with_receipts: bool,
 }
 
 #[derive(Debug, Args)]
@@ -70,40 +87,145 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> ImportEraC
     {
         info!(target: "reth::cli", "reth {} starting", version_metadata().short_version);
 
-        let Environment { provider_factory, config, .. } =
-            self.env.init::<N>(AccessRights::RW, runtime)?;
+        // Receipt backfill expects Receipts to trail Execution, so skip the normal consistency
+        // check that would unwind execution before the repair.
+        let access =
+            if self.with_receipts { AccessRights::RwInconsistent } else { AccessRights::RW };
+        let Environment { provider_factory, config, .. } = self.env.init::<N>(access, runtime)?;
 
         let mut hash_collector = Collector::new(config.stages.etl.file_size, config.stages.etl.dir);
 
-        let next_block = provider_factory
-            .static_file_provider()
+        let static_file_provider = provider_factory.static_file_provider();
+        // The chain's first block, which is not necessarily 0: reth supports a non-zero genesis.
+        let genesis_block_number = static_file_provider.genesis_block_number();
+        let headers_tip = static_file_provider
             .get_highest_static_file_block(StaticFileSegment::Headers)
-            .unwrap_or_default() +
-            1;
+            .unwrap_or(genesis_block_number);
+
+        // With `--with-receipts`, resume from the receipts tip so files covering already-imported
+        // headers are re-read to backfill their receipts.
+        let resume_block = if self.with_receipts {
+            let receipts_tip = static_file_provider
+                .get_highest_static_file_block(StaticFileSegment::Receipts)
+                .unwrap_or(genesis_block_number);
+            headers_tip.min(receipts_tip)
+        } else {
+            headers_tip
+        };
+        let next_block = resume_block + 1;
+
+        // Pre-Byzantium receipts commit to a post-state root, so their receipts root can't be
+        // recomputed from what the node stores. The logs bloom is checked on every fork.
+        let chain_spec = self.env.chain.clone();
+        let is_receipt_verifiable =
+            move |number: u64| chain_spec.is_byzantium_active_at_block(number);
 
         if let Some(path) = self.import.path {
-            let stream = read_dir(path, next_block)?;
+            let era_type = EraFileType::from_dir(&path)?.ok_or_else(|| {
+                eyre!(
+                    "No ERA (.era), ERA1 (.era1) or ERE (.ere, .erae) files found in {}",
+                    path.display()
+                )
+            })?;
 
-            era::import(stream, &provider_factory, &mut hash_collector)?;
+            info!(target: "reth::cli", ?era_type, path = %path.display(), to_block = ?self.to_block, with_receipts = self.with_receipts, "Starting ERA import");
+
+            check_receipts_supported(self.with_receipts, era_type)?;
+
+            match era_type {
+                EraFileType::Era => era::import::<era::Era, _, _, _, _, _, _>(
+                    read_era_dir(path)?,
+                    &provider_factory,
+                    &mut hash_collector,
+                    self.to_block,
+                    self.with_receipts,
+                    &is_receipt_verifiable,
+                )?,
+                EraFileType::Ere => era::import::<era::Ere, _, _, _, _, _, _>(
+                    read_dir(path, next_block)?,
+                    &provider_factory,
+                    &mut hash_collector,
+                    self.to_block,
+                    self.with_receipts,
+                    &is_receipt_verifiable,
+                )?,
+                EraFileType::Era1 => era::import::<era::Era1, _, _, _, _, _, _>(
+                    read_dir(path, next_block)?,
+                    &provider_factory,
+                    &mut hash_collector,
+                    self.to_block,
+                    self.with_receipts,
+                    &is_receipt_verifiable,
+                )?,
+            };
         } else {
             let url = match self.import.url {
                 Some(url) => url,
                 None => self.env.chain.chain().kind().try_to_url()?,
             };
+            let era_type = EraFileType::from_url(url.as_str());
+
+            info!(target: "reth::cli", ?era_type, %url, to_block = ?self.to_block, with_receipts = self.with_receipts, "Starting ERA import");
+
+            check_receipts_supported(self.with_receipts, era_type)?;
+
             let folder =
                 self.env.datadir.resolve_datadir(self.env.chain.chain()).data_dir().join("era");
 
             fs::create_dir_all(&folder)?;
 
-            let config = EraStreamConfig::default().start_from(next_block);
-            let client = EraClient::new(Client::new(), url, folder);
+            let mut config = EraStreamConfig::default();
+            // `start_from` maps a block number to a file index as `block / BLOCKS_PER_FILE`, valid
+            // only for execution-layer files (era1/ere). Consensus `.era` files are slot-indexed,
+            // so stream from 0 and let the pipeline skip already-imported blocks.
+            if !matches!(era_type, EraFileType::Era) {
+                config = config.start_from(next_block);
+            }
+            let client = EraClient::new(Client::new(), url, folder).with_era_type(era_type);
             let stream = EraStream::new(client, config);
 
-            era::import(stream, &provider_factory, &mut hash_collector)?;
+            match era_type {
+                EraFileType::Ere => era::import::<era::Ere, _, _, _, _, _, _>(
+                    stream,
+                    &provider_factory,
+                    &mut hash_collector,
+                    self.to_block,
+                    self.with_receipts,
+                    &is_receipt_verifiable,
+                )?,
+                EraFileType::Era1 => era::import::<era::Era1, _, _, _, _, _, _>(
+                    stream,
+                    &provider_factory,
+                    &mut hash_collector,
+                    self.to_block,
+                    self.with_receipts,
+                    &is_receipt_verifiable,
+                )?,
+                EraFileType::Era => era::import::<era::Era, _, _, _, _, _, _>(
+                    stream,
+                    &provider_factory,
+                    &mut hash_collector,
+                    self.to_block,
+                    self.with_receipts,
+                    &is_receipt_verifiable,
+                )?,
+            };
         }
 
         Ok(())
     }
+}
+
+/// Errors if `--with-receipts` was passed for the consensus `.era` format, which carries no
+/// receipt data at all.
+fn check_receipts_supported(with_receipts: bool, era_type: EraFileType) -> eyre::Result<()> {
+    if with_receipts && era_type == EraFileType::Era {
+        return Err(eyre!(
+            "--with-receipts is not supported for `.era` files: they contain no receipt data. \
+             Use `.era1` or `.ere` files instead."
+        ));
+    }
+    Ok(())
 }
 
 impl<C: ChainSpecParser> ImportEraCommand<C> {

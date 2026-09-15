@@ -39,7 +39,7 @@ mod fs;
 mod stream;
 
 pub use client::{EraClient, HttpClient};
-pub use fs::read_dir;
+pub use fs::{read_dir, read_era_dir};
 pub use stream::{EraMeta, EraStream, EraStreamConfig};
 
 pub(crate) const BLOCKS_PER_FILE: usize = 8192;

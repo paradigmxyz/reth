@@ -5,7 +5,9 @@
 use alloy_primitives::bytes::BytesMut;
 use futures::Stream;
 use reth_eth_wire::{
-    capability::SharedCapabilities, multiplex::ProtocolConnection, protocol::Protocol,
+    capability::SharedCapabilities,
+    multiplex::ProtocolConnection,
+    protocol::{Protocol, ProtocolIngressLimits},
 };
 use reth_network_api::{Direction, PeerId};
 use std::{
@@ -49,6 +51,11 @@ pub trait ConnectionHandler: Send + Sync + 'static {
     ///
     /// This will be negotiated with the remote peer.
     fn protocol(&self) -> Protocol;
+
+    /// Returns local resource limits for inbound messages of this protocol.
+    fn inbound_limits(&self) -> ProtocolIngressLimits {
+        ProtocolIngressLimits::default()
+    }
 
     /// Invoked when the `RLPx` connection has been established by the peer does not share the
     /// protocol.
@@ -200,6 +207,8 @@ impl<T: ProtocolHandler> DynProtocolHandler for T {
 pub(crate) trait DynConnectionHandler: Send + Sync + 'static {
     fn protocol(&self) -> Protocol;
 
+    fn inbound_limits(&self) -> ProtocolIngressLimits;
+
     fn on_unsupported_by_peer(
         self: Box<Self>,
         supported: &SharedCapabilities,
@@ -218,6 +227,10 @@ pub(crate) trait DynConnectionHandler: Send + Sync + 'static {
 impl<T: ConnectionHandler> DynConnectionHandler for T {
     fn protocol(&self) -> Protocol {
         T::protocol(self)
+    }
+
+    fn inbound_limits(&self) -> ProtocolIngressLimits {
+        T::inbound_limits(self)
     }
 
     fn on_unsupported_by_peer(

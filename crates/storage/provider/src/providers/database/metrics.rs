@@ -48,7 +48,7 @@ pub(crate) enum Action {
 /// Database provider metrics
 #[derive(Metrics)]
 #[metrics(scope = "storage.providers.database")]
-pub(crate) struct DatabaseProviderMetrics {
+pub struct DatabaseProviderMetrics {
     /// Duration of insert block
     insert_block: Histogram,
     /// Duration of insert state

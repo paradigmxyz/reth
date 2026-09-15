@@ -85,6 +85,7 @@ pub trait AsEthApiError {
                     Some(EthSimulateError::NonceTooLow { tx: *tx, state: *state })
                 }
                 RpcInvalidTransactionError::NonceTooHigh => Some(EthSimulateError::NonceTooHigh),
+                RpcInvalidTransactionError::NonceMaxValue => Some(EthSimulateError::NonceMaxValue),
                 RpcInvalidTransactionError::FeeCapTooLow => {
                     Some(EthSimulateError::BaseFeePerGasTooLow)
                 }

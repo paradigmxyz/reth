@@ -14,12 +14,20 @@ function fmtS(v) { return v.toFixed(2) + 's'; }
 function fmtChange(ch) {
   if (!ch || (!ch.pct && !ch.ci_pct)) return '';
   const pctStr = `${ch.pct >= 0 ? '+' : ''}${ch.pct.toFixed(2)}%`;
-  const ciStr = ch.ci_pct ? ` (±${ch.ci_pct.toFixed(2)}%)` : '';
-  return `${pctStr}${ciStr} ${SIG_EMOJI[ch.sig]}`;
+  const details = [];
+  if (ch.ci_pct) details.push(`±${ch.ci_pct.toFixed(2)}%`);
+  if (ch.floor_pct) details.push(`floor ${ch.floor_pct.toFixed(2)}%`);
+  if (ch.materiality?.threshold_ms) {
+    details.push(`materiality ${ch.materiality.threshold_ms.toFixed(2)}ms`);
+  }
+  if (ch.informational) details.push('informational');
+  const detailStr = details.length ? ` (${details.join(', ')})` : '';
+  const sig = ch.informational ? 'neutral' : ch.sig;
+  return `${pctStr}${detailStr} ${SIG_EMOJI[sig]}`;
 }
 
 function verdict(changes) {
-  const vals = Object.values(changes);
+  const vals = Object.values(changes).filter(v => !v.informational);
   const hasBad = vals.some(v => v.sig === 'bad');
   const hasGood = vals.some(v => v.sig === 'good');
   if (hasBad && hasGood) return { emoji: '⚠️', label: 'Mixed Results' };
@@ -28,11 +36,32 @@ function verdict(changes) {
   return { emoji: '⚪', label: 'No Difference' };
 }
 
+function isWin(changes) {
+  const vals = Object.values(changes || {}).filter(v => !v.informational);
+  return vals.some(v => v.sig === 'good') && !vals.some(v => v.sig === 'bad');
+}
+
 function loadSamplyUrls(workDir) {
+  return loadProfileUrls(workDir, 'samply-profile-url.txt');
+}
+
+function loadTracingChromeUrls(workDir) {
+  return loadProfileUrls(workDir, 'tracing-chrome-profile-url.txt');
+}
+
+function loadProfileUrls(workDir, fileName) {
   const urls = {};
-  for (const run of ['baseline-1', 'baseline-2', 'feature-1', 'feature-2']) {
+  let runs = [];
+  try {
+    runs = fs.readdirSync(workDir)
+      .filter(run => /^(baseline|feature)-\d+$/.test(run))
+      .sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+  } catch {
+    return urls;
+  }
+  for (const run of runs) {
     try {
-      const url = fs.readFileSync(path.join(workDir, run, 'samply-profile-url.txt'), 'utf8').trim();
+      const url = fs.readFileSync(path.join(workDir, run, fileName), 'utf8').trim();
       if (url) urls[run] = url;
     } catch {}
   }
@@ -54,6 +83,17 @@ function balModeLabel(mode) {
 
 function blocksLabel(summary) {
   const parts = [];
+  if (summary.mode === 'call') {
+    const corpus = summary.corpus || {};
+    parts.push({ key: 'Corpus', value: corpus.name || 'static' });
+    if (corpus.class) parts.push({ key: 'Class', value: corpus.class });
+    if (corpus.records) parts.push({ key: 'Records', value: corpus.records });
+    if (summary.rps) parts.push({ key: 'Rps', value: summary.rps });
+    if (summary.passes) parts.push({ key: 'Passes', value: summary.passes });
+    const callRunPairs = summary.run_pairs || process.env.BENCH_RUN_PAIRS || '';
+    if (callRunPairs) parts.push({ key: 'Run pairs', value: callRunPairs });
+    return parts;
+  }
   if (summary.big_blocks) {
     parts.push({ key: 'Big Blocks', value: summary.blocks });
     const balMode = balModeLabel(summary.bal_mode || summary.bal || process.env.BENCH_BAL || 'false');
@@ -66,15 +106,34 @@ function blocksLabel(summary) {
   const cores = process.env.BENCH_CORES || '0';
   if (cores !== '0') parts.push({ key: 'Cores', value: cores });
   if (summary.wait_time) parts.push({ key: 'Wait time', value: summary.wait_time });
+  const runPairs = summary.run_pairs || process.env.BENCH_RUN_PAIRS || '';
+  if (runPairs) {
+    parts.push({ key: 'Run pairs', value: runPairs });
+  }
   return parts;
 }
 
-// The 7 metric rows shared by all renderers.
+// The metric rows shared by all renderers.
 // Returns an array of { label, baseline, feature, change } objects.
 function metricRows(summary) {
   const b = summary.baseline.stats;
   const f = summary.feature.stats;
   const c = summary.changes;
+  if (summary.mode === 'call') {
+    const optMs = v => (Number.isFinite(v) ? fmtMs(v) : 'n/a');
+    const optNum = v => (Number.isFinite(v) ? v.toFixed(2) : 'n/a');
+    const optPct = v => (Number.isFinite(v) ? `${v.toFixed(2)}%` : 'n/a');
+    return [
+      { label: 'Mean',            baseline: optMs(b.mean_ms),  feature: optMs(f.mean_ms),  change: fmtChange(c.mean) },
+      { label: 'P50',             baseline: optMs(b.p50_ms),   feature: optMs(f.p50_ms),   change: fmtChange(c.p50) },
+      { label: 'P90',             baseline: optMs(b.p90_ms),   feature: optMs(f.p90_ms),   change: fmtChange(c.p90) },
+      { label: 'P99',             baseline: optMs(b.p99_ms),   feature: optMs(f.p99_ms),   change: fmtChange(c.p99) },
+      { label: 'Record median',   baseline: optMs(b.record_median_ms), feature: optMs(f.record_median_ms), change: fmtChange(c.record_median) },
+      { label: 'Closed-loop rps', baseline: optNum(b.closed_loop_rps), feature: optNum(f.closed_loop_rps), change: fmtChange(c.closed_loop_rps) },
+      { label: 'CPU / request',   baseline: optMs(b.cpu_ms_per_request), feature: optMs(f.cpu_ms_per_request), change: fmtChange(c.cpu_per_request) },
+      { label: 'Error rate',      baseline: optPct(b.error_rate_pct), feature: optPct(f.error_rate_pct), change: '' },
+    ];
+  }
   return [
     { label: 'Mean',       baseline: fmtMs(b.mean_ms),       feature: fmtMs(f.mean_ms),       change: fmtChange(c.mean) },
     { label: 'StdDev',     baseline: fmtMs(b.stddev_ms),     feature: fmtMs(f.stddev_ms),     change: '' },
@@ -105,7 +164,9 @@ module.exports = {
   fmtS,
   fmtChange,
   verdict,
+  isWin,
   loadSamplyUrls,
+  loadTracingChromeUrls,
   blocksLabel,
   metricRows,
   waitTimeRows,

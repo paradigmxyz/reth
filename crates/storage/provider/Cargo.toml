@@ -20,6 +20,7 @@ reth-primitives-traits = { workspace = true, features = ["reth-codec", "secp256k
 reth-errors.workspace = true
 reth-storage-errors.workspace = true
 reth-storage-api = { workspace = true, features = ["std", "db-api"] }
+reth-storage-overlay.workspace = true
 reth-db = { workspace = true, features = ["mdbx"] }
 reth-db-api.workspace = true
 reth-prune-types.workspace = true
@@ -41,8 +42,7 @@ alloy-genesis.workspace = true
 alloy-primitives.workspace = true
 alloy-rpc-types-engine.workspace = true
 alloy-consensus.workspace = true
-revm-database.workspace = true
-revm-state = { workspace = true, optional = true }
+revm.workspace = true
 
 # tracing
 tracing.workspace = true
@@ -55,6 +55,7 @@ metrics.workspace = true
 itertools.workspace = true
 notify = { workspace = true, default-features = false, features = ["macos_fsevent"] }
 parking_lot.workspace = true
+smallvec.workspace = true
 strum.workspace = true
 eyre.workspace = true
 reth-tokio-util.workspace = true
@@ -68,6 +69,9 @@ rayon.workspace = true
 
 rocksdb.workspace = true
 
+[target.'cfg(unix)'.dependencies]
+libc.workspace = true
+
 [dev-dependencies]
 reth-db = { workspace = true, features = ["test-utils"] }
 reth-primitives-traits = { workspace = true, features = ["arbitrary", "test-utils"] }
@@ -77,9 +81,6 @@ reth-testing-utils.workspace = true
 reth-ethereum-engine-primitives.workspace = true
 reth-ethereum-primitives.workspace = true
 reth-tracing.workspace = true
-
-revm-database-interface.workspace = true
-revm-state.workspace = true
 
 tempfile.workspace = true
 assert_matches.workspace = true
@@ -104,7 +105,6 @@ test-utils = [
     "reth-trie-db/test-utils",
     "reth-prune-types/test-utils",
     "reth-stages-types/test-utils",
-    "revm-state",
     "reth-tasks/test-utils",
     "dep:tokio",
 ]

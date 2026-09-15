@@ -1,4 +1,4 @@
-use alloy_eips::eip2718::Encodable2718;
+use alloy_consensus::transaction::TxHashRef;
 use alloy_primitives::{TxHash, TxNumber};
 use num_traits::Zero;
 use reth_config::config::{EtlConfig, TransactionLookupConfig};
@@ -175,7 +175,7 @@ where
                             info!(
                                 target: "sync::stages::transaction_lookup",
                                 ?append_only,
-                                progress = %format!("{:.2}%", (index as f64 / total_hashes as f64) * 100.0),
+                                progress = %format_args!("{:.2}%", (index as f64 / total_hashes as f64) * 100.0),
                                 "Inserting hashes"
                             );
                         }
@@ -237,7 +237,7 @@ where
                 for transaction in
                     static_file_provider.transactions_by_tx_range(body.tx_num_range())?
                 {
-                    writer.delete_transaction_hash_number(transaction.trie_hash())?;
+                    writer.delete_transaction_hash_number(*transaction.tx_hash())?;
                 }
             }
 

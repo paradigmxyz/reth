@@ -1,0 +1,69 @@
+---
+description: Start Reth from public modular snapshots.
+---
+
+# Snapshots
+
+Reth publishes modular node snapshots at
+[snapshots.reth.rs](https://snapshots.reth.rs). The snapshot UI lets you choose
+minimal, full, or archive components and gives you the matching `reth download`
+command.
+
+Use snapshots when you want to avoid syncing from genesis. `reth download`
+extracts the selected components into your Reth data directory. It also writes
+`reth.toml` for the selected components if the file does not already exist;
+after extraction, start `reth node` normally.
+
+## Latest minimal snapshot
+
+For the default minimal component set:
+
+```bash
+reth download -y
+
+reth node
+```
+
+## Snapshot sizes
+
+Snapshot download sizes are compressed and change with the selected profile,
+selected components, and latest published block. The
+[snapshots.reth.rs](https://snapshots.reth.rs) UI shows the estimated download
+size for the current selection.
+
+You can also list snapshot sizes from the CLI:
+
+```bash
+reth download --list
+```
+
+## Choose a profile
+
+```bash
+# Smallest built-in profile
+reth download --minimal
+
+# Full-node profile
+reth download --full
+
+# Archive profile
+reth download --archive
+```
+
+## Custom components
+
+Use the website or `reth download` flags to include specific components, such
+as transaction files, receipts, state history, senders, or RocksDB indices:
+
+```bash
+reth download \
+    --with-txs-distance 100000 \
+    --with-receipts-distance 100000 \
+    -y
+```
+
+## Further reading
+
+-   [Storage V2](/run/storage) - understand the default storage layout
+-   [Minimal Storage Mode](/run/storage/minimal) - run the smallest built-in profile
+-   [`reth download` CLI reference](/cli/reth/download) - all snapshot download flags

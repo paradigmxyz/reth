@@ -9,6 +9,7 @@ pub use reputation::{Reputation, ReputationChange, ReputationChangeKind, Reputat
 
 use alloy_eip2124::ForkId;
 use reth_network_peers::{NodeRecord, PeerId};
+use std::time::{Duration, Instant};
 use tracing::trace;
 
 use crate::{
@@ -25,6 +26,8 @@ pub struct Peer {
     pub reputation: i32,
     /// The state of the connection, if any.
     pub state: PeerConnectionState,
+    /// When the current session was established.
+    pub connected_at: Option<Instant>,
     /// The [`ForkId`] that the peer announced via discovery.
     pub fork_id: Option<Box<ForkId>>,
     /// Whether the entry should be removed after an existing session was terminated.
@@ -56,11 +59,28 @@ impl Peer {
         self.reputation
     }
 
+    /// Marks this peer as connected.
+    pub fn mark_connected(&mut self) {
+        self.connected_at = Some(Instant::now());
+    }
+
+    /// Clears the current connection timestamp.
+    pub const fn mark_disconnected(&mut self) {
+        self.connected_at = None;
+    }
+
+    /// Returns `true` if the current connection has been active for at least `min_uptime`.
+    pub fn connected_for_at_least(&self, now: Instant, min_uptime: Duration) -> bool {
+        self.connected_at
+            .is_some_and(|connected_at| now.saturating_duration_since(connected_at) >= min_uptime)
+    }
+
     /// Returns a new peer for given [`PeerAddr`] and [`PeerConnectionState`].
     pub fn with_state(addr: PeerAddr, state: PeerConnectionState) -> Self {
         Self {
             addr,
             state,
+            connected_at: None,
             reputation: DEFAULT_REPUTATION,
             fork_id: None,
             remove_after_disconnect: false,

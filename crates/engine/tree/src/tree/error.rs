@@ -3,8 +3,11 @@
 use crate::tree::payload_processor::bal::BalExecutionError;
 use alloy_consensus::BlockHeader;
 use reth_consensus::ConsensusError;
-use reth_errors::{BlockExecutionError, BlockValidationError, ProviderError};
-use reth_evm::execute::InternalBlockExecutionError;
+pub use reth_engine_primitives::{
+    BlockAccessListDecodeError, InsertBlockErrorKind, InsertBlockFatalError,
+    InsertBlockProcessingError, InsertBlockValidationError,
+};
+use reth_errors::ProviderError;
 use reth_payload_primitives::NewPayloadError;
 use reth_primitives_traits::{Block, BlockBody, SealedBlock};
 
@@ -14,6 +17,9 @@ pub enum AdvancePersistenceError {
     /// The persistence channel was closed unexpectedly
     #[error("persistence channel closed")]
     ChannelClosed,
+    /// State/trie catch-up could not construct an input despite split persistence frontiers.
+    #[error("state/trie catch-up input unavailable while persistence frontiers are split")]
+    StateTrieCatchupUnavailable,
     /// A provider error
     #[error(transparent)]
     Provider(#[from] ProviderError),
@@ -105,97 +111,16 @@ impl<B: Block> std::fmt::Debug for InsertBlockError<B> {
     }
 }
 
-/// All error variants possible when inserting a block
-#[derive(Debug, thiserror::Error)]
-pub enum InsertBlockErrorKind {
-    /// Block violated consensus rules.
-    #[error(transparent)]
-    Consensus(#[from] ConsensusError),
-    /// Block execution failed.
-    #[error(transparent)]
-    Execution(#[from] BlockExecutionError),
-    /// Provider error.
-    #[error(transparent)]
-    Provider(#[from] ProviderError),
-    /// BAL-driven block execution rejected the block. Covers structural BAL errors and the
-    /// final-hash mismatch.
-    #[error(transparent)]
-    InvalidBlockAccessList(BalExecutionError),
-    /// Other errors.
-    #[error(transparent)]
-    Other(#[from] Box<dyn core::error::Error + Send + Sync + 'static>),
-}
-
 impl From<BalExecutionError> for InsertBlockErrorKind {
     fn from(e: BalExecutionError) -> Self {
         match e {
-            // Worker EVM errors flow through the standard execution-error path so existing
-            // metrics and routing apply.
-            BalExecutionError::Evm(inner) => Self::Execution(inner),
+            BalExecutionError::Consensus(inner) => Self::Consensus(inner),
+            BalExecutionError::BlockAccessListDecode(inner) => Self::BlockAccessListDecode(inner),
+            BalExecutionError::Execution(inner) => Self::Execution(inner),
             BalExecutionError::Provider(inner) => Self::Provider(inner),
-            other => Self::InvalidBlockAccessList(other),
+            BalExecutionError::Other(inner) => Self::Other(inner),
         }
     }
-}
-
-impl InsertBlockErrorKind {
-    /// Returns an [`InsertBlockValidationError`] if the error is caused by an invalid block.
-    ///
-    /// Returns an [`InsertBlockFatalError`] if the error is caused by an error that is not
-    /// validation related or is otherwise fatal.
-    ///
-    /// This is intended to be used to determine if we should respond `INVALID` as a response when
-    /// processing a new block.
-    pub fn ensure_validation_error(
-        self,
-    ) -> Result<InsertBlockValidationError, InsertBlockFatalError> {
-        match self {
-            Self::Consensus(err) => Ok(InsertBlockValidationError::Consensus(err)),
-            // other execution errors that are considered internal errors
-            Self::Execution(err) => {
-                match err {
-                    BlockExecutionError::Validation(err) => {
-                        Ok(InsertBlockValidationError::Validation(err))
-                    }
-                    // these are internal errors, not caused by an invalid block
-                    BlockExecutionError::Internal(error) => {
-                        Err(InsertBlockFatalError::BlockExecutionError(error))
-                    }
-                }
-            }
-            Self::Provider(err) => Err(InsertBlockFatalError::Provider(err)),
-            Self::InvalidBlockAccessList(err) => {
-                Ok(InsertBlockValidationError::InvalidBlockAccessList(err))
-            }
-            Self::Other(err) => Err(InternalBlockExecutionError::Other(err).into()),
-        }
-    }
-}
-
-/// Error variants that are not caused by invalid blocks
-#[derive(Debug, thiserror::Error)]
-pub enum InsertBlockFatalError {
-    /// A provider error
-    #[error(transparent)]
-    Provider(#[from] ProviderError),
-    /// An internal / fatal block execution error
-    #[error(transparent)]
-    BlockExecutionError(#[from] InternalBlockExecutionError),
-}
-
-/// Error variants that are caused by invalid blocks
-#[derive(Debug, thiserror::Error)]
-pub enum InsertBlockValidationError {
-    /// Block violated consensus rules.
-    #[error(transparent)]
-    Consensus(#[from] ConsensusError),
-    /// Validation error, transparently wrapping [`BlockValidationError`]
-    #[error(transparent)]
-    Validation(#[from] BlockValidationError),
-    /// BAL-driven block execution rejected the block. Covers structural BAL errors and the
-    /// final-hash mismatch.
-    #[error(transparent)]
-    InvalidBlockAccessList(BalExecutionError),
 }
 
 /// Errors that may occur when inserting a payload.

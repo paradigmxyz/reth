@@ -7,7 +7,7 @@ use alloy_consensus::BlobTransactionValidationError;
 use alloy_eips::{eip7594::BlobTransactionSidecarVariant, BlockId, Typed2718};
 use alloy_primitives::{hex, B256};
 use reth_chainspec::{ChainSpecProvider, EthereumHardforks};
-use reth_primitives_traits::{AlloyBlockHeader, Recovered, WithEncoded};
+use reth_primitives_traits::{AlloyBlockHeader, WithEncoded};
 use reth_rpc_convert::RpcConvert;
 use reth_rpc_eth_api::{
     helpers::{spec::SignersForRpc, EthTransactions, LoadTransaction},
@@ -17,7 +17,7 @@ use reth_rpc_eth_types::{error::RpcPoolError, EthApiError};
 use reth_storage_api::BlockReaderIdExt;
 use reth_transaction_pool::{
     error::Eip4844PoolTransactionError, AddedTransactionOutcome, EthBlobTransactionSidecar,
-    EthPoolTransaction, PoolPooledTx, PoolTransaction, TransactionPool,
+    EthPoolTransaction, PoolTransaction, PoolTx,
 };
 
 impl<N, Rpc> EthTransactions for EthApi<N, Rpc>
@@ -36,14 +36,12 @@ where
         self.inner.send_raw_transaction_sync_timeout()
     }
 
-    async fn send_transaction(
+    async fn send_pool_transaction(
         &self,
         origin: reth_transaction_pool::TransactionOrigin,
-        tx: WithEncoded<Recovered<PoolPooledTx<Self::Pool>>>,
+        tx: WithEncoded<PoolTx<Self::Pool>>,
     ) -> Result<B256, Self::Error> {
-        let (tx, recovered) = tx.split();
-        let mut pool_transaction =
-            <Self::Pool as TransactionPool>::Transaction::from_pooled(recovered);
+        let (tx, mut pool_transaction) = tx.split();
 
         // Optionally convert legacy blob sidecars to EIP-7594 format when Osaka is active
         // This is opt-in via --rpc.force-blob-sidecar-upcasting
@@ -53,6 +51,7 @@ where
                     Eip4844PoolTransactionError::MissingEip4844BlobSidecar,
                 )));
             };
+            let sidecar = sidecar.into_sidecar();
 
             let sidecar = match sidecar {
                 BlobTransactionSidecarVariant::Eip4844(sidecar) => {
@@ -133,11 +132,11 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::eth::helpers::types::EthRpcConverter;
+    use crate::eth::helpers::{signer::DevSigner, types::EthRpcConverter};
     use alloy_consensus::{
         BlobTransactionSidecar, Block, Header, SidecarBuilder, SimpleCoder, Transaction,
     };
-    use alloy_primitives::{map::AddressMap, Address, U256};
+    use alloy_primitives::{map::AddressMap, Address, Bytes, U256};
     use alloy_rpc_types_eth::request::TransactionRequest;
     use reth_chainspec::{ChainSpec, ChainSpecBuilder};
     use reth_evm_ethereum::EthEvmConfig;
@@ -147,11 +146,23 @@ mod tests {
         ChainSpecProvider,
     };
     use reth_rpc_eth_api::node::RpcNodeCoreAdapter;
-    use reth_transaction_pool::test_utils::{testing_pool, TestPool};
-    use revm_primitives::Bytes;
+    use reth_transaction_pool::{
+        test_utils::{testing_pool, TestPool},
+        TransactionOrigin, TransactionPool,
+    };
 
     fn mock_eth_api(
         accounts: AddressMap<ExtendedAccount>,
+    ) -> EthApi<
+        RpcNodeCoreAdapter<MockEthProvider, TestPool, NoopNetwork, EthEvmConfig>,
+        EthRpcConverter<ChainSpec>,
+    > {
+        mock_eth_api_with_sync_timeout(accounts, Duration::from_secs(30))
+    }
+
+    fn mock_eth_api_with_sync_timeout(
+        accounts: AddressMap<ExtendedAccount>,
+        send_raw_transaction_sync_timeout: Duration,
     ) -> EthApi<
         RpcNodeCoreAdapter<MockEthProvider, TestPool, NoopNetwork, EthEvmConfig>,
         EthRpcConverter<ChainSpec>,
@@ -176,7 +187,16 @@ mod tests {
         let genesis_hash = B256::ZERO;
         mock_provider.add_block(genesis_hash, Block::new(genesis_header, Default::default()));
 
-        EthApi::builder(mock_provider, pool, NoopNetwork::default(), evm_config).build()
+        EthApi::builder(mock_provider, pool, NoopNetwork::default(), evm_config)
+            .send_raw_transaction_sync_timeout(send_raw_transaction_sync_timeout)
+            .build()
+    }
+
+    fn raw_transfer_tx() -> Bytes {
+        // https://etherscan.io/tx/0xa694b71e6c128a2ed8e2e0f6770bddbe52e3bb8f10e8472f9a79ab81497a8b5d
+        Bytes::from(hex!(
+            "02f871018303579880850555633d1b82520894eee27662c2b8eba3cd936a23f039f3189633e4c887ad591c62bdaeb180c080a07ea72c68abfb8fca1bd964f0f99132ed9280261bdca3e549546c0205e800f7d0a05b4ef3039e9c9b9babc179a1878fb825b5aaf5aed2fa8744854150157b08d6f3"
+        ))
     }
 
     #[tokio::test]
@@ -184,10 +204,7 @@ mod tests {
         let eth_api = mock_eth_api(Default::default());
         let pool = eth_api.pool();
 
-        // https://etherscan.io/tx/0xa694b71e6c128a2ed8e2e0f6770bddbe52e3bb8f10e8472f9a79ab81497a8b5d
-        let tx_1 = Bytes::from(hex!(
-            "02f871018303579880850555633d1b82520894eee27662c2b8eba3cd936a23f039f3189633e4c887ad591c62bdaeb180c080a07ea72c68abfb8fca1bd964f0f99132ed9280261bdca3e549546c0205e800f7d0a05b4ef3039e9c9b9babc179a1878fb825b5aaf5aed2fa8744854150157b08d6f3"
-        ));
+        let tx_1 = raw_transfer_tx();
 
         let tx_1_result = eth_api.send_raw_transaction(tx_1).await.unwrap();
         assert_eq!(
@@ -212,6 +229,153 @@ mod tests {
 
         assert!(pool.get(&tx_1_result).is_some(), "tx1 not found in the pool");
         assert!(pool.get(&tx_2_result).is_some(), "tx2 not found in the pool");
+        assert_eq!(pool.get(&tx_1_result).unwrap().origin, TransactionOrigin::Local);
+        assert_eq!(pool.get(&tx_2_result).unwrap().origin, TransactionOrigin::Local);
+    }
+
+    #[tokio::test]
+    async fn send_raw_transaction_sync_uses_request_timeout() {
+        let eth_api = mock_eth_api(Default::default());
+
+        let err = eth_api.send_raw_transaction_sync(raw_transfer_tx(), Some(1)).await.unwrap_err();
+
+        assert!(matches!(
+            err,
+            EthApiError::TransactionConfirmationTimeout { duration, .. }
+                if duration == Duration::from_millis(1)
+        ));
+        assert_eq!(eth_api.pool().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn send_raw_transaction_sync_uses_configured_timeout_when_omitted() {
+        let eth_api = mock_eth_api_with_sync_timeout(Default::default(), Duration::from_millis(1));
+
+        let err = eth_api.send_raw_transaction_sync(raw_transfer_tx(), None).await.unwrap_err();
+
+        assert!(matches!(
+            err,
+            EthApiError::TransactionConfirmationTimeout { duration, .. }
+                if duration == Duration::from_millis(1)
+        ));
+        assert_eq!(eth_api.pool().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn send_raw_transaction_sync_uses_configured_timeout_when_zero() {
+        let eth_api = mock_eth_api_with_sync_timeout(Default::default(), Duration::from_millis(1));
+
+        let err = eth_api.send_raw_transaction_sync(raw_transfer_tx(), Some(0)).await.unwrap_err();
+
+        assert!(matches!(
+            err,
+            EthApiError::TransactionConfirmationTimeout { duration, .. }
+                if duration == Duration::from_millis(1)
+        ));
+        assert_eq!(eth_api.pool().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn send_raw_transaction_sync_caps_request_timeout() {
+        let eth_api = mock_eth_api_with_sync_timeout(Default::default(), Duration::from_millis(1));
+
+        let err = eth_api.send_raw_transaction_sync(raw_transfer_tx(), Some(50)).await.unwrap_err();
+
+        assert!(matches!(
+            err,
+            EthApiError::TransactionConfirmationTimeout { duration, .. }
+                if duration == Duration::from_millis(1)
+        ));
+        assert_eq!(eth_api.pool().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn send_transaction_preserves_provided_gas_limit() {
+        let signers = DevSigner::random_signers(1);
+        let address = signers[0].accounts()[0];
+        let accounts = AddressMap::from_iter([(
+            address,
+            ExtendedAccount::new(0, U256::from(10_000_000_000_000_000_000u64)),
+        )]);
+        let eth_api = mock_eth_api(accounts);
+        eth_api.signers().write().extend(signers);
+
+        let provided_gas_limit = 90_000;
+        let tx_req = TransactionRequest {
+            from: Some(address),
+            to: Some(address.into()),
+            gas: Some(provided_gas_limit),
+            gas_price: Some(1_000_000_000),
+            ..Default::default()
+        };
+
+        let hash = eth_api
+            .send_transaction_request(tx_req)
+            .await
+            .expect("send_transaction should succeed");
+        let pooled = eth_api.pool().get(&hash).expect("transaction should be in the pool");
+
+        assert_eq!(pooled.transaction.gas_limit(), provided_gas_limit);
+    }
+
+    #[tokio::test]
+    async fn send_transaction_rejects_mismatched_chain_id() {
+        let signers = DevSigner::random_signers(1);
+        let address = signers[0].accounts()[0];
+        let accounts = AddressMap::from_iter([(
+            address,
+            ExtendedAccount::new(0, U256::from(10_000_000_000_000_000_000u64)),
+        )]);
+        let eth_api = mock_eth_api(accounts);
+        eth_api.signers().write().extend(signers);
+
+        // The mock node is mainnet (chain id 1); the caller pins a different chain.
+        let tx_req = TransactionRequest {
+            from: Some(address),
+            to: Some(address.into()),
+            gas: Some(90_000),
+            gas_price: Some(1_000_000_000),
+            chain_id: Some(999),
+            ..Default::default()
+        };
+
+        let err = eth_api
+            .send_transaction_request(tx_req)
+            .await
+            .expect_err("a chain id that is not the node's must be rejected, not rewritten");
+        assert!(
+            err.to_string().contains("chainId does not match node's"),
+            "unexpected error: {err}"
+        );
+        assert!(eth_api.pool().is_empty(), "no transaction should have been submitted");
+    }
+
+    #[tokio::test]
+    async fn send_transaction_accepts_matching_chain_id() {
+        let signers = DevSigner::random_signers(1);
+        let address = signers[0].accounts()[0];
+        let accounts = AddressMap::from_iter([(
+            address,
+            ExtendedAccount::new(0, U256::from(10_000_000_000_000_000_000u64)),
+        )]);
+        let eth_api = mock_eth_api(accounts);
+        eth_api.signers().write().extend(signers);
+
+        let tx_req = TransactionRequest {
+            from: Some(address),
+            to: Some(address.into()),
+            gas: Some(90_000),
+            gas_price: Some(1_000_000_000),
+            chain_id: Some(1),
+            ..Default::default()
+        };
+
+        let hash = eth_api
+            .send_transaction_request(tx_req)
+            .await
+            .expect("a matching chain id must still be accepted");
+        let pooled = eth_api.pool().get(&hash).expect("transaction should be in the pool");
+        assert_eq!(pooled.transaction.chain_id(), Some(1));
     }
 
     #[tokio::test]

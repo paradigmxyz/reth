@@ -82,11 +82,11 @@ pub fn make_genesis_header(genesis: &Genesis, hardforks: &ChainHardforks) -> Hea
         .active_at_timestamp(genesis.timestamp)
         .then_some(EMPTY_BLOCK_ACCESS_LIST_HASH);
 
-    // If Amsterdam is activated at genesis we set slot number to 0
+    // If Amsterdam is activated at genesis we set slot number to the provided genesis or 0
     let slot_number = hardforks
         .fork(EthereumHardfork::Amsterdam)
         .active_at_timestamp(genesis.timestamp)
-        .then_some(0);
+        .then_some(genesis.slot_number.unwrap_or(0));
 
     Header {
         number: genesis.number.unwrap_or_default(),
@@ -312,6 +312,7 @@ pub fn create_chain_config(
         prague_time: timestamp(EthereumHardfork::Prague),
         osaka_time: timestamp(EthereumHardfork::Osaka),
         amsterdam_time: timestamp(EthereumHardfork::Amsterdam),
+        bogota_time: timestamp(EthereumHardfork::Bogota),
         bpo1_time: timestamp(EthereumHardfork::Bpo1),
         bpo2_time: timestamp(EthereumHardfork::Bpo2),
         bpo3_time: timestamp(EthereumHardfork::Bpo3),
@@ -896,6 +897,7 @@ impl From<Genesis> for ChainSpec {
             (EthereumHardfork::Bpo4.boxed(), genesis.config.bpo4_time),
             (EthereumHardfork::Bpo5.boxed(), genesis.config.bpo5_time),
             (EthereumHardfork::Amsterdam.boxed(), genesis.config.amsterdam_time),
+            (EthereumHardfork::Bogota.boxed(), genesis.config.bogota_time),
         ];
 
         let mut time_hardforks = time_hardfork_opts
@@ -1212,6 +1214,19 @@ impl ChainSpecBuilder {
     /// Enable Amsterdam at the given timestamp.
     pub fn with_amsterdam_at(mut self, timestamp: u64) -> Self {
         self.hardforks.insert(EthereumHardfork::Amsterdam, ForkCondition::Timestamp(timestamp));
+        self
+    }
+
+    /// Enable Bogota at genesis.
+    pub fn bogota_activated(mut self) -> Self {
+        self = self.amsterdam_activated();
+        self.hardforks.insert(EthereumHardfork::Bogota, ForkCondition::Timestamp(0));
+        self
+    }
+
+    /// Enable Bogota at the given timestamp.
+    pub fn with_bogota_at(mut self, timestamp: u64) -> Self {
+        self.hardforks.insert(EthereumHardfork::Bogota, ForkCondition::Timestamp(timestamp));
         self
     }
 
@@ -2654,6 +2669,28 @@ Post-merge hard forks (timestamp based):
         // check that the forkhash is correct
         let expected_forkhash = ForkHash(hex!("0x8062457a"));
         assert_eq!(ForkHash::from(genesis_hash), expected_forkhash);
+    }
+
+    #[test]
+    fn test_amsterdam_genesis_slot_number() {
+        // a genesis-provided slot number is used as-is
+        let genesis =
+            Genesis { gas_limit: 0x2fefd8u64, ..Default::default() }.with_slot_number(Some(999));
+        let chainspec = ChainSpecBuilder::default()
+            .chain(Chain::from_id(1337))
+            .genesis(genesis)
+            .amsterdam_activated()
+            .build();
+        assert_eq!(chainspec.genesis_header().slot_number, Some(999));
+
+        // an omitted slot number defaults to 0
+        let genesis = Genesis { gas_limit: 0x2fefd8u64, ..Default::default() };
+        let chainspec = ChainSpecBuilder::default()
+            .chain(Chain::from_id(1337))
+            .genesis(genesis)
+            .amsterdam_activated()
+            .build();
+        assert_eq!(chainspec.genesis_header().slot_number, Some(0));
     }
 
     #[test]

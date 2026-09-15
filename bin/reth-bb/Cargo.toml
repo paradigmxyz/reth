@@ -57,7 +57,6 @@ derive_more.workspace = true
 crossbeam-channel.workspace = true
 tokio = { workspace = true, features = ["sync"] }
 revm.workspace = true
-revm-primitives.workspace = true
 alloy-hardforks.workspace = true
 metrics.workspace = true
 
@@ -104,7 +103,6 @@ asm-keccak = [
     "alloy-primitives/asm-keccak",
     "alloy-evm/asm-keccak",
     "revm/asm-keccak",
-    "revm-primitives/asm-keccak",
 ]
 
 keccak-cache-global = [

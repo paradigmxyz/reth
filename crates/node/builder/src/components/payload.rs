@@ -65,13 +65,33 @@ pub trait PayloadBuilderBuilder<Node: FullNodeTypes, Pool: TransactionPool, EvmC
 }
 
 /// Basic payload service builder that spawns a [`BasicPayloadJobGenerator`]
-#[derive(Debug, Default, Clone)]
-pub struct BasicPayloadServiceBuilder<PB>(PB);
+#[derive(Debug, Clone)]
+pub struct BasicPayloadServiceBuilder<PB> {
+    /// Builds the payload builder used by generated payload jobs.
+    payload_builder_builder: PB,
+    /// Whether to pre-cache changed state from canonical state notifications.
+    pre_cache_state: bool,
+}
 
 impl<PB> BasicPayloadServiceBuilder<PB> {
     /// Create a new [`BasicPayloadServiceBuilder`].
     pub const fn new(payload_builder_builder: PB) -> Self {
-        Self(payload_builder_builder)
+        Self { payload_builder_builder, pre_cache_state: true }
+    }
+
+    /// Sets whether to pre-cache changed state from canonical state notifications.
+    pub const fn with_pre_cache_state(mut self, pre_cache_state: bool) -> Self {
+        self.pre_cache_state = pre_cache_state;
+        self
+    }
+}
+
+impl<PB> Default for BasicPayloadServiceBuilder<PB>
+where
+    PB: Default,
+{
+    fn default() -> Self {
+        Self::new(PB::default())
     }
 }
 
@@ -89,14 +109,17 @@ where
         pool: Pool,
         evm_config: EvmConfig,
     ) -> eyre::Result<PayloadBuilderHandle<<Node::Types as NodeTypes>::Payload>> {
-        let payload_builder = self.0.build_payload_builder(ctx, pool, evm_config).await?;
+        let Self { payload_builder_builder, pre_cache_state } = self;
+        let payload_builder =
+            payload_builder_builder.build_payload_builder(ctx, pool, evm_config).await?;
 
         let conf = ctx.config().builder.clone();
 
         let payload_job_config = BasicPayloadJobGeneratorConfig::default()
             .interval(conf.interval)
             .deadline(conf.deadline)
-            .max_payload_tasks(conf.max_payload_tasks);
+            .max_payload_tasks(conf.max_payload_tasks)
+            .pre_cache_state(pre_cache_state);
 
         let payload_generator = BasicPayloadJobGenerator::with_builder(
             ctx.provider().clone(),
@@ -111,7 +134,7 @@ where
             );
 
         ctx.task_executor().spawn_critical_os_thread(
-            "payload-builder",
+            "payload-service",
             "payload builder service",
             payload_service,
         );
@@ -141,8 +164,8 @@ where
         let (tx, mut rx) = mpsc::unbounded_channel();
 
         ctx.task_executor().spawn_critical_os_thread(
-            "payload-builder",
-            "payload builder",
+            "payload-service",
+            "payload builder service",
             async move {
                 #[expect(clippy::collection_is_never_read)]
                 let mut subscriptions = Vec::new();

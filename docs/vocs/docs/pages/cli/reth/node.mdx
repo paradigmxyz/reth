@@ -139,7 +139,7 @@ Networking:
           [default: 200]
 
       --trusted-peers <TRUSTED_PEERS>
-          Comma separated enode URLs of trusted peers for P2P connections.
+          Comma separated enode URLs or ENRs of trusted peers for P2P connections.
 
           --trusted-peers enode://abcd@192.168.0.1:30303
 
@@ -147,7 +147,7 @@ Networking:
           Connect to or accept from trusted peers only
 
       --bootnodes <BOOTNODES>
-          Comma separated enode URLs for P2P discovery bootstrap.
+          Comma separated enode URLs or ENRs for P2P discovery bootstrap.
 
           Will fall back to a network-specific default if not specified.
 
@@ -249,7 +249,7 @@ Networking:
           [default: 131072]
 
       --max-tx-pending-fetch <COUNT>
-          Max capacity of cache of hashes for transactions pending fetch.
+          Maximum number of announced transaction hashes to track, including inflight requests.
 
           [default: 25600]
 
@@ -332,6 +332,22 @@ RPC:
       --http.disable-compression
           Disable compression for HTTP responses
 
+      --http.compression <ALGOS>
+          Comma-separated list of allowed compression algorithms for HTTP responses.
+
+          If not specified, all supported algorithms are enabled.
+
+          Client `Accept-Encoding` quality values select among allowed algorithms; ties prefer zstd > br > gzip > deflate. Omitted quality values default to 1; without an acceptable allowed algorithm, the response is uncompressed. List order is ignored.
+
+          [possible values: zstd, gzip, deflate, br]
+
+      --http.decompression <ALGOS>
+          Comma-separated list of allowed decompression algorithms for HTTP requests.
+
+          Request decompression is disabled when not specified.
+
+          [possible values: zstd, gzip, deflate, br]
+
       --http.api <HTTP_API>
           Rpc Modules to be configured for the HTTP server
 
@@ -391,6 +407,11 @@ RPC:
 
           If no path is provided, a secret will be generated and stored in the datadir under `<DIR>/<CHAIN_ID>/jwt.hex`. For mainnet this would be `~/.local/share/reth/mainnet/jwt.hex` by default.
 
+      --authrpc.jwtsecret-hex <HEX>
+          Hex encoded JWT secret to use for the authenticated engine-API RPC server.
+
+          This will enforce JWT authentication for all requests coming from the consensus layer. Cannot be used together with `--authrpc.jwtsecret`.
+
       --auth-ipc
           Enable auth engine API over IPC
 
@@ -409,8 +430,13 @@ RPC:
 
           This is __not__ used for the authenticated engine-API RPC server, see `--authrpc.jwtsecret`.
 
+      --rpc.disable-metrics
+          Disable built-in RPC request metrics
+
       --rpc.max-request-size <RPC_MAX_REQUEST_SIZE>
-          Set the maximum RPC request payload size for both HTTP and WS in megabytes
+          Set the maximum RPC request payload size for both HTTP and WS in megabytes.
+
+          For compressed HTTP requests, this limit applies to both the compressed and decompressed payloads.
 
           [default: 15]
 
@@ -418,7 +444,7 @@ RPC:
           Set the maximum RPC response payload size for both HTTP and WS in megabytes
 
           [default: 160]
-          [aliases: --rpc.returndata.limit]
+          [alias: --rpc.returndata.limit]
 
       --rpc.max-subscriptions-per-connection <RPC_MAX_SUBSCRIPTIONS_PER_CONNECTION>
           Set the maximum concurrent subscriptions per connection
@@ -479,6 +505,11 @@ RPC:
 
           [default: 256]
 
+      --rpc.compute-state-root-for-eth-simulate
+          Compute state roots for `eth_simulateV1` responses
+
+          [env: RETH_RPC_COMPUTE_STATE_ROOT_FOR_ETH_SIMULATE=]
+
       --rpc.eth-proof-window <RPC_ETH_PROOF_WINDOW>
           The maximum proof window for historical proof generation. This value allows for generating historical proofs up to configured number of blocks from current tip (up to `tip - window`)
 
@@ -513,18 +544,13 @@ RPC State Cache:
 
           [default: 2000]
 
-      --rpc-cache.max-headers <MAX_HEADERS>
-          Max number of headers in cache
-
-          [default: 1000]
-
       --rpc-cache.max-bals <MAX_BALS>
-          Max number of revm block access lists in cache
+          Max number of block access lists in cache
 
           [default: 1000]
 
       --rpc-cache.prewarm-bals
-          Fetch and prewarm block access lists for new canonical blocks in the RPC cache
+          Replay new canonical blocks to generate and cache block access lists
 
       --rpc-cache.max-concurrent-db-requests <MAX_CONCURRENT_DB_REQUESTS>
           Max number of concurrent database requests
@@ -534,7 +560,7 @@ RPC State Cache:
       --rpc-cache.max-cached-tx-hashes <MAX_CACHED_TX_HASHES>
           Maximum number of transaction hashes to cache for transaction lookups
 
-          [default: 30000]
+          [default: 100000]
 
 Gas Price Oracle:
       --gpo.blocks <BLOCKS>
@@ -577,7 +603,7 @@ Gas Price Oracle:
 
 TxPool:
       --txpool.pending-max-count <PENDING_MAX_COUNT>
-          Max number of transaction in the pending sub-pool
+          Max number of transactions in the pending sub-pool
 
           [default: 10000]
 
@@ -587,7 +613,7 @@ TxPool:
           [default: 20]
 
       --txpool.basefee-max-count <BASEFEE_MAX_COUNT>
-          Max number of transaction in the basefee sub-pool
+          Max number of transactions in the basefee sub-pool
 
           [default: 10000]
 
@@ -597,7 +623,7 @@ TxPool:
           [default: 20]
 
       --txpool.queued-max-count <QUEUED_MAX_COUNT>
-          Max number of transaction in the queued sub-pool
+          Max number of transactions in the queued sub-pool
 
           [default: 10000]
 
@@ -607,7 +633,7 @@ TxPool:
           [default: 20]
 
       --txpool.blobpool-max-count <BLOBPOOL_MAX_COUNT>
-          Max number of transaction in the blobpool
+          Max number of transactions in the blobpool
 
           [default: 10000]
 
@@ -854,6 +880,9 @@ Database:
       --db.balstore-cache-size <BALSTORE_CACHE_SIZE>
           Number of recent blocks to keep in the in-memory BAL store cache
 
+      --db.disable-metrics
+          Disable built-in database metrics
+
 Dev testnet:
       --dev
           Start the node in dev mode
@@ -872,6 +901,13 @@ Dev testnet:
 
           Parses strings using [`humantime::parse_duration`]
           --dev.block-time 12s
+
+      --dev.finality-depth <FINALITY_DEPTH>
+          Number of confirmations required before a block is finalized.
+
+          A depth of `1` finalizes the canonical head immediately.
+
+          [default: 64]
 
       --dev.payload-wait-time <PAYLOAD_WAIT_TIME>
           Time to wait after initiating payload building before resolving.
@@ -969,19 +1005,26 @@ Engine:
 
           To persist blocks as fast as the node receives them, set this value to zero. This will cause more frequent DB writes.
 
-          [default: 2]
+          [env: RETH_ENGINE_PERSISTENCE_THRESHOLD=]
+          [default: 7]
 
       --engine.persistence-backpressure-threshold <PERSISTENCE_BACKPRESSURE_THRESHOLD>
-          Configure the maximum canonical-minus-persisted gap before engine API processing stalls.
+          Configure the maximum number of blocks beyond the in-memory buffer target that may await persistence before engine API processing stalls.
+
+          If omitted, this defaults to the larger of the default backpressure threshold and twice `--engine.persistence-threshold`.
 
           This value must be greater than `--engine.persistence-threshold`.
 
-          [default: 16]
+      --engine.num-state-masking-blocks <NUM_STATE_MASKING_BLOCKS>
+          EXPERIMENTAL: Configure how many of the blocks being persisted should only mask state/trie writes instead of durably persisting their state/trie updates in the current cycle
+
+          [env: RETH_ENGINE_NUM_STATE_MASKING_BLOCKS=]
+          [default: 0]
 
       --engine.memory-block-buffer-target <MEMORY_BLOCK_BUFFER_TARGET>
-          Configure the target number of blocks to keep in memory
+          Configure the target number of blocks to keep in memory.
 
-          [default: 0]
+          If omitted, this defaults to the lesser of `--engine.persistence-threshold` and the configured default memory block buffer target.
 
       --engine.invalid-header-cache-hit-eviction-threshold <INVALID_HEADER_HIT_EVICTION_THRESHOLD>
           Configure how many cache hits an invalid header can accumulate before it is evicted and reprocessed.
@@ -990,14 +1033,21 @@ Engine:
 
           [default: 128]
 
-      --engine.legacy-state-root
-          Enable legacy state root
-
       --engine.disable-state-cache
           Disable state cache
 
       --engine.disable-prewarming
           Disable parallel prewarming
+
+      --engine.txpool-prewarming
+          Enable best-effort txpool transaction prewarming between payloads
+
+          [env: RETH_ENGINE_TXPOOL_PREWARMING=]
+
+      --engine.sender-recovery-cache
+          Enable caching recovered transaction senders across transaction ingress and payload execution
+
+          [env: RETH_ENGINE_SENDER_RECOVERY_CACHE=]
 
       --engine.state-provider-metrics
           Enable state provider latency metrics. This allows the engine to collect and report stats about how long state provider calls took during execution, but this does introduce slight overhead to state provider calls
@@ -1049,16 +1099,6 @@ Engine:
       --engine.disable-cache-metrics
           Disable cache metrics recording, which can take up to 50ms with large cached state
 
-      --engine.sparse-trie-max-hot-slots <SPARSE_TRIE_MAX_HOT_SLOTS>
-          LFU hot-slot capacity: max storage slots retained across sparse trie prune cycles
-
-          [default: 1500]
-
-      --engine.sparse-trie-max-hot-accounts <SPARSE_TRIE_MAX_HOT_ACCOUNTS>
-          LFU hot-account capacity: max account addresses retained across sparse trie prune cycles
-
-          [default: 1000]
-
       --engine.slow-block-threshold <DURATION>
           Configure the slow block logging threshold in milliseconds.
 
@@ -1099,7 +1139,7 @@ Engine:
       --engine.suppress-persistence-during-build
           Suppress persistence while building a payload.
 
-          When enabled, persistence cycles are deferred from the moment an FCU with payload attributes arrives until the next FCU clears the build. Useful on chains with short block times where persistence I/O can interfere with block building latency.
+          When enabled, persistence cycles are deferred while a payload build is active. Useful on chains with short block times where persistence I/O can interfere with block building latency.
 
       --engine.disable-bal-parallel-execution
           Disable BAL (Block Access List, EIP-7928) based parallel execution
@@ -1152,6 +1192,48 @@ Storage:
 
           [default: true]
           [possible values: true, false]
+
+JIT:
+      --jit
+          Enable JIT compilation of EVM bytecode
+
+      --jit.hot-threshold <HOT_THRESHOLD>
+          Number of observed misses before a bytecode is promoted to JIT compilation
+
+          [default: 8]
+
+      --jit.worker-count <WORKER_COUNT>
+          Number of JIT compilation worker threads
+
+      --jit.channel-capacity <CHANNEL_CAPACITY>
+          Capacity of the lookup-observed event channel. Events are silently dropped when the channel is full
+
+          [default: 4096]
+
+      --jit.max-pending-jobs <MAX_PENDING_JOBS>
+          Maximum number of pending JIT compilation jobs
+
+          [default: 2048]
+
+      --jit.max-bytecode-len <MAX_BYTECODE_LEN>
+          Maximum bytecode length eligible for JIT compilation. Contracts with bytecode larger than this are never promoted to JIT. 0 means no limit
+
+          [default: 0]
+
+      --jit.code-cache-bytes <CODE_CACHE_BYTES>
+          Maximum total resident compiled code size in bytes. When exceeded, the backend evicts least-recently-used entries. 0 means no limit
+
+          [default: 1073741824]
+
+      --jit.idle-evict-duration <IDLE_EVICT_DURATION>
+          Duration after which a compiled program with no lookup hits is evicted
+
+          [default: 1h]
+
+      --jit.debug
+          Enable compiler debug dumps.
+
+          IR, assembly, and bytecode are written to `<datadir>/jit/<spec_id>/<code_hash>/` for each compiled contract. Note that this is not ever cleaned up, and has a non negligible performance overhead.
 
 Logging:
       --log.stdout.format <FORMAT>

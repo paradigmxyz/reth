@@ -151,16 +151,16 @@ impl<T: ParkedOrd> ParkedPool<T> {
             .collect()
     }
 
-    /// Returns all transactions for the given sender, using a `BTree` range query.
+    /// Returns an iterator over all transactions for the given sender, using a `BTree` range
+    /// query.
     pub(crate) fn txs_by_sender(
         &self,
         sender: SenderId,
-    ) -> Vec<Arc<ValidPoolTransaction<T::Transaction>>> {
+    ) -> impl Iterator<Item = Arc<ValidPoolTransaction<T::Transaction>>> + '_ {
         self.by_id
             .range((sender.start_bound(), Unbounded))
             .take_while(move |(other, _)| sender == other.sender)
             .map(|(_, tx)| Arc::clone(&tx.transaction))
-            .collect()
     }
 
     #[cfg(test)]

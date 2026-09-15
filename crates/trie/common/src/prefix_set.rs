@@ -1,10 +1,13 @@
 use crate::Nibbles;
 use alloc::{sync::Arc, vec::Vec};
-use alloy_primitives::map::{B256Map, B256Set};
+use alloy_primitives::{
+    map::{B256Map, B256Set},
+    B256,
+};
 use core::ops::Range;
 
 /// Collection of mutable prefix sets.
-#[derive(Clone, Default, Debug)]
+#[derive(Clone, Default, Debug, PartialEq, Eq)]
 pub struct TriePrefixSetsMut {
     /// A set of account prefixes that have changed.
     pub account_prefix_set: PrefixSetMut,
@@ -30,6 +33,15 @@ impl TriePrefixSetsMut {
             self.storage_prefix_sets.entry(hashed_address).or_default().extend(prefix_set);
         }
         self.destroyed_accounts.extend(other.destroyed_accounts);
+    }
+
+    /// Extends prefix sets with contents of another prefix set by reference.
+    pub fn extend_ref(&mut self, other: &Self) {
+        self.account_prefix_set.extend_ref(&other.account_prefix_set);
+        for (hashed_address, prefix_set) in &other.storage_prefix_sets {
+            self.storage_prefix_sets.entry(*hashed_address).or_default().extend_ref(prefix_set);
+        }
+        self.destroyed_accounts.extend(other.destroyed_accounts.iter().copied());
     }
 
     /// Returns a `TriePrefixSets` with the same elements as these sets.
@@ -135,12 +147,30 @@ impl PrefixSetMut {
         self.keys.extend(other.keys);
     }
 
+    /// Extend prefix set with contents of another prefix set by reference.
+    pub fn extend_ref(&mut self, other: &Self) {
+        self.all |= other.all;
+        self.keys.extend(other.keys.iter().copied());
+    }
+
+    /// Appends prefix set keys from another mutable prefix set, leaving it empty.
+    pub fn append(&mut self, other: &mut Self) {
+        self.all |= other.all;
+        other.all = false;
+        self.keys.append(&mut other.keys);
+    }
+
     /// Extend prefix set keys with contents of provided iterator.
     pub fn extend_keys<I>(&mut self, keys: I)
     where
         I: IntoIterator<Item = Nibbles>,
     {
         self.keys.extend(keys);
+    }
+
+    /// Returns an iterator over all currently retained keys.
+    pub fn iter(&self) -> core::slice::Iter<'_, Nibbles> {
+        self.keys.iter()
     }
 
     /// Returns the number of elements in the set.
@@ -163,30 +193,76 @@ impl PrefixSetMut {
     ///
     /// If not yet sorted, the elements will be sorted and deduplicated.
     pub fn freeze(mut self) -> PrefixSet {
-        if self.all {
-            PrefixSet { index: 0, all: true, keys: Arc::new(Vec::new()) }
-        } else {
+        if !self.all {
             self.keys.sort_unstable();
             self.keys.dedup();
             // Shrink after deduplication to release unused capacity.
             self.keys.shrink_to_fit();
-            PrefixSet { index: 0, all: false, keys: Arc::new(self.keys) }
         }
+        PrefixSet::new(self.all, self.keys)
+    }
+}
+
+impl<'a> IntoIterator for &'a PrefixSetMut {
+    type Item = &'a Nibbles;
+    type IntoIter = core::slice::Iter<'a, Nibbles>;
+    fn into_iter(self) -> Self::IntoIter {
+        self.iter()
     }
 }
 
 /// A sorted prefix set that has an immutable _sorted_ list of unique keys.
 ///
 /// See also [`PrefixSetMut::freeze`].
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Clone)]
 pub struct PrefixSet {
     /// Flag indicating that any entry should be considered changed.
     all: bool,
     index: usize,
-    keys: Arc<Vec<Nibbles>>,
+    /// `None` for an empty set to avoid allocating an empty vector.
+    keys: Option<Arc<Vec<Nibbles>>>,
+}
+
+impl Default for PrefixSet {
+    fn default() -> Self {
+        Self::new(false, Vec::new())
+    }
+}
+
+impl<I> From<I> for PrefixSet
+where
+    I: Iterator<Item = B256>,
+{
+    fn from(keys: I) -> Self {
+        let (lower_bound, upper_bound) = keys.size_hint();
+        let mut unpacked = Vec::with_capacity(upper_bound.unwrap_or(lower_bound));
+        let mut previous = None;
+
+        for key in keys {
+            debug_assert!(
+                previous.is_none_or(|previous| previous <= key),
+                "prefix set keys must be sorted"
+            );
+            if previous != Some(key) {
+                unpacked.push(Nibbles::unpack(key));
+            }
+            previous = Some(key);
+        }
+
+        Self::new(false, unpacked)
+    }
 }
 
 impl PrefixSet {
+    fn new(all: bool, keys: Vec<Nibbles>) -> Self {
+        Self { index: 0, all, keys: (!all && !keys.is_empty()).then(|| Arc::new(keys)) }
+    }
+
+    /// Creates a prefix set that considers every path changed.
+    pub fn all_paths() -> Self {
+        Self::new(true, Vec::new())
+    }
+
     /// Returns `true` if any of the keys in the set has the given prefix
     ///
     /// # Note on Mutability
@@ -207,11 +283,12 @@ impl PrefixSet {
             return true
         }
 
-        while self.index > 0 && &self.keys[self.index] > prefix {
+        let keys = self.keys.as_deref().map(Vec::as_slice).unwrap_or_default();
+        while self.index > 0 && &keys[self.index] > prefix {
             self.index -= 1;
         }
 
-        for (idx, key) in self.keys[self.index..].iter().enumerate() {
+        for (idx, key) in keys[self.index..].iter().enumerate() {
             if key.starts_with(prefix) {
                 self.index += idx;
                 return true
@@ -237,11 +314,12 @@ impl PrefixSet {
             return true
         }
 
-        while self.index > 0 && &self.keys[self.index] >= range.end {
+        let keys = self.keys.as_deref().map(Vec::as_slice).unwrap_or_default();
+        while self.index > 0 && &keys[self.index] >= range.end {
             self.index -= 1;
         }
 
-        for (idx, key) in self.keys[self.index..].iter().enumerate() {
+        for (idx, key) in keys[self.index..].iter().enumerate() {
             if key >= range.start && key < range.end {
                 self.index += idx;
                 return true
@@ -256,9 +334,36 @@ impl PrefixSet {
         false
     }
 
+    /// Returns `true` if any key in the set is at or after `start`.
+    #[inline]
+    pub fn contains_from(&mut self, start: &Nibbles) -> bool {
+        if self.all {
+            return true
+        }
+
+        let keys = self.keys.as_deref().map(Vec::as_slice).unwrap_or_default();
+        while self.index > 0 && &keys[self.index] > start {
+            self.index -= 1;
+        }
+
+        for (idx, key) in keys[self.index..].iter().enumerate() {
+            if key >= start {
+                self.index += idx;
+                return true
+            }
+        }
+
+        false
+    }
+
     /// Returns an iterator over reference to _all_ nibbles regardless of cursor position.
     pub fn iter(&self) -> core::slice::Iter<'_, Nibbles> {
-        self.keys.iter()
+        self.slice().iter()
+    }
+
+    /// Returns the underlying sorted prefix slice.
+    pub fn slice(&self) -> &[Nibbles] {
+        self.keys.as_deref().map(Vec::as_slice).unwrap_or_default()
     }
 
     /// Returns true if every entry should be considered changed.
@@ -268,12 +373,12 @@ impl PrefixSet {
 
     /// Returns the number of elements in the set.
     pub fn len(&self) -> usize {
-        self.keys.len()
+        self.slice().len()
     }
 
     /// Returns `true` if the set is empty and `all` flag is not set.
-    pub fn is_empty(&self) -> bool {
-        !self.all && self.keys.is_empty()
+    pub const fn is_empty(&self) -> bool {
+        !self.all && self.keys.is_none()
     }
 }
 
@@ -288,6 +393,7 @@ impl<'a> IntoIterator for &'a PrefixSet {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloy_primitives::B256;
 
     #[test]
     fn test_contains_with_multiple_inserts_and_duplicates() {
@@ -305,6 +411,44 @@ mod tests {
     }
 
     #[test]
+    fn test_contains_from() {
+        let first = Nibbles::from_nibbles([1, 2, 3]);
+        let middle = Nibbles::from_nibbles([1, 2, 4]);
+        let last = Nibbles::from_nibbles([4, 5, 6]);
+        let mut prefix_set = PrefixSetMut::from([first, middle, last]).freeze();
+
+        assert!(prefix_set.contains_range(&first..&middle));
+        assert!(prefix_set.contains_from(&middle));
+        assert!(prefix_set.contains_from(&last));
+        assert!(!prefix_set.contains_from(&Nibbles::from_nibbles([5])));
+    }
+
+    #[test]
+    fn test_from_sorted_b256_iterator() {
+        let first = B256::with_last_byte(1);
+        let second = B256::with_last_byte(2);
+        let prefix_set = PrefixSet::from([first, second].into_iter());
+
+        assert_eq!(prefix_set.slice(), &[Nibbles::unpack(first), Nibbles::unpack(second)]);
+    }
+
+    #[test]
+    fn test_from_sorted_b256_iterator_with_duplicates() {
+        let first = B256::with_last_byte(1);
+        let second = B256::with_last_byte(2);
+        let prefix_set = PrefixSet::from([first, first, second].into_iter());
+
+        assert_eq!(prefix_set.slice(), &[Nibbles::unpack(first), Nibbles::unpack(second)]);
+    }
+
+    #[cfg(debug_assertions)]
+    #[test]
+    #[should_panic(expected = "prefix set keys must be sorted")]
+    fn test_from_unsorted_b256_iterator() {
+        let _: PrefixSet = [B256::with_last_byte(2), B256::with_last_byte(1)].into_iter().into();
+    }
+
+    #[test]
     fn test_freeze_shrinks_capacity() {
         let mut prefix_set_mut = PrefixSetMut::default();
         prefix_set_mut.insert(Nibbles::from_nibbles([1, 2, 3]));
@@ -319,8 +463,8 @@ mod tests {
         assert!(prefix_set.contains(&Nibbles::from_nibbles_unchecked([1, 2])));
         assert!(prefix_set.contains(&Nibbles::from_nibbles_unchecked([4, 5])));
         assert!(!prefix_set.contains(&Nibbles::from_nibbles_unchecked([7, 8])));
-        assert_eq!(prefix_set.keys.len(), 3); // Length should be 3 (excluding duplicate)
-        assert_eq!(prefix_set.keys.capacity(), 3); // Capacity should be 3 after shrinking
+        assert_eq!(prefix_set.slice().len(), 3); // Length should be 3 (excluding duplicate)
+        assert_eq!(prefix_set.keys.as_ref().unwrap().capacity(), 3); // Capacity after shrinking
     }
 
     #[test]
@@ -339,8 +483,16 @@ mod tests {
         assert!(prefix_set.contains(&Nibbles::from_nibbles_unchecked([1, 2])));
         assert!(prefix_set.contains(&Nibbles::from_nibbles_unchecked([4, 5])));
         assert!(!prefix_set.contains(&Nibbles::from_nibbles_unchecked([7, 8])));
-        assert_eq!(prefix_set.keys.len(), 3); // Length should be 3 (excluding duplicate)
-        assert_eq!(prefix_set.keys.capacity(), 3); // Capacity should be 3 after shrinking
+        assert_eq!(prefix_set.slice().len(), 3); // Length should be 3 (excluding duplicate)
+        assert_eq!(prefix_set.keys.as_ref().unwrap().capacity(), 3); // Capacity after shrinking
+    }
+
+    #[test]
+    fn test_empty_prefix_sets_do_not_allocate() {
+        assert!(PrefixSet::default().keys.is_none());
+        assert!(PrefixSetMut::default().freeze().keys.is_none());
+        assert!(PrefixSet::from(core::iter::empty()).keys.is_none());
+        assert!(PrefixSet::all_paths().keys.is_none());
     }
 
     #[test]
@@ -348,5 +500,43 @@ mod tests {
         let mut prefix_set_mut = PrefixSetMut::default();
         prefix_set_mut.extend(PrefixSetMut::all());
         assert!(prefix_set_mut.all);
+    }
+
+    #[test]
+    fn test_prefix_set_slice_returns_frozen_keys() {
+        let path_a = Nibbles::from_nibbles([1, 2, 3]);
+        let path_b = Nibbles::from_nibbles([4, 5, 6]);
+        let mut prefix_set_mut = PrefixSetMut::default();
+        prefix_set_mut.insert(path_b);
+        prefix_set_mut.insert(path_a);
+        prefix_set_mut.insert(path_b);
+
+        let prefix_set = prefix_set_mut.freeze();
+        assert_eq!(prefix_set.slice(), &[path_a, path_b]);
+    }
+
+    #[test]
+    fn test_trie_prefix_sets_mut_extend_ref() {
+        let account_path = Nibbles::from_nibbles([1, 2]);
+        let storage_path = Nibbles::from_nibbles([3, 4]);
+        let storage_account = B256::with_last_byte(1);
+        let destroyed_account = B256::with_last_byte(2);
+        let other = TriePrefixSetsMut {
+            account_prefix_set: PrefixSetMut::from([account_path]),
+            storage_prefix_sets: B256Map::from_iter([(
+                storage_account,
+                PrefixSetMut::from([storage_path]),
+            )]),
+            destroyed_accounts: B256Set::from_iter([destroyed_account]),
+        };
+
+        let mut prefix_sets = TriePrefixSetsMut::default();
+        prefix_sets.extend_ref(&other);
+
+        let frozen = prefix_sets.freeze();
+        assert_eq!(frozen.account_prefix_set.slice(), &[account_path]);
+        assert_eq!(frozen.storage_prefix_sets[&storage_account].slice(), &[storage_path]);
+        assert!(frozen.destroyed_accounts.contains(&destroyed_account));
+        assert_eq!(other.account_prefix_set.len(), 1);
     }
 }

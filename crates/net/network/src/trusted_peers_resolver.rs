@@ -33,6 +33,11 @@ impl TrustedPeersResolver {
         self.interval = interval;
     }
 
+    /// Remove a trusted peer from the resolver.
+    pub fn remove(&mut self, peer_id: PeerId) {
+        self.trusted_peers.retain(|trusted| trusted.id != peer_id);
+    }
+
     /// Poll the resolver.
     /// When the interval ticks, new resolution futures for each trusted peer are spawned.
     /// If a future completes successfully, it returns the resolved (`PeerId`, `NodeRecord`).

@@ -54,6 +54,8 @@ pub struct DefaultRpcServerArgs {
     http_addr: IpAddr,
     http_port: u16,
     http_disable_compression: bool,
+    http_compression_algorithms: Option<Vec<String>>,
+    http_decompression_algorithms: Option<Vec<String>>,
     http_api: Option<RpcModuleSelection>,
     http_corsdomain: Option<String>,
     ws: bool,
@@ -71,6 +73,7 @@ pub struct DefaultRpcServerArgs {
     auth_ipc_path: String,
     disable_auth_server: bool,
     rpc_jwtsecret: Option<JwtSecret>,
+    rpc_disable_metrics: bool,
     rpc_max_request_size: MaxU32,
     rpc_max_response_size: MaxU32,
     rpc_max_subscriptions_per_connection: MaxU32,
@@ -84,6 +87,7 @@ pub struct DefaultRpcServerArgs {
     rpc_evm_memory_limit: u64,
     rpc_tx_fee_cap: u128,
     rpc_max_simulate_blocks: u64,
+    rpc_compute_state_root_for_eth_simulate: bool,
     rpc_eth_proof_window: u64,
     rpc_proof_permits: usize,
     rpc_pending_block: PendingBlockKind,
@@ -126,6 +130,18 @@ impl DefaultRpcServerArgs {
     /// Set whether to disable HTTP compression by default
     pub const fn with_http_disable_compression(mut self, v: bool) -> Self {
         self.http_disable_compression = v;
+        self
+    }
+
+    /// Set the default allowed HTTP response compression algorithms
+    pub fn with_http_compression_algorithms(mut self, v: Option<Vec<String>>) -> Self {
+        self.http_compression_algorithms = v;
+        self
+    }
+
+    /// Set the default allowed HTTP request decompression algorithms
+    pub fn with_http_decompression_algorithms(mut self, v: Option<Vec<String>>) -> Self {
+        self.http_decompression_algorithms = v;
         self
     }
 
@@ -231,6 +247,12 @@ impl DefaultRpcServerArgs {
         self
     }
 
+    /// Set whether to disable RPC request metrics by default
+    pub const fn with_rpc_disable_metrics(mut self, v: bool) -> Self {
+        self.rpc_disable_metrics = v;
+        self
+    }
+
     /// Set the default max request size
     pub const fn with_rpc_max_request_size(mut self, v: MaxU32) -> Self {
         self.rpc_max_request_size = v;
@@ -309,6 +331,12 @@ impl DefaultRpcServerArgs {
         self
     }
 
+    /// Set whether to compute state roots for `eth_simulateV1` responses by default.
+    pub const fn with_rpc_compute_state_root_for_eth_simulate(mut self, v: bool) -> Self {
+        self.rpc_compute_state_root_for_eth_simulate = v;
+        self
+    }
+
     /// Set the default eth proof window
     pub const fn with_rpc_eth_proof_window(mut self, v: u64) -> Self {
         self.rpc_eth_proof_window = v;
@@ -365,6 +393,8 @@ impl Default for DefaultRpcServerArgs {
             http_addr: Ipv4Addr::LOCALHOST.into(),
             http_port: constants::DEFAULT_HTTP_RPC_PORT,
             http_disable_compression: false,
+            http_compression_algorithms: None,
+            http_decompression_algorithms: None,
             http_api: None,
             http_corsdomain: None,
             ws: false,
@@ -382,6 +412,7 @@ impl Default for DefaultRpcServerArgs {
             auth_ipc_path: constants::DEFAULT_ENGINE_API_IPC_ENDPOINT.to_string(),
             disable_auth_server: false,
             rpc_jwtsecret: None,
+            rpc_disable_metrics: false,
             rpc_max_request_size: RPC_DEFAULT_MAX_REQUEST_SIZE_MB.into(),
             rpc_max_response_size: RPC_DEFAULT_MAX_RESPONSE_SIZE_MB.into(),
             rpc_max_subscriptions_per_connection: RPC_DEFAULT_MAX_SUBS_PER_CONN.into(),
@@ -395,6 +426,7 @@ impl Default for DefaultRpcServerArgs {
             rpc_evm_memory_limit: (1 << 32) - 1,
             rpc_tx_fee_cap: constants::DEFAULT_TX_FEE_CAP_WEI,
             rpc_max_simulate_blocks: constants::DEFAULT_MAX_SIMULATE_BLOCKS,
+            rpc_compute_state_root_for_eth_simulate: false,
             rpc_eth_proof_window: constants::DEFAULT_ETH_PROOF_WINDOW,
             rpc_proof_permits: constants::DEFAULT_PROOF_PERMITS,
             rpc_pending_block: PendingBlockKind::Full,
@@ -427,6 +459,34 @@ pub struct RpcServerArgs {
     /// Disable compression for HTTP responses
     #[arg(long = "http.disable-compression", default_value_t = DefaultRpcServerArgs::get_global().http_disable_compression)]
     pub http_disable_compression: bool,
+
+    /// Comma-separated list of allowed compression algorithms for HTTP responses.
+    ///
+    /// If not specified, all supported algorithms are enabled.
+    ///
+    /// Client `Accept-Encoding` quality values select among allowed algorithms; ties prefer
+    /// zstd > br > gzip > deflate. Omitted quality values default to 1; without an acceptable
+    /// allowed algorithm, the response is uncompressed. List order is ignored.
+    #[arg(
+        long = "http.compression",
+        value_name = "ALGOS",
+        value_delimiter = ',',
+        value_parser = ["zstd", "gzip", "deflate", "br"],
+        default_value = Resettable::from(DefaultRpcServerArgs::get_global().http_compression_algorithms.as_ref().map(|v| v.join(",").into()))
+    )]
+    pub http_compression_algorithms: Option<Vec<String>>,
+
+    /// Comma-separated list of allowed decompression algorithms for HTTP requests.
+    ///
+    /// Request decompression is disabled when not specified.
+    #[arg(
+        long = "http.decompression",
+        value_name = "ALGOS",
+        value_delimiter = ',',
+        value_parser = ["zstd", "gzip", "deflate", "br"],
+        default_value = Resettable::from(DefaultRpcServerArgs::get_global().http_decompression_algorithms.as_ref().map(|v| v.join(",").into()))
+    )]
+    pub http_decompression_algorithms: Option<Vec<String>>,
 
     /// Rpc Modules to be configured for the HTTP server
     #[arg(long = "http.api", value_parser = RpcModuleSelectionValueParser::default(), default_value = Resettable::from(DefaultRpcServerArgs::get_global().http_api.as_ref().map(|v| v.to_string().into())))]
@@ -485,8 +545,21 @@ pub struct RpcServerArgs {
     /// If no path is provided, a secret will be generated and stored in the datadir under
     /// `<DIR>/<CHAIN_ID>/jwt.hex`. For mainnet this would be `~/.local/share/reth/mainnet/jwt.hex`
     /// by default.
-    #[arg(long = "authrpc.jwtsecret", value_name = "PATH", global = true, required = false, default_value = Resettable::from(DefaultRpcServerArgs::get_global().auth_jwtsecret.as_ref().map(|v| v.to_string_lossy().into())))]
+    #[arg(long = "authrpc.jwtsecret", value_name = "PATH", global = true, required = false, conflicts_with = "auth_jwtsecret_hex", default_value = Resettable::from(DefaultRpcServerArgs::get_global().auth_jwtsecret.as_ref().map(|v| v.to_string_lossy().into())))]
     pub auth_jwtsecret: Option<PathBuf>,
+
+    /// Hex encoded JWT secret to use for the authenticated engine-API RPC server.
+    ///
+    /// This will enforce JWT authentication for all requests coming from the consensus layer.
+    /// Cannot be used together with `--authrpc.jwtsecret`.
+    #[arg(
+        long = "authrpc.jwtsecret-hex",
+        value_name = "HEX",
+        global = true,
+        required = false,
+        conflicts_with = "auth_jwtsecret"
+    )]
+    pub auth_jwtsecret_hex: Option<JwtSecret>,
 
     /// Enable auth engine API over IPC
     #[arg(long, default_value_t = DefaultRpcServerArgs::get_global().auth_ipc)]
@@ -511,7 +584,14 @@ pub struct RpcServerArgs {
     #[arg(long = "rpc.jwtsecret", value_name = "HEX", global = true, required = false, default_value = Resettable::from(DefaultRpcServerArgs::get_global().rpc_jwtsecret.as_ref().map(|v| format!("{:?}", v).into())))]
     pub rpc_jwtsecret: Option<JwtSecret>,
 
+    /// Disable built-in RPC request metrics.
+    #[arg(long = "rpc.disable-metrics", default_value_t = DefaultRpcServerArgs::get_global().rpc_disable_metrics)]
+    pub rpc_disable_metrics: bool,
+
     /// Set the maximum RPC request payload size for both HTTP and WS in megabytes.
+    ///
+    /// For compressed HTTP requests, this limit applies to both the compressed and decompressed
+    /// payloads.
     #[arg(long = "rpc.max-request-size", alias = "rpc-max-request-size", default_value_t = DefaultRpcServerArgs::get_global().rpc_max_request_size)]
     pub rpc_max_request_size: MaxU32,
 
@@ -594,6 +674,14 @@ pub struct RpcServerArgs {
     )]
     pub rpc_max_simulate_blocks: u64,
 
+    /// Compute state roots for `eth_simulateV1` responses.
+    #[arg(
+        long = "rpc.compute-state-root-for-eth-simulate",
+        env = "RETH_RPC_COMPUTE_STATE_ROOT_FOR_ETH_SIMULATE",
+        default_value_t = DefaultRpcServerArgs::get_global().rpc_compute_state_root_for_eth_simulate
+    )]
+    pub rpc_compute_state_root_for_eth_simulate: bool,
+
     /// The maximum proof window for historical proof generation.
     /// This value allows for generating historical proofs up to
     /// configured number of blocks from current tip (up to `tip - window`).
@@ -645,13 +733,13 @@ pub struct RpcServerArgs {
     ///
     /// When enabled, transactions that fail execution will be skipped, and all subsequent
     /// transactions from the same sender will also be skipped.
-    #[arg(long = "testing.skip-invalid-transactions", default_value_t = true)]
+    #[arg(long = "testing.skip-invalid-transactions", default_value_t = false)]
     pub testing_skip_invalid_transactions: bool,
 
     /// Override the gas limit used by `testing_buildBlockV1`.
     ///
-    /// When set, `testing_buildBlockV1` will use this value instead of inheriting
-    /// the parent block's gas limit. Accepts short notation: K for thousand, M for
+    /// When set, `testing_buildBlockV1` will use this exact value instead of moving toward the
+    /// payload builder's configured gas limit. Accepts short notation: K for thousand, M for
     /// million, G for billion (e.g., 1G = 1 billion).
     #[arg(long = "testing.gas-limit", value_name = "GAS_LIMIT", hide = true)]
     pub testing_gas_limit: Option<u64>,
@@ -811,6 +899,8 @@ impl Default for RpcServerArgs {
             http_addr,
             http_port,
             http_disable_compression,
+            http_compression_algorithms,
+            http_decompression_algorithms,
             http_api,
             http_corsdomain,
             ws,
@@ -828,6 +918,7 @@ impl Default for RpcServerArgs {
             auth_ipc_path,
             disable_auth_server,
             rpc_jwtsecret,
+            rpc_disable_metrics,
             rpc_max_request_size,
             rpc_max_response_size,
             rpc_max_subscriptions_per_connection,
@@ -841,6 +932,7 @@ impl Default for RpcServerArgs {
             rpc_evm_memory_limit,
             rpc_tx_fee_cap,
             rpc_max_simulate_blocks,
+            rpc_compute_state_root_for_eth_simulate,
             rpc_eth_proof_window,
             rpc_proof_permits,
             rpc_pending_block,
@@ -855,6 +947,8 @@ impl Default for RpcServerArgs {
             http_addr,
             http_port,
             http_disable_compression,
+            http_compression_algorithms,
+            http_decompression_algorithms,
             http_api,
             http_corsdomain,
             ws,
@@ -868,10 +962,12 @@ impl Default for RpcServerArgs {
             auth_addr,
             auth_port,
             auth_jwtsecret,
+            auth_jwtsecret_hex: None,
             auth_ipc,
             auth_ipc_path,
             disable_auth_server,
             rpc_jwtsecret,
+            rpc_disable_metrics,
             rpc_max_request_size,
             rpc_max_response_size,
             rpc_max_subscriptions_per_connection,
@@ -885,6 +981,7 @@ impl Default for RpcServerArgs {
             rpc_evm_memory_limit,
             rpc_tx_fee_cap,
             rpc_max_simulate_blocks,
+            rpc_compute_state_root_for_eth_simulate,
             rpc_eth_proof_window,
             rpc_proof_permits,
             rpc_pending_block,
@@ -893,7 +990,7 @@ impl Default for RpcServerArgs {
             rpc_state_cache,
             gas_price_oracle,
             rpc_send_raw_transaction_sync_timeout,
-            testing_skip_invalid_transactions: true,
+            testing_skip_invalid_transactions: false,
             testing_gas_limit: None,
             rpc_force_blob_sidecar_upcasting: false,
         }
@@ -974,11 +1071,69 @@ mod tests {
     }
 
     #[test]
+    fn http_compression_algorithms_are_optional() {
+        let args = CommandParser::<RpcServerArgs>::parse_from(["reth"]).args;
+        assert!(args.http_compression_algorithms.is_none());
+
+        let args = CommandParser::<RpcServerArgs>::parse_from([
+            "reth",
+            "--http.compression",
+            "zstd,gzip,deflate,br",
+        ])
+        .args;
+        assert_eq!(
+            args.http_compression_algorithms.as_deref().unwrap(),
+            ["zstd", "gzip", "deflate", "br"]
+        );
+
+        let result =
+            CommandParser::<RpcServerArgs>::try_parse_from(["reth", "--http.compression", "gizp"]);
+        assert!(result.is_err());
+    }
+
+    #[test]
     fn rpc_server_args_default_sanity_test() {
         let default_args = RpcServerArgs::default();
         let args = CommandParser::<RpcServerArgs>::parse_from(["reth"]).args;
 
         assert_eq!(args, default_args);
+    }
+
+    #[test]
+    fn http_request_decompression_is_opt_in() {
+        let args = CommandParser::<RpcServerArgs>::parse_from(["reth"]).args;
+        assert!(args.http_decompression_algorithms.is_none());
+
+        let args = CommandParser::<RpcServerArgs>::parse_from([
+            "reth",
+            "--http.decompression",
+            "zstd,gzip,deflate,br",
+        ])
+        .args;
+        assert_eq!(
+            args.http_decompression_algorithms.as_deref().unwrap(),
+            ["zstd", "gzip", "deflate", "br"]
+        );
+    }
+
+    #[test]
+    fn invalid_http_request_decompression_algorithm_is_rejected() {
+        let result = CommandParser::<RpcServerArgs>::try_parse_from([
+            "reth",
+            "--http.decompression",
+            "gizp",
+        ]);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_rpc_disable_metrics_arg() {
+        let args = CommandParser::<RpcServerArgs>::parse_from(["reth"]).args;
+        assert!(!args.rpc_disable_metrics);
+
+        let args =
+            CommandParser::<RpcServerArgs>::parse_from(["reth", "--rpc.disable-metrics"]).args;
+        assert!(args.rpc_disable_metrics);
     }
 
     #[test]
@@ -1016,6 +1171,8 @@ mod tests {
             http_addr: "127.0.0.1".parse().unwrap(),
             http_port: 8545,
             http_disable_compression: false,
+            http_compression_algorithms: None,
+            http_decompression_algorithms: None,
             http_api: Some(RpcModuleSelection::try_from_selection(["eth", "admin"]).unwrap()),
             http_corsdomain: Some("*".to_string()),
             ws: true,
@@ -1029,6 +1186,7 @@ mod tests {
             auth_addr: "127.0.0.1".parse().unwrap(),
             auth_port: 8551,
             auth_jwtsecret: Some(std::path::PathBuf::from("/tmp/jwt.hex")),
+            auth_jwtsecret_hex: None,
             auth_ipc: false,
             auth_ipc_path: "engine.ipc".to_string(),
             disable_auth_server: false,
@@ -1038,6 +1196,7 @@ mod tests {
                 )
                 .unwrap(),
             ),
+            rpc_disable_metrics: false,
             rpc_max_request_size: 15u32.into(),
             rpc_max_response_size: 160u32.into(),
             rpc_max_subscriptions_per_connection: 1024u32.into(),
@@ -1051,6 +1210,7 @@ mod tests {
             rpc_evm_memory_limit: 256,
             rpc_tx_fee_cap: 2_000_000_000_000_000_000u128,
             rpc_max_simulate_blocks: 256,
+            rpc_compute_state_root_for_eth_simulate: false,
             rpc_eth_proof_window: 100_000,
             rpc_proof_permits: 16,
             rpc_pending_block: PendingBlockKind::Full,
@@ -1063,7 +1223,7 @@ mod tests {
                 max_bals: 1000,
                 prewarm_bals: true,
                 max_concurrent_db_requests: 512,
-                max_cached_tx_hashes: 30_000,
+                max_cached_tx_hashes: 100_000,
             },
             gas_price_oracle: GasPriceOracleArgs {
                 blocks: 20,
@@ -1172,5 +1332,42 @@ mod tests {
         .args;
 
         assert_eq!(parsed_args, args);
+    }
+
+    #[test]
+    fn parse_auth_jwtsecret_hex() {
+        let hex = "1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef";
+        let args =
+            CommandParser::<RpcServerArgs>::parse_from(["reth", "--authrpc.jwtsecret-hex", hex])
+                .args;
+
+        let expected = JwtSecret::from_hex(hex).unwrap();
+        assert_eq!(args.auth_jwtsecret_hex, Some(expected));
+        assert_eq!(args.auth_jwtsecret, None);
+    }
+
+    #[test]
+    fn parse_auth_jwtsecret_hex_with_0x_prefix() {
+        let hex = "0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef";
+        let args =
+            CommandParser::<RpcServerArgs>::parse_from(["reth", "--authrpc.jwtsecret-hex", hex])
+                .args;
+
+        let expected = JwtSecret::from_hex(hex).unwrap();
+        assert_eq!(args.auth_jwtsecret_hex, Some(expected));
+        assert_eq!(args.auth_jwtsecret, None);
+    }
+
+    #[test]
+    fn test_auth_jwtsecret_and_hex_are_mutually_exclusive() {
+        let result = CommandParser::<RpcServerArgs>::try_parse_from([
+            "reth",
+            "--authrpc.jwtsecret",
+            "/tmp/jwt.hex",
+            "--authrpc.jwtsecret-hex",
+            "1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
+        ]);
+
+        assert!(result.is_err());
     }
 }

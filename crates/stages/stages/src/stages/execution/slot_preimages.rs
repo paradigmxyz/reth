@@ -17,13 +17,16 @@ use tracing::trace;
 
 /// Separate MDBX environment for storing `keccak256(slot) → slot` preimage mappings.
 ///
-/// Used only during [`super::ExecutionStage`] for pre-Cancun selfdestruct handling where
+/// Used during [`super::ExecutionStage`] for pre-Cancun selfdestruct handling where
 /// the original storage slot keys must be recovered from their hashed representation.
+///
+/// Also usable by downstream state-dump importers (e.g. `op-reth init-state`) to seed
+/// the database when state is imported from a snapshot rather than executed block-by-block.
 ///
 /// The database is append-only and not unwound — duplicate inserts are silently skipped.
 /// After Cancun (where `SELFDESTRUCT` no longer destroys storage) the database can be pruned.
 #[derive(Debug)]
-struct SlotPreimages {
+pub struct SlotPreimages {
     env: Environment,
 }
 
@@ -32,7 +35,7 @@ impl SlotPreimages {
     ///
     /// Uses subdir mode (`no_sub_dir = false`), so MDBX creates `mdbx.dat` / `mdbx.lck`
     /// under the directory (e.g. `db/preimage/mdbx.dat`).
-    fn open(path: &Path) -> eyre::Result<Self> {
+    pub fn open(path: &Path) -> eyre::Result<Self> {
         const GIGABYTE: usize = 1024 * 1024 * 1024;
         const TERABYTE: usize = GIGABYTE * 1024;
 
@@ -71,9 +74,11 @@ impl SlotPreimages {
 
     /// Batch-insert `hashed_slot → plain_slot` preimage entries.
     ///
-    /// Entries must be pre-sorted by key for optimal insert performance.
-    /// Existing keys are skipped after cursor lookup.
-    fn insert_preimages(&self, entries: &[(B256, B256)]) -> eyre::Result<()> {
+    /// Entries should be pre-sorted by key for optimal insert performance.
+    /// Unsorted entries are still inserted correctly but will be slower due to
+    /// loss of btree cursor locality.
+    /// Existing keys are silently skipped.
+    pub fn insert_preimages(&self, entries: &[(B256, B256)]) -> eyre::Result<()> {
         let tx = self.env.begin_rw_txn()?;
         let db = tx.open_db(None)?;
         let mut cursor = tx.cursor(db.dbi())?;
@@ -96,7 +101,7 @@ impl SlotPreimages {
     ///
     /// Reuse the returned [`SlotPreimagesReader`] for multiple `get` calls to avoid
     /// the overhead of opening a new RO transaction per lookup.
-    fn reader(&self) -> eyre::Result<SlotPreimagesReader> {
+    pub fn reader(&self) -> eyre::Result<SlotPreimagesReader> {
         let tx = self.env.begin_ro_txn()?;
         let dbi = tx.open_db(None)?.dbi();
         Ok(SlotPreimagesReader { tx, dbi })
@@ -104,14 +109,15 @@ impl SlotPreimages {
 }
 
 /// Read-only handle for batch slot-preimage lookups within a single MDBX transaction.
-struct SlotPreimagesReader {
+#[derive(Debug)]
+pub struct SlotPreimagesReader {
     tx: reth_libmdbx::Transaction<RO>,
     dbi: reth_libmdbx::ffi::MDBX_dbi,
 }
 
 impl SlotPreimagesReader {
     /// Point-lookup of a slot preimage by its keccak256 hash.
-    fn get(&self, hashed_slot: &B256) -> eyre::Result<Option<B256>> {
+    pub fn get(&self, hashed_slot: &B256) -> eyre::Result<Option<B256>> {
         let result: Option<[u8; 32]> = self.tx.get(self.dbi, hashed_slot.as_ref())?;
         Ok(result.map(B256::from))
     }

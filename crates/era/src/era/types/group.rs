@@ -8,8 +8,10 @@ use crate::{
     era::types::consensus::{CompressedBeaconState, CompressedSignedBeaconBlock},
 };
 
-/// Number of slots per historical root in ERA files
-pub const SLOTS_PER_HISTORICAL_ROOT: u64 = 8192;
+/// Number of slots per historical root in ERA files.
+///
+/// Equals [`crate::common::MAX_ENTRIES_PER_ERA`].
+pub const SLOTS_PER_HISTORICAL_ROOT: u64 = crate::common::MAX_ENTRIES_PER_ERA;
 
 /// Era file content group
 ///

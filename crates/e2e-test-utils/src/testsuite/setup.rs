@@ -270,6 +270,7 @@ where
             withdrawals: Some(vec![]),
             parent_beacon_block_root: Some(B256::ZERO),
             slot_number: None,
+            ..Default::default()
         };
 
         crate::setup_import::setup_engine_with_chain_import(
@@ -297,6 +298,7 @@ where
                 withdrawals: Some(vec![]),
                 parent_beacon_block_root: Some(B256::ZERO),
                 slot_number: None,
+                ..Default::default()
             }
             .into()
         }

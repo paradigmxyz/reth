@@ -462,7 +462,8 @@ impl<N: NetworkPrimitives> NetworkManager<N> {
 
     /// Returns a new [`FetchClient`] that can be cloned and shared.
     ///
-    /// The [`FetchClient`] is the entrypoint for sending requests to the network.
+    /// The [`FetchClient`] is the entrypoint for sending requests to the network, including
+    /// `snap/2` requests via its [`SnapClient`](reth_network_p2p::snap::client::SnapClient) impl.
     pub fn fetch_client(&self) -> FetchClient<N> {
         self.swarm.state().fetch_client()
     }
@@ -582,6 +583,8 @@ impl<N: NetworkPrimitives> NetworkManager<N> {
                     response,
                 });
             }
+            PeerRequest::GetSnap { request, response } => self
+                .delegate_eth_request(IncomingEthRequest::GetSnap { peer_id, request, response }),
         }
     }
 
@@ -676,7 +679,7 @@ impl<N: NetworkPrimitives> NetworkManager<N> {
                     msg,
                 });
             }
-            PeerMessage::SendTransactions(_) => {
+            PeerMessage::SendTransactions(_) | PeerMessage::SendBroadcastPoolTransactions(_) => {
                 unreachable!("Not emitted by session")
             }
             PeerMessage::BlockRangeUpdated(_) => {}
@@ -707,12 +710,21 @@ impl<N: NetworkPrimitives> NetworkManager<N> {
             NetworkHandleMessage::SendTransaction { peer_id, msg } => {
                 self.swarm.sessions_mut().send_message(&peer_id, PeerMessage::SendTransactions(msg))
             }
+            NetworkHandleMessage::SendBroadcastPoolTransactions { peer_id, msg } => self
+                .swarm
+                .sessions_mut()
+                .send_message(&peer_id, PeerMessage::SendBroadcastPoolTransactions(msg)),
             NetworkHandleMessage::SendPooledTransactionHashes { peer_id, msg } => self
                 .swarm
                 .sessions_mut()
                 .send_message(&peer_id, PeerMessage::PooledTransactions(msg)),
             NetworkHandleMessage::AddTrustedPeerId(peer_id) => {
                 self.swarm.state_mut().add_trusted_peer_id(peer_id);
+            }
+            NetworkHandleMessage::AddTrustedPeerNode(trusted_peer) => {
+                if !self.swarm.is_shutting_down() {
+                    self.swarm.state_mut().add_trusted_peer_node(trusted_peer);
+                }
             }
             NetworkHandleMessage::AddPeerAddress(peer, kind, addr) => {
                 // only add peer if we are not shutting down
@@ -725,6 +737,12 @@ impl<N: NetworkPrimitives> NetworkManager<N> {
             }
             NetworkHandleMessage::DisconnectPeer(peer_id, reason) => {
                 self.swarm.sessions_mut().disconnect(peer_id, reason);
+            }
+            NetworkHandleMessage::BanPeer(peer_id) => {
+                self.swarm.peers_mut().ban_peer_by_admin(peer_id);
+            }
+            NetworkHandleMessage::UnbanPeer(peer_id) => {
+                self.swarm.peers_mut().unban_peer_by_admin(peer_id);
             }
             NetworkHandleMessage::ConnectPeer(peer_id, kind, addr) => {
                 self.swarm.state_mut().add_and_connect(peer_id, kind, addr);
@@ -757,6 +775,10 @@ impl<N: NetworkPrimitives> NetworkManager<N> {
                 if let Some(transition) = self.swarm.sessions_mut().on_status_update(head) {
                     self.swarm.state_mut().update_fork_id(transition.current);
                 }
+            }
+            NetworkHandleMessage::SetForkFilter { fork_filter } => {
+                let fork_id = self.swarm.sessions_mut().set_fork_filter(fork_filter);
+                self.swarm.state_mut().update_fork_id(fork_id);
             }
             NetworkHandleMessage::GetPeerInfos(tx) => {
                 let _ = tx.send(self.get_peer_infos());

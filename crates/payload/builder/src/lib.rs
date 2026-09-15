@@ -33,7 +33,7 @@
 //! use reth_payload_builder::PayloadId;
 //! use alloy_primitives::U256;
 //! use reth_payload_builder::{EthBuiltPayload, PayloadBuilderError, KeepPayloadJobAlive, PayloadJob, PayloadJobGenerator, PayloadKind};
-//! use reth_primitives_traits::SealedBlock;
+//! use reth_primitives_traits::{RecoveredBlock, SealedBlock};
 //! use alloy_rpc_types::engine::PayloadAttributes;
 //! use reth_payload_builder::BuildNewPayload;
 //!
@@ -72,7 +72,8 @@
 //!         },
 //!         ..Default::default()
 //!     };
-//!     let payload = EthBuiltPayload::new(Arc::new(SealedBlock::seal_slow(block)), U256::ZERO, None, None);
+//!     let block = RecoveredBlock::new_sealed(SealedBlock::seal_slow(block), vec![]);
+//!     let payload = EthBuiltPayload::new(Arc::new(block), U256::ZERO, None, None);
 //!     Ok(payload)
 //! }
 //!
@@ -125,8 +126,8 @@ pub use alloy_rpc_types::engine::PayloadId;
 pub use reth_payload_builder_primitives::PayloadBuilderError;
 pub use reth_payload_primitives::PayloadKind;
 pub use service::{
-    BuildNewPayload, PayloadBuilderHandle, PayloadBuilderService, PayloadServiceCommand,
-    PayloadStore,
+    BuildNewPayload, PayloadBuilderHandle, PayloadBuilderLease, PayloadBuilderResources,
+    PayloadBuilderService, PayloadServiceCommand, PayloadStore,
 };
 pub use traits::{KeepPayloadJobAlive, PayloadJob, PayloadJobGenerator};
 

@@ -6,7 +6,7 @@
 //! See also <https://github.com/eth-clients/e2store-format-specs/blob/main/formats/era.md>.
 
 use crate::{
-    common::file_ops::{EraFileFormat, FileReader, StreamReader, StreamWriter},
+    common::file_ops::{EraFileFormat, StreamReader, StreamWriter},
     e2s::{
         error::E2sError,
         file::{E2StoreReader, E2StoreWriter},
@@ -20,10 +20,7 @@ use crate::{
         group::{EraGroup, EraId, SlotIndex},
     },
 };
-use std::{
-    fs::File,
-    io::{Read, Seek, Write},
-};
+use std::io::{Read, Seek, Write};
 
 /// Era file interface
 #[derive(Debug)]
@@ -194,8 +191,6 @@ impl<R: Read + Seek> EraReader<R> {
         Ok(EraFile::new(group, id))
     }
 }
-
-impl FileReader for EraReader<File> {}
 
 /// Writer for Era files that builds on top of [`E2StoreWriter`]
 #[derive(Debug)]

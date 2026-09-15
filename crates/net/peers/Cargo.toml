@@ -46,5 +46,9 @@ std = [
     "url/std",
     "serde_json/std",
 ]
-secp256k1 = ["dep:secp256k1", "enr/secp256k1"]
+secp256k1 = [
+    "dep:secp256k1",
+    "enr/secp256k1",
+    "alloy-primitives/secp256k1",
+]
 net = ["std", "dep:tokio", "tokio?/net"]

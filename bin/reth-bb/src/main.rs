@@ -7,6 +7,7 @@ static ALLOC: reth_cli_util::allocator::Allocator = reth_cli_util::allocator::ne
 mod evm;
 mod evm_config;
 
+use alloy_primitives::Bytes;
 use alloy_rpc_types::engine::ExecutionData;
 use clap::Parser;
 use evm_config::{BbEvmConfig, BigBlockData};
@@ -33,7 +34,6 @@ use reth_node_ethereum::{
 };
 use reth_primitives_traits::SealedBlock;
 use reth_provider::EthStorage;
-use revm_primitives::Bytes;
 use tracing::info;
 
 #[derive(Debug, Clone, Default)]
@@ -101,6 +101,7 @@ impl PayloadValidator<BbPayloadTypes> for BbEngineValidator {
 
         // Update block's gas usage to make sure metrics are correct
         block.header.gas_used += blocks.iter().map(|b| b.gas_used).sum::<u64>();
+        block.header.gas_limit += blocks.iter().map(|b| b.gas_limit).sum::<u64>();
 
         // Prepend transactions from previous blocks to make sure that persistence indices are
         // correct.

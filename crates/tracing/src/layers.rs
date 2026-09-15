@@ -6,6 +6,7 @@ use reth_tracing_otlp::{span_layer, OtlpConfig};
 use rolling_file::{RollingConditionBasic, RollingFileAppender};
 use std::{
     fmt,
+    fs::File,
     path::{Path, PathBuf},
 };
 use tracing_appender::non_blocking::WorkerGuard;
@@ -16,6 +17,32 @@ use tracing_subscriber::{filter::Directive, reload, EnvFilter, Layer, Registry};
 ///  When a guard is dropped, all events currently in-memory are flushed to the log file this guard
 ///  belongs to.
 pub type FileWorkerGuard = tracing_appender::non_blocking::WorkerGuard;
+
+/// Guards for tracing layers that must stay alive until shutdown.
+#[derive(Default)]
+pub struct TracingGuards {
+    _file: Option<FileWorkerGuard>,
+    _chrome: Option<tracing_chrome::FlushGuard>,
+}
+
+impl fmt::Debug for TracingGuards {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("TracingGuards")
+            .field("file", &self._file.is_some())
+            .field("chrome", &self._chrome.is_some())
+            .finish()
+    }
+}
+
+impl TracingGuards {
+    /// Creates tracing guards from active layer guards.
+    pub const fn new(
+        file: Option<FileWorkerGuard>,
+        chrome: Option<tracing_chrome::FlushGuard>,
+    ) -> Self {
+        Self { _file: file, _chrome: chrome }
+    }
+}
 
 ///  A boxed tracing [Layer].
 pub(crate) type BoxedLayer<S> = Box<dyn Layer<S> + Send + Sync>;
@@ -169,6 +196,25 @@ impl Layers {
                 )?),
         );
         Ok(())
+    }
+
+    pub(crate) fn chrome(
+        &mut self,
+        config: LayerInfo,
+        file: &Path,
+    ) -> eyre::Result<tracing_chrome::FlushGuard> {
+        let writer = File::create(file)
+            .map_err(|err| eyre::eyre!("Failed to create Chrome trace file {file:?}: {err}"))?;
+        let (layer, guard) = tracing_chrome::ChromeLayerBuilder::new()
+            .writer(writer)
+            .include_args(true)
+            .include_locations(false)
+            .build();
+        self.add_layer(layer.with_filter(build_env_filter(
+            Some(config.default_directive.parse()?),
+            &config.filters,
+        )?));
+        Ok(guard)
     }
 
     #[cfg(feature = "tracy")]

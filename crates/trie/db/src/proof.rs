@@ -6,8 +6,8 @@ use reth_trie::{
     hashed_cursor::HashedPostStateCursorFactory,
     proof::{Proof, StorageProof},
     trie_cursor::InMemoryTrieCursorFactory,
-    AccountProof, HashedPostStateSorted, HashedStorage, MultiProof, MultiProofTargets,
-    StorageMultiProof, TrieInput,
+    AccountProof, DecodedMultiProofV2, HashedPostStateSorted, HashedStorage, MultiProof,
+    MultiProofTargets, MultiProofTargetsV2, StorageMultiProof, TrieInput,
 };
 
 /// Extends [`Proof`] with operations specific for working with a database transaction.
@@ -32,6 +32,13 @@ pub trait DatabaseProof<'a> {
         input: TrieInput,
         targets: MultiProofTargets,
     ) -> Result<MultiProof, StateProofError>;
+
+    /// Generates a V2 decoded state multiproof for target hashed accounts and storage keys.
+    fn overlay_multiproof_v2(
+        &self,
+        input: TrieInput,
+        targets: MultiProofTargetsV2,
+    ) -> Result<DecodedMultiProofV2, StateProofError>;
 }
 
 impl<'a, TX: DbTx, A: TrieTableAdapter> DatabaseProof<'a>
@@ -71,6 +78,21 @@ impl<'a, TX: DbTx, A: TrieTableAdapter> DatabaseProof<'a>
         )
         .with_prefix_sets_mut(input.prefix_sets)
         .multiproof(targets)
+    }
+
+    fn overlay_multiproof_v2(
+        &self,
+        input: TrieInput,
+        targets: MultiProofTargetsV2,
+    ) -> Result<DecodedMultiProofV2, StateProofError> {
+        let nodes_sorted = input.nodes.into_sorted();
+        let state_sorted = input.state.into_sorted();
+        Proof::new(
+            InMemoryTrieCursorFactory::new(self.trie_cursor_factory().clone(), &nodes_sorted),
+            HashedPostStateCursorFactory::new(self.hashed_cursor_factory().clone(), &state_sorted),
+        )
+        .with_prefix_sets_mut(input.prefix_sets)
+        .multiproof_v2(targets)
     }
 }
 

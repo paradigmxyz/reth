@@ -290,9 +290,8 @@ where
         let flattened_bundle = self.parse_and_flatten_bundle(&request)?;
 
         let block_id = parent_block.unwrap_or(BlockId::Number(BlockNumberOrTag::Latest));
-        let (mut evm_env, current_block_id) = self.eth_api().evm_env_at(block_id).await?;
-        let current_block = self.eth_api().recovered_block(current_block_id).await?;
-        let current_block = current_block.ok_or(EthApiError::HeaderNotFound(block_id))?;
+        let (current_block, mut evm_env, current_block_id) =
+            self.eth_api().evm_env_and_recovered_block_at(block_id).await?;
 
         let eth_api = self.inner.eth_api.clone();
 

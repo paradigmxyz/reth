@@ -60,7 +60,7 @@ mod tests {
     use super::*;
     use alloy_rpc_types_admin::EthProtocolInfo;
     use futures::stream;
-    use reth_network_api::{NetworkError, NetworkStatus};
+    use reth_network_api::{CellCustody, NetworkError, NetworkStatus};
     use std::{
         net::{IpAddr, SocketAddr},
         sync::{
@@ -97,6 +97,11 @@ mod tests {
 
         fn chain_id(&self) -> u64 {
             1
+        }
+
+        fn cell_custody(&self) -> &CellCustody {
+            static CELL_CUSTODY: std::sync::OnceLock<CellCustody> = std::sync::OnceLock::new();
+            CELL_CUSTODY.get_or_init(CellCustody::default)
         }
 
         fn is_syncing(&self) -> bool {

@@ -1,4 +1,5 @@
 //! Configuration files.
+use reth_network_peers::TrustedPeer;
 use reth_network_types::{PeersConfig, SessionsConfig};
 use reth_prune_types::{PruneModes, MINIMUM_UNWIND_SAFE_DISTANCE};
 use reth_stages_types::ExecutionStageThresholds;
@@ -20,6 +21,10 @@ pub const DEFAULT_BLOCK_INTERVAL: usize = 5;
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "serde", serde(default))]
 pub struct Config {
+    /// Nodes to bootstrap P2P discovery with, as `enode://` URLs or `enr:` records.
+    ///
+    /// Takes precedence over the chain spec bootnodes, and is overridden by `--bootnodes`.
+    pub bootnodes: Vec<TrustedPeer>,
     /// Configuration for each stage in the pipeline.
     pub stages: StageConfig,
     /// Configuration for pruning.
@@ -1199,5 +1204,38 @@ connect_trusted_nodes_only = true
             let node = TrustedPeer::from_str(enode).unwrap();
             assert!(conf.peers.trusted_nodes.contains(&node));
         }
+    }
+
+    #[test]
+    fn test_bootnodes() {
+        let reth_toml = r#"
+    bootnodes = [
+        "enode://0401e494dbd0c84c5c0f72adac5985d2f2525e08b68d448958aae218f5ac8198a80d1498e0ebec2ce38b1b18d6750f6e61a56b4614c5a6c6cf0981c39aed47dc@34.159.32.127:30303",
+        "enode://e9675164b5e17b9d9edf0cc2bd79e6b6f487200c74d1331c220abb5b8ee80c2eefbf18213989585e9d0960683e819542e11d4eefb5f2b4019e1e49f9fd8fff18@berav2-bootnode.staketab.org:30303",
+        "enr:-IS4QHCYrYZbAKWCBRlAy5zzaDZXJBGkcnh4MHcBFZntXNFrdvJjX04jRzjzCBOonrkTfj499SZuOh8R33Ls8RRcy5wBgmlkgnY0gmlwhH8AAAGJc2VjcDI1NmsxoQPKY0yuDUmstAHYpMa2_oxVtw0RW_QAdpzBQA8yWM0xOIN1ZHCCdl8"
+    ]
+    "#;
+
+        let conf: Config = toml::from_str(reth_toml).unwrap();
+        assert_eq!(conf.bootnodes.len(), 3);
+        assert_eq!(
+            conf.bootnodes[1].host,
+            url::Host::<String>::Domain("berav2-bootnode.staketab.org".to_string())
+        );
+        // the ENR omits the tcp key, so the udp port is used for the RLPx dial guess
+        assert_eq!(
+            conf.bootnodes[2],
+            TrustedPeer::from_str("enode://ca634cae0d49acb401d8a4c6b6fe8c55b70d115bf400769cc1400f3258cd31387574077f301b421bc84df7266c44e9e6d569fc56be00812904767bf5ccd1fc7f@127.0.0.1:30303").unwrap()
+        );
+
+        // bootnodes are written back as enode URLs, including the ones read as ENRs
+        let serialized = toml::to_string(&conf).unwrap();
+        assert_eq!(toml::from_str::<Config>(&serialized).unwrap(), conf);
+    }
+
+    #[test]
+    fn test_bootnodes_default_empty() {
+        let conf: Config = toml::from_str("").unwrap();
+        assert!(conf.bootnodes.is_empty());
     }
 }

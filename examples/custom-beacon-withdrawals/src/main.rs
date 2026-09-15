@@ -20,7 +20,6 @@ use reth_ethereum::{
             block::StateDB,
             execute::{BlockExecutionError, BlockExecutor, InternalBlockExecutionError},
             Evm, EvmEnv, EvmEnvFor, ExecutionCtxFor, InspectorFor, NextBlockEnvAttributes,
-            OnStateHook,
         },
         revm::{
             context::TxEnv,
@@ -192,7 +191,7 @@ pub struct CustomBlockExecutor<'a, Evm> {
 
 impl<E> BlockExecutor for CustomBlockExecutor<'_, E>
 where
-    E: Evm<DB: StateDB, Tx = TxEnv>,
+    E: Evm<DB: StateDB, Spec: Into<SpecId> + Clone, Tx = TxEnv>,
 {
     type Transaction = TransactionSigned;
     type Receipt = Receipt;
@@ -225,10 +224,6 @@ where
 
         // Invoke inner finish method to apply Ethereum post-execution changes
         self.inner.finish()
-    }
-
-    fn set_state_hook(&mut self, _hook: Option<Box<dyn OnStateHook>>) {
-        self.inner.set_state_hook(_hook)
     }
 
     fn evm_mut(&mut self) -> &mut Self::Evm {

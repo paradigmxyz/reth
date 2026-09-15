@@ -53,11 +53,12 @@ use reth_rpc_eth_api::{
     RpcConverter, RpcHeader, RpcNodeCore, RpcReceipt, RpcTransaction, RpcTxReq,
 };
 use reth_rpc_eth_types::{receipt::EthReceiptConverter, EthConfig, EthSubscriptionIdProvider};
-use reth_rpc_layer::{AuthLayer, Claims, CompressionLayer, JwtAuthValidator, JwtSecret};
+use reth_rpc_layer::{
+    AuthLayer, Claims, CompressionLayer, DecompressionLayer, JwtAuthValidator, JwtSecret,
+};
 pub use reth_rpc_server_types::RethRpcModule;
 use reth_storage_api::{
-    AccountReader, BlockReader, ChangeSetReader, FullRpcProvider, NodePrimitivesProvider,
-    StateProviderFactory,
+    BlockReader, ChangeSetReader, FullRpcProvider, NodePrimitivesProvider, StateProviderFactory,
 };
 use reth_tasks::{pool::BlockingTaskGuard, Runtime};
 use reth_tokio_util::EventSender;
@@ -316,7 +317,6 @@ where
         + CanonStateSubscriptions<Primitives = N>
         + ForkChoiceSubscriptions<Header = N::BlockHeader>
         + PersistedBlockSubscriptions
-        + AccountReader
         + ChangeSetReader,
     Pool: TransactionPool + Clone + 'static,
     Network: NetworkInfo + Peers + Clone + 'static,
@@ -663,8 +663,7 @@ where
             Block = N::Block,
             Receipt = N::Receipt,
             Transaction = N::SignedTx,
-        > + AccountReader
-        + ChangeSetReader
+        > + ChangeSetReader
         + CanonStateSubscriptions<Primitives = N>
         + ForkChoiceSubscriptions<Header = N::BlockHeader>
         + PersistedBlockSubscriptions,
@@ -781,8 +780,7 @@ where
             Header = N::BlockHeader,
             Transaction = N::SignedTx,
             Receipt = N::Receipt,
-        > + AccountReader
-        + ChangeSetReader,
+        > + ChangeSetReader,
     Network: NetworkInfo + Peers + Clone + 'static,
     EthApi: EthApiTypes,
     EvmConfig: ConfigureEvm<Primitives = N>,
@@ -862,7 +860,6 @@ where
         + CanonStateSubscriptions<Primitives = N>
         + ForkChoiceSubscriptions<Header = N::BlockHeader>
         + PersistedBlockSubscriptions
-        + AccountReader
         + ChangeSetReader,
     Pool: TransactionPool + Clone + 'static,
     Network: NetworkInfo + Peers + Clone + 'static,
@@ -1092,6 +1089,16 @@ pub struct RpcServerConfig<RpcMiddleware = Identity> {
     http_addr: Option<SocketAddr>,
     /// Control whether http responses should be compressed
     http_disable_compression: bool,
+    /// Allowed compression algorithms for HTTP responses.
+    ///
+    /// If `None`, all supported algorithms are enabled.
+    http_compression_algorithms: Option<Vec<String>>,
+    /// Allowed decompression algorithms for HTTP requests.
+    ///
+    /// If `None`, request decompression is disabled.
+    http_decompression_algorithms: Option<Vec<String>>,
+    /// Maximum allowed HTTP request body size in bytes (decompressed).
+    http_max_request_body_size: Option<u32>,
     /// Configs for WS server
     ws_server_config: Option<ServerConfigBuilder>,
     /// Allowed CORS Domains for ws.
@@ -1104,6 +1111,8 @@ pub struct RpcServerConfig<RpcMiddleware = Identity> {
     ipc_endpoint: Option<String>,
     /// JWT secret for authentication
     jwt_secret: Option<JwtSecret>,
+    /// Whether RPC request metrics are enabled.
+    rpc_metrics_enabled: bool,
     /// Configurable RPC middleware
     rpc_middleware: RpcMiddleware,
 }
@@ -1118,12 +1127,16 @@ impl Default for RpcServerConfig<Identity> {
             http_cors_domains: None,
             http_addr: None,
             http_disable_compression: false,
+            http_compression_algorithms: None,
+            http_decompression_algorithms: None,
+            http_max_request_body_size: None,
             ws_server_config: None,
             ws_cors_domains: None,
             ws_addr: None,
             ipc_server_config: None,
             ipc_endpoint: None,
             jwt_secret: None,
+            rpc_metrics_enabled: true,
             rpc_middleware: Default::default(),
         }
     }
@@ -1182,14 +1195,24 @@ impl<RpcMiddleware> RpcServerConfig<RpcMiddleware> {
             http_cors_domains: self.http_cors_domains,
             http_addr: self.http_addr,
             http_disable_compression: self.http_disable_compression,
+            http_compression_algorithms: self.http_compression_algorithms,
+            http_decompression_algorithms: self.http_decompression_algorithms,
+            http_max_request_body_size: self.http_max_request_body_size,
             ws_server_config: self.ws_server_config,
             ws_cors_domains: self.ws_cors_domains,
             ws_addr: self.ws_addr,
             ipc_server_config: self.ipc_server_config,
             ipc_endpoint: self.ipc_endpoint,
             jwt_secret: self.jwt_secret,
+            rpc_metrics_enabled: self.rpc_metrics_enabled,
             rpc_middleware,
         }
+    }
+
+    /// Configures whether the built-in RPC request metrics layer is enabled.
+    pub const fn with_rpc_metrics_enabled(mut self, enabled: bool) -> Self {
+        self.rpc_metrics_enabled = enabled;
+        self
     }
 
     /// Configure the cors domains for http _and_ ws
@@ -1203,15 +1226,33 @@ impl<RpcMiddleware> RpcServerConfig<RpcMiddleware> {
         self
     }
 
+    /// Configure the cors domains for HTTP
+    pub fn with_http_cors(mut self, cors_domain: Option<String>) -> Self {
+        self.http_cors_domains = cors_domain;
+        self
+    }
+
     /// Configure whether HTTP responses should be compressed
     pub const fn with_http_disable_compression(mut self, http_disable_compression: bool) -> Self {
         self.http_disable_compression = http_disable_compression;
         self
     }
 
-    /// Configure the cors domains for HTTP
-    pub fn with_http_cors(mut self, cors_domain: Option<String>) -> Self {
-        self.http_cors_domains = cors_domain;
+    /// Configure the allowed compression algorithms for HTTP responses.
+    ///
+    /// If `None`, all supported algorithms are enabled. See
+    /// [`CompressionLayer::with_algorithms`] for how the algorithms are applied.
+    pub fn with_http_compression_algorithms(mut self, algos: Option<Vec<String>>) -> Self {
+        self.http_compression_algorithms = algos;
+        self
+    }
+
+    /// Configure decompression for HTTP requests.
+    ///
+    /// If `algos` is `None`, request decompression is disabled.
+    pub fn with_http_decompression(mut self, algos: Option<Vec<String>>, max_size: u32) -> Self {
+        self.http_decompression_algorithms = algos;
+        self.http_max_request_body_size = Some(max_size);
         self
     }
 
@@ -1308,6 +1349,11 @@ impl<RpcMiddleware> RpcServerConfig<RpcMiddleware> {
         self.ipc_endpoint.clone()
     }
 
+    /// Returns whether the built-in RPC request metrics layer is enabled.
+    pub const fn rpc_metrics_enabled(&self) -> bool {
+        self.rpc_metrics_enabled
+    }
+
     /// Creates the [`CorsLayer`] if any
     fn maybe_cors_layer(cors: Option<String>) -> Result<Option<CorsLayer>, CorsDomainError> {
         cors.as_deref().map(cors::create_cors_layer).transpose()
@@ -1319,13 +1365,38 @@ impl<RpcMiddleware> RpcServerConfig<RpcMiddleware> {
     }
 
     /// Returns a [`CompressionLayer`] that adds compression support (gzip, deflate, brotli, zstd)
-    /// based on the client's `Accept-Encoding` header
-    fn maybe_compression_layer(disable_compression: bool) -> Option<CompressionLayer> {
+    /// based on the client's `Accept-Encoding` header.
+    fn maybe_compression_layer(
+        disable_compression: bool,
+        algos: Option<&[String]>,
+    ) -> Option<CompressionLayer> {
         if disable_compression {
             None
         } else {
-            Some(CompressionLayer::new())
+            match algos {
+                // All supported algorithms are enabled when none are specified
+                None => Some(CompressionLayer::new()),
+                Some(algos) => Some(CompressionLayer::with_algorithms(algos)),
+            }
         }
+    }
+
+    /// Returns a [`DecompressionLayer`] that allows decompression of incoming requests
+    /// based on the `Content-Encoding` request header.
+    ///
+    /// Decompression is disabled by default, and only enabled when algorithms are explicitly
+    /// specified via the `algos` parameter.
+    fn maybe_decompression_layer(
+        max_request_body_size: Option<u32>,
+        algos: Option<&[String]>,
+    ) -> Option<DecompressionLayer> {
+        let algos = algos?;
+        if algos.is_empty() {
+            return None;
+        }
+
+        let max = max_request_body_size?;
+        Some(DecompressionLayer::new(algos, max as usize))
     }
 
     /// Builds and starts the configured server(s): http, ws, ipc.
@@ -1351,13 +1422,19 @@ impl<RpcMiddleware> RpcServerConfig<RpcMiddleware> {
             constants::DEFAULT_WS_RPC_PORT,
         )));
 
-        let metrics = modules.ipc.as_ref().map(RpcRequestMetrics::ipc).unwrap_or_default();
+        let rpc_metrics_enabled = self.rpc_metrics_enabled;
         let ipc_path =
             self.ipc_endpoint.clone().unwrap_or_else(|| constants::DEFAULT_IPC_ENDPOINT.into());
 
         if let Some(builder) = self.ipc_server_config {
             let ipc = builder
-                .set_rpc_middleware(IpcRpcServiceBuilder::new().layer(metrics))
+                .set_rpc_middleware(
+                    IpcRpcServiceBuilder::new().option_layer(
+                        rpc_metrics_enabled
+                            .then(|| modules.ipc.as_ref().map(RpcRequestMetrics::ipc))
+                            .flatten(),
+                    ),
+                )
                 .build(ipc_path);
             ipc_handle = Some(ipc.start(modules.ipc.clone().expect("ipc server error")).await?);
         }
@@ -1391,19 +1468,27 @@ impl<RpcMiddleware> RpcServerConfig<RpcMiddleware> {
                         tower::ServiceBuilder::new()
                             .option_layer(Self::maybe_cors_layer(cors)?)
                             .option_layer(Self::maybe_jwt_layer(self.jwt_secret))
+                            .option_layer(Self::maybe_decompression_layer(
+                                self.http_max_request_body_size,
+                                self.http_decompression_algorithms.as_deref(),
+                            ))
                             .option_layer(Self::maybe_compression_layer(
                                 self.http_disable_compression,
+                                self.http_compression_algorithms.as_deref(),
                             )),
                     )
                     .set_rpc_middleware(
                         RpcServiceBuilder::default()
-                            .layer(
-                                modules
-                                    .http
-                                    .as_ref()
-                                    .or(modules.ws.as_ref())
-                                    .map(RpcRequestMetrics::same_port)
-                                    .unwrap_or_default(),
+                            .option_layer(
+                                rpc_metrics_enabled
+                                    .then(|| {
+                                        modules
+                                            .http
+                                            .as_ref()
+                                            .or(modules.ws.as_ref())
+                                            .map(RpcRequestMetrics::same_port)
+                                    })
+                                    .flatten(),
                             )
                             .layer(self.rpc_middleware.clone()),
                     )
@@ -1448,7 +1533,11 @@ impl<RpcMiddleware> RpcServerConfig<RpcMiddleware> {
                 )
                 .set_rpc_middleware(
                     RpcServiceBuilder::default()
-                        .layer(modules.ws.as_ref().map(RpcRequestMetrics::ws).unwrap_or_default())
+                        .option_layer(
+                            rpc_metrics_enabled
+                                .then(|| modules.ws.as_ref().map(RpcRequestMetrics::ws))
+                                .flatten(),
+                        )
                         .layer(self.rpc_middleware.clone()),
                 )
                 .build(ws_socket_addr)
@@ -1470,12 +1559,21 @@ impl<RpcMiddleware> RpcServerConfig<RpcMiddleware> {
                     tower::ServiceBuilder::new()
                         .option_layer(Self::maybe_cors_layer(self.http_cors_domains.clone())?)
                         .option_layer(Self::maybe_jwt_layer(self.jwt_secret))
-                        .option_layer(Self::maybe_compression_layer(self.http_disable_compression)),
+                        .option_layer(Self::maybe_decompression_layer(
+                            self.http_max_request_body_size,
+                            self.http_decompression_algorithms.as_deref(),
+                        ))
+                        .option_layer(Self::maybe_compression_layer(
+                            self.http_disable_compression,
+                            self.http_compression_algorithms.as_deref(),
+                        )),
                 )
                 .set_rpc_middleware(
                     RpcServiceBuilder::default()
-                        .layer(
-                            modules.http.as_ref().map(RpcRequestMetrics::http).unwrap_or_default(),
+                        .option_layer(
+                            rpc_metrics_enabled
+                                .then(|| modules.http.as_ref().map(RpcRequestMetrics::http))
+                                .flatten(),
                         )
                         .layer(self.rpc_middleware.clone()),
                 )

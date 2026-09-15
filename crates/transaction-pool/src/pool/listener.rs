@@ -8,10 +8,12 @@ use crate::{
     traits::{NewBlobSidecar, PropagateKind},
     PoolTransaction, ValidPoolTransaction,
 };
-use alloy_primitives::{TxHash, B256};
+use alloy_primitives::{
+    map::{hash_map::Entry, B256Map},
+    TxHash, B256,
+};
 use futures_util::Stream;
 use std::{
-    collections::{hash_map::Entry, HashMap},
     pin::Pin,
     sync::Arc,
     task::{Context, Poll},
@@ -86,14 +88,14 @@ pub struct PoolEventBroadcast<T: PoolTransaction> {
     /// All listeners for all transaction events.
     all_events_broadcaster: AllPoolEventsBroadcaster<T>,
     /// All listeners for events for a certain transaction hash.
-    broadcasters_by_hash: HashMap<TxHash, PoolEventBroadcaster>,
+    broadcasters_by_hash: B256Map<PoolEventBroadcaster>,
 }
 
 impl<T: PoolTransaction> Default for PoolEventBroadcast<T> {
     fn default() -> Self {
         Self {
             all_events_broadcaster: AllPoolEventsBroadcaster::default(),
-            broadcasters_by_hash: HashMap::default(),
+            broadcasters_by_hash: B256Map::default(),
         }
     }
 }

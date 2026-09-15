@@ -57,6 +57,9 @@ pub trait RethRpcServerConfig {
     /// Creates the [`RpcServerConfig`] from cli args.
     fn rpc_server_config(&self) -> RpcServerConfig;
 
+    /// Returns whether built-in RPC request metrics are enabled.
+    fn rpc_metrics_enabled(&self) -> bool;
+
     /// Creates the [`AuthServerConfig`] from cli args.
     fn auth_server_config(&self, jwt_secret: JwtSecret) -> Result<AuthServerConfig, RpcError>;
 
@@ -72,7 +75,7 @@ pub trait RethRpcServerConfig {
     /// the filesystem. This file can then be used to provision the counterpart client.
     ///
     /// The `default_jwt_path` provided as an argument will be used as the default location for the
-    /// jwt secret in case the `auth_jwtsecret` argument is not provided.
+    /// jwt secret in case neither `--authrpc.jwtsecret` nor `--authrpc.jwtsecret-hex` is provided.
     fn auth_jwt_secret(&self, default_jwt_path: PathBuf) -> Result<JwtSecret, JwtError>;
 
     /// Returns the configured jwt secret key for the regular rpc servers, if any.
@@ -101,6 +104,7 @@ impl RethRpcServerConfig for RpcServerArgs {
             .eth_proof_window(self.rpc_eth_proof_window)
             .rpc_gas_cap(self.rpc_gas_cap)
             .rpc_max_simulate_blocks(self.rpc_max_simulate_blocks)
+            .compute_state_root_for_eth_simulate(self.rpc_compute_state_root_for_eth_simulate)
             .state_cache(self.state_cache_config())
             .gpo_config(self.gas_price_oracle_config())
             .proof_permits(self.rpc_proof_permits)
@@ -121,7 +125,6 @@ impl RethRpcServerConfig for RpcServerArgs {
         EthStateCacheConfig {
             max_blocks: self.rpc_state_cache.max_blocks,
             max_receipts: self.rpc_state_cache.max_receipts,
-            max_headers: self.rpc_state_cache.max_headers,
             max_bals: self.rpc_state_cache.max_bals,
             prewarm_bals: self.rpc_state_cache.prewarm_bals,
             max_concurrent_db_requests: self.rpc_state_cache.max_concurrent_db_requests,
@@ -186,7 +189,9 @@ impl RethRpcServerConfig for RpcServerArgs {
     }
 
     fn rpc_server_config(&self) -> RpcServerConfig {
-        let mut config = RpcServerConfig::default().with_jwt_secret(self.rpc_secret_key());
+        let mut config = RpcServerConfig::default()
+            .with_jwt_secret(self.rpc_secret_key())
+            .with_rpc_metrics_enabled(self.rpc_metrics_enabled());
 
         if self.http_api.is_some() && !self.http {
             warn!(
@@ -208,7 +213,12 @@ impl RethRpcServerConfig for RpcServerArgs {
                 .with_http_address(socket_address)
                 .with_http(self.http_ws_server_builder())
                 .with_http_cors(self.http_corsdomain.clone())
-                .with_http_disable_compression(self.http_disable_compression);
+                .with_http_disable_compression(self.http_disable_compression)
+                .with_http_compression_algorithms(self.http_compression_algorithms.clone())
+                .with_http_decompression(
+                    self.http_decompression_algorithms.clone(),
+                    self.rpc_max_request_size_bytes(),
+                );
         }
 
         if self.ws {
@@ -228,6 +238,10 @@ impl RethRpcServerConfig for RpcServerArgs {
         config
     }
 
+    fn rpc_metrics_enabled(&self) -> bool {
+        !self.rpc_disable_metrics
+    }
+
     fn auth_server_config(&self, jwt_secret: JwtSecret) -> Result<AuthServerConfig, RpcError> {
         let address = SocketAddr::new(self.auth_addr, self.auth_port);
 
@@ -241,12 +255,17 @@ impl RethRpcServerConfig for RpcServerArgs {
     }
 
     fn auth_jwt_secret(&self, default_jwt_path: PathBuf) -> Result<JwtSecret, JwtError> {
-        match self.auth_jwtsecret.as_ref() {
-            Some(fpath) => {
-                debug!(target: "reth::cli", user_path=?fpath, "Reading JWT auth secret file");
-                JwtSecret::from_file(fpath)
+        if let Some(secret) = self.auth_jwtsecret_hex {
+            debug!(target: "reth::cli", "Using JWT auth secret from hex");
+            Ok(secret)
+        } else {
+            match self.auth_jwtsecret.as_ref() {
+                Some(fpath) => {
+                    debug!(target: "reth::cli", user_path=?fpath, "Reading JWT auth secret file");
+                    JwtSecret::from_file(fpath)
+                }
+                None => get_or_create_jwt_secret_from_path(&default_jwt_path),
             }
-            None => get_or_create_jwt_secret_from_path(&default_jwt_path),
         }
     }
 
@@ -260,6 +279,7 @@ mod tests {
     use clap::{Args, Parser};
     use reth_node_core::args::RpcServerArgs;
     use reth_rpc_eth_types::RPC_DEFAULT_GAS_CAP;
+    use reth_rpc_layer::JwtSecret;
     use reth_rpc_server_types::{constants, RethRpcModule, RpcModuleSelection};
     use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
 
@@ -371,6 +391,15 @@ mod tests {
             SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::new(127, 0, 0, 1), 8888))
         );
         assert_eq!(config.ipc_endpoint().unwrap(), constants::DEFAULT_IPC_ENDPOINT);
+        assert!(config.rpc_metrics_enabled());
+    }
+
+    #[test]
+    fn test_rpc_server_config_disable_metrics() {
+        let args =
+            CommandParser::<RpcServerArgs>::parse_from(["reth", "--rpc.disable-metrics"]).args;
+        let config = args.rpc_server_config();
+        assert!(!config.rpc_metrics_enabled());
     }
 
     #[test]
@@ -403,5 +432,16 @@ mod tests {
         let config = args.eth_config().filter_config();
         assert_eq!(config.max_blocks_per_filter, Some(100));
         assert_eq!(config.max_logs_per_response, Some(200));
+    }
+
+    #[test]
+    fn test_auth_jwt_secret_from_hex() {
+        let hex = "1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef";
+        let args =
+            CommandParser::<RpcServerArgs>::parse_from(["reth", "--authrpc.jwtsecret-hex", hex])
+                .args;
+
+        let secret = args.auth_jwt_secret(std::env::temp_dir().join("unused.jwt")).unwrap();
+        assert_eq!(secret, JwtSecret::from_hex(hex).unwrap());
     }
 }

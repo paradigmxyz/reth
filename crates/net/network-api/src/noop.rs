@@ -9,7 +9,7 @@ use std::net::{IpAddr, SocketAddr};
 use crate::{
     events::{NetworkPeersEvents, PeerEventStream},
     test_utils::{PeersHandle, PeersHandleProvider},
-    BlockDownloaderProvider, DiscoveryEvent, NetworkError, NetworkEvent,
+    BlockDownloaderProvider, CellCustody, DiscoveryEvent, NetworkError, NetworkEvent,
     NetworkEventListenerProvider, NetworkInfo, NetworkStatus, PeerId, PeerInfo, PeerRequest, Peers,
     PeersInfo,
 };
@@ -32,7 +32,9 @@ use tokio_stream::wrappers::UnboundedReceiverStream;
 #[non_exhaustive]
 pub struct NoopNetwork<Net = EthNetworkPrimitives> {
     chain_id: u64,
+    client_version: String,
     peers_handle: PeersHandle,
+    cell_custody: CellCustody,
     _marker: PhantomData<Net>,
 }
 
@@ -43,7 +45,9 @@ impl<Net> NoopNetwork<Net> {
 
         Self {
             chain_id: 1, // mainnet
+            client_version: "reth-test".to_string(),
             peers_handle: PeersHandle::new(tx),
+            cell_custody: CellCustody::default(),
             _marker: PhantomData,
         }
     }
@@ -51,6 +55,12 @@ impl<Net> NoopNetwork<Net> {
     /// Creates a new [`NoopNetwork`] from an existing one but with a new chain id.
     pub const fn with_chain_id(mut self, chain_id: u64) -> Self {
         self.chain_id = chain_id;
+        self
+    }
+
+    /// Configures the client version returned by [`NetworkInfo::network_status`].
+    pub fn with_client_version(mut self, client_version: impl Into<String>) -> Self {
+        self.client_version = client_version.into();
         self
     }
 }
@@ -72,7 +82,7 @@ where
     async fn network_status(&self) -> Result<NetworkStatus, NetworkError> {
         #[expect(deprecated)]
         Ok(NetworkStatus {
-            client_version: "reth-test".to_string(),
+            client_version: self.client_version.clone(),
             protocol_version: ProtocolVersion::V5 as u64,
             eth_protocol_info: EthProtocolInfo {
                 network: 1,
@@ -87,6 +97,10 @@ where
 
     fn chain_id(&self) -> u64 {
         self.chain_id
+    }
+
+    fn cell_custody(&self) -> &CellCustody {
+        &self.cell_custody
     }
 
     fn is_syncing(&self) -> bool {
@@ -152,6 +166,10 @@ where
     fn disconnect_peer(&self, _peer: PeerId) {}
 
     fn disconnect_peer_with_reason(&self, _peer: PeerId, _reason: DisconnectReason) {}
+
+    fn ban_peer(&self, _peer: PeerId) {}
+
+    fn unban_peer(&self, _peer: PeerId) {}
 
     fn connect_peer_kind(
         &self,
@@ -224,5 +242,20 @@ where
 {
     fn peers_handle(&self) -> &PeersHandle {
         &self.peers_handle
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn configures_client_version() {
+        let network = NoopNetwork::default().with_client_version("custom-client/v1.0.0");
+
+        assert_eq!(
+            futures::executor::block_on(network.network_status()).unwrap().client_version,
+            "custom-client/v1.0.0"
+        );
     }
 }

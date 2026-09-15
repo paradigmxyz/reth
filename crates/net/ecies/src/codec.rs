@@ -136,11 +136,14 @@ impl Decoder for ECIESCodec {
                     }
 
                     let mut data = buf.split_to(self.ecies.body_len());
-                    let mut ret = BytesMut::new();
-                    ret.extend_from_slice(self.ecies.read_body(&mut data)?);
+                    let body_len = {
+                        let body = self.ecies.read_body(&mut data)?;
+                        body.len()
+                    };
+                    data.truncate(body_len);
 
                     self.state = ECIESState::Header;
-                    return Ok(Some(IngressECIESValue::Message(ret)))
+                    return Ok(Some(IngressECIESValue::Message(data)))
                 }
             }
         }
@@ -156,18 +159,16 @@ impl Encoder<EgressECIESValue> for ECIESCodec {
             EgressECIESValue::Auth => {
                 self.state = ECIESState::Ack;
                 self.ecies.write_auth(buf);
-                Ok(())
             }
             EgressECIESValue::Ack => {
                 self.state = ECIESState::InitialHeader;
                 self.ecies.write_ack(buf);
-                Ok(())
             }
             EgressECIESValue::Message(data) => {
                 self.ecies.write_header(buf, data.len());
                 self.ecies.write_body(buf, &data);
-                Ok(())
             }
         }
+        Ok(())
     }
 }

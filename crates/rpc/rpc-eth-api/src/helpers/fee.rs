@@ -234,7 +234,6 @@ pub trait EthFees:
                         rewards.push(
                             calculate_reward_percentiles_for_block(
                                 percentiles,
-                                header.gas_used(),
                                 header.base_fee_per_gas().unwrap_or_default(),
                                 block.body().transactions(),
                                 &receipts,

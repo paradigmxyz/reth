@@ -22,22 +22,23 @@ pub struct RpcStateCacheArgs {
     )]
     pub max_receipts: u32,
 
-    /// Max number of headers in cache.
+    /// Legacy no-op retained for CLI compatibility.
     #[arg(
         long = "rpc-cache.max-headers",
         alias = "rpc-cache.max-envs",
         default_value_t = DEFAULT_HEADER_CACHE_MAX_LEN,
+        hide = true,
     )]
     pub max_headers: u32,
 
-    /// Max number of revm block access lists in cache.
+    /// Max number of block access lists in cache.
     #[arg(
         long = "rpc-cache.max-bals",
         default_value_t = DEFAULT_BAL_CACHE_MAX_LEN,
     )]
     pub max_bals: u32,
 
-    /// Fetch and prewarm block access lists for new canonical blocks in the RPC cache.
+    /// Replay new canonical blocks to generate and cache block access lists.
     #[arg(long = "rpc-cache.prewarm-bals", default_value_t = false)]
     pub prewarm_bals: bool,
 

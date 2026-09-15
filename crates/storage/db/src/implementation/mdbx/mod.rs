@@ -22,8 +22,8 @@ use reth_libmdbx::{
 };
 use reth_storage_errors::db::LogLevel;
 use reth_tracing::tracing::error;
+use rustc_hash::FxHashMap;
 use std::{
-    collections::HashMap,
     ops::{Deref, Range},
     path::{Path, PathBuf},
     sync::Arc,
@@ -251,7 +251,7 @@ pub struct DatabaseEnv {
     /// More generally, do not dynamically create, re-open, or drop tables at
     /// runtime. It's better to perform table creation and migration only once
     /// at startup.
-    dbis: Arc<HashMap<&'static str, ffi::MDBX_dbi>>,
+    dbis: Arc<FxHashMap<&'static str, ffi::MDBX_dbi>>,
     /// Cache for metric handles. If `None`, metrics are not recorded.
     metrics: Option<Arc<DatabaseEnvMetrics>>,
     /// Write lock for when dealing with a read-write environment.
@@ -547,6 +547,15 @@ impl DatabaseEnv {
     pub fn with_metrics(mut self) -> Self {
         self.metrics = Some(DatabaseEnvMetrics::new().into());
         self
+    }
+
+    /// Enables metrics on the database if requested.
+    pub fn with_metrics_if(self, enabled: bool) -> Self {
+        if enabled {
+            self.with_metrics()
+        } else {
+            self
+        }
     }
 
     /// Creates all the tables defined in [`Tables`], if necessary.

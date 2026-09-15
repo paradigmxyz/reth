@@ -6,7 +6,7 @@ use alloy_eips::{
     eip7910::{EthConfig, EthForkConfig, SystemContract},
 };
 use alloy_evm::precompiles::Precompile;
-use alloy_primitives::Address;
+use alloy_primitives::{address, Address};
 use jsonrpsee::{core::RpcResult, proc_macros::rpc};
 use reth_chainspec::{ChainSpecProvider, EthChainSpec, EthereumHardforks, Hardforks, Head};
 use reth_errors::{ProviderError, RethError};
@@ -65,6 +65,10 @@ where
         if chain_spec.is_prague_active_at_timestamp(timestamp) {
             system_contracts
                 .extend(SystemContract::prague(chain_spec.deposit_contract().map(|c| c.address)));
+        }
+
+        if chain_spec.is_amsterdam_active_at_timestamp(timestamp) {
+            system_contracts.extend(amsterdam_system_contracts());
         }
 
         // Fork config only exists for timestamp-based hardforks.
@@ -167,6 +171,31 @@ where
     fn config(&self) -> RpcResult<EthConfig> {
         Ok(self.config().map_err(EthApiError::from)?)
     }
+}
+
+/// Address of the builder deposit system contract introduced in Amsterdam
+/// ([EIP-8282](https://eips.ethereum.org/EIPS/eip-8282)).
+const BUILDER_DEPOSIT_CONTRACT_ADDRESS: Address =
+    address!("0x0000BFF46984E3725691FA540A8C7589300D8282");
+
+/// Address of the builder exit system contract introduced in Amsterdam
+/// ([EIP-8282](https://eips.ethereum.org/EIPS/eip-8282)).
+const BUILDER_EXIT_CONTRACT_ADDRESS: Address =
+    address!("0x000064D678505AD48F8CCB093BC65613800E8282");
+
+/// Returns the system contracts introduced in the Amsterdam hardfork
+/// ([EIP-8282](https://eips.ethereum.org/EIPS/eip-8282) builder execution requests).
+fn amsterdam_system_contracts() -> [(SystemContract, Address); 2] {
+    [
+        (
+            SystemContract::Other("BUILDER_DEPOSIT_CONTRACT_ADDRESS".to_string()),
+            BUILDER_DEPOSIT_CONTRACT_ADDRESS,
+        ),
+        (
+            SystemContract::Other("BUILDER_EXIT_CONTRACT_ADDRESS".to_string()),
+            BUILDER_EXIT_CONTRACT_ADDRESS,
+        ),
+    ]
 }
 
 fn evm_to_precompiles_map(

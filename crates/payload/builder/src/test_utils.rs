@@ -12,7 +12,7 @@ use reth_chain_state::CanonStateNotification;
 use reth_ethereum_engine_primitives::EthPayloadAttributes;
 use reth_payload_builder_primitives::PayloadBuilderError;
 use reth_payload_primitives::{PayloadKind, PayloadTypes};
-use reth_primitives_traits::Block as _;
+use reth_primitives_traits::{Block as _, RecoveredBlock};
 use std::{
     future::Future,
     pin::Pin,
@@ -86,7 +86,7 @@ impl PayloadJob for TestPayloadJob {
 
     fn best_payload(&self) -> Result<EthBuiltPayload, PayloadBuilderError> {
         Ok(EthBuiltPayload::new(
-            Arc::new(Block::<_>::default().seal_slow()),
+            Arc::new(RecoveredBlock::new_sealed(Block::<_>::default().seal_slow(), vec![])),
             U256::ZERO,
             Some(Default::default()),
             None,

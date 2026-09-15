@@ -13,8 +13,9 @@ use super::{
     PooledTransactions, Receipts, Status, StatusEth69, Transactions,
 };
 use crate::{
-    status::StatusMessage, BlockRangeUpdate, Cells, EthNetworkPrimitives, EthVersion, GetCells,
-    NetworkPrimitives, RawCapabilityMessage, Receipts69, Receipts70, SharedTransactions,
+    status::StatusMessage, BlockRangeUpdate, BroadcastPoolTransactions, Cells,
+    EthNetworkPrimitives, EthVersion, GetCells, NetworkPrimitives, NewPooledTransactionHashes72,
+    RawCapabilityMessage, Receipts69, Receipts70, SharedTransactions,
 };
 use alloc::{boxed::Box, string::String, sync::Arc};
 use alloy_primitives::{
@@ -129,7 +130,11 @@ impl<N: NetworkPrimitives> ProtocolMessage<N> {
                 Transactions::decode_with_memory_budget(buf, tx_memory_budget)?,
             ),
             EthMessageID::NewPooledTransactionHashes => {
-                if version >= EthVersion::Eth68 {
+                if version >= EthVersion::Eth72 {
+                    EthMessage::NewPooledTransactionHashes72(NewPooledTransactionHashes72::decode(
+                        buf,
+                    )?)
+                } else if version >= EthVersion::Eth68 {
                     EthMessage::NewPooledTransactionHashes68(NewPooledTransactionHashes68::decode(
                         buf,
                     )?)
@@ -325,6 +330,9 @@ pub enum EthMessage<N: NetworkPrimitives = EthNetworkPrimitives> {
     NewPooledTransactionHashes66(NewPooledTransactionHashes66),
     /// Represents a `NewPooledTransactionHashes` message for eth/68 version.
     NewPooledTransactionHashes68(NewPooledTransactionHashes68),
+    /// Represents a `NewPooledTransactionHashes` message for eth/72 version.
+    NewPooledTransactionHashes72(NewPooledTransactionHashes72),
+
     // The following messages are request-response message pairs
     /// Represents a `GetBlockHeaders` request-response pair.
     GetBlockHeaders(RequestPair<GetBlockHeaders>),
@@ -410,9 +418,9 @@ impl<N: NetworkPrimitives> EthMessage<N> {
             Self::NewBlockHashes(_) => EthMessageID::NewBlockHashes,
             Self::NewBlock(_) => EthMessageID::NewBlock,
             Self::Transactions(_) => EthMessageID::Transactions,
-            Self::NewPooledTransactionHashes66(_) | Self::NewPooledTransactionHashes68(_) => {
-                EthMessageID::NewPooledTransactionHashes
-            }
+            Self::NewPooledTransactionHashes66(_) |
+            Self::NewPooledTransactionHashes68(_) |
+            Self::NewPooledTransactionHashes72(_) => EthMessageID::NewPooledTransactionHashes,
             Self::GetBlockHeaders(_) => EthMessageID::GetBlockHeaders,
             Self::BlockHeaders(_) => EthMessageID::BlockHeaders,
             Self::GetBlockBodies(_) => EthMessageID::GetBlockBodies,
@@ -501,6 +509,7 @@ impl<N: NetworkPrimitives> Encodable for EthMessage<N> {
             Self::Transactions(transactions) => transactions.encode(out),
             Self::NewPooledTransactionHashes66(hashes) => hashes.encode(out),
             Self::NewPooledTransactionHashes68(hashes) => hashes.encode(out),
+            Self::NewPooledTransactionHashes72(hashes) => hashes.encode(out),
             Self::GetBlockHeaders(request) => request.encode(out),
             Self::BlockHeaders(headers) => headers.encode(out),
             Self::GetBlockBodies(request) => request.encode(out),
@@ -530,6 +539,7 @@ impl<N: NetworkPrimitives> Encodable for EthMessage<N> {
             Self::Transactions(transactions) => transactions.length(),
             Self::NewPooledTransactionHashes66(hashes) => hashes.length(),
             Self::NewPooledTransactionHashes68(hashes) => hashes.length(),
+            Self::NewPooledTransactionHashes72(hashes) => hashes.length(),
             Self::GetBlockHeaders(request) => request.length(),
             Self::BlockHeaders(headers) => headers.length(),
             Self::GetBlockBodies(request) => request.length(),
@@ -560,12 +570,14 @@ impl<N: NetworkPrimitives> Encodable for EthMessage<N> {
 /// never receive a hash of an object (block, transaction) it has already seen.
 ///
 /// Note: This is only useful for outgoing messages.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug)]
 pub enum EthBroadcastMessage<N: NetworkPrimitives = EthNetworkPrimitives> {
     /// Represents a new block broadcast message.
     NewBlock(Arc<N::NewBlockPayload>),
     /// Represents a transactions broadcast message.
     Transactions(SharedTransactions<N::BroadcastedTransaction>),
+    /// Represents cached outbound pool transactions broadcast message.
+    BroadcastPoolTransactions(BroadcastPoolTransactions),
 }
 
 // === impl EthBroadcastMessage ===
@@ -575,8 +587,15 @@ impl<N: NetworkPrimitives> EthBroadcastMessage<N> {
     pub const fn message_id(&self) -> EthMessageID {
         match self {
             Self::NewBlock(_) => EthMessageID::NewBlock,
-            Self::Transactions(_) => EthMessageID::Transactions,
+            Self::Transactions(_) | Self::BroadcastPoolTransactions(_) => {
+                EthMessageID::Transactions
+            }
         }
+    }
+
+    /// Encodes this broadcast to its id-prefixed `RLPx` message bytes.
+    pub fn encoded(self) -> alloy_primitives::bytes::Bytes {
+        alloy_rlp::encode(ProtocolBroadcastMessage::from(self)).into()
     }
 }
 
@@ -585,6 +604,7 @@ impl<N: NetworkPrimitives> Encodable for EthBroadcastMessage<N> {
         match self {
             Self::NewBlock(new_block) => new_block.encode(out),
             Self::Transactions(transactions) => transactions.encode(out),
+            Self::BroadcastPoolTransactions(transactions) => transactions.encode(out),
         }
     }
 
@@ -592,6 +612,7 @@ impl<N: NetworkPrimitives> Encodable for EthBroadcastMessage<N> {
         match self {
             Self::NewBlock(new_block) => new_block.length(),
             Self::Transactions(transactions) => transactions.length(),
+            Self::BroadcastPoolTransactions(transactions) => transactions.length(),
         }
     }
 }

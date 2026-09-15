@@ -1,9 +1,12 @@
 use crate::{
-    providers::{NodeTypesForProvider, ProviderNodeTypes, RocksDBBuilder, StaticFileProvider},
+    providers::{
+        NodeTypesForProvider, ProviderNodeTypes, RocksDBBuilder, StaticFileProvider,
+        StaticFileProviderBuilder,
+    },
     HashingWriter, ProviderFactory, TrieWriter,
 };
 use alloy_primitives::B256;
-use reth_chainspec::{ChainSpec, MAINNET};
+use reth_chainspec::{ChainSpec, ChainSpecBuilder, MAINNET};
 use reth_db::{mdbx::DatabaseArguments, test_utils::TempDatabase, DatabaseEnv};
 use reth_errors::ProviderResult;
 use reth_ethereum_engine_primitives::EthEngineTypes;
@@ -49,12 +52,33 @@ pub fn create_test_provider_factory() -> ProviderFactory<MockNodeTypesWithDB> {
 pub fn create_test_provider_factory_with_chain_spec(
     chain_spec: Arc<ChainSpec>,
 ) -> ProviderFactory<MockNodeTypesWithDB> {
-    create_test_provider_factory_with_node_types::<MockNodeTypes>(chain_spec)
+    let genesis_block_number = chain_spec.genesis.number.unwrap_or_default();
+    create_test_provider_factory_with_node_types_and_genesis::<MockNodeTypes>(
+        chain_spec,
+        genesis_block_number,
+    )
+}
+
+/// Creates a test provider factory whose chain starts at `genesis_block_number`.
+pub fn create_test_provider_factory_with_genesis_block_number(
+    genesis_block_number: u64,
+) -> ProviderFactory<MockNodeTypesWithDB> {
+    let mut genesis = MAINNET.genesis.clone();
+    genesis.number = Some(genesis_block_number);
+    let chain_spec = Arc::new(ChainSpecBuilder::mainnet().genesis(genesis).build());
+    create_test_provider_factory_with_chain_spec(chain_spec)
 }
 
 /// Creates test provider factory with provided chain spec.
 pub fn create_test_provider_factory_with_node_types<N: NodeTypesForProvider>(
     chain_spec: Arc<N::ChainSpec>,
+) -> ProviderFactory<NodeTypesWithDBAdapter<N, Arc<TempDatabase<DatabaseEnv>>>> {
+    create_test_provider_factory_with_node_types_and_genesis(chain_spec, 0)
+}
+
+fn create_test_provider_factory_with_node_types_and_genesis<N: NodeTypesForProvider>(
+    chain_spec: Arc<N::ChainSpec>,
+    genesis_block_number: u64,
 ) -> ProviderFactory<NodeTypesWithDBAdapter<N, Arc<TempDatabase<DatabaseEnv>>>> {
     // Create a single temp directory that contains all data dirs (db, static_files, rocksdb).
     // TempDatabase will clean up the entire directory on drop.
@@ -72,7 +96,10 @@ pub fn create_test_provider_factory_with_node_types<N: NodeTypesForProvider>(
     ProviderFactory::new(
         db,
         chain_spec,
-        StaticFileProvider::read_write(static_files_path).expect("static file provider"),
+        StaticFileProviderBuilder::read_write(static_files_path)
+            .with_genesis_block_number(genesis_block_number)
+            .build()
+            .expect("static file provider"),
         RocksDBBuilder::new(&rocksdb_path)
             .with_default_tables()
             .build()

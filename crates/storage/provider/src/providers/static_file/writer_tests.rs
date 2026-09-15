@@ -883,4 +883,28 @@ mod tests {
 
         drop(writer);
     }
+
+    /// `ensure_at_block` on a fresh file that does not start at block 0 (e.g. created for a
+    /// distance-pruned segment) must initialize the writer at the file's expected block
+    /// start instead of erroring out.
+    ///
+    /// See <https://github.com/paradigmxyz/reth/issues/23463>.
+    #[test]
+    fn test_ensure_at_block_on_empty_non_genesis_file() {
+        let static_dir = tempfile::tempdir().unwrap();
+        let provider = setup_test_provider(&static_dir, 100);
+
+        // A writer for block 250 opens a fresh empty file covering blocks 200..=299.
+        let mut writer = provider.get_writer(250, StaticFileSegment::TransactionSenders).unwrap();
+        assert_eq!(writer.current_block_number(), None);
+
+        writer.ensure_at_block(250).unwrap();
+        assert_eq!(writer.current_block_number(), Some(250));
+        writer.commit().unwrap();
+
+        assert_eq!(
+            provider.get_highest_static_file_block(StaticFileSegment::TransactionSenders),
+            Some(250)
+        );
+    }
 }

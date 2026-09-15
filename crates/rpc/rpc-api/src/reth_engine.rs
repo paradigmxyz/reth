@@ -3,7 +3,7 @@
 use alloy_primitives::Bytes;
 use alloy_rpc_types_engine::{ForkchoiceState, ForkchoiceUpdated, PayloadStatus};
 use jsonrpsee::{core::RpcResult, proc_macros::rpc};
-use serde::{Deserialize, Deserializer, Serialize};
+use serde::{ser::SerializeStruct, Deserialize, Deserializer, Serialize, Serializer};
 
 /// Reth-specific payload status that includes server-measured execution latency.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -31,8 +31,7 @@ pub struct RethPayloadStatus {
 
 /// Input for `reth_newPayload` that accepts either `ExecutionData` directly or an RLP-encoded
 /// block with optional side data.
-#[derive(Debug, Clone, Serialize)]
-#[serde(untagged)]
+#[derive(Debug, Clone)]
 pub enum RethNewPayloadInput<ExecutionData> {
     /// Standard execution data (payload + sidecar).
     ExecutionData(ExecutionData),
@@ -41,9 +40,29 @@ pub enum RethNewPayloadInput<ExecutionData> {
         /// RLP-encoded block bytes.
         block: Bytes,
         /// RLP-encoded block access list bytes.
-        #[serde(default, skip_serializing_if = "Option::is_none")]
         bal: Option<Bytes>,
     },
+}
+
+impl<ExecutionData> Serialize for RethNewPayloadInput<ExecutionData>
+where
+    ExecutionData: Serialize,
+{
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        match self {
+            Self::ExecutionData(data) => data.serialize(serializer),
+            Self::BlockRlp { block, bal: None } => block.serialize(serializer),
+            Self::BlockRlp { block, bal: Some(bal) } => {
+                let mut state = serializer.serialize_struct("BlockRlp", 2)?;
+                state.serialize_field("block", block)?;
+                state.serialize_field("bal", bal)?;
+                state.end()
+            }
+        }
+    }
 }
 
 impl<'de, ExecutionData> Deserialize<'de> for RethNewPayloadInput<ExecutionData>
@@ -130,15 +149,36 @@ mod tests {
             bal: Some(Bytes::from_static(&[2])),
         };
 
+        assert_eq!(serde_json::to_string(&input).unwrap(), r#"{"block":"0x01","bal":"0x02"}"#);
         assert_eq!(serde_json::to_value(input).unwrap(), json!({ "block": "0x01", "bal": "0x02" }));
     }
 
     #[test]
+    fn block_rlp_without_bal_serializes_legacy_bytes_roundtrip() {
+        let input = RethNewPayloadInput::<TestExecutionData>::BlockRlp {
+            block: Bytes::from_static(&[1]),
+            bal: None,
+        };
+
+        let serialized = serde_json::to_string(&input).unwrap();
+        assert_eq!(serialized, r#""0x01""#);
+
+        let input =
+            serde_json::from_str::<RethNewPayloadInput<TestExecutionData>>(&serialized).unwrap();
+
+        let RethNewPayloadInput::BlockRlp { block, bal } = input else {
+            panic!("expected block rlp input")
+        };
+
+        assert_eq!(block, Bytes::from_static(&[1]));
+        assert_eq!(bal, None);
+    }
+
+    #[test]
     fn block_rlp_deserializes_without_bal() {
-        let input = serde_json::from_value::<RethNewPayloadInput<TestExecutionData>>(json!({
-            "block": "0x01"
-        }))
-        .unwrap();
+        let input =
+            serde_json::from_str::<RethNewPayloadInput<TestExecutionData>>(r#"{"block":"0x01"}"#)
+                .unwrap();
 
         let RethNewPayloadInput::BlockRlp { block, bal } = input else {
             panic!("expected block rlp input")

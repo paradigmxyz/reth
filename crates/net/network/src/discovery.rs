@@ -161,6 +161,9 @@ impl Discovery {
 
         // Start discv5, wiring in the shared socket if in shared-port mode.
         let (discv5, discv5_updates) = if let Some(mut config) = discv5_config {
+            // Set OS-assigned advertised RLPx ports to the bound listener port.
+            set_bound_rlpx_port_if_unset(&mut config, tcp_addr.port());
+
             if let Some(socket) = shared_socket {
                 let discv5_cfg = config.discv5_config_mut();
 
@@ -404,6 +407,12 @@ impl Discovery {
     }
 }
 
+const fn set_bound_rlpx_port_if_unset(config: &mut reth_discv5::Config, port: u16) {
+    if config.rlpx_socket().port() == 0 {
+        config.set_rlpx_port(port);
+    }
+}
+
 impl Drop for Discovery {
     fn drop(&mut self) {
         if let Some(discv4) = &self.discv4 {
@@ -511,6 +520,38 @@ mod tests {
         )
         .await
         .expect("should build discv5 with discv4 downgrade")
+    }
+
+    #[test]
+    fn discv5_enr_advertises_bound_rlpx_port() {
+        let secret_key = SecretKey::new(&mut rand_08::thread_rng());
+
+        let bound_rlpx_port = 30307;
+        let discv5_addr: SocketAddr = "127.0.0.1:0".parse().unwrap();
+        let mut discv5_config = reth_discv5::Config::builder((Ipv4Addr::LOCALHOST, 0).into())
+            .discv5_config(discv5::ConfigBuilder::new(discv5_addr.into()).build())
+            .build();
+
+        set_bound_rlpx_port_if_unset(&mut discv5_config, bound_rlpx_port);
+
+        let (enr, _, _, _) = reth_discv5::build_local_enr(&secret_key, &discv5_config);
+        assert_eq!(enr.tcp4(), Some(bound_rlpx_port));
+    }
+
+    #[test]
+    fn discv5_enr_preserves_configured_rlpx_port() {
+        let secret_key = SecretKey::new(&mut rand_08::thread_rng());
+
+        let advertised_addr: SocketAddr = "127.0.0.1:30308".parse().unwrap();
+        let discv5_addr: SocketAddr = "127.0.0.1:0".parse().unwrap();
+        let mut discv5_config = reth_discv5::Config::builder(advertised_addr)
+            .discv5_config(discv5::ConfigBuilder::new(discv5_addr.into()).build())
+            .build();
+
+        set_bound_rlpx_port_if_unset(&mut discv5_config, 30307);
+
+        let (enr, _, _, _) = reth_discv5::build_local_enr(&secret_key, &discv5_config);
+        assert_eq!(enr.tcp4(), Some(advertised_addr.port()));
     }
 
     #[tokio::test(flavor = "multi_thread")]

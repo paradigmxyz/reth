@@ -16,7 +16,7 @@ use alloy_rpc_types_engine::{
 };
 use reth_ethereum_primitives::EthPrimitives;
 use reth_payload_primitives::BuiltPayload;
-use reth_primitives_traits::{NodePrimitives, SealedBlock};
+use reth_primitives_traits::{NodePrimitives, RecoveredBlock, SealedBlock};
 
 use crate::BuiltPayloadConversionError;
 
@@ -30,7 +30,7 @@ use crate::BuiltPayloadConversionError;
 #[derive(Debug, Clone)]
 pub struct EthBuiltPayload<N: NodePrimitives = EthPrimitives> {
     /// The built block
-    pub(crate) block: Arc<SealedBlock<N::Block>>,
+    pub(crate) block: Arc<RecoveredBlock<N::Block>>,
     /// The fees of the block
     pub(crate) fees: U256,
     /// The blobs, proofs, and commitments in the block. If the block is pre-cancun, this will be
@@ -49,7 +49,7 @@ impl<N: NodePrimitives> EthBuiltPayload<N> {
     ///
     /// Caution: This does not set any [`BlobSidecars`].
     pub const fn new(
-        block: Arc<SealedBlock<N::Block>>,
+        block: Arc<RecoveredBlock<N::Block>>,
         fees: U256,
         requests: Option<Requests>,
         block_access_list: Option<Bytes>,
@@ -59,12 +59,22 @@ impl<N: NodePrimitives> EthBuiltPayload<N> {
 
     /// Returns the built block(sealed)
     pub fn block(&self) -> &SealedBlock<N::Block> {
+        self.block.sealed_block()
+    }
+
+    /// Returns the built block with recovered senders.
+    pub fn recovered_block(&self) -> &RecoveredBlock<N::Block> {
         &self.block
     }
 
     /// Returns the built block with shared ownership.
-    pub const fn block_arc(&self) -> &Arc<SealedBlock<N::Block>> {
+    pub const fn block_arc(&self) -> &Arc<RecoveredBlock<N::Block>> {
         &self.block
+    }
+
+    /// Consumes the payload and returns the built block with shared ownership.
+    pub fn into_block_arc(self) -> Arc<RecoveredBlock<N::Block>> {
+        self.block
     }
 
     /// Fees of the block
@@ -235,7 +245,7 @@ impl<N: NodePrimitives> BuiltPayload for EthBuiltPayload<N> {
     type Primitives = N;
 
     fn block(&self) -> &SealedBlock<N::Block> {
-        &self.block
+        self.block.sealed_block()
     }
 
     fn fees(&self) -> U256 {
@@ -412,7 +422,7 @@ impl From<alloc::vec::IntoIter<BlobTransactionSidecarEip7594>> for BlobSidecars 
 mod tests {
     use super::*;
     use alloy_primitives::B256;
-    use reth_primitives_traits::Block as _;
+    use reth_primitives_traits::{Block as _, RecoveredBlock};
 
     #[test]
     fn into_execution_data_preserves_requests() {
@@ -424,7 +434,7 @@ mod tests {
         block.header.requests_hash = Some(requests.requests_hash());
 
         let payload = EthBuiltPayload::new(
-            Arc::new(block.seal_slow()),
+            Arc::new(RecoveredBlock::new_sealed(block.seal_slow(), vec![])),
             U256::ZERO,
             Some(requests.clone()),
             None,
@@ -448,7 +458,7 @@ mod tests {
         block.header.block_access_list_hash = Some(B256::ZERO);
 
         let payload = EthBuiltPayload::new(
-            Arc::new(block.seal_slow()),
+            Arc::new(RecoveredBlock::new_sealed(block.seal_slow(), vec![])),
             U256::ZERO,
             None,
             Some(block_access_list.clone()),

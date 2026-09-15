@@ -1,6 +1,7 @@
 {
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/25.11";
+    nixpkgs-llvm22.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
     utils.url = "github:numtide/flake-utils";
     crane.url = "github:ipetkov/crane";
 
@@ -12,7 +13,9 @@
 
   outputs =
     {
+      self,
       nixpkgs,
+      nixpkgs-llvm22,
       utils,
       crane,
       fenix,
@@ -22,6 +25,7 @@
       system:
       let
         pkgs = import nixpkgs { inherit system; };
+        llvm22Pkgs = import nixpkgs-llvm22 { inherit system; };
 
         # A useful helper for folding a list of `prevSet -> newSet` functions
         # into an attribute set.
@@ -43,10 +47,20 @@
 
         craneLib = (crane.mkLib pkgs).overrideToolchain rustStable;
 
+        llvm22 = llvm22Pkgs.llvmPackages_22;
+
         nativeBuildInputs = [
           pkgs.pkg-config
           pkgs.libgit2
+          pkgs.m4
           pkgs.perl
+        ];
+
+        buildInputs = [
+          pkgs.libffi
+          pkgs.libxml2
+          pkgs.ncurses
+          pkgs.zlib
         ];
 
         withClang = prev: {
@@ -54,6 +68,23 @@
             pkgs.clang
           ];
           LIBCLANG_PATH = "${pkgs.libclang.lib}/lib";
+        };
+
+        withLlvm22 = prev: {
+          nativeBuildInputs = prev.nativeBuildInputs or [] ++ [
+            llvm22.llvm.dev
+          ];
+          buildInputs = prev.buildInputs or [] ++ [
+            llvm22.llvm.lib
+          ];
+          LLVM_SYS_221_PREFIX = "${llvm22.llvm.dev}";
+        };
+
+        withLlvm22DevShell = prev: (withLlvm22 prev) // {
+          packages = prev.packages or [] ++ [
+            llvm22.llvm.dev
+            llvm22.llvm.lib
+          ];
         };
 
         withMaxPerf = prev: {
@@ -73,11 +104,19 @@
           ];
         };
 
+        withVergenBypass = prev: {
+          preBuild = ''
+            export VERGEN_GIT_SHA=${self.rev or self.dirtyRev}
+            export VERGEN_GIT_DIRTY=${if self ? rev then "false" else "true"}
+            export VERGEN_GIT_DESCRIBE=${self.shortRev or self.dirtyRev} 
+          '';
+        };
+
         mkReth = overrides: craneLib.buildPackage (composeAttrOverrides {
           pname = "reth";
           version = packageVersion;
           src = ./.;
-          inherit nativeBuildInputs;
+          inherit nativeBuildInputs buildInputs;
           doCheck = false;
         } overrides);
 
@@ -87,7 +126,9 @@
 
           reth = mkReth ([
             withClang
+            withLlvm22
             withMaxPerf
+            withVergenBypass
           ] ++ pkgs.lib.optionals pkgs.stdenv.isLinux [
             withMold
           ]);
@@ -98,6 +139,7 @@
         devShell = let
           overrides = [
             withClang
+            withLlvm22DevShell
           ] ++ pkgs.lib.optionals pkgs.stdenv.isLinux [
             withMold
           ];

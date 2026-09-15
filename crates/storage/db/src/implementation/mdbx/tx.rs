@@ -10,17 +10,18 @@ use reth_db_api::{
     transaction::{DbTx, DbTxMut},
 };
 use reth_libmdbx::{ffi::MDBX_dbi, CommitLatency, Transaction, TransactionKind, WriteFlags, RW};
+use reth_primitives_traits::FastInstant as Instant;
 use reth_storage_errors::db::{DatabaseWriteError, DatabaseWriteOperation};
 use reth_tracing::tracing::{debug, instrument, trace, warn};
+use rustc_hash::FxHashMap;
 use std::{
     backtrace::Backtrace,
-    collections::HashMap,
     marker::PhantomData,
     sync::{
         atomic::{AtomicBool, Ordering},
         Arc,
     },
-    time::{Duration, Instant},
+    time::Duration,
 };
 
 /// Duration after which we emit the log about long-lived database transactions.
@@ -33,7 +34,7 @@ pub struct Tx<K: TransactionKind> {
     inner: Transaction<K>,
 
     /// Cached MDBX DBIs for reuse.
-    dbis: Arc<HashMap<&'static str, MDBX_dbi>>,
+    dbis: Arc<FxHashMap<&'static str, MDBX_dbi>>,
 
     /// Handler for metrics with its own [Drop] implementation for cases when the transaction isn't
     /// closed by [`Tx::commit`] or [`Tx::abort`], but we still need to report it in the metrics.
@@ -48,7 +49,7 @@ impl<K: TransactionKind> Tx<K> {
     #[track_caller]
     pub(crate) fn new(
         inner: Transaction<K>,
-        dbis: Arc<HashMap<&'static str, MDBX_dbi>>,
+        dbis: Arc<FxHashMap<&'static str, MDBX_dbi>>,
         env_metrics: Option<Arc<DatabaseEnvMetrics>>,
     ) -> reth_libmdbx::Result<Self> {
         let metrics_handler = env_metrics
@@ -177,6 +178,11 @@ struct MetricsHandler<K: TransactionKind> {
     /// Cached internal transaction ID provided by libmdbx.
     txn_id: u64,
     /// The time when transaction has started.
+    ///
+    /// This is a TSC-backed [`reth_primitives_traits::FastInstant`] rather than
+    /// [`std::time::Instant`] because
+    /// [`MetricsHandler::log_backtrace_on_long_read_transaction`] reads it on every database
+    /// operation.
     start: Instant,
     /// Duration after which we emit the log about long-lived database transactions.
     long_transaction_duration: Duration,

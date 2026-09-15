@@ -1,14 +1,13 @@
 //! Helpers for `eth_blockAccessList` RPC method.
-use alloy_consensus::BlockHeader;
-use alloy_eips::eip7928::BlockAccessList;
+use alloy_eip7928::{bal::DecodedBal, BlockAccessList};
+use alloy_primitives::Bytes;
 use alloy_rpc_types_eth::BlockId;
-use reth_chainspec::{ChainSpecProvider, EthereumHardforks};
-use reth_rpc_eth_types::{bal::build_bal_for_block, error::FromEthApiError, EthApiError};
-use reth_storage_api::BalProvider;
+use reth_errors::RethError;
+use reth_rpc_eth_types::{bal::build_revm_bal_for_block, error::FromEthApiError, EthApiError};
 
 use crate::{
     helpers::{Call, LoadBlock, Trace},
-    RpcNodeCoreExt,
+    RpcNodeCore, RpcNodeCoreExt,
 };
 
 /// Helper trait for `eth_blockAccessList` RPC method.
@@ -19,63 +18,66 @@ pub trait GetBlockAccessList: Trace + Call + LoadBlock + RpcNodeCoreExt {
         block_id: BlockId,
     ) -> impl Future<Output = Result<Option<BlockAccessList>, Self::Error>> + Send {
         async move {
+            if block_id.is_pending() {
+                return Ok(None)
+            }
+
+            let Some(block) = self.recovered_block(block_id).await? else {
+                return Ok(None);
+            };
+
+            if let Some(cached_bal) =
+                self.cache().get_bal(block.hash()).await.map_err(Self::Error::from_eth_err)?
+            {
+                let (bal, _) = DecodedBal::from_rlp_bytes(cached_bal.as_raw().clone())
+                    .map_err(RethError::other)
+                    .map_err(Self::Error::from_eth_err)?
+                    .split();
+                return Ok(Some(Vec::from(bal)))
+            }
+
+            let permit = self
+                .acquire_owned_blocking_io()
+                .await
+                .map_err(|_| EthApiError::InternalEthError)?;
+
+            self.spawn_blocking_io(move |eth_api| {
+                let _permit = permit;
+                let bal = build_revm_bal_for_block(
+                    eth_api.provider(),
+                    RpcNodeCore::evm_config(&eth_api),
+                    &block,
+                )
+                .map_err(Self::Error::from_eth_err)?;
+                let (response, _) = DecodedBal::from_rlp_bytes(bal.as_raw().clone())
+                    .map_err(RethError::other)
+                    .map_err(Self::Error::from_eth_err)?
+                    .split();
+                eth_api.cache().insert_bal(block.hash(), bal);
+                Ok(Some(Vec::from(response)))
+            })
+            .await
+        }
+    }
+
+    /// Retrieves the raw RLP-encoded block access list for a block.
+    fn get_raw_block_access_list(
+        &self,
+        block_id: BlockId,
+    ) -> impl Future<Output = Result<Option<Bytes>, Self::Error>> + Send {
+        async move {
             let block = self
                 .recovered_block(block_id)
                 .await?
                 .ok_or_else(|| EthApiError::HeaderNotFound(block_id))?;
 
-            ensure_block_access_list_available(self.provider().chain_spec(), block.timestamp())
-                .map_err(Self::Error::from_eth_err)?;
-
             if let Some(cached_bal) =
                 self.cache().get_bal(block.hash()).await.map_err(Self::Error::from_eth_err)?
             {
-                return Ok(Some(cached_bal.as_bal().clone().into_alloy_bal()))
+                return Ok(Some(cached_bal.as_raw().clone()))
             }
 
-            self.spawn_blocking_io(move |eth_api| {
-                if let Some(bal) = eth_api
-                    .provider()
-                    .bal_store()
-                    .get_decoded_by_hash(block.hash())
-                    .map_err(Self::Error::from_eth_err)?
-                {
-                    return Ok(Some(bal.split().0.into_inner()))
-                }
-
-                build_bal_for_block(eth_api.provider(), eth_api.evm_config(), &block)
-                    .map(Some)
-                    .map_err(Self::Error::from_eth_err)
-            })
-            .await
+            Ok(self.get_block_access_list(block_id).await?.map(|bal| alloy_rlp::encode(bal).into()))
         }
-    }
-}
-
-fn ensure_block_access_list_available(
-    chain_spec: impl EthereumHardforks,
-    timestamp: u64,
-) -> Result<(), EthApiError> {
-    if chain_spec.is_amsterdam_active_at_timestamp(timestamp) {
-        return Ok(())
-    }
-
-    Err(EthApiError::BlockAccessListNotAvailablePreAmsterdam)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use reth_chainspec::ChainSpecBuilder;
-
-    #[test]
-    fn block_access_list_is_unavailable_before_amsterdam() {
-        let chain_spec = ChainSpecBuilder::mainnet().with_amsterdam_at(10).build();
-
-        assert!(matches!(
-            ensure_block_access_list_available(&chain_spec, 9),
-            Err(EthApiError::BlockAccessListNotAvailablePreAmsterdam)
-        ));
-        assert!(ensure_block_access_list_available(&chain_spec, 10).is_ok());
     }
 }

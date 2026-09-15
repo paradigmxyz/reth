@@ -6,6 +6,7 @@ use alloy_evm::{
     eth::EthEvmContext,
     precompiles::PrecompilesMap,
     revm::{
+        context::DBErrorMarker,
         handler::EthPrecompiles,
         precompile::{Precompile, PrecompileId},
     },
@@ -50,7 +51,7 @@ impl EvmFactory for MyEvmFactory {
     type Evm<DB: Database, I: Inspector<EthEvmContext<DB>, EthInterpreter>> =
         EthEvm<DB, I, Self::Precompiles>;
     type Tx = TxEnv;
-    type Error<DBError: core::error::Error + Send + Sync + 'static> = EVMError<DBError>;
+    type Error<DBError: DBErrorMarker> = EVMError<DBError>;
     type HaltReason = HaltReason;
     type Context<DB: Database> = EthEvmContext<DB>;
     type Spec = SpecId;

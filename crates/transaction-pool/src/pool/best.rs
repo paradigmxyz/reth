@@ -9,8 +9,9 @@ use alloy_primitives::map::AddressSet;
 use core::fmt;
 use imbl::OrdMap;
 use reth_primitives_traits::transaction::error::InvalidTransactionError;
+use rustc_hash::FxHashSet;
 use std::{
-    collections::{BTreeSet, HashSet, VecDeque},
+    collections::{BTreeSet, VecDeque},
     sync::Arc,
 };
 use tokio::sync::broadcast::{error::TryRecvError, Receiver};
@@ -38,6 +39,10 @@ impl<T: TransactionOrdering> crate::traits::BestTransactions for BestTransaction
 
     fn no_updates(&mut self) {
         self.best.no_updates()
+    }
+
+    fn allow_updates_out_of_order(&mut self) {
+        self.best.allow_updates_out_of_order()
     }
 
     fn skip_blobs(&mut self) {
@@ -72,6 +77,11 @@ impl<T: TransactionOrdering> Iterator for BestTransactionsWithFees<T> {
             );
         }
     }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        let (_, upper) = self.best.size_hint();
+        (0, upper)
+    }
 }
 
 /// An iterator that returns transactions that can be executed on the current state (*best*
@@ -92,7 +102,7 @@ pub struct BestTransactions<T: TransactionOrdering> {
     /// then can be moved from the `all` set to the `independent` set.
     pub(crate) independent: BTreeSet<PendingTransaction<T>>,
     /// There might be the case where a yielded transactions is invalid, this will track it.
-    pub(crate) invalid: HashSet<SenderId>,
+    pub(crate) invalid: FxHashSet<SenderId>,
     /// Used to receive any new pending transactions that have been added to the pool after this
     /// iterator was static filtered
     ///
@@ -105,6 +115,8 @@ pub struct BestTransactions<T: TransactionOrdering> {
     pub(crate) last_priority: Option<Priority<T::PriorityValue>>,
     /// Flag to control whether to skip blob transactions (EIP4844).
     pub(crate) skip_blobs: bool,
+    /// Whether live updates can be yielded after a lower-priority transaction.
+    pub(crate) allow_updates_out_of_order: bool,
 }
 
 impl<T: TransactionOrdering> BestTransactions<T> {
@@ -130,7 +142,8 @@ impl<T: TransactionOrdering> BestTransactions<T> {
         loop {
             match self.new_transaction_receiver.as_mut()?.try_recv() {
                 Ok(tx) => {
-                    if let Some(last_priority) = &self.last_priority &&
+                    if !self.allow_updates_out_of_order &&
+                        let Some(last_priority) = &self.last_priority &&
                         &tx.priority > last_priority
                     {
                         // we skip transactions if we already yielded a transaction with lower
@@ -272,6 +285,10 @@ impl<T: TransactionOrdering> crate::traits::BestTransactions for BestTransaction
         self.last_priority.take();
     }
 
+    fn allow_updates_out_of_order(&mut self) {
+        self.allow_updates_out_of_order = true;
+    }
+
     fn skip_blobs(&mut self) {
         self.set_skip_blobs(true);
     }
@@ -286,6 +303,10 @@ impl<T: TransactionOrdering> Iterator for BestTransactions<T> {
 
     fn next(&mut self) -> Option<Self::Item> {
         self.next_tx_and_priority().map(|(tx, _)| tx)
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        (0, self.new_transaction_receiver.is_none().then_some(self.all.len()))
     }
 }
 
@@ -325,6 +346,11 @@ where
             );
         }
     }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        let (_, upper) = self.best.size_hint();
+        (0, upper)
+    }
 }
 
 impl<I, P> crate::traits::BestTransactions for BestTransactionFilter<I, P>
@@ -338,6 +364,10 @@ where
 
     fn no_updates(&mut self) {
         self.best.no_updates()
+    }
+
+    fn allow_updates_out_of_order(&mut self) {
+        self.best.allow_updates_out_of_order()
     }
 
     fn skip_blobs(&mut self) {
@@ -414,6 +444,16 @@ where
             self.inner.next()
         }
     }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        let buffered = self.buffer.len();
+        let (inner_lower, inner_upper) = self.inner.size_hint();
+
+        (
+            buffered.saturating_add(inner_lower),
+            inner_upper.and_then(|upper| upper.checked_add(buffered)),
+        )
+    }
 }
 
 impl<I, T> crate::traits::BestTransactions for BestTransactionsWithPrioritizedSenders<I>
@@ -427,6 +467,10 @@ where
 
     fn no_updates(&mut self) {
         self.inner.no_updates()
+    }
+
+    fn allow_updates_out_of_order(&mut self) {
+        self.inner.allow_updates_out_of_order()
     }
 
     fn set_skip_blobs(&mut self, skip_blobs: bool) {
@@ -470,6 +514,90 @@ mod tests {
             let tx = best.next().unwrap();
             assert_eq!(tx.nonce(), nonce);
         }
+    }
+
+    #[test]
+    fn test_best_transactions_size_hint() {
+        let mut pool = PendingPool::new(MockOrdering::default());
+        let mut f = MockTransactionFactory::default();
+
+        for nonce in 0..3 {
+            let tx = MockTransaction::eip1559().rng_hash().with_nonce(nonce);
+            pool.add_transaction(Arc::new(f.validated(tx)), 0);
+        }
+
+        let mut best = pool.best();
+        assert_eq!(best.size_hint(), (0, None));
+
+        best.no_updates();
+        assert_eq!(best.size_hint(), (0, Some(3)));
+
+        assert_eq!(best.next().unwrap().nonce(), 0);
+        assert_eq!(best.size_hint(), (0, Some(2)));
+    }
+
+    #[test]
+    fn test_best_transactions_with_fees_size_hint() {
+        let mut pool = PendingPool::new(MockOrdering::default());
+        let mut f = MockTransactionFactory::default();
+
+        for nonce in 0..3 {
+            let tx = MockTransaction::eip1559().rng_hash().with_nonce(nonce).with_max_fee(100);
+            pool.add_transaction(Arc::new(f.validated(tx)), 0);
+        }
+
+        let mut best = pool.best_with_basefee_and_blobfee(10, 0);
+        best.no_updates();
+
+        assert_eq!(best.size_hint(), (0, Some(3)));
+        assert_eq!(best.next().unwrap().nonce(), 0);
+        assert_eq!(best.size_hint(), (0, Some(2)));
+    }
+
+    #[test]
+    fn test_best_transaction_filter_size_hint() {
+        let mut pool = PendingPool::new(MockOrdering::default());
+        let mut f = MockTransactionFactory::default();
+
+        for nonce in 0..3 {
+            let tx = MockTransaction::eip1559().rng_hash().with_nonce(nonce);
+            pool.add_transaction(Arc::new(f.validated(tx)), 0);
+        }
+
+        let best = pool.best().without_updates();
+        let mut filter =
+            BestTransactionFilter::new(best, |_: &Arc<ValidPoolTransaction<MockTransaction>>| {
+                false
+            });
+
+        assert_eq!(filter.size_hint(), (0, Some(3)));
+        assert!(filter.next().is_none());
+        assert_eq!(filter.size_hint(), (0, Some(0)));
+    }
+
+    #[test]
+    fn test_best_transactions_with_prioritized_senders_size_hint() {
+        let mut pool = PendingPool::new(MockOrdering::default());
+        let mut f = MockTransactionFactory::default();
+
+        for gas_price in 0..5 {
+            let tx = MockTransaction::eip1559().with_gas_price((gas_price + 1) * 10);
+            pool.add_transaction(Arc::new(f.validated(tx)), 0);
+        }
+
+        let prioritized_tx = MockTransaction::eip1559().with_gas_price(5).with_gas_limit(200);
+        let prioritized_sender = prioritized_tx.sender();
+        pool.add_transaction(Arc::new(f.validated(prioritized_tx)), 0);
+
+        let mut best = BestTransactionsWithPrioritizedSenders::new(
+            AddressSet::from_iter([prioritized_sender]),
+            200,
+            pool.best().without_updates(),
+        );
+
+        assert_eq!(best.size_hint(), (0, Some(6)));
+        assert_eq!(best.next().unwrap().sender(), prioritized_sender);
+        assert_eq!(best.size_hint(), (5, Some(5)));
     }
 
     #[test]
@@ -996,6 +1124,23 @@ mod tests {
 
         // Ensure receiver is cleared
         assert!(best.new_transaction_receiver.is_none());
+    }
+
+    #[test]
+    fn test_best_transactions_yields_updates_after_empty() {
+        let mut pool = PendingPool::new(MockOrdering::default());
+        let mut best = pool.best();
+        best.allow_updates_out_of_order();
+
+        assert!(best.next().is_none());
+
+        let mut f = MockTransactionFactory::default();
+        let tx = MockTransaction::eip1559().rng_hash();
+        let valid_tx = Arc::new(f.validated(tx));
+        let expected_hash = *valid_tx.hash();
+        pool.add_transaction(valid_tx, 0);
+
+        assert_eq!(*best.next().expect("new transaction should be yielded").hash(), expected_hash);
     }
 
     #[test]

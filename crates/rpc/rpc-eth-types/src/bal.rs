@@ -1,14 +1,14 @@
 //! Block access list helpers for RPC cache prewarming.
 
-use crate::cache::db::StateProviderTraitObjWrapper;
 use alloy_consensus::BlockHeader;
-use alloy_eips::eip7928::{bal::DecodedBal, BlockAccessList};
+use alloy_eip7928::{bal::DecodedBal, BlockAccessList};
 use alloy_primitives::Bytes;
 use reth_errors::ProviderError;
 use reth_evm::{block::BlockExecutor, ConfigureEvm, Evm};
 use reth_primitives_traits::{BlockTy, RecoveredBlock};
 use reth_revm::{database::StateProviderDatabase, State};
 use reth_storage_api::{NodePrimitivesProvider, StateProviderFactory};
+use std::sync::Arc;
 
 /// Recomputes the BAL for a block by replaying it on top of its parent state.
 pub fn build_bal_for_block<Provider, EvmConfig>(
@@ -22,7 +22,7 @@ where
 {
     let state = provider.state_by_block_id(block.parent_hash().into())?;
     let mut db = State::builder()
-        .with_database(StateProviderDatabase::new(StateProviderTraitObjWrapper(state)))
+        .with_database(StateProviderDatabase::new(state))
         .with_bal_builder()
         .build();
 
@@ -48,7 +48,7 @@ pub fn build_revm_bal_for_block<Provider, EvmConfig>(
     provider: &Provider,
     evm_config: &EvmConfig,
     block: &RecoveredBlock<BlockTy<Provider::Primitives>>,
-) -> Result<DecodedBal<revm::database::state::bal::Bal>, ProviderError>
+) -> Result<DecodedBal<Arc<reth_revm::state::bal::Bal>>, ProviderError>
 where
     Provider: NodePrimitivesProvider + StateProviderFactory,
     EvmConfig: ConfigureEvm<Primitives = Provider::Primitives>,
@@ -57,5 +57,5 @@ where
     let raw = Bytes::from(alloy_rlp::encode(&bal));
     let revm_bal = bal.try_into().map_err(ProviderError::other)?;
 
-    Ok(DecodedBal::new(revm_bal, raw))
+    Ok(DecodedBal::new(Arc::new(revm_bal), raw))
 }

@@ -12,12 +12,14 @@ use reth_revm::{
 };
 use reth_rpc_api::DebugApiClient;
 use reth_tracing::tracing::warn;
-use reth_trie::{updates::TrieUpdates, HashedStorage};
-use revm::state::AccountInfo;
-use revm_bytecode::Bytecode;
-use revm_database::{
-    states::{reverts::AccountInfoRevert, StorageSlot},
-    AccountStatus, RevertToSlot,
+use reth_trie::updates::TrieUpdates;
+use revm::{
+    bytecode::Bytecode,
+    database::{
+        states::{reverts::AccountInfoRevert, StorageSlot},
+        AccountStatus, RevertToSlot,
+    },
+    state::AccountInfo,
 };
 use serde::Serialize;
 use std::{collections::BTreeMap, fmt::Debug, fs::File, io::Write, path::PathBuf};
@@ -119,7 +121,7 @@ fn collect_execution_data(
     let bundle_state = db.take_bundle();
     let mut codes = BTreeMap::new();
     let mut preimages = BTreeMap::new();
-    let mut hashed_state = db.database.hashed_post_state(&bundle_state);
+    let mut hashed_state = db.database.hashed_post_state(&bundle_state)?;
 
     // Collect codes
     db.cache.contracts.values().chain(bundle_state.contracts.values()).for_each(|code| {
@@ -136,10 +138,7 @@ fn collect_execution_data(
 
         if let Some(account_data) = account.account {
             preimages.insert(hashed_address, alloy_rlp::encode(address).into());
-            let storage = hashed_state
-                .storages
-                .entry(hashed_address)
-                .or_insert_with(|| HashedStorage::new(account.status.was_destroyed()));
+            let storage = hashed_state.storages.entry(hashed_address).or_default();
 
             for (slot, value) in account_data.storage {
                 let slot_bytes = B256::from(slot);
@@ -306,7 +305,7 @@ where
         block_prefix: &str,
     ) -> eyre::Result<()> {
         let state_provider = self.provider.state_by_block_hash(parent_header.hash())?;
-        let hashed_state = state_provider.hashed_post_state(bundle_state);
+        let hashed_state = state_provider.hashed_post_state(bundle_state)?;
         let (re_executed_root, trie_output) =
             state_provider.state_root_with_updates(hashed_state)?;
 
@@ -420,12 +419,12 @@ mod tests {
     use reth_evm_ethereum::EthEvmConfig;
     use reth_provider::test_utils::MockEthProvider;
     use reth_revm::db::{BundleAccount, BundleState};
-    use revm_database::states::reverts::AccountRevert;
+    use revm::database::states::reverts::AccountRevert;
     use tempfile::TempDir;
 
     use reth_revm::test_utils::StateProviderTest;
     use reth_testing_utils::generators::{self, random_block, random_eoa_accounts, BlockParams};
-    use revm_bytecode::Bytecode;
+    use revm::bytecode::Bytecode;
 
     /// Creates a test `BundleState` with realistic accounts, contracts, and reverts
     fn create_bundle_state() -> BundleState {

@@ -16,7 +16,8 @@ use futures_util::FutureExt;
 use reth_chain_state::CanonStateNotification;
 use reth_execution_cache::SavedCache;
 use reth_payload_builder::{
-    BuildNewPayload, KeepPayloadJobAlive, PayloadId, PayloadJob, PayloadJobGenerator,
+    BuildNewPayload, KeepPayloadJobAlive, PayloadBuilderLease, PayloadId, PayloadJob,
+    PayloadJobGenerator,
 };
 use reth_payload_builder_primitives::PayloadBuilderError;
 use reth_payload_primitives::{BuiltPayload, PayloadAttributes, PayloadKind};
@@ -24,7 +25,7 @@ use reth_primitives_traits::{HeaderTy, NodePrimitives, SealedHeader};
 use reth_revm::{cached::CachedReads, cancelled::CancelOnDrop};
 use reth_storage_api::{BlockReaderIdExt, StateProviderFactory};
 use reth_tasks::Runtime;
-use reth_trie_parallel::state_root_task::StateRootHandle;
+use reth_trie_parallel::state_root_task::PayloadStateRootHandle;
 use std::{
     fmt,
     future::Future,
@@ -47,6 +48,8 @@ mod stack;
 pub use better_payload_emitter::BetterPayloadEmitter;
 pub use stack::PayloadBuilderStack;
 
+const PAYLOAD_BUILDER_THREAD_NAME: &str = "payload-builder";
+
 /// Helper to access [`NodePrimitives::BlockHeader`] from [`PayloadBuilder::BuiltPayload`].
 pub type HeaderForPayload<P> = <<P as BuiltPayload>::Primitives as NodePrimitives>::BlockHeader;
 
@@ -67,6 +70,8 @@ pub struct BasicPayloadJobGenerator<Client, Builder> {
     builder: Builder,
     /// Stored `cached_reads` for new payload jobs.
     pre_cached: Option<PrecachedState>,
+    /// Stored parent block information for new payload jobs.
+    pre_cached_parent_block_info: Option<PrecachedParentBlockInfo>,
 }
 
 // === impl BasicPayloadJobGenerator ===
@@ -87,6 +92,7 @@ impl<Client, Builder> BasicPayloadJobGenerator<Client, Builder> {
             config,
             builder,
             pre_cached: None,
+            pre_cached_parent_block_info: None,
         }
     }
 
@@ -123,7 +129,19 @@ impl<Client, Builder> BasicPayloadJobGenerator<Client, Builder> {
     /// Returns the pre-cached reads for the given parent header if it matches the cached state's
     /// block.
     fn maybe_pre_cached(&self, parent: B256) -> Option<CachedReads> {
+        if !self.config.pre_cache_state {
+            return None
+        }
+
         self.pre_cached.as_ref().filter(|pc| pc.block == parent).map(|pc| pc.cached.clone())
+    }
+
+    /// Returns the cached parent block information if it matches the requested parent.
+    fn maybe_parent_block_info(&self, parent: B256) -> Option<PayloadParentBlockInfo> {
+        self.pre_cached_parent_block_info
+            .as_ref()
+            .filter(|info| info.block == parent)
+            .map(|info| info.parent_block_info)
     }
 }
 
@@ -147,7 +165,8 @@ where
         input: BuildNewPayload<Builder::Attributes>,
         id: PayloadId,
     ) -> Result<Self::Job, PayloadBuilderError> {
-        let parent_header = if input.parent_hash.is_zero() {
+        let BuildNewPayload { attributes, parent_hash, mut resources } = input;
+        let parent_header = if parent_hash.is_zero() {
             // Use latest header for genesis block case
             self.client
                 .latest_header()
@@ -156,14 +175,17 @@ where
         } else {
             // Fetch specific header by hash
             self.client
-                .sealed_header_by_hash(input.parent_hash)
+                .sealed_header_by_hash(parent_hash)
                 .map_err(PayloadBuilderError::from)?
-                .ok_or_else(|| PayloadBuilderError::MissingParentHeader(input.parent_hash))?
+                .ok_or_else(|| PayloadBuilderError::MissingParentHeader(parent_hash))?
         };
 
-        let cached_reads = self.maybe_pre_cached(parent_header.hash());
+        let parent_hash = parent_header.hash();
+        let cached_reads = self.maybe_pre_cached(parent_hash);
+        let parent_block_info = self.maybe_parent_block_info(parent_hash);
 
-        let config = PayloadConfig::new(Arc::new(parent_header), input.attributes, id);
+        let config = PayloadConfig::new(Arc::new(parent_header), attributes, id)
+            .with_parent_block_info(parent_block_info);
 
         let until = self.job_deadline(config.attributes.timestamp());
         let deadline = Box::pin(tokio::time::sleep_until(until));
@@ -177,8 +199,9 @@ where
             best_payload: PayloadState::Missing,
             pending_block: None,
             cached_reads,
-            execution_cache: input.cache,
-            trie_handle: input.trie_handle,
+            execution_cache: resources.take_execution_cache(),
+            state_root_handle: resources.take_state_root_handle(),
+            leases: resources.take_leases(),
             payload_task_guard: self.payload_task_guard.clone(),
             metrics: Default::default(),
             builder: self.builder.clone(),
@@ -191,6 +214,11 @@ where
     }
 
     fn on_new_state<N: NodePrimitives>(&mut self, new_state: CanonStateNotification<N>) {
+        if !self.config.pre_cache_state {
+            self.pre_cached = None;
+            return
+        }
+
         let mut cached = CachedReads::default();
 
         // extract the state from the notification and put it into the cache
@@ -206,7 +234,14 @@ where
             }
         }
 
-        self.pre_cached = Some(PrecachedState { block: committed.tip().hash(), cached });
+        let tip = committed.tip();
+        let block = tip.hash();
+        let parent_block_info =
+            PayloadParentBlockInfo { transaction_count: tip.transaction_count() };
+
+        self.pre_cached = Some(PrecachedState { block, cached });
+        self.pre_cached_parent_block_info =
+            Some(PrecachedParentBlockInfo { block, parent_block_info });
     }
 }
 
@@ -219,6 +254,15 @@ pub struct PrecachedState {
     pub block: B256,
     /// Cached state for the block.
     pub cached: CachedReads,
+}
+
+/// Pre-filled parent block information for a specific block.
+#[derive(Debug, Clone, Copy)]
+struct PrecachedParentBlockInfo {
+    /// The block for which the parent block information is cached.
+    block: B256,
+    /// Cached parent block information.
+    parent_block_info: PayloadParentBlockInfo,
 }
 
 /// Restricts how many generator tasks can be executed at once.
@@ -240,6 +284,11 @@ impl PayloadTaskGuard {
     pub fn new(max_payload_tasks: usize) -> Self {
         Self(Arc::new(Semaphore::new(max_payload_tasks)))
     }
+
+    /// Acquires an owned permit for a payload build task.
+    async fn acquire_owned(&self) -> tokio::sync::OwnedSemaphorePermit {
+        self.0.clone().acquire_owned().await.expect("payload task semaphore closed")
+    }
 }
 
 /// Settings for the [`BasicPayloadJobGenerator`].
@@ -253,6 +302,8 @@ pub struct BasicPayloadJobGeneratorConfig {
     deadline: Duration,
     /// Maximum number of tasks to spawn for building a payload.
     max_payload_tasks: usize,
+    /// Whether to pre-cache changed state from canonical state notifications.
+    pre_cache_state: bool,
 }
 
 // === impl BasicPayloadJobGeneratorConfig ===
@@ -280,6 +331,15 @@ impl BasicPayloadJobGeneratorConfig {
         self.max_payload_tasks = max_payload_tasks;
         self
     }
+
+    /// Sets whether to pre-cache changed state from canonical state notifications.
+    ///
+    /// This keeps the parent block's state changes in memory so payload jobs building on top of it
+    /// can reuse those reads.
+    pub const fn pre_cache_state(mut self, pre_cache_state: bool) -> Self {
+        self.pre_cache_state = pre_cache_state;
+        self
+    }
 }
 
 impl Default for BasicPayloadJobGeneratorConfig {
@@ -289,6 +349,7 @@ impl Default for BasicPayloadJobGeneratorConfig {
             // 12s slot time
             deadline: SLOT_DURATION,
             max_payload_tasks: 3,
+            pre_cache_state: true,
         }
     }
 }
@@ -329,8 +390,13 @@ where
     cached_reads: Option<CachedReads>,
     /// Optional execution cache shared with the engine.
     execution_cache: Option<SavedCache>,
-    /// Optional state root task handle, shared with the engine.
-    trie_handle: Option<StateRootHandle>,
+    /// Optional state-root task handle, shared with the engine.
+    state_root_handle: Option<PayloadStateRootHandle>,
+    /// Lifecycle leases shared with the payload-builder service.
+    ///
+    /// Every detached build task clones these so that the loaned resources remain available until
+    /// `try_build` completes, even if the payload job is resolved first.
+    leases: Vec<PayloadBuilderLease>,
     /// metrics for this type
     metrics: PayloadBuilderMetrics,
     /// The type responsible for building payloads.
@@ -350,31 +416,37 @@ where
         trace!(target: "payload_builder", id = %self.config.payload_id(), "spawn new payload build task");
         let (tx, rx) = oneshot::channel();
         let cancel = CancelOnDrop::default();
-        let _cancel = cancel.clone();
+        let pending_cancel = cancel.clone();
         let guard = self.payload_task_guard.clone();
         let payload_config = self.config.clone();
         let best_payload = self.best_payload.payload().cloned();
         self.metrics.inc_initiated_payload_builds();
         let cached_reads = self.cached_reads.take().unwrap_or_default();
         let execution_cache = self.execution_cache.clone();
-        let trie_handle = self.trie_handle.take();
+        let state_root_handle = self.state_root_handle.take();
+        let leases = self.leases.clone();
         let builder = self.builder.clone();
-        self.executor.spawn_blocking_task(async move {
+        let executor = self.executor.clone();
+        self.executor.spawn_task(async move {
             // acquire the permit for executing the task
-            let _permit = guard.acquire().await;
-            let args = BuildArguments {
-                cached_reads,
-                execution_cache,
-                trie_handle,
-                config: payload_config,
-                cancel,
-                best_payload,
-            };
-            let result = builder.try_build(args);
-            let _ = tx.send(result);
+            let permit = guard.acquire_owned().await;
+            executor.spawn_blocking_named_or_tokio(PAYLOAD_BUILDER_THREAD_NAME, move || {
+                let _permit = permit;
+                let args = BuildArguments {
+                    cached_reads,
+                    execution_cache,
+                    state_root_handle,
+                    config: payload_config,
+                    cancel,
+                    best_payload,
+                };
+                let result = builder.try_build(args);
+                drop(leases);
+                let _ = tx.send(result);
+            });
         });
 
-        self.pending_block = Some(PendingPayload { _cancel, payload: rx });
+        self.pending_block = Some(PendingPayload { cancel: pending_cancel, payload: rx });
     }
 }
 
@@ -495,12 +567,16 @@ where
         let mut empty_payload = None;
 
         if best_payload.is_none() {
+            if let Some(pending) = maybe_better.as_ref() {
+                pending.cancel.request_finalization();
+            }
+
             debug!(target: "payload_builder", id=%self.config.payload_id(), "no best payload yet to resolve, building empty payload");
 
             let args = BuildArguments {
                 cached_reads: self.cached_reads.take().unwrap_or_default(),
                 execution_cache: self.execution_cache.clone(),
-                trie_handle: None,
+                state_root_handle: None,
                 config: self.config.clone(),
                 cancel: CancelOnDrop::default(),
                 best_payload: None,
@@ -519,10 +595,13 @@ where
                     let (tx, rx) = oneshot::channel();
                     let config = self.config.clone();
                     let builder = self.builder.clone();
-                    self.executor.spawn_blocking_task(async move {
-                        let res = builder.build_empty_payload(config);
-                        let _ = tx.send(res);
-                    });
+                    self.executor.spawn_blocking_named_or_tokio(
+                        PAYLOAD_BUILDER_THREAD_NAME,
+                        move || {
+                            let res = builder.build_empty_payload(config);
+                            let _ = tx.send(res);
+                        },
+                    );
 
                     empty_payload = Some(rx);
                 }
@@ -530,9 +609,12 @@ where
                     debug!(target: "payload_builder", id=%self.config.payload_id(), "racing fallback payload");
                     // race the in progress job with this job
                     let (tx, rx) = oneshot::channel();
-                    self.executor.spawn_blocking_task(async move {
-                        let _ = tx.send(job());
-                    });
+                    self.executor.spawn_blocking_named_or_tokio(
+                        PAYLOAD_BUILDER_THREAD_NAME,
+                        move || {
+                            let _ = tx.send(job());
+                        },
+                    );
                     empty_payload = Some(rx);
                 }
             };
@@ -656,8 +738,8 @@ where
 /// A future that resolves to the result of the block building job.
 #[derive(Debug)]
 pub struct PendingPayload<P> {
-    /// The marker to cancel the job on drop
-    _cancel: CancelOnDrop,
+    /// Cancels the job on drop and carries cooperative control signals.
+    cancel: CancelOnDrop,
     /// The channel to send the result to.
     payload: oneshot::Receiver<Result<BuildOutcome<P>, PayloadBuilderError>>,
 }
@@ -668,7 +750,7 @@ impl<P> PendingPayload<P> {
         cancel: CancelOnDrop,
         payload: oneshot::Receiver<Result<BuildOutcome<P>, PayloadBuilderError>>,
     ) -> Self {
-        Self { _cancel: cancel, payload }
+        Self { cancel, payload }
     }
 }
 
@@ -686,10 +768,19 @@ impl<P> Future for PendingPayload<P> {
 pub struct PayloadConfig<Attributes, Header = alloy_consensus::Header> {
     /// The parent header.
     pub parent_header: Arc<SealedHeader<Header>>,
+    /// Additional parent block information, if available.
+    pub parent_block_info: Option<PayloadParentBlockInfo>,
     /// Requested attributes for the payload.
     pub attributes: Attributes,
     /// The payload id.
     pub payload_id: PayloadId,
+}
+
+/// Additional information about the parent block.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct PayloadParentBlockInfo {
+    /// Number of transactions in the parent block.
+    pub transaction_count: usize,
 }
 
 impl<Attributes, Header> PayloadConfig<Attributes, Header>
@@ -702,7 +793,16 @@ where
         attributes: Attributes,
         payload_id: PayloadId,
     ) -> Self {
-        Self { parent_header, attributes, payload_id }
+        Self { parent_header, parent_block_info: None, attributes, payload_id }
+    }
+
+    /// Attaches cached parent block information.
+    pub const fn with_parent_block_info(
+        mut self,
+        parent_block_info: Option<PayloadParentBlockInfo>,
+    ) -> Self {
+        self.parent_block_info = parent_block_info;
+        self
     }
 
     /// Returns the payload id.
@@ -830,13 +930,13 @@ pub struct BuildArguments<Attributes, Payload: BuiltPayload> {
     pub cached_reads: CachedReads,
     /// Optional execution cache shared with the engine.
     pub execution_cache: Option<SavedCache>,
-    /// Optional state root task handle, shared with the engine.
+    /// Optional state-root task handle, shared with the engine.
     ///
     /// The preserved trie is shared with the engine, so a concurrent `newPayload` will
     /// block until this task completes. The trie is anchored at the built block's state
     /// root, so if the next `newPayload` is not on top of that block, the trie cache is
     /// invalidated and cleared.
-    pub trie_handle: Option<StateRootHandle>,
+    pub state_root_handle: Option<PayloadStateRootHandle>,
     /// How to configure the payload.
     pub config: PayloadConfig<Attributes, HeaderTy<Payload::Primitives>>,
     /// A marker that can be used to cancel the job.
@@ -850,12 +950,12 @@ impl<Attributes, Payload: BuiltPayload> BuildArguments<Attributes, Payload> {
     pub const fn new(
         cached_reads: CachedReads,
         execution_cache: Option<SavedCache>,
-        trie_handle: Option<StateRootHandle>,
+        state_root_handle: Option<PayloadStateRootHandle>,
         config: PayloadConfig<Attributes, HeaderTy<Payload::Primitives>>,
         cancel: CancelOnDrop,
         best_payload: Option<Payload>,
     ) -> Self {
-        Self { cached_reads, execution_cache, trie_handle, config, cancel, best_payload }
+        Self { cached_reads, execution_cache, state_root_handle, config, cancel, best_payload }
     }
 }
 

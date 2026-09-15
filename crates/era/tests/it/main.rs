@@ -12,6 +12,7 @@ use reth_era::{
     e2s::error::E2sError,
     era::file::{EraFile, EraReader},
     era1::file::{Era1File, Era1Reader},
+    ere::file::{EreFile, EreReader},
 };
 use reth_era_downloader::EraClient;
 use std::{
@@ -26,6 +27,7 @@ use tempfile::TempDir;
 
 mod era;
 mod era1;
+mod ere;
 
 const fn main() {}
 
@@ -100,6 +102,23 @@ const ERA_MAINNET_FILES_NAMES: [&str; 8] = [
     "mainnet-01267-e3ddc749.era",
     "mainnet-01581-82073d28.era",
     "mainnet-01592-d4dc8b98.era",
+];
+
+/// Default mainnet url for downloading mainnet `.erae` files
+const ERE_MAINNET_URL: &str = "https://data.ethpandaops.io/erae/mainnet/";
+
+/// Succinct list of mainnet `.erae` files
+/// from <https://data.ethpandaops.io/erae/mainnet/>.
+///
+/// Spread across history and the merge (era ~1896) so both compositions are covered: pre-merge
+/// files carry total-difficulty and an accumulator, post-merge files carry neither.
+const ERE_MAINNET_FILES_NAMES: [&str; 6] = [
+    "mainnet-00000-a6860fef.erae",
+    "mainnet-00500-365ebdb8.erae",
+    "mainnet-01500-8f81d882.erae",
+    "mainnet-01900-34196a7e.erae",
+    "mainnet-02500-73f28496.erae",
+    "mainnet-02992-d3f7961d.erae",
 ];
 
 /// Utility for downloading `.era` and `.era1` files for tests
@@ -195,6 +214,7 @@ impl EraTestDownloader {
         match (network, file_type) {
             (MAINNET, EraFileType::Era1) => Ok((ERA1_MAINNET_URL, &ERA1_MAINNET_FILES_NAMES[..])),
             (MAINNET, EraFileType::Era) => Ok((ERA_MAINNET_URL, &ERA_MAINNET_FILES_NAMES[..])),
+            (MAINNET, EraFileType::Ere) => Ok((ERE_MAINNET_URL, &ERE_MAINNET_FILES_NAMES[..])),
             (SEPOLIA, EraFileType::Era1) => Ok((ERA1_SEPOLIA_URL, &ERA1_SEPOLIA_FILES_NAMES[..])),
             (HOODI, EraFileType::Era) => Ok((ERA_HOODI_URL, &ERA_HOODI_FILES_NAMES[..])),
             _ => Err(eyre!(
@@ -215,5 +235,11 @@ impl EraTestDownloader {
     async fn open_era_file(&self, filename: &str, network: &str) -> Result<EraFile> {
         let path = self.download_file(filename, network).await?;
         EraReader::open(&path, network).map_err(|e| eyre!("Failed to open Era1 file: {e}"))
+    }
+
+    /// Open `.erae` file, downloading it if necessary
+    async fn open_ere_file(&self, filename: &str, network: &str) -> Result<EreFile> {
+        let path = self.download_file(filename, network).await?;
+        EreReader::open(&path, network).map_err(|e| eyre!("Failed to open ere file: {e}"))
     }
 }

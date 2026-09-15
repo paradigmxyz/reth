@@ -13,7 +13,7 @@ use reth::{
 };
 use reth_exex::{ExExContext, ExExEvent};
 use reth_node_ethereum::EthereumNode;
-use reth_tracing::tracing::info;
+use reth_tracing::tracing::{info, warn};
 
 struct MyExEx<Node: FullNodeComponents> {
     ctx: ExExContext<Node>,
@@ -52,9 +52,14 @@ impl<Node: FullNodeComponents<Types: NodeTypes<Primitives = EthPrimitives>>> Fut
                     .map(|b| b.body().transaction_count() as u64)
                     .sum::<u64>();
 
-                this.ctx
+                if let Err(err) = this
+                    .ctx
                     .events
-                    .send(ExExEvent::FinishedHeight(committed_chain.tip().num_hash()))?;
+                    .send(ExExEvent::FinishedHeight(committed_chain.tip().num_hash()))
+                {
+                    warn!(%err, "ExEx event channel closed");
+                    return Poll::Ready(Ok(()));
+                }
             }
 
             if let Some(first_block) = this.first_block {

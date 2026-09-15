@@ -1,5 +1,6 @@
 //! Additional helpers for executing tracing calls
 
+use crate::metrics::WorkerPoolMetrics;
 use std::{
     any::Any,
     cell::RefCell,
@@ -12,6 +13,7 @@ use std::{
     },
     task::{ready, Context, Poll},
     thread,
+    time::Instant,
 };
 use tokio::sync::{oneshot, AcquireError, OwnedSemaphorePermit, Semaphore};
 
@@ -166,6 +168,10 @@ thread_local! {
 /// [`Worker::init`]. The state is thread-local and accessible during [`install`](Self::install)
 /// calls.
 ///
+/// Worker access is backed by a thread-local [`RefCell`]. Keep [`with_worker`](Self::with_worker)
+/// and [`with_worker_mut`](Self::with_worker_mut) closures short and non-yielding: if Rayon runs
+/// another job on the same thread while a borrow is active, re-entrant worker access can panic.
+///
 /// The pool supports multiple init/clear cycles, allowing reuse of the same threads with
 /// different state configurations.
 ///
@@ -173,6 +179,7 @@ thread_local! {
 #[derive(Debug)]
 pub struct WorkerPool {
     pool: OnceLock<rayon::ThreadPool>,
+    metrics: OnceLock<WorkerPoolMetrics>,
     num_threads: usize,
     thread_name_prefix: &'static str,
 }
@@ -183,7 +190,7 @@ impl WorkerPool {
     /// The underlying rayon pool is not created until the first method that requires it is called.
     /// Thread names follow the pattern `"{prefix}-{index:02}"`.
     pub const fn new(num_threads: usize, thread_name_prefix: &'static str) -> Self {
-        Self { pool: OnceLock::new(), num_threads, thread_name_prefix }
+        Self { pool: OnceLock::new(), metrics: OnceLock::new(), num_threads, thread_name_prefix }
     }
 
     /// Returns a reference to the underlying rayon pool, creating it on first access.
@@ -197,6 +204,11 @@ impl WorkerPool {
             )
             .unwrap_or_else(|err| panic!("failed to build {prefix} worker pool: {err}"))
         })
+    }
+
+    /// Returns metrics for this worker pool.
+    fn metrics(&self) -> &WorkerPoolMetrics {
+        self.metrics.get_or_init(|| WorkerPoolMetrics::new(self.thread_name_prefix))
     }
 
     /// Returns `true` if the underlying rayon pool has been initialized.
@@ -264,7 +276,16 @@ impl WorkerPool {
     /// Each thread can access its own [`Worker`] via the provided reference or through additional
     /// [`WorkerPool::with_worker`] calls.
     pub fn install<R: Send>(&self, f: impl FnOnce(&Worker) -> R + Send) -> R {
-        self.pool().install(|| WORKER.with_borrow(|worker| f(worker)))
+        let pool = self.pool();
+        let metrics = self.metrics().clone();
+        let queued_at = Instant::now();
+
+        pool.install(move || {
+            let started_at = Instant::now();
+            metrics.record_job_queue_wait(started_at.saturating_duration_since(queued_at));
+            let _record_job_duration = RecordWorkerPoolJobDurationOnDrop::new(metrics, started_at);
+            WORKER.with_borrow(|worker| f(worker))
+        })
     }
 
     /// Runs a closure on the pool without worker state access.
@@ -272,12 +293,52 @@ impl WorkerPool {
     /// Like [`install`](Self::install) but for closures that don't need per-thread [`Worker`]
     /// state.
     pub fn install_fn<R: Send>(&self, f: impl FnOnce() -> R + Send) -> R {
-        self.pool().install(f)
+        let pool = self.pool();
+        let metrics = self.metrics().clone();
+        let queued_at = Instant::now();
+
+        pool.install(move || {
+            let started_at = Instant::now();
+            metrics.record_job_queue_wait(started_at.saturating_duration_since(queued_at));
+            let _record_job_duration = RecordWorkerPoolJobDurationOnDrop::new(metrics, started_at);
+            f()
+        })
+    }
+
+    /// Runs a closure on this pool, waiting for its result.
+    ///
+    /// Unlike [`install_fn`](Self::install_fn), this always queues the closure onto this pool
+    /// when called from another rayon pool. This avoids Rayon running the closure on the caller's
+    /// worker through its cross-pool install path.
+    pub fn spawn_and_wait<R: Send + 'static>(&self, f: impl FnOnce() -> R + Send + 'static) -> R {
+        let pool = self.pool();
+        if pool.current_thread_index().is_some() {
+            return f()
+        }
+
+        let (tx, rx) = std::sync::mpsc::sync_channel(1);
+        self.spawn(move || {
+            let _ = tx.send(catch_unwind(AssertUnwindSafe(f)));
+        });
+
+        match rx.recv().expect("worker pool exited before completing task") {
+            Ok(result) => result,
+            Err(panic) => std::panic::resume_unwind(panic),
+        }
     }
 
     /// Spawns a closure on the pool.
     pub fn spawn(&self, f: impl FnOnce() + Send + 'static) {
-        self.pool().spawn(f);
+        let pool = self.pool();
+        let metrics = self.metrics().clone();
+        let queued_at = Instant::now();
+
+        pool.spawn(move || {
+            let started_at = Instant::now();
+            metrics.record_job_queue_wait(started_at.saturating_duration_since(queued_at));
+            let _record_job_duration = RecordWorkerPoolJobDurationOnDrop::new(metrics, started_at);
+            f();
+        });
     }
 
     /// Executes `f` on this pool using [`rayon::in_place_scope`], which converts the calling
@@ -287,17 +348,66 @@ impl WorkerPool {
         self.pool().in_place_scope(f)
     }
 
-    /// Access the current thread's [`Worker`] from within an [`install`](Self::install) closure.
+    /// Accesses the current thread's [`Worker`] from within a pool closure.
     ///
     /// This is useful for accessing the worker from inside `par_iter` where the initial `&Worker`
     /// reference from `install` belongs to a different thread.
+    ///
+    /// This borrows the thread-local worker for the entire duration of `f`. Do not yield to Rayon
+    /// from inside `f` if another job could call [`with_worker_mut`](Self::with_worker_mut) on the
+    /// same thread. Yield points include parallel iterators, `rayon::join`, scopes, and waiting in
+    /// `ThreadPool::install` on a different Rayon pool. A cross-pool `install` may run another job
+    /// from the caller's pool on the same thread while it waits.
+    ///
+    /// Prefer copying or cloning the required worker state in `f`, returning from this method to
+    /// release the borrow, and only then performing work that may yield.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the current thread's worker is already mutably borrowed, including by a
+    /// re-entrant [`with_worker_mut`](Self::with_worker_mut) call.
     pub fn with_worker<R>(f: impl FnOnce(&Worker) -> R) -> R {
         WORKER.with_borrow(|worker| f(worker))
     }
 
-    /// Mutably access the current thread's [`Worker`] from within a pool closure.
+    /// Mutably accesses the current thread's [`Worker`] from within a pool closure.
+    ///
+    /// This exclusively borrows the thread-local worker for the entire duration of `f`. The borrow
+    /// is not re-entrant: if Rayon runs another job on the same thread before `f` returns, any call
+    /// to [`with_worker`](Self::with_worker) or `with_worker_mut` from that job will panic.
+    ///
+    /// Do not call operations that can yield to Rayon from inside `f` when re-entrant worker access
+    /// is possible. This includes parallel iterators, `rayon::join`, scopes, and waiting in
+    /// `ThreadPool::install` on a different Rayon pool. In particular, a cross-pool `install`
+    /// cooperatively runs jobs from the caller's pool while waiting for the target pool.
+    ///
+    /// Prefer computing updates before entering `with_worker_mut`, then use this closure only to
+    /// apply the update to the worker state.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the current thread's worker is already borrowed, including by a re-entrant
+    /// `with_worker` or `with_worker_mut` call.
     pub fn with_worker_mut<R>(f: impl FnOnce(&mut Worker) -> R) -> R {
         WORKER.with_borrow_mut(|worker| f(worker))
+    }
+}
+
+/// Records a worker pool job's run time when the job finishes or unwinds.
+struct RecordWorkerPoolJobDurationOnDrop {
+    metrics: WorkerPoolMetrics,
+    started_at: Instant,
+}
+
+impl RecordWorkerPoolJobDurationOnDrop {
+    const fn new(metrics: WorkerPoolMetrics, started_at: Instant) -> Self {
+        Self { metrics, started_at }
+    }
+}
+
+impl Drop for RecordWorkerPoolJobDurationOnDrop {
+    fn drop(&mut self) {
+        self.metrics.record_job_duration(self.started_at.elapsed());
     }
 }
 
@@ -495,5 +605,22 @@ mod tests {
         assert_eq!(results, vec![10, 11, 12, 13]);
 
         pool.clear();
+    }
+
+    #[test]
+    fn worker_pool_spawn_and_wait_runs_on_target_pool() {
+        let caller_pool = WorkerPool::new(1, "caller");
+        let target_pool = Arc::new(WorkerPool::new(1, "target"));
+
+        let thread_name = caller_pool.install_fn({
+            let target_pool = Arc::clone(&target_pool);
+            move || {
+                WorkerPool::with_worker_mut(|_| {
+                    target_pool.spawn_and_wait(|| thread::current().name().unwrap().to_owned())
+                })
+            }
+        });
+
+        assert_eq!(thread_name, "target-00");
     }
 }

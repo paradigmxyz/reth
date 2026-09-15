@@ -1,19 +1,27 @@
-use crate::utils::{advance_with_random_transactions, eth_payload_attributes};
+use crate::utils::{
+    advance_with_random_transactions, eth_payload_attributes, eth_payload_attributes_amsterdam,
+};
 use alloy_consensus::{SignableTransaction, TxEip1559, TxEnvelope};
-use alloy_eips::Encodable2718;
+use alloy_eips::{BlockNumberOrTag, Encodable2718};
 use alloy_network::TxSignerSync;
+use alloy_primitives::B256;
 use alloy_provider::{Provider, ProviderBuilder};
-use futures::future::JoinAll;
+use alloy_rpc_types_engine::{ForkchoiceState, PayloadStatusEnum};
+use futures::{future::JoinAll, StreamExt};
 use rand::{rngs::StdRng, seq::IndexedRandom, Rng, SeedableRng};
 use reth_chainspec::{ChainSpecBuilder, MAINNET};
 use reth_e2e_test_utils::{
     setup, setup_engine, setup_engine_with_connection, transaction::TransactionTestContext,
     wallet::Wallet,
 };
-use reth_network::{NetworkInfo, PeersInfo};
+use reth_engine_primitives::ConsensusEngineEvent;
+use reth_ethereum_primitives::EthPrimitives;
+use reth_network::{test_utils::Testnet, NetworkInfo, Peers, PeersInfo};
 use reth_node_builder::{NodeBuilder, NodeHandle};
 use reth_node_core::{args::NetworkArgs, node_config::NodeConfig};
 use reth_node_ethereum::EthereumNode;
+use reth_primitives_traits::SealedBlock;
+use reth_provider::test_utils::MockEthProvider;
 use reth_rpc_api::EthApiServer;
 use reth_tasks::Runtime;
 use std::{net::UdpSocket, sync::Arc, time::Duration};
@@ -135,6 +143,97 @@ async fn can_sync() -> eyre::Result<()> {
 }
 
 #[tokio::test]
+async fn rejects_downloaded_block_with_invalid_bal_hash() -> eyre::Result<()> {
+    reth_tracing::init_test_tracing();
+
+    let chain_spec = Arc::new(
+        ChainSpecBuilder::default()
+            .chain(MAINNET.chain)
+            .genesis(serde_json::from_str(include_str!("../assets/genesis.json")).unwrap())
+            .amsterdam_activated()
+            .build(),
+    );
+
+    let (mut nodes, wallet) = setup_engine::<EthereumNode>(
+        1,
+        chain_spec.clone(),
+        false,
+        Default::default(),
+        eth_payload_attributes_amsterdam,
+    )
+    .await?;
+    let mut node = nodes.pop().unwrap();
+
+    // Build a valid Amsterdam block without submitting it to the engine, then change only its BAL
+    // commitment so all other execution-derived header fields remain valid.
+    let raw_tx = TransactionTestContext::transfer_tx_bytes(1, wallet.inner).await;
+    node.rpc.inject_tx(raw_tx).await?;
+    let payload = node.new_payload().await?;
+    let mut invalid_block = payload.block().clone().into_block();
+    let valid_bal_hash = invalid_block.header.block_access_list_hash.unwrap();
+    invalid_block.header.block_access_list_hash = Some(B256::ZERO);
+    assert_ne!(valid_bal_hash, B256::ZERO);
+
+    let invalid_block = SealedBlock::seal_slow(invalid_block);
+    let invalid_hash = invalid_block.hash();
+    let genesis_hash = node.block_hash(0);
+
+    // Serve the malformed block from a real eth protocol peer so the node must fetch it after the
+    // forkchoice update instead of receiving it through `newPayload`.
+    let peer_provider = Arc::new(
+        MockEthProvider::<EthPrimitives>::new()
+            .with_chain_spec((*chain_spec).clone())
+            .with_genesis_block(),
+    );
+    peer_provider.add_block(invalid_hash, invalid_block.into_block());
+
+    let mut testnet = Testnet::create_with(1, peer_provider).await;
+    testnet.for_each_mut(|peer| peer.install_request_handler());
+    let peer = testnet.peers()[0].handle();
+    let peer_id = *peer.peer_id();
+    let peer_addr = peer.local_addr();
+    let _testnet = testnet.spawn();
+
+    node.inner.network.add_peer(peer_id, peer_addr);
+    assert_eq!(node.network.next_session_established().await, Some(peer_id));
+
+    let mut engine_events = node.inner.add_ons_handle.consensus_engine_events().new_listener();
+    let state = ForkchoiceState {
+        head_block_hash: invalid_hash,
+        safe_block_hash: genesis_hash,
+        finalized_block_hash: genesis_hash,
+    };
+    let response =
+        node.inner.add_ons_handle.beacon_engine_handle.fork_choice_updated(state, None).await?;
+    assert_eq!(response.payload_status.status, PayloadStatusEnum::Syncing);
+
+    let error = tokio::time::timeout(Duration::from_secs(20), async {
+        while let Some(event) = engine_events.next().await {
+            match event {
+                ConsensusEngineEvent::InvalidBlock { block, error }
+                    if block.hash() == invalid_hash =>
+                {
+                    return error
+                }
+                ConsensusEngineEvent::CanonicalBlockAdded(block, _)
+                    if block.recovered_block().hash() == invalid_hash =>
+                {
+                    panic!("block with invalid BAL hash became canonical")
+                }
+                _ => {}
+            }
+        }
+        panic!("consensus engine event stream ended")
+    })
+    .await?;
+
+    assert!(error.contains("block access list hash mismatch"), "{error}");
+    assert_eq!(node.current_forkchoice_state()?.head_block_hash, genesis_hash);
+
+    Ok(())
+}
+
+#[tokio::test]
 async fn e2e_test_send_transactions() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
 
@@ -228,6 +327,70 @@ async fn test_long_reorg() -> eyre::Result<()> {
     // Ensure that it works the other way around too.
     advance_with_random_transactions(&mut first_node, 20, &mut rng, true).await?;
     second_node.sync_to(first_node.block_hash(100)).await?;
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_pipeline_sync_target_head_becomes_finalized() -> eyre::Result<()> {
+    reth_tracing::init_test_tracing();
+
+    const TARGET_BLOCK: u64 = 100;
+
+    let seed: [u8; 32] = rand::rng().random();
+    let mut rng = StdRng::from_seed(seed);
+    println!("Seed: {seed:?}");
+
+    let chain_spec = Arc::new(
+        ChainSpecBuilder::default()
+            .chain(MAINNET.chain)
+            .genesis(serde_json::from_str(include_str!("../assets/genesis.json")).unwrap())
+            .cancun_activated()
+            .prague_activated()
+            .build(),
+    );
+
+    let (mut nodes, _) = setup_engine::<EthereumNode>(
+        2,
+        chain_spec.clone(),
+        false,
+        Default::default(),
+        eth_payload_attributes,
+    )
+    .await?;
+
+    let mut first_node = nodes.pop().unwrap();
+    let second_node = nodes.pop().unwrap();
+
+    let first_provider = ProviderBuilder::new().connect_http(first_node.rpc_url());
+    let second_provider = ProviderBuilder::new().connect_http(second_node.rpc_url());
+
+    advance_with_random_transactions(&mut first_node, TARGET_BLOCK as usize, &mut rng, false)
+        .await?;
+
+    assert_eq!(second_provider.get_block_number().await?, 0);
+
+    let target = first_provider.get_block_by_number(TARGET_BLOCK.into()).await?.unwrap();
+
+    // Send exactly one FCU with an unknown head == safe == finalized. The node must promote this
+    // FCU when pipeline sync completes, without relying on another FCU.
+    second_node.update_forkchoice(target.header.hash, target.header.hash).await?;
+
+    tokio::time::timeout(Duration::from_secs(40), async {
+        while second_provider.get_block_number().await? != TARGET_BLOCK {
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+        eyre::Ok(())
+    })
+    .await
+    .map_err(|_| eyre::eyre!("timed out waiting for pipeline sync to block {TARGET_BLOCK}"))??;
+
+    let finalized = second_provider
+        .get_block_by_number(BlockNumberOrTag::Finalized)
+        .await?
+        .ok_or_else(|| eyre::eyre!("finalized block not found"))?;
+    assert_eq!(finalized.header.number, TARGET_BLOCK);
+    assert_eq!(finalized.header.hash, target.header.hash);
 
     Ok(())
 }

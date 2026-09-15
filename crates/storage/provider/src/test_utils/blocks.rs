@@ -13,8 +13,7 @@ use reth_ethereum_primitives::{BlockBody, Receipt, Transaction, TransactionSigne
 use reth_node_types::NodeTypes;
 use reth_primitives_traits::{Account, RecoveredBlock, SealedBlock, SealedHeader};
 use reth_trie::root::{state_root_unhashed, storage_root_unhashed};
-use revm_database::BundleState;
-use revm_state::AccountInfo;
+use revm::{database::BundleState, state::AccountInfo};
 use std::{str::FromStr, sync::LazyLock};
 
 /// Assert genesis block

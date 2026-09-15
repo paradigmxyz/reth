@@ -1,0 +1,524 @@
+@import "tailwindcss" important;
+
+@custom-variant dark (&:where(.dark, .dark *, [data-vocs-theme="dark"], [data-vocs-theme="dark"] *));
+
+[data-v-content]:has(.reth-home-page) {
+  max-width: min(940px, calc(100vw - 48px));
+  width: 100%;
+  padding-top: 32px;
+  padding-bottom: 88px;
+}
+
+.reth-home-page,
+.reth-home-page * {
+  box-sizing: border-box;
+  letter-spacing: 0;
+}
+
+.reth-home-page {
+  display: flex;
+  flex-direction: column;
+  gap: 26px;
+  color: var(--vocs-text-color-primary);
+}
+
+.reth-home-page a {
+  color: inherit;
+  text-decoration: none;
+}
+
+.reth-home-hero {
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+}
+
+.reth-home-hero-top {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(320px, 0.95fr);
+  gap: 28px;
+  align-items: end;
+}
+
+.reth-home-hero-heading {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  align-items: flex-start;
+}
+
+.reth-home-hero-media {
+  overflow: hidden;
+  border: 1px solid var(--vocs-border-color-primary);
+  border-radius: 10px;
+  background: #0b0b0d;
+}
+
+.reth-home-hero-media img {
+  display: block;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  object-fit: cover;
+  object-position: center;
+}
+
+.reth-home-hero-body {
+  max-width: 760px;
+  min-width: 0;
+}
+
+.reth-home-hero-heading .reth-home-kicker {
+  margin-bottom: 12px;
+}
+
+.reth-home-kicker {
+  margin: 0 0 10px;
+  color: var(--vocs-text-color-muted);
+  font-size: 12px;
+  font-weight: 650;
+  line-height: 1.25;
+  text-transform: uppercase;
+}
+
+.reth-home-hero h1 {
+  margin: 0;
+  color: var(--vocs-text-color-heading);
+  font-size: clamp(68px, 8vw, 92px);
+  font-weight: 650;
+  line-height: 0.94;
+}
+
+.reth-home-lede,
+.reth-home-detail,
+.reth-home-section-copy {
+  margin-top: 14px;
+  color: var(--vocs-text-color-secondary);
+  font-size: 17px;
+  line-height: 1.58;
+}
+
+.reth-home-lede {
+  max-width: 760px;
+  color: var(--vocs-text-color-primary);
+  font-size: clamp(19px, 1.6vw, 22px);
+  line-height: 1.38;
+}
+
+.reth-home-detail {
+  max-width: 760px;
+  margin-top: 10px;
+  font-size: 16px;
+}
+
+.reth-home-hero-body .reth-home-lede {
+  margin-top: 0;
+}
+
+.reth-home-actions,
+.reth-home-metrics {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.reth-home-actions {
+  margin-top: 18px;
+}
+
+.reth-home-button {
+  display: inline-flex;
+  min-height: 40px;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--vocs-border-color-primary);
+  border-radius: 8px;
+  padding: 0 16px;
+  background: var(--vocs-background-color-surface);
+  color: var(--vocs-text-color-heading);
+  font-size: 14px;
+  font-weight: 650;
+  line-height: 1;
+  transition: background 150ms ease, border-color 150ms ease, transform 150ms ease;
+}
+
+.reth-home-button:hover,
+.reth-home-metrics a:hover,
+.reth-home-feature-grid a:hover,
+.reth-sdk-card:hover,
+.reth-trusted-card:hover,
+.reth-home-supporter-grid a:hover {
+  transform: translateY(-1px);
+  border-color: var(--vocs-text-color-muted);
+  background: var(--vocs-background-color-surfaceTint);
+}
+
+.reth-home-button-primary {
+  border-color: #111111;
+  background: #111111;
+  color: #ffffff !important;
+}
+
+.reth-home-button-primary:hover {
+  background: #2a2a2a;
+}
+
+[data-vocs-theme="dark"] .reth-home-button-primary {
+  border-color: #ffffff;
+  background: #ffffff;
+  color: #111111 !important;
+}
+
+[data-vocs-theme="dark"] .reth-home-button-primary:hover {
+  background: rgba(255, 255, 255, 0.88);
+}
+
+.reth-home-quickstart {
+  display: grid;
+  grid-template-columns: minmax(0, 0.78fr) minmax(360px, 1.22fr);
+  gap: 24px;
+  align-items: start;
+  border: 1px solid var(--vocs-border-color-primary);
+  border-radius: 10px;
+  padding: 24px;
+  background: color-mix(in srgb, var(--vocs-background-color-surface) 92%, transparent);
+}
+
+.reth-home-section-header {
+  max-width: 760px;
+}
+
+.reth-home-quickstart h2,
+.reth-home-section h2 {
+  margin: 0;
+  color: var(--vocs-text-color-heading);
+  font-weight: 650;
+  line-height: 1.1;
+}
+
+.reth-home-quickstart h2 {
+  font-size: clamp(24px, 2.6vw, 30px);
+}
+
+.reth-home-section h2 {
+  font-size: clamp(27px, 3vw, 34px);
+}
+
+.reth-home-code {
+  min-width: 0;
+}
+
+#home-install .vocs_CodeGroup {
+  display: flex;
+  min-height: 260px;
+  flex-direction: column;
+  margin: 0;
+}
+
+#home-install .vocs_Tabs_content {
+  flex: 1;
+}
+
+#home-install .vocs_Code {
+  font-size: 15px;
+}
+
+.reth-home-metrics-section {
+  display: flex;
+  justify-content: flex-start;
+  margin: -4px 0 8px;
+}
+
+.reth-home-metrics-section .reth-home-metrics {
+  justify-content: flex-start;
+}
+
+.reth-home-metrics a {
+  display: inline-flex;
+  min-height: 36px;
+  align-items: center;
+  gap: 10px;
+  border: 1px solid var(--vocs-border-color-primary);
+  border-radius: 8px;
+  padding: 5px 10px 5px 6px;
+  background: var(--vocs-background-color-surface);
+  transition: background 150ms ease, border-color 150ms ease, transform 150ms ease;
+}
+
+.reth-home-metrics span {
+  display: inline-flex;
+  height: 24px;
+  align-items: center;
+  border-radius: 6px;
+  padding: 0 8px;
+  background: var(--vocs-background-color-surfaceMuted);
+  color: var(--vocs-text-color-muted);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.reth-home-metrics strong {
+  color: var(--vocs-text-color-heading);
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.reth-home-metric-highlight {
+  border-color: color-mix(in srgb, var(--vocs-color-green) 58%, transparent) !important;
+}
+
+.reth-home-metric-highlight strong {
+  color: var(--vocs-color-green);
+}
+
+.reth-home-feature-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.reth-home-feature-grid a,
+.reth-sdk-card,
+.reth-trusted-card,
+.reth-home-supporter-grid a {
+  border: 1px solid var(--vocs-border-color-primary);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--vocs-background-color-surface) 90%, transparent);
+  transition: background 150ms ease, border-color 150ms ease, transform 150ms ease;
+}
+
+.reth-home-feature-grid a {
+  display: flex;
+  min-height: 132px;
+  flex-direction: column;
+  justify-content: space-between;
+  padding: 18px;
+}
+
+.reth-home-feature-grid span,
+.reth-sdk-card h3 {
+  color: var(--vocs-text-color-heading);
+  font-size: 18px;
+  font-weight: 650;
+  line-height: 1.18;
+}
+
+.reth-home-feature-grid strong {
+  color: var(--vocs-text-color-secondary);
+  font-size: 14px;
+  font-weight: 450;
+  line-height: 1.5;
+}
+
+.reth-home-section {
+  margin-top: 36px;
+}
+
+.reth-home-section .reth-home-section-header {
+  margin-bottom: 20px;
+}
+
+.reth-trusted-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.reth-trusted-card {
+  display: grid;
+  height: 138px;
+  place-items: center;
+  padding: 22px;
+}
+
+.reth-trusted-logo {
+  display: block;
+  width: auto;
+  height: auto;
+  object-fit: contain;
+}
+
+.reth-trusted-logo-flashbots,
+.reth-trusted-logo-succinct {
+  max-width: 76px;
+  max-height: 76px;
+}
+
+.reth-trusted-logo-coinbase,
+.reth-trusted-logo-alchemy {
+  max-width: 148px;
+  max-height: 52px;
+}
+
+.reth-sdk-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.reth-sdk-card {
+  position: relative;
+  display: flex;
+  min-height: 198px;
+  flex-direction: column;
+  padding: 22px;
+}
+
+.reth-sdk-badge {
+  position: absolute;
+  top: 18px;
+  right: 18px;
+  border-radius: 999px;
+  padding: 5px 10px;
+  background: var(--vocs-background-color-surfaceMuted);
+  color: var(--vocs-text-color-heading);
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.reth-sdk-card h3 {
+  max-width: calc(100% - 82px);
+  margin: 0;
+}
+
+.reth-sdk-company {
+  margin: 8px 0 0;
+  color: var(--vocs-text-color-secondary);
+  font-size: 15px;
+  line-height: 1.4;
+}
+
+.reth-sdk-description {
+  margin: 20px 0 24px;
+  color: var(--vocs-text-color-secondary);
+  font-size: 15px;
+  line-height: 1.5;
+}
+
+.reth-sdk-link {
+  display: inline-flex;
+  width: fit-content;
+  align-items: center;
+  gap: 8px;
+  margin-top: auto;
+  color: var(--vocs-text-color-heading);
+  font-size: 14px;
+  font-weight: 650;
+}
+
+.reth-sdk-link:hover {
+  color: var(--vocs-color-accent7);
+}
+
+.reth-sdk-link-icon {
+  width: 17px;
+  height: 17px;
+  flex: none;
+}
+
+.reth-home-supporter-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.reth-home-supporter-grid a {
+  display: grid;
+  height: 152px;
+  place-items: center;
+  padding: 24px;
+}
+
+.reth-home-supporter-grid img {
+  display: block;
+  max-width: min(290px, 76%);
+  max-height: 70px;
+  object-fit: contain;
+}
+
+[data-vocs-theme="dark"] .reth-home-supporter-grid img {
+  filter: invert(1);
+}
+
+.border-accent {
+  border: 1px solid var(--vocs-color_borderAccent) !important;
+}
+
+@media (max-width: 1180px) {
+  .reth-home-quickstart {
+    grid-template-columns: 1fr;
+  }
+
+  .reth-home-hero-top {
+    grid-template-columns: minmax(0, 0.95fr) minmax(280px, 0.78fr);
+    gap: 24px;
+  }
+}
+
+@media (min-width: 1376px) {
+  [data-v-content]:has(.reth-home-page) {
+    max-width: min(860px, calc(100vw - 48px));
+  }
+}
+
+@media (max-width: 900px) {
+  [data-v-content]:has(.reth-home-page) {
+    max-width: calc(100vw - 32px);
+    padding-top: 24px;
+    padding-bottom: 64px;
+  }
+
+  .reth-home-hero-top {
+    grid-template-columns: 1fr;
+    align-items: start;
+  }
+
+  .reth-home-hero-media img {
+    aspect-ratio: 16 / 8;
+  }
+
+  .reth-home-hero-body {
+    max-width: 680px;
+  }
+
+  .reth-home-feature-grid,
+  .reth-trusted-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 620px) {
+  .reth-home-page {
+    gap: 24px;
+  }
+
+  .reth-home-actions,
+  .reth-home-metrics {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .reth-home-button,
+  .reth-home-metrics a {
+    width: 100%;
+  }
+
+  .reth-home-quickstart {
+    padding: 18px;
+  }
+
+  .reth-home-feature-grid,
+  .reth-trusted-grid,
+  .reth-sdk-grid,
+  .reth-home-supporter-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .reth-trusted-card {
+    height: 122px;
+  }
+
+  .reth-sdk-card {
+    min-height: 0;
+    padding: 20px;
+  }
+}

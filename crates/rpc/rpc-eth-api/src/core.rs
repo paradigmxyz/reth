@@ -5,7 +5,6 @@ use crate::{
     RpcBlock, RpcHeader, RpcReceipt, RpcTransaction,
 };
 use alloy_dyn_abi::TypedData;
-use alloy_eip7928::BlockAccessList;
 use alloy_eips::{eip2930::AccessListResult, BlockId, BlockNumberOrTag};
 use alloy_json_rpc::RpcObject;
 use alloy_primitives::{Address, Bytes, B256, B64, U256, U64};
@@ -19,7 +18,7 @@ use alloy_serde::JsonStorageKey;
 use jsonrpsee::{core::RpcResult, proc_macros::rpc};
 use reth_primitives_traits::TxTy;
 use reth_rpc_convert::RpcTxReq;
-use reth_rpc_eth_types::{EthApiError, FillTransaction};
+use reth_rpc_eth_types::{EthApiError, EthCapabilities, FillTransaction};
 use reth_rpc_server_types::{result::internal_rpc_err, ToRpcResult};
 use serde_json::Value;
 use std::collections::HashMap;
@@ -88,6 +87,13 @@ pub trait EthApi<
     /// Returns the chain ID of the current network.
     #[method(name = "chainId")]
     async fn chain_id(&self) -> RpcResult<Option<U64>>;
+
+    /// Returns effective routing capabilities for this node.
+    ///
+    /// See the `eth_capabilities` execution API proposal:
+    /// <https://github.com/ethereum/execution-apis/pull/755>.
+    #[method(name = "capabilities")]
+    fn capabilities(&self) -> RpcResult<EthCapabilities>;
 
     /// Returns information about a block by hash.
     #[method(name = "getBlockByHash")]
@@ -186,6 +192,10 @@ pub trait EthApi<
         address: Address,
         nonce: U64,
     ) -> RpcResult<Option<T>>;
+
+    /// Returns all transactions in the local pending pool.
+    #[method(name = "pendingTransactions")]
+    fn pending_transactions(&self) -> RpcResult<Vec<T>>;
 
     /// Returns the receipt of a transaction by transaction hash.
     #[method(name = "getTransactionReceipt")]
@@ -375,7 +385,11 @@ pub trait EthApi<
     ///
     /// This will return a timeout error if the transaction isn't included within some time period.
     #[method(name = "sendRawTransactionSync")]
-    async fn send_raw_transaction_sync(&self, bytes: Bytes) -> RpcResult<R>;
+    async fn send_raw_transaction_sync(
+        &self,
+        bytes: Bytes,
+        timeout_ms: Option<u64>,
+    ) -> RpcResult<R>;
 
     /// Returns an Ethereum specific signature with: sign(keccak256("\x19Ethereum Signed Message:\n"
     /// + len(message) + message))).
@@ -400,6 +414,14 @@ pub trait EthApi<
         keys: Vec<JsonStorageKey>,
         block_number: Option<BlockId>,
     ) -> RpcResult<EIP1186AccountProofResponse>;
+
+    /// Returns the account and storage values of the specified targets including Merkle proofs.
+    #[method(name = "getMultiProof")]
+    async fn get_multi_proof(
+        &self,
+        targets: Vec<(Address, Vec<B256>)>,
+        block_number: Option<BlockId>,
+    ) -> RpcResult<Vec<EIP1186AccountProofResponse>>;
 
     /// Returns the account's balance, nonce, and code.
     ///
@@ -480,6 +502,12 @@ where
     async fn chain_id(&self) -> RpcResult<Option<U64>> {
         trace!(target: "rpc::eth", "Serving eth_chainId");
         Ok(Some(EthApiSpec::chain_id(self)))
+    }
+
+    /// Handler for: `eth_capabilities`
+    fn capabilities(&self) -> RpcResult<EthCapabilities> {
+        trace!(target: "rpc::eth", "Serving eth_capabilities");
+        EthApiSpec::capabilities(self).to_rpc_result()
     }
 
     /// Handler for: `eth_getBlockByHash`
@@ -647,6 +675,12 @@ where
         trace!(target: "rpc::eth", ?sender, ?nonce, "Serving eth_getTransactionBySenderAndNonce");
         Ok(EthTransactions::get_transaction_by_sender_and_nonce(self, sender, nonce.to(), true)
             .await?)
+    }
+
+    /// Handler for: `eth_pendingTransactions`
+    fn pending_transactions(&self) -> RpcResult<Vec<RpcTransaction<T::NetworkTypes>>> {
+        trace!(target: "rpc::eth", "Serving eth_pendingTransactions");
+        Ok(EthTransactions::pending_transactions(self)?)
     }
 
     /// Handler for: `eth_getTransactionReceipt`
@@ -890,9 +924,13 @@ where
     }
 
     /// Handler for: `eth_sendRawTransactionSync`
-    async fn send_raw_transaction_sync(&self, tx: Bytes) -> RpcResult<RpcReceipt<T::NetworkTypes>> {
-        trace!(target: "rpc::eth", ?tx, "Serving eth_sendRawTransactionSync");
-        Ok(EthTransactions::send_raw_transaction_sync(self, tx).await?)
+    async fn send_raw_transaction_sync(
+        &self,
+        tx: Bytes,
+        timeout_ms: Option<u64>,
+    ) -> RpcResult<RpcReceipt<T::NetworkTypes>> {
+        trace!(target: "rpc::eth", ?tx, ?timeout_ms, "Serving eth_sendRawTransactionSync");
+        Ok(EthTransactions::send_raw_transaction_sync(self, tx, timeout_ms).await?)
     }
 
     /// Handler for: `eth_sign`
@@ -922,6 +960,16 @@ where
     ) -> RpcResult<EIP1186AccountProofResponse> {
         trace!(target: "rpc::eth", ?address, ?keys, ?block_number, "Serving eth_getProof");
         Ok(EthState::get_proof(self, address, keys, block_number)?.await?)
+    }
+
+    /// Handler for: `eth_getMultiProof`
+    async fn get_multi_proof(
+        &self,
+        targets: Vec<(Address, Vec<B256>)>,
+        block_number: Option<BlockId>,
+    ) -> RpcResult<Vec<EIP1186AccountProofResponse>> {
+        trace!(target: "rpc::eth", ?targets, ?block_number, "Serving eth_getMultiProof");
+        Ok(EthState::get_multi_proof(self, targets, block_number)?.await?)
     }
 
     /// Handler for: `eth_getAccountInfo`
@@ -974,7 +1022,6 @@ where
     async fn block_access_list_raw(&self, block: BlockId) -> RpcResult<Option<Bytes>> {
         trace!(target: "rpc::eth", ?block, "Serving eth_getBlockAccessListRaw");
 
-        let bal = self.get_block_access_list(block).await?;
-        Ok(bal.map(|b: BlockAccessList| alloy_rlp::encode(b).into()))
+        Ok(self.get_raw_block_access_list(block).await?)
     }
 }

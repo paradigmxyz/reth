@@ -96,6 +96,19 @@ impl HelloMessageWithProtocols {
             Ok(())
         }
     }
+
+    /// Toggles advertisement of the `snap/2` satellite protocol (EIP-8189).
+    ///
+    /// snap/2 is negotiated as an `RLPx` capability and rides alongside `eth` on the same
+    /// connection. Disabling removes any advertised `snap` capability of any version.
+    pub fn with_snap(mut self, enable: bool) -> Self {
+        if enable {
+            let _ = self.try_add_protocol(Protocol::snap_2());
+        } else {
+            self.protocols.retain(|p| p.cap.name != "snap");
+        }
+        self
+    }
 }
 
 // TODO: determine if we should allow for the extra fields at the end like EIP-706 suggests

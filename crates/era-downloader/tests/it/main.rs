@@ -13,20 +13,30 @@ use futures::Stream;
 use reqwest::IntoUrl;
 use reth_era_downloader::HttpClient;
 
-pub(crate) const ERA1_NIMBUS: &[u8] = include_bytes!("../res/era1-nimbus.html");
-pub(crate) const ERA1_ETH_PORTAL: &[u8] = include_bytes!("../res/ethportal.html");
-pub(crate) const ERA1_ITHACA: &[u8] = include_bytes!("../res/era1-ithaca.html");
-pub(crate) const ERA1_CHECKSUMS: &[u8] = include_bytes!("../res/checksums.txt");
+pub(crate) const ERA1_NIMBUS: &[u8] = include_bytes!("../res/era1/nimbus.html");
+pub(crate) const ERA1_ETH_PORTAL: &[u8] = include_bytes!("../res/era1/ethportal.html");
+pub(crate) const ERA1_ITHACA: &[u8] = include_bytes!("../res/era1/ithaca.html");
+pub(crate) const ERA1_CHECKSUMS: &[u8] = include_bytes!("../res/era1/checksums.txt");
 pub(crate) const ERA1_MAINNET_0: &[u8] =
-    include_bytes!("../res/era1-files/mainnet-00000-5ec1ffb8.era1");
+    include_bytes!("../res/era1/files/mainnet-00000-5ec1ffb8.era1");
 pub(crate) const ERA1_MAINNET_1: &[u8] =
-    include_bytes!("../res/era1-files/mainnet-00001-a5364e9a.era1");
+    include_bytes!("../res/era1/files/mainnet-00001-a5364e9a.era1");
 
-pub(crate) const ERA_NIMBUS: &[u8] = include_bytes!("../res/era-nimbus.html");
+pub(crate) const ERA_NIMBUS: &[u8] = include_bytes!("../res/era/nimbus.html");
 pub(crate) const ERA_MAINNET_0: &[u8] =
-    include_bytes!("../res/era-files/mainnet-00000-4b363db9.era");
+    include_bytes!("../res/era/files/mainnet-00000-4b363db9.era");
 pub(crate) const ERA_MAINNET_1: &[u8] =
-    include_bytes!("../res/era-files/mainnet-00001-40cf2f3c.era");
+    include_bytes!("../res/era/files/mainnet-00001-40cf2f3c.era");
+
+/// Base URL of the ethPandaOps `erae` directory the ere test fixtures are served from.
+pub(crate) const ERE_ETHPANDAOPS_URL: &str = "https://data.ethpandaops.io/erae/mainnet/";
+
+pub(crate) const ERE_ETHPANDAOPS: &[u8] = include_bytes!("../res/ere/ethpandaops.html");
+pub(crate) const ERE_CHECKSUMS: &[u8] = include_bytes!("../res/ere/checksums.txt");
+pub(crate) const ERE_MAINNET_0: &[u8] =
+    include_bytes!("../res/ere/files/mainnet-00000-a6860fef.erae");
+pub(crate) const ERE_MAINNET_1: &[u8] =
+    include_bytes!("../res/ere/files/mainnet-00001-05c64fc4.erae");
 
 /// An HTTP client pre-programmed with canned answers to received calls.
 /// Panics if it receives an unknown call.
@@ -57,6 +67,17 @@ impl HttpClient for StubClient {
             "https://mainnet.era1.nimbus.team/mainnet-00001-a5364e9a.era1" |
             "https://era.ithaca.xyz/era1/mainnet-00001-a5364e9a.era1" => {
                 Bytes::from_static(ERA1_MAINNET_1)
+            }
+            // Ere urls
+            "https://data.ethpandaops.io/erae/mainnet/" => Bytes::from_static(ERE_ETHPANDAOPS),
+            "https://data.ethpandaops.io/erae/mainnet/checksums.txt" => {
+                Bytes::from_static(ERE_CHECKSUMS)
+            }
+            "https://data.ethpandaops.io/erae/mainnet/mainnet-00000-a6860fef.erae" => {
+                Bytes::from_static(ERE_MAINNET_0)
+            }
+            "https://data.ethpandaops.io/erae/mainnet/mainnet-00001-05c64fc4.erae" => {
+                Bytes::from_static(ERE_MAINNET_1)
             }
             // Era urls
             "https://mainnet.era.nimbus.team/" => Bytes::from_static(ERA_NIMBUS),

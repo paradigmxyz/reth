@@ -6,8 +6,8 @@ use crate::{
     to_range, BlockHashReader, BlockNumReader, HeaderProvider, ReceiptProvider,
     TransactionsProvider,
 };
-use alloy_consensus::transaction::TransactionMeta;
-use alloy_eips::{eip2718::Encodable2718, BlockHashOrNumber};
+use alloy_consensus::transaction::{TransactionMeta, TxHashRef};
+use alloy_eips::BlockHashOrNumber;
 use alloy_primitives::{Address, BlockHash, BlockNumber, TxHash, TxNumber, B256};
 use reth_chainspec::ChainInfo;
 use reth_db::static_file::{
@@ -264,7 +264,7 @@ impl<N: NodePrimitives<SignedTx: Decompress + SignedTransaction>> TransactionsPr
 
         Ok(cursor
             .get_one::<TransactionMask<Self::Transaction>>((&hash).into())?
-            .and_then(|res| (res.trie_hash() == hash).then(|| cursor.number()).flatten()))
+            .and_then(|res| (*res.tx_hash() == hash).then(|| cursor.number()).flatten()))
     }
 
     fn transaction_by_id(&self, num: TxNumber) -> ProviderResult<Option<Self::Transaction>> {

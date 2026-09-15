@@ -23,12 +23,14 @@ use alloy_evm::{
     eth::{EthBlockExecutionCtx, EthBlockExecutorFactory},
     EthEvmFactory, FromRecoveredTx, FromTxWithEncoded,
 };
+#[cfg(feature = "jit")]
+use core::any::Any;
 use core::{convert::Infallible, fmt::Debug};
 use reth_chainspec::{ChainSpec, EthChainSpec, MAINNET};
 use reth_ethereum_primitives::{Block, EthPrimitives, TransactionSigned};
 use reth_evm::{
     eth::NextEvmEnvAttributes, precompiles::PrecompilesMap, ConfigureEvm, EvmEnv, EvmFactory,
-    NextBlockEnvAttributes, TransactionEnvMut,
+    JitBackend, NextBlockEnvAttributes, SenderRecoveryCache, TransactionEnvMut,
 };
 use reth_primitives_traits::{SealedBlock, SealedHeader};
 use revm::{context::BlockEnv, primitives::hardfork::SpecId};
@@ -76,6 +78,8 @@ mod test_utils;
 #[cfg(feature = "test-utils")]
 pub use test_utils::*;
 
+pub mod factory;
+
 /// Ethereum-related EVM configuration.
 #[derive(Debug, Clone)]
 pub struct EthEvmConfig<C = ChainSpec, EvmFactory = EthEvmFactory> {
@@ -83,6 +87,8 @@ pub struct EthEvmConfig<C = ChainSpec, EvmFactory = EthEvmFactory> {
     pub executor_factory: EthBlockExecutorFactory<RethReceiptBuilder, Arc<C>, EvmFactory>,
     /// Ethereum block assembler.
     pub block_assembler: EthBlockAssembler<C>,
+    /// Cache of recovered transaction senders, if enabled.
+    pub sender_recovery_cache: Option<SenderRecoveryCache>,
 }
 
 impl EthEvmConfig {
@@ -109,6 +115,7 @@ impl<ChainSpec, EvmFactory> EthEvmConfig<ChainSpec, EvmFactory> {
     pub fn new_with_evm_factory(chain_spec: Arc<ChainSpec>, evm_factory: EvmFactory) -> Self {
         Self {
             block_assembler: EthBlockAssembler::new(chain_spec.clone()),
+            sender_recovery_cache: None,
             executor_factory: EthBlockExecutorFactory::new(
                 RethReceiptBuilder::default(),
                 chain_spec,
@@ -120,6 +127,12 @@ impl<ChainSpec, EvmFactory> EthEvmConfig<ChainSpec, EvmFactory> {
     /// Returns the chain spec associated with this configuration.
     pub const fn chain_spec(&self) -> &Arc<ChainSpec> {
         self.executor_factory.spec()
+    }
+
+    /// Uses the provided sender recovery cache.
+    pub fn with_sender_recovery_cache(mut self, cache: SenderRecoveryCache) -> Self {
+        self.sender_recovery_cache = Some(cache);
+        self
     }
 }
 
@@ -152,6 +165,45 @@ where
 
     fn block_assembler(&self) -> &Self::BlockAssembler {
         &self.block_assembler
+    }
+
+    fn with_jit_support_enabled(self, enabled: bool) -> Self
+    where
+        Self: Sized,
+    {
+        #[cfg(feature = "jit")]
+        {
+            let mut this = self;
+            let mut evm_factory = this.executor_factory.evm_factory().clone();
+            if let Some(factory) =
+                (&mut evm_factory as &mut dyn Any).downcast_mut::<factory::RethEvmFactory>()
+            {
+                factory.set_jit_support(enabled);
+            }
+            this.executor_factory = EthBlockExecutorFactory::new(
+                *this.executor_factory.receipt_builder(),
+                this.executor_factory.spec().clone(),
+                evm_factory,
+            );
+            this
+        }
+
+        #[cfg(not(feature = "jit"))]
+        {
+            let _ = enabled;
+            self
+        }
+    }
+
+    fn jit_backend(&self) -> Option<&dyn JitBackend> {
+        #[cfg(feature = "jit")]
+        if let Some(factory) = (self.executor_factory.evm_factory() as &dyn Any)
+            .downcast_ref::<factory::RethEvmFactory>()
+        {
+            return Some(factory);
+        }
+
+        None
     }
 
     fn evm_env(&self, header: &Header) -> Result<EvmEnv<SpecId>, Self::Error> {
@@ -302,10 +354,16 @@ where
         payload: &ExecutionData,
     ) -> Result<impl ExecutableTxIterator<Self>, Self::Error> {
         let txs = payload.payload.transactions().clone();
-        let convert = |tx: Bytes| {
+        let sender_recovery_cache = self.sender_recovery_cache.clone();
+        let convert = move |tx: Bytes| {
             let tx =
                 TxTy::<Self::Primitives>::decode_2718_exact(tx.as_ref()).map_err(AnyError::new)?;
-            let signer = tx.try_recover().map_err(AnyError::new)?;
+            let signer = if let Some(cache) = &sender_recovery_cache {
+                cache.recover(&tx)
+            } else {
+                tx.try_recover()
+            }
+            .map_err(AnyError::new)?;
             Ok::<_, AnyError>(tx.with_signer(signer))
         };
 
@@ -416,14 +474,14 @@ mod tests {
         let db = CacheDB::<EmptyDBTyped<ProviderError>>::default();
 
         let evm_env = EvmEnv {
-            cfg_env: CfgEnv::new().with_spec_and_mainnet_gas_params(SpecId::CONSTANTINOPLE),
+            cfg_env: CfgEnv::new().with_spec_and_mainnet_gas_params(SpecId::PETERSBURG),
             ..Default::default()
         };
 
         let evm = evm_config.evm_with_env(db, evm_env);
 
         // Check that the spec ID is setup properly
-        assert_eq!(evm.cfg.spec, SpecId::CONSTANTINOPLE);
+        assert_eq!(evm.cfg.spec, SpecId::PETERSBURG);
     }
 
     #[test]
@@ -483,7 +541,7 @@ mod tests {
         let db = CacheDB::<EmptyDBTyped<ProviderError>>::default();
 
         let evm_env = EvmEnv {
-            cfg_env: CfgEnv::new().with_spec_and_mainnet_gas_params(SpecId::CONSTANTINOPLE),
+            cfg_env: CfgEnv::new().with_spec_and_mainnet_gas_params(SpecId::PETERSBURG),
             ..Default::default()
         };
 
@@ -493,5 +551,34 @@ mod tests {
         assert_eq!(evm.block, evm_env.block_env);
         assert_eq!(evm.cfg, evm_env.cfg_env);
         assert_eq!(evm.tx, Default::default());
+    }
+
+    #[cfg(feature = "jit")]
+    #[test]
+    fn test_jit_support_downcast_updates_reth_factory() {
+        let evm_config = EthEvmConfig::new_with_evm_factory(
+            MAINNET.clone(),
+            factory::RethEvmFactory::disabled(),
+        );
+
+        assert!(evm_config.jit_backend().is_some());
+        assert!(!evm_config.executor_factory.evm_factory().jit_support_enabled());
+
+        let evm_config = evm_config.with_jit_support();
+        assert!(evm_config.executor_factory.evm_factory().jit_support_enabled());
+
+        let evm_config = evm_config.with_jit_support_enabled(false);
+        assert!(!evm_config.executor_factory.evm_factory().jit_support_enabled());
+    }
+
+    #[cfg(feature = "jit")]
+    #[test]
+    fn test_jit_support_downcast_ignores_plain_factory() {
+        let evm_config = EthEvmConfig::mainnet();
+
+        assert!(evm_config.jit_backend().is_none());
+
+        let evm_config = evm_config.with_jit_support();
+        assert!(evm_config.jit_backend().is_none());
     }
 }

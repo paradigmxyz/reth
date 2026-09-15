@@ -131,13 +131,24 @@ where
     let mut bad_block_number: Option<u64> = None;
     let mut last_valid_block_number: Option<u64> = None;
 
-    while let Some(file_client) =
-        reader.next_chunk::<BlockTy<N>>(consensus.clone(), Some(sealed_header)).await?
+    let skip_invalid_blocks = !import_config.fail_on_invalid_block;
+    while let Some(file_client) = reader
+        .next_chunk_with_invalid_block_handling::<BlockTy<N>>(
+            consensus.clone(),
+            Some(sealed_header.clone()),
+            skip_invalid_blocks,
+        )
+        .await?
     {
         // create a new FileClient from chunk read from file
         info!(target: "reth::import",
             "Importing chain file chunk"
         );
+
+        if file_client.headers_len() == 0 {
+            debug!(target: "reth::import", "Skipping chain file chunk without valid blocks");
+            continue;
+        }
 
         let tip = file_client.tip().ok_or(eyre::eyre!("file client has no tip"))?;
         info!(target: "reth::import", "Chain file chunk read");

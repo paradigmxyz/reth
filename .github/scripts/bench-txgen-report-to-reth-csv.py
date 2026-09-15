@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Convert txgen `bench send-blocks` JSON into legacy benchmark CSVs.
+"""Convert txgen `bench send-blocks` or `bench send` JSON into legacy benchmark CSVs.
 
 The benchmark rendering pipeline still consumes `combined_latency.csv` and
 `total_gas.csv`. This adapter lets the txgen runner reuse the existing
@@ -18,12 +18,17 @@ def opt_int(value, default=None):
     return int(value)
 
 
-def block_latency_us(block: dict) -> tuple[int, int, int]:
+def block_latency_us(block: dict, fallback_block_time_ms: int = 0) -> tuple[int, int, int]:
     # txgen currently records server newPayload latency in microseconds but
     # client-side forkchoiceUpdated latency in milliseconds.
     new_payload_us = opt_int(block.get("new_payload_server_latency_us"))
     if new_payload_us is None:
-        new_payload_us = opt_int(block.get("new_payload_ms"), 0) * 1000
+        new_payload_ms = opt_int(block.get("new_payload_ms"))
+        if new_payload_ms is None:
+            # `bench send` has no Engine API timings. Use locally mined block
+            # time so the existing gas/latency summaries remain meaningful.
+            new_payload_ms = opt_int(block.get("block_time_ms"), fallback_block_time_ms)
+        new_payload_us = new_payload_ms * 1000
     fcu_us = opt_int(block.get("forkchoice_updated_ms"), 0) * 1000
     return new_payload_us, fcu_us, new_payload_us + fcu_us
 
@@ -45,6 +50,11 @@ def main() -> None:
     if not blocks:
         raise SystemExit(f"txgen report {report_path} does not contain any blocks")
 
+    fallback_block_time_ms = next(
+        (int(block["block_time_ms"]) for block in blocks if block.get("block_time_ms") is not None),
+        0,
+    )
+
     combined_path = output_dir / "combined_latency.csv"
     with combined_path.open("w", newline="") as f:
         writer = csv.DictWriter(
@@ -64,7 +74,7 @@ def main() -> None:
         )
         writer.writeheader()
         for block in blocks:
-            new_payload_us, fcu_us, total_us = block_latency_us(block)
+            new_payload_us, fcu_us, total_us = block_latency_us(block, fallback_block_time_ms)
             writer.writerow(
                 {
                     "block_number": block["number"],
@@ -89,7 +99,7 @@ def main() -> None:
         )
         writer.writeheader()
         for block in blocks:
-            _, _, total_us = block_latency_us(block)
+            _, _, total_us = block_latency_us(block, fallback_block_time_ms)
             elapsed_us += total_us
             writer.writerow(
                 {

@@ -10,11 +10,11 @@ pub use reth_rpc_builder::{
     middleware::{RethAuthHttpMiddleware, RethRpcMiddleware},
     Identity, Stack,
 };
-pub use reth_trie_db::ChangesetCache;
+use reth_storage_overlay::OverlayManager;
 
 use crate::{
-    invalid_block_hook::InvalidBlockHookExt, ConfigureEngineEvm, ConsensusEngineEvent,
-    ConsensusEngineHandle,
+    invalid_block_hook::InvalidBlockHookExt, txpool_prewarm, ConfigureEngineEvm,
+    ConsensusEngineEvent, ConsensusEngineHandle,
 };
 use alloy_consensus::BlockHeader;
 use alloy_rpc_types::engine::ClientVersionV1;
@@ -606,21 +606,29 @@ where
         self,
         engine_api_builder: T,
     ) -> RpcAddOns<Node, EthB, PVB, T, EVB, RpcMiddleware, AuthHttpMiddleware> {
+        self.map_engine_api(|_| engine_api_builder)
+    }
+
+    /// Maps the existing [`EngineApiBuilder`] builder value.
+    pub fn map_engine_api<T>(
+        self,
+        f: impl FnOnce(EB) -> T,
+    ) -> RpcAddOns<Node, EthB, PVB, T, EVB, RpcMiddleware, AuthHttpMiddleware> {
         let Self {
             hooks,
             eth_api_builder,
             payload_validator_builder,
+            engine_api_builder,
             engine_validator_builder,
             rpc_middleware,
             auth_http_middleware,
             tokio_runtime,
-            ..
         } = self;
         RpcAddOns {
             hooks,
             eth_api_builder,
             payload_validator_builder,
-            engine_api_builder,
+            engine_api_builder: f(engine_api_builder),
             engine_validator_builder,
             rpc_middleware,
             auth_http_middleware,
@@ -800,6 +808,33 @@ where
             engine_validator_builder,
             rpc_middleware,
             auth_http_middleware,
+            tokio_runtime,
+        }
+    }
+
+    /// Maps the existing auth HTTP middleware, preserving its configuration.
+    pub fn map_auth_http_middleware<T>(
+        self,
+        f: impl FnOnce(AuthHttpMiddleware) -> T,
+    ) -> RpcAddOns<Node, EthB, PVB, EB, EVB, RpcMiddleware, T> {
+        let Self {
+            hooks,
+            eth_api_builder,
+            payload_validator_builder,
+            engine_api_builder,
+            engine_validator_builder,
+            rpc_middleware,
+            auth_http_middleware,
+            tokio_runtime,
+        } = self;
+        RpcAddOns {
+            hooks,
+            eth_api_builder,
+            payload_validator_builder,
+            engine_api_builder,
+            engine_validator_builder,
+            rpc_middleware,
+            auth_http_middleware: f(auth_http_middleware),
             tokio_runtime,
         }
     }
@@ -1122,14 +1157,12 @@ where
         if config.rpc.eth_config().cache.prewarm_bals {
             let new_canonical_blocks = node.provider().canonical_state_stream();
             let provider = node.provider().clone();
-            let chain_spec = provider.chain_spec();
             let evm_config = node.evm_config().clone();
             let executor = node.task_executor().clone();
             let c = cache.clone();
             node.task_executor().spawn_task(async move {
                 prewarm_new_block_bals_task(
                     provider,
-                    chain_spec,
                     evm_config,
                     executor,
                     c,
@@ -1282,7 +1315,6 @@ where
 
 async fn prewarm_new_block_bals_task<Provider, Evm, N, St>(
     provider: Provider,
-    chain_spec: Arc<Provider::ChainSpec>,
     evm_config: Evm,
     executor: reth_tasks::Runtime,
     eth_state_cache: EthStateCache<N>,
@@ -1307,10 +1339,6 @@ async fn prewarm_new_block_bals_task<Provider, Evm, N, St>(
         for block in committed.blocks_iter() {
             let block_hash = block.hash();
             let block_number = block.number();
-
-            if !should_prewarm_bal(chain_spec.as_ref(), block.header()) {
-                continue
-            }
 
             match eth_state_cache.get_bal(block_hash).await {
                 Ok(Some(_)) => continue,
@@ -1337,7 +1365,7 @@ async fn prewarm_new_block_bals_task<Provider, Evm, N, St>(
             {
                 Ok(Ok(bal)) => {
                     let raw = bal.as_raw().clone();
-                    let sealed = alloy_primitives::Sealed::new_unchecked(raw, bal.hash());
+                    let sealed = reth_provider::RawBal::new(raw);
                     store_entries
                         .push((alloy_eips::NumHash::new(block_number, block_hash), sealed));
                     cached_bals.push((block_hash, bal));
@@ -1406,32 +1434,6 @@ async fn prewarm_new_block_bals_task<Provider, Evm, N, St>(
     }
 }
 
-fn should_prewarm_bal<ChainSpec, Header>(chain_spec: &ChainSpec, header: &Header) -> bool
-where
-    ChainSpec: EthereumHardforks,
-    Header: BlockHeader,
-{
-    chain_spec.is_amsterdam_active_at_timestamp(header.timestamp())
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use alloy_consensus::Header;
-    use reth_chainspec::ChainSpecBuilder;
-
-    #[test]
-    fn should_prewarm_bal_requires_amsterdam_activation() {
-        let chain_spec = ChainSpecBuilder::mainnet().with_amsterdam_at(10).build();
-
-        let pre_amsterdam = Header { timestamp: 9, ..Default::default() };
-        assert!(!should_prewarm_bal(&chain_spec, &pre_amsterdam));
-
-        let amsterdam = Header { timestamp: 10, ..Default::default() };
-        assert!(should_prewarm_bal(&chain_spec, &amsterdam));
-    }
-}
-
 /// Helper trait implemented for add-ons producing [`RpcHandle`]. Used by common node launcher
 /// implementations.
 pub trait RethRpcAddOns<N: FullNodeComponents>:
@@ -1481,6 +1483,7 @@ impl<'a, N: FullNodeComponents<Types: NodeTypes<ChainSpec: Hardforks + EthereumH
             .task_spawner(self.components.task_executor().clone())
             .gas_cap(self.config.rpc_gas_cap.into())
             .max_simulate_blocks(self.config.rpc_max_simulate_blocks)
+            .compute_state_root_for_eth_simulate(self.config.compute_state_root_for_eth_simulate)
             .eth_proof_window(self.config.eth_proof_window)
             .fee_history_cache_config(self.config.fee_history_cache)
             .proof_permits(self.config.proof_permits)
@@ -1587,7 +1590,7 @@ pub trait EngineValidatorBuilder<Node: FullNodeComponents>: Send + Sync + Clone 
         self,
         ctx: &AddOnsContext<'_, Node>,
         tree_config: TreeConfig,
-        changeset_cache: ChangesetCache,
+        overlay_manager: OverlayManager<PrimitivesTy<Node::Types>>,
     ) -> impl Future<Output = eyre::Result<Self::EngineValidator>> + Send;
 }
 
@@ -1635,22 +1638,30 @@ where
         self,
         ctx: &AddOnsContext<'_, Node>,
         tree_config: TreeConfig,
-        changeset_cache: ChangesetCache,
+        overlay_manager: OverlayManager<PrimitivesTy<Node::Types>>,
     ) -> eyre::Result<Self::EngineValidator> {
         let validator = self.payload_validator_builder.build(ctx).await?;
         let data_dir = ctx.config.datadir.clone().resolve_datadir(ctx.config.chain.chain());
         let invalid_block_hook = ctx.create_invalid_block_hook(&data_dir).await?;
 
-        Ok(BasicEngineValidator::new(
+        let txpool_prewarming = tree_config.txpool_prewarming();
+        let mut validator = BasicEngineValidator::new(
             ctx.node.provider().clone(),
             std::sync::Arc::new(ctx.node.consensus().clone()),
             ctx.node.evm_config().clone(),
             validator,
             tree_config,
             invalid_block_hook,
-            changeset_cache,
+            overlay_manager,
             ctx.node.task_executor().clone(),
-        ))
+        );
+
+        if txpool_prewarming {
+            validator = validator
+                .with_txpool_prewarming(txpool_prewarm::Source::new(ctx.node.pool().clone()));
+        }
+
+        Ok(validator)
     }
 }
 

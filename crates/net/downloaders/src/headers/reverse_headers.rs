@@ -475,17 +475,19 @@ where
                     .into())
                 }
 
-                if (headers.len() as u64) != request.limit {
+                let received_headers = headers.len() as u64;
+                if received_headers > request.limit {
                     return Err(HeadersResponseError {
                         peer_id: Some(peer_id),
-                        error: DownloadError::HeadersResponseTooShort(GotExpected {
-                            got: headers.len() as u64,
+                        error: DownloadError::HeadersResponseTooLong(GotExpected {
+                            got: received_headers,
                             expected: request.limit,
                         }),
                         request,
                     }
                     .into())
                 }
+                let missing_headers = request.limit - received_headers;
 
                 // sort headers from highest to lowest block number
                 headers.sort_unstable_by_key(|h| Reverse(h.number()));
@@ -511,6 +513,14 @@ where
                 if highest.number() == self.next_chain_tip_block_number {
                     // is next response, validate it
                     self.process_next_headers(request, headers, peer_id)?;
+                    // request the missing headers before validating buffered responses, because a
+                    // buffered validation error returns early and would otherwise leave the
+                    // remainder of this range unrequested
+                    self.requeue_missing_headers(
+                        requested_block_number,
+                        received_headers,
+                        missing_headers,
+                    );
                     // try to validate all buffered responses blocked by this successful response
                     self.try_validate_buffered()
                         .map(Err::<(), ReverseHeadersDownloaderError<H::Header>>)
@@ -522,7 +532,12 @@ where
                         headers,
                         request,
                         peer_id,
-                    })
+                    });
+                    self.requeue_missing_headers(
+                        requested_block_number,
+                        received_headers,
+                        missing_headers,
+                    );
                 }
 
                 Ok(())
@@ -596,6 +611,29 @@ where
         trace!(target: "downloaders::headers", ?request, "Submitting headers request");
         self.in_progress_queue.push(self.request_fut(request, priority));
         self.metrics.in_flight_requests.increment(1.);
+    }
+
+    /// Submits a high-priority request for the missing suffix of a partial response.
+    ///
+    /// Peers are allowed to respond with fewer headers than requested, for example due to
+    /// response size limits. Expects that the caller has verified that the response started at
+    /// `requested_block_number` and contained `received_headers` headers.
+    fn requeue_missing_headers(
+        &self,
+        requested_block_number: u64,
+        received_headers: u64,
+        missing_headers: u64,
+    ) {
+        if missing_headers > 0 {
+            self.metrics.partial_responses.increment(1);
+            self.submit_request(
+                HeadersRequest::falling(
+                    (requested_block_number - received_headers).into(),
+                    missing_headers,
+                ),
+                Priority::High,
+            );
+        }
     }
 
     fn request_fut(
@@ -1251,7 +1289,74 @@ mod tests {
     use alloy_eips::{eip1898::BlockWithParent, BlockNumHash};
     use assert_matches::assert_matches;
     use reth_consensus::test_utils::TestConsensus;
-    use reth_network_p2p::test_utils::TestHeadersClient;
+    use reth_network_p2p::{
+        download::DownloadClient, error::PeerRequestResult, test_utils::TestHeadersClient,
+    };
+    use reth_network_peers::WithPeerId;
+    use std::sync::{
+        atomic::{AtomicU64, Ordering as AtomicOrdering},
+        Mutex,
+    };
+
+    #[derive(Clone, Debug)]
+    struct CappedHeadersClient {
+        responses: Arc<Mutex<Vec<Header>>>,
+        requests: Arc<Mutex<Vec<HeadersRequest>>>,
+        bad_messages: Arc<AtomicU64>,
+        response_limit: usize,
+    }
+
+    impl CappedHeadersClient {
+        fn new(responses: Vec<Header>, response_limit: usize) -> Self {
+            Self {
+                responses: Arc::new(Mutex::new(responses)),
+                requests: Default::default(),
+                bad_messages: Default::default(),
+                response_limit,
+            }
+        }
+
+        fn numeric_requests(&self) -> Vec<(u64, u64)> {
+            self.requests
+                .lock()
+                .unwrap()
+                .iter()
+                .filter_map(|request| request.start.as_number().map(|start| (start, request.limit)))
+                .collect()
+        }
+
+        fn bad_message_count(&self) -> u64 {
+            self.bad_messages.load(AtomicOrdering::SeqCst)
+        }
+    }
+
+    impl DownloadClient for CappedHeadersClient {
+        fn report_bad_message(&self, _peer_id: PeerId) {
+            self.bad_messages.fetch_add(1, AtomicOrdering::SeqCst);
+        }
+
+        fn num_connected_peers(&self) -> usize {
+            1
+        }
+    }
+
+    impl HeadersClient for CappedHeadersClient {
+        type Header = Header;
+        type Output = futures::future::Ready<PeerRequestResult<Vec<Header>>>;
+
+        fn get_headers_with_priority(
+            &self,
+            request: HeadersRequest,
+            _priority: Priority,
+        ) -> Self::Output {
+            self.requests.lock().unwrap().push(request.clone());
+            let mut responses = self.responses.lock().unwrap();
+            let response_length = request.limit.min(self.response_limit as u64) as usize;
+            let response = responses.drain(..response_length).collect();
+
+            futures::future::ready(Ok(WithPeerId::new(PeerId::default(), response)))
+        }
+    }
 
     /// Tests that `replace_number` works the same way as `Option::replace`
     #[test]
@@ -1379,6 +1484,14 @@ mod tests {
         let request = calc_next_request(local, next, batch_size);
         assert_eq!(request.start, next.into());
         assert_eq!(request.limit, 1);
+    }
+
+    #[test]
+    fn default_request_limit_matches_sync_config() {
+        assert_eq!(
+            ReverseHeadersDownloaderBuilder::default().request_limit,
+            HeadersConfig::default().downloader_request_limit
+        );
     }
 
     /// Tests that request calc works
@@ -1546,5 +1659,82 @@ mod tests {
         assert_eq!(headers.capacity(), headers.len());
 
         assert!(downloader.next().await.is_none());
+    }
+
+    #[tokio::test]
+    async fn downloads_capped_header_responses() {
+        let p3 = SealedHeader::default();
+        let p2 = child_header(&p3);
+        let p1 = child_header(&p2);
+        let p0 = child_header(&p1);
+
+        let client = CappedHeadersClient::new(
+            vec![p0.as_ref().clone(), p1.as_ref().clone(), p2.as_ref().clone()],
+            1,
+        );
+        let mut downloader = ReverseHeadersDownloaderBuilder::default()
+            .stream_batch_size(1)
+            .request_limit(2)
+            .min_concurrent_requests(1)
+            .max_concurrent_requests(1)
+            .build(client.clone(), Arc::new(TestConsensus::default()));
+        downloader.update_local_head(p3);
+        downloader.update_sync_target(SyncTarget::Tip(p0.hash()));
+
+        assert_eq!(downloader.next().await.unwrap().unwrap(), vec![p0]);
+        assert_eq!(downloader.next().await.unwrap().unwrap(), vec![p1]);
+        assert_eq!(downloader.next().await.unwrap().unwrap(), vec![p2]);
+        assert!(downloader.next().await.is_none());
+
+        assert_eq!(client.numeric_requests(), vec![(2, 2), (1, 1)]);
+        assert_eq!(client.bad_message_count(), 0);
+    }
+
+    #[test]
+    fn requeues_missing_headers_for_buffered_partial_response() {
+        let client = CappedHeadersClient::new(Vec::new(), 0);
+        let mut downloader = ReverseHeadersDownloaderBuilder::default()
+            .build(client.clone(), Arc::new(TestConsensus::default()));
+        downloader.local_head = Some(SealedHeader::default());
+        downloader.sync_target = Some(SyncTargetBlock::from_number(10));
+        downloader.next_chain_tip_block_number = 10;
+
+        // a partial response that can't be validated yet is buffered, but the missing suffix must
+        // be requested immediately
+        let request = HeadersRequest::falling(5u64.into(), 3);
+        let response = vec![Header { number: 5, ..Default::default() }];
+        let outcome = downloader.on_headers_outcome(HeadersRequestOutcome {
+            request,
+            outcome: Ok(WithPeerId::new(PeerId::default(), response)),
+        });
+
+        assert!(outcome.is_ok());
+        assert_eq!(downloader.buffered_responses.len(), 1);
+        assert_eq!(client.numeric_requests(), vec![(4, 2)]);
+        assert_eq!(client.bad_message_count(), 0);
+    }
+
+    #[test]
+    fn rejects_over_long_headers_response() {
+        let client = CappedHeadersClient::new(Vec::new(), 0);
+        let mut downloader = ReverseHeadersDownloaderBuilder::default()
+            .build(client.clone(), Arc::new(TestConsensus::default()));
+
+        let request = HeadersRequest::falling(5u64.into(), 1);
+        let response = vec![
+            Header { number: 5, ..Default::default() },
+            Header { number: 4, ..Default::default() },
+        ];
+        let outcome = downloader.on_headers_outcome(HeadersRequestOutcome {
+            request,
+            outcome: Ok(WithPeerId::new(PeerId::default(), response)),
+        });
+
+        assert_matches!(
+            outcome,
+            Err(ReverseHeadersDownloaderError::Response(err))
+                if matches!(err.error, DownloadError::HeadersResponseTooLong(_))
+        );
+        assert!(client.numeric_requests().is_empty());
     }
 }

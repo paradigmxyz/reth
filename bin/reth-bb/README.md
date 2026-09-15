@@ -14,36 +14,45 @@ reth-bb extends the standard Ethereum node with:
 
 ## Quick start
 
-The full workflow has four steps: **build** binaries, **generate** big blocks,  **start** reth-bb, and **replay** the payloads.
+The full workflow has five steps: **build** reth-bb, **install** txgen tools, **extract** big-block payloads, **start** reth-bb, and **replay** the payloads.
 
 ### Prerequisites
 
 - A synced reth datadir for the target chain (e.g. hoodi)
 - Rust toolchain
+- An archive RPC endpoint that supports `debug_getRawBlock`
 
-### 1. Build
+### 1. Build reth-bb
 
 ```bash
-cargo build --profile profiling -p reth-bb -p reth-bench
+cargo build --profile profiling -p reth-bb
 ```
 
-### 2. Generate big blocks
+### 2. Install txgen tools
 
-Fetch consecutive blocks from an RPC and merge them until a target gas is reached. Use `--from-block` set to the block number following the one the node is currently synced to (i.e. the next block the node would process):
+Install `txgen-ethereum` for big-block extraction and `bench` for Engine API replay from [tempoxyz/txgen](https://github.com/tempoxyz/txgen):
 
 ```bash
-reth-bench generate-big-block \
-    --rpc-url https://rpc.hoodi.ethpandaops.io \
-    --chain hoodi \
-    --from-block 910020 \
+cargo install --git https://github.com/tempoxyz/txgen txgen-ethereum --locked
+cargo install --git https://github.com/tempoxyz/txgen bench-cli --locked
+```
+
+### 3. Extract big-block payloads
+
+Merge source blocks into synthetic big-block payloads, starting at the block following the one the node is currently synced to (i.e. the next block the node would process):
+
+```bash
+txgen-ethereum extract-big-blocks \
+    --rpc https://rpc.hoodi.ethpandaops.io \
+    --from 910020 \
+    --count 5 \
     --target-gas 2G \
-    --num-big-blocks 5 \
-    --output-dir /tmp/payloads
+    --output /tmp/big-blocks.ndjson
 ```
 
-This produces one JSON file per big block in the output directory.
+This produces an NDJSON file containing one reth-bb-compatible big-block payload per line. `--target-gas` accepts bare units or `K`, `M`, `G` suffixes.
 
-### 3. Start reth-bb
+### 4. Start reth-bb
 
 ```bash
 reth-bb node \
@@ -54,14 +63,15 @@ reth-bb node \
     -d
 ```
 
-### 4. Replay payloads
+### 5. Replay payloads
 
 ```bash
-reth-bench replay-payloads \
-    --engine-rpc-url http://localhost:8551 \
+bench send-blocks \
+    --engine http://localhost:8551 \
     --jwt-secret /tmp/jwt.hex \
-    --payload-dir /tmp/payloads \
-    --reth-new-payload
+    --input /tmp/big-blocks.ndjson \
+    --wait-for-persistence every:2 \
+    --report json:/tmp/reth-bb-report.json
 ```
 
-The `--reth-new-payload` flag is required for big blocks — it uses the `reth_newPayload` endpoint which carries the multi-segment execution metadata.
+`bench send-blocks` submits each payload through reth's custom `reth_newPayload` and `reth_forkchoiceUpdated` Engine API methods.

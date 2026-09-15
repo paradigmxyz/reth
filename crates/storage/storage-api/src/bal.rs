@@ -1,24 +1,22 @@
 use alloc::{sync::Arc, vec::Vec};
-use alloy_eips::{eip7928::bal::DecodedBal, NumHash};
-use alloy_primitives::{BlockHash, BlockNumber, Bytes, Sealed};
+use alloy_eip7928::bal::DecodedBal;
+pub use alloy_eip7928::bal::RawBal;
+use alloy_eips::NumHash;
+use alloy_primitives::{BlockHash, BlockNumber, Bytes};
 use reth_storage_errors::provider::ProviderResult;
-use revm_database::state::bal::Bal as RevmBal;
-
-/// Raw BAL RLP bytes sealed by the BAL hash.
-pub type SealedBal = Sealed<Bytes>;
 
 /// Notification emitted when a new BAL is inserted into the store.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct BalNotification {
     /// Number and hash of the block the BAL belongs to.
     pub num_hash: NumHash,
-    /// Raw BAL RLP payload sealed by the BAL hash.
-    pub bal: SealedBal,
+    /// Raw BAL RLP payload.
+    pub bal: RawBal,
 }
 
 impl BalNotification {
     /// Creates a new [`BalNotification`].
-    pub const fn new(num_hash: NumHash, bal: SealedBal) -> Self {
+    pub const fn new(num_hash: NumHash, bal: RawBal) -> Self {
         Self { num_hash, bal }
     }
 }
@@ -45,22 +43,22 @@ pub trait BalStore: Send + Sync + 'static {
     ///
     /// Implementations may buffer inserts. Call [`Self::flush`] when pending BALs need to be made
     /// durable.
-    fn insert(&self, num_hash: NumHash, bal: SealedBal) -> ProviderResult<()>;
+    fn insert(&self, num_hash: NumHash, bal: RawBal) -> ProviderResult<()>;
 
     /// Insert multiple BALs.
     ///
     /// The default implementation preserves the behavior of repeated [`Self::insert`] calls.
-    fn insert_many(&self, entries: Vec<(NumHash, SealedBal)>) -> ProviderResult<()> {
+    fn insert_many(&self, entries: Vec<(NumHash, RawBal)>) -> ProviderResult<()> {
         for (num_hash, bal) in entries {
             self.insert(num_hash, bal)?;
         }
         Ok(())
     }
 
-    /// Flushes any pending BALs to the backing store.
+    /// Flushes pending BALs for the given canonical blocks to the backing store.
     ///
     /// In-memory implementations may treat this as a no-op.
-    fn flush(&self) -> ProviderResult<()> {
+    fn flush(&self, _blocks: &[NumHash]) -> ProviderResult<()> {
         Ok(())
     }
 
@@ -85,21 +83,6 @@ pub trait BalStore: Send + Sync + 'static {
             .map(DecodedBal::from_rlp_bytes)
             .transpose()
             .map_err(Into::into)
-    }
-
-    /// Fetches the BAL for the given block hash in revm representation.
-    fn revm_bal_by_hash(
-        &self,
-        block_hash: BlockHash,
-    ) -> ProviderResult<Option<DecodedBal<RevmBal>>> {
-        self.get_decoded_by_hash(block_hash)?
-            .map(|decoded| {
-                decoded.try_map(|bal| {
-                    RevmBal::try_from(Vec::from(bal))
-                        .map_err(reth_storage_errors::provider::ProviderError::other)
-                })
-            })
-            .transpose()
     }
 
     /// Fetch BAL response entries for the given block hashes, stopping after the soft limit is
@@ -186,20 +169,20 @@ impl BalStoreHandle {
 
     /// Insert the BAL for the given block.
     #[inline]
-    pub fn insert(&self, num_hash: NumHash, bal: SealedBal) -> ProviderResult<()> {
+    pub fn insert(&self, num_hash: NumHash, bal: RawBal) -> ProviderResult<()> {
         self.inner.insert(num_hash, bal)
     }
 
     /// Insert multiple BALs.
     #[inline]
-    pub fn insert_many(&self, entries: Vec<(NumHash, SealedBal)>) -> ProviderResult<()> {
+    pub fn insert_many(&self, entries: Vec<(NumHash, RawBal)>) -> ProviderResult<()> {
         self.inner.insert_many(entries)
     }
 
-    /// Flushes any pending BALs to the backing store.
+    /// Flushes pending BALs for the given canonical blocks to the backing store.
     #[inline]
-    pub fn flush(&self) -> ProviderResult<()> {
-        self.inner.flush()
+    pub fn flush(&self, blocks: &[NumHash]) -> ProviderResult<()> {
+        self.inner.flush(blocks)
     }
 
     /// Prunes expired BALs according to the store's retention policy and the given chain tip.
@@ -224,15 +207,6 @@ impl BalStoreHandle {
     #[inline]
     pub fn get_decoded_by_hash(&self, block_hash: BlockHash) -> ProviderResult<Option<DecodedBal>> {
         self.inner.get_decoded_by_hash(block_hash)
-    }
-
-    /// Fetches the BAL for the given block hash in revm representation.
-    #[inline]
-    pub fn revm_bal_by_hash(
-        &self,
-        block_hash: BlockHash,
-    ) -> ProviderResult<Option<DecodedBal<RevmBal>>> {
-        self.inner.revm_bal_by_hash(block_hash)
     }
 
     /// Fetch BAL response entries for the given block hashes, stopping after the soft limit is
@@ -282,6 +256,26 @@ impl core::fmt::Debug for BalStoreHandle {
 pub trait BalProvider {
     /// Returns the configured BAL store handle.
     fn bal_store(&self) -> &BalStoreHandle;
+
+    /// Fetches the BAL for the given block hash.
+    fn get_bal_by_hash(&self, block_hash: BlockHash) -> ProviderResult<Option<Bytes>> {
+        self.bal_store().get_by_hash(block_hash)
+    }
+
+    /// Fetches BALs for the given block hashes.
+    fn get_bals_by_hashes(&self, block_hashes: &[BlockHash]) -> ProviderResult<Vec<Option<Bytes>>> {
+        self.bal_store().get_by_hashes(block_hashes)
+    }
+
+    /// Fetches BAL response entries for the given block hashes, stopping after the soft limit is
+    /// exceeded.
+    fn get_bals_by_hashes_with_limit(
+        &self,
+        block_hashes: &[BlockHash],
+        limit: GetBlockAccessListLimit,
+    ) -> ProviderResult<Vec<Option<Bytes>>> {
+        self.bal_store().get_by_hashes_with_limit(block_hashes, limit)
+    }
 }
 
 /// No-op BAL store used as the default wiring target until a concrete implementation is injected.
@@ -289,11 +283,11 @@ pub trait BalProvider {
 pub struct NoopBalStore;
 
 impl BalStore for NoopBalStore {
-    fn insert(&self, _num_hash: NumHash, _bal: SealedBal) -> ProviderResult<()> {
+    fn insert(&self, _num_hash: NumHash, _bal: RawBal) -> ProviderResult<()> {
         Ok(())
     }
 
-    fn insert_many(&self, _entries: Vec<(NumHash, SealedBal)>) -> ProviderResult<()> {
+    fn insert_many(&self, _entries: Vec<(NumHash, RawBal)>) -> ProviderResult<()> {
         Ok(())
     }
 
@@ -351,10 +345,28 @@ mod tests {
     }
 
     #[test]
+    fn noop_provider_returns_empty_results() {
+        let provider = crate::noop::NoopProvider::default();
+        let hashes = [B256::random(), B256::random()];
+
+        assert_eq!(provider.get_bals_by_hashes(&hashes).unwrap(), vec![None, None]);
+        assert_eq!(
+            provider
+                .get_bals_by_hashes_with_limit(
+                    &hashes,
+                    GetBlockAccessListLimit::ResponseSizeSoftLimit(0),
+                )
+                .unwrap(),
+            vec![None]
+        );
+        assert!(provider.get_bal_by_hash(B256::random()).unwrap().is_none());
+    }
+
+    #[test]
     fn noop_store_flush_is_noop() {
         let store = BalStoreHandle::default();
 
-        store.flush().unwrap();
+        store.flush(&[]).unwrap();
     }
 
     #[test]
@@ -375,11 +387,6 @@ mod tests {
         let decoded = store.get_decoded_by_hash(hash).unwrap().unwrap();
 
         assert_eq!(decoded.as_raw(), &raw_bal);
-
-        let revm_bal = store.revm_bal_by_hash(hash).unwrap().unwrap();
-
-        assert_eq!(revm_bal.as_raw(), &raw_bal);
-        assert!(revm_bal.as_bal().accounts.is_empty());
     }
 
     #[test]
@@ -421,7 +428,7 @@ mod tests {
     }
 
     impl BalStore for TestBalStore {
-        fn insert(&self, _num_hash: NumHash, _bal: SealedBal) -> ProviderResult<()> {
+        fn insert(&self, _num_hash: NumHash, _bal: RawBal) -> ProviderResult<()> {
             Ok(())
         }
 
