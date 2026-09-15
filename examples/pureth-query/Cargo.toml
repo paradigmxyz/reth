@@ -1,0 +1,14 @@
+[package]
+name = "example-pureth-query"
+version = "0.0.0"
+publish = false
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+eyre.workspace = true
+jsonrpsee = { workspace = true, features = ["http-client"] }
+reth-ethereum = { workspace = true, features = ["node", "test-utils"] }
+reth-pureth-query = { path = "../../crates/pureth/query" }
+reth-pureth-receipt.workspace = true
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
