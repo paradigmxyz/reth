@@ -1,9 +1,14 @@
 //! Helpers for `eth_blockAccessList` RPC method.
+use alloy_consensus::BlockHeader;
 use alloy_eip7928::{bal::DecodedBal, BlockAccessList};
 use alloy_primitives::Bytes;
 use alloy_rpc_types_eth::BlockId;
 use reth_errors::RethError;
-use reth_rpc_eth_types::{bal::build_revm_bal_for_block, error::FromEthApiError, EthApiError};
+use reth_evm::{block::BlockExecutor, ConfigureEvm, Evm};
+use reth_revm::{database::StateProviderDatabase, State};
+use reth_rpc_eth_types::{error::FromEthApiError, EthApiError};
+use reth_storage_api::StateProviderFactory;
+use std::sync::Arc;
 
 use crate::{
     helpers::{Call, LoadBlock, Trace},
@@ -43,18 +48,43 @@ pub trait GetBlockAccessList: Trace + Call + LoadBlock + RpcNodeCoreExt {
 
             self.spawn_blocking_io(move |eth_api| {
                 let _permit = permit;
-                let bal = build_revm_bal_for_block(
-                    eth_api.provider(),
-                    RpcNodeCore::evm_config(&eth_api),
-                    &block,
-                )
-                .map_err(Self::Error::from_eth_err)?;
-                let (response, _) = DecodedBal::from_rlp_bytes(bal.as_raw().clone())
+                let state = eth_api
+                    .provider()
+                    .state_by_block_id(block.parent_hash().into())
+                    .map_err(Self::Error::from_eth_err)?;
+
+                let mut db = State::builder()
+                    .with_database(StateProviderDatabase::new(state))
+                    .with_bal_builder()
+                    .build();
+
+                let block_txs = block.transactions_recovered();
+                let mut executor = RpcNodeCore::evm_config(&eth_api)
+                    .executor_for_block(&mut db, block.sealed_block())
                     .map_err(RethError::other)
-                    .map_err(Self::Error::from_eth_err)?
-                    .split();
-                eth_api.cache().insert_bal(block.hash(), bal);
-                Ok(Some(Vec::from(response)))
+                    .map_err(Self::Error::from_eth_err)?;
+
+                executor.apply_pre_execution_changes().map_err(Self::Error::from_eth_err)?;
+                executor.evm_mut().db_mut().bump_bal_index();
+
+                for block_tx in block_txs {
+                    executor.execute_transaction(block_tx).map_err(Self::Error::from_eth_err)?;
+                    executor.evm_mut().db_mut().bump_bal_index();
+                }
+
+                executor
+                    .apply_post_execution_changes()
+                    .map_err(|err| EthApiError::Internal(err.into()))?;
+
+                let bal = db.take_built_alloy_bal().expect("BAL builder configured");
+                let raw = alloy_rlp::encode(&bal).into();
+                let revm_bal = bal
+                    .clone()
+                    .try_into()
+                    .map_err(RethError::other)
+                    .map_err(Self::Error::from_eth_err)?;
+                eth_api.cache().insert_bal(block.hash(), DecodedBal::new(Arc::new(revm_bal), raw));
+                Ok(Some(bal))
             })
             .await
         }

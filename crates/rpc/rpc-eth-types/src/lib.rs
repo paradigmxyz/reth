@@ -11,7 +11,6 @@
 // `url` is needed for serde support on `reqwest::Url`
 use url as _;
 
-pub mod bal;
 pub mod block;
 pub mod builder;
 pub mod cache;
