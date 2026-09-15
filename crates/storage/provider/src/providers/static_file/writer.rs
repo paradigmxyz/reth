@@ -909,8 +909,11 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
         let csoff_path = self.data_path.with_extension("csoff");
         let changeset_offsets_len = self.writer.user_header().changeset_offsets_len();
 
-        // Flush any pending changeset offset before reading the sidecar
+        // Flush both the current offset and buffered records before opening a sidecar reader.
         self.flush_current_changeset_offset()?;
+        if let Some(writer) = &mut self.changeset_offsets {
+            writer.flush().map_err(ProviderError::other)?;
+        }
 
         let rows_to_keep = if blocks_to_keep == 0 {
             0

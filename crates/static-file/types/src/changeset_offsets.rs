@@ -6,14 +6,16 @@
 use crate::ChangesetOffset;
 use reth_fs_util::DirectFile;
 use std::{
-    io::{self, Seek, SeekFrom, Write},
+    io::{self, BufWriter, Seek, SeekFrom, Write},
     path::Path,
 };
 
 /// Writer for appending changeset offsets to a sidecar file.
 #[derive(Debug)]
 pub struct ChangesetOffsetWriter {
-    file: DirectFile,
+    // Batch the small records before aligned direct writes; sync flushes this buffer
+    // before the header can commit the record count.
+    file: BufWriter<DirectFile>,
     /// Number of records written.
     records_written: u64,
 }
@@ -100,7 +102,7 @@ impl ChangesetOffsetWriter {
         let records_written = committed_len;
         file.seek(SeekFrom::End(0))?;
 
-        Ok(Self { file, records_written })
+        Ok(Self { file: BufWriter::new(file), records_written })
     }
 
     /// Appends a single changeset offset record.
@@ -121,9 +123,15 @@ impl ChangesetOffsetWriter {
         Ok(())
     }
 
+    /// Makes pending records visible to readers without syncing them to disk.
+    pub fn flush(&mut self) -> io::Result<()> {
+        self.file.flush()
+    }
+
     /// Syncs all data to disk. Must be called before committing the header.
     pub fn sync(&mut self) -> io::Result<()> {
-        self.file.sync_all()
+        self.file.flush()?;
+        self.file.get_ref().sync_all()
     }
 
     /// Truncates the file to contain exactly `len` records and syncs to disk.
@@ -132,9 +140,10 @@ impl ChangesetOffsetWriter {
     /// The sync is required for crash safety - without it, a crash could
     /// resurrect the old file length.
     pub fn truncate(&mut self, len: u64) -> io::Result<()> {
-        self.file.set_len(len * Self::RECORD_SIZE as u64)?;
+        self.file.flush()?;
+        self.file.get_mut().set_len(len * Self::RECORD_SIZE as u64)?;
         self.file.seek(SeekFrom::End(0))?;
-        self.file.sync_all()?;
+        self.file.get_ref().sync_all()?;
         self.records_written = len;
         Ok(())
     }
@@ -199,14 +208,19 @@ impl ChangesetOffsetReader {
         let byte_pos = start * Self::RECORD_SIZE as u64;
 
         let mut result = Vec::with_capacity(count);
-        let mut buf = [0u8; Self::RECORD_SIZE];
-
-        for i in 0..count {
-            let pos = byte_pos + (i as u64) * Self::RECORD_SIZE as u64;
-            self.file.read_exact_at(&mut buf, pos)?;
-            let offset = u64::from_le_bytes(buf[..8].try_into().unwrap());
-            let num_changes = u64::from_le_bytes(buf[8..].try_into().unwrap());
-            result.push(ChangesetOffset::new(offset, num_changes));
+        // Coalesce adjacent records instead of issuing one direct read per 16 bytes.
+        let mut buf = [0u8; 4096];
+        let records_per_read = buf.len() / Self::RECORD_SIZE;
+        for first in (0..count).step_by(records_per_read) {
+            let records = (count - first).min(records_per_read);
+            let bytes = &mut buf[..records * Self::RECORD_SIZE];
+            let pos = byte_pos + first as u64 * Self::RECORD_SIZE as u64;
+            self.file.read_exact_at(bytes, pos)?;
+            for record in bytes.chunks_exact(Self::RECORD_SIZE) {
+                let offset = u64::from_le_bytes(record[..8].try_into().unwrap());
+                let num_changes = u64::from_le_bytes(record[8..].try_into().unwrap());
+                result.push(ChangesetOffset::new(offset, num_changes));
+            }
         }
 
         Ok(result)
@@ -262,6 +276,29 @@ mod tests {
 
             assert!(reader.get(3).unwrap().is_none());
         }
+    }
+
+    #[test]
+    fn buffered_append_truncate_and_range_read() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("buffered.csoff");
+        let mut writer = ChangesetOffsetWriter::new(&path, 0).unwrap();
+        for index in 0..1025 {
+            writer.append(&ChangesetOffset::new(index * 3, 3)).unwrap();
+        }
+        // Truncation must flush pending records before shortening the file.
+        writer.truncate(513).unwrap();
+        writer.append(&ChangesetOffset::new(1539, 7)).unwrap();
+        writer.flush().unwrap();
+        let reader = ChangesetOffsetReader::new(&path, writer.len()).unwrap();
+        let records = reader.get_range(1, u64::MAX).unwrap();
+        assert_eq!(records.len(), 513);
+        for (index, record) in records[..512].iter().enumerate() {
+            assert_eq!(record.offset(), (index as u64 + 1) * 3);
+            assert_eq!(record.num_changes(), 3);
+        }
+        assert_eq!(records[512].offset(), 1539);
+        assert_eq!(records[512].num_changes(), 7);
     }
 
     #[test]
