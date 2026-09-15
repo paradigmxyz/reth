@@ -1009,7 +1009,7 @@ where
                     parent_header,
                     preserved_sparse_trie,
                     // Block built incrementally, so neither the tx count nor the gas is known at
-                    // FCU time: the payload builder gets the default half pool.
+                    // FCU time: the payload builder gets the base pool.
                     transaction_count: None,
                     gas_used: None,
                     config: ctx.config,
