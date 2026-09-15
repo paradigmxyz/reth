@@ -29,6 +29,7 @@ reth-rpc-eth-types.workspace = true
 reth-rpc-server-types.workspace = true
 reth-network-api.workspace = true
 reth-node-api.workspace = true
+reth-stages-types.workspace = true
 reth-trie-common = { workspace = true, features = ["eip1186"] }
 reth-prune-types.workspace = true
 
