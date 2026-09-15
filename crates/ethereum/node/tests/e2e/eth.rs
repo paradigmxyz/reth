@@ -212,10 +212,9 @@ async fn test_engine_graceful_shutdown() -> eyre::Result<()> {
 }
 
 #[tokio::test]
-async fn canonical_ancestor_without_known_finality_is_rejected() -> eyre::Result<()> {
+async fn can_update_forkchoice_without_finalized_block() -> eyre::Result<()> {
     use alloy_eips::BlockNumberOrTag;
     use alloy_provider::{Provider, ProviderBuilder};
-    use jsonrpsee_core::client::Error;
     use reth_node_ethereum::EthEngineTypes;
     use reth_rpc_api::EngineApiClient;
 
@@ -243,13 +242,13 @@ async fn canonical_ancestor_without_known_finality_is_rejected() -> eyre::Result
     let engine = node.auth_server_handle().http_client();
     let rpc = ProviderBuilder::new().connect_http(node.rpc_url());
     let canonical = node.inner.provider.canonical_in_memory_state();
+    assert!(canonical.get_finalized_num_hash().is_none());
 
-    // Keep finality unknown while building the canonical chain.
-    let mut hashes = vec![node.block_hash(0)];
-    for timestamp in 1..=8 {
+    let mut parent = node.block_hash(0);
+    for timestamp in 1..=3 {
         let payload = node
             .testing_build_block_v1(TestingBuildBlockRequestV1 {
-                parent_block_hash: *hashes.last().unwrap(),
+                parent_block_hash: parent,
                 payload_attributes: eth_payload_attributes(timestamp),
                 transactions: vec![],
                 extra_data: None,
@@ -261,76 +260,32 @@ async fn canonical_ancestor_without_known_finality_is_rejected() -> eyre::Result
             EngineApiClient::<EthEngineTypes>::new_payload_v3(&engine, payload, vec![], B256::ZERO)
                 .await?;
         assert_eq!(status.status, PayloadStatusEnum::Valid);
-        let response = EngineApiClient::<EthEngineTypes>::fork_choice_updated_v3(
-            &engine,
-            ForkchoiceState { head_block_hash: hash, ..Default::default() },
-            None,
-        )
-        .await?;
-        assert_eq!(response.payload_status.status, PayloadStatusEnum::Valid);
-        hashes.push(hash);
-    }
-    assert!(canonical.get_finalized_num_hash().is_none());
 
-    for attrs in [None, Some(eth_payload_attributes(9))] {
-        let err = EngineApiClient::<EthEngineTypes>::fork_choice_updated_v3(
-            &engine,
-            ForkchoiceState {
-                head_block_hash: hashes[5],
-                safe_block_hash: hashes[5],
-                finalized_block_hash: B256::ZERO,
-            },
-            attrs,
-        )
-        .await
-        .unwrap_err();
-        let Error::Call(err) = err else { panic!("Expected an RPC error, got {err:?}") };
-        assert_eq!(err.code(), -38006);
-        assert_eq!(
-            rpc.get_block_by_number(BlockNumberOrTag::Latest).await?.unwrap().header.hash,
-            hashes[8]
-        );
-        for number in 6..=8 {
+        // Advance the head, then build on it, without ever supplying a finalized hash.
+        for attrs in [None, Some(eth_payload_attributes(timestamp + 1))] {
+            let build_requested = attrs.is_some();
+            let response = EngineApiClient::<EthEngineTypes>::fork_choice_updated_v3(
+                &engine,
+                ForkchoiceState {
+                    head_block_hash: hash,
+                    safe_block_hash: parent,
+                    finalized_block_hash: B256::ZERO,
+                },
+                attrs,
+            )
+            .await?;
+            assert_eq!(response.payload_status.status, PayloadStatusEnum::Valid);
+            assert_eq!(response.payload_status.latest_valid_hash, Some(hash));
+            assert_eq!(response.payload_id.is_some(), build_requested);
             assert_eq!(
-                rpc.get_block_by_number(number.into()).await?.unwrap().header.hash,
-                hashes[number as usize]
+                rpc.get_block_by_number(BlockNumberOrTag::Latest).await?.unwrap().header.hash,
+                hash
             );
+            assert_eq!(canonical.get_safe_num_hash().unwrap().hash, parent);
+            assert!(canonical.get_finalized_num_hash().is_none());
         }
-        assert!(canonical.get_safe_num_hash().is_none());
-        assert!(canonical.get_finalized_num_hash().is_none());
+        parent = hash;
     }
-
-    // Building on the current head still works without finality.
-    let response = EngineApiClient::<EthEngineTypes>::fork_choice_updated_v3(
-        &engine,
-        ForkchoiceState { head_block_hash: hashes[8], ..Default::default() },
-        Some(eth_payload_attributes(9)),
-    )
-    .await?;
-    assert_eq!(response.payload_status.status, PayloadStatusEnum::Valid);
-    assert!(response.payload_id.is_some());
-
-    // A zero hash does not erase previously established finality.
-    let response = EngineApiClient::<EthEngineTypes>::fork_choice_updated_v3(
-        &engine,
-        ForkchoiceState {
-            head_block_hash: hashes[8],
-            safe_block_hash: hashes[5],
-            finalized_block_hash: hashes[3],
-        },
-        None,
-    )
-    .await?;
-    assert_eq!(response.payload_status.status, PayloadStatusEnum::Valid);
-    let response = EngineApiClient::<EthEngineTypes>::fork_choice_updated_v3(
-        &engine,
-        ForkchoiceState { head_block_hash: hashes[5], ..Default::default() },
-        Some(eth_payload_attributes(9)),
-    )
-    .await?;
-    assert_eq!(response.payload_status.status, PayloadStatusEnum::Valid);
-    assert!(response.payload_id.is_some());
-    assert_eq!(canonical.get_finalized_num_hash().unwrap().hash, hashes[3]);
 
     Ok(())
 }

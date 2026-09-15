@@ -1306,16 +1306,6 @@ where
             let always_trigger_payload_job = self.engine_kind.is_opstack() ||
                 self.config.always_process_payload_attributes_on_canonical_head();
 
-            // Without known finality, the Engine API does not permit skipping this head update.
-            // Refuse the unsupported reorg before starting a payload build.
-            if !always_trigger_payload_job &&
-                state.finalized_block_hash.is_zero() &&
-                self.canonical_in_memory_state.get_finalized_num_hash().is_none()
-            {
-                debug!(target: "engine::tree", head = canonical_header.number(), "rejecting canonical ancestor fcu without known finality");
-                return Ok(Some(TreeOutcome::new(OnForkChoiceUpdated::too_deep_reorg())));
-            }
-
             // A canonical ancestor below the latest known finalized block can never become the
             // head again, because this would reorg out the finalized block. Such a forkchoice
             // update exceeds the supported reorg depth and is rejected regardless of the payload
