@@ -48,7 +48,14 @@ impl BalStateUpdate {
                 DownloadedAccount::Present(account) => account,
             };
 
-            account.apply_bal_info(account_info);
+            if let Some(balance) = account_info.balance {
+                account.balance = balance;
+            }
+            if let Some(nonce) = account_info.nonce {
+                account.nonce = nonce;
+            }
+            account.bytecode_hash =
+                account_info.code_hash.or(account.bytecode_hash).or(Some(KECCAK256_EMPTY));
             // Stored accounts represent empty code with no code hash.
             account.bytecode_hash = account.bytecode_hash.filter(|hash| *hash != KECCAK256_EMPTY);
             // Execution removes accounts a block leaves empty, see EIP-161.

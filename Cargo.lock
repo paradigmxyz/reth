@@ -306,7 +306,7 @@ dependencies = [
  "auto_impl",
  "derive_more",
  "revm",
- "thiserror 2.0.18",
+ "thiserror 2.0.20",
  "tracing",
 ]
 
@@ -9887,7 +9887,7 @@ dependencies = [
  "revm-state",
  "secp256k1 0.30.0",
  "serde",
- "thiserror 2.0.18",
+ "thiserror 2.0.20",
 ]
 
 [[package]]
@@ -10398,7 +10398,7 @@ dependencies = [
  "alloy-rpc-types-eth",
  "alloy-signer",
  "reth-primitives-traits",
- "thiserror 2.0.18",
+ "thiserror 2.0.20",
 ]
 
 [[package]]
@@ -11065,7 +11065,7 @@ dependencies = [
  "revm-primitives",
  "revm-state",
  "serde",
- "thiserror 2.0.18",
+ "thiserror 2.0.20",
 ]
 
 [[package]]
@@ -11120,7 +11120,7 @@ dependencies = [
  "revm",
  "serde",
  "serde_json",
- "thiserror 2.0.18",
+ "thiserror 2.0.20",
 ]
 
 [[package]]
@@ -11177,7 +11177,7 @@ version = "42.0.0"
 source = "git+https://github.com/bluealloy/revm?rev=0cc8b8a0b38e88864352b218a145dcfd0a54692d#0cc8b8a0b38e88864352b218a145dcfd0a54692d"
 dependencies = [
  "alloy-eip7928",
- "bitflags 2.13.0",
+ "bitflags 2.13.1",
  "nonmax",
  "revm-bytecode",
  "revm-primitives",
@@ -11239,11 +11239,11 @@ version = "0.1.0"
 source = "git+https://github.com/paradigmxyz/revmc?branch=glamsterdam-devnet-8#ec97a3f8b5d9f8c0f8f1a61255acd0064f1303ff"
 dependencies = [
  "alloy-primitives",
- "bitflags 2.13.0",
+ "bitflags 2.13.1",
  "bitvec",
  "derive_more",
  "either",
- "indexmap 2.14.0",
+ "indexmap 2.14.2",
  "oxc_index",
  "revm-bytecode",
  "revm-context",
