@@ -1255,10 +1255,15 @@ where
 
         trace!(target: "engine::tree", "fcu head hash is already canonical");
 
-        let Some(headers) = self.resolve_forkchoice_state(state, None)? else {
+        if !self.is_consistent_forkchoice_state(state, None)? {
             return Ok(Some(TreeOutcome::new(OnForkChoiceUpdated::invalid_state())));
-        };
-        self.apply_forkchoice_state(headers);
+        }
+
+        // Update the safe and finalized blocks and ensure their values are valid
+        if let Err(outcome) = self.ensure_consistent_forkchoice_state(state) {
+            // safe or finalized hashes are invalid
+            return Ok(Some(TreeOutcome::new(outcome)));
+        }
 
         self.payload_validator.on_canonical_head_changed(state.head_block_hash, &self.state);
 
@@ -1322,9 +1327,9 @@ where
                 return Ok(Some(TreeOutcome::new(OnForkChoiceUpdated::too_deep_reorg())));
             }
 
-            let Some(headers) = self.resolve_forkchoice_state(state, None)? else {
+            if !self.is_consistent_forkchoice_state(state, None)? {
                 return Ok(Some(TreeOutcome::new(OnForkChoiceUpdated::invalid_state())));
-            };
+            }
 
             // We need to effectively unwind the _canonical_ chain to the FCU's head, which is
             // part of the canonical chain. We need to update the latest block state to reflect
@@ -1334,7 +1339,6 @@ where
             if always_trigger_payload_job && self.config.unwind_canonical_header() {
                 self.update_latest_block_to_canonical_ancestor(&canonical_header)?;
             }
-            self.apply_forkchoice_state(headers);
 
             // A canonical ancestor at or above the latest known finalized block can become the
             // parent of the next block, e.g. when the CL wants to reorg out the current head.
@@ -1355,13 +1359,18 @@ where
 
         // Ensure we can apply a new chain update for the head block
         if let Some(chain_update) = self.on_new_head(state.head_block_hash)? {
-            let Some(headers) = self.resolve_forkchoice_state(state, Some(&chain_update))? else {
+            if !self.is_consistent_forkchoice_state(state, Some(&chain_update))? {
                 return Ok(Some(TreeOutcome::new(OnForkChoiceUpdated::invalid_state())));
-            };
+            }
 
             let tip = chain_update.tip().clone_sealed_header();
             self.on_canonical_chain_update(chain_update);
-            self.apply_forkchoice_state(headers);
+
+            // Update the safe and finalized blocks and ensure their values are valid
+            if let Err(outcome) = self.ensure_consistent_forkchoice_state(state) {
+                // safe or finalized hashes are invalid
+                return Ok(Some(TreeOutcome::new(outcome)));
+            }
 
             if let Some(attr) = attrs {
                 // Clone only when we actually need to process the attributes
@@ -2012,24 +2021,17 @@ where
             return;
         };
 
-        let headers = match self.resolve_forkchoice_state(sync_target_state, None) {
-            Ok(Some(headers)) => headers,
-            Ok(None) => {
-                debug!(
-                    target: "engine::tree",
-                    head = %sync_target_state.head_block_hash,
-                    safe = %sync_target_state.safe_block_hash,
-                    finalized = %sync_target_state.finalized_block_hash,
-                    "Canonicalized sync target head before safe/finalized could be applied"
-                );
-                return;
-            }
-            Err(err) => {
-                error!(target: "engine::tree", %err, "Failed to resolve sync target forkchoice state");
-                return;
-            }
-        };
-        self.apply_forkchoice_state(headers);
+        if let Err(outcome) = self.ensure_consistent_forkchoice_state(sync_target_state) {
+            debug!(
+                target: "engine::tree",
+                head = %sync_target_state.head_block_hash,
+                safe = %sync_target_state.safe_block_hash,
+                finalized = %sync_target_state.finalized_block_hash,
+                ?outcome,
+                "Canonicalized sync target head before safe/finalized could be applied"
+            );
+            return;
+        }
 
         self.state.forkchoice_state_tracker.promote_sync_target_to_valid(sync_target_state);
     }
@@ -3381,73 +3383,129 @@ where
         Ok(canonical)
     }
 
-    /// Resolves safe and finalized headers against the requested head without changing state.
-    ///
-    /// A pending chain update takes precedence over the current canonical chain. Only canonical
-    /// ancestors below its first block remain on the proposed chain.
-    fn resolve_forkchoice_state(
+    /// Checks safe/finalized ancestry before changing the canonical chain or either marker.
+    fn is_consistent_forkchoice_state(
         &self,
         state: ForkchoiceState,
         chain_update: Option<&NewCanonicalChain<N>>,
-    ) -> ProviderResult<Option<ForkchoiceStateHeaders<N::BlockHeader>>> {
-        let (head_number, new) = match chain_update {
+    ) -> ProviderResult<bool> {
+        let (canonical_head_number, new) = match chain_update {
             Some(NewCanonicalChain::Commit { new } | NewCanonicalChain::Reorg { new, .. }) => {
-                (new.last().expect("non empty chain").block_number(), new.as_slice())
+                // Only the canonical prefix below the new branch remains on the proposed chain.
+                (new.first().expect("non empty chain").block_number() - 1, new.as_slice())
             }
             None => {
                 let Some(head) = self.find_canonical_header(state.head_block_hash)? else {
-                    return Ok(None)
+                    return Ok(false)
                 };
                 (head.number(), &[][..])
             }
         };
 
-        let resolve_header = |hash| -> ProviderResult<Option<SealedHeader<N::BlockHeader>>> {
-            if let Some(block) = new.iter().find(|block| block.recovered_block().hash() == hash) {
-                return Ok(Some(block.recovered_block().clone_sealed_header()))
+        for hash in [state.finalized_block_hash, state.safe_block_hash] {
+            if hash.is_zero() || new.iter().any(|block| block.recovered_block().hash() == hash) {
+                continue
             }
-
-            Ok(self.find_canonical_header(hash)?.filter(|header| {
-                header.number() <= head_number &&
-                    new.first().is_none_or(|first| header.number() < first.block_number())
-            }))
-        };
-
-        let finalized = if state.finalized_block_hash.is_zero() {
-            None
-        } else {
-            let Some(header) = resolve_header(state.finalized_block_hash)? else { return Ok(None) };
-            Some(header)
-        };
-        let safe = if state.safe_block_hash.is_zero() {
-            None
-        } else {
-            let Some(header) = resolve_header(state.safe_block_hash)? else { return Ok(None) };
-            Some(header)
-        };
-
-        Ok(Some(ForkchoiceStateHeaders { finalized, safe }))
+            if self
+                .find_canonical_header(hash)?
+                .is_none_or(|header| header.number() > canonical_head_number)
+            {
+                return Ok(false)
+            }
+        }
+        Ok(true)
     }
 
-    /// Applies safe and finalized headers after the entire forkchoice state has been validated.
-    fn apply_forkchoice_state(&self, headers: ForkchoiceStateHeaders<N::BlockHeader>) {
-        if let Some(finalized) = headers.finalized &&
-            Some(finalized.num_hash()) != self.canonical_in_memory_state.get_finalized_num_hash()
-        {
-            let number = finalized.number();
-            // Persist finality so it survives restart, as required by OP Stack nodes.
-            let _ = self.persistence.save_finalized_block_number(number);
-            self.canonical_in_memory_state.set_finalized(finalized);
-            self.metrics.tree.finalized_block_height.set(number as f64);
+    /// Updates the tracked finalized block if we have it.
+    fn update_finalized_block(
+        &self,
+        finalized_block_hash: B256,
+    ) -> Result<(), OnForkChoiceUpdated> {
+        if finalized_block_hash.is_zero() {
+            return Ok(())
         }
-        if let Some(safe) = headers.safe &&
-            Some(safe.num_hash()) != self.canonical_in_memory_state.get_safe_num_hash()
-        {
-            let number = safe.number();
-            let _ = self.persistence.save_safe_block_number(number);
-            self.canonical_in_memory_state.set_safe(safe);
-            self.metrics.tree.safe_block_height.set(number as f64);
+
+        match self.find_canonical_header(finalized_block_hash) {
+            Ok(None) => {
+                debug!(target: "engine::tree", "Finalized block not found in canonical chain");
+                // if the finalized block is not known, we can't update the finalized block
+                return Err(OnForkChoiceUpdated::invalid_state())
+            }
+            Ok(Some(finalized)) => {
+                if Some(finalized.num_hash()) !=
+                    self.canonical_in_memory_state.get_finalized_num_hash()
+                {
+                    // we're also persisting the finalized block on disk so we can reload it on
+                    // restart this is required by optimism which queries the finalized block: <https://github.com/ethereum-optimism/optimism/blob/c383eb880f307caa3ca41010ec10f30f08396b2e/op-node/rollup/sync/start.go#L65-L65>
+                    let _ = self.persistence.save_finalized_block_number(finalized.number());
+                    self.canonical_in_memory_state.set_finalized(finalized.clone());
+                    // Update finalized block height metric
+                    self.metrics.tree.finalized_block_height.set(finalized.number() as f64);
+                }
+            }
+            Err(err) => {
+                error!(target: "engine::tree", %err, "Failed to fetch finalized block header");
+            }
         }
+
+        Ok(())
+    }
+
+    /// Updates the tracked safe block if we have it
+    fn update_safe_block(&self, safe_block_hash: B256) -> Result<(), OnForkChoiceUpdated> {
+        if safe_block_hash.is_zero() {
+            return Ok(())
+        }
+
+        match self.find_canonical_header(safe_block_hash) {
+            Ok(None) => {
+                debug!(target: "engine::tree", "Safe block not found in canonical chain");
+                // if the safe block is not known, we can't update the safe block
+                return Err(OnForkChoiceUpdated::invalid_state())
+            }
+            Ok(Some(safe)) => {
+                if Some(safe.num_hash()) != self.canonical_in_memory_state.get_safe_num_hash() {
+                    // we're also persisting the safe block on disk so we can reload it on
+                    // restart this is required by optimism which queries the safe block: <https://github.com/ethereum-optimism/optimism/blob/c383eb880f307caa3ca41010ec10f30f08396b2e/op-node/rollup/sync/start.go#L65-L65>
+                    let _ = self.persistence.save_safe_block_number(safe.number());
+                    self.canonical_in_memory_state.set_safe(safe.clone());
+                    // Update safe block height metric
+                    self.metrics.tree.safe_block_height.set(safe.number() as f64);
+                }
+            }
+            Err(err) => {
+                error!(target: "engine::tree", %err, "Failed to fetch safe block header");
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Ensures that the given forkchoice state is consistent, assuming the head block has been
+    /// made canonical.
+    ///
+    /// If the forkchoice state is consistent, this will return Ok(()). Otherwise, this will
+    /// return an instance of [`OnForkChoiceUpdated`] that is INVALID.
+    ///
+    /// This also updates the safe and finalized blocks in the [`CanonicalInMemoryState`], if they
+    /// are consistent with the head block.
+    fn ensure_consistent_forkchoice_state(
+        &self,
+        state: ForkchoiceState,
+    ) -> Result<(), OnForkChoiceUpdated> {
+        // Ensure that the finalized block, if not zero, is known and in the canonical chain
+        // after the head block is canonicalized.
+        //
+        // This ensures that the finalized block is consistent with the head block, i.e. the
+        // finalized block is an ancestor of the head block.
+        self.update_finalized_block(state.finalized_block_hash)?;
+
+        // Also ensure that the safe block, if not zero, is known and in the canonical chain
+        // after the head block is canonicalized.
+        //
+        // This ensures that the safe block is consistent with the head block, i.e. the safe
+        // block is an ancestor of the head block.
+        self.update_safe_block(state.safe_block_hash)
     }
 
     /// Validates the payload attributes with respect to the header and fork choice state.
@@ -3547,13 +3605,6 @@ where
         );
         Ok(())
     }
-}
-
-/// Safe and finalized headers validated against the requested forkchoice head.
-#[derive(Debug)]
-struct ForkchoiceStateHeaders<H> {
-    finalized: Option<SealedHeader<H>>,
-    safe: Option<SealedHeader<H>>,
 }
 
 /// Events received in the main engine loop.
