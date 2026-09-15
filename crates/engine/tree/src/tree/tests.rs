@@ -1727,7 +1727,7 @@ fn test_threshold_persistence_with_state_masking_blocks() {
         .unwrap();
     assert_eq!(
         test_harness.tree.persistence_pacing.delay(Duration::ZERO),
-        Duration::from_micros(12_500)
+        Duration::from_micros(11_000)
     );
 }
 
