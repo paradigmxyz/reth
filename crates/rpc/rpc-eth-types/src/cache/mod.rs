@@ -74,12 +74,11 @@ type BalLruCache<L> = MultiConsumerLruCache<B256, CachedRevmBal, L, BalResponseS
 #[derive(Debug)]
 pub struct EthStateCache<N: NodePrimitives> {
     to_service: UnboundedSender<CacheAction<N::Block, N::Receipt>>,
-    prewarm_bals: bool,
 }
 
 impl<N: NodePrimitives> Clone for EthStateCache<N> {
     fn clone(&self) -> Self {
-        Self { to_service: self.to_service.clone(), prewarm_bals: self.prewarm_bals }
+        Self { to_service: self.to_service.clone() }
     }
 }
 
@@ -97,7 +96,7 @@ impl<N: NodePrimitives> EthStateCache<N> {
             max_blocks,
             max_receipts,
             max_bals,
-            prewarm_bals,
+            prewarm_bals: _,
             max_concurrent_db_requests,
             max_cached_tx_hashes,
         } = config;
@@ -114,7 +113,7 @@ impl<N: NodePrimitives> EthStateCache<N> {
             rate_limiter: Arc::new(Semaphore::new(max_concurrent_db_requests)),
             tx_hash_index: LruMap::new(ByLength::new(max_cached_tx_hashes)),
         };
-        let cache = Self { to_service, prewarm_bals };
+        let cache = Self { to_service };
         (cache, service)
     }
 
@@ -137,11 +136,6 @@ impl<N: NodePrimitives> EthStateCache<N> {
         let (this, service) = Self::create(provider, executor.clone(), config);
         executor.spawn_critical_task("eth state cache", service);
         this
-    }
-
-    /// Whether BAL prewarming and caching of RPC-generated BALs are enabled.
-    pub const fn prewarm_bals(&self) -> bool {
-        self.prewarm_bals
     }
 
     /// Requests the  [`RecoveredBlock`] for the block hash

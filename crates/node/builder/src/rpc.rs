@@ -1682,13 +1682,15 @@ async fn prewarm_new_block_bals_task<EthApi: GetBlockAccessList, N: NodePrimitiv
                 return;
             }
 
-            if let Err(err) = eth_api.get_block_access_list(block.hash().into()).await {
-                debug!(
+            match eth_api.get_decoded_block_access_list(block.hash().into()).await {
+                Ok(Some(bal)) => eth_api.cache().insert_bal(block.hash(), bal),
+                Ok(None) => {}
+                Err(err) => debug!(
                     target: "reth::cli",
                     %err,
                     block_hash = ?block.hash(),
                     "Failed to prewarm BAL for canonical block",
-                );
+                ),
             }
         }
     }

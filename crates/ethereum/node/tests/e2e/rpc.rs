@@ -1,5 +1,7 @@
 use crate::utils::{eth_payload_attributes, eth_payload_attributes_amsterdam};
-use alloy_eips::{eip2718::Encodable2718, eip7910::EthConfig, BlockNumberOrTag};
+use alloy_eips::{
+    eip2718::Encodable2718, eip7910::EthConfig, eip7928::BlockAccessList, BlockNumberOrTag,
+};
 use alloy_genesis::Genesis;
 use alloy_primitives::{Address, Bytes, B256, U256};
 use alloy_provider::{
@@ -115,7 +117,7 @@ async fn test_block_access_list_lookup_semantics() -> eyre::Result<()> {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn test_generated_bal_cache_respects_prewarm_setting() -> eyre::Result<()> {
+async fn test_bal_prewarming_for_transaction_replay() -> eyre::Result<()> {
     for prewarm in [false, true] {
         let chain_spec = Arc::new(
             ChainSpecBuilder::default()
@@ -178,16 +180,14 @@ async fn test_generated_bal_cache_respects_prewarm_setting() -> eyre::Result<()>
                         .await?,
                 );
             }
-            let bal: serde_json::Value =
-                client.request("eth_getBlockAccessList", (block_hash,)).await?;
-            assert!(!bal.as_array().unwrap().is_empty());
-            assert!(cache
-                .get_recovered_block_and_maybe_bal(block_hash)
-                .await?
-                .unwrap()
-                .1
-                .is_none());
         }
+        let bal: BlockAccessList = client.request("eth_getBlockAccessList", (block_hash,)).await?;
+        assert!(!bal.is_empty());
+        let raw: Bytes = client.request("debug_getRawBlockAccessList", (block_hash,)).await?;
+        assert_eq!(raw.as_ref(), alloy_rlp::encode(&bal));
+        let (_, cached_bal) = cache.get_recovered_block_and_maybe_bal(block_hash).await?.unwrap();
+        assert_eq!(cached_bal.is_some(), prewarm);
+
         for (index, hash) in hashes.into_iter().enumerate() {
             let actual: serde_json::Value =
                 client.request("debug_traceTransaction", (hash, &opts)).await?;
