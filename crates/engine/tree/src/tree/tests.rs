@@ -1594,7 +1594,9 @@ async fn test_built_block_admission_acknowledges_after_pacing() {
             BeaconEngineMessage::InsertExecutedBlock { payload: payload.clone(), tx },
         )))
         .unwrap();
-    assert!(rx.await.unwrap());
+    let (admitted, original_feedback) = rx.await.unwrap();
+    assert!(admitted);
+    assert_eq!(original_feedback.unwrap().persistence_per_block, Some(Duration::from_millis(100)));
     let wait = harness.tree.persistence_pacing.total_wait;
     assert!(!wait.is_zero());
     let completion = harness.tree.persistence_pacing.last_validation_completed_at;
@@ -1614,7 +1616,9 @@ async fn test_built_block_admission_acknowledges_after_pacing() {
             BeaconEngineMessage::InsertExecutedBlock { payload, tx },
         )))
         .unwrap();
-    assert!(rx.await.unwrap());
+    let (admitted, duplicate_feedback) = rx.await.unwrap();
+    assert!(admitted);
+    assert_eq!(duplicate_feedback, original_feedback);
     assert_eq!(harness.tree.persistence_pacing.total_wait, wait);
     assert_eq!(harness.tree.persistence_pacing.last_validation_completed_at, completion);
 }

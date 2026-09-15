@@ -157,6 +157,10 @@ impl Future for PendingPayloadId {
 /// Timing breakdown for `reth_newPayload` responses.
 #[derive(Debug, Clone, Copy)]
 pub struct NewPayloadTimings {
+    /// Adaptive tail sleep incurred by this request, excluding queue and hard-stall time.
+    pub adaptive_wait: Duration,
+    /// Pacing feedback when this request completed a new block (not a duplicate).
+    pub pacing: Option<PersistencePacingFeedback>,
     /// Server-side execution latency.
     pub latency: Duration,
     /// Time spent waiting on persistence, including both time this message spent queued
@@ -171,6 +175,23 @@ pub struct NewPayloadTimings {
     ///
     /// `None` when wasn't asked to wait for sparse trie cache.
     pub sparse_trie_wait: Option<Duration>,
+}
+
+/// In-process feedback for predicting admission cost separately from execution work.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct PersistencePacingFeedback {
+    /// Actual tail sleep for this block, including scheduler oversleep.
+    pub adaptive_wait: Duration,
+    /// Unpadded persistence duration per released block, or `None` when pacing is inactive.
+    pub persistence_per_block: Option<Duration>,
+}
+
+impl PersistencePacingFeedback {
+    /// Predict remaining tail sleep after credited work/idle time. Padding applies only to
+    /// the deficit, matching engine pacing; reducing work does not eliminate admission cost.
+    pub fn remaining_wait(self, credited: Duration) -> Duration {
+        self.persistence_per_block.unwrap_or_default().saturating_sub(credited).mul_f64(1.10)
+    }
 }
 
 /// Additional data for big block payloads that merge multiple real blocks.
@@ -251,7 +272,7 @@ pub enum BeaconEngineMessage<Payload: PayloadTypes> {
         /// Execution results produced by the local payload builder.
         payload: BuiltPayloadExecutedBlock<<Payload::BuiltPayload as BuiltPayload>::Primitives>,
         /// True after insertion (or an existing insertion) and its pacing have completed.
-        tx: oneshot::Sender<bool>,
+        tx: oneshot::Sender<(bool, Option<PersistencePacingFeedback>)>,
     },
     /// Message with new payload.
     NewPayload {
@@ -353,6 +374,15 @@ where
         &self,
         payload: BuiltPayloadExecutedBlock<<Payload::BuiltPayload as BuiltPayload>::Primitives>,
     ) -> Result<bool, BeaconOnNewPayloadError> {
+        self.insert_executed_block_with_pacing(payload).await.map(|(admitted, _)| admitted)
+    }
+
+    /// Admit a local block and return its original pacing feedback, including on duplicate
+    /// notification/acknowledgment paths. Feedback retention is bounded to recent blocks.
+    pub async fn insert_executed_block_with_pacing(
+        &self,
+        payload: BuiltPayloadExecutedBlock<<Payload::BuiltPayload as BuiltPayload>::Primitives>,
+    ) -> Result<(bool, Option<PersistencePacingFeedback>), BeaconOnNewPayloadError> {
         let (tx, rx) = oneshot::channel();
         let _ = self.to_engine.send(BeaconEngineMessage::InsertExecutedBlock { payload, tx });
         rx.await.map_err(|_| BeaconOnNewPayloadError::EngineUnavailable)

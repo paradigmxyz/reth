@@ -542,6 +542,9 @@ where
         std::thread::sleep(delay);
         let elapsed = start.elapsed();
         self.persistence_pacing.total_wait += elapsed;
+        if let Some(feedback) = &mut self.persistence_pacing.last_feedback {
+            feedback.adaptive_wait = elapsed;
+        }
         self.metrics.engine.backpressure_stall_duration.record(elapsed);
         self.metrics.engine.backpressure_active.set(0.0);
     }
@@ -577,6 +580,7 @@ where
             ConsensusEngineEvent::CanonicalBlockAdded(block, now.elapsed()),
         ));
         self.pace_validation();
+        self.persistence_pacing.record_local_feedback(block_num_hash.hash);
         true
     }
 
@@ -1650,8 +1654,12 @@ where
                     EngineApiRequest::Beacon(request) => {
                         match request {
                             BeaconEngineMessage::InsertExecutedBlock { payload, tx } => {
+                                let hash = payload.recovered_block.hash();
                                 let admitted = self.insert_built_block(payload);
-                                let _ = tx.send(admitted);
+                                let feedback = admitted
+                                    .then(|| self.persistence_pacing.local_feedback(hash))
+                                    .flatten();
+                                let _ = tx.send((admitted, feedback));
                             }
                             BeaconEngineMessage::ForkchoiceUpdated { state, payload_attrs, tx } => {
                                 let has_attrs = payload_attrs.is_some();
@@ -1742,6 +1750,7 @@ where
                                 );
 
                                 let backpressure_wait = enqueued_at.elapsed();
+                                let completions_before = self.persistence_pacing.completions;
 
                                 let explicit_persistence_wait = if wait_for_persistence {
                                     let pending_persistence = self.persistence_state.rx.take();
@@ -1797,6 +1806,11 @@ where
                                     output.as_mut().ok().and_then(|out| out.event.take());
 
                                 let timings = NewPayloadTimings {
+                                    adaptive_wait: pacing_wait,
+                                    pacing: (self.persistence_pacing.completions !=
+                                        completions_before)
+                                        .then_some(self.persistence_pacing.last_feedback)
+                                        .flatten(),
                                     latency,
                                     persistence_wait: backpressure_wait +
                                         explicit_persistence_wait +

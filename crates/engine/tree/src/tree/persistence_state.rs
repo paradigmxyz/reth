@@ -22,7 +22,9 @@
 
 use crate::persistence::PersistenceResult;
 use alloy_eips::BlockNumHash;
+use alloy_primitives::B256;
 use crossbeam_channel::Receiver as CrossbeamReceiver;
+use reth_engine_primitives::PersistencePacingFeedback;
 use reth_primitives_traits::FastInstant as Instant;
 use std::{collections::VecDeque, time::Duration};
 use tracing::trace;
@@ -112,6 +114,12 @@ pub(crate) enum CurrentPersistenceAction {
 /// Paces validation using the last three successful saves that released blocks from memory.
 #[derive(Debug, Default)]
 pub(crate) struct PersistencePacing {
+    /// Original local admission feedback, retained across notification/acknowledgment races.
+    local_feedback: VecDeque<(B256, PersistencePacingFeedback)>,
+    /// Last new block's feedback; changed only when a completion is recorded.
+    pub(crate) last_feedback: Option<PersistencePacingFeedback>,
+    /// Monotonic completion count distinguishes fresh validation from duplicate requests.
+    pub(crate) completions: u64,
     /// Oldest sample first; each sample is save duration per fully persisted block.
     samples: VecDeque<Duration>,
     /// Completion before any pacing sleep, including locally built blocks inserted directly.
@@ -130,6 +138,11 @@ impl PersistencePacing {
     /// completions includes payload building and idle time, but excludes the previous block's
     /// pacing sleep: that sleep belongs to the block that incurred it.
     pub(crate) fn on_validation_completed(&mut self, now: Instant, pacing: bool) -> Duration {
+        self.completions += 1;
+        self.last_feedback = Some(PersistencePacingFeedback {
+            adaptive_wait: Duration::ZERO,
+            persistence_per_block: pacing.then(|| self.estimate()).flatten(),
+        });
         let previous = self.last_validation_completed_at.replace(now);
         let previous_wait = self.total_wait - self.wait_at_last_completion;
         self.wait_at_last_completion = self.total_wait;
@@ -153,20 +166,60 @@ impl PersistencePacing {
 
     /// Recompute the EMA over the bounded window so older saves no longer affect pacing.
     pub(crate) fn delay(&self, completion_interval: Duration) -> Duration {
+        PersistencePacingFeedback { persistence_per_block: self.estimate(), ..Default::default() }
+            .remaining_wait(completion_interval)
+    }
+
+    fn estimate(&self) -> Option<Duration> {
         if self.samples.len() < 2 {
-            return Duration::ZERO;
+            return None;
         }
         let mut samples = self.samples.iter().map(Duration::as_secs_f64);
         let first = samples.next().expect("at least two samples");
         let ema = samples
             .fold(first, |ema, sample| (1.0 - Self::ALPHA).mul_add(ema, Self::ALPHA * sample));
-        // Apply the safety margin to the deficit, not the entire persistence estimate.
-        Duration::from_secs_f64(ema).saturating_sub(completion_interval).mul_f64(1.10)
+        Some(Duration::from_secs_f64(ema))
+    }
+
+    pub(crate) fn record_local_feedback(&mut self, hash: B256) {
+        if let Some(feedback) = self.last_feedback {
+            if self.local_feedback.len() == 64 {
+                self.local_feedback.pop_front();
+            }
+            self.local_feedback.push_back((hash, feedback));
+        }
+    }
+
+    pub(crate) fn local_feedback(&self, hash: B256) -> Option<PersistencePacingFeedback> {
+        self.local_feedback.iter().rev().find(|(key, _)| *key == hash).map(|(_, value)| *value)
     }
 }
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn feedback_is_bounded_and_reports_inactive_completions() {
+        let mut pacing = super::PersistencePacing::default();
+        let now = Instant::now();
+        pacing.record(Duration::from_millis(200), 2);
+        pacing.on_validation_completed(now, true);
+        assert_eq!(pacing.last_feedback.unwrap().persistence_per_block, None);
+        pacing.record(Duration::from_millis(200), 2);
+        pacing.on_validation_completed(now + Duration::from_millis(10), true);
+        assert_eq!(
+            pacing.last_feedback.unwrap().persistence_per_block,
+            Some(Duration::from_millis(100))
+        );
+        for number in 0..65 {
+            pacing.record_local_feedback(alloy_primitives::B256::with_last_byte(number));
+        }
+        assert_eq!(pacing.local_feedback.len(), 64);
+        assert!(pacing.local_feedback(alloy_primitives::B256::ZERO).is_none());
+        let previous = pacing.last_feedback;
+        pacing.on_validation_completed(now + Duration::from_millis(20), false);
+        assert_eq!(pacing.last_feedback.unwrap().persistence_per_block, None);
+        assert_eq!(pacing.local_feedback(alloy_primitives::B256::with_last_byte(64)), previous);
+    }
     use super::PersistencePacing;
     use reth_primitives_traits::FastInstant as Instant;
     use std::time::Duration;
