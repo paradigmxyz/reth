@@ -636,6 +636,92 @@ fn on_new_persisted_block_queues_sparse_trie_prune_request() {
     assert!(test_harness.tree.state.pending_sparse_trie_prune());
 }
 
+mod retained_blocks_gauge {
+    use super::*;
+    use reth_metrics::metrics::{Gauge, GaugeFn};
+    use std::sync::Mutex;
+
+    #[derive(Default)]
+    struct RecordedCount(Mutex<f64>);
+
+    impl GaugeFn for RecordedCount {
+        fn increment(&self, _: f64) {
+            panic!("expected an absolute block count");
+        }
+
+        fn decrement(&self, _: f64) {
+            panic!("expected an absolute block count");
+        }
+
+        fn set(&self, value: f64) {
+            *self.0.lock().unwrap() = value;
+        }
+    }
+
+    fn observe(harness: &mut TestHarness) -> Arc<RecordedCount> {
+        let count = Arc::new(RecordedCount::default());
+        harness.tree.metrics.engine.executed_blocks = Gauge::from_arc(count.clone());
+        count
+    }
+
+    fn assert_count(count: &RecordedCount, expected: usize) {
+        assert_eq!(*count.0.lock().unwrap(), expected as f64);
+    }
+
+    #[tokio::test]
+    async fn records_locally_built_blocks_without_revalidation() {
+        let blocks: Vec<_> = TestBlockBuilder::eth().get_executed_blocks(1..4).collect();
+        let mut harness = TestHarness::new(MAINNET.clone()).with_blocks(vec![blocks[0].clone()]);
+        let count = observe(&mut harness);
+
+        for (index, block) in blocks[1..].iter().enumerate() {
+            let payload = reth_payload_primitives::BuiltPayloadExecutedBlock {
+                recovered_block: Arc::new(block.recovered_block().clone()),
+                execution_output: Arc::new(Default::default()),
+                hashed_state: Arc::new(Default::default()),
+                trie_updates: Arc::new(Default::default()),
+            };
+            // Neither insertion nor duplicate delivery should require a normal validation
+            // or a subsequent event-loop iteration to refresh the gauge.
+            for _ in 0..2 {
+                let _ = harness
+                    .tree
+                    .on_engine_message(FromEngine::Request(EngineApiRequest::InsertExecutedBlock(
+                        payload.clone(),
+                    )))
+                    .unwrap();
+                assert_count(&count, index + 2);
+            }
+        }
+    }
+
+    #[test]
+    fn records_persistence_removal_and_reorg_reinsertion() {
+        let blocks: Vec<_> = TestBlockBuilder::eth().get_executed_blocks(1..5).collect();
+        let mut harness = TestHarness::new(MAINNET.clone()).with_blocks(blocks.clone());
+        let count = observe(&mut harness);
+        let tip = blocks[3].recovered_block().num_hash();
+        let state_trie_tip = blocks[1].recovered_block().num_hash();
+
+        // Partial persistence retains the blocks above the state/trie frontier,
+        // even though their other data has already been written to disk.
+        harness.tree.persistence_state.finish(tip, state_trie_tip);
+        harness.tree.on_new_persisted_block().unwrap();
+        assert_eq!(harness.tree.state.tree_state.block_count(), 2);
+        assert_count(&count, 2);
+
+        harness.tree.reinsert_reorged_blocks(blocks.clone());
+        assert_count(&count, 4);
+        harness.tree.reinsert_reorged_blocks(blocks.clone());
+        assert_count(&count, 4);
+
+        harness.tree.persistence_state.finish(tip, tip);
+        harness.tree.on_new_persisted_block().unwrap();
+        assert_eq!(harness.tree.state.tree_state.block_count(), 0);
+        assert_count(&count, 0);
+    }
+}
+
 #[test]
 fn on_new_persisted_block_queues_sparse_trie_prune_with_in_memory_blocks() {
     let blocks: Vec<_> = TestBlockBuilder::eth().get_executed_blocks(1..4).collect();

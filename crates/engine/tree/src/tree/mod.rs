@@ -1616,6 +1616,10 @@ where
                         let is_pending = self.state.tree_state.canonical_block_hash() ==
                             block.recovered_block().parent_hash();
                         self.state.tree_state.insert_executed(block.clone());
+                        self.metrics
+                            .engine
+                            .executed_blocks
+                            .set(self.state.tree_state.block_count() as f64);
 
                         if is_pending {
                             debug!(target: "engine::tree", pending=?block_num_hash, "updating pending block");
@@ -2927,6 +2931,7 @@ where
                 self.state.tree_state.insert_executed(block);
             }
         }
+        self.metrics.engine.executed_blocks.set(self.state.tree_state.block_count() as f64);
     }
 
     /// This handles downloaded blocks that are shown to be disconnected from the canonical chain.
@@ -3545,6 +3550,7 @@ where
             self.persistence_state.last_persisted_block.hash,
             num,
         );
+        self.metrics.engine.executed_blocks.set(self.state.tree_state.block_count() as f64);
         Ok(())
     }
 }
