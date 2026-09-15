@@ -546,6 +546,7 @@ impl DefaultStateRootStrategy {
                 } else {
                     pending_sparse_trie_prune_blocks
                 },
+                sparse_trie_retain_blocks: config.sparse_trie_retain_blocks(),
             },
         );
 
@@ -578,6 +579,7 @@ impl DefaultStateRootStrategy {
             preserved_sparse_trie,
             chunk_size,
             pending_sparse_trie_prune_blocks,
+            sparse_trie_retain_blocks,
         } = options;
         let overlay_manager = overlay_manager.clone();
         let trie_metrics = self.metrics.clone();
@@ -590,8 +592,11 @@ impl DefaultStateRootStrategy {
             let parent_hash = parent_header.hash();
             let parent_state_root = parent_header.state_root();
             let new_epoch = TrieNodeEpoch::new(parent_header.number().saturating_add(1));
-            let prune_before =
-                sparse_trie_prune_before(pending_sparse_trie_prune_blocks.as_deref(), new_epoch);
+            let prune_before = sparse_trie_prune_before(
+                pending_sparse_trie_prune_blocks.as_deref(),
+                new_epoch,
+                sparse_trie_retain_blocks,
+            );
 
             let _enter = debug_span!(
                 target: "engine::tree::payload_processor",
@@ -740,6 +745,7 @@ struct SparseTrieTaskOptions<N: NodePrimitives> {
     chunk_size: usize,
     /// `None` disables pruning. `Some(Vec::new())` prunes nodes older than the current block.
     pending_sparse_trie_prune_blocks: Option<Vec<ExecutedBlock<N>>>,
+    sparse_trie_retain_blocks: u64,
 }
 
 struct StateRootTaskOptions<'a, N: NodePrimitives> {
@@ -753,14 +759,19 @@ struct StateRootTaskOptions<'a, N: NodePrimitives> {
 fn sparse_trie_prune_before<N: NodePrimitives>(
     pending_sparse_trie_prune_blocks: Option<&[ExecutedBlock<N>]>,
     new_epoch: TrieNodeEpoch,
+    retain_blocks: u64,
 ) -> Option<TrieNodeEpoch> {
     // The parent chain is ordered newest to oldest. An empty chain means the block being
     // calculated is the only in-memory block whose trie nodes need to be retained.
-    match pending_sparse_trie_prune_blocks {
-        None => None,
-        Some([]) => Some(new_epoch),
-        Some([.., oldest]) => Some(TrieNodeEpoch::new(oldest.recovered_block().number())),
-    }
+    let in_memory = match pending_sparse_trie_prune_blocks {
+        None => return None,
+        Some([]) => new_epoch,
+        Some([.., oldest]) => TrieNodeEpoch::new(oldest.recovered_block().number()),
+    };
+    // Nodes touched within the configured number of recent blocks stay cached after those
+    // blocks are persisted, so the cutoff never moves past that window.
+    let retained = TrieNodeEpoch::new(new_epoch.get().saturating_sub(retain_blocks));
+    Some(in_memory.min(retained))
 }
 
 fn published_sparse_trie_anchor_hash<N: NodePrimitives>(
@@ -1309,16 +1320,50 @@ mod tests {
     #[test]
     fn sparse_trie_prune_before_uses_requested_range() {
         let new_epoch = TrieNodeEpoch::new(10);
-        assert_eq!(sparse_trie_prune_before::<EthPrimitives>(None, new_epoch), None);
+        assert_eq!(sparse_trie_prune_before::<EthPrimitives>(None, new_epoch, 0), None);
         assert_eq!(
-            sparse_trie_prune_before::<EthPrimitives>(Some(&[]), new_epoch),
+            sparse_trie_prune_before::<EthPrimitives>(Some(&[]), new_epoch, 0),
             Some(new_epoch)
         );
 
         let mut blocks: Vec<_> = TestBlockBuilder::eth().get_executed_blocks(7..10).collect();
         blocks.reverse();
 
-        assert_eq!(sparse_trie_prune_before(Some(&blocks), new_epoch), Some(TrieNodeEpoch::new(7)));
+        assert_eq!(
+            sparse_trie_prune_before(Some(&blocks), new_epoch, 0),
+            Some(TrieNodeEpoch::new(7))
+        );
+    }
+
+    #[test]
+    fn sparse_trie_prune_before_keeps_retained_blocks() {
+        let new_epoch = TrieNodeEpoch::new(10);
+        assert_eq!(
+            sparse_trie_prune_before::<EthPrimitives>(Some(&[]), new_epoch, 6),
+            Some(TrieNodeEpoch::new(4))
+        );
+        assert_eq!(
+            sparse_trie_prune_before::<EthPrimitives>(None, new_epoch, 6),
+            None,
+            "disabled pruning stays disabled"
+        );
+
+        let mut blocks: Vec<_> = TestBlockBuilder::eth().get_executed_blocks(7..10).collect();
+        blocks.reverse();
+
+        // The in-memory chain already covers a window shorter than the retained one.
+        assert_eq!(
+            sparse_trie_prune_before(Some(&blocks), new_epoch, 2),
+            Some(TrieNodeEpoch::new(7))
+        );
+        assert_eq!(
+            sparse_trie_prune_before(Some(&blocks), new_epoch, 6),
+            Some(TrieNodeEpoch::new(4))
+        );
+        assert_eq!(
+            sparse_trie_prune_before(Some(&blocks), new_epoch, 100),
+            Some(TrieNodeEpoch::new(0))
+        );
     }
 
     #[test]
