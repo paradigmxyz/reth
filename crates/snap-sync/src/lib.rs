@@ -17,12 +17,12 @@ mod bal;
 mod bootstrap;
 mod bytecode;
 mod catch_up;
+mod common;
 mod context;
 mod error;
 mod generation;
 mod handoff;
 mod pivot;
-mod request;
 mod session;
 mod storage;
 mod trie;
@@ -32,7 +32,7 @@ mod test_utils;
 
 pub use account::{
     AccountCoverage, AccountRangeDownload, AccountRangeProgress, AccountRangeStep,
-    SnapAccountStore, VerifiedRange, DEFAULT_RESPONSE_BYTES, MAX_HASH,
+    SnapAccountStore, VerifiedRange,
 };
 pub use attempt::{SnapAttemptStore, SnapWrite};
 pub use bal::{BalStateUpdate, DownloadedAccount};
@@ -40,6 +40,7 @@ pub use bootstrap::{SnapBootstrap, SnapSyncContext, SnapSyncOutcome, SnapSyncPro
 pub use catch_up::{
     BlockAccessListCatchUp, BlockAccessListCatchUpOutcome, BlockAccessListProgress,
 };
+pub use common::{DEFAULT_RESPONSE_BYTES, MAX_HASH};
 pub use context::NodeSnapContext;
 pub use error::SnapSyncError;
 pub use generation::{SnapDownloadProgress, SnapGeneration, SnapPhase, SnapStateStore};

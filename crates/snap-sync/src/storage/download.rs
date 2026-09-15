@@ -1,7 +1,7 @@
 //! Downloads authenticated storage dependencies through all required responses.
 
 use crate::{
-    request::{push_peer, request_options, SnapRequests},
+    common::{push_peer, request_options, SnapRequests},
     SnapSyncError, DEFAULT_RESPONSE_BYTES, MAX_HASH,
 };
 use alloy_primitives::B256;

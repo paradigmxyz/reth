@@ -5,8 +5,8 @@
 
 use crate::{
     bytecode::store::write_bytecodes,
+    common::{push_peer, request_options, SnapRequests},
     error::db_error,
-    request::{push_peer, request_options},
     SnapDownloadProgress, SnapPhase, SnapStateStore, SnapSyncError,
 };
 use alloy_eip7928::bal::DecodedBal;
@@ -35,22 +35,22 @@ const BAL_BLOCKS_PER_REQUEST: u64 = 28;
 /// Applies authenticated BALs from the downloaded pivot through a canonical target block.
 #[derive(Debug)]
 pub struct BlockAccessListCatchUp<'a, C, F> {
-    // A reference avoids requiring network clients to implement Clone.
-    client: &'a C,
+    // Client, runtime and request ids shared with the state downloads.
+    requests: SnapRequests<'a, C>,
     // Header reads and state transitions must observe the same provider factory.
     factory: &'a F,
     // Every applied block advances the store's durable generation marker.
     store: SnapStateStore<'a, F>,
-    // BAL decoding and commitment checks stay off the async worker.
-    runtime: Runtime,
-    // Request IDs remain unique for this catch-up attempt.
-    request_id: u64,
 }
 
 impl<'a, C, F> BlockAccessListCatchUp<'a, C, F> {
     /// Creates a catch-up coordinator without starting network or database work.
     pub const fn new(client: &'a C, factory: &'a F, runtime: Runtime) -> Self {
-        Self { client, factory, store: SnapStateStore::new(factory), runtime, request_id: 0 }
+        Self {
+            requests: SnapRequests::new(client, runtime),
+            factory,
+            store: SnapStateStore::new(factory),
+        }
     }
 
     /// Applies the canonical BAL prefix or returns when every eligible peer lacks the next BAL.
@@ -153,15 +153,15 @@ impl<'a, C, F> BlockAccessListCatchUp<'a, C, F> {
         loop {
             let headers = self.canonical_headers(generation, target_block)?;
             let request = GetBlockAccessListsMessage {
-                request_id: self.next_request_id()?,
+                request_id: self.requests.next_id()?,
                 block_hashes: headers.iter().map(|header| header.hash()).collect(),
                 response_bytes: BAL_RESPONSE_BYTES,
             };
             let downloader = BlockAccessListDownloader::new_with_options(
-                self.client,
+                self.requests.client,
                 request,
                 &headers,
-                self.runtime.clone(),
+                self.requests.runtime.clone(),
                 request_options(&excluded),
             )
             .map_err(|error| SnapSyncError::InvalidRequest(error.to_string()))?;
@@ -260,14 +260,6 @@ impl<'a, C, F> BlockAccessListCatchUp<'a, C, F> {
             return Err(SnapSyncError::MissingHeader(generation.next_block + headers.len() as u64))
         }
         Ok(headers)
-    }
-
-    // Failing on wrap prevents a stale response from matching a new logical request.
-    fn next_request_id(&mut self) -> Result<u64, SnapSyncError> {
-        self.request_id = self.request_id.checked_add(1).ok_or_else(|| {
-            SnapSyncError::InvalidRequest("snap request id space exhausted".to_string())
-        })?;
-        Ok(self.request_id)
     }
 }
 

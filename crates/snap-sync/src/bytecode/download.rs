@@ -1,7 +1,7 @@
 //! Downloads authenticated bytecode dependencies through all required responses.
 
 use crate::{
-    request::{push_peer, request_options, SnapRequests},
+    common::{push_peer, request_options, SnapRequests},
     SnapSyncError, DEFAULT_RESPONSE_BYTES,
 };
 use alloy_primitives::{map::B256Set, Bytes, B256, KECCAK256_EMPTY};

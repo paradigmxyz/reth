@@ -1,7 +1,7 @@
 //! Drives one snap synchronization attempt: what it targets, and when it stops.
 
 use crate::{
-    account::account_progress, request::SnapRequests, AccountRangeProgress, SnapDownloadProgress,
+    account::account_progress, common::SnapRequests, AccountRangeProgress, SnapDownloadProgress,
     SnapGeneration, SnapPhase, SnapPivotPolicy, SnapStateStore, SnapSyncError,
     DEFAULT_RESPONSE_BYTES, MAX_HASH,
 };

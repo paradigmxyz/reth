@@ -40,9 +40,11 @@ pub enum SnapSyncError {
     /// No account coverage is recorded for the attempt.
     #[error("no account coverage is recorded for the attempt")]
     NoCoverage,
-    /// A persisted coverage record this build cannot read.
-    #[error("account coverage record version {version:?} is not supported")]
-    UnsupportedCoverage {
+    /// A persisted progress record this build cannot read.
+    #[error("{key} record version {version:?} is not supported")]
+    UnsupportedRecord {
+        /// Metadata key the record is stored under.
+        key: &'static str,
         /// Version found on disk, absent when the record carries no numeric version.
         version: Option<u64>,
     },

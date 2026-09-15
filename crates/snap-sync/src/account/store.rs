@@ -4,6 +4,7 @@
 
 use crate::{
     bytecode::store::{require_code, supplied_code, write_bytecodes},
+    common::{read_record, write_record},
     error::db_error,
     storage::store::verify_storage,
     SnapAttemptStore, SnapDownloadProgress, SnapPhase, SnapStateStore, SnapSyncError, SnapWrite,
@@ -22,7 +23,6 @@ use reth_storage_api::{
     DBProvider, DatabaseProviderFactory, MetadataProvider, MetadataWriter, SnapAttemptId,
     StageCheckpointReader, StageCheckpointWriter, StateWriter, StorageSettingsCache,
 };
-use reth_storage_errors::provider::ProviderError;
 use reth_trie_common::{HashedPostState, HashedPostStateSorted, HashedStorage, TrieAccount};
 use revm::bytecode::Bytecode;
 use serde::{Deserialize, Serialize};
@@ -191,21 +191,9 @@ struct StoredCoverage {
 }
 
 impl StoredCoverage {
-    // Serializes `coverage` for `attempt` at this build's version.
-    fn encode(attempt: SnapAttemptId, coverage: AccountCoverage) -> Result<Vec<u8>, SnapSyncError> {
-        let stored = Self { version: COVERAGE_VERSION, attempt, coverage };
-        Ok(serde_json::to_vec(&stored).map_err(ProviderError::other)?)
-    }
-
-    // Checks the version first, so a record from another build is reported rather than misread.
-    fn decode(bytes: &[u8]) -> Result<Self, SnapSyncError> {
-        let value: serde_json::Value =
-            serde_json::from_slice(bytes).map_err(ProviderError::other)?;
-        let version = value.get("version").and_then(serde_json::Value::as_u64);
-        if version != Some(COVERAGE_VERSION as u64) {
-            return Err(SnapSyncError::UnsupportedCoverage { version })
-        }
-        Ok(serde_json::from_value(value).map_err(ProviderError::other)?)
+    // `coverage` for `attempt` at this build's version.
+    const fn new(attempt: SnapAttemptId, coverage: AccountCoverage) -> Self {
+        Self { version: COVERAGE_VERSION, attempt, coverage }
     }
 }
 
@@ -219,15 +207,17 @@ impl<T: MetadataProvider> SnapAccountStore for T {
             return Ok(coverage)
         }
         let start = AccountCoverage::START;
-        self.write_metadata(COVERAGE_KEY, StoredCoverage::encode(write.attempt(), start)?)?;
+        write_record(self, COVERAGE_KEY, &StoredCoverage::new(write.attempt(), start))?;
         Ok(start)
     }
 
     // A record left by another attempt reads as no coverage.
     fn account_coverage(&self, write: SnapWrite) -> Result<Option<AccountCoverage>, SnapSyncError> {
         self.authorize_snap_write(write)?;
-        let Some(bytes) = self.get_metadata(COVERAGE_KEY)? else { return Ok(None) };
-        let stored = StoredCoverage::decode(&bytes)?;
+        let Some(stored) = read_record::<StoredCoverage>(self, COVERAGE_KEY, COVERAGE_VERSION)?
+        else {
+            return Ok(None)
+        };
         Ok((stored.attempt == write.attempt()).then_some(stored.coverage))
     }
 
@@ -258,7 +248,7 @@ impl<T: MetadataProvider> SnapAccountStore for T {
         self.remove::<tables::HashedAccounts>(interval)?;
         self.remove::<tables::HashedStorages>(interval)?;
         dependencies.write(self)?;
-        self.write_metadata(COVERAGE_KEY, StoredCoverage::encode(write.attempt(), advanced)?)?;
+        write_record(self, COVERAGE_KEY, &StoredCoverage::new(write.attempt(), advanced))?;
         Ok(advanced)
     }
 }
@@ -443,11 +433,7 @@ mod tests {
         assert!(tail.accounts().is_empty());
         let provider = factory.database_provider_rw().unwrap();
         let coverage = AccountCoverage { next: Some(key(3)) };
-        provider
-            .write_metadata(
-                COVERAGE_KEY,
-                StoredCoverage::encode(write.attempt(), coverage).unwrap(),
-            )
+        write_record(&provider, COVERAGE_KEY, &StoredCoverage::new(write.attempt(), coverage))
             .unwrap();
 
         let coverage =
@@ -666,7 +652,7 @@ mod tests {
 
             assert!(matches!(
                 provider.account_coverage(write),
-                Err(SnapSyncError::UnsupportedCoverage { .. })
+                Err(SnapSyncError::UnsupportedRecord { .. })
             ));
         }
     }
