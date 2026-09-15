@@ -16,7 +16,7 @@ use core::{
 use futures::{future::Either, FutureExt, TryFutureExt};
 use reth_errors::RethResult;
 use reth_payload_builder_primitives::PayloadBuilderError;
-use reth_payload_primitives::PayloadTypes;
+use reth_payload_primitives::{BuiltPayload, BuiltPayloadExecutedBlock, PayloadTypes};
 use std::time::{Duration, Instant};
 use tokio::sync::{mpsc::UnboundedSender, oneshot};
 
@@ -246,6 +246,13 @@ impl ExecutionPayload for BigBlockData<ExecutionData> {
 /// consensus layer).
 #[derive(Debug)]
 pub enum BeaconEngineMessage<Payload: PayloadTypes> {
+    /// Admit a trusted locally built block without re-executing it.
+    InsertExecutedBlock {
+        /// Execution results produced by the local payload builder.
+        payload: BuiltPayloadExecutedBlock<<Payload::BuiltPayload as BuiltPayload>::Primitives>,
+        /// True after insertion (or an existing insertion) and its pacing have completed.
+        tx: oneshot::Sender<bool>,
+    },
     /// Message with new payload.
     NewPayload {
         /// The execution payload received by Engine API.
@@ -285,6 +292,9 @@ pub enum BeaconEngineMessage<Payload: PayloadTypes> {
 impl<Payload: PayloadTypes> Display for BeaconEngineMessage<Payload> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::InsertExecutedBlock { payload, .. } => {
+                write!(f, "InsertExecutedBlock({:?})", payload.recovered_block.num_hash())
+            }
             Self::NewPayload { payload, .. } => {
                 write!(
                     f,
@@ -334,6 +344,18 @@ where
     /// Creates a new beacon consensus engine handle.
     pub const fn new(to_engine: UnboundedSender<BeaconEngineMessage<Payload>>) -> Self {
         Self { to_engine }
+    }
+
+    /// Admit a trusted local execution result and wait for its persistence pacing to finish.
+    /// Returns false if the block is obsolete or insertion fails. Duplicate insertion does not
+    /// execute or pace the block again. This is an in-process API, not a remote Engine RPC.
+    pub async fn insert_executed_block(
+        &self,
+        payload: BuiltPayloadExecutedBlock<<Payload::BuiltPayload as BuiltPayload>::Primitives>,
+    ) -> Result<bool, BeaconOnNewPayloadError> {
+        let (tx, rx) = oneshot::channel();
+        let _ = self.to_engine.send(BeaconEngineMessage::InsertExecutedBlock { payload, tx });
+        rx.await.map_err(|_| BeaconOnNewPayloadError::EngineUnavailable)
     }
 
     /// Sends a new payload message to the beacon consensus engine and waits for a response.
