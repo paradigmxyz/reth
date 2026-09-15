@@ -1384,7 +1384,7 @@ async fn test_built_block_admission_acknowledges_after_pacing() {
     };
     harness.tree.persistence_pacing.last_validation_completed_at = Some(Instant::now());
     let (tx, rx) = tokio::sync::oneshot::channel();
-    harness
+    let _ = harness
         .tree
         .on_engine_message(FromEngine::Request(EngineApiRequest::Beacon(
             BeaconEngineMessage::InsertExecutedBlock { payload: payload.clone(), tx },
@@ -1395,7 +1395,7 @@ async fn test_built_block_admission_acknowledges_after_pacing() {
     assert!(!wait.is_zero());
     let completion = harness.tree.persistence_pacing.last_validation_completed_at;
     // The asynchronous builder notification can arrive after acknowledged admission.
-    harness
+    let _ = harness
         .tree
         .on_engine_message(FromEngine::Request(EngineApiRequest::InsertExecutedBlock(
             payload.clone(),
@@ -1404,7 +1404,7 @@ async fn test_built_block_admission_acknowledges_after_pacing() {
     assert_eq!(harness.tree.persistence_pacing.total_wait, wait);
     // Or it can arrive before the acknowledgment request: neither order sleeps twice.
     let (tx, rx) = tokio::sync::oneshot::channel();
-    harness
+    let _ = harness
         .tree
         .on_engine_message(FromEngine::Request(EngineApiRequest::Beacon(
             BeaconEngineMessage::InsertExecutedBlock { payload, tx },
