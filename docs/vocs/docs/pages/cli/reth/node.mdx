@@ -249,7 +249,7 @@ Networking:
           [default: 131072]
 
       --max-tx-pending-fetch <COUNT>
-          Max capacity of cache of hashes for transactions pending fetch.
+          Maximum number of announced transaction hashes to track, including inflight requests.
 
           [default: 25600]
 
@@ -407,6 +407,11 @@ RPC:
 
           If no path is provided, a secret will be generated and stored in the datadir under `<DIR>/<CHAIN_ID>/jwt.hex`. For mainnet this would be `~/.local/share/reth/mainnet/jwt.hex` by default.
 
+      --authrpc.jwtsecret-hex <HEX>
+          Hex encoded JWT secret to use for the authenticated engine-API RPC server.
+
+          This will enforce JWT authentication for all requests coming from the consensus layer. Cannot be used together with `--authrpc.jwtsecret`.
+
       --auth-ipc
           Enable auth engine API over IPC
 
@@ -439,7 +444,7 @@ RPC:
           Set the maximum RPC response payload size for both HTTP and WS in megabytes
 
           [default: 160]
-          [aliases: --rpc.returndata.limit]
+          [alias: --rpc.returndata.limit]
 
       --rpc.max-subscriptions-per-connection <RPC_MAX_SUBSCRIPTIONS_PER_CONNECTION>
           Set the maximum concurrent subscriptions per connection
@@ -539,11 +544,6 @@ RPC State Cache:
 
           [default: 2000]
 
-      --rpc-cache.max-headers <MAX_HEADERS>
-          Max number of headers in cache
-
-          [default: 1000]
-
       --rpc-cache.max-bals <MAX_BALS>
           Max number of block access lists in cache
 
@@ -557,7 +557,7 @@ RPC State Cache:
       --rpc-cache.max-cached-tx-hashes <MAX_CACHED_TX_HASHES>
           Maximum number of transaction hashes to cache for transaction lookups
 
-          [default: 30000]
+          [default: 100000]
 
 Gas Price Oracle:
       --gpo.blocks <BLOCKS>
@@ -1000,9 +1000,10 @@ Engine:
       --engine.persistence-threshold <PERSISTENCE_THRESHOLD>
           Configure persistence threshold for the engine. This determines how many canonical blocks must be in-memory, ahead of the last persisted block, before flushing canonical blocks to disk again.
 
-          To persist blocks as fast as the node receives them, set this value to zero. This will cause more frequent DB writes.
+          To persist blocks as fast as the node receives them, set this value to zero. This disables state masking and causes more frequent DB writes.
 
-          [default: 7]
+          [env: RETH_ENGINE_PERSISTENCE_THRESHOLD=]
+          [default: 50]
 
       --engine.persistence-backpressure-threshold <PERSISTENCE_BACKPRESSURE_THRESHOLD>
           Configure the maximum number of blocks beyond the in-memory buffer target that may await persistence before engine API processing stalls.
@@ -1012,9 +1013,10 @@ Engine:
           This value must be greater than `--engine.persistence-threshold`.
 
       --engine.num-state-masking-blocks <NUM_STATE_MASKING_BLOCKS>
-          EXPERIMENTAL: Configure how many of the blocks being persisted should only mask state/trie writes instead of durably persisting their state/trie updates in the current cycle
+          Configure how many of the blocks being persisted should only mask state/trie writes instead of durably persisting their state/trie updates in the current cycle
 
-          [default: 0]
+          [env: RETH_ENGINE_NUM_STATE_MASKING_BLOCKS=]
+          [default: 30]
 
       --engine.memory-block-buffer-target <MEMORY_BLOCK_BUFFER_TARGET>
           Configure the target number of blocks to keep in memory.

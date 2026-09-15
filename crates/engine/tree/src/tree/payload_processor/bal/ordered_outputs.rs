@@ -32,9 +32,9 @@ impl From<OrderedWorkerOutputError> for BalExecutionError {
 /// state and performs no canonical commit work.
 ///
 /// Behavior:
-/// - each yielded item has the next transaction index, `Ok` and indexed execution errors alike: an
-///   execution error is a per-transaction result, deferred to its slot so the consumer observes it
-///   in block order
+/// - each yielded item has the next transaction index, `Ok` and indexed transaction errors alike: a
+///   recovery or execution error is a per-transaction result, deferred to its slot so the consumer
+///   observes it in block order
 /// - non-indexed worker errors are forwarded immediately and exhaust the iterator
 /// - closed channels before `total` outputs yield `Err` and exhaust the iterator
 /// - out-of-bounds and duplicate indices panic because they violate the internal worker/dispatcher
@@ -48,7 +48,7 @@ pub(super) fn ordered_worker_outputs<R>(
 
 struct OrderedWorkerOutputs<'a, R> {
     result_rx: &'a Receiver<Result<BalWorkerOutput<R>, BalWorkerError>>,
-    /// Slot per transaction: an out-of-order output (or its indexed execution error) is parked
+    /// Slot per transaction: an out-of-order output (or its indexed transaction error) is parked
     /// here until every earlier transaction has been yielded.
     pending: Vec<Option<Result<BalWorkerOutput<R>, BalWorkerError>>>,
     /// Next transaction index to yield.
@@ -91,15 +91,19 @@ impl<R> Iterator for OrderedWorkerOutputs<'_, R> {
             let (index, slot) = match self.result_rx.recv() {
                 Ok(Ok(output)) => (output.index, Ok(output)),
                 Ok(Err(err)) => {
-                    // Execution failures are deferred to their transaction's slot so the
+                    // Transaction failures are deferred to their transaction's slot so the
                     // consumer observes them in block order: verdict precedence must follow
                     // block position, not worker completion order. Errors without an index
                     // cannot be attributed to a transaction and end the iteration.
-                    let BalWorkerError::Execution { tx_index, .. } = &err else {
-                        self.failed = true;
-                        return Some(Err(err.into()));
+                    let tx_index = match &err {
+                        BalWorkerError::Execution { tx_index, .. } |
+                        BalWorkerError::Transaction { tx_index, .. } => *tx_index,
+                        BalWorkerError::Setup(_) => {
+                            self.failed = true;
+                            return Some(Err(err.into()));
+                        }
                     };
-                    (*tx_index, Err(err))
+                    (tx_index, Err(err))
                 }
                 Err(_) => {
                     self.failed = true;
@@ -207,6 +211,30 @@ mod tests {
 
         expect_err_contains(outputs.next().expect("first item"), "transaction 0: bal miss");
         assert_eq!(outputs.next().expect("second item").expect("second output").result, 10);
+        assert!(outputs.next().is_none());
+    }
+
+    #[test]
+    fn orders_recovery_and_execution_errors_by_transaction_index() {
+        let (tx, rx) = crossbeam_channel::unbounded();
+        tx.send(Err(BalWorkerError::Execution {
+            tx_index: 2,
+            tx_gas_limit: 42,
+            source: alloy_evm::block::BlockExecutionError::msg("bal miss"),
+        }))
+        .unwrap();
+        tx.send(Err(BalWorkerError::Transaction {
+            tx_index: 1,
+            source: std::io::Error::other("sig fail").into(),
+        }))
+        .unwrap();
+        tx.send(Ok(output(0, 0))).unwrap();
+        drop(tx);
+
+        let mut outputs = ordered_worker_outputs(&rx, 3);
+        assert_eq!(outputs.next().unwrap().unwrap().result, 0);
+        expect_err_contains(outputs.next().unwrap(), "transaction 1: sig fail");
+        expect_err_contains(outputs.next().unwrap(), "transaction 2: bal miss");
         assert!(outputs.next().is_none());
     }
 

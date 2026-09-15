@@ -4,10 +4,16 @@
 # mount snapshot → start node → extract source blocks → warmup → replay →
 # convert txgen JSON report into legacy benchmark CSVs.
 #
+# In call mode it replays the request corpus staged by bench-txgen-extract.sh
+# instead, and writes responses.ndjson, record_timings.csv, requests.csv,
+# report.json and cpu.json for bench-call-summary.py.
+#
 # Usage: bench-txgen-run.sh <label> <binary> <output-dir>
 #
 # Required env: SCHELK_MOUNT, BENCH_RPC_URL, BENCH_BLOCKS, BENCH_WARMUP_BLOCKS
 # Optional env: BENCH_EXECUTION_MODE, BENCH_BIG_BLOCKS, BENCH_BIG_BLOCKS_TARGET_GAS,
+#               BENCH_CALL_CLASS, BENCH_CALL_METHODS, BENCH_CALL_RPS,
+#               BENCH_CALL_DURATION, BENCH_CALL_PASSES, BENCH_CALL_CONCURRENCY,
 #               BENCH_REORG, BENCH_BAL,
 #               BENCH_WORK_DIR, BENCH_WAIT_TIME, BENCH_BLOCK_TIME, BENCH_BASELINE_ARGS,
 #               BENCH_FEATURE_ARGS, BENCH_OTLP_TRACES_ENDPOINT,
@@ -47,6 +53,21 @@ fi
 DATADIR_NAME="datadir"
 BIG_BLOCKS="${BENCH_BIG_BLOCKS:-false}"
 EXECUTION_MODE="${BENCH_EXECUTION_MODE:-engine}"
+CALL_CLASS="${BENCH_CALL_CLASS:-call}"
+CALL_METHODS="${BENCH_CALL_METHODS:-}"
+CALL_RPS="${BENCH_CALL_RPS:-100}"
+CALL_DURATION="${BENCH_CALL_DURATION:-120s}"
+CALL_PASSES="${BENCH_CALL_PASSES:-20}"
+CALL_CONCURRENCY="${BENCH_CALL_CONCURRENCY:-16}"
+# Traces are orders of magnitude slower than calls, so they get a longer budget.
+CALL_TIMEOUT=30s
+if [ "$CALL_CLASS" != "call" ]; then
+  CALL_TIMEOUT=120s
+fi
+WARMUP_UNIT="source blocks"
+if [ "$EXECUTION_MODE" = "call" ]; then
+  WARMUP_UNIT="seconds"
+fi
 if [ "$BIG_BLOCKS" = "true" ]; then
   DATADIR_NAME="datadir-big-blocks"
 fi
@@ -57,6 +78,12 @@ TARGET_METRICS_RANGE="$OUTPUT_DIR/target-metrics-range.json"
 
 RETH_SCOPE="${RETH_SCOPE:-reth-bench.scope}"
 BENCH_TARGET_METRICS_SCRAPE_INTERVAL_MS="${BENCH_TARGET_METRICS_SCRAPE_INTERVAL_MS:-}"
+TARGET_METRICS_CONFIG="${BENCH_TARGET_METRICS_CONFIG:-}"
+if [ "$EXECUTION_MODE" = "call" ]; then
+  # The target metric queries describe block execution and nothing in call mode
+  # reads the scrapes, so they are not collected.
+  TARGET_METRICS_CONFIG=""
+fi
 
 capture_unix_time_ms() {
   python3 -c 'import time; print(time.time_ns() // 1_000_000)'
@@ -65,7 +92,7 @@ capture_unix_time_ms() {
 record_target_metric_range() {
   local start_ms="$1"
   local end_ms="$2"
-  if [ -z "${BENCH_TARGET_METRICS_CONFIG:-}" ]; then
+  if [ -z "$TARGET_METRICS_CONFIG" ]; then
     return 0
   fi
 
@@ -110,7 +137,7 @@ extract_target_metric_scrapes() {
     return 1
   fi
 
-  filter_output="$(python3 .github/scripts/bench-target-metric-sample-filter.py "$BENCH_TARGET_METRICS_CONFIG")"
+  filter_output="$(python3 .github/scripts/bench-target-metric-sample-filter.py "$TARGET_METRICS_CONFIG")"
   mapfile -t filter_lines <<< "$filter_output"
   sample_grep="${filter_lines[0]}"
   sample_names_json="${filter_lines[1]}"
@@ -163,6 +190,58 @@ bal_enabled_for_label() {
 
 USE_BAL="$(bal_enabled_for_label)"
 echo "BAL replay for ${LABEL}: ${USE_BAL} (mode=${BENCH_BAL:-false})"
+
+node_head_hash() {
+  curl -sf http://127.0.0.1:8545 -X POST \
+    -H 'Content-Type: application/json' \
+    -d '{"jsonrpc":"2.0","method":"eth_getBlockByNumber","params":["latest",false],"id":1}' \
+    | jq -r '.result.hash'
+}
+
+# Total CPU time the node's cgroup has consumed, empty when unavailable.
+cgroup_cpu_usage_usec() {
+  local cgroup_path
+  cgroup_path="$(sudo systemctl show -p ControlGroup --value "$RETH_SCOPE" 2>/dev/null || true)"
+  if [ -z "$cgroup_path" ]; then
+    return 0
+  fi
+  sudo cat "/sys/fs/cgroup${cgroup_path}/cpu.stat" 2>/dev/null | awk '/^usage_usec/ { print $2 }'
+}
+
+# CPU time of the measured phase plus the request counts it is divided by.
+write_cpu_json() {
+  local start="$1"
+  local end="$2"
+  local delta=0
+  local requests_total=0
+  local requests_ok=0
+  local counts csv
+
+  if [ -n "$start" ] && [ -n "$end" ]; then
+    delta=$(( end - start ))
+  fi
+  for csv in "$OUTPUT_DIR/requests.csv" "$OUTPUT_DIR/record_timings.csv"; do
+    if [ -f "$csv" ]; then
+      # `status` is the last column of both per-request CSVs.
+      counts=$(awk -F, 'NR > 1 { total++; if ($NF == "ok") ok++ } END { printf "%d %d", total + 0, ok + 0 }' "$csv")
+      requests_total=$(( requests_total + ${counts% *} ))
+      requests_ok=$(( requests_ok + ${counts#* } ))
+    fi
+  done
+  jq -n \
+    --argjson usage_usec_start "${start:-null}" \
+    --argjson usage_usec_end "${end:-null}" \
+    --argjson usage_usec_delta "$delta" \
+    --argjson requests_total "$requests_total" \
+    --argjson requests_ok "$requests_ok" \
+    '{
+      usage_usec_start: $usage_usec_start,
+      usage_usec_end: $usage_usec_end,
+      usage_usec_delta: $usage_usec_delta,
+      requests_total: $requests_total,
+      requests_ok: $requests_ok,
+    }' > "$OUTPUT_DIR/cpu.json"
+}
 
 call_reth_jit() {
   local action="$1"
@@ -245,14 +324,19 @@ if [ "${BENCH_CORES:-0}" -gt 0 ] && [ "$BENCH_CORES" -lt "$MAX_RETH" ]; then
 fi
 RETH_CPUS="1-${MAX_RETH}"
 
+# txgen reorg mode builds synthetic side-fork blocks via testing_buildBlockV1.
+HTTP_API="eth,net,web3,debug,reth,testing,txpool"
+if [ "$EXECUTION_MODE" = "call" ]; then
+  HTTP_API="$HTTP_API,trace"
+fi
+
 RETH_ARGS=(
   node
   --datadir "$DATADIR"
   --log.file.directory "$OUTPUT_DIR/reth-logs"
   --engine.accept-execution-requests-hash
   --http
-  # txgen reorg mode builds synthetic side-fork blocks via testing_buildBlockV1.
-  --http.api eth,net,web3,debug,reth,testing,txpool
+  --http.api "$HTTP_API"
   --http.port 8545
   --ws
   --ws.api all
@@ -267,6 +351,21 @@ if [ "$EXECUTION_MODE" = "rpc" ]; then
     exit 1
   fi
   RETH_ARGS+=(--chain mainnet --dev --dev.block-time "${BENCH_BLOCK_TIME:-1s}")
+fi
+
+if [ "$EXECUTION_MODE" = "call" ]; then
+  if [ "$BIG_BLOCKS" = "true" ] || [ -n "${BENCH_REORG:-}" ] || [ "$USE_BAL" = "true" ]; then
+    echo "::error::Call mode does not support big blocks, reorg, or BAL"
+    exit 1
+  fi
+  RETH_ARGS+=(
+    # Corpus records carry the source transaction's gas limit, which the
+    # default cap would clamp; overrides and trace responses are also large.
+    --rpc.gascap 1000000000000
+    --rpc.max-request-size 64
+    --rpc.max-response-size 512
+    --rpc.max-connections 1024
+  )
 fi
 
 if [ -n "${BENCH_REORG:-}" ]; then
@@ -298,7 +397,7 @@ if [ "${BENCH_OTLP_DISABLED:-false}" != "true" ]; then
     RETH_ARGS+=(--tracing-otlp="${BENCH_OTLP_TRACES_ENDPOINT}" --tracing-otlp.service-name=reth-bench --tracing-otlp.service-version="${LABEL}")
   fi
   if [ -n "${BENCH_OTLP_LOGS_ENDPOINT:-}" ]; then
-    RETH_ARGS+=(--logs-otlp="${BENCH_OTLP_LOGS_ENDPOINT}" --logs-otlp.filter=debug)
+    RETH_ARGS+=(--logs-otlp="${BENCH_OTLP_LOGS_ENDPOINT}" --logs-otlp.filter=debug,storage::overlay=off)
   fi
 fi
 
@@ -430,7 +529,26 @@ TXGEN_DIR="$OUTPUT_DIR/txgen"
 mkdir -p "$TXGEN_DIR"
 
 # Use pre-extracted payloads if available, otherwise extract inline.
-if [ -n "${TXGEN_PAYLOADS_DIR:-}" ] && [ -d "$TXGEN_PAYLOADS_DIR" ]; then
+if [ "$EXECUTION_MODE" = "call" ]; then
+  if [ -z "${TXGEN_PAYLOADS_DIR:-}" ] || [ ! -d "$TXGEN_PAYLOADS_DIR" ]; then
+    echo "::error::Call mode requires a corpus staged in TXGEN_PAYLOADS_DIR"
+    exit 1
+  fi
+  # Both phases replay the same corpus; BENCHMARK_BLOCKS is the shared --input.
+  BENCHMARK_BLOCKS=""
+  for candidate in "$TXGEN_PAYLOADS_DIR/corpus.jsonl.gz" "$TXGEN_PAYLOADS_DIR/corpus.jsonl"; do
+    if [ -f "$candidate" ]; then
+      BENCHMARK_BLOCKS="$candidate"
+      break
+    fi
+  done
+  if [ -z "$BENCHMARK_BLOCKS" ]; then
+    echo "::error::Staged corpus missing in ${TXGEN_PAYLOADS_DIR}"
+    exit 1
+  fi
+  WARMUP_BLOCKS="$BENCHMARK_BLOCKS"
+  echo "Selected call corpus: ${BENCHMARK_BLOCKS}"
+elif [ -n "${TXGEN_PAYLOADS_DIR:-}" ] && [ -d "$TXGEN_PAYLOADS_DIR" ]; then
   echo "Using pre-extracted payloads from ${TXGEN_PAYLOADS_DIR}"
   if [ "$BIG_BLOCKS" = "true" ]; then
     WARMUP_BLOCKS="$TXGEN_PAYLOADS_DIR/warmup-big-blocks.ndjson"
@@ -530,9 +648,26 @@ else
   fi
 fi
 
+CALL_METHOD_ARGS=()
+if [ -n "$CALL_METHODS" ]; then
+  CALL_METHOD_ARGS+=(--methods "$CALL_METHODS")
+fi
+
 if [ "$WARMUP" -gt 0 ] 2>/dev/null; then
-  echo "Running txgen warmup (${WARMUP} source blocks, mode=${EXECUTION_MODE})..."
-  if [ "$EXECUTION_MODE" = "rpc" ]; then
+  echo "Running txgen warmup (${WARMUP} ${WARMUP_UNIT}, mode=${EXECUTION_MODE})..."
+  if [ "$EXECUTION_MODE" = "call" ]; then
+    # Warm at twice the measured rate so the measured phase never replays a
+    # request the process just answered cold. Nothing here is recorded.
+    $BENCH_NICE "$TXGEN_BENCH" call \
+      --rpc-url http://127.0.0.1:8545 \
+      --input "$WARMUP_BLOCKS" \
+      --phase warmup \
+      --rps "$(( CALL_RPS * 2 ))" \
+      --duration "${WARMUP}s" \
+      --timeout "$CALL_TIMEOUT" \
+      "${CALL_METHOD_ARGS[@]}" \
+      --report json:"$TXGEN_DIR/warmup-report.json" 2>&1 | sed -u "s/^/[bench] /"
+  elif [ "$EXECUTION_MODE" = "rpc" ]; then
     $BENCH_NICE "$TXGEN_BENCH" send \
       --rpc-url http://127.0.0.1:8545 \
       --input "$WARMUP_BLOCKS" \
@@ -574,7 +709,7 @@ METRICS_ARGS=()
 PROMETHEUS_REPORT=()
 PROMETHEUS_METADATA=()
 METRICS_URL_ADDED=false
-if [ -n "${BENCH_TARGET_METRICS_CONFIG:-}" ] || [ -n "${BENCH_VICTORIAMETRICS_URL:-}" ]; then
+if [ -n "$TARGET_METRICS_CONFIG" ] || [ -n "${BENCH_VICTORIAMETRICS_URL:-}" ]; then
   if [ -z "${BENCH_METRICS_ADDR:-}" ]; then
     echo "::error::BENCH_METRICS_ADDR is required when benchmark metrics are enabled"
     exit 1
@@ -584,7 +719,7 @@ if [ -n "${BENCH_TARGET_METRICS_CONFIG:-}" ] || [ -n "${BENCH_VICTORIAMETRICS_UR
   METRICS_URL_ADDED=true
 fi
 
-if [ -n "${BENCH_TARGET_METRICS_CONFIG:-}" ]; then
+if [ -n "$TARGET_METRICS_CONFIG" ]; then
   TARGET_METRICS_START_MS="$(capture_unix_time_ms)"
   if [ "$METRICS_URL_ADDED" = true ] && [ -n "$BENCH_TARGET_METRICS_SCRAPE_INTERVAL_MS" ]; then
     METRICS_ARGS+=(--scrape-interval-ms "$BENCH_TARGET_METRICS_SCRAPE_INTERVAL_MS")
@@ -620,12 +755,40 @@ fi
 echo "Running txgen measured benchmark (${BLOCKS} source blocks, mode=${EXECUTION_MODE})..."
 TXGEN_REPLAY_ARGS=()
 BENCH_SCENARIO="replay"
-if [ "$EXECUTION_MODE" = "rpc" ]; then
+if [ "$EXECUTION_MODE" = "call" ]; then
+  # The same seed in every run makes both arms replay the identical sequence.
+  TXGEN_REPLAY_ARGS=(
+    call
+    --rpc-url http://127.0.0.1:8545
+    --phase measure
+    --rps "$CALL_RPS"
+    --duration "$CALL_DURATION"
+    --passes "$CALL_PASSES"
+    --concurrency "$CALL_CONCURRENCY"
+    --timeout "$CALL_TIMEOUT"
+    --seed 1
+    --responses "$OUTPUT_DIR/responses.ndjson"
+    --record-csv "$OUTPUT_DIR/record_timings.csv"
+    --requests-csv "$OUTPUT_DIR/requests.csv"
+    -m "class=$CALL_CLASS"
+  )
+  TXGEN_REPLAY_ARGS+=("${CALL_METHOD_ARGS[@]}")
+  BENCH_SCENARIO="call-replay"
+elif [ "$EXECUTION_MODE" = "rpc" ]; then
   TXGEN_REPLAY_ARGS=(send --rpc-url http://127.0.0.1:8545 --drain-timeout 300)
   BENCH_SCENARIO="rpc-replay"
 else
   TXGEN_REPLAY_ARGS=(send-blocks --engine http://127.0.0.1:8551 --jwt-secret "$DATADIR/jwt.hex" --wait-for-persistence never)
 fi
+
+# No Engine API traffic in call mode, so `latest` must not move while measuring.
+HEAD_HASH_BEFORE=""
+CPU_USAGE_START=""
+if [ "$EXECUTION_MODE" = "call" ]; then
+  HEAD_HASH_BEFORE="$(node_head_hash)"
+  CPU_USAGE_START="$(cgroup_cpu_usage_usec)"
+fi
+
 $BENCH_NICE "$TXGEN_BENCH" "${TXGEN_REPLAY_ARGS[@]}" \
   --input "$BENCHMARK_BLOCKS" \
   "${TXGEN_SEND_ARGS[@]}" \
@@ -642,6 +805,16 @@ $BENCH_NICE "$TXGEN_BENCH" "${TXGEN_REPLAY_ARGS[@]}" \
   -m "bal-enabled=$USE_BAL" \
   "${PROMETHEUS_METADATA[@]}" 2>&1 | sed -u "s/^/[bench] /"
 
+if [ "$EXECUTION_MODE" = "call" ]; then
+  CPU_USAGE_END="$(cgroup_cpu_usage_usec)"
+  HEAD_HASH_AFTER="$(node_head_hash)"
+  if [ "$HEAD_HASH_BEFORE" != "$HEAD_HASH_AFTER" ]; then
+    echo "::error::Chain tip moved during the measured phase (${HEAD_HASH_BEFORE} -> ${HEAD_HASH_AFTER})"
+    exit 1
+  fi
+  write_cpu_json "$CPU_USAGE_START" "$CPU_USAGE_END"
+fi
+
 if [ -n "$TARGET_METRICS_START_MS" ]; then
   TARGET_METRICS_END_MS="$(capture_unix_time_ms)"
   record_target_metric_range "$TARGET_METRICS_START_MS" "$TARGET_METRICS_END_MS"
@@ -651,4 +824,7 @@ if [ -n "$TARGET_METRICS_START_MS" ]; then
     "$OUTPUT_DIR/target-metrics-scrapes.jsonl"
 fi
 
-python3 .github/scripts/bench-txgen-report-to-reth-csv.py "$OUTPUT_DIR/report.json" "$OUTPUT_DIR"
+# Call mode reports per request instead of per block, so it has no block CSVs.
+if [ "$EXECUTION_MODE" != "call" ]; then
+  python3 .github/scripts/bench-txgen-report-to-reth-csv.py "$OUTPUT_DIR/report.json" "$OUTPUT_DIR"
+fi

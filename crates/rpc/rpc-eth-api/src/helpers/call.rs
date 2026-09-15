@@ -29,11 +29,14 @@ use reth_primitives_traits::Recovered;
 use reth_revm::{
     cancelled::CancelOnDrop,
     database::StateProviderDatabase,
-    db::{bal::EvmDatabaseError, State},
+    db::{
+        bal::{BalState, EvmDatabaseError},
+        State,
+    },
 };
 use reth_rpc_convert::{RpcConvert, RpcTxReq};
 use reth_rpc_eth_types::{
-    cache::db::StateProviderTraitObjWrapper,
+    cache::db::attach_bal_before_tx,
     error::{AsEthApiError, FromEthApiError},
     simulate::{self, EthSimulateError},
     EthApiError, StateCacheDb,
@@ -91,7 +94,10 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
                 return Err(EthApiError::InvalidParams(String::from("calls are empty.")).into())
             }
 
-            let _permit = self.acquire_owned_blocking_io().await;
+            let permit = self
+                .acquire_owned_blocking_io()
+                .await
+                .map_err(|_| EthApiError::InternalEthError)?;
 
             let base_block = self
                 .recovered_block(block)
@@ -101,7 +107,8 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
             let max_simulate_blocks = self.max_simulate_blocks();
 
             self.spawn_with_state_at_block(block, move |this, db| {
-                let state_provider = db.database.0 .0;
+                let _permit = permit;
+                let state_provider = db.database.0;
                 let mut db = State::builder()
                     .with_database(StateProviderDatabase::new(&state_provider))
                     .with_bundle_update()
@@ -190,6 +197,13 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
 
                     let chain_id = evm_env.cfg_env.chain_id;
 
+                    // Each simulated block needs its own BAL, including when crossing Amsterdam.
+                    if this.provider().chain_spec().is_amsterdam_active_at_timestamp(
+                        evm_env.block_env.timestamp().saturating_to(),
+                    ) {
+                        db.bal_state = BalState::new().with_bal_builder();
+                    }
+
                     let ctx = this
                         .evm_config()
                         .context_for_next_block(&parent, attributes)
@@ -202,6 +216,12 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
                         }
                     };
 
+                    // EIP-7708 already emits transfer logs: https://eips.ethereum.org/EIPS/eip-7708
+                    let trace_transfers = trace_transfers &&
+                        (!Cfg::spec(&evm_env.cfg_env)
+                            .into()
+                            .is_enabled_in(revm::primitives::hardfork::SpecId::AMSTERDAM) ||
+                            evm_env.cfg_env.is_eip7708_disabled());
                     let (result, results) = if trace_transfers {
                         // prepare inspector to capture transfer inside the evm so they are recorded
                         // and included in logs
@@ -284,7 +304,6 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
         overrides: EvmOverrides,
     ) -> impl Future<Output = Result<Bytes, Self::Error>> + Send {
         async move {
-            let _permit = self.acquire_owned_blocking_io().await;
             let res =
                 self.transact_call_at(request, block_number.unwrap_or_default(), overrides).await?;
 
@@ -309,7 +328,10 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
                 return Err(EthApiError::InvalidParams(String::from("bundles are empty.")).into());
             }
 
-            let _permit = self.acquire_owned_blocking_io().await;
+            let permit = self
+                .acquire_owned_blocking_io()
+                .await
+                .map_err(|_| EthApiError::InternalEthError)?;
 
             let StateContext { transaction_index, block_number } =
                 state_context.unwrap_or_default();
@@ -354,10 +376,13 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
             }
 
             self.spawn_with_state_at_block(at, move |this, mut db| {
+                let _permit = permit;
                 let mut all_results = Vec::with_capacity(bundles.len());
 
                 if replay_block_txs {
-                    this.replay_block_until(&mut db, &block, num_txs)?;
+                    // no BAL positioning here: bundle transactions commit state on top, and an
+                    // attached BAL would take read precedence over the committed changes
+                    this.replay_block_until(&mut db, &block, num_txs, None)?;
                 }
 
                 // transact all bundles
@@ -581,12 +606,17 @@ pub trait Call:
         Self: LoadPendingBlock,
     {
         async move {
+            let permit = self
+                .acquire_owned_blocking_io()
+                .await
+                .map_err(|_| EthApiError::InternalEthError)?;
             let guard = CancelOnDrop::default();
             let cancel = guard.clone();
             let this = self.clone();
 
             let res = self
                 .spawn_with_call_at(request, at, overrides, move |db, evm_env, tx_env| {
+                    let _permit = permit;
                     if cancel.is_cancelled() {
                         // callsite dropped the guard
                         return Err(EthApiError::InternalEthError.into())
@@ -612,9 +642,7 @@ pub trait Call:
         let at = at.into();
         self.spawn_blocking_io_fut(async move |this| {
             let state = this.state_at_block_id(at).await?;
-            let db = State::builder()
-                .with_database(StateProviderDatabase::new(StateProviderTraitObjWrapper(state)))
-                .build();
+            let db = State::builder().with_database(StateProviderDatabase::new(state)).build();
             f(this, db)
         })
     }
@@ -666,10 +694,13 @@ pub trait Call:
 
     /// Retrieves the transaction if it exists and executes it.
     ///
-    /// Before the transaction is executed, all previous transaction in the block are applied to the
-    /// state by executing them first.
+    /// Before the transaction is executed, the state is positioned right before the transaction,
+    /// either by attaching the block's cached BAL or by executing all previous transactions in the
+    /// block.
     /// The callback `f` is invoked with the [`ResultAndState`] after the transaction was executed
-    /// and the database that points to the beginning of the transaction.
+    /// and the database that points to the beginning of the transaction. The database may have
+    /// the block's BAL attached and must only be used for reads, because an attached BAL takes
+    /// read precedence over state committed on top, see [`attach_bal_before_tx`].
     ///
     /// Note: Implementers should use a threadpool where blocking is allowed, such as
     /// [`BlockingTaskPool`](reth_tasks::pool::BlockingTaskPool).
@@ -690,10 +721,11 @@ pub trait Call:
         R: Send + 'static,
     {
         async move {
-            let (transaction, block) = match self.transaction_and_block(hash).await? {
-                None => return Ok(None),
-                Some(res) => res,
-            };
+            let (transaction, block, bal) =
+                match self.transaction_and_block_and_maybe_bal(hash).await? {
+                    None => return Ok(None),
+                    Some(res) => res,
+                };
             let (tx, tx_info) = transaction.split();
 
             // we need to get the state of the parent block because we're essentially replaying the
@@ -701,6 +733,15 @@ pub trait Call:
             let parent_block = block.parent_hash();
 
             self.spawn_with_state_at_block(parent_block, move |this, mut db| {
+                if let Some((bal, tx_index)) = bal.zip(tx_info.index) {
+                    attach_bal_before_tx(&mut db, &bal, tx_index as usize);
+
+                    let evm_env = this.evm_env_for_header(block.sealed_block().sealed_header())?;
+                    let tx_env = RpcNodeCore::evm_config(&this).tx_env(tx);
+                    let res = this.transact(&mut db, evm_env, tx_env)?;
+                    return f(tx_info, res, db)
+                }
+
                 let block_txs = block.transactions_recovered();
 
                 let mut executor = RpcNodeCore::evm_config(&this)

@@ -56,10 +56,7 @@
 mod sparse_trie;
 
 use self::sparse_trie::{SparseTrieCacheTask, SparseTrieTaskMetrics};
-use crate::tree::{
-    metrics::BlockValidationMetrics, EngineApiTreeState, ExecutionEnv, StateProviderBuilder,
-    TreeConfig,
-};
+use crate::tree::{metrics::BlockValidationMetrics, EngineApiTreeState, ExecutionEnv, TreeConfig};
 use alloy_primitives::B256;
 use crossbeam_channel::{Receiver as CrossbeamReceiver, Sender as CrossbeamSender};
 use reth_chain_state::{ExecutedBlock, PreservedSparseTrie};
@@ -69,9 +66,9 @@ use reth_primitives_traits::{
     AlloyBlockHeader, FastInstant as Instant, NodePrimitives, RecoveredBlock, SealedHeader,
 };
 use reth_provider::{
-    BlockExecutionOutput, BlockNumReader, DatabaseProviderFactory, DatabaseProviderROFactory,
-    HashedPostStateProvider, ProviderError, PruneCheckpointReader, StageCheckpointReader,
-    StateRootProvider, StorageSettingsCache, TryIntoHistoricalStateProvider,
+    BlockExecutionOutput, BlockNumReader, ChangeSetReader, DatabaseProviderFactory,
+    DatabaseProviderROFactory, HashedPostStateProvider, ProviderError, PruneCheckpointReader,
+    StageCheckpointReader, StateRootProvider, StorageChangeSetReader, StorageSettingsCache,
 };
 use reth_storage_overlay::{OverlayManager, OverlayStateProviderFactory};
 use reth_tasks::utils::increase_thread_priority;
@@ -88,8 +85,6 @@ pub use reth_trie_parallel::{
         StateRootSink, StateRootTaskCancelGuard, StateRootUpdateHook, StateRootUpdateStream,
     },
 };
-#[cfg(feature = "trie-debug")]
-use reth_trie_sparse::debug_recorder::TrieDebugRecorder;
 use reth_trie_sparse::{
     ArenaParallelSparseTrie, RevealableSparseTrie, SparseStateTrie, TrieNodeEpoch,
 };
@@ -146,8 +141,7 @@ where
     parent_header: &'a N::BlockHeader,
     timestamp: u64,
     state: &'a mut EngineApiTreeState<N>,
-    provider_builder: StateProviderBuilder<N, P>,
-    overlay_factory: OverlayStateProviderFactory<P, N>,
+    state_provider_factory: OverlayStateProviderFactory<P, N>,
     config: &'a TreeConfig,
 }
 
@@ -178,8 +172,7 @@ where
         parent_header: &'a N::BlockHeader,
         timestamp: u64,
         state: &'a mut EngineApiTreeState<N>,
-        provider_builder: StateProviderBuilder<N, P>,
-        overlay_factory: OverlayStateProviderFactory<P, N>,
+        state_provider_factory: OverlayStateProviderFactory<P, N>,
         config: &'a TreeConfig,
     ) -> Self {
         Self {
@@ -189,8 +182,7 @@ where
             parent_header,
             timestamp,
             state,
-            provider_builder,
-            overlay_factory,
+            state_provider_factory,
             config,
         }
     }
@@ -225,14 +217,6 @@ where
         self.executor
     }
 
-    /// Returns a clone of the state provider builder.
-    pub fn provider_builder(&self) -> StateProviderBuilder<N, P>
-    where
-        P: Clone,
-    {
-        self.provider_builder.clone()
-    }
-
     /// Consumes the pending sparse trie prune request as in-memory parent-chain blocks, if any.
     ///
     /// Custom strategies that maintain a reusable sparse trie should call this when starting the
@@ -252,8 +236,7 @@ where
     overlay_manager: &'a OverlayManager<N>,
     env: &'a ExecutionEnv<Evm>,
     parent_header: &'a SealedHeader<N::BlockHeader>,
-    provider_builder: StateProviderBuilder<N, P>,
-    overlay_factory: OverlayStateProviderFactory<P, N>,
+    state_provider_factory: OverlayStateProviderFactory<P, N>,
     config: &'a TreeConfig,
     parallel_bal_execution: bool,
     state: &'a mut EngineApiTreeState<N>,
@@ -284,8 +267,7 @@ where
         overlay_manager: &'a OverlayManager<N>,
         env: &'a ExecutionEnv<Evm>,
         parent_header: &'a SealedHeader<N::BlockHeader>,
-        provider_builder: StateProviderBuilder<N, P>,
-        overlay_factory: OverlayStateProviderFactory<P, N>,
+        state_provider_factory: OverlayStateProviderFactory<P, N>,
         config: &'a TreeConfig,
         parallel_bal_execution: bool,
         state: &'a mut EngineApiTreeState<N>,
@@ -295,8 +277,7 @@ where
             overlay_manager,
             env,
             parent_header,
-            provider_builder,
-            overlay_factory,
+            state_provider_factory,
             config,
             parallel_bal_execution,
             state,
@@ -321,14 +302,6 @@ where
     /// Returns true when validation will use the parallel BAL execution path.
     pub const fn parallel_bal_execution(&self) -> bool {
         self.parallel_bal_execution
-    }
-
-    /// Returns a clone of the state provider builder.
-    pub fn provider_builder(&self) -> StateProviderBuilder<N, P>
-    where
-        P: Clone,
-    {
-        self.provider_builder.clone()
     }
 
     /// Consumes the pending sparse trie prune request as in-memory parent-chain blocks, if any.
@@ -823,11 +796,17 @@ where
     P::Provider: BlockNumReader
         + PruneCheckpointReader
         + StageCheckpointReader
+        + ChangeSetReader
+        + StorageChangeSetReader
         + StorageSettingsCache
-        + TryIntoHistoricalStateProvider
         + 'static,
-    OverlayStateProviderFactory<P, N>: DatabaseProviderROFactory<Provider: TrieCursorFactory + HashedCursorFactory>
-        + Clone
+    OverlayStateProviderFactory<P, N>: DatabaseProviderROFactory<
+            Provider: TrieCursorFactory
+                          + HashedCursorFactory
+                          + HashedPostStateProvider
+                          + StateRootProvider
+                          + Send,
+        > + Clone
         + 'static,
     Evm: ConfigureEvm<Primitives = N> + 'static,
 {
@@ -841,7 +820,9 @@ where
 
         if !ctx.config.use_state_root_task() {
             return Ok(PreparedStateRootJob::new(
-                Box::new(SynchronousStateRootJob { provider_builder: ctx.provider_builder }),
+                Box::new(SynchronousStateRootJob {
+                    state_provider_factory: ctx.state_provider_factory,
+                }),
                 None,
             ))
         }
@@ -852,28 +833,27 @@ where
             overlay_manager,
             env,
             parent_header,
-            provider_builder,
-            overlay_factory,
+            state_provider_factory,
             config,
             parallel_bal_execution,
             state: _,
         } = ctx;
 
         let preserved_sparse_trie = overlay_manager.take_sparse_trie();
-        let overlay_factory = if let Some(anchor_hash) = preserved_sparse_trie
+        let proof_state_provider_factory = if let Some(anchor_hash) = preserved_sparse_trie
             .as_ref()
             .filter(|trie| trie.state_root() == env.parent_state_root)
             .map(|trie| trie.anchor_hash())
         {
-            overlay_factory.with_skip_overlay_for_reused_sparse_trie(anchor_hash)
+            state_provider_factory.clone().with_skip_overlay_for_reused_sparse_trie(anchor_hash)
         } else {
-            overlay_factory
+            state_provider_factory.clone()
         };
 
         let mut handle = self.spawn_state_root(
             executor,
             overlay_manager,
-            overlay_factory.clone(),
+            proof_state_provider_factory,
             StateRootTaskOptions {
                 parent_header: parent_header.clone(),
                 preserved_sparse_trie,
@@ -900,8 +880,7 @@ where
         let mut prepared = PreparedStateRootJob::new(
             Box::new(SparseTrieStateRootJob {
                 handle,
-                provider_builder,
-                overlay_factory,
+                state_provider_factory,
                 executor: executor.clone(),
                 timeout: config.state_root_task_timeout(),
                 compare_trie_updates: config.always_compare_trie_updates(),
@@ -936,20 +915,20 @@ where
         let parent_state_root = ctx.parent_state_root();
         let parent_header = SealedHeader::new(ctx.parent_header().clone(), ctx.parent_hash());
         let preserved_sparse_trie = ctx.overlay_manager.take_sparse_trie();
-        let overlay_factory = if let Some(anchor_hash) = preserved_sparse_trie
+        let proof_state_provider_factory = if let Some(anchor_hash) = preserved_sparse_trie
             .as_ref()
             .filter(|trie| trie.state_root() == parent_state_root)
             .map(|trie| trie.anchor_hash())
         {
-            ctx.overlay_factory.clone().with_skip_overlay_for_reused_sparse_trie(anchor_hash)
+            ctx.state_provider_factory.clone().with_skip_overlay_for_reused_sparse_trie(anchor_hash)
         } else {
-            ctx.overlay_factory.clone()
+            ctx.state_provider_factory.clone()
         };
         Ok(Some(
             self.spawn_state_root(
                 ctx.executor,
                 ctx.overlay_manager,
-                overlay_factory,
+                proof_state_provider_factory,
                 StateRootTaskOptions {
                     parent_header,
                     preserved_sparse_trie,
@@ -984,7 +963,7 @@ impl<N: NodePrimitives> StateRootJob<N> for SkippedStateRootJob {
 
 #[derive(Debug)]
 struct SynchronousStateRootJob<N: NodePrimitives, P> {
-    provider_builder: StateProviderBuilder<N, P>,
+    state_provider_factory: OverlayStateProviderFactory<P, N>,
 }
 
 impl<N, P> StateRootJob<N> for SynchronousStateRootJob<N, P>
@@ -994,9 +973,11 @@ where
     P::Provider: BlockNumReader
         + PruneCheckpointReader
         + StageCheckpointReader
+        + ChangeSetReader
+        + StorageChangeSetReader
         + StorageSettingsCache
-        + TryIntoHistoricalStateProvider
         + 'static,
+    OverlayStateProviderFactory<P, N>: DatabaseProviderROFactory<Provider: StateRootProvider>,
 {
     fn name(&self) -> &'static str {
         "synchronous"
@@ -1008,7 +989,7 @@ where
         _output: Arc<BlockExecutionOutput<N::Receipt>>,
         hashed_state: &LazyHashedPostState,
     ) -> ProviderResult<StateRootJobOutcome> {
-        let provider = self.provider_builder.clone().build()?;
+        let provider = self.state_provider_factory.database_provider_ro()?;
         let (state_root, trie_updates) =
             provider.state_root_with_updates(hashed_state.get().as_ref().clone())?;
         Ok(StateRootJobOutcome::new(state_root, Arc::new(trie_updates)))
@@ -1018,8 +999,7 @@ where
 #[derive(Debug)]
 struct SparseTrieStateRootJob<N: NodePrimitives, P> {
     handle: StateRootHandle,
-    provider_builder: StateProviderBuilder<N, P>,
-    overlay_factory: OverlayStateProviderFactory<P, N>,
+    state_provider_factory: OverlayStateProviderFactory<P, N>,
     executor: reth_tasks::Runtime,
     timeout: Option<Duration>,
     compare_trie_updates: bool,
@@ -1033,19 +1013,25 @@ where
     P::Provider: BlockNumReader
         + PruneCheckpointReader
         + StageCheckpointReader
+        + ChangeSetReader
+        + StorageChangeSetReader
         + StorageSettingsCache
-        + TryIntoHistoricalStateProvider
         + 'static,
-    OverlayStateProviderFactory<P, N>: DatabaseProviderROFactory<Provider: TrieCursorFactory + HashedCursorFactory>
-        + Clone
+    OverlayStateProviderFactory<P, N>: DatabaseProviderROFactory<
+            Provider: TrieCursorFactory
+                          + HashedCursorFactory
+                          + HashedPostStateProvider
+                          + StateRootProvider
+                          + Send,
+        > + Clone
         + 'static,
 {
     fn serial_fallback(
         executor: &reth_tasks::Runtime,
-        provider_builder: StateProviderBuilder<N, P>,
+        state_provider_factory: OverlayStateProviderFactory<P, N>,
         output: Arc<BlockExecutionOutput<N::Receipt>>,
     ) -> ProviderResult<SerialFallbackRx> {
-        let provider = provider_builder.build()?;
+        let provider = state_provider_factory.database_provider_ro()?;
         let (fallback_tx, fallback_rx) = mpsc::channel();
         executor.spawn_blocking_named("serial-root", move || {
             let result = (|| {
@@ -1068,7 +1054,7 @@ where
         &self,
         output: &BlockExecutionOutput<N::Receipt>,
     ) -> ProviderResult<StateRootJobOutcome> {
-        let provider = self.provider_builder.clone().build()?;
+        let provider = self.state_provider_factory.database_provider_ro()?;
         let hashed_state = Arc::new(provider.hashed_post_state(&output.state)?);
         let (state_root, trie_updates) =
             provider.state_root_with_updates(hashed_state.as_ref().clone())?;
@@ -1106,30 +1092,15 @@ where
         output: &BlockExecutionOutput<N::Receipt>,
         outcome: StateRootComputeOutcome,
     ) -> StateRootJobOutcome {
-        let StateRootComputeOutcome {
-            state_root,
-            trie_updates,
-            hashed_state: _hashed_state,
-            #[cfg(feature = "trie-debug")]
-            debug_recorders,
-        } = outcome;
+        let StateRootComputeOutcome { state_root, trie_updates, hashed_state: _hashed_state } =
+            outcome;
 
         if self.compare_trie_updates {
-            let _has_diff = compare_trie_updates_with_serial(
-                self.provider_builder.clone(),
-                self.overlay_factory.clone(),
+            compare_trie_updates_with_serial(
+                self.state_provider_factory.clone(),
                 output,
                 trie_updates.as_ref().clone(),
             );
-            #[cfg(feature = "trie-debug")]
-            if _has_diff {
-                write_trie_debug_recorders(_block.header().number(), &debug_recorders);
-            }
-        }
-
-        #[cfg(feature = "trie-debug")]
-        if state_root != _block.header().state_root() {
-            write_trie_debug_recorders(_block.header().number(), &debug_recorders);
         }
 
         StateRootJobOutcome::new(state_root, trie_updates)
@@ -1143,11 +1114,17 @@ where
     P::Provider: BlockNumReader
         + PruneCheckpointReader
         + StageCheckpointReader
+        + ChangeSetReader
+        + StorageChangeSetReader
         + StorageSettingsCache
-        + TryIntoHistoricalStateProvider
         + 'static,
-    OverlayStateProviderFactory<P, N>: DatabaseProviderROFactory<Provider: TrieCursorFactory + HashedCursorFactory>
-        + Clone
+    OverlayStateProviderFactory<P, N>: DatabaseProviderROFactory<
+            Provider: TrieCursorFactory
+                          + HashedCursorFactory
+                          + HashedPostStateProvider
+                          + StateRootProvider
+                          + Send,
+        > + Clone
         + 'static,
 {
     fn name(&self) -> &'static str {
@@ -1178,7 +1155,7 @@ where
                 debug!(target: "engine::tree::state_root_strategy", %err, "State root task failed, falling back to serial root");
                 Self::serial_fallback(
                     &self.executor,
-                    self.provider_builder.clone(),
+                    self.state_provider_factory.clone(),
                     output.clone(),
                 )?
             }
@@ -1187,7 +1164,7 @@ where
                 self.metrics.state_root_task_timeout_total.increment(1);
                 Self::serial_fallback(
                     &self.executor,
-                    self.provider_builder.clone(),
+                    self.state_provider_factory.clone(),
                     output.clone(),
                 )?
             }
@@ -1195,7 +1172,7 @@ where
                 debug!(target: "engine::tree::state_root_strategy", "State root task dropped, falling back to serial root");
                 Self::serial_fallback(
                     &self.executor,
-                    self.provider_builder.clone(),
+                    self.state_provider_factory.clone(),
                     output.clone(),
                 )?
             }
@@ -1237,8 +1214,7 @@ where
 }
 
 fn compare_trie_updates_with_serial<N, P>(
-    state_provider_builder: StateProviderBuilder<N, P>,
-    overlay_factory: OverlayStateProviderFactory<P, N>,
+    state_provider_factory: OverlayStateProviderFactory<P, N>,
     output: &BlockExecutionOutput<N::Receipt>,
     task_trie_updates: TrieUpdates,
 ) -> bool
@@ -1248,15 +1224,20 @@ where
     P::Provider: BlockNumReader
         + PruneCheckpointReader
         + StageCheckpointReader
+        + ChangeSetReader
+        + StorageChangeSetReader
         + StorageSettingsCache
-        + TryIntoHistoricalStateProvider
         + 'static,
-    OverlayStateProviderFactory<P, N>:
-        DatabaseProviderROFactory<Provider: TrieCursorFactory + HashedCursorFactory>,
+    OverlayStateProviderFactory<P, N>: DatabaseProviderROFactory<
+        Provider: TrieCursorFactory
+                      + HashedCursorFactory
+                      + HashedPostStateProvider
+                      + StateRootProvider,
+    >,
 {
     debug!(target: "engine::tree::state_root_strategy", "Comparing trie updates with serial computation");
 
-    match state_provider_builder.build().and_then(|provider| {
+    match state_provider_factory.database_provider_ro().and_then(|provider| {
         let hashed_state = provider.hashed_post_state(&output.state)?;
         provider.state_root_with_updates(hashed_state)
     }) {
@@ -1267,7 +1248,7 @@ where
                 "Serial state root computation finished for comparison"
             );
 
-            match overlay_factory.database_provider_ro() {
+            match state_provider_factory.database_provider_ro() {
                 Ok(provider) => match super::trie_updates::compare_trie_updates(
                     &provider,
                     task_trie_updates,
@@ -1301,40 +1282,6 @@ where
         }
     }
     false
-}
-
-/// Writes trie debug recorders to a JSON file for the given block number.
-///
-/// The file is written to the current working directory as `trie_debug_block_{block_number}.json`.
-#[cfg(feature = "trie-debug")]
-fn write_trie_debug_recorders(block_number: u64, recorders: &[(Option<B256>, TrieDebugRecorder)]) {
-    let path = format!("trie_debug_block_{block_number}.json");
-    match serde_json::to_string_pretty(recorders) {
-        Ok(json) => match std::fs::write(&path, json) {
-            Ok(()) => {
-                warn!(
-                    target: "engine::tree::state_root_strategy",
-                    %path,
-                    "Wrote trie debug recorders to file"
-                );
-            }
-            Err(err) => {
-                warn!(
-                    target: "engine::tree::state_root_strategy",
-                    %err,
-                    %path,
-                    "Failed to write trie debug recorders"
-                );
-            }
-        },
-        Err(err) => {
-            warn!(
-                target: "engine::tree::state_root_strategy",
-                %err,
-                "Failed to serialize trie debug recorders"
-            );
-        }
-    }
 }
 
 #[cfg(test)]

@@ -2086,6 +2086,18 @@ impl IngressHandler {
             return
         }
 
+        // A packet starts with the hash of everything that follows it, and `Message::decode`
+        // rejects any packet whose contents do not hash to it. A repeat of a packet we already
+        // accepted can therefore be recognised from those 32 bytes alone, without decoding.
+        // Decoding runs an ECDSA recovery, so checking here keeps a replayed packet from costing
+        // a signature verification.
+        if data.len() >= MIN_PACKET_SIZE &&
+            self.cache.contains_packet(B256::from_slice(&data[..32]))
+        {
+            trace!(target: "discv4", ?src, "Received duplicate packet.");
+            return
+        }
+
         let event = match Message::decode(data) {
             Ok(packet) => {
                 if packet.node_id == self.local_id {
@@ -2093,10 +2105,9 @@ impl IngressHandler {
                     return
                 }
 
-                if self.cache.contains_packet(packet.hash) {
-                    debug!(target: "discv4", ?src, "Received duplicate packet.");
-                    return
-                }
+                // Only packets that decoded are remembered, so a peer cannot suppress a packet we
+                // have not seen yet by guessing its hash.
+                self.cache.insert_packet(packet.hash);
 
                 IngressEvent::Packet(src, packet)
             }
@@ -2147,9 +2158,16 @@ impl ReceiveCache {
         *ctn
     }
 
-    /// Returns true if we previously received the packet
+    /// Returns true if we previously received the packet.
+    ///
+    /// A hit refreshes the entry so that a packet being replayed repeatedly stays cached.
     fn contains_packet(&mut self, hash: B256) -> bool {
-        !self.unique_packets.insert(hash, ())
+        self.unique_packets.get(&hash).is_some()
+    }
+
+    /// Remembers a packet we accepted.
+    fn insert_packet(&mut self, hash: B256) {
+        self.unique_packets.insert(hash, ());
     }
 }
 
@@ -2571,7 +2589,65 @@ mod tests {
     use rand_08::Rng;
     use reth_ethereum_forks::{EnrForkIdEntry, ForkHash};
     use reth_network_peers::mainnet_nodes;
+    use secp256k1::SECP256K1;
     use std::future::poll_fn;
+
+    #[tokio::test]
+    async fn test_duplicate_packet_rejected_without_decoding() {
+        let secret_key = SecretKey::new(&mut rand_08::thread_rng());
+        let local_id = pk2id(&secret_key.public_key(SECP256K1));
+        let (tx, mut rx) = mpsc::channel(16);
+        let mut handler = IngressHandler::new(tx, local_id);
+
+        let remote_key = SecretKey::new(&mut rand_08::thread_rng());
+        let msg = Message::Ping(Ping {
+            from: rng_endpoint(&mut rand_08::thread_rng()),
+            to: rng_endpoint(&mut rand_08::thread_rng()),
+            expire: u64::MAX,
+            enr_sq: None,
+        });
+        let (packet, hash) = msg.encode(&remote_key);
+        let src = "10.0.0.1:30303".parse().unwrap();
+
+        handler.handle_packet(&packet, src).await;
+        assert!(matches!(rx.try_recv(), Ok(IngressEvent::Packet(_, _))));
+
+        // the replay is dropped on the hash prefix alone
+        handler.handle_packet(&packet, src).await;
+        assert!(rx.try_recv().is_err());
+        assert!(handler.cache.contains_packet(hash));
+    }
+
+    #[tokio::test]
+    async fn test_undecodable_packet_does_not_poison_cache() {
+        let secret_key = SecretKey::new(&mut rand_08::thread_rng());
+        let local_id = pk2id(&secret_key.public_key(SECP256K1));
+        let (tx, mut rx) = mpsc::channel(16);
+        let mut handler = IngressHandler::new(tx, local_id);
+
+        let remote_key = SecretKey::new(&mut rand_08::thread_rng());
+        let msg = Message::Ping(Ping {
+            from: rng_endpoint(&mut rand_08::thread_rng()),
+            to: rng_endpoint(&mut rand_08::thread_rng()),
+            expire: u64::MAX,
+            enr_sq: None,
+        });
+        let (packet, hash) = msg.encode(&remote_key);
+        let src = "10.0.0.1:30303".parse().unwrap();
+
+        // a packet carrying the right hash prefix but a corrupt body must not be remembered,
+        // otherwise it could be used to suppress the real packet
+        let mut forged = packet.to_vec();
+        let last = forged.len() - 1;
+        forged[last] ^= 0xff;
+        handler.handle_packet(&forged, src).await;
+        assert!(matches!(rx.try_recv(), Ok(IngressEvent::BadPacket(..))));
+        assert!(!handler.cache.contains_packet(hash));
+
+        // so the genuine packet still gets through
+        handler.handle_packet(&packet, src).await;
+        assert!(matches!(rx.try_recv(), Ok(IngressEvent::Packet(_, _))));
+    }
 
     #[tokio::test]
     async fn test_configured_enr_forkid_entry() {

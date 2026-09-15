@@ -1,19 +1,30 @@
 use alloc::vec::Vec;
 use alloy_primitives::{keccak256, Bytes, B256};
-use reth_trie::{ExecutionWitnessMode, HashedPostState, HashedStorage};
+use reth_trie::{ExecutionWitnessMode, HashedPostState};
 use revm::database::State;
 
 /// Borrows finalized execution state for witness generation.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub struct ExecutionWitnessRecord<'a, DB> {
     /// State after execution.
     state: &'a State<DB>,
+    /// Additional hashed state to include in the witness.
+    additional_state: Option<HashedPostState>,
 }
 
 impl<'a, DB> ExecutionWitnessRecord<'a, DB> {
     /// Creates a new record from the state after execution.
     pub const fn new(state: &'a State<DB>) -> Self {
-        Self { state }
+        Self { state, additional_state: None }
+    }
+
+    /// Adds hashed state that should be included when generating the witness.
+    ///
+    /// State recorded during execution takes precedence over additional state for overlapping
+    /// accounts and storage slots.
+    pub fn with_additional_state(mut self, additional_state: HashedPostState) -> Self {
+        self.additional_state.get_or_insert_default().extend(additional_state);
+        self
     }
 
     /// Converts this record into a complete [`alloy_rpc_types_debug::ExecutionWitness`] by
@@ -36,6 +47,39 @@ impl<'a, DB> ExecutionWitnessRecord<'a, DB> {
             + ?Sized,
         HP: reth_storage_api::HeaderProvider + ?Sized,
         HP::Header: alloy_rlp::Encodable,
+    {
+        let lowest_block_number = self.state.block_hashes.lowest().map(|(number, _)| number);
+        let mut exec_witness = self.into_execution_witness_without_headers(state_provider, mode)?;
+
+        let smallest = lowest_block_number.unwrap_or_else(|| block_number.saturating_sub(1));
+        let range = smallest..block_number;
+
+        exec_witness.headers = headers_provider
+            .headers_range(range)?
+            .into_iter()
+            .map(|header| {
+                let mut buf = Vec::new();
+                alloy_rlp::Encodable::encode(&header, &mut buf);
+                buf.into()
+            })
+            .collect();
+
+        Ok(exec_witness)
+    }
+
+    /// Generates state proofs and codes without fetching ancestor headers.
+    ///
+    /// Callers witnessing non-canonical blocks can supply headers by following parent hashes.
+    #[cfg(feature = "witness")]
+    pub fn into_execution_witness_without_headers<SP>(
+        self,
+        state_provider: &SP,
+        mode: ExecutionWitnessMode,
+    ) -> reth_storage_errors::provider::ProviderResult<alloy_rpc_types_debug::ExecutionWitness>
+    where
+        SP: reth_storage_api::HashedPostStateProvider
+            + reth_storage_api::StateProofProvider
+            + ?Sized,
     {
         let codes = match mode {
             ExecutionWitnessMode::Legacy => self
@@ -69,36 +113,18 @@ impl<'a, DB> ExecutionWitnessRecord<'a, DB> {
         let (hashed_state, keys) = self.hashed_post_state(state_provider)?;
 
         let state = state_provider.witness(Default::default(), hashed_state, mode)?;
-        let mut exec_witness =
-            alloy_rpc_types_debug::ExecutionWitness { state, codes, keys, ..Default::default() };
-
-        let lowest_block_number =
-            self.state.block_hashes.lowest().map(|(block_number, _)| block_number);
-        let smallest = lowest_block_number.unwrap_or_else(|| block_number.saturating_sub(1));
-        let range = smallest..block_number;
-
-        exec_witness.headers = headers_provider
-            .headers_range(range)?
-            .into_iter()
-            .map(|header| {
-                let mut buf = Vec::new();
-                alloy_rlp::Encodable::encode(&header, &mut buf);
-                buf.into()
-            })
-            .collect();
-
-        Ok(exec_witness)
+        Ok(alloy_rpc_types_debug::ExecutionWitness { state, codes, keys, ..Default::default() })
     }
 
     #[cfg(feature = "witness")]
     fn hashed_post_state<SP>(
-        &self,
+        self,
         state_provider: &SP,
     ) -> reth_storage_errors::provider::ProviderResult<(HashedPostState, Vec<Bytes>)>
     where
         SP: reth_storage_api::HashedPostStateProvider + ?Sized,
     {
-        let mut hashed_state = HashedPostState::default();
+        let mut hashed_state = self.additional_state.unwrap_or_default();
         let mut keys = Vec::new();
         for (address, account) in &self.state.cache.accounts {
             let hashed_address = keccak256(address);
@@ -106,10 +132,7 @@ impl<'a, DB> ExecutionWitnessRecord<'a, DB> {
                 .accounts
                 .insert(hashed_address, account.account.as_ref().map(|a| (&a.info).into()));
 
-            let storage = hashed_state
-                .storages
-                .entry(hashed_address)
-                .or_insert_with(|| HashedStorage::new(false));
+            let storage = hashed_state.storages.entry(hashed_address).or_default();
 
             if let Some(account) = &account.account {
                 keys.push(address.to_vec().into());
@@ -138,6 +161,7 @@ mod tests {
     use alloy_primitives::{Address, U256};
     use reth_storage_api::HashedPostStateProvider;
     use reth_storage_errors::provider::ProviderResult;
+    use reth_trie::HashedStorage;
     use revm::{
         database::{states::CacheAccount, AccountStatus, BundleAccount, EmptyDB},
         state::AccountInfo,
@@ -156,8 +180,20 @@ mod tests {
         }
     }
 
+    #[derive(Debug)]
+    struct StaticStateProvider(HashedPostState);
+
+    impl HashedPostStateProvider for StaticStateProvider {
+        fn hashed_post_state(
+            &self,
+            _bundle_state: &revm::database::BundleState,
+        ) -> ProviderResult<HashedPostState> {
+            Ok(self.0.clone())
+        }
+    }
+
     #[test]
-    fn destroyed_account_storage_is_zero_expanded_without_wipe() {
+    fn destroyed_account_storage_is_zero_expanded() {
         let address = Address::with_last_byte(1);
         let hashed_address = keccak256(address);
         let hashed_slot = B256::with_last_byte(2);
@@ -184,7 +220,38 @@ mod tests {
         let (hashed_state, _) =
             ExecutionWitnessRecord::new(&state).hashed_post_state(&provider).unwrap();
         let storage = hashed_state.storages.get(&hashed_address).unwrap();
-        assert!(!storage.wiped);
         assert_eq!(storage.storage.get(&hashed_slot), Some(&U256::ZERO));
+    }
+
+    #[test]
+    fn additional_state_is_merged_with_executed_state() {
+        let address = Address::with_last_byte(1);
+        let hashed_address = keccak256(address);
+        let slot = U256::from(1);
+        let additional_slot = B256::with_last_byte(2);
+
+        let mut state = State::builder().with_database(EmptyDB::default()).build();
+        let account = CacheAccount::new_loaded(
+            AccountInfo::default(),
+            core::iter::once((slot, U256::from(2))).collect(),
+        );
+        state.cache.accounts.insert(address, account);
+
+        let additional_state = HashedPostState::default().with_storages([(
+            hashed_address,
+            HashedStorage::from_iter([
+                (keccak256(B256::from(slot)), U256::from(1)),
+                (additional_slot, U256::from(3)),
+            ]),
+        )]);
+        let provider = StaticStateProvider(HashedPostState::default());
+
+        let (hashed_state, _) = ExecutionWitnessRecord::new(&state)
+            .with_additional_state(additional_state)
+            .hashed_post_state(&provider)
+            .unwrap();
+        let storage = &hashed_state.storages[&hashed_address].storage;
+        assert_eq!(storage[&keccak256(B256::from(slot))], U256::from(2));
+        assert_eq!(storage[&additional_slot], U256::from(3));
     }
 }

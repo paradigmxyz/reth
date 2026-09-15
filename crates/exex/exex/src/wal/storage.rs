@@ -1,5 +1,6 @@
 use std::{
     fs::File,
+    io::{BufReader, BufWriter, Write},
     path::{Path, PathBuf},
 };
 
@@ -138,7 +139,7 @@ where
 
         // Deserialize using the bincode- and msgpack-compatible serde wrapper
         let notification: reth_exex_types::serde_bincode_compat::ExExNotification<'_, N> =
-            rmp_serde::decode::from_read(&mut file)
+            rmp_serde::decode::from_read(BufReader::new(&mut file))
                 .map_err(|err| WalError::Decode(file_id, file_path, err))?;
 
         Ok(Some((notification.into(), size)))
@@ -163,7 +164,12 @@ where
             reth_exex_types::serde_bincode_compat::ExExNotification::<N>::from(notification);
 
         reth_fs_util::atomic_write_file(&file_path, |file| {
-            rmp_serde::encode::write(file, &notification)
+            let mut writer = BufWriter::new(file);
+            rmp_serde::encode::write(&mut writer, &notification)?;
+            // a `BufWriter` dropped without an explicit flush discards write errors, and
+            // `atomic_write_file` fsyncs as soon as this returns
+            writer.flush()?;
+            Ok::<_, Box<dyn core::error::Error + Send + Sync>>(())
         })?;
 
         Ok(file_path.metadata().map_err(|err| WalError::FileMetadata(file_id, err))?.len())
@@ -183,8 +189,10 @@ mod tests {
     use reth_provider::Chain;
     use reth_testing_utils::generators::{self, random_block};
     use reth_trie_common::{
-        updates::{StorageTrieUpdates, TrieUpdates},
-        BranchNodeCompact, ComputedTrieData, HashedPostState, HashedStorage, LazyTrieData, Nibbles,
+        serde_bincode_compat,
+        updates::{StorageTrieUpdates, StorageTrieUpdatesSorted, TrieUpdates},
+        BranchNodeCompact, ComputedTrieData, HashedPostState, HashedStorage, HashedStorageSorted,
+        LazyTrieData, Nibbles,
     };
     use std::{collections::BTreeMap, fs::File, sync::Arc};
 
@@ -211,6 +219,26 @@ mod tests {
             deserialized_notification.map(|(notification, _)| notification),
             Some(notification)
         );
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_decode_legacy_sorted_trie_data() -> eyre::Result<()> {
+        let storage_nodes =
+            vec![(Nibbles::from_nibbles_unchecked([0x01]), Some(BranchNodeCompact::default()))];
+        let encoded = rmp_serde::encode::to_vec(&(false, &storage_nodes))?;
+        let decoded: serde_bincode_compat::updates::StorageTrieUpdatesSorted<'_> =
+            rmp_serde::decode::from_slice(&encoded)?;
+        let decoded: StorageTrieUpdatesSorted = decoded.into();
+        assert_eq!(decoded.storage_nodes, storage_nodes);
+
+        let storage_slots = vec![(B256::from([1; 32]), U256::from(1))];
+        let encoded = rmp_serde::encode::to_vec(&(&storage_slots, false))?;
+        let decoded: serde_bincode_compat::hashed_state::HashedStorageSorted<'_> =
+            rmp_serde::decode::from_slice(&encoded)?;
+        let decoded: HashedStorageSorted = decoded.into();
+        assert_eq!(decoded.storage_slots, storage_slots);
 
         Ok(())
     }
@@ -270,7 +298,6 @@ mod tests {
             storage_tries: HashMap::from_iter([(
                 hashed_address,
                 StorageTrieUpdates {
-                    is_deleted: false,
                     storage_nodes: HashMap::from_iter([(
                         Nibbles::from_nibbles_unchecked([0x04]),
                         BranchNodeCompact::default(),
@@ -287,10 +314,7 @@ mod tests {
             )]),
             storages: HashMap::from_iter([(
                 hashed_address,
-                HashedStorage {
-                    wiped: false,
-                    storage: HashMap::from_iter([(storage_key, U256::from(101))]),
-                },
+                HashedStorage { storage: HashMap::from_iter([(storage_key, U256::from(101))]) },
             )]),
         };
 

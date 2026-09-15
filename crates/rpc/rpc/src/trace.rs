@@ -16,7 +16,7 @@ use alloy_rpc_types_trace::{
     tracerequest::TraceCallRequest,
 };
 use async_trait::async_trait;
-use futures::StreamExt;
+use futures::{FutureExt, StreamExt};
 use jsonrpsee::core::RpcResult;
 use reth_chainspec::{ChainSpecProvider, EthereumHardforks};
 use reth_primitives_traits::{BlockBody, BlockHeader};
@@ -113,6 +113,7 @@ where
                     .map_err(Eth::Error::from_eth_err)?;
                 Ok(trace_res)
             })
+            .boxed()
             .await
     }
 
@@ -236,7 +237,19 @@ where
         hash: B256,
         index: usize,
     ) -> Result<Option<LocalizedTransactionTrace>, Eth::Error> {
-        Ok(self.trace_transaction(hash).await?.and_then(|traces| traces.into_iter().nth(index)))
+        self.eth_api()
+            .spawn_trace_transaction_in_block(
+                hash,
+                TracingInspectorConfig::default_parity(),
+                move |tx_info, inspector, _, _| {
+                    Ok(inspector
+                        .into_parity_builder()
+                        .into_localized_transaction_traces_iter(tx_info)
+                        .nth(index))
+                },
+            )
+            .await
+            .map(Option::flatten)
     }
 
     /// Returns all traces for the given transaction hash

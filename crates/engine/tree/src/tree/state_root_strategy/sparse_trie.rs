@@ -113,6 +113,8 @@ pub(super) struct SparseTrieCacheTask<A = ArenaParallelSparseTrie, S = ArenaPara
     /// Number of pending execution/prewarming updates received but not yet passed to
     /// `update_leaves`.
     pending_updates: usize,
+    /// Whether the first buffered leaf batch has been applied.
+    initial_updates_applied: bool,
     /// Combined final hashed state.
     ///
     /// Sparse trie task observes and hashes all state updates, allowing it to cheaply construct a
@@ -182,6 +184,7 @@ where
             pending_targets: Default::default(),
             in_flight_proof_batches: 0,
             pending_updates: Default::default(),
+            initial_updates_applied: false,
             final_hashed_state: Default::default(),
             metrics,
         }
@@ -359,9 +362,6 @@ where
             }
         };
 
-        #[cfg(feature = "trie-debug")]
-        let debug_recorders = self.trie.take_debug_recorders();
-
         let end = Instant::now();
         self.metrics.sparse_trie_final_update_duration_histogram.record(end.duration_since(start));
         self.metrics.sparse_trie_total_duration_histogram.record(end.duration_since(now));
@@ -380,8 +380,6 @@ where
             trie_updates: Arc::new(trie_updates),
             hashed_state: finalized_hashed_state
                 .expect("finished state updates publish the hashed post state"),
-            #[cfg(feature = "trie-debug")]
-            debug_recorders,
         })
     }
 
@@ -439,6 +437,14 @@ where
             }
         } else if !updates_queued {
             // If we don't have any pending updates, apply them to the trie,
+            let t = Instant::now();
+            self.process_new_updates()?;
+            self.metrics.sparse_trie_process_updates_duration_histogram.record(t.elapsed());
+            self.dispatch_pending_targets()?;
+        } else if !self.initial_updates_applied && self.pending_updates >= INITIAL_UPDATE_BATCH_SIZE
+        {
+            // Start proof fetching before a continuously arriving state stream drains. Later
+            // batches retain the usual coalescing policy to avoid repeatedly sorting small maps.
             let t = Instant::now();
             self.process_new_updates()?;
             self.metrics.sparse_trie_process_updates_duration_histogram.record(t.elapsed());
@@ -575,6 +581,7 @@ where
 
         let _span = debug_span!("process_new_updates").entered();
         self.pending_updates = 0;
+        self.initial_updates_applied = true;
 
         // Firstly apply all new storage and account updates to the tries.
         self.process_leaf_updates(true)?;
@@ -718,24 +725,18 @@ where
     ///
     /// we trigger state root computation on a rayon pool.
     fn compute_drained_storage_roots(&mut self) {
-        let addresses_to_compute_roots: Vec<_> = self
-            .storage_updates
-            .iter()
-            .filter_map(|(address, updates)| updates.is_empty().then_some(*address))
-            .collect();
-
         struct SendStorageTriePtr<S>(*mut RevealableSparseTrie<S>);
         // SAFETY: this wrapper only forwards the pointer across rayon; deref invariants are
         // documented at the use site below.
         unsafe impl<S: Send> Send for SendStorageTriePtr<S> {}
 
-        let mut tries_to_compute_roots: Vec<(B256, SendStorageTriePtr<S>)> =
-            Vec::with_capacity(addresses_to_compute_roots.len());
-        for address in addresses_to_compute_roots {
-            if let Some(trie) = self.trie.storage_tries_mut().get_mut(&address) &&
+        let mut tries_to_compute_roots: Vec<(B256, SendStorageTriePtr<S>)> = Vec::new();
+        for (address, updates) in &self.storage_updates {
+            if updates.is_empty() &&
+                let Some(trie) = self.trie.storage_tries_mut().get_mut(address) &&
                 !trie.is_root_cached()
             {
-                tries_to_compute_roots.push((address, SendStorageTriePtr(trie)));
+                tries_to_compute_roots.push((*address, SendStorageTriePtr(trie)));
             }
         }
 
@@ -764,7 +765,7 @@ where
             let _enter = span.entered();
             // SAFETY:
             // - pointers are created from `storage_tries_mut().get_mut(address)` above;
-            // - `addresses_to_compute_roots` comes from map iteration, so addresses are unique;
+            // - `storage_updates` is a map, so addresses are unique;
             // - we do not insert/remove entries between pointer collection and use, so pointers
             //   stay valid and map reallocation cannot occur;
             // - each pointer is consumed by at most one rayon task, so no aliasing mutable access.
@@ -1018,6 +1019,9 @@ pub(super) struct SparseTrieTaskMetrics {
 /// fetched by a single worker. If exceeded, chunking is forced regardless of worker availability.
 const DEFAULT_MAX_TARGETS_FOR_CHUNKING: usize = 300;
 
+/// Start proof fetching while the first state-update batch is still arriving.
+const INITIAL_UPDATE_BATCH_SIZE: usize = 64;
+
 /// Dispatches work items as a single unit or in chunks based on target size and worker
 /// availability.
 #[expect(clippy::too_many_arguments)]
@@ -1146,7 +1150,7 @@ mod tests {
             address,
             Some(Account { balance: U256::from(100), nonce: 1, bytecode_hash: None }),
         );
-        let mut storage = reth_trie::HashedStorage::new(false);
+        let mut storage = reth_trie::HashedStorage::default();
         storage.storage.insert(slot, value);
         hashed_state.storages.insert(address, storage);
 
@@ -1226,11 +1230,11 @@ mod tests {
     }
 
     #[test]
-    fn run_returns_parent_root_without_revealing_blind_trie_when_no_state_updates() {
+    fn first_leaf_batch_starts_proofs_before_input_queue_drains() {
         let runtime = reth_tasks::Runtime::test();
         let provider_factory = create_test_provider_factory();
         let anchor_hash = init_genesis(&provider_factory).expect("failed to initialize genesis");
-        let overlay_factory = OverlayStateProviderFactory::new(
+        let state_provider_factory = OverlayStateProviderFactory::new(
             provider_factory,
             OverlayManager::<reth_chain_state::EthPrimitives>::default()
                 .overlay_builder(anchor_hash),
@@ -1238,7 +1242,91 @@ mod tests {
         let (proof_result_tx, proof_result_rx) = crossbeam_channel::unbounded();
         let proof_worker_handle = ProofWorkerHandle::new(
             &runtime,
-            ProofTaskCtx::new(overlay_factory),
+            ProofTaskCtx::new(state_provider_factory),
+            false,
+            proof_result_tx.clone(),
+        );
+
+        let default_trie = RevealableSparseTrie::blind_from(ArenaParallelSparseTrie::default());
+        let trie = SparseStateTrie::default()
+            .with_accounts_trie(default_trie.clone())
+            .with_default_storage_trie(default_trie)
+            .with_updates(true);
+
+        let parent_state_root = B256::from([0x55; 32]);
+        let (updates_tx, updates_rx) = crossbeam_channel::unbounded();
+        let (_cancel_guard, cancel_rx) = crossbeam_channel::bounded::<()>(0);
+        let mut task = SparseTrieCacheTask::new_with_trie(
+            &runtime,
+            updates_rx,
+            cancel_rx,
+            std::sync::mpsc::channel().0,
+            proof_worker_handle,
+            proof_result_tx,
+            proof_result_rx,
+            SparseTrieTaskMetrics::default(),
+            trie,
+            parent_state_root,
+            TrieNodeEpoch::UNMODIFIED,
+            1,
+        );
+
+        // Keep an input queued so progress cannot use its normal queue-empty flush.
+        updates_tx.send(StateRootMessage::PrefetchProofs(Default::default())).unwrap();
+        let deadline = std::time::Instant::now();
+        while task.updates.is_empty() {
+            assert!(deadline.elapsed() < std::time::Duration::from_secs(1));
+            std::thread::yield_now();
+        }
+        for index in 0..INITIAL_UPDATE_BATCH_SIZE {
+            let mut state = HashedPostState::default();
+            state.accounts.insert(
+                B256::repeat_byte(index as u8),
+                Some(Account { nonce: 1, ..Default::default() }),
+            );
+            task.on_hashed_state_update(state);
+            task.pending_updates += 1;
+            assert!(!task.make_progress().unwrap());
+            if index + 1 < INITIAL_UPDATE_BATCH_SIZE {
+                assert_eq!(task.in_flight_proof_batches, 0);
+            }
+        }
+        assert!(task.in_flight_proof_batches > 0, "proof work must start before the queue drains");
+        assert_eq!(task.pending_updates, 0);
+
+        // A second batch remains buffered; the early flush must not become a permanent small
+        // batch policy that repeatedly scans and sorts pending leaves.
+        for index in INITIAL_UPDATE_BATCH_SIZE..INITIAL_UPDATE_BATCH_SIZE * 2 {
+            let mut state = HashedPostState::default();
+            state.accounts.insert(
+                B256::repeat_byte(index as u8),
+                Some(Account { nonce: 1, ..Default::default() }),
+            );
+            task.on_hashed_state_update(state);
+            task.pending_updates += 1;
+            assert!(!task.make_progress().unwrap());
+        }
+        assert_eq!(task.pending_updates, INITIAL_UPDATE_BATCH_SIZE);
+        assert_eq!(task.new_account_updates.len(), INITIAL_UPDATE_BATCH_SIZE);
+        drop(updates_tx);
+        drop(task);
+        drain_sparse_trie_tasks(&runtime);
+    }
+
+    #[test]
+    fn run_returns_parent_root_without_revealing_blind_trie_when_no_state_updates() {
+        let runtime = reth_tasks::Runtime::test();
+        let provider_factory = create_test_provider_factory();
+        let anchor_hash = init_genesis(&provider_factory).expect("failed to initialize genesis");
+        let state_provider_factory = OverlayStateProviderFactory::new(
+            provider_factory,
+            OverlayManager::<reth_chain_state::EthPrimitives>::default()
+                .overlay_builder(anchor_hash),
+        );
+        let (proof_result_tx, proof_result_rx) = crossbeam_channel::unbounded();
+        let proof_worker_handle = ProofWorkerHandle::new(
+            &runtime,
+            ProofTaskCtx::new(state_provider_factory),
             false,
             proof_result_tx.clone(),
         );
@@ -1285,7 +1373,7 @@ mod tests {
         let runtime = reth_tasks::Runtime::test();
         let provider_factory = create_test_provider_factory();
         let anchor_hash = init_genesis(&provider_factory).expect("failed to initialize genesis");
-        let overlay_factory = OverlayStateProviderFactory::new(
+        let state_provider_factory = OverlayStateProviderFactory::new(
             provider_factory,
             OverlayManager::<reth_chain_state::EthPrimitives>::default()
                 .overlay_builder(anchor_hash),
@@ -1293,7 +1381,7 @@ mod tests {
         let (proof_result_tx, proof_result_rx) = crossbeam_channel::unbounded();
         let proof_worker_handle = ProofWorkerHandle::new(
             &runtime,
-            ProofTaskCtx::new(overlay_factory),
+            ProofTaskCtx::new(state_provider_factory),
             false,
             proof_result_tx.clone(),
         );
@@ -1373,7 +1461,7 @@ mod tests {
         let runtime = reth_tasks::Runtime::test();
         let provider_factory = create_test_provider_factory();
         let anchor_hash = init_genesis(&provider_factory).expect("failed to initialize genesis");
-        let overlay_factory = OverlayStateProviderFactory::new(
+        let state_provider_factory = OverlayStateProviderFactory::new(
             provider_factory,
             OverlayManager::<reth_chain_state::EthPrimitives>::default()
                 .overlay_builder(anchor_hash),
@@ -1381,7 +1469,7 @@ mod tests {
         let (proof_result_tx, proof_result_rx) = crossbeam_channel::unbounded();
         let proof_worker_handle = ProofWorkerHandle::new(
             &runtime,
-            ProofTaskCtx::new(overlay_factory),
+            ProofTaskCtx::new(state_provider_factory),
             false,
             proof_result_tx.clone(),
         );
@@ -1426,7 +1514,7 @@ mod tests {
         let runtime = reth_tasks::Runtime::test();
         let provider_factory = create_test_provider_factory();
         let anchor_hash = init_genesis(&provider_factory).expect("failed to initialize genesis");
-        let overlay_factory = OverlayStateProviderFactory::new(
+        let state_provider_factory = OverlayStateProviderFactory::new(
             provider_factory,
             OverlayManager::<reth_chain_state::EthPrimitives>::default()
                 .overlay_builder(anchor_hash),
@@ -1434,7 +1522,7 @@ mod tests {
         let (proof_result_tx, proof_result_rx) = crossbeam_channel::unbounded();
         let proof_worker_handle = ProofWorkerHandle::new(
             &runtime,
-            ProofTaskCtx::new(overlay_factory),
+            ProofTaskCtx::new(state_provider_factory),
             false,
             proof_result_tx.clone(),
         );

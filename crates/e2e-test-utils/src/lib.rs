@@ -1,8 +1,9 @@
 //! Utilities for end-to-end tests.
 
+use alloy_primitives::{Address, B256};
 use alloy_rpc_types_engine::PayloadAttributes;
 use node::NodeTestContext;
-use reth_chainspec::ChainSpec;
+use reth_chainspec::{ChainSpec, EthereumHardfork};
 use reth_db::{test_utils::TempDatabase, DatabaseEnv};
 use reth_network_api::test_utils::PeersHandleProvider;
 use reth_node_builder::{
@@ -39,6 +40,9 @@ mod rpc;
 
 /// Utilities for creating and writing RLP test data
 pub mod test_rlp_utils;
+
+/// Helpers for verifying the persisted state and trie representation
+pub mod trie;
 
 /// Builder for configuring test node setups
 mod setup_builder;
@@ -121,6 +125,28 @@ where
         .with_connect_nodes(connect_nodes)
         .build()
         .await
+}
+
+/// Creates Ethereum [`PayloadAttributes`] valid for the given hardfork, allowing the same test
+/// to be run against multiple hardfork targets.
+///
+/// Withdrawals are set once Shanghai is active, the parent beacon block root once Cancun is
+/// active, and a slot number once Amsterdam is active. The payload builder requires a slot number
+/// for EIP-7843; tests use the timestamp as a deterministic dummy slot because the exact beacon
+/// slot is irrelevant for local e2e payloads.
+pub fn eth_payload_attributes_for_fork(
+    fork: EthereumHardfork,
+    timestamp: u64,
+) -> PayloadAttributes {
+    PayloadAttributes {
+        timestamp,
+        prev_randao: B256::ZERO,
+        suggested_fee_recipient: Address::ZERO,
+        withdrawals: (fork >= EthereumHardfork::Shanghai).then(Vec::new),
+        parent_beacon_block_root: (fork >= EthereumHardfork::Cancun).then_some(B256::ZERO),
+        slot_number: (fork >= EthereumHardfork::Amsterdam).then_some(timestamp),
+        ..Default::default()
+    }
 }
 
 // Type aliases

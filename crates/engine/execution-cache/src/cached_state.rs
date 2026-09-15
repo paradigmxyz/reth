@@ -998,6 +998,14 @@ impl<S: StateProofProvider> StateProofProvider for CachedStateProvider<S> {
         self.state_provider.multiproof(input, targets)
     }
 
+    fn multiproof_v2(
+        &self,
+        input: TrieInput,
+        targets: reth_trie::MultiProofTargetsV2,
+    ) -> ProviderResult<reth_trie::DecodedMultiProofV2> {
+        self.state_provider.multiproof_v2(input, targets)
+    }
+
     fn witness(
         &self,
         input: TrieInput,
@@ -1384,6 +1392,17 @@ impl SavedCache {
     /// Returns the [`ExecutionCache`] belonging to the tracked hash.
     pub const fn cache(&self) -> &ExecutionCache {
         &self.caches
+    }
+
+    /// Consumes the saved cache and returns its [`ExecutionCache`].
+    pub fn into_cache(self) -> ExecutionCache {
+        self.caches
+    }
+
+    /// Returns whether `self` and `other` refer to the same [`ExecutionCache`] data,
+    /// regardless of their block hashes.
+    pub fn shares_cache_with(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.caches.0, &other.caches.0)
     }
 
     /// Updates the cache metrics (size/capacity/collisions) from the stats handlers.

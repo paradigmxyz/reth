@@ -132,7 +132,7 @@ where
         for batch_entry in req.iter().flatten() {
             let method_name = batch_entry.method_name();
             if let Some(call_metrics) = self.metrics.inner.call_metrics.get(method_name) {
-                call_metrics.started_total.increment(1);
+                call_metrics.batched_total.increment(1);
             }
         }
 
@@ -299,6 +299,12 @@ struct RpcServerCallMetrics {
     successful_total: Counter,
     /// The number of failed calls
     failed_total: Counter,
+    /// The number of calls received as batch entries.
+    ///
+    /// jsonrpsee dispatches batch entries internally without invoking this middleware's `call`,
+    /// so only their per-method volume can be tracked; batched calls are excluded from
+    /// `started_total`, `successful_total`, `failed_total` and `time_seconds`.
+    batched_total: Counter,
     /// Response for a single call
     time_seconds: Histogram,
 }

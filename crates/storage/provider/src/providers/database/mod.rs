@@ -30,7 +30,7 @@ use reth_stages_types::{PipelineTarget, StageCheckpoint, StageId};
 use reth_static_file_types::StaticFileSegment;
 use reth_storage_api::{
     BlockBodyIndicesProvider, ChainStateBlockReader, ChainStateBlockWriter, DBProvider,
-    NodePrimitivesProvider, StorageSettings, StorageSettingsCache, TryIntoHistoricalStateProvider,
+    NodePrimitivesProvider, StorageSettings, StorageSettingsCache,
 };
 use reth_storage_errors::provider::ProviderResult;
 use reth_storage_overlay::OverlayManager;
@@ -461,29 +461,6 @@ impl<N: ProviderNodeTypes> ProviderFactory<N> {
     pub fn latest(&self) -> ProviderResult<StateProviderBox> {
         trace!(target: "providers::db", "Returning latest state provider");
         Ok(Box::new(LatestStateProvider::new(self.database_provider_ro()?)))
-    }
-
-    /// Storage provider for state at that given block
-    pub fn history_by_block_number(
-        &self,
-        block_number: BlockNumber,
-    ) -> ProviderResult<StateProviderBox> {
-        let state_provider = self.provider()?.try_into_history_at_block(block_number)?;
-        trace!(target: "providers::db", ?block_number, "Returning historical state provider for block number");
-        Ok(state_provider)
-    }
-
-    /// Storage provider for state at that given block hash
-    pub fn history_by_block_hash(&self, block_hash: BlockHash) -> ProviderResult<StateProviderBox> {
-        let provider = self.provider()?;
-
-        let block_number = provider
-            .block_number(block_hash)?
-            .ok_or(ProviderError::BlockHashNotFound(block_hash))?;
-
-        let state_provider = provider.try_into_history_at_block(block_number)?;
-        trace!(target: "providers::db", ?block_number, %block_hash, "Returning historical state provider for block hash");
-        Ok(state_provider)
     }
 
     /// Asserts that the static files and database are consistent. If not,

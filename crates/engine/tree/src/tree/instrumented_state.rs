@@ -244,6 +244,14 @@ impl<S: StateProofProvider> StateProofProvider for InstrumentedStateProvider<S> 
         self.state_provider.multiproof(input, targets)
     }
 
+    fn multiproof_v2(
+        &self,
+        input: TrieInput,
+        targets: reth_trie::MultiProofTargetsV2,
+    ) -> ProviderResult<reth_trie::DecodedMultiProofV2> {
+        self.state_provider.multiproof_v2(input, targets)
+    }
+
     fn witness(
         &self,
         input: TrieInput,
