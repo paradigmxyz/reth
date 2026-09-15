@@ -615,7 +615,10 @@ async fn test_tree_persist_blocks() {
         assert_eq!(input.persist_rest_blocks().len(), expected_persist_len);
         assert_eq!(input.persist_rest_blocks(), &blocks[..expected_persist_len]);
         assert_eq!(input.prev_db_tip(), input.prev_partial_state_trie());
-        assert_eq!(input.new_db_tip(), input.new_partial_state_trie());
+        assert_eq!(
+            input.new_db_tip() - tree_config.num_state_masking_blocks(),
+            input.new_partial_state_trie()
+        );
     } else {
         panic!("unexpected action received {received_action:?}");
     }
@@ -1272,8 +1275,12 @@ async fn test_tree_state_on_new_head_reorg() {
 
     // Set persistence_threshold to 1
     let mut test_harness = TestHarness::new(chain_spec);
-    test_harness.tree.config =
-        test_harness.tree.config.with_persistence_threshold(1).with_memory_block_buffer_target(1);
+    test_harness.tree.config = test_harness
+        .tree
+        .config
+        .with_num_state_masking_blocks(0)
+        .with_persistence_threshold(1)
+        .with_memory_block_buffer_target(1);
     let mut test_block_builder = TestBlockBuilder::eth();
     let blocks: Vec<_> = test_block_builder.get_executed_blocks(1..6).collect();
 
@@ -1478,6 +1485,7 @@ async fn test_get_canonical_blocks_to_persist() {
     let persistence_threshold = 4;
     let memory_block_buffer_target = 3;
     test_harness.tree.config = TreeConfig::default()
+        .with_num_state_masking_blocks(0)
         .with_persistence_threshold(persistence_threshold)
         .with_memory_block_buffer_target(memory_block_buffer_target);
 
@@ -1527,6 +1535,7 @@ fn threshold_persistence_uses_canonical_in_memory_chain_length() {
     let blocks: Vec<_> = TestBlockBuilder::eth().get_executed_blocks(0..10).collect();
     let mut test_harness = TestHarness::new(MAINNET.clone()).with_blocks(blocks.clone());
     test_harness.tree.config = TreeConfig::default()
+        .with_num_state_masking_blocks(0)
         .with_persistence_threshold(3)
         .with_memory_block_buffer_target(0)
         .with_num_state_masking_blocks(2);
@@ -1553,6 +1562,7 @@ fn test_threshold_persistence_with_state_masking_blocks() {
     test_harness.tree.persistence_state.last_persisted_block =
         blocks[3].recovered_block().num_hash();
     test_harness.tree.config = TreeConfig::default()
+        .with_num_state_masking_blocks(0)
         .with_persistence_threshold(4)
         .with_memory_block_buffer_target(1)
         .with_num_state_masking_blocks(2);

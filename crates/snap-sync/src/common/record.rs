@@ -1,35 +1,37 @@
 //! Versioned progress records kept in the metadata table.
 //!
-//! [`read_record`] reports a record written by another build version instead of misreading it
-//! when a download resumes.
+//! Account coverage and storage progress each implement [`SnapRecord`], so a record written by
+//! another build version is reported instead of misread when a download resumes.
 
 use crate::SnapSyncError;
 use reth_storage_api::{MetadataProvider, MetadataWriter};
 use reth_storage_errors::provider::ProviderError;
 use serde::{de::DeserializeOwned, Serialize};
 
-/// Reads the record under `key`, reporting one written at another `version` instead of misreading
-/// it.
-pub(crate) fn read_record<T: DeserializeOwned>(
-    provider: &impl MetadataProvider,
-    key: &'static str,
-    version: u32,
-) -> Result<Option<T>, SnapSyncError> {
-    let Some(bytes) = provider.get_metadata(key)? else { return Ok(None) };
-    let value: serde_json::Value = serde_json::from_slice(&bytes).map_err(ProviderError::other)?;
-    let found = value.get("version").and_then(serde_json::Value::as_u64);
-    if found != Some(u64::from(version)) {
-        return Err(SnapSyncError::UnsupportedRecord { key, version: found })
-    }
-    Ok(Some(serde_json::from_value(value).map_err(ProviderError::other)?))
-}
+/// Versioned JSON progress checked before decoding under its own metadata key.
+pub(crate) trait SnapRecord: Serialize + DeserializeOwned {
+    /// Metadata key the record is stored under.
+    const KEY: &'static str;
 
-/// Writes `record`, which carries its own `version` field, under `key`.
-pub(crate) fn write_record(
-    provider: &impl MetadataWriter,
-    key: &str,
-    record: &impl Serialize,
-) -> Result<(), SnapSyncError> {
-    provider.write_metadata(key, serde_json::to_vec(record).map_err(ProviderError::other)?)?;
-    Ok(())
+    /// Encoding version this build writes.
+    const VERSION: u32;
+
+    /// Reads the record, reporting one written at another version instead of misreading it.
+    fn read(provider: &impl MetadataProvider) -> Result<Option<Self>, SnapSyncError> {
+        let Some(bytes) = provider.get_metadata(Self::KEY)? else { return Ok(None) };
+        let value: serde_json::Value =
+            serde_json::from_slice(&bytes).map_err(ProviderError::other)?;
+        let version = value.get("version").and_then(serde_json::Value::as_u64);
+        if version != Some(u64::from(Self::VERSION)) {
+            return Err(SnapSyncError::UnsupportedRecord { key: Self::KEY, version })
+        }
+        Ok(Some(serde_json::from_value(value).map_err(ProviderError::other)?))
+    }
+
+    /// Writes this record under its key.
+    fn write(&self, provider: &impl MetadataWriter) -> Result<(), SnapSyncError> {
+        provider
+            .write_metadata(Self::KEY, serde_json::to_vec(self).map_err(ProviderError::other)?)?;
+        Ok(())
+    }
 }

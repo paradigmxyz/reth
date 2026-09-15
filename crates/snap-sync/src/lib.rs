@@ -42,6 +42,8 @@ pub use pivot::SnapPivotPolicy;
 pub use session::{SnapSyncSession, SnapSyncSessionState};
 pub use state::{
     AccountCoverage, AccountRangeDownload, AccountRangeProgress, AccountRangeStep, RangeBudget,
-    SnapAccountStore, StateDownloadOutcome, StateDownloader, VerifiedRange,
+    SnapAccountStore, SnapStorageStore, StateDownloadOutcome, StateDownloader, StorageChunk,
+    StorageProgress, StorageRangeDownload, StorageRangeStep, VerifiedRange,
+    DEFAULT_STORAGE_ACCOUNTS,
 };
 pub use trie::TrieGenerator;

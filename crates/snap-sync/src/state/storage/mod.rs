@@ -1,4 +1,8 @@
-//! Storage download scheduling and persistence.
+//! Contract storage download coordination and persistence.
 
-pub(crate) mod download;
-pub(crate) mod store;
+mod download;
+mod store;
+
+pub use download::{StorageRangeDownload, StorageRangeStep, DEFAULT_STORAGE_ACCOUNTS};
+pub(crate) use store::persisted_storage_root;
+pub use store::{SnapStorageStore, StorageChunk, StorageProgress};

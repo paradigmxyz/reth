@@ -2,6 +2,7 @@
 
 use crate::SnapPhase;
 use alloy_primitives::B256;
+use reth_downloaders::snap::InvalidStorageRangeRequest;
 use reth_network_p2p::error::RequestError;
 use reth_storage_api::SnapAttemptId;
 use reth_storage_errors::{db::DatabaseError, provider::ProviderError};
@@ -15,6 +16,9 @@ pub enum SnapSyncError {
     /// A request for state failed.
     #[error(transparent)]
     Request(#[from] RequestError),
+    /// A storage request did not match the accounts it was built from.
+    #[error(transparent)]
+    StorageRequest(#[from] InvalidStorageRangeRequest),
     /// The storage layout keys state by address, which snap cannot fill in without preimages.
     #[error("snap synchronization requires the hashed state layout")]
     UnsupportedStorage,
@@ -57,10 +61,18 @@ pub enum SnapSyncError {
         got: B256,
     },
     /// A verified range proved nothing past the key it was requested from.
-    #[error("account range made no progress past {origin}")]
+    #[error("range made no progress past {origin}")]
     NoProgress {
         /// Key the range was requested from.
         origin: B256,
+    },
+    /// Storage was downloaded from somewhere other than where its contract's progress continues.
+    #[error("storage for {account} from {from} does not continue its persisted progress")]
+    OutOfOrderStorage {
+        /// Hashed address of the contract.
+        account: B256,
+        /// Slot the storage was requested from.
+        from: B256,
     },
     /// An account with storage was committed without it.
     #[error("account {account} has storage that was not downloaded")]

@@ -9,6 +9,11 @@ pub use account::{
     SnapAccountStore, VerifiedRange,
 };
 
+pub use storage::{
+    SnapStorageStore, StorageChunk, StorageProgress, StorageRangeDownload, StorageRangeStep,
+    DEFAULT_STORAGE_ACCOUNTS,
+};
+
 use crate::{
     common::SnapRequests, SnapDownloadProgress, SnapPhase, SnapStateStore, SnapSyncError,
     DEFAULT_RESPONSE_BYTES, MAX_HASH,

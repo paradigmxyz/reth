@@ -3,17 +3,18 @@
 //! Each range replaces its key interval, and ranges commit in key order.
 
 use crate::{
-    common::{read_record, write_record},
+    common::SnapRecord,
     error::db_error,
     state::{
         bytecode::store::{require_code, supplied_code, write_bytecodes},
-        storage::store::verify_storage,
+        storage::persisted_storage_root,
     },
-    SnapAttemptStore, SnapDownloadProgress, SnapPhase, SnapStateStore, SnapSyncError, SnapWrite,
+    SnapAttemptStore, SnapDownloadProgress, SnapPhase, SnapStateStore, SnapStorageStore,
+    SnapSyncError, SnapWrite, StorageProgress,
 };
 use alloy_primitives::{
     map::{B256Map, B256Set},
-    Bytes, B256,
+    Bytes, B256, U256,
 };
 use reth_db_api::{
     tables,
@@ -25,16 +26,13 @@ use reth_storage_api::{
     DBProvider, DatabaseProviderFactory, MetadataProvider, MetadataWriter, SnapAttemptId,
     StageCheckpointReader, StageCheckpointWriter, StateWriter, StorageSettingsCache,
 };
-use reth_trie_common::{HashedPostState, HashedPostStateSorted, HashedStorage, TrieAccount};
+use reth_trie_common::{
+    root::storage_root, HashedPostState, HashedPostStateSorted, HashedStorage, TrieAccount,
+    EMPTY_ROOT_HASH,
+};
 use revm::bytecode::Bytecode;
 use serde::{Deserialize, Serialize};
 use std::ops::Bound;
-
-// Metadata key of the coverage record.
-const COVERAGE_KEY: &str = "snap_account_coverage";
-
-// Encoding version of the coverage record this build writes.
-const COVERAGE_VERSION: u32 = 1;
 
 /// Persists accounts, dependencies and coverage together in the caller's transaction.
 pub trait SnapAccountStore {
@@ -46,7 +44,7 @@ pub trait SnapAccountStore {
     /// Returns the coverage recorded for the attempt `write` belongs to, if any.
     fn account_coverage(&self, write: SnapWrite) -> Result<Option<AccountCoverage>, SnapSyncError>;
 
-    /// Replaces a range with accounts, root-matched storage and supplied or stored code.
+    /// Commits accounts with matching supplied or persisted storage and available bytecode.
     fn commit_account_range(
         &self,
         write: SnapWrite,
@@ -56,6 +54,16 @@ pub trait SnapAccountStore {
     ) -> Result<AccountCoverage, SnapSyncError>
     where
         Self: MetadataWriter + StateWriter + DBProvider<Tx: DbTxMut>;
+
+    /// Removes storage in `interval` except the contracts in `kept`, which are sorted and inside
+    /// it.
+    fn remove_storages_except(
+        &self,
+        interval: (Bound<B256>, Bound<B256>),
+        kept: &[B256],
+    ) -> Result<(), SnapSyncError>
+    where
+        Self: DBProvider<Tx: DbTxMut>;
 }
 
 /// How far the account key space has been downloaded.
@@ -192,10 +200,15 @@ struct StoredCoverage {
     coverage: AccountCoverage,
 }
 
+impl SnapRecord for StoredCoverage {
+    const KEY: &'static str = "snap_account_coverage";
+    const VERSION: u32 = 1;
+}
+
 impl StoredCoverage {
     // `coverage` for `attempt` at this build's version.
     const fn new(attempt: SnapAttemptId, coverage: AccountCoverage) -> Self {
-        Self { version: COVERAGE_VERSION, attempt, coverage }
+        Self { version: Self::VERSION, attempt, coverage }
     }
 }
 
@@ -209,17 +222,14 @@ impl<T: MetadataProvider> SnapAccountStore for T {
             return Ok(coverage)
         }
         let start = AccountCoverage::START;
-        write_record(self, COVERAGE_KEY, &StoredCoverage::new(write.attempt(), start))?;
+        StoredCoverage::new(write.attempt(), start).write(self)?;
         Ok(start)
     }
 
     // A record left by another attempt reads as no coverage.
     fn account_coverage(&self, write: SnapWrite) -> Result<Option<AccountCoverage>, SnapSyncError> {
         self.authorize_snap_write(write)?;
-        let Some(stored) = read_record::<StoredCoverage>(self, COVERAGE_KEY, COVERAGE_VERSION)?
-        else {
-            return Ok(None)
-        };
+        let Some(stored) = StoredCoverage::read(self)? else { return Ok(None) };
         Ok((stored.attempt == write.attempt()).then_some(stored.coverage))
     }
 
@@ -243,15 +253,36 @@ impl<T: MetadataProvider> SnapAccountStore for T {
         }
         let coverage = self.account_coverage(write)?.ok_or(SnapSyncError::NoCoverage)?;
         let advanced = coverage.advance(range)?;
+        let progress = self.storage_progress(write, range.origin())?;
         let dependencies = RangeDependencies::new(range.accounts(), storages, bytecodes);
-        dependencies.verify(range.accounts(), self.tx_ref())?;
+        let persisted = dependencies.verify(range.accounts(), &progress, self.tx_ref())?;
 
         let interval = coverage.interval_to(&advanced);
         self.remove::<tables::HashedAccounts>(interval)?;
-        self.remove::<tables::HashedStorages>(interval)?;
+        self.remove_storages_except(interval, &persisted)?;
         dependencies.write(self)?;
-        write_record(self, COVERAGE_KEY, &StoredCoverage::new(write.attempt(), advanced))?;
+        StoredCoverage::new(write.attempt(), advanced).write(self)?;
         Ok(advanced)
+    }
+
+    fn remove_storages_except(
+        &self,
+        (mut start, end): (Bound<B256>, Bound<B256>),
+        kept: &[B256],
+    ) -> Result<(), SnapSyncError>
+    where
+        Self: DBProvider<Tx: DbTxMut>,
+    {
+        for account in kept {
+            self.remove::<tables::HashedStorages>((start, Bound::Excluded(*account)))?;
+            // Walks cannot start at an excluded key, so the next piece starts one key past it.
+            let Some(after) = U256::from_be_bytes(account.0).checked_add(U256::from(1)) else {
+                return Ok(())
+            };
+            start = Bound::Included(after.into());
+        }
+        self.remove::<tables::HashedStorages>((start, end))?;
+        Ok(())
     }
 }
 
@@ -279,16 +310,22 @@ impl RangeDependencies {
     }
 
     // Checks storage against each account's root, and code against its hash or the table.
+    // Returns the contracts whose storage was persisted ahead of the range, in key order.
     fn verify(
         &self,
         accounts: &[(B256, TrieAccount)],
+        progress: &StorageProgress,
         tx: &impl DbTx,
-    ) -> Result<(), SnapSyncError> {
+    ) -> Result<Vec<B256>, SnapSyncError> {
         let mut available = supplied_code(&self.bytecodes)?;
         let mut contracts = B256Set::default();
+        let mut persisted = Vec::new();
         for (hash, account) in accounts {
-            if verify_storage(&self.state, *hash, account)? {
+            if account.storage_root != EMPTY_ROOT_HASH {
                 contracts.insert(*hash);
+                if self.verify_storage(*hash, account, progress, tx)? {
+                    persisted.push(*hash);
+                }
             }
             require_code(tx, &mut available, account.code_hash)?;
         }
@@ -297,7 +334,41 @@ impl RangeDependencies {
         {
             return Err(SnapSyncError::UnexpectedStorage { account: *account })
         }
-        Ok(())
+        Ok(persisted)
+    }
+
+    // Checks the contract's storage, supplied or persisted, against its root. Returns whether it
+    // was persisted.
+    fn verify_storage(
+        &self,
+        hash: B256,
+        account: &TrieAccount,
+        progress: &StorageProgress,
+        tx: &impl DbTx,
+    ) -> Result<bool, SnapSyncError> {
+        let (got, persisted) = match self.state.account_storages().get(&hash) {
+            // Zero slots are deletions, which the trie does not hold.
+            Some(storage) => (
+                storage_root(
+                    storage
+                        .storage_slots_ref()
+                        .iter()
+                        .filter(|(_, value)| !value.is_zero())
+                        .copied(),
+                ),
+                false,
+            ),
+            None if progress.is_complete(hash) => (persisted_storage_root(tx, hash)?, true),
+            None => return Err(SnapSyncError::MissingStorage { account: hash }),
+        };
+        if got != account.storage_root {
+            return Err(SnapSyncError::StorageRootMismatch {
+                account: hash,
+                expected: account.storage_root,
+                got,
+            })
+        }
+        Ok(persisted)
     }
 
     // Writes the accounts with their storage and code.
@@ -313,7 +384,7 @@ mod tests {
     use super::*;
     use crate::{
         test_utils::{account, generation, hashed_factory, key, state_root, verified_range},
-        SnapGeneration,
+        SnapGeneration, StorageChunk,
     };
     use alloy_primitives::{Bytes, U256};
     use reth_db_api::cursor::DbCursorRO;
@@ -435,8 +506,7 @@ mod tests {
         assert!(tail.accounts().is_empty());
         let provider = factory.database_provider_rw().unwrap();
         let coverage = AccountCoverage { next: Some(key(3)) };
-        write_record(&provider, COVERAGE_KEY, &StoredCoverage::new(write.attempt(), coverage))
-            .unwrap();
+        StoredCoverage::new(write.attempt(), coverage).write(&provider).unwrap();
 
         let coverage =
             provider.commit_account_range(write, &tail, Default::default(), Vec::new()).unwrap();
@@ -644,13 +714,69 @@ mod tests {
     }
 
     #[test]
+    fn storage_persisted_ahead_of_the_range_commits_with_it() {
+        let accounts = accounts();
+        let (factory, write, _) = started(&accounts);
+        let range = verified_range(&accounts, 0..3, B256::ZERO, &[]);
+        let (_, bytecodes) = dependencies();
+        let provider = factory.database_provider_rw().unwrap();
+        // Left behind for an account that has no storage at this root.
+        let leftover = HashedPostState::default().with_storages([(key(1), storage().1)]);
+        provider.write_hashed_state(&leftover.into_sorted()).unwrap();
+        let slots = vec![(SLOT, U256::from(7))];
+        let chunk = StorageChunk::new(key(2), storage().0, B256::ZERO, slots, None);
+        provider.commit_storage_chunk(write, B256::ZERO, chunk).unwrap();
+
+        let coverage =
+            provider.commit_account_range(write, &range, Default::default(), bytecodes).unwrap();
+
+        assert!(coverage.is_complete());
+        assert_eq!(stored(&provider), (vec![key(1), key(2), FAR], true, true));
+        assert!(provider.tx_ref().get::<tables::HashedStorages>(key(1)).unwrap().is_none());
+    }
+
+    #[test]
+    fn persisted_storage_must_be_complete_and_match_the_account_root() {
+        let accounts = accounts();
+        let (factory, write, _) = started(&accounts);
+        let range = verified_range(&accounts, 0..3, B256::ZERO, &[]);
+        let (_, bytecodes) = dependencies();
+
+        // Part way through the contract.
+        let provider = factory.database_provider_rw().unwrap();
+        let slots = vec![(SLOT, U256::from(7))];
+        let next = Some(B256::repeat_byte(0x66));
+        let partial = StorageChunk::new(key(2), storage().0, B256::ZERO, slots, next);
+        provider.commit_storage_chunk(write, B256::ZERO, partial).unwrap();
+        let incomplete =
+            provider.commit_account_range(write, &range, Default::default(), bytecodes.clone());
+        assert!(
+            matches!(incomplete, Err(SnapSyncError::MissingStorage { account }) if account == key(2))
+        );
+        drop(provider);
+
+        // Complete, but not the storage the account commits to.
+        let provider = factory.database_provider_rw().unwrap();
+        let slots = vec![(SLOT, U256::from(8))];
+        let wrong = StorageChunk::new(key(2), storage().0, B256::ZERO, slots, None);
+        provider.commit_storage_chunk(write, B256::ZERO, wrong).unwrap();
+        let mismatched =
+            provider.commit_account_range(write, &range, Default::default(), bytecodes);
+        assert!(matches!(
+            mismatched,
+            Err(SnapSyncError::StorageRootMismatch { account, .. }) if account == key(2)
+        ));
+        assert_eq!(provider.account_coverage(write).unwrap(), Some(AccountCoverage::START));
+    }
+
+    #[test]
     fn a_record_this_build_cannot_read_is_reported() {
         let accounts = accounts();
         let (factory, write, _) = started(&accounts);
 
         for record in [br#"{"version":999}"#.to_vec(), b"{}".to_vec()] {
             let provider = factory.database_provider_rw().unwrap();
-            provider.write_metadata(COVERAGE_KEY, record).unwrap();
+            provider.write_metadata(StoredCoverage::KEY, record).unwrap();
 
             assert!(matches!(
                 provider.account_coverage(write),
