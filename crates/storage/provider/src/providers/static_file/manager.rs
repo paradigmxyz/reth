@@ -1806,7 +1806,11 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
             StaticFileSegment::Receipts |
             StaticFileSegment::TransactionSenders => {
                 if let Some(block) = provider.block_body_indices(checkpoint_block_number)? {
-                    let number = highest_static_file_entry - block.last_tx_num();
+                    // `last_tx_num()` saturates to zero for an empty genesis block, but row zero
+                    // belongs to the first non-empty block and must be removed as well.
+                    let number = highest_static_file_entry
+                        .saturating_add(1)
+                        .saturating_sub(block.next_tx_num());
                     debug!(target: "reth::providers::static_file", prune_count = number, checkpoint_block_number, "Pruning transaction based segment");
 
                     match segment {
