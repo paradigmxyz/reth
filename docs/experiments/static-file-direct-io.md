@@ -15,11 +15,22 @@ edge blocks with read-modify-write, then truncate padding to the logical file si
 The existing user-space write buffering, config commit boundary, and fsync ordering
 are retained. Direct I/O does not itself provide fsync durability.
 
-Cursor-local read-ahead windows amortize sequential scans: 64 KiB each for data
-and offsets, growing for an individual oversized value. They are released with
-the cursor; inactive jars retain no cached file contents. Small lookups still
-require device I/O, and partial writes require read-modify-write. Changeset-offset
-sidecars retain buffered writes and read range records in batches.
+Jar data, offsets, and changeset-offset sidecars use a shared user-space block
+cache with a 64 MiB total buffer budget across all files (plus bookkeeping and
+in-flight reads). It has 16 independently locked LRU shards. Small reads fetch
+4 KiB blocks, or the filesystem's required alignment if larger. Misses read
+directly into aligned cache storage, avoiding a second temporary allocation and
+copy. Entries survive individual cursor lifetimes through the shared reader.
+
+Each opened reader gets a fresh identity and snapshots the file length. Reopening
+after pruning, replacement, or recovery cannot reuse old cached contents. The
+provider already replaces readers at these boundaries. Evicted readers' blocks
+age out under the same global budget. Writes retain their existing buffering and
+read-modify-write behavior.
+
+The first measured version below instead used cursor-local 64 KiB read-ahead
+windows that were discarded on cursor drop. The shared-cache revision is awaiting
+its own benchmark results.
 
 The experiment bypasses the kernel cache while retaining higher-level caches
 and the existing file format. It does not change MDBX or RocksDB I/O.
@@ -44,7 +55,7 @@ closed-loop passes with concurrency two. Both binaries are pinned to commit IDs.
 | Engine API replay with depth-5 reorgs | [35003194833](https://github.com/paradigmxyz/reth/actions/runs/35003194833) |
 | Historical `debug_traceBlockByNumber` | [35003197593](https://github.com/paradigmxyz/reth/actions/runs/35003197593) |
 
-## Results
+## Initial results (cursor-local read-ahead)
 
 All three workflows completed successfully. This implementation substantially
 regresses every measured workload, so it should remain an experiment.

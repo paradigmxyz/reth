@@ -12,7 +12,7 @@
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 #![cfg_attr(docsrs, feature(doc_cfg))]
 
-use reth_fs_util::DirectFile;
+use reth_fs_util::{CachedFile, DirectFile};
 use serde::{Deserialize, Serialize};
 use smallvec::SmallVec;
 use std::{
@@ -347,8 +347,8 @@ impl<H: NippyJarHeader> NippyJar<H> {
 /// Reads static file data and offsets without populating the kernel data cache where supported.
 #[derive(Debug)]
 pub struct DataReader {
-    data_file: DirectFile,
-    offset_file: DirectFile,
+    data_file: CachedFile,
+    offset_file: CachedFile,
     data_len: usize,
     offsets_len: usize,
     /// Number of bytes that represent one offset.
@@ -358,11 +358,10 @@ pub struct DataReader {
 impl DataReader {
     /// Reads the respective data and offsets file and returns [`DataReader`].
     pub fn new(path: impl AsRef<Path>) -> Result<Self, NippyJarError> {
-        let data_file = DirectFile::open(path.as_ref(), false, false)?;
-        let offset_file =
-            DirectFile::open(path.as_ref().with_extension(OFFSETS_FILE_EXTENSION), false, false)?;
-        let data_len = data_file.metadata()?.len() as usize;
-        let offsets_len = offset_file.metadata()?.len() as usize;
+        let data_file = CachedFile::open(path.as_ref())?;
+        let offset_file = CachedFile::open(path.as_ref().with_extension(OFFSETS_FILE_EXTENSION))?;
+        let data_len = data_file.len() as usize;
+        let offsets_len = offset_file.len() as usize;
         let mut header = [0];
         offset_file.read_exact_at(&mut header, 0)?;
         let offset_size = header[0];
@@ -387,7 +386,7 @@ impl DataReader {
 
     /// Returns the offset for the requested data index starting from the end
     pub fn reverse_offset(&self, index: usize) -> Result<u64, NippyJarError> {
-        let offsets_file_size = self.offset_file.metadata()?.len() as usize;
+        let offsets_file_size = self.offset_file.len() as usize;
 
         if offsets_file_size > 1 {
             let from = offsets_file_size - self.offset_size as usize * (index + 1);
@@ -400,9 +399,8 @@ impl DataReader {
 
     /// Returns total number of offsets in the file.
     /// The size of one offset is determined by the file itself.
-    pub fn offsets_count(&self) -> Result<usize, NippyJarError> {
-        Ok((self.offset_file.metadata()?.len().saturating_sub(1) / self.offset_size as u64)
-            as usize)
+    pub const fn offsets_count(&self) -> Result<usize, NippyJarError> {
+        Ok((self.offset_file.len().saturating_sub(1) / self.offset_size as u64) as usize)
     }
 
     /// Reads one offset-sized (determined by the offset file) u64 at the provided index.

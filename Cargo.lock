@@ -9193,6 +9193,7 @@ name = "reth-fs-util"
 version = "2.5.2"
 dependencies = [
  "libc",
+ "schnellru",
  "serde",
  "serde_json",
  "tempfile",

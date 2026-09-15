@@ -4,7 +4,7 @@
 //! The file format is fixed-width 16-byte records: `[offset: u64 LE][num_changes: u64 LE]`.
 
 use crate::ChangesetOffset;
-use reth_fs_util::DirectFile;
+use reth_fs_util::{CachedFile, DirectFile};
 use std::{
     io::{self, BufWriter, Seek, SeekFrom, Write},
     path::Path,
@@ -162,7 +162,7 @@ impl ChangesetOffsetWriter {
 /// Reader for changeset offsets with O(1) random access.
 #[derive(Debug)]
 pub struct ChangesetOffsetReader {
-    file: DirectFile,
+    file: CachedFile,
     /// Cached file length in records.
     len: u64,
 }
@@ -176,7 +176,7 @@ impl ChangesetOffsetReader {
     /// The `len` parameter (from header metadata) bounds the reader - any records
     /// beyond this length are ignored. This ensures we only read committed data.
     pub fn new(path: impl AsRef<Path>, len: u64) -> io::Result<Self> {
-        let file = DirectFile::open(path, false, false)?;
+        let file = CachedFile::open(path)?;
         Ok(Self { file, len })
     }
 

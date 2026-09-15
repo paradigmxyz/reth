@@ -90,6 +90,32 @@ impl DirectFile {
         Ok(Self { file, position: 0, alignment })
     }
 
+    pub(crate) const fn alignment(&self) -> usize {
+        self.alignment
+    }
+
+    /// Reads into an already aligned buffer, avoiding an allocation and copy.
+    pub(crate) fn read_aligned_at(&self, buf: &mut [u8], offset: u64) -> io::Result<usize> {
+        debug_assert!(buf.as_ptr().align_offset(self.alignment) == 0);
+        debug_assert!(buf.len().is_multiple_of(self.alignment));
+        debug_assert!(offset.is_multiple_of(self.alignment as u64));
+        let mut filled = 0;
+        while filled < buf.len() {
+            let n = match positional_read(&self.file, &mut buf[filled..], offset + filled as u64) {
+                Err(err) if err.kind() == io::ErrorKind::Interrupted => continue,
+                other => other?,
+            };
+            if n == 0 {
+                break;
+            }
+            filled += n;
+            if !filled.is_multiple_of(self.alignment) {
+                break;
+            }
+        }
+        Ok(filled)
+    }
+
     /// Returns filesystem metadata.
     pub fn metadata(&self) -> io::Result<Metadata> {
         self.file.metadata()
@@ -228,6 +254,32 @@ impl Seek for DirectFile {
                 .ok_or(io::ErrorKind::InvalidInput)?,
         };
         Ok(self.position)
+    }
+}
+
+/// Owns aligned storage without requiring custom allocation or unsafe slice construction.
+#[derive(Debug)]
+pub(crate) struct AlignedBuffer {
+    storage: Vec<u8>,
+    shift: usize,
+    len: usize,
+}
+
+impl AlignedBuffer {
+    pub(crate) fn new(len: usize, alignment: usize) -> io::Result<Self> {
+        let storage = vec![0; len.checked_add(alignment - 1).ok_or(io::ErrorKind::InvalidInput)?];
+        let shift = storage.as_ptr().align_offset(alignment);
+        Ok(Self { storage, shift, len })
+    }
+
+    pub(crate) fn as_slice(&self) -> &[u8] {
+        &self.storage[self.shift..self.shift + self.len]
+    }
+    pub(crate) fn as_mut_slice(&mut self) -> &mut [u8] {
+        &mut self.storage[self.shift..self.shift + self.len]
+    }
+    pub(crate) const fn allocated_bytes(&self) -> usize {
+        self.storage.capacity()
     }
 }
 
