@@ -1354,6 +1354,7 @@ impl<'a, N: FullNodeComponents<Types: NodeTypes<ChainSpec: Hardforks + EthereumH
     pub fn eth_api_builder(self) -> reth_rpc::EthApiBuilder<N, EthRpcConverterFor<N>> {
         reth_rpc::EthApiBuilder::new_with_components(self.components.clone())
             .eth_cache(self.cache)
+            .eth_state_cache_config(self.config.cache)
             .task_spawner(self.components.task_executor().clone())
             .gas_cap(self.config.rpc_gas_cap.into())
             .max_simulate_blocks(self.config.rpc_max_simulate_blocks)
@@ -1682,15 +1683,13 @@ async fn prewarm_new_block_bals_task<EthApi: GetBlockAccessList, N: NodePrimitiv
                 return;
             }
 
-            match eth_api.get_decoded_block_access_list(block.hash().into()).await {
-                Ok(Some(bal)) => eth_api.cache().insert_bal(block.hash(), bal),
-                Ok(None) => {}
-                Err(err) => debug!(
+            if let Err(err) = eth_api.get_block_access_list(block.hash().into()).await {
+                debug!(
                     target: "reth::cli",
                     %err,
                     block_hash = ?block.hash(),
                     "Failed to prewarm BAL for canonical block",
-                ),
+                );
             }
         }
     }

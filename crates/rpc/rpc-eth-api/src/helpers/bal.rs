@@ -5,7 +5,7 @@ use alloy_primitives::Bytes;
 use alloy_rpc_types_eth::BlockId;
 use reth_errors::RethError;
 use reth_evm::{block::BlockExecutor, ConfigureEvm, Evm};
-use reth_revm::{database::StateProviderDatabase, state::bal::Bal as RevmBal, State};
+use reth_revm::{database::StateProviderDatabase, State};
 use reth_rpc_eth_types::{error::FromEthApiError, EthApiError};
 use reth_storage_api::StateProviderFactory;
 use std::sync::Arc;
@@ -23,19 +23,6 @@ pub trait GetBlockAccessList: Trace + Call + LoadBlock + RpcNodeCoreExt {
         block_id: BlockId,
     ) -> impl Future<Output = Result<Option<BlockAccessList>, Self::Error>> + Send {
         async move {
-            Ok(self.get_decoded_block_access_list(block_id).await?.map(|bal| {
-                let (bal, _) = bal.split();
-                Arc::unwrap_or_clone(bal).into_alloy_bal()
-            }))
-        }
-    }
-
-    /// Retrieves or builds a decoded revm BAL and its RLP encoding without caching generated BALs.
-    fn get_decoded_block_access_list(
-        &self,
-        block_id: BlockId,
-    ) -> impl Future<Output = Result<Option<DecodedBal<Arc<RevmBal>>>, Self::Error>> + Send {
-        async move {
             if block_id.is_pending() {
                 return Ok(None)
             }
@@ -47,7 +34,11 @@ pub trait GetBlockAccessList: Trace + Call + LoadBlock + RpcNodeCoreExt {
             if let Some(cached_bal) =
                 self.cache().get_bal(block.hash()).await.map_err(Self::Error::from_eth_err)?
             {
-                return Ok(Some(cached_bal.as_ref().clone()))
+                let (bal, _) = DecodedBal::from_rlp_bytes(cached_bal.as_raw().clone())
+                    .map_err(RethError::other)
+                    .map_err(Self::Error::from_eth_err)?
+                    .split();
+                return Ok(Some(Vec::from(bal)))
             }
 
             let permit = self
@@ -86,9 +77,14 @@ pub trait GetBlockAccessList: Trace + Call + LoadBlock + RpcNodeCoreExt {
                     .map_err(|err| EthApiError::Internal(err.into()))?;
 
                 let revm_bal = db.take_built_bal().expect("BAL builder configured");
+                if !eth_api.cache_computed_bals() {
+                    return Ok(Some(revm_bal.into_alloy_bal()));
+                }
+
                 let bal = revm_bal.clone().into_alloy_bal();
                 let raw = alloy_rlp::encode(&bal).into();
-                Ok(Some(DecodedBal::new(Arc::new(revm_bal), raw)))
+                eth_api.cache().insert_bal(block.hash(), DecodedBal::new(Arc::new(revm_bal), raw));
+                Ok(Some(bal))
             })
             .await
         }
@@ -111,7 +107,12 @@ pub trait GetBlockAccessList: Trace + Call + LoadBlock + RpcNodeCoreExt {
                 return Ok(Some(cached_bal.as_raw().clone()))
             }
 
-            Ok(self.get_decoded_block_access_list(block_id).await?.map(|bal| bal.split().1))
+            Ok(self.get_block_access_list(block_id).await?.map(|bal| alloy_rlp::encode(bal).into()))
         }
+    }
+
+    /// Whether to cache computed BALs for transaction tracing.
+    fn cache_computed_bals(&self) -> bool {
+        false
     }
 }
