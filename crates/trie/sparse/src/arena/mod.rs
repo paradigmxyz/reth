@@ -2883,14 +2883,14 @@ impl SparseTrie for ArenaParallelSparseTrie {
 
 #[cfg(test)]
 mod tests {
-    use super::TRACE_TARGET;
+    use super::{ArenaCursor, ArenaSparseNode, Index, NodeArena, SeekResult, TRACE_TARGET};
     use crate::{
         ArenaParallelSparseTrie, ArenaParallelismThresholds, LeafUpdate, SparseTrie, TrieNodeEpoch,
     };
     use alloy_primitives::{map::B256Map, B256, U256};
     use rand::{seq::SliceRandom, Rng, SeedableRng};
     use reth_trie::test_utils::TrieTestHarness;
-    use reth_trie_common::ProofV2Target;
+    use reth_trie_common::{Nibbles, ProofV2Target};
     use std::collections::BTreeMap;
     use tracing::{info, trace};
 
@@ -3101,6 +3101,107 @@ mod tests {
             }
 
             harness.assert_changes(&mut apst, changeset2);
+        }
+    }
+
+    /// Seeks `targets` in order on one reused cursor and compares every result against a cursor
+    /// that starts over from `root` for each target.
+    ///
+    /// The reused cursor pops to the deepest ancestor using only the nibble lengths it kept and
+    /// the common prefix of the previous target, so any mismatch means the derived entry paths
+    /// drifted from the paths a full walk would produce. Returns the arena index of a revealed
+    /// subtrie the walk passed through, if any.
+    fn assert_seeks_match_fresh_walk(
+        arena: &mut NodeArena,
+        root: Index,
+        root_path: Nibbles,
+        targets: &[Nibbles],
+    ) -> Option<Index> {
+        let mut subtrie_idx = None;
+        let mut cursor = ArenaCursor::default();
+        cursor.reset(arena, root, root_path);
+
+        for target in targets {
+            let actual = cursor.seek(arena, target);
+
+            let mut fresh = ArenaCursor::default();
+            fresh.reset(arena, root, root_path);
+            let expected = fresh.seek(arena, target);
+
+            let head = cursor.head().expect("cursor is non-empty");
+            let fresh_head = fresh.head().expect("cursor is non-empty");
+            assert_eq!(expected, actual, "seek result mismatch for {target:?}");
+            assert_eq!(fresh_head.index, head.index, "head index mismatch for {target:?}");
+            assert_eq!(fresh.head_path(), cursor.head_path(), "head path mismatch for {target:?}");
+
+            if matches!(actual, SeekResult::RevealedSubtrie) {
+                subtrie_idx = Some(head.index);
+            }
+        }
+
+        subtrie_idx
+    }
+
+    proptest! {
+        #![proptest_config(ProptestConfig::with_cases(64))]
+        /// The cursor derives each stack entry's path from a single packed [`Nibbles`] rather
+        /// than storing one per entry. Seeking a shuffled target sequence must therefore land
+        /// exactly where a walk from the root lands, for targets of every length — empty, odd,
+        /// full, and prefixes of one another — both in the upper trie and inside a subtrie,
+        /// whose walk root has a non-empty path.
+        #[test]
+        fn arena_cursor_packed_seek_matches_full_walk(
+            initial in proptest::collection::btree_map(arb::<B256>(), arb::<U256>(), 1..=100usize),
+            changeset_new_keys in proptest::collection::btree_map(arb::<B256>(), arb::<U256>(), 0..=30usize),
+            overlap_pct in 0.0..=0.5f64,
+            seed in arb::<u64>(),
+        ) {
+            let initial: BTreeMap<B256, U256> = initial.into_iter()
+                .filter(|(_, v)| *v != U256::ZERO)
+                .collect();
+            prop_assume!(!initial.is_empty());
+
+            let mut rng = rand::rngs::StdRng::seed_from_u64(seed);
+            let changeset = build_changeset(&initial, changeset_new_keys, overlap_pct, 0.0, &mut rng);
+
+            let harness = ArenaTrieTestHarness::new(initial.clone());
+            let root_node = harness.root_node();
+            let mut apst = ArenaParallelSparseTrie::default();
+            apst.set_root(root_node.node, root_node.masks, true).expect("set_root should succeed");
+            harness.assert_changes(&mut apst, changeset);
+
+            let mut targets = Vec::new();
+            for key in initial.keys() {
+                let path = Nibbles::unpack(key);
+                targets.push(path);
+                // A prefix of the full path: empty and odd lengths included.
+                targets.push(path.slice(..rng.random_range(0..path.len())));
+            }
+            for _ in 0..16 {
+                targets.push(Nibbles::unpack(B256::from(rng.random::<[u8; 32]>())));
+            }
+            targets.shuffle(&mut rng);
+
+            let root = apst.root;
+            let subtrie_idx = assert_seeks_match_fresh_walk(
+                &mut apst.upper_arena,
+                root,
+                Nibbles::default(),
+                &targets,
+            );
+
+            if let Some(subtrie_idx) = subtrie_idx {
+                let ArenaSparseNode::Subtrie(subtrie) = &mut apst.upper_arena[subtrie_idx] else {
+                    unreachable!("seek reported a subtrie")
+                };
+                let (root, root_path) = (subtrie.root, subtrie.path);
+                let targets: Vec<_> = targets
+                    .iter()
+                    .filter(|target| target.starts_with(&root_path))
+                    .copied()
+                    .collect();
+                assert_seeks_match_fresh_walk(&mut subtrie.arena, root, root_path, &targets);
+            }
         }
     }
 }
