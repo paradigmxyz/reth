@@ -1368,7 +1368,7 @@ async fn test_backpressure_counts_built_blocks_without_revalidation() {
 
 #[tokio::test]
 async fn test_built_block_admission_acknowledges_after_pacing() {
-    let blocks: Vec<_> = TestBlockBuilder::eth().get_executed_blocks(1..3).collect();
+    let blocks: Vec<_> = TestBlockBuilder::eth().get_executed_blocks(1..4).collect();
     let mut harness = TestHarness::new(MAINNET.clone()).with_blocks(vec![blocks[0].clone()]);
     harness.tree.config = harness.tree.config.with_persistence_threshold(0);
     let (_persist_tx, persist_rx) = crossbeam_channel::bounded(1);
@@ -1381,6 +1381,14 @@ async fn test_built_block_admission_acknowledges_after_pacing() {
         execution_output: Arc::new(Default::default()),
         hashed_state: Arc::new(Default::default()),
         trie_updates: Arc::new(Default::default()),
+    };
+    // Initialize the validator's lazy worker/cache state before measuring the interval. Cold
+    // insertion can itself exceed the persistence estimate and correctly require no sleep.
+    assert!(harness.tree.insert_built_block(payload.clone()));
+    assert!(harness.tree.should_pace_validation());
+    let payload = reth_payload_primitives::BuiltPayloadExecutedBlock {
+        recovered_block: Arc::new(blocks[2].recovered_block().clone()),
+        ..payload
     };
     harness.tree.persistence_pacing.last_validation_completed_at = Some(Instant::now());
     let (tx, rx) = tokio::sync::oneshot::channel();
