@@ -261,15 +261,16 @@ impl ProofWorkerHandle {
         // Broadcast blocks until all workers exit (channel close), so run each pool on its
         // own named blocking thread.
         let storage_rt = runtime.clone();
-        let spawn_storage_base = spawn_storage_workers.clone();
+        let spawn_storage_overflow =
+            (storage_overflow_count > 0).then(|| spawn_storage_workers.clone());
         runtime.spawn_blocking_named("storage-workers", move || {
-            spawn_storage_base(storage_rt.proof_storage_worker_pool(), storage_base_count, 0);
+            spawn_storage_workers(storage_rt.proof_storage_worker_pool(), storage_base_count, 0);
         });
-        if storage_overflow_count > 0 {
+        if let Some(spawn_storage_overflow) = spawn_storage_overflow {
             let storage_rt = runtime.clone();
             runtime.spawn_blocking_named("storage-worker2", move || {
                 if let Some(pool) = storage_rt.proof_storage_overflow_worker_pool() {
-                    spawn_storage_workers(pool, storage_overflow_count, storage_base_count);
+                    spawn_storage_overflow(pool, storage_overflow_count, storage_base_count);
                 }
             });
         }
@@ -324,15 +325,16 @@ impl ProofWorkerHandle {
         };
 
         let account_rt = runtime.clone();
-        let spawn_account_base = spawn_account_workers.clone();
+        let spawn_account_overflow =
+            (account_overflow_count > 0).then(|| spawn_account_workers.clone());
         runtime.spawn_blocking_named("account-workers", move || {
-            spawn_account_base(account_rt.proof_account_worker_pool(), account_base_count, 0);
+            spawn_account_workers(account_rt.proof_account_worker_pool(), account_base_count, 0);
         });
-        if account_overflow_count > 0 {
+        if let Some(spawn_account_overflow) = spawn_account_overflow {
             let account_rt = runtime.clone();
             runtime.spawn_blocking_named("account-worker2", move || {
                 if let Some(pool) = account_rt.proof_account_overflow_worker_pool() {
-                    spawn_account_workers(pool, account_overflow_count, account_base_count);
+                    spawn_account_overflow(pool, account_overflow_count, account_base_count);
                 }
             });
         }
