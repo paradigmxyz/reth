@@ -66,7 +66,7 @@ where
 
         while let Some(response) = pending_calls.next().await {
             if let Err(too_large) = batch_response.append(response) {
-                return Some(too_large.to_json().to_string())
+                return Some(raw_response_into_string(too_large.into_json()))
             }
         }
 
@@ -74,10 +74,13 @@ where
             None
         } else {
             let batch_resp = batch_response.finish();
-            Some(MethodResponse::from_batch(batch_resp).to_json().to_string())
+            Some(raw_response_into_string(MethodResponse::from_batch(batch_resp).into_json()))
         }
     } else {
-        Some(batch_response_error(Id::Null, ErrorObject::from(ErrorCode::ParseError)).to_string())
+        Some(raw_response_into_string(batch_response_error(
+            Id::Null,
+            ErrorObject::from(ErrorCode::ParseError),
+        )))
     }
 }
 
@@ -135,17 +138,19 @@ where
 
     let data = request.into_bytes();
     if data.len() > max_request_body_size {
-        return Some(
-            batch_response_error(Id::Null, reject_too_big_request(max_request_body_size as u32))
-                .to_string(),
-        )
+        return Some(raw_response_into_string(batch_response_error(
+            Id::Null,
+            reject_too_big_request(max_request_body_size as u32),
+        )))
     }
 
     // Single request or notification
     let res = if matches!(request_kind, Kind::Single) {
         let response = process_single_request(data, &rpc_service).await;
         match response {
-            Some(response) if response.is_method_call() => Some(response.to_json().to_string()),
+            Some(response) if response.is_method_call() => {
+                Some(raw_response_into_string(response.into_json()))
+            }
             _ => {
                 // subscription responses are sent directly over the sink, return a response here
                 // would lead to duplicate responses for the subscription response
@@ -159,4 +164,12 @@ where
     drop(conn);
 
     res
+}
+
+/// Converts an already serialized JSON-RPC response into the `String` the connection writes.
+///
+/// `Box<RawValue>` is a `Box<str>` under the hood, so this reuses the existing allocation instead
+/// of copying the response body.
+fn raw_response_into_string(raw: Box<JsonRawValue>) -> String {
+    String::from(Box::<str>::from(raw))
 }
