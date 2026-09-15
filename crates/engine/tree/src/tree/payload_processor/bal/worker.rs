@@ -83,12 +83,12 @@ pub(super) fn spawn_worker<'scope, Evm, Tx, Err, DB, MakeDb>(
 {
     scope.spawn(move |_| {
         let worker_result = (|| -> Result<(), BalWorkerError> {
+            // Keep the cache-filling database across executor resets so a speculative failure
+            // cannot introduce an unindexed provider setup error ahead of its ordered verdict.
+            let mut database = make_db(true).map_err(BalWorkerError::Setup)?;
             'worker: loop {
-                // Create a database with fill_on_miss=true ensuring misses
-                // are inserted for the other workers.
-                let database = make_db(true).map_err(BalWorkerError::Setup)?;
                 let mut worker_state = State::builder()
-                    .with_database(database)
+                    .with_database(&mut database)
                     .with_bal(Arc::clone(&received_bal_revm))
                     .with_bundle_update()
                     .build();

@@ -3,8 +3,9 @@
 //! Read `execute_block` as two execution paths over the same parent state.
 //!
 //! Worker states run transactions speculatively. Each worker gets one fresh cache-filling database
-//! from `make_db(true)` (recreated after execution errors), installs the received BAL, sets the
-//! transaction BAL index for each streamed transaction, and returns uncommitted results.
+//! from `make_db(true)`, installs the received BAL, sets the transaction BAL index for each
+//! streamed transaction, and returns uncommitted results. Execution errors rebuild the State,
+//! EVM, and executor while retaining the worker's database.
 //!
 //! The canonical state owns block effects. It runs the normal pre/post block hooks, commits
 //! worker results in transaction order, tracks block gas admission, and builds the BAL that this
@@ -1128,7 +1129,7 @@ mod tests {
     }
 
     #[test]
-    fn worker_rebuilds_after_failure_and_finishes_earlier_transactions() {
+    fn worker_reuses_provider_after_failure_and_finishes_earlier_transactions() {
         use std::sync::atomic::{AtomicUsize, Ordering};
 
         let evm_config = EthEvmConfig::mainnet();
@@ -1138,7 +1139,13 @@ mod tests {
         let received_bal = convert_alloy_to_revm_bal(&reference_bal.into()).unwrap();
         let setups = AtomicUsize::new(0);
         let make_db = |_: bool| {
-            setups.fetch_add(1, Ordering::Relaxed);
+            // Reopening the provider after a speculative error must not introduce an
+            // unindexed setup failure that overtakes the remaining transaction slots.
+            if setups.fetch_add(1, Ordering::Relaxed) != 0 {
+                return Err(BalExecutionError::Provider(
+                    reth_errors::ProviderError::HeaderNotFound(B256::ZERO.into()),
+                ));
+            }
             Ok(pre_block_db.clone())
         };
         let (tx_tx, tx_rx) = crossbeam_channel::unbounded();
@@ -1164,8 +1171,6 @@ mod tests {
                 evm_config.context_for_block(&block).unwrap(),
             );
         });
-        assert_eq!(setups.load(Ordering::Relaxed), 2);
-
         let mut outputs = ordered_worker_outputs(&result_rx, 3);
         let output = outputs.next().unwrap().unwrap();
         assert_eq!(output.index, 0);
@@ -1195,6 +1200,7 @@ mod tests {
             BalExecutionError::Execution(BlockExecutionError::Validation(_))
         ));
         assert!(outputs.next().is_none());
+        assert_eq!(setups.load(Ordering::Relaxed), 1);
     }
 
     #[test]
