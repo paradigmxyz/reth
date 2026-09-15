@@ -16,12 +16,13 @@ use crate::{
     invalid_block_hook::InvalidBlockHookExt, txpool_prewarm, ConfigureEngineEvm,
     ConsensusEngineEvent, ConsensusEngineHandle,
 };
+use alloy_consensus::BlockHeader;
 use alloy_rpc_types::engine::ClientVersionV1;
 use alloy_rpc_types_engine::ExecutionData;
 use futures::StreamExt;
 use jsonrpsee::RpcModule;
 use parking_lot::Mutex;
-use reth_chain_state::CanonStateSubscriptions;
+use reth_chain_state::{CanonStateNotificationStream, CanonStateSubscriptions};
 use reth_chainspec::{ChainSpecProvider, EthChainSpec, EthereumHardforks, Hardforks};
 use reth_node_api::{
     AddOnsContext, BlockTy, EngineApiValidator, EngineTypes, FullNodeComponents, FullNodeTypes,
@@ -33,6 +34,7 @@ use reth_node_core::{
     version::{version_metadata, CLIENT_CODE},
 };
 use reth_payload_builder::{PayloadBuilderHandle, PayloadStore};
+use reth_primitives_traits::NodePrimitives;
 use reth_rpc::{
     eth::{core::EthRpcConverterFor, DevSigner, EthApiTypes, FullEthApiServer},
     AdminApi,
@@ -1170,22 +1172,8 @@ where
         };
         let eth_api = eth_api_builder.build_eth_api(ctx).await?;
 
-        if let Some(mut events) = prewarm_bals {
-            let eth_api = eth_api.clone();
-            node.task_executor().spawn_task(async move {
-                while let Some(event) = events.next().await {
-                    for block in event.committed().blocks_iter() {
-                        if let Err(err) = eth_api.get_block_access_list(block.hash().into()).await {
-                            debug!(
-                                target: "reth::cli",
-                                %err,
-                                block_hash = ?block.hash(),
-                                "Failed to prewarm BAL for canonical block",
-                            );
-                        }
-                    }
-                }
-            });
+        if let Some(events) = prewarm_bals {
+            node.task_executor().spawn_task(prewarm_new_block_bals_task(eth_api.clone(), events));
         }
 
         let auth_config = config.rpc.auth_server_config(jwt_secret)?;
@@ -1681,4 +1669,27 @@ impl Default for EngineShutdown {
 pub struct EngineShutdownRequest {
     /// Channel to signal shutdown completion.
     pub done_tx: oneshot::Sender<()>,
+}
+
+/// Prewarms BALs until a canonical block includes a BAL hash.
+async fn prewarm_new_block_bals_task<EthApi: GetBlockAccessList, N: NodePrimitives>(
+    eth_api: EthApi,
+    mut events: CanonStateNotificationStream<N>,
+) {
+    while let Some(event) = events.next().await {
+        for block in event.committed().blocks_iter() {
+            if block.block_access_list_hash().is_some() {
+                return;
+            }
+
+            if let Err(err) = eth_api.get_block_access_list(block.hash().into()).await {
+                debug!(
+                    target: "reth::cli",
+                    %err,
+                    block_hash = ?block.hash(),
+                    "Failed to prewarm BAL for canonical block",
+                );
+            }
+        }
+    }
 }
