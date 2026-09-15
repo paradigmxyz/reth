@@ -210,15 +210,15 @@ impl ArenaSparseSubtrie {
                 continue;
             };
 
-            let parent_new_idx = frame.new_idx;
-            let mut child_path = frame.branch_logical_path;
-            child_path.push(nibble);
-
             let Some(old_child_idx) = child.revealed_index() else {
                 // A blinded child needs no rewrite, its slot survived the adoption.
                 marks.mark(child);
                 continue;
             };
+
+            let parent_new_idx = frame.new_idx;
+            let mut child_path = frame.branch_logical_path;
+            child_path.push(nibble);
 
             let child_epoch = self.arena[old_child_idx]
                 .state_ref()

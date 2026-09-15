@@ -114,7 +114,7 @@ impl NodeArena {
             .map(|(idx, node)| (Index(idx as u32), node))
     }
 
-    /// Stores the RLP of an unrevealed child and returns the child slot referencing it.
+    /// Stores the RLP of an unrevealed child and returns a [`BranchChild`] referencing it.
     pub(super) fn insert_blinded(&mut self, rlp: RlpNode) -> BranchChild {
         let slot = if let Some(slot) = self.blinded_free.pop() {
             self.blinded[slot as usize] = rlp;
