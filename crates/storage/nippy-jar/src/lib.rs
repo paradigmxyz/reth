@@ -12,12 +12,11 @@
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 #![cfg_attr(docsrs, feature(doc_cfg))]
 
-use memmap2::Mmap;
+use reth_fs_util::DirectFile;
 use serde::{Deserialize, Serialize};
 use smallvec::SmallVec;
 use std::{
     error::Error as StdError,
-    fs::File,
     io::{self, Read, Write},
     ops::Range,
     path::{Path, PathBuf},
@@ -63,8 +62,7 @@ pub const CONFIG_FILE_EXTENSION: &str = "conf";
 /// The file extension used for changeset offset sidecar files.
 pub const CHANGESET_OFFSETS_FILE_EXTENSION: &str = "csoff";
 
-/// A [`RefRow`] is a list of column value slices pointing to either an internal buffer or a
-/// memory-mapped file.
+/// A [`RefRow`] is a list of column value slices pointing to a cursor-owned buffer.
 ///
 /// The inline capacity covers every segment used by reth (at most three columns), so reading a row
 /// does not allocate.
@@ -88,7 +86,7 @@ impl<T> NippyJarHeader for T where
 /// `NippyJar` is a specialized storage format designed for immutable data.
 ///
 /// Data is organized into a columnar format, enabling column-based compression. Data retrieval
-/// entails consulting an offset list and fetching the data from file via `mmap`.
+/// entails consulting an offset list and fetching the data with cache-bypassing positional reads.
 #[derive(Serialize, Deserialize)]
 #[cfg_attr(test, derive(PartialEq))]
 pub struct NippyJar<H = ()> {
@@ -205,7 +203,7 @@ impl<H: NippyJarHeader> NippyJar<H> {
     pub fn load(path: &Path) -> Result<Self, NippyJarError> {
         // Read [`Self`] located at the data file.
         let config_path = path.with_extension(CONFIG_FILE_EXTENSION);
-        let config_file = File::open(&config_path)
+        let config_file = DirectFile::open(&config_path, false, false)
             .inspect_err(|e| {
                 warn!(?path, %e, "Failed to load static file jar");
             })
@@ -278,7 +276,13 @@ impl<H: NippyJarHeader> NippyJar<H> {
 
     /// Writes all necessary configuration to file.
     fn freeze_config(&self) -> Result<(), NippyJarError> {
-        Ok(reth_fs_util::atomic_write_file(&self.config_path(), |file| self.save_to_writer(file))?)
+        Ok(reth_fs_util::atomic_write_file(&self.config_path(), |file| {
+            // Serialize once so an empty, write-only temporary file needs no tail reads.
+            let data = bincode::serialize(self)?;
+            let mut file = DirectFile::from_file(file.try_clone()?)?;
+            file.write_all(&data)?;
+            Ok::<_, NippyJarError>(())
+        })?)
     }
 }
 
@@ -340,20 +344,13 @@ impl<H: NippyJarHeader> NippyJar<H> {
     }
 }
 
-/// Manages the reading of static file data using memory-mapped files.
-///
-/// Holds file and mmap descriptors of the data and offsets files of a `static_file`.
+/// Reads static file data and offsets without populating the kernel data cache where supported.
 #[derive(Debug)]
 pub struct DataReader {
-    /// Data file descriptor. Needs to be kept alive as long as `data_mmap` handle.
-    #[expect(dead_code)]
-    data_file: File,
-    /// Mmap handle for data.
-    data_mmap: Mmap,
-    /// Offset file descriptor. Needs to be kept alive as long as `offset_mmap` handle.
-    offset_file: File,
-    /// Mmap handle for offsets.
-    offset_mmap: Mmap,
+    data_file: DirectFile,
+    offset_file: DirectFile,
+    data_len: usize,
+    offsets_len: usize,
     /// Number of bytes that represent one offset.
     offset_size: u8,
 }
@@ -361,16 +358,14 @@ pub struct DataReader {
 impl DataReader {
     /// Reads the respective data and offsets file and returns [`DataReader`].
     pub fn new(path: impl AsRef<Path>) -> Result<Self, NippyJarError> {
-        let data_file = File::open(path.as_ref())?;
-        // SAFETY: File is read-only and its descriptor is kept alive as long as the mmap handle.
-        let data_mmap = unsafe { Mmap::map(&data_file)? };
-
-        let offset_file = File::open(path.as_ref().with_extension(OFFSETS_FILE_EXTENSION))?;
-        // SAFETY: File is read-only and its descriptor is kept alive as long as the mmap handle.
-        let offset_mmap = unsafe { Mmap::map(&offset_file)? };
-
-        // First byte is the size of one offset in bytes
-        let offset_size = offset_mmap[0];
+        let data_file = DirectFile::open(path.as_ref(), false, false)?;
+        let offset_file =
+            DirectFile::open(path.as_ref().with_extension(OFFSETS_FILE_EXTENSION), false, false)?;
+        let data_len = data_file.metadata()?.len() as usize;
+        let offsets_len = offset_file.metadata()?.len() as usize;
+        let mut header = [0];
+        offset_file.read_exact_at(&mut header, 0)?;
+        let offset_size = header[0];
 
         // Ensure that the size of an offset is at most 8 bytes.
         if offset_size > 8 {
@@ -379,7 +374,7 @@ impl DataReader {
             return Err(NippyJarError::OffsetSizeTooSmall { offset_size })
         }
 
-        Ok(Self { data_file, data_mmap, offset_file, offset_size, offset_mmap })
+        Ok(Self { data_file, offset_file, offset_size, data_len, offsets_len })
     }
 
     /// Returns the offset for the requested data index
@@ -415,11 +410,11 @@ impl DataReader {
         let mut buffer: [u8; 8] = [0; 8];
 
         let offset_end = index.saturating_add(self.offset_size as usize);
-        if offset_end > self.offset_mmap.len() {
+        if offset_end > self.offsets_len {
             return Err(NippyJarError::OffsetOutOfBounds { index })
         }
 
-        buffer[..self.offset_size as usize].copy_from_slice(&self.offset_mmap[index..offset_end]);
+        self.offset_file.read_exact_at(&mut buffer[..self.offset_size as usize], index as u64)?;
         Ok(u64::from_le_bytes(buffer))
     }
 
@@ -428,19 +423,33 @@ impl DataReader {
         self.offset_size
     }
 
-    /// Returns the underlying data as a slice of bytes for the provided range.
-    pub fn data(&self, range: Range<usize>) -> &[u8] {
-        &self.data_mmap[range]
+    /// Appends the requested data range to a caller-owned buffer.
+    pub fn read_data(
+        &self,
+        range: Range<usize>,
+        buffer: &mut Vec<u8>,
+    ) -> Result<(), NippyJarError> {
+        if range.start > range.end || range.end > self.data_len {
+            return Err(io::Error::new(
+                io::ErrorKind::UnexpectedEof,
+                "static file data range out of bounds",
+            )
+            .into());
+        }
+        let start = buffer.len();
+        buffer.resize(start + range.len(), 0);
+        self.data_file.read_exact_at(&mut buffer[start..], range.start as u64)?;
+        Ok(())
     }
 
     /// Returns total size of data file.
     pub fn size(&self) -> usize {
-        self.data_mmap.len()
+        self.data_len
     }
 
     /// Returns total size of offsets file.
     pub fn offsets_size(&self) -> usize {
-        self.offset_mmap.len()
+        self.offsets_len
     }
 }
 
@@ -449,7 +458,10 @@ mod tests {
     use super::*;
     use compression::Compression;
     use rand::{rngs::SmallRng, seq::SliceRandom, RngCore, SeedableRng};
-    use std::{fs::OpenOptions, io::Read};
+    use std::{
+        fs::{File, OpenOptions},
+        io::Read,
+    };
 
     type ColumnResults<T> = Vec<ColumnResult<T>>;
     type ColumnValues = Vec<Vec<u8>>;

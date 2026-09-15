@@ -12,7 +12,7 @@ use zstd::bulk::Decompressor;
 /// internal buffer mutably while filling it.
 ///
 /// [`read_value`]: NippyJarCursor::read_value
-type ValueRanges = SmallVec<[ValueRange; 4]>;
+type ValueRanges = SmallVec<[Range<usize>; 4]>;
 
 /// Simple cursor implementation to retrieve data from [`NippyJar`].
 #[derive(Clone)]
@@ -21,9 +21,10 @@ pub struct NippyJarCursor<'a, H = ()> {
     jar: &'a NippyJar<H>,
     /// Data and offset reader.
     reader: Arc<DataReader>,
-    /// Internal buffer to unload data to without reallocating memory on each retrieval. Only
-    /// compressed jars decompress into it, so it is sized on first use.
+    /// Cursor-owned row data, reused across reads.
     internal_buffer: Vec<u8>,
+    /// Scratch buffer for compressed input.
+    compressed_buffer: Vec<u8>,
     /// Cursor row position.
     row: u64,
 }
@@ -41,6 +42,7 @@ impl<'a, H: NippyJarHeader> NippyJarCursor<'a, H> {
             jar,
             reader: Arc::new(jar.open_data_reader()?),
             internal_buffer: Vec::new(),
+            compressed_buffer: Vec::new(),
             row: 0,
         })
     }
@@ -51,7 +53,7 @@ impl<'a, H: NippyJarHeader> NippyJarCursor<'a, H> {
         jar: &'a NippyJar<H>,
         reader: Arc<DataReader>,
     ) -> Result<Self, NippyJarError> {
-        Ok(Self { jar, reader, internal_buffer: Vec::new(), row: 0 })
+        Ok(Self { jar, reader, internal_buffer: Vec::new(), compressed_buffer: Vec::new(), row: 0 })
     }
 
     /// Returns a reference to the related [`NippyJar`]
@@ -93,14 +95,7 @@ impl<'a, H: NippyJarHeader> NippyJarCursor<'a, H> {
 
         self.row += 1;
 
-        Ok(Some(
-            row.into_iter()
-                .map(|v| match v {
-                    ValueRange::Mmap(range) => self.reader.data(range),
-                    ValueRange::Internal(range) => &self.internal_buffer[range],
-                })
-                .collect(),
-        ))
+        Ok(Some(row.into_iter().map(|range| &self.internal_buffer[range]).collect()))
     }
 
     /// Returns a row by its number by using a `mask` to only read certain columns from the row.
@@ -134,14 +129,7 @@ impl<'a, H: NippyJarHeader> NippyJarCursor<'a, H> {
         }
         self.row += 1;
 
-        Ok(Some(
-            row.into_iter()
-                .map(|v| match v {
-                    ValueRange::Mmap(range) => self.reader.data(range),
-                    ValueRange::Internal(range) => &self.internal_buffer[range],
-                })
-                .collect(),
-        ))
+        Ok(Some(row.into_iter().map(|range| &self.internal_buffer[range]).collect()))
     }
 
     /// Takes the column index and reads the range value for the corresponding column.
@@ -158,14 +146,16 @@ impl<'a, H: NippyJarHeader> NippyJarCursor<'a, H> {
             value_offset..next_value_offset
         };
 
+        let from = self.internal_buffer.len();
         if let Some(compression) = self.jar.compressor() {
+            self.compressed_buffer.clear();
+            self.reader.read_data(column_offset_range, &mut self.compressed_buffer)?;
             // The decompressors write into the spare capacity of the buffer, so it has to fit any
             // row of data. The buffer is only cleared between rows, so this reserves once.
             if self.internal_buffer.capacity() < self.jar.max_row_size {
                 self.internal_buffer.reserve(self.jar.max_row_size - self.internal_buffer.len());
             }
 
-            let from = self.internal_buffer.len();
             match compression {
                 Compressors::Zstd(z) if z.use_dict => {
                     // If we are here, then for sure we have the necessary dictionaries and they're
@@ -177,34 +167,22 @@ impl<'a, H: NippyJarHeader> NippyJarCursor<'a, H> {
                         .expect("dictionary to be loaded");
                     let mut decompressor = Decompressor::with_prepared_dictionary(dictionaries)?;
                     Zstd::decompress_with_dictionary(
-                        self.reader.data(column_offset_range),
+                        &self.compressed_buffer,
                         &mut self.internal_buffer,
                         &mut decompressor,
                     )?;
                 }
                 _ => {
                     // Uses the chosen default decompressor
-                    compression.decompress_to(
-                        self.reader.data(column_offset_range),
-                        &mut self.internal_buffer,
-                    )?;
+                    compression
+                        .decompress_to(&self.compressed_buffer, &mut self.internal_buffer)?;
                 }
             }
-            let to = self.internal_buffer.len();
-
-            row.push(ValueRange::Internal(from..to));
         } else {
-            // Not compressed
-            row.push(ValueRange::Mmap(column_offset_range));
+            self.reader.read_data(column_offset_range, &mut self.internal_buffer)?;
         }
 
+        row.push(from..self.internal_buffer.len());
         Ok(())
     }
-}
-
-/// Helper type that stores the range of the decompressed column value either on a `mmap` slice or
-/// on the internal buffer.
-enum ValueRange {
-    Mmap(Range<usize>),
-    Internal(Range<usize>),
 }

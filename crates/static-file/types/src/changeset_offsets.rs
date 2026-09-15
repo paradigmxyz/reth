@@ -4,17 +4,16 @@
 //! The file format is fixed-width 16-byte records: `[offset: u64 LE][num_changes: u64 LE]`.
 
 use crate::ChangesetOffset;
+use reth_fs_util::DirectFile;
 use std::{
-    fs::{File, OpenOptions},
-    io::{self, Write},
-    os::unix::fs::FileExt,
+    io::{self, Seek, SeekFrom, Write},
     path::Path,
 };
 
 /// Writer for appending changeset offsets to a sidecar file.
 #[derive(Debug)]
 pub struct ChangesetOffsetWriter {
-    file: File,
+    file: DirectFile,
     /// Number of records written.
     records_written: u64,
 }
@@ -33,12 +32,7 @@ impl ChangesetOffsetWriter {
     ///
     /// This mirrors `NippyJar`'s healing behavior where config/header is the commit boundary.
     pub fn new(path: impl AsRef<Path>, committed_len: u64) -> io::Result<Self> {
-        let file = OpenOptions::new()
-            .create(true)
-            .truncate(false)
-            .read(true)
-            .write(true)
-            .open(path.as_ref())?;
+        let mut file = DirectFile::open(path.as_ref(), true, true)?;
 
         let file_len = file.metadata()?.len();
         let remainder = file_len % Self::RECORD_SIZE as u64;
@@ -104,7 +98,7 @@ impl ChangesetOffsetWriter {
         }
 
         let records_written = committed_len;
-        let file = OpenOptions::new().create(true).append(true).open(path)?;
+        file.seek(SeekFrom::End(0))?;
 
         Ok(Self { file, records_written })
     }
@@ -139,6 +133,7 @@ impl ChangesetOffsetWriter {
     /// resurrect the old file length.
     pub fn truncate(&mut self, len: u64) -> io::Result<()> {
         self.file.set_len(len * Self::RECORD_SIZE as u64)?;
+        self.file.seek(SeekFrom::End(0))?;
         self.file.sync_all()?;
         self.records_written = len;
         Ok(())
@@ -158,7 +153,7 @@ impl ChangesetOffsetWriter {
 /// Reader for changeset offsets with O(1) random access.
 #[derive(Debug)]
 pub struct ChangesetOffsetReader {
-    file: File,
+    file: DirectFile,
     /// Cached file length in records.
     len: u64,
 }
@@ -172,7 +167,7 @@ impl ChangesetOffsetReader {
     /// The `len` parameter (from header metadata) bounds the reader - any records
     /// beyond this length are ignored. This ensures we only read committed data.
     pub fn new(path: impl AsRef<Path>, len: u64) -> io::Result<Self> {
-        let file = File::open(path)?;
+        let file = DirectFile::open(path, false, false)?;
         Ok(Self { file, len })
     }
 

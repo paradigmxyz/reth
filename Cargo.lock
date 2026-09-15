@@ -9192,8 +9192,10 @@ dependencies = [
 name = "reth-fs-util"
 version = "2.5.2"
 dependencies = [
+ "libc",
  "serde",
  "serde_json",
+ "tempfile",
  "thiserror 2.0.20",
 ]
 
@@ -9466,7 +9468,6 @@ dependencies = [
  "bincode",
  "derive_more",
  "lz4_flex",
- "memmap2",
  "rand 0.9.4",
  "reth-fs-util",
  "serde",
@@ -10585,6 +10586,7 @@ dependencies = [
  "derive_more",
  "fixed-map",
  "insta",
+ "reth-fs-util",
  "reth-nippy-jar",
  "reth-stages-types",
  "serde",

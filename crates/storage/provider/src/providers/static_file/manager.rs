@@ -452,7 +452,7 @@ impl<N: NodePrimitives> StaticFileProviderInner<N> {
 impl<N: NodePrimitives> StaticFileProvider<N> {
     /// Reports metrics for the static files.
     ///
-    /// This uses the in-memory index to get file sizes from mmap handles instead of reading
+    /// This uses the in-memory index to get file sizes from reader handles instead of reading
     /// filesystem metadata.
     pub fn report_metrics(&self) -> ProviderResult<()> {
         let Some(metrics) = &self.metrics else { return Ok(()) };

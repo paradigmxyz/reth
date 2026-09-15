@@ -12,6 +12,7 @@ description = "Commonly used types for static file usage in reth."
 workspace = true
 
 [dependencies]
+reth-fs-util = { workspace = true, optional = true }
 alloy-primitives.workspace = true
 tracing = { workspace = true, optional = true }
 
@@ -31,6 +32,7 @@ tempfile.workspace = true
 [features]
 default = ["std"]
 std = [
+    "dep:reth-fs-util",
     "alloy-primitives/std",
     "derive_more/std",
     "reth-stages-types/std",

@@ -24,11 +24,11 @@ use std::{io, ops::Deref, sync::Arc};
 type LoadedJarRef<'a> =
     reth_primitives_traits::dashmap::mapref::one::Ref<'a, (u64, StaticFileSegment), LoadedJar>;
 
-/// Helper type to reuse an associated static file mmap handle on created cursors.
+/// Helper type to reuse an associated static file reader handle on created cursors.
 #[derive(Debug)]
 pub struct LoadedJar {
     jar: NippyJar<SegmentHeader>,
-    mmap_handle: Arc<reth_nippy_jar::DataReader>,
+    data_reader: Arc<reth_nippy_jar::DataReader>,
     csoff_reader: Option<ChangesetOffsetReader>,
 }
 
@@ -36,7 +36,7 @@ impl LoadedJar {
     fn new(jar: NippyJar<SegmentHeader>) -> ProviderResult<Self> {
         match jar.open_data_reader() {
             Ok(data_reader) => {
-                let mmap_handle = Arc::new(data_reader);
+                let data_reader = Arc::new(data_reader);
 
                 let csoff_reader = if jar.user_header().segment().is_change_based() {
                     let csoff_path = jar.data_path().with_extension("csoff");
@@ -50,24 +50,24 @@ impl LoadedJar {
                     None
                 };
 
-                Ok(Self { jar, mmap_handle, csoff_reader })
+                Ok(Self { jar, data_reader, csoff_reader })
             }
             Err(e) => Err(ProviderError::other(e)),
         }
     }
 
-    /// Returns a clone of the mmap handle that can be used to instantiate a cursor.
-    fn mmap_handle(&self) -> Arc<reth_nippy_jar::DataReader> {
-        self.mmap_handle.clone()
+    /// Returns a clone of the reader handle that can be used to instantiate a cursor.
+    fn data_reader(&self) -> Arc<reth_nippy_jar::DataReader> {
+        self.data_reader.clone()
     }
 
     const fn segment(&self) -> StaticFileSegment {
         self.jar.user_header().segment()
     }
 
-    /// Returns the total size of the data and offsets files (from the in-memory mmap).
+    /// Returns the total size of the data and offsets files (from the cached metadata).
     fn size(&self) -> usize {
-        self.mmap_handle.size() + self.mmap_handle.offsets_size()
+        self.data_reader.size() + self.data_reader.offsets_size()
     }
 
     /// Returns a reference to the cached changeset offset reader.

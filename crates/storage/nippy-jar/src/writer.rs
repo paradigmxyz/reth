@@ -2,8 +2,8 @@ use crate::{
     compression::Compression, ColumnResult, NippyJar, NippyJarChecker, NippyJarError,
     NippyJarHeader,
 };
+use reth_fs_util::DirectFile;
 use std::{
-    fs::{File, OpenOptions},
     io::{BufWriter, Read, Seek, SeekFrom, Write},
     path::Path,
 };
@@ -30,9 +30,9 @@ pub struct NippyJarWriter<H: NippyJarHeader = ()> {
     /// handling.
     jar: NippyJar<H>,
     /// File handle to where the data is stored.
-    data_file: BufWriter<File>,
+    data_file: BufWriter<DirectFile>,
     /// File handle to where the offsets are stored.
-    offsets_file: BufWriter<File>,
+    offsets_file: BufWriter<DirectFile>,
     /// Temporary buffer to reuse when compressing data.
     tmp_buf: Vec<u8>,
     /// Used to find the maximum uncompressed size of a row in a jar.
@@ -126,23 +126,21 @@ impl<H: NippyJarHeader> NippyJarWriter<H> {
     fn create_or_open_files(
         data: &Path,
         offsets: &Path,
-    ) -> Result<(File, File, bool), NippyJarError> {
+    ) -> Result<(DirectFile, DirectFile, bool), NippyJarError> {
         let is_created = !data.exists() || !offsets.exists();
 
         if !data.exists() {
-            // File::create is write-only (no reading possible)
-            File::create(data)?;
+            DirectFile::open(data, true, true)?;
         }
 
-        let mut data_file = OpenOptions::new().read(true).write(true).open(data)?;
+        let mut data_file = DirectFile::open(data, true, false)?;
         data_file.seek(SeekFrom::End(0))?;
 
         if !offsets.exists() {
-            // File::create is write-only (no reading possible)
-            File::create(offsets)?;
+            DirectFile::open(offsets, true, true)?;
         }
 
-        let mut offsets_file = OpenOptions::new().read(true).write(true).open(offsets)?;
+        let mut offsets_file = DirectFile::open(offsets, true, false)?;
         if is_created {
             let mut buf = Vec::with_capacity(1 + OFFSET_SIZE_BYTES as usize);
 
@@ -307,7 +305,7 @@ impl<H: NippyJarHeader> NippyJarWriter<H> {
                         .seek(SeekFrom::Start(new_len.saturating_sub(OFFSET_SIZE_BYTES as u64)))?;
                     // Read the last offset value
                     let mut last_offset = [0u8; OFFSET_SIZE_BYTES as usize];
-                    self.offsets_file.get_ref().read_exact(&mut last_offset)?;
+                    self.offsets_file.get_mut().read_exact(&mut last_offset)?;
                     let last_offset = u64::from_le_bytes(last_offset);
 
                     // Update the lengths of both the offsets and data files
@@ -415,7 +413,7 @@ impl<H: NippyJarHeader> NippyJarWriter<H> {
         let mut last_offset_ondisk = if self.offsets_file.get_ref().metadata()?.len() > 1 {
             self.offsets_file.seek(SeekFrom::End(-(OFFSET_SIZE_BYTES as i64)))?;
             let mut buf = [0u8; OFFSET_SIZE_BYTES as usize];
-            self.offsets_file.get_ref().read_exact(&mut buf)?;
+            self.offsets_file.get_mut().read_exact(&mut buf)?;
             Some(u64::from_le_bytes(buf))
         } else {
             None
@@ -475,7 +473,7 @@ impl<H: NippyJarHeader> NippyJarWriter<H> {
 
     /// Returns a mutable reference to the buffered writer for the data file.
     #[cfg(any(test, feature = "test-utils"))]
-    pub const fn data_file(&mut self) -> &mut BufWriter<File> {
+    pub const fn data_file(&mut self) -> &mut BufWriter<DirectFile> {
         &mut self.data_file
     }
 

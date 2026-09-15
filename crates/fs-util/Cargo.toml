@@ -16,3 +16,9 @@ workspace = true
 serde_json = { workspace = true, features = ["std"] }
 serde.workspace = true
 thiserror.workspace = true
+
+[target.'cfg(unix)'.dependencies]
+libc.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
