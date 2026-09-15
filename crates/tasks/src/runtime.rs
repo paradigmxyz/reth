@@ -972,7 +972,10 @@ impl RuntimeBuilder {
 
             let blocking_guard = BlockingTaskGuard::new(config.rayon.max_blocking_tasks);
 
-            let default_proof_worker_threads = default_threads * 2;
+            // `cpu_threads` may be zero, which rayon resolves to the automatic count when the
+            // cpu pool is built; size the proof pools from that resolved count so a zero never
+            // reaches the per-block worker budget.
+            let default_proof_worker_threads = cpu_pool.current_num_threads() * 2;
 
             let (proof_storage_worker_threads, proof_storage_overflow_worker_threads) =
                 split_proof_worker_threads(
@@ -1129,6 +1132,27 @@ mod tests {
         let config = RayonConfig::default();
         let count = config.default_thread_count();
         assert!(count >= 1);
+    }
+
+    #[cfg(feature = "rayon")]
+    #[test]
+    fn zero_cpu_threads_still_size_the_proof_pools() {
+        let rt = TokioRuntime::new().unwrap();
+        let mut config =
+            Runtime::test_config().with_tokio(TokioConfig::existing_handle(rt.handle().clone()));
+        config.rayon.cpu_threads = Some(0);
+        config.rayon.proof_storage_worker_threads = None;
+        config.rayon.proof_account_worker_threads = None;
+        let runtime = RuntimeBuilder::new(config).build().unwrap();
+
+        let resolved = runtime.cpu_pool().current_num_threads();
+        assert!(resolved >= 1);
+        assert_eq!(runtime.proof_storage_worker_pool().num_threads(), resolved * 2);
+        assert_eq!(runtime.proof_account_worker_pool().num_threads(), resolved * 2);
+        assert_eq!(
+            runtime.proof_storage_overflow_worker_pool().map(WorkerPool::num_threads),
+            Some(resolved * 2)
+        );
     }
 
     #[cfg(feature = "rayon")]
