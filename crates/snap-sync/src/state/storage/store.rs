@@ -14,10 +14,7 @@ use reth_storage_api::{DBProvider, MetadataProvider, MetadataWriter, SnapAttempt
 use reth_trie_common::{root::storage_root, HashedPostState, HashedStorage, EMPTY_ROOT_HASH};
 use serde::{Deserialize, Serialize};
 
-/// Persistence for contract storage downloaded ahead of its account range.
-///
-/// Blanket-implemented over the node's writers, so slots and progress join the caller's
-/// transaction and commit together or not at all.
+/// Persists contract storage and progress together in the caller's transaction.
 pub trait SnapStorageStore {
     /// Returns how far the storage of the range requested from `origin` is persisted.
     fn storage_progress(
@@ -26,10 +23,7 @@ pub trait SnapStorageStore {
         origin: B256,
     ) -> Result<StorageProgress, SnapSyncError>;
 
-    /// Persists `chunk` for the range requested from `origin`, where the coverage must continue.
-    ///
-    /// A contract starts at the zero slot, dropping whatever an earlier attempt left for it, and
-    /// otherwise continues only where its last chunk ended.
+    /// Starts storage at the zero slot or continues its last chunk, committing slots with progress.
     fn commit_storage_chunk(
         &self,
         write: SnapWrite,
@@ -68,9 +62,7 @@ impl StorageChunk {
     }
 }
 
-/// How far the contracts of the account range being downloaded have their storage persisted.
-///
-/// Contracts complete in key order, so only one is ever part way through.
+/// Storage progress in contract key order, with at most one partially downloaded contract.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct StorageProgress {
     // Contracts up to this key have all their storage persisted.

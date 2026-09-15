@@ -22,9 +22,8 @@ pub struct BalStateUpdate {
 }
 
 impl BalStateUpdate {
-    /// Applies `bal` on top of the downloaded state, resolved by hashed address through `base`.
-    ///
-    /// The list must already be verified against its header.
+    /// Applies a header-verified `bal` to downloaded state resolved by hashed address through
+    /// `base`.
     pub fn from_block_access_list(
         bal: &[AccountChanges],
         mut base: impl FnMut(B256) -> Result<DownloadedAccount, SnapSyncError>,

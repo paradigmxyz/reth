@@ -237,6 +237,11 @@ Networking:
 
           [default: 200]
 
+      --snap.v2
+          Enable experimental snap/2 (EIP-8189) advertisement and state sync.
+
+          Fresh databases bootstrap from a post-Amsterdam pivot. Databases with existing execution progress continue using the staged pipeline.
+
       --trusted-peers <TRUSTED_PEERS>
           Comma separated enode URLs or ENRs of trusted peers for P2P connections.
 

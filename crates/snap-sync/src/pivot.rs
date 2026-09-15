@@ -1,14 +1,6 @@
-//! Chooses the canonical block a snap generation is anchored to.
-//!
-//! [EIP-8189](https://eips.ethereum.org/EIPS/eip-8189#synchronization-algorithm) pivot selection
-//! anchors synchronization at a block "sufficiently behind the chain head [...] to reduce the
-//! likelihood of P being reorged while remaining recent enough that serving peers still hold its
-//! state in memory". Those two pressures are what this policy balances: too close to the head and
-//! the anchor is reorged, too far and no peer will serve its state.
-//!
-//! Two choices depart from the EIP's example: a finalized block is preferred as the anchor when one
-//! is available, and re-anchoring starts once a pivot lags by 96 blocks rather than at the edge of
-//! the window peers still serve state for.
+//! Selects a canonical pivot recent enough for peers to serve and deep enough to limit reorgs.
+//! Prefers a recent finalized block, otherwise uses the configured head distance.
+//! Re-anchoring starts before the pivot leaves the served history window.
 
 use crate::{SnapGeneration, SnapPhase, SnapSyncError};
 use alloy_eip7928::BAL_RETENTION_PERIOD_SLOTS;
@@ -60,19 +52,13 @@ impl SnapPivotPolicy {
         self
     }
 
-    /// Returns this policy assuming `history` blocks of block access lists remain servable.
-    ///
-    /// Defaults to the full EIP-7928 retention period, since applying lists beats downloading the
-    /// state again.
+    /// Sets the servable BAL history, defaulting to the full EIP-7928 retention period.
     pub const fn with_history(mut self, history: u64) -> Self {
         self.history = history;
         self
     }
 
-    /// Returns the block a pivot anchored under `head` targets.
-    ///
-    /// Prefers a finalized block that peers still serve state for, since it cannot be reorged, and
-    /// falls back to the head distance.
+    /// Selects a recent finalized pivot, falling back to the configured head distance.
     pub const fn pivot_block(&self, head: u64, finalized: Option<u64>) -> Option<u64> {
         if let Some(finalized) = finalized &&
             head.saturating_sub(finalized) <= self.advance_after
@@ -82,25 +68,19 @@ impl SnapPivotPolicy {
         head.checked_sub(self.head_distance)
     }
 
-    /// Returns whether `generation` should be re-anchored under `head`.
-    ///
-    /// Advancing stays far cheaper than restarting, so this triggers well before peers stop
-    /// serving the old root.
+    /// Returns whether the pivot should advance before peers stop serving its root.
     pub const fn needs_advance(&self, generation: SnapGeneration, head: u64) -> bool {
         generation.lag(head) > self.advance_after
     }
 
-    /// Returns whether the block access lists `generation` still needs remain servable.
-    ///
-    /// Once they are not, its state cannot be carried forward and the attempt has to restart.
+    /// Returns whether the required BAL history remains servable; otherwise the attempt must
+    /// restart.
     pub const fn is_catchable(&self, generation: SnapGeneration, head: u64) -> bool {
         generation.lag(head) <= self.history
     }
 
-    /// Returns a fresh generation for the canonical pivot under `head`.
-    ///
-    /// A candidate that is not eligible falls back to the head distance; `None` means no candidate
-    /// can anchor a sync yet.
+    /// Selects a canonical generation, falling back to head distance; `None` means no eligible
+    /// pivot.
     pub fn select(
         &self,
         provider: &impl HeaderProvider,
@@ -119,9 +99,8 @@ impl SnapPivotPolicy {
         Ok(None)
     }
 
-    /// Returns whether an interrupted generation is still worth finishing under `head`.
-    ///
-    /// A fully downloaded generation only needs its trie rebuilt, so it always is.
+    /// Returns whether interrupted work is worth resuming; completed state only needs trie
+    /// rebuilding.
     pub const fn is_finishable(&self, generation: SnapGeneration, head: u64) -> bool {
         matches!(generation.phase(), SnapPhase::Trie) || self.is_catchable(generation, head)
     }

@@ -11,14 +11,13 @@ use futures::future::{ready, Ready};
 use reth_db_api::{cursor::DbDupCursorRO, tables, transaction::DbTx};
 use reth_downloaders::snap::{AccountRangeDownloader, AccountRangeOutcome, VerifiedAccountRange};
 use reth_eth_wire_types::snap::{
-    AccountData, AccountRangeMessage, GetAccountRangeMessage, GetBlockAccessListsMessage,
-    GetByteCodesMessage, GetStorageRangesMessage, StorageData, StorageRangesMessage,
+    AccountData, AccountRangeMessage, GetAccountRangeMessage, SnapProtocolMessage, StorageData,
+    StorageRangesMessage,
 };
 use reth_network_p2p::{
     download::DownloadClient,
     error::{PeerRequestResult, RequestError},
-    priority::Priority,
-    snap::client::{SnapClient, SnapResponse},
+    snap::client::{SnapClient, SnapRequestOptions, SnapResponse},
 };
 use reth_network_peers::{PeerId, WithPeerId};
 use reth_provider::{
@@ -38,12 +37,12 @@ use std::{
     sync::{Mutex, MutexGuard},
 };
 
-/// Small bounds keep header fixtures short without changing the policy's decisions.
+// Small bounds keep header fixtures short without changing the policy's decisions.
 pub(crate) fn policy() -> SnapPivotPolicy {
     SnapPivotPolicy::default().with_head_distance(1).with_advance_after(4).with_history(8)
 }
 
-/// A header with a state root distinctive to its number, and a commitment when one is given.
+// A header with a state root distinctive to its number, and a commitment when one is given.
 pub(crate) fn header(
     number: u64,
     parent_hash: B256,
@@ -58,7 +57,7 @@ pub(crate) fn header(
     }
 }
 
-/// Blocks `0..=3`, carrying a block access list commitment from `bal_from` onwards.
+// Blocks `0..=3`, carrying a block access list commitment from `bal_from` onwards.
 pub(crate) fn chain(bal_from: Option<u64>) -> Vec<Header> {
     let mut headers = Vec::new();
     let mut parent = B256::ZERO;
@@ -78,12 +77,12 @@ pub(crate) fn provider_with(headers: impl IntoIterator<Item = Header>) -> MockEt
     provider
 }
 
-/// A generation anchored to `block`, downloading against `state_root`.
+// A generation anchored to `block`, downloading against `state_root`.
 pub(crate) fn generation(block: u64, state_root: B256) -> SnapGeneration {
     SnapGeneration::new(BlockNumHash::new(block, B256::repeat_byte(block as u8)), state_root)
 }
 
-/// A database using the hashed state layout snap writes into.
+// A database using the hashed state layout snap writes into.
 pub(crate) fn hashed_factory() -> ProviderFactory<MockNodeTypesWithDB> {
     let factory = create_test_provider_factory();
     let provider = factory.database_provider_rw().unwrap();
@@ -94,12 +93,12 @@ pub(crate) fn hashed_factory() -> ProviderFactory<MockNodeTypesWithDB> {
     factory
 }
 
-/// A hashed account key in the lowest part of the key space.
+// A hashed account key in the lowest part of the key space.
 pub(crate) fn key(value: u64) -> B256 {
     B256::left_padding_from(&value.to_be_bytes())
 }
 
-/// An account without storage or code, distinguished by its nonce.
+// An account without storage or code, distinguished by its nonce.
 pub(crate) fn account(nonce: u64) -> TrieAccount {
     TrieAccount {
         nonce,
@@ -109,7 +108,7 @@ pub(crate) fn account(nonce: u64) -> TrieAccount {
     }
 }
 
-/// Root of the account trie holding `accounts`.
+// Root of the account trie holding `accounts`.
 pub(crate) fn state_root(accounts: &[(B256, TrieAccount)]) -> B256 {
     state_root_unsorted(accounts.iter().copied())
 }
@@ -142,8 +141,8 @@ fn trie(leaves: impl IntoIterator<Item = (B256, Vec<u8>)>, targets: &[B256]) -> 
     (root, proof)
 }
 
-/// A peer's answer serving `accounts[served]` out of the trie holding `accounts`, proven along
-/// the paths to `proof_targets`. No targets means the whole trie is served without a proof.
+// A peer's answer serving `accounts[served]` out of the trie holding `accounts`, proven along
+// the paths to `proof_targets`. No targets means the whole trie is served without a proof.
 pub(crate) fn account_range(
     request_id: u64,
     accounts: &[(B256, TrieAccount)],
@@ -167,8 +166,8 @@ pub(crate) fn account_range(
     Ok(WithPeerId::new(PeerId::random(), SnapResponse::AccountRange(message)))
 }
 
-/// Runs the same verification production uses on [`account_range`]'s answer to a request from
-/// `origin` through the end of the key space.
+// Runs the same verification production uses on [`account_range`]'s answer to a request from
+// `origin` through the end of the key space.
 pub(crate) fn verified_range(
     accounts: &[(B256, TrieAccount)],
     served: Range<usize>,
@@ -241,7 +240,7 @@ impl ScriptedSnapClient {
         }
     }
 
-    /// Origins of the account range requests sent so far.
+    // Origins of the account range requests sent so far.
     pub(crate) fn origins(&self) -> MutexGuard<'_, Vec<B256>> {
         self.origins.lock().unwrap()
     }
@@ -274,50 +273,21 @@ impl DownloadClient for ScriptedSnapClient {
 impl SnapClient for ScriptedSnapClient {
     type Output = Ready<PeerRequestResult<SnapResponse>>;
 
-    fn get_account_range_with_priority(
+    fn request_snap(
         &self,
-        request: GetAccountRangeMessage,
-        _priority: Priority,
+        request: SnapProtocolMessage,
+        _options: SnapRequestOptions,
     ) -> Self::Output {
-        self.origins.lock().unwrap().push(request.starting_hash);
+        match request {
+            SnapProtocolMessage::GetAccountRange(request) => {
+                self.origins.lock().unwrap().push(request.starting_hash);
+            }
+            SnapProtocolMessage::GetStorageRanges(request) => {
+                let from = request.starting_hash.unwrap_or(B256::ZERO);
+                self.storage_requests.lock().unwrap().push((request.account_hashes, from));
+            }
+            _ => return ready(Err(RequestError::UnsupportedCapability)),
+        }
         self.next_response()
     }
-
-    fn get_storage_ranges(&self, request: GetStorageRangesMessage) -> Self::Output {
-        self.get_storage_ranges_with_priority(request, Priority::Normal)
-    }
-
-    fn get_storage_ranges_with_priority(
-        &self,
-        request: GetStorageRangesMessage,
-        _priority: Priority,
-    ) -> Self::Output {
-        let from = request.starting_hash.unwrap_or(B256::ZERO);
-        self.storage_requests.lock().unwrap().push((request.account_hashes, from));
-        self.next_response()
-    }
-
-    fn get_byte_codes(&self, _request: GetByteCodesMessage) -> Self::Output {
-        unsupported()
-    }
-
-    fn get_byte_codes_with_priority(
-        &self,
-        _request: GetByteCodesMessage,
-        _priority: Priority,
-    ) -> Self::Output {
-        unsupported()
-    }
-
-    fn get_block_access_lists_with_priority(
-        &self,
-        _request: GetBlockAccessListsMessage,
-        _priority: Priority,
-    ) -> Self::Output {
-        unsupported()
-    }
-}
-
-fn unsupported() -> Ready<PeerRequestResult<SnapResponse>> {
-    ready(Err(RequestError::UnsupportedCapability))
 }

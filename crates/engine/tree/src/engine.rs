@@ -87,7 +87,9 @@ where
                         return match ev {
                             HandlerEvent::BackfillAction(target) => {
                                 // bubble up backfill sync request
-                                self.downloader.on_action(DownloadAction::Clear);
+                                if matches!(target, BackfillAction::Start(_)) {
+                                    self.downloader.on_action(DownloadAction::Clear);
+                                }
                                 Poll::Ready(HandlerEvent::BackfillAction(target))
                             }
                             HandlerEvent::Event(ev) => {

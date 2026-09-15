@@ -8,9 +8,7 @@ use reth_storage_api::{MetadataProvider, MetadataWriter};
 use reth_storage_errors::provider::ProviderError;
 use serde::{de::DeserializeOwned, Serialize};
 
-/// A progress record stored as JSON under its own metadata key.
-///
-/// The serialized record carries a `version` field, checked before the rest is decoded.
+/// Versioned JSON progress checked before decoding under its own metadata key.
 pub(crate) trait SnapRecord: Serialize + DeserializeOwned {
     /// Metadata key the record is stored under.
     const KEY: &'static str;

@@ -26,6 +26,7 @@ pub mod test_utils;
 use test_utils::PeersHandleProvider;
 
 pub use alloy_rpc_types_admin::EthProtocolInfo;
+use reth_network_p2p::snap::client::SnapClient;
 pub use reth_network_p2p::{BlockClient, HeadersClient};
 pub use reth_network_types::{PeerKind, Reputation, ReputationChangeKind};
 
@@ -51,7 +52,7 @@ pub type PeerId = alloy_primitives::B512;
 /// Helper trait that unifies network API needed to launch node.
 pub trait FullNetwork:
     BlockDownloaderProvider<
-        Client: BlockClient<Block = <Self::Primitives as NetworkPrimitives>::Block>,
+        Client: BlockClient<Block = <Self::Primitives as NetworkPrimitives>::Block> + SnapClient,
     > + NetworkSyncUpdater
     + NetworkInfo
     + NetworkEventListenerProvider
@@ -65,7 +66,8 @@ pub trait FullNetwork:
 
 impl<T> FullNetwork for T where
     T: BlockDownloaderProvider<
-            Client: BlockClient<Block = <Self::Primitives as NetworkPrimitives>::Block>,
+            Client: BlockClient<Block = <Self::Primitives as NetworkPrimitives>::Block>
+                        + SnapClient,
         > + NetworkSyncUpdater
         + NetworkInfo
         + NetworkEventListenerProvider

@@ -51,21 +51,15 @@ impl<H: BlockHeader> EthResponseValidator for RequestResult<Vec<H>> {
         }
     }
 
-    /// [`RequestError::ChannelClosed`] is not possible here since these errors are mapped to
-    /// `ConnectionDropped`, which will be handled when the dropped connection is cleaned up.
-    ///
-    /// [`RequestError::ConnectionDropped`] should be ignored here because this is already handled
-    /// when the dropped connection is handled.
-    ///
-    /// [`RequestError::UnsupportedCapability`] is also used for locally rejected optional requests,
-    /// which should not affect peer reputation.
+    /// Ignores local failures and dropped connections, which are handled outside peer reputation.
     fn reputation_change_err(&self) -> Option<ReputationChangeKind> {
         if let Err(err) = self {
             match err {
                 RequestError::ChannelClosed |
                 RequestError::ConnectionDropped |
                 RequestError::UnsupportedCapability |
-                RequestError::BadResponse => None,
+                RequestError::BadResponse |
+                RequestError::Internal => None,
                 RequestError::Timeout => Some(ReputationChangeKind::Timeout),
             }
         } else {
@@ -99,6 +93,9 @@ pub enum RequestError {
     /// Indicates a bad response was received.
     #[display("received bad response")]
     BadResponse,
+    /// Local request failure, including cancelled or panicked verification.
+    #[display("request failed locally")]
+    Internal,
 }
 
 // === impl RequestError ===
@@ -242,5 +239,12 @@ mod tests {
             HeadersRequest { start: 0u64.into(), limit: 1, direction: Default::default() };
         let headers = vec![Header::default(), Header::default()];
         assert!(Ok(headers).is_likely_bad_headers_response(&request));
+    }
+
+    #[test]
+    fn internal_request_error_does_not_change_peer_reputation() {
+        let response: RequestResult<Vec<Header>> = Err(RequestError::Internal);
+
+        assert_eq!(response.reputation_change_err(), None);
     }
 }
