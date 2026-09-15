@@ -916,7 +916,11 @@ where
 
         let executed_block =
             self.spawn_deferred_trie_task(Arc::new(block), output, hashed_state, trie_output);
-        let raw_bal = decoded_bal.map(|decoded_bal| decoded_bal.as_raw_bal().clone());
+        let raw_bal = decoded_bal.as_ref().map(|decoded_bal| decoded_bal.as_raw_bal().clone());
+        if let Some(decoded_bal) = decoded_bal {
+            // Usually the last reference: execution and prewarm have released theirs by now.
+            self.runtime.spawn_drop(decoded_bal);
+        }
         Ok(ValidationOutput::new(executed_block, timing_stats).with_raw_bal(raw_bal))
     }
 
@@ -1096,6 +1100,9 @@ where
 
         let built_bal = if has_bal { db.take_built_alloy_bal() } else { None };
         let output = BlockExecutionOutput { result, state: db.take_bundle() };
+        // The cache still holds every account, slot and bytecode the block touched. Free it off
+        // this thread so the deallocation does not delay the state root handoff.
+        self.runtime.spawn_drop(core::mem::take(&mut db.cache));
 
         let execution_duration = execution_start.elapsed();
         self.metrics.record_block_execution(&output, execution_duration);
@@ -1364,6 +1371,10 @@ where
             return Err(err.into())
         }
         drop(_enter);
+        // The rebuilt BAL is as large as the received one and is only needed for the hash above.
+        if let Some(built_bal) = built_bal {
+            self.runtime.spawn_drop(built_bal);
+        }
 
         // record post-execution validation duration
         self.metrics

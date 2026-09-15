@@ -68,6 +68,7 @@ where
 
     worker_pool.in_place_scope(|scope| {
         execute_block_inner(
+            runtime,
             scope,
             evm_config,
             make_db,
@@ -84,6 +85,7 @@ where
 
 #[expect(clippy::too_many_arguments, clippy::type_complexity)]
 fn execute_block_inner<'scope, Evm, Tx, Err, DB, MakeDb>(
+    runtime: &Runtime,
     scope: &rayon::Scope<'scope>,
     evm_config: &'scope Evm,
     make_db: &'scope MakeDb,
@@ -181,11 +183,12 @@ where
     let built_bal = take_built_bal_and_log_divergence(&mut canonical_state, bal);
 
     canonical_state.merge_transitions(BundleRetention::Reverts);
-    Ok((
-        BlockExecutionOutput { state: canonical_state.take_bundle(), result: block_result },
-        senders,
-        built_bal,
-    ))
+    let output =
+        BlockExecutionOutput { state: canonical_state.take_bundle(), result: block_result };
+    // The canonical cache and both forms of the received BAL are block-sized. Workers may still
+    // hold BAL clones while they wind down; whichever reference is last frees it off this thread.
+    runtime.spawn_drop((core::mem::take(&mut canonical_state.cache), input_bal_revm, input_bal));
+    Ok((output, senders, built_bal))
 }
 
 fn convert_alloy_to_revm_bal(alloy_bal: &AlloyBal) -> Result<Arc<RevmBal>, BalExecutionError> {
