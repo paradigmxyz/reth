@@ -94,8 +94,10 @@ if [ "$EXECUTION_MODE" = "call" ]; then
   RETH_ARGS+=(--http.api "eth,net,web3,debug,trace")
 fi
 
+SYNC_STATE_IDLE=false
 if "$BINARY" node --help 2>/dev/null | grep -qF -- '--debug.startup-sync-state-idle'; then
   RETH_ARGS+=(--debug.startup-sync-state-idle)
+  SYNC_STATE_IDLE=true
 fi
 
 LOG="$OUTPUT_DIR/extract-node.log"
@@ -121,6 +123,26 @@ for i in $(seq 1 60); do
   fi
   sleep 1
 done
+
+# Historical calls need the startup history indexes, not just a listening RPC
+# server. Use the same readiness condition and bound as the benchmark runner.
+if [ "$EXECUTION_MODE" = "call" ] && [ "$SYNC_STATE_IDLE" = "true" ]; then
+  for i in $(seq 1 300); do
+    SYNC_RESULT=$(curl -sf http://127.0.0.1:8545 -X POST \
+      -H 'Content-Type: application/json' \
+      -d '{"jsonrpc":"2.0","method":"eth_syncing","params":[],"id":1}' 2>/dev/null || true)
+    if [ -n "$SYNC_RESULT" ] && jq -e '.result == false' <<< "$SYNC_RESULT" > /dev/null 2>&1; then
+      echo "reth (extract) pipeline finished after ${i}s"
+      break
+    fi
+    if [ "$i" -eq 300 ]; then
+      echo "::error::reth (extract) pipeline did not finish within 300s"
+      cat "$LOG"
+      exit 1
+    fi
+    sleep 1
+  done
+fi
 
 HEAD_JSON=$(curl -sf http://127.0.0.1:8545 -X POST \
   -H 'Content-Type: application/json' \
