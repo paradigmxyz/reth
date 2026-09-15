@@ -150,7 +150,7 @@ pub(super) fn test_incremental_reveal_and_update_with_retry<T: SparseTrie>(new_t
     .expect("update_leaves should succeed");
 
     assert!(!targets.is_empty(), "callback should fire for blinded keys");
-    assert!(!leaf_updates.is_empty(), "blinded keys should remain in updates map");
+    assert_eq!(trie.blocked_updates().len(), 2, "blinded keys should be blocked in the trie");
 
     // Reveal the proof for the requested targets.
     let (mut proof_nodes, _) = harness.proof_v2(&mut targets);
@@ -164,7 +164,7 @@ pub(super) fn test_incremental_reveal_and_update_with_retry<T: SparseTrie>(new_t
     .expect("update_leaves should succeed on retry");
 
     assert!(targets2.is_empty(), "no callback should fire after reveal");
-    assert!(leaf_updates.is_empty(), "all keys should be drained after retry");
+    assert!(trie.blocked_updates().is_empty(), "no key should stay blocked after retry");
 
     // Root should match reference with all 5 updates applied.
     let mut expected_storage = base_storage;
@@ -407,13 +407,13 @@ pub(super) fn test_touched_on_blinded_triggers_proof_then_changed_succeeds<T: Sp
     .expect("update_leaves with Touched should succeed");
 
     assert!(!targets.is_empty(), "callback should fire for Touched on blinded path");
-    assert!(!leaf_updates.is_empty(), "Touched key should remain in map when blinded");
+    assert_eq!(trie.blocked_updates().len(), 1, "Touched key should be blocked when blinded");
 
     // Step 2: Reveal the proof for the requested targets.
     let (mut proof_nodes, _) = harness.proof_v2(&mut targets);
     trie.reveal_nodes(&mut proof_nodes).expect("reveal should succeed");
 
-    // Step 3: Replace Touched with Changed(new_value) in the map.
+    // Step 3: Send Changed(new_value), superseding the blocked Touched.
     let new_value = U256::from(999);
     leaf_updates.insert(target_key, LeafUpdate::Changed(encode_fixed_size(&new_value).to_vec()));
 
@@ -606,10 +606,14 @@ pub(super) fn test_prune_then_reuse_for_next_block<T: SparseTrie>(new_trie: fn()
     let mut changeset_cold: BTreeMap<B256, U256> = BTreeMap::new();
     changeset_cold.insert(keys[4], U256::from(555));
     let mut leaf_updates_cold = SuiteTestHarness::leaf_updates(&changeset_cold);
-    let mut proof_requested = false;
-    trie.update_leaves(&mut leaf_updates_cold, |_, _| proof_requested = true)
-        .expect("update_leaves should succeed");
-    assert!(proof_requested, "leaf older than the cutoff should require a proof");
+    let mut targets: Vec<ProofV2Target> = Vec::new();
+    trie.update_leaves(&mut leaf_updates_cold, |key, parent| {
+        targets.push(ProofV2Target::new(key).with_parent(parent));
+    })
+    .expect("update_leaves should succeed");
+    assert!(!targets.is_empty(), "leaf older than the cutoff should require a proof");
+    let (mut proof_nodes, _) = harness.proof_v2(&mut targets);
+    trie.reveal_nodes(&mut proof_nodes).expect("reveal_nodes should succeed");
     harness.reveal_and_update(&mut trie, &mut leaf_updates_cold);
     let root_cold = trie.root(epoch(2));
 
@@ -619,4 +623,91 @@ pub(super) fn test_prune_then_reuse_for_next_block<T: SparseTrie>(new_trie: fn()
         harness.original_root(),
         "cold path root should match reference (K1 and K5 updated)"
     );
+}
+
+/// A leaf removal whose branch collapse waits for a blinded sibling must ask for that sibling
+/// once, not once per pass.
+///
+/// Mirrors what the engine's storage trie jobs do: proofs arrive in chunks, every arrival runs
+/// another `reveal_nodes` + `update_leaves` pass, and the caller drops an ask for a key it
+/// already requested a proof for. A blocked update that is retried although nothing on the path
+/// it waits for was revealed shows up as such a dropped ask.
+pub(super) fn test_collapse_asks_for_blinded_sibling_once<T: SparseTrie>(new_trie: fn() -> T) {
+    use alloy_primitives::keccak256;
+    use reth_trie_common::ProofV2TargetParent;
+    use std::collections::HashMap;
+
+    const NUM_SLOTS: u64 = 2048;
+    const NUM_UPDATES: u64 = 200;
+    const PROOFS_PER_PASS: usize = 4;
+
+    let base_storage: BTreeMap<B256, U256> =
+        (0..NUM_SLOTS).map(|i| (keccak256(i.to_be_bytes()), U256::from(i + 1))).collect();
+    let harness = SuiteTestHarness::new(base_storage.clone());
+
+    // Only the root is revealed, so every update starts out blinded.
+    let mut trie: T = harness.init_trie_with_targets(&[], true, new_trie);
+
+    let changeset: BTreeMap<B256, U256> = (0..NUM_UPDATES)
+        .map(|i| {
+            let value = if i % 4 == 0 { U256::ZERO } else { U256::from(i + 1000) };
+            (keccak256(i.to_be_bytes()), value)
+        })
+        .collect();
+    let mut leaf_updates = SuiteTestHarness::leaf_updates(&changeset);
+
+    let mut requested: HashMap<B256, ProofV2TargetParent> = HashMap::new();
+    let mut queue: Vec<ProofV2Target> = Vec::new();
+    let mut repeated_asks = 0usize;
+    let mut sibling_asks = 0usize;
+    let mut passes = 0usize;
+
+    loop {
+        passes += 1;
+        assert!(passes < 10_000, "reveal loop did not terminate");
+
+        trie.update_leaves(&mut leaf_updates, |key, parent| {
+            if !changeset.contains_key(&key) {
+                sibling_asks += 1;
+            }
+            match requested.entry(key) {
+                std::collections::hash_map::Entry::Occupied(mut entry) => {
+                    if parent < *entry.get() {
+                        entry.insert(parent);
+                        queue.push(ProofV2Target::new(key).with_parent(parent));
+                    } else if parent == *entry.get() {
+                        repeated_asks += 1;
+                    }
+                }
+                std::collections::hash_map::Entry::Vacant(entry) => {
+                    entry.insert(parent);
+                    queue.push(ProofV2Target::new(key).with_parent(parent));
+                }
+            }
+        })
+        .expect("update_leaves should succeed");
+
+        if queue.is_empty() {
+            break;
+        }
+        let mut chunk: Vec<ProofV2Target> =
+            queue.drain(..PROOFS_PER_PASS.min(queue.len())).collect();
+        let (mut proof_nodes, _) = harness.proof_v2(&mut chunk);
+        trie.reveal_nodes(&mut proof_nodes).expect("reveal_nodes should succeed");
+    }
+
+    assert!(sibling_asks > 0, "the changeset should collapse a branch onto a blinded sibling");
+    assert_eq!(repeated_asks, 0, "no key should be asked again from the parent it was asked from");
+    assert!(trie.blocked_updates().is_empty(), "every update should have been applied");
+
+    let mut expected_storage = base_storage;
+    for (&key, &value) in &changeset {
+        if value.is_zero() {
+            expected_storage.remove(&key);
+        } else {
+            expected_storage.insert(key, value);
+        }
+    }
+    let expected = SuiteTestHarness::new(expected_storage);
+    assert_eq!(trie.root(epoch(0)), expected.original_root(), "root should match the reference");
 }
