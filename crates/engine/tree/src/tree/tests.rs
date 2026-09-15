@@ -709,7 +709,7 @@ mod retained_blocks_gauge {
 
         harness.tree.reinsert_reorged_blocks(blocks.clone());
         assert_count(&count, 4);
-        harness.tree.reinsert_reorged_blocks(blocks.clone());
+        harness.tree.reinsert_reorged_blocks(blocks);
         assert_count(&count, 4);
 
         harness.tree.persistence_state.finish(tip, tip);
