@@ -188,6 +188,10 @@ impl BalStore for RocksDBBalStore {
         Ok(pruned)
     }
 
+    fn should_prune(&self, block: BlockNumber, tip: BlockNumber) -> bool {
+        PruneMode::Distance(BAL_RETENTION_PERIOD_SLOTS).should_prune(block, tip)
+    }
+
     fn get_by_hashes(&self, block_hashes: &[BlockHash]) -> ProviderResult<Vec<Option<Bytes>>> {
         block_hashes.iter().map(|hash| self.read_one_by_hash(*hash)).collect()
     }
