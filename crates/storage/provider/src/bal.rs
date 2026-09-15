@@ -172,6 +172,11 @@ impl BalStore for InMemoryBalStore {
         Ok(self.inner.write().prune(self.config.in_memory_retention, tip))
     }
 
+    fn should_prune(&self, block: BlockNumber, tip: BlockNumber) -> bool {
+        let tip = self.inner.read().highest_block_number.unwrap_or(tip).max(tip);
+        self.config.in_memory_retention.is_some_and(|mode| mode.should_prune(block, tip))
+    }
+
     fn get_by_hashes(&self, block_hashes: &[BlockHash]) -> ProviderResult<Vec<Option<Bytes>>> {
         let inner = self.inner.read();
         let mut result = Vec::with_capacity(block_hashes.len());
