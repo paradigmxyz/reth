@@ -518,21 +518,22 @@ impl DefaultStateRootStrategy {
         transaction_count: Option<usize>,
         gas_used: Option<u64>,
     ) -> usize {
-        if let Some(configured_threads) = configured_threads {
-            return configured_threads
-        }
-
-        let count = match (transaction_count, gas_used) {
-            (Some(count), _) if count <= Self::SMALL_BLOCK_PROOF_WORKER_TX_THRESHOLD => {
-                base_pool_threads / 2
+        let count = if let Some(configured_threads) = configured_threads {
+            configured_threads
+        } else {
+            match (transaction_count, gas_used) {
+                (Some(count), _) if count <= Self::SMALL_BLOCK_PROOF_WORKER_TX_THRESHOLD => {
+                    base_pool_threads / 2
+                }
+                (_, Some(gas)) if gas >= Self::LARGE_BLOCK_PROOF_WORKER_GAS_THRESHOLD => {
+                    base_pool_threads + overflow_pool_threads
+                }
+                _ => base_pool_threads,
             }
-            (_, Some(gas)) if gas >= Self::LARGE_BLOCK_PROOF_WORKER_GAS_THRESHOLD => {
-                base_pool_threads + overflow_pool_threads
-            }
-            _ => base_pool_threads,
         };
 
-        // Pools can be smaller than two threads, and a block without workers stalls the proofs.
+        // Pools can be smaller than two threads, and a pinned count can be zero; a block without
+        // workers stalls the proofs.
         if count == 0 {
             1
         } else {
@@ -1427,11 +1428,12 @@ mod tests {
             );
         }
 
-        // Pools smaller than two threads still get a worker.
+        // Pools smaller than two threads, and a pinned count of zero, still get a worker.
         assert_eq!(
             DefaultStateRootStrategy::proof_worker_count(1, 0, None, Some(1), Some(1_000_000)),
             1
         );
+        assert_eq!(DefaultStateRootStrategy::proof_worker_count(32, 32, Some(0), None, None), 1);
     }
 
     #[test]
