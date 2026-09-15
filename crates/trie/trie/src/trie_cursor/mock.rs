@@ -1,5 +1,5 @@
 use parking_lot::{Mutex, MutexGuard};
-use std::{collections::BTreeMap, sync::Arc};
+use std::{collections::BTreeMap, ops::Bound, sync::Arc};
 use tracing::instrument;
 
 use super::{TrieCursor, TrieCursorFactory, TrieStorageCursor};
@@ -207,8 +207,7 @@ impl TrieCursor for MockTrieCursor {
         key: Nibbles,
     ) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
         // Find the first key that is greater than or equal to the given key.
-        let entry =
-            self.trie_nodes().iter().find_map(|(k, v)| (k >= &key).then(|| (*k, v.clone())));
+        let entry = self.trie_nodes().range(key..).next().map(|(k, v)| (*k, v.clone()));
         if let Some((key, _)) = &entry {
             self.current_key = Some(*key);
         }
@@ -221,13 +220,25 @@ impl TrieCursor for MockTrieCursor {
 
     #[instrument(skip(self), ret(level = "trace"))]
     fn next(&mut self) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
-        let mut iter = self.trie_nodes().iter();
-        // Jump to the first key that has a prefix of the current key if it's set, or to the first
-        // key otherwise.
-        iter.find(|(k, _)| self.current_key.as_ref().is_none_or(|current| k.starts_with(current)))
-            .expect("current key should exist in trie nodes");
-        // Get the next key-value pair.
-        let entry = iter.next().map(|(k, v)| (*k, v.clone()));
+        let trie_nodes = self.trie_nodes();
+        // Get the key-value pair after the current key if it's set, or after the first key
+        // otherwise. The current key sorts before every longer key it is a prefix of, so it is
+        // the first prefix match.
+        let entry = match self.current_key {
+            Some(current) => {
+                debug_assert!(
+                    trie_nodes.contains_key(&current),
+                    "current key should exist in trie nodes"
+                );
+                trie_nodes.range((Bound::Excluded(current), Bound::Unbounded)).next()
+            }
+            None => {
+                let mut iter = trie_nodes.iter();
+                iter.next().expect("current key should exist in trie nodes");
+                iter.next()
+            }
+        };
+        let entry = entry.map(|(k, v)| (*k, v.clone()));
         if let Some((key, _)) = &entry {
             self.current_key = Some(*key);
         }
