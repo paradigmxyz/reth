@@ -38,7 +38,10 @@ pub struct RpcStateCacheArgs {
     )]
     pub max_bals: u32,
 
-    /// Replay new canonical blocks to generate and cache block access lists.
+    /// Replay new canonical blocks to generate and cache block access lists before native BAL
+    /// support.
+    ///
+    /// Prewarming stops when the first canonical block with a block access list hash is received.
     #[arg(long = "rpc-cache.prewarm-bals", default_value_t = false)]
     pub prewarm_bals: bool,
 

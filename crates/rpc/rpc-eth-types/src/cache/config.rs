@@ -23,7 +23,10 @@ pub struct EthStateCacheConfig {
     ///
     /// Default is 1000.
     pub max_bals: u32,
-    /// Whether to replay new canonical blocks to generate and cache BALs.
+    /// Whether to replay new canonical blocks to generate and cache BALs before native BAL
+    /// support.
+    ///
+    /// Prewarming stops when the first canonical block with a BAL hash is received.
     ///
     /// Default is false.
     #[serde(default)]

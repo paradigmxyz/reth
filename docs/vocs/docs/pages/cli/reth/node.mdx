@@ -550,7 +550,9 @@ RPC State Cache:
           [default: 1000]
 
       --rpc-cache.prewarm-bals
-          Replay new canonical blocks to generate and cache block access lists
+          Replay new canonical blocks to generate and cache block access lists before native BAL support.
+
+          Prewarming stops when the first canonical block with a block access list hash is received.
 
       --rpc-cache.max-concurrent-db-requests <MAX_CONCURRENT_DB_REQUESTS>
           Max number of concurrent database requests
