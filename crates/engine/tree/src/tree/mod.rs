@@ -511,14 +511,15 @@ where
         self.incoming_tx.clone()
     }
 
-    /// Whether the unbuffered canonical persistence gap has reached the backpressure threshold.
-    const fn should_backpressure(&self) -> bool {
+    /// Returns `true` when the main loop should stop draining the tree input channel.
+    ///
+    /// Count all retained executed blocks, including forks, the in-memory buffer, and blocks whose
+    /// state/trie writes are still masked. A durable DB tip does not imply these blocks were freed.
+    /// Only wait while persistence is running: otherwise engine messages may be needed to advance
+    /// forkchoice or finish a payload build before persistence can make progress.
+    fn should_backpressure(&self) -> bool {
         self.persistence_state.in_progress() &&
-            self.state
-                .tree_state
-                .canonical_block_number()
-                .saturating_sub(self.persistence_state.last_persisted_block.number)
-                .saturating_sub(self.config.memory_block_buffer_target()) >=
+            self.state.tree_state.block_count() as u64 >=
                 self.config.persistence_backpressure_threshold()
     }
 

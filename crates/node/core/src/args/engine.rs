@@ -320,8 +320,8 @@ pub struct EngineArgs {
     )]
     pub persistence_threshold: u64,
 
-    /// Configure the maximum number of blocks beyond the in-memory buffer target that may await
-    /// persistence before engine API processing stalls.
+    /// Configure the retained executed-block count at which engine API processing waits for
+    /// in-flight persistence. Includes forks, the in-memory buffer, and state-masked blocks.
     ///
     /// If omitted, this defaults to the larger of the default backpressure threshold and twice
     /// `--engine.persistence-threshold`.

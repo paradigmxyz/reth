@@ -1219,8 +1219,117 @@ fn test_backpressure_stalls_incoming_until_persistence_completes() {
 }
 
 #[test]
+fn test_backpressure_counts_in_memory_buffer() {
+    for (canonical_tip, expected_backpressure) in [(9_u64, false), (10, true), (11, true)] {
+        let blocks: Vec<_> =
+            TestBlockBuilder::eth().get_executed_blocks(1..canonical_tip + 1).collect();
+        let mut test_harness = TestHarness::new(MAINNET.clone()).with_blocks(blocks.clone());
+        test_harness.tree.config = test_harness
+            .tree
+            .config
+            .with_persistence_threshold(0)
+            .with_memory_block_buffer_target(5)
+            .with_persistence_backpressure_threshold(10);
+
+        let (_persist_tx, persist_rx) = crossbeam_channel::bounded(1);
+        let persisted = blocks.last().unwrap().recovered_block().num_hash();
+        test_harness.tree.persistence_state.start_save(persisted, persist_rx);
+
+        assert_eq!(test_harness.tree.should_backpressure(), expected_backpressure);
+        test_harness.tree.persistence_state.rx.take();
+        assert!(!test_harness.tree.should_backpressure());
+    }
+}
+
+#[test]
+fn test_backpressure_counts_state_masked_blocks() {
+    let blocks: Vec<_> = TestBlockBuilder::eth().get_executed_blocks(1..141).collect();
+    let mut harness = TestHarness::new(MAINNET.clone()).with_blocks(blocks[40..].to_vec());
+    harness.tree.config = harness
+        .tree
+        .config
+        .with_persistence_backpressure_threshold(100)
+        .with_persistence_threshold(50)
+        .with_num_state_masking_blocks(40)
+        .with_memory_block_buffer_target(5);
+    harness.tree.persistence_state.last_persisted_block = blocks[79].recovered_block().num_hash();
+    harness.tree.persistence_state.last_state_trie_persisted_block =
+        blocks[39].recovered_block().num_hash();
+    let (_tx, rx) = crossbeam_channel::bounded(1);
+    harness.tree.persistence_state.start_save(blocks[134].recovered_block().num_hash(), rx);
+
+    // DB gap minus buffer is only 55, but the 40 masked blocks are still retained.
+    assert_eq!(harness.tree.state.tree_state.block_count(), 100);
+    assert!(harness.tree.should_backpressure());
+}
+
+#[test]
+fn test_backpressure_counts_noncanonical_blocks() {
+    let mut builder = TestBlockBuilder::eth();
+    let blocks: Vec<_> = builder.get_executed_blocks(1..3).collect();
+    let mut harness = TestHarness::new(MAINNET.clone()).with_blocks(blocks.clone());
+    harness.tree.config = harness
+        .tree
+        .config
+        .with_persistence_threshold(0)
+        .with_persistence_backpressure_threshold(10);
+    let (_tx, rx) = crossbeam_channel::bounded(1);
+    harness.tree.persistence_state.start_save(blocks[0].recovered_block().num_hash(), rx);
+    assert!(!harness.tree.should_backpressure());
+
+    let mut parent = blocks[0].recovered_block().hash();
+    for number in 2..10 {
+        let block = builder.get_executed_block_with_number(number, parent);
+        parent = block.recovered_block().hash();
+        harness.tree.state.tree_state.insert_executed(block);
+    }
+    assert_eq!(harness.tree.state.tree_state.canonical_block_number(), 2);
+    assert_eq!(harness.tree.state.tree_state.block_count(), 10);
+    assert!(harness.tree.should_backpressure());
+}
+
+#[test]
+fn test_backpressure_rechecks_retained_blocks_after_partial_save() {
+    let blocks: Vec<_> = TestBlockBuilder::eth().get_executed_blocks(1..111).collect();
+    let mut harness = TestHarness::new(MAINNET.clone()).with_blocks(blocks.clone());
+    harness.tree.config = harness
+        .tree
+        .config
+        .with_persistence_backpressure_threshold(100)
+        .with_persistence_threshold(50)
+        .with_num_state_masking_blocks(40);
+    let (_tx, rx) = crossbeam_channel::bounded(1);
+    harness.tree.persistence_state.start_save(blocks[49].recovered_block().num_hash(), rx);
+    assert!(harness.tree.should_backpressure());
+
+    for (state_tip, retained, backpressure) in [(10, 100, true), (11, 99, false)] {
+        harness
+            .tree
+            .on_persistence_complete(
+                PersistenceResult {
+                    last_block: blocks[state_tip + 39].recovered_block().num_hash(),
+                    last_state_trie_block: blocks[state_tip - 1].recovered_block().num_hash(),
+                    commit_duration: Some(Duration::ZERO),
+                },
+                Instant::now(),
+            )
+            .unwrap();
+        assert_eq!(harness.tree.state.tree_state.block_count(), retained);
+        // The next save can still require a stall even though the previous one completed.
+        let (_next_tx, next_rx) = crossbeam_channel::bounded(1);
+        harness
+            .tree
+            .persistence_state
+            .start_save(blocks[109].recovered_block().num_hash(), next_rx);
+        assert_eq!(harness.tree.should_backpressure(), backpressure);
+    }
+}
+
+#[test]
 fn test_tail_wait_starts_at_persistence_threshold_before_full_backpressure() {
-    for (tip, expected, full_stall) in [(9, false, false), (10, true, false), (25, true, true)] {
+    for (tip, expected, full_stall) in
+        [(9, false, false), (10, true, false), (19, true, false), (20, true, true)]
+    {
         let blocks: Vec<_> = TestBlockBuilder::eth().get_executed_blocks(1..tip + 1).collect();
         let mut harness = TestHarness::new(MAINNET.clone()).with_blocks(blocks.clone());
         harness.tree.config = harness

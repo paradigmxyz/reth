@@ -9,8 +9,7 @@ pub const DEFAULT_PERSISTENCE_THRESHOLD: u64 = 7;
 /// Number of persisted blocks whose state/trie writes are masked by an in-memory suffix.
 pub const DEFAULT_NUM_STATE_MASKING_BLOCKS: u64 = 0;
 
-/// Maximum number of blocks beyond the in-memory buffer target awaiting persistence before engine
-/// API processing is stalled.
+/// Retained executed-block count at which engine API processing waits for in-flight persistence.
 pub const DEFAULT_PERSISTENCE_BACKPRESSURE_THRESHOLD: u64 = 16;
 
 /// How close to the canonical head we persist blocks.
@@ -110,8 +109,8 @@ pub struct TreeConfig {
     ///
     /// Note: this should be less than or equal to `persistence_threshold`.
     memory_block_buffer_target: u64,
-    /// Maximum number of blocks beyond the in-memory buffer target awaiting persistence before
-    /// engine API processing is stalled.
+    /// Retained executed-block count at which engine API processing waits for in-flight
+    /// persistence. Includes forks, the in-memory buffer, and state-masked blocks.
     persistence_backpressure_threshold: u64,
     /// Number of pending blocks that cannot be executed due to missing parent and
     /// are kept in cache.
