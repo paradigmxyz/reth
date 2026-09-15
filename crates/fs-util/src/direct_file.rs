@@ -46,7 +46,7 @@ impl DirectFile {
                     c"".as_ptr(),
                     libc::AT_EMPTY_PATH,
                     libc::STATX_DIOALIGN,
-                    &mut stat,
+                    &raw mut stat,
                 )
             };
             if result == 0 && stat.stx_mask & libc::STATX_DIOALIGN != 0 {
@@ -295,6 +295,32 @@ mod tests {
             io::ErrorKind::UnexpectedEof
         );
         assert_eq!(reader.read_at(&mut [0; 4], 50000).unwrap(), 0);
+    }
+
+    #[test]
+    fn mixed_writes_match_in_memory_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut file = DirectFile::open(dir.path().join("mixed"), true, true).unwrap();
+        file.alignment = file.alignment.max(4096);
+        let mut expected = Vec::new();
+        for step in 0..64usize {
+            let offset = (step * 7907) % 16384;
+            let len = (step * 137) % 5000 + 1;
+            let bytes = vec![step as u8; len];
+            file.seek(SeekFrom::Start(offset as u64)).unwrap();
+            file.write_all(&bytes).unwrap();
+            expected.resize(expected.len().max(offset + len), 0);
+            expected[offset..offset + len].copy_from_slice(&bytes);
+            if step % 7 == 0 {
+                let len = expected.len() / 2;
+                file.set_len(len as u64).unwrap();
+                expected.truncate(len);
+            }
+            assert_eq!(file.metadata().unwrap().len(), expected.len() as u64);
+            let mut actual = vec![0; expected.len()];
+            file.read_exact_at(&mut actual, 0).unwrap();
+            assert_eq!(actual, expected, "step {step}");
+        }
     }
 
     #[cfg(target_os = "linux")]

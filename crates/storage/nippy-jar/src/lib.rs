@@ -429,7 +429,7 @@ impl DataReader {
         range: Range<usize>,
         buffer: &mut Vec<u8>,
     ) -> Result<(), NippyJarError> {
-        if range.start > range.end || range.end > self.data_len {
+        if !(range.start..=self.data_len).contains(&range.end) {
             return Err(io::Error::new(
                 io::ErrorKind::UnexpectedEof,
                 "static file data range out of bounds",
@@ -443,12 +443,12 @@ impl DataReader {
     }
 
     /// Returns total size of data file.
-    pub fn size(&self) -> usize {
+    pub const fn size(&self) -> usize {
         self.data_len
     }
 
     /// Returns total size of offsets file.
-    pub fn offsets_size(&self) -> usize {
+    pub const fn offsets_size(&self) -> usize {
         self.offsets_len
     }
 }
