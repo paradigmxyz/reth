@@ -38,7 +38,87 @@ use reth_trie_sparse::{
 };
 use tracing::{debug, debug_span, error, instrument, trace_span};
 
-/// Sparse trie task implementation that uses in-memory sparse trie data to schedule proof fetching.
+/// Computes a block's state root by applying streamed updates to an in-memory [`SparseStateTrie`].
+/// Updates that reach a blinded node stay pending while the task fetches the missing proof. The
+/// account trie stays on this task's thread; storage tries can be moved into independent rayon
+/// jobs.
+///
+/// # Message flow
+///
+/// The task coordinates three incoming streams:
+///
+/// 1. **Execution and prewarming:** [`Self::run_hashing_task`] receives [`StateRootMessage`]s,
+///    hashes raw state updates, and forwards [`SparseTrieTaskMessage`]s to [`Self::updates`] in
+///    receive order. `HashedState` supplies changed values; `PrefetchProofs` supplies
+///    [`LeafUpdate::Touched`] hints that must not overwrite changed values. The task buffers these
+///    leaf updates before applying them in batches.
+/// 2. **Proof workers:** blinded paths become [`MultiProofTargetsV2`] requests dispatched through
+///    [`ProofWorkerHandle`]. Each request carries a [`ProofResultContext`] with a sender for
+///    [`Self::proof_result_rx`]. The task coalesces returned [`ProofResultMessage`]s, reveals
+///    account proofs locally, and queues storage proofs on the corresponding address'
+///    [`StorageSlot`].
+/// 3. **Storage jobs:** [`Self::spawn_storage_jobs`] moves each [`StorageTrieWork`] into a rayon
+///    closure. A pass reveals queued proofs, applies unblocked leaves, and hashes the storage trie
+///    once its pending leaves are drained. It sends [`StorageJobMessage::Done`] via
+///    [`Self::storage_done_tx`] to [`Self::storage_done_rx`], returning ownership of the payload
+///    along with newly discovered proof targets, cache counters, and any error. Small or
+///    target-only passes run inline and apply the same output directly.
+///
+/// [`Self::run`] selects between these streams and cancellation. After handling a message,
+/// [`Self::make_progress`] collects queued job returns, applies buffered updates, dispatches proof
+/// requests and storage jobs, and promotes account updates whose storage roots are available.
+/// Proof workers fetch nodes; storage jobs reveal and modify the owned storage trie. Neither
+/// mutates the account trie.
+///
+/// # Storage ownership
+///
+/// On first use, an address' storage trie moves out of [`SparseStateTrie`] into an idle slot.
+/// There is at most one job per address, and no shared mutable access to its trie:
+///
+/// ```text
+///                    dispatch: move StorageTrieWork to rayon
+///   Idle --------------------------------------------------------> InFlight
+///   (task owns trie)                                               (job owns trie)
+///        ^                                                              |
+///        +--------------------------------------------------------------+
+///                    Done: restore payload and merge buffered arrivals
+/// ```
+///
+/// In `Idle`, new proofs and leaf updates make the payload ready for another pass. An inline pass
+/// keeps it in `Idle`. In `InFlight`, the task holds only [`InFlightStorage`] buffers for new
+/// arrivals; the job owns the trie, earlier pending leaves, proofs, and fetched-target cache.
+/// When `Done` arrives, newer changed values and deletions override older pending values, while
+/// touch hints preserve them. Buffered work can then trigger another pass.
+///
+/// `Idle` describes ownership, not completion: a payload can still have leaves blocked on a proof.
+/// Blocked leaves alone do not trigger another pass; new updates or that address' own proof nodes
+/// make it ready again. Account updates wait while their storage trie is in flight or still has
+/// pending leaves, so they cannot use an incomplete storage root.
+///
+/// # Task lifecycle
+///
+/// ```text
+///   Streaming -- FinishedStateUpdates --> Draining -- no pending trie work --> Finalize
+///       |                                    |
+///       +------------- cancellation ---------+--> Canceled
+/// ```
+///
+/// The finish marker publishes the accumulated [`HashedPostState`] through
+/// [`Self::final_hashed_state_tx`] and ends consumption of the update stream. Draining continues
+/// to receive proof results and storage-job returns; late prefetch hints are ignored. Closing
+/// the update channel before the marker is an error, while closing it afterward is harmless.
+///
+/// Finalization waits for all leaf updates, account promotions, and checked-out storage tries.
+/// It restores the storage tries to [`SparseStateTrie`], computes the final root and trie updates,
+/// and returns [`StateRootComputeOutcome`]. The caller publishes that result before consuming
+/// the task with [`Self::into_trie_for_reuse`], which also releases the retained job buffers.
+///
+/// Dropping the consumer's cancel guard makes [`Self::run`] return
+/// [`StateRootTaskError::Canceled`]. Teardown through [`Self::into_cleared_trie`] disconnects the
+/// storage return channel, so late jobs drop their payloads when sending fails. Proof and trie
+/// errors fail the calculation; [`StorageJobMessage::Panicked`] resumes the worker's panic on
+/// this task's thread. During draining, pending updates with no remaining source of progress
+/// produce [`StateRootTaskError::Stalled`].
 pub(super) struct SparseTrieCacheTask<A = ArenaParallelSparseTrie, S = ArenaParallelSparseTrie> {
     /// Sender for proof results.
     proof_result_tx: ProofResultSender,
@@ -285,7 +365,9 @@ where
     /// This waits for new incoming [`SparseTrieTaskMessage`]s, applies updates
     /// to the trie and schedules proof fetching when needed.
     ///
-    /// This concludes once the last state update has been received and processed.
+    /// After the finish marker, drains the remaining proof and storage work until all trie updates
+    /// are applied and all checked-out storage tries have returned. See the [task
+    /// lifecycle](Self#task-lifecycle).
     #[instrument(
         name = "SparseTrieCacheTask::run",
         level = "debug",
@@ -354,9 +436,9 @@ where
         }
 
         // Draining phase: the marker is the last message read from the updates channel, so
-        // after it only proof results and cancellation can occur. The channel closing when
-        // the producers drop their senders is not observed here, and late best-effort hints
-        // are ignored: with all updates known, prefetching has nothing left to help.
+        // after it only proof results, storage-job returns, and cancellation can occur. The
+        // update channel closing when producers drop their senders is not observed here, and late
+        // hints are ignored: with all updates known, prefetching has nothing left to help.
         while !done {
             let mut t = Instant::now();
             crossbeam_channel::select_biased! {
