@@ -64,8 +64,8 @@ pub const CHANGESET_OFFSETS_FILE_EXTENSION: &str = "csoff";
 
 /// A [`RefRow`] is a list of column value slices pointing to a cursor-owned buffer.
 ///
-/// The inline capacity covers every segment used by reth (at most three columns), so reading a row
-/// does not allocate.
+/// The inline capacity covers every segment used by reth (at most three columns), so collecting the
+/// column slices does not allocate.
 pub type RefRow<'a> = SmallVec<[&'a [u8]; 4]>;
 
 /// Alias type for a column value wrapped in `Result`.

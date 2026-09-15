@@ -39,6 +39,7 @@ impl DirectFile {
             // SAFETY: statx writes to an initialized struct and receives a valid fd
             // and a NUL-terminated empty path with AT_EMPTY_PATH.
             let mut stat: libc::statx = unsafe { std::mem::zeroed() };
+            // SAFETY: the descriptor, path, and output pointer are valid.
             let result = unsafe {
                 libc::statx(
                     file.as_raw_fd(),
@@ -57,6 +58,7 @@ impl DirectFile {
                 if flags == -1 {
                     return Err(io::Error::last_os_error());
                 }
+                // SAFETY: F_SETFL takes integer flags and a live descriptor.
                 let result =
                     unsafe { libc::fcntl(file.as_raw_fd(), libc::F_SETFL, flags | libc::O_DIRECT) };
                 if result == -1 {
@@ -260,6 +262,8 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("direct");
         let mut file = DirectFile::open(&path, true, true).unwrap();
+        // Exercise alignment and read-modify-write on Apple/fallback platforms too.
+        file.alignment = file.alignment.max(4096);
         let mut expected: Vec<u8> = (0..12345).map(|i| (i % 251) as u8).collect();
         file.write_all(&expected).unwrap();
         assert_eq!(file.metadata().unwrap().len(), expected.len() as u64);

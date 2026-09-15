@@ -1,0 +1,37 @@
+name: direct-io experiment checks
+
+on:
+  push:
+    branches: [onbjerg/static-file-direct-io]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  storage:
+    runs-on: depot-ubuntu-latest-16
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: rui314/setup-mold@7e4f20ad28a2e8ca6fd0892ccf72e2abb706b9c3 # v1
+      - run: .github/scripts/install_llvm.sh ubuntu
+      - uses: dtolnay/rust-toolchain@nightly
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          prefix-key: direct-io-experiment
+          cache-on-failure: true
+      - uses: taiki-e/install-action@d438492cf8a250514fa2d34b30bc3c0dc37c65ff # v2.87.8
+        with:
+          tool: nextest
+      - run: cargo +nightly fmt --all --check
+      - name: Verify direct I/O and file recovery on Linux
+        run: cargo +nightly nextest run --locked -p reth-fs-util -p reth-nippy-jar -p reth-static-file-types
+      - name: Workspace clippy
+        run: cargo +nightly clippy --locked --workspace --lib --examples --tests --benches --all-features -- -D warnings
+      - name: Workspace unit tests
+        run: cargo +nightly nextest run --locked --workspace --exclude ef-tests --no-tests=warn -E '!kind(test) and not binary(e2e_testsuite)'
