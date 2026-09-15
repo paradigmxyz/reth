@@ -104,12 +104,13 @@ impl PayloadExecutionCache {
         None
     }
 
-    /// Waits until the execution cache becomes available for use.
+    /// Waits for the mutex protecting the stored `Option<SavedCache>` to be released.
     ///
-    /// This acquires a write lock to ensure exclusive access, then immediately releases it.
-    /// This is useful for synchronization before starting payload processing.
+    /// This does not wait for other users to drop their [`ExecutionCache`] clones or for removed
+    /// caches to finish dropping after unlocking. A subsequent [`Self::get_cache_for`] can still
+    /// return `None`, causing its caller to allocate a new cache while those drops run.
     ///
-    /// Returns the time spent waiting for the lock.
+    /// Returns only the time spent waiting for the mutex, excluding post-unlock cleanup.
     pub fn wait_for_availability(&self) -> Duration {
         let start = Instant::now();
         // Acquire lock to wait for any current holders to finish
@@ -125,8 +126,13 @@ impl PayloadExecutionCache {
         elapsed
     }
 
-    /// Updates the cache with a closure that has exclusive access to the guard.
-    /// This ensures that all cache operations happen atomically.
+    /// Runs `update_fn` with mutable access to the stored `Option<SavedCache>` under the mutex.
+    /// Returns the closure's result after releasing the mutex, allowing removed caches to be
+    /// dropped outside the lock.
+    ///
+    /// Drop extra [`SavedCache`] or [`ExecutionCache`] clones of the stored cache before the
+    /// closure returns: [`Self::get_cache_for`] requires that cache's Arc strong reference
+    /// count to be one.
     ///
     /// ## CRITICAL SAFETY REQUIREMENT
     ///
@@ -138,12 +144,12 @@ impl PayloadExecutionCache {
     ///
     /// Violating this requirement can result in cache corruption, incorrect state data,
     /// and potential consensus failures.
-    pub fn update_with_guard<F>(&self, update_fn: F)
+    pub fn update_with_guard<F, R>(&self, update_fn: F) -> R
     where
-        F: FnOnce(&mut Option<SavedCache>),
+        F: FnOnce(&mut Option<SavedCache>) -> R,
     {
         let mut guard = self.inner.lock();
-        update_fn(&mut guard);
+        update_fn(&mut guard)
     }
 }
 

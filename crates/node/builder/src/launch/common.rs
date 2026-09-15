@@ -514,14 +514,12 @@ where
         let rocksdb_provider = if let Some(provider) = rocksdb_provider {
             provider
         } else {
-            let mut builder = RocksDBProvider::builder(self.data_dir().rocksdb())
+            RocksDBProvider::builder(self.data_dir().rocksdb())
                 .with_default_tables()
                 .with_metrics()
-                .with_statistics();
-            if let Some(cache_size) = self.node_config().db.rocksdb_block_cache_size {
-                builder = builder.with_block_cache_size(cache_size);
-            }
-            builder.build()?
+                .with_statistics()
+                .with_block_cache_size_opt(self.node_config().db.rocksdb_block_cache_size)
+                .build()?
         };
 
         let balstore_cache_size = self
