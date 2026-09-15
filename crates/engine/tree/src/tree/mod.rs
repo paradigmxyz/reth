@@ -520,10 +520,17 @@ where
                 self.config.persistence_backpressure_threshold()
     }
 
+    /// Start tail pacing at the persistence threshold, including state-masked canonical blocks.
+    fn should_pace_validation(&self) -> bool {
+        self.persistence_state.in_progress() &&
+            self.canonical_in_memory_state.canonical_chain().count() as u64 >=
+                self.config.persistence_threshold()
+    }
+
     /// Apply tail backpressure using elapsed time since the previous block completed validation.
     fn pace_validation(&mut self) {
-        let backpressure = self.should_backpressure();
-        let delay = self.persistence_pacing.on_validation_completed(Instant::now(), backpressure);
+        let pacing = self.should_pace_validation();
+        let delay = self.persistence_pacing.on_validation_completed(Instant::now(), pacing);
         if delay.is_zero() {
             return;
         }
@@ -542,7 +549,8 @@ where
     pub fn run(mut self) {
         loop {
             // Absorb completed saves before handling the next request so validation uses the
-            // latest persistence throughput. Backpressure is applied after each validated block.
+            // latest persistence throughput. Tail pacing smooths admission below the full-stall
+            // threshold; at that threshold, stop draining requests until persistence completes.
             match self.try_poll_persistence() {
                 Ok(true) => {
                     if let Err(err) = self.advance_persistence() {
@@ -558,7 +566,7 @@ where
                 }
             }
 
-            match self.wait_for_event() {
+            match self.wait_for_next_event() {
                 LoopEvent::EngineMessage(msg) => {
                     debug!(target: "engine::tree", %msg, "received new engine message");
                     match self.on_engine_message(msg) {
@@ -591,6 +599,32 @@ where
                 error!(target: "engine::tree", %err, "Advancing persistence failed");
                 return
             }
+        }
+    }
+
+    /// Stop admitting requests at the hard backpressure threshold.
+    fn wait_for_next_event(&mut self) -> LoopEvent<T, N> {
+        if self.should_backpressure() {
+            self.metrics.engine.backpressure_active.set(1.0);
+            let start = Instant::now();
+            let event = self.wait_for_persistence_event();
+            self.metrics.engine.backpressure_stall_duration.record(start.elapsed());
+            self.metrics.engine.backpressure_active.set(0.0);
+            event
+        } else {
+            self.wait_for_event()
+        }
+    }
+
+    /// Wait only for persistence, leaving engine requests queued upstream.
+    fn wait_for_persistence_event(&mut self) -> LoopEvent<T, N> {
+        if let Some((rx, start_time, _action)) = self.persistence_state.rx.take() {
+            match rx.recv() {
+                Ok(result) => LoopEvent::PersistenceComplete { result, start_time },
+                Err(_) => LoopEvent::Disconnected,
+            }
+        } else {
+            self.wait_for_event()
         }
     }
 

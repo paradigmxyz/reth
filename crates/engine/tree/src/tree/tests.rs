@@ -1157,7 +1157,7 @@ async fn test_holesky_payload() {
 }
 
 #[test]
-fn test_backpressure_does_not_block_incoming_before_validation() {
+fn test_backpressure_stalls_incoming_until_persistence_completes() {
     let blocks: Vec<_> = TestBlockBuilder::eth().get_executed_blocks(1..4).collect();
     let mut test_harness = TestHarness::new(MAINNET.clone()).with_blocks(blocks.clone());
     test_harness.tree.config = test_harness
@@ -1167,7 +1167,7 @@ fn test_backpressure_does_not_block_incoming_before_validation() {
         .with_memory_block_buffer_target(0)
         .with_persistence_backpressure_threshold(1);
 
-    let (_persist_tx, persist_rx) = crossbeam_channel::bounded(1);
+    let (persist_tx, persist_rx) = crossbeam_channel::bounded(1);
     let persisted = blocks.last().unwrap().recovered_block().num_hash();
     test_harness.tree.persistence_state.start_save(persisted, persist_rx);
     for _ in 0..2 {
@@ -1191,24 +1191,43 @@ fn test_backpressure_does_not_block_incoming_before_validation() {
         ))
         .unwrap();
 
-    let super::LoopEvent::EngineMessage(message) = test_harness.tree.wait_for_event() else {
-        panic!("expected queued engine message without waiting for persistence")
+    let sender = std::thread::spawn(move || {
+        std::thread::sleep(Duration::from_millis(50));
+        persist_tx
+            .send(PersistenceResult {
+                last_block: persisted,
+                last_state_trie_block: persisted,
+                commit_duration: Some(Duration::from_millis(50)),
+            })
+            .unwrap();
+    });
+    assert!(test_harness.tree.should_backpressure());
+    let event = test_harness.tree.wait_for_next_event();
+    sender.join().unwrap();
+    assert_matches!(event, super::LoopEvent::PersistenceComplete { .. });
+    assert!(rx.try_recv().is_err());
+    assert_eq!(test_harness.tree.incoming.len(), 1);
+    // The full stall is reported by queue latency, not added again as a tail sleep.
+    assert_eq!(test_harness.tree.persistence_pacing.total_wait, Duration::ZERO);
+    let super::LoopEvent::EngineMessage(message) = test_harness.tree.wait_for_next_event() else {
+        panic!("expected the queued engine message after persistence")
     };
     let _ = test_harness.tree.on_engine_message(message).unwrap();
     assert!(rx.try_recv().is_ok());
-    assert!(test_harness.tree.persistence_state.in_progress());
+    assert!(!test_harness.tree.persistence_state.in_progress());
     assert_eq!(test_harness.tree.persistence_pacing.total_wait, Duration::ZERO);
 }
 
 #[test]
-fn test_backpressure_tail_wait_requires_threshold() {
-    for (tip, expected) in [(14, false), (15, true)] {
+fn test_tail_wait_starts_at_persistence_threshold_before_full_backpressure() {
+    for (tip, expected, full_stall) in [(9, false, false), (10, true, false), (15, true, true)] {
         let blocks: Vec<_> = TestBlockBuilder::eth().get_executed_blocks(1..tip + 1).collect();
         let mut harness = TestHarness::new(MAINNET.clone()).with_blocks(blocks.clone());
         harness.tree.config = harness
             .tree
             .config
             .with_memory_block_buffer_target(5)
+            .with_persistence_threshold(10)
             .with_persistence_backpressure_threshold(10);
         let (_tx, rx) = crossbeam_channel::bounded(1);
         harness
@@ -1218,14 +1237,34 @@ fn test_backpressure_tail_wait_requires_threshold() {
         for _ in 0..2 {
             harness.tree.persistence_pacing.record(Duration::from_millis(100), 1);
         }
-        assert_eq!(harness.tree.should_backpressure(), expected);
+        assert_eq!(harness.tree.should_backpressure(), full_stall);
+        assert_eq!(harness.tree.should_pace_validation(), expected);
         harness.tree.pace_validation(); // First completion never sleeps.
         assert_eq!(harness.tree.persistence_pacing.total_wait, Duration::ZERO);
         harness.tree.pace_validation();
         assert_eq!(!harness.tree.persistence_pacing.total_wait.is_zero(), expected);
         harness.tree.persistence_state.rx.take();
         assert!(!harness.tree.should_backpressure());
+        assert!(!harness.tree.should_pace_validation());
     }
+}
+
+#[test]
+fn test_tail_pacing_counts_state_masked_blocks_at_persistence_threshold() {
+    let blocks: Vec<_> = TestBlockBuilder::eth().get_executed_blocks(1..51).collect();
+    let mut harness = TestHarness::new(MAINNET.clone()).with_blocks(blocks.clone());
+    harness.tree.config = harness
+        .tree
+        .config
+        .with_persistence_threshold(50)
+        .with_num_state_masking_blocks(40)
+        .with_memory_block_buffer_target(5)
+        .with_persistence_backpressure_threshold(10);
+    harness.tree.persistence_state.last_persisted_block = blocks[39].recovered_block().num_hash();
+    let (_tx, rx) = crossbeam_channel::bounded(1);
+    harness.tree.persistence_state.start_save(blocks[44].recovered_block().num_hash(), rx);
+    assert!(harness.tree.should_pace_validation());
+    assert!(!harness.tree.should_backpressure());
 }
 
 #[test]
@@ -1688,7 +1727,7 @@ fn test_threshold_persistence_with_state_masking_blocks() {
         .unwrap();
     assert_eq!(
         test_harness.tree.persistence_pacing.delay(Duration::ZERO),
-        Duration::from_micros(10_500)
+        Duration::from_micros(12_500)
     );
 }
 

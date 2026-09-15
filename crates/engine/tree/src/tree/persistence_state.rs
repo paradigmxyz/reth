@@ -109,7 +109,7 @@ pub(crate) enum CurrentPersistenceAction {
     },
 }
 
-/// Paces validation using the last ten successful saves that released blocks from memory.
+/// Paces validation using the last three successful saves that released blocks from memory.
 #[derive(Debug, Default)]
 pub(crate) struct PersistencePacing {
     /// Oldest sample first; each sample is save duration per fully persisted block.
@@ -123,18 +123,18 @@ pub(crate) struct PersistencePacing {
 }
 
 impl PersistencePacing {
-    const WINDOW: usize = 10;
+    const WINDOW: usize = 3;
     const ALPHA: f64 = 2.0 / (Self::WINDOW as f64 + 1.0);
 
     /// Record every completion, including those below the backpressure threshold. Time between
     /// completions includes payload building and idle time, but excludes the previous block's
     /// pacing sleep: that sleep belongs to the block that incurred it.
-    pub(crate) fn on_validation_completed(&mut self, now: Instant, backpressure: bool) -> Duration {
+    pub(crate) fn on_validation_completed(&mut self, now: Instant, pacing: bool) -> Duration {
         let previous = self.last_validation_completed_at.replace(now);
         let previous_wait = self.total_wait - self.wait_at_last_completion;
         self.wait_at_last_completion = self.total_wait;
         match previous {
-            Some(previous) if backpressure => {
+            Some(previous) if pacing => {
                 self.delay(now.duration_since(previous).saturating_sub(previous_wait))
             }
             _ => Duration::ZERO,
@@ -161,7 +161,7 @@ impl PersistencePacing {
         let ema = samples
             .fold(first, |ema, sample| (1.0 - Self::ALPHA).mul_add(ema, Self::ALPHA * sample));
         // Apply the safety margin to the deficit, not the entire persistence estimate.
-        Duration::from_secs_f64(ema).saturating_sub(completion_interval).mul_f64(1.05)
+        Duration::from_secs_f64(ema).saturating_sub(completion_interval).mul_f64(1.25)
     }
 }
 
@@ -186,28 +186,28 @@ mod tests {
         );
         assert_eq!(
             pacing.on_validation_completed(start + Duration::from_millis(30), true),
-            Duration::from_millis(84)
+            Duration::from_millis(100)
         );
         // Charge the actual sleep (including oversleep) only to the preceding block.
-        pacing.total_wait += Duration::from_millis(90);
+        pacing.total_wait += Duration::from_millis(110);
         assert_eq!(
-            pacing.on_validation_completed(start + Duration::from_millis(140), true),
-            Duration::from_millis(84)
+            pacing.on_validation_completed(start + Duration::from_millis(160), true),
+            Duration::from_millis(100)
         );
-        pacing.total_wait += Duration::from_millis(84);
+        pacing.total_wait += Duration::from_millis(100);
         // A below-threshold completion consumes the previous sleep accounting too.
         assert_eq!(
-            pacing.on_validation_completed(start + Duration::from_millis(244), false),
+            pacing.on_validation_completed(start + Duration::from_millis(280), false),
             Duration::ZERO
         );
         assert_eq!(
-            pacing.on_validation_completed(start + Duration::from_millis(264), true),
-            Duration::from_millis(84)
+            pacing.on_validation_completed(start + Duration::from_millis(300), true),
+            Duration::from_millis(100)
         );
-        pacing.total_wait += Duration::from_millis(84);
+        pacing.total_wait += Duration::from_millis(100);
         // Genuine work/idle time that meets the estimate still needs no sleep.
         assert_eq!(
-            pacing.on_validation_completed(start + Duration::from_millis(448), true),
+            pacing.on_validation_completed(start + Duration::from_millis(500), true),
             Duration::ZERO
         );
     }
@@ -220,7 +220,7 @@ mod tests {
         pacing.record(Duration::from_millis(100), 10);
         assert_eq!(pacing.delay(Duration::ZERO), Duration::ZERO);
         pacing.record(Duration::from_millis(200), 20);
-        assert_eq!(pacing.delay(Duration::from_millis(4)), Duration::from_micros(6300));
+        assert_eq!(pacing.delay(Duration::from_millis(4)), Duration::from_micros(7500));
         assert_eq!(pacing.delay(Duration::from_millis(10)), Duration::ZERO);
         assert_eq!(pacing.delay(Duration::from_millis(20)), Duration::ZERO);
     }
@@ -230,13 +230,13 @@ mod tests {
         let mut pacing = PersistencePacing::default();
         pacing.record(Duration::from_millis(110), 1);
         pacing.record(Duration::from_millis(220), 1);
-        assert_eq!(pacing.delay(Duration::ZERO), Duration::from_micros(136_500));
+        assert_eq!(pacing.delay(Duration::ZERO), Duration::from_micros(206_250));
 
-        for _ in 0..10 {
+        for _ in 0..3 {
             pacing.record(Duration::from_millis(10), 1);
         }
-        assert_eq!(pacing.samples.len(), 10);
-        assert_eq!(pacing.delay(Duration::ZERO), Duration::from_micros(10_500));
+        assert_eq!(pacing.samples.len(), 3);
+        assert_eq!(pacing.delay(Duration::ZERO), Duration::from_micros(12_500));
     }
 
     #[test]
@@ -250,7 +250,7 @@ mod tests {
         for _ in 0..20 {
             now += Duration::from_millis(200);
             let sleep = pacing.on_validation_completed(now, true);
-            assert_eq!(sleep, Duration::from_millis(315));
+            assert_eq!(sleep, Duration::from_millis(375));
             pacing.total_wait += sleep;
             now += sleep;
         }
