@@ -504,27 +504,15 @@ where
         self.incoming_tx.clone()
     }
 
-    /// How many blocks the canonical tip is ahead of the last persisted block. A large gap means
-    /// persistence is falling behind execution.
-    const fn persistence_gap(&self) -> u64 {
-        self.state
-            .tree_state
-            .canonical_block_number()
-            .saturating_sub(self.persistence_state.last_persisted_block.number)
-    }
-
-    /// How many blocks beyond the configured in-memory buffer are awaiting persistence.
-    const fn persistence_backpressure_gap(&self) -> u64 {
-        self.persistence_gap().saturating_sub(self.config.memory_block_buffer_target())
-    }
-
     /// Returns `true` when the main loop should stop draining the tree input channel.
     ///
-    /// This is the case when persistence is already running and the number of blocks beyond the
-    /// configured in-memory buffer has reached the configured threshold.
-    const fn should_backpressure(&self) -> bool {
+    /// Count all retained executed blocks, including forks, the in-memory buffer, and blocks whose
+    /// state/trie writes are still masked. A durable DB tip does not imply these blocks were freed.
+    /// Only wait while persistence is running: otherwise engine messages may be needed to advance
+    /// forkchoice or finish a payload build before persistence can make progress.
+    fn should_backpressure(&self) -> bool {
         self.persistence_state.in_progress() &&
-            self.persistence_backpressure_gap() >=
+            self.state.tree_state.block_count() as u64 >=
                 self.config.persistence_backpressure_threshold()
     }
 
@@ -536,15 +524,14 @@ where
             // Each iteration has three phases:
             //
             // 1. Non-blocking poll for persistence completion. If the background flush already
-            //    landed, absorb the result now so the gap calculation below is fresh.
-            // 2. Decide how to wait for the next event. When the canonical-to-persisted gap beyond
-            //    the in-memory buffer reaches the backpressure threshold we only block on the
-            //    persistence receiver, leaving new engine requests sitting in the unbounded
-            //    upstream channel.
+            //    landed, absorb the result now so the retained block count below is fresh.
+            // 2. Decide how to wait for the next event. When the retained executed-block count
+            //    reaches the backpressure threshold we only block on the persistence receiver,
+            //    leaving new engine requests sitting in the unbounded upstream channel.
             // 3. Handle the event (engine message or persistence completion) and kick off a new
             //    persistence cycle if the threshold is met again.
             //
-            // The net effect: when the unbuffered persistence gap reaches the threshold, we stop
+            // The net effect: when the retained block count reaches the threshold, we stop
             // processing incoming messages and let them queue in the channel. This is only a soft
             // form of backpressure: it delays replies and, more importantly, prevents executing
             // further blocks that would pile up in the persistence queue - where each block
@@ -1629,6 +1616,10 @@ where
                         let is_pending = self.state.tree_state.canonical_block_hash() ==
                             block.recovered_block().parent_hash();
                         self.state.tree_state.insert_executed(block.clone());
+                        self.metrics
+                            .engine
+                            .executed_blocks
+                            .set(self.state.tree_state.block_count() as f64);
 
                         if is_pending {
                             debug!(target: "engine::tree", pending=?block_num_hash, "updating pending block");
@@ -2940,6 +2931,7 @@ where
                 self.state.tree_state.insert_executed(block);
             }
         }
+        self.metrics.engine.executed_blocks.set(self.state.tree_state.block_count() as f64);
     }
 
     /// This handles downloaded blocks that are shown to be disconnected from the canonical chain.
@@ -3558,6 +3550,7 @@ where
             self.persistence_state.last_persisted_block.hash,
             num,
         );
+        self.metrics.engine.executed_blocks.set(self.state.tree_state.block_count() as f64);
         Ok(())
     }
 }
