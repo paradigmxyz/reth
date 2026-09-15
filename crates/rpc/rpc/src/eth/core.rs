@@ -230,6 +230,8 @@ pub struct EthApiInner<N: RpcNodeCore, Rpc: RpcConvert> {
     signers: SignersForRpc<N::Provider, Rpc::Network>,
     /// The async cache frontend for eth related data
     eth_cache: EthStateCache<N::Primitives>,
+    /// Whether to cache computed BALs for transaction tracing.
+    pub(super) cache_computed_bals: bool,
     /// The async gas oracle frontend for gas price suggestions
     gas_oracle: GasPriceOracle<N::Provider>,
     /// Maximum gas limit for `eth_call` and call tracing RPC methods.
@@ -341,6 +343,7 @@ where
             components,
             signers,
             eth_cache,
+            cache_computed_bals: false,
             gas_oracle,
             gas_cap: gas_cap.into().into(),
             max_simulate_blocks,

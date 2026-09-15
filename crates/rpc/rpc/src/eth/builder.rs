@@ -557,7 +557,7 @@ where
             },
         );
 
-        EthApiInner::new(
+        let mut inner = EthApiInner::new(
             components,
             eth_cache,
             gas_oracle,
@@ -584,7 +584,9 @@ where
             send_raw_transaction_sync_timeout,
             evm_memory_limit,
             force_blob_sidecar_upcasting,
-        )
+        );
+        inner.cache_computed_bals = eth_state_cache_config.prewarm_bals;
+        inner
     }
 
     /// Builds the [`EthApi`] instance.
