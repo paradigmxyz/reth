@@ -35,6 +35,7 @@ use alloy_primitives::{
     map::{AddressSet, B256Map, B256Set},
     TxHash, B256,
 };
+use reth_primitives_traits::transaction::error::InvalidTransactionError;
 use rustc_hash::FxHashMap;
 use smallvec::SmallVec;
 #[cfg(test)]
@@ -252,7 +253,45 @@ impl<T: TransactionOrdering> TxPool<T> {
                     self.add_transaction_to_subpool(to, tx);
                 }
             }
-            (Ordering::Less, _) | (_, Ordering::Less) => {
+            (Ordering::Greater, Ordering::Less) => {
+                // The blob fee increased while the base fee decreased, so this update must both
+                // park transactions that no longer cover the blob fee and promote transactions
+                // that now cover both fees. Demote first so the promotion check sees the final
+                // fee state.
+                let removed =
+                    self.pending_pool.update_blob_fee(self.all_transactions.pending_fees.blob_fee);
+                for tx in removed {
+                    let to = {
+                        let tx =
+                            self.all_transactions.txs.get_mut(tx.id()).expect("tx exists in set");
+
+                        tx.state.remove(TxState::ENOUGH_BLOB_FEE_CAP_BLOCK);
+                        tx.subpool = tx.state.into();
+                        tx.subpool
+                    };
+                    self.add_transaction_to_subpool(to, tx);
+                }
+
+                let removed =
+                    self.blob_pool.enforce_pending_fees(&self.all_transactions.pending_fees);
+                for tx in removed {
+                    let subpool = {
+                        let tx_meta =
+                            self.all_transactions.txs.get_mut(tx.id()).expect("tx exists in set");
+                        tx_meta.state.insert(TxState::ENOUGH_BLOB_FEE_CAP_BLOCK);
+                        tx_meta.state.insert(TxState::ENOUGH_FEE_CAP_BLOCK);
+                        tx_meta.subpool = tx_meta.state.into();
+                        tx_meta.subpool
+                    };
+
+                    if subpool == SubPool::Pending {
+                        on_promoted(&tx);
+                    }
+
+                    self.add_transaction_to_subpool(subpool, tx);
+                }
+            }
+            (Ordering::Less, _) | (Ordering::Equal, Ordering::Less) => {
                 // decreased blob/base fee: recheck blob pool and promote all that are now valid
                 let removed =
                     self.blob_pool.enforce_pending_fees(&self.all_transactions.pending_fees);
@@ -646,13 +685,20 @@ impl<T: TransactionOrdering> TxPool<T> {
         // Apply the state changes to the total set of transactions which triggers sub-pool updates.
         let mut updates = self.all_transactions.update(&changed_senders);
 
-        // track changed accounts
-        self.all_transactions.sender_info.extend(changed_senders);
-
         // Process the sub-pool updates
         let mut outcome = UpdateOutcome::default();
-        #[expect(clippy::iter_with_drain, reason = "retain the scratch buffer allocation")]
-        self.process_updates(updates.drain(..), &mut outcome);
+        if self.config.enforce_tracked_nonce {
+            // Track the changed accounts only after the discards: a discard that removes the
+            // sender's last transaction also removes its info, and the tracked nonce must survive
+            // for `add_transaction` to reject a stale validation result.
+            #[expect(clippy::iter_with_drain, reason = "retain the scratch buffer allocation")]
+            self.process_updates(updates.drain(..), &mut outcome);
+            self.all_transactions.sender_info.extend(changed_senders);
+        } else {
+            self.all_transactions.sender_info.extend(changed_senders);
+            #[expect(clippy::iter_with_drain, reason = "retain the scratch buffer allocation")]
+            self.process_updates(updates.drain(..), &mut outcome);
+        }
         self.all_transactions.update_buffer = updates;
         // update the metrics after the update
         self.update_size_metrics();
@@ -741,12 +787,38 @@ impl<T: TransactionOrdering> TxPool<T> {
     pub(crate) fn add_transaction(
         &mut self,
         tx: ValidPoolTransaction<T::Transaction>,
-        on_chain_balance: U256,
-        on_chain_nonce: u64,
+        mut on_chain_balance: U256,
+        mut on_chain_nonce: u64,
         on_chain_code_hash: Option<B256>,
     ) -> PoolResult<AddedTransaction<T::Transaction>> {
         if self.contains(tx.hash()) {
             return Err(PoolError::new(*tx.hash(), PoolErrorKind::AlreadyImported))
+        }
+
+        // Validation reads state outside the pool lock, so its snapshot can predate the last
+        // canonical update. Opt-in because it assumes nonces only move forward, which a reorg
+        // breaks. Transactions exempt from the nonce check keep the validator's verdict.
+        if self.config.enforce_tracked_nonce &&
+            tx.transaction.requires_nonce_check() &&
+            let Some(info) = self.all_transactions.sender_info.get(&tx.sender_id()) &&
+            info.state_nonce > on_chain_nonce
+        {
+            // Below the tracked nonce the transaction was validated against outdated state;
+            // inserted as pending it would shadow the sender's executable transactions in the
+            // payload builder.
+            if tx.nonce() < info.state_nonce {
+                return Err(PoolError::new(
+                    *tx.hash(),
+                    InvalidPoolTransactionError::Consensus(
+                        InvalidTransactionError::NonceNotConsistent {
+                            tx: tx.nonce(),
+                            state: info.state_nonce,
+                        },
+                    ),
+                ))
+            }
+            on_chain_nonce = info.state_nonce;
+            on_chain_balance = info.balance;
         }
 
         self.validate_auth(&tx, on_chain_nonce, on_chain_code_hash)?;
@@ -1382,6 +1454,10 @@ pub(crate) struct AllTransactions<T: PoolTransaction> {
     /// _All_ transaction in the pool sorted by their sender and nonce pair.
     txs: BTreeMap<TransactionId, PoolInternalTransaction<T>>,
     /// Contains the currently known information about the senders.
+    ///
+    /// With `PoolConfig::enforce_tracked_nonce` entries outlive a sender's transactions when an
+    /// account update discards them, so a validation result computed against older state cannot
+    /// regress the tracked nonce.
     sender_info: FxHashMap<SenderId, SenderInfo>,
     /// Tracks the number of transactions by sender that are currently in the pool.
     tx_counter: FxHashMap<SenderId, usize>,
@@ -2116,7 +2192,9 @@ impl<T: PoolTransaction> AllTransactions<T> {
                 let maybe_replacement = transaction.as_ref();
 
                 // Ensure the new transaction is not underpriced
-                if existing_transaction.is_underpriced(maybe_replacement, &self.price_bumps) {
+                if existing_transaction
+                    .is_replacement_underpriced(maybe_replacement, &self.price_bumps)
+                {
                     return Err(InsertErr::Underpriced {
                         transaction: pool_tx.transaction,
                         existing: *entry.get().transaction.hash(),
@@ -3966,6 +4044,85 @@ mod tests {
     }
 
     #[test]
+    fn update_blob_fee_parks_pending_when_base_fee_falls_in_the_same_block() {
+        let mut f = MockTransactionFactory::default();
+        let mut pool = TxPool::new(MockOrdering::default(), Default::default());
+
+        let initial_blob_fee = pool.all_transactions.pending_fees.blob_fee;
+        let initial_base_fee = 100u64;
+        pool.all_transactions.pending_fees.base_fee = initial_base_fee;
+
+        // comfortably satisfies both fees, so it starts out pending
+        let tx = MockTransaction::eip4844()
+            .with_max_fee(500)
+            .with_priority_fee(1)
+            .with_blob_fee(initial_blob_fee + 100);
+        let validated = f.validated(tx.clone());
+        let id = *validated.id();
+        pool.add_transaction(validated, U256::from(1_000_000), 0, None).unwrap();
+        assert_eq!(pool.pending_pool.len(), 1);
+
+        // the blob fee rises past its cap while the base fee falls, which is what a blob heavy
+        // but gas light block produces. The rise still has to park it.
+        let raised_blob_fee = tx.max_fee_per_blob_gas().unwrap() + 1;
+        pool.all_transactions.pending_fees.base_fee = initial_base_fee - 1;
+        pool.update_blob_fee(raised_blob_fee, Ordering::Less, |_| {});
+
+        assert!(pool.pending_pool.is_empty(), "transaction was left in the pending pool");
+        assert_eq!(pool.blob_pool.len(), 1);
+
+        let tx_meta = pool.all_transactions.txs.get(&id).unwrap();
+        assert!(
+            !tx_meta.state.contains(TxState::ENOUGH_BLOB_FEE_CAP_BLOCK),
+            "blob fee cap flag was not cleared"
+        );
+        assert_eq!(tx_meta.subpool, SubPool::Blob);
+    }
+
+    #[test]
+    fn update_blob_fee_demotes_and_promotes_when_base_fee_falls() {
+        let mut f = MockTransactionFactory::default();
+        let mut pool = TxPool::new(MockOrdering::default(), Default::default());
+
+        let initial_blob_fee = pool.all_transactions.pending_fees.blob_fee;
+        let initial_base_fee = 600;
+        pool.all_transactions.pending_fees.base_fee = initial_base_fee;
+
+        let tx_to_demote = MockTransaction::eip4844()
+            .with_max_fee(700)
+            .with_priority_fee(1)
+            .with_blob_fee(initial_blob_fee + 100);
+        let validated = f.validated(tx_to_demote);
+        let demoted_id = *validated.id();
+        pool.add_transaction(validated, U256::from(1_000_000), 0, None).unwrap();
+
+        let tx_to_promote = MockTransaction::eip4844()
+            .with_max_fee(500)
+            .with_priority_fee(1)
+            .with_blob_fee(initial_blob_fee + 300);
+        let validated = f.validated(tx_to_promote);
+        let promoted_id = *validated.id();
+        pool.add_transaction(validated, U256::from(1_000_000), 0, None).unwrap();
+
+        assert_eq!(pool.pending_pool.len(), 1);
+        assert_eq!(pool.blob_pool.len(), 1);
+
+        // The lower base fee makes one transaction affordable while the higher blob fee makes the
+        // other unaffordable, so the same update must both promote and demote.
+        let raised_blob_fee = initial_blob_fee + 200;
+        pool.all_transactions.pending_fees.base_fee = 400;
+        let mut promoted = Vec::new();
+        pool.update_blob_fee(raised_blob_fee, Ordering::Less, |tx| promoted.push(*tx.id()));
+
+        assert_eq!(pool.pending_pool.len(), 1);
+        assert_eq!(pool.blob_pool.len(), 1);
+        assert_eq!(promoted, vec![promoted_id]);
+
+        assert_eq!(pool.all_transactions.txs.get(&demoted_id).unwrap().subpool, SubPool::Blob);
+        assert_eq!(pool.all_transactions.txs.get(&promoted_id).unwrap().subpool, SubPool::Pending);
+    }
+
+    #[test]
     fn apply_fee_updates_records_promotions_after_blob_fee_drop() {
         let mut f = MockTransactionFactory::default();
         let mut pool = TxPool::new(MockOrdering::default(), Default::default());
@@ -4213,6 +4370,157 @@ mod tests {
         let outcome = pool.update_accounts(changed_senders);
         assert_eq!(outcome.discarded.len(), 1);
         assert_eq!(pool.pending_pool.len(), 1);
+    }
+
+    /// Pool with `enforce_tracked_nonce` enabled.
+    fn stale_validation_pool() -> TxPool<MockOrdering> {
+        TxPool::new(
+            MockOrdering::default(),
+            PoolConfig { enforce_tracked_nonce: true, ..Default::default() },
+        )
+    }
+
+    #[test]
+    fn stale_validation_accepted_by_default() {
+        let mut f = MockTransactionFactory::default();
+        let mut pool = TxPool::new(MockOrdering::default(), Default::default());
+
+        let template = MockTransaction::eip1559();
+        let first = f.validated(template.clone().with_nonce(0).rng_hash());
+        let sender = first.sender_id();
+        pool.add_transaction(first, U256::from(1_000), 0, None).unwrap();
+
+        let changed = FxHashMap::from_iter([(
+            sender,
+            SenderInfo { state_nonce: 1, balance: U256::from(1_000) },
+        )]);
+        let outcome = pool.update_accounts(changed);
+        assert_eq!(outcome.discarded.len(), 1);
+        // discarding the sender's last transaction drops its info
+        assert!(!pool.all_transactions.sender_info.contains_key(&sender));
+
+        // the validation snapshot is trusted as is
+        let stale = f.validated(template.with_nonce(0).rng_hash());
+        pool.add_transaction(stale, U256::from(1_000), 0, None).unwrap();
+        assert_eq!(pool.pending_pool.len(), 1);
+        assert_eq!(pool.all_transactions.sender_info[&sender].state_nonce, 0);
+    }
+
+    #[test]
+    fn stale_validation_does_not_regress_sender_state() {
+        let mut f = MockTransactionFactory::default();
+        let mut pool = stale_validation_pool();
+
+        let template = MockTransaction::eip1559();
+        let first = f.validated(template.clone().with_nonce(0).rng_hash());
+        let sender = first.sender_id();
+        pool.add_transaction(first, U256::from(1_000), 0, None).unwrap();
+
+        let mut changed_senders = HashMap::default();
+        changed_senders.insert(sender, SenderInfo { state_nonce: 1, balance: U256::from(1_000) });
+        let outcome = pool.update_accounts(changed_senders);
+        assert_eq!(outcome.discarded.len(), 1);
+        assert_eq!(pool.all_transactions.sender_info[&sender].state_nonce, 1);
+
+        // Stale validation for the next nonce remains pending.
+        let current = f.validated(template.clone().with_nonce(1).rng_hash());
+        pool.add_transaction(current, U256::from(1_000), 0, None).unwrap();
+        assert_eq!(pool.pending_pool.len(), 1);
+        assert_eq!(pool.queued_pool.len(), 0);
+        assert_eq!(pool.all_transactions.sender_info[&sender].state_nonce, 1);
+
+        let stale = f.validated(template.with_nonce(0).rng_hash());
+        let stale_hash = *stale.hash();
+        let err = pool.add_transaction(stale, U256::from(1_000), 0, None).unwrap_err();
+        assert!(matches!(
+            err.kind,
+            PoolErrorKind::InvalidTransaction(InvalidPoolTransactionError::Consensus(
+                InvalidTransactionError::NonceNotConsistent { tx: 0, state: 1 }
+            ))
+        ));
+        assert!(!pool.contains(&stale_hash));
+        assert_eq!(pool.all_transactions.sender_info[&sender].state_nonce, 1);
+    }
+
+    #[test]
+    fn stale_validation_resubmission_after_commit() {
+        let mut f = MockTransactionFactory::default();
+        let mut pool = stale_validation_pool();
+        let block_info = pool.block_info();
+
+        let template = MockTransaction::eip1559();
+        let tx0 = template.clone().with_nonce(0).rng_hash();
+        let tx1 = template.clone().with_nonce(1).rng_hash();
+        let first = f.validated(tx0.clone());
+        let sender = first.sender_id();
+        pool.add_transaction(first, U256::from(1_000), 0, None).unwrap();
+        pool.add_transaction(f.validated(tx1.clone()), U256::from(1_000), 0, None).unwrap();
+        assert_eq!(pool.pending_pool.len(), 2);
+
+        // Nonce 0 is mined while resubmissions of both nonces are still being validated.
+        let changed = FxHashMap::from_iter([(
+            sender,
+            SenderInfo { state_nonce: 1, balance: U256::from(1_000) },
+        )]);
+        pool.on_canonical_state_change(
+            block_info,
+            vec![*tx0.get_hash()],
+            changed,
+            PoolUpdateKind::Commit,
+        );
+        assert_eq!(pool.pending_pool.len(), 1);
+
+        // The resubmitted mined nonce is rejected instead of shadowing nonce 1.
+        let retry = f.validated(template.with_nonce(0).rng_hash());
+        let err = pool.add_transaction(retry, U256::from(1_000), 0, None).unwrap_err();
+        assert!(matches!(
+            err.kind,
+            PoolErrorKind::InvalidTransaction(InvalidPoolTransactionError::Consensus(
+                InvalidTransactionError::NonceNotConsistent { tx: 0, state: 1 }
+            ))
+        ));
+
+        // The replacement of the executable nonce is accepted using the tracked nonce.
+        let replacement = f.validated(tx1.inc_price_by(10).rng_hash());
+        let added = pool.add_transaction(replacement, U256::from(1_000), 0, None).unwrap();
+        assert!(added.as_pending().is_some());
+        assert!(added.replaced().is_some());
+        assert_eq!(pool.pending_pool.len(), 1);
+        assert_eq!(pool.all_transactions.sender_info[&sender].state_nonce, 1);
+        let next =
+            pool.get_highest_consecutive_transaction_by_sender(sender.into_transaction_id(1));
+        assert_eq!(next.map(|tx| tx.nonce()), Some(1));
+    }
+
+    #[test]
+    fn stale_validation_uses_tracked_balance() {
+        let mut f = MockTransactionFactory::default();
+        let mut pool = stale_validation_pool();
+
+        // each transaction costs 1_500_000
+        let template = MockTransaction::eip1559().with_gas_price(50).with_gas_limit(30_000);
+        let first = f.validated(template.clone().with_nonce(0).rng_hash());
+        let sender = first.sender_id();
+        pool.add_transaction(first, U256::from(10_000_000), 0, None).unwrap();
+        assert_eq!(pool.pending_pool.len(), 1);
+
+        // The commit mines nonce 0 and drains the balance below the cost of the next transaction.
+        let changed = FxHashMap::from_iter([(
+            sender,
+            SenderInfo { state_nonce: 1, balance: U256::from(1_000) },
+        )]);
+        pool.update_accounts(changed);
+
+        // The stale snapshot still reports the old balance, the tracked balance applies.
+        let next = f.validated(template.with_nonce(1).rng_hash());
+        let id = *next.id();
+        pool.add_transaction(next, U256::from(10_000_000), 0, None).unwrap();
+        assert_eq!(pool.pending_pool.len(), 0);
+        assert_eq!(pool.queued_pool.len(), 1);
+        let state = pool.all_transactions.get(&id).unwrap().state;
+        assert!(state.contains(TxState::NO_NONCE_GAPS));
+        assert!(!state.contains(TxState::ENOUGH_BALANCE));
+        assert_eq!(pool.all_transactions.sender_info[&sender].balance, U256::from(1_000));
     }
 
     #[test]
