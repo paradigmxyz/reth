@@ -10,7 +10,10 @@
 //! matches the target header.
 //!
 //! Downloaded state goes into the hashed state tables, owned by an attempt record that commits
-//! with it. Scheduling, in-flight requests and cancellation stay in memory.
+//! with it, along with how far the account key space has been downloaded. An account range only
+//! commits with storage matching its accounts' roots and code matching their hashes, so committed
+//! progress never depends on work still pending. Storage too large for one response is persisted
+//! ahead of its range, under progress tied to the attempt, pivot and range.
 //!
 //! ```
 //! use reth_snap_sync::SnapPivotPolicy;
@@ -33,17 +36,30 @@
 )]
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 
+mod account;
 mod attempt;
+mod bal;
+mod common;
 mod error;
 mod generation;
 mod pivot;
 mod session;
+mod storage;
 
 #[cfg(test)]
 mod test_utils;
 
+pub use account::{
+    AccountCoverage, AccountRangeDownload, AccountRangeStep, SnapAccountStore, VerifiedRange,
+};
 pub use attempt::{SnapAttemptStore, SnapWrite};
+pub use bal::{BalStateUpdate, DownloadedAccount};
+pub use common::{DEFAULT_RESPONSE_BYTES, MAX_HASH};
 pub use error::SnapSyncError;
 pub use generation::{SnapGeneration, SnapPhase};
 pub use pivot::SnapPivotPolicy;
 pub use session::{SnapSyncSession, SnapSyncSessionState};
+pub use storage::{
+    SnapStorageStore, StorageChunk, StorageProgress, StorageRangeDownload, StorageRangeStep,
+    DEFAULT_STORAGE_ACCOUNTS,
+};

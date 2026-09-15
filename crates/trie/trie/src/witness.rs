@@ -182,12 +182,7 @@ where
                 let mut targets = MultiProofTargetsV2::default();
 
                 for (&hashed_address, slot_updates) in storage_updates.iter_mut() {
-                    // Updates the trie took ownership of are retried by `update_leaves` itself.
-                    if slot_updates.is_empty() &&
-                        sparse_trie
-                            .storage_trie_ref(&hashed_address)
-                            .is_none_or(|trie| !trie.blocked_updates().has_retryable())
-                    {
+                    if slot_updates.is_empty() {
                         continue;
                     }
                     let storage_trie = sparse_trie

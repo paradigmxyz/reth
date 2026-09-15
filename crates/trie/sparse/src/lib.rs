@@ -15,9 +15,6 @@ mod trie;
 #[cfg(feature = "std")]
 pub use trie::*;
 
-mod blocked;
-pub use blocked::*;
-
 mod traits;
 pub use traits::*;
 
