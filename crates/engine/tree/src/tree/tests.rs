@@ -1367,6 +1367,55 @@ async fn test_backpressure_counts_built_blocks_without_revalidation() {
 }
 
 #[tokio::test]
+async fn test_built_block_admission_acknowledges_after_pacing() {
+    let blocks: Vec<_> = TestBlockBuilder::eth().get_executed_blocks(1..3).collect();
+    let mut harness = TestHarness::new(MAINNET.clone()).with_blocks(vec![blocks[0].clone()]);
+    harness.tree.config = harness.tree.config.with_persistence_threshold(0);
+    let (_persist_tx, persist_rx) = crossbeam_channel::bounded(1);
+    harness.tree.persistence_state.start_save(blocks[0].recovered_block().num_hash(), persist_rx);
+    for _ in 0..2 {
+        harness.tree.persistence_pacing.record(Duration::from_millis(100), 1);
+    }
+    let payload = reth_payload_primitives::BuiltPayloadExecutedBlock {
+        recovered_block: Arc::new(blocks[1].recovered_block().clone()),
+        execution_output: Arc::new(Default::default()),
+        hashed_state: Arc::new(Default::default()),
+        trie_updates: Arc::new(Default::default()),
+    };
+    harness.tree.persistence_pacing.last_validation_completed_at = Some(Instant::now());
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    harness
+        .tree
+        .on_engine_message(FromEngine::Request(EngineApiRequest::Beacon(
+            BeaconEngineMessage::InsertExecutedBlock { payload: payload.clone(), tx },
+        )))
+        .unwrap();
+    assert!(rx.await.unwrap());
+    let wait = harness.tree.persistence_pacing.total_wait;
+    assert!(!wait.is_zero());
+    let completion = harness.tree.persistence_pacing.last_validation_completed_at;
+    // The asynchronous builder notification can arrive after acknowledged admission.
+    harness
+        .tree
+        .on_engine_message(FromEngine::Request(EngineApiRequest::InsertExecutedBlock(
+            payload.clone(),
+        )))
+        .unwrap();
+    assert_eq!(harness.tree.persistence_pacing.total_wait, wait);
+    // Or it can arrive before the acknowledgment request: neither order sleeps twice.
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    harness
+        .tree
+        .on_engine_message(FromEngine::Request(EngineApiRequest::Beacon(
+            BeaconEngineMessage::InsertExecutedBlock { payload, tx },
+        )))
+        .unwrap();
+    assert!(rx.await.unwrap());
+    assert_eq!(harness.tree.persistence_pacing.total_wait, wait);
+    assert_eq!(harness.tree.persistence_pacing.last_validation_completed_at, completion);
+}
+
+#[tokio::test]
 async fn test_tree_state_on_new_head_reorg() {
     reth_tracing::init_test_tracing();
     let chain_spec = MAINNET.clone();

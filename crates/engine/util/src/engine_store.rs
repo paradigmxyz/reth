@@ -62,6 +62,8 @@ impl EngineMessageStore {
         fs::create_dir_all(&self.path)?; // ensure that store path had been created
         let timestamp = received_at.duration_since(SystemTime::UNIX_EPOCH).unwrap().as_millis();
         match msg {
+            // Local execution results are not replayable Engine API requests.
+            BeaconEngineMessage::InsertExecutedBlock { .. } => {}
             BeaconEngineMessage::ForkchoiceUpdated { state, payload_attrs, tx: _tx } => {
                 let filename = format!("{}-fcu-{}.json", timestamp, state.head_block_hash);
                 fs::write(

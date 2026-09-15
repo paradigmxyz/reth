@@ -26,7 +26,9 @@ use reth_errors::{ConsensusError, ProviderResult};
 use reth_evm::ConfigureEvm;
 use reth_network_p2p::full_block::SealedBlockWithAccessList;
 use reth_payload_builder::{BuildNewPayload, PayloadBuilderHandle, PayloadBuilderLease};
-use reth_payload_primitives::{BuiltPayload, NewPayloadError, PayloadAttributes, PayloadTypes};
+use reth_payload_primitives::{
+    BuiltPayload, BuiltPayloadExecutedBlock, NewPayloadError, PayloadAttributes, PayloadTypes,
+};
 use reth_primitives_traits::{
     FastInstant as Instant, NodePrimitives, RecoveredBlock, SealedBlock, SealedHeader,
 };
@@ -541,6 +543,39 @@ where
         self.persistence_pacing.total_wait += elapsed;
         self.metrics.engine.backpressure_stall_duration.record(elapsed);
         self.metrics.engine.backpressure_active.set(0.0);
+    }
+
+    /// Both the builder notification and acknowledged admission share one insertion and sleep.
+    fn insert_built_block(&mut self, payload: BuiltPayloadExecutedBlock<N>) -> bool {
+        let block_num_hash = payload.recovered_block.num_hash();
+        if self.state.tree_state.contains_hash(&block_num_hash.hash) {
+            return true
+        }
+        if block_num_hash.number <= self.state.tree_state.canonical_block_number() {
+            return false
+        }
+        debug!(target: "engine::tree", block=?block_num_hash, "inserting already executed block");
+        let now = Instant::now();
+        let block = match self.payload_validator.on_inserted_executed_block(payload) {
+            Ok(block) => block,
+            Err(err) => {
+                warn!(target: "engine::tree", %err, block=?block_num_hash, "Failed to insert already executed block");
+                return false
+            }
+        };
+        let is_pending =
+            self.state.tree_state.canonical_block_hash() == block.recovered_block().parent_hash();
+        self.state.tree_state.insert_executed(block.clone());
+        if is_pending {
+            debug!(target: "engine::tree", pending=?block_num_hash, "updating pending block");
+            self.canonical_in_memory_state.set_pending_block(block.clone());
+        }
+        self.metrics.engine.inserted_already_executed_blocks.increment(1);
+        self.emit_event(EngineApiEvent::BeaconConsensus(
+            ConsensusEngineEvent::CanonicalBlockAdded(block, now.elapsed()),
+        ));
+        self.pace_validation();
+        true
     }
 
     /// Run the engine API handler.
@@ -1608,46 +1643,14 @@ where
             FromEngine::Request(request) => {
                 match request {
                     EngineApiRequest::InsertExecutedBlock(payload) => {
-                        let block_num_hash = payload.recovered_block.num_hash();
-                        if block_num_hash.number <= self.state.tree_state.canonical_block_number() {
-                            // outdated block that can be skipped
-                            return Ok(ops::ControlFlow::Continue(()))
-                        }
-
-                        if self.state.tree_state.contains_hash(&block_num_hash.hash) {
-                            // block already known to the tree (e.g. delivered via newPayload first)
-                            return Ok(ops::ControlFlow::Continue(()))
-                        }
-
-                        debug!(target: "engine::tree", block=?block_num_hash, "inserting already executed block");
-                        let now = Instant::now();
-
-                        let block = match self.payload_validator.on_inserted_executed_block(payload)
-                        {
-                            Ok(block) => block,
-                            Err(err) => {
-                                warn!(target: "engine::tree", %err, block=?block_num_hash, "Failed to insert already executed block");
-                                return Ok(ops::ControlFlow::Continue(()))
-                            }
-                        };
-
-                        let is_pending = self.state.tree_state.canonical_block_hash() ==
-                            block.recovered_block().parent_hash();
-                        self.state.tree_state.insert_executed(block.clone());
-
-                        if is_pending {
-                            debug!(target: "engine::tree", pending=?block_num_hash, "updating pending block");
-                            self.canonical_in_memory_state.set_pending_block(block.clone());
-                        }
-
-                        self.metrics.engine.inserted_already_executed_blocks.increment(1);
-                        self.emit_event(EngineApiEvent::BeaconConsensus(
-                            ConsensusEngineEvent::CanonicalBlockAdded(block, now.elapsed()),
-                        ));
-                        self.pace_validation();
+                        self.insert_built_block(payload);
                     }
                     EngineApiRequest::Beacon(request) => {
                         match request {
+                            BeaconEngineMessage::InsertExecutedBlock { payload, tx } => {
+                                let admitted = self.insert_built_block(payload);
+                                let _ = tx.send(admitted);
+                            }
                             BeaconEngineMessage::ForkchoiceUpdated { state, payload_attrs, tx } => {
                                 let has_attrs = payload_attrs.is_some();
 
