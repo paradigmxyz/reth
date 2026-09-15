@@ -3,8 +3,6 @@ use super::{
     StorageRootProvider,
 };
 use alloc::boxed::Box;
-#[cfg(feature = "chain-state")]
-use alloc::sync::Arc;
 use alloy_consensus::constants::KECCAK_EMPTY;
 use alloy_eips::{BlockId, BlockNumberOrTag};
 use alloy_primitives::{Address, BlockHash, BlockNumber, StorageKey, StorageValue, B256, U256};
@@ -32,12 +30,6 @@ pub trait StateReader: Send {
 
 /// Type alias of boxed [`StateProvider`].
 pub type StateProviderBox = Box<dyn StateProvider + Send + 'static>;
-
-/// Creates state providers for one specific appended block.
-pub trait AppendedBlockStateProviderFactory: Send + Sync {
-    /// Creates a state provider for the appended block.
-    fn state_provider(&self) -> ProviderResult<StateProviderBox>;
-}
 
 /// An abstraction for a type that provides state data.
 #[auto_impl(&, Arc, Box)]
@@ -160,16 +152,6 @@ pub trait StateProviderFactory: BlockIdReader + Send {
         parent_hash: BlockHash,
         block: ExecutedBlock<Self::Primitives>,
     ) -> ProviderResult<StateProviderBox>;
-
-    /// Returns a reusable factory for state providers with `block` applied to `parent_hash`.
-    #[cfg(feature = "chain-state")]
-    fn state_provider_factory_with_block_appended(
-        &self,
-        _parent_hash: BlockHash,
-        _block: ExecutedBlock<Self::Primitives>,
-    ) -> ProviderResult<Option<Arc<dyn AppendedBlockStateProviderFactory>>> {
-        Ok(None)
-    }
 
     /// Returns a [`StateProvider`] indexed by the given [`BlockId`].
     ///
