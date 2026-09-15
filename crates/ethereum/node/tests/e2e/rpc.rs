@@ -115,7 +115,7 @@ async fn test_block_access_list_lookup_semantics() -> eyre::Result<()> {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn test_generated_bal_is_cached_for_transaction_replay() -> eyre::Result<()> {
+async fn test_generated_bal_cache_respects_prewarm_setting() -> eyre::Result<()> {
     for prewarm in [false, true] {
         let chain_spec = Arc::new(
             ChainSpecBuilder::default()
@@ -152,7 +152,19 @@ async fn test_generated_bal_is_cached_for_transaction_replay() -> eyre::Result<(
             serde_json::json!({"tracer": "prestateTracer", "tracerConfig": {"diffMode": true}});
         let hashes = [*first.tx_hash(), receipt.transaction_hash];
         let mut expected = Vec::new();
-        if !prewarm {
+        if prewarm {
+            tokio::time::timeout(std::time::Duration::from_secs(10), async {
+                loop {
+                    let (_, bal) =
+                        cache.get_recovered_block_and_maybe_bal(block_hash).await?.unwrap();
+                    if bal.is_some() {
+                        return Ok::<_, eyre::Report>(());
+                    }
+                    tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+                }
+            })
+            .await??;
+        } else {
             assert!(cache
                 .get_recovered_block_and_maybe_bal(block_hash)
                 .await?
@@ -169,16 +181,13 @@ async fn test_generated_bal_is_cached_for_transaction_replay() -> eyre::Result<(
             let bal: serde_json::Value =
                 client.request("eth_getBlockAccessList", (block_hash,)).await?;
             assert!(!bal.as_array().unwrap().is_empty());
+            assert!(cache
+                .get_recovered_block_and_maybe_bal(block_hash)
+                .await?
+                .unwrap()
+                .1
+                .is_none());
         }
-        tokio::time::timeout(std::time::Duration::from_secs(10), async {
-            loop {
-                if cache.get_recovered_block_and_maybe_bal(block_hash).await?.unwrap().1.is_some() {
-                    return Ok::<_, eyre::Report>(());
-                }
-                tokio::time::sleep(std::time::Duration::from_millis(10)).await;
-            }
-        })
-        .await??;
         for (index, hash) in hashes.into_iter().enumerate() {
             let actual: serde_json::Value =
                 client.request("debug_traceTransaction", (hash, &opts)).await?;

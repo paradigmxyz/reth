@@ -77,6 +77,10 @@ pub trait GetBlockAccessList: Trace + Call + LoadBlock + RpcNodeCoreExt {
                     .map_err(|err| EthApiError::Internal(err.into()))?;
 
                 let revm_bal = db.take_built_bal().expect("BAL builder configured");
+                if !eth_api.cache().prewarm_bals() {
+                    return Ok(Some(revm_bal.into_alloy_bal()));
+                }
+
                 let bal = revm_bal.clone().into_alloy_bal();
                 let raw = alloy_rlp::encode(&bal).into();
                 eth_api.cache().insert_bal(block.hash(), DecodedBal::new(Arc::new(revm_bal), raw));
