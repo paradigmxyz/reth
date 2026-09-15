@@ -266,7 +266,7 @@ impl ProofWorkerHandle {
         });
         if storage_overflow_count > 0 {
             let storage_rt = runtime.clone();
-            runtime.spawn_blocking_named("storage-overflow-workers", move || {
+            runtime.spawn_blocking_named("storage-worker2", move || {
                 if let Some(pool) = storage_rt.proof_storage_overflow_worker_pool() {
                     spawn_storage_workers(pool, storage_overflow_count, storage_base_count);
                 }
@@ -329,7 +329,7 @@ impl ProofWorkerHandle {
         });
         if account_overflow_count > 0 {
             let account_rt = runtime.clone();
-            runtime.spawn_blocking_named("account-overflow-workers", move || {
+            runtime.spawn_blocking_named("account-worker2", move || {
                 if let Some(pool) = account_rt.proof_account_overflow_worker_pool() {
                     spawn_account_workers(pool, account_overflow_count, account_base_count);
                 }
