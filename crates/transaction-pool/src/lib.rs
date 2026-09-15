@@ -706,6 +706,10 @@ where
         self.inner().on_propagated(txs)
     }
 
+    fn has_propagation_listeners(&self) -> bool {
+        self.inner().has_event_listeners()
+    }
+
     fn get_transactions_by_sender(
         &self,
         sender: Address,
