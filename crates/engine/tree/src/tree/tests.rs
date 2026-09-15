@@ -2602,7 +2602,7 @@ mod forkchoice_updated_tests {
 
         let new_head = blocks[2].recovered_block().hash();
 
-        // Test 1: Apply chain update to a new head
+        // Test 1: Reject a canonical ancestor while finality is unknown
         let state = ForkchoiceState {
             head_block_hash: new_head,
             safe_block_hash: B256::ZERO,
@@ -2610,10 +2610,10 @@ mod forkchoice_updated_tests {
         };
 
         let result = test_harness.tree.apply_chain_update(state, &None).unwrap();
-        assert!(result.is_some(), "Should apply chain update for new head");
+        assert!(result.is_some(), "Should reject canonical ancestor without known finality");
         let outcome = result.unwrap();
-        let fcu_result = outcome.outcome.await.unwrap();
-        assert!(fcu_result.payload_status.is_valid());
+        let err = outcome.outcome.await.unwrap_err();
+        assert_matches!(err, ForkchoiceUpdateError::TooDeepReorg);
 
         // Test 2: Try to apply chain update to missing block
         let missing_state = ForkchoiceState {
