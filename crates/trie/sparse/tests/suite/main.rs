@@ -22,7 +22,9 @@ use alloy_rlp::{encode_fixed_size, Decodable};
 use alloy_trie::EMPTY_ROOT_HASH;
 use reth_trie::test_utils::TrieTestHarness;
 use reth_trie_common::{Nibbles, ProofV2Target, TrieNodeV2};
-use reth_trie_sparse::{LeafLookup, LeafLookupError, LeafUpdate, SparseTrie, TrieNodeEpoch};
+use reth_trie_sparse::{
+    LeafLookup, LeafLookupError, LeafUpdate, LeafUpdateEvent, SparseTrie, TrieNodeEpoch,
+};
 use std::{collections::BTreeMap, iter::once};
 
 mod find_leaf;
@@ -242,7 +244,9 @@ sparse_trie_tests! {
     test_remove_nonexistent_leaf_preserves_hashes,
     test_update_leaves_blinded_node_requests_proof,
     test_update_leaves_retry_after_reveal,
+    test_update_leaves_supersede_blocked_update,
     test_remove_leaf_blinded_sibling_requires_reveal,
+    test_collapse_blocked_removal_applies_after_branch_gains_leaf,
     test_update_leaves_removal_branch_collapse_blinded_sibling,
     test_update_leaves_subtrie_collapse_requests_proof,
     test_update_leaves_multiple_keys_same_blinded_node,
@@ -250,6 +254,7 @@ sparse_trie_tests! {
     test_update_leaves_touched_blinded_requests_proof,
     test_update_leaves_touched_nonexistent_key,
     test_update_leaves_touched_nonexistent_in_populated_trie,
+    test_update_leaves_reports_touched_values,
     test_update_leaves_multiple_mixed_updates,
     test_remove_leaf_marks_ancestors_dirty_unconditionally,
     test_orphaned_value_update_falls_through_to_full_insertion,
@@ -312,4 +317,5 @@ sparse_trie_tests! {
     test_get_leaf_value_for_storage_root_lookup,
     test_find_leaf_before_update_to_check_existence,
     test_prune_then_reuse_for_next_block,
+    test_collapse_asks_for_blinded_sibling_once,
 }

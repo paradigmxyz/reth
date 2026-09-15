@@ -512,10 +512,12 @@ pub(super) fn test_update_leaves_blinded_node_requests_proof<T: SparseTrie>(new_
     // The callback should have been invoked.
     assert!(!targets.is_empty(), "callback should be invoked for a blinded node");
 
-    // The key should remain in the updates map (not drained).
-    assert!(
-        !leaf_updates.is_empty(),
-        "key should remain in updates map when blinded node is encountered"
+    // The trie should have taken ownership of the update (not drained).
+    assert!(leaf_updates.is_empty(), "updates map should be drained");
+    assert_eq!(
+        trie.blocked_updates().len(),
+        1,
+        "key should be blocked in the trie when blinded node is encountered"
     );
 }
 
@@ -558,7 +560,7 @@ pub(super) fn test_update_leaves_retry_after_reveal<T: SparseTrie>(new_trie: fn(
     })
     .expect("update_leaves should succeed");
     assert!(!targets.is_empty(), "callback should fire for blinded node");
-    assert!(!leaf_updates.is_empty(), "key should remain in map after blinded hit");
+    assert_eq!(trie.blocked_updates().len(), 1, "key should be blocked after blinded hit");
 
     // Reveal the proof for the requested targets.
     let (mut proof_nodes, _) = harness.proof_v2(&mut targets);
@@ -583,6 +585,67 @@ pub(super) fn test_update_leaves_retry_after_reveal<T: SparseTrie>(new_trie: fn(
         root,
         expected_harness.original_root(),
         "root should match expected trie after retry"
+    );
+}
+
+/// A newer update for a key that is already blocked must replace the blocked one, so the stale
+/// value can never be applied on top of it once the proof arrives.
+pub(super) fn test_update_leaves_supersede_blocked_update<T: SparseTrie>(new_trie: fn() -> T) {
+    // Two groups of 16 keys under different first nibbles, so branch children become hash nodes.
+    let mut base_storage = BTreeMap::new();
+
+    let mut group_a_keys = Vec::new();
+    for i in 0u8..16 {
+        let mut key = B256::ZERO;
+        key.0[0] = 0x10 | i;
+        group_a_keys.push(key);
+        base_storage.insert(key, U256::from(i as u64 + 1));
+    }
+
+    let mut group_b_keys = Vec::new();
+    for i in 0u8..16 {
+        let mut key = B256::ZERO;
+        key.0[0] = 0x20 | i;
+        group_b_keys.push(key);
+        base_storage.insert(key, U256::from(i as u64 + 100));
+    }
+
+    let harness = SuiteTestHarness::new(base_storage.clone());
+
+    // Reveal only group_a keys, leaving group_b's subtrie blinded.
+    let mut trie: T = harness.init_trie_with_targets(&group_a_keys, false, new_trie);
+
+    let target_key = group_b_keys[0];
+    let stale_value = U256::from(111);
+    let new_value = U256::from(999);
+
+    let mut leaf_updates =
+        SuiteTestHarness::leaf_updates(&BTreeMap::from([(target_key, stale_value)]));
+    let mut targets: Vec<ProofV2Target> = Vec::new();
+    trie.update_leaves(&mut leaf_updates, |key, parent| {
+        targets.push(ProofV2Target::new(key).with_parent(parent));
+    })
+    .expect("update_leaves should succeed");
+    assert_eq!(trie.blocked_updates().len(), 1, "the first update should be blocked");
+
+    // The newer value hits the same blinded node, so it takes the blocked entry's place.
+    let mut newer = SuiteTestHarness::leaf_updates(&BTreeMap::from([(target_key, new_value)]));
+    trie.update_leaves(&mut newer, |_, _| {}).expect("update_leaves should succeed");
+    assert!(newer.is_empty(), "the newer update should be taken over by the trie");
+    assert_eq!(trie.blocked_updates().len(), 1, "the key should be blocked exactly once");
+
+    let (mut proof_nodes, _) = harness.proof_v2(&mut targets);
+    trie.reveal_nodes(&mut proof_nodes).expect("reveal_nodes should succeed");
+    trie.update_leaves(&mut leaf_updates, |_, _| {}).expect("update_leaves should succeed");
+    assert!(trie.blocked_updates().is_empty(), "the update should be applied after the reveal");
+
+    let mut expected_storage = base_storage;
+    expected_storage.insert(target_key, new_value);
+    let expected_harness = SuiteTestHarness::new(expected_storage);
+    assert_eq!(
+        trie.root(epoch(0)),
+        expected_harness.original_root(),
+        "the newer value must win over the blocked one"
     );
 }
 
@@ -621,7 +684,7 @@ pub(super) fn test_remove_leaf_blinded_sibling_requires_reveal<T: SparseTrie>(ne
     })
     .expect("update_leaves should succeed");
     assert!(!targets.is_empty(), "callback should fire for blinded sibling");
-    assert!(!leaf_updates.is_empty(), "key should remain in map after blinded hit");
+    assert_eq!(trie.blocked_updates().len(), 1, "key should be blocked after blinded hit");
 
     // Reveal the blinded sibling subtrie.
     let (mut proof_nodes, _) = harness.proof_v2(&mut targets);
@@ -643,6 +706,72 @@ pub(super) fn test_remove_leaf_blinded_sibling_requires_reveal<T: SparseTrie>(ne
         expected_harness.original_root(),
         "root should match trie without the removed leaf"
     );
+}
+
+/// A removal whose branch collapse waits for a blinded sibling applies without that sibling's
+/// proof once another leaf lands under the same branch.
+pub(super) fn test_collapse_blocked_removal_applies_after_branch_gains_leaf<T: SparseTrie>(
+    new_trie: fn() -> T,
+) {
+    // Root branch: nibble 0x1 = one revealed leaf, nibble 0x2 = 16 blinded keys (hash node).
+    let mut base_storage = BTreeMap::new();
+
+    let revealed_key = {
+        let mut key = B256::ZERO;
+        key.0[0] = 0x10;
+        key
+    };
+    base_storage.insert(revealed_key, U256::from(1));
+
+    for i in 0u8..16 {
+        let mut key = B256::ZERO;
+        key.0[0] = 0x20 | i;
+        base_storage.insert(key, U256::from(i as u64 + 100));
+    }
+
+    let harness = SuiteTestHarness::new(base_storage.clone());
+    let mut trie: T = harness.init_trie_with_targets(&[revealed_key], false, new_trie);
+
+    // Removing the only revealed leaf would collapse the root branch onto the blinded sibling.
+    let mut leaf_updates =
+        SuiteTestHarness::leaf_updates(&BTreeMap::from([(revealed_key, U256::ZERO)]));
+    let mut targets: Vec<ProofV2Target> = Vec::new();
+    trie.update_leaves(&mut leaf_updates, |key, parent| {
+        targets.push(ProofV2Target::new(key).with_parent(parent));
+    })
+    .expect("update_leaves should succeed");
+    assert!(!targets.is_empty(), "callback should fire for blinded sibling");
+    assert_eq!(trie.blocked_updates().len(), 1, "the removal should be blocked on the sibling");
+
+    // A leaf at a free nibble of the same branch leaves it with another child, so the removal
+    // does not collapse it any more. The sibling's proof is never revealed.
+    let new_key = {
+        let mut key = B256::ZERO;
+        key.0[0] = 0x30;
+        key
+    };
+    let mut leaf_updates =
+        SuiteTestHarness::leaf_updates(&BTreeMap::from([(new_key, U256::from(7))]));
+    let mut asks = 0usize;
+    trie.update_leaves(&mut leaf_updates, |_, _| asks += 1).expect("update_leaves should succeed");
+    assert!(
+        trie.blocked_updates().has_retryable(),
+        "the blocked removal should be retried after its branch received a leaf",
+    );
+
+    trie.update_leaves(&mut B256Map::default(), |_, _| asks += 1)
+        .expect("update_leaves should succeed");
+    assert_eq!(asks, 0, "no further proof should be asked for");
+    assert!(
+        trie.blocked_updates().is_empty(),
+        "the removal should apply without the sibling's proof",
+    );
+
+    let mut expected_storage = base_storage;
+    expected_storage.remove(&revealed_key);
+    expected_storage.insert(new_key, U256::from(7));
+    let expected = SuiteTestHarness::new(expected_storage);
+    assert_eq!(trie.root(epoch(0)), expected.original_root(), "root should match the reference");
 }
 
 /// Atomic rollback preserves a revealed leaf when its sibling is blinded.
@@ -690,8 +819,8 @@ pub(super) fn test_update_leaves_removal_branch_collapse_blinded_sibling<T: Spar
     // Callback should have fired for the blinded sibling path.
     assert!(!targets.is_empty(), "callback should fire for blinded sibling");
 
-    // Update should remain in the map (not drained).
-    assert!(!leaf_updates.is_empty(), "update should remain in map after blinded hit");
+    // Update should be blocked in the trie (not applied).
+    assert!(!trie.blocked_updates().is_empty(), "update should be blocked after blinded hit");
 
     // Leaf value should be preserved (atomic rollback).
     let value_after = trie.get_leaf_value(&revealed_path);
@@ -760,8 +889,8 @@ pub(super) fn test_update_leaves_subtrie_collapse_requests_proof<T: SparseTrie>(
         !targets.is_empty(),
         "callback should fire for blinded sibling during subtrie collapse"
     );
-    // At least one removal key should remain in the map for retry.
-    assert!(!leaf_updates.is_empty(), "removal keys should remain in map after blinded hit");
+    // At least one removal key should be blocked for retry.
+    assert!(!trie.blocked_updates().is_empty(), "removal keys should be blocked after blinded hit");
 }
 
 /// Multiple keys hitting the same blinded node each trigger a callback.
@@ -811,8 +940,8 @@ pub(super) fn test_update_leaves_multiple_keys_same_blinded_node<T: SparseTrie>(
 
     // Callback should fire for each key (3 invocations).
     assert_eq!(targets.len(), 3, "callback should fire once per key hitting the blinded node");
-    // All updates should remain in the map for retry.
-    assert_eq!(leaf_updates.len(), 3, "all keys should remain in map after blinded hit");
+    // All updates should be blocked for retry.
+    assert_eq!(trie.blocked_updates().len(), 3, "all keys should be blocked after blinded hit");
 }
 
 /// `LeafUpdate::Touched` on a fully revealed path should be a no-op.
@@ -892,14 +1021,86 @@ pub(super) fn test_update_leaves_touched_blinded_requests_proof<T: SparseTrie>(
 
     // Callback should have been invoked for the blinded node.
     assert!(!targets.is_empty(), "callback should fire for Touched on blinded path");
-    // Key should remain in the updates map.
-    assert!(!leaf_updates.is_empty(), "Touched key should remain in map when blinded");
+    // Key should be blocked in the trie.
+    assert_eq!(trie.blocked_updates().len(), 1, "Touched key should be blocked when blinded");
     // Root should be unchanged (no mutation).
     assert_eq!(
         trie.root(epoch(0)),
         root_before,
         "root should be unchanged after Touched on blinded path"
     );
+}
+
+/// `update_leaves_with_events` reports the leaf value behind every applied `Touched` entry:
+/// the stored value for a revealed leaf, `None` for a revealed key without a leaf, and nothing
+/// at all while the key's path is still blinded.
+pub(super) fn test_update_leaves_reports_touched_values<T: SparseTrie>(new_trie: fn() -> T) {
+    // Two groups of 16 keys under different first nibbles, so revealing only group A leaves
+    // group B behind a blinded node.
+    let mut base_storage = BTreeMap::new();
+    let mut group_a_keys = Vec::new();
+    for i in 0u8..16 {
+        let mut key = B256::ZERO;
+        key.0[0] = 0x10 | i;
+        group_a_keys.push(key);
+        base_storage.insert(key, U256::from(i as u64 + 1));
+        let mut key = B256::ZERO;
+        key.0[0] = 0x20 | i;
+        base_storage.insert(key, U256::from(i as u64 + 100));
+    }
+
+    let harness = SuiteTestHarness::new(base_storage);
+    let mut trie: T = harness.init_trie_with_targets(&group_a_keys, false, new_trie);
+
+    let revealed = group_a_keys[3];
+    let absent = B256::with_last_byte(0x77);
+    let blinded = {
+        let mut key = B256::ZERO;
+        key.0[0] = 0x20;
+        key
+    };
+    let changed = group_a_keys[5];
+
+    let mut leaf_updates: B256Map<LeafUpdate> = [
+        (revealed, LeafUpdate::Touched),
+        (absent, LeafUpdate::Touched),
+        (blinded, LeafUpdate::Touched),
+        (changed, LeafUpdate::Changed(encode_fixed_size(&U256::from(999)).to_vec())),
+    ]
+    .into_iter()
+    .collect();
+
+    let mut targets: Vec<ProofV2Target> = Vec::new();
+    let mut touched: Vec<(B256, Option<Vec<u8>>)> = Vec::new();
+    trie.update_leaves_with_events(&mut leaf_updates, true, |event| match event {
+        LeafUpdateEvent::ProofRequired { key, parent } => {
+            targets.push(ProofV2Target::new(key).with_parent(parent));
+        }
+        LeafUpdateEvent::Touched { key, value } => touched.push((key, value.map(<[u8]>::to_vec))),
+    })
+    .expect("update_leaves should succeed");
+
+    touched.sort_unstable();
+    assert_eq!(
+        touched,
+        vec![(absent, None), (revealed, Some(encode_fixed_size(&U256::from(4)).to_vec()))],
+        "only applied touched entries are reported, the blinded one is not",
+    );
+    assert_eq!(targets.len(), 1, "only the blinded key needs a proof");
+
+    // Revealing the blinded subtrie lets the retry report its value.
+    let (mut proof_nodes, _) = harness.proof_v2(&mut targets);
+    trie.reveal_nodes(&mut proof_nodes).expect("reveal_nodes should succeed");
+
+    touched.clear();
+    trie.update_leaves_with_events(&mut leaf_updates, true, |event| {
+        if let LeafUpdateEvent::Touched { key, value } = event {
+            touched.push((key, value.map(<[u8]>::to_vec)));
+        }
+    })
+    .expect("update_leaves should succeed on retry");
+
+    assert_eq!(touched, vec![(blinded, Some(encode_fixed_size(&U256::from(100)).to_vec()))]);
 }
 
 /// Touched on a nonexistent key in an empty trie is drained silently.
@@ -1369,8 +1570,8 @@ pub(super) fn test_branch_collapse_multi_empty_subtries_blinded_remaining<T: Spa
 
     // Callback should fire for the blinded child at 0xd8.
     assert!(!targets.is_empty(), "callback should fire for blinded child during branch collapse");
-    // Removal keys should remain in the map for retry.
-    assert!(!leaf_updates.is_empty(), "removal keys should remain in map after blinded hit");
+    // Removal keys should be blocked for retry.
+    assert!(!trie.blocked_updates().is_empty(), "removal keys should be blocked after blinded hit");
 
     // Reveal the blinded subtrie.
     let (mut proof_nodes, _) = harness.proof_v2(&mut targets);
