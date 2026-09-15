@@ -286,6 +286,12 @@ struct RuntimeInner {
     /// Proof account worker pool (trie account proof computation).
     #[cfg(feature = "rayon")]
     proof_account_worker_pool: WorkerPool,
+    /// Proof storage worker thread count the operator configured explicitly, if any.
+    #[cfg(feature = "rayon")]
+    proof_storage_worker_threads_override: Option<usize>,
+    /// Proof account worker thread count the operator configured explicitly, if any.
+    #[cfg(feature = "rayon")]
+    proof_account_worker_threads_override: Option<usize>,
     /// Prewarming pool (execution prewarming workers).
     #[cfg(feature = "rayon")]
     prewarming_pool: WorkerPool,
@@ -372,6 +378,22 @@ impl Runtime {
     #[cfg(feature = "rayon")]
     pub fn proof_account_worker_pool(&self) -> &WorkerPool {
         &self.0.proof_account_worker_pool
+    }
+
+    /// Returns the proof storage worker thread count the operator configured explicitly, if any.
+    ///
+    /// Callers that size the worker count per block must use this verbatim instead of scaling it.
+    #[cfg(feature = "rayon")]
+    pub fn proof_storage_worker_threads_override(&self) -> Option<usize> {
+        self.0.proof_storage_worker_threads_override
+    }
+
+    /// Returns the proof account worker thread count the operator configured explicitly, if any.
+    ///
+    /// Callers that size the worker count per block must use this verbatim instead of scaling it.
+    #[cfg(feature = "rayon")]
+    pub fn proof_account_worker_threads_override(&self) -> Option<usize> {
+        self.0.proof_account_worker_threads_override
     }
 
     /// Get the prewarming pool.
@@ -999,6 +1021,10 @@ impl RuntimeBuilder {
             proof_storage_worker_pool,
             #[cfg(feature = "rayon")]
             proof_account_worker_pool,
+            #[cfg(feature = "rayon")]
+            proof_storage_worker_threads_override: config.rayon.proof_storage_worker_threads,
+            #[cfg(feature = "rayon")]
+            proof_account_worker_threads_override: config.rayon.proof_account_worker_threads,
             #[cfg(feature = "rayon")]
             prewarming_pool,
             #[cfg(feature = "rayon")]

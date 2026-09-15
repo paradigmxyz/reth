@@ -159,7 +159,7 @@ impl ProofWorkerHandle {
     /// # Parameters
     /// - `runtime`: The centralized runtime used to spawn blocking worker tasks
     /// - `task_ctx`: Shared context with database view and prefix sets
-    /// - `halve_workers`: Whether to halve the worker pool size (for small blocks)
+    /// - `worker_counts`: How many workers of each pool to spawn for this block
     #[instrument(
         name = "ProofWorkerHandle::new",
         level = "debug",
@@ -169,7 +169,7 @@ impl ProofWorkerHandle {
     pub fn new<Factory>(
         runtime: &Runtime,
         task_ctx: ProofTaskCtx<Factory>,
-        halve_workers: bool,
+        worker_counts: ProofWorkerCounts,
         proof_result_tx: ProofResultSender,
     ) -> Self
     where
@@ -183,11 +183,12 @@ impl ProofWorkerHandle {
         let (account_work_tx, account_work_rx) = unbounded::<AccountWorkerJob>();
         let cached_storage_roots = Arc::<DashMap<_, _>>::default();
 
-        let divisor = if halve_workers { 2 } else { 1 };
+        // The pools are the cap: a broadcast for more workers than the pool has threads would
+        // run on every thread and leave the surplus availability slots without a worker.
         let storage_worker_count =
-            runtime.proof_storage_worker_pool().current_num_threads() / divisor;
+            worker_counts.storage.min(runtime.proof_storage_worker_pool().current_num_threads());
         let account_worker_count =
-            runtime.proof_account_worker_pool().current_num_threads() / divisor;
+            worker_counts.account.min(runtime.proof_account_worker_pool().current_num_threads());
 
         let storage_availability = Arc::new(AvailabilitySheet::new(storage_worker_count));
         let account_availability = Arc::new(AvailabilitySheet::new(account_worker_count));
@@ -196,7 +197,6 @@ impl ProofWorkerHandle {
             target: "trie::proof_task",
             storage_worker_count,
             account_worker_count,
-            halve_workers,
             "Spawning proof worker pools"
         );
 
@@ -385,6 +385,34 @@ impl ProofWorkerHandle {
 
                 error
             })
+    }
+}
+
+/// How many workers [`ProofWorkerHandle::new`] spawns from each proof worker pool.
+///
+/// The worker pools are rebuilt for every block and every worker opens a database transaction and
+/// trie cursors, so the counts are sized per block by the caller. They are capped by the pool
+/// sizes.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ProofWorkerCounts {
+    /// Number of storage proof workers to spawn.
+    pub storage: usize,
+    /// Number of account proof workers to spawn.
+    pub account: usize,
+}
+
+impl ProofWorkerCounts {
+    /// Creates counts for the given number of storage and account workers.
+    pub const fn new(storage: usize, account: usize) -> Self {
+        Self { storage, account }
+    }
+
+    /// Creates counts that use every thread of both proof worker pools.
+    pub fn full(runtime: &Runtime) -> Self {
+        Self::new(
+            runtime.proof_storage_worker_pool().current_num_threads(),
+            runtime.proof_account_worker_pool().current_num_threads(),
+        )
     }
 }
 
@@ -1201,7 +1229,12 @@ mod tests {
 
         let runtime = reth_tasks::Runtime::test();
         let (proof_result_tx, _) = unbounded();
-        let proof_handle = ProofWorkerHandle::new(&runtime, ctx, false, proof_result_tx);
+        let proof_handle = ProofWorkerHandle::new(
+            &runtime,
+            ctx,
+            ProofWorkerCounts::full(&runtime),
+            proof_result_tx,
+        );
 
         // Verify handle can be cloned
         let _cloned_handle = proof_handle.clone();
