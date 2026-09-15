@@ -3,6 +3,11 @@ name: direct-io experiment checks
 on:
   push:
     branches: [onbjerg/static-file-direct-io]
+    paths:
+      - "crates/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - ".github/workflows/direct-io.yml"
   workflow_dispatch:
 
 permissions:

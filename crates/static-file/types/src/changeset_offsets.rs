@@ -216,7 +216,7 @@ impl ChangesetOffsetReader {
             let bytes = &mut buf[..records * Self::RECORD_SIZE];
             let pos = byte_pos + first as u64 * Self::RECORD_SIZE as u64;
             self.file.read_exact_at(bytes, pos)?;
-            for record in bytes.chunks_exact(Self::RECORD_SIZE) {
+            for record in bytes.as_chunks::<{ Self::RECORD_SIZE }>().0 {
                 let offset = u64::from_le_bytes(record[..8].try_into().unwrap());
                 let num_changes = u64::from_le_bytes(record[8..].try_into().unwrap());
                 result.push(ChangesetOffset::new(offset, num_changes));
