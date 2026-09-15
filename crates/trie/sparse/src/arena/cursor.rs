@@ -17,10 +17,11 @@ pub(super) struct ArenaCursorStackEntry {
     /// The arena index of this node.
     pub(super) index: Index,
     /// The nibble length of the absolute path of this node (not including its `short_key`).
-    pub(super) path_len: u8,
+    /// A [`Nibbles`] holds at most 64 nibbles, so this always fits in a `u8`.
+    path_len: u8,
     /// The dense index at which to resume child iteration in [`ArenaCursor::next`].
     /// Only meaningful when this entry's node is a branch.
-    pub(super) next_dense_idx: u8,
+    next_dense_idx: u8,
 }
 
 /// Result of [`ArenaCursor::seek`] describing the state at the deepest ancestor node.
@@ -297,6 +298,7 @@ impl ArenaCursor {
             };
 
             let state_mask = branch.state_mask;
+            let short_key = branch.short_key;
             let start = head.next_dense_idx as usize;
             let child_depth = self.stack.len();
 
@@ -316,7 +318,7 @@ impl ArenaCursor {
                     self.stack.last_mut().expect("head exists").next_dense_idx =
                         branch_child_idx.get() as u8 + 1;
                     self.path.truncate(head_path_len);
-                    self.path.extend(&arena[head_idx].branch_ref().short_key);
+                    self.path.extend(&short_key);
                     self.path.push_unchecked(nibble);
                     self.push(arena, child_idx, self.path.len());
                     descended = true;
