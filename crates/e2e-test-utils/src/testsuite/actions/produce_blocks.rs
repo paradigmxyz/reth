@@ -723,7 +723,7 @@ where
 
                 let result = EngineApiClient::<Engine>::new_payload_v3(
                     &engine,
-                    execution_payload.clone(),
+                    execution_payload.clone().into(),
                     vec![],
                     parent_beacon_block_root,
                 )
@@ -755,7 +755,7 @@ where
                     // Broadcast the execution payload
                     let result = EngineApiClient::<Engine>::new_payload_v3(
                         &engine,
-                        execution_payload.clone(),
+                        execution_payload.clone().into(),
                         vec![],
                         parent_beacon_block_root,
                     )
@@ -1119,7 +1119,7 @@ where
 
                     let new_payload_response = EngineApiClient::<Engine>::new_payload_v3(
                         &engine_client,
-                        corrupted_payload.clone(),
+                        corrupted_payload.clone().into(),
                         versioned_hashes,
                         parent_beacon_block_root,
                     )

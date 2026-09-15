@@ -13,9 +13,8 @@ use alloy_rpc_types_engine::{
     BogotaPayloadFields, CancunPayloadFields, ClientVersionV1, ExecutionData,
     ExecutionPayloadBodiesV1, ExecutionPayloadBodiesV2, ExecutionPayloadBodyV1,
     ExecutionPayloadBodyV2, ExecutionPayloadInputV2, ExecutionPayloadSidecar, ExecutionPayloadV1,
-    ExecutionPayloadV3, ExecutionPayloadV4, ForkchoiceState, ForkchoiceUpdated,
-    ForkchoiceUpdatedResponseV2, PayloadId, PayloadStatus, PayloadStatusV2, PraguePayloadFields,
-    MAX_BYTES_PER_INCLUSION_LIST,
+    ExecutionPayloadV4, ForkchoiceState, ForkchoiceUpdated, ForkchoiceUpdatedResponseV2, PayloadId,
+    PayloadStatus, PayloadStatusV2, PraguePayloadFields, MAX_BYTES_PER_INCLUSION_LIST,
 };
 use async_trait::async_trait;
 use jsonrpsee_core::{server::RpcModule, RpcResult};
@@ -28,7 +27,7 @@ use reth_payload_primitives::{
     PayloadOrAttributes, PayloadTypes,
 };
 use reth_primitives_traits::{AlloyBlockHeader, Block, BlockBody};
-use reth_rpc_api::{EngineApiServer, IntoEngineApiRpcModule};
+use reth_rpc_api::{EngineApiServer, ExecutionPayloadV3Input, IntoEngineApiRpcModule};
 use reth_storage_api::{BalProvider, BlockReader, HeaderProvider, StateProviderFactory};
 use reth_tasks::Runtime;
 use reth_transaction_pool::{BestTransactions, TransactionPool};
@@ -1367,11 +1366,12 @@ where
     /// See also <https://github.com/ethereum/execution-apis/blob/fe8e13c288c592ec154ce25c534e26cb7ce0530d/src/engine/cancun.md#engine_newpayloadv3>
     async fn new_payload_v3(
         &self,
-        payload: ExecutionPayloadV3,
+        payload: ExecutionPayloadV3Input,
         versioned_hashes: Vec<B256>,
         parent_beacon_block_root: B256,
     ) -> RpcResult<PayloadStatus> {
         trace!(target: "rpc::engine", "Serving engine_newPayloadV3");
+        let payload = payload.0;
         let payload = ExecutionData {
             payload: payload.into(),
             sidecar: ExecutionPayloadSidecar::v3(CancunPayloadFields {
@@ -1387,12 +1387,13 @@ where
     /// See also <https://github.com/ethereum/execution-apis/blob/03911ffc053b8b806123f1fc237184b0092a485a/src/engine/prague.md#engine_newpayloadv4>
     async fn new_payload_v4(
         &self,
-        payload: ExecutionPayloadV3,
+        payload: ExecutionPayloadV3Input,
         versioned_hashes: Vec<B256>,
         parent_beacon_block_root: B256,
         requests: RequestsOrHash,
     ) -> RpcResult<PayloadStatus> {
         trace!(target: "rpc::engine", "Serving engine_newPayloadV4");
+        let payload = payload.0;
 
         // Accept requests as a hash only if it is explicitly allowed
         if requests.is_hash() && !self.inner.accept_execution_requests_hash {
@@ -1832,7 +1833,8 @@ mod tests {
     use alloy_eips::{eip7685::Requests, Encodable2718, NumHash};
     use alloy_primitives::{Address, Bytes, B256};
     use alloy_rpc_types_engine::{
-        ClientCode, ClientVersionV1, ExecutionPayloadV2, PayloadAttributes, PayloadStatusEnum,
+        ClientCode, ClientVersionV1, ExecutionPayloadV2, ExecutionPayloadV3, PayloadAttributes,
+        PayloadStatusEnum,
     };
     use assert_matches::assert_matches;
     use reth_chainspec::{ChainSpec, ChainSpecBuilder, MAINNET};
@@ -1938,6 +1940,33 @@ mod tests {
         );
         let handle = EngineApiTestHandle { chain_spec, provider, from_api: engine_rx };
         (handle, api)
+    }
+
+    #[tokio::test]
+    async fn new_payload_v3_v4_reject_amsterdam_fields() {
+        let (mut handle, api) = setup_engine_api();
+        let module = api.into_rpc_module();
+        for version in [3, 4] {
+            for field in ["blockAccessList", "slotNumber"] {
+                for value in ["0xc0", "0x"] {
+                    let mut payload = jsonrpsee_core::to_json_value(
+                        ExecutionPayloadV3::from_block_unchecked(B256::ZERO, &Block::default()),
+                    )
+                    .unwrap();
+                    payload[field] = value.into();
+                    let requests = if version == 4 { ",[]" } else { "" };
+                    let request = format!(
+                        r#"{{"jsonrpc":"2.0","id":1,"method":"engine_newPayloadV{version}","params":[{payload},[],"{:?}"{requests}]}}"#,
+                        B256::ZERO
+                    );
+                    let (response, _) = module.raw_json_request(&request, 1).await.unwrap();
+                    let response = response.get();
+                    assert!(response.contains(r#""code":-32602"#), "{response}");
+                    assert!(response.contains(field), "{response}");
+                    assert!(handle.from_api.try_recv().is_err());
+                }
+            }
+        }
     }
 
     #[tokio::test]

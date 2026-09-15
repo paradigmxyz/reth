@@ -138,7 +138,7 @@ where
             let target_engine = env.node_clients[self.node_idx].engine.http_client();
             let result = EngineApiClient::<Engine>::new_payload_v3(
                 &target_engine,
-                payload,
+                payload.into(),
                 vec![],
                 B256::ZERO, // parent_beacon_block_root
             )

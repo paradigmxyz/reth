@@ -58,7 +58,7 @@ pub trait EngineApi<Engine: EngineTypes> {
     #[method(name = "newPayloadV3")]
     async fn new_payload_v3(
         &self,
-        payload: ExecutionPayloadV3,
+        payload: ExecutionPayloadV3Input,
         versioned_hashes: Vec<B256>,
         parent_beacon_block_root: B256,
     ) -> RpcResult<PayloadStatus>;
@@ -69,7 +69,7 @@ pub trait EngineApi<Engine: EngineTypes> {
     #[method(name = "newPayloadV4")]
     async fn new_payload_v4(
         &self,
-        payload: ExecutionPayloadV3,
+        payload: ExecutionPayloadV3Input,
         versioned_hashes: Vec<B256>,
         parent_beacon_block_root: B256,
         execution_requests: RequestsOrHash,
@@ -494,4 +494,135 @@ pub trait EngineEthApi<TxReq: RpcObject, B: RpcObject, R: RpcObject, L: RpcObjec
     /// Returns the EIP-7928 block access list bytes for a block by number.
     #[method(name = "getBlockAccessListRaw")]
     async fn block_access_list_raw(&self, block: BlockId) -> RpcResult<Option<Bytes>>;
+}
+
+/// A Cancun/Prague payload that rejects fields introduced in Amsterdam.
+///
+/// Unlike the shared payload types, Engine API request decoding must reject unsupported
+/// fields. Cancun's strict parameter rule (inherited by Prague) treats null as absent.
+#[derive(Clone, Debug, serde::Serialize)]
+#[serde(transparent)]
+pub struct ExecutionPayloadV3Input(pub ExecutionPayloadV3);
+
+impl From<ExecutionPayloadV3> for ExecutionPayloadV3Input {
+    fn from(payload: ExecutionPayloadV3) -> Self {
+        Self(payload)
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for ExecutionPayloadV3Input {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        #[derive(serde::Deserialize)]
+        #[serde(rename_all = "camelCase")]
+        struct Input {
+            #[serde(flatten)]
+            payload: ExecutionPayloadV3,
+            block_access_list: Option<serde::de::IgnoredAny>,
+            slot_number: Option<serde::de::IgnoredAny>,
+        }
+
+        let input = Input::deserialize(deserializer)?;
+        if input.block_access_list.is_some() {
+            return Err(serde::de::Error::custom(
+                "blockAccessList is not supported before newPayloadV5",
+            ));
+        }
+        if input.slot_number.is_some() {
+            return Err(serde::de::Error::custom("slotNumber is not supported before newPayloadV5"));
+        }
+        Ok(Self(input.payload))
+    }
+}
+
+#[cfg(test)]
+mod payload_input_tests {
+    use super::*;
+    use jsonrpsee::types::Params;
+    use serde_json::json;
+
+    fn payload_v3() -> ExecutionPayloadV3 {
+        ExecutionPayloadV3 {
+            payload_inner: alloy_rpc_types_engine::ExecutionPayloadV2 {
+                payload_inner: ExecutionPayloadV1 {
+                    parent_hash: B256::ZERO,
+                    fee_recipient: Address::ZERO,
+                    state_root: B256::ZERO,
+                    receipts_root: B256::ZERO,
+                    logs_bloom: Default::default(),
+                    prev_randao: B256::ZERO,
+                    block_number: 1,
+                    gas_limit: 30_000_000,
+                    gas_used: 0,
+                    timestamp: 1,
+                    extra_data: Bytes::new(),
+                    base_fee_per_gas: U256::from(1),
+                    block_hash: B256::ZERO,
+                    transactions: vec![],
+                },
+                withdrawals: vec![],
+            },
+            blob_gas_used: 0,
+            excess_blob_gas: 0,
+        }
+    }
+
+    #[test]
+    fn rejects_non_null_amsterdam_fields() {
+        for field in ["blockAccessList", "slotNumber"] {
+            // Reject the presence of the field, independently of its encoding or value.
+            for value in
+                [json!("0xc0"), json!("0x"), json!("0x0"), json!(false), json!([]), json!({})]
+            {
+                let mut payload = serde_json::to_value(payload_v3()).unwrap();
+                payload[field] = value;
+                let request = json!([payload]).to_string();
+                let error =
+                    Params::new(Some(&request)).parse::<(ExecutionPayloadV3Input,)>().unwrap_err();
+                assert_eq!(error.code(), -32602, "{field}: {request}");
+                assert!(error.data().unwrap().get().contains(field));
+            }
+        }
+    }
+
+    #[test]
+    fn accepts_absent_or_null_amsterdam_fields() {
+        let original = payload_v3();
+        for fields in [
+            json!({}),
+            json!({"blockAccessList": null}),
+            json!({"slotNumber": null}),
+            json!({"blockAccessList": null, "slotNumber": null}),
+        ] {
+            let mut payload = serde_json::to_value(&original).unwrap();
+            payload.as_object_mut().unwrap().extend(fields.as_object().unwrap().clone());
+            let request = json!([payload]).to_string();
+            let (decoded,) =
+                Params::new(Some(&request)).parse::<(ExecutionPayloadV3Input,)>().unwrap();
+            assert_eq!(decoded.0, original);
+        }
+    }
+
+    #[test]
+    fn preserves_client_payload_encoding() {
+        let payload = payload_v3();
+        assert_eq!(
+            serde_json::to_value(ExecutionPayloadV3Input::from(payload.clone())).unwrap(),
+            serde_json::to_value(payload).unwrap()
+        );
+    }
+
+    #[test]
+    fn amsterdam_payload_still_accepts_bal() {
+        let payload = ExecutionPayloadV4 {
+            payload_inner: payload_v3(),
+            block_access_list: Bytes::from_static(&[0xc0]),
+            slot_number: 0,
+        };
+        let request = json!([payload]).to_string();
+        let (decoded,) = Params::new(Some(&request)).parse::<(ExecutionPayloadV4,)>().unwrap();
+        assert_eq!(decoded, payload);
+    }
 }

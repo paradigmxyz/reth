@@ -77,7 +77,7 @@ async fn can_handle_invalid_payload_then_valid() -> eyre::Result<()> {
     // Send the invalid payload to the receiver - should be rejected
     let invalid_result = EngineApiClient::<reth_node_ethereum::EthEngineTypes>::new_payload_v3(
         &receiver_engine,
-        invalid_payload.clone(),
+        invalid_payload.clone().into(),
         vec![],
         valid_block.header().parent_beacon_block_root.unwrap_or_default(),
     )
@@ -106,7 +106,7 @@ async fn can_handle_invalid_payload_then_valid() -> eyre::Result<()> {
 
     let valid_result = EngineApiClient::<reth_node_ethereum::EthEngineTypes>::new_payload_v3(
         &receiver_engine,
-        valid_payload,
+        valid_payload.into(),
         vec![],
         valid_block.header().parent_beacon_block_root.unwrap_or_default(),
     )
@@ -193,7 +193,7 @@ async fn can_handle_multiple_invalid_payloads() -> eyre::Result<()> {
 
         let result = EngineApiClient::<reth_node_ethereum::EthEngineTypes>::new_payload_v3(
             &receiver_engine,
-            invalid_payload,
+            invalid_payload.into(),
             vec![],
             valid_block.header().parent_beacon_block_root.unwrap_or_default(),
         )
@@ -216,7 +216,7 @@ async fn can_handle_multiple_invalid_payloads() -> eyre::Result<()> {
 
     let valid_result = EngineApiClient::<reth_node_ethereum::EthEngineTypes>::new_payload_v3(
         &receiver_engine,
-        valid_payload,
+        valid_payload.into(),
         vec![],
         valid_block.header().parent_beacon_block_root.unwrap_or_default(),
     )
@@ -300,7 +300,7 @@ async fn can_handle_invalid_payload_with_transactions() -> eyre::Result<()> {
     // Send invalid payload - should be rejected
     let invalid_result = EngineApiClient::<reth_node_ethereum::EthEngineTypes>::new_payload_v3(
         &receiver_engine,
-        invalid_payload.clone(),
+        invalid_payload.clone().into(),
         vec![],
         valid_block.header().parent_beacon_block_root.unwrap_or_default(),
     )
@@ -329,7 +329,7 @@ async fn can_handle_invalid_payload_with_transactions() -> eyre::Result<()> {
 
     let valid_result = EngineApiClient::<reth_node_ethereum::EthEngineTypes>::new_payload_v3(
         &receiver_engine,
-        valid_payload,
+        valid_payload.into(),
         vec![],
         valid_block.header().parent_beacon_block_root.unwrap_or_default(),
     )
