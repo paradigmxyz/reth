@@ -77,7 +77,7 @@ pub trait GetBlockAccessList: Trace + Call + LoadBlock + RpcNodeCoreExt {
                     .map_err(|err| EthApiError::Internal(err.into()))?;
 
                 let revm_bal = db.take_built_bal().expect("BAL builder configured");
-                if !eth_api.cache_computed_bals() {
+                if !eth_api.eth_api_settings().cache_computed_bals {
                     return Ok(Some(revm_bal.into_alloy_bal()));
                 }
 
@@ -109,10 +109,5 @@ pub trait GetBlockAccessList: Trace + Call + LoadBlock + RpcNodeCoreExt {
 
             Ok(self.get_block_access_list(block_id).await?.map(|bal| alloy_rlp::encode(bal).into()))
         }
-    }
-
-    /// Whether to cache computed BALs for transaction tracing.
-    fn cache_computed_bals(&self) -> bool {
-        false
     }
 }

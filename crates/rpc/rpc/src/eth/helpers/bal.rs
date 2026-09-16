@@ -12,7 +12,4 @@ where
     EthApiError: FromEvmError<N::Evm>,
     Rpc: RpcConvert<Primitives = N::Primitives, Error = EthApiError, Evm = N::Evm>,
 {
-    fn cache_computed_bals(&self) -> bool {
-        self.inner.cache_computed_bals
-    }
 }

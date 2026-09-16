@@ -562,6 +562,8 @@ where
             proof_permits,
             max_batch_size,
             max_blocking_io_requests,
+            cache_computed_bals: eth_state_cache_config.cache_computed_bals ||
+                eth_state_cache_config.prewarm_bals.is_some(),
             gas_cap: gas_cap.into(),
             max_simulate_blocks,
             compute_state_root_for_eth_simulate,
@@ -572,7 +574,7 @@ where
             force_blob_sidecar_upcasting,
         };
 
-        let mut inner = EthApiInner::new(
+        EthApiInner::new(
             components,
             eth_cache,
             gas_oracle,
@@ -589,9 +591,7 @@ where
             rpc_converter,
             next_env,
             raw_tx_forwarder.forwarder_client(),
-        );
-        inner.cache_computed_bals = eth_state_cache_config.prewarm_bals;
-        inner
+        )
     }
 
     /// Builds the [`EthApi`] instance.

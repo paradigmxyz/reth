@@ -17,6 +17,7 @@ use crate::{
     ConsensusEngineEvent, ConsensusEngineHandle,
 };
 use alloy_consensus::BlockHeader;
+use alloy_eips::BlockNumberOrTag;
 use alloy_rpc_types::engine::ClientVersionV1;
 use alloy_rpc_types_engine::ExecutionData;
 use futures::StreamExt;
@@ -1161,7 +1162,7 @@ where
             .eth_config()
             .cache
             .prewarm_bals
-            .then(|| node.provider().canonical_state_stream());
+            .map(|count| (count, node.provider().canonical_state_stream()));
 
         let eth_config = config.rpc.eth_config().max_batch_size(config.txpool.max_batch_size());
         let ctx = EthApiCtx {
@@ -1172,8 +1173,12 @@ where
         };
         let eth_api = eth_api_builder.build_eth_api(ctx).await?;
 
-        if let Some(events) = prewarm_bals {
-            node.task_executor().spawn_task(prewarm_new_block_bals_task(eth_api.clone(), events));
+        if let Some((count, events)) = prewarm_bals {
+            node.task_executor().spawn_task(prewarm_new_block_bals_task(
+                eth_api.clone(),
+                events,
+                count,
+            ));
         }
 
         let auth_config = config.rpc.auth_server_config(jwt_secret)?;
@@ -1672,14 +1677,37 @@ pub struct EngineShutdownRequest {
     pub done_tx: oneshot::Sender<()>,
 }
 
-/// Prewarms BALs until a canonical block includes a BAL hash.
+/// Prewarms recent and new canonical blocks until a block includes a BAL hash.
 async fn prewarm_new_block_bals_task<EthApi: GetBlockAccessList, N: NodePrimitives>(
     eth_api: EthApi,
     mut events: CanonStateNotificationStream<N>,
+    startup_blocks: usize,
 ) {
+    match eth_api.recovered_block(BlockNumberOrTag::Latest.into()).await {
+        Ok(Some(head)) => {
+            if head.block_access_list_hash().is_some() {
+                debug!(target: "reth::cli", block_hash = ?head.hash(), "Stopping BAL prewarming: native BALs available");
+                return;
+            }
+
+            // Leave the newest BALs in the cache if the startup range exceeds its capacity.
+            let start = head.number().saturating_sub(startup_blocks as u64).saturating_add(1);
+            for number in start..=head.number() {
+                if let Err(err) = eth_api.get_block_access_list(number.into()).await {
+                    debug!(target: "reth::cli", %err, block_number = number, "Failed to prewarm BAL on startup");
+                }
+            }
+        }
+        Err(err) => {
+            debug!(target: "reth::cli", %err, "Failed to load head for BAL prewarming");
+        }
+        Ok(None) => {}
+    }
+
     while let Some(event) = events.next().await {
         for block in event.committed().blocks_iter() {
             if block.block_access_list_hash().is_some() {
+                debug!(target: "reth::cli", block_hash = ?block.hash(), "Stopping BAL prewarming: native BALs available");
                 return;
             }
 
@@ -1689,6 +1717,78 @@ async fn prewarm_new_block_bals_task<EthApi: GetBlockAccessList, N: NodePrimitiv
                     %err,
                     block_hash = ?block.hash(),
                     "Failed to prewarm BAL for canonical block",
+                );
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use alloy_consensus::{Block, BlockBody, Header};
+    use alloy_primitives::B256;
+    use reth_evm_ethereum::EthEvmConfig;
+    use reth_network_api::noop::NoopNetwork;
+    use reth_primitives_traits::RecoveredBlock;
+    use reth_provider::{test_utils::MockEthProvider, Chain, ExecutionOutcome};
+    use reth_rpc::EthApiBuilder;
+    use reth_rpc_eth_types::EthStateCacheConfig;
+    use reth_transaction_pool::noop::NoopTransactionPool;
+
+    #[tokio::test]
+    async fn bal_prewarming_startup_range_and_native_stop() {
+        for (count, native) in [(0, false), (2, false), (10, false), (2, true)] {
+            let provider = MockEthProvider::default();
+            let blocks: Vec<_> = (0..=3)
+                .map(|number| {
+                    let block = RecoveredBlock::new_unhashed(
+                        Block {
+                            header: Header {
+                                number,
+                                block_access_list_hash: (native && number == 3)
+                                    .then_some(B256::ZERO),
+                                ..Default::default()
+                            },
+                            body: BlockBody::default(),
+                        },
+                        Vec::new(),
+                    );
+                    provider.add_block(block.hash(), block.clone_block());
+                    block
+                })
+                .collect();
+            let events = provider.canonical_state_stream();
+            let api = EthApiBuilder::new(
+                provider,
+                NoopTransactionPool::default(),
+                NoopNetwork::default(),
+                EthEvmConfig::mainnet(),
+            )
+            .eth_state_cache_config(EthStateCacheConfig {
+                prewarm_bals: Some(count),
+                ..Default::default()
+            })
+            .build();
+
+            let chain = Chain::new(
+                blocks.clone(),
+                ExecutionOutcome { receipts: vec![vec![]; blocks.len()], ..Default::default() },
+                Default::default(),
+            );
+            cache_new_blocks_task(
+                api.cache().clone(),
+                futures::stream::iter([reth_chain_state::CanonStateNotification::Commit {
+                    new: Arc::new(chain),
+                }]),
+            )
+            .await;
+            prewarm_new_block_bals_task(api.clone(), events, count).await;
+            for (number, block) in blocks.iter().enumerate() {
+                assert_eq!(
+                    api.cache().get_bal(block.hash()).await.unwrap().is_some(),
+                    !native && number != 0 && number > 3_usize.saturating_sub(count),
+                    "count={count}, native={native}, block={number}",
                 );
             }
         }

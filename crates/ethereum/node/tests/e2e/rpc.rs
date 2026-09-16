@@ -118,7 +118,7 @@ async fn test_block_access_list_lookup_semantics() -> eyre::Result<()> {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_bal_prewarming_for_transaction_replay() -> eyre::Result<()> {
-    for prewarm in [false, true] {
+    for (cache_computed, prewarm) in [(false, false), (true, false), (false, true)] {
         let chain_spec = Arc::new(
             ChainSpecBuilder::default()
                 .chain(MAINNET.chain)
@@ -129,7 +129,8 @@ async fn test_bal_prewarming_for_transaction_replay() -> eyre::Result<()> {
         let (mut nodes, wallet) =
             E2ETestSetupBuilder::<EthereumNode, _>::new(1, chain_spec, eth_payload_attributes)
                 .with_node_config_modifier(move |mut config| {
-                    config.rpc.rpc_state_cache.prewarm_bals = prewarm;
+                    config.rpc.rpc_state_cache.cache_computed_bals = cache_computed;
+                    config.rpc.rpc_state_cache.prewarm_bals = prewarm.then_some(0);
                     config
                 })
                 .build()
@@ -186,7 +187,7 @@ async fn test_bal_prewarming_for_transaction_replay() -> eyre::Result<()> {
         let raw: Bytes = client.request("debug_getRawBlockAccessList", (block_hash,)).await?;
         assert_eq!(raw.as_ref(), alloy_rlp::encode(&bal));
         let (_, cached_bal) = cache.get_recovered_block_and_maybe_bal(block_hash).await?.unwrap();
-        assert_eq!(cached_bal.is_some(), prewarm);
+        assert_eq!(cached_bal.is_some(), cache_computed || prewarm);
 
         for (index, hash) in hashes.into_iter().enumerate() {
             let actual: serde_json::Value =
