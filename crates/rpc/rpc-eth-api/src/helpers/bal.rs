@@ -8,6 +8,7 @@ use reth_evm::{block::BlockExecutor, ConfigureEvm, Evm};
 use reth_revm::{database::StateProviderDatabase, State};
 use reth_rpc_eth_types::{error::FromEthApiError, EthApiError};
 use reth_storage_api::StateProviderFactory;
+use std::sync::Arc;
 
 use crate::{
     helpers::{Call, LoadBlock, Trace},
@@ -66,7 +67,6 @@ pub trait GetBlockAccessList: Trace + Call + LoadBlock + RpcNodeCoreExt {
                 executor.apply_pre_execution_changes().map_err(Self::Error::from_eth_err)?;
                 executor.evm_mut().db_mut().bump_bal_index();
 
-                // replay all transactions prior to the targeted transaction
                 for block_tx in block_txs {
                     executor.execute_transaction(block_tx).map_err(Self::Error::from_eth_err)?;
                     executor.evm_mut().db_mut().bump_bal_index();
@@ -76,8 +76,15 @@ pub trait GetBlockAccessList: Trace + Call + LoadBlock + RpcNodeCoreExt {
                     .apply_post_execution_changes()
                     .map_err(|err| EthApiError::Internal(err.into()))?;
 
-                let bal = db.take_built_alloy_bal();
-                Ok(bal)
+                let revm_bal = db.take_built_bal().expect("BAL builder configured");
+                if !eth_api.eth_api_settings().cache_computed_bals {
+                    return Ok(Some(revm_bal.into_alloy_bal()));
+                }
+
+                let bal = revm_bal.clone().into_alloy_bal();
+                let raw = alloy_rlp::encode(&bal).into();
+                eth_api.cache().insert_bal(block.hash(), DecodedBal::new(Arc::new(revm_bal), raw));
+                Ok(Some(bal))
             })
             .await
         }

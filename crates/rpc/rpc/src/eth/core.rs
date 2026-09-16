@@ -623,6 +623,7 @@ mod tests {
             proof_permits: 3,
             max_batch_size: 5,
             max_blocking_io_requests: 7,
+            cache_computed_bals: true,
             gas_cap: 123_456,
             max_simulate_blocks: 7,
             compute_state_root_for_eth_simulate: true,
@@ -638,6 +639,10 @@ mod tests {
             NoopNetwork::default(),
             EthEvmConfig::mainnet(),
         )
+        .eth_state_cache_config(reth_rpc_eth_types::EthStateCacheConfig {
+            cache_computed_bals: true,
+            ..Default::default()
+        })
         .proof_permits(expected.proof_permits)
         .max_batch_size(expected.max_batch_size)
         .max_blocking_io_requests(expected.max_blocking_io_requests)

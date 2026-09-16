@@ -20,6 +20,8 @@ pub struct EthApiSettings {
     pub max_batch_size: usize,
     /// Maximum number of concurrent blocking IO requests.
     pub max_blocking_io_requests: usize,
+    /// Cache computed block access lists for transaction tracing.
+    pub cache_computed_bals: bool,
     /// Maximum gas limit for `eth_call` and call tracing RPC methods.
     pub gas_cap: u64,
     /// Maximum number of blocks for `eth_simulateV1`.
@@ -44,6 +46,7 @@ impl Default for EthApiSettings {
             proof_permits: DEFAULT_PROOF_PERMITS,
             max_batch_size: 1,
             max_blocking_io_requests: DEFAULT_MAX_BLOCKING_IO_REQUEST,
+            cache_computed_bals: false,
             gas_cap: RPC_DEFAULT_GAS_CAP.into(),
             max_simulate_blocks: DEFAULT_MAX_SIMULATE_BLOCKS,
             compute_state_root_for_eth_simulate: false,
