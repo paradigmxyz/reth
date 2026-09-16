@@ -117,6 +117,8 @@ pub struct TransactionFetcher<N: NetworkPrimitives = EthNetworkPrimitives> {
     num_fetching: usize,
     /// Reused when verifying responses, so no sets are allocated per response.
     scratch_requested: B256Set,
+    /// Counts rejected hashes to distinguish duplicates from unsolicited transactions.
+    scratch_rejected: B256Map<usize>,
     /// Reused when processing announcements, so no vector is allocated per announcement.
     scratch_queue: Vec<(TxHash, u64)>,
     /// Configured limits.
@@ -142,6 +144,7 @@ impl<N: NetworkPrimitives> TransactionFetcher<N> {
             inflight: Default::default(),
             num_fetching: 0,
             scratch_requested: Default::default(),
+            scratch_rejected: Default::default(),
             scratch_queue: Default::default(),
             config,
             metrics,
@@ -802,12 +805,13 @@ impl<N: NetworkPrimitives> TransactionFetcher<N> {
         }
 
         let mut remaining = std::mem::take(&mut self.scratch_requested);
+        remaining.clear();
 
         let outcome = match result {
             Ok(mut transactions) => {
-                remaining.clear();
                 remaining.extend(requested.iter().copied());
-                let unsolicited = verify_response(&mut transactions, &mut remaining);
+                let unsolicited =
+                    verify_response(&mut transactions, &mut remaining, &mut self.scratch_rejected);
                 Ok((transactions, unsolicited))
             }
             Err(error) => Err(error),
@@ -831,7 +835,7 @@ impl<N: NetworkPrimitives> TransactionFetcher<N> {
                     trace!(target: "net::tx",
                         peer_id=format!("{peer_id:#}"),
                         unsolicited,
-                        "received unsolicited or repeated transactions in `PooledTransactions` response"
+                        "received transactions in `PooledTransactions` response that weren't requested"
                     );
                 }
                 if !transactions.is_empty() {
@@ -1163,8 +1167,8 @@ pub enum FetchEvent<T = PooledTransaction> {
         client_version: Arc<str>,
         /// The transactions that were fetched, if available.
         transactions: PooledTransactions<T>,
-        /// Whether the peer should be penalized for sending unsolicited or repeated transactions
-        /// or for misbehavior.
+        /// Whether the peer should be penalized for sending unsolicited transactions or for
+        /// misbehavior.
         report_peer: bool,
     },
     /// Triggered when there is an error in fetching transactions.
@@ -1417,21 +1421,37 @@ fn announced_size(metadata: Option<TransactionMetadata>) -> u32 {
 }
 
 /// Retains the first requested transaction for each hash and removes received hashes from
-/// `remaining`. Returns the number of dropped entries: transactions that were not requested and
-/// repeats of requested ones, which no correct peer sends either.
+/// `remaining`. Returns the number of unsolicited entries, counting repeats of unsolicited hashes.
+/// `rejected` is scratch space and is left empty.
 fn verify_response<T: SignedTransaction>(
     transactions: &mut PooledTransactions<T>,
     remaining: &mut B256Set,
+    rejected: &mut B256Map<usize>,
 ) -> usize {
-    let mut unsolicited = 0;
     // A successful removal verifies the hash and deduplicates it in one lookup.
     transactions.0.retain(|tx| {
-        if remaining.remove(tx.tx_hash()) {
-            return true
+        let hash = *tx.tx_hash();
+        if remaining.remove(&hash) {
+            true
+        } else {
+            *rejected.entry(hash).or_default() += 1;
+            false
         }
-        unsolicited += 1;
-        false
     });
+    if rejected.is_empty() {
+        return 0
+    }
+
+    // Rejected hashes that were also received successfully are duplicates, not unsolicited.
+    // Only malformed responses populate this scratch map or need this additional pass.
+    for tx in transactions.iter() {
+        rejected.remove(tx.tx_hash());
+        if rejected.is_empty() {
+            return 0
+        }
+    }
+    let unsolicited = rejected.values().sum();
+    rejected.clear();
     unsolicited
 }
 
@@ -1995,7 +2015,7 @@ mod tests {
     }
 
     #[test]
-    fn duplicate_transactions_in_response_are_deduplicated_and_reported() {
+    fn duplicate_transactions_in_response_are_deduplicated() {
         let mut rig = Rig::new();
         let peer_a = peer(1);
         rig.add_peer(peer_a);
@@ -2010,7 +2030,7 @@ mod tests {
             panic!("expected fetched transactions")
         };
         assert_eq!(transactions.len(), 1);
-        assert!(report_peer);
+        assert!(!report_peer);
     }
 
     #[test]
@@ -2776,11 +2796,11 @@ mod tests {
 
         let mut response = PooledTransactions(vec![txs[0].clone(), txs[1].clone(), txs[0].clone()]);
         let mut remaining = requested.into_iter().collect();
-        let unsolicited = verify_response(&mut response, &mut remaining);
+        let unsolicited = verify_response(&mut response, &mut remaining, &mut B256Map::default());
 
         assert_eq!(response.0, txs[..1]);
         assert_eq!(remaining, B256Set::from_iter([hash(1), hash(2)]));
-        assert_eq!(unsolicited, 2);
+        assert_eq!(unsolicited, 1);
     }
 
     #[test]
@@ -2788,6 +2808,7 @@ mod tests {
         use alloy_consensus::{EthereumTypedTransaction, TxLegacy};
         use alloy_primitives::{Signature, U256};
 
+        let mut rejected = B256Map::default();
         for hashes in [
             &[][..],
             &[0],
@@ -2826,18 +2847,34 @@ mod tests {
                         expected.push(tx);
                     }
                 }
-                let expected_unsolicited = original.len() - expected.len();
+                let expected_unsolicited =
+                    original.iter().filter(|tx| !remaining.contains(tx.tx_hash())).count();
                 let expected_remaining = remaining
                     .iter()
                     .filter(|hash| !expected.iter().any(|tx| tx.tx_hash() == *hash))
                     .copied()
                     .collect::<B256Set>();
                 let mut response = PooledTransactions(original.clone());
-                assert_eq!(verify_response(&mut response, &mut remaining), expected_unsolicited);
+                assert_eq!(
+                    verify_response(&mut response, &mut remaining, &mut rejected),
+                    expected_unsolicited
+                );
                 assert_eq!(response.iter().collect::<Vec<_>>(), expected);
                 assert_eq!(remaining, expected_remaining);
             }
         }
+
+        let mut response = PooledTransactions(pooled_txs(3));
+        let mut remaining = response.iter().map(|tx| *tx.tx_hash()).collect();
+        let capacity = rejected.capacity();
+        assert_eq!(verify_response(&mut response, &mut remaining, &mut rejected), 0);
+        assert_eq!(rejected.capacity(), capacity);
+        assert!(remaining.is_empty());
+
+        let mut remaining = response.iter().map(|tx| *tx.tx_hash()).collect();
+        let mut cold_scratch = B256Map::default();
+        assert_eq!(verify_response(&mut response, &mut remaining, &mut cold_scratch), 0);
+        assert_eq!(cold_scratch.capacity(), 0);
     }
 
     #[test]

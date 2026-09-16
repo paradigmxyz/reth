@@ -53,14 +53,22 @@ impl<T: Hash + Eq + fmt::Debug, S: BuildHasher> LruCache<T, S> {
         is_new
     }
 
-    /// Inserts a duplicate-free sequence and returns the number of cache hits.
+    /// Inserts a sequence of distinct entries and returns the number of cache hits, matching
+    /// sequential insertion of the same entries.
     ///
     /// After a capacity-sized prefix of distinct entries, every later entry must be a miss.
     /// The final capacity-sized suffix determines the cache's contents and recency order.
+    ///
+    /// The caller must guarantee that `entries` contains no duplicates, otherwise hit counts
+    /// and eviction order diverge from sequential insertion.
     pub(crate) fn insert_unique(&mut self, entries: &[T]) -> usize
     where
         T: Clone,
     {
+        debug_assert!(
+            entries.iter().collect::<std::collections::HashSet<_>>().len() == entries.len(),
+            "insert_unique requires distinct entries"
+        );
         // Ordinary insert uses the backing map's limit, including its extra eviction slot.
         let capacity = self.inner.limiter().max_length() as usize;
         if capacity == 0 {

@@ -692,7 +692,8 @@ impl<Pool: TransactionPool, N: NetworkPrimitives> TransactionsManager<Pool, N> {
         let has_duplicates = announcement.len() != msg.len();
 
         // Account for all raw hashes before filtering; duplicate announcements need sequential
-        // insertion to preserve both cache hits and eviction order.
+        // insertion to preserve both cache hits and eviction order. A peer can force that path
+        // with a single duplicate, which costs it a bad announcement report.
         let count_txns_already_seen_by_peer = if has_duplicates {
             msg.iter_hashes().filter(|hash| !peer.seen_transactions.insert(**hash)).count()
         } else {
