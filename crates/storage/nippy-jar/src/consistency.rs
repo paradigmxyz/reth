@@ -1,7 +1,7 @@
 use crate::{writer::OFFSET_SIZE_BYTES, NippyJar, NippyJarError, NippyJarHeader};
+use reth_fs_util::DirectFile;
 use std::{
     cmp::Ordering,
-    fs::{File, OpenOptions},
     io::{BufWriter, Seek, SeekFrom},
     path::Path,
 };
@@ -22,9 +22,9 @@ pub struct NippyJarChecker<H: NippyJarHeader = ()> {
     /// handling.
     pub(crate) jar: NippyJar<H>,
     /// File handle to where the data is stored.
-    pub(crate) data_file: Option<BufWriter<File>>,
+    pub(crate) data_file: Option<BufWriter<DirectFile>>,
     /// File handle to where the offsets are stored.
-    pub(crate) offsets_file: Option<BufWriter<File>>,
+    pub(crate) offsets_file: Option<BufWriter<DirectFile>>,
 }
 
 impl<H: NippyJarHeader> NippyJarChecker<H> {
@@ -77,7 +77,7 @@ impl<H: NippyJarHeader> NippyJarChecker<H> {
                 // TODO: ideally we could truncate until the last offset of the last column of the
                 //  last row inserted
 
-                // Windows has locked the file with the mmap handle, so we need to drop it
+                // Release the reader before truncating and reopening the file
                 drop(reader);
 
                 self.offsets_file().get_mut().set_len(expected_offsets_file_size)?;
@@ -109,7 +109,7 @@ impl<H: NippyJarHeader> NippyJarChecker<H> {
         // Offset list wasn't properly committed
         match last_offset.cmp(&data_file_len) {
             Ordering::Less => {
-                // Windows has locked the file with the mmap handle, so we need to drop it
+                // Release the reader before truncating and reopening the file
                 drop(reader);
 
                 // Happened during an appending job, so we need to truncate the data, since there's
@@ -130,7 +130,7 @@ impl<H: NippyJarHeader> NippyJarChecker<H> {
                             .len()
                             .saturating_sub(OFFSET_SIZE_BYTES as u64 * (index as u64 + 1));
 
-                        // Windows has locked the file with the mmap handle, so we need to drop it
+                        // Release the reader before truncating and reopening the file
                         drop(reader);
 
                         self.offsets_file().get_mut().set_len(new_len)?;
@@ -153,12 +153,12 @@ impl<H: NippyJarHeader> NippyJarChecker<H> {
 
     /// Loads data and offsets files.
     fn load_files(&mut self, mode: ConsistencyFailStrategy) -> Result<(), NippyJarError> {
-        let load_file = |path: &Path| -> Result<BufWriter<File>, NippyJarError> {
+        let load_file = |path: &Path| -> Result<BufWriter<DirectFile>, NippyJarError> {
             let path = path
                 .exists()
                 .then_some(path)
                 .ok_or_else(|| NippyJarError::MissingFile(path.to_path_buf()))?;
-            Ok(BufWriter::new(OpenOptions::new().read(true).write(mode.should_heal()).open(path)?))
+            Ok(BufWriter::new(DirectFile::open(path, mode.should_heal(), false)?))
         };
         self.data_file = Some(load_file(self.jar.data_path())?);
         self.offsets_file = Some(load_file(&self.jar.offsets_path())?);
@@ -168,14 +168,14 @@ impl<H: NippyJarHeader> NippyJarChecker<H> {
     /// Returns a mutable reference to offsets file.
     ///
     /// **Panics** if it does not exist.
-    const fn offsets_file(&mut self) -> &mut BufWriter<File> {
+    const fn offsets_file(&mut self) -> &mut BufWriter<DirectFile> {
         self.offsets_file.as_mut().expect("should exist")
     }
 
     /// Returns a mutable reference to data file.
     ///
     /// **Panics** if it does not exist.
-    const fn data_file(&mut self) -> &mut BufWriter<File> {
+    const fn data_file(&mut self) -> &mut BufWriter<DirectFile> {
         self.data_file.as_mut().expect("should exist")
     }
 }

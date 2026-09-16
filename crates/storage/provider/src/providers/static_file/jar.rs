@@ -62,7 +62,7 @@ impl<'a, N: NodePrimitives> StaticFileJarProvider<'a, N> {
     where
         'b: 'a,
     {
-        let result = StaticFileCursor::new(self.value(), self.mmap_handle())?;
+        let result = StaticFileCursor::new(self.value(), self.data_reader())?;
 
         if let Some(metrics) = &self.metrics {
             metrics.record_segment_operation(
@@ -87,7 +87,7 @@ impl<'a, N: NodePrimitives> StaticFileJarProvider<'a, N> {
         self
     }
 
-    /// Returns the total size of the data and offsets files (from the in-memory mmap).
+    /// Returns the total size of the data and offsets files (from the cached metadata).
     pub fn size(&self) -> usize {
         self.jar.value().size()
     }

@@ -22,7 +22,6 @@ reth-fs-util.workspace = true
 zstd = { workspace = true, features = ["experimental", "zdict_builder"] }
 lz4_flex.workspace = true
 
-memmap2.workspace = true
 bincode.workspace = true
 smallvec.workspace = true
 serde = { workspace = true, features = ["derive"] }
