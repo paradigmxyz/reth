@@ -22,7 +22,7 @@ use reth_rpc_eth_api::{
 };
 use reth_rpc_eth_types::{
     builder::config::PendingBlockKind, receipt::EthReceiptConverter, EthApiError, EthApiSettings,
-    EthStateCache, FeeHistoryCache, GasCap, GasPriceOracle, PendingBlock,
+    EthStateCache, FeeHistoryCache, GasPriceOracle, PendingBlock,
 };
 use reth_storage_api::{noop::NoopProvider, BlockReaderIdExt, ProviderHeader};
 use reth_tasks::{
@@ -286,23 +286,13 @@ where
         components: N,
         eth_cache: EthStateCache<N::Primitives>,
         gas_oracle: GasPriceOracle<N::Provider>,
-        gas_cap: impl Into<GasCap>,
-        max_simulate_blocks: u64,
-        compute_state_root_for_eth_simulate: bool,
-        eth_proof_window: u64,
+        settings: EthApiSettings,
         blocking_task_pool: BlockingTaskPool,
         fee_history_cache: FeeHistoryCache<ProviderHeader<N::Provider>>,
         task_spawner: Runtime,
-        proof_permits: usize,
         converter: Rpc,
         next_env: impl PendingEnvBuilder<N::Evm>,
-        max_batch_size: usize,
-        max_blocking_io_requests: usize,
-        pending_block_kind: PendingBlockKind,
         raw_tx_forwarder: Option<RpcClient>,
-        send_raw_transaction_sync_timeout: Duration,
-        evm_memory_limit: u64,
-        force_blob_sidecar_upcasting: bool,
     ) -> Self {
         let signers = parking_lot::RwLock::new(Default::default());
         // get the block number of the latest block
@@ -320,7 +310,7 @@ where
 
         // Create tx pool insertion batcher
         let (processor, tx_batch_sender) =
-            BatchTxProcessor::new(components.pool().clone(), max_batch_size);
+            BatchTxProcessor::new(components.pool().clone(), settings.max_batch_size);
         task_spawner.spawn_critical_task("tx-batcher", processor);
 
         Self {
@@ -328,23 +318,16 @@ where
             signers,
             eth_cache,
             gas_oracle,
-            settings: EthApiSettings {
-                gas_cap: gas_cap.into().into(),
-                max_simulate_blocks,
-                compute_state_root_for_eth_simulate,
-                eth_proof_window,
-                pending_block_kind,
-                send_raw_transaction_sync_timeout,
-                evm_memory_limit,
-                force_blob_sidecar_upcasting,
-            },
             starting_block,
             task_spawner,
             pending_block: Default::default(),
             blocking_task_pool,
             fee_history_cache,
-            blocking_task_guard: BlockingTaskGuard::new(proof_permits),
-            blocking_io_request_semaphore: Arc::new(Semaphore::new(max_blocking_io_requests)),
+            blocking_task_guard: BlockingTaskGuard::new(settings.proof_permits),
+            blocking_io_request_semaphore: Arc::new(Semaphore::new(
+                settings.max_blocking_io_requests,
+            )),
+            settings,
             raw_tx_sender,
             raw_tx_forwarder,
             converter,
@@ -637,6 +620,9 @@ mod tests {
         assert_eq!(settings(&default_api), &EthApiSettings::default());
 
         let expected = EthApiSettings {
+            proof_permits: 3,
+            max_batch_size: 5,
+            max_blocking_io_requests: 7,
             gas_cap: 123_456,
             max_simulate_blocks: 7,
             compute_state_root_for_eth_simulate: true,
@@ -652,6 +638,9 @@ mod tests {
             NoopNetwork::default(),
             EthEvmConfig::mainnet(),
         )
+        .proof_permits(expected.proof_permits)
+        .max_batch_size(expected.max_batch_size)
+        .max_blocking_io_requests(expected.max_blocking_io_requests)
         .gas_cap(expected.gas_cap.into())
         .max_simulate_blocks(expected.max_simulate_blocks)
         .compute_state_root_for_eth_simulate(expected.compute_state_root_for_eth_simulate)
@@ -663,6 +652,10 @@ mod tests {
         .build();
 
         assert_eq!(settings(&api), &expected);
+        assert_eq!(
+            api.inner.blocking_io_request_semaphore().available_permits(),
+            expected.max_blocking_io_requests
+        );
         assert_eq!(Call::call_gas_limit(&api), expected.gas_cap);
         assert_eq!(Call::max_simulate_blocks(&api), expected.max_simulate_blocks);
         assert_eq!(
