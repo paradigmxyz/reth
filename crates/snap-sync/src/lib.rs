@@ -39,6 +39,7 @@
 mod account;
 mod attempt;
 mod bal;
+mod bytecode;
 mod common;
 mod error;
 mod generation;
@@ -54,6 +55,7 @@ pub use account::{
 };
 pub use attempt::{SnapAttemptStore, SnapWrite};
 pub use bal::{BalStateUpdate, DownloadedAccount};
+pub use bytecode::{BytecodeDownload, BytecodeStep, SnapBytecodeStore, DEFAULT_CODE_HASHES};
 pub use common::{DEFAULT_RESPONSE_BYTES, MAX_HASH};
 pub use error::SnapSyncError;
 pub use generation::{SnapGeneration, SnapPhase};
