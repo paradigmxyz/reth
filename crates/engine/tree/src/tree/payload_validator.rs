@@ -741,9 +741,6 @@ where
         }
         let (output, senders, receipt_root_rx, built_bal) = ensure_ok!(execution_result);
 
-        // After executing the block we can stop prewarming transactions
-        handle.stop_prewarming_execution();
-
         // Create ExecutionOutcome early so we can terminate caching before validation and state
         // root computation. Using Arc allows sharing with both the caching task and the deferred
         // trie task without cloning the expensive BundleState.
@@ -1081,6 +1078,7 @@ where
             &executed_tx_index,
             has_bal,
         )?;
+        handle.stop_prewarming_execution();
         drop(receipt_tx);
 
         // Finish execution and get the result
@@ -1185,6 +1183,7 @@ where
             env.transaction_count,
             handle.clone_transaction_receiver(),
             receipt_tx,
+            || handle.stop_prewarming_execution(),
         )?;
         let execution_duration = execution_start.elapsed();
 
