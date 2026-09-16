@@ -75,7 +75,8 @@ impl NodeArena {
         }
     }
 
-    /// Returns `true` if `idx` refers to an occupied slot.
+    /// Returns `true` if `idx` refers to an occupied slot, or `false` if it is out of bounds or
+    /// free.
     pub(super) fn contains_key(&self, idx: Index) -> bool {
         self.get(idx).is_some()
     }
@@ -266,14 +267,22 @@ impl BranchChild {
     const BLINDED: u32 = 1 << 31;
 
     /// Returns a child referencing the revealed node at `idx`.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `idx` is at least 2^31.
     pub(super) const fn revealed(idx: Index) -> Self {
-        debug_assert!(idx.0 & Self::BLINDED == 0, "arena index overflows the blinded tag bit");
+        assert!(idx.0 & Self::BLINDED == 0, "arena index overflows the blinded tag bit");
         Self(idx.0)
     }
 
     /// Returns a child referencing the blinded RLP at `slot`.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `slot` is at least 2^31.
     const fn blinded(slot: u32) -> Self {
-        debug_assert!(slot & Self::BLINDED == 0, "blinded slot overflows the tag bit");
+        assert!(slot & Self::BLINDED == 0, "blinded slot overflows the tag bit");
         Self(slot | Self::BLINDED)
     }
 
@@ -345,9 +354,37 @@ mod tests {
     }
 
     #[test]
-    fn largest_arena_index_is_revealed() {
+    fn contains_key_excludes_free_slots() {
+        let mut arena = NodeArena::new();
+        let removed = arena.insert(ArenaSparseNode::TakenSubtrie);
+        let drained = arena.insert(ArenaSparseNode::TakenSubtrie);
+        assert!(arena.contains_key(removed));
+        assert!(arena.contains_key(drained));
+        assert!(!arena.contains_key(Index::new(2)));
+
+        arena.remove(removed);
+        arena.drain_node(drained);
+        assert!(!arena.contains_key(removed));
+        assert!(!arena.contains_key(drained));
+    }
+
+    #[test]
+    fn branch_child_preserves_largest_index() {
         let index = Index::new((1 << 31) - 1);
         assert_eq!(BranchChild::revealed(index).revealed_index(), Some(index));
+        assert_eq!(BranchChild::blinded(index.0).blinded_slot(), Some(index.0));
+    }
+
+    #[test]
+    #[should_panic(expected = "arena index overflows the blinded tag bit")]
+    fn revealed_child_rejects_blinded_tag_bit() {
+        BranchChild::revealed(Index(1 << 31));
+    }
+
+    #[test]
+    #[should_panic(expected = "blinded slot overflows the tag bit")]
+    fn blinded_child_rejects_blinded_tag_bit() {
+        BranchChild::blinded(1 << 31);
     }
 
     #[test]

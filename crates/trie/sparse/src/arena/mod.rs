@@ -985,7 +985,7 @@ impl ArenaParallelSparseTrie {
                 }
             }
             ArenaSparseNode::Subtrie(_) | ArenaSparseNode::TakenSubtrie | ArenaSparseNode::Free => {
-                unreachable!("Subtrie/TakenSubtrie should not appear inside a subtrie's own arena");
+                unreachable!("Subtrie/TakenSubtrie/Free cannot be a subtrie's root");
             }
         }
 
