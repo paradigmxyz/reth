@@ -505,6 +505,7 @@ impl DefaultStateRootStrategy {
     {
         let StateRootTaskOptions {
             parent_header,
+            block_hash,
             preserved_sparse_trie,
             transaction_count,
             config,
@@ -539,6 +540,7 @@ impl DefaultStateRootStrategy {
             cancel_rx,
             SparseTrieTaskOptions {
                 parent_header,
+                block_hash,
                 preserved_sparse_trie,
                 chunk_size: config.multiproof_chunk_size(),
                 pending_sparse_trie_prune_blocks: if config.disable_sparse_trie_cache_pruning() {
@@ -575,6 +577,7 @@ impl DefaultStateRootStrategy {
     ) {
         let SparseTrieTaskOptions {
             parent_header,
+            block_hash,
             preserved_sparse_trie,
             chunk_size,
             pending_sparse_trie_prune_blocks,
@@ -617,7 +620,7 @@ impl DefaultStateRootStrategy {
                 Some(preserved) => {
                     let start = Instant::now();
                     let preserved_anchor_hash = preserved.anchor_hash();
-                    let preserved = preserved.into_trie_for(parent_state_root);
+                    let preserved = preserved.into_trie_for(parent_hash);
                     trie_metrics
                         .sparse_trie_cache_wait_duration_histogram
                         .record(start.elapsed().as_secs_f64());
@@ -662,13 +665,15 @@ impl DefaultStateRootStrategy {
             let result = task.run();
             let task_result = result.as_ref().ok().cloned();
 
-            // Publish a handle before sending the result so the next block can inspect the
-            // state root immediately while the trie is finalized for reuse below.
-            let pending_trie = if let Some(result) = &task_result {
+            // Validation supplies the completed block hash before this task starts. Payload
+            // building does not, so only validation tasks publish a reusable trie.
+            let pending_trie = if task_result.is_some() &&
+                let Some(block_hash) = block_hash
+            {
                 let preserved_anchor_hash =
                     prune_target.map_or(sparse_trie_anchor_hash, |(_, anchor_hash)| anchor_hash);
                 let (preserved, completer) =
-                    PreservedSparseTrie::pending(result.state_root, preserved_anchor_hash);
+                    PreservedSparseTrie::pending(block_hash, preserved_anchor_hash);
                 overlay_manager.store_sparse_trie(preserved);
                 Some(completer)
             } else {
@@ -737,6 +742,7 @@ impl DefaultStateRootStrategy {
 
 struct SparseTrieTaskOptions<N: NodePrimitives> {
     parent_header: SealedHeader<N::BlockHeader>,
+    block_hash: Option<B256>,
     preserved_sparse_trie: Option<PreservedSparseTrie>,
     chunk_size: usize,
     /// `None` disables pruning. `Some(Vec::new())` prunes nodes older than the current block.
@@ -745,6 +751,7 @@ struct SparseTrieTaskOptions<N: NodePrimitives> {
 
 struct StateRootTaskOptions<'a, N: NodePrimitives> {
     parent_header: SealedHeader<N::BlockHeader>,
+    block_hash: Option<B256>,
     preserved_sparse_trie: Option<PreservedSparseTrie>,
     transaction_count: Option<usize>,
     config: &'a TreeConfig,
@@ -825,7 +832,7 @@ where
         let preserved_sparse_trie = overlay_manager.take_sparse_trie();
         let proof_state_provider_factory = if let Some(anchor_hash) = preserved_sparse_trie
             .as_ref()
-            .filter(|trie| trie.state_root() == env.parent_state_root)
+            .filter(|trie| trie.block_hash() == parent_header.hash())
             .map(|trie| trie.anchor_hash())
         {
             state_provider_factory.clone().with_skip_overlay_for_reused_sparse_trie(anchor_hash)
@@ -839,6 +846,7 @@ where
             proof_state_provider_factory,
             StateRootTaskOptions {
                 parent_header: parent_header.clone(),
+                block_hash: Some(env.hash),
                 preserved_sparse_trie,
                 transaction_count: Some(env.transaction_count),
                 config,
@@ -895,12 +903,11 @@ where
         }
 
         let pending_sparse_trie_prune_blocks = ctx.take_sparse_trie_prune_blocks();
-        let parent_state_root = ctx.parent_state_root();
         let parent_header = SealedHeader::new(ctx.parent_header().clone(), ctx.parent_hash());
         let preserved_sparse_trie = ctx.overlay_manager.take_sparse_trie();
         let proof_state_provider_factory = if let Some(anchor_hash) = preserved_sparse_trie
             .as_ref()
-            .filter(|trie| trie.state_root() == parent_state_root)
+            .filter(|trie| trie.block_hash() == ctx.parent_hash())
             .map(|trie| trie.anchor_hash())
         {
             ctx.state_provider_factory.clone().with_skip_overlay_for_reused_sparse_trie(anchor_hash)
@@ -914,6 +921,7 @@ where
                 proof_state_provider_factory,
                 StateRootTaskOptions {
                     parent_header,
+                    block_hash: None,
                     preserved_sparse_trie,
                     // Tx count unknown at FCU time (block built incrementally): full proof workers.
                     transaction_count: None,
@@ -1478,6 +1486,7 @@ mod tests {
             ),
             StateRootTaskOptions {
                 parent_header: SealedHeader::new(Default::default(), genesis_hash),
+                block_hash: None,
                 preserved_sparse_trie: None,
                 transaction_count: Some(env.transaction_count),
                 config: &TreeConfig::default(),
