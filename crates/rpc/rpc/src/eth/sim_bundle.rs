@@ -10,6 +10,7 @@ use alloy_rpc_types_mev::{
     SimBundleResponse, Validity,
 };
 use jsonrpsee::core::RpcResult;
+use reth_errors::RethError;
 use reth_evm::{ConfigureEvm, Evm};
 use reth_primitives_traits::Recovered;
 use reth_rpc_api::MevSimApiServer;
@@ -290,22 +291,40 @@ where
         let flattened_bundle = self.parse_and_flatten_bundle(&request)?;
 
         let block_id = parent_block.unwrap_or(BlockId::Number(BlockNumberOrTag::Latest));
-        let (current_block, mut evm_env, current_block_id) =
+        let (parent, _, parent_block_id) =
             self.eth_api().evm_env_and_recovered_block_at(block_id).await?;
+
+        // The bundle is simulated in the block that builds on the parent, so derive the
+        // environment of the next block, see
+        // <https://github.com/flashbots/builder/blob/main/internal/ethapi/sbundle_api.go>
+        let parent_header = parent.clone_sealed_header();
+        let mut evm_env = {
+            let attributes = self
+                .eth_api()
+                .pending_env_builder()
+                .pending_env_attributes(&parent_header, Some(&block_overrides))?;
+            self.eth_api()
+                .evm_config()
+                .next_evm_env(&parent_header, &attributes)
+                .map_err(RethError::other)
+                .map_err(EthApiError::from_eth_err)?
+        };
 
         let eth_api = self.inner.eth_api.clone();
 
         let sim_response = self
             .inner
             .eth_api
-            .spawn_with_state_at_block(current_block_id, move |_, mut db| {
-                // Setup environment
-                let current_block_number = current_block.number();
+            .spawn_with_state_at_block(parent_block_id, move |_, mut db| {
+                // apply overrides before reading the block values they may change
+                apply_block_overrides(block_overrides, &mut db, evm_env.block_env.inner_mut());
+
+                let state_block = parent.number();
+                let simulated_block_number = evm_env.block_env.number().saturating_to::<u64>();
+                let simulated_block_timestamp =
+                    evm_env.block_env.timestamp().saturating_to::<u64>();
                 let coinbase = evm_env.block_env.beneficiary();
                 let basefee = evm_env.block_env.basefee();
-
-                // apply overrides
-                apply_block_overrides(block_overrides, &mut db, evm_env.block_env.inner_mut());
 
                 let initial_coinbase_balance = DatabaseRef::basic_ref(&db, coinbase)
                     .map_err(EthApiError::from_eth_err)?
@@ -327,8 +346,8 @@ where
                     let max_block_number =
                         item.inclusion.max_block_number().unwrap_or(block_number);
 
-                    if current_block_number < block_number ||
-                        current_block_number > max_block_number
+                    if simulated_block_number < block_number ||
+                        simulated_block_number > max_block_number
                     {
                         return Err(EthApiError::InvalidParams(
                             EthSimBundleError::InvalidInclusion.to_string(),
@@ -375,9 +394,10 @@ where
                             .map(|inner| {
                                 let full_log = Log {
                                     inner,
-                                    block_hash: Some(current_block.hash()),
-                                    block_number: Some(current_block.number()),
-                                    block_timestamp: Some(current_block.timestamp()),
+                                    // the simulated block has no hash yet
+                                    block_hash: None,
+                                    block_number: Some(simulated_block_number),
+                                    block_timestamp: Some(simulated_block_timestamp),
                                     transaction_hash: Some(*item.tx.tx_hash()),
                                     transaction_index: Some(tx_index as u64),
                                     log_index: Some(log_index),
@@ -452,7 +472,7 @@ where
 
                 Ok(SimBundleResponse {
                     success: true,
-                    state_block: current_block_number,
+                    state_block,
                     error: None,
                     logs: Some(body_logs),
                     gas_used: total_gas_used,
@@ -558,6 +578,139 @@ mod tests {
     use super::*;
     use alloy_primitives::Bytes;
     use alloy_rpc_types_mev::{Inclusion, ProtocolVersion};
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn sim_bundle_uses_next_block_env_and_overrides() {
+        use crate::EthApiBuilder;
+        use alloy_consensus::{transaction::SignerRecoverable, TxEip1559};
+        use alloy_eips::eip2718::Encodable2718;
+        use alloy_genesis::{Genesis, GenesisAccount};
+        use alloy_primitives::{Address, TxKind, B256};
+        use alloy_rpc_types_eth::BlockOverrides;
+        use reth_chainspec::{ChainSpecBuilder, ChainSpecProvider};
+        use reth_db_common::init::init_genesis;
+        use reth_evm_ethereum::EthEvmConfig;
+        use reth_network_api::noop::NoopNetwork;
+        use reth_provider::{
+            providers::BlockchainProvider, test_utils::create_test_provider_factory_with_chain_spec,
+        };
+        use reth_testing_utils::generators::{self, generate_key, sign_tx_with_key_pair};
+        use reth_transaction_pool::test_utils::testing_pool;
+
+        let contract = Address::repeat_byte(0xaa);
+        let coinbase = Address::repeat_byte(0x11);
+        let overridden_coinbase = Address::repeat_byte(0x22);
+        let mut rng = generators::rng();
+        let tx = sign_tx_with_key_pair(
+            generate_key(&mut rng),
+            reth_ethereum_primitives::Transaction::Eip1559(TxEip1559 {
+                chain_id: 1,
+                nonce: 0,
+                gas_limit: 100_000,
+                max_fee_per_gas: 2_000_000_000,
+                max_priority_fee_per_gas: 1_000_000_000,
+                to: TxKind::Call(contract),
+                ..Default::default()
+            }),
+        );
+        let sender = tx.recover_signer().unwrap();
+
+        // Log NUMBER, TIMESTAMP, BASEFEE and COINBASE as topics, in that order.
+        let code = Bytes::from_static(&[0x41, 0x48, 0x42, 0x43, 0x5f, 0x5f, 0xa4, 0x00]);
+        let genesis = Genesis::default()
+            .with_gas_limit(30_000_000)
+            .with_timestamp(100)
+            .with_base_fee(Some(1_000_000_000))
+            .with_coinbase(coinbase)
+            .extend_accounts([
+                (sender, GenesisAccount::default().with_balance(U256::from(10u128.pow(18)))),
+                (contract, GenesisAccount::default().with_code(Some(code))),
+                (
+                    overridden_coinbase,
+                    GenesisAccount::default().with_balance(U256::from(10u128.pow(18))),
+                ),
+            ]);
+        let chain_spec =
+            Arc::new(ChainSpecBuilder::mainnet().cancun_activated().genesis(genesis).build());
+        let factory = create_test_provider_factory_with_chain_spec(chain_spec);
+        init_genesis(&factory).unwrap();
+        let provider = BlockchainProvider::new(factory).unwrap();
+
+        let eth_api = EthApiBuilder::new(
+            provider.clone(),
+            testing_pool(),
+            NoopNetwork::default(),
+            EthEvmConfig::new(provider.chain_spec()),
+        )
+        .build();
+        let api = EthSimBundle::new(eth_api, BlockingTaskGuard::new(4));
+
+        let bundle = |block| MevSendBundle {
+            protocol_version: ProtocolVersion::V0_1,
+            inclusion: Inclusion::at_block(block),
+            bundle_body: vec![BundleItem::Tx { tx: tx.encoded_2718().into(), can_revert: false }],
+            validity: None,
+            privacy: None,
+        };
+
+        for (overrides, number, timestamp, base_fee, beneficiary) in [
+            (SimBundleOverrides::default(), 1, 112, 875_000_000, coinbase),
+            (
+                SimBundleOverrides {
+                    parent_block: Some(BlockNumberOrTag::Number(0).into()),
+                    block_overrides: BlockOverrides {
+                        number: Some(U256::from(2)),
+                        time: Some(200),
+                        base_fee: Some(U256::from(1_500_000_000)),
+                        coinbase: Some(overridden_coinbase),
+                        ..Default::default()
+                    },
+                    ..Default::default()
+                },
+                2,
+                200,
+                1_500_000_000,
+                overridden_coinbase,
+            ),
+        ] {
+            let response = api.sim_bundle(bundle(number), overrides.clone()).await.unwrap();
+            assert!(response.success);
+            assert_eq!(response.state_block, 0);
+            let tip = (2_000_000_000u64 - base_fee).min(1_000_000_000);
+            assert_eq!(response.profit, U256::from(response.gas_used) * U256::from(tip));
+            assert_eq!(response.refundable_value, response.profit);
+            assert_eq!(response.mev_gas_price, U256::from(tip));
+
+            let logs = response.logs.unwrap();
+            assert_eq!(logs.len(), 1);
+            let tx_logs = logs[0].tx_logs.as_ref().unwrap();
+            assert_eq!(tx_logs.len(), 1);
+            let log = &tx_logs[0];
+            assert_eq!(
+                log.inner.topics(),
+                &[
+                    B256::from(U256::from(number)),
+                    B256::from(U256::from(timestamp)),
+                    B256::from(U256::from(base_fee)),
+                    beneficiary.into_word(),
+                ]
+            );
+            assert_eq!(log.block_hash, None);
+            assert_eq!(log.block_number, Some(number));
+            assert_eq!(log.block_timestamp, Some(timestamp));
+            assert_eq!(log.transaction_hash, Some(*tx.tx_hash()));
+            assert_eq!(log.transaction_index, Some(0));
+            assert_eq!(log.log_index, Some(0));
+
+            // Nonzero inclusion bounds reach the simulation check instead of failing parsing.
+            let err = api.sim_bundle(bundle(number + 1), overrides.clone()).await.unwrap_err();
+            assert!(err.message().contains("invalid inclusion"), "{err}");
+            if number > 1 {
+                let err = api.sim_bundle(bundle(number - 1), overrides).await.unwrap_err();
+                assert!(err.message().contains("invalid inclusion"), "{err}");
+            }
+        }
+    }
 
     fn create_test_bundle(tx_bytes: Vec<Bytes>) -> MevSendBundle {
         let body: Vec<BundleItem> =
