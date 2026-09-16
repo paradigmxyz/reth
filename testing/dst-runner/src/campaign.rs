@@ -142,6 +142,7 @@ impl Node {
         let consensus = Arc::new(EthBeaconConsensus::new(chain.clone()));
         let config = TreeConfig::default()
             .with_cross_block_cache_size(1024 * 1024)
+            .with_num_state_masking_blocks(0)
             .with_memory_block_buffer_target(0)
             .with_persistence_threshold(campaign_config.persistence_threshold)
             .with_persistence_backpressure_threshold(campaign_config.persistence_threshold + 2)

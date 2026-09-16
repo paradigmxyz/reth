@@ -322,22 +322,27 @@ impl<N: NodePrimitives> OverlayManager<N> {
         if tip_hash == anchor_hash {
             return
         }
-        let Some(worker_pool) = &self.worker_pool else { return };
+        let Some(worker_pool) = self.worker_pool.clone() else { return };
         let manager = self.clone();
         let parent_span = tracing::Span::current();
-        worker_pool.spawn(move || {
-            let _span = tracing::trace_span!(
-                target: "storage::overlay::manager",
-                parent: parent_span,
-                "precompute_execution_overlay",
-                %tip_hash,
-                %anchor_hash,
-            )
-            .entered();
-            if let Err(err) = manager.precompute_execution_overlay_for_parent(tip_hash, anchor_hash) {
-                debug!(target: "storage::overlay::manager", %err, "Skipping execution overlay precompute");
-            }
-        });
+        reth_rayon::spawn_with(
+            move || {
+                let _span = tracing::trace_span!(
+                    target: "storage::overlay::manager",
+                    parent: parent_span,
+                    "precompute_execution_overlay",
+                    %tip_hash,
+                    %anchor_hash,
+                )
+                .entered();
+                if let Err(err) =
+                    manager.precompute_execution_overlay_for_parent(tip_hash, anchor_hash)
+                {
+                    debug!(target: "storage::overlay::manager", %err, "Skipping execution overlay precompute");
+                }
+            },
+            |job| worker_pool.spawn(job),
+        );
     }
 
     /// Removes blocks from the live block graph and prunes cached overlays that can no longer be
