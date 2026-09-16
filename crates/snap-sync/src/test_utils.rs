@@ -1,17 +1,19 @@
 //! Fixtures shared by the crate's tests: headers, an account trie and a scripted snap client.
 
 use crate::{
-    account::{DEFAULT_RESPONSE_BYTES, MAX_HASH},
+    common::{DEFAULT_RESPONSE_BYTES, MAX_HASH},
     SnapGeneration, SnapPivotPolicy,
 };
 use alloy_consensus::Header;
 use alloy_eips::BlockNumHash;
 use alloy_primitives::{Bytes, B256, KECCAK256_EMPTY, U256};
 use futures::future::{ready, Ready};
+use reth_db_api::{cursor::DbDupCursorRO, tables, transaction::DbTx};
 use reth_downloaders::snap::{AccountRangeDownloader, AccountRangeOutcome, VerifiedAccountRange};
 use reth_eth_wire_types::snap::{
-    AccountData, AccountRangeMessage, GetAccountRangeMessage, GetBlockAccessListsMessage,
-    GetByteCodesMessage, GetStorageRangesMessage,
+    AccountData, AccountRangeMessage, ByteCodesMessage, GetAccountRangeMessage,
+    GetBlockAccessListsMessage, GetByteCodesMessage, GetStorageRangesMessage, StorageData,
+    StorageRangesMessage,
 };
 use reth_network_p2p::{
     download::DownloadClient,
@@ -26,7 +28,11 @@ use reth_provider::{
 };
 use reth_storage_api::{DBProvider, MetadataWriter, StorageSettings, StorageSettingsCache};
 use reth_tasks::Runtime;
-use reth_trie_common::{proof::ProofRetainer, HashBuilder, Nibbles, TrieAccount, EMPTY_ROOT_HASH};
+use reth_trie_common::{
+    proof::ProofRetainer,
+    root::{state_root_unsorted, storage_root_unsorted},
+    HashBuilder, Nibbles, TrieAccount, EMPTY_ROOT_HASH,
+};
 use std::{
     collections::VecDeque,
     ops::Range,
@@ -106,15 +112,30 @@ pub(crate) fn account(nonce: u64) -> TrieAccount {
 
 /// Root of the account trie holding `accounts`.
 pub(crate) fn state_root(accounts: &[(B256, TrieAccount)]) -> B256 {
-    root_and_proof(accounts, &[]).0
+    state_root_unsorted(accounts.iter().copied())
 }
 
-// Root of the trie, and the proof nodes on the paths to `targets`.
+// Root of the account trie, and the proof nodes on the paths to `targets`.
 fn root_and_proof(accounts: &[(B256, TrieAccount)], targets: &[B256]) -> (B256, Vec<Bytes>) {
+    trie(accounts.iter().map(|(key, account)| (*key, alloy_rlp::encode(account))), targets)
+}
+
+/// Root of the storage trie holding `slots`.
+pub(crate) fn storage_root_of(slots: &[(B256, U256)]) -> B256 {
+    storage_root_unsorted(slots.iter().copied())
+}
+
+// Root of the storage trie, and the proof nodes on the paths to `targets`.
+fn storage_trie(slots: &[(B256, U256)], targets: &[B256]) -> (B256, Vec<Bytes>) {
+    trie(slots.iter().map(|(slot, value)| (*slot, alloy_rlp::encode(value))), targets)
+}
+
+// Root of the trie holding `leaves` in key order, and the proof nodes on the paths to `targets`.
+fn trie(leaves: impl IntoIterator<Item = (B256, Vec<u8>)>, targets: &[B256]) -> (B256, Vec<Bytes>) {
     let targets = targets.iter().copied().map(Nibbles::unpack).collect();
     let mut builder = HashBuilder::default().with_proof_retainer(ProofRetainer::new(targets));
-    for (key, account) in accounts {
-        builder.add_leaf(Nibbles::unpack(*key), &alloy_rlp::encode(account));
+    for (key, leaf) in leaves {
+        builder.add_leaf(Nibbles::unpack(key), &leaf);
     }
     let root = builder.root();
     let proof =
@@ -170,10 +191,51 @@ pub(crate) fn verified_range(
     }
 }
 
+/// A peer's answer serving `ranges`, the last of which belongs to the storage trie holding `last`
+/// and is proven along the paths to `proof_targets`. No targets means no proof.
+pub(crate) fn storage_ranges(
+    request_id: u64,
+    ranges: &[&[(B256, U256)]],
+    last: &[(B256, U256)],
+    proof_targets: &[B256],
+) -> PeerRequestResult<SnapResponse> {
+    let proof =
+        if proof_targets.is_empty() { Vec::new() } else { storage_trie(last, proof_targets).1 };
+    let slots = ranges
+        .iter()
+        .map(|range| {
+            range.iter().map(|(slot, value)| StorageData::from_value(*slot, *value)).collect()
+        })
+        .collect();
+    let message = StorageRangesMessage { request_id, slots, proof };
+    Ok(WithPeerId::new(PeerId::random(), SnapResponse::StorageRanges(message)))
+}
+
+/// A peer's answer serving `codes`, in the order they were requested.
+pub(crate) fn byte_codes(request_id: u64, codes: &[Bytes]) -> PeerRequestResult<SnapResponse> {
+    let message = ByteCodesMessage { request_id, codes: codes.to_vec() };
+    Ok(WithPeerId::new(PeerId::random(), SnapResponse::ByteCodes(message)))
+}
+
+/// Slots persisted for `account`, in key order.
+pub(crate) fn stored_slots(provider: &impl DBProvider, account: B256) -> Vec<(B256, U256)> {
+    let mut cursor = provider.tx_ref().cursor_dup_read::<tables::HashedStorages>().unwrap();
+    cursor
+        .walk_dup(Some(account), None)
+        .unwrap()
+        .map(|entry| {
+            let (_, slot) = entry.unwrap();
+            (slot.key, slot.value)
+        })
+        .collect()
+}
+
 /// Serves scripted answers in request order, recording what each request asked for.
 pub(crate) struct ScriptedSnapClient {
     responses: Mutex<VecDeque<PeerRequestResult<SnapResponse>>>,
     origins: Mutex<Vec<B256>>,
+    storage_requests: Mutex<Vec<(Vec<B256>, B256)>>,
+    code_requests: Mutex<Vec<Vec<B256>>>,
 }
 
 impl ScriptedSnapClient {
@@ -183,12 +245,29 @@ impl ScriptedSnapClient {
         Self {
             responses: Mutex::new(responses.into_iter().collect()),
             origins: Mutex::new(Vec::new()),
+            storage_requests: Mutex::new(Vec::new()),
+            code_requests: Mutex::new(Vec::new()),
         }
     }
 
     /// Origins of the account range requests sent so far.
     pub(crate) fn origins(&self) -> MutexGuard<'_, Vec<B256>> {
         self.origins.lock().unwrap()
+    }
+
+    /// Accounts and starting slot of the storage range requests sent so far.
+    pub(crate) fn storage_requests(&self) -> MutexGuard<'_, Vec<(Vec<B256>, B256)>> {
+        self.storage_requests.lock().unwrap()
+    }
+
+    /// Hashes of the bytecode requests sent so far.
+    pub(crate) fn code_requests(&self) -> MutexGuard<'_, Vec<Vec<B256>>> {
+        self.code_requests.lock().unwrap()
+    }
+
+    fn next_response(&self) -> Ready<PeerRequestResult<SnapResponse>> {
+        let response = self.responses.lock().unwrap().pop_front();
+        ready(response.unwrap_or(Err(RequestError::ChannelClosed)))
     }
 }
 
@@ -215,32 +294,34 @@ impl SnapClient for ScriptedSnapClient {
         _priority: Priority,
     ) -> Self::Output {
         self.origins.lock().unwrap().push(request.starting_hash);
-        let response = self.responses.lock().unwrap().pop_front();
-        ready(response.unwrap_or(Err(RequestError::ChannelClosed)))
+        self.next_response()
     }
 
-    fn get_storage_ranges(&self, _request: GetStorageRangesMessage) -> Self::Output {
-        unsupported()
+    fn get_storage_ranges(&self, request: GetStorageRangesMessage) -> Self::Output {
+        self.get_storage_ranges_with_priority(request, Priority::Normal)
     }
 
     fn get_storage_ranges_with_priority(
         &self,
-        _request: GetStorageRangesMessage,
+        request: GetStorageRangesMessage,
         _priority: Priority,
     ) -> Self::Output {
-        unsupported()
+        let from = request.starting_hash.unwrap_or(B256::ZERO);
+        self.storage_requests.lock().unwrap().push((request.account_hashes, from));
+        self.next_response()
     }
 
-    fn get_byte_codes(&self, _request: GetByteCodesMessage) -> Self::Output {
-        unsupported()
+    fn get_byte_codes(&self, request: GetByteCodesMessage) -> Self::Output {
+        self.get_byte_codes_with_priority(request, Priority::Normal)
     }
 
     fn get_byte_codes_with_priority(
         &self,
-        _request: GetByteCodesMessage,
+        request: GetByteCodesMessage,
         _priority: Priority,
     ) -> Self::Output {
-        unsupported()
+        self.code_requests.lock().unwrap().push(request.hashes);
+        self.next_response()
     }
 
     fn get_block_access_lists_with_priority(

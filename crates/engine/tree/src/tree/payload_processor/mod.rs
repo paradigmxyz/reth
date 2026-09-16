@@ -298,13 +298,14 @@ where
                             .enumerate()
                             .try_for_each(|(idx, tx)| {
                                 let tx = convert.convert(tx).map(WithTxEnv::new);
-                                let failed = tx.is_err();
                                 if let (Some(prewarm_tx), Ok(tx)) = (&prewarm_tx, &tx) {
                                     let _ = prewarm_tx.send((idx, tx.clone()));
                                 }
                                 let disconnected = execute_tx.send((idx, tx)).is_err();
                                 trace!(target: "engine::tree::payload_processor", idx, "yielded transaction");
-                                if failed || disconnected {
+                                // Recovery failures are adjudicated in transaction order by
+                                // the BAL commit loop. Earlier slots may still be unconverted.
+                                if disconnected {
                                     Err(())
                                 } else {
                                     Ok(())
@@ -753,7 +754,7 @@ mod tests {
     #[test]
     fn transaction_conversion_stops_on_error() {
         for (count, bal, fail_at) in
-            [(10, false, 0), (200, false, 0), (200, false, 4), (200, false, 20), (200, true, 0)]
+            [(10, false, 0), (10, true, 0), (200, false, 0), (200, false, 4), (200, false, 20)]
         {
             let processor = test_processor();
             let (_, receiver) = processor.spawn_tx_iterator(
@@ -783,6 +784,32 @@ mod tests {
                 assert!(results.last().unwrap().1.is_err());
             }
         }
+    }
+
+    #[test]
+    fn bal_transaction_conversion_preserves_all_error_slots() {
+        let count = 200;
+        let processor = test_processor();
+        let (_, receiver) = processor.spawn_tx_iterator(
+            ((0..count).collect::<Vec<_>>(), |idx| {
+                if idx % 3 == 0 {
+                    Err(std::io::Error::other("invalid transaction"))
+                } else {
+                    Ok(converted_tx())
+                }
+            }),
+            count,
+            true,
+            false,
+        );
+        let mut indices = Vec::new();
+        for _ in 0..count {
+            let (idx, tx) = receiver.recv_timeout(std::time::Duration::from_secs(10)).unwrap();
+            assert_eq!(tx.is_err(), idx % 3 == 0);
+            indices.push(idx);
+        }
+        indices.sort_unstable();
+        assert_eq!(indices, (0..count).collect::<Vec<_>>());
     }
 
     #[test]

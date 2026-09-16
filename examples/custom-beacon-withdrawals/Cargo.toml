@@ -13,3 +13,5 @@ alloy-sol-types.workspace = true
 alloy-eips.workspace = true
 
 eyre.workspace = true
+
+[lints]
