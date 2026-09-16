@@ -1920,14 +1920,10 @@ impl ArenaParallelSparseTrie {
 
     /// Removes a pruned node from the arena and blinds the parent's child slot with the node's
     /// cached RLP.
-    fn remove_pruned_node(
-        arena: &mut NodeArena,
-        cursor: &ArenaCursor,
-        idx: Index,
-        nibble: Option<u8>,
-    ) -> ArenaSparseNode {
-        let path = cursor.head().expect("cursor is non-empty").path;
-        let node = arena.remove(idx).expect("node must exist to be pruned");
+    fn remove_pruned_node(arena: &mut NodeArena, cursor: &mut ArenaCursor) -> ArenaSparseNode {
+        let entry = cursor.pop(arena);
+        let path = entry.path;
+        let node = arena.remove(entry.index).expect("node must exist to be pruned");
         let rlp_node = node
             .state_ref()
             .and_then(ArenaSparseNodeState::cached_rlp_node)
@@ -1941,8 +1937,8 @@ impl ArenaParallelSparseTrie {
             "pruning node",
         );
 
-        let parent_idx = cursor.parent().expect("pruned child has parent").index;
-        let child_nibble = nibble.expect("non-root child");
+        let parent_idx = cursor.head().expect("pruned child has parent").index;
+        let child_nibble = path.last().expect("non-root child");
         let blinded = arena.insert_blinded(rlp_node);
         let parent_branch = arena[parent_idx].branch_mut();
         let child_idx = BranchChildIdx::new(parent_branch.state_mask, child_nibble)
@@ -1994,7 +1990,7 @@ impl ArenaParallelSparseTrie {
         if !child.is_blinded() {
             return None;
         }
-        let cached_rlp = arena.take_blinded(child);
+        let cached_rlp = arena.blinded(child).clone();
 
         trace!(
             target: TRACE_TARGET,
@@ -2012,6 +2008,7 @@ impl ArenaParallelSparseTrie {
 
         let child_idx = arena.insert(arena_node);
         arena[head_idx].branch_mut().children[dense_child_idx] = BranchChild::revealed(child_idx);
+        arena.take_blinded(child);
 
         Some(child_idx)
     }
@@ -2494,8 +2491,6 @@ impl SparseTrie for ArenaParallelSparseTrie {
 
             let head = cursor.head().expect("cursor is non-empty");
             let head_idx = head.index;
-            let head_path = head.path;
-
             match &self.upper_arena[head_idx] {
                 ArenaSparseNode::Branch(_) | ArenaSparseNode::Leaf { .. } => {
                     // Don't prune the root.
@@ -2511,12 +2506,7 @@ impl SparseTrie for ArenaParallelSparseTrie {
                         continue;
                     }
 
-                    Self::remove_pruned_node(
-                        &mut self.upper_arena,
-                        &cursor,
-                        head_idx,
-                        head_path.last(),
-                    );
+                    Self::remove_pruned_node(&mut self.upper_arena, &mut cursor);
                     pruned += 1;
                 }
                 ArenaSparseNode::Subtrie(_) => {
@@ -2525,12 +2515,7 @@ impl SparseTrie for ArenaParallelSparseTrie {
                         .and_then(ArenaSparseNodeState::cached_epoch)
                         .expect("prune must run after hashing");
                     if root_epoch.should_prune(prune_before) {
-                        let removed = Self::remove_pruned_node(
-                            &mut self.upper_arena,
-                            &cursor,
-                            head_idx,
-                            head_path.last(),
-                        );
+                        let removed = Self::remove_pruned_node(&mut self.upper_arena, &mut cursor);
                         let ArenaSparseNode::Subtrie(s) = &removed else { unreachable!() };
                         pruned += s.arena.len();
                         self.recycle_subtrie(removed);
@@ -2911,6 +2896,52 @@ mod tests {
 
     const fn epoch(value: u64) -> TrieNodeEpoch {
         TrieNodeEpoch::new(value)
+    }
+
+    #[test]
+    fn pruning_pops_cursor_before_reusing_node_slot() {
+        use super::{
+            ArenaCursor, ArenaSparseNode, ArenaSparseNodeBranch, ArenaSparseNodeState, BranchChild,
+            NextResult, NodeArena,
+        };
+        use reth_trie_common::RlpNode;
+
+        let mut arena = NodeArena::new();
+        let rlp = RlpNode::word_rlp(&B256::repeat_byte(1));
+        let state = ArenaSparseNodeState::Cached { rlp_node: rlp.clone(), epoch: epoch(0) };
+        let leaf =
+            ArenaSparseNode::Leaf { state: state.clone(), key: Default::default(), value: vec![1] };
+        let first = arena.insert(leaf.clone());
+        let second = arena.insert(leaf);
+        let root = arena.insert(ArenaSparseNode::Branch(ArenaSparseNodeBranch {
+            state: state.clone(),
+            children: [BranchChild::revealed(first), BranchChild::revealed(second)]
+                .into_iter()
+                .collect(),
+            state_mask: alloy_trie::TrieMask::new(3),
+            short_key: Default::default(),
+            branch_masks: Default::default(),
+        }));
+        let mut cursor = ArenaCursor::default();
+        cursor.reset(&arena, root, Default::default());
+        assert!(matches!(cursor.next(&mut arena, |_, _| true), NextResult::NonBranch));
+        assert_eq!(cursor.head().unwrap().index, first);
+
+        ArenaParallelSparseTrie::remove_pruned_node(&mut arena, &mut cursor);
+        assert_eq!(cursor.head().unwrap().index, root);
+        let reused = arena.insert(ArenaSparseNode::Leaf {
+            state: ArenaSparseNodeState::Dirty,
+            key: Default::default(),
+            value: vec![2],
+        });
+        assert_eq!(reused, first);
+
+        assert!(matches!(cursor.next(&mut arena, |_, _| true), NextResult::NonBranch));
+        assert_eq!(cursor.head().unwrap().index, second);
+        assert!(matches!(cursor.next(&mut arena, |_, _| true), NextResult::Branch));
+        assert_eq!(arena[root].state_ref(), Some(&state));
+        assert_eq!(arena.blinded(arena[root].branch_ref().children[0]), &rlp);
+        assert!(matches!(cursor.next(&mut arena, |_, _| true), NextResult::Done));
     }
 
     /// Test harness for proptest-based arena sparse trie testing.

@@ -50,9 +50,13 @@ impl NodeArena {
     /// For an arena that is being emptied into a fresh one — pruning and compaction both do that
     /// and then drop the source — maintaining the free list is wasted work. [`Self::len`] is no
     /// longer accurate afterwards.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the slot is out of bounds or free.
     pub(super) fn drain_node(&mut self, idx: Index) -> ArenaSparseNode {
         let node = core::mem::replace(&mut self.nodes[idx.get()], ArenaSparseNode::Free);
-        debug_assert!(!matches!(node, ArenaSparseNode::Free), "drained a free arena slot");
+        assert!(!matches!(node, ArenaSparseNode::Free), "drained a free arena slot");
         node
     }
 
@@ -147,7 +151,8 @@ impl NodeArena {
     /// out of `src` stay valid without their RLP being moved one slot at a time.
     ///
     /// The copy must record every child it carries over in the returned marks and finish with
-    /// [`Self::sweep_blinded`], which turns the slots left behind into free ones.
+    /// [`Self::sweep_blinded`], which reclaims unreferenced slots and may rewrite the blinded
+    /// children stored in this arena. Blinded handles must not be retained across the sweep.
     pub(super) fn adopt_blinded(&mut self, src: &mut Self) -> BlindedMarks {
         debug_assert!(self.blinded.is_empty(), "adopting into a non-empty side table");
         self.blinded = core::mem::take(&mut src.blinded);
@@ -155,25 +160,62 @@ impl NodeArena {
         BlindedMarks { words: alloc::vec![0; self.blinded.len().div_ceil(WORD_BITS)] }
     }
 
-    /// Rebuilds the free list of the side table adopted by [`Self::adopt_blinded`] from the slots
-    /// `marks` records as still referenced, and drops its unreferenced tail.
+    /// Reclaims unmarked slots in the side table adopted by [`Self::adopt_blinded`].
+    /// Sparse tables are compacted and their branch child references rewritten, so a live tail
+    /// slot cannot retain an arbitrarily large table. Other tables keep their slot indices.
     pub(super) fn sweep_blinded(&mut self, marks: BlindedMarks) {
         let words = marks.words;
-        let live = words
+        let end = words
             .iter()
             .rposition(|word| *word != 0)
             .map_or(0, |idx| idx * WORD_BITS + WORD_BITS - words[idx].leading_zeros() as usize);
-        debug_assert!(live <= self.blinded.len(), "marked slot outside the side table");
-        self.blinded.truncate(live);
+        debug_assert!(end <= self.blinded.len(), "marked slot outside the side table");
+        self.blinded.truncate(end);
         self.blinded_free.clear();
+
+        let words = &words[..end.div_ceil(WORD_BITS)];
+        let live_count = words.iter().map(|word| word.count_ones() as usize).sum::<usize>();
+        if end > 0 && live_count <= end / 4 {
+            // A slot's new index is the number of marked slots before it. Store one prefix
+            // count per bitmap word instead of allocating a mapping for every old slot.
+            let mut offsets = Vec::with_capacity(words.len());
+            let mut next = 0;
+            for (idx, &word) in words.iter().enumerate() {
+                offsets.push(next as u32);
+                let mut marked = word;
+                while marked != 0 {
+                    let slot = idx * WORD_BITS + marked.trailing_zeros() as usize;
+                    self.blinded.swap(next, slot);
+                    next += 1;
+                    marked &= marked - 1;
+                }
+            }
+            self.blinded.truncate(next);
+            for (_, node) in self.iter_mut() {
+                if let ArenaSparseNode::Branch(branch) = node {
+                    for child in &mut branch.children {
+                        if let Some(slot) = child.blinded_slot() {
+                            let word = slot as usize / WORD_BITS;
+                            let bit = slot as usize % WORD_BITS;
+                            debug_assert_ne!(words[word] & (1 << bit), 0, "unmarked child");
+                            let preceding = words[word] & ((1 << bit) - 1);
+                            *child = BranchChild::blinded(offsets[word] + preceding.count_ones());
+                        }
+                    }
+                }
+            }
+            shrink_excess_capacity(&mut self.blinded);
+            shrink_excess_capacity(&mut self.blinded_free);
+            return;
+        }
 
         // Push high to low so that `insert_blinded` hands the lowest slot out first and the tail
         // of the table keeps draining.
-        let word_count = live.div_ceil(WORD_BITS);
+        let word_count = end.div_ceil(WORD_BITS);
         for (idx, word) in words[..word_count].iter().enumerate().rev() {
-            // The last word covers only the slots below `live`.
-            let covered = if idx + 1 == word_count && live % WORD_BITS != 0 {
-                (1 << (live % WORD_BITS)) - 1
+            // The last word covers only the slots below `end`.
+            let covered = if idx + 1 == word_count && end % WORD_BITS != 0 {
+                (1 << (end % WORD_BITS)) - 1
             } else {
                 u64::MAX
             };
@@ -196,7 +238,7 @@ impl IndexOps<Index> for NodeArena {
     #[inline]
     fn index(&self, idx: Index) -> &Self::Output {
         let node = &self.nodes[idx.get()];
-        debug_assert!(!matches!(node, ArenaSparseNode::Free), "indexed a free arena slot");
+        assert!(!matches!(node, ArenaSparseNode::Free), "indexed a free arena slot");
         node
     }
 }
@@ -205,7 +247,7 @@ impl IndexMut<Index> for NodeArena {
     #[inline]
     fn index_mut(&mut self, idx: Index) -> &mut Self::Output {
         let node = &mut self.nodes[idx.get()];
-        debug_assert!(!matches!(node, ArenaSparseNode::Free), "indexed a free arena slot");
+        assert!(!matches!(node, ArenaSparseNode::Free), "indexed a free arena slot");
         node
     }
 }
@@ -234,6 +276,7 @@ impl Index {
 /// The slots of a side table of blinded children that a copy into a fresh arena carried over.
 ///
 /// See [`NodeArena::adopt_blinded`].
+#[must_use = "adopted blinded children must be marked and swept"]
 pub(super) struct BlindedMarks {
     words: Vec<u64>,
 }
@@ -331,6 +374,7 @@ fn shrink_excess_capacity<T>(vec: &mut Vec<T>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::arena::{ArenaSparseNodeBranch, ArenaSparseNodeState};
     use alloy_primitives::B256;
 
     #[test]
@@ -366,6 +410,33 @@ mod tests {
         arena.drain_node(drained);
         assert!(!arena.contains_key(removed));
         assert!(!arena.contains_key(drained));
+    }
+
+    #[test]
+    #[should_panic(expected = "indexed a free arena slot")]
+    fn indexing_a_free_slot_panics() {
+        let mut arena = NodeArena::new();
+        let idx = arena.insert(ArenaSparseNode::TakenSubtrie);
+        arena.remove(idx);
+        let _ = &arena[idx];
+    }
+
+    #[test]
+    #[should_panic(expected = "indexed a free arena slot")]
+    fn mutably_indexing_a_free_slot_panics() {
+        let mut arena = NodeArena::new();
+        let idx = arena.insert(ArenaSparseNode::TakenSubtrie);
+        arena.remove(idx);
+        arena[idx] = ArenaSparseNode::TakenSubtrie;
+    }
+
+    #[test]
+    #[should_panic(expected = "drained a free arena slot")]
+    fn draining_a_free_slot_panics() {
+        let mut arena = NodeArena::new();
+        let idx = arena.insert(ArenaSparseNode::TakenSubtrie);
+        arena.drain_node(idx);
+        arena.drain_node(idx);
     }
 
     #[test]
@@ -483,5 +554,82 @@ mod tests {
         }
         dst.sweep_blinded(marks);
         assert_eq!(dst.blinded.capacity(), capacity);
+    }
+
+    #[test]
+    fn sweeping_compacts_a_live_replacement_at_the_tail() {
+        let mut src = NodeArena::new();
+        for _ in 0..65_536 {
+            src.insert_blinded(RlpNode::default());
+        }
+        let mut dst = NodeArena::new();
+        let mut marks = dst.adopt_blinded(&mut src);
+        let rlp = RlpNode::word_rlp(&B256::repeat_byte(1));
+        let replacement = dst.insert_blinded(rlp.clone());
+        assert_eq!(replacement.blinded_slot(), Some(65_536));
+        let root = dst.insert(branch([replacement]));
+        marks.mark(replacement);
+        dst.sweep_blinded(marks);
+
+        let child = dst[root].branch_ref().children[0];
+        assert_eq!(dst.blinded(child), &rlp);
+        assert_eq!(child.blinded_slot(), Some(0));
+        assert_eq!(dst.blinded.len(), 1);
+        assert!(dst.blinded.capacity() <= 2);
+        assert_eq!(dst.blinded_free.capacity(), 0);
+
+        // Subsequent sweeps visit only the compacted table, not the old high-water mark.
+        let mut next = NodeArena::new();
+        let mut marks = next.adopt_blinded(&mut dst);
+        assert_eq!(marks.words.len(), 1);
+        marks.mark(child);
+        next.insert(dst.drain_node(root));
+        next.sweep_blinded(marks);
+        assert_eq!(next.blinded(child), &rlp);
+        assert_eq!(next.blinded.len(), 1);
+    }
+
+    #[test]
+    fn sweeping_rewrites_sparse_slots_across_bitmap_words() {
+        let mut src = NodeArena::new();
+        let children: Vec<_> = (0..200u8)
+            .map(|byte| src.insert_blinded(RlpNode::word_rlp(&B256::repeat_byte(byte))))
+            .collect();
+        let mut dst = NodeArena::new();
+        let mut marks = dst.adopt_blinded(&mut src);
+        let kept = [199, 64, 0, 130, 63];
+        for slot in kept {
+            marks.mark(children[slot]);
+        }
+        let leaf = dst.insert(ArenaSparseNode::TakenSubtrie);
+        let root = dst.insert(branch(
+            kept.map(|slot| children[slot]).into_iter().chain([BranchChild::revealed(leaf)]),
+        ));
+        dst.sweep_blinded(marks);
+
+        assert_eq!(dst.blinded.len(), kept.len());
+        assert!(dst.blinded.capacity() <= kept.len() * 2);
+        assert_eq!(dst.blinded_free.capacity(), 0);
+        let branch = dst[root].branch_ref();
+        for (pos, slot) in kept.into_iter().enumerate() {
+            assert_eq!(
+                dst.blinded(branch.children[pos]),
+                &RlpNode::word_rlp(&B256::repeat_byte(slot as u8))
+            );
+        }
+        assert_eq!(branch.children[kept.len()].revealed_index(), Some(leaf));
+        assert!(dst.contains_key(leaf));
+        assert_eq!(dst.insert_blinded(RlpNode::default()).blinded_slot(), Some(5));
+    }
+
+    fn branch(children: impl IntoIterator<Item = BranchChild>) -> ArenaSparseNode {
+        let children: smallvec::SmallVec<_> = children.into_iter().collect();
+        ArenaSparseNode::Branch(ArenaSparseNodeBranch {
+            state_mask: alloy_trie::TrieMask::new((1 << children.len()) - 1),
+            children,
+            state: ArenaSparseNodeState::Revealed,
+            short_key: Default::default(),
+            branch_masks: Default::default(),
+        })
     }
 }

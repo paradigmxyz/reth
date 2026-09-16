@@ -113,15 +113,17 @@ impl ArenaCursor {
     /// Pops the top entry from the stack and propagates dirty state to the parent.
     /// Returns the popped entry.
     ///
-    /// Uses `arena.get()` for the popped node because callers (e.g. pruning) may remove
-    /// the node from the arena between the time it was pushed and the time it is popped.
+    /// The node must still be in the arena. Pop its entry before removing it, since a new
+    /// insertion can immediately reuse its index.
     #[instrument(level = "trace", target = TRACE_TARGET, skip(self, arena))]
     pub(super) fn pop(&mut self, arena: &mut NodeArena) -> ArenaCursorStackEntry {
         let entry = self.stack.pop().expect("pop can't be called on empty stack");
+        self.needs_pop = false;
         trace!(target: TRACE_TARGET, entry = ?entry, "Popped stack entry");
+        let node = &arena[entry.index];
 
         #[cfg(debug_assertions)]
-        if let Some(ArenaSparseNode::Subtrie(s)) = arena.get(entry.index) {
+        if let ArenaSparseNode::Subtrie(s) = node {
             debug_assert_eq!(
                 s.path, entry.path,
                 "subtrie cached path {:?} does not match stack entry path {:?}",
@@ -130,7 +132,7 @@ impl ArenaCursor {
         }
 
         if let Some(parent) = self.stack.last() {
-            let child_is_dirty = arena.get(entry.index).is_some_and(|node| match node {
+            let child_is_dirty = match node {
                 ArenaSparseNode::Branch(b) => matches!(b.state, ArenaSparseNodeState::Dirty),
                 ArenaSparseNode::Leaf { state, .. } => matches!(state, ArenaSparseNodeState::Dirty),
                 ArenaSparseNode::Subtrie(s) => {
@@ -138,7 +140,7 @@ impl ArenaCursor {
                     matches!(root.state_ref(), Some(ArenaSparseNodeState::Dirty))
                 }
                 _ => false,
-            });
+            };
             if child_is_dirty {
                 *arena[parent.index].state_mut() = ArenaSparseNodeState::Dirty;
             }
@@ -223,8 +225,8 @@ impl ArenaCursor {
     ///
     /// If a previous call returned [`NextResult::NonBranch`] or [`NextResult::Branch`],
     /// the head entry is automatically popped (with dirty-state propagation) before
-    /// descending further. This means callers never need to call [`Self::pop`] after
-    /// `next` — it is handled internally on the subsequent call.
+    /// descending further, unless the caller already popped it. Callers removing the head
+    /// node must call [`Self::pop`] before the removal.
     ///
     /// Returns [`NextResult::NonBranch`] when the head is a non-branch node the caller
     /// should process, or [`NextResult::Branch`] when a branch has exhausted its
@@ -240,7 +242,6 @@ impl ArenaCursor {
     ) -> NextResult {
         if self.needs_pop {
             self.pop(arena);
-            self.needs_pop = false;
         }
 
         loop {
