@@ -28,6 +28,9 @@ fn main() {
         // which works correctly on all filesystems.
         .define("MDBX_USE_FALLOCATE", "0");
 
+    // Benchmark residency probes independently of the existing prefault writes.
+    cc.define("MDBX_USE_MINCORE", "0");
+
     // Enable debugging on debug builds
     #[cfg(debug_assertions)]
     cc.define("MDBX_DEBUG", "1").define("MDBX_ENABLE_PROFGC", "1");
