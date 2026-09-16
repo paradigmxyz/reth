@@ -1480,7 +1480,11 @@ pub enum AddedTransaction<T: PoolTransaction> {
         subpool: SubPool,
         /// The specific reason why the transaction is queued (if applicable).
         queued_reason: Option<QueuedReason>,
-        /// Existing transactions promoted by this insertion.
+        /// Existing transactions promoted to pending by this insertion.
+        ///
+        /// Validation can observe newer account state before pool maintenance applies it.
+        /// Insertion rechecks the sender's transactions against that state, so lower-nonce
+        /// transactions can become pending while the inserted transaction remains parked.
         promoted: Vec<Arc<ValidPoolTransaction<T>>>,
     },
 }
