@@ -1,18 +1,25 @@
-//! Runtime settings shared by `eth` RPC helpers.
+//! Settings for initializing and serving the `eth` RPC API.
 
 use crate::{builder::config::PendingBlockKind, RPC_DEFAULT_GAS_CAP};
 use reth_rpc_server_types::constants::{
-    DEFAULT_ETH_PROOF_WINDOW, DEFAULT_MAX_SIMULATE_BLOCKS,
-    RPC_DEFAULT_SEND_RAW_TX_SYNC_TIMEOUT_SECS,
+    DEFAULT_ETH_PROOF_WINDOW, DEFAULT_MAX_BLOCKING_IO_REQUEST, DEFAULT_MAX_SIMULATE_BLOCKS,
+    DEFAULT_PROOF_PERMITS, RPC_DEFAULT_SEND_RAW_TX_SYNC_TIMEOUT_SECS,
 };
 use std::time::Duration;
 
-/// Settings used when serving `eth` RPC requests.
+/// Settings used when initializing the API and serving `eth` RPC requests.
 ///
 /// These settings are shared by the API's helper traits so additional settings can be exposed
-/// without adding individual trait methods.
+/// without adding individual trait methods. Concurrency and batching limits take effect when the
+/// API is constructed.
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct EthApiSettings {
+    /// Maximum number of concurrent proof requests.
+    pub proof_permits: usize,
+    /// Maximum batch size for transaction insertions.
+    pub max_batch_size: usize,
+    /// Maximum number of concurrent blocking IO requests.
+    pub max_blocking_io_requests: usize,
     /// Maximum gas limit for `eth_call` and call tracing RPC methods.
     pub gas_cap: u64,
     /// Maximum number of blocks for `eth_simulateV1`.
@@ -34,6 +41,9 @@ pub struct EthApiSettings {
 impl Default for EthApiSettings {
     fn default() -> Self {
         Self {
+            proof_permits: DEFAULT_PROOF_PERMITS,
+            max_batch_size: 1,
+            max_blocking_io_requests: DEFAULT_MAX_BLOCKING_IO_REQUEST,
             gas_cap: RPC_DEFAULT_GAS_CAP.into(),
             max_simulate_blocks: DEFAULT_MAX_SIMULATE_BLOCKS,
             compute_state_root_for_eth_simulate: false,
