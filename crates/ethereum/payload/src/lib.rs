@@ -125,6 +125,13 @@ where
             None,
         );
 
+        self.build_empty_payload_with_args(args)
+    }
+
+    fn build_empty_payload_with_args(
+        &self,
+        args: BuildArguments<Self::Attributes, Self::BuiltPayload>,
+    ) -> Result<EthBuiltPayload, PayloadBuilderError> {
         default_ethereum_payload(
             self.evm_config.clone(),
             self.client.clone(),
@@ -162,6 +169,7 @@ where
         mut cached_reads,
         execution_cache,
         mut state_root_handle,
+        state_provider_factory,
         config,
         cancel,
         best_payload,

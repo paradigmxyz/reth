@@ -67,6 +67,7 @@ fn job(runtime: TaskRuntime, builder: Builder, duration: Duration) -> BasicPaylo
         cached_reads: None,
         execution_cache: None,
         state_root_handle: None,
+        state_provider_factory: None,
         leases: Vec::new(),
         metrics: Default::default(),
         builder,

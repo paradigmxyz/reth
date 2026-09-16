@@ -143,7 +143,9 @@ use reth_evm::{
 use reth_execution_cache::{CacheFillMode, CacheStats};
 use reth_execution_types::DecodedRevmBal;
 use reth_network_p2p::full_block::SealedBlockWithAccessList;
-use reth_payload_builder::{PayloadBuilderLease, PayloadBuilderResources};
+use reth_payload_builder::{
+    PayloadBuilderLease, PayloadBuilderResources, PayloadStateProviderFactory,
+};
 use reth_payload_primitives::{
     BuiltPayload, BuiltPayloadExecutedBlock, InvalidPayloadAttributesError, NewPayloadError,
     PayloadTypes,
@@ -1624,20 +1626,8 @@ where
         parent_header: &N::BlockHeader,
         timestamp: u64,
         state: &mut EngineApiTreeState<N>,
+        state_provider_factory: OverlayStateProviderFactory<P, N>,
     ) -> Option<PayloadStateRootHandle> {
-        let state_provider_factory = match self.overlay_state_provider_factory(parent_hash, state) {
-            Ok(Some(state_provider_factory)) => state_provider_factory,
-            Ok(None) => return None,
-            Err(err) => {
-                warn!(
-                    target: "engine::tree::payload_validator",
-                    %err,
-                    %parent_hash,
-                    "failed to prepare payload-builder state-root provider"
-                );
-                return None
-            }
-        };
         match self.state_root_strategy.prepare_payload_builder(PayloadStateRootJobContext::new(
             &self.runtime,
             &self.overlay_manager,
@@ -2162,9 +2152,37 @@ where
             .config
             .share_execution_cache_with_payload_builder()
             .then(|| self.payload_processor.cache_for(parent_hash));
-        let state_root_handle =
-            self.payload_state_root_handle_for(parent_hash, parent_header, timestamp, state);
+        let state_provider_factory = match self.overlay_state_provider_factory(parent_hash, state) {
+            Ok(state_provider_factory) => state_provider_factory,
+            Err(err) => {
+                warn!(
+                    target: "engine::tree::payload_validator",
+                    %err,
+                    %parent_hash,
+                    "failed to prepare payload-builder state provider"
+                );
+                None
+            }
+        };
+        let state_root_handle = state_provider_factory.clone().and_then(|factory| {
+            self.payload_state_root_handle_for(
+                parent_hash,
+                parent_header,
+                timestamp,
+                state,
+                factory,
+            )
+        });
         let mut resources = PayloadBuilderResources::new(execution_cache, state_root_handle);
+        if let Some(factory) = state_provider_factory {
+            resources = resources.with_state_provider_factory(PayloadStateProviderFactory::new(
+                move || {
+                    factory
+                        .database_provider_ro()
+                        .map(|provider| Box::new(provider) as StateProviderBox)
+                },
+            ));
+        }
         if !self.sequential_execution {
             resources = resources
                 .with_lease(PayloadBuilderLease::new(JitPauseGuard::new(&self.evm_config)));

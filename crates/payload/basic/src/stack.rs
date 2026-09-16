@@ -171,6 +171,7 @@ where
             cached_reads,
             execution_cache,
             state_root_handle,
+            state_provider_factory,
             config,
             cancel,
             best_payload,
@@ -183,6 +184,7 @@ where
                     cached_reads,
                     execution_cache,
                     state_root_handle,
+                    state_provider_factory,
                     config: PayloadConfig {
                         parent_header,
                         parent_block_info,
@@ -205,6 +207,7 @@ where
                     cached_reads,
                     execution_cache,
                     state_root_handle,
+                    state_provider_factory,
                     config: PayloadConfig {
                         parent_header,
                         parent_block_info,
@@ -258,6 +261,65 @@ where
                 };
                 self.right.build_empty_payload(right_config).map(Either::Right)
             }
+        }
+    }
+
+    fn build_empty_payload_with_args(
+        &self,
+        args: BuildArguments<Self::Attributes, Self::BuiltPayload>,
+    ) -> Result<Self::BuiltPayload, PayloadBuilderError> {
+        let BuildArguments {
+            cached_reads,
+            execution_cache,
+            state_root_handle,
+            state_provider_factory,
+            config,
+            cancel,
+            best_payload,
+        } = args;
+        let PayloadConfig { parent_header, parent_block_info, attributes, payload_id } = config;
+
+        match attributes {
+            Either::Left(attributes) => self
+                .left
+                .build_empty_payload_with_args(BuildArguments {
+                    cached_reads,
+                    execution_cache,
+                    state_root_handle,
+                    state_provider_factory,
+                    config: PayloadConfig {
+                        parent_header,
+                        parent_block_info,
+                        attributes,
+                        payload_id,
+                    },
+                    cancel,
+                    best_payload: best_payload.and_then(|payload| match payload {
+                        Either::Left(payload) => Some(payload),
+                        Either::Right(_) => None,
+                    }),
+                })
+                .map(Either::Left),
+            Either::Right(attributes) => self
+                .right
+                .build_empty_payload_with_args(BuildArguments {
+                    cached_reads,
+                    execution_cache,
+                    state_root_handle,
+                    state_provider_factory,
+                    config: PayloadConfig {
+                        parent_header,
+                        parent_block_info,
+                        attributes,
+                        payload_id,
+                    },
+                    cancel,
+                    best_payload: best_payload.and_then(|payload| match payload {
+                        Either::Left(_) => None,
+                        Either::Right(payload) => Some(payload),
+                    }),
+                })
+                .map(Either::Right),
         }
     }
 }

@@ -16,6 +16,7 @@ use reth_execution_cache::SavedCache;
 use reth_payload_builder_primitives::{Events, PayloadBuilderError, PayloadEvents};
 use reth_payload_primitives::{BuiltPayload, PayloadAttributes, PayloadKind, PayloadTypes};
 use reth_primitives_traits::{FastInstant as Instant, NodePrimitives};
+use reth_storage_api::{errors::ProviderResult, StateProviderBox};
 use reth_trie_parallel::state_root_task::PayloadStateRootHandle;
 use std::{
     future::Future,
@@ -584,6 +585,8 @@ pub struct PayloadBuilderResources {
     execution_cache: Option<SavedCache>,
     /// Optional handle to a background state-root task.
     state_root_handle: Option<PayloadStateRootHandle>,
+    /// Factory for state pinned to the parent accepted by the engine.
+    state_provider_factory: Option<PayloadStateProviderFactory>,
     /// Lifecycle leases retained by the service or by detached payload build tasks.
     leases: Vec<PayloadBuilderLease>,
 }
@@ -594,7 +597,18 @@ impl PayloadBuilderResources {
         execution_cache: Option<SavedCache>,
         state_root_handle: Option<PayloadStateRootHandle>,
     ) -> Self {
-        Self { execution_cache, state_root_handle, leases: Vec::new() }
+        Self {
+            execution_cache,
+            state_root_handle,
+            state_provider_factory: None,
+            leases: Vec::new(),
+        }
+    }
+
+    /// Adds the parent-pinned state provider factory for this payload build.
+    pub fn with_state_provider_factory(mut self, factory: PayloadStateProviderFactory) -> Self {
+        self.state_provider_factory = Some(factory);
+        self
     }
 
     /// Adds a lease for this payload build.
@@ -623,6 +637,11 @@ impl PayloadBuilderResources {
         self.state_root_handle.take()
     }
 
+    /// Takes the parent-pinned state provider factory.
+    pub const fn take_state_provider_factory(&mut self) -> Option<PayloadStateProviderFactory> {
+        self.state_provider_factory.take()
+    }
+
     /// Takes lifecycle leases for a payload job that owns detached work.
     pub fn take_leases(&mut self) -> Vec<PayloadBuilderLease> {
         std::mem::take(&mut self.leases)
@@ -631,6 +650,32 @@ impl PayloadBuilderResources {
     /// Clones lifecycle leases for the payload builder service to retain.
     fn clone_leases(&self) -> Vec<PayloadBuilderLease> {
         self.leases.clone()
+    }
+}
+
+/// Creates state providers pinned to the parent accepted for one payload job.
+#[derive(Clone)]
+pub struct PayloadStateProviderFactory(
+    Arc<dyn Fn() -> ProviderResult<StateProviderBox> + Send + Sync>,
+);
+
+impl PayloadStateProviderFactory {
+    /// Wraps a cloneable parent-state provider constructor.
+    pub fn new(
+        factory: impl Fn() -> ProviderResult<StateProviderBox> + Send + Sync + 'static,
+    ) -> Self {
+        Self(Arc::new(factory))
+    }
+
+    /// Opens a new database snapshot with the captured parent overlay.
+    pub fn state_provider(&self) -> ProviderResult<StateProviderBox> {
+        (self.0)()
+    }
+}
+
+impl std::fmt::Debug for PayloadStateProviderFactory {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("PayloadStateProviderFactory").finish_non_exhaustive()
     }
 }
 
