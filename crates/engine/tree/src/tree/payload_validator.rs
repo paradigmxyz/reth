@@ -784,7 +784,9 @@ where
                 }
             });
 
+        let conversion = reth_trie_sparse::activity::ActivityGuard::new("np_conversion_wait");
         let block = validated_block.try_into_inner().expect("sole handle")?;
+        drop(conversion);
         let block = block.with_senders(senders);
 
         // Wait for the receipt root computation to complete.
