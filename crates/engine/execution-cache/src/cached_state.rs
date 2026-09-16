@@ -1189,7 +1189,6 @@ mod tests {
     use alloy_primitives::U256;
     use reth_execution_types::{
         EvmState, EvmStateChangeSink, ExecutionAccountChangeRef, ExecutionAccountInfo,
-        ExecutionAccountInfoRef,
     };
     use reth_provider::test_utils::{ExtendedAccount, MockEthProvider};
 
@@ -1201,7 +1200,7 @@ mod tests {
         accumulator
             .account(ExecutionAccountChangeRef {
                 address,
-                original: original.as_ref().map(account_info_ref),
+                original: original.as_ref(),
                 current: None,
                 created: false,
                 selfdestructed: false,
@@ -1209,15 +1208,6 @@ mod tests {
             .unwrap();
         accumulator.storage_wipe(address).unwrap();
         accumulator
-    }
-
-    fn account_info_ref(info: &ExecutionAccountInfo) -> ExecutionAccountInfoRef<'_> {
-        ExecutionAccountInfoRef {
-            balance: info.balance,
-            nonce: info.nonce,
-            code_hash: info.code_hash,
-            code: info.code.as_ref(),
-        }
     }
 
     #[test]

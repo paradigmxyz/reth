@@ -11,8 +11,7 @@ use alloy_primitives::{
     Address, BlockNumber, Bloom, Log, B256, U256,
 };
 use evm2::evm::{
-    AccountChangeRef, AccountInfo, AccountInfoRef, BlockStateAccumulator, StateChangeSink,
-    StorageChange, Tracked,
+    AccountChangeRef, AccountInfo, BlockStateAccumulator, StateChangeSink, StorageChange, Tracked,
 };
 use reth_primitives_traits::{Account, Bytecode, Receipt, StorageEntry};
 
@@ -203,11 +202,13 @@ impl<T> ExecutionOutcome<T> {
 
         let mut accumulator = BlockStateAccumulator::new();
         for (address, (original, current, storage)) in state_init {
+            let original = original.map(account_info_from_reth);
+            let current = current.map(account_info_from_reth);
             accumulator
                 .account(AccountChangeRef {
                     address,
-                    original: original.as_ref().map(account_info_ref_from_reth),
-                    current: current.as_ref().map(account_info_ref_from_reth),
+                    original: original.as_ref(),
+                    current: current.as_ref(),
                     created: false,
                     selfdestructed: false,
                 })
@@ -639,12 +640,13 @@ impl<T> From<(BlockExecutionOutput<T>, BlockNumber)> for ExecutionOutcome<T> {
     }
 }
 
-fn account_info_ref_from_reth(account: &Account) -> AccountInfoRef<'_> {
-    AccountInfoRef {
+fn account_info_from_reth(account: Account) -> AccountInfo {
+    AccountInfo {
         balance: account.balance,
         nonce: account.nonce,
         code_hash: account.get_bytecode_hash(),
         code: None,
+        _non_exhaustive: (),
     }
 }
 
@@ -666,17 +668,14 @@ fn account_info_to_reth(info: &AccountInfo) -> Account {
 #[cfg(test)]
 fn multi_block_outcome_for_serde() -> ExecutionOutcome {
     let address = Address::repeat_byte(0x42);
+    let original = AccountInfo { balance: U256::from(1), nonce: 1, ..Default::default() };
+    let current = AccountInfo { balance: U256::from(3), nonce: 2, ..Default::default() };
     let mut block1 = BlockStateAccumulator::new();
     block1
         .account(AccountChangeRef {
             address,
             original: None,
-            current: Some(AccountInfoRef {
-                balance: U256::from(1),
-                nonce: 1,
-                code_hash: KECCAK_EMPTY,
-                code: None,
-            }),
+            current: Some(&original),
             created: false,
             selfdestructed: false,
         })
@@ -691,18 +690,8 @@ fn multi_block_outcome_for_serde() -> ExecutionOutcome {
     block2
         .account(AccountChangeRef {
             address,
-            original: Some(AccountInfoRef {
-                balance: U256::from(1),
-                nonce: 1,
-                code_hash: KECCAK_EMPTY,
-                code: None,
-            }),
-            current: Some(AccountInfoRef {
-                balance: U256::from(3),
-                nonce: 2,
-                code_hash: KECCAK_EMPTY,
-                code: None,
-            }),
+            original: Some(&original),
+            current: Some(&current),
             created: false,
             selfdestructed: false,
         })
