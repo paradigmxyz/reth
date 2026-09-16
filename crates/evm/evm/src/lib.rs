@@ -222,6 +222,9 @@ pub mod noop;
 #[cfg(any(test, feature = "test-utils"))]
 /// test helpers for mocking executor
 pub mod test_utils;
+/// Helper types for execution witness generation.
+#[cfg(feature = "witness")]
+pub mod witness;
 
 /// A complete configuration of EVM for Reth.
 ///

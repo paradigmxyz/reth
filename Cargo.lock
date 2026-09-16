@@ -9127,6 +9127,8 @@ dependencies = [
  "alloy-eip7928",
  "alloy-eips",
  "alloy-primitives",
+ "alloy-rlp",
+ "alloy-rpc-types-debug",
  "auto_impl",
  "evm2",
  "futures-util",
