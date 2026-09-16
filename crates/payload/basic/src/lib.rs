@@ -435,20 +435,6 @@ where
     Builder::Attributes: Unpin + Clone,
     Builder::BuiltPayload: Unpin + Clone,
 {
-    fn empty_payload_arguments(
-        &self,
-    ) -> BuildArguments<Builder::Attributes, Builder::BuiltPayload> {
-        BuildArguments {
-            cached_reads: Default::default(),
-            execution_cache: self.execution_cache.clone(),
-            state_root_handle: None,
-            state_provider_factory: self.state_provider_factory.clone(),
-            config: self.config.clone(),
-            cancel: CancelOnDrop::default(),
-            best_payload: None,
-        }
-    }
-
     /// Spawns a new payload build task.
     fn spawn_build_job(&mut self) {
         trace!(target: "payload_builder", id = %self.config.payload_id(), "spawn new payload build task");
@@ -591,7 +577,7 @@ where
             // started right away and the first full block should have been
             // built by the time CL is requesting the payload.
             self.metrics.inc_requested_empty_payload();
-            self.builder.build_empty_payload_with_args(self.empty_payload_arguments())
+            self.builder.build_empty_payload(self.config.clone())
         }
     }
 
@@ -643,7 +629,7 @@ where
                     self.metrics.inc_requested_empty_payload();
                     // no payload built yet, so we need to return an empty payload
                     let (tx, rx) = oneshot::channel();
-                    let args = self.empty_payload_arguments();
+                    let config = self.config.clone();
                     let builder = self.builder.clone();
                     let span = Span::current();
                     self.executor.spawn_blocking_named_or_tokio(
@@ -1064,14 +1050,6 @@ pub trait PayloadBuilder: Send + Sync + Clone {
         &self,
         config: PayloadConfig<Self::Attributes, HeaderForPayload<Self::BuiltPayload>>,
     ) -> Result<Self::BuiltPayload, PayloadBuilderError>;
-
-    /// Builds an empty payload with the resources captured for its payload job.
-    fn build_empty_payload_with_args(
-        &self,
-        args: BuildArguments<Self::Attributes, Self::BuiltPayload>,
-    ) -> Result<Self::BuiltPayload, PayloadBuilderError> {
-        self.build_empty_payload(args.config)
-    }
 }
 
 /// Tells the payload builder how to react to payload request if there's no payload available yet.

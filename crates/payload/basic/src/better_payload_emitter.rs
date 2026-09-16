@@ -58,11 +58,4 @@ where
     ) -> Result<Self::BuiltPayload, PayloadBuilderError> {
         self.inner.build_empty_payload(config)
     }
-
-    fn build_empty_payload_with_args(
-        &self,
-        args: BuildArguments<Self::Attributes, Self::BuiltPayload>,
-    ) -> Result<Self::BuiltPayload, PayloadBuilderError> {
-        self.inner.build_empty_payload_with_args(args)
-    }
 }
