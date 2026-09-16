@@ -56,3 +56,5 @@ serde = [
     "reth-network-api/serde",
     "reth-ethereum-primitives/serde",
 ]
+
+[lints]
