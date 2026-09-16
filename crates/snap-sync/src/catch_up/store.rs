@@ -9,12 +9,14 @@ use crate::{
 };
 use alloy_eip7928::AccountChanges;
 use alloy_eips::BlockNumHash;
-use alloy_primitives::B256;
+use alloy_primitives::{keccak256, B256, KECCAK256_EMPTY};
 use reth_db_api::{
     tables,
     transaction::{DbTx, DbTxMut},
 };
+use reth_primitives_traits::Account;
 use reth_storage_api::{DBProvider, MetadataProvider, MetadataWriter, SnapAttemptId, StateWriter};
+use reth_trie_common::HashedStorage;
 use serde::{Deserialize, Serialize};
 
 /// Persistence for the block access lists an attempt applies to its downloaded state.
@@ -38,6 +40,18 @@ pub trait SnapCatchUpStore {
         coverage: AccountCoverage,
         hashed_address: B256,
     ) -> Result<DownloadedAccount, SnapSyncError>
+    where
+        Self: DBProvider;
+
+    /// Returns the state update implied by `bal`, reading downloaded accounts from this provider.
+    ///
+    /// The list must already be verified against its header. Accounts outside `coverage` remain
+    /// unresolved, and no state is written.
+    fn block_access_list_update(
+        &self,
+        coverage: AccountCoverage,
+        bal: &[AccountChanges],
+    ) -> Result<BalStateUpdate, SnapSyncError>
     where
         Self: DBProvider;
 
@@ -168,6 +182,58 @@ impl<T: MetadataProvider> SnapCatchUpStore for T {
             .map_or(DownloadedAccount::Absent, DownloadedAccount::Present))
     }
 
+    fn block_access_list_update(
+        &self,
+        coverage: AccountCoverage,
+        bal: &[AccountChanges],
+    ) -> Result<BalStateUpdate, SnapSyncError>
+    where
+        Self: DBProvider,
+    {
+        let mut update = BalStateUpdate::default();
+        for account_changes in bal {
+            let account_info = account_changes.account_info();
+            // Read-only entries record accesses, not changes.
+            if !account_info.changes_state_root(account_changes) {
+                continue
+            }
+
+            let hashed_address = keccak256(account_changes.address());
+            let mut account = match self.downloaded_account(coverage, hashed_address)? {
+                // Its range is downloaded against a later root, which includes this change.
+                DownloadedAccount::Unknown => {
+                    update.unresolved.push(hashed_address);
+                    continue
+                }
+                DownloadedAccount::Absent => Account::default(),
+                DownloadedAccount::Present(account) => account,
+            };
+
+            account.apply_bal_info(account_info);
+            // Stored accounts represent empty code with no code hash.
+            account.bytecode_hash = account.bytecode_hash.filter(|hash| *hash != KECCAK256_EMPTY);
+            // Execution removes accounts a block leaves empty, see EIP-161.
+            update.state.accounts.insert(hashed_address, (!account.is_empty()).then_some(account));
+            if account_changes.has_storage_changes() {
+                update.state.storages.insert(
+                    hashed_address,
+                    HashedStorage::from_iter(
+                        account_changes
+                            .storage_post_states()
+                            .map(|(slot, value)| (keccak256(B256::from(slot)), value)),
+                    ),
+                );
+            }
+            if let Some((code_hash, code)) = account_info
+                .code_hash
+                .zip(account_changes.code_post_state().filter(|code| !code.is_empty()))
+            {
+                update.bytecodes.insert(code_hash, code.clone());
+            }
+        }
+        Ok(update)
+    }
+
     // Every check runs before the first write, so a refused list changes nothing.
     fn commit_block_access_list(
         &self,
@@ -185,9 +251,7 @@ impl<T: MetadataProvider> SnapCatchUpStore for T {
             .ok_or(SnapSyncError::NoCatchUpProgress)?
             .advance(block, parent)?;
         let coverage = self.account_coverage(write)?.ok_or(SnapSyncError::NoCoverage)?;
-        let update = BalStateUpdate::from_block_access_list(bal, |hashed_address| {
-            self.downloaded_account(coverage, hashed_address)
-        })?;
+        let update = self.block_access_list_update(coverage, bal)?;
 
         // Entries left unresolved are downloaded whole once the pivot moves onto a root that
         // already includes this block, so nothing here has to remember them.
