@@ -54,6 +54,8 @@ use crate::tree::payload_processor::receipt_root_task::IndexedReceipt;
 ///
 /// The ordered commit loop applies Ethereum block-level gas admission. Executors with different
 /// admission rules, such as segment-scoped gas budgets, must align those checks before using it.
+///
+/// Calls `on_transactions_executed` after committing all transactions, before post-execution work.
 #[expect(clippy::too_many_arguments, clippy::type_complexity)]
 pub fn execute_block<'a, Evm, Tx, Err, DB, MakeDb>(
     runtime: &Runtime,
@@ -65,6 +67,7 @@ pub fn execute_block<'a, Evm, Tx, Err, DB, MakeDb>(
     transaction_count: usize,
     txs: Receiver<(usize, Result<Tx, Err>)>,
     receipt_tx: Sender<IndexedReceipt<ReceiptTy<Evm::Primitives>>>,
+    on_transactions_executed: impl FnOnce() + Send + 'a,
 ) -> Result<
     (BlockExecutionOutput<ReceiptTy<Evm::Primitives>>, Vec<Address>, BlockAccessList),
     BalExecutionError,
@@ -92,6 +95,7 @@ where
             txs,
             receipt_tx,
             worker_count,
+            on_transactions_executed,
         )
     })
 }
@@ -108,6 +112,7 @@ fn execute_block_inner<'scope, Evm, Tx, Err, DB, MakeDb>(
     txs: Receiver<(usize, Result<Tx, Err>)>,
     receipt_tx: Sender<IndexedReceipt<ReceiptTy<Evm::Primitives>>>,
     worker_count: usize,
+    on_transactions_executed: impl FnOnce() + Send + 'scope,
 ) -> Result<
     (BlockExecutionOutput<ReceiptTy<Evm::Primitives>>, Vec<Address>, BlockAccessList),
     BalExecutionError,
@@ -207,6 +212,7 @@ where
                 }
             }
         }
+        on_transactions_executed();
         drop(abort_guard);
 
         canonical_executor.evm_mut().db_mut().bump_bal_index();
@@ -607,6 +613,7 @@ mod tests {
             transaction_count,
             tx_stream(txs),
             receipt_tx,
+            || {},
         )
         .map(|(output, _, built_bal)| (output, built_bal))
     }
@@ -1253,6 +1260,7 @@ mod tests {
                 2,
                 tx_stream(vec![tx1, tx2]),
                 receipt_tx,
+                || {},
             );
             if tx_gas_limit == 500_000 {
                 serial_result.unwrap();
@@ -1494,6 +1502,7 @@ mod tests {
             1, // transaction_count = 1 → exactly one worker spawned
             tx_rx,
             receipt_tx,
+            || {},
         );
 
         assert!(

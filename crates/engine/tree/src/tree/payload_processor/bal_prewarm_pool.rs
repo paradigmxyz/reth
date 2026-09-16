@@ -7,7 +7,7 @@ use reth_provider::{
 };
 use std::{
     sync::{
-        atomic::{AtomicUsize, Ordering},
+        atomic::{AtomicBool, AtomicUsize, Ordering},
         Arc,
     },
     thread::JoinHandle,
@@ -19,25 +19,27 @@ use tracing::trace;
 /// generic over the provider factory; each worker builds its own per block.
 pub type BuildProviderFn = dyn Fn() -> ProviderResult<StateProviderBox> + Send + Sync;
 
-/// A single warm request: a whole account (basic account + its bytecode) followed by a batch of
-/// its storage slots, or a batch of storage slots on their own.
+/// An account and a batch of its storage slots, or a batch of storage slots on their own.
 enum PrewarmTarget {
     Account(Address, Box<[StorageKey]>),
     Storage(Address, Box<[StorageKey]>),
 }
 
 /// A message in a worker's queue. The per-block lifecycle is explicit and ordered (the queue is
-/// FIFO): one `BeginBlock`, then the worker's share of `Warm`s, then one `EndBlock`.
+/// FIFO): `BeginBlock`, the worker's share of `Warm`s, `FinishState`, then `EndBlock`.
 enum PrewarmMsg {
     /// Open a read txn for the new block: build a provider over the parent state and hold it.
     BeginBlock {
         build: Arc<BuildProviderFn>,
         caches: ExecutionCache,
         txpool_snapshot: Option<TxPoolPrewarmCacheSnapshot>,
+        stop: Arc<AtomicBool>,
     },
     /// Warm one target into the held provider's cache. Ignored if no provider is held.
     Warm(PrewarmTarget),
-    /// Drop the held provider (and its read txn).
+    /// Signal that this worker has finished account and storage reads.
+    FinishState(Arc<SendOnDrop>),
+    /// Warm deferred bytecode, then drop the held provider (and its read txn).
     EndBlock(Arc<SendOnDrop>),
 }
 
@@ -78,17 +80,20 @@ impl BalPrewarmPool {
         build: Arc<BuildProviderFn>,
         caches: ExecutionCache,
         txpool_snapshot: Option<TxPoolPrewarmCacheSnapshot>,
+        stop: Arc<AtomicBool>,
     ) {
         for worker in &self.workers {
             let _ = worker.send(PrewarmMsg::BeginBlock {
                 build: build.clone(),
                 caches: caches.clone(),
                 txpool_snapshot: txpool_snapshot.clone(),
+                stop: stop.clone(),
             });
         }
     }
 
-    /// Fire-and-forget: warm an account (basic account + bytecode) and its storage slots.
+    /// Fire-and-forget: warm an account and its storage slots, deferring bytecode until all
+    /// account and storage requests have finished.
     ///
     /// The slots are dispatched in `WARM_BATCH_SIZE` chunks that are distributed independently,
     /// so a single account with a large read-set does not serialize onto one worker;
@@ -107,16 +112,23 @@ impl BalPrewarmPool {
         }
     }
 
-    /// Ends the block: every worker drops its provider (and read txn) once it has drained the warm
-    /// requests queued ahead of this message.
+    /// Waits for all account and storage requests, then warms deferred bytecode and drops each
+    /// worker's provider (and read txn). Workers skip remaining reads when execution stops.
     ///
     /// Blocks until all workers processed the end block message.
     pub fn end_block(&self) {
+        // A queue-local boundary would let faster workers read code while slower workers still
+        // fetch accounts and storage. Wait for every queue before starting any bytecode reads.
+        self.synchronize(PrewarmMsg::FinishState);
+        self.synchronize(PrewarmMsg::EndBlock);
+    }
+
+    fn synchronize(&self, message: impl Fn(Arc<SendOnDrop>) -> PrewarmMsg) {
         let (tx, rx) = oneshot::channel();
         let tx = Arc::new(SendOnDrop { sender: Some(tx) });
 
         for worker in &self.workers {
-            let _ = worker.send(PrewarmMsg::EndBlock(tx.clone()));
+            let _ = worker.send(message(tx.clone()));
         }
 
         drop(tx);
@@ -162,11 +174,19 @@ fn prewarm_loop(rx: crossbeam_channel::Receiver<PrewarmMsg>) {
     // The provider (and its MDBX read txn) held for the current block, between `BeginBlock` and
     // `EndBlock`. `None` while idle, so no read txn is pinned across the inter-block gap.
     let mut provider: Option<CachedStateProvider<StateProviderBox>> = None;
+    let mut stop = Arc::new(AtomicBool::new(false));
+    let mut code_hashes = Vec::new();
 
     // Blocks when idle; the channel disconnects (and the loop ends) when the pool is dropped.
     while let Ok(msg) = rx.recv() {
         match msg {
-            PrewarmMsg::BeginBlock { build, caches, txpool_snapshot } => {
+            PrewarmMsg::BeginBlock { build, caches, txpool_snapshot, stop: block_stop } => {
+                stop = block_stop;
+                code_hashes.clear();
+                if stop.load(Ordering::Relaxed) {
+                    provider = None;
+                    continue
+                }
                 provider = match (build)() {
                     Ok(inner) => Some(
                         CachedStateProvider::new_prewarm(inner, caches)
@@ -179,6 +199,9 @@ fn prewarm_loop(rx: crossbeam_channel::Receiver<PrewarmMsg>) {
                 };
             }
             PrewarmMsg::Warm(target) => {
+                if stop.load(Ordering::Relaxed) {
+                    continue
+                }
                 let Some(provider) = provider.as_ref() else { continue };
                 match target {
                     PrewarmTarget::Account(addr, slots) => {
@@ -186,20 +209,37 @@ fn prewarm_loop(rx: crossbeam_channel::Receiver<PrewarmMsg>) {
                             let Some(code_hash) = account.bytecode_hash &&
                             code_hash != alloy_consensus::constants::KECCAK_EMPTY
                         {
-                            let _ = provider.bytecode_by_hash(&code_hash);
+                            code_hashes.push(code_hash);
                         }
                         for &slot in &slots {
+                            if stop.load(Ordering::Relaxed) {
+                                break
+                            }
                             let _ = provider.storage(addr, slot);
                         }
                     }
                     PrewarmTarget::Storage(addr, slots) => {
                         for &slot in &slots {
+                            if stop.load(Ordering::Relaxed) {
+                                break
+                            }
                             let _ = provider.storage(addr, slot);
                         }
                     }
                 }
             }
+            PrewarmMsg::FinishState(done) => drop(done),
             PrewarmMsg::EndBlock(end_tx) => {
+                if let Some(provider) = &provider {
+                    for code_hash in &code_hashes {
+                        if stop.load(Ordering::Relaxed) {
+                            break
+                        }
+                        // The shared cache also covers code loaded by execution in the meantime.
+                        let _ = provider.bytecode_by_hash(code_hash);
+                    }
+                }
+                code_hashes.clear();
                 provider = None;
                 drop(end_tx);
             }
@@ -214,6 +254,134 @@ impl Drop for SendOnDrop {
     fn drop(&mut self) {
         if let Some(sender) = self.sender.take() {
             let _ = sender.send(());
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use alloy_primitives::{keccak256, Bytes, B256, U256};
+    use reth_execution_cache::CachedStatus;
+    use reth_provider::test_utils::{ExtendedAccount, MockEthProvider};
+    use std::time::Duration;
+
+    #[test]
+    fn code_phase_waits_for_every_worker() {
+        let (tx0, rx0) = crossbeam_channel::unbounded();
+        let (tx1, rx1) = crossbeam_channel::unbounded();
+        let pool =
+            BalPrewarmPool { workers: vec![tx0, tx1], next: AtomicUsize::new(0), _handles: vec![] };
+        let end = std::thread::spawn(move || pool.end_block());
+        let timeout = Duration::from_secs(10);
+        let PrewarmMsg::FinishState(done0) = rx0.recv_timeout(timeout).unwrap() else {
+            panic!("expected state completion boundary")
+        };
+        let PrewarmMsg::FinishState(done1) = rx1.recv_timeout(timeout).unwrap() else {
+            panic!("expected state completion boundary")
+        };
+        drop(done0);
+        // A fast worker must not start code while another worker still reads state.
+        assert!(matches!(
+            rx0.recv_timeout(Duration::from_millis(50)),
+            Err(crossbeam_channel::RecvTimeoutError::Timeout)
+        ));
+        drop(done1);
+        for rx in [&rx0, &rx1] {
+            let PrewarmMsg::EndBlock(done) = rx.recv_timeout(timeout).unwrap() else {
+                panic!("expected code phase and block completion")
+            };
+            drop(done);
+        }
+        end.join().unwrap();
+    }
+
+    #[test]
+    fn warms_accounts_and_storage_before_code() {
+        let pool = BalPrewarmPool::new(4);
+        let caches = ExecutionCache::new(1024 * 1024);
+        let provider = MockEthProvider::default();
+        let addresses = [Address::with_last_byte(1), Address::with_last_byte(2)];
+        let code = Bytes::from_static(&[0x60, 0x01, 0x00]);
+        let code_hash = keccak256(&code);
+        let slots: Vec<_> = (0..WARM_BATCH_SIZE * 3 + 1)
+            .map(|i| (B256::with_last_byte(i as u8), U256::from(i + 1)))
+            .collect();
+        for address in addresses {
+            provider.add_account(
+                address,
+                ExtendedAccount::new(1, U256::from(10))
+                    .with_bytecode(code.clone())
+                    .extend_storage(slots.iter().copied()),
+            );
+        }
+        pool.begin_block(
+            Arc::new(move || Ok(Box::new(provider.clone()))),
+            caches.clone(),
+            None,
+            Arc::default(),
+        );
+        for address in addresses {
+            pool.warm_account(address, slots.iter().map(|(key, _)| *key));
+        }
+        pool.synchronize(PrewarmMsg::FinishState);
+
+        for address in addresses {
+            assert!(matches!(
+                caches.get_or_try_insert_account_with(address, || Err(())),
+                Ok(CachedStatus::Cached(Some(_)))
+            ));
+            for &(key, value) in &slots {
+                assert_eq!(
+                    caches.get_or_try_insert_storage_with(address, key, || Err(())),
+                    Ok(CachedStatus::Cached(value))
+                );
+            }
+        }
+        assert_eq!(caches.get_or_try_insert_code_with(code_hash, || Err(())), Err(()));
+
+        pool.end_block();
+        assert!(matches!(
+            caches.get_or_try_insert_code_with(code_hash, || Err(())),
+            Ok(CachedStatus::Cached(Some(bytecode))) if bytecode.original_bytes() == code
+        ));
+    }
+
+    #[test]
+    fn cancellation_skips_deferred_code_and_queued_state() {
+        let pool = BalPrewarmPool::new(2);
+        let provider = MockEthProvider::default();
+        let address = Address::with_last_byte(1);
+        let code = Bytes::from_static(&[0x60, 0x01, 0x00]);
+        let code_hash = keccak256(&code);
+        provider.add_account(address, ExtendedAccount::new(1, U256::ZERO).with_bytecode(code));
+        let build: Arc<BuildProviderFn> = Arc::new(move || Ok(Box::new(provider.clone())));
+
+        for cancel in [true, false] {
+            let caches = ExecutionCache::new(1024 * 1024);
+            let stop = Arc::new(AtomicBool::new(false));
+            pool.begin_block(build.clone(), caches.clone(), None, stop.clone());
+            pool.warm_account(address, []);
+            pool.synchronize(PrewarmMsg::FinishState);
+            stop.store(cancel, Ordering::Relaxed);
+
+            let queued_address = Address::with_last_byte(2);
+            pool.warm_account(queued_address, [B256::ZERO]);
+            pool.end_block();
+
+            let account = caches.get_or_try_insert_account_with(queued_address, || Err(()));
+            let storage =
+                caches.get_or_try_insert_storage_with(queued_address, B256::ZERO, || Err(()));
+            let code = caches.get_or_try_insert_code_with(code_hash, || Err(()));
+            if cancel {
+                assert_eq!(account, Err(()));
+                assert_eq!(storage, Err(()));
+                assert_eq!(code, Err(()));
+            } else {
+                assert_eq!(account, Ok(CachedStatus::Cached(None)));
+                assert_eq!(storage, Ok(CachedStatus::Cached(U256::ZERO)));
+                assert!(matches!(code, Ok(CachedStatus::Cached(Some(_)))));
+            }
         }
     }
 }
