@@ -308,7 +308,7 @@ where
 
         let (raw_tx_sender, _) = broadcast::channel(DEFAULT_BROADCAST_CAPACITY);
 
-        // Create tx pool insertion batcher
+        // Retain the legacy batch sender for custom pools without shared ingress and direct users.
         let (processor, tx_batch_sender) =
             BatchTxProcessor::new(components.pool().clone(), settings.max_batch_size);
         task_spawner.spawn_critical_task("tx-batcher", processor);
@@ -486,13 +486,25 @@ where
         &self.tx_batch_sender
     }
 
-    /// Adds an _unvalidated_ transaction into the pool via the transaction batch sender.
+    /// Adds an _unvalidated_ transaction through shared ingress, or the fallback batch sender.
     #[inline]
     pub async fn add_pool_transaction(
         &self,
         origin: reth_transaction_pool::TransactionOrigin,
         transaction: <N::Pool as TransactionPool>::Transaction,
     ) -> Result<AddedTransactionOutcome, EthApiError> {
+        if let Some(ingress) = self.components.pool().transaction_ingress() {
+            let result = ingress.submit_recovered(origin, transaction)?;
+            return match result
+                .await
+                .map_err(|_| reth_transaction_pool::ingress::IngressError::Closed)??
+            {
+                reth_transaction_pool::ingress::IngressOutcome::Inserted(outcome) => Ok(outcome),
+                reth_transaction_pool::ingress::IngressOutcome::Recovered(..) => {
+                    unreachable!("insertion request")
+                }
+            }
+        }
         let (response_tx, response_rx) = tokio::sync::oneshot::channel();
         let request = reth_transaction_pool::BatchTxRequest::new(origin, transaction, response_tx);
 
@@ -501,6 +513,33 @@ where
             .map_err(|_| reth_rpc_eth_types::EthApiError::BatchTxSendError)?;
 
         Ok(response_rx.await??)
+    }
+
+    /// Inserts a prepared transaction while retaining its original ingress admission.
+    pub async fn add_admitted_pool_transaction(
+        &self,
+        origin: reth_transaction_pool::TransactionOrigin,
+        transaction: <N::Pool as TransactionPool>::Transaction,
+        permit: Option<reth_transaction_pool::ingress::IngressPermit>,
+    ) -> Result<AddedTransactionOutcome, EthApiError> {
+        let Some(permit) = permit else {
+            return self.add_pool_transaction(origin, transaction).await
+        };
+        let ingress = self
+            .components
+            .pool()
+            .transaction_ingress()
+            .expect("permit belongs to the ingress service");
+        match ingress
+            .submit_admitted(origin, transaction, permit)?
+            .await
+            .map_err(|_| reth_transaction_pool::ingress::IngressError::Closed)??
+        {
+            reth_transaction_pool::ingress::IngressOutcome::Inserted(outcome) => Ok(outcome),
+            reth_transaction_pool::ingress::IngressOutcome::Recovered(..) => {
+                unreachable!("insertion request")
+            }
+        }
     }
 
     /// Returns the pending block kind

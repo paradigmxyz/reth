@@ -106,6 +106,8 @@ impl ValidationJobSender {
 pub struct TransactionValidationTaskExecutor<V> {
     /// The validator that will validate transactions on a separate task.
     pub validator: Arc<V>,
+    /// Configured validation worker count.
+    pub concurrency: usize,
     /// The sender half to validation tasks that perform the actual validation.
     pub to_validation_task: Arc<sync::Mutex<ValidationJobSender>>,
 }
@@ -114,6 +116,7 @@ impl<V> Clone for TransactionValidationTaskExecutor<V> {
     fn clone(&self) -> Self {
         Self {
             validator: self.validator.clone(),
+            concurrency: self.concurrency,
             to_validation_task: self.to_validation_task.clone(),
         }
     }
@@ -144,6 +147,7 @@ impl<V> TransactionValidationTaskExecutor<V> {
     {
         TransactionValidationTaskExecutor {
             validator: Arc::new(f(Arc::into_inner(self.validator).unwrap())),
+            concurrency: self.concurrency,
             to_validation_task: self.to_validation_task,
         }
     }
@@ -205,6 +209,7 @@ impl<V> TransactionValidationTaskExecutor<V> {
         (
             Self {
                 validator: Arc::new(validator),
+                concurrency: 1,
                 to_validation_task: Arc::new(sync::Mutex::new(tx)),
             },
             task,
@@ -229,7 +234,11 @@ impl<V> TransactionValidationTaskExecutor<V> {
             task.run().await;
         });
 
-        Self { validator: Arc::new(validator), to_validation_task: Arc::new(sync::Mutex::new(tx)) }
+        Self {
+            validator: Arc::new(validator),
+            to_validation_task: Arc::new(sync::Mutex::new(tx)),
+            concurrency: additional_tasks + 1,
+        }
     }
 }
 
@@ -322,6 +331,29 @@ where
             Ok(res) => res,
             Err(_) => validation_service_error_outcomes(hashes),
         }
+    }
+
+    fn validation_concurrency(&self) -> usize {
+        self.concurrency
+    }
+
+    fn try_dispatch_ingress(
+        &self,
+        batch: crate::ingress::IngressBatch<Self::Transaction>,
+    ) -> Result<impl Future<Output = ()> + Send, crate::ingress::IngressBatch<Self::Transaction>>
+    {
+        Ok(async move {
+            let (tx, rx) = oneshot::channel();
+            let validator = self.validator.clone();
+            let job = Box::pin(async move {
+                batch.run(validator.as_ref()).await;
+                let _ = tx.send(());
+            });
+            if self.to_validation_task.lock().await.send(job).await.is_err() {
+                return
+            }
+            let _ = rx.await;
+        })
     }
 
     fn on_new_head_block(&self, new_tip_block: &SealedBlock<Self::Block>) {

@@ -99,7 +99,8 @@ pub struct EthConfig {
     pub fee_history_cache: FeeHistoryCacheConfig,
     /// The maximum number of getproof calls that can be executed concurrently.
     pub proof_permits: usize,
-    /// Maximum batch size for transaction pool insertions.
+    /// Maximum batch size for the fallback transaction insertion processor.
+    /// Pools with shared ingress use their own admission and batch configuration.
     pub max_batch_size: usize,
     /// Controls how pending blocks are built when requested via RPC methods
     pub pending_block_kind: PendingBlockKind,

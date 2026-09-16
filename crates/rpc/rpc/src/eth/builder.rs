@@ -361,7 +361,8 @@ where
         self
     }
 
-    /// Sets the max batch size for batching transaction insertions.
+    /// Sets the max batch size for the fallback transaction insertion processor.
+    /// Pools with shared ingress use `PoolConfig::ingress` for batching.
     pub const fn max_batch_size(mut self, max_batch_size: usize) -> Self {
         self.max_batch_size = max_batch_size;
         self

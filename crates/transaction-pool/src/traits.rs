@@ -115,6 +115,13 @@ pub trait TransactionPool: Clone + Debug + Send + Sync {
     /// The transaction type of the pool
     type Transaction: EthPoolTransaction;
 
+    /// Returns the shared bounded ingress service, when supported by the pool.
+    /// Implementations may initialize the service lazily and require a current Tokio runtime.
+    /// Custom pools may retain their existing submission path by returning `None`.
+    fn transaction_ingress(&self) -> Option<crate::TransactionIngress<Self::Transaction>> {
+        None
+    }
+
     /// Returns stats about the pool and all sub-pools.
     fn pool_size(&self) -> PoolSize;
 

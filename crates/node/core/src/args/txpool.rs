@@ -284,7 +284,7 @@ impl Default for DefaultTxPoolValues {
             max_queued_lifetime: MAX_QUEUED_TRANSACTION_LIFETIME,
             transactions_backup_path: None,
             disable_transactions_backup: false,
-            max_batch_size: 1,
+            max_batch_size: 32,
         }
     }
 }
@@ -411,7 +411,7 @@ pub struct TxPoolArgs {
     )]
     pub disable_transactions_backup: bool,
 
-    /// Max batch size for transaction pool insertions
+    /// Max batch size for shared RPC and P2P transaction recovery, validation, and insertion
     #[arg(long = "txpool.max-batch-size", value_parser = RangedU64ValueParser::<usize>::new().range(1..), default_value_t = DefaultTxPoolValues::get_global().max_batch_size)]
     pub max_batch_size: usize,
 }
@@ -508,6 +508,10 @@ impl RethTransactionPoolConfig for TxPoolArgs {
     fn pool_config(&self) -> PoolConfig {
         let default_config = PoolConfig::default();
         PoolConfig {
+            ingress: reth_transaction_pool::TransactionIngressConfig {
+                max_batch_size: self.max_batch_size.max(1),
+                ..Default::default()
+            },
             local_transactions_config: LocalTransactionConfig {
                 no_exemptions: self.no_locals,
                 local_addresses: self.locals.iter().copied().collect(),

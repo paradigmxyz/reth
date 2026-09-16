@@ -37,6 +37,8 @@ pub const DEFAULT_MAX_INFLIGHT_DELEGATED_SLOTS: usize = 1;
 /// Configuration options for the Transaction pool.
 #[derive(Debug, Clone)]
 pub struct PoolConfig {
+    /// Shared RPC/gossip admission and batch limits.
+    pub ingress: crate::TransactionIngressConfig,
     /// Max number of transactions in the pending sub-pool
     pub pending_limit: SubPoolLimit,
     /// Max number of transactions in the basefee sub-pool
@@ -127,6 +129,7 @@ impl PoolConfig {
 impl Default for PoolConfig {
     fn default() -> Self {
         Self {
+            ingress: Default::default(),
             pending_limit: Default::default(),
             basefee_limit: Default::default(),
             queued_limit: Default::default(),

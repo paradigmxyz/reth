@@ -35,6 +35,10 @@ pub const DEFAULT_BUDGET_TRY_DRAIN_NETWORK_TRANSACTION_EVENTS: u32 = DEFAULT_BUD
 // Default is 40 pending pool imports.
 pub const DEFAULT_BUDGET_TRY_DRAIN_PENDING_POOL_IMPORTS: u32 = 4 * DEFAULT_BUDGET_TRY_DRAIN_STREAM;
 
+/// Budget for individual shared-ingress completions. Incoming events contain entire batches,
+/// so a per-message budget here would retain completed imports and falsely exhaust admission.
+pub const DEFAULT_BUDGET_TRY_DRAIN_TRANSACTION_IMPORT_RESULTS: u32 = 1024;
+
 /// Polls the given stream. Breaks with `true` if there maybe is more work.
 #[macro_export]
 macro_rules! poll_nested_stream_with_budget {
