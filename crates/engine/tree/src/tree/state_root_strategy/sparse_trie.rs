@@ -389,7 +389,7 @@ where
         // marker means they died without finishing the stream.
         while !self.finished_state_updates {
             let mut t = Instant::now();
-            let receive = ActivityGuard::new("loop_receive");
+            let receive = ActivityGuard::detail("loop_receive");
             receive.dependencies(
                 self.storage_in_flight,
                 self.in_flight_proof_batches,
@@ -456,7 +456,7 @@ where
         // hints are ignored: with all updates known, prefetching has nothing left to help.
         while !done {
             let mut t = Instant::now();
-            let receive = ActivityGuard::new("loop_receive");
+            let receive = ActivityGuard::detail("loop_receive");
             receive.dependencies(
                 self.storage_in_flight,
                 self.in_flight_proof_batches,
@@ -586,7 +586,7 @@ where
     /// Messages queued after the finish marker are best-effort hints and are not actionable.
     /// Returns `true` once the finish marker was received and all pending trie work is done.
     fn make_progress(&mut self) -> Result<bool, StateRootTaskError> {
-        let _activity = ActivityGuard::new("progress");
+        let _activity = ActivityGuard::detail("progress");
         // Absorb a whole burst of returns before the scans below, so one batch of storage jobs
         // costs one promotion pass rather than one per trie.
         self.drain_returned_storage_tries()?;
@@ -638,7 +638,7 @@ where
 
     /// Processes a [`SparseTrieTaskMessage`] from the hashing task.
     fn on_message(&mut self, message: SparseTrieTaskMessage) -> Option<Arc<HashedPostState>> {
-        let _activity = ActivityGuard::new("message");
+        let _activity = ActivityGuard::detail("message");
         match message {
             SparseTrieTaskMessage::PrefetchProofs(targets) => {
                 self.on_prewarm_targets(targets);
@@ -995,7 +995,7 @@ where
                 )
                 .entered();
                 for job in chunk {
-                    let _job = ActivityGuard::worker(
+                    let _job = ActivityGuard::job(
                         "storage_job",
                         batch_id,
                         job.work.pending.len() + job.work.proofs.len(),
@@ -1034,7 +1034,7 @@ where
     /// Puts a payload back into its entry once its job finished, folding in everything that
     /// arrived for the address while it was gone.
     fn on_storage_trie_returned(&mut self, done: StorageTrieJobDone<S>) -> SparseTrieResult<()> {
-        let _activity = ActivityGuard::new("storage_return");
+        let _activity = ActivityGuard::detail("storage_return");
         let StorageTrieJobDone { address, work, output } = done;
 
         let Entry::Occupied(mut entry) = self.storage.entry(address) else {
@@ -1361,13 +1361,13 @@ impl<S: SparseTrie + Default> StorageTrieWork<S> {
     /// Reveals the queued proof nodes, applies the leaf updates that are not blocked by a blinded
     /// node, and recomputes the root once nothing is left to apply.
     fn run(&mut self, new_epoch: TrieNodeEpoch, retain_updates: bool) -> StorageWorkOutput {
-        let _activity = ActivityGuard::new("storage_work");
+        let _activity = ActivityGuard::detail("storage_work");
         let Self { trie, pending, proofs, fetched, dirty, .. } = self;
         *dirty = false;
         let mut output = StorageWorkOutput::default();
 
         if !proofs.is_empty() {
-            let _activity = ActivityGuard::new("storage_reveal");
+            let _activity = ActivityGuard::detail("storage_reveal");
             output.result = trie.reveal_v2_proof_nodes(proofs, retain_updates);
             proofs.clear();
             if output.result.is_err() {
@@ -1376,7 +1376,7 @@ impl<S: SparseTrie + Default> StorageTrieWork<S> {
         }
 
         if !pending.is_empty() {
-            let _activity = ActivityGuard::new("storage_leaves");
+            let _activity = ActivityGuard::detail("storage_leaves");
             let updates_len_before = pending.len();
             let targets = &mut output.targets;
             output.result = trie.update_leaves(pending, |path, parent| match fetched.entry(path) {
@@ -1399,7 +1399,7 @@ impl<S: SparseTrie + Default> StorageTrieWork<S> {
         }
 
         if self.needs_root() {
-            let _activity = ActivityGuard::new("storage_root");
+            let _activity = ActivityGuard::detail("storage_root");
             self.trie.root(new_epoch);
         }
 
