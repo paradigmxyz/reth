@@ -250,7 +250,6 @@ where
         chunk_size: usize,
     ) -> Self {
         let (hashed_state_tx, hashed_state_rx) = crossbeam_channel::unbounded();
-        let (storage_done_tx, storage_done_rx) = crossbeam_channel::unbounded();
 
         let parent_span = tracing::Span::current();
         let hashing_metrics = metrics.clone();
@@ -341,6 +340,7 @@ where
         chunk_size: usize,
         hashing_task: Option<(CrossbeamSender<()>, TaskHandle<()>)>,
     ) -> Self {
+        let (storage_done_tx, storage_done_rx) = crossbeam_channel::unbounded();
         Self {
             proof_result_tx,
             proof_result_rx,
