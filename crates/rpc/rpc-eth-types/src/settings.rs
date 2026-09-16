@@ -11,6 +11,8 @@ use std::time::Duration;
 ///
 /// These settings are shared by the API's helper traits so additional settings can be exposed
 /// without adding individual trait methods.
+///
+/// Configure individual settings with [`Self::default`] and the `with_*` methods.
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct EthApiSettings {
     /// Maximum gas limit for `eth_call` and call tracing RPC methods.
@@ -29,6 +31,73 @@ pub struct EthApiSettings {
     pub evm_memory_limit: u64,
     /// Whether to force upcasting EIP-4844 blob sidecars to EIP-7594 format when Osaka is active.
     pub force_blob_sidecar_upcasting: bool,
+}
+
+impl EthApiSettings {
+    /// Sets the maximum gas limit for calls and tracing.
+    #[must_use]
+    pub const fn with_gas_cap(mut self, gas_cap: u64) -> Self {
+        self.gas_cap = gas_cap;
+        self
+    }
+
+    /// Sets the maximum number of blocks for `eth_simulateV1`.
+    #[must_use]
+    pub const fn with_max_simulate_blocks(mut self, max_simulate_blocks: u64) -> Self {
+        self.max_simulate_blocks = max_simulate_blocks;
+        self
+    }
+
+    /// Sets whether `eth_simulateV1` computes state roots.
+    #[must_use]
+    pub const fn with_compute_state_root_for_eth_simulate(
+        mut self,
+        compute_state_root_for_eth_simulate: bool,
+    ) -> Self {
+        self.compute_state_root_for_eth_simulate = compute_state_root_for_eth_simulate;
+        self
+    }
+
+    /// Sets the maximum number of blocks into the past for state proofs.
+    #[must_use]
+    pub const fn with_eth_proof_window(mut self, eth_proof_window: u64) -> Self {
+        self.eth_proof_window = eth_proof_window;
+        self
+    }
+
+    /// Sets the pending block construction mode.
+    #[must_use]
+    pub const fn with_pending_block_kind(mut self, pending_block_kind: PendingBlockKind) -> Self {
+        self.pending_block_kind = pending_block_kind;
+        self
+    }
+
+    /// Sets the timeout for `send_raw_transaction_sync`.
+    #[must_use]
+    pub const fn with_send_raw_transaction_sync_timeout(
+        mut self,
+        send_raw_transaction_sync_timeout: Duration,
+    ) -> Self {
+        self.send_raw_transaction_sync_timeout = send_raw_transaction_sync_timeout;
+        self
+    }
+
+    /// Sets the maximum EVM memory per RPC request.
+    #[must_use]
+    pub const fn with_evm_memory_limit(mut self, evm_memory_limit: u64) -> Self {
+        self.evm_memory_limit = evm_memory_limit;
+        self
+    }
+
+    /// Sets whether to force blob sidecar upcasting when Osaka is active.
+    #[must_use]
+    pub const fn with_force_blob_sidecar_upcasting(
+        mut self,
+        force_blob_sidecar_upcasting: bool,
+    ) -> Self {
+        self.force_blob_sidecar_upcasting = force_blob_sidecar_upcasting;
+        self
+    }
 }
 
 impl Default for EthApiSettings {

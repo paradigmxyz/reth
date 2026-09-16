@@ -11,8 +11,9 @@ use reth_rpc_eth_api::{
 };
 use reth_rpc_eth_types::{
     builder::config::PendingBlockKind, fee_history::fee_history_cache_new_blocks_task,
-    receipt::EthReceiptConverter, EthStateCache, EthStateCacheConfig, FeeHistoryCache,
-    FeeHistoryCacheConfig, ForwardConfig, GasCap, GasPriceOracle, GasPriceOracleConfig,
+    receipt::EthReceiptConverter, EthApiSettings, EthStateCache, EthStateCacheConfig,
+    FeeHistoryCache, FeeHistoryCacheConfig, ForwardConfig, GasCap, GasPriceOracle,
+    GasPriceOracleConfig,
 };
 use reth_rpc_server_types::constants::{
     DEFAULT_ETH_PROOF_WINDOW, DEFAULT_MAX_BLOCKING_IO_REQUEST, DEFAULT_MAX_SIMULATE_BLOCKS,
@@ -557,14 +558,21 @@ where
             },
         );
 
+        let settings = EthApiSettings::default()
+            .with_gas_cap(gas_cap.into())
+            .with_max_simulate_blocks(max_simulate_blocks)
+            .with_compute_state_root_for_eth_simulate(compute_state_root_for_eth_simulate)
+            .with_eth_proof_window(eth_proof_window)
+            .with_pending_block_kind(pending_block_kind)
+            .with_send_raw_transaction_sync_timeout(send_raw_transaction_sync_timeout)
+            .with_evm_memory_limit(evm_memory_limit)
+            .with_force_blob_sidecar_upcasting(force_blob_sidecar_upcasting);
+
         EthApiInner::new(
             components,
             eth_cache,
             gas_oracle,
-            gas_cap,
-            max_simulate_blocks,
-            compute_state_root_for_eth_simulate,
-            eth_proof_window,
+            settings,
             blocking_task_pool.unwrap_or_else(|| {
                 BlockingTaskPool::builder()
                     .thread_name(|i| format!("blocking-{i:02}"))
@@ -579,11 +587,7 @@ where
             next_env,
             max_batch_size,
             max_blocking_io_requests,
-            pending_block_kind,
             raw_tx_forwarder.forwarder_client(),
-            send_raw_transaction_sync_timeout,
-            evm_memory_limit,
-            force_blob_sidecar_upcasting,
         )
     }
 

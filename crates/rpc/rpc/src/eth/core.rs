@@ -22,7 +22,7 @@ use reth_rpc_eth_api::{
 };
 use reth_rpc_eth_types::{
     builder::config::PendingBlockKind, receipt::EthReceiptConverter, EthApiError, EthApiSettings,
-    EthStateCache, FeeHistoryCache, GasCap, GasPriceOracle, PendingBlock,
+    EthStateCache, FeeHistoryCache, GasPriceOracle, PendingBlock,
 };
 use reth_storage_api::{noop::NoopProvider, BlockReaderIdExt, ProviderHeader};
 use reth_tasks::{
@@ -286,10 +286,7 @@ where
         components: N,
         eth_cache: EthStateCache<N::Primitives>,
         gas_oracle: GasPriceOracle<N::Provider>,
-        gas_cap: impl Into<GasCap>,
-        max_simulate_blocks: u64,
-        compute_state_root_for_eth_simulate: bool,
-        eth_proof_window: u64,
+        settings: EthApiSettings,
         blocking_task_pool: BlockingTaskPool,
         fee_history_cache: FeeHistoryCache<ProviderHeader<N::Provider>>,
         task_spawner: Runtime,
@@ -298,11 +295,7 @@ where
         next_env: impl PendingEnvBuilder<N::Evm>,
         max_batch_size: usize,
         max_blocking_io_requests: usize,
-        pending_block_kind: PendingBlockKind,
         raw_tx_forwarder: Option<RpcClient>,
-        send_raw_transaction_sync_timeout: Duration,
-        evm_memory_limit: u64,
-        force_blob_sidecar_upcasting: bool,
     ) -> Self {
         let signers = parking_lot::RwLock::new(Default::default());
         // get the block number of the latest block
@@ -328,16 +321,7 @@ where
             signers,
             eth_cache,
             gas_oracle,
-            settings: EthApiSettings {
-                gas_cap: gas_cap.into().into(),
-                max_simulate_blocks,
-                compute_state_root_for_eth_simulate,
-                eth_proof_window,
-                pending_block_kind,
-                send_raw_transaction_sync_timeout,
-                evm_memory_limit,
-                force_blob_sidecar_upcasting,
-            },
+            settings,
             starting_block,
             task_spawner,
             pending_block: Default::default(),
