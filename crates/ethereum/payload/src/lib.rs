@@ -125,6 +125,13 @@ where
             None,
         );
 
+        self.build_empty_payload_with_args(args)
+    }
+
+    fn build_empty_payload_with_args(
+        &self,
+        args: BuildArguments<Self::Attributes, Self::BuiltPayload>,
+    ) -> Result<EthBuiltPayload, PayloadBuilderError> {
         default_ethereum_payload(
             self.evm_config.clone(),
             self.client.clone(),
