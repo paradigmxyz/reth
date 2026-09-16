@@ -947,10 +947,12 @@ impl<T: NodePrimitives, ChainSpec: EthChainSpec + Send + Sync + 'static> BlockRe
 
     fn recovered_block(
         &self,
-        _id: BlockHashOrNumber,
+        id: BlockHashOrNumber,
         _transaction_kind: TransactionVariant,
     ) -> ProviderResult<Option<RecoveredBlock<Self::Block>>> {
-        Ok(None)
+        self.block(id)?
+            .map(|block| block.try_recover().map_err(|err| ProviderError::Other(err.to_string())))
+            .transpose()
     }
 
     fn sealed_block_with_senders(

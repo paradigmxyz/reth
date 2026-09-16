@@ -551,7 +551,7 @@ mod tests {
     use crate::{eth::helpers::types::EthRpcConverter, EthApi, EthApiBuilder};
     use alloy_consensus::{Block, BlockBody, Header};
     use alloy_eips::BlockNumberOrTag;
-    use alloy_primitives::{Signature, B256, U64};
+    use alloy_primitives::{Address, Signature, B256, U256, U64};
     use alloy_rpc_types::FeeHistory;
     use alloy_rpc_types_eth::{Bundle, TransactionRequest};
     use jsonrpsee_types::error::INVALID_PARAMS_CODE;
@@ -562,7 +562,7 @@ mod tests {
     use reth_evm_ethereum::EthEvmConfig;
     use reth_network_api::noop::NoopNetwork;
     use reth_provider::{
-        test_utils::{MockEthProvider, NoopProvider},
+        test_utils::{ExtendedAccount, MockEthProvider, NoopProvider},
         PruneCheckpointReader, StageCheckpointReader,
     };
     use reth_rpc_eth_api::{node::RpcNodeCoreAdapter, EthApiServer};
@@ -601,6 +601,33 @@ mod tests {
             EthEvmConfig::new(provider.chain_spec()),
         )
         .build()
+    }
+
+    #[tokio::test]
+    async fn test_transaction_by_sender_and_nonce_without_sender_transaction_returns_none() {
+        use reth_rpc_eth_api::helpers::EthTransactions;
+
+        let provider = MockEthProvider::default();
+        let sender = Address::random();
+        provider.add_account(sender, ExtendedAccount::new(1, U256::ZERO));
+
+        let block_hash = B256::random();
+        provider.add_block(
+            block_hash,
+            Block {
+                header: Header { number: 1, ..Default::default() },
+                body: BlockBody::default(),
+            },
+        );
+
+        let api = build_test_eth_api(provider);
+        let transaction = EthTransactions::get_transaction_by_sender_and_nonce(
+            &api, sender, 0, false,
+        )
+        .await
+        .expect("existing block without a sender transaction should not be a header error");
+
+        assert!(transaction.is_none());
     }
 
     #[tokio::test]

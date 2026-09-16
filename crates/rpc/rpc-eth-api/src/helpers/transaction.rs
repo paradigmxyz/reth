@@ -434,32 +434,31 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
             .await?;
 
             let block_id = num.into();
-            self.recovered_block(block_id)
-                .await?
-                .and_then(|block| {
-                    let block_hash = block.hash();
-                    let block_number = block.number();
-                    let block_timestamp = block.timestamp();
-                    let base_fee_per_gas = block.base_fee_per_gas();
+            let Some(block) = self.recovered_block(block_id).await? else {
+                return Err(EthApiError::HeaderNotFound(block_id).into())
+            };
 
-                    block
-                        .transactions_with_sender()
-                        .enumerate()
-                        .find(|(_, (signer, tx))| **signer == sender && (*tx).nonce() == nonce)
-                        .map(|(index, (signer, tx))| {
-                            let tx_info = TransactionInfo {
-                                hash: Some(*tx.tx_hash()),
-                                block_hash: Some(block_hash),
-                                block_number: Some(block_number),
-                                block_timestamp: Some(block_timestamp),
-                                base_fee: base_fee_per_gas,
-                                index: Some(index as u64),
-                            };
-                            Ok(self.converter().fill(tx.clone().with_signer(*signer), tx_info)?)
-                        })
+            let block_hash = block.hash();
+            let block_number = block.number();
+            let block_timestamp = block.timestamp();
+            let base_fee_per_gas = block.base_fee_per_gas();
+
+            block
+                .transactions_with_sender()
+                .enumerate()
+                .find(|(_, (signer, tx))| **signer == sender && (*tx).nonce() == nonce)
+                .map(|(index, (signer, tx))| {
+                    let tx_info = TransactionInfo {
+                        hash: Some(*tx.tx_hash()),
+                        block_hash: Some(block_hash),
+                        block_number: Some(block_number),
+                        block_timestamp: Some(block_timestamp),
+                        base_fee: base_fee_per_gas,
+                        index: Some(index as u64),
+                    };
+                    Ok(self.converter().fill(tx.clone().with_signer(*signer), tx_info)?)
                 })
-                .ok_or(EthApiError::HeaderNotFound(block_id))?
-                .map(Some)
+                .transpose()
         }
     }
 
