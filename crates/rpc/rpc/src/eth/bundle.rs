@@ -12,8 +12,11 @@ use reth_rpc_eth_api::{
     helpers::{Call, EthTransactions, LoadPendingBlock},
     EthCallBundleApiServer, FromEthApiError, FromEvmError,
 };
-use reth_rpc_eth_types::{utils::recover_raw_transaction, EthApiError, RpcInvalidTransactionError};
-use reth_storage_api::HeaderProvider;
+use reth_rpc_eth_types::{
+    utils::recover_raw_transaction, EthApiError, PendingBlockEnv, PendingBlockEnvOrigin,
+    RpcInvalidTransactionError,
+};
+use reth_storage_api::BlockReaderIdExt;
 use reth_tasks::pool::BlockingTaskGuard;
 use reth_transaction_pool::{
     EthBlobTransactionSidecar, EthPoolTransaction, PoolPooledTx, PoolTransaction, TransactionPool,
@@ -95,7 +98,24 @@ where
 
         let block_id: alloy_rpc_types_eth::BlockId = state_block_number.into();
         // Note: the block number is considered the `parent` block: <https://github.com/flashbots/mev-geth/blob/fddf97beec5877483f879a77b7dea2e58a58d653/internal/ethapi/api.go#L2104>
-        let (mut evm_env, at) = self.eth_api().evm_env_at(block_id).await?;
+        let (mut evm_env, at, parent) = if block_id.is_pending() {
+            let PendingBlockEnv { evm_env, origin } = self.eth_api().pending_block_env_and_cfg()?;
+            let at = origin.state_block_id();
+            let parent = match origin {
+                PendingBlockEnvOrigin::ActualPending(block, _) => block.clone_sealed_header(),
+                PendingBlockEnvOrigin::DerivedFromLatest(header) => header,
+            };
+            (evm_env, at, parent)
+        } else {
+            let parent = self
+                .eth_api()
+                .provider()
+                .sealed_header_by_id(block_id)
+                .map_err(Eth::Error::from_eth_err)?
+                .ok_or(EthApiError::HeaderNotFound(block_id))?;
+            let evm_env = self.eth_api().evm_env_for_header(&parent)?;
+            (evm_env, parent.hash().into(), parent)
+        };
 
         if let Some(coinbase) = coinbase {
             evm_env.block_env.inner_mut().beneficiary = coinbase;
@@ -134,27 +154,17 @@ where
         // Apply gas limit: default to call gas limit unless user requests a smaller limit
         evm_env.block_env.inner_mut().gas_limit = gas_limit.unwrap_or(call_gas_limit);
 
+        // The bundle is simulated on top of the state block, so default to the next block's base
+        // fee. <https://github.com/flashbots/mev-geth/blob/fddf97beec5877483f879a77b7dea2e58a58d653/internal/ethapi/api.go#L2130>
         if let Some(base_fee) = base_fee {
             evm_env.block_env.inner_mut().basefee = base_fee.try_into().unwrap_or(u64::MAX);
-        } else {
-            // The bundle is simulated on top of the state block, so the base fee is the one of
-            // the _next_ block derived from the state block's header:
-            // <https://github.com/flashbots/mev-geth/blob/fddf97beec5877483f879a77b7dea2e58a58d653/internal/ethapi/api.go#L2130>
-            let parent_block = evm_env.block_env.number().saturating_to::<u64>();
-            let parent = self
-                .eth_api()
-                .provider()
-                .header_by_number(parent_block)
-                .map_err(Eth::Error::from_eth_err)?
-                .ok_or(EthApiError::HeaderNotFound(parent_block.into()))?;
-            if let Some(next_base_fee) = self
-                .eth_api()
-                .provider()
-                .chain_spec()
-                .next_block_base_fee(&parent, evm_env.block_env.timestamp().saturating_to())
-            {
-                evm_env.block_env.inner_mut().basefee = next_base_fee;
-            }
+        } else if let Some(next_base_fee) = self
+            .eth_api()
+            .provider()
+            .chain_spec()
+            .next_block_base_fee(&parent, evm_env.block_env.timestamp().saturating_to())
+        {
+            evm_env.block_env.inner_mut().basefee = next_base_fee;
         }
 
         let state_block_number = evm_env.block_env.number();
@@ -333,13 +343,17 @@ mod tests {
     use alloy_eips::{eip1559::INITIAL_BASE_FEE, eip2718::Encodable2718, BlockNumberOrTag};
     use alloy_genesis::{Genesis, GenesisAccount};
     use alloy_primitives::{Address, TxKind};
+    use reth_chain_state::ExecutedBlock;
     use reth_chainspec::ChainSpecBuilder;
     use reth_db_common::init::init_genesis;
+    use reth_ethereum_primitives::Block as EthBlock;
     use reth_evm_ethereum::EthEvmConfig;
     use reth_network_api::noop::NoopNetwork;
+    use reth_primitives_traits::RecoveredBlock;
     use reth_provider::{
         providers::BlockchainProvider, test_utils::create_test_provider_factory_with_chain_spec,
     };
+    use reth_storage_overlay::OverlayManager;
     use reth_testing_utils::generators::{self, generate_key, sign_tx_with_key_pair};
     use reth_transaction_pool::test_utils::testing_pool;
 
@@ -358,7 +372,7 @@ mod tests {
                 nonce: 0,
                 gas_limit: 21_000,
                 max_fee_per_gas: (next_base_fee + 1) as u128,
-                max_priority_fee_per_gas: 1,
+                max_priority_fee_per_gas: (next_base_fee + 1) as u128,
                 to: TxKind::Call(Address::random()),
                 ..Default::default()
             }),
@@ -374,7 +388,9 @@ mod tests {
             )]);
         let chain_spec =
             Arc::new(ChainSpecBuilder::mainnet().cancun_activated().genesis(genesis).build());
-        let factory = create_test_provider_factory_with_chain_spec(chain_spec);
+        let overlay_manager = OverlayManager::default();
+        let factory = create_test_provider_factory_with_chain_spec(chain_spec)
+            .with_overlay_manager(overlay_manager.clone());
         init_genesis(&factory).unwrap();
         let provider = BlockchainProvider::new(factory).unwrap();
 
@@ -393,8 +409,62 @@ mod tests {
             state_block_number: BlockNumberOrTag::Number(0),
             ..Default::default()
         };
-        let response = api.call_bundle(bundle).await.unwrap();
+        for state_block_number in
+            [BlockNumberOrTag::Number(0), BlockNumberOrTag::Latest, BlockNumberOrTag::Pending]
+        {
+            for base_fee in [None, Some((next_base_fee - 1) as u128)] {
+                let response = api
+                    .call_bundle(EthCallBundle { state_block_number, base_fee, ..bundle.clone() })
+                    .await
+                    .unwrap();
+                let expected_tip =
+                    (next_base_fee + 1) as u128 - base_fee.unwrap_or(next_base_fee as u128);
+                assert_bundle_fees(&response, expected_tip);
+            }
+        }
+
+        // An actual pending block is not canonical and has its own base fee.
+        let chain_spec = provider.chain_spec();
+        let mut header = chain_spec.genesis_header().clone();
+        header.parent_hash = chain_spec.genesis_hash();
+        header.number = 1;
+        header.timestamp = 12;
+        header.base_fee_per_gas = Some(next_base_fee);
+        let pending_block = ExecutedBlock {
+            recovered_block: Arc::new(RecoveredBlock::new_unhashed(
+                EthBlock { header, body: Default::default() },
+                vec![],
+            )),
+            ..Default::default()
+        };
+        overlay_manager.insert_block(pending_block.clone());
+        provider.canonical_in_memory_state().set_pending_block(pending_block);
+        let pending_next_base_fee = next_base_fee - next_base_fee / 8;
+        for base_fee in [None, Some((pending_next_base_fee - 1) as u128)] {
+            let response = api
+                .call_bundle(EthCallBundle {
+                    block_number: 2,
+                    state_block_number: BlockNumberOrTag::Pending,
+                    base_fee,
+                    ..bundle.clone()
+                })
+                .await
+                .unwrap();
+            let expected_tip =
+                (next_base_fee + 1) as u128 - base_fee.unwrap_or(pending_next_base_fee as u128);
+            assert_bundle_fees(&response, expected_tip);
+        }
+    }
+
+    fn assert_bundle_fees(response: &EthCallBundleResponse, expected_tip: u128) {
         assert_eq!(response.results.len(), 1);
-        assert_eq!(response.results[0].gas_price, U256::from(1));
+        assert_eq!(response.total_gas_used, 21_000);
+        let gas_price = U256::from(expected_tip);
+        let gas_fees = gas_price * U256::from(21_000);
+        assert_eq!(response.results[0].gas_price, gas_price);
+        assert_eq!(response.results[0].gas_fees, gas_fees);
+        assert_eq!(response.gas_fees, gas_fees);
+        assert_eq!(response.bundle_gas_price, gas_price);
+        assert_eq!(response.coinbase_diff, gas_fees);
     }
 }
