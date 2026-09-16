@@ -29,8 +29,7 @@ age out under the same global budget. Writes retain their existing buffering and
 read-modify-write behavior.
 
 The first measured version below instead used cursor-local 64 KiB read-ahead
-windows that were discarded on cursor drop. The shared-cache revision is awaiting
-its own benchmark results.
+windows that were discarded on cursor drop. The shared-cache revision and its benchmark results are recorded separately below.
 
 The experiment bypasses the kernel cache while retaining higher-level caches
 and the existing file format. It does not change MDBX or RocksDB I/O.
@@ -97,6 +96,76 @@ cost of this implementation on these workloads. Aligned read amplification,
 copying/allocation, and additional file operations are all possible contributors;
 these runs do not isolate their individual effects. A different buffering or
 file-layout strategy would require a new comparison.
+
+## Shared block-cache follow-up
+
+Candidate: `258f32a2cdee61b4e080fbfcb82776443e93e29f`, retaining the same pinned
+upstream baseline, workload settings, and direct-I/O write path.
+
+| Workload | Run |
+| --- | --- |
+| Engine API replay | [35020889712](https://github.com/paradigmxyz/reth/actions/runs/35020889712) |
+| Engine API replay with depth-5 reorgs | [35020893390](https://github.com/paradigmxyz/reth/actions/runs/35020893390) |
+| Historical `debug_traceBlockByNumber` | [35020897841](https://github.com/paradigmxyz/reth/actions/runs/35020897841) |
+
+| Workload / metric | Upstream | Cached direct I/O | Change (95% CI half-width) |
+| --- | ---: | ---: | ---: |
+| Engine mean block latency | 28.52 ms | 28.73 ms | +0.73% ±0.56 pp |
+| Engine throughput | 1,201.65 MGas/s | 1,195.31 MGas/s | −0.53% ±0.54 pp |
+| Depth-5 reorg mean block latency | 19.51 ms | 19.78 ms | +1.37% ±0.55 pp |
+| Depth-5 reorg throughput | 1,595.63 MGas/s | 1,582.23 MGas/s | −0.84% ±0.48 pp |
+| Historical trace mean latency | 34.78 ms | 35.74 ms | +2.75% ±0.56 pp |
+| Historical trace P99 latency | 72.89 ms | 74.96 ms | +2.84% ±0.42 pp |
+| Historical trace throughput | 57.17 requests/s | 55.09 requests/s | −3.63% ±0.57 pp |
+
+All three workflows complete successfully. Relative to the earlier direct-I/O
+measurements, mean latency falls from 57.54 to 28.73 ms for engine replay, from
+40.90 to 19.78 ms with reorgs, and from 466.92 to 35.74 ms for historical tracing.
+
+Both engine changes are below the workflow's 1.20% practical significance floor.
+Block input operations average 513.12 for upstream and 525.10 for the cached
+candidate; the initial direct-I/O comparison averaged 518.82 and 983.94.
+Startup takes 14 seconds in all six cached candidate runs versus 9 seconds for
+upstream, compared with 27–28 seconds in the initial direct-I/O run.
+
+The write-side cost remains: static-file saving averages 4.88 ms versus 1.02 ms
+upstream, and pruning averages 4.57 ms versus 3.70 ms. This run does not show a
+material end-to-end engine regression despite these slower components.
+
+The workflow classifies the engine and reorg latency/throughput changes as
+neutral using its confidence intervals and practical significance floors. Trace
+throughput remains 3.63% lower than upstream, and CPU per trace request is 31.73 ms
+versus 30.65 ms (+3.54%); both are classified as regressions. All 80 response
+comparisons match across the same 20-block corpus, with zero RPC errors. Neither
+engine artifact contains a node-error report from the workflow's panic/ERROR scan.
+
+Absolute comparisons with the earlier direct-I/O results are across separate
+workflow runs; the paired upstream comparisons are the controlled measurements.
+These warm, repeating workloads show that the shared cache avoids most of the
+previous repeated I/O. They do not establish the same result for random reads
+whose working set exceeds the 64 MiB buffer budget, nor measure net memory savings.
+
+### Follow-up validation
+
+[Linux CI](https://github.com/paradigmxyz/reth/actions/runs/35020876918) passes
+31 focused tests, workspace clippy, and 3,465 workspace unit tests (seven skipped,
+three passed on retry). Local checks pass 30 storage tests, 39 provider/recovery
+tests, nightly formatting and clippy, WASI compilation, private-item documentation,
+`zepter`, and `make lint-toml`.
+
+Cache tests verify that repeated and overlapping reads fetch each distinct block
+once, concurrent warm reads issue no additional I/O, LRU eviction respects the
+buffer budget, and reopening after truncation cannot hit old contents. Jar tests
+scan and seek through separate cursors sharing a reader, with and without
+compression. Existing provider tests exercise pruning and interrupted commits.
+
+The reorg consistency test's retried assertion (`primary: signer must exist at
+block 1`) also reproduces on unmodified upstream `5d0ea55c` during repeated local
+runs (iteration 10; cached candidate iteration 7). Its randomized block generator
+can emit no transactions for block 1, then mark the signer as newly created in
+block 2. The other CI retries were an arbitrary-data generation failure in
+`hash_builder_state_roundtrip` and a thread-join failure during proof-worker
+teardown.
 
 ## Earlier experiment findings
 
