@@ -509,7 +509,7 @@ where
         debug!(target: "engine::root", "All proofs processed, ending calculation");
 
         let start = Instant::now();
-        let final_activity = ActivityGuard::new("final_root_updates");
+        let final_activity = ActivityGuard::coordinator("final_root_updates");
         self.return_storage_tries();
         let (state_root, trie_updates) = match self.trie.root_with_updates(self.new_epoch) {
             Ok(result) => result,
@@ -560,7 +560,7 @@ where
         message: ProofResultMessage,
         t: &mut Instant,
     ) -> Result<(), StateRootTaskError> {
-        let _activity = ActivityGuard::new("proof_coalesce_reveal");
+        let _activity = ActivityGuard::coordinator("proof_coalesce_reveal");
         let mut result = self.on_proof_result_message(message)?;
         while let Ok(next) = self.proof_result_rx.try_recv() {
             let res = self.on_proof_result_message(next)?;
@@ -574,7 +574,7 @@ where
         *t = phase_end;
 
         {
-            let _activity = ActivityGuard::new("proof_reveal");
+            let _activity = ActivityGuard::coordinator("proof_reveal");
             self.on_proof_result(result)?;
         }
         self.metrics.sparse_trie_reveal_multiproof_duration_histogram.record(t.elapsed());
@@ -612,7 +612,7 @@ where
             // If there's still no pending updates spend some time pre-computing the account
             // trie upper hashes
             if self.proof_result_rx.is_empty() {
-                let _activity = ActivityGuard::new("account_subtries");
+                let _activity = ActivityGuard::coordinator("account_subtries");
                 self.trie.calculate_subtries(self.new_epoch);
             }
         } else if !updates_queued {
@@ -803,7 +803,7 @@ where
             return Ok(());
         }
 
-        let _activity = ActivityGuard::new("new_updates");
+        let _activity = ActivityGuard::coordinator("new_updates");
         let _span = debug_span!("process_new_updates").entered();
         self.pending_updates = 0;
         self.initial_updates_applied = true;
@@ -860,7 +860,7 @@ where
         skip_all
     )]
     fn run_ready_storage_work(&mut self) -> SparseTrieResult<()> {
-        let _activity = ActivityGuard::new("storage_dispatch");
+        let _activity = ActivityGuard::coordinator("storage_dispatch");
         let mut ready = Vec::new();
         let mut job_units = 0;
         for (address, state) in &self.storage {
@@ -936,7 +936,7 @@ where
         skip_all
     )]
     fn process_account_leaf_updates(&mut self, new: bool) -> SparseTrieResult<bool> {
-        let _activity = ActivityGuard::new("account_leaves");
+        let _activity = ActivityGuard::coordinator("account_leaves");
         let account_updates =
             if new { &mut self.new_account_updates } else { &mut self.account_updates };
 
@@ -975,7 +975,7 @@ where
             return;
         }
 
-        let batch = ActivityGuard::new("storage_batch_spawn");
+        let batch = ActivityGuard::coordinator("storage_batch_spawn");
         let batch_id = batch.id();
         let parent_span = debug_span!("spawn_storage_jobs", n = jobs.len());
         let chunk_len = storage_job_chunk_len(jobs.len());
@@ -1067,7 +1067,7 @@ where
     /// The final root and everything after it - trie updates, preservation, pruning - reads the
     /// storage tries through [`SparseStateTrie`], so no trie may remain in the task's storage map.
     fn return_storage_tries(&mut self) {
-        let _activity = ActivityGuard::new("restore_storage");
+        let _activity = ActivityGuard::coordinator("restore_storage");
         let mut storage = core::mem::take(&mut self.storage);
         for (address, state) in &mut storage {
             let StorageTrieState::Idle(work) = state else {
@@ -1090,7 +1090,7 @@ where
         skip_all
     )]
     fn promote_pending_account_updates(&mut self) -> SparseTrieResult<()> {
-        let _activity = ActivityGuard::new("promotion");
+        let _activity = ActivityGuard::coordinator("promotion");
         self.process_account_leaf_updates(false)?;
 
         if self.pending_account_updates.is_empty() {
@@ -1177,7 +1177,7 @@ where
     }
 
     fn dispatch_pending_targets(&mut self) -> Result<(), StateRootTaskError> {
-        let _activity = ActivityGuard::new("proof_dispatch");
+        let _activity = ActivityGuard::coordinator("proof_dispatch");
         if self.pending_targets.is_empty() {
             return Ok(())
         }

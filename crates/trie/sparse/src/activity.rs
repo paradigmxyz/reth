@@ -24,6 +24,14 @@ impl ActivityGuard {
         Self::start(phase, PARENT.with(Cell::get), 0, Duration::ZERO, true)
     }
 
+    /// Measures a coordinator phase only when its optional probes are enabled.
+    pub fn coordinator(phase: &'static str) -> Self {
+        if !tracing::enabled!(target: "engine::tree::coordinator_activity", tracing::Level::TRACE) {
+            return Self { active: None };
+        }
+        Self::new(phase)
+    }
+
     /// Measures a storage job with its submitting batch and dispatch-to-start delay.
     pub fn worker(phase: &'static str, parent: u64, units: usize, queued: Duration) -> Self {
         Self::start(phase, parent, units, queued, true)
