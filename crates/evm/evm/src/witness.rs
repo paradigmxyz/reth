@@ -13,14 +13,12 @@ pub struct ExecutionWitnessRecord<'a, DB> {
     state: &'a CacheDB<DB>,
     /// Additional hashed state to include in the witness.
     additional_state: Option<HashedPostState>,
-    /// Additional key preimages to include in the witness.
-    additional_keys: Vec<Bytes>,
 }
 
 impl<'a, DB> ExecutionWitnessRecord<'a, DB> {
     /// Creates a new record from the state after execution.
     pub const fn new(state: &'a CacheDB<DB>) -> Self {
-        Self { state, additional_state: None, additional_keys: Vec::new() }
+        Self { state, additional_state: None }
     }
 
     /// Adds hashed state that should be included when generating the witness.
@@ -29,15 +27,6 @@ impl<'a, DB> ExecutionWitnessRecord<'a, DB> {
     /// accounts and storage slots.
     pub fn with_additional_state(mut self, additional_state: HashedPostState) -> Self {
         self.additional_state.get_or_insert_default().extend(additional_state);
-        self
-    }
-
-    /// Adds key preimages for additional hashed state.
-    pub fn with_additional_keys(
-        mut self,
-        additional_keys: impl IntoIterator<Item = Bytes>,
-    ) -> Self {
-        self.additional_keys.extend(additional_keys);
         self
     }
 
@@ -107,7 +96,7 @@ impl<'a, DB> ExecutionWitnessRecord<'a, DB> {
 
     fn hashed_post_state(self) -> (HashedPostState, Vec<Bytes>) {
         let mut hashed_state = self.additional_state.unwrap_or_default();
-        let mut keys = self.additional_keys;
+        let mut keys = Vec::new();
         for (address, account) in &self.state.cache.accounts {
             let hashed_address = keccak256(address);
             hashed_state.accounts.insert(
@@ -185,16 +174,5 @@ mod tests {
         let storage = &hashed_state.storages[&hashed_address].storage;
         assert_eq!(storage[&keccak256(B256::from(slot))], U256::from(2));
         assert_eq!(storage[&additional_slot], U256::from(3));
-    }
-
-    #[test]
-    fn additional_keys_are_included() {
-        let state = CacheDB::<EmptyDB>::default();
-        let additional_key = Bytes::from_static(b"additional key");
-
-        let (_, keys) = ExecutionWitnessRecord::new(&state)
-            .with_additional_keys([additional_key.clone()])
-            .hashed_post_state();
-        assert!(keys.contains(&additional_key));
     }
 }
