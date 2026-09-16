@@ -615,7 +615,7 @@ fn materialize_block_transactions(
 
 const MIN_TRANSACTIONS_PER_BLOCK: usize = payload_processor::SMALL_BLOCK_TX_THRESHOLD;
 const MAX_TRANSACTIONS_PER_BLOCK: usize = 24;
-const CAMPAIGN_SCHEMA_VERSION: u64 = 8;
+const CAMPAIGN_SCHEMA_VERSION: u64 = 9;
 const MAX_DATABASE_FAULTS_PER_CASE: u64 = 3;
 
 #[derive(Debug)]
@@ -2056,8 +2056,9 @@ fn simulate_node(
     let config = deterministic::Config::default()
         .with_seed(seed)
         .with_scheduling_policy(SemanticScheduler::new(decisions.clone(), virtual_time))
-        // Several worker polls must fit inside the validator's 1ms speculative window.
-        .with_cycle(Duration::from_micros(10))
+        // Several worker polls must fit inside the validator's 1ms speculative window. A 100µs
+        // cycle also lets network request timeouts advance without millions of duplicate wakes.
+        .with_cycle(Duration::from_micros(100))
         .with_timeout(Some(Duration::from_secs(120)));
     let run_decisions = decisions.clone();
     let run_database_faults = Arc::clone(&follower_database_faults);

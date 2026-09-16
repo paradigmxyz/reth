@@ -18,7 +18,7 @@ use thiserror::Error;
 pub const TRACE_SCHEMA_VERSION: u16 = 1;
 
 /// Maximum accepted trace size.
-pub const MAX_TRACE_BYTES: u64 = 64 * 1024 * 1024;
+pub const MAX_TRACE_BYTES: u64 = 256 * 1024 * 1024;
 
 /// A stable semantic actor name.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]

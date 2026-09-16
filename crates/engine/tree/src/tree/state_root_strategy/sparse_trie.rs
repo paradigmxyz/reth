@@ -42,7 +42,7 @@ use tracing::{debug, debug_span, error, instrument, trace_span};
 
 /// Computes a block's state root by applying streamed updates to an in-memory [`SparseStateTrie`].
 /// Updates that reach a blinded node stay pending while the task fetches the missing proof. The
-/// account trie stays on this task's thread; storage tries can be moved into independent rayon
+/// account trie stays on this task's thread; storage tries can be moved into independent worker
 /// jobs.
 ///
 /// # Message flow
@@ -59,7 +59,7 @@ use tracing::{debug, debug_span, error, instrument, trace_span};
 ///    [`Self::proof_result_rx`]. The task coalesces returned [`ProofResultMessage`]s, reveals
 ///    account proofs locally, and queues storage proofs on the corresponding address'
 ///    [`StorageTrieState`].
-/// 3. **Storage jobs:** [`Self::spawn_storage_jobs`] moves each [`StorageTrieWork`] into a rayon
+/// 3. **Storage jobs:** [`Self::spawn_storage_jobs`] moves each [`StorageTrieWork`] into a worker
 ///    closure. A pass reveals queued proofs, applies unblocked leaves, and hashes the storage trie
 ///    once its pending leaves are drained. It sends [`StorageJobMessage::Done`] via
 ///    [`Self::storage_done_tx`] to [`Self::storage_done_rx`], returning ownership of the payload
@@ -78,7 +78,7 @@ use tracing::{debug, debug_span, error, instrument, trace_span};
 /// There is at most one job per address, and no shared mutable access to its trie:
 ///
 /// ```text
-///                    dispatch: move StorageTrieWork to rayon
+///                    dispatch: move StorageTrieWork to worker
 ///   Idle --------------------------------------------------------> InFlight
 ///   (task owns trie)                                               (job owns trie)
 ///        ^                                                              |
@@ -222,6 +222,8 @@ pub(super) struct SparseTrieCacheTask<A = ArenaParallelSparseTrie, S = ArenaPara
 
     /// Whether operations are driven by a cooperative runtime.
     cooperative: bool,
+    /// Runtime used to expose storage-job completion order to deterministic scheduling.
+    cooperative_runtime: Option<TaskRuntime>,
     /// Owned hashing worker and its stop guard. Dropping the guard disconnects its stop channel.
     hashing_task: Option<(CrossbeamSender<()>, TaskHandle<()>)>,
     /// Metrics for the sparse trie.
@@ -270,6 +272,7 @@ where
             parent_state_root,
             new_epoch,
             chunk_size,
+            None,
             None,
         )
     }
@@ -321,6 +324,7 @@ where
             parent_state_root,
             new_epoch,
             chunk_size,
+            Some(executor.clone()),
             Some((stop, hashing_task)),
         )
     }
@@ -338,6 +342,7 @@ where
         parent_state_root: B256,
         new_epoch: TrieNodeEpoch,
         chunk_size: usize,
+        cooperative_runtime: Option<TaskRuntime>,
         hashing_task: Option<(CrossbeamSender<()>, TaskHandle<()>)>,
     ) -> Self {
         let (storage_done_tx, storage_done_rx) = crossbeam_channel::unbounded();
@@ -375,6 +380,7 @@ where
             initial_updates_applied: false,
             final_hashed_state: Default::default(),
             cooperative: hashing_task.is_some(),
+            cooperative_runtime,
             hashing_task,
             metrics,
         }
@@ -1066,7 +1072,7 @@ where
         Ok(updates_len_after < updates_len_before)
     }
 
-    /// Hands checked out storage tries to the rayon pool in chunks.
+    /// Hands checked out storage tries to worker jobs in chunks.
     ///
     /// Chunking amortizes the spawn cost over a batch, while each trie is still sent back on its
     /// own so promotion does not wait for the rest of the chunk.
@@ -1083,7 +1089,7 @@ where
             let chunk = jobs.split_off(jobs.len().saturating_sub(chunk_len));
             let storage_done_tx = self.storage_done_tx.clone();
             let parent_span = parent_span.clone();
-            rayon::spawn(move || {
+            let run = move || {
                 let _enter = debug_span!(
                     target: "engine::tree::payload_processor::sparse_trie",
                     parent: &parent_span,
@@ -1104,7 +1110,12 @@ where
                         return;
                     }
                 }
-            });
+            };
+            if let Some(runtime) = &self.cooperative_runtime {
+                drop(runtime.spawn_cpu("trie-storage-jobs", run));
+            } else {
+                reth_rayon::spawn(run);
+            }
         }
     }
 
@@ -1659,7 +1670,8 @@ fn storage_job_chunk_len(tries: usize) -> usize {
     /// Upper bound on how many tries a single slow one can hold up.
     const MAX_CHUNK_LEN: usize = 32;
 
-    tries.div_ceil(rayon::current_num_threads().max(1) * 4).clamp(1, MAX_CHUNK_LEN)
+    let workers = if reth_rayon::is_inline() { 1 } else { rayon::current_num_threads().max(1) };
+    tries.div_ceil(workers * 4).clamp(1, MAX_CHUNK_LEN)
 }
 
 /// Metrics recorded by sparse trie and hashing tasks.
