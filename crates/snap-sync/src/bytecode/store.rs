@@ -29,9 +29,8 @@ pub trait SnapBytecodeStore {
     where
         Self: DBProvider;
 
-    /// Persists `codes`, each checked against the hash it was downloaded under.
-    ///
-    /// Returns how many blobs were written.
+    /// Persists `codes`, each checked against the hash it was downloaded under, and returns how
+    /// many were written.
     fn commit_bytecodes(
         &self,
         write: SnapWrite,
@@ -84,8 +83,10 @@ impl<T: MetadataProvider> SnapBytecodeStore for T {
                 if got != hash {
                     return Err(SnapSyncError::CodeMismatch { expected: hash, got })
                 }
-                let code = Bytecode::new_raw_checked(code)
-                    .map_err(|error| SnapSyncError::UndecodableCode { hash, error })?;
+                // Code deployed before EIP-3541 can carry the delegation prefix without being
+                // one, so authenticated bytes that do not parse as a delegation are legacy code.
+                let code = Bytecode::new_raw_checked(code.clone())
+                    .unwrap_or_else(|_| Bytecode::new_legacy(code));
                 Ok((hash, code))
             })
             .collect::<Result<Vec<_>, SnapSyncError>>()?;
@@ -185,18 +186,21 @@ mod tests {
         assert!(!is_stored(&provider, &wanted));
     }
 
-    // Delegation-shaped code is only valid at its own length, and pre-London accounts can carry
-    // whatever was deployed.
+    // A delegation is exactly 23 bytes, but EIP-3541 only bars the prefix from London onwards, so
+    // an older account can reference shorter code that starts with it.
     #[test]
-    fn code_the_node_cannot_decode_is_reported_rather_than_panicking() {
-        let malformed = bytes!("ef0100");
-        let accounts = vec![(key(1), contract(1, &malformed))];
+    fn delegation_shaped_code_that_predates_eip_3541_is_kept_as_legacy_code() {
+        let historical = bytes!("ef0100");
+        let accounts = vec![(key(1), contract(1, &historical))];
         let (factory, write) = started(&accounts);
         let provider = factory.database_provider_rw().unwrap();
 
-        let refused = provider.commit_bytecodes(write, vec![(keccak256(&malformed), malformed)]);
+        let hash = keccak256(&historical);
+        assert_eq!(provider.commit_bytecodes(write, vec![(hash, historical.clone())]).unwrap(), 1);
 
-        assert!(matches!(refused, Err(SnapSyncError::UndecodableCode { .. })));
+        let stored = provider.tx_ref().get::<tables::Bytecodes>(hash).unwrap().unwrap();
+        assert_eq!(stored.original_bytes(), historical);
+        assert!(provider.missing_code(write, &accounts).unwrap().is_empty());
     }
 
     #[test]

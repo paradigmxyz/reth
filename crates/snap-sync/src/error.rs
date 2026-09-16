@@ -5,7 +5,6 @@ use reth_downloaders::snap::InvalidStorageRangeRequest;
 use reth_network_p2p::error::RequestError;
 use reth_storage_api::SnapAttemptId;
 use reth_storage_errors::{db::DatabaseError, provider::ProviderError};
-use revm::bytecode::BytecodeDecodeError;
 
 /// Error returned while assembling a snap state generation.
 #[derive(Debug, thiserror::Error)]
@@ -109,14 +108,6 @@ pub enum SnapSyncError {
         expected: B256,
         /// Hash of the supplied code.
         got: B256,
-    },
-    /// Code authenticated by its hash that this build cannot decode.
-    #[error("code {hash} does not decode: {error}")]
-    UndecodableCode {
-        /// Hash of the code.
-        hash: B256,
-        /// Why it could not be decoded.
-        error: BytecodeDecodeError,
     },
 }
 
