@@ -39,10 +39,10 @@ use evm2::Precompiles;
 use evm2::{
     bytecode::Bytecode as ExecutableBytecode,
     evm::{
-        AccountChangeRef, AccountInfo, AccountInfoRef, BlockStateAccumulator, StateChangeSink,
-        StateChangeSource, StorageChange, SystemTx, BEACON_ROOTS_ADDRESS,
-        BUILDER_DEPOSIT_REQUEST_ADDRESS, BUILDER_EXIT_REQUEST_ADDRESS,
-        CONSOLIDATION_REQUEST_ADDRESS, HISTORY_STORAGE_ADDRESS, WITHDRAWAL_REQUEST_ADDRESS,
+        AccountChangeRef, AccountInfo, BlockStateAccumulator, StateChangeSink, StateChangeSource,
+        StorageChange, SystemTx, BEACON_ROOTS_ADDRESS, BUILDER_DEPOSIT_REQUEST_ADDRESS,
+        BUILDER_EXIT_REQUEST_ADDRESS, CONSOLIDATION_REQUEST_ADDRESS, HISTORY_STORAGE_ADDRESS,
+        WITHDRAWAL_REQUEST_ADDRESS,
     },
     registry::HandlerError,
     ErrorCode, Evm, EvmTypes, SpecId, TxResult, TxResultWithState,
@@ -1032,8 +1032,8 @@ fn commit_state_changes<T: EvmTypes>(
         let result = changes.iter().try_for_each(|(address, original, current)| {
             sink.account(AccountChangeRef {
                 address: *address,
-                original: original.as_ref().map(account_info_ref),
-                current: current.as_ref().map(account_info_ref),
+                original: original.as_ref(),
+                current: current.as_ref(),
                 created: false,
                 selfdestructed: false,
             })
@@ -1126,15 +1126,6 @@ pub(crate) fn post_block_balance_state_changes<T: EvmTypes>(
     commit_state_changes(evm, block_state, stream_hashed_state, on_hashed_state_update, &changes);
 
     Ok(())
-}
-
-const fn account_info_ref(info: &AccountInfo) -> AccountInfoRef<'_> {
-    AccountInfoRef {
-        balance: info.balance,
-        nonce: info.nonce,
-        code_hash: info.code_hash,
-        code: info.code.as_ref(),
-    }
 }
 
 pub(crate) fn base_block_reward<C>(chain_spec: &C, block_number: u64) -> Option<u128>

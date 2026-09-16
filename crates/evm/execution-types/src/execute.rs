@@ -250,7 +250,7 @@ fn account_info_to_reth(info: &AccountInfo) -> Account {
 mod tests {
     use super::*;
     use alloy_primitives::Bytes;
-    use evm2::evm::{AccountChangeRef, AccountInfoRef, StorageChange};
+    use evm2::evm::{AccountChangeRef, StorageChange};
 
     #[test]
     fn account_info_normalizes_empty_code_hashes() {
@@ -270,6 +270,13 @@ mod tests {
         let wiped_address = Address::repeat_byte(0x43);
         let code_hash = B256::repeat_byte(0x24);
         let bytecode = ExecutableBytecode::new_raw(Bytes::from_static(&[0x60, 0x00]));
+        let account = AccountInfo {
+            balance: U256::from(7),
+            nonce: 3,
+            code_hash,
+            code: Some(bytecode.clone()),
+            _non_exhaustive: (),
+        };
         let mut state = BlockStateAccumulator::new();
 
         state.bytecode(code_hash, &bytecode).unwrap();
@@ -277,12 +284,7 @@ mod tests {
             .account(AccountChangeRef {
                 address,
                 original: None,
-                current: Some(AccountInfoRef {
-                    balance: U256::from(7),
-                    nonce: 3,
-                    code_hash,
-                    code: Some(&bytecode),
-                }),
+                current: Some(&account),
                 created: false,
                 selfdestructed: false,
             })
@@ -315,13 +317,12 @@ mod tests {
     #[test]
     fn indexed_block_state_makes_deleted_account_storage_wipe_explicit() {
         let address = Address::repeat_byte(0x42);
-        let original =
-            AccountInfoRef { balance: U256::from(1), nonce: 1, code_hash: B256::ZERO, code: None };
+        let original = AccountInfo { balance: U256::from(1), nonce: 1, ..Default::default() };
         let mut state = BlockStateAccumulator::new();
         state
             .account(AccountChangeRef {
                 address,
-                original: Some(original),
+                original: Some(&original),
                 current: None,
                 created: false,
                 selfdestructed: false,

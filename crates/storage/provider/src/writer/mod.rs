@@ -14,8 +14,7 @@ use reth_db_api::{
 };
 use reth_execution_types::{
     BlockReverts, EvmStateChangeSink, EvmStateChangeSource, ExecutableBytecode,
-    ExecutionAccountChangeRef, ExecutionAccountInfo, ExecutionAccountInfoRef,
-    ExecutionStorageChange,
+    ExecutionAccountChangeRef, ExecutionAccountInfo, ExecutionStorageChange,
 };
 use reth_primitives_traits::{Account, Bytecode, StorageEntry};
 use reth_storage_api::{
@@ -162,7 +161,7 @@ fn execution_account_info_to_reth(info: &ExecutionAccountInfo) -> Account {
     }
 }
 
-fn execution_account_info_ref_to_reth(info: ExecutionAccountInfoRef<'_>) -> Account {
+fn execution_account_info_ref_to_reth(info: &ExecutionAccountInfo) -> Account {
     Account {
         balance: info.balance,
         nonce: info.nonce,
