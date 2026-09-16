@@ -590,8 +590,6 @@ impl DefaultStateRootStrategy {
             let parent_hash = parent_header.hash();
             let parent_state_root = parent_header.state_root();
             let new_epoch = TrieNodeEpoch::new(parent_header.number().saturating_add(1));
-            let prune_before =
-                sparse_trie_prune_before(pending_sparse_trie_prune_blocks.as_deref(), new_epoch);
 
             let _enter = debug_span!(
                 target: "engine::tree::payload_processor",
@@ -640,6 +638,12 @@ impl DefaultStateRootStrategy {
                 }
                 None => new_sparse_state_trie(),
             };
+            let prune_target = sparse_trie_prune_target(
+                sparse_trie_anchor_hash,
+                reused_preserved_sparse_trie,
+                parent_header.num_hash(),
+                pending_sparse_trie_prune_blocks.as_deref(),
+            );
             let mut task = SparseTrieCacheTask::new_with_trie(
                 &executor,
                 from_multi_proof,
@@ -661,11 +665,8 @@ impl DefaultStateRootStrategy {
             // Publish a handle before sending the result so the next block can inspect the
             // state root immediately while the trie is finalized for reuse below.
             let pending_trie = if let Some(result) = &task_result {
-                let preserved_anchor_hash = published_sparse_trie_anchor_hash(
-                    sparse_trie_anchor_hash,
-                    reused_preserved_sparse_trie,
-                    pending_sparse_trie_prune_blocks.as_deref(),
-                );
+                let preserved_anchor_hash =
+                    prune_target.map_or(sparse_trie_anchor_hash, |(_, anchor_hash)| anchor_hash);
                 let (preserved, completer) =
                     PreservedSparseTrie::pending(result.state_root, preserved_anchor_hash);
                 overlay_manager.store_sparse_trie(preserved);
@@ -700,7 +701,7 @@ impl DefaultStateRootStrategy {
                     pending_trie.expect("pending trie is created for successful task result");
                 let start = Instant::now();
                 let (mut trie, deferred) = task.into_trie_for_reuse();
-                if let Some(prune_before) = prune_before {
+                if let Some((prune_before, _)) = prune_target {
                     let prune_start = Instant::now();
                     trie.prune(prune_before);
                     trie_metrics
@@ -750,43 +751,25 @@ struct StateRootTaskOptions<'a, N: NodePrimitives> {
     pending_sparse_trie_prune_blocks: Option<Vec<ExecutedBlock<N>>>,
 }
 
-fn sparse_trie_prune_before<N: NodePrimitives>(
-    pending_sparse_trie_prune_blocks: Option<&[ExecutedBlock<N>]>,
-    new_epoch: TrieNodeEpoch,
-) -> Option<TrieNodeEpoch> {
-    // The parent chain is ordered newest to oldest. An empty chain means the block being
-    // calculated is the only in-memory block whose trie nodes need to be retained.
-    match pending_sparse_trie_prune_blocks {
-        None => None,
-        Some([]) => Some(new_epoch),
-        Some([.., oldest]) => Some(TrieNodeEpoch::new(oldest.recovered_block().number())),
-    }
-}
-
-fn published_sparse_trie_anchor_hash<N: NodePrimitives>(
-    sparse_trie_anchor_hash: B256,
+fn sparse_trie_prune_target<N: NodePrimitives>(
+    current_anchor: B256,
     reused_preserved_sparse_trie: bool,
-    pending_sparse_trie_prune_blocks: Option<&[ExecutedBlock<N>]>,
-) -> B256 {
-    if !reused_preserved_sparse_trie {
-        return sparse_trie_anchor_hash
-    }
-
-    let Some(prune_blocks) = pending_sparse_trie_prune_blocks else {
-        return sparse_trie_anchor_hash
+    parent: alloy_eips::BlockNumHash,
+    pending_blocks: Option<&[ExecutedBlock<N>]>,
+) -> Option<(TrieNodeEpoch, B256)> {
+    let blocks = pending_blocks?;
+    let Some(oldest) = blocks.last() else {
+        // Pruning the now-durable parent moves the proof source forward with it.
+        return Some((TrieNodeEpoch::new(parent.number.saturating_add(1)), parent.hash))
     };
-    let Some(oldest_prune_block) = prune_blocks.last() else { return sparse_trie_anchor_hash };
-
-    // Prune blocks contain the complete in-memory parent chain from newest to oldest, with the
-    // oldest block's parent being the persisted tip. A fresh trie can be anchored to an in-memory
-    // block ahead of that tip. If that anchor is still in the prune range, publishing the
-    // persisted tip as the new anchor would expand the trie's claimed coverage backwards even
-    // though pruning cannot reveal those paths.
-    if prune_blocks.iter().any(|block| block.recovered_block().hash() == sparse_trie_anchor_hash) {
-        return sparse_trie_anchor_hash
-    }
-
-    oldest_prune_block.recovered_block().parent_hash()
+    let anchor = if !reused_preserved_sparse_trie ||
+        blocks.iter().any(|block| block.recovered_block().hash() == current_anchor)
+    {
+        current_anchor
+    } else {
+        oldest.recovered_block().parent_hash()
+    };
+    Some((TrieNodeEpoch::new(oldest.recovered_block().number()), anchor))
 }
 
 impl<N, P, Evm> StateRootStrategy<N, P, Evm> for DefaultStateRootStrategy
@@ -1307,35 +1290,43 @@ mod tests {
     use revm::state::{AccountInfo, AccountStatus, EvmState, EvmStorageSlot, TransactionId};
 
     #[test]
-    fn sparse_trie_prune_before_uses_requested_range() {
-        let new_epoch = TrieNodeEpoch::new(10);
-        assert_eq!(sparse_trie_prune_before::<EthPrimitives>(None, new_epoch), None);
+    fn sparse_trie_prune_target_uses_requested_range() {
+        let parent = alloy_eips::BlockNumHash { hash: B256::with_last_byte(9), number: 9 };
         assert_eq!(
-            sparse_trie_prune_before::<EthPrimitives>(Some(&[]), new_epoch),
-            Some(new_epoch)
+            sparse_trie_prune_target::<EthPrimitives>(B256::ZERO, false, parent, None),
+            None
+        );
+        assert_eq!(
+            sparse_trie_prune_target::<EthPrimitives>(B256::ZERO, false, parent, Some(&[])),
+            Some((TrieNodeEpoch::new(10), parent.hash))
         );
 
         let mut blocks: Vec<_> = TestBlockBuilder::eth().get_executed_blocks(7..10).collect();
         blocks.reverse();
 
-        assert_eq!(sparse_trie_prune_before(Some(&blocks), new_epoch), Some(TrieNodeEpoch::new(7)));
-    }
-
-    #[test]
-    fn published_sparse_trie_anchor_advances_to_prune_anchor() {
-        let blocks: Vec<_> = TestBlockBuilder::eth().get_executed_blocks(1..5).collect();
-        let reused_anchor_hash = blocks[0].recovered_block().hash();
-        let expected_prune_anchor = blocks[1].recovered_block().hash();
-        let prune_blocks: Vec<_> = blocks.into_iter().skip(2).rev().collect();
-
+        let anchor = blocks[0].recovered_block().hash();
         assert_eq!(
-            published_sparse_trie_anchor_hash(reused_anchor_hash, true, Some(&prune_blocks)),
-            expected_prune_anchor
+            sparse_trie_prune_target(anchor, true, parent, Some(&blocks)),
+            Some((TrieNodeEpoch::new(7), anchor))
         );
     }
 
     #[test]
-    fn published_sparse_trie_anchor_does_not_move_backwards_when_anchor_is_in_prune_range() {
+    fn sparse_trie_prune_target_advances_to_prune_anchor() {
+        let blocks: Vec<_> = TestBlockBuilder::eth().get_executed_blocks(1..5).collect();
+        let reused_anchor_hash = blocks[0].recovered_block().hash();
+        let expected_prune_anchor = blocks[1].recovered_block().hash();
+        let parent = blocks[3].recovered_block().num_hash();
+        let prune_blocks: Vec<_> = blocks.into_iter().skip(2).rev().collect();
+
+        assert_eq!(
+            sparse_trie_prune_target(reused_anchor_hash, true, parent, Some(&prune_blocks),),
+            Some((TrieNodeEpoch::new(3), expected_prune_anchor))
+        );
+    }
+
+    #[test]
+    fn sparse_trie_prune_target_does_not_move_backwards_when_anchor_is_in_prune_range() {
         let blocks: Vec<_> = TestBlockBuilder::eth().get_executed_blocks(1..5).collect();
         let reused_anchor_hash = blocks[2].recovered_block().hash();
         let mut prune_blocks = blocks;
@@ -1344,20 +1335,42 @@ mod tests {
 
         assert_ne!(reused_anchor_hash, prune_anchor);
         assert_eq!(
-            published_sparse_trie_anchor_hash(reused_anchor_hash, true, Some(&prune_blocks)),
-            reused_anchor_hash
+            sparse_trie_prune_target(
+                reused_anchor_hash,
+                true,
+                prune_blocks[0].recovered_block().num_hash(),
+                Some(&prune_blocks),
+            ),
+            Some((TrieNodeEpoch::new(1), reused_anchor_hash))
         );
     }
 
     #[test]
-    fn published_sparse_trie_anchor_keeps_parent_for_fresh_trie() {
+    fn sparse_trie_prune_target_keeps_parent_for_fresh_trie() {
         let mut blocks: Vec<_> = TestBlockBuilder::eth().get_executed_blocks(1..3).collect();
         blocks.reverse();
         let parent_hash = B256::with_last_byte(0xaa);
 
         assert_eq!(
-            published_sparse_trie_anchor_hash(parent_hash, false, Some(&blocks)),
-            parent_hash
+            sparse_trie_prune_target(
+                parent_hash,
+                false,
+                blocks[0].recovered_block().num_hash(),
+                Some(&blocks),
+            ),
+            Some((TrieNodeEpoch::new(1), parent_hash))
+        );
+    }
+
+    #[test]
+    fn sparse_trie_prune_target_advances_reused_anchor_when_parent_becomes_durable() {
+        let blocks: Vec<_> = TestBlockBuilder::eth().get_executed_blocks(1..4).collect();
+        let old_anchor = blocks[1].recovered_block().hash();
+        let parent = blocks[2].recovered_block().num_hash();
+
+        assert_eq!(
+            sparse_trie_prune_target::<EthPrimitives>(old_anchor, true, parent, Some(&[])),
+            Some((TrieNodeEpoch::new(4), parent.hash))
         );
     }
 
