@@ -20,10 +20,10 @@ use alloy_consensus::BlockHeader;
 use alloy_eips::BlockNumberOrTag;
 use alloy_rpc_types::engine::ClientVersionV1;
 use alloy_rpc_types_engine::ExecutionData;
-use futures::StreamExt;
+use futures::{Stream, StreamExt};
 use jsonrpsee::RpcModule;
 use parking_lot::Mutex;
-use reth_chain_state::{CanonStateNotificationStream, CanonStateSubscriptions};
+use reth_chain_state::{CanonStateNotification, CanonStateSubscriptions};
 use reth_chainspec::{ChainSpecProvider, EthChainSpec, EthereumHardforks, Hardforks};
 use reth_node_api::{
     AddOnsContext, BlockTy, EngineApiValidator, EngineTypes, FullNodeComponents, FullNodeTypes,
@@ -1680,10 +1680,10 @@ pub struct EngineShutdownRequest {
 /// Prewarms recent and new canonical blocks until a block includes a BAL hash.
 async fn prewarm_new_block_bals_task<EthApi: GetBlockAccessList, N: NodePrimitives>(
     eth_api: EthApi,
-    mut events: CanonStateNotificationStream<N>,
+    mut events: impl Stream<Item = CanonStateNotification<N>> + Unpin,
     startup_blocks: usize,
 ) {
-    match eth_api.recovered_block(BlockNumberOrTag::Latest.into()).await {
+    let mut startup = match eth_api.recovered_block(BlockNumberOrTag::Latest.into()).await {
         Ok(Some(head)) => {
             if head.block_access_list_hash().is_some() {
                 debug!(target: "reth::cli", block_hash = ?head.hash(), "Stopping BAL prewarming: native BALs available");
@@ -1691,34 +1691,44 @@ async fn prewarm_new_block_bals_task<EthApi: GetBlockAccessList, N: NodePrimitiv
             }
 
             // Leave the newest BALs in the cache if the startup range exceeds its capacity.
-            let start = head.number().saturating_sub(startup_blocks as u64).saturating_add(1);
-            for number in start..=head.number() {
+            head.number().saturating_sub(startup_blocks as u64)..head.number()
+        }
+        Err(err) => {
+            debug!(target: "reth::cli", %err, "Failed to load head for BAL prewarming");
+            0..0
+        }
+        Ok(None) => 0..0,
+    }
+    .map(|number| number + 1);
+
+    loop {
+        tokio::select! {
+            // Observe new blocks (including native BAL activation) between startup replays.
+            biased;
+            Some(event) = events.next() => {
+                let committed = event.committed();
+                if let Some(block) = committed.blocks_iter().find(|block| block.block_access_list_hash().is_some()) {
+                    debug!(target: "reth::cli", block_hash = ?block.hash(), "Stopping BAL prewarming: native BALs available");
+                    return;
+                }
+
+                for block in committed.blocks_iter() {
+                    if let Err(err) = eth_api.get_block_access_list(block.hash().into()).await {
+                        debug!(
+                            target: "reth::cli",
+                            %err,
+                            block_hash = ?block.hash(),
+                            "Failed to prewarm BAL for canonical block",
+                        );
+                    }
+                }
+            }
+            Some(number) = async { startup.next() } => {
                 if let Err(err) = eth_api.get_block_access_list(number.into()).await {
                     debug!(target: "reth::cli", %err, block_number = number, "Failed to prewarm BAL on startup");
                 }
             }
-        }
-        Err(err) => {
-            debug!(target: "reth::cli", %err, "Failed to load head for BAL prewarming");
-        }
-        Ok(None) => {}
-    }
-
-    while let Some(event) = events.next().await {
-        for block in event.committed().blocks_iter() {
-            if block.block_access_list_hash().is_some() {
-                debug!(target: "reth::cli", block_hash = ?block.hash(), "Stopping BAL prewarming: native BALs available");
-                return;
-            }
-
-            if let Err(err) = eth_api.get_block_access_list(block.hash().into()).await {
-                debug!(
-                    target: "reth::cli",
-                    %err,
-                    block_hash = ?block.hash(),
-                    "Failed to prewarm BAL for canonical block",
-                );
-            }
+            else => break,
         }
     }
 }
@@ -1738,7 +1748,13 @@ mod tests {
 
     #[tokio::test]
     async fn bal_prewarming_startup_range_and_native_stop() {
-        for (count, native) in [(0, false), (2, false), (10, false), (2, true)] {
+        for (count, native, native_event) in [
+            (0, false, false),
+            (2, false, false),
+            (10, false, false),
+            (2, true, false),
+            (10, false, true),
+        ] {
             let provider = MockEthProvider::default();
             let blocks: Vec<_> = (0..=3)
                 .map(|number| {
@@ -1758,7 +1774,6 @@ mod tests {
                     block
                 })
                 .collect();
-            let events = provider.canonical_state_stream();
             let api = EthApiBuilder::new(
                 provider,
                 NoopTransactionPool::default(),
@@ -1783,12 +1798,27 @@ mod tests {
                 }]),
             )
             .await;
+            let events = futures::stream::iter(native_event.then(|| {
+                let mut block = blocks.last().unwrap().clone_block();
+                block.header.number += 1;
+                block.header.block_access_list_hash = Some(B256::ZERO);
+                CanonStateNotification::Commit {
+                    new: Arc::new(Chain::<reth_chain_state::EthPrimitives>::new(
+                        [RecoveredBlock::new_unhashed(block, Vec::new())],
+                        Default::default(),
+                        Default::default(),
+                    )),
+                }
+            }));
             prewarm_new_block_bals_task(api.clone(), events, count).await;
             for (number, block) in blocks.iter().enumerate() {
                 assert_eq!(
                     api.cache().get_bal(block.hash()).await.unwrap().is_some(),
-                    !native && number != 0 && number > 3_usize.saturating_sub(count),
-                    "count={count}, native={native}, block={number}",
+                    !native &&
+                        !native_event &&
+                        number != 0 &&
+                        number > 3_usize.saturating_sub(count),
+                    "count={count}, native={native}, native_event={native_event}, block={number}",
                 );
             }
         }
