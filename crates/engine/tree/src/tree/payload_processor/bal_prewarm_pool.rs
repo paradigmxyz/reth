@@ -2,9 +2,8 @@
 
 use alloy_primitives::{Address, StorageKey};
 use reth_execution_cache::{CachedStateProvider, ExecutionCache, TxPoolPrewarmCacheSnapshot};
-use reth_provider::{
-    AccountReader, BytecodeReader, ProviderResult, StateProvider, StateProviderBox,
-};
+use reth_provider::ProviderResult;
+use reth_revm::database::{EvmStateProvider, EvmStateProviderBox};
 use std::{
     sync::{
         atomic::{AtomicUsize, Ordering},
@@ -15,9 +14,9 @@ use std::{
 use tokio::sync::oneshot;
 use tracing::trace;
 
-/// Builds a fresh `StateProviderBox` over the block's parent state. Type-erased so the pool is not
+/// Builds a fresh EVM provider over the block's parent state. Type-erased so the pool is not
 /// generic over the provider factory; each worker builds its own per block.
-pub type BuildProviderFn = dyn Fn() -> ProviderResult<StateProviderBox> + Send + Sync;
+pub type BuildProviderFn = dyn Fn() -> ProviderResult<EvmStateProviderBox> + Send + Sync;
 
 /// A single warm request: a whole account (basic account + its bytecode) followed by a batch of
 /// its storage slots, or a batch of storage slots on their own.
@@ -161,7 +160,7 @@ const WARM_BATCH_SIZE: usize = 8;
 fn prewarm_loop(rx: crossbeam_channel::Receiver<PrewarmMsg>) {
     // The provider (and its MDBX read txn) held for the current block, between `BeginBlock` and
     // `EndBlock`. `None` while idle, so no read txn is pinned across the inter-block gap.
-    let mut provider: Option<CachedStateProvider<StateProviderBox>> = None;
+    let mut provider: Option<CachedStateProvider<EvmStateProviderBox>> = None;
 
     // Blocks when idle; the channel disconnects (and the loop ends) when the pool is dropped.
     while let Ok(msg) = rx.recv() {
