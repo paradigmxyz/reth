@@ -533,16 +533,24 @@ pub trait Call:
     /// Returns default gas limit to use for `eth_call` and tracing RPC methods.
     ///
     /// Data access in default trait method implementations.
-    fn call_gas_limit(&self) -> u64;
+    fn call_gas_limit(&self) -> u64 {
+        self.eth_api_settings().gas_cap
+    }
 
     /// Returns the maximum number of blocks accepted for `eth_simulateV1`.
-    fn max_simulate_blocks(&self) -> u64;
+    fn max_simulate_blocks(&self) -> u64 {
+        self.eth_api_settings().max_simulate_blocks
+    }
 
     /// Returns whether `eth_simulateV1` should compute state roots.
-    fn compute_state_root_for_eth_simulate(&self) -> bool;
+    fn compute_state_root_for_eth_simulate(&self) -> bool {
+        self.eth_api_settings().compute_state_root_for_eth_simulate
+    }
 
     /// Returns the maximum memory the EVM can allocate per RPC request.
-    fn evm_memory_limit(&self) -> u64;
+    fn evm_memory_limit(&self) -> u64 {
+        self.eth_api_settings().evm_memory_limit
+    }
 
     /// Returns the max gas limit that the caller can afford given a transaction environment.
     fn caller_gas_allowance(

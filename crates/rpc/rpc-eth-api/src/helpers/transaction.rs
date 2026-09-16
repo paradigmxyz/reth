@@ -74,7 +74,9 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
     }
 
     /// Returns the timeout duration for `send_raw_transaction_sync` RPC method.
-    fn send_raw_transaction_sync_timeout(&self) -> Duration;
+    fn send_raw_transaction_sync_timeout(&self) -> Duration {
+        self.eth_api_settings().send_raw_transaction_sync_timeout
+    }
 
     /// Decodes and recovers the transaction and submits it to the pool.
     ///

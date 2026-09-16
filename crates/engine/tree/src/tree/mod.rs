@@ -2324,6 +2324,12 @@ where
             self.persistence_state.last_persisted_block,
             in_memory_persisted_block.number,
         );
+        // Persistence changes the overlay anchor. Prepare the remaining canonical range before
+        // the next payload needs to read execution state against the new durable frontier.
+        self.state.tree_state.overlay_manager.precompute_execution_overlay(
+            self.state.tree_state.canonical_block_hash(),
+            in_memory_persisted_block.hash,
+        );
         self.state.set_pending_sparse_trie_prune(self.should_prune_sparse_trie());
         Ok(())
     }
@@ -3675,7 +3681,7 @@ enum PersistTarget {
 /// Result of waiting for caches to become available.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct CacheWaitDurations {
-    /// Time spent waiting for the execution cache lock.
+    /// Time spent waiting for the execution cache lock, excluding post-unlock cache destruction.
     pub execution_cache: Duration,
     /// Time spent waiting for the sparse trie lock.
     pub sparse_trie: Duration,
@@ -3683,8 +3689,8 @@ pub struct CacheWaitDurations {
 
 /// Trait for types that can wait for caches to become available.
 ///
-/// This is used by `reth_newPayload` endpoint to ensure that payload processing
-/// waits for any ongoing operations to complete before starting.
+/// Used by `reth_newPayload` to wait for cache updates before starting payload processing.
+/// Removed execution-cache allocations may still be destroyed concurrently after unlocking.
 pub trait WaitForCaches {
     /// Waits for cache updates to complete.
     ///

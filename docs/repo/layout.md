@@ -39,8 +39,8 @@ All binaries are stored in [`bin`](../../bin).
 
 These crates are related to the database.
 
-- [`storage/codecs`](../../crates/storage/codecs): Different storage codecs.
-- [`storage/codecs/derive`](../../crates/storage/codecs/derive): Derive macros for storage codecs.
+- [`storage/codecs`](https://github.com/paradigmxyz/reth-core/tree/main/crates/codecs): Different storage codecs (lives in [reth-core](https://github.com/paradigmxyz/reth-core)).
+- [`storage/codecs/derive`](https://github.com/paradigmxyz/reth-core/tree/main/crates/codecs-derive): Derive macros for storage codecs (lives in [reth-core](https://github.com/paradigmxyz/reth-core)).
 - [`storage/libmdbx-rs`](../../crates/storage/libmdbx-rs): Rust bindings for [libmdbx](https://github.com/erthink/libmdbx). A fork of an earlier Apache-licensed version of [libmdbx-rs][libmdbx-rs].
 - [`storage/db`](../../crates/storage/db): Strongly typed Database abstractions (transactions, cursors, tables) over lower level database backends.
   - Implemented backends: mdbx
@@ -52,7 +52,7 @@ These crates are related to the database.
 - [`storage/rpc-provider`](../../crates/storage/rpc-provider): Storage provider implementations tailored for RPC access patterns.
 - [`storage/errors`](../../crates/storage/errors): Common error types used by storage crates.
 - [`storage/nippy-jar`](../../crates/storage/nippy-jar): Compressed columnar storage for historical data.
-- [`storage/zstd-compressors`](../../crates/storage/zstd-compressors): Zstandard-based compressors used by storage components.
+- [`storage/zstd-compressors`](https://github.com/paradigmxyz/reth-core/tree/main/crates/zstd-compressors): Zstandard-based compressors used by storage components (lives in [reth-core](https://github.com/paradigmxyz/reth-core)).
 
 
 ### Networking
@@ -172,8 +172,8 @@ Crates related to building and validating payloads (blocks).
 
 These crates define primitive types or algorithms.
 
-- [`primitives`](../../crates/primitives): Commonly used types in Reth.
-- [`primitives-traits`](../../crates/primitives-traits/): Common abstracted types in reth.
+- [`ethereum/primitives`](../../crates/ethereum/primitives): Commonly used Ethereum primitive types in Reth (successor to the removed top-level `crates/primitives`).
+- [`primitives-traits`](https://github.com/paradigmxyz/reth-core/tree/main/crates/primitives-traits): Common abstracted types in reth (lives in [reth-core](https://github.com/paradigmxyz/reth-core)).
 - [`trie`](../../crates/trie): An implementation of a Merkle Patricia Trie used for various roots (e.g. the state root) in Ethereum.
 
 ### Ethereum-Specific Crates
