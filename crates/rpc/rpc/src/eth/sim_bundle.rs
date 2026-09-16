@@ -579,15 +579,14 @@ mod tests {
     use alloy_primitives::Bytes;
     use alloy_rpc_types_mev::{Inclusion, ProtocolVersion};
 
-    /// The bundle is simulated in the block after `parentBlock`, which is what searchers target
-    /// with `inclusion.block`.
     #[tokio::test(flavor = "multi_thread")]
-    async fn sim_bundle_simulates_the_next_block() {
+    async fn sim_bundle_uses_next_block_env_and_overrides() {
         use crate::EthApiBuilder;
         use alloy_consensus::{transaction::SignerRecoverable, TxEip1559};
         use alloy_eips::eip2718::Encodable2718;
         use alloy_genesis::{Genesis, GenesisAccount};
-        use alloy_primitives::{Address, TxKind};
+        use alloy_primitives::{Address, TxKind, B256};
+        use alloy_rpc_types_eth::BlockOverrides;
         use reth_chainspec::{ChainSpecBuilder, ChainSpecProvider};
         use reth_db_common::init::init_genesis;
         use reth_evm_ethereum::EthEvmConfig;
@@ -598,25 +597,39 @@ mod tests {
         use reth_testing_utils::generators::{self, generate_key, sign_tx_with_key_pair};
         use reth_transaction_pool::test_utils::testing_pool;
 
+        let contract = Address::repeat_byte(0xaa);
+        let coinbase = Address::repeat_byte(0x11);
+        let overridden_coinbase = Address::repeat_byte(0x22);
         let mut rng = generators::rng();
         let tx = sign_tx_with_key_pair(
             generate_key(&mut rng),
             reth_ethereum_primitives::Transaction::Eip1559(TxEip1559 {
                 chain_id: 1,
                 nonce: 0,
-                gas_limit: 21_000,
+                gas_limit: 100_000,
                 max_fee_per_gas: 2_000_000_000,
-                max_priority_fee_per_gas: 1,
-                to: TxKind::Call(Address::random()),
+                max_priority_fee_per_gas: 1_000_000_000,
+                to: TxKind::Call(contract),
                 ..Default::default()
             }),
         );
         let sender = tx.recover_signer().unwrap();
 
-        let genesis = Genesis::default().with_gas_limit(30_000_000).extend_accounts([(
-            sender,
-            GenesisAccount::default().with_balance(U256::from(10u128.pow(18))),
-        )]);
+        // Log NUMBER, TIMESTAMP, BASEFEE and COINBASE as topics, in that order.
+        let code = Bytes::from_static(&[0x41, 0x48, 0x42, 0x43, 0x5f, 0x5f, 0xa4, 0x00]);
+        let genesis = Genesis::default()
+            .with_gas_limit(30_000_000)
+            .with_timestamp(100)
+            .with_base_fee(Some(1_000_000_000))
+            .with_coinbase(coinbase)
+            .extend_accounts([
+                (sender, GenesisAccount::default().with_balance(U256::from(10u128.pow(18)))),
+                (contract, GenesisAccount::default().with_code(Some(code))),
+                (
+                    overridden_coinbase,
+                    GenesisAccount::default().with_balance(U256::from(10u128.pow(18))),
+                ),
+            ]);
         let chain_spec =
             Arc::new(ChainSpecBuilder::mainnet().cancun_activated().genesis(genesis).build());
         let factory = create_test_provider_factory_with_chain_spec(chain_spec);
@@ -640,16 +653,63 @@ mod tests {
             privacy: None,
         };
 
-        // latest is genesis, the bundle targets block 1
-        let response = api.sim_bundle(bundle(1), SimBundleOverrides::default()).await.unwrap();
-        assert_eq!(response.state_block, 0);
-        assert_eq!(response.gas_used, 21_000);
-        let logs = response.logs.unwrap();
-        assert_eq!(logs.len(), 1);
+        for (overrides, number, timestamp, base_fee, beneficiary) in [
+            (SimBundleOverrides::default(), 1, 112, 875_000_000, coinbase),
+            (
+                SimBundleOverrides {
+                    parent_block: Some(BlockNumberOrTag::Number(0).into()),
+                    block_overrides: BlockOverrides {
+                        number: Some(U256::from(2)),
+                        time: Some(200),
+                        base_fee: Some(U256::from(1_500_000_000)),
+                        coinbase: Some(overridden_coinbase),
+                        ..Default::default()
+                    },
+                    ..Default::default()
+                },
+                2,
+                200,
+                1_500_000_000,
+                overridden_coinbase,
+            ),
+        ] {
+            let response = api.sim_bundle(bundle(number), overrides.clone()).await.unwrap();
+            assert!(response.success);
+            assert_eq!(response.state_block, 0);
+            let tip = (2_000_000_000u64 - base_fee).min(1_000_000_000);
+            assert_eq!(response.profit, U256::from(response.gas_used) * U256::from(tip));
+            assert_eq!(response.refundable_value, response.profit);
+            assert_eq!(response.mev_gas_price, U256::from(tip));
 
-        // a bundle that is only valid for the parent block is not included in the next block
-        let err = api.sim_bundle(bundle(0), SimBundleOverrides::default()).await.unwrap_err();
-        assert!(err.message().contains("invalid inclusion"), "{err}");
+            let logs = response.logs.unwrap();
+            assert_eq!(logs.len(), 1);
+            let tx_logs = logs[0].tx_logs.as_ref().unwrap();
+            assert_eq!(tx_logs.len(), 1);
+            let log = &tx_logs[0];
+            assert_eq!(
+                log.inner.topics(),
+                &[
+                    B256::from(U256::from(number)),
+                    B256::from(U256::from(timestamp)),
+                    B256::from(U256::from(base_fee)),
+                    beneficiary.into_word(),
+                ]
+            );
+            assert_eq!(log.block_hash, None);
+            assert_eq!(log.block_number, Some(number));
+            assert_eq!(log.block_timestamp, Some(timestamp));
+            assert_eq!(log.transaction_hash, Some(*tx.tx_hash()));
+            assert_eq!(log.transaction_index, Some(0));
+            assert_eq!(log.log_index, Some(0));
+
+            // Nonzero inclusion bounds reach the simulation check instead of failing parsing.
+            let err = api.sim_bundle(bundle(number + 1), overrides.clone()).await.unwrap_err();
+            assert!(err.message().contains("invalid inclusion"), "{err}");
+            if number > 1 {
+                let err = api.sim_bundle(bundle(number - 1), overrides).await.unwrap_err();
+                assert!(err.message().contains("invalid inclusion"), "{err}");
+            }
+        }
     }
 
     fn create_test_bundle(tx_bytes: Vec<Bytes>) -> MevSendBundle {
