@@ -1,7 +1,7 @@
 use alloy_consensus::{constants::KECCAK_EMPTY, transaction::TxHashRef, BlockHeader};
 use alloy_eips::{eip2718::Encodable2718, BlockId, BlockNumberOrTag};
 use alloy_genesis::ChainConfig;
-use alloy_primitives::{hex::decode, keccak256, uint, Address, Bytes, B256, U64};
+use alloy_primitives::{hex::decode, uint, Address, Bytes, B256, U64};
 use alloy_rlp::{Decodable, Encodable};
 use alloy_rpc_types::BlockTransactionsKind;
 use alloy_rpc_types_debug::ExecutionWitness;
@@ -20,10 +20,12 @@ use parking_lot::RwLock;
 use reth_chainspec::{ChainSpecProvider, EthChainSpec, EthereumHardforks};
 use reth_engine_primitives::ConsensusEngineEvent;
 use reth_errors::RethError;
-use reth_evm::{execute::Executor, ConfigureEvm, DynDatabase, EvmEnv, EvmEnvFor};
+use reth_evm::{
+    execute::Executor, witness::ExecutionWitnessRecord, ConfigureEvm, DynDatabase, EvmEnv,
+    EvmEnvFor,
+};
 use reth_primitives_traits::{
-    Account as PrimitiveAccount, Block as BlockTrait, BlockBody, BlockTy, ReceiptWithBloom,
-    RecoveredBlock,
+    Block as BlockTrait, BlockBody, BlockTy, ReceiptWithBloom, RecoveredBlock,
 };
 use reth_rpc_api::DebugApiServer;
 use reth_rpc_convert::RpcTxReq;
@@ -35,8 +37,8 @@ use reth_rpc_eth_types::{EthApiError, StateCacheDb};
 use reth_rpc_server_types::{result::internal_rpc_err, ToRpcResult};
 use reth_storage_api::{
     BlockIdReader, BlockReaderIdExt, HashedPostStateProvider, HeaderProvider, ProviderBlock,
-    ReceiptProviderIdExt, StateProofProvider, StateProviderFactory, StateRootProvider,
-    StorageRootProvider, TransactionVariant,
+    ReceiptProviderIdExt, StateProviderFactory, StateRootProvider, StorageRootProvider,
+    TransactionVariant,
 };
 use reth_tasks::{pool::BlockingTaskGuard, Runtime};
 use reth_transaction_pool::TransactionPool;
@@ -539,72 +541,14 @@ where
                     .map_err(|err| EthApiError::Internal(err.into()))?;
                 db.commit_source(output.state.inner());
 
-                let mut codes = db
-                    .cache
-                    .contracts
-                    .values()
-                    .map(|code| code.original_bytes())
-                    .filter(|code| !mode.is_canonical() || !code.is_empty())
-                    .collect::<Vec<_>>();
-                if mode.is_canonical() {
-                    codes.sort_unstable();
-                }
-                let mut hashed_state = HashedPostState::default();
-                let mut keys = Vec::new();
-                for (address, account) in &db.cache.accounts {
-                    let hashed_address = keccak256(address);
-                    hashed_state.accounts.insert(
-                        hashed_address,
-                        account.as_ref().map(|account| PrimitiveAccount {
-                            nonce: account.nonce,
-                            balance: account.balance,
-                            bytecode_hash: (!account.code_hash.is_zero() &&
-                                account.code_hash != KECCAK_EMPTY)
-                                .then_some(account.code_hash),
-                        }),
-                    );
-                    if account.is_some() {
-                        keys.push(address.to_vec().into());
-                    }
-
-                    if let Some(storage) = db.cache.storage.get(address) {
-                        let hashed_storage = hashed_state
-                            .storages
-                            .entry(hashed_address)
-                            .or_insert_with(|| HashedStorage::new(storage.wiped));
-                        for (slot, value) in &storage.slots {
-                            let slot = B256::from(*slot);
-                            hashed_storage.storage.insert(keccak256(slot), *value);
-                            keys.push(slot.into());
-                        }
-                    }
-                }
-
-                let state = db
-                    .db
-                    .inner()
-                    .witness(Default::default(), hashed_state, mode)
-                    .map_err(EthApiError::from)?;
-                let lowest_block_number = db
-                    .cache
-                    .block_hashes
-                    .keys()
-                    .map(|number| number.saturating_to::<u64>())
-                    .min()
-                    .unwrap_or_else(|| block_number.saturating_sub(1));
-                let headers = eth_api
-                    .provider()
-                    .headers_range(lowest_block_number..block_number)
-                    .map_err(EthApiError::from)?
-                    .into_iter()
-                    .map(|header| {
-                        let mut encoded = Vec::new();
-                        header.encode(&mut encoded);
-                        encoded.into()
-                    })
-                    .collect();
-
-                Ok(ExecutionWitness { state, codes, keys, headers })
+                Ok(ExecutionWitnessRecord::new(&db)
+                    .into_execution_witness(
+                        &db.db.inner().0,
+                        eth_api.provider(),
+                        block_number,
+                        mode,
+                    )
+                    .map_err(EthApiError::from)?)
             })
             .await
     }

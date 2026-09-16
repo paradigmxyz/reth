@@ -27,6 +27,8 @@ alloy-primitives.workspace = true
 alloy-eips.workspace = true
 alloy-consensus.workspace = true
 alloy-eip7928.workspace = true
+alloy-rlp = { workspace = true, optional = true }
+alloy-rpc-types-debug = { workspace = true, optional = true }
 
 auto_impl.workspace = true
 futures-util.workspace = true
@@ -84,6 +86,7 @@ std = [
     "alloy-eip7928/std",
 ]
 metrics = ["std", "dep:metrics", "dep:reth-metrics"]
+witness = ["dep:alloy-rlp", "dep:alloy-rpc-types-debug"]
 test-utils = [
     "reth-primitives-traits/test-utils",
     "reth-trie-common/test-utils",

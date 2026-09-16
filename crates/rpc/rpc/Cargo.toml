@@ -31,7 +31,7 @@ reth-tasks = { workspace = true, features = ["rayon"] }
 reth-rpc-convert.workspace = true
 evm2-inspectors = { workspace = true, features = ["std"] }
 reth-network-peers = { workspace = true, features = ["secp256k1"] }
-reth-evm.workspace = true
+reth-evm = { workspace = true, features = ["witness"] }
 reth-evm-ethereum = { workspace = true, features = ["std"] }
 reth-rpc-eth-types.workspace = true
 reth-rpc-server-types.workspace = true
