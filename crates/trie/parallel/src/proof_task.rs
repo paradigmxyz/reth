@@ -385,6 +385,7 @@ impl ProofWorkerHandle {
         input: StorageProofInput,
         proof_result_sender: CrossbeamSender<StorageProofResultMessage>,
     ) -> Result<(), ProviderError> {
+        let _activity = tracing::debug_span!(target: "engine::tree::proof_activity", "storage_proof", address = ?input.hashed_address, targets = input.targets.len()).entered();
         let hashed_address = input.hashed_address;
         self.storage_work_tx
             .send(StorageWorkerJob::StorageProof { input, proof_result_sender })
@@ -1120,6 +1121,7 @@ where
     {
         let proof_start = Instant::now();
 
+        let _activity = tracing::debug_span!(target: "engine::tree::proof_activity", "account_proof", queued_us = input.proof_result_sender.start_time.elapsed().as_micros() as u64).entered();
         let AccountMultiproofInput { targets, proof_result_sender } = input;
         let (result, value_encoder_stats) = match self.compute_v2_account_multiproof::<Provider>(
             v2_account_calculator,

@@ -491,6 +491,8 @@ where
         V: PayloadValidator<T, Block = N::Block> + Clone,
         Evm: ConfigureEngineEvm<T::ExecutionData, Primitives = N>,
     {
+        let _validation = reth_trie_sparse::activity::ActivityGuard::new("validation");
+        let setup = reth_trie_sparse::activity::ActivityGuard::new("np_setup");
         let parent_hash = input.parent_hash();
         let _txpool_pause = self.txpool_prewarm.as_ref().map(txpool_prewarm::Handle::pause);
         let txpool_snapshot =
@@ -525,7 +527,10 @@ where
                 match $expr {
                     Ok(val) => val,
                     Err(e) => {
+                        let conversion =
+                            reth_trie_sparse::activity::ActivityGuard::new("np_conversion_wait");
                         let block = validated_block.try_into_inner().expect("sole handle")?;
+                        drop(conversion);
                         return Err(InsertBlockError::new(block, e.into()).into())
                     }
                 }
@@ -581,9 +586,11 @@ where
 
         // Extract the decoded BAL, if present. Undecodable block access list bytes invalidate the
         // payload.
-        let decoded_bal =
+        let decoded_bal = {
+            let _activity = reth_trie_sparse::activity::ActivityGuard::new("np_decode_bal");
             ensure_ok!(input.try_decoded_access_list().map_err(BlockAccessListDecodeError::new))
-                .map(Arc::new);
+                .map(Arc::new)
+        };
 
         if let Some(decoded_bal) = decoded_bal.as_deref() {
             // Reject oversized BAL sidecars before executing the block.
@@ -719,6 +726,8 @@ where
         // Execute the block and handle any execution errors.
         // The receipt root task is spawned before execution and receives receipts incrementally
         // as transactions complete, allowing parallel computation during execution.
+        drop(setup);
+        let execution = reth_trie_sparse::activity::ActivityGuard::new("np_execution");
         let execute_block_start = Instant::now();
         let execution_result = if parallel_bal_execution {
             self.execute_block_bal(env, &input, &handle, &make_state_provider)
@@ -736,6 +745,7 @@ where
             }
         };
         let execution_duration = execute_block_start.elapsed();
+        drop(execution);
         if let (Some(metrics), Some(stats)) = (&state_provider_metrics, &state_provider_stats) {
             metrics.record_totals(stats);
         }
@@ -779,6 +789,7 @@ where
 
         // Wait for the receipt root computation to complete.
         let receipt_root_bloom = {
+            let _activity = reth_trie_sparse::activity::ActivityGuard::new("np_receipt_wait");
             let _enter = debug_span!(
                 target: "engine::tree::payload_validator",
                 "wait_receipt_root",
@@ -796,6 +807,7 @@ where
                 .ok()
         };
 
+        let validation = reth_trie_sparse::activity::ActivityGuard::new("np_post_execution");
         ensure_ok_post_block!(
             self.validate_post_execution(
                 &block,
@@ -825,12 +837,15 @@ where
             )
         });
 
+        drop(validation);
+        let root_activity = reth_trie_sparse::activity::ActivityGuard::new("engine_root_wait");
         let root_start = Instant::now();
         let root_outcome = ensure_ok_post_block!(
             state_root_job.finish(&block, output.clone(), &hashed_state),
             block
         );
         let root_elapsed = root_start.elapsed();
+        drop(root_activity);
 
         info!(
             target: "engine::tree::payload_validator",

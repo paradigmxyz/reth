@@ -33,3 +33,6 @@ pub mod errors {
         SparseTrieErrorKind, SparseTrieResult,
     };
 }
+
+/// Diagnostic synchronous phase accounting.
+pub mod activity;
