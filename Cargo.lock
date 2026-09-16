@@ -10058,6 +10058,7 @@ dependencies = [
  "reth-consensus",
  "reth-consensus-common",
  "reth-db-api",
+ "reth-db-common",
  "reth-engine-primitives",
  "reth-errors",
  "reth-ethereum-engine-primitives",
