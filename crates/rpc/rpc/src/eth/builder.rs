@@ -558,18 +558,19 @@ where
             },
         );
 
-        let settings = EthApiSettings::default()
-            .with_proof_permits(proof_permits)
-            .with_max_batch_size(max_batch_size)
-            .with_max_blocking_io_requests(max_blocking_io_requests)
-            .with_gas_cap(gas_cap.into())
-            .with_max_simulate_blocks(max_simulate_blocks)
-            .with_compute_state_root_for_eth_simulate(compute_state_root_for_eth_simulate)
-            .with_eth_proof_window(eth_proof_window)
-            .with_pending_block_kind(pending_block_kind)
-            .with_send_raw_transaction_sync_timeout(send_raw_transaction_sync_timeout)
-            .with_evm_memory_limit(evm_memory_limit)
-            .with_force_blob_sidecar_upcasting(force_blob_sidecar_upcasting);
+        let settings = EthApiSettings {
+            proof_permits,
+            max_batch_size,
+            max_blocking_io_requests,
+            gas_cap: gas_cap.into(),
+            max_simulate_blocks,
+            compute_state_root_for_eth_simulate,
+            eth_proof_window,
+            pending_block_kind,
+            send_raw_transaction_sync_timeout,
+            evm_memory_limit,
+            force_blob_sidecar_upcasting,
+        };
 
         EthApiInner::new(
             components,
