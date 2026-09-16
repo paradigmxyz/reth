@@ -1,6 +1,9 @@
 //! Downloads account ranges in key order and commits each under the write it was fetched with.
 
-use crate::{AccountCoverage, SnapAccountStore, SnapAttemptStore, SnapSyncError, SnapWrite};
+use crate::{
+    common::DownloadContext, AccountCoverage, SnapAccountStore, SnapAttemptStore, SnapSyncError,
+    SnapWrite, MAX_HASH,
+};
 use alloy_primitives::{map::B256Map, B256};
 use reth_db_api::transaction::DbTxMut;
 use reth_downloaders::snap::{AccountRangeDownloader, AccountRangeOutcome, VerifiedAccountRange};
@@ -10,50 +13,30 @@ use reth_network_peers::PeerId;
 use reth_storage_api::{
     DBProvider, DatabaseProviderFactory, MetadataProvider, MetadataWriter, StateWriter,
 };
-use reth_storage_errors::provider::ProviderError;
 use reth_tasks::Runtime;
 use reth_trie_common::HashedStorage;
 use revm::bytecode::Bytecode;
 use std::fmt;
-
-/// Default soft response limit for account-range requests, matching common peer limits.
-pub const DEFAULT_RESPONSE_BYTES: u64 = 512 * 1024;
-
-/// Inclusive upper bound covering the full account trie keyspace.
-pub const MAX_HASH: B256 = B256::new([0xff; B256::len_bytes()]);
 
 /// Downloads the account ranges an attempt still needs, one at a time in key order.
 ///
 /// [`Self::next`] fetches the range at the coverage cursor the store records; the caller resolves
 /// its storage and code, then [`Self::commit`] persists everything and moves the cursor.
 pub struct AccountRangeDownload<C, F> {
-    client: C,
-    factory: F,
-    // Proof verification and commits run on the blocking pool.
-    runtime: Runtime,
+    context: DownloadContext<C, F>,
     // Coverage as last read from the store; none before the first request.
     coverage: Option<AccountCoverage>,
-    response_bytes: u64,
-    // Distinguishes responses to reissued requests.
-    request_id: u64,
 }
 
 impl<C, F> AccountRangeDownload<C, F> {
     /// Creates a download that continues from the coverage the store records.
     pub const fn new(client: C, factory: F, runtime: Runtime) -> Self {
-        Self {
-            client,
-            factory,
-            runtime,
-            coverage: None,
-            response_bytes: DEFAULT_RESPONSE_BYTES,
-            request_id: 0,
-        }
+        Self { context: DownloadContext::new(client, factory, runtime), coverage: None }
     }
 
     /// Returns this download asking peers for at most `response_bytes` per response.
     pub const fn with_response_bytes(mut self, response_bytes: u64) -> Self {
-        self.response_bytes = response_bytes;
+        self.context.set_response_bytes(response_bytes);
         self
     }
 
@@ -79,17 +62,19 @@ where
         self.coverage = Some(coverage);
         let Some(origin) = coverage.next() else { return Ok(None) };
 
-        self.request_id = self.request_id.wrapping_add(1);
         let request = GetAccountRangeMessage {
-            request_id: self.request_id,
+            request_id: self.context.next_request_id(),
             root_hash,
             starting_hash: origin,
             limit_hash: MAX_HASH,
-            response_bytes: self.response_bytes,
+            response_bytes: self.context.response_bytes(),
         };
-        let downloader =
-            AccountRangeDownloader::new(self.client.clone(), request, self.runtime.clone())
-                .expect("origin never exceeds the maximum hash");
+        let downloader = AccountRangeDownloader::new(
+            self.context.client().clone(),
+            request,
+            self.context.runtime().clone(),
+        )
+        .expect("origin never exceeds the maximum hash");
 
         Ok(Some(match downloader.await? {
             AccountRangeOutcome::Verified(range) => {
@@ -111,18 +96,13 @@ where
         storages: B256Map<HashedStorage>,
         bytecodes: Vec<(B256, Bytecode)>,
     ) -> Result<AccountCoverage, SnapSyncError> {
-        let factory = self.factory.clone();
         let coverage = self
-            .runtime
-            .spawn_blocking(move || -> Result<AccountCoverage, SnapSyncError> {
+            .context
+            .commit(move |provider| {
                 let VerifiedRange { write, range } = verified;
-                let provider = factory.database_provider_rw()?;
-                let coverage = provider.commit_account_range(write, &range, storages, bytecodes)?;
-                provider.commit()?;
-                Ok(coverage)
+                provider.commit_account_range(write, &range, storages, bytecodes)
             })
-            .await
-            .map_err(|error| SnapSyncError::Provider(ProviderError::other(error)))??;
+            .await?;
         self.coverage = Some(coverage);
         Ok(coverage)
     }
@@ -130,7 +110,7 @@ where
     // The write the attempt accepts right now, the root to request against, and the coverage the
     // store records for it.
     fn active_write(&self) -> Result<(SnapWrite, B256, AccountCoverage), SnapSyncError> {
-        let provider = self.factory.database_provider_ro()?;
+        let provider = self.context.factory().database_provider_ro()?;
         let write = provider.active_snap_write()?.ok_or(SnapSyncError::NoAttempt)?;
         let root = provider.authorize_snap_write(write)?.state_root();
         let coverage = provider.account_coverage(write)?.ok_or(SnapSyncError::NoCoverage)?;
@@ -141,10 +121,9 @@ where
 impl<C, F> fmt::Debug for AccountRangeDownload<C, F> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("AccountRangeDownload")
+            .field("context", &self.context)
             .field("coverage", &self.coverage)
-            .field("response_bytes", &self.response_bytes)
-            .field("request_id", &self.request_id)
-            .finish_non_exhaustive()
+            .finish()
     }
 }
 
@@ -175,6 +154,16 @@ pub struct VerifiedRange {
 }
 
 impl VerifiedRange {
+    #[cfg(test)]
+    pub(crate) const fn new(write: SnapWrite, range: VerifiedAccountRange) -> Self {
+        Self { write, range }
+    }
+
+    /// Write the attempt accepted when the range was requested.
+    pub(crate) const fn write(&self) -> SnapWrite {
+        self.write
+    }
+
     /// Key the range was requested from.
     pub const fn origin(&self) -> B256 {
         self.range.origin()
