@@ -1247,6 +1247,30 @@ fn test_backpressure_excludes_in_memory_buffer() {
     }
 }
 
+#[test]
+fn test_backpressure_uses_state_trie_frontier() {
+    let blocks: Vec<_> = TestBlockBuilder::eth().get_executed_blocks(1..16).collect();
+    let mut test_harness = TestHarness::new(MAINNET.clone()).with_blocks(blocks.clone());
+    test_harness.tree.config = test_harness
+        .tree
+        .config
+        .with_persistence_threshold(0)
+        .with_memory_block_buffer_target(0)
+        .with_persistence_backpressure_threshold(10);
+
+    let (_persist_tx, persist_rx) = crossbeam_channel::bounded(1);
+    test_harness
+        .tree
+        .persistence_state
+        .start_save(blocks.last().unwrap().recovered_block().num_hash(), persist_rx);
+    test_harness.tree.persistence_state.last_persisted_block =
+        blocks.last().unwrap().recovered_block().num_hash();
+    test_harness.tree.persistence_state.last_state_trie_persisted_block =
+        blocks[4].recovered_block().num_hash();
+
+    assert!(test_harness.tree.should_backpressure());
+}
+
 #[tokio::test]
 async fn test_tree_state_on_new_head_reorg() {
     reth_tracing::init_test_tracing();

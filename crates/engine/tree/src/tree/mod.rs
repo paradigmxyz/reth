@@ -504,13 +504,13 @@ where
         self.incoming_tx.clone()
     }
 
-    /// How many blocks the canonical tip is ahead of the last persisted block. A large gap means
-    /// persistence is falling behind execution.
+    /// How many blocks the canonical tip is ahead of the persisted state-trie frontier. A large
+    /// gap means persistence is falling behind execution.
     const fn persistence_gap(&self) -> u64 {
         self.state
             .tree_state
             .canonical_block_number()
-            .saturating_sub(self.persistence_state.last_persisted_block.number)
+            .saturating_sub(self.persistence_state.last_state_trie_persisted_block.number)
     }
 
     /// How many blocks beyond the configured in-memory buffer are awaiting persistence.
