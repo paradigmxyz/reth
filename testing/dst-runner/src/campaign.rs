@@ -615,7 +615,8 @@ fn materialize_block_transactions(
 
 const MIN_TRANSACTIONS_PER_BLOCK: usize = payload_processor::SMALL_BLOCK_TX_THRESHOLD;
 const MAX_TRANSACTIONS_PER_BLOCK: usize = 24;
-const CAMPAIGN_SCHEMA_VERSION: u64 = 7;
+const CAMPAIGN_SCHEMA_VERSION: u64 = 8;
+const MAX_DATABASE_FAULTS_PER_CASE: u64 = 3;
 
 #[derive(Debug)]
 struct PoolPrewarmSource(TxPool);
@@ -851,7 +852,10 @@ impl CampaignModel {
         if self.database_faults.needs_recovery() {
             return vec![CampaignAction::CrashRestartFollower]
         }
-        if self.blocks[&self.canonical_head].header.number >= 4 && self.database_faults.can_arm() {
+        if self.blocks[&self.canonical_head].header.number >= 4 &&
+            self.database_faults.injected() == 0 &&
+            self.database_faults.can_arm()
+        {
             return vec![CampaignAction::EnableDatabaseFault]
         }
         if self.state_read.is_some() {
@@ -1324,7 +1328,12 @@ impl CampaignDatabaseFaults {
 
     fn arm(&self) {
         let mut state = self.state.lock().unwrap();
-        assert!(self.enabled && !state.armed && state.injected == 0);
+        assert!(
+            self.enabled &&
+                !state.armed &&
+                state.injected == state.recovered &&
+                state.injected < MAX_DATABASE_FAULTS_PER_CASE
+        );
         let plans = [
             (DatabaseFaultClass::Any, 16u64),
             (DatabaseFaultClass::Transaction, 2),
@@ -1390,7 +1399,10 @@ impl CampaignDatabaseFaults {
 
     fn can_arm(&self) -> bool {
         let state = self.state.lock().unwrap();
-        self.enabled && !state.armed && state.injected == 0
+        self.enabled &&
+            !state.armed &&
+            state.injected == state.recovered &&
+            state.injected < MAX_DATABASE_FAULTS_PER_CASE
     }
 
     fn injected(&self) -> u64 {
