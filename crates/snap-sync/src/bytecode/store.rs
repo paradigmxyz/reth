@@ -4,14 +4,13 @@
 //! far the pivot moves. Accounts sharing a code hash therefore need it downloaded and stored once.
 
 use crate::{SnapAttemptStore, SnapSyncError, SnapWrite};
-use alloy_primitives::{keccak256, map::B256Set, Bytes, B256, KECCAK256_EMPTY};
+use alloy_primitives::{keccak256, Bytes, B256};
 use reth_db_api::{
     tables,
     transaction::{DbTx, DbTxMut},
     RawKey, RawTable,
 };
 use reth_storage_api::{DBProvider, MetadataProvider, StateWriter};
-use reth_trie_common::TrieAccount;
 use revm::{bytecode::Bytecode, database::states::StateChangeset};
 
 /// Persistence for the code an attempt's accounts reference.
@@ -19,12 +18,13 @@ use revm::{bytecode::Bytecode, database::states::StateChangeset};
 /// Blanket-implemented over the node's writers, so code joins the caller's transaction and commits
 /// with whatever else that transaction carries.
 pub trait SnapBytecodeStore {
-    /// Returns the code hashes `accounts` reference that are not stored yet, once each and in the
-    /// order the accounts reference them.
+    /// Returns the first `limit` of `hashes` that are not stored yet, so the scan a request costs
+    /// is bounded by what it can ask for.
     fn missing_code(
         &self,
         write: SnapWrite,
-        accounts: &[(B256, TrieAccount)],
+        hashes: &[B256],
+        limit: usize,
     ) -> Result<Vec<B256>, SnapSyncError>
     where
         Self: DBProvider;
@@ -44,23 +44,21 @@ impl<T: MetadataProvider> SnapBytecodeStore for T {
     fn missing_code(
         &self,
         write: SnapWrite,
-        accounts: &[(B256, TrieAccount)],
+        hashes: &[B256],
+        limit: usize,
     ) -> Result<Vec<B256>, SnapSyncError>
     where
         Self: DBProvider,
     {
         self.authorize_snap_write(write)?;
-        let mut seen = B256Set::default();
         let mut missing = Vec::new();
-        for (_, account) in accounts {
+        for hash in hashes {
+            if missing.len() == limit {
+                break
+            }
             // Only presence matters, so stored code is not decoded.
-            if account.code_hash != KECCAK256_EMPTY &&
-                seen.insert(account.code_hash) &&
-                self.tx_ref()
-                    .get::<RawTable<tables::Bytecodes>>(RawKey::new(account.code_hash))?
-                    .is_none()
-            {
-                missing.push(account.code_hash);
+            if self.tx_ref().get::<RawTable<tables::Bytecodes>>(RawKey::new(*hash))?.is_none() {
+                missing.push(*hash);
             }
         }
         Ok(missing)
@@ -100,11 +98,12 @@ impl<T: MetadataProvider> SnapBytecodeStore for T {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_utils::{account, generation, hashed_factory, key, state_root};
+    use crate::test_utils::{account, generation, hashed_factory, key, state_root, verified_range};
     use alloy_primitives::bytes;
     use reth_provider::{
         test_utils::MockNodeTypesWithDB, DatabaseProviderFactory, ProviderFactory,
     };
+    use reth_trie_common::TrieAccount;
 
     type Factory = ProviderFactory<MockNodeTypesWithDB>;
 
@@ -132,7 +131,7 @@ mod tests {
     }
 
     #[test]
-    fn accounts_sharing_code_need_it_downloaded_once() {
+    fn one_blob_answers_every_account_sharing_its_hash() {
         let shared = code(1);
         let accounts = vec![
             (key(1), contract(1, &shared)),
@@ -142,8 +141,10 @@ mod tests {
         ];
         let (factory, write) = started(&accounts);
         let provider = factory.database_provider_rw().unwrap();
+        let referenced =
+            verified_range(&accounts, 0..accounts.len(), B256::ZERO, &[]).code_hashes();
 
-        let missing = provider.missing_code(write, &accounts).unwrap();
+        let missing = provider.missing_code(write, &referenced, usize::MAX).unwrap();
 
         assert_eq!(missing, [keccak256(&shared), keccak256(code(2))]);
         assert_eq!(
@@ -151,8 +152,20 @@ mod tests {
             1
         );
         // The shared blob answers both accounts, leaving only the other contract's code.
-        assert_eq!(provider.missing_code(write, &accounts).unwrap(), [keccak256(code(2))]);
+        assert_eq!(
+            provider.missing_code(write, &referenced, usize::MAX).unwrap(),
+            [keccak256(code(2))]
+        );
         assert!(is_stored(&provider, &shared));
+    }
+
+    #[test]
+    fn a_scan_stops_once_it_has_the_hashes_a_request_can_carry() {
+        let hashes: Vec<_> = (1..=4).map(|byte| keccak256(code(byte))).collect();
+        let (factory, write) = started(&[(key(1), contract(1, &code(1)))]);
+        let provider = factory.database_provider_ro().unwrap();
+
+        assert_eq!(provider.missing_code(write, &hashes, 2).unwrap(), hashes[..2]);
     }
 
     #[test]
@@ -165,7 +178,10 @@ mod tests {
         provider.commit().unwrap();
 
         let provider = factory.database_provider_ro().unwrap();
-        assert!(provider.missing_code(write, &accounts).unwrap().is_empty());
+        assert!(provider
+            .missing_code(write, &[keccak256(&stored)], usize::MAX)
+            .unwrap()
+            .is_empty());
         assert!(is_stored(&provider, &stored));
     }
 
@@ -182,7 +198,7 @@ mod tests {
         assert!(
             matches!(refused, Err(SnapSyncError::CodeMismatch { expected, .. }) if expected == hash)
         );
-        assert_eq!(provider.missing_code(write, &accounts).unwrap(), [hash]);
+        assert_eq!(provider.missing_code(write, &[hash], usize::MAX).unwrap(), [hash]);
         assert!(!is_stored(&provider, &wanted));
     }
 
@@ -200,7 +216,7 @@ mod tests {
 
         let stored = provider.tx_ref().get::<tables::Bytecodes>(hash).unwrap().unwrap();
         assert_eq!(stored.original_bytes(), historical);
-        assert!(provider.missing_code(write, &accounts).unwrap().is_empty());
+        assert!(provider.missing_code(write, &[hash], usize::MAX).unwrap().is_empty());
     }
 
     #[test]
@@ -215,7 +231,7 @@ mod tests {
 
         assert!(matches!(refused, Err(SnapSyncError::StaleWrite { .. })));
         assert!(matches!(
-            provider.missing_code(write, &accounts),
+            provider.missing_code(write, &[keccak256(&wanted)], usize::MAX),
             Err(SnapSyncError::StaleWrite { .. })
         ));
         assert!(!is_stored(&provider, &wanted));

@@ -17,8 +17,8 @@ pub const DEFAULT_CODE_HASHES: usize = 128;
 
 /// Downloads the code an account range still needs, one request at a time.
 ///
-/// Code is content addressed, so a hash several accounts share is one dependency: it is requested
-/// once, and a blob already stored by this or an earlier attempt is never requested again.
+/// Code is content addressed, so a hash is requested only while no blob is stored for it, however
+/// many accounts reference it and whichever attempt fetched it.
 pub struct BytecodeDownload<C, F> {
     context: DownloadContext<C, F>,
     // Code hashes asked for per request.
@@ -56,20 +56,22 @@ where
 {
     /// Requests code `range` still needs and commits the verified response.
     ///
-    /// [`BytecodeStep::Complete`] once every hash the range's accounts reference is stored, so the
-    /// range can commit without supplying their code. A peer that serves only part of a request,
-    /// or none of it, leaves the rest missing for the next call to ask for again.
+    /// [`BytecodeStep::Complete`] once every hash it references is stored, so the range can commit
+    /// without supplying code. Whatever a peer leaves out stays missing for the next call.
     pub async fn next(&mut self, range: &VerifiedRange) -> Result<BytecodeStep, SnapSyncError> {
         let write = range.write();
-        let mut missing = self
+        let referenced = range.range().code_hashes();
+        if referenced.is_empty() {
+            return Ok(BytecodeStep::Complete)
+        }
+        let limit = self.max_hashes;
+        let missing = self
             .context
-            .factory()
-            .database_provider_ro()?
-            .missing_code(write, range.range().accounts())?;
+            .read(move |provider| provider.missing_code(write, &referenced, limit))
+            .await?;
         if missing.is_empty() {
             return Ok(BytecodeStep::Complete)
         }
-        missing.truncate(self.max_hashes);
 
         let request = GetByteCodesMessage {
             request_id: self.context.next_request_id(),
