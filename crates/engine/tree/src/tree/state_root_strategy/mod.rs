@@ -488,7 +488,7 @@ impl DefaultStateRootStrategy {
     ///
     /// More workers help drain the proof queue on large blocks while storage reads are blocked.
     /// Keeping that capacity in a separate pool avoids waking unused threads on regular blocks.
-    const LARGE_BLOCK_PROOF_WORKER_GAS_THRESHOLD: u64 = 100_000_000;
+    const LARGE_BLOCK_PROOF_WORKER_GAS_THRESHOLD: u64 = 60_000_000;
 
     /// Returns how many workers to spawn for the block being validated from one kind of proof
     /// worker pool, given the base pool size and the size of the overflow pool extending it.
@@ -1388,12 +1388,12 @@ mod tests {
         assert_eq!(count(Some(30), Some(300_000_000)), 16);
 
         // Gas heavy blocks spill into the overflow pool.
-        assert_eq!(count(Some(1_000), Some(100_000_000)), 64);
+        assert_eq!(count(Some(1_000), Some(60_000_000)), 64);
         assert_eq!(count(Some(1_000), Some(300_000_000)), 64);
 
         // Everything else, including a block whose size is not known yet, stays in the base pool
         // and never names the overflow pool.
-        assert_eq!(count(Some(31), Some(99_999_999)), 32);
+        assert_eq!(count(Some(31), Some(59_999_999)), 32);
         assert_eq!(count(Some(1_000), Some(15_000_000)), 32);
         assert_eq!(count(None, None), 32);
 

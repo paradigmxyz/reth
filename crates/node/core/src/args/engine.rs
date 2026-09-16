@@ -460,7 +460,7 @@ pub struct EngineArgs {
 
     /// Configure the number of storage proof workers spawned for each block.
     /// If not specified, the count is derived from the block: 2x available parallelism, halved for
-    /// blocks with few transactions and doubled for blocks at or above 100M gas.
+    /// blocks with few transactions and doubled for blocks at or above 60M gas.
     #[arg(long = "engine.storage-worker-count", default_value = Resettable::from(DefaultEngineValues::get_global().storage_worker_count.map(|v| v.to_string().into())))]
     pub storage_worker_count: Option<usize>,
 

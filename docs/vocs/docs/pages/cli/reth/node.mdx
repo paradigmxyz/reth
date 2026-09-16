@@ -1085,7 +1085,7 @@ Engine:
           Allow unwinding canonical header to ancestor during forkchoice updates. See `TreeConfig::unwind_canonical_header` for more details
 
       --engine.storage-worker-count <STORAGE_WORKER_COUNT>
-          Configure the number of storage proof workers spawned for each block. If not specified, the count is derived from the block: 2x available parallelism, halved for blocks with few transactions and doubled for blocks at or above 100M gas
+          Configure the number of storage proof workers spawned for each block. If not specified, the count is derived from the block: 2x available parallelism, halved for blocks with few transactions and doubled for blocks at or above 60M gas
 
       --engine.account-worker-count <ACCOUNT_WORKER_COUNT>
           Configure the number of account proof workers spawned for each block. If not specified, defaults to the same count as storage workers
