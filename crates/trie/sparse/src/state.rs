@@ -395,10 +395,23 @@ where
         #[cfg(feature = "metrics")]
         self.metrics.record();
 
-        let storage_tries = self.storage_trie_updates();
+        let storage_tries = {
+            #[cfg(feature = "metrics")]
+            let _activity = crate::activity::ActivityGuard::coordinator("collect_storage_updates");
+            self.storage_trie_updates()
+        };
         let revealed = self.revealed_trie_mut()?;
 
-        let (root, updates) = (revealed.root(new_epoch), revealed.take_updates());
+        let root = {
+            #[cfg(feature = "metrics")]
+            let _activity = crate::activity::ActivityGuard::coordinator("final_account_root");
+            revealed.root(new_epoch)
+        };
+        let updates = {
+            #[cfg(feature = "metrics")]
+            let _activity = crate::activity::ActivityGuard::coordinator("collect_account_updates");
+            revealed.take_updates()
+        };
         let updates = TrieUpdates {
             account_nodes: updates.updated_nodes,
             removed_nodes: updates.removed_nodes,
