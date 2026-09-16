@@ -11,8 +11,8 @@ use futures::future::{ready, Ready};
 use reth_db_api::{cursor::DbDupCursorRO, tables, transaction::DbTx};
 use reth_downloaders::snap::{AccountRangeDownloader, AccountRangeOutcome, VerifiedAccountRange};
 use reth_eth_wire_types::snap::{
-    AccountData, AccountRangeMessage, GetAccountRangeMessage, SnapProtocolMessage, StorageData,
-    StorageRangesMessage,
+    AccountData, AccountRangeMessage, ByteCodesMessage, GetAccountRangeMessage,
+    SnapProtocolMessage, StorageData, StorageRangesMessage,
 };
 use reth_network_p2p::{
     download::DownloadClient,
@@ -209,6 +209,12 @@ pub(crate) fn storage_ranges(
     Ok(WithPeerId::new(PeerId::random(), SnapResponse::StorageRanges(message)))
 }
 
+/// A peer's answer serving `codes`, in the order they were requested.
+pub(crate) fn byte_codes(request_id: u64, codes: &[Bytes]) -> PeerRequestResult<SnapResponse> {
+    let message = ByteCodesMessage { request_id, codes: codes.to_vec() };
+    Ok(WithPeerId::new(PeerId::random(), SnapResponse::ByteCodes(message)))
+}
+
 /// Slots persisted for `account`, in key order.
 pub(crate) fn stored_slots(provider: &impl DBProvider, account: B256) -> Vec<(B256, U256)> {
     let mut cursor = provider.tx_ref().cursor_dup_read::<tables::HashedStorages>().unwrap();
@@ -227,6 +233,7 @@ pub(crate) struct ScriptedSnapClient {
     responses: Mutex<VecDeque<PeerRequestResult<SnapResponse>>>,
     origins: Mutex<Vec<B256>>,
     storage_requests: Mutex<Vec<(Vec<B256>, B256)>>,
+    code_requests: Mutex<Vec<Vec<B256>>>,
 }
 
 impl ScriptedSnapClient {
@@ -237,6 +244,7 @@ impl ScriptedSnapClient {
             responses: Mutex::new(responses.into_iter().collect()),
             origins: Mutex::new(Vec::new()),
             storage_requests: Mutex::new(Vec::new()),
+            code_requests: Mutex::new(Vec::new()),
         }
     }
 
@@ -248,6 +256,11 @@ impl ScriptedSnapClient {
     /// Accounts and starting slot of the storage range requests sent so far.
     pub(crate) fn storage_requests(&self) -> MutexGuard<'_, Vec<(Vec<B256>, B256)>> {
         self.storage_requests.lock().unwrap()
+    }
+
+    /// Hashes of the bytecode requests sent so far.
+    pub(crate) fn code_requests(&self) -> MutexGuard<'_, Vec<Vec<B256>>> {
+        self.code_requests.lock().unwrap()
     }
 
     fn next_response(&self) -> Ready<PeerRequestResult<SnapResponse>> {
@@ -285,6 +298,9 @@ impl SnapClient for ScriptedSnapClient {
             SnapProtocolMessage::GetStorageRanges(request) => {
                 let from = request.starting_hash.unwrap_or(B256::ZERO);
                 self.storage_requests.lock().unwrap().push((request.account_hashes, from));
+            }
+            SnapProtocolMessage::GetByteCodes(request) => {
+                self.code_requests.lock().unwrap().push(request.hashes);
             }
             _ => return ready(Err(RequestError::UnsupportedCapability)),
         }

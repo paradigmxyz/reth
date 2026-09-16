@@ -13,6 +13,7 @@
 
 mod attempt;
 mod bootstrap;
+mod bytecode;
 mod catch_up;
 mod common;
 mod context;
@@ -29,6 +30,7 @@ mod test_utils;
 
 pub use attempt::{SnapAttemptStore, SnapWrite};
 pub use bootstrap::{SnapBootstrap, SnapSyncOutcome};
+pub use bytecode::{BytecodeDownload, BytecodeStep, SnapBytecodeStore, DEFAULT_CODE_HASHES};
 pub use catch_up::{
     BalStateUpdate, BlockAccessListCatchUp, BlockAccessListCatchUpOutcome, BlockAccessListProgress,
     DownloadedAccount,
