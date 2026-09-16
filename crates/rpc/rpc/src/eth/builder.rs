@@ -559,6 +559,9 @@ where
         );
 
         let settings = EthApiSettings::default()
+            .with_proof_permits(proof_permits)
+            .with_max_batch_size(max_batch_size)
+            .with_max_blocking_io_requests(max_blocking_io_requests)
             .with_gas_cap(gas_cap.into())
             .with_max_simulate_blocks(max_simulate_blocks)
             .with_compute_state_root_for_eth_simulate(compute_state_root_for_eth_simulate)
@@ -582,11 +585,8 @@ where
             }),
             fee_history_cache,
             task_spawner,
-            proof_permits,
             rpc_converter,
             next_env,
-            max_batch_size,
-            max_blocking_io_requests,
             raw_tx_forwarder.forwarder_client(),
         )
     }
