@@ -35,4 +35,5 @@ pub mod errors {
 }
 
 /// Diagnostic synchronous phase accounting.
+#[cfg(feature = "metrics")]
 pub mod activity;
