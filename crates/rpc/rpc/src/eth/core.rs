@@ -621,13 +621,62 @@ mod tests {
         );
 
         let api = build_test_eth_api(provider);
-        let transaction = EthTransactions::get_transaction_by_sender_and_nonce(
-            &api, sender, 0, false,
-        )
-        .await
-        .expect("existing block without a sender transaction should not be a header error");
+        let transaction =
+            EthTransactions::get_transaction_by_sender_and_nonce(&api, sender, 0, false)
+                .await
+                .expect("existing block without a sender transaction should not be a header error");
 
         assert!(transaction.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_transaction_by_sender_and_nonce_missing_block_returns_error() {
+        use reth_rpc_eth_api::helpers::EthTransactions;
+        use reth_rpc_eth_types::EthApiError;
+
+        let provider = MockEthProvider::default();
+        let sender = Address::random();
+        provider.add_account(sender, ExtendedAccount::new(1, U256::ZERO));
+        provider.add_header(B256::random(), Header { number: 1, ..Default::default() });
+
+        let api = build_test_eth_api(provider);
+        let error = EthTransactions::get_transaction_by_sender_and_nonce(&api, sender, 0, false)
+            .await
+            .unwrap_err();
+
+        assert!(matches!(error, EthApiError::HeaderNotFound(id) if id == 1.into()));
+    }
+
+    #[tokio::test]
+    async fn test_transaction_by_sender_and_nonce_returns_matching_transaction() {
+        use reth_primitives_traits::SignerRecoverable;
+        use reth_rpc_eth_api::helpers::EthTransactions;
+
+        let provider = MockEthProvider::default();
+        let tx = TransactionSigned::new_unhashed(
+            reth_ethereum_primitives::Transaction::Legacy(Default::default()),
+            Signature::test_signature(),
+        );
+        let sender = tx.recover_signer().unwrap();
+        provider.add_account(sender, ExtendedAccount::new(1, U256::ZERO));
+        let block = Block {
+            header: Header { number: 1, ..Default::default() },
+            body: BlockBody { transactions: vec![tx], ..Default::default() },
+        };
+        let block_hash = block.header.hash_slow();
+        provider.add_block(block_hash, block);
+
+        let api = build_test_eth_api(provider);
+        let transaction =
+            EthTransactions::get_transaction_by_sender_and_nonce(&api, sender, 0, false)
+                .await
+                .unwrap()
+                .expect("matching transaction should be returned");
+
+        assert_eq!(transaction.block_hash, Some(block_hash));
+        assert_eq!(transaction.block_number, Some(1));
+        assert_eq!(transaction.transaction_index, Some(0));
+        assert_eq!(transaction.inner.signer(), sender);
     }
 
     #[tokio::test]

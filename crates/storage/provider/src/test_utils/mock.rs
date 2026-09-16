@@ -951,16 +951,16 @@ impl<T: NodePrimitives, ChainSpec: EthChainSpec + Send + Sync + 'static> BlockRe
         _transaction_kind: TransactionVariant,
     ) -> ProviderResult<Option<RecoveredBlock<Self::Block>>> {
         self.block(id)?
-            .map(|block| block.try_recover().map_err(|err| ProviderError::Other(err.to_string())))
+            .map(|block| block.try_into_recovered().map_err(ProviderError::other))
             .transpose()
     }
 
     fn sealed_block_with_senders(
         &self,
-        _id: BlockHashOrNumber,
-        _transaction_kind: TransactionVariant,
+        id: BlockHashOrNumber,
+        transaction_kind: TransactionVariant,
     ) -> ProviderResult<Option<RecoveredBlock<Self::Block>>> {
-        Ok(None)
+        self.recovered_block(id, transaction_kind)
     }
 
     fn block_range(&self, range: RangeInclusive<BlockNumber>) -> ProviderResult<Vec<Self::Block>> {

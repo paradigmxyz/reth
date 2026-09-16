@@ -443,6 +443,8 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
             let block_timestamp = block.timestamp();
             let base_fee_per_gas = block.base_fee_per_gas();
 
+            // EIP-7702 authorizations can consume the account's nonce without a transaction
+            // from that sender, so an existing block may contain no matching transaction.
             block
                 .transactions_with_sender()
                 .enumerate()
