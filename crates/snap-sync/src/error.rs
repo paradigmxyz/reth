@@ -1,7 +1,7 @@
 //! Failures raised while assembling a snap state generation.
 
 use alloy_primitives::B256;
-use reth_downloaders::snap::InvalidStorageRangeRequest;
+use reth_downloaders::snap::{InvalidBlockAccessListRequest, InvalidStorageRangeRequest};
 use reth_network_p2p::error::RequestError;
 use reth_storage_api::SnapAttemptId;
 use reth_storage_errors::{db::DatabaseError, provider::ProviderError};
@@ -18,6 +18,9 @@ pub enum SnapSyncError {
     /// A storage request did not match the accounts it was built from.
     #[error(transparent)]
     StorageRequest(#[from] InvalidStorageRangeRequest),
+    /// A block access list request did not match the headers it was built from.
+    #[error(transparent)]
+    BlockAccessListRequest(#[from] InvalidBlockAccessListRequest),
     /// The storage layout keys state by address, which snap cannot fill in without preimages.
     #[error("snap synchronization requires the hashed state layout")]
     UnsupportedStorage,
@@ -38,6 +41,31 @@ pub enum SnapSyncError {
         /// Root the attempt currently downloads.
         expected: B256,
         /// Root the range was proved against.
+        got: B256,
+    },
+    /// No catch-up progress is recorded for the attempt.
+    #[error("no catch-up progress is recorded for the attempt")]
+    NoCatchUpProgress,
+    /// A block the catch-up needs has no header.
+    #[error("block {block} has no header to authenticate its access list against")]
+    MissingHeader {
+        /// Block the header is missing for.
+        block: u64,
+    },
+    /// A list was applied for a block other than the one continuing the applied sequence.
+    #[error("block access list for block {got}, the applied state continues at {expected}")]
+    OutOfOrderBlock {
+        /// Block the applied state continues at.
+        expected: u64,
+        /// Block the list was applied for.
+        got: u64,
+    },
+    /// A list was applied for a block building on another chain than the applied state.
+    #[error("block access list for a block building on {got}, the applied state is at {expected}")]
+    ForkedBlock {
+        /// Hash of the last applied block.
+        expected: B256,
+        /// Hash the block the list belongs to builds on.
         got: B256,
     },
     /// No account coverage is recorded for the attempt.

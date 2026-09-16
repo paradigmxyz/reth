@@ -1,4 +1,4 @@
-//! Carries downloaded state forward through verified block access lists.
+//! Turns one verified block access list into the state update it implies.
 //!
 //! [EIP-8189](https://eips.ethereum.org/EIPS/eip-8189#synchronization-algorithm) advances the
 //! pivot by applying later blocks' lists to the state downloaded so far. Each list records the
@@ -86,6 +86,12 @@ impl BalStateUpdate {
     /// Hashed addresses of entries left out because their account is not downloaded yet.
     pub fn unresolved(&self) -> &[B256] {
         &self.unresolved
+    }
+
+    /// Consumes this update into the state it writes, the code it stores and its unresolved
+    /// entries.
+    pub fn into_parts(self) -> (HashedPostState, B256Map<Bytes>, Vec<B256>) {
+        (self.state, self.bytecodes, self.unresolved)
     }
 }
 

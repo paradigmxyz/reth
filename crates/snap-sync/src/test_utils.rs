@@ -5,15 +5,22 @@ use crate::{
     SnapGeneration, SnapPivotPolicy,
 };
 use alloy_consensus::Header;
-use alloy_eips::BlockNumHash;
+use alloy_eip7928::AccountChanges;
+use alloy_eips::{
+    eip7928::bal::{Bal, DecodedBal},
+    BlockNumHash,
+};
 use alloy_primitives::{Bytes, B256, KECCAK256_EMPTY, U256};
 use futures::future::{ready, Ready};
 use reth_db_api::{cursor::DbDupCursorRO, tables, transaction::DbTx};
 use reth_downloaders::snap::{AccountRangeDownloader, AccountRangeOutcome, VerifiedAccountRange};
-use reth_eth_wire_types::snap::{
-    AccountData, AccountRangeMessage, ByteCodesMessage, GetAccountRangeMessage,
-    GetBlockAccessListsMessage, GetByteCodesMessage, GetStorageRangesMessage, StorageData,
-    StorageRangesMessage,
+use reth_eth_wire_types::{
+    snap::{
+        AccountData, AccountRangeMessage, BlockAccessListsMessage, ByteCodesMessage,
+        GetAccountRangeMessage, GetBlockAccessListsMessage, GetByteCodesMessage,
+        GetStorageRangesMessage, StorageData, StorageRangesMessage,
+    },
+    BlockAccessLists,
 };
 use reth_network_p2p::{
     download::DownloadClient,
@@ -22,9 +29,11 @@ use reth_network_p2p::{
     snap::client::{SnapClient, SnapResponse},
 };
 use reth_network_peers::{PeerId, WithPeerId};
+use reth_primitives_traits::{AlloyBlockHeader, SealedHeader};
 use reth_provider::{
     test_utils::{create_test_provider_factory, MockEthProvider, MockNodeTypesWithDB},
-    DatabaseProviderFactory, ProviderFactory,
+    DatabaseProviderFactory, ProviderFactory, StaticFileProviderFactory, StaticFileSegment,
+    StaticFileWriter,
 };
 use reth_storage_api::{DBProvider, MetadataWriter, StorageSettings, StorageSettingsCache};
 use reth_tasks::Runtime;
@@ -217,6 +226,81 @@ pub(crate) fn byte_codes(request_id: u64, codes: &[Bytes]) -> PeerRequestResult<
     Ok(WithPeerId::new(PeerId::random(), SnapResponse::ByteCodes(message)))
 }
 
+/// A canonical chain from genesis through the blocks a catch-up applies, each of those carrying
+/// the list its header commits to.
+pub(crate) struct BalChain {
+    // Headers from genesis through the last block after the pivot.
+    headers: Vec<SealedHeader<Header>>,
+    // Block the downloaded state is anchored to.
+    pivot: u64,
+    // Encoded lists of the blocks after the pivot, as peers serve them.
+    lists: Vec<Bytes>,
+}
+
+impl BalChain {
+    /// A chain anchored at `pivot`, carrying one block per entry of `lists` after it.
+    pub(crate) fn new(pivot: u64, lists: impl IntoIterator<Item = Vec<AccountChanges>>) -> Self {
+        let lists: Vec<Bytes> =
+            lists.into_iter().map(|changes| alloy_rlp::encode(Bal::from(changes)).into()).collect();
+        let mut headers = Vec::new();
+        let mut parent = B256::ZERO;
+        for number in 0..=pivot {
+            headers.push(SealedHeader::seal_slow(header(number, parent, None)));
+            parent = headers[number as usize].hash();
+        }
+        for (index, list) in lists.iter().enumerate() {
+            let commitment = DecodedBal::from_rlp_bytes(list.clone()).expect("fixture decodes");
+            let sealed = SealedHeader::seal_slow(header(
+                pivot + index as u64 + 1,
+                parent,
+                Some(commitment.hash()),
+            ));
+            parent = sealed.hash();
+            headers.push(sealed);
+        }
+        Self { headers, pivot, lists }
+    }
+
+    /// Generation anchored to this chain's pivot, downloading against `state_root`.
+    pub(crate) fn generation(&self, state_root: B256) -> SnapGeneration {
+        SnapGeneration::new(self.block(0), state_root)
+    }
+
+    /// The block `nth` after the pivot, which is the pivot itself at zero.
+    pub(crate) fn block(&self, nth: usize) -> BlockNumHash {
+        let header = &self.headers[self.pivot as usize + nth];
+        BlockNumHash::new(header.number(), header.hash())
+    }
+
+    /// Persists every header, so a catch-up finds this chain canonical.
+    pub(crate) fn insert_headers(&self, factory: &ProviderFactory<MockNodeTypesWithDB>) {
+        let static_files = factory.static_file_provider();
+        let mut writer = static_files.latest_writer(StaticFileSegment::Headers).unwrap();
+        for header in &self.headers {
+            writer.append_header(header.header(), &header.hash()).unwrap();
+        }
+        writer.commit().unwrap();
+    }
+
+    /// A peer's answer serving the list of each block `served` names, holding none where it names
+    /// no block.
+    pub(crate) fn response(
+        &self,
+        request_id: u64,
+        served: impl IntoIterator<Item = Option<usize>>,
+    ) -> PeerRequestResult<SnapResponse> {
+        let block_access_lists = served
+            .into_iter()
+            .map(|nth| nth.map(|nth| self.lists[nth - 1].clone()))
+            .collect::<Vec<_>>();
+        let message = BlockAccessListsMessage {
+            request_id,
+            block_access_lists: BlockAccessLists(block_access_lists),
+        };
+        Ok(WithPeerId::new(PeerId::random(), SnapResponse::BlockAccessLists(message)))
+    }
+}
+
 /// Slots persisted for `account`, in key order.
 pub(crate) fn stored_slots(provider: &impl DBProvider, account: B256) -> Vec<(B256, U256)> {
     let mut cursor = provider.tx_ref().cursor_dup_read::<tables::HashedStorages>().unwrap();
@@ -236,6 +320,7 @@ pub(crate) struct ScriptedSnapClient {
     origins: Mutex<Vec<B256>>,
     storage_requests: Mutex<Vec<(Vec<B256>, B256)>>,
     code_requests: Mutex<Vec<Vec<B256>>>,
+    block_requests: Mutex<Vec<Vec<B256>>>,
 }
 
 impl ScriptedSnapClient {
@@ -247,6 +332,7 @@ impl ScriptedSnapClient {
             origins: Mutex::new(Vec::new()),
             storage_requests: Mutex::new(Vec::new()),
             code_requests: Mutex::new(Vec::new()),
+            block_requests: Mutex::new(Vec::new()),
         }
     }
 
@@ -263,6 +349,11 @@ impl ScriptedSnapClient {
     /// Hashes of the bytecode requests sent so far.
     pub(crate) fn code_requests(&self) -> MutexGuard<'_, Vec<Vec<B256>>> {
         self.code_requests.lock().unwrap()
+    }
+
+    /// Block hashes of the block access list requests sent so far.
+    pub(crate) fn block_requests(&self) -> MutexGuard<'_, Vec<Vec<B256>>> {
+        self.block_requests.lock().unwrap()
     }
 
     fn next_response(&self) -> Ready<PeerRequestResult<SnapResponse>> {
@@ -326,13 +417,10 @@ impl SnapClient for ScriptedSnapClient {
 
     fn get_block_access_lists_with_priority(
         &self,
-        _request: GetBlockAccessListsMessage,
+        request: GetBlockAccessListsMessage,
         _priority: Priority,
     ) -> Self::Output {
-        unsupported()
+        self.block_requests.lock().unwrap().push(request.block_hashes);
+        self.next_response()
     }
-}
-
-fn unsupported() -> Ready<PeerRequestResult<SnapResponse>> {
-    ready(Err(RequestError::UnsupportedCapability))
 }
