@@ -13,6 +13,7 @@ use reth_rpc_eth_api::{
     EthCallBundleApiServer, FromEthApiError, FromEvmError,
 };
 use reth_rpc_eth_types::{utils::recover_raw_transaction, EthApiError, RpcInvalidTransactionError};
+use reth_storage_api::HeaderProvider;
 use reth_tasks::pool::BlockingTaskGuard;
 use reth_transaction_pool::{
     EthBlobTransactionSidecar, EthPoolTransaction, PoolPooledTx, PoolTransaction, TransactionPool,
@@ -135,6 +136,25 @@ where
 
         if let Some(base_fee) = base_fee {
             evm_env.block_env.inner_mut().basefee = base_fee.try_into().unwrap_or(u64::MAX);
+        } else {
+            // The bundle is simulated on top of the state block, so the base fee is the one of
+            // the _next_ block derived from the state block's header:
+            // <https://github.com/flashbots/mev-geth/blob/fddf97beec5877483f879a77b7dea2e58a58d653/internal/ethapi/api.go#L2130>
+            let parent_block = evm_env.block_env.number().saturating_to::<u64>();
+            let parent = self
+                .eth_api()
+                .provider()
+                .header_by_number(parent_block)
+                .map_err(Eth::Error::from_eth_err)?
+                .ok_or(EthApiError::HeaderNotFound(parent_block.into()))?;
+            if let Some(next_base_fee) = self
+                .eth_api()
+                .provider()
+                .chain_spec()
+                .next_block_base_fee(&parent, evm_env.block_env.timestamp().saturating_to())
+            {
+                evm_env.block_env.inner_mut().basefee = next_base_fee;
+            }
         }
 
         let state_block_number = evm_env.block_env.number();
@@ -303,4 +323,78 @@ pub enum EthBundleError {
     /// Thrown when the blob gas usage of the blob transactions in a bundle exceed the maximum.
     #[error("blob gas usage exceeds the limit of {0} gas per block.")]
     Eip4844BlobGasExceeded(u64),
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::EthApiBuilder;
+    use alloy_consensus::{transaction::SignerRecoverable, TxEip1559};
+    use alloy_eips::{eip1559::INITIAL_BASE_FEE, eip2718::Encodable2718, BlockNumberOrTag};
+    use alloy_genesis::{Genesis, GenesisAccount};
+    use alloy_primitives::{Address, TxKind};
+    use reth_chainspec::ChainSpecBuilder;
+    use reth_db_common::init::init_genesis;
+    use reth_evm_ethereum::EthEvmConfig;
+    use reth_network_api::noop::NoopNetwork;
+    use reth_provider::{
+        providers::BlockchainProvider, test_utils::create_test_provider_factory_with_chain_spec,
+    };
+    use reth_testing_utils::generators::{self, generate_key, sign_tx_with_key_pair};
+    use reth_transaction_pool::test_utils::testing_pool;
+
+    /// The bundle is simulated in the block after the state block, so a transaction that only
+    /// covers the next block's base fee, but not the state block's, must be accepted.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn call_bundle_uses_next_block_base_fee() {
+        let mut rng = generators::rng();
+        let key = generate_key(&mut rng);
+        // genesis is empty, so the next base fee is 7/8 of the initial base fee
+        let next_base_fee = INITIAL_BASE_FEE - INITIAL_BASE_FEE / 8;
+        let tx = sign_tx_with_key_pair(
+            key,
+            reth_ethereum_primitives::Transaction::Eip1559(TxEip1559 {
+                chain_id: 1,
+                nonce: 0,
+                gas_limit: 21_000,
+                max_fee_per_gas: (next_base_fee + 1) as u128,
+                max_priority_fee_per_gas: 1,
+                to: TxKind::Call(Address::random()),
+                ..Default::default()
+            }),
+        );
+        let sender = tx.recover_signer().unwrap();
+
+        let genesis = Genesis::default()
+            .with_gas_limit(30_000_000)
+            .with_base_fee(Some(INITIAL_BASE_FEE as u128))
+            .extend_accounts([(
+                sender,
+                GenesisAccount::default().with_balance(U256::from(10u128.pow(18))),
+            )]);
+        let chain_spec =
+            Arc::new(ChainSpecBuilder::mainnet().cancun_activated().genesis(genesis).build());
+        let factory = create_test_provider_factory_with_chain_spec(chain_spec);
+        init_genesis(&factory).unwrap();
+        let provider = BlockchainProvider::new(factory).unwrap();
+
+        let eth_api = EthApiBuilder::new(
+            provider.clone(),
+            testing_pool(),
+            NoopNetwork::default(),
+            EthEvmConfig::new(provider.chain_spec()),
+        )
+        .build();
+        let api = EthBundle::new(eth_api, BlockingTaskGuard::new(4));
+
+        let bundle = EthCallBundle {
+            txs: vec![tx.encoded_2718().into()],
+            block_number: 1,
+            state_block_number: BlockNumberOrTag::Number(0),
+            ..Default::default()
+        };
+        let response = api.call_bundle(bundle).await.unwrap();
+        assert_eq!(response.results.len(), 1);
+        assert_eq!(response.results[0].gas_price, U256::from(1));
+    }
 }
