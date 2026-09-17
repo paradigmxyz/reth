@@ -309,5 +309,5 @@ where
     let BlockBuilderOutcome { block, block_access_list, .. } =
         builder.finish(&state_provider, None)?;
 
-    Ok((block.into_sealed_block(), block_access_list.map(|bal| bal.into_raw())))
+    Ok((block.into_sealed_block(), block_access_list.map(|bal| bal.split().1)))
 }

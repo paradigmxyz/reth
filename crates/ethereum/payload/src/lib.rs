@@ -497,7 +497,7 @@ where
         }));
     }
 
-    let block_access_list = block_access_list.map(|bal| bal.into_raw());
+    let block_access_list = block_access_list.map(|bal| bal.split().1);
     let payload = EthBuiltPayload::new(Arc::new(block), total_fees, requests, block_access_list)
         // add blob sidecars from the executed txs
         .with_sidecars(blob_sidecars);

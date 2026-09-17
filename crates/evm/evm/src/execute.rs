@@ -3,7 +3,7 @@
 use crate::{ConfigureEvm, Database, OnStateHook, TxEnvFor};
 use alloc::{boxed::Box, sync::Arc, vec::Vec};
 use alloy_consensus::{BlockHeader, Header};
-use alloy_eip7928::{bal::RawBal, compute_block_access_list_hash_with_buf, BlockAccessList};
+use alloy_eip7928::{bal::DecodedBal, compute_block_access_list_hash_with_buf, BlockAccessList};
 use alloy_eips::eip2718::WithEncoded;
 pub use alloy_evm::block::{BlockExecutor, BlockExecutorFactory, GasOutput};
 use alloy_evm::{
@@ -314,8 +314,9 @@ pub struct BlockBuilderOutcome<N: NodePrimitives> {
     pub trie_updates: TrieUpdates,
     /// The built block.
     pub block: RecoveredBlock<N::Block>,
-    /// RLP-encoded block access list built during execution (EIP-7928, Amsterdam), with its hash.
-    pub block_access_list: Option<RawBal>,
+    /// Block access list built during execution (EIP-7928, Amsterdam), with its RLP bytes and
+    /// hash.
+    pub block_access_list: Option<DecodedBal<BlockAccessList>>,
 }
 
 /// A type that knows how to execute and build a block.
@@ -514,9 +515,9 @@ where
         let block_access_list = db.take_built_alloy_bal().map(|bal| {
             let mut raw = Vec::new();
             let hash = compute_block_access_list_hash_with_buf(&bal, &mut raw);
-            RawBal::new_unchecked(raw.into(), hash)
+            DecodedBal::new_unchecked(bal, raw.into(), hash)
         });
-        let block_access_list_hash = block_access_list.as_ref().map(RawBal::hash);
+        let block_access_list_hash = block_access_list.as_ref().map(DecodedBal::hash);
 
         let hashed_state =
             state.hashed_post_state(&db.bundle_state).map_err(BlockExecutionError::other)?;
