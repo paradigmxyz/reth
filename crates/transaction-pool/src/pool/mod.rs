@@ -580,6 +580,7 @@ where
         pool: &mut RwLockWriteGuard<'_, TxPool<T>>,
         origin: TransactionOrigin,
         tx: TransactionValidationOutcome<T::Transaction>,
+        timestamp: Instant,
     ) -> (PoolResult<AddedTransactionOutcome>, Option<AddedTransactionMeta<T::Transaction>>) {
         match tx {
             TransactionValidationOutcome::Valid {
@@ -609,7 +610,7 @@ where
                     transaction,
                     transaction_id,
                     propagate,
-                    timestamp: Instant::now(),
+                    timestamp,
                     origin,
                     authority_ids: authorities.map(|auths| self.get_sender_ids(auths)),
                 };
@@ -676,12 +677,13 @@ where
         // Collect results and metadata while holding the pool write lock
         let (mut results, added_metas, discarded) = {
             let mut pool = self.pool.write();
+            let timestamp = Instant::now();
             let mut added_metas = Vec::new();
 
             let results = transactions
                 .into_iter()
                 .map(|(origin, tx)| {
-                    let (result, meta) = self.add_transaction(&mut pool, origin, tx);
+                    let (result, meta) = self.add_transaction(&mut pool, origin, tx, timestamp);
 
                     // Only collect metadata for successful insertions
                     if result.is_ok() &&
