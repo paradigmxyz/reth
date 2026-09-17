@@ -43,6 +43,7 @@ reth-ethereum-primitives.workspace = true
 
 [features]
 default = ["std"]
+gmp = ["evm2/gmp"]
 asm-keccak = [
     "evm2/asm-keccak",
     "reth-execution-types/asm-keccak",

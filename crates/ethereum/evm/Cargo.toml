@@ -41,6 +41,7 @@ secp256k1.workspace = true
 alloy-genesis.workspace = true
 
 [features]
+gmp = ["evm2/gmp", "reth-evm/gmp"]
 default = ["std"]
 asm-keccak = [
     "evm2/asm-keccak",

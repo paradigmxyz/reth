@@ -94,6 +94,7 @@ reth-rpc-layer.workspace = true
 
 [features]
 default = []
+gmp = ["evm2/gmp", "reth-evm/gmp", "reth-evm-ethereum/gmp"]
 jit = ["reth-evm-ethereum/jit"]
 asm-keccak = [
     "alloy-primitives/asm-keccak",
