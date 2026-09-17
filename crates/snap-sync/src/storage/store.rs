@@ -241,7 +241,8 @@ pub(crate) fn persisted_storage_root(tx: &impl DbTx, account: B256) -> Result<B2
 mod tests {
     use super::*;
     use crate::test_utils::{
-        account, generation, hashed_factory, state_root, storage_root_of, stored_slots,
+        account, generation, hashed_factory, insert_generation_headers, state_root,
+        storage_root_of, stored_slots,
     };
     use reth_provider::{
         test_utils::MockNodeTypesWithDB, DatabaseProviderFactory, ProviderFactory,
@@ -270,6 +271,7 @@ mod tests {
     // An attempt whose account coverage has not reached the contract yet.
     fn started() -> (ProviderFactory<MockNodeTypesWithDB>, SnapWrite) {
         let factory = hashed_factory();
+        insert_generation_headers(&factory);
         let provider = factory.database_provider_rw().unwrap();
         let mut contract = account(1);
         contract.storage_root = root();

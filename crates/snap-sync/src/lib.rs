@@ -38,8 +38,8 @@
 
 mod account;
 mod attempt;
-mod bal;
 mod bytecode;
+mod catch_up;
 mod common;
 mod error;
 mod generation;
@@ -54,8 +54,11 @@ pub use account::{
     AccountCoverage, AccountRangeDownload, AccountRangeStep, SnapAccountStore, VerifiedRange,
 };
 pub use attempt::{SnapAttemptStore, SnapWrite};
-pub use bal::{BalStateUpdate, DownloadedAccount};
 pub use bytecode::{BytecodeDownload, BytecodeStep, SnapBytecodeStore, DEFAULT_CODE_HASHES};
+pub use catch_up::{
+    BalStateUpdate, BlockAccessListCatchUp, CatchUpProgress, CatchUpStep, DownloadedAccount,
+    SnapCatchUpStore, DEFAULT_BAL_RESPONSE_BYTES, DEFAULT_CATCH_UP_BLOCKS,
+};
 pub use common::{DEFAULT_RESPONSE_BYTES, MAX_HASH};
 pub use error::SnapSyncError;
 pub use generation::{SnapGeneration, SnapPhase};
