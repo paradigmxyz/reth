@@ -170,12 +170,10 @@ impl<T: PoolTransaction + 'static> BlobFetcher<T> {
         // on the old custody set (EIP-8070 ?engine_forkchoiceUpdatedV4).
         let custody = BlobCellMask::new(self.custody.get());
         for pending in self.pending.values_mut() {
-            if pending.full == Some(false) {
-                if let Some(target) = pending.target {
-                    let expanded = custody.bits() & !target.bits();
-                    if expanded != 0 {
-                        pending.target = Some(BlobCellMask::from_bits(target.bits() | expanded));
-                    }
+            if pending.full == Some(false) && let Some(target) = pending.target {
+                let expanded = custody.bits() & !target.bits();
+                if expanded != 0 {
+                    pending.target = Some(BlobCellMask::from_bits(target.bits() | expanded));
                 }
             }
         }
