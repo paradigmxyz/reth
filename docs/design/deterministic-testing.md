@@ -117,6 +117,28 @@ routing in the ordinary crates that expose those boundaries. Default node builds
 task, cache, transport, entropy, and Rayon implementations and have no normal dependency on
 Commonware, txgen, abi-fuzz, or `reth-dst`.
 
+The system campaign is complemented by continuous component campaigns at trust boundaries that a
+normal node workload does not invoke adversarially. `reth-dst-witness` maintains arbitrary valid
+hashed trie state through insert, update, and delete actions. It checks that a flat execution
+witness reconstructs into a sparse trie that exposes every modeled value and matches the database
+state root. It also generates honest MPT proofs, mutates their nodes and claimed values, and checks
+verifier soundness against the campaign's authoritative key/value model. This covers trie shapes
+that cannot be reached economically by grinding Keccak preimages through transactions, and
+malformed artifacts that an honest local node would never produce.
+
+```console
+RETH_DST_SEED=0 RETH_DST_CASES=100000 RETH_DST_STEPS=64 \
+  cargo run -p reth-dst-runner --release --features dst --bin reth-dst-witness
+```
+
+Set `RETH_DST_ORACLE=witness` or `RETH_DST_ORACLE=proof` to isolate one boundary during triage.
+
+Component actions describe general state changes and wire-level corruptions. They do not select
+node encodings, branch layouts, or historical regression cases. Local key mutation gives the
+campaign both clustered and unrelated paths; the trie implementation decides which extension,
+branch, leaf, hashed, and inline nodes result. An accepted proof must agree with the model even if a
+mutation happens to leave it valid.
+
 This slice controls workload actions, transaction count, virtual-time advances, link state, wire
 corruption, node crashes, Commonware ready-batch order, and modeled MDBX results. The scheduler,
 workload, and database adapter share the semantic controller, so replay checks the runnable set and

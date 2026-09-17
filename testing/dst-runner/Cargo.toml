@@ -28,7 +28,9 @@ alloy-eips.workspace = true
 alloy-genesis.workspace = true
 alloy-primitives.workspace = true
 alloy-rpc-types-engine.workspace = true
+alloy-rlp.workspace = true
 alloy-signer.workspace = true
+alloy-trie.workspace = true
 commonware-runtime = { workspace = true, features = ["test-utils"] }
 crossbeam-channel.workspace = true
 futures.workspace = true
@@ -67,13 +69,21 @@ reth-prune.workspace = true
 reth-rayon.workspace = true
 reth-stages.workspace = true
 reth-storage-errors.workspace = true
+reth-storage-api.workspace = true
 reth-storage-overlay.workspace = true
 reth-tasks.workspace = true
 reth-transaction-pool = { workspace = true, features = ["test-utils"] }
 reth-trie.workspace = true
+reth-trie-db.workspace = true
+reth-trie-sparse = { workspace = true, features = ["std"] }
 reth-tracing.workspace = true
 
 [[bin]]
 name = "reth-dst-node"
 path = "src/main.rs"
+required-features = ["dst"]
+
+[[bin]]
+name = "reth-dst-witness"
+path = "src/bin/reth-dst-witness.rs"
 required-features = ["dst"]
