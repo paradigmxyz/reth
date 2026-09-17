@@ -983,6 +983,7 @@ where
         if ready.is_empty() {
             return Ok(())
         }
+        ready.sort_unstable();
 
         let inline_round = job_units <= INLINE_STORAGE_WORK_UNITS;
         let new_epoch = self.new_epoch;
