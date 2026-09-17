@@ -28,7 +28,7 @@ use super::{
 };
 use alloy_eip7928::{
     bal::{Bal, DecodedBal},
-    compute_block_access_list_hash, BlockAccessList,
+    compute_block_access_list_hash, BlockAccessIndex, BlockAccessList,
 };
 use alloy_primitives::Address;
 use crossbeam_channel::{Receiver, Sender};
@@ -158,6 +158,9 @@ where
             Err(error) => return Err(error.into()),
         };
         canonical_executor.validate_transaction_gas_limit(output.tx_gas_limit)?;
+        canonical_executor.set_block_access_index(BlockAccessIndex::from_tx_index(
+            canonical_executor.receipts().len() as u64,
+        ));
         canonical_executor.commit_transaction(output.result)?;
         senders.push(output.signer);
 
