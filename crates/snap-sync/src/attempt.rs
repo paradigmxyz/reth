@@ -4,7 +4,7 @@
 //! attempt produced it. Every write presents a [`SnapWrite`]; ones that no longer match are
 //! refused.
 
-use crate::{SnapGeneration, SnapSyncError};
+use crate::{CatchUpProgress, SnapCatchUpStore, SnapGeneration, SnapSyncError};
 use reth_storage_api::{
     MetadataProvider, MetadataWriter, SnapAttempt, SnapAttemptId, StorageSettings,
 };
@@ -14,7 +14,8 @@ use reth_storage_api::{
 /// Blanket-implemented over node metadata access, so these writes join the caller's transaction:
 /// state, bytecode and the attempt record commit together or not at all.
 pub trait SnapAttemptStore {
-    /// Starts an attempt anchored to `generation`, superseding any already recorded.
+    /// Starts an attempt anchored to `generation`, superseding any already recorded, with its
+    /// catch-up progress at that pivot.
     fn start_snap_attempt(&self, generation: SnapGeneration) -> Result<SnapWrite, SnapSyncError>
     where
         Self: MetadataWriter;
@@ -26,6 +27,8 @@ pub trait SnapAttemptStore {
     fn authorize_snap_write(&self, write: SnapWrite) -> Result<SnapAttempt, SnapSyncError>;
 
     /// Re-anchors the attempt to `generation`, refusing writes proved against the previous root.
+    ///
+    /// The new pivot must not be below the last block whose list is applied.
     fn advance_snap_pivot(
         &self,
         write: SnapWrite,
@@ -84,6 +87,8 @@ impl<T: MetadataProvider> SnapAttemptStore for T {
         let attempt =
             SnapAttempt::start(self.snap_attempt()?, generation.target(), generation.state_root());
         self.write_snap_attempt(&attempt)?;
+        // Ranges committed at this pivot need every list after it, however far the pivot moves.
+        CatchUpProgress::at_pivot(attempt.pivot()).write(self, attempt.id())?;
         Ok(SnapWrite::of(&attempt))
     }
 
@@ -110,6 +115,15 @@ impl<T: MetadataProvider> SnapAttemptStore for T {
         Self: MetadataWriter,
     {
         let mut attempt = self.authorize_snap_write(write)?;
+        // Ranges downloaded at the new pivot would already hold the applied blocks' changes.
+        if let Some(progress) = self.catch_up_progress(write)? &&
+            generation.target().number < progress.applied().number
+        {
+            return Err(SnapSyncError::PivotBelowApplied {
+                applied: progress.applied().number,
+                pivot: generation.target().number,
+            })
+        }
         attempt.re_anchor(generation.target(), generation.state_root());
         self.write_snap_attempt(&attempt)?;
         Ok(SnapWrite::of(&attempt))

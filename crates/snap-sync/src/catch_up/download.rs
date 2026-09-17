@@ -255,7 +255,6 @@ mod tests {
         provider.start_account_coverage(write).unwrap();
         let range = verified_range(accounts, 0..accounts.len(), B256::ZERO, &[]);
         provider.commit_account_range(write, &range, Default::default(), Vec::new()).unwrap();
-        provider.start_catch_up_progress(write).unwrap();
         let tip = SnapGeneration::new(chain.tip(), state_root(accounts));
         let write = provider.advance_snap_pivot(write, tip).unwrap();
         provider.commit().unwrap();
@@ -429,7 +428,6 @@ mod tests {
         chain.insert_headers(&factory);
         let provider = factory.database_provider_rw().unwrap();
         let write = provider.start_snap_attempt(chain.generation(state_root(&accounts()))).unwrap();
-        provider.start_catch_up_progress(write).unwrap();
         provider.commit().unwrap();
         let (client, mut catch_up) = catch_up([], factory);
 
@@ -448,7 +446,6 @@ mod tests {
         let provider = factory.database_provider_rw().unwrap();
         let write = provider.start_snap_attempt(chain.generation(state_root(&accounts))).unwrap();
         provider.start_account_coverage(write).unwrap();
-        provider.start_catch_up_progress(write).unwrap();
         provider.commit().unwrap();
         let (_, mut catch_up) = catch_up([], factory);
 

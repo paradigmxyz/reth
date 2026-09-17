@@ -68,6 +68,14 @@ pub enum SnapSyncError {
         /// Block the list was applied for.
         block: u64,
     },
+    /// The pivot was moved below the last block whose list is applied.
+    #[error("pivot {pivot} is below applied block {applied}")]
+    PivotBelowApplied {
+        /// Last block whose list is applied.
+        applied: u64,
+        /// Block the pivot was moved to.
+        pivot: u64,
+    },
     /// A list was applied for a block building on another chain than the applied state.
     #[error("block access list for a block building on {got}, the applied state is at {expected}")]
     ForkedBlock {

@@ -24,12 +24,6 @@ use serde::{Deserialize, Serialize};
 /// Blanket-implemented over the node's writers, so the state a list changes, the code it deploys
 /// and the progress it advances join the caller's transaction and commit together or not at all.
 pub trait SnapCatchUpStore {
-    /// Returns the progress recorded for the attempt `write` belongs to, recording the attempt's
-    /// pivot when there is none.
-    fn start_catch_up_progress(&self, write: SnapWrite) -> Result<CatchUpProgress, SnapSyncError>
-    where
-        Self: MetadataWriter;
-
     /// Returns the progress recorded for the attempt `write` belongs to, if any.
     fn catch_up_progress(&self, write: SnapWrite)
         -> Result<Option<CatchUpProgress>, SnapSyncError>;
@@ -103,6 +97,15 @@ impl CatchUpProgress {
         }
         Ok(Self { applied: block })
     }
+
+    /// Persists this progress as `attempt`'s record.
+    pub(crate) fn write(
+        &self,
+        provider: &impl MetadataWriter,
+        attempt: SnapAttemptId,
+    ) -> Result<(), SnapSyncError> {
+        StoredCatchUpProgress::new(attempt, *self).write(provider)
+    }
 }
 
 // The progress record as persisted, tied to the attempt that recorded it.
@@ -140,20 +143,6 @@ impl StoredCatchUpProgress {
 }
 
 impl<T: MetadataProvider> SnapCatchUpStore for T {
-    // Resumes the recorded progress, so restarting an attempt re-applies nothing.
-    fn start_catch_up_progress(&self, write: SnapWrite) -> Result<CatchUpProgress, SnapSyncError>
-    where
-        Self: MetadataWriter,
-    {
-        if let Some(progress) = self.catch_up_progress(write)? {
-            return Ok(progress)
-        }
-        // The downloaded state is anchored at the pivot, so its list is applied by construction.
-        let progress = CatchUpProgress::at_pivot(self.authorize_snap_write(write)?.pivot());
-        StoredCatchUpProgress::new(write.attempt(), progress).write(self)?;
-        Ok(progress)
-    }
-
     // A record left by another attempt reads as no progress.
     fn catch_up_progress(
         &self,
@@ -272,7 +261,7 @@ impl<T: MetadataProvider> SnapCatchUpStore for T {
         }
         self.commit_bytecodes(write, bytecodes.into_iter().collect())?;
         self.write_hashed_state(&state.into_sorted())?;
-        StoredCatchUpProgress::new(write.attempt(), advanced).write(self)?;
+        advanced.write(self, write.attempt())?;
         Ok(advanced)
     }
 }
@@ -348,7 +337,6 @@ mod tests {
                 Vec::new(),
             )
             .unwrap();
-        provider.start_catch_up_progress(write).unwrap();
         let write =
             provider.advance_snap_pivot(write, generation(2, state_root(accounts))).unwrap();
         provider.commit().unwrap();
@@ -378,14 +366,15 @@ mod tests {
     }
 
     #[test]
-    fn progress_starts_at_the_pivot_and_resumes_where_it_left_off() {
+    fn progress_starts_at_the_first_pivot_and_resumes_where_it_left_off() {
         let accounts = accounts();
         let (factory, write) = started(&accounts, accounts.len());
         let provider = factory.database_provider_rw().unwrap();
         let (block, parent) = block(2);
 
+        // The pivot moved to block 2, but ranges committed at block 1 still need its list.
         assert_eq!(
-            provider.start_catch_up_progress(write).unwrap().applied(),
+            provider.catch_up_progress(write).unwrap().unwrap().applied(),
             generation(1, B256::ZERO).target()
         );
 
@@ -394,7 +383,21 @@ mod tests {
         assert_eq!(progress.applied(), block);
         assert_eq!(progress.next(), 3);
         // Restarting the attempt re-applies nothing.
-        assert_eq!(provider.start_catch_up_progress(write).unwrap(), progress);
+        assert_eq!(provider.catch_up_progress(write).unwrap(), Some(progress));
+    }
+
+    #[test]
+    fn a_pivot_below_the_applied_block_is_refused() {
+        let accounts = accounts();
+        let (factory, write) = started(&accounts, accounts.len());
+        let provider = factory.database_provider_rw().unwrap();
+        let (block, parent) = block(2);
+        provider.commit_block_access_list(write, block, parent, &credit(10)).unwrap();
+
+        let refused = provider.advance_snap_pivot(write, generation(1, state_root(&accounts)));
+
+        assert!(matches!(refused, Err(SnapSyncError::PivotBelowApplied { applied: 2, pivot: 1 })));
+        provider.authorize_snap_write(write).unwrap();
     }
 
     #[test]
