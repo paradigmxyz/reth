@@ -1390,6 +1390,29 @@ mod tests {
     use revm::state::{AccountInfo, AccountStatus, EvmState, EvmStorageSlot, TransactionId};
 
     #[test]
+    fn custom_root_preserves_replacement_hashed_state() {
+        let replacement = Arc::new(HashedPostState::default());
+        let returned = replacement.clone();
+        let root = B256::repeat_byte(7);
+        let mut job = CustomStateRootJob::<EthPrimitives> {
+            callback: Arc::new(move |_| {
+                Ok(StateRootJobOutcome::new(root, Arc::new(TrieUpdates::default()))
+                    .with_hashed_state(Some(returned.clone())))
+            }),
+            parent_block: SealedHeader::seal_slow(Default::default()),
+        };
+        let block = TestBlockBuilder::eth().get_executed_blocks(1..2).next().unwrap();
+        let output = Arc::new(BlockExecutionOutput {
+            result: Default::default(),
+            state: Default::default(),
+        });
+        let fallback = reth_tasks::LazyHandle::ready(Arc::new(HashedPostState::default()));
+        let outcome = job.finish(block.recovered_block(), output, &fallback).unwrap();
+        assert_eq!(outcome.state_root, root);
+        assert!(Arc::ptr_eq(outcome.hashed_state.as_ref().unwrap(), &replacement));
+    }
+
+    #[test]
     fn sparse_trie_prune_before_uses_requested_range() {
         let new_epoch = TrieNodeEpoch::new(10);
         assert_eq!(sparse_trie_prune_before::<EthPrimitives>(None, new_epoch), None);
