@@ -218,14 +218,6 @@ impl<T: PoolTransaction + 'static> BlobFetcher<T> {
                         custody.count() >= 64 ||
                         rand::random_range(0..100u8) < self.probability
                 });
-                let full_providers =
-                    pending.providers.iter().filter(|(_, mask)| mask.bits() == u128::MAX).count();
-                // Geth waits for two distinct full-provider announcements before entering the
-                // sampler path. After the availability timeout, continue with whatever providers
-                // are available rather than stalling the transaction indefinitely.
-                if !full && full_providers < 2 && now.duration_since(pending.created) < WAIT {
-                    continue
-                }
                 if first_decision {
                     if full {
                         self.metrics.full.increment(1);
@@ -234,12 +226,11 @@ impl<T: PoolTransaction + 'static> BlobFetcher<T> {
                     }
                 }
                 pending.target = if full {
-                    // Match Geth's eager/full path: request the 64 data cells needed for
-                    // reconstruction, rather than all 128 extended cells.
+                    // Request the 64 data cells needed for reconstruction, rather than all 128
+                    // extended cells.
                     let available = pending
                         .providers
                         .iter()
-                        .filter(|(_, provider)| provider.bits() == u128::MAX)
                         .fold(pending.received, |mask, (_, provider)| mask | provider.bits());
                     let mut selected = pending.received;
                     for index in BlobCellMask::from_bits(available & !pending.received)
@@ -472,7 +463,7 @@ mod tests {
         fetcher.announce(hash, first, all);
         assert!(fetcher.poll(&mut cx, &peers).is_pending());
         let PeerRequest::GetCells { request, .. } = rx1.try_recv().unwrap() else {
-            panic!("expected custody sample")
+            panic!("expected sample")
         };
         let requested = u128::from_le_bytes(request.cell_mask.into());
         assert_eq!(requested & bits, bits);
