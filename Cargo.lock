@@ -8652,7 +8652,6 @@ version = "2.5.2"
 dependencies = [
  "alloy-consensus",
  "alloy-primitives",
- "alloy-rlp",
  "alloy-rpc-types-engine",
  "eyre",
  "futures",
@@ -10058,6 +10057,7 @@ dependencies = [
  "reth-consensus",
  "reth-consensus-common",
  "reth-db-api",
+ "reth-db-common",
  "reth-engine-primitives",
  "reth-errors",
  "reth-ethereum-engine-primitives",
@@ -10081,6 +10081,7 @@ dependencies = [
  "reth-rpc-eth-types",
  "reth-rpc-server-types",
  "reth-storage-api",
+ "reth-storage-overlay",
  "reth-tasks",
  "reth-testing-utils",
  "reth-transaction-pool",

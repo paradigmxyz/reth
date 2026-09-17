@@ -9,9 +9,9 @@ pub const DEFAULT_PERSISTENCE_THRESHOLD: u64 = 50;
 /// Number of persisted blocks whose state/trie writes are masked by an in-memory suffix.
 pub const DEFAULT_NUM_STATE_MASKING_BLOCKS: u64 = 30;
 
-/// Maximum number of blocks beyond the in-memory buffer target awaiting persistence before engine
-/// API processing is stalled.
-pub const DEFAULT_PERSISTENCE_BACKPRESSURE_THRESHOLD: u64 = DEFAULT_PERSISTENCE_THRESHOLD * 2;
+/// The engine stalls API processing when this many blocks are awaiting persistence beyond the
+/// in-memory buffer target.
+pub const MIN_PERSISTENCE_BACKPRESSURE_THRESHOLD: u64 = 16;
 
 /// How close to the canonical head we persist blocks.
 pub const DEFAULT_MEMORY_BLOCK_BUFFER_TARGET: u64 = 5;
@@ -225,7 +225,7 @@ impl Default for TreeConfig {
     fn default() -> Self {
         assert_backpressure_threshold_invariant(
             DEFAULT_PERSISTENCE_THRESHOLD,
-            DEFAULT_PERSISTENCE_BACKPRESSURE_THRESHOLD,
+            DEFAULT_PERSISTENCE_THRESHOLD * 2,
         );
         assert_state_masking_invariant(
             DEFAULT_PERSISTENCE_THRESHOLD,
@@ -236,7 +236,7 @@ impl Default for TreeConfig {
             persistence_threshold: DEFAULT_PERSISTENCE_THRESHOLD,
             num_state_masking_blocks: DEFAULT_NUM_STATE_MASKING_BLOCKS,
             memory_block_buffer_target: DEFAULT_MEMORY_BLOCK_BUFFER_TARGET,
-            persistence_backpressure_threshold: DEFAULT_PERSISTENCE_BACKPRESSURE_THRESHOLD,
+            persistence_backpressure_threshold: DEFAULT_PERSISTENCE_THRESHOLD * 2,
             block_buffer_limit: DEFAULT_BLOCK_BUFFER_LIMIT,
             max_invalid_header_cache_length: DEFAULT_MAX_INVALID_HEADER_CACHE_LENGTH,
             invalid_header_hit_eviction_threshold: DEFAULT_INVALID_HEADER_HIT_EVICTION_THRESHOLD,

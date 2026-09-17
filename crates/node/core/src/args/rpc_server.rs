@@ -1039,6 +1039,19 @@ mod tests {
     }
 
     #[test]
+    fn parse_bal_cache_modes() {
+        for (flag, cache_computed, prewarm) in [
+            ("--rpc-cache.cache-computed-bals", true, None),
+            ("--rpc-cache.prewarm-bals", false, Some(0)),
+            ("--rpc-cache.prewarm-bals=10", false, Some(10)),
+        ] {
+            let args = CommandParser::<RpcServerArgs>::parse_from(["reth", flag]).args;
+            assert_eq!(args.rpc_state_cache.cache_computed_bals, cache_computed);
+            assert_eq!(args.rpc_state_cache.prewarm_bals, prewarm);
+        }
+    }
+
+    #[test]
     fn test_rpc_server_args_parser() {
         let args =
             CommandParser::<RpcServerArgs>::parse_from(["reth", "--http.api", "eth,admin,debug"])
@@ -1221,6 +1234,8 @@ mod tests {
                 max_receipts: 2000,
                 max_headers: 1000,
                 max_bals: 1000,
+                cache_computed_bals: true,
+                prewarm_bals: Some(0),
                 max_concurrent_db_requests: 512,
                 max_cached_tx_hashes: 100_000,
             },
@@ -1313,6 +1328,8 @@ mod tests {
             "1000",
             "--rpc-cache.max-bals",
             "1000",
+            "--rpc-cache.cache-computed-bals",
+            "--rpc-cache.prewarm-bals",
             "--rpc-cache.max-concurrent-db-requests",
             "512",
             "--gpo.blocks",

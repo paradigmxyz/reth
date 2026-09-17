@@ -1,8 +1,8 @@
 //! Downloads the storage of an account range's contracts, committing every verified response.
 
 use crate::{
-    SnapStorageStore, SnapSyncError, SnapWrite, StorageChunk, StorageProgress, VerifiedRange,
-    DEFAULT_RESPONSE_BYTES, MAX_HASH,
+    common::DownloadContext, SnapStorageStore, SnapSyncError, StorageChunk, StorageProgress,
+    VerifiedRange, MAX_HASH,
 };
 use alloy_primitives::B256;
 use reth_db_api::transaction::DbTxMut;
@@ -15,7 +15,6 @@ use reth_network_peers::PeerId;
 use reth_storage_api::{
     DBProvider, DatabaseProviderFactory, MetadataProvider, MetadataWriter, StateWriter,
 };
-use reth_storage_errors::provider::ProviderError;
 use reth_tasks::Runtime;
 use std::fmt;
 
@@ -27,33 +26,23 @@ pub const DEFAULT_STORAGE_ACCOUNTS: usize = 128;
 /// Every verified response is committed before the next request, so at most one response is held
 /// however large a contract is, and a download resumes from the persisted progress.
 pub struct StorageRangeDownload<C, F> {
-    client: C,
-    factory: F,
-    // Proof verification and commits run on the blocking pool.
-    runtime: Runtime,
-    response_bytes: u64,
+    context: DownloadContext<C, F>,
     // Contracts asked for per request.
     max_accounts: usize,
-    // Distinguishes responses to reissued requests.
-    request_id: u64,
 }
 
 impl<C, F> StorageRangeDownload<C, F> {
     /// Creates a download that continues from the progress the store records.
     pub const fn new(client: C, factory: F, runtime: Runtime) -> Self {
         Self {
-            client,
-            factory,
-            runtime,
-            response_bytes: DEFAULT_RESPONSE_BYTES,
+            context: DownloadContext::new(client, factory, runtime),
             max_accounts: DEFAULT_STORAGE_ACCOUNTS,
-            request_id: 0,
         }
     }
 
     /// Returns this download asking peers for at most `response_bytes` per response.
     pub const fn with_response_bytes(mut self, response_bytes: u64) -> Self {
-        self.response_bytes = response_bytes;
+        self.context.set_response_bytes(response_bytes);
         self
     }
 
@@ -77,7 +66,8 @@ where
     /// can commit without supplying their storage. A failed request leaves the progress in place.
     pub async fn next(&mut self, range: &VerifiedRange) -> Result<StorageRangeStep, SnapSyncError> {
         let (write, origin) = (range.write(), range.origin());
-        let progress = self.factory.database_provider_ro()?.storage_progress(write, origin)?;
+        let progress =
+            self.context.factory().database_provider_ro()?.storage_progress(write, origin)?;
         let contracts = range.range().storage_batch();
         let Some(first) =
             contracts.accounts().iter().position(|(account, _)| !progress.is_complete(*account))
@@ -88,20 +78,19 @@ where
         let batch = contracts.range(first..end).expect("positions are inside the batch");
         let from = progress.resume_at(batch.accounts()[0].0).expect("first contract is incomplete");
 
-        self.request_id = self.request_id.wrapping_add(1);
         let request = GetStorageRangesMessage {
-            request_id: self.request_id,
+            request_id: self.context.next_request_id(),
             root_hash: batch.state_root(),
             account_hashes: batch.accounts().iter().map(|(account, _)| *account).collect(),
             starting_hash: from.into(),
             limit_hash: MAX_HASH.into(),
-            response_bytes: self.response_bytes,
+            response_bytes: self.context.response_bytes(),
         };
         let downloader = StorageRangeDownloader::new(
-            self.client.clone(),
+            self.context.client().clone(),
             request,
             &batch,
-            self.runtime.clone(),
+            self.context.runtime().clone(),
         )?;
         let ranges = match downloader.await? {
             StorageRangeOutcome::Verified(ranges) => ranges,
@@ -110,39 +99,27 @@ where
             }
         };
         let chunks = chunks(ranges, batch, from)?;
-        self.commit(write, origin, chunks).await.map(StorageRangeStep::Committed)
-    }
-
-    // Commits one response's chunks together.
-    async fn commit(
-        &self,
-        write: SnapWrite,
-        origin: B256,
-        chunks: Vec<StorageChunk>,
-    ) -> Result<StorageProgress, SnapSyncError> {
-        let factory = self.factory.clone();
-        self.runtime
-            .spawn_blocking(move || -> Result<StorageProgress, SnapSyncError> {
-                let provider = factory.database_provider_rw()?;
+        // One response's chunks commit together.
+        let committed = self
+            .context
+            .commit(move |provider| {
                 let mut progress = StorageProgress::START;
                 for chunk in chunks {
                     progress = provider.commit_storage_chunk(write, origin, chunk)?;
                 }
-                provider.commit()?;
                 Ok(progress)
             })
-            .await
-            .map_err(|error| SnapSyncError::Provider(ProviderError::other(error)))?
+            .await?;
+        Ok(StorageRangeStep::Committed(committed))
     }
 }
 
 impl<C, F> fmt::Debug for StorageRangeDownload<C, F> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("StorageRangeDownload")
-            .field("response_bytes", &self.response_bytes)
+            .field("context", &self.context)
             .field("max_accounts", &self.max_accounts)
-            .field("request_id", &self.request_id)
-            .finish_non_exhaustive()
+            .finish()
     }
 }
 
