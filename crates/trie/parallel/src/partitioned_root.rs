@@ -35,6 +35,14 @@ const PROGRESS_BATCH: u64 = 1 << 16;
 /// Each partition opens a provider of its own. Every branch node that belongs in the trie tables is
 /// passed to a [`TrieSink`], along with the progress of the walk.
 ///
+/// # Consistency
+///
+/// `reth-libmdbx` serializes all access to a transaction, so the partitions cannot share one. With
+/// a [`HashedStateFactory`] over a [`ProviderFactory`](reth_provider::ProviderFactory), each
+/// partition reads the latest committed state through its own read transaction. The hashed state
+/// must be committed and must not change during the build, e.g. because the caller holds a
+/// [`DatabaseProviderRW`](reth_provider::DatabaseProviderRW) that it commits only afterwards.
+///
 /// The account trie is split into sixteen partitions, one per first nibble, each built by its own
 /// [`HashBuilder`] in parallel on the [`Runtime`]'s CPU pool. Large storage tries are partitioned
 /// the same way.
@@ -192,6 +200,9 @@ where
 ///
 /// The providers have long-lived read transaction safety, such as the transaction timeout,
 /// disabled, since [`PartitionedStateRoot`] keeps each read transaction open for the whole build.
+///
+/// Each provider opens a new read transaction, see the
+/// [consistency section](PartitionedStateRoot#consistency) of [`PartitionedStateRoot`].
 #[derive(Debug, Clone)]
 pub struct HashedStateFactory<F>(F);
 
