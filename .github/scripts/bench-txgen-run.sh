@@ -828,3 +828,7 @@ fi
 if [ "$EXECUTION_MODE" != "call" ]; then
   python3 .github/scripts/bench-txgen-report-to-reth-csv.py "$OUTPUT_DIR/report.json" "$OUTPUT_DIR"
 fi
+
+if [ "$EXECUTION_MODE" = "call" ]; then
+  python3 .github/scripts/bench-capture-traces.py "$TXGEN_PAYLOADS_DIR" "$OUTPUT_DIR"
+fi
