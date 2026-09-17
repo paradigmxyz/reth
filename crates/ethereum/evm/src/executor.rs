@@ -297,7 +297,6 @@ where
         commit: impl FnOnce(&evm2::TxResult<T>) -> reth_evm::CommitChanges,
     ) -> Result<Option<GasOutput>, BlockExecutionError> {
         let (transaction, tx) = transaction.into_parts();
-        let tx_hash = *tx.tx().tx_hash();
         self.set_transaction_block_access_index();
         self.validate_transaction_gas_limit(tx.tx().gas_limit())?;
         let blob_gas_used = tx.tx().blob_gas_used().unwrap_or_default();
@@ -310,7 +309,7 @@ where
             &transaction,
             commit,
         )
-        .map_err(|error| map_transaction_execution_error(error, tx_hash))?
+        .map_err(|error| map_transaction_execution_error(error, *tx.tx().tx_hash()))?
         else {
             return Ok(None);
         };
@@ -334,14 +333,13 @@ where
         transaction: impl ExecutorTx<Self>,
     ) -> Result<Self::TransactionResultWithState, BlockExecutionError> {
         let (transaction, tx) = transaction.into_parts();
-        let tx_hash = *tx.tx().tx_hash();
         self.set_transaction_block_access_index();
         let transaction_gas_limit = tx.tx().gas_limit();
         self.validate_transaction_gas_limit(transaction_gas_limit)?;
         let blob_gas_used = tx.tx().blob_gas_used().unwrap_or_default();
         let tx_type = tx.tx().tx_type();
         let result = execute_transaction_without_commit(&mut self.evm, &transaction)
-            .map_err(|err| map_transaction_execution_error(err, tx_hash))?;
+            .map_err(|err| map_transaction_execution_error(err, *tx.tx().tx_hash()))?;
         Ok(EthTransactionResultWithState::new(result, tx_type, blob_gas_used))
     }
 
