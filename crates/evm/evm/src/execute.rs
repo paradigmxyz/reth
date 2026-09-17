@@ -401,10 +401,10 @@ pub trait BlockExecutor: Sized {
     /// Returns the underlying EVM mutably.
     fn evm_mut(&mut self) -> &mut Self::Evm;
 
-    /// Sets a hook for streamed hashed state updates emitted during block execution.
+    /// Sets a hook for streamed native state updates emitted during block execution.
     ///
     /// Returns `true` if the hook was installed.
-    fn set_state_hook(&mut self, _hook: impl FnMut(HashedPostState) + Send + 'static) -> bool {
+    fn set_state_hook(&mut self, _hook: impl FnMut(EvmState) + Send + 'static) -> bool {
         false
     }
 
@@ -705,10 +705,10 @@ pub trait BlockBuilder: Sized {
         ) -> Result<Option<(B256, TrieUpdates)>, BlockExecutionError>,
     ) -> Result<BlockBuilderOutcome<Self::Primitives>, BlockExecutionError>;
 
-    /// Sets a hook for streamed hashed state updates emitted while building a block.
+    /// Sets a hook for streamed native state updates emitted while building a block.
     ///
     /// Returns `true` if the hook was installed.
-    fn set_state_hook(&mut self, _hook: impl FnMut(HashedPostState) + Send + 'static) -> bool {
+    fn set_state_hook(&mut self, _hook: impl FnMut(EvmState) + Send + 'static) -> bool {
         false
     }
 
@@ -887,7 +887,7 @@ where
         })
     }
 
-    fn set_state_hook(&mut self, hook: impl FnMut(HashedPostState) + Send + 'static) -> bool {
+    fn set_state_hook(&mut self, hook: impl FnMut(EvmState) + Send + 'static) -> bool {
         self.executor.set_state_hook(hook)
     }
 
@@ -917,14 +917,14 @@ pub trait Executor<DB: Database>: Sized {
         block: &RecoveredBlock<<Self::Primitives as NodePrimitives>::Block>,
     ) -> Result<BlockExecutionResult<<Self::Primitives as NodePrimitives>::Receipt>, Self::Error>;
 
-    /// Executes a single block and streams hashed state updates to the provided hook.
+    /// Executes a single block and streams native state updates to the provided hook.
     fn execute_one_with_state_hook<F>(
         &mut self,
         block: &RecoveredBlock<<Self::Primitives as NodePrimitives>::Block>,
         state_hook: F,
     ) -> Result<BlockExecutionResult<<Self::Primitives as NodePrimitives>::Receipt>, Self::Error>
     where
-        F: FnMut(HashedPostState) + Send + 'static;
+        F: FnMut(EvmState) + Send + 'static;
 
     /// Consumes the type and executes the block.
     fn execute(
@@ -937,7 +937,7 @@ pub trait Executor<DB: Database>: Sized {
         Ok(BlockExecutionOutput::new(result, state.into_execution_state()))
     }
 
-    /// Consumes the type, executes the block, and streams hashed state updates to the provided
+    /// Consumes the type, executes the block, and streams native state updates to the provided
     /// hook.
     fn execute_with_state_hook<F>(
         mut self,
@@ -945,7 +945,7 @@ pub trait Executor<DB: Database>: Sized {
         state_hook: F,
     ) -> Result<BlockExecutionOutput<<Self::Primitives as NodePrimitives>::Receipt>, Self::Error>
     where
-        F: FnMut(HashedPostState) + Send + 'static,
+        F: FnMut(EvmState) + Send + 'static,
     {
         let result = self.execute_one_with_state_hook(block, state_hook)?;
         let state = self.into_state();
@@ -1081,7 +1081,7 @@ where
         evm_config: &Evm,
         block: &RecoveredBlock<BlockTy<Evm::Primitives>>,
         database: impl DynDatabase,
-        state_hook: Option<Box<dyn FnMut(HashedPostState) + Send>>,
+        state_hook: Option<Box<dyn FnMut(EvmState) + Send>>,
     ) -> Result<
         (BlockExecutionOutput<ReceiptTy<Evm::Primitives>>, Option<BlockAccessList>),
         BlockExecutionError,
@@ -1141,7 +1141,7 @@ where
         state_hook: F,
     ) -> Result<BlockExecutionResult<<Self::Primitives as NodePrimitives>::Receipt>, Self::Error>
     where
-        F: FnMut(HashedPostState) + Send + 'static,
+        F: FnMut(EvmState) + Send + 'static,
     {
         let (output, block_access_list) = Self::execute_block_with_database_and_state_hook(
             &self.evm_config,
@@ -1174,7 +1174,7 @@ where
         state_hook: F,
     ) -> Result<BlockExecutionOutput<<Self::Primitives as NodePrimitives>::Receipt>, Self::Error>
     where
-        F: FnMut(HashedPostState) + Send + 'static,
+        F: FnMut(EvmState) + Send + 'static,
     {
         let Self { evm_config, batch_database, batch_state, .. } = self;
         let (output, _) = Self::execute_block_with_database_and_state_hook(
@@ -1243,7 +1243,7 @@ where
         _state_hook: F,
     ) -> Result<BlockExecutionResult<<Self::Primitives as NodePrimitives>::Receipt>, Self::Error>
     where
-        F: FnMut(HashedPostState) + Send + 'static,
+        F: FnMut(EvmState) + Send + 'static,
     {
         Err(BlockExecutionError::msg("block execution is unsupported by this EVM configuration"))
     }
@@ -1254,7 +1254,7 @@ where
         _state_hook: F,
     ) -> Result<BlockExecutionOutput<<Self::Primitives as NodePrimitives>::Receipt>, Self::Error>
     where
-        F: FnMut(HashedPostState) + Send + 'static,
+        F: FnMut(EvmState) + Send + 'static,
     {
         Err(BlockExecutionError::msg("block execution is unsupported by this EVM configuration"))
     }

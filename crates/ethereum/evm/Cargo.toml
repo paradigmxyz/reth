@@ -18,7 +18,6 @@ reth-ethereum-forks.workspace = true
 reth-primitives-traits.workspace = true
 reth-ethereum-primitives.workspace = true
 reth-evm.workspace = true
-reth-trie-common.workspace = true
 reth-storage-errors = { workspace = true, optional = true }
 evm2.workspace = true
 evm2-jit = { workspace = true, optional = true, features = ["llvm"] }
@@ -36,6 +35,7 @@ metrics = { workspace = true, optional = true }
 reth-metrics = { workspace = true, optional = true }
 
 [dev-dependencies]
+reth-trie-common.workspace = true
 reth-evm = { workspace = true, features = ["test-utils"] }
 secp256k1.workspace = true
 alloy-genesis.workspace = true

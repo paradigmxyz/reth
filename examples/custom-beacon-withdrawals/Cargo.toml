@@ -15,8 +15,6 @@ alloy-eips.workspace = true
 evm2.workspace = true
 
 eyre.workspace = true
-reth-execution-types.workspace = true
-reth-trie-common.workspace = true
 
 [lints]
 workspace = true

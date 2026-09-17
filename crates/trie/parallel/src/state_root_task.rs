@@ -444,11 +444,6 @@ impl StateRootUpdateHook {
     pub fn on_state(&mut self, state: EvmState) {
         self.inner.on_state_update(state);
     }
-
-    /// Emits an authoritative pre-hashed state update.
-    pub fn on_hashed_state_update(&mut self, state: HashedPostState) {
-        self.inner.on_hashed_state_update(state);
-    }
 }
 
 impl Drop for StateRootUpdateHook {

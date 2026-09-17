@@ -42,13 +42,11 @@ use reth_ethereum::{
     rpc::types::engine::ExecutionData,
     Block, EthPrimitives, Receipt, TransactionSigned,
 };
-use reth_execution_types::hashed_post_state_from_execution_state;
-use reth_trie_common::{HashedPostState, KeccakKeyHasher};
 
 const SYSTEM_ADDRESS: Address = address!("0xfffffffffffffffffffffffffffffffffffffffe");
 const WITHDRAWALS_ADDRESS: Address = address!("0x4200000000000000000000000000000000000000");
 
-type HashedStateHook = Arc<Mutex<Box<dyn FnMut(HashedPostState) + Send>>>;
+type StateHook = Arc<Mutex<Box<dyn FnMut(BlockStateAccumulator) + Send>>>;
 
 fn main() {
     Cli::parse_args()
@@ -254,7 +252,7 @@ impl BlockExecutorFactory for CustomBlockExecutorFactory {
             self.inner.chain_spec().as_ref(),
             self.inner.receipt_builder(),
         );
-        CustomBlockExecutor { inner, withdrawals, hashed_state_hook: None }
+        CustomBlockExecutor { inner, withdrawals, state_hook: None }
     }
 
     fn evm_factory(&self) -> &Self::EvmFactory {
@@ -273,7 +271,7 @@ impl BlockExecutorFactory for CustomBlockExecutorFactory {
 pub struct CustomBlockExecutor<'a> {
     inner: EthBlockExecutor<'a, BaseEvmTypes, &'a RethReceiptBuilder>,
     withdrawals: Option<Cow<'a, [Withdrawal]>>,
-    hashed_state_hook: Option<HashedStateHook>,
+    state_hook: Option<StateHook>,
 }
 
 impl std::fmt::Debug for CustomBlockExecutor<'_> {
@@ -301,16 +299,16 @@ impl<'a> BlockExecutor for CustomBlockExecutor<'a> {
         self.inner.evm_mut()
     }
 
-    fn set_state_hook(&mut self, hook: impl FnMut(HashedPostState) + Send + 'static) -> bool {
-        let hook: HashedStateHook = Arc::new(Mutex::new(Box::new(hook)));
+    fn set_state_hook(&mut self, hook: impl FnMut(BlockStateAccumulator) + Send + 'static) -> bool {
+        let hook: StateHook = Arc::new(Mutex::new(Box::new(hook)));
         let inner_hook = Arc::clone(&hook);
         if !self.inner.set_state_hook(move |state| {
-            let mut hook = inner_hook.lock().expect("hashed state hook mutex poisoned");
+            let mut hook = inner_hook.lock().expect("state hook mutex poisoned");
             (hook)(state);
         }) {
             return false
         }
-        self.hashed_state_hook = Some(hook);
+        self.state_hook = Some(hook);
         true
     }
 
@@ -375,13 +373,11 @@ impl<'a> BlockExecutor for CustomBlockExecutor<'a> {
         BlockExecutionError,
     > {
         let withdrawal_state = self.apply_withdrawals_contract_call()?;
-        if let Some(hook) = &self.hashed_state_hook {
-            let hashed_state =
-                hashed_post_state_from_execution_state::<KeccakKeyHasher>(&withdrawal_state.inner);
-            if !hashed_state.is_empty() {
-                let mut hook = hook.lock().expect("hashed state hook mutex poisoned");
-                (hook)(hashed_state);
-            }
+        if let Some(hook) = &self.state_hook &&
+            !withdrawal_state.inner.is_empty()
+        {
+            let mut hook = hook.lock().expect("state hook mutex poisoned");
+            (hook)(withdrawal_state.inner.clone());
         }
         let (mut output, block_access_list) = self.inner.finish_with_block_access_list()?;
 

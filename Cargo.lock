@@ -3950,8 +3950,6 @@ dependencies = [
  "evm2",
  "eyre",
  "reth-ethereum",
- "reth-execution-types",
- "reth-trie-common",
 ]
 
 [[package]]

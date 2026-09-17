@@ -380,10 +380,10 @@ impl<N: NodePrimitives> PreparedStateRootJob<N> {
     /// Takes the execution hook, present only when the job wants normal execution updates.
     pub fn take_execution_hook(
         &mut self,
-    ) -> Option<Box<dyn FnMut(HashedPostState) + Send + 'static>> {
+    ) -> Option<Box<dyn FnMut(reth_execution_types::EvmState) + Send + 'static>> {
         self.execution_hook.take().map(|mut hook| {
-            Box::new(move |state| hook.on_hashed_state_update(state))
-                as Box<dyn FnMut(HashedPostState) + Send + 'static>
+            Box::new(move |state| hook.on_state(state))
+                as Box<dyn FnMut(reth_execution_types::EvmState) + Send + 'static>
         })
     }
 

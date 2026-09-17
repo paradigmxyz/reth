@@ -159,7 +159,7 @@ use reth_provider::{
 use reth_storage_overlay::{OverlayManager, OverlayStateProviderFactory};
 use reth_trie::{
     hashed_cursor::HashedCursorFactory, trie_cursor::TrieCursorFactory, updates::TrieUpdates,
-    HashedPostState, KeccakKeyHasher, LazyTrieData,
+    KeccakKeyHasher, LazyTrieData,
 };
 use std::{
     sync::{
@@ -1004,7 +1004,7 @@ where
         env: ExecutionEnv<Evm>,
         input: &BlockOrPayload<T>,
         handle: &mut PayloadHandle<impl ExecutableTxFor<Evm>, Err, N::Receipt>,
-        state_hook: Option<Box<dyn FnMut(HashedPostState) + Send + 'static>>,
+        state_hook: Option<Box<dyn FnMut(reth_execution_types::EvmState) + Send + 'static>>,
     ) -> Result<
         (
             BlockExecutionOutput<N::Receipt>,

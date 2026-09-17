@@ -221,7 +221,7 @@ where
     let use_state_root_task =
         if let Some(task) = state_root_handle.as_mut().filter(|_| stream_state_updates) {
             let mut hook = task.take_state_hook();
-            builder.set_state_hook(move |hashed_state| hook.on_hashed_state_update(hashed_state))
+            builder.set_state_hook(move |state| hook.on_state(state))
         } else {
             false
         };

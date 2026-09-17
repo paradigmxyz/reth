@@ -32,7 +32,6 @@ use reth_evm::{
     BlockValidationError, ExecutorTx, GasOutput, ReceiptBuilder, ReceiptBuilderCtx, RecoveredTx,
 };
 use reth_execution_types::BlockExecutionResult;
-use reth_trie_common::HashedPostState;
 
 /// Configured Ethereum block executor backed by evm2.
 #[expect(missing_debug_implementations)]
@@ -49,7 +48,7 @@ where
     dao_fork_transition: bool,
     deposit_contract_address: Option<Address>,
     block_state: BlockStateAccumulator,
-    hashed_state_update_hook: HashedStateUpdateHook,
+    state_update_hook: StateUpdateHook,
     receipts: Vec<R::Receipt>,
     cumulative_gas_used: u64,
     block_regular_gas_used: u64,
@@ -88,7 +87,7 @@ impl<T: EvmTypes, TxType> EthTransactionResultWithState<T, TxType> {
     }
 }
 
-type HashedStateUpdateHook = Option<Box<dyn FnMut(HashedPostState) + Send>>;
+type StateUpdateHook = Option<Box<dyn FnMut(BlockStateAccumulator) + Send>>;
 
 impl<'a, T, R> EthBlockExecutor<'a, T, R>
 where
@@ -126,7 +125,7 @@ where
                 .deposit_contract()
                 .map(|contract| contract.address),
             block_state: BlockStateAccumulator::new(),
-            hashed_state_update_hook: None,
+            state_update_hook: None,
             receipts: Vec::new(),
             cumulative_gas_used: 0,
             block_regular_gas_used: 0,
@@ -168,12 +167,12 @@ where
 
     /// Commits detached state without recording a transaction receipt or gas usage.
     pub fn commit_pending_state(&mut self, state: &evm2::evm::PendingState) {
-        let stream_hashed_state = self.hashed_state_update_hook.is_some();
+        let stream_state = self.state_update_hook.is_some();
         commit_pending_state(
             &mut self.evm,
             &mut self.block_state,
-            stream_hashed_state,
-            &mut |state| emit_hashed_state(&mut self.hashed_state_update_hook, state),
+            stream_state,
+            &mut |state| emit_state(&mut self.state_update_hook, state),
             state,
         );
     }
@@ -207,8 +206,8 @@ where
         &mut self.evm
     }
 
-    fn set_state_hook(&mut self, hook: impl FnMut(HashedPostState) + Send + 'static) -> bool {
-        self.hashed_state_update_hook = Some(Box::new(hook));
+    fn set_state_hook(&mut self, hook: impl FnMut(BlockStateAccumulator) + Send + 'static) -> bool {
+        self.state_update_hook = Some(Box::new(hook));
         true
     }
 
@@ -247,12 +246,12 @@ where
             None,
         );
         let block_number = self.evm.block_env().number.to::<u64>();
-        let stream_hashed_state = self.hashed_state_update_hook.is_some();
+        let stream_state = self.state_update_hook.is_some();
         pre_execution_system_call_state_changes(
             &mut self.evm,
             &mut self.block_state,
-            stream_hashed_state,
-            &mut |state| emit_hashed_state(&mut self.hashed_state_update_hook, state),
+            stream_state,
+            &mut |state| emit_state(&mut self.state_update_hook, state),
             self.spec_id,
             block_number,
             context,
@@ -304,8 +303,8 @@ where
         let Some(outcome) = crate::execution::execute_transaction_with_condition(
             &mut self.evm,
             &mut self.block_state,
-            self.hashed_state_update_hook.is_some(),
-            &mut |state| emit_hashed_state(&mut self.hashed_state_update_hook, state),
+            self.state_update_hook.is_some(),
+            &mut |state| emit_state(&mut self.state_update_hook, state),
             &transaction,
             commit,
         )
@@ -349,12 +348,12 @@ where
     ) -> Result<GasOutput, BlockExecutionError> {
         let EthTransactionResultWithState { result, tx_type, blob_gas_used } = output;
         self.set_transaction_block_access_index();
-        let stream_hashed_state = self.hashed_state_update_hook.is_some();
+        let stream_state = self.state_update_hook.is_some();
         let outcome = commit_detached_transaction(
             &mut self.evm,
             &mut self.block_state,
-            stream_hashed_state,
-            &mut |state| emit_hashed_state(&mut self.hashed_state_update_hook, state),
+            stream_state,
+            &mut |state| emit_state(&mut self.state_update_hook, state),
             result,
         );
         let tx_gas_used = outcome.tx_gas_used();
@@ -389,12 +388,12 @@ where
             None,
         );
         let mut requests = block_requests_from_receipts(self.spec_id, context, &self.receipts)?;
-        let stream_hashed_state = self.hashed_state_update_hook.is_some();
+        let stream_state = self.state_update_hook.is_some();
         post_execution_system_call_state_changes(
             &mut self.evm,
             &mut self.block_state,
-            stream_hashed_state,
-            &mut |state| emit_hashed_state(&mut self.hashed_state_update_hook, state),
+            stream_state,
+            &mut |state| emit_state(&mut self.state_update_hook, state),
             self.spec_id,
             context,
             &mut requests,
@@ -414,8 +413,8 @@ where
         post_block_balance_state_changes(
             &mut self.evm,
             &mut self.block_state,
-            stream_hashed_state,
-            &mut |state| emit_hashed_state(&mut self.hashed_state_update_hook, state),
+            stream_state,
+            &mut |state| emit_state(&mut self.state_update_hook, state),
             self.base_block_reward,
             self.dao_fork_transition,
             block_number,
@@ -695,12 +694,12 @@ where
         );
         let receipts = &self.inner.receipts[self.segment_receipt_start..];
         let mut requests = block_requests_from_receipts(self.inner.spec_id, context, receipts)?;
-        let stream_hashed_state = self.inner.hashed_state_update_hook.is_some();
+        let stream_state = self.inner.state_update_hook.is_some();
         post_execution_system_call_state_changes(
             &mut self.inner.evm,
             &mut self.inner.block_state,
-            stream_hashed_state,
-            &mut |state| emit_hashed_state(&mut self.inner.hashed_state_update_hook, state),
+            stream_state,
+            &mut |state| emit_state(&mut self.inner.state_update_hook, state),
             self.inner.spec_id,
             context,
             &mut requests,
@@ -720,8 +719,8 @@ where
         post_block_balance_state_changes(
             &mut self.inner.evm,
             &mut self.inner.block_state,
-            stream_hashed_state,
-            &mut |state| emit_hashed_state(&mut self.inner.hashed_state_update_hook, state),
+            stream_state,
+            &mut |state| emit_state(&mut self.inner.state_update_hook, state),
             self.inner.base_block_reward,
             self.inner.dao_fork_transition,
             block_number,
@@ -805,7 +804,7 @@ where
         self.inner.evm_mut()
     }
 
-    fn set_state_hook(&mut self, hook: impl FnMut(HashedPostState) + Send + 'static) -> bool {
+    fn set_state_hook(&mut self, hook: impl FnMut(BlockStateAccumulator) + Send + 'static) -> bool {
         self.inner.set_state_hook(hook)
     }
 
@@ -950,7 +949,7 @@ fn map_transaction_execution_error(err: EthExecutionError, tx_hash: B256) -> Blo
     }
 }
 
-fn emit_hashed_state(hook: &mut HashedStateUpdateHook, state: HashedPostState) {
+fn emit_state(hook: &mut StateUpdateHook, state: BlockStateAccumulator) {
     if let Some(hook) = hook.as_mut() {
         hook(state);
     }

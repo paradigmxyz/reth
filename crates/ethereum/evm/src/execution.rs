@@ -66,9 +66,9 @@ use reth_ethereum_primitives::TransactionSigned;
 use reth_evm::{BlockExecutionError, BlockValidationError, EvmError, InvalidTxError};
 #[cfg(test)]
 use reth_evm::{ReceiptBuilder, ReceiptBuilderCtx};
-use reth_execution_types::HashedPostStateSink;
 #[cfg(test)]
 use reth_execution_types::{BlockExecutionOutput, BlockExecutionResult};
+#[cfg(test)]
 use reth_trie_common::{HashedPostState, KeccakKeyHasher};
 
 const DEPOSIT_BYTES_SIZE: usize = 48 + 32 + 8 + 96 + 8;
@@ -383,14 +383,14 @@ where
         I: IntoIterator<Item = Result<RecoveredTxEnvelope, TxErr>>,
         F: FnMut(usize),
         R: for<'receipt> FnMut(usize, &'receipt Receipt) -> Result<(), ReceiptErr>,
-        H: FnMut(HashedPostState),
+        H: FnMut(BlockStateAccumulator),
     {
         let Self { spec_id, block_env, database, block_number, context, precompiles } = self;
         let ExecutionHooks {
             mut on_transaction_executed,
             mut on_receipt,
-            mut on_hashed_state_update,
-            stream_hashed_state,
+            mut on_state_update,
+            stream_state,
         } = hooks;
 
         let block_beneficiary = block_env.beneficiary;
@@ -408,8 +408,8 @@ where
         pre_execution_system_call_state_changes(
             &mut evm,
             &mut block_state,
-            stream_hashed_state,
-            &mut on_hashed_state_update,
+            stream_state,
+            &mut on_state_update,
             spec_id,
             block_number,
             context,
@@ -426,8 +426,8 @@ where
             let outcome = execute_transaction(
                 &mut evm,
                 &mut block_state,
-                stream_hashed_state,
-                &mut on_hashed_state_update,
+                stream_state,
+                &mut on_state_update,
                 &transaction,
             )?;
             cumulative_gas_used += outcome.tx_gas_used();
@@ -446,8 +446,8 @@ where
         post_execution_system_call_state_changes(
             &mut evm,
             &mut block_state,
-            stream_hashed_state,
-            &mut on_hashed_state_update,
+            stream_state,
+            &mut on_state_update,
             spec_id,
             context,
             &mut requests,
@@ -456,8 +456,8 @@ where
         post_block_balance_state_changes(
             &mut evm,
             &mut block_state,
-            stream_hashed_state,
-            &mut on_hashed_state_update,
+            stream_state,
+            &mut on_state_update,
             base_block_reward_for_spec_id(spec_id),
             false,
             block_number,
@@ -486,8 +486,8 @@ pub(crate) fn transaction_blob_gas_used(transaction: &RecoveredTxEnvelope) -> u6
 pub(crate) struct ExecutionHooks<F, R, H> {
     on_transaction_executed: F,
     on_receipt: R,
-    on_hashed_state_update: H,
-    stream_hashed_state: bool,
+    on_state_update: H,
+    stream_state: bool,
 }
 
 #[cfg(test)]
@@ -496,10 +496,10 @@ impl<F, R, H> ExecutionHooks<F, R, H> {
     pub(crate) const fn new(
         on_transaction_executed: F,
         on_receipt: R,
-        on_hashed_state_update: H,
-        stream_hashed_state: bool,
+        on_state_update: H,
+        stream_state: bool,
     ) -> Self {
-        Self { on_transaction_executed, on_receipt, on_hashed_state_update, stream_hashed_state }
+        Self { on_transaction_executed, on_receipt, on_state_update, stream_state }
     }
 }
 
@@ -619,29 +619,26 @@ fn take_database_error<T: EvmTypes>(evm: &mut Evm<'_, T>, code: ErrorCode) -> Dy
 struct RethStateSink<'a> {
     execution_sink: Option<&'a mut dyn StateChangeSink<Error = Infallible>>,
     block_state: &'a mut BlockStateAccumulator,
-    streamed_hashed_state: Option<HashedPostStateSink<KeccakKeyHasher>>,
+    // Transfer native changes to consumers without hashing keys on the execution thread.
+    streamed_state: Option<BlockStateAccumulator>,
 }
 
 impl<'a> RethStateSink<'a> {
     fn new(
         execution_sink: Option<&'a mut dyn StateChangeSink<Error = Infallible>>,
         block_state: &'a mut BlockStateAccumulator,
-        stream_hashed_state: bool,
+        stream_state: bool,
     ) -> Self {
         Self {
             execution_sink,
             block_state,
-            streamed_hashed_state: stream_hashed_state
-                .then(HashedPostStateSink::<KeccakKeyHasher>::default),
+            streamed_state: stream_state.then(BlockStateAccumulator::default),
         }
     }
 
-    fn flush_streamed_hashed_state(self, on_hashed_state_update: &mut impl FnMut(HashedPostState)) {
-        if let Some(streamed_hashed_state) = self.streamed_hashed_state {
-            send_hashed_state_update(
-                streamed_hashed_state.into_hashed_post_state(),
-                on_hashed_state_update,
-            );
+    fn flush_streamed_state(self, on_state_update: &mut impl FnMut(BlockStateAccumulator)) {
+        if let Some(streamed_state) = self.streamed_state {
+            send_state_update(streamed_state, on_state_update);
         }
     }
 }
@@ -654,8 +651,8 @@ impl StateChangeSink for RethStateSink<'_> {
             execution_sink.bytecode(code_hash, code)?;
         }
         self.block_state.bytecode(code_hash, code)?;
-        if let Some(streamed_hashed_state) = self.streamed_hashed_state.as_mut() {
-            streamed_hashed_state.bytecode(code_hash, code)?;
+        if let Some(streamed_state) = self.streamed_state.as_mut() {
+            streamed_state.bytecode(code_hash, code)?;
         }
         Ok(())
     }
@@ -665,8 +662,8 @@ impl StateChangeSink for RethStateSink<'_> {
             execution_sink.account(change)?;
         }
         self.block_state.account(change)?;
-        if let Some(streamed_hashed_state) = self.streamed_hashed_state.as_mut() {
-            streamed_hashed_state.account(change)?;
+        if let Some(streamed_state) = self.streamed_state.as_mut() {
+            streamed_state.account(change)?;
         }
         Ok(())
     }
@@ -676,8 +673,8 @@ impl StateChangeSink for RethStateSink<'_> {
             execution_sink.storage_wipe(address)?;
         }
         self.block_state.storage_wipe(address)?;
-        if let Some(streamed_hashed_state) = self.streamed_hashed_state.as_mut() {
-            streamed_hashed_state.storage_wipe(address)?;
+        if let Some(streamed_state) = self.streamed_state.as_mut() {
+            streamed_state.storage_wipe(address)?;
         }
         Ok(())
     }
@@ -687,19 +684,19 @@ impl StateChangeSink for RethStateSink<'_> {
             execution_sink.storage(change)?;
         }
         self.block_state.storage(change)?;
-        if let Some(streamed_hashed_state) = self.streamed_hashed_state.as_mut() {
-            streamed_hashed_state.storage(change)?;
+        if let Some(streamed_state) = self.streamed_state.as_mut() {
+            streamed_state.storage(change)?;
         }
         Ok(())
     }
 }
 
-fn send_hashed_state_update(
-    hashed_state: HashedPostState,
-    on_hashed_state_update: &mut impl FnMut(HashedPostState),
+fn send_state_update(
+    state: BlockStateAccumulator,
+    on_state_update: &mut impl FnMut(BlockStateAccumulator),
 ) {
-    if !hashed_state.is_empty() {
-        on_hashed_state_update(hashed_state);
+    if !state.is_empty() {
+        on_state_update(state);
     }
 }
 
@@ -707,35 +704,29 @@ fn send_hashed_state_update(
 pub(crate) fn execute_transaction<T: EvmTypes>(
     evm: &mut Evm<'_, T>,
     block_state: &mut BlockStateAccumulator,
-    stream_hashed_state: bool,
-    on_hashed_state_update: &mut impl FnMut(HashedPostState),
+    stream_state: bool,
+    on_state_update: &mut impl FnMut(BlockStateAccumulator),
     transaction: &Recovered<T::Tx>,
 ) -> Result<TxResult<T>, EthExecutionError>
 where
     T::Tx: Typed2718,
 {
     let output = execute_transaction_without_commit(evm, transaction)?;
-    Ok(commit_detached_transaction(
-        evm,
-        block_state,
-        stream_hashed_state,
-        on_hashed_state_update,
-        output,
-    ))
+    Ok(commit_detached_transaction(evm, block_state, stream_state, on_state_update, output))
 }
 
 pub(crate) fn execute_transaction_with_condition<T: EvmTypes>(
     evm: &mut Evm<'_, T>,
     block_state: &mut BlockStateAccumulator,
-    stream_hashed_state: bool,
-    on_hashed_state_update: &mut impl FnMut(HashedPostState),
+    stream_state: bool,
+    on_state_update: &mut impl FnMut(BlockStateAccumulator),
     transaction: &Recovered<T::Tx>,
     commit: impl FnOnce(&TxResult<T>) -> reth_evm::CommitChanges,
 ) -> Result<Option<TxResult<T>>, EthExecutionError>
 where
     T::Tx: Typed2718,
 {
-    let mut sink = RethStateSink::new(None, block_state, stream_hashed_state);
+    let mut sink = RethStateSink::new(None, block_state, stream_state);
     let result = match evm.transact(transaction) {
         Ok(executed) => {
             if let Some(code) = executed.result().error_code {
@@ -751,7 +742,7 @@ where
         }
         Err(error) => Err(error),
     };
-    sink.flush_streamed_hashed_state(on_hashed_state_update);
+    sink.flush_streamed_state(on_state_update);
     result.map_err(|error| map_handler_error(evm, error))
 }
 
@@ -790,32 +781,26 @@ where
 pub(crate) fn commit_detached_transaction<T: EvmTypes>(
     evm: &mut Evm<'_, T>,
     block_state: &mut BlockStateAccumulator,
-    stream_hashed_state: bool,
-    on_hashed_state_update: &mut impl FnMut(HashedPostState),
+    stream_state: bool,
+    on_state_update: &mut impl FnMut(BlockStateAccumulator),
     output: TxResultWithState<T>,
 ) -> TxResult<T> {
     let TxResultWithState { result, pending_state, .. } = output;
-    commit_pending_state(
-        evm,
-        block_state,
-        stream_hashed_state,
-        on_hashed_state_update,
-        &pending_state,
-    );
+    commit_pending_state(evm, block_state, stream_state, on_state_update, &pending_state);
     result
 }
 
 pub(crate) fn commit_pending_state<T: EvmTypes>(
     evm: &mut Evm<'_, T>,
     block_state: &mut BlockStateAccumulator,
-    stream_hashed_state: bool,
-    on_hashed_state_update: &mut impl FnMut(HashedPostState),
+    stream_state: bool,
+    on_state_update: &mut impl FnMut(BlockStateAccumulator),
     pending_state: &evm2::evm::PendingState,
 ) {
     {
-        let mut sink = RethStateSink::new(None, block_state, stream_hashed_state);
+        let mut sink = RethStateSink::new(None, block_state, stream_state);
         let Ok(()) = pending_state.visit(&mut sink);
-        sink.flush_streamed_hashed_state(on_hashed_state_update);
+        sink.flush_streamed_state(on_state_update);
     }
     evm.overlay_db_mut().commit_pending(pending_state);
 }
@@ -831,8 +816,8 @@ fn map_db_error_code<T: EvmTypes>(evm: &mut Evm<'_, T>, code: ErrorCode) -> EthE
 pub(crate) fn pre_execution_system_call_state_changes<T: EvmTypes>(
     evm: &mut Evm<'_, T>,
     block_state: &mut BlockStateAccumulator,
-    stream_hashed_state: bool,
-    on_hashed_state_update: &mut impl FnMut(HashedPostState),
+    stream_state: bool,
+    on_state_update: &mut impl FnMut(BlockStateAccumulator),
     spec_id: SpecId,
     block_number: u64,
     context: BlockExecutionContext<'_>,
@@ -845,8 +830,8 @@ pub(crate) fn pre_execution_system_call_state_changes<T: EvmTypes>(
         let _ = execute_system_call(
             evm,
             block_state,
-            stream_hashed_state,
-            on_hashed_state_update,
+            stream_state,
+            on_state_update,
             HISTORY_STORAGE_ADDRESS,
             system_calls.parent_hash.0.into(),
         )?;
@@ -867,8 +852,8 @@ pub(crate) fn pre_execution_system_call_state_changes<T: EvmTypes>(
             let _ = execute_system_call(
                 evm,
                 block_state,
-                stream_hashed_state,
-                on_hashed_state_update,
+                stream_state,
+                on_state_update,
                 BEACON_ROOTS_ADDRESS,
                 parent_beacon_block_root.0.into(),
             )?;
@@ -933,8 +918,8 @@ where
 pub(crate) fn post_execution_system_call_state_changes<T: EvmTypes>(
     evm: &mut Evm<'_, T>,
     block_state: &mut BlockStateAccumulator,
-    stream_hashed_state: bool,
-    on_hashed_state_update: &mut impl FnMut(HashedPostState),
+    stream_state: bool,
+    on_state_update: &mut impl FnMut(BlockStateAccumulator),
     spec_id: SpecId,
     context: BlockExecutionContext<'_>,
     requests: &mut Requests,
@@ -946,8 +931,8 @@ pub(crate) fn post_execution_system_call_state_changes<T: EvmTypes>(
     let withdrawal_requests = execute_system_call(
         evm,
         block_state,
-        stream_hashed_state,
-        on_hashed_state_update,
+        stream_state,
+        on_state_update,
         WITHDRAWAL_REQUEST_ADDRESS,
         Bytes::new(),
     )?;
@@ -959,8 +944,8 @@ pub(crate) fn post_execution_system_call_state_changes<T: EvmTypes>(
     let consolidation_requests = execute_system_call(
         evm,
         block_state,
-        stream_hashed_state,
-        on_hashed_state_update,
+        stream_state,
+        on_state_update,
         CONSOLIDATION_REQUEST_ADDRESS,
         Bytes::new(),
     )?;
@@ -973,8 +958,8 @@ pub(crate) fn post_execution_system_call_state_changes<T: EvmTypes>(
         let builder_deposit_requests = execute_system_call(
             evm,
             block_state,
-            stream_hashed_state,
-            on_hashed_state_update,
+            stream_state,
+            on_state_update,
             BUILDER_DEPOSIT_REQUEST_ADDRESS,
             Bytes::new(),
         )?;
@@ -986,8 +971,8 @@ pub(crate) fn post_execution_system_call_state_changes<T: EvmTypes>(
         let builder_exit_requests = execute_system_call(
             evm,
             block_state,
-            stream_hashed_state,
-            on_hashed_state_update,
+            stream_state,
+            on_state_update,
             BUILDER_EXIT_REQUEST_ADDRESS,
             Bytes::new(),
         )?;
@@ -1003,8 +988,8 @@ pub(crate) fn post_execution_system_call_state_changes<T: EvmTypes>(
 fn execute_system_call<T: EvmTypes>(
     evm: &mut Evm<'_, T>,
     block_state: &mut BlockStateAccumulator,
-    stream_hashed_state: bool,
-    on_hashed_state_update: &mut impl FnMut(HashedPostState),
+    stream_state: bool,
+    on_state_update: &mut impl FnMut(BlockStateAccumulator),
     address: Address,
     data: Bytes,
 ) -> Result<TxResult<T>, EthExecutionError> {
@@ -1026,9 +1011,9 @@ fn execute_system_call<T: EvmTypes>(
                 SystemCallResolution::Failed(reason)
             } else {
                 let outcome = {
-                    let mut sink = RethStateSink::new(None, block_state, stream_hashed_state);
+                    let mut sink = RethStateSink::new(None, block_state, stream_state);
                     let Ok(outcome) = executed.commit_with(&mut sink);
-                    sink.flush_streamed_hashed_state(on_hashed_state_update);
+                    sink.flush_streamed_state(on_state_update);
                     outcome
                 };
                 SystemCallResolution::<T>::Outcome(outcome)
@@ -1050,15 +1035,15 @@ fn execute_system_call<T: EvmTypes>(
 fn commit_state_changes<T: EvmTypes>(
     evm: &mut Evm<'_, T>,
     block_state: &mut BlockStateAccumulator,
-    stream_hashed_state: bool,
-    on_hashed_state_update: &mut impl FnMut(HashedPostState),
+    stream_state: bool,
+    on_state_update: &mut impl FnMut(BlockStateAccumulator),
     changes: &[(Address, Option<AccountInfo>, Option<AccountInfo>)],
 ) {
     let result = {
         let mut sink = RethStateSink::new(
             Some(evm.overlay_db_mut() as &mut dyn StateChangeSink<Error = Infallible>),
             block_state,
-            stream_hashed_state,
+            stream_state,
         );
         let result = changes.iter().try_for_each(|(address, original, current)| {
             sink.account(AccountChangeRef {
@@ -1070,7 +1055,7 @@ fn commit_state_changes<T: EvmTypes>(
             })
         });
         if result.is_ok() {
-            sink.flush_streamed_hashed_state(on_hashed_state_update);
+            sink.flush_streamed_state(on_state_update);
         }
         result
     };
@@ -1084,8 +1069,8 @@ fn commit_state_changes<T: EvmTypes>(
 pub(crate) fn post_block_balance_state_changes<T: EvmTypes>(
     evm: &mut Evm<'_, T>,
     block_state: &mut BlockStateAccumulator,
-    stream_hashed_state: bool,
-    on_hashed_state_update: &mut impl FnMut(HashedPostState),
+    stream_state: bool,
+    on_state_update: &mut impl FnMut(BlockStateAccumulator),
     base_block_reward: Option<u128>,
     dao_fork_transition: bool,
     block_number: u64,
@@ -1154,7 +1139,7 @@ pub(crate) fn post_block_balance_state_changes<T: EvmTypes>(
         changes.push((address, original, current));
     }
 
-    commit_state_changes(evm, block_state, stream_hashed_state, on_hashed_state_update, &changes);
+    commit_state_changes(evm, block_state, stream_state, on_state_update, &changes);
 
     Ok(())
 }
@@ -1231,11 +1216,11 @@ mod tests {
 
     fn assert_hashed_state_matches_streamed_updates(
         output: &BlockExecutionOutput<Receipt>,
-        updates: Vec<HashedPostState>,
+        updates: Vec<BlockStateAccumulator>,
     ) {
         let mut streamed = HashedPostState::default();
         for update in updates {
-            streamed.extend(update);
+            streamed.extend(hashed_post_state_from_execution_state::<KeccakKeyHasher>(&update));
         }
         let recomputed =
             hashed_post_state_from_execution_state::<KeccakKeyHasher>(output.state.inner());
@@ -1476,7 +1461,7 @@ mod tests {
     }
 
     #[test]
-    fn hashed_state_hook_streams_updates() {
+    fn state_hook_streams_updates() {
         let caller = address!("0000000000000000000000000000000000000001");
         let target = address!("0000000000000000000000000000000000001000");
         let mut database = TestDatabase::default();
@@ -1510,7 +1495,7 @@ mod tests {
     }
 
     #[test]
-    fn disabled_hashed_state_stream_does_not_emit_updates() {
+    fn disabled_state_stream_does_not_emit_updates() {
         let caller = address!("0000000000000000000000000000000000000001");
         let target = address!("0000000000000000000000000000000000001000");
         let mut database = TestDatabase::default();
