@@ -781,6 +781,7 @@ mod storage_tests {
     use reth_trie::{
         test_utils::{state_root, storage_root_prehashed},
         HashedPostState, HashedStorage, StateRoot, StorageRoot, StorageRootProgress,
+        TrieInputSorted,
     };
     use reth_trie_db::{
         DatabaseStateRoot, DatabaseStorageRoot, LegacyKeyAdapter, PackedKeyAdapter,
@@ -2003,18 +2004,20 @@ mod storage_tests {
             reth_trie_db::DatabaseHashedCursorFactory<&'a TX>,
         >;
         let is_v2 = provider_rw.cached_storage_settings().is_v2();
+        let input = TrieInputSorted::from_state(
+            HashedPostState::from_hashed_storage(hashed_address, updated_storage.clone())
+                .into_sorted(),
+        );
         let storage_root = if is_v2 {
-            TestStorageRoot::<_, PackedKeyAdapter>::overlay_root(
-                tx,
-                address,
-                updated_storage.clone(),
-            )
-            .unwrap()
+            TestStorageRoot::<_, PackedKeyAdapter>::overlay_root(tx, address, input).unwrap()
         } else {
             TestStorageRoot::<_, LegacyKeyAdapter>::overlay_root(
                 tx,
                 address,
-                updated_storage.clone(),
+                TrieInputSorted::from_state(
+                    HashedPostState::from_hashed_storage(hashed_address, updated_storage.clone())
+                        .into_sorted(),
+                ),
             )
             .unwrap()
         };
