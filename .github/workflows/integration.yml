@@ -50,7 +50,10 @@ jobs:
       - uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
-          prefix-key: v1-rust-integration-targets
+          # Restoring the full target cache exhausts the integration runner's disk.
+          # sccache still reuses compiled artifacts without unpacking that cache.
+          prefix-key: v2-rust-integration-registry
+          cache-targets: false
           cache-bin: false
           cache-on-failure: true
       - name: Run tests
