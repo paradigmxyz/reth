@@ -674,14 +674,15 @@ where
             Item = (TransactionOrigin, TransactionValidationOutcome<T::Transaction>),
         >,
     ) -> Vec<PoolResult<AddedTransactionOutcome>> {
+        let transactions = transactions.into_iter();
+        let mut added_metas = Vec::with_capacity(transactions.size_hint().0);
+
         // Collect results and metadata while holding the pool write lock
         let (mut results, added_metas, discarded) = {
             let mut pool = self.pool.write();
             let timestamp = Instant::now();
-            let mut added_metas = Vec::new();
 
             let results = transactions
-                .into_iter()
                 .map(|(origin, tx)| {
                     let (result, meta) = self.add_transaction(&mut pool, origin, tx, timestamp);
 
