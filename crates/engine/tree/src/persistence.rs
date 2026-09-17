@@ -211,7 +211,7 @@ where
             }
         }
 
-        provider_rw.commit()?;
+        provider_rw.commit_with_hook(|tx| self.provider.db_ref().on_persisting(tx))?;
         self.provider.db_ref().on_persisted();
         // BALs live outside the main database and are intentionally flushed last.
         let _ = self.provider.bal_store().flush(&canonical_blocks).inspect_err(|err| {
