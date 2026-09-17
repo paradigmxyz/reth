@@ -745,6 +745,41 @@ fn persistence_completion_does_not_wait_for_active_payload_jobs() {
 }
 
 #[test]
+fn disk_reorg_waits_while_payload_build_is_active() {
+    let mut block_builder = TestBlockBuilder::eth();
+    let blocks: Vec<_> = block_builder.get_executed_blocks(1..5).collect();
+    let mut test_harness = TestHarness::new(MAINNET.clone()).with_blocks(blocks.clone());
+    let fork_block_3 =
+        block_builder.get_executed_block_with_number(3, blocks[1].recovered_block().hash());
+    let fork_block_4 =
+        block_builder.get_executed_block_with_number(4, fork_block_3.recovered_block().hash());
+    test_harness.tree.state.tree_state.insert_executed(fork_block_3);
+    test_harness.tree.state.tree_state.insert_executed(fork_block_4.clone());
+    test_harness
+        .tree
+        .state
+        .tree_state
+        .set_canonical_head(fork_block_4.recovered_block().num_hash());
+    let persisted = blocks[3].recovered_block().num_hash();
+    test_harness.tree.persistence_state.last_persisted_block = persisted;
+    test_harness.tree.persistence_state.last_state_trie_persisted_block = persisted;
+    let payload_build = test_harness.tree.payload_builds.acquire();
+
+    test_harness.tree.advance_persistence().unwrap();
+
+    assert_eq!(test_harness.tree.persistence_state.current_action(), None);
+    assert!(test_harness.action_rx.try_recv().is_err());
+
+    drop(payload_build);
+    test_harness.tree.advance_persistence().unwrap();
+
+    assert_eq!(
+        test_harness.tree.persistence_state.current_action(),
+        Some(&CurrentPersistenceAction::RemovingBlocks { new_tip_num: 2 })
+    );
+}
+
+#[test]
 fn backfill_action_waits_while_payload_build_is_active() {
     let (mut test_harness, _, action) = deferred_backfill_harness();
     let payload_build = test_harness.tree.payload_builds.acquire();

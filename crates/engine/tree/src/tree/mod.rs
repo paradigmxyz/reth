@@ -1511,7 +1511,15 @@ where
         if !self.persistence_state.in_progress() {
             let payload_build_active = self.payload_builds.is_active();
             if let Some(new_tip_num) = self.find_disk_reorg()? {
-                self.remove_blocks(new_tip_num)
+                if payload_build_active {
+                    debug!(
+                        target: "engine::tree",
+                        new_tip_num,
+                        "Deferring disk reorg while a payload build is active"
+                    );
+                } else {
+                    self.remove_blocks(new_tip_num)
+                }
             } else if self.backfill_sync_state.is_pending_revalidation() &&
                 !payload_build_active &&
                 self.persistence_state.last_state_trie_persisted_block !=
