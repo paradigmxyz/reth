@@ -116,12 +116,16 @@ struct NodeCampaignConfig {
 impl NodeCampaignConfig {
     fn from_seed(seed: u64) -> Self {
         let persistence_threshold = 1 + seed % 4;
+        let native_workers = std::env::var_os("RETH_DST_NATIVE_WORKERS").is_some();
         Self {
             persistence_threshold,
             state_masking_blocks: (seed >> 2) % persistence_threshold,
             multiproof_chunk_size: 1 + ((seed >> 5) % 16) as usize,
-            inject_database_fault: seed.is_multiple_of(4),
-            native_workers: std::env::var_os("RETH_DST_NATIVE_WORKERS").is_some(),
+            // An in-process abort cannot reproduce the OS cleanup that releases RocksDB's lock
+            // after a process crash. Database-fault recovery remains covered by the cooperative
+            // lane, where every task holding a provider is controlled by the simulator.
+            inject_database_fault: seed.is_multiple_of(4) && !native_workers,
+            native_workers,
         }
     }
 }
@@ -623,7 +627,7 @@ fn materialize_block_transactions(
 
 const MIN_TRANSACTIONS_PER_BLOCK: usize = payload_processor::SMALL_BLOCK_TX_THRESHOLD;
 const MAX_TRANSACTIONS_PER_BLOCK: usize = 64;
-const CAMPAIGN_SCHEMA_VERSION: u64 = 10;
+const CAMPAIGN_SCHEMA_VERSION: u64 = 12;
 const MAX_DATABASE_FAULTS_PER_CASE: u64 = 3;
 
 #[derive(Debug)]
@@ -700,6 +704,7 @@ enum CampaignAction {
     HealFollower,
     AdvanceTime,
     CrashRestartFollower,
+    GracefulRestartFollower,
     CorruptFollowerResponse,
     ReplayPayload { block: B256 },
     EnableDatabaseFault,
@@ -739,6 +744,7 @@ impl CampaignAction {
             Self::HealFollower => encoded.push(7),
             Self::AdvanceTime => encoded.push(8),
             Self::CrashRestartFollower => encoded.push(9),
+            Self::GracefulRestartFollower => encoded.push(16),
             Self::CorruptFollowerResponse => encoded.push(10),
             Self::ReplayPayload { block } => {
                 encoded.push(11);
@@ -820,6 +826,7 @@ struct CampaignModel {
     maximum_blocks: usize,
     database_faults: Arc<CampaignDatabaseFaults>,
     trie_frontier_reuses: u64,
+    allow_in_process_crash: bool,
 }
 
 impl CampaignModel {
@@ -827,6 +834,7 @@ impl CampaignModel {
         genesis: SealedHeader,
         maximum_blocks: usize,
         database_faults: Arc<CampaignDatabaseFaults>,
+        allow_in_process_crash: bool,
     ) -> Self {
         let hash = genesis.hash();
         Self {
@@ -855,6 +863,7 @@ impl CampaignModel {
             maximum_blocks,
             database_faults,
             trie_frontier_reuses: 0,
+            allow_in_process_crash,
         }
     }
 
@@ -880,7 +889,7 @@ impl CampaignModel {
                 CampaignAction::AdvanceTime,
                 CampaignAction::CorruptFollowerResponse,
             ];
-            if !self.database_faults.is_armed() {
+            if self.allow_in_process_crash && !self.database_faults.is_armed() {
                 actions.push(CampaignAction::CrashRestartFollower);
             }
             if self.database_faults.can_arm() {
@@ -970,7 +979,7 @@ impl CampaignModel {
             actions.push(CampaignAction::BeginFollowerSync { head: self.canonical_head });
         }
         actions.push(CampaignAction::AdvanceTime);
-        if !self.database_faults.is_armed() {
+        if self.allow_in_process_crash && !self.database_faults.is_armed() {
             actions.push(CampaignAction::CrashRestartFollower);
         }
         if self.database_faults.can_arm() {
@@ -1835,7 +1844,13 @@ async fn execute_action(
             let duration = model.choose_time_advance(decisions, tasks);
             tasks.sleep(duration).await;
         }
-        CampaignAction::CrashRestartFollower => {
+        action @ (CampaignAction::CrashRestartFollower |
+        CampaignAction::GracefulRestartFollower) => {
+            let crash = matches!(action, CampaignAction::CrashRestartFollower);
+            assert_eq!(
+                crash, !campaign_config.native_workers,
+                "native workers require graceful in-process restart"
+            );
             model.database_faults.suppress();
             let durable = follower.as_ref().unwrap().provider.database_provider_ro().unwrap();
             let durable_number = durable.best_block_number().unwrap();
@@ -1844,13 +1859,17 @@ async fn execute_action(
             model.database_faults.resume();
             let old_peer = &follower.as_ref().unwrap().peer;
             model.follower_wire.extend(old_peer.trace());
-            follower.take().unwrap().crash().await;
-            native.spawn_blocking_named("crash-barrier", || ()).get();
+            if crash {
+                follower.take().unwrap().crash().await;
+                native.spawn_blocking_named("crash-barrier", || ()).get();
+            } else {
+                follower.take().unwrap().shutdown().await;
+            }
             let release_deadline = tasks.now() + Duration::from_secs(1);
             while follower_storage.is_open() {
                 assert!(
                     tasks.now() < release_deadline,
-                    "crashed follower did not release its database handles"
+                    "stopped follower did not release its database handles"
                 );
                 tasks.sleep(Duration::from_millis(1)).await;
             }
@@ -1915,8 +1934,12 @@ async fn converge_follower(
     let deadline = tasks.now() + Duration::from_secs(5);
     loop {
         if model.database_faults.needs_recovery() {
-            let restart =
-                model.choose(&mut *decisions, tasks, vec![CampaignAction::CrashRestartFollower]);
+            let restart_action = if campaign_config.native_workers {
+                CampaignAction::GracefulRestartFollower
+            } else {
+                CampaignAction::CrashRestartFollower
+            };
+            let restart = model.choose(&mut *decisions, tasks, vec![restart_action]);
             execute_action(
                 restart,
                 model,
@@ -1932,8 +1955,12 @@ async fn converge_follower(
             .await;
         }
         if !follower.as_ref().unwrap().peer.is_connected() {
-            let restart =
-                model.choose(&mut *decisions, tasks, vec![CampaignAction::CrashRestartFollower]);
+            let restart_action = if campaign_config.native_workers {
+                CampaignAction::GracefulRestartFollower
+            } else {
+                CampaignAction::CrashRestartFollower
+            };
+            let restart = model.choose(&mut *decisions, tasks, vec![restart_action]);
             execute_action(
                 restart,
                 model,
@@ -2115,6 +2142,7 @@ fn simulate_node(
                     genesis,
                     action_budget.max(8),
                     Arc::clone(&run_database_faults),
+                    !campaign_config.native_workers,
                 );
                 for _ in 0..action_budget {
                     let action = model.choose(&mut decisions, &tasks, model.legal_actions());
