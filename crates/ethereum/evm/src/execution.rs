@@ -724,6 +724,37 @@ where
     ))
 }
 
+pub(crate) fn execute_transaction_with_condition<T: EvmTypes>(
+    evm: &mut Evm<'_, T>,
+    block_state: &mut BlockStateAccumulator,
+    stream_hashed_state: bool,
+    on_hashed_state_update: &mut impl FnMut(HashedPostState),
+    transaction: &Recovered<T::Tx>,
+    commit: impl FnOnce(&TxResult<T>) -> reth_evm::CommitChanges,
+) -> Result<Option<TxResult<T>>, EthExecutionError>
+where
+    T::Tx: Typed2718,
+{
+    let mut sink = RethStateSink::new(None, block_state, stream_hashed_state);
+    let result = match evm.transact(transaction) {
+        Ok(executed) => {
+            if let Some(code) = executed.result().error_code {
+                let _ = executed.discard();
+                Err(HandlerError::Fatal(code))
+            } else if commit(executed.result()).should_commit() {
+                let Ok(result) = executed.commit_with(&mut sink);
+                Ok(Some(result))
+            } else {
+                let _ = executed.discard();
+                Ok(None)
+            }
+        }
+        Err(error) => Err(error),
+    };
+    sink.flush_streamed_hashed_state(on_hashed_state_update);
+    result.map_err(|error| map_handler_error(evm, error))
+}
+
 pub(crate) fn execute_transaction_without_commit<T: EvmTypes>(
     evm: &mut Evm<'_, T>,
     transaction: &Recovered<T::Tx>,

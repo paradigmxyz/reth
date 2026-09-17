@@ -32,7 +32,9 @@ use reth_node_api::BlockBody;
 use reth_primitives_traits::Recovered;
 use reth_rpc_convert::{RpcConvert, RpcTxReq};
 use reth_rpc_eth_types::{
-    cache::db::{apply_block_overrides, apply_state_overrides, attach_bal_before_tx},
+    cache::db::{
+        apply_block_overrides, apply_state_overrides, attach_bal_before_tx, merge_state_cache,
+    },
     error::{AsEthApiError, FromEthApiError},
     simulate::{self, EthSimulateError},
     EthApiError, RpcInvalidTransactionError, StateCacheDb,
@@ -194,8 +196,8 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
                     };
 
                     // EIP-7708 already emits transfer logs: https://eips.ethereum.org/EIPS/eip-7708
-                    let trace_transfers = trace_transfers &&
-                        !evm_env.version().feature(evm2::EvmFeatures::EIP7708);
+                    let trace_transfers =
+                        trace_transfers && !evm_env.version().feature(evm2::EvmFeatures::EIP7708);
                     let (result, results) = if trace_transfers {
                         // prepare inspector to capture transfer inside the evm so they are recorded
                         // and included in logs
@@ -474,9 +476,11 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
                 EvmOverrides::state(state_override),
             )?;
 
-            let mut evm = this.evm_config().block_executor_factory().evm_with_database(&mut db, evm_env);
+            let mut evm =
+                this.evm_config().block_executor_factory().evm_with_database(&mut db, evm_env);
 
-            let (inspector, result) = evm.transact_with_inspector(&tx_env, AccessListInspector::new(initial))
+            let (inspector, result) = evm
+                .transact_with_inspector(&tx_env, AccessListInspector::new(initial))
                 .map_err(Self::Error::from_evm_err)?;
             let access_list = inspector.into_access_list();
             let gas_used = result.result.tx_gas_used();
@@ -647,9 +651,7 @@ pub trait Call:
         let at = at.into();
         self.spawn_blocking_io_fut(async move |this| {
             let state = this.state_at_block_id(at).await?;
-            let db = evm2::evm::CacheDB::new(evm2::evm::Db::new(StateProviderDatabase::new(
-                state,
-            )));
+            let db = evm2::evm::CacheDB::new(evm2::evm::Db::new(StateProviderDatabase::new(state)));
             f(this, db)
         })
     }
@@ -764,12 +766,18 @@ pub trait Call:
                     .map_err(Self::Error::from_eth_err)?;
                 db.commit_source(&changes);
 
-                let mut evm = this.evm_config().block_executor_factory().evm_with_database(&mut db, evm_env);
-                this.replay_transactions_until_with_evm(&mut evm, block_txs,
-                    tx_info.index.expect("included transaction has an index") as usize)?;
+                let mut evm =
+                    this.evm_config().block_executor_factory().evm_with_database(&mut db, evm_env);
+                this.replay_transactions_until_with_evm(
+                    &mut evm,
+                    block_txs,
+                    tx_info.index.expect("included transaction has an index") as usize,
+                )?;
                 let tx_env = RpcNodeCore::evm_config(&this).tx_env(tx);
                 let res = evm.transact(&tx_env).map_err(Self::Error::from_evm_err)?;
+                let cache = evm.take_state_cache();
                 drop(evm);
+                merge_state_cache(&mut db, cache);
                 f(tx_info, res, db)
             })
             .await
@@ -793,7 +801,10 @@ pub trait Call:
         target_tx_index: usize,
     ) -> Result<(), Self::Error>
     where
-        E: Evm<EvmTypes = EvmTypesFor<Self::Evm>, Transaction = <EvmTypesFor<Self::Evm> as evm2::EvmTypes>::Tx>,
+        E: Evm<
+            EvmTypes = EvmTypesFor<Self::Evm>,
+            Transaction = <EvmTypesFor<Self::Evm> as evm2::EvmTypesHost>::Tx,
+        >,
         Txs: IntoIterator<Item = Recovered<&'a ProviderTx<Self::Provider>>>,
     {
         for (index, tx) in transactions.into_iter().enumerate() {
@@ -803,7 +814,7 @@ pub trait Call:
             }
 
             let tx_env = self.evm_config().tx_env(tx.cloned());
-            evm.transact_commit(&tx_env).map_err(Self::Error::from_evm_err)?;
+            let _ = evm.transact_commit(&tx_env).map_err(Self::Error::from_evm_err)?;
         }
         Ok(())
     }

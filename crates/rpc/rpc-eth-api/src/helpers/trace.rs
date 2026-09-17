@@ -6,6 +6,7 @@ use alloy_consensus::{transaction::TxHashRef, BlockHeader};
 use alloy_eip7928::bal::DecodedBal;
 use alloy_primitives::B256;
 use alloy_rpc_types_eth::{BlockId, TransactionInfo};
+use evm2::evm::Bal as EvmBal;
 use evm2_inspectors::tracing::{TracingInspector, TracingInspectorConfig};
 use futures::Future;
 use reth_errors::RethError;
@@ -14,18 +15,19 @@ use reth_evm::{
     TxResultWithStateFor,
 };
 use reth_primitives_traits::{BlockBody, BlockTy, RecoveredBlock};
-use reth_rpc_eth_types::cache::db::attach_bal_before_tx;
-use evm2::evm::Bal as EvmBal;
-use reth_rpc_eth_types::{EthApiError, StateCacheDb};
+use reth_rpc_eth_types::{
+    cache::db::{attach_bal_before_tx, merge_state_cache},
+    EthApiError, StateCacheDb,
+};
 use reth_storage_api::ProviderBlock;
 use std::sync::Arc;
 
 /// Context passed to per-transaction trace callbacks.
 pub struct TracingCtx<'a, Insp, EvmTypes: evm2::EvmTypes> {
     /// Execution result and detached state changes for the transaction.
-    pub result: evm2::TxResultWithState<EvmTypes>,
+    pub result: &'a evm2::TxResultWithState<EvmTypes>,
     /// Database pointing to the transaction pre-state.
-    pub db: &'a mut StateCacheDb,
+    pub db: &'a mut dyn evm2::evm::DynDatabase,
     /// Inspector used while executing the transaction.
     pub inspector: Insp,
 }
@@ -48,7 +50,7 @@ pub trait Trace: LoadState<Error: FromEvmError<Self::Evm>> + Call {
     /// Executes a transaction with the provided inspector without committing state changes.
     fn inspect<DB, I>(
         &self,
-        db: &'a mut StateCacheDb,
+        db: DB,
         evm_env: EvmEnvFor<Self::Evm>,
         tx_env: &TxEnvFor<Self::Evm>,
         inspector: I,
@@ -153,16 +155,21 @@ pub trait Trace: LoadState<Error: FromEvmError<Self::Evm>> + Call {
         R: Send + 'static,
     {
         async move {
-            let Some((transaction, block, bal)) = self.transaction_and_block_and_maybe_bal(hash).await? else {
+            let Some((transaction, block, bal)) =
+                self.transaction_and_block_and_maybe_bal(hash).await?
+            else {
                 return Ok(None);
             };
             let (target_tx, tx_info) = transaction.split();
             self.spawn_with_state_at_block(block.parent_hash(), move |this, mut db| {
                 let tx_env = this.evm_config().tx_env(target_tx);
                 let (inspector, result, _) = this.inspect_transaction_in_block(
-                    &block, &mut db, inspector,
+                    &block,
+                    &mut db,
+                    inspector,
                     tx_info.index.expect("included transaction has an index") as usize,
-                    &tx_env, bal.as_deref(),
+                    &tx_env,
+                    bal.as_deref(),
                 )?;
                 f(tx_info, inspector, result, db)
             })
@@ -195,11 +202,16 @@ pub trait Trace: LoadState<Error: FromEvmError<Self::Evm>> + Call {
         self.apply_pre_execution_changes(block, db)?;
 
         let evm_env = self.evm_env_for_header(block.sealed_block().sealed_header())?;
-        for tx in block.transactions_recovered().take(target_tx_index) {
-            let tx_env = self.evm_config().tx_env(tx.cloned());
-            let result = self.transact(&mut *db, evm_env.clone(), tx_env)?;
-            db.commit_source(&result.pending_state);
-        }
+        let mut evm =
+            self.evm_config().block_executor_factory().evm_with_database(&mut *db, evm_env);
+        self.replay_transactions_until_with_evm(
+            &mut evm,
+            block.transactions_recovered(),
+            target_tx_index,
+        )?;
+        let cache = evm.take_state_cache();
+        drop(evm);
+        merge_state_cache(db, cache);
         Ok(())
     }
 
@@ -228,12 +240,21 @@ pub trait Trace: LoadState<Error: FromEvmError<Self::Evm>> + Call {
             self.apply_pre_execution_changes(block, db)?;
         }
         let evm_env = self.evm_env_for_header(block.sealed_block().sealed_header())?;
-        let mut evm = self.evm_config().block_executor_factory().evm_with_database(db, evm_env.clone());
+        let mut evm =
+            self.evm_config().block_executor_factory().evm_with_database(&mut *db, evm_env.clone());
         if bal.is_none() {
-            self.replay_transactions_until_with_evm(&mut evm, block.transactions_recovered(), target_tx_index)?;
+            self.replay_transactions_until_with_evm(
+                &mut evm,
+                block.transactions_recovered(),
+                target_tx_index,
+            )?;
         }
-        let (inspector, result) = evm.transact_with_inspector(target_tx_env, inspector)
+        let (inspector, result) = evm
+            .transact_with_inspector(target_tx_env, inspector)
             .map_err(Self::Error::from_evm_err)?;
+        let cache = evm.take_state_cache();
+        drop(evm);
+        merge_state_cache(db, cache);
         Ok((inspector, result, evm_env))
     }
 
@@ -280,11 +301,14 @@ pub trait Trace: LoadState<Error: FromEvmError<Self::Evm>> + Call {
                     .map(|highest| highest as usize + 1)
                     .unwrap_or_else(|| block.body().transaction_count());
                 let mut results = Vec::new();
+                let mut evm =
+                    this.evm_config().block_executor_factory().evm_with_database(&mut db, evm_env);
 
                 for (idx, tx) in block.transactions_recovered().take(max_transactions).enumerate() {
                     let tx_env = this.evm_config().tx_env(tx.cloned());
-                    let (inspector, result) =
-                        this.inspect(&mut db, evm_env.clone(), &tx_env, inspector_setup())?;
+                    let (inspector, result) = evm
+                        .transact_with_inspector(&tx_env, inspector_setup())
+                        .map_err(Self::Error::from_evm_err)?;
                     let tx_info = TransactionInfo {
                         hash: Some(*tx.tx_hash()),
                         index: Some(idx as u64),
@@ -293,9 +317,11 @@ pub trait Trace: LoadState<Error: FromEvmError<Self::Evm>> + Call {
                         block_timestamp: Some(block_timestamp),
                         base_fee,
                     };
-                    let state_changes = result.pending_state.clone();
-                    let item = f(tx_info, TracingCtx { result, db: &mut db, inspector })?;
-                    db.commit_source(&state_changes);
+                    let item = f(
+                        tx_info,
+                        TracingCtx { result: &result, db: evm.state_db_mut(), inspector },
+                    )?;
+                    evm.commit_state(&result.pending_state);
                     results.push(item);
                 }
 

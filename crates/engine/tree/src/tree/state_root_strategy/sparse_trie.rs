@@ -663,14 +663,6 @@ where
         hashed_state_update: HashedPostState,
     ) -> Result<(), StateRootTaskError> {
         for (&address, storage) in &hashed_state_update.storages {
-            if storage.wiped {
-                self.trie.wipe_storage(address).map_err(|err| {
-                    StateRootTaskError::Other(format!(
-                        "could not wipe sparse storage trie: {err:?}"
-                    ))
-                })?;
-            }
-
             if !storage.storage.is_empty() {
                 // Look up the outer map once per address instead of once per slot.
                 let new_updates = self.new_storage_updates.entry(address).or_default();

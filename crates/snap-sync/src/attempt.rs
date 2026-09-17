@@ -144,16 +144,15 @@ mod tests {
     use super::*;
     use alloy_eips::BlockNumHash;
     use alloy_primitives::{Bytes, B256};
+    use evm2::bytecode::Bytecode;
     use reth_db_api::{tables, transaction::DbTx};
     use reth_primitives_traits::Account;
     use reth_provider::{
         test_utils::{create_test_provider_factory, MockNodeTypesWithDB},
         DBProvider, DatabaseProviderFactory, ProviderFactory,
     };
-    use reth_storage_api::{metadata::keys, StateWriter};
+    use reth_storage_api::{metadata::keys, StateChangeset, StateWriter};
     use reth_trie_common::HashedPostState;
-    use evm2::bytecode::Bytecode;
-use reth_storage_api::StateChangeset;
 
     const HASHED_ADDRESS: B256 = B256::repeat_byte(0xbb);
 

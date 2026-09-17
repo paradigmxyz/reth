@@ -3,11 +3,14 @@
 use crate::engine_ssz_containers::ExecutionWitnessV1;
 use alloy_primitives::B256;
 use alloy_rpc_types_engine::ExecutionData;
+use evm2::evm::{CacheDB, Db};
 use reth_ethereum_primitives::{EthPrimitives, TransactionSigned};
-use reth_evm::{execute::Executor, ConfigureEvm};
+use reth_evm::{
+    database::StateProviderDatabase, execute::Executor, witness::ExecutionWitnessRecord,
+    ConfigureEvm,
+};
 use reth_primitives_traits::{AlloyBlockHeader, Block};
 use reth_provider::{HeaderProvider, StateProviderFactory};
-use reth_revm::{database::StateProviderDatabase, witness::ExecutionWitnessRecord};
 use reth_tasks::Runtime;
 use reth_trie_common::ExecutionWitnessMode;
 use std::{future::Future, pin::Pin};
@@ -70,27 +73,23 @@ where
                                 source: eyre::Report::new(source),
                             }
                         })?;
-                    let block_executor =
-                        evm_config.executor(StateProviderDatabase::new(state_provider));
-                    let mut witness = None;
-                    let mut first_header = block_number.saturating_sub(1);
-                    block_executor
-                        .execute_with_state_closure(&block, |statedb: &reth_revm::State<_>| {
-                            if let Some((number, _)) = statedb.block_hashes.lowest() {
-                                first_header = number;
-                            }
-                            witness = Some(
-                                ExecutionWitnessRecord::new(statedb)
-                                    .into_execution_witness_without_headers(
-                                        &statedb.database.0,
-                                        ExecutionWitnessMode::Canonical,
-                                    ),
-                            );
-                        })
-                        .map_err(eyre::Report::new)?;
-
-                    let witness = witness
-                        .expect("state closure is called after successful execution")
+                    let mut db =
+                        CacheDB::new(Db::new(StateProviderDatabase::new(state_provider.as_ref())));
+                    let output =
+                        evm_config.executor(&mut db).execute(&block).map_err(eyre::Report::new)?;
+                    db.commit_source(output.state.inner());
+                    let first_header = db
+                        .cache
+                        .block_hashes
+                        .keys()
+                        .map(|number| number.saturating_to::<u64>())
+                        .min()
+                        .unwrap_or_else(|| block_number.saturating_sub(1));
+                    let witness = ExecutionWitnessRecord::new(&db)
+                        .into_execution_witness_without_headers(
+                            state_provider.as_ref(),
+                            ExecutionWitnessMode::Canonical,
+                        )
                         .map_err(eyre::Report::new)?;
 
                     // Header numbers may refer to a different canonical ancestor.

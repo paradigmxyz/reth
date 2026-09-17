@@ -470,7 +470,7 @@ where
         )
     )]
     pub fn validate_block_with_state<T: PayloadTypes<BuiltPayload: BuiltPayload<Primitives = N>>>(
-        &self,
+        &mut self,
         input: BlockOrPayload<T>,
         mut ctx: TreeCtx<'_, N>,
     ) -> InsertPayloadResult<N>
@@ -743,6 +743,15 @@ where
         // Spawn hashed post state computation in background so it runs concurrently with
         // block conversion and receipt root computation. This is a pure CPU-bound task
         // (keccak256 hashing of all changed addresses and storage slots).
+        // A destroyed existing account needs zero updates for every slot in its parent trie.
+        // Transaction streams only know the slots observed during execution.
+        let destroyed_state =
+            if reth_execution_types::destroyed_accounts(output.state.inner()).next().is_some() {
+                let provider = ensure_ok!(state_provider_factory.database_provider_ro());
+                Some(Arc::new(ensure_ok!(provider.hashed_post_state(output.state.inner()))))
+            } else {
+                None
+            };
         let hashed_state_output = output.clone();
         let mut hashed_state_rx = state_root_job.take_hashed_state_rx();
         let mut hashed_state: LazyHashedPostState =
@@ -752,10 +761,14 @@ where
                     "hashed_post_state",
                 )
                 .entered();
-                if let Some(Ok(state)) = hashed_state_rx.as_mut().map(|rx| rx.recv()) {
+                if let Some(state) = destroyed_state {
+                    state
+                } else if let Some(Ok(state)) = hashed_state_rx.as_mut().map(|rx| rx.recv()) {
                     state
                 } else {
-                    Arc::new(reth_execution_types::hashed_post_state_from_execution_state::<KeccakKeyHasher>(hashed_state_output.state.inner()))
+                    Arc::new(reth_execution_types::hashed_post_state_from_execution_state::<
+                        KeccakKeyHasher,
+                    >(hashed_state_output.state.inner()))
                 }
             });
 

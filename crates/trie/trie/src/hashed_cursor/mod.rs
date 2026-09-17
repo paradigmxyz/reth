@@ -113,6 +113,33 @@ mod tests {
     use super::*;
 
     #[test]
+    fn destroyed_storage_zeroes_parent_slots_and_preserves_recreated_writes() {
+        let address = Address::with_last_byte(1);
+        let hashed_address = keccak256(address);
+        let old_slot = B256::with_last_byte(2);
+        let rewritten_slot = B256::with_last_byte(3);
+        let parent = HashedPostState::default().with_storages([(
+            hashed_address,
+            reth_trie_common::HashedStorage::from_iter([
+                (old_slot, U256::from(10)),
+                (rewritten_slot, U256::from(20)),
+            ]),
+        )]);
+        let mut state = HashedPostState::default().with_storages([(
+            hashed_address,
+            reth_trie_common::HashedStorage::from_iter([(rewritten_slot, U256::from(30))]),
+        )]);
+        zero_destroyed_account_storage(
+            &mock::MockHashedCursorFactory::from_hashed_post_state(parent),
+            [address],
+            &mut state,
+        )
+        .unwrap();
+        assert_eq!(state.storages[&hashed_address].storage[&old_slot], U256::ZERO);
+        assert_eq!(state.storages[&hashed_address].storage[&rewritten_slot], U256::from(30));
+    }
+
+    #[test]
     fn zero_destroyed_storage_skips_empty_input() {
         let mut hashed_state = HashedPostState::default();
 

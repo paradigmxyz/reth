@@ -11,6 +11,7 @@ repository.workspace = true
 workspace = true
 
 [dependencies]
+evm2.workspace = true
 # reth
 reth-ethereum-engine-primitives = { workspace = true, features = ["std"] }
 reth-ethereum-payload-builder.workspace = true

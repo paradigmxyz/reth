@@ -4,10 +4,12 @@ use alloy_primitives::{
     map::{AddressMap, AddressSet, B256Map, U256Map},
     Address, BlockHash, BlockNumber, B256, U256,
 };
+use evm2::{bytecode::Bytecode, evm::AccountInfo};
 use metrics::{Counter, Histogram};
 use reth_chain_state::{BlockState, ExecutedBlock};
 use reth_errors::{ProviderError, ProviderResult};
 use reth_ethereum_primitives::EthPrimitives;
+use reth_execution_types::EvmState;
 use reth_metrics::Metrics;
 use reth_primitives_traits::{AlloyBlockHeader, NodePrimitives};
 use reth_prune_types::PruneSegment;
@@ -18,8 +20,6 @@ use reth_storage_api::{
 };
 use reth_trie::{updates::TrieUpdatesSorted, HashedPostStateSorted};
 use reth_trie_db::DatabaseHashedPostState;
-use evm2::{bytecode::Bytecode, evm::AccountInfo};
-use reth_execution_types::EvmState;
 use std::{
     ops::RangeInclusive,
     sync::Arc,
@@ -148,7 +148,9 @@ impl ExecutionOverlay {
                 storage_wipes.insert(address);
                 storage.remove(&address);
             }
-            accounts.extend(state.accounts().map(|(address, account)| (address, account.current.clone())));
+            accounts.extend(
+                state.accounts().map(|(address, account)| (address, account.current.clone())),
+            );
             for (key, value) in state.storage() {
                 storage.entry(key.address()).or_default().insert(key.key(), value.current);
             }
@@ -171,12 +173,7 @@ impl ExecutionOverlay {
     #[cfg(test)]
     fn extend_overlay(&mut self, other: &Self) {
         self.block_hashes.extend_from_slice(&other.block_hashes);
-        self.accounts.extend(
-            other
-                .accounts
-                .iter()
-                .map(|(address, info)| (*address, info.clone())),
-        );
+        self.accounts.extend(other.accounts.iter().map(|(address, info)| (*address, info.clone())));
         for address in &other.storage_wipes {
             self.storage.remove(address);
         }
@@ -189,8 +186,6 @@ impl ExecutionOverlay {
         self.storage_wipes.extend(other.storage_wipes.iter().copied());
         self.code_hashes.extend(other.code_hashes.iter().map(|(hash, code)| (*hash, code.clone())));
     }
-
-
 }
 
 /// Builder for calculating trie and hashed-state overlays.
@@ -777,12 +772,17 @@ enum AnchorForParent {
 mod tests {
     use super::*;
     use alloy_primitives::{map::HashMap, Address, U256};
+    use evm2::{
+        bytecode::Bytecode,
+        evm::{AccountChangeRef, AccountInfo, StateChangeSink},
+    };
     use reth_chain_state::{test_utils::TestBlockBuilder, ExecutedBlock};
     use reth_db::{
         models::{AccountBeforeTx, BlockNumberAddress},
         tables,
         transaction::DbTxMut,
     };
+    use reth_execution_types::{execution_state_from_init, EvmState};
     use reth_primitives_traits::{Account, StorageEntry};
     use reth_provider::{
         test_utils::{create_test_provider_factory, MockNodeTypesWithDB},
@@ -791,8 +791,6 @@ mod tests {
     use reth_stages_types::{FinishCheckpoint, StageCheckpoint};
     use reth_storage_api::StageCheckpointWriter;
     use reth_trie::{BranchNodeCompact, ComputedTrieData, HashedPostState, HashedStorage, Nibbles};
-    use evm2::{bytecode::Bytecode, evm::{AccountInfo, StateChangeSink, AccountChangeRef}};
-    use reth_execution_types::{EvmState, execution_state_from_init};
 
     fn with_unique_trie_data(
         block: &ExecutedBlock<EthPrimitives>,
@@ -818,8 +816,18 @@ mod tests {
         let slot = U256::from(id);
         let code_hash = B256::with_last_byte(id.saturating_add(64));
         let state = execution_state_from_init(
-            [(address, (None, Some(Account { nonce: id as u64, balance: U256::from(id), bytecode_hash: None }),
-                [(slot, (U256::ZERO, U256::from(id)))].into()))],
+            [(
+                address,
+                (
+                    None,
+                    Some(Account {
+                        nonce: id as u64,
+                        balance: U256::from(id),
+                        bytecode_hash: None,
+                    }),
+                    [(slot, (U256::ZERO, U256::from(id)))].into(),
+                ),
+            )],
             [(code_hash, reth_primitives_traits::Bytecode(Bytecode::new_raw(vec![id].into())))],
         );
         let mut execution_output = (*block.execution_output).clone();
@@ -887,8 +895,18 @@ mod tests {
             ..Default::default()
         };
         let state = execution_state_from_init(
-            [(address, (None, Some(Account { nonce: account.nonce, balance: account.balance, bytecode_hash: Some(code_hash) }),
-                [(slot, (U256::ZERO, value))].into()))],
+            [(
+                address,
+                (
+                    None,
+                    Some(Account {
+                        nonce: account.nonce,
+                        balance: account.balance,
+                        bytecode_hash: Some(code_hash),
+                    }),
+                    [(slot, (U256::ZERO, value))].into(),
+                ),
+            )],
             [(code_hash, reth_primitives_traits::Bytecode(code.clone()))],
         );
 
@@ -910,13 +928,15 @@ mod tests {
     fn execution_overlay_zeroes_unobserved_storage_for_destroyed_accounts() {
         let address = Address::with_last_byte(1);
         let mut state = EvmState::default();
-        state.account(AccountChangeRef {
-            address,
-            original: Some(&AccountInfo::default()),
-            current: None,
-            created: false,
-            selfdestructed: true,
-        }).unwrap();
+        state
+            .account(AccountChangeRef {
+                address,
+                original: Some(&AccountInfo::default()),
+                current: None,
+                created: false,
+                selfdestructed: true,
+            })
+            .unwrap();
 
         let mut overlay = ExecutionOverlay::default();
         overlay.extend_state(&state);
@@ -937,10 +957,7 @@ mod tests {
 
         let mut overlay = ExecutionOverlay::default();
         overlay.block_hashes.push(first_block);
-        overlay.accounts.insert(
-            address,
-            Some(AccountInfo { nonce: 1, ..Default::default() }),
-        );
+        overlay.accounts.insert(address, Some(AccountInfo { nonce: 1, ..Default::default() }));
         overlay.accounts.insert(retained_address, Some(AccountInfo::default()));
         overlay.storage.entry(address).or_default().insert(slot, U256::from(9));
         overlay.storage.entry(address).or_default().insert(retained_slot, U256::from(10));
@@ -948,10 +965,7 @@ mod tests {
 
         let mut later = ExecutionOverlay::default();
         later.block_hashes.push(later_block);
-        later.accounts.insert(
-            address,
-            Some(AccountInfo { nonce: 11, ..Default::default() }),
-        );
+        later.accounts.insert(address, Some(AccountInfo { nonce: 11, ..Default::default() }));
         later.storage.entry(address).or_default().insert(slot, U256::from(13));
         later.storage_wipes.insert(address);
         later.code_hashes.insert(later_code_hash, Bytecode::new_raw(vec![2].into()));

@@ -91,15 +91,28 @@ impl EvmTransactionValidationGasRules {
         authorization_list_len: u64,
     ) -> EvmTransactionValidationGas {
         let mut intrinsic_gas = evm2::ethereum::intrinsic_gas(
-            &self.version, caller, to, input, access_list_accounts, access_list_storage_keys, value,
+            &self.version,
+            caller,
+            to,
+            input,
+            access_list_accounts,
+            access_list_storage_keys,
+            value,
         );
         if self.version.feature(evm2::EvmFeatures::EIP7702) {
-            intrinsic_gas += authorization_list_len * u64::from(self.version.gas_params.get(
-                evm2::version::GasId::TxEip7702PerEmptyAccountCost,
-            ));
+            intrinsic_gas += authorization_list_len *
+                u64::from(
+                    self.version.gas_params.get(evm2::version::GasId::TxEip7702PerEmptyAccountCost),
+                );
         }
         let floor_gas = evm2::ethereum::floor_gas(
-            &self.version, caller, to, input, access_list_accounts, access_list_storage_keys, value,
+            &self.version,
+            caller,
+            to,
+            input,
+            access_list_accounts,
+            access_list_storage_keys,
+            value,
         );
         EvmTransactionValidationGas { intrinsic_gas, floor_gas }
     }

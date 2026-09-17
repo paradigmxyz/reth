@@ -1329,8 +1329,7 @@ where
         &self,
         bundle_state: &reth_execution_types::EvmState,
     ) -> ProviderResult<HashedPostState> {
-        if reth_execution_types::destroyed_accounts(bundle_state).next().is_some()
-        {
+        if reth_execution_types::destroyed_accounts(bundle_state).next().is_some() {
             return Err(ProviderError::UnsupportedProvider)
         }
         Ok(hashed_post_state_from_execution_state::<KeccakKeyHasher>(bundle_state))

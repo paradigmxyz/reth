@@ -192,9 +192,8 @@ impl<N: NodePrimitives> EthStateCache<N> {
     pub async fn get_recovered_block_and_maybe_bal(
         &self,
         block_hash: B256,
-    ) -> ProviderResult<
-        Option<(Arc<RecoveredBlock<N::Block>>, Option<Arc<DecodedBal<Arc<EvmBal>>>>)>,
-    > {
+    ) -> ProviderResult<Option<(Arc<RecoveredBlock<N::Block>>, Option<Arc<DecodedBal<Arc<EvmBal>>>>)>>
+    {
         let (response_tx, rx) = oneshot::channel();
         let _ = self.to_service.send(CacheAction::GetCachedBal { block_hash, response_tx });
 
@@ -262,9 +261,8 @@ impl<N: NodePrimitives> EthStateCache<N> {
 
     /// Inserts a decoded revm BAL into the cache.
     pub fn insert_bal(&self, block_hash: B256, bal: DecodedBal<Arc<EvmBal>>) {
-        let _ = self
-            .to_service
-            .send(CacheAction::InsertBal { block_hash, bal: CachedBal::new(bal) });
+        let _ =
+            self.to_service.send(CacheAction::InsertBal { block_hash, bal: CachedBal::new(bal) });
     }
 }
 /// Thrown when the cache service task dropped.

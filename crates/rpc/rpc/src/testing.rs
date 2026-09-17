@@ -126,7 +126,7 @@ where
         let gas_limit_override = self.gas_limit_override;
         self.eth_api
             .spawn_with_state_at_block(request.parent_block_hash, move |eth_api, state| {
-                let state_provider = state.db.into_inner().into_inner().0;
+                let state_provider = state.db.into_inner().into_inner();
                 let mut state = evm2::evm::CacheDB::new(evm2::evm::Db::new(
                     StateProviderDatabase::new(&state_provider),
                 ));

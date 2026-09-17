@@ -22,18 +22,21 @@
 //! validation. This module only logs the first divergence between the received BAL and the BAL
 //! rebuilt from canonical execution.
 
-use super::{ordered_outputs::ordered_worker_outputs, worker, BalExecutionError};
+use super::{
+    ordered_outputs::{ordered_worker_outputs, OrderedWorkerOutputError},
+    worker, BalExecutionError,
+};
 use alloy_eip7928::{
     bal::{Bal, DecodedBal},
     compute_block_access_list_hash, BlockAccessList,
 };
 use alloy_primitives::Address;
 use crossbeam_channel::{Receiver, Sender};
+use reth_engine_primitives::BlockAccessListDecodeError;
 use reth_evm::{
     BlockExecutionOutput, BlockExecutor, BlockExecutorFactory, BlockExecutorFor, ConfigureEvm,
     Database, EvmEnvFor, ExecutableTxFor, ExecutionCtxFor,
 };
-use reth_engine_primitives::BlockAccessListDecodeError;
 use reth_primitives_traits::ReceiptTy;
 use reth_tasks::Runtime;
 use std::sync::Arc;
@@ -143,10 +146,14 @@ where
         let output = match output {
             Ok(output) => output,
             Err(OrderedWorkerOutputError::Worker(worker::BalWorkerError::Execution {
-                tx_index, tx_gas_limit, source,
+                tx_index,
+                tx_gas_limit,
+                source,
             })) => {
                 canonical_executor.validate_transaction_gas_limit(tx_gas_limit)?;
-                return Err(worker::BalWorkerError::Execution { tx_index, tx_gas_limit, source }.into());
+                return Err(
+                    worker::BalWorkerError::Execution { tx_index, tx_gas_limit, source }.into()
+                );
             }
             Err(error) => return Err(error.into()),
         };
@@ -712,7 +719,10 @@ mod tests {
             tx_rx,
             receipt_tx,
         );
-        assert!(matches!(result, Err(BalExecutionError::Execution(reth_evm::BlockExecutionError::Validation(_)))));
+        assert!(matches!(
+            result,
+            Err(BalExecutionError::Execution(reth_evm::BlockExecutionError::Validation(_)))
+        ));
     }
 
     #[test]

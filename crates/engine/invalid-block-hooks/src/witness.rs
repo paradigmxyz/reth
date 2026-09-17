@@ -177,11 +177,18 @@ where
         block: &RecoveredBlock<N::Block>,
     ) -> eyre::Result<(ExecutionWitness, EvmState, reth_trie::HashedPostState)> {
         let state_provider = self.provider.state_by_block_hash(parent_header.hash())?;
-        let database = StateProviderDatabase::new(state_provider.as_ref());
-        let output = self.evm_config.executor(database).execute(block)?;
+        let mut database = evm2::evm::CacheDB::new(evm2::evm::Db::new(StateProviderDatabase::new(
+            state_provider.as_ref(),
+        )));
+        let output = self.evm_config.executor(&mut database).execute(block)?;
         let hashed_state = state_provider.hashed_post_state(output.state.inner())?;
-        let (codes, preimages, block_state) = collect_execution_data(output.state.into_inner())?;
-        let witness = generate(codes, preimages, hashed_state.clone(), state_provider)?;
+        database.commit_source(output.state.inner());
+        let witness = reth_evm::witness::ExecutionWitnessRecord::new(&database)
+            .into_execution_witness_without_headers(
+                state_provider.as_ref(),
+                reth_trie::ExecutionWitnessMode::Legacy,
+            )?;
+        let block_state = output.state.into_inner();
 
         Ok((witness, block_state, hashed_state))
     }

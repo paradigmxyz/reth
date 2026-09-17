@@ -214,7 +214,9 @@ where
         let cache = self.cache_map.cache_for_address(address);
 
         let cacheable_input = message.input.len() <= MAX_PRECOMPILE_CACHE_INPUT_SIZE;
-        if cacheable_input && let Some(entry) = cache.get(message.input.as_ref(), self.spec_id.clone()) {
+        if cacheable_input &&
+            let Some(entry) = cache.get(message.input.as_ref(), self.spec_id.clone())
+        {
             return Some(match gas.spend(entry.regular_gas_used).map_err(PrecompileError::from) {
                 Ok(()) => {
                     self.increment_by_one_precompile_cache_hits();
@@ -383,5 +385,45 @@ mod tests {
             .expect("cached identity precompile succeeds");
         assert_eq!(output.bytes(), b"cached-input");
         assert_eq!(hit_gas.spent(), 18);
+    }
+    #[test]
+    fn identity_cache_obeys_input_size_boundary() {
+        let cache = PrecompileCacheMap::default();
+        let mut provider = CachedPrecompileProvider::new(
+            evm2::Precompiles::base(SpecId::OSAKA),
+            cache.clone(),
+            SpecId::OSAKA,
+            None,
+        );
+        let mut evm = Evm::<BaseEvmTypes>::new(
+            SpecId::OSAKA,
+            BlockEnv::default(),
+            TxRegistry::new(),
+            InMemoryDB::default(),
+            NoPrecompiles::default(),
+        );
+        let address = Address::with_last_byte(4);
+        for len in [2048, 2049] {
+            let message = Message::<BaseEvmTypes> {
+                kind: MessageKind::Call,
+                gas_limit: 30_000,
+                destination: address,
+                code_address: address,
+                input: Bytes::from(vec![1; len]),
+                ..Default::default()
+            };
+            let output = provider
+                .execute(&mut evm, &message, &mut GasTracker::new(30_000))
+                .unwrap()
+                .unwrap();
+            assert_eq!(output.bytes(), message.input.as_ref());
+            assert_eq!(
+                cache
+                    .cache_for_address(address)
+                    .get(message.input.as_ref(), SpecId::OSAKA)
+                    .is_some(),
+                len == 2048
+            );
+        }
     }
 }

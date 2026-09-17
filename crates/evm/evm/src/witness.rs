@@ -97,7 +97,9 @@ impl<'a, DB> ExecutionWitnessRecord<'a, DB> {
             }
         }
         if !wiped_state.is_empty() {
-            self.additional_state.get_or_insert_default().extend(state_provider.hashed_post_state(&wiped_state)?);
+            self.additional_state
+                .get_or_insert_default()
+                .extend(state_provider.hashed_post_state(&wiped_state)?);
         }
         let (hashed_state, keys) = self.hashed_post_state();
         let state = state_provider.witness(Default::default(), hashed_state, mode)?;
@@ -124,10 +126,7 @@ impl<'a, DB> ExecutionWitnessRecord<'a, DB> {
             }
 
             if let Some(storage) = self.state.cache.storage.get(address) {
-                let hashed_storage = hashed_state
-                    .storages
-                    .entry(hashed_address)
-                    .or_default();
+                let hashed_storage = hashed_state.storages.entry(hashed_address).or_default();
                 for (slot, value) in &storage.slots {
                     let slot = B256::from(*slot);
                     hashed_storage.storage.insert(keccak256(slot), *value);
@@ -172,9 +171,10 @@ mod tests {
 
         let additional_state = HashedPostState::default().with_storages([(
             hashed_address,
-            HashedStorage::from_iter(
-                [(keccak256(B256::from(slot)), U256::from(1)), (additional_slot, U256::from(3))],
-            ),
+            HashedStorage::from_iter([
+                (keccak256(B256::from(slot)), U256::from(1)),
+                (additional_slot, U256::from(3)),
+            ]),
         )]);
 
         let (hashed_state, _) = ExecutionWitnessRecord::new(&state)

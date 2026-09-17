@@ -13,10 +13,10 @@ use reth_exex::{ExExManagerHandle, ExExNotification, ExExNotificationSource};
 use reth_primitives_traits::{format_gas_throughput, BlockBody, NodePrimitives};
 use reth_provider::{
     providers::{StaticFileProvider, StaticFileWriter},
-    BlockHashReader, BlockReader, DBProvider, EitherWriter,
-    HashedPostStateProvider, HeaderProvider, LatestStateProviderRef, OriginalValuesKnown,
-    ProviderError, StateWriteConfig, StateWriter, StaticFileProviderFactory, StatsReader,
-    StoragePath, StorageSettingsCache, TransactionVariant,
+    BlockHashReader, BlockReader, DBProvider, EitherWriter, HashedPostStateProvider,
+    HeaderProvider, LatestStateProviderRef, OriginalValuesKnown, ProviderError, StateWriteConfig,
+    StateWriter, StaticFileProviderFactory, StatsReader, StoragePath, StorageSettingsCache,
+    TransactionVariant,
 };
 use reth_stages_api::{
     BlockErrorKind, CheckpointBlockRange, EntitiesCheckpoint, ExecInput, ExecOutput,
@@ -500,8 +500,8 @@ where
         provider.write_state(&state, OriginalValuesKnown::Yes, StateWriteConfig::default())?;
 
         if provider.cached_storage_settings().use_hashed_state() {
-            let hashed_state =
-                LatestStateProviderRef::new(provider).hashed_post_state(&state.bundle)?;
+            let hashed_state = LatestStateProviderRef::new(provider)
+                .hashed_post_state(state.execution_state_ref())?;
             provider.write_hashed_state(&hashed_state.into_sorted())?;
         }
 
@@ -852,7 +852,8 @@ mod tests {
             ),
         );
 
-        let hashed_state = provider.latest().hashed_post_state(&state.bundle).unwrap();
+        let hashed_state =
+            provider.latest().hashed_post_state(state.execution_state_ref()).unwrap();
 
         let storage = &hashed_state.storages[&hashed_address];
         assert_eq!(storage.storage[&first_slot], U256::ZERO);

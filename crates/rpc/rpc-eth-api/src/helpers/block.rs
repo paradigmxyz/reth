@@ -10,13 +10,13 @@ use alloy_eip7928::bal::DecodedBal;
 use alloy_eips::BlockId;
 use alloy_rlp::Encodable;
 use alloy_rpc_types_eth::{Block, BlockTransactions, Index};
+use evm2::evm::Bal as EvmBal;
 use futures::Future;
 use reth_node_api::BlockBody;
 use reth_primitives_traits::{AlloyBlockHeader, RecoveredBlock, SealedHeader, TransactionMeta};
 use reth_rpc_convert::{transaction::ConvertReceiptInput, RpcConvert, RpcHeader};
 use reth_storage_api::{BlockIdReader, BlockReader, ProviderHeader, ProviderReceipt, ProviderTx};
 use reth_transaction_pool::{PoolTransaction, TransactionPool};
-use revm::state::bal::Bal as RevmBal;
 use std::sync::Arc;
 
 /// Result type of the fetched block receipts.
@@ -310,7 +310,7 @@ pub trait LoadBlock: LoadPendingBlock + SpawnBlocking + RpcNodeCoreExt {
         Output = Result<
             Option<(
                 Arc<RecoveredBlock<<Self::Provider as BlockReader>::Block>>,
-                Option<Arc<DecodedBal<Arc<RevmBal>>>>,
+                Option<Arc<DecodedBal<Arc<EvmBal>>>>,
             )>,
             Self::Error,
         >,

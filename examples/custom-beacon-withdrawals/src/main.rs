@@ -334,6 +334,13 @@ impl<'a> BlockExecutor for CustomBlockExecutor<'a> {
         self.inner.apply_pre_execution_changes()
     }
 
+    fn validate_transaction_gas_limit(
+        &mut self,
+        gas_limit: u64,
+    ) -> Result<(), BlockExecutionError> {
+        self.inner.validate_transaction_gas_limit(gas_limit)
+    }
+
     fn execute_transaction_without_commit(
         &mut self,
         transaction: impl ExecutorTx<Self>,

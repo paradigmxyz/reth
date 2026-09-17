@@ -306,10 +306,7 @@ impl<S: BlockHashReader> BlockHashReader for InstrumentedStateProvider<S> {
 }
 
 impl<S: HashedPostStateProvider> HashedPostStateProvider for InstrumentedStateProvider<S> {
-    fn hashed_post_state(
-        &self,
-        bundle_state: &EvmState,
-    ) -> ProviderResult<HashedPostState> {
+    fn hashed_post_state(&self, bundle_state: &EvmState) -> ProviderResult<HashedPostState> {
         self.state_provider.hashed_post_state(bundle_state)
     }
 }

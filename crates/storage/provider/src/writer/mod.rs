@@ -768,16 +768,20 @@ mod storage_tests {
         test_utils::{state_root, storage_root_prehashed},
         HashedPostState, HashedStorage, StateRoot, StorageRoot, StorageRootProgress,
     };
-    use reth_trie_db::{DatabaseStateRoot, DatabaseStorageRoot, LegacyKeyAdapter, PackedKeyAdapter};
-    use revm::database::{
-        states::{
-            bundle_state::BundleRetention, changes::PlainStorageRevert, PlainStorageChangeset,
-        },
-        BundleState, OriginalValuesKnown, State,
+    use reth_trie_db::{
+        DatabaseStateRoot, DatabaseStorageRoot, LegacyKeyAdapter, PackedKeyAdapter,
     };
-    use revm::database_interface::{DatabaseCommit, EmptyDB};
-    use revm::state::{
-        Account as RevmAccount, AccountInfo as RevmAccountInfo, AccountStatus, EvmStorageSlot,
+    use revm::{
+        database::{
+            states::{
+                bundle_state::BundleRetention, changes::PlainStorageRevert, PlainStorageChangeset,
+            },
+            BundleState, OriginalValuesKnown, State,
+        },
+        database_interface::{DatabaseCommit, EmptyDB},
+        state::{
+            Account as RevmAccount, AccountInfo as RevmAccountInfo, AccountStatus, EvmStorageSlot,
+        },
     };
     use std::{collections::BTreeMap, str::FromStr};
 
@@ -888,7 +892,9 @@ mod storage_tests {
         provider.write_state_changes(plain_state).expect("Could not write plain state to DB");
 
         assert_eq!(reverts.storage, [[]]);
-        provider.write_state_reverts(reverts, 1, StateWriteConfig::default()).expect("Could not write reverts to DB");
+        provider
+            .write_state_reverts(reverts, 1, StateWriteConfig::default())
+            .expect("Could not write reverts to DB");
 
         let reth_account_a = account_a.into();
         let reth_account_b = account_b.into();
@@ -954,7 +960,9 @@ mod storage_tests {
             reverts.storage,
             [[PlainStorageRevert { address: address_b, wiped: true, storage_revert: vec![] }]]
         );
-        provider.write_state_reverts(reverts, 2, StateWriteConfig::default()).expect("Could not write reverts to DB");
+        provider
+            .write_state_reverts(reverts, 2, StateWriteConfig::default())
+            .expect("Could not write reverts to DB");
 
         // Check new plain state for account B
         assert_eq!(

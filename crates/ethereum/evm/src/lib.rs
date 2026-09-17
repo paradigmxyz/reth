@@ -644,8 +644,7 @@ where
         let txs = payload.payload.transactions().clone();
         let sender_recovery_cache = self.sender_recovery_cache.clone();
         let convert = move |tx: Bytes| {
-            let tx =
-                TransactionSigned::decode_2718_exact(tx.as_ref()).map_err(AnyError::new)?;
+            let tx = TransactionSigned::decode_2718_exact(tx.as_ref()).map_err(AnyError::new)?;
             let signer = if let Some(cache) = &sender_recovery_cache {
                 cache.recover(&tx)
             } else {

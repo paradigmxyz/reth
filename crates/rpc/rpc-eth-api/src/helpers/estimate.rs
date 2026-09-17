@@ -1,14 +1,15 @@
 //! Estimate gas needed implementation
 
 use super::{call::request_gas_price, Call, LoadPendingBlock};
-use crate::{AsEthApiError, FromEthApiError, IntoEthApiError};
+use crate::{AsEthApiError, FromEthApiError, FromEvmError, IntoEthApiError};
+use alloy_consensus::Transaction;
 use alloy_network::TransactionBuilder;
 use alloy_primitives::{TxKind, KECCAK256_EMPTY, U256};
 use alloy_rpc_types_eth::{state::EvmOverrides, BlockId};
 use evm2::{evm::DynDatabase, EvmFeatures, TxResult};
 use futures::Future;
 use reth_chainspec::MIN_TRANSACTION_GAS;
-use reth_evm::{EvmEnv, EvmEnvFor, EvmTypesFor};
+use reth_evm::{execute::BlockExecutorFactory, ConfigureEvm, Evm, EvmEnv, EvmEnvFor, EvmTypesFor};
 use reth_rpc_convert::{RpcConvert, RpcTxReq};
 use reth_rpc_eth_types::{
     cache::db::{apply_block_overrides, apply_state_overrides},
@@ -120,11 +121,14 @@ pub trait EstimateCall: Call {
             highest_gas_limit = highest_gas_limit.min(allowance);
         }
 
+        request.as_mut().set_nonce(tx_env.nonce());
+        let mut evm =
+            self.evm_config().block_executor_factory().evm_with_database(&mut db, evm_env.clone());
         let mut execute = |gas_limit| {
             let mut request = request.clone();
             request.as_mut().set_gas_limit(gas_limit);
-            let tx_env = self.create_txn_env(&evm_env, request, &mut db)?;
-            self.transact(&mut db, evm_env.clone(), tx_env).map(|res| res.result)
+            let tx_env = self.converter().tx_env(request, &evm_env)?;
+            evm.transact_result(&tx_env).map_err(Self::Error::from_evm_err)
         };
 
         // For basic transfers, try using minimum gas before running full binary search

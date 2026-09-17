@@ -962,14 +962,17 @@ fn compute_execution_overlay_inner<N: NodePrimitives>(
 mod tests {
     use super::*;
     use alloy_primitives::{map::HashMap, Address, U256};
+    use evm2::{
+        bytecode::Bytecode,
+        evm::{AccountChangeRef, AccountInfo, StateChangeSink},
+    };
     use reth_chain_state::{test_utils::TestBlockBuilder, ExecutedBlock, SparseTrie};
     use reth_ethereum_primitives::EthPrimitives;
+    use reth_execution_types::{execution_state_from_init, EvmState};
     use reth_primitives_traits::Account;
     #[cfg(feature = "rayon")]
     use reth_tasks::WorkerPool;
     use reth_trie::{updates::TrieUpdatesSorted, ComputedTrieData, HashedPostState, HashedStorage};
-    use evm2::{bytecode::Bytecode, evm::{AccountInfo, StateChangeSink, AccountChangeRef}};
-    use reth_execution_types::{EvmState, execution_state_from_init};
     use std::{
         sync::{mpsc, Arc},
         thread,
@@ -993,8 +996,18 @@ mod tests {
         let slot = U256::from(id);
         let code_hash = B256::with_last_byte(id.saturating_add(64));
         let state = execution_state_from_init(
-            [(address, (None, Some(Account { nonce: id as u64, balance: U256::from(id), bytecode_hash: None }),
-                [(slot, (U256::ZERO, U256::from(id)))].into()))],
+            [(
+                address,
+                (
+                    None,
+                    Some(Account {
+                        nonce: id as u64,
+                        balance: U256::from(id),
+                        bytecode_hash: None,
+                    }),
+                    [(slot, (U256::ZERO, U256::from(id)))].into(),
+                ),
+            )],
             [(code_hash, reth_primitives_traits::Bytecode(Bytecode::new_raw(vec![id].into())))],
         );
         let mut execution_output = (*block.execution_output).clone();

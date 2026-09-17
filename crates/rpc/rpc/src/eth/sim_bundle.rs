@@ -14,7 +14,10 @@ use reth_errors::RethError;
 use reth_evm::{ConfigureEvm, EvmEnv};
 use reth_primitives_traits::Recovered;
 use reth_rpc_api::MevSimApiServer;
-use reth_rpc_eth_api::helpers::{block::LoadBlock, Call, EthTransactions};
+use reth_rpc_eth_api::{
+    helpers::{block::LoadBlock, Call, EthTransactions},
+    FromEthApiError,
+};
 use reth_rpc_eth_types::{
     cache::db::apply_block_overrides, utils::recover_raw_transaction, EthApiError,
 };

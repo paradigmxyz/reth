@@ -19,8 +19,8 @@ use crate::{
         PlainStateInputOrder,
     },
     AccountReader, BlockBodyWriter, BlockExecutionWriter, BlockHashReader, BlockNumReader,
-    BlockReader, BlockWriter, EvmStateInit, ChainStateBlockReader, ChainStateBlockWriter,
-    DBProvider, DbTxProvider, EitherReader, EitherWriter, EitherWriterDestination, HashingWriter,
+    BlockReader, BlockWriter, ChainStateBlockReader, ChainStateBlockWriter, DBProvider,
+    DbTxProvider, EitherReader, EitherWriter, EitherWriterDestination, EvmStateInit, HashingWriter,
     HeaderProvider, HeaderSyncGapProvider, HistoryWriter, LatestStateProviderRef,
     OriginalValuesKnown, PersistenceFrontiers, ProviderError, PruneCheckpointReader,
     PruneCheckpointWriter, RawRocksDBBatch, RevertsInit, RocksBatchArg, RocksDBProviderFactory,
@@ -67,8 +67,9 @@ use reth_stages_types::{FinishCheckpoint, StageCheckpoint, StageId};
 use reth_static_file_types::StaticFileSegment;
 use reth_storage_api::{
     BlockBodyIndicesProvider, BlockBodyReader, HistoryInfo, HistoryReader, MetadataProvider,
-    MetadataWriter, NodePrimitivesProvider, StateProvider, StateWriteConfig,
-    StorageChangeSetReader, StoragePath, StorageSettingsCache, WriteStateInput,
+    MetadataWriter, NodePrimitivesProvider, PlainStateReverts, PlainStorageChangeset,
+    PlainStorageRevert, StateChangeset, StateProvider, StateWriteConfig, StorageChangeSetReader,
+    StoragePath, StorageSettingsCache, WriteStateInput,
 };
 use reth_storage_errors::provider::{ProviderResult, StaticFileWriterError};
 use reth_storage_overlay::OverlayManager;
@@ -77,9 +78,6 @@ use reth_trie::{
     ComputedTrieData, HashedPostStateSorted,
 };
 use reth_trie_db::{DatabaseStorageTrieCursor, TrieTableAdapter};
-use reth_storage_api::{
-    PlainStateReverts, PlainStorageChangeset, PlainStorageRevert, StateChangeset,
-};
 use smallvec::SmallVec;
 use std::{
     cmp::Ordering,
@@ -5257,7 +5255,6 @@ mod tests {
 
     #[test]
     fn test_write_state_hashed() {
-
         let factory = create_test_provider_factory();
         factory.set_storage_settings_cache(StorageSettings::v2());
 

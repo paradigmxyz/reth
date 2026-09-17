@@ -22,8 +22,9 @@ use reth_chainspec::{ChainSpecProvider, EthChainSpec, EthereumHardforks};
 use reth_engine_primitives::ConsensusEngineEvent;
 use reth_errors::RethError;
 use reth_evm::{
-    execute::Executor, witness::ExecutionWitnessRecord, ConfigureEvm, DynDatabase, EvmEnv,
-    EvmEnvFor,
+    execute::{BlockExecutorFactory, Executor},
+    witness::ExecutionWitnessRecord,
+    ConfigureEvm, DynDatabase, Evm, EvmEnv, EvmEnvFor,
 };
 use reth_primitives_traits::{
     Block as BlockTrait, BlockBody, BlockTy, ReceiptWithBloom, RecoveredBlock,
@@ -127,18 +128,21 @@ where
 
                 eth_api.apply_pre_execution_changes(&block, &mut db)?;
 
-                let block_env = evm_env.block_env.clone();
+                let block_env = evm_env.block_env().clone();
 
                 let mut transactions = block.transactions_recovered().enumerate().peekable();
-                let inspector = DebugInspector::new(opts).map_err(Eth::Error::from_eth_err)?;
-                let mut evm =
-                    eth_api.evm_config().evm_with_env_and_inspector(&mut db, evm_env, inspector);
+                let mut inspector = DebugInspector::new(opts).map_err(Eth::Error::from_eth_err)?;
+                let mut evm = eth_api
+                    .evm_config()
+                    .block_executor_factory()
+                    .evm_with_database(&mut db, evm_env);
                 while let Some((index, tx)) = transactions.next() {
                     let tx_hash = *tx.tx_hash();
                     let tx_env = eth_api.evm_config().tx_env(tx.cloned());
 
-                    let (next_inspector, res) =
-                        eth_api.inspect(&mut db, evm_env.clone(), &tx_env, inspector)?;
+                    let (next_inspector, res) = evm
+                        .transact_with_inspector(&tx_env, inspector)
+                        .map_err(Eth::Error::from_evm_err)?;
                     inspector = next_inspector;
                     let result = inspector
                         .get_result(
@@ -148,9 +152,9 @@ where
                                 tx_index: Some(index),
                             }),
                             &tx_env,
-                            evm_env.block_env(),
+                            &block_env,
                             &res,
-                            db,
+                            evm.state_db_mut(),
                         )
                         .map_err(Eth::Error::from_eth_err)?;
 
@@ -159,7 +163,7 @@ where
                         inspector.fuse().map_err(Eth::Error::from_eth_err)?;
                         // need to apply the state changes of this transaction before executing the
                         // next transaction
-                        db.commit_source(&res.pending_state)
+                        evm.commit_state(&res.pending_state)
                     }
                 }
 
@@ -184,9 +188,9 @@ where
 
                 eth_api.apply_pre_execution_changes(&block, &mut db)?;
 
-                let block_env = evm_env.block_env.clone();
+                let block_env = evm_env.block_env().clone();
                 let mut transactions = block.transactions_recovered().enumerate().peekable();
-                let inspector = match DebugInspector::new(opts) {
+                let mut inspector = match DebugInspector::new(opts) {
                     Ok(inspector) => inspector,
                     Err(err) => {
                         if let Some((_, tx)) = transactions.peek() {
@@ -199,14 +203,19 @@ where
                         return Ok(results)
                     }
                 };
-                let mut evm =
-                    eth_api.evm_config().evm_with_env_and_inspector(&mut db, evm_env, inspector);
+                let mut evm = eth_api
+                    .evm_config()
+                    .block_executor_factory()
+                    .evm_with_database(&mut db, evm_env);
 
                 while let Some((index, tx)) = transactions.next() {
                     let tx_hash = *tx.tx_hash();
-                    let tx_env = eth_api.evm_config().tx_env(tx);
-                    let res = match evm.transact(tx_env.clone()) {
-                        Ok(res) => res,
+                    let tx_env = eth_api.evm_config().tx_env(tx.cloned());
+                    let res = match evm.transact_with_inspector(&tx_env, inspector) {
+                        Ok((next_inspector, res)) => {
+                            inspector = next_inspector;
+                            res
+                        }
                         Err(err) => {
                             results.push(Some(TraceResult::Error {
                                 error: err.to_string(),
@@ -216,7 +225,6 @@ where
                         }
                     };
 
-                    let (db, inspector, _) = evm.components_mut();
                     let result = match inspector.get_result(
                         Some(TransactionContext {
                             block_hash: Some(block.hash()),
@@ -226,7 +234,7 @@ where
                         &tx_env,
                         &block_env,
                         &res,
-                        db,
+                        evm.state_db_mut(),
                     ) {
                         Ok(result) => result,
                         Err(err) => {
@@ -247,7 +255,7 @@ where
                             }));
                             break
                         }
-                        db.commit(res.state);
+                        evm.commit_state(&res.pending_state);
                     }
                 }
 
@@ -328,6 +336,7 @@ where
             .spawn_with_state_at_block(block.parent_hash(), move |eth_api, mut db| {
                 // configure env for the target transaction
                 let (tx, tx_info) = transaction.split();
+                let tx_hash = *tx.tx_hash();
 
                 // index should always be available because `transaction_and_block` only
                 // returns transactions included in a block
@@ -338,7 +347,12 @@ where
                 let inspector = DebugInspector::new(opts).map_err(Eth::Error::from_eth_err)?;
                 let tx_env = eth_api.evm_config().tx_env(tx.clone());
                 let (mut inspector, res, evm_env) = eth_api.inspect_transaction_in_block(
-                    &block, &mut db, inspector, index, &tx_env, bal.as_deref(),
+                    &block,
+                    &mut db,
+                    inspector,
+                    index,
+                    &tx_env,
+                    bal.as_deref(),
                 )?;
                 let trace = inspector
                     .get_result(
@@ -718,7 +732,9 @@ where
             HashedStorage::from_plain_storage(s.slots.iter())
         });
         let storage_root = if storage.is_some_and(|s| s.wiped) {
-            storage_root_unsorted(hashed_storage.storage.into_iter().filter(|(_, value)| !value.is_zero()))
+            storage_root_unsorted(
+                hashed_storage.storage.into_iter().filter(|(_, value)| !value.is_zero()),
+            )
         } else {
             db.db.inner().storage_root(address, hashed_storage).map_err(Eth::Error::from_eth_err)?
         };
@@ -803,7 +819,11 @@ where
                         .visit(&mut state)
                         .expect("state accumulator is infallible");
                     db.commit_source(&result.pending_state);
-                    let hashed_state = db.db.inner().hashed_post_state(&state).map_err(Eth::Error::from_eth_err)?;
+                    let hashed_state = db
+                        .db
+                        .inner()
+                        .hashed_post_state(&state)
+                        .map_err(Eth::Error::from_eth_err)?;
                     let root =
                         db.db.inner().state_root(hashed_state).map_err(Eth::Error::from_eth_err)?;
                     roots.push(root);

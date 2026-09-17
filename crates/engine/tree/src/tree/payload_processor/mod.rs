@@ -20,7 +20,6 @@ use reth_provider::{
     BlockExecutionOutput, BlockNumReader, ChangeSetReader, DatabaseProviderFactory, HistoryReader,
     PruneCheckpointReader, StageCheckpointReader, StorageChangeSetReader, StorageSettingsCache,
 };
-use reth_execution_types::{execution_state_from_init, EvmState};
 use reth_storage_overlay::OverlayStateProviderFactory;
 use reth_tasks::Runtime;
 pub use reth_trie_parallel::{
@@ -679,7 +678,6 @@ mod tests {
     use reth_chainspec::ChainSpec;
     use reth_evm_ethereum::EthEvmConfig;
     use reth_execution_cache::CachedStatus;
-    use reth_execution_types::{execution_state_from_init, EvmState};
     use reth_primitives_traits::Account;
     use std::sync::{atomic::Ordering, Arc};
 

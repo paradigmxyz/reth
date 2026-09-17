@@ -61,11 +61,16 @@ pub trait GetBlockAccessList: Trace + Call + LoadBlock + RpcNodeCoreExt {
                 }
                 let (_, bal) =
                     executor.finish_with_block_access_list().map_err(Self::Error::from_eth_err)?;
-                if let Some(bal) = bal.as_ref().filter(|_| eth_api.eth_api_settings().cache_computed_bals) {
+                if let Some(bal) =
+                    bal.as_ref().filter(|_| eth_api.eth_api_settings().cache_computed_bals)
+                {
                     let raw = alloy_rlp::encode(bal).into();
                     let native = evm2::evm::Bal::try_from(bal.clone())
-                        .map_err(RethError::other).map_err(Self::Error::from_eth_err)?;
-                    eth_api.cache().insert_bal(block.hash(), DecodedBal::new(Arc::new(native), raw));
+                        .map_err(RethError::other)
+                        .map_err(Self::Error::from_eth_err)?;
+                    eth_api
+                        .cache()
+                        .insert_bal(block.hash(), DecodedBal::new(Arc::new(native), raw));
                 }
                 Ok(bal)
             })

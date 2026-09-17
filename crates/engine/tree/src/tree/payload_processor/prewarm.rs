@@ -766,6 +766,27 @@ impl PrewarmProofTargetsSink {
 impl EvmStateChangeSink for PrewarmProofTargetsSink {
     type Error = Infallible;
 
+    fn account_read(
+        &mut self,
+        address: Address,
+        _info: Option<&reth_execution_types::ExecutionAccountInfo>,
+    ) -> Result<(), Self::Error> {
+        self.targets.account_targets.push(ProofV2Target::new(keccak256(address)));
+        Ok(())
+    }
+
+    fn storage_read(
+        &mut self,
+        address: Address,
+        key: alloy_primitives::U256,
+        _value: alloy_primitives::U256,
+    ) -> Result<(), Self::Error> {
+        self.storage_targets_for_address(address)
+            .push(ProofV2Target::new(keccak256(key.to_be_bytes::<32>())));
+        self.storage_targets += 1;
+        Ok(())
+    }
+
     fn account(&mut self, change: ExecutionAccountChangeRef<'_>) -> Result<(), Self::Error> {
         self.targets.account_targets.push(ProofV2Target::new(keccak256(change.address)));
         Ok(())

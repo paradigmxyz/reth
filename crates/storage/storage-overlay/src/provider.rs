@@ -390,7 +390,13 @@ where
     fn basic_account(&self, address: &Address) -> ProviderResult<Option<Account>> {
         let (overlay, historical_fallback) = self.execution_overlay()?;
         if let Some(account) = overlay.accounts().get(address) {
-            return Ok(account.as_ref().map(|info| Account { nonce: info.nonce, balance: info.balance, bytecode_hash: (!info.code_hash.is_zero() && info.code_hash != alloy_primitives::KECCAK256_EMPTY).then_some(info.code_hash) }))
+            return Ok(account.as_ref().map(|info| Account {
+                nonce: info.nonce,
+                balance: info.balance,
+                bytecode_hash: (!info.code_hash.is_zero() &&
+                    info.code_hash != alloy_primitives::KECCAK256_EMPTY)
+                    .then_some(info.code_hash),
+            }))
         }
         if let Some(historical_fallback) = historical_fallback {
             return match self.provider().account_history_info(
@@ -768,10 +774,10 @@ where
         &self,
         bundle_state: &reth_execution_types::EvmState,
     ) -> ProviderResult<HashedPostState> {
-        let mut hashed_state =
-            reth_execution_types::hashed_post_state_from_execution_state::<KeccakKeyHasher>(bundle_state);
-        if reth_execution_types::destroyed_accounts(bundle_state).next().is_none()
-        {
+        let mut hashed_state = reth_execution_types::hashed_post_state_from_execution_state::<
+            KeccakKeyHasher,
+        >(bundle_state);
+        if reth_execution_types::destroyed_accounts(bundle_state).next().is_none() {
             return Ok(hashed_state)
         }
 
@@ -1036,6 +1042,7 @@ mod tests {
     use crate::{ExecutionOverlay, OverlayManager};
     use alloy_eips::BlockNumHash;
     use alloy_primitives::{Address, U256};
+    use evm2::{bytecode::Bytecode as EvmBytecode, evm::AccountInfo};
     use reth_chain_state::{test_utils::TestBlockBuilder, ExecutedBlock};
     use reth_db_api::{
         models::{
@@ -1056,7 +1063,6 @@ mod tests {
         updates::TrieUpdatesSorted, BranchNodeCompact, ComputedTrieData, HashedPostState,
         HashedStorage, Nibbles,
     };
-    use evm2::{bytecode::Bytecode as EvmBytecode, evm::AccountInfo};
 
     fn with_unique_trie_data(
         block: &ExecutedBlock<EthPrimitives>,

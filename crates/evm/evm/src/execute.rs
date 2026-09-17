@@ -6,7 +6,9 @@ use alloy_consensus::{
     transaction::{Either, Recovered, TransactionEnvelope},
     BlockHeader as _, Header,
 };
-use alloy_eip7928::{bal::DecodedBal, compute_block_access_list_hash_with_buf, BlockAccessIndex, BlockAccessList};
+use alloy_eip7928::{
+    bal::DecodedBal, compute_block_access_list_hash_with_buf, BlockAccessIndex, BlockAccessList,
+};
 use alloy_eips::eip2718::{Typed2718, WithEncoded};
 use alloy_primitives::{Address, B256};
 use core::fmt::Debug;
@@ -169,6 +171,15 @@ pub trait Evm {
     where
         I: evm2::Inspector<Self::EvmTypes> + 'static;
 
+    /// Returns the accepted state overlay, including earlier committed transactions.
+    fn state_db_mut(&mut self) -> &mut dyn DynDatabase;
+
+    /// Accepts detached changes after a tracing callback has consumed the pre-state.
+    fn commit_state(&mut self, state: &evm2::evm::PendingState);
+
+    /// Takes cached reads and accepted writes for a caller that continues using its database.
+    fn take_state_cache(&mut self) -> evm2::evm::Cache;
+
     /// Returns active precompile addresses and identifiers.
     fn precompile_ids(&self) -> Vec<(Address, evm2::precompiles::PrecompileId)>;
 
@@ -242,6 +253,18 @@ impl<'a, T: evm2::EvmTypes<Tx: Typed2718>> Evm for evm2::Evm<'a, T> {
 
     fn set_inspector<I: evm2::Inspector<T> + 'a>(&mut self, inspector: I) {
         evm2::Evm::set_inspector(self, inspector);
+    }
+
+    fn state_db_mut(&mut self) -> &mut dyn DynDatabase {
+        self.overlay_db_mut()
+    }
+
+    fn commit_state(&mut self, state: &evm2::evm::PendingState) {
+        self.overlay_db_mut().commit_pending(state);
+    }
+
+    fn take_state_cache(&mut self) -> evm2::evm::Cache {
+        core::mem::take(&mut self.overlay_db_mut().cache)
     }
 
     fn precompile_ids(&self) -> Vec<(Address, evm2::precompiles::PrecompileId)> {
@@ -405,15 +428,15 @@ pub trait BlockExecutor: Sized {
     /// Applies pre-execution block changes.
     fn apply_pre_execution_changes(&mut self) -> Result<(), BlockExecutionError>;
 
-    /// Executes a transaction, invokes `f` with the detached result and state changes, and commits
+    /// Executes a transaction, invokes `f` with the borrowed execution result, and commits
     /// changes when `f` returns [`CommitChanges::Yes`].
     fn execute_transaction_with_commit_condition(
         &mut self,
         transaction: impl ExecutorTx<Self>,
-        f: impl FnOnce(&Self::TransactionResultWithState) -> CommitChanges,
+        f: impl FnOnce(&evm2::TxResult<<Self::Evm as Evm>::EvmTypes>) -> CommitChanges,
     ) -> Result<Option<GasOutput>, BlockExecutionError> {
         let output = self.execute_transaction_without_commit(transaction)?;
-        if f(&output).should_commit() {
+        if f(&output.result().result).should_commit() {
             self.commit_transaction(output).map(Some)
         } else {
             Ok(None)
@@ -423,7 +446,8 @@ pub trait BlockExecutor: Sized {
     /// Validates transaction gas admission against the executor's current block or segment budget.
     /// Speculative workers and ordered commits must perform the same check before accepting a
     /// transaction's result or execution error.
-    fn validate_transaction_gas_limit(&mut self, gas_limit: u64) -> Result<(), BlockExecutionError>;
+    fn validate_transaction_gas_limit(&mut self, gas_limit: u64)
+        -> Result<(), BlockExecutionError>;
 
     /// Executes a transaction and detaches its state changes without committing them.
     fn execute_transaction_without_commit(
@@ -437,12 +461,12 @@ pub trait BlockExecutor: Sized {
         output: Self::TransactionResultWithState,
     ) -> Result<GasOutput, BlockExecutionError>;
 
-    /// Executes a transaction, invokes `f` with the detached result and state changes, and commits
+    /// Executes a transaction, invokes `f` with the borrowed execution result, and commits
     /// changes.
     fn execute_transaction_with_result_closure(
         &mut self,
         transaction: impl ExecutorTx<Self>,
-        f: impl FnOnce(&Self::TransactionResultWithState),
+        f: impl FnOnce(&evm2::TxResult<<Self::Evm as Evm>::EvmTypes>),
     ) -> Result<GasOutput, BlockExecutionError> {
         self.execute_transaction_with_commit_condition(transaction, |result| {
             f(result);
@@ -631,20 +655,22 @@ pub trait BlockBuilder: Sized {
     /// Applies pre-execution block changes.
     fn apply_pre_execution_changes(&mut self) -> Result<(), BlockExecutionError>;
 
-    /// Executes a transaction, exposes its detached result and state changes to `f`, and saves it
+    /// Executes a transaction, exposes its borrowed execution result to `f`, and saves it
     /// for block assembly only if committed.
     fn execute_transaction_with_commit_condition(
         &mut self,
         tx: impl ExecutorTx<Self::Executor>,
-        f: impl FnOnce(&<Self::Executor as BlockExecutor>::TransactionResultWithState) -> CommitChanges,
+        f: impl FnOnce(
+            &evm2::TxResult<<<Self::Executor as BlockExecutor>::Evm as Evm>::EvmTypes>,
+        ) -> CommitChanges,
     ) -> Result<Option<GasOutput>, BlockExecutionError>;
 
-    /// Executes a transaction, invokes `f` with the detached result and state changes, and saves it
+    /// Executes a transaction, invokes `f` with the borrowed execution result, and saves it
     /// for block assembly.
     fn execute_transaction_with_result_closure(
         &mut self,
         tx: impl ExecutorTx<Self::Executor>,
-        f: impl FnOnce(&<Self::Executor as BlockExecutor>::TransactionResultWithState),
+        f: impl FnOnce(&evm2::TxResult<<<Self::Executor as BlockExecutor>::Evm as Evm>::EvmTypes>),
     ) -> Result<GasOutput, BlockExecutionError> {
         self.execute_transaction_with_commit_condition(tx, |result| {
             f(result);
@@ -795,7 +821,9 @@ where
     fn execute_transaction_with_commit_condition(
         &mut self,
         tx: impl ExecutorTx<Self::Executor>,
-        f: impl FnOnce(&<Self::Executor as BlockExecutor>::TransactionResultWithState) -> CommitChanges,
+        f: impl FnOnce(
+            &evm2::TxResult<<<Self::Executor as BlockExecutor>::Evm as Evm>::EvmTypes>,
+        ) -> CommitChanges,
     ) -> Result<Option<GasOutput>, BlockExecutionError> {
         let (tx_env, tx) = tx.into_parts();
         let tx = tx.to_recovered();
@@ -825,7 +853,9 @@ where
             DecodedBal::new_unchecked(bal.into(), raw.into(), hash)
         });
         let block_access_list_hash = block_access_list.as_ref().map(DecodedBal::hash);
-        let hashed_state = state_provider.hashed_post_state(output.state.inner()).map_err(BlockExecutionError::other)?;
+        let hashed_state = state_provider
+            .hashed_post_state(output.state.inner())
+            .map_err(BlockExecutionError::other)?;
         let (state_root, trie_updates) = match state_root(&output)? {
             Some(precomputed) => precomputed,
             None => state_provider

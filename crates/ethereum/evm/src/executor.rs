@@ -260,7 +260,10 @@ where
         .map_err(Into::into)
     }
 
-    fn validate_transaction_gas_limit(&mut self, transaction_gas_limit: u64) -> Result<(), BlockExecutionError> {
+    fn validate_transaction_gas_limit(
+        &mut self,
+        transaction_gas_limit: u64,
+    ) -> Result<(), BlockExecutionError> {
         let block_gas_limit = self.evm.block_env().gas_limit.to::<u64>();
         let unavailable = if self.separate_block_gas {
             let regular_available = block_gas_limit.saturating_sub(self.block_regular_gas_used);
@@ -286,6 +289,44 @@ where
             .into())
         }
         Ok(())
+    }
+
+    fn execute_transaction_with_commit_condition(
+        &mut self,
+        transaction: impl ExecutorTx<Self>,
+        commit: impl FnOnce(&evm2::TxResult<T>) -> reth_evm::CommitChanges,
+    ) -> Result<Option<GasOutput>, BlockExecutionError> {
+        let (transaction, tx) = transaction.into_parts();
+        let tx_hash = *tx.tx().tx_hash();
+        self.set_transaction_block_access_index();
+        self.validate_transaction_gas_limit(tx.tx().gas_limit())?;
+        let blob_gas_used = tx.tx().blob_gas_used().unwrap_or_default();
+        let tx_type = tx.tx().tx_type();
+        let Some(outcome) = crate::execution::execute_transaction_with_condition(
+            &mut self.evm,
+            &mut self.block_state,
+            self.hashed_state_update_hook.is_some(),
+            &mut |state| emit_hashed_state(&mut self.hashed_state_update_hook, state),
+            &transaction,
+            commit,
+        )
+        .map_err(|error| map_transaction_execution_error(error, tx_hash))?
+        else {
+            return Ok(None);
+        };
+        let tx_gas_used = outcome.tx_gas_used();
+        let regular_gas_used = outcome.execution_gas_spent();
+        let state_gas_used = outcome.state_gas_spent();
+        self.block_regular_gas_used = self.block_regular_gas_used.saturating_add(regular_gas_used);
+        self.block_state_gas_used = self.block_state_gas_used.saturating_add(state_gas_used);
+        self.cumulative_gas_used += tx_gas_used;
+        self.blob_gas_used += blob_gas_used;
+        self.receipts.push(self.receipt_builder.build_receipt::<T>(ReceiptBuilderCtx {
+            tx_type,
+            result: outcome,
+            cumulative_gas_used: self.cumulative_gas_used,
+        }));
+        Ok(Some(GasOutput::new_with_regular(tx_gas_used, regular_gas_used, state_gas_used)))
     }
 
     fn execute_transaction_without_commit(
@@ -825,8 +866,24 @@ where
         Ok(())
     }
 
-    fn validate_transaction_gas_limit(&mut self, gas_limit: u64) -> Result<(), BlockExecutionError> {
+    fn validate_transaction_gas_limit(
+        &mut self,
+        gas_limit: u64,
+    ) -> Result<(), BlockExecutionError> {
         self.inner.validate_transaction_gas_limit(gas_limit)
+    }
+
+    fn execute_transaction_with_commit_condition(
+        &mut self,
+        transaction: impl ExecutorTx<Self>,
+        commit: impl FnOnce(&evm2::TxResult<F::Types>) -> reth_evm::CommitChanges,
+    ) -> Result<Option<GasOutput>, BlockExecutionError> {
+        self.initialize()?;
+        let output = self.inner.execute_transaction_with_commit_condition(transaction, commit)?;
+        if output.is_some() {
+            self.after_committed_transaction()?;
+        }
+        Ok(output)
     }
 
     fn execute_transaction_without_commit(

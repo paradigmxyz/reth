@@ -268,8 +268,9 @@ impl<Provider: DBProvider> HashedPostStateProvider for LatestStateProviderRef<'_
         &self,
         bundle_state: &reth_execution_types::EvmState,
     ) -> ProviderResult<HashedPostState> {
-        let mut hashed_state =
-            reth_execution_types::hashed_post_state_from_execution_state::<KeccakKeyHasher>(bundle_state);
+        let mut hashed_state = reth_execution_types::hashed_post_state_from_execution_state::<
+            KeccakKeyHasher,
+        >(bundle_state);
         zero_destroyed_account_storage(
             &reth_trie_db::DatabaseHashedCursorFactory::new(self.tx()),
             reth_execution_types::destroyed_accounts(bundle_state),

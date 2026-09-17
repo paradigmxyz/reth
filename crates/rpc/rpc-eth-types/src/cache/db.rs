@@ -3,16 +3,15 @@
 //! `reth_rpc_eth_api::helpers::Call`.
 
 use crate::error::StateOverrideError;
+use alloy_eip7928::{bal::DecodedBal, BlockAccessIndex};
 use alloy_primitives::{Address, B256, U256};
 use alloy_rpc_types_eth::{state::StateOverride, BlockOverrides};
 use evm2::{
     bytecode::Bytecode,
-    evm::{CacheDB, Db, DynDatabase},
+    evm::{Bal as EvmBal, CacheDB, Db, DynDatabase},
 };
 use reth_evm::{database::StateProviderDatabase, EvmEnv};
 use reth_storage_api::StateProviderBox;
-use alloy_eip7928::{bal::DecodedBal, BlockAccessIndex};
-use evm2::evm::Bal as EvmBal;
 use std::sync::Arc;
 
 /// Helper alias type for cached state access.
@@ -118,6 +117,21 @@ pub fn apply_state_overrides<DB: DynDatabase>(
     Ok(())
 }
 
+/// Incorporates an EVM's accepted overlay and read cache into its caller-owned database.
+/// Storage wipes shadow all earlier cached slots; ordinary updates retain untouched reads.
+pub fn merge_state_cache<DB>(db: &mut CacheDB<DB>, cache: evm2::evm::Cache) {
+    db.cache.accounts.extend(cache.accounts);
+    db.cache.contracts.extend(cache.contracts);
+    db.cache.block_hashes.extend(cache.block_hashes);
+    for (address, storage) in cache.storage {
+        let target = db.cache.storage.entry(address).or_default();
+        if storage.wiped {
+            target.wipe();
+        }
+        target.slots.extend(storage.slots);
+    }
+}
+
 /// Attaches `bal` to the database, positioned at the state right before the transaction at
 /// `tx_index`.
 ///
@@ -141,9 +155,9 @@ pub fn attach_bal_before_tx<DB: DynDatabase>(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloy_eip7928::{BalanceChange, StorageChange};
     use alloy_primitives::{address, Bytes, U256};
-    use evm2::evm::{AccountBal, Bal, BalChanges, AccountInfo, EmptyDB};
-    use alloy_eip7928::{StorageChange, BalanceChange};
+    use evm2::evm::{AccountBal, AccountInfo, Bal, BalChanges, EmptyDB};
 
     #[test]
     fn attach_bal_before_tx_serves_positioned_reads() {
@@ -169,10 +183,15 @@ mod tests {
         let mut account = AccountBal::default();
         account.storage.storage.insert(
             written_slot,
-            BalChanges::new(vec![StorageChange::new(BlockAccessIndex::from_tx_index(1), U256::from(42))]),
+            BalChanges::new(vec![StorageChange::new(
+                BlockAccessIndex::from_tx_index(1),
+                U256::from(42),
+            )]),
         );
-        account.account_info.balance =
-            BalChanges::new(vec![BalanceChange::new(BlockAccessIndex::from_tx_index(2), U256::from(1000))]);
+        account.account_info.balance = BalChanges::new(vec![BalanceChange::new(
+            BlockAccessIndex::from_tx_index(2),
+            U256::from(1000),
+        )]);
         let mut bal = Bal::default();
         bal.accounts.insert(covered, account);
         let bal = DecodedBal::new(Arc::new(bal), Bytes::new());
@@ -191,10 +210,7 @@ mod tests {
 
         // before tx 3, the balance change of tx 2 is visible
         attach_bal_before_tx(&mut state, &bal, 3);
-        assert_eq!(
-            state.get_account(&covered).unwrap().unwrap().balance,
-            U256::from(1000)
-        );
+        assert_eq!(state.get_account(&covered).unwrap().unwrap().balance, U256::from(1000));
 
         // reads not covered by the BAL fall back to the underlying database
         assert_eq!(state.get_storage(&covered, &read_slot).unwrap(), U256::from(99));
