@@ -417,6 +417,9 @@ impl StateChangeSink for BlockRevertsSink {
     }
 
     fn account(&mut self, change: AccountChangeRef<'_>) -> Result<(), Self::Error> {
+        if change.original.is_some() && change.current.is_none() {
+            self.storage_wipe(change.address)?;
+        }
         self.reverts
             .accounts
             .entry(change.address)
@@ -498,9 +501,11 @@ where
             None => {
                 self.state.accounts.insert(hashed_address, None);
                 self.created_accounts.remove(&hashed_address);
-                // The account leaves the trie, but persisted storage tables still need the wipe.
-                let storage = self.state.storages.entry(hashed_address).or_default();
-                storage.storage.clear();
+                // Preserve explicit deletions for slots observed before destruction. Parent
+                // storage not observed here is expanded by the state provider at persistence.
+                if let Some(storage) = self.state.storages.get_mut(&hashed_address) {
+                    storage.storage.values_mut().for_each(|value| *value = U256::ZERO);
+                }
             }
         }
 
@@ -512,8 +517,9 @@ where
         if self.created_accounts.contains(&hashed_address) {
             self.state.storages.remove(&hashed_address);
         } else {
-            let storage = self.state.storages.entry(hashed_address).or_default();
-            storage.storage.clear();
+            if let Some(storage) = self.state.storages.get_mut(&hashed_address) {
+                storage.storage.values_mut().for_each(|value| *value = U256::ZERO);
+            }
         }
         Ok(())
     }
@@ -614,7 +620,7 @@ mod tests {
     }
 
     #[test]
-    fn hashed_post_state_sink_clears_prior_slots_on_storage_wipe() {
+    fn hashed_post_state_sink_zeroes_prior_slots_on_storage_wipe() {
         let address = Address::repeat_byte(0x03);
         let mut sink = HashedPostStateSink::<KeccakKeyHasher>::default();
 
@@ -637,7 +643,11 @@ mod tests {
         let hashed_state = sink.into_hashed_post_state();
         let storage = hashed_state.storages.get(&KeccakKeyHasher::hash_key(address)).unwrap();
 
-        assert_eq!(storage.storage.len(), 1);
+        assert_eq!(storage.storage.len(), 2);
+        assert_eq!(
+            storage.storage[&KeccakKeyHasher::hash_key(B256::from(U256::from(1)))],
+            U256::ZERO
+        );
         assert_eq!(
             storage.storage.get(&KeccakKeyHasher::hash_key(B256::new(U256::from(3).to_be_bytes()))),
             Some(&U256::from(4))
@@ -645,7 +655,7 @@ mod tests {
     }
 
     #[test]
-    fn streaming_hashed_post_state_removes_storage_for_deleted_accounts() {
+    fn streaming_hashed_post_state_zeroes_observed_slots_for_deleted_accounts() {
         let address = Address::repeat_byte(0x04);
         let original = AccountInfo { balance: U256::from(1), nonce: 1, ..Default::default() };
 
@@ -667,11 +677,16 @@ mod tests {
             tee.account(account_change(address, Some(&original), None)).unwrap();
         }
 
-        let recomputed =
-            hashed_post_state_from_state_source::<KeccakKeyHasher, _>(&accumulator).into_sorted();
-        let streaming = sink.into_hashed_post_state().into_sorted();
-
-        assert_eq!(streaming, recomputed);
+        let streaming = sink.into_hashed_post_state();
+        let hashed_address = KeccakKeyHasher::hash_key(address);
+        assert_eq!(streaming.accounts[&hashed_address], None);
+        assert_eq!(
+            streaming.storages[&hashed_address].storage
+                [&KeccakKeyHasher::hash_key(B256::from(U256::from(1)))],
+            U256::ZERO
+        );
+        let reverts = block_reverts_from_state_source(&accumulator);
+        assert!(reverts.storage[&address].wiped);
     }
 
     #[test]

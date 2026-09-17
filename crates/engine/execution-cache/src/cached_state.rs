@@ -1234,15 +1234,14 @@ impl ExecutionCache {
 
     /// Inserts post-execution state changes into the cache.
     #[instrument(level = "debug", target = "engine::caching", skip_all)]
-    #[expect(clippy::result_unit_err)]
-    pub fn insert_state(&self, state_updates: &EvmState) -> Result<(), ()> {
+    pub fn insert_state(&self, state_updates: &EvmState) {
         let _enter = debug_span!(target: "engine::tree", "state_source").entered();
         let mut sink = ExecutionCacheInsertSink {
             cache: self,
             storage_wipes: AddressSet::default(),
             cleared: false,
         };
-        state_updates.visit(&mut sink)
+        state_updates.visit(&mut sink).expect("infallible state sink");
     }
 
     /// Clears storage and account caches, resetting them to empty state.
@@ -1284,7 +1283,7 @@ struct ExecutionCacheInsertSink<'a> {
 }
 
 impl EvmStateChangeSink for ExecutionCacheInsertSink<'_> {
-    type Error = ();
+    type Error = core::convert::Infallible;
 
     fn bytecode(
         &mut self,
@@ -1345,10 +1344,7 @@ impl EvmStateChangeSink for ExecutionCacheInsertSink<'_> {
             return Ok(())
         }
 
-        let Some(account_info) = account.current else {
-            trace!(target: "engine::caching", ?account, "Account with None account info found in state updates");
-            return Err(())
-        };
+        let account_info = account.current.expect("deleted accounts handled above");
 
         self.cache.insert_account(
             account.address,
@@ -1596,8 +1592,7 @@ mod tests {
         );
 
         // Insert state should clear all caches because a contract was destroyed
-        let result = caches.insert_state(&state);
-        assert!(result.is_ok());
+        caches.insert_state(&state);
 
         // Verify all caches were cleared
         assert!(caches.0.account_cache.get(&addr1).is_none());
@@ -1629,7 +1624,7 @@ mod tests {
         );
 
         // Insert state should only remove the destroyed account
-        assert!(caches.insert_state(&state).is_ok());
+        caches.insert_state(&state);
 
         // Verify only addr1 was removed, other data is still present
         assert!(caches.0.account_cache.get(&addr1).is_none());
@@ -1645,7 +1640,7 @@ mod tests {
         let addr = Address::random();
         let state = destroyed_account_state(addr, None);
 
-        assert!(caches.insert_state(&state).is_ok());
+        caches.insert_state(&state);
         assert_eq!(caches.0.account_stats.size(), 0);
         assert!(caches.0.account_cache.get(&addr).is_none());
     }

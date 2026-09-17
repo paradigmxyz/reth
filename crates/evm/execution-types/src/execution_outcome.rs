@@ -361,6 +361,12 @@ impl<T> ExecutionOutcome<T> {
         self.first_block = first_block;
     }
 
+    /// Prepends state without overriding existing changes or updating receipts and reverts.
+    pub fn prepend_state(&mut self, mut other: EvmState) {
+        state::extend_execution_state(&mut other, &self.state);
+        self.state = other.into();
+    }
+
     /// Return iterator over all accounts
     pub fn accounts_iter(&self) -> impl Iterator<Item = (Address, Option<&AccountInfo>)> {
         self.state.accounts().map(|(address, account)| (address, account.current.as_ref()))

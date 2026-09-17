@@ -1108,6 +1108,28 @@ mod tests {
     }
 
     #[test]
+    fn amsterdam_admission_enforces_uncapped_state_gas_budget() {
+        let factory = super::super::factory::EthBlockExecutorFactory::new(Arc::new(
+            ChainSpecBuilder::mainnet().amsterdam_activated().build(),
+        ));
+        let ctx = segment(0, 1, B256::ZERO).ctx;
+        for cap in [u64::MAX, 400_000] {
+            let mut env = EthEvmEnv::new(
+                SpecId::AMSTERDAM,
+                BlockEnv::<BaseEvmTypes> { gas_limit: U256::from(1_000_000), ..Default::default() },
+                1,
+            );
+            env.version.tx_gas_limit_cap = cap;
+            let evm = factory.evm_with_env(Db::new(TestDatabase::default()), env);
+            let mut executor = factory.create_executor(evm, ctx.clone());
+            executor.block_state_gas_used = 600_000;
+            executor.block_regular_gas_used = 0;
+            assert!(executor.validate_transaction_gas_limit(500_000).is_err());
+            assert!(executor.validate_transaction_gas_limit(400_000).is_ok());
+        }
+    }
+
+    #[test]
     fn executor_applies_dao_fork_balance_transfer() {
         let dao_account = address!("d4fe7bc31cedb7bfb8a345f31e668033056b2728");
         let beneficiary = address!("bf4ed7b27f1d666546e30d74d50d173d20bca754");

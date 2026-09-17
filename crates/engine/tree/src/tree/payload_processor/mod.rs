@@ -500,11 +500,7 @@ where
 
             // Insert the block's state into cache
             let new_cache = SavedCache::new(block_with_parent.block.hash, caches);
-            if new_cache.cache().insert_state(block_state).is_err() {
-                *cached = None;
-                debug!(target: "engine::caching", "cleared execution cache on update error");
-                return
-            }
+            new_cache.cache().insert_state(block_state);
             new_cache.update_metrics(cache_state_metrics.as_ref());
 
             // Replace with the updated cache
@@ -678,6 +674,7 @@ mod tests {
     use reth_chainspec::ChainSpec;
     use reth_evm_ethereum::EthEvmConfig;
     use reth_execution_cache::CachedStatus;
+    use reth_execution_types::{execution_state_from_init, EvmState};
     use reth_primitives_traits::Account;
     use std::sync::{atomic::Ordering, Arc};
 
@@ -687,19 +684,16 @@ mod tests {
     >;
 
     fn converted_tx() -> TestTx {
-        TestTx {
-            tx_env: Default::default(),
-            tx: Arc::new(reth_primitives_traits::Recovered::new_unchecked(
-                reth_ethereum_primitives::TransactionSigned::Legacy(
-                    alloy_consensus::Signed::new_unchecked(
-                        alloy_consensus::TxLegacy::default(),
-                        alloy_primitives::Signature::test_signature(),
-                        B256::ZERO,
-                    ),
+        TestTx::new(reth_primitives_traits::Recovered::new_unchecked(
+            reth_ethereum_primitives::TransactionSigned::Legacy(
+                alloy_consensus::Signed::new_unchecked(
+                    alloy_consensus::TxLegacy::default(),
+                    alloy_primitives::Signature::test_signature(),
+                    B256::ZERO,
                 ),
-                Address::ZERO,
-            )),
-        }
+            ),
+            Address::ZERO,
+        ))
     }
 
     fn test_processor() -> PayloadProcessor<EthEvmConfig> {
@@ -707,7 +701,6 @@ mod tests {
             reth_tasks::Runtime::test(),
             EthEvmConfig::new(Arc::new(ChainSpec::default())),
             &TreeConfig::default(),
-            PrecompileCacheMap::default(),
         )
     }
 

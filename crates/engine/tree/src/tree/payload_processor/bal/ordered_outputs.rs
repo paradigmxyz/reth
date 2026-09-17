@@ -182,7 +182,7 @@ mod tests {
         tx.send(Err(BalWorkerError::Execution {
             tx_index: 1,
             tx_gas_limit: 42,
-            source: alloy_evm::block::BlockExecutionError::msg("bal miss"),
+            source: reth_evm::BlockExecutionError::msg("bal miss"),
         }))
         .unwrap();
         tx.send(Ok(output(0, 0))).unwrap();
@@ -201,7 +201,7 @@ mod tests {
         tx.send(Err(BalWorkerError::Execution {
             tx_index: 0,
             tx_gas_limit: 42,
-            source: alloy_evm::block::BlockExecutionError::msg("bal miss"),
+            source: reth_evm::BlockExecutionError::msg("bal miss"),
         }))
         .unwrap();
         tx.send(Ok(output(1, 10))).unwrap();
@@ -220,7 +220,7 @@ mod tests {
         tx.send(Err(BalWorkerError::Execution {
             tx_index: 2,
             tx_gas_limit: 42,
-            source: alloy_evm::block::BlockExecutionError::msg("bal miss"),
+            source: reth_evm::BlockExecutionError::msg("bal miss"),
         }))
         .unwrap();
         tx.send(Err(BalWorkerError::Transaction {

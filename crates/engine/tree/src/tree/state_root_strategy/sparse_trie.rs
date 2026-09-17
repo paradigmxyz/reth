@@ -1898,7 +1898,7 @@ mod tests {
         let mut state = HashedPostState::default();
         state.accounts.insert(address, Some(Account { nonce: 1, ..Default::default() }));
         state.storages.entry(address).or_default().storage.insert(revealed_slot, U256::from(7));
-        task.on_hashed_state_update(state);
+        task.on_hashed_state_update(state).unwrap();
         task.pending_updates = 1;
         task.apply_new_updates().unwrap();
 
@@ -1936,7 +1936,7 @@ mod tests {
         // The same holds for leaf updates arriving while the payload is gone.
         let mut state = HashedPostState::default();
         state.storages.entry(address).or_default().storage.insert(late_slot, U256::from(9));
-        task.on_hashed_state_update(state);
+        task.on_hashed_state_update(state).unwrap();
         task.pending_updates = 1;
         task.apply_new_updates().unwrap();
         let StorageTrieState::InFlight(in_flight) = &task.storage[&address] else {
@@ -1964,7 +1964,7 @@ mod tests {
         let work = check_out_storage(&mut task, address);
         let mut state = HashedPostState::default();
         state.storages.entry(address).or_default().storage.insert(late_slot, U256::from(11));
-        task.on_hashed_state_update(state);
+        task.on_hashed_state_update(state).unwrap();
         task.pending_updates = 1;
         task.apply_new_updates().unwrap();
         return_storage(&mut task, address, work);
@@ -2015,7 +2015,7 @@ mod tests {
             (new_slot, U256::from(1)),
             (sibling_slot, U256::from(2)),
         ]);
-        task.on_hashed_state_update(state);
+        task.on_hashed_state_update(state).unwrap();
         task.pending_updates = 1;
         task.apply_new_updates().unwrap();
 
@@ -2032,7 +2032,7 @@ mod tests {
             .or_default()
             .storage
             .extend([(removed_slot, U256::ZERO), (changed_slot, U256::from(11))]);
-        task.on_hashed_state_update(state);
+        task.on_hashed_state_update(state).unwrap();
         task.pending_updates = 1;
         task.apply_new_updates().unwrap();
         task.on_prewarm_targets(MultiProofTargetsV2 {
@@ -2353,7 +2353,7 @@ mod tests {
                 B256::repeat_byte(index as u8),
                 Some(Account { nonce: 1, ..Default::default() }),
             );
-            task.on_hashed_state_update(state);
+            task.on_hashed_state_update(state).unwrap();
             task.pending_updates += 1;
             assert!(!task.make_progress().unwrap());
             if index + 1 < INITIAL_UPDATE_BATCH_SIZE {
@@ -2371,7 +2371,7 @@ mod tests {
                 B256::repeat_byte(index as u8),
                 Some(Account { nonce: 1, ..Default::default() }),
             );
-            task.on_hashed_state_update(state);
+            task.on_hashed_state_update(state).unwrap();
             task.pending_updates += 1;
             assert!(!task.make_progress().unwrap());
         }

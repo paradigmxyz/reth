@@ -1267,7 +1267,15 @@ mod tests {
             false,
         );
 
-        assert_eq!(provider.basic_account(&address).unwrap(), Some(Account::from(account_info)));
+        assert_eq!(
+            provider.basic_account(&address).unwrap(),
+            Some(Account {
+                nonce: account_info.nonce,
+                balance: account_info.balance,
+                bytecode_hash: (account_info.code_hash != alloy_primitives::KECCAK256_EMPTY)
+                    .then_some(account_info.code_hash)
+            })
+        );
         assert!(provider.basic_account(&Address::with_last_byte(2)).unwrap().is_none());
         assert_eq!(provider.block_hash(1).unwrap(), Some(block_hash));
         assert_eq!(provider.canonical_hashes_range(1, 2).unwrap(), vec![block_hash]);

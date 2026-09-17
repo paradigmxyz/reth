@@ -239,8 +239,7 @@ where
 
             let start = Instant::now();
 
-            let (_tx_env, tx) = tx.into_parts();
-            let tx_env = ctx.evm_config.tx_env(tx.to_recovered());
+            let (tx_env, _tx) = tx.into_parts();
             // Prewarm workers must not commit speculative writes into the reused worker EVM:
             // task scheduling would otherwise make later prewarm reads observe non-canonical state.
             let mut proof_targets = PrewarmProofTargetsSink::default();
@@ -311,10 +310,7 @@ where
                 let new_cache = SavedCache::new(hash, saved_cache.into_cache());
 
                 // Update under the mutex so no checkout can observe partially updated state.
-                if new_cache.cache().insert_state(execution_outcome.state.inner()).is_err() {
-                    debug!(target: "engine::caching", "cleared execution cache on update error");
-                    return (cached.take(), Some(new_cache));
-                }
+                new_cache.cache().insert_state(execution_outcome.state.inner());
 
                 new_cache.update_metrics(cache_state_metrics.as_ref());
 
@@ -848,8 +844,6 @@ mod tests {
             cache_state_metrics: None,
             terminate_execution: Arc::clone(&terminate_execution),
             executed_tx_index: Arc::new(AtomicUsize::new(0)),
-            precompile_cache_disabled: false,
-            precompile_cache_map: PrecompileCacheMap::default(),
             disable_bal_parallel_state_root: false,
             disable_bal_batch_io: false,
         };
@@ -891,8 +885,6 @@ mod tests {
             cache_state_metrics: None,
             terminate_execution: Arc::new(AtomicBool::new(false)),
             executed_tx_index: Arc::new(AtomicUsize::new(0)),
-            precompile_cache_disabled: false,
-            precompile_cache_map: PrecompileCacheMap::default(),
             disable_bal_parallel_state_root: false,
             disable_bal_batch_io: false,
         }
@@ -902,7 +894,7 @@ mod tests {
         runtime: &Runtime,
         execution_cache: &PayloadExecutionCache,
         saved_cache: SavedCache,
-        state: reth_revm::db::BundleState,
+        state: reth_execution_types::EvmState,
         valid: bool,
         saving_duration: Gauge,
     ) {
@@ -914,7 +906,7 @@ mod tests {
         }
         drop(valid_tx);
         task.save_cache(
-            Arc::new(BlockExecutionOutput { state, result: Default::default() }),
+            Arc::new(BlockExecutionOutput { state: state.into(), result: Default::default() }),
             valid_rx,
         );
     }
@@ -1041,7 +1033,7 @@ mod tests {
             inspected: inspected_rx,
             result: result_tx,
         });
-        let code = reth_revm::bytecode::Bytecode::new_eip7702_raw(bytes.into()).unwrap();
+        let code = evm2::bytecode::Bytecode::new_eip7702_raw(bytes.into()).unwrap();
         saved
             .cache()
             .insert_code(B256::repeat_byte(3), Some(reth_primitives_traits::Bytecode(code)));
@@ -1099,9 +1091,7 @@ mod tests {
         assert_ne!(drop_thread, prewarm_thread);
     }
 
-    fn assert_save_cache_drops_removed_caches(slot: CacheSlot, valid: bool, insert_error: bool) {
-        use reth_revm::db::{AccountStatus, BundleAccount, BundleState};
-
+    fn assert_save_cache_drops_removed_caches(slot: CacheSlot, valid: bool) {
         let runtime = Runtime::test();
         let execution_cache = PayloadExecutionCache::default();
         let cache_to_save =
@@ -1117,7 +1107,7 @@ mod tests {
                 CacheSlot::Distinct => distinct_previous.clone(),
             };
         });
-        let expect_saved_cache = valid && !insert_error;
+        let expect_saved_cache = valid;
         let mut drops = Vec::new();
         if let Some(previous) = &distinct_previous {
             drops.push(observe_cache_drop(previous, &execution_cache, expect_saved_cache));
@@ -1134,14 +1124,7 @@ mod tests {
             let _ = release_rx.recv();
         });
 
-        let mut state = BundleState::default();
-        if insert_error {
-            // Modified accounts without current info are rejected by insert_state.
-            state.state.insert(
-                address!("0000000000000000000000000000000000000001"),
-                BundleAccount::new(None, None, Default::default(), AccountStatus::Changed),
-            );
-        }
+        let state = Default::default();
         save_test_cache(&runtime, &execution_cache, cache_to_save, state, valid, Gauge::noop());
 
         for (result, reader) in drops {
@@ -1168,34 +1151,46 @@ mod tests {
 
     #[test]
     fn save_cache_drops_replaced_allocation_after_unlock() {
-        assert_save_cache_drops_removed_caches(CacheSlot::Distinct, true, false);
+        assert_save_cache_drops_removed_caches(CacheSlot::Distinct, true);
     }
 
     #[test]
     fn save_cache_drops_invalid_allocations_after_unlock() {
-        assert_save_cache_drops_removed_caches(CacheSlot::Distinct, false, false);
-    }
-
-    #[test]
-    fn save_cache_drops_allocations_after_unlock_on_insert_error() {
-        assert_save_cache_drops_removed_caches(CacheSlot::Distinct, true, true);
+        assert_save_cache_drops_removed_caches(CacheSlot::Distinct, false);
     }
 
     #[test]
     fn save_cache_drops_shared_allocation_after_unlock_on_invalid_block() {
-        assert_save_cache_drops_removed_caches(CacheSlot::Shared, false, false);
-    }
-
-    #[test]
-    fn save_cache_drops_shared_allocation_after_unlock_on_insert_error() {
-        assert_save_cache_drops_removed_caches(CacheSlot::Shared, true, true);
+        assert_save_cache_drops_removed_caches(CacheSlot::Shared, false);
     }
 
     #[test]
     fn save_cache_handles_empty_slot() {
-        for (valid, insert_error) in [(true, false), (false, false), (true, true)] {
-            assert_save_cache_drops_removed_caches(CacheSlot::Empty, valid, insert_error);
+        for valid in [true, false] {
+            assert_save_cache_drops_removed_caches(CacheSlot::Empty, valid);
         }
+    }
+
+    #[test]
+    fn prewarm_targets_include_unchanged_reads() {
+        let address = Address::repeat_byte(1);
+        let slot = U256::from(7);
+        let mut sink = PrewarmProofTargetsSink::default();
+        sink.account_read(address, None).unwrap();
+        sink.storage_read(address, slot, U256::from(8)).unwrap();
+        let (targets, count) = sink.into_parts();
+        assert_eq!(
+            targets.account_targets.iter().map(ProofV2Target::key).collect::<Vec<_>>(),
+            vec![keccak256(address)]
+        );
+        assert_eq!(
+            targets.storage_targets[&keccak256(address)]
+                .iter()
+                .map(ProofV2Target::key)
+                .collect::<Vec<_>>(),
+            vec![keccak256(slot.to_be_bytes::<32>())]
+        );
+        assert_eq!(count, 1);
     }
 
     #[test]
@@ -1229,7 +1224,7 @@ mod tests {
 /// The events the pre-warm task can handle.
 ///
 /// Generic over `R` (receipt type) to allow sharing `Arc<ExecutionOutcome<R>>` with the main
-/// execution path without cloning the expensive `BundleState`.
+/// execution path without cloning the execution state.
 #[derive(Debug)]
 pub enum PrewarmTaskEvent<R> {
     /// Signals the prewarm workers to stop executing further transactions.
@@ -1248,7 +1243,7 @@ pub enum PrewarmTaskEvent<R> {
     Terminate {
         /// The final execution outcome, or `None` when the task is torn down without one (e.g. a
         /// dropped handle). Using `Arc` allows sharing with the main execution path without
-        /// cloning the expensive `BundleState`.
+        /// cloning the execution state.
         execution_outcome: Option<Arc<BlockExecutionOutput<R>>>,
         /// Receiver for the block validation result.
         ///

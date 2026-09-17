@@ -784,6 +784,7 @@ mod tests {
     use reth_ethereum_consensus::EthBeaconConsensus;
     use reth_ethereum_primitives::Block;
     use reth_evm_ethereum::EthEvmConfig;
+    use reth_execution_types::{EvmStateChangeSink, ExecutionAccountChangeRef};
     use reth_primitives_traits::{Account, Block as _, Bytecode, SealedBlock, StorageEntry};
     use reth_provider::{
         test_utils::{create_test_provider_factory, create_test_provider_factory_with_chain_spec},
@@ -792,7 +793,6 @@ mod tests {
     };
     use reth_prune::PruneModes;
     use reth_prune_types::{PruneMode, ReceiptsLogPruneConfig};
-    use reth_revm::revm::database::{AccountStatus, BundleAccount};
     use reth_stages_api::StageUnitCheckpoint;
     use reth_testing_utils::generators;
     use std::collections::BTreeMap;
@@ -841,16 +841,17 @@ mod tests {
             )
             .unwrap();
 
-        let mut state = ExecutionOutcome::<()>::default();
-        state.bundle.state.insert(
-            address,
-            BundleAccount::new(
-                Some(Default::default()),
-                None,
-                Default::default(),
-                AccountStatus::Destroyed,
-            ),
-        );
+        let mut block_state = reth_execution_types::EvmState::default();
+        block_state
+            .account(ExecutionAccountChangeRef {
+                address,
+                original: Some(&Default::default()),
+                current: None,
+                created: false,
+                selfdestructed: true,
+            })
+            .unwrap();
+        let state = ExecutionOutcome::<()>::from_block_states(1, [block_state], Vec::new());
 
         let hashed_state =
             provider.latest().hashed_post_state(state.execution_state_ref()).unwrap();
@@ -858,7 +859,7 @@ mod tests {
         let storage = &hashed_state.storages[&hashed_address];
         assert_eq!(storage.storage[&first_slot], U256::ZERO);
         assert_eq!(storage.storage[&second_slot], U256::ZERO);
-        assert!(state.bundle.reverts.is_empty());
+        assert_eq!(state.block_reverts().len(), 1);
     }
 
     #[test]

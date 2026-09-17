@@ -100,10 +100,12 @@ asm-keccak = [
     "reth-node-core/asm-keccak",
     "reth-evm/asm-keccak",
     "reth-evm-ethereum/asm-keccak",
+    "evm2/asm-keccak",
 ]
 portable = [
     "reth-evm/portable",
     "reth-evm-ethereum/portable",
+    "evm2/portable",
 ]
 keccak-cache-global = [
     "alloy-primitives/keccak-cache-global",

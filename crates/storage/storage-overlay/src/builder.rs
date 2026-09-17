@@ -831,7 +831,7 @@ mod tests {
             [(code_hash, reth_primitives_traits::Bytecode(Bytecode::new_raw(vec![id].into())))],
         );
         let mut execution_output = (*block.execution_output).clone();
-        execution_output.state = state;
+        execution_output.state = state.into();
 
         ExecutedBlock::new(
             Arc::clone(&block.recovered_block),
@@ -916,7 +916,7 @@ mod tests {
         let stored_account = overlay.accounts[&address].as_ref().unwrap();
         assert_eq!(
             stored_account,
-            &account.clone_no_code(),
+            &AccountInfo { code: None, ..account.clone() },
             "the overlay must preserve durable account fields"
         );
         assert_eq!(stored_account.code, None);

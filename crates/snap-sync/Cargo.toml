@@ -39,6 +39,7 @@ thiserror.workspace = true
 tokio-util.workspace = true
 
 [dev-dependencies]
+reth-execution-types.workspace = true
 alloy-consensus.workspace = true
 alloy-rlp.workspace = true
 futures.workspace = true

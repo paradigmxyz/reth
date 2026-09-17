@@ -61,7 +61,9 @@ arbitrary = [
     "alloy-eips/arbitrary",
     "alloy-primitives/arbitrary",
     "alloy-trie/arbitrary",
+    "reth-ethereum-primitives/arbitrary",
 ]
 test-utils = [
     "reth-primitives-traits/test-utils",
+    "reth-ethereum-primitives/test-utils",
 ]

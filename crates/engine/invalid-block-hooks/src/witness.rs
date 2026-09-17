@@ -13,8 +13,6 @@ use reth_trie::updates::TrieUpdates;
 use serde::Serialize;
 use std::{collections::BTreeMap, fmt::Debug, fs::File, io::Write, path::PathBuf};
 
-type CollectionResult = (BTreeMap<B256, Bytes>, BTreeMap<B256, Bytes>, EvmState);
-
 #[derive(Debug, PartialEq, Eq, Serialize)]
 struct BlockStateSorted {
     pub state: BTreeMap<Address, StateAccountSorted>,
@@ -82,57 +80,6 @@ fn account_info_sorted(info: &ExecutionAccountInfo) -> AccountInfoSorted {
         code_hash: info.code_hash,
         code: info.code.as_ref().map(|code| code.original_bytes()),
     }
-}
-
-/// Extracts codes and preimages from execution state changes.
-fn collect_execution_data(block_state: EvmState) -> eyre::Result<CollectionResult> {
-    let mut codes = BTreeMap::new();
-    let mut preimages = BTreeMap::new();
-
-    // Collect codes
-    block_state.code().for_each(|(_, code)| {
-        let code_bytes = code.original_bytes();
-        codes.insert(keccak256(&code_bytes), code_bytes);
-    });
-
-    // Collect preimages for changed accounts and storage slots.
-    for (address, _) in block_state.accounts() {
-        let hashed_address = keccak256(address);
-        preimages.insert(hashed_address, alloy_rlp::encode(address).into());
-    }
-    for address in block_state.storage_wipes() {
-        let hashed_address = keccak256(address);
-        preimages.insert(hashed_address, alloy_rlp::encode(address).into());
-    }
-    for (key, _) in block_state.storage() {
-        let hashed_address = keccak256(key.address());
-        preimages.insert(hashed_address, alloy_rlp::encode(key.address()).into());
-        let slot_bytes = B256::new(key.key().to_be_bytes());
-        let hashed_slot = keccak256(slot_bytes);
-        preimages.insert(hashed_slot, alloy_rlp::encode(slot_bytes).into());
-    }
-
-    Ok((codes, preimages, block_state))
-}
-
-/// Generates execution witness from collected codes, preimages, and hashed state
-fn generate(
-    codes: BTreeMap<B256, Bytes>,
-    preimages: BTreeMap<B256, Bytes>,
-    hashed_state: reth_trie::HashedPostState,
-    state_provider: Box<dyn StateProvider>,
-) -> eyre::Result<ExecutionWitness> {
-    let state = state_provider.witness(
-        Default::default(),
-        hashed_state,
-        reth_trie::ExecutionWitnessMode::Legacy,
-    )?;
-    Ok(ExecutionWitness {
-        state,
-        codes: codes.into_values().collect(),
-        keys: preimages.into_values().collect(),
-        ..Default::default()
-    })
 }
 
 /// Hook for generating execution witnesses when invalid blocks are detected.
@@ -457,24 +404,6 @@ mod tests {
     }
 
     #[test]
-    fn test_data_collector_collect() {
-        // Create test data using the fixture function
-        let block_state = create_block_state();
-
-        // Call the collect function
-        let result = collect_execution_data(block_state);
-        // Verify the function returns successfully
-        assert!(result.is_ok());
-
-        let (codes, _preimages, returned_block_state) = result.unwrap();
-
-        // Verify that the returned data contains expected values
-        // Since we used the fixture data, we should have some codes and state
-        assert!(!codes.is_empty(), "Expected some bytecode entries");
-        assert!(returned_block_state.accounts().next().is_some(), "Expected state entries");
-    }
-
-    #[test]
     fn test_re_execute_block() {
         // Create hook instance
         let (hook, _output_directory, _temp_dir) = create_test_hook();
@@ -580,49 +509,27 @@ mod tests {
     }
 
     #[test]
-    fn test_proof_generator_generate() {
-        // Use existing MockEthProvider
-        let mock_provider = MockEthProvider::default();
-        let state_provider: Box<dyn StateProvider> = Box::new(mock_provider);
-
-        // Mock Data
-        let mut codes = BTreeMap::new();
-        codes.insert(B256::from([1u8; 32]), Bytes::from("contract_code_1"));
-        codes.insert(B256::from([2u8; 32]), Bytes::from("contract_code_2"));
-
-        let mut preimages = BTreeMap::new();
-        preimages.insert(B256::from([3u8; 32]), Bytes::from("preimage_1"));
-        preimages.insert(B256::from([4u8; 32]), Bytes::from("preimage_2"));
-
-        let hashed_state = reth_trie::HashedPostState::default();
-
-        // Call generate function
-        let result = generate(codes.clone(), preimages.clone(), hashed_state, state_provider);
-
-        // Verify result
-        assert!(result.is_ok(), "generate function should succeed");
-        let execution_witness = result.unwrap();
-
-        assert!(execution_witness.state.is_empty(), "State should be empty from MockEthProvider");
-
-        let expected_codes: Vec<Bytes> = codes.into_values().collect();
-        assert_eq!(
-            execution_witness.codes.len(),
-            expected_codes.len(),
-            "Codes length should match"
-        );
-        for code in &expected_codes {
-            assert!(
-                execution_witness.codes.contains(code),
-                "Codes should contain expected bytecode"
-            );
-        }
-
-        let expected_keys: Vec<Bytes> = preimages.into_values().collect();
-        assert_eq!(execution_witness.keys.len(), expected_keys.len(), "Keys length should match");
-        for key in &expected_keys {
-            assert!(execution_witness.keys.contains(key), "Keys should contain expected preimage");
-        }
+    fn witness_includes_unchanged_account_storage_and_code_reads() {
+        use evm2::{
+            bytecode::Bytecode,
+            evm::{AccountInfo, CacheDB, EmptyDB},
+        };
+        let provider = MockEthProvider::default();
+        let mut database = CacheDB::<EmptyDB>::default();
+        let address = Address::repeat_byte(1);
+        let slot = U256::from(7);
+        let code = Bytecode::new_raw(Bytes::from_static(&[0x60, 0x00]));
+        database.insert_account_info(&address, AccountInfo::default().with_code(code.clone()));
+        database.insert_account_storage(&address, &slot, &U256::from(8));
+        let witness = reth_evm::witness::ExecutionWitnessRecord::new(&database)
+            .into_execution_witness_without_headers(
+                &provider,
+                reth_trie::ExecutionWitnessMode::Legacy,
+            )
+            .unwrap();
+        assert!(witness.codes.contains(&code.original_bytes()));
+        assert!(witness.keys.contains(&Bytes::copy_from_slice(address.as_slice())));
+        assert!(witness.keys.contains(&Bytes::copy_from_slice(B256::from(slot).as_slice())));
     }
 
     #[test]

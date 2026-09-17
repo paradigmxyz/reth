@@ -1311,7 +1311,6 @@ mod tests {
     use reth_trie::{
         test_utils::state_root, HashedPostState, HashedStorage, LazyTrieData, Nibbles,
     };
-    use reth_trie_db::ChangesetCache;
     use std::collections::BTreeMap;
 
     #[test]

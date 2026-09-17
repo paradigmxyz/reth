@@ -549,7 +549,7 @@ mod tests {
         let provider = factory.database_provider_rw().unwrap();
         provider
             .write_state_changes(StateChangeset {
-                contracts: vec![(code().hash_slow(), code())],
+                contracts: vec![(code().hash_slow(), code().into())],
                 ..Default::default()
             })
             .unwrap();

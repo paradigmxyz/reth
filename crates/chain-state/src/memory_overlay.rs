@@ -313,8 +313,8 @@ reth_storage_api::macros::delegate_provider_impls!(MemoryOverlayStateProvider<N>
 mod tests {
     use super::*;
     use reth_ethereum_primitives::EthPrimitives;
+    use reth_execution_types::{EvmStateChangeSink, ExecutionAccountChangeRef};
     use reth_storage_api::noop::NoopProvider;
-    use revm::database::{AccountStatus, BundleAccount};
 
     #[test]
     fn created_and_destroyed_account_skips_in_memory_trie_aggregation() {
@@ -324,10 +324,15 @@ mod tests {
             Vec::new(),
         );
         let mut bundle_state = EvmState::default();
-        bundle_state.state.insert(
-            address,
-            BundleAccount::new(None, None, Default::default(), AccountStatus::Destroyed),
-        );
+        bundle_state
+            .account(ExecutionAccountChangeRef {
+                address,
+                original: None,
+                current: None,
+                created: true,
+                selfdestructed: true,
+            })
+            .unwrap();
 
         provider.hashed_post_state(&bundle_state).unwrap();
 

@@ -25,7 +25,7 @@ use reth_downloaders::{
 use reth_ethereum_primitives::{Block, BlockBody, Transaction, TransactionSigned};
 use reth_evm::{database::StateProviderDatabase, execute::Executor, ConfigureEvm};
 use reth_evm_ethereum::EthEvmConfig;
-use reth_execution_types::hashed_post_state_from_execution_state;
+use reth_execution_types::{hashed_post_state_from_execution_state, HashedPostState};
 use reth_libmdbx::{Environment, EnvironmentFlags, Mode};
 use reth_network_p2p::{
     bodies::downloader::BodyDownloader,
@@ -557,9 +557,12 @@ fn setup_create2_selfdestruct_scenario() -> eyre::Result<Create2SelfdestructScen
         let db = StateProviderDatabase::new(&*state_provider);
         evm_config.batch_executor(db).execute(&preview_block)?
     };
-    let child_was_destroyed =
-        output.state.account(&child_contract).is_some_and(|account| account.was_destroyed());
-    let hashed_state = HashedPostState::from_bundle_state::<KeccakKeyHasher>(output.state.state());
+    let child_was_destroyed = output
+        .state
+        .account_state(&child_contract)
+        .is_some_and(|account| account.current.is_none());
+    let hashed_state =
+        hashed_post_state_from_execution_state::<KeccakKeyHasher>(output.state.inner());
     let block = execute_and_commit_block(
         &provider_factory,
         &evm_config,
@@ -1102,7 +1105,7 @@ fn execute_and_commit_block(
     };
 
     let gas_used = output.gas_used;
-    let hashed_state = provider.latest().hashed_post_state(output.state.inner())?;
+    let hashed_state = provider.latest().hashed_post_state(output.state.inner())?.into_sorted();
     type TestStateRoot<'a, TX, A> = StateRoot<
         reth_trie_db::DatabaseTrieCursorFactory<&'a TX, A>,
         reth_trie_db::DatabaseHashedCursorFactory<&'a TX>,

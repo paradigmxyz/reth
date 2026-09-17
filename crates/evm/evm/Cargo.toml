@@ -86,6 +86,7 @@ std = [
     "tracing?/std",
     "alloy-eip7928/std",
     "fixed-cache/std",
+    "alloy-rlp?/std",
 ]
 metrics = ["std", "dep:metrics", "dep:reth-metrics"]
 witness = ["dep:alloy-rlp", "dep:alloy-rpc-types-debug"]

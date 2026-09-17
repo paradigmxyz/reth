@@ -499,54 +499,34 @@ pub fn evm_state_to_hashed_post_state(update: EvmState) -> HashedPostState {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_primitives::{Address, U256};
-    use revm::state::{Account, EvmStorageSlot, TransactionId};
+    use alloy_primitives::{keccak256, Address};
+    use reth_execution_types::{
+        EvmStateChangeSink, ExecutionAccountChangeRef, ExecutionAccountInfo,
+    };
     use std::{
         sync::atomic::{AtomicUsize, Ordering},
         time::Duration,
     };
 
     #[test]
-    fn created_selfdestruct_does_not_emit_storage() {
-        let address = Address::repeat_byte(0x01);
-        let mut account = Account::default();
-        account.mark_touch();
-        assert!(account.mark_created_locally());
-        assert!(account.mark_selfdestructed_locally());
-        account.info.nonce = 1;
-        account.storage.insert(
-            U256::from(1),
-            EvmStorageSlot::new_changed(U256::ZERO, U256::from(2), TransactionId::ZERO),
-        );
-
-        let hashed_state =
-            evm_state_to_hashed_post_state(EvmState::from_iter([(address, account)]));
-        let hashed_address = keccak256(address);
-
-        assert_eq!(hashed_state.accounts.get(&hashed_address), Some(&None));
-        assert!(!hashed_state.storages.contains_key(&hashed_address));
-    }
-
-    #[test]
-    fn existing_selfdestruct_does_not_emit_storage() {
-        let address = Address::repeat_byte(0x02);
-        let mut account = Account::default();
-        account.info.nonce = 1;
-        account.set_current_info_as_original();
-        account.mark_touch();
-        assert!(account.mark_selfdestructed_locally());
-        account.selfdestruct();
-        account.storage.insert(
-            U256::from(1),
-            EvmStorageSlot::new_changed(U256::ZERO, U256::from(2), TransactionId::ZERO),
-        );
-
-        let hashed_state =
-            evm_state_to_hashed_post_state(EvmState::from_iter([(address, account)]));
-        let hashed_address = keccak256(address);
-
-        assert_eq!(hashed_state.accounts.get(&hashed_address), Some(&None));
-        assert!(!hashed_state.storages.contains_key(&hashed_address));
+    fn selfdestruct_does_not_emit_stale_storage() {
+        let address = Address::repeat_byte(1);
+        let original = ExecutionAccountInfo { nonce: 1, ..Default::default() };
+        for existed in [false, true] {
+            let mut state = EvmState::default();
+            state
+                .account(ExecutionAccountChangeRef {
+                    address,
+                    original: existed.then_some(&original),
+                    current: None,
+                    created: !existed,
+                    selfdestructed: true,
+                })
+                .unwrap();
+            let hashed_state = evm_state_to_hashed_post_state(state);
+            assert_eq!(hashed_state.accounts.get(&keccak256(address)), existed.then_some(&None));
+            assert!(!hashed_state.storages.contains_key(&keccak256(address)));
+        }
     }
 
     #[derive(Default)]

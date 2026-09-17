@@ -1011,7 +1011,7 @@ mod tests {
             [(code_hash, reth_primitives_traits::Bytecode(Bytecode::new_raw(vec![id].into())))],
         );
         let mut execution_output = (*block.execution_output).clone();
-        execution_output.state = state;
+        execution_output.state = state.into();
 
         ExecutedBlock::new(
             Arc::clone(&block.recovered_block),
@@ -1210,7 +1210,7 @@ mod tests {
             .accounts()
             .values()
             .flatten()
-            .all(|account| account.account_id.is_none()));
+            .all(|account| account.code.is_none()));
     }
 
     #[test]

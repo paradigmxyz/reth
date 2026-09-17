@@ -1626,18 +1626,12 @@ mod tests {
         let sender = Address::repeat_byte(1);
         let recipient = Address::repeat_byte(2);
 
-        let amsterdam = || ForkTracker {
-            shanghai: true.into(),
-            cancun: true.into(),
-            prague: true.into(),
-            osaka: true.into(),
-            amsterdam: true.into(),
-            tip_timestamp: 0.into(),
-            max_blob_count: 0.into(),
-            max_initcode_size: AtomicUsize::new(MAX_INITCODE_SIZE),
-            tx_gas_limit_cap: AtomicU64::new(0),
+        let amsterdam = || EvmTransactionValidationGasRules {
+            version: evm2::Version::new(evm2::SpecId::AMSTERDAM),
         };
-        let pre_amsterdam = || ForkTracker { amsterdam: false.into(), ..amsterdam() };
+        let pre_amsterdam = || EvmTransactionValidationGasRules {
+            version: evm2::Version::new(evm2::SpecId::OSAKA),
+        };
 
         // Self-transfer: base cost only (12k), where pre-Amsterdam it pays the flat 21k.
         let self_transfer = eip1559_tx(sender, sender, 1, 15_000);

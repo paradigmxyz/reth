@@ -397,7 +397,7 @@ mod tests {
         );
         let mut evm = Evm::<BaseEvmTypes>::new(
             SpecId::OSAKA,
-            BlockEnv::default(),
+            BlockEnv::<BaseEvmTypes>::default(),
             TxRegistry::new(),
             InMemoryDB::default(),
             NoPrecompiles::default(),

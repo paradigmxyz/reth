@@ -1496,15 +1496,15 @@ mod tests {
     use reth_chainspec::ChainSpec;
     use reth_db_api::{tables, transaction::DbTxMut};
     use reth_evm_ethereum::EthEvmConfig;
+    use reth_execution_types::{
+        EvmState, EvmStateChangeSink, ExecutionAccountChangeRef, ExecutionAccountInfo,
+        ExecutionStorageChange,
+    };
     use reth_network_api::noop::NoopNetwork;
     use reth_primitives_traits::StorageEntry;
     use reth_provider::test_utils::{create_test_provider_factory, NoopProvider};
     use reth_rpc_eth_api::EthApiServer;
     use reth_transaction_pool::test_utils::testing_pool;
-    use revm::{
-        database::{states::StorageSlot, AccountStatus, BundleAccount, BundleState},
-        state::AccountInfo as RevmAccountInfo,
-    };
 
     #[tokio::test]
     async fn trace_call_out_of_range_block_error() {
@@ -1566,17 +1566,28 @@ mod tests {
             .unwrap();
         provider_rw.commit().unwrap();
 
-        let mut bundle_state = BundleState::default();
-        bundle_state.state.insert(
-            address,
-            BundleAccount::new(
-                Some(RevmAccountInfo::default()),
-                Some(RevmAccountInfo::default()),
-                std::iter::once((new_slot, StorageSlot::new_changed(U256::ZERO, new_value)))
-                    .collect(),
-                AccountStatus::DestroyedChanged,
-            ),
-        );
+        let mut bundle_state = EvmState::default();
+        let info = ExecutionAccountInfo::default();
+        bundle_state.storage_wipe(address).unwrap();
+        bundle_state
+            .account(ExecutionAccountChangeRef {
+                address,
+                original: Some(&info),
+                current: Some(&info),
+                created: true,
+                selfdestructed: false,
+            })
+            .unwrap();
+        EvmStateChangeSink::storage(
+            &mut bundle_state,
+            ExecutionStorageChange {
+                address,
+                key: new_slot,
+                original: U256::ZERO,
+                current: new_value,
+            },
+        )
+        .unwrap();
 
         let provider = factory.latest().unwrap();
         let hashed_state = provider.hashed_post_state(&bundle_state).unwrap();

@@ -62,6 +62,7 @@ proptest = { workspace = true, optional = true }
 proptest-arbitrary-interop = { workspace = true, optional = true }
 
 [dev-dependencies]
+evm2.workspace = true
 reth-provider = { workspace = true, features = ["test-utils"] }
 reth-tracing.workspace = true
 alloy-primitives = { workspace = true, features = ["rand"] }
@@ -93,6 +94,7 @@ serde = [
     "reth-chain-state/serde",
     "reth-storage-api/serde",
     "reth-transaction-pool/serde",
+    "evm2/serde",
 ]
 test-utils = [
     "rand",
@@ -124,6 +126,7 @@ arbitrary = [
     "reth-ethereum-primitives/arbitrary",
     "imbl/arbitrary",
     "reth-transaction-pool/arbitrary",
+    "evm2/arbitrary",
 ]
 
 [[bench]]
