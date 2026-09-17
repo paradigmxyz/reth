@@ -229,8 +229,8 @@ impl Node {
             blocks,
             LinkConfig {
                 seed,
-                capacity: 512,
-                max_chunk: 71,
+                capacity: 4096,
+                max_chunk: 1024,
                 latency: Duration::from_millis(1),
                 jitter: Duration::from_millis(2),
             },
@@ -468,15 +468,20 @@ type TxPool = Pool<
 type AccountNonces = [u64; WORKLOAD_ACCOUNT_COUNT];
 
 const WORKLOAD_ACCOUNT_COUNT: usize = 20;
+const STORAGE_CONTRACT_COUNT: u8 = 4;
 const WORKLOAD_MNEMONIC: &str = "test test test test test test test test test test test junk";
-const STORAGE_RUNTIME_CODE: &[u8] = &[0x60, 0x20, 0x35, 0x60, 0x00, 0x35, 0x55, 0x00];
+const STORAGE_RUNTIME_CODE: &[u8] = &[
+    0x60, 0x20, 0x35, 0x60, 0x00, 0x35, 0x55, 0x60, 0x60, 0x35, 0x60, 0x40, 0x35, 0x55, 0x60, 0xa0,
+    0x35, 0x60, 0x80, 0x35, 0x55, 0x60, 0xe0, 0x35, 0x60, 0xc0, 0x35, 0x55, 0x00,
+];
 const STORAGE_INIT_CODE: &[u8] = &[
     0x67, 0x60, 0x20, 0x35, 0x60, 0x00, 0x35, 0x55, 0x00, 0x60, 0x00, 0x52, 0x60, 0x08, 0x60, 0x18,
     0xf3,
 ];
 
-fn storage_contract() -> Address {
-    Address::repeat_byte(0xcc)
+fn storage_contract(index: u8) -> Address {
+    debug_assert!(index < STORAGE_CONTRACT_COUNT);
+    Address::repeat_byte(0xcc + index)
 }
 
 fn workload_accounts() -> &'static AccountManager {
@@ -541,18 +546,21 @@ fn materialize_block_transactions(
         let nonce = context.next_nonce(sender.0 .0);
         let action = context.rng.next_u64() % 4;
         let (to, input, value, gas_limit) = if action < 2 {
-            let key = match abi.generate(&DynSolType::Uint(256), context.rng) {
-                DynSolValue::Uint(value, _) => value,
-                _ => unreachable!(),
-            };
-            let value = match abi.generate(&DynSolType::Uint(256), context.rng) {
-                DynSolValue::Uint(value, _) => value,
-                _ => unreachable!(),
-            };
-            let mut input = Vec::with_capacity(64);
-            input.extend_from_slice(&key.to_be_bytes::<32>());
-            input.extend_from_slice(&value.to_be_bytes::<32>());
-            (Some(storage_contract()), Bytes::from(input), U256::ZERO, 100_000)
+            let mut input = Vec::with_capacity(256);
+            for _ in 0..4 {
+                let key = match abi.generate(&DynSolType::Uint(256), context.rng) {
+                    DynSolValue::Uint(value, _) => value,
+                    _ => unreachable!(),
+                };
+                let value = match abi.generate(&DynSolType::Uint(256), context.rng) {
+                    DynSolValue::Uint(value, _) => value,
+                    _ => unreachable!(),
+                };
+                input.extend_from_slice(&key.to_be_bytes::<32>());
+                input.extend_from_slice(&value.to_be_bytes::<32>());
+            }
+            let contract = storage_contract(context.rng.next_u64() as u8 % STORAGE_CONTRACT_COUNT);
+            (Some(contract), Bytes::from(input), U256::ZERO, 200_000)
         } else if action == 2 {
             let recipient = addresses[context.rng.next_u64() as usize % WORKLOAD_ACCOUNT_COUNT];
             (Some(recipient), Bytes::new(), U256::from(context.rng.next_u64() % 1_000), 21_000)
@@ -614,8 +622,8 @@ fn materialize_block_transactions(
 }
 
 const MIN_TRANSACTIONS_PER_BLOCK: usize = payload_processor::SMALL_BLOCK_TX_THRESHOLD;
-const MAX_TRANSACTIONS_PER_BLOCK: usize = 24;
-const CAMPAIGN_SCHEMA_VERSION: u64 = 9;
+const MAX_TRANSACTIONS_PER_BLOCK: usize = 64;
+const CAMPAIGN_SCHEMA_VERSION: u64 = 10;
 const MAX_DATABASE_FAULTS_PER_CASE: u64 = 3;
 
 #[derive(Debug)]
@@ -661,13 +669,15 @@ fn node_chain() -> Arc<ChainSpec> {
         "../../../crates/e2e-test-utils/src/testsuite/assets/genesis.json"
     ))
     .unwrap();
-    genesis.alloc.insert(
-        storage_contract(),
-        GenesisAccount {
-            code: Some(Bytes::copy_from_slice(STORAGE_RUNTIME_CODE)),
-            ..Default::default()
-        },
-    );
+    for index in 0..STORAGE_CONTRACT_COUNT {
+        genesis.alloc.insert(
+            storage_contract(index),
+            GenesisAccount {
+                code: Some(Bytes::copy_from_slice(STORAGE_RUNTIME_CODE)),
+                ..Default::default()
+            },
+        );
+    }
     Arc::new(
         ChainSpecBuilder::default()
             .chain(MAINNET.chain)
@@ -2011,7 +2021,18 @@ async fn converge_follower(
             campaign_config,
         )
         .await;
-        assert!(tasks.now() < deadline, "follower did not sync before the virtual deadline");
+        assert!(
+            tasks.now() < deadline,
+            "follower did not sync before the virtual deadline: target={head}, observed={:?}, wire={:?}",
+            follower
+                .as_ref()
+                .unwrap()
+                .provider
+                .canonical_in_memory_state()
+                .get_canonical_head()
+                .num_hash(),
+            follower.as_ref().unwrap().peer.trace(),
+        );
     }
 }
 
@@ -2557,6 +2578,14 @@ pub(crate) fn run_node_campaign() {
             .iter()
             .filter(|decision| decision.point.domain == DecisionDomain::Storage)
             .count();
+        let storage_job_schedules = trace
+            .decisions
+            .iter()
+            .filter(|decision| {
+                decision.point.domain == DecisionDomain::Schedule &&
+                    decision.summary.contains("trie-storage-jobs")
+            })
+            .count();
         let injected_database_faults = trace
             .decisions
             .iter()
@@ -2564,7 +2593,7 @@ pub(crate) fn run_node_campaign() {
             .map(|decision| decision.summary.as_str())
             .collect::<Vec<_>>();
         eprintln!(
-            "node seed={seed} decisions={} storage_decisions={storage_decisions} trie_frontier_reuses={} database_faults={injected_database_faults:?}",
+            "node seed={seed} decisions={} storage_decisions={storage_decisions} storage_job_schedules={storage_job_schedules} trie_frontier_reuses={} database_faults={injected_database_faults:?}",
             trace.decisions.len(),
             outcome.trie_frontier_reuses,
         );
