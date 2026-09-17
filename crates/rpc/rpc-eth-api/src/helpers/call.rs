@@ -36,7 +36,7 @@ use reth_revm::{
 };
 use reth_rpc_convert::{RpcConvert, RpcTxReq};
 use reth_rpc_eth_types::{
-    cache::db::attach_bal_before_tx,
+    cache::db::{attach_bal_before_tx, BalPostStateDatabase, CallStateDb},
     error::{AsEthApiError, FromEthApiError},
     simulate::{self, EthSimulateError},
     EthApiError, StateCacheDb,
@@ -99,18 +99,23 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
                 .await
                 .map_err(|_| EthApiError::InternalEthError)?;
 
-            let base_block = self
-                .recovered_block(block)
+            let (base_block, bal) = self
+                .recovered_block_and_maybe_bal(block)
                 .await?
                 .ok_or_else(|| EthApiError::other(EthSimulateError::BlockNotFound { block }))?;
             let parent = base_block.sealed_header().clone();
             let max_simulate_blocks = self.max_simulate_blocks();
+            // Pin the state to the same block as the header and cached BAL when resolving tags.
+            let block = if block.is_pending() { block } else { base_block.hash().into() };
 
             self.spawn_with_state_at_block(block, move |this, db| {
                 let _permit = permit;
                 let state_provider = db.database.0;
                 let mut db = State::builder()
-                    .with_database(StateProviderDatabase::new(&state_provider))
+                    .with_database(BalPostStateDatabase::new(
+                        StateProviderDatabase::new(&state_provider),
+                        bal.map(|bal| bal.as_bal().clone()),
+                    ))
                     .with_bundle_update()
                     .build();
                 let mut parent = parent;
@@ -680,7 +685,7 @@ pub trait Call:
     where
         Self: LoadPendingBlock,
         F: FnOnce(
-                &mut StateCacheDb,
+                &mut CallStateDb,
                 EvmEnvFor<Self::Evm>,
                 TxEnvFor<Self::Evm>,
             ) -> Result<R, Self::Error>
@@ -690,7 +695,18 @@ pub trait Call:
     {
         async move {
             let (evm_env, at) = self.evm_env_at(at).await?;
-            self.spawn_with_state_at_block(at, move |this, mut db| {
+            let bal = if let Some(hash) = at.as_block_hash() {
+                self.cache().get_cached_bal(hash).await.map_err(Self::Error::from_eth_err)?
+            } else {
+                None
+            };
+            self.spawn_with_state_at_block(at, move |this, db| {
+                let mut db = State::builder()
+                    .with_database(BalPostStateDatabase::new(
+                        db.database,
+                        bal.map(|bal| bal.as_bal().clone()),
+                    ))
+                    .build();
                 let (evm_env, tx_env) =
                     this.prepare_call_env(evm_env, request, &mut db, overrides)?;
 

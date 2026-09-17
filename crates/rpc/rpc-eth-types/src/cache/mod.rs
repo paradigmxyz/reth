@@ -195,14 +195,21 @@ impl<N: NodePrimitives> EthStateCache<N> {
     ) -> ProviderResult<
         Option<(Arc<RecoveredBlock<N::Block>>, Option<Arc<DecodedBal<Arc<RevmBal>>>>)>,
     > {
+        let block = self.get_recovered_block(block_hash);
+        let bal = self.get_cached_bal(block_hash);
+        let (block, bal) = futures::try_join!(block, bal)?;
+
+        Ok(block.map(|block| (block, bal)))
+    }
+
+    /// Returns the block's BAL only if it is already cached, without fetching it from storage.
+    pub async fn get_cached_bal(
+        &self,
+        block_hash: B256,
+    ) -> ProviderResult<Option<Arc<DecodedBal<Arc<RevmBal>>>>> {
         let (response_tx, rx) = oneshot::channel();
         let _ = self.to_service.send(CacheAction::GetCachedBal { block_hash, response_tx });
-
-        let block = self.get_recovered_block(block_hash);
-        let (block, bal) = futures::join!(block, rx);
-
-        let bal = bal.map_err(|_| CacheServiceUnavailable)?.map(|cached| cached.0);
-        Ok(block?.map(|block| (block, bal)))
+        Ok(rx.await.map_err(|_| CacheServiceUnavailable)?.map(|cached| cached.0))
     }
 
     /// Retrieves receipts and blocks from cache if block is in the cache, otherwise only receipts.
@@ -1074,6 +1081,7 @@ mod tests {
             .expect("block exists");
         assert_eq!(returned_block.hash(), block_hash);
         assert!(bal.is_none());
+        assert!(cache.get_cached_bal(block_hash).await.unwrap().is_none());
         assert_eq!(bal_fetches.load(Ordering::SeqCst), 0);
 
         assert!(cache.get_bal(block_hash).await.unwrap().is_some());
@@ -1084,6 +1092,7 @@ mod tests {
             .unwrap()
             .expect("block exists");
         assert!(bal.is_some());
+        assert!(cache.get_cached_bal(block_hash).await.unwrap().is_some());
         assert_eq!(bal_fetches.load(Ordering::SeqCst), 1);
     }
 
