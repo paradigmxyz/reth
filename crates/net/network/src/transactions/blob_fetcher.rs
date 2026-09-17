@@ -48,7 +48,6 @@ type VerifyFuture<T> =
     Pin<Box<dyn Future<Output = (B256, Result<(PeerId, T), Vec<PeerId>>)> + Send>>;
 const MAX_PENDING: usize = 4096;
 const MAX_REQUESTS: usize = 16;
-const WAIT: Duration = Duration::from_secs(2);
 const TIMEOUT: Duration = Duration::from_secs(5);
 const TTL: Duration = Duration::from_secs(120);
 
@@ -127,7 +126,12 @@ impl<T: PoolTransaction + 'static> BlobFetcher<T> {
                 }
                 continue
             };
-            if u128::from_le_bytes(response.cell_mask.into()) != requested.bits() ||
+            let response_mask =
+                BlobCellMask::from_bits(u128::from_le_bytes(response.cell_mask.into()));
+            // EIP-8070 permits a provider to truncate a Cells response under load. Accept any
+            // non-overclaiming subset of the requested columns and schedule the remainder from
+            // other providers; only masks outside the request are malformed.
+            if response_mask.bits() & !requested.bits() != 0 ||
                 response.hashes.len() != response.cells.len() ||
                 response.hashes.len() > 1 ||
                 response.hashes.first().is_some_and(|h| *h != hash)
@@ -141,17 +145,18 @@ impl<T: PoolTransaction + 'static> BlobFetcher<T> {
                 pending.target = None;
             }
             if let Some(cells) = response.cells.into_iter().next() {
-                if cells.is_empty() ||
-                    !cells.len().is_multiple_of(requested.count()) ||
-                    cells.len() / requested.count() > 128
+                if response_mask.count() == 0 ||
+                    cells.is_empty() ||
+                    !cells.len().is_multiple_of(response_mask.count()) ||
+                    cells.len() / response_mask.count() > 128
                 {
                     if pending.full == Some(true) {
                         pending.target = None;
                     }
                     return Poll::Ready(BlobFetchEvent::BadPeers(vec![peer]))
                 }
-                if self.buffer.cells(hash, peer, requested, cells, Instant::now()) {
-                    pending.received |= requested.bits();
+                if self.buffer.cells(hash, peer, response_mask, cells, Instant::now()) {
+                    pending.received |= response_mask.bits();
                 }
             }
         }
@@ -159,6 +164,20 @@ impl<T: PoolTransaction + 'static> BlobFetcher<T> {
         while self.tick.poll_tick(cx).is_ready() {
             self.metrics.expired.increment(self.buffer.expire(now).len() as u64);
             self.pending.retain(|_, p| now.duration_since(p.created) < TTL);
+        }
+        // A CL may expand its custody set after a transaction entered the sampler path. Extend
+        // the target so the delta columns are fetched instead of leaving the pending transaction
+        // on the old custody set (EIP-8070 ?engine_forkchoiceUpdatedV4).
+        let custody = BlobCellMask::new(self.custody.get());
+        for pending in self.pending.values_mut() {
+            if pending.full == Some(false) &&
+                let Some(target) = pending.target
+            {
+                let expanded = custody.bits() & !target.bits();
+                if expanded != 0 {
+                    pending.target = Some(BlobCellMask::from_bits(target.bits() | expanded));
+                }
+            }
         }
         let mut queued = false;
         // Bound proof verification jobs independently of network request concurrency.
@@ -190,20 +209,13 @@ impl<T: PoolTransaction + 'static> BlobFetcher<T> {
                 continue
             }
             if pending.target.is_none() {
-                let full_providers =
-                    pending.providers.iter().filter(|(_, m)| m.count() >= 64).count();
-                if pending.full.is_none() &&
-                    full_providers < 2 &&
-                    now.duration_since(pending.created) < WAIT
-                {
-                    continue
-                }
+                // Decide independently of provider-count saturation. A sparse sampler may
+                // acquire custody cells as soon as an announcement is available.
                 let custody = BlobCellMask::new(self.custody.get());
                 let first_decision = pending.full.is_none();
                 let full = *pending.full.get_or_insert_with(|| {
                     custody.count() == 0 ||
                         custody.count() >= 64 ||
-                        full_providers < 2 ||
                         rand::random_range(0..100u8) < self.probability
                 });
                 if first_decision {
@@ -214,6 +226,8 @@ impl<T: PoolTransaction + 'static> BlobFetcher<T> {
                     }
                 }
                 pending.target = if full {
+                    // Match Geth's eager/full path: request the 64 data cells needed for
+                    // reconstruction, rather than all 128 extended cells.
                     let available = pending
                         .providers
                         .iter()
@@ -227,7 +241,25 @@ impl<T: PoolTransaction + 'static> BlobFetcher<T> {
                     }
                     (selected.count_ones() == 64).then_some(BlobCellMask::from_bits(selected))
                 } else {
-                    Some(custody)
+                    // Sampling noise: request one additional unpredictable column from a
+                    // provider, as required by EIP-8070, so a peer cannot advertise only the
+                    // victim's custody set and selectively withhold data.
+                    let available = pending
+                        .providers
+                        .iter()
+                        .fold(0u128, |mask, (_, provider)| mask | provider.bits());
+                    let extras = available & !custody.bits();
+                    let sample = if extras == 0 {
+                        custody.bits()
+                    } else {
+                        let offset = rand::random_range(0..extras.count_ones()) as usize;
+                        let index = BlobCellMask::from_bits(extras)
+                            .selected_indices()
+                            .nth(offset)
+                            .expect("extra sampling column exists");
+                        custody.bits() | (1u128 << index)
+                    };
+                    Some(BlobCellMask::from_bits(sample))
                 };
             }
             let Some(target) = pending.target else { continue };
@@ -416,12 +448,10 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn custody_sampling_requires_two_full_providers_and_preserves_wire_order() {
+    async fn custody_sampling_starts_with_one_provider() {
         let first = PeerId::random();
-        let second = PeerId::random();
         let (p1, mut rx1) = peer(first);
-        let (p2, _rx2) = peer(second);
-        let peers = HashMap::from_iter([(first, p1), (second, p2)]);
+        let peers = HashMap::from_iter([(first, p1)]);
         let custody = CellCustody::default();
         let bits: u128 = 1 | (1 << 8) | (1 << 127);
         custody.set(B128::from(bits));
@@ -429,16 +459,15 @@ mod tests {
         fetcher.probability = 0;
         let hash = B256::random();
         let all = BlobCellMask::from_bits(u128::MAX);
-        fetcher.announce(hash, first, all);
         let mut cx = Context::from_waker(noop_waker_ref());
-        assert!(fetcher.poll(&mut cx, &peers).is_pending());
-        assert!(rx1.try_recv().is_err());
-        fetcher.announce(hash, second, all);
+        fetcher.announce(hash, first, all);
         assert!(fetcher.poll(&mut cx, &peers).is_pending());
         let PeerRequest::GetCells { request, .. } = rx1.try_recv().unwrap() else {
             panic!("expected sample")
         };
-        assert_eq!(request.cell_mask, B128::from(bits.to_le_bytes()));
+        let requested = u128::from_le_bytes(request.cell_mask.into());
+        assert_eq!(requested & bits, bits);
+        assert_eq!(requested.count_ones(), bits.count_ones() + 1);
     }
 
     #[test]

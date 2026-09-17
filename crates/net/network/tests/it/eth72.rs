@@ -214,6 +214,7 @@ async fn run_eth72_blob_receive(cells_first: bool) {
     let mask = alloy_eips::eip7594::BlobCellMask::from_bits(u128::from_le_bytes(
         request.message.cell_mask.into(),
     ));
+    // Match Geth's full-fetch path: 64 data cells are sufficient for reconstruction.
     assert_eq!(mask.count(), 64);
     eth_stream
         .send(EthMessage::Cells(RequestPair {
