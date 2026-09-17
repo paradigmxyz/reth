@@ -881,6 +881,9 @@ where
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let this = self.get_mut();
 
+        // preemptive yield point
+        let mut budget = 4;
+
         loop {
             match ready!(this.request.poll(cx)) {
                 // This branch handles headers responses from peers - it first ensures that the
@@ -963,6 +966,14 @@ where
 
             if let Some(res) = this.take_blocks() {
                 return Poll::Ready(res)
+            }
+
+            // ensure we still have enough budget for another iteration
+            budget -= 1;
+            if budget == 0 {
+                // make sure we're woken up again
+                cx.waker().wake_by_ref();
+                return Poll::Pending
             }
         }
     }
@@ -1273,6 +1284,17 @@ mod tests {
         let received = client.get_full_block_range(header.hash(), 1).await;
         let received = received.first().expect("response should include a block");
         assert_eq!(*received, SealedBlock::from_sealed_parts(header, body));
+    }
+
+    #[test]
+    fn full_block_range_yields_after_immediate_retries() {
+        let client =
+            FullBlockClient::test_client(NoopFullBlockClient::<EthNetworkPrimitives>::default());
+        let mut request = Box::pin(client.get_full_block_range(B256::ZERO, 1));
+        let waker = futures::task::noop_waker();
+        let mut cx = Context::from_waker(&waker);
+
+        assert!(request.as_mut().poll(&mut cx).is_pending());
     }
 
     #[tokio::test]
