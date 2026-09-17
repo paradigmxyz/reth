@@ -1310,7 +1310,7 @@ mod tests {
         let runtime = Runtime::test();
         runtime.bal_streaming_pool().in_place_scope(|scope| {
             worker::spawn_worker(
-                scope,
+                Some(scope),
                 tx_rx,
                 abort_rx,
                 result_tx,
@@ -1392,7 +1392,7 @@ mod tests {
             assert!(serial.block_regular_gas_used + 400_000 < 1_000_000);
             let serial_result = serial.execute_transaction(tx2.clone());
 
-            let (receipt_tx, _receipt_rx) = crossbeam_channel::unbounded();
+            let (receipt_tx, _receipt_rx) = tokio::sync::mpsc::unbounded_channel();
             let parallel_result = execute_block(
                 &Runtime::test(),
                 &evm_config,
