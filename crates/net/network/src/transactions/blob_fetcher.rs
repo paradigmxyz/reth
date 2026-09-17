@@ -17,7 +17,6 @@ use std::{
     time::{Duration, Instant},
 };
 use tokio::sync::oneshot;
-use tracing::info;
 
 /// Independent cell fetcher. Transaction bodies still use the transaction fetcher.
 pub(super) struct BlobFetcher<T> {
@@ -71,7 +70,6 @@ impl<T: PoolTransaction + 'static> BlobFetcher<T> {
         if mask.count() == 0 ||
             (!self.pending.contains_key(&hash) && self.pending.len() >= MAX_PENDING)
         {
-            info!(target: "net::tx::blob", %hash, ?peer, mask_bits = mask.bits(), mask_cells = mask.count(), pending = self.pending.len(), "sparse blob announcement ignored");
             return
         }
         let pending = self.pending.entry(hash).or_insert_with(|| Pending::new(Instant::now()));
@@ -80,24 +78,17 @@ impl<T: PoolTransaction + 'static> BlobFetcher<T> {
         } else if pending.providers.len() < 16 {
             pending.providers.push((peer, mask));
         }
-        info!(target: "net::tx::blob", %hash, ?peer, mask_bits = mask.bits(), mask_cells = mask.count(), providers = pending.providers.len(), "sparse blob provider announcement recorded");
     }
 
     pub(super) fn body(&mut self, peer: PeerId, tx: T) -> Result<(), ()> {
-        let hash = *tx.hash();
-        let result = self.buffer.body(peer, tx, Instant::now());
-        info!(target: "net::tx::blob", %hash, ?peer, accepted = result.is_ok(), "sparse blob transaction body received");
-        result
+        self.buffer.body(peer, tx, Instant::now())
     }
 
     pub(super) fn drop_peer(&mut self, peer: PeerId) {
         self.budgets.remove(&peer);
-        let mut removed_providers = 0usize;
         for pending in self.pending.values_mut() {
-            removed_providers += pending.providers.iter().filter(|(id, _)| *id == peer).count();
             pending.providers.retain(|(id, _)| *id != peer);
         }
-        info!(target: "net::tx::blob", ?peer, removed_providers, pending = self.pending.len(), "sparse blob provider removed");
     }
 
     pub(super) fn poll<N: NetworkPrimitives>(
@@ -116,7 +107,6 @@ impl<T: PoolTransaction + 'static> BlobFetcher<T> {
             } else {
                 self.metrics.invalid.increment(1);
             }
-            info!(target: "net::tx::blob", %hash, verified = result.is_ok(), "sparse blob cell verification completed");
             self.pending.remove(&hash);
             return Poll::Ready(match result {
                 Ok((peer, tx)) => BlobFetchEvent::Transaction(peer, tx),
@@ -131,13 +121,11 @@ impl<T: PoolTransaction + 'static> BlobFetcher<T> {
             pending.providers.retain(|(id, _)| *id != peer);
             let Some(response) = response else {
                 self.metrics.failed_requests.increment(1);
-                info!(target: "net::tx::blob", %hash, ?peer, requested_bits = requested.bits(), requested_cells = requested.count(), "sparse GetCells request timed out or disconnected");
                 if pending.full == Some(true) {
                     pending.target = None;
                 }
                 continue
             };
-            info!(target: "net::tx::blob", %hash, ?peer, requested_bits = requested.bits(), requested_cells = requested.count(), response_bits = u128::from_le_bytes(response.cell_mask.into()), response_hashes = response.hashes.len(), response_cell_groups = response.cells.len(), "sparse GetCells response received");
             let response_mask =
                 BlobCellMask::from_bits(u128::from_le_bytes(response.cell_mask.into()));
             // EIP-8070 permits a provider to truncate a Cells response under load. Accept any
@@ -151,7 +139,6 @@ impl<T: PoolTransaction + 'static> BlobFetcher<T> {
                 if pending.full == Some(true) {
                     pending.target = None;
                 }
-                info!(target: "net::tx::blob", %hash, ?peer, "sparse GetCells response rejected as malformed");
                 return Poll::Ready(BlobFetchEvent::BadPeers(vec![peer]))
             }
             if response.cells.is_empty() && pending.full == Some(true) {
@@ -166,12 +153,10 @@ impl<T: PoolTransaction + 'static> BlobFetcher<T> {
                     if pending.full == Some(true) {
                         pending.target = None;
                     }
-                    info!(target: "net::tx::blob", %hash, ?peer, "sparse GetCells response rejected with invalid cell shape");
                     return Poll::Ready(BlobFetchEvent::BadPeers(vec![peer]))
                 }
                 if self.buffer.cells(hash, peer, response_mask, cells, Instant::now()) {
                     pending.received |= response_mask.bits();
-                    info!(target: "net::tx::blob", %hash, ?peer, received_bits = pending.received, "sparse blob cells buffered");
                 }
             }
         }
@@ -190,13 +175,6 @@ impl<T: PoolTransaction + 'static> BlobFetcher<T> {
                     let expanded = custody.bits() & !target.bits();
                     if expanded != 0 {
                         pending.target = Some(BlobCellMask::from_bits(target.bits() | expanded));
-                        info!(
-                            target: "net::tx::blob",
-                            %hash,
-                            added_bits = expanded,
-                            custody_bits = custody.bits(),
-                            "expanded sparse blob sampling target after custody update"
-                        );
                     }
                 }
             }
@@ -248,9 +226,6 @@ impl<T: PoolTransaction + 'static> BlobFetcher<T> {
                     } else {
                         self.metrics.sampled.increment(1);
                     }
-                }
-                if first_decision {
-                    info!(target: "net::tx::blob", %hash, full, full_providers, custody_cells = custody.count(), providers = pending.providers.len(), "sparse blob acquisition mode selected");
                 }
                 pending.target = if full {
                     // Provider mode MUST retrieve the complete extended blob. Supernodes may
@@ -309,7 +284,6 @@ impl<T: PoolTransaction + 'static> BlobFetcher<T> {
                 if metadata.request_tx.try_send(request).is_err() {
                     continue
                 }
-                info!(target: "net::tx::blob", %hash, ?peer, requested_bits = requested.bits(), requested_cells = requested.count(), received_bits = pending.received, "sparse GetCells request sent");
                 self.metrics.requests.increment(1);
                 budget.tokens -= requested.count() as f64;
                 pending.inflight = true;

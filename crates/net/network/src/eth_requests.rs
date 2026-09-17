@@ -40,7 +40,6 @@ use std::{
 };
 use tokio::sync::{mpsc::Receiver, oneshot};
 use tokio_stream::wrappers::ReceiverStream;
-use tracing::info;
 
 // Limits: <https://github.com/ethereum/go-ethereum/blob/b0d44338bbcefee044f1f635a84487cbbd8f0538/eth/protocols/eth/handler.go#L34-L56>
 
@@ -405,15 +404,11 @@ where
 
     fn on_cells_request(
         &self,
-        peer_id: PeerId,
+        _peer_id: PeerId,
         request: GetCells,
         response: oneshot::Sender<RequestResult<Cells>>,
     ) {
-        let requested_hashes = request.hashes.len();
-        let requested_mask = request.cell_mask();
-        info!(target: "net::eth72", ?peer_id, requested_hashes, requested_bits = requested_mask.bits(), requested_cells = requested_mask.count(), "received ETH/72 GetCells request");
         let Ok(permit) = self.cell_responses.clone().try_acquire_owned() else {
-            info!(target: "net::eth72", ?peer_id, requested_hashes, requested_bits = requested_mask.bits(), "ETH/72 GetCells request rejected because cell response capacity is exhausted");
             let _ = response.send(Ok(Cells { cell_mask: request.cell_mask, ..Default::default() }));
             return
         };
@@ -441,7 +436,6 @@ where
                 }
             }
 
-            info!(target: "net::eth72", ?peer_id, requested_hashes, requested_bits = cell_mask.bits(), requested_cells = cell_mask.count(), response_hashes = cells_response.hashes.len(), response_cell_groups = cells_response.cells.len(), response_bytes = total_bytes, "serving ETH/72 GetCells response");
             let _ = response.send(Ok(cells_response));
         });
     }

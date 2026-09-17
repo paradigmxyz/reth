@@ -37,7 +37,7 @@ use std::{
     time::{Instant, SystemTime},
 };
 use tokio::sync::oneshot;
-use tracing::{debug, info, trace, warn};
+use tracing::{debug, trace, warn};
 
 /// The Engine API response sender.
 pub type EngineApiSender<Ok> = oneshot::Sender<EngineApiResult<Ok>>;
@@ -1739,7 +1739,6 @@ where
         let el_caps = self.capabilities();
         el_caps.log_capability_mismatches(&capabilities);
         if capabilities.iter().any(|cap| cap == "engine_getBlobsV4") {
-            info!(target: "rpc::engine::blob", "consensus client negotiated engine_getBlobsV4; enabling sparse cell mode");
             self.inner.tx_pool.blob_store().set_cell_mode();
         }
 
@@ -1747,7 +1746,7 @@ where
     }
 
     async fn has_blobs(&self, versioned_hashes: Vec<B256>) -> RpcResult<Vec<bool>> {
-        info!(target: "rpc::engine::blob", requested_hashes = versioned_hashes.len(), "serving engine_hasBlobs");
+        trace!(target: "rpc::engine", "Serving engine_hasBlobs");
         Ok(self.has_blobs_metered(versioned_hashes)?)
     }
 
@@ -1755,40 +1754,34 @@ where
         &self,
         versioned_hashes: Vec<B256>,
     ) -> RpcResult<Vec<Option<BlobAndProofV1>>> {
-        info!(target: "rpc::engine::blob", requested_hashes = versioned_hashes.len(), "serving engine_getBlobsV1");
-        let result = self.get_blobs_v1_metered(versioned_hashes)?;
-        info!(target: "rpc::engine::blob", returned_entries = result.len(), "completed engine_getBlobsV1");
-        Ok(result)
+        trace!(target: "rpc::engine", "Serving engine_getBlobsV1");
+        Ok(self.get_blobs_v1_metered(versioned_hashes)?)
     }
 
     async fn get_blobs_v2(
         &self,
         versioned_hashes: Vec<B256>,
     ) -> RpcResult<Option<Vec<BlobAndProofV2>>> {
-        info!(target: "rpc::engine::blob", requested_hashes = versioned_hashes.len(), "serving engine_getBlobsV2");
+        trace!(target: "rpc::engine", "Serving engine_getBlobsV2");
         let (tx, rx) = oneshot::channel();
         let this = self.clone();
         self.inner.task_spawner.spawn_blocking_task(async move {
             let _ = tx.send(this.get_blobs_v2_metered(versioned_hashes));
         });
-        let result = rx.await.map_err(|err| EngineApiError::Internal(Box::new(err)))??;
-        info!(target: "rpc::engine::blob", returned_entries = result.as_ref().map_or(0, Vec::len), "completed engine_getBlobsV2");
-        Ok(result)
+        Ok(rx.await.map_err(|err| EngineApiError::Internal(Box::new(err)))??)
     }
 
     async fn get_blobs_v3(
         &self,
         versioned_hashes: Vec<B256>,
     ) -> RpcResult<Option<Vec<Option<BlobAndProofV2>>>> {
-        info!(target: "rpc::engine::blob", requested_hashes = versioned_hashes.len(), "serving engine_getBlobsV3");
+        trace!(target: "rpc::engine", "Serving engine_getBlobsV3");
         let (tx, rx) = oneshot::channel();
         let this = self.clone();
         self.inner.task_spawner.spawn_blocking_task(async move {
             let _ = tx.send(this.get_blobs_v3_metered(versioned_hashes));
         });
-        let result = rx.await.map_err(|err| EngineApiError::Internal(Box::new(err)))??;
-        info!(target: "rpc::engine::blob", returned_entries = result.as_ref().map_or(0, Vec::len), "completed engine_getBlobsV3");
-        Ok(result)
+        Ok(rx.await.map_err(|err| EngineApiError::Internal(Box::new(err)))??)
     }
 
     async fn get_blobs_v4(
@@ -1796,15 +1789,13 @@ where
         versioned_hashes: Vec<B256>,
         indices_bitarray: B128,
     ) -> RpcResult<Option<Vec<Option<BlobCellsAndProofsV1>>>> {
-        info!(target: "rpc::engine::blob", requested_hashes = versioned_hashes.len(), ?indices_bitarray, "serving engine_getBlobsV4");
+        trace!(target: "rpc::engine", "Serving engine_getBlobsV4");
         let (tx, rx) = oneshot::channel();
         let this = self.clone();
         self.inner.task_spawner.spawn_blocking_task(async move {
             let _ = tx.send(this.get_blobs_v4_metered(versioned_hashes, indices_bitarray));
         });
-        let result = rx.await.map_err(|err| EngineApiError::Internal(Box::new(err)))??;
-        info!(target: "rpc::engine::blob", returned_entries = result.as_ref().map_or(0, Vec::len), "completed engine_getBlobsV4");
-        Ok(result)
+        Ok(rx.await.map_err(|err| EngineApiError::Internal(Box::new(err)))??)
     }
 }
 

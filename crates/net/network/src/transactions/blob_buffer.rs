@@ -11,7 +11,6 @@ use reth_transaction_pool::{
     PoolTransaction,
 };
 use std::time::{Duration, Instant};
-use tracing::info;
 
 /// Body and cell buffer. Cryptographic checks run after entries leave this buffer.
 #[derive(Debug)]
@@ -45,9 +44,6 @@ impl<T: PoolTransaction> BlobBuffer<T> {
             expired.push(*hash);
             false
         });
-        if !expired.is_empty() {
-            info!(target: "net::tx::blob", expired = expired.len(), buffered = self.entries.len(), bytes = self.bytes, "sparse blob buffer entries expired");
-        }
         expired
     }
 
@@ -74,7 +70,6 @@ impl<T: PoolTransaction> BlobBuffer<T> {
         if self.bytes.saturating_add(size) > MAX_BYTES ||
             (!self.entries.contains_key(&hash) && self.entries.len() >= MAX_ENTRIES)
         {
-            info!(target: "net::tx::blob", %hash, ?peer, entries = self.entries.len(), bytes = self.bytes, "sparse blob body dropped because buffer capacity is exhausted");
             return Ok(())
         }
         let entry = self.entries.entry(hash).or_insert_with(|| Entry::new(now));
@@ -83,7 +78,6 @@ impl<T: PoolTransaction> BlobBuffer<T> {
             entry.bytes += size;
             self.bytes += size;
         }
-        info!(target: "net::tx::blob", %hash, ?peer, entries = self.entries.len(), bytes = self.bytes, "sparse blob body buffered");
         Ok(())
     }
 
@@ -103,20 +97,17 @@ impl<T: PoolTransaction> BlobBuffer<T> {
             self.bytes.saturating_add(size) > MAX_BYTES ||
             (!self.entries.contains_key(&hash) && self.entries.len() >= MAX_ENTRIES)
         {
-            info!(target: "net::tx::blob", %hash, ?peer, mask_bits = mask.bits(), mask_cells = mask.count(), cells = cells.len(), entries = self.entries.len(), bytes = self.bytes, "sparse blob cells dropped before buffering");
             return false
         }
         let entry = self.entries.entry(hash).or_insert_with(|| Entry::new(now));
         // Fetch requests reserve disjoint columns; overlapping replies are stale.
         if entry.mask & mask.bits() != 0 {
-            info!(target: "net::tx::blob", %hash, ?peer, mask_bits = mask.bits(), existing_bits = entry.mask, "overlapping sparse blob cell delivery dropped");
             return false
         }
         entry.mask |= mask.bits();
         entry.deliveries.push(Delivery { peer, mask, cells });
         entry.bytes += size;
         self.bytes += size;
-        info!(target: "net::tx::blob", %hash, ?peer, mask_bits = mask.bits(), mask_cells = mask.count(), cells = entry.deliveries.last().map_or(0, |d| d.cells.len()), received_bits = entry.mask, bytes = self.bytes, "sparse blob cells buffered");
         true
     }
 
@@ -135,7 +126,6 @@ impl<T: PoolTransaction> BlobBuffer<T> {
         let entry = self.entries.remove(&hash)?;
         self.bytes -= entry.bytes;
         let (peer, transaction) = entry.body?;
-        info!(target: "net::tx::blob", %hash, target_bits = target.bits(), target_cells = target.count(), deliveries = entry.deliveries.len(), "sparse blob buffer entry ready for verification");
         Some(BufferedBlob { peer, transaction, deliveries: entry.deliveries })
     }
 }
@@ -175,7 +165,6 @@ impl<T: PoolTransaction> BufferedBlob<T> {
             }
         }
         if !bad.is_empty() {
-            info!(target: "net::tx::blob", bad_peers = bad.len(), verified_deliveries = verified.len(), "sparse blob cell verification rejected delivery");
             return Err(bad)
         }
         let mask = BlobCellMask::from_bits(mask);
@@ -197,10 +186,8 @@ impl<T: PoolTransaction> BufferedBlob<T> {
             cell_mask: B128::from(mask.bits()),
         };
         if !self.transaction.set_blob_sidecar(PooledBlobSidecar::from_cells(sidecar)) {
-            info!(target: "net::tx::blob", "sparse blob transaction rejected reconstructed cell sidecar");
             return Err(Vec::new())
         }
-        info!(target: "net::tx::blob", peer = ?self.peer, verified_mask = mask.bits(), verified_cells = mask.count(), "sparse blob cells reconstructed and attached to transaction");
         Ok((self.peer, self.transaction))
     }
 }

@@ -19,7 +19,6 @@ use std::{
         Arc,
     },
 };
-use tracing::info;
 pub use tracker::{BlobStoreCanonTracker, BlobStoreUpdates};
 
 mod cells;
@@ -133,20 +132,8 @@ impl PooledBlobSidecar {
         }
         let full = if let Some(cells) = &self.cells {
             if !cells.is_recoverable() {
-                info!(
-                    target: "txpool::blob",
-                    available_bits = cells.mask().bits(),
-                    available_cells = cells.mask().count(),
-                    "sparse blob sidecar is not yet reconstructable"
-                );
                 return Ok(None)
             }
-            info!(
-                target: "txpool::blob",
-                available_bits = cells.mask().bits(),
-                available_cells = cells.mask().count(),
-                "reconstructing full blob sidecar from sparse cells"
-            );
             cells.recover(alloy_eips::eip4844::env_settings::EnvKzgSettings::Default.get())?.into()
         } else {
             self.sidecar.clone()
