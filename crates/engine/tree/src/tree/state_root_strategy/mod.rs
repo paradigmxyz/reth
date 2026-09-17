@@ -701,9 +701,7 @@ impl DefaultStateRootStrategy {
             let _enter =
                 debug_span!(target: "engine::tree::payload_processor", "preserve").entered();
             let mut trie_to_drop = None;
-            let deferred = if task_result.is_some() {
-                let pending_trie =
-                    pending_trie.expect("pending trie is created for successful task result");
+            let deferred = if let Some(pending_trie) = pending_trie {
                 let start = Instant::now();
                 let (mut trie, deferred) = task.into_trie_for_reuse();
                 if let Some((prune_before, _)) = prune_target {
@@ -726,7 +724,7 @@ impl DefaultStateRootStrategy {
             } else {
                 debug!(
                     target: "engine::tree::payload_processor",
-                    "State root computation failed, dropping trie"
+                    "State root task has no reusable trie to publish, dropping trie"
                 );
                 let (trie, deferred) = task.into_cleared_trie();
                 trie_to_drop = Some(trie);
