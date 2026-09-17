@@ -5,11 +5,8 @@ use crate::{
     SnapGeneration, SnapPivotPolicy,
 };
 use alloy_consensus::Header;
-use alloy_eip7928::AccountChanges;
-use alloy_eips::{
-    eip7928::bal::{Bal, DecodedBal},
-    BlockNumHash,
-};
+use alloy_eip7928::{compute_block_access_list_hash, AccountChanges};
+use alloy_eips::{eip7928::bal::Bal, BlockNumHash};
 use alloy_primitives::{Bytes, B256, KECCAK256_EMPTY, U256};
 use futures::future::{ready, Ready};
 use reth_db_api::{cursor::DbDupCursorRO, tables, transaction::DbTx};
@@ -240,21 +237,24 @@ pub(crate) struct BalChain {
 impl BalChain {
     /// A chain anchored at `pivot`, carrying one block per entry of `lists` after it.
     pub(crate) fn new(pivot: u64, lists: impl IntoIterator<Item = Vec<AccountChanges>>) -> Self {
-        let lists: Vec<Bytes> =
-            lists.into_iter().map(|changes| alloy_rlp::encode(Bal::from(changes)).into()).collect();
+        let (commitments, lists): (Vec<B256>, Vec<Bytes>) = lists
+            .into_iter()
+            .map(|changes| {
+                (
+                    compute_block_access_list_hash(&changes),
+                    alloy_rlp::encode(Bal::from(changes)).into(),
+                )
+            })
+            .unzip();
         let mut headers = Vec::new();
         let mut parent = B256::ZERO;
         for number in 0..=pivot {
             headers.push(SealedHeader::seal_slow(header(number, parent, None)));
             parent = headers[number as usize].hash();
         }
-        for (index, list) in lists.iter().enumerate() {
-            let commitment = DecodedBal::from_rlp_bytes(list.clone()).expect("fixture decodes");
-            let sealed = SealedHeader::seal_slow(header(
-                pivot + index as u64 + 1,
-                parent,
-                Some(commitment.hash()),
-            ));
+        for (index, commitment) in commitments.into_iter().enumerate() {
+            let sealed =
+                SealedHeader::seal_slow(header(pivot + index as u64 + 1, parent, Some(commitment)));
             parent = sealed.hash();
             headers.push(sealed);
         }

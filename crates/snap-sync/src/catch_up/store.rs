@@ -276,17 +276,14 @@ impl<T: MetadataProvider> SnapCatchUpStore for T {
 mod tests {
     use super::*;
     use crate::{
-        test_utils::{
-            account, generation, hashed_factory, header, key, state_root, storage_root_of,
-        },
-        SnapAccountStore,
+        test_utils::{account, hashed_factory, key, state_root, storage_root_of, BalChain},
+        SnapAccountStore, SnapGeneration,
     };
     use alloy_eip7928::{BalanceChange, BlockAccessIndex, CodeChange, SlotChanges, StorageChange};
     use alloy_primitives::{bytes, keccak256, map::B256Map, Address, Bytes, U256};
     use reth_primitives_traits::Account;
     use reth_provider::{
         test_utils::MockNodeTypesWithDB, DatabaseProviderFactory, ProviderFactory,
-        StaticFileProviderFactory, StaticFileSegment, StaticFileWriter,
     };
     use reth_trie_common::{HashedStorage, TrieAccount};
 
@@ -327,16 +324,7 @@ mod tests {
     // block access list progress recorded, then moved to pivot 2.
     fn started(accounts: &[(B256, TrieAccount)], served: usize) -> (Factory, SnapWrite) {
         let factory = hashed_factory();
-        // Blocks 0 through 3 are canonical under the hashes `block` gives them.
-        {
-            let static_files = factory.static_file_provider();
-            let mut writer = static_files.latest_writer(StaticFileSegment::Headers).unwrap();
-            for number in 0..=3 {
-                let hash = B256::repeat_byte(number as u8);
-                writer.append_header(&header(number, B256::ZERO, None), &hash).unwrap();
-            }
-            writer.commit().unwrap();
-        }
+        chain().insert_headers(&factory);
         let provider = factory.database_provider_rw().unwrap();
         let write = provider.start_snap_attempt(generation(1, state_root(accounts))).unwrap();
         provider.start_account_coverage(write).unwrap();
@@ -362,12 +350,21 @@ mod tests {
         (factory, write)
     }
 
+    // Canonical blocks 0 through 3, pivoted at block 1. The lists the tests apply are their own, as
+    // the store does not authenticate them.
+    fn chain() -> BalChain {
+        BalChain::new(1, [Vec::new(), Vec::new()])
+    }
+
+    // Generation anchored to block `number` of the fixture chain.
+    fn generation(number: u64, state_root: B256) -> SnapGeneration {
+        SnapGeneration::new(chain().block(number as usize - 1), state_root)
+    }
+
     // Block `number` of the fixture chain, with the hash of its parent.
     fn block(number: u64) -> (BlockNumHash, B256) {
-        (
-            BlockNumHash::new(number, B256::repeat_byte(number as u8)),
-            B256::repeat_byte(number as u8 - 1),
-        )
+        let chain = chain();
+        (chain.block(number as usize - 1), chain.block(number as usize - 2).hash)
     }
 
     fn index(value: u64) -> BlockAccessIndex {
