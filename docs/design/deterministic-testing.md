@@ -1,7 +1,7 @@
 # Deterministic system testing for Reth
 
 Status: implementation direction
-Date: 2026-09-11
+Date: 2026-09-16
 
 ## Decision
 
@@ -77,13 +77,13 @@ sync a follower through the production ETH codec. Follower sync is split into be
 so the controller can advance virtual time, partition or heal the link, corrupt the next encrypted
 response, or crash and restart the follower while requests are in flight.
 
-Accepted blocks contain 5–24 signed transactions built with txgen-core's account, nonce, and
+Accepted blocks contain 5–64 signed transactions built with txgen-core's account, nonce, and
 generation context APIs. The workload maintains nonces for 20 funded accounts and mixes legacy,
-EIP-2930, and EIP-1559 envelopes, transfers, contract creation, and abi-fuzz-generated storage keys
-and values. Transaction count is a semantic trace decision. Persistence threshold, state-masking
-window, and multiproof chunk size vary over their legal ranges by campaign seed and remain fixed
-across a node restart. Recovery uses the database tip observed at the crash boundary rather than
-assuming which blocks were durable.
+EIP-2930, and EIP-1559 envelopes, transfers, contract creation, and calls across four storage
+contracts with abi-fuzz-generated keys and values. Transaction count is a semantic trace decision.
+Persistence threshold, state-masking window, and multiproof chunk size vary over their legal
+ranges by campaign seed and remain fixed across a node restart. Recovery uses the database tip
+observed at the crash boundary rather than assuming which blocks were durable.
 
 The bounded developer profile runs four cases:
 
@@ -237,15 +237,19 @@ schedule key when spawning a task, or derive one from a unique context path plus
 generation. The numeric executor ID remains an internal lookup key and must not appear in a replay
 artifact as the task identity.
 
-The implemented hook is in the sibling `commonware-scheduler` checkout while it is prepared for
+The implemented hook is published at
+`0xalpharush/monorepo@9efcb23c8f3ab91164c755ba3c87aa195717d021` while it is prepared for
 upstreaming. `SchedulingPolicy` receives virtual time and the ready batch. Each runnable item has
-its supervisor name, a generation local to that name, and an activation index when one task was
-woken more than once before the batch was drained. The internal executor token remains private.
-The Reth policy repeatedly selects one remaining item to form a permutation, recording each
-selection through the same strict semantic trace used by workload decisions. Commonware still
-polls every item in the captured batch exactly once per queue entry. Its focused test proves that
-the default seeded shuffle remains in use without a policy and that a supplied policy controls
-ordering.
+its supervisor name and a generation local to that name; the internal executor token remains
+private. The Reth policy repeatedly selects one remaining item to form a permutation, recording
+each selection through the same strict semantic trace used by workload decisions.
+
+The deterministic executor coalesces repeated wakes while a task is already queued, then makes it
+eligible for one new wake immediately before polling. This matches the scheduling contract used by
+Tokio and prevents a self-waking future from manufacturing thousands of duplicate scheduling
+choices. A campaign timeout caused by duplicate ready entries is a simulator defect, not evidence
+of a product stall. Focused tests cover both semantic ordering and duplicate-wake coalescing; the
+Commonware runtime suite passes with 839 tests.
 
 The first hook only needs to choose an ordering of the ready batch. It need not implement partial
 order reduction or preempt synchronous Rust code. Existing yield points around message receipt,
@@ -349,13 +353,13 @@ deletes, clears, read and write cursor creation, table entry counts, and transac
 does not yet intercept each movement of an already-created cursor, static-file operations,
 RocksDB operations, or kernel durability. One quarter of cases select a recorded operation family
 (any, transaction, direct read, cursor, write, or commit) and an ordinal without naming a table.
-Every observed operation is recorded; only matching operations consume the ordinal. Exactly one
-operation fails, expected engine termination is modeled as a terminal result, and the next action
-cold-restarts the follower before faults are disabled. The campaign then checks convergence,
-storage consistency, account state, canonical hashes, and the persisted state root. An eight-seed
-64-action smoke run passed strict replay; its fault cases reached `put HeaderNumbers` after 449–581
-recorded storage operations and recovered successfully. A separate seed reached
-`open-read-dup-cursor HashedStorages`.
+Every observed operation is recorded; only matching operations consume the ordinal. Up to three
+operations fail at separately chosen points. Expected engine termination is modeled as a terminal
+result, and the next action cold-restarts the follower before another fault can be armed. The
+campaign then checks convergence, storage consistency, account state, canonical hashes, and the
+persisted state root. Post-rebase qualification covered direct reads, read and write transactions,
+cursor creation, writes, commits, and proof-worker failures in both cooperative and native-worker
+lanes.
 
 Application simulation cannot faithfully model torn sectors, kernel writeback, mmap behavior, or
 MDBX's response to a power cut by returning an error from a Rust trait. Those belong in native
@@ -575,3 +579,17 @@ historical rediscovery measurements, and longer qualification campaigns remain.
 Only after these campaigns expose a measured replay or exploration bottleneck should the project
 add quiescent snapshots, copy-on-write branching, LibAFL coverage scheduling, shrinking, or
 compiler-discovered scheduling points.
+
+Run the native-worker differential lane with an explicitly qualified binary:
+
+```console
+cargo build --release -p reth-dst-runner \
+  --features dst,native-differential --bin reth-dst-node
+RETH_DST_NATIVE_WORKERS=1 RETH_DST_SECONDS=3600 RETH_DST_STEPS=1000 \
+  target/release/reth-dst-node
+```
+
+The semantic workload, network, storage-fault, and lifecycle decisions remain recorded. Native
+Rayon worker ordering is intentionally outside the trace, so a native-only failure must reproduce
+statistically and receive an independent component-level false-positive check before it is
+reported as deterministic.
