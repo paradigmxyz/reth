@@ -11,6 +11,9 @@ pub enum StateRootTaskError {
     /// Proof dispatch error.
     #[error("proof dispatch failed: {_0}")]
     ProofDispatch(ProviderError),
+    /// A proof worker failed before it could process queued work.
+    #[error("proof worker failed: {_0}")]
+    ProofWorker(String),
     /// Sparse trie error.
     #[error(transparent)]
     SparseTrie(#[from] SparseTrieError),

@@ -51,6 +51,11 @@ impl CellCustody {
             }
         }
     }
+
+    /// Updates the custody bitmap from the Engine API's little-endian bitvector encoding.
+    pub fn set_from_engine_api(&self, custody_columns: B128) {
+        self.set(B128::from(u128::from_le_bytes(custody_columns.into())));
+    }
 }
 
 const CELL_CUSTODY_NONE: u8 = 0;
@@ -62,4 +67,17 @@ struct CellCustodyInner {
     state: AtomicU8,
     high: AtomicU64,
     low: AtomicU64,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn sets_engine_api_bitvector_as_numeric_mask() {
+        let custody = CellCustody::default();
+        custody.set_from_engine_api(B128::from(0b1010u128.to_le_bytes()));
+
+        assert_eq!(custody.get(), B128::from(0b1010u128));
+    }
 }

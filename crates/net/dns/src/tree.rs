@@ -341,6 +341,13 @@ impl<K: EnrKeyUnambiguous> fmt::Display for NodeEntry<K> {
     }
 }
 
+/// Returns whether the value starts with a recognized EIP-1459 entry prefix.
+pub(crate) fn has_entry_prefix(value: &str) -> bool {
+    [ROOT_V1_PREFIX, BRANCH_PREFIX, LINK_PREFIX, ENR_PREFIX]
+        .iter()
+        .any(|prefix| value.starts_with(prefix))
+}
+
 /// Parses the value of the key value pair
 fn parse_value<F, V>(input: &mut &str, key: &str, err: &'static str, f: F) -> ParseEntryResult<V>
 where

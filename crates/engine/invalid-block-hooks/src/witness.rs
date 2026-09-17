@@ -179,9 +179,7 @@ where
         let state_provider = self.provider.state_by_block_hash(parent_header.hash())?;
         let database = StateProviderDatabase::new(state_provider.as_ref());
         let output = self.evm_config.executor(database).execute(block)?;
-        let hashed_state = reth_execution_types::hashed_post_state_from_execution_state::<
-            reth_trie::KeccakKeyHasher,
-        >(output.state.inner());
+        let hashed_state = state_provider.hashed_post_state(output.state.inner())?;
         let (codes, preimages, block_state) = collect_execution_data(output.state.into_inner())?;
         let witness = generate(codes, preimages, hashed_state.clone(), state_provider)?;
 

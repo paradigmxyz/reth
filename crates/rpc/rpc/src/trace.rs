@@ -21,10 +21,9 @@ use evm2_inspectors::{
     storage::StorageInspector,
     tracing::{parity::populate_state_diff, TracingInspector, TracingInspectorConfig},
 };
-use futures::StreamExt;
+use futures::{FutureExt, StreamExt};
 use jsonrpsee::core::RpcResult;
 use reth_chainspec::{ChainSpecProvider, EthereumHardforks};
-use reth_evm::ConfigureEvm;
 use reth_primitives_traits::{BlockBody, BlockHeader};
 use reth_rpc_api::TraceApiServer;
 use reth_rpc_convert::RpcTxReq;
@@ -118,6 +117,7 @@ where
                     .map_err(Eth::Error::from_eth_err)?;
                 Ok(trace_res)
             })
+            .boxed()
             .await
     }
 
@@ -252,7 +252,19 @@ where
         hash: B256,
         index: usize,
     ) -> Result<Option<LocalizedTransactionTrace>, Eth::Error> {
-        Ok(self.trace_transaction(hash).await?.and_then(|traces| traces.into_iter().nth(index)))
+        self.eth_api()
+            .spawn_trace_transaction_in_block(
+                hash,
+                TracingInspectorConfig::default_parity(),
+                move |tx_info, inspector, _, _| {
+                    Ok(inspector
+                        .into_parity_builder()
+                        .into_localized_transaction_traces_iter(tx_info)
+                        .nth(index))
+                },
+            )
+            .await
+            .map(Option::flatten)
     }
 
     /// Returns all traces for the given transaction hash
@@ -386,7 +398,11 @@ where
         let earliest_block =
             self.provider().earliest_block_number().map_err(Eth::Error::from_eth_err)?;
         if start < earliest_block {
-            return Err(EthApiError::PrunedHistoryUnavailable.into());
+            return Err(EthApiError::PrunedHistoryUnavailable {
+                requested: start,
+                earliest_available: earliest_block,
+            }
+            .into());
         }
 
         if start > end {

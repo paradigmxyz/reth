@@ -19,6 +19,7 @@ pub use raw::{RawDupSort, RawKey, RawTable, RawValue, TableRawRow};
 use crate::{
     models::{
         accounts::BlockNumberAddress,
+        bal::{StoredBlockAccessList, StoredBlockAccessListKey},
         blocks::{HeaderHash, StoredBlockOmmers},
         storage_sharded_key::StorageShardedKey,
         AccountBeforeTx, ClientVersion, CompactU256, IntegerList, ShardedKey,
@@ -351,6 +352,18 @@ tables! {
         type Value = StoredBlockWithdrawals;
     }
 
+    /// Stores block access list payloads by block number and block hash.
+    table BlockAccessLists {
+        type Key = StoredBlockAccessListKey;
+        type Value = StoredBlockAccessList;
+    }
+
+    /// Stores the block number for each persisted block access list hash.
+    table BlockAccessListBlockNumbers {
+        type Key = BlockHash;
+        type Value = BlockNumber;
+    }
+
     /// Canonical only Stores the transaction body for canonical transactions.
     table Transactions<T = TransactionSigned> {
         type Key = TxNumber;
@@ -414,8 +427,6 @@ tables! {
     /// * for N=150 we would get second shard.
     /// * If max block number is 200 and we ask for N=250 we would fetch last shard and know that needed entry is in `AccountPlainState`.
     /// * If there were no shard we would get `None` entry or entry of different storage key.
-    ///
-    /// Code example can be found in `reth_provider::HistoricalStateProviderRef`
     table AccountsHistory {
         type Key = ShardedKey<Address>;
         type Value = BlockNumberList;
@@ -436,8 +447,6 @@ tables! {
     /// * for N=150 we would get second shard.
     /// * If max block number is 200 and we ask for N=250 we would fetch last shard and know that needed entry is in `StoragePlainState`.
     /// * If there were no shard we would get `None` entry or entry of different storage key.
-    ///
-    /// Code example can be found in `reth_provider::HistoricalStateProviderRef`
     table StoragesHistory {
         type Key = StorageShardedKey;
         type Value = BlockNumberList;

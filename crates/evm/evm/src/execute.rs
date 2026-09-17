@@ -6,7 +6,7 @@ use alloy_consensus::{
     transaction::{Either, Recovered, TransactionEnvelope},
     BlockHeader as _, Header,
 };
-use alloy_eip7928::{compute_block_access_list_hash, BlockAccessIndex, BlockAccessList};
+use alloy_eip7928::{bal::DecodedBal, compute_block_access_list_hash_with_buf, BlockAccessIndex, BlockAccessList};
 use alloy_eips::eip2718::{Typed2718, WithEncoded};
 use alloy_primitives::{Address, B256};
 use core::fmt::Debug;
@@ -143,6 +143,18 @@ pub trait Evm {
         transaction: &Recovered<Self::Transaction>,
     ) -> Result<evm2::TxResultWithState<Self::EvmTypes>, BlockExecutionError>;
 
+    /// Executes and accepts writes in the EVM's block-scoped state without detaching them.
+    fn transact_commit(
+        &mut self,
+        transaction: &Recovered<Self::Transaction>,
+    ) -> Result<evm2::TxResult<Self::EvmTypes>, BlockExecutionError>;
+
+    /// Executes a transaction and discards writes without materializing detached state.
+    fn transact_result(
+        &mut self,
+        transaction: &Recovered<Self::Transaction>,
+    ) -> Result<evm2::TxResult<Self::EvmTypes>, BlockExecutionError>;
+
     /// Executes a transaction with an inspector without committing its state changes.
     fn transact_with_inspector<I>(
         &mut self,
@@ -197,6 +209,20 @@ impl<'a, T: evm2::EvmTypes<Tx: Typed2718>> Evm for evm2::Evm<'a, T> {
     ) -> Result<evm2::TxResultWithState<T>, BlockExecutionError> {
         let resolution = transaction_resolution(evm2::Evm::transact(self, transaction));
         resolve_transaction(self, resolution)
+    }
+
+    fn transact_commit(
+        &mut self,
+        transaction: &Recovered<Self::Transaction>,
+    ) -> Result<evm2::TxResult<T>, BlockExecutionError> {
+        execute_result(self, transaction, true)
+    }
+
+    fn transact_result(
+        &mut self,
+        transaction: &Recovered<Self::Transaction>,
+    ) -> Result<evm2::TxResult<T>, BlockExecutionError> {
+        execute_result(self, transaction, false)
     }
 
     fn transact_with_inspector<I: evm2::Inspector<T> + 'a>(
@@ -271,6 +297,28 @@ impl<'a, T: evm2::EvmTypes<Tx: Typed2718>> Evm for evm2::Evm<'a, T> {
             BlockExecutionError::msg(format!("discarded state sink failed: {err:?}"))
         })
     }
+}
+
+fn execute_result<T: evm2::EvmTypes<Tx: Typed2718>>(
+    evm: &mut evm2::Evm<'_, T>,
+    transaction: &Recovered<T::Tx>,
+    commit: bool,
+) -> Result<evm2::TxResult<T>, BlockExecutionError> {
+    let result = match evm2::Evm::transact(evm, transaction) {
+        Ok(executed) => {
+            if let Some(code) = executed.result().error_code {
+                let _ = executed.discard();
+                Err(HandlerError::Fatal(code))
+            } else {
+                Ok(if commit { executed.commit() } else { executed.discard() })
+            }
+        }
+        Err(error) => Err(error),
+    };
+    result.map_err(|error| match error {
+        HandlerError::Fatal(code) => BlockExecutionError::other(evm.database_mut().error(code)),
+        error => BlockValidationError::Other(Box::new(error)).into(),
+    })
 }
 
 enum TransactionResolution<T: evm2::EvmTypes> {
@@ -371,6 +419,11 @@ pub trait BlockExecutor: Sized {
             Ok(None)
         }
     }
+
+    /// Validates transaction gas admission against the executor's current block or segment budget.
+    /// Speculative workers and ordered commits must perform the same check before accepting a
+    /// transaction's result or execution error.
+    fn validate_transaction_gas_limit(&mut self, gas_limit: u64) -> Result<(), BlockExecutionError>;
 
     /// Executes a transaction and detaches its state changes without committing them.
     fn execute_transaction_without_commit(
@@ -556,7 +609,7 @@ pub struct BlockBuilderOutcome<N: NodePrimitives> {
     /// The built block.
     pub block: RecoveredBlock<N::Block>,
     /// Block access list built during execution (EIP-7928, Amsterdam).
-    pub block_access_list: Option<BlockAccessList>,
+    pub block_access_list: Option<DecodedBal>,
 }
 
 /// A type that knows how to execute transactions and assemble a block.
@@ -766,9 +819,13 @@ where
         let Self { executor, evm_env, transactions, ctx, parent, assembler } = self;
 
         let (output, block_access_list) = executor.finish_with_block_access_list()?;
-        let block_access_list_hash =
-            block_access_list.as_ref().map(|bal| compute_block_access_list_hash(bal.as_slice()));
-        let hashed_state = state_provider.hashed_post_state(output.state.inner());
+        let block_access_list = block_access_list.map(|bal| {
+            let mut raw = Vec::new();
+            let hash = compute_block_access_list_hash_with_buf(&bal, &mut raw);
+            DecodedBal::new_unchecked(bal.into(), raw.into(), hash)
+        });
+        let block_access_list_hash = block_access_list.as_ref().map(DecodedBal::hash);
+        let hashed_state = state_provider.hashed_post_state(output.state.inner()).map_err(BlockExecutionError::other)?;
         let (state_root, trie_updates) = match state_root(&output)? {
             Some(precomputed) => precomputed,
             None => state_provider

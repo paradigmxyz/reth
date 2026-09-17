@@ -33,32 +33,39 @@ use reth_errors::ProviderError;
 use reth_node_types::NodePrimitives;
 use reth_primitives_traits::{ReceiptTy, StorageEntry};
 use reth_static_file_types::StaticFileSegment;
-use reth_storage_api::{ChangeSetReader, DBProvider, NodePrimitivesProvider, StorageSettingsCache};
+use reth_storage_api::{
+    ChangeSetReader, DBProvider, DbTxProvider, NodePrimitivesProvider, StorageSettingsCache,
+};
 use reth_storage_errors::provider::ProviderResult;
 use strum::{Display, EnumIs};
 
 /// Type alias for [`EitherReader`] constructors.
-type EitherReaderTy<'a, P, T> =
-    EitherReader<'a, CursorTy<<P as DBProvider>::Tx, T>, <P as NodePrimitivesProvider>::Primitives>;
+type EitherReaderTy<'a, 'db, P, T> = EitherReader<
+    'a,
+    'db,
+    CursorTy<<P as DbTxProvider>::Tx, T>,
+    <P as NodePrimitivesProvider>::Primitives,
+>;
 
 /// Type alias for [`EitherReader`] constructors.
-type DupEitherReaderTy<'a, P, T> = EitherReader<
+type DupEitherReaderTy<'a, 'db, P, T> = EitherReader<
     'a,
-    DupCursorTy<<P as DBProvider>::Tx, T>,
+    'db,
+    DupCursorTy<<P as DbTxProvider>::Tx, T>,
     <P as NodePrimitivesProvider>::Primitives,
 >;
 
 /// Type alias for dup [`EitherWriter`] constructors.
 type DupEitherWriterTy<'a, P, T> = EitherWriter<
     'a,
-    DupCursorMutTy<<P as DBProvider>::Tx, T>,
+    DupCursorMutTy<<P as DbTxProvider>::Tx, T>,
     <P as NodePrimitivesProvider>::Primitives,
 >;
 
 /// Type alias for [`EitherWriter`] constructors.
 type EitherWriterTy<'a, P, T> = EitherWriter<
     'a,
-    CursorMutTy<<P as DBProvider>::Tx, T>,
+    CursorMutTy<<P as DbTxProvider>::Tx, T>,
     <P as NodePrimitivesProvider>::Primitives,
 >;
 
@@ -72,7 +79,7 @@ pub type RawRocksDBBatch = rocksdb::WriteBatchWithTransaction<true>;
 ///
 /// The `Option` allows callers to skip `RocksDB` access when it isn't needed
 /// (e.g., on legacy MDBX-only nodes).
-pub type RocksDBRefArg<'a> = Option<crate::providers::rocksdb::RocksReadSnapshot<'a>>;
+pub type RocksDBRefArg<'a, 'db> = Option<&'a crate::providers::rocksdb::RocksReadSnapshot<'db>>;
 
 /// Represents a destination for writing data, either to database, static files, or `RocksDB`.
 #[derive(Debug, Display)]
@@ -691,20 +698,20 @@ where
 
 /// Represents a source for reading data, either from database, static files, or `RocksDB`.
 #[derive(Debug, Display)]
-pub enum EitherReader<'a, CURSOR, N> {
+pub enum EitherReader<'a, 'db, CURSOR, N> {
     /// Read from database table via cursor
     Database(CURSOR, PhantomData<&'a ()>),
     /// Read from static file
     StaticFile(StaticFileProvider<N>, PhantomData<&'a ()>),
     /// Read from `RocksDB` snapshot (works in both read-only and read-write modes)
-    RocksDB(crate::providers::rocksdb::RocksReadSnapshot<'a>),
+    RocksDB(&'a crate::providers::rocksdb::RocksReadSnapshot<'db>),
 }
 
-impl<'a> EitherReader<'a, (), ()> {
+impl<'a, 'db> EitherReader<'a, 'db, (), ()> {
     /// Creates a new [`EitherReader`] for senders based on storage settings.
     pub fn new_senders<P>(
         provider: &P,
-    ) -> ProviderResult<EitherReaderTy<'a, P, tables::TransactionSenders>>
+    ) -> ProviderResult<EitherReaderTy<'a, 'db, P, tables::TransactionSenders>>
     where
         P: DBProvider + NodePrimitivesProvider + StorageSettingsCache + StaticFileProviderFactory,
         P::Tx: DbTx,
@@ -722,8 +729,8 @@ impl<'a> EitherReader<'a, (), ()> {
     /// Creates a new [`EitherReader`] for storages history based on storage settings.
     pub fn new_storages_history<P>(
         provider: &P,
-        rocksdb: RocksDBRefArg<'a>,
-    ) -> ProviderResult<EitherReaderTy<'a, P, tables::StoragesHistory>>
+        rocksdb: RocksDBRefArg<'a, 'db>,
+    ) -> ProviderResult<EitherReaderTy<'a, 'db, P, tables::StoragesHistory>>
     where
         P: DBProvider + NodePrimitivesProvider + StorageSettingsCache,
         P::Tx: DbTx,
@@ -743,8 +750,8 @@ impl<'a> EitherReader<'a, (), ()> {
     /// Creates a new [`EitherReader`] for transaction hash numbers based on storage settings.
     pub fn new_transaction_hash_numbers<P>(
         provider: &P,
-        rocksdb: RocksDBRefArg<'a>,
-    ) -> ProviderResult<EitherReaderTy<'a, P, tables::TransactionHashNumbers>>
+        rocksdb: RocksDBRefArg<'a, 'db>,
+    ) -> ProviderResult<EitherReaderTy<'a, 'db, P, tables::TransactionHashNumbers>>
     where
         P: DBProvider + NodePrimitivesProvider + StorageSettingsCache,
         P::Tx: DbTx,
@@ -764,8 +771,8 @@ impl<'a> EitherReader<'a, (), ()> {
     /// Creates a new [`EitherReader`] for account history based on storage settings.
     pub fn new_accounts_history<P>(
         provider: &P,
-        rocksdb: RocksDBRefArg<'a>,
-    ) -> ProviderResult<EitherReaderTy<'a, P, tables::AccountsHistory>>
+        rocksdb: RocksDBRefArg<'a, 'db>,
+    ) -> ProviderResult<EitherReaderTy<'a, 'db, P, tables::AccountsHistory>>
     where
         P: DBProvider + NodePrimitivesProvider + StorageSettingsCache,
         P::Tx: DbTx,
@@ -785,7 +792,7 @@ impl<'a> EitherReader<'a, (), ()> {
     /// Creates a new [`EitherReader`] for account changesets based on storage settings.
     pub fn new_account_changesets<P>(
         provider: &P,
-    ) -> ProviderResult<DupEitherReaderTy<'a, P, tables::AccountChangeSets>>
+    ) -> ProviderResult<DupEitherReaderTy<'a, 'db, P, tables::AccountChangeSets>>
     where
         P: DBProvider + NodePrimitivesProvider + StorageSettingsCache + StaticFileProviderFactory,
         P::Tx: DbTx,
@@ -801,7 +808,7 @@ impl<'a> EitherReader<'a, (), ()> {
     }
 }
 
-impl<CURSOR, N: NodePrimitives> EitherReader<'_, CURSOR, N>
+impl<CURSOR, N: NodePrimitives> EitherReader<'_, '_, CURSOR, N>
 where
     CURSOR: DbCursorRO<tables::TransactionSenders>,
 {
@@ -832,7 +839,7 @@ where
     }
 }
 
-impl<CURSOR, N: NodePrimitives> EitherReader<'_, CURSOR, N>
+impl<CURSOR, N: NodePrimitives> EitherReader<'_, '_, CURSOR, N>
 where
     CURSOR: DbCursorRO<tables::TransactionHashNumbers>,
 {
@@ -849,7 +856,7 @@ where
     }
 }
 
-impl<CURSOR, N: NodePrimitives> EitherReader<'_, CURSOR, N>
+impl<CURSOR, N: NodePrimitives> EitherReader<'_, '_, CURSOR, N>
 where
     CURSOR: DbCursorRO<tables::StoragesHistory>,
 {
@@ -897,7 +904,7 @@ where
     }
 }
 
-impl<CURSOR, N: NodePrimitives> EitherReader<'_, CURSOR, N>
+impl<CURSOR, N: NodePrimitives> EitherReader<'_, '_, CURSOR, N>
 where
     CURSOR: DbCursorRO<tables::AccountsHistory>,
 {
@@ -943,7 +950,7 @@ where
     }
 }
 
-impl<CURSOR, N: NodePrimitives> EitherReader<'_, CURSOR, N>
+impl<CURSOR, N: NodePrimitives> EitherReader<'_, '_, CURSOR, N>
 where
     CURSOR: DbCursorRO<tables::AccountChangeSets>,
 {
@@ -1462,7 +1469,7 @@ mod rocksdb_tests {
 
         for (i, query) in queries.iter().enumerate() {
             // MDBX query via EitherReader
-            let mut mdbx_reader: EitherReader<'_, AccountsHistoryReadCursor, EthPrimitives> =
+            let mut mdbx_reader: EitherReader<'_, '_, AccountsHistoryReadCursor, EthPrimitives> =
                 EitherReader::Database(
                     mdbx_ro.tx_ref().cursor_read::<tables::AccountsHistory>().unwrap(),
                     PhantomData,
@@ -1551,7 +1558,7 @@ mod rocksdb_tests {
 
         for (i, query) in queries.iter().enumerate() {
             // MDBX query via EitherReader
-            let mut mdbx_reader: EitherReader<'_, StoragesHistoryReadCursor, EthPrimitives> =
+            let mut mdbx_reader: EitherReader<'_, '_, StoragesHistoryReadCursor, EthPrimitives> =
                 EitherReader::Database(
                     mdbx_ro.tx_ref().cursor_read::<tables::StoragesHistory>().unwrap(),
                     PhantomData,
@@ -1703,9 +1710,9 @@ mod rocksdb_tests {
         );
 
         // Scenario 4: Query at pruning boundary
-        // Note: We test block >= lowest_available because HistoricalStateProviderRef
-        // errors on blocks below the pruning boundary before doing the lookup.
-        // The RocksDB implementation doesn't have this check at the same level.
+        // We test block >= lowest_available because state queries reject blocks below the
+        // pruning boundary before doing the lookup. The RocksDB implementation doesn't have
+        // this check at the same level.
         // This tests that when pruning IS available, both backends agree.
         run_account_history_scenario(
             "with_pruning_boundary",

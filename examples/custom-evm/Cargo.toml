@@ -17,3 +17,5 @@ evm2.workspace = true
 evm2-macros.workspace = true
 eyre.workspace = true
 tokio.workspace = true
+
+[lints]

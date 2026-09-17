@@ -10,14 +10,14 @@ use reth_storage_api::{
 };
 use reth_storage_errors::provider::{ProviderError, ProviderResult};
 use reth_trie::{
-    hashed_cursor::HashedPostStateCursorFactory,
+    hashed_cursor::{zero_destroyed_account_storage, HashedPostStateCursorFactory},
     proof::{Proof, StorageProof},
     trie_cursor::InMemoryTrieCursorFactory,
     updates::TrieUpdates,
     witness::TrieWitness,
-    AccountProof, ExecutionWitnessMode, HashedPostState, HashedStorage, KeccakKeyHasher,
-    MultiProof, MultiProofTargets, StateRoot, StorageMultiProof, StorageRoot, TrieInput,
-    TrieInputSorted,
+    AccountProof, DecodedMultiProofV2, ExecutionWitnessMode, HashedPostState, HashedStorage,
+    KeccakKeyHasher, MultiProof, MultiProofTargets, MultiProofTargetsV2, StateRoot,
+    StorageMultiProof, StorageRoot, TrieInput, TrieInputSorted,
 };
 use reth_trie_db::{DatabaseProof, DatabaseStateRoot, DatabaseStorageProof, DatabaseStorageRoot};
 
@@ -220,6 +220,17 @@ impl<Provider: DBProvider + StorageSettingsCache> StateProofProvider
         })
     }
 
+    fn multiproof_v2(
+        &self,
+        input: TrieInput,
+        targets: MultiProofTargetsV2,
+    ) -> ProviderResult<DecodedMultiProofV2> {
+        reth_trie_db::with_adapter!(self.0, |A| {
+            let proof = <DbProof<'_, _, A> as DatabaseProof>::from_tx(self.tx());
+            proof.overlay_multiproof_v2(input, targets).map_err(ProviderError::from)
+        })
+    }
+
     fn witness(
         &self,
         input: TrieInput,
@@ -253,8 +264,18 @@ impl<Provider: DBProvider + StorageSettingsCache> StateProofProvider
 }
 
 impl<Provider: DBProvider> HashedPostStateProvider for LatestStateProviderRef<'_, Provider> {
-    fn hashed_post_state(&self, state: &EvmState) -> HashedPostState {
-        hashed_post_state_from_execution_state::<KeccakKeyHasher>(state)
+    fn hashed_post_state(
+        &self,
+        bundle_state: &reth_execution_types::EvmState,
+    ) -> ProviderResult<HashedPostState> {
+        let mut hashed_state =
+            reth_execution_types::hashed_post_state_from_execution_state::<KeccakKeyHasher>(bundle_state);
+        zero_destroyed_account_storage(
+            &reth_trie_db::DatabaseHashedCursorFactory::new(self.tx()),
+            reth_execution_types::destroyed_accounts(bundle_state),
+            &mut hashed_state,
+        )?;
+        Ok(hashed_state)
     }
 }
 

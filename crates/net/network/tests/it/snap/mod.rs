@@ -13,7 +13,6 @@ use alloy_eip7928::{
 };
 use alloy_eips::NumHash;
 use alloy_primitives::{keccak256, Address, Bytes, B256, U256};
-use alloy_rlp::{Decodable, RlpDecodable};
 use alloy_trie::{nodes::RlpNode, proof::verify_proof, Nibbles};
 use reth_chainspec::Hardforks;
 use reth_eth_wire::{
@@ -205,19 +204,6 @@ fn assert_boundary_proof(root: B256, key: B256, expected_value: Option<Vec<u8>>,
     );
 }
 
-/// Owned decode counterpart of `eth_requests::SlimAccountBody`
-#[derive(Debug, RlpDecodable)]
-struct SlimAccountBody {
-    /// The account's nonce.
-    nonce: u64,
-    /// The account's balance.
-    balance: U256,
-    /// Empty when the account has no storage.
-    storage_root: Bytes,
-    /// Empty when the account has no code.
-    code_hash: Bytes,
-}
-
 /// A valid RLP-encoded EIP-7928 block access list for `address`, with its commitment hash.
 fn valid_bal(address: Address) -> (Bytes, B256) {
     let mut change = AccountChanges::new(address);
@@ -280,16 +266,16 @@ async fn account_range_roundtrip_carries_slim_encoding_and_proof() {
     };
     assert_eq!(request_id, 7);
     assert_eq!(returned.len(), expected.len());
-    for (AccountData { hash, body }, (expected_hash, expected_account)) in
-        returned.iter().zip(&expected)
-    {
-        assert_eq!(hash, expected_hash);
-        let decoded = SlimAccountBody::decode(&mut &body[..]).unwrap();
+    for (account, (expected_hash, expected_account)) in returned.iter().zip(&expected) {
+        assert_eq!(&account.hash, expected_hash);
+        let decoded = account.trie_account().unwrap();
         assert_eq!(decoded.nonce, expected_account.nonce);
         assert_eq!(decoded.balance, expected_account.balance);
-        // Freshly generated EOAs have no storage/code, so they get the slim (elided) encoding.
-        assert!(decoded.storage_root.is_empty());
-        assert!(decoded.code_hash.is_empty());
+        // Freshly generated EOAs have no storage/code, so the slim encoding elides both fields
+        // and they decode back to their defaults.
+        assert_eq!(decoded.storage_root, EMPTY_ROOT_HASH);
+        assert_eq!(decoded.code_hash, KECCAK_EMPTY);
+        assert_eq!(account, &AccountData::from_trie_account(*expected_hash, &decoded));
     }
 
     assert!(!proof.is_empty());
@@ -422,10 +408,8 @@ async fn storage_range_roundtrip_carries_rlp_values_and_proof() {
     assert_eq!(request_id, 9);
     assert_eq!(returned.len(), 1);
 
-    let decoded: Vec<_> = returned[0]
-        .iter()
-        .map(|slot| (slot.hash, U256::decode(&mut &slot.data[..]).unwrap()))
-        .collect();
+    let decoded: Vec<_> =
+        returned[0].iter().map(|slot| (slot.hash, slot.value().unwrap())).collect();
     let expected_bounded: Vec<_> =
         expected.iter().filter(|(hash, _)| *hash >= origin && *hash <= limit).copied().collect();
     assert_eq!(decoded, expected_bounded);
@@ -493,10 +477,8 @@ async fn storage_range_empty_window_returns_boundary_slot() {
         panic!("expected a storage ranges response");
     };
     assert_eq!(returned.len(), 1);
-    let decoded: Vec<_> = returned[0]
-        .iter()
-        .map(|slot| (slot.hash, U256::decode(&mut &slot.data[..]).unwrap()))
-        .collect();
+    let decoded: Vec<_> =
+        returned[0].iter().map(|slot| (slot.hash, slot.value().unwrap())).collect();
     assert_eq!(decoded, vec![expected[2]]);
 
     assert!(!proof.is_empty());
@@ -573,15 +555,11 @@ async fn storage_ranges_multi_account_bounds_only_first_account() {
         panic!("expected a storage ranges response");
     };
     assert_eq!(returned.len(), 2, "both accounts should appear");
-    let decoded_a: Vec<_> = returned[0]
-        .iter()
-        .map(|slot| (slot.hash, U256::decode(&mut &slot.data[..]).unwrap()))
-        .collect();
+    let decoded_a: Vec<_> =
+        returned[0].iter().map(|slot| (slot.hash, slot.value().unwrap())).collect();
     assert_eq!(decoded_a, expected_a, "the earlier account's range should be complete");
-    let decoded_b: Vec<_> = returned[1]
-        .iter()
-        .map(|slot| (slot.hash, U256::decode(&mut &slot.data[..]).unwrap()))
-        .collect();
+    let decoded_b: Vec<_> =
+        returned[1].iter().map(|slot| (slot.hash, slot.value().unwrap())).collect();
     assert!(decoded_b.len() < expected_b.len(), "the final account's range should be truncated");
     assert_eq!(decoded_b, expected_b[..decoded_b.len()]);
     assert!(!proof.is_empty());
@@ -610,10 +588,8 @@ async fn storage_ranges_multi_account_bounds_only_first_account() {
         panic!("expected a storage ranges response");
     };
     assert_eq!(returned.len(), 1, "only the bounded first account should appear");
-    let decoded_a: Vec<_> = returned[0]
-        .iter()
-        .map(|slot| (slot.hash, U256::decode(&mut &slot.data[..]).unwrap()))
-        .collect();
+    let decoded_a: Vec<_> =
+        returned[0].iter().map(|slot| (slot.hash, slot.value().unwrap())).collect();
     assert_eq!(decoded_a, expected_a[1..]);
     assert!(!proof.is_empty());
     assert_boundary_proof(storage_root_a, origin, Some(alloy_rlp::encode(expected_a[1].1)), &proof);

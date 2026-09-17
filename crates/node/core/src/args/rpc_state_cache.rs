@@ -22,11 +22,12 @@ pub struct RpcStateCacheArgs {
     )]
     pub max_receipts: u32,
 
-    /// Max number of headers in cache.
+    /// Legacy no-op retained for CLI compatibility.
     #[arg(
         long = "rpc-cache.max-headers",
         alias = "rpc-cache.max-envs",
         default_value_t = DEFAULT_HEADER_CACHE_MAX_LEN,
+        hide = true,
     )]
     pub max_headers: u32,
 
@@ -36,6 +37,24 @@ pub struct RpcStateCacheArgs {
         default_value_t = DEFAULT_BAL_CACHE_MAX_LEN,
     )]
     pub max_bals: u32,
+
+    /// Cache block access lists computed by RPC requests for transaction tracing.
+    #[arg(long = "rpc-cache.cache-computed-bals")]
+    pub cache_computed_bals: bool,
+
+    /// Replay new canonical blocks to cache block access lists until native BAL support.
+    ///
+    /// Optionally replay the latest BLOCKS blocks sequentially on startup. Without a count, only
+    /// new blocks are prewarmed. Implies --rpc-cache.cache-computed-bals.
+    /// Prewarming stops when a canonical block with a block access list hash is received.
+    #[arg(
+        long = "rpc-cache.prewarm-bals",
+        value_name = "BLOCKS",
+        num_args = 0..=1,
+        default_missing_value = "0",
+        require_equals = true,
+    )]
+    pub prewarm_bals: Option<usize>,
 
     /// Max number of concurrent database requests.
     #[arg(
@@ -59,6 +78,8 @@ impl RpcStateCacheArgs {
         self.max_receipts = 0;
         self.max_headers = 0;
         self.max_bals = 0;
+        self.cache_computed_bals = false;
+        self.prewarm_bals = None;
     }
 }
 
@@ -69,6 +90,8 @@ impl Default for RpcStateCacheArgs {
             max_receipts: DEFAULT_RECEIPT_CACHE_MAX_LEN,
             max_headers: DEFAULT_HEADER_CACHE_MAX_LEN,
             max_bals: DEFAULT_BAL_CACHE_MAX_LEN,
+            cache_computed_bals: false,
+            prewarm_bals: None,
             max_concurrent_db_requests: DEFAULT_CONCURRENT_DB_REQUESTS,
             max_cached_tx_hashes: DEFAULT_MAX_CACHED_TX_HASHES,
         }

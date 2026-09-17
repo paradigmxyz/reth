@@ -62,32 +62,10 @@ pub struct EvmTransactionValidationLimits {
 }
 
 /// Transaction validation gas rules resolved for an EVM environment.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy)]
 pub struct EvmTransactionValidationGasRules {
-    /// Base transaction gas.
-    pub tx_base_gas: u64,
-    /// Gas charged for create transactions.
-    pub tx_create_gas: u64,
-    /// Gas charged per zero calldata byte.
-    pub tx_data_zero_gas: u64,
-    /// Gas charged per non-zero calldata byte.
-    pub tx_data_non_zero_gas: u64,
-    /// Gas charged per access list address.
-    pub tx_access_list_address_gas: u64,
-    /// Gas charged per access list storage key.
-    pub tx_access_list_storage_key_gas: u64,
-    /// Floor gas tokens charged per access-list byte.
-    pub tx_access_list_floor_byte_multiplier: u64,
-    /// Gas charged per initcode word.
-    pub tx_initcode_word_gas: u64,
-    /// Base gas used for calldata floor gas.
-    pub tx_floor_gas_base: u64,
-    /// Floor gas charged per token. Zero disables floor gas.
-    pub tx_floor_gas_per_token: u64,
-    /// Token multiplier for non-zero calldata bytes.
-    pub tx_floor_gas_non_zero_token_multiplier: u64,
-    /// EIP-7702 gas charged per authorization.
-    pub tx_eip7702_per_empty_account_cost: u64,
+    /// The configured native gas schedule and enabled features.
+    pub version: evm2::Version,
 }
 
 /// Transaction validation gas resolved for a transaction.
@@ -100,61 +78,29 @@ pub struct EvmTransactionValidationGas {
 }
 
 impl EvmTransactionValidationGasRules {
-    /// Calculates transaction validation gas for the resolved rules.
+    /// Calculates validation gas with the same native rules used during execution.
+    #[expect(clippy::too_many_arguments)]
     pub fn calculate(
-        self,
-        input: &[u8],
-        is_create: bool,
+        &self,
+        caller: alloy_primitives::Address,
+        to: alloy_primitives::TxKind,
+        value: alloy_primitives::U256,
+        input: &alloy_primitives::Bytes,
         access_list_accounts: u64,
         access_list_storage_keys: u64,
         authorization_list_len: u64,
     ) -> EvmTransactionValidationGas {
-        let (zero_data_len, non_zero_data_len) =
-            input.iter().fold((0u64, 0u64), |(zero, non_zero), byte| {
-                if *byte == 0 {
-                    (zero + 1, non_zero)
-                } else {
-                    (zero, non_zero + 1)
-                }
-            });
-
-        let mut intrinsic_gas = self
-            .tx_base_gas
-            .saturating_add(zero_data_len.saturating_mul(self.tx_data_zero_gas))
-            .saturating_add(non_zero_data_len.saturating_mul(self.tx_data_non_zero_gas))
-            .saturating_add(access_list_accounts.saturating_mul(self.tx_access_list_address_gas))
-            .saturating_add(
-                access_list_storage_keys.saturating_mul(self.tx_access_list_storage_key_gas),
-            )
-            .saturating_add(
-                authorization_list_len.saturating_mul(self.tx_eip7702_per_empty_account_cost),
-            );
-
-        if is_create {
-            intrinsic_gas = intrinsic_gas.saturating_add(self.tx_create_gas).saturating_add(
-                self.tx_initcode_word_gas
-                    .saturating_mul(u64::try_from(input.len().div_ceil(32)).unwrap_or(u64::MAX)),
-            );
+        let mut intrinsic_gas = evm2::ethereum::intrinsic_gas(
+            &self.version, caller, to, input, access_list_accounts, access_list_storage_keys, value,
+        );
+        if self.version.feature(evm2::EvmFeatures::EIP7702) {
+            intrinsic_gas += authorization_list_len * u64::from(self.version.gas_params.get(
+                evm2::version::GasId::TxEip7702PerEmptyAccountCost,
+            ));
         }
-
-        let floor_gas = if self.tx_floor_gas_per_token == 0 {
-            0
-        } else {
-            let access_list_tokens = access_list_accounts
-                .saturating_mul(20)
-                .saturating_add(access_list_storage_keys.saturating_mul(32))
-                .saturating_mul(self.tx_access_list_floor_byte_multiplier);
-            let calldata_tokens = zero_data_len.saturating_add(
-                non_zero_data_len.saturating_mul(self.tx_floor_gas_non_zero_token_multiplier),
-            );
-
-            self.tx_floor_gas_base.saturating_add(
-                access_list_tokens
-                    .saturating_add(calldata_tokens)
-                    .saturating_mul(self.tx_floor_gas_per_token),
-            )
-        };
-
+        let floor_gas = evm2::ethereum::floor_gas(
+            &self.version, caller, to, input, access_list_accounts, access_list_storage_keys, value,
+        );
         EvmTransactionValidationGas { intrinsic_gas, floor_gas }
     }
 }
@@ -215,6 +161,8 @@ pub trait EvmEnv: Debug + Clone + Send + Sync + 'static {
 mod engine;
 #[cfg(feature = "std")]
 pub use engine::{ConfigureEngineEvm, ConvertTx, ExecutableTxIterator, ExecutableTxTuple};
+mod sender_recovery;
+pub use sender_recovery::SenderRecoveryCache;
 
 #[cfg(feature = "metrics")]
 pub mod metrics;

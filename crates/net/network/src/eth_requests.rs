@@ -4,13 +4,10 @@ use crate::{
     budget::DEFAULT_BUDGET_TRY_DRAIN_DOWNLOADERS, metered_poll_nested_stream_with_budget,
     metrics::EthRequestHandlerMetrics,
 };
-use alloy_consensus::{
-    constants::{EMPTY_ROOT_HASH, KECCAK_EMPTY},
-    BlockHeader, ReceiptWithBloom,
-};
+use alloy_consensus::{constants::KECCAK_EMPTY, BlockHeader, ReceiptWithBloom};
 use alloy_eips::BlockHashOrNumber;
-use alloy_primitives::{Bytes, B256, U256};
-use alloy_rlp::{Encodable, RlpEncodable};
+use alloy_primitives::{Bytes, B256};
+use alloy_rlp::Encodable;
 use futures::StreamExt;
 use reth_eth_wire::{
     snap::{
@@ -28,7 +25,7 @@ use reth_network_p2p::{
     snap::client::SnapResponse,
 };
 use reth_network_peers::PeerId;
-use reth_primitives_traits::{Account, Block};
+use reth_primitives_traits::Block;
 use reth_storage_api::{
     errors::provider::ProviderResult, BalProvider, BlockReader, BytecodeReader,
     GetBlockAccessListLimit, HeaderProvider, RangeEnd, RangeResponse, StateProviderFactory,
@@ -82,6 +79,20 @@ pub const MAX_STORAGE_RANGE_ACCOUNTS_SERVE: usize = 1024;
 
 /// Maximum size of replies to data retrievals: 2MB
 pub const SOFT_RESPONSE_LIMIT: usize = 2 * 1024 * 1024;
+
+/// Upper bound on the headers reserved once the first requested header resolves.
+///
+/// Header responses are bound by [`MAX_HEADERS_SERVE`] rather than by size, so a full batch reaches
+/// its final capacity within a few doublings while a batch that runs past the local tip wastes at
+/// most this many slots.
+const MAX_HEADERS_RESERVE: usize = 64;
+
+/// Upper bound on the block bodies or receipt lists reserved once the first requested block
+/// resolves.
+///
+/// These responses are bound by [`SOFT_RESPONSE_LIMIT`], so the first block's size predicts how
+/// many fit and this only caps the estimate for tiny blocks.
+const MAX_BLOCKS_RESERVE: usize = 16;
 
 /// Manages eth related requests on top of the p2p network.
 ///
@@ -151,8 +162,14 @@ where
             if let Some(header) = self.client.header_by_hash_or_number(block).unwrap_or_default() {
                 let number = header.number();
                 let parent_hash = header.parent_hash();
+                let len = header.length();
 
-                total_bytes += header.length();
+                if headers.is_empty() {
+                    let count = limit.min(MAX_HEADERS_SERVE as u64) as usize;
+                    headers.reserve(response_reserve_hint(count, len, MAX_HEADERS_RESERVE));
+                }
+
+                total_bytes += len;
                 headers.push(header);
 
                 if headers.len() >= MAX_HEADERS_SERVE || total_bytes > SOFT_RESPONSE_LIMIT {
@@ -210,6 +227,7 @@ where
         response: oneshot::Sender<RequestResult<BlockBodies<<C::Block as Block>::Body>>>,
     ) {
         self.metrics.eth_bodies_requests_received_total.increment(1);
+        let count = request.0.len();
         let mut bodies = Vec::new();
 
         let mut total_bytes = 0;
@@ -217,7 +235,11 @@ where
         for hash in request {
             if let Some(block) = self.client.block_by_hash(hash).unwrap_or_default() {
                 let body = block.into_body();
-                total_bytes += body.length();
+                let len = body.length();
+                if bodies.is_empty() {
+                    bodies.reserve(response_reserve_hint(count, len, MAX_BLOCKS_RESERVE));
+                }
+                total_bytes += len;
                 bodies.push(body);
 
                 if bodies.len() >= MAX_BODIES_SERVE || total_bytes > SOFT_RESPONSE_LIMIT {
@@ -229,6 +251,21 @@ where
         }
 
         let _ = response.send(Ok(BlockBodies(bodies)));
+    }
+
+    /// Replies to `GetNodeData`.
+    ///
+    /// State serving via eth `GetNodeData` was removed; answer with an empty payload so eth/66
+    /// peers receive a response instead of hanging until the request timeout when the oneshot is
+    /// dropped unanswered.
+    fn on_node_data_request(
+        &self,
+        _peer_id: PeerId,
+        _request: GetNodeData,
+        response: oneshot::Sender<RequestResult<NodeData>>,
+    ) {
+        self.metrics.eth_node_data_requests_received_total.increment(1);
+        let _ = response.send(Ok(NodeData(vec![])));
     }
 
     fn on_receipts_request(
@@ -275,6 +312,7 @@ where
 
         let GetReceipts70 { first_block_receipt_index, block_hashes } = request;
 
+        let count = block_hashes.len();
         let mut receipts = Vec::new();
         let mut total_bytes = 0usize;
         let mut last_block_incomplete = false;
@@ -300,6 +338,9 @@ where
             }
 
             let block_size = block_receipts.length();
+            if receipts.is_empty() {
+                receipts.reserve(response_reserve_hint(count, block_size, MAX_BLOCKS_RESERVE));
+            }
 
             if total_bytes + block_size <= SOFT_RESPONSE_LIMIT {
                 total_bytes += block_size;
@@ -331,6 +372,7 @@ where
         F: Fn(Vec<C::Receipt>) -> Vec<T>,
         T: Encodable,
     {
+        let count = request.0.len();
         let mut receipts = Vec::new();
         let mut total_bytes = 0;
 
@@ -339,7 +381,11 @@ where
                 self.client.receipts_by_block(BlockHashOrNumber::Hash(hash)).unwrap_or_default()
             {
                 let transformed_receipts = transform_fn(receipts_by_block);
-                total_bytes += transformed_receipts.length();
+                let len = transformed_receipts.length();
+                if receipts.is_empty() {
+                    receipts.reserve(response_reserve_hint(count, len, MAX_BLOCKS_RESERVE));
+                }
+                total_bytes += len;
                 receipts.push(transformed_receipts);
 
                 if receipts.len() >= MAX_RECEIPTS_SERVE || total_bytes > SOFT_RESPONSE_LIMIT {
@@ -360,24 +406,33 @@ where
         response: oneshot::Sender<RequestResult<Cells>>,
     ) {
         let mut cells_response = Cells { cell_mask: request.cell_mask, ..Default::default() };
+        let mut total_bytes = 0;
+        let cell_mask = request.cell_mask();
 
         for hash in request.hashes.into_iter().take(MAX_CELLS_SERVE) {
-            let Some(cells) =
-                self.blob_store.get_cells(hash, request.cell_mask).unwrap_or_default()
-            else {
+            let Some(cells) = self.blob_store.get_cells(hash, cell_mask).unwrap_or_default() else {
                 continue;
             };
 
+            total_bytes += hash.length() + cells.length();
             cells_response.hashes.push(hash);
             cells_response.cells.push(cells);
 
-            if cells_response.length() > SOFT_RESPONSE_LIMIT {
+            if total_bytes > SOFT_RESPONSE_LIMIT {
                 break
             }
         }
 
         let _ = response.send(Ok(cells_response));
     }
+}
+
+/// Number of response items to reserve once the first requested item has resolved.
+///
+/// Assumes the remaining items are about as large as the first one and reserves as many as fit into
+/// [`SOFT_RESPONSE_LIMIT`], bounded by the requested `count` and `max`.
+fn response_reserve_hint(count: usize, first_len: usize, max: usize) -> usize {
+    SOFT_RESPONSE_LIMIT.div_ceil(first_len.max(1)).min(count).min(max)
 }
 
 impl<C, N> EthRequestHandler<C, N>
@@ -400,7 +455,7 @@ where
 
         let limit = GetBlockAccessListLimit::ResponseSizeSoftLimit(SOFT_RESPONSE_LIMIT);
         let access_lists =
-            self.client.bal_store().get_by_hashes_with_limit(&request.0, limit).unwrap_or_default();
+            self.client.get_bals_by_hashes_with_limit(&request.0, limit).unwrap_or_default();
         let _ = response.send(Ok(BlockAccessLists(access_lists)));
     }
 }
@@ -458,8 +513,7 @@ where
                 );
                 let block_access_lists = self
                     .client
-                    .bal_store()
-                    .get_by_hashes_with_limit(&req.block_hashes, limit)
+                    .get_bals_by_hashes_with_limit(&req.block_hashes, limit)
                     .unwrap_or_default();
                 Ok(SnapResponse::BlockAccessLists(BlockAccessListsMessage {
                     request_id: req.request_id,
@@ -538,8 +592,10 @@ where
         let mut account_data = Vec::with_capacity(accounts.len());
         for (hash, account) in accounts {
             let storage_root = state.storage_root_by_hash(hash)?;
-            account_data
-                .push(AccountData { hash, body: slim_account_body(&account, storage_root) });
+            account_data.push(AccountData::from_trie_account(
+                hash,
+                &account.into_trie_account(storage_root),
+            ));
         }
 
         Ok(AccountRangeMessage { request_id: req.request_id, accounts: account_data, proof })
@@ -595,11 +651,8 @@ where
             slots.push(
                 account_slots
                     .into_iter()
-                    .map(|(hash, value)| StorageData {
-                        hash,
-                        // snap clients verify proofs against RLP-encoded storage trie leaves.
-                        data: alloy_rlp::encode(value).into(),
-                    })
+                    // snap clients verify proofs against RLP-encoded storage trie leaves.
+                    .map(|(hash, value)| StorageData::from_value(hash, value))
                     .collect(),
             );
 
@@ -623,39 +676,6 @@ fn boundary_proof_keys<T>(origin: B256, last: Option<&(B256, T)>) -> Vec<B256> {
         Some((last, _)) => vec![origin, *last],
         None => vec![origin],
     }
-}
-
-/// Like the consensus trie account, but the code hash and storage root are empty byte strings
-/// rather than [`KECCAK_EMPTY`]/[`EMPTY_ROOT_HASH`] when the account has no code/storage, to
-/// avoid transferring the same 32 bytes for every EOA. Borrowed to encode without allocating.
-#[derive(RlpEncodable)]
-struct SlimAccountBody<'a> {
-    /// The account's nonce.
-    nonce: u64,
-    /// The account's balance.
-    balance: U256,
-    /// Empty when the account has no storage.
-    storage_root: &'a [u8],
-    /// Empty when the account has no code.
-    code_hash: &'a [u8],
-}
-
-/// RLP-encodes `account` in snap/2's slim format; see [`SlimAccountBody`].
-fn slim_account_body(account: &Account, storage_root: B256) -> Bytes {
-    let storage_root: &[u8] =
-        if storage_root == EMPTY_ROOT_HASH { &[] } else { storage_root.as_slice() };
-    let code_hash: &[u8] = match &account.bytecode_hash {
-        Some(hash) if *hash != KECCAK_EMPTY => hash.as_slice(),
-        _ => &[],
-    };
-
-    alloy_rlp::encode(SlimAccountBody {
-        nonce: account.nonce,
-        balance: account.balance,
-        storage_root,
-        code_hash,
-    })
-    .into()
 }
 
 /// An endless future.
@@ -691,8 +711,8 @@ where
                     IncomingEthRequest::GetBlockBodies { peer_id, request, response } => {
                         this.on_bodies_request(peer_id, request, response)
                     }
-                    IncomingEthRequest::GetNodeData { .. } => {
-                        this.metrics.eth_node_data_requests_received_total.increment(1);
+                    IncomingEthRequest::GetNodeData { peer_id, request, response } => {
+                        this.on_node_data_request(peer_id, request, response)
                     }
                     IncomingEthRequest::GetReceipts { peer_id, request, response } => {
                         this.on_receipts_request(peer_id, request, response)
@@ -835,15 +855,19 @@ pub enum IncomingEthRequest<N: NetworkPrimitives = EthNetworkPrimitives> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloy_consensus::constants::EMPTY_ROOT_HASH;
     use alloy_eips::{
         eip4844::{BlobAndProofV1, BlobAndProofV2, BlobCellsAndProofsV1},
-        eip7594::{BlobTransactionSidecarVariant, Cell},
+        eip7594::{BlobCellMask, BlobTransactionSidecarVariant, Cell},
     };
-    use alloy_primitives::{keccak256, Address, TxHash, B128};
+    use alloy_primitives::{keccak256, Address, TxHash, B128, U256};
     use reth_network_api::test_utils::PeersHandle;
+    use reth_primitives_traits::Account;
     use reth_provider::test_utils::{ExtendedAccount, MockEthProvider};
     use reth_storage_api::noop::NoopProvider;
-    use reth_transaction_pool::blobstore::{BlobStoreCleanupStat, BlobStoreError};
+    use reth_transaction_pool::blobstore::{
+        BlobStoreCleanupStat, BlobStoreError, PooledBlobSidecar,
+    };
     use std::sync::{
         atomic::{AtomicUsize, Ordering},
         Arc,
@@ -854,21 +878,15 @@ mod tests {
     #[derive(Debug, Default)]
     struct CountingBlobStore {
         get_cells_calls: Arc<AtomicUsize>,
+        expected_cell_mask: Option<BlobCellMask>,
     }
 
     impl BlobStore for CountingBlobStore {
-        fn insert(
-            &self,
-            _tx: B256,
-            _data: BlobTransactionSidecarVariant,
-        ) -> Result<(), BlobStoreError> {
+        fn insert(&self, _tx: B256, _data: PooledBlobSidecar) -> Result<(), BlobStoreError> {
             Ok(())
         }
 
-        fn insert_all(
-            &self,
-            _txs: Vec<(B256, BlobTransactionSidecarVariant)>,
-        ) -> Result<(), BlobStoreError> {
+        fn insert_all(&self, _txs: Vec<(B256, PooledBlobSidecar)>) -> Result<(), BlobStoreError> {
             Ok(())
         }
 
@@ -937,7 +955,7 @@ mod tests {
         fn get_by_versioned_hashes_v4(
             &self,
             versioned_hashes: &[B256],
-            _indices_bitarray: B128,
+            _cell_mask: BlobCellMask,
         ) -> Result<Vec<Option<BlobCellsAndProofsV1>>, BlobStoreError> {
             Ok(vec![None; versioned_hashes.len()])
         }
@@ -952,9 +970,13 @@ mod tests {
         fn get_cells(
             &self,
             _tx_hash: TxHash,
-            _indices_bitarray: B128,
+            cell_mask: BlobCellMask,
         ) -> Result<Option<Vec<Cell>>, BlobStoreError> {
             self.get_cells_calls.fetch_add(1, Ordering::Relaxed);
+            if let Some(expected) = self.expected_cell_mask {
+                assert_eq!(cell_mask, expected);
+                return Ok(Some(vec![Cell::default()]))
+            }
             Ok(None)
         }
 
@@ -972,7 +994,10 @@ mod tests {
         let (peers_tx, _) = mpsc::unbounded_channel();
         let (_incoming_tx, incoming_rx) = mpsc::channel(1);
         let get_cells_calls = Arc::new(AtomicUsize::new(0));
-        let blob_store = CountingBlobStore { get_cells_calls: Arc::clone(&get_cells_calls) };
+        let blob_store = CountingBlobStore {
+            get_cells_calls: Arc::clone(&get_cells_calls),
+            ..Default::default()
+        };
         let handler = EthRequestHandler::<NoopProvider>::new(
             NoopProvider::default(),
             PeersHandle::new(peers_tx),
@@ -988,6 +1013,64 @@ mod tests {
         let cells = rx.await.unwrap().unwrap();
         assert!(cells.hashes.is_empty());
         assert_eq!(get_cells_calls.load(Ordering::Relaxed), MAX_CELLS_SERVE);
+    }
+
+    #[test_case(0)]
+    #[test_case(7)]
+    #[test_case(8)]
+    #[test_case(63)]
+    #[test_case(64)]
+    #[test_case(127)]
+    #[tokio::test]
+    async fn get_cells_request_uses_little_endian_wire_mask(index: u32) {
+        use alloy_rlp::{Decodable, Encodable};
+
+        let (peers_tx, _) = mpsc::unbounded_channel();
+        let (_incoming_tx, incoming_rx) = mpsc::channel(1);
+        let numeric_mask = 1u128 << index;
+        let blob_store = CountingBlobStore {
+            expected_cell_mask: Some(BlobCellMask::from_bits(numeric_mask)),
+            ..Default::default()
+        };
+        let handler = EthRequestHandler::<NoopProvider>::new(
+            NoopProvider::default(),
+            PeersHandle::new(peers_tx),
+            incoming_rx,
+        )
+        .with_blob_store(Box::new(blob_store));
+        let wire_mask = B128::from(numeric_mask.to_le_bytes());
+        let request = GetCells { hashes: vec![B256::ZERO], cell_mask: wire_mask };
+        let mut encoded = Vec::new();
+        request.encode(&mut encoded);
+        let request = GetCells::decode(&mut encoded.as_slice()).unwrap();
+        let (response, rx) = oneshot::channel();
+
+        handler.on_cells_request(PeerId::default(), request, response);
+
+        let cells = rx.await.unwrap().unwrap();
+        assert_eq!(cells.hashes, vec![B256::ZERO]);
+        assert_eq!(cells.cells, vec![vec![Cell::default()]]);
+        assert_eq!(cells.cell_mask, wire_mask);
+        encoded.clear();
+        cells.encode(&mut encoded);
+        assert_eq!(Cells::decode(&mut encoded.as_slice()).unwrap(), cells);
+    }
+
+    #[tokio::test]
+    async fn get_node_data_responds_with_empty_payload() {
+        let (peers_tx, _) = mpsc::unbounded_channel();
+        let (_incoming_tx, incoming_rx) = mpsc::channel(1);
+        let handler = EthRequestHandler::<NoopProvider>::new(
+            NoopProvider::default(),
+            PeersHandle::new(peers_tx),
+            incoming_rx,
+        );
+        let (response, rx) = oneshot::channel();
+
+        handler.on_node_data_request(PeerId::default(), GetNodeData(vec![B256::ZERO]), response);
+
+        let node_data = rx.await.expect("response channel must not be dropped").unwrap();
+        assert!(node_data.0.is_empty(), "GetNodeData should reply with empty NodeData");
     }
 
     /// Creates a request handler backed by the mock provider for snap response tests.

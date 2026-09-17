@@ -24,6 +24,7 @@ reth-discv4.workspace = true
 reth-discv5.workspace = true
 reth-dns-discovery.workspace = true
 reth-ethereum-forks.workspace = true
+reth-evm.workspace = true
 reth-eth-wire.workspace = true
 reth-eth-wire-types.workspace = true
 reth-ecies.workspace = true
@@ -100,6 +101,7 @@ alloy-genesis.workspace = true
 alloy-trie.workspace = true
 
 # misc
+criterion.workspace = true
 test-case.workspace = true
 url.workspace = true
 secp256k1 = { workspace = true, features = ["rand"] }
@@ -150,4 +152,10 @@ test-utils = [
     "reth-tasks/test-utils",
     "reth-stages-types/test-utils",
     "reth-trie/test-utils",
+    "reth-evm/test-utils",
 ]
+
+[[bench]]
+name = "tx_fetcher"
+harness = false
+required-features = ["test-utils"]

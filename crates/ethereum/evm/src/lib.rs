@@ -31,7 +31,7 @@ use reth_ethereum_primitives::{Block, EthPrimitives};
 use reth_evm::ExecutionCtxFor;
 #[cfg(feature = "std")]
 use reth_evm::{ConfigureEngineEvm, ExecutableTxIterator};
-use reth_evm::{ConfigureEvm, EvmEnv, EvmEnvFor, NextBlockEnvAttributes};
+use reth_evm::{ConfigureEvm, EvmEnv, EvmEnvFor, NextBlockEnvAttributes, SenderRecoveryCache};
 #[cfg(feature = "std")]
 use reth_primitives_traits::SignedTransaction;
 use reth_primitives_traits::{SealedBlock, SealedHeader};
@@ -170,58 +170,7 @@ where
     }
 
     fn transaction_validation_gas_rules(&self) -> reth_evm::EvmTransactionValidationGasRules {
-        let params = &self.version.gas_params;
-        let floor_gas_enabled = self.version.feature(evm2::EvmFeatures::EIP7623);
-
-        reth_evm::EvmTransactionValidationGasRules {
-            tx_base_gas: 21_000,
-            tx_create_gas: if self.version.feature(evm2::EvmFeatures::EIP2) {
-                params.get(evm2::version::GasId::TxCreateCost) as u64
-            } else {
-                0
-            },
-            tx_data_zero_gas: 4,
-            tx_data_non_zero_gas: if self.version.feature(evm2::EvmFeatures::EIP2028) {
-                16
-            } else {
-                68
-            },
-            tx_access_list_address_gas: params.get(evm2::version::GasId::TxAccessListAddressCost)
-                as u64,
-            tx_access_list_storage_key_gas: params
-                .get(evm2::version::GasId::TxAccessListStorageKeyCost)
-                as u64,
-            tx_access_list_floor_byte_multiplier: if floor_gas_enabled {
-                params.get(evm2::version::GasId::TxAccessListFloorByteMultiplier) as u64
-            } else {
-                0
-            },
-            tx_initcode_word_gas: if self.version.feature(evm2::EvmFeatures::EIP3860) {
-                params.get(evm2::version::GasId::TxInitcodeCost) as u64
-            } else {
-                0
-            },
-            tx_floor_gas_base: if floor_gas_enabled {
-                params.get(evm2::version::GasId::TxFloorCostBase) as u64
-            } else {
-                0
-            },
-            tx_floor_gas_per_token: if floor_gas_enabled {
-                params.get(evm2::version::GasId::TxFloorCostPerToken) as u64
-            } else {
-                0
-            },
-            tx_floor_gas_non_zero_token_multiplier: if floor_gas_enabled {
-                params.get(evm2::version::GasId::TxTokenNonZeroByteMultiplier) as u64
-            } else {
-                0
-            },
-            tx_eip7702_per_empty_account_cost: if self.version.feature(evm2::EvmFeatures::EIP7702) {
-                params.get(evm2::version::GasId::TxEip7702PerEmptyAccountCost) as u64
-            } else {
-                0
-            },
-        }
+        reth_evm::EvmTransactionValidationGasRules { version: self.version }
     }
 
     fn uses_separate_block_gas(&self) -> bool {
@@ -410,6 +359,8 @@ where
     pub executor_factory: EthBlockExecutorFactory<RethReceiptBuilder, C, F>,
     /// Ethereum block assembler.
     pub block_assembler: EthBlockAssembler<C>,
+    /// Cache of recovered transaction senders, if enabled.
+    pub sender_recovery_cache: Option<SenderRecoveryCache>,
 }
 
 impl EthEvmConfig {
@@ -436,6 +387,7 @@ impl<ChainSpec, F: EvmFactory> EthEvmConfig<ChainSpec, F> {
     pub fn new_with_evm_factory(chain_spec: Arc<ChainSpec>, evm_factory: F) -> Self {
         Self {
             block_assembler: EthBlockAssembler::new(chain_spec.clone()),
+            sender_recovery_cache: None,
             executor_factory: EthBlockExecutorFactory::new_with_evm_factory(
                 chain_spec,
                 evm_factory,
@@ -467,6 +419,12 @@ impl<ChainSpec, F: EvmFactory> EthEvmConfig<ChainSpec, F> {
                 .expect("blob base fee update fraction exceeds evm2 u64 capacity");
         }
         EthEvmEnv::new_with_version(factory.spec_id(spec), factory.block_env(block), version)
+    }
+
+    /// Uses the provided sender recovery cache.
+    pub fn with_sender_recovery_cache(mut self, cache: SenderRecoveryCache) -> Self {
+        self.sender_recovery_cache = Some(cache);
+        self
     }
 }
 
@@ -684,9 +642,16 @@ where
         payload: &ExecutionData,
     ) -> Result<impl ExecutableTxIterator<Self>, Self::Error> {
         let txs = payload.payload.transactions().clone();
-        let convert = |tx: Bytes| {
-            let tx = TransactionSigned::decode_2718_exact(tx.as_ref()).map_err(AnyError::new)?;
-            let signer = tx.try_recover().map_err(AnyError::new)?;
+        let sender_recovery_cache = self.sender_recovery_cache.clone();
+        let convert = move |tx: Bytes| {
+            let tx =
+                TransactionSigned::decode_2718_exact(tx.as_ref()).map_err(AnyError::new)?;
+            let signer = if let Some(cache) = &sender_recovery_cache {
+                cache.recover(&tx)
+            } else {
+                tx.try_recover()
+            }
+            .map_err(AnyError::new)?;
             Ok::<_, AnyError>(ExecutableRecoveredTx::new(tx.with_signer(signer)))
         };
 

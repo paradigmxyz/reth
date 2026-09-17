@@ -13,6 +13,9 @@ use std::{
     sync::Arc,
 };
 
+mod rocksdb;
+pub use rocksdb::RocksDBBalStore;
+
 /// Basic in-memory BAL store keyed by block hash.
 #[derive(Debug, Clone)]
 pub struct InMemoryBalStore {
@@ -161,7 +164,7 @@ impl BalStore for InMemoryBalStore {
         Ok(())
     }
 
-    fn flush(&self) -> ProviderResult<()> {
+    fn flush(&self, _blocks: &[NumHash]) -> ProviderResult<()> {
         Ok(())
     }
 
@@ -250,7 +253,7 @@ mod tests {
     fn flush_is_noop() {
         let store = InMemoryBalStore::default();
 
-        store.flush().unwrap();
+        store.flush(&[]).unwrap();
     }
 
     #[test]

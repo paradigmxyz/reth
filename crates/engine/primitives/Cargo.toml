@@ -39,6 +39,10 @@ auto_impl.workspace = true
 serde.workspace = true
 thiserror.workspace = true
 
+[dev-dependencies]
+alloy-primitives = { workspace = true, features = ["getrandom"] }
+alloy-rlp.workspace = true
+
 [features]
 default = ["std"]
 trie-debug = []
@@ -60,4 +64,5 @@ std = [
     "serde/std",
     "thiserror/std",
     "reth-evm?/std",
+    "alloy-rlp/std",
 ]

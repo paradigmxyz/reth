@@ -120,7 +120,7 @@ pub mod cache {
     /// Default cache size for the receipts cache: 2000 receipts.
     pub const DEFAULT_RECEIPT_CACHE_MAX_LEN: u32 = 2000;
 
-    /// Default cache size for the header cache: 1000 headers.
+    /// Legacy default for the no-op RPC header cache option.
     pub const DEFAULT_HEADER_CACHE_MAX_LEN: u32 = 1000;
 
     /// Default cache size for the EVM BAL cache: 1000 block access lists.
@@ -130,5 +130,5 @@ pub mod cache {
     pub const DEFAULT_CONCURRENT_DB_REQUESTS: usize = 512;
 
     /// Default maximum number of transaction hashes to cache for lookups.
-    pub const DEFAULT_MAX_CACHED_TX_HASHES: u32 = 30_000;
+    pub const DEFAULT_MAX_CACHED_TX_HASHES: u32 = 100_000;
 }

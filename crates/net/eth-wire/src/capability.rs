@@ -259,7 +259,8 @@ impl SharedCapabilities {
             cap = next
         }
 
-        Some(cap)
+        let end = u16::from(cap.message_id_offset()) + u16::from(cap.num_messages());
+        (u16::from(offset) < end).then_some(cap)
     }
 
     /// Returns the shared capability for the given capability or an error if it's not compatible.
@@ -464,6 +465,18 @@ mod tests {
         assert!(capabilities.supports_eth_v68());
         assert!(capabilities.supports_eth_v69());
         assert!(capabilities.supports_eth_v70());
+    }
+
+    #[test]
+    fn lookup_rejects_message_ids_past_last_capability() {
+        let cap = Capability::new_static("test", 1);
+        let shared =
+            SharedCapabilities::try_new(vec![Protocol::new(cap.clone(), 1)], vec![cap.clone()])
+                .unwrap();
+        let offset = shared.find(&cap).unwrap().message_id_offset();
+
+        assert_eq!(shared.find_by_offset(offset).unwrap().capability().as_ref(), &cap);
+        assert!(shared.find_by_offset(offset + 1).is_none());
     }
 
     #[test]

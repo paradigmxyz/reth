@@ -13,7 +13,10 @@ use crate::{
 };
 
 #[cfg(feature = "db-api")]
-use crate::{DBProvider, DatabaseProviderFactory, StorageChangeSetReader, StorageSettingsCache};
+use crate::{
+    DBProvider, DatabaseProviderFactory, DbTxProvider, HistoryInfo, HistoryReader,
+    StorageChangeSetReader, StorageSettingsCache,
+};
 use alloc::{boxed::Box, string::String, sync::Arc, vec::Vec};
 use alloy_consensus::transaction::TransactionMeta;
 use alloy_eips::{BlockHashOrNumber, BlockId, BlockNumberOrTag};
@@ -38,8 +41,9 @@ use reth_prune_types::{PruneCheckpoint, PruneSegment};
 use reth_stages_types::{StageCheckpoint, StageId};
 use reth_storage_errors::provider::{ProviderError, ProviderResult};
 use reth_trie_common::{
-    updates::TrieUpdates, AccountProof, ExecutionWitnessMode, HashedPostState, HashedStorage,
-    MultiProof, MultiProofTargets, StorageMultiProof, StorageProof, TrieInput,
+    updates::TrieUpdates, AccountProof, DecodedMultiProofV2, ExecutionWitnessMode, HashedPostState,
+    HashedStorage, MultiProof, MultiProofTargets, MultiProofTargetsV2, StorageMultiProof,
+    StorageProof, TrieInput,
 };
 
 /// Supports various api interfaces for testing purposes.
@@ -424,6 +428,28 @@ impl<C: Send + Sync, N: NodePrimitives> ChangeSetReader for NoopProvider<C, N> {
 }
 
 #[cfg(feature = "db-api")]
+impl<C: Send + Sync, N: NodePrimitives> HistoryReader for NoopProvider<C, N> {
+    fn account_history_info(
+        &self,
+        _address: Address,
+        _block_number: BlockNumber,
+        _lowest_available_block_number: Option<BlockNumber>,
+    ) -> ProviderResult<HistoryInfo> {
+        Ok(HistoryInfo::NotYetWritten)
+    }
+
+    fn storage_history_info(
+        &self,
+        _address: Address,
+        _storage_key: B256,
+        _block_number: BlockNumber,
+        _lowest_available_block_number: Option<BlockNumber>,
+    ) -> ProviderResult<HistoryInfo> {
+        Ok(HistoryInfo::NotYetWritten)
+    }
+}
+
+#[cfg(feature = "db-api")]
 impl<C: Send + Sync, N: NodePrimitives> StorageChangeSetReader for NoopProvider<C, N> {
     fn storage_changeset(
         &self,
@@ -523,6 +549,14 @@ impl<C: Send + Sync, N: NodePrimitives> StateProofProvider for NoopProvider<C, N
         Ok(MultiProof::default())
     }
 
+    fn multiproof_v2(
+        &self,
+        _input: TrieInput,
+        _targets: MultiProofTargetsV2,
+    ) -> ProviderResult<DecodedMultiProofV2> {
+        Ok(DecodedMultiProofV2::default())
+    }
+
     fn witness(
         &self,
         _input: TrieInput,
@@ -534,8 +568,11 @@ impl<C: Send + Sync, N: NodePrimitives> StateProofProvider for NoopProvider<C, N
 }
 
 impl<C: Send + Sync, N: NodePrimitives> HashedPostStateProvider for NoopProvider<C, N> {
-    fn hashed_post_state(&self, _state: &EvmState) -> HashedPostState {
-        HashedPostState::default()
+    fn hashed_post_state(
+        &self,
+        _bundle_state: &reth_execution_types::EvmState,
+    ) -> ProviderResult<HashedPostState> {
+        Ok(HashedPostState::default())
     }
 }
 
@@ -669,13 +706,16 @@ impl<C: Send + Sync, N: Send + Sync> BlockBodyIndicesProvider for NoopProvider<C
 }
 
 #[cfg(feature = "db-api")]
-impl<ChainSpec: Send + Sync, N: NodePrimitives> DBProvider for NoopProvider<ChainSpec, N> {
+impl<ChainSpec: Send + Sync, N: NodePrimitives> DbTxProvider for NoopProvider<ChainSpec, N> {
     type Tx = TxMock;
 
-    fn tx_ref(&self) -> &Self::Tx {
+    fn tx(&self) -> &Self::Tx {
         &self.tx
     }
+}
 
+#[cfg(feature = "db-api")]
+impl<ChainSpec: Send + Sync, N: NodePrimitives> DBProvider for NoopProvider<ChainSpec, N> {
     fn tx_mut(&mut self) -> &mut Self::Tx {
         &mut self.tx
     }

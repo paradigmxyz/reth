@@ -38,7 +38,6 @@ reth-rpc-server-types.workspace = true
 reth-network-types.workspace = true
 reth-consensus.workspace = true
 reth-consensus-common.workspace = true
-reth-ethereum-primitives.workspace = true
 reth-ethereum-engine-primitives.workspace = true
 reth-node-api.workspace = true
 reth-payload-primitives.workspace = true
@@ -92,9 +91,12 @@ itertools.workspace = true
 
 [dev-dependencies]
 reth-testing-utils.workspace = true
+reth-ethereum-primitives.workspace = true
 reth-transaction-pool = { workspace = true, features = ["test-utils"] }
 reth-provider = { workspace = true, features = ["test-utils"] }
 reth-db-api.workspace = true
+reth-db-common.workspace = true
+reth-storage-overlay.workspace = true
 
 rand.workspace = true
 

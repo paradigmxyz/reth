@@ -55,8 +55,8 @@ use reth_prune_types::{PruneCheckpoint, PruneSegment};
 pub mod rpc_response;
 use reth_stages_types::{StageCheckpoint, StageId};
 use reth_storage_api::{
-    BlockBodyIndicesProvider, BlockReaderIdExt, BlockSource, DBProvider, NodePrimitivesProvider,
-    ReceiptProviderIdExt, StatsReader,
+    BlockBodyIndicesProvider, BlockReaderIdExt, BlockSource, DBProvider, DbTxProvider,
+    NodePrimitivesProvider, ReceiptProviderIdExt, StatsReader,
 };
 use reth_trie::{
     updates::TrieUpdates, AccountProof, HashedPostState, KeccakKeyHasher, MultiProof, TrieInput,
@@ -1300,6 +1300,14 @@ where
         Err(ProviderError::UnsupportedProvider)
     }
 
+    fn multiproof_v2(
+        &self,
+        _input: TrieInput,
+        _targets: reth_trie::MultiProofTargetsV2,
+    ) -> Result<reth_trie::DecodedMultiProofV2, ProviderError> {
+        Err(ProviderError::UnsupportedProvider)
+    }
+
     fn witness(
         &self,
         _input: TrieInput,
@@ -1317,8 +1325,15 @@ where
     N: Network,
     Node: NodeTypes,
 {
-    fn hashed_post_state(&self, state: &EvmState) -> HashedPostState {
-        hashed_post_state_from_execution_state::<KeccakKeyHasher>(state)
+    fn hashed_post_state(
+        &self,
+        bundle_state: &reth_execution_types::EvmState,
+    ) -> ProviderResult<HashedPostState> {
+        if reth_execution_types::destroyed_accounts(bundle_state).next().is_some()
+        {
+            return Err(ProviderError::UnsupportedProvider)
+        }
+        Ok(hashed_post_state_from_execution_state::<KeccakKeyHasher>(bundle_state))
     }
 }
 
@@ -1339,7 +1354,7 @@ where
     }
 }
 
-impl<P, Node, N> DBProvider for RpcBlockchainStateProvider<P, Node, N>
+impl<P, Node, N> DbTxProvider for RpcBlockchainStateProvider<P, Node, N>
 where
     P: Provider<N> + Clone + 'static,
     N: Network,
@@ -1347,12 +1362,19 @@ where
 {
     type Tx = TxMock;
 
-    fn tx_ref(&self) -> &Self::Tx {
+    fn tx(&self) -> &Self::Tx {
         // We can't use a static here since TxMock doesn't allow direct construction
         // This is fine since we're just returning a mock transaction
-        unimplemented!("tx_ref not supported for RPC provider")
+        unimplemented!("tx not supported for RPC provider")
     }
+}
 
+impl<P, Node, N> DBProvider for RpcBlockchainStateProvider<P, Node, N>
+where
+    P: Provider<N> + Clone + 'static,
+    N: Network,
+    Node: NodeTypes,
+{
     fn tx_mut(&mut self) -> &mut Self::Tx {
         unimplemented!("tx_mut not supported for RPC provider")
     }

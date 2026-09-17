@@ -4,17 +4,13 @@ use crate::{EthMessage, EthVersion, NetworkPrimitives};
 use alloc::{sync::Arc, vec::Vec};
 use alloy_consensus::transaction::TxHashRef;
 use alloy_eips::eip2718::Typed2718;
-use alloy_primitives::{
-    bytes::BufMut,
-    map::{B256Map, B256Set},
-    Bytes, TxHash, B128, B256, U128,
-};
+use alloy_primitives::{bytes::BufMut, Bytes, TxHash, B128, B256, U128};
 use alloy_rlp::{
     decode_append, Decodable, Encodable, Header, RlpDecodable, RlpDecodableWrapper, RlpEncodable,
     RlpEncodableWrapper,
 };
 use core::{fmt::Debug, mem};
-use derive_more::{Constructor, Deref, DerefMut, From, IntoIterator};
+use derive_more::{Deref, DerefMut, IntoIterator};
 use reth_codecs_derive::{add_arbitrary_tests, generate_tests};
 use reth_ethereum_primitives::TransactionSigned;
 use reth_primitives_traits::{sync::OnceLock, Block, InMemorySize, SignedTransaction};
@@ -657,6 +653,16 @@ impl proptest::prelude::Arbitrary for NewPooledTransactionHashes68 {
 }
 
 impl NewPooledTransactionHashes68 {
+    /// Returns the number of announced hashes.
+    pub const fn len(&self) -> usize {
+        self.hashes.len()
+    }
+
+    /// Returns whether there are no announced hashes.
+    pub const fn is_empty(&self) -> bool {
+        self.hashes.is_empty()
+    }
+
     /// Returns a new instance with capacity for `capacity` entries.
     pub fn with_capacity(capacity: usize) -> Self {
         Self {
@@ -794,8 +800,13 @@ pub struct NewPooledTransactionHashes72 {
     ///
     /// Per [EIP-8070](https://eips.ethereum.org/EIPS/eip-8070), this is a `B_16`
     /// bitarray over `CELLS_PER_EXT_BLOB`; bit `i` is set when the announcer has column
-    /// `i` available for every type 3 transaction in the message. `None` encodes as RLP
-    /// `nil` and must be used when no type 3 transactions are announced.
+    /// `i` available for every type 3 transaction in the message.
+    ///
+    /// On the wire this field is always encoded as a 16 byte string, zero-filled when no
+    /// type 3 transactions are announced: go-ethereum decodes the mask into a fixed
+    /// `[16]byte` and rejects the RLP `nil` encoding the EIP text describes, so the
+    /// always-present form is the de facto network format. `None` is equivalent to a zero
+    /// mask; decoding additionally accepts the spec's `nil` encoding for compatibility.
     pub cell_mask: Option<B128>,
 }
 
@@ -819,7 +830,10 @@ impl proptest::prelude::Arbitrary for NewPooledTransactionHashes72 {
                 // Map the usize values to the range 0..131072(0x20000)
                 let sizes_vec = vec(proptest::num::usize::ANY.prop_map(|x| x % 131072), len..=len);
                 let hashes_vec = vec(any::<B256>(), len..=len);
-                let cell_mask = any::<Option<B128>>();
+                // A zero mask is spelled `None`, so generating `Some(ZERO)` would produce a
+                // value that cannot survive its own encoding.
+                let cell_mask =
+                    any::<Option<B128>>().prop_map(|mask| mask.filter(|mask| !mask.is_zero()));
 
                 (types_vec, sizes_vec, hashes_vec, cell_mask)
             })
@@ -831,6 +845,22 @@ impl proptest::prelude::Arbitrary for NewPooledTransactionHashes72 {
 }
 
 impl NewPooledTransactionHashes72 {
+    /// Returns the number of announced hashes.
+    pub const fn len(&self) -> usize {
+        self.hashes.len()
+    }
+
+    /// Returns whether there are no announced hashes.
+    pub const fn is_empty(&self) -> bool {
+        self.hashes.is_empty()
+    }
+
+    /// Cell mask advertising availability of every cell.
+    ///
+    /// Used when announcing blob transactions whose full sidecar is available locally, since
+    /// every cell can be computed from the complete blob data.
+    pub const ALL_CELLS_MASK: B128 = B128::repeat_byte(0xff);
+
     /// Returns a new instance with capacity for `capacity` entries and no cell mask.
     pub fn with_capacity(capacity: usize) -> Self {
         Self {
@@ -851,6 +881,9 @@ impl NewPooledTransactionHashes72 {
         self.hashes.push(*tx.tx_hash());
         self.sizes.push(tx.encode_2718_len());
         self.types.push(tx.ty());
+        if tx.is_eip4844() {
+            self.cell_mask = Some(Self::ALL_CELLS_MASK);
+        }
     }
 
     /// Appends the provided transactions
@@ -886,7 +919,7 @@ impl NewPooledTransactionHashes72 {
         self.types.as_slice().length() +
             self.sizes.length() +
             self.hashes.length() +
-            self.cell_mask.as_ref().map_or(1, Encodable::length)
+            self.cell_mask.unwrap_or_default().length()
     }
 }
 
@@ -896,11 +929,8 @@ impl Encodable for NewPooledTransactionHashes72 {
         self.types.as_slice().encode(out);
         self.sizes.encode(out);
         self.hashes.encode(out);
-        if let Some(cell_mask) = &self.cell_mask {
-            cell_mask.encode(out);
-        } else {
-            out.put_u8(alloy_rlp::EMPTY_STRING_CODE);
-        }
+        // A zero-filled mask when no cells are available, see the `cell_mask` field docs.
+        self.cell_mask.unwrap_or_default().encode(out);
     }
 
     fn length(&self) -> usize {
@@ -924,10 +954,13 @@ impl Decodable for NewPooledTransactionHashes72 {
             return Err(alloy_rlp::Error::InputTooShort)
         };
         let cell_mask = if first_byte == alloy_rlp::EMPTY_STRING_CODE {
+            // The EIP-8070 `nil` encoding, tolerated for compatibility.
             payload = &payload[1..];
             None
         } else {
-            Some(B128::decode(&mut payload)?)
+            // A zero mask is the wire representation of "no cells available", see the
+            // `cell_mask` field docs.
+            Some(B128::decode(&mut payload)?).filter(|mask| !mask.is_zero())
         };
 
         if !payload.is_empty() {
@@ -984,122 +1017,6 @@ const fn ensure_pooled_transaction_hashes_lengths(
     Ok(())
 }
 
-/// Validation pass that checks for unique transaction hashes.
-pub trait DedupPayload {
-    /// Value type in [`PartiallyValidData`] map.
-    type Value;
-
-    /// The payload contains no entries.
-    fn is_empty(&self) -> bool;
-
-    /// Returns the number of entries.
-    fn len(&self) -> usize;
-
-    /// Consumes self, returning an iterator over hashes in payload.
-    fn dedup(self) -> PartiallyValidData<Self::Value>;
-}
-
-/// Value in [`PartiallyValidData`] map obtained from an announcement.
-pub type Eth68TxMetadata = Option<(u8, usize)>;
-
-impl DedupPayload for NewPooledTransactionHashes {
-    type Value = Eth68TxMetadata;
-
-    fn is_empty(&self) -> bool {
-        self.is_empty()
-    }
-
-    fn len(&self) -> usize {
-        self.len()
-    }
-
-    fn dedup(self) -> PartiallyValidData<Self::Value> {
-        match self {
-            Self::Eth66(msg) => msg.dedup(),
-            Self::Eth68(msg) => msg.dedup(),
-            Self::Eth72(msg) => msg.dedup(),
-        }
-    }
-}
-
-impl DedupPayload for NewPooledTransactionHashes72 {
-    type Value = Eth68TxMetadata;
-
-    fn is_empty(&self) -> bool {
-        self.hashes.is_empty()
-    }
-
-    fn len(&self) -> usize {
-        self.hashes.len()
-    }
-
-    fn dedup(self) -> PartiallyValidData<Self::Value> {
-        let Self { hashes, mut sizes, mut types, .. } = self;
-
-        let mut deduped_data = B256Map::with_capacity_and_hasher(hashes.len(), Default::default());
-
-        for hash in hashes.into_iter().rev() {
-            if let (Some(ty), Some(size)) = (types.pop(), sizes.pop()) {
-                deduped_data.insert(hash, Some((ty, size)));
-            }
-        }
-
-        PartiallyValidData::from_raw_data_eth72(deduped_data)
-    }
-}
-
-impl DedupPayload for NewPooledTransactionHashes68 {
-    type Value = Eth68TxMetadata;
-
-    fn is_empty(&self) -> bool {
-        self.hashes.is_empty()
-    }
-
-    fn len(&self) -> usize {
-        self.hashes.len()
-    }
-
-    fn dedup(self) -> PartiallyValidData<Self::Value> {
-        let Self { hashes, mut sizes, mut types } = self;
-
-        let mut deduped_data = B256Map::with_capacity_and_hasher(hashes.len(), Default::default());
-
-        for hash in hashes.into_iter().rev() {
-            if let (Some(ty), Some(size)) = (types.pop(), sizes.pop()) {
-                deduped_data.insert(hash, Some((ty, size)));
-            }
-        }
-
-        PartiallyValidData::from_raw_data_eth68(deduped_data)
-    }
-}
-
-impl DedupPayload for NewPooledTransactionHashes66 {
-    type Value = Eth68TxMetadata;
-
-    fn is_empty(&self) -> bool {
-        self.0.is_empty()
-    }
-
-    fn len(&self) -> usize {
-        self.0.len()
-    }
-
-    fn dedup(self) -> PartiallyValidData<Self::Value> {
-        let Self(hashes) = self;
-
-        let mut deduped_data = B256Map::with_capacity_and_hasher(hashes.len(), Default::default());
-
-        let noop_value: Eth68TxMetadata = None;
-
-        for hash in hashes.into_iter().rev() {
-            deduped_data.insert(hash, noop_value);
-        }
-
-        PartiallyValidData::from_raw_data_eth66(deduped_data)
-    }
-}
-
 /// Interface for handling mempool message data. Used in various filters in pipelines in
 /// `TransactionsManager` and in queries to `TransactionPool`.
 pub trait HandleMempoolData {
@@ -1113,13 +1030,6 @@ pub trait HandleMempoolData {
     fn retain_by_hash(&mut self, f: impl FnMut(&TxHash) -> bool);
 }
 
-/// Extension of [`HandleMempoolData`] interface, for mempool messages that are versioned.
-pub trait HandleVersionedMempoolData {
-    /// Returns the announcement version, either [`Eth66`](EthVersion::Eth66) or
-    /// [`Eth68`](EthVersion::Eth68).
-    fn msg_version(&self) -> EthVersion;
-}
-
 impl<T: SignedTransaction> HandleMempoolData for Vec<T> {
     fn is_empty(&self) -> bool {
         self.is_empty()
@@ -1131,185 +1041,6 @@ impl<T: SignedTransaction> HandleMempoolData for Vec<T> {
 
     fn retain_by_hash(&mut self, mut f: impl FnMut(&TxHash) -> bool) {
         self.retain(|tx| f(tx.tx_hash()))
-    }
-}
-
-macro_rules! handle_mempool_data_map_impl {
-    ($data_ty:ty, $(<$generic:ident>)?) => {
-        impl$(<$generic>)? HandleMempoolData for $data_ty {
-            fn is_empty(&self) -> bool {
-                self.data.is_empty()
-            }
-
-            fn len(&self) -> usize {
-                self.data.len()
-            }
-
-            fn retain_by_hash(&mut self, mut f: impl FnMut(&TxHash) -> bool) {
-                self.data.retain(|hash, _| f(hash));
-            }
-        }
-    };
-}
-
-/// Data that has passed an initial validation pass that is not specific to any mempool message
-/// type.
-#[derive(Debug, Deref, DerefMut, IntoIterator)]
-pub struct PartiallyValidData<V> {
-    #[deref]
-    #[deref_mut]
-    #[into_iterator]
-    data: B256Map<V>,
-    version: Option<EthVersion>,
-}
-
-handle_mempool_data_map_impl!(PartiallyValidData<V>, <V>);
-
-impl<V> PartiallyValidData<V> {
-    /// Wraps raw data.
-    pub const fn from_raw_data(data: B256Map<V>, version: Option<EthVersion>) -> Self {
-        Self { data, version }
-    }
-
-    /// Wraps raw data with version [`EthVersion::Eth72`].
-    pub const fn from_raw_data_eth72(data: B256Map<V>) -> Self {
-        Self::from_raw_data(data, Some(EthVersion::Eth72))
-    }
-
-    /// Wraps raw data with version [`EthVersion::Eth68`].
-    pub const fn from_raw_data_eth68(data: B256Map<V>) -> Self {
-        Self::from_raw_data(data, Some(EthVersion::Eth68))
-    }
-
-    /// Wraps raw data with version [`EthVersion::Eth66`].
-    pub const fn from_raw_data_eth66(data: B256Map<V>) -> Self {
-        Self::from_raw_data(data, Some(EthVersion::Eth66))
-    }
-
-    /// Returns a new [`PartiallyValidData`] with empty data from an [`Eth72`](EthVersion::Eth72)
-    /// announcement.
-    pub fn empty_eth72() -> Self {
-        Self::from_raw_data_eth72(B256Map::default())
-    }
-
-    /// Returns a new [`PartiallyValidData`] with empty data from an [`Eth68`](EthVersion::Eth68)
-    /// announcement.
-    pub fn empty_eth68() -> Self {
-        Self::from_raw_data_eth68(B256Map::default())
-    }
-
-    /// Returns a new [`PartiallyValidData`] with empty data from an [`Eth66`](EthVersion::Eth66)
-    /// announcement.
-    pub fn empty_eth66() -> Self {
-        Self::from_raw_data_eth66(B256Map::default())
-    }
-
-    /// Returns the version of the message this data was received in if different versions of the
-    /// message exist.
-    pub const fn msg_version(&self) -> Option<EthVersion> {
-        self.version
-    }
-
-    /// Destructs returning the validated data.
-    pub fn into_data(self) -> B256Map<V> {
-        self.data
-    }
-}
-
-/// Partially validated data from an announcement or a
-/// [`PooledTransactions`](crate::PooledTransactions) response.
-#[derive(Debug, Deref, DerefMut, IntoIterator, From)]
-pub struct ValidAnnouncementData {
-    #[deref]
-    #[deref_mut]
-    #[into_iterator]
-    data: B256Map<Eth68TxMetadata>,
-    version: EthVersion,
-}
-
-handle_mempool_data_map_impl!(ValidAnnouncementData,);
-
-impl ValidAnnouncementData {
-    /// Destructs returning only the valid hashes and the announcement message version. Caution! If
-    /// this is [`Eth68`](EthVersion::Eth68) announcement data, this drops the metadata.
-    pub fn into_request_hashes(self) -> (RequestTxHashes, EthVersion) {
-        let hashes = self.data.into_keys().collect::<B256Set>();
-
-        (RequestTxHashes::new(hashes), self.version)
-    }
-
-    /// Conversion from [`PartiallyValidData`] from an announcement. Note! [`PartiallyValidData`]
-    /// from an announcement, should have some [`EthVersion`]. Panics if [`PartiallyValidData`] has
-    /// version set to `None`.
-    pub fn from_partially_valid_data(data: PartiallyValidData<Eth68TxMetadata>) -> Self {
-        let PartiallyValidData { data, version } = data;
-
-        let version = version.expect("should have eth version for conversion");
-
-        Self { data, version }
-    }
-
-    /// Destructs returning the validated data.
-    pub fn into_data(self) -> B256Map<Eth68TxMetadata> {
-        self.data
-    }
-}
-
-impl HandleVersionedMempoolData for ValidAnnouncementData {
-    fn msg_version(&self) -> EthVersion {
-        self.version
-    }
-}
-
-/// Hashes to request from a peer.
-#[derive(Debug, Default, Deref, DerefMut, IntoIterator, Constructor)]
-pub struct RequestTxHashes {
-    #[deref]
-    #[deref_mut]
-    #[into_iterator(owned, ref)]
-    hashes: B256Set,
-}
-
-impl RequestTxHashes {
-    /// Returns a new [`RequestTxHashes`] with given capacity for hashes. Caution! Make sure to
-    /// call `shrink_to_fit` on [`RequestTxHashes`] when full, especially where it will
-    /// be stored in its entirety like in the future waiting for a
-    /// [`GetPooledTransactions`](crate::GetPooledTransactions) request to resolve.
-    pub fn with_capacity(capacity: usize) -> Self {
-        Self::new(B256Set::with_capacity_and_hasher(capacity, Default::default()))
-    }
-
-    /// Returns a new empty instance.
-    fn empty() -> Self {
-        Self::new(B256Set::default())
-    }
-
-    /// Retains the given number of elements, returning an iterator over the rest.
-    pub fn retain_count(&mut self, count: usize) -> Self {
-        let rest_capacity = self.hashes.len().saturating_sub(count);
-        if rest_capacity == 0 {
-            return Self::empty()
-        }
-        let mut rest = Self::with_capacity(rest_capacity);
-
-        let mut i = 0;
-        self.hashes.retain(|hash| {
-            if i >= count {
-                rest.insert(*hash);
-                return false
-            }
-            i += 1;
-
-            true
-        });
-
-        rest
-    }
-}
-
-impl FromIterator<(TxHash, Eth68TxMetadata)> for RequestTxHashes {
-    fn from_iter<I: IntoIterator<Item = (TxHash, Eth68TxMetadata)>>(iter: I) -> Self {
-        Self::new(iter.into_iter().map(|(hash, _)| hash).collect())
     }
 }
 
@@ -1351,7 +1082,7 @@ mod tests {
     use super::*;
     use alloy_consensus::{transaction::TxHashRef, Typed2718};
     use alloy_eips::eip2718::Encodable2718;
-    use alloy_primitives::{b256, hex, Bytes, Signature, U256};
+    use alloy_primitives::{hex, Bytes, Signature, U256};
     use alloy_rlp::{RlpDecodable, RlpEncodable};
     use proptest::prelude::*;
     use reth_ethereum_primitives::{Transaction, TransactionSigned};
@@ -1634,8 +1365,30 @@ mod tests {
     }
 
     #[test]
+    fn eth_72_zero_cell_mask_decodes_as_none() {
+        // The wire cannot tell a zero mask from an absent one, so `None` is the only
+        // representation that survives a round trip.
+        let zero = NewPooledTransactionHashes72 {
+            types: vec![],
+            sizes: vec![],
+            hashes: vec![],
+            cell_mask: Some(B128::ZERO),
+        };
+
+        let mut encoded = Vec::new();
+        zero.encode(&mut encoded);
+
+        let decoded = NewPooledTransactionHashes72::decode(&mut &encoded[..]).unwrap();
+
+        assert_eq!(decoded.cell_mask, None);
+        assert_eq!(encoded, hex!("d480c0c09000000000000000000000000000000000"));
+    }
+
+    #[test]
     fn eth_72_tx_hash_roundtrip() {
         let vectors = vec![
+            // `None` is always encoded as a zero-filled 16 byte mask, matching go-ethereum's
+            // non-optional `[16]byte` field.
             (
                 NewPooledTransactionHashes72 {
                     types: vec![],
@@ -1643,7 +1396,7 @@ mod tests {
                     hashes: vec![],
                     cell_mask: None,
                 },
-                &hex!("c480c0c080")[..],
+                &hex!("d480c0c09000000000000000000000000000000000")[..],
             ),
             (
                 NewPooledTransactionHashes72 {
@@ -1662,71 +1415,23 @@ mod tests {
     }
 
     #[test]
+    fn eth_72_decodes_spec_nil_cell_mask() {
+        // The EIP-8070 text encodes an absent mask as the RLP empty string; decoding stays
+        // lenient even though reth never produces this form.
+        let encoded = hex!("c480c0c080");
+
+        let decoded = NewPooledTransactionHashes72::decode(&mut encoded.as_ref()).unwrap();
+
+        assert_eq!(decoded.cell_mask, None);
+    }
+
+    #[test]
     fn eth_72_rejects_missing_cell_mask() {
         let encoded_eth68_payload = hex!("c380c0c0");
 
         let result = NewPooledTransactionHashes72::decode(&mut encoded_eth68_payload.as_ref());
 
         assert!(matches!(result, Err(alloy_rlp::Error::InputTooShort)));
-    }
-
-    #[test]
-    fn request_hashes_retain_count_keep_subset() {
-        let mut hashes = RequestTxHashes::new(
-            [
-                b256!("0x0000000000000000000000000000000000000000000000000000000000000001"),
-                b256!("0x0000000000000000000000000000000000000000000000000000000000000002"),
-                b256!("0x0000000000000000000000000000000000000000000000000000000000000003"),
-                b256!("0x0000000000000000000000000000000000000000000000000000000000000004"),
-                b256!("0x0000000000000000000000000000000000000000000000000000000000000005"),
-            ]
-            .into_iter()
-            .collect::<B256Set>(),
-        );
-
-        let rest = hashes.retain_count(3);
-
-        assert_eq!(3, hashes.len());
-        assert_eq!(2, rest.len());
-    }
-
-    #[test]
-    fn request_hashes_retain_count_keep_all() {
-        let mut hashes = RequestTxHashes::new(
-            [
-                b256!("0x0000000000000000000000000000000000000000000000000000000000000001"),
-                b256!("0x0000000000000000000000000000000000000000000000000000000000000002"),
-                b256!("0x0000000000000000000000000000000000000000000000000000000000000003"),
-                b256!("0x0000000000000000000000000000000000000000000000000000000000000004"),
-                b256!("0x0000000000000000000000000000000000000000000000000000000000000005"),
-            ]
-            .into_iter()
-            .collect::<B256Set>(),
-        );
-
-        let _ = hashes.retain_count(6);
-
-        assert_eq!(5, hashes.len());
-    }
-
-    #[test]
-    fn split_request_hashes_keep_none() {
-        let mut hashes = RequestTxHashes::new(
-            [
-                b256!("0x0000000000000000000000000000000000000000000000000000000000000001"),
-                b256!("0x0000000000000000000000000000000000000000000000000000000000000002"),
-                b256!("0x0000000000000000000000000000000000000000000000000000000000000003"),
-                b256!("0x0000000000000000000000000000000000000000000000000000000000000004"),
-                b256!("0x0000000000000000000000000000000000000000000000000000000000000005"),
-            ]
-            .into_iter()
-            .collect::<B256Set>(),
-        );
-
-        let rest = hashes.retain_count(0);
-
-        assert_eq!(0, hashes.len());
-        assert_eq!(5, rest.len());
     }
 
     fn signed_transaction() -> impl SignedTransaction {

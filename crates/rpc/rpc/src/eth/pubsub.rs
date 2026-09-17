@@ -7,7 +7,7 @@ use alloy_rpc_types_eth::{
     pubsub::{
         Params, PubSubSyncStatus, SubscriptionKind, SyncStatusMetadata, TransactionReceiptsParams,
     },
-    Filter, Log,
+    Filter,
 };
 use futures::StreamExt;
 use jsonrpsee::{
@@ -17,7 +17,8 @@ use reth_chain_state::CanonStateSubscriptions;
 use reth_network_api::NetworkInfo;
 use reth_rpc_convert::RpcHeader;
 use reth_rpc_eth_api::{
-    helpers::EthSubscriptions, pubsub::EthPubSubApiServer, RpcConvert, RpcNodeCore, RpcTransaction,
+    helpers::EthSubscriptions, pubsub::EthPubSubApiServer, RpcConvert, RpcLog, RpcNodeCore,
+    RpcTransaction,
 };
 use reth_rpc_server_types::result::{internal_rpc_err, invalid_params_rpc_err};
 use reth_storage_api::BlockNumReader;
@@ -76,7 +77,7 @@ where
     }
 
     /// Returns a stream that yields matching logs.
-    pub fn log_stream(&self, filter: Filter) -> impl Stream<Item = Log> {
+    pub fn log_stream(&self, filter: Filter) -> impl Stream<Item = RpcLog<Eth::NetworkTypes>> {
         self.inner.eth_api.log_stream(filter)
     }
 

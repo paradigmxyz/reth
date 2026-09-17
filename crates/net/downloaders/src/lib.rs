@@ -25,6 +25,9 @@ pub mod headers;
 /// Common downloader metrics.
 pub mod metrics;
 
+/// Downloaders for authenticated snap state ranges.
+pub mod snap;
+
 /// Module managing file-based data retrieval and buffering.
 ///
 /// Contains [`FileClient`](file_client::FileClient) to read block data from files,

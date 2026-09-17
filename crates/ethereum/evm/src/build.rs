@@ -67,11 +67,21 @@ impl<ChainSpec: EthChainSpec + EthereumHardforks> EthBlockAssembler<ChainSpec> {
         let timestamp = block.timestamp();
         let transactions_root =
             transactions_root.unwrap_or_else(|| proofs::calculate_transaction_root(&transactions));
-        let receipts_root = receipts_root.unwrap_or_else(|| {
-            calculate_receipt_root(&receipts.iter().map(|r| r.with_bloom_ref()).collect::<Vec<_>>())
-        });
-        let logs_bloom = logs_bloom
-            .unwrap_or_else(|| calculate_logs_bloom(receipts.iter().flat_map(|r| r.logs())));
+        let (receipts_root, logs_bloom) = match (receipts_root, logs_bloom) {
+            (Some(receipts_root), Some(logs_bloom)) => (receipts_root, logs_bloom),
+            (receipts_root, logs_bloom) => {
+                // The block bloom is the OR of the receipt blooms, so the blooms computed for the
+                // receipts root are reused instead of hashing every log a second time.
+                let receipts_with_bloom =
+                    receipts.iter().map(TxReceipt::with_bloom_ref).collect::<Vec<_>>();
+                (
+                    receipts_root.unwrap_or_else(|| calculate_receipt_root(&receipts_with_bloom)),
+                    logs_bloom.unwrap_or_else(|| {
+                        receipts_with_bloom.iter().fold(Bloom::ZERO, |acc, r| acc | r.bloom_ref())
+                    }),
+                )
+            }
+        };
 
         let withdrawals = self
             .chain_spec

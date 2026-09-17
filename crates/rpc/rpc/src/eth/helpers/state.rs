@@ -14,9 +14,6 @@ where
     Rpc: RpcConvert<Primitives = N::Primitives, Error = EthApiError>,
     Self: LoadPendingBlock,
 {
-    fn max_proof_window(&self) -> u64 {
-        self.inner.eth_proof_window()
-    }
 }
 
 impl<N, Rpc> LoadState for EthApi<N, Rpc>

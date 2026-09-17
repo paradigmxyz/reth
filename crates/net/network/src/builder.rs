@@ -34,6 +34,15 @@ pub struct NetworkBuilder<Tx, Eth, N: NetworkPrimitives = EthNetworkPrimitives> 
 // === impl NetworkBuilder ===
 
 impl<Tx, Eth, N: NetworkPrimitives> NetworkBuilder<Tx, Eth, N> {
+    /// Maps the transactions component.
+    pub fn map_transactions<F, NewTx>(self, f: F) -> NetworkBuilder<NewTx, Eth, N>
+    where
+        F: FnOnce(Tx) -> NewTx,
+    {
+        let Self { network, transactions, request_handler } = self;
+        NetworkBuilder { network, transactions: f(transactions), request_handler }
+    }
+
     /// Consumes the type and returns all fields.
     pub fn split(self) -> (NetworkManager<N>, Tx, Eth) {
         let Self { network, transactions, request_handler } = self;

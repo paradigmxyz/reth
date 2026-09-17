@@ -1,6 +1,10 @@
 //! Ethereum Node types config.
 
-use crate::{EthEngineTypes, EthEvmConfig};
+use crate::{
+    engine_ssz_proxy::{EngineSszApi, EngineSszProxyLayer},
+    engine_ssz_witness::EngineSszWitnessGenerator,
+    EthEngineTypes, EthEvmConfig,
+};
 use alloy_eips::{eip7840::BlobParams, merge::EPOCH_SLOTS};
 use alloy_network::Ethereum;
 use alloy_rpc_types_engine::ExecutionData;
@@ -34,7 +38,7 @@ use reth_node_builder::{
         PayloadValidatorBuilder, RethAuthHttpMiddleware, RethRpcAddOns, RethRpcMiddleware,
         RpcAddOns, RpcHandle, Stack,
     },
-    BuilderContext, DebugNode, Node, NodeAdapter, PayloadBuilderConfig,
+    BuilderContext, DebugNode, EngineApiExt, Node, NodeAdapter, PayloadBuilderConfig,
 };
 use reth_node_core::args::JitArgs;
 use reth_payload_primitives::PayloadTypes;
@@ -324,10 +328,12 @@ where
     EthB: EthApiBuilder<N>,
     PVB: Send,
     EB: EngineApiBuilder<N>,
+    EB::EngineApi: EngineSszApi,
     EVB: EngineValidatorBuilder<N>,
     EthApiError: FromEvmError<N::Evm>,
     RpcMiddleware: RethRpcMiddleware,
     AuthHttpMiddleware: RethAuthHttpMiddleware<Identity>,
+    Stack<EngineSszProxyLayer<EB::EngineApi>, AuthHttpMiddleware>: RethAuthHttpMiddleware<Identity>,
 {
     type Handle = RpcHandle<N, EthB::EthApi>;
 
@@ -352,7 +358,20 @@ where
         let testing_desired_gas_limit = ctx.config.builder.gas_limit_for(ctx.config.chain.chain());
         let testing_engine_handle = ctx.beacon_engine_handle.clone();
 
+        let (ssz_proxy_layer, ssz_proxy_handle) = EngineSszProxyLayer::new();
+        ssz_proxy_handle.set_witness_handler_sync(Arc::new(EngineSszWitnessGenerator::new(
+            ctx.node.provider().clone(),
+            ctx.node.evm_config().clone(),
+            ctx.node.task_executor().clone(),
+        )));
+
         self.inner
+            .map_engine_api(|engine_api_builder| {
+                EngineApiExt::new(engine_api_builder, move |engine_api| {
+                    ssz_proxy_handle.set_engine_api_sync(engine_api);
+                })
+            })
+            .map_auth_http_middleware(|middleware| Stack::new(ssz_proxy_layer, middleware))
             .launch_add_ons_with(ctx, move |container| {
                 container.modules.merge_if_module_configured(
                     RethRpcModule::Flashbots,
@@ -401,10 +420,12 @@ where
     EthB: EthApiBuilder<N>,
     PVB: PayloadValidatorBuilder<N>,
     EB: EngineApiBuilder<N>,
+    EB::EngineApi: EngineSszApi,
     EVB: EngineValidatorBuilder<N>,
     EthApiError: FromEvmError<N::Evm>,
     RpcMiddleware: RethRpcMiddleware,
     AuthHttpMiddleware: RethAuthHttpMiddleware<Identity>,
+    Stack<EngineSszProxyLayer<EB::EngineApi>, AuthHttpMiddleware>: RethAuthHttpMiddleware<Identity>,
 {
     type EthApi = EthB::EthApi;
 
@@ -584,7 +605,10 @@ where
         let jit = &ctx.config().jit;
         let dump_dir = jit.debug.then(|| ctx.config().datadir().data_dir().join("jit"));
 
-        let (evm_config, jit_metrics) = build_evm_config(ctx.chain_spec(), jit, dump_dir)?;
+        let (mut evm_config, jit_metrics) = build_evm_config(ctx.chain_spec(), jit, dump_dir)?;
+        if let Some(cache) = ctx.sender_recovery_cache() {
+            evm_config = evm_config.with_sender_recovery_cache(cache.clone());
+        }
 
         #[cfg(not(feature = "jit"))]
         let _ = jit_metrics;
@@ -613,10 +637,29 @@ where
 ///
 /// This contains various settings that can be configured and take precedence over the node's
 /// config.
-#[derive(Debug, Default, Clone, Copy)]
+#[derive(Debug, Clone, Copy)]
 #[non_exhaustive]
 pub struct EthereumPoolBuilder {
-    // TODO add options for txpool args
+    init_kzg_settings: bool,
+}
+
+impl EthereumPoolBuilder {
+    /// Creates a new [`EthereumPoolBuilder`].
+    pub const fn new() -> Self {
+        Self { init_kzg_settings: false }
+    }
+
+    /// Sets whether to initialize KZG settings even if EIP-4844 support is disabled in the pool.
+    pub const fn with_init_kzg_settings(mut self, init_kzg_settings: bool) -> Self {
+        self.init_kzg_settings = init_kzg_settings;
+        self
+    }
+}
+
+impl Default for EthereumPoolBuilder {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl<Types, Node, Evm> PoolBuilder<Node, Evm> for EthereumPoolBuilder
@@ -672,7 +715,7 @@ where
                 .with_additional_tasks(ctx.config().txpool.additional_validation_tasks)
                 .build_with_tasks(ctx.task_executor().clone(), blob_store.clone());
 
-        if validator.validator().eip4844() {
+        if validator.validator().eip4844() || self.init_kzg_settings {
             // initializing the KZG settings can be expensive, this should be done upfront so that
             // it doesn't impact the first block or the first gossiped blob transaction, so we
             // initialize this in the background
@@ -760,5 +803,16 @@ where
 
     async fn build(self, ctx: &AddOnsContext<'_, Node>) -> eyre::Result<Self::Validator> {
         Ok(EthereumEngineValidator::new(ctx.config.chain.clone()))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::EthereumPoolBuilder;
+
+    #[test]
+    fn configures_kzg_settings_initialization() {
+        assert!(!EthereumPoolBuilder::new().init_kzg_settings);
+        assert!(EthereumPoolBuilder::new().with_init_kzg_settings(true).init_kzg_settings);
     }
 }

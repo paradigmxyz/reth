@@ -269,7 +269,8 @@ async fn test_get_header_range_falling() {
     // ensure we can fetch the correct headers in falling direction
     // start from the last header and work backwards
     for idx in (0..100).rev() {
-        let count = std::cmp::min(idx + 1, 100); // Can't fetch more than idx+1 headers when going backwards
+        let count = std::cmp::min(idx + 1, 100); // Can't fetch more than idx+1 headers when going
+                                                 // backwards
         let header = &all_headers[idx];
         let req = HeadersRequest {
             start: header.hash().into(),

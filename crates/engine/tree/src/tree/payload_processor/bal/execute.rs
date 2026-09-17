@@ -4,11 +4,19 @@
 //!
 //! Worker states run transactions speculatively. Each worker gets one fresh cache-filling database
 //! from `make_db(true)`, installs the received BAL, sets the transaction BAL index for each
-//! streamed transaction, and returns uncommitted transaction results.
+//! streamed transaction, and returns uncommitted results. Execution errors rebuild the State,
+//! EVM, and executor while retaining the worker's database.
 //!
 //! The canonical state owns block effects. It runs the normal pre/post block hooks, commits
 //! worker results in transaction order, tracks block gas admission, and builds the BAL that this
 //! execution actually produced.
+//!
+//! Recovery and speculative execution failures are deferred to their transaction slot and
+//! adjudicated in block order: block-gas admission at an earlier slot takes precedence, otherwise
+//! the first failure decides the block's verdict. Workers trust the received BAL before its hash is
+//! validated against the rebuilt BAL. An undeclared access therefore short-circuits execution
+//! at that slot, and its error may differ from serial execution against canonical state (which
+//! can instead fail nonce, balance, or later block checks). Failed transactions are not replayed.
 //!
 //! The rebuilt BAL is returned to the outer payload validator for consensus post-execution
 //! validation. This module only logs the first divergence between the received BAL and the BAL
@@ -25,6 +33,7 @@ use reth_evm::{
     BlockExecutionOutput, BlockExecutor, BlockExecutorFactory, BlockExecutorFor, ConfigureEvm,
     Database, EvmEnvFor, ExecutableTxFor, ExecutionCtxFor,
 };
+use reth_engine_primitives::BlockAccessListDecodeError;
 use reth_primitives_traits::ReceiptTy;
 use reth_tasks::Runtime;
 use std::sync::Arc;
@@ -102,7 +111,7 @@ where
         <BlockExecutorFor<'scope, Evm> as BlockExecutor>::convert_block_access_list(
             input_bal.as_bal().as_vec(),
         )
-        .map_err(|err| reth_errors::ConsensusError::BlockAccessListInvalid(err.to_string()))?,
+        .map_err(BlockAccessListDecodeError::new)?,
     );
     let (result_tx, result_rx) = crossbeam_channel::unbounded();
     let (abort_guard, abort_rx) = AbortGuard::new();
@@ -131,7 +140,17 @@ where
     let mut senders = Vec::with_capacity(transaction_count);
     let mut last_sent_len = 0;
     for output in ordered_worker_outputs(&result_rx, transaction_count) {
-        let output = output?;
+        let output = match output {
+            Ok(output) => output,
+            Err(OrderedWorkerOutputError::Worker(worker::BalWorkerError::Execution {
+                tx_index, tx_gas_limit, source,
+            })) => {
+                canonical_executor.validate_transaction_gas_limit(tx_gas_limit)?;
+                return Err(worker::BalWorkerError::Execution { tx_index, tx_gas_limit, source }.into());
+            }
+            Err(error) => return Err(error.into()),
+        };
+        canonical_executor.validate_transaction_gas_limit(output.tx_gas_limit)?;
         canonical_executor.commit_transaction(output.result)?;
         senders.push(output.signer);
 
@@ -669,7 +688,7 @@ mod tests {
     }
 
     #[test]
-    fn worker_tx_recovery_error_becomes_other_error() {
+    fn worker_tx_recovery_error_becomes_validation_error() {
         let evm_config = test_evm_config();
         let block = empty_amsterdam_block(B256::ZERO);
         let (tx_tx, tx_rx) = crossbeam_channel::unbounded::<(
@@ -693,7 +712,7 @@ mod tests {
             tx_rx,
             receipt_tx,
         );
-        assert!(matches!(result, Err(BalExecutionError::Other(_))));
+        assert!(matches!(result, Err(BalExecutionError::Execution(reth_evm::BlockExecutionError::Validation(_)))));
     }
 
     #[test]

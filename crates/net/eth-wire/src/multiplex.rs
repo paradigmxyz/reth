@@ -13,7 +13,10 @@ use std::{
     future::Future,
     io,
     pin::{pin, Pin},
-    sync::Arc,
+    sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc,
+    },
     task::{ready, Context, Poll},
 };
 
@@ -22,6 +25,7 @@ use crate::{
     errors::{EthStreamError, P2PStreamError},
     handshake::EthRlpxHandshake,
     p2pstream::DisconnectP2P,
+    protocol::ProtocolIngressLimits,
     CanDisconnect, Capability, DisconnectReason, EthStream, P2PStream, UnifiedStatus,
     HANDSHAKE_TIMEOUT,
 };
@@ -29,8 +33,9 @@ use bytes::{Bytes, BytesMut};
 use futures::{Sink, SinkExt, Stream, StreamExt, TryStream, TryStreamExt};
 use reth_eth_wire_types::NetworkPrimitives;
 use reth_ethereum_forks::ForkFilter;
+use reth_metrics::metrics::counter;
 use tokio::sync::{mpsc, mpsc::UnboundedSender};
-use tokio_stream::wrappers::UnboundedReceiverStream;
+use tokio_stream::wrappers::{ReceiverStream, UnboundedReceiverStream};
 
 /// A Stream and Sink type that wraps a raw rlpx stream [`P2PStream`] and handles message ID
 /// multiplexing.
@@ -47,6 +52,7 @@ impl<St> RlpxProtocolMultiplexer<St> {
                 conn,
                 protocols: Default::default(),
                 out_buffer: Default::default(),
+                inbound_budget: Arc::new(InboundBudget::new(MAX_MUX_IN_BUFFER_BYTES)),
             },
         }
     }
@@ -64,7 +70,21 @@ impl<St> RlpxProtocolMultiplexer<St> {
         F: FnOnce(ProtocolConnection) -> Proto,
         Proto: Stream<Item = BytesMut> + Send + 'static,
     {
-        self.inner.install_protocol(cap, f)
+        self.inner.install_protocol(cap, ProtocolIngressLimits::default(), f)
+    }
+
+    /// Installs a new protocol with local limits for inbound messages.
+    pub fn install_protocol_with_limits<F, Proto>(
+        &mut self,
+        cap: &Capability,
+        limits: ProtocolIngressLimits,
+        f: F,
+    ) -> Result<(), UnsupportedCapabilityError>
+    where
+        F: FnOnce(ProtocolConnection) -> Proto,
+        Proto: Stream<Item = BytesMut> + Send + 'static,
+    {
+        self.inner.install_protocol(cap, limits, f)
     }
 
     /// Returns the [`SharedCapabilities`] of the underlying raw p2p stream
@@ -86,13 +106,10 @@ impl<St> RlpxProtocolMultiplexer<St> {
             return Err(P2PStreamError::CapabilityNotShared)
         };
 
-        let (to_primary, from_wire) = mpsc::unbounded_channel();
+        let (to_primary, from_wire) =
+            self.inner.inbound_channel(&shared_cap, ProtocolIngressLimits::default());
         let (to_wire, from_primary) = mpsc::unbounded_channel();
-        let proxy = ProtocolProxy {
-            shared_cap: shared_cap.clone(),
-            from_wire: UnboundedReceiverStream::new(from_wire),
-            to_wire,
-        };
+        let proxy = ProtocolProxy { shared_cap: shared_cap.clone(), from_wire, to_wire };
 
         let st = primary(proxy);
         Ok(RlpxSatelliteStream {
@@ -104,6 +121,7 @@ impl<St> RlpxProtocolMultiplexer<St> {
                 shared_cap,
             },
             next_outbound: 0,
+            producer_polls_since_inbound: 0,
         })
     }
 
@@ -155,47 +173,20 @@ impl<St> RlpxProtocolMultiplexer<St> {
             return Err(P2PStreamError::CapabilityNotShared.into())
         };
 
-        let (to_primary, from_wire) = mpsc::unbounded_channel();
+        let (to_primary, from_wire) =
+            self.inner.inbound_channel(&shared_cap, ProtocolIngressLimits::default());
         let (to_wire, mut from_primary) = mpsc::unbounded_channel();
-        let proxy = ProtocolProxy {
-            shared_cap: shared_cap.clone(),
-            from_wire: UnboundedReceiverStream::new(from_wire),
-            to_wire,
-        };
+        let proxy = ProtocolProxy { shared_cap: shared_cap.clone(), from_wire, to_wire };
 
         let f = handshake(proxy);
         let mut f = pin!(f);
+        let mut inbound_messages = 0;
 
         // this polls the connection and the primary stream concurrently until the handshake is
         // complete
         loop {
             tokio::select! {
                 biased;
-                Some(Ok(msg)) = self.inner.conn.next() => {
-                    // Ensure the message belongs to the primary protocol
-                    let Some(offset) = msg.first().copied()
-                    else {
-                        return Err(P2PStreamError::EmptyProtocolMessage.into())
-                    };
-                    if let Some(cap) = self.shared_capabilities().find_by_relative_offset(offset).cloned() {
-                            if cap == shared_cap {
-                                // delegate to primary
-                                let _ = to_primary.send(msg);
-                            } else {
-                                // delegate to satellite
-                                self.inner.delegate_message(&cap, msg);
-                            }
-                        } else {
-                           return Err(P2PStreamError::UnknownReservedMessageId(offset).into())
-                        }
-                }
-                Some(msg) = from_primary.recv() => {
-                    self.inner.conn.send(msg).await.map_err(Into::into)?;
-                }
-                // Poll all subprotocols for new messages
-                msg = ProtocolsPoller::new(&mut self.inner.protocols) => {
-                     self.inner.conn.send(msg.map_err(Into::into)?).await.map_err(Into::into)?;
-                }
                 res = &mut f => {
                     let (st, extra) = res?;
                     return Ok((
@@ -208,9 +199,49 @@ impl<St> RlpxProtocolMultiplexer<St> {
                                 shared_cap,
                             },
                             next_outbound: 0,
+                            producer_polls_since_inbound: 0,
                         },
                         extra,
                     ))
+                }
+                Some(msg) = from_primary.recv() => {
+                    self.inner.conn.send(msg).await.map_err(Into::into)?;
+                }
+                // Polling a satellite drives its inbound consumer even when it has no outbound
+                // message. This must happen before reading another frame from the socket.
+                msg = ProtocolsPoller::new(&mut self.inner.protocols) => {
+                     self.inner.conn.send(msg.map_err(Into::into)?).await.map_err(Into::into)?;
+                }
+                incoming = self.inner.conn.next() => {
+                    let msg = match incoming {
+                        Some(Ok(msg)) => msg,
+                        Some(Err(err)) => return Err(err.into()),
+                        None => {
+                            return Err(P2PStreamError::Io(io::ErrorKind::UnexpectedEof.into()).into())
+                        }
+                    };
+                    // Ensure the message belongs to the primary protocol
+                    let Some(offset) = msg.first().copied()
+                    else {
+                        return Err(P2PStreamError::EmptyProtocolMessage.into())
+                    };
+                    if let Some(cap) = self.shared_capabilities().find_by_relative_offset(offset).cloned() {
+                            if cap == shared_cap {
+                                // delegate to primary
+                                to_primary.try_send(msg).map_err(Into::into)?;
+                            } else {
+                                // delegate to satellite
+                                self.inner.delegate_message(&cap, msg).map_err(Into::into)?;
+                            }
+                        } else {
+                           return Err(P2PStreamError::UnknownReservedMessageId(offset).into())
+                        }
+
+                    inbound_messages += 1;
+                    if inbound_messages == MAX_INBOUND_MESSAGES_PER_POLL {
+                        inbound_messages = 0;
+                        yield_once().await;
+                    }
                 }
             }
         }
@@ -257,6 +288,8 @@ struct MultiplexInner<St> {
     protocols: VecDeque<ProtocolStream>,
     /// Buffer for outgoing messages on the wire.
     out_buffer: OutBuffer,
+    /// Byte budget shared by every inbound protocol queue on this connection.
+    inbound_budget: Arc<InboundBudget>,
 }
 
 impl<St> MultiplexInner<St> {
@@ -265,19 +298,24 @@ impl<St> MultiplexInner<St> {
     }
 
     /// Delegates a message to the matching protocol.
-    fn delegate_message(&self, cap: &SharedCapability, msg: BytesMut) -> bool {
+    fn delegate_message(
+        &self,
+        cap: &SharedCapability,
+        msg: BytesMut,
+    ) -> Result<bool, P2PStreamError> {
         for proto in &self.protocols {
             if proto.shared_cap == *cap {
-                proto.send_raw(msg);
-                return true
+                proto.send_raw(msg)?;
+                return Ok(true)
             }
         }
-        false
+        Ok(false)
     }
 
     fn install_protocol<F, Proto>(
         &mut self,
         cap: &Capability,
+        limits: ProtocolIngressLimits,
         f: F,
     ) -> Result<(), UnsupportedCapabilityError>
     where
@@ -286,12 +324,21 @@ impl<St> MultiplexInner<St> {
     {
         let shared_cap =
             self.conn.shared_capabilities().ensure_matching_capability(cap).cloned()?;
-        let (to_satellite, rx) = mpsc::unbounded_channel();
-        let proto_conn = ProtocolConnection { from_wire: UnboundedReceiverStream::new(rx) };
+        self.conn.set_protocol_ingress_limits(&shared_cap, limits);
+        let (to_satellite, from_wire) = self.inbound_channel(&shared_cap, limits);
+        let proto_conn = ProtocolConnection { from_wire };
         let st = f(proto_conn);
         let st = ProtocolStream { shared_cap, to_satellite, satellite_st: Box::pin(st) };
         self.protocols.push_back(st);
         Ok(())
+    }
+
+    fn inbound_channel(
+        &self,
+        capability: &SharedCapability,
+        limits: ProtocolIngressLimits,
+    ) -> (InboundSender, InboundReceiver) {
+        inbound_channel(capability, limits, Arc::clone(&self.inbound_budget))
     }
 }
 
@@ -299,7 +346,7 @@ impl<St> MultiplexInner<St> {
 #[derive(Debug)]
 struct PrimaryProtocol<Primary> {
     /// Channel to send messages to the primary protocol.
-    to_primary: UnboundedSender<BytesMut>,
+    to_primary: InboundSender,
     /// Receiver for messages from the primary protocol.
     from_primary: UnboundedReceiverStream<Bytes>,
     /// Shared capability of the primary protocol.
@@ -315,7 +362,7 @@ struct PrimaryProtocol<Primary> {
 pub struct ProtocolProxy {
     shared_cap: SharedCapability,
     /// Receives _non-empty_ messages from the wire
-    from_wire: UnboundedReceiverStream<BytesMut>,
+    from_wire: InboundReceiver,
     /// Sends _non-empty_ messages from the wire
     to_wire: UnboundedSender<Bytes>,
 }
@@ -451,12 +498,127 @@ impl CanDisconnect<Bytes> for UnauthProxy {
     }
 }
 
+#[derive(Debug)]
+struct InboundSender {
+    inner: mpsc::Sender<BudgetedInbound>,
+    connection_budget: Arc<InboundBudget>,
+    protocol_budget: Arc<InboundBudget>,
+    capability: Capability,
+}
+
+impl InboundSender {
+    fn try_send(&self, frame: BytesMut) -> Result<(), P2PStreamError> {
+        let size = frame.capacity().max(frame.len());
+        let Some(connection_guard) = InboundBudget::try_reserve(&self.connection_budget, size)
+        else {
+            return Err(self.buffer_full())
+        };
+        let Some(protocol_guard) = InboundBudget::try_reserve(&self.protocol_budget, size) else {
+            return Err(self.buffer_full())
+        };
+
+        let frame = BudgetedInbound {
+            frame,
+            _connection_guard: connection_guard,
+            _protocol_guard: protocol_guard,
+        };
+        self.inner.try_send(frame).map_err(|err| match err {
+            mpsc::error::TrySendError::Full(_) => self.buffer_full(),
+            mpsc::error::TrySendError::Closed(_) => {
+                P2PStreamError::Io(io::ErrorKind::BrokenPipe.into())
+            }
+        })
+    }
+
+    fn buffer_full(&self) -> P2PStreamError {
+        counter!("p2pstream.subprotocol_inbound_buffer_full").increment(1);
+        P2PStreamError::SubprotocolInboundBufferFull { capability: self.capability.clone() }
+    }
+}
+
+#[derive(Debug)]
+struct InboundReceiver {
+    inner: ReceiverStream<BudgetedInbound>,
+}
+
+impl Stream for InboundReceiver {
+    type Item = BytesMut;
+
+    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        self.inner.poll_next_unpin(cx).map(|frame| frame.map(BudgetedInbound::into_frame))
+    }
+}
+
+#[derive(Debug)]
+struct BudgetedInbound {
+    frame: BytesMut,
+    _connection_guard: InboundBudgetGuard,
+    _protocol_guard: InboundBudgetGuard,
+}
+
+impl BudgetedInbound {
+    fn into_frame(self) -> BytesMut {
+        let Self { frame, _connection_guard, _protocol_guard } = self;
+        frame
+    }
+}
+
+#[derive(Debug)]
+struct InboundBudget {
+    used: AtomicUsize,
+    max: usize,
+}
+
+impl InboundBudget {
+    const fn new(max: usize) -> Self {
+        Self { used: AtomicUsize::new(0), max }
+    }
+
+    fn try_reserve(budget: &Arc<Self>, size: usize) -> Option<InboundBudgetGuard> {
+        budget
+            .used
+            .try_update(Ordering::Relaxed, Ordering::Relaxed, |used| {
+                used.checked_add(size).filter(|next| *next <= budget.max)
+            })
+            .ok()
+            .map(|_| InboundBudgetGuard { size, budget: Arc::clone(budget) })
+    }
+}
+
+#[derive(Debug)]
+struct InboundBudgetGuard {
+    size: usize,
+    budget: Arc<InboundBudget>,
+}
+
+impl Drop for InboundBudgetGuard {
+    fn drop(&mut self) {
+        self.budget.used.fetch_sub(self.size, Ordering::Relaxed);
+    }
+}
+
+fn inbound_channel(
+    capability: &SharedCapability,
+    limits: ProtocolIngressLimits,
+    connection_budget: Arc<InboundBudget>,
+) -> (InboundSender, InboundReceiver) {
+    let (tx, rx) = mpsc::channel(limits.max_buffered_messages());
+    let sender = InboundSender {
+        inner: tx,
+        connection_budget,
+        protocol_budget: Arc::new(InboundBudget::new(limits.max_buffered_bytes())),
+        capability: capability.capability().into_owned(),
+    };
+    let receiver = InboundReceiver { inner: ReceiverStream::new(rx) };
+    (sender, receiver)
+}
+
 /// A connection channel to receive _`non_empty`_ messages for the negotiated protocol.
 ///
 /// This is a [Stream] that returns raw bytes of the received messages for this protocol.
 #[derive(Debug)]
 pub struct ProtocolConnection {
-    from_wire: UnboundedReceiverStream<BytesMut>,
+    from_wire: InboundReceiver,
 }
 
 impl Stream for ProtocolConnection {
@@ -475,6 +637,8 @@ pub struct RlpxSatelliteStream<St, Primary> {
     primary: PrimaryProtocol<Primary>,
     /// Round-robin cursor for the next outbound producer to poll.
     next_outbound: usize,
+    /// Number of round-robin producers polled since the last inbound frame.
+    producer_polls_since_inbound: usize,
 }
 
 impl<St, Primary> RlpxSatelliteStream<St, Primary> {
@@ -491,7 +655,29 @@ impl<St, Primary> RlpxSatelliteStream<St, Primary> {
         F: FnOnce(ProtocolConnection) -> Proto,
         Proto: Stream<Item = BytesMut> + Send + 'static,
     {
-        self.inner.install_protocol(cap, f)
+        let result = self.inner.install_protocol(cap, ProtocolIngressLimits::default(), f);
+        if result.is_ok() {
+            self.producer_polls_since_inbound = 0;
+        }
+        result
+    }
+
+    /// Installs a new protocol with local limits for inbound messages.
+    pub fn install_protocol_with_limits<F, Proto>(
+        &mut self,
+        cap: &Capability,
+        limits: ProtocolIngressLimits,
+        f: F,
+    ) -> Result<(), UnsupportedCapabilityError>
+    where
+        F: FnOnce(ProtocolConnection) -> Proto,
+        Proto: Stream<Item = BytesMut> + Send + 'static,
+    {
+        let result = self.inner.install_protocol(cap, limits, f);
+        if result.is_ok() {
+            self.producer_polls_since_inbound = 0;
+        }
+        result
     }
 
     /// Returns the primary protocol.
@@ -544,6 +730,9 @@ impl<St, Primary> RlpxSatelliteStream<St, Primary> {
 
             let producer = self.next_outbound;
             self.next_outbound = (self.next_outbound + 1) % producers;
+            if self.producer_polls_since_inbound < producers {
+                self.producer_polls_since_inbound += 1;
+            }
 
             let msg = if producer == 0 {
                 match self.primary.from_primary.poll_next_unpin(cx) {
@@ -588,6 +777,7 @@ where
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let this = self.get_mut();
+        let mut inbound_messages = 0;
 
         loop {
             // first drain the primary stream
@@ -634,52 +824,62 @@ where
             }
 
             match this.poll_outbound_producers(cx) {
+                Ok(ProducerPoll::Full)
+                    if this.producer_polls_since_inbound < this.inner.protocols.len() + 1 =>
+                {
+                    // A full buffer prevents protocol streams from being polled. Pause ingress
+                    // until every consumer has had a chance to drain the previous frame.
+                    if conn_ready {
+                        cx.waker().wake_by_ref();
+                    }
+                    return Poll::Pending
+                }
                 Ok(ProducerPoll::Pending | ProducerPoll::Full) => {}
                 Ok(ProducerPoll::Closed) => return Poll::Ready(None),
                 Err(err) => return Poll::Ready(Some(Err(P2PStreamError::Io(err).into()))),
             }
 
             let mut delegated = false;
-            loop {
-                // pull messages from connection
-                match this.inner.conn.poll_next_unpin(cx) {
-                    Poll::Ready(Some(Ok(msg))) => {
-                        delegated = true;
-                        let Some(offset) = msg.first().copied() else {
-                            return Poll::Ready(Some(Err(
-                                P2PStreamError::EmptyProtocolMessage.into()
-                            )))
-                        };
-                        // delegate the multiplexed message to the correct protocol
-                        if let Some(cap) =
-                            this.inner.conn.shared_capabilities().find_by_relative_offset(offset)
-                        {
-                            if cap == &this.primary.shared_cap {
-                                // delegate to primary
-                                let _ = this.primary.to_primary.send(msg);
-                            } else {
-                                // delegate to installed satellite if any
-                                for proto in &this.inner.protocols {
-                                    if proto.shared_cap == *cap {
-                                        proto.send_raw(msg);
-                                        break
-                                    }
-                                }
-                            }
-                        } else {
-                            return Poll::Ready(Some(Err(P2PStreamError::UnknownReservedMessageId(
-                                offset,
-                            )
-                            .into())))
-                        }
+            // Pull one message before returning to the top of the loop, where every protocol gets
+            // another chance to consume its inbound queue.
+            match this.inner.conn.poll_next_unpin(cx) {
+                Poll::Ready(Some(Ok(msg))) => {
+                    delegated = true;
+                    let Some(offset) = msg.first().copied() else {
+                        return Poll::Ready(Some(Err(P2PStreamError::EmptyProtocolMessage.into())))
+                    };
+                    let Some(cap) = this
+                        .inner
+                        .conn
+                        .shared_capabilities()
+                        .find_by_relative_offset(offset)
+                        .cloned()
+                    else {
+                        return Poll::Ready(Some(Err(P2PStreamError::UnknownReservedMessageId(
+                            offset,
+                        )
+                        .into())))
+                    };
+
+                    let result = if cap == this.primary.shared_cap {
+                        this.primary.to_primary.try_send(msg)
+                    } else {
+                        this.inner.delegate_message(&cap, msg).map(|_| ())
+                    };
+                    if let Err(err) = result {
+                        return Poll::Ready(Some(Err(err.into())))
                     }
-                    Poll::Ready(Some(Err(err))) => return Poll::Ready(Some(Err(err.into()))),
-                    Poll::Ready(None) => {
-                        // connection closed
-                        return Poll::Ready(None)
+                    this.producer_polls_since_inbound = 0;
+
+                    inbound_messages += 1;
+                    if inbound_messages == MAX_INBOUND_MESSAGES_PER_POLL {
+                        cx.waker().wake_by_ref();
+                        return Poll::Pending
                     }
-                    Poll::Pending => break,
                 }
+                Poll::Ready(Some(Err(err))) => return Poll::Ready(Some(Err(err.into()))),
+                Poll::Ready(None) => return Poll::Ready(None),
+                Poll::Pending => {}
             }
 
             if !conn_ready || (!delegated && this.inner.out_buffer.is_empty()) {
@@ -725,7 +925,7 @@ where
 struct ProtocolStream {
     shared_cap: SharedCapability,
     /// the channel shared with the satellite stream
-    to_satellite: UnboundedSender<BytesMut>,
+    to_satellite: InboundSender,
     satellite_st: Pin<Box<dyn Stream<Item = BytesMut> + Send>>,
 }
 
@@ -757,8 +957,9 @@ impl ProtocolStream {
     }
 
     /// Sends the message to the satellite stream.
-    fn send_raw(&self, msg: BytesMut) {
-        let _ = self.unmask_id(msg).map(|msg| self.to_satellite.send(msg));
+    fn send_raw(&self, msg: BytesMut) -> Result<(), P2PStreamError> {
+        let msg = self.unmask_id(msg).map_err(P2PStreamError::from)?;
+        self.to_satellite.try_send(msg)
     }
 }
 
@@ -817,6 +1018,25 @@ impl<'a> Future for ProtocolsPoller<'a> {
         Poll::Pending
     }
 }
+
+fn yield_once() -> impl Future<Output = ()> {
+    let mut yielded = false;
+    std::future::poll_fn(move |cx| {
+        if yielded {
+            Poll::Ready(())
+        } else {
+            yielded = true;
+            cx.waker().wake_by_ref();
+            Poll::Pending
+        }
+    })
+}
+
+/// Aggregate byte budget for inbound messages queued across all protocols on one connection.
+const MAX_MUX_IN_BUFFER_BYTES: usize = 32 * 1024 * 1024;
+
+/// Maximum network messages delegated before yielding the connection task.
+const MAX_INBOUND_MESSAGES_PER_POLL: usize = 32;
 
 /// Soft cap for per-connection outbound `RLPx` messages waiting in the multiplexer.
 ///
@@ -888,7 +1108,7 @@ mod tests {
     };
     use futures::{stream, task::noop_waker_ref};
     use reth_eth_wire_types::EthNetworkPrimitives;
-    use std::task::Poll;
+    use std::{sync::atomic::AtomicBool, task::Poll};
     use tokio::{net::TcpListener, sync::oneshot};
     use tokio_util::codec::Decoder;
 
@@ -901,6 +1121,24 @@ mod tests {
         type Item = Result<(), P2PStreamError>;
 
         fn poll_next(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+            Poll::Pending
+        }
+    }
+
+    #[derive(Debug)]
+    struct BurstingPrimary {
+        proxy: ProtocolProxy,
+        remaining: usize,
+    }
+
+    impl Stream for BurstingPrimary {
+        type Item = Result<(), P2PStreamError>;
+
+        fn poll_next(mut self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+            if self.remaining > 0 {
+                self.remaining -= 1;
+                self.proxy.try_send(Bytes::from_static(&[0, 0])).unwrap();
+            }
             Poll::Pending
         }
     }
@@ -943,6 +1181,279 @@ mod tests {
         ) -> Poll<Result<(), Self::Error>> {
             Poll::Pending
         }
+    }
+
+    #[derive(Debug)]
+    struct InboundFramesTransport {
+        frames: VecDeque<BytesMut>,
+        writable: AtomicBool,
+    }
+
+    impl Stream for InboundFramesTransport {
+        type Item = io::Result<BytesMut>;
+
+        fn poll_next(mut self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+            Poll::Ready(self.frames.pop_front().map(Ok))
+        }
+    }
+
+    impl Sink<Bytes> for InboundFramesTransport {
+        type Error = io::Error;
+
+        fn poll_ready(
+            self: Pin<&mut Self>,
+            _cx: &mut Context<'_>,
+        ) -> Poll<Result<(), Self::Error>> {
+            if self.writable.load(Ordering::Relaxed) {
+                Poll::Ready(Ok(()))
+            } else {
+                Poll::Pending
+            }
+        }
+
+        fn start_send(self: Pin<&mut Self>, _item: Bytes) -> Result<(), Self::Error> {
+            Ok(())
+        }
+
+        fn poll_flush(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+            self.poll_ready(cx)
+        }
+
+        fn poll_close(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+            self.poll_ready(cx)
+        }
+    }
+
+    #[derive(Debug)]
+    struct HoldingProtocol {
+        _conn: ProtocolConnection,
+    }
+
+    impl Stream for HoldingProtocol {
+        type Item = BytesMut;
+
+        fn poll_next(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+            Poll::Pending
+        }
+    }
+
+    #[derive(Debug)]
+    struct DrainingProtocol {
+        conn: ProtocolConnection,
+    }
+
+    impl Stream for DrainingProtocol {
+        type Item = BytesMut;
+
+        fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+            while matches!(self.conn.poll_next_unpin(cx), Poll::Ready(Some(_))) {}
+            Poll::Pending
+        }
+    }
+
+    #[derive(Debug)]
+    struct SignalingDrainingProtocol {
+        conn: ProtocolConnection,
+        drained: Option<oneshot::Sender<()>>,
+    }
+
+    impl Stream for SignalingDrainingProtocol {
+        type Item = BytesMut;
+
+        fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+            if matches!(self.conn.poll_next_unpin(cx), Poll::Ready(Some(_))) &&
+                let Some(drained) = self.drained.take()
+            {
+                let _ = drained.send(());
+            }
+            Poll::Pending
+        }
+    }
+
+    fn compressed_frame(message_id: u8, payload: &[u8]) -> BytesMut {
+        let mut encoded = vec![0; snap::raw::max_compress_len(payload.len()) + 1];
+        encoded[0] = message_id;
+        let len = snap::raw::Encoder::new().compress(payload, &mut encoded[1..]).unwrap();
+        encoded.truncate(len + 1);
+        BytesMut::from(encoded.as_slice())
+    }
+
+    fn test_multiplexer(
+        frame_count: usize,
+    ) -> (RlpxProtocolMultiplexer<InboundFramesTransport>, SharedCapability, SharedCapability) {
+        let (hello, _) = test_hello();
+        let shared_capabilities =
+            SharedCapabilities::try_new(hello.protocols.clone(), hello.message().capabilities)
+                .unwrap();
+        let eth = shared_capabilities.eth().unwrap().clone();
+        let test = shared_capabilities.find(&TestProtoMessage::capability()).unwrap().clone();
+        let frames =
+            (0..frame_count).map(|_| compressed_frame(test.message_id_offset(), &[0])).collect();
+        let conn = P2PStream::new(
+            InboundFramesTransport { frames, writable: AtomicBool::new(true) },
+            shared_capabilities,
+        );
+        (RlpxProtocolMultiplexer::new(conn), eth, test)
+    }
+
+    fn shared_test_capability(name: &'static str, offset: u8) -> SharedCapability {
+        SharedCapability::UnknownCapability {
+            cap: Capability::new_static(name, 1),
+            offset,
+            messages: 1,
+        }
+    }
+
+    #[tokio::test]
+    async fn inbound_channel_enforces_and_releases_protocol_limits() {
+        let capability = shared_test_capability("test", 0x10);
+        let limits =
+            ProtocolIngressLimits::new(16).with_max_buffered_bytes(4).with_max_buffered_messages(1);
+        let aggregate = Arc::new(InboundBudget::new(16));
+        let (sender, mut receiver) = inbound_channel(&capability, limits, aggregate);
+
+        sender.try_send(BytesMut::zeroed(4)).unwrap();
+        assert!(matches!(
+            sender.try_send(BytesMut::zeroed(1)),
+            Err(P2PStreamError::SubprotocolInboundBufferFull { .. })
+        ));
+
+        assert_eq!(receiver.next().await.unwrap().len(), 4);
+        sender.try_send(BytesMut::zeroed(1)).unwrap();
+    }
+
+    #[tokio::test]
+    async fn inbound_channels_share_connection_byte_budget() {
+        let aggregate = Arc::new(InboundBudget::new(6));
+        let limits = ProtocolIngressLimits::new(16)
+            .with_max_buffered_bytes(16)
+            .with_max_buffered_messages(2);
+        let (first, mut first_receiver) =
+            inbound_channel(&shared_test_capability("aaa", 0x10), limits, Arc::clone(&aggregate));
+        let (second, _second_receiver) =
+            inbound_channel(&shared_test_capability("bbb", 0x11), limits, aggregate);
+
+        first.try_send(BytesMut::zeroed(4)).unwrap();
+        assert!(matches!(
+            second.try_send(BytesMut::zeroed(4)),
+            Err(P2PStreamError::SubprotocolInboundBufferFull { .. })
+        ));
+
+        let _ = first_receiver.next().await.unwrap();
+        second.try_send(BytesMut::zeroed(4)).unwrap();
+    }
+
+    #[tokio::test]
+    async fn stalled_satellite_fails_when_its_inbound_queue_is_full() {
+        let (mut mux, eth, test) = test_multiplexer(2);
+        let limits =
+            ProtocolIngressLimits::new(2).with_max_buffered_bytes(2).with_max_buffered_messages(1);
+        mux.install_protocol_with_limits(&TestProtoMessage::capability(), limits, |conn| {
+            HoldingProtocol { _conn: conn }
+        })
+        .unwrap();
+        let mut stream = mux
+            .into_satellite_stream(eth.capability().as_ref(), |proxy| PendingPrimary {
+                _proxy: proxy,
+            })
+            .unwrap();
+
+        let mut cx = Context::from_waker(noop_waker_ref());
+        assert!(matches!(
+            Pin::new(&mut stream).poll_next(&mut cx),
+            Poll::Ready(Some(Err(P2PStreamError::SubprotocolInboundBufferFull {
+                capability,
+            }))) if capability == test.capability().into_owned()
+        ));
+    }
+
+    #[tokio::test]
+    async fn satellite_is_polled_between_inbound_frames() {
+        let (mut mux, eth, _) = test_multiplexer(2 * MAX_INBOUND_MESSAGES_PER_POLL);
+        let limits =
+            ProtocolIngressLimits::new(2).with_max_buffered_bytes(2).with_max_buffered_messages(1);
+        mux.install_protocol_with_limits(&TestProtoMessage::capability(), limits, |conn| {
+            DrainingProtocol { conn }
+        })
+        .unwrap();
+        let mut stream = mux
+            .into_satellite_stream(eth.capability().as_ref(), |proxy| PendingPrimary {
+                _proxy: proxy,
+            })
+            .unwrap();
+
+        let mut cx = Context::from_waker(noop_waker_ref());
+        assert!(Pin::new(&mut stream).poll_next(&mut cx).is_pending());
+        assert_eq!(stream.inner.conn.inner().frames.len(), MAX_INBOUND_MESSAGES_PER_POLL);
+    }
+
+    #[tokio::test]
+    async fn outbound_backpressure_preserves_inbound_fairness() {
+        let (hello, _) = test_hello();
+        let shared_capabilities =
+            SharedCapabilities::try_new(hello.protocols.clone(), hello.message().capabilities)
+                .unwrap();
+        let eth = shared_capabilities.eth().unwrap().clone();
+        let test = shared_capabilities.find(&TestProtoMessage::capability()).unwrap().clone();
+        let frames = (0..2)
+            .map(|_| compressed_frame(test.message_id_offset(), &[0]))
+            .collect::<VecDeque<_>>();
+        let conn = P2PStream::new(
+            InboundFramesTransport { frames, writable: AtomicBool::new(false) },
+            shared_capabilities,
+        );
+        let mut mux = RlpxProtocolMultiplexer::new(conn);
+        let limits =
+            ProtocolIngressLimits::new(2).with_max_buffered_bytes(2).with_max_buffered_messages(1);
+        mux.install_protocol_with_limits(&TestProtoMessage::capability(), limits, |conn| {
+            DrainingProtocol { conn }
+        })
+        .unwrap();
+        let mut stream = mux
+            .into_satellite_stream(eth.capability().as_ref(), |proxy| BurstingPrimary {
+                proxy,
+                remaining: 3,
+            })
+            .unwrap();
+        stream.inner.conn.start_send_unpin(Bytes::from_static(&[0, 0])).unwrap();
+        stream.inner.conn.start_send_unpin(Bytes::from_static(&[0, 0])).unwrap();
+        stream.inner.out_buffer.max_bytes = 1;
+        stream.inner.out_buffer.push_back(Bytes::from_static(&[0, 0]));
+
+        let mut cx = Context::from_waker(noop_waker_ref());
+        assert!(Pin::new(&mut stream).poll_next(&mut cx).is_pending());
+        assert_eq!(stream.inner.conn.inner().frames.len(), 2);
+
+        assert!(Pin::new(&mut stream).poll_next(&mut cx).is_pending());
+        assert_eq!(stream.inner.conn.inner().frames.len(), 2);
+
+        stream.inner.conn.inner().writable.store(true, Ordering::Relaxed);
+        assert!(Pin::new(&mut stream).poll_next(&mut cx).is_pending());
+        assert_eq!(stream.inner.conn.inner().frames.len(), 2);
+
+        assert!(matches!(Pin::new(&mut stream).poll_next(&mut cx), Poll::Ready(None)));
+        assert_eq!(stream.inner.conn.inner().frames.len(), 0);
+    }
+
+    #[tokio::test]
+    async fn satellite_is_polled_between_frames_during_primary_handshake() {
+        let (mut mux, eth, _) = test_multiplexer(2);
+        let limits =
+            ProtocolIngressLimits::new(2).with_max_buffered_bytes(2).with_max_buffered_messages(1);
+        let (drained_tx, drained_rx) = oneshot::channel();
+        mux.install_protocol_with_limits(&TestProtoMessage::capability(), limits, |conn| {
+            SignalingDrainingProtocol { conn, drained: Some(drained_tx) }
+        })
+        .unwrap();
+
+        let stream = mux
+            .into_satellite_stream_with_handshake(eth.capability().as_ref(), async move |proxy| {
+                drained_rx.await.unwrap();
+                Ok::<_, P2PStreamError>(PendingPrimary { _proxy: proxy })
+            })
+            .await;
+
+        assert!(stream.is_ok());
     }
 
     #[tokio::test]

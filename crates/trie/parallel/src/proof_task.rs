@@ -170,6 +170,7 @@ impl ProofWorkerHandle {
         runtime: &Runtime,
         task_ctx: ProofTaskCtx<Factory>,
         halve_workers: bool,
+        proof_result_tx: ProofResultSender,
     ) -> Self
     where
         Factory: DatabaseProviderROFactory<Provider: TrieCursorFactory + HashedCursorFactory>
@@ -180,7 +181,6 @@ impl ProofWorkerHandle {
     {
         let (storage_work_tx, storage_work_rx) = unbounded::<StorageWorkerJob>();
         let (account_work_tx, account_work_rx) = unbounded::<AccountWorkerJob>();
-
         let cached_storage_roots = Arc::<DashMap<_, _>>::default();
 
         let divisor = if halve_workers { 2 } else { 1 };
@@ -206,6 +206,7 @@ impl ProofWorkerHandle {
         let storage_task_ctx = task_ctx.clone();
         let storage_avail = storage_availability.clone();
         let storage_roots = cached_storage_roots.clone();
+        let storage_result_tx = proof_result_tx.clone();
         let storage_parent_span = tracing::Span::current();
         runtime.spawn_blocking_named("storage-workers", move || {
             let worker_id = AtomicUsize::new(0);
@@ -237,6 +238,13 @@ impl ProofWorkerHandle {
                         ?error,
                         "Storage worker failed"
                     );
+                    let _ = storage_result_tx.send(ProofResultMessage {
+                        result: Err(StateRootTaskError::ProofWorker(format!(
+                            "storage worker {worker_id}: {error}"
+                        ))),
+                        elapsed: Duration::ZERO,
+                        state: Default::default(),
+                    });
                 }
             });
         });
@@ -244,6 +252,7 @@ impl ProofWorkerHandle {
         let account_rt = runtime.clone();
         let account_tx = storage_work_tx.clone();
         let account_avail = account_availability.clone();
+        let account_result_tx = proof_result_tx;
         let account_parent_span = tracing::Span::current();
         runtime.spawn_blocking_named("account-workers", move || {
             let worker_id = AtomicUsize::new(0);
@@ -276,6 +285,13 @@ impl ProofWorkerHandle {
                         ?error,
                         "Account worker failed"
                     );
+                    let _ = account_result_tx.send(ProofResultMessage {
+                        result: Err(StateRootTaskError::ProofWorker(format!(
+                            "account worker {worker_id}: {error}"
+                        ))),
+                        elapsed: Duration::ZERO,
+                        state: Default::default(),
+                    });
                 }
             });
         });
@@ -475,10 +491,11 @@ where
     }
 }
 
-/// Channel used by worker threads to deliver `ProofResultMessage` items back to
+/// Channel used by worker threads to deliver proof results back to
 /// `SparseTrieCacheTask`.
 ///
-/// Workers use this sender to deliver proof results directly to `SparseTrieCacheTask`.
+/// Workers use this sender to deliver proof results or terminal initialization errors directly to
+/// `SparseTrieCacheTask`.
 pub type ProofResultSender = CrossbeamSender<ProofResultMessage>;
 
 /// Message containing a completed proof result with metadata for direct delivery to
@@ -1173,18 +1190,18 @@ mod tests {
         let chain_spec = Arc::new(ChainSpec::default());
         let anchor_hash = chain_spec.genesis_hash();
         let provider_factory = create_test_provider_factory_with_chain_spec(chain_spec);
-        let changeset_cache = reth_trie_db::ChangesetCache::new();
-        let factory = reth_provider::providers::OverlayStateProviderFactory::new(
+        let factory = reth_storage_overlay::OverlayStateProviderFactory::new(
             provider_factory,
-            reth_provider::providers::OverlayBuilder::<reth_ethereum_primitives::EthPrimitives>::new(
-                anchor_hash,
-                changeset_cache,
-            ),
+            reth_storage_overlay::OverlayManager::<
+                reth_ethereum_primitives::EthPrimitives,
+            >::default()
+            .overlay_builder(anchor_hash),
         );
         let ctx = test_ctx(factory);
 
         let runtime = reth_tasks::Runtime::test();
-        let proof_handle = ProofWorkerHandle::new(&runtime, ctx, false);
+        let (proof_result_tx, _) = unbounded();
+        let proof_handle = ProofWorkerHandle::new(&runtime, ctx, false, proof_result_tx);
 
         // Verify handle can be cloned
         let _cloned_handle = proof_handle.clone();

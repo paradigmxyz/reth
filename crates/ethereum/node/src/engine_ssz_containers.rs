@@ -491,7 +491,7 @@ impl From<PayloadAttributesParis> for LegacyPayloadAttributes {
             withdrawals: None,
             parent_beacon_block_root: None,
             slot_number: None,
-            target_gas_limit: None,
+            ..Default::default()
         }
     }
 }
@@ -521,7 +521,7 @@ impl From<PayloadAttributesShanghai> for LegacyPayloadAttributes {
             withdrawals: Some(value.withdrawals),
             parent_beacon_block_root: None,
             slot_number: None,
-            target_gas_limit: None,
+            ..Default::default()
         }
     }
 }
@@ -551,7 +551,7 @@ impl From<PayloadAttributesCancun> for LegacyPayloadAttributes {
             withdrawals: Some(value.withdrawals),
             parent_beacon_block_root: Some(value.parent_beacon_block_root),
             slot_number: None,
-            target_gas_limit: None,
+            ..Default::default()
         }
     }
 }
@@ -576,6 +576,7 @@ impl TryFrom<LegacyPayloadAttributes> for PayloadAttributesCancun {
 }
 
 impl From<PayloadAttributesAmsterdam> for LegacyPayloadAttributes {
+    #[allow(clippy::needless_update)]
     fn from(value: PayloadAttributesAmsterdam) -> Self {
         Self {
             timestamp: value.timestamp,
@@ -585,6 +586,7 @@ impl From<PayloadAttributesAmsterdam> for LegacyPayloadAttributes {
             parent_beacon_block_root: Some(value.parent_beacon_block_root),
             slot_number: Some(value.slot_number),
             target_gas_limit: Some(value.target_gas_limit),
+            ..Default::default()
         }
     }
 }
@@ -1381,13 +1383,13 @@ impl TryFrom<Vec<Option<BlobCellsAndProofsV1>>> for BlobsV4Response {
 }
 
 /// A trie-node byte list in an [`ExecutionWitnessV1`].
-pub type WitnessNodeV1 = Vec<u8>;
+pub type WitnessNodeV1 = Bytes;
 
 /// A contract-code byte list in an [`ExecutionWitnessV1`].
-pub type WitnessCodeV1 = Vec<u8>;
+pub type WitnessCodeV1 = Bytes;
 
 /// An RLP-encoded header byte list in an [`ExecutionWitnessV1`].
-pub type WitnessHeaderV1 = Vec<u8>;
+pub type WitnessHeaderV1 = Bytes;
 
 /// Canonical execution witness for `POST /payloads/witness`.
 ///
@@ -1400,7 +1402,7 @@ pub type WitnessHeaderV1 = Vec<u8>;
 pub struct ExecutionWitnessV1 {
     /// Hashed trie-node preimages required during execution and state-root recomputation.
     pub state: Vec<WitnessNodeV1>,
-    /// Contract bytecode preimages created or accessed during execution.
+    /// Contract bytecode preimages required from the pre-state.
     pub codes: Vec<WitnessCodeV1>,
     /// RLP-encoded ancestor headers used for pre-state and `BLOCKHASH` correctness proofs.
     pub headers: Vec<WitnessHeaderV1>,
@@ -1412,7 +1414,9 @@ pub type ExecutionWitness = ExecutionWitnessV1;
 /// REST-SSZ response for `POST /payloads/witness`.
 ///
 /// The witness uses the Engine REST-SSZ `Optional[T]` encoding from execution-apis and is present
-/// only when the payload status is `VALID`.
+/// only when the payload status is `VALID`. A `VALID` status without a witness means the parent
+/// state was not yet available through the provider (the parent is only known to the engine
+/// tree); resubmitting the payload once forkchoice has made the parent canonical yields it.
 #[derive(Clone, Debug, PartialEq, Eq, ssz_derive::Encode)]
 pub struct PayloadStatusWithWitness {
     /// Result of processing the submitted payload.
@@ -1939,9 +1943,9 @@ mod tests {
             validation_error: Optional::none(),
         };
         let witness = ExecutionWitnessV1 {
-            state: vec![vec![1, 2, 3]],
-            codes: vec![vec![4, 5]],
-            headers: vec![vec![6]],
+            state: vec![vec![1, 2, 3].into()],
+            codes: vec![vec![4, 5].into()],
+            headers: vec![vec![6].into()],
         };
         let response = PayloadStatusWithWitness::new(payload_status, Some(witness));
 

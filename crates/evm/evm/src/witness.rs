@@ -2,7 +2,7 @@ use alloy_primitives::{keccak256, Bytes, B256};
 use alloy_rpc_types_debug::ExecutionWitness;
 use evm2::evm::CacheDB;
 use reth_primitives_traits::Account as PrimitiveAccount;
-use reth_storage_api::{HeaderProvider, StateProofProvider};
+use reth_storage_api::{HashedPostStateProvider, HeaderProvider, StateProofProvider};
 use reth_storage_errors::provider::ProviderResult;
 use reth_trie_common::{ExecutionWitnessMode, HashedPostState, HashedStorage};
 
@@ -44,7 +44,7 @@ impl<'a, DB> ExecutionWitnessRecord<'a, DB> {
         mode: ExecutionWitnessMode,
     ) -> ProviderResult<ExecutionWitness>
     where
-        SP: StateProofProvider + ?Sized,
+        SP: StateProofProvider + HashedPostStateProvider + ?Sized,
         HP: HeaderProvider + ?Sized,
         HP::Header: alloy_rlp::Encodable,
     {
@@ -70,12 +70,12 @@ impl<'a, DB> ExecutionWitnessRecord<'a, DB> {
     ///
     /// Callers witnessing non-canonical blocks can supply headers by following parent hashes.
     pub fn into_execution_witness_without_headers<SP>(
-        self,
+        mut self,
         state_provider: &SP,
         mode: ExecutionWitnessMode,
     ) -> ProviderResult<ExecutionWitness>
     where
-        SP: StateProofProvider + ?Sized,
+        SP: StateProofProvider + HashedPostStateProvider + ?Sized,
     {
         let mut codes = self
             .state
@@ -89,6 +89,16 @@ impl<'a, DB> ExecutionWitnessRecord<'a, DB> {
             codes.sort_unstable();
         }
 
+        let mut wiped_state = reth_execution_types::EvmState::default();
+        for (address, storage) in &self.state.cache.storage {
+            if storage.wiped {
+                use reth_execution_types::EvmStateChangeSink;
+                wiped_state.storage_wipe(*address).expect("infallible");
+            }
+        }
+        if !wiped_state.is_empty() {
+            self.additional_state.get_or_insert_default().extend(state_provider.hashed_post_state(&wiped_state)?);
+        }
         let (hashed_state, keys) = self.hashed_post_state();
         let state = state_provider.witness(Default::default(), hashed_state, mode)?;
         Ok(ExecutionWitness { state, codes, keys, ..Default::default() })
@@ -117,7 +127,7 @@ impl<'a, DB> ExecutionWitnessRecord<'a, DB> {
                 let hashed_storage = hashed_state
                     .storages
                     .entry(hashed_address)
-                    .or_insert_with(|| HashedStorage::new(storage.wiped));
+                    .or_default();
                 for (slot, value) in &storage.slots {
                     let slot = B256::from(*slot);
                     hashed_storage.storage.insert(keccak256(slot), *value);
@@ -136,7 +146,7 @@ mod tests {
     use evm2::evm::{AccountInfo, EmptyDB};
 
     #[test]
-    fn destroyed_account_storage_is_marked_wiped() {
+    fn destroyed_account_is_recorded_for_witness() {
         let address = Address::with_last_byte(1);
         let hashed_address = keccak256(address);
 
@@ -146,7 +156,7 @@ mod tests {
 
         let (hashed_state, _) = ExecutionWitnessRecord::new(&state).hashed_post_state();
         assert_eq!(hashed_state.accounts[&hashed_address], None);
-        assert!(hashed_state.storages[&hashed_address].wiped);
+        assert!(hashed_state.storages[&hashed_address].storage.is_empty());
     }
 
     #[test]
@@ -163,7 +173,6 @@ mod tests {
         let additional_state = HashedPostState::default().with_storages([(
             hashed_address,
             HashedStorage::from_iter(
-                false,
                 [(keccak256(B256::from(slot)), U256::from(1)), (additional_slot, U256::from(3))],
             ),
         )]);

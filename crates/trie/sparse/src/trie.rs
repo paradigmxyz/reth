@@ -1,5 +1,6 @@
 use crate::{
     ArenaParallelSparseTrie, LeafUpdate, SparseTrie as SparseTrieTrait, SparseTrieUpdates,
+    TrieNodeEpoch,
 };
 use alloc::{borrow::Cow, boxed::Box};
 use alloy_primitives::{map::B256Map, B256};
@@ -158,16 +159,6 @@ impl<T: SparseTrieTrait> RevealableSparseTrie<T> {
         }
     }
 
-    /// Wipes the trie by removing all nodes and values,
-    /// and resetting the trie to only contain an empty root node.
-    ///
-    /// Note: This method will error if the trie is blinded.
-    pub fn wipe(&mut self) -> SparseTrieResult<()> {
-        let revealed = self.as_revealed_mut().ok_or(SparseTrieErrorKind::Blind)?;
-        revealed.wipe();
-        Ok(())
-    }
-
     /// Calculates the root hash of the trie.
     ///
     /// This will update any remaining dirty nodes before computing the root hash.
@@ -178,8 +169,8 @@ impl<T: SparseTrieTrait> RevealableSparseTrie<T> {
     ///
     /// - `Some(B256)` with the calculated root hash if the trie is revealed.
     /// - `None` if the trie is still blind.
-    pub fn root(&mut self) -> Option<B256> {
-        Some(self.as_revealed_mut()?.root())
+    pub fn root(&mut self, new_epoch: TrieNodeEpoch) -> Option<B256> {
+        Some(self.as_revealed_mut()?.root(new_epoch))
     }
 
     /// Returns true if the root node is cached and does not need any recomputation.
@@ -199,9 +190,12 @@ impl<T: SparseTrieTrait> RevealableSparseTrie<T> {
     ///  - The trie root hash (`B256`).
     ///  - A [`SparseTrieUpdates`] structure containing information about updated nodes.
     ///  - `None` if the trie is still blind.
-    pub fn root_with_updates(&mut self) -> Option<(B256, SparseTrieUpdates)> {
+    pub fn root_with_updates(
+        &mut self,
+        new_epoch: TrieNodeEpoch,
+    ) -> Option<(B256, SparseTrieUpdates)> {
         let revealed = self.as_revealed_mut()?;
-        Some((revealed.root(), revealed.take_updates()))
+        Some((revealed.root(new_epoch), revealed.take_updates()))
     }
 
     /// Clears this trie, setting it to a blind state.
@@ -466,24 +460,15 @@ pub struct RlpNodeStackItem {
 }
 
 impl SparseTrieUpdates {
-    /// Create new wiped sparse trie updates.
-    pub fn wiped() -> Self {
-        Self { wiped: true, ..Default::default() }
-    }
-
     /// Clears the updates, but keeps the backing data structures allocated.
-    ///
-    /// Sets `wiped` to `false`.
     pub fn clear(&mut self) {
         self.updated_nodes.clear();
         self.removed_nodes.clear();
-        self.wiped = false;
     }
 
     /// Extends the updates with another set of updates.
     pub fn extend(&mut self, other: Self) {
         self.updated_nodes.extend(other.updated_nodes);
         self.removed_nodes.extend(other.removed_nodes);
-        self.wiped |= other.wiped;
     }
 }

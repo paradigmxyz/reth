@@ -112,21 +112,19 @@ impl<Pool: TransactionPool + Unpin> Future for MiningMode<Pool> {
                         return Poll::Ready(());
                     }
                 }
-                Poll::Pending
             }
             Self::Interval(interval) => {
                 if interval.poll_tick(cx).is_ready() {
                     return Poll::Ready(())
                 }
-                Poll::Pending
             }
             Self::Trigger(trigger) => {
                 if trigger.poll_next_unpin(cx).is_ready() {
                     return Poll::Ready(())
                 }
-                Poll::Pending
             }
         }
+        Poll::Pending
     }
 }
 
@@ -284,6 +282,8 @@ where
         if self.last_block_hashes.len() > self.finality_depth.get() {
             self.last_block_hashes.pop_front();
         }
+
+        self.update_forkchoice_state().await?;
 
         Ok(())
     }

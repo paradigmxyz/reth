@@ -7,6 +7,7 @@ use reth_errors::RethError;
 use reth_evm::{database::StateProviderDatabase, BlockExecutor, ConfigureEvm};
 use reth_rpc_eth_types::{error::FromEthApiError, EthApiError};
 use reth_storage_api::StateProviderFactory;
+use std::sync::Arc;
 
 use crate::{
     helpers::{Call, LoadBlock, Trace},
@@ -21,6 +22,10 @@ pub trait GetBlockAccessList: Trace + Call + LoadBlock + RpcNodeCoreExt {
         block_id: BlockId,
     ) -> impl Future<Output = Result<Option<BlockAccessList>, Self::Error>> + Send {
         async move {
+            if block_id.is_pending() {
+                return Ok(None)
+            }
+
             let Some(block) = self.recovered_block(block_id).await? else {
                 return Ok(None);
             };
@@ -33,7 +38,13 @@ pub trait GetBlockAccessList: Trace + Call + LoadBlock + RpcNodeCoreExt {
                 return Ok(Some(bal))
             }
 
+            let permit = self
+                .acquire_owned_blocking_io()
+                .await
+                .map_err(|_| EthApiError::InternalEthError)?;
+
             self.spawn_blocking_io(move |eth_api| {
+                let _permit = permit;
                 let state = eth_api
                     .provider()
                     .state_by_block_id(block.parent_hash().into())
@@ -50,6 +61,12 @@ pub trait GetBlockAccessList: Trace + Call + LoadBlock + RpcNodeCoreExt {
                 }
                 let (_, bal) =
                     executor.finish_with_block_access_list().map_err(Self::Error::from_eth_err)?;
+                if let Some(bal) = bal.as_ref().filter(|_| eth_api.eth_api_settings().cache_computed_bals) {
+                    let raw = alloy_rlp::encode(bal).into();
+                    let native = evm2::evm::Bal::try_from(bal.clone())
+                        .map_err(RethError::other).map_err(Self::Error::from_eth_err)?;
+                    eth_api.cache().insert_bal(block.hash(), DecodedBal::new(Arc::new(native), raw));
+                }
                 Ok(bal)
             })
             .await

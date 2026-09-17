@@ -12,7 +12,7 @@ use alloy_rpc_types_eth::{Block, Header, Receipt, Transaction, TransactionReques
 use eyre::Result;
 use futures_util::future::BoxFuture;
 use reth_ethereum_primitives::TransactionSigned;
-use reth_node_api::{EngineTypes, PayloadTypes};
+use reth_node_api::{EngineTypes, PayloadKind, PayloadTypes};
 use reth_rpc_api::clients::{EngineApiClient, EthApiClient};
 use std::{collections::HashSet, marker::PhantomData, time::Duration};
 use tokio::time::sleep;
@@ -228,7 +228,7 @@ where
                 withdrawals: Some(vec![]),
                 parent_beacon_block_root: Some(B256::ZERO),
                 slot_number: None,
-                target_gas_limit: None,
+                ..Default::default()
             };
 
             env.active_node_state_mut()?
@@ -302,7 +302,7 @@ where
                     withdrawals: Some(vec![]),
                     parent_beacon_block_root: Some(B256::ZERO),
                     slot_number: None,
-                    target_gas_limit: None,
+                    ..Default::default()
                 };
 
                 let fresh_fcu_result = EngineApiClient::<Engine>::fork_choice_updated_v3(
@@ -330,7 +330,18 @@ where
 
             env.active_node_state_mut()?.next_payload_id = Some(payload_id);
 
-            sleep(Duration::from_secs(1)).await;
+            if let Some(builder) = &env.node_clients[producer_idx].payload_builder {
+                // Wait for the pending build rather than racing it with an empty fallback payload.
+                tokio::time::timeout(
+                    Duration::from_secs(30),
+                    builder.resolve_kind(payload_id, PayloadKind::WaitForPending),
+                )
+                .await?
+                .ok_or_else(|| eyre::eyre!("Unknown payload {payload_id}"))??;
+            } else {
+                // RPC-only clients do not expose the local payload builder.
+                sleep(Duration::from_secs(1)).await;
+            }
 
             let built_payload_envelope = EngineApiClient::<Engine>::get_payload_v3(
                 &env.node_clients[producer_idx].engine.http_client(),
@@ -402,7 +413,10 @@ where
             let fork_choice_state = ForkchoiceState {
                 head_block_hash: head_hash,
                 safe_block_hash: head_hash,
-                finalized_block_hash: head_hash,
+                // Making a block canonical does not imply finality: tests advance the finalized
+                // block explicitly via `FinalizeBlock`, and a finalized tip would reject any
+                // later forkchoice update below it as a too deep reorg.
+                finalized_block_hash: B256::ZERO,
             };
             debug!(
                 "Broadcasting forkchoice update to {} clients. Head: {:?}",

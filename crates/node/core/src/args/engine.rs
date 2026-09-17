@@ -8,7 +8,7 @@ use eyre::ensure;
 use reth_cli_util::{parse_duration_from_secs_or_ms, parsers::format_duration_as_secs_or_ms};
 use reth_engine_primitives::{
     TreeConfig, DEFAULT_INVALID_HEADER_HIT_EVICTION_THRESHOLD, DEFAULT_MULTIPROOF_TASK_CHUNK_SIZE,
-    DEFAULT_PERSISTENCE_BACKPRESSURE_THRESHOLD,
+    DEFAULT_NUM_STATE_MASKING_BLOCKS, DEFAULT_PERSISTENCE_BACKPRESSURE_THRESHOLD,
 };
 use std::{sync::OnceLock, time::Duration};
 
@@ -27,10 +27,13 @@ static ENGINE_DEFAULTS: OnceLock<DefaultEngineValues> = OnceLock::new();
 pub struct DefaultEngineValues {
     persistence_threshold: u64,
     persistence_backpressure_threshold: u64,
+    num_state_masking_blocks: u64,
     memory_block_buffer_target: u64,
     invalid_header_hit_eviction_threshold: u8,
     state_cache_disabled: bool,
     prewarming_disabled: bool,
+    txpool_prewarming_enabled: bool,
+    sender_recovery_cache_enabled: bool,
     state_provider_metrics: bool,
     cross_block_cache_size: usize,
     state_root_task_compare_updates: bool,
@@ -78,6 +81,12 @@ impl DefaultEngineValues {
         self
     }
 
+    /// Set the default number of state masking blocks.
+    pub const fn with_num_state_masking_blocks(mut self, v: u64) -> Self {
+        self.num_state_masking_blocks = v;
+        self
+    }
+
     /// Set the default memory block buffer target
     pub const fn with_memory_block_buffer_target(mut self, v: u64) -> Self {
         self.memory_block_buffer_target = v;
@@ -99,6 +108,18 @@ impl DefaultEngineValues {
     /// Set whether to disable prewarming by default
     pub const fn with_prewarming_disabled(mut self, v: bool) -> Self {
         self.prewarming_disabled = v;
+        self
+    }
+
+    /// Set whether to enable txpool prewarming by default
+    pub const fn with_txpool_prewarming_enabled(mut self, v: bool) -> Self {
+        self.txpool_prewarming_enabled = v;
+        self
+    }
+
+    /// Set whether to enable sender recovery caching by default
+    pub const fn with_sender_recovery_cache_enabled(mut self, v: bool) -> Self {
+        self.sender_recovery_cache_enabled = v;
         self
     }
 
@@ -243,10 +264,13 @@ impl Default for DefaultEngineValues {
         Self {
             persistence_threshold: DEFAULT_PERSISTENCE_THRESHOLD,
             persistence_backpressure_threshold: DEFAULT_PERSISTENCE_BACKPRESSURE_THRESHOLD,
+            num_state_masking_blocks: DEFAULT_NUM_STATE_MASKING_BLOCKS,
             memory_block_buffer_target: DEFAULT_MEMORY_BLOCK_BUFFER_TARGET,
             invalid_header_hit_eviction_threshold: DEFAULT_INVALID_HEADER_HIT_EVICTION_THRESHOLD,
             state_cache_disabled: false,
             prewarming_disabled: false,
+            txpool_prewarming_enabled: false,
+            sender_recovery_cache_enabled: false,
             state_provider_metrics: false,
             cross_block_cache_size: DEFAULT_CROSS_BLOCK_CACHE_SIZE_MB,
             state_root_task_compare_updates: false,
@@ -287,9 +311,13 @@ pub struct EngineArgs {
     /// must be in-memory, ahead of the last persisted block, before flushing canonical blocks to
     /// disk again.
     ///
-    /// To persist blocks as fast as the node receives them, set this value to zero. This will
-    /// cause more frequent DB writes.
-    #[arg(long = "engine.persistence-threshold", default_value_t = DefaultEngineValues::get_global().persistence_threshold)]
+    /// To persist blocks as fast as the node receives them, set this value to zero. This disables
+    /// state masking and causes more frequent DB writes.
+    #[arg(
+        long = "engine.persistence-threshold",
+        env = "RETH_ENGINE_PERSISTENCE_THRESHOLD",
+        default_value_t = DefaultEngineValues::get_global().persistence_threshold
+    )]
     pub persistence_threshold: u64,
 
     /// Configure the maximum number of blocks beyond the in-memory buffer target that may await
@@ -301,6 +329,15 @@ pub struct EngineArgs {
     /// This value must be greater than `--engine.persistence-threshold`.
     #[arg(long = "engine.persistence-backpressure-threshold")]
     pub persistence_backpressure_threshold: Option<u64>,
+
+    /// Configure how many of the blocks being persisted should only mask state/trie
+    /// writes instead of durably persisting their state/trie updates in the current cycle.
+    #[arg(
+        long = "engine.num-state-masking-blocks",
+        env = "RETH_ENGINE_NUM_STATE_MASKING_BLOCKS",
+        default_value_t = DefaultEngineValues::get_global().num_state_masking_blocks
+    )]
+    pub num_state_masking_blocks: u64,
 
     /// Configure the target number of blocks to keep in memory.
     ///
@@ -336,6 +373,23 @@ pub struct EngineArgs {
     /// Disable parallel prewarming
     #[arg(long = "engine.disable-prewarming", alias = "engine.disable-caching-and-prewarming", default_value_t = DefaultEngineValues::get_global().prewarming_disabled)]
     pub prewarming_disabled: bool,
+
+    /// Enable best-effort txpool transaction prewarming between payloads.
+    #[arg(
+        long = "engine.txpool-prewarming",
+        env = "RETH_ENGINE_TXPOOL_PREWARMING",
+        default_value_t = DefaultEngineValues::get_global().txpool_prewarming_enabled
+    )]
+    pub txpool_prewarming_enabled: bool,
+
+    /// Enable caching recovered transaction senders across transaction ingress and payload
+    /// execution.
+    #[arg(
+        long = "engine.sender-recovery-cache",
+        env = "RETH_ENGINE_SENDER_RECOVERY_CACHE",
+        default_value_t = DefaultEngineValues::get_global().sender_recovery_cache_enabled
+    )]
+    pub sender_recovery_cache_enabled: bool,
 
     /// CAUTION: This CLI flag has no effect anymore. The parallel sparse trie is always enabled.
     #[deprecated]
@@ -487,9 +541,9 @@ pub struct EngineArgs {
 
     /// Suppress persistence while building a payload.
     ///
-    /// When enabled, persistence cycles are deferred from the moment an FCU with payload
-    /// attributes arrives until the next FCU clears the build. Useful on chains with short
-    /// block times where persistence I/O can interfere with block building latency.
+    /// When enabled, persistence cycles are deferred while a payload build is active. Useful on
+    /// chains with short block times where persistence I/O can interfere with block building
+    /// latency.
     #[arg(
         long = "engine.suppress-persistence-during-build",
         default_value_t = DefaultEngineValues::get_global().suppress_persistence_during_build,
@@ -530,10 +584,13 @@ impl Default for EngineArgs {
         let DefaultEngineValues {
             persistence_threshold,
             persistence_backpressure_threshold: _,
+            num_state_masking_blocks,
             memory_block_buffer_target: _,
             invalid_header_hit_eviction_threshold,
             state_cache_disabled,
             prewarming_disabled,
+            txpool_prewarming_enabled,
+            sender_recovery_cache_enabled,
             state_provider_metrics,
             cross_block_cache_size,
             state_root_task_compare_updates,
@@ -560,6 +617,7 @@ impl Default for EngineArgs {
         Self {
             persistence_threshold,
             persistence_backpressure_threshold: None,
+            num_state_masking_blocks,
             memory_block_buffer_target: None,
             invalid_header_hit_eviction_threshold,
             state_root_task_compare_updates,
@@ -567,6 +625,8 @@ impl Default for EngineArgs {
             caching_and_prewarming_enabled: true,
             state_cache_disabled,
             prewarming_disabled,
+            txpool_prewarming_enabled,
+            sender_recovery_cache_enabled,
             parallel_sparse_trie_enabled: true,
             parallel_sparse_trie_disabled: false,
             state_provider_metrics,
@@ -601,6 +661,15 @@ impl Default for EngineArgs {
 }
 
 impl EngineArgs {
+    /// Returns the effective state masking window, disabled when persistence is immediate.
+    pub const fn num_state_masking_blocks(&self) -> u64 {
+        if self.persistence_threshold == 0 {
+            0
+        } else {
+            self.num_state_masking_blocks
+        }
+    }
+
     /// Returns the effective memory block buffer target.
     pub fn memory_block_buffer_target(&self) -> u64 {
         self.memory_block_buffer_target.unwrap_or_else(|| {
@@ -620,6 +689,7 @@ impl EngineArgs {
     pub fn validate(&self) -> eyre::Result<()> {
         let persistence_backpressure_threshold = self.persistence_backpressure_threshold();
         let memory_block_buffer_target = self.memory_block_buffer_target();
+        let num_state_masking_blocks = self.num_state_masking_blocks();
         ensure!(
             persistence_backpressure_threshold > self.persistence_threshold,
             "--engine.persistence-backpressure-threshold ({}) must be greater than --engine.persistence-threshold ({})",
@@ -631,6 +701,21 @@ impl EngineArgs {
             "--engine.memory-block-buffer-target ({}) must be less than or equal to --engine.persistence-threshold ({})",
             memory_block_buffer_target,
             self.persistence_threshold,
+        );
+        ensure!(
+            num_state_masking_blocks == 0 ||
+                matches!(
+                    num_state_masking_blocks.checked_add(memory_block_buffer_target),
+                    Some(window) if window < self.persistence_threshold
+                ),
+            "--engine.num-state-masking-blocks ({}) + --engine.memory-block-buffer-target ({}) must be less than --engine.persistence-threshold ({})",
+            num_state_masking_blocks,
+            memory_block_buffer_target,
+            self.persistence_threshold,
+        );
+        ensure!(
+            !self.state_cache_disabled || !self.txpool_prewarming_enabled,
+            "--engine.txpool-prewarming conflicts with --engine.disable-state-cache"
         );
         ensure!(
             self.bal_parallel_execution_disabled || !self.bal_parallel_state_root_disabled,
@@ -646,12 +731,16 @@ impl EngineArgs {
             tracing::warn!(target: "reth::cli", "--engine.legacy-state-root has no effect anymore, use --engine.state-root-fallback to force synchronous state root computation");
         }
         let config = TreeConfig::default()
+            // Clear the default window before applying overrides that may be smaller than it.
+            .with_persistence_threshold(0)
             .with_persistence_backpressure_threshold(self.persistence_backpressure_threshold())
             .with_persistence_threshold(self.persistence_threshold)
             .with_memory_block_buffer_target(self.memory_block_buffer_target())
+            .with_num_state_masking_blocks(self.num_state_masking_blocks())
             .with_invalid_header_hit_eviction_threshold(self.invalid_header_hit_eviction_threshold)
             .without_state_cache(self.state_cache_disabled)
             .without_prewarming(self.prewarming_disabled)
+            .with_txpool_prewarming(self.txpool_prewarming_enabled)
             .with_state_provider_metrics(self.state_provider_metrics)
             .with_always_compare_trie_updates(self.state_root_task_compare_updates)
             .with_cross_block_cache_size(self.cross_block_cache_size * 1024 * 1024)
@@ -700,13 +789,41 @@ mod tests {
         let default_args = EngineArgs::default();
         let args = CommandParser::<EngineArgs>::parse_from(["reth"]).args;
         assert_eq!(args, default_args);
-        assert_eq!(args.persistence_threshold, 7);
+        assert_eq!(args.persistence_threshold, 50);
+        assert_eq!(args.num_state_masking_blocks, 30);
         assert_eq!(args.memory_block_buffer_target, None);
         assert_eq!(args.memory_block_buffer_target(), 5);
-        assert_eq!(
-            args.persistence_backpressure_threshold(),
-            DefaultEngineValues::get_global().persistence_backpressure_threshold
-        );
+        assert_eq!(args.persistence_backpressure_threshold(), 100);
+        args.validate().unwrap();
+        let config = args.tree_config();
+        assert_eq!(config.persistence_threshold(), 50);
+        assert_eq!(config.num_state_masking_blocks(), 30);
+        assert_eq!(config.persistence_backpressure_threshold(), 100);
+    }
+
+    #[test]
+    fn txpool_prewarming_is_disabled_by_default_and_can_be_enabled() {
+        let args = CommandParser::<EngineArgs>::parse_from(["reth"]).args;
+        assert!(!args.txpool_prewarming_enabled);
+        assert!(!args.tree_config().txpool_prewarming());
+
+        let args =
+            CommandParser::<EngineArgs>::parse_from(["reth", "--engine.txpool-prewarming"]).args;
+        assert!(args.txpool_prewarming_enabled);
+        assert!(args.tree_config().txpool_prewarming());
+    }
+
+    #[test]
+    fn validate_rejects_txpool_prewarming_with_disabled_state_cache() {
+        let args = EngineArgs {
+            state_cache_disabled: true,
+            txpool_prewarming_enabled: true,
+            ..EngineArgs::default()
+        };
+
+        let err = args.validate().unwrap_err().to_string();
+        assert!(err.contains("engine.txpool-prewarming"));
+        assert!(err.contains("engine.disable-state-cache"));
     }
 
     #[test]
@@ -760,17 +877,32 @@ mod tests {
     }
 
     #[test]
+    fn sender_recovery_cache_is_disabled_by_default_and_can_be_enabled() {
+        let args = CommandParser::<EngineArgs>::parse_from(["reth"]).args;
+        assert!(!args.sender_recovery_cache_enabled);
+
+        let args =
+            CommandParser::<EngineArgs>::parse_from(["reth", "--engine.sender-recovery-cache"])
+                .args;
+        assert!(args.sender_recovery_cache_enabled);
+    }
+
+    #[test]
     #[allow(deprecated)]
     fn engine_args() {
         let args = EngineArgs {
             persistence_threshold: 100,
             persistence_backpressure_threshold: Some(101),
+            num_state_masking_blocks: DEFAULT_NUM_STATE_MASKING_BLOCKS,
             memory_block_buffer_target: Some(50),
             invalid_header_hit_eviction_threshold: 7,
             legacy_state_root_task_enabled: true,
             caching_and_prewarming_enabled: true,
             state_cache_disabled: true,
             prewarming_disabled: true,
+            // conflicts with --engine.disable-state-cache, covered by its own test below
+            txpool_prewarming_enabled: false,
+            sender_recovery_cache_enabled: true,
             parallel_sparse_trie_enabled: true,
             parallel_sparse_trie_disabled: false,
             state_provider_metrics: true,
@@ -814,6 +946,7 @@ mod tests {
             "--engine.legacy-state-root",
             "--engine.disable-state-cache",
             "--engine.disable-prewarming",
+            "--engine.sender-recovery-cache",
             "--engine.state-provider-metrics",
             "--engine.cross-block-cache-size",
             "256",
@@ -863,6 +996,7 @@ mod tests {
     fn validate_memory_block_buffer_target() {
         let args = EngineArgs {
             persistence_threshold: 4,
+            num_state_masking_blocks: 0,
             memory_block_buffer_target: Some(4),
             ..EngineArgs::default()
         };
@@ -875,11 +1009,52 @@ mod tests {
     }
 
     #[test]
+    fn test_parse_num_state_masking_blocks() {
+        let args = CommandParser::<EngineArgs>::parse_from([
+            "reth",
+            "--engine.persistence-threshold",
+            "13",
+            "--engine.num-state-masking-blocks",
+            "7",
+        ])
+        .args;
+
+        assert_eq!(args.tree_config().num_state_masking_blocks(), 7);
+    }
+
+    #[test]
+    fn validate_rejects_state_masking_window_at_or_above_threshold() {
+        let args = EngineArgs {
+            persistence_threshold: 4,
+            num_state_masking_blocks: 2,
+            memory_block_buffer_target: Some(2),
+            ..EngineArgs::default()
+        };
+
+        let err = args.validate().unwrap_err().to_string();
+        assert!(err.contains("engine.num-state-masking-blocks"));
+    }
+
+    #[test]
+    fn validate_rejects_overflowing_state_masking_window() {
+        let args = EngineArgs {
+            persistence_threshold: 7,
+            num_state_masking_blocks: u64::MAX,
+            ..EngineArgs::default()
+        };
+
+        let err = args.validate().unwrap_err().to_string();
+        assert!(err.contains("engine.num-state-masking-blocks"));
+    }
+
+    #[test]
     fn default_memory_block_buffer_target_is_bounded_by_persistence_threshold() {
         let args = CommandParser::<EngineArgs>::parse_from([
             "reth",
             "--engine.persistence-threshold",
             "4",
+            "--engine.num-state-masking-blocks",
+            "0",
         ])
         .args;
 
@@ -887,6 +1062,36 @@ mod tests {
         assert_eq!(args.memory_block_buffer_target(), 4);
         assert_eq!(args.tree_config().memory_block_buffer_target(), 4);
         args.validate().unwrap();
+    }
+
+    #[test]
+    fn explicit_persistence_settings_can_be_lower_than_defaults() {
+        let args = CommandParser::<EngineArgs>::parse_from([
+            "reth",
+            "--engine.persistence-threshold",
+            "0",
+            "--engine.persistence-backpressure-threshold",
+            "1",
+        ])
+        .args;
+
+        args.validate().unwrap();
+        let config = args.tree_config();
+        assert_eq!(config.persistence_threshold(), 0);
+        assert_eq!(config.num_state_masking_blocks(), 0);
+        assert_eq!(config.memory_block_buffer_target(), 0);
+        assert_eq!(config.persistence_backpressure_threshold(), 1);
+    }
+
+    #[test]
+    fn zero_persistence_threshold_disables_explicit_state_masking() {
+        let args = EngineArgs {
+            persistence_threshold: 0,
+            num_state_masking_blocks: u64::MAX,
+            ..EngineArgs::default()
+        };
+        args.validate().unwrap();
+        assert_eq!(args.tree_config().num_state_masking_blocks(), 0);
     }
 
     #[test]

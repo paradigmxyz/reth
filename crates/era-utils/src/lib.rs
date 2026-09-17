@@ -9,6 +9,6 @@ mod export;
 pub use export::{export, EraBlockWriter, ExportBlock, ExportConfig};
 
 pub use history::{
-    build_index, calculate_td_by_number, decode, import, open, process, process_iter,
-    save_stage_checkpoints, Era, Era1, EraBlockReader, Ere,
+    build_index, calculate_td_by_number, decode, decode_with_receipts, import, open, process,
+    process_iter, save_stage_checkpoints, Era, Era1, EraBlockReader, Ere, ImportPolicy,
 };

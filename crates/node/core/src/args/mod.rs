@@ -50,7 +50,7 @@ pub use txpool::{DefaultTxPoolValues, TxPoolArgs};
 
 /// DevArgs for configuring the dev testnet
 mod dev;
-pub use dev::DevArgs;
+pub use dev::{DefaultDevArgs, DevArgs};
 
 /// PruneArgs for configuring the pruning and full node
 mod pruning;

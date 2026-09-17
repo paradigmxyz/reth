@@ -148,7 +148,19 @@ impl RevertToSlot {
     }
 }
 
-/// Returns the hashed post-state represented by an execution state.
+/// Returns addresses whose parent storage must be cleared before applying final slot values.
+///
+/// evm2 represents terminal deletion in account deltas and destruction followed by recreation
+/// in storage wipes. Both need explicit parent-slot deletions at the trie boundary.
+pub fn destroyed_accounts(state: &BlockStateAccumulator) -> impl Iterator<Item = Address> + '_ {
+    state.storage_wipes().chain(state.accounts().filter_map(|(address, account)| {
+        (account.original.is_some() && account.current.is_none()).then_some(address)
+    }))
+}
+
+/// Returns the hashed updates represented by an execution state.
+///
+/// Providers must also materialize zero-valued parent slots for [`destroyed_accounts`].
 pub fn hashed_post_state_from_execution_state<KH>(state: &BlockStateAccumulator) -> HashedPostState
 where
     KH: KeyHasher,
@@ -437,7 +449,6 @@ impl<KH> HashedPostStateSink<KH> {
 
     fn drop_created_account_storage_wipe(&mut self, hashed_address: B256) {
         let remove_storage = if let Some(storage) = self.state.storages.get_mut(&hashed_address) {
-            storage.wiped = false;
             storage.storage.is_empty()
         } else {
             false
@@ -489,7 +500,6 @@ where
                 self.created_accounts.remove(&hashed_address);
                 // The account leaves the trie, but persisted storage tables still need the wipe.
                 let storage = self.state.storages.entry(hashed_address).or_default();
-                storage.wiped = true;
                 storage.storage.clear();
             }
         }
@@ -503,7 +513,6 @@ where
             self.state.storages.remove(&hashed_address);
         } else {
             let storage = self.state.storages.entry(hashed_address).or_default();
-            storage.wiped = true;
             storage.storage.clear();
         }
         Ok(())
@@ -512,9 +521,6 @@ where
     fn storage(&mut self, change: StorageChange) -> Result<(), Self::Error> {
         let hashed_address = KH::hash_key(change.address);
         let storage = self.state.storages.entry(hashed_address).or_default();
-        if storage.wiped && change.current.is_zero() {
-            return Ok(())
-        }
         storage.storage.insert(KH::hash_key(B256::new(change.key.to_be_bytes())), change.current);
         Ok(())
     }
@@ -631,7 +637,6 @@ mod tests {
         let hashed_state = sink.into_hashed_post_state();
         let storage = hashed_state.storages.get(&KeccakKeyHasher::hash_key(address)).unwrap();
 
-        assert!(storage.wiped);
         assert_eq!(storage.storage.len(), 1);
         assert_eq!(
             storage.storage.get(&KeccakKeyHasher::hash_key(B256::new(U256::from(3).to_be_bytes()))),

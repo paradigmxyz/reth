@@ -320,6 +320,5 @@ where
     let BlockBuilderOutcome { block, block_access_list, .. } =
         builder.finish(state_provider.as_ref(), None)?;
 
-    let encoded_bal = block_access_list.map(|bal| alloy_rlp::encode(&bal).into());
-    Ok((block.into_sealed_block(), encoded_bal))
+    Ok((block.into_sealed_block(), block_access_list.map(|bal| bal.split().1)))
 }

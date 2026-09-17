@@ -11,7 +11,7 @@ use reth_chainspec::MIN_TRANSACTION_GAS;
 use reth_evm::{EvmEnv, EvmEnvFor, EvmTypesFor};
 use reth_rpc_convert::{RpcConvert, RpcTxReq};
 use reth_rpc_eth_types::{
-    cache::db::{apply_block_overrides, apply_state_overrides, StateProviderTraitObjWrapper},
+    cache::db::{apply_block_overrides, apply_state_overrides},
     error::api::{FromEvmHalt, FromRevert},
     EthApiError, RpcInvalidTransactionError,
 };
@@ -66,7 +66,7 @@ pub trait EstimateCall: Call {
         // Configure the evm env
         let state: StateProviderBox = Box::new(state);
         let mut db = evm2::evm::CacheDB::new(evm2::evm::Db::new(
-            reth_evm::database::StateProviderDatabase::new(StateProviderTraitObjWrapper(state)),
+            reth_evm::database::StateProviderDatabase::new(state),
         ));
 
         // Apply any block overrides before deriving block-derived limits and the tx env so
@@ -103,7 +103,8 @@ pub trait EstimateCall: Call {
         {
             match db.get_account(&to) {
                 Ok(Some(account)) => account.code_hash == KECCAK256_EMPTY,
-                _ => true,
+                Ok(None) => true,
+                Err(_) => false,
             }
         } else {
             false
@@ -131,7 +132,7 @@ pub trait EstimateCall: Call {
             let Ok(res) = execute(MIN_TRANSACTION_GAS) &&
             res.status
         {
-            return Ok(U256::from(MIN_TRANSACTION_GAS))
+            return Ok(U256::from(res.tx_gas_used()))
         }
 
         trace!(target: "rpc::eth::estimate", ?request, gas_limit = highest_gas_limit, is_basic_transfer, "Starting gas estimation");

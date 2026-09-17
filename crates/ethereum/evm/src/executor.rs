@@ -260,21 +260,14 @@ where
         .map_err(Into::into)
     }
 
-    fn execute_transaction_without_commit(
-        &mut self,
-        transaction: impl ExecutorTx<Self>,
-    ) -> Result<Self::TransactionResultWithState, BlockExecutionError> {
-        let (transaction, tx) = transaction.into_parts();
-        let tx_hash = *tx.tx().tx_hash();
-        self.set_transaction_block_access_index();
-        let transaction_gas_limit = tx.tx().gas_limit();
+    fn validate_transaction_gas_limit(&mut self, transaction_gas_limit: u64) -> Result<(), BlockExecutionError> {
         let block_gas_limit = self.evm.block_env().gas_limit.to::<u64>();
         let unavailable = if self.separate_block_gas {
             let regular_available = block_gas_limit.saturating_sub(self.block_regular_gas_used);
             let state_available = block_gas_limit.saturating_sub(self.block_state_gas_used);
             let regular_limit = transaction_gas_limit.min(self.evm.version().tx_gas_limit_cap);
             if regular_limit > regular_available {
-                Some((regular_limit, regular_available))
+                Some((transaction_gas_limit, regular_available))
             } else if transaction_gas_limit > state_available {
                 Some((transaction_gas_limit, state_available))
             } else {
@@ -282,7 +275,8 @@ where
             }
         } else {
             let available = block_gas_limit.saturating_sub(self.cumulative_gas_used);
-            (transaction_gas_limit > available).then_some((transaction_gas_limit, available))
+            let regular_limit = transaction_gas_limit.min(self.evm.version().tx_gas_limit_cap);
+            (regular_limit > available).then_some((transaction_gas_limit, available))
         };
         if let Some((transaction_gas_limit, block_available_gas)) = unavailable {
             return Err(BlockValidationError::TransactionGasLimitMoreThanAvailableBlockGas {
@@ -291,6 +285,18 @@ where
             }
             .into())
         }
+        Ok(())
+    }
+
+    fn execute_transaction_without_commit(
+        &mut self,
+        transaction: impl ExecutorTx<Self>,
+    ) -> Result<Self::TransactionResultWithState, BlockExecutionError> {
+        let (transaction, tx) = transaction.into_parts();
+        let tx_hash = *tx.tx().tx_hash();
+        self.set_transaction_block_access_index();
+        let transaction_gas_limit = tx.tx().gas_limit();
+        self.validate_transaction_gas_limit(transaction_gas_limit)?;
         let blob_gas_used = tx.tx().blob_gas_used().unwrap_or_default();
         let tx_type = tx.tx().tx_type();
         let result = execute_transaction_without_commit(&mut self.evm, &transaction)
@@ -817,6 +823,10 @@ where
             self.apply_segment_boundary()?;
         }
         Ok(())
+    }
+
+    fn validate_transaction_gas_limit(&mut self, gas_limit: u64) -> Result<(), BlockExecutionError> {
+        self.inner.validate_transaction_gas_limit(gas_limit)
     }
 
     fn execute_transaction_without_commit(

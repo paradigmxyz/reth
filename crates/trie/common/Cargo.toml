@@ -28,6 +28,7 @@ bytes = { workspace = true, optional = true }
 derive_more.workspace = true
 itertools = { workspace = true, features = ["use_alloc"] }
 nybbles = { workspace = true, features = ["rlp"] }
+thiserror.workspace = true
 
 # `serde` feature
 serde = { workspace = true, optional = true }
@@ -80,6 +81,7 @@ std = [
     "serde?/std",
     "serde_with?/std",
     "serde_json/std",
+    "thiserror/std",
     "reth-codecs?/std",
     "alloy-eips/std",
 ]

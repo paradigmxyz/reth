@@ -12,13 +12,13 @@ description = "Ethereum primitive types"
 workspace = true
 
 [dependencies]
+alloy-primitives.workspace = true
 # reth
 reth-codecs = { workspace = true, optional = true, features = ["alloy"] }
 reth-primitives-traits.workspace = true
 
 # ethereum
 alloy-eips = { workspace = true, features = ["k256"] }
-alloy-primitives.workspace = true
 alloy-consensus = { workspace = true, features = ["serde"] }
 alloy-rpc-types-eth = { workspace = true, optional = true }
 
@@ -26,6 +26,7 @@ alloy-rpc-types-eth = { workspace = true, optional = true }
 serde = { workspace = true, optional = true }
 
 [dev-dependencies]
+alloy-primitives.workspace = true
 arbitrary.workspace = true
 proptest.workspace = true
 proptest-arbitrary-interop.workspace = true

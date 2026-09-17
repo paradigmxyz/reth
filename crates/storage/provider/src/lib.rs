@@ -22,10 +22,9 @@ pub use traits::*;
 /// Provider trait implementations.
 pub mod providers;
 pub use providers::{
-    DatabaseProvider, DatabaseProviderRO, DatabaseProviderRW, HistoricalStateProvider,
-    HistoricalStateProviderRef, LatestStateProvider, LatestStateProviderRef, ProviderFactory,
-    PruneShardOutcome, PrunedIndices, SaveBlocksMode, StaticFileAccess, StaticFileProviderBuilder,
-    StaticFileWriteCtx, StaticFileWriter,
+    DatabaseProvider, DatabaseProviderRO, DatabaseProviderRW, LatestStateProvider,
+    LatestStateProviderRef, ProviderFactory, PruneShardOutcome, PrunedIndices, SaveBlocksInput,
+    StaticFileAccess, StaticFileProviderBuilder, StaticFileWriteCtx, StaticFileWriter,
 };
 
 pub mod changeset_walker;
@@ -41,7 +40,7 @@ pub use either_writer::*;
 mod writer;
 
 mod bal;
-pub use bal::{BalConfig, InMemoryBalStore};
+pub use bal::{BalConfig, InMemoryBalStore, RocksDBBalStore};
 
 pub use reth_chain_state::{
     CanonStateNotification, CanonStateNotificationSender, CanonStateNotificationStream,

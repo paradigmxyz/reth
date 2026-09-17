@@ -113,13 +113,14 @@ where
     /// Fills the block cache with the notifications from the storage.
     #[instrument(skip(self))]
     fn fill_block_cache(&self) -> WalResult<()> {
-        let Some(files_range) = self.storage.files_range()? else { return Ok(()) };
-        self.next_file_id.store(files_range.end() + 1, Ordering::Relaxed);
+        let file_ids = self.storage.file_ids()?;
+        let Some(last_file_id) = file_ids.last() else { return Ok(()) };
+        self.next_file_id.store(last_file_id + 1, Ordering::Relaxed);
 
         let mut block_cache = self.block_cache.write();
         let mut notifications_size = 0;
 
-        for entry in self.storage.iter_notifications(files_range) {
+        for entry in self.storage.iter_notifications(file_ids) {
             let (file_id, size, notification) = entry?;
 
             notifications_size += size;
@@ -198,11 +199,9 @@ where
     fn iter_notifications(
         &self,
     ) -> WalResult<Box<dyn Iterator<Item = WalResult<ExExNotification<N>>> + '_>> {
-        let Some(range) = self.storage.files_range()? else {
-            return Ok(Box::new(std::iter::empty()))
-        };
-
-        Ok(Box::new(self.storage.iter_notifications(range).map(|entry| Ok(entry?.2))))
+        Ok(Box::new(
+            self.storage.iter_notifications(self.storage.file_ids()?).map(|entry| Ok(entry?.2)),
+        ))
     }
 }
 
@@ -238,6 +237,7 @@ mod tests {
     use crate::wal::{cache::CachedBlock, error::WalResult, Wal};
     use alloy_primitives::B256;
     use itertools::Itertools;
+    use reth_ethereum_primitives::EthPrimitives;
     use reth_exex_types::ExExNotification;
     use reth_provider::Chain;
     use reth_testing_utils::generators::{
@@ -246,13 +246,11 @@ mod tests {
     use std::{collections::BTreeMap, sync::Arc};
 
     fn read_notifications(wal: &Wal) -> WalResult<Vec<ExExNotification>> {
-        wal.inner.storage.files_range()?.map_or(Ok(Vec::new()), |range| {
-            wal.inner
-                .storage
-                .iter_notifications(range)
-                .map(|entry| entry.map(|(_, _, n)| n))
-                .collect()
-        })
+        wal.inner
+            .storage
+            .iter_notifications(wal.inner.storage.file_ids()?)
+            .map(|entry| entry.map(|(_, _, n)| n))
+            .collect()
     }
 
     fn sort_committed_blocks(
@@ -519,6 +517,46 @@ mod tests {
             )
         );
         assert_eq!(read_notifications(&wal)?, vec![committed_notification_2, reorged_notification]);
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_finalize_with_sparse_file_ids() -> eyre::Result<()> {
+        let mut rng = generators::rng();
+
+        let temp_dir = tempfile::tempdir()?;
+        let wal = Wal::<EthPrimitives>::new(&temp_dir)?;
+
+        let blocks = random_block_range(&mut rng, 0..=5, BlockRangeParams::default())
+            .into_iter()
+            .map(|block| block.try_recover())
+            .collect::<Result<Vec<_>, _>>()?;
+        let chain = |range: std::ops::RangeInclusive<usize>| {
+            Arc::new(Chain::new(blocks[range].to_vec(), Default::default(), BTreeMap::new()))
+        };
+
+        let commit_to_four = ExExNotification::ChainCommitted { new: chain(1..=4) };
+        let revert_to_two = ExExNotification::ChainReverted { old: chain(2..=4) };
+        let commit_two = ExExNotification::ChainCommitted { new: chain(2..=2) };
+        let commit_to_five = ExExNotification::ChainCommitted { new: chain(3..=5) };
+
+        wal.commit(&commit_to_four)?;
+        wal.commit(&revert_to_two)?;
+        wal.commit(&commit_two)?;
+        wal.commit(&commit_to_five)?;
+        assert_eq!(wal.inner.storage.file_ids()?, vec![0, 1, 2, 3]);
+
+        // File 2 has a lower maximum block than the surrounding notifications, so finalizing it
+        // leaves a gap in the file ID sequence.
+        wal.finalize((blocks[2].number, blocks[2].hash()).into())?;
+        assert_eq!(wal.inner.storage.file_ids()?, vec![0, 1, 3]);
+
+        let wal = Wal::<EthPrimitives>::new(&temp_dir)?;
+        assert_eq!(read_notifications(&wal)?, vec![commit_to_four, revert_to_two, commit_to_five]);
+
+        wal.commit(&commit_two)?;
+        assert_eq!(wal.inner.storage.file_ids()?, vec![0, 1, 3, 4]);
 
         Ok(())
     }

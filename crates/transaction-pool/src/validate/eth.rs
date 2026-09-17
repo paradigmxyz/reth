@@ -2,22 +2,21 @@
 
 use super::constants::DEFAULT_MAX_TX_INPUT_BYTES;
 use crate::{
-    blobstore::BlobStore,
+    blobstore::{BlobStore, PooledBlobSidecar},
     error::{
         Eip4844PoolTransactionError, Eip7702PoolTransactionError, InvalidPoolTransactionError,
     },
     metrics::TxPoolValidationMetrics,
     traits::TransactionOrigin,
     validate::ValidTransaction,
-    Address, BlobTransactionSidecarVariant, EthBlobTransactionSidecar, EthPoolTransaction,
-    LocalTransactionConfig, TransactionValidationOutcome, TransactionValidationTaskExecutor,
-    TransactionValidator,
+    Address, EthBlobTransactionSidecar, EthPoolTransaction, LocalTransactionConfig,
+    TransactionValidationOutcome, TransactionValidationTaskExecutor, TransactionValidator,
 };
 
 use alloy_consensus::{
     constants::{
         EIP1559_TX_TYPE_ID, EIP2930_TX_TYPE_ID, EIP4844_TX_TYPE_ID, EIP7702_TX_TYPE_ID,
-        LEGACY_TX_TYPE_ID,
+        KECCAK_EMPTY, LEGACY_TX_TYPE_ID,
     },
     BlockHeader,
 };
@@ -489,8 +488,7 @@ where
         };
 
         // Reject transactions with a nonce equal to U64::max according to EIP-2681
-        let tx_nonce = transaction.nonce();
-        if tx_nonce == u64::MAX {
+        if transaction.requires_nonce_bound_check() && transaction.nonce() == u64::MAX {
             return Err(InvalidPoolTransactionError::Eip2681)
         }
 
@@ -575,10 +573,9 @@ where
             }
         }
 
-        // Drop non-local transactions with a fee lower than the configured fee for acceptance into
-        // the pool.
-        if !is_local &&
-            transaction.is_dynamic_fee() &&
+        // Drop dynamic fee transactions with a fee lower than the configured fee for acceptance
+        // into the pool.
+        if transaction.is_dynamic_fee() &&
             transaction.max_priority_fee_per_gas() < self.minimum_priority_fee
         {
             return Err(InvalidPoolTransactionError::PriorityFeeBelowMinimum {
@@ -606,7 +603,7 @@ where
             }
         }
 
-        ensure_intrinsic_gas(transaction, self.transaction_validation_gas_rules.load())?;
+        ensure_intrinsic_gas(transaction, &self.transaction_validation_gas_rules.load())?;
 
         // light blob tx pre-checks
         if transaction.is_eip4844() {
@@ -734,7 +731,9 @@ where
         //
         // Any other case means that the account is not an EOA, and should not be able to send
         // transactions.
-        if let Some(code_hash) = &sender.bytecode_hash {
+        if let Some(code_hash) = &sender.bytecode_hash &&
+            *code_hash != KECCAK_EMPTY
+        {
             let is_eip7702 = if self.fork_tracker.is_prague_activated() {
                 match state.bytecode_by_hash(code_hash) {
                     Ok(bytecode) => bytecode.unwrap_or_default().is_eip7702(),
@@ -796,7 +795,7 @@ where
     pub fn validate_eip4844(
         &self,
         transaction: &mut Tx,
-    ) -> Result<Option<BlobTransactionSidecarVariant>, InvalidPoolTransactionError> {
+    ) -> Result<Option<PooledBlobSidecar>, InvalidPoolTransactionError> {
         let mut maybe_blob_sidecar = None;
 
         // heavy blob tx validation
@@ -916,6 +915,10 @@ where
             self.fork_tracker.osaka.store(true, std::sync::atomic::Ordering::Relaxed);
         }
 
+        if self.chain_spec().is_amsterdam_active_at_timestamp(new_tip_block.timestamp()) {
+            self.fork_tracker.amsterdam.store(true, std::sync::atomic::Ordering::Relaxed);
+        }
+
         self.fork_tracker
             .tip_timestamp
             .store(new_tip_block.timestamp(), std::sync::atomic::Ordering::Relaxed);
@@ -1012,6 +1015,8 @@ pub struct EthTransactionValidatorBuilder<Client, Evm> {
     prague: bool,
     /// Fork indicator whether we are in the Osaka hardfork.
     osaka: bool,
+    /// Fork indicator whether we are in the Amsterdam hardfork.
+    amsterdam: bool,
     /// Timestamp of the tip block.
     tip_timestamp: u64,
     /// Max blob count at the block's timestamp.
@@ -1101,6 +1106,7 @@ impl<Client, Evm> EthTransactionValidatorBuilder<Client, Evm> {
             cancun: chain_spec.is_cancun_active_at_timestamp(tip.timestamp()),
             prague: chain_spec.is_prague_active_at_timestamp(tip.timestamp()),
             osaka: chain_spec.is_osaka_active_at_timestamp(tip.timestamp()),
+            amsterdam: chain_spec.is_amsterdam_active_at_timestamp(tip.timestamp()),
 
             tip_timestamp: tip.timestamp(),
 
@@ -1172,6 +1178,17 @@ impl<Client, Evm> EthTransactionValidatorBuilder<Client, Evm> {
     /// Set the Osaka fork.
     pub const fn set_osaka(mut self, osaka: bool) -> Self {
         self.osaka = osaka;
+        self
+    }
+
+    /// Disables the Amsterdam fork.
+    pub const fn no_amsterdam(self) -> Self {
+        self.set_amsterdam(false)
+    }
+
+    /// Set the Amsterdam fork.
+    pub const fn set_amsterdam(mut self, amsterdam: bool) -> Self {
+        self.amsterdam = amsterdam;
         self
     }
 
@@ -1309,6 +1326,7 @@ impl<Client, Evm> EthTransactionValidatorBuilder<Client, Evm> {
             cancun,
             prague,
             osaka,
+            amsterdam,
             tip_timestamp,
             eip2718,
             eip1559,
@@ -1334,6 +1352,7 @@ impl<Client, Evm> EthTransactionValidatorBuilder<Client, Evm> {
             cancun: AtomicBool::new(cancun),
             prague: AtomicBool::new(prague),
             osaka: AtomicBool::new(osaka),
+            amsterdam: AtomicBool::new(amsterdam),
             tip_timestamp: AtomicU64::new(tip_timestamp),
             max_blob_count: AtomicU64::new(max_blob_count),
             max_initcode_size: AtomicUsize::new(validation_rules.max_initcode_size),
@@ -1401,6 +1420,8 @@ pub struct ForkTracker {
     pub prague: AtomicBool,
     /// Tracks if osaka is activated at the block's timestamp.
     pub osaka: AtomicBool,
+    /// Tracks if amsterdam is activated at the block's timestamp.
+    pub amsterdam: AtomicBool,
     /// Tracks max blob count per transaction at the block's timestamp.
     pub max_blob_count: AtomicU64,
     /// Tracks the timestamp of the tip block.
@@ -1436,108 +1457,21 @@ where
     })
 }
 
-/// Atomic transaction validation gas rules.
+/// Publishes a coherent gas schedule when the head crosses a fork boundary.
 #[derive(Debug)]
-struct AtomicTransactionValidationGasRules {
-    tx_base_gas: AtomicU64,
-    tx_create_gas: AtomicU64,
-    tx_data_zero_gas: AtomicU64,
-    tx_data_non_zero_gas: AtomicU64,
-    tx_access_list_address_gas: AtomicU64,
-    tx_access_list_storage_key_gas: AtomicU64,
-    tx_access_list_floor_byte_multiplier: AtomicU64,
-    tx_initcode_word_gas: AtomicU64,
-    tx_floor_gas_base: AtomicU64,
-    tx_floor_gas_per_token: AtomicU64,
-    tx_floor_gas_non_zero_token_multiplier: AtomicU64,
-    tx_eip7702_per_empty_account_cost: AtomicU64,
-}
+struct AtomicTransactionValidationGasRules(parking_lot::RwLock<EvmTransactionValidationGasRules>);
 
 impl AtomicTransactionValidationGasRules {
-    /// Creates atomic gas rules from resolved gas rules.
     const fn new(rules: EvmTransactionValidationGasRules) -> Self {
-        Self {
-            tx_base_gas: AtomicU64::new(rules.tx_base_gas),
-            tx_create_gas: AtomicU64::new(rules.tx_create_gas),
-            tx_data_zero_gas: AtomicU64::new(rules.tx_data_zero_gas),
-            tx_data_non_zero_gas: AtomicU64::new(rules.tx_data_non_zero_gas),
-            tx_access_list_address_gas: AtomicU64::new(rules.tx_access_list_address_gas),
-            tx_access_list_storage_key_gas: AtomicU64::new(rules.tx_access_list_storage_key_gas),
-            tx_access_list_floor_byte_multiplier: AtomicU64::new(
-                rules.tx_access_list_floor_byte_multiplier,
-            ),
-            tx_initcode_word_gas: AtomicU64::new(rules.tx_initcode_word_gas),
-            tx_floor_gas_base: AtomicU64::new(rules.tx_floor_gas_base),
-            tx_floor_gas_per_token: AtomicU64::new(rules.tx_floor_gas_per_token),
-            tx_floor_gas_non_zero_token_multiplier: AtomicU64::new(
-                rules.tx_floor_gas_non_zero_token_multiplier,
-            ),
-            tx_eip7702_per_empty_account_cost: AtomicU64::new(
-                rules.tx_eip7702_per_empty_account_cost,
-            ),
-        }
+        Self(parking_lot::RwLock::new(rules))
     }
 
-    /// Loads resolved gas rules.
-    fn load(&self) -> EvmTransactionValidationGasRules {
-        EvmTransactionValidationGasRules {
-            tx_base_gas: self.tx_base_gas.load(std::sync::atomic::Ordering::Relaxed),
-            tx_create_gas: self.tx_create_gas.load(std::sync::atomic::Ordering::Relaxed),
-            tx_data_zero_gas: self.tx_data_zero_gas.load(std::sync::atomic::Ordering::Relaxed),
-            tx_data_non_zero_gas: self
-                .tx_data_non_zero_gas
-                .load(std::sync::atomic::Ordering::Relaxed),
-            tx_access_list_address_gas: self
-                .tx_access_list_address_gas
-                .load(std::sync::atomic::Ordering::Relaxed),
-            tx_access_list_storage_key_gas: self
-                .tx_access_list_storage_key_gas
-                .load(std::sync::atomic::Ordering::Relaxed),
-            tx_access_list_floor_byte_multiplier: self
-                .tx_access_list_floor_byte_multiplier
-                .load(std::sync::atomic::Ordering::Relaxed),
-            tx_initcode_word_gas: self
-                .tx_initcode_word_gas
-                .load(std::sync::atomic::Ordering::Relaxed),
-            tx_floor_gas_base: self.tx_floor_gas_base.load(std::sync::atomic::Ordering::Relaxed),
-            tx_floor_gas_per_token: self
-                .tx_floor_gas_per_token
-                .load(std::sync::atomic::Ordering::Relaxed),
-            tx_floor_gas_non_zero_token_multiplier: self
-                .tx_floor_gas_non_zero_token_multiplier
-                .load(std::sync::atomic::Ordering::Relaxed),
-            tx_eip7702_per_empty_account_cost: self
-                .tx_eip7702_per_empty_account_cost
-                .load(std::sync::atomic::Ordering::Relaxed),
-        }
+    fn load(&self) -> parking_lot::RwLockReadGuard<'_, EvmTransactionValidationGasRules> {
+        self.0.read()
     }
 
-    /// Stores resolved gas rules.
     fn store(&self, rules: EvmTransactionValidationGasRules) {
-        self.tx_base_gas.store(rules.tx_base_gas, std::sync::atomic::Ordering::Relaxed);
-        self.tx_create_gas.store(rules.tx_create_gas, std::sync::atomic::Ordering::Relaxed);
-        self.tx_data_zero_gas.store(rules.tx_data_zero_gas, std::sync::atomic::Ordering::Relaxed);
-        self.tx_data_non_zero_gas
-            .store(rules.tx_data_non_zero_gas, std::sync::atomic::Ordering::Relaxed);
-        self.tx_access_list_address_gas
-            .store(rules.tx_access_list_address_gas, std::sync::atomic::Ordering::Relaxed);
-        self.tx_access_list_storage_key_gas
-            .store(rules.tx_access_list_storage_key_gas, std::sync::atomic::Ordering::Relaxed);
-        self.tx_access_list_floor_byte_multiplier.store(
-            rules.tx_access_list_floor_byte_multiplier,
-            std::sync::atomic::Ordering::Relaxed,
-        );
-        self.tx_initcode_word_gas
-            .store(rules.tx_initcode_word_gas, std::sync::atomic::Ordering::Relaxed);
-        self.tx_floor_gas_base.store(rules.tx_floor_gas_base, std::sync::atomic::Ordering::Relaxed);
-        self.tx_floor_gas_per_token
-            .store(rules.tx_floor_gas_per_token, std::sync::atomic::Ordering::Relaxed);
-        self.tx_floor_gas_non_zero_token_multiplier.store(
-            rules.tx_floor_gas_non_zero_token_multiplier,
-            std::sync::atomic::Ordering::Relaxed,
-        );
-        self.tx_eip7702_per_empty_account_cost
-            .store(rules.tx_eip7702_per_empty_account_cost, std::sync::atomic::Ordering::Relaxed);
+        *self.0.write() = rules;
     }
 }
 
@@ -1574,6 +1508,11 @@ impl ForkTracker {
         self.osaka.load(std::sync::atomic::Ordering::Relaxed)
     }
 
+    /// Returns `true` if Amsterdam fork is activated.
+    pub fn is_amsterdam_activated(&self) -> bool {
+        self.amsterdam.load(std::sync::atomic::Ordering::Relaxed)
+    }
+
     /// Returns the timestamp of the tip block.
     pub fn tip_timestamp(&self) -> u64 {
         self.tip_timestamp.load(std::sync::atomic::Ordering::Relaxed)
@@ -1588,7 +1527,7 @@ impl ForkTracker {
 /// Ensures that gas limit of the transaction exceeds the intrinsic gas of the transaction.
 fn ensure_intrinsic_gas<T: EthPoolTransaction>(
     transaction: &T,
-    gas_rules: EvmTransactionValidationGasRules,
+    gas_rules: &EvmTransactionValidationGasRules,
 ) -> Result<(), InvalidPoolTransactionError> {
     let access_list_accounts =
         transaction.access_list().map(|l| l.len()).unwrap_or_default() as u64;
@@ -1600,8 +1539,10 @@ fn ensure_intrinsic_gas<T: EthPoolTransaction>(
         transaction.authorization_list().map(|l| l.len()).unwrap_or_default() as u64;
 
     let gas = gas_rules.calculate(
+        transaction.sender(),
+        transaction.kind(),
+        transaction.value(),
         transaction.input(),
-        transaction.is_create(),
         access_list_accounts,
         access_list_storage_keys,
         authorization_list_len,
@@ -1627,7 +1568,7 @@ mod tests {
         eip2718::{Decodable2718, Encodable2718},
         eip2930::{AccessList, AccessListItem},
     };
-    use alloy_primitives::{hex, Address, B256, U256};
+    use alloy_primitives::{hex, Address, Bytes, B256, U256};
     use reth_ethereum_primitives::PooledTransactionVariant;
     use reth_evm_ethereum::EthEvmConfig;
     use reth_primitives_traits::SignedTransaction;
@@ -1651,15 +1592,83 @@ mod tests {
         EthPooledTransaction::from_pooled(tx.try_into_recovered().unwrap())
     }
 
+    fn eip1559_tx(
+        to: Address,
+        sender: Address,
+        value: u64,
+        gas_limit: u64,
+    ) -> EthPooledTransaction {
+        let tx = alloy_consensus::TxEip1559 {
+            chain_id: 1,
+            nonce: 0,
+            gas_limit,
+            max_fee_per_gas: 1,
+            max_priority_fee_per_gas: 0,
+            to: to.into(),
+            value: U256::from(value),
+            ..Default::default()
+        };
+        let signed = reth_ethereum_primitives::TransactionSigned::new_unhashed(
+            tx.into(),
+            alloy_primitives::Signature::test_signature(),
+        );
+        EthPooledTransaction::new(
+            alloy_consensus::transaction::Recovered::new_unchecked(signed, sender),
+            200,
+        )
+    }
+
+    /// EIP-2780 replaces the flat 21k intrinsic base with a decomposed one: 12k base, plus a cold
+    /// account access for `tx.to` and a transfer charge when `tx.value` is non-zero, with a
+    /// carve-out for self-transfers.
+    #[test]
+    fn intrinsic_gas_eip2780() {
+        let sender = Address::repeat_byte(1);
+        let recipient = Address::repeat_byte(2);
+
+        let amsterdam = || ForkTracker {
+            shanghai: true.into(),
+            cancun: true.into(),
+            prague: true.into(),
+            osaka: true.into(),
+            amsterdam: true.into(),
+            tip_timestamp: 0.into(),
+            max_blob_count: 0.into(),
+            max_initcode_size: AtomicUsize::new(MAX_INITCODE_SIZE),
+            tx_gas_limit_cap: AtomicU64::new(0),
+        };
+        let pre_amsterdam = || ForkTracker { amsterdam: false.into(), ..amsterdam() };
+
+        // Self-transfer: base cost only (12k), where pre-Amsterdam it pays the flat 21k.
+        let self_transfer = eip1559_tx(sender, sender, 1, 15_000);
+        assert!(ensure_intrinsic_gas(&self_transfer, &amsterdam()).is_ok());
+        assert!(ensure_intrinsic_gas(&self_transfer, &pre_amsterdam()).is_err());
+
+        // Zero-value call to another account: base + cold account access (15k).
+        let zero_value = eip1559_tx(recipient, sender, 0, 15_000);
+        assert!(ensure_intrinsic_gas(&zero_value, &amsterdam()).is_ok());
+        assert!(
+            ensure_intrinsic_gas(&eip1559_tx(recipient, sender, 0, 14_999), &amsterdam()).is_err()
+        );
+
+        // Value transfer to another account: base + cold access + transfer log + value cost (21k).
+        assert!(
+            ensure_intrinsic_gas(&eip1559_tx(recipient, sender, 1, 15_000), &amsterdam()).is_err()
+        );
+        assert!(
+            ensure_intrinsic_gas(&eip1559_tx(recipient, sender, 1, 21_000), &amsterdam()).is_ok()
+        );
+    }
+
     // <https://github.com/paradigmxyz/reth/issues/5178>
     #[tokio::test]
     async fn validate_transaction() {
         let transaction = get_transaction();
 
-        let res = ensure_intrinsic_gas(&transaction, validation_gas_rules(1681338454));
+        let res = ensure_intrinsic_gas(&transaction, &validation_gas_rules(1681338454));
         assert!(res.is_ok());
 
-        let res = ensure_intrinsic_gas(&transaction, validation_gas_rules(1681338455));
+        let res = ensure_intrinsic_gas(&transaction, &validation_gas_rules(1681338455));
         assert!(res.is_ok());
 
         let provider = MockEthProvider::default().with_genesis_block();
@@ -1682,6 +1691,50 @@ mod tests {
         assert!(res.is_ok());
         let tx = pool.get(transaction.hash());
         assert!(tx.is_some());
+    }
+
+    #[test]
+    fn accepts_sender_with_empty_bytecode() {
+        let transaction = get_transaction();
+        let provider = MockEthProvider::default().with_genesis_block();
+        provider.add_account(
+            transaction.sender(),
+            ExtendedAccount::new(transaction.nonce(), U256::MAX).with_bytecode(Bytes::new()),
+        );
+        let validator = EthTransactionValidatorBuilder::new(provider, test_evm_config())
+            .build(InMemoryBlobStore::default());
+
+        let outcome = validator.validate_one(TransactionOrigin::External, transaction);
+
+        assert!(outcome.is_valid());
+    }
+
+    #[test]
+    fn validates_nonce_bound() {
+        let provider = MockEthProvider::default().with_genesis_block();
+        let validator = EthTransactionValidatorBuilder::new(provider, test_evm_config())
+            .build(InMemoryBlobStore::default());
+        let transaction = |nonce| {
+            EthPooledTransaction::try_from_consensus(
+                TransactionBuilder::default()
+                    .chain_id(validator.chain_id())
+                    .nonce(nonce)
+                    .gas_limit(21_000)
+                    .to(Address::ZERO)
+                    .into_eip1559()
+                    .try_into_recovered()
+                    .unwrap(),
+            )
+            .unwrap()
+        };
+
+        assert!(validator
+            .validate_stateless(TransactionOrigin::External, &transaction(u64::MAX - 1))
+            .is_ok());
+        assert!(matches!(
+            validator.validate_stateless(TransactionOrigin::External, &transaction(u64::MAX)),
+            Err(InvalidPoolTransactionError::Eip2681)
+        ));
     }
 
     #[test]
@@ -1932,24 +1985,27 @@ mod tests {
         let validator =
             create_validator_with_minimum_fee(provider, Some(minimum_priority_fee), None);
 
-        // External transaction should be rejected due to low priority fee
-        let outcome = validator.validate_one(TransactionOrigin::External, transaction.clone());
-        assert!(outcome.is_invalid());
-
-        if let TransactionValidationOutcome::Invalid(_, err) = outcome {
+        for origin in
+            [TransactionOrigin::External, TransactionOrigin::Local, TransactionOrigin::Private]
+        {
+            let outcome = validator.validate_one(origin, transaction.clone());
             assert!(matches!(
-                err,
-                InvalidPoolTransactionError::PriorityFeeBelowMinimum { minimum_priority_fee: min_fee }
-                if min_fee == minimum_priority_fee
+                outcome,
+                TransactionValidationOutcome::Invalid(
+                    _,
+                    InvalidPoolTransactionError::PriorityFeeBelowMinimum {
+                        minimum_priority_fee: min_fee
+                    }
+                ) if min_fee == minimum_priority_fee
             ));
         }
 
-        // Test pool integration
+        // Local submission is the path used by `eth_sendRawTransaction`.
         let blob_store = InMemoryBlobStore::default();
         let pool =
             Pool::new(validator, CoinbaseTipOrdering::default(), blob_store, Default::default());
 
-        let res = pool.add_external_transaction(transaction.clone()).await;
+        let res = pool.add_transaction(TransactionOrigin::Local, transaction.clone()).await;
         assert!(res.is_err());
         assert!(matches!(
             res.unwrap_err().kind,
@@ -1959,14 +2015,6 @@ mod tests {
         ));
         let tx = pool.get(transaction.hash());
         assert!(tx.is_none());
-
-        // Local transactions should still be accepted regardless of minimum priority fee
-        let (_, local_provider) = setup_priority_fee_test();
-        let validator_local =
-            create_validator_with_minimum_fee(local_provider, Some(minimum_priority_fee), None);
-
-        let local_outcome = validator_local.validate_one(TransactionOrigin::Local, transaction);
-        assert!(local_outcome.is_valid());
     }
 
     #[tokio::test]

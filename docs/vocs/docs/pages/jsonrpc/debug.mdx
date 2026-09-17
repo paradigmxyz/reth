@@ -53,13 +53,25 @@ Returns an array of recent bad blocks that the client has seen on the network.
 | ------ | ------------------------------------------------ |
 | RPC    | `{"method": "debug_getBadBlocks", "params": []}` |
 
-## `debug_traceChain`
+## `debug_subscribe`, `debug_unsubscribe`
 
-Returns the structured logs created during the execution of EVM between two blocks (excluding start) as a JSON object.
+Subscribes to structured logs created during EVM execution between two blocks. The start block is
+excluded and the end block is included. Pass `"traceChain"` as the subscription type and optionally
+provide tracing options.
 
-| Client | Method invocation                                                    |
-| ------ | -------------------------------------------------------------------- |
-| RPC    | `{"method": "debug_traceChain", "params": [start_block, end_block]}` |
+The subscription returns an ID and emits `debug_subscription` notifications containing the block
+number and its transaction traces. Empty intermediate blocks are omitted, but the end block is
+always emitted. Pass the subscription ID to `debug_unsubscribe` to stop receiving notifications.
+
+| Client | Method invocation                                                                                 |
+| ------ | ------------------------------------------------------------------------------------------------- |
+| RPC    | `{"method": "debug_subscribe", "params": ["traceChain", start_block, end_block, opts]}` |
+| RPC    | `{"method": "debug_unsubscribe", "params": [subscription_id]}`                            |
+
+:::note
+Subscriptions are only available over WebSocket and IPC transports, as HTTP does not support
+server-initiated messages.
+:::
 
 ## `debug_traceBlock`
 
@@ -127,13 +139,15 @@ This method returns nested lists of traces, where the outer list length is the n
 
 Allows for re-execution of a block with the purpose of generating an execution witness. The witness comprises a map of all hashed trie nodes to their preimages that were required during the execution of the block, including during state root recomputation.
 
+The `block` parameter accepts a block number, tag, hash, or EIP-1898 block object. An optional second parameter selects the witness generation mode.
+
 | Client | Method invocation                                            |
 | ------ | ------------------------------------------------------------ |
 | RPC    | `{"method": "debug_executionWitness", "params": [block]}` |
 
 ## `debug_executionWitnessByBlockHash`
 
-Similar to [`debug_executionWitness`](#debug_executionwitness), but accepts a block hash instead of a block number or tag.
+Similar to [`debug_executionWitness`](#debug_executionwitness), but accepts a block hash and retains its dedicated method for compatibility.
 
 | Client | Method invocation                                                      |
 | ------ | ---------------------------------------------------------------------- |

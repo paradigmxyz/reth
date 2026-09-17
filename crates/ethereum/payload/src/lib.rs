@@ -8,7 +8,7 @@
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 #![cfg_attr(docsrs, feature(doc_cfg))]
 
-use alloy_consensus::Transaction as _;
+use alloy_consensus::{BlockHeader, Transaction};
 use alloy_primitives::U256;
 use alloy_rlp::Encodable;
 use alloy_rpc_types_engine::PayloadAttributes as EthPayloadAttributes;
@@ -466,8 +466,7 @@ where
         }));
     }
 
-    let block_access_list =
-        block_access_list.map(|block_access_list| alloy_rlp::encode(&block_access_list).into());
+    let block_access_list = block_access_list.map(|bal| bal.split().1);
     let payload = EthBuiltPayload::new(Arc::new(block), total_fees, requests, block_access_list)
         .with_sidecars(blob_sidecars);
 

@@ -10,16 +10,17 @@ use crate::{
     traits::{BestTransactionsAttributes, GetPooledTransactionLimit, NewBlobSidecar},
     validate::ValidTransaction,
     AddedTransactionOutcome, AllPoolTransactions, AllTransactionsEvents, BestTransactions,
-    BlockInfo, EthPoolTransaction, EthPooledTransaction, NewTransactionEvent, PoolResult, PoolSize,
-    PoolTransaction, PropagatedTransactions, TransactionEvents, TransactionOrigin, TransactionPool,
-    TransactionValidationOutcome, TransactionValidator, ValidPoolTransaction,
+    BlockInfo, EthBlobTransactionSidecar, EthPoolTransaction, EthPooledTransaction,
+    NewTransactionEvent, PoolResult, PoolSize, PoolTransaction, PropagatedTransactions,
+    TransactionEvents, TransactionOrigin, TransactionPool, TransactionValidationOutcome,
+    TransactionValidator, ValidPoolTransaction,
 };
 use alloy_eips::{
     eip1559::ETHEREUM_BLOCK_GAS_LIMIT_30M,
     eip4844::{BlobAndProofV1, BlobAndProofV2, BlobCellsAndProofsV1},
-    eip7594::BlobTransactionSidecarVariant,
+    eip7594::{BlobCellMask, BlobTransactionSidecarVariant},
 };
-use alloy_primitives::{map::AddressSet, Address, TxHash, B128, B256, U256};
+use alloy_primitives::{map::AddressSet, Address, TxHash, B256, U256};
 use reth_eth_wire_types::HandleMempoolData;
 use reth_primitives_traits::Recovered;
 use std::{marker::PhantomData, sync::Arc};
@@ -219,6 +220,13 @@ impl<T: EthPoolTransaction> TransactionPool for NoopTransactionPool<T> {
         AllPoolTransactions::default()
     }
 
+    fn all_transactions_by_sender(
+        &self,
+        _sender: Address,
+    ) -> AllPoolTransactions<Self::Transaction> {
+        AllPoolTransactions::default()
+    }
+
     fn all_transaction_hashes(&self) -> Vec<TxHash> {
         vec![]
     }
@@ -390,7 +398,7 @@ impl<T: EthPoolTransaction> TransactionPool for NoopTransactionPool<T> {
     fn get_blobs_for_versioned_hashes_v4(
         &self,
         versioned_hashes: &[B256],
-        _indices_bitarray: B128,
+        _cell_mask: BlobCellMask,
     ) -> Result<Vec<Option<BlobCellsAndProofsV1>>, BlobStoreError> {
         Ok(vec![None; versioned_hashes.len()])
     }
@@ -431,7 +439,10 @@ impl<T: EthPoolTransaction> TransactionValidator for MockTransactionValidator<T>
                 InvalidPoolTransactionError::Underpriced,
             );
         }
-        let maybe_sidecar = transaction.take_blob().maybe_sidecar().cloned();
+        let maybe_sidecar = match transaction.take_blob() {
+            EthBlobTransactionSidecar::Present(sidecar) => Some(sidecar),
+            _ => None,
+        };
         // we return `balance: U256::MAX` to simulate a valid transaction which will never go into
         // overdraft
         TransactionValidationOutcome::Valid {

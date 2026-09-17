@@ -12,7 +12,7 @@ use reth_eth_wire::{
     BlockRangeUpdate, BroadcastPoolTransactions, DisconnectReason, EthNetworkPrimitives,
     NetworkPrimitives, NewPooledTransactionHashes, SharedTransactions,
 };
-use reth_ethereum_forks::Head;
+use reth_ethereum_forks::{ForkFilter, Head};
 use reth_network_api::{
     events::{NetworkPeersEvents, PeerEvent, PeerEventStream},
     test_utils::{PeersHandle, PeersHandleProvider},
@@ -110,6 +110,18 @@ impl<N: NetworkPrimitives> NetworkHandle<N> {
     /// Update the status of the node.
     pub fn update_status(&self, head: Head) {
         self.send_message(NetworkHandleMessage::StatusUpdate { head });
+    }
+
+    /// Replaces the network's active [`ForkFilter`] with `fork_filter`, re-deriving the advertised
+    /// [`ForkId`](reth_ethereum_forks::ForkId) for future handshakes and updating the discovery
+    /// ENR entry.
+    ///
+    /// This lets a running node adopt a fork schedule that changed at runtime (e.g. an
+    /// L1-signalled upgrade) without a restart. The caller must build `fork_filter` from the
+    /// updated chain spec advanced to the node's current head, and should do so before the fork's
+    /// activation timestamp so the node announces the upcoming fork ahead of time.
+    pub fn set_fork_filter(&self, fork_filter: ForkFilter) {
+        self.send_message(NetworkHandleMessage::SetForkFilter { fork_filter });
     }
 
     /// Announce a block over devp2p
@@ -497,6 +509,11 @@ impl<N: NetworkPrimitives> NetworkSyncUpdater for NetworkHandle<N> {
     fn update_block_range(&self, update: reth_eth_wire::BlockRangeUpdate) {
         self.send_message(NetworkHandleMessage::InternalBlockRangeUpdate(update));
     }
+
+    /// Replaces the active fork filter to adopt a runtime fork-schedule change.
+    fn set_fork_filter(&self, fork_filter: ForkFilter) {
+        self.send_message(NetworkHandleMessage::SetForkFilter { fork_filter });
+    }
 }
 
 impl<N: NetworkPrimitives> BlockDownloaderProvider for NetworkHandle<N> {
@@ -613,6 +630,11 @@ pub(crate) enum NetworkHandleMessage<N: NetworkPrimitives = EthNetworkPrimitives
     StatusUpdate {
         /// The head status to apply.
         head: Head,
+    },
+    /// Replaces the active fork filter to adopt a runtime fork-schedule change.
+    SetForkFilter {
+        /// The new fork filter, built from the updated chain spec advanced to the current head.
+        fork_filter: ForkFilter,
     },
     /// Retrieves the current status via a oneshot sender.
     GetStatus(oneshot::Sender<NetworkStatus>),

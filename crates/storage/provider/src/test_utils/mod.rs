@@ -1,14 +1,18 @@
 use crate::{
-    providers::{NodeTypesForProvider, ProviderNodeTypes, RocksDBBuilder, StaticFileProvider},
-    HashingWriter, ProviderFactory, TrieWriter,
+    providers::{
+        NodeTypesForProvider, ProviderNodeTypes, RocksDBBuilder, StaticFileProvider,
+        StaticFileProviderBuilder,
+    },
+    HashingWriter, ProviderFactory, StaticFileProviderFactory, StaticFileSegment, StaticFileWriter,
+    TrieWriter,
 };
 use alloy_primitives::B256;
-use reth_chainspec::{ChainSpec, MAINNET};
+use reth_chainspec::{ChainSpec, ChainSpecBuilder, MAINNET};
 use reth_db::{mdbx::DatabaseArguments, test_utils::TempDatabase, DatabaseEnv};
 use reth_errors::ProviderResult;
 use reth_ethereum_engine_primitives::EthEngineTypes;
-use reth_node_types::NodeTypesWithDBAdapter;
-use reth_primitives_traits::{Account, StorageEntry};
+use reth_node_types::{HeaderTy, NodeTypesWithDBAdapter};
+use reth_primitives_traits::{Account, SealedHeader, StorageEntry};
 use reth_storage_api::StorageSettingsCache;
 use reth_trie::StateRoot;
 use reth_trie_db::DatabaseStateRoot;
@@ -49,12 +53,33 @@ pub fn create_test_provider_factory() -> ProviderFactory<MockNodeTypesWithDB> {
 pub fn create_test_provider_factory_with_chain_spec(
     chain_spec: Arc<ChainSpec>,
 ) -> ProviderFactory<MockNodeTypesWithDB> {
-    create_test_provider_factory_with_node_types::<MockNodeTypes>(chain_spec)
+    let genesis_block_number = chain_spec.genesis.number.unwrap_or_default();
+    create_test_provider_factory_with_node_types_and_genesis::<MockNodeTypes>(
+        chain_spec,
+        genesis_block_number,
+    )
+}
+
+/// Creates a test provider factory whose chain starts at `genesis_block_number`.
+pub fn create_test_provider_factory_with_genesis_block_number(
+    genesis_block_number: u64,
+) -> ProviderFactory<MockNodeTypesWithDB> {
+    let mut genesis = MAINNET.genesis.clone();
+    genesis.number = Some(genesis_block_number);
+    let chain_spec = Arc::new(ChainSpecBuilder::mainnet().genesis(genesis).build());
+    create_test_provider_factory_with_chain_spec(chain_spec)
 }
 
 /// Creates test provider factory with provided chain spec.
 pub fn create_test_provider_factory_with_node_types<N: NodeTypesForProvider>(
     chain_spec: Arc<N::ChainSpec>,
+) -> ProviderFactory<NodeTypesWithDBAdapter<N, Arc<TempDatabase<DatabaseEnv>>>> {
+    create_test_provider_factory_with_node_types_and_genesis(chain_spec, 0)
+}
+
+fn create_test_provider_factory_with_node_types_and_genesis<N: NodeTypesForProvider>(
+    chain_spec: Arc<N::ChainSpec>,
+    genesis_block_number: u64,
 ) -> ProviderFactory<NodeTypesWithDBAdapter<N, Arc<TempDatabase<DatabaseEnv>>>> {
     // Create a single temp directory that contains all data dirs (db, static_files, rocksdb).
     // TempDatabase will clean up the entire directory on drop.
@@ -72,7 +97,10 @@ pub fn create_test_provider_factory_with_node_types<N: NodeTypesForProvider>(
     ProviderFactory::new(
         db,
         chain_spec,
-        StaticFileProvider::read_write(static_files_path).expect("static file provider"),
+        StaticFileProviderBuilder::read_write(static_files_path)
+            .with_genesis_block_number(genesis_block_number)
+            .build()
+            .expect("static file provider"),
         RocksDBBuilder::new(&rocksdb_path)
             .with_default_tables()
             .build()
@@ -146,4 +174,21 @@ pub fn insert_genesis<N: ProviderNodeTypes<ChainSpec = ChainSpec>>(
     provider.commit()?;
 
     Ok(root)
+}
+
+/// Appends `headers` to the headers static files and commits them.
+pub fn insert_headers<N: ProviderNodeTypes>(
+    factory: &ProviderFactory<N>,
+    headers: &[SealedHeader<HeaderTy<N>>],
+) {
+    let provider = factory.provider_rw().expect("failed to create provider");
+    let static_file_provider = provider.static_file_provider();
+    let mut writer = static_file_provider
+        .latest_writer(StaticFileSegment::Headers)
+        .expect("failed to create writer");
+    for header in headers {
+        writer.append_header(header.header(), &header.hash()).expect("failed to append header");
+    }
+    drop(writer);
+    provider.commit().expect("failed to commit");
 }

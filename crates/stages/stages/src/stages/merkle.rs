@@ -90,7 +90,10 @@ pub enum MerkleStage {
         incremental_threshold: u64,
     },
     /// The unwind portion of the merkle stage.
-    Unwind,
+    Unwind {
+        /// Whether every child of a changed branch path should be walked.
+        walk_all_changed_branch_children: bool,
+    },
     /// Able to execute and unwind. Used for tests
     #[cfg(any(test, feature = "test-utils"))]
     Both {
@@ -115,7 +118,12 @@ impl MerkleStage {
 
     /// Stage default for the [`MerkleStage::Unwind`].
     pub const fn default_unwind() -> Self {
-        Self::Unwind
+        Self::new_unwind(false)
+    }
+
+    /// Create a new instance of [`MerkleStage::Unwind`].
+    pub const fn new_unwind(walk_all_changed_branch_children: bool) -> Self {
+        Self::Unwind { walk_all_changed_branch_children }
     }
 
     /// Create new instance of [`MerkleStage::Execution`].
@@ -174,7 +182,7 @@ where
     fn id(&self) -> StageId {
         match self {
             Self::Execution { .. } => StageId::MerkleExecute,
-            Self::Unwind => StageId::MerkleUnwind,
+            Self::Unwind { .. } => StageId::MerkleUnwind,
             #[cfg(any(test, feature = "test-utils"))]
             Self::Both { .. } => StageId::Other("MerkleBoth"),
         }
@@ -183,7 +191,7 @@ where
     /// Execute the stage.
     fn execute(&mut self, provider: &Provider, input: ExecInput) -> Result<ExecOutput, StageError> {
         let (threshold, incremental_threshold) = match self {
-            Self::Unwind => {
+            Self::Unwind { .. } => {
                 info!(target: "sync::stages::merkle::unwind", "Stage is always skipped");
                 return Ok(ExecOutput::done(StageCheckpoint::new(input.target())))
             }
@@ -377,6 +385,12 @@ where
             info!(target: "sync::stages::merkle::unwind", "Stage is always skipped");
             return Ok(UnwindOutput { checkpoint: StageCheckpoint::new(input.unwind_to) })
         }
+        let walk_all_changed_branch_children = match self {
+            Self::Unwind { walk_all_changed_branch_children } => *walk_all_changed_branch_children,
+            #[cfg(any(test, feature = "test-utils"))]
+            Self::Both { .. } => false,
+            Self::Execution { .. } => unreachable!(),
+        };
 
         let mut entities_checkpoint =
             input.checkpoint.entities_stage_checkpoint().unwrap_or(EntitiesCheckpoint {
@@ -402,7 +416,13 @@ where
             info!(target: "sync::stages::merkle::unwind", "Nothing to unwind");
         } else {
             let (block_root, updates) = reth_trie_db::with_adapter!(provider, |A| {
-                DbStateRoot::<_, A>::incremental_root_with_updates(provider, range)
+                DbStateRoot::<_, A>::incremental_root_calculator(provider, range).and_then(
+                    |calculator| {
+                        calculator
+                            .with_walk_all_changed_branch_children(walk_all_changed_branch_children)
+                            .root_with_updates()
+                    },
+                )
             })
             .map_err(|e| StageError::Fatal(Box::new(e)))?;
 

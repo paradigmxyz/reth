@@ -1,6 +1,7 @@
-use alloy_primitives::{B256, U256};
+use alloy_primitives::{keccak256, Address, B256, U256};
 use reth_primitives_traits::Account;
 use reth_storage_errors::db::DatabaseError;
+use reth_trie_common::HashedPostState;
 
 /// Implementation of hashed state cursor traits for the post state.
 mod post_state;
@@ -74,4 +75,54 @@ pub trait HashedStorageCursor: HashedCursor {
     ///
     /// After calling this method, the subsequent operation MUST be a [`HashedCursor::seek`] call.
     fn set_hashed_address(&mut self, hashed_address: B256);
+}
+
+/// Materializes storage deletions for destroyed accounts as explicit zero-valued slot updates.
+///
+/// Callers supply accounts that may have parent storage. Final values take precedence so that
+/// destroy-then-recreate transitions retain storage
+/// written by the recreated account.
+pub fn zero_destroyed_account_storage(
+    cursor_factory: &impl HashedCursorFactory,
+    accounts: impl IntoIterator<Item = Address>,
+    hashed_state: &mut HashedPostState,
+) -> Result<(), DatabaseError> {
+    let mut destroyed_accounts = accounts.into_iter().map(keccak256);
+    let Some(mut hashed_address) = destroyed_accounts.next() else { return Ok(()) };
+    let mut cursor = cursor_factory.hashed_storage_cursor(hashed_address)?;
+
+    loop {
+        if let Some((hashed_slot, _)) = cursor.seek(B256::ZERO)? {
+            let storage = &mut hashed_state.storages.entry(hashed_address).or_default().storage;
+            storage.entry(hashed_slot).or_insert(U256::ZERO);
+            while let Some((hashed_slot, _)) = cursor.next()? {
+                storage.entry(hashed_slot).or_insert(U256::ZERO);
+            }
+        }
+
+        let Some(next_hashed_address) = destroyed_accounts.next() else { break };
+        hashed_address = next_hashed_address;
+        cursor.set_hashed_address(hashed_address);
+    }
+
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn zero_destroyed_storage_skips_empty_input() {
+        let mut hashed_state = HashedPostState::default();
+
+        zero_destroyed_account_storage(
+            &mock::MockHashedCursorFactory::default(),
+            [],
+            &mut hashed_state,
+        )
+        .unwrap();
+
+        assert!(hashed_state.storages.is_empty());
+    }
 }

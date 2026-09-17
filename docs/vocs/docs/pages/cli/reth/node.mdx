@@ -139,7 +139,7 @@ Networking:
           [default: 200]
 
       --trusted-peers <TRUSTED_PEERS>
-          Comma separated enode URLs of trusted peers for P2P connections.
+          Comma separated enode URLs or ENRs of trusted peers for P2P connections.
 
           --trusted-peers enode://abcd@192.168.0.1:30303
 
@@ -147,7 +147,7 @@ Networking:
           Connect to or accept from trusted peers only
 
       --bootnodes <BOOTNODES>
-          Comma separated enode URLs for P2P discovery bootstrap.
+          Comma separated enode URLs or ENRs for P2P discovery bootstrap.
 
           Will fall back to a network-specific default if not specified.
 
@@ -249,7 +249,7 @@ Networking:
           [default: 131072]
 
       --max-tx-pending-fetch <COUNT>
-          Max capacity of cache of hashes for transactions pending fetch.
+          Maximum number of announced transaction hashes to track, including inflight requests.
 
           [default: 25600]
 
@@ -332,6 +332,22 @@ RPC:
       --http.disable-compression
           Disable compression for HTTP responses
 
+      --http.compression <ALGOS>
+          Comma-separated list of allowed compression algorithms for HTTP responses.
+
+          If not specified, all supported algorithms are enabled.
+
+          Client `Accept-Encoding` quality values select among allowed algorithms; ties prefer zstd > br > gzip > deflate. Omitted quality values default to 1; without an acceptable allowed algorithm, the response is uncompressed. List order is ignored.
+
+          [possible values: zstd, gzip, deflate, br]
+
+      --http.decompression <ALGOS>
+          Comma-separated list of allowed decompression algorithms for HTTP requests.
+
+          Request decompression is disabled when not specified.
+
+          [possible values: zstd, gzip, deflate, br]
+
       --http.api <HTTP_API>
           Rpc Modules to be configured for the HTTP server
 
@@ -391,6 +407,11 @@ RPC:
 
           If no path is provided, a secret will be generated and stored in the datadir under `<DIR>/<CHAIN_ID>/jwt.hex`. For mainnet this would be `~/.local/share/reth/mainnet/jwt.hex` by default.
 
+      --authrpc.jwtsecret-hex <HEX>
+          Hex encoded JWT secret to use for the authenticated engine-API RPC server.
+
+          This will enforce JWT authentication for all requests coming from the consensus layer. Cannot be used together with `--authrpc.jwtsecret`.
+
       --auth-ipc
           Enable auth engine API over IPC
 
@@ -413,7 +434,9 @@ RPC:
           Disable built-in RPC request metrics
 
       --rpc.max-request-size <RPC_MAX_REQUEST_SIZE>
-          Set the maximum RPC request payload size for both HTTP and WS in megabytes
+          Set the maximum RPC request payload size for both HTTP and WS in megabytes.
+
+          For compressed HTTP requests, this limit applies to both the compressed and decompressed payloads.
 
           [default: 15]
 
@@ -421,7 +444,7 @@ RPC:
           Set the maximum RPC response payload size for both HTTP and WS in megabytes
 
           [default: 160]
-          [aliases: --rpc.returndata.limit]
+          [alias: --rpc.returndata.limit]
 
       --rpc.max-subscriptions-per-connection <RPC_MAX_SUBSCRIPTIONS_PER_CONNECTION>
           Set the maximum concurrent subscriptions per connection
@@ -521,15 +544,18 @@ RPC State Cache:
 
           [default: 2000]
 
-      --rpc-cache.max-headers <MAX_HEADERS>
-          Max number of headers in cache
-
-          [default: 1000]
-
       --rpc-cache.max-bals <MAX_BALS>
           Max number of block access lists in cache
 
           [default: 1000]
+
+      --rpc-cache.cache-computed-bals
+          Cache block access lists computed by RPC requests for transaction tracing
+
+      --rpc-cache.prewarm-bals[=<BLOCKS>]
+          Replay new canonical blocks to cache block access lists until native BAL support.
+
+          Optionally replay the latest BLOCKS blocks sequentially on startup. Without a count, only new blocks are prewarmed. Implies --rpc-cache.cache-computed-bals. Prewarming stops when a canonical block with a block access list hash is received.
 
       --rpc-cache.max-concurrent-db-requests <MAX_CONCURRENT_DB_REQUESTS>
           Max number of concurrent database requests
@@ -539,7 +565,7 @@ RPC State Cache:
       --rpc-cache.max-cached-tx-hashes <MAX_CACHED_TX_HASHES>
           Maximum number of transaction hashes to cache for transaction lookups
 
-          [default: 30000]
+          [default: 100000]
 
 Gas Price Oracle:
       --gpo.blocks <BLOCKS>
@@ -982,9 +1008,10 @@ Engine:
       --engine.persistence-threshold <PERSISTENCE_THRESHOLD>
           Configure persistence threshold for the engine. This determines how many canonical blocks must be in-memory, ahead of the last persisted block, before flushing canonical blocks to disk again.
 
-          To persist blocks as fast as the node receives them, set this value to zero. This will cause more frequent DB writes.
+          To persist blocks as fast as the node receives them, set this value to zero. This disables state masking and causes more frequent DB writes.
 
-          [default: 7]
+          [env: RETH_ENGINE_PERSISTENCE_THRESHOLD=]
+          [default: 50]
 
       --engine.persistence-backpressure-threshold <PERSISTENCE_BACKPRESSURE_THRESHOLD>
           Configure the maximum number of blocks beyond the in-memory buffer target that may await persistence before engine API processing stalls.
@@ -992,6 +1019,12 @@ Engine:
           If omitted, this defaults to the larger of the default backpressure threshold and twice `--engine.persistence-threshold`.
 
           This value must be greater than `--engine.persistence-threshold`.
+
+      --engine.num-state-masking-blocks <NUM_STATE_MASKING_BLOCKS>
+          Configure how many of the blocks being persisted should only mask state/trie writes instead of durably persisting their state/trie updates in the current cycle
+
+          [env: RETH_ENGINE_NUM_STATE_MASKING_BLOCKS=]
+          [default: 30]
 
       --engine.memory-block-buffer-target <MEMORY_BLOCK_BUFFER_TARGET>
           Configure the target number of blocks to keep in memory.
@@ -1010,6 +1043,16 @@ Engine:
 
       --engine.disable-prewarming
           Disable parallel prewarming
+
+      --engine.txpool-prewarming
+          Enable best-effort txpool transaction prewarming between payloads
+
+          [env: RETH_ENGINE_TXPOOL_PREWARMING=]
+
+      --engine.sender-recovery-cache
+          Enable caching recovered transaction senders across transaction ingress and payload execution
+
+          [env: RETH_ENGINE_SENDER_RECOVERY_CACHE=]
 
       --engine.state-provider-metrics
           Enable state provider latency metrics. This allows the engine to collect and report stats about how long state provider calls took during execution, but this does introduce slight overhead to state provider calls
@@ -1101,7 +1144,7 @@ Engine:
       --engine.suppress-persistence-during-build
           Suppress persistence while building a payload.
 
-          When enabled, persistence cycles are deferred from the moment an FCU with payload attributes arrives until the next FCU clears the build. Useful on chains with short block times where persistence I/O can interfere with block building latency.
+          When enabled, persistence cycles are deferred while a payload build is active. Useful on chains with short block times where persistence I/O can interfere with block building latency.
 
       --engine.disable-bal-parallel-execution
           Disable BAL (Block Access List, EIP-7928) based parallel execution

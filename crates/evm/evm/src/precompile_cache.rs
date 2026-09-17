@@ -19,6 +19,9 @@ use tracing::error;
 /// Default max cache size for [`PrecompileCache`].
 const MAX_CACHE_SIZE: u32 = 1024 * 1024;
 
+/// Maximum input retained by a precompile cache.
+const MAX_PRECOMPILE_CACHE_INPUT_SIZE: usize = 2 * 1024;
+
 /// Stores caches for each precompile.
 pub struct PrecompileCacheMap<S>(Arc<DashMap<Address, PrecompileCache<S>, FbBuildHasher<20>>>);
 
@@ -210,7 +213,8 @@ where
         let address = message.code_address;
         let cache = self.cache_map.cache_for_address(address);
 
-        if let Some(entry) = cache.get(message.input.as_ref(), self.spec_id.clone()) {
+        let cacheable_input = message.input.len() <= MAX_PRECOMPILE_CACHE_INPUT_SIZE;
+        if cacheable_input && let Some(entry) = cache.get(message.input.as_ref(), self.spec_id.clone()) {
             return Some(match gas.spend(entry.regular_gas_used).map_err(PrecompileError::from) {
                 Ok(()) => {
                     self.increment_by_one_precompile_cache_hits();
@@ -228,7 +232,7 @@ where
         let after = GasSnapshot::new(gas);
 
         match &result {
-            Ok(output) => {
+            Ok(output) if cacheable_input => {
                 if before.reservoir != after.reservoir {
                     error!(
                         target: "evm::precompile_cache",
@@ -266,6 +270,7 @@ where
                     );
                 }
             }
+            Ok(_) => {}
             Err(_) => {
                 self.increment_by_one_precompile_errors();
             }

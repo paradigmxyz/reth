@@ -326,7 +326,7 @@ async fn run_pipeline_forward_and_unwind(
 
         let block_with_senders = RecoveredBlock::new_unhashed(
             Block::new(
-                temp_header.clone(),
+                temp_header,
                 BlockBody {
                     transactions: transactions.clone(),
                     ommers: Vec::new(),
@@ -378,7 +378,7 @@ async fn run_pipeline_forward_and_unwind(
         };
 
         let block: SealedBlock<Block> = SealedBlock::seal_parts(
-            header.clone(),
+            header,
             BlockBody { transactions, ommers: Vec::new(), withdrawals: None },
         );
 

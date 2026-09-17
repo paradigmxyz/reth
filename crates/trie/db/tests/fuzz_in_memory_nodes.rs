@@ -2,11 +2,7 @@
 
 use alloy_primitives::{B256, U256};
 use proptest::prelude::*;
-use reth_db::{
-    cursor::{DbCursorRO, DbCursorRW, DbDupCursorRW},
-    tables,
-    transaction::DbTxMut,
-};
+use reth_db::{cursor::DbCursorRW, tables, transaction::DbTxMut};
 use reth_primitives_traits::{Account, StorageEntry};
 use reth_provider::test_utils::create_test_provider_factory;
 use reth_storage_api::StorageSettingsCache;
@@ -85,7 +81,7 @@ proptest! {
     }
 
     #[test]
-    fn fuzz_in_memory_storage_nodes(mut init_storage: BTreeMap<B256, U256>, storage_updates: [(bool, BTreeMap<B256, U256>); 10]) {
+    fn fuzz_in_memory_storage_nodes(mut init_storage: BTreeMap<B256, U256>, storage_updates: [BTreeMap<B256, U256>; 10]) {
         let hashed_address = B256::random();
         let factory = create_test_provider_factory();
         let provider = factory.provider_rw().unwrap();
@@ -105,12 +101,9 @@ proptest! {
                 DbStorageRoot::<_, A>::from_tx_hashed(provider.tx_ref(), hashed_address).root_with_updates().unwrap();
 
             let mut storage = init_storage;
-            for (is_deleted, mut storage_update) in storage_updates {
+            for mut storage_update in storage_updates {
                 // Insert state updates into database
-                if is_deleted && hashed_storage_cursor.seek_exact(hashed_address).unwrap().is_some() {
-                    hashed_storage_cursor.delete_current_duplicates().unwrap();
-                }
-                let mut hashed_storage = HashedStorage::new(is_deleted);
+                let mut hashed_storage = HashedStorage::default();
                 for (hashed_slot, value) in storage_update.clone() {
                     hashed_storage_cursor
                         .upsert(hashed_address, &StorageEntry { key: hashed_slot, value })
@@ -134,9 +127,6 @@ proptest! {
                 storage_trie_nodes.extend(trie_updates);
 
                 // Verify the result
-                if is_deleted {
-                    storage.clear();
-                }
                 storage.append(&mut storage_update);
                 let expected_root = storage_root_prehashed(storage.clone());
                 assert_eq!(expected_root, storage_root);

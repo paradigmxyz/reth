@@ -41,10 +41,6 @@ pub struct StateRootComputeOutcome {
     pub trie_updates: Arc<TrieUpdates>,
     /// Hashed post state produced while computing the state root.
     pub hashed_state: Arc<HashedPostState>,
-    /// Debug recorders taken from the sparse tries, keyed by `None` for account trie
-    /// and `Some(address)` for storage tries.
-    #[cfg(feature = "trie-debug")]
-    pub debug_recorders: Vec<(Option<B256>, reth_trie_sparse::debug_recorder::TrieDebugRecorder)>,
 }
 
 /// Handle to a background sparse trie state root computation.
@@ -503,10 +499,55 @@ pub fn evm_state_to_hashed_post_state(update: EvmState) -> HashedPostState {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloy_primitives::{Address, U256};
+    use revm::state::{Account, EvmStorageSlot, TransactionId};
     use std::{
         sync::atomic::{AtomicUsize, Ordering},
         time::Duration,
     };
+
+    #[test]
+    fn created_selfdestruct_does_not_emit_storage() {
+        let address = Address::repeat_byte(0x01);
+        let mut account = Account::default();
+        account.mark_touch();
+        assert!(account.mark_created_locally());
+        assert!(account.mark_selfdestructed_locally());
+        account.info.nonce = 1;
+        account.storage.insert(
+            U256::from(1),
+            EvmStorageSlot::new_changed(U256::ZERO, U256::from(2), TransactionId::ZERO),
+        );
+
+        let hashed_state =
+            evm_state_to_hashed_post_state(EvmState::from_iter([(address, account)]));
+        let hashed_address = keccak256(address);
+
+        assert_eq!(hashed_state.accounts.get(&hashed_address), Some(&None));
+        assert!(!hashed_state.storages.contains_key(&hashed_address));
+    }
+
+    #[test]
+    fn existing_selfdestruct_does_not_emit_storage() {
+        let address = Address::repeat_byte(0x02);
+        let mut account = Account::default();
+        account.info.nonce = 1;
+        account.set_current_info_as_original();
+        account.mark_touch();
+        assert!(account.mark_selfdestructed_locally());
+        account.selfdestruct();
+        account.storage.insert(
+            U256::from(1),
+            EvmStorageSlot::new_changed(U256::ZERO, U256::from(2), TransactionId::ZERO),
+        );
+
+        let hashed_state =
+            evm_state_to_hashed_post_state(EvmState::from_iter([(address, account)]));
+        let hashed_address = keccak256(address);
+
+        assert_eq!(hashed_state.accounts.get(&hashed_address), Some(&None));
+        assert!(!hashed_state.storages.contains_key(&hashed_address));
+    }
 
     #[derive(Default)]
     struct CountingSink {
@@ -661,8 +702,6 @@ mod tests {
                 state_root: B256::repeat_byte(0x42),
                 trie_updates: Arc::new(TrieUpdates::default()),
                 hashed_state: Arc::new(HashedPostState::default()),
-                #[cfg(feature = "trie-debug")]
-                debug_recorders: Vec::new(),
             }))
             .unwrap();
         let outcome = handle.state_root().expect("outcome is delivered");

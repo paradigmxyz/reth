@@ -4,6 +4,8 @@ mod active;
 mod conn;
 mod counter;
 mod handle;
+#[cfg(test)]
+mod tests;
 mod types;
 pub use types::BlockRangeInfo;
 
@@ -29,6 +31,7 @@ use reth_metrics::common::mpsc::MeteredPollSender;
 use reth_network_api::{PeerRequest, PeerRequestSender};
 use reth_network_peers::PeerId;
 use reth_network_types::SessionsConfig;
+use reth_primitives_traits::{GotExpected, GotExpectedBoxed};
 use reth_tasks::Runtime;
 use rustc_hash::FxHashMap;
 use secp256k1::SecretKey;
@@ -258,6 +261,23 @@ impl<N: NetworkPrimitives> SessionManager<N> {
         self.status.latest_block = Some(head.number);
 
         transition
+    }
+
+    /// Replaces the active [`ForkFilter`] with a newly derived one and returns the resulting
+    /// [`ForkId`].
+    ///
+    /// This is used to adopt a fork schedule that changed at runtime (e.g. an L1-signalled
+    /// upgrade) without restarting the node. The caller is expected to build `fork_filter` from
+    /// the updated chain spec already advanced to the node's current head, so that
+    /// [`ForkFilter::current`] reflects the correct [`ForkId`] immediately.
+    ///
+    /// Every subsequent handshake clones this filter and advertises the returned [`ForkId`], so
+    /// the node's advertised fork identity stays aligned with the rules it now enforces. Existing
+    /// active sessions are not revalidated here; see [`SessionManager::active_sessions`].
+    pub(crate) fn set_fork_filter(&mut self, fork_filter: ForkFilter) -> ForkId {
+        self.fork_filter = fork_filter;
+        self.status.forkid = self.fork_filter.current();
+        self.status.forkid
     }
 
     /// An incoming TCP connection was received. This starts the authentication process to turn this
@@ -868,13 +888,21 @@ pub enum PendingSessionHandshakeError {
     /// Thrown when the remote lacks the required capability
     #[error("Mandatory extra capability unsupported")]
     UnsupportedExtraCapability,
+    /// Thrown when the node id in the remote's `Hello` message differs from the identity that the
+    /// ECIES handshake authenticated.
+    #[error("unexpected identity in hello message: {0}")]
+    UnexpectedHandshakeIdentity(GotExpectedBoxed<PeerId>),
 }
 
 impl PendingSessionHandshakeError {
-    /// Returns the [`DisconnectReason`] if the error is a disconnect message
+    /// Returns the [`DisconnectReason`] the session was disconnected with, either because the
+    /// remote sent one or because we sent one before failing the handshake.
     pub const fn as_disconnected(&self) -> Option<DisconnectReason> {
         match self {
             Self::Eth(eth_err) => eth_err.as_disconnected(),
+            Self::UnexpectedHandshakeIdentity(_) => {
+                Some(DisconnectReason::UnexpectedHandshakeIdentity)
+            }
             _ => None,
         }
     }
@@ -1104,6 +1132,8 @@ async fn authenticate_stream<N: NetworkPrimitives>(
     // Add extra protocols to the hello message
     extra_handlers.retain(|handler| hello.try_add_protocol(handler.protocol()).is_ok());
 
+    let authenticated_peer_id = stream.inner().remote_id();
+
     // conduct the p2p rlpx handshake and return the rlpx authenticated stream
     let (mut p2p_stream, their_hello) = match stream.handshake(hello).await {
         Ok(stream_res) => stream_res,
@@ -1116,6 +1146,25 @@ async fn authenticate_stream<N: NetworkPrimitives>(
             }
         }
     };
+
+    // The ECIES handshake proved possession of this key, so it is the only trustworthy identity of
+    // the connection. Everything the peer states in `Hello` is unauthenticated.
+    //
+    // Bind the session to the authenticated identity before anything else observes the peer. A
+    // peer that announces a different node id could otherwise act on behalf of that node, for
+    // example by making an extra protocol report reputation changes against it.
+    if their_hello.id != authenticated_peer_id {
+        let _ = p2p_stream.disconnect(DisconnectReason::UnexpectedHandshakeIdentity).await;
+
+        return PendingSessionEvent::Disconnected {
+            remote_addr,
+            session_id,
+            direction,
+            error: Some(PendingSessionHandshakeError::UnexpectedHandshakeIdentity(
+                GotExpected { got: their_hello.id, expected: authenticated_peer_id }.into(),
+            )),
+        }
+    }
 
     // if we have extra handlers, check if it must be supported by the remote
     if !extra_handlers.is_empty() {
@@ -1130,7 +1179,7 @@ async fn authenticate_stream<N: NetworkPrimitives>(
             if handler.on_unsupported_by_peer(
                 p2p_stream.shared_capabilities(),
                 direction,
-                their_hello.id,
+                authenticated_peer_id,
             ) == OnNotSupported::Disconnect
             {
                 return PendingSessionEvent::Disconnected {
@@ -1212,14 +1261,18 @@ async fn authenticate_stream<N: NetworkPrimitives>(
 
         // install additional handlers
         for handler in extra_handlers.into_iter() {
-            let cap = handler.protocol().cap;
-            let remote_peer_id = their_hello.id;
+            let protocol = handler.protocol();
+            let limits = handler.inbound_limits();
+            let remote_peer_id = authenticated_peer_id;
 
+            // The unsupported-handler pass above guarantees that every remaining handler has a
+            // matching negotiated capability. The multiplexer retains the same immutable set of
+            // shared capabilities, so installing one of these handlers cannot fail.
             multiplex_stream
-                .install_protocol(&cap, move |conn| {
+                .install_protocol_with_limits(&protocol.cap, limits, move |conn| {
                     handler.into_connection(direction, remote_peer_id, conn)
                 })
-                .ok();
+                .expect("remaining handler capability was negotiated");
         }
 
         let (multiplex_stream, their_status) = match multiplex_stream
@@ -1247,7 +1300,7 @@ async fn authenticate_stream<N: NetworkPrimitives>(
         session_id,
         remote_addr,
         local_addr,
-        peer_id: their_hello.id,
+        peer_id: authenticated_peer_id,
         capabilities: Arc::new(Capabilities::from(their_hello.capabilities)),
         status: Arc::new(their_status),
         conn,

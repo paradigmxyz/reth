@@ -54,6 +54,8 @@ pub struct DefaultRpcServerArgs {
     http_addr: IpAddr,
     http_port: u16,
     http_disable_compression: bool,
+    http_compression_algorithms: Option<Vec<String>>,
+    http_decompression_algorithms: Option<Vec<String>>,
     http_api: Option<RpcModuleSelection>,
     http_corsdomain: Option<String>,
     ws: bool,
@@ -128,6 +130,18 @@ impl DefaultRpcServerArgs {
     /// Set whether to disable HTTP compression by default
     pub const fn with_http_disable_compression(mut self, v: bool) -> Self {
         self.http_disable_compression = v;
+        self
+    }
+
+    /// Set the default allowed HTTP response compression algorithms
+    pub fn with_http_compression_algorithms(mut self, v: Option<Vec<String>>) -> Self {
+        self.http_compression_algorithms = v;
+        self
+    }
+
+    /// Set the default allowed HTTP request decompression algorithms
+    pub fn with_http_decompression_algorithms(mut self, v: Option<Vec<String>>) -> Self {
+        self.http_decompression_algorithms = v;
         self
     }
 
@@ -379,6 +393,8 @@ impl Default for DefaultRpcServerArgs {
             http_addr: Ipv4Addr::LOCALHOST.into(),
             http_port: constants::DEFAULT_HTTP_RPC_PORT,
             http_disable_compression: false,
+            http_compression_algorithms: None,
+            http_decompression_algorithms: None,
             http_api: None,
             http_corsdomain: None,
             ws: false,
@@ -444,6 +460,34 @@ pub struct RpcServerArgs {
     #[arg(long = "http.disable-compression", default_value_t = DefaultRpcServerArgs::get_global().http_disable_compression)]
     pub http_disable_compression: bool,
 
+    /// Comma-separated list of allowed compression algorithms for HTTP responses.
+    ///
+    /// If not specified, all supported algorithms are enabled.
+    ///
+    /// Client `Accept-Encoding` quality values select among allowed algorithms; ties prefer
+    /// zstd > br > gzip > deflate. Omitted quality values default to 1; without an acceptable
+    /// allowed algorithm, the response is uncompressed. List order is ignored.
+    #[arg(
+        long = "http.compression",
+        value_name = "ALGOS",
+        value_delimiter = ',',
+        value_parser = ["zstd", "gzip", "deflate", "br"],
+        default_value = Resettable::from(DefaultRpcServerArgs::get_global().http_compression_algorithms.as_ref().map(|v| v.join(",").into()))
+    )]
+    pub http_compression_algorithms: Option<Vec<String>>,
+
+    /// Comma-separated list of allowed decompression algorithms for HTTP requests.
+    ///
+    /// Request decompression is disabled when not specified.
+    #[arg(
+        long = "http.decompression",
+        value_name = "ALGOS",
+        value_delimiter = ',',
+        value_parser = ["zstd", "gzip", "deflate", "br"],
+        default_value = Resettable::from(DefaultRpcServerArgs::get_global().http_decompression_algorithms.as_ref().map(|v| v.join(",").into()))
+    )]
+    pub http_decompression_algorithms: Option<Vec<String>>,
+
     /// Rpc Modules to be configured for the HTTP server
     #[arg(long = "http.api", value_parser = RpcModuleSelectionValueParser::default(), default_value = Resettable::from(DefaultRpcServerArgs::get_global().http_api.as_ref().map(|v| v.to_string().into())))]
     pub http_api: Option<RpcModuleSelection>,
@@ -501,8 +545,21 @@ pub struct RpcServerArgs {
     /// If no path is provided, a secret will be generated and stored in the datadir under
     /// `<DIR>/<CHAIN_ID>/jwt.hex`. For mainnet this would be `~/.local/share/reth/mainnet/jwt.hex`
     /// by default.
-    #[arg(long = "authrpc.jwtsecret", value_name = "PATH", global = true, required = false, default_value = Resettable::from(DefaultRpcServerArgs::get_global().auth_jwtsecret.as_ref().map(|v| v.to_string_lossy().into())))]
+    #[arg(long = "authrpc.jwtsecret", value_name = "PATH", global = true, required = false, conflicts_with = "auth_jwtsecret_hex", default_value = Resettable::from(DefaultRpcServerArgs::get_global().auth_jwtsecret.as_ref().map(|v| v.to_string_lossy().into())))]
     pub auth_jwtsecret: Option<PathBuf>,
+
+    /// Hex encoded JWT secret to use for the authenticated engine-API RPC server.
+    ///
+    /// This will enforce JWT authentication for all requests coming from the consensus layer.
+    /// Cannot be used together with `--authrpc.jwtsecret`.
+    #[arg(
+        long = "authrpc.jwtsecret-hex",
+        value_name = "HEX",
+        global = true,
+        required = false,
+        conflicts_with = "auth_jwtsecret"
+    )]
+    pub auth_jwtsecret_hex: Option<JwtSecret>,
 
     /// Enable auth engine API over IPC
     #[arg(long, default_value_t = DefaultRpcServerArgs::get_global().auth_ipc)]
@@ -532,6 +589,9 @@ pub struct RpcServerArgs {
     pub rpc_disable_metrics: bool,
 
     /// Set the maximum RPC request payload size for both HTTP and WS in megabytes.
+    ///
+    /// For compressed HTTP requests, this limit applies to both the compressed and decompressed
+    /// payloads.
     #[arg(long = "rpc.max-request-size", alias = "rpc-max-request-size", default_value_t = DefaultRpcServerArgs::get_global().rpc_max_request_size)]
     pub rpc_max_request_size: MaxU32,
 
@@ -839,6 +899,8 @@ impl Default for RpcServerArgs {
             http_addr,
             http_port,
             http_disable_compression,
+            http_compression_algorithms,
+            http_decompression_algorithms,
             http_api,
             http_corsdomain,
             ws,
@@ -885,6 +947,8 @@ impl Default for RpcServerArgs {
             http_addr,
             http_port,
             http_disable_compression,
+            http_compression_algorithms,
+            http_decompression_algorithms,
             http_api,
             http_corsdomain,
             ws,
@@ -898,6 +962,7 @@ impl Default for RpcServerArgs {
             auth_addr,
             auth_port,
             auth_jwtsecret,
+            auth_jwtsecret_hex: None,
             auth_ipc,
             auth_ipc_path,
             disable_auth_server,
@@ -974,6 +1039,19 @@ mod tests {
     }
 
     #[test]
+    fn parse_bal_cache_modes() {
+        for (flag, cache_computed, prewarm) in [
+            ("--rpc-cache.cache-computed-bals", true, None),
+            ("--rpc-cache.prewarm-bals", false, Some(0)),
+            ("--rpc-cache.prewarm-bals=10", false, Some(10)),
+        ] {
+            let args = CommandParser::<RpcServerArgs>::parse_from(["reth", flag]).args;
+            assert_eq!(args.rpc_state_cache.cache_computed_bals, cache_computed);
+            assert_eq!(args.rpc_state_cache.prewarm_bals, prewarm);
+        }
+    }
+
+    #[test]
     fn test_rpc_server_args_parser() {
         let args =
             CommandParser::<RpcServerArgs>::parse_from(["reth", "--http.api", "eth,admin,debug"])
@@ -1006,11 +1084,59 @@ mod tests {
     }
 
     #[test]
+    fn http_compression_algorithms_are_optional() {
+        let args = CommandParser::<RpcServerArgs>::parse_from(["reth"]).args;
+        assert!(args.http_compression_algorithms.is_none());
+
+        let args = CommandParser::<RpcServerArgs>::parse_from([
+            "reth",
+            "--http.compression",
+            "zstd,gzip,deflate,br",
+        ])
+        .args;
+        assert_eq!(
+            args.http_compression_algorithms.as_deref().unwrap(),
+            ["zstd", "gzip", "deflate", "br"]
+        );
+
+        let result =
+            CommandParser::<RpcServerArgs>::try_parse_from(["reth", "--http.compression", "gizp"]);
+        assert!(result.is_err());
+    }
+
+    #[test]
     fn rpc_server_args_default_sanity_test() {
         let default_args = RpcServerArgs::default();
         let args = CommandParser::<RpcServerArgs>::parse_from(["reth"]).args;
 
         assert_eq!(args, default_args);
+    }
+
+    #[test]
+    fn http_request_decompression_is_opt_in() {
+        let args = CommandParser::<RpcServerArgs>::parse_from(["reth"]).args;
+        assert!(args.http_decompression_algorithms.is_none());
+
+        let args = CommandParser::<RpcServerArgs>::parse_from([
+            "reth",
+            "--http.decompression",
+            "zstd,gzip,deflate,br",
+        ])
+        .args;
+        assert_eq!(
+            args.http_decompression_algorithms.as_deref().unwrap(),
+            ["zstd", "gzip", "deflate", "br"]
+        );
+    }
+
+    #[test]
+    fn invalid_http_request_decompression_algorithm_is_rejected() {
+        let result = CommandParser::<RpcServerArgs>::try_parse_from([
+            "reth",
+            "--http.decompression",
+            "gizp",
+        ]);
+        assert!(result.is_err());
     }
 
     #[test]
@@ -1058,6 +1184,8 @@ mod tests {
             http_addr: "127.0.0.1".parse().unwrap(),
             http_port: 8545,
             http_disable_compression: false,
+            http_compression_algorithms: None,
+            http_decompression_algorithms: None,
             http_api: Some(RpcModuleSelection::try_from_selection(["eth", "admin"]).unwrap()),
             http_corsdomain: Some("*".to_string()),
             ws: true,
@@ -1071,6 +1199,7 @@ mod tests {
             auth_addr: "127.0.0.1".parse().unwrap(),
             auth_port: 8551,
             auth_jwtsecret: Some(std::path::PathBuf::from("/tmp/jwt.hex")),
+            auth_jwtsecret_hex: None,
             auth_ipc: false,
             auth_ipc_path: "engine.ipc".to_string(),
             disable_auth_server: false,
@@ -1105,8 +1234,10 @@ mod tests {
                 max_receipts: 2000,
                 max_headers: 1000,
                 max_bals: 1000,
+                cache_computed_bals: true,
+                prewarm_bals: Some(0),
                 max_concurrent_db_requests: 512,
-                max_cached_tx_hashes: 30_000,
+                max_cached_tx_hashes: 100_000,
             },
             gas_price_oracle: GasPriceOracleArgs {
                 blocks: 20,
@@ -1197,6 +1328,8 @@ mod tests {
             "1000",
             "--rpc-cache.max-bals",
             "1000",
+            "--rpc-cache.cache-computed-bals",
+            "--rpc-cache.prewarm-bals",
             "--rpc-cache.max-concurrent-db-requests",
             "512",
             "--gpo.blocks",
@@ -1214,5 +1347,42 @@ mod tests {
         .args;
 
         assert_eq!(parsed_args, args);
+    }
+
+    #[test]
+    fn parse_auth_jwtsecret_hex() {
+        let hex = "1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef";
+        let args =
+            CommandParser::<RpcServerArgs>::parse_from(["reth", "--authrpc.jwtsecret-hex", hex])
+                .args;
+
+        let expected = JwtSecret::from_hex(hex).unwrap();
+        assert_eq!(args.auth_jwtsecret_hex, Some(expected));
+        assert_eq!(args.auth_jwtsecret, None);
+    }
+
+    #[test]
+    fn parse_auth_jwtsecret_hex_with_0x_prefix() {
+        let hex = "0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef";
+        let args =
+            CommandParser::<RpcServerArgs>::parse_from(["reth", "--authrpc.jwtsecret-hex", hex])
+                .args;
+
+        let expected = JwtSecret::from_hex(hex).unwrap();
+        assert_eq!(args.auth_jwtsecret_hex, Some(expected));
+        assert_eq!(args.auth_jwtsecret, None);
+    }
+
+    #[test]
+    fn test_auth_jwtsecret_and_hex_are_mutually_exclusive() {
+        let result = CommandParser::<RpcServerArgs>::try_parse_from([
+            "reth",
+            "--authrpc.jwtsecret",
+            "/tmp/jwt.hex",
+            "--authrpc.jwtsecret-hex",
+            "1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
+        ]);
+
+        assert!(result.is_err());
     }
 }

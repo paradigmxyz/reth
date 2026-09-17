@@ -23,12 +23,11 @@ pub use config::DnsDiscoveryConfig;
 use enr::Enr;
 pub use error::ParseDnsEntryError;
 use reth_ethereum_forks::{EnrForkIdEntry, ForkId};
-use reth_network_peers::{pk2id, NodeRecord};
+use reth_network_peers::NodeRecord;
 use schnellru::{ByLength, LruMap};
 use secp256k1::SecretKey;
 use std::{
     collections::{hash_map::Entry, HashMap, HashSet, VecDeque},
-    net::IpAddr,
     pin::Pin,
     sync::Arc,
     task::{ready, Context, Poll},
@@ -42,6 +41,7 @@ use tokio::{
         oneshot,
     },
     task::JoinHandle,
+    time::{Interval, MissedTickBehavior},
 };
 use tokio_stream::{
     wrappers::{ReceiverStream, UnboundedReceiverStream},
@@ -108,6 +108,12 @@ pub struct DnsDiscoveryService<R: Resolver = DnsResolver> {
     queued_events: VecDeque<DnsDiscoveryEvent>,
     /// The rate at which trees should be updated.
     recheck_interval: Duration,
+    /// Wakes the service up so due trees are rechecked.
+    ///
+    /// [`SyncTree::poll`] decides that a recheck is due by comparing timestamps, which registers
+    /// no waker, and once the initial walk is done there is nothing else to poll. Without this the
+    /// spawned service would sleep until an unrelated command or query happened to wake it.
+    recheck_tick: Interval,
     /// Links to the DNS networks to bootstrap.
     bootstrap_dns_networks: HashSet<LinkEntry>,
 }
@@ -146,6 +152,7 @@ impl<R: Resolver> DnsDiscoveryService<R> {
             dns_record_cache: LruMap::new(ByLength::new(dns_record_cache_limit.get())),
             queued_events: Default::default(),
             recheck_interval,
+            recheck_tick: recheck_tick(recheck_interval),
             bootstrap_dns_networks: bootstrap_dns_networks.unwrap_or_default(),
         }
     }
@@ -236,7 +243,12 @@ impl<R: Resolver> DnsDiscoveryService<R> {
                 }
             },
             Err((err, link)) => {
-                debug!(target: "disc::dns",%err, ?link, "Failed to lookup root")
+                debug!(target: "disc::dns",%err, ?link, "Failed to lookup root");
+                // an already synced tree asked for this lookup and is waiting on it, so it has to
+                // be released even though the lookup failed
+                if let Some(tree) = self.trees.get_mut(&link) {
+                    tree.root_update_failed();
+                }
             }
         }
     }
@@ -347,11 +359,24 @@ impl<R: Resolver> DnsDiscoveryService<R> {
                 self.sync_tree_with_link(link)
             }
 
+            // Register the wake-up for the next recheck. Polled to `Pending` so the waker is
+            // always armed; a ready tick needs no extra work because the trees were already polled
+            // with a current timestamp above.
+            while self.recheck_tick.poll_tick(cx).is_ready() {}
+
             if !progress && self.queued_events.is_empty() {
                 return Poll::Pending
             }
         }
     }
+}
+
+/// Builds the interval that wakes the service to look for trees due a recheck.
+fn recheck_tick(recheck_interval: Duration) -> Interval {
+    let mut tick = tokio::time::interval(recheck_interval);
+    // a service that was starved must not then fire a burst of catch-up ticks
+    tick.set_missed_tick_behavior(MissedTickBehavior::Delay);
+    tick
 }
 
 /// A Stream events, mainly used for debugging
@@ -390,13 +415,8 @@ pub enum DnsDiscoveryEvent {
 
 /// Converts an [Enr] into a [`NodeRecord`]
 fn convert_enr_node_record(enr: &Enr<SecretKey>) -> Option<DnsNodeRecordUpdate> {
-    let node_record = NodeRecord {
-        address: enr.ip4().map(IpAddr::from).or_else(|| enr.ip6().map(IpAddr::from))?,
-        tcp_port: enr.tcp4().or_else(|| enr.tcp6())?,
-        udp_port: enr.udp4().or_else(|| enr.udp6())?,
-        id: pk2id(&enr.public_key()),
-    }
-    .into_ipv4_mapped();
+    // DNS discovery yields RLPx dial targets, so records without a tcp endpoint are skipped.
+    let node_record = NodeRecord::try_from(enr).ok().filter(NodeRecord::has_rlpx_endpoint)?;
 
     let fork_id =
         enr.get_decodable::<EnrForkIdEntry>(b"eth").transpose().ok().flatten().map(Into::into);
@@ -416,7 +436,11 @@ mod tests {
     use reth_chainspec::MAINNET;
     use reth_ethereum_forks::{EthereumHardfork, ForkHash};
     use secp256k1::rand::thread_rng;
-    use std::{future::poll_fn, net::Ipv4Addr};
+    use std::{
+        future::poll_fn,
+        net::{IpAddr, Ipv4Addr},
+        num::NonZeroUsize,
+    };
 
     fn entry_hash(entry_txt: &str) -> String {
         BASE32_NOPAD.encode(&keccak256(entry_txt.as_bytes()).as_slice()[..16])
@@ -612,6 +636,115 @@ mod tests {
             Poll::Ready(())
         })
         .await;
+    }
+
+    #[tokio::test]
+    async fn spawned_service_rechecks_without_outside_wakeups() {
+        reth_tracing::init_test_tracing();
+
+        let config = DnsDiscoveryConfig {
+            recheck_interval: Duration::from_millis(100),
+            max_requests_per_sec: NonZeroUsize::new(50).unwrap(),
+            ..Default::default()
+        };
+
+        let secret_key = SecretKey::new(&mut thread_rng());
+        let resolver = Arc::new(MapResolver::default());
+        let s = "enrtree-root:v1 e=QFT4PBCRX4XQCV3VUYJ6BTCEPU l=JGUFMSAGI7KZYB3P7IZW4S5Y3A seq=3 sig=3FmXuVwpa8Y7OstZTx9PIb1mt8FrW7VpDOFv4AaGCsZ2EIHmhraWhe4NxYhQDlw5MjeFXYMbJjsPeKlHzmJREQE";
+        let mut root: TreeRootEntry = s.parse().unwrap();
+        root.sign(&secret_key).unwrap();
+
+        let link =
+            LinkEntry { domain: "nodes.example.org".to_string(), pubkey: secret_key.public() };
+        resolver.insert(link.domain.clone(), root.to_string());
+
+        let mut service = DnsDiscoveryService::new(Arc::clone(&resolver), config.clone());
+        let mut node_records = service.node_record_stream();
+        service.sync_tree_with_link(link.clone());
+
+        // drive it the way the production path does: nothing polls the service except its own
+        // event stream, so only a wake-up the service arms itself can start a recheck
+        let handle = service.spawn();
+
+        // let the initial walk finish and the service go idle
+        tokio::time::sleep(config.recheck_interval * 3).await;
+
+        // publish a change that only a self-scheduled recheck can pick up
+        let mut new_root = root.clone();
+        new_root.sequence_number = new_root.sequence_number.saturating_add(1);
+        // needs an address, an ENR without one yields no node record
+        let enr = Enr::builder()
+            .ip4(Ipv4Addr::LOCALHOST)
+            .udp4(30303)
+            .tcp4(30303)
+            .build(&secret_key)
+            .unwrap();
+        let enr_txt = enr.to_base64();
+        new_root.enr_root = entry_hash(&enr_txt);
+        new_root.sign(&secret_key).unwrap();
+        resolver.insert(link.domain.clone(), new_root.to_string());
+        resolver.insert(format!("{}.{}", new_root.enr_root.clone(), link.domain), enr_txt);
+
+        let update = tokio::time::timeout(Duration::from_secs(10), node_records.next())
+            .await
+            .expect("service never woke up to recheck the tree")
+            .expect("record stream closed");
+        assert_eq!(update.enr, enr);
+
+        handle.abort();
+    }
+
+    #[tokio::test]
+    async fn test_recheck_tree_survives_unchanged_root() {
+        reth_tracing::init_test_tracing();
+
+        let config = DnsDiscoveryConfig {
+            recheck_interval: Duration::from_millis(100),
+            // the default 3/s would leave the recheck lookup queued behind the initial tree walk
+            max_requests_per_sec: NonZeroUsize::new(50).unwrap(),
+            ..Default::default()
+        };
+
+        let secret_key = SecretKey::new(&mut thread_rng());
+        let resolver = Arc::new(MapResolver::default());
+        let s = "enrtree-root:v1 e=QFT4PBCRX4XQCV3VUYJ6BTCEPU l=JGUFMSAGI7KZYB3P7IZW4S5Y3A seq=3 sig=3FmXuVwpa8Y7OstZTx9PIb1mt8FrW7VpDOFv4AaGCsZ2EIHmhraWhe4NxYhQDlw5MjeFXYMbJjsPeKlHzmJREQE";
+        let mut root: TreeRootEntry = s.parse().unwrap();
+        root.sign(&secret_key).unwrap();
+
+        let link =
+            LinkEntry { domain: "nodes.example.org".to_string(), pubkey: secret_key.public() };
+        resolver.insert(link.domain.clone(), root.to_string());
+
+        let mut service = DnsDiscoveryService::new(Arc::clone(&resolver), config.clone());
+        service.sync_tree_with_link(link.clone());
+
+        // first recheck sees the very same root, which must not take the tree out of rotation
+        for _ in 0..10 {
+            poll_fn(|cx| {
+                let _ = service.poll(cx);
+                Poll::Ready(())
+            })
+            .await;
+            tokio::time::sleep(config.recheck_interval / 2).await;
+        }
+
+        // now publish a change and expect the tree to still pick it up
+        let mut new_root = root.clone();
+        new_root.sequence_number = new_root.sequence_number.saturating_add(1);
+        let enr = Enr::empty(&secret_key).unwrap();
+        let enr_txt = enr.to_base64();
+        new_root.enr_root = entry_hash(&enr_txt);
+        new_root.sign(&secret_key).unwrap();
+        resolver.insert(link.domain.clone(), new_root.to_string());
+        resolver.insert(format!("{}.{}", new_root.enr_root.clone(), link.domain), enr_txt);
+
+        let event = tokio::time::timeout(Duration::from_secs(10), poll_fn(|cx| service.poll(cx)))
+            .await
+            .expect("tree stopped rechecking after an unchanged root");
+
+        match event {
+            DnsDiscoveryEvent::Enr(discovered) => assert_eq!(discovered, enr),
+        }
     }
 
     #[tokio::test]

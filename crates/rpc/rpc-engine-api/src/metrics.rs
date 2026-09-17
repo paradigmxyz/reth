@@ -24,6 +24,8 @@ pub(crate) struct EngineApiLatencyMetrics {
     pub(crate) new_payload_v4: Histogram,
     /// Latency for `engine_newPayloadV5`
     pub(crate) new_payload_v5: Histogram,
+    /// Latency for `engine_newPayloadV6`
+    pub(crate) new_payload_v6: Histogram,
     /// Latency for `engine_forkchoiceUpdatedV1`
     pub(crate) fork_choice_updated_v1: Histogram,
     /// Latency for `engine_forkchoiceUpdatedV2`
@@ -32,6 +34,10 @@ pub(crate) struct EngineApiLatencyMetrics {
     pub(crate) fork_choice_updated_v3: Histogram,
     /// Latency for `engine_forkchoiceUpdatedV4`
     pub(crate) fork_choice_updated_v4: Histogram,
+    /// Latency for `engine_forkchoiceUpdatedV5`
+    pub(crate) fork_choice_updated_v5: Histogram,
+    /// Latency for `engine_getInclusionListV1`
+    pub(crate) get_inclusion_list_v1: Histogram,
     /// Latency for `engine_getPayloadV1`
     pub(crate) get_payload_v1: Histogram,
     /// Latency for `engine_getPayloadV2`

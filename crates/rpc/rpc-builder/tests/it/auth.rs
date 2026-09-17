@@ -110,6 +110,7 @@ where
     EngineApiClient::fork_choice_updated_v1(client, ForkchoiceState::default(), None).await;
     EngineApiClient::get_payload_v1(client, PayloadId::new([0, 0, 0, 0, 0, 0, 0, 0])).await;
     EngineApiClient::get_payload_v2(client, PayloadId::new([0, 0, 0, 0, 0, 0, 0, 0])).await;
+    EngineApiClient::get_inclusion_list_v1(client).await;
     EngineApiClient::get_payload_bodies_by_hash_v1(client, vec![]).await;
     EngineApiClient::get_payload_bodies_by_range_v1(client, U64::ZERO, U64::from(1u64)).await;
     EngineApiClient::exchange_capabilities(client, vec![]).await;
