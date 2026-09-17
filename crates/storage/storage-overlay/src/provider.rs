@@ -853,10 +853,10 @@ where
         if self.provider().cached_storage_settings().use_hashed_state() {
             let hashed_address = alloy_primitives::keccak256(address);
             let hashed_slot = alloy_primitives::keccak256(storage_key);
-            let mut cursor = self.provider().tx().cursor_dup_read::<tables::HashedStorages>()?;
-            let value = cursor
-                .seek_by_key_subkey(hashed_address, hashed_slot)?
-                .filter(|entry| entry.key == hashed_slot)
+            let value = self
+                .provider()
+                .tx()
+                .get_by_key_subkey::<tables::HashedStorages>(hashed_address, hashed_slot)?
                 .map(|entry| entry.value);
             Ok(value.or_else(|| zero_if_missing.then_some(U256::ZERO)))
         } else {
