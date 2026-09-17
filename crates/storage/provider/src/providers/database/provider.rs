@@ -3977,8 +3977,8 @@ impl<TX: DbTx + 'static, N: NodeTypes + 'static> DatabaseProvider<TX, N> {
             }
             timings.rocksdb = start.elapsed();
 
-            let start = Instant::now();
             hook(&self.tx);
+            let start = Instant::now();
             self.tx.commit()?;
             timings.mdbx = start.elapsed();
 
