@@ -211,8 +211,6 @@ impl<T: PoolTransaction + 'static> BlobFetcher<T> {
             if pending.target.is_none() {
                 // Decide independently of provider-count saturation. A sparse sampler may
                 // acquire custody cells as soon as an announcement is available.
-                let full_providers =
-                    pending.providers.iter().filter(|(_, mask)| mask.bits() == u128::MAX).count();
                 let custody = BlobCellMask::new(self.custody.get());
                 let first_decision = pending.full.is_none();
                 let full = *pending.full.get_or_insert_with(|| {
