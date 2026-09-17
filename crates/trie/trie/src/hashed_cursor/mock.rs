@@ -1,4 +1,4 @@
-use std::{collections::BTreeMap, fmt::Debug, sync::Arc};
+use std::{collections::BTreeMap, fmt::Debug, ops::Bound, sync::Arc};
 
 use crate::mock::{KeyVisit, KeyVisitType};
 
@@ -198,7 +198,7 @@ impl<T: Debug + Clone> HashedCursor for MockHashedCursor<T> {
     #[instrument(skip(self), ret(level = "trace"))]
     fn seek(&mut self, key: B256) -> Result<Option<(B256, Self::Value)>, DatabaseError> {
         // Find the first key that is greater than or equal to the given key.
-        let entry = self.values().iter().find_map(|(k, v)| (k >= &key).then(|| (*k, v.clone())));
+        let entry = self.values().range(key..).next().map(|(k, v)| (*k, v.clone()));
         if let Some((key, _)) = &entry {
             self.current_key = Some(*key);
         }
@@ -211,15 +211,21 @@ impl<T: Debug + Clone> HashedCursor for MockHashedCursor<T> {
 
     #[instrument(skip(self), ret(level = "trace"))]
     fn next(&mut self) -> Result<Option<(B256, Self::Value)>, DatabaseError> {
-        let mut iter = self.values().iter();
-        // Jump to the first key that has a prefix of the current key if it's set, or to the first
-        // key otherwise.
-        iter.find(|(k, _)| {
-            self.current_key.as_ref().is_none_or(|current| k.starts_with(current.as_slice()))
-        })
-        .expect("current key should exist in values");
-        // Get the next key-value pair.
-        let entry = iter.next().map(|(k, v)| (*k, v.clone()));
+        let values = self.values();
+        // Get the key-value pair after the current key if it's set, or after the first key
+        // otherwise.
+        let entry = match self.current_key {
+            Some(current) => {
+                debug_assert!(values.contains_key(&current), "current key should exist in values");
+                values.range((Bound::Excluded(current), Bound::Unbounded)).next()
+            }
+            None => {
+                let mut iter = values.iter();
+                iter.next().expect("current key should exist in values");
+                iter.next()
+            }
+        };
+        let entry = entry.map(|(k, v)| (*k, v.clone()));
         if let Some((key, _)) = &entry {
             self.current_key = Some(*key);
         }

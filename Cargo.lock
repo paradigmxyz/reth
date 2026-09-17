@@ -10947,6 +10947,7 @@ dependencies = [
  "alloy-rlp",
  "alloy-trie",
  "arbitrary",
+ "codspeed-criterion-compat",
  "either",
  "itertools 0.14.0",
  "metrics",
