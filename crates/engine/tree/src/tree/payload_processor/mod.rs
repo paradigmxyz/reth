@@ -35,7 +35,7 @@ pub use reth_trie_parallel::{
 use std::{
     ops::Not,
     sync::{
-        atomic::{AtomicBool, AtomicUsize},
+        atomic::{AtomicBool, AtomicUsize, Ordering},
         mpsc, Arc, OnceLock,
     },
 };
@@ -419,6 +419,7 @@ where
         let saved_cache = self.disable_state_cache.not().then(|| self.cache_for(env.parent_hash));
 
         let executed_tx_index = Arc::new(AtomicUsize::new(0));
+        let terminate_execution = Arc::new(AtomicBool::new(false));
         // configure prewarming
         let prewarm_ctx = PrewarmContext {
             env,
@@ -429,7 +430,7 @@ where
             metrics: PrewarmMetrics::default(),
             cache_metrics: self.cache_metrics.clone(),
             cache_state_metrics: self.cache_state_metrics.clone(),
-            terminate_execution: Arc::new(AtomicBool::new(false)),
+            terminate_execution: terminate_execution.clone(),
             executed_tx_index: Arc::clone(&executed_tx_index),
             precompile_cache_disabled: self.precompile_cache_disabled,
             precompile_cache_map: self.precompile_cache_map.clone(),
@@ -450,6 +451,7 @@ where
             saved_cache,
             to_prewarm_task: Some(to_prewarm_task),
             executed_tx_index,
+            terminate_execution,
             cache_metrics: self.cache_metrics.clone(),
         }
     }
@@ -634,6 +636,8 @@ pub struct CacheTaskHandle<R> {
     /// Shared counter tracking the next transaction index to be executed by the main execution
     /// loop. Prewarm workers skip transactions below this index.
     executed_tx_index: Arc<AtomicUsize>,
+    /// Stops workers directly, even while the prewarm task is waiting for BAL I/O.
+    terminate_execution: Arc<AtomicBool>,
     /// Metrics for the execution cache.
     cache_metrics: Option<CachedStateMetrics>,
 }
@@ -643,6 +647,7 @@ impl<R: Send + Sync + 'static> CacheTaskHandle<R> {
     ///
     /// Note: This does not terminate the task yet.
     pub fn stop_prewarming_execution(&self) {
+        self.terminate_execution.store(true, Ordering::Relaxed);
         self.to_prewarm_task
             .as_ref()
             .map(|tx| tx.send(PrewarmTaskEvent::TerminateTransactionExecution).ok());
@@ -657,6 +662,7 @@ impl<R: Send + Sync + 'static> CacheTaskHandle<R> {
         &mut self,
         execution_outcome: Option<Arc<BlockExecutionOutput<R>>>,
     ) -> Option<mpsc::Sender<()>> {
+        self.terminate_execution.store(true, Ordering::Relaxed);
         if let Some(tx) = self.to_prewarm_task.take() {
             let (valid_block_tx, valid_block_rx) = mpsc::channel();
             let event = PrewarmTaskEvent::Terminate { execution_outcome, valid_block_rx };
@@ -671,6 +677,7 @@ impl<R: Send + Sync + 'static> CacheTaskHandle<R> {
 
 impl<R> Drop for CacheTaskHandle<R> {
     fn drop(&mut self) {
+        self.terminate_execution.store(true, Ordering::Relaxed);
         // Ensure we always terminate on drop - send None without needing Send + Sync bounds
         if let Some(tx) = self.to_prewarm_task.take() {
             let _ = tx.send(PrewarmTaskEvent::Terminate {
@@ -715,6 +722,27 @@ mod tests {
                 ),
                 Address::ZERO,
             )),
+        }
+    }
+
+    #[test]
+    fn prewarm_cancellation_does_not_wait_for_task_events() {
+        for action in [0, 1, 2] {
+            let stop = Arc::new(super::AtomicBool::new(false));
+            let (tx, _rx) = std::sync::mpsc::channel();
+            let mut handle = super::CacheTaskHandle::<()> {
+                saved_cache: None,
+                to_prewarm_task: Some(tx),
+                executed_tx_index: Default::default(),
+                terminate_execution: stop.clone(),
+                cache_metrics: None,
+            };
+            match action {
+                0 => handle.stop_prewarming_execution(),
+                1 => drop(handle.terminate_caching(None)),
+                _ => drop(handle),
+            }
+            assert!(stop.load(Ordering::Relaxed));
         }
     }
 
@@ -840,6 +868,7 @@ mod tests {
                     saved_cache: None,
                     to_prewarm_task: None,
                     executed_tx_index: Default::default(),
+                    terminate_execution: Default::default(),
                     cache_metrics: None,
                 },
                 transactions: receiver,

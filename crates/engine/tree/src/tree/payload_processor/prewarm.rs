@@ -18,14 +18,14 @@ use crate::tree::{
     PayloadExecutionCache, SavedCache,
 };
 use alloy_consensus::transaction::TxHashRef;
-use alloy_eip7928::bal::DecodedBal;
+use alloy_eip7928::{bal::DecodedBal, BalAccountInfo};
 use alloy_eips::eip4895::Withdrawal;
 use alloy_primitives::keccak256;
 use metrics::{Counter, Gauge, Histogram};
 use rayon::prelude::*;
 use reth_evm::{execute::ExecutableTxFor, ConfigureEvm, Evm, EvmFor, RecoveredTx, SpecFor};
 use reth_metrics::Metrics;
-use reth_primitives_traits::{FastInstant as Instant, NodePrimitives};
+use reth_primitives_traits::{Account, FastInstant as Instant, NodePrimitives};
 use reth_provider::{
     AccountReader, BlockExecutionOutput, BlockNumReader, ChangeSetReader, DatabaseProviderFactory,
     DatabaseProviderROFactory, HistoryReader, PruneCheckpointReader, StageCheckpointReader,
@@ -353,8 +353,8 @@ where
     /// Spawns two halves concurrently on separate pools, then waits for both to complete:
     /// 1. Hashed state streaming on the BAL streaming pool so storage updates can reach the
     ///    state-root job before account reads finish.
-    /// 2. Storage prefetch on the prewarming pool to populate the execution cache, unless BAL batch
-    ///    I/O is disabled.
+    /// 2. Account and storage prefetch on the prewarming pool, followed by deferred bytecode reads,
+    ///    unless BAL batch I/O is disabled. Prefetch stops once transaction execution finishes.
     #[instrument(level = "debug", target = "engine::tree::payload_processor::prewarm", skip_all)]
     fn run_bal_prewarm(
         &self,
@@ -418,7 +418,7 @@ where
             let _ = stream_tx.send(());
         }
 
-        if let Some(saved_cache) = ctx.saved_cache &&
+        if let Some(saved_cache) = &ctx.saved_cache &&
             !ctx.disable_bal_batch_io &&
             let Some(pool) = ctx.bal_prewarm_pool.as_ref()
         {
@@ -442,10 +442,21 @@ where
                     .map(|provider| Box::new(provider) as _)
             });
 
-            pool.begin_block(build, caches, ctx.env.txpool_snapshot.clone());
+            pool.begin_block(
+                build,
+                caches,
+                ctx.env.txpool_snapshot.clone(),
+                ctx.terminate_execution.clone(),
+            );
             let dispatch_start = Instant::now();
             for account in prefetch_bal.as_bal() {
-                pool.warm_account(account.address, account.storage_slots().map(Into::into));
+                if ctx.should_stop() {
+                    break
+                }
+                pool.warm_account(
+                    account.address,
+                    account.storage_slots().take_while(|_| !ctx.should_stop()).map(Into::into),
+                );
             }
             ctx.metrics.bal_slot_iteration_duration.record(dispatch_start.elapsed());
             pool.end_block();
@@ -750,7 +761,7 @@ where
         };
 
         let mut account = existing_account.unwrap_or_default();
-        account.apply_bal_info(account_info);
+        apply_bal_info(&mut account, account_info);
         let hashed_address = hashed_address.unwrap_or_else(|| keccak256(address));
 
         // It is possible for the resulting account info to be empty. This can happen when, in the
@@ -770,6 +781,17 @@ where
         hashed_state.accounts.insert(hashed_address, account);
         hashed_update_stream.on_hashed_state_update(hashed_state);
     }
+}
+
+fn apply_bal_info(account: &mut Account, info: BalAccountInfo) {
+    if let Some(balance) = info.balance {
+        account.balance = balance;
+    }
+    if let Some(nonce) = info.nonce {
+        account.nonce = nonce;
+    }
+    account.bytecode_hash =
+        info.code_hash.or(account.bytecode_hash).or(Some(alloy_consensus::constants::KECCAK_EMPTY));
 }
 
 /// Returns [`MultiProofTargetsV2`] for withdrawal addresses.
@@ -793,7 +815,6 @@ mod tests {
     use reth_ethereum_primitives::{EthPrimitives, TransactionSigned};
     use reth_evm::{execute::WithTxEnv, TxEnvFor};
     use reth_evm_ethereum::EthEvmConfig;
-    use reth_primitives_traits::Account;
     use reth_provider::test_utils::MockEthProvider;
     use reth_storage_overlay::OverlayManager;
 
@@ -1031,6 +1052,7 @@ mod tests {
                 saved_cache: task.ctx.saved_cache.clone(),
                 to_prewarm_task: Some(actions_tx.clone()),
                 executed_tx_index: task.ctx.executed_tx_index.clone(),
+                terminate_execution: task.ctx.terminate_execution.clone(),
                 cache_metrics: None,
             },
             transactions: crossbeam_channel::never::<(usize, Result<(), ()>)>(),
@@ -1184,7 +1206,7 @@ mod tests {
             nonce: 3,
             bytecode_hash: Some(B256::repeat_byte(0xaa)),
         };
-        account.apply_bal_info(info);
+        apply_bal_info(&mut account, info);
 
         assert_eq!(account.balance, U256::from(10));
         assert_eq!(account.nonce, 3);

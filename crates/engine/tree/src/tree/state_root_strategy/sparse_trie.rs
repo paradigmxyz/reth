@@ -1676,7 +1676,7 @@ mod tests {
     use reth_provider::test_utils::create_test_provider_factory;
     use reth_storage_overlay::{OverlayManager, OverlayStateProviderFactory};
     use reth_trie_common::{ExtensionNode, LeafNode, Nibbles, RlpNode, TrieNodeV2};
-    use reth_trie_parallel::proof_task::ProofTaskCtx;
+    use reth_trie_parallel::proof_task::{ProofTaskCtx, ProofWorkerCounts};
     use reth_trie_sparse::ArenaParallelSparseTrie;
 
     fn drain_sparse_trie_tasks(runtime: &Runtime) {
@@ -1700,7 +1700,7 @@ mod tests {
         let proof_worker_handle = ProofWorkerHandle::new(
             runtime,
             ProofTaskCtx::new(state_provider_factory),
-            false,
+            ProofWorkerCounts::full(runtime),
             proof_result_tx.clone(),
         );
         let (updates_tx, updates_rx) = crossbeam_channel::unbounded();
@@ -2304,7 +2304,7 @@ mod tests {
         let proof_worker_handle = ProofWorkerHandle::new(
             &runtime,
             ProofTaskCtx::new(state_provider_factory),
-            false,
+            ProofWorkerCounts::full(&runtime),
             proof_result_tx.clone(),
         );
 
@@ -2388,7 +2388,7 @@ mod tests {
         let proof_worker_handle = ProofWorkerHandle::new(
             &runtime,
             ProofTaskCtx::new(state_provider_factory),
-            false,
+            ProofWorkerCounts::full(&runtime),
             proof_result_tx.clone(),
         );
 
@@ -2443,7 +2443,7 @@ mod tests {
         let proof_worker_handle = ProofWorkerHandle::new(
             &runtime,
             ProofTaskCtx::new(state_provider_factory),
-            false,
+            ProofWorkerCounts::full(&runtime),
             proof_result_tx.clone(),
         );
 
@@ -2534,7 +2534,7 @@ mod tests {
         let proof_worker_handle = ProofWorkerHandle::new(
             &runtime,
             ProofTaskCtx::new(state_provider_factory),
-            false,
+            ProofWorkerCounts::full(&runtime),
             proof_result_tx.clone(),
         );
 
@@ -2587,7 +2587,7 @@ mod tests {
         let proof_worker_handle = ProofWorkerHandle::new(
             &runtime,
             ProofTaskCtx::new(state_provider_factory),
-            false,
+            ProofWorkerCounts::full(&runtime),
             proof_result_tx.clone(),
         );
 
