@@ -26,7 +26,7 @@ impl ActivityGuard {
     }
     /// Enables coordinator phase detail independently of engine phases.
     pub fn coordinator(phase: &'static str) -> Self {
-        if tracing::enabled!(target: "engine::tree::coordinator_activity", tracing::Level::TRACE) {
+        if CONFIG.coordinator {
             Self::new(phase)
         } else {
             Self::disabled()
@@ -34,7 +34,7 @@ impl ActivityGuard {
     }
     /// Records fine-grained phases without per-event subscriber calls.
     pub fn detail(phase: &'static str) -> Self {
-        if tracing::enabled!(target: "engine::tree::detail_activity", tracing::Level::TRACE) {
+        if CONFIG.detail {
             Self::new(phase)
         } else {
             Self::disabled()
@@ -46,7 +46,7 @@ impl ActivityGuard {
     }
     /// Records a storage job only with fine-grained tracing enabled.
     pub fn job(phase: &'static str, parent: u64, units: usize, queued: Duration) -> Self {
-        if tracing::enabled!(target: "engine::tree::detail_activity", tracing::Level::TRACE) {
+        if CONFIG.detail {
             Self::start(phase, parent, units, queued)
         } else {
             Self::disabled()
@@ -56,7 +56,7 @@ impl ActivityGuard {
         Self { active: None, _thread: PhantomData }
     }
     fn start(phase: &'static str, external_parent: u64, units: usize, queued: Duration) -> Self {
-        if !tracing::enabled!(target: "engine::tree::activity", tracing::Level::TRACE) {
+        if !CONFIG.active {
             return Self::disabled()
         }
         let root = PARENT.with(Cell::get) == 0;
@@ -66,10 +66,7 @@ impl ActivityGuard {
         let allowed_root = allowed_root || phase.starts_with("test_");
         // Do not turn each small Rayon job into an outer trace/export by default.
         // Nested work executed on the coordinator itself is still accounted for.
-        if root &&
-            !allowed_root &&
-            !tracing::enabled!(target: "engine::tree::worker_activity", tracing::Level::TRACE)
-        {
+        if root && !allowed_root && !CONFIG.workers {
             return Self::disabled()
         }
         let epoch = *EPOCH;
@@ -80,8 +77,33 @@ impl ActivityGuard {
         // /proc scheduler reads are restricted to outer scopes. Optional phase CPU clocks
         // are benchmarked separately from wall-only probes to expose measurement overhead.
         let queue = outer.then(current_thread_runqueue_time).flatten();
-        let cpu_enabled =
-            outer || tracing::enabled!(target: "engine::tree::phase_cpu", tracing::Level::TRACE);
+        let cpu_enabled = outer ||
+            CONFIG.fine_cpu ||
+            (CONFIG.cpu &&
+                matches!(
+                    phase,
+                    "proof_coalesce_reveal" |
+                        "proof_reveal" |
+                        "reveal_account_proofs" |
+                        "account_subtries" |
+                        "new_updates" |
+                        "storage_dispatch" |
+                        "account_leaves" |
+                        "storage_batch_spawn" |
+                        "restore_storage" |
+                        "promotion" |
+                        "proof_dispatch" |
+                        "final_root_updates" |
+                        "collect_account_updates" |
+                        "collect_storage_updates" |
+                        "final_account_root" |
+                        "arena_leaf_application" |
+                        "leaf_unpack_sort" |
+                        "hash_restore_upper" |
+                        "hash_subtries_parallel_join" |
+                        "hash_subtries_inline" |
+                        "storage_inline"
+                ));
         let cpu = cpu_enabled.then(current_thread_cpu_time).flatten();
         let start = Instant::now().duration_since(epoch).as_nanos() as u64;
         Self {
@@ -201,6 +223,24 @@ struct Events {
     records: Vec<Record>,
     dropped: usize,
 }
+// Benchmark filters are fixed for the lifetime of the process. Checking EnvFilter
+// on every tiny phase otherwise becomes a major part of the measured CPU workload.
+struct Config {
+    active: bool,
+    detail: bool,
+    coordinator: bool,
+    workers: bool,
+    cpu: bool,
+    fine_cpu: bool,
+}
+static CONFIG: LazyLock<Config> = LazyLock::new(|| Config {
+    active: tracing::enabled!(target: "engine::tree::activity", tracing::Level::TRACE),
+    detail: tracing::enabled!(target: "engine::tree::detail_activity", tracing::Level::TRACE),
+    coordinator: tracing::enabled!(target: "engine::tree::coordinator_activity", tracing::Level::TRACE),
+    workers: tracing::enabled!(target: "engine::tree::worker_activity", tracing::Level::TRACE),
+    cpu: tracing::enabled!(target: "engine::tree::phase_cpu", tracing::Level::TRACE),
+    fine_cpu: tracing::enabled!(target: "engine::tree::fine_cpu", tracing::Level::TRACE),
+});
 static EPOCH: LazyLock<Instant> = LazyLock::new(Instant::now);
 static NEXT: AtomicU64 = AtomicU64::new(1);
 thread_local! {
