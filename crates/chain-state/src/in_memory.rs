@@ -10,7 +10,9 @@ use alloy_primitives::{map::B256Map, BlockNumber, TxHash, B256};
 use parking_lot::RwLock;
 use reth_chainspec::ChainInfo;
 use reth_ethereum_primitives::EthPrimitives;
-use reth_execution_types::{BlockExecutionOutput, BlockExecutionResult, Chain, ExecutionOutcome};
+use reth_execution_types::{
+    BlockExecutionOutput, BlockExecutionResult, Chain, DecodedRevmBal, ExecutionOutcome,
+};
 use reth_metrics::{metrics::Gauge, Metrics};
 use reth_primitives_traits::{
     BlockBody as _, IndexedTx, NodePrimitives, RecoveredBlock, SealedBlock, SealedHeader,
@@ -768,6 +770,11 @@ pub struct ExecutedBlock<N: NodePrimitives = EthPrimitives> {
     /// This allows deferring the computation of the trie data which can be expensive.
     /// The data can be populated asynchronously after the block was validated.
     pub trie_data: LazyTrieData,
+    /// The prepared block access list of the block, if the payload carried one.
+    ///
+    /// This carries the raw RLP (for the BAL store) together with the revm representation (for
+    /// consumers like the RPC state cache), so that neither has to be re-derived after validation.
+    pub bal: Option<Arc<DecodedRevmBal>>,
 }
 
 impl<N: NodePrimitives> Default for ExecutedBlock<N> {
@@ -784,13 +791,15 @@ impl<N: NodePrimitives> Default for ExecutedBlock<N> {
                 state: Default::default(),
             }),
             trie_data: LazyTrieData::ready(ComputedTrieData::default()),
+            bal: None,
         }
     }
 }
 
 impl<N: NodePrimitives> PartialEq for ExecutedBlock<N> {
     fn eq(&self, other: &Self) -> bool {
-        // Trie data is computed asynchronously and doesn't define block identity.
+        // Trie data is computed asynchronously and the block access list is derived data; neither
+        // defines block identity.
         self.recovered_block == other.recovered_block &&
             self.execution_output == other.execution_output
     }
@@ -806,7 +815,12 @@ impl<N: NodePrimitives> ExecutedBlock<N> {
         execution_output: Arc<BlockExecutionOutput<N::Receipt>>,
         trie_data: ComputedTrieData,
     ) -> Self {
-        Self { recovered_block, execution_output, trie_data: LazyTrieData::ready(trie_data) }
+        Self {
+            recovered_block,
+            execution_output,
+            trie_data: LazyTrieData::ready(trie_data),
+            bal: None,
+        }
     }
 
     /// Create a new [`ExecutedBlock`] with deferred trie data.
@@ -827,7 +841,19 @@ impl<N: NodePrimitives> ExecutedBlock<N> {
         execution_output: Arc<BlockExecutionOutput<N::Receipt>>,
         trie_data: LazyTrieData,
     ) -> Self {
-        Self { recovered_block, execution_output, trie_data }
+        Self { recovered_block, execution_output, trie_data, bal: None }
+    }
+
+    /// Attaches the prepared block access list of the block.
+    pub fn with_bal(mut self, bal: Option<Arc<DecodedRevmBal>>) -> Self {
+        self.bal = bal;
+        self
+    }
+
+    /// Returns the prepared block access list of the block, if the payload carried one.
+    #[inline]
+    pub const fn bal(&self) -> Option<&Arc<DecodedRevmBal>> {
+        self.bal.as_ref()
     }
 
     /// Returns a reference to an inner [`SealedBlock`]
@@ -981,6 +1007,9 @@ impl<N: NodePrimitives<SignedTx: SignedTransaction>> NewCanonicalChain<N> {
                     )),
                     first.trie_data_handle(),
                 );
+                if let Some(bal) = first.bal() {
+                    chain.insert_bal(first.block_number(), Arc::clone(bal));
+                }
                 for exec in rest {
                     chain.append_block(
                         Arc::clone(&exec.recovered_block),
@@ -990,6 +1019,9 @@ impl<N: NodePrimitives<SignedTx: SignedTransaction>> NewCanonicalChain<N> {
                         )),
                         exec.trie_data_handle(),
                     );
+                    if let Some(bal) = exec.bal() {
+                        chain.insert_bal(exec.block_number(), Arc::clone(bal));
+                    }
                 }
                 chain
             }
@@ -1641,5 +1673,26 @@ mod tests {
                 ))
             }
         );
+    }
+
+    #[test]
+    fn test_to_chain_notification_carries_prepared_bal() {
+        let mut test_block_builder: TestBlockBuilder = TestBlockBuilder::default();
+        let block0 = test_block_builder.get_executed_block_with_number(0, B256::random());
+        let block1 = test_block_builder
+            .get_executed_block_with_number(1, block0.recovered_block.hash())
+            .with_bal(Some(Arc::new(DecodedRevmBal::new(
+                Arc::new(revm::state::bal::Bal::default()),
+                Bytes::from_static(&[0xc0]),
+            ))));
+
+        let chain = NewCanonicalChain::Commit { new: vec![block0, block1.clone()] };
+        let CanonStateNotification::Commit { new } = chain.to_chain_notification() else {
+            panic!("expected a commit notification")
+        };
+
+        // Only the block whose payload carried a BAL contributes one.
+        assert_eq!(new.bals().len(), 1);
+        assert_eq!(new.bal_at(1), block1.bal());
     }
 }
