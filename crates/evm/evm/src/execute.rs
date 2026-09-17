@@ -316,7 +316,7 @@ pub struct BlockBuilderOutcome<N: NodePrimitives> {
     pub block: RecoveredBlock<N::Block>,
     /// Block access list built during execution (EIP-7928, Amsterdam), with its RLP bytes and
     /// hash.
-    pub block_access_list: Option<DecodedBal<BlockAccessList>>,
+    pub block_access_list: Option<DecodedBal>,
 }
 
 /// A type that knows how to execute and build a block.
@@ -515,7 +515,7 @@ where
         let block_access_list = db.take_built_alloy_bal().map(|bal| {
             let mut raw = Vec::new();
             let hash = compute_block_access_list_hash_with_buf(&bal, &mut raw);
-            DecodedBal::new_unchecked(bal, raw.into(), hash)
+            DecodedBal::new_unchecked(bal.into(), raw.into(), hash)
         });
         let block_access_list_hash = block_access_list.as_ref().map(DecodedBal::hash);
 
