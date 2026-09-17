@@ -287,6 +287,7 @@ pub(crate) fn normalize_deleted_account_storage_wipes(state: &mut BlockStateAccu
 pub struct HashedPostStateSink<KH> {
     state: HashedPostState,
     created_accounts: B256Set,
+    last_address: Option<(Address, B256)>,
     _key_hasher: PhantomData<KH>,
 }
 
@@ -362,6 +363,7 @@ impl<KH> Default for HashedPostStateSink<KH> {
         Self {
             state: HashedPostState::default(),
             created_accounts: B256Set::default(),
+            last_address: None,
             _key_hasher: PhantomData,
         }
     }
@@ -412,6 +414,20 @@ impl<KH> HashedPostStateSink<KH> {
         self.state
     }
 
+    fn hash_address(&mut self, address: Address) -> B256
+    where
+        KH: KeyHasher,
+    {
+        if let Some((previous, hash)) = self.last_address &&
+            previous == address
+        {
+            return hash;
+        }
+        let hash = KH::hash_key(address);
+        self.last_address = Some((address, hash));
+        hash
+    }
+
     fn drop_created_account_storage_wipe(&mut self, hashed_address: B256) {
         let remove_storage = if let Some(storage) = self.state.storages.get_mut(&hashed_address) {
             storage.storage.is_empty()
@@ -439,7 +455,7 @@ where
     }
 
     fn account(&mut self, change: AccountChangeRef<'_>) -> Result<(), Self::Error> {
-        let hashed_address = KH::hash_key(change.address);
+        let hashed_address = self.hash_address(change.address);
         let was_created = self.created_accounts.contains(&hashed_address);
         let was_deleted_existing =
             !was_created && self.state.accounts.get(&hashed_address).is_some_and(Option::is_none);
@@ -475,7 +491,7 @@ where
     }
 
     fn storage_wipe(&mut self, address: alloy_primitives::Address) -> Result<(), Self::Error> {
-        let hashed_address = KH::hash_key(address);
+        let hashed_address = self.hash_address(address);
         if self.created_accounts.contains(&hashed_address) {
             self.state.storages.remove(&hashed_address);
         } else {
@@ -487,7 +503,7 @@ where
     }
 
     fn storage(&mut self, change: StorageChange) -> Result<(), Self::Error> {
-        let hashed_address = KH::hash_key(change.address);
+        let hashed_address = self.hash_address(change.address);
         let storage = self.state.storages.entry(hashed_address).or_default();
         storage.storage.insert(KH::hash_key(B256::new(change.key.to_be_bytes())), change.current);
         Ok(())

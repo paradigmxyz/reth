@@ -8,10 +8,7 @@ use fixed_cache::{AnyRef, CacheConfig, Stats, StatsHandler};
 use metrics::{Counter, Gauge, Histogram};
 use parking_lot::Once;
 use reth_errors::ProviderResult;
-use reth_execution_types::{
-    EvmState, EvmStateChangeSink, EvmStateChangeSource, ExecutableBytecode,
-    ExecutionAccountChangeRef, ExecutionStorageChange,
-};
+use reth_execution_types::EvmState;
 use reth_metrics::Metrics;
 use reth_primitives_traits::{Account, Bytecode};
 use reth_provider::{
@@ -1236,8 +1233,45 @@ impl ExecutionCache {
     #[instrument(level = "debug", target = "engine::caching", skip_all)]
     pub fn insert_state(&self, state_updates: &EvmState) {
         let _enter = debug_span!(target: "engine::tree", "state_source").entered();
-        let mut sink = ExecutionCacheInsertSink { cache: self, cleared: false };
-        state_updates.visit(&mut sink).expect("infallible state sink");
+        // Native iterators avoid allocating and sorting the state for a cache update.
+        for (hash, code) in state_updates.code() {
+            self.insert_code(*hash, Some(code.clone().into()));
+        }
+        if let Some(address) = state_updates.storage_wipes().next() {
+            self.0.selfdestruct_encountered.call_once(|| {
+                warn!(target: "engine::caching", ?address, "Storage wipe reset the execution cache");
+            });
+            self.clear();
+            return;
+        }
+        for (address, account) in state_updates.accounts() {
+            let Some(info) = &account.current else {
+                let had_code = account.original.as_ref().is_some_and(|info| {
+                    !info.code_hash.is_zero() && info.code_hash != KECCAK256_EMPTY
+                });
+                if had_code {
+                    self.0.selfdestruct_encountered.call_once(|| {
+                        warn!(target: "engine::caching", ?address, "Contract deletion reset the execution cache");
+                    });
+                    self.clear();
+                    return;
+                }
+                self.0.account_cache.remove(&address);
+                continue;
+            };
+            self.insert_account(
+                address,
+                Some(Account {
+                    nonce: info.nonce,
+                    balance: info.balance,
+                    bytecode_hash: (!info.code_hash.is_zero() && info.code_hash != KECCAK256_EMPTY)
+                        .then_some(info.code_hash),
+                }),
+            );
+        }
+        for (key, value) in state_updates.storage() {
+            self.insert_storage(key.address(), key.key().into(), Some(value.current));
+        }
     }
 
     /// Clears storage and account caches, resetting them to empty state.
@@ -1269,95 +1303,6 @@ impl ExecutionCache {
         metrics.account_cache_capacity.set(self.0.account_stats.capacity() as f64);
         metrics.account_cache_collisions.set(self.0.account_stats.collisions() as f64);
         self.0.account_stats.reset_stats();
-    }
-}
-
-struct ExecutionCacheInsertSink<'a> {
-    cache: &'a ExecutionCache,
-    cleared: bool,
-}
-
-impl EvmStateChangeSink for ExecutionCacheInsertSink<'_> {
-    type Error = core::convert::Infallible;
-
-    fn bytecode(
-        &mut self,
-        code_hash: B256,
-        bytecode: &ExecutableBytecode,
-    ) -> Result<(), Self::Error> {
-        if self.cleared {
-            return Ok(())
-        }
-
-        self.cache.insert_code(code_hash, Some(bytecode.clone().into()));
-        Ok(())
-    }
-
-    fn storage_wipe(&mut self, address: Address) -> Result<(), Self::Error> {
-        if self.cleared {
-            return Ok(())
-        }
-
-        // A recreated account can have identical original and final account info, so evm2
-        // may emit only the storage wipe. Invalidate here even without an account callback.
-        self.cache.0.selfdestruct_encountered.call_once(|| {
-            warn!(target: "engine::caching", ?address, "Storage wipe reset the execution cache");
-        });
-        self.cache.clear();
-        self.cleared = true;
-        Ok(())
-    }
-
-    fn storage(&mut self, change: ExecutionStorageChange) -> Result<(), Self::Error> {
-        if self.cleared {
-            return Ok(())
-        }
-
-        self.cache.insert_storage(change.address, change.key.into(), Some(change.current));
-        Ok(())
-    }
-
-    fn account(&mut self, account: ExecutionAccountChangeRef<'_>) -> Result<(), Self::Error> {
-        if self.cleared {
-            return Ok(())
-        }
-
-        if account.current.is_none() {
-            let had_code = account
-                .original
-                .is_some_and(|info| !info.code_hash.is_zero() && info.code_hash != KECCAK256_EMPTY);
-            if had_code {
-                self.cache.0.selfdestruct_encountered.call_once(|| {
-                    warn!(
-                        target: "engine::caching",
-                        address = ?account.address,
-                        info = ?account.current,
-                        original_info = ?account.original,
-                        "Encountered an inter-transaction SELFDESTRUCT that reset the storage cache. Are you running a pre-Dencun network?"
-                    );
-                });
-                self.cache.clear();
-                self.cleared = true;
-                return Ok(())
-            }
-
-            self.cache.0.account_cache.remove(&account.address);
-            return Ok(())
-        }
-
-        let account_info = account.current.expect("deleted accounts handled above");
-
-        self.cache.insert_account(
-            account.address,
-            Some(Account {
-                nonce: account_info.nonce,
-                balance: account_info.balance,
-                bytecode_hash: (!account_info.code_hash.is_zero() &&
-                    account_info.code_hash != KECCAK256_EMPTY)
-                    .then_some(account_info.code_hash),
-            }),
-        );
-        Ok(())
     }
 }
 

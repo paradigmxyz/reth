@@ -747,6 +747,7 @@ where
 struct PrewarmProofTargetsSink {
     targets: MultiProofTargetsV2,
     storage_targets: usize,
+    last_storage_address: Option<(Address, alloy_primitives::B256)>,
 }
 
 impl PrewarmProofTargetsSink {
@@ -755,7 +756,15 @@ impl PrewarmProofTargetsSink {
     }
 
     fn storage_targets_for_address(&mut self, address: Address) -> &mut Vec<ProofV2Target> {
-        self.targets.storage_targets.entry(keccak256(address)).or_default()
+        let hash = match self.last_storage_address {
+            Some((previous, hash)) if previous == address => hash,
+            _ => {
+                let hash = keccak256(address);
+                self.last_storage_address = Some((address, hash));
+                hash
+            }
+        };
+        self.targets.storage_targets.entry(hash).or_default()
     }
 }
 
