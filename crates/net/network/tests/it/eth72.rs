@@ -214,7 +214,8 @@ async fn run_eth72_blob_receive(cells_first: bool) {
     let mask = alloy_eips::eip7594::BlobCellMask::from_bits(u128::from_le_bytes(
         request.message.cell_mask.into(),
     ));
-    assert_eq!(mask.count(), 64);
+    // Full-provider acquisition requests the complete 128-cell extended blob.
+    assert_eq!(mask.count(), 128);
     eth_stream
         .send(EthMessage::Cells(RequestPair {
             request_id: request.request_id,
