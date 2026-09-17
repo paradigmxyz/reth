@@ -59,6 +59,7 @@ use self::sparse_trie::{SparseTrieCacheTask, SparseTrieTaskMetrics};
 use crate::tree::{metrics::BlockValidationMetrics, EngineApiTreeState, ExecutionEnv, TreeConfig};
 use alloy_primitives::B256;
 use crossbeam_channel::{Receiver as CrossbeamReceiver, Sender as CrossbeamSender};
+use parking_lot::Mutex;
 use reth_chain_state::{ExecutedBlock, PreservedSparseTrie};
 use reth_errors::ProviderResult;
 use reth_evm::{ConfigureEvm, OnStateHook};
@@ -494,7 +495,7 @@ impl DefaultStateRootStrategy {
         overlay_manager: &OverlayManager<N>,
         multiproof_provider_factory: F,
         options: StateRootTaskOptions<'_, N>,
-    ) -> StateRootHandle
+    ) -> (StateRootHandle, Arc<SparseTrieCache<N>>)
     where
         N: NodePrimitives,
         F: DatabaseProviderROFactory<Provider: TrieCursorFactory + HashedCursorFactory>
@@ -528,6 +529,10 @@ impl DefaultStateRootStrategy {
         let (hashed_state_tx, hashed_state_rx) = mpsc::channel();
         let parent_state_root = parent_header.state_root();
 
+        let cache = Arc::new(SparseTrieCache {
+            overlay_manager: overlay_manager.clone(),
+            enabled: Mutex::new(true),
+        });
         self.spawn_sparse_trie_task(
             executor,
             overlay_manager,
@@ -539,6 +544,7 @@ impl DefaultStateRootStrategy {
             from_multi_proof,
             cancel_rx,
             SparseTrieTaskOptions {
+                cache: cache.clone(),
                 parent_header,
                 block_hash,
                 preserved_sparse_trie,
@@ -551,12 +557,15 @@ impl DefaultStateRootStrategy {
             },
         );
 
-        StateRootHandle::new(
-            parent_state_root,
-            updates_tx,
-            cancel_guard,
-            state_root_rx,
-            hashed_state_rx,
+        (
+            StateRootHandle::new(
+                parent_state_root,
+                updates_tx,
+                cancel_guard,
+                state_root_rx,
+                hashed_state_rx,
+            ),
+            cache,
         )
     }
 
@@ -576,6 +585,7 @@ impl DefaultStateRootStrategy {
         options: SparseTrieTaskOptions<N>,
     ) {
         let SparseTrieTaskOptions {
+            cache,
             parent_header,
             block_hash,
             preserved_sparse_trie,
@@ -674,8 +684,12 @@ impl DefaultStateRootStrategy {
                     prune_target.map_or(sparse_trie_anchor_hash, |(_, anchor_hash)| anchor_hash);
                 let (preserved, completer) =
                     PreservedSparseTrie::pending(block_hash, preserved_anchor_hash);
-                overlay_manager.store_sparse_trie(preserved);
-                Some(completer)
+                if let Err(preserved) = cache.publish(preserved) {
+                    executor.spawn_drop(preserved);
+                    None
+                } else {
+                    Some(completer)
+                }
             } else {
                 overlay_manager.clear_sparse_trie();
                 None
@@ -738,7 +752,33 @@ impl DefaultStateRootStrategy {
     }
 }
 
+/// Serial fallback permanently disables publication by this task. The lock also orders
+/// invalidation against a worker publishing after its timeout has expired.
+#[derive(Debug)]
+struct SparseTrieCache<N: NodePrimitives> {
+    overlay_manager: OverlayManager<N>,
+    enabled: Mutex<bool>,
+}
+
+impl<N: NodePrimitives> SparseTrieCache<N> {
+    fn publish(&self, trie: PreservedSparseTrie) -> Result<(), PreservedSparseTrie> {
+        let enabled = self.enabled.lock();
+        if !*enabled {
+            return Err(trie)
+        }
+        self.overlay_manager.store_sparse_trie(trie);
+        Ok(())
+    }
+
+    fn invalidate(&self) {
+        let mut enabled = self.enabled.lock();
+        *enabled = false;
+        self.overlay_manager.clear_sparse_trie();
+    }
+}
+
 struct SparseTrieTaskOptions<N: NodePrimitives> {
+    cache: Arc<SparseTrieCache<N>>,
     parent_header: SealedHeader<N::BlockHeader>,
     block_hash: Option<B256>,
     preserved_sparse_trie: Option<PreservedSparseTrie>,
@@ -838,7 +878,7 @@ where
             state_provider_factory.clone()
         };
 
-        let mut handle = self.spawn_state_root(
+        let (mut handle, cache) = self.spawn_state_root(
             executor,
             overlay_manager,
             proof_state_provider_factory,
@@ -868,6 +908,7 @@ where
 
         let mut prepared = PreparedStateRootJob::new(
             Box::new(SparseTrieStateRootJob {
+                cache,
                 handle,
                 state_provider_factory,
                 executor: executor.clone(),
@@ -927,6 +968,7 @@ where
                     pending_sparse_trie_prune_blocks,
                 },
             )
+            .0
             .into_payload_state_root_handle(),
         ))
     }
@@ -987,6 +1029,7 @@ where
 
 #[derive(Debug)]
 struct SparseTrieStateRootJob<N: NodePrimitives, P> {
+    cache: Arc<SparseTrieCache<N>>,
     handle: StateRootHandle,
     state_provider_factory: OverlayStateProviderFactory<P, N>,
     executor: reth_tasks::Runtime,
@@ -1016,13 +1059,13 @@ where
         + 'static,
 {
     fn serial_fallback(
-        executor: &reth_tasks::Runtime,
-        state_provider_factory: OverlayStateProviderFactory<P, N>,
+        &self,
         output: Arc<BlockExecutionOutput<N::Receipt>>,
     ) -> ProviderResult<SerialFallbackRx> {
-        let provider = state_provider_factory.database_provider_ro()?;
+        self.cache.invalidate();
+        let provider = self.state_provider_factory.database_provider_ro()?;
         let (fallback_tx, fallback_rx) = mpsc::channel();
-        executor.spawn_blocking_named("serial-root", move || {
+        self.executor.spawn_blocking_named("serial-root", move || {
             let result = (|| {
                 let hashed_state = Arc::new(provider.hashed_post_state(&output.state)?);
                 let (root, updates) =
@@ -1043,6 +1086,7 @@ where
         &self,
         output: &BlockExecutionOutput<N::Receipt>,
     ) -> ProviderResult<StateRootJobOutcome> {
+        self.cache.invalidate();
         let provider = self.state_provider_factory.database_provider_ro()?;
         let hashed_state = Arc::new(provider.hashed_post_state(&output.state)?);
         let (state_root, trie_updates) =
@@ -1142,28 +1186,16 @@ where
             Ok(Ok(outcome)) => return self.verified_sparse_outcome(block, &output, outcome),
             Ok(Err(err)) => {
                 debug!(target: "engine::tree::state_root_strategy", %err, "State root task failed, falling back to serial root");
-                Self::serial_fallback(
-                    &self.executor,
-                    self.state_provider_factory.clone(),
-                    output.clone(),
-                )?
+                self.serial_fallback(output.clone())?
             }
             Err(RecvTimeoutError::Timeout) => {
                 warn!(target: "engine::tree::state_root_strategy", ?timeout, "State root task timed out, racing serial fallback");
                 self.metrics.state_root_task_timeout_total.increment(1);
-                Self::serial_fallback(
-                    &self.executor,
-                    self.state_provider_factory.clone(),
-                    output.clone(),
-                )?
+                self.serial_fallback(output.clone())?
             }
             Err(RecvTimeoutError::Disconnected) => {
                 debug!(target: "engine::tree::state_root_strategy", "State root task dropped, falling back to serial root");
-                Self::serial_fallback(
-                    &self.executor,
-                    self.state_provider_factory.clone(),
-                    output.clone(),
-                )?
+                self.serial_fallback(output.clone())?
             }
         };
 
@@ -1294,6 +1326,35 @@ mod tests {
     use reth_testing_utils::generators;
     use reth_trie::test_utils::state_root;
     use revm::state::{AccountInfo, AccountStatus, EvmState, EvmStorageSlot, TransactionId};
+
+    #[test]
+    fn serial_fallback_invalidates_published_and_late_tries() {
+        let overlay_manager = OverlayManager::<EthPrimitives>::default();
+        let cache =
+            SparseTrieCache { overlay_manager: overlay_manager.clone(), enabled: Mutex::new(true) };
+        let block_hash = B256::with_last_byte(1);
+        let (preserved, completer) = PreservedSparseTrie::pending(block_hash, B256::ZERO);
+        cache.publish(preserved).unwrap();
+
+        cache.invalidate();
+        assert!(overlay_manager.take_sparse_trie().is_none());
+        // Finalizing a trie already published before fallback cannot restore the cache.
+        assert!(completer.complete(SparseStateTrie::default()).is_err());
+
+        let (late, _completer) = PreservedSparseTrie::pending(block_hash, B256::ZERO);
+        assert!(cache.publish(late).is_err());
+        assert!(overlay_manager.take_sparse_trie().is_none());
+
+        // Disabling the old task must not disable publication by the next validation.
+        let next_cache =
+            SparseTrieCache { overlay_manager: overlay_manager.clone(), enabled: Mutex::new(true) };
+        let next_hash = B256::with_last_byte(2);
+        let (next, _completer) = PreservedSparseTrie::pending(next_hash, block_hash);
+        next_cache.publish(next).unwrap();
+        let (late, _completer) = PreservedSparseTrie::pending(block_hash, B256::ZERO);
+        assert!(cache.publish(late).is_err());
+        assert_eq!(overlay_manager.take_sparse_trie().unwrap().block_hash(), next_hash);
+    }
 
     #[test]
     fn sparse_trie_prune_target_uses_requested_range() {
@@ -1475,7 +1536,7 @@ mod tests {
         let env: ExecutionEnv<EthEvmConfig> = ExecutionEnv::test_default();
         let runtime = reth_tasks::Runtime::test();
         let overlay_manager = OverlayManager::<EthPrimitives>::default();
-        let mut state_root_handle = DefaultStateRootStrategy::default().spawn_state_root(
+        let (mut state_root_handle, _cache) = DefaultStateRootStrategy::default().spawn_state_root(
             &runtime,
             &overlay_manager,
             OverlayStateProviderFactory::new(
