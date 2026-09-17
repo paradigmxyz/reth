@@ -266,6 +266,11 @@ impl BalChain {
         SnapGeneration::new(self.block(0), state_root)
     }
 
+    /// The chain's last block.
+    pub(crate) fn tip(&self) -> BlockNumHash {
+        self.block(self.lists.len())
+    }
+
     /// The block `nth` after the pivot, which is the pivot itself at zero.
     pub(crate) fn block(&self, nth: usize) -> BlockNumHash {
         let header = &self.headers[self.pivot as usize + nth];

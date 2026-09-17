@@ -2,7 +2,10 @@
 //!
 //! Headers are read again each request, so a reorged anchor is caught before peers are asked.
 
-use crate::{common::DownloadContext, CatchUpProgress, SnapCatchUpStore, SnapSyncError, SnapWrite};
+use crate::{
+    common::DownloadContext, CatchUpProgress, SnapAttemptStore, SnapCatchUpStore, SnapSyncError,
+    SnapWrite,
+};
 use alloy_eips::BlockNumHash;
 use reth_db_api::transaction::DbTxMut;
 use reth_downloaders::snap::{BlockAccessListDownloader, BlockAccessListOutcome};
@@ -161,7 +164,7 @@ pub enum CatchUpStep {
 }
 
 // The canonical headers continuing the applied block, at most `max_blocks` of them and none past
-// `target`.
+// `target` or the pivot.
 //
 // Reading them again each request is what notices a reorg: the applied block is only still what
 // the state was carried through while the canonical chain agrees.
@@ -179,6 +182,8 @@ fn pending_headers<P: HeaderProvider + MetadataProvider>(
     if canonical.hash() != applied.hash {
         return Err(SnapSyncError::ForkedBlock { expected: applied.hash, got: canonical.hash() })
     }
+    // Pending ranges are proved against the pivot, so no list past it applies.
+    let target = target.min(provider.authorize_snap_write(write)?.pivot().number);
     if target <= applied.number {
         return Ok(Vec::new())
     }
@@ -205,7 +210,7 @@ mod tests {
         test_utils::{
             account, hashed_factory, key, state_root, verified_range, BalChain, ScriptedSnapClient,
         },
-        SnapAccountStore, SnapAttemptStore,
+        SnapAccountStore, SnapGeneration,
     };
     use alloy_eip7928::{AccountChanges, BalanceChange, BlockAccessIndex};
     use alloy_primitives::{keccak256, Address, B256, U256};
@@ -240,7 +245,8 @@ mod tests {
         BalChain::new(PIVOT, [credit(10), credit(20), credit(30)])
     }
 
-    // An attempt anchored to `chain`'s pivot, with every account downloaded and nothing applied.
+    // An attempt started at `chain`'s pivot, with every account downloaded and nothing applied,
+    // then moved to the chain's last block.
     fn started(chain: &BalChain, accounts: &[(B256, TrieAccount)]) -> (Factory, SnapWrite) {
         let factory = hashed_factory();
         chain.insert_headers(&factory);
@@ -250,6 +256,8 @@ mod tests {
         let range = verified_range(accounts, 0..accounts.len(), B256::ZERO, &[]);
         provider.commit_account_range(write, &range, Default::default(), Vec::new()).unwrap();
         provider.start_catch_up_progress(write).unwrap();
+        let tip = SnapGeneration::new(chain.tip(), state_root(accounts));
+        let write = provider.advance_snap_pivot(write, tip).unwrap();
         provider.commit().unwrap();
         (factory, write)
     }
@@ -411,6 +419,21 @@ mod tests {
         let (client, mut catch_up) = catch_up([], factory);
 
         assert!(matches!(catch_up.next(write, PIVOT).await.unwrap(), CatchUpStep::Complete));
+        assert!(client.block_requests().is_empty());
+    }
+
+    #[tokio::test]
+    async fn a_target_past_the_pivot_is_held_at_it() {
+        let chain = chain();
+        let factory = hashed_factory();
+        chain.insert_headers(&factory);
+        let provider = factory.database_provider_rw().unwrap();
+        let write = provider.start_snap_attempt(chain.generation(state_root(&accounts()))).unwrap();
+        provider.start_catch_up_progress(write).unwrap();
+        provider.commit().unwrap();
+        let (client, mut catch_up) = catch_up([], factory);
+
+        assert!(matches!(catch_up.next(write, PIVOT + 3).await.unwrap(), CatchUpStep::Complete));
         assert!(client.block_requests().is_empty());
     }
 

@@ -60,6 +60,14 @@ pub enum SnapSyncError {
         /// Block the list was applied for.
         got: u64,
     },
+    /// A list was applied for a block past the pivot.
+    #[error("block access list for block {block} past pivot {pivot}")]
+    BlockPastPivot {
+        /// Block the attempt is anchored to.
+        pivot: u64,
+        /// Block the list was applied for.
+        block: u64,
+    },
     /// A list was applied for a block building on another chain than the applied state.
     #[error("block access list for a block building on {got}, the applied state is at {expected}")]
     ForkedBlock {

@@ -245,16 +245,23 @@ impl<T: MetadataProvider> SnapCatchUpStore for T {
     where
         Self: MetadataWriter + StateWriter + DBProvider<Tx: DbTxMut>,
     {
-        self.authorize_snap_write(write)?;
+        let attempt = self.authorize_snap_write(write)?;
         let advanced = self
             .catch_up_progress(write)?
             .ok_or(SnapSyncError::NoCatchUpProgress)?
             .advance(block, parent)?;
+        // Pending ranges are proved against the pivot, so they hold no change past it.
+        if block.number > attempt.pivot().number {
+            return Err(SnapSyncError::BlockPastPivot {
+                pivot: attempt.pivot().number,
+                block: block.number,
+            })
+        }
         let coverage = self.account_coverage(write)?.ok_or(SnapSyncError::NoCoverage)?;
         let update = self.block_access_list_update(coverage, bal)?;
 
-        // Entries left unresolved are downloaded whole once the pivot moves onto a root that
-        // already includes this block, so nothing here has to remember them.
+        // Entries left unresolved are downloaded whole against the pivot, which already includes
+        // this block, so nothing here has to remember them.
         let (state, bytecodes, _unresolved) = update.into_parts();
         for (hashed_address, account) in &state.accounts {
             // Execution clears the storage of an account it removes, which the list leaves to
@@ -318,8 +325,8 @@ mod tests {
             .unwrap()
     }
 
-    // An attempt anchored to block 1, with `served` of the trie's accounts downloaded and its
-    // block access list progress recorded.
+    // An attempt started at block 1, with `served` of the trie's accounts downloaded and its
+    // block access list progress recorded, then moved to pivot 2.
     fn started(accounts: &[(B256, TrieAccount)], served: usize) -> (Factory, SnapWrite) {
         let factory = hashed_factory();
         let provider = factory.database_provider_rw().unwrap();
@@ -342,6 +349,8 @@ mod tests {
             )
             .unwrap();
         provider.start_catch_up_progress(write).unwrap();
+        let write =
+            provider.advance_snap_pivot(write, generation(2, state_root(accounts))).unwrap();
         provider.commit().unwrap();
         (factory, write)
     }
@@ -500,6 +509,21 @@ mod tests {
 
         assert_eq!(stored(&provider, keccak256(CHANGED)), None);
         assert!(crate::test_utils::stored_slots(&provider, keccak256(CHANGED)).is_empty());
+    }
+
+    #[test]
+    fn a_block_past_the_pivot_is_refused() {
+        let accounts = accounts();
+        let (factory, write) = started(&accounts, accounts.len());
+        let provider = factory.database_provider_rw().unwrap();
+        let (block, parent) = block(2);
+        provider.commit_block_access_list(write, block, parent, &credit(10)).unwrap();
+        let (block, parent) = self::block(3);
+
+        let refused = provider.commit_block_access_list(write, block, parent, &credit(20));
+
+        assert!(matches!(refused, Err(SnapSyncError::BlockPastPivot { pivot: 2, block: 3 })));
+        assert_eq!(stored(&provider, keccak256(CHANGED)).unwrap().balance, U256::from(10));
     }
 
     #[test]
