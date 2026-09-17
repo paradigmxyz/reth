@@ -599,7 +599,7 @@ tracing-opentelemetry = "0.33"
 abi-fuzz = { git = "https://github.com/tempoxyz/abi-fuzz", rev = "2d8dac35d70fa13072f183ea8c9a90d144e3144f" }
 arbitrary = "1.3"
 assert_matches = "1.5.0"
-commonware-runtime = { git = "https://github.com/0xalpharush/monorepo", rev = "8f5bb213af870bea75920819328167f5632fd766" }
+commonware-runtime = { git = "https://github.com/0xalpharush/monorepo", rev = "9efcb23c8f3ab91164c755ba3c87aa195717d021" }
 loom = "0.7.2"
 criterion = { package = "codspeed-criterion-compat", version = "4.3" }
 insta = "1.47"

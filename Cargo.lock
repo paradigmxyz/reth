@@ -1809,7 +1809,7 @@ dependencies = [
  "bitflags 2.13.2",
  "cexpr",
  "clang-sys",
- "itertools 0.13.0",
+ "itertools 0.10.5",
  "proc-macro2",
  "quote",
  "regex",
@@ -2640,7 +2640,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "117725a109d387c937a1533ce01b450cbde6b88abceea8473c4d7a85853cda3c"
 dependencies = [
  "lazy_static",
- "windows-sys 0.52.0",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -2667,7 +2667,7 @@ dependencies = [
 [[package]]
 name = "commonware-codec"
 version = "2026.9.0"
-source = "git+https://github.com/0xalpharush/monorepo?rev=8f5bb213af870bea75920819328167f5632fd766#8f5bb213af870bea75920819328167f5632fd766"
+source = "git+https://github.com/0xalpharush/monorepo?rev=9efcb23c8f3ab91164c755ba3c87aa195717d021#9efcb23c8f3ab91164c755ba3c87aa195717d021"
 dependencies = [
  "arbitrary",
  "bytes",
@@ -2684,7 +2684,7 @@ dependencies = [
 [[package]]
 name = "commonware-codec-macros"
 version = "2026.9.0"
-source = "git+https://github.com/0xalpharush/monorepo?rev=8f5bb213af870bea75920819328167f5632fd766#8f5bb213af870bea75920819328167f5632fd766"
+source = "git+https://github.com/0xalpharush/monorepo?rev=9efcb23c8f3ab91164c755ba3c87aa195717d021#9efcb23c8f3ab91164c755ba3c87aa195717d021"
 dependencies = [
  "proc-macro-crate",
  "proc-macro2",
@@ -2695,7 +2695,7 @@ dependencies = [
 [[package]]
 name = "commonware-conformance"
 version = "2026.9.0"
-source = "git+https://github.com/0xalpharush/monorepo?rev=8f5bb213af870bea75920819328167f5632fd766#8f5bb213af870bea75920819328167f5632fd766"
+source = "git+https://github.com/0xalpharush/monorepo?rev=9efcb23c8f3ab91164c755ba3c87aa195717d021#9efcb23c8f3ab91164c755ba3c87aa195717d021"
 dependencies = [
  "commonware-conformance-macros",
  "commonware-formatting",
@@ -2709,7 +2709,7 @@ dependencies = [
 [[package]]
 name = "commonware-conformance-macros"
 version = "2026.9.0"
-source = "git+https://github.com/0xalpharush/monorepo?rev=8f5bb213af870bea75920819328167f5632fd766#8f5bb213af870bea75920819328167f5632fd766"
+source = "git+https://github.com/0xalpharush/monorepo?rev=9efcb23c8f3ab91164c755ba3c87aa195717d021#9efcb23c8f3ab91164c755ba3c87aa195717d021"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -2719,7 +2719,7 @@ dependencies = [
 [[package]]
 name = "commonware-cryptography"
 version = "2026.9.0"
-source = "git+https://github.com/0xalpharush/monorepo?rev=8f5bb213af870bea75920819328167f5632fd766#8f5bb213af870bea75920819328167f5632fd766"
+source = "git+https://github.com/0xalpharush/monorepo?rev=9efcb23c8f3ab91164c755ba3c87aa195717d021#9efcb23c8f3ab91164c755ba3c87aa195717d021"
 dependencies = [
  "ahash",
  "anyhow",
@@ -2761,7 +2761,7 @@ dependencies = [
 [[package]]
 name = "commonware-formatting"
 version = "2026.9.0"
-source = "git+https://github.com/0xalpharush/monorepo?rev=8f5bb213af870bea75920819328167f5632fd766#8f5bb213af870bea75920819328167f5632fd766"
+source = "git+https://github.com/0xalpharush/monorepo?rev=9efcb23c8f3ab91164c755ba3c87aa195717d021#9efcb23c8f3ab91164c755ba3c87aa195717d021"
 dependencies = [
  "commonware-macros",
  "const-hex",
@@ -2770,7 +2770,7 @@ dependencies = [
 [[package]]
 name = "commonware-invariants"
 version = "2026.9.0"
-source = "git+https://github.com/0xalpharush/monorepo?rev=8f5bb213af870bea75920819328167f5632fd766#8f5bb213af870bea75920819328167f5632fd766"
+source = "git+https://github.com/0xalpharush/monorepo?rev=9efcb23c8f3ab91164c755ba3c87aa195717d021#9efcb23c8f3ab91164c755ba3c87aa195717d021"
 dependencies = [
  "arbitrary",
  "commonware-formatting",
@@ -2783,7 +2783,7 @@ dependencies = [
 [[package]]
 name = "commonware-macros"
 version = "2026.9.0"
-source = "git+https://github.com/0xalpharush/monorepo?rev=8f5bb213af870bea75920819328167f5632fd766#8f5bb213af870bea75920819328167f5632fd766"
+source = "git+https://github.com/0xalpharush/monorepo?rev=9efcb23c8f3ab91164c755ba3c87aa195717d021#9efcb23c8f3ab91164c755ba3c87aa195717d021"
 dependencies = [
  "commonware-macros-impl",
  "tokio",
@@ -2792,7 +2792,7 @@ dependencies = [
 [[package]]
 name = "commonware-macros-impl"
 version = "2026.9.0"
-source = "git+https://github.com/0xalpharush/monorepo?rev=8f5bb213af870bea75920819328167f5632fd766#8f5bb213af870bea75920819328167f5632fd766"
+source = "git+https://github.com/0xalpharush/monorepo?rev=9efcb23c8f3ab91164c755ba3c87aa195717d021#9efcb23c8f3ab91164c755ba3c87aa195717d021"
 dependencies = [
  "proc-macro-crate",
  "proc-macro2",
@@ -2804,7 +2804,7 @@ dependencies = [
 [[package]]
 name = "commonware-math"
 version = "2026.9.0"
-source = "git+https://github.com/0xalpharush/monorepo?rev=8f5bb213af870bea75920819328167f5632fd766#8f5bb213af870bea75920819328167f5632fd766"
+source = "git+https://github.com/0xalpharush/monorepo?rev=9efcb23c8f3ab91164c755ba3c87aa195717d021#9efcb23c8f3ab91164c755ba3c87aa195717d021"
 dependencies = [
  "arbitrary",
  "bytes",
@@ -2819,7 +2819,7 @@ dependencies = [
 [[package]]
 name = "commonware-parallel"
 version = "2026.9.0"
-source = "git+https://github.com/0xalpharush/monorepo?rev=8f5bb213af870bea75920819328167f5632fd766#8f5bb213af870bea75920819328167f5632fd766"
+source = "git+https://github.com/0xalpharush/monorepo?rev=9efcb23c8f3ab91164c755ba3c87aa195717d021#9efcb23c8f3ab91164c755ba3c87aa195717d021"
 dependencies = [
  "cfg-if",
  "commonware-macros",
@@ -2831,7 +2831,7 @@ dependencies = [
 [[package]]
 name = "commonware-runtime"
 version = "2026.9.0"
-source = "git+https://github.com/0xalpharush/monorepo?rev=8f5bb213af870bea75920819328167f5632fd766#8f5bb213af870bea75920819328167f5632fd766"
+source = "git+https://github.com/0xalpharush/monorepo?rev=9efcb23c8f3ab91164c755ba3c87aa195717d021#9efcb23c8f3ab91164c755ba3c87aa195717d021"
 dependencies = [
  "ahash",
  "arbitrary",
@@ -2873,7 +2873,7 @@ dependencies = [
 [[package]]
 name = "commonware-runtime-macros"
 version = "2026.9.0"
-source = "git+https://github.com/0xalpharush/monorepo?rev=8f5bb213af870bea75920819328167f5632fd766#8f5bb213af870bea75920819328167f5632fd766"
+source = "git+https://github.com/0xalpharush/monorepo?rev=9efcb23c8f3ab91164c755ba3c87aa195717d021#9efcb23c8f3ab91164c755ba3c87aa195717d021"
 dependencies = [
  "proc-macro-crate",
  "proc-macro2",
@@ -2884,7 +2884,7 @@ dependencies = [
 [[package]]
 name = "commonware-utils"
 version = "2026.9.0"
-source = "git+https://github.com/0xalpharush/monorepo?rev=8f5bb213af870bea75920819328167f5632fd766#8f5bb213af870bea75920819328167f5632fd766"
+source = "git+https://github.com/0xalpharush/monorepo?rev=9efcb23c8f3ab91164c755ba3c87aa195717d021#9efcb23c8f3ab91164c755ba3c87aa195717d021"
 dependencies = [
  "ahash",
  "arbitrary",
@@ -8092,7 +8092,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "27c6023962132f4b30eb4c172c91ce92d933da334c59c23cddee82358ddafb0b"
 dependencies = [
  "anyhow",
- "itertools 0.14.0",
+ "itertools 0.10.5",
  "proc-macro2",
  "quote",
  "syn 2.0.119",
@@ -8205,7 +8205,7 @@ dependencies = [
  "once_cell",
  "socket2",
  "tracing",
- "windows-sys 0.60.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -12541,7 +12541,7 @@ dependencies = [
  "security-framework",
  "security-framework-sys",
  "webpki-root-certs 0.26.11",
- "windows-sys 0.52.0",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -13562,7 +13562,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "32497e9a4c7b38532efcdebeef879707aa9f794296a4f0244f6f69e9bc8574bd"
 dependencies = [
  "fastrand",
- "getrandom 0.3.4",
+ "getrandom 0.4.3",
  "once_cell",
  "rustix",
  "windows-sys 0.61.2",
