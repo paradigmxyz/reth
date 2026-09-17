@@ -1031,6 +1031,14 @@ Engine:
 
           If omitted, this defaults to the lesser of `--engine.persistence-threshold` and the configured default memory block buffer target.
 
+      --engine.backfill-threshold <BACKFILL_RUN_THRESHOLD>
+          Configure the largest gap, in blocks, between the local head and the forkchoice head that is closed by downloading the missing blocks directly. Larger gaps trigger a full pipeline (backfill) run instead.
+
+          On chains with short block times a pipeline run may take longer than it takes the chain to produce another gap of this size, in which case raising this value lets the node catch up via live sync.
+
+          [env: RETH_ENGINE_BACKFILL_THRESHOLD=]
+          [default: 32]
+
       --engine.invalid-header-cache-hit-eviction-threshold <INVALID_HEADER_HIT_EVICTION_THRESHOLD>
           Configure how many cache hits an invalid header can accumulate before it is evicted and reprocessed.
 
