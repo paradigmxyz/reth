@@ -28,9 +28,10 @@ use reth_network_p2p::{
 use reth_network_peers::{PeerId, WithPeerId};
 use reth_primitives_traits::{AlloyBlockHeader, SealedHeader};
 use reth_provider::{
-    test_utils::{create_test_provider_factory, MockEthProvider, MockNodeTypesWithDB},
-    DatabaseProviderFactory, ProviderFactory, StaticFileProviderFactory, StaticFileSegment,
-    StaticFileWriter,
+    test_utils::{
+        create_test_provider_factory, insert_headers, MockEthProvider, MockNodeTypesWithDB,
+    },
+    DatabaseProviderFactory, ProviderFactory,
 };
 use reth_storage_api::{DBProvider, MetadataWriter, StorageSettings, StorageSettingsCache};
 use reth_tasks::Runtime;
@@ -279,12 +280,7 @@ impl BalChain {
 
     /// Persists every header, so a catch-up finds this chain canonical.
     pub(crate) fn insert_headers(&self, factory: &ProviderFactory<MockNodeTypesWithDB>) {
-        let static_files = factory.static_file_provider();
-        let mut writer = static_files.latest_writer(StaticFileSegment::Headers).unwrap();
-        for header in &self.headers {
-            writer.append_header(header.header(), &header.hash()).unwrap();
-        }
-        writer.commit().unwrap();
+        insert_headers(factory, &self.headers);
     }
 
     /// A peer's answer serving the list of each block `served` names, holding none where it names
