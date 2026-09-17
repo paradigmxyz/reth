@@ -246,7 +246,7 @@ impl ProofWorkerHandle {
                             ?error,
                             "Storage worker failed"
                         );
-                        let _ = result_tx.send(ProofResultMessage {
+                        let _ = result_tx.send(ProofResultMessage { ready_at: Instant::now(),
                             result: Err(StateRootTaskError::ProofWorker(format!(
                                 "storage worker {worker_id}: {error}"
                             ))),
@@ -311,7 +311,7 @@ impl ProofWorkerHandle {
                             ?error,
                             "Account worker failed"
                         );
-                        let _ = result_tx.send(ProofResultMessage {
+                        let _ = result_tx.send(ProofResultMessage { ready_at: Instant::now(),
                             result: Err(StateRootTaskError::ProofWorker(format!(
                                 "account worker {worker_id}: {error}"
                             ))),
@@ -385,6 +385,7 @@ impl ProofWorkerHandle {
         input: StorageProofInput,
         proof_result_sender: CrossbeamSender<StorageProofResultMessage>,
     ) -> Result<(), ProviderError> {
+        let _activity = tracing::debug_span!(target: "engine::tree::proof_activity", "storage_proof", address = ?input.hashed_address, targets = input.targets.len()).entered();
         let hashed_address = input.hashed_address;
         self.storage_work_tx
             .send(StorageWorkerJob::StorageProof { input, proof_result_sender })
@@ -419,6 +420,7 @@ impl ProofWorkerHandle {
                     input.into_proof_result_sender();
 
                 let _ = result_tx.send(ProofResultMessage {
+                    ready_at: Instant::now(),
                     result: Err(StateRootTaskError::ProofDispatch(error.clone())),
                     elapsed: start.elapsed(),
                     state,
@@ -584,6 +586,8 @@ pub type ProofResultSender = CrossbeamSender<ProofResultMessage>;
 /// loop.
 #[derive(Debug)]
 pub struct ProofResultMessage {
+    /// Diagnostic timestamp immediately before result delivery.
+    pub ready_at: Instant,
     /// The proof calculation result
     pub result: Result<DecodedMultiProofV2, StateRootTaskError>,
     /// Time taken for the entire proof calculation (from dispatch to completion)
@@ -1120,6 +1124,7 @@ where
     {
         let proof_start = Instant::now();
 
+        let _activity = tracing::debug_span!(target: "engine::tree::proof_activity", "account_proof", queued_us = input.proof_result_sender.start_time.elapsed().as_micros() as u64).entered();
         let AccountMultiproofInput { targets, proof_result_sender } = input;
         let (result, value_encoder_stats) = match self.compute_v2_account_multiproof::<Provider>(
             v2_account_calculator,
@@ -1138,7 +1143,15 @@ where
         *account_proofs_processed += 1;
 
         // Send result to SparseTrieCacheTask
-        if result_tx.send(ProofResultMessage { result, elapsed: total_elapsed, state }).is_err() {
+        if result_tx
+            .send(ProofResultMessage {
+                ready_at: Instant::now(),
+                result,
+                elapsed: total_elapsed,
+                state,
+            })
+            .is_err()
+        {
             trace!(
                 target: "trie::proof_task",
                 worker_id=self.worker_id,

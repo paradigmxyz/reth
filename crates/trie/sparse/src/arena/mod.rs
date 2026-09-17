@@ -2307,6 +2307,8 @@ impl SparseTrie for ArenaParallelSparseTrie {
 
     #[instrument(level = "trace", target = TRACE_TARGET, skip_all)]
     fn update_subtrie_hashes(&mut self, new_epoch: TrieNodeEpoch) {
+        #[cfg(feature = "metrics")]
+        let hashing = crate::activity::ActivityGuard::detail("hash_subtries");
         trace!(target: TRACE_TARGET, "Updating subtrie hashes");
 
         // Only descend if the root is a branch; otherwise there are no subtries.
@@ -2335,16 +2337,31 @@ impl SparseTrie for ArenaParallelSparseTrie {
         if !taken.is_empty() {
             if taken.len() == 1 || total_dirty_leaves < self.parallelism_thresholds.min_dirty_leaves
             {
+                #[cfg(feature = "metrics")]
+                let _inline = crate::activity::ActivityGuard::detail("hash_subtries_inline");
                 for (_, subtrie) in &mut taken {
                     subtrie.update_cached_rlp(new_epoch);
                 }
             } else {
                 use rayon::iter::{IntoParallelIterator, ParallelIterator};
 
+                #[cfg(feature = "metrics")]
+                let _join = crate::activity::ActivityGuard::detail("hash_subtries_parallel_join");
+                #[cfg(feature = "metrics")]
+                let hash_parent = hashing.id();
+                #[cfg(feature = "metrics")]
+                let dispatched = std::time::Instant::now();
                 let parent_span = tracing::Span::current();
                 taken = taken
                     .into_par_iter()
                     .map(|(idx, mut subtrie)| {
+                        #[cfg(feature = "metrics")]
+                        let _job = crate::activity::ActivityGuard::worker(
+                            "subtrie_hash_job",
+                            hash_parent,
+                            subtrie.num_dirty_leaves as usize,
+                            dispatched.elapsed(),
+                        );
                         let _guard = parent_span.enter();
                         subtrie.update_cached_rlp(new_epoch);
                         (idx, subtrie)
@@ -2362,6 +2379,8 @@ impl SparseTrie for ArenaParallelSparseTrie {
         // Walk the upper trie depth-first, restoring hashed subtries and inline-hashing
         // any remaining dirty subtries. Only descend into dirty branches; clean subtrees
         // cannot contain dirty subtries since dirty state propagates upward.
+        #[cfg(feature = "metrics")]
+        let _upper = crate::activity::ActivityGuard::detail("hash_restore_upper");
         taken.sort_unstable_by_key(|(_, b)| Reverse(b.path));
 
         self.buffers.cursor.reset(&self.upper_arena, self.root, Nibbles::default());
@@ -2587,9 +2606,15 @@ impl SparseTrie for ArenaParallelSparseTrie {
         }
 
         // Drain and sort updates lexicographically by nibbles path.
+        #[cfg(feature = "metrics")]
+        let _leaves = crate::activity::ActivityGuard::detail("arena_leaf_application");
+        #[cfg(feature = "metrics")]
+        let sorting = crate::activity::ActivityGuard::detail("leaf_unpack_sort");
         let mut sorted: Vec<_> =
             updates.drain().map(|(key, update)| (key, Nibbles::unpack(key), update)).collect();
         sorted.sort_unstable_by_key(|entry| entry.1);
+        #[cfg(feature = "metrics")]
+        drop(sorting);
 
         let threshold = self.parallelism_thresholds.min_updates;
         let parallelize_distributed_updates = sorted.len() >= threshold.saturating_mul(4);
