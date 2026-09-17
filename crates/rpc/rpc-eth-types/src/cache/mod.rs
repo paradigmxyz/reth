@@ -1221,10 +1221,6 @@ mod tests {
             self.fetches.fetch_add(1, Ordering::SeqCst);
             Ok(block_hashes.iter().map(|_| Some(Bytes::from_static(&[0xc0]))).collect())
         }
-
-        fn bal_stream(&self) -> reth_storage_api::BalNotificationStream {
-            reth_storage_api::NoopBalStore.bal_stream()
-        }
     }
 
     impl BlockHashReader for TestBalProvider {
