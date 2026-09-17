@@ -11,8 +11,9 @@ use reth_rpc_eth_api::{
 };
 use reth_rpc_eth_types::{
     builder::config::PendingBlockKind, fee_history::fee_history_cache_new_blocks_task,
-    receipt::EthReceiptConverter, EthStateCache, EthStateCacheConfig, FeeHistoryCache,
-    FeeHistoryCacheConfig, ForwardConfig, GasCap, GasPriceOracle, GasPriceOracleConfig,
+    receipt::EthReceiptConverter, EthApiSettings, EthStateCache, EthStateCacheConfig,
+    FeeHistoryCache, FeeHistoryCacheConfig, ForwardConfig, GasCap, GasPriceOracle,
+    GasPriceOracleConfig,
 };
 use reth_rpc_server_types::constants::{
     DEFAULT_ETH_PROOF_WINDOW, DEFAULT_MAX_BLOCKING_IO_REQUEST, DEFAULT_MAX_SIMULATE_BLOCKS,
@@ -557,14 +558,27 @@ where
             },
         );
 
+        let settings = EthApiSettings {
+            proof_permits,
+            max_batch_size,
+            max_blocking_io_requests,
+            cache_computed_bals: eth_state_cache_config.cache_computed_bals ||
+                eth_state_cache_config.prewarm_bals.is_some(),
+            gas_cap: gas_cap.into(),
+            max_simulate_blocks,
+            compute_state_root_for_eth_simulate,
+            eth_proof_window,
+            pending_block_kind,
+            send_raw_transaction_sync_timeout,
+            evm_memory_limit,
+            force_blob_sidecar_upcasting,
+        };
+
         EthApiInner::new(
             components,
             eth_cache,
             gas_oracle,
-            gas_cap,
-            max_simulate_blocks,
-            compute_state_root_for_eth_simulate,
-            eth_proof_window,
+            settings,
             blocking_task_pool.unwrap_or_else(|| {
                 BlockingTaskPool::builder()
                     .thread_name(|i| format!("blocking-{i:02}"))
@@ -574,16 +588,9 @@ where
             }),
             fee_history_cache,
             task_spawner,
-            proof_permits,
             rpc_converter,
             next_env,
-            max_batch_size,
-            max_blocking_io_requests,
-            pending_block_kind,
             raw_tx_forwarder.forwarder_client(),
-            send_raw_transaction_sync_timeout,
-            evm_memory_limit,
-            force_blob_sidecar_upcasting,
         )
     }
 

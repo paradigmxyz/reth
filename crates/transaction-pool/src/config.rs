@@ -72,6 +72,13 @@ pub struct PoolConfig {
     ///
     /// This restricts how many executable transaction a delegated sender can stack.
     pub max_inflight_delegated_slot_limit: usize,
+    /// Whether to enforce the sender nonce tracked from canonical updates over the nonce a
+    /// transaction was validated against, rejecting transactions below it.
+    ///
+    /// Closes the window in which a validation result that predates a block inserts an already
+    /// mined nonce as pending. Assumes sender nonces only move forward, so this is primarily
+    /// recommended for chains without reorgs and very low block times. Disabled by default.
+    pub enforce_tracked_nonce: bool,
 }
 
 impl PoolConfig {
@@ -97,6 +104,13 @@ impl PoolConfig {
         max_inflight_delegation_limit: usize,
     ) -> Self {
         self.max_inflight_delegated_slot_limit = max_inflight_delegation_limit;
+        self
+    }
+
+    /// Configures whether the sender nonce tracked from canonical updates is enforced on
+    /// insertion, see [`Self::enforce_tracked_nonce`].
+    pub const fn with_enforce_tracked_nonce(mut self, enforce: bool) -> Self {
+        self.enforce_tracked_nonce = enforce;
         self
     }
 
@@ -129,6 +143,7 @@ impl Default for PoolConfig {
             max_new_pending_txs_notifications: MAX_NEW_PENDING_TXS_NOTIFICATIONS,
             max_queued_lifetime: MAX_QUEUED_TRANSACTION_LIFETIME,
             max_inflight_delegated_slot_limit: DEFAULT_MAX_INFLIGHT_DELEGATED_SLOTS,
+            enforce_tracked_nonce: false,
         }
     }
 }
