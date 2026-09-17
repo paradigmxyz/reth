@@ -467,16 +467,17 @@ mod tests {
             compute_block_access_list_hash(&reference_bal),
             block_header_only.header().gas_limit(),
         );
-        let bal_out = run_execute_block(
+        let (bal_out, built_bal) = run_execute_block_full(
             &Runtime::test(),
             evm_config,
             db_factory(canonical_db_template),
-            to_arc_decoded(reference_bal),
+            to_arc_decoded(reference_bal.clone()),
             &block,
             txs,
         )
         .unwrap_or_else(|e| panic!("BAL path failed: {e:?}"));
 
+        assert_eq!(reference_bal, built_bal, "rebuilt BAL diverged");
         assert_eq!(serial.receipts, bal_out.receipts, "receipts diverged");
         assert_eq!(serial.gas_used, bal_out.gas_used, "gas used diverged");
         assert_eq!(serial.requests, bal_out.requests, "requests diverged");

@@ -1036,7 +1036,7 @@ where
                 let evm = evm_config.evm_with_env(db, env.evm_env);
                 let mut executor =
                     evm_config.block_executor_factory().create_executor(evm, execution_ctx);
-                if env.decoded_bal.is_some() {
+                if input.has_block_access_list() {
                     executor.enable_block_access_list_builder();
                 }
                 if let Some(state_hook) = state_hook {

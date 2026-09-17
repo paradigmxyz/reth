@@ -350,6 +350,7 @@ where
         output: Self::TransactionResultWithState,
     ) -> Result<GasOutput, BlockExecutionError> {
         let EthTransactionResultWithState { result, tx_type, blob_gas_used } = output;
+        self.set_transaction_block_access_index();
         let stream_hashed_state = self.hashed_state_update_hook.is_some();
         let outcome = commit_detached_transaction(
             &mut self.evm,

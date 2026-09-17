@@ -22,7 +22,7 @@ use reth_errors::{ProviderError, RethError};
 use reth_evm::{
     cancelled::CancelOnDrop,
     database::StateProviderDatabase,
-    execute::{BlockBuilder, BlockExecutorFactory},
+    execute::{BlockBuilder, BlockExecutor, BlockExecutorFactory},
     ConfigureEvm, Database, Evm, EvmEnv, EvmEnvFor, EvmTypesFor, TxEnvFor, TxResultWithStateFor,
 };
 use reth_node_api::BlockBody;
@@ -179,6 +179,9 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
                     }
 
                     let chain_id = evm_env.chain_id();
+                    let build_bal = this.provider().chain_spec().is_amsterdam_active_at_timestamp(
+                        evm_env.block_env().timestamp.to::<u64>(),
+                    );
 
                     let ctx = this
                         .evm_config()
@@ -206,6 +209,9 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
                         evm.set_inspector(inspector);
                         let mut builder =
                             this.evm_config().create_block_builder(evm, evm_env, &parent, ctx);
+                        if build_bal {
+                            builder.executor_mut().enable_block_access_list_builder();
+                        }
 
                         if let Some(ref state_overrides) = state_overrides {
                             simulate::apply_precompile_overrides(
@@ -232,6 +238,9 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
                             .evm_with_env(&mut db, evm_env.clone());
                         let mut builder =
                             this.evm_config().create_block_builder(evm, evm_env, &parent, ctx);
+                        if build_bal {
+                            builder.executor_mut().enable_block_access_list_builder();
+                        }
 
                         if let Some(ref state_overrides) = state_overrides {
                             simulate::apply_precompile_overrides(

@@ -1138,11 +1138,12 @@ mod tests {
                         (
                             Some(account),
                             Some(account),
-                            BTreeMap::from([(slot, (U256::from(1), value))]),
+                            BTreeMap::from([(U256::from_be_bytes(slot.0), (U256::from(1), value))]),
                         ),
                     )],
                     [],
-                );
+                )
+                .into();
                 (
                     HashedPostState::from_hashed_storage(
                         hashed_address,

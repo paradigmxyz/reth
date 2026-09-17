@@ -1446,6 +1446,7 @@ mod tests {
         original: Option<ExecutionAccountInfo>,
     ) -> EvmState {
         let mut accumulator = EvmState::new();
+        accumulator.storage_wipe(address).unwrap();
         accumulator
             .account(ExecutionAccountChangeRef {
                 address,
@@ -1455,7 +1456,6 @@ mod tests {
                 selfdestructed: false,
             })
             .unwrap();
-        accumulator.storage_wipe(address).unwrap();
         accumulator
     }
 
