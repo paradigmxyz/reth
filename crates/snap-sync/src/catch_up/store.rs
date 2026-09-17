@@ -236,11 +236,8 @@ impl<T: MetadataProvider> SnapCatchUpStore for T {
     where
         Self: BlockHashReader + MetadataWriter + StateWriter + DBProvider<Tx: DbTxMut>,
     {
-        let attempt = self.authorize_snap_write(write)?;
-        let pivot = attempt.pivot();
-        if self.block_hash(pivot.number)? != Some(pivot.hash) {
-            return Err(SnapSyncError::NonCanonicalBlock { block: pivot.number, hash: pivot.hash })
-        }
+        // Downloaded ranges are proved against the pivot, so it must still be canonical too.
+        let attempt = self.authorize_canonical_snap_write(write)?;
         // The chain may have reorged since the list was requested.
         if self.block_hash(block.number)? != Some(block.hash) {
             return Err(SnapSyncError::NonCanonicalBlock { block: block.number, hash: block.hash })
@@ -280,7 +277,9 @@ impl<T: MetadataProvider> SnapCatchUpStore for T {
 mod tests {
     use super::*;
     use crate::{
-        test_utils::{account, hashed_factory, key, state_root, storage_root_of, BalChain},
+        test_utils::{
+            account, hashed_factory, key, state_root, storage_root_of, BalChain, SnapStateSnapshot,
+        },
         SnapAccountStore, SnapGeneration,
     };
     use alloy_eip7928::{BalanceChange, BlockAccessIndex, CodeChange, SlotChanges, StorageChange};
@@ -505,6 +504,60 @@ mod tests {
 
         assert!(matches!(refused, Err(SnapSyncError::NonCanonicalBlock { block: 2, .. })));
         assert_eq!(stored(&provider, keccak256(CHANGED)).unwrap().balance, U256::from(1));
+    }
+
+    #[test]
+    fn a_list_proved_against_an_orphaned_pivot_is_refused() {
+        let accounts = accounts();
+        let (factory, write) = started(&accounts, accounts.len());
+        let provider = factory.database_provider_rw().unwrap();
+        let (applied, parent) = block(2);
+        provider.commit_block_access_list(write, applied, parent, &[]).unwrap();
+        // A reorg replaced the pivot, leaving the applied block and the one after it canonical.
+        let orphaned = BlockNumHash::new(3, B256::repeat_byte(0xee));
+        let write = provider
+            .advance_snap_pivot(write, SnapGeneration::new(orphaned, state_root(&accounts)))
+            .unwrap();
+        let (block, parent) = block(3);
+        let before = SnapStateSnapshot::read(&provider);
+
+        let refused = provider.commit_block_access_list(write, block, parent, &credit(10));
+
+        assert!(matches!(
+            refused,
+            Err(SnapSyncError::NonCanonicalBlock { block: 3, hash }) if hash == orphaned.hash
+        ));
+        assert_eq!(provider.catch_up_progress(write).unwrap().unwrap().applied(), applied);
+        assert_eq!(SnapStateSnapshot::read(&provider), before);
+        provider.commit().unwrap();
+        assert_eq!(SnapStateSnapshot::read(&factory.database_provider_ro().unwrap()), before);
+    }
+
+    #[test]
+    fn an_orphaned_pivot_cannot_be_replaced() {
+        let accounts = accounts();
+        let (factory, write) = started(&accounts, accounts.len());
+        let provider = factory.database_provider_rw().unwrap();
+        let (applied, parent) = block(2);
+        provider.commit_block_access_list(write, applied, parent, &[]).unwrap();
+        let orphaned = BlockNumHash::new(3, B256::repeat_byte(0xee));
+        let write = provider
+            .advance_snap_pivot(write, SnapGeneration::new(orphaned, state_root(&accounts)))
+            .unwrap();
+
+        let before = SnapStateSnapshot::read(&provider);
+
+        let refused = provider.advance_snap_pivot(write, generation(3, state_root(&accounts)));
+
+        // Re-anchoring would leave the ranges downloaded against the orphan looking canonical.
+        assert!(matches!(
+            refused,
+            Err(SnapSyncError::NonCanonicalBlock { block: 3, hash }) if hash == orphaned.hash
+        ));
+        assert_eq!(provider.authorize_snap_write(write).unwrap().pivot(), orphaned);
+        assert_eq!(SnapStateSnapshot::read(&provider), before);
+        provider.commit().unwrap();
+        assert_eq!(SnapStateSnapshot::read(&factory.database_provider_ro().unwrap()), before);
     }
 
     #[test]

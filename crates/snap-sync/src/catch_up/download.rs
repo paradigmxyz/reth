@@ -59,7 +59,7 @@ impl<C, F> BlockAccessListCatchUp<C, F>
 where
     C: SnapClient + Clone + Unpin,
     F: DatabaseProviderFactory + Clone + 'static,
-    F::Provider: HeaderProvider + MetadataProvider,
+    F::Provider: HeaderProvider + MetadataProvider + BlockHashReader,
     F::ProviderRW:
         BlockHashReader + MetadataProvider + MetadataWriter + StateWriter + DBProvider<Tx: DbTxMut>,
 {
@@ -167,9 +167,9 @@ pub enum CatchUpStep {
 // The canonical headers continuing the applied block, at most `max_blocks` of them and none past
 // `target` or the pivot.
 //
-// Reading them again each request is what notices a reorg: the applied block is only still what
-// the state was carried through while the canonical chain agrees.
-fn pending_headers<P: HeaderProvider + MetadataProvider>(
+// Both anchors must remain canonical: downloaded ranges can contain changes from the pivot
+// even when catch-up has only reached an earlier block.
+fn pending_headers<P: HeaderProvider + MetadataProvider + BlockHashReader>(
     provider: &P,
     write: SnapWrite,
     target: u64,
@@ -184,7 +184,7 @@ fn pending_headers<P: HeaderProvider + MetadataProvider>(
         return Err(SnapSyncError::ForkedBlock { expected: applied.hash, got: canonical.hash() })
     }
     // Pending ranges are proved against the pivot, so no list past it applies.
-    let target = target.min(provider.authorize_snap_write(write)?.pivot().number);
+    let target = target.min(provider.authorize_canonical_snap_write(write)?.pivot().number);
     if target <= applied.number {
         return Ok(Vec::new())
     }
@@ -210,6 +210,7 @@ mod tests {
     use crate::{
         test_utils::{
             account, hashed_factory, key, state_root, verified_range, BalChain, ScriptedSnapClient,
+            SnapStateSnapshot,
         },
         SnapAccountStore, SnapGeneration,
     };
@@ -263,6 +264,29 @@ mod tests {
         let write = provider.advance_snap_pivot(write, tip).unwrap();
         provider.commit().unwrap();
         (factory, write)
+    }
+
+    // Applied block 2 is shared, but ranges downloaded at pivot 3 contain an old-branch-only
+    // balance change. The replacement block's empty BAL cannot undo that change.
+    fn pivot_reorg_fixture() -> (Factory, SnapWrite, BalChain, BalChain) {
+        let chain = BalChain::new(PIVOT, [credit(30)]);
+        let replacement = BalChain::new(PIVOT, [Vec::new()]);
+        assert_eq!(chain.block(0), replacement.block(0));
+        let mut accounts = accounts();
+        let factory = hashed_factory();
+        insert_headers(&factory, &chain.headers);
+        let provider = factory.database_provider_rw().unwrap();
+        let write = provider.start_snap_attempt(chain.generation(state_root(&accounts))).unwrap();
+        provider.start_account_coverage(write).unwrap();
+        accounts.iter_mut().find(|(key, _)| *key == keccak256(CHANGED)).unwrap().1.balance =
+            U256::from(30);
+        let write = provider
+            .advance_snap_pivot(write, SnapGeneration::new(chain.tip(), state_root(&accounts)))
+            .unwrap();
+        let range = verified_range(&accounts, 0..accounts.len(), B256::ZERO, &[]);
+        provider.commit_account_range(write, &range, Default::default(), Vec::new()).unwrap();
+        provider.commit().unwrap();
+        (factory, write, chain, replacement)
     }
 
     fn catch_up(
@@ -472,6 +496,55 @@ mod tests {
         let forked = catch_up.next(write, PIVOT + 3).await;
 
         assert!(matches!(forked, Err(SnapSyncError::ForkedBlock { .. })));
+    }
+
+    #[tokio::test]
+    async fn a_pivot_the_canonical_chain_no_longer_holds_is_reported() {
+        let (factory, write, chain, replacement) = pivot_reorg_fixture();
+        let before = SnapStateSnapshot::read(&factory.database_provider_ro().unwrap());
+        replacement.replace_tip(&factory);
+        let (client, mut catch_up) = catch_up([], factory.clone());
+
+        // Even an already-applied target must reject the orphan instead of reporting completion.
+        for target in [PIVOT, PIVOT + 1] {
+            assert!(matches!(
+                catch_up.next(write, target).await,
+                Err(SnapSyncError::NonCanonicalBlock { block, hash })
+                    if block == PIVOT + 1 && hash == chain.tip().hash
+            ));
+        }
+        assert!(client.block_requests().is_empty());
+        let provider = factory.database_provider_ro().unwrap();
+        assert_eq!(provider.block_hash(PIVOT).unwrap(), Some(chain.block(0).hash));
+        assert_eq!(provider.catch_up_progress(write).unwrap().unwrap().applied(), chain.block(0));
+        assert_eq!(SnapStateSnapshot::read(&provider), before);
+    }
+
+    #[tokio::test]
+    async fn a_pivot_reorg_during_a_bal_request_changes_nothing() {
+        let (factory, write, chain, replacement) = pivot_reorg_fixture();
+        let before = SnapStateSnapshot::read(&factory.database_provider_ro().unwrap());
+        let reorg_factory = factory.clone();
+        let replacement_hash = replacement.tip().hash;
+        let client = Arc::new(
+            ScriptedSnapClient::new([chain.response(1, [Some(1)])])
+                .on_block_request(move || replacement.replace_tip(&reorg_factory)),
+        );
+        let mut catch_up =
+            BlockAccessListCatchUp::new(client.clone(), factory.clone(), Runtime::test());
+
+        assert!(matches!(
+            catch_up.next(write, PIVOT + 1).await,
+            Err(SnapSyncError::NonCanonicalBlock { block, hash })
+                if block == PIVOT + 1 && hash == chain.tip().hash
+        ));
+
+        assert_eq!(*client.block_requests(), [vec![chain.tip().hash]]);
+        let provider = factory.database_provider_ro().unwrap();
+        assert_eq!(provider.block_hash(PIVOT).unwrap(), Some(chain.block(0).hash));
+        assert_eq!(provider.block_hash(PIVOT + 1).unwrap(), Some(replacement_hash));
+        assert_eq!(provider.catch_up_progress(write).unwrap().unwrap().applied(), chain.block(0));
+        assert_eq!(SnapStateSnapshot::read(&provider), before);
     }
 
     #[tokio::test]

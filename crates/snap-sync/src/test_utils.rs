@@ -9,7 +9,12 @@ use alloy_eip7928::{compute_block_access_list_hash, AccountChanges};
 use alloy_eips::{eip7928::bal::Bal, BlockNumHash};
 use alloy_primitives::{Bytes, B256, KECCAK256_EMPTY, U256};
 use futures::future::{ready, Ready};
-use reth_db_api::{cursor::DbDupCursorRO, tables, transaction::DbTx};
+use reth_db_api::{
+    cursor::{DbCursorRO, DbDupCursorRO},
+    table::Table,
+    tables,
+    transaction::DbTx,
+};
 use reth_downloaders::snap::{AccountRangeDownloader, AccountRangeOutcome, VerifiedAccountRange};
 use reth_eth_wire_types::{
     snap::{
@@ -26,10 +31,13 @@ use reth_network_p2p::{
     snap::client::{SnapClient, SnapResponse},
 };
 use reth_network_peers::{PeerId, WithPeerId};
-use reth_primitives_traits::{AlloyBlockHeader, SealedHeader};
+use reth_primitives_traits::{Account, AlloyBlockHeader, Bytecode, SealedHeader, StorageEntry};
 use reth_provider::{
-    test_utils::{create_test_provider_factory, MockEthProvider, MockNodeTypesWithDB},
-    DatabaseProviderFactory, ProviderFactory,
+    test_utils::{
+        create_test_provider_factory, insert_headers, MockEthProvider, MockNodeTypesWithDB,
+    },
+    DatabaseProviderFactory, ProviderFactory, StaticFileProviderFactory, StaticFileSegment,
+    StaticFileWriter,
 };
 use reth_storage_api::{DBProvider, MetadataWriter, StorageSettings, StorageSettingsCache};
 use reth_tasks::Runtime;
@@ -87,6 +95,18 @@ pub(crate) fn provider_with(headers: impl IntoIterator<Item = Header>) -> MockEt
 /// A generation anchored to `block`, downloading against `state_root`.
 pub(crate) fn generation(block: u64, state_root: B256) -> SnapGeneration {
     SnapGeneration::new(BlockNumHash::new(block, B256::repeat_byte(block as u8)), state_root)
+}
+
+/// Writes blocks `0..=3` hashed the way [`generation`] anchors them, so an attempt started from
+/// one finds its pivot on the canonical chain.
+pub(crate) fn insert_generation_headers(factory: &ProviderFactory<MockNodeTypesWithDB>) {
+    let headers: Vec<_> = (0..=3u64)
+        .map(|number| {
+            let parent = number.checked_sub(1).map_or(B256::ZERO, |n| B256::repeat_byte(n as u8));
+            SealedHeader::new(header(number, parent, None), B256::repeat_byte(number as u8))
+        })
+        .collect();
+    insert_headers(factory, &headers);
 }
 
 /// A database using the hashed state layout snap writes into.
@@ -270,6 +290,17 @@ impl BalChain {
         self.block(self.lists.len())
     }
 
+    /// Replaces the canonical tip with this chain's tip, retaining its ancestors.
+    pub(crate) fn replace_tip(&self, factory: &ProviderFactory<MockNodeTypesWithDB>) {
+        let static_files = factory.static_file_provider();
+        let mut writer = static_files.latest_writer(StaticFileSegment::Headers).unwrap();
+        writer.prune_headers(1).unwrap();
+        writer.commit().unwrap();
+        let tip = self.headers.last().unwrap();
+        writer.append_header(tip.header(), &tip.hash()).unwrap();
+        writer.commit().unwrap();
+    }
+
     /// The block `nth` after the pivot, which is the pivot itself at zero.
     pub(crate) fn block(&self, nth: usize) -> BlockNumHash {
         let header = &self.headers[self.pivot as usize + nth];
@@ -308,6 +339,30 @@ pub(crate) fn stored_slots(provider: &impl DBProvider, account: B256) -> Vec<(B2
         .collect()
 }
 
+/// Persisted snap state and all metadata, including attempt, coverage and catch-up progress.
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) struct SnapStateSnapshot {
+    accounts: Vec<(B256, Account)>,
+    storages: Vec<(B256, StorageEntry)>,
+    bytecodes: Vec<(B256, Bytecode)>,
+    metadata: Vec<(String, Vec<u8>)>,
+}
+
+impl SnapStateSnapshot {
+    pub(crate) fn read(provider: &impl DBProvider) -> Self {
+        Self {
+            accounts: table_entries::<tables::HashedAccounts>(provider),
+            storages: table_entries::<tables::HashedStorages>(provider),
+            bytecodes: table_entries::<tables::Bytecodes>(provider),
+            metadata: table_entries::<tables::Metadata>(provider),
+        }
+    }
+}
+
+fn table_entries<T: Table>(provider: &impl DBProvider) -> Vec<(T::Key, T::Value)> {
+    provider.tx_ref().cursor_read::<T>().unwrap().walk(None).unwrap().map(Result::unwrap).collect()
+}
+
 /// Serves scripted answers in request order, recording what each request asked for.
 pub(crate) struct ScriptedSnapClient {
     responses: Mutex<VecDeque<PeerRequestResult<SnapResponse>>>,
@@ -315,6 +370,7 @@ pub(crate) struct ScriptedSnapClient {
     storage_requests: Mutex<Vec<(Vec<B256>, B256)>>,
     code_requests: Mutex<Vec<Vec<B256>>>,
     block_requests: Mutex<Vec<Vec<B256>>>,
+    on_block_request: Mutex<Option<Box<dyn FnOnce() + Send>>>,
 }
 
 impl ScriptedSnapClient {
@@ -327,7 +383,14 @@ impl ScriptedSnapClient {
             storage_requests: Mutex::new(Vec::new()),
             code_requests: Mutex::new(Vec::new()),
             block_requests: Mutex::new(Vec::new()),
+            on_block_request: Mutex::new(None),
         }
+    }
+
+    /// Runs `hook` after the next BAL request is recorded, before returning its response.
+    pub(crate) fn on_block_request(self, hook: impl FnOnce() + Send + 'static) -> Self {
+        *self.on_block_request.lock().unwrap() = Some(Box::new(hook));
+        self
     }
 
     /// Origins of the account range requests sent so far.
@@ -415,6 +478,9 @@ impl SnapClient for ScriptedSnapClient {
         _priority: Priority,
     ) -> Self::Output {
         self.block_requests.lock().unwrap().push(request.block_hashes);
+        if let Some(hook) = self.on_block_request.lock().unwrap().take() {
+            hook();
+        }
         self.next_response()
     }
 }
