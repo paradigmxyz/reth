@@ -283,7 +283,8 @@ mod tests {
     use alloy_primitives::{bytes, keccak256, map::B256Map, Address, Bytes, U256};
     use reth_primitives_traits::Account;
     use reth_provider::{
-        test_utils::MockNodeTypesWithDB, DatabaseProviderFactory, ProviderFactory,
+        test_utils::{insert_headers, MockNodeTypesWithDB},
+        DatabaseProviderFactory, ProviderFactory,
     };
     use reth_trie_common::{HashedStorage, TrieAccount};
 
@@ -324,7 +325,7 @@ mod tests {
     // block access list progress recorded, then moved to pivot 2.
     fn started(accounts: &[(B256, TrieAccount)], served: usize) -> (Factory, SnapWrite) {
         let factory = hashed_factory();
-        chain().insert_headers(&factory);
+        insert_headers(&factory, &chain().headers);
         let provider = factory.database_provider_rw().unwrap();
         let write = provider.start_snap_attempt(generation(1, state_root(accounts))).unwrap();
         provider.start_account_coverage(write).unwrap();

@@ -217,7 +217,10 @@ mod tests {
     use alloy_primitives::{keccak256, Address, B256, U256};
     use reth_db_api::{tables, transaction::DbTx};
     use reth_network_p2p::{error::PeerRequestResult, snap::client::SnapResponse};
-    use reth_provider::{test_utils::MockNodeTypesWithDB, ProviderFactory};
+    use reth_provider::{
+        test_utils::{insert_headers, MockNodeTypesWithDB},
+        ProviderFactory,
+    };
     use reth_trie_common::TrieAccount;
     use std::sync::Arc;
 
@@ -250,7 +253,7 @@ mod tests {
     // then moved to the chain's last block.
     fn started(chain: &BalChain, accounts: &[(B256, TrieAccount)]) -> (Factory, SnapWrite) {
         let factory = hashed_factory();
-        chain.insert_headers(&factory);
+        insert_headers(&factory, &chain.headers);
         let provider = factory.database_provider_rw().unwrap();
         let write = provider.start_snap_attempt(chain.generation(state_root(accounts))).unwrap();
         provider.start_account_coverage(write).unwrap();
@@ -442,7 +445,7 @@ mod tests {
     async fn a_target_past_the_pivot_is_held_at_it() {
         let chain = chain();
         let factory = hashed_factory();
-        chain.insert_headers(&factory);
+        insert_headers(&factory, &chain.headers);
         let provider = factory.database_provider_rw().unwrap();
         let write = provider.start_snap_attempt(chain.generation(state_root(&accounts()))).unwrap();
         provider.commit().unwrap();
@@ -459,7 +462,7 @@ mod tests {
         // The chain the node holds instead, forking before the pivot as a reorg leaves it.
         let reorged = BalChain::new(0, [credit(1), credit(2), credit(3)]);
         let factory = hashed_factory();
-        reorged.insert_headers(&factory);
+        insert_headers(&factory, &reorged.headers);
         let provider = factory.database_provider_rw().unwrap();
         let write = provider.start_snap_attempt(chain.generation(state_root(&accounts))).unwrap();
         provider.start_account_coverage(write).unwrap();

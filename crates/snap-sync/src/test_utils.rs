@@ -28,9 +28,7 @@ use reth_network_p2p::{
 use reth_network_peers::{PeerId, WithPeerId};
 use reth_primitives_traits::{AlloyBlockHeader, SealedHeader};
 use reth_provider::{
-    test_utils::{
-        create_test_provider_factory, insert_headers, MockEthProvider, MockNodeTypesWithDB,
-    },
+    test_utils::{create_test_provider_factory, MockEthProvider, MockNodeTypesWithDB},
     DatabaseProviderFactory, ProviderFactory,
 };
 use reth_storage_api::{DBProvider, MetadataWriter, StorageSettings, StorageSettingsCache};
@@ -227,8 +225,8 @@ pub(crate) fn byte_codes(request_id: u64, codes: &[Bytes]) -> PeerRequestResult<
 /// A canonical chain from genesis through the blocks a catch-up applies, each of those carrying
 /// the list its header commits to.
 pub(crate) struct BalChain {
-    // Headers from genesis through the last block after the pivot.
-    headers: Vec<SealedHeader<Header>>,
+    /// Headers from genesis through the last block after the pivot.
+    pub(crate) headers: Vec<SealedHeader<Header>>,
     // Block the downloaded state is anchored to.
     pivot: u64,
     // Encoded lists of the blocks after the pivot, as peers serve them.
@@ -276,11 +274,6 @@ impl BalChain {
     pub(crate) fn block(&self, nth: usize) -> BlockNumHash {
         let header = &self.headers[self.pivot as usize + nth];
         BlockNumHash::new(header.number(), header.hash())
-    }
-
-    /// Persists every header, so a catch-up finds this chain canonical.
-    pub(crate) fn insert_headers(&self, factory: &ProviderFactory<MockNodeTypesWithDB>) {
-        insert_headers(factory, &self.headers);
     }
 
     /// A peer's answer serving the list of each block `served` names, holding none where it names
