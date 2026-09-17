@@ -224,10 +224,20 @@ impl<T: PoolTransaction + 'static> BlobFetcher<T> {
                     }
                 }
                 pending.target = if full {
-                    // Provider mode MUST retrieve the complete extended blob. Supernodes may
-                    // later reconstruct from 64 cells, but a probabilistic provider must
-                    // advertise and retain all cells.
-                    Some(BlobCellMask::from_bits(u128::MAX))
+                    // Match Geth's eager/full path: request the 64 data cells needed for
+                    // reconstruction, rather than all 128 extended cells.
+                    let available = pending
+                        .providers
+                        .iter()
+                        .fold(pending.received, |mask, (_, provider)| mask | provider.bits());
+                    let mut selected = pending.received;
+                    for index in BlobCellMask::from_bits(available & !pending.received)
+                        .selected_indices()
+                        .take(64usize.saturating_sub(pending.received.count_ones() as usize))
+                    {
+                        selected |= 1 << index;
+                    }
+                    (selected.count_ones() == 64).then_some(BlobCellMask::from_bits(selected))
                 } else {
                     // Sampling noise: request one additional unpredictable column from a
                     // provider, as required by EIP-8070, so a peer cannot advertise only the
@@ -411,7 +421,7 @@ mod tests {
         let PeerRequest::GetCells { request, response } = rx1.try_recv().unwrap() else {
             panic!("expected cells")
         };
-        assert_eq!(request.cell_mask, B128::from(u128::MAX.to_le_bytes()));
+        assert_eq!(request.cell_mask, B128::from((u64::MAX as u128).to_le_bytes()));
         response.send(Ok(Cells { cell_mask: request.cell_mask, ..Default::default() })).unwrap();
         assert!(fetcher.poll(&mut cx, &peers).is_pending());
         let PeerRequest::GetCells { request, response } = rx2.try_recv().unwrap() else {
@@ -432,7 +442,7 @@ mod tests {
         .await
         .unwrap();
         let BlobFetchEvent::Transaction(_, tx) = event else { panic!("valid cells must import") };
-        assert_eq!(tx.blob_cell_availability().unwrap().get().count(), 128);
+        assert_eq!(tx.blob_cell_availability().unwrap().get().count(), 64);
     }
 
     #[tokio::test]
