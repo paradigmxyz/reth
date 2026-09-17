@@ -867,6 +867,7 @@ impl DefaultStateRootStrategy {
                 }
                 let anchor_hash = published_sparse_trie_anchor_hash(
                     anchor_hash,
+                    parent_hash,
                     reused,
                     pending_sparse_trie_prune_blocks.as_deref(),
                 );
