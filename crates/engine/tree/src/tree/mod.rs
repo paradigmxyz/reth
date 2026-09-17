@@ -504,17 +504,14 @@ where
         self.incoming_tx.clone()
     }
 
-    /// How many blocks the canonical tip is ahead of the last persisted block. A large gap means
-    /// persistence is falling behind execution.
-    const fn persistence_gap(&self) -> u64 {
-        self.state
-            .tree_state
-            .canonical_block_number()
-            .saturating_sub(self.persistence_state.last_persisted_block.number)
+    /// How many canonical blocks are retained in memory. A large count means persistence is
+    /// falling behind execution.
+    fn persistence_gap(&self) -> u64 {
+        self.canonical_in_memory_state.canonical_chain().count() as u64
     }
 
     /// How many blocks beyond the configured in-memory buffer are awaiting persistence.
-    const fn persistence_backpressure_gap(&self) -> u64 {
+    fn persistence_backpressure_gap(&self) -> u64 {
         self.persistence_gap().saturating_sub(self.config.memory_block_buffer_target())
     }
 
@@ -522,7 +519,7 @@ where
     ///
     /// This is the case when persistence is already running and the number of blocks beyond the
     /// configured in-memory buffer has reached the configured threshold.
-    const fn should_backpressure(&self) -> bool {
+    fn should_backpressure(&self) -> bool {
         self.persistence_state.in_progress() &&
             self.persistence_backpressure_gap() >=
                 self.config.persistence_backpressure_threshold()
@@ -1629,6 +1626,10 @@ where
                         let is_pending = self.state.tree_state.canonical_block_hash() ==
                             block.recovered_block().parent_hash();
                         self.state.tree_state.insert_executed(block.clone());
+                        self.metrics
+                            .engine
+                            .executed_blocks
+                            .set(self.state.tree_state.block_count() as f64);
 
                         if is_pending {
                             debug!(target: "engine::tree", pending=?block_num_hash, "updating pending block");
@@ -2324,6 +2325,12 @@ where
             self.persistence_state.last_persisted_block,
             in_memory_persisted_block.number,
         );
+        // Persistence changes the overlay anchor. Prepare the remaining canonical range before
+        // the next payload needs to read execution state against the new durable frontier.
+        self.state.tree_state.overlay_manager.precompute_execution_overlay(
+            self.state.tree_state.canonical_block_hash(),
+            in_memory_persisted_block.hash,
+        );
         self.state.set_pending_sparse_trie_prune(self.should_prune_sparse_trie());
         Ok(())
     }
@@ -2934,6 +2941,7 @@ where
                 self.state.tree_state.insert_executed(block);
             }
         }
+        self.metrics.engine.executed_blocks.set(self.state.tree_state.block_count() as f64);
     }
 
     /// This handles downloaded blocks that are shown to be disconnected from the canonical chain.
@@ -3552,6 +3560,7 @@ where
             self.persistence_state.last_persisted_block.hash,
             num,
         );
+        self.metrics.engine.executed_blocks.set(self.state.tree_state.block_count() as f64);
         Ok(())
     }
 }
@@ -3675,7 +3684,7 @@ enum PersistTarget {
 /// Result of waiting for caches to become available.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct CacheWaitDurations {
-    /// Time spent waiting for the execution cache lock.
+    /// Time spent waiting for the execution cache lock, excluding post-unlock cache destruction.
     pub execution_cache: Duration,
     /// Time spent waiting for the sparse trie lock.
     pub sparse_trie: Duration,
@@ -3683,8 +3692,8 @@ pub struct CacheWaitDurations {
 
 /// Trait for types that can wait for caches to become available.
 ///
-/// This is used by `reth_newPayload` endpoint to ensure that payload processing
-/// waits for any ongoing operations to complete before starting.
+/// Used by `reth_newPayload` to wait for cache updates before starting payload processing.
+/// Removed execution-cache allocations may still be destroyed concurrently after unlocking.
 pub trait WaitForCaches {
     /// Waits for cache updates to complete.
     ///

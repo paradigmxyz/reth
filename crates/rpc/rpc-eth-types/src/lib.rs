@@ -22,6 +22,7 @@ pub mod id_provider;
 pub mod logs_utils;
 pub mod pending_block;
 pub mod receipt;
+pub mod settings;
 pub mod simulate;
 pub mod transaction;
 pub mod tx_forward;
@@ -42,5 +43,6 @@ pub use gas_oracle::{
 };
 pub use id_provider::EthSubscriptionIdProvider;
 pub use pending_block::{PendingBlock, PendingBlockEnv, PendingBlockEnvOrigin};
+pub use settings::EthApiSettings;
 pub use transaction::TransactionSource;
 pub use tx_forward::ForwardConfig;
