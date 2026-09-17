@@ -108,7 +108,7 @@ use std::{
     time::Instant,
 };
 use tokio::sync::mpsc;
-use tracing::{debug, trace, warn};
+use tracing::{debug, info, trace, warn};
 mod events;
 pub use best::{BestTransactionFilter, BestTransactionsWithPrioritizedSenders};
 pub use blob::{blob_tx_priority, fee_delta, BlobOrd, BlobTransactions};
@@ -1377,7 +1377,17 @@ where
         hash: TxHash,
         blob: PooledBlobSidecar,
     ) -> Result<(), crate::blobstore::BlobStoreError> {
-        debug!(target: "txpool", "[{:?}] storing blob sidecar", hash);
+        let availability = blob.availability().get();
+        info!(
+            target: "txpool::blob",
+            %hash,
+            sparse = blob.cells().is_some(),
+            eip7594 = blob.is_eip7594(),
+            available_bits = availability.bits(),
+            available_cells = availability.count(),
+            bytes = blob.size(),
+            "storing blob sidecar"
+        );
         let result = self.blob_store.insert(hash, blob);
         if let Err(err) = &result {
             warn!(target: "txpool", %err, "[{:?}] failed to insert blob", hash);

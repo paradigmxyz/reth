@@ -88,7 +88,7 @@ use std::{
 };
 use tokio::sync::{mpsc, oneshot, oneshot::error::RecvError};
 use tokio_stream::wrappers::UnboundedReceiverStream;
-use tracing::{debug, trace};
+use tracing::{debug, info, trace};
 
 /// The future for importing transactions into the pool.
 ///
@@ -242,6 +242,7 @@ impl<N: NetworkPrimitives> TransactionsHandle<N> {
         hashes: Vec<B256>,
         cell_mask: alloy_primitives::B128,
     ) -> Result<Option<Cells>, RequestError> {
+        info!(target: "net::tx::blob", ?peer_id, requested_hashes = hashes.len(), requested_bits = u128::from_le_bytes(cell_mask.into()), "requesting sparse blob cells from peer");
         if hashes.is_empty() {
             return Ok(Some(Cells { cell_mask, ..Default::default() }))
         }
@@ -253,7 +254,9 @@ impl<N: NetworkPrimitives> TransactionsHandle<N> {
             PeerRequest::GetCells { request: GetCells { hashes, cell_mask }, response: tx };
         peer.try_send(request).map_err(|_| RequestError::ChannelClosed)?;
 
-        rx.await?.map(Some)
+        let result = rx.await?.map(Some);
+        info!(target: "net::tx::blob", ?peer_id, success = result.is_ok(), "completed sparse blob cell request to peer");
+        result
     }
 }
 
@@ -515,6 +518,7 @@ impl<Pool: TransactionPool, N: NetworkPrimitives> TransactionsManager<Pool, N> {
         }
         self.transaction_fetcher.remove_peer(peer_id);
         self.blob_fetcher.drop_peer(*peer_id);
+        info!(target: "net::tx::blob", ?peer_id, "transaction network peer session closed; sparse blob state updated");
     }
 
     /// Clear the transaction
@@ -668,6 +672,8 @@ impl<Pool: TransactionPool, N: NetworkPrimitives> TransactionsManager<Pool, N> {
             return
         }
 
+        info!(target: "net::tx::blob", ?peer_id, announced_hashes = msg.len(), "received pooled transaction hash announcement");
+
         // get handle to peer's session, if the session is still active
         let Some(peer) = self.peers.get_mut(&peer_id) else {
             trace!(
@@ -819,6 +825,7 @@ impl<Pool: TransactionPool, N: NetworkPrimitives> TransactionsManager<Pool, N> {
         if let Some(mask) = valid_announcement_data.eth72_cell_mask() {
             let mask =
                 alloy_eips::eip7594::BlobCellMask::from_bits(u128::from_le_bytes(mask.into()));
+            info!(target: "net::tx::blob", ?peer_id, announced_hashes = valid_announcement_data.len(), mask_bits = mask.bits(), mask_cells = mask.count(), "recording ETH/72 sparse cell availability");
             for (&hash, metadata) in valid_announcement_data.iter() {
                 if metadata.is_some_and(|(ty, _)| ty == EIP4844_TX_TYPE_ID) {
                     self.blob_fetcher.announce(hash, peer_id, mask);
@@ -1746,10 +1753,12 @@ where
         {
             match event {
                 BlobFetchEvent::Transaction(peer, tx) => {
+                    info!(target: "net::tx::blob", ?peer, hash = %tx.hash(), "sparse blob transaction reconstructed and queued for pool import");
                     this.transactions_by_peers.insert(*tx.hash(), smallvec::smallvec![peer]);
                     this.import_recovered_transactions(vec![tx]);
                 }
                 BlobFetchEvent::BadPeers(peers) => {
+                    info!(target: "net::tx::blob", bad_peers = peers.len(), "sparse blob fetch reported invalid peer delivery");
                     for peer in peers {
                         this.report_peer_bad_transactions(peer);
                     }

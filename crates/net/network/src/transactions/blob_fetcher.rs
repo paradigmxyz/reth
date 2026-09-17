@@ -17,6 +17,7 @@ use std::{
     time::{Duration, Instant},
 };
 use tokio::sync::oneshot;
+use tracing::info;
 
 /// Independent cell fetcher. Transaction bodies still use the transaction fetcher.
 pub(super) struct BlobFetcher<T> {
@@ -48,7 +49,6 @@ type VerifyFuture<T> =
     Pin<Box<dyn Future<Output = (B256, Result<(PeerId, T), Vec<PeerId>>)> + Send>>;
 const MAX_PENDING: usize = 4096;
 const MAX_REQUESTS: usize = 16;
-const WAIT: Duration = Duration::from_secs(2);
 const TIMEOUT: Duration = Duration::from_secs(5);
 const TTL: Duration = Duration::from_secs(120);
 
@@ -71,6 +71,7 @@ impl<T: PoolTransaction + 'static> BlobFetcher<T> {
         if mask.count() == 0 ||
             (!self.pending.contains_key(&hash) && self.pending.len() >= MAX_PENDING)
         {
+            info!(target: "net::tx::blob", %hash, ?peer, mask_bits = mask.bits(), mask_cells = mask.count(), pending = self.pending.len(), "sparse blob announcement ignored");
             return
         }
         let pending = self.pending.entry(hash).or_insert_with(|| Pending::new(Instant::now()));
@@ -79,17 +80,24 @@ impl<T: PoolTransaction + 'static> BlobFetcher<T> {
         } else if pending.providers.len() < 16 {
             pending.providers.push((peer, mask));
         }
+        info!(target: "net::tx::blob", %hash, ?peer, mask_bits = mask.bits(), mask_cells = mask.count(), providers = pending.providers.len(), "sparse blob provider announcement recorded");
     }
 
     pub(super) fn body(&mut self, peer: PeerId, tx: T) -> Result<(), ()> {
-        self.buffer.body(peer, tx, Instant::now())
+        let hash = *tx.hash();
+        let result = self.buffer.body(peer, tx, Instant::now());
+        info!(target: "net::tx::blob", %hash, ?peer, accepted = result.is_ok(), "sparse blob transaction body received");
+        result
     }
 
     pub(super) fn drop_peer(&mut self, peer: PeerId) {
         self.budgets.remove(&peer);
+        let mut removed_providers = 0usize;
         for pending in self.pending.values_mut() {
+            removed_providers += pending.providers.iter().filter(|(id, _)| *id == peer).count();
             pending.providers.retain(|(id, _)| *id != peer);
         }
+        info!(target: "net::tx::blob", ?peer, removed_providers, pending = self.pending.len(), "sparse blob provider removed");
     }
 
     pub(super) fn poll<N: NetworkPrimitives>(
@@ -108,6 +116,7 @@ impl<T: PoolTransaction + 'static> BlobFetcher<T> {
             } else {
                 self.metrics.invalid.increment(1);
             }
+            info!(target: "net::tx::blob", %hash, verified = result.is_ok(), "sparse blob cell verification completed");
             self.pending.remove(&hash);
             return Poll::Ready(match result {
                 Ok((peer, tx)) => BlobFetchEvent::Transaction(peer, tx),
@@ -122,12 +131,19 @@ impl<T: PoolTransaction + 'static> BlobFetcher<T> {
             pending.providers.retain(|(id, _)| *id != peer);
             let Some(response) = response else {
                 self.metrics.failed_requests.increment(1);
+                info!(target: "net::tx::blob", %hash, ?peer, requested_bits = requested.bits(), requested_cells = requested.count(), "sparse GetCells request timed out or disconnected");
                 if pending.full == Some(true) {
                     pending.target = None;
                 }
                 continue
             };
-            if u128::from_le_bytes(response.cell_mask.into()) != requested.bits() ||
+            info!(target: "net::tx::blob", %hash, ?peer, requested_bits = requested.bits(), requested_cells = requested.count(), response_bits = u128::from_le_bytes(response.cell_mask.into()), response_hashes = response.hashes.len(), response_cell_groups = response.cells.len(), "sparse GetCells response received");
+            let response_mask =
+                BlobCellMask::from_bits(u128::from_le_bytes(response.cell_mask.into()));
+            // EIP-8070 permits a provider to truncate a Cells response under load. Accept any
+            // non-overclaiming subset of the requested columns and schedule the remainder from
+            // other providers; only masks outside the request are malformed.
+            if response_mask.bits() & !requested.bits() != 0 ||
                 response.hashes.len() != response.cells.len() ||
                 response.hashes.len() > 1 ||
                 response.hashes.first().is_some_and(|h| *h != hash)
@@ -135,23 +151,27 @@ impl<T: PoolTransaction + 'static> BlobFetcher<T> {
                 if pending.full == Some(true) {
                     pending.target = None;
                 }
+                info!(target: "net::tx::blob", %hash, ?peer, "sparse GetCells response rejected as malformed");
                 return Poll::Ready(BlobFetchEvent::BadPeers(vec![peer]))
             }
             if response.cells.is_empty() && pending.full == Some(true) {
                 pending.target = None;
             }
             if let Some(cells) = response.cells.into_iter().next() {
-                if cells.is_empty() ||
-                    !cells.len().is_multiple_of(requested.count()) ||
-                    cells.len() / requested.count() > 128
+                if response_mask.count() == 0 ||
+                    cells.is_empty() ||
+                    !cells.len().is_multiple_of(response_mask.count()) ||
+                    cells.len() / response_mask.count() > 128
                 {
                     if pending.full == Some(true) {
                         pending.target = None;
                     }
+                    info!(target: "net::tx::blob", %hash, ?peer, "sparse GetCells response rejected with invalid cell shape");
                     return Poll::Ready(BlobFetchEvent::BadPeers(vec![peer]))
                 }
-                if self.buffer.cells(hash, peer, requested, cells, Instant::now()) {
-                    pending.received |= requested.bits();
+                if self.buffer.cells(hash, peer, response_mask, cells, Instant::now()) {
+                    pending.received |= response_mask.bits();
+                    info!(target: "net::tx::blob", %hash, ?peer, received_bits = pending.received, "sparse blob cells buffered");
                 }
             }
         }
@@ -159,6 +179,27 @@ impl<T: PoolTransaction + 'static> BlobFetcher<T> {
         while self.tick.poll_tick(cx).is_ready() {
             self.metrics.expired.increment(self.buffer.expire(now).len() as u64);
             self.pending.retain(|_, p| now.duration_since(p.created) < TTL);
+        }
+        // A CL may expand its custody set after a transaction entered the sampler path. Extend
+        // the target so the delta columns are fetched instead of leaving the pending transaction
+        // on the old custody set (EIP-8070 ?engine_forkchoiceUpdatedV4).
+        let custody = BlobCellMask::new(self.custody.get());
+        for (hash, pending) in &mut self.pending {
+            if pending.full == Some(false) {
+                if let Some(target) = pending.target {
+                    let expanded = custody.bits() & !target.bits();
+                    if expanded != 0 {
+                        pending.target = Some(BlobCellMask::from_bits(target.bits() | expanded));
+                        info!(
+                            target: "net::tx::blob",
+                            %hash,
+                            added_bits = expanded,
+                            custody_bits = custody.bits(),
+                            "expanded sparse blob sampling target after custody update"
+                        );
+                    }
+                }
+            }
         }
         let mut queued = false;
         // Bound proof verification jobs independently of network request concurrency.
@@ -190,20 +231,15 @@ impl<T: PoolTransaction + 'static> BlobFetcher<T> {
                 continue
             }
             if pending.target.is_none() {
+                // Decide independently of provider-count saturation. A sparse sampler may
+                // acquire custody cells as soon as an announcement is available.
                 let full_providers =
-                    pending.providers.iter().filter(|(_, m)| m.count() >= 64).count();
-                if pending.full.is_none() &&
-                    full_providers < 2 &&
-                    now.duration_since(pending.created) < WAIT
-                {
-                    continue
-                }
+                    pending.providers.iter().filter(|(_, mask)| mask.bits() == u128::MAX).count();
                 let custody = BlobCellMask::new(self.custody.get());
                 let first_decision = pending.full.is_none();
                 let full = *pending.full.get_or_insert_with(|| {
                     custody.count() == 0 ||
                         custody.count() >= 64 ||
-                        full_providers < 2 ||
                         rand::random_range(0..100u8) < self.probability
                 });
                 if first_decision {
@@ -213,21 +249,34 @@ impl<T: PoolTransaction + 'static> BlobFetcher<T> {
                         self.metrics.sampled.increment(1);
                     }
                 }
+                if first_decision {
+                    info!(target: "net::tx::blob", %hash, full, full_providers, custody_cells = custody.count(), providers = pending.providers.len(), "sparse blob acquisition mode selected");
+                }
                 pending.target = if full {
+                    // Provider mode MUST retrieve the complete extended blob. Supernodes may
+                    // later reconstruct from 64 cells, but a probabilistic provider must
+                    // advertise and retain all cells.
+                    Some(BlobCellMask::from_bits(u128::MAX))
+                } else {
+                    // Sampling noise: request one additional unpredictable column from a
+                    // provider, as required by EIP-8070, so a peer cannot advertise only the
+                    // victim's custody set and selectively withhold data.
                     let available = pending
                         .providers
                         .iter()
-                        .fold(pending.received, |mask, (_, provider)| mask | provider.bits());
-                    let mut selected = pending.received;
-                    for index in BlobCellMask::from_bits(available & !pending.received)
-                        .selected_indices()
-                        .take(64usize.saturating_sub(pending.received.count_ones() as usize))
-                    {
-                        selected |= 1 << index;
-                    }
-                    (selected.count_ones() == 64).then_some(BlobCellMask::from_bits(selected))
-                } else {
-                    Some(custody)
+                        .fold(0u128, |mask, (_, provider)| mask | provider.bits());
+                    let extras = available & !custody.bits();
+                    let sample = if extras == 0 {
+                        custody.bits()
+                    } else {
+                        let offset = rand::random_range(0..extras.count_ones()) as usize;
+                        let index = BlobCellMask::from_bits(extras)
+                            .selected_indices()
+                            .nth(offset)
+                            .expect("extra sampling column exists");
+                        custody.bits() | (1u128 << index)
+                    };
+                    Some(BlobCellMask::from_bits(sample))
                 };
             }
             let Some(target) = pending.target else { continue };
@@ -260,6 +309,7 @@ impl<T: PoolTransaction + 'static> BlobFetcher<T> {
                 if metadata.request_tx.try_send(request).is_err() {
                     continue
                 }
+                info!(target: "net::tx::blob", %hash, ?peer, requested_bits = requested.bits(), requested_cells = requested.count(), received_bits = pending.received, "sparse GetCells request sent");
                 self.metrics.requests.increment(1);
                 budget.tokens -= requested.count() as f64;
                 pending.inflight = true;
@@ -391,7 +441,7 @@ mod tests {
         let PeerRequest::GetCells { request, response } = rx1.try_recv().unwrap() else {
             panic!("expected cells")
         };
-        assert_eq!(request.cell_mask, B128::from((u64::MAX as u128).to_le_bytes()));
+        assert_eq!(request.cell_mask, B128::from(u128::MAX.to_le_bytes()));
         response.send(Ok(Cells { cell_mask: request.cell_mask, ..Default::default() })).unwrap();
         assert!(fetcher.poll(&mut cx, &peers).is_pending());
         let PeerRequest::GetCells { request, response } = rx2.try_recv().unwrap() else {
@@ -412,16 +462,14 @@ mod tests {
         .await
         .unwrap();
         let BlobFetchEvent::Transaction(_, tx) = event else { panic!("valid cells must import") };
-        assert_eq!(tx.blob_cell_availability().unwrap().get().count(), 64);
+        assert_eq!(tx.blob_cell_availability().unwrap().get().count(), 128);
     }
 
     #[tokio::test]
-    async fn custody_sampling_requires_two_full_providers_and_preserves_wire_order() {
+    async fn custody_sampling_starts_with_one_provider() {
         let first = PeerId::random();
-        let second = PeerId::random();
         let (p1, mut rx1) = peer(first);
-        let (p2, _rx2) = peer(second);
-        let peers = HashMap::from_iter([(first, p1), (second, p2)]);
+        let peers = HashMap::from_iter([(first, p1)]);
         let custody = CellCustody::default();
         let bits: u128 = 1 | (1 << 8) | (1 << 127);
         custody.set(B128::from(bits));
@@ -429,16 +477,15 @@ mod tests {
         fetcher.probability = 0;
         let hash = B256::random();
         let all = BlobCellMask::from_bits(u128::MAX);
-        fetcher.announce(hash, first, all);
         let mut cx = Context::from_waker(noop_waker_ref());
-        assert!(fetcher.poll(&mut cx, &peers).is_pending());
-        assert!(rx1.try_recv().is_err());
-        fetcher.announce(hash, second, all);
+        fetcher.announce(hash, first, all);
         assert!(fetcher.poll(&mut cx, &peers).is_pending());
         let PeerRequest::GetCells { request, .. } = rx1.try_recv().unwrap() else {
             panic!("expected sample")
         };
-        assert_eq!(request.cell_mask, B128::from(bits.to_le_bytes()));
+        let requested = u128::from_le_bytes(request.cell_mask.into());
+        assert_eq!(requested & bits, bits);
+        assert_eq!(requested.count_ones(), bits.count_ones() + 1);
     }
 
     #[test]
