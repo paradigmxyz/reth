@@ -353,8 +353,8 @@ where
     /// Spawns two halves concurrently on separate pools, then waits for both to complete:
     /// 1. Hashed state streaming on the BAL streaming pool so storage updates can reach the
     ///    state-root job before account reads finish.
-    /// 2. Storage prefetch on the prewarming pool to populate the execution cache, unless BAL batch
-    ///    I/O is disabled.
+    /// 2. Account and storage prefetch on the prewarming pool, followed by deferred bytecode reads,
+    ///    unless BAL batch I/O is disabled. Prefetch stops once transaction execution finishes.
     #[instrument(level = "debug", target = "engine::tree::payload_processor::prewarm", skip_all)]
     fn run_bal_prewarm(
         &self,
@@ -418,7 +418,7 @@ where
             let _ = stream_tx.send(());
         }
 
-        if let Some(saved_cache) = ctx.saved_cache &&
+        if let Some(saved_cache) = &ctx.saved_cache &&
             !ctx.disable_bal_batch_io &&
             let Some(pool) = ctx.bal_prewarm_pool.as_ref()
         {
@@ -442,10 +442,21 @@ where
                     .map(|provider| Box::new(provider) as _)
             });
 
-            pool.begin_block(build, caches, ctx.env.txpool_snapshot.clone());
+            pool.begin_block(
+                build,
+                caches,
+                ctx.env.txpool_snapshot.clone(),
+                ctx.terminate_execution.clone(),
+            );
             let dispatch_start = Instant::now();
             for account in prefetch_bal.as_bal() {
-                pool.warm_account(account.address, account.storage_slots().map(Into::into));
+                if ctx.should_stop() {
+                    break
+                }
+                pool.warm_account(
+                    account.address,
+                    account.storage_slots().take_while(|_| !ctx.should_stop()).map(Into::into),
+                );
             }
             ctx.metrics.bal_slot_iteration_duration.record(dispatch_start.elapsed());
             pool.end_block();
@@ -1031,6 +1042,7 @@ mod tests {
                 saved_cache: task.ctx.saved_cache.clone(),
                 to_prewarm_task: Some(actions_tx.clone()),
                 executed_tx_index: task.ctx.executed_tx_index.clone(),
+                terminate_execution: task.ctx.terminate_execution.clone(),
                 cache_metrics: None,
             },
             transactions: crossbeam_channel::never::<(usize, Result<(), ()>)>(),
