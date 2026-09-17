@@ -226,8 +226,8 @@ impl<T: PoolTransaction + 'static> BlobFetcher<T> {
                     }
                 }
                 pending.target = if full {
-                    // Match Geth's eager/full path: request the 64 data cells needed for
-                    // reconstruction, rather than all 128 extended cells.
+                    // Request the 64 data cells needed for reconstruction, rather than all 128
+                    // extended cells.
                     let available = pending
                         .providers
                         .iter()
