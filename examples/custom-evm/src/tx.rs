@@ -65,6 +65,7 @@ pub fn execute_code(
     let mut message = Message::<CustomTypes> {
         gas_limit: req.tx.gas_limit,
         destination: req.tx.target,
+        call_target: req.tx.target,
         code_address: req.tx.target,
         code: Bytecode::new_legacy(req.tx.code.clone()),
         caller: req.tx.signer(),
