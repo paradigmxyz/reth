@@ -116,7 +116,7 @@ pub struct CustomStateRootInput<'a, N: NodePrimitives> {
 
 /// A custom state-root computation handler.
 pub type CustomStateRoot<N> = Arc<
-    dyn Fn(CustomStateRootInput<'_, N>) -> ProviderResult<(B256, TrieUpdates)>
+    dyn Fn(CustomStateRootInput<'_, N>) -> ProviderResult<StateRootJobOutcome>
         + Send
         + Sync
         + 'static,
@@ -156,13 +156,12 @@ impl<N: NodePrimitives> StateRootJob<N> for CustomStateRootJob<N> {
         output: Arc<BlockExecutionOutput<N::Receipt>>,
         hashed_state: &LazyHashedPostState,
     ) -> ProviderResult<StateRootJobOutcome> {
-        let (state_root, trie_updates) = (self.callback)(CustomStateRootInput {
+        (self.callback)(CustomStateRootInput {
             block,
             parent_block: &self.parent_block,
             output: &output,
             hashed_state,
-        })?;
-        Ok(StateRootJobOutcome::new(state_root, Arc::new(trie_updates)))
+        })
     }
 }
 
