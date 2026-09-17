@@ -4970,7 +4970,6 @@ mod tests {
         );
     }
 
-    #[cfg(feature = "partial-persistence")]
     #[test]
     fn test_save_blocks_partial_cycles_do_not_duplicate_static_file_writes() {
         let factory = create_test_provider_factory();
