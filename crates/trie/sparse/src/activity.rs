@@ -59,6 +59,19 @@ impl ActivityGuard {
         if !tracing::enabled!(target: "engine::tree::activity", tracing::Level::TRACE) {
             return Self::disabled()
         }
+        let root = PARENT.with(Cell::get) == 0;
+        let allowed_root =
+            matches!(phase, "task" | "new_payload" | "bal_worker" | "hashing_stream");
+        #[cfg(test)]
+        let allowed_root = allowed_root || phase.starts_with("test_");
+        // Do not turn each small Rayon job into an outer trace/export by default.
+        // Nested work executed on the coordinator itself is still accounted for.
+        if root &&
+            !allowed_root &&
+            !tracing::enabled!(target: "engine::tree::worker_activity", tracing::Level::TRACE)
+        {
+            return Self::disabled()
+        }
         let epoch = *EPOCH;
         let id = NEXT.fetch_add(1, Ordering::Relaxed);
         let previous = PARENT.with(|p| p.replace(id));
