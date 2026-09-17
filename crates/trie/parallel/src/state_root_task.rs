@@ -172,13 +172,13 @@ impl StateRootHandle {
 
     /// Converts this sparse-trie handle into the opaque handle passed to payload builders.
     ///
-    /// The payload builder only executes transactions, so the handle carries the execution
-    /// hook; the hint capability is dropped here.
+    /// Preserves both authoritative execution updates and best-effort prewarming hints.
     pub fn into_payload_state_root_handle(mut self) -> PayloadStateRootHandle {
         let hook = self.take_execution_hook();
         PayloadStateRootHandle {
             name: "sparse-trie",
             hook: Some(hook),
+            hint: self.hint.take(),
             cancel_guard: Some(self.cancel_guard),
             state_root_rx: self.state_root_rx.take(),
             hashed_state_rx: self.hashed_state_rx.take(),
@@ -207,6 +207,8 @@ pub struct PayloadStateRootHandle {
     name: &'static str,
     /// Execution hook that streams per-transaction updates; taken once when building starts.
     hook: Option<StateRootUpdateHook>,
+    /// Optional best-effort prewarming capability, taken once by the builder.
+    hint: Option<StateRootHintStream>,
     /// Cancels the backing task when the handle is dropped without consuming the result.
     cancel_guard: Option<StateRootTaskCancelGuard>,
     state_root_rx:
@@ -239,7 +241,14 @@ impl PayloadStateRootHandle {
         >,
         hashed_state_rx: Option<std::sync::mpsc::Receiver<Arc<HashedPostState>>>,
     ) -> Self {
-        Self { name, hook, cancel_guard: None, state_root_rx: Some(state_root_rx), hashed_state_rx }
+        Self {
+            name,
+            hook,
+            hint: None,
+            cancel_guard: None,
+            state_root_rx: Some(state_root_rx),
+            hashed_state_rx,
+        }
     }
 
     /// Returns the task name used in logs.
@@ -254,6 +263,11 @@ impl PayloadStateRootHandle {
     /// If the handle was created without an execution hook, or the hook was already taken.
     pub const fn take_state_hook(&mut self) -> StateRootUpdateHook {
         self.hook.take().expect("payload state root task missing execution hook")
+    }
+
+    /// Takes the optional hint stream without granting authority to change state.
+    pub const fn take_hint_stream(&mut self) -> Option<StateRootHintStream> {
+        self.hint.take()
     }
 
     /// Awaits the state root computation result.
@@ -691,6 +705,25 @@ mod tests {
 
         let _hook = handle.take_execution_hook();
         let _ = handle.take_hashed_update_stream();
+    }
+
+    #[test]
+    fn payload_conversion_preserves_prewarming_hints() {
+        let (updates_tx, updates_rx) = crossbeam_channel::unbounded();
+        let (cancel_guard, _cancel_rx) = StateRootTaskCancelGuard::channel();
+        let (_state_root_tx, state_root_rx) = std::sync::mpsc::channel();
+        let (_hashed_state_tx, hashed_state_rx) = std::sync::mpsc::channel();
+        let mut handle = StateRootHandle::new(
+            B256::ZERO,
+            updates_tx,
+            cancel_guard,
+            state_root_rx,
+            hashed_state_rx,
+        )
+        .into_payload_state_root_handle();
+        handle.take_hint_stream().unwrap().on_access_hint(StateAccessHint::default());
+        assert!(matches!(updates_rx.recv().unwrap(), StateRootMessage::PrefetchProofs(_)));
+        assert!(handle.take_hint_stream().is_none());
     }
 
     /// Lifecycle of the opaque handle a strategy hands to the payload builder: the execution
