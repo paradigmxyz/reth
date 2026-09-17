@@ -15,7 +15,9 @@ use reth_db_api::{
     transaction::{DbTx, DbTxMut},
 };
 use reth_primitives_traits::Account;
-use reth_storage_api::{DBProvider, MetadataProvider, MetadataWriter, SnapAttemptId, StateWriter};
+use reth_storage_api::{
+    BlockHashReader, DBProvider, MetadataProvider, MetadataWriter, SnapAttemptId, StateWriter,
+};
 use reth_trie_common::HashedStorage;
 use serde::{Deserialize, Serialize};
 
@@ -52,7 +54,7 @@ pub trait SnapCatchUpStore {
     /// Applies `bal` to the downloaded state and records `block` as the last one applied.
     ///
     /// The list must be authenticated against `block`'s header commitment, and `block` must be
-    /// the child of the last applied one.
+    /// canonical and the child of the last applied one.
     fn commit_block_access_list(
         &self,
         write: SnapWrite,
@@ -61,7 +63,7 @@ pub trait SnapCatchUpStore {
         bal: &[AccountChanges],
     ) -> Result<CatchUpProgress, SnapSyncError>
     where
-        Self: MetadataWriter + StateWriter + DBProvider<Tx: DbTxMut>;
+        Self: BlockHashReader + MetadataWriter + StateWriter + DBProvider<Tx: DbTxMut>;
 }
 
 /// How far past the pivot the downloaded state has been carried.
@@ -232,9 +234,13 @@ impl<T: MetadataProvider> SnapCatchUpStore for T {
         bal: &[AccountChanges],
     ) -> Result<CatchUpProgress, SnapSyncError>
     where
-        Self: MetadataWriter + StateWriter + DBProvider<Tx: DbTxMut>,
+        Self: BlockHashReader + MetadataWriter + StateWriter + DBProvider<Tx: DbTxMut>,
     {
         let attempt = self.authorize_snap_write(write)?;
+        // The chain may have reorged since the list was requested.
+        if self.block_hash(block.number)? != Some(block.hash) {
+            return Err(SnapSyncError::NonCanonicalBlock { block: block.number, hash: block.hash })
+        }
         let advanced = self
             .catch_up_progress(write)?
             .ok_or(SnapSyncError::NoCatchUpProgress)?
@@ -270,7 +276,9 @@ impl<T: MetadataProvider> SnapCatchUpStore for T {
 mod tests {
     use super::*;
     use crate::{
-        test_utils::{account, generation, hashed_factory, key, state_root, storage_root_of},
+        test_utils::{
+            account, generation, hashed_factory, header, key, state_root, storage_root_of,
+        },
         SnapAccountStore,
     };
     use alloy_eip7928::{BalanceChange, BlockAccessIndex, CodeChange, SlotChanges, StorageChange};
@@ -278,6 +286,7 @@ mod tests {
     use reth_primitives_traits::Account;
     use reth_provider::{
         test_utils::MockNodeTypesWithDB, DatabaseProviderFactory, ProviderFactory,
+        StaticFileProviderFactory, StaticFileSegment, StaticFileWriter,
     };
     use reth_trie_common::{HashedStorage, TrieAccount};
 
@@ -318,6 +327,16 @@ mod tests {
     // block access list progress recorded, then moved to pivot 2.
     fn started(accounts: &[(B256, TrieAccount)], served: usize) -> (Factory, SnapWrite) {
         let factory = hashed_factory();
+        // Blocks 0 through 3 are canonical under the hashes `block` gives them.
+        {
+            let static_files = factory.static_file_provider();
+            let mut writer = static_files.latest_writer(StaticFileSegment::Headers).unwrap();
+            for number in 0..=3 {
+                let hash = B256::repeat_byte(number as u8);
+                writer.append_header(&header(number, B256::ZERO, None), &hash).unwrap();
+            }
+            writer.commit().unwrap();
+        }
         let provider = factory.database_provider_rw().unwrap();
         let write = provider.start_snap_attempt(generation(1, state_root(accounts))).unwrap();
         provider.start_account_coverage(write).unwrap();
@@ -469,6 +488,20 @@ mod tests {
         let gap = provider.commit_block_access_list(write, block, parent, &credit(10));
 
         assert!(matches!(gap, Err(SnapSyncError::OutOfOrderBlock { expected: 2, got: 3 })));
+        assert_eq!(stored(&provider, keccak256(CHANGED)).unwrap().balance, U256::from(1));
+    }
+
+    #[test]
+    fn a_block_the_canonical_chain_no_longer_holds_is_refused() {
+        let accounts = accounts();
+        let (factory, write) = started(&accounts, accounts.len());
+        let provider = factory.database_provider_rw().unwrap();
+        let (_, parent) = block(2);
+        let orphaned = BlockNumHash::new(2, B256::repeat_byte(0xee));
+
+        let refused = provider.commit_block_access_list(write, orphaned, parent, &credit(10));
+
+        assert!(matches!(refused, Err(SnapSyncError::NonCanonicalBlock { block: 2, .. })));
         assert_eq!(stored(&provider, keccak256(CHANGED)).unwrap().balance, U256::from(1));
     }
 

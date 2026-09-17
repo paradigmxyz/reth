@@ -14,8 +14,8 @@ use reth_network_p2p::snap::client::SnapClient;
 use reth_network_peers::PeerId;
 use reth_primitives_traits::{AlloyBlockHeader, SealedHeader};
 use reth_storage_api::{
-    DBProvider, DatabaseProviderFactory, HeaderProvider, MetadataProvider, MetadataWriter,
-    StateWriter,
+    BlockHashReader, DBProvider, DatabaseProviderFactory, HeaderProvider, MetadataProvider,
+    MetadataWriter, StateWriter,
 };
 use reth_tasks::Runtime;
 use std::fmt;
@@ -60,7 +60,8 @@ where
     C: SnapClient + Clone + Unpin,
     F: DatabaseProviderFactory + Clone + 'static,
     F::Provider: HeaderProvider + MetadataProvider,
-    F::ProviderRW: MetadataProvider + MetadataWriter + StateWriter + DBProvider<Tx: DbTxMut>,
+    F::ProviderRW:
+        BlockHashReader + MetadataProvider + MetadataWriter + StateWriter + DBProvider<Tx: DbTxMut>,
 {
     /// Requests the lists of the canonical blocks between the applied one and `target`, and
     /// commits those continuing it, in order.

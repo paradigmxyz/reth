@@ -76,6 +76,14 @@ pub enum SnapSyncError {
         /// Block the pivot was moved to.
         pivot: u64,
     },
+    /// A list was applied for a block the canonical chain no longer holds.
+    #[error("block {block} ({hash}) is no longer canonical")]
+    NonCanonicalBlock {
+        /// Number of the block.
+        block: u64,
+        /// Hash of the block the list belongs to.
+        hash: B256,
+    },
     /// A list was applied for a block building on another chain than the applied state.
     #[error("block access list for a block building on {got}, the applied state is at {expected}")]
     ForkedBlock {
