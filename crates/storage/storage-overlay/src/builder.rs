@@ -916,7 +916,7 @@ mod tests {
         let stored_account = overlay.accounts[&address].as_ref().unwrap();
         assert_eq!(
             stored_account,
-            &AccountInfo { code: None, ..account.clone() },
+            &AccountInfo { code: None, ..account },
             "the overlay must preserve durable account fields"
         );
         assert_eq!(stored_account.code, None);

@@ -1,6 +1,6 @@
 //! DAO fork constants from [EIP-779](https://eips.ethereum.org/EIPS/eip-779).
 //!
-//! The fork activated at Ethereum block 1_920_000.
+//! The fork activated at Ethereum block `1_920_000`.
 
 use alloy_primitives::{address, Address};
 

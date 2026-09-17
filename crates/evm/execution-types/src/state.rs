@@ -228,16 +228,11 @@ where
 }
 
 /// Returns an approximate state-change size for thresholding and metrics.
-pub(crate) fn state_source_size_hint<S>(source: &S) -> usize
-where
-    S: StateChangeSource,
-{
-    let mut sink = StateSizeHintSink::default();
-    match source.visit(&mut sink) {
-        Ok(()) => {}
-        Err(err) => match err {},
-    }
-    sink.size
+pub(crate) fn state_source_size_hint(source: &BlockStateAccumulator) -> usize {
+    source.accounts().count() +
+        source.storage_wipes().count() +
+        source.storage().count() +
+        source.code().count()
 }
 
 /// Returns the per-block reverts represented by an execution state-change source.
@@ -293,11 +288,6 @@ pub struct HashedPostStateSink<KH> {
     state: HashedPostState,
     created_accounts: B256Set,
     _key_hasher: PhantomData<KH>,
-}
-
-#[derive(Default)]
-struct StateSizeHintSink {
-    size: usize,
 }
 
 #[derive(Default)]
@@ -374,34 +364,6 @@ impl<KH> Default for HashedPostStateSink<KH> {
             created_accounts: B256Set::default(),
             _key_hasher: PhantomData,
         }
-    }
-}
-
-impl StateChangeSink for StateSizeHintSink {
-    type Error = Infallible;
-
-    fn bytecode(
-        &mut self,
-        _code_hash: B256,
-        _code: &ExecutableBytecode,
-    ) -> Result<(), Self::Error> {
-        self.size += 1;
-        Ok(())
-    }
-
-    fn account(&mut self, _change: AccountChangeRef<'_>) -> Result<(), Self::Error> {
-        self.size += 1;
-        Ok(())
-    }
-
-    fn storage_wipe(&mut self, _address: alloy_primitives::Address) -> Result<(), Self::Error> {
-        self.size += 1;
-        Ok(())
-    }
-
-    fn storage(&mut self, _change: StorageChange) -> Result<(), Self::Error> {
-        self.size += 1;
-        Ok(())
     }
 }
 

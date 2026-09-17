@@ -128,7 +128,7 @@ where
 
                 eth_api.apply_pre_execution_changes(&block, &mut db)?;
 
-                let block_env = evm_env.block_env().clone();
+                let block_env = *evm_env.block_env();
 
                 let mut transactions = block.transactions_recovered().enumerate().peekable();
                 let mut inspector = DebugInspector::new(opts).map_err(Eth::Error::from_eth_err)?;
@@ -188,7 +188,7 @@ where
 
                 eth_api.apply_pre_execution_changes(&block, &mut db)?;
 
-                let block_env = evm_env.block_env().clone();
+                let block_env = *evm_env.block_env();
                 let mut transactions = block.transactions_recovered().enumerate().peekable();
                 let mut inspector = match DebugInspector::new(opts) {
                     Ok(inspector) => inspector,
@@ -345,7 +345,7 @@ where
                         as usize;
 
                 let inspector = DebugInspector::new(opts).map_err(Eth::Error::from_eth_err)?;
-                let tx_env = eth_api.evm_config().tx_env(tx.clone());
+                let tx_env = eth_api.evm_config().tx_env(tx);
                 let (mut inspector, res, evm_env) = eth_api.inspect_transaction_in_block(
                     &block,
                     &mut db,

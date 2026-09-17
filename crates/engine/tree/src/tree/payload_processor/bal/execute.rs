@@ -953,7 +953,7 @@ mod tests {
         let block = empty_amsterdam_block(B256::ZERO);
         let received_bal = Arc::new(
             <BlockExecutorFor<'_, EthEvmConfig> as BlockExecutor>::convert_block_access_list(
-                &reference_bal.into(),
+                &reference_bal,
             )
             .unwrap(),
         );

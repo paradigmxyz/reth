@@ -3317,7 +3317,7 @@ mod tests {
         later_revert_storage.insert(
             address,
             StorageReverts {
-                slots: [(slot, RevertToSlot::Some(value_a))].into_iter().collect(),
+                slots: std::iter::once((slot, RevertToSlot::Some(value_a))).collect(),
                 ..Default::default()
             },
         );

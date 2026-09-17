@@ -953,13 +953,13 @@ mod storage_tests {
 
         let mut state = StateFixture::default();
         state.insert_not_existing(address_a);
-        state.insert_account(address_b, account_b.clone());
+        state.insert_account(address_b, account_b);
 
         // 0x00.. is created
         state.commit(HashMap::from_iter([(
             address_a,
             AccountUpdate {
-                info: account_a.clone(),
+                info: account_a,
                 created: true,
                 destroyed: false,
                 storage: HashMap::default(),
@@ -970,7 +970,7 @@ mod storage_tests {
         state.commit(HashMap::from_iter([(
             address_b,
             AccountUpdate {
-                info: account_b_changed.clone(),
+                info: account_b_changed,
                 created: false,
                 destroyed: false,
                 storage: HashMap::default(),
@@ -1023,7 +1023,7 @@ mod storage_tests {
         );
 
         let mut state = StateFixture::default();
-        state.insert_account(address_b, account_b_changed.clone());
+        state.insert_account(address_b, account_b_changed);
 
         // 0xff.. is destroyed
         state.commit(HashMap::from_iter([(
@@ -1085,7 +1085,7 @@ mod storage_tests {
         state.insert_not_existing(address_a);
         state.insert_account_with_storage(
             address_b,
-            account_b.clone(),
+            account_b,
             HashMap::from_iter([(U256::from(1), U256::from(1))]),
         );
 
@@ -1119,11 +1119,7 @@ mod storage_tests {
                     // 0x01 => 1 => 2
                     storage: HashMap::from_iter([(
                         U256::from(1),
-                        SlotUpdate {
-                            present_value: U256::from(2),
-                            original_value: U256::from(1),
-                            ..Default::default()
-                        },
+                        SlotUpdate { present_value: U256::from(2), original_value: U256::from(1) },
                     )]),
                 },
             ),
@@ -1279,7 +1275,7 @@ mod storage_tests {
         init_state.commit(HashMap::from_iter([(
             address1,
             AccountUpdate {
-                info: account_info.clone(),
+                info: account_info,
                 created: true,
                 destroyed: false,
                 // 0x00 => 0 => 1
@@ -1303,7 +1299,7 @@ mod storage_tests {
         let mut state = StateFixture::default();
         state.insert_account_with_storage(
             address1,
-            account_info.clone(),
+            account_info,
             HashMap::from_iter([(U256::ZERO, U256::from(1)), (U256::from(1), U256::from(2))]),
         );
 
@@ -1313,15 +1309,11 @@ mod storage_tests {
             AccountUpdate {
                 created: false,
                 destroyed: false,
-                info: account_info.clone(),
+                info: account_info,
                 // 0x00 => 1 => 2
                 storage: HashMap::from_iter([(
                     U256::ZERO,
-                    SlotUpdate {
-                        original_value: U256::from(1),
-                        present_value: U256::from(2),
-                        ..Default::default()
-                    },
+                    SlotUpdate { original_value: U256::from(1), present_value: U256::from(2) },
                 )]),
             },
         )]));
@@ -1333,7 +1325,7 @@ mod storage_tests {
             AccountUpdate {
                 created: false,
                 destroyed: true,
-                info: account_info.clone(),
+                info: account_info,
                 storage: HashMap::default(),
             },
         )]));
@@ -1345,7 +1337,7 @@ mod storage_tests {
             AccountUpdate {
                 created: true,
                 destroyed: false,
-                info: account_info.clone(),
+                info: account_info,
                 storage: HashMap::default(),
             },
         )]));
@@ -1357,7 +1349,7 @@ mod storage_tests {
             AccountUpdate {
                 created: false,
                 destroyed: false,
-                info: account_info.clone(),
+                info: account_info,
                 // 0x00 => 0 => 2
                 // 0x02 => 0 => 4
                 // 0x06 => 0 => 6
@@ -1382,7 +1374,7 @@ mod storage_tests {
             AccountUpdate {
                 created: false,
                 destroyed: true,
-                info: account_info.clone(),
+                info: account_info,
                 storage: HashMap::default(),
             },
         )]));
@@ -1394,7 +1386,7 @@ mod storage_tests {
             AccountUpdate {
                 created: true,
                 destroyed: false,
-                info: account_info.clone(),
+                info: account_info,
                 storage: HashMap::default(),
             },
         )]));
@@ -1403,7 +1395,7 @@ mod storage_tests {
             AccountUpdate {
                 created: false,
                 destroyed: false,
-                info: account_info.clone(),
+                info: account_info,
                 // 0x00 => 0 => 2
                 storage: HashMap::from_iter([(
                     U256::ZERO,
@@ -1416,7 +1408,7 @@ mod storage_tests {
             AccountUpdate {
                 created: false,
                 destroyed: true,
-                info: account_info.clone(),
+                info: account_info,
                 storage: HashMap::default(),
             },
         )]));
@@ -1425,7 +1417,7 @@ mod storage_tests {
             AccountUpdate {
                 created: true,
                 destroyed: false,
-                info: account_info.clone(),
+                info: account_info,
                 storage: HashMap::default(),
             },
         )]));
@@ -1597,7 +1589,7 @@ mod storage_tests {
         init_state.commit(HashMap::from_iter([(
             address1,
             AccountUpdate {
-                info: account1.clone(),
+                info: account1,
                 created: true,
                 destroyed: false,
                 // 0x00 => 0 => 1
@@ -1620,7 +1612,7 @@ mod storage_tests {
         let mut state = StateFixture::default();
         state.insert_account_with_storage(
             address1,
-            account1.clone(),
+            account1,
             HashMap::from_iter([(U256::ZERO, U256::from(1)), (U256::from(1), U256::from(2))]),
         );
 
@@ -1630,7 +1622,7 @@ mod storage_tests {
             AccountUpdate {
                 created: false,
                 destroyed: true,
-                info: account1.clone(),
+                info: account1,
                 storage: HashMap::default(),
             },
         )]));
@@ -1640,7 +1632,7 @@ mod storage_tests {
             AccountUpdate {
                 created: true,
                 destroyed: false,
-                info: account1.clone(),
+                info: account1,
                 storage: HashMap::default(),
             },
         )]));
@@ -1797,7 +1789,7 @@ mod storage_tests {
         // destroy account 1
         let address1 = Address::with_last_byte(1);
         let account1_old = prestate.remove(&address1).unwrap();
-        state.insert_account(address1, account1_old.0.into());
+        state.insert_account(address1, account1_old.0);
         state.commit(HashMap::from_iter([(
             address1,
             AccountUpdate {
@@ -1818,7 +1810,7 @@ mod storage_tests {
         let account2_slot2_old_value = *account2.1.get(&slot2_key).unwrap();
         state.insert_account_with_storage(
             address2,
-            account2.0.into(),
+            account2.0,
             HashMap::from_iter([(slot2, account2_slot2_old_value)]),
         );
 
@@ -1829,7 +1821,7 @@ mod storage_tests {
             AccountUpdate {
                 created: false,
                 destroyed: false,
-                info: account2.0.into(),
+                info: account2.0,
                 storage: HashMap::from_iter([(
                     slot2,
                     SlotUpdate::changed(account2_slot2_old_value, account2_slot2_new_value, 0),
@@ -1842,7 +1834,7 @@ mod storage_tests {
         // change balance of account 3
         let address3 = Address::with_last_byte(3);
         let account3 = prestate.get_mut(&address3).unwrap();
-        state.insert_account(address3, account3.0.into());
+        state.insert_account(address3, account3.0);
 
         account3.0.balance = U256::from(24);
         state.commit(HashMap::from_iter([(
@@ -1850,7 +1842,7 @@ mod storage_tests {
             AccountUpdate {
                 created: false,
                 destroyed: false,
-                info: account3.0.into(),
+                info: account3.0,
                 storage: HashMap::default(),
             },
         )]));
@@ -1860,7 +1852,7 @@ mod storage_tests {
         // change nonce of account 4
         let address4 = Address::with_last_byte(4);
         let account4 = prestate.get_mut(&address4).unwrap();
-        state.insert_account(address4, account4.0.into());
+        state.insert_account(address4, account4.0);
 
         account4.0.nonce = 128;
         state.commit(HashMap::from_iter([(
@@ -1868,7 +1860,7 @@ mod storage_tests {
             AccountUpdate {
                 created: false,
                 destroyed: false,
-                info: account4.0.into(),
+                info: account4.0,
                 storage: HashMap::default(),
             },
         )]));
@@ -1884,7 +1876,7 @@ mod storage_tests {
             AccountUpdate {
                 created: true,
                 destroyed: false,
-                info: account1_new.into(),
+                info: account1_new,
                 storage: HashMap::default(),
             },
         )]));
@@ -1901,7 +1893,7 @@ mod storage_tests {
             AccountUpdate {
                 created: true,
                 destroyed: false,
-                info: account1_new.into(),
+                info: account1_new,
                 storage: HashMap::from_iter([(
                     slot20,
                     SlotUpdate::changed(U256::ZERO, account1_slot20_value, 0),
