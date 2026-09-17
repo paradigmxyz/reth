@@ -237,6 +237,10 @@ impl<T: MetadataProvider> SnapCatchUpStore for T {
         Self: BlockHashReader + MetadataWriter + StateWriter + DBProvider<Tx: DbTxMut>,
     {
         let attempt = self.authorize_snap_write(write)?;
+        let pivot = attempt.pivot();
+        if self.block_hash(pivot.number)? != Some(pivot.hash) {
+            return Err(SnapSyncError::NonCanonicalBlock { block: pivot.number, hash: pivot.hash })
+        }
         // The chain may have reorged since the list was requested.
         if self.block_hash(block.number)? != Some(block.hash) {
             return Err(SnapSyncError::NonCanonicalBlock { block: block.number, hash: block.hash })
