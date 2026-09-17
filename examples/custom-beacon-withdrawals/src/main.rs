@@ -45,8 +45,8 @@ use reth_ethereum::{
 use reth_execution_types::hashed_post_state_from_execution_state;
 use reth_trie_common::{HashedPostState, KeccakKeyHasher};
 
-pub const SYSTEM_ADDRESS: Address = address!("0xfffffffffffffffffffffffffffffffffffffffe");
-pub const WITHDRAWALS_ADDRESS: Address = address!("0x4200000000000000000000000000000000000000");
+const SYSTEM_ADDRESS: Address = address!("0xfffffffffffffffffffffffffffffffffffffffe");
+const WITHDRAWALS_ADDRESS: Address = address!("0x4200000000000000000000000000000000000000");
 
 type HashedStateHook = Arc<Mutex<Box<dyn FnMut(HashedPostState) + Send>>>;
 
@@ -274,6 +274,14 @@ pub struct CustomBlockExecutor<'a> {
     inner: EthBlockExecutor<'a, BaseEvmTypes, &'a RethReceiptBuilder>,
     withdrawals: Option<Cow<'a, [Withdrawal]>>,
     hashed_state_hook: Option<HashedStateHook>,
+}
+
+impl std::fmt::Debug for CustomBlockExecutor<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("CustomBlockExecutor")
+            .field("withdrawals", &self.withdrawals)
+            .finish_non_exhaustive()
+    }
 }
 
 impl<'a> BlockExecutor for CustomBlockExecutor<'a> {

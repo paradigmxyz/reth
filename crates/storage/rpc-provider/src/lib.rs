@@ -38,7 +38,7 @@ use reth_db_api::{
     models::StoredBlockBodyIndices,
 };
 use reth_errors::{ProviderError, ProviderResult};
-use reth_execution_types::{hashed_post_state_from_execution_state, EvmState};
+use reth_execution_types::hashed_post_state_from_execution_state;
 use reth_node_types::{
     Block, BlockBody, BlockTy, HeaderTy, NodeTypes, PrimitivesTy, ReceiptTy, TxTy,
 };

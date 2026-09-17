@@ -1,7 +1,7 @@
 //! Execution cache implementation for block processing.
 use crate::TxPoolPrewarmCacheSnapshot;
 use alloy_primitives::{
-    map::{AddressSet, DefaultHashBuilder, FbBuildHasher},
+    map::{DefaultHashBuilder, FbBuildHasher},
     Address, StorageKey, StorageValue, B256, KECCAK256_EMPTY,
 };
 use fixed_cache::{AnyRef, CacheConfig, Stats, StatsHandler};
@@ -31,7 +31,7 @@ use std::{
     },
     time::Duration,
 };
-use tracing::{debug_span, instrument, trace, warn};
+use tracing::{debug_span, instrument, warn};
 
 /// Alignment in bytes for entries in the fixed-cache.
 ///
@@ -1236,11 +1236,7 @@ impl ExecutionCache {
     #[instrument(level = "debug", target = "engine::caching", skip_all)]
     pub fn insert_state(&self, state_updates: &EvmState) {
         let _enter = debug_span!(target: "engine::tree", "state_source").entered();
-        let mut sink = ExecutionCacheInsertSink {
-            cache: self,
-            storage_wipes: AddressSet::default(),
-            cleared: false,
-        };
+        let mut sink = ExecutionCacheInsertSink { cache: self, cleared: false };
         state_updates.visit(&mut sink).expect("infallible state sink");
     }
 
@@ -1278,7 +1274,6 @@ impl ExecutionCache {
 
 struct ExecutionCacheInsertSink<'a> {
     cache: &'a ExecutionCache,
-    storage_wipes: AddressSet,
     cleared: bool,
 }
 
@@ -1303,7 +1298,13 @@ impl EvmStateChangeSink for ExecutionCacheInsertSink<'_> {
             return Ok(())
         }
 
-        self.storage_wipes.insert(address);
+        // A recreated account can have identical original and final account info, so evm2
+        // may emit only the storage wipe. Invalidate here even without an account callback.
+        self.cache.0.selfdestruct_encountered.call_once(|| {
+            warn!(target: "engine::caching", ?address, "Storage wipe reset the execution cache");
+        });
+        self.cache.clear();
+        self.cleared = true;
         Ok(())
     }
 
@@ -1321,7 +1322,7 @@ impl EvmStateChangeSink for ExecutionCacheInsertSink<'_> {
             return Ok(())
         }
 
-        if self.storage_wipes.contains(&account.address) || account.current.is_none() {
+        if account.current.is_none() {
             let had_code = account
                 .original
                 .is_some_and(|info| !info.code_hash.is_zero() && info.code_hash != KECCAK256_EMPTY);
@@ -1560,6 +1561,31 @@ mod tests {
 
         drop(cache3);
         assert!(cache.is_available());
+    }
+
+    #[test]
+    fn storage_wipe_without_account_delta_clears_cached_slots() {
+        let caches = ExecutionCache::new(1000);
+        let address = Address::repeat_byte(1);
+        let key = B256::repeat_byte(2);
+        caches.insert_account(address, Some(Account::default()));
+        caches.insert_storage(address, key, Some(U256::from(42)));
+        let mut state = EvmState::default();
+        state.storage_wipe(address).unwrap();
+        let info = ExecutionAccountInfo::default().with_nonce(1);
+        state
+            .account(ExecutionAccountChangeRef {
+                address,
+                original: Some(&info),
+                current: Some(&info),
+                created: true,
+                selfdestructed: false,
+            })
+            .unwrap();
+        assert_eq!(state.accounts().count(), 0);
+        caches.insert_state(&state);
+        assert!(caches.0.storage_cache.get(&(address, key)).is_none());
+        assert!(caches.0.account_cache.get(&address).is_none());
     }
 
     #[test]

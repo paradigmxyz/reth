@@ -5,7 +5,7 @@ use crate::block::CachedTransaction;
 use alloy_consensus::transaction::TxHashRef;
 use alloy_eip7928::bal::DecodedBal;
 use alloy_eips::BlockHashOrNumber;
-use alloy_primitives::{Address, Bytes, TxHash, B256};
+use alloy_primitives::{Bytes, TxHash, B256};
 use evm2::{
     bytecode::Bytecode,
     evm::{

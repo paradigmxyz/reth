@@ -961,14 +961,11 @@ fn compute_execution_overlay_inner<N: NodePrimitives>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_primitives::{map::HashMap, Address, U256};
-    use evm2::{
-        bytecode::Bytecode,
-        evm::{AccountChangeRef, AccountInfo, StateChangeSink},
-    };
+    use alloy_primitives::{Address, U256};
+    use evm2::bytecode::Bytecode;
     use reth_chain_state::{test_utils::TestBlockBuilder, ExecutedBlock, SparseTrie};
     use reth_ethereum_primitives::EthPrimitives;
-    use reth_execution_types::{execution_state_from_init, EvmState};
+    use reth_execution_types::execution_state_from_init;
     use reth_primitives_traits::Account;
     #[cfg(feature = "rayon")]
     use reth_tasks::WorkerPool;

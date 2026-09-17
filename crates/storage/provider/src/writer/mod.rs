@@ -769,8 +769,8 @@ mod storage_tests {
     };
     use reth_ethereum_primitives::Receipt;
     use reth_execution_types::{
-        EvmState, EvmStateChangeSink, EvmStateChangeSource, ExecutionAccountChangeRef,
-        ExecutionAccountInfo, ExecutionOutcome, ExecutionStorageChange,
+        EvmState, EvmStateChangeSink, ExecutionAccountChangeRef, ExecutionAccountInfo,
+        ExecutionOutcome, ExecutionStorageChange,
     };
     use reth_primitives_traits::{Account, StorageEntry};
     use reth_storage_api::{

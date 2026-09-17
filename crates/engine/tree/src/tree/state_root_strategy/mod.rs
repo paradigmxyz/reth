@@ -1308,9 +1308,7 @@ mod tests {
     };
     use reth_storage_overlay::{OverlayManager, OverlayStateProviderFactory};
     use reth_testing_utils::generators;
-    use reth_trie::{
-        test_utils::state_root, HashedPostState, HashedStorage, LazyTrieData, Nibbles,
-    };
+    use reth_trie::test_utils::state_root;
     use std::collections::BTreeMap;
 
     #[test]

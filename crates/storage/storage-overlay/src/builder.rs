@@ -771,7 +771,7 @@ enum AnchorForParent {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_primitives::{map::HashMap, Address, U256};
+    use alloy_primitives::{Address, U256};
     use evm2::{
         bytecode::Bytecode,
         evm::{AccountChangeRef, AccountInfo, StateChangeSink},

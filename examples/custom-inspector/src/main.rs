@@ -108,7 +108,7 @@ struct RethCliTxpoolExt {
 
 impl RethCliTxpoolExt {
     /// Check if the recipient is in the list of recipients to inspect.
-    pub fn is_match(&self, recipient: &Address) -> bool {
+    pub(crate) fn is_match(&self, recipient: &Address) -> bool {
         self.recipients.is_empty() || self.recipients.contains(recipient)
     }
 }

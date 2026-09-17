@@ -43,7 +43,7 @@ use parking_lot::RwLock;
 use reth_chain_state::ExecutedBlock;
 use reth_chainspec::{ChainInfo, ChainSpecProvider, EthChainSpec};
 use reth_db_api::{
-    cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO, DbDupCursorRW},
+    cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO},
     database::{Database, ReaderTxnTracker},
     models::{
         sharded_key, storage_sharded_key::StorageShardedKey, AccountBeforeTx, BlockNumberAddress,
@@ -67,9 +67,8 @@ use reth_stages_types::{FinishCheckpoint, StageCheckpoint, StageId};
 use reth_static_file_types::StaticFileSegment;
 use reth_storage_api::{
     BlockBodyIndicesProvider, BlockBodyReader, HistoryInfo, HistoryReader, MetadataProvider,
-    MetadataWriter, NodePrimitivesProvider, PlainStateReverts, PlainStorageChangeset,
-    PlainStorageRevert, StateChangeset, StateProvider, StateWriteConfig, StorageChangeSetReader,
-    StoragePath, StorageSettingsCache, WriteStateInput,
+    MetadataWriter, NodePrimitivesProvider, PlainStateReverts, StateChangeset, StateProvider,
+    StateWriteConfig, StorageChangeSetReader, StoragePath, StorageSettingsCache, WriteStateInput,
 };
 use reth_storage_errors::provider::{ProviderResult, StaticFileWriterError};
 use reth_storage_overlay::OverlayManager;

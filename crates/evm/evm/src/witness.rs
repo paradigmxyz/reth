@@ -4,7 +4,7 @@ use evm2::evm::CacheDB;
 use reth_primitives_traits::Account as PrimitiveAccount;
 use reth_storage_api::{HashedPostStateProvider, HeaderProvider, StateProofProvider};
 use reth_storage_errors::provider::ProviderResult;
-use reth_trie_common::{ExecutionWitnessMode, HashedPostState, HashedStorage};
+use reth_trie_common::{ExecutionWitnessMode, HashedPostState};
 
 /// Borrows finalized execution state for witness generation.
 #[derive(Debug, Clone)]
@@ -143,6 +143,7 @@ mod tests {
     use super::*;
     use alloy_primitives::{Address, U256};
     use evm2::evm::{AccountInfo, EmptyDB};
+    use reth_trie_common::HashedStorage;
 
     #[test]
     fn destroyed_account_is_recorded_for_witness() {

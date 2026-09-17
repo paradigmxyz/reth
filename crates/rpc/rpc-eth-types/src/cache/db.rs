@@ -4,7 +4,7 @@
 
 use crate::error::StateOverrideError;
 use alloy_eip7928::{bal::DecodedBal, BlockAccessIndex};
-use alloy_primitives::{Address, B256, U256};
+use alloy_primitives::U256;
 use alloy_rpc_types_eth::{state::StateOverride, BlockOverrides};
 use evm2::{
     bytecode::Bytecode,

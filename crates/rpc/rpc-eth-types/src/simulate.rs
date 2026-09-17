@@ -18,7 +18,7 @@ use evm2::{precompiles::MovePrecompileError, EvmFeatures, TxResult};
 use jsonrpsee_types::{error::INTERNAL_ERROR_CODE, ErrorObject};
 use reth_evm::{
     execute::{BlockBuilder, BlockBuilderOutcome},
-    BlockTransactionResult, Database, Evm as RethEvm, EvmEnv,
+    Database, Evm as RethEvm, EvmEnv,
 };
 use reth_primitives_traits::{
     BlockBody as _, BlockTy, NodePrimitives, Recovered, RecoveredBlock, SealedHeader,

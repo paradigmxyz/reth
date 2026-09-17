@@ -6,7 +6,6 @@ use crossbeam_channel::{Receiver, Sender};
 use reth_evm::{
     BlockExecutionError, BlockExecutor, BlockExecutorFactory, BlockExecutorFor,
     BlockValidationError, ConfigureEvm, Database, EvmEnvFor, ExecutableTxFor, ExecutionCtxFor,
-    RecoveredTx,
 };
 use std::sync::Arc;
 

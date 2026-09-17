@@ -10,7 +10,7 @@ use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_evm::BlockAssembler;
 use reth_evm::{BlockAssemblerInput, BlockExecutionError, BlockExecutorFactory};
 use reth_execution_types::BlockExecutionResult;
-use reth_primitives_traits::{logs_bloom as calculate_logs_bloom, Receipt, SignedTransaction};
+use reth_primitives_traits::{Receipt, SignedTransaction};
 
 use crate::{EthBlockEnv, EthBlockExecutionCtx, EthEvmEnvLike};
 

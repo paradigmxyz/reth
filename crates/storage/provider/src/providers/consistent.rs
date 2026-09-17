@@ -1943,7 +1943,7 @@ mod tests {
     fn test_storage_changeset_consistent_keys_plain_state() -> eyre::Result<()> {
         use alloy_primitives::U256;
         use reth_db_api::models::StorageSettings;
-        use reth_storage_api::{PlainStorageRevert, StorageChangeSetReader, StorageSettingsCache};
+        use reth_storage_api::{StorageChangeSetReader, StorageSettingsCache};
 
         let mut rng = generators::rng();
         let factory = create_test_provider_factory();
@@ -2035,7 +2035,7 @@ mod tests {
     fn test_storage_changesets_range_consistent_keys_plain_state() -> eyre::Result<()> {
         use alloy_primitives::U256;
         use reth_db_api::models::StorageSettings;
-        use reth_storage_api::{PlainStorageRevert, StorageChangeSetReader, StorageSettingsCache};
+        use reth_storage_api::{StorageChangeSetReader, StorageSettingsCache};
 
         let mut rng = generators::rng();
         let factory = create_test_provider_factory();

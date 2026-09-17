@@ -137,7 +137,7 @@ where
                     .block_executor_factory()
                     .evm_with_database(&mut db, evm_env);
                 while let Some((index, tx)) = transactions.next() {
-                    let tx_hash = *tx.tx_hash();
+                    let _tx_hash = *tx.tx_hash();
                     let tx_env = eth_api.evm_config().tx_env(tx.cloned());
 
                     let (next_inspector, res) = evm

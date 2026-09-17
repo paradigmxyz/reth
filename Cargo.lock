@@ -4005,7 +4005,6 @@ dependencies = [
 name = "example-custom-inspector"
 version = "0.0.0"
 dependencies = [
- "alloy-eips",
  "alloy-primitives",
  "clap",
  "evm2",

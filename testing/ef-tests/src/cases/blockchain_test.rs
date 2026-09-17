@@ -15,13 +15,12 @@ use reth_evm::{database::StateProviderDatabase, execute::Executor, ConfigureEvm}
 use reth_evm_ethereum::EthEvmConfig;
 use reth_primitives_traits::{ParallelBridgeBuffered, RecoveredBlock, SealedBlock};
 use reth_provider::{
-    hashed_post_state_from_execution_state,
     test_utils::create_test_provider_factory_with_chain_spec, BlockWriter, DatabaseProviderFactory,
     ExecutionOutcome, HashedPostStateProvider, HistoryWriter, OriginalValuesKnown,
     StateWriteConfig, StateWriter, StaticFileProviderFactory, StaticFileSegment, StaticFileWriter,
     StorageSettingsCache,
 };
-use reth_trie::{KeccakKeyHasher, StateRoot};
+use reth_trie::StateRoot;
 use reth_trie_db::DatabaseStateRoot;
 use std::{
     collections::BTreeMap,

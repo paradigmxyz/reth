@@ -5,10 +5,7 @@ use super::{LoadBlock, LoadPendingBlock, LoadState, LoadTransaction, SpawnBlocki
 use crate::{
     helpers::estimate::EstimateCall, FromEvmError, FullEthApiTypes, RpcBlock, RpcNodeCore,
 };
-use alloy_consensus::{
-    transaction::{Transaction, TxHashRef},
-    BlockHeader,
-};
+use alloy_consensus::{transaction::Transaction, BlockHeader};
 use alloy_eips::{eip1559::calc_effective_gas_price, eip2930::AccessListResult};
 use alloy_network::TransactionBuilder;
 use alloy_primitives::{Bytes, B256, U256};
@@ -17,7 +14,7 @@ use alloy_rpc_types_eth::{
     state::{EvmOverrides, StateOverride},
     BlockId, Bundle, EthCallResponse, StateContext, TransactionInfo,
 };
-use evm2::evm::{CacheDB, DynDatabase, StateChangeSink, StateChangeSource};
+use evm2::evm::{CacheDB, DynDatabase};
 use evm2_inspectors::{access_list::AccessListInspector, transfer::TransferInspector};
 use futures::Future;
 use reth_chainspec::{ChainSpecProvider, EthChainSpec, EthereumHardforks};
@@ -39,7 +36,7 @@ use reth_rpc_eth_types::{
     simulate::{self, EthSimulateError},
     EthApiError, RpcInvalidTransactionError, StateCacheDb,
 };
-use reth_storage_api::{BlockIdReader, ProviderTx, StateProviderBox};
+use reth_storage_api::{BlockIdReader, ProviderTx};
 use std::fmt;
 use tracing::{trace, warn};
 
@@ -469,7 +466,7 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
     {
         self.spawn_with_state_at_block(at, |this, mut db| {
             let initial = request.as_ref().access_list().cloned().unwrap_or_default();
-            let (evm_env, mut tx_env) = this.prepare_call_env(
+            let (evm_env, tx_env) = this.prepare_call_env(
                 evm_env,
                 request,
                 &mut db,

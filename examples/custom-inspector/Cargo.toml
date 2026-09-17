@@ -11,7 +11,6 @@ clap = { workspace = true, features = ["derive"] }
 evm2.workspace = true
 futures-util.workspace = true
 alloy-primitives.workspace = true
-alloy-eips.workspace = true
 
 [lints]
 workspace = true
