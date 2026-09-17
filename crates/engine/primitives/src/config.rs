@@ -9,8 +9,8 @@ pub const DEFAULT_PERSISTENCE_THRESHOLD: u64 = 50;
 /// Number of persisted blocks whose state/trie writes are masked by an in-memory suffix.
 pub const DEFAULT_NUM_STATE_MASKING_BLOCKS: u64 = 30;
 
-/// Minimum number of blocks beyond the in-memory buffer target awaiting persistence before engine
-/// API processing is stalled.
+/// The engine stalls API processing when this many blocks are awaiting persistence beyond the
+/// in-memory buffer target.
 pub const MIN_PERSISTENCE_BACKPRESSURE_THRESHOLD: u64 = 16;
 
 /// How close to the canonical head we persist blocks.
