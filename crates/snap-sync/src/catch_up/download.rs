@@ -189,7 +189,7 @@ fn pending_headers<P: HeaderProvider + MetadataProvider>(
         return Ok(Vec::new())
     }
 
-    let end = target.min(applied.number + max_blocks);
+    let end = target.min(applied.number.saturating_add(max_blocks));
     let headers = provider.sealed_headers_range(progress.next()..=end)?;
     if headers.is_empty() {
         return Err(SnapSyncError::MissingHeader { block: progress.next() })
@@ -410,6 +410,22 @@ mod tests {
         applied(&mut catch_up, write, PIVOT + 3).await;
 
         assert_eq!(*client.block_requests(), [vec![chain.block(1).hash]]);
+    }
+
+    #[tokio::test]
+    async fn an_unbounded_request_asks_for_every_block_through_the_target() {
+        let chain = chain();
+        let (factory, write) = started(&chain, &accounts());
+        let (client, mut catch_up) =
+            catch_up_with([chain.response(1, [Some(1), Some(2), Some(3)])], factory, u64::MAX);
+
+        let progress = applied(&mut catch_up, write, PIVOT + 3).await;
+
+        assert_eq!(progress.applied(), chain.block(3));
+        assert_eq!(
+            *client.block_requests(),
+            [(1..=3).map(|nth| chain.block(nth).hash).collect::<Vec<_>>()]
+        );
     }
 
     #[tokio::test]
