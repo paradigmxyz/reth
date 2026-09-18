@@ -1,5 +1,5 @@
 use crate::{database_state_frontiers, ExecutionOverlay, OverlayBuilder, StateTrieOverlay};
-use alloy_primitives::{Address, BlockHash, BlockNumber, B256, U256};
+use alloy_primitives::{keccak256, map::AddressSet, Address, BlockHash, BlockNumber, B256, U256};
 use metrics::{Counter, Histogram};
 use reth_db_api::{cursor::DbDupCursorRO, tables, transaction::DbTx, DatabaseError};
 use reth_errors::{ProviderError, ProviderResult};
@@ -768,19 +768,47 @@ where
         let mut hashed_state = reth_execution_types::hashed_post_state_from_execution_state::<
             KeccakKeyHasher,
         >(bundle_state);
-        if reth_execution_types::destroyed_accounts(bundle_state).next().is_none() {
+        let destroyed_accounts =
+            reth_execution_types::destroyed_accounts(bundle_state).collect::<AddressSet>();
+        if destroyed_accounts.is_empty() {
             return Ok(hashed_state)
         }
 
-        let overlay_state = self.build_overlay(TrieInputSorted::default(), false)?.state;
+        // Parent slots come from durable storage, pending execution, or historical changesets.
+        // Only their keys are needed: extra zero updates for slots absent at the parent are
+        // harmless, and final writes from a recreated account must take precedence.
         zero_destroyed_account_storage(
-            &HashedPostStateCursorFactory::new(
-                DatabaseHashedCursorFactory::new(self.provider().tx()),
-                overlay_state.as_ref(),
-            ),
-            reth_execution_types::destroyed_accounts(bundle_state),
+            &DatabaseHashedCursorFactory::new(self.provider().tx()),
+            destroyed_accounts.iter().copied(),
             &mut hashed_state,
         )?;
+        let (overlay, historical_fallback) = self.execution_overlay()?;
+        for address in &destroyed_accounts {
+            if let Some(slots) = overlay.storage().get(address) {
+                let storage =
+                    &mut hashed_state.storages.entry(keccak256(address)).or_default().storage;
+                for slot in slots.keys() {
+                    storage.entry(keccak256(slot.to_be_bytes::<32>())).or_insert(U256::ZERO);
+                }
+            }
+        }
+        if let Some(fallback) = historical_fallback {
+            let (_, finish) = database_state_frontiers(self.provider())?;
+            for (block_address, slot) in
+                self.provider().storage_changesets_range(fallback.block_number..=finish.number)?
+            {
+                let address = block_address.address();
+                if destroyed_accounts.contains(&address) {
+                    hashed_state
+                        .storages
+                        .entry(keccak256(address))
+                        .or_default()
+                        .storage
+                        .entry(keccak256(slot.key))
+                        .or_insert(U256::ZERO);
+                }
+            }
+        }
         Ok(hashed_state)
     }
 }
@@ -1371,5 +1399,99 @@ mod tests {
 
         assert_eq!(provider.basic_account(&address).unwrap(), Some(account));
         assert_eq!(provider.storage(address, storage_key).unwrap(), Some(storage));
+    }
+
+    #[test]
+    fn destroyed_storage_uses_execution_overlay_without_trie_data() {
+        use reth_execution_types::{EvmState, EvmStateChangeSink, ExecutionStorageChange};
+
+        for partial_frontier in [1, 3] {
+            let (factory, _) = setup_frontiers(partial_frontier, 3);
+            let address = Address::with_last_byte(1);
+            let durable_slot = U256::from(2);
+            let pending_slot = U256::from(3);
+            let rewritten_slot = U256::from(4);
+            let value = U256::from(5);
+            let provider_rw = factory.provider_rw().unwrap();
+            for slot in [durable_slot, rewritten_slot] {
+                provider_rw
+                    .tx_ref()
+                    .put::<tables::HashedStorages>(
+                        keccak256(address),
+                        reth_primitives_traits::StorageEntry {
+                            key: keccak256(slot.to_be_bytes::<32>()),
+                            value,
+                        },
+                    )
+                    .unwrap();
+            }
+            provider_rw.commit().unwrap();
+
+            let mut overlay = ExecutionOverlay::default();
+            overlay.storage_mut().entry(address).or_default().insert(pending_slot, value);
+            // No trie builder is installed: hashing must only use the execution overlay.
+            let provider = OverlayStateProvider::<_, EthPrimitives>::new_with_execution(
+                factory.provider().unwrap(),
+                Arc::new(overlay),
+                false,
+            );
+            let mut state = EvmState::default();
+            state.storage_wipe(address).unwrap();
+            state
+                .storage(ExecutionStorageChange {
+                    address,
+                    key: rewritten_slot,
+                    original: U256::ZERO,
+                    current: value,
+                })
+                .unwrap();
+
+            let hashed = provider.hashed_post_state(&state).unwrap();
+            let slots = &hashed.storages[&keccak256(address)].storage;
+            assert_eq!(slots[&keccak256(durable_slot.to_be_bytes::<32>())], U256::ZERO);
+            assert_eq!(slots[&keccak256(pending_slot.to_be_bytes::<32>())], U256::ZERO);
+            assert_eq!(slots[&keccak256(rewritten_slot.to_be_bytes::<32>())], value);
+            assert!(provider.state_trie_overlay.get().is_none());
+        }
+    }
+
+    #[test]
+    fn destroyed_storage_includes_historical_parent_slots() {
+        use reth_execution_types::{EvmState, EvmStateChangeSink, ExecutionAccountChangeRef};
+
+        let (factory, blocks) = setup_frontiers(1, 3);
+        let address = Address::with_last_byte(1);
+        let slot = B256::with_last_byte(2);
+        let provider_rw = factory.provider_rw().unwrap();
+        // This slot existed at the parent but was deleted from durable storage afterwards.
+        provider_rw
+            .tx_ref()
+            .put::<tables::StorageChangeSets>(
+                BlockNumberAddress((2, address)),
+                reth_primitives_traits::StorageEntry { key: slot, value: U256::from(5) },
+            )
+            .unwrap();
+        provider_rw.commit().unwrap();
+        let provider_factory = OverlayStateProviderFactory::<_, EthPrimitives>::new(
+            factory,
+            OverlayManager::default().overlay_builder(blocks[1].recovered_block().hash()),
+        );
+        let provider = provider_factory.database_provider_ro().unwrap();
+        let mut state = EvmState::default();
+        state
+            .account(ExecutionAccountChangeRef {
+                address,
+                original: Some(&AccountInfo::default()),
+                current: None,
+                created: false,
+                selfdestructed: true,
+            })
+            .unwrap();
+
+        let hashed = provider.hashed_post_state(&state).unwrap();
+        assert_eq!(hashed.accounts[&keccak256(address)], None);
+        assert_eq!(hashed.storages[&keccak256(address)].storage[&keccak256(slot)], U256::ZERO);
+        assert!(provider.state_trie_overlay.get().is_none());
+        assert!(provider_factory.state_trie_overlay_cache.is_empty());
     }
 }
