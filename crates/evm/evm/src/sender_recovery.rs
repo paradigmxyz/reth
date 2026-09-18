@@ -105,12 +105,12 @@ pub struct UncachedSenders(Vec<(B256, Address)>);
 
 impl UncachedSenders {
     /// Returns the number of collected senders.
-    pub fn len(&self) -> usize {
+    pub const fn len(&self) -> usize {
         self.0.len()
     }
 
     /// Returns `true` if no sender was collected.
-    pub fn is_empty(&self) -> bool {
+    pub const fn is_empty(&self) -> bool {
         self.0.is_empty()
     }
 

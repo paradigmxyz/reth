@@ -227,9 +227,7 @@ pub trait PayloadValidator<Types: PayloadTypes>: Send + Sync + Unpin + 'static {
     fn ensure_well_formed_payload_with_senders(
         &self,
         payload: Types::ExecutionData,
-        recover_senders: &mut dyn FnMut(
-            &[BlockTx<Self::Block>],
-        ) -> Result<Vec<Address>, RecoveryError>,
+        recover_senders: &mut SenderRecoveryFn<'_, Self::Block>,
     ) -> Result<RecoveredBlock<Self::Block>, NewPayloadError> {
         let sealed_block = self.convert_payload_to_block(payload)?;
         let recovered = match recover_senders(sealed_block.body().transactions()) {
@@ -288,3 +286,9 @@ pub trait PayloadValidator<Types: PayloadTypes>: Send + Sync + Unpin + 'static {
         Ok(())
     }
 }
+
+/// Recovers the senders of the given transactions, in order.
+///
+/// Passed to [`PayloadValidator::ensure_well_formed_payload_with_senders`].
+pub type SenderRecoveryFn<'a, B> =
+    dyn FnMut(&[BlockTx<B>]) -> Result<Vec<Address>, RecoveryError> + 'a;
