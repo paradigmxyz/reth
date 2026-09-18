@@ -189,7 +189,7 @@ where
                 input
                     .persist_rest_blocks()
                     .iter()
-                    .map(|block| block.recovered_block().clone())
+                    .map(|block| block.recovered_block.clone())
                     .collect(),
             )
             .map_err(reth_provider::ProviderError::from)?;

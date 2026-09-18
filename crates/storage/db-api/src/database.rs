@@ -32,7 +32,7 @@ pub trait Database: Send + Sync + Debug {
     /// Dropping the task cancels publication; `finish` is called only after commit succeeds.
     fn prepare_persistence<B: reth_primitives_traits::Block + 'static>(
         &self,
-        _blocks: Vec<reth_primitives_traits::RecoveredBlock<B>>,
+        _blocks: Vec<Arc<reth_primitives_traits::RecoveredBlock<B>>>,
     ) -> Result<Option<Box<dyn PersistenceTask>>, DatabaseError> {
         Ok(None)
     }
@@ -95,7 +95,7 @@ impl<DB: Database> Database for Arc<DB> {
 
     fn prepare_persistence<B: reth_primitives_traits::Block + 'static>(
         &self,
-        blocks: Vec<reth_primitives_traits::RecoveredBlock<B>>,
+        blocks: Vec<Arc<reth_primitives_traits::RecoveredBlock<B>>>,
     ) -> Result<Option<Box<dyn PersistenceTask>>, DatabaseError> {
         <DB as Database>::prepare_persistence(self, blocks)
     }
@@ -127,7 +127,7 @@ impl<DB: Database> Database for &DB {
 
     fn prepare_persistence<B: reth_primitives_traits::Block + 'static>(
         &self,
-        blocks: Vec<reth_primitives_traits::RecoveredBlock<B>>,
+        blocks: Vec<Arc<reth_primitives_traits::RecoveredBlock<B>>>,
     ) -> Result<Option<Box<dyn PersistenceTask>>, DatabaseError> {
         <DB as Database>::prepare_persistence(self, blocks)
     }
