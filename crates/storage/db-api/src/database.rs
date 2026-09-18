@@ -5,6 +5,12 @@ use crate::{
 };
 use std::{fmt::Debug, path::PathBuf, sync::Arc};
 
+/// Work prepared alongside persistence and published only after a successful commit.
+pub trait PersistenceTask: Send {
+    /// Wait for preparation and publish the committed state.
+    fn finish(self: Box<Self>);
+}
+
 /// Main Database trait that can open read-only and read-write transactions.
 ///
 /// Sealed trait which cannot be implemented by 3rd parties, exposed only for consumption.
@@ -22,16 +28,14 @@ pub trait Database: Send + Sync + Debug {
     #[track_caller]
     fn tx_mut(&self) -> Result<Self::TXMut, DatabaseError>;
 
-    /// Called on the persistence thread after static files and RocksDB have been
-    /// flushed, but before the database transaction becomes visible to readers.
-    /// Derived caches can prepare this view while readers still use the old one.
-    /// The commit may subsequently fail; cached data must be validated against
-    /// each reader's database view before it is served.
-    fn on_persisting(&self, _tx: &Self::TXMut) {}
-
-    /// Called after engine persistence commits its database and static files.
-    /// Implementations should return promptly and schedule expensive work asynchronously.
-    fn on_persisted(&self) {}
+    /// Starts derived state preparation from the recovered blocks before backend writes.
+    /// Dropping the task cancels publication; `finish` is called only after commit succeeds.
+    fn prepare_persistence<B: reth_primitives_traits::Block>(
+        &self,
+        _blocks: Vec<reth_primitives_traits::RecoveredBlock<B>>,
+    ) -> Result<Option<Box<dyn PersistenceTask>>, DatabaseError> {
+        Ok(None)
+    }
 
     /// Returns the path to the database directory.
     fn path(&self) -> PathBuf;
@@ -89,12 +93,11 @@ impl<DB: Database> Database for Arc<DB> {
         <DB as Database>::tx_mut(self)
     }
 
-    fn on_persisting(&self, tx: &Self::TXMut) {
-        <DB as Database>::on_persisting(self, tx)
-    }
-
-    fn on_persisted(&self) {
-        <DB as Database>::on_persisted(self)
+    fn prepare_persistence<B: reth_primitives_traits::Block>(
+        &self,
+        blocks: Vec<reth_primitives_traits::RecoveredBlock<B>>,
+    ) -> Result<Option<Box<dyn PersistenceTask>>, DatabaseError> {
+        <DB as Database>::prepare_persistence(self, blocks)
     }
 
     fn path(&self) -> PathBuf {
@@ -122,12 +125,11 @@ impl<DB: Database> Database for &DB {
         <DB as Database>::tx_mut(self)
     }
 
-    fn on_persisting(&self, tx: &Self::TXMut) {
-        <DB as Database>::on_persisting(self, tx)
-    }
-
-    fn on_persisted(&self) {
-        <DB as Database>::on_persisted(self)
+    fn prepare_persistence<B: reth_primitives_traits::Block>(
+        &self,
+        blocks: Vec<reth_primitives_traits::RecoveredBlock<B>>,
+    ) -> Result<Option<Box<dyn PersistenceTask>>, DatabaseError> {
+        <DB as Database>::prepare_persistence(self, blocks)
     }
 
     fn path(&self) -> PathBuf {
