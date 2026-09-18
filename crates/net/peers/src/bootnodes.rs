@@ -39,6 +39,12 @@ pub static HOODI_BOOTNODES: [&str; 5] = [
     "enode://81aabd7223f345e713b7f355cc76680ba8ec3a7b098f100655a467e4049113586fb5ce052a6ef90033ec62b91ed63457c87aa49dd0f1338af963b85522176db7@5.223.94.81:0?discport=30503", // nodeops-bootnode-sin-01
 ];
 
+/// Ephemery Bootnodes
+pub static EPHEMERY_BOOTNODES: [&str; 2] = [
+    "enode://50a54ecbd2175497640bcf46a25bbe9bb4fae51d7cc2a29ef4947a7ee17496cf39a699b7fe6b703ed0feb9dbaae7e44fc3827fcb7435ca9ac6de4daa4d983b3d@137.74.203.240:30303",
+    "enode://7367578e9d211512a59e2cdd2c600b8bb71199421aac9d4b0b26050098d551575684314ca8bf226930568e29507c45de1ee00ae1ca70c544b9ba8250ce1d66e1@167.235.1.185:30343",
+];
+
 /// Returns parsed mainnet nodes
 pub fn mainnet_nodes() -> Vec<NodeRecord> {
     parse_nodes(&MAINNET_BOOTNODES[..])
@@ -57,6 +63,11 @@ pub fn holesky_nodes() -> Vec<NodeRecord> {
 /// Returns parsed hoodi nodes
 pub fn hoodi_nodes() -> Vec<NodeRecord> {
     parse_nodes(&HOODI_BOOTNODES[..])
+}
+
+/// Returns parsed ephemery nodes
+pub fn ephemery_nodes() -> Vec<NodeRecord> {
+    parse_nodes(&EPHEMERY_BOOTNODES[..])
 }
 
 /// Parses all the nodes

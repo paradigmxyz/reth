@@ -16,6 +16,8 @@ mod constants;
 pub use constants::*;
 
 mod api;
+/// ephemery chain
+mod ephemery;
 /// The chain info module.
 mod info;
 /// The chain spec module.
@@ -35,6 +37,11 @@ pub use spec::{
     BaseFeeParams, BaseFeeParamsKind, ChainSpec, ChainSpecBuilder, ChainSpecProvider,
     DepositContract, ForkBaseFeeParams, DEV, HOLESKY, HOODI, MAINNET, SEPOLIA,
 };
+
+/// The Ephemery spec is only available with `std`, since its chain ID and genesis
+/// timestamp are derived from wall-clock time.
+#[cfg(feature = "std")]
+pub use spec::EPHEMERY;
 
 #[cfg(test)]
 mod tests {

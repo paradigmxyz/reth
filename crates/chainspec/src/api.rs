@@ -1,4 +1,4 @@
-use crate::{ChainSpec, DepositContract};
+use crate::{ephemery::is_ephemery_chain_id, ChainSpec, DepositContract};
 use alloc::{boxed::Box, vec::Vec};
 use alloy_chains::Chain;
 use alloy_eips::{eip1559::BaseFeeParams, eip7840::BlobParams};
@@ -57,7 +57,7 @@ pub trait EthChainSpec: Send + Sync + Unpin + Debug {
 
     /// Returns `true` if this chain contains Ethereum configuration.
     fn is_ethereum(&self) -> bool {
-        self.chain().is_ethereum()
+        self.chain().is_ethereum() || is_ephemery_chain_id(self.chain().id())
     }
 
     /// Returns the final total difficulty if the Paris hardfork is known.
