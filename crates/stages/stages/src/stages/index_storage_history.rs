@@ -893,6 +893,47 @@ mod tests {
             assert_eq!(result.iter().collect::<Vec<_>>(), (6..=10).collect::<Vec<_>>());
         }
 
+        #[tokio::test]
+        async fn prune_rebuild_retries_after_checkpoint_rollback() {
+            let db = TestStageDB::default();
+            setup_v2_storage_data(&db, 0..=10);
+            let rocksdb = db.factory.rocksdb_provider();
+            rocksdb.put::<tables::StoragesHistory>(shard(u64::MAX), &list(&[1, 2, 3])).unwrap();
+            let input = || ExecInput { target: Some(20_000), checkpoint: None };
+            let mut stage = IndexStorageHistoryStage {
+                commit_threshold: 2,
+                prune_mode: Some(PruneMode::Before(6)),
+                ..Default::default()
+            };
+
+            let provider = db.factory.database_provider_rw().unwrap();
+            let output = stage.execute(&provider, input()).unwrap();
+            assert_eq!(output, ExecOutput { checkpoint: StageCheckpoint::new(7), done: false });
+            drop(provider);
+
+            let result = rocksdb.get::<tables::StoragesHistory>(shard(u64::MAX)).unwrap().unwrap();
+            assert_eq!(result.iter().collect::<Vec<_>>(), vec![6, 7]);
+            let provider = db.factory.provider().unwrap();
+            assert!(provider.get_prune_checkpoint(PruneSegment::StorageHistory).unwrap().is_none());
+            drop(provider);
+
+            let provider = db.factory.database_provider_rw().unwrap();
+            let output = stage.execute(&provider, input()).unwrap();
+            assert_eq!(output, ExecOutput { checkpoint: StageCheckpoint::new(7), done: false });
+            provider.commit().unwrap();
+            let result = rocksdb.get::<tables::StoragesHistory>(shard(u64::MAX)).unwrap().unwrap();
+            assert_eq!(result.iter().collect::<Vec<_>>(), vec![6, 7]);
+            let provider = db.factory.provider().unwrap();
+            assert_eq!(
+                provider
+                    .get_prune_checkpoint(PruneSegment::StorageHistory)
+                    .unwrap()
+                    .unwrap()
+                    .block_number,
+                Some(5)
+            );
+        }
+
         /// Test that unwind works correctly when `storages_history_in_rocksdb` is enabled.
         #[tokio::test]
         async fn unwind_works_when_rocksdb_enabled() {
