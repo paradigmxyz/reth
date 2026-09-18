@@ -216,13 +216,13 @@ mod tests {
     };
     use alloy_eip7928::{AccountChanges, BalanceChange, BlockAccessIndex};
     use alloy_primitives::{keccak256, Address, B256, U256};
-    use reth_db_api::{tables, transaction::DbTx};
+    use reth_db_api::{cursor::DbCursorRO, tables, transaction::DbTx};
     use reth_network_p2p::{error::PeerRequestResult, snap::client::SnapResponse};
     use reth_provider::{
         test_utils::{insert_headers, MockNodeTypesWithDB},
         ProviderFactory,
     };
-    use reth_trie_common::TrieAccount;
+    use reth_trie_common::{TrieAccount, EMPTY_ROOT_HASH};
     use std::sync::Arc;
 
     type Factory = ProviderFactory<MockNodeTypesWithDB>;
@@ -323,6 +323,77 @@ mod tests {
             .unwrap()
             .unwrap()
             .balance
+    }
+
+    // The fixture accounts with `CHANGED` holding `balance`, plus `extra`.
+    fn accounts_with(
+        balance: u64,
+        extra: impl IntoIterator<Item = (B256, TrieAccount)>,
+    ) -> Vec<(B256, TrieAccount)> {
+        let mut accounts: Vec<_> = accounts().into_iter().chain(extra).collect();
+        accounts.iter_mut().find(|(key, _)| *key == keccak256(CHANGED)).unwrap().1.balance =
+            U256::from(balance);
+        accounts.sort_by_key(|(hashed_address, _)| *hashed_address);
+        accounts
+    }
+
+    // Root of the account trie the downloaded state holds, none of the fixture accounts having
+    // storage.
+    fn downloaded_root(factory: &Factory) -> B256 {
+        let provider = factory.database_provider_ro().unwrap();
+        let mut cursor = provider.tx_ref().cursor_read::<tables::HashedAccounts>().unwrap();
+        let accounts: Vec<_> = cursor
+            .walk(None)
+            .unwrap()
+            .map(|entry| {
+                let (hashed_address, account) = entry.unwrap();
+                (hashed_address, account.into_trie_account(EMPTY_ROOT_HASH))
+            })
+            .collect();
+        state_root(&accounts)
+    }
+
+    // An attempt at `chain`'s pivot holding `accounts[..served]`, proved against `accounts`.
+    fn partially_downloaded(
+        chain: &BalChain,
+        accounts: &[(B256, TrieAccount)],
+        served: usize,
+    ) -> (Factory, SnapWrite) {
+        let factory = hashed_factory();
+        insert_headers(&factory, &chain.headers);
+        let provider = factory.database_provider_rw().unwrap();
+        let write = provider.start_snap_attempt(chain.generation(state_root(accounts))).unwrap();
+        provider.start_account_coverage(write).unwrap();
+        let range =
+            verified_range(accounts, 0..served, B256::ZERO, &[B256::ZERO, accounts[served - 1].0]);
+        provider.commit_account_range(write, &range, Default::default(), Vec::new()).unwrap();
+        provider.commit().unwrap();
+        (factory, write)
+    }
+
+    // Moves the attempt to the block `nth` after the chain's pivot, whose state is `accounts`.
+    fn advance(
+        factory: &Factory,
+        write: SnapWrite,
+        chain: &BalChain,
+        nth: usize,
+        accounts: &[(B256, TrieAccount)],
+    ) -> SnapWrite {
+        let provider = factory.database_provider_rw().unwrap();
+        let generation = SnapGeneration::new(chain.block(nth), state_root(accounts));
+        let write = provider.advance_snap_pivot(write, generation).unwrap();
+        provider.commit().unwrap();
+        write
+    }
+
+    // Commits the rest of the trie from the coverage cursor, proved against `accounts`.
+    fn download_rest(factory: &Factory, write: SnapWrite, accounts: &[(B256, TrieAccount)]) {
+        let provider = factory.database_provider_rw().unwrap();
+        let origin = provider.account_coverage(write).unwrap().unwrap().next().unwrap();
+        let served = accounts.iter().position(|(key, _)| *key >= origin).unwrap()..accounts.len();
+        let range = verified_range(accounts, served, origin, &[origin, accounts.last().unwrap().0]);
+        provider.commit_account_range(write, &range, Default::default(), Vec::new()).unwrap();
+        provider.commit().unwrap();
     }
 
     #[tokio::test]
@@ -567,5 +638,65 @@ mod tests {
 
         assert_eq!(progress.applied(), chain.block(3));
         assert_eq!(balance(&factory), U256::from(30));
+    }
+
+    #[tokio::test]
+    async fn downloads_split_across_pivots_converge_on_the_latest_pivot_state() {
+        const FAR: B256 = B256::repeat_byte(0xfe);
+        let chain = chain();
+        let at = |balance| accounts_with(balance, [(FAR, account(3))]);
+        assert_eq!(at(1).last().unwrap().0, FAR);
+        // The pivot serves every account but the last.
+        let (factory, write) = partially_downloaded(&chain, &at(1), 2);
+        let (_, mut catch_up) =
+            catch_up([chain.response(1, [Some(1)]), chain.response(2, [Some(2)])], factory.clone());
+
+        let write = advance(&factory, write, &chain, 1, &at(10));
+        applied(&mut catch_up, write, PIVOT + 3).await;
+        assert_eq!(balance(&factory), U256::from(10));
+        let write = advance(&factory, write, &chain, 2, &at(20));
+
+        // A range proved against the previous root cannot complete the new one's coverage.
+        let provider = factory.database_provider_rw().unwrap();
+        let origin = provider.account_coverage(write).unwrap().unwrap().next().unwrap();
+        let stale = verified_range(&at(10), 2..3, origin, &[origin, FAR]);
+        assert!(matches!(
+            provider.commit_account_range(write, &stale, Default::default(), Vec::new()),
+            Err(SnapSyncError::RootMismatch { .. })
+        ));
+        drop(provider);
+        download_rest(&factory, write, &at(20));
+
+        // Lists stop at the latest pivot, where the downloaded state now sits.
+        let progress = applied(&mut catch_up, write, PIVOT + 3).await;
+        assert_eq!(progress.applied(), chain.block(2));
+        assert!(matches!(catch_up.next(write, PIVOT + 3).await.unwrap(), CatchUpStep::Complete));
+        assert_eq!(downloaded_root(&factory), state_root(&at(20)));
+    }
+
+    #[tokio::test]
+    async fn an_account_lists_reach_before_its_range_is_taken_from_the_new_root() {
+        let chain = chain();
+        let at = |balance| accounts_with(balance, []);
+        // Only the account before the changed one is downloaded at the pivot.
+        assert_eq!(at(1)[1].0, keccak256(CHANGED));
+        let (factory, write) = partially_downloaded(&chain, &at(1), 1);
+        let write = advance(&factory, write, &chain, 2, &at(20));
+        let (_, mut catch_up) = catch_up([chain.response(1, [Some(1), Some(2)])], factory.clone());
+
+        // The lists have no base to change yet, so they leave the account to its range.
+        let progress = applied(&mut catch_up, write, PIVOT + 3).await;
+        assert_eq!(progress.applied(), chain.block(2));
+        let provider = factory.database_provider_ro().unwrap();
+        assert_eq!(
+            provider.tx_ref().get::<tables::HashedAccounts>(keccak256(CHANGED)).unwrap(),
+            None
+        );
+        drop(provider);
+
+        download_rest(&factory, write, &at(20));
+
+        assert_eq!(balance(&factory), U256::from(20));
+        assert_eq!(downloaded_root(&factory), state_root(&at(20)));
     }
 }

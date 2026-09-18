@@ -11,7 +11,7 @@ use reth_trie_common::HashedPostState;
 /// Changes one block access list makes to the downloaded state.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct BalStateUpdate {
-    // Post-state of every entry whose account is downloaded.
+    // Post-state of every downloaded account, and slots persisted ahead of their range.
     pub(super) state: HashedPostState,
     // Final code of accounts whose code changed, keyed by code hash.
     pub(super) bytecodes: B256Map<Bytes>,
@@ -20,7 +20,7 @@ pub struct BalStateUpdate {
 }
 
 impl BalStateUpdate {
-    /// Post-state of every entry whose account is downloaded, keyed by hashed address.
+    /// Post-state of every downloaded account, and slots persisted ahead of their range.
     pub const fn state(&self) -> &HashedPostState {
         &self.state
     }
@@ -56,7 +56,7 @@ pub enum DownloadedAccount {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{test_utils::hashed_factory, AccountCoverage, SnapCatchUpStore};
+    use crate::{test_utils::hashed_factory, AccountCoverage, SnapCatchUpStore, StorageProgress};
     use alloy_consensus::{Header, TxLegacy};
     use alloy_eip7928::{
         AccountChanges, BalanceChange, BlockAccessIndex, CodeChange, NonceChange, SlotChanges,
@@ -100,7 +100,7 @@ mod tests {
         for (address, account) in accounts {
             provider.tx_ref().put::<tables::HashedAccounts>(address, account).unwrap();
         }
-        provider.block_access_list_update(coverage, bal).unwrap()
+        provider.block_access_list_update(coverage, StorageProgress::START, bal).unwrap()
     }
 
     fn apply(changes: &AccountChanges, base: DownloadedAccount) -> BalStateUpdate {
