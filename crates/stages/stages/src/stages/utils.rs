@@ -872,7 +872,10 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_utils::TestStageDB;
     use alloy_primitives::{address, b256, BlockNumber};
+    use reth_db_api::transaction::DbTxMut;
+    use reth_provider::DatabaseProviderFactory;
 
     fn list(indices: &[u64]) -> BlockNumberList {
         BlockNumberList::new(indices.iter().copied()).unwrap()
@@ -1002,5 +1005,81 @@ mod tests {
             chunks.iter().filter(|chunk| chunk.iter().any(|(addr, _)| *addr == address_b)).count(),
             1
         );
+    }
+
+    #[test]
+    fn mdbx_account_loader_merges_spilled_rows_and_reads_own_writes() {
+        let db = TestStageDB::default();
+        let address = Address::repeat_byte(1);
+        db.commit(|tx| {
+            tx.put::<tables::AccountsHistory>(ShardedKey::last(address), list(&[1, 2, 3]))?;
+            Ok(())
+        })
+        .unwrap();
+
+        let mut first = Collector::new(1, None);
+        first.insert(ShardedKey::new(address, 4), list(&[4])).unwrap();
+        first.insert(ShardedKey::new(address, 5), list(&[5])).unwrap();
+        let mut second = Collector::new(1, None);
+        second.insert(ShardedKey::new(address, 6), list(&[6])).unwrap();
+
+        let provider = db.factory.database_provider_rw().unwrap();
+        provider
+            .with_rocksdb_batch_auto_commit(|rocksdb_batch| {
+                let mut writer = EitherWriter::new_accounts_history(&provider, rocksdb_batch)?;
+                load_account_history_mdbx(first, &mut writer)
+                    .map_err(|err| ProviderError::other(Box::new(err)))?;
+                load_account_history_mdbx(second, &mut writer)
+                    .map_err(|err| ProviderError::other(Box::new(err)))?;
+                Ok(((), writer.into_raw_rocksdb_batch()))
+            })
+            .unwrap();
+        provider.commit().unwrap();
+
+        let blocks = db
+            .table::<tables::AccountsHistory>()
+            .unwrap()
+            .into_iter()
+            .find_map(|(key, list)| {
+                (key == ShardedKey::last(address)).then(|| list.iter().collect::<Vec<_>>())
+            })
+            .unwrap();
+        assert_eq!(blocks, (1..=6).collect::<Vec<_>>());
+    }
+
+    #[test]
+    fn mdbx_storage_loader_merges_spilled_rows() {
+        let db = TestStageDB::default();
+        let address = Address::repeat_byte(1);
+        let slot = B256::repeat_byte(2);
+        let last = StorageShardedKey::last(address, slot);
+        db.commit(|tx| {
+            tx.put::<tables::StoragesHistory>(last.clone(), list(&[1, 2, 3]))?;
+            Ok(())
+        })
+        .unwrap();
+
+        let mut collector = Collector::new(1, None);
+        collector.insert(StorageShardedKey::new(address, slot, 4), list(&[4])).unwrap();
+        collector.insert(StorageShardedKey::new(address, slot, 5), list(&[5])).unwrap();
+
+        let provider = db.factory.database_provider_rw().unwrap();
+        provider
+            .with_rocksdb_batch_auto_commit(|rocksdb_batch| {
+                let mut writer = EitherWriter::new_storages_history(&provider, rocksdb_batch)?;
+                load_storage_history_mdbx(collector, &mut writer)
+                    .map_err(|err| ProviderError::other(Box::new(err)))?;
+                Ok(((), writer.into_raw_rocksdb_batch()))
+            })
+            .unwrap();
+        provider.commit().unwrap();
+
+        let blocks = db
+            .table::<tables::StoragesHistory>()
+            .unwrap()
+            .into_iter()
+            .find_map(|(key, list)| (key == last).then(|| list.iter().collect::<Vec<_>>()))
+            .unwrap();
+        assert_eq!(blocks, (1..=5).collect::<Vec<_>>());
     }
 }
