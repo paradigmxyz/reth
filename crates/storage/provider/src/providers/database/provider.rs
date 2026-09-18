@@ -147,12 +147,6 @@ impl<DB: Database, N: NodeTypes + 'static> DatabaseProviderRW<DB, N> {
         self.0.commit()
     }
 
-    /// Commit with a hook after static files and RocksDB are flushed, before MDBX
-    /// becomes visible. The hook is skipped for unwind commits.
-    pub fn commit_with_hook(self, hook: impl FnOnce(&DB::TXMut)) -> ProviderResult<()> {
-        self.0.commit_with_hook(hook)
-    }
-
     /// Consume `DbTx` or `DbTxMut`.
     pub fn into_tx(self) -> <DB as Database>::TXMut {
         self.0.into_tx()
@@ -3946,12 +3940,6 @@ impl<TX: DbTx + 'static, N: NodeTypes + 'static> DBProvider for DatabaseProvider
         self.prune_modes_ref()
     }
 
-    fn commit(self) -> ProviderResult<()> {
-        self.commit_with_hook(|_| {})
-    }
-}
-
-impl<TX: DbTx + 'static, N: NodeTypes + 'static> DatabaseProvider<TX, N> {
     /// Commit database transaction, static files, and pending `RocksDB` batches.
     #[instrument(
         name = "DatabaseProvider::commit",
@@ -3959,7 +3947,7 @@ impl<TX: DbTx + 'static, N: NodeTypes + 'static> DatabaseProvider<TX, N> {
         target = "providers::db",
         skip_all
     )]
-    pub fn commit_with_hook(self, hook: impl FnOnce(&TX)) -> ProviderResult<()> {
+    fn commit(self) -> ProviderResult<()> {
         if self.static_file_provider.has_unwind_queued() || self.commit_order.is_unwind() {
             self.commit_unwind()?;
         } else {
@@ -3977,7 +3965,6 @@ impl<TX: DbTx + 'static, N: NodeTypes + 'static> DatabaseProvider<TX, N> {
             }
             timings.rocksdb = start.elapsed();
 
-            hook(&self.tx);
             let start = Instant::now();
             self.tx.commit()?;
             timings.mdbx = start.elapsed();

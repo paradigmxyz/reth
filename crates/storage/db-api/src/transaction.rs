@@ -3,7 +3,6 @@ use crate::{
     table::{DupSort, Encode, Table},
     DatabaseError,
 };
-use reth_primitives_traits::ValueWithSubKey;
 use std::fmt::Debug;
 
 /// Helper adapter type for accessing [`DbTx`] cursor.
@@ -34,21 +33,6 @@ pub trait DbTx: Debug + Send {
         &self,
         key: &<T::Key as Encode>::Encoded,
     ) -> Result<Option<T::Value>, DatabaseError>;
-    /// Gets an exact key/subkey pair without exposing cursor positioning. Backends
-    /// may override this to serve point reads without constructing a cursor.
-    fn get_by_key_subkey<T: DupSort>(
-        &self,
-        key: T::Key,
-        subkey: T::SubKey,
-    ) -> Result<Option<T::Value>, DatabaseError>
-    where
-        T::Value: ValueWithSubKey<SubKey = T::SubKey>,
-    {
-        Ok(self
-            .cursor_dup_read::<T>()?
-            .seek_by_key_subkey(key, subkey.clone())?
-            .filter(|value| value.get_subkey() == subkey))
-    }
     /// Commit for read only transaction will consume and free transaction and allows
     /// freeing of memory pages
     fn commit(self) -> Result<(), DatabaseError>;

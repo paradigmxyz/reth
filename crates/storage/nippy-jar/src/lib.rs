@@ -454,23 +454,6 @@ mod tests {
     type ColumnResults<T> = Vec<ColumnResult<T>>;
     type ColumnValues = Vec<Vec<u8>>;
 
-    #[test]
-    fn cursor_bounds_last_row_while_writer_appends() {
-        let file = tempfile::NamedTempFile::new().unwrap();
-        let mut writer = NippyJarWriter::new(NippyJar::new_without_header(1, file.path())).unwrap();
-        writer.append_column(Some(Ok(b"first"))).unwrap();
-        writer.commit().unwrap();
-        let snapshot = NippyJar::load_without_header(file.path()).unwrap();
-
-        writer.append_column(Some(Ok(b"second"))).unwrap();
-        writer.sync_all().unwrap();
-
-        let mut cursor = NippyJarCursor::new(&snapshot).unwrap();
-        assert_eq!(cursor.next_row().unwrap().unwrap()[0], b"first");
-        assert!(cursor.next_row().unwrap().is_none());
-        assert_eq!(cursor.row_by_number_with_cols(0, 1).unwrap().unwrap()[0], b"first");
-    }
-
     fn test_data(seed: Option<u64>) -> (ColumnValues, ColumnValues) {
         let value_length = 32;
         let num_rows = 100;
