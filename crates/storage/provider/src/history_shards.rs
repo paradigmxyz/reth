@@ -121,7 +121,7 @@ where
     T: ShardedHistoryTable,
     F: Fn(T::Key) -> ProviderResult<Option<BlockNumberList>> + Send + Sync,
 {
-    let parallelism = rayon::current_num_threads().min(MAX_PARALLEL_HISTORY_READ_TASKS).max(1);
+    let parallelism = rayon::current_num_threads().clamp(1, MAX_PARALLEL_HISTORY_READ_TASKS);
     if grouped.len() < MIN_PARALLEL_HISTORY_READ_KEYS || parallelism == 1 {
         return prepare_history_shard_writes_serial_vec::<T, _>(grouped, get_last)
     }
