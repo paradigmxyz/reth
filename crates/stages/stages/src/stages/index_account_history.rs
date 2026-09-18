@@ -149,9 +149,10 @@ where
             let prepared = prepare_account_history_writes(collector, provider, &self.etl_config)?;
             provider.with_rocksdb_batch_auto_commit(|rocksdb_batch| {
                 let mut writer = EitherWriter::new_accounts_history(provider, rocksdb_batch)?;
-                write_prepared_history_shards(prepared, |key, value| {
-                    writer.upsert_account_history(key, value)
-                })?;
+                write_prepared_history_shards::<tables::AccountsHistory>(
+                    prepared,
+                    |key, value| writer.upsert_account_history(key, value),
+                )?;
                 Ok(((), writer.into_raw_rocksdb_batch()))
             })?;
         } else {
