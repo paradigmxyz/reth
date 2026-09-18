@@ -118,22 +118,15 @@ impl StorageProgress {
 
     // Hands the progress of contracts past a committed range to the range continuing at `next`.
     pub(crate) fn carry_to(
-        &self,
+        mut self,
         provider: &impl MetadataWriter,
         write: SnapWrite,
         next: B256,
     ) -> Result<(), SnapSyncError> {
-        let carried = Self {
-            complete: self.complete.filter(|complete| *complete >= next),
-            partial: self
-                .partial
-                .iter()
-                .filter(|partial| partial.account >= next)
-                .copied()
-                .collect(),
-        };
-        if carried != Self::START {
-            StoredProgress::new(write, next, carried).write(provider)?;
+        self.complete = self.complete.filter(|complete| *complete >= next);
+        self.partial.retain(|partial| partial.account >= next);
+        if self != Self::START {
+            StoredProgress::new(write, next, self).write(provider)?;
         }
         Ok(())
     }
@@ -158,7 +151,7 @@ impl StorageProgress {
     //
     // A contract carried across a pivot move does not block others: the new root can hold
     // contracts before it, or no longer hold it at all.
-    fn advance(&self, chunk: &StorageChunk) -> Result<Self, SnapSyncError> {
+    fn advance(mut self, chunk: &StorageChunk) -> Result<Self, SnapSyncError> {
         let blocked = self
             .partial
             .iter()
@@ -184,21 +177,16 @@ impl StorageProgress {
         }
         // Carried contracts past this one stay resumable, those before it were skipped, so the new
         // root no longer holds them.
-        let mut partial: Vec<_> = self
-            .partial
-            .iter()
-            .filter(|partial| partial.account > chunk.account)
-            .copied()
-            .collect();
-        let complete = match chunk.next {
+        self.partial.retain(|partial| partial.account > chunk.account);
+        match chunk.next {
             Some(next) => {
                 let storage_root = Some(chunk.storage_root);
-                partial.insert(0, PartialStorage { account: chunk.account, storage_root, next });
-                self.complete
+                self.partial
+                    .insert(0, PartialStorage { account: chunk.account, storage_root, next });
             }
-            None => Some(chunk.account),
-        };
-        Ok(Self { complete, partial })
+            None => self.complete = Some(chunk.account),
+        }
+        Ok(self)
     }
 }
 
@@ -246,15 +234,14 @@ impl StoredProgress {
     }
 
     // The recorded progress, if it belongs to `write`'s attempt and the range at `origin`.
-    fn progress_for(&self, write: SnapWrite, origin: B256) -> Option<StorageProgress> {
+    fn into_progress(self, write: SnapWrite, origin: B256) -> Option<StorageProgress> {
         if self.attempt != write.attempt() || self.origin != origin {
             return None
         }
-        let progress = self.progress.clone();
         Some(if self.state_version == write.state_version() {
-            progress
+            self.progress
         } else {
-            progress.carried()
+            self.progress.carried()
         })
     }
 }
@@ -268,7 +255,7 @@ impl<T: MetadataProvider> SnapStorageStore for T {
     ) -> Result<StorageProgress, SnapSyncError> {
         self.authorize_snap_write(write)?;
         let Some(stored) = StoredProgress::read(self)? else { return Ok(StorageProgress::START) };
-        Ok(stored.progress_for(write, origin).unwrap_or(StorageProgress::START))
+        Ok(stored.into_progress(write, origin).unwrap_or(StorageProgress::START))
     }
 
     // Every check runs before the first write, so a refused chunk changes nothing.
@@ -306,8 +293,9 @@ impl<T: MetadataProvider> SnapStorageStore for T {
             .with_storages([(chunk.account, HashedStorage::from_iter(chunk.slots))])
             .into_sorted();
         self.write_hashed_state(&state)?;
-        StoredProgress::new(write, origin, progress.clone()).write(self)?;
-        Ok(progress)
+        let stored = StoredProgress::new(write, origin, progress);
+        stored.write(self)?;
+        Ok(stored.progress)
     }
 }
 
