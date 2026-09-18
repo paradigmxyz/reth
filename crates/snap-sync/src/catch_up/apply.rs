@@ -4,9 +4,10 @@
 //! pivot by applying later blocks' lists to the state downloaded so far. Each list records the
 //! final value of every field it changes, so untouched fields come from the downloaded account.
 
-use alloy_primitives::{map::B256Map, Bytes, B256};
+use alloy_eip7928::AccountChanges;
+use alloy_primitives::{keccak256, map::B256Map, Bytes, B256};
 use reth_primitives_traits::Account;
-use reth_trie_common::HashedPostState;
+use reth_trie_common::{HashedPostState, HashedStorage};
 
 /// Changes one block access list makes to the downloaded state.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -39,6 +40,14 @@ impl BalStateUpdate {
     /// entries.
     pub fn into_parts(self) -> (HashedPostState, B256Map<Bytes>, Vec<B256>) {
         (self.state, self.bytecodes, self.unresolved)
+    }
+
+    // Records the final values of the slots `changes` writes for `hashed_address`.
+    pub(super) fn insert_storage(&mut self, hashed_address: B256, changes: &AccountChanges) {
+        let storage = HashedStorage::from_iter(
+            changes.storage_post_states().map(|(slot, value)| (keccak256(B256::from(slot)), value)),
+        );
+        self.state.storages.insert(hashed_address, storage);
     }
 }
 

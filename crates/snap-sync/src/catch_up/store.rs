@@ -19,7 +19,6 @@ use reth_primitives_traits::Account;
 use reth_storage_api::{
     BlockHashReader, DBProvider, MetadataProvider, MetadataWriter, SnapAttemptId, StateWriter,
 };
-use reth_trie_common::HashedStorage;
 use serde::{Deserialize, Serialize};
 
 /// Persistence for the block access lists an attempt applies to its downloaded state.
@@ -198,10 +197,7 @@ impl<T: MetadataProvider> SnapCatchUpStore for T {
                 // persisted ahead of it may predate the change, so they follow the list.
                 DownloadedAccount::Unknown => {
                     if storage.has_slots(hashed_address) && account_changes.has_storage_changes() {
-                        update
-                            .state
-                            .storages
-                            .insert(hashed_address, storage_update(account_changes));
+                        update.insert_storage(hashed_address, account_changes);
                     }
                     update.unresolved.push(hashed_address);
                     continue
@@ -216,7 +212,7 @@ impl<T: MetadataProvider> SnapCatchUpStore for T {
             // Execution removes accounts a block leaves empty, see EIP-161.
             update.state.accounts.insert(hashed_address, (!account.is_empty()).then_some(account));
             if account_changes.has_storage_changes() {
-                update.state.storages.insert(hashed_address, storage_update(account_changes));
+                update.insert_storage(hashed_address, account_changes);
             }
             if let Some((code_hash, code)) = account_info
                 .code_hash
@@ -278,13 +274,6 @@ impl<T: MetadataProvider> SnapCatchUpStore for T {
         advanced.write(self, write.attempt())?;
         Ok(advanced)
     }
-}
-
-// Final values of the slots `changes` writes, keyed by hashed slot.
-fn storage_update(changes: &AccountChanges) -> HashedStorage {
-    HashedStorage::from_iter(
-        changes.storage_post_states().map(|(slot, value)| (keccak256(B256::from(slot)), value)),
-    )
 }
 
 #[cfg(test)]
