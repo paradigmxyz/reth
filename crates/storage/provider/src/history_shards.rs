@@ -28,7 +28,7 @@ use std::collections::BTreeMap;
 /// Maximum Rayon jobs used for one batch of committed last-shard reads.
 const MAX_PARALLEL_HISTORY_READ_TASKS: usize = 16;
 /// Small batches stay serial to avoid paying Rayon scheduling overhead.
-const MIN_PARALLEL_HISTORY_READ_KEYS: usize = MAX_PARALLEL_HISTORY_READ_TASKS * 4;
+const MIN_PARALLEL_HISTORY_READ_KEYS: usize = 8;
 
 /// A history table whose keys are sharded by highest block number.
 ///
@@ -121,12 +121,13 @@ where
     T: ShardedHistoryTable,
     F: Fn(T::Key) -> ProviderResult<Option<BlockNumberList>> + Send + Sync,
 {
-    if grouped.len() < MIN_PARALLEL_HISTORY_READ_KEYS {
+    let parallelism = rayon::current_num_threads().min(MAX_PARALLEL_HISTORY_READ_TASKS).max(1);
+    if grouped.len() < MIN_PARALLEL_HISTORY_READ_KEYS || parallelism == 1 {
         return prepare_history_shard_writes_serial_vec::<T, _>(grouped, get_last)
     }
 
     validate_grouped_keys::<T>(&grouped)?;
-    let min_len = grouped.len().div_ceil(MAX_PARALLEL_HISTORY_READ_TASKS);
+    let min_len = grouped.len().div_ceil(parallelism);
     let per_key = grouped
         .into_par_iter()
         .with_min_len(min_len)
@@ -413,24 +414,22 @@ mod tests {
 
     #[test]
     fn prepare_vector_parallel_matches_serial() {
-        let addr_a = address!("0x00000000000000000000000000000000000000aa");
-        let addr_b = address!("0x00000000000000000000000000000000000000bb");
-        let existing = HashMap::from([
-            (ShardedKey::new(addr_a, u64::MAX), list(&[1, 2])),
-            (ShardedKey::new(addr_b, u64::MAX), list(&[10])),
-        ]);
-        let grouped = vec![(addr_a, vec![3, 4]), (addr_b, vec![11])];
+        let grouped = account_groups(MIN_PARALLEL_HISTORY_READ_KEYS);
 
         let serial = prepare_history_shard_writes_serial_vec::<tables::AccountsHistory, _>(
             grouped.clone(),
-            account_map_getter(existing.clone()),
+            account_map_getter(HashMap::new()),
         )
         .unwrap();
-        let parallel = prepare_history_shard_writes_parallel_vec::<tables::AccountsHistory, _>(
-            grouped,
-            account_map_getter(existing),
-        )
-        .unwrap();
+        let pool = rayon::ThreadPoolBuilder::new().num_threads(4).build().unwrap();
+        let parallel = pool
+            .install(|| {
+                prepare_history_shard_writes_parallel_vec::<tables::AccountsHistory, _>(
+                    grouped,
+                    account_map_getter(HashMap::new()),
+                )
+            })
+            .unwrap();
 
         let serial_writes: Vec<_> =
             serial.into_writes().map(|(key, value)| (key, blocks(&value))).collect();
@@ -512,11 +511,12 @@ mod tests {
         let pool = rayon::ThreadPoolBuilder::new().num_threads(32).build().unwrap();
         let inflight = AtomicUsize::new(0);
         let max_inflight = AtomicUsize::new(0);
+        let key_count = MAX_PARALLEL_HISTORY_READ_TASKS * 2;
 
         let prepared = pool
             .install(|| {
                 prepare_history_shard_writes_parallel_vec::<tables::AccountsHistory, _>(
-                    account_groups(MIN_PARALLEL_HISTORY_READ_KEYS),
+                    account_groups(key_count),
                     |_| {
                         let current = inflight.fetch_add(1, Ordering::SeqCst) + 1;
                         max_inflight.fetch_max(current, Ordering::SeqCst);
@@ -527,7 +527,7 @@ mod tests {
                 )
             })
             .unwrap();
-        assert_eq!(prepared.into_writes().count(), MIN_PARALLEL_HISTORY_READ_KEYS);
+        assert_eq!(prepared.into_writes().count(), key_count);
 
         let max_inflight = max_inflight.load(Ordering::SeqCst);
         assert!(
@@ -538,5 +538,29 @@ mod tests {
             max_inflight <= MAX_PARALLEL_HISTORY_READ_TASKS,
             "last-shard gets exceeded the job cap: {max_inflight}"
         );
+    }
+
+    #[test]
+    fn prepare_parallel_uses_serial_path_on_single_thread_pool() {
+        let pool = rayon::ThreadPoolBuilder::new().num_threads(1).build().unwrap();
+        let inflight = AtomicUsize::new(0);
+        let max_inflight = AtomicUsize::new(0);
+
+        let prepared = pool
+            .install(|| {
+                prepare_history_shard_writes_parallel_vec::<tables::AccountsHistory, _>(
+                    account_groups(MIN_PARALLEL_HISTORY_READ_KEYS),
+                    |_| {
+                        let current = inflight.fetch_add(1, Ordering::SeqCst) + 1;
+                        max_inflight.fetch_max(current, Ordering::SeqCst);
+                        thread::sleep(Duration::from_millis(1));
+                        inflight.fetch_sub(1, Ordering::SeqCst);
+                        Ok(None)
+                    },
+                )
+            })
+            .unwrap();
+        assert_eq!(prepared.into_writes().count(), MIN_PARALLEL_HISTORY_READ_KEYS);
+        assert_eq!(max_inflight.load(Ordering::SeqCst), 1);
     }
 }
