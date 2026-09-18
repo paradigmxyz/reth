@@ -123,14 +123,13 @@ impl AccountData {
     /// Returns the account the trie leaf commits to.
     ///
     /// Default storage roots and code hashes are restored when decoding the slim body.
-    pub const fn trie_account(&self) -> alloy_rlp::Result<TrieAccount> {
-        Ok(self.body.0)
+    pub const fn trie_account(&self) -> TrieAccount {
+        self.body.0
     }
 
     /// Consumes the wire value and returns its hashed key with the decoded trie account.
-    pub fn into_trie_entry(self) -> alloy_rlp::Result<(B256, TrieAccount)> {
-        let account = self.trie_account()?;
-        Ok((self.hash, account))
+    pub const fn into_trie_entry(self) -> (B256, TrieAccount) {
+        (self.hash, self.body.0)
     }
 }
 
@@ -981,8 +980,8 @@ mod tests {
         let body = alloy_rlp::encode(encoded.body);
         assert_eq!(body, alloy_primitives::hex!("c4072a8080"));
         assert_eq!(alloy_rlp::decode_exact::<SlimAccountBody>(&body).unwrap(), encoded.body);
-        assert_eq!(encoded.trie_account().unwrap(), account);
-        assert_eq!(encoded.into_trie_entry().unwrap(), (hash, account));
+        assert_eq!(encoded.trie_account(), account);
+        assert_eq!(encoded.into_trie_entry(), (hash, account));
     }
 
     #[test]
@@ -993,7 +992,7 @@ mod tests {
         let body = alloy_rlp::encode(encoded.body);
         assert_eq!(body, alloy_rlp::encode(account));
         assert_eq!(alloy_rlp::decode_exact::<SlimAccountBody>(&body).unwrap(), encoded.body);
-        assert_eq!(encoded.trie_account().unwrap(), account);
+        assert_eq!(encoded.trie_account(), account);
     }
 
     #[test_case(1)]
