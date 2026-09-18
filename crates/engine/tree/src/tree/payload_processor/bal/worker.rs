@@ -83,6 +83,7 @@ pub(super) fn spawn_worker<'scope, Evm, Tx, Err, DB, MakeDb>(
 {
     scope.spawn(move |_| {
         let worker_result = (|| -> Result<(), BalWorkerError> {
+            let _activity = reth_trie_sparse::activity::ActivityGuard::new("bal_worker");
             // Keep the cache-filling database across executor resets so a speculative failure
             // cannot introduce an unindexed provider setup error ahead of its ordered verdict.
             let mut database = make_db(true).map_err(BalWorkerError::Setup)?;

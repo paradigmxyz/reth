@@ -42,7 +42,7 @@ use reth_execution_errors::StateProofError;
 use reth_primitives_traits::{dashmap::DashMap, FastInstant as Instant};
 use reth_provider::{DatabaseProviderROFactory, ProviderError, ProviderResult};
 use reth_storage_errors::db::DatabaseError;
-use reth_tasks::Runtime;
+use reth_tasks::{Runtime, WorkerPool};
 use reth_trie::{
     hashed_cursor::{HashedCursorFactory, HashedStorageCursor, InstrumentedHashedCursor},
     proof_v2,
@@ -159,7 +159,8 @@ impl ProofWorkerHandle {
     /// # Parameters
     /// - `runtime`: The centralized runtime used to spawn blocking worker tasks
     /// - `task_ctx`: Shared context with database view and prefix sets
-    /// - `halve_workers`: Whether to halve the worker pool size (for small blocks)
+    /// - `worker_counts`: How many workers of each pool to spawn for this block, with a minimum of
+    ///   one worker of each kind
     #[instrument(
         name = "ProofWorkerHandle::new",
         level = "debug",
@@ -169,7 +170,7 @@ impl ProofWorkerHandle {
     pub fn new<Factory>(
         runtime: &Runtime,
         task_ctx: ProofTaskCtx<Factory>,
-        halve_workers: bool,
+        worker_counts: ProofWorkerCounts,
         proof_result_tx: ProofResultSender,
     ) -> Self
     where
@@ -183,11 +184,18 @@ impl ProofWorkerHandle {
         let (account_work_tx, account_work_rx) = unbounded::<AccountWorkerJob>();
         let cached_storage_roots = Arc::<DashMap<_, _>>::default();
 
-        let divisor = if halve_workers { 2 } else { 1 };
-        let storage_worker_count =
-            runtime.proof_storage_worker_pool().current_num_threads() / divisor;
-        let account_worker_count =
-            runtime.proof_account_worker_pool().current_num_threads() / divisor;
+        let (storage_base_count, storage_overflow_count) = split_worker_count(
+            worker_counts.storage.max(1),
+            runtime.proof_storage_worker_pool(),
+            runtime.proof_storage_overflow_worker_pool(),
+        );
+        let (account_base_count, account_overflow_count) = split_worker_count(
+            worker_counts.account.max(1),
+            runtime.proof_account_worker_pool(),
+            runtime.proof_account_overflow_worker_pool(),
+        );
+        let storage_worker_count = storage_base_count + storage_overflow_count;
+        let account_worker_count = account_base_count + account_overflow_count;
 
         let storage_availability = Arc::new(AvailabilitySheet::new(storage_worker_count));
         let account_availability = Arc::new(AvailabilitySheet::new(account_worker_count));
@@ -196,105 +204,138 @@ impl ProofWorkerHandle {
             target: "trie::proof_task",
             storage_worker_count,
             account_worker_count,
-            halve_workers,
+            storage_overflow_count,
+            account_overflow_count,
             "Spawning proof worker pools"
         );
 
-        // broadcast blocks until all workers exit (channel close), so run on
-        // tokio's blocking pool.
-        let storage_rt = runtime.clone();
-        let storage_task_ctx = task_ctx.clone();
-        let storage_avail = storage_availability.clone();
-        let storage_roots = cached_storage_roots.clone();
-        let storage_result_tx = proof_result_tx.clone();
-        let storage_parent_span = tracing::Span::current();
-        runtime.spawn_blocking_named("storage-workers", move || {
-            let worker_id = AtomicUsize::new(0);
-            storage_rt.proof_storage_worker_pool().broadcast(storage_worker_count, |_| {
-                let worker_id = worker_id.fetch_add(1, Ordering::Relaxed);
-                let span = debug_span!(target: "trie::proof_task", parent: storage_parent_span.clone(), "storage_worker", ?worker_id);
-                let _guard = span.enter();
+        let spawn_storage_workers = {
+            let task_ctx = task_ctx.clone();
+            let work_rx = storage_work_rx;
+            let availability = storage_availability.clone();
+            let storage_roots = cached_storage_roots.clone();
+            let result_tx = proof_result_tx.clone();
+            let parent_span = tracing::Span::current();
+            move |pool: &WorkerPool, count: usize, first_worker_id: usize| {
+                let next_worker_id = AtomicUsize::new(first_worker_id);
+                pool.broadcast(count, |_| {
+                    let worker_id = next_worker_id.fetch_add(1, Ordering::Relaxed);
+                    let span = debug_span!(target: "trie::proof_task", parent: parent_span.clone(), "storage_worker", ?worker_id);
+                    let _guard = span.enter();
 
-                #[cfg(feature = "metrics")]
-                let metrics = ProofTaskTrieMetrics::default();
-                #[cfg(feature = "metrics")]
-                let cursor_metrics = ProofTaskCursorMetrics::new();
+                    #[cfg(feature = "metrics")]
+                    let metrics = ProofTaskTrieMetrics::default();
+                    #[cfg(feature = "metrics")]
+                    let cursor_metrics = ProofTaskCursorMetrics::new();
 
-                let worker = StorageProofWorker::new(
-                    storage_task_ctx.clone(),
-                    storage_work_rx.clone(),
-                    worker_id,
-                    storage_avail.clone(),
-                    storage_roots.clone(),
-                    #[cfg(feature = "metrics")]
-                    metrics,
-                    #[cfg(feature = "metrics")]
-                    cursor_metrics,
-                );
-                if let Err(error) = worker.run() {
-                    error!(
-                        target: "trie::proof_task",
+                    let worker = StorageProofWorker::new(
+                        task_ctx.clone(),
+                        work_rx.clone(),
                         worker_id,
-                        ?error,
-                        "Storage worker failed"
+                        availability.clone(),
+                        storage_roots.clone(),
+                        #[cfg(feature = "metrics")]
+                        metrics,
+                        #[cfg(feature = "metrics")]
+                        cursor_metrics,
                     );
-                    let _ = storage_result_tx.send(ProofResultMessage {
-                        result: Err(StateRootTaskError::ProofWorker(format!(
-                            "storage worker {worker_id}: {error}"
-                        ))),
-                        elapsed: Duration::ZERO,
-                        state: Default::default(),
-                    });
+                    if let Err(error) = worker.run() {
+                        error!(
+                            target: "trie::proof_task",
+                            worker_id,
+                            ?error,
+                            "Storage worker failed"
+                        );
+                        let _ = result_tx.send(ProofResultMessage { ready_at: Instant::now(),
+                            result: Err(StateRootTaskError::ProofWorker(format!(
+                                "storage worker {worker_id}: {error}"
+                            ))),
+                            elapsed: Duration::ZERO,
+                            state: Default::default(),
+                        });
+                    }
+                });
+            }
+        };
+
+        // Broadcast blocks until all workers exit (channel close), so run each pool on its
+        // own named blocking thread.
+        let storage_rt = runtime.clone();
+        let spawn_storage_base = spawn_storage_workers.clone();
+        runtime.spawn_blocking_named("storage-workers", move || {
+            spawn_storage_base(storage_rt.proof_storage_worker_pool(), storage_base_count, 0);
+        });
+        if storage_overflow_count > 0 {
+            let storage_rt = runtime.clone();
+            runtime.spawn_blocking_named("storage-worker2", move || {
+                if let Some(pool) = storage_rt.proof_storage_overflow_worker_pool() {
+                    spawn_storage_workers(pool, storage_overflow_count, storage_base_count);
                 }
             });
-        });
+        }
+
+        let spawn_account_workers = {
+            let work_rx = account_work_rx;
+            let availability = account_availability.clone();
+            let storage_tx = storage_work_tx.clone();
+            let result_tx = proof_result_tx;
+            let parent_span = tracing::Span::current();
+            move |pool: &WorkerPool, count: usize, first_worker_id: usize| {
+                let next_worker_id = AtomicUsize::new(first_worker_id);
+                pool.broadcast(count, |_| {
+                    let worker_id = next_worker_id.fetch_add(1, Ordering::Relaxed);
+                    let span = debug_span!(target: "trie::proof_task", parent: parent_span.clone(), "account_worker", ?worker_id);
+                    let _guard = span.enter();
+
+                    #[cfg(feature = "metrics")]
+                    let metrics = ProofTaskTrieMetrics::default();
+                    #[cfg(feature = "metrics")]
+                    let cursor_metrics = ProofTaskCursorMetrics::new();
+
+                    let worker = AccountProofWorker::new(
+                        task_ctx.clone(),
+                        work_rx.clone(),
+                        worker_id,
+                        storage_tx.clone(),
+                        availability.clone(),
+                        cached_storage_roots.clone(),
+                        #[cfg(feature = "metrics")]
+                        metrics,
+                        #[cfg(feature = "metrics")]
+                        cursor_metrics,
+                    );
+                    if let Err(error) = worker.run() {
+                        error!(
+                            target: "trie::proof_task",
+                            worker_id,
+                            ?error,
+                            "Account worker failed"
+                        );
+                        let _ = result_tx.send(ProofResultMessage { ready_at: Instant::now(),
+                            result: Err(StateRootTaskError::ProofWorker(format!(
+                                "account worker {worker_id}: {error}"
+                            ))),
+                            elapsed: Duration::ZERO,
+                            state: Default::default(),
+                        });
+                    }
+                });
+            }
+        };
 
         let account_rt = runtime.clone();
-        let account_tx = storage_work_tx.clone();
-        let account_avail = account_availability.clone();
-        let account_result_tx = proof_result_tx;
-        let account_parent_span = tracing::Span::current();
+        let spawn_account_base = spawn_account_workers.clone();
         runtime.spawn_blocking_named("account-workers", move || {
-            let worker_id = AtomicUsize::new(0);
-            account_rt.proof_account_worker_pool().broadcast(account_worker_count, |_| {
-                let worker_id = worker_id.fetch_add(1, Ordering::Relaxed);
-                let span = debug_span!(target: "trie::proof_task", parent: account_parent_span.clone(), "account_worker", ?worker_id);
-                let _guard = span.enter();
-
-                #[cfg(feature = "metrics")]
-                let metrics = ProofTaskTrieMetrics::default();
-                #[cfg(feature = "metrics")]
-                let cursor_metrics = ProofTaskCursorMetrics::new();
-
-                let worker = AccountProofWorker::new(
-                    task_ctx.clone(),
-                    account_work_rx.clone(),
-                    worker_id,
-                    account_tx.clone(),
-                    account_avail.clone(),
-                    cached_storage_roots.clone(),
-                    #[cfg(feature = "metrics")]
-                    metrics,
-                    #[cfg(feature = "metrics")]
-                    cursor_metrics,
-                );
-                if let Err(error) = worker.run() {
-                    error!(
-                        target: "trie::proof_task",
-                        worker_id,
-                        ?error,
-                        "Account worker failed"
-                    );
-                    let _ = account_result_tx.send(ProofResultMessage {
-                        result: Err(StateRootTaskError::ProofWorker(format!(
-                            "account worker {worker_id}: {error}"
-                        ))),
-                        elapsed: Duration::ZERO,
-                        state: Default::default(),
-                    });
+            spawn_account_base(account_rt.proof_account_worker_pool(), account_base_count, 0);
+        });
+        if account_overflow_count > 0 {
+            let account_rt = runtime.clone();
+            runtime.spawn_blocking_named("account-worker2", move || {
+                if let Some(pool) = account_rt.proof_account_overflow_worker_pool() {
+                    spawn_account_workers(pool, account_overflow_count, account_base_count);
                 }
             });
-        });
+        }
 
         Self {
             storage_work_tx,
@@ -344,6 +385,7 @@ impl ProofWorkerHandle {
         input: StorageProofInput,
         proof_result_sender: CrossbeamSender<StorageProofResultMessage>,
     ) -> Result<(), ProviderError> {
+        let _activity = tracing::debug_span!(target: "engine::tree::proof_activity", "storage_proof", address = ?input.hashed_address, targets = input.targets.len()).entered();
         let hashed_address = input.hashed_address;
         self.storage_work_tx
             .send(StorageWorkerJob::StorageProof { input, proof_result_sender })
@@ -378,6 +420,7 @@ impl ProofWorkerHandle {
                     input.into_proof_result_sender();
 
                 let _ = result_tx.send(ProofResultMessage {
+                    ready_at: Instant::now(),
                     result: Err(StateRootTaskError::ProofDispatch(error.clone())),
                     elapsed: start.elapsed(),
                     state,
@@ -385,6 +428,44 @@ impl ProofWorkerHandle {
 
                 error
             })
+    }
+}
+
+/// How many workers [`ProofWorkerHandle::new`] spawns for a block.
+///
+/// Worker instances are recreated for each block on persistent thread pools. Each worker opens a
+/// database transaction and trie cursors, so the caller sizes the counts per block. Counts are
+/// clamped to at least one worker of each kind and capped by the combined base and overflow
+/// capacity.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ProofWorkerCounts {
+    /// Number of storage proof workers to spawn.
+    pub storage: usize,
+    /// Number of account proof workers to spawn.
+    pub account: usize,
+}
+
+impl ProofWorkerCounts {
+    /// Creates counts for the given number of storage and account workers.
+    pub const fn new(storage: usize, account: usize) -> Self {
+        Self { storage, account }
+    }
+
+    /// Creates counts that use every thread of the base and overflow pools of both kinds.
+    pub fn full(runtime: &Runtime) -> Self {
+        let capacity = |base: &WorkerPool, overflow: Option<&WorkerPool>| {
+            base.num_threads() + overflow.map_or(0, WorkerPool::num_threads)
+        };
+        Self::new(
+            capacity(
+                runtime.proof_storage_worker_pool(),
+                runtime.proof_storage_overflow_worker_pool(),
+            ),
+            capacity(
+                runtime.proof_account_worker_pool(),
+                runtime.proof_account_overflow_worker_pool(),
+            ),
+        )
     }
 }
 
@@ -505,6 +586,8 @@ pub type ProofResultSender = CrossbeamSender<ProofResultMessage>;
 /// loop.
 #[derive(Debug)]
 pub struct ProofResultMessage {
+    /// Diagnostic timestamp immediately before result delivery.
+    pub ready_at: Instant,
     /// The proof calculation result
     pub result: Result<DecodedMultiProofV2, StateRootTaskError>,
     /// Time taken for the entire proof calculation (from dispatch to completion)
@@ -1041,6 +1124,7 @@ where
     {
         let proof_start = Instant::now();
 
+        let _activity = tracing::debug_span!(target: "engine::tree::proof_activity", "account_proof", queued_us = input.proof_result_sender.start_time.elapsed().as_micros() as u64).entered();
         let AccountMultiproofInput { targets, proof_result_sender } = input;
         let (result, value_encoder_stats) = match self.compute_v2_account_multiproof::<Provider>(
             v2_account_calculator,
@@ -1059,7 +1143,15 @@ where
         *account_proofs_processed += 1;
 
         // Send result to SparseTrieCacheTask
-        if result_tx.send(ProofResultMessage { result, elapsed: total_elapsed, state }).is_err() {
+        if result_tx
+            .send(ProofResultMessage {
+                ready_at: Instant::now(),
+                result,
+                elapsed: total_elapsed,
+                state,
+            })
+            .is_err()
+        {
             trace!(
                 target: "trie::proof_task",
                 worker_id=self.worker_id,
@@ -1078,6 +1170,19 @@ where
 
         value_encoder_stats
     }
+}
+
+/// Splits `count` workers over a base pool and the overflow pool that extends it, capped by what
+/// the pools hold.
+fn split_worker_count(
+    count: usize,
+    base: &WorkerPool,
+    overflow: Option<&WorkerPool>,
+) -> (usize, usize) {
+    let base_count = count.min(base.num_threads());
+    let overflow_count =
+        overflow.map_or(0, |pool| count.saturating_sub(base_count).min(pool.num_threads()));
+    (base_count, overflow_count)
 }
 
 /// Queues V2 storage proofs for all accounts in the targets and returns receivers.
@@ -1201,12 +1306,130 @@ mod tests {
 
         let runtime = reth_tasks::Runtime::test();
         let (proof_result_tx, _) = unbounded();
-        let proof_handle = ProofWorkerHandle::new(&runtime, ctx, false, proof_result_tx);
+        let proof_handle = ProofWorkerHandle::new(
+            &runtime,
+            ctx,
+            ProofWorkerCounts::full(&runtime),
+            proof_result_tx,
+        );
 
         // Verify handle can be cloned
         let _cloned_handle = proof_handle.clone();
 
         // Workers shut down automatically when handle is dropped
         drop(proof_handle);
+    }
+
+    /// Ensures the overflow pool is only used, and only created, for counts the base pool cannot
+    /// hold.
+    #[test]
+    fn overflow_pool_serves_counts_beyond_the_base_pool() {
+        let provider_factory =
+            create_test_provider_factory_with_chain_spec(Arc::new(ChainSpec::default()));
+        let anchor_hash = reth_db_common::init::init_genesis(&provider_factory).unwrap();
+        let factory = reth_storage_overlay::OverlayStateProviderFactory::new(
+            provider_factory,
+            reth_storage_overlay::OverlayManager::<reth_ethereum_primitives::EthPrimitives>::default()
+                .overlay_builder(anchor_hash),
+        );
+        let ctx = test_ctx(factory);
+
+        let runtime = reth_tasks::RuntimeBuilder::new(
+            reth_tasks::RuntimeConfig::default()
+                .with_rayon(reth_tasks::RayonConfig { cpu_threads: Some(2), ..Default::default() }),
+        )
+        .build()
+        .unwrap();
+        let base = runtime.proof_storage_worker_pool().num_threads();
+        assert_eq!(runtime.proof_storage_overflow_worker_pool().unwrap().num_threads(), base);
+        assert_eq!(runtime.proof_account_overflow_worker_pool().unwrap().num_threads(), base);
+
+        for counts in [
+            ProofWorkerCounts::new(0, 0),
+            ProofWorkerCounts::new(base, base),
+            ProofWorkerCounts::new(base + 1, base + 2),
+            ProofWorkerCounts::full(&runtime),
+        ] {
+            // Occupy every base thread so the partial-overflow case must complete its proofs
+            // using overflow workers. Dropping the sender releases the threads even on panic.
+            let release_base =
+                (counts.storage == base + 1).then(|| block_base_proof_workers(&runtime));
+            let (proof_result_tx, proof_result_rx) = unbounded();
+            let handle =
+                ProofWorkerHandle::new(&runtime, ctx.clone(), counts, proof_result_tx.clone());
+            assert_eq!(handle.total_storage_workers(), counts.storage.max(1));
+            assert_eq!(handle.total_account_workers(), counts.account.max(1));
+            if counts.storage <= base {
+                assert!(!runtime.proof_storage_overflow_worker_pool().unwrap().is_initialized());
+                assert!(!runtime.proof_account_overflow_worker_pool().unwrap().is_initialized());
+            }
+
+            let address = B256::ZERO;
+            let slot = ProofV2Target::new(B256::ZERO);
+            let (storage_tx, storage_rx) = unbounded();
+            handle
+                .dispatch_storage_proof(
+                    StorageProofInput::new(address, vec![slot], true),
+                    storage_tx,
+                )
+                .unwrap();
+            let storage = storage_rx.recv_timeout(Duration::from_secs(30)).unwrap().result.unwrap();
+            assert_eq!(storage.root(), Some(reth_trie::EMPTY_ROOT_HASH));
+
+            handle
+                .dispatch_account_multiproof(AccountMultiproofInput {
+                    targets: MultiProofTargetsV2 {
+                        account_targets: vec![ProofV2Target::new(address)],
+                        storage_targets: std::iter::once((address, vec![slot])).collect(),
+                    },
+                    proof_result_sender: ProofResultContext::new(
+                        proof_result_tx.clone(),
+                        HashedPostState::default(),
+                        Instant::now(),
+                    ),
+                })
+                .unwrap();
+            let proof =
+                proof_result_rx.recv_timeout(Duration::from_secs(30)).unwrap().result.unwrap();
+            assert!(proof.storage_proofs.contains_key(&address));
+
+            drop(release_base);
+            drop(handle);
+            drop(proof_result_tx);
+            // Every broadcast holds a result sender until all its workers have exited. An
+            // initialization error is a message here, rather than a successful shutdown.
+            assert!(matches!(
+                proof_result_rx.recv_timeout(Duration::from_secs(30)),
+                Err(crossbeam_channel::RecvTimeoutError::Disconnected)
+            ));
+        }
+    }
+
+    fn block_base_proof_workers(runtime: &Runtime) -> CrossbeamSender<()> {
+        let (release_tx, release_rx) = unbounded();
+        let (started_tx, started_rx) = unbounded();
+        let count = runtime.proof_storage_worker_pool().num_threads() +
+            runtime.proof_account_worker_pool().num_threads();
+        for storage in [true, false] {
+            let rt = runtime.clone();
+            let release_rx = release_rx.clone();
+            let started_tx = started_tx.clone();
+            let name = if storage { "block-storage-workers" } else { "block-account-workers" };
+            runtime.spawn_blocking_named(name, move || {
+                let pool = if storage {
+                    rt.proof_storage_worker_pool()
+                } else {
+                    rt.proof_account_worker_pool()
+                };
+                pool.broadcast(pool.num_threads(), |_| {
+                    started_tx.send(()).unwrap();
+                    let _ = release_rx.recv();
+                });
+            });
+        }
+        for _ in 0..count {
+            started_rx.recv_timeout(Duration::from_secs(30)).unwrap();
+        }
+        release_tx
     }
 }
