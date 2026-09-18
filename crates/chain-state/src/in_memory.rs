@@ -770,10 +770,17 @@ pub struct ExecutedBlock<N: NodePrimitives = EthPrimitives> {
     /// This allows deferring the computation of the trie data which can be expensive.
     /// The data can be populated asynchronously after the block was validated.
     pub trie_data: LazyTrieData,
-    /// The prepared block access list of the block, if the payload carried one.
+    /// The prepared block access list of the block, if one is available.
     ///
-    /// This carries the raw RLP (for the BAL store) together with the revm representation (for
-    /// consumers like the RPC state cache), so that neither has to be re-derived after validation.
+    /// `None` means no BAL was available when the block was constructed, not that the block
+    /// has none: only blocks the engine validated from a payload that carried a BAL have it
+    /// attached. Blocks from before the BAL fork, blocks built or loaded outside engine
+    /// validation (payload builder, persistence, tests) and downloaded blocks without a BAL
+    /// sidecar leave it unset; the BAL store is the source of truth in that case.
+    ///
+    /// When present, this carries the raw RLP (for the BAL store) together with the revm
+    /// representation (for consumers like the RPC state cache), so that neither has to be
+    /// re-derived after validation.
     pub bal: Option<Arc<DecodedRevmBal>>,
 }
 
@@ -844,13 +851,15 @@ impl<N: NodePrimitives> ExecutedBlock<N> {
         Self { recovered_block, execution_output, trie_data, bal: None }
     }
 
-    /// Attaches the prepared block access list of the block.
+    /// Attaches the prepared block access list of the block, or clears it with `None`.
     pub fn with_bal(mut self, bal: Option<Arc<DecodedRevmBal>>) -> Self {
         self.bal = bal;
         self
     }
 
-    /// Returns the prepared block access list of the block, if the payload carried one.
+    /// Returns the prepared block access list of the block, if one is available.
+    ///
+    /// `None` only means no BAL was attached to this block; see the `bal` field for details.
     #[inline]
     pub const fn bal(&self) -> Option<&Arc<DecodedRevmBal>> {
         self.bal.as_ref()

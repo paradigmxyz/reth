@@ -43,10 +43,11 @@ pub struct Chain<N: NodePrimitives = reth_ethereum_primitives::EthPrimitives> {
     trie_data: BTreeMap<BlockNumber, LazyTrieData>,
     /// Block access lists prepared during block validation, keyed by block number.
     ///
-    /// Only blocks the engine validated from a payload that carried a BAL have an entry, so
-    /// chains built from storage or received over the wire have none. Consumers that need the
-    /// BAL of an arbitrary block must read it from the BAL store. This is derived cache data
-    /// and not part of the serialized representation.
+    /// A missing entry means the BAL was not available for that block, not that the block has
+    /// none: only blocks the engine validated from a payload that carried a BAL have one, so
+    /// chains built from storage or received over the wire have no entries at all. Consumers
+    /// that need the BAL of an arbitrary block must read it from the BAL store. This is derived
+    /// cache data and not part of the serialized representation.
     #[cfg_attr(feature = "serde", serde(skip))]
     bals: BTreeMap<BlockNumber, Arc<DecodedRevmBal>>,
 }
@@ -134,11 +135,15 @@ impl<N: NodePrimitives> Chain<N> {
     }
 
     /// Get all prepared block access lists for this chain.
+    ///
+    /// Blocks without an available BAL have no entry; see the `bals` field for details.
     pub const fn bals(&self) -> &BTreeMap<BlockNumber, Arc<DecodedRevmBal>> {
         &self.bals
     }
 
-    /// Get the prepared block access list for a specific block number.
+    /// Get the prepared block access list for a specific block number, if one is available.
+    ///
+    /// `None` only means no BAL was attached for that block; see the `bals` field for details.
     pub fn bal_at(&self, block_number: BlockNumber) -> Option<&Arc<DecodedRevmBal>> {
         self.bals.get(&block_number)
     }

@@ -718,7 +718,8 @@ impl<B: Block, R: Clone> ChainChange<B, R> {
                 (Arc::clone(block), block_receipts)
             })
             .unzip();
-        // Only engine-validated blocks whose payload carried a BAL have one attached.
+        // Only engine-validated blocks whose payload carried a BAL have one attached; blocks
+        // without one are simply absent here and their BAL is fetched from the store on demand.
         let bals = chain
             .blocks()
             .iter()
