@@ -367,6 +367,18 @@ impl<Builder> WithLaunchContext<Builder> {
 }
 
 impl<DB, ChainSpec> WithLaunchContext<NodeBuilder<DB, ChainSpec>> {
+    /// Transforms the database before selecting the node's types and components.
+    pub fn map_database<D>(
+        self,
+        map: impl FnOnce(DB) -> D,
+    ) -> WithLaunchContext<NodeBuilder<D, ChainSpec>> {
+        let NodeBuilder { config, database, rocksdb_provider } = self.builder;
+        WithLaunchContext {
+            builder: NodeBuilder { config, database: map(database), rocksdb_provider },
+            task_executor: self.task_executor,
+        }
+    }
+
     /// Returns a reference to the node builder's config.
     pub const fn config(&self) -> &NodeConfig<ChainSpec> {
         self.builder.config()

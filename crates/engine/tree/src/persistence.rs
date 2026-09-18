@@ -1,6 +1,7 @@
 use crate::metrics::PersistenceMetrics;
 use alloy_eips::BlockNumHash;
 use crossbeam_channel::Sender as CrossbeamSender;
+use reth_db_api::Database;
 use reth_errors::ProviderError;
 use reth_ethereum_primitives::EthPrimitives;
 use reth_primitives_traits::{FastInstant as Instant, NodePrimitives};
@@ -210,7 +211,8 @@ where
             }
         }
 
-        provider_rw.commit()?;
+        provider_rw.commit_with_hook(|tx| self.provider.db_ref().on_persisting(tx))?;
+        self.provider.db_ref().on_persisted();
         // BALs live outside the main database and are intentionally flushed last.
         let _ = self.provider.bal_store().flush(&canonical_blocks).inspect_err(|err| {
             warn!(target: "engine::persistence", last=?last_block, ?err, "Failed to flush BAL store");

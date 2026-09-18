@@ -22,6 +22,17 @@ pub trait Database: Send + Sync + Debug {
     #[track_caller]
     fn tx_mut(&self) -> Result<Self::TXMut, DatabaseError>;
 
+    /// Called on the persistence thread after static files and RocksDB have been
+    /// flushed, but before the database transaction becomes visible to readers.
+    /// Derived caches can prepare this view while readers still use the old one.
+    /// The commit may subsequently fail; cached data must be validated against
+    /// each reader's database view before it is served.
+    fn on_persisting(&self, _tx: &Self::TXMut) {}
+
+    /// Called after engine persistence commits its database and static files.
+    /// Implementations should return promptly and schedule expensive work asynchronously.
+    fn on_persisted(&self) {}
+
     /// Returns the path to the database directory.
     fn path(&self) -> PathBuf;
 
@@ -78,6 +89,14 @@ impl<DB: Database> Database for Arc<DB> {
         <DB as Database>::tx_mut(self)
     }
 
+    fn on_persisting(&self, tx: &Self::TXMut) {
+        <DB as Database>::on_persisting(self, tx)
+    }
+
+    fn on_persisted(&self) {
+        <DB as Database>::on_persisted(self)
+    }
+
     fn path(&self) -> PathBuf {
         <DB as Database>::path(self)
     }
@@ -101,6 +120,14 @@ impl<DB: Database> Database for &DB {
 
     fn tx_mut(&self) -> Result<Self::TXMut, DatabaseError> {
         <DB as Database>::tx_mut(self)
+    }
+
+    fn on_persisting(&self, tx: &Self::TXMut) {
+        <DB as Database>::on_persisting(self, tx)
+    }
+
+    fn on_persisted(&self) {
+        <DB as Database>::on_persisted(self)
     }
 
     fn path(&self) -> PathBuf {
