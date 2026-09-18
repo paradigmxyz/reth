@@ -190,16 +190,12 @@ impl<T> ExecutionOutcome<T> {
     /// initialization parameters.
     pub fn new_init(
         state_init: EvmStateInit,
-        revert_init: RevertsInit,
+        mut revert_init: RevertsInit,
         contracts_init: impl IntoIterator<Item = (B256, Bytecode)>,
         receipts: Vec<Vec<T>>,
         first_block: BlockNumber,
         requests: Vec<Requests>,
     ) -> Self {
-        // sort reverts by block number
-        let mut reverts = revert_init.into_iter().collect::<Vec<_>>();
-        reverts.sort_unstable_by_key(|a| a.0);
-
         let mut accumulator = BlockStateAccumulator::new();
         for (address, (original, current, storage)) in state_init {
             let original = original.map(account_info_from_reth);
@@ -225,9 +221,9 @@ impl<T> ExecutionOutcome<T> {
             accumulator.bytecode(code_hash, &bytecode.into()).expect("infallible");
         }
 
-        let block_reverts = reverts
-            .into_iter()
-            .map(|(_, reverts)| BlockReverts {
+        let block_reverts = (first_block..first_block + receipts.len() as u64)
+            .map(|number| revert_init.remove(&number).unwrap_or_default())
+            .map(|reverts| BlockReverts {
                 accounts: reverts
                     .iter()
                     .filter_map(|(address, (original, _))| {
@@ -486,9 +482,14 @@ impl<T> ExecutionOutcome<T> {
         self.receipts.truncate(new_len);
         // remove requests
         self.requests.truncate(new_len);
-        // Revert last n reverts.
+        if self.block_states.is_empty() {
+            self.state =
+                state::revert_execution_state(self.state.inner(), &self.block_reverts, new_len)
+                    .into();
+        } else {
+            self.truncate_block_states(new_len);
+        }
         self.block_reverts.truncate(new_len);
-        self.truncate_block_states(new_len);
 
         true
     }
@@ -943,6 +944,142 @@ mod tests {
     use crate::execution_state_from_init;
     use alloy_consensus::TxType;
     use alloy_primitives::{bytes, Address, LogData};
+
+    #[test]
+    fn reconstructed_outcome_reverts_account_and_storage() {
+        let address = Address::repeat_byte(1);
+        let account = |nonce| Account { nonce, ..Default::default() };
+        let outcome: ExecutionOutcome = ExecutionOutcome::new_init(
+            AddressMap::from_iter([(
+                address,
+                (
+                    Some(account(0)),
+                    Some(account(0)),
+                    B256Map::from_iter([(B256::ZERO, (U256::ZERO, U256::ZERO))]),
+                ),
+            )]),
+            HashMap::from_iter([
+                (
+                    10,
+                    AddressMap::from_iter([(
+                        address,
+                        (
+                            Some(Some(account(0))),
+                            vec![StorageEntry { key: B256::ZERO, value: U256::ZERO }],
+                        ),
+                    )]),
+                ),
+                (
+                    12,
+                    AddressMap::from_iter([(
+                        address,
+                        (
+                            Some(Some(account(1))),
+                            vec![StorageEntry { key: B256::ZERO, value: U256::from(1) }],
+                        ),
+                    )]),
+                ),
+            ]),
+            [],
+            vec![vec![], vec![], vec![]],
+            10,
+            vec![],
+        );
+        let mut reverted = outcome.clone();
+        assert!(reverted.revert_to(11));
+        assert_eq!(reverted.account(&address), Some(Some(account(1))));
+        assert_eq!(reverted.storage(&address, U256::ZERO), Some(U256::from(1)));
+        let (lower, higher) = outcome.split_at(12);
+        assert_eq!(lower.unwrap().state, reverted.state);
+        assert_eq!(higher.first_block(), 12);
+        assert_eq!(higher.len(), 1);
+    }
+
+    #[test]
+    fn reconstructed_outcome_reverts_storage_wipes() {
+        let expected = multi_block_outcome_for_serde();
+        let mut actual = ExecutionOutcome::from_state_and_reverts(
+            expected.state.inner().clone(),
+            expected.block_reverts.clone(),
+            expected.receipts.clone(),
+            expected.first_block,
+            expected.requests.clone(),
+        );
+        let mut expected = expected;
+        assert!(actual.revert_to(10));
+        assert!(expected.revert_to(10));
+        assert_eq!(actual.state, expected.state);
+    }
+
+    #[test]
+    fn reconstructed_outcome_reverts_deletion_and_recreation() {
+        let address = Address::repeat_byte(2);
+        let account = |nonce| AccountInfo { nonce, ..Default::default() };
+        let mut blocks = Vec::new();
+        for (original, current, wipe, slot) in [
+            (Some(account(1)), Some(account(2)), false, Some((0, 10, 20))),
+            (Some(account(2)), Some(account(3)), true, Some((1, 0, 30))),
+            (Some(account(3)), None, false, None),
+            (None, Some(account(4)), false, Some((2, 0, 40))),
+        ] {
+            let mut block = BlockStateAccumulator::new();
+            block
+                .account(AccountChangeRef {
+                    address,
+                    original: original.as_ref(),
+                    current: current.as_ref(),
+                    created: false,
+                    selfdestructed: false,
+                })
+                .unwrap();
+            if wipe {
+                block.storage_wipe(address).unwrap();
+            }
+            if let Some((key, original, current)) = slot {
+                StateChangeSink::storage(
+                    &mut block,
+                    StorageChange {
+                        address,
+                        key: U256::from(key),
+                        original: U256::from(original),
+                        current: U256::from(current),
+                    },
+                )
+                .unwrap();
+            }
+            blocks.push(block);
+        }
+        let expected: ExecutionOutcome = ExecutionOutcome::from_block_states(
+            10,
+            blocks,
+            (0..4).map(|_| BlockExecutionResult::default()).collect(),
+        );
+        let mut actual = ExecutionOutcome::from_state_and_reverts(
+            expected.state.inner().clone(),
+            expected.block_reverts.clone(),
+            expected.receipts.clone(),
+            expected.first_block,
+            expected.requests.clone(),
+        );
+        for number in (10..=12).rev() {
+            let mut prefix = expected.clone();
+            assert!(prefix.revert_to(number));
+            assert!(actual.revert_to(number));
+            assert_eq!(
+                actual.hash_state_slow::<reth_trie_common::KeccakKeyHasher>(),
+                prefix.hash_state_slow::<reth_trie_common::KeccakKeyHasher>(),
+                "block {number}"
+            );
+            assert_eq!(actual.account(&address), prefix.account(&address));
+            for key in 0..3 {
+                assert_eq!(
+                    actual.storage(&address, U256::from(key)),
+                    prefix.storage(&address, U256::from(key)),
+                    "block {number}, slot {key}"
+                );
+            }
+        }
+    }
 
     fn outcome_with_receipts<T>(
         first_block: BlockNumber,

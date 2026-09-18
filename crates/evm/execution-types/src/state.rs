@@ -1,7 +1,7 @@
 use alloc::{collections::BTreeMap, vec::Vec};
 use alloy_consensus::constants::KECCAK_EMPTY;
 use alloy_primitives::{
-    map::{AddressMap, AddressSet, B256Set},
+    map::{AddressMap, AddressSet, B256Set, HashMap, HashSet},
     Address, B256, U256,
 };
 use core::{convert::Infallible, marker::PhantomData};
@@ -225,6 +225,107 @@ where
         Ok(()) => {}
         Err(err) => match err {},
     }
+}
+
+/// Rolls back a reconstructed aggregate whose per-block forward changes are unavailable.
+pub(crate) fn revert_execution_state(
+    state: &BlockStateAccumulator,
+    reverts: &[BlockReverts],
+    keep: usize,
+) -> BlockStateAccumulator {
+    let mut accounts = state
+        .accounts()
+        .map(|(address, delta)| (address, delta.clone()))
+        .collect::<AddressMap<_>>();
+    let mut wipes = state.storage_wipes().collect::<AddressSet>();
+    let mut originals = state
+        .storage()
+        .map(|(key, delta)| ((key.address(), key.key()), delta.original))
+        .collect::<HashMap<_, _>>();
+    let mut storage = state
+        .storage()
+        .map(|(key, delta)| ((key.address(), key.key()), delta.current))
+        .collect::<HashMap<_, _>>();
+
+    // A net-zero change is absent from the aggregate, and a wipe discards earlier slot deltas.
+    // The earliest revert supplies those original values for intermediate block states.
+    let mut seen_slots: HashSet<(Address, U256)> = HashSet::default();
+    for revert in reverts {
+        for (address, account) in &revert.accounts {
+            accounts.entry(*address).or_insert_with(|| {
+                let original = account.as_ref().map(RevertAccount::to_account_info);
+                evm2::evm::Tracked::from_parts(original.clone(), original)
+            });
+        }
+        for (address, changes) in &revert.storage {
+            for (key, value) in &changes.slots {
+                if seen_slots.insert((*address, *key)) &&
+                    let RevertToSlot::Some(value) = value
+                {
+                    if wipes.contains(address) {
+                        originals.insert((*address, *key), *value);
+                    } else {
+                        originals.entry((*address, *key)).or_insert(*value);
+                    }
+                }
+            }
+        }
+    }
+
+    for revert in reverts.iter().skip(keep).rev() {
+        for (address, changes) in &revert.storage {
+            if changes.wiped {
+                storage.retain(|(owner, _), _| owner != address);
+                if changes.previous_wipe {
+                    wipes.insert(*address);
+                } else {
+                    wipes.remove(address);
+                }
+            }
+            for (key, value) in &changes.slots {
+                match value {
+                    RevertToSlot::Some(value) => {
+                        storage.insert((*address, *key), *value);
+                    }
+                    RevertToSlot::Destroyed => {
+                        storage.remove(&(*address, *key));
+                    }
+                }
+            }
+        }
+        for (address, account) in &revert.accounts {
+            accounts.get_mut(address).expect("revert accounts were collected").current =
+                account.as_ref().map(RevertAccount::to_account_info);
+        }
+    }
+
+    let mut reverted = BlockStateAccumulator::new();
+    for (address, delta) in &accounts {
+        let Ok(()) = reverted.account(AccountChangeRef {
+            address: *address,
+            original: delta.original.as_ref(),
+            current: delta.current.as_ref(),
+            created: false,
+            selfdestructed: false,
+        });
+    }
+    for address in wipes {
+        let Ok(()) = reverted.storage_wipe(address);
+    }
+    for ((address, key), current) in storage {
+        if accounts.get(&address).is_some_and(|account| account.current.is_none()) {
+            continue;
+        }
+        let original = originals.get(&(address, key)).copied().unwrap_or_default();
+        let Ok(()) = StateChangeSink::storage(
+            &mut reverted,
+            StorageChange { address, key, original, current },
+        );
+    }
+    for (hash, code) in state.code() {
+        let Ok(()) = reverted.bytecode(*hash, code);
+    }
+    reverted
 }
 
 /// Returns an approximate state-change size for thresholding and metrics.
