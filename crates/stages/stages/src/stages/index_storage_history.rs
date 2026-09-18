@@ -1,7 +1,8 @@
 use super::{collect_history_indices, collect_storage_history_indices};
 use crate::{
     stages::utils::{
-        load_storage_history_append, prepare_storage_history_writes, write_prepared_history_shards,
+        load_storage_history_append, load_storage_history_mdbx, prepare_storage_history_writes,
+        write_prepared_history_shards,
     },
     StageCheckpoint, StageId,
 };
@@ -172,15 +173,21 @@ where
                     .map_err(|e| reth_provider::ProviderError::other(Box::new(e)))?;
                 Ok(((), writer.into_raw_rocksdb_batch()))
             })?;
-        } else {
-            let prepared =
-                prepare_storage_history_writes(collector, provider, use_rocksdb, &self.etl_config)?;
+        } else if use_rocksdb {
+            let prepared = prepare_storage_history_writes(collector, provider, &self.etl_config)?;
             provider.with_rocksdb_batch_auto_commit(|rocksdb_batch| {
                 let mut writer = EitherWriter::new_storages_history(provider, rocksdb_batch)?;
                 write_prepared_history_shards::<tables::StoragesHistory>(
                     prepared,
                     |key, value| writer.upsert_storage_history(key, value),
                 )?;
+                Ok(((), writer.into_raw_rocksdb_batch()))
+            })?;
+        } else {
+            provider.with_rocksdb_batch_auto_commit(|rocksdb_batch| {
+                let mut writer = EitherWriter::new_storages_history(provider, rocksdb_batch)?;
+                load_storage_history_mdbx(collector, &mut writer)
+                    .map_err(|e| reth_provider::ProviderError::other(Box::new(e)))?;
                 Ok(((), writer.into_raw_rocksdb_batch()))
             })?;
         }
