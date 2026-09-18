@@ -1,78 +1,25 @@
-//! Carries downloaded state forward through verified block access lists.
+//! State updates implied by verified block access lists.
 //!
 //! [EIP-8189](https://eips.ethereum.org/EIPS/eip-8189#synchronization-algorithm) advances the
 //! pivot by applying later blocks' lists to the state downloaded so far. Each list records the
 //! final value of every field it changes, so untouched fields come from the downloaded account.
 
-use crate::SnapSyncError;
-use alloy_eip7928::AccountChanges;
-use alloy_primitives::{keccak256, map::B256Map, Bytes, B256, KECCAK256_EMPTY};
+use alloy_primitives::{map::B256Map, Bytes, B256};
 use reth_primitives_traits::Account;
-use reth_trie_common::{HashedPostState, HashedStorage};
+use reth_trie_common::HashedPostState;
 
 /// Changes one block access list makes to the downloaded state.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct BalStateUpdate {
     // Post-state of every entry whose account is downloaded.
-    state: HashedPostState,
+    pub(super) state: HashedPostState,
     // Final code of accounts whose code changed, keyed by code hash.
-    bytecodes: B256Map<Bytes>,
+    pub(super) bytecodes: B256Map<Bytes>,
     // Entries left out because their account is not downloaded yet.
-    unresolved: Vec<B256>,
+    pub(super) unresolved: Vec<B256>,
 }
 
 impl BalStateUpdate {
-    /// Applies `bal` on top of the downloaded state, resolved by hashed address through `base`.
-    ///
-    /// The list must already be verified against its header.
-    pub fn from_block_access_list(
-        bal: &[AccountChanges],
-        mut base: impl FnMut(B256) -> Result<DownloadedAccount, SnapSyncError>,
-    ) -> Result<Self, SnapSyncError> {
-        let mut update = Self::default();
-        for account_changes in bal {
-            let account_info = account_changes.account_info();
-            // Read-only entries record accesses, not changes.
-            if !account_info.changes_state_root(account_changes) {
-                continue
-            }
-
-            let hashed_address = keccak256(account_changes.address());
-            let mut account = match base(hashed_address)? {
-                // Its range is downloaded against a later root, which includes this change.
-                DownloadedAccount::Unknown => {
-                    update.unresolved.push(hashed_address);
-                    continue
-                }
-                DownloadedAccount::Absent => Account::default(),
-                DownloadedAccount::Present(account) => account,
-            };
-
-            account.apply_bal_info(account_info);
-            // Stored accounts represent empty code with no code hash.
-            account.bytecode_hash = account.bytecode_hash.filter(|hash| *hash != KECCAK256_EMPTY);
-            // Execution removes accounts a block leaves empty, see EIP-161.
-            update.state.accounts.insert(hashed_address, (!account.is_empty()).then_some(account));
-            if account_changes.has_storage_changes() {
-                update.state.storages.insert(
-                    hashed_address,
-                    HashedStorage::from_iter(
-                        account_changes
-                            .storage_post_states()
-                            .map(|(slot, value)| (keccak256(B256::from(slot)), value)),
-                    ),
-                );
-            }
-            if let Some((code_hash, code)) = account_info
-                .code_hash
-                .zip(account_changes.code_post_state().filter(|code| !code.is_empty()))
-            {
-                update.bytecodes.insert(code_hash, code.clone());
-            }
-        }
-        Ok(update)
-    }
-
     /// Post-state of every entry whose account is downloaded, keyed by hashed address.
     pub const fn state(&self) -> &HashedPostState {
         &self.state
@@ -86,6 +33,12 @@ impl BalStateUpdate {
     /// Hashed addresses of entries left out because their account is not downloaded yet.
     pub fn unresolved(&self) -> &[B256] {
         &self.unresolved
+    }
+
+    /// Consumes this update into the state it writes, the code it stores and its unresolved
+    /// entries.
+    pub fn into_parts(self) -> (HashedPostState, B256Map<Bytes>, Vec<B256>) {
+        (self.state, self.bytecodes, self.unresolved)
     }
 }
 
@@ -103,9 +56,11 @@ pub enum DownloadedAccount {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::{test_utils::hashed_factory, AccountCoverage, SnapCatchUpStore};
     use alloy_consensus::{Header, TxLegacy};
     use alloy_eip7928::{
-        BalanceChange, BlockAccessIndex, CodeChange, NonceChange, SlotChanges, StorageChange,
+        AccountChanges, BalanceChange, BlockAccessIndex, CodeChange, NonceChange, SlotChanges,
+        StorageChange,
     };
     use alloy_eips::{
         eip2935::{HISTORY_STORAGE_ADDRESS, HISTORY_STORAGE_CODE},
@@ -113,16 +68,19 @@ mod tests {
         eip4895::Withdrawal,
         eip7002::{WITHDRAWAL_REQUEST_PREDEPLOY_ADDRESS, WITHDRAWAL_REQUEST_PREDEPLOY_CODE},
     };
-    use alloy_primitives::{bytes, Address, Signature, TxKind, U256};
+    use alloy_primitives::{bytes, keccak256, Address, Signature, TxKind, U256};
     use evm2::{
         bytecode::Bytecode,
         evm::{AccountInfo, CacheDB, EmptyDB},
     };
     use reth_chainspec::ChainSpecBuilder;
+    use reth_db_api::{tables, transaction::DbTxMut};
     use reth_ethereum_primitives::{Block, BlockBody, Transaction, TransactionSigned};
     use reth_evm::{execute::BlockExecutor, ConfigureEvm};
     use reth_evm_ethereum::EthEvmConfig;
     use reth_primitives_traits::{Block as _, Recovered};
+    use reth_storage_api::DatabaseProviderFactory;
+    use reth_trie_common::{HashedStorage, KeccakKeyHasher};
     use std::{collections::BTreeMap, sync::Arc};
 
     const ACCOUNT: Address = Address::repeat_byte(0xaa);
@@ -132,18 +90,37 @@ mod tests {
         BlockAccessIndex::new(value)
     }
 
+    fn state_update(
+        bal: &[AccountChanges],
+        coverage: AccountCoverage,
+        accounts: impl IntoIterator<Item = (B256, Account)>,
+    ) -> BalStateUpdate {
+        let factory = hashed_factory();
+        let provider = factory.database_provider_rw().unwrap();
+        for (address, account) in accounts {
+            provider.tx_ref().put::<tables::HashedAccounts>(address, account).unwrap();
+        }
+        provider.block_access_list_update(coverage, bal).unwrap()
+    }
+
     fn apply(changes: &AccountChanges, base: DownloadedAccount) -> BalStateUpdate {
-        BalStateUpdate::from_block_access_list(std::slice::from_ref(changes), |_| Ok(base)).unwrap()
+        let (coverage, account) = match base {
+            DownloadedAccount::Unknown => (AccountCoverage::START, None),
+            DownloadedAccount::Absent => (AccountCoverage::COMPLETE, None),
+            DownloadedAccount::Present(account) => (AccountCoverage::COMPLETE, Some(account)),
+        };
+        state_update(
+            std::slice::from_ref(changes),
+            coverage,
+            account.map(|account| (keccak256(changes.address()), account)),
+        )
     }
 
     #[test]
     fn read_only_entries_write_nothing() {
         let changes = AccountChanges::new(ACCOUNT).with_storage_read(U256::from(1));
 
-        let update = BalStateUpdate::from_block_access_list(&[changes], |_| {
-            panic!("read-only entries need no downloaded account")
-        })
-        .unwrap();
+        let update = apply(&changes, DownloadedAccount::Unknown);
 
         assert_eq!(update, BalStateUpdate::default());
     }
@@ -153,10 +130,7 @@ mod tests {
         let changes = AccountChanges::new(ACCOUNT)
             .with_storage_change(SlotChanges::new(U256::from(1), vec![]));
 
-        let update = BalStateUpdate::from_block_access_list(&[changes], |_| {
-            panic!("empty slot entries need no downloaded account")
-        })
-        .unwrap();
+        let update = apply(&changes, DownloadedAccount::Unknown);
 
         assert_eq!(update, BalStateUpdate::default());
     }
@@ -427,15 +401,13 @@ mod tests {
         let (output, bal) = executor.finish_with_block_access_list().unwrap();
         let bal = bal.unwrap();
 
-        let update = BalStateUpdate::from_block_access_list(&bal, |hashed_address| {
-            Ok(pre
-                .0
-                .get(&hashed_address)
-                .map_or(DownloadedAccount::Absent, |account| DownloadedAccount::Present(*account)))
-        })
-        .unwrap();
+        let update = state_update(
+            &bal,
+            AccountCoverage::COMPLETE,
+            pre.0.iter().map(|(address, account)| (*address, *account)),
+        );
         let executed = reth_execution_types::hashed_post_state_from_execution_state::<
-            reth_trie_common::KeccakKeyHasher,
+            KeccakKeyHasher,
         >(output.state.inner());
 
         let post = fold(pre.clone(), &update.state);
