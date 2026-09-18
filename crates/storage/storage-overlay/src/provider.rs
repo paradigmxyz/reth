@@ -1437,14 +1437,16 @@ mod tests {
             );
             let mut state = EvmState::default();
             state.storage_wipe(address).unwrap();
-            state
-                .storage(ExecutionStorageChange {
+            EvmStateChangeSink::storage(
+                &mut state,
+                ExecutionStorageChange {
                     address,
                     key: rewritten_slot,
                     original: U256::ZERO,
                     current: value,
-                })
-                .unwrap();
+                },
+            )
+            .unwrap();
 
             let hashed = provider.hashed_post_state(&state).unwrap();
             let slots = &hashed.storages[&keccak256(address)].storage;
