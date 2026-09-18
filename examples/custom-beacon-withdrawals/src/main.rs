@@ -10,8 +10,8 @@ use std::{
 };
 
 use alloy_consensus::Header;
-use alloy_eips::{eip2718::Decodable2718, eip4895::Withdrawal};
-use alloy_primitives::{address, Address, Bytes};
+use alloy_eips::eip4895::Withdrawal;
+use alloy_primitives::{address, Address};
 use alloy_sol_types::{sol, SolCall};
 use evm2::{
     evm::{
@@ -30,7 +30,7 @@ use reth_ethereum::{
             NextBlockEnvAttributes,
         },
         EthBlockAssembler, EthBlockExecutionCtx, EthBlockExecutor, EthBlockExecutorFactory,
-        EthEvmConfig, EthEvmEnv, ExecutableRecoveredTx, RethEvmFactory, RethReceiptBuilder,
+        EthEvmConfig, EthEvmEnv, RethEvmFactory, RethReceiptBuilder,
     },
     node::{
         api::{FullNodeTypes, NodeTypes},
@@ -38,7 +38,7 @@ use reth_ethereum::{
         node::EthereumAddOns,
         EthereumNode,
     },
-    primitives::{SealedBlock, SealedHeader, SignedTransaction},
+    primitives::{SealedBlock, SealedHeader},
     rpc::types::engine::ExecutionData,
     Block, EthPrimitives, Receipt, TransactionSigned,
 };
@@ -191,18 +191,7 @@ impl ConfigureEngineEvm<ExecutionData> for CustomEvmConfig {
         &self,
         payload: &ExecutionData,
     ) -> Result<impl ExecutableTxIterator<Self>, Self::Error> {
-        let txs = payload.payload.transactions().clone();
-        let convert = |tx: Bytes| -> Result<_, std::io::Error> {
-            let tx = TransactionSigned::decode_2718_exact(tx.as_ref()).map_err(|err| {
-                std::io::Error::other(format!("failed to decode transaction: {err:?}"))
-            })?;
-            let signer = tx.try_recover().map_err(|err| {
-                std::io::Error::other(format!("failed to recover transaction signer: {err:?}"))
-            })?;
-            Ok(ExecutableRecoveredTx::new(tx.with_signer(signer)))
-        };
-
-        Ok((txs, convert))
+        self.inner.tx_iterator_for_payload(payload)
     }
 }
 

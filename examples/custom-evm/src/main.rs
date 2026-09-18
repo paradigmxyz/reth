@@ -46,10 +46,8 @@ mod config;
 mod factory;
 mod opcode;
 mod tx;
-mod wire;
 
 use tx::{CustomEnvelope, ExecuteCodeTx};
-use wire::{into_evm_transaction, recover_wire_transaction, SignedCustomTransaction, WireTx};
 
 #[tokio::main]
 async fn main() -> eyre::Result<()> {
@@ -57,7 +55,6 @@ async fn main() -> eyre::Result<()> {
     l1_blocknumber_opcode()?;
     custom_precompile()?;
     custom_transaction()?;
-    custom_wire_transaction()?;
     mainnet_fallback()?;
     launch_node().await
 }
@@ -186,32 +183,6 @@ fn mainnet_fallback() -> HandlerResult<()> {
     assert_eq!(result.stop, InstrStop::InvalidOpcode);
     assert!(!result.status);
     println!("mainnet fallback: custom opcode remains invalid");
-    Ok(())
-}
-
-fn custom_wire_transaction() -> HandlerResult<()> {
-    let wire = SignedCustomTransaction::new_unhashed(
-        WireTx {
-            chain_id: 1,
-            nonce: 0,
-            gas_limit: 100_000,
-            max_fee_per_gas: 10,
-            max_priority_fee_per_gas: 1,
-            target: Address::from([0xcc; 20]),
-            code: Bytes::from_static(&[op::STOP]),
-        },
-        alloy_primitives::Signature::new(U256::from(1), U256::from(2), false),
-    );
-    let encoded = alloy_eips::Encodable2718::encoded_2718(&wire);
-    let decoded = alloy_eips::Decodable2718::decode_2718_exact(&encoded).unwrap();
-    let recovered = recover_wire_transaction(decoded).unwrap();
-    let caller = recovered.signer();
-    let evm_tx = into_evm_transaction(recovered);
-    assert_eq!(evm_tx.signer(), caller);
-    let CustomEnvelope::ExecuteCode(tx) = evm_tx.inner();
-    assert_eq!(tx.target, Address::from([0xcc; 20]));
-    assert_eq!(tx.code, Bytes::from_static(&[op::STOP]));
-    println!("custom wire transaction: type=0x{:02x} roundtrip=true", WireTx::tx_type());
     Ok(())
 }
 
