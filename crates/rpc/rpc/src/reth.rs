@@ -12,7 +12,7 @@ use reth_chain_state::{
 };
 use reth_errors::{RethError, RethResult};
 use reth_evm::{execute::Executor, ConfigureEvm};
-use reth_execution_types::ExecutionOutcome;
+use reth_execution_types::{Chain, ExecutionOutcome};
 use reth_primitives_traits::{NodePrimitives, SealedHeader};
 use reth_rpc_api::{RethApiServer, RethJitAction};
 use reth_rpc_eth_types::{EthApiError, EthResult};
@@ -325,7 +325,7 @@ async fn finalized_chain_notifications<N>(
 ) where
     N: NodePrimitives,
 {
-    let mut buffered: Vec<CanonStateNotification<N>> = Vec::new();
+    let mut buffer = FinalizedNotificationBuffer::default();
 
     loop {
         tokio::select! {
@@ -334,34 +334,15 @@ async fn finalized_chain_notifications<N>(
             }
             maybe_canon = canon_stream.next() => {
                 let Some(notification) = maybe_canon else { break };
-                match &notification {
-                    CanonStateNotification::Commit { .. } => {
-                        buffered.push(notification);
-                    }
-                    CanonStateNotification::Reorg { .. } => {
-                        buffered.clear();
-                    }
-                }
+                buffer.on_canonical_state(notification);
             }
             maybe_finalized = finalized_stream.next() => {
                 let Some(finalized_header) = maybe_finalized else { break };
-                let finalized_num = finalized_header.number();
-
-                let mut committed = Vec::new();
-                buffered.retain(|n| {
-                    if *n.committed().range().end() <= finalized_num {
-                        committed.push(n.clone());
-                        false
-                    } else {
-                        true
-                    }
-                });
+                let committed = buffer.on_finalized(finalized_header.number());
 
                 if committed.is_empty() {
                     continue;
                 }
-
-                committed.sort_by_key(|n| *n.committed().range().start());
 
                 let msg = match SubscriptionMessage::new(
                     sink.method_name(),
@@ -380,6 +361,76 @@ async fn finalized_chain_notifications<N>(
             }
         }
     }
+}
+
+/// Holds canonical chain segments that have been committed but not finalized yet.
+#[derive(Debug)]
+struct FinalizedNotificationBuffer<N: NodePrimitives> {
+    buffered: Vec<CanonStateNotification<N>>,
+}
+
+impl<N: NodePrimitives> Default for FinalizedNotificationBuffer<N> {
+    fn default() -> Self {
+        Self { buffered: Vec::new() }
+    }
+}
+
+impl<N: NodePrimitives> FinalizedNotificationBuffer<N> {
+    /// Records a canonical state change.
+    ///
+    /// A reorg only invalidates the buffered blocks it reverted; everything below the fork point
+    /// stays canonical and is still awaiting finalization. The blocks committed by the reorg are
+    /// buffered like any other commit.
+    fn on_canonical_state(&mut self, notification: CanonStateNotification<N>) {
+        match notification {
+            CanonStateNotification::Commit { .. } => self.buffered.push(notification),
+            CanonStateNotification::Reorg { old, new } => {
+                let fork = *old.range().start();
+                self.buffered.retain_mut(|buffered| {
+                    let range = buffered.committed().range();
+                    if *range.end() < fork {
+                        return true
+                    }
+                    if *range.start() >= fork {
+                        return false
+                    }
+                    *buffered = CanonStateNotification::Commit {
+                        new: Arc::new(truncate_chain(&buffered.committed(), fork)),
+                    };
+                    true
+                });
+                self.buffered.push(CanonStateNotification::Commit { new });
+            }
+        }
+    }
+
+    /// Drains all buffered segments that are fully covered by the given finalized block number,
+    /// ordered by block number.
+    fn on_finalized(&mut self, finalized: u64) -> Vec<CanonStateNotification<N>> {
+        let mut committed = Vec::new();
+        self.buffered.retain(|n| {
+            if *n.committed().range().end() <= finalized {
+                committed.push(n.clone());
+                false
+            } else {
+                true
+            }
+        });
+        committed.sort_by_key(|n| *n.committed().range().start());
+        committed
+    }
+}
+
+/// Returns the part of the chain below the given block number.
+fn truncate_chain<N: NodePrimitives>(chain: &Chain<N>, below: u64) -> Chain<N> {
+    let (blocks, mut execution_outcome, mut trie_data) = chain.clone().into_inner();
+    execution_outcome.revert_to(below - 1);
+    trie_data.split_off(&below);
+    Chain::new(
+        blocks.into_blocks().filter(|b| b.header().number() < below),
+        execution_outcome,
+        trie_data,
+    )
 }
 
 impl<Provider, EvmConfig> std::fmt::Debug for RethApi<Provider, EvmConfig> {
@@ -403,4 +454,93 @@ struct RethApiInner<Provider, EvmConfig> {
     blocking_task_guard: BlockingTaskGuard,
     /// The type that can spawn tasks which would otherwise block.
     task_spawner: Runtime,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use alloy_primitives::B256;
+    use reth_ethereum_primitives::EthPrimitives;
+    use reth_testing_utils::generators::{self, BlockParams};
+    use std::{collections::BTreeMap, ops::RangeInclusive};
+
+    fn chain(range: RangeInclusive<u64>, parent: B256) -> Arc<Chain<EthPrimitives>> {
+        let mut rng = generators::rng();
+        let first_block = *range.start();
+        let mut parent = parent;
+        let blocks = range.map(|number| {
+            let block = generators::random_block(
+                &mut rng,
+                number,
+                BlockParams { parent: Some(parent), tx_count: Some(0), ..Default::default() },
+            );
+            parent = block.hash();
+            block.try_recover().unwrap()
+        });
+        Arc::new(Chain::new(
+            blocks,
+            ExecutionOutcome { first_block, ..Default::default() },
+            BTreeMap::new(),
+        ))
+    }
+
+    fn hashes(notifications: &[CanonStateNotification<EthPrimitives>]) -> Vec<(u64, B256)> {
+        notifications
+            .iter()
+            .flat_map(|n| {
+                n.committed().blocks_iter().map(|b| (b.number(), b.hash())).collect::<Vec<_>>()
+            })
+            .collect()
+    }
+
+    #[test]
+    fn finalized_buffer_keeps_unreverted_blocks_on_reorg() {
+        let mut buffer = FinalizedNotificationBuffer::<EthPrimitives>::default();
+
+        let first = chain(1..=3, B256::ZERO);
+        let second = chain(4..=6, first.tip().hash());
+        buffer.on_canonical_state(CanonStateNotification::Commit { new: first.clone() });
+        buffer.on_canonical_state(CanonStateNotification::Commit { new: second.clone() });
+
+        // blocks 5 and 6 are replaced, 1..=4 stay canonical
+        let old = Arc::new(truncate_chain(&second, 5));
+        let reverted = chain(5..=6, old.tip().hash());
+        assert_eq!(reverted.range(), 5..=6);
+        let new = chain(5..=7, old.tip().hash());
+        buffer
+            .on_canonical_state(CanonStateNotification::Reorg { old: reverted, new: new.clone() });
+
+        let finalized = buffer.on_finalized(4);
+        let mut expected = hashes(&[CanonStateNotification::Commit { new: first }]);
+        expected.extend(hashes(&[CanonStateNotification::Commit { new: old }]));
+        assert_eq!(hashes(&finalized), expected);
+        assert_eq!(finalized[1].committed().execution_outcome().first_block, 4);
+
+        let finalized = buffer.on_finalized(7);
+        assert_eq!(hashes(&finalized), hashes(&[CanonStateNotification::Commit { new }]));
+        assert!(buffer.on_finalized(u64::MAX).is_empty());
+    }
+
+    #[test]
+    fn finalized_buffer_drops_fully_reverted_segments() {
+        let mut buffer = FinalizedNotificationBuffer::<EthPrimitives>::default();
+
+        let first = chain(1..=2, B256::ZERO);
+        let reverted = chain(3..=4, first.tip().hash());
+        buffer.on_canonical_state(CanonStateNotification::Commit { new: first.clone() });
+        buffer.on_canonical_state(CanonStateNotification::Commit { new: reverted.clone() });
+
+        let new = chain(3..=5, first.tip().hash());
+        buffer
+            .on_canonical_state(CanonStateNotification::Reorg { old: reverted, new: new.clone() });
+
+        let finalized = buffer.on_finalized(5);
+        assert_eq!(
+            hashes(&finalized),
+            hashes(&[
+                CanonStateNotification::Commit { new: first },
+                CanonStateNotification::Commit { new }
+            ])
+        );
+    }
 }
