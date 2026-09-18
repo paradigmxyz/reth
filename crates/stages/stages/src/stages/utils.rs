@@ -18,10 +18,9 @@ use reth_db_api::{
 use reth_etl::Collector;
 use reth_primitives_traits::NodePrimitives;
 use reth_provider::{
-    prepare_history_shard_writes_parallel_vec, prepare_history_shard_writes_serial_vec,
-    providers::StaticFileProvider, to_range, BlockReader, DBProvider, EitherWriter,
-    PreparedHistoryShardWrites, ProviderError, ProviderResult, RocksDBProviderFactory,
-    ShardedHistoryTable, StaticFileProviderFactory,
+    prepare_history_shard_writes_parallel_vec, providers::StaticFileProvider, to_range,
+    BlockReader, DBProvider, EitherWriter, PreparedHistoryShardWrites, ProviderError,
+    ProviderResult, RocksDBProviderFactory, ShardedHistoryTable, StaticFileProviderFactory,
 };
 use reth_stages_api::StageError;
 use reth_static_file_types::StaticFileSegment;
@@ -369,26 +368,18 @@ where
 fn prepare_grouped_history_writes<T, Provider>(
     grouped: Vec<(T::PartialKey, Vec<BlockNumber>)>,
     provider: &Provider,
-    use_rocksdb: bool,
 ) -> Result<PreparedHistoryShardWrites<T>, StageError>
 where
     T: ShardedHistoryTable,
     Provider: DBProvider + RocksDBProviderFactory,
 {
-    if use_rocksdb {
-        let rocksdb = provider.rocksdb_provider();
-        Ok(prepare_history_shard_writes_parallel_vec::<T, _>(grouped, |key| rocksdb.get::<T>(key))?)
-    } else {
-        Ok(prepare_history_shard_writes_serial_vec::<T, _>(grouped, |key| {
-            provider.tx_ref().get::<T>(key).map_err(Into::into)
-        })?)
-    }
+    let rocksdb = provider.rocksdb_provider();
+    Ok(prepare_history_shard_writes_parallel_vec::<T, _>(grouped, |key| rocksdb.get::<T>(key))?)
 }
 
 fn prepare_history_writes<T, Provider>(
     collector: Collector<T::Key, BlockNumberList>,
     provider: &Provider,
-    use_rocksdb: bool,
     etl_config: &EtlConfig,
 ) -> Result<Collector<T::Key, BlockNumberList>, StageError>
 where
@@ -397,7 +388,7 @@ where
 {
     let mut prepared = Collector::new(etl_config.file_size, etl_config.dir.clone());
     for_each_grouped_history_chunk::<T, _>(collector, HISTORY_PREPARATION_LIMITS, |grouped| {
-        let writes = prepare_grouped_history_writes::<T, _>(grouped, provider, use_rocksdb)?;
+        let writes = prepare_grouped_history_writes::<T, _>(grouped, provider)?;
         for (key, value) in writes.into_writes() {
             prepared.insert(key, value)?;
         }
@@ -413,18 +404,12 @@ where
 pub(crate) fn prepare_account_history_writes<Provider>(
     collector: Collector<ShardedKey<Address>, BlockNumberList>,
     provider: &Provider,
-    use_rocksdb: bool,
     etl_config: &EtlConfig,
 ) -> Result<Collector<ShardedKey<Address>, BlockNumberList>, StageError>
 where
     Provider: DBProvider + RocksDBProviderFactory,
 {
-    prepare_history_writes::<tables::AccountsHistory, _>(
-        collector,
-        provider,
-        use_rocksdb,
-        etl_config,
-    )
+    prepare_history_writes::<tables::AccountsHistory, _>(collector, provider, etl_config)
 }
 
 /// Spools prepared storage-history shards after merging each key's committed last shard.
@@ -434,18 +419,12 @@ where
 pub(crate) fn prepare_storage_history_writes<Provider>(
     collector: Collector<StorageShardedKey, BlockNumberList>,
     provider: &Provider,
-    use_rocksdb: bool,
     etl_config: &EtlConfig,
 ) -> Result<Collector<StorageShardedKey, BlockNumberList>, StageError>
 where
     Provider: DBProvider + RocksDBProviderFactory,
 {
-    prepare_history_writes::<tables::StoragesHistory, _>(
-        collector,
-        provider,
-        use_rocksdb,
-        etl_config,
-    )
+    prepare_history_writes::<tables::StoragesHistory, _>(collector, provider, etl_config)
 }
 
 /// Streams prepared history shards into serial puts, logging progress every 10%.
@@ -476,7 +455,34 @@ where
 ///
 /// Streams the collector into `append_*` and never reads last shards.
 pub(crate) fn load_account_history_append<N, CURSOR>(
+    collector: Collector<ShardedKey<Address>, BlockNumberList>,
+    writer: &mut EitherWriter<'_, CURSOR, N>,
+) -> Result<(), StageError>
+where
+    N: NodePrimitives,
+    CURSOR: DbCursorRW<tables::AccountsHistory> + DbCursorRO<tables::AccountsHistory>,
+{
+    load_account_history(collector, true, writer)
+}
+
+/// Streams account history directly through one MDBX cursor for incremental sync.
+///
+/// Each logical key is read, merged, and written before advancing to the next key. `RocksDB`
+/// incremental writes use the separate prepare-then-write path.
+pub(crate) fn load_account_history_mdbx<N, CURSOR>(
+    collector: Collector<ShardedKey<Address>, BlockNumberList>,
+    writer: &mut EitherWriter<'_, CURSOR, N>,
+) -> Result<(), StageError>
+where
+    N: NodePrimitives,
+    CURSOR: DbCursorRW<tables::AccountsHistory> + DbCursorRO<tables::AccountsHistory>,
+{
+    load_account_history(collector, false, writer)
+}
+
+fn load_account_history<N, CURSOR>(
     mut collector: Collector<ShardedKey<Address>, BlockNumberList>,
+    append_only: bool,
     writer: &mut EitherWriter<'_, CURSOR, N>,
 ) -> Result<(), StageError>
 where
@@ -505,23 +511,29 @@ where
         if current_address != Some(address) {
             // Flush all remaining shards for the previous address (uses u64::MAX for last shard).
             if let Some(prev_addr) = current_address {
-                flush_account_history_shards(prev_addr, &mut current_list, writer)?;
+                flush_account_history_shards(prev_addr, &mut current_list, append_only, writer)?;
             }
 
             current_address = Some(address);
             current_list.clear();
+
+            if !append_only &&
+                let Some(last_shard) = writer.get_last_account_history_shard_mdbx(address)?
+            {
+                current_list.extend(last_shard.iter());
+            }
         }
 
         // Append new block numbers to the accumulator.
         current_list.extend(new_list.iter());
 
         // Flush complete shards, keeping the last (partial) shard buffered.
-        flush_account_history_shards_partial(address, &mut current_list, writer)?;
+        flush_account_history_shards_partial(address, &mut current_list, append_only, writer)?;
     }
 
     // Flush the final address's remaining shard.
     if let Some(addr) = current_address {
-        flush_account_history_shards(addr, &mut current_list, writer)?;
+        flush_account_history_shards(addr, &mut current_list, append_only, writer)?;
     }
 
     Ok(())
@@ -535,6 +547,7 @@ where
 fn flush_account_history_shards_partial<N, CURSOR>(
     address: Address,
     list: &mut Vec<u64>,
+    append_only: bool,
     writer: &mut EitherWriter<'_, CURSOR, N>,
 ) -> Result<(), StageError>
 where
@@ -569,7 +582,11 @@ where
         let highest = *chunk.last().expect("chunk is non-empty");
         let key = ShardedKey::new(address, highest);
         let value = BlockNumberList::new_pre_sorted(chunk.iter().copied());
-        writer.append_account_history(key, &value)?;
+        if append_only {
+            writer.append_account_history(key, &value)?;
+        } else {
+            writer.upsert_account_history(key, &value)?;
+        }
     }
 
     // Keep the remaining indices for the next iteration.
@@ -584,6 +601,7 @@ where
 fn flush_account_history_shards<N, CURSOR>(
     address: Address,
     list: &mut Vec<u64>,
+    append_only: bool,
     writer: &mut EitherWriter<'_, CURSOR, N>,
 ) -> Result<(), StageError>
 where
@@ -605,7 +623,11 @@ where
 
         let key = ShardedKey::new(address, highest);
         let value = BlockNumberList::new_pre_sorted(chunk.iter().copied());
-        writer.append_account_history(key, &value)?;
+        if append_only {
+            writer.append_account_history(key, &value)?;
+        } else {
+            writer.upsert_account_history(key, &value)?;
+        }
     }
 
     list.clear();
@@ -652,7 +674,34 @@ where
 ///
 /// Streams the collector into `append_*` and never reads last shards.
 pub(crate) fn load_storage_history_append<N, CURSOR>(
+    collector: Collector<StorageShardedKey, BlockNumberList>,
+    writer: &mut EitherWriter<'_, CURSOR, N>,
+) -> Result<(), StageError>
+where
+    N: NodePrimitives,
+    CURSOR: DbCursorRW<tables::StoragesHistory> + DbCursorRO<tables::StoragesHistory>,
+{
+    load_storage_history(collector, true, writer)
+}
+
+/// Streams storage history directly through one MDBX cursor for incremental sync.
+///
+/// Each logical key is read, merged, and written before advancing to the next key. `RocksDB`
+/// incremental writes use the separate prepare-then-write path.
+pub(crate) fn load_storage_history_mdbx<N, CURSOR>(
+    collector: Collector<StorageShardedKey, BlockNumberList>,
+    writer: &mut EitherWriter<'_, CURSOR, N>,
+) -> Result<(), StageError>
+where
+    N: NodePrimitives,
+    CURSOR: DbCursorRW<tables::StoragesHistory> + DbCursorRO<tables::StoragesHistory>,
+{
+    load_storage_history(collector, false, writer)
+}
+
+fn load_storage_history<N, CURSOR>(
     mut collector: Collector<StorageShardedKey, BlockNumberList>,
+    append_only: bool,
     writer: &mut EitherWriter<'_, CURSOR, N>,
 ) -> Result<(), StageError>
 where
@@ -685,12 +734,20 @@ where
                     prev_addr,
                     prev_storage_key,
                     &mut current_list,
+                    append_only,
                     writer,
                 )?;
             }
 
             current_key = Some(partial_key);
             current_list.clear();
+
+            if !append_only &&
+                let Some(last_shard) =
+                    writer.get_last_storage_history_shard_mdbx(partial_key.0, partial_key.1)?
+            {
+                current_list.extend(last_shard.iter());
+            }
         }
 
         // Append new block numbers to the accumulator.
@@ -701,13 +758,14 @@ where
             partial_key.0,
             partial_key.1,
             &mut current_list,
+            append_only,
             writer,
         )?;
     }
 
     // Flush the final key's remaining shard.
     if let Some((addr, storage_key)) = current_key {
-        flush_storage_history_shards(addr, storage_key, &mut current_list, writer)?;
+        flush_storage_history_shards(addr, storage_key, &mut current_list, append_only, writer)?;
     }
 
     Ok(())
@@ -722,6 +780,7 @@ fn flush_storage_history_shards_partial<N, CURSOR>(
     address: Address,
     storage_key: B256,
     list: &mut Vec<u64>,
+    append_only: bool,
     writer: &mut EitherWriter<'_, CURSOR, N>,
 ) -> Result<(), StageError>
 where
@@ -756,7 +815,11 @@ where
         let highest = *chunk.last().expect("chunk is non-empty");
         let key = StorageShardedKey::new(address, storage_key, highest);
         let value = BlockNumberList::new_pre_sorted(chunk.iter().copied());
-        writer.append_storage_history(key, &value)?;
+        if append_only {
+            writer.append_storage_history(key, &value)?;
+        } else {
+            writer.upsert_storage_history(key, &value)?;
+        }
     }
 
     // Keep the remaining indices for the next iteration.
@@ -773,6 +836,7 @@ fn flush_storage_history_shards<N, CURSOR>(
     address: Address,
     storage_key: B256,
     list: &mut Vec<u64>,
+    append_only: bool,
     writer: &mut EitherWriter<'_, CURSOR, N>,
 ) -> Result<(), StageError>
 where
@@ -794,7 +858,11 @@ where
 
         let key = StorageShardedKey::new(address, storage_key, highest);
         let value = BlockNumberList::new_pre_sorted(chunk.iter().copied());
-        writer.append_storage_history(key, &value)?;
+        if append_only {
+            writer.append_storage_history(key, &value)?;
+        } else {
+            writer.upsert_storage_history(key, &value)?;
+        }
     }
 
     list.clear();
