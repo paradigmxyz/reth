@@ -266,12 +266,14 @@ mod tests {
         (factory, write)
     }
 
-    // Applied block 2 is shared, but ranges downloaded at pivot 3 contain an old-branch-only
-    // balance change. The replacement block's empty BAL cannot undo that change.
+    // The reorg replaces the pivot alone: the applied block and the one the lists carry the state
+    // through stay canonical, so only the pivot check can refuse what follows. Ranges downloaded
+    // at that pivot hold a balance change the replacement branch never made.
     fn pivot_reorg_fixture() -> (Factory, SnapWrite, BalChain, BalChain) {
-        let chain = BalChain::new(PIVOT, [credit(30)]);
-        let replacement = BalChain::new(PIVOT, [Vec::new()]);
-        assert_eq!(chain.block(0), replacement.block(0));
+        let chain = BalChain::new(PIVOT, [Vec::new(), credit(30)]);
+        let replacement = BalChain::new(PIVOT, [Vec::new(), Vec::new()]);
+        assert_eq!(chain.block(1), replacement.block(1));
+        assert_ne!(chain.tip(), replacement.tip());
         let mut accounts = accounts();
         let factory = hashed_factory();
         insert_headers(&factory, &chain.headers);
@@ -506,15 +508,17 @@ mod tests {
         let (client, mut catch_up) = catch_up([], factory.clone());
 
         // Even an already-applied target must reject the orphan instead of reporting completion.
-        for target in [PIVOT, PIVOT + 1] {
+        for target in [PIVOT, PIVOT + 2] {
             assert!(matches!(
                 catch_up.next(write, target).await,
                 Err(SnapSyncError::NonCanonicalBlock { block, hash })
-                    if block == PIVOT + 1 && hash == chain.tip().hash
+                    if block == PIVOT + 2 && hash == chain.tip().hash
             ));
         }
         assert!(client.block_requests().is_empty());
         let provider = factory.database_provider_ro().unwrap();
+        // The block whose list would apply next is untouched by the reorg.
+        assert_eq!(provider.block_hash(PIVOT + 1).unwrap(), Some(chain.block(1).hash));
         assert_eq!(provider.block_hash(PIVOT).unwrap(), Some(chain.block(0).hash));
         assert_eq!(provider.catch_up_progress(write).unwrap().unwrap().applied(), chain.block(0));
         assert_eq!(SnapStateSnapshot::read(&provider), before);
@@ -533,16 +537,18 @@ mod tests {
         let mut catch_up =
             BlockAccessListCatchUp::new(client.clone(), factory.clone(), Runtime::test());
 
+        // The list the peer served belongs to a block the reorg left canonical, so refusing it is
+        // the pivot check's doing.
         assert!(matches!(
-            catch_up.next(write, PIVOT + 1).await,
+            catch_up.next(write, PIVOT + 2).await,
             Err(SnapSyncError::NonCanonicalBlock { block, hash })
-                if block == PIVOT + 1 && hash == chain.tip().hash
+                if block == PIVOT + 2 && hash == chain.tip().hash
         ));
 
-        assert_eq!(*client.block_requests(), [vec![chain.tip().hash]]);
+        assert_eq!(*client.block_requests(), [vec![chain.block(1).hash, chain.tip().hash]]);
         let provider = factory.database_provider_ro().unwrap();
-        assert_eq!(provider.block_hash(PIVOT).unwrap(), Some(chain.block(0).hash));
-        assert_eq!(provider.block_hash(PIVOT + 1).unwrap(), Some(replacement_hash));
+        assert_eq!(provider.block_hash(PIVOT + 1).unwrap(), Some(chain.block(1).hash));
+        assert_eq!(provider.block_hash(PIVOT + 2).unwrap(), Some(replacement_hash));
         assert_eq!(provider.catch_up_progress(write).unwrap().unwrap().applied(), chain.block(0));
         assert_eq!(SnapStateSnapshot::read(&provider), before);
     }
