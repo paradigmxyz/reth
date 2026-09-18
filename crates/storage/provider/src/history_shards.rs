@@ -10,7 +10,7 @@
 //! Last-shard `get`s read committed state only, not pending batch writes. Getting a key after
 //! putting it in the same batch would miss the merge (one logical key per batch). Do not overlap
 //! parallel [`RocksDBProvider::get`](crate::providers::RocksDBProvider::get) with auto-commit
-//! `write_opt`. MDBX `DbTx` is not safe for concurrent `get`s — use the serial prepare path.
+//! `write_opt`. MDBX cursor reads must remain serial.
 
 use alloy_primitives::{Address, BlockNumber, B256};
 use itertools::Itertools;
@@ -24,6 +24,11 @@ use reth_db_api::{
 };
 use reth_storage_errors::provider::{ProviderError, ProviderResult};
 use std::collections::BTreeMap;
+
+/// Maximum Rayon jobs used for one batch of committed last-shard reads.
+const MAX_PARALLEL_HISTORY_READ_TASKS: usize = 16;
+/// Small batches stay serial to avoid paying Rayon scheduling overhead.
+const MIN_PARALLEL_HISTORY_READ_KEYS: usize = MAX_PARALLEL_HISTORY_READ_TASKS * 4;
 
 /// A history table whose keys are sharded by highest block number.
 ///
@@ -86,7 +91,7 @@ impl<T: ShardedHistoryTable> PreparedHistoryShardWrites<T> {
     }
 }
 
-/// Prepares history shard writes, reading last shards in parallel.
+/// Prepares history shard writes, reading sufficiently large groups in parallel.
 ///
 /// `get_last` must read **committed** state only (for example
 /// [`crate::providers::RocksDBProvider::get`]). Join all reads before opening a `RocksDB` write
@@ -102,10 +107,12 @@ where
     prepare_history_shard_writes_parallel_vec(grouped.into_iter().collect(), get_last)
 }
 
-/// Prepares history shard writes from an owned vector, reading last shards in parallel.
+/// Prepares history shard writes from an owned vector, reading last shards concurrently.
 ///
 /// `get_last` must read **committed** state only. Join all reads before opening a `RocksDB` write
-/// batch. `grouped` must be strictly ordered by logical key so every key occurs exactly once.
+/// batch. Small inputs use the serial path, and larger inputs create at most
+/// [`MAX_PARALLEL_HISTORY_READ_TASKS`] Rayon jobs. `grouped` must be strictly ordered by logical
+/// key so every key occurs exactly once.
 pub fn prepare_history_shard_writes_parallel_vec<T, F>(
     grouped: Vec<(T::PartialKey, Vec<BlockNumber>)>,
     get_last: F,
@@ -114,10 +121,15 @@ where
     T: ShardedHistoryTable,
     F: Fn(T::Key) -> ProviderResult<Option<BlockNumberList>> + Send + Sync,
 {
+    if grouped.len() < MIN_PARALLEL_HISTORY_READ_KEYS {
+        return prepare_history_shard_writes_serial_vec::<T, _>(grouped, get_last)
+    }
+
     validate_grouped_keys::<T>(&grouped)?;
+    let min_len = grouped.len().div_ceil(MAX_PARALLEL_HISTORY_READ_TASKS);
     let per_key = grouped
         .into_par_iter()
-        .with_min_len(1)
+        .with_min_len(min_len)
         .map(|(partial_key, indices)| prepare_one::<T, _>(partial_key, indices, &get_last))
         .collect::<ProviderResult<Vec<_>>>()?;
 
@@ -255,6 +267,10 @@ mod tests {
         existing: HashMap<StorageShardedKey, BlockNumberList>,
     ) -> impl Fn(StorageShardedKey) -> ProviderResult<Option<BlockNumberList>> {
         move |key| Ok(existing.get(&key).cloned())
+    }
+
+    fn account_groups(count: usize) -> Vec<(Address, Vec<BlockNumber>)> {
+        (1..=count).map(|i| (Address::repeat_byte(i.try_into().unwrap()), vec![i as u64])).collect()
     }
 
     #[test]
@@ -443,29 +459,84 @@ mod tests {
         let inflight = AtomicUsize::new(0);
         let max_inflight = AtomicUsize::new(0);
 
-        let grouped: Vec<_> =
-            (1u8..=8).map(|i| (Address::repeat_byte(i), vec![u64::from(i)])).collect();
-
         let prepared = pool
             .install(|| {
                 prepare_history_shard_writes_parallel_vec::<tables::AccountsHistory, _>(
-                    grouped,
+                    account_groups(MIN_PARALLEL_HISTORY_READ_KEYS),
                     |_| {
                         let current = inflight.fetch_add(1, Ordering::SeqCst) + 1;
                         max_inflight.fetch_max(current, Ordering::SeqCst);
-                        thread::sleep(Duration::from_millis(50));
+                        thread::sleep(Duration::from_millis(20));
                         inflight.fetch_sub(1, Ordering::SeqCst);
                         Ok(None)
                     },
                 )
             })
             .unwrap();
-        assert_eq!(prepared.into_writes().count(), 8);
+        assert_eq!(prepared.into_writes().count(), MIN_PARALLEL_HISTORY_READ_KEYS);
 
         assert!(
             max_inflight.load(Ordering::SeqCst) >= 2,
             "parallel last-shard gets should overlap on a 4-thread pool, max inflight was {}",
             max_inflight.load(Ordering::SeqCst)
+        );
+    }
+
+    #[test]
+    fn prepare_parallel_uses_serial_path_below_cutoff() {
+        let pool = rayon::ThreadPoolBuilder::new().num_threads(4).build().unwrap();
+        let inflight = AtomicUsize::new(0);
+        let max_inflight = AtomicUsize::new(0);
+
+        let prepared = pool
+            .install(|| {
+                prepare_history_shard_writes_parallel_vec::<tables::AccountsHistory, _>(
+                    account_groups(MIN_PARALLEL_HISTORY_READ_KEYS - 1),
+                    |_| {
+                        let current = inflight.fetch_add(1, Ordering::SeqCst) + 1;
+                        max_inflight.fetch_max(current, Ordering::SeqCst);
+                        thread::sleep(Duration::from_millis(1));
+                        inflight.fetch_sub(1, Ordering::SeqCst);
+                        Ok(None)
+                    },
+                )
+            })
+            .unwrap();
+        assert_eq!(prepared.into_writes().count(), MIN_PARALLEL_HISTORY_READ_KEYS - 1);
+
+        assert_eq!(max_inflight.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn prepare_parallel_caps_rayon_jobs() {
+        let pool = rayon::ThreadPoolBuilder::new().num_threads(32).build().unwrap();
+        let inflight = AtomicUsize::new(0);
+        let max_inflight = AtomicUsize::new(0);
+
+        let prepared = pool
+            .install(|| {
+                prepare_history_shard_writes_parallel_vec::<tables::AccountsHistory, _>(
+                    account_groups(MIN_PARALLEL_HISTORY_READ_KEYS),
+                    |_| {
+                        let current = inflight.fetch_add(1, Ordering::SeqCst) + 1;
+                        max_inflight.fetch_max(current, Ordering::SeqCst);
+                        thread::sleep(Duration::from_millis(20));
+                        inflight.fetch_sub(1, Ordering::SeqCst);
+                        Ok(None)
+                    },
+                )
+            })
+            .unwrap();
+        assert_eq!(prepared.into_writes().count(), MIN_PARALLEL_HISTORY_READ_KEYS);
+
+        let max_inflight = max_inflight.load(Ordering::SeqCst);
+        assert!(
+            max_inflight >= 2,
+            "last-shard gets should overlap, max inflight was {max_inflight}"
+        );
+        assert!(
+            max_inflight <= MAX_PARALLEL_HISTORY_READ_TASKS,
+            "last-shard gets exceeded the job cap: {max_inflight}"
         );
     }
 }
