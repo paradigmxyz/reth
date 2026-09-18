@@ -144,9 +144,10 @@ mod tree;
 mod fixture_tests;
 
 pub use provider::{
-    CanonicalityStatus, DeterministicProvider, LookupError, ObjectKind, ProviderBuildError,
-    ProviderSnapshot, RootContext, DETERMINISTIC_PRODUCER_REVISION, MULTIPLE_LOGS_BLOCK_HASH,
-    PROGRESSIVE_RECEIPTS_BLOCK_HASH, SINGLETON_BLOCK_HASH,
+    CanonicalityStatus, DeterministicProvider, HistoricalAcquisitionError, LookupError, ObjectKind,
+    ProviderBuildError, ProviderSnapshot, RootContext, DETERMINISTIC_PRODUCER_REVISION,
+    MULTIPLE_LOGS_BLOCK_HASH, PROGRESSIVE_RECEIPTS_BLOCK_HASH, RETH_HISTORICAL_PRODUCER_REVISION,
+    SINGLETON_BLOCK_HASH,
 };
 pub use snapshot::ReceiptSnapshot;
 pub use tree::{RetainedNode, TreeConstructionError};
