@@ -335,7 +335,10 @@ jobs:
   deny:
     permissions:
       contents: read
-    uses: tempoxyz/ci/.github/workflows/deny.yml@main
+      id-token: write
+    uses: tempoxyz/gh-actions/.github/workflows/rust-deny.yml@6cd9d3a68b9cb0b52c7a0fc9a523f4806921354f
+    with:
+      rust-toolchain: nightly
 
   lint-success:
     name: lint success
