@@ -51,14 +51,11 @@ impl SenderRecoveryCache {
     /// Recovers the senders of the given transactions, in transaction order.
     ///
     /// Cached senders are reused. The remaining transactions are recovered together, in parallel
-    /// when the `rayon` feature of `reth-primitives-traits` is enabled, and appended to `uncached`
-    /// instead of being cached right away, so that callers cache them only once the transactions
-    /// proved worth caching, for example after their block validated. Nothing is appended if any
-    /// recovery fails.
+    /// when the `rayon` feature of `reth-primitives-traits` is enabled, and their senders are
+    /// cached. Nothing is cached if any recovery fails.
     pub fn recover_signers<T: SignedTransaction>(
         &self,
         transactions: &[T],
-        uncached: &mut UncachedSenders,
     ) -> Result<Vec<Address>, RecoveryError> {
         let mut senders = Vec::with_capacity(transactions.len());
         let mut misses = Vec::new();
@@ -79,9 +76,8 @@ impl SenderRecoveryCache {
 
         let recovered =
             recover_signers(misses.iter().map(|&index| &transactions[index]).collect::<Vec<_>>())?;
-        uncached.0.reserve(misses.len());
         for (index, sender) in misses.into_iter().zip(recovered) {
-            uncached.0.push((*transactions[index].tx_hash(), sender));
+            self.cache.insert(*transactions[index].tx_hash(), sender);
             senders[index] = sender;
         }
 
@@ -92,33 +88,6 @@ impl SenderRecoveryCache {
 impl Default for SenderRecoveryCache {
     fn default() -> Self {
         Self::new(SENDER_RECOVERY_CACHE_CAPACITY)
-    }
-}
-
-/// Senders that [`SenderRecoveryCache::recover_signers`] recovered on a cache miss and that are not
-/// cached yet.
-///
-/// Deferring the insertion lets callers cache only senders of transactions that proved worth
-/// caching, so that invalid input cannot evict entries other components rely on.
-#[derive(Debug, Default)]
-pub struct UncachedSenders(Vec<(B256, Address)>);
-
-impl UncachedSenders {
-    /// Returns the number of collected senders.
-    pub const fn len(&self) -> usize {
-        self.0.len()
-    }
-
-    /// Returns `true` if no sender was collected.
-    pub const fn is_empty(&self) -> bool {
-        self.0.is_empty()
-    }
-
-    /// Inserts the collected senders into the cache.
-    pub fn cache(self, cache: &SenderRecoveryCache) {
-        for (tx_hash, sender) in self.0 {
-            cache.cache.insert(tx_hash, sender);
-        }
     }
 }
 
@@ -171,7 +140,7 @@ mod tests {
     }
 
     #[test]
-    fn recover_signers_reuses_cached_senders_and_defers_misses() {
+    fn recover_signers_reuses_cached_senders_and_caches_misses() {
         let transactions: Vec<_> = (0..4).map(signed_transaction).collect();
         let recovered: Vec<_> =
             transactions.iter().map(|transaction| transaction.try_recover().unwrap()).collect();
@@ -182,35 +151,25 @@ mod tests {
         let cached_sender = Address::repeat_byte(0xaa);
         cache.cache.insert(*transactions[1].tx_hash(), cached_sender);
 
-        let mut uncached = UncachedSenders::default();
-        let senders = cache.recover_signers(&transactions, &mut uncached).unwrap();
-        assert_eq!(senders, [recovered[0], cached_sender, recovered[2], recovered[3]]);
+        let senders = cache.recover_signers(&transactions).unwrap();
 
-        // misses are recovered but only cached once the caller decides so
-        assert_eq!(uncached.len(), 3);
-        assert_eq!(cache.get(transactions[0].tx_hash()), None);
-        uncached.cache(&cache);
+        assert_eq!(senders, [recovered[0], cached_sender, recovered[2], recovered[3]]);
         for (transaction, sender) in transactions.iter().zip(&senders) {
             assert_eq!(cache.get(transaction.tx_hash()), Some(*sender));
         }
-
-        let mut uncached = UncachedSenders::default();
-        assert!(cache.recover_signers::<TransactionSigned>(&[], &mut uncached).unwrap().is_empty());
-        assert!(uncached.is_empty());
+        assert!(cache.recover_signers::<TransactionSigned>(&[]).unwrap().is_empty());
     }
 
     #[test]
-    fn recover_signers_rejects_invalid_signature_without_collecting_senders() {
+    fn recover_signers_rejects_invalid_signature_without_caching() {
         let valid = signed_transaction(0);
         let invalid = TransactionSigned::new_unhashed(
             Transaction::Legacy(TxLegacy::default()),
             Signature::new(U256::ZERO, U256::ZERO, false),
         );
         let cache = SenderRecoveryCache::default();
-        let mut uncached = UncachedSenders::default();
 
-        assert!(cache.recover_signers(&[valid.clone(), invalid.clone()], &mut uncached).is_err());
-        assert!(uncached.is_empty());
+        assert!(cache.recover_signers(&[valid.clone(), invalid.clone()]).is_err());
         assert_eq!(cache.get(valid.tx_hash()), None);
         assert_eq!(cache.get(invalid.tx_hash()), None);
     }

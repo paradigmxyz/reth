@@ -11,18 +11,12 @@
 
 extern crate alloc;
 
-use alloc::vec::Vec;
 use alloy_consensus::BlockHeader;
-use alloy_primitives::Address;
 use reth_payload_primitives::{
     EngineApiMessageVersion, EngineObjectValidationError, InvalidPayloadAttributesError,
     NewPayloadError, PayloadAttributes, PayloadOrAttributes, PayloadTypes,
 };
-use reth_primitives_traits::{
-    block::{error::SealedBlockRecoveryError, BlockTx},
-    transaction::signed::RecoveryError,
-    Block, BlockBody, RecoveredBlock, SealedBlock, SealedHeader,
-};
+use reth_primitives_traits::{Block, RecoveredBlock, SealedBlock, SealedHeader};
 use reth_storage_api::{errors::ProviderResult, StateProviderBox};
 use reth_trie_common::HashedPostState;
 use serde::{de::DeserializeOwned, Serialize};
@@ -209,32 +203,15 @@ pub trait PayloadValidator<Types: PayloadTypes>: Send + Sync + Unpin + 'static {
     /// fields.
     ///
     /// Implementers should ensure that the checks are done in the order that conforms with the
-    /// engine-API specification.
+    /// engine-API specification. Callers that recover the senders themselves, such as the engine
+    /// and builder block validation, use [`Self::convert_payload_to_block`] directly, so payload
+    /// checks belong there rather than in an override of this method.
     fn ensure_well_formed_payload(
         &self,
         payload: Types::ExecutionData,
     ) -> Result<RecoveredBlock<Self::Block>, NewPayloadError> {
         let sealed_block = self.convert_payload_to_block(payload)?;
         sealed_block.try_recover().map_err(|e| NewPayloadError::Other(e.into()))
-    }
-
-    /// Like [`Self::ensure_well_formed_payload`], but recovers the transaction senders with
-    /// `recover_senders`, which receives the block's transactions and returns their senders in
-    /// order.
-    ///
-    /// This lets callers reuse already recovered senders, for example from a cache. Implementers
-    /// that add checks to [`Self::ensure_well_formed_payload`] must apply them here as well.
-    fn ensure_well_formed_payload_with_senders(
-        &self,
-        payload: Types::ExecutionData,
-        recover_senders: &mut SenderRecoveryFn<'_, Self::Block>,
-    ) -> Result<RecoveredBlock<Self::Block>, NewPayloadError> {
-        let sealed_block = self.convert_payload_to_block(payload)?;
-        let recovered = match recover_senders(sealed_block.body().transactions()) {
-            Ok(senders) => RecoveredBlock::try_recover_sealed_with_senders(sealed_block, senders),
-            Err(_) => Err(SealedBlockRecoveryError::new(sealed_block)),
-        };
-        recovered.map_err(|e| NewPayloadError::Other(e.into()))
     }
 
     /// Verifies payload post-execution w.r.t. hashed state updates.
@@ -286,9 +263,3 @@ pub trait PayloadValidator<Types: PayloadTypes>: Send + Sync + Unpin + 'static {
         Ok(())
     }
 }
-
-/// Recovers the senders of the given transactions, in order.
-///
-/// Passed to [`PayloadValidator::ensure_well_formed_payload_with_senders`].
-pub type SenderRecoveryFn<'a, B> =
-    dyn FnMut(&[BlockTx<B>]) -> Result<Vec<Address>, RecoveryError> + 'a;
