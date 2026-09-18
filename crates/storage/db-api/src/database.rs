@@ -30,7 +30,7 @@ pub trait Database: Send + Sync + Debug {
 
     /// Starts derived state preparation from the recovered blocks before backend writes.
     /// Dropping the task cancels publication; `finish` is called only after commit succeeds.
-    fn prepare_persistence<B: reth_primitives_traits::Block>(
+    fn prepare_persistence<B: reth_primitives_traits::Block + 'static>(
         &self,
         _blocks: Vec<reth_primitives_traits::RecoveredBlock<B>>,
     ) -> Result<Option<Box<dyn PersistenceTask>>, DatabaseError> {
@@ -93,7 +93,7 @@ impl<DB: Database> Database for Arc<DB> {
         <DB as Database>::tx_mut(self)
     }
 
-    fn prepare_persistence<B: reth_primitives_traits::Block>(
+    fn prepare_persistence<B: reth_primitives_traits::Block + 'static>(
         &self,
         blocks: Vec<reth_primitives_traits::RecoveredBlock<B>>,
     ) -> Result<Option<Box<dyn PersistenceTask>>, DatabaseError> {
@@ -125,7 +125,7 @@ impl<DB: Database> Database for &DB {
         <DB as Database>::tx_mut(self)
     }
 
-    fn prepare_persistence<B: reth_primitives_traits::Block>(
+    fn prepare_persistence<B: reth_primitives_traits::Block + 'static>(
         &self,
         blocks: Vec<reth_primitives_traits::RecoveredBlock<B>>,
     ) -> Result<Option<Box<dyn PersistenceTask>>, DatabaseError> {
