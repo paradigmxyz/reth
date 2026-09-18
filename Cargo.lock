@@ -9068,6 +9068,7 @@ name = "reth-execution-types"
 version = "2.5.2"
 dependencies = [
  "alloy-consensus",
+ "alloy-eip7928",
  "alloy-eips",
  "alloy-evm",
  "alloy-primitives",
@@ -9928,7 +9929,6 @@ dependencies = [
  "reth-storage-overlay",
  "reth-tasks",
  "reth-testing-utils",
- "reth-tokio-util",
  "reth-tracing",
  "reth-trie",
  "reth-trie-db",
@@ -9938,7 +9938,6 @@ dependencies = [
  "strum 0.27.2",
  "tempfile",
  "tokio",
- "tokio-stream",
  "tracing",
 ]
 
@@ -10612,12 +10611,9 @@ dependencies = [
  "reth-prune-types",
  "reth-stages-types",
  "reth-storage-errors",
- "reth-tokio-util",
  "reth-trie-common",
  "revm",
  "serde_json",
- "tokio",
- "tokio-stream",
 ]
 
 [[package]]
