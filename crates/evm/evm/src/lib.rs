@@ -186,6 +186,7 @@ pub trait ConfigureEvm: Clone + Debug + Send + Sync + Unpin {
     /// Called only for ordinary sequential execution. Implementations must merge any
     /// background changes through the executor before it finishes, and propagate failures.
     #[cfg(feature = "std")]
+    #[auto_impl(keep_default_for(&, Arc))]
     fn with_background_state(
         self,
         _env: &EvmEnvFor<Self>,
