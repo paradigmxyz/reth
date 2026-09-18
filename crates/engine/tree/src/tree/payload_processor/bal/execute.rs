@@ -54,6 +54,9 @@ use crate::tree::payload_processor::receipt_root_task::IndexedReceipt;
 ///
 /// The ordered commit loop applies Ethereum block-level gas admission. Executors with different
 /// admission rules, such as segment-scoped gas budgets, must align those checks before using it.
+///
+/// Returns the execution output, the recovered senders, the BAL rebuilt from this execution, and
+/// the received BAL in the revm representation the workers consumed.
 #[expect(clippy::too_many_arguments, clippy::type_complexity)]
 pub fn execute_block<'a, Evm, Tx, Err, DB, MakeDb>(
     runtime: &Runtime,
@@ -66,7 +69,7 @@ pub fn execute_block<'a, Evm, Tx, Err, DB, MakeDb>(
     txs: Receiver<(usize, Result<Tx, Err>)>,
     receipt_tx: Sender<IndexedReceipt<ReceiptTy<Evm::Primitives>>>,
 ) -> Result<
-    (BlockExecutionOutput<ReceiptTy<Evm::Primitives>>, Vec<Address>, BlockAccessList),
+    (BlockExecutionOutput<ReceiptTy<Evm::Primitives>>, Vec<Address>, BlockAccessList, Arc<RevmBal>),
     BalExecutionError,
 >
 where
@@ -109,7 +112,7 @@ fn execute_block_inner<'scope, Evm, Tx, Err, DB, MakeDb>(
     receipt_tx: Sender<IndexedReceipt<ReceiptTy<Evm::Primitives>>>,
     worker_count: usize,
 ) -> Result<
-    (BlockExecutionOutput<ReceiptTy<Evm::Primitives>>, Vec<Address>, BlockAccessList),
+    (BlockExecutionOutput<ReceiptTy<Evm::Primitives>>, Vec<Address>, BlockAccessList, Arc<RevmBal>),
     BalExecutionError,
 >
 where
@@ -221,6 +224,7 @@ where
         BlockExecutionOutput { state: canonical_state.take_bundle(), result: block_result },
         senders,
         built_bal,
+        input_bal_revm,
     ))
 }
 
@@ -608,7 +612,7 @@ mod tests {
             tx_stream(txs),
             receipt_tx,
         )
-        .map(|(output, _, built_bal)| (output, built_bal))
+        .map(|(output, _, built_bal, _)| (output, built_bal))
     }
 
     /// Inserts `AccountInfo { nonce: 0, balance }` for `addr` into the canonical DB.
