@@ -270,6 +270,18 @@ impl<N: NodePrimitives> Chain<N> {
         self.blocks_iter().zip(self.block_receipts_iter())
     }
 
+    /// Returns an iterator over the blocks of this chain that have a prepared block access list,
+    /// paired with that BAL.
+    ///
+    /// Blocks without an available BAL are skipped; see the `bals` field for details.
+    pub fn blocks_and_bals(
+        &self,
+    ) -> impl Iterator<Item = (&Arc<RecoveredBlock<N::Block>>, &Arc<DecodedRevmBal>)> + '_ {
+        self.bals
+            .iter()
+            .filter_map(|(number, bal)| self.blocks.get(number).map(|block| (block, bal)))
+    }
+
     /// Finds a transaction by hash and returns it along with its corresponding receipt data.
     ///
     /// Returns `None` if the transaction is not found in this chain.

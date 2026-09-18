@@ -1703,5 +1703,11 @@ mod tests {
         // Only the block whose payload carried a BAL contributes one.
         assert_eq!(new.bals().len(), 1);
         assert_eq!(new.bal_at(1), block1.bal());
+
+        let mut blocks_and_bals = new.blocks_and_bals();
+        let (block, bal) = blocks_and_bals.next().expect("block with BAL");
+        assert_eq!(block.hash(), block1.recovered_block.hash());
+        assert_eq!(Some(bal), block1.bal());
+        assert!(blocks_and_bals.next().is_none());
     }
 }
