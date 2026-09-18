@@ -22,7 +22,7 @@ use reth_consensus::{Consensus, FullConsensus};
 use reth_consensus_common::validation::MAX_RLP_BLOCK_SIZE;
 use reth_engine_primitives::PayloadValidator;
 use reth_errors::{BlockExecutionError, ConsensusError, ProviderError};
-use reth_evm::{execute::Executor, ConfigureEvm, SenderRecoveryCache};
+use reth_evm::{execute::Executor, ConfigureEvm, SenderRecoveryCache, UncachedSenders};
 use reth_execution_types::BlockExecutionOutput;
 use reth_metrics::{
     metrics,
@@ -31,8 +31,7 @@ use reth_metrics::{
 };
 use reth_node_api::{NewPayloadError, PayloadTypes};
 use reth_primitives_traits::{
-    block::error::SealedBlockRecoveryError, BlockBody, GotExpected, NodePrimitives, RecoveredBlock,
-    SealedBlock, SealedHeaderFor,
+    Block, BlockBody, GotExpected, NodePrimitives, RecoveredBlock, SealedBlock, SealedHeaderFor,
 };
 use reth_revm::{cached::CachedReads, database::StateProviderDatabase};
 use reth_rpc_api::BlockSubmissionValidationApiServer;
@@ -379,24 +378,46 @@ where
 
     /// Converts the payload into a block and recovers the transaction senders.
     ///
-    /// Like the engine's `newPayload` handling, this leaves payload validation and conversion to
-    /// the payload validator and recovers senders through the shared [`SenderRecoveryCache`] if
-    /// one is configured, so senders already recovered on transaction ingress or payload
-    /// execution are reused. Without a cache this matches
-    /// [`PayloadValidator::ensure_well_formed_payload`].
+    /// With a [`SenderRecoveryCache`], senders already recovered on transaction ingress or payload
+    /// execution are reused, and the senders recovered here are collected in the returned
+    /// submission to be cached once it validated.
     fn recover_payload(
         &self,
         payload: ExecutionData,
-    ) -> Result<RecoveredBlock<<E::Primitives as NodePrimitives>::Block>, ValidationApiError> {
-        let block = self.payload_validator.convert_payload_to_block(payload)?;
-        let recovered = match &self.sender_recovery_cache {
-            Some(cache) => match cache.recover_signers(block.body().transactions()) {
-                Ok(senders) => Ok(RecoveredBlock::new_sealed(block, senders)),
-                Err(_) => Err(SealedBlockRecoveryError::new(block)),
-            },
-            None => block.try_recover(),
+    ) -> Result<RecoveredSubmission<<E::Primitives as NodePrimitives>::Block>, ValidationApiError>
+    {
+        let Some(cache) = &self.sender_recovery_cache else {
+            let block = self.payload_validator.ensure_well_formed_payload(payload)?;
+            return Ok(RecoveredSubmission { block, uncached_senders: Default::default() })
         };
-        recovered.map_err(|err| NewPayloadError::Other(err.into()).into())
+
+        let mut uncached_senders = UncachedSenders::default();
+        let block = self
+            .payload_validator
+            .ensure_well_formed_payload_with_senders(payload, &mut |transactions| {
+                cache.recover_signers(transactions, &mut uncached_senders)
+            })?;
+        Ok(RecoveredSubmission { block, uncached_senders })
+    }
+
+    /// Validates the submission and, once it is valid, caches the senders recovered for it.
+    ///
+    /// Caching only senders of valid submissions keeps stale or otherwise invalid submissions from
+    /// evicting entries that the other components sharing the cache rely on.
+    async fn validate_submission(
+        &self,
+        submission: RecoveredSubmission<<E::Primitives as NodePrimitives>::Block>,
+        message: BidTrace,
+        registered_gas_limit: u64,
+        decoded_bal: Option<DecodedBal>,
+    ) -> Result<(), ValidationApiError> {
+        let RecoveredSubmission { block, uncached_senders } = submission;
+        self.validate_message_against_block(block, message, registered_gas_limit, decoded_bal)
+            .await?;
+        if let Some(cache) = &self.sender_recovery_cache {
+            uncached_senders.cache(cache);
+        }
+        Ok(())
     }
 
     /// Core logic for validating the builder submission v3
@@ -404,7 +425,7 @@ where
         &self,
         request: BuilderBlockValidationRequestV3,
     ) -> Result<(), ValidationApiError> {
-        let block = self.recover_payload(ExecutionData {
+        let submission = self.recover_payload(ExecutionData {
             payload: ExecutionPayload::V3(request.request.execution_payload),
             sidecar: ExecutionPayloadSidecar::v3(CancunPayloadFields {
                 parent_beacon_block_root: request.parent_beacon_block_root,
@@ -412,8 +433,8 @@ where
             }),
         })?;
 
-        self.validate_message_against_block(
-            block,
+        self.validate_submission(
+            submission,
             request.request.message,
             request.registered_gas_limit,
             None,
@@ -426,7 +447,7 @@ where
         &self,
         request: BuilderBlockValidationRequestV4,
     ) -> Result<(), ValidationApiError> {
-        let block = self.recover_payload(ExecutionData {
+        let submission = self.recover_payload(ExecutionData {
             payload: ExecutionPayload::V3(request.request.execution_payload),
             sidecar: ExecutionPayloadSidecar::v4(
                 CancunPayloadFields {
@@ -441,8 +462,8 @@ where
             ),
         })?;
 
-        self.validate_message_against_block(
-            block,
+        self.validate_submission(
+            submission,
             request.request.message,
             request.registered_gas_limit,
             None,
@@ -458,7 +479,7 @@ where
         let payload = ExecutionPayload::V3(request.request.execution_payload);
         validate_message_against_payload(&request.request.message, &payload)?;
 
-        let block = self.recover_payload(ExecutionData {
+        let submission = self.recover_payload(ExecutionData {
             payload,
             sidecar: ExecutionPayloadSidecar::v4(
                 CancunPayloadFields {
@@ -476,8 +497,8 @@ where
 
         // Check block size as per EIP-7934 (only applies when Osaka hardfork is active)
         let chain_spec = self.provider.chain_spec();
-        if chain_spec.is_osaka_active_at_timestamp(block.timestamp()) {
-            let rlp_length = block.rlp_length();
+        if chain_spec.is_osaka_active_at_timestamp(submission.block.timestamp()) {
+            let rlp_length = submission.block.rlp_length();
             if rlp_length > MAX_RLP_BLOCK_SIZE {
                 return Err(ValidationApiError::Consensus(ConsensusError::BlockTooLarge {
                     rlp_length,
@@ -486,8 +507,8 @@ where
             }
         }
 
-        self.validate_message_against_block(
-            block,
+        self.validate_submission(
+            submission,
             request.request.message,
             request.registered_gas_limit,
             None,
@@ -507,7 +528,7 @@ where
             DecodedBal::from_rlp_bytes(payload.as_v4().unwrap().block_access_list.clone())
                 .map_err(ValidationApiError::InvalidBlockAccessList)?;
 
-        let block = self.recover_payload(ExecutionData {
+        let submission = self.recover_payload(ExecutionData {
             payload,
             sidecar: ExecutionPayloadSidecar::v4(
                 CancunPayloadFields {
@@ -524,8 +545,8 @@ where
         })?;
 
         let chain_spec = self.provider.chain_spec();
-        if chain_spec.is_osaka_active_at_timestamp(block.timestamp()) {
-            let rlp_length = block.rlp_length();
+        if chain_spec.is_osaka_active_at_timestamp(submission.block.timestamp()) {
+            let rlp_length = submission.block.rlp_length();
             if rlp_length > MAX_RLP_BLOCK_SIZE {
                 return Err(ValidationApiError::Consensus(ConsensusError::BlockTooLarge {
                     rlp_length,
@@ -534,8 +555,8 @@ where
             }
         }
 
-        self.validate_message_against_block(
-            block,
+        self.validate_submission(
+            submission,
             request.request.message,
             request.registered_gas_limit,
             Some(decoded_bal),
@@ -670,6 +691,13 @@ pub struct ValidationApiInner<Provider, E: ConfigureEvm, T: PayloadTypes> {
     sender_recovery_cache: Option<SenderRecoveryCache>,
     /// Validation metrics
     metrics: ValidationMetrics,
+}
+
+/// A submitted block with recovered senders, ready for validation.
+struct RecoveredSubmission<B: Block> {
+    block: RecoveredBlock<B>,
+    /// Senders recovered for this submission that are cached once it validated.
+    uncached_senders: UncachedSenders,
 }
 
 /// Ensures that the raw execution payload fields match the corresponding [`BidTrace`] fields.

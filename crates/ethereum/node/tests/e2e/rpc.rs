@@ -593,7 +593,7 @@ async fn test_flashbots_validate_uses_shared_sender_recovery_cache() -> eyre::Re
     assert!(payload.block().body().transactions.iter().any(|tx| *tx.tx_hash() == tx_hash));
     assert_eq!(cache.get(&tx_hash), None);
 
-    let request = BuilderBlockValidationRequestV3 {
+    let mut request = BuilderBlockValidationRequestV3 {
         request: SignedBidSubmissionV3 {
             message: BidTrace {
                 parent_hash: payload.block().parent_hash,
@@ -613,20 +613,20 @@ async fn test_flashbots_validate_uses_shared_sender_recovery_cache() -> eyre::Re
         registered_gas_limit: payload.block().gas_limit,
     };
 
+    // senders recovered for a submission that fails validation are not cached
+    request.registered_gas_limit -= 1;
+    assert!(provider
+        .raw_request::<_, ()>("flashbots_validateBuilderSubmissionV3".into(), (&request,))
+        .await
+        .is_err());
+    assert_eq!(cache.get(&tx_hash), None);
+
+    request.registered_gas_limit += 1;
     provider
         .raw_request::<_, ()>("flashbots_validateBuilderSubmissionV3".into(), (&request,))
         .await?;
     // validation cached the recovered sender for the other components sharing the cache
     assert_eq!(cache.get(&tx_hash), Some(sender));
-
-    // A cached sender is reused without recovering the signature: with a wrong entry, standing
-    // in for a sender recovered by another component, the block executes with that sender and
-    // fails validation.
-    cache.insert(tx_hash, Address::ZERO);
-    assert!(provider
-        .raw_request::<_, ()>("flashbots_validateBuilderSubmissionV3".into(), (&request,))
-        .await
-        .is_err());
 
     Ok(())
 }

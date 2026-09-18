@@ -11,12 +11,18 @@
 
 extern crate alloc;
 
+use alloc::vec::Vec;
 use alloy_consensus::BlockHeader;
+use alloy_primitives::Address;
 use reth_payload_primitives::{
     EngineApiMessageVersion, EngineObjectValidationError, InvalidPayloadAttributesError,
     NewPayloadError, PayloadAttributes, PayloadOrAttributes, PayloadTypes,
 };
-use reth_primitives_traits::{Block, RecoveredBlock, SealedBlock, SealedHeader};
+use reth_primitives_traits::{
+    block::{error::SealedBlockRecoveryError, BlockTx},
+    transaction::signed::RecoveryError,
+    Block, BlockBody, RecoveredBlock, SealedBlock, SealedHeader,
+};
 use reth_storage_api::{errors::ProviderResult, StateProviderBox};
 use reth_trie_common::HashedPostState;
 use serde::{de::DeserializeOwned, Serialize};
@@ -210,6 +216,27 @@ pub trait PayloadValidator<Types: PayloadTypes>: Send + Sync + Unpin + 'static {
     ) -> Result<RecoveredBlock<Self::Block>, NewPayloadError> {
         let sealed_block = self.convert_payload_to_block(payload)?;
         sealed_block.try_recover().map_err(|e| NewPayloadError::Other(e.into()))
+    }
+
+    /// Like [`Self::ensure_well_formed_payload`], but recovers the transaction senders with
+    /// `recover_senders`, which receives the block's transactions and returns their senders in
+    /// order.
+    ///
+    /// This lets callers reuse already recovered senders, for example from a cache. Implementers
+    /// that add checks to [`Self::ensure_well_formed_payload`] must apply them here as well.
+    fn ensure_well_formed_payload_with_senders(
+        &self,
+        payload: Types::ExecutionData,
+        recover_senders: &mut dyn FnMut(
+            &[BlockTx<Self::Block>],
+        ) -> Result<Vec<Address>, RecoveryError>,
+    ) -> Result<RecoveredBlock<Self::Block>, NewPayloadError> {
+        let sealed_block = self.convert_payload_to_block(payload)?;
+        let recovered = match recover_senders(sealed_block.body().transactions()) {
+            Ok(senders) => RecoveredBlock::try_recover_sealed_with_senders(sealed_block, senders),
+            Err(_) => Err(SealedBlockRecoveryError::new(sealed_block)),
+        };
+        recovered.map_err(|e| NewPayloadError::Other(e.into()))
     }
 
     /// Verifies payload post-execution w.r.t. hashed state updates.

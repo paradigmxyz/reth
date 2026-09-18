@@ -45,7 +45,7 @@ mod engine;
 #[cfg(feature = "std")]
 pub use engine::{ConfigureEngineEvm, ConvertTx, ExecutableTxIterator, ExecutableTxTuple};
 mod sender_recovery;
-pub use sender_recovery::SenderRecoveryCache;
+pub use sender_recovery::{SenderRecoveryCache, UncachedSenders};
 
 #[cfg(feature = "metrics")]
 pub mod metrics;
