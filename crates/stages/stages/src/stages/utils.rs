@@ -28,6 +28,16 @@ use tracing::info;
 
 /// Number of blocks before pushing indices from cache to [`Collector`]
 const DEFAULT_CACHE_THRESHOLD: u64 = 100_000;
+/// Maximum number of logical keys held in a history collection cache.
+const HISTORY_CACHE_KEY_LIMIT: usize = 500_000;
+/// Maximum number of block numbers held in a history collection cache.
+const HISTORY_CACHE_INDEX_LIMIT: usize = 8_000_000;
+
+const fn history_cache_limit_reached(keys: usize, indices: usize, blocks: u64) -> bool {
+    keys >= HISTORY_CACHE_KEY_LIMIT ||
+        indices >= HISTORY_CACHE_INDEX_LIMIT ||
+        blocks >= DEFAULT_CACHE_THRESHOLD
+}
 
 /// Collects all history (`H`) indices for a range of changesets (`CS`) and stores them in a
 /// [`Collector`].
@@ -77,25 +87,31 @@ where
     let total_changesets = provider.tx_ref().entries::<CS>()?;
     let interval = (total_changesets / 1000).max(1);
 
-    let mut flush_counter = 0;
-    let mut current_block_number = u64::MAX;
+    let mut cached_blocks = 0;
+    let mut cached_indices = 0;
+    let mut current_block_number = None;
     for (idx, entry) in changeset_cursor.walk_range(range)?.enumerate() {
         let (block_number, key) = partial_key_factory(entry?);
-        cache.entry(key).or_default().push(block_number);
 
         if idx > 0 && idx.is_multiple_of(interval) && total_changesets > 1000 {
             info!(target: "sync::stages::index_history", progress = %format_args!("{:.4}%", (idx as f64 / total_changesets as f64) * 100.0), "Collecting indices");
         }
 
-        // Make sure we only flush the cache every DEFAULT_CACHE_THRESHOLD blocks.
-        if current_block_number != block_number {
-            current_block_number = block_number;
-            flush_counter += 1;
-            if flush_counter > DEFAULT_CACHE_THRESHOLD {
+        // Check limits before the first row of a new block so a flush never splits one block.
+        if current_block_number != Some(block_number) {
+            if current_block_number.is_some() &&
+                history_cache_limit_reached(cache.len(), cached_indices, cached_blocks)
+            {
                 collect(&mut cache)?;
-                flush_counter = 0;
+                cached_blocks = 0;
+                cached_indices = 0;
             }
+            current_block_number = Some(block_number);
+            cached_blocks += 1;
         }
+
+        cache.entry(key).or_default().push(block_number);
+        cached_indices += 1;
     }
     collect(&mut cache)?;
 
@@ -144,28 +160,34 @@ where
 
     let walker = static_file_provider.walk_account_changeset_range(range);
 
-    let mut flush_counter = 0;
-    let mut current_block_number = u64::MAX;
+    let mut cached_blocks = 0;
+    let mut cached_indices = 0;
+    let mut current_block_number = None;
 
     for changeset_result in walker {
         let (block_number, AccountBeforeTx { address, .. }) = changeset_result?;
+
+        // Check limits before the first row of a new block so a flush never splits one block.
+        if current_block_number != Some(block_number) {
+            if let Some(completed_block) = current_block_number &&
+                history_cache_limit_reached(cache.len(), cached_indices, cached_blocks)
+            {
+                info!(
+                    target: "sync::stages::index_history",
+                    processed_blocks = completed_block.saturating_sub(start_block) + 1,
+                    current_block = completed_block,
+                    "Collecting indices"
+                );
+                collect_indices(cache.drain(), &mut insert_fn)?;
+                cached_blocks = 0;
+                cached_indices = 0;
+            }
+            current_block_number = Some(block_number);
+            cached_blocks += 1;
+        }
+
         cache.entry(address).or_default().push(block_number);
-
-        if block_number != current_block_number {
-            current_block_number = block_number;
-            flush_counter += 1;
-        }
-
-        if flush_counter > DEFAULT_CACHE_THRESHOLD {
-            info!(
-                target: "sync::stages::index_history",
-                processed_blocks = current_block_number.saturating_sub(start_block) + 1,
-                current_block = current_block_number,
-                "Collecting indices"
-            );
-            collect_indices(cache.drain(), &mut insert_fn)?;
-            flush_counter = 0;
-        }
+        cached_indices += 1;
     }
     collect_indices(cache.into_iter(), insert_fn)?;
 
@@ -199,28 +221,34 @@ where
 
     let walker = static_file_provider.walk_storage_changeset_range(range);
 
-    let mut flush_counter = 0;
-    let mut current_block_number = u64::MAX;
+    let mut cached_blocks = 0;
+    let mut cached_indices = 0;
+    let mut current_block_number = None;
 
     for changeset_result in walker {
         let (BlockNumberAddress((block_number, address)), storage) = changeset_result?;
+
+        // Check limits before the first row of a new block so a flush never splits one block.
+        if current_block_number != Some(block_number) {
+            if let Some(completed_block) = current_block_number &&
+                history_cache_limit_reached(cache.len(), cached_indices, cached_blocks)
+            {
+                info!(
+                    target: "sync::stages::index_history",
+                    processed_blocks = completed_block.saturating_sub(start_block) + 1,
+                    current_block = completed_block,
+                    "Collecting indices"
+                );
+                collect_indices(cache.drain(), &mut insert_fn)?;
+                cached_blocks = 0;
+                cached_indices = 0;
+            }
+            current_block_number = Some(block_number);
+            cached_blocks += 1;
+        }
+
         cache.entry(AddressStorageKey((address, storage.key))).or_default().push(block_number);
-
-        if block_number != current_block_number {
-            current_block_number = block_number;
-            flush_counter += 1;
-        }
-
-        if flush_counter > DEFAULT_CACHE_THRESHOLD {
-            info!(
-                target: "sync::stages::index_history",
-                processed_blocks = current_block_number.saturating_sub(start_block) + 1,
-                current_block = current_block_number,
-                "Collecting indices"
-            );
-            collect_indices(cache.drain(), &mut insert_fn)?;
-            flush_counter = 0;
-        }
+        cached_indices += 1;
     }
 
     collect_indices(cache.into_iter(), insert_fn)?;
