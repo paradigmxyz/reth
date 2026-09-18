@@ -4214,6 +4214,77 @@ mod tests {
         }
     }
 
+    #[test]
+    fn test_history_retry_repairs_auto_commit_between_shard_puts() {
+        let temp_dir = TempDir::new().unwrap();
+        let address = Address::repeat_byte(0x42);
+        let shard_size = NUM_OF_INDICES_IN_SHARD as u64;
+        let initial = BlockNumberList::new_pre_sorted(0..shard_size);
+
+        {
+            let provider =
+                RocksDBBuilder::new(temp_dir.path()).with_default_tables().build().unwrap();
+            let mut initial_batch = provider.batch();
+            initial_batch
+                .put::<tables::AccountsHistory>(ShardedKey::last(address), &initial)
+                .unwrap();
+            initial_batch.commit().unwrap();
+
+            let prepared = prepare_history_shard_writes_serial::<tables::AccountsHistory, _>(
+                BTreeMap::from([(address, vec![shard_size])]),
+                |key| provider.get::<tables::AccountsHistory>(key),
+            )
+            .unwrap();
+            let (completed_key, completed_shard) = prepared.into_writes().next().unwrap();
+            assert_eq!(completed_key, ShardedKey::new(address, shard_size - 1));
+
+            // A one-byte threshold commits the completed shard before the new sentinel shard is
+            // written. Ending the scope simulates interruption at that exact boundary.
+            let mut interrupted_batch = RocksDBBatch {
+                provider: &provider,
+                inner: WriteBatchWithTransaction::<true>::default(),
+                buf: Vec::new(),
+                auto_commit_threshold: Some(1),
+            };
+            interrupted_batch
+                .put::<tables::AccountsHistory>(completed_key.clone(), &completed_shard)
+                .unwrap();
+            assert!(interrupted_batch.is_empty());
+            assert!(
+                provider.get::<tables::AccountsHistory>(completed_key).unwrap().is_some(),
+                "the completed shard should have auto-committed"
+            );
+            assert_eq!(
+                provider
+                    .get::<tables::AccountsHistory>(ShardedKey::last(address))
+                    .unwrap()
+                    .unwrap()
+                    .iter()
+                    .collect::<Vec<_>>(),
+                (0..shard_size).collect::<Vec<_>>()
+            );
+        }
+
+        let reopened = RocksDBBuilder::new(temp_dir.path()).with_default_tables().build().unwrap();
+        let prepared = prepare_history_shard_writes_serial::<tables::AccountsHistory, _>(
+            BTreeMap::from([(address, vec![shard_size])]),
+            |key| reopened.get::<tables::AccountsHistory>(key),
+        )
+        .unwrap();
+        let mut retry_batch = reopened.batch();
+        for (key, shard) in prepared.into_writes() {
+            retry_batch.put::<tables::AccountsHistory>(key, &shard).unwrap();
+        }
+        retry_batch.commit().unwrap();
+
+        let shards = reopened.account_history_shards(address).unwrap();
+        assert_eq!(shards.len(), 2);
+        assert_eq!(shards[0].0, ShardedKey::new(address, shard_size - 1));
+        assert_eq!(shards[0].1.iter().collect::<Vec<_>>(), (0..shard_size).collect::<Vec<_>>());
+        assert_eq!(shards[1].0, ShardedKey::last(address));
+        assert_eq!(shards[1].1.iter().collect::<Vec<_>>(), vec![shard_size]);
+    }
+
     // ==================== PARAMETERIZED PRUNE TESTS ====================
 
     /// Test case for account history pruning
