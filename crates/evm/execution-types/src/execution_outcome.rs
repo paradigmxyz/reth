@@ -546,8 +546,7 @@ impl<T> ExecutionOutcome<T> {
         } = other;
         let other_receipts_len = receipts.len();
         Self::adjust_reverts_for_prior_wipes(self.state.inner(), &mut block_reverts);
-        let mut accumulator = BlockStateAccumulator::new();
-        state::extend_execution_state(&mut accumulator, &self.state);
+        let mut accumulator = core::mem::take(&mut self.state).into_inner();
         state::extend_execution_state(&mut accumulator, &other_state);
         self.state = accumulator.into();
         self.extend_block_states(other_block_states, other_receipts_len);
