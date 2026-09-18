@@ -69,8 +69,10 @@ async fn run_selfdestruct_suite(fork: EthereumHardfork) -> eyre::Result<()> {
 
     // low persistence thresholds so the scenario blocks reach the database and the persisted
     // trie representation can be verified at the end of the suite
-    let tree_config =
-        TreeConfig::default().with_persistence_threshold(2).with_memory_block_buffer_target(1);
+    let tree_config = TreeConfig::default()
+        .with_num_state_masking_blocks(0)
+        .with_persistence_threshold(2)
+        .with_memory_block_buffer_target(1);
     let (mut nodes, wallet) =
         setup_engine::<EthereumNode>(1, fork_spec(fork), false, tree_config, move |timestamp| {
             eth_payload_attributes_for_fork(fork, timestamp)

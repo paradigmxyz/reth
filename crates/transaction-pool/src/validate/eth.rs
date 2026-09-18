@@ -487,8 +487,7 @@ where
         };
 
         // Reject transactions with a nonce equal to U64::max according to EIP-2681
-        let tx_nonce = transaction.nonce();
-        if tx_nonce == u64::MAX {
+        if transaction.requires_nonce_bound_check() && transaction.nonce() == u64::MAX {
             return Err(InvalidPoolTransactionError::Eip2681)
         }
 
@@ -1700,6 +1699,34 @@ mod tests {
         let outcome = validator.validate_one(TransactionOrigin::External, transaction);
 
         assert!(outcome.is_valid());
+    }
+
+    #[test]
+    fn validates_nonce_bound() {
+        let provider = MockEthProvider::default().with_genesis_block();
+        let validator = EthTransactionValidatorBuilder::new(provider, test_evm_config())
+            .build(InMemoryBlobStore::default());
+        let transaction = |nonce| {
+            EthPooledTransaction::try_from_consensus(
+                TransactionBuilder::default()
+                    .chain_id(validator.chain_id())
+                    .nonce(nonce)
+                    .gas_limit(21_000)
+                    .to(Address::ZERO)
+                    .into_eip1559()
+                    .try_into_recovered()
+                    .unwrap(),
+            )
+            .unwrap()
+        };
+
+        assert!(validator
+            .validate_stateless(TransactionOrigin::External, &transaction(u64::MAX - 1))
+            .is_ok());
+        assert!(matches!(
+            validator.validate_stateless(TransactionOrigin::External, &transaction(u64::MAX)),
+            Err(InvalidPoolTransactionError::Eip2681)
+        ));
     }
 
     #[test]

@@ -12,7 +12,7 @@ use reth_provider::{
 };
 use reth_rpc_eth_api::{helpers::EthTransactions, EthApiServer};
 use reth_tasks::Runtime;
-use std::{num::NonZeroUsize, sync::Arc};
+use std::{num::NonZeroUsize, sync::Arc, time::Duration};
 
 #[tokio::test]
 async fn can_run_dev_node() -> eyre::Result<()> {
@@ -38,12 +38,22 @@ async fn can_run_dev_node() -> eyre::Result<()> {
 
     assert_chain_advances(&node).await;
 
-    let (safe_changed, finalized_changed) =
-        tokio::join!(safe_block.changed(), finalized_block.changed());
-    safe_changed?;
-    finalized_changed?;
-
     let chain_info = node.provider.chain_info()?;
+    // Startup can leave an unread genesis notification, and the canonical head notification
+    // precedes the safe/finalized updates. Wait for the mined block itself on both channels.
+    tokio::time::timeout(Duration::from_secs(10), async {
+        tokio::try_join!(
+            safe_block.wait_for(|header| {
+                header.as_ref().is_some_and(|header| header.num_hash() == chain_info.into())
+            }),
+            finalized_block.wait_for(|header| {
+                header.as_ref().is_some_and(|header| header.num_hash() == chain_info.into())
+            }),
+        )
+        .map(|_| ())
+    })
+    .await??;
+
     assert_eq!(node.provider.safe_block_num_hash()?, Some(chain_info.into()));
     assert_eq!(node.provider.finalized_block_num_hash()?, Some(chain_info.into()));
 

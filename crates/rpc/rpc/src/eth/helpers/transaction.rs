@@ -1,7 +1,5 @@
 //! Contains RPC handler implementations specific to transactions
 
-use std::time::Duration;
-
 use crate::EthApi;
 use alloy_consensus::BlobTransactionValidationError;
 use alloy_eips::{eip7594::BlobTransactionSidecarVariant, BlockId, Typed2718};
@@ -29,11 +27,6 @@ where
     #[inline]
     fn signers(&self) -> &SignersForRpc<Self::Provider, Self::NetworkTypes> {
         self.inner.signers()
-    }
-
-    #[inline]
-    fn send_raw_transaction_sync_timeout(&self) -> Duration {
-        self.inner.send_raw_transaction_sync_timeout()
     }
 
     async fn send_pool_transaction(
@@ -131,6 +124,8 @@ where
 
 #[cfg(test)]
 mod tests {
+    use std::time::Duration;
+
     use super::*;
     use crate::eth::helpers::{signer::DevSigner, types::EthRpcConverter};
     use alloy_consensus::{

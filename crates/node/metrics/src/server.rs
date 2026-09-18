@@ -494,7 +494,10 @@ mod tests {
     use socket2::{Domain, Socket, Type};
     use std::{
         net::{SocketAddr, TcpListener},
-        sync::atomic::{AtomicUsize, Ordering},
+        sync::{
+            atomic::{AtomicUsize, Ordering},
+            mpsc, Mutex,
+        },
     };
 
     fn get_random_available_addr() -> SocketAddr {
@@ -569,14 +572,24 @@ mod tests {
         install_prometheus_recorder();
 
         let collections = Arc::new(AtomicUsize::new(0));
+        let (release, wait_for_release) = mpsc::channel();
+        let wait_for_release = Mutex::new(Some(wait_for_release));
+        let completed = Arc::new(tokio::sync::Notify::new());
         let hooks = Hooks::builder()
             .with_background_interval(Duration::from_secs(60))
             .with_background_hook({
                 let collections = collections.clone();
+                let completed = completed.clone();
                 move || {
-                    std::thread::sleep(Duration::from_secs(2));
+                    // Dropping the sender also unblocks the hook if a scrape assertion fails.
+                    if let Some(wait_for_release) = wait_for_release.lock().unwrap().take() &&
+                        wait_for_release.recv().is_err()
+                    {
+                        return
+                    }
                     let collections = collections.fetch_add(1, Ordering::Relaxed) + 1;
                     metrics::gauge!("test_background_hook_collections").set(collections as f64);
+                    completed.notify_one();
                 }
             })
             .build();
@@ -611,9 +624,8 @@ mod tests {
         assert_eq!(collections.load(Ordering::Relaxed), 0);
 
         // once it completes, its values are rendered by the following scrape
-        while collections.load(Ordering::Relaxed) == 0 {
-            tokio::time::sleep(Duration::from_millis(10)).await;
-        }
+        release.send(()).unwrap();
+        tokio::time::timeout(Duration::from_secs(10), completed.notified()).await.unwrap();
         let body = Client::new().get(&url).send().await.unwrap().text().await.unwrap();
         assert!(
             body.contains("test_background_hook_collections"),
