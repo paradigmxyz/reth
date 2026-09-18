@@ -4265,19 +4265,35 @@ mod tests {
             );
         }
 
-        let reopened = RocksDBBuilder::new(temp_dir.path()).with_default_tables().build().unwrap();
-        let prepared = prepare_history_shard_writes_serial::<tables::AccountsHistory, _>(
-            BTreeMap::from([(address, vec![shard_size])]),
-            |key| reopened.get::<tables::AccountsHistory>(key),
-        )
-        .unwrap();
-        let mut retry_batch = reopened.batch();
-        for (key, shard) in prepared.into_writes() {
-            retry_batch.put::<tables::AccountsHistory>(key, &shard).unwrap();
-        }
-        retry_batch.commit().unwrap();
+        {
+            let reopened =
+                RocksDBBuilder::new(temp_dir.path()).with_default_tables().build().unwrap();
+            let completed_key = ShardedKey::new(address, shard_size - 1);
+            assert!(reopened.get::<tables::AccountsHistory>(completed_key).unwrap().is_some());
+            assert_eq!(
+                reopened
+                    .get::<tables::AccountsHistory>(ShardedKey::last(address))
+                    .unwrap()
+                    .unwrap()
+                    .iter()
+                    .collect::<Vec<_>>(),
+                (0..shard_size).collect::<Vec<_>>()
+            );
 
-        let shards = reopened.account_history_shards(address).unwrap();
+            let prepared = prepare_history_shard_writes_serial::<tables::AccountsHistory, _>(
+                BTreeMap::from([(address, vec![shard_size])]),
+                |key| reopened.get::<tables::AccountsHistory>(key),
+            )
+            .unwrap();
+            let mut retry_batch = reopened.batch();
+            for (key, shard) in prepared.into_writes() {
+                retry_batch.put::<tables::AccountsHistory>(key, &shard).unwrap();
+            }
+            retry_batch.commit().unwrap();
+        }
+
+        let repaired = RocksDBBuilder::new(temp_dir.path()).with_default_tables().build().unwrap();
+        let shards = repaired.account_history_shards(address).unwrap();
         assert_eq!(shards.len(), 2);
         assert_eq!(shards[0].0, ShardedKey::new(address, shard_size - 1));
         assert_eq!(shards[0].1.iter().collect::<Vec<_>>(), (0..shard_size).collect::<Vec<_>>());
