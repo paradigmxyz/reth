@@ -73,3 +73,8 @@ serde_json.workspace = true
 
 [features]
 js-tracer = ["revm-inspectors/js-tracer"]
+account-ext = [
+    "reth-revm/account-ext",
+    "reth-rpc-convert/account-ext",
+    "reth-transaction-pool/account-ext",
+]

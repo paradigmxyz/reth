@@ -52,3 +52,8 @@ alloy-consensus.workspace = true
 
 [features]
 rayon = ["dep:rayon", "dep:reth-tasks"]
+account-ext = [
+    "reth-chain-state/account-ext",
+    "reth-trie-db/account-ext",
+    "reth-tasks?/account-ext",
+]

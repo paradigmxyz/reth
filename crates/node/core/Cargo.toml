@@ -92,6 +92,12 @@ min-trace-logs = ["tracing/release_max_level_trace"]
 
 # Debug recording for sparse trie mutations
 trie-debug = ["reth-engine-primitives/trie-debug"]
+account-ext = [
+    "reth-config/account-ext",
+    "reth-engine-local/account-ext",
+    "reth-network/account-ext",
+    "reth-rpc-eth-types/account-ext",
+]
 
 [build-dependencies]
 vergen = { workspace = true, features = ["build", "cargo", "emit_and_set"] }

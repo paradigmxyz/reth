@@ -47,6 +47,7 @@ parking_lot = { workspace = true, optional = true }
 
 [dev-dependencies]
 # reth
+reth-codecs.workspace = true
 reth-primitives-traits = { workspace = true, features = ["test-utils"] }
 reth-tracing.workspace = true
 reth-trie-common = { workspace = true, features = ["test-utils", "arbitrary"] }
@@ -57,13 +58,16 @@ triehash.workspace = true
 # misc
 assert_matches.workspace = true
 criterion.workspace = true
+modular-bitfield.workspace = true
 parking_lot.workspace = true
 pretty_assertions.workspace = true
 proptest-arbitrary-interop.workspace = true
 proptest.workspace = true
 rand.workspace = true
+serde.workspace = true
 
 [features]
+account-ext = ["reth-metrics?/account-ext", "reth-trie-sparse/account-ext"]
 metrics = ["reth-metrics", "dep:metrics"]
 serde = [
     "alloy-primitives/serde",
@@ -81,6 +85,7 @@ serde = [
     "parking_lot/serde",
     "rand/serde",
     "revm/serde",
+    "reth-codecs/serde",
 ]
 test-utils = [
     "triehash",
@@ -89,6 +94,7 @@ test-utils = [
     "reth-trie-common/test-utils",
     "reth-trie-sparse/test-utils",
     "reth-stages-types/test-utils",
+    "reth-codecs/test-utils",
 ]
 serde-bincode-compat = [
     "alloy-consensus/serde-bincode-compat",

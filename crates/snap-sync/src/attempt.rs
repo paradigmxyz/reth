@@ -179,7 +179,7 @@ impl<T: MetadataProvider> SnapAttemptStore for T {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, not(feature = "account-ext")))]
 mod tests {
     use super::*;
     use crate::test_utils::insert_generation_headers;

@@ -48,3 +48,6 @@ reth-tasks.workspace = true
 
 [lints]
 workspace = true
+
+[features]
+account-ext = ["reth-config/account-ext", "reth-provider/account-ext", "reth-etl/account-ext"]

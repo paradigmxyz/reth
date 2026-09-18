@@ -48,3 +48,6 @@ reth-evm.workspace = true
 reth-evm-ethereum.workspace = true
 reth-provider = { workspace = true, features = ["test-utils"] }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+
+[features]
+account-ext = ["reth-storage-api/account-ext"]

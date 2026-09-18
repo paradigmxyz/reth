@@ -1204,9 +1204,13 @@ mod tests {
         let proof_handle = ProofWorkerHandle::new(&runtime, ctx, false, proof_result_tx);
 
         // Verify handle can be cloned
-        let _cloned_handle = proof_handle.clone();
+        let cloned_handle = proof_handle.clone();
 
-        // Workers shut down automatically when handle is dropped
+        // Close both work channels, then wait for the named tasks to release their runtime
+        // clones so the runtime cannot be destroyed on one of its own worker threads.
         drop(proof_handle);
+        drop(cloned_handle);
+        runtime.spawn_blocking_named("account-workers", || ()).get();
+        runtime.spawn_blocking_named("storage-workers", || ()).get();
     }
 }

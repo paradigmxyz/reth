@@ -14,4 +14,6 @@ eyre.workspace = true
 tracing.workspace = true
 alloy-primitives.workspace = true
 
+[features]
+account-ext = ["reth-ethereum/account-ext"]
 [lints]

@@ -201,6 +201,8 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
                     if this.provider().chain_spec().is_amsterdam_active_at_timestamp(
                         evm_env.block_env.timestamp().saturating_to(),
                     ) {
+                        reth_storage_api::ensure_no_account_extensions("BAL")
+                            .map_err(Self::Error::from_eth_err)?;
                         db.bal_state = BalState::new().with_bal_builder();
                     }
 

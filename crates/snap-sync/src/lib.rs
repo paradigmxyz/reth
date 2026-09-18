@@ -47,7 +47,8 @@ mod pivot;
 mod session;
 mod storage;
 
-#[cfg(test)]
+// Snap fixtures exercise the wire protocol, which rejects account extensions.
+#[cfg(all(test, not(feature = "account-ext")))]
 mod test_utils;
 
 pub use account::{

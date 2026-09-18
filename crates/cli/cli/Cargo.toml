@@ -20,3 +20,6 @@ alloy-genesis.workspace = true
 clap.workspace = true
 eyre.workspace = true
 serde_json.workspace = true
+
+[features]
+account-ext = ["alloy-genesis/account-ext", "reth-db/account-ext"]

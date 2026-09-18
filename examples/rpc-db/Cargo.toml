@@ -12,4 +12,6 @@ reth-ethereum = { workspace = true, features = ["test-utils", "node", "provider"
 tokio = { workspace = true, features = ["full"] }
 eyre.workspace = true
 
+[features]
+account-ext = ["reth-ethereum/account-ext"]
 [lints]

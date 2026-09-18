@@ -32,6 +32,7 @@ reth-ethereum-forks.workspace = true
 alloy-consensus.workspace = true
 
 [features]
+account-ext = ["reth-trie?/account-ext", "reth-storage-api/account-ext"]
 default = ["std"]
 std = [
     "reth-primitives-traits/std",

@@ -128,6 +128,12 @@ arbitrary = [
     "imbl/arbitrary",
     "reth-transaction-pool/arbitrary",
 ]
+account-ext = [
+    "reth-chain-state/account-ext",
+    "reth-eth-wire-types/account-ext",
+    "reth-evm-ethereum/account-ext",
+    "reth-tasks/account-ext",
+]
 
 [[bench]]
 name = "saturated_pool"

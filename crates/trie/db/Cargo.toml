@@ -34,7 +34,7 @@ reth-primitives-traits = { workspace = true, features = ["test-utils", "arbitrar
 reth-db = { workspace = true, features = ["test-utils"] }
 reth-provider = { workspace = true, features = ["test-utils"] }
 reth-stages-types.workspace = true
-reth-trie-common = { workspace = true, features = ["test-utils", "arbitrary"] }
+reth-trie-common = { workspace = true, features = ["test-utils", "arbitrary", "eip1186"] }
 reth-trie = { workspace = true, features = ["test-utils"] }
 
 alloy-consensus.workspace = true
@@ -73,3 +73,4 @@ test-utils = [
     "reth-trie/test-utils",
     "reth-stages-types/test-utils",
 ]
+account-ext = ["reth-db-api/account-ext", "reth-storage-api/account-ext", "reth-trie/account-ext"]

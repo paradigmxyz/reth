@@ -50,3 +50,4 @@ workspace = true
 jemalloc = ["dep:tikv-jemalloc-ctl"]
 jemalloc-prof = ["jemalloc", "dep:jemalloc_pprof", "dep:mappings", "dep:pprof_util", "dep:reth-fs-util", "dep:tempfile"]
 jemalloc-symbols = ["jemalloc-prof", "jemalloc_pprof?/symbolize"]
+account-ext = ["reth-tasks/account-ext"]

@@ -81,3 +81,9 @@ test-utils = [
     "reth-ethereum-primitives/test-utils",
     "reth-trie-sparse/test-utils",
 ]
+account-ext = [
+    "reth-metrics/account-ext",
+    "reth-storage-api/account-ext",
+    "reth-trie/account-ext",
+    "reth-errors/account-ext",
+]

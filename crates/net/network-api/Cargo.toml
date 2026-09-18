@@ -49,3 +49,4 @@ serde = [
     "alloy-consensus/serde",
     "alloy-rpc-types-eth/serde",
 ]
+account-ext = ["reth-network-p2p/account-ext"]

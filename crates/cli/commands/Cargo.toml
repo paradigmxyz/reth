@@ -138,3 +138,4 @@ arbitrary = [
     "reth-primitives-traits/arbitrary",
     "reth-ethereum-primitives/arbitrary",
 ]
+account-ext = ["reth-cli/account-ext", "reth-node-builder/account-ext"]

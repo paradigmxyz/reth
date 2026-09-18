@@ -47,6 +47,7 @@ client = [
     "jsonrpsee/async-client",
     "reth-rpc-eth-api/client",
 ]
+account-ext = ["reth-rpc-eth-api/account-ext"]
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }

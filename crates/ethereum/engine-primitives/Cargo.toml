@@ -42,3 +42,4 @@ std = [
     "reth-engine-primitives/std",
     "reth-primitives-traits/std",
 ]
+account-ext = ["reth-engine-primitives/account-ext"]

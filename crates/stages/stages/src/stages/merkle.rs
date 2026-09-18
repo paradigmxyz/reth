@@ -1,4 +1,7 @@
-use alloy_consensus::{constants::KECCAK_EMPTY, BlockHeader};
+// Accounts are only Copy when account-ext is disabled.
+#![cfg_attr(not(feature = "account-ext"), allow(clippy::clone_on_copy))]
+
+use alloy_consensus::BlockHeader;
 use alloy_primitives::{BlockNumber, Sealable, B256};
 use reth_codecs::Compact;
 use reth_consensus::ConsensusError;
@@ -292,9 +295,7 @@ where
                                     .map(StoredSubNode::from)
                                     .collect(),
                                 storage_state.state.hash_builder.into(),
-                                storage_state.account.nonce,
-                                storage_state.account.balance,
-                                storage_state.account.bytecode_hash.unwrap_or(KECCAK_EMPTY),
+                                storage_state.account,
                             ));
                     }
                     self.save_execution_checkpoint(provider, Some(checkpoint))?;
@@ -698,7 +699,7 @@ mod tests {
                 .collect::<BTreeMap<_, _>>();
 
             self.db.insert_accounts_and_storages(
-                accounts.iter().map(|(addr, acc)| (*addr, (*acc, std::iter::empty()))),
+                accounts.iter().map(|(addr, acc)| (*addr, (acc.clone(), std::iter::empty()))),
             )?;
 
             let (header, body) = random_block(

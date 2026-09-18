@@ -511,8 +511,13 @@ where
         // merge all transitions into bundle state
         db.merge_transitions(BundleRetention::Reverts);
 
+        let block_access_list = db.take_built_alloy_bal();
+        if block_access_list.is_some() {
+            reth_storage_api::ensure_no_account_extensions("BAL")
+                .map_err(BlockExecutionError::other)?;
+        }
         // Encode the built BAL once and keep the bytes, so callers don't re-encode it.
-        let block_access_list = db.take_built_alloy_bal().map(|bal| {
+        let block_access_list = block_access_list.map(|bal| {
             let mut raw = Vec::new();
             let hash = compute_block_access_list_hash_with_buf(&bal, &mut raw);
             DecodedBal::new_unchecked(bal.into(), raw.into(), hash)
@@ -604,6 +609,10 @@ where
             .map_err(BlockExecutionError::other)?;
 
         let has_bal = block.header().block_access_list_hash().is_some();
+        if has_bal {
+            reth_storage_api::ensure_no_account_extensions("BAL")
+                .map_err(BlockExecutionError::other)?;
+        }
 
         if has_bal {
             executor.evm_mut().db_mut().bal_state.bal_builder = Some(Bal::new());

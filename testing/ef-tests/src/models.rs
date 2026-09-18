@@ -180,7 +180,7 @@ impl State {
                     nonce: Some(account.nonce.try_into().unwrap()),
                     code: Some(account.code).filter(|c| !c.is_empty()),
                     storage: Some(storage),
-                    private_key: None,
+                    ..Default::default()
                 };
                 (address, account)
             })

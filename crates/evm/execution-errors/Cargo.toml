@@ -31,3 +31,4 @@ std = [
     "reth-storage-errors/std",
     "alloy-evm/std",
 ]
+account-ext = ["reth-storage-errors/account-ext"]

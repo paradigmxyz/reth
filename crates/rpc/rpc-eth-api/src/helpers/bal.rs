@@ -23,6 +23,8 @@ pub trait GetBlockAccessList: Trace + Call + LoadBlock + RpcNodeCoreExt {
         block_id: BlockId,
     ) -> impl Future<Output = Result<Option<BlockAccessList>, Self::Error>> + Send {
         async move {
+            reth_storage_api::ensure_no_account_extensions("BAL")
+                .map_err(Self::Error::from_eth_err)?;
             if block_id.is_pending() {
                 return Ok(None)
             }
@@ -96,6 +98,8 @@ pub trait GetBlockAccessList: Trace + Call + LoadBlock + RpcNodeCoreExt {
         block_id: BlockId,
     ) -> impl Future<Output = Result<Option<Bytes>, Self::Error>> + Send {
         async move {
+            reth_storage_api::ensure_no_account_extensions("BAL")
+                .map_err(Self::Error::from_eth_err)?;
             let block = self
                 .recovered_block(block_id)
                 .await?

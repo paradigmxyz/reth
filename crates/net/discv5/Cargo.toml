@@ -45,3 +45,6 @@ alloy-primitives = { workspace = true, features = ["rand"] }
 tokio = { workspace = true, features = ["rt-multi-thread"] }
 secp256k1 = { workspace = true, features = ["std", "rand"] }
 rand_08.workspace = true
+
+[features]
+account-ext = ["reth-chainspec/account-ext", "reth-metrics/account-ext"]

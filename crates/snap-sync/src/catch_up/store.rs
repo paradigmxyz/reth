@@ -181,6 +181,7 @@ impl<T: MetadataProvider> SnapCatchUpStore for T {
     where
         Self: DBProvider,
     {
+        reth_storage_api::ensure_no_account_extensions("BAL")?;
         let mut update = BalStateUpdate::default();
         for account_changes in bal {
             let account_info = account_changes.account_info();
@@ -273,7 +274,22 @@ impl<T: MetadataProvider> SnapCatchUpStore for T {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "account-ext"))]
+mod extension_tests {
+    use super::*;
+    use reth_provider::test_utils::create_test_provider_factory;
+    use reth_storage_api::DatabaseProviderFactory;
+
+    #[test]
+    fn rejects_bal_updates_with_account_extensions() {
+        let factory = create_test_provider_factory();
+        let provider = factory.database_provider_rw().unwrap();
+        let error = provider.block_access_list_update(AccountCoverage::COMPLETE, &[]).unwrap_err();
+        assert_eq!(error.to_string(), "BAL does not support account extensions");
+    }
+}
+
+#[cfg(all(test, not(feature = "account-ext")))]
 mod tests {
     use super::*;
     use crate::{

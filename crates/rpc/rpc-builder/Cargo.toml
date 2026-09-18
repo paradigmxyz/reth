@@ -78,3 +78,6 @@ alloy-rpc-types-engine.workspace = true
 serde_json.workspace = true
 clap = { workspace = true, features = ["derive"] }
 reqwest.workspace = true
+
+[features]
+account-ext = ["reth-rpc/account-ext"]

@@ -1568,6 +1568,8 @@ mod tests {
                         code_hash: B256::random(), // Non-empty code hash
                         code: None,
                         account_id: None,
+                        #[cfg(feature = "account-ext")]
+                        extension: Default::default(),
                     }),
                     None, // Destroyed, so no current info
                     Default::default(),
@@ -1613,6 +1615,8 @@ mod tests {
                         code_hash: alloy_primitives::KECCAK256_EMPTY, // Empty code hash = EOA
                         code: None,
                         account_id: None,
+                        #[cfg(feature = "account-ext")]
+                        extension: Default::default(),
                     }),
                     None, // Destroyed
                     Default::default(),

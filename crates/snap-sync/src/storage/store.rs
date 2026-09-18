@@ -237,7 +237,7 @@ pub(crate) fn persisted_storage_root(tx: &impl DbTx, account: B256) -> Result<B2
     failed.map_or(Ok(root), |error| Err(error.into()))
 }
 
-#[cfg(test)]
+#[cfg(all(test, not(feature = "account-ext")))]
 mod tests {
     use super::*;
     use crate::test_utils::{

@@ -224,6 +224,55 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "account-ext")]
+    fn test_account_extensions_roundtrip() -> eyre::Result<()> {
+        use alloy_primitives::Address;
+        use reth_revm::{
+            db::{AccountStatus, BundleAccount},
+            state::AccountInfo,
+        };
+
+        let mut notification = get_test_notification_data()?;
+        let ExExNotification::ChainCommitted { new } = &mut notification else { unreachable!() };
+        let chain = Arc::get_mut(new).unwrap();
+        for (i, payload) in [&[][..], &[0x82, 0xaa][..], &[][..]].into_iter().enumerate() {
+            let info = AccountInfo { nonce: i as u64, ..Default::default() }
+                .with_extension(payload.to_vec());
+            chain.execution_outcome_mut().state_mut().state.insert(
+                Address::with_last_byte(i as u8),
+                BundleAccount::new(
+                    Some(AccountInfo::default()),
+                    Some(info),
+                    Default::default(),
+                    AccountStatus::Changed,
+                ),
+            );
+        }
+        let mut hashed_state = HashedPostState::default();
+        hashed_state.accounts.insert(
+            B256::from([1; 32]),
+            Some(Account { extension: vec![0x82, 0xaa].into(), ..Default::default() }),
+        );
+        hashed_state.accounts.insert(B256::from([2; 32]), Some(Account::default()));
+        let block = chain.blocks().values().next().unwrap().as_ref().clone();
+        let trie_data = LazyTrieData::ready(ComputedTrieData::new(
+            Arc::new(hashed_state.into_sorted()),
+            Default::default(),
+        ));
+        let chain = Chain::new(
+            vec![block],
+            chain.execution_outcome().clone(),
+            BTreeMap::from([(0, trie_data)]),
+        );
+        let notification = ExExNotification::ChainCommitted { new: Arc::new(chain) };
+        let temp_dir = tempfile::tempdir()?;
+        let storage: Storage = Storage::new(&temp_dir)?;
+        storage.write_notification(0, &notification)?;
+        assert_eq!(storage.read_notification(0)?.unwrap().0, notification);
+        Ok(())
+    }
+
+    #[test]
     fn test_decode_legacy_sorted_trie_data() -> eyre::Result<()> {
         let storage_nodes =
             vec![(Nibbles::from_nibbles_unchecked([0x01]), Some(BranchNodeCompact::default()))];
