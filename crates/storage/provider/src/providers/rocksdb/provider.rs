@@ -585,14 +585,14 @@ impl RocksDBProviderInner {
         self.db_rw().delete_cf(cf, key)
     }
 
-    /// Deletes a range of values from a column family.
-    fn delete_range_cf<K: AsRef<[u8]>>(
+    /// Durably deletes a range of values from a column family.
+    fn delete_range_cf_synced<K: AsRef<[u8]>>(
         &self,
         cf: &rocksdb::ColumnFamily,
         from: K,
         to: K,
     ) -> Result<(), rocksdb::Error> {
-        self.db_rw().delete_range_cf(cf, from, to)
+        self.db_rw().delete_range_cf_opt(cf, from, to, &synced_write_options())
     }
 
     /// Returns an iterator over a column family.
@@ -1023,10 +1023,13 @@ impl RocksDBProvider {
     /// Uses `delete_range_cf` from empty key to a max key (256 bytes of 0xFF).
     /// This end key must exceed the maximum encoded key size for any table.
     /// Current max is ~60 bytes (`StorageShardedKey` = 20 + 32 + 8).
+    ///
+    /// The range tombstone is WAL-synced before returning because callers may commit an MDBX
+    /// checkpoint immediately after this operation.
     pub fn clear<T: Table>(&self) -> ProviderResult<()> {
         let cf = self.get_cf_handle::<T>()?;
 
-        self.0.delete_range_cf(cf, &[] as &[u8], &[0xFF; 256]).map_err(|e| {
+        self.0.delete_range_cf_synced(cf, &[] as &[u8], &[0xFF; 256]).map_err(|e| {
             ProviderError::Database(DatabaseError::Delete(DatabaseErrorInfo {
                 message: e.to_string().into(),
                 code: -1,
@@ -3339,6 +3342,28 @@ mod tests {
     }
 
     #[test]
+    fn test_clear_survives_reopen() {
+        let temp_dir = TempDir::new().unwrap();
+
+        {
+            let provider =
+                RocksDBBuilder::new(temp_dir.path()).with_table::<TestTable>().build().unwrap();
+            let mut batch = provider.batch();
+            for key in [0, 1, u64::MAX] {
+                batch.put::<TestTable>(key, &vec![42]).unwrap();
+            }
+            batch.commit().unwrap();
+
+            provider.clear::<TestTable>().unwrap();
+            assert!(provider.first::<TestTable>().unwrap().is_none());
+        }
+
+        let reopened =
+            RocksDBBuilder::new(temp_dir.path()).with_table::<TestTable>().build().unwrap();
+        assert!(reopened.first::<TestTable>().unwrap().is_none());
+    }
+
+    #[test]
     fn test_transaction_read_your_writes() {
         let temp_dir = TempDir::new().unwrap();
         let provider =
@@ -4212,6 +4237,77 @@ mod tests {
             let value = format!("value_{i:04}").into_bytes();
             assert_eq!(provider.get::<TestTable>(i).unwrap(), Some(value));
         }
+    }
+
+    #[test]
+    fn test_history_retry_repairs_auto_commit_between_shard_puts() {
+        let temp_dir = TempDir::new().unwrap();
+        let address = Address::repeat_byte(0x42);
+        let shard_size = NUM_OF_INDICES_IN_SHARD as u64;
+        let initial = BlockNumberList::new_pre_sorted(0..shard_size);
+
+        {
+            let provider =
+                RocksDBBuilder::new(temp_dir.path()).with_default_tables().build().unwrap();
+            let mut initial_batch = provider.batch();
+            initial_batch
+                .put::<tables::AccountsHistory>(ShardedKey::last(address), &initial)
+                .unwrap();
+            initial_batch.commit().unwrap();
+
+            let prepared = prepare_history_shard_writes_serial::<tables::AccountsHistory, _>(
+                BTreeMap::from([(address, vec![shard_size])]),
+                |key| provider.get::<tables::AccountsHistory>(key),
+            )
+            .unwrap();
+            let (completed_key, completed_shard) = prepared.into_writes().next().unwrap();
+            assert_eq!(completed_key, ShardedKey::new(address, shard_size - 1));
+
+            // A one-byte threshold commits the completed shard before the new sentinel shard is
+            // written. Ending the scope simulates interruption at that exact boundary.
+            let mut interrupted_batch = RocksDBBatch {
+                provider: &provider,
+                inner: WriteBatchWithTransaction::<true>::default(),
+                buf: Vec::new(),
+                auto_commit_threshold: Some(1),
+            };
+            interrupted_batch
+                .put::<tables::AccountsHistory>(completed_key.clone(), &completed_shard)
+                .unwrap();
+            assert!(interrupted_batch.is_empty());
+            assert!(
+                provider.get::<tables::AccountsHistory>(completed_key).unwrap().is_some(),
+                "the completed shard should have auto-committed"
+            );
+            assert_eq!(
+                provider
+                    .get::<tables::AccountsHistory>(ShardedKey::last(address))
+                    .unwrap()
+                    .unwrap()
+                    .iter()
+                    .collect::<Vec<_>>(),
+                (0..shard_size).collect::<Vec<_>>()
+            );
+        }
+
+        let reopened = RocksDBBuilder::new(temp_dir.path()).with_default_tables().build().unwrap();
+        let prepared = prepare_history_shard_writes_serial::<tables::AccountsHistory, _>(
+            BTreeMap::from([(address, vec![shard_size])]),
+            |key| reopened.get::<tables::AccountsHistory>(key),
+        )
+        .unwrap();
+        let mut retry_batch = reopened.batch();
+        for (key, shard) in prepared.into_writes() {
+            retry_batch.put::<tables::AccountsHistory>(key, &shard).unwrap();
+        }
+        retry_batch.commit().unwrap();
+
+        let shards = reopened.account_history_shards(address).unwrap();
+        assert_eq!(shards.len(), 2);
+        assert_eq!(shards[0].0, ShardedKey::new(address, shard_size - 1));
+        assert_eq!(shards[0].1.iter().collect::<Vec<_>>(), (0..shard_size).collect::<Vec<_>>());
+        assert_eq!(shards[1].0, ShardedKey::last(address));
+        assert_eq!(shards[1].1.iter().collect::<Vec<_>>(), vec![shard_size]);
     }
 
     // ==================== PARAMETERIZED PRUNE TESTS ====================
