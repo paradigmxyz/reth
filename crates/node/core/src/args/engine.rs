@@ -382,8 +382,8 @@ pub struct EngineArgs {
     )]
     pub txpool_prewarming_enabled: bool,
 
-    /// Enable caching recovered transaction senders across transaction ingress and payload
-    /// execution.
+    /// Enable caching recovered transaction senders across transaction ingress, payload
+    /// execution and builder block validation.
     #[arg(
         long = "engine.sender-recovery-cache",
         env = "RETH_ENGINE_SENDER_RECOVERY_CACHE",

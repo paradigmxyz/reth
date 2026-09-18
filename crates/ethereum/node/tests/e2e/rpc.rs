@@ -556,6 +556,82 @@ async fn test_flashbots_validate_v3() -> eyre::Result<()> {
 }
 
 #[tokio::test]
+async fn test_flashbots_validate_uses_shared_sender_recovery_cache() -> eyre::Result<()> {
+    reth_tracing::init_test_tracing();
+
+    let chain_spec = Arc::new(
+        ChainSpecBuilder::default()
+            .chain(MAINNET.chain)
+            .genesis(serde_json::from_str(include_str!("../assets/genesis.json")).unwrap())
+            .cancun_activated()
+            .build(),
+    );
+
+    let (mut nodes, wallet) =
+        E2ETestSetupBuilder::<EthereumNode, _>::new(1, chain_spec, eth_payload_attributes)
+            .with_node_config_modifier(|mut config| {
+                config.engine.sender_recovery_cache_enabled = true;
+                config
+            })
+            .build()
+            .await?;
+    let mut node = nodes.pop().unwrap();
+    let cache = node.inner.evm_config.sender_recovery_cache.clone().expect("cache is enabled");
+
+    let signer = wallet.wallet_gen().swap_remove(0);
+    let sender = signer.address();
+    let provider =
+        ProviderBuilder::new().wallet(EthereumWallet::new(signer)).connect_http(node.rpc_url());
+
+    let tx_hash = *provider
+        .send_transaction(TransactionRequest::default().to(Address::ZERO))
+        .await?
+        .tx_hash();
+    // The payload is only built, not sent to the engine, so validation is the first component
+    // that recovers this sender.
+    let payload = node.new_payload().await?;
+    assert!(payload.block().body().transactions.iter().any(|tx| *tx.tx_hash() == tx_hash));
+    assert_eq!(cache.get(&tx_hash), None);
+
+    let request = BuilderBlockValidationRequestV3 {
+        request: SignedBidSubmissionV3 {
+            message: BidTrace {
+                parent_hash: payload.block().parent_hash,
+                block_hash: payload.block().hash(),
+                gas_used: payload.block().gas_used,
+                gas_limit: payload.block().gas_limit,
+                ..Default::default()
+            },
+            execution_payload: ExecutionPayloadV3::from_block_unchecked(
+                payload.block().hash(),
+                &payload.block().clone().into_block(),
+            ),
+            blobs_bundle: BlobsBundleV1::new([]),
+            signature: Default::default(),
+        },
+        parent_beacon_block_root: payload.block().parent_beacon_block_root.unwrap(),
+        registered_gas_limit: payload.block().gas_limit,
+    };
+
+    provider
+        .raw_request::<_, ()>("flashbots_validateBuilderSubmissionV3".into(), (&request,))
+        .await?;
+    // validation cached the recovered sender for the other components sharing the cache
+    assert_eq!(cache.get(&tx_hash), Some(sender));
+
+    // A cached sender is reused without recovering the signature: with a wrong entry, standing
+    // in for a sender recovered by another component, the block executes with that sender and
+    // fails validation.
+    cache.insert(tx_hash, Address::ZERO);
+    assert!(provider
+        .raw_request::<_, ()>("flashbots_validateBuilderSubmissionV3".into(), (&request,))
+        .await
+        .is_err());
+
+    Ok(())
+}
+
+#[tokio::test]
 async fn test_flashbots_validate_v4() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
 

@@ -22,7 +22,7 @@ use reth_consensus::{Consensus, FullConsensus};
 use reth_consensus_common::validation::MAX_RLP_BLOCK_SIZE;
 use reth_engine_primitives::PayloadValidator;
 use reth_errors::{BlockExecutionError, ConsensusError, ProviderError};
-use reth_evm::{execute::Executor, ConfigureEvm};
+use reth_evm::{execute::Executor, ConfigureEvm, SenderRecoveryCache};
 use reth_execution_types::BlockExecutionOutput;
 use reth_metrics::{
     metrics,
@@ -31,7 +31,8 @@ use reth_metrics::{
 };
 use reth_node_api::{NewPayloadError, PayloadTypes};
 use reth_primitives_traits::{
-    BlockBody, GotExpected, NodePrimitives, RecoveredBlock, SealedBlock, SealedHeaderFor,
+    block::error::SealedBlockRecoveryError, BlockBody, GotExpected, NodePrimitives, RecoveredBlock,
+    SealedBlock, SealedHeaderFor,
 };
 use reth_revm::{cached::CachedReads, database::StateProviderDatabase};
 use reth_rpc_api::BlockSubmissionValidationApiServer;
@@ -57,6 +58,9 @@ where
     T: PayloadTypes,
 {
     /// Create a new instance of the [`ValidationApi`]
+    ///
+    /// If a `sender_recovery_cache` is given, the senders of submitted blocks are recovered
+    /// through it, reusing senders that other node components have already recovered.
     pub fn new(
         provider: Provider,
         consensus: Arc<dyn FullConsensus<E::Primitives>>,
@@ -66,6 +70,7 @@ where
         payload_validator: Arc<
             dyn PayloadValidator<T, Block = <E::Primitives as NodePrimitives>::Block>,
         >,
+        sender_recovery_cache: Option<SenderRecoveryCache>,
     ) -> Self {
         let ValidationApiConfig { disallow, validation_window } = config;
 
@@ -78,6 +83,7 @@ where
             validation_window,
             cached_state: Default::default(),
             task_spawner,
+            sender_recovery_cache,
             metrics: Default::default(),
         });
 
@@ -371,12 +377,34 @@ where
         Ok(versioned_hashes)
     }
 
+    /// Converts the payload into a block and recovers the transaction senders.
+    ///
+    /// Like the engine's `newPayload` handling, this leaves payload validation and conversion to
+    /// the payload validator and recovers senders through the shared [`SenderRecoveryCache`] if
+    /// one is configured, so senders already recovered on transaction ingress or payload
+    /// execution are reused. Without a cache this matches
+    /// [`PayloadValidator::ensure_well_formed_payload`].
+    fn recover_payload(
+        &self,
+        payload: ExecutionData,
+    ) -> Result<RecoveredBlock<<E::Primitives as NodePrimitives>::Block>, ValidationApiError> {
+        let block = self.payload_validator.convert_payload_to_block(payload)?;
+        let recovered = match &self.sender_recovery_cache {
+            Some(cache) => match cache.recover_signers(block.body().transactions()) {
+                Ok(senders) => Ok(RecoveredBlock::new_sealed(block, senders)),
+                Err(_) => Err(SealedBlockRecoveryError::new(block)),
+            },
+            None => block.try_recover(),
+        };
+        recovered.map_err(|err| NewPayloadError::Other(err.into()).into())
+    }
+
     /// Core logic for validating the builder submission v3
     async fn validate_builder_submission_v3(
         &self,
         request: BuilderBlockValidationRequestV3,
     ) -> Result<(), ValidationApiError> {
-        let block = self.payload_validator.ensure_well_formed_payload(ExecutionData {
+        let block = self.recover_payload(ExecutionData {
             payload: ExecutionPayload::V3(request.request.execution_payload),
             sidecar: ExecutionPayloadSidecar::v3(CancunPayloadFields {
                 parent_beacon_block_root: request.parent_beacon_block_root,
@@ -398,7 +426,7 @@ where
         &self,
         request: BuilderBlockValidationRequestV4,
     ) -> Result<(), ValidationApiError> {
-        let block = self.payload_validator.ensure_well_formed_payload(ExecutionData {
+        let block = self.recover_payload(ExecutionData {
             payload: ExecutionPayload::V3(request.request.execution_payload),
             sidecar: ExecutionPayloadSidecar::v4(
                 CancunPayloadFields {
@@ -430,7 +458,7 @@ where
         let payload = ExecutionPayload::V3(request.request.execution_payload);
         validate_message_against_payload(&request.request.message, &payload)?;
 
-        let block = self.payload_validator.ensure_well_formed_payload(ExecutionData {
+        let block = self.recover_payload(ExecutionData {
             payload,
             sidecar: ExecutionPayloadSidecar::v4(
                 CancunPayloadFields {
@@ -479,7 +507,7 @@ where
             DecodedBal::from_rlp_bytes(payload.as_v4().unwrap().block_access_list.clone())
                 .map_err(ValidationApiError::InvalidBlockAccessList)?;
 
-        let block = self.payload_validator.ensure_well_formed_payload(ExecutionData {
+        let block = self.recover_payload(ExecutionData {
             payload,
             sidecar: ExecutionPayloadSidecar::v4(
                 CancunPayloadFields {
@@ -637,6 +665,9 @@ pub struct ValidationApiInner<Provider, E: ConfigureEvm, T: PayloadTypes> {
     cached_state: RwLock<(B256, CachedReads)>,
     /// Task spawner for blocking operations
     task_spawner: Runtime,
+    /// Cache of recovered transaction senders shared with transaction ingress and payload
+    /// execution, if enabled.
+    sender_recovery_cache: Option<SenderRecoveryCache>,
     /// Validation metrics
     metrics: ValidationMetrics,
 }
