@@ -71,9 +71,9 @@ impl reth_codecs::Compact for HashBuilderState {
         let mut len = 0;
 
         // Collection codecs return flag bits, not their encoded byte length.
-        let start = buf.as_mut().len();
+        let start = buf.remaining_mut();
         self.key.to_compact(buf);
-        len += buf.as_mut().len() - start;
+        len += start - buf.remaining_mut();
 
         buf.put_u16(self.stack.len() as u16);
         len += 2;
@@ -83,9 +83,9 @@ impl reth_codecs::Compact for HashBuilderState {
             len += 2 + item.len();
         }
 
-        let start = buf.as_mut().len();
+        let start = buf.remaining_mut();
         self.value.to_compact(buf);
-        len += buf.as_mut().len() - start;
+        len += start - buf.remaining_mut();
 
         buf.put_u16(self.groups.len() as u16);
         len += 2;
@@ -167,6 +167,24 @@ mod tests {
         let len = state.clone().to_compact(&mut buf);
         let (decoded, _) = HashBuilderState::from_compact(&buf, len);
         assert_eq!(state, decoded);
+    }
+
+    #[test]
+    fn hash_builder_state_fixed_slice() {
+        let mut state = HashBuilderState { key: vec![1, 2, 3], ..Default::default() };
+        state.value.set_bytes_owned(vec![42; 128]);
+        let mut expected = vec![];
+        assert_eq!(state.to_compact(&mut expected), expected.len());
+
+        let mut storage = vec![0; expected.len() + 1];
+        let mut remaining = storage.as_mut_slice();
+        let len = state.to_compact(&mut remaining);
+        assert_eq!(len, expected.len());
+        assert_eq!(remaining.len(), 1);
+        assert_eq!(&storage[..len], expected);
+        let (decoded, rest) = HashBuilderState::from_compact(&storage[..len], len);
+        assert_eq!(decoded, state);
+        assert!(rest.is_empty());
     }
 
     #[cfg(feature = "arbitrary")]

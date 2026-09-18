@@ -122,7 +122,7 @@ dependencies = [
 [[package]]
 name = "alloy-consensus"
 version = "2.4.2"
-source = "git+https://github.com/alloy-rs/alloy?rev=513147d#513147d673858cd26cd11f3e328f5f6e5c37d6cb"
+source = "git+https://github.com/alloy-rs/alloy?rev=2c173801e#2c173801eda52aa61f21100d86bf91375ffd7cb3"
 dependencies = [
  "alloy-eips",
  "alloy-primitives",
@@ -149,7 +149,7 @@ dependencies = [
 [[package]]
 name = "alloy-consensus-any"
 version = "2.4.2"
-source = "git+https://github.com/alloy-rs/alloy?rev=513147d#513147d673858cd26cd11f3e328f5f6e5c37d6cb"
+source = "git+https://github.com/alloy-rs/alloy?rev=2c173801e#2c173801eda52aa61f21100d86bf91375ffd7cb3"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -266,7 +266,7 @@ dependencies = [
 [[package]]
 name = "alloy-eips"
 version = "2.4.2"
-source = "git+https://github.com/alloy-rs/alloy?rev=513147d#513147d673858cd26cd11f3e328f5f6e5c37d6cb"
+source = "git+https://github.com/alloy-rs/alloy?rev=2c173801e#2c173801eda52aa61f21100d86bf91375ffd7cb3"
 dependencies = [
  "alloy-eip2124",
  "alloy-eip2930",
@@ -311,7 +311,7 @@ dependencies = [
 [[package]]
 name = "alloy-genesis"
 version = "2.4.2"
-source = "git+https://github.com/alloy-rs/alloy?rev=513147d#513147d673858cd26cd11f3e328f5f6e5c37d6cb"
+source = "git+https://github.com/alloy-rs/alloy?rev=2c173801e#2c173801eda52aa61f21100d86bf91375ffd7cb3"
 dependencies = [
  "alloy-eips",
  "alloy-primitives",
@@ -405,7 +405,7 @@ dependencies = [
 [[package]]
 name = "alloy-network-primitives"
 version = "2.4.2"
-source = "git+https://github.com/alloy-rs/alloy?rev=513147d#513147d673858cd26cd11f3e328f5f6e5c37d6cb"
+source = "git+https://github.com/alloy-rs/alloy?rev=2c173801e#2c173801eda52aa61f21100d86bf91375ffd7cb3"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -692,7 +692,7 @@ dependencies = [
 [[package]]
 name = "alloy-rpc-types-eth"
 version = "2.4.2"
-source = "git+https://github.com/alloy-rs/alloy?rev=513147d#513147d673858cd26cd11f3e328f5f6e5c37d6cb"
+source = "git+https://github.com/alloy-rs/alloy?rev=2c173801e#2c173801eda52aa61f21100d86bf91375ffd7cb3"
 dependencies = [
  "alloy-consensus",
  "alloy-consensus-any",
@@ -755,7 +755,7 @@ dependencies = [
 [[package]]
 name = "alloy-serde"
 version = "2.4.2"
-source = "git+https://github.com/alloy-rs/alloy?rev=513147d#513147d673858cd26cd11f3e328f5f6e5c37d6cb"
+source = "git+https://github.com/alloy-rs/alloy?rev=2c173801e#2c173801eda52aa61f21100d86bf91375ffd7cb3"
 dependencies = [
  "alloy-primitives",
  "arbitrary",
@@ -969,7 +969,7 @@ dependencies = [
 [[package]]
 name = "alloy-tx-macros"
 version = "2.4.2"
-source = "git+https://github.com/alloy-rs/alloy?rev=513147d#513147d673858cd26cd11f3e328f5f6e5c37d6cb"
+source = "git+https://github.com/alloy-rs/alloy?rev=2c173801e#2c173801eda52aa61f21100d86bf91375ffd7cb3"
 dependencies = [
  "darling 0.23.0",
  "proc-macro2",
@@ -3494,7 +3494,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.52.0",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -5241,7 +5241,7 @@ checksum = "3640c1c38b8e4e43584d8df18be5fc6b0aa314ce6ebf51b53313d4306cca8e46"
 dependencies = [
  "hermit-abi",
  "libc",
- "windows-sys 0.52.0",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -8106,7 +8106,7 @@ dependencies = [
 [[package]]
 name = "reth-codecs"
 version = "0.7.0"
-source = "git+https://github.com/paradigmxyz/reth-core?rev=ba95f09#ba95f09f4610ec70c9a4a30d18fe5f8c505e9a3b"
+source = "git+https://github.com/paradigmxyz/reth-core?rev=b844c5a#b844c5acdc763e16545562c898c727cda66da0ee"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -8126,7 +8126,7 @@ dependencies = [
 [[package]]
 name = "reth-codecs-derive"
 version = "0.7.0"
-source = "git+https://github.com/paradigmxyz/reth-core?rev=ba95f09#ba95f09f4610ec70c9a4a30d18fe5f8c505e9a3b"
+source = "git+https://github.com/paradigmxyz/reth-core?rev=b844c5a#b844c5acdc763e16545562c898c727cda66da0ee"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -9856,7 +9856,7 @@ dependencies = [
 [[package]]
 name = "reth-primitives-traits"
 version = "0.7.0"
-source = "git+https://github.com/paradigmxyz/reth-core?rev=ba95f09#ba95f09f4610ec70c9a4a30d18fe5f8c505e9a3b"
+source = "git+https://github.com/paradigmxyz/reth-core?rev=b844c5a#b844c5acdc763e16545562c898c727cda66da0ee"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -10961,7 +10961,7 @@ dependencies = [
 [[package]]
 name = "reth-zstd-compressors"
 version = "0.7.0"
-source = "git+https://github.com/paradigmxyz/reth-core?rev=ba95f09#ba95f09f4610ec70c9a4a30d18fe5f8c505e9a3b"
+source = "git+https://github.com/paradigmxyz/reth-core?rev=b844c5a#b844c5acdc763e16545562c898c727cda66da0ee"
 dependencies = [
  "zstd",
 ]
@@ -11532,7 +11532,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys",
- "windows-sys 0.52.0",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -11612,7 +11612,7 @@ dependencies = [
  "security-framework",
  "security-framework-sys",
  "webpki-root-certs 1.0.7",
- "windows-sys 0.52.0",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -12505,7 +12505,7 @@ dependencies = [
  "getrandom 0.4.2",
  "once_cell",
  "rustix",
- "windows-sys 0.52.0",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -13778,7 +13778,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.52.0",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
