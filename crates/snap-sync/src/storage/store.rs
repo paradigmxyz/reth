@@ -72,18 +72,19 @@ impl StorageChunk {
 
 /// How far the contracts of the account range being downloaded have their storage persisted.
 ///
-/// Contracts complete in key order, so only one is ever part way through.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+/// Contracts complete in key order, so only one is part way through per pivot, plus those carried
+/// across pivot moves.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct StorageProgress {
     // Contracts up to this key have all their storage persisted.
     complete: Option<B256>,
-    // The contract part way through, if any.
-    partial: Option<PartialStorage>,
+    // Contracts part way through, in key order.
+    partial: Vec<PartialStorage>,
 }
 
 impl StorageProgress {
     /// No storage persisted yet.
-    pub const START: Self = Self { complete: None, partial: None };
+    pub const START: Self = Self { complete: None, partial: Vec::new() };
 
     /// Returns whether all of `account`'s storage is persisted.
     pub fn is_complete(&self, account: B256) -> bool {
@@ -92,12 +93,12 @@ impl StorageProgress {
 
     /// Returns whether `account` has storage persisted ahead of its range.
     pub fn has_slots(&self, account: B256) -> bool {
-        self.is_complete(account) || self.resuming() == Some(account)
+        self.is_complete(account) || self.partial_of(account).is_some()
     }
 
-    /// Contract part way through, if any.
-    pub fn resuming(&self) -> Option<B256> {
-        self.partial.map(|partial| partial.account)
+    // Progress of `account` if it is part way through.
+    fn partial_of(&self, account: B256) -> Option<&PartialStorage> {
+        self.partial.iter().find(|partial| partial.account == account)
     }
 
     // End of a request for at most `max` of `contracts` from `first`. Contracts after the first
@@ -109,11 +110,32 @@ impl StorageProgress {
         max: usize,
     ) -> usize {
         let end = contracts.len().min(first.saturating_add(max));
-        self.resuming()
-            .and_then(|resuming| {
-                contracts[first + 1..end].iter().position(|(account, _)| *account == resuming)
-            })
+        contracts[first + 1..end]
+            .iter()
+            .position(|(account, _)| self.partial_of(*account).is_some())
             .map_or(end, |offset| first + 1 + offset)
+    }
+
+    // Hands the progress of contracts past a committed range to the range continuing at `next`.
+    pub(crate) fn carry_to(
+        &self,
+        provider: &impl MetadataWriter,
+        write: SnapWrite,
+        next: B256,
+    ) -> Result<(), SnapSyncError> {
+        let carried = Self {
+            complete: self.complete.filter(|complete| *complete >= next),
+            partial: self
+                .partial
+                .iter()
+                .filter(|partial| partial.account >= next)
+                .copied()
+                .collect(),
+        };
+        if carried != Self::START {
+            StoredProgress::new(write, next, carried).write(provider)?;
+        }
+        Ok(())
     }
 
     /// Slot `account`'s storage resumes at: zero before it starts, `None` once it is complete.
@@ -121,13 +143,12 @@ impl StorageProgress {
         if self.is_complete(account) {
             return None
         }
-        let partial = self.partial.filter(|partial| partial.account == account);
-        Some(partial.map_or(B256::ZERO, |partial| partial.next))
+        Some(self.partial_of(account).map_or(B256::ZERO, |partial| partial.next))
     }
 
-    // The same progress with the partial contract's root unproved, after the pivot moved.
-    const fn carried(mut self) -> Self {
-        if let Some(partial) = &mut self.partial {
+    // The same progress with every partial contract's root unproved, after the pivot moved.
+    fn carried(mut self) -> Self {
+        for partial in &mut self.partial {
             partial.storage_root = None;
         }
         self
@@ -138,17 +159,17 @@ impl StorageProgress {
     // A contract carried across a pivot move does not block others: the new root can hold
     // contracts before it, or no longer hold it at all.
     fn advance(&self, chunk: &StorageChunk) -> Result<Self, SnapSyncError> {
-        let blocked = self.partial.is_some_and(|partial| {
-            partial.account != chunk.account && partial.storage_root.is_some()
-        });
+        let blocked = self
+            .partial
+            .iter()
+            .any(|partial| partial.account < chunk.account && partial.storage_root.is_some());
         if blocked || self.resume_at(chunk.account) != Some(chunk.from) {
             return Err(SnapSyncError::OutOfOrderStorage {
                 account: chunk.account,
                 from: chunk.from,
             })
         }
-        if let Some(partial) = self.partial &&
-            partial.account == chunk.account &&
+        if let Some(partial) = self.partial_of(chunk.account) &&
             let Some(expected) = partial.storage_root &&
             expected != chunk.storage_root
         {
@@ -161,21 +182,23 @@ impl StorageProgress {
         if chunk.next.is_some_and(|next| next <= chunk.from) {
             return Err(SnapSyncError::NoProgress { origin: chunk.from })
         }
-        Ok(match chunk.next {
-            Some(next) => Self {
-                complete: self.complete,
-                partial: Some(PartialStorage {
-                    account: chunk.account,
-                    storage_root: Some(chunk.storage_root),
-                    next,
-                }),
-            },
-            // A carried contract past this one stays resumable.
-            None => Self {
-                complete: Some(chunk.account),
-                partial: self.partial.filter(|partial| partial.account > chunk.account),
-            },
-        })
+        // Carried contracts past this one stay resumable, those before it were skipped, so the new
+        // root no longer holds them.
+        let mut partial: Vec<_> = self
+            .partial
+            .iter()
+            .filter(|partial| partial.account > chunk.account)
+            .copied()
+            .collect();
+        let complete = match chunk.next {
+            Some(next) => {
+                let storage_root = Some(chunk.storage_root);
+                partial.insert(0, PartialStorage { account: chunk.account, storage_root, next });
+                self.complete
+            }
+            None => Some(chunk.account),
+        };
+        Ok(Self { complete, partial })
     }
 }
 
@@ -227,10 +250,11 @@ impl StoredProgress {
         if self.attempt != write.attempt() || self.origin != origin {
             return None
         }
+        let progress = self.progress.clone();
         Some(if self.state_version == write.state_version() {
-            self.progress
+            progress
         } else {
-            self.progress.carried()
+            progress.carried()
         })
     }
 }
@@ -273,7 +297,7 @@ impl<T: MetadataProvider> SnapStorageStore for T {
             .with_storages([(chunk.account, HashedStorage::from_iter(chunk.slots))])
             .into_sorted();
         self.write_hashed_state(&state)?;
-        StoredProgress::new(write, origin, progress).write(self)?;
+        StoredProgress::new(write, origin, progress.clone()).write(self)?;
         Ok(progress)
     }
 }
@@ -469,14 +493,36 @@ mod tests {
         let after = B256::repeat_byte(0x44);
         let progress = provider.commit_storage_chunk(advanced, B256::ZERO, whole(after)).unwrap();
         assert!(progress.is_complete(after));
-        assert_eq!(progress.resuming(), None);
+        assert!(progress.partial.is_empty());
+    }
+
+    #[test]
+    fn a_new_contract_part_way_keeps_the_carried_one_resumable() {
+        let (factory, _, advanced) = carried();
+        let provider = factory.database_provider_rw().unwrap();
+        let before = B256::repeat_byte(0x11);
+        let first =
+            StorageChunk::new(before, root(), B256::ZERO, slots()[..1].to_vec(), Some(slot(2)));
+        provider.commit_storage_chunk(advanced, B256::ZERO, first).unwrap();
+
+        // Both stay resumable, even across another pivot move.
+        let advanced =
+            provider.advance_snap_pivot(advanced, generation(3, B256::repeat_byte(0xdd))).unwrap();
+        let progress = provider.storage_progress(advanced, B256::ZERO).unwrap();
+        assert_eq!(progress.resume_at(before), Some(slot(2)));
+        assert_eq!(progress.resume_at(CONTRACT), Some(slot(2)));
+
+        let rest = StorageChunk::new(before, root(), slot(2), slots()[1..].to_vec(), None);
+        let progress = provider.commit_storage_chunk(advanced, B256::ZERO, rest).unwrap();
+        assert!(progress.is_complete(before));
+        assert_eq!(progress.resume_at(CONTRACT), Some(slot(2)));
     }
 
     #[test]
     fn a_contract_resuming_part_way_leads_its_request() {
         let progress = StorageProgress {
             complete: None,
-            partial: Some(PartialStorage { account: CONTRACT, storage_root: None, next: slot(2) }),
+            partial: vec![PartialStorage { account: CONTRACT, storage_root: None, next: slot(2) }],
         };
         let contracts = [(slot(1), ()), (CONTRACT, ()), (B256::repeat_byte(0x33), ())];
 

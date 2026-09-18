@@ -194,6 +194,10 @@ impl<T: MetadataProvider> SnapAccountStore for T {
         self.remove_storages_except(interval, &persisted)?;
         dependencies.write(self)?;
         StoredCoverage::new(write.attempt(), advanced).write(self)?;
+        // A page ending before contracts with persisted storage leaves them to the next range.
+        if let Some(next) = advanced.next() {
+            progress.carry_to(self, write, next)?;
+        }
         Ok(advanced)
     }
 

@@ -438,4 +438,31 @@ mod tests {
         assert_eq!(slots_of(&factory, key(1)), small);
         assert_eq!(slots_of(&factory, key(2)), large);
     }
+
+    #[tokio::test]
+    async fn a_page_ending_before_a_carried_contract_hands_it_to_the_next_range() {
+        let accounts = accounts();
+        let (factory, range) = started(&accounts);
+        let large = large();
+        let first = storage_ranges(1, &[&large[..1]], &large, &[B256::ZERO, key(1)]);
+        let (_, mut download) = download([first], factory.clone());
+        committed(&mut download, &range).await;
+        let provider = factory.database_provider_rw().unwrap();
+        let write = provider
+            .advance_snap_pivot(range.write(), generation(2, state_root(&accounts)))
+            .unwrap();
+        let block = BlockNumHash::new(2, B256::repeat_byte(2));
+        provider.commit_block_access_list(write, block, B256::repeat_byte(1), &[]).unwrap();
+
+        // The new root's page stops before the contract part way through.
+        let page = verified_range(&accounts, 0..1, B256::ZERO, &[B256::ZERO, key(1)]);
+        let next = provider
+            .commit_account_range(write, &page, Default::default(), Vec::new())
+            .unwrap()
+            .next()
+            .unwrap();
+
+        assert!(next <= key(2));
+        assert_eq!(provider.storage_progress(write, next).unwrap().resume_at(key(2)), Some(key(2)));
+    }
 }
