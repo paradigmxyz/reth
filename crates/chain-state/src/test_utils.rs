@@ -19,7 +19,6 @@ use reth_primitives_traits::{
     Account, NodePrimitives, Recovered, RecoveredBlock, SealedBlock, SealedHeader,
     SignedTransaction,
 };
-use reth_storage_api::NodePrimitivesProvider;
 use reth_trie::{root::state_root_unhashed, ComputedTrieData, SortedTrieData};
 use revm::{database::BundleState, state::AccountInfo};
 use std::{
@@ -445,11 +444,9 @@ impl TestCanonStateSubscriptions {
     }
 }
 
-impl NodePrimitivesProvider for TestCanonStateSubscriptions {
-    type Primitives = EthPrimitives;
-}
-
 impl CanonStateSubscriptions for TestCanonStateSubscriptions {
+    type Primitives = EthPrimitives;
+
     /// Sets up a broadcast channel with a buffer size of 100.
     fn subscribe_to_canonical_state(&self) -> CanonStateNotifications {
         let (canon_notif_tx, canon_notif_rx) = broadcast::channel(100);

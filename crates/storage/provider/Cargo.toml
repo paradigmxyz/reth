@@ -19,7 +19,7 @@ reth-ethereum-primitives = { workspace = true, features = ["reth-codec"] }
 reth-primitives-traits = { workspace = true, features = ["reth-codec", "secp256k1", "dashmap"] }
 reth-errors.workspace = true
 reth-storage-errors.workspace = true
-reth-storage-api = { workspace = true, features = ["std", "db-api"] }
+reth-storage-api = { workspace = true, features = ["std", "db-api", "chain-state"] }
 reth-storage-overlay.workspace = true
 reth-db = { workspace = true, features = ["mdbx"] }
 reth-db-api.workspace = true
