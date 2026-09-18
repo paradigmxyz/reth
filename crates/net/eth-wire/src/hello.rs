@@ -1,5 +1,5 @@
 use crate::{Capability, EthVersion, ProtocolVersion};
-use alloy_rlp::{RlpDecodable, RlpEncodable};
+use alloy_rlp::{Decodable, Header, RlpEncodable};
 use reth_codecs::add_arbitrary_tests;
 use reth_network_peers::PeerId;
 use reth_primitives_traits::constants::RETH_CLIENT_VERSION;
@@ -111,12 +111,11 @@ impl HelloMessageWithProtocols {
     }
 }
 
-// TODO: determine if we should allow for the extra fields at the end like EIP-706 suggests
 /// Raw rlpx protocol message used in the `p2p` handshake, containing information about the
 /// supported `RLPx` protocol version and capabilities.
 ///
 /// See also <https://github.com/ethereum/devp2p/blob/master/rlpx.md#hello-0x00>
-#[derive(Clone, Debug, PartialEq, Eq, RlpEncodable, RlpDecodable)]
+#[derive(Clone, Debug, PartialEq, Eq, RlpEncodable)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[cfg_attr(any(test, feature = "arbitrary"), derive(arbitrary::Arbitrary))]
 #[add_arbitrary_tests(rlp)]
@@ -149,6 +148,40 @@ impl HelloMessage {
     /// ```
     pub const fn builder(id: PeerId) -> HelloMessageBuilder {
         HelloMessageBuilder::new(id)
+    }
+}
+
+impl Decodable for HelloMessage {
+    fn decode(buf: &mut &[u8]) -> alloy_rlp::Result<Self> {
+        let header = Header::decode(buf)?;
+        if !header.list {
+            return Err(alloy_rlp::Error::UnexpectedString)
+        }
+        let started_len = buf.len();
+        if started_len < header.payload_length {
+            return Err(alloy_rlp::Error::InputTooShort)
+        }
+
+        let this = Self {
+            protocol_version: Decodable::decode(buf)?,
+            client_version: Decodable::decode(buf)?,
+            capabilities: Decodable::decode(buf)?,
+            port: Decodable::decode(buf)?,
+            id: Decodable::decode(buf)?,
+        };
+
+        // The spec requires implementations to ignore any additional list elements in `Hello`
+        // so that future protocol versions can extend the message.
+        let consumed = started_len - buf.len();
+        let Some(remaining) = header.payload_length.checked_sub(consumed) else {
+            return Err(alloy_rlp::Error::ListLengthMismatch {
+                expected: header.payload_length,
+                got: consumed,
+            })
+        };
+        *buf = &buf[remaining..];
+
+        Ok(this)
     }
 }
 
@@ -232,7 +265,7 @@ mod tests {
         p2pstream::P2PMessage, Capability, EthVersion, HelloMessage, HelloMessageWithProtocols,
         ProtocolVersion,
     };
-    use alloy_rlp::{Decodable, Encodable, EMPTY_STRING_CODE};
+    use alloy_rlp::{Decodable, Encodable, Header, EMPTY_STRING_CODE};
     use reth_network_peers::pk2id;
     use secp256k1::{SecretKey, SECP256K1};
 
@@ -307,5 +340,58 @@ mod tests {
 
         // zero is encoded as 0x80, the empty string code in RLP
         assert_eq!(hello_encoded[0], EMPTY_STRING_CODE);
+    }
+
+    #[test]
+    fn hello_decoding_ignores_additional_list_elements() {
+        let secret_key = SecretKey::new(&mut rand_08::thread_rng());
+        let id = pk2id(&secret_key.public_key(SECP256K1));
+        let hello = HelloMessage {
+            protocol_version: ProtocolVersion::V5,
+            client_version: "reth/0.1.0".to_string(),
+            capabilities: vec![Capability::new_static("eth", EthVersion::Eth68 as usize)],
+            port: 30303,
+            id,
+        };
+
+        // re-encode the message with two extra elements appended to the list
+        let mut fields = Vec::new();
+        hello.protocol_version.encode(&mut fields);
+        hello.client_version.encode(&mut fields);
+        hello.capabilities.encode(&mut fields);
+        hello.port.encode(&mut fields);
+        hello.id.encode(&mut fields);
+        1337u64.encode(&mut fields);
+        vec![Capability::new_static("future", 1)].encode(&mut fields);
+
+        let mut encoded = Vec::new();
+        Header { list: true, payload_length: fields.len() }.encode(&mut encoded);
+        encoded.extend_from_slice(&fields);
+
+        let mut buf = &encoded[..];
+        assert_eq!(HelloMessage::decode(&mut buf).unwrap(), hello);
+        assert!(buf.is_empty());
+    }
+
+    #[test]
+    fn hello_decoding_rejects_truncated_list() {
+        let secret_key = SecretKey::new(&mut rand_08::thread_rng());
+        let id = pk2id(&secret_key.public_key(SECP256K1));
+        let hello = HelloMessage {
+            protocol_version: ProtocolVersion::V5,
+            client_version: "reth/0.1.0".to_string(),
+            capabilities: vec![],
+            port: 30303,
+            id,
+        };
+
+        let mut encoded = Vec::new();
+        hello.encode(&mut encoded);
+        // shrink the list header so the declared payload ends inside the peer id
+        encoded[0] -= 1;
+        let last = encoded.len() - 1;
+        encoded.truncate(last);
+
+        assert!(HelloMessage::decode(&mut &encoded[..]).is_err());
     }
 }
