@@ -288,8 +288,17 @@ impl<T: MetadataProvider> SnapStorageStore for T {
         if chunk.account < origin || chunk.storage_root == EMPTY_ROOT_HASH {
             return Err(SnapSyncError::UnexpectedStorage { account: chunk.account })
         }
-        let progress = self.storage_progress(write, origin)?.advance(&chunk)?;
+        let progress = self.storage_progress(write, origin)?;
+        let complete = progress.complete;
+        let progress = progress.advance(&chunk)?;
 
+        if chunk.next.is_none() {
+            // Skipped accounts have empty storage at this pivot. Clear earlier attempts' slots
+            // before the completion watermark makes them eligible for reuse and BAL updates.
+            let start = complete
+                .map_or(origin, |account| (U256::from_be_bytes(account.0) + U256::from(1)).into());
+            self.remove::<tables::HashedStorages>(start..chunk.account)?;
+        }
         if chunk.from == B256::ZERO {
             self.remove::<tables::HashedStorages>(chunk.account..=chunk.account)?;
         }
