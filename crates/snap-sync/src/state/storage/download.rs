@@ -1,9 +1,8 @@
 //! Downloads the storage of an account range's contracts, committing every verified response.
 
 use crate::{
-    common::{push_peer, request_options, DownloadContext, SnapRequests},
-    SnapStorageStore, SnapSyncError, StorageChunk, StorageProgress, VerifiedRange,
-    DEFAULT_RESPONSE_BYTES, MAX_HASH,
+    common::DownloadContext, SnapStorageStore, SnapSyncError, StorageChunk, StorageProgress,
+    VerifiedRange, MAX_HASH,
 };
 use alloy_primitives::B256;
 use reth_db_api::transaction::DbTxMut;
@@ -11,20 +10,21 @@ use reth_downloaders::snap::{
     StorageRangeDownloader, StorageRangeOutcome, VerifiedAccountBatch, VerifiedStorageRanges,
 };
 use reth_eth_wire_types::snap::GetStorageRangesMessage;
-use reth_network_p2p::{error::RequestError, snap::client::SnapClient};
+use reth_network_p2p::snap::client::SnapClient;
 use reth_network_peers::PeerId;
 use reth_storage_api::{
     DBProvider, DatabaseProviderFactory, MetadataProvider, MetadataWriter, StateWriter,
 };
 use reth_tasks::Runtime;
-use reth_trie_common::HashedStorage;
 use std::fmt;
 
 /// Default number of contracts asked for per storage request.
 pub const DEFAULT_STORAGE_ACCOUNTS: usize = 128;
 
-/// Downloads contract storage one response at a time, committing resumable progress before
-/// continuing.
+/// Downloads the storage an account range's contracts still need, one request at a time.
+///
+/// Every verified response is committed before the next request, so at most one response is held
+/// however large a contract is, and a download resumes from the persisted progress.
 pub struct StorageRangeDownload<C, F> {
     context: DownloadContext<C, F>,
     // Contracts asked for per request.
@@ -60,7 +60,10 @@ where
     F::Provider: MetadataProvider,
     F::ProviderRW: MetadataProvider + MetadataWriter + StateWriter + DBProvider<Tx: DbTxMut>,
 {
-    /// Commits the next storage response, or reports completion; failures preserve progress.
+    /// Requests storage `range` still needs and commits the verified response.
+    ///
+    /// [`StorageRangeStep::Complete`] once every contract in the range is persisted, so the range
+    /// can commit without supplying their storage. A failed request leaves the progress in place.
     pub async fn next(&mut self, range: &VerifiedRange) -> Result<StorageRangeStep, SnapSyncError> {
         let (write, origin) = (range.write(), range.origin());
         let progress =
@@ -161,92 +164,13 @@ fn chunks(
         .collect())
 }
 
-impl<C: SnapClient> SnapRequests<'_, C> {
-    // Completes every non-empty storage trie before its owning accounts become durable.
-    pub(crate) async fn download_storages(
-        &mut self,
-        batch: VerifiedAccountBatch<'_>,
-    ) -> Result<Option<Vec<(B256, HashedStorage)>>, SnapSyncError> {
-        if batch.accounts().is_empty() {
-            return Ok(Some(Vec::new()))
-        }
-
-        let mut storages = batch
-            .accounts()
-            .iter()
-            .map(|(hash, _)| (*hash, HashedStorage::default()))
-            .collect::<Vec<_>>();
-        if self.download_storage_batch(batch, &mut storages).await?.is_none() {
-            return Ok(None)
-        }
-        Ok(Some(storages))
-    }
-
-    // Drives one contiguous non-empty account batch through all authenticated follow-ups.
-    async fn download_storage_batch(
-        &mut self,
-        mut batch: VerifiedAccountBatch<'_>,
-        storages: &mut [(B256, HashedStorage)],
-    ) -> Result<Option<()>, SnapSyncError> {
-        let mut request = GetStorageRangesMessage {
-            request_id: self.next_id()?,
-            root_hash: batch.state_root(),
-            account_hashes: batch.accounts().iter().map(|(hash, _)| *hash).collect(),
-            starting_hash: B256::ZERO.into(),
-            limit_hash: MAX_HASH.into(),
-            response_bytes: DEFAULT_RESPONSE_BYTES,
-        };
-        let mut excluded = Vec::new();
-        loop {
-            let downloader = StorageRangeDownloader::new_with_options(
-                self.client,
-                request.clone(),
-                &batch,
-                self.runtime.clone(),
-                request_options(&excluded),
-            )
-            .map_err(|error| SnapSyncError::InvalidRequest(error.to_string()))?;
-            match downloader.await {
-                Ok(StorageRangeOutcome::Unavailable { peer_id }) => {
-                    push_peer(&mut excluded, peer_id)
-                }
-                Err(RequestError::UnsupportedCapability) => return Ok(None),
-                Err(error) => return Err(error.into()),
-                Ok(StorageRangeOutcome::Verified(verified)) => {
-                    let follow_up_id = self.request_id.wrapping_add(1);
-                    let follow_up = verified
-                        .follow_up(follow_up_id, batch)
-                        .map_err(|error| SnapSyncError::InvalidRequest(error.to_string()))?;
-                    for range in verified.into_ranges() {
-                        let storage = storages
-                            .iter_mut()
-                            .find(|(hash, _)| *hash == range.account_hash)
-                            .expect("verified range belongs to a requested account");
-                        storage.1.storage.extend(range.slots);
-                    }
-                    let Some((next_request, next_batch)) = follow_up else { return Ok(Some(())) };
-                    if follow_up_id == 0 {
-                        return Err(SnapSyncError::InvalidRequest(
-                            "snap request id space exhausted".to_string(),
-                        ))
-                    }
-                    self.request_id = follow_up_id;
-                    request = next_request;
-                    batch = next_batch;
-                    excluded.clear();
-                }
-            }
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::{
         test_utils::{
-            account, generation, hashed_factory, key, state_root, storage_ranges, storage_root_of,
-            stored_slots, verified_range, ScriptedSnapClient,
+            account, generation, hashed_factory, insert_generation_headers, key, state_root,
+            storage_ranges, storage_root_of, stored_slots, verified_range, ScriptedSnapClient,
         },
         SnapAccountStore, SnapAttemptStore,
     };
@@ -291,6 +215,7 @@ mod tests {
     // An attempt that fetched all of `accounts` as one range, not yet committed.
     fn started(accounts: &[(B256, TrieAccount)]) -> (Factory, VerifiedRange) {
         let factory = hashed_factory();
+        insert_generation_headers(&factory);
         let provider = factory.database_provider_rw().unwrap();
         let write = provider.start_snap_attempt(generation(1, state_root(accounts))).unwrap();
         provider.start_account_coverage(write).unwrap();

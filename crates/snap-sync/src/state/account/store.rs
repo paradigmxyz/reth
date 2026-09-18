@@ -3,40 +3,36 @@
 //! Each range replaces its key interval, and ranges commit in key order.
 
 use crate::{
-    common::SnapRecord,
-    error::db_error,
-    state::{
-        bytecode::store::{require_code, supplied_code, write_bytecodes},
-        storage::persisted_storage_root,
-    },
-    SnapAttemptStore, SnapDownloadProgress, SnapPhase, SnapStateStore, SnapStorageStore,
+    common::SnapRecord, state::storage::persisted_storage_root, SnapAttemptStore, SnapStorageStore,
     SnapSyncError, SnapWrite, StorageProgress,
 };
 use alloy_primitives::{
     map::{B256Map, B256Set},
-    Bytes, B256, U256,
+    B256, KECCAK256_EMPTY, U256,
 };
 use reth_db_api::{
     tables,
     transaction::{DbTx, DbTxMut},
+    RawKey, RawTable,
 };
 use reth_downloaders::snap::VerifiedAccountRange;
 use reth_primitives_traits::Account;
-use reth_storage_api::{
-    DBProvider, DatabaseProviderFactory, MetadataProvider, MetadataWriter, SnapAttemptId,
-    StageCheckpointReader, StageCheckpointWriter, StateWriter, StorageSettingsCache,
-};
+use reth_storage_api::{DBProvider, MetadataProvider, MetadataWriter, SnapAttemptId, StateWriter};
 use reth_trie_common::{
     root::storage_root, HashedPostState, HashedPostStateSorted, HashedStorage, TrieAccount,
     EMPTY_ROOT_HASH,
 };
-use revm::bytecode::Bytecode;
+use revm::{bytecode::Bytecode, database::states::StateChangeset};
 use serde::{Deserialize, Serialize};
 use std::ops::Bound;
 
-/// Persists accounts, dependencies and coverage together in the caller's transaction.
+/// Persistence for the account ranges an attempt downloads.
+///
+/// Blanket-implemented over the node's writers, so accounts, their dependencies and the coverage
+/// join the caller's transaction and commit together or not at all.
 pub trait SnapAccountStore {
-    /// Resumes the attempt's coverage, recording an empty download if absent.
+    /// Returns the coverage recorded for the attempt `write` belongs to, recording that no
+    /// account has been downloaded yet when there is none.
     fn start_account_coverage(&self, write: SnapWrite) -> Result<AccountCoverage, SnapSyncError>
     where
         Self: MetadataWriter;
@@ -44,7 +40,10 @@ pub trait SnapAccountStore {
     /// Returns the coverage recorded for the attempt `write` belongs to, if any.
     fn account_coverage(&self, write: SnapWrite) -> Result<Option<AccountCoverage>, SnapSyncError>;
 
-    /// Commits accounts with matching supplied or persisted storage and available bytecode.
+    /// Persists `range` with its storage and code, replacing its key interval.
+    ///
+    /// Storage must match each account's root, supplied or persisted ahead of the range by
+    /// [`SnapStorageStore`], and code must be supplied or already stored.
     fn commit_account_range(
         &self,
         write: SnapWrite,
@@ -108,84 +107,6 @@ impl AccountCoverage {
             self.next.map_or(Bound::Unbounded, Bound::Included),
             to.next.map_or(Bound::Unbounded, Bound::Excluded),
         )
-    }
-}
-
-impl<F> SnapStateStore<'_, F> {
-    /// Commits one verified range and advances its account cursor in the same transaction.
-    pub fn commit_account_range(
-        &self,
-        generation: SnapDownloadProgress,
-        state: HashedPostState,
-        bytecodes: Vec<(B256, Bytes)>,
-        progress: AccountRangeProgress,
-    ) -> Result<SnapDownloadProgress, SnapSyncError>
-    where
-        F: DatabaseProviderFactory,
-        F::ProviderRW: DBProvider
-            + StageCheckpointReader
-            + StageCheckpointWriter
-            + StateWriter
-            + StorageSettingsCache,
-    {
-        generation.validate()?;
-        generation.ensure_phase(SnapPhase::Accounts)?;
-        let next_generation = generation.with_account_progress(progress)?;
-        let provider = self.factory.database_provider_rw().map_err(db_error)?;
-        if !provider.cached_storage_settings().use_hashed_state() {
-            return Err(SnapSyncError::UnsupportedStorageLayout)
-        }
-        self.ensure_generation(&provider, generation)?;
-
-        if !state.is_empty() {
-            provider.write_hashed_state(&state.into_sorted()).map_err(db_error)?;
-        }
-        let contracts = bytecodes
-            .into_iter()
-            .filter(|(_, code)| !code.is_empty())
-            .map(|(hash, code)| (hash, Bytecode::new_raw(code)))
-            .collect::<Vec<_>>();
-        if !contracts.is_empty() {
-            write_bytecodes(&provider, contracts).map_err(db_error)?;
-        }
-
-        Self::save_generation(&provider, next_generation)?;
-        provider.commit().map_err(db_error)?;
-        Ok(next_generation)
-    }
-}
-
-/// Restart position after committing an authenticated account range.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum AccountRangeProgress {
-    /// Another request starts at this inclusive account hash.
-    More {
-        /// Inclusive origin of the next range.
-        next_account: B256,
-    },
-    /// Account, storage, and bytecode download is complete.
-    Complete,
-}
-
-impl SnapDownloadProgress {
-    // A monotonic cursor makes every committed prefix safe to resume.
-    fn with_account_progress(
-        mut self,
-        progress: AccountRangeProgress,
-    ) -> Result<Self, SnapSyncError> {
-        match progress {
-            AccountRangeProgress::More { next_account } if next_account > self.next_account => {
-                self.next_account = next_account;
-            }
-            AccountRangeProgress::More { next_account } => {
-                return Err(SnapSyncError::NonAdvancingAccountCursor {
-                    current: self.next_account,
-                    next: next_account,
-                })
-            }
-            AccountRangeProgress::Complete => self.phase = SnapPhase::BlockAccessLists,
-        }
-        Ok(self)
     }
 }
 
@@ -317,7 +238,7 @@ impl RangeDependencies {
         progress: &StorageProgress,
         tx: &impl DbTx,
     ) -> Result<Vec<B256>, SnapSyncError> {
-        let mut available = supplied_code(&self.bytecodes)?;
+        let mut available = self.supplied_code()?;
         let mut contracts = B256Set::default();
         let mut persisted = Vec::new();
         for (hash, account) in accounts {
@@ -327,7 +248,13 @@ impl RangeDependencies {
                     persisted.push(*hash);
                 }
             }
-            require_code(tx, &mut available, account.code_hash)?;
+            // Only presence matters, so stored code is not decoded.
+            if account.code_hash != KECCAK256_EMPTY &&
+                available.insert(account.code_hash) &&
+                tx.get::<RawTable<tables::Bytecodes>>(RawKey::new(account.code_hash))?.is_none()
+            {
+                return Err(SnapSyncError::MissingCode { hash: account.code_hash })
+            }
         }
         if let Some(account) =
             self.state.account_storages().keys().find(|hash| !contracts.contains(*hash))
@@ -335,6 +262,19 @@ impl RangeDependencies {
             return Err(SnapSyncError::UnexpectedStorage { account: *account })
         }
         Ok(persisted)
+    }
+
+    // Hashes of the supplied code, refusing code filed under a hash it does not hash to.
+    fn supplied_code(&self) -> Result<B256Set, SnapSyncError> {
+        let mut hashes = B256Set::default();
+        for (hash, code) in &self.bytecodes {
+            let got = code.hash_slow();
+            if got != *hash {
+                return Err(SnapSyncError::CodeMismatch { expected: *hash, got })
+            }
+            hashes.insert(*hash);
+        }
+        Ok(hashes)
     }
 
     // Checks the contract's storage, supplied or persisted, against its root. Returns whether it
@@ -374,7 +314,10 @@ impl RangeDependencies {
     // Writes the accounts with their storage and code.
     fn write(self, writer: &impl StateWriter) -> Result<(), SnapSyncError> {
         writer.write_hashed_state(&self.state)?;
-        write_bytecodes(writer, self.bytecodes)?;
+        writer.write_state_changes(StateChangeset {
+            contracts: self.bytecodes,
+            ..Default::default()
+        })?;
         Ok(())
     }
 }
@@ -392,7 +335,6 @@ mod tests {
         test_utils::MockNodeTypesWithDB, DatabaseProviderFactory, ProviderFactory,
     };
     use reth_trie_common::root::storage_root_unsorted;
-    use revm::database::states::StateChangeset;
 
     const FAR: B256 = B256::repeat_byte(0xaa);
     const SLOT: B256 = B256::repeat_byte(0x55);
@@ -783,136 +725,5 @@ mod tests {
                 Err(SnapSyncError::UnsupportedRecord { .. })
             ));
         }
-    }
-}
-
-#[cfg(test)]
-mod progress_tests {
-    use super::*;
-    use alloy_primitives::U256;
-    use reth_db_api::{cursor::DbCursorRO, transaction::DbTx};
-    use reth_provider::test_utils::create_test_provider_factory;
-    use reth_storage_api::StorageSettings;
-
-    fn generation() -> SnapDownloadProgress {
-        SnapDownloadProgress::new(100, B256::repeat_byte(1), B256::repeat_byte(2))
-    }
-
-    fn account(nonce: u64) -> Account {
-        Account { nonce, balance: U256::from(nonce), bytecode_hash: None }
-    }
-
-    #[test]
-    fn account_range_and_cursor_commit_together() {
-        let factory = create_test_provider_factory();
-        factory.set_storage_settings_cache(StorageSettings::v2());
-        let store = SnapStateStore::new(&factory);
-        let generation = generation();
-        assert!(store.requires_bootstrap().unwrap());
-        store.begin_generation(generation).unwrap();
-        let account_hash = B256::repeat_byte(3);
-        let code = Bytes::from_static(&[0x60, 0x00]);
-        let code_hash = alloy_primitives::keccak256(&code);
-        let state = HashedPostState::default().with_accounts([(
-            account_hash,
-            Some(Account { bytecode_hash: Some(code_hash), ..account(7) }),
-        )]);
-
-        let updated = store
-            .commit_account_range(
-                generation,
-                state,
-                vec![(code_hash, code.clone())],
-                AccountRangeProgress::More { next_account: account_hash },
-            )
-            .unwrap();
-
-        assert_eq!(store.interrupted_generation().unwrap(), Some(updated));
-        assert!(store.requires_bootstrap().unwrap());
-        assert_eq!(updated.next_account, account_hash);
-        let provider = factory.database_provider_ro().unwrap();
-        assert_eq!(
-            provider
-                .tx_ref()
-                .get::<tables::Bytecodes>(code_hash)
-                .unwrap()
-                .unwrap()
-                .original_bytes(),
-            code
-        );
-        let mut cursor = provider.tx_ref().cursor_read::<tables::HashedAccounts>().unwrap();
-        assert_eq!(cursor.seek_exact(account_hash).unwrap().unwrap().1.nonce, 7);
-    }
-
-    #[test]
-    fn final_account_range_sets_bal_cursor() {
-        let factory = create_test_provider_factory();
-        factory.set_storage_settings_cache(StorageSettings::v2());
-        let store = SnapStateStore::new(&factory);
-        let generation = generation();
-        store.begin_generation(generation).unwrap();
-
-        let updated = store
-            .commit_account_range(
-                generation,
-                HashedPostState::default(),
-                Vec::new(),
-                AccountRangeProgress::Complete,
-            )
-            .unwrap();
-
-        assert_eq!(updated.phase, SnapPhase::BlockAccessLists);
-        assert_eq!(updated.next_block, generation.target_block + 1);
-        assert_eq!(store.interrupted_generation().unwrap(), Some(updated));
-    }
-
-    #[test]
-    fn stale_range_cannot_advance_generation() {
-        let factory = create_test_provider_factory();
-        factory.set_storage_settings_cache(StorageSettings::v2());
-        let store = SnapStateStore::new(&factory);
-        let generation = generation();
-        store.begin_generation(generation).unwrap();
-        let updated = store
-            .commit_account_range(
-                generation,
-                HashedPostState::default(),
-                Vec::new(),
-                AccountRangeProgress::More { next_account: B256::repeat_byte(1) },
-            )
-            .unwrap();
-
-        let error = store
-            .commit_account_range(
-                generation,
-                HashedPostState::default(),
-                Vec::new(),
-                AccountRangeProgress::Complete,
-            )
-            .unwrap_err();
-
-        assert!(matches!(error, SnapSyncError::StaleGeneration));
-        assert_eq!(store.interrupted_generation().unwrap(), Some(updated));
-    }
-
-    #[test]
-    fn continuation_must_advance_account_cursor() {
-        let factory = create_test_provider_factory();
-        factory.set_storage_settings_cache(StorageSettings::v2());
-        let store = SnapStateStore::new(&factory);
-        let generation = generation();
-        store.begin_generation(generation).unwrap();
-
-        let error = store
-            .commit_account_range(
-                generation,
-                HashedPostState::default(),
-                Vec::new(),
-                AccountRangeProgress::More { next_account: B256::ZERO },
-            )
-            .unwrap_err();
-
-        assert!(matches!(error, SnapSyncError::NonAdvancingAccountCursor { .. }));
-        assert_eq!(store.interrupted_generation().unwrap(), Some(generation));
     }
 }

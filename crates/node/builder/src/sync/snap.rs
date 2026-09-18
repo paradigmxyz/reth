@@ -264,8 +264,8 @@ mod tests {
     use reth_network_p2p::NoopFullBlockClient;
     use reth_provider::{
         test_utils::{create_test_provider_factory, MockNodeTypesWithDB},
-        DBProvider, DatabaseProviderFactory, StageCheckpointWriter, StorageSettings,
-        StorageSettingsCache,
+        DBProvider, DatabaseProviderFactory, MetadataWriter, StageCheckpointWriter,
+        StorageSettings, StorageSettingsCache,
     };
     use reth_prune::PruneModes;
     use reth_stages_api::{ControlFlow, StageCheckpoint};
@@ -275,6 +275,9 @@ mod tests {
     fn backfill() -> SnapBackfillSync<MockNodeTypesWithDB, NoopFullBlockClient> {
         let factory = create_test_provider_factory();
         factory.set_storage_settings_cache(StorageSettings::v2());
+        let provider = factory.database_provider_rw().unwrap();
+        provider.write_storage_settings(StorageSettings::v2()).unwrap();
+        provider.commit().unwrap();
         let pipeline = Pipeline::<MockNodeTypesWithDB>::builder()
             .with_tip_sender(tokio::sync::watch::channel(B256::ZERO).0)
             .build(

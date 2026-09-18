@@ -2,7 +2,7 @@
 
 use crate::SnapPhase;
 use alloy_primitives::B256;
-use reth_downloaders::snap::InvalidStorageRangeRequest;
+use reth_downloaders::snap::{InvalidBlockAccessListRequest, InvalidStorageRangeRequest};
 use reth_network_p2p::error::RequestError;
 use reth_storage_api::SnapAttemptId;
 use reth_storage_errors::{db::DatabaseError, provider::ProviderError};
@@ -19,6 +19,9 @@ pub enum SnapSyncError {
     /// A storage request did not match the accounts it was built from.
     #[error(transparent)]
     StorageRequest(#[from] InvalidStorageRangeRequest),
+    /// A block access list request did not match the headers it was built from.
+    #[error(transparent)]
+    BlockAccessListRequest(#[from] InvalidBlockAccessListRequest),
     /// The storage layout keys state by address, which snap cannot fill in without preimages.
     #[error("snap synchronization requires the hashed state layout")]
     UnsupportedStorage,
@@ -39,6 +42,55 @@ pub enum SnapSyncError {
         /// Root the attempt currently downloads.
         expected: B256,
         /// Root the range was proved against.
+        got: B256,
+    },
+    /// No catch-up progress is recorded for the attempt.
+    #[error("no catch-up progress is recorded for the attempt")]
+    NoCatchUpProgress,
+    /// A block the catch-up needs has no header.
+    #[error("block {block} has no header to authenticate its access list against")]
+    MissingHeader {
+        /// Block the header is missing for.
+        block: u64,
+    },
+    /// A list was applied for a block other than the one continuing the applied sequence.
+    #[error("block access list for block {got}, the applied state continues at {expected}")]
+    OutOfOrderBlock {
+        /// Block the applied state continues at.
+        expected: u64,
+        /// Block the list was applied for.
+        got: u64,
+    },
+    /// A list was applied for a block past the pivot.
+    #[error("block access list for block {block} past pivot {pivot}")]
+    BlockPastPivot {
+        /// Block the attempt is anchored to.
+        pivot: u64,
+        /// Block the list was applied for.
+        block: u64,
+    },
+    /// The pivot was moved below the last block whose list is applied.
+    #[error("pivot {pivot} is below applied block {applied}")]
+    PivotBelowApplied {
+        /// Last block whose list is applied.
+        applied: u64,
+        /// Block the pivot was moved to.
+        pivot: u64,
+    },
+    /// A list was applied for a block the canonical chain no longer holds.
+    #[error("block {block} ({hash}) is no longer canonical")]
+    NonCanonicalBlock {
+        /// Number of the block.
+        block: u64,
+        /// Hash of the block the list belongs to.
+        hash: B256,
+    },
+    /// A list was applied for a block building on another chain than the applied state.
+    #[error("block access list for a block building on {got}, the applied state is at {expected}")]
+    ForkedBlock {
+        /// Hash of the last applied block.
+        expected: B256,
+        /// Hash the block the list belongs to builds on.
         got: B256,
     },
     /// No account coverage is recorded for the attempt.
@@ -110,17 +162,6 @@ pub enum SnapSyncError {
         /// Hash of the supplied code.
         got: B256,
     },
-    /// Locally assembled request bounds or inputs are inconsistent.
-    #[error("invalid snap request: {0}")]
-    InvalidRequest(String),
-    /// A BAL was delivered out of durable block order.
-    #[error("snap BAL block {actual} does not advance expected block {expected}")]
-    UnexpectedBlock {
-        /// Persisted next block.
-        expected: u64,
-        /// Delivered block.
-        actual: u64,
-    },
     /// The generation anchor or a requested BAL header left the canonical chain.
     #[error("canonical header {block_number} is {actual:?}, expected {expected}")]
     CanonicalHeaderMismatch {
@@ -131,9 +172,6 @@ pub enum SnapSyncError {
         /// Current canonical hash, if the header still exists.
         actual: Option<B256>,
     },
-    /// A required canonical header has not been downloaded yet.
-    #[error("canonical snap header {0} is unavailable")]
-    MissingHeader(u64),
     /// The generation root no longer matches its canonical target header.
     #[error("canonical state root at block {block_number} is {actual}, expected {expected}")]
     CanonicalStateRootMismatch {
@@ -155,9 +193,6 @@ pub enum SnapSyncError {
     /// The Merkle stage rejected the downloaded state.
     #[error("snap trie generation failed: {0}")]
     Trie(String),
-    /// The database uses plain canonical state, which hashed Snap keys cannot populate.
-    #[error("snap sync requires the v2 hashed-state layout")]
-    UnsupportedStorageLayout,
     /// Snapshot bootstrap would replace an executed or already published state.
     #[error("snap bootstrap cannot replace existing canonical state")]
     ExistingState,
@@ -172,14 +207,6 @@ pub enum SnapSyncError {
     /// A range completed after another operation advanced the generation.
     #[error("snap generation changed while a range was in flight")]
     StaleGeneration,
-    /// A continuation must move past the committed range.
-    #[error("snap account cursor {next} does not advance {current}")]
-    NonAdvancingAccountCursor {
-        /// Persisted inclusive origin.
-        current: B256,
-        /// Proposed inclusive origin.
-        next: B256,
-    },
     /// The persisted generation marker cannot be resumed safely.
     #[error("invalid snap generation marker: {0}")]
     InvalidGeneration(String),

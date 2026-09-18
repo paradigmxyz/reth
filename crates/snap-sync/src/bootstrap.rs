@@ -5,13 +5,14 @@
 //! the trie. Phases that run out of peers wait for the node to report progress instead of spinning.
 
 use crate::{
-    error::db_error, BlockAccessListCatchUp, BlockAccessListCatchUpOutcome, RangeBudget,
-    SnapDownloadProgress, SnapPhase, SnapPivotPolicy, SnapStateStore, SnapSyncContext,
+    catch_up::coordinator::{BlockAccessListCatchUpOutcome, CatchUpCoordinator},
+    error::db_error,
+    RangeBudget, SnapDownloadProgress, SnapPhase, SnapPivotPolicy, SnapStateStore, SnapSyncContext,
     SnapSyncError, SnapSyncProvider, StateDownloadOutcome, StateDownloader, TrieGenerator,
 };
 use reth_network_p2p::snap::client::SnapClient;
 use reth_provider::DatabaseProviderFactory;
-use reth_storage_api::{HeaderProvider, StageCheckpointReader};
+use reth_storage_api::{BlockHashReader, HeaderProvider, MetadataProvider, StageCheckpointReader};
 use reth_tasks::Runtime;
 use tracing::{debug, info};
 
@@ -68,15 +69,19 @@ impl<'a, C, F, X> SnapBootstrap<'a, C, F, X> {
     pub async fn run(&mut self) -> Result<SnapSyncOutcome, SnapSyncError>
     where
         C: SnapClient,
-        F: DatabaseProviderFactory<Provider: HeaderProvider + StageCheckpointReader>
-            + Clone
+        F: DatabaseProviderFactory<
+                Provider: HeaderProvider
+                              + BlockHashReader
+                              + MetadataProvider
+                              + StageCheckpointReader,
+            > + Clone
             + Send
             + 'static,
         F::ProviderRW: SnapSyncProvider,
         X: SnapSyncContext,
     {
         if !self.store.requires_bootstrap()? {
-            return Err(SnapSyncError::ExistingState)
+            return Err(SnapSyncError::ExistingState);
         }
         loop {
             let head = self.context.canonical_head()?;
@@ -85,9 +90,9 @@ impl<'a, C, F, X> SnapBootstrap<'a, C, F, X> {
                 Resolved::Wait => {
                     debug!(target: "snap::session", head, "No eligible snap pivot");
                     if !self.context.wait_for_progress(head).await {
-                        return Ok(SnapSyncOutcome::Stalled { generation: None })
+                        return Ok(SnapSyncOutcome::Stalled { generation: None });
                     }
-                    continue
+                    continue;
                 }
             };
 
@@ -114,10 +119,10 @@ impl<'a, C, F, X> SnapBootstrap<'a, C, F, X> {
                 }
                 // Unlike a reorg, a header the session has not downloaded yet only becomes
                 // available once the chain progresses, so this is the one path that waits.
-                Err(SnapSyncError::MissingHeader(block_number)) => {
+                Err(SnapSyncError::MissingHeader { block: block_number }) => {
                     debug!(target: "snap::session", block_number, "Waiting for a canonical snap header");
                     if !self.context.wait_for_progress(head).await {
-                        return Ok(SnapSyncOutcome::Stalled { generation: Some(generation) })
+                        return Ok(SnapSyncOutcome::Stalled { generation: Some(generation) });
                     }
                 }
                 Err(error) => return Err(error),
@@ -128,15 +133,18 @@ impl<'a, C, F, X> SnapBootstrap<'a, C, F, X> {
     // Resumes a usable generation, otherwise starts a clean one on the current canonical pivot.
     fn resolve_generation(&self, head: u64) -> Result<Resolved, SnapSyncError>
     where
-        F: DatabaseProviderFactory<Provider: HeaderProvider + StageCheckpointReader>,
+        F: DatabaseProviderFactory<
+            Provider: HeaderProvider + BlockHashReader + MetadataProvider + StageCheckpointReader,
+        >,
         F::ProviderRW: SnapSyncProvider,
     {
         if let Some(generation) = self.store.interrupted_generation()? &&
-            self.policy.is_finishable(generation.generation(), head)
+            (generation.phase == SnapPhase::Trie ||
+                self.policy.is_catchable_from(generation.next_block.saturating_sub(1), head))
         {
             let provider = self.factory.database_provider_ro().map_err(db_error)?;
             if generation.generation().is_canonical(&provider)? {
-                return Ok(Resolved::Ready(generation))
+                return Ok(Resolved::Ready(generation));
             }
             // An orphaned anchor is discarded rather than reconciled, so it falls through to a
             // fresh generation on the current canonical pivot.
@@ -147,7 +155,9 @@ impl<'a, C, F, X> SnapBootstrap<'a, C, F, X> {
     // Begins a clean generation on the canonical pivot, discarding any state left behind.
     fn start_generation(&self, head: u64) -> Result<Option<SnapDownloadProgress>, SnapSyncError>
     where
-        F: DatabaseProviderFactory<Provider: HeaderProvider + StageCheckpointReader>,
+        F: DatabaseProviderFactory<
+            Provider: HeaderProvider + BlockHashReader + MetadataProvider + StageCheckpointReader,
+        >,
         F::ProviderRW: SnapSyncProvider,
     {
         let pivot = {
@@ -178,8 +188,12 @@ impl<'a, C, F, X> SnapBootstrap<'a, C, F, X> {
     ) -> Result<SessionStep, SnapSyncError>
     where
         C: SnapClient,
-        F: DatabaseProviderFactory<Provider: HeaderProvider + StageCheckpointReader>
-            + Clone
+        F: DatabaseProviderFactory<
+                Provider: HeaderProvider
+                              + BlockHashReader
+                              + MetadataProvider
+                              + StageCheckpointReader,
+            > + Clone
             + Send
             + 'static,
         F::ProviderRW: SnapSyncProvider,
@@ -187,19 +201,22 @@ impl<'a, C, F, X> SnapBootstrap<'a, C, F, X> {
     {
         // Both helpers borrow the session's inputs, not the session, so waits stay possible.
         let mut downloader = StateDownloader::new(self.client, self.factory, self.runtime.clone());
-        let mut catch_up =
-            BlockAccessListCatchUp::new(self.client, self.factory, self.runtime.clone());
+        let mut catch_up = CatchUpCoordinator::new(self.client, self.factory, self.runtime.clone());
 
         loop {
             if self.context.is_cancelled() {
-                return Ok(SessionStep::Stalled(generation))
+                return Ok(SessionStep::Stalled(generation));
             }
             match generation.phase {
                 SnapPhase::Accounts => {
-                    if !self.policy.is_catchable(generation.generation(), head) {
-                        return Ok(SessionStep::Restart)
+                    if !self.policy.is_catchable_from(generation.next_block.saturating_sub(1), head)
+                    {
+                        return Ok(SessionStep::Restart);
                     }
-                    if let Some(target) = self.pending_advance(generation, head) {
+                    if let Some(target) = (generation.next_block <= generation.target_block)
+                        .then_some(generation.target_block)
+                        .or_else(|| self.pending_advance(generation, head))
+                    {
                         match catch_up.advance_pivot(generation, target).await? {
                             BlockAccessListCatchUpOutcome::Complete { generation: next } => {
                                 info!(target: "snap::session", from = generation.target_block, to = next.target_block, "Advanced snap pivot using block access lists");
@@ -208,10 +225,10 @@ impl<'a, C, F, X> SnapBootstrap<'a, C, F, X> {
                             BlockAccessListCatchUpOutcome::Unavailable { generation: next } => {
                                 generation = next;
                                 let Some(next_head) = self.wait(head).await? else {
-                                    return Ok(SessionStep::Stalled(generation))
+                                    return Ok(SessionStep::Stalled(generation));
                                 };
                                 head = next_head;
-                                continue
+                                continue;
                             }
                         }
                     }
@@ -225,15 +242,16 @@ impl<'a, C, F, X> SnapBootstrap<'a, C, F, X> {
                         StateDownloadOutcome::Unavailable { generation: next } => {
                             generation = next;
                             let Some(next_head) = self.wait(head).await? else {
-                                return Ok(SessionStep::Stalled(generation))
+                                return Ok(SessionStep::Stalled(generation));
                             };
                             head = next_head;
                         }
                     }
                 }
                 SnapPhase::BlockAccessLists => {
-                    if !self.policy.is_catchable(generation.generation(), head) {
-                        return Ok(SessionStep::Restart)
+                    if !self.policy.is_catchable_from(generation.next_block.saturating_sub(1), head)
+                    {
+                        return Ok(SessionStep::Restart);
                     }
                     let target =
                         self.advance_target(generation, head).unwrap_or(generation.target_block);
@@ -247,7 +265,7 @@ impl<'a, C, F, X> SnapBootstrap<'a, C, F, X> {
                         BlockAccessListCatchUpOutcome::Unavailable { generation: next } => {
                             generation = next;
                             let Some(next_head) = self.wait(head).await? else {
-                                return Ok(SessionStep::Stalled(generation))
+                                return Ok(SessionStep::Stalled(generation));
                             };
                             head = next_head;
                         }
@@ -260,7 +278,7 @@ impl<'a, C, F, X> SnapBootstrap<'a, C, F, X> {
                         "Rebuilding snap state trie"
                     );
                     self.rebuild_trie(generation).await?;
-                    return Ok(SessionStep::Complete(generation))
+                    return Ok(SessionStep::Complete(generation));
                 }
             }
         }
@@ -298,7 +316,7 @@ impl<'a, C, F, X> SnapBootstrap<'a, C, F, X> {
         X: SnapSyncContext,
     {
         if !self.context.wait_for_progress(head).await {
-            return Ok(None)
+            return Ok(None);
         }
         self.context.canonical_head().map(Some)
     }
@@ -342,31 +360,33 @@ const fn is_reorg(error: &SnapSyncError) -> bool {
     matches!(
         error,
         SnapSyncError::CanonicalHeaderMismatch { .. } |
-            SnapSyncError::CanonicalStateRootMismatch { .. }
+            SnapSyncError::CanonicalStateRootMismatch { .. } |
+            SnapSyncError::NonCanonicalBlock { .. } |
+            SnapSyncError::ForkedBlock { .. }
     )
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{generation::SNAP_SYNC_STAGE, AccountRangeProgress, SnapPipelineHandoff};
+    use crate::{
+        generation::SNAP_SYNC_STAGE, test_utils::ScriptedSnapClient as TestSnapClient,
+        SnapPipelineHandoff,
+    };
     use alloy_consensus::Header;
     use alloy_primitives::{B256, KECCAK256_EMPTY, U256};
     use reth_db_api::{tables, transaction::DbTx};
-    use reth_downloaders::snap::test_utils::TestSnapClient;
     use reth_eth_wire_types::snap::{AccountData, AccountRangeMessage};
     use reth_network_p2p::{error::PeerRequestResult, snap::client::SnapResponse};
     use reth_network_peers::{PeerId, WithPeerId};
     use reth_primitives_traits::Account;
     use reth_provider::{
-        test_utils::{create_test_provider_factory, MockNodeTypesWithDB},
-        ProviderFactory, StaticFileProviderFactory, StaticFileWriter,
+        test_utils::MockNodeTypesWithDB, ProviderFactory, StaticFileProviderFactory,
+        StaticFileWriter,
     };
     use reth_stages_types::{StageCheckpoint, StageId};
     use reth_static_file_types::StaticFileSegment;
-    use reth_storage_api::{
-        DBProvider, StageCheckpointWriter, StateWriter, StorageSettings, StorageSettingsCache,
-    };
+    use reth_storage_api::{DBProvider, StageCheckpointWriter, StateWriter};
     use reth_trie_common::{HashBuilder, HashedPostState, Nibbles, TrieAccount, EMPTY_ROOT_HASH};
     use std::{
         collections::VecDeque,
@@ -438,8 +458,7 @@ mod tests {
 
     #[tokio::test]
     async fn assembles_downloads_catch_up_and_trie_in_one_session() {
-        let factory = create_test_provider_factory();
-        factory.set_storage_settings_cache(StorageSettings::v2());
+        let factory = crate::test_utils::hashed_factory();
         let account_hash = B256::repeat_byte(0x11);
         let account = account();
         let root = state_root(account_hash, &account);
@@ -507,8 +526,7 @@ mod tests {
             }
         }
 
-        let factory = create_test_provider_factory();
-        factory.set_storage_settings_cache(StorageSettings::v2());
+        let factory = crate::test_utils::hashed_factory();
         let hash = B256::repeat_byte(0x11);
         let account = account();
         let root = state_root(hash, &account);
@@ -517,11 +535,11 @@ mod tests {
         let generation = SnapDownloadProgress::new(1, blocks[1].hash_slow(), root);
         store.begin_generation(generation).unwrap();
         let generation = store
-            .commit_account_range(
+            .seed_account_state(
                 generation,
                 HashedPostState::default().with_accounts([(hash, Some(Account::from(account)))]),
                 Vec::new(),
-                AccountRangeProgress::More { next_account: B256::repeat_byte(0x22) },
+                Some(B256::repeat_byte(0x22)),
             )
             .unwrap();
         let client = TestSnapClient::new([]);
@@ -546,23 +564,22 @@ mod tests {
 
     #[tokio::test]
     async fn generation_outside_the_bal_window_restarts_on_a_fresh_pivot() {
-        let factory = create_test_provider_factory();
-        factory.set_storage_settings_cache(StorageSettings::v2());
+        let factory = crate::test_utils::hashed_factory();
         let blocks = chain(&factory, [B256::ZERO; 4], true);
         let store = SnapStateStore::new(&factory);
         let stale = SnapDownloadProgress::new(0, blocks[0].hash_slow(), B256::ZERO);
         store.begin_generation(stale).unwrap();
         let account_hash = B256::repeat_byte(0x11);
         store
-            .commit_account_range(
+            .seed_account_state(
                 stale,
                 HashedPostState::default()
                     .with_accounts([(account_hash, Some(Account::default()))]),
                 Vec::new(),
-                AccountRangeProgress::More { next_account: account_hash },
+                Some(account_hash),
             )
             .unwrap();
-        let client = TestSnapClient::new(std::iter::empty());
+        let client = TestSnapClient::new([account_range(Vec::new())]);
         let context = TestContext::new(3, []);
 
         let outcome = SnapBootstrap::new(&client, &factory, context.clone(), Runtime::test())
@@ -583,24 +600,57 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn advanced_pivot_does_not_hide_expired_unapplied_lists() {
+        use crate::test_utils::BalChain;
+        use reth_provider::test_utils::insert_headers;
+
+        let factory = crate::test_utils::hashed_factory();
+        let chain = BalChain::new(2, (0..8).map(|_| Vec::new()));
+        insert_headers(&factory, &chain.headers);
+        let store = SnapStateStore::new(&factory);
+        let pivot = chain.block(0);
+        let generation = SnapDownloadProgress::new(pivot.number, pivot.hash, EMPTY_ROOT_HASH);
+        store.begin_generation(generation).unwrap();
+        let generation = store.advance_generation(generation, 5).unwrap();
+        assert_eq!(generation.next_block, 3);
+        let client = TestSnapClient::new([chain.response(1, [None]), account_range(Vec::new())]);
+        let context = TestContext::new(6, [9]);
+
+        let outcome = SnapBootstrap::new(&client, &factory, context.clone(), Runtime::test())
+            .with_policy(policy().with_history(5))
+            .run()
+            .await
+            .unwrap();
+
+        let SnapSyncOutcome::Stalled { generation: Some(generation) } = outcome else {
+            panic!("fresh attempt stalled without a serving peer")
+        };
+        assert_eq!(generation.target_block, 8);
+        assert_eq!(generation.next_block, 9);
+        assert_eq!(generation.next_account, B256::ZERO);
+        assert_eq!(store.interrupted_generation().unwrap(), Some(generation));
+        assert_eq!(context.waits(), [6, 9]);
+        assert_eq!(client.block_requests().len(), 1);
+    }
+
+    #[tokio::test]
     async fn resumable_generation_keeps_its_downloaded_state() {
-        let factory = create_test_provider_factory();
-        factory.set_storage_settings_cache(StorageSettings::v2());
+        let factory = crate::test_utils::hashed_factory();
         let blocks = chain(&factory, [B256::ZERO; 4], true);
         let store = SnapStateStore::new(&factory);
         let interrupted = SnapDownloadProgress::new(2, blocks[2].hash_slow(), B256::ZERO);
         store.begin_generation(interrupted).unwrap();
         let account_hash = B256::repeat_byte(0x11);
         let interrupted = store
-            .commit_account_range(
+            .seed_account_state(
                 interrupted,
                 HashedPostState::default()
                     .with_accounts([(account_hash, Some(Account::default()))]),
                 Vec::new(),
-                AccountRangeProgress::More { next_account: account_hash },
+                Some(account_hash),
             )
             .unwrap();
-        let client = TestSnapClient::new(std::iter::empty());
+        let client = TestSnapClient::new([account_range(Vec::new())]);
         let context = TestContext::new(3, []);
 
         let outcome = SnapBootstrap::new(&client, &factory, context.clone(), Runtime::test())
@@ -617,10 +667,9 @@ mod tests {
 
     #[tokio::test]
     async fn chain_without_bal_commitments_waits_instead_of_polling() {
-        let factory = create_test_provider_factory();
-        factory.set_storage_settings_cache(StorageSettings::v2());
+        let factory = crate::test_utils::hashed_factory();
         chain(&factory, [B256::ZERO; 4], false);
-        let client = TestSnapClient::new(std::iter::empty());
+        let client = TestSnapClient::new([account_range(Vec::new())]);
         let context = TestContext::new(3, [3]);
 
         let outcome = SnapBootstrap::new(&client, &factory, context.clone(), Runtime::test())
@@ -632,7 +681,7 @@ mod tests {
         assert_eq!(outcome, SnapSyncOutcome::Stalled { generation: None });
         // One wait per unproductive head, and no request while no pivot is eligible.
         assert_eq!(context.waits(), [3, 3]);
-        assert!(client.priorities().is_empty());
+        assert!(client.origins().is_empty());
     }
 
     #[tokio::test]
@@ -654,8 +703,7 @@ mod tests {
     // Whatever an orphaned generation had assembled, the session drops it and anchors a clean
     // generation on the canonical pivot instead of reconciling the fork.
     async fn restarts_on_the_canonical_pivot(phase: SnapPhase) {
-        let factory = create_test_provider_factory();
-        factory.set_storage_settings_cache(StorageSettings::v2());
+        let factory = crate::test_utils::hashed_factory();
         let blocks = chain(&factory, [B256::ZERO; 4], true);
         let stale_account = B256::repeat_byte(0x11);
 
@@ -674,7 +722,7 @@ mod tests {
             .unwrap();
         provider.commit().unwrap();
 
-        let client = TestSnapClient::new(std::iter::empty());
+        let client = TestSnapClient::new([account_range(Vec::new())]);
         let context = TestContext::new(3, []);
 
         let outcome = SnapBootstrap::new(&client, &factory, context.clone(), Runtime::test())
@@ -706,6 +754,21 @@ mod tests {
         generation: SnapDownloadProgress,
     ) {
         let provider = factory.database_provider_rw().unwrap();
+        use crate::{SnapAccountStore, SnapAttemptStore};
+        let write = provider.start_snap_attempt(generation.generation()).unwrap();
+        provider.start_account_coverage(write).unwrap();
+        if generation.phase != SnapPhase::Accounts {
+            use reth_storage_api::MetadataWriter;
+            provider
+                .write_metadata(
+                    "snap_account_coverage",
+                    serde_json::to_vec(&serde_json::json!({
+                        "version": 1, "attempt": write.attempt(), "coverage": { "next": null }
+                    }))
+                    .unwrap(),
+                )
+                .unwrap();
+        }
         provider
             .save_stage_checkpoint(SNAP_SYNC_STAGE, StageCheckpoint::new(generation.target_block))
             .unwrap();

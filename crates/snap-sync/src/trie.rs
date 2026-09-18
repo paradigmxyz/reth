@@ -9,8 +9,9 @@ use reth_provider::{DatabaseProviderFactory, StaticFileProviderFactory};
 use reth_stages::{stages::MerkleStage, ExecInput, Stage};
 use reth_stages_types::StageId;
 use reth_storage_api::{
-    ChangeSetReader, DBProvider, HeaderProvider, PruneCheckpointWriter, StageCheckpointReader,
-    StageCheckpointWriter, StatsReader, StorageChangeSetReader, StorageSettingsCache, TrieWriter,
+    ChangeSetReader, DBProvider, HeaderProvider, MetadataProvider, MetadataWriter,
+    PruneCheckpointWriter, StageCheckpointReader, StageCheckpointWriter, StatsReader,
+    StorageChangeSetReader, StorageSettingsCache, TrieWriter,
 };
 
 /// Drives a clean, resumable Merkle rebuild for one downloaded generation.
@@ -33,6 +34,8 @@ impl<'a, F> TrieGenerator<'a, F> {
     where
         F: DatabaseProviderFactory,
         F::ProviderRW: DBProvider<Tx: DbTxMut>
+            + MetadataProvider
+            + MetadataWriter
             + ChangeSetReader
             + HeaderProvider
             + PruneCheckpointWriter
@@ -48,7 +51,7 @@ impl<'a, F> TrieGenerator<'a, F> {
             return Err(SnapSyncError::UnexpectedPhase {
                 expected: SnapPhase::Trie,
                 actual: generation.phase,
-            })
+            });
         }
         let mut stage = MerkleStage::default_execution();
         loop {
@@ -65,7 +68,7 @@ impl<'a, F> TrieGenerator<'a, F> {
                 .map_err(crate::error::db_error)?;
             provider.commit().map_err(crate::error::db_error)?;
             if output.done {
-                break
+                break;
             }
         }
         self.store.finish_generation(generation)
@@ -75,22 +78,18 @@ impl<'a, F> TrieGenerator<'a, F> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::AccountRangeProgress;
+
     use alloy_consensus::Header;
     use alloy_primitives::{B256, U256};
     use reth_db_api::{tables, transaction::DbTx};
     use reth_primitives_traits::Account;
-    use reth_provider::{
-        test_utils::create_test_provider_factory, StaticFileProviderFactory, StaticFileWriter,
-    };
+    use reth_provider::{StaticFileProviderFactory, StaticFileWriter};
     use reth_static_file_types::StaticFileSegment;
-    use reth_storage_api::StorageSettings;
     use reth_trie_common::{HashBuilder, HashedPostState, Nibbles, TrieAccount, EMPTY_ROOT_HASH};
 
     #[test]
     fn rebuilds_with_merkle_stage_before_clearing_marker() {
-        let factory = create_test_provider_factory();
-        factory.set_storage_settings_cache(StorageSettings::v2());
+        let factory = crate::test_utils::hashed_factory();
         let account_hash = B256::repeat_byte(0x11);
         let trie_account = TrieAccount {
             nonce: 3,
@@ -117,12 +116,12 @@ mod tests {
         let generation = SnapDownloadProgress::new(1, hash1, state_root);
         store.begin_generation(generation).unwrap();
         let generation = store
-            .commit_account_range(
+            .seed_account_state(
                 generation,
                 HashedPostState::default()
                     .with_accounts([(account_hash, Some(Account::from(trie_account)))]),
                 Vec::new(),
-                AccountRangeProgress::Complete,
+                None,
             )
             .unwrap();
         let generation = store.complete_block_access_lists(generation).unwrap();

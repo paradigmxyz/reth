@@ -1,4 +1,7 @@
-//! Bytecode download scheduling and persistence.
+//! Contract bytecode download coordination and persistence.
 
-pub(crate) mod download;
-pub(crate) mod store;
+mod download;
+mod store;
+
+pub use download::{BytecodeDownload, BytecodeStep, DEFAULT_CODE_HASHES};
+pub use store::SnapBytecodeStore;

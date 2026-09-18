@@ -13,7 +13,6 @@
 
 mod attempt;
 mod bootstrap;
-mod bytecode;
 mod catch_up;
 mod common;
 mod context;
@@ -30,10 +29,9 @@ mod test_utils;
 
 pub use attempt::{SnapAttemptStore, SnapWrite};
 pub use bootstrap::{SnapBootstrap, SnapSyncOutcome};
-pub use bytecode::{BytecodeDownload, BytecodeStep, SnapBytecodeStore, DEFAULT_CODE_HASHES};
 pub use catch_up::{
-    BalStateUpdate, BlockAccessListCatchUp, BlockAccessListCatchUpOutcome, BlockAccessListProgress,
-    DownloadedAccount,
+    BalStateUpdate, BlockAccessListCatchUp, CatchUpProgress, CatchUpStep, DownloadedAccount,
+    SnapCatchUpStore, DEFAULT_BAL_RESPONSE_BYTES, DEFAULT_CATCH_UP_BLOCKS,
 };
 pub use common::{DEFAULT_RESPONSE_BYTES, MAX_HASH};
 pub use context::{NodeSnapContext, SnapSyncContext, SnapSyncProvider};
@@ -43,9 +41,9 @@ pub use handoff::SnapPipelineHandoff;
 pub use pivot::SnapPivotPolicy;
 pub use session::{SnapSyncSession, SnapSyncSessionState};
 pub use state::{
-    AccountCoverage, AccountRangeDownload, AccountRangeProgress, AccountRangeStep, RangeBudget,
-    SnapAccountStore, SnapStorageStore, StateDownloadOutcome, StateDownloader, StorageChunk,
-    StorageProgress, StorageRangeDownload, StorageRangeStep, VerifiedRange,
-    DEFAULT_STORAGE_ACCOUNTS,
+    AccountCoverage, AccountRangeDownload, AccountRangeStep, BytecodeDownload, BytecodeStep,
+    RangeBudget, SnapAccountStore, SnapBytecodeStore, SnapStorageStore, StateDownloadOutcome,
+    StateDownloader, StorageChunk, StorageProgress, StorageRangeDownload, StorageRangeStep,
+    VerifiedRange, DEFAULT_CODE_HASHES, DEFAULT_STORAGE_ACCOUNTS,
 };
 pub use trie::TrieGenerator;

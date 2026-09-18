@@ -4,7 +4,10 @@ use crate::{SnapGeneration, SnapPivotPolicy, SnapSyncError};
 use reth_storage_api::HeaderProvider;
 use tokio_util::sync::CancellationToken;
 
-/// One snap attempt with a locally selected pivot and authenticated peer downloads.
+/// One snap synchronization attempt, from the pivot it targets to the work it owns.
+///
+/// Targets come from the local chain, never from a peer: peers only supply state, which is
+/// authenticated against the target's state root.
 #[derive(Debug)]
 pub struct SnapSyncSession {
     // Decides which blocks are eligible targets.
@@ -40,7 +43,11 @@ impl SnapSyncSession {
         self.cancellation.is_cancelled()
     }
 
-    /// Selects or replaces a target until work starts; started work requires pivot advancement.
+    /// Selects a target under `head`, or waits while no block is eligible.
+    ///
+    /// A target no work has taken yet is replaced by a newer eligible one and dropped when none is
+    /// eligible, since nothing authenticates against its root so far. Moving a target that work
+    /// has taken is instead pivot advancement, which has to carry the downloaded state forward.
     pub fn select(
         &mut self,
         provider: &impl HeaderProvider,
@@ -56,14 +63,19 @@ impl SnapSyncSession {
         Ok(&self.state)
     }
 
-    /// Hands the target and cancellation token to its downloader once; otherwise returns `None`.
+    /// Hands the selected target, and the token to watch, to the work downloading against it.
+    ///
+    /// Taking the target is what starts it, so only the first caller gets one: a target already
+    /// being downloaded has an owner, and a waiting or cancelled session has nothing to hand out.
     pub fn start(&mut self) -> Option<(SnapGeneration, CancellationToken)> {
         let SnapSyncSessionState::Selected(generation) = self.state else { return None };
         self.state = SnapSyncSessionState::Downloading(generation);
         Some((generation, self.cancellation.clone()))
     }
 
-    /// Cancels outstanding work permanently; a later attempt needs a new session.
+    /// Signals outstanding work to stop and ends the session.
+    ///
+    /// Terminal: a later attempt needs a new session.
     pub fn cancel(&mut self) {
         self.cancellation.cancel();
         self.state = SnapSyncSessionState::Cancelled;

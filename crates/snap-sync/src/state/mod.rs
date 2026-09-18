@@ -1,54 +1,45 @@
-//! Bulk state download at a pivot: accounts, their storage and bytecode.
+//! Coordinates authenticated account ranges with their incremental storage and code downloads.
 
 pub(crate) mod account;
 pub(crate) mod bytecode;
 pub(crate) mod storage;
 
 pub use account::{
-    AccountCoverage, AccountRangeDownload, AccountRangeProgress, AccountRangeStep,
-    SnapAccountStore, VerifiedRange,
+    AccountCoverage, AccountRangeDownload, AccountRangeStep, SnapAccountStore, VerifiedRange,
 };
-
+pub use bytecode::{BytecodeDownload, BytecodeStep, SnapBytecodeStore, DEFAULT_CODE_HASHES};
 pub use storage::{
     SnapStorageStore, StorageChunk, StorageProgress, StorageRangeDownload, StorageRangeStep,
     DEFAULT_STORAGE_ACCOUNTS,
 };
 
-use crate::{
-    common::SnapRequests, SnapDownloadProgress, SnapPhase, SnapStateStore, SnapSyncError,
-    DEFAULT_RESPONSE_BYTES, MAX_HASH,
-};
-use account::account_progress;
-use alloy_primitives::{Bytes, B256};
-use reth_downloaders::snap::VerifiedAccountBatch;
+use crate::{SnapDownloadProgress, SnapPhase, SnapStateStore, SnapSyncError, SnapSyncProvider};
 use reth_network_p2p::snap::client::SnapClient;
-use reth_primitives_traits::Account;
 use reth_provider::DatabaseProviderFactory;
-use reth_storage_api::{
-    DBProvider, StageCheckpointReader, StageCheckpointWriter, StateWriter, StorageSettingsCache,
-};
+use reth_storage_api::{MetadataProvider, StageCheckpointReader};
 use reth_tasks::Runtime;
-use reth_trie_common::{HashedPostState, TrieAccount, EMPTY_ROOT_HASH};
 
-// A 1 KiB estimate prevents small storage tries from overfilling a response request.
-const STATE_ACCOUNTS_PER_BATCH: usize = DEFAULT_RESPONSE_BYTES as usize / 1024;
-
-/// Downloads and durably assembles the flat state authenticated by one generation root.
+/// Downloads dependencies before extending the durable account coverage.
 #[derive(Debug)]
 pub struct StateDownloader<'a, C, F> {
-    requests: SnapRequests<'a, C>,
-    // All state and cursor transitions share the same provider factory.
+    accounts: AccountRangeDownload<&'a C, F>,
+    storage: StorageRangeDownload<&'a C, F>,
+    bytecode: BytecodeDownload<&'a C, F>,
     store: SnapStateStore<'a, F>,
 }
 
-impl<'a, C, F> StateDownloader<'a, C, F> {
-    /// Creates a state downloader without starting network or database work.
-    pub const fn new(client: &'a C, factory: &'a F, runtime: Runtime) -> Self {
-        Self { requests: SnapRequests::new(client, runtime), store: SnapStateStore::new(factory) }
+impl<'a, C, F: Clone> StateDownloader<'a, C, F> {
+    /// Creates a coordinator over the same persisted attempt as its domain downloaders.
+    pub fn new(client: &'a C, factory: &'a F, runtime: Runtime) -> Self {
+        Self {
+            accounts: AccountRangeDownload::new(client, factory.clone(), runtime.clone()),
+            storage: StorageRangeDownload::new(client, factory.clone(), runtime.clone()),
+            bytecode: BytecodeDownload::new(client, factory.clone(), runtime),
+            store: SnapStateStore::new(factory),
+        }
     }
 
-    /// Resumes account state download until `budget` is spent, the state completes, or every
-    /// eligible peer is unavailable.
+    /// Commits at most `budget` ranges, retaining partial dependency progress on unavailable peers.
     pub async fn run(
         &mut self,
         mut generation: SnapDownloadProgress,
@@ -56,126 +47,57 @@ impl<'a, C, F> StateDownloader<'a, C, F> {
     ) -> Result<StateDownloadOutcome, SnapSyncError>
     where
         C: SnapClient,
-        F: DatabaseProviderFactory,
-        F::ProviderRW: DBProvider
-            + StageCheckpointReader
-            + StageCheckpointWriter
-            + StateWriter
-            + StorageSettingsCache,
+        F: DatabaseProviderFactory<Provider: MetadataProvider + StageCheckpointReader> + 'static,
+        F::ProviderRW: SnapSyncProvider,
     {
-        if generation.phase != SnapPhase::Accounts {
-            return Err(SnapSyncError::UnexpectedPhase {
-                expected: SnapPhase::Accounts,
-                actual: generation.phase,
-            })
+        generation.ensure_phase(SnapPhase::Accounts)?;
+        // BALs update only covered accounts. Extending coverage before catch-up finishes would
+        // apply old changes to accounts already downloaded at the new root.
+        if generation.next_block <= generation.target_block {
+            return Err(SnapSyncError::InvalidGeneration(
+                "account coverage cannot advance during BAL catch-up".into(),
+            ));
         }
-
-        let mut remaining = budget.ranges();
-        loop {
-            let Some(next_remaining) = remaining.checked_sub(1) else {
-                return Ok(StateDownloadOutcome::Paused { generation })
-            };
-            remaining = next_remaining;
-
-            match self.download_range(generation).await? {
-                RangeStep::Unavailable(generation) => {
+        for _ in 0..budget.ranges() {
+            let range = match self.accounts.next().await? {
+                Some(AccountRangeStep::Verified(range)) => range,
+                Some(AccountRangeStep::Unavailable { .. }) => {
                     return Ok(StateDownloadOutcome::Unavailable { generation })
                 }
-                RangeStep::Committed(committed) => {
-                    generation = committed;
-                    // Leaving the account phase means the trie was exhausted.
-                    if generation.phase != SnapPhase::Accounts {
-                        return Ok(StateDownloadOutcome::Complete { generation })
+                None => return Ok(StateDownloadOutcome::Complete { generation: self.progress()? }),
+            };
+            loop {
+                match self.storage.next(&range).await? {
+                    StorageRangeStep::Complete => break,
+                    StorageRangeStep::Committed(_) => {}
+                    StorageRangeStep::Unavailable { .. } => {
+                        return Ok(StateDownloadOutcome::Unavailable { generation })
                     }
                 }
             }
-        }
-    }
-
-    // Commits batches only after their storage and bytecode are downloaded.
-    async fn download_range(
-        &mut self,
-        mut generation: SnapDownloadProgress,
-    ) -> Result<RangeStep, SnapSyncError>
-    where
-        C: SnapClient,
-        F: DatabaseProviderFactory,
-        F::ProviderRW: DBProvider
-            + StageCheckpointReader
-            + StageCheckpointWriter
-            + StateWriter
-            + StorageSettingsCache,
-    {
-        let Some(range) = self
-            .requests
-            .download_account_range(generation.state_root, generation.next_account, MAX_HASH)
-            .await?
-        else {
-            return Ok(RangeStep::Unavailable(generation))
-        };
-
-        if range.accounts().is_empty() {
-            if range.has_more() {
-                return Err(SnapSyncError::InvalidRequest(
-                    "account range requires continuation without advancing".to_string(),
-                ))
+            loop {
+                match self.bytecode.next(&range).await? {
+                    BytecodeStep::Complete => break,
+                    BytecodeStep::Committed { .. } => {}
+                    BytecodeStep::Unavailable { .. } => {
+                        return Ok(StateDownloadOutcome::Unavailable { generation })
+                    }
+                }
             }
-            generation = self.store.commit_account_range(
-                generation,
-                HashedPostState::default(),
-                Vec::new(),
-                AccountRangeProgress::Complete,
-            )?;
-            return Ok(RangeStep::Committed(generation))
+            let coverage = self.accounts.commit(range, Default::default(), Vec::new()).await?;
+            generation = self.progress()?;
+            if coverage.is_complete() {
+                return Ok(StateDownloadOutcome::Complete { generation });
+            }
         }
-
-        let total = range.accounts().len();
-        let storage_accounts = range.storage_batch();
-        let mut storage_start = 0;
-        for start in (0..total).step_by(STATE_ACCOUNTS_PER_BATCH) {
-            let end = (start + STATE_ACCOUNTS_PER_BATCH).min(total);
-            let accounts = &range.accounts()[start..end];
-            let storage_end = storage_start +
-                accounts
-                    .iter()
-                    .filter(|(_, account)| account.storage_root != EMPTY_ROOT_HASH)
-                    .count();
-            let storage_batch = storage_accounts
-                .range(storage_start..storage_end)
-                .expect("storage batch covers the account chunk");
-            let Some((state, bytecodes)) = self.download_batch(accounts, storage_batch).await?
-            else {
-                return Ok(RangeStep::Unavailable(generation))
-            };
-            storage_start = storage_end;
-            let progress = account_progress(accounts, end >= total && !range.has_more())?;
-            generation = self.store.commit_account_range(generation, state, bytecodes, progress)?;
-        }
-        Ok(RangeStep::Committed(generation))
+        Ok(StateDownloadOutcome::Paused { generation })
     }
 
-    // Storage and code complete before their accounts become durable, so `None` means the batch
-    // must be retried rather than committed.
-    async fn download_batch(
-        &mut self,
-        accounts: &[AccountEntry],
-        storage_batch: VerifiedAccountBatch<'_>,
-    ) -> Result<Option<(HashedPostState, Vec<(B256, Bytes)>)>, SnapSyncError>
+    fn progress(&self) -> Result<SnapDownloadProgress, SnapSyncError>
     where
-        C: SnapClient,
+        F: DatabaseProviderFactory<Provider: MetadataProvider + StageCheckpointReader>,
     {
-        let Some(storages) = self.requests.download_storages(storage_batch).await? else {
-            return Ok(None)
-        };
-        let Some(bytecodes) = self.requests.download_bytecodes(accounts).await? else {
-            return Ok(None)
-        };
-        let state = HashedPostState::default()
-            .with_accounts(
-                accounts.iter().map(|(hash, account)| (*hash, Some(Account::from(*account)))),
-            )
-            .with_storages(storages);
-        Ok(Some((state, bytecodes)))
+        self.store.interrupted_generation()?.ok_or(SnapSyncError::StaleGeneration)
     }
 }
 
@@ -218,32 +140,22 @@ impl RangeBudget {
     }
 }
 
-/// A hashed account key with the trie value a range proof authenticated.
-type AccountEntry = (B256, TrieAccount);
-
-/// Whether one account range finished, or ran out of peers part way through its batches.
-enum RangeStep {
-    /// Every batch of the range is durable at this generation.
-    Committed(SnapDownloadProgress),
-    /// No eligible peer served a batch; the generation is the last one committed.
-    Unavailable(SnapDownloadProgress),
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use account::next_hash;
-    use alloy_primitives::{keccak256, KECCAK256_EMPTY, U256};
+    use crate::test_utils::ScriptedSnapClient as TestSnapClient;
+    use alloy_primitives::{keccak256, Bytes, B256, KECCAK256_EMPTY, U256};
     use reth_db_api::{cursor::DbDupCursorRO, tables, transaction::DbTx};
-    use reth_downloaders::snap::test_utils::TestSnapClient;
     use reth_eth_wire_types::snap::{
         AccountData, AccountRangeMessage, ByteCodesMessage, StorageData, StorageRangesMessage,
     };
     use reth_network_p2p::{error::PeerRequestResult, snap::client::SnapResponse};
     use reth_network_peers::{PeerId, WithPeerId};
-    use reth_provider::test_utils::create_test_provider_factory;
-    use reth_storage_api::StorageSettings;
-    use reth_trie_common::{proof::ProofRetainer, HashBuilder, Nibbles};
+    use reth_trie_common::{
+        proof::ProofRetainer, HashBuilder, Nibbles, TrieAccount, EMPTY_ROOT_HASH,
+    };
+
+    type AccountEntry = (B256, TrieAccount);
 
     fn response(peer_id: PeerId, response: SnapResponse) -> PeerRequestResult<SnapResponse> {
         Ok(WithPeerId::new(peer_id, response))
@@ -280,8 +192,7 @@ mod tests {
 
     #[tokio::test]
     async fn empty_root_completes_state_download() {
-        let factory = create_test_provider_factory();
-        factory.set_storage_settings_cache(StorageSettings::v2());
+        let factory = crate::test_utils::hashed_factory();
         let generation = SnapDownloadProgress::new(10, B256::repeat_byte(1), EMPTY_ROOT_HASH);
         SnapStateStore::new(&factory).begin_generation(generation).unwrap();
         let client = TestSnapClient::new([response(
@@ -305,9 +216,8 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn unavailable_range_excludes_each_peer() {
-        let factory = create_test_provider_factory();
-        factory.set_storage_settings_cache(StorageSettings::v2());
+    async fn unavailable_range_preserves_coverage() {
+        let factory = crate::test_utils::hashed_factory();
         let generation = SnapDownloadProgress::new(10, B256::repeat_byte(1), B256::repeat_byte(2));
         SnapStateStore::new(&factory).begin_generation(generation).unwrap();
         let first = PeerId::random();
@@ -337,13 +247,12 @@ mod tests {
             .unwrap();
 
         assert_eq!(outcome, StateDownloadOutcome::Unavailable { generation });
-        assert_eq!(*client.exclusions(), [vec![], vec![first], vec![first, second]]);
+        assert_eq!(client.origins().len(), 1);
     }
 
     #[tokio::test]
     async fn commits_account_storage_and_bytecode_as_one_batch() {
-        let factory = create_test_provider_factory();
-        factory.set_storage_settings_cache(StorageSettings::v2());
+        let factory = crate::test_utils::hashed_factory();
         let account_hash = B256::repeat_byte(0x11);
         let slot_hash = B256::repeat_byte(0x22);
         let slot_value = U256::from(7);
@@ -367,7 +276,7 @@ mod tests {
             response(
                 peer,
                 SnapResponse::StorageRanges(StorageRangesMessage {
-                    request_id: 2,
+                    request_id: 1,
                     slots: vec![vec![StorageData::from_value(slot_hash, slot_value)]],
                     proof: Vec::new(),
                 }),
@@ -375,7 +284,7 @@ mod tests {
             response(
                 peer,
                 SnapResponse::ByteCodes(ByteCodesMessage {
-                    request_id: 3,
+                    request_id: 1,
                     codes: vec![code.clone()],
                 }),
             ),
@@ -410,8 +319,7 @@ mod tests {
 
     #[tokio::test]
     async fn skips_empty_storage_accounts_in_a_mixed_range() {
-        let factory = create_test_provider_factory();
-        factory.set_storage_settings_cache(StorageSettings::v2());
+        let factory = crate::test_utils::hashed_factory();
         let empty_hash = B256::repeat_byte(0x11);
         let stored_hash = B256::repeat_byte(0x22);
         let slot_hash = B256::repeat_byte(0x33);
@@ -446,7 +354,7 @@ mod tests {
             response(
                 peer,
                 SnapResponse::StorageRanges(StorageRangesMessage {
-                    request_id: 2,
+                    request_id: 1,
                     slots: vec![vec![StorageData::from_value(slot_hash, slot_value)]],
                     proof: Vec::new(),
                 }),
@@ -469,8 +377,7 @@ mod tests {
 
     #[tokio::test]
     async fn spent_budget_pauses_before_the_next_range() {
-        let factory = create_test_provider_factory();
-        factory.set_storage_settings_cache(StorageSettings::v2());
+        let factory = crate::test_utils::hashed_factory();
         let first = (B256::repeat_byte(0x11), empty_account(1));
         let second = (B256::repeat_byte(0x22), empty_account(2));
         let (state_root, proof) = root_and_proof(&[first, second], &[first.0]);
@@ -494,8 +401,15 @@ mod tests {
             panic!("paused state download")
         };
         assert_eq!(generation.phase, SnapPhase::Accounts);
-        assert_eq!(generation.next_account, next_hash(first.0).unwrap());
+        // The proof covers the gap up to the next subtree, beyond the returned account.
+        let mut next_account = B256::ZERO;
+        next_account[0] = 0x20;
+        assert_eq!(generation.next_account, next_account);
+        assert_eq!(
+            SnapStateStore::new(&factory).interrupted_generation().unwrap(),
+            Some(generation)
+        );
         // Only the first range was requested, so the peer never saw a continuation.
-        assert_eq!(client.priorities().len(), 1);
+        assert_eq!(client.origins().len(), 1);
     }
 }

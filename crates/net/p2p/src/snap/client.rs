@@ -13,29 +13,6 @@ use reth_eth_wire_types::{
     },
     NetworkPrimitives,
 };
-use reth_network_peers::PeerId;
-
-/// Scheduling constraints for one Snap request.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub struct SnapRequestOptions {
-    /// Position relative to other queued requests.
-    pub priority: Priority,
-    /// Peers already rejected for this logical request.
-    pub excluded_peers: Vec<PeerId>,
-}
-
-impl SnapRequestOptions {
-    /// Creates options without peer exclusions.
-    pub const fn new(priority: Priority) -> Self {
-        Self { priority, excluded_peers: Vec::new() }
-    }
-
-    /// Sets peers that must not receive this request.
-    pub fn with_excluded_peers(mut self, peers: impl IntoIterator<Item = PeerId>) -> Self {
-        self.excluded_peers = peers.into_iter().collect();
-        self
-    }
-}
 
 /// Response types for snap sync requests
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -84,13 +61,6 @@ pub trait SnapClient: DownloadClient {
     /// The output future type for snap requests
     type Output: Future<Output = PeerRequestResult<SnapResponse>> + Send + Sync + Unpin;
 
-    /// Sends a Snap request with explicit scheduling constraints.
-    fn request_snap(
-        &self,
-        request: SnapProtocolMessage,
-        options: SnapRequestOptions,
-    ) -> Self::Output;
-
     /// Sends the account range request to the p2p network and returns the account range
     /// response received from a peer.
     fn get_account_range(&self, request: GetAccountRangeMessage) -> Self::Output {
@@ -103,18 +73,11 @@ pub trait SnapClient: DownloadClient {
         &self,
         request: GetAccountRangeMessage,
         priority: Priority,
-    ) -> Self::Output {
-        self.request_snap(
-            SnapProtocolMessage::GetAccountRange(request),
-            SnapRequestOptions::new(priority),
-        )
-    }
+    ) -> Self::Output;
 
     /// Sends the storage ranges request to the p2p network and returns the storage ranges
     /// response received from a peer.
-    fn get_storage_ranges(&self, request: GetStorageRangesMessage) -> Self::Output {
-        self.get_storage_ranges_with_priority(request, Priority::Normal)
-    }
+    fn get_storage_ranges(&self, request: GetStorageRangesMessage) -> Self::Output;
 
     /// Sends the storage ranges request to the p2p network with priority set and returns
     /// the storage ranges response received from a peer.
@@ -122,18 +85,11 @@ pub trait SnapClient: DownloadClient {
         &self,
         request: GetStorageRangesMessage,
         priority: Priority,
-    ) -> Self::Output {
-        self.request_snap(
-            SnapProtocolMessage::GetStorageRanges(request),
-            SnapRequestOptions::new(priority),
-        )
-    }
+    ) -> Self::Output;
 
     /// Sends the byte codes request to the p2p network and returns the byte codes
     /// response received from a peer.
-    fn get_byte_codes(&self, request: GetByteCodesMessage) -> Self::Output {
-        self.get_byte_codes_with_priority(request, Priority::Normal)
-    }
+    fn get_byte_codes(&self, request: GetByteCodesMessage) -> Self::Output;
 
     /// Sends the byte codes request to the p2p network with priority set and returns
     /// the byte codes response received from a peer.
@@ -141,12 +97,7 @@ pub trait SnapClient: DownloadClient {
         &self,
         request: GetByteCodesMessage,
         priority: Priority,
-    ) -> Self::Output {
-        self.request_snap(
-            SnapProtocolMessage::GetByteCodes(request),
-            SnapRequestOptions::new(priority),
-        )
-    }
+    ) -> Self::Output;
 
     /// Sends the block access lists request to the p2p network and returns the block
     /// access lists response received from a peer.
@@ -164,12 +115,7 @@ pub trait SnapClient: DownloadClient {
         &self,
         request: GetBlockAccessListsMessage,
         priority: Priority,
-    ) -> Self::Output {
-        self.request_snap(
-            SnapProtocolMessage::GetBlockAccessLists(request),
-            SnapRequestOptions::new(priority),
-        )
-    }
+    ) -> Self::Output;
 }
 
 /// Fails every snap request with [`RequestError::UnsupportedCapability`], so the noop client can
@@ -180,11 +126,48 @@ where
 {
     type Output = futures::future::Ready<PeerRequestResult<SnapResponse>>;
 
-    /// Fails every Snap request as unsupported.
-    fn request_snap(
+    /// Fails the account range request as unsupported.
+    fn get_account_range_with_priority(
         &self,
-        _request: SnapProtocolMessage,
-        _options: SnapRequestOptions,
+        _request: GetAccountRangeMessage,
+        _priority: Priority,
+    ) -> Self::Output {
+        unsupported()
+    }
+
+    /// Fails the storage ranges request as unsupported.
+    fn get_storage_ranges(&self, _request: GetStorageRangesMessage) -> Self::Output {
+        unsupported()
+    }
+
+    /// Fails the prioritized storage ranges request as unsupported.
+    fn get_storage_ranges_with_priority(
+        &self,
+        _request: GetStorageRangesMessage,
+        _priority: Priority,
+    ) -> Self::Output {
+        unsupported()
+    }
+
+    /// Fails the bytecode request as unsupported.
+    fn get_byte_codes(&self, _request: GetByteCodesMessage) -> Self::Output {
+        unsupported()
+    }
+
+    /// Fails the prioritized bytecode request as unsupported.
+    fn get_byte_codes_with_priority(
+        &self,
+        _request: GetByteCodesMessage,
+        _priority: Priority,
+    ) -> Self::Output {
+        unsupported()
+    }
+
+    /// Fails the block access lists request as unsupported.
+    fn get_block_access_lists_with_priority(
+        &self,
+        _request: GetBlockAccessListsMessage,
+        _priority: Priority,
     ) -> Self::Output {
         unsupported()
     }

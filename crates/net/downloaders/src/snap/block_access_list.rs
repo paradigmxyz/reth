@@ -12,7 +12,7 @@ use futures::Future;
 use reth_eth_wire_types::snap::{BlockAccessListsMessage, GetBlockAccessListsMessage};
 use reth_network_p2p::{
     error::RequestError,
-    snap::client::{SnapClient, SnapRequestOptions, SnapResponse},
+    snap::client::{SnapClient, SnapResponse},
 };
 use reth_network_peers::PeerId;
 use reth_primitives_traits::SealedHeader;
@@ -40,17 +40,6 @@ impl<C: SnapClient> BlockAccessListDownloader<C> {
         request: GetBlockAccessListsMessage,
         headers: &[SealedHeader<H>],
         runtime: Runtime,
-    ) -> Result<Self, InvalidBlockAccessListRequest> {
-        Self::new_with_options(client, request, headers, runtime, Default::default())
-    }
-
-    /// Creates a downloader with custom peer-selection options.
-    pub fn new_with_options<H: BlockHeader + Sealable>(
-        client: C,
-        request: GetBlockAccessListsMessage,
-        headers: &[SealedHeader<H>],
-        runtime: Runtime,
-        options: SnapRequestOptions,
     ) -> Result<Self, InvalidBlockAccessListRequest> {
         if request.block_hashes.is_empty() {
             return Err(InvalidBlockAccessListRequest::NoBlocks)
@@ -87,7 +76,7 @@ impl<C: SnapClient> BlockAccessListDownloader<C> {
             response_bytes: request.response_bytes,
             blocks,
         };
-        Ok(Self(VerifyingRequest::new_with_options(client, request, verifier, runtime, options)))
+        Ok(Self(VerifyingRequest::new(client, request, verifier, runtime)))
     }
 }
 

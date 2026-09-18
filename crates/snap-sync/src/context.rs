@@ -14,9 +14,10 @@ use reth_db_api::transaction::DbTxMut;
 use reth_network_p2p::download::DownloadClient;
 use reth_provider::{DatabaseProviderFactory, StaticFileProviderFactory};
 use reth_storage_api::{
-    AccountExtReader, BlockNumReader, ChangeSetReader, DBProvider, HeaderProvider,
-    PruneCheckpointWriter, StageCheckpointReader, StageCheckpointWriter, StateWriter, StatsReader,
-    StorageChangeSetReader, StorageSettingsCache, TrieWriter,
+    AccountExtReader, BlockHashReader, BlockNumReader, ChangeSetReader, DBProvider, HeaderProvider,
+    MetadataProvider, MetadataWriter, PruneCheckpointWriter, StageCheckpointReader,
+    StageCheckpointWriter, StateWriter, StatsReader, StorageChangeSetReader, StorageSettingsCache,
+    TrieWriter,
 };
 use reth_tasks::shutdown::Shutdown;
 use tracing::debug;
@@ -41,6 +42,9 @@ pub trait SnapSyncContext {
 /// Provider capabilities a Snap session needs to assemble and validate state.
 pub trait SnapSyncProvider:
     DBProvider<Tx: DbTxMut>
+    + MetadataProvider
+    + MetadataWriter
+    + BlockHashReader
     + AccountExtReader
     + ChangeSetReader
     + HeaderProvider
@@ -58,6 +62,9 @@ pub trait SnapSyncProvider:
 
 impl<T> SnapSyncProvider for T where
     T: DBProvider<Tx: DbTxMut>
+        + MetadataProvider
+        + MetadataWriter
+        + BlockHashReader
         + AccountExtReader
         + ChangeSetReader
         + HeaderProvider
@@ -120,10 +127,10 @@ where
         let peers = self.client.num_connected_peers();
         loop {
             if tokio::time::timeout(self.interval, self.shutdown.clone()).await.is_ok() {
-                return false
+                return false;
             }
             if self.client.num_connected_peers() > peers {
-                return true
+                return true;
             }
             match self.canonical_head() {
                 Ok(current) if current > head => return true,

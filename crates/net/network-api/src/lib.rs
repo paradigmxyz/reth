@@ -26,7 +26,6 @@ pub mod test_utils;
 use test_utils::PeersHandleProvider;
 
 pub use alloy_rpc_types_admin::EthProtocolInfo;
-use reth_network_p2p::snap::client::SnapClient;
 pub use reth_network_p2p::{BlockClient, HeadersClient};
 pub use reth_network_types::{PeerKind, Reputation, ReputationChangeKind};
 
@@ -42,7 +41,7 @@ use reth_eth_wire_types::{
     capability::Capabilities, Capability, DisconnectReason, EthVersion, NetworkPrimitives,
     UnifiedStatus,
 };
-use reth_network_p2p::sync::NetworkSyncUpdater;
+use reth_network_p2p::{snap::client::SnapClient, sync::NetworkSyncUpdater};
 use reth_network_peers::NodeRecord;
 use std::{future::Future, net::SocketAddr, sync::Arc, time::Instant};
 

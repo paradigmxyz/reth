@@ -1,13 +1,10 @@
-//! Client, database and request settings shared by the account, storage, bytecode and block
-//! access list downloads.
+//! Client, database and request settings shared by the account, storage and bytecode downloads.
 //!
-//! [`DownloadContext`] numbers requests and commits verified responses on the blocking pool, and
-//! [`SnapRequests`] shares one request id sequence and the unavailable-peer exclusions.
+//! Each download holds a [`DownloadContext`] to number its requests and commit verified responses
+//! in one transaction on the blocking pool.
 
 use crate::SnapSyncError;
 use alloy_primitives::B256;
-use reth_network_p2p::{priority::Priority, snap::client::SnapRequestOptions};
-use reth_network_peers::PeerId;
 use reth_storage_api::{DBProvider, DatabaseProviderFactory};
 use reth_storage_errors::provider::ProviderError;
 use reth_tasks::Runtime;
@@ -103,43 +100,5 @@ impl<C, F> fmt::Debug for DownloadContext<C, F> {
             .field("response_bytes", &self.response_bytes)
             .field("request_id", &self.request_id)
             .finish_non_exhaustive()
-    }
-}
-
-/// Request state shared by the account, storage, bytecode and block access list downloads.
-#[derive(Debug)]
-pub(crate) struct SnapRequests<'a, C> {
-    // A reference avoids requiring network clients to implement Clone.
-    pub(crate) client: &'a C,
-    // Proof verification must stay off the async worker.
-    pub(crate) runtime: Runtime,
-    // One sequence covers follow-ups across every download.
-    pub(crate) request_id: u64,
-}
-
-impl<'a, C> SnapRequests<'a, C> {
-    pub(crate) const fn new(client: &'a C, runtime: Runtime) -> Self {
-        Self { client, runtime, request_id: 0 }
-    }
-
-    // Failing on wrap prevents a stale response from matching a new logical request.
-    pub(crate) fn next_id(&mut self) -> Result<u64, SnapSyncError> {
-        self.request_id = self.request_id.checked_add(1).ok_or_else(|| {
-            SnapSyncError::InvalidRequest("snap request id space exhausted".to_string())
-        })?;
-        Ok(self.request_id)
-    }
-}
-
-// Prioritizes follow-ups while preserving the unavailable-peer set.
-pub(crate) fn request_options(excluded: &[PeerId]) -> SnapRequestOptions {
-    let priority = if excluded.is_empty() { Priority::Normal } else { Priority::High };
-    SnapRequestOptions::new(priority).with_excluded_peers(excluded.iter().copied())
-}
-
-// Keeps exclusions stable and duplicate-free across retries.
-pub(crate) fn push_peer(peers: &mut Vec<PeerId>, peer_id: PeerId) {
-    if !peers.contains(&peer_id) {
-        peers.push(peer_id);
     }
 }

@@ -55,7 +55,6 @@ reth-ethereum-primitives.workspace = true
 reth-evm.workspace = true
 reth-evm-ethereum.workspace = true
 reth-db-api = { workspace = true, features = ["test-utils"] }
-reth-downloaders = { workspace = true, features = ["test-utils"] }
 reth-provider = { workspace = true, features = ["test-utils"] }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
 

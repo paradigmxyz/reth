@@ -1,9 +1,12 @@
-//! Tracks a snap generation's identity, durable progress and state ownership.
+//! Tracks the bootstrap phase alongside the attempt's authoritative metadata.
 //!
-//! A generation marker remains present until the downloaded state and rebuilt trie are accepted,
-//! preventing partial hashed tables from being mistaken for canonical state.
+//! Pivot identity, account coverage and applied BAL progress come from their domain stores.
+//! The stage marker retains the phase until trie verification and pipeline publication finish.
 
-use crate::{error::db_error, handoff::publish_state_snapshot, SnapSyncError};
+use crate::{
+    error::db_error, handoff::publish_state_snapshot, SnapAccountStore, SnapAttemptStore,
+    SnapCatchUpStore, SnapSyncError,
+};
 use alloy_eips::BlockNumHash;
 use alloy_primitives::B256;
 use alloy_rlp::{Decodable, Encodable};
@@ -12,8 +15,8 @@ use reth_primitives_traits::AlloyBlockHeader;
 use reth_provider::{DatabaseProviderFactory, StaticFileProviderFactory};
 use reth_stages_types::{StageCheckpoint, StageId};
 use reth_storage_api::{
-    DBProvider, HeaderProvider, PruneCheckpointWriter, StageCheckpointReader,
-    StageCheckpointWriter, StorageSettingsCache,
+    DBProvider, HeaderProvider, MetadataProvider, MetadataWriter, PruneCheckpointWriter,
+    StageCheckpointReader, StageCheckpointWriter, StorageSettingsCache,
 };
 
 /// A snap attempt's canonical pivot identity and the state root authenticating its downloads.
@@ -80,7 +83,7 @@ pub enum SnapPhase {
 // Existing stage tooling can inspect the generation without a Snap-specific table.
 pub(crate) const SNAP_SYNC_STAGE: StageId = StageId::Other("SnapSync");
 // Versioning prevents an incompatible restart marker from being reinterpreted.
-const SNAP_GENERATION_VERSION: u8 = 2;
+const SNAP_GENERATION_VERSION: u8 = 3;
 
 /// Owns durable state-generation writes for one provider factory.
 #[derive(Debug)]
@@ -103,20 +106,24 @@ impl<'a, F> SnapStateStore<'a, F> {
         F::ProviderRW: DBProvider<Tx: DbTxMut>
             + StageCheckpointReader
             + StageCheckpointWriter
-            + StorageSettingsCache,
+            + StorageSettingsCache
+            + MetadataProvider
+            + MetadataWriter,
     {
         generation.validate()?;
         generation.ensure_phase(SnapPhase::Accounts)?;
         let provider = self.factory.database_provider_rw().map_err(db_error)?;
         if !provider.cached_storage_settings().use_hashed_state() {
-            return Err(SnapSyncError::UnsupportedStorageLayout)
+            return Err(SnapSyncError::UnsupportedStorage);
         }
         // Check in the transaction that clears state, even when the caller checked before
         // selecting a pivot. A completed bootstrap must never become a fresh generation.
         if !Self::requires_bootstrap_in(&provider)? {
-            return Err(SnapSyncError::ExistingState)
+            return Err(SnapSyncError::ExistingState);
         }
 
+        let write = provider.start_snap_attempt(generation.generation())?;
+        provider.start_account_coverage(write)?;
         let tx = provider.tx_ref();
         tx.clear::<tables::HashedAccounts>().map_err(db_error)?;
         tx.clear::<tables::HashedStorages>().map_err(db_error)?;
@@ -147,13 +154,15 @@ impl<'a, F> SnapStateStore<'a, F> {
             + StageCheckpointReader
             + StageCheckpointWriter
             + StorageSettingsCache
-            + StaticFileProviderFactory,
+            + StaticFileProviderFactory
+            + MetadataProvider
+            + MetadataWriter,
     {
         generation.validate()?;
         generation.ensure_phase(SnapPhase::Trie)?;
         let provider = self.factory.database_provider_rw().map_err(db_error)?;
         if !provider.cached_storage_settings().use_hashed_state() {
-            return Err(SnapSyncError::UnsupportedStorageLayout)
+            return Err(SnapSyncError::UnsupportedStorage);
         }
         self.ensure_generation(&provider, generation)?;
         let (state_root, _) = Self::canonical_header_fields(
@@ -166,7 +175,7 @@ impl<'a, F> SnapStateStore<'a, F> {
                 block_number: generation.target_block,
                 expected: generation.state_root,
                 actual: state_root,
-            })
+            });
         }
         let checkpoint = provider
             .get_stage_checkpoint(StageId::MerkleExecute)
@@ -176,12 +185,14 @@ impl<'a, F> SnapStateStore<'a, F> {
             return Err(SnapSyncError::TrieIncomplete {
                 expected: generation.target_block,
                 actual: checkpoint,
-            })
+            });
         }
         provider
             .save_stage_checkpoint(SNAP_SYNC_STAGE, StageCheckpoint::new(generation.target_block))
             .map_err(db_error)?;
         provider.save_stage_checkpoint_progress(SNAP_SYNC_STAGE, Vec::new()).map_err(db_error)?;
+        let write = provider.active_snap_write()?.ok_or(SnapSyncError::NoAttempt)?;
+        provider.verify_snap_attempt(write)?;
         publish_state_snapshot(&provider, generation.target_block)?;
         provider.commit().map_err(db_error)
     }
@@ -197,7 +208,7 @@ impl<'a, F> SnapStateStore<'a, F> {
                 block_number,
                 expected,
                 actual: None,
-            })
+            });
         };
         let actual = header.hash();
         if actual != expected {
@@ -205,7 +216,7 @@ impl<'a, F> SnapStateStore<'a, F> {
                 block_number,
                 expected,
                 actual: Some(actual),
-            })
+            });
         }
         Ok((header.state_root(), header.block_access_list_hash()))
     }
@@ -225,25 +236,46 @@ impl<'a, F> SnapStateStore<'a, F> {
 
     // Empty progress remains compatible with stages that clear progress without deleting its row.
     fn load_generation(
-        provider: &impl StageCheckpointReader,
+        provider: &(impl StageCheckpointReader + MetadataProvider),
     ) -> Result<Option<SnapDownloadProgress>, SnapSyncError> {
         let Some(encoded) = provider
             .get_stage_checkpoint_progress(SNAP_SYNC_STAGE)
             .map_err(db_error)?
             .filter(|encoded| !encoded.is_empty())
         else {
-            return Ok(None)
+            return Ok(None);
         };
-        let generation = alloy_rlp::decode_exact::<SnapDownloadProgress>(&encoded)
+        let mut generation = alloy_rlp::decode_exact::<SnapDownloadProgress>(&encoded)
             .map_err(|error| SnapSyncError::InvalidGeneration(error.to_string()))?;
         generation.validate()?;
+        let write = provider.active_snap_write()?.ok_or(SnapSyncError::NoAttempt)?;
+        let attempt = provider.authorize_snap_write(write)?;
+        let coverage = provider.account_coverage(write)?.ok_or(SnapSyncError::NoCoverage)?;
+        let progress =
+            provider.catch_up_progress(write)?.ok_or(SnapSyncError::NoCatchUpProgress)?;
+        generation.target_block = attempt.pivot().number;
+        generation.target_hash = attempt.pivot().hash;
+        generation.state_root = attempt.state_root();
+        generation.next_account = coverage.next().unwrap_or(crate::MAX_HASH);
+        generation.next_block = progress.next();
+        if generation.phase == SnapPhase::Accounts && coverage.is_complete() {
+            generation.phase = SnapPhase::BlockAccessLists;
+        }
+        generation.validate()?;
+        if generation.phase == SnapPhase::Trie &&
+            (!coverage.is_complete() || progress.applied() != attempt.pivot())
+        {
+            return Err(SnapSyncError::InvalidGeneration(
+                "trie verification requires complete state at the pivot".into(),
+            ))
+        }
         Ok(Some(generation))
     }
 
     // Checking through the active transaction prevents stale work from crossing generations.
     pub(crate) fn ensure_generation(
         &self,
-        provider: &impl StageCheckpointReader,
+        provider: &(impl StageCheckpointReader + MetadataProvider),
         generation: SnapDownloadProgress,
     ) -> Result<(), SnapSyncError> {
         if Self::load_generation(provider)? == Some(generation) {
@@ -252,12 +284,67 @@ impl<'a, F> SnapStateStore<'a, F> {
             Err(SnapSyncError::StaleGeneration)
         }
     }
+
+    /// Re-anchors downloads before catching the covered prefix up to the new root.
+    pub(crate) fn advance_generation(
+        &self,
+        generation: SnapDownloadProgress,
+        target: u64,
+    ) -> Result<SnapDownloadProgress, SnapSyncError>
+    where
+        F: DatabaseProviderFactory,
+        F::ProviderRW: crate::SnapSyncProvider,
+    {
+        let provider = self.factory.database_provider_rw().map_err(db_error)?;
+        self.ensure_generation(&provider, generation)?;
+        if target > generation.target_block {
+            let header = provider
+                .sealed_header(target)?
+                .ok_or(SnapSyncError::MissingHeader { block: target })?;
+            let pivot =
+                SnapGeneration::new(BlockNumHash::new(target, header.hash()), header.state_root());
+            let write = provider.active_snap_write()?.ok_or(SnapSyncError::NoAttempt)?;
+            provider.advance_snap_pivot(write, pivot)?;
+        }
+        let next = Self::load_generation(&provider)?.ok_or(SnapSyncError::StaleGeneration)?;
+        Self::save_generation(&provider, next)?;
+        provider.commit().map_err(db_error)?;
+        Ok(next)
+    }
+
+    /// Enters trie verification only once coverage and applied BALs reach the same pivot.
+    pub(crate) fn complete_block_access_lists(
+        &self,
+        generation: SnapDownloadProgress,
+    ) -> Result<SnapDownloadProgress, SnapSyncError>
+    where
+        F: DatabaseProviderFactory,
+        F::ProviderRW: crate::SnapSyncProvider,
+    {
+        let provider = self.factory.database_provider_rw().map_err(db_error)?;
+        self.ensure_generation(&provider, generation)?;
+        generation.ensure_phase(SnapPhase::BlockAccessLists)?;
+        let write = provider.active_snap_write()?.ok_or(SnapSyncError::NoAttempt)?;
+        let attempt = provider.authorize_canonical_snap_write(write)?;
+        if !provider.account_coverage(write)?.is_some_and(|coverage| coverage.is_complete()) ||
+            provider.catch_up_progress(write)?.map(|progress| progress.applied()) !=
+                Some(attempt.pivot())
+        {
+            return Err(SnapSyncError::InvalidGeneration(
+                "state coverage and BALs have not reached the pivot".into(),
+            ));
+        }
+        let next = SnapDownloadProgress { phase: SnapPhase::Trie, ..generation };
+        Self::save_generation(&provider, next)?;
+        provider.commit().map_err(db_error)?;
+        Ok(next)
+    }
 }
 
 impl<F> SnapStateStore<'_, F>
 where
     F: DatabaseProviderFactory,
-    F::Provider: StageCheckpointReader,
+    F::Provider: StageCheckpointReader + MetadataProvider,
 {
     /// Returns whether the database is fresh or has an unfinished snapshot; does not check snap
     /// support.
@@ -281,9 +368,11 @@ where
 }
 
 impl<F> SnapStateStore<'_, F> {
-    fn requires_bootstrap_in(provider: &impl StageCheckpointReader) -> Result<bool, SnapSyncError> {
+    fn requires_bootstrap_in(
+        provider: &(impl StageCheckpointReader + MetadataProvider),
+    ) -> Result<bool, SnapSyncError> {
         if Self::completed_block_in(provider)?.is_some() {
-            return Ok(false)
+            return Ok(false);
         }
         // Execution may have committed state before Finish advances, including during an
         // interrupted ordinary backfill. Genesis alone does not preclude snapshot bootstrap.
@@ -294,9 +383,9 @@ impl<F> SnapStateStore<'_, F> {
                 .is_some_and(|checkpoint| checkpoint.block_number > 0)
             {
                 if Self::load_generation(provider)?.is_some() {
-                    return Err(SnapSyncError::ExistingState)
+                    return Err(SnapSyncError::ExistingState);
                 }
-                return Ok(false)
+                return Ok(false);
             }
         }
         Ok(true)
@@ -304,10 +393,10 @@ impl<F> SnapStateStore<'_, F> {
 
     // An accepted generation leaves its block behind with no resumable progress.
     pub(crate) fn completed_block_in(
-        provider: &impl StageCheckpointReader,
+        provider: &(impl StageCheckpointReader + MetadataProvider),
     ) -> Result<Option<u64>, SnapSyncError> {
         if Self::load_generation(provider)?.is_some() {
-            return Ok(None)
+            return Ok(None);
         }
         Ok(provider
             .get_stage_checkpoint(SNAP_SYNC_STAGE)
@@ -316,7 +405,7 @@ impl<F> SnapStateStore<'_, F> {
     }
 }
 
-/// Durable identity and restart position of a Snap state generation.
+/// Bootstrap progress reconstructed from the attempt, coverage and catch-up records.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, alloy_rlp::RlpEncodable, alloy_rlp::RlpDecodable)]
 pub struct SnapDownloadProgress {
     // Rejects markers written by an incompatible schema.
@@ -364,55 +453,21 @@ impl SnapDownloadProgress {
         }
     }
 
-    // Re-anchoring every applied block makes its canonicality checkable after a restart.
-    pub(crate) fn with_applied_block_access_list(
-        mut self,
-        block_number: u64,
-        block_hash: B256,
-        state_root: B256,
-        complete: bool,
-    ) -> Result<Self, SnapSyncError> {
-        if block_number != self.next_block {
-            return Err(SnapSyncError::UnexpectedBlock {
-                expected: self.next_block,
-                actual: block_number,
-            })
-        }
-        self.next_block = block_number.checked_add(1).ok_or_else(|| {
-            SnapSyncError::InvalidGeneration(
-                "BAL cursor exceeds the block number space".to_string(),
-            )
-        })?;
-        self.target_block = block_number;
-        self.target_hash = block_hash;
-        self.state_root = state_root;
-        if complete {
-            self.phase = SnapPhase::Trie;
-        }
-        Ok(self)
-    }
-
-    // No-op catch-up still needs an explicit durable phase transition.
-    pub(crate) const fn with_completed_block_access_lists(mut self) -> Self {
-        self.phase = SnapPhase::Trie;
-        self
-    }
-
     // Unknown marker schemas are safer to restart than reinterpret.
     pub(crate) fn validate(&self) -> Result<(), SnapSyncError> {
         if self.version != SNAP_GENERATION_VERSION {
             return Err(SnapSyncError::InvalidGeneration(format!(
                 "unsupported version {}",
                 self.version
-            )))
+            )));
         }
         let first_bal = self.target_block.checked_add(1).ok_or_else(|| {
             SnapSyncError::InvalidGeneration("target block has no BAL successor".to_string())
         })?;
-        if self.next_block != first_bal {
+        if self.next_block > first_bal {
             return Err(SnapSyncError::InvalidGeneration(
                 "BAL cursor does not follow the target".to_string(),
-            ))
+            ));
         }
         Ok(())
     }
@@ -440,6 +495,39 @@ impl Decodable for SnapPhase {
 }
 
 #[cfg(test)]
+impl<F> SnapStateStore<'_, F> {
+    // Seeds a durable prefix for lifecycle tests that do not exercise proof verification.
+    pub(crate) fn seed_account_state(
+        &self,
+        generation: SnapDownloadProgress,
+        state: reth_trie_common::HashedPostState,
+        bytecodes: Vec<(B256, alloy_primitives::Bytes)>,
+        next: Option<B256>,
+    ) -> Result<SnapDownloadProgress, SnapSyncError>
+    where
+        F: DatabaseProviderFactory,
+        F::ProviderRW: crate::SnapSyncProvider,
+    {
+        use reth_storage_api::StateWriter;
+        let provider = self.factory.database_provider_rw()?;
+        self.ensure_generation(&provider, generation)?;
+        let write = provider.active_snap_write()?.ok_or(SnapSyncError::NoAttempt)?;
+        assert!(bytecodes.is_empty());
+        provider.write_hashed_state(&state.into_sorted())?;
+        provider.write_metadata(
+            "snap_account_coverage",
+            serde_json::to_vec(&serde_json::json!({
+                "version": 1, "attempt": write.attempt(), "coverage": { "next": next }
+            }))
+            .unwrap(),
+        )?;
+        let generation = Self::load_generation(&provider)?.unwrap();
+        provider.commit()?;
+        Ok(generation)
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use alloy_primitives::U256;
@@ -462,8 +550,7 @@ mod tests {
         // Execution can be ahead of Finish after an interrupted ordinary backfill. A completed
         // snapshot also has its own checkpoint, independent of subsequent pipeline progress.
         for stage in [StageId::Execution, StageId::Finish, SNAP_SYNC_STAGE] {
-            let factory = create_test_provider_factory();
-            factory.set_storage_settings_cache(StorageSettings::v2());
+            let factory = crate::test_utils::hashed_factory();
             let provider = factory.database_provider_rw().unwrap();
             provider
                 .write_hashed_state(
@@ -518,7 +605,7 @@ mod tests {
 
         let error = SnapStateStore::new(&factory).begin_generation(generation()).unwrap_err();
 
-        assert!(matches!(error, SnapSyncError::UnsupportedStorageLayout));
+        assert!(matches!(error, SnapSyncError::UnsupportedStorage));
         let provider = factory.database_provider_ro().unwrap();
         let mut cursor = provider.tx_ref().cursor_read::<tables::HashedAccounts>().unwrap();
         assert!(cursor.first().unwrap().is_some());
@@ -526,8 +613,7 @@ mod tests {
 
     #[test]
     fn genesis_checkpoints_allow_bootstrap() {
-        let factory = create_test_provider_factory();
-        factory.set_storage_settings_cache(StorageSettings::v2());
+        let factory = crate::test_utils::hashed_factory();
         let provider = factory.database_provider_rw().unwrap();
         for stage in [StageId::Execution, StageId::Finish] {
             provider.save_stage_checkpoint(stage, StageCheckpoint::default()).unwrap();
@@ -542,8 +628,7 @@ mod tests {
 
     #[test]
     fn executed_state_with_an_unfinished_generation_is_rejected() {
-        let factory = create_test_provider_factory();
-        factory.set_storage_settings_cache(StorageSettings::v2());
+        let factory = crate::test_utils::hashed_factory();
         let store = SnapStateStore::new(&factory);
         store.begin_generation(generation()).unwrap();
         let provider = factory.database_provider_rw().unwrap();

@@ -9,7 +9,8 @@ use reth_prune_types::{PruneCheckpoint, PruneMode, PruneSegment};
 use reth_stages_types::{StageCheckpoint, StageId};
 use reth_static_file_types::StaticFileSegment;
 use reth_storage_api::{
-    DBProvider, PruneCheckpointWriter, StageCheckpointReader, StageCheckpointWriter,
+    DBProvider, MetadataProvider, PruneCheckpointWriter, StageCheckpointReader,
+    StageCheckpointWriter,
 };
 use tracing::info;
 
@@ -45,7 +46,7 @@ impl<'a, F> SnapPipelineHandoff<'a, F> {
     /// Returns the published pivot, below which missing change sets prevent rewinding.
     pub fn published_block(&self) -> Result<Option<u64>, SnapSyncError>
     where
-        F: DatabaseProviderFactory<Provider: StageCheckpointReader>,
+        F: DatabaseProviderFactory<Provider: StageCheckpointReader + MetadataProvider>,
     {
         self.store.completed_block()
     }
@@ -101,7 +102,7 @@ pub(crate) fn publish_state_snapshot(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{AccountRangeProgress, SnapDownloadProgress, TrieGenerator};
+    use crate::{SnapDownloadProgress, TrieGenerator};
     use alloy_consensus::Header;
     use alloy_primitives::{B256, KECCAK256_EMPTY, U256};
     use reth_primitives_traits::Account;
@@ -110,13 +111,12 @@ mod tests {
         ProviderFactory, StaticFileProviderFactory, StaticFileWriter,
     };
     use reth_static_file_types::StaticFileSegment;
-    use reth_storage_api::{PruneCheckpointReader, StorageSettings, StorageSettingsCache};
+    use reth_storage_api::PruneCheckpointReader;
     use reth_trie_common::{HashBuilder, HashedPostState, Nibbles, TrieAccount, EMPTY_ROOT_HASH};
 
     // Runs a complete generation so the handoff has an accepted state frontier to publish.
     fn snap_synced_factory() -> (ProviderFactory<MockNodeTypesWithDB>, u64) {
-        let factory = create_test_provider_factory();
-        factory.set_storage_settings_cache(StorageSettings::v2());
+        let factory = crate::test_utils::hashed_factory();
         let account_hash = B256::repeat_byte(0x11);
         let account = TrieAccount {
             nonce: 3,
@@ -144,12 +144,12 @@ mod tests {
         let generation = SnapDownloadProgress::new(1, pivot_hash, state_root);
         store.begin_generation(generation).unwrap();
         let generation = store
-            .commit_account_range(
+            .seed_account_state(
                 generation,
                 HashedPostState::default()
                     .with_accounts([(account_hash, Some(Account::from(account)))]),
                 Vec::new(),
-                AccountRangeProgress::Complete,
+                None,
             )
             .unwrap();
         let generation = store.complete_block_access_lists(generation).unwrap();
@@ -235,8 +235,7 @@ mod tests {
 
     #[test]
     fn unfinished_state_is_not_published() {
-        let factory = create_test_provider_factory();
-        factory.set_storage_settings_cache(StorageSettings::v2());
+        let factory = crate::test_utils::hashed_factory();
         let generation = SnapDownloadProgress::new(7, B256::repeat_byte(1), B256::repeat_byte(2));
         SnapStateStore::new(&factory).begin_generation(generation).unwrap();
 

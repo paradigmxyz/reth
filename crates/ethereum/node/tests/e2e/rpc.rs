@@ -3,7 +3,7 @@ use alloy_eips::{
     eip2718::Encodable2718, eip7910::EthConfig, eip7928::BlockAccessList, BlockNumberOrTag,
 };
 use alloy_genesis::Genesis;
-use alloy_primitives::{Address, Bytes, B256, U256};
+use alloy_primitives::{keccak256, Address, Bytes, B256, U256};
 use alloy_provider::{
     ext::DebugApi,
     network::{EthereumWallet, TransactionBuilder},
@@ -758,7 +758,8 @@ async fn test_flashbots_validate_v6() -> eyre::Result<()> {
 
     inject_blob_transaction(&node, &wallet).await?;
     let payload = node.new_payload().await?;
-    assert!(payload.block_access_list().is_some());
+    let block_access_list = payload.block_access_list().expect("amsterdam payload has a BAL");
+    assert_eq!(Some(keccak256(block_access_list)), payload.block().block_access_list_hash);
 
     let envelope = payload.clone().try_into_v6()?;
     assert!(!envelope.blobs_bundle.blobs.is_empty());
