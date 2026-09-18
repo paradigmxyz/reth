@@ -747,11 +747,19 @@ where
 struct PrewarmProofTargetsSink {
     targets: MultiProofTargetsV2,
     storage_targets: usize,
+    selfdestructed: Vec<Address>,
     last_storage_address: Option<(Address, alloy_primitives::B256)>,
 }
 
 impl PrewarmProofTargetsSink {
-    fn into_parts(self) -> (MultiProofTargetsV2, usize) {
+    fn into_parts(mut self) -> (MultiProofTargetsV2, usize) {
+        // A transaction can write storage before selfdestructing. Such writes do not need
+        // speculative proofs, regardless of the order in which the stream reports them.
+        for address in self.selfdestructed {
+            if let Some(slots) = self.targets.storage_targets.remove(&keccak256(address)) {
+                self.storage_targets -= slots.len();
+            }
+        }
         (self.targets, self.storage_targets)
     }
 
@@ -771,35 +779,12 @@ impl PrewarmProofTargetsSink {
 impl EvmStateChangeSink for PrewarmProofTargetsSink {
     type Error = Infallible;
 
-    fn account_read(
-        &mut self,
-        address: Address,
-        _info: Option<&reth_execution_types::ExecutionAccountInfo>,
-    ) -> Result<(), Self::Error> {
-        self.targets.account_targets.push(ProofV2Target::new(keccak256(address)));
-        Ok(())
-    }
-
-    fn storage_read(
-        &mut self,
-        address: Address,
-        key: alloy_primitives::U256,
-        _value: alloy_primitives::U256,
-    ) -> Result<(), Self::Error> {
-        self.storage_targets_for_address(address)
-            .push(ProofV2Target::new(keccak256(key.to_be_bytes::<32>())));
-        self.storage_targets += 1;
-        Ok(())
-    }
-
     fn account(&mut self, change: ExecutionAccountChangeRef<'_>) -> Result<(), Self::Error> {
-        self.targets.account_targets.push(ProofV2Target::new(keccak256(change.address)));
-        Ok(())
-    }
-
-    fn storage_wipe(&mut self, address: Address) -> Result<(), Self::Error> {
-        self.targets.account_targets.push(ProofV2Target::new(keccak256(address)));
-        self.storage_targets_for_address(address);
+        if change.selfdestructed {
+            self.selfdestructed.push(change.address);
+        } else if change.original != change.current {
+            self.targets.account_targets.push(ProofV2Target::new(keccak256(change.address)));
+        }
         Ok(())
     }
 
@@ -1181,12 +1166,40 @@ mod tests {
     }
 
     #[test]
-    fn prewarm_targets_include_unchanged_reads() {
+    fn prewarm_targets_ignore_unchanged_reads() {
         let address = Address::repeat_byte(1);
         let slot = U256::from(7);
         let mut sink = PrewarmProofTargetsSink::default();
         sink.account_read(address, None).unwrap();
         sink.storage_read(address, slot, U256::from(8)).unwrap();
+        let (targets, count) = sink.into_parts();
+        assert!(targets.account_targets.is_empty());
+        assert!(targets.storage_targets.is_empty());
+        assert_eq!(count, 0);
+    }
+
+    #[test]
+    fn prewarm_targets_include_changes() {
+        let address = Address::repeat_byte(1);
+        let slot = U256::from(7);
+        let original = reth_execution_types::ExecutionAccountInfo::default();
+        let current = reth_execution_types::ExecutionAccountInfo { nonce: 1, ..original.clone() };
+        let mut sink = PrewarmProofTargetsSink::default();
+        sink.account(ExecutionAccountChangeRef {
+            address,
+            original: Some(&original),
+            current: Some(&current),
+            created: false,
+            selfdestructed: false,
+        })
+        .unwrap();
+        sink.storage(ExecutionStorageChange {
+            address,
+            key: slot,
+            original: U256::ZERO,
+            current: U256::from(8),
+        })
+        .unwrap();
         let (targets, count) = sink.into_parts();
         assert_eq!(
             targets.account_targets.iter().map(ProofV2Target::key).collect::<Vec<_>>(),
@@ -1200,6 +1213,53 @@ mod tests {
             vec![keccak256(slot.to_be_bytes::<32>())]
         );
         assert_eq!(count, 1);
+    }
+
+    #[test]
+    fn prewarm_targets_discard_selfdestructed_storage() {
+        let address = Address::repeat_byte(1);
+        let retained = Address::repeat_byte(2);
+        let info = reth_execution_types::ExecutionAccountInfo::default();
+        for account_first in [false, true] {
+            let mut sink = PrewarmProofTargetsSink::default();
+            let destroyed = ExecutionAccountChangeRef {
+                address,
+                original: Some(&info),
+                current: None,
+                created: true,
+                selfdestructed: true,
+            };
+            if account_first {
+                sink.account(destroyed).unwrap();
+            }
+            sink.storage_wipe(address).unwrap();
+            for address in [address, retained] {
+                sink.storage(ExecutionStorageChange {
+                    address,
+                    key: U256::from(7),
+                    original: U256::ZERO,
+                    current: U256::from(8),
+                })
+                .unwrap();
+            }
+            if !account_first {
+                sink.account(destroyed).unwrap();
+            }
+            // Lifecycle flags alone do not imply an account trie update.
+            sink.account(ExecutionAccountChangeRef {
+                address: retained,
+                original: Some(&info),
+                current: Some(&info),
+                created: true,
+                selfdestructed: false,
+            })
+            .unwrap();
+            let (targets, count) = sink.into_parts();
+            assert!(targets.account_targets.is_empty());
+            assert_eq!(targets.storage_targets.len(), 1);
+            assert!(targets.storage_targets.contains_key(&keccak256(retained)));
+            assert_eq!(count, 1);
+        }
     }
 
     #[test]
