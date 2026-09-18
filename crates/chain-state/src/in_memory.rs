@@ -1005,7 +1005,7 @@ impl<N: NodePrimitives<SignedTx: SignedTransaction>> NewCanonicalChain<N> {
 
     /// Converts a slice of executed blocks into a [`Chain`].
     fn blocks_to_chain(blocks: &[ExecutedBlock<N>]) -> Chain<N> {
-        match blocks {
+        let mut chain = match blocks {
             [] => Chain::default(),
             [first, rest @ ..] => {
                 let mut chain = Chain::from_block(
@@ -1016,9 +1016,6 @@ impl<N: NodePrimitives<SignedTx: SignedTransaction>> NewCanonicalChain<N> {
                     )),
                     first.trie_data_handle(),
                 );
-                if let Some(bal) = first.bal() {
-                    chain.insert_bal(first.block_number(), Arc::clone(bal));
-                }
                 for exec in rest {
                     chain.append_block(
                         Arc::clone(&exec.recovered_block),
@@ -1028,13 +1025,16 @@ impl<N: NodePrimitives<SignedTx: SignedTransaction>> NewCanonicalChain<N> {
                         )),
                         exec.trie_data_handle(),
                     );
-                    if let Some(bal) = exec.bal() {
-                        chain.insert_bal(exec.block_number(), Arc::clone(bal));
-                    }
                 }
                 chain
             }
+        };
+        for exec in blocks {
+            if let Some(bal) = exec.bal() {
+                chain.insert_bal(exec.block_number(), Arc::clone(bal));
+            }
         }
+        chain
     }
 
     /// Returns the new tip of the chain.

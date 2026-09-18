@@ -3216,7 +3216,7 @@ where
         let ValidationOutput { executed_block: executed, execution_timing_stats: timing_stats } =
             execute(&mut self.payload_validator, input, ctx)?;
 
-        if let Some(raw_bal) = executed.bal.as_ref().map(|bal| bal.as_raw_bal().clone()) {
+        if let Some(raw_bal) = executed.bal().map(|bal| bal.as_raw_bal().clone()) {
             let num_hash = executed.recovered_block().num_hash();
             if let Err(err) = self.provider.bal_store().insert(num_hash, raw_bal) {
                 warn!(

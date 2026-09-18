@@ -918,12 +918,10 @@ where
             let _ = valid_block_tx.send(());
         }
 
-        // The payload's raw bytes are already tied to this header hash: payload-to-block conversion
-        // and downloaded-sidecar verification both check the BAL hash against the header. Pairing
-        // them with the BAL this execution produced is therefore sound.
-        //
-        // Zipping keeps the BAL out of the executed block unless the payload actually carried the
-        // raw bytes, so a downloaded block with only a BAL hash still yields `None`.
+        // The payload's raw bytes are already bound to this header: payload-to-block conversion
+        // and downloaded-sidecar verification both check their hash against it, so pairing them
+        // with the BAL this execution produced is sound. The zip leaves the BAL unset for a
+        // downloaded block that carried only a BAL hash and no sidecar.
         let bal = revm_bal.zip(decoded_bal).map(|(revm_bal, decoded_bal)| {
             Arc::new(DecodedRevmBal::with_raw_bal(revm_bal, decoded_bal.as_raw_bal().clone()))
         });
@@ -1102,10 +1100,12 @@ where
         debug_span!(target: "engine::tree", "merge_transitions")
             .in_scope(|| db.merge_transitions(BundleRetention::Reverts));
 
-        // The revm form is the one shared with the executed block, so it must survive here. The
-        // clone only feeds the post-execution hash check, the sole consumer of the alloy form.
-        let built_bal = has_bal.then(|| db.take_built_bal()).flatten().map(|revm_bal| {
-            ExecutedBal { alloy: revm_bal.clone().into_alloy_bal(), revm: Arc::new(revm_bal) }
+        // The builder only exists when the block declares a BAL. The revm form is the one shared
+        // with the executed block, so it must survive here; the clone only feeds the
+        // post-execution consensus checks, the sole consumer of the alloy form.
+        let built_bal = db.take_built_bal().map(|revm_bal| ExecutedBal {
+            alloy: revm_bal.clone().into_alloy_bal(),
+            revm: Arc::new(revm_bal),
         });
         let output = BlockExecutionOutput { result, state: db.take_bundle() };
 
@@ -2126,7 +2126,7 @@ impl<T: PayloadTypes> BlockOrPayload<T> {
 
 /// Block access list produced by executing a block.
 struct ExecutedBal {
-    /// Alloy form, only needed for the consensus hash check.
+    /// Alloy form, only needed for the post-execution consensus checks (hash and gas limit).
     alloy: BlockAccessList,
     /// Revm form, shared with the executed block so consumers can reuse it.
     revm: Arc<RevmBal>,
