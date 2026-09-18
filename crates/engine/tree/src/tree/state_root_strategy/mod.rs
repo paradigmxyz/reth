@@ -531,11 +531,10 @@ impl DefaultStateRootStrategy {
 
         let cache = Arc::new(SparseTrieCache {
             overlay_manager: overlay_manager.clone(),
-            enabled: Mutex::new(true),
+            pending: Mutex::new(None),
         });
         self.spawn_sparse_trie_task(
             executor,
-            overlay_manager,
             proof_handle,
             proof_result_tx,
             proof_result_rx,
@@ -574,7 +573,6 @@ impl DefaultStateRootStrategy {
     fn spawn_sparse_trie_task<N: NodePrimitives>(
         &self,
         executor: &reth_tasks::Runtime,
-        overlay_manager: &OverlayManager<N>,
         proof_worker_handle: ProofWorkerHandle,
         proof_result_tx: CrossbeamSender<ProofResultMessage>,
         proof_result_rx: CrossbeamReceiver<ProofResultMessage>,
@@ -592,7 +590,6 @@ impl DefaultStateRootStrategy {
             chunk_size,
             pending_sparse_trie_prune_blocks,
         } = options;
-        let overlay_manager = overlay_manager.clone();
         let trie_metrics = self.metrics.clone();
         let executor = executor.clone();
 
@@ -675,8 +672,8 @@ impl DefaultStateRootStrategy {
             let result = task.run();
             let task_result = result.as_ref().ok().cloned();
 
-            // Validation supplies the completed block hash before this task starts. Payload
-            // building does not, so only validation tasks publish a reusable trie.
+            // Stage the trie before sending the result so `finish` can publish it after
+            // accepting the state root. Payload building supplies no hash and cannot publish.
             let pending_trie = if task_result.is_some() &&
                 let Some(block_hash) = block_hash
             {
@@ -684,29 +681,18 @@ impl DefaultStateRootStrategy {
                     prune_target.map_or(sparse_trie_anchor_hash, |(_, anchor_hash)| anchor_hash);
                 let (preserved, completer) =
                     PreservedSparseTrie::pending(block_hash, preserved_anchor_hash);
-                if let Err(preserved) = cache.publish(preserved) {
-                    executor.spawn_drop(preserved);
-                    None
-                } else {
-                    Some(completer)
-                }
+                *cache.pending.lock() = Some(preserved);
+                Some(completer)
             } else {
-                overlay_manager.clear_sparse_trie();
                 None
             };
 
             if state_root_tx.send(result).is_err() {
-                // A continuation task can take the pending trie during the narrow window between
-                // publishing it and detecting the abandoned receiver here. Returning drops the
-                // completer, so the taker wakes with `ProducerDropped` and its state-root consumer
-                // falls back to serial computation. No partially finalized trie is exposed; the
-                // worst case is a redundant fallback.
                 debug!(
                     target: "engine::tree::payload_processor",
                     "State root receiver dropped, dropping trie"
                 );
                 let (trie, deferred) = task.into_cleared_trie();
-                overlay_manager.clear_sparse_trie();
                 executor.spawn_drop(trie);
                 executor.spawn_drop(deferred);
                 return;
@@ -752,28 +738,18 @@ impl DefaultStateRootStrategy {
     }
 }
 
-/// Serial fallback permanently disables publication by this task. The lock also orders
-/// invalidation against a worker publishing after its timeout has expired.
+/// Keeps the worker's trie private until `finish` accepts its state root.
 #[derive(Debug)]
 struct SparseTrieCache<N: NodePrimitives> {
     overlay_manager: OverlayManager<N>,
-    enabled: Mutex<bool>,
+    pending: Mutex<Option<PreservedSparseTrie>>,
 }
 
 impl<N: NodePrimitives> SparseTrieCache<N> {
-    fn publish(&self, trie: PreservedSparseTrie) -> Result<(), PreservedSparseTrie> {
-        let enabled = self.enabled.lock();
-        if !*enabled {
-            return Err(trie)
+    fn publish(&self) {
+        if let Some(trie) = self.pending.lock().take() {
+            self.overlay_manager.store_sparse_trie(trie);
         }
-        self.overlay_manager.store_sparse_trie(trie);
-        Ok(())
-    }
-
-    fn invalidate(&self) {
-        let mut enabled = self.enabled.lock();
-        *enabled = false;
-        self.overlay_manager.clear_sparse_trie();
     }
 }
 
@@ -1062,7 +1038,6 @@ where
         &self,
         output: Arc<BlockExecutionOutput<N::Receipt>>,
     ) -> ProviderResult<SerialFallbackRx> {
-        self.cache.invalidate();
         let provider = self.state_provider_factory.database_provider_ro()?;
         let (fallback_tx, fallback_rx) = mpsc::channel();
         self.executor.spawn_blocking_named("serial-root", move || {
@@ -1086,7 +1061,6 @@ where
         &self,
         output: &BlockExecutionOutput<N::Receipt>,
     ) -> ProviderResult<StateRootJobOutcome> {
-        self.cache.invalidate();
         let provider = self.state_provider_factory.database_provider_ro()?;
         let hashed_state = Arc::new(provider.hashed_post_state(&output.state)?);
         let (state_root, trie_updates) =
@@ -1108,6 +1082,7 @@ where
     ) -> ProviderResult<StateRootJobOutcome> {
         let outcome = self.sparse_outcome(block, output, outcome);
         if outcome.state_root == block.header().state_root() {
+            self.cache.publish();
             return Ok(outcome)
         }
         warn!(
@@ -1203,6 +1178,7 @@ where
             if let Ok(Ok(outcome)) = task_rx.try_recv() {
                 let outcome = self.sparse_outcome(block, &output, outcome);
                 if outcome.state_root == block.header().state_root() {
+                    self.cache.publish();
                     return Ok(outcome)
                 }
                 // A wrong task root falls through to the serial fallback already racing below.
@@ -1328,32 +1304,103 @@ mod tests {
     use revm::state::{AccountInfo, AccountStatus, EvmState, EvmStorageSlot, TransactionId};
 
     #[test]
-    fn serial_fallback_invalidates_published_and_late_tries() {
-        let overlay_manager = OverlayManager::<EthPrimitives>::default();
-        let cache =
-            SparseTrieCache { overlay_manager: overlay_manager.clone(), enabled: Mutex::new(true) };
-        let block_hash = B256::with_last_byte(1);
-        let (preserved, completer) = PreservedSparseTrie::pending(block_hash, B256::ZERO);
-        cache.publish(preserved).unwrap();
+    fn finish_publishes_only_accepted_sparse_trie() {
+        let factory = create_test_provider_factory_with_chain_spec(Arc::new(ChainSpec::default()));
+        let genesis_hash = init_genesis(&factory).unwrap();
+        let provider = BlockchainProvider::new(factory).unwrap();
+        let runtime = reth_tasks::Runtime::test();
 
-        cache.invalidate();
-        assert!(overlay_manager.take_sparse_trie().is_none());
-        // Finalizing a trie already published before fallback cannot restore the cache.
-        assert!(completer.complete(SparseStateTrie::default()).is_err());
+        for timeout in [None, Some(Duration::from_secs(1))] {
+            for (finish, matching_root) in [(false, true), (true, true), (true, false)] {
+                let overlay_manager = OverlayManager::<EthPrimitives>::default();
+                let block = RecoveredBlock::new_unhashed(
+                    reth_ethereum_primitives::Block {
+                        header: alloy_consensus::Header {
+                            state_root: B256::with_last_byte(1),
+                            ..Default::default()
+                        },
+                        ..Default::default()
+                    },
+                    Vec::new(),
+                );
+                let (preserved, completer) =
+                    PreservedSparseTrie::pending(block.hash(), genesis_hash);
+                let cache = Arc::new(SparseTrieCache {
+                    overlay_manager: overlay_manager.clone(),
+                    pending: Mutex::new(Some(preserved)),
+                });
+                let (result_tx, result_rx) = mpsc::channel();
+                result_tx
+                    .send(Ok(StateRootComputeOutcome {
+                        state_root: if matching_root { block.state_root } else { B256::ZERO },
+                        trie_updates: Default::default(),
+                        hashed_state: Default::default(),
+                    }))
+                    .unwrap();
+                completer.complete(SparseStateTrie::default()).unwrap();
+                let mut job = SparseTrieStateRootJob {
+                    cache,
+                    handle: StateRootHandle::new(
+                        B256::ZERO,
+                        crossbeam_channel::unbounded().0,
+                        StateRootTaskCancelGuard::channel().0,
+                        result_rx,
+                        mpsc::channel().1,
+                    ),
+                    state_provider_factory: OverlayStateProviderFactory::new(
+                        provider.clone(),
+                        overlay_manager.overlay_builder(genesis_hash),
+                    ),
+                    executor: runtime.clone(),
+                    timeout,
+                    compare_trie_updates: false,
+                    metrics: Default::default(),
+                };
+                assert!(overlay_manager.take_sparse_trie().is_none());
+                if finish {
+                    job.finish(
+                        &block,
+                        Arc::new(BlockExecutionOutput::default()),
+                        &LazyHashedPostState::ready(Default::default()),
+                    )
+                    .unwrap();
+                }
+                drop(job);
+                let preserved = overlay_manager.take_sparse_trie();
+                assert_eq!(preserved.is_some(), finish && matching_root);
+                if let Some(preserved) = preserved {
+                    assert!(preserved.into_trie_for(block.hash()).unwrap().is_some());
+                }
+            }
+        }
+    }
 
-        let (late, _completer) = PreservedSparseTrie::pending(block_hash, B256::ZERO);
-        assert!(cache.publish(late).is_err());
-        assert!(overlay_manager.take_sparse_trie().is_none());
+    #[test]
+    fn abandoned_sparse_trie_does_not_replace_shared_cache() {
+        for completed in [false, true] {
+            let overlay_manager = OverlayManager::<EthPrimitives>::default();
+            let block_hash = B256::with_last_byte(1);
+            let (preserved, completer) = PreservedSparseTrie::pending(block_hash, B256::ZERO);
+            let cache = SparseTrieCache {
+                overlay_manager: overlay_manager.clone(),
+                pending: Mutex::new(Some(preserved)),
+            };
+            let next_hash = B256::with_last_byte(2);
+            overlay_manager.store_sparse_trie(PreservedSparseTrie::anchored(
+                SparseStateTrie::default(),
+                next_hash,
+                block_hash,
+            ));
 
-        // Disabling the old task must not disable publication by the next validation.
-        let next_cache =
-            SparseTrieCache { overlay_manager: overlay_manager.clone(), enabled: Mutex::new(true) };
-        let next_hash = B256::with_last_byte(2);
-        let (next, _completer) = PreservedSparseTrie::pending(next_hash, block_hash);
-        next_cache.publish(next).unwrap();
-        let (late, _completer) = PreservedSparseTrie::pending(block_hash, B256::ZERO);
-        assert!(cache.publish(late).is_err());
-        assert_eq!(overlay_manager.take_sparse_trie().unwrap().block_hash(), next_hash);
+            if completed {
+                completer.complete(SparseStateTrie::default()).unwrap();
+                drop(cache);
+            } else {
+                drop(cache);
+                assert!(completer.complete(SparseStateTrie::default()).is_err());
+            }
+            assert_eq!(overlay_manager.take_sparse_trie().unwrap().block_hash(), next_hash);
+        }
     }
 
     #[test]
