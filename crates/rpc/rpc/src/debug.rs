@@ -635,7 +635,7 @@ where
                     .executor(&mut db)
                     .execute(&block)
                     .map_err(|err| EthApiError::Internal(err.into()))?;
-                db.commit_source(output.state.inner());
+                db.commit_source(&reth_execution_types::BundleSource(&output.state));
 
                 Ok(ExecutionWitnessRecord::new(&db)
                     .into_execution_witness(
@@ -814,10 +814,11 @@ where
                 for tx in block.transactions_recovered() {
                     let tx_env = eth_api.evm_config().tx_env(tx.cloned());
                     let result = eth_api.transact(&mut db, evm_env.clone(), tx_env)?;
-                    result
-                        .pending_state
-                        .visit(&mut state)
-                        .expect("state accumulator is infallible");
+                    let mut changes = reth_execution_types::TransactionChanges::default();
+                    let Ok(()) = result.pending_state.visit(&mut changes);
+                    let mut transaction_state = reth_execution_types::BlockState::default();
+                    transaction_state.commit(&changes);
+                    state.extend(transaction_state.into_bundle());
                     db.commit_source(&result.pending_state);
                     let hashed_state = db
                         .db

@@ -25,7 +25,7 @@ use reth_evm::{
     execute::{
         BlockBuilder, BlockBuilderOutcome, BlockExecutionError, BlockExecutor, BlockValidationError,
     },
-    ConfigureEvm, EvmEnv, NextBlockEnvAttributes,
+    ConfigureEvm, EvmEnv, NextBlockEnvAttributes, OnStateHook,
 };
 use reth_evm_ethereum::EthEvmConfig;
 use reth_execution_cache::{CachedStateMetrics, CachedStateMetricsSource, CachedStateProvider};

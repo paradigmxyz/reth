@@ -1,4 +1,5 @@
 //! EVM-backed Ethereum execution helpers.
+use reth_execution_types::{BlockState, EvmState, TransactionChanges};
 
 use crate::dao_fork;
 
@@ -31,28 +32,28 @@ use alloy_eips::{
 use alloy_primitives::keccak256;
 use alloy_primitives::{map::AddressMap, Address, Bytes, Log, B256, KECCAK256_EMPTY, U256};
 use alloy_sol_types::{sol, SolEvent};
-use core::{any::Any, convert::Infallible};
+use core::any::Any;
+#[cfg(test)]
+use core::convert::Infallible;
 #[cfg(test)]
 use evm2::evm::Db;
 #[cfg(test)]
 use evm2::Precompiles;
-use evm2::{
-    bytecode::Bytecode as ExecutableBytecode,
-    evm::{
-        AccountChangeRef, AccountInfo, BlockStateAccumulator, StateChangeSink, StateChangeSource,
-        StorageChange, SystemTx, BEACON_ROOTS_ADDRESS, BUILDER_DEPOSIT_REQUEST_ADDRESS,
-        BUILDER_EXIT_REQUEST_ADDRESS, CONSOLIDATION_REQUEST_ADDRESS, HISTORY_STORAGE_ADDRESS,
-        WITHDRAWAL_REQUEST_ADDRESS,
-    },
-    registry::HandlerError,
-    ErrorCode, Evm, EvmTypes, SpecId, TxResult, TxResultWithState,
-};
 #[cfg(test)]
 use evm2::{
     env::BlockEnv as EvmBlockEnv,
     ethereum::{ethereum_tx_registry, RecoveredTxEnvelope},
     evm::{precompile::PrecompileProvider, Database, DynDatabase},
     BaseEvmTypes, ExecutionConfig, Version,
+};
+use evm2::{
+    evm::{
+        AccountChangeRef, AccountInfo, StateChangeSink, StateChangeSource, SystemTx,
+        BEACON_ROOTS_ADDRESS, BUILDER_DEPOSIT_REQUEST_ADDRESS, BUILDER_EXIT_REQUEST_ADDRESS,
+        CONSOLIDATION_REQUEST_ADDRESS, HISTORY_STORAGE_ADDRESS, WITHDRAWAL_REQUEST_ADDRESS,
+    },
+    registry::HandlerError,
+    ErrorCode, Evm, EvmTypes, SpecId, TxResult, TxResultWithState,
 };
 #[cfg(test)]
 type BlockEnv = EvmBlockEnv<BaseEvmTypes>;
@@ -383,7 +384,7 @@ where
         I: IntoIterator<Item = Result<RecoveredTxEnvelope, TxErr>>,
         F: FnMut(usize),
         R: for<'receipt> FnMut(usize, &'receipt Receipt) -> Result<(), ReceiptErr>,
-        H: FnMut(BlockStateAccumulator),
+        H: FnMut(EvmState),
     {
         let Self { spec_id, block_env, database, block_number, context, precompiles } = self;
         let ExecutionHooks {
@@ -404,7 +405,7 @@ where
             database,
             precompiles,
         );
-        let mut block_state = BlockStateAccumulator::new();
+        let mut block_state = BlockState::new();
         pre_execution_system_call_state_changes(
             &mut evm,
             &mut block_state,
@@ -469,7 +470,7 @@ where
         let gas_used = receipts.last().map_or(0, TxReceipt::cumulative_gas_used);
         let output = BlockExecutionOutput::new(
             BlockExecutionResult { receipts, requests, gas_used, blob_gas_used },
-            block_state,
+            block_state.into_bundle(),
         );
 
         Ok(output)
@@ -616,85 +617,7 @@ fn take_database_error<T: EvmTypes>(evm: &mut Evm<'_, T>, code: ErrorCode) -> Dy
     DynamicDatabaseError::new(evm.database_mut().error(code))
 }
 
-struct RethStateSink<'a> {
-    execution_sink: Option<&'a mut dyn StateChangeSink<Error = Infallible>>,
-    block_state: &'a mut BlockStateAccumulator,
-    // Transfer native changes to consumers without hashing keys on the execution thread.
-    streamed_state: Option<BlockStateAccumulator>,
-}
-
-impl<'a> RethStateSink<'a> {
-    fn new(
-        execution_sink: Option<&'a mut dyn StateChangeSink<Error = Infallible>>,
-        block_state: &'a mut BlockStateAccumulator,
-        stream_state: bool,
-    ) -> Self {
-        Self {
-            execution_sink,
-            block_state,
-            streamed_state: stream_state.then(BlockStateAccumulator::default),
-        }
-    }
-
-    fn flush_streamed_state(self, on_state_update: &mut impl FnMut(BlockStateAccumulator)) {
-        if let Some(streamed_state) = self.streamed_state {
-            send_state_update(streamed_state, on_state_update);
-        }
-    }
-}
-
-impl StateChangeSink for RethStateSink<'_> {
-    type Error = Infallible;
-
-    fn bytecode(&mut self, code_hash: B256, code: &ExecutableBytecode) -> Result<(), Self::Error> {
-        if let Some(execution_sink) = self.execution_sink.as_deref_mut() {
-            execution_sink.bytecode(code_hash, code)?;
-        }
-        self.block_state.bytecode(code_hash, code)?;
-        if let Some(streamed_state) = self.streamed_state.as_mut() {
-            streamed_state.bytecode(code_hash, code)?;
-        }
-        Ok(())
-    }
-
-    fn account(&mut self, change: AccountChangeRef<'_>) -> Result<(), Self::Error> {
-        if let Some(execution_sink) = self.execution_sink.as_deref_mut() {
-            execution_sink.account(change)?;
-        }
-        self.block_state.account(change)?;
-        if let Some(streamed_state) = self.streamed_state.as_mut() {
-            streamed_state.account(change)?;
-        }
-        Ok(())
-    }
-
-    fn storage_wipe(&mut self, address: Address) -> Result<(), Self::Error> {
-        if let Some(execution_sink) = self.execution_sink.as_deref_mut() {
-            execution_sink.storage_wipe(address)?;
-        }
-        self.block_state.storage_wipe(address)?;
-        if let Some(streamed_state) = self.streamed_state.as_mut() {
-            streamed_state.storage_wipe(address)?;
-        }
-        Ok(())
-    }
-
-    fn storage(&mut self, change: StorageChange) -> Result<(), Self::Error> {
-        if let Some(execution_sink) = self.execution_sink.as_deref_mut() {
-            execution_sink.storage(change)?;
-        }
-        self.block_state.storage(change)?;
-        if let Some(streamed_state) = self.streamed_state.as_mut() {
-            streamed_state.storage(change)?;
-        }
-        Ok(())
-    }
-}
-
-fn send_state_update(
-    state: BlockStateAccumulator,
-    on_state_update: &mut impl FnMut(BlockStateAccumulator),
-) {
+fn send_state_update(state: EvmState, on_state_update: &mut impl FnMut(EvmState)) {
     if !state.is_empty() {
         on_state_update(state);
     }
@@ -703,9 +626,9 @@ fn send_state_update(
 #[cfg(test)]
 pub(crate) fn execute_transaction<T: EvmTypes>(
     evm: &mut Evm<'_, T>,
-    block_state: &mut BlockStateAccumulator,
+    block_state: &mut BlockState,
     stream_state: bool,
-    on_state_update: &mut impl FnMut(BlockStateAccumulator),
+    on_state_update: &mut impl FnMut(EvmState),
     transaction: &Recovered<T::Tx>,
 ) -> Result<TxResult<T>, EthExecutionError>
 where
@@ -717,33 +640,20 @@ where
 
 pub(crate) fn execute_transaction_with_condition<T: EvmTypes>(
     evm: &mut Evm<'_, T>,
-    block_state: &mut BlockStateAccumulator,
+    block_state: &mut BlockState,
     stream_state: bool,
-    on_state_update: &mut impl FnMut(BlockStateAccumulator),
+    on_state_update: &mut impl FnMut(EvmState),
     transaction: &Recovered<T::Tx>,
     commit: impl FnOnce(&TxResult<T>) -> reth_evm::CommitChanges,
 ) -> Result<Option<TxResult<T>>, EthExecutionError>
 where
     T::Tx: Typed2718,
 {
-    let mut sink = RethStateSink::new(None, block_state, stream_state);
-    let result = match evm.transact(transaction) {
-        Ok(executed) => {
-            if let Some(code) = executed.result().error_code {
-                let _ = executed.discard();
-                Err(HandlerError::Fatal(code))
-            } else if commit(executed.result()).should_commit() {
-                let Ok(result) = executed.commit_with(&mut sink);
-                Ok(Some(result))
-            } else {
-                let _ = executed.discard();
-                Ok(None)
-            }
-        }
-        Err(error) => Err(error),
-    };
-    sink.flush_streamed_state(on_state_update);
-    result.map_err(|error| map_handler_error(evm, error))
+    let output = execute_transaction_without_commit(evm, transaction)?;
+    if !commit(&output.result).should_commit() {
+        return Ok(None)
+    }
+    Ok(Some(commit_detached_transaction(evm, block_state, stream_state, on_state_update, output)))
 }
 
 pub(crate) fn execute_transaction_without_commit<T: EvmTypes>(
@@ -780,9 +690,9 @@ where
 
 pub(crate) fn commit_detached_transaction<T: EvmTypes>(
     evm: &mut Evm<'_, T>,
-    block_state: &mut BlockStateAccumulator,
+    block_state: &mut BlockState,
     stream_state: bool,
-    on_state_update: &mut impl FnMut(BlockStateAccumulator),
+    on_state_update: &mut impl FnMut(EvmState),
     output: TxResultWithState<T>,
 ) -> TxResult<T> {
     let TxResultWithState { result, pending_state, .. } = output;
@@ -792,15 +702,16 @@ pub(crate) fn commit_detached_transaction<T: EvmTypes>(
 
 pub(crate) fn commit_pending_state<T: EvmTypes>(
     evm: &mut Evm<'_, T>,
-    block_state: &mut BlockStateAccumulator,
+    block_state: &mut BlockState,
     stream_state: bool,
-    on_state_update: &mut impl FnMut(BlockStateAccumulator),
+    on_state_update: &mut impl FnMut(EvmState),
     pending_state: &evm2::evm::PendingState,
 ) {
-    {
-        let mut sink = RethStateSink::new(None, block_state, stream_state);
-        let Ok(()) = pending_state.visit(&mut sink);
-        sink.flush_streamed_state(on_state_update);
+    let mut changes = TransactionChanges::default();
+    let Ok(()) = pending_state.visit(&mut changes);
+    block_state.commit(&changes);
+    if stream_state {
+        send_state_update(changes.state, on_state_update);
     }
     evm.overlay_db_mut().commit_pending(pending_state);
 }
@@ -815,9 +726,9 @@ fn map_db_error_code<T: EvmTypes>(evm: &mut Evm<'_, T>, code: ErrorCode) -> EthE
 
 pub(crate) fn pre_execution_system_call_state_changes<T: EvmTypes>(
     evm: &mut Evm<'_, T>,
-    block_state: &mut BlockStateAccumulator,
+    block_state: &mut BlockState,
     stream_state: bool,
-    on_state_update: &mut impl FnMut(BlockStateAccumulator),
+    on_state_update: &mut impl FnMut(EvmState),
     spec_id: SpecId,
     block_number: u64,
     context: BlockExecutionContext<'_>,
@@ -917,9 +828,9 @@ where
 
 pub(crate) fn post_execution_system_call_state_changes<T: EvmTypes>(
     evm: &mut Evm<'_, T>,
-    block_state: &mut BlockStateAccumulator,
+    block_state: &mut BlockState,
     stream_state: bool,
-    on_state_update: &mut impl FnMut(BlockStateAccumulator),
+    on_state_update: &mut impl FnMut(EvmState),
     spec_id: SpecId,
     context: BlockExecutionContext<'_>,
     requests: &mut Requests,
@@ -987,14 +898,14 @@ pub(crate) fn post_execution_system_call_state_changes<T: EvmTypes>(
 
 fn execute_system_call<T: EvmTypes>(
     evm: &mut Evm<'_, T>,
-    block_state: &mut BlockStateAccumulator,
+    block_state: &mut BlockState,
     stream_state: bool,
-    on_state_update: &mut impl FnMut(BlockStateAccumulator),
+    on_state_update: &mut impl FnMut(EvmState),
     address: Address,
     data: Bytes,
 ) -> Result<TxResult<T>, EthExecutionError> {
     enum SystemCallResolution<U: EvmTypes> {
-        Outcome(TxResult<U>),
+        Outcome(TxResultWithState<U>),
         DatabaseError(ErrorCode),
         HandlerError(HandlerError),
         Failed(String),
@@ -1010,12 +921,7 @@ fn execute_system_call<T: EvmTypes>(
                 let _ = executed.discard();
                 SystemCallResolution::Failed(reason)
             } else {
-                let outcome = {
-                    let mut sink = RethStateSink::new(None, block_state, stream_state);
-                    let Ok(outcome) = executed.commit_with(&mut sink);
-                    sink.flush_streamed_state(on_state_update);
-                    outcome
-                };
+                let outcome = executed.detach();
                 SystemCallResolution::<T>::Outcome(outcome)
             }
         }
@@ -1023,7 +929,13 @@ fn execute_system_call<T: EvmTypes>(
     };
 
     match resolution {
-        SystemCallResolution::Outcome(outcome) => Ok(outcome),
+        SystemCallResolution::Outcome(outcome) => Ok(commit_detached_transaction(
+            evm,
+            block_state,
+            stream_state,
+            on_state_update,
+            outcome,
+        )),
         SystemCallResolution::DatabaseError(code) => Err(map_db_error_code(evm, code)),
         SystemCallResolution::HandlerError(err) => Err(map_handler_error(evm, err)),
         SystemCallResolution::Failed(reason) => {
@@ -1034,43 +946,35 @@ fn execute_system_call<T: EvmTypes>(
 
 fn commit_state_changes<T: EvmTypes>(
     evm: &mut Evm<'_, T>,
-    block_state: &mut BlockStateAccumulator,
+    block_state: &mut BlockState,
     stream_state: bool,
-    on_state_update: &mut impl FnMut(BlockStateAccumulator),
+    on_state_update: &mut impl FnMut(EvmState),
     changes: &[(Address, Option<AccountInfo>, Option<AccountInfo>)],
 ) {
-    let result = {
-        let mut sink = RethStateSink::new(
-            Some(evm.overlay_db_mut() as &mut dyn StateChangeSink<Error = Infallible>),
-            block_state,
-            stream_state,
-        );
-        let result = changes.iter().try_for_each(|(address, original, current)| {
-            sink.account(AccountChangeRef {
-                address: *address,
-                original: original.as_ref(),
-                current: current.as_ref(),
-                created: false,
-                selfdestructed: false,
-            })
-        });
-        if result.is_ok() {
-            sink.flush_streamed_state(on_state_update);
-        }
-        result
-    };
-    match result {
-        Ok(()) => {}
-        Err(err) => match err {},
+    let mut converted = TransactionChanges::default();
+    for (address, original, current) in changes {
+        let change = AccountChangeRef {
+            address: *address,
+            original: original.as_ref(),
+            current: current.as_ref(),
+            created: false,
+            selfdestructed: false,
+        };
+        let Ok(()) = evm.overlay_db_mut().account(change);
+        let Ok(()) = converted.account(change);
+    }
+    block_state.commit(&converted);
+    if stream_state {
+        send_state_update(converted.state, on_state_update);
     }
 }
 
 #[expect(clippy::too_many_arguments)]
 pub(crate) fn post_block_balance_state_changes<T: EvmTypes>(
     evm: &mut Evm<'_, T>,
-    block_state: &mut BlockStateAccumulator,
+    block_state: &mut BlockState,
     stream_state: bool,
-    on_state_update: &mut impl FnMut(BlockStateAccumulator),
+    on_state_update: &mut impl FnMut(EvmState),
     base_block_reward: Option<u128>,
     dao_fork_transition: bool,
     block_number: u64,
@@ -1212,18 +1116,36 @@ mod tests {
     };
     use reth_chainspec::{Chain, ChainSpec};
     use reth_ethereum_forks::{EthereumHardfork, ForkCondition};
-    use reth_execution_types::hashed_post_state_from_execution_state;
 
     fn assert_hashed_state_matches_streamed_updates(
         output: &BlockExecutionOutput<Receipt>,
-        updates: Vec<BlockStateAccumulator>,
+        updates: Vec<EvmState>,
     ) {
         let mut streamed = HashedPostState::default();
         for update in updates {
-            streamed.extend(hashed_post_state_from_execution_state::<KeccakKeyHasher>(&update));
+            for (address, account) in update {
+                let hash = keccak256(address);
+                if account.info != account.original_info() {
+                    streamed.accounts.insert(
+                        hash,
+                        (!account.is_selfdestructed()).then(|| account.info.clone().into()),
+                    );
+                }
+                if !account.is_selfdestructed() {
+                    for (key, value) in account.storage {
+                        if value.is_changed() {
+                            streamed
+                                .storages
+                                .entry(hash)
+                                .or_default()
+                                .storage
+                                .insert(keccak256(B256::from(key)), value.present_value);
+                        }
+                    }
+                }
+            }
         }
-        let recomputed =
-            hashed_post_state_from_execution_state::<KeccakKeyHasher>(output.state.inner());
+        let recomputed = HashedPostState::from_bundle_state::<KeccakKeyHasher>(&output.state.state);
 
         assert_eq!(streamed.into_sorted(), recomputed.into_sorted());
     }
@@ -1314,7 +1236,7 @@ mod tests {
         assert_eq!(output.result.receipts.len(), 1);
         assert!(output.result.receipts[0].success);
         assert_eq!(
-            output.account_state(&target).unwrap().current.as_ref().unwrap().balance,
+            output.account_state(&target).unwrap().info.as_ref().unwrap().balance,
             U256::from(1)
         );
     }
@@ -1373,12 +1295,12 @@ mod tests {
         .expect("factory transaction succeeds");
 
         assert!(output.result.receipts[0].success);
-        let factory = output.account_state(&FACTORY_ADDRESS).unwrap().current.as_ref().unwrap();
+        let factory = output.account_state(&FACTORY_ADDRESS).unwrap().info.as_ref().unwrap();
         assert_eq!(factory.balance, U256::ZERO);
         assert_eq!(factory.code_hash, keccak256(FACTORY_CODE.as_ref()));
         assert_eq!(factory.nonce, 2);
 
-        let account = output.account_state(&target).unwrap().current.as_ref().unwrap();
+        let account = output.account_state(&target).unwrap().info.as_ref().unwrap();
         assert_eq!(account.nonce, 1);
         assert_eq!(output.bytecode(&account.code_hash).unwrap().original_bytes().as_ref(), &[0]);
     }
@@ -1632,11 +1554,11 @@ mod tests {
 
         assert!(output.result.receipts.is_empty());
         assert_eq!(
-            output.account_state(&existing).unwrap().current.as_ref().unwrap().balance,
+            output.account_state(&existing).unwrap().info.as_ref().unwrap().balance,
             U256::from(1_000_000_100)
         );
         assert_eq!(
-            output.account_state(&new).unwrap().current.as_ref().unwrap().balance,
+            output.account_state(&new).unwrap().info.as_ref().unwrap().balance,
             U256::from(5_000_000_000u64)
         );
     }
@@ -1666,7 +1588,7 @@ mod tests {
         .expect("EVM execution succeeds");
 
         assert!(output.account_state(&nonexistent).is_none());
-        assert!(output.account_state(&empty).unwrap().current.is_none());
+        assert!(output.account_state(&empty).unwrap().info.is_none());
         assert!(output.account_state(&contract).is_none());
     }
 
@@ -1834,7 +1756,7 @@ mod tests {
         .expect("system calls to absent contracts are no-ops");
 
         assert!(output.result.receipts.is_empty());
-        assert_eq!(output.state.accounts().count(), 0);
+        assert_eq!(output.state.state.len(), 0);
     }
 
     #[test]

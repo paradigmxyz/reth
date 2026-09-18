@@ -1,7 +1,7 @@
 //! Traits for execution.
 
 use crate::{ConfigureEvm, Database, DynDatabase, EvmEnv, TxEnvFor};
-use alloc::{boxed::Box, format, sync::Arc, vec::Vec};
+use alloc::{boxed::Box, sync::Arc, vec::Vec};
 use alloy_consensus::{
     transaction::{Either, Recovered, TransactionEnvelope},
     BlockHeader as _, Header,
@@ -20,9 +20,7 @@ pub use reth_execution_errors::{
     InvalidTxError,
 };
 pub use reth_execution_types::{BlockExecutionOutput, ExecutionOutcome};
-use reth_execution_types::{
-    BlockExecutionResult, EvmState, EvmStateChangeSink, ExecutionOutcomeState, HashedPostState,
-};
+use reth_execution_types::{BlockExecutionResult, BundleSource, EvmState, HashedPostState};
 #[cfg(feature = "std")]
 use reth_primitives_traits::BlockTy;
 use reth_primitives_traits::{
@@ -31,6 +29,7 @@ use reth_primitives_traits::{
 };
 use reth_storage_api::StateProvider;
 use reth_trie_common::updates::TrieUpdates;
+use revm::database::BundleState;
 
 /// Gas used by a successfully executed transaction.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
@@ -197,17 +196,6 @@ pub trait Evm {
         &mut self,
         moves: impl IntoIterator<Item = (Address, Address)>,
     ) -> Result<(), evm2::precompiles::MovePrecompileError>;
-
-    /// Executes a transaction and discards its writes while streaming observed state changes into
-    /// `sink`.
-    fn transact_and_discard<S>(
-        &mut self,
-        transaction: &Recovered<Self::Transaction>,
-        sink: &mut S,
-    ) -> Result<(), BlockExecutionError>
-    where
-        S: EvmStateChangeSink,
-        S::Error: Debug;
 }
 
 impl<'a, T: evm2::EvmTypes<Tx: Typed2718>> Evm for evm2::Evm<'a, T> {
@@ -290,31 +278,6 @@ impl<'a, T: evm2::EvmTypes<Tx: Typed2718>> Evm for evm2::Evm<'a, T> {
         moves: impl IntoIterator<Item = (Address, Address)>,
     ) -> Result<(), evm2::precompiles::MovePrecompileError> {
         self.precompiles_mut().move_precompiles(&moves.into_iter().collect::<Vec<_>>())
-    }
-
-    fn transact_and_discard<S>(
-        &mut self,
-        transaction: &Recovered<Self::Transaction>,
-        sink: &mut S,
-    ) -> Result<(), BlockExecutionError>
-    where
-        S: EvmStateChangeSink,
-        S::Error: Debug,
-    {
-        let executed = self.transact(transaction).map_err(|err| {
-            BlockExecutionError::msg(format!("discarded transaction execution failed: {err:?}"))
-        })?;
-
-        if let Some(code) = executed.result().error_code {
-            let _ = executed.discard();
-            return Err(BlockExecutionError::msg(format!(
-                "discarded transaction database error: {code:?}"
-            )))
-        }
-
-        executed.discard_with(sink).map(|_| ()).map_err(|err| {
-            BlockExecutionError::msg(format!("discarded state sink failed: {err:?}"))
-        })
     }
 }
 
@@ -565,7 +528,7 @@ pub struct BlockAssemblerInput<'a, 'b, F: BlockExecutorFactory + 'a, H = Header>
     /// Output of block execution.
     pub output: &'b BlockExecutionResult<F::Receipt>,
     /// Execution state after block execution.
-    pub execution_state: &'b EvmState,
+    pub execution_state: &'b BundleState,
     /// Provider with access to state.
     pub state_provider: &'b dyn StateProvider,
     /// State root for the assembled block.
@@ -583,7 +546,7 @@ impl<'a, 'b, F: BlockExecutorFactory + 'a, H> BlockAssemblerInput<'a, 'b, F, H> 
         parent: &'a SealedHeader<H>,
         transactions: Vec<F::Transaction>,
         output: &'b BlockExecutionResult<F::Receipt>,
-        execution_state: &'b EvmState,
+        execution_state: &'b BundleState,
         state_provider: &'b dyn StateProvider,
         state_root: B256,
         block_access_list_hash: Option<B256>,
@@ -621,7 +584,7 @@ pub struct BlockBuilderOutcome<N: NodePrimitives> {
     /// Result of block execution.
     pub execution_result: BlockExecutionResult<N::Receipt>,
     /// Changed state produced by block execution.
-    pub execution_state: reth_execution_types::IndexedBlockState,
+    pub execution_state: BundleState,
     /// Hashed state after execution.
     pub hashed_state: HashedPostState,
     /// Trie updates collected during state-root calculation.
@@ -849,9 +812,8 @@ where
             DecodedBal::new_unchecked(bal.into(), raw.into(), hash)
         });
         let block_access_list_hash = block_access_list.as_ref().map(DecodedBal::hash);
-        let hashed_state = state_provider
-            .hashed_post_state(output.state.inner())
-            .map_err(BlockExecutionError::other)?;
+        let hashed_state =
+            state_provider.hashed_post_state(&output.state).map_err(BlockExecutionError::other)?;
         let (state_root, trie_updates) = match state_root(&output)? {
             Some(precomputed) => precomputed,
             None => state_provider
@@ -866,7 +828,7 @@ where
             parent,
             transactions,
             output: &output.result,
-            execution_state: output.state.inner(),
+            execution_state: &output.state,
             state_provider: &state_provider,
             state_root,
             block_access_list_hash,
@@ -930,7 +892,7 @@ pub trait Executor<DB: Database>: Sized {
     {
         let result = self.execute_one(block)?;
         let state = self.into_state();
-        Ok(BlockExecutionOutput::new(result, state.into_execution_state()))
+        Ok(BlockExecutionOutput::new(result, state))
     }
 
     /// Consumes the type, executes the block, and streams native state updates to the provided
@@ -945,7 +907,7 @@ pub trait Executor<DB: Database>: Sized {
     {
         let result = self.execute_one_with_state_hook(block, state_hook)?;
         let state = self.into_state();
-        Ok(BlockExecutionOutput::new(result, state.into_execution_state()))
+        Ok(BlockExecutionOutput::new(result, state))
     }
 
     /// Executes the block and invokes `f` with the accumulated execution state after execution.
@@ -955,13 +917,13 @@ pub trait Executor<DB: Database>: Sized {
         mut f: F,
     ) -> Result<BlockExecutionOutput<<Self::Primitives as NodePrimitives>::Receipt>, Self::Error>
     where
-        F: FnMut(&ExecutionOutcomeState),
+        F: FnMut(&BundleState),
     {
         let result = self.execute_one(block)?;
         let state = self.into_state();
         f(&state);
 
-        Ok(BlockExecutionOutput::new(result, state.into_execution_state()))
+        Ok(BlockExecutionOutput::new(result, state))
     }
 
     /// Executes the block and always invokes `f` with the accumulated execution state, even when
@@ -972,13 +934,13 @@ pub trait Executor<DB: Database>: Sized {
         mut f: F,
     ) -> Result<BlockExecutionOutput<<Self::Primitives as NodePrimitives>::Receipt>, Self::Error>
     where
-        F: FnMut(&ExecutionOutcomeState),
+        F: FnMut(&BundleState),
     {
         let result = self.execute_one(block);
         let state = self.into_state();
         f(&state);
 
-        Ok(BlockExecutionOutput::new(result?, state.into_execution_state()))
+        Ok(BlockExecutionOutput::new(result?, state))
     }
 
     /// Executes multiple inputs in the batch and returns an aggregated [`ExecutionOutcome`].
@@ -1011,7 +973,7 @@ pub trait Executor<DB: Database>: Sized {
     fn size_hint(&self) -> usize;
 
     /// Converts the executor into its accumulated batch state.
-    fn into_state(self) -> ExecutionOutcomeState;
+    fn into_state(self) -> BundleState;
 
     /// Takes the canonical block access list from executor.
     fn take_bal(&mut self) -> Option<BlockAccessList>;
@@ -1023,7 +985,7 @@ pub trait Executor<DB: Database>: Sized {
 pub struct BasicBlockExecutor<Evm, DB: Database> {
     evm_config: Evm,
     batch_database: CacheDB<Db<DB>>,
-    batch_state: ExecutionOutcomeState,
+    batch_state: BundleState,
     block_access_list: Option<BlockAccessList>,
 }
 
@@ -1034,7 +996,7 @@ impl<Evm, DB: Database> BasicBlockExecutor<Evm, DB> {
         Self {
             evm_config,
             batch_database: CacheDB::new(Db::new(database)),
-            batch_state: ExecutionOutcomeState::default(),
+            batch_state: BundleState::default(),
             block_access_list: None,
         }
     }
@@ -1047,17 +1009,17 @@ where
     DB: Database,
 {
     fn merge_batch_output(
-        mut batch_state: ExecutionOutcomeState,
+        mut batch_state: BundleState,
         output: BlockExecutionOutput<ReceiptTy<Evm::Primitives>>,
     ) -> BlockExecutionOutput<ReceiptTy<Evm::Primitives>> {
-        if batch_state.block_reverts().is_empty() {
+        if batch_state.reverts.is_empty() {
             return output
         }
 
         let result = output.result;
         let state = output.state;
-        batch_state.push_block_state(state.into_inner());
-        BlockExecutionOutput::new(result, batch_state.into_execution_state())
+        batch_state.extend(state);
+        BlockExecutionOutput::new(result, batch_state)
     }
 
     #[expect(clippy::type_complexity)]
@@ -1123,10 +1085,10 @@ where
         let (output, block_access_list) =
             Self::execute_block_with_database(&self.evm_config, block, &mut self.batch_database)?;
         self.block_access_list = block_access_list;
-        self.batch_database.commit_source(&output.state);
+        self.batch_database.commit_source(&BundleSource(&output.state));
 
-        let block_state = output.state.into_inner();
-        self.batch_state.push_block_state(block_state);
+        let block_state = output.state;
+        self.batch_state.extend(block_state);
 
         Ok(output.result)
     }
@@ -1146,10 +1108,10 @@ where
             Some(Box::new(state_hook)),
         )?;
         self.block_access_list = block_access_list;
-        self.batch_database.commit_source(&output.state);
+        self.batch_database.commit_source(&BundleSource(&output.state));
 
-        let block_state = output.state.into_inner();
-        self.batch_state.push_block_state(block_state);
+        let block_state = output.state;
+        self.batch_state.extend(block_state);
 
         Ok(output.result)
     }
@@ -1186,7 +1148,7 @@ where
         self.batch_state.size_hint()
     }
 
-    fn into_state(self) -> ExecutionOutcomeState {
+    fn into_state(self) -> BundleState {
         self.batch_state
     }
 
@@ -1269,8 +1231,8 @@ where
         0
     }
 
-    fn into_state(self) -> ExecutionOutcomeState {
-        ExecutionOutcomeState::default()
+    fn into_state(self) -> BundleState {
+        BundleState::default()
     }
 
     fn take_bal(&mut self) -> Option<BlockAccessList> {

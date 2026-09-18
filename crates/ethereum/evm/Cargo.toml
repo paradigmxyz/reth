@@ -11,6 +11,7 @@ repository.workspace = true
 workspace = true
 
 [dependencies]
+revm.workspace = true
 # Reth
 reth-execution-types.workspace = true
 reth-chainspec.workspace = true
@@ -49,6 +50,7 @@ asm-keccak = [
     "reth-evm/asm-keccak",
     "reth-execution-types/asm-keccak",
     "alloy-primitives/asm-keccak",
+    "revm/asm-keccak",
 ]
 c-kzg = [
     "evm2/c-kzg",
@@ -64,6 +66,7 @@ portable = [
     "evm2/portable",
     "reth-evm/portable",
     "reth-execution-types/portable",
+    "revm/portable",
 ]
 jit = [
     "std",
@@ -95,6 +98,7 @@ std = [
     "reth-storage-errors/std",
     "alloy-sol-types/std",
     "alloy-eip7928/std",
+    "revm/std",
 ]
 test-utils = [
     "std",

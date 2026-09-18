@@ -27,6 +27,9 @@ alloy-primitives.workspace = true
 alloy-consensus.workspace = true
 alloy-trie.workspace = true
 
+# revm
+revm.workspace = true
+
 # tracing
 tracing = { workspace = true, features = ["attributes"] }
 
@@ -77,6 +80,7 @@ serde = [
     "reth-stages-types/serde",
     "parking_lot/serde",
     "rand/serde",
+    "revm/serde",
 ]
 test-utils = [
     "triehash",

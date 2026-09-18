@@ -580,14 +580,14 @@ where
         env: EvmEnvFor<Self>,
         block_number: u64,
         ctx: EthBlockExecutionCtx<'a>,
-    ) -> Result<reth_evm::EvmState, Box<dyn core::error::Error + Send + Sync>>
+    ) -> Result<revm::database::BundleState, Box<dyn core::error::Error + Send + Sync>>
     where
         Self: 'a,
         DB: evm2::evm::DynDatabase + 'a,
     {
         let spec_id = env.spec.into();
         let mut evm = self.block_executor_factory().build_evm_with_env(db, env);
-        let mut block_state = evm2::evm::BlockStateAccumulator::new();
+        let mut block_state = reth_execution_types::BlockState::new();
         crate::execution::pre_execution_system_call_state_changes(
             &mut evm,
             &mut block_state,
@@ -600,7 +600,7 @@ where
             ),
         )
         .map_err(|err| -> Box<dyn core::error::Error + Send + Sync> { Box::new(err) })?;
-        Ok(block_state)
+        Ok(block_state.into_bundle())
     }
 }
 

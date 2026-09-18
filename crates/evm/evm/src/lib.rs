@@ -51,6 +51,7 @@ pub use execute::{
     RecoveredTx, WithTxEnv,
 };
 pub use reth_execution_types::EvmState;
+pub use revm::database_interface::OnStateHook;
 
 /// Transaction validation limits resolved for an EVM environment.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -425,12 +426,12 @@ pub trait ConfigureEvm: Clone + Debug + Send + Sync + Unpin {
         _evm_env: EvmEnvFor<Self>,
         _block_number: u64,
         _ctx: ExecutionCtxFor<'a, Self>,
-    ) -> Result<EvmState, Box<dyn Error + Send + Sync>>
+    ) -> Result<revm::database::BundleState, Box<dyn Error + Send + Sync>>
     where
         Self: 'a,
         DB: DynDatabase + 'a,
     {
-        Ok(EvmState::default())
+        Ok(revm::database::BundleState::default())
     }
 }
 

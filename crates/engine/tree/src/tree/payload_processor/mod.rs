@@ -14,7 +14,6 @@ use reth_evm::{
     ConfigureEvm, ConvertTx, ExecutableTxFor, ExecutableTxIterator, ExecutableTxParts,
     ExecutableTxTuple, TxEnvFor, WithTxEnv,
 };
-use reth_execution_types::EvmState;
 use reth_primitives_traits::{FastInstant as Instant, NodePrimitives};
 use reth_provider::{
     BlockExecutionOutput, BlockNumReader, ChangeSetReader, DatabaseProviderFactory, HistoryReader,
@@ -30,6 +29,7 @@ pub use reth_trie_parallel::{
         StateRootSink, StateRootTaskCancelGuard, StateRootUpdateHook, StateRootUpdateStream,
     },
 };
+use revm::database::BundleState;
 use std::{
     ops::Not,
     sync::{
@@ -469,7 +469,7 @@ where
     pub fn on_inserted_executed_block(
         &self,
         block_with_parent: BlockWithParent,
-        block_state: &EvmState,
+        block_state: &BundleState,
     ) {
         let cache_state_metrics = self.cache_state_metrics.clone();
         self.execution_cache.update_with_guard(|cached| {
@@ -500,7 +500,11 @@ where
 
             // Insert the block's state into cache
             let new_cache = SavedCache::new(block_with_parent.block.hash, caches);
-            new_cache.cache().insert_state(block_state);
+            if new_cache.cache().insert_state(block_state).is_err() {
+                *cached = None;
+                debug!(target: "engine::caching", "cleared execution cache on update error");
+                return
+            }
             new_cache.update_metrics(cache_state_metrics.as_ref());
 
             // Replace with the updated cache

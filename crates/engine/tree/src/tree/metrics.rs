@@ -62,9 +62,10 @@ impl EngineApiMetrics {
         self.executor.execution_duration.set(execution_secs);
 
         // Update the metrics for the number of accounts, storage slots and bytecodes
-        let accounts = output.state.accounts().count();
-        let storage_slots = output.state.storage().count();
-        let bytecodes = output.state.code().count();
+        let accounts = output.state.state.len();
+        let storage_slots =
+            output.state.state.values().map(|account| account.storage.len()).sum::<usize>();
+        let bytecodes = output.state.contracts.len();
 
         self.executor.accounts_updated_histogram.record(accounts as f64);
         self.executor.storage_slots_updated_histogram.record(storage_slots as f64);
@@ -633,7 +634,9 @@ mod tests {
     use super::*;
     use alloy_eips::eip7685::Requests;
     use metrics_util::debugging::{DebuggingRecorder, Snapshotter};
-    use reth_execution_types::{BlockExecutionResult, EvmState};
+    use reth_ethereum_primitives::Receipt;
+    use reth_execution_types::BlockExecutionResult;
+    use reth_revm::db::BundleState;
 
     fn setup_test_recorder() -> Snapshotter {
         let recorder = DebuggingRecorder::new();
@@ -652,8 +655,8 @@ mod tests {
         metrics.executor.gas_per_second.set(0.0);
         metrics.executor.gas_used_histogram.record(0.0);
 
-        let output = BlockExecutionOutput::<()> {
-            state: EvmState::default().into(),
+        let output = BlockExecutionOutput::<Receipt> {
+            state: BundleState::default(),
             result: BlockExecutionResult {
                 receipts: vec![],
                 requests: Requests::default(),

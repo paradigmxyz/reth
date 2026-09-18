@@ -89,11 +89,29 @@ impl<'a, DB> ExecutionWitnessRecord<'a, DB> {
             codes.sort_unstable();
         }
 
-        let mut wiped_state = reth_execution_types::EvmState::default();
+        let mut wiped_state = revm::database::BundleState::default();
         for (address, storage) in &self.state.cache.storage {
             if storage.wiped {
-                use reth_execution_types::EvmStateChangeSink;
-                wiped_state.storage_wipe(*address).expect("infallible");
+                let info = self
+                    .state
+                    .cache
+                    .accounts
+                    .get(address)
+                    .and_then(|info| info.as_ref())
+                    .map(reth_execution_types::revm_account);
+                wiped_state.state.insert(
+                    *address,
+                    revm::database::BundleAccount::new(
+                        info.clone(),
+                        info.clone(),
+                        Default::default(),
+                        if info.is_some() {
+                            revm::database::AccountStatus::DestroyedChanged
+                        } else {
+                            revm::database::AccountStatus::Destroyed
+                        },
+                    ),
+                );
             }
         }
         if !wiped_state.is_empty() {

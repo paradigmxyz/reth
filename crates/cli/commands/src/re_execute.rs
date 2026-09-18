@@ -14,12 +14,15 @@ use reth_cli::chainspec::ChainSpecParser;
 use reth_cli_util::cancellation::CancellationToken;
 use reth_consensus::FullConsensus;
 use reth_evm::{database::StateProviderDatabase, execute::Executor, ConfigureEvm};
-use reth_execution_types::{BlockReverts, RevertToSlot};
 use reth_node_core::args::JitArgs;
 use reth_primitives_traits::{format_gas_throughput, Account, BlockBody, GotExpected};
 use reth_provider::{
     providers::BlockchainProvider, BlockHashReader, BlockNumReader, BlockReader, ChainSpecProvider,
     DatabaseProviderFactory, ReceiptProvider, StaticFileProviderFactory, TransactionVariant,
+};
+use reth_revm::db::{
+    states::reverts::{AccountInfoRevert, RevertToSlot},
+    BundleState,
 };
 use reth_stages::stages::calculate_gas_used_from_headers;
 use reth_storage_api::{ChangeSetReader, DBProvider, StorageChangeSetReader};
@@ -148,10 +151,18 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
                 // Reused across blocks for BAL hash encoding.
                 let mut bal_buf = Vec::new();
 
-                let db_at = |block_number: u64| -> eyre::Result<_> {
-                    let provider = provider_factory.database_provider_ro()?.disable_long_read_transaction_safety();
-                    let hash = provider.block_hash(block_number)?.ok_or_else(|| eyre::eyre!("missing block {block_number}"))?;
-                    Ok(StateProviderDatabase(state_provider_factory.state_provider_from_database(provider, hash)))
+                let db_at = {
+                    |block_number: u64| {
+                        let provider = provider_factory
+                            .database_provider_ro()
+                            .unwrap()
+                            .disable_long_read_transaction_safety();
+                        let hash = provider.block_hash(block_number).unwrap().unwrap();
+                        StateProviderDatabase(
+                            state_provider_factory
+                                .state_provider_from_database(provider, hash),
+                        )
+                    }
                 };
 
                 loop {
@@ -167,8 +178,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
                     }
                     let chunk_end = (chunk_start + blocks_per_chunk).min(max_block);
 
-                    let mut executor = evm_config.batch_executor(db_at(chunk_start.saturating_sub(1))?);
-                    let mut last_executed_block = None;
+                    let mut executor = evm_config.batch_executor(db_at(chunk_start - 1));
                     let mut executor_created = Instant::now();
 
                     'blocks: for block in chunk_start..chunk_end {
@@ -184,12 +194,13 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
                             Ok(result) => result,
                             Err(err) => {
                                 if skip_invalid_blocks {
-                                    executor = evm_config.batch_executor(db_at(block.number())?);
-                                    executor_created = Instant::now();
-                                    let _ = info_tx.send((block, eyre::Report::new(err)));
+                                    executor =
+                                        evm_config.batch_executor(db_at(block.number()));
+                                    let _ =
+                                        info_tx.send((block, eyre::Report::new(err)));
                                     continue
                                 }
-                                return Err(eyre::Report::new(err))
+                                return Err(err.into())
                             }
                         };
 
@@ -246,8 +257,8 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
 
                                         error!(number=?block.number(), ?mismatch, "Gas usage mismatch");
                                         if skip_invalid_blocks {
-                                            executor = evm_config.batch_executor(db_at(block.number())?);
-                                            executor_created = Instant::now();
+                                            executor = evm_config
+                                                .batch_executor(db_at(block.number()));
                                             let _ = info_tx.send((block, err));
                                             continue 'blocks;
                                         }
@@ -260,28 +271,27 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
 
                             if skip_invalid_blocks {
                                 executor =
-                                    evm_config.batch_executor(db_at(block.number())?);
+                                    evm_config.batch_executor(db_at(block.number()));
                                 let _ = info_tx.send((block, err));
                                 continue 'blocks;
                             }
                             return Err(err);
                         }
                         let _ = stats_tx.send((block.number(), block.gas_used()));
-                        last_executed_block = Some(block.number());
 
-                        // Verify and drop accumulated state once in a while to avoid OOM.
+                        // Reset DB once in a while to avoid OOM or read tx timeouts
                         if executor.size_hint() > 5_000_000 ||
                             executor_created.elapsed() > executor_lifetime
                         {
                             let last_block = block.number();
                             let old_executor = std::mem::replace(
                                 &mut executor,
-                                evm_config.batch_executor(db_at(last_block)?),
+                                evm_config.batch_executor(db_at(last_block)),
                             );
-                            let state = old_executor.into_state();
+                            let bundle = old_executor.into_state();
                             verify_bundle_against_changesets(
                                 &provider,
-                                state.block_reverts(),
+                                &bundle,
                                 last_block,
                             )?;
                             executor_created = Instant::now();
@@ -289,15 +299,12 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
                     }
 
                     // Full verification at chunk end for remaining unverified blocks
-                    let state = executor.into_state();
-                    if !state.block_reverts().is_empty() {
-                        let last_block = last_executed_block.unwrap_or(chunk_end.saturating_sub(1));
-                        verify_bundle_against_changesets(
-                            &provider,
-                            state.block_reverts(),
-                            last_block,
-                        )?;
-                    }
+                    let bundle = executor.into_state();
+                    verify_bundle_against_changesets(
+                        &provider,
+                        &bundle,
+                        chunk_end - 1,
+                    )?;
                 }
 
                 eyre::Ok(())
@@ -392,14 +399,14 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
 /// (from DB storage wipe) absent from reverts.
 fn verify_bundle_against_changesets<P>(
     provider: &P,
-    reverts: &[BlockReverts],
+    bundle: &BundleState,
     last_block: u64,
 ) -> eyre::Result<()>
 where
     P: ChangeSetReader + StorageChangeSetReader,
 {
     // Verify reverts against changesets per block
-    for (i, block_reverts) in reverts.iter().rev().enumerate() {
+    for (i, block_reverts) in bundle.reverts.iter().rev().enumerate() {
         let block_number = last_block - i as u64;
 
         let mut cs_accounts: HashMap<Address, Option<Account>> = provider
@@ -413,26 +420,46 @@ where
             cs_storage.entry(bna.address()).or_default().insert(entry.key, entry.value);
         }
 
-        for (addr, original) in &block_reverts.accounts {
-            let cs_info = cs_accounts.remove(addr).ok_or_else(|| {
-                eyre::eyre!("Block {block_number}: account {addr} in reverts but not in changeset")
-            })?;
-            let revert_acct = original.as_ref().map(Account::from);
-            eyre::ensure!(
-                revert_acct == cs_info,
-                "Block {block_number}: account {addr} info mismatch: revert={revert_acct:?} cs={cs_info:?}",
-            );
-        }
+        for (addr, revert) in block_reverts {
+            // Verify account info
+            match &revert.account {
+                AccountInfoRevert::DoNothing => {
+                    eyre::ensure!(
+                        !cs_accounts.contains_key(addr),
+                        "Block {block_number}: account {addr} in changeset but revert is DoNothing",
+                    );
+                }
+                AccountInfoRevert::DeleteIt => {
+                    let cs_info = cs_accounts.remove(addr).ok_or_else(|| {
+                        eyre::eyre!("Block {block_number}: account {addr} revert is DeleteIt but not in changeset")
+                    })?;
+                    eyre::ensure!(
+                        cs_info.is_none(),
+                        "Block {block_number}: account {addr} revert is DeleteIt but changeset has {cs_info:?}",
+                    );
+                }
+                AccountInfoRevert::RevertTo(info) => {
+                    let cs_info = cs_accounts.remove(addr).ok_or_else(|| {
+                        eyre::eyre!("Block {block_number}: account {addr} revert is RevertTo but not in changeset")
+                    })?;
+                    let revert_acct = Some(Account::from(info));
+                    eyre::ensure!(
+                        revert_acct == cs_info,
+                        "Block {block_number}: account {addr} info mismatch: revert={revert_acct:?} cs={cs_info:?}",
+                    );
+                }
+            }
 
-        for (addr, revert) in &block_reverts.storage {
             // Verify storage slots — remove matched changeset entries as we go
             let mut cs_slots = cs_storage.get_mut(addr);
-            for (slot_key, revert_slot) in &revert.slots {
+            for (slot_key, revert_slot) in &revert.storage {
                 let b256_key = B256::from(*slot_key);
                 let cs_value = cs_slots.as_mut().and_then(|s| s.remove(&b256_key));
                 match (revert_slot, cs_value) {
-                    // A recreated account never loaded the pre-block value for this slot. The
-                    // storage writer resolves it from the wiped database state instead.
+                    // When a contract is selfdestructed and re-created at the same address
+                    // within the same block, revm marks slots touched by the new contract
+                    // as `Destroyed` and never reads the original DB value, so
+                    // `to_previous_value()` would resolve to zero, which might be wrong.
                     (RevertToSlot::Destroyed, _) => {}
                     (RevertToSlot::Some(prev), Some(cs_value)) => eyre::ensure!(
                         *prev == cs_value,
@@ -440,16 +467,16 @@ where
                          revert={prev} cs={cs_value}",
                     ),
                     (RevertToSlot::Some(_), None) => eyre::ensure!(
-                        revert.wiped,
+                        revert.wipe_storage,
                         "Block {block_number}: {addr} slot {b256_key} in reverts but not in changeset",
                     ),
                 }
             }
 
-            // Any remaining cs_storage slots for this address must be from a storage wipe
+            // Any remaining cs_storage slots for this address must be from a destroyed account
             if let Some(remaining) = cs_slots.filter(|s| !s.is_empty()) {
                 eyre::ensure!(
-                    revert.wiped,
+                    revert.wipe_storage,
                     "Block {block_number}: {addr} has {} unmatched storage slots in changeset",
                     remaining.len(),
                 );

@@ -11,6 +11,7 @@ repository.workspace = true
 workspace = true
 
 [dependencies]
+reth-execution-types.workspace = true
 evm2.workspace = true
 # reth
 reth-ethereum-engine-primitives = { workspace = true, features = ["std"] }
@@ -102,11 +103,13 @@ asm-keccak = [
     "reth-evm/asm-keccak",
     "reth-evm-ethereum/asm-keccak",
     "evm2/asm-keccak",
+    "reth-execution-types/asm-keccak",
 ]
 portable = [
     "reth-evm/portable",
     "reth-evm-ethereum/portable",
     "evm2/portable",
+    "reth-execution-types/portable",
 ]
 keccak-cache-global = [
     "alloy-primitives/keccak-cache-global",
