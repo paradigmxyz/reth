@@ -181,6 +181,22 @@ pub use alloy_evm::{
 /// [`BlockExecutor`]: alloy_evm::block::BlockExecutor
 #[auto_impl::auto_impl(&, Arc)]
 pub trait ConfigureEvm: Clone + Debug + Send + Sync + Unpin {
+    /// Prepares independent block state work against the same parent view as execution.
+    ///
+    /// Called only for ordinary sequential execution. Implementations must merge any
+    /// background changes through the executor before it finishes, and propagate failures.
+    #[cfg(feature = "std")]
+    fn with_background_state(
+        self,
+        _env: &EvmEnvFor<Self>,
+        _provider: impl FnOnce() -> reth_storage_errors::provider::ProviderResult<
+                reth_storage_api::StateProviderBox,
+            > + Send
+            + 'static,
+    ) -> Result<Self, BlockExecutionError> {
+        Ok(self)
+    }
+
     /// The primitives type used by the EVM.
     type Primitives: NodePrimitives;
 
