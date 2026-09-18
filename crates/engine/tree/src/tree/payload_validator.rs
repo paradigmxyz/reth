@@ -726,6 +726,7 @@ where
             self.execute_block_bal(env, &input, &handle, &make_state_provider)
         } else {
             let state_provider = make_state_provider(false);
+            let background_provider_factory = state_provider_factory.clone();
             match state_provider {
                 Ok(state_provider) => self.execute_block(
                     state_provider,
@@ -733,6 +734,7 @@ where
                     &input,
                     &mut handle,
                     execution_state_hook,
+                    move || Ok(Box::new(background_provider_factory.database_provider_ro()?)),
                 ),
                 Err(err) => Err(err.into()),
             }
@@ -1018,6 +1020,7 @@ where
         input: &BlockOrPayload<T>,
         handle: &mut PayloadHandle<impl ExecutableTxFor<Evm>, Err, N::Receipt>,
         state_hook: Option<Box<dyn OnStateHook + 'static>>,
+        background_provider: impl FnOnce() -> ProviderResult<StateProviderBox> + Send + 'static,
     ) -> Result<
         (BlockExecutionOutput<N::Receipt>, Vec<Address>, ReceiptRootReceiver, Option<ExecutedBal>),
         InsertBlockErrorKind,
@@ -1032,6 +1035,11 @@ where
         debug!(target: "engine::tree::payload_validator", "Executing block");
 
         let has_bal = input.has_block_access_list();
+        let evm_config = if has_bal {
+            self.evm_config.clone()
+        } else {
+            self.evm_config.clone().with_background_state(&env.evm_env, background_provider)?
+        };
         let mut db = debug_span!(target: "engine::tree", "build_state_db").in_scope(|| {
             State::builder()
                 .with_database(StateProviderDatabase::new(state_provider))
@@ -1043,12 +1051,12 @@ where
         let (spec_id, mut executor) = {
             let _span = debug_span!(target: "engine::tree", "create_evm").entered();
             let spec_id = *env.evm_env.spec_id();
-            let evm_config = self.evm_config.clone().with_jit_support();
-            let evm = evm_config.evm_with_env(&mut db, env.evm_env);
+            let jit_config = evm_config.clone().with_jit_support();
+            let evm = jit_config.evm_with_env(&mut db, env.evm_env);
             let ctx = self
                 .execution_ctx_for(input)
                 .map_err(|e| InsertBlockErrorKind::Other(Box::new(e)))?;
-            let executor = self.evm_config.create_executor(evm, ctx);
+            let executor = evm_config.create_executor(evm, ctx);
             (spec_id, executor)
         };
 
