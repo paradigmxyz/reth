@@ -267,17 +267,16 @@ pub trait LoadPendingBlock:
         builder.apply_pre_execution_changes().map_err(Self::Error::from_eth_err)?;
 
         let block_gas_limit: u64 = builder.evm().block().gas_limit();
-        let is_amsterdam = self
-            .provider()
-            .chain_spec()
-            .is_amsterdam_active_at_timestamp(builder.evm().block().timestamp().saturating_to());
+        let timestamp: u64 = builder.evm().block().timestamp().saturating_to();
+        let is_amsterdam = self.provider().chain_spec().is_amsterdam_active_at_timestamp(timestamp);
         let basefee = builder.evm().block().basefee();
         let blob_gasprice = builder.evm().block().blob_gasprice().map(|p| p as u64);
 
+        // the blob limits of the pending block, which can differ from the parent's at a fork
         let blob_params = self
             .provider()
             .chain_spec()
-            .blob_params_at_timestamp(parent.timestamp())
+            .blob_params_at_timestamp(timestamp)
             .unwrap_or_else(BlobParams::cancun);
         let mut cumulative_tx_gas_used = 0;
         let mut block_regular_gas_used = 0;
