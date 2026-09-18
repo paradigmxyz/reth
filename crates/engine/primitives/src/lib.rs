@@ -203,7 +203,9 @@ pub trait PayloadValidator<Types: PayloadTypes>: Send + Sync + Unpin + 'static {
     /// fields.
     ///
     /// Implementers should ensure that the checks are done in the order that conforms with the
-    /// engine-API specification.
+    /// engine-API specification. Callers that recover the senders themselves, such as the engine
+    /// and builder block validation, use [`Self::convert_payload_to_block`] directly, so payload
+    /// checks belong there rather than in an override of this method.
     fn ensure_well_formed_payload(
         &self,
         payload: Types::ExecutionData,
