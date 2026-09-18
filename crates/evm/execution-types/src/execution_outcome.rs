@@ -221,7 +221,13 @@ impl<T> ExecutionOutcome<T> {
             accumulator.bytecode(code_hash, &bytecode.into()).expect("infallible");
         }
 
-        let block_reverts = (first_block..first_block + receipts.len() as u64)
+        // Genesis initialization includes reverts without a receipts entry.
+        let end_block = revert_init
+            .keys()
+            .max()
+            .map_or(first_block, |number| number + 1)
+            .max(first_block + receipts.len() as u64);
+        let block_reverts = (first_block..end_block)
             .map(|number| revert_init.remove(&number).unwrap_or_default())
             .map(|reverts| BlockReverts {
                 accounts: reverts
@@ -943,6 +949,32 @@ mod tests {
     use crate::execution_state_from_init;
     use alloy_consensus::TxType;
     use alloy_primitives::{bytes, Address, LogData};
+
+    #[test]
+    fn reconstructed_outcome_preserves_genesis_reverts_without_receipts() {
+        let address = Address::repeat_byte(1);
+        let outcome: ExecutionOutcome = ExecutionOutcome::new_init(
+            AddressMap::default(),
+            HashMap::from_iter([(
+                0,
+                AddressMap::from_iter([(
+                    address,
+                    (Some(None), vec![StorageEntry { key: B256::ZERO, value: U256::ZERO }]),
+                )]),
+            )]),
+            [],
+            vec![],
+            0,
+            vec![],
+        );
+
+        assert_eq!(outcome.block_reverts().len(), 1);
+        assert_eq!(outcome.block_reverts()[0].accounts.get(&address), Some(&None));
+        assert_eq!(
+            outcome.block_reverts()[0].storage[&address].slots[&U256::ZERO],
+            RevertToSlot::Some(U256::ZERO)
+        );
+    }
 
     #[test]
     fn reconstructed_outcome_reverts_account_and_storage() {
