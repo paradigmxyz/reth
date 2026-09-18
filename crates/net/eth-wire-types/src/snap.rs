@@ -110,20 +110,22 @@ pub struct GetAccountRangeMessage {
 pub struct AccountData {
     /// Hash of the account address (trie path)
     pub hash: B256,
-    /// Account body in slim format
-    pub body: Bytes,
+    /// Slim account fields, encoded as a nested RLP list.
+    pub body: SlimAccountBody,
 }
 
 impl AccountData {
-    /// Encodes `account` in snap/2's slim format.
+    /// Converts `account` to snap/2's slim representation.
     pub fn from_trie_account(hash: B256, account: &TrieAccount) -> Self {
-        let body = alloy_rlp::encode(SlimAccountBodyRef {
-            nonce: account.nonce,
-            balance: account.balance,
-            storage_root: SlimAccountBodyRef::shorten(&account.storage_root, EMPTY_ROOT_HASH),
-            code_hash: SlimAccountBodyRef::shorten(&account.code_hash, KECCAK256_EMPTY),
-        });
-        Self { hash, body: body.into() }
+        Self {
+            hash,
+            body: SlimAccountBody {
+                nonce: account.nonce,
+                balance: account.balance,
+                storage_root: SlimAccountBody::shorten(&account.storage_root, EMPTY_ROOT_HASH),
+                code_hash: SlimAccountBody::shorten(&account.code_hash, KECCAK256_EMPTY),
+            },
+        }
     }
 
     /// Decodes the slim body into the account the trie leaf commits to.
@@ -131,7 +133,7 @@ impl AccountData {
     /// Range proofs are verified against the full encoding, so the omitted storage root and code
     /// hash are restored to their defaults here.
     pub fn trie_account(&self) -> alloy_rlp::Result<TrieAccount> {
-        let slim = alloy_rlp::decode_exact::<SlimAccountBody>(&self.body)?;
+        let slim = &self.body;
 
         Ok(TrieAccount {
             nonce: slim.nonce,
@@ -527,8 +529,9 @@ impl SnapProtocolMessage {
 }
 
 /// Like a trie account, with empty code and storage hashes omitted to reduce transfer size.
-#[derive(RlpDecodable)]
-struct SlimAccountBody {
+#[derive(Debug, Clone, PartialEq, Eq, RlpEncodable, RlpDecodable)]
+#[cfg_attr(any(test, feature = "arbitrary"), derive(arbitrary::Arbitrary))]
+pub struct SlimAccountBody {
     /// The account's nonce.
     nonce: u64,
     /// The account's balance.
@@ -540,35 +543,20 @@ struct SlimAccountBody {
 }
 
 impl SlimAccountBody {
+    /// Omits default hashes from the wire encoding.
+    fn shorten(value: &B256, empty: B256) -> Bytes {
+        if *value == empty {
+            Bytes::new()
+        } else {
+            Bytes::copy_from_slice(value.as_slice())
+        }
+    }
+
     /// Restores a dropped field to `empty`, rejecting any length the encoding never produces.
     fn restore(value: &[u8], empty: B256) -> alloy_rlp::Result<B256> {
         match value {
             [] => Ok(empty),
             _ => B256::try_from(value).map_err(|_| alloy_rlp::Error::UnexpectedLength),
-        }
-    }
-}
-
-/// Borrowed encode twin of [`SlimAccountBody`].
-#[derive(RlpEncodable)]
-struct SlimAccountBodyRef<'a> {
-    /// The account's nonce.
-    nonce: u64,
-    /// The account's balance.
-    balance: U256,
-    /// Empty when the account has no storage.
-    storage_root: &'a [u8],
-    /// Empty when the account has no code.
-    code_hash: &'a [u8],
-}
-
-impl<'a> SlimAccountBodyRef<'a> {
-    /// Drops a field that holds its empty default, which is what makes the encoding slim.
-    fn shorten(value: &'a B256, empty: B256) -> &'a [u8] {
-        if *value == empty {
-            &[]
-        } else {
-            value.as_slice()
         }
     }
 }
@@ -624,10 +612,10 @@ mod tests {
 
         test_roundtrip(SnapProtocolMessage::AccountRange(AccountRangeMessage {
             request_id: 42,
-            accounts: vec![AccountData {
-                hash: b256_from_u64(123),
-                body: Bytes::from(vec![1, 2, 3]),
-            }],
+            accounts: vec![AccountData::from_trie_account(
+                b256_from_u64(123),
+                &trie_account(EMPTY_ROOT_HASH, KECCAK256_EMPTY),
+            )],
             proof: vec![Bytes::from(vec![4, 5, 6])],
         }));
 
@@ -889,12 +877,65 @@ mod tests {
     }
 
     #[test]
+    fn account_range_matches_nested_account_wire_encoding() {
+        // [request_id, [[hash, [nonce, balance, storage_root, code_hash]]], proof]
+        let wire = alloy_primitives::hex!(
+            "ea01e7e6a00101010101010101010101010101010101010101010101010101010101010101c4072a8080c0"
+        );
+        let message = AccountRangeMessage {
+            request_id: 1,
+            accounts: vec![AccountData::from_trie_account(
+                B256::repeat_byte(1),
+                &trie_account(EMPTY_ROOT_HASH, KECCAK256_EMPTY),
+            )],
+            proof: vec![],
+        };
+
+        assert_eq!(alloy_rlp::encode(&message), wire);
+        assert_eq!(alloy_rlp::decode_exact::<AccountRangeMessage>(&wire).unwrap(), message);
+    }
+
+    #[test]
+    fn account_data_rejects_byte_string_wrapped_body() {
+        let wire = alloy_primitives::hex!(
+            "e7a0010101010101010101010101010101010101010101010101010101010101010185c4072a8080"
+        );
+        assert!(alloy_rlp::decode_exact::<AccountData>(&wire).is_err());
+    }
+
+    #[test]
+    fn account_data_consumes_only_its_own_list() {
+        let account = AccountData::from_trie_account(
+            B256::repeat_byte(1),
+            &trie_account(B256::repeat_byte(2), B256::repeat_byte(3)),
+        );
+        let mut wire = alloy_rlp::encode(&account);
+        assert_eq!(wire.len(), account.length());
+        wire.push(0x80);
+        let mut input = wire.as_slice();
+        assert_eq!(AccountData::decode(&mut input).unwrap(), account);
+        assert_eq!(input, &[0x80]);
+    }
+
+    #[test]
+    fn account_data_rejects_missing_truncated_and_extra_body_items() {
+        for wire in [
+            "e1a00101010101010101010101010101010101010101010101010101010101010101",
+            "e4a00101010101010101010101010101010101010101010101010101010101010101c4072a",
+            "e7a00101010101010101010101010101010101010101010101010101010101010101c4072a808080",
+        ] {
+            let bytes = alloy_primitives::hex::decode(wire).unwrap();
+            assert!(alloy_rlp::decode_exact::<AccountData>(&bytes).is_err());
+        }
+    }
+
+    #[test]
     fn slim_body_elides_empty_storage_and_code() {
         let account = trie_account(EMPTY_ROOT_HASH, KECCAK256_EMPTY);
         let hash = B256::repeat_byte(1);
         let encoded = AccountData::from_trie_account(hash, &account);
 
-        let body = SlimAccountBody::decode(&mut encoded.body.as_ref()).unwrap();
+        let body = &encoded.body;
         assert!(body.storage_root.is_empty());
         assert!(body.code_hash.is_empty());
         assert_eq!(encoded.trie_account().unwrap(), account);
@@ -906,7 +947,7 @@ mod tests {
         let account = trie_account(B256::repeat_byte(2), B256::repeat_byte(3));
         let encoded = AccountData::from_trie_account(B256::repeat_byte(1), &account);
 
-        let body = SlimAccountBody::decode(&mut encoded.body.as_ref()).unwrap();
+        let body = &encoded.body;
         assert_eq!(body.storage_root.len(), 32);
         assert_eq!(body.code_hash.len(), 32);
         assert_eq!(encoded.trie_account().unwrap(), account);
@@ -919,15 +960,6 @@ mod tests {
         let truncated = Bytes::from_static(&[0xaa; 16]);
 
         assert!(SlimAccountBody::restore(&truncated, EMPTY_ROOT_HASH).is_err());
-    }
-
-    #[test]
-    fn slim_body_rejects_trailing_bytes() {
-        let account = trie_account(EMPTY_ROOT_HASH, KECCAK256_EMPTY);
-        let mut encoded = AccountData::from_trie_account(B256::repeat_byte(1), &account);
-        encoded.body = [encoded.body.as_ref(), &[0x00]].concat().into();
-
-        assert!(encoded.trie_account().is_err());
     }
 
     #[test]

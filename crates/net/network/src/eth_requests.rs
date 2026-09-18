@@ -352,7 +352,7 @@ where
             for receipt in block_receipts {
                 let receipt_size = receipt.length();
                 if total_bytes + receipt_size > SOFT_RESPONSE_LIMIT {
-                    break;
+                    break
                 }
                 total_bytes += receipt_size;
                 partial_block.push(receipt);
@@ -1273,8 +1273,14 @@ mod tests {
             Ok(SnapResponse::AccountRange(AccountRangeMessage {
                 request_id: 1,
                 accounts: vec![
-                    AccountData { hash: first_hash, body: full_body.into() },
-                    AccountData { hash: second_hash, body: empty_body },
+                    AccountData {
+                        hash: first_hash,
+                        body: alloy_rlp::decode_exact(&full_body).unwrap()
+                    },
+                    AccountData {
+                        hash: second_hash,
+                        body: alloy_rlp::decode_exact(&empty_body).unwrap()
+                    },
                 ],
                 proof,
             }))
