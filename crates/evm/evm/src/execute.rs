@@ -289,11 +289,7 @@ impl<'a, T: evm2::EvmTypes<Tx: Typed2718>> Evm for evm2::Evm<'a, T> {
         &mut self,
         moves: impl IntoIterator<Item = (Address, Address)>,
     ) -> Result<(), evm2::precompiles::MovePrecompileError> {
-        // TODO(dani): precompiles_as_mut
-        let mut precompiles = evm2::Precompiles::<T>::base(self.spec_id());
-        precompiles.as_map_mut().move_precompiles(moves)?;
-        self.set_precompiles(precompiles);
-        Ok(())
+        self.precompiles_mut().move_precompiles(&moves.into_iter().collect::<Vec<_>>())
     }
 
     fn transact_and_discard<S>(

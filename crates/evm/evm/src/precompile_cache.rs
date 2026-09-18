@@ -200,6 +200,24 @@ where
         self.inner.addresses()
     }
 
+    fn precompile_ids(&self) -> Vec<(Address, evm2::precompiles::PrecompileId)> {
+        self.inner.precompile_ids()
+    }
+
+    fn move_precompiles(
+        &mut self,
+        moves: &[(Address, Address)],
+    ) -> Result<(), evm2::precompiles::MovePrecompileError> {
+        self.inner.move_precompiles(moves)?;
+        if moves.iter().any(|(source, dest)| source != dest) {
+            // The shared cache still belongs to the unmodified table used by other EVMs.
+            // Relocated entries need a private cache because address alone no longer identifies
+            // the same precompile implementation.
+            self.cache_map = PrecompileCacheMap::default();
+        }
+        Ok(())
+    }
+
     fn contains(&self, address: &Address) -> bool {
         self.inner.contains(address)
     }
@@ -335,6 +353,113 @@ mod tests {
         registry::TxRegistry,
         BaseEvmTypes, SpecId,
     };
+
+    #[test]
+    fn cached_precompile_metadata_matches_inner() {
+        let precompiles = evm2::Precompiles::<BaseEvmTypes>::base(SpecId::OSAKA);
+        let expected = precompiles.precompile_ids();
+        assert!(!expected.is_empty());
+        let cached = CachedPrecompileProvider::new(
+            precompiles,
+            PrecompileCacheMap::default(),
+            SpecId::OSAKA,
+            None,
+        );
+        assert_eq!(cached.precompile_ids(), expected);
+    }
+
+    #[test]
+    fn moves_preserve_custom_precompiles_with_borrowed_database() {
+        let spec = SpecId::OSAKA;
+        let identity = Address::with_last_byte(4);
+        let custom = Address::with_last_byte(0x40);
+        let moved = Address::with_last_byte(0x41);
+        let mut precompiles = evm2::Precompiles::<BaseEvmTypes>::base(spec);
+        let custom_entry = precompiles.as_map_mut().remove(identity).unwrap().with_address(custom);
+        precompiles.as_map_mut().insert(custom_entry);
+        let provider =
+            CachedPrecompileProvider::new(precompiles, PrecompileCacheMap::default(), spec, None);
+        let mut database = InMemoryDB::default();
+        let mut evm = Evm::<BaseEvmTypes>::new(
+            spec,
+            BlockEnv::<BaseEvmTypes>::default(),
+            TxRegistry::new(),
+            &mut database,
+            provider,
+        );
+        let standard = Address::with_last_byte(2);
+        crate::Evm::move_precompiles(&mut evm, [(standard, moved)]).unwrap();
+        assert!(evm.precompiles().contains(&custom));
+        assert!(!evm.precompiles().contains(&identity));
+        assert!(!evm.precompiles().contains(&standard));
+        crate::Evm::move_precompiles(&mut evm, [(custom, identity)]).unwrap();
+        assert!(!evm.precompiles().contains(&custom));
+        assert!(evm.precompiles().contains(&identity));
+        assert!(evm.precompiles().contains(&moved));
+        let before = evm.precompiles().precompile_ids();
+        assert!(crate::Evm::move_precompiles(&mut evm, [(custom, standard)]).is_err());
+        assert_eq!(evm.precompiles().precompile_ids(), before);
+    }
+
+    #[test]
+    fn moves_isolate_cached_outputs_without_disabling_caching() {
+        let spec = SpecId::OSAKA;
+        let identity = Address::with_last_byte(4);
+        let destination = Address::with_last_byte(2);
+        let input = Bytes::from_static(b"input");
+        let shared = PrecompileCacheMap::default();
+        shared.cache_for_address(destination).insert(
+            input.clone(),
+            CacheEntry {
+                output: PrecompileOutput::new(Bytes::from_static(b"old implementation")),
+                regular_gas_used: 60,
+                spec,
+            },
+        );
+        let mut provider = CachedPrecompileProvider::new(
+            evm2::Precompiles::<BaseEvmTypes>::base(spec),
+            shared.clone(),
+            spec,
+            None,
+        );
+        provider.move_precompiles(&[(identity, destination)]).unwrap();
+        let mut evm = Evm::<BaseEvmTypes>::new(
+            spec,
+            BlockEnv::<BaseEvmTypes>::default(),
+            TxRegistry::new(),
+            InMemoryDB::default(),
+            NoPrecompiles::default(),
+        );
+        let message = Message::<BaseEvmTypes> {
+            kind: MessageKind::Call,
+            gas_limit: 30_000,
+            destination,
+            code_address: destination,
+            input: input.clone(),
+            ..Default::default()
+        };
+        for _ in 0..2 {
+            let output = provider
+                .execute(&mut evm, &message, &mut GasTracker::new(30_000))
+                .unwrap()
+                .unwrap();
+            assert_eq!(output.bytes(), input.as_ref());
+        }
+        assert_eq!(
+            provider
+                .cache_map
+                .cache_for_address(destination)
+                .get(&input, spec)
+                .unwrap()
+                .output
+                .bytes(),
+            input.as_ref()
+        );
+        assert_eq!(
+            shared.cache_for_address(destination).get(&input, spec).unwrap().output.bytes(),
+            b"old implementation"
+        );
+    }
 
     #[test]
     fn caches_successful_precompile_output() {
