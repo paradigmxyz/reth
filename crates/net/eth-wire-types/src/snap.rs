@@ -117,15 +117,7 @@ pub struct AccountData {
 impl AccountData {
     /// Converts `account` to snap/2's slim representation.
     pub fn from_trie_account(hash: B256, account: &TrieAccount) -> Self {
-        Self {
-            hash,
-            body: SlimAccountBody {
-                nonce: account.nonce,
-                balance: account.balance,
-                storage_root: SlimAccountBody::shorten(&account.storage_root, EMPTY_ROOT_HASH),
-                code_hash: SlimAccountBody::shorten(&account.code_hash, KECCAK256_EMPTY),
-            },
-        }
+        Self { hash, body: account.into() }
     }
 
     /// Decodes the slim body into the account the trie leaf commits to.
@@ -557,6 +549,17 @@ impl SlimAccountBody {
         match value {
             [] => Ok(empty),
             _ => B256::try_from(value).map_err(|_| alloy_rlp::Error::UnexpectedLength),
+        }
+    }
+}
+
+impl From<&TrieAccount> for SlimAccountBody {
+    fn from(account: &TrieAccount) -> Self {
+        Self {
+            nonce: account.nonce,
+            balance: account.balance,
+            storage_root: Self::shorten(&account.storage_root, EMPTY_ROOT_HASH),
+            code_hash: Self::shorten(&account.code_hash, KECCAK256_EMPTY),
         }
     }
 }
