@@ -161,9 +161,9 @@ where
                 state_provider.as_ref(),
                 reth_trie::ExecutionWitnessMode::Legacy,
             )?;
-        let block_state = output.state;
+        let bundle_state = output.state;
 
-        Ok((witness, block_state, hashed_state))
+        Ok((witness, bundle_state, hashed_state))
     }
 
     /// Handles witness generation, saving, and comparison with healthy node
@@ -205,22 +205,22 @@ where
     }
 
     /// Validates that the block state after re-execution matches the original.
-    fn validate_block_state(
+    fn validate_bundle_state(
         &self,
         re_executed_state: &BundleState,
         original_state: &BundleState,
         block_prefix: &str,
     ) -> eyre::Result<()> {
         if re_executed_state != original_state {
-            let original_filename = format!("{}.block_state.original.json", block_prefix);
+            let original_filename = format!("{}.bundle_state.original.json", block_prefix);
             let output_state_sorted = sort_bundle_state_for_comparison(original_state);
             let original_path = self.save_file(original_filename, original_state)?;
-            let re_executed_filename = format!("{}.block_state.re_executed.json", block_prefix);
-            let block_state_sorted = sort_bundle_state_for_comparison(re_executed_state);
+            let re_executed_filename = format!("{}.bundle_state.re_executed.json", block_prefix);
+            let bundle_state_sorted = sort_bundle_state_for_comparison(re_executed_state);
             let re_executed_path = self.save_file(re_executed_filename, re_executed_state)?;
 
-            let filename = format!("{}.block_state.diff", block_prefix);
-            let diff_path = self.save_diff(filename, &output_state_sorted, &block_state_sorted)?;
+            let filename = format!("{}.bundle_state.diff", block_prefix);
+            let diff_path = self.save_diff(filename, &output_state_sorted, &bundle_state_sorted)?;
 
             warn!(
                 target: "engine::invalid_block_hooks::witness",
@@ -287,12 +287,12 @@ where
         trie_updates: Option<(&TrieUpdates, B256)>,
     ) -> eyre::Result<()> {
         // TODO(alexey): unify with `DebugApi::debug_execution_witness`
-        let (witness, block_state, hashed_state) = self.re_execute_block(parent_header, block)?;
+        let (witness, bundle_state, hashed_state) = self.re_execute_block(parent_header, block)?;
 
         let block_prefix = format!("{}_{}", block.number(), block.hash());
         self.handle_witness_operations(&witness, &block_prefix, block.number())?;
 
-        self.validate_block_state(&block_state, &output.state, &block_prefix)?;
+        self.validate_bundle_state(&bundle_state, &output.state, &block_prefix)?;
 
         self.validate_state_root_and_trie(
             parent_header,
@@ -361,7 +361,7 @@ mod tests {
     use reth_testing_utils::generators::{self, random_block, random_eoa_accounts, BlockParams};
 
     /// Creates a test block state with realistic accounts and contracts.
-    fn create_block_state() -> BundleState {
+    fn create_bundle_state() -> BundleState {
         let mut rng = generators::rng();
         let mut bundle_state = BundleState::default();
 
@@ -430,16 +430,16 @@ mod tests {
         bundle_state
     }
 
-    fn hashed_state_for_block_state(block_state: BundleState) -> reth_trie::HashedPostState {
+    fn hashed_state_for_bundle_state(bundle_state: BundleState) -> reth_trie::HashedPostState {
         reth_trie::HashedPostState::from_bundle_state::<reth_trie::KeccakKeyHasher>(
-            &block_state.state,
+            &bundle_state.state,
         )
     }
 
     #[test]
     fn test_sort_bundle_state_for_comparison() {
         // Use the fixture function to create test data
-        let bundle_state = create_block_state();
+        let bundle_state = create_bundle_state();
 
         // Call the function under test
         let sorted = sort_bundle_state_for_comparison(&bundle_state);
@@ -599,33 +599,33 @@ mod tests {
     }
 
     #[test]
-    fn test_validate_block_state_matching() {
+    fn test_validate_bundle_state_matching() {
         let (hook, _output_dir, _temp_dir) = create_test_hook();
-        let block_state = create_block_state();
+        let bundle_state = create_bundle_state();
         let block_prefix = "test_block_123";
 
         // Test with identical states - should not produce any warnings or files
-        let result = hook.validate_block_state(&block_state, &block_state, block_prefix);
+        let result = hook.validate_bundle_state(&bundle_state, &bundle_state, block_prefix);
         assert!(result.is_ok());
     }
 
     #[test]
-    fn test_validate_block_state_mismatch() {
+    fn test_validate_bundle_state_mismatch() {
         let (hook, output_dir, _temp_dir) = create_test_hook();
-        let original_state = create_block_state();
+        let original_state = create_bundle_state();
         let modified_state = BundleState::default();
 
         let block_prefix = "test_block_mismatch";
 
         // Test with different states - should save files and log warning
-        let result = hook.validate_block_state(&modified_state, &original_state, block_prefix);
+        let result = hook.validate_bundle_state(&modified_state, &original_state, block_prefix);
         assert!(result.is_ok());
 
         // Verify that files were created
-        let original_file = output_dir.join(format!("{}.block_state.original.json", block_prefix));
+        let original_file = output_dir.join(format!("{}.bundle_state.original.json", block_prefix));
         let re_executed_file =
-            output_dir.join(format!("{}.block_state.re_executed.json", block_prefix));
-        let diff_file = output_dir.join(format!("{}.block_state.diff", block_prefix));
+            output_dir.join(format!("{}.bundle_state.re_executed.json", block_prefix));
+        let diff_file = output_dir.join(format!("{}.bundle_state.diff", block_prefix));
 
         assert!(original_file.exists(), "Original block state file should be created");
         assert!(re_executed_file.exists(), "Re-executed block state file should be created");
@@ -658,7 +658,7 @@ mod tests {
     #[test]
     fn test_validate_state_root_and_trie_with_trie_updates() {
         let (hook, _output_dir, _temp_dir) = create_test_hook();
-        let block_state = create_block_state();
+        let bundle_state = create_bundle_state();
 
         // Generate test data
         let mut rng = generators::rng();
@@ -678,7 +678,7 @@ mod tests {
         let trie_updates = create_test_trie_updates();
         let original_root = B256::from([2u8; 32]); // Different from what will be computed
         let block_prefix = "test_state_root_with_trie";
-        let hashed_state = hashed_state_for_block_state(block_state);
+        let hashed_state = hashed_state_for_bundle_state(bundle_state);
 
         // Test with trie updates - this will likely produce warnings due to mock data
         let result = hook.validate_state_root_and_trie(
@@ -694,7 +694,7 @@ mod tests {
     #[test]
     fn test_on_invalid_block_calls_all_validation_methods() {
         let (hook, output_dir, _temp_dir) = create_test_hook();
-        let block_state = create_block_state();
+        let bundle_state = create_bundle_state();
 
         // Generate test data
         let mut rng = generators::rng();
@@ -719,7 +719,7 @@ mod tests {
                 gas_used: 0,
                 blob_gas_used: 0,
             },
-            block_state,
+            bundle_state,
         );
 
         // Create test trie updates
@@ -793,20 +793,20 @@ mod tests {
     }
 
     #[test]
-    fn test_validate_block_state_with_empty_states() {
+    fn test_validate_bundle_state_with_empty_states() {
         let (hook, _output_dir, _temp_dir) = create_test_hook();
         let empty_state = BundleState::default();
         let block_prefix = "empty_states_test";
 
-        let result = hook.validate_block_state(&empty_state, &empty_state, block_prefix);
+        let result = hook.validate_bundle_state(&empty_state, &empty_state, block_prefix);
         assert!(result.is_ok());
     }
 
     #[test]
-    fn test_validate_block_state_with_different_contract_counts() {
+    fn test_validate_bundle_state_with_different_contract_counts() {
         let (hook, output_dir, _temp_dir) = create_test_hook();
-        let state1 = create_block_state();
-        let mut state2 = create_block_state();
+        let state1 = create_bundle_state();
+        let mut state2 = create_bundle_state();
 
         // Add extra contract to state2
         let extra_contract_hash = B256::random();
@@ -816,7 +816,7 @@ mod tests {
         );
 
         let block_prefix = "different_contracts_test";
-        let result = hook.validate_block_state(&state1, &state2, block_prefix);
+        let result = hook.validate_bundle_state(&state1, &state2, block_prefix);
         assert!(result.is_ok());
 
         // Verify diff files were created
@@ -841,7 +841,7 @@ mod tests {
     #[test]
     fn test_validate_state_root_and_trie_without_trie_updates() {
         let (hook, _output_dir, _temp_dir) = create_test_hook();
-        let block_state = create_block_state();
+        let bundle_state = create_bundle_state();
 
         let mut rng = generators::rng();
         let parent_header = generators::random_header(&mut rng, 1, None);
@@ -858,7 +858,7 @@ mod tests {
         .unwrap();
 
         let block_prefix = "no_trie_updates_test";
-        let hashed_state = hashed_state_for_block_state(block_state);
+        let hashed_state = hashed_state_for_bundle_state(bundle_state);
 
         // Test without trie updates (None case)
         let result = hook.validate_state_root_and_trie(
@@ -890,18 +890,18 @@ mod tests {
         .try_recover()
         .unwrap();
 
-        let block_state = create_block_state();
+        let bundle_state = create_bundle_state();
         let trie_updates = create_test_trie_updates();
 
         // Test validation methods
         let validation_result =
-            hook.validate_block_state(&block_state, &block_state, "integration_test");
+            hook.validate_bundle_state(&bundle_state, &bundle_state, "integration_test");
         assert!(validation_result.is_ok(), "Block state validation should succeed");
 
         let state_root_result = hook.validate_state_root_and_trie(
             &parent_header,
             &invalid_block,
-            &hashed_state_for_block_state(block_state),
+            &hashed_state_for_bundle_state(bundle_state),
             Some((&trie_updates, B256::random())),
             "integration_test",
         );
@@ -927,12 +927,12 @@ mod tests {
         .try_recover()
         .unwrap();
 
-        let block_state = create_block_state();
+        let bundle_state = create_bundle_state();
         let _trie_updates = create_test_trie_updates();
 
         // Test individual components that would be part of the complete flow
         let validation_result =
-            hook.validate_block_state(&block_state, &block_state, "integration_component_test");
+            hook.validate_bundle_state(&bundle_state, &bundle_state, "integration_component_test");
         assert!(validation_result.is_ok(), "Component validation should succeed");
     }
 }
