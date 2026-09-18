@@ -492,6 +492,7 @@ mod tests {
     fn verified_range(accounts: &[(B256, TrieAccount)]) -> VerifiedAccountRange {
         VerifiedAccountRange {
             state_root: STATE_ROOT,
+            origin: B256::ZERO,
             accounts: accounts.to_vec(),
             has_more: false,
             next: None,

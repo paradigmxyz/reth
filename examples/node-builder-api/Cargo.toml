@@ -10,3 +10,4 @@ reth-ethereum = { workspace = true, features = ["node", "pool", "node-api", "cli
 
 [features]
 account-ext = ["reth-ethereum/account-ext"]
+[lints]

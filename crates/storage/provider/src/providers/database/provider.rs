@@ -6,7 +6,10 @@ use crate::{
     changesets_utils::StorageRevertsIter,
     providers::{
         database::{chain::ChainStorage, metrics, DatabaseProviderMetrics},
-        rocksdb::{PendingRocksDBBatches, RocksDBProvider, RocksDBWriteCtx},
+        rocksdb::{
+            OwnedRocksReadSnapshot, PendingRocksDBBatches, RocksDBProvider, RocksDBWriteCtx,
+            RocksReadSnapshot,
+        },
         static_file::{StaticFileWriteCtx, StaticFileWriter},
         NodeTypesForProvider, StaticFileProvider,
     },
@@ -85,7 +88,7 @@ use std::{
     fmt::Debug,
     ops::{Deref, DerefMut, Range, RangeBounds, RangeInclusive},
     path::PathBuf,
-    sync::Arc,
+    sync::{Arc, OnceLock},
 };
 use tracing::{debug, instrument, trace};
 
@@ -204,6 +207,12 @@ pub struct DatabaseProvider<TX, N: NodeTypes> {
     storage_settings: Arc<RwLock<StorageSettings>>,
     /// `RocksDB` provider
     rocksdb_provider: RocksDBProvider,
+    /// `RocksDB` snapshot shared by all history lookups made through this provider.
+    ///
+    /// It lives as long as the provider, next to the MDBX read transaction, and pins the
+    /// `RocksDB` versions its cached iterators were created on for that long; see
+    /// [`Self::history_rocksdb_snapshot`].
+    rocksdb_history_snapshot: OnceLock<Option<OwnedRocksReadSnapshot>>,
     /// Manager for state trie overlays and cached changesets.
     overlay_manager: OverlayManager<N::Primitives>,
     /// Task runtime for spawning parallel I/O work.
@@ -384,6 +393,7 @@ impl<TX: DbTxMut, N: NodeTypes> DatabaseProvider<TX, N> {
             overlay_manager,
             runtime,
             db_path,
+            rocksdb_history_snapshot: OnceLock::new(),
             pending_rocksdb_batches: Default::default(),
             commit_order,
             minimum_pruning_distance: MINIMUM_UNWIND_SAFE_DISTANCE,
@@ -1032,6 +1042,7 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> DatabaseProvider<TX, N> {
             overlay_manager,
             runtime,
             db_path,
+            rocksdb_history_snapshot: OnceLock::new(),
             pending_rocksdb_batches: Default::default(),
             commit_order: CommitOrder::Normal,
             minimum_pruning_distance: MINIMUM_UNWIND_SAFE_DISTANCE,
@@ -1644,6 +1655,31 @@ impl<TX: DbTx, N: NodeTypes> ChangeSetReader for DatabaseProvider<TX, N> {
     }
 }
 
+impl<TX: DbTx + 'static, N: NodeTypes> DatabaseProvider<TX, N> {
+    /// Returns the `RocksDB` snapshot used for history lookups, creating it on first use.
+    ///
+    /// A reading provider serves a single request, so one snapshot is created for all of its
+    /// history lookups instead of one per lookup. The snapshot also caches the raw iterator of
+    /// each history column family, which is what makes repeated lookups cheap. The storage
+    /// settings are read once here as well, so a lookup does not take the settings lock.
+    ///
+    /// The snapshot and its iterators pin the `RocksDB` snapshot and the SST files and memtables
+    /// they were created on until the provider is dropped, the same way the provider's MDBX read
+    /// transaction pins its pages. Provider lifetimes are request or job scoped, and a provider
+    /// whose MDBX transaction hits the read-transaction timeout errors on every later read and is
+    /// dropped by its caller, so that timeout bounds the `RocksDB` retention as well.
+    fn history_rocksdb_snapshot(&self) -> Option<&RocksReadSnapshot<'_>> {
+        self.rocksdb_history_snapshot
+            .get_or_init(|| {
+                self.cached_storage_settings()
+                    .storage_v2
+                    .then(|| self.rocksdb_provider.owned_snapshot())
+            })
+            .as_ref()
+            .map(OwnedRocksReadSnapshot::as_snapshot)
+    }
+}
+
 impl<TX: DbTx + 'static, N: NodeTypes> HistoryReader for DatabaseProvider<TX, N> {
     fn account_history_info(
         &self,
@@ -1652,17 +1688,10 @@ impl<TX: DbTx + 'static, N: NodeTypes> HistoryReader for DatabaseProvider<TX, N>
         lowest_available_block_number: Option<BlockNumber>,
     ) -> ProviderResult<HistoryInfo> {
         let visible_tip = self.best_block_number()?;
-        self.with_rocksdb_snapshot(|rocksdb_ref| {
-            let mut reader = EitherReader::new_accounts_history(self, rocksdb_ref)?;
-            reader
-                .account_history_info(
-                    address,
-                    block_number,
-                    lowest_available_block_number,
-                    visible_tip,
-                )
-                .map(Into::into)
-        })
+        let mut reader = EitherReader::new_accounts_history(self, self.history_rocksdb_snapshot())?;
+        reader
+            .account_history_info(address, block_number, lowest_available_block_number, visible_tip)
+            .map(Into::into)
     }
 
     fn storage_history_info(
@@ -1673,18 +1702,16 @@ impl<TX: DbTx + 'static, N: NodeTypes> HistoryReader for DatabaseProvider<TX, N>
         lowest_available_block_number: Option<BlockNumber>,
     ) -> ProviderResult<HistoryInfo> {
         let visible_tip = self.best_block_number()?;
-        self.with_rocksdb_snapshot(|rocksdb_ref| {
-            let mut reader = EitherReader::new_storages_history(self, rocksdb_ref)?;
-            reader
-                .storage_history_info(
-                    address,
-                    storage_key,
-                    block_number,
-                    lowest_available_block_number,
-                    visible_tip,
-                )
-                .map(Into::into)
-        })
+        let mut reader = EitherReader::new_storages_history(self, self.history_rocksdb_snapshot())?;
+        reader
+            .storage_history_info(
+                address,
+                storage_key,
+                block_number,
+                lowest_available_block_number,
+                visible_tip,
+            )
+            .map(Into::into)
     }
 }
 

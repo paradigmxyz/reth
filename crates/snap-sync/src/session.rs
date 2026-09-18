@@ -105,7 +105,7 @@ impl SnapSyncSessionState {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, not(feature = "account-ext")))]
 mod tests {
     use super::*;
     use crate::test_utils::{chain, policy, provider_with};

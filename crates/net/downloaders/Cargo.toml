@@ -25,7 +25,6 @@ reth-trie-common.workspace = true
 
 # optional deps for the test-utils feature
 reth-ethereum-primitives = { workspace = true, optional = true }
-reth-provider = { workspace = true, optional = true }
 reth-testing-utils = { workspace = true, optional = true }
 
 # ethereum
@@ -91,7 +90,7 @@ test-utils = [
 account-ext = [
     "reth-config/account-ext",
     "reth-network-p2p/account-ext",
-    "reth-provider?/account-ext",
+    "reth-provider/account-ext",
     "reth-storage-api/account-ext",
     "reth-testing-utils?/account-ext",
     "reth-tasks/account-ext",

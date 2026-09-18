@@ -23,6 +23,15 @@ pub struct EthStateCacheConfig {
     ///
     /// Default is 1000.
     pub max_bals: u32,
+    /// Cache BALs computed by RPC requests for transaction tracing. Disabled by default.
+    #[serde(default)]
+    pub cache_computed_bals: bool,
+    /// Prewarm BALs until native BAL support, optionally replaying this many recent blocks on
+    /// startup. `Some(0)` prewarms only new canonical blocks; `None` disables prewarming.
+    ///
+    /// Implies caching of BALs computed by RPC requests.
+    #[serde(default)]
+    pub prewarm_bals: Option<usize>,
     /// Max number of concurrent database requests.
     ///
     /// Default is 512.
@@ -37,6 +46,8 @@ impl Default for EthStateCacheConfig {
             max_blocks: DEFAULT_BLOCK_CACHE_MAX_LEN,
             max_receipts: DEFAULT_RECEIPT_CACHE_MAX_LEN,
             max_bals: DEFAULT_BAL_CACHE_MAX_LEN,
+            cache_computed_bals: false,
+            prewarm_bals: None,
             max_concurrent_db_requests: DEFAULT_CONCURRENT_DB_REQUESTS,
             max_cached_tx_hashes: DEFAULT_MAX_CACHED_TX_HASHES,
         }

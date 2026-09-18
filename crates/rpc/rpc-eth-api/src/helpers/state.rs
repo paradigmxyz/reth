@@ -28,7 +28,9 @@ use std::{collections::HashMap, sync::Arc};
 /// Helper methods for `eth_` methods relating to state (accounts).
 pub trait EthState: LoadState + SpawnBlocking {
     /// Returns the maximum number of blocks into the past for generating state proofs.
-    fn max_proof_window(&self) -> u64;
+    fn max_proof_window(&self) -> u64 {
+        self.eth_api_settings().eth_proof_window
+    }
 
     /// Validates that the given block is within the configured proof window.
     ///

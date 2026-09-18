@@ -9,7 +9,7 @@ use alloy_primitives::{Address, Bytes, TxHash, B256};
 use futures::{Stream, StreamExt};
 use reth_chain_state::CanonStateNotification;
 use reth_errors::{ProviderError, ProviderResult};
-use reth_execution_types::Chain;
+use reth_execution_types::{Chain, DecodedRevmBal};
 use reth_primitives_traits::{Block, BlockBody, InMemorySize, NodePrimitives, RecoveredBlock};
 use reth_revm::{
     bytecode::Bytecode,
@@ -96,6 +96,8 @@ impl<N: NodePrimitives> EthStateCache<N> {
             max_blocks,
             max_receipts,
             max_bals,
+            cache_computed_bals: _,
+            prewarm_bals: _,
             max_concurrent_db_requests,
             max_cached_tx_hashes,
         } = config;
@@ -259,6 +261,13 @@ impl<N: NodePrimitives> EthStateCache<N> {
         }
         Ok(maybe_bal.map(|cached| cached.0))
     }
+
+    /// Inserts a decoded revm BAL into the cache.
+    pub fn insert_bal(&self, block_hash: B256, bal: DecodedBal<Arc<RevmBal>>) {
+        let _ = self
+            .to_service
+            .send(CacheAction::InsertBal { block_hash, bal: CachedRevmBal::new(bal) });
+    }
 }
 /// Thrown when the cache service task dropped.
 #[derive(Debug, thiserror::Error)]
@@ -378,6 +387,11 @@ where
     }
 
     fn on_new_bal(&mut self, block_hash: B256, res: ProviderResult<Option<CachedRevmBal>>) {
+        // A local replay may finish before an older provider lookup returns.
+        if self.bal_cache.contains_key(&block_hash) {
+            return
+        }
+
         if let Some(queued) = self.bal_cache.remove(&block_hash) {
             for tx in queued {
                 let _ = tx.send(res.clone());
@@ -557,6 +571,9 @@ where
                         CacheAction::BalResult { block_hash, res } => {
                             this.on_new_bal(block_hash, res);
                         }
+                        CacheAction::InsertBal { block_hash, bal } => {
+                            this.on_new_bal(block_hash, Ok(Some(bal)));
+                        }
                         CacheAction::BlockWithSendersResult { block_hash, res } => match res {
                             Ok(Some(block_with_senders)) => {
                                 this.on_new_block(block_hash, Ok(Some(block_with_senders)));
@@ -579,6 +596,13 @@ where
                                 this.on_new_receipts(
                                     block_receipts.block_hash,
                                     Ok(Some(block_receipts.receipts)),
+                                );
+                            }
+
+                            for (block_hash, bal) in chain_change.bals {
+                                this.on_new_bal(
+                                    block_hash,
+                                    Ok(Some(CachedRevmBal::from_shared(bal))),
                                 );
                             }
                         }
@@ -652,6 +676,10 @@ enum CacheAction<B: Block, R> {
         block_hash: B256,
         res: ProviderResult<Option<CachedRevmBal>>,
     },
+    InsertBal {
+        block_hash: B256,
+        bal: CachedRevmBal,
+    },
     CacheNewCanonicalChain {
         chain_change: ChainChange<B, R>,
     },
@@ -674,6 +702,7 @@ struct BlockReceipts<R> {
 struct ChainChange<B: Block, R> {
     blocks: Vec<Arc<RecoveredBlock<B>>>,
     receipts: Vec<BlockReceipts<R>>,
+    bals: Vec<(B256, Arc<DecodedRevmBal>)>,
 }
 
 impl<B: Block, R: Clone> ChainChange<B, R> {
@@ -691,7 +720,11 @@ impl<B: Block, R: Clone> ChainChange<B, R> {
                 (Arc::clone(block), block_receipts)
             })
             .unzip();
-        Self { blocks, receipts }
+        // Blocks without an attached BAL are absent here; their BAL is fetched from the store on
+        // demand.
+        let bals =
+            chain.blocks_and_bals().map(|(block, bal)| (block.hash(), Arc::clone(bal))).collect();
+        Self { blocks, receipts, bals }
     }
 }
 
@@ -790,13 +823,20 @@ pub async fn cache_new_blocks_task<St, N: NodePrimitives>(
 
 /// Cached decoded revm BAL.
 #[derive(Clone, Debug)]
-pub(crate) struct CachedRevmBal(Arc<DecodedBal<Arc<RevmBal>>>);
+pub(crate) struct CachedRevmBal(Arc<DecodedRevmBal>);
 
 impl CachedRevmBal {
     /// Creates a cached revm BAL from an owned decoded BAL.
     #[inline]
-    fn new(bal: DecodedBal<Arc<RevmBal>>) -> Self {
+    fn new(bal: DecodedRevmBal) -> Self {
         Self(Arc::new(bal))
+    }
+
+    /// Creates a cached revm BAL from a BAL that is already shared, for example one prepared
+    /// during block validation.
+    #[inline]
+    const fn from_shared(bal: Arc<DecodedRevmBal>) -> Self {
+        Self(bal)
     }
 
     /// Decodes raw BAL bytes into the representation used by revm.
@@ -818,10 +858,8 @@ impl InMemorySize for CachedRevmBal {
     }
 }
 
-fn decoded_revm_bal_size(bal: &DecodedBal<Arc<RevmBal>>) -> usize {
-    core::mem::size_of::<DecodedBal<Arc<RevmBal>>>() +
-        bal.as_raw().len() +
-        revm_bal_size(bal.as_bal())
+fn decoded_revm_bal_size(bal: &DecodedRevmBal) -> usize {
+    core::mem::size_of::<DecodedRevmBal>() + bal.as_raw().len() + revm_bal_size(bal.as_bal())
 }
 
 fn revm_bal_size(bal: &Arc<RevmBal>) -> usize {
@@ -875,6 +913,7 @@ mod tests {
     use reth_ethereum_primitives::{
         Block, BlockBody, EthPrimitives, Receipt, Transaction, TransactionSigned,
     };
+    use reth_execution_types::ExecutionOutcome;
     use reth_primitives_traits::{RecoveredBlock, SealedHeader};
     use reth_storage_api::{
         noop::NoopProvider, BalProvider, BalStore, BalStoreHandle, BlockBodyIndicesProvider,
@@ -891,6 +930,8 @@ mod tests {
                 max_blocks: 4,
                 max_receipts: 4,
                 max_bals: 4,
+                cache_computed_bals: false,
+                prewarm_bals: None,
                 max_concurrent_db_requests: 1,
                 max_cached_tx_hashes: 16,
             },
@@ -942,6 +983,18 @@ mod tests {
         service.on_reorg_bal(block_hash, Ok(None));
 
         assert!(service.bal_cache.get(&block_hash).is_none());
+    }
+
+    #[test]
+    fn late_provider_miss_preserves_generated_bal() {
+        let mut service = test_service();
+        let hash = B256::repeat_byte(0x69);
+        let (tx, mut rx) = oneshot::channel();
+        assert!(service.bal_cache.queue(hash, tx));
+        service.on_new_bal(hash, Ok(Some(CachedRevmBal::new(test_decoded_revm_bal()))));
+        assert!(rx.try_recv().unwrap().unwrap().is_some());
+        service.on_new_bal(hash, Ok(None));
+        assert!(service.bal_cache.contains_key(&hash));
     }
 
     #[test]
@@ -999,6 +1052,8 @@ mod tests {
                 max_blocks: 0,
                 max_receipts: 0,
                 max_bals: 4,
+                cache_computed_bals: false,
+                prewarm_bals: None,
                 max_concurrent_db_requests: 1,
                 max_cached_tx_hashes: 0,
             },
@@ -1033,6 +1088,8 @@ mod tests {
                 max_blocks: 4,
                 max_receipts: 0,
                 max_bals: 4,
+                cache_computed_bals: false,
+                prewarm_bals: None,
                 max_concurrent_db_requests: 1,
                 max_cached_tx_hashes: 0,
             },
@@ -1069,6 +1126,51 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn insert_bal_populates_cache_without_provider_fetch() {
+        let fetches = Arc::new(AtomicUsize::default());
+        let provider = TestBalProvider::new(fetches.clone());
+        let cache = EthStateCache::<EthPrimitives>::spawn_with(
+            provider,
+            EthStateCacheConfig { max_bals: 4, ..Default::default() },
+            Runtime::test(),
+        );
+        let block_hash = B256::repeat_byte(0x68);
+        cache.insert_bal(block_hash, test_decoded_revm_bal());
+        assert!(cache.get_bal(block_hash).await.unwrap().is_some());
+        assert_eq!(fetches.load(Ordering::SeqCst), 0);
+    }
+
+    #[tokio::test]
+    async fn canonical_chain_notification_caches_prepared_bal() {
+        let fetches = Arc::new(AtomicUsize::default());
+        let provider = TestBalProvider::new(fetches.clone());
+        let cache = EthStateCache::<EthPrimitives>::spawn_with(
+            provider,
+            EthStateCacheConfig { max_blocks: 4, max_bals: 4, ..Default::default() },
+            Runtime::test(),
+        );
+
+        let block = test_block();
+        let block_hash = block.hash();
+        let block_number = block.number;
+        let mut chain: Chain<EthPrimitives> = Chain::new(
+            [block],
+            ExecutionOutcome::new(Default::default(), vec![vec![]], block_number, vec![]),
+            Default::default(),
+        );
+        chain.insert_bal(block_number, Arc::new(test_decoded_revm_bal()));
+
+        cache_new_blocks_task(
+            cache.clone(),
+            tokio_stream::iter([CanonStateNotification::Commit { new: Arc::new(chain) }]),
+        )
+        .await;
+
+        assert!(cache.get_bal(block_hash).await.unwrap().is_some());
+        assert_eq!(fetches.load(Ordering::SeqCst), 0);
+    }
+
+    #[tokio::test]
     async fn concurrent_get_bal_requests_share_fetch() {
         let fetches = Arc::new(AtomicUsize::default());
         let provider = TestBalProvider::new(fetches.clone());
@@ -1078,6 +1180,8 @@ mod tests {
                 max_blocks: 0,
                 max_receipts: 0,
                 max_bals: 4,
+                cache_computed_bals: false,
+                prewarm_bals: None,
                 max_concurrent_db_requests: 1,
                 max_cached_tx_hashes: 0,
             },
@@ -1139,10 +1243,6 @@ mod tests {
         fn get_by_hashes(&self, block_hashes: &[BlockHash]) -> ProviderResult<Vec<Option<Bytes>>> {
             self.fetches.fetch_add(1, Ordering::SeqCst);
             Ok(block_hashes.iter().map(|_| Some(Bytes::from_static(&[0xc0]))).collect())
-        }
-
-        fn bal_stream(&self) -> reth_storage_api::BalNotificationStream {
-            reth_storage_api::NoopBalStore.bal_stream()
         }
     }
 

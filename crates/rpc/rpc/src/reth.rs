@@ -12,7 +12,7 @@ use reth_chain_state::{
 };
 use reth_errors::{RethError, RethResult};
 use reth_evm::{execute::Executor, ConfigureEvm};
-use reth_execution_types::ExecutionOutcome;
+use reth_execution_types::{Chain, ExecutionOutcome};
 use reth_primitives_traits::{NodePrimitives, SealedHeader};
 use reth_rpc_api::{RethApiServer, RethJitAction};
 use reth_rpc_eth_types::{EthApiError, EthResult};
@@ -338,8 +338,31 @@ async fn finalized_chain_notifications<N>(
                     CanonStateNotification::Commit { .. } => {
                         buffered.push(notification);
                     }
-                    CanonStateNotification::Reorg { .. } => {
-                        buffered.clear();
+                    CanonStateNotification::Reorg { old, new } => {
+                        let first_reverted = old.first().number();
+                        buffered.retain_mut(|notification| {
+                            let chain = notification.committed();
+                            if chain.first().number() >= first_reverted {
+                                return false
+                            }
+                            // Preserve the canonical prefix of a segment crossing the fork.
+                            if chain.tip().number() >= first_reverted {
+                                let (blocks, mut outcome, mut trie_data) = (*chain).clone().into_inner();
+                                outcome.revert_to(first_reverted - 1);
+                                trie_data.split_off(&first_reverted);
+                                *notification = CanonStateNotification::Commit {
+                                    new: Arc::new(Chain::new(
+                                        blocks.into_blocks().take_while(|b| b.number() < first_reverted),
+                                        outcome,
+                                        trie_data,
+                                    )),
+                                };
+                            }
+                            true
+                        });
+                        if !new.is_empty() {
+                            buffered.push(CanonStateNotification::Commit { new: new.clone() });
+                        }
                     }
                 }
             }

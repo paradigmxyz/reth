@@ -3,7 +3,7 @@
 use crate::{ConfigureEvm, Database, OnStateHook, TxEnvFor};
 use alloc::{boxed::Box, sync::Arc, vec::Vec};
 use alloy_consensus::{BlockHeader, Header};
-use alloy_eip7928::{compute_block_access_list_hash, BlockAccessList};
+use alloy_eip7928::{bal::DecodedBal, compute_block_access_list_hash_with_buf, BlockAccessList};
 use alloy_eips::eip2718::WithEncoded;
 pub use alloy_evm::block::{BlockExecutor, BlockExecutorFactory, GasOutput};
 use alloy_evm::{
@@ -314,8 +314,9 @@ pub struct BlockBuilderOutcome<N: NodePrimitives> {
     pub trie_updates: TrieUpdates,
     /// The built block.
     pub block: RecoveredBlock<N::Block>,
-    /// Block access list built during execution (EIP-7928, Amsterdam).
-    pub block_access_list: Option<BlockAccessList>,
+    /// Block access list built during execution (EIP-7928, Amsterdam), with its RLP bytes and
+    /// hash.
+    pub block_access_list: Option<DecodedBal>,
 }
 
 /// A type that knows how to execute and build a block.
@@ -515,8 +516,13 @@ where
             reth_storage_api::ensure_no_account_extensions("BAL")
                 .map_err(BlockExecutionError::other)?;
         }
-        let block_access_list_hash =
-            block_access_list.as_ref().map(|bal| compute_block_access_list_hash(bal.as_slice()));
+        // Encode the built BAL once and keep the bytes, so callers don't re-encode it.
+        let block_access_list = block_access_list.map(|bal| {
+            let mut raw = Vec::new();
+            let hash = compute_block_access_list_hash_with_buf(&bal, &mut raw);
+            DecodedBal::new_unchecked(bal.into(), raw.into(), hash)
+        });
+        let block_access_list_hash = block_access_list.as_ref().map(DecodedBal::hash);
 
         let hashed_state =
             state.hashed_post_state(&db.bundle_state).map_err(BlockExecutionError::other)?;

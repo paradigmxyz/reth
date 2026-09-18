@@ -6,7 +6,7 @@
 //!
 //! Persistence and range selection are handled by the snap sync orchestrator.
 
-use alloy_primitives::B256;
+use alloy_primitives::{map::B256Set, B256, KECCAK256_EMPTY};
 use futures::Future;
 use reth_eth_wire_types::snap::{
     AccountRangeMessage, GetAccountRangeMessage, GetStorageRangesMessage,
@@ -92,6 +92,8 @@ pub struct VerifiedAccountRange {
     // Root the accounts were proven against. Private so a range cannot be relabelled with a root
     // that did not authenticate it.
     state_root: B256,
+    // Inclusive key the proof was verified from. Private for the same reason as the root.
+    origin: B256,
     // Accounts as the response returned them, in the order every positional check assumes.
     accounts: Vec<(B256, TrieAccount)>,
     // Whether the requested interval may continue past this response.
@@ -104,6 +106,11 @@ impl VerifiedAccountRange {
     /// State root the accounts were authenticated against.
     pub const fn state_root(&self) -> B256 {
         self.state_root
+    }
+
+    /// Key the range was requested from, proven to have nothing before the first account.
+    pub const fn origin(&self) -> B256 {
+        self.origin
     }
 
     /// Accounts in strictly increasing hashed-key order.
@@ -130,6 +137,18 @@ impl VerifiedAccountRange {
             state_root: self.state_root,
             accounts: self.accounts.iter().map(|(hash, account)| (*hash, account)).collect(),
         }
+    }
+
+    /// Code hashes the accounts reference, once each and in the order they appear.
+    ///
+    /// Accounts sharing code therefore yield one hash, so it is downloaded and stored once.
+    pub fn code_hashes(&self) -> Vec<B256> {
+        let mut seen = B256Set::default();
+        self.accounts
+            .iter()
+            .map(|(_, account)| account.code_hash)
+            .filter(|hash| *hash != KECCAK256_EMPTY && seen.insert(*hash))
+            .collect()
     }
 
     /// Borrows only the accounts that have storage, together with the root that authenticated
@@ -257,6 +276,7 @@ impl SnapVerifier for GetAccountRangeMessage {
             return if self.root_hash == EMPTY_ROOT_HASH {
                 Ok(AccountRangeOutcome::Verified(VerifiedAccountRange {
                     state_root: self.root_hash,
+                    origin: self.starting_hash,
                     accounts: Vec::new(),
                     has_more: false,
                     next: None,
@@ -294,11 +314,20 @@ fn verify_account_range(
         .collect::<Result<Vec<_>, _>>()?;
     let next = verify_proof(request, &accounts, &response.proof)?;
 
-    // Authenticate the boundary account before removing it from the requested range.
-    accounts.truncate(accounts.partition_point(|(hash, _)| *hash <= request.limit_hash));
+    // Authenticate the boundary account before removing it from the requested range. Once
+    // removed, it is the first key after the response, so resuming from it cannot skip it.
+    let kept = accounts.partition_point(|(hash, _)| *hash <= request.limit_hash);
+    let next = accounts.get(kept).map(|(hash, _)| *hash).or(next);
+    accounts.truncate(kept);
     let has_more = next.is_some_and(|next| next <= request.limit_hash);
 
-    Ok(VerifiedAccountRange { state_root: request.root_hash, accounts, has_more, next })
+    Ok(VerifiedAccountRange {
+        state_root: request.root_hash,
+        origin: request.starting_hash,
+        accounts,
+        has_more,
+        next,
+    })
 }
 
 // Re-encodes decoded accounts so the proof authenticates their canonical trie values.
@@ -413,6 +442,7 @@ mod tests {
             outcome,
             AccountRangeOutcome::Verified(VerifiedAccountRange {
                 state_root: root_hash,
+                origin: B256::ZERO,
                 accounts,
                 has_more: false,
                 next: None,
@@ -471,6 +501,7 @@ mod tests {
         let root_hash = root(&accounts);
         let range = VerifiedAccountRange {
             state_root: root_hash,
+            origin: B256::ZERO,
             accounts: accounts.clone(),
             has_more: false,
             next: None,
@@ -487,6 +518,28 @@ mod tests {
     }
 
     #[test]
+    fn code_hashes_are_listed_once_in_the_order_the_accounts_reference_them() {
+        let shared = B256::repeat_byte(0x11);
+        let mut first = account(1);
+        first.code_hash = shared;
+        let mut third = account(3);
+        third.code_hash = shared;
+        let mut fourth = account(4);
+        fourth.code_hash = B256::repeat_byte(0x44);
+        let accounts =
+            vec![(key(1), first), (key(2), account(2)), (key(3), third), (key(4), fourth)];
+        let range = VerifiedAccountRange {
+            state_root: root(&accounts),
+            origin: B256::ZERO,
+            accounts,
+            has_more: false,
+            next: None,
+        };
+
+        assert_eq!(range.code_hashes(), vec![shared, B256::repeat_byte(0x44)]);
+    }
+
+    #[test]
     fn storage_batch_omits_interleaved_accounts_without_storage() {
         let mut first = account(1);
         first.storage_root = B256::repeat_byte(0x11);
@@ -495,8 +548,13 @@ mod tests {
         third.storage_root = B256::repeat_byte(0x33);
         let accounts = vec![(key(1), first), (key(2), empty), (key(3), third)];
         let root_hash = root(&accounts);
-        let range =
-            VerifiedAccountRange { state_root: root_hash, accounts, has_more: false, next: None };
+        let range = VerifiedAccountRange {
+            state_root: root_hash,
+            origin: B256::ZERO,
+            accounts,
+            has_more: false,
+            next: None,
+        };
 
         let batch = range.storage_batch();
 
@@ -551,9 +609,10 @@ mod tests {
             outcome,
             AccountRangeOutcome::Verified(VerifiedAccountRange {
                 state_root: root_hash,
+                origin: B256::ZERO,
                 accounts: vec![accounts[0].clone()],
                 has_more: false,
-                next: Some(key(4)),
+                next: Some(key(3)),
             })
         );
         assert!(client.reported().is_empty());
@@ -608,6 +667,7 @@ mod tests {
             outcome,
             AccountRangeOutcome::Verified(VerifiedAccountRange {
                 state_root: root_hash,
+                origin: B256::ZERO,
                 accounts: accounts[..2].to_vec(),
                 has_more: false,
                 next: Some(key(3)),
@@ -638,9 +698,10 @@ mod tests {
             outcome,
             AccountRangeOutcome::Verified(VerifiedAccountRange {
                 state_root: root_hash,
+                origin: key(3),
                 accounts: Vec::new(),
                 has_more: false,
-                next: None,
+                next: Some(key(9)),
             })
         );
         assert!(client.reported().is_empty());
@@ -663,6 +724,7 @@ mod tests {
             outcome,
             AccountRangeOutcome::Verified(VerifiedAccountRange {
                 state_root: root_hash,
+                origin: key(3),
                 accounts: Vec::new(),
                 has_more: false,
                 next: Some(key(9)),
@@ -692,6 +754,7 @@ mod tests {
             outcome,
             AccountRangeOutcome::Verified(VerifiedAccountRange {
                 state_root: root_hash,
+                origin: B256::ZERO,
                 accounts: vec![accounts[0].clone()],
                 has_more: false,
                 next: Some(key(9)),
@@ -719,6 +782,7 @@ mod tests {
             outcome,
             AccountRangeOutcome::Verified(VerifiedAccountRange {
                 state_root: root_hash,
+                origin: B256::ZERO,
                 accounts: vec![accounts[0].clone()],
                 has_more: true,
                 next: Some(key(3)),
