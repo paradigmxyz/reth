@@ -10131,6 +10131,7 @@ dependencies = [
  "alloy-rpc-types-trace",
  "clap",
  "dyn-clone",
+ "futures",
  "http",
  "jsonrpsee",
  "metrics",

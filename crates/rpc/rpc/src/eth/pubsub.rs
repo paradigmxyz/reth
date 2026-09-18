@@ -77,7 +77,11 @@ where
     }
 
     /// Returns a stream that yields matching logs.
-    pub fn log_stream(&self, filter: Filter) -> impl Stream<Item = RpcLog<Eth::NetworkTypes>> {
+    pub fn log_stream(
+        &self,
+        filter: Filter,
+    ) -> Result<impl Stream<Item = RpcLog<Eth::NetworkTypes>> + Send + Unpin, ErrorObject<'static>>
+    {
         self.inner.eth_api.log_stream(filter)
     }
 
@@ -94,15 +98,8 @@ where
                 pipe_from_stream(accepted_sink, self.new_headers_stream()).await
             }
             SubscriptionKind::Logs => {
-                // if no params are provided, used default filter params
-                let filter = match params {
-                    Some(Params::Logs(filter)) => *filter,
-                    Some(Params::Bool(_)) => {
-                        return Err(invalid_params_rpc_err("Invalid params for logs"))
-                    }
-                    _ => Default::default(),
-                };
-                pipe_from_stream(accepted_sink, self.log_stream(filter)).await
+                let filter = logs_filter(params)?;
+                pipe_from_stream(accepted_sink, self.log_stream(filter)?).await
             }
             SubscriptionKind::NewPendingTransactions => {
                 if let Some(params) = params {
@@ -219,6 +216,25 @@ where
         kind: SubscriptionKind,
         params: Option<Params>,
     ) -> jsonrpsee::core::SubscriptionResult {
+        if kind == SubscriptionKind::Logs {
+            let pubsub = self.clone();
+            self.inner.subscription_task_spawner.spawn_task(async move {
+                let stream = match logs_filter(params).and_then(|filter| pubsub.log_stream(filter))
+                {
+                    Ok(stream) => stream,
+                    Err(err) => {
+                        pending.reject(err).await;
+                        return
+                    }
+                };
+
+                let Ok(sink) = pending.accept().await else { return };
+                let _ = pipe_from_stream(sink, stream).await;
+            });
+
+            return Ok(())
+        }
+
         let sink = pending.accept().await?;
         let pubsub = self.clone();
         self.inner.subscription_task_spawner.spawn_task(async move {
@@ -226,6 +242,17 @@ where
         });
 
         Ok(())
+    }
+}
+
+/// Returns the logs filter from the subscription params.
+fn logs_filter(params: Option<Params>) -> Result<Filter, ErrorObject<'static>> {
+    match params {
+        None | Some(Params::None) => Ok(Default::default()),
+        Some(Params::Logs(filter)) => Ok(*filter),
+        Some(Params::Bool(_) | Params::TransactionReceipts(_)) => {
+            Err(invalid_params_rpc_err("Invalid params for logs"))
+        }
     }
 }
 
