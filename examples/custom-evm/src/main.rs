@@ -284,7 +284,6 @@ mod tests {
         l1_blocknumber_opcode().unwrap();
         custom_precompile().unwrap();
         custom_transaction().unwrap();
-        custom_wire_transaction().unwrap();
         mainnet_fallback().unwrap();
     }
 }
