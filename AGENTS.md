@@ -59,7 +59,7 @@ Real example: Fixing beacon block root handling ([#16767](https://github.com/par
 ```
 
 #### 2. Integration with Upstream Changes
-Real example: Integrating revm updates ([#16752](https://github.com/paradigmxyz/reth/pull/16752))
+Real example: Integrating upstream EVM updates ([#16752](https://github.com/paradigmxyz/reth/pull/16752))
 ```rust
 // Update code to use new APIs from dependencies
 - if self.fork_tracker.is_shanghai_activated() {
@@ -303,7 +303,7 @@ Most PRs change only 1-5 files. Examples:
 - Adding test cases for edge conditions
 
 #### Integration Work
-When dependencies update (especially revm), code needs updating:
+When dependencies update, code needs updating:
 - Check for breaking API changes
 - Update to use new features (like EIP implementations)
 - Ensure compatibility with new versions

@@ -1171,7 +1171,7 @@ impl<T: NodePrimitives, ChainSpec: EthChainSpec + 'static> HashedPostStateProvid
 {
     fn hashed_post_state(
         &self,
-        _bundle_state: &revm::database::BundleState,
+        _bundle_state: &reth_execution_types::EvmState,
     ) -> ProviderResult<HashedPostState> {
         Ok(HashedPostState::default())
     }

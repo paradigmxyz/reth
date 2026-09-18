@@ -5,13 +5,13 @@
 
 use crate::{SnapAttemptStore, SnapSyncError, SnapWrite};
 use alloy_primitives::{keccak256, Bytes, B256};
+use evm2::bytecode::Bytecode;
 use reth_db_api::{
     tables,
     transaction::{DbTx, DbTxMut},
     RawKey, RawTable,
 };
-use reth_storage_api::{DBProvider, MetadataProvider, StateWriter};
-use revm::{bytecode::Bytecode, database::states::StateChangeset};
+use reth_storage_api::{DBProvider, MetadataProvider, StateChangeset, StateWriter};
 
 /// Persistence for the code an attempt's accounts reference.
 ///
@@ -85,7 +85,7 @@ impl<T: MetadataProvider> SnapBytecodeStore for T {
                 // one, so authenticated bytes that do not parse as a delegation are legacy code.
                 let code = Bytecode::new_raw_checked(code.clone())
                     .unwrap_or_else(|_| Bytecode::new_legacy(code));
-                Ok((hash, code))
+                Ok((hash, reth_primitives_traits::Bytecode(code)))
             })
             .collect::<Result<Vec<_>, SnapSyncError>>()?;
 

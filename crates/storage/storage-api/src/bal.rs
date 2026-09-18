@@ -387,6 +387,8 @@ mod tests {
         let decoded = store.get_decoded_by_hash(hash).unwrap().unwrap();
 
         assert_eq!(decoded.as_raw(), &raw_bal);
+
+        assert!(decoded.as_bal().is_empty());
     }
 
     #[test]

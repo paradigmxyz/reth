@@ -18,12 +18,16 @@ use core::fmt;
 use jsonrpsee::core::RpcResult;
 use jsonrpsee_types::error::ErrorObject;
 use reth_chainspec::{ChainSpecProvider, EthereumHardforks};
-use reth_consensus::{Consensus, FullConsensus};
+use reth_consensus::FullConsensus;
 use reth_consensus_common::validation::MAX_RLP_BLOCK_SIZE;
 use reth_engine_primitives::PayloadValidator;
 use reth_errors::{BlockExecutionError, ConsensusError, ProviderError};
-use reth_evm::{execute::Executor, ConfigureEvm};
-use reth_execution_types::BlockExecutionOutput;
+use reth_evm::{
+    cached::CachedReads,
+    database::StateProviderDatabase,
+    execute::{BlockExecutionOutput, Executor},
+    ConfigureEvm,
+};
 use reth_metrics::{
     metrics,
     metrics::{gauge, Gauge},
@@ -33,7 +37,6 @@ use reth_node_api::{NewPayloadError, PayloadTypes};
 use reth_primitives_traits::{
     BlockBody, GotExpected, NodePrimitives, RecoveredBlock, SealedBlock, SealedHeaderFor,
 };
-use reth_revm::{cached::CachedReads, database::StateProviderDatabase};
 use reth_rpc_api::BlockSubmissionValidationApiServer;
 use reth_rpc_server_types::result::{internal_rpc_err, invalid_params_rpc_err};
 use reth_storage_api::{BlockReaderIdExt, HashedPostStateProvider, StateProviderFactory};
@@ -76,7 +79,7 @@ where
             evm_config,
             disallow,
             validation_window,
-            cached_state: Default::default(),
+            cached_state: RwLock::new(Default::default()),
             task_spawner,
             metrics: Default::default(),
         });
@@ -96,7 +99,7 @@ where
         if cache.0 == head {
             cache.1.clone()
         } else {
-            Default::default()
+            CachedReads::default()
         }
     }
 
@@ -106,7 +109,7 @@ where
         if cache.0 == head {
             cache.1.extend(cached_state);
         } else {
-            *cache = (head, cached_state)
+            *cache = (head, cached_state);
         }
     }
 }
@@ -196,31 +199,22 @@ where
         let mut request_cache = self.cached_reads(parent_header_hash).await;
 
         let (output, block_access_list_hash) = {
-            let cached_db = request_cache.as_db_mut(StateProviderDatabase::new(&state_provider));
+            let db = StateProviderDatabase::new(state_provider.as_ref());
+            let cached_db = request_cache.as_db_mut(db);
+            let cached_db_handle = cached_db.clone();
             let mut executor = self.evm_config.batch_executor(cached_db);
-
-            let result = executor.execute_one(&block)?;
-
-            // The executor rebuilds the block access list whenever the block header contains a
-            // BAL hash. Comparing the rebuilt hash against the header post execution also
-            // commits to the submitted access list, because the header's BAL hash is derived
-            // from the submitted bytes.
+            let result = executor.execute_one(&block).map_err(BlockExecutionError::other)?;
             let block_access_list_hash =
-                executor.take_bal().map(|bal| compute_block_access_list_hash(&bal));
+                executor.take_bal().as_ref().map(|bal| compute_block_access_list_hash(bal));
+            let output =
+                BlockExecutionOutput::new(result, executor.into_state().into_execution_state());
+            cached_db_handle.sync(&mut request_cache);
 
-            let mut state = executor.into_state();
             if !self.disallow.is_empty() {
-                // Check whether the submission interacted with any blacklisted account by
-                // scanning the `State`'s cache that records everything read from database
-                // during execution.
-                for account in state.cache.accounts.keys() {
-                    if self.disallow.contains(account) {
-                        return Err(ValidationApiError::Blacklist(*account))
-                    }
-                }
+                self.ensure_no_disallowed_accounts(&request_cache, &output)?;
             }
 
-            (BlockExecutionOutput { state: state.take_bundle(), result }, block_access_list_hash)
+            (output, block_access_list_hash)
         };
 
         // update the cached reads
@@ -235,7 +229,7 @@ where
 
         self.ensure_payment(&block, &output, &message)?;
 
-        let hashed_state = state_provider.hashed_post_state(&output.state)?;
+        let hashed_state = state_provider.hashed_post_state(output.state.inner())?;
         let state_root = state_provider.state_root(hashed_state)?;
 
         if state_root != block.header().state_root() {
@@ -279,6 +273,26 @@ where
         }
     }
 
+    fn ensure_no_disallowed_accounts(
+        &self,
+        request_cache: &CachedReads,
+        output: &BlockExecutionOutput<<E::Primitives as NodePrimitives>::Receipt>,
+    ) -> Result<(), ValidationApiError> {
+        for account in request_cache.accounts.keys() {
+            if self.disallow.contains(account) {
+                return Err(ValidationApiError::Blacklist(*account))
+            }
+        }
+
+        for (account, _) in output.state.inner().accounts() {
+            if self.disallow.contains(&account) {
+                return Err(ValidationApiError::Blacklist(account))
+            }
+        }
+
+        Ok(())
+    }
+
     /// Ensures that the proposer has received [`BidTrace::value`] for this block.
     ///
     /// Firstly attempts to verify the payment by checking the state changes, otherwise falls back
@@ -289,18 +303,17 @@ where
         output: &BlockExecutionOutput<<E::Primitives as NodePrimitives>::Receipt>,
         message: &BidTrace,
     ) -> Result<(), ValidationApiError> {
-        let (mut balance_before, balance_after) = if let Some(acc) =
-            output.state.state.get(&message.proposer_fee_recipient)
-        {
-            let balance_before = acc.original_info.as_ref().map(|i| i.balance).unwrap_or_default();
-            let balance_after = acc.info.as_ref().map(|i| i.balance).unwrap_or_default();
+        let (mut balance_before, balance_after) =
+            if let Some(acc) = output.account_state(&message.proposer_fee_recipient) {
+                let balance_before = acc.original.as_ref().map(|i| i.balance).unwrap_or_default();
+                let balance_after = acc.current.as_ref().map(|i| i.balance).unwrap_or_default();
 
-            (balance_before, balance_after)
-        } else {
-            // account might have balance but considering it zero is fine as long as we know
-            // that balance have not changed
-            (U256::ZERO, U256::ZERO)
-        };
+                (balance_before, balance_after)
+            } else {
+                // account might have balance but considering it zero is fine as long as we know
+                // that balance have not changed
+                (U256::ZERO, U256::ZERO)
+            };
 
         if let Some(withdrawals) = block.body().withdrawals() {
             for withdrawal in withdrawals {

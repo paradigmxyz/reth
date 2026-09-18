@@ -29,8 +29,8 @@ alloy-eip7928.workspace = true
 alloy-eips.workspace = true
 alloy-primitives.workspace = true
 
-# revm
-revm.workspace = true
+# evm2
+evm2.workspace = true
 
 # misc
 serde = { workspace = true, features = ["derive"] }
@@ -39,12 +39,13 @@ thiserror.workspace = true
 tokio-util.workspace = true
 
 [dev-dependencies]
+reth-execution-types.workspace = true
 alloy-consensus.workspace = true
 alloy-rlp.workspace = true
 futures.workspace = true
 reth-chainspec.workspace = true
 reth-ethereum-primitives.workspace = true
 reth-evm.workspace = true
-reth-evm-ethereum.workspace = true
+reth-evm-ethereum = { workspace = true, features = ["std"] }
 reth-provider = { workspace = true, features = ["test-utils"] }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }

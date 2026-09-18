@@ -1,6 +1,5 @@
 //! Entrypoint for payload processing.
 
-use super::precompile_cache::PrecompileCacheMap;
 use crate::tree::{
     payload_processor::prewarm::{PrewarmCacheTask, PrewarmContext, PrewarmMode, PrewarmTaskEvent},
     CachedStateCacheMetrics, CachedStateMetrics, CachedStateMetricsSource, ExecutionCache,
@@ -12,16 +11,15 @@ use crossbeam_channel::{Receiver as CrossbeamReceiver, Sender as CrossbeamSender
 use prewarm::PrewarmMetrics;
 use rayon::prelude::*;
 use reth_evm::{
-    block::ExecutableTxParts,
-    execute::{ExecutableTxFor, WithTxEnv},
-    ConfigureEvm, ConvertTx, ExecutableTxIterator, ExecutableTxTuple, SpecFor, TxEnvFor,
+    ConfigureEvm, ConvertTx, ExecutableTxFor, ExecutableTxIterator, ExecutableTxParts,
+    ExecutableTxTuple, TxEnvFor, WithTxEnv,
 };
+use reth_execution_types::EvmState;
 use reth_primitives_traits::{FastInstant as Instant, NodePrimitives};
 use reth_provider::{
     BlockExecutionOutput, BlockNumReader, ChangeSetReader, DatabaseProviderFactory, HistoryReader,
     PruneCheckpointReader, StageCheckpointReader, StorageChangeSetReader, StorageSettingsCache,
 };
-use reth_revm::db::BundleState;
 use reth_storage_overlay::OverlayStateProviderFactory;
 use reth_tasks::Runtime;
 pub use reth_trie_parallel::{
@@ -99,10 +97,6 @@ where
     disable_state_cache: bool,
     /// Determines how to configure the evm for execution.
     evm_config: Evm,
-    /// Whether precompile cache should be disabled.
-    precompile_cache_disabled: bool,
-    /// Precompile cache map.
-    precompile_cache_map: PrecompileCacheMap<SpecFor<Evm>>,
     /// Whether to disable BAL-driven parallel state root computation.
     /// Only valid when BAL parallel execution is also disabled.
     disable_bal_parallel_state_root: bool,
@@ -118,12 +112,7 @@ where
     Evm: ConfigureEvm,
 {
     /// Creates a new payload processor.
-    pub fn new(
-        executor: Runtime,
-        evm_config: Evm,
-        config: &TreeConfig,
-        precompile_cache_map: PrecompileCacheMap<SpecFor<Evm>>,
-    ) -> Self {
+    pub fn new(executor: Runtime, evm_config: Evm, config: &TreeConfig) -> Self {
         Self {
             executor,
             execution_cache: Default::default(),
@@ -131,8 +120,6 @@ where
             disable_transaction_prewarming: config.disable_prewarming(),
             evm_config,
             disable_state_cache: config.disable_state_cache(),
-            precompile_cache_disabled: config.precompile_cache_disabled(),
-            precompile_cache_map,
             cache_metrics: (!config.disable_cache_metrics())
                 .then(|| CachedStateMetrics::zeroed(CachedStateMetricsSource::Engine)),
             cache_state_metrics: (!config.disable_cache_metrics())
@@ -431,8 +418,6 @@ where
             cache_state_metrics: self.cache_state_metrics.clone(),
             terminate_execution: Arc::new(AtomicBool::new(false)),
             executed_tx_index: Arc::clone(&executed_tx_index),
-            precompile_cache_disabled: self.precompile_cache_disabled,
-            precompile_cache_map: self.precompile_cache_map.clone(),
             disable_bal_parallel_state_root: self.disable_bal_parallel_state_root,
             disable_bal_batch_io: self.disable_bal_batch_io,
         };
@@ -484,7 +469,7 @@ where
     pub fn on_inserted_executed_block(
         &self,
         block_with_parent: BlockWithParent,
-        bundle_state: &BundleState,
+        block_state: &EvmState,
     ) {
         let cache_state_metrics = self.cache_state_metrics.clone();
         self.execution_cache.update_with_guard(|cached| {
@@ -513,13 +498,9 @@ where
                 None => ExecutionCache::new(self.cross_block_cache_size),
             };
 
-            // Insert the block's bundle state into cache
+            // Insert the block's state into cache
             let new_cache = SavedCache::new(block_with_parent.block.hash, caches);
-            if new_cache.cache().insert_state(bundle_state).is_err() {
-                *cached = None;
-                debug!(target: "engine::caching", "cleared execution cache on update error");
-                return
-            }
+            new_cache.cache().insert_state(block_state);
             new_cache.update_metrics(cache_state_metrics.as_ref());
 
             // Replace with the updated cache
@@ -560,7 +541,7 @@ where
 /// Handle to all the spawned tasks.
 ///
 /// Generic over `R` (receipt type) to allow sharing `Arc<ExecutionOutcome<R>>` with the
-/// caching task without cloning the expensive `BundleState`.
+/// caching task without cloning the execution state.
 #[derive(Debug)]
 pub struct PayloadHandle<Tx, Err, R> {
     prewarm_handle: CacheTaskHandle<R>,
@@ -600,7 +581,7 @@ impl<Tx, Err, R: Send + Sync + 'static> PayloadHandle<Tx, Err, R> {
     ///
     /// If the [`BlockExecutionOutput`] is provided it will update the shared cache using its
     /// bundle state. Using `Arc<ExecutionOutcome>` allows sharing with the main execution
-    /// path without cloning the expensive `BundleState`.
+    /// path without cloning the execution state.
     ///
     /// Returns a sender for the channel that should be notified on block validation success.
     pub fn terminate_caching(
@@ -624,7 +605,7 @@ impl<Tx, Err, R: Send + Sync + 'static> PayloadHandle<Tx, Err, R> {
 /// Access to the spawned [`PrewarmCacheTask`].
 ///
 /// Generic over `R` (receipt type) to allow sharing `Arc<ExecutionOutcome<R>>` with the
-/// prewarm task without cloning the expensive `BundleState`.
+/// prewarm task without cloning the execution state.
 #[derive(Debug)]
 pub struct CacheTaskHandle<R> {
     /// The shared cache the task operates with.
@@ -651,7 +632,7 @@ impl<R: Send + Sync + 'static> CacheTaskHandle<R> {
     /// Terminates the entire pre-warming task.
     ///
     /// If the [`BlockExecutionOutput`] is provided it will update the shared cache using its
-    /// bundle state. Using `Arc<ExecutionOutcome>` avoids cloning the expensive `BundleState`.
+    /// execution state. Using `Arc<ExecutionOutcome>` avoids cloning it.
     #[must_use = "sender must be used and notified on block validation success"]
     pub fn terminate_caching(
         &mut self,
@@ -684,8 +665,8 @@ impl<R> Drop for CacheTaskHandle<R> {
 #[cfg(test)]
 mod tests {
     use crate::tree::{
-        payload_processor::PayloadProcessor, precompile_cache::PrecompileCacheMap, ExecutionCache,
-        PayloadExecutionCache, SavedCache, TreeConfig,
+        payload_processor::PayloadProcessor, ExecutionCache, PayloadExecutionCache, SavedCache,
+        TreeConfig,
     };
     use alloy_consensus::constants::KECCAK_EMPTY;
     use alloy_eips::eip1898::{BlockNumHash, BlockWithParent};
@@ -693,8 +674,8 @@ mod tests {
     use reth_chainspec::ChainSpec;
     use reth_evm_ethereum::EthEvmConfig;
     use reth_execution_cache::CachedStatus;
-    use reth_revm::db::BundleState;
-    use revm::state::AccountInfo;
+    use reth_execution_types::{execution_state_from_init, EvmState};
+    use reth_primitives_traits::Account;
     use std::sync::{atomic::Ordering, Arc};
 
     type TestTx = reth_evm::execute::WithTxEnv<
@@ -703,19 +684,16 @@ mod tests {
     >;
 
     fn converted_tx() -> TestTx {
-        TestTx {
-            tx_env: Default::default(),
-            tx: Arc::new(reth_primitives_traits::Recovered::new_unchecked(
-                reth_ethereum_primitives::TransactionSigned::Legacy(
-                    alloy_consensus::Signed::new_unchecked(
-                        alloy_consensus::TxLegacy::default(),
-                        alloy_primitives::Signature::test_signature(),
-                        B256::ZERO,
-                    ),
+        TestTx::new(reth_primitives_traits::Recovered::new_unchecked(
+            reth_ethereum_primitives::TransactionSigned::Legacy(
+                alloy_consensus::Signed::new_unchecked(
+                    alloy_consensus::TxLegacy::default(),
+                    alloy_primitives::Signature::test_signature(),
+                    B256::ZERO,
                 ),
-                Address::ZERO,
-            )),
-        }
+            ),
+            Address::ZERO,
+        ))
     }
 
     fn test_processor() -> PayloadProcessor<EthEvmConfig> {
@@ -723,7 +701,6 @@ mod tests {
             reth_tasks::Runtime::test(),
             EthEvmConfig::new(Arc::new(ChainSpec::default())),
             &TreeConfig::default(),
-            PrecompileCacheMap::default(),
         )
     }
 
@@ -948,7 +925,6 @@ mod tests {
             reth_tasks::Runtime::test(),
             EthEvmConfig::new(Arc::new(ChainSpec::default())),
             &TreeConfig::default(),
-            PrecompileCacheMap::default(),
         );
 
         let parent_hash = B256::from([1u8; 32]);
@@ -957,13 +933,13 @@ mod tests {
             block: BlockNumHash { hash: block_hash, number: 1 },
             parent: parent_hash,
         };
-        let bundle_state = BundleState::default();
+        let block_state = EvmState::default();
 
         // Cache should be empty initially
         assert!(payload_processor.execution_cache.get_cache_for(block_hash).is_none());
 
         // Update cache with inserted block
-        payload_processor.on_inserted_executed_block(block_with_parent, &bundle_state);
+        payload_processor.on_inserted_executed_block(block_with_parent, &block_state);
 
         // Cache should now exist for the block hash
         let cached = payload_processor.execution_cache.get_cache_for(block_hash);
@@ -977,7 +953,6 @@ mod tests {
             reth_tasks::Runtime::test(),
             EthEvmConfig::new(Arc::new(ChainSpec::default())),
             &TreeConfig::default(),
-            PrecompileCacheMap::default(),
         );
 
         // Setup: populate cache with block 1
@@ -993,9 +968,9 @@ mod tests {
             block: BlockNumHash { hash: block3_hash, number: 3 },
             parent: wrong_parent,
         };
-        let bundle_state = BundleState::default();
+        let block_state = EvmState::default();
 
-        payload_processor.on_inserted_executed_block(block_with_parent, &bundle_state);
+        payload_processor.on_inserted_executed_block(block_with_parent, &block_state);
 
         // Cache should still be for block 1 (unchanged)
         let cached = payload_processor.execution_cache.get_cache_for(block1_hash);
@@ -1012,7 +987,6 @@ mod tests {
             reth_tasks::Runtime::test(),
             EthEvmConfig::new(Arc::new(ChainSpec::default())),
             &TreeConfig::default(),
-            PrecompileCacheMap::default(),
         );
 
         let parent_hash = B256::from([1u8; 32]);
@@ -1029,18 +1003,21 @@ mod tests {
             .expect("expected parent cache checkout to succeed");
 
         let polluted_address = Address::random();
-        let bundle_state = BundleState::builder(2..=2)
-            .state_present_account_info(
+        let block_state = execution_state_from_init(
+            [(
                 polluted_address,
-                AccountInfo {
-                    balance: U256::from(1337),
-                    nonce: 7,
-                    code_hash: KECCAK_EMPTY,
-                    code: None,
-                    account_id: None,
-                },
-            )
-            .build();
+                (
+                    None,
+                    Some(Account {
+                        balance: U256::from(1337),
+                        nonce: 7,
+                        bytecode_hash: Some(KECCAK_EMPTY),
+                    }),
+                    Default::default(),
+                ),
+            )],
+            [],
+        );
 
         // Make parent match the cached slot so we bypass the parent-mismatch guard and exercise
         // the in-use guard specifically.
@@ -1049,7 +1026,7 @@ mod tests {
             parent: parent_hash,
         };
 
-        payload_processor.on_inserted_executed_block(block_with_parent, &bundle_state);
+        payload_processor.on_inserted_executed_block(block_with_parent, &block_state);
 
         // The closure runs only on a cache miss, so NotCached(None) means polluted_address was
         // absent and Cached(Some(_)) means it was written by on_inserted_executed_block.

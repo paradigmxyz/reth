@@ -60,11 +60,8 @@ async fn test_simulate_v1_transfer_logs_across_amsterdam() -> eyre::Result<()> {
                 assert!(logs.is_empty());
             } else {
                 assert_eq!(logs.len(), 1);
-                let emitter = if index == 0 {
-                    Address::repeat_byte(0xee)
-                } else {
-                    revm::primitives::eip7708::ETH_TRANSFER_LOG_ADDRESS
-                };
+                let emitter =
+                    if index == 0 { Address::repeat_byte(0xee) } else { evm2::evm::SYSTEM_ADDRESS };
                 assert_eq!(logs[0].address(), emitter);
             }
             assert!(!block.calls[1].status);

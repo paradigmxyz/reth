@@ -7,18 +7,17 @@ use reth_chainspec::{ChainSpecProvider, EthereumHardforks};
 use reth_config::config::ExecutionConfig;
 use reth_consensus::FullConsensus;
 use reth_db::{static_file::HeaderMask, tables};
-use reth_evm::{execute::Executor, metrics::ExecutorMetrics, ConfigureEvm};
-use reth_execution_types::Chain;
+use reth_evm::{database::StateProviderDatabase, metrics::ExecutorMetrics, ConfigureEvm, Executor};
+use reth_execution_types::{Chain, ExecutionOutcome};
 use reth_exex::{ExExManagerHandle, ExExNotification, ExExNotificationSource};
 use reth_primitives_traits::{format_gas_throughput, BlockBody, NodePrimitives};
 use reth_provider::{
     providers::{StaticFileProvider, StaticFileWriter},
-    BlockHashReader, BlockReader, DBProvider, EitherWriter, ExecutionOutcome,
-    HashedPostStateProvider, HeaderProvider, LatestStateProviderRef, OriginalValuesKnown,
-    ProviderError, StateWriteConfig, StateWriter, StaticFileProviderFactory, StatsReader,
-    StoragePath, StorageSettingsCache, TransactionVariant,
+    BlockHashReader, BlockReader, DBProvider, EitherWriter, HashedPostStateProvider,
+    HeaderProvider, LatestStateProviderRef, OriginalValuesKnown, ProviderError, StateWriteConfig,
+    StateWriter, StaticFileProviderFactory, StatsReader, StoragePath, StorageSettingsCache,
+    TransactionVariant,
 };
-use reth_revm::database::StateProviderDatabase;
 use reth_stages_api::{
     BlockErrorKind, CheckpointBlockRange, EntitiesCheckpoint, ExecInput, ExecOutput,
     ExecutionCheckpoint, ExecutionStageThresholds, Stage, StageCheckpoint, StageError, StageId,
@@ -46,7 +45,7 @@ pub mod slot_preimages;
 ///
 /// Input tables:
 /// - [`tables::CanonicalHeaders`] get next block to execute.
-/// - [`tables::Headers`] get for revm environment variables.
+/// - [`tables::Headers`] get for EVM environment variables.
 /// - [`tables::BlockBodyIndices`] to get tx number
 /// - [`tables::Transactions`] to execute
 ///
@@ -422,11 +421,7 @@ where
 
         // prepare execution output for writing
         let time = Instant::now();
-        let mut state = ExecutionOutcome::from_blocks(
-            start_block,
-            executor.into_state().take_bundle(),
-            results,
-        );
+        let mut state = ExecutionOutcome::from_blocks(start_block, executor.into_state(), results);
         let write_preparation_duration = time.elapsed();
 
         // log the gas per second for the range we just executed
@@ -457,7 +452,7 @@ where
             // Iterate over all reverts and clear them if pruning is configured.
             for block_number in start_block..=max_block {
                 let Some(reverts) =
-                    state.bundle.reverts.get_mut((block_number - start_block) as usize)
+                    state.block_reverts_mut().get_mut((block_number - start_block) as usize)
                 else {
                     break
                 };
@@ -505,8 +500,8 @@ where
         provider.write_state(&state, OriginalValuesKnown::Yes, StateWriteConfig::default())?;
 
         if provider.cached_storage_settings().use_hashed_state() {
-            let hashed_state =
-                LatestStateProviderRef::new(provider).hashed_post_state(&state.bundle)?;
+            let hashed_state = LatestStateProviderRef::new(provider)
+                .hashed_post_state(state.execution_state_ref())?;
             provider.write_hashed_state(&hashed_state.into_sorted())?;
         }
 
@@ -789,6 +784,7 @@ mod tests {
     use reth_ethereum_consensus::EthBeaconConsensus;
     use reth_ethereum_primitives::Block;
     use reth_evm_ethereum::EthEvmConfig;
+    use reth_execution_types::{EvmStateChangeSink, ExecutionAccountChangeRef};
     use reth_primitives_traits::{Account, Block as _, Bytecode, SealedBlock, StorageEntry};
     use reth_provider::{
         test_utils::{create_test_provider_factory, create_test_provider_factory_with_chain_spec},
@@ -797,7 +793,6 @@ mod tests {
     };
     use reth_prune::PruneModes;
     use reth_prune_types::{PruneMode, ReceiptsLogPruneConfig};
-    use reth_revm::revm::database::{AccountStatus, BundleAccount};
     use reth_stages_api::StageUnitCheckpoint;
     use reth_testing_utils::generators;
     use std::collections::BTreeMap;
@@ -846,23 +841,25 @@ mod tests {
             )
             .unwrap();
 
-        let mut state = ExecutionOutcome::<()>::default();
-        state.bundle.state.insert(
-            address,
-            BundleAccount::new(
-                Some(Default::default()),
-                None,
-                Default::default(),
-                AccountStatus::Destroyed,
-            ),
-        );
+        let mut block_state = reth_execution_types::EvmState::default();
+        block_state
+            .account(ExecutionAccountChangeRef {
+                address,
+                original: Some(&Default::default()),
+                current: None,
+                created: false,
+                selfdestructed: true,
+            })
+            .unwrap();
+        let state = ExecutionOutcome::<()>::from_block_states(1, [block_state], Vec::new());
 
-        let hashed_state = provider.latest().hashed_post_state(&state.bundle).unwrap();
+        let hashed_state =
+            provider.latest().hashed_post_state(state.execution_state_ref()).unwrap();
 
         let storage = &hashed_state.storages[&hashed_address];
         assert_eq!(storage.storage[&first_slot], U256::ZERO);
         assert_eq!(storage.storage[&second_slot], U256::ZERO);
-        assert!(state.bundle.reverts.is_empty());
+        assert_eq!(state.block_reverts().len(), 1);
     }
 
     #[test]

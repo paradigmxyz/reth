@@ -38,6 +38,7 @@ use reth_db_api::{
     models::StoredBlockBodyIndices,
 };
 use reth_errors::{ProviderError, ProviderResult};
+use reth_execution_types::hashed_post_state_from_execution_state;
 use reth_node_types::{
     Block, BlockBody, BlockTy, HeaderTy, NodeTypes, PrimitivesTy, ReceiptTy, TxTy,
 };
@@ -1326,16 +1327,12 @@ where
 {
     fn hashed_post_state(
         &self,
-        bundle_state: &revm::database::BundleState,
+        bundle_state: &reth_execution_types::EvmState,
     ) -> ProviderResult<HashedPostState> {
-        if bundle_state
-            .state()
-            .values()
-            .any(|account| account.was_destroyed() && account.original_info.is_some())
-        {
+        if reth_execution_types::destroyed_accounts(bundle_state).next().is_some() {
             return Err(ProviderError::UnsupportedProvider)
         }
-        Ok(HashedPostState::from_bundle_state::<KeccakKeyHasher>(bundle_state.state()))
+        Ok(hashed_post_state_from_execution_state::<KeccakKeyHasher>(bundle_state))
     }
 }
 

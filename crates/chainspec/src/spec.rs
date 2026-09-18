@@ -1,5 +1,4 @@
 pub use alloy_eips::eip1559::BaseFeeParams;
-use alloy_evm::eth::spec::EthExecutorSpec;
 
 use crate::{
     constants::{MAINNET_DEPOSIT_CONTRACT, MAINNET_PRUNE_DELETE_LIMIT},
@@ -30,7 +29,7 @@ use alloy_eips::{
     eip1559::INITIAL_BASE_FEE, eip7685::EMPTY_REQUESTS_HASH, eip7840::BlobParams,
     eip7892::BlobScheduleBlobParams, eip7928::EMPTY_BLOCK_ACCESS_LIST_HASH,
 };
-use alloy_genesis::{ChainConfig, Genesis};
+use alloy_genesis::{ChainConfig, Genesis, GenesisAccount};
 use alloy_primitives::{address, b256, Address, BlockNumber, B256, U256};
 use alloy_trie::root::state_root_ref_unhashed;
 use core::fmt::Debug;
@@ -39,6 +38,7 @@ use reth_ethereum_forks::{
     ChainHardforks, DisplayHardforks, EthereumHardfork, EthereumHardforks, ForkCondition,
     ForkFilter, ForkFilterKey, ForkHash, ForkId, Hardfork, Hardforks, Head, DEV_HARDFORKS,
 };
+use reth_ethereum_primitives::eip7997::{FACTORY_ADDRESS, FACTORY_CODE};
 use reth_network_peers::{holesky_nodes, hoodi_nodes, mainnet_nodes, sepolia_nodes, NodeRecord};
 use reth_primitives_traits::{sync::LazyLock, BlockHeader, SealedHeader};
 
@@ -109,6 +109,18 @@ pub fn make_genesis_header(genesis: &Genesis, hardforks: &ChainHardforks) -> Hea
         slot_number,
         ..Default::default()
     }
+}
+
+/// Adds the EIP-7997 deterministic factory account to a genesis allocation.
+///
+/// EIP-7997 is state-based: the factory is ordinary contract code and is not installed by a
+/// generic fork-boundary system call. Callers constructing a chain whose initial state includes
+/// the factory should invoke this before computing the genesis header or state root.
+pub fn add_eip7997_factory(genesis: &mut Genesis) {
+    genesis.alloc.insert(
+        FACTORY_ADDRESS,
+        GenesisAccount::default().with_nonce(Some(1)).with_code(Some(FACTORY_CODE)),
+    );
 }
 
 /// The Ethereum mainnet spec
@@ -1272,12 +1284,6 @@ impl From<&Arc<ChainSpec>> for ChainSpecBuilder {
     }
 }
 
-impl<H: BlockHeader> EthExecutorSpec for ChainSpec<H> {
-    fn deposit_contract_address(&self) -> Option<Address> {
-        self.deposit_contract.map(|deposit_contract| deposit_contract.address)
-    }
-}
-
 /// `PoS` deposit contract details.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct DepositContract {
@@ -1315,13 +1321,28 @@ mod tests {
     use alloy_chains::Chain;
     use alloy_consensus::constants::ETH_TO_WEI;
     use alloy_eips::{eip4844::BLOB_TX_MIN_BLOB_GASPRICE, eip7840::BlobParams};
-    use alloy_evm::block::calc::{base_block_reward, block_reward};
     use alloy_genesis::{ChainConfig, GenesisAccount};
     use alloy_primitives::{b256, hex};
     use alloy_trie::{TrieAccount, EMPTY_ROOT_HASH};
     use core::ops::Deref;
     use reth_ethereum_forks::{ForkCondition, ForkHash, ForkId, Head};
     use std::{collections::HashMap, str::FromStr};
+
+    fn base_block_reward(spec: impl EthereumHardforks, block_number: BlockNumber) -> Option<u128> {
+        if spec.is_paris_active_at_block(block_number) {
+            None
+        } else if spec.is_constantinople_active_at_block(block_number) {
+            Some(ETH_TO_WEI * 2)
+        } else if spec.is_byzantium_active_at_block(block_number) {
+            Some(ETH_TO_WEI * 3)
+        } else {
+            Some(ETH_TO_WEI * 5)
+        }
+    }
+
+    const fn block_reward(base_block_reward: u128, ommers: usize) -> u128 {
+        base_block_reward + (base_block_reward >> 5) * ommers as u128
+    }
 
     fn test_hardfork_fork_ids(spec: &ChainSpec, cases: &[(EthereumHardfork, ForkId)]) {
         for (hardfork, expected_id) in cases {
@@ -2742,6 +2763,17 @@ Post-merge hard forks (timestamp based):
         let deserialized_genesis: Genesis = serde_json::from_str(&serialized_genesis).unwrap();
 
         assert_eq!(genesis, deserialized_genesis);
+    }
+
+    #[test]
+    fn adds_eip7997_factory_to_genesis() {
+        let mut genesis = Genesis::default();
+        add_eip7997_factory(&mut genesis);
+
+        let account = genesis.alloc.get(&FACTORY_ADDRESS).expect("factory account");
+        assert_eq!(account.nonce, Some(1));
+        assert_eq!(account.balance, U256::ZERO);
+        assert_eq!(account.code.as_ref(), Some(&FACTORY_CODE));
     }
 
     #[test]

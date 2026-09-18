@@ -2,7 +2,6 @@ use alloy_primitives::{keccak256, Address, B256, U256};
 use reth_primitives_traits::Account;
 use reth_storage_errors::db::DatabaseError;
 use reth_trie_common::HashedPostState;
-use revm::database::BundleAccount;
 
 /// Implementation of hashed state cursor traits for the post state.
 mod post_state;
@@ -80,18 +79,15 @@ pub trait HashedStorageCursor: HashedCursor {
 
 /// Materializes storage deletions for destroyed accounts as explicit zero-valued slot updates.
 ///
-/// Accounts absent from the bundle pre-state are skipped because they cannot have parent storage.
-/// Final bundle values take precedence so that destroy-then-recreate transitions retain storage
+/// Callers supply accounts that may have parent storage. Final values take precedence so that
+/// destroy-then-recreate transitions retain storage
 /// written by the recreated account.
-pub fn zero_destroyed_account_storage<'a>(
+pub fn zero_destroyed_account_storage(
     cursor_factory: &impl HashedCursorFactory,
-    accounts: impl IntoIterator<Item = (&'a Address, &'a BundleAccount)>,
+    accounts: impl IntoIterator<Item = Address>,
     hashed_state: &mut HashedPostState,
 ) -> Result<(), DatabaseError> {
-    let mut destroyed_accounts = accounts
-        .into_iter()
-        .filter(|(_, account)| account.was_destroyed() && account.original_info.is_some())
-        .map(|(address, _)| keccak256(address));
+    let mut destroyed_accounts = accounts.into_iter().map(keccak256);
     let Some(mut hashed_address) = destroyed_accounts.next() else { return Ok(()) };
     let mut cursor = cursor_factory.hashed_storage_cursor(hashed_address)?;
 
@@ -115,17 +111,41 @@ pub fn zero_destroyed_account_storage<'a>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use revm::database::AccountStatus;
 
     #[test]
-    fn zero_destroyed_storage_skips_new_accounts() {
+    fn destroyed_storage_zeroes_parent_slots_and_preserves_recreated_writes() {
         let address = Address::with_last_byte(1);
-        let account = BundleAccount::new(None, None, Default::default(), AccountStatus::Destroyed);
+        let hashed_address = keccak256(address);
+        let old_slot = B256::with_last_byte(2);
+        let rewritten_slot = B256::with_last_byte(3);
+        let parent = HashedPostState::default().with_storages([(
+            hashed_address,
+            reth_trie_common::HashedStorage::from_iter([
+                (old_slot, U256::from(10)),
+                (rewritten_slot, U256::from(20)),
+            ]),
+        )]);
+        let mut state = HashedPostState::default().with_storages([(
+            hashed_address,
+            reth_trie_common::HashedStorage::from_iter([(rewritten_slot, U256::from(30))]),
+        )]);
+        zero_destroyed_account_storage(
+            &mock::MockHashedCursorFactory::from_hashed_post_state(parent),
+            [address],
+            &mut state,
+        )
+        .unwrap();
+        assert_eq!(state.storages[&hashed_address].storage[&old_slot], U256::ZERO);
+        assert_eq!(state.storages[&hashed_address].storage[&rewritten_slot], U256::from(30));
+    }
+
+    #[test]
+    fn zero_destroyed_storage_skips_empty_input() {
         let mut hashed_state = HashedPostState::default();
 
         zero_destroyed_account_storage(
             &mock::MockHashedCursorFactory::default(),
-            [(&address, &account)],
+            [],
             &mut hashed_state,
         )
         .unwrap();
