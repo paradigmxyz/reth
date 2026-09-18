@@ -150,7 +150,7 @@ impl ConfigureEvm for CustomEvmConfig {
         evm_env: reth_ethereum::evm::primitives::EvmEnvFor<Self>,
         block_number: u64,
         ctx: reth_ethereum::evm::primitives::ExecutionCtxFor<'a, Self>,
-    ) -> Result<reth_ethereum::evm::primitives::EvmState, Box<dyn std::error::Error + Send + Sync>>
+    ) -> Result<revm::database::BundleState, Box<dyn std::error::Error + Send + Sync>>
     where
         Self: 'a,
         DB: reth_ethereum::evm::primitives::DynDatabase + 'a,

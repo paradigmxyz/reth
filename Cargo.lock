@@ -3970,6 +3970,7 @@ dependencies = [
  "evm2",
  "eyre",
  "reth-ethereum",
+ "revm",
 ]
 
 [[package]]
@@ -8258,6 +8259,7 @@ dependencies = [
  "reth-rpc-engine-api",
  "reth-storage-api",
  "reth-storage-errors",
+ "revm",
  "tokio",
  "tracing",
 ]
@@ -10016,6 +10018,7 @@ dependencies = [
  "reth-payload-primitives",
  "reth-primitives-traits",
  "reth-provider",
+ "reth-revm",
  "reth-rpc",
  "reth-rpc-api",
  "reth-rpc-builder",

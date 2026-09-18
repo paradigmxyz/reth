@@ -66,6 +66,7 @@ serde_json.workspace = true
 tower.workspace = true
 
 [dev-dependencies]
+reth-revm.workspace = true
 reth-db.workspace = true
 reth-exex.workspace = true
 reth-e2e-test-utils.workspace = true
@@ -110,6 +111,7 @@ portable = [
     "reth-evm-ethereum/portable",
     "evm2/portable",
     "reth-execution-types/portable",
+    "reth-revm/portable",
 ]
 keccak-cache-global = [
     "alloy-primitives/keccak-cache-global",
@@ -135,4 +137,5 @@ test-utils = [
     "reth-stages-types/test-utils",
     "reth-tasks/test-utils",
     "reth-trie-common/test-utils",
+    "reth-revm/test-utils",
 ]

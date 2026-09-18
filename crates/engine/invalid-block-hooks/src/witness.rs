@@ -1,6 +1,4 @@
 use alloy_consensus::BlockHeader;
-#[cfg(test)]
-use alloy_primitives::Bytes;
 use alloy_primitives::{Address, B256, U256};
 use alloy_rpc_types_debug::ExecutionWitness;
 use pretty_assertions::Comparison;
@@ -352,12 +350,12 @@ where
 mod tests {
     use super::*;
     use alloy_eips::eip7685::Requests;
-    use alloy_primitives::{Bytes, B256, U256};
+    use alloy_primitives::{map::HashMap, Bytes, B256, U256};
     use reth_chainspec::ChainSpec;
     use reth_ethereum_primitives::EthPrimitives;
     use reth_evm_ethereum::EthEvmConfig;
-    use reth_primitives_traits::{Account, Bytecode as RethBytecode};
     use reth_provider::test_utils::MockEthProvider;
+    use revm::database::{AccountRevert, BundleAccount};
     use tempfile::TempDir;
 
     use reth_testing_utils::generators::{self, random_block, random_eoa_accounts, BlockParams};

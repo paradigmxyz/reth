@@ -360,7 +360,7 @@ pub trait BlockExecutor: Sized {
     /// Returns the underlying EVM mutably.
     fn evm_mut(&mut self) -> &mut Self::Evm;
 
-    /// Sets a hook for streamed native state updates emitted during block execution.
+    /// Sets a hook for transaction state updates emitted during block execution.
     ///
     /// Returns `true` if the hook was installed.
     fn set_state_hook(&mut self, _hook: impl FnMut(EvmState) + Send + 'static) -> bool {
@@ -664,7 +664,7 @@ pub trait BlockBuilder: Sized {
         ) -> Result<Option<(B256, TrieUpdates)>, BlockExecutionError>,
     ) -> Result<BlockBuilderOutcome<Self::Primitives>, BlockExecutionError>;
 
-    /// Sets a hook for streamed native state updates emitted while building a block.
+    /// Sets a hook for transaction state updates emitted while building a block.
     ///
     /// Returns `true` if the hook was installed.
     fn set_state_hook(&mut self, _hook: impl FnMut(EvmState) + Send + 'static) -> bool {
@@ -718,7 +718,7 @@ where
     Assembler: BlockAssembler<F, Block = N::Block> + 'a,
     N: NodePrimitives,
 {
-    /// Creates a block builder that accumulates final hashed state in the execution output.
+    /// Creates a block builder that accumulates bundle state in the execution output.
     pub fn new(
         executor_factory: &'a F,
         assembler: &'a Assembler,
@@ -875,7 +875,7 @@ pub trait Executor<DB: Database>: Sized {
         block: &RecoveredBlock<<Self::Primitives as NodePrimitives>::Block>,
     ) -> Result<BlockExecutionResult<<Self::Primitives as NodePrimitives>::Receipt>, Self::Error>;
 
-    /// Executes a single block and streams native state updates to the provided hook.
+    /// Executes a single block and emits transaction state updates to the provided hook.
     fn execute_one_with_state_hook<F>(
         &mut self,
         block: &RecoveredBlock<<Self::Primitives as NodePrimitives>::Block>,
@@ -895,7 +895,7 @@ pub trait Executor<DB: Database>: Sized {
         Ok(BlockExecutionOutput::new(result, state))
     }
 
-    /// Consumes the type, executes the block, and streams native state updates to the provided
+    /// Consumes the type, executes the block, and emits transaction state updates to the provided
     /// hook.
     fn execute_with_state_hook<F>(
         mut self,

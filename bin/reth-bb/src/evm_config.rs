@@ -12,8 +12,7 @@ use reth_ethereum_forks::Hardforks;
 use reth_ethereum_primitives::{Block, EthPrimitives, TransactionSigned};
 use reth_evm::{
     BlockAssembler, BlockAssemblerInput, BlockExecutionError, ConfigureEngineEvm, ConfigureEvm,
-    DynDatabase, EvmEnvFor, EvmState, ExecutableTxIterator, ExecutionCtxFor,
-    NextBlockEnvAttributes,
+    DynDatabase, EvmEnvFor, ExecutableTxIterator, ExecutionCtxFor, NextBlockEnvAttributes,
 };
 use reth_evm_ethereum::{
     EthBigBlockExecutorFactory, EthBigBlockPlan, EthBigBlockSegment, EthEvmConfig,
@@ -153,7 +152,7 @@ where
         evm_env: EvmEnvFor<Self>,
         block_number: u64,
         ctx: ExecutionCtxFor<'a, Self>,
-    ) -> Result<EvmState, Box<dyn core::error::Error + Send + Sync>>
+    ) -> Result<revm::database::BundleState, Box<dyn core::error::Error + Send + Sync>>
     where
         Self: 'a,
         DB: DynDatabase + 'a,
