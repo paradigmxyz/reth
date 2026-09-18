@@ -19,8 +19,6 @@ use crate::tree::{
 use alloy_eip7928::bal::DecodedBal;
 use alloy_eips::eip4895::Withdrawal;
 use alloy_primitives::keccak256;
-#[cfg(test)]
-use alloy_primitives::Address;
 use evm2::evm::StateChangeSource;
 use metrics::{Counter, Gauge, Histogram};
 use rayon::prelude::*;
@@ -840,7 +838,7 @@ mod tests {
         runtime: &Runtime,
         execution_cache: &PayloadExecutionCache,
         saved_cache: SavedCache,
-        state: reth_execution_types::EvmState,
+        state: revm::database::BundleState,
         valid: bool,
         saving_duration: Gauge,
     ) {
@@ -852,7 +850,7 @@ mod tests {
         }
         drop(valid_tx);
         task.save_cache(
-            Arc::new(BlockExecutionOutput { state: state.into(), result: Default::default() }),
+            Arc::new(BlockExecutionOutput { state, result: Default::default() }),
             valid_rx,
         );
     }
@@ -979,7 +977,7 @@ mod tests {
             inspected: inspected_rx,
             result: result_tx,
         });
-        let code = evm2::bytecode::Bytecode::new_eip7702_raw(bytes.into()).unwrap();
+        let code = revm::bytecode::Bytecode::new_eip7702_raw(bytes.into()).unwrap();
         saved
             .cache()
             .insert_code(B256::repeat_byte(3), Some(reth_primitives_traits::Bytecode(code)));

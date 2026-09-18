@@ -28,7 +28,7 @@ pub struct BlockExecutionOutput<T> {
 
 impl<T> BlockExecutionOutput<T> {
     /// Combines execution results with their persistent state.
-    pub fn new(result: BlockExecutionResult<T>, state: BundleState) -> Self {
+    pub const fn new(result: BlockExecutionResult<T>, state: BundleState) -> Self {
         Self { result, state }
     }
 

@@ -255,7 +255,7 @@ fn run_case(case: &BlockchainTest) -> Result<(), Error> {
 
         // Compute and check the post state root
         let hashed_state = state_provider
-            .hashed_post_state(output.state.inner())
+            .hashed_post_state(&output.state)
             .map_err(|err| Error::block_failed(block_number, err))?;
         let sorted = hashed_state.clone_into_sorted();
         let (computed_state_root, _) = reth_trie_db::with_adapter!(provider, |A| {

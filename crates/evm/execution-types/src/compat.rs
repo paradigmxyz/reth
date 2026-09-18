@@ -9,7 +9,7 @@ use revm::{
     state::{AccountInfo, Bytecode},
 };
 
-/// Transaction transitions retained using main's state model.
+/// Transaction transitions retained using revm's bundle state model.
 #[derive(Debug, Default)]
 pub struct BlockState {
     transitions: TransitionState,
@@ -68,7 +68,7 @@ impl BlockState {
     }
 }
 
-/// Materialized transaction changes in main's EVM state representation.
+/// Materialized transaction changes in revm's EVM state representation.
 #[derive(Debug, Default)]
 pub struct TransactionChanges {
     /// State passed to the block accumulator and state-root hooks.
@@ -195,12 +195,13 @@ pub fn revm_bytecode(code: &evm2::bytecode::Bytecode) -> Bytecode {
 }
 
 /// Converts native account information into the persistent state representation.
+/// Empty bytecode is omitted because its presence depends on database cache state.
 pub fn revm_account(info: &evm2::evm::AccountInfo) -> AccountInfo {
     AccountInfo {
         balance: info.balance,
         nonce: info.nonce,
         code_hash: info.code_hash,
-        code: info.code.as_ref().map(revm_bytecode),
+        code: info.code.as_ref().filter(|code| !code.is_empty()).map(revm_bytecode),
         account_id: None,
     }
 }
@@ -220,6 +221,31 @@ mod tests {
     use evm2::evm::{
         AccountChangeRef, AccountInfo as NativeAccount, StateChangeSink, StorageChange,
     };
+
+    #[test]
+    fn cached_empty_bytecode_does_not_change_bundle_output() {
+        let address = Address::with_last_byte(1);
+        let info = NativeAccount { balance: U256::from(5), ..Default::default() };
+        let bundle = |info: &NativeAccount| {
+            let mut changes = TransactionChanges::default();
+            changes
+                .account(AccountChangeRef {
+                    address,
+                    original: None,
+                    current: Some(info),
+                    created: false,
+                    selfdestructed: false,
+                })
+                .unwrap();
+            let mut block = BlockState::new();
+            block.commit(&changes);
+            block.into_bundle()
+        };
+        let uncached = bundle(&info);
+        let cached = bundle(&NativeAccount { code: Some(Default::default()), ..info });
+        assert_eq!(uncached, cached);
+        assert!(cached.contracts.is_empty());
+    }
 
     #[test]
     fn storage_only_change_retains_account_and_reverts() {

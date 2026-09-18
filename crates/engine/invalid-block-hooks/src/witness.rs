@@ -356,7 +356,6 @@ mod tests {
     use reth_chainspec::ChainSpec;
     use reth_ethereum_primitives::EthPrimitives;
     use reth_evm_ethereum::EthEvmConfig;
-    use reth_execution_types::execution_state_from_init;
     use reth_primitives_traits::{Account, Bytecode as RethBytecode};
     use reth_provider::test_utils::MockEthProvider;
     use tempfile::TempDir;
@@ -366,52 +365,90 @@ mod tests {
     /// Creates a test block state with realistic accounts and contracts.
     fn create_block_state() -> BundleState {
         let mut rng = generators::rng();
-        let mut state_accounts = Vec::new();
+        let mut bundle_state = BundleState::default();
 
         // Generate realistic EOA accounts using generators
         let accounts = random_eoa_accounts(&mut rng, 3);
 
         for (i, (addr, account)) in accounts.into_iter().enumerate() {
             // Create storage entries for each account
-            let mut storage = BTreeMap::default();
+            let mut storage = HashMap::default();
             let storage_key = U256::from(i + 1);
-            storage.insert(storage_key, (U256::from((i + 1) * 15), U256::from((i + 1) * 10)));
+            storage.insert(
+                storage_key,
+                StorageSlot {
+                    present_value: U256::from((i + 1) * 10),
+                    previous_or_original_value: U256::from((i + 1) * 15),
+                },
+            );
 
-            let original = (i == 0).then(|| Account {
-                balance: account.balance.checked_div(U256::from(2)).unwrap_or(U256::ZERO),
-                nonce: 0,
-                bytecode_hash: account.bytecode_hash,
-            });
+            let bundle_account = BundleAccount {
+                info: Some(AccountInfo {
+                    balance: account.balance,
+                    nonce: account.nonce,
+                    code_hash: account.bytecode_hash.unwrap_or_default(),
+                    code: None,
+                    account_id: None,
+                }),
+                original_info: (i == 0).then(|| AccountInfo {
+                    balance: account.balance.checked_div(U256::from(2)).unwrap_or(U256::ZERO),
+                    nonce: 0,
+                    code_hash: account.bytecode_hash.unwrap_or_default(),
+                    code: None,
+                    account_id: None,
+                }),
+                storage,
+                status: AccountStatus::default(),
+            };
 
-            state_accounts.push((addr, (original, Some(account), storage)));
+            bundle_state.state.insert(addr, bundle_account);
         }
 
         // Generate realistic contract bytecode using generators
-        let contracts = (0..3).map(|i| {
+        let contract_hashes: Vec<B256> = (0..3).map(|_| B256::random()).collect();
+        for (i, hash) in contract_hashes.iter().enumerate() {
             let bytecode = match i {
                 0 => Bytes::from(vec![0x60, 0x80, 0x60, 0x40, 0x52]), // Simple contract
                 1 => Bytes::from(vec![0x61, 0x81, 0x60, 0x00, 0x39]), // Another contract
                 _ => Bytes::from(vec![0x60, 0x00, 0x60, 0x00, 0xfd]), // REVERT contract
             };
-            (B256::random(), RethBytecode::new_raw(bytecode))
-        });
+            bundle_state.contracts.insert(*hash, Bytecode::new_raw(bytecode));
+        }
 
-        execution_state_from_init(state_accounts, contracts)
+        // Add reverts for multiple blocks using different accounts
+        let addresses: Vec<Address> = bundle_state.state.keys().copied().collect();
+        for (i, addr) in addresses.iter().take(2).enumerate() {
+            let revert = AccountRevert {
+                wipe_storage: i == 0, // First account has storage wiped
+                ..AccountRevert::default()
+            };
+            bundle_state.reverts.push(vec![(*addr, revert)]);
+        }
+
+        // Set realistic sizes
+        bundle_state.state_size = bundle_state.state.len();
+        bundle_state.reverts_size = bundle_state.reverts.len();
+
+        bundle_state
     }
 
     fn hashed_state_for_block_state(block_state: BundleState) -> reth_trie::HashedPostState {
-        reth_execution_types::hashed_post_state_from_execution_state::<reth_trie::KeccakKeyHasher>(
-            BlockExecutionOutput::<()>::new(Default::default(), block_state).state.inner(),
+        reth_trie::HashedPostState::from_bundle_state::<reth_trie::KeccakKeyHasher>(
+            &block_state.state,
         )
     }
 
     #[test]
     fn test_sort_bundle_state_for_comparison() {
         // Use the fixture function to create test data
-        let block_state = create_block_state();
+        let bundle_state = create_block_state();
 
         // Call the function under test
-        let sorted = sort_bundle_state_for_comparison(&block_state);
+        let sorted = sort_bundle_state_for_comparison(&bundle_state);
+
+        // Verify state_size and reverts_size values match the fixture
+        assert_eq!(sorted.state_size, 3);
+        assert_eq!(sorted.reverts_size, 2);
 
         // Verify state contains our mock accounts
         assert_eq!(sorted.state.len(), 3); // We added 3 accounts
@@ -419,15 +456,18 @@ mod tests {
         // Verify contracts contains our mock contracts
         assert_eq!(sorted.contracts.len(), 3); // We added 3 contracts
 
-        // Verify storage contains our mock entries
-        assert_eq!(sorted.storage.len(), 3); // We added storage for 3 accounts
+        // Verify reverts is an array with multiple blocks of reverts
+        let reverts = &sorted.reverts;
+        assert_eq!(reverts.len(), 2); // Fixture has two blocks of reverts
 
         // Verify that the state accounts have the expected structure
         for account_data in sorted.state.values() {
-            // StateAccountSorted has current and original account info fields.
+            // BundleAccountSorted has info, original_info, storage, and status fields
             // Just verify the structure exists by accessing the fields
-            let _current = &account_data.current;
-            let _original = &account_data.original;
+            let _info = &account_data.info;
+            let _original_info = &account_data.original_info;
+            let _storage = &account_data.storage;
+            let _status = &account_data.status;
         }
     }
 
@@ -768,15 +808,13 @@ mod tests {
     fn test_validate_block_state_with_different_contract_counts() {
         let (hook, output_dir, _temp_dir) = create_test_hook();
         let state1 = create_block_state();
+        let mut state2 = create_block_state();
 
         // Add extra contract to state2
         let extra_contract_hash = B256::random();
-        let state2 = execution_state_from_init(
-            [],
-            [(
-                extra_contract_hash,
-                RethBytecode::new_raw(Bytes::from(vec![0x60, 0x00, 0x60, 0x00, 0xfd])),
-            )],
+        state2.contracts.insert(
+            extra_contract_hash,
+            Bytecode::new_raw(Bytes::from(vec![0x60, 0x00, 0x60, 0x00, 0xfd])), // REVERT opcode
         );
 
         let block_prefix = "different_contracts_test";
@@ -784,7 +822,7 @@ mod tests {
         assert!(result.is_ok());
 
         // Verify diff files were created
-        let diff_file = output_dir.join(format!("{}.block_state.diff", block_prefix));
+        let diff_file = output_dir.join(format!("{}.bundle_state.diff", block_prefix));
         assert!(diff_file.exists());
     }
 

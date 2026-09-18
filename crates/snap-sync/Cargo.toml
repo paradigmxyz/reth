@@ -29,8 +29,8 @@ alloy-eip7928.workspace = true
 alloy-eips.workspace = true
 alloy-primitives.workspace = true
 
-# evm2
-evm2.workspace = true
+# revm
+revm.workspace = true
 
 # misc
 serde = { workspace = true, features = ["derive"] }
@@ -39,7 +39,7 @@ thiserror.workspace = true
 tokio-util.workspace = true
 
 [dev-dependencies]
-reth-execution-types.workspace = true
+evm2.workspace = true
 alloy-consensus.workspace = true
 alloy-rlp.workspace = true
 futures.workspace = true

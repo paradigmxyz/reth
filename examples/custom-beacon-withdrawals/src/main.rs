@@ -3,31 +3,21 @@
 
 #![warn(unused_crate_dependencies)]
 
-use std::{
-    borrow::Cow,
-    convert::Infallible,
-    sync::{Arc, Mutex},
-};
+use std::{borrow::Cow, sync::Arc};
 
 use alloy_consensus::Header;
 use alloy_eips::eip4895::Withdrawal;
 use alloy_primitives::{address, Address};
 use alloy_sol_types::{sol, SolCall};
-use evm2::{
-    evm::{
-        AccountChangeRef, BlockStateAccumulator, StateChangeSink, StateChangeSource, StorageChange,
-        SystemTx,
-    },
-    BaseEvmTypes,
-};
+use evm2::{evm::SystemTx, BaseEvmTypes};
 use reth_ethereum::{
     chainspec::ChainSpec,
     cli::interface::Cli,
     evm::{
         primitives::{
             BlockExecutionError, BlockExecutionOutput, BlockExecutor, BlockExecutorFactory,
-            ConfigureEngineEvm, ConfigureEvm, ExecutableTxIterator, ExecutorTx, GasOutput,
-            NextBlockEnvAttributes,
+            ConfigureEngineEvm, ConfigureEvm, EvmState, ExecutableTxIterator, ExecutorTx,
+            GasOutput, NextBlockEnvAttributes,
         },
         EthBlockAssembler, EthBlockExecutionCtx, EthBlockExecutor, EthBlockExecutorFactory,
         EthEvmConfig, EthEvmEnv, RethEvmFactory, RethReceiptBuilder,
@@ -43,10 +33,7 @@ use reth_ethereum::{
     Block, EthPrimitives, Receipt, TransactionSigned,
 };
 
-const SYSTEM_ADDRESS: Address = address!("0xfffffffffffffffffffffffffffffffffffffffe");
 const WITHDRAWALS_ADDRESS: Address = address!("0x4200000000000000000000000000000000000000");
-
-type StateHook = Arc<Mutex<Box<dyn FnMut(BlockStateAccumulator) + Send>>>;
 
 fn main() {
     Cli::parse_args()
@@ -241,7 +228,7 @@ impl BlockExecutorFactory for CustomBlockExecutorFactory {
             self.inner.chain_spec().as_ref(),
             self.inner.receipt_builder(),
         );
-        CustomBlockExecutor { inner, withdrawals, state_hook: None }
+        CustomBlockExecutor { inner, withdrawals }
     }
 
     fn evm_factory(&self) -> &Self::EvmFactory {
@@ -260,7 +247,6 @@ impl BlockExecutorFactory for CustomBlockExecutorFactory {
 pub struct CustomBlockExecutor<'a> {
     inner: EthBlockExecutor<'a, BaseEvmTypes, &'a RethReceiptBuilder>,
     withdrawals: Option<Cow<'a, [Withdrawal]>>,
-    state_hook: Option<StateHook>,
 }
 
 impl std::fmt::Debug for CustomBlockExecutor<'_> {
@@ -288,17 +274,8 @@ impl<'a> BlockExecutor for CustomBlockExecutor<'a> {
         self.inner.evm_mut()
     }
 
-    fn set_state_hook(&mut self, hook: impl FnMut(BlockStateAccumulator) + Send + 'static) -> bool {
-        let hook: StateHook = Arc::new(Mutex::new(Box::new(hook)));
-        let inner_hook = Arc::clone(&hook);
-        if !self.inner.set_state_hook(move |state| {
-            let mut hook = inner_hook.lock().expect("state hook mutex poisoned");
-            (hook)(state);
-        }) {
-            return false
-        }
-        self.state_hook = Some(hook);
-        true
+    fn set_state_hook(&mut self, hook: impl FnMut(EvmState) + Send + 'static) -> bool {
+        self.inner.set_state_hook(hook)
     }
 
     fn convert_block_access_list(
@@ -361,29 +338,15 @@ impl<'a> BlockExecutor for CustomBlockExecutor<'a> {
         (BlockExecutionOutput<Self::Receipt>, Option<alloy_eips::eip7928::BlockAccessList>),
         BlockExecutionError,
     > {
-        let withdrawal_state = self.apply_withdrawals_contract_call()?;
-        if let Some(hook) = &self.state_hook &&
-            !withdrawal_state.inner.is_empty()
-        {
-            let mut hook = hook.lock().expect("state hook mutex poisoned");
-            (hook)(withdrawal_state.inner.clone());
-        }
-        let (mut output, block_access_list) = self.inner.finish_with_block_access_list()?;
-
-        let mut state = output.state.into_inner();
-        withdrawal_state.inner.visit(&mut state).expect("withdrawal state sink is infallible");
-        output.state = state.into();
-
-        Ok((output, block_access_list))
+        self.apply_withdrawals_contract_call()?;
+        self.inner.finish_with_block_access_list()
     }
 }
 
 impl CustomBlockExecutor<'_> {
-    fn apply_withdrawals_contract_call(&mut self) -> Result<WithdrawalState, BlockExecutionError> {
-        let beneficiary = self.inner.evm().block().beneficiary;
-        let mut state = WithdrawalState { inner: BlockStateAccumulator::new(), beneficiary };
+    fn apply_withdrawals_contract_call(&mut self) -> Result<(), BlockExecutionError> {
         let Some(withdrawals) = self.withdrawals.as_deref() else {
-            return Ok(state);
+            return Ok(());
         };
 
         let calldata = withdrawalsCall {
@@ -409,39 +372,9 @@ impl CustomBlockExecutor<'_> {
             )));
         }
 
-        let _ = executed.commit_with(&mut state).expect("withdrawal state sink is infallible");
-        Ok(state)
-    }
-}
-
-#[derive(Debug)]
-struct WithdrawalState {
-    inner: BlockStateAccumulator,
-    beneficiary: Address,
-}
-
-impl StateChangeSink for WithdrawalState {
-    type Error = Infallible;
-
-    fn account(&mut self, change: AccountChangeRef<'_>) -> Result<(), Self::Error> {
-        if change.address == SYSTEM_ADDRESS || change.address == self.beneficiary {
-            return Ok(())
-        }
-        StateChangeSink::account(&mut self.inner, change)
-    }
-
-    fn storage_wipe(&mut self, address: Address) -> Result<(), Self::Error> {
-        if address == SYSTEM_ADDRESS || address == self.beneficiary {
-            return Ok(())
-        }
-        StateChangeSink::storage_wipe(&mut self.inner, address)
-    }
-
-    fn storage(&mut self, change: StorageChange) -> Result<(), Self::Error> {
-        if change.address == SYSTEM_ADDRESS || change.address == self.beneficiary {
-            return Ok(())
-        }
-        StateChangeSink::storage(&mut self.inner, change)
+        let output = executed.detach();
+        self.inner.commit_pending_state(&output.pending_state);
+        Ok(())
     }
 }
 

@@ -10,7 +10,6 @@ use alloy_primitives::{
     map::{B256Map, B256Set},
     B256, KECCAK256_EMPTY, U256,
 };
-use evm2::bytecode::Bytecode;
 use reth_db_api::{
     tables,
     transaction::{DbTx, DbTxMut},
@@ -18,13 +17,12 @@ use reth_db_api::{
 };
 use reth_downloaders::snap::VerifiedAccountRange;
 use reth_primitives_traits::Account;
-use reth_storage_api::{
-    DBProvider, MetadataProvider, MetadataWriter, SnapAttemptId, StateChangeset, StateWriter,
-};
+use reth_storage_api::{DBProvider, MetadataProvider, MetadataWriter, SnapAttemptId, StateWriter};
 use reth_trie_common::{
     root::storage_root, HashedPostState, HashedPostStateSorted, HashedStorage, TrieAccount,
     EMPTY_ROOT_HASH,
 };
+use revm::{bytecode::Bytecode, database::states::StateChangeset};
 use serde::{Deserialize, Serialize};
 use std::ops::Bound;
 
@@ -317,11 +315,7 @@ impl RangeDependencies {
     fn write(self, writer: &impl StateWriter) -> Result<(), SnapSyncError> {
         writer.write_hashed_state(&self.state)?;
         writer.write_state_changes(StateChangeset {
-            contracts: self
-                .bytecodes
-                .into_iter()
-                .map(|(hash, code)| (hash, reth_primitives_traits::Bytecode(code)))
-                .collect(),
+            contracts: self.bytecodes,
             ..Default::default()
         })?;
         Ok(())
@@ -549,7 +543,7 @@ mod tests {
         let provider = factory.database_provider_rw().unwrap();
         provider
             .write_state_changes(StateChangeset {
-                contracts: vec![(code().hash_slow(), code().into())],
+                contracts: vec![(code().hash_slow(), code())],
                 ..Default::default()
             })
             .unwrap();
