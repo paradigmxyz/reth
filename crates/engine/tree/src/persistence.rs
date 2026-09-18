@@ -182,13 +182,17 @@ where
             .iter()
             .map(|block| block.recovered_block().num_hash())
             .collect::<Vec<_>>();
-        let preparation = self.provider.db_ref().prepare_persistence(
-            input
-                .persist_rest_blocks()
-                .iter()
-                .map(|block| block.recovered_block().clone())
-                .collect(),
-        )?;
+        let preparation = self
+            .provider
+            .db_ref()
+            .prepare_persistence(
+                input
+                    .persist_rest_blocks()
+                    .iter()
+                    .map(|block| block.recovered_block().clone())
+                    .collect(),
+            )
+            .map_err(reth_provider::ProviderError::from)?;
         let provider_rw = self.provider.database_provider_rw()?;
         let last_state_trie_block = if let Some(block) = input.state_trie_blocks().last() {
             // Newly written static-file headers are not readable until commit finalizes their
