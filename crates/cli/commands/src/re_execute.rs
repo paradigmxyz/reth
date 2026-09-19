@@ -163,7 +163,8 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
                         let hash = provider.block_hash(block_number).unwrap().unwrap();
                         StateProviderDatabase(
                             state_provider_factory
-                                .state_provider_from_database(provider, hash),
+                                .state_provider_from_database(provider, hash)
+                                .unwrap(),
                         )
                     }
                 };

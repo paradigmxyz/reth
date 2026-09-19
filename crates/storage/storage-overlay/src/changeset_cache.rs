@@ -11,6 +11,7 @@ use crate::{database_state_frontiers, OverlayManager, OverlayStateProvider};
 use alloy_eips::BlockNumHash;
 use alloy_primitives::{map::B256Map, BlockNumber, B256};
 use parking_lot::RwLock;
+use reth_chain_state::BlockState;
 use reth_metrics::{
     metrics::{Counter, Gauge},
     Metrics,
@@ -68,6 +69,7 @@ pub(crate) fn compute_block_trie_updates<N, Provider>(
     overlay_manager: &OverlayManager<N>,
     provider: &Provider,
     block_number: BlockNumber,
+    finish_state: Option<Arc<BlockState<N>>>,
 ) -> ProviderResult<TrieUpdatesSorted>
 where
     N: NodePrimitives,
@@ -80,7 +82,12 @@ where
         + StorageSettingsCache,
 {
     reth_trie_db::with_adapter!(provider, |A| {
-        compute_block_trie_updates_inner::<_, _, A>(overlay_manager, provider, block_number)
+        compute_block_trie_updates_inner::<N, _, A>(
+            overlay_manager,
+            provider,
+            block_number,
+            finish_state,
+        )
     })
 }
 
@@ -88,6 +95,7 @@ fn compute_block_trie_updates_inner<N, Provider, A>(
     overlay_manager: &OverlayManager<N>,
     provider: &Provider,
     block_number: BlockNumber,
+    finish_state: Option<Arc<BlockState<N>>>,
 ) -> ProviderResult<TrieUpdatesSorted>
 where
     N: NodePrimitives,
@@ -111,6 +119,7 @@ where
         block_number,
         partial_state_trie,
         finish,
+        finish_state.clone(),
     )?;
 
     // Step 2: Get the trie reverts for the state after the target block using the cache
@@ -120,6 +129,7 @@ where
         (block_number + 1)..=finish.number,
         partial_state_trie,
         finish,
+        finish_state,
     )?;
 
     // Step 3: Create an InMemoryTrieCursorFactory with the reverts
@@ -218,6 +228,7 @@ impl ChangesetCache {
         block_number: BlockNumber,
         partial_state_trie: BlockNumHash,
         finish: BlockNumHash,
+        finish_state: Option<Arc<BlockState<N>>>,
     ) -> ProviderResult<Arc<TrieUpdatesSorted>>
     where
         N: NodePrimitives,
@@ -235,6 +246,7 @@ impl ChangesetCache {
             block_number..=block_number,
             partial_state_trie,
             finish,
+            finish_state,
         )
     }
 
@@ -271,6 +283,7 @@ impl ChangesetCache {
         range: RangeInclusive<BlockNumber>,
         partial_state_trie: BlockNumHash,
         finish: BlockNumHash,
+        finish_state: Option<Arc<BlockState<N>>>,
     ) -> ProviderResult<Arc<TrieUpdatesSorted>>
     where
         N: NodePrimitives,
@@ -400,10 +413,22 @@ impl ChangesetCache {
             "Changeset cache MISS in range, falling back to aggregate DB-based computation"
         );
 
-        let overlay = overlay_manager
-            .overlay_builder_for_hash(finish.hash)
-            .with_no_reverts()
-            .build_state_trie_overlay_at_frontiers(provider, partial_state_trie, finish, true)?;
+        // Completing the masked trie needs an overlay whose tip is Finish itself, so narrow the
+        // supplied chain to the part that ends there. A caller may hand over any chain that has
+        // Finish as an ancestor, such as the canonical head.
+        let finish_state =
+            finish_state.and_then(|state| state.iter().find(|state| state.hash() == finish.hash));
+        let overlay = match finish_state {
+            Some(finish_state) => overlay_manager.overlay_builder_for_state(finish_state),
+            None => overlay_manager.overlay_builder_for_persisted(finish.hash),
+        }
+        .with_no_reverts()
+        .build_state_trie_overlay_at_frontiers(
+            provider,
+            partial_state_trie,
+            finish,
+            true,
+        )?;
         let state_trie_provider = OverlayStateProvider::<&P, N>::new_with_state_trie(
             provider,
             overlay,
@@ -831,7 +856,14 @@ mod tests {
         let overlay_manager = OverlayManager::<reth_ethereum_primitives::EthPrimitives>::default();
         let (partial_state_trie, finish) = database_state_frontiers(&*provider).unwrap();
         let accumulated = cache
-            .get_or_compute_range(&overlay_manager, &*provider, 1..=2, partial_state_trie, finish)
+            .get_or_compute_range(
+                &overlay_manager,
+                &*provider,
+                1..=2,
+                partial_state_trie,
+                finish,
+                None,
+            )
             .unwrap();
         assert_eq!(accumulated.account_nodes_ref(), &[(path, Some(older_node))]);
     }
@@ -921,13 +953,20 @@ mod tests {
         let overlay_manager = OverlayManager::<reth_ethereum_primitives::EthPrimitives>::default();
         let (partial_state_trie, finish) = database_state_frontiers(&*provider).unwrap();
         let from_cache_api = cache
-            .get_or_compute_range(&overlay_manager, &*provider, 1..=3, partial_state_trie, finish)
+            .get_or_compute_range(
+                &overlay_manager,
+                &*provider,
+                1..=3,
+                partial_state_trie,
+                finish,
+                None,
+            )
             .unwrap();
         assert_eq!(*from_cache_api, actual);
         assert_eq!(cache.inner.read().entries.len(), 1);
 
         let block_changesets = cache
-            .get_or_compute(&overlay_manager, &*provider, 2, partial_state_trie, finish)
+            .get_or_compute(&overlay_manager, &*provider, 2, partial_state_trie, finish, None)
             .unwrap();
         assert_eq!(*block_changesets, legacy_compute_block_trie_changesets(&*provider, 2));
         assert_eq!(cache.inner.read().entries.len(), 2);

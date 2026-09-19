@@ -224,7 +224,6 @@ impl TestHarness {
         let header = SealedHeader::seal_slow(header);
         let canonical_in_memory_state =
             CanonicalInMemoryState::with_head(header.clone(), None, None);
-        overlay_manager.attach_in_memory_state(canonical_in_memory_state.clone());
         let engine_api_tree_state = EngineApiTreeState::new(
             10,
             10,
@@ -292,7 +291,6 @@ impl TestHarness {
             .set_canonical_head(blocks.last().unwrap().recovered_block().clone_sealed_header());
 
         let overlay_manager = self.tree.state.tree_state.overlay_manager.clone();
-        overlay_manager.attach_in_memory_state(canonical_in_memory_state.clone());
 
         let mut blocks_by_hash = B256Map::default();
         let mut blocks_by_number: BTreeMap<u64, Vec<_>> = BTreeMap::new();

@@ -1694,7 +1694,7 @@ mod tests {
         let state_provider_factory = OverlayStateProviderFactory::new(
             provider_factory,
             OverlayManager::<reth_chain_state::EthPrimitives>::default()
-                .overlay_builder_for_hash(anchor_hash),
+                .overlay_builder_for_persisted(anchor_hash),
         );
         let (proof_result_tx, proof_result_rx) = crossbeam_channel::unbounded();
         let proof_worker_handle = ProofWorkerHandle::new(
@@ -2298,7 +2298,7 @@ mod tests {
         let state_provider_factory = OverlayStateProviderFactory::new(
             provider_factory,
             OverlayManager::<reth_chain_state::EthPrimitives>::default()
-                .overlay_builder_for_hash(anchor_hash),
+                .overlay_builder_for_persisted(anchor_hash),
         );
         let (proof_result_tx, proof_result_rx) = crossbeam_channel::unbounded();
         let proof_worker_handle = ProofWorkerHandle::new(
@@ -2382,7 +2382,7 @@ mod tests {
         let state_provider_factory = OverlayStateProviderFactory::new(
             provider_factory,
             OverlayManager::<reth_chain_state::EthPrimitives>::default()
-                .overlay_builder_for_hash(anchor_hash),
+                .overlay_builder_for_persisted(anchor_hash),
         );
         let (proof_result_tx, proof_result_rx) = crossbeam_channel::unbounded();
         let proof_worker_handle = ProofWorkerHandle::new(
@@ -2437,7 +2437,7 @@ mod tests {
         let state_provider_factory = OverlayStateProviderFactory::new(
             provider_factory,
             OverlayManager::<reth_chain_state::EthPrimitives>::default()
-                .overlay_builder_for_hash(anchor_hash),
+                .overlay_builder_for_persisted(anchor_hash),
         );
         let (proof_result_tx, proof_result_rx) = crossbeam_channel::unbounded();
         let proof_worker_handle = ProofWorkerHandle::new(
@@ -2528,7 +2528,7 @@ mod tests {
         let state_provider_factory = OverlayStateProviderFactory::new(
             provider_factory,
             OverlayManager::<reth_chain_state::EthPrimitives>::default()
-                .overlay_builder_for_hash(anchor_hash),
+                .overlay_builder_for_persisted(anchor_hash),
         );
         let (proof_result_tx, proof_result_rx) = crossbeam_channel::unbounded();
         let proof_worker_handle = ProofWorkerHandle::new(
@@ -2581,7 +2581,7 @@ mod tests {
         let state_provider_factory = OverlayStateProviderFactory::new(
             provider_factory,
             OverlayManager::<reth_chain_state::EthPrimitives>::default()
-                .overlay_builder_for_hash(anchor_hash),
+                .overlay_builder_for_persisted(anchor_hash),
         );
         let (proof_result_tx, proof_result_rx) = crossbeam_channel::unbounded();
         let proof_worker_handle = ProofWorkerHandle::new(

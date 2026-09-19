@@ -35,7 +35,10 @@ use reth_storage_api::{
     StorageChangeSetReader, StorageRangeResult,
 };
 use reth_storage_errors::provider::ProviderResult;
-use reth_storage_overlay::{OverlayStateProvider, OverlayStateProviderFactory, OwnedProvider};
+use reth_storage_overlay::{
+    database_state_frontiers, OverlayBuilder, OverlayStateProvider, OverlayStateProviderFactory,
+    OwnedProvider,
+};
 use reth_trie::{
     hashed_cursor::{HashedCursor, HashedCursorFactory},
     metrics::TrieRootMetrics,
@@ -126,9 +129,6 @@ impl<N: ProviderNodeTypes> BlockchainProvider<N> {
         let bal_store = storage.bal_store().clone();
         let canonical_in_memory_state =
             CanonicalInMemoryState::with_head(latest, finalized_header, safe_header);
-        // The overlay manager does not own in-memory blocks; give it a read handle so it can
-        // resolve the chain at the database's Finish frontier.
-        storage.overlay_manager().attach_in_memory_state(canonical_in_memory_state.clone());
 
         Ok(Self { database: storage, canonical_in_memory_state, bal_store })
     }
@@ -162,15 +162,50 @@ impl<N: ProviderNodeTypes> BlockchainProvider<N> {
     }
 
     /// Returns a historical state provider using an existing database snapshot.
+    ///
+    /// The overlay is built from the shared chain this provider owns when `block_hash` is still
+    /// in memory, and from the database alone otherwise. Completing a masked state trie needs the
+    /// chain at the Finish frontier, so that is read from `provider`'s own transaction and
+    /// resolved here rather than looked up by the overlay manager.
     pub fn state_provider_from_database(
         &self,
         provider: StateRangeDbProvider<N>,
         block_hash: B256,
-    ) -> StateProviderBox {
-        Box::new(OverlayStateProvider::new(
-            provider,
-            self.database.overlay_manager().overlay_builder_for_hash(block_hash),
-        ))
+    ) -> ProviderResult<StateProviderBox> {
+        let builder = self.overlay_builder_for_hash(&provider, block_hash)?;
+        Ok(Box::new(OverlayStateProvider::new(provider, builder)))
+    }
+
+    /// Builds an overlay builder for a block the caller only has a hash for.
+    ///
+    /// `provider` is the transaction the resulting state provider will read from, so the Finish
+    /// frontier and the chain resolved for it come from one consistent view.
+    fn overlay_builder_for_hash<P>(
+        &self,
+        provider: &P,
+        block_hash: B256,
+    ) -> ProviderResult<OverlayBuilder<N::Primitives>>
+    where
+        P: StageCheckpointReader + BlockNumReader,
+    {
+        let overlay_manager = self.database.overlay_manager();
+        if let Some(state) = self.canonical_in_memory_state.executed_state_by_hash(block_hash) {
+            // Everything a block above the Finish frontier needs, including the masked blocks
+            // below it, is on its own chain.
+            return Ok(overlay_manager.overlay_builder_for_state(state))
+        }
+
+        // The block is durable, so it has no chain of its own. Only a partial state trie needs
+        // more: the blocks it masks are the ones between the two frontiers.
+        let builder = overlay_manager.overlay_builder_for_persisted(block_hash);
+        let (state_trie_frontier, finish) = database_state_frontiers(provider)?;
+        if state_trie_frontier == finish {
+            return Ok(builder)
+        }
+        Ok(match self.canonical_in_memory_state.executed_state_by_hash(finish.hash) {
+            Some(finish_state) => builder.with_finish_state(finish_state),
+            None => builder,
+        })
     }
 
     /// Returns a cursor-backed state view for a state root still in canonical in-memory blocks.
@@ -213,10 +248,13 @@ impl<N: ProviderNodeTypes> BlockchainProvider<N> {
         drop(provider);
 
         let Some(block_hash) = block_hash else { return Ok(None) };
-        let state_provider_factory = OverlayStateProviderFactory::new(
-            self.database.clone(),
-            self.database.overlay_manager().overlay_builder_for_hash(block_hash),
-        );
+        // Re-open the transaction the overlay will read from, so the frontier and the chain
+        // resolved for it agree.
+        let provider = self.database.provider()?;
+        let builder = self.overlay_builder_for_hash(&provider, block_hash)?;
+        drop(provider);
+        let state_provider_factory =
+            OverlayStateProviderFactory::new(self.database.clone(), builder);
         state_provider_factory.database_provider_ro().map(Some)
     }
 }
@@ -779,14 +817,14 @@ impl<N: ProviderNodeTypes> StateProviderFactory for BlockchainProvider<N> {
         let hash = provider
             .block_hash(block_number)?
             .ok_or_else(|| ProviderError::HeaderNotFound(block_number.into()))?;
-        Ok(self.state_provider_from_database(provider.into_database_provider(), hash))
+        self.state_provider_from_database(provider.into_database_provider(), hash)
     }
 
     fn history_by_block_hash(&self, block_hash: BlockHash) -> ProviderResult<StateProviderBox> {
         trace!(target: "providers::blockchain", ?block_hash, "Getting history by block hash");
         let provider = self.consistent_provider()?;
         provider.block_number(block_hash)?.ok_or(ProviderError::BlockHashNotFound(block_hash))?;
-        Ok(self.state_provider_from_database(provider.into_database_provider(), block_hash))
+        self.state_provider_from_database(provider.into_database_provider(), block_hash)
     }
 
     fn state_by_block_hash(&self, hash: BlockHash) -> ProviderResult<StateProviderBox> {
@@ -1008,10 +1046,8 @@ impl<N: ProviderNodeTypes> StateReader for BlockchainProvider<N> {
         let storage_changeset = provider.storage_changeset(block)?;
 
         let Some(block_hash) = provider.block_hash(block)? else { return Ok(None) };
-        let state_provider = OverlayStateProvider::<&_, N::Primitives>::new_ref(
-            &provider,
-            self.database.overlay_manager().overlay_builder_for_hash(block_hash),
-        );
+        let builder = self.overlay_builder_for_hash(&provider, block_hash)?;
+        let state_provider = OverlayStateProvider::<&_, N::Primitives>::new_ref(&provider, builder);
         let (state, reverts) = provider.populate_bundle_state(
             account_changeset,
             storage_changeset,
@@ -3310,17 +3346,19 @@ mod tests {
         );
         commit_in_memory(&provider, vec![executed]);
 
-        // `latest` reuses the canonical `Arc<BlockState>` chain, while the hash-based lookup
-        // rebuilds an equivalent chain from the overlay manager's block graph. Both must observe
-        // the same in-memory account and storage values.
-        let rebuilt_from_hash = OverlayStateProviderFactory::new(
+        // `latest` reuses the canonical `Arc<BlockState>` chain; a caller that starts from a hash
+        // resolves the very same chain through the provider. Both must observe the same
+        // in-memory account and storage values.
+        let db_provider = provider.database.provider()?;
+        let from_hash = OverlayStateProviderFactory::new(
             provider.database.clone(),
-            provider.database.overlay_manager().overlay_builder_for_hash(block_hash),
+            provider.overlay_builder_for_hash(&db_provider, block_hash)?,
         )
         .database_provider_ro()?;
+        drop(db_provider);
 
         for state in [
-            Box::new(rebuilt_from_hash) as StateProviderBox,
+            Box::new(from_hash) as StateProviderBox,
             provider.latest()?,
             provider.state_by_block_hash(block_hash)?,
         ] {
@@ -3435,13 +3473,15 @@ mod tests {
                 )
                 .database_provider_ro()?,
             );
+            let db_provider = provider.database.provider()?;
             let from_hash: StateProviderBox = Box::new(
                 OverlayStateProviderFactory::new(
                     provider.database.clone(),
-                    overlay_manager.overlay_builder_for_hash(hash),
+                    provider.overlay_builder_for_hash(&db_provider, hash)?,
                 )
                 .database_provider_ro()?,
             );
+            drop(db_provider);
 
             assert_eq!(from_shared.basic_account(&address)?, Some(account));
             assert_eq!(from_hash.basic_account(&address)?, Some(account));

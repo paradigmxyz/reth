@@ -75,7 +75,8 @@ impl<N: NodePrimitives> TreeState<N> {
         let removed_hashes = self.blocks_by_hash.keys().copied().collect::<Vec<_>>();
         if !removed_hashes.is_empty() {
             self.in_memory_state.remove_executed_blocks(removed_hashes.iter().copied());
-            self.overlay_manager.remove_blocks(removed_hashes);
+            // A reset leaves nothing in memory, so no cached overlay can be anchored any more.
+            self.overlay_manager.remove_blocks(removed_hashes, BlockNumber::MAX);
         }
         self.blocks_by_hash.clear();
         self.blocks_by_number.clear();
@@ -359,8 +360,10 @@ impl<N: NodePrimitives> TreeState<N> {
             // The shared in-memory state owns these blocks; canonical ones are dropped by
             // `remove_persisted_blocks_until`, so this only clears pruned forks.
             self.in_memory_state.remove_executed_blocks(removed_hashes.iter().copied());
-            self.overlay_manager.remove_blocks(removed_hashes);
         }
+        // Overlays are keyed by their anchor, which moves to the new frontier, so this also
+        // drops the entries anchored below it even when no block was removed here.
+        self.overlay_manager.remove_blocks(removed_hashes, upper_bound.number);
 
         self.rebind_shared_states();
     }

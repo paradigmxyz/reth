@@ -160,7 +160,7 @@ use reth_provider::{
     StorageSettingsCache,
 };
 use reth_revm::db::{states::bundle_state::BundleRetention, BundleAccount, State};
-use reth_storage_overlay::{OverlayManager, OverlayStateProviderFactory};
+use reth_storage_overlay::{database_state_frontiers, OverlayManager, OverlayStateProviderFactory};
 use reth_trie::{
     hashed_cursor::HashedCursorFactory, trie_cursor::TrieCursorFactory, updates::TrieUpdates,
     HashedPostState, KeccakKeyHasher, LazyTrieData,
@@ -1456,7 +1456,20 @@ where
                     debug!(target: "engine::tree::payload_validator", %hash, "no canonical state found for block");
                     return Ok(None)
                 }
-                state.tree_state.overlay_manager.overlay_builder_for_hash(hash)
+                // The parent is durable, so it has no chain of its own. A partial state trie
+                // still masks the blocks up to Finish, and completing it needs the chain that
+                // ends there.
+                let builder = state.tree_state.overlay_manager.overlay_builder_for_persisted(hash);
+                let db_provider = self.provider.database_provider_ro()?;
+                let (state_trie_frontier, finish) = database_state_frontiers(&db_provider)?;
+                drop(db_provider);
+                match (state_trie_frontier != finish)
+                    .then(|| state.tree_state.in_memory_state.executed_state_by_hash(finish.hash))
+                    .flatten()
+                {
+                    Some(finish_state) => builder.with_finish_state(finish_state),
+                    None => builder,
+                }
             }
         };
 

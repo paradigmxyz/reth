@@ -1461,7 +1461,7 @@ mod tests {
             &overlay_manager,
             OverlayStateProviderFactory::new(
                 provider_factory,
-                overlay_manager.overlay_builder_for_hash(genesis_hash),
+                overlay_manager.overlay_builder_for_persisted(genesis_hash),
             ),
             StateRootTaskOptions {
                 parent_header: SealedHeader::new(Default::default(), genesis_hash),

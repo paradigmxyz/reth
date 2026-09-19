@@ -222,6 +222,13 @@ pub struct OverlayBuilder<N: NodePrimitives = EthPrimitives> {
     /// This is shared with the caller so that a chain that is already maintained elsewhere (for
     /// example the canonical in-memory chain) can be reused instead of rebuilt.
     parent_state: Option<Arc<BlockState<N>>>,
+    /// Chain ending at the database's Finish frontier, supplied by the caller.
+    ///
+    /// Completing a masked state trie needs the in-memory blocks between the state trie frontier
+    /// and Finish. When this builder's parent is above Finish those blocks are on
+    /// [`Self::parent_state`] and this stays `None`; a caller that builds for a block at or below
+    /// Finish has to supply the chain, because the builder cannot resolve one.
+    finish_state: Option<Arc<BlockState<N>>>,
     /// Anchor hash of the reused sparse trie, if this task reused one.
     reused_sparse_trie_anchor_hash: Option<B256>,
     /// Whether building the overlay may query revert changesets.
@@ -243,11 +250,38 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
             parent_hash,
             overlay_manager,
             parent_state,
+            finish_state: None,
             reused_sparse_trie_anchor_hash: None,
             no_reverts: false,
             overlay_cache_config: OverlayCacheConfig::default(),
             metrics: OverlayBuilderMetrics::default(),
         }
+    }
+
+    /// Supplies an in-memory chain that reaches the database's Finish frontier.
+    ///
+    /// Only needed when this builder's parent is at or below Finish, which is the case for the
+    /// historical views that are addressed by hash and for an unwind. Above Finish the chain is
+    /// already reachable from the parent. The chain does not have to end at Finish; any chain
+    /// that has it as an ancestor works, such as the canonical head.
+    pub fn with_finish_state(mut self, finish_state: Arc<BlockState<N>>) -> Self {
+        self.finish_state = Some(finish_state);
+        self
+    }
+
+    /// Returns the chain ending at `finish_hash`, if this builder can reach it.
+    ///
+    /// Every block masked by a partial state trie is an ancestor of a parent above Finish, so the
+    /// parent chain answers this without a lookup. Otherwise the caller has to have supplied a
+    /// chain through [`Self::with_finish_state`].
+    fn finish_state(&self, finish_hash: B256) -> Option<Arc<BlockState<N>>> {
+        let reaches_finish = |state: &Arc<BlockState<N>>| {
+            Arc::clone(state).iter().find(|state| state.hash() == finish_hash)
+        };
+        self.parent_state
+            .as_ref()
+            .and_then(reaches_finish)
+            .or_else(|| self.finish_state.as_ref().and_then(reaches_finish))
     }
 
     /// Skips managed overlay construction when the sparse trie was reused and the DB tip is
@@ -480,6 +514,7 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
                             revert_blocks.clone(),
                             state_trie_tip_block,
                             finish_tip_block,
+                            self.finish_state(finish_tip_block.hash),
                         )?;
                     retrieve_trie_reverts_duration = start.elapsed();
                     accumulated_reverts
@@ -490,15 +525,13 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
                     // Revert prefixes describe changes since the anchor, not stale hashes in
                     // masked DB rows. Complete the trie at Finish before applying those prefixes.
                     let start = Instant::now();
-                    let finish_state = self
-                        .overlay_manager
-                        .state_for_hash(finish_tip_block.hash)
-                        .ok_or_else(|| {
-                        ProviderError::other(StateTrieOverlayError {
-                            tip_hash: finish_tip_block.hash,
-                            anchor_hash: state_trie_tip_block.hash,
-                        })
-                    })?;
+                    let finish_state =
+                        self.finish_state(finish_tip_block.hash).ok_or_else(|| {
+                            ProviderError::other(StateTrieOverlayError {
+                                tip_hash: finish_tip_block.hash,
+                                anchor_hash: state_trie_tip_block.hash,
+                            })
+                        })?;
                     let (nodes, _) = self
                         .overlay_manager
                         .overlay_for_parent(
@@ -754,7 +787,11 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
 
 /// Returns the highest blocks whose state/trie data and non-state/trie data are durably
 /// available in the database.
-pub(crate) fn database_state_frontiers<Provider>(
+///
+/// The first is the state trie frontier, the second the Finish frontier. Callers that build an
+/// overlay for a block at or below Finish read this from the same transaction they hand to the
+/// provider, so that the frontier and the state they resolve for it agree.
+pub fn database_state_frontiers<Provider>(
     provider: &Provider,
 ) -> ProviderResult<(BlockNumHash, BlockNumHash)>
 where
@@ -841,6 +878,7 @@ enum AnchorForParent {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_utils::TestOverlay;
     use alloy_primitives::{map::HashMap, Address, U256};
     use reth_chain_state::{
         test_utils::TestBlockBuilder, CanonicalInMemoryState, ExecutedBlock, NewCanonicalChain,
@@ -1074,7 +1112,7 @@ mod tests {
         // The state trie frontier sits at block 1 while Finish is at block 3, so the in-memory
         // chain straddles the state-masking frontier.
         let (factory, blocks) = setup_frontiers(1, 3);
-        let manager = OverlayManager::default();
+        let manager = TestOverlay::default();
         for block in &blocks[2..=4] {
             manager.insert_executed_block(block.clone());
         }
@@ -1088,8 +1126,15 @@ mod tests {
             let state = canonical.state_by_hash(hash).expect("canonical state for in-memory block");
             assert_eq!(state.hash(), hash);
 
-            let from_hash = manager.overlay_builder_for_hash(hash);
-            let from_state = manager.overlay_builder_for_state(state);
+            // Block 2 is below Finish, so its own chain cannot reach it and the caller has to
+            // supply the chain that ends there. For the blocks above Finish this is redundant.
+            let finish_state = manager
+                .state_for_hash(blocks[3].recovered_block().hash())
+                .expect("Finish is tracked in memory");
+            let from_hash =
+                manager.overlay_builder_for_hash(hash).with_finish_state(Arc::clone(&finish_state));
+            let from_state =
+                manager.overlay_builder_for_state(state).with_finish_state(finish_state);
 
             let anchor = anchor_num_hash(&from_hash.anchor_at_parent(&provider).unwrap());
             assert_eq!(
@@ -1133,45 +1178,74 @@ mod tests {
     }
 
     #[test]
-    fn overlay_builder_for_state_covers_fork_and_pending_tips() {
+    fn historical_view_below_finish_uses_the_supplied_finish_state() {
+        // Finish is at block 3 while the state trie only reaches block 1, so blocks 2 and 3 are
+        // masked in the database and completing the trie needs the chain that ends at Finish.
         let (factory, blocks) = setup_frontiers(1, 3);
-        let manager = OverlayManager::default();
+        let manager = TestOverlay::default();
         for block in &blocks[2..=4] {
             manager.insert_executed_block(block.clone());
         }
-        let in_memory = manager.test_in_memory_state();
+        let provider = factory.provider().unwrap();
+
+        // A historical view is addressed by hash and the block is durable, so the builder has no
+        // chain of its own and cannot reach Finish.
+        let persisted_hash = blocks[1].recovered_block().hash();
+        let error = manager
+            .overlay_builder_for_persisted(persisted_hash)
+            .build_state_trie_overlay(&provider, false)
+            .unwrap_err();
+        assert!(error.to_string().contains("cannot be anchored"), "unexpected error: {error}");
+
+        let finish_state = manager
+            .state_for_hash(blocks[3].recovered_block().hash())
+            .expect("Finish is tracked in memory");
+        let overlay = manager
+            .overlay_builder_for_persisted(persisted_hash)
+            .with_finish_state(finish_state)
+            .build_state_trie_overlay(&provider, false)
+            .unwrap();
+
+        // The completed trie carries the nodes of the masked blocks 2 and 3.
+        assert_eq!(
+            account_node_paths(&overlay),
+            [3, 4].map(|id| Nibbles::from_nibbles([id])).to_vec()
+        );
+    }
+
+    #[test]
+    fn overlay_builder_for_state_covers_fork_and_pending_tips() {
+        let (factory, blocks) = setup_frontiers(1, 3);
+        let manager = TestOverlay::default();
+        for block in &blocks[2..=4] {
+            manager.insert_executed_block(block.clone());
+        }
         let mut side_builder = TestBlockBuilder::eth();
 
         // A fork off block 3 and a pending block on top of the head, tracked the way the engine
         // tracks them: owned by the in-memory state, handed to the manager as a shared chain.
-        let fork = with_unique_trie_data(
+        let fork_state = manager.insert_fork(with_unique_trie_data(
             &side_builder.get_executed_block_with_number(
                 blocks[4].block_number(),
                 blocks[3].recovered_block().hash(),
             ),
             9,
-        );
-        let fork_state = in_memory.insert_executed(fork);
-        manager.insert_block(Arc::clone(&fork_state));
-
-        let pending = with_unique_trie_data(
+        ));
+        let pending_state = manager.set_pending_block(with_unique_trie_data(
             &side_builder.get_executed_block_with_number(
                 blocks[4].block_number() + 1,
                 blocks[4].recovered_block().hash(),
             ),
             10,
-        );
-        in_memory.set_pending_block(pending);
-        let pending_state = in_memory.pending_state().expect("pending block was just set");
-        manager.insert_block(Arc::clone(&pending_state));
+        ));
 
         let provider = factory.provider().unwrap();
         let anchor = blocks[1].recovered_block().num_hash();
 
         for state in [fork_state, pending_state] {
             let hash = state.hash();
-            // There is one shared chain per block: what the engine hands to payload validation is
-            // the same object the hash-based entry point resolves.
+            // There is one shared chain per block: what the engine hands to payload validation
+            // is the same object a caller that starts from a hash resolves.
             assert!(Arc::ptr_eq(&state, &manager.state_for_hash(hash).unwrap()));
 
             let from_state = manager.overlay_builder_for_state(Arc::clone(&state));
@@ -1199,7 +1273,7 @@ mod tests {
         );
         assert_ne!(side_block.recovered_block().hash(), blocks[3].recovered_block().hash());
 
-        let manager = OverlayManager::default();
+        let manager = TestOverlay::default();
         manager.insert_executed_block(blocks[2].clone());
         manager.insert_executed_block(side_block.clone());
         let canonical = canonical_in_memory_state(&blocks[2..=4]);
@@ -1225,7 +1299,7 @@ mod tests {
     #[test]
     fn managed_overlay_starts_at_state_trie_frontier() {
         let (factory, blocks) = setup_frontiers(1, 3);
-        let manager = OverlayManager::default();
+        let manager = TestOverlay::default();
         for block in &blocks[2..=4] {
             manager.insert_executed_block(block.clone());
         }
@@ -1255,7 +1329,7 @@ mod tests {
     #[test]
     fn managed_overlay_skips_when_finish_is_the_anchor() {
         let (factory, blocks) = setup_frontiers(3, 3);
-        let manager = OverlayManager::default();
+        let manager = TestOverlay::default();
         manager.insert_executed_block(blocks[4].clone());
         let provider = factory.provider().unwrap();
 
@@ -1274,7 +1348,7 @@ mod tests {
         let (factory, blocks) = setup_frontiers(2, 3);
         let provider = factory.provider().unwrap();
 
-        let builder = OverlayManager::<EthPrimitives>::default()
+        let builder = TestOverlay::default()
             .overlay_builder_for_hash(blocks[1].recovered_block().hash())
             .with_no_reverts();
         let error = builder.build_state_trie_overlay(&provider, true).unwrap_err();
@@ -1290,9 +1364,8 @@ mod tests {
         assert_ne!(parent_hash, blocks[1].recovered_block().hash());
         let block = TestBlockBuilder::eth()
             .get_executed_block_with_number(blocks[2].block_number(), parent_hash);
-        let builder = OverlayManager::default()
-            .overlay_builder_for_hash(parent_hash)
-            .with_appended_block(block);
+        let builder =
+            TestOverlay::default().overlay_builder_for_hash(parent_hash).with_appended_block(block);
 
         assert!(matches!(
             builder.execution_overlay(&provider),
@@ -1321,7 +1394,7 @@ mod tests {
         provider_rw.commit().unwrap();
 
         let provider = factory.provider().unwrap();
-        let overlay = OverlayManager::<EthPrimitives>::default()
+        let overlay = TestOverlay::default()
             .overlay_builder_for_hash(blocks[1].recovered_block().hash())
             .build_state_trie_overlay(&provider, false)
             .unwrap();
@@ -1369,7 +1442,7 @@ mod tests {
         provider_rw.commit().unwrap();
 
         let provider = factory.provider().unwrap();
-        let (overlay, fallback_block_number) = OverlayManager::<EthPrimitives>::default()
+        let (overlay, fallback_block_number) = TestOverlay::default()
             .overlay_builder_for_hash(blocks[1].recovered_block().hash())
             .execution_overlay(&provider)
             .unwrap();
@@ -1383,7 +1456,7 @@ mod tests {
     #[test]
     fn execution_overlay_uses_managed_blocks_after_the_anchor() {
         let (factory, blocks) = setup_frontiers(1, 3);
-        let manager = OverlayManager::default();
+        let manager = TestOverlay::default();
         for block in &blocks[2..=4] {
             manager.insert_executed_block(block.clone());
         }
@@ -1457,7 +1530,7 @@ mod tests {
             "the managed chain must not contain the durable Finish block"
         );
 
-        let manager = OverlayManager::default();
+        let manager = TestOverlay::default();
         manager.insert_executed_block(side_block_two.clone());
         manager.insert_executed_block(side_block_three.clone());
         let provider = factory.provider().unwrap();
@@ -1484,7 +1557,7 @@ mod tests {
     #[test]
     fn execution_overlay_no_revert_path_discards_account_ids() {
         let (factory, blocks) = setup_frontiers(1, 1);
-        let manager = OverlayManager::default();
+        let manager = TestOverlay::default();
         for block in &blocks[2..=3] {
             manager.insert_executed_block(block.clone());
         }
@@ -1503,7 +1576,7 @@ mod tests {
     #[test]
     fn managed_overlay_uses_persisted_parent_even_if_retained() {
         let (factory, blocks) = setup_frontiers(2, 3);
-        let manager = OverlayManager::default();
+        let manager = TestOverlay::default();
         manager.insert_executed_block(blocks[1].clone());
         let provider = factory.provider().unwrap();
         let builder = manager.overlay_builder_for_hash(blocks[1].recovered_block().hash());
@@ -1522,7 +1595,7 @@ mod tests {
     fn overlay_after_state_trie_frontier_requires_managed_coverage() {
         let (factory, blocks) = setup_frontiers(1, 3);
         let provider = factory.provider().unwrap();
-        let error = OverlayManager::<EthPrimitives>::default()
+        let error = TestOverlay::default()
             .overlay_builder_for_hash(blocks[3].recovered_block().hash())
             .build_state_trie_overlay(&provider, true)
             .unwrap_err();
@@ -1538,7 +1611,7 @@ mod tests {
         let (factory, blocks) = setup_frontiers(1, 3);
         let provider = factory.provider().unwrap();
         let parent_hash = blocks[3].recovered_block().hash();
-        let error = OverlayManager::<EthPrimitives>::default()
+        let error = TestOverlay::default()
             .overlay_builder_for_hash(parent_hash)
             .build_state_trie_overlay(&provider, true)
             .unwrap_err();
@@ -1549,8 +1622,7 @@ mod tests {
     #[test]
     fn managed_overlay_skips_manager_for_persisted_parent() {
         let parent_hash = B256::with_last_byte(1);
-        let builder =
-            OverlayManager::<EthPrimitives>::default().overlay_builder_for_hash(parent_hash);
+        let builder = TestOverlay::default().overlay_builder_for_hash(parent_hash);
 
         let (trie, state) = builder.resolve_state_trie_overlays(parent_hash).unwrap();
         assert!(trie.is_empty());
@@ -1561,8 +1633,7 @@ mod tests {
     fn managed_overlay_errors_if_parent_is_not_persisted_or_managed() {
         let parent_hash = B256::with_last_byte(1);
         let anchor_hash = B256::with_last_byte(2);
-        let builder =
-            OverlayManager::<EthPrimitives>::default().overlay_builder_for_hash(parent_hash);
+        let builder = TestOverlay::default().overlay_builder_for_hash(parent_hash);
 
         let err = builder.resolve_state_trie_overlays(anchor_hash).unwrap_err();
 
@@ -1572,8 +1643,7 @@ mod tests {
     #[test]
     fn managed_overlay_skip_requires_both_frontiers() {
         let parent_hash = B256::with_last_byte(1);
-        let builder =
-            OverlayManager::<EthPrimitives>::default().overlay_builder_for_hash(parent_hash);
+        let builder = TestOverlay::default().overlay_builder_for_hash(parent_hash);
         assert!(!builder.should_skip_overlay_for_reused_sparse_trie(parent_hash, parent_hash));
 
         let builder = builder.with_skip_overlay_for_reused_sparse_trie(parent_hash);
@@ -1582,7 +1652,7 @@ mod tests {
             .should_skip_overlay_for_reused_sparse_trie(B256::with_last_byte(3), parent_hash,));
 
         let blocks = test_blocks();
-        let manager = OverlayManager::default();
+        let manager = TestOverlay::default();
         for block in &blocks[2..=4] {
             manager.insert_executed_block(block.clone());
         }

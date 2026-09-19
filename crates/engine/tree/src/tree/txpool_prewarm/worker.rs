@@ -382,7 +382,7 @@ mod tests {
                 state_provider_factory: OverlayStateProviderFactory::new(
                     provider,
                     reth_storage_overlay::OverlayManager::default()
-                        .overlay_builder_for_hash(parent_hash),
+                        .overlay_builder_for_persisted(parent_hash),
                 ),
             };
             self.commands.send(Command::Start { parent_hash, job }).unwrap();

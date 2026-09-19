@@ -38,7 +38,7 @@ use reth_provider::{
 };
 use reth_revm::database::StateProviderDatabase;
 use reth_stages_api::ControlFlow;
-use reth_storage_overlay::OverlayManager;
+use reth_storage_overlay::{database_state_frontiers, OverlayManager};
 use reth_tasks::{spawn_os_thread, utils::increase_thread_priority};
 use reth_trie::ComputedTrieData;
 use revm::interpreter::debug_unreachable;
@@ -1419,7 +1419,10 @@ where
             debug!(target: "engine::tree", ?new_tip_num, "Starting remove blocks job");
             self.state.set_pending_sparse_trie_prune(false);
             let (tx, rx) = crossbeam_channel::bounded(1);
-            let _ = self.persistence.remove_blocks_above(new_tip_num, tx);
+            // Unwinding a partial state trie needs the in-memory blocks the database masks. The
+            // canonical chain still has them, so hand it to the persistence service.
+            let finish_state = self.canonical_in_memory_state.head_state();
+            let _ = self.persistence.remove_blocks_above(new_tip_num, finish_state, tx);
             self.persistence_state.start_remove(new_tip_num, rx);
         }
     }
@@ -2387,11 +2390,15 @@ where
             "computing block trie updates",
         );
         let db_provider = self.provider.database_provider_ro()?;
-        let trie_updates = self
-            .state
-            .tree_state
-            .overlay_manager
-            .compute_block_trie_updates(&db_provider, block.number())?;
+        // Completing a masked state trie needs the in-memory chain at the Finish frontier, read
+        // from the same transaction the computation runs against.
+        let (_, finish) = database_state_frontiers(&db_provider)?;
+        let finish_state = self.canonical_in_memory_state.executed_state_by_hash(finish.hash);
+        let trie_updates = self.state.tree_state.overlay_manager.compute_block_trie_updates(
+            &db_provider,
+            block.number(),
+            finish_state,
+        )?;
 
         let sorted_hashed_state = Arc::new(hashed_state.into_sorted());
         let sorted_trie_updates = Arc::new(trie_updates);

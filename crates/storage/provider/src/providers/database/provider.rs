@@ -133,6 +133,18 @@ impl<DB: Database, N: NodeTypes> DerefMut for DatabaseProviderRW<DB, N> {
     }
 }
 
+impl<DB: Database, N: NodeTypes> DatabaseProviderRW<DB, N> {
+    /// Supplies the in-memory chain that reaches the database's Finish frontier.
+    ///
+    /// See [`DatabaseProvider::with_finish_state`].
+    pub fn with_finish_state(
+        self,
+        finish_state: Option<Arc<reth_chain_state::BlockState<N::Primitives>>>,
+    ) -> Self {
+        Self(self.0.with_finish_state(finish_state))
+    }
+}
+
 impl<DB: Database, N: NodeTypes> AsRef<DatabaseProvider<<DB as Database>::TXMut, N>>
     for DatabaseProviderRW<DB, N>
 {
@@ -212,6 +224,12 @@ pub struct DatabaseProvider<TX, N: NodeTypes> {
     rocksdb_history_snapshot: OnceLock<Option<OwnedRocksReadSnapshot>>,
     /// Manager for state trie overlays and cached changesets.
     overlay_manager: OverlayManager<N::Primitives>,
+    /// In-memory chain reaching the database's Finish frontier, if the caller has one.
+    ///
+    /// Unwinding a database whose state trie is partial has to complete the trie at Finish first,
+    /// and the blocks it is missing are only in memory. The overlay manager does not track them,
+    /// so whoever drives the unwind supplies the chain.
+    finish_state: Option<Arc<reth_chain_state::BlockState<N::Primitives>>>,
     /// Task runtime for spawning parallel I/O work.
     runtime: reth_tasks::Runtime,
     /// Path to the database directory.
@@ -257,6 +275,18 @@ impl<TX, N: NodeTypes> DatabaseProvider<TX, N> {
     /// Sets the minimum pruning distance.
     pub const fn with_minimum_pruning_distance(mut self, distance: u64) -> Self {
         self.minimum_pruning_distance = distance;
+        self
+    }
+
+    /// Supplies the in-memory chain that reaches the database's Finish frontier.
+    ///
+    /// Only an unwind of a partial state trie needs it: the trie has to be completed at Finish
+    /// first, and the blocks it is missing are only in memory.
+    pub fn with_finish_state(
+        mut self,
+        finish_state: Option<Arc<reth_chain_state::BlockState<N::Primitives>>>,
+    ) -> Self {
+        self.finish_state = finish_state;
         self
     }
 
@@ -388,6 +418,7 @@ impl<TX: DbTxMut, N: NodeTypes> DatabaseProvider<TX, N> {
             storage_settings,
             rocksdb_provider,
             overlay_manager,
+            finish_state: None,
             runtime,
             db_path,
             rocksdb_history_snapshot: OnceLock::new(),
@@ -903,9 +934,11 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
                 available: 0..=0,
             })?;
 
-        let trie_revert = self
-            .overlay_manager
-            .get_or_compute_cached_changesets_range(self, from..=db_tip_block)?;
+        let trie_revert = self.overlay_manager.get_or_compute_cached_changesets_range(
+            self,
+            from..=db_tip_block,
+            self.finish_state.clone(),
+        )?;
         self.write_trie_updates_sorted(&trie_revert)?;
 
         Ok(())
@@ -1037,6 +1070,7 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> DatabaseProvider<TX, N> {
             storage_settings,
             rocksdb_provider,
             overlay_manager,
+            finish_state: None,
             runtime,
             db_path,
             rocksdb_history_snapshot: OnceLock::new(),
@@ -4942,7 +4976,6 @@ mod tests {
         use reth_chain_state::{CanonicalInMemoryState, NewCanonicalChain};
 
         let in_memory_state = CanonicalInMemoryState::empty();
-        factory.overlay_manager().attach_in_memory_state(in_memory_state.clone());
         in_memory_state.update_chain(NewCanonicalChain::Commit { new: blocks[2..].to_vec() });
         for state in in_memory_state.canonical_chain() {
             factory.overlay_manager().insert_block(state);
@@ -4953,7 +4986,10 @@ mod tests {
         provider_rw.save_blocks(&input).unwrap();
         provider_rw.commit().unwrap();
 
-        let provider_rw = factory.provider_rw().unwrap();
+        // Unwinding the partial state trie needs the in-memory blocks the database masks, which
+        // the caller driving the unwind supplies.
+        let provider_rw =
+            factory.provider_rw().unwrap().with_finish_state(in_memory_state.head_state());
         let frontiers = provider_rw.remove_block_and_execution_above(3).unwrap();
         assert_eq!(frontiers, PersistenceFrontiers { db_tip: 3, partial_state_trie: 2 });
         provider_rw.commit().unwrap();

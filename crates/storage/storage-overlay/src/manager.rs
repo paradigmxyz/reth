@@ -2,8 +2,8 @@
 //!
 //! Payload validation needs a view of the state trie as of an in-memory parent block even when that
 //! parent has not been persisted yet. [`OverlayManager`] builds reusable state trie and execution
-//! overlays for those blocks on demand, from the shared chains that [`CanonicalInMemoryState`]
-//! owns.
+//! overlays for those blocks on demand, from the shared [`BlockState`] chains their callers
+//! already hold. It neither owns nor looks up an in-memory block itself.
 
 use crate::{
     changeset_cache::compute_block_trie_updates,
@@ -13,8 +13,8 @@ use crate::{
 };
 use alloy_eips::BlockNumHash;
 use alloy_primitives::{map::B256Set, BlockNumber, B256};
-use parking_lot::{Mutex, RwLock};
-use reth_chain_state::{BlockState, CanonicalInMemoryState, ExecutedBlock, PreservedSparseTrie};
+use parking_lot::Mutex;
+use reth_chain_state::{BlockState, ExecutedBlock, PreservedSparseTrie};
 use reth_errors::ProviderResult;
 use reth_ethereum_primitives::EthPrimitives;
 use reth_primitives_traits::{
@@ -30,6 +30,7 @@ use reth_tasks::WorkerPool;
 use reth_trie::{updates::TrieUpdatesSorted, HashedPostStateSorted, TrieInputSorted};
 use std::{
     fmt,
+    marker::PhantomData,
     ops::RangeInclusive,
     sync::{Arc, OnceLock},
     time::Instant,
@@ -38,19 +39,13 @@ use tracing::{debug, trace};
 
 /// Manages state trie and execution overlays for in-memory blocks.
 ///
-/// The manager does not own any in-memory blocks: callers hand it the shared
-/// [`BlockState`] chain, which [`CanonicalInMemoryState`] owns. What it owns is the changeset
-/// cache, the preserved sparse trie, and the flattened overlays keyed by
-/// `(anchor_hash, tip_hash)`.
+/// The manager neither owns nor looks up in-memory blocks: every input is a [`BlockState`] chain
+/// that the caller already holds, or a block number. What it owns is the changeset cache, the
+/// preserved sparse trie, and the flattened overlays keyed by `(anchor_hash, tip_hash)`.
 #[derive(Clone)]
 pub struct OverlayManager<N: NodePrimitives = EthPrimitives> {
-    /// Read-only handle to the shared in-memory block store, which owns every executed
-    /// in-memory block.
-    ///
-    /// This is consulted by [`Self::overlay_builder_for_hash`], for callers that hold a block
-    /// hash rather than a chain, and when pruning overlays after a trim. It stays unset in unit
-    /// tests, where it behaves as if no block were in memory.
-    in_memory_state: Arc<RwLock<Option<CanonicalInMemoryState<N>>>>,
+    /// The manager is generic over the primitives its callers' chains use, but stores no block.
+    _primitives: PhantomData<fn() -> N>,
     state_trie_overlays: OverlayCache<TrieInputSorted>,
     execution_overlays: OverlayCache<ExecutionOverlay>,
     changeset_cache: ChangesetCache,
@@ -64,7 +59,7 @@ pub struct OverlayManager<N: NodePrimitives = EthPrimitives> {
 impl<N: NodePrimitives> Default for OverlayManager<N> {
     fn default() -> Self {
         Self {
-            in_memory_state: Default::default(),
+            _primitives: PhantomData,
             state_trie_overlays: Default::default(),
             execution_overlays: Default::default(),
             changeset_cache: Default::default(),
@@ -91,7 +86,7 @@ impl<N: NodePrimitives> OverlayManager<N> {
     #[cfg(feature = "rayon")]
     pub fn new(worker_pool: Arc<WorkerPool>) -> Self {
         Self {
-            in_memory_state: Default::default(),
+            _primitives: PhantomData,
             state_trie_overlays: Default::default(),
             execution_overlays: Default::default(),
             changeset_cache: Default::default(),
@@ -100,13 +95,6 @@ impl<N: NodePrimitives> OverlayManager<N> {
             metrics: Default::default(),
             execution_metrics: Default::default(),
         }
-    }
-
-    /// Connects the manager to the shared in-memory block store.
-    ///
-    /// This is wired when the blockchain provider creates the canonical state.
-    pub fn attach_in_memory_state(&self, state: CanonicalInMemoryState<N>) {
-        *self.in_memory_state.write() = Some(state);
     }
 
     /// Creates an overlay builder for an already materialized in-memory chain.
@@ -118,56 +106,12 @@ impl<N: NodePrimitives> OverlayManager<N> {
         OverlayBuilder::new(state.hash(), Some(state), self.clone())
     }
 
-    /// Creates an overlay builder for a block the caller only has a hash for.
+    /// Creates an overlay builder for a block that is already durable in the database.
     ///
-    /// The in-memory chain is resolved through the shared store rather than a block map of the
-    /// manager's own, and is empty for a block that is already durable in the database. Prefer
-    /// [`Self::overlay_builder_for_state`] whenever the caller holds the chain.
-    pub fn overlay_builder_for_hash(&self, parent_hash: B256) -> OverlayBuilder<N> {
-        OverlayBuilder::new(parent_hash, self.state_for_hash(parent_hash), self.clone())
-    }
-
-    /// Returns the shared in-memory chain ending at `hash`, if the store knows that block.
-    pub(crate) fn state_for_hash(&self, hash: B256) -> Option<Arc<BlockState<N>>> {
-        let state = self.in_memory_state.read().clone()?;
-        state.executed_state_by_hash(hash)
-    }
-
-    /// Commits `block` to the attached in-memory state and notifies the manager about it.
-    ///
-    /// Only used by unit tests, which have no engine to own the blocks for them.
-    #[cfg(test)]
-    pub(crate) fn insert_executed_block(&self, block: ExecutedBlock<N>) -> Arc<BlockState<N>> {
-        let hash = block.recovered_block().hash();
-        let state = {
-            let mut guard = self.in_memory_state.write();
-            let in_memory_state = guard.get_or_insert_with(CanonicalInMemoryState::empty);
-            in_memory_state
-                .update_chain(reth_chain_state::NewCanonicalChain::Commit { new: vec![block] });
-            in_memory_state.state_by_hash(hash).expect("block was just committed")
-        };
-        self.insert_block(Arc::clone(&state));
-        state
-    }
-
-    /// Returns the attached in-memory state, creating one if this manager has none yet.
-    #[cfg(test)]
-    pub(crate) fn test_in_memory_state(&self) -> CanonicalInMemoryState<N> {
-        self.in_memory_state.write().get_or_insert_with(CanonicalInMemoryState::empty).clone()
-    }
-
-    /// Trims the attached in-memory state and prunes the overlays for the removed blocks, the way
-    /// the engine's single persistence trim does.
-    #[cfg(test)]
-    pub(crate) fn remove_blocks_until(
-        &self,
-        persisted: BlockNumHash,
-        removed: impl IntoIterator<Item = B256>,
-    ) {
-        if let Some(in_memory_state) = self.in_memory_state.read().clone() {
-            in_memory_state.remove_persisted_blocks_until(persisted, persisted.number);
-        }
-        self.remove_blocks(removed);
+    /// No in-memory chain is attached, because there is none above a persisted block. Callers
+    /// that have a chain use [`Self::overlay_builder_for_state`] instead.
+    pub fn overlay_builder_for_persisted(&self, parent_hash: B256) -> OverlayBuilder<N> {
+        OverlayBuilder::new(parent_hash, None, self.clone())
     }
 
     pub(crate) const fn changeset_cache(&self) -> &ChangesetCache {
@@ -175,10 +119,15 @@ impl<N: NodePrimitives> OverlayManager<N> {
     }
 
     /// Gets or computes cached changesets for an inclusive block range.
+    ///
+    /// `finish_state` is the in-memory chain ending at the Finish frontier. It is only consulted
+    /// when the cache misses and the aggregate fallback has to complete a masked state trie;
+    /// callers with nothing in memory above the database tip pass `None`.
     pub fn get_or_compute_cached_changesets_range<P>(
         &self,
         provider: &P,
         range: RangeInclusive<BlockNumber>,
+        finish_state: Option<Arc<BlockState<N>>>,
     ) -> ProviderResult<Arc<TrieUpdatesSorted>>
     where
         P: DBProvider
@@ -195,6 +144,7 @@ impl<N: NodePrimitives> OverlayManager<N> {
             range,
             partial_state_trie,
             finish,
+            finish_state,
         )
     }
 
@@ -204,6 +154,7 @@ impl<N: NodePrimitives> OverlayManager<N> {
         range: RangeInclusive<BlockNumber>,
         partial_state_trie: BlockNumHash,
         finish: BlockNumHash,
+        finish_state: Option<Arc<BlockState<N>>>,
     ) -> ProviderResult<Arc<TrieUpdatesSorted>>
     where
         P: DBProvider
@@ -214,7 +165,14 @@ impl<N: NodePrimitives> OverlayManager<N> {
             + BlockNumReader
             + StorageSettingsCache,
     {
-        self.changeset_cache.get_or_compute_range(self, provider, range, partial_state_trie, finish)
+        self.changeset_cache.get_or_compute_range(
+            self,
+            provider,
+            range,
+            partial_state_trie,
+            finish,
+            finish_state,
+        )
     }
 
     /// Evicts cached changesets for blocks below `up_to_block`.
@@ -227,6 +185,7 @@ impl<N: NodePrimitives> OverlayManager<N> {
         &self,
         provider: &P,
         block_number: BlockNumber,
+        finish_state: Option<Arc<BlockState<N>>>,
     ) -> ProviderResult<TrieUpdatesSorted>
     where
         P: DBProvider
@@ -237,7 +196,7 @@ impl<N: NodePrimitives> OverlayManager<N> {
             + BlockNumReader
             + StorageSettingsCache,
     {
-        compute_block_trie_updates(self, provider, block_number)
+        compute_block_trie_updates(self, provider, block_number, finish_state)
     }
 
     /// Takes the preserved sparse trie if present.
@@ -370,7 +329,11 @@ impl<N: NodePrimitives> OverlayManager<N> {
             pruned_overlays = tracing::field::Empty,
         )
     )]
-    pub fn remove_blocks(&self, hashes: impl IntoIterator<Item = B256>) {
+    pub fn remove_blocks(
+        &self,
+        hashes: impl IntoIterator<Item = B256>,
+        state_trie_frontier: BlockNumber,
+    ) {
         let span = tracing::Span::current();
 
         let removed = hashes.into_iter().collect::<B256Set>();
@@ -378,26 +341,23 @@ impl<N: NodePrimitives> OverlayManager<N> {
         span.record("block_count", block_count);
         span.record("removed_blocks", block_count);
 
-        let mut pruned_overlays = 0usize;
-        if block_count > 0 {
-            let in_memory_state = self.in_memory_state.read().clone();
-            let overlays_before = self.state_trie_overlays.len() + self.execution_overlays.len();
-            self.state_trie_overlays
-                .retain(|key, _| overlay_is_live(in_memory_state.as_ref(), key, &removed));
-            self.execution_overlays.retain(|key, entry| {
-                // The covered blocks are recorded on a ready execution overlay, so the check is
-                // exact without looking at the chain at all.
-                if let OverlayCacheEntry::Ready(overlay) = entry &&
-                    overlay.block_hashes().iter().any(|block| removed.contains(&block.hash))
-                {
-                    return false
-                }
-                overlay_is_live(in_memory_state.as_ref(), key, &removed)
-            });
-            pruned_overlays = overlays_before
-                .saturating_sub(self.state_trie_overlays.len() + self.execution_overlays.len());
-            span.record("pruned_overlays", pruned_overlays);
-        }
+        let overlays_before = self.state_trie_overlays.len() + self.execution_overlays.len();
+        self.state_trie_overlays
+            .retain(|key, cached| overlay_is_live(key, cached, &removed, state_trie_frontier));
+        self.execution_overlays.retain(|key, cached| {
+            // A ready execution overlay records the blocks it covers, so an interior removal is
+            // caught exactly rather than inferred from the ends of the range.
+            if let OverlayCacheEntry::Ready(overlay) = &cached.entry &&
+                overlay.block_hashes().iter().any(|block| removed.contains(&block.hash))
+            {
+                return false
+            }
+            overlay_is_live(key, cached, &removed, state_trie_frontier)
+        });
+        let pruned_overlays = overlays_before
+            .saturating_sub(self.state_trie_overlays.len() + self.execution_overlays.len());
+        span.record("pruned_overlays", pruned_overlays);
+
         debug!(
             target: "storage::overlay::manager",
             block_count,
@@ -511,7 +471,7 @@ impl<N: NodePrimitives> OverlayManager<N> {
         let tip_hash = parent_state.hash();
         let key = OverlayCacheKey { anchor_hash, tip_hash };
         let span = tracing::Span::current();
-        if let Some(entry) = cache.entries.get(&key).map(|entry| entry.value().clone()) {
+        if let Some(entry) = cache.entries.get(&key).map(|cached| cached.value().entry.clone()) {
             metrics.record_cache_reuse();
             span.record("cache_reused", true);
             return match entry {
@@ -525,6 +485,15 @@ impl<N: NodePrimitives> OverlayManager<N> {
         // Resolve the block path and any cached parent overlay before locking the child entry.
         let mut blocks = Self::blocks_from_parent_state(parent_state, anchor_hash)?;
         span.record("block_count", blocks.len());
+
+        // `blocks` runs from the tip down to the block right above the anchor, so the anchor's
+        // number is known here, before an entry is installed.
+        let anchor_number = blocks
+            .last()
+            .expect("a non-empty block path always reaches the anchor")
+            .recovered_block()
+            .number()
+            .saturating_sub(1);
 
         if !cache_config.write_to_cache {
             let parent_input = blocks.first().and_then(|block| {
@@ -551,7 +520,7 @@ impl<N: NodePrimitives> OverlayManager<N> {
 
         let action = match cache.entries.entry(key) {
             Entry::Occupied(entry) => {
-                let entry = entry.get().clone();
+                let entry = entry.get().entry.clone();
                 metrics.record_cache_reuse();
                 span.record("cache_reused", true);
                 match entry {
@@ -563,7 +532,10 @@ impl<N: NodePrimitives> OverlayManager<N> {
             Entry::Vacant(entry) => {
                 metrics.record_cache_fill();
                 let waiter = Arc::new(OverlayWaiter::new());
-                entry.insert(OverlayCacheEntry::Computing(Arc::clone(&waiter)));
+                entry.insert(CachedOverlay {
+                    anchor_number,
+                    entry: OverlayCacheEntry::Computing(Arc::clone(&waiter)),
+                });
                 CacheAction::Compute(waiter)
             }
         };
@@ -595,12 +567,15 @@ impl<N: NodePrimitives> OverlayManager<N> {
                 if let Entry::Occupied(mut entry) = cache.entries.entry(key) {
                     // The entry may have been pruned while the overlay was computing. Only cache
                     // the result if the map still points at the waiter installed by this task.
-                    let should_publish = match entry.get() {
+                    let should_publish = match &entry.get().entry {
                         OverlayCacheEntry::Computing(existing) => Arc::ptr_eq(existing, &waiter),
                         OverlayCacheEntry::Ready(_) => false,
                     };
                     if should_publish {
-                        entry.insert(OverlayCacheEntry::Ready(Arc::clone(&input)));
+                        entry.insert(CachedOverlay {
+                            anchor_number,
+                            entry: OverlayCacheEntry::Ready(Arc::clone(&input)),
+                        });
                     }
                 }
 
@@ -673,28 +648,23 @@ impl<N: NodePrimitives> OverlayManager<N> {
     }
 }
 
-/// Returns whether a cached overlay can still be built from the remaining in-memory blocks.
+/// Returns whether a cached overlay can still be requested.
 ///
-/// An overlay spans the blocks in `(anchor, tip]`. It is stale once either end is gone, or once
-/// the shared chain that ends at `tip` no longer reaches `anchor` - which is what a persistence
-/// trim does when it re-links the surviving blocks onto the new frontier. This follows the
-/// `parent` links of the shared [`BlockState`] and does not look up any block but the tip.
-fn overlay_is_live<N: NodePrimitives>(
-    in_memory_state: Option<&CanonicalInMemoryState<N>>,
+/// An overlay spans the blocks in `(anchor, tip]`. It is dead once either end is gone, or once
+/// the durable state trie frontier has moved past its anchor: an overlay anchored below the
+/// frontier can never be asked for again, because anchors are resolved at the frontier. The
+/// number check also covers an anchor that was never an in-memory block, which no hash-based
+/// check can see.
+fn overlay_is_live<T>(
     key: &OverlayCacheKey,
+    cached: &CachedOverlay<T>,
     removed: &B256Set,
+    state_trie_frontier: BlockNumber,
 ) -> bool {
     if removed.contains(&key.tip_hash) || removed.contains(&key.anchor_hash) {
         return false
     }
-    // Without an attached store there is no chain to verify against, so the hash checks above are
-    // all that can be said. This only happens in unit tests.
-    let Some(in_memory_state) = in_memory_state else { return true };
-    let Some(tip) = in_memory_state.executed_state_by_hash(key.tip_hash) else { return false };
-    tip.chain().any(|state| {
-        state.hash() == key.anchor_hash ||
-            state.block_ref().recovered_block().parent_hash() == key.anchor_hash
-    })
+    cached.anchor_number >= state_trie_frontier
 }
 
 /// Controls how an overlay computation interacts with the manager cache.
@@ -739,8 +709,20 @@ struct OverlayCacheKey {
     tip_hash: B256,
 }
 
+/// A cached overlay, together with the number of the block it is anchored to.
+///
+/// An overlay covers `(anchor_number, tip_number]`. Recording where that range starts makes the
+/// entry prunable without walking any chain: once the durable state trie frontier moves past the
+/// anchor, the entry can never be requested again, because anchors are resolved at the frontier.
+struct CachedOverlay<T> {
+    /// Number of the block the overlay is anchored to.
+    anchor_number: BlockNumber,
+    /// The overlay itself, or the computation that will produce it.
+    entry: OverlayCacheEntry<T>,
+}
+
 struct OverlayCache<T> {
-    entries: Arc<DashMap<OverlayCacheKey, OverlayCacheEntry<T>>>,
+    entries: Arc<DashMap<OverlayCacheKey, CachedOverlay<T>>>,
 }
 
 impl<T> Default for OverlayCache<T> {
@@ -760,13 +742,13 @@ impl<T> OverlayCache<T> {
         self.entries.len()
     }
 
-    fn retain(&self, mut keep: impl FnMut(&OverlayCacheKey, &OverlayCacheEntry<T>) -> bool) {
-        self.entries.retain(|key, entry| keep(key, entry))
+    fn retain(&self, mut keep: impl FnMut(&OverlayCacheKey, &CachedOverlay<T>) -> bool) {
+        self.entries.retain(|key, cached| keep(key, cached))
     }
 
     /// Returns a ready entry without removing it from the cache.
     fn ready(&self, key: &OverlayCacheKey) -> Option<Arc<T>> {
-        self.entries.get(key).and_then(|entry| match entry.value() {
+        self.entries.get(key).and_then(|cached| match &cached.value().entry {
             OverlayCacheEntry::Ready(input) => Some(Arc::clone(input)),
             OverlayCacheEntry::Computing(_) => None,
         })
@@ -777,9 +759,10 @@ impl<T> OverlayCache<T> {
     /// Transferring a parent entry lets `Arc::make_mut` extend it in place when no caller retains
     /// it. Keeping the cache entry would otherwise guarantee a clone.
     fn take_ready(&self, key: &OverlayCacheKey) -> Option<Arc<T>> {
-        let (_, entry) =
-            self.entries.remove_if(key, |_, entry| matches!(entry, OverlayCacheEntry::Ready(_)))?;
-        let OverlayCacheEntry::Ready(input) = entry else { unreachable!() };
+        let (_, cached) = self
+            .entries
+            .remove_if(key, |_, cached| matches!(cached.entry, OverlayCacheEntry::Ready(_)))?;
+        let OverlayCacheEntry::Ready(input) = cached.entry else { unreachable!() };
         Some(input)
     }
 }
@@ -992,6 +975,7 @@ fn compute_execution_overlay_inner<N: NodePrimitives>(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_utils::TestOverlay;
     use alloy_primitives::{map::HashMap, Address, U256};
     use reth_chain_state::{test_utils::TestBlockBuilder, ExecutedBlock, SparseTrie};
     use reth_ethereum_primitives::EthPrimitives;
@@ -1057,7 +1041,7 @@ mod tests {
             .collect()
     }
 
-    impl OverlayManager {
+    impl TestOverlay {
         fn execution_overlay_for_parent(
             &self,
             parent_hash: B256,
@@ -1078,7 +1062,7 @@ mod tests {
     }
 
     fn overlay_for_parent(
-        manager: &OverlayManager,
+        manager: &TestOverlay,
         parent_hash: B256,
         anchor_hash: B256,
     ) -> Result<(Arc<TrieUpdatesSorted>, Arc<HashedPostStateSorted>), StateTrieOverlayError> {
@@ -1090,7 +1074,7 @@ mod tests {
 
     #[test]
     fn errors_for_unknown_parent() {
-        let manager = OverlayManager::<EthPrimitives>::default();
+        let manager = TestOverlay::default();
         let parent = B256::random();
         let anchor = B256::random();
 
@@ -1102,7 +1086,7 @@ mod tests {
 
     #[test]
     fn builds_managed_overlay_for_inserted_blocks() {
-        let manager = OverlayManager::default();
+        let manager = TestOverlay::default();
         let blocks = test_blocks();
         for block in &blocks {
             manager.insert_executed_block(block.clone());
@@ -1125,7 +1109,7 @@ mod tests {
 
     #[test]
     fn builds_execution_overlay_for_inserted_blocks() {
-        let manager = OverlayManager::default();
+        let manager = TestOverlay::default();
         let blocks = test_blocks();
         for block in &blocks {
             manager.insert_executed_block(block.clone());
@@ -1163,7 +1147,7 @@ mod tests {
 
     #[test]
     fn execution_overlay_for_parent_at_anchor_is_empty() {
-        let manager = OverlayManager::<EthPrimitives>::default();
+        let manager = TestOverlay::default();
         let anchor_hash = B256::with_last_byte(1);
 
         let overlay = manager.execution_overlay_for_parent(anchor_hash, anchor_hash).unwrap();
@@ -1176,7 +1160,7 @@ mod tests {
 
     #[test]
     fn promotes_ready_parent_overlays_to_the_child() {
-        let manager = OverlayManager::default();
+        let manager = TestOverlay::default();
         let blocks = test_blocks();
         for block in &blocks {
             manager.insert_executed_block(block.clone());
@@ -1202,7 +1186,7 @@ mod tests {
 
     #[test]
     fn promotes_parent_overlays_held_by_callers() {
-        let manager = OverlayManager::default();
+        let manager = TestOverlay::default();
         let blocks = test_blocks();
         for block in &blocks {
             manager.insert_executed_block(block.clone());
@@ -1218,7 +1202,7 @@ mod tests {
             .state_trie_overlays
             .entries
             .get(&parent_key)
-            .and_then(|entry| match entry.value() {
+            .and_then(|entry| match &entry.value().entry {
                 OverlayCacheEntry::Ready(input) => Some(Arc::clone(input)),
                 OverlayCacheEntry::Computing(_) => None,
             })
@@ -1245,7 +1229,7 @@ mod tests {
 
     #[test]
     fn does_not_cache_or_take_parent_overlays_for_unmanaged_blocks() {
-        let manager = OverlayManager::default();
+        let manager = TestOverlay::default();
         let blocks = test_blocks();
         for block in &blocks[..2] {
             manager.insert_executed_block(block.clone());
@@ -1280,7 +1264,8 @@ mod tests {
     #[cfg(feature = "rayon")]
     #[test]
     fn precomputes_execution_overlay_for_cached_parent() {
-        let manager = OverlayManager::new(Arc::new(WorkerPool::new(1, "execution-overlay-test")));
+        let manager =
+            TestOverlay::with_worker_pool(Arc::new(WorkerPool::new(1, "execution-overlay-test")));
         let blocks = test_blocks();
         let anchor_hash = blocks[0].recovered_block().parent_hash();
 
@@ -1296,7 +1281,7 @@ mod tests {
             .execution_overlays
             .entries
             .get(&key)
-            .is_some_and(|entry| matches!(entry.value(), OverlayCacheEntry::Ready(_)))
+            .is_some_and(|entry| matches!(entry.value().entry, OverlayCacheEntry::Ready(_)))
         {
             assert!(std::time::Instant::now() < deadline, "execution overlay was not precomputed");
             thread::sleep(Duration::from_millis(10));
@@ -1310,7 +1295,8 @@ mod tests {
     #[cfg(feature = "rayon")]
     #[test]
     fn precomputes_execution_overlay_after_anchor_advances() {
-        let manager = OverlayManager::new(Arc::new(WorkerPool::new(1, "execution-overlay-test")));
+        let manager =
+            TestOverlay::with_worker_pool(Arc::new(WorkerPool::new(1, "execution-overlay-test")));
         let blocks = test_blocks();
         for block in &blocks {
             manager.insert_executed_block(block.clone());
@@ -1361,7 +1347,7 @@ mod tests {
     #[test]
     fn execution_overlay_precompute_does_not_wait_for_pending_entry() {
         let worker_pool = Arc::new(WorkerPool::new(1, "execution-overlay-pending-test"));
-        let manager = OverlayManager::new(Arc::clone(&worker_pool));
+        let manager = TestOverlay::with_worker_pool(Arc::clone(&worker_pool));
         let block = test_blocks().remove(0);
         let anchor_hash = block.recovered_block().parent_hash();
         let tip_hash = block.recovered_block().hash();
@@ -1370,7 +1356,10 @@ mod tests {
         let waiter = Arc::new(OverlayWaiter::new());
         manager.execution_overlays.entries.insert(
             OverlayCacheKey { anchor_hash, tip_hash },
-            OverlayCacheEntry::Computing(Arc::clone(&waiter)),
+            CachedOverlay {
+                anchor_number: 0,
+                entry: OverlayCacheEntry::Computing(Arc::clone(&waiter)),
+            },
         );
 
         let (tx, rx) = mpsc::channel();
@@ -1392,7 +1381,7 @@ mod tests {
 
     #[test]
     fn taking_sparse_trie_removes_it() {
-        let manager = OverlayManager::<EthPrimitives>::default();
+        let manager = TestOverlay::default();
         let state_root = B256::with_last_byte(1);
         let other_state_root = B256::with_last_byte(2);
         let anchor_hash = B256::with_last_byte(3);
@@ -1412,7 +1401,7 @@ mod tests {
 
     #[test]
     fn required_lookup_waits_for_in_progress_overlay() {
-        let manager = OverlayManager::<EthPrimitives>::default();
+        let manager = TestOverlay::default();
         let block = test_blocks().remove(0);
         let parent_state = BlockState::new(block);
         let key = OverlayCacheKey {
@@ -1420,10 +1409,13 @@ mod tests {
             tip_hash: parent_state.hash(),
         };
         let waiter = Arc::new(OverlayWaiter::new());
-        manager
-            .state_trie_overlays
-            .entries
-            .insert(key, OverlayCacheEntry::Computing(Arc::clone(&waiter)));
+        manager.state_trie_overlays.entries.insert(
+            key,
+            CachedOverlay {
+                anchor_number: 0,
+                entry: OverlayCacheEntry::Computing(Arc::clone(&waiter)),
+            },
+        );
 
         let (tx, rx) = mpsc::channel();
         thread::spawn(move || {
@@ -1446,13 +1438,12 @@ mod tests {
 
     #[test]
     fn prunes_fork_overlays_when_the_fork_is_removed() {
-        let manager = OverlayManager::default();
+        let manager = TestOverlay::default();
         let blocks = test_blocks();
         for block in &blocks {
             manager.insert_executed_block(block.clone());
         }
 
-        let in_memory = manager.test_in_memory_state();
         let fork = with_unique_state(
             &TestBlockBuilder::eth().get_executed_block_with_number(
                 blocks[2].block_number(),
@@ -1460,8 +1451,7 @@ mod tests {
             ),
             9,
         );
-        let fork_state = in_memory.insert_executed(fork);
-        manager.insert_block(Arc::clone(&fork_state));
+        let fork_state = manager.insert_fork(fork);
 
         let anchor_hash = blocks[0].recovered_block().parent_hash();
         let key = OverlayCacheKey { anchor_hash, tip_hash: fork_state.hash() };
@@ -1478,17 +1468,16 @@ mod tests {
         assert!(manager.state_trie_overlays.entries.contains_key(&key));
         assert!(manager.execution_overlays.entries.contains_key(&key));
 
-        // Pruning the fork goes through the shared store, and the manager drops the overlays that
-        // can no longer be built.
-        in_memory.remove_executed_blocks([fork_state.hash()]);
-        manager.remove_blocks([fork_state.hash()]);
+        // Pruning the fork goes through the store that owns it, and the manager drops the
+        // overlays whose tip is gone.
+        manager.remove_forks([fork_state.hash()], blocks[0].block_number());
         assert!(!manager.state_trie_overlays.entries.contains_key(&key));
         assert!(!manager.execution_overlays.entries.contains_key(&key));
     }
 
     #[test]
     fn prunes_cached_overlays_after_removing_blocks() {
-        let manager = OverlayManager::default();
+        let manager = TestOverlay::default();
         let blocks = test_blocks();
         for block in &blocks {
             manager.insert_executed_block(block.clone());
