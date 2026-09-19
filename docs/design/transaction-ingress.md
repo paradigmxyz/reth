@@ -47,7 +47,8 @@ These are bounds on admitted work, not a process RSS ceiling. Existing network m
 
 ## Configuration and limits
 
-- `--txpool.max-batch-size` controls shared recovery/validation/insertion batches; its default is 32.
+- `--txpool.recovery-threads` controls dedicated recovery concurrency; its default is half the available CPUs, at least one. `--txpool.recovery-batch-size` controls recovery chunks and defaults to 32.
+- `--txpool.max-batch-size` controls validation/insertion batches; its default is 32.
 - `--txpool.additional-validation-tasks` continues to control worker count (one base worker plus the configured additional tasks).
 - `BatchTxConfig` configures per-source admission counts and bytes, and the byte quantum. Defaults are 4,096 transactions and 32 MiB per source, with a 256 KiB batch quantum.
 - `EthApiBuilder::max_batch_size` controls a standalone RPC processor. An injected shared batcher owns its batch settings; `PoolBuilder::build_batcher` selects the execution adapter and can customize its configuration.
@@ -55,28 +56,62 @@ These are bounds on admitted work, not a process RSS ceiling. Existing network m
 
 Resident pool capacity is separate from ingress capacity. A full pool can still accept a higher-priority transaction or replacement, so resident fullness does not cause blanket pre-recovery rejection. Existing pool eviction and validation rules remain authoritative. Existing recovered-transaction pool APIs also remain available for internal callers.
 
-A smaller worker budget limits total ingress CPU, including recovery and insertion. Under overload this can trade gossip admission throughput for RPC responsiveness and CPU available to chain processing. Raising validation concurrency gives recovery more CPU as well. It does not remove pool write-lock contention or the cost of long per-account nonce chains. Count and byte quanta are not CPU deadlines: blob verification and chain-specific authorization work can require different settings. The measurements below cover Ethereum transfers, not Tempo AA transactions or production persistence/TLB behavior.
+A smaller recovery-thread budget limits parallel recovery CPU independently of validation concurrency. Under overload this can trade gossip admission throughput for RPC responsiveness and CPU available to chain processing. Raising validation concurrency can reduce downstream queueing, but does not change the recovery-thread budget. Neither setting removes pool write-lock contention or the cost of long per-account nonce chains. Count and byte quanta are not CPU deadlines: blob verification and chain-specific authorization work can require different settings.
 
 ## Measurements
 
-Measured at `da7f499de8`, before the subsequent sidecar-accounting, overload-drop hardening and batcher consolidation. Compared with main `4dd0cc021a72` on a Linux AMD EPYC 4585PX host, using identical profiling builds, eight physical cores (16 logical CPUs) for the node and separate CPUs for generators. Four validation workers and a 32-transaction batch limit were used on both builds. The node and generators shared a 3 GiB cgroup; existing nodes remained running. These are local comparisons, not production capacity estimates.
+Measured the staged implementation at `a6d68e0876` against main `4dd0cc021a` on `dev-mattsse` (AMD EPYC 4585PX). Both binaries used the same Rust 1.96.1 profiling-build recipe. The node used eight physical cores (16 logical CPUs), with separate generator CPUs, four validation workers and 32-transaction import batches. The candidate used eight dedicated recovery threads and 32-transaction recovery chunks. Existing Ethereum nodes remained running. Node and generators shared a 3 GiB cgroup; these are local comparisons, not production capacity estimates.
 
-Each case offered 20,000 RPC transfers at up to 5,000/s, with 256 concurrent requests and no retries. Mixed cases also offered 100,000 P2P transfers at 25,000/s, using either broadcasts or fetched bodies in 256-transaction messages. Account and resident-pool limits were raised to stress long nonce chains. Non-replay cases used a development chain with 500 ms blocks. Replay cases imported the same 45 payloads containing 62,748 P2P-source transactions while RPC used disjoint senders, avoiding nonce invalidation by the replay. The first three payloads were warmup; the remaining 40 nonempty payloads supply latency samples. At this sample count, p99 is the maximum, so tail estimates are noisy.
+There were three alternating repeats per case: 36 txgen/dev-chain runs and 18 disjoint-sender payload-replay runs. Every measured run accepted all 20,000 RPC submissions; all dev-chain runs also mined them. No OOM kills or CPU throttling were observed. The cgroup reached its 3 GiB limit and experienced reclaim; peak sampled node RSS across all runs was 1,389 MiB. The cgroup limit includes generators and page cache, and ingress byte limits are not a process RSS ceiling.
 
-Medians of three runs per case and build, with alternating build order; values are main → candidate. Every run acknowledged all 20,000 RPC submissions successfully. CPU is node-wide user plus system time, excluding generators. CPU per insertion also includes payload work and is not an isolated recovery cost. Insertions measure accepted pool work, not retention or inclusion.
+Each run offered 20,000 RPC transfers at up to 5,000/s, with 256 concurrent requests and no retries. Mixed runs also offered 100,000 P2P transfers at 25,000/s in 256-transaction messages. Account and pool limits were raised to stress long nonce chains. Txgen/dev-chain cases used 500 ms blocks, sender caching disabled, and either no pending limiter or `--max-pending 5000`.
 
-| Workload | Sender cache | CPU µs/insertion | Pool insertions | RPC p99 (ms) | newPayload p95 / p99 (ms) |
+Values below are medians of three runs, main → candidate. CPU is node-wide user plus system time. RPC p99 measures submission acknowledgement, excluding time waiting for the txgen pending limiter and time waiting for inclusion. Inclusion completion is sampled approximately once per second.
+
+| Traffic | Max pending | CPU in ~16 s (s) | Pool insertions by RPC completion | RPC p99 (ms) | All RPC mined (s) |
+|---|---:|---:|---:|---:|---:|
+| rpc-only | 0 | 3.40 → 3.72 | 20,000 → 20,000 | 0.440 → 0.365 | 7.64 → 7.66 |
+| rpc-only | 5,000 | 3.36 → 3.72 | 20,000 → 20,000 | 0.245 → 0.298 | 7.64 → 7.65 |
+| fetch | 0 | 12.08 → 12.28 | 93,632 → 92,960 | 15.912 → 11.563 | 20.85 → 22.02 |
+| fetch | 5,000 | 11.81 → 11.35 | 95,936 → 94,656 | 13.359 → 9.020 | 20.85 → 20.96 |
+| broadcast | 0 | 13.67 → 11.97 | 108,736 → 95,584 | 102.725 → 11.397 | 22.03 → 20.93 |
+| broadcast | 5,000 | 13.02 → 11.20 | 109,600 → 96,800 | 105.116 → 10.810 | 22.18 → 20.94 |
+
+The additional stage costs roughly 9–11% more CPU in RPC-only runs. Broadcast-load RPC p99 improves by about 89–90%, but the candidate admits about 12% fewer transactions overall; part of its lower total CPU comes from shedding gossip. Fetched-load RPC p99 improves by about 27–32%; uncapped RPC inclusion completion is about 1.2 seconds slower. Included throughput in mixed dev-chain runs stays around 2.9k transactions/s and is constrained by block production, so it is not a measure of maximum ingress capacity.
+
+Replay cases import the same 45 payloads containing 62,748 P2P-source transactions while RPC uses disjoint senders. All payloads returned VALID. Three warmup payloads are excluded; each run provides 40 nonempty timed payloads. At that sample count p99 is the maximum, so tail comparisons remain noisy.
+
+| Replay traffic | Sender cache | CPU µs/insertion | Pool insertions | RPC p99 (ms) | newPayload p95 / p99 (ms) |
 |---|---|---:|---:|---:|---:|
-| RPC only | Off | 167.0 → 162.5 | 20,000 → 20,000 | 0.353 → 0.336 | — |
-| Fetched | On | 121.3 → 117.2 | 93,984 → 92,206 | 15.725 → 11.624 | — |
-| Fetched + payload replay | Off | 125.8 → 118.5 | 111,100 → 109,483 | 10.481 → 13.628 | 9.844 / 14.495 → 9.182 / 9.870 |
-| Fetched + payload replay | On | 109.9 → 103.9 | 111,356 → 109,456 | 10.781 → 13.513 | 6.649 / 7.060 → 5.981 / 6.157 |
-| Broadcast + payload replay | On | 111.8 → 97.9 | 112,636 → 112,124 | 28.017 → 11.289 | 6.559 / 10.546 → 6.008 / 6.683 |
+| fetch | Off | 126.6 → 128.6 | 111,100 → 109,528 | 10.445 → 14.789 | 10.247 / 13.430 → 9.580 / 9.958 |
+| fetch | On | 110.1 → 112.7 | 111,612 → 110,588 | 10.584 → 12.937 | 6.280 / 7.235 → 6.361 / 7.101 |
+| broadcast | On | 113.8 → 109.5 | 111,612 → 112,200 | 20.881 → 11.423 | 7.023 / 8.797 → 6.370 / 6.992 |
 
-Payload priority trades fetched-RPC tail latency and some gossip admission for lower payload tails and CPU per insertion. RPC-only p50 also rose from 0.123 to 0.135 ms. The cache-on/off comparison includes existing P2P cache behavior and does not isolate the benefit of RPC cache sharing; cache hit rate was not measured. The node-level regression test verifies that rejected raw RPC transactions publish successful recovery to the same cache used by payload execution.
+CPU per insertion includes payload processing and is not an isolated recovery cost. During payload replay, fetched RPC p99 worsens by about 22–42%, while broadcast RPC p99 improves by about 45%. The cache-off fetched and cache-on broadcast cases have lower median-run payload tails; cache-on fetched payload timing is close between builds. These tradeoffs do not establish a universal throughput improvement.
 
-Both ingress lanes recorded zero admission rejections, but upstream gossip limits still dropped offered work. In mixed candidate runs, median sampled outstanding RPC work peaked at 10 requests, versus roughly 3,900–4,032 P2P requests against the 4,096 budget. Mean batches contained 2.0–2.2 RPC and 28.1–29.3 P2P transactions. P2P enqueue-to-recovery p99 was 215–341 ms; this is queue delay, not end-to-end arrival-to-pool latency. Gauges sampled every 200 ms can miss shorter peaks.
+Both ingress lanes recorded zero admission rejections in this matrix; upstream P2P import limits still shed offered work. Candidate sampled outstanding work peaked at 10 RPC and 3,968 P2P requests against separate 4,096-request budgets. Samples can miss shorter peaks. Unit and integration tests separately cover admission exhaustion, byte growth, stalled validation, payload pauses, cancellation, shutdown and panics.
 
-An initial replay corpus included RPC senders and invalidated RPC nonces as payloads arrived. Those runs are retained separately in the benchmark evidence and excluded from this comparison. The corrected matrix uses disjoint RPC and replay senders.
+The [earlier measurements](https://github.com/paradigmxyz/reth/blob/b26425bcab790bc3daf3591a14c05479e41ddb05/docs/design/transaction-ingress.md#measurements) cover preceding implementations, including different batching and overload cases. Those results must not be attributed to this staged implementation.
 
-The [original measurements](https://github.com/paradigmxyz/reth/blob/119cdd43f236bbf0845fcf6880e9980cdbac88a6/docs/design/transaction-ingress.md#measurements) include batch-size selection, singleton broadcasts, burst overload, constrained pool capacity and separate CPU profiles. Singleton broadcasts regressed, and burst overload shed substantially more gossip; those cases were not rerun for the cache/pause changes. Ready batching and bounded concurrency do not guarantee faster ingestion for every workload, and repeated sender-prefix traversal and pool write-lock contention remain separate costs.
+## Live Ethereum observation
+
+Restarted one synced mainnet node on `dev-mattsse` at 14:51:05 UTC on 2026-09-19 with the measured `a6d68e0876` binary and unchanged runtime arguments. The other Ethereum nodes remained running. The candidate used the default 16 recovery threads on the full 32-logical-CPU host. The previous binary was `2f46c5e2f`, the direct predecessor of the controlled benchmark base; the intervening change concerns historical SnapSync verification.
+
+Observed the candidate for 43.7 minutes after restart. Peer connections took about 33 minutes to recover; the steady comparison below starts at 15:24:14 UTC, with 95–101 peers, and lasts 10.6 minutes. The before window excludes the candidate build and benchmark load. CPU is percent of one logical CPU; throughput counts successful pool insertions, not unique transactions or block inclusion.
+
+| Window / node | Seconds | Pool insertions/s | CPU % | RSS median (MiB) | Payload count | newPayload mean / p95 / p99 (ms) |
+|---|---:|---:|---:|---:|---:|---:|
+| Before / selected node | 455 | 157.7 | 12.65 | 10,636 | 38 | 26.21 / 54.64 / 63.43 |
+| Before / reference | 455 | 155.2 | 13.66 | 11,087 | 38 | 27.02 / 55.72 / 64.46 |
+| After / candidate | 635 | 173.7 | 16.33 | 7,038 | 53 | 28.54 / 51.10 / 72.41 |
+| After / reference | 635 | 153.7 | 13.12 | 12,009 | 53 | 27.69 / 55.45 / 73.02 |
+
+The candidate remained synced and tracked the reference head, with no newPayload invalid/error counter increments in the measured post-startup windows. Steady-window P2P admission was 193,295 transactions with 0 capacity rejections. Sampled P2P outstanding work peaked at 32 transactions and 13,296 estimated bytes; no RPC submission traffic was observed. P2P mean pre-recovery queue wait was 121.5 µs, recovery 29.9 µs, and validation queue wait 180.6 µs.
+
+This live window establishes normal chain progress under actual P2P traffic, but does not isolate a performance effect. The candidate and reference see different gossip, and the unchanged reference runs a different branch. Restarted caches and different blocks confound before/after comparisons. In particular, the lower candidate RSS must not be attributed to ingress, and a short observation does not establish long-term memory behavior. newPayload means use counter deltas; tail estimates use the latest completed payload at five-second samples (53 steady samples, 0 unobserved payloads), so tail precision is limited. The healthy candidate remains running; rollback instructions and original arguments are retained on the dev box.
+
+## Tempo integration
+
+[Tempo #7762](https://github.com/tempoxyz/tempo/pull/7762) integrates this Reth change while preserving the hybrid transaction pool and explicitly routing raw RPC through shared ingress. A regression test verifies admission before recovery. The matched baseline `375728ccfd3d` pins the same upstream Reth base, and feature `2bcac0b98108` contains the integration plus a test-future stack fix. Linux tests, RPC/e2e tests, Clippy and the other build checks passed.
+
+The requested `public-mix` txgen/building benchmark was dispatched for three 90-second baseline/feature pairs, 100 GiB state, 50,000 offered TPS, 1,000 accounts, 100 concurrent requests and four tokens. All three execution attempts across [the first run](https://github.com/tempoxyz/tempo/actions/runs/35450026162) and [the final feature run](https://github.com/tempoxyz/tempo/actions/runs/35451041630) failed before compilation: the runner firewall could not bind `127.0.0.1:443` on `ghr-euw-04` / `ghr-euw-05`. No Tempo performance result is available. Runner repair or a healthy accessible runner is required; stale artifacts left in those workspaces were excluded.
