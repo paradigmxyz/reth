@@ -835,16 +835,10 @@ impl Runtime {
         self.do_graceful_shutdown(Some(timeout))
     }
 
-    /// Shuts down the owned tokio runtime, waiting at most `timeout` for blocking tasks to finish.
+    /// Shuts down the owned tokio runtime for all clones, waiting at most `timeout` for blocking
+    /// tasks. Externally supplied runtimes are left running.
     ///
-    /// This affects all clones, cancelling remaining async tasks. Complete graceful shutdown first
-    /// if those tasks need to persist data. Blocking tasks that exceed the timeout continue running
-    /// until they return. An externally supplied runtime is left running.
-    ///
-    /// # Panics
-    ///
-    /// Panics if called from an async context with a nonzero timeout while an owned runtime remains
-    /// to be shut down.
+    /// Panics if called from an async context while an owned runtime remains.
     pub fn shutdown_timeout(self, timeout: Duration) {
         let runtime = self.0.tokio_runtime.lock().unwrap().take();
         if let Some(runtime) = runtime {
@@ -1087,7 +1081,6 @@ mod tests {
             drop(task_runtime);
         });
 
-        // Dropping the CLI's clone on another thread does not determine where the last clone drops.
         thread::spawn(move || drop(runtime)).join().unwrap();
         release.send(()).unwrap();
         task.await.unwrap();

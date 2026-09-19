@@ -69,12 +69,20 @@ pub enum SnapSyncError {
         /// Block the list was applied for.
         block: u64,
     },
-    /// The pivot was moved below the last block whose list is applied.
-    #[error("pivot {pivot} is below applied block {applied}")]
-    PivotBelowApplied {
+    /// The pivot was moved to a block not past the current one.
+    #[error("pivot {pivot} cannot move to block {target}, which is not past it")]
+    PivotNotAdvanced {
+        /// Block the attempt is anchored to.
+        pivot: u64,
+        /// Block the pivot was moved to.
+        target: u64,
+    },
+    /// Storage persisted ahead of a range was committed before catch-up reached the pivot.
+    #[error("catch-up applied block {applied}, the pivot is {pivot}")]
+    CatchUpBehindPivot {
         /// Last block whose list is applied.
         applied: u64,
-        /// Block the pivot was moved to.
+        /// Block the attempt is anchored to.
         pivot: u64,
     },
     /// A list was applied for a block the canonical chain no longer holds.
