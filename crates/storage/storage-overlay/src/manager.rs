@@ -249,7 +249,7 @@ impl<N: NodePrimitives> OverlayManager<N> {
             parent_hash = %state.block_ref().recovered_block().parent_hash(),
         )
     )]
-    pub fn insert_block(&self, state: Arc<BlockState<N>>) {
+    pub fn on_new_block(&self, state: Arc<BlockState<N>>) {
         let hash = state.hash();
         let parent_hash = state.block_ref().recovered_block().parent_hash();
 

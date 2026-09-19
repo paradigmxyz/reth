@@ -438,7 +438,7 @@ mod tests {
             ..Default::default()
         };
         provider.canonical_in_memory_state().set_pending_block(pending_block);
-        overlay_manager.insert_block(
+        overlay_manager.on_new_block(
             provider
                 .canonical_in_memory_state()
                 .pending_state()

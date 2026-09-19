@@ -1385,7 +1385,7 @@ mod tests {
         };
         provider.canonical_in_memory_state.update_chain(chain);
         for state in provider.canonical_in_memory_state.canonical_chain() {
-            provider.database.overlay_manager().insert_block(state);
+            provider.database.overlay_manager().on_new_block(state);
         }
 
         // Get canonical, safe, and finalized blocks
@@ -3065,7 +3065,7 @@ mod tests {
                 .canonical_in_memory_state
                 .state_by_hash(hash)
                 .expect("block was just committed");
-            provider.database.overlay_manager().insert_block(state);
+            provider.database.overlay_manager().on_new_block(state);
         }
     }
 
@@ -3395,7 +3395,7 @@ mod tests {
             executed_block_with_account(&mut rng, genesis.num_hash(), 2, None);
         let fork_hash = fork.recovered_block().hash();
         let fork_state = provider.canonical_in_memory_state.insert_executed(fork);
-        provider.database.overlay_manager().insert_block(fork_state);
+        provider.database.overlay_manager().on_new_block(fork_state);
 
         let (pending, pending_address, pending_account) =
             executed_block_with_account(&mut rng, canonical_num_hash, 3, None);
@@ -3403,7 +3403,7 @@ mod tests {
         provider.canonical_in_memory_state.set_pending_block(pending);
         let pending_state =
             provider.canonical_in_memory_state.pending_state().expect("pending block was just set");
-        provider.database.overlay_manager().insert_block(pending_state);
+        provider.database.overlay_manager().on_new_block(pending_state);
 
         // `state_by_block_hash` still only serves canonical and pending hashes; a fork is reached
         // through the overlay manager, which is what payload validation does.

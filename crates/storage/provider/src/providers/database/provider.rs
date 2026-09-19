@@ -4978,7 +4978,7 @@ mod tests {
         let in_memory_state = CanonicalInMemoryState::empty();
         in_memory_state.update_chain(NewCanonicalChain::Commit { new: blocks[2..].to_vec() });
         for state in in_memory_state.canonical_chain() {
-            factory.overlay_manager().insert_block(state);
+            factory.overlay_manager().on_new_block(state);
         }
 
         let provider_rw = factory.provider_rw().unwrap();

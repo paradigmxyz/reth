@@ -44,7 +44,7 @@ impl TestOverlay {
         let hash = block.recovered_block().hash();
         self.blocks.update_chain(NewCanonicalChain::Commit { new: vec![block] });
         let state = self.blocks.state_by_hash(hash).expect("block was just committed");
-        self.manager.insert_block(Arc::clone(&state));
+        self.manager.on_new_block(Arc::clone(&state));
         state
     }
 
@@ -54,7 +54,7 @@ impl TestOverlay {
         block: ExecutedBlock<EthPrimitives>,
     ) -> Arc<BlockState<EthPrimitives>> {
         let state = self.blocks.insert_executed(block);
-        self.manager.insert_block(Arc::clone(&state));
+        self.manager.on_new_block(Arc::clone(&state));
         state
     }
 
@@ -65,7 +65,7 @@ impl TestOverlay {
     ) -> Arc<BlockState<EthPrimitives>> {
         self.blocks.set_pending_block(block);
         let state = self.blocks.pending_state().expect("pending block was just set");
-        self.manager.insert_block(Arc::clone(&state));
+        self.manager.on_new_block(Arc::clone(&state));
         state
     }
 

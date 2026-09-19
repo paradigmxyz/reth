@@ -303,7 +303,7 @@ impl TestHarness {
             let number = sealed_block.number;
             let state =
                 canonical_in_memory_state.state_by_hash(hash).expect("block was just committed");
-            overlay_manager.insert_block(Arc::clone(&state));
+            overlay_manager.on_new_block(Arc::clone(&state));
             blocks_by_hash.insert(hash, Arc::clone(&state));
             blocks_by_number.entry(number).or_default().push(state);
             parent_to_child.entry(parent_hash).or_default().insert(hash);

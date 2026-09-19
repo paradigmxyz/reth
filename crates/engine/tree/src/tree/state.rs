@@ -147,7 +147,7 @@ impl<N: NodePrimitives> TreeState<N> {
         self.blocks_by_hash.insert(hash, Arc::clone(&state));
         self.blocks_by_number.entry(block_number).or_default().push(Arc::clone(&state));
         self.parent_to_child.entry(parent_hash).or_default().insert(hash);
-        self.overlay_manager.insert_block(state);
+        self.overlay_manager.on_new_block(state);
     }
 
     /// Remove single executed block by its hash.
