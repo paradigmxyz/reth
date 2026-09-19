@@ -190,6 +190,20 @@ impl StoredRebuild {
     }
 }
 
+// A matching hand-off preserves the Merkle stage's durable progress. Older bootstrap markers
+// have no hand-off record, so they must pass completeness checks and start a fresh rebuild.
+pub(crate) fn ensure_trie_rebuild(
+    provider: &(impl MetadataProvider + MetadataWriter + StageCheckpointWriter + DBProvider),
+    write: SnapWrite,
+    cancel: &CancellationToken,
+) -> Result<(), SnapSyncError> {
+    provider.authorize_snap_write(write)?;
+    if !StoredRebuild::read(provider)?.is_some_and(|stored| stored.write == write) {
+        provider.start_trie_rebuild(write, DEFAULT_SCAN_CHUNK, cancel)?;
+    }
+    Ok(())
+}
+
 // Refuses the first account whose code is not stored, checking for cancellation every `chunk`
 // accounts.
 fn ensure_code_present(
@@ -431,6 +445,30 @@ mod tests {
         ));
         run_merkle(&provider, 1).unwrap();
         provider.verify_state_root(write).unwrap();
+    }
+
+    #[test]
+    fn resuming_after_rebuild_preserves_the_committed_checkpoint() {
+        let (factory, write, _) = downloaded(state_root(&accounts()), accounts().len());
+        let provider = factory.database_provider_rw().unwrap();
+        ensure_trie_rebuild(&provider, write, &CancellationToken::new()).unwrap();
+        run_merkle(&provider, 1).unwrap();
+        let checkpoint = provider.get_stage_checkpoint(StageId::MerkleExecute).unwrap();
+        provider.commit().unwrap();
+
+        // The process stopped after the stage commit but before accepting the state.
+        let provider = factory.database_provider_rw().unwrap();
+        ensure_trie_rebuild(&provider, write, &CancellationToken::new()).unwrap();
+        assert_eq!(provider.get_stage_checkpoint(StageId::MerkleExecute).unwrap(), checkpoint);
+        provider.verify_state_root(write).unwrap();
+        provider.commit().unwrap();
+        assert!(factory
+            .database_provider_ro()
+            .unwrap()
+            .snap_attempt()
+            .unwrap()
+            .unwrap()
+            .is_verified());
     }
 
     #[test]

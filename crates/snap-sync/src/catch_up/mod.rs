@@ -10,6 +10,7 @@
 //! serves holds back every block after it rather than leaving a hole in the applied sequence.
 
 mod apply;
+pub(crate) mod coordinator;
 mod download;
 mod store;
 

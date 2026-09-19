@@ -9521,6 +9521,7 @@ dependencies = [
  "reth-engine-primitives",
  "reth-engine-tree",
  "reth-engine-util",
+ "reth-errors",
  "reth-ethereum-engine-primitives",
  "reth-evm",
  "reth-evm-ethereum",
@@ -9546,7 +9547,9 @@ dependencies = [
  "reth-rpc-engine-api",
  "reth-rpc-eth-types",
  "reth-rpc-layer",
+ "reth-snap-sync",
  "reth-stages",
+ "reth-stages-api",
  "reth-static-file",
  "reth-storage-overlay",
  "reth-tasks",
@@ -10418,9 +10421,11 @@ dependencies = [
  "reth-network-peers",
  "reth-primitives-traits",
  "reth-provider",
+ "reth-prune-types",
  "reth-stages",
  "reth-stages-api",
  "reth-stages-types",
+ "reth-static-file-types",
  "reth-storage-api",
  "reth-storage-errors",
  "reth-tasks",
@@ -10431,6 +10436,7 @@ dependencies = [
  "thiserror 2.0.20",
  "tokio",
  "tokio-util",
+ "tracing",
 ]
 
 [[package]]

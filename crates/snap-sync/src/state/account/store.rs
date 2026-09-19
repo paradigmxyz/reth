@@ -3,7 +3,7 @@
 //! Each range replaces its key interval, and ranges commit in key order.
 
 use crate::{
-    common::SnapRecord, storage::persisted_storage_root, SnapAttemptStore, SnapCatchUpStore,
+    common::SnapRecord, state::storage::persisted_storage_root, SnapAttemptStore, SnapCatchUpStore,
     SnapStorageStore, SnapSyncError, SnapWrite, StorageProgress,
 };
 use alloy_primitives::{

@@ -94,7 +94,12 @@ impl SnapPivotPolicy {
     ///
     /// Once they are not, its state cannot be carried forward and the attempt has to restart.
     pub const fn is_catchable(&self, generation: SnapGeneration, head: u64) -> bool {
-        generation.lag(head) <= self.history
+        self.is_catchable_from(generation.target().number, head)
+    }
+
+    /// Returns whether lists after `applied` remain servable, even if the download pivot moved.
+    pub const fn is_catchable_from(&self, applied: u64, head: u64) -> bool {
+        head.saturating_sub(applied) <= self.history
     }
 
     /// Returns a fresh generation for the canonical pivot under `head`.

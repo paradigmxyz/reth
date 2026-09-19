@@ -1,5 +1,6 @@
 //! Failures raised while assembling a snap state generation.
 
+use crate::SnapPhase;
 use alloy_primitives::B256;
 use reth_downloaders::snap::{InvalidBlockAccessListRequest, InvalidStorageRangeRequest};
 use reth_network_p2p::error::RequestError;
@@ -170,6 +171,29 @@ pub enum SnapSyncError {
         /// Hash of the supplied code.
         got: B256,
     },
+    /// The Merkle stage rejected the downloaded state.
+    #[error("snap trie generation failed: {0}")]
+    Trie(String),
+    /// Snapshot bootstrap would replace an executed or already published state.
+    #[error("snap bootstrap cannot replace existing canonical state")]
+    ExistingState,
+    /// A generation operation was attempted in the wrong phase.
+    #[error("snap generation is in {actual:?}, expected {expected:?}")]
+    UnexpectedPhase {
+        /// Required phase.
+        expected: SnapPhase,
+        /// Persisted phase.
+        actual: SnapPhase,
+    },
+    /// A range completed after another operation advanced the generation.
+    #[error("snap generation changed while a range was in flight")]
+    StaleGeneration,
+    /// The persisted generation marker cannot be resumed safely.
+    #[error("invalid snap generation marker: {0}")]
+    InvalidGeneration(String),
+    /// The provider rejected a database operation.
+    #[error("snap database operation failed: {0}")]
+    Database(String),
     /// Account ranges remain to be downloaded.
     #[error("accounts from {next} are not downloaded yet")]
     IncompleteAccounts {
@@ -188,4 +212,9 @@ impl From<DatabaseError> for SnapSyncError {
     fn from(error: DatabaseError) -> Self {
         Self::Provider(error.into())
     }
+}
+
+// Erasing provider error types keeps the coordinator's public bounds small.
+pub(crate) fn db_error(error: impl core::fmt::Display) -> SnapSyncError {
+    SnapSyncError::Database(error.to_string())
 }
