@@ -112,10 +112,10 @@ impl<N> ProviderFactoryBuilder<N> {
             .with_read_only(true)
             .build()?;
         let factory =
-            ProviderFactory::new(db, chainspec, static_file_provider, rocksdb_provider, runtime)?
-                .with_read_only_sync(watch);
+            ProviderFactory::new(db, chainspec, static_file_provider, rocksdb_provider, runtime)?;
+        // Checked before the watcher spawns, since it keeps the database open for the process.
         factory.ensure_no_snap_attempt()?;
-        Ok(factory)
+        Ok(factory.with_read_only_sync(watch))
     }
 }
 
