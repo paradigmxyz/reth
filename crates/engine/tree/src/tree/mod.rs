@@ -1419,9 +1419,13 @@ where
             debug!(target: "engine::tree", ?new_tip_num, "Starting remove blocks job");
             self.state.set_pending_sparse_trie_prune(false);
             let (tx, rx) = crossbeam_channel::bounded(1);
-            // Unwinding a partial state trie needs the in-memory blocks the database masks. The
-            // canonical chain still has them, so hand it to the persistence service.
-            let finish_state = self.canonical_in_memory_state.head_state();
+            // Unwinding a partial state trie needs the in-memory blocks the database masks, which
+            // are the ones up to the persisted tip. That tip is on the chain this unwind is about
+            // to remove, not on the canonical one, so it is resolved by hash: a reorg keeps the
+            // blocks it moved off the canonical chain.
+            let finish_state = self
+                .canonical_in_memory_state
+                .executed_state_by_hash(self.persistence_state.last_persisted_block.hash);
             let _ = self.persistence.remove_blocks_above(new_tip_num, finish_state, tx);
             self.persistence_state.start_remove(new_tip_num, rx);
         }
