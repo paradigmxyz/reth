@@ -38,7 +38,7 @@ use reth_provider::{
 };
 use reth_revm::database::StateProviderDatabase;
 use reth_stages_api::ControlFlow;
-use reth_storage_overlay::{database_state_frontiers, OverlayManager};
+use reth_storage_overlay::OverlayManager;
 use reth_tasks::{spawn_os_thread, utils::increase_thread_priority};
 use reth_trie::ComputedTrieData;
 use revm::interpreter::debug_unreachable;
@@ -2394,14 +2394,12 @@ where
             "computing block trie updates",
         );
         let db_provider = self.provider.database_provider_ro()?;
-        // Completing a masked state trie needs the in-memory chain at the Finish frontier, read
-        // from the same transaction the computation runs against.
-        let (_, finish) = database_state_frontiers(&db_provider)?;
-        let finish_state = self.canonical_in_memory_state.executed_state_by_hash(finish.hash);
+        // Completing a masked state trie needs the in-memory blocks the database masks, which
+        // the shared state still holds.
         let trie_updates = self.state.tree_state.overlay_manager.compute_block_trie_updates(
             &db_provider,
             block.number(),
-            finish_state,
+            |hash| self.canonical_in_memory_state.executed_state_by_hash(hash),
         )?;
 
         let sorted_hashed_state = Arc::new(hashed_state.into_sorted());

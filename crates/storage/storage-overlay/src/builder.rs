@@ -813,10 +813,8 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
 /// Returns the highest blocks whose state/trie data and non-state/trie data are durably
 /// available in the database.
 ///
-/// The first is the state trie frontier, the second the Finish frontier. Callers that build an
-/// overlay for a block at or below Finish read this from the same transaction they hand to the
-/// provider, so that the frontier and the state they resolve for it agree.
-pub fn database_state_frontiers<Provider>(
+/// The first is the state trie frontier, the second the Finish frontier.
+pub(crate) fn database_state_frontiers<Provider>(
     provider: &Provider,
 ) -> ProviderResult<(BlockNumHash, BlockNumHash)>
 where

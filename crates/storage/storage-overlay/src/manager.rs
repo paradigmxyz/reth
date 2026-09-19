@@ -181,11 +181,15 @@ impl<N: NodePrimitives> OverlayManager<N> {
     }
 
     /// Computes the trie updates produced by `block_number`.
+    ///
+    /// `resolve_finish_state` looks up the in-memory chain that reaches the database's Finish
+    /// frontier in the caller's store. It is only consulted when a partial state trie has to be
+    /// completed first.
     pub fn compute_block_trie_updates<P>(
         &self,
         provider: &P,
         block_number: BlockNumber,
-        finish_state: Option<Arc<BlockState<N>>>,
+        resolve_finish_state: impl FnOnce(B256) -> Option<Arc<BlockState<N>>>,
     ) -> ProviderResult<TrieUpdatesSorted>
     where
         P: DBProvider
@@ -196,7 +200,7 @@ impl<N: NodePrimitives> OverlayManager<N> {
             + BlockNumReader
             + StorageSettingsCache,
     {
-        compute_block_trie_updates(self, provider, block_number, finish_state)
+        compute_block_trie_updates(self, provider, block_number, resolve_finish_state)
     }
 
     /// Takes the preserved sparse trie if present.

@@ -69,7 +69,7 @@ pub(crate) fn compute_block_trie_updates<N, Provider>(
     overlay_manager: &OverlayManager<N>,
     provider: &Provider,
     block_number: BlockNumber,
-    finish_state: Option<Arc<BlockState<N>>>,
+    resolve_finish_state: impl FnOnce(B256) -> Option<Arc<BlockState<N>>>,
 ) -> ProviderResult<TrieUpdatesSorted>
 where
     N: NodePrimitives,
@@ -86,7 +86,7 @@ where
             overlay_manager,
             provider,
             block_number,
-            finish_state,
+            resolve_finish_state,
         )
     })
 }
@@ -95,7 +95,7 @@ fn compute_block_trie_updates_inner<N, Provider, A>(
     overlay_manager: &OverlayManager<N>,
     provider: &Provider,
     block_number: BlockNumber,
-    finish_state: Option<Arc<BlockState<N>>>,
+    resolve_finish_state: impl FnOnce(B256) -> Option<Arc<BlockState<N>>>,
 ) -> ProviderResult<TrieUpdatesSorted>
 where
     N: NodePrimitives,
@@ -111,6 +111,9 @@ where
     let tx = provider.tx_ref();
     let cache = overlay_manager.changeset_cache();
     let (partial_state_trie, finish) = database_state_frontiers(provider)?;
+    // Only a partial state trie needs the in-memory chain that reaches Finish.
+    let finish_state =
+        (partial_state_trie != finish).then(|| resolve_finish_state(finish.hash)).flatten();
 
     // Step 1: Get the trie changesets for the target block from cache
     let changesets = cache.get_or_compute(
