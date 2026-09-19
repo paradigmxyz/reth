@@ -478,6 +478,11 @@ where
         let _ = self.raw_tx_sender.send(raw_tx);
     }
 
+    /// Returns the notification sender without retaining the API or pool.
+    pub(super) const fn raw_tx_sender(&self) -> &broadcast::Sender<Bytes> {
+        &self.raw_tx_sender
+    }
+
     /// Returns the transaction batch sender
     #[inline]
     pub const fn tx_batch_sender(

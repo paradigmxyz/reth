@@ -150,13 +150,14 @@ where
     where
         BS: BlobStore,
     {
-        let TxPoolBuilder { validator, .. } = self;
+        let TxPoolBuilder { ctx, validator } = self;
         reth_transaction_pool::Pool::new(
             validator,
             CoinbaseTipOrdering::default(),
             blob_store,
             pool_config,
         )
+        .with_sender_recovery_cache(ctx.sender_recovery_cache().cloned())
     }
 
     /// Build the transaction pool and spawn its maintenance tasks.
@@ -197,7 +198,8 @@ where
         let TxPoolBuilder { ctx, validator, .. } = self;
 
         let transaction_pool =
-            reth_transaction_pool::Pool::new(validator, ordering, blob_store, pool_config.clone());
+            reth_transaction_pool::Pool::new(validator, ordering, blob_store, pool_config.clone())
+                .with_sender_recovery_cache(ctx.sender_recovery_cache().cloned());
 
         spawn_maintenance_tasks(ctx, transaction_pool.clone(), &pool_config)?;
 

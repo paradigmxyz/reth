@@ -240,7 +240,7 @@ mod tests {
             .pool()
             .transaction_ingress()
             .unwrap()
-            .try_submit_pooled(pooled_txs(1).pop().unwrap(), None)
+            .try_submit_pooled(pooled_txs(1).pop().unwrap())
             .unwrap();
         tokio::time::timeout(std::time::Duration::from_secs(2), barrier)
             .await

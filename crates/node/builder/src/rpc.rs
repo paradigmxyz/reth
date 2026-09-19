@@ -53,6 +53,7 @@ use reth_rpc_engine_api::{capabilities::EngineCapabilities, EngineApi};
 use reth_rpc_eth_types::{cache::cache_new_blocks_task, EthConfig, EthStateCache};
 use reth_tokio_util::EventSender;
 use reth_tracing::tracing::{debug, info};
+use reth_transaction_pool::TransactionPool;
 use std::{
     fmt::{self, Debug},
     future::Future,
@@ -1535,6 +1536,10 @@ where
             overlay_manager,
             ctx.node.task_executor().clone(),
         );
+
+        if let Some(ingress) = ctx.node.pool().transaction_ingress() {
+            validator = validator.with_ingress_pause(ingress.pause_handle());
+        }
 
         if txpool_prewarming {
             validator = validator

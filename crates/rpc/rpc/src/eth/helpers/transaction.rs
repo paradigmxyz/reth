@@ -43,10 +43,11 @@ where
         };
         let origin = reth_transaction_pool::TransactionOrigin::Local;
         if self.raw_tx_forwarder().is_none() && !self.inner.force_blob_sidecar_upcasting() {
-            let this = self.clone();
+            let notifications = self.inner.raw_tx_sender().clone();
             let raw = bytes.clone();
-            let result =
-                ingress.submit_raw(origin, bytes, move || this.broadcast_raw_transaction(raw))?;
+            let result = ingress.submit_raw(origin, bytes, move || {
+                let _ = notifications.send(raw);
+            })?;
             return match result.await.map_err(|_| IngressError::Closed)?? {
                 IngressOutcome::Inserted(outcome) => Ok(outcome.hash),
                 IngressOutcome::Recovered(..) => unreachable!("insertion request"),
@@ -288,6 +289,19 @@ mod tests {
         assert!(pool.get(&tx_2_result).is_some(), "tx2 not found in the pool");
         assert_eq!(pool.get(&tx_1_result).unwrap().origin, TransactionOrigin::Local);
         assert_eq!(pool.get(&tx_2_result).unwrap().origin, TransactionOrigin::Local);
+    }
+
+    #[tokio::test]
+    async fn canceled_paused_rpc_does_not_retain_api() {
+        let api = mock_eth_api(Default::default());
+        let weak = std::sync::Arc::downgrade(&api.inner);
+        let pause = api.pool().transaction_ingress().unwrap().pause_handle().pause();
+        let mut submission = Box::pin(api.send_raw_transaction(raw_transfer_tx()));
+        assert!(futures::poll!(&mut submission).is_pending());
+        drop(submission);
+        drop(api);
+        assert!(weak.upgrade().is_none());
+        drop(pause);
     }
 
     #[tokio::test]

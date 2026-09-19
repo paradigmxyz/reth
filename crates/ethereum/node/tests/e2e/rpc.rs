@@ -65,6 +65,36 @@ alloy_sol_types::sol! {
     }
 }
 
+#[tokio::test]
+async fn test_rpc_ingress_shares_payload_sender_cache() -> eyre::Result<()> {
+    use reth_primitives_traits::SignedTransaction;
+    use reth_transaction_pool::test_utils::TransactionGenerator;
+
+    let chain_spec = Arc::new(ChainSpecBuilder::mainnet().cancun_activated().build());
+    let (mut nodes, _) =
+        E2ETestSetupBuilder::<EthereumNode, _>::new(1, chain_spec, eth_payload_attributes)
+            .with_node_config_modifier(|mut config| {
+                config.engine.sender_recovery_cache_enabled = true;
+                config
+            })
+            .build()
+            .await?;
+    let node = nodes.pop().unwrap();
+    let cache = node.inner.evm_config.sender_recovery_cache.as_ref().unwrap();
+    let transaction =
+        TransactionGenerator::new(rand::rng()).transaction().chain_id(2).into_legacy();
+    let hash = *transaction.tx_hash();
+    let sender = transaction.try_recover()?;
+    assert_eq!(cache.get(&hash), None);
+    let client = node.rpc_client().unwrap();
+    let result = client
+        .request::<B256, _>("eth_sendRawTransaction", (Bytes::from(transaction.encoded_2718()),))
+        .await;
+    assert!(result.is_err(), "wrong-chain transaction must still be rejected");
+    assert_eq!(cache.get(&hash), Some(sender));
+    Ok(())
+}
+
 async fn inject_blob_transaction(
     node: &NodeHelperType<EthereumNode>,
     wallet: &Wallet,

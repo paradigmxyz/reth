@@ -306,6 +306,8 @@ where
     txpool_prewarm: Option<txpool_prewarm::Handle<Evm::Primitives, P, Evm>>,
     /// Scratch buffer reused for BAL hash encoding across validated blocks.
     bal_hash_buf: Vec<u8>,
+    /// Pauses transaction ingress while this validator processes a live block.
+    ingress_pause: Option<reth_tasks::pause::TaskPause>,
 }
 
 impl<N, P, Evm, V> BasicEngineValidator<P, Evm, V>
@@ -373,7 +375,14 @@ where
             state_root_strategy: Arc::new(DefaultStateRootStrategy::default()),
             txpool_prewarm: None,
             bal_hash_buf: Vec::new(),
+            ingress_pause: None,
         }
+    }
+
+    /// Shares the ingress pause trigger with this payload validator.
+    pub fn with_ingress_pause(mut self, pause: reth_tasks::pause::TaskPause) -> Self {
+        self.ingress_pause = Some(pause);
+        self
     }
 
     /// Sets the state-root strategy used by payload validation.
@@ -493,6 +502,7 @@ where
         V: PayloadValidator<T, Block = N::Block> + Clone,
         Evm: ConfigureEngineEvm<T::ExecutionData, Primitives = N>,
     {
+        let _ingress_pause = self.ingress_pause.as_ref().map(reth_tasks::pause::TaskPause::pause);
         let parent_hash = input.parent_hash();
         let _txpool_pause = self.txpool_prewarm.as_ref().map(txpool_prewarm::Handle::pause);
         let txpool_snapshot =

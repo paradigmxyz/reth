@@ -354,6 +354,7 @@ pub struct Pool<V, T: TransactionOrdering, S> {
     /// Arc'ed instance of the pool internals
     pool: Arc<PoolInner<V, T, S>>,
     ingress: Arc<std::sync::OnceLock<TransactionIngress<T::Transaction>>>,
+    sender_recovery_cache: Option<reth_evm::SenderRecoveryCache>,
 }
 
 // === impl Pool ===
@@ -369,7 +370,19 @@ where
         Self {
             pool: Arc::new(PoolInner::new(validator, ordering, blob_store, config)),
             ingress: Default::default(),
+            sender_recovery_cache: None,
         }
+    }
+
+    /// Configures the optional cache shared by RPC, P2P and payload sender recovery.
+    /// Must be called before the ingress service is initialized.
+    pub fn with_sender_recovery_cache(
+        mut self,
+        cache: Option<reth_evm::SenderRecoveryCache>,
+    ) -> Self {
+        assert!(self.ingress.get().is_none(), "ingress already initialized");
+        self.sender_recovery_cache = cache;
+        self
     }
 
     /// Returns the wrapped pool internals.
@@ -488,55 +501,61 @@ where
                 .get_or_init(|| {
                     let pool = Arc::downgrade(&self.pool);
                     let concurrency = self.pool.validator().validation_concurrency();
-                    TransactionIngress::new(self.config().ingress, concurrency, move |requests| {
-                        let pool = pool.clone();
-                        Box::pin(async move {
-                            // An idle service must not keep the pool (and its sender) alive
-                            // forever.
-                            let Some(pool) = pool.upgrade() else { return };
-                            let insert_pool = pool.clone();
-                            let batch = ingress::IngressBatch::new(
-                                requests,
-                                Box::new(move |validated| {
-                                    if validated.is_empty() {
-                                        return
-                                    }
-                                    let mut completions = Vec::with_capacity(validated.len());
-                                    let transactions = validated
-                                        .into_iter()
-                                        .map(|request| {
-                                            let (origin, outcome, completion) =
-                                                request.into_parts();
-                                            completions.push(completion);
-                                            (origin, outcome)
+                    TransactionIngress::new(
+                        self.config().ingress,
+                        concurrency,
+                        self.sender_recovery_cache.clone(),
+                        move |requests| {
+                            let pool = pool.clone();
+                            Box::pin(async move {
+                                // An idle service must not keep the pool (and its sender) alive
+                                // forever.
+                                let Some(pool) = pool.upgrade() else { return };
+                                let insert_pool = pool.clone();
+                                let batch = ingress::IngressBatch::new(
+                                    requests,
+                                    Box::new(move |validated| {
+                                        if validated.is_empty() {
+                                            return
+                                        }
+                                        let mut completions = Vec::with_capacity(validated.len());
+                                        let transactions = validated
+                                            .into_iter()
+                                            .map(|request| {
+                                                let (origin, outcome, completion) =
+                                                    request.into_parts();
+                                                completions.push(completion);
+                                                (origin, outcome)
+                                            })
+                                            .collect::<Vec<_>>();
+                                        let started = std::time::Instant::now();
+                                        let results =
+                                            insert_pool.add_transactions_with_origins(transactions);
+                                        reth_metrics::metrics::histogram!(
+                                            "transaction_pool.ingress.insertion_duration"
+                                        )
+                                        .record(started.elapsed());
+                                        for (completion, result) in
+                                            completions.into_iter().zip(results)
+                                        {
+                                            completion.complete(result);
+                                        }
+                                    }),
+                                );
+                                match pool.validator().try_dispatch_ingress(batch) {
+                                    Ok(job) => job.await,
+                                    Err(batch) => {
+                                        let runtime = tokio::runtime::Handle::current();
+                                        let pool = pool.clone();
+                                        let _ = tokio::task::spawn_blocking(move || {
+                                            runtime.block_on(batch.run(pool.validator()));
                                         })
-                                        .collect::<Vec<_>>();
-                                    let started = std::time::Instant::now();
-                                    let results =
-                                        insert_pool.add_transactions_with_origins(transactions);
-                                    reth_metrics::metrics::histogram!(
-                                        "transaction_pool.ingress.insertion_duration"
-                                    )
-                                    .record(started.elapsed());
-                                    for (completion, result) in completions.into_iter().zip(results)
-                                    {
-                                        completion.complete(result);
+                                        .await;
                                     }
-                                }),
-                            );
-                            match pool.validator().try_dispatch_ingress(batch) {
-                                Ok(job) => job.await,
-                                Err(batch) => {
-                                    let runtime = tokio::runtime::Handle::current();
-                                    let pool = pool.clone();
-                                    let _ = tokio::task::spawn_blocking(move || {
-                                        runtime.block_on(batch.run(pool.validator()));
-                                    })
-                                    .await;
                                 }
-                            }
-                        })
-                    })
+                            })
+                        },
+                    )
                 })
                 .clone(),
         )
@@ -960,6 +979,10 @@ where
 
 impl<V, T: TransactionOrdering, S> Clone for Pool<V, T, S> {
     fn clone(&self) -> Self {
-        Self { pool: Arc::clone(&self.pool), ingress: Arc::clone(&self.ingress) }
+        Self {
+            pool: Arc::clone(&self.pool),
+            ingress: Arc::clone(&self.ingress),
+            sender_recovery_cache: self.sender_recovery_cache.clone(),
+        }
     }
 }

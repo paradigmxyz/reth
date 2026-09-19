@@ -1469,7 +1469,7 @@ where
                 if self.transactions_by_peers.contains_key(&hash) {
                     continue
                 }
-                match ingress.try_submit_pooled(transaction, self.sender_recovery_cache.clone()) {
+                match ingress.try_submit_pooled(transaction) {
                     Ok(response) => {
                         self.transactions_by_peers.insert(hash, smallvec::smallvec![peer_id]);
                         self.metrics.pending_pool_imports.increment(1.0);

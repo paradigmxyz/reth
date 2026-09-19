@@ -12,18 +12,26 @@ use reth_metrics::{
     Metrics,
 };
 use reth_primitives_traits::InMemorySize;
+use reth_tasks::pause::TaskPause;
 use std::{fmt, sync::Arc, time::Instant};
-use tokio::sync::{mpsc, oneshot, OwnedSemaphorePermit, Semaphore};
+use tokio::sync::{mpsc, oneshot, watch, OwnedSemaphorePermit, Semaphore};
 
 /// A cloneable admission handle. RPC and gossip have separate bounded queues and share workers.
 #[derive(Debug)]
 pub struct TransactionIngress<T: PoolTransaction> {
     lanes: [IngressLane<T>; 2],
+    context: Arc<IngressContext>,
+    // Only public handles keep the service alive; paused jobs must not retain this sender.
+    lifetime: watch::Sender<()>,
 }
 
 impl<T: PoolTransaction> Clone for TransactionIngress<T> {
     fn clone(&self) -> Self {
-        Self { lanes: self.lanes.clone() }
+        Self {
+            lanes: self.lanes.clone(),
+            context: self.context.clone(),
+            lifetime: self.lifetime.clone(),
+        }
     }
 }
 
@@ -36,6 +44,7 @@ impl<T: PoolTransaction + 'static> TransactionIngress<T> {
     pub fn new(
         config: TransactionIngressConfig,
         concurrency: usize,
+        cache: Option<SenderRecoveryCache>,
         process: impl Fn(Vec<IngressRequest<T>>) -> BoxFuture<'static, ()> + Send + Sync + 'static,
     ) -> Self {
         let (rpc_tx, rpc_rx) = mpsc::unbounded_channel();
@@ -46,28 +55,39 @@ impl<T: PoolTransaction + 'static> TransactionIngress<T> {
             slots: Arc::new(Semaphore::new(config.max_transactions.min(Semaphore::MAX_PERMITS))),
             bytes: Arc::new(Semaphore::new(config.max_bytes.min(u32::MAX as usize))),
         };
-        let ingress = Self { lanes: [lane(rpc_tx, "rpc"), lane(p2p_tx, "p2p")] };
+        let (lifetime, shutdown) = watch::channel(());
+        let context = Arc::new(IngressContext { cache, pause: TaskPause::default(), shutdown });
+        let ingress = Self {
+            lanes: [lane(rpc_tx, "rpc"), lane(p2p_tx, "p2p")],
+            context: context.clone(),
+            lifetime,
+        };
         tokio::spawn(run(
             [rpc_rx, p2p_rx],
             config.max_batch_size.max(1).min(config.max_transactions.max(1)),
             config.max_batch_bytes.max(1),
             concurrency.max(1),
+            context,
             process,
         ));
         ingress
+    }
+
+    /// Returns the shared trigger used to pause ingress during foreground CPU work.
+    pub fn pause_handle(&self) -> TaskPause {
+        self.context.pause.clone()
     }
 
     /// Tries to admit gossip without waiting or retaining additional work outside the budget.
     pub fn try_submit_pooled(
         &self,
         transaction: T::Pooled,
-        cache: Option<SenderRecoveryCache>,
     ) -> Result<IngressResultReceiver<T>, IngressError> {
         let permit = self.reserve(1, transaction.size())?;
         self.send(
             1,
             TransactionOrigin::External,
-            IngressInput::Pooled(transaction, cache),
+            IngressInput::Pooled(transaction),
             permit,
             false,
             None,
@@ -175,6 +195,7 @@ impl<T: PoolTransaction + 'static> TransactionIngress<T> {
                 on_recovered,
                 response,
                 queued_at: Instant::now(),
+                context: self.context.clone(),
             })
             .map_err(|_| IngressError::Closed)?;
         Ok(rx)
@@ -263,6 +284,7 @@ impl IngressPermit {
 /// requests into the worker keeps permits alive even if the submitting task is canceled.
 pub struct IngressRequest<T: PoolTransaction> {
     pub(crate) origin: TransactionOrigin,
+    context: Arc<IngressContext>,
     queued_at: Instant,
     input: IngressInput<T>,
     pub(crate) permit: IngressPermit,
@@ -334,7 +356,13 @@ impl<T: PoolTransaction> IngressBatch<T> {
 
     /// Runs all CPU work, including insertion. Call this on a blocking or validation worker.
     pub async fn run<V: TransactionValidator<Transaction = T> + ?Sized>(self, validator: &V) {
-        (self.complete)(validate_ingress(validator, self.requests).await);
+        let Some(context) = self.requests.first().map(|request| request.context.clone()) else {
+            return
+        };
+        let validated = validate_ingress(validator, self.requests).await;
+        if !validated.is_empty() && context.ready().await {
+            (self.complete)(validated);
+        }
     }
 }
 
@@ -351,6 +379,9 @@ pub async fn validate_ingress<V: TransactionValidator + ?Sized>(
     validator: &V,
     requests: Vec<IngressRequest<V::Transaction>>,
 ) -> Vec<ValidatedIngress<V::Transaction>> {
+    let Some(context) = requests.first().map(|request| request.context.clone()) else {
+        return Vec::new()
+    };
     let mut transactions = Vec::with_capacity(requests.len());
     let mut completions = Vec::with_capacity(requests.len());
     for request in requests {
@@ -362,16 +393,25 @@ pub async fn validate_ingress<V: TransactionValidator + ?Sized>(
             on_recovered,
             response,
             queued_at,
+            context: _,
         } = request;
+        if !context.ready().await {
+            return Vec::new()
+        }
         if response.is_closed() {
             continue
         }
         permit.0.metrics.queue_duration.record(queued_at.elapsed());
         let recovery_start = Instant::now();
         let recovered = match input {
-            IngressInput::Raw(bytes) => V::Transaction::recover_raw_transaction(&bytes),
-            IngressInput::Pooled(tx, cache) => match cache {
-                Some(cache) => V::Transaction::try_recover_with_cache(tx, &cache),
+            IngressInput::Raw(bytes) => match &context.cache {
+                Some(cache) => {
+                    V::Transaction::recover_raw_transaction_with_cache(&bytes, Some(cache))
+                }
+                None => V::Transaction::recover_raw_transaction(&bytes),
+            },
+            IngressInput::Pooled(tx) => match &context.cache {
+                Some(cache) => V::Transaction::try_recover_with_cache(tx, cache),
                 None => V::Transaction::try_recover(tx),
             }
             .map_err(|_| RawPoolTransactionError::InvalidTransactionSignature),
@@ -399,7 +439,7 @@ pub async fn validate_ingress<V: TransactionValidator + ?Sized>(
             }
         }
     }
-    if transactions.is_empty() {
+    if transactions.is_empty() || !context.ready().await {
         return Vec::new()
     }
     let origin = transactions[0].0;
@@ -478,8 +518,27 @@ struct IngressMetrics {
 #[derive(Debug)]
 enum IngressInput<T: PoolTransaction> {
     Raw(Bytes),
-    Pooled(T::Pooled, Option<SenderRecoveryCache>),
+    Pooled(T::Pooled),
     Recovered(T),
+}
+
+#[derive(Debug)]
+struct IngressContext {
+    cache: Option<SenderRecoveryCache>,
+    pause: TaskPause,
+    shutdown: watch::Receiver<()>,
+}
+
+impl IngressContext {
+    /// Closing every admission handle cancels paused work as well as the scheduler.
+    async fn ready(&self) -> bool {
+        let mut shutdown = self.shutdown.clone();
+        tokio::select! {
+            biased;
+            _ = shutdown.changed() => false,
+            _ = self.pause.resumed() => true,
+        }
+    }
 }
 
 async fn run<T: PoolTransaction>(
@@ -487,6 +546,7 @@ async fn run<T: PoolTransaction>(
     max_batch: usize,
     max_batch_bytes: usize,
     concurrency: usize,
+    context: Arc<IngressContext>,
     process: impl Fn(Vec<IngressRequest<T>>) -> BoxFuture<'static, ()>,
 ) {
     let mut jobs = FuturesUnordered::new();
@@ -497,6 +557,9 @@ async fn run<T: PoolTransaction>(
         // Completed jobs release admission before another input batch is selected.
         while jobs.len() >= concurrency {
             jobs.next().await;
+        }
+        if !context.ready().await {
+            break
         }
         let first = futures_util::future::poll_fn(|cx| {
             while jobs.poll_next_unpin(cx) == std::task::Poll::Ready(Some(())) {}
@@ -587,6 +650,7 @@ mod tests {
         let ingress = TransactionIngress::new(
             TransactionIngressConfig { max_transactions: 1, ..Default::default() },
             1,
+            None,
             move |requests: Vec<IngressRequest<MockTransaction>>| {
                 let (release, wait) = oneshot::channel();
                 started.send(release).unwrap();
@@ -626,6 +690,7 @@ mod tests {
                 ..Default::default()
             },
             1,
+            None,
             |_| Box::pin(async {}),
         );
         let first = ingress.reserve(0, 8).unwrap();
@@ -642,6 +707,7 @@ mod tests {
         let ingress = TransactionIngress::new(
             TransactionIngressConfig { max_batch_size: 2, ..Default::default() },
             2,
+            None,
             move |requests: Vec<IngressRequest<MockTransaction>>| {
                 let origins = requests.iter().map(|request| request.origin).collect::<Vec<_>>();
                 let (release, wait) = oneshot::channel();
@@ -680,6 +746,7 @@ mod tests {
                 ..Default::default()
             },
             1,
+            None,
             move |requests: Vec<IngressRequest<MockTransaction>>| {
                 let sizes =
                     requests.iter().map(|r| r.permit.0._bytes.num_permits()).collect::<Vec<_>>();
@@ -721,8 +788,10 @@ mod tests {
     #[tokio::test]
     async fn prepared_permits_cannot_be_transferred_between_pools() {
         let config = TransactionIngressConfig { max_transactions: 1, ..Default::default() };
-        let first = TransactionIngress::<MockTransaction>::new(config, 1, |_| Box::pin(async {}));
-        let second = TransactionIngress::<MockTransaction>::new(config, 1, |_| Box::pin(async {}));
+        let first =
+            TransactionIngress::<MockTransaction>::new(config, 1, None, |_| Box::pin(async {}));
+        let second =
+            TransactionIngress::<MockTransaction>::new(config, 1, None, |_| Box::pin(async {}));
         let permit = first.reserve(0, 1).unwrap();
         assert!(matches!(
             second.submit_admitted(TransactionOrigin::Local, MockTransaction::eip1559(), permit),
@@ -759,8 +828,8 @@ mod tests {
         let rpc = ingress
             .submit_raw(TransactionOrigin::Private, raw.encoded_2718().into(), || {})
             .unwrap();
-        let p2p = ingress.try_submit_pooled(pooled, None).unwrap();
-        let bad = ingress.try_submit_pooled(invalid, None).unwrap();
+        let p2p = ingress.try_submit_pooled(pooled).unwrap();
+        let bad = ingress.try_submit_pooled(invalid).unwrap();
         assert!(
             matches!(rpc.await.unwrap().unwrap(), IngressOutcome::Inserted(outcome) if outcome.hash == raw_hash)
         );
@@ -777,6 +846,129 @@ mod tests {
         drop((ingress, pool));
         tokio::time::timeout(Duration::from_secs(2), worker).await.unwrap().unwrap();
         assert!(weak_pool.upgrade().is_none(), "idle ingress must not keep the pool alive");
+    }
+
+    #[tokio::test]
+    async fn pause_between_recoveries_retains_admission_and_allows_shutdown() {
+        for shutdown in [false, true] {
+            let cache = SenderRecoveryCache::new(16);
+            let (executor, worker) = TransactionValidationTaskExecutor::new(OkValidator::<
+                EthPooledTransaction,
+            >::default(
+            ));
+            let worker = tokio::spawn(worker.run());
+            let pool = Pool::new(
+                executor,
+                CoinbaseTipOrdering::default(),
+                InMemoryBlobStore::default(),
+                PoolConfig {
+                    ingress: TransactionIngressConfig { max_transactions: 2, ..Default::default() },
+                    ..Default::default()
+                },
+            )
+            .with_sender_recovery_cache(Some(cache.clone()));
+            let ingress = pool.transaction_ingress().unwrap();
+            let slots = ingress.lanes[0].slots.clone();
+            let pause = ingress.pause_handle();
+            let initial = pause.pause();
+            let overlap = pause.pause();
+            let mut generator = TransactionGenerator::new(rand::rng());
+            let first = generator.transaction().into_legacy();
+            let second = generator.transaction().nonce(1).into_eip1559();
+            let (paused_tx, paused_rx) = oneshot::channel();
+            let first_result = ingress
+                .submit_raw(TransactionOrigin::Local, first.encoded_2718().into(), move || {
+                    let _ = paused_tx.send(pause.pause());
+                })
+                .unwrap();
+            let second_result = ingress
+                .submit_raw(TransactionOrigin::Local, second.encoded_2718().into(), || {})
+                .unwrap();
+            drop(initial);
+            tokio::task::yield_now().await;
+            assert_eq!(cache.get(first.tx_hash()), None);
+            assert!(matches!(ingress.reserve(0, 1), Err(IngressError::Full)));
+            drop(overlap);
+            let between =
+                tokio::time::timeout(Duration::from_secs(2), paused_rx).await.unwrap().unwrap();
+            assert!(cache.get(first.tx_hash()).is_some());
+            assert_eq!(cache.get(second.tx_hash()), None);
+            assert!(pool.is_empty());
+            assert_eq!(slots.available_permits(), 0);
+            if shutdown {
+                drop((ingress, pool));
+                // Even a foreground producer that outlives the pool cannot strand paused jobs.
+                tokio::time::timeout(Duration::from_secs(2), worker).await.unwrap().unwrap();
+                assert!(first_result.await.is_err());
+                assert!(second_result.await.is_err());
+                drop(between);
+            } else {
+                drop(between);
+                first_result.await.unwrap().unwrap();
+                second_result.await.unwrap().unwrap();
+                assert!(cache.get(second.tx_hash()).is_some());
+                drop((ingress, pool));
+                tokio::time::timeout(Duration::from_secs(2), worker).await.unwrap().unwrap();
+            }
+            assert_eq!(slots.available_permits(), 2);
+        }
+    }
+
+    #[tokio::test]
+    async fn raw_and_pooled_cache_publication_precedes_rejected_validation() {
+        use reth_primitives_traits::{
+            transaction::error::InvalidTransactionError, SignedTransaction,
+        };
+
+        #[derive(Debug)]
+        struct RejectValidator(SenderRecoveryCache);
+        impl TransactionValidator for RejectValidator {
+            type Transaction = EthPooledTransaction;
+            type Block = reth_ethereum_primitives::Block;
+
+            async fn validate_transaction(
+                &self,
+                _origin: TransactionOrigin,
+                transaction: Self::Transaction,
+            ) -> TransactionValidationOutcome<Self::Transaction> {
+                assert_eq!(self.0.get(transaction.hash()), Some(transaction.sender()));
+                TransactionValidationOutcome::Invalid(
+                    transaction,
+                    InvalidTransactionError::ChainIdMismatch.into(),
+                )
+            }
+        }
+
+        let cache = SenderRecoveryCache::new(16);
+        let pool = Pool::new(
+            RejectValidator(cache.clone()),
+            CoinbaseTipOrdering::default(),
+            InMemoryBlobStore::default(),
+            PoolConfig::default(),
+        )
+        .with_sender_recovery_cache(Some(cache.clone()));
+        let ingress = pool.transaction_ingress().unwrap();
+        let mut generator = TransactionGenerator::new(rand::rng());
+        for transaction in
+            [generator.transaction().chain_id(1).into_legacy(), generator.gen_eip1559()]
+        {
+            let expected = transaction.try_recover().unwrap();
+            let raw = ingress
+                .submit_raw(TransactionOrigin::Local, transaction.encoded_2718().into(), || {})
+                .unwrap();
+            assert!(matches!(raw.await.unwrap(), Err(IngressError::Pool(_))));
+            assert_eq!(cache.get(transaction.tx_hash()), Some(expected));
+            let pooled = ingress.try_submit_pooled(transaction.try_into().unwrap()).unwrap();
+            assert!(matches!(pooled.await.unwrap(), Err(IngressError::Pool(_))));
+        }
+        let invalid = TransactionSigned::new_unhashed(
+            TxEip1559::default().into(),
+            Signature::new(U256::ZERO, U256::ZERO, false),
+        );
+        let result = ingress.recover_raw(invalid.encoded_2718().into()).unwrap();
+        assert!(matches!(result.await.unwrap(), Err(IngressError::Recovery(_))));
+        assert_eq!(cache.get(invalid.tx_hash()), None);
+        assert!(pool.is_empty());
     }
 
     #[tokio::test]
