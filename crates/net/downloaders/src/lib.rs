@@ -16,6 +16,9 @@
 #[cfg(any(test, feature = "test-utils"))]
 use tempfile as _;
 
+/// Background backfill of missing block access lists.
+pub mod bal;
+
 /// The collection of algorithms for downloading block bodies.
 pub mod bodies;
 

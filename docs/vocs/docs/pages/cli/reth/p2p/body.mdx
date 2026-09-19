@@ -144,6 +144,14 @@ Networking:
 
           Splits peers using approximately 2:1 inbound:outbound ratio. Cannot be used together with `--max-outbound-peers` or `--max-inbound-peers`.
 
+      --bal.backfill
+          Download missing BALs in the store's retention window on startup and new chain heads
+
+      --bal.max-concurrent-requests <COUNT>
+          Maximum number of concurrent BAL requests
+
+          [default: 4]
+
       --max-tx-reqs <COUNT>
           Max concurrent `GetPooledTransactions` requests.
 
