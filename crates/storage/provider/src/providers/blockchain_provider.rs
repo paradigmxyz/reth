@@ -36,8 +36,7 @@ use reth_storage_api::{
 };
 use reth_storage_errors::provider::ProviderResult;
 use reth_storage_overlay::{
-    database_state_frontiers, OverlayBuilder, OverlayStateProvider, OverlayStateProviderFactory,
-    OwnedProvider,
+    OverlayBuilder, OverlayStateProvider, OverlayStateProviderFactory, OwnedProvider,
 };
 use reth_trie::{
     hashed_cursor::{HashedCursor, HashedCursorFactory},
@@ -189,22 +188,16 @@ impl<N: ProviderNodeTypes> BlockchainProvider<N> {
         P: StageCheckpointReader + BlockNumReader,
     {
         let overlay_manager = self.database.overlay_manager();
-        if let Some(state) = self.canonical_in_memory_state.executed_state_by_hash(block_hash) {
-            // Everything a block above the Finish frontier needs, including the masked blocks
-            // below it, is on its own chain.
-            return Ok(overlay_manager.overlay_builder_for_state(state))
-        }
+        let builder = match self.canonical_in_memory_state.executed_state_by_hash(block_hash) {
+            Some(state) => overlay_manager.overlay_builder_for_state(state),
+            // The block is durable, so it has no chain of its own.
+            None => overlay_manager.overlay_builder_for_persisted(block_hash),
+        };
 
-        // The block is durable, so it has no chain of its own. Only a partial state trie needs
-        // more: the blocks it masks are the ones between the two frontiers.
-        let builder = overlay_manager.overlay_builder_for_persisted(block_hash);
-        let (state_trie_frontier, finish) = database_state_frontiers(provider)?;
-        if state_trie_frontier == finish {
-            return Ok(builder)
-        }
-        Ok(match self.canonical_in_memory_state.executed_state_by_hash(finish.hash) {
-            Some(finish_state) => builder.with_finish_state(finish_state),
-            None => builder,
+        // A block that descends from Finish carries the blocks a partial state trie masks on its
+        // own chain. A durable block and a fork that branches at or below Finish do not.
+        builder.with_database_finish_state(provider, |finish_hash| {
+            self.canonical_in_memory_state.executed_state_by_hash(finish_hash)
         })
     }
 

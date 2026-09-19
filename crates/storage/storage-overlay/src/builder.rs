@@ -260,13 +260,38 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
 
     /// Supplies an in-memory chain that reaches the database's Finish frontier.
     ///
-    /// Only needed when this builder's parent is at or below Finish, which is the case for the
-    /// historical views that are addressed by hash and for an unwind. Above Finish the chain is
-    /// already reachable from the parent. The chain does not have to end at Finish; any chain
-    /// that has it as an ancestor works, such as the canonical head.
+    /// Only needed when Finish is not an ancestor of this builder's parent, which is the case for
+    /// a durable parent, for a fork that branches at or below Finish, and for an unwind. The
+    /// chain does not have to end at Finish; any chain that has it as an ancestor works, such as
+    /// the canonical head.
     pub fn with_finish_state(mut self, finish_state: Arc<BlockState<N>>) -> Self {
         self.finish_state = Some(finish_state);
         self
+    }
+
+    /// Resolves and attaches the chain reaching the database's Finish frontier, if the database
+    /// masks any state trie updates.
+    ///
+    /// The masked blocks live between the state trie frontier and Finish and only exist in
+    /// memory. `resolve` looks a block up in the caller's own store, because the manager tracks
+    /// none. Reading the frontier from the same `provider` the state provider will use keeps the
+    /// frontier and the chain resolved for it consistent.
+    pub fn with_database_finish_state<Provider>(
+        self,
+        provider: &Provider,
+        resolve: impl FnOnce(B256) -> Option<Arc<BlockState<N>>>,
+    ) -> ProviderResult<Self>
+    where
+        Provider: StageCheckpointReader + BlockNumReader,
+    {
+        let (state_trie_frontier, finish) = database_state_frontiers(provider)?;
+        if state_trie_frontier == finish {
+            return Ok(self)
+        }
+        Ok(match resolve(finish.hash) {
+            Some(finish_state) => self.with_finish_state(finish_state),
+            None => self,
+        })
     }
 
     /// Returns the chain ending at `finish_hash`, if this builder can reach it.
@@ -1210,6 +1235,53 @@ mod tests {
         assert_eq!(
             account_node_paths(&overlay),
             [3, 4].map(|id| Nibbles::from_nibbles([id])).to_vec()
+        );
+    }
+
+    #[test]
+    fn fork_below_finish_completes_the_masked_trie_from_the_supplied_finish_state() {
+        // Finish is at block 3 while the state trie only reaches block 1, so blocks 2 and 3 are
+        // masked in the database.
+        let (factory, blocks) = setup_frontiers(1, 3);
+        let manager = TestOverlay::default();
+        for block in &blocks[2..=4] {
+            manager.insert_executed_block(block.clone());
+        }
+
+        // A fork that branches off block 2, below Finish: Finish is not one of its ancestors, so
+        // its own chain cannot complete the masked trie.
+        let fork = manager.insert_fork(with_unique_trie_data(
+            &TestBlockBuilder::eth().get_executed_block_with_number(
+                blocks[3].block_number(),
+                blocks[2].recovered_block().hash(),
+            ),
+            9,
+        ));
+        let finish_hash = blocks[3].recovered_block().hash();
+        assert!(Arc::clone(&fork).iter().all(|state| state.hash() != finish_hash));
+
+        let provider = factory.provider().unwrap();
+        let error = manager
+            .overlay_builder_for_state(Arc::clone(&fork))
+            .build_state_trie_overlay(&provider, false)
+            .unwrap_err();
+        assert!(error.to_string().contains("cannot be anchored"), "unexpected error: {error}");
+
+        // The canonical chain has Finish as an ancestor, so supplying it is enough.
+        let head = manager
+            .state_for_hash(blocks[4].recovered_block().hash())
+            .expect("canonical head is tracked in memory");
+        let overlay = manager
+            .overlay_builder_for_state(fork)
+            .with_finish_state(head)
+            .build_state_trie_overlay(&provider, false)
+            .unwrap();
+
+        // The masked blocks 2 and 3 complete the trie at Finish, on top of which the fork's own
+        // nodes are applied.
+        assert_eq!(
+            account_node_paths(&overlay),
+            [3, 4, 9].map(|id| Nibbles::from_nibbles([id])).to_vec()
         );
     }
 

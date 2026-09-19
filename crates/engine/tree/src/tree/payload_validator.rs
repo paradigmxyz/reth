@@ -160,7 +160,7 @@ use reth_provider::{
     StorageSettingsCache,
 };
 use reth_revm::db::{states::bundle_state::BundleRetention, BundleAccount, State};
-use reth_storage_overlay::{database_state_frontiers, OverlayManager, OverlayStateProviderFactory};
+use reth_storage_overlay::{OverlayManager, OverlayStateProviderFactory};
 use reth_trie::{
     hashed_cursor::HashedCursorFactory, trie_cursor::TrieCursorFactory, updates::TrieUpdates,
     HashedPostState, KeccakKeyHasher, LazyTrieData,
@@ -1447,30 +1447,41 @@ where
         hash: B256,
         state: &EngineApiTreeState<N>,
     ) -> ProviderResult<Option<OverlayStateProviderFactory<P, N>>> {
-        let overlay_builder = match state.tree_state.block_state_by_hash(hash) {
+        let (overlay_builder, descends_from_finish) = match state
+            .tree_state
+            .block_state_by_hash(hash)
+        {
             Some(parent_state) => {
-                state.tree_state.overlay_manager.overlay_builder_for_state(parent_state)
+                // A canonical parent descends from Finish, so the blocks a partial state trie
+                // masks are on its own chain. A fork may branch at or below Finish, in which
+                // case its chain stops short of them.
+                let canonical = state.tree_state.in_memory_state.state_by_hash(hash).is_some();
+                (
+                    state.tree_state.overlay_manager.overlay_builder_for_state(parent_state),
+                    canonical,
+                )
             }
             None => {
                 if self.provider.header(hash)?.is_none() {
                     debug!(target: "engine::tree::payload_validator", %hash, "no canonical state found for block");
                     return Ok(None)
                 }
-                // The parent is durable, so it has no chain of its own. A partial state trie
-                // still masks the blocks up to Finish, and completing it needs the chain that
-                // ends there.
-                let builder = state.tree_state.overlay_manager.overlay_builder_for_persisted(hash);
-                let db_provider = self.provider.database_provider_ro()?;
-                let (state_trie_frontier, finish) = database_state_frontiers(&db_provider)?;
-                drop(db_provider);
-                match (state_trie_frontier != finish)
-                    .then(|| state.tree_state.in_memory_state.executed_state_by_hash(finish.hash))
-                    .flatten()
-                {
-                    Some(finish_state) => builder.with_finish_state(finish_state),
-                    None => builder,
-                }
+                // The parent is durable, so it has no chain of its own.
+                (state.tree_state.overlay_manager.overlay_builder_for_persisted(hash), false)
             }
+        };
+
+        let overlay_builder = if descends_from_finish {
+            overlay_builder
+        } else {
+            // Resolve the chain that reaches Finish from the shared store instead.
+            let db_provider = self.provider.database_provider_ro()?;
+            let builder = overlay_builder
+                .with_database_finish_state(&db_provider, |finish_hash| {
+                    state.tree_state.in_memory_state.executed_state_by_hash(finish_hash)
+                })?;
+            drop(db_provider);
+            builder
         };
 
         Ok(Some(OverlayStateProviderFactory::new(self.provider.clone(), overlay_builder)))
