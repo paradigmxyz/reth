@@ -99,6 +99,11 @@ impl<T: MetadataProvider> SnapStateVerifier for T {
     where
         Self: MetadataWriter + StageCheckpointWriter + DBProvider,
     {
+        // The stage treats a checkpoint at genesis as already rebuilt, so it would never check
+        // state anchored there.
+        if self.authorize_snap_write(write)?.pivot().number == 0 {
+            return Err(SnapSyncError::GenesisPivot)
+        }
         self.verify_completeness(write, chunk, cancel)?;
         // Starting from block zero makes the stage clear the trie tables and rebuild them, since
         // downloaded state has no changesets to update an existing trie from.
@@ -481,5 +486,16 @@ mod tests {
             provider.verify_state_root(advanced),
             Err(SnapSyncError::Provider(ProviderError::StateForNumberNotFound(2)))
         ));
+    }
+
+    #[test]
+    fn a_genesis_pivot_is_not_handed_off() {
+        let root = state_root(&accounts());
+        let (factory, _, blocks) = downloaded(root, accounts().len());
+        let provider = factory.database_provider_rw().unwrap();
+        let write = provider.start_snap_attempt(SnapGeneration::new(blocks[0], root)).unwrap();
+
+        assert!(matches!(start(&provider, write), Err(SnapSyncError::GenesisPivot)));
+        assert_eq!(merkle_checkpoint(&provider), None);
     }
 }

@@ -176,6 +176,9 @@ pub enum SnapSyncError {
         /// Key the next range is requested from.
         next: B256,
     },
+    /// The pivot is the genesis block, whose trie the merkle stage never rebuilds.
+    #[error("snap synchronization cannot anchor to the genesis block")]
+    GenesisPivot,
     /// Work stopped because its session was cancelled.
     #[error("snap synchronization was cancelled")]
     Cancelled,
