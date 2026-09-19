@@ -97,6 +97,8 @@ reth-ethereum-primitives.workspace = true
 reth-transaction-pool = { workspace = true, features = ["test-utils"] }
 reth-provider = { workspace = true, features = ["test-utils"] }
 reth-db-api.workspace = true
+reth-db-common.workspace = true
+reth-storage-overlay.workspace = true
 
 rand.workspace = true
 

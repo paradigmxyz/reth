@@ -701,10 +701,7 @@ pub struct DecodedFileChunk<T> {
 mod tests {
     use super::*;
     use crate::{
-        bodies::{
-            bodies::BodiesDownloaderBuilder,
-            test_utils::{insert_headers, zip_blocks},
-        },
+        bodies::{bodies::BodiesDownloaderBuilder, test_utils::zip_blocks},
         headers::{reverse_headers::ReverseHeadersDownloaderBuilder, test_utils::child_header},
         test_utils::{generate_bodies, generate_bodies_file},
     };
@@ -718,7 +715,7 @@ mod tests {
         bodies::downloader::BodyDownloader,
         headers::downloader::{HeaderDownloader, SyncTarget},
     };
-    use reth_provider::test_utils::create_test_provider_factory;
+    use reth_provider::test_utils::{create_test_provider_factory, insert_headers};
     use std::sync::Arc;
     use tokio::{
         fs::File,

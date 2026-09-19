@@ -518,6 +518,7 @@ where
                 .with_default_tables()
                 .with_metrics()
                 .with_statistics()
+                .with_block_cache_size_opt(self.node_config().db.rocksdb_block_cache_size)
                 .build()?
         };
 
