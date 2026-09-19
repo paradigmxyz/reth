@@ -76,7 +76,8 @@ pub enum SnapSyncError {
         /// Block the pivot was moved to.
         target: u64,
     },
-    /// Storage persisted ahead of a range was committed before catch-up reached the pivot.
+    /// Catch-up has not carried the downloaded state to the pivot, which committing storage
+    /// persisted ahead of its range or completing the attempt requires.
     #[error("catch-up applied block {applied}, the pivot is {pivot}")]
     CatchUpBehindPivot {
         /// Last block whose list is applied.
@@ -169,6 +170,18 @@ pub enum SnapSyncError {
         /// Hash of the supplied code.
         got: B256,
     },
+    /// Account ranges remain to be downloaded.
+    #[error("accounts from {next} are not downloaded yet")]
+    IncompleteAccounts {
+        /// Key the next range is requested from.
+        next: B256,
+    },
+    /// The pivot is the genesis block, whose trie the merkle stage never rebuilds.
+    #[error("snap synchronization cannot anchor to the genesis block")]
+    GenesisPivot,
+    /// Work stopped because its session was cancelled.
+    #[error("snap synchronization was cancelled")]
+    Cancelled,
 }
 
 impl From<DatabaseError> for SnapSyncError {
