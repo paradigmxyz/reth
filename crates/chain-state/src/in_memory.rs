@@ -293,7 +293,6 @@ impl<N: NodePrimitives> CanonicalInMemoryState<N> {
         self.inner.in_memory_state.pending.send_modify(|p| {
             p.replace(pending);
         });
-        self.inner.in_memory_state.update_metrics();
     }
 
     /// Inserts an executed block that is not (yet) canonical and returns the shared state for it.
@@ -322,9 +321,6 @@ impl<N: NodePrimitives> CanonicalInMemoryState<N> {
         let parent = parent.or_else(|| non_canonical.get(&parent_hash).cloned());
         let state = Arc::new(BlockState::with_parent(block, parent));
         non_canonical.insert(hash, Arc::clone(&state));
-        drop(non_canonical);
-
-        self.inner.in_memory_state.update_metrics();
         state
     }
 
@@ -357,7 +353,6 @@ impl<N: NodePrimitives> CanonicalInMemoryState<N> {
             pending.take();
             true
         });
-        self.inner.in_memory_state.update_metrics();
     }
 
     /// Append new blocks to the in memory state.
