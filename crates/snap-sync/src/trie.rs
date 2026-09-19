@@ -3,16 +3,20 @@
 //! Stage and Snap checkpoints remain durable independently, while the generation marker is only
 //! cleared after the canonical header root and completed Merkle checkpoint agree.
 
-use crate::{SnapDownloadProgress, SnapPhase, SnapStateStore, SnapSyncError};
+use crate::{
+    verify::ensure_trie_rebuild, SnapAttemptStore, SnapDownloadProgress, SnapPhase, SnapStateStore,
+    SnapSyncError,
+};
 use reth_db_api::transaction::DbTxMut;
 use reth_provider::{DatabaseProviderFactory, StaticFileProviderFactory};
 use reth_stages::{stages::MerkleStage, ExecInput, Stage};
 use reth_stages_types::StageId;
 use reth_storage_api::{
-    ChangeSetReader, DBProvider, HeaderProvider, MetadataProvider, MetadataWriter,
+    BlockHashReader, ChangeSetReader, DBProvider, HeaderProvider, MetadataProvider, MetadataWriter,
     PruneCheckpointWriter, StageCheckpointReader, StageCheckpointWriter, StatsReader,
     StorageChangeSetReader, StorageSettingsCache, TrieWriter,
 };
+use tokio_util::sync::CancellationToken;
 
 /// Drives a clean, resumable Merkle rebuild for one downloaded generation.
 #[derive(Debug)]
@@ -36,6 +40,7 @@ impl<'a, F> TrieGenerator<'a, F> {
         F::ProviderRW: DBProvider<Tx: DbTxMut>
             + MetadataProvider
             + MetadataWriter
+            + BlockHashReader
             + ChangeSetReader
             + HeaderProvider
             + PruneCheckpointWriter
@@ -52,6 +57,13 @@ impl<'a, F> TrieGenerator<'a, F> {
                 expected: SnapPhase::Trie,
                 actual: generation.phase,
             });
+        }
+        {
+            let provider = self.factory.database_provider_rw().map_err(crate::error::db_error)?;
+            self.store.ensure_generation(&provider, generation)?;
+            let write = provider.active_snap_write()?.ok_or(SnapSyncError::NoAttempt)?;
+            ensure_trie_rebuild(&provider, write, &CancellationToken::new())?;
+            provider.commit().map_err(crate::error::db_error)?;
         }
         let mut stage = MerkleStage::default_execution();
         loop {
@@ -83,12 +95,16 @@ mod tests {
     use alloy_primitives::{B256, U256};
     use reth_db_api::{tables, transaction::DbTx};
     use reth_primitives_traits::Account;
-    use reth_provider::{StaticFileProviderFactory, StaticFileWriter};
+    use reth_provider::{
+        test_utils::MockNodeTypesWithDB, ProviderFactory, StaticFileProviderFactory,
+        StaticFileWriter,
+    };
+    use reth_stages_types::StageCheckpoint;
     use reth_static_file_types::StaticFileSegment;
     use reth_trie_common::{HashBuilder, HashedPostState, Nibbles, TrieAccount, EMPTY_ROOT_HASH};
 
-    #[test]
-    fn rebuilds_with_merkle_stage_before_clearing_marker() {
+    fn downloaded(
+    ) -> (ProviderFactory<MockNodeTypesWithDB>, SnapDownloadProgress, B256, TrieAccount) {
         let factory = crate::test_utils::hashed_factory();
         let account_hash = B256::repeat_byte(0x11);
         let trie_account = TrieAccount {
@@ -125,6 +141,13 @@ mod tests {
             )
             .unwrap();
         let generation = store.complete_block_access_lists(generation).unwrap();
+        (factory, generation, account_hash, trie_account)
+    }
+
+    #[test]
+    fn rebuilds_with_merkle_stage_before_clearing_marker() {
+        let (factory, generation, account_hash, trie_account) = downloaded();
+        let store = SnapStateStore::new(&factory);
 
         TrieGenerator::new(&factory).run(generation).unwrap();
 
@@ -138,5 +161,46 @@ mod tests {
             provider.tx_ref().get::<tables::HashedAccounts>(account_hash).unwrap(),
             Some(Account::from(trie_account))
         );
+        assert!(provider.snap_attempt().unwrap().unwrap().is_verified());
+        assert_eq!(store.completed_block().unwrap(), Some(1));
+    }
+
+    #[test]
+    fn missing_bytecode_prevents_rebuild_and_publication() {
+        let (factory, generation, account_hash, trie_account) = downloaded();
+        let code_hash = B256::repeat_byte(0xcc);
+        let provider = factory.database_provider_rw().unwrap();
+        let account = Account { bytecode_hash: Some(code_hash), ..Account::from(trie_account) };
+        provider.tx_ref().put::<tables::HashedAccounts>(account_hash, account).unwrap();
+        provider.commit().unwrap();
+
+        assert!(matches!(
+            TrieGenerator::new(&factory).run(generation),
+            Err(SnapSyncError::MissingCode { hash }) if hash == code_hash
+        ));
+        let store = SnapStateStore::new(&factory);
+        assert_eq!(store.interrupted_generation().unwrap(), Some(generation));
+        assert_eq!(store.completed_block().unwrap(), None);
+    }
+
+    #[test]
+    fn a_legacy_checkpoint_cannot_bypass_root_validation() {
+        let (factory, generation, account_hash, trie_account) = downloaded();
+        let provider = factory.database_provider_rw().unwrap();
+        let account = Account { balance: U256::from(99), ..Account::from(trie_account) };
+        provider.tx_ref().put::<tables::HashedAccounts>(account_hash, account).unwrap();
+        // A completed checkpoint without this attempt's hand-off must not authenticate state.
+        provider.save_stage_checkpoint(StageId::MerkleExecute, StageCheckpoint::new(1)).unwrap();
+        provider.commit().unwrap();
+
+        assert!(matches!(
+            TrieGenerator::new(&factory).run(generation),
+            Err(SnapSyncError::Trie(_))
+        ));
+        let store = SnapStateStore::new(&factory);
+        assert_eq!(store.interrupted_generation().unwrap(), Some(generation));
+        assert_eq!(store.completed_block().unwrap(), None);
+        let provider = factory.database_provider_ro().unwrap();
+        assert!(provider.snap_attempt().unwrap().unwrap().is_unfinished());
     }
 }

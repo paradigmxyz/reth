@@ -10423,6 +10423,7 @@ dependencies = [
  "reth-provider",
  "reth-prune-types",
  "reth-stages",
+ "reth-stages-api",
  "reth-stages-types",
  "reth-static-file-types",
  "reth-storage-api",

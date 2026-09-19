@@ -23,6 +23,7 @@ mod pivot;
 mod session;
 mod state;
 mod trie;
+mod verify;
 
 #[cfg(test)]
 mod test_utils;
@@ -47,3 +48,4 @@ pub use state::{
     VerifiedRange, DEFAULT_CODE_HASHES, DEFAULT_STORAGE_ACCOUNTS,
 };
 pub use trie::TrieGenerator;
+pub use verify::{SnapStateVerifier, VerifiedSnapState, DEFAULT_SCAN_CHUNK};

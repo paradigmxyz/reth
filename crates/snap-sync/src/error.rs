@@ -77,7 +77,8 @@ pub enum SnapSyncError {
         /// Block the pivot was moved to.
         target: u64,
     },
-    /// Storage persisted ahead of a range was committed before catch-up reached the pivot.
+    /// Catch-up has not carried the downloaded state to the pivot, which committing storage
+    /// persisted ahead of its range or completing the attempt requires.
     #[error("catch-up applied block {applied}, the pivot is {pivot}")]
     CatchUpBehindPivot {
         /// Last block whose list is applied.
@@ -170,34 +171,6 @@ pub enum SnapSyncError {
         /// Hash of the supplied code.
         got: B256,
     },
-    /// The generation anchor or a requested BAL header left the canonical chain.
-    #[error("canonical header {block_number} is {actual:?}, expected {expected}")]
-    CanonicalHeaderMismatch {
-        /// Header number being checked.
-        block_number: u64,
-        /// Header hash authenticated by the generation or response.
-        expected: B256,
-        /// Current canonical hash, if the header still exists.
-        actual: Option<B256>,
-    },
-    /// The generation root no longer matches its canonical target header.
-    #[error("canonical state root at block {block_number} is {actual}, expected {expected}")]
-    CanonicalStateRootMismatch {
-        /// Target header number.
-        block_number: u64,
-        /// Root retained by the durable generation.
-        expected: B256,
-        /// Root currently committed by the header.
-        actual: B256,
-    },
-    /// Trie generation has not durably reached its target checkpoint.
-    #[error("snap trie checkpoint is {actual:?}, expected {expected}")]
-    TrieIncomplete {
-        /// Target generation block.
-        expected: u64,
-        /// Current Merkle stage block, if present.
-        actual: Option<u64>,
-    },
     /// The Merkle stage rejected the downloaded state.
     #[error("snap trie generation failed: {0}")]
     Trie(String),
@@ -221,6 +194,18 @@ pub enum SnapSyncError {
     /// The provider rejected a database operation.
     #[error("snap database operation failed: {0}")]
     Database(String),
+    /// Account ranges remain to be downloaded.
+    #[error("accounts from {next} are not downloaded yet")]
+    IncompleteAccounts {
+        /// Key the next range is requested from.
+        next: B256,
+    },
+    /// The pivot is the genesis block, whose trie the merkle stage never rebuilds.
+    #[error("snap synchronization cannot anchor to the genesis block")]
+    GenesisPivot,
+    /// Work stopped because its session was cancelled.
+    #[error("snap synchronization was cancelled")]
+    Cancelled,
 }
 
 impl From<DatabaseError> for SnapSyncError {

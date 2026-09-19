@@ -5,7 +5,7 @@
 
 use crate::{
     error::db_error, handoff::publish_state_snapshot, SnapAccountStore, SnapAttemptStore,
-    SnapCatchUpStore, SnapSyncError,
+    SnapCatchUpStore, SnapStateVerifier, SnapSyncError,
 };
 use alloy_eips::BlockNumHash;
 use alloy_primitives::B256;
@@ -15,8 +15,8 @@ use reth_primitives_traits::AlloyBlockHeader;
 use reth_provider::{DatabaseProviderFactory, StaticFileProviderFactory};
 use reth_stages_types::{StageCheckpoint, StageId};
 use reth_storage_api::{
-    DBProvider, HeaderProvider, MetadataProvider, MetadataWriter, PruneCheckpointWriter,
-    StageCheckpointReader, StageCheckpointWriter, StorageSettingsCache,
+    BlockHashReader, DBProvider, HeaderProvider, MetadataProvider, MetadataWriter,
+    PruneCheckpointWriter, StageCheckpointReader, StageCheckpointWriter, StorageSettingsCache,
 };
 
 /// A snap attempt's canonical pivot identity and the state root authenticating its downloads.
@@ -150,6 +150,7 @@ impl<'a, F> SnapStateStore<'a, F> {
         F: DatabaseProviderFactory,
         F::ProviderRW: DBProvider<Tx: DbTxMut>
             + HeaderProvider
+            + BlockHashReader
             + PruneCheckpointWriter
             + StageCheckpointReader
             + StageCheckpointWriter
@@ -165,60 +166,14 @@ impl<'a, F> SnapStateStore<'a, F> {
             return Err(SnapSyncError::UnsupportedStorage);
         }
         self.ensure_generation(&provider, generation)?;
-        let (state_root, _) = Self::canonical_header_fields(
-            &provider,
-            generation.target_block,
-            generation.target_hash,
-        )?;
-        if state_root != generation.state_root {
-            return Err(SnapSyncError::CanonicalStateRootMismatch {
-                block_number: generation.target_block,
-                expected: generation.state_root,
-                actual: state_root,
-            });
-        }
-        let checkpoint = provider
-            .get_stage_checkpoint(StageId::MerkleExecute)
-            .map_err(db_error)?
-            .map(|checkpoint| checkpoint.block_number);
-        if checkpoint != Some(generation.target_block) {
-            return Err(SnapSyncError::TrieIncomplete {
-                expected: generation.target_block,
-                actual: checkpoint,
-            });
-        }
+        let write = provider.active_snap_write()?.ok_or(SnapSyncError::NoAttempt)?;
+        let verified = provider.verify_state_root(write)?;
         provider
             .save_stage_checkpoint(SNAP_SYNC_STAGE, StageCheckpoint::new(generation.target_block))
             .map_err(db_error)?;
         provider.save_stage_checkpoint_progress(SNAP_SYNC_STAGE, Vec::new()).map_err(db_error)?;
-        let write = provider.active_snap_write()?.ok_or(SnapSyncError::NoAttempt)?;
-        provider.verify_snap_attempt(write)?;
-        publish_state_snapshot(&provider, generation.target_block)?;
+        publish_state_snapshot(&provider, verified.target().number)?;
         provider.commit().map_err(db_error)
-    }
-
-    // Canonical checks keep a reorged pivot or in-flight BAL outside the durable generation.
-    pub(crate) fn canonical_header_fields(
-        provider: &impl HeaderProvider,
-        block_number: u64,
-        expected: B256,
-    ) -> Result<(B256, Option<B256>), SnapSyncError> {
-        let Some(header) = provider.sealed_header(block_number).map_err(db_error)? else {
-            return Err(SnapSyncError::CanonicalHeaderMismatch {
-                block_number,
-                expected,
-                actual: None,
-            });
-        };
-        let actual = header.hash();
-        if actual != expected {
-            return Err(SnapSyncError::CanonicalHeaderMismatch {
-                block_number,
-                expected,
-                actual: Some(actual),
-            });
-        }
-        Ok((header.state_root(), header.block_access_list_hash()))
     }
 
     // Stage progress keeps restart data visible to existing database tooling.

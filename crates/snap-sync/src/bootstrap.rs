@@ -357,13 +357,7 @@ enum SessionStep {
 
 // A reorged anchor invalidates the generation, not the session.
 const fn is_reorg(error: &SnapSyncError) -> bool {
-    matches!(
-        error,
-        SnapSyncError::CanonicalHeaderMismatch { .. } |
-            SnapSyncError::CanonicalStateRootMismatch { .. } |
-            SnapSyncError::NonCanonicalBlock { .. } |
-            SnapSyncError::ForkedBlock { .. }
-    )
+    matches!(error, SnapSyncError::NonCanonicalBlock { .. } | SnapSyncError::ForkedBlock { .. })
 }
 
 #[cfg(test)]

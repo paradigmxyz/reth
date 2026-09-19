@@ -8,6 +8,7 @@ use crate::{CatchUpProgress, SnapGeneration, SnapSyncError};
 use reth_storage_api::{
     BlockHashReader, MetadataProvider, MetadataWriter, SnapAttempt, SnapAttemptId, StorageSettings,
 };
+use serde::{Deserialize, Serialize};
 
 /// Persistence for the attempt that owns downloaded snap state.
 ///
@@ -61,7 +62,7 @@ pub trait SnapAttemptStore {
 }
 
 /// What a write presents to prove it belongs to the attempt owning the persisted state.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct SnapWrite {
     // Attempt this write belongs to.
     attempt: SnapAttemptId,
