@@ -806,7 +806,7 @@ mod tests {
             saved_cache: None,
             provider: OverlayStateProviderFactory::new(
                 MockEthProvider::default(),
-                OverlayManager::default().overlay_builder(B256::ZERO),
+                OverlayManager::default().overlay_builder_for_hash(B256::ZERO),
             ),
             bal_prewarm_pool: None,
             metrics: PrewarmMetrics::default(),
@@ -846,7 +846,7 @@ mod tests {
             saved_cache: Some(saved_cache),
             provider: OverlayStateProviderFactory::new(
                 MockEthProvider::default(),
-                OverlayManager::default().overlay_builder(B256::ZERO),
+                OverlayManager::default().overlay_builder_for_hash(B256::ZERO),
             ),
             bal_prewarm_pool: None,
             metrics: PrewarmMetrics {

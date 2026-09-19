@@ -401,7 +401,7 @@ impl ChangesetCache {
         );
 
         let overlay = overlay_manager
-            .overlay_builder(finish.hash)
+            .overlay_builder_for_hash(finish.hash)
             .with_no_reverts()
             .build_state_trie_overlay_at_frontiers(provider, partial_state_trie, finish, true)?;
         let state_trie_provider = OverlayStateProvider::<&P, N>::new_with_state_trie(

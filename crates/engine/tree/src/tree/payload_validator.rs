@@ -1438,21 +1438,29 @@ where
 
     /// Creates an overlay state provider factory for the given parent hash.
     ///
+    /// When the parent is in memory its shared `BlockState` chain is handed to the overlay
+    /// manager directly, so no chain has to be resolved by hash.
+    ///
     /// Returns `None` when the parent is neither in memory nor persisted.
     fn overlay_state_provider_factory(
         &self,
         hash: B256,
         state: &EngineApiTreeState<N>,
     ) -> ProviderResult<Option<OverlayStateProviderFactory<P, N>>> {
-        if !state.tree_state.contains_hash(&hash) && self.provider.header(hash)?.is_none() {
-            debug!(target: "engine::tree::payload_validator", %hash, "no canonical state found for block");
-            return Ok(None)
-        }
+        let overlay_builder = match state.tree_state.block_state_by_hash(hash) {
+            Some(parent_state) => {
+                state.tree_state.overlay_manager.overlay_builder_for_state(parent_state)
+            }
+            None => {
+                if self.provider.header(hash)?.is_none() {
+                    debug!(target: "engine::tree::payload_validator", %hash, "no canonical state found for block");
+                    return Ok(None)
+                }
+                state.tree_state.overlay_manager.overlay_builder_for_hash(hash)
+            }
+        };
 
-        Ok(Some(OverlayStateProviderFactory::new(
-            self.provider.clone(),
-            state.tree_state.overlay_manager.overlay_builder(hash),
-        )))
+        Ok(Some(OverlayStateProviderFactory::new(self.provider.clone(), overlay_builder)))
     }
 
     /// Called when an invalid block is encountered during validation.

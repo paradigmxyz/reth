@@ -4937,8 +4937,15 @@ mod tests {
         save_genesis(&provider_rw, &genesis).unwrap();
         provider_rw.commit().unwrap();
 
-        for block in &blocks[2..] {
-            factory.overlay_manager().insert_block(block.clone());
+        // The in-memory state owns the executed blocks; the overlay manager only tracks the
+        // chains it is handed.
+        use reth_chain_state::{CanonicalInMemoryState, NewCanonicalChain};
+
+        let in_memory_state = CanonicalInMemoryState::empty();
+        factory.overlay_manager().attach_in_memory_state(in_memory_state.clone());
+        in_memory_state.update_chain(NewCanonicalChain::Commit { new: blocks[2..].to_vec() });
+        for state in in_memory_state.canonical_chain() {
+            factory.overlay_manager().insert_block(state);
         }
 
         let provider_rw = factory.provider_rw().unwrap();

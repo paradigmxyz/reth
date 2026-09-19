@@ -124,16 +124,13 @@ impl<N: ProviderNodeTypes> BlockchainProvider<N> {
             .transpose()?
             .flatten();
         let bal_store = storage.bal_store().clone();
+        let canonical_in_memory_state =
+            CanonicalInMemoryState::with_head(latest, finalized_header, safe_header);
+        // The overlay manager does not own in-memory blocks; give it a read handle so it can
+        // resolve the chain at the database's Finish frontier.
+        storage.overlay_manager().attach_in_memory_state(canonical_in_memory_state.clone());
 
-        Ok(Self {
-            database: storage,
-            canonical_in_memory_state: CanonicalInMemoryState::with_head(
-                latest,
-                finalized_header,
-                safe_header,
-            ),
-            bal_store,
-        })
+        Ok(Self { database: storage, canonical_in_memory_state, bal_store })
     }
 
     /// Gets a clone of `canonical_in_memory_state`.
@@ -172,7 +169,7 @@ impl<N: ProviderNodeTypes> BlockchainProvider<N> {
     ) -> StateProviderBox {
         Box::new(OverlayStateProvider::new(
             provider,
-            self.database.overlay_manager().overlay_builder(block_hash),
+            self.database.overlay_manager().overlay_builder_for_hash(block_hash),
         ))
     }
 
@@ -218,7 +215,7 @@ impl<N: ProviderNodeTypes> BlockchainProvider<N> {
         let Some(block_hash) = block_hash else { return Ok(None) };
         let state_provider_factory = OverlayStateProviderFactory::new(
             self.database.clone(),
-            self.database.overlay_manager().overlay_builder(block_hash),
+            self.database.overlay_manager().overlay_builder_for_hash(block_hash),
         );
         state_provider_factory.database_provider_ro().map(Some)
     }
@@ -817,7 +814,7 @@ impl<N: ProviderNodeTypes> StateProviderFactory for BlockchainProvider<N> {
 
         if let Some(pending) = self.canonical_in_memory_state.pending_state() {
             // we have a pending block
-            return self.state_provider_for_state(Arc::new(pending));
+            return self.state_provider_for_state(pending);
         }
 
         // fallback to latest state if the pending block is not available
@@ -828,14 +825,14 @@ impl<N: ProviderNodeTypes> StateProviderFactory for BlockchainProvider<N> {
         if let Some(pending) = self.canonical_in_memory_state.pending_state() &&
             pending.hash() == block_hash
         {
-            return self.state_provider_for_state(Arc::new(pending)).map(Some);
+            return self.state_provider_for_state(pending).map(Some);
         }
         Ok(None)
     }
 
     fn maybe_pending(&self) -> ProviderResult<Option<StateProviderBox>> {
         if let Some(pending) = self.canonical_in_memory_state.pending_state() {
-            return self.state_provider_for_state(Arc::new(pending)).map(Some)
+            return self.state_provider_for_state(pending).map(Some)
         }
 
         Ok(None)
@@ -1013,7 +1010,7 @@ impl<N: ProviderNodeTypes> StateReader for BlockchainProvider<N> {
         let Some(block_hash) = provider.block_hash(block)? else { return Ok(None) };
         let state_provider = OverlayStateProvider::<&_, N::Primitives>::new_ref(
             &provider,
-            self.database.overlay_manager().overlay_builder(block_hash),
+            self.database.overlay_manager().overlay_builder_for_hash(block_hash),
         );
         let (state, reverts) = provider.populate_bundle_state(
             account_changeset,
@@ -1208,8 +1205,8 @@ mod tests {
         let writer = factory.provider_rw()?;
         writer.save_blocks(&SaveBlocksInput::new(blocks[1..].to_vec(), 0, 0, 2, 1))?;
         writer.commit()?;
-        factory.overlay_manager().insert_block(blocks[2].clone());
         let provider = BlockchainProvider::new(factory)?;
+        commit_in_memory(&provider, vec![blocks[2].clone()]);
 
         for number in [1, 2] {
             let state = provider.history_by_block_hash(blocks[number].recovered_block().hash())?;
@@ -1362,7 +1359,7 @@ mod tests {
         };
         provider.canonical_in_memory_state.update_chain(chain);
         for state in provider.canonical_in_memory_state.canonical_chain() {
-            provider.database.overlay_manager().insert_block(state.block());
+            provider.database.overlay_manager().insert_block(state);
         }
 
         // Get canonical, safe, and finalized blocks
@@ -3029,6 +3026,23 @@ mod tests {
         Ok(())
     }
 
+    /// Commits `blocks` to the provider's in-memory state, which owns them, and notifies the
+    /// overlay manager about the resulting shared chain.
+    fn commit_in_memory(
+        provider: &BlockchainProvider<MockNodeTypesWithDB>,
+        blocks: Vec<ExecutedBlock>,
+    ) {
+        let hashes = blocks.iter().map(|block| block.recovered_block().hash()).collect::<Vec<_>>();
+        provider.canonical_in_memory_state.update_chain(NewCanonicalChain::Commit { new: blocks });
+        for hash in hashes {
+            let state = provider
+                .canonical_in_memory_state
+                .state_by_hash(hash)
+                .expect("block was just committed");
+            provider.database.overlay_manager().insert_block(state);
+        }
+    }
+
     fn random_account(nonce: u64) -> (Address, Account) {
         (Address::random(), Account { nonce, balance: U256::from(nonce), bytecode_hash: None })
     }
@@ -3294,17 +3308,14 @@ mod tests {
                 Arc::new(TrieUpdates::default().into_sorted()),
             ),
         );
-        provider.database.overlay_manager().insert_block(executed.clone());
-        provider
-            .canonical_in_memory_state
-            .update_chain(NewCanonicalChain::Commit { new: vec![executed] });
+        commit_in_memory(&provider, vec![executed]);
 
         // `latest` reuses the canonical `Arc<BlockState>` chain, while the hash-based lookup
         // rebuilds an equivalent chain from the overlay manager's block graph. Both must observe
         // the same in-memory account and storage values.
         let rebuilt_from_hash = OverlayStateProviderFactory::new(
             provider.database.clone(),
-            provider.database.overlay_manager().overlay_builder(block_hash),
+            provider.database.overlay_manager().overlay_builder_for_hash(block_hash),
         )
         .database_provider_ro()?;
 
@@ -3316,6 +3327,131 @@ mod tests {
             assert_eq!(state.basic_account(&address)?, Some(account));
             assert_eq!(state.storage(address, slot_key)?, Some(value));
         }
+
+        Ok(())
+    }
+
+    #[test]
+    fn state_providers_share_one_block_state_for_canonical_pending_and_fork_hashes(
+    ) -> eyre::Result<()> {
+        use crate::{AccountReader, StateProviderBox};
+        use reth_storage_api::DatabaseProviderROFactory;
+        use reth_storage_overlay::OverlayStateProviderFactory;
+
+        let mut rng = generators::rng();
+        let factory = test_provider_factory_with_genesis()?;
+        let provider = BlockchainProvider::new(factory)?;
+        let genesis = provider.canonical_in_memory_state.get_canonical_head();
+
+        // One executed block per role, each with an account only that block writes, so a read
+        // proves which chain the state provider was built from.
+        let mut executed_block =
+            |parent: B256, number: u64, nonce: u64| -> (ExecutedBlock, Address, Account) {
+                let (address, account) = random_account(nonce);
+                let mut hashed_state = HashedPostState::default();
+                hashed_state.accounts.insert(keccak256(address), Some(account));
+                let block = random_block(
+                    &mut rng,
+                    number,
+                    BlockParams { parent: Some(parent), tx_count: Some(0), ..Default::default() },
+                )
+                .try_recover()
+                .expect("failed to seal block with senders");
+                let executed = ExecutedBlock::new(
+                    Arc::new(block),
+                    Arc::new(BlockExecutionOutput {
+                        result: BlockExecutionResult {
+                            receipts: Default::default(),
+                            requests: Default::default(),
+                            gas_used: 0,
+                            blob_gas_used: 0,
+                        },
+                        state: BundleState::new(
+                            [(address, None, Some(account.into()), Default::default())],
+                            [[(address, Some(None), [])]],
+                            [],
+                        ),
+                    }),
+                    ComputedTrieData::new(
+                        Arc::new(hashed_state.into_sorted()),
+                        Arc::new(TrieUpdates::default().into_sorted()),
+                    ),
+                );
+                (executed, address, account)
+            };
+
+        let (canonical, canonical_address, canonical_account) =
+            executed_block(genesis.hash(), genesis.number + 1, 1);
+        let canonical_hash = canonical.recovered_block().hash();
+        commit_in_memory(&provider, vec![canonical]);
+
+        // A fork off genesis and a pending block on top of the canonical head, tracked the way
+        // the engine tracks them.
+        let (fork, fork_address, fork_account) = executed_block(genesis.hash(), 1, 2);
+        let fork_hash = fork.recovered_block().hash();
+        let fork_state = provider.canonical_in_memory_state.insert_executed(fork);
+        provider.database.overlay_manager().insert_block(Arc::clone(&fork_state));
+
+        let (pending, pending_address, pending_account) =
+            executed_block(canonical_hash, genesis.number + 2, 3);
+        let pending_hash = pending.recovered_block().hash();
+        provider.canonical_in_memory_state.set_pending_block(pending);
+        let pending_state =
+            provider.canonical_in_memory_state.pending_state().expect("pending block was just set");
+        provider.database.overlay_manager().insert_block(Arc::clone(&pending_state));
+
+        // `state_by_block_hash` still only serves canonical and pending hashes; a fork is reached
+        // through the overlay manager, which is what payload validation uses.
+        let cases = [
+            (canonical_hash, canonical_address, canonical_account, Some(provider.latest()?)),
+            (fork_hash, fork_address, fork_account, None),
+            (pending_hash, pending_address, pending_account, Some(provider.pending()?)),
+        ];
+
+        for (hash, address, account, public_provider) in cases {
+            // Every role resolves to the one shared `BlockState` the engine hands to payload
+            // validation, so there is no second chain to drift from.
+            let shared = provider
+                .canonical_in_memory_state
+                .executed_state_by_hash(hash)
+                .expect("block is tracked in memory");
+            assert_eq!(shared.hash(), hash);
+            assert_eq!(shared.anchor(), genesis.num_hash());
+            assert!(Arc::ptr_eq(
+                &shared,
+                &provider
+                    .canonical_in_memory_state
+                    .executed_state_by_hash(hash)
+                    .expect("block is tracked in memory")
+            ));
+
+            // Build the provider the way payload validation does, from that shared chain, and the
+            // way a caller with only a hash does. Both must read the same in-memory state.
+            let overlay_manager = provider.database.overlay_manager();
+            let from_shared: StateProviderBox = Box::new(
+                OverlayStateProviderFactory::new(
+                    provider.database.clone(),
+                    overlay_manager.overlay_builder_for_state(Arc::clone(&shared)),
+                )
+                .database_provider_ro()?,
+            );
+            let from_hash: StateProviderBox = Box::new(
+                OverlayStateProviderFactory::new(
+                    provider.database.clone(),
+                    overlay_manager.overlay_builder_for_hash(hash),
+                )
+                .database_provider_ro()?,
+            );
+
+            assert_eq!(from_shared.basic_account(&address)?, Some(account));
+            assert_eq!(from_hash.basic_account(&address)?, Some(account));
+            if let Some(public_provider) = public_provider {
+                assert_eq!(public_provider.basic_account(&address)?, Some(account));
+            }
+        }
+
+        // The fork must not be visible from the canonical head.
+        assert_eq!(provider.latest()?.basic_account(&fork_address)?, None);
 
         Ok(())
     }
@@ -3358,10 +3494,7 @@ mod tests {
             state: Default::default(),
         };
         let executed = ExecutedBlock::new(Arc::new(block), Arc::new(execution_output), trie_data);
-        provider.database.overlay_manager().insert_block(executed.clone());
-        provider
-            .canonical_in_memory_state
-            .update_chain(NewCanonicalChain::Commit { new: vec![executed] });
+        commit_in_memory(&provider, vec![executed]);
 
         let state =
             provider.state_range_provider(unique_root)?.expect("in-memory root must resolve");
@@ -3407,10 +3540,7 @@ mod tests {
             state: Default::default(),
         };
         let executed = ExecutedBlock::new(Arc::new(block), Arc::new(execution_output), trie_data);
-        provider.database.overlay_manager().insert_block(executed.clone());
-        provider
-            .canonical_in_memory_state
-            .update_chain(NewCanonicalChain::Commit { new: vec![executed] });
+        commit_in_memory(&provider, vec![executed]);
 
         // Persistence races ahead: a *different* block, with a *different* account, lands in
         // the database on top of the same genesis anchor while the in-memory chain above still
