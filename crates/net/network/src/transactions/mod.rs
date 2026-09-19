@@ -657,6 +657,9 @@ impl<Pool: TransactionPool, N: NetworkPrimitives> TransactionsManager<Pool, N> {
 }
 
 impl<Pool: TransactionPool, N: NetworkPrimitives> TransactionsManager<Pool, N> {
+    /// Applies a shared-batcher result to peer attribution and bad-transaction tracking.
+    /// Recovery failures penalize peers at most once per source message; local overload
+    /// only clears attribution without penalizing peers or scheduling a refetch.
     fn on_ingress_import_result(&mut self, (hash, result, reported): IngressImportResult) {
         match result {
             Ok(_) => self.on_good_import(hash),
@@ -2447,6 +2450,8 @@ impl Drop for PendingImportGuard {
     }
 }
 
+/// A transaction's import result and a flag shared by its source message to deduplicate
+/// recovery-failure penalties.
 type IngressImportResult = (TxHash, Result<AddedTransactionOutcome, IngressError>, Arc<AtomicBool>);
 
 #[cfg(test)]

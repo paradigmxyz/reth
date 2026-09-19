@@ -48,6 +48,26 @@ impl Drop for TaskPauseGuard {
     }
 }
 
+/// Coordinates payload validation with the transaction batcher shared by RPC and P2P.
+///
+/// The payload validator holds pause guards while processing a live block. The batcher
+/// cooperatively waits between bounded units of recovery, validation and insertion.
+#[derive(Clone, Debug, Default)]
+pub struct TransactionIngressPause(TaskPause);
+
+impl TransactionIngressPause {
+    /// Pauses transaction ingress until this and all overlapping guards have been dropped.
+    /// Work that has already started finishes its current bounded unit.
+    pub fn pause(&self) -> TaskPauseGuard {
+        self.0.pause()
+    }
+
+    /// Waits until every payload-validation guard has been dropped.
+    pub async fn resumed(&self) {
+        self.0.resumed().await;
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -14,7 +14,7 @@ use reth_metrics::{
     Metrics,
 };
 use reth_primitives_traits::InMemorySize;
-use reth_tasks::pause::TaskPause;
+use reth_tasks::pause::TransactionIngressPause;
 use std::{
     fmt,
     future::Future,
@@ -178,7 +178,8 @@ impl BatchTxProcessor {
             bytes: Arc::new(Semaphore::new(config.max_bytes.min(u32::MAX as usize))),
         };
         let (lifetime, shutdown) = watch::channel(());
-        let context = Arc::new(IngressContext { cache, pause: TaskPause::default(), shutdown });
+        let context =
+            Arc::new(IngressContext { cache, pause: TransactionIngressPause::default(), shutdown });
         let handle = BatchTxHandle {
             lanes: [lane(rpc_tx, "rpc"), lane(p2p_tx, "p2p")],
             context: context.clone(),
@@ -248,8 +249,8 @@ impl<T: PoolTransaction + 'static> BatchTxHandle<T> {
         handle
     }
 
-    /// Returns the shared trigger used to pause ingress during foreground CPU work.
-    pub fn pause_handle(&self) -> TaskPause {
+    /// Returns the trigger shared with payload validation to pause RPC and P2P ingress.
+    pub fn pause_handle(&self) -> TransactionIngressPause {
         self.context.pause.clone()
     }
 
@@ -734,7 +735,7 @@ enum IngressInput<T: PoolTransaction> {
 #[derive(Debug)]
 struct IngressContext {
     cache: Option<SenderRecoveryCache>,
-    pause: TaskPause,
+    pause: TransactionIngressPause,
     shutdown: watch::Receiver<()>,
 }
 
