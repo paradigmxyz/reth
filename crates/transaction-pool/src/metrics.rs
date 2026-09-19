@@ -139,12 +139,60 @@ pub struct AllTransactionsMetrics {
     pub base_fee: Gauge,
 }
 
-/// Transaction pool validation metrics
+/// Transaction pool validation metrics.
+///
+/// Rejection counters count stateless validation attempts by their first failing check, including
+/// repeated attempts for the same transaction.
 #[derive(Metrics)]
 #[metrics(scope = "transaction_pool")]
 pub struct TxPoolValidationMetrics {
     /// How long to successfully validate a blob
     pub blob_validation_duration: Histogram,
+    /// Number of stateless validation attempts rejected due to an unsupported or inactive
+    /// transaction type.
+    pub rejected_unsupported_transaction_type: Counter,
+    /// Number of stateless validation attempts rejected due to a nonce exceeding the EIP-2681
+    /// bound.
+    pub rejected_nonce_exceeds_limit: Counter,
+    /// Number of stateless validation attempts rejected due to transaction data exceeding the size
+    /// limit.
+    pub rejected_oversized_data: Counter,
+    /// Number of stateless validation attempts rejected due to init code exceeding the size limit.
+    pub rejected_init_code_too_large: Counter,
+    /// Number of stateless validation attempts rejected due to a gas limit exceeding the block gas
+    /// limit.
+    pub rejected_exceeds_gas_limit: Counter,
+    /// Number of stateless validation attempts rejected due to a gas limit exceeding the
+    /// configured transaction gas limit.
+    pub rejected_max_tx_gas_limit_exceeded: Counter,
+    /// Number of stateless validation attempts rejected due to a priority fee exceeding the max
+    /// fee per gas.
+    pub rejected_tip_above_fee_cap: Counter,
+    /// Number of stateless validation attempts rejected due to a local transaction fee exceeding
+    /// the configured fee cap.
+    pub rejected_exceeds_fee_cap: Counter,
+    /// Number of stateless validation attempts rejected due to a priority fee below the configured
+    /// minimum.
+    pub rejected_priority_fee_below_minimum: Counter,
+    /// Number of stateless validation attempts rejected due to a chain ID mismatch.
+    pub rejected_chain_id_mismatch: Counter,
+    /// Number of stateless validation attempts rejected due to a missing or empty EIP-7702
+    /// authorization list.
+    pub rejected_missing_authorization_list: Counter,
+    /// Number of stateless validation attempts rejected due to a gas limit below the intrinsic or
+    /// floor gas cost.
+    pub rejected_intrinsic_gas_too_low: Counter,
+    /// Number of stateless validation attempts rejected due to a blob transaction without blobs.
+    pub rejected_no_blobs: Counter,
+    /// Number of stateless validation attempts rejected due to a blob count exceeding the fork
+    /// limit.
+    pub rejected_too_many_blobs: Counter,
+    /// Number of stateless validation attempts rejected due to a gas limit exceeding the fork
+    /// transaction gas limit cap.
+    pub rejected_gas_limit_too_high: Counter,
+    /// Number of stateless validation attempts rejected due to a failed additional stateless
+    /// validation check.
+    pub rejected_additional_stateless_validation_failed: Counter,
 }
 
 /// Transaction pool validator task metrics
