@@ -650,21 +650,20 @@ impl<N: NodePrimitives> OverlayManager<N> {
 
 /// Returns whether a cached overlay can still be requested.
 ///
-/// An overlay spans the blocks in `(anchor, tip]`. It is dead once either end is gone, or once
-/// the durable state trie frontier has moved past its anchor: an overlay anchored below the
-/// frontier can never be asked for again, because anchors are resolved at the frontier. The
-/// number check also covers an anchor that was never an in-memory block, which no hash-based
-/// check can see.
+/// An overlay spans the blocks in `(anchor, tip]`. It is dead once its tip is gone, or once the
+/// durable state trie frontier has moved past its anchor: an overlay anchored below the frontier
+/// can never be asked for again, because anchors are resolved at the frontier. The number check
+/// also covers an anchor that was never an in-memory block, which no hash-based check can see.
+///
+/// The anchor being removed is not a reason to drop the entry: the trim removes the frontier
+/// block itself, and an overlay anchored there is exactly what the next payload asks for.
 fn overlay_is_live<T>(
     key: &OverlayCacheKey,
     cached: &CachedOverlay<T>,
     removed: &B256Set,
     state_trie_frontier: BlockNumber,
 ) -> bool {
-    if removed.contains(&key.tip_hash) || removed.contains(&key.anchor_hash) {
-        return false
-    }
-    cached.anchor_number >= state_trie_frontier
+    !removed.contains(&key.tip_hash) && cached.anchor_number >= state_trie_frontier
 }
 
 /// Controls how an overlay computation interacts with the manager cache.
@@ -1473,6 +1472,31 @@ mod tests {
         manager.remove_forks([fork_state.hash()], blocks[0].block_number());
         assert!(!manager.state_trie_overlays.entries.contains_key(&key));
         assert!(!manager.execution_overlays.entries.contains_key(&key));
+    }
+
+    #[test]
+    fn keeps_overlays_anchored_at_the_new_state_trie_frontier() {
+        let manager = TestOverlay::default();
+        let blocks = test_blocks();
+        for block in &blocks {
+            manager.insert_executed_block(block.clone());
+        }
+
+        // Anchored at the block the trim below makes the new frontier, which is also the anchor
+        // every overlay built after it resolves.
+        let anchor_hash = blocks[1].recovered_block().hash();
+        let tip_hash = blocks[2].recovered_block().hash();
+        overlay_for_parent(&manager, tip_hash, anchor_hash).unwrap();
+        manager.execution_overlay_for_parent(tip_hash, anchor_hash).unwrap();
+
+        manager.remove_blocks_until(
+            blocks[1].recovered_block().num_hash(),
+            [blocks[0].recovered_block().hash(), blocks[1].recovered_block().hash()],
+        );
+
+        let key = OverlayCacheKey { anchor_hash, tip_hash };
+        assert!(manager.state_trie_overlays.entries.contains_key(&key));
+        assert!(manager.execution_overlays.entries.contains_key(&key));
     }
 
     #[test]
