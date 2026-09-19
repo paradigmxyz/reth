@@ -51,6 +51,19 @@ pub trait MetadataProvider: Send {
 
         serde_json::from_slice(&bytes).map(Some).map_err(ProviderError::other)
     }
+
+    /// Refuses state a snap attempt has written into, even once verified.
+    ///
+    /// On a database provider this reads the transaction its state reads use, so a reader opened
+    /// before the attempt started cannot see its state.
+    fn ensure_no_snap_attempt(&self) -> ProviderResult<()> {
+        match self.snap_attempt()? {
+            Some(attempt) => {
+                Err(ProviderError::UnavailableSnapState { attempt: attempt.id().into() })
+            }
+            None => Ok(()),
+        }
+    }
 }
 
 /// Client trait for writing node metadata to the database.

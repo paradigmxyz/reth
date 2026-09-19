@@ -460,23 +460,14 @@ impl<N: ProviderNodeTypes> ProviderFactory<N> {
     #[track_caller]
     pub fn latest(&self) -> ProviderResult<StateProviderBox> {
         trace!(target: "providers::db", "Returning latest state provider");
-        Ok(Box::new(LatestStateProvider::new(self.database_provider_ro()?)))
-    }
-
-    /// Refuses a database a snap attempt has written into, even once verified.
-    ///
-    /// Run before [`Self::check_consistency`], which may heal or unwind that state.
-    pub fn ensure_no_snap_attempt(&self) -> ProviderResult<()> {
-        match self.snap_attempt()? {
-            Some(attempt) => {
-                Err(ProviderError::UnavailableSnapState { attempt: attempt.id().into() })
-            }
-            None => Ok(()),
-        }
+        let provider = self.database_provider_ro()?;
+        provider.ensure_no_snap_attempt()?;
+        Ok(Box::new(LatestStateProvider::new(provider)))
     }
 
     /// Asserts that the static files and database are consistent, returning
-    /// [`ProviderError::MustUnwind`] otherwise. Snap state is refused first.
+    /// [`ProviderError::MustUnwind`] otherwise. Snap state is refused first, since
+    /// [`Self::check_consistency`] may heal or unwind it.
     pub fn assert_consistent(self) -> ProviderResult<Self> {
         self.ensure_no_snap_attempt()?;
         let (rocksdb_unwind, static_file_unwind) = self.check_consistency()?;

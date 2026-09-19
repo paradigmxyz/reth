@@ -27,8 +27,8 @@ use reth_provider::{
         BlockchainProvider, NodeTypesForProvider, RocksDBProvider, StaticFileProvider,
         StaticFileProviderBuilder,
     },
-    BalConfig, BalStoreHandle, InMemoryBalStore, ProviderFactory, StaticFileProviderFactory,
-    StorageSettings,
+    BalConfig, BalStoreHandle, InMemoryBalStore, MetadataProvider, ProviderFactory,
+    StaticFileProviderFactory, StorageSettings,
 };
 use reth_stages::{sets::DefaultStages, Pipeline, PipelineTarget};
 use reth_static_file::StaticFileProducer;

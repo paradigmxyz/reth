@@ -6,10 +6,10 @@ use crate::{
     AccountReader, BalProvider, BalStoreHandle, BlockHashReader, BlockIdReader, BlockNumReader,
     BlockReader, BlockReaderIdExt, BlockSource, CanonChainTracker, CanonStateNotifications,
     CanonStateSubscriptions, ChainSpecProvider, ChainStateBlockReader, ChangeSetReader,
-    DatabaseProviderFactory, HeaderProvider, ProviderError, ProviderFactory, PruneCheckpointReader,
-    ReceiptProvider, ReceiptProviderIdExt, RocksDBProviderFactory, StageCheckpointReader,
-    StateProvider, StateProviderBox, StateProviderFactory, StateReader, StaticFileProviderFactory,
-    TransactionVariant, TransactionsProvider,
+    DatabaseProviderFactory, HeaderProvider, MetadataProvider, ProviderError, ProviderFactory,
+    PruneCheckpointReader, ReceiptProvider, ReceiptProviderIdExt, RocksDBProviderFactory,
+    StageCheckpointReader, StateProvider, StateProviderBox, StateProviderFactory, StateReader,
+    StaticFileProviderFactory, TransactionVariant, TransactionsProvider,
 };
 use alloy_consensus::{transaction::TransactionMeta, BlockHeader};
 use alloy_eips::{BlockHashOrNumber, BlockId, BlockNumHash, BlockNumberOrTag};
@@ -155,7 +155,9 @@ impl<N: ProviderNodeTypes> BlockchainProvider<N> {
             self.database.clone(),
             self.database.overlay_manager().overlay_builder(block_hash),
         );
-        Ok(Box::new(state_provider_factory.database_provider_ro()?))
+        let provider = state_provider_factory.database_provider_ro()?;
+        provider.ensure_no_snap_attempt()?;
+        Ok(Box::new(provider))
     }
 
     /// Returns a historical state provider using an existing database snapshot.
@@ -241,6 +243,9 @@ impl<N: ProviderNodeTypes> StateRangeProviderFactory for BlockchainProvider<N> {
             Some(provider) => Some(provider),
             None => self.historical_state_range_provider(state_root)?,
         };
+        if let Some(provider) = &provider {
+            provider.ensure_no_snap_attempt()?;
+        }
         Ok(provider
             .map(|provider| Box::new(HistoricalStateRangeView { provider }) as StateRangeView))
     }
@@ -776,14 +781,18 @@ impl<N: ProviderNodeTypes> StateProviderFactory for BlockchainProvider<N> {
         let hash = provider
             .block_hash(block_number)?
             .ok_or_else(|| ProviderError::HeaderNotFound(block_number.into()))?;
-        Ok(self.state_provider_from_database(provider.into_database_provider(), hash))
+        let provider = provider.into_database_provider();
+        provider.ensure_no_snap_attempt()?;
+        Ok(self.state_provider_from_database(provider, hash))
     }
 
     fn history_by_block_hash(&self, block_hash: BlockHash) -> ProviderResult<StateProviderBox> {
         trace!(target: "providers::blockchain", ?block_hash, "Getting history by block hash");
         let provider = self.consistent_provider()?;
         provider.block_number(block_hash)?.ok_or(ProviderError::BlockHashNotFound(block_hash))?;
-        Ok(self.state_provider_from_database(provider.into_database_provider(), block_hash))
+        let provider = provider.into_database_provider();
+        provider.ensure_no_snap_attempt()?;
+        Ok(self.state_provider_from_database(provider, block_hash))
     }
 
     fn state_by_block_hash(&self, hash: BlockHash) -> ProviderResult<StateProviderBox> {
@@ -1050,7 +1059,7 @@ mod tests {
         CanonicalInMemoryState, ExecutedBlock, NewCanonicalChain,
     };
     use reth_chainspec::{ChainSpec, MAINNET};
-    use reth_db_api::models::{AccountBeforeTx, StoredBlockBodyIndices};
+    use reth_db_api::models::{AccountBeforeTx, SnapAttempt, StoredBlockBodyIndices};
     use reth_errors::ProviderError;
     use reth_ethereum_primitives::{Block, Receipt};
     use reth_execution_types::{
@@ -1063,10 +1072,10 @@ mod tests {
     use reth_storage_api::{
         BlockBodyIndicesProvider, BlockHashReader, BlockIdReader, BlockNumReader, BlockReader,
         BlockReaderIdExt, BlockSource, ChangeSetReader, DBProvider, DatabaseProviderFactory,
-        HashingWriter, HeaderProvider, RangeEnd, ReceiptProvider, ReceiptProviderIdExt,
-        StageCheckpointWriter, StateProviderFactory, StateRangeProvider, StateRangeProviderFactory,
-        StateRootProvider, StateWriteConfig, StateWriter, StorageRootProvider, TransactionVariant,
-        TransactionsProvider,
+        HashingWriter, HeaderProvider, MetadataWriter, RangeEnd, ReceiptProvider,
+        ReceiptProviderIdExt, StageCheckpointWriter, StateProviderFactory, StateRangeProvider,
+        StateRangeProviderFactory, StateRootProvider, StateWriteConfig, StateWriter,
+        StorageRootProvider, TransactionVariant, TransactionsProvider,
     };
     use reth_testing_utils::generators::{
         self, random_block, random_block_range, random_changeset_range, random_eoa_accounts,
@@ -1725,6 +1734,39 @@ mod tests {
                 .map(|block| block.hash())
                 .collect::<Vec<_>>()
         );
+
+        Ok(())
+    }
+
+    #[test]
+    fn state_reads_refuse_snap_state_written_after_opening() -> eyre::Result<()> {
+        let mut rng = generators::rng();
+        let (provider, database_blocks, in_memory_blocks, _) = provider_with_random_blocks(
+            &mut rng,
+            TEST_BLOCKS_COUNT,
+            TEST_BLOCKS_COUNT,
+            BlockRangeParams::default(),
+        )?;
+        let database_block = database_blocks.last().unwrap();
+        let in_memory_block = in_memory_blocks.last().unwrap();
+
+        // The attempt starts after the provider opened, so only per-read checks can see it.
+        let provider_rw = provider.database_provider_rw()?;
+        provider_rw.write_snap_attempt(&SnapAttempt::start(
+            None,
+            BlockNumHash::default(),
+            B256::ZERO,
+        ))?;
+        provider_rw.commit()?;
+
+        let refused = |result: Result<(), ProviderError>| {
+            matches!(result, Err(ProviderError::UnavailableSnapState { attempt: 0 }))
+        };
+        assert!(refused(provider.latest().map(drop)));
+        assert!(refused(provider.database.latest().map(drop)));
+        assert!(refused(provider.history_by_block_number(database_block.number).map(drop)));
+        assert!(refused(provider.history_by_block_hash(database_block.hash()).map(drop)));
+        assert!(refused(provider.state_range_provider(in_memory_block.state_root).map(drop)));
 
         Ok(())
     }

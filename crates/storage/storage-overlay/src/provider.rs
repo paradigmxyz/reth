@@ -13,9 +13,9 @@ use reth_prune_types::PruneSegment;
 use reth_storage_api::{
     AccountReader, BlockHashReader, BlockNumReader, BytecodeReader, ChangeSetReader, DBProvider,
     DatabaseProviderFactory, DatabaseProviderROFactory, DbTxProvider, HashedPostStateProvider,
-    HistoryInfo, HistoryReader, PruneCheckpointReader, StageCheckpointReader, StateProofProvider,
-    StateProvider, StateRootProvider, StorageChangeSetReader, StorageRootProvider,
-    StorageSettingsCache,
+    HistoryInfo, HistoryReader, MetadataProvider, PruneCheckpointReader, StageCheckpointReader,
+    StateProofProvider, StateProvider, StateRootProvider, StorageChangeSetReader,
+    StorageRootProvider, StorageSettingsCache,
 };
 use reth_trie::{
     hashed_cursor::{
@@ -394,6 +394,18 @@ where
             .field("execution_overlay", &self.execution_overlay.get())
             .field("is_v2", &self.is_v2)
             .finish()
+    }
+}
+
+/// Reads metadata from the transaction the overlay's state reads use.
+impl<Provider, N: NodePrimitives> MetadataProvider for OverlayStateProvider<Provider, N>
+where
+    Self: Send,
+    Provider: Deref,
+    Provider::Target: MetadataProvider + Sized,
+{
+    fn get_metadata(&self, key: &str) -> ProviderResult<Option<Vec<u8>>> {
+        self.provider().get_metadata(key)
     }
 }
 

@@ -2,7 +2,7 @@
 
 use crate::{
     providers::{NodeTypesForProvider, RocksDBProvider, StaticFileProvider},
-    ProviderFactory,
+    MetadataProvider, ProviderFactory,
 };
 use reth_db::{
     mdbx::{DatabaseArguments, MaxReadTransactionDuration},
@@ -31,7 +31,7 @@ impl<N> ProviderFactoryBuilder<N> {
 
     /// Opens the database with the given chainspec and [`ReadOnlyConfig`].
     ///
-    /// Refuses a database holding snap state, see [`ProviderFactory::ensure_no_snap_attempt`].
+    /// Refuses a database holding snap state, see [`MetadataProvider::ensure_no_snap_attempt`].
     ///
     /// # Open a monitored instance
     ///
