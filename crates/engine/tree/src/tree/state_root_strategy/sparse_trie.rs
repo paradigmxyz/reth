@@ -85,8 +85,9 @@ use tracing::{debug, debug_span, error, instrument, trace_span};
 /// ```
 ///
 /// In `Idle`, new proofs and leaf updates make the payload ready for another pass. An inline pass
-/// keeps it in `Idle`. In `InFlight`, the task holds only [`InFlightStorage`] buffers for new
-/// arrivals; the job owns the trie, earlier pending leaves, proofs, and fetched-target cache.
+/// keeps it in `Idle`. Ready addresses are queued once until their pass runs. In `InFlight`, the
+/// task holds only [`InFlightStorage`] buffers for new arrivals; the job owns the trie, earlier
+/// pending leaves, proofs, and fetched-target cache.
 /// When `Done` arrives, newer changed values and deletions override older pending values, while
 /// touch hints preserve them. Buffered work can then trigger another pass.
 ///
@@ -198,6 +199,12 @@ pub(super) struct SparseTrieCacheTask<A = ArenaParallelSparseTrie, S = ArenaPara
     /// trie map, never both. Everything that reads a storage trie goes through this map until
     /// [`Self::return_storage_tries`] hands them all back.
     storage: B256Map<StorageTrieState<S>>,
+    /// Idle addresses that became ready since their last pass. `StorageTrieWork::dirty`
+    /// deduplicates arrivals until the queue is drained.
+    storage_ready: Vec<B256>,
+    /// Number of idle storage tries with leaves still pending. Checked-out tries are counted
+    /// separately by `storage_in_flight`.
+    storage_pending: usize,
     /// Storage job buffers kept alive after returning their tries, until the result is sent.
     storage_to_drop: B256Map<StorageTrieState<S>>,
     /// Number of storage tries currently owned by a job running off this thread.
@@ -279,6 +286,8 @@ where
             pending_targets: Default::default(),
             in_flight_proof_batches: 0,
             storage: Default::default(),
+            storage_ready: Vec::new(),
+            storage_pending: 0,
             storage_to_drop: Default::default(),
             storage_in_flight: 0,
             storage_done_tx,
@@ -723,9 +732,19 @@ where
             }
             revealed_nodes += nodes.len();
 
-            match self.storage_trie_state_mut(address) {
-                StorageTrieState::Idle(work) => work.queue_proofs(&mut nodes),
-                StorageTrieState::InFlight(in_flight) => in_flight.proofs.append(&mut nodes),
+            let became_ready = match self.storage_trie_state_mut(address) {
+                StorageTrieState::Idle(work) => {
+                    let was_ready = work.has_work();
+                    work.queue_proofs(&mut nodes);
+                    !was_ready
+                }
+                StorageTrieState::InFlight(in_flight) => {
+                    in_flight.proofs.append(&mut nodes);
+                    false
+                }
+            };
+            if became_ready {
+                self.storage_ready.push(address);
             }
         }
         self.trie.record_revealed_storage_nodes(revealed_nodes);
@@ -773,7 +792,7 @@ where
         self.initial_updates_applied = true;
 
         // Queue the new storage updates on their entries; the jobs apply them to the tries.
-        let Self { storage, trie, new_storage_updates, .. } = self;
+        let Self { storage, trie, new_storage_updates, storage_ready, storage_pending, .. } = self;
         for (address, new) in new_storage_updates.drain() {
             if new.is_empty() {
                 continue;
@@ -785,7 +804,13 @@ where
                 )))
             });
             match state {
-                StorageTrieState::Idle(work) => work.queue_updates(new),
+                StorageTrieState::Idle(work) => {
+                    if !work.has_work() {
+                        storage_ready.push(address);
+                    }
+                    *storage_pending += usize::from(work.pending.is_empty());
+                    work.queue_updates(new);
+                }
                 StorageTrieState::InFlight(in_flight) => {
                     merge_leaf_updates(&mut in_flight.updates, new)
                 }
@@ -811,8 +836,8 @@ where
         Ok(())
     }
 
-    /// Runs a pass over every idle storage trie that has something to do: proof nodes to reveal,
-    /// leaf updates that were not tried against the current state of the trie yet.
+    /// Drains the ready-address queue, running a pass for each idle storage trie with new proof
+    /// nodes or leaf updates that were not tried against its current state yet.
     ///
     /// Each pass owns its address' payload for its whole duration, so the passes are independent
     /// of each other and of this thread. Most of them are handed to the rayon pool; the ones that
@@ -824,20 +849,19 @@ where
         skip_all
     )]
     fn run_ready_storage_work(&mut self) -> SparseTrieResult<()> {
-        let mut ready = Vec::new();
+        if self.storage_ready.is_empty() {
+            return Ok(())
+        }
+
+        let mut ready = core::mem::take(&mut self.storage_ready);
         let mut job_units = 0;
-        for (address, state) in &self.storage {
-            let StorageTrieState::Idle(work) = state else { continue };
-            if !work.has_work() {
-                continue;
-            }
+        for address in &ready {
+            let StorageTrieState::Idle(work) = &self.storage[address] else {
+                unreachable!("a ready trie stays idle until its pass runs")
+            };
             if !work.is_target_only() {
                 job_units += work.proofs.len() + work.pending.len();
             }
-            ready.push(*address);
-        }
-        if ready.is_empty() {
-            return Ok(())
         }
 
         let inline_round = job_units <= INLINE_STORAGE_WORK_UNITS;
@@ -845,14 +869,16 @@ where
         let retain_updates = self.trie.retains_updates();
         let started = Instant::now();
         let mut jobs = Vec::new();
-        for address in ready {
+        for address in ready.drain(..) {
             let state = self.storage.get_mut(&address).expect("entry was just seen");
             let StorageTrieState::Idle(work) = state else {
                 unreachable!("an idle trie is only checked out from here")
             };
 
             if inline_round || work.is_target_only() {
+                let was_pending = !work.pending.is_empty();
                 let output = work.run(new_epoch, retain_updates);
+                self.storage_pending -= usize::from(was_pending && work.pending.is_empty());
                 self.apply_storage_output(address, output)?;
                 continue;
             }
@@ -863,10 +889,12 @@ where
             ) else {
                 unreachable!("just matched")
             };
+            self.storage_pending -= usize::from(!work.pending.is_empty());
             self.storage_in_flight += 1;
             jobs.push(StorageTrieJob { address, work });
         }
 
+        self.storage_ready = ready;
         self.spawn_storage_jobs(jobs);
 
         Ok(())
@@ -999,6 +1027,10 @@ where
         let started = in_flight.started;
         let StorageTrieState::Idle(work) = entry.into_mut() else { unreachable!("just inserted") };
         work.take_buffered(*in_flight);
+        if work.has_work() {
+            self.storage_ready.push(address);
+        }
+        self.storage_pending += usize::from(!work.pending.is_empty());
         self.storage_in_flight -= 1;
         self.metrics.sparse_trie_storage_job_duration_histogram.record(started.elapsed());
 
@@ -1174,18 +1206,47 @@ where
     }
 
     fn has_pending_sparse_trie_updates(&self) -> bool {
+        #[cfg(debug_assertions)]
+        self.debug_assert_storage_bookkeeping();
+
         !self.account_updates.is_empty() ||
             !self.pending_account_updates.is_empty() ||
-            self.storage.values().any(|state| state.is_pending())
+            self.storage_in_flight > 0 ||
+            self.storage_pending > 0 ||
+            !self.storage_ready.is_empty()
     }
 
     /// Returns whether any idle storage trie has a pass to run, which is progress that has not been
     /// made yet rather than a stall.
     fn has_ready_storage_work(&self) -> bool {
-        self.storage.values().any(|state| match state {
-            StorageTrieState::Idle(work) => work.has_work(),
-            StorageTrieState::InFlight(_) => false,
-        })
+        !self.storage_ready.is_empty()
+    }
+
+    /// Checks the maintained scheduling state against the payloads that own the work.
+    #[cfg(any(test, debug_assertions))]
+    fn debug_assert_storage_bookkeeping(&self) {
+        let ready = self.storage_ready.iter().copied().collect::<alloy_primitives::map::B256Set>();
+        assert_eq!(ready.len(), self.storage_ready.len(), "ready addresses must be unique");
+        let mut pending = 0;
+        let mut in_flight = 0;
+        let mut ready_count = 0;
+        for (address, state) in &self.storage {
+            let is_ready = match state {
+                StorageTrieState::Idle(work) => {
+                    pending += usize::from(!work.pending.is_empty());
+                    work.has_work()
+                }
+                StorageTrieState::InFlight(_) => {
+                    in_flight += 1;
+                    false
+                }
+            };
+            ready_count += usize::from(is_ready);
+            assert_eq!(is_ready, ready.contains(address), "readiness drifted for {address:?}");
+        }
+        assert_eq!(ready.len(), ready_count, "ready queue contains an unknown address");
+        assert_eq!(self.storage_pending, pending);
+        assert_eq!(self.storage_in_flight, in_flight);
     }
 
     /// Errors when pending trie updates remain but nothing can deliver them: no update
@@ -1258,16 +1319,6 @@ enum StorageTrieState<S> {
     /// A job owns the payload. Everything arriving for the address meanwhile is buffered here
     /// and folded back in when the job returns.
     InFlight(Box<InFlightStorage>),
-}
-
-impl<S: SparseTrie + Default> StorageTrieState<S> {
-    /// Returns whether the address still owes the state root some work.
-    fn is_pending(&self) -> bool {
-        match self {
-            Self::InFlight(_) => true,
-            Self::Idle(work) => !work.pending.is_empty() || work.has_work(),
-        }
-    }
 }
 
 /// Everything the sparse trie task knows about one storage trie, moved into a job as a whole and
@@ -1742,6 +1793,8 @@ mod tests {
         ) else {
             panic!("trie must be idle")
         };
+        task.storage_ready.retain(|queued| *queued != address);
+        task.storage_pending -= usize::from(!work.pending.is_empty());
         task.storage_in_flight += 1;
         work
     }
@@ -2088,15 +2141,71 @@ mod tests {
     }
 
     #[test]
+    fn storage_readiness_tracks_buffered_work_and_drain() {
+        let runtime = Runtime::test();
+        let (mut task, updates_tx, _cancel_guard) = test_task(&runtime, SparseStateTrie::default());
+        let address = B256::repeat_byte(0x11);
+        let slot = B256::repeat_byte(0x22);
+        for value in [1, 2] {
+            task.new_storage_updates
+                .insert(address, B256Map::from_iter([(slot, LeafUpdate::Changed(vec![value]))]));
+            task.pending_updates = 1;
+            task.apply_new_updates().unwrap();
+        }
+        task.debug_assert_storage_bookkeeping();
+        assert_eq!(task.storage_ready, [address], "multiple updates need only one pass");
+        assert_eq!(task.storage_pending, 1);
+
+        task.run_ready_storage_work().unwrap();
+        task.debug_assert_storage_bookkeeping();
+        assert!(!task.has_ready_storage_work(), "blocked leaves wait for their own proof");
+        assert!(task.has_pending_sparse_trie_updates());
+
+        let mut work = check_out_storage(&mut task, address);
+        let output = work.run(task.new_epoch, false);
+        assert_eq!(task.storage_pending, 0, "in-flight work has its own counter");
+        for _ in 0..2 {
+            task.queue_storage_proofs(B256Map::from_iter([(
+                address,
+                vec![ProofTrieNodeV2::empty()],
+            )]));
+        }
+        task.debug_assert_storage_bookkeeping();
+        assert!(!task.has_ready_storage_work(), "an in-flight trie cannot run a second job");
+        assert!(task.has_pending_sparse_trie_updates());
+
+        task.on_storage_trie_returned(StorageTrieJobDone { address, work, output }).unwrap();
+        task.debug_assert_storage_bookkeeping();
+        assert_eq!(task.storage_ready, [address], "buffered proofs re-arm the returned payload");
+        assert_eq!(task.storage_pending, 1);
+        task.queue_storage_proofs(B256Map::from_iter([(address, vec![ProofTrieNodeV2::empty()])]));
+        task.debug_assert_storage_bookkeeping();
+        assert_eq!(task.storage_ready.len(), 1, "a later proof shares the already queued pass");
+
+        task.process_new_updates().unwrap();
+        task.debug_assert_storage_bookkeeping();
+        assert_eq!(storage_slot_value(&task, &address, &slot), Some(vec![2]));
+        assert!(!task.has_pending_sparse_trie_updates());
+        assert!(!task.has_ready_storage_work());
+        let hits = task.storage_cache_hits;
+        task.process_new_updates().unwrap();
+        assert_eq!(task.storage_cache_hits, hits, "drained work must not be run twice");
+
+        drop(updates_tx);
+        drop(task);
+        drain_sparse_trie_tasks(&runtime);
+    }
+
+    #[test]
     fn unrelated_storage_proofs_do_not_retry_blocked_leaves() {
         let runtime = Runtime::test();
         let (mut task, updates_tx, _cancel_guard) = test_task(&runtime, SparseStateTrie::default());
         let address = B256::repeat_byte(0x11);
         let slot = B256::repeat_byte(0x22);
-        let StorageTrieState::Idle(work) = task.storage_trie_state_mut(address) else {
-            unreachable!()
-        };
-        work.queue_updates(B256Map::from_iter([(slot, LeafUpdate::Changed(vec![1]))]));
+        task.new_storage_updates
+            .insert(address, B256Map::from_iter([(slot, LeafUpdate::Changed(vec![1]))]));
+        task.pending_updates = 1;
+        task.apply_new_updates().unwrap();
         task.run_ready_storage_work().unwrap();
         assert_eq!(task.storage_cache_misses, 1);
 
@@ -2489,6 +2598,7 @@ mod tests {
         work.updated = true;
         work.pending.insert(slot, LeafUpdate::Touched);
         work.fetched.insert(storage_target, ProofV2TargetParent::new(11));
+        task.storage_pending = 1;
         task.in_flight_proof_batches = 1;
 
         assert!(task.ensure_not_stalled(false).is_ok());
