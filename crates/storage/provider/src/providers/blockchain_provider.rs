@@ -3069,6 +3069,59 @@ mod tests {
         }
     }
 
+    /// Builds an executed block on top of `parent` that creates one fresh account, and writes
+    /// `slot` in its storage when given.
+    ///
+    /// The account is unique per block, so a read through a state provider shows which chain the
+    /// provider was built from.
+    fn executed_block_with_account(
+        rng: &mut impl rand::Rng,
+        parent: BlockNumHash,
+        nonce: u64,
+        slot: Option<(B256, U256)>,
+    ) -> (ExecutedBlock, Address, Account) {
+        let (address, account) = random_account(nonce);
+        let hashed_address = keccak256(address);
+        let mut hashed_state = HashedPostState::default();
+        hashed_state.accounts.insert(hashed_address, Some(account));
+        let mut storage = HashMap::default();
+        if let Some((slot_key, value)) = slot {
+            hashed_state
+                .storages
+                .insert(hashed_address, HashedStorage::from_iter([(keccak256(slot_key), value)]));
+            storage.insert(U256::from_be_bytes(slot_key.0), (U256::ZERO, value));
+        }
+
+        let block = random_block(
+            rng,
+            parent.number + 1,
+            BlockParams { parent: Some(parent.hash), tx_count: Some(0), ..Default::default() },
+        )
+        .try_recover()
+        .expect("failed to seal block with senders");
+        let executed = ExecutedBlock::new(
+            Arc::new(block),
+            Arc::new(BlockExecutionOutput {
+                result: BlockExecutionResult {
+                    receipts: Default::default(),
+                    requests: Default::default(),
+                    gas_used: 0,
+                    blob_gas_used: 0,
+                },
+                state: BundleState::new(
+                    [(address, None, Some(account.into()), storage)],
+                    [[(address, Some(None), [])]],
+                    [],
+                ),
+            }),
+            ComputedTrieData::new(
+                Arc::new(hashed_state.into_sorted()),
+                Arc::new(TrieUpdates::default().into_sorted()),
+            ),
+        );
+        (executed, address, account)
+    }
+
     fn random_account(nonce: u64) -> (Address, Account) {
         (Address::random(), Account { nonce, balance: U256::from(nonce), bytecode_hash: None })
     }
@@ -3289,51 +3342,11 @@ mod tests {
         let provider = BlockchainProvider::new(factory)?;
         let genesis = provider.canonical_in_memory_state.get_canonical_head();
 
-        let (address, account) = random_account(1);
-        let hashed_address = keccak256(address);
         let slot_key = B256::with_last_byte(1);
-        let slot = U256::from_be_bytes(slot_key.0);
         let value = U256::from(42);
-
-        let mut hashed_state = HashedPostState::default();
-        hashed_state.accounts.insert(hashed_address, Some(account));
-        hashed_state
-            .storages
-            .insert(hashed_address, HashedStorage::from_iter([(keccak256(slot_key), value)]));
-
-        let mut storage = HashMap::default();
-        storage.insert(slot, (U256::ZERO, value));
-
-        let block = random_block(
-            &mut rng,
-            genesis.number + 1,
-            BlockParams { parent: Some(genesis.hash()), tx_count: Some(0), ..Default::default() },
-        )
-        .try_recover()
-        .expect("failed to seal block with senders");
-        let block_hash = block.hash();
-
-        let execution_output = BlockExecutionOutput {
-            result: BlockExecutionResult {
-                receipts: Default::default(),
-                requests: Default::default(),
-                gas_used: 0,
-                blob_gas_used: 0,
-            },
-            state: BundleState::new(
-                [(address, None, Some(account.into()), storage)],
-                [[(address, Some(None), [])]],
-                [],
-            ),
-        };
-        let executed = ExecutedBlock::new(
-            Arc::new(block),
-            Arc::new(execution_output),
-            ComputedTrieData::new(
-                Arc::new(hashed_state.into_sorted()),
-                Arc::new(TrieUpdates::default().into_sorted()),
-            ),
-        );
+        let (executed, address, account) =
+            executed_block_with_account(&mut rng, genesis.num_hash(), 1, Some((slot_key, value)));
+        let block_hash = executed.recovered_block().hash();
         commit_in_memory(&provider, vec![executed]);
 
         // `latest` reuses the canonical `Arc<BlockState>` chain; a caller that starts from a hash
@@ -3371,95 +3384,56 @@ mod tests {
         let provider = BlockchainProvider::new(factory)?;
         let genesis = provider.canonical_in_memory_state.get_canonical_head();
 
-        // One executed block per role, each with an account only that block writes, so a read
-        // proves which chain the state provider was built from.
-        let mut executed_block =
-            |parent: B256, number: u64, nonce: u64| -> (ExecutedBlock, Address, Account) {
-                let (address, account) = random_account(nonce);
-                let mut hashed_state = HashedPostState::default();
-                hashed_state.accounts.insert(keccak256(address), Some(account));
-                let block = random_block(
-                    &mut rng,
-                    number,
-                    BlockParams { parent: Some(parent), tx_count: Some(0), ..Default::default() },
-                )
-                .try_recover()
-                .expect("failed to seal block with senders");
-                let executed = ExecutedBlock::new(
-                    Arc::new(block),
-                    Arc::new(BlockExecutionOutput {
-                        result: BlockExecutionResult {
-                            receipts: Default::default(),
-                            requests: Default::default(),
-                            gas_used: 0,
-                            blob_gas_used: 0,
-                        },
-                        state: BundleState::new(
-                            [(address, None, Some(account.into()), Default::default())],
-                            [[(address, Some(None), [])]],
-                            [],
-                        ),
-                    }),
-                    ComputedTrieData::new(
-                        Arc::new(hashed_state.into_sorted()),
-                        Arc::new(TrieUpdates::default().into_sorted()),
-                    ),
-                );
-                (executed, address, account)
-            };
-
+        // One executed block per role: canonical, a fork off genesis, and a pending block on top
+        // of the canonical head, tracked the way the engine tracks them.
         let (canonical, canonical_address, canonical_account) =
-            executed_block(genesis.hash(), genesis.number + 1, 1);
-        let canonical_hash = canonical.recovered_block().hash();
+            executed_block_with_account(&mut rng, genesis.num_hash(), 1, None);
+        let canonical_num_hash = canonical.recovered_block().num_hash();
         commit_in_memory(&provider, vec![canonical]);
 
-        // A fork off genesis and a pending block on top of the canonical head, tracked the way
-        // the engine tracks them.
-        let (fork, fork_address, fork_account) = executed_block(genesis.hash(), 1, 2);
+        let (fork, fork_address, fork_account) =
+            executed_block_with_account(&mut rng, genesis.num_hash(), 2, None);
         let fork_hash = fork.recovered_block().hash();
         let fork_state = provider.canonical_in_memory_state.insert_executed(fork);
-        provider.database.overlay_manager().insert_block(Arc::clone(&fork_state));
+        provider.database.overlay_manager().insert_block(fork_state);
 
         let (pending, pending_address, pending_account) =
-            executed_block(canonical_hash, genesis.number + 2, 3);
+            executed_block_with_account(&mut rng, canonical_num_hash, 3, None);
         let pending_hash = pending.recovered_block().hash();
         provider.canonical_in_memory_state.set_pending_block(pending);
         let pending_state =
             provider.canonical_in_memory_state.pending_state().expect("pending block was just set");
-        provider.database.overlay_manager().insert_block(Arc::clone(&pending_state));
+        provider.database.overlay_manager().insert_block(pending_state);
 
         // `state_by_block_hash` still only serves canonical and pending hashes; a fork is reached
-        // through the overlay manager, which is what payload validation uses.
+        // through the overlay manager, which is what payload validation does.
         let cases = [
-            (canonical_hash, canonical_address, canonical_account, Some(provider.latest()?)),
+            (
+                canonical_num_hash.hash,
+                canonical_address,
+                canonical_account,
+                Some(provider.latest()?),
+            ),
             (fork_hash, fork_address, fork_account, None),
             (pending_hash, pending_address, pending_account, Some(provider.pending()?)),
         ];
 
         for (hash, address, account, public_provider) in cases {
-            // Every role resolves to the one shared `BlockState` the engine hands to payload
-            // validation, so there is no second chain to drift from.
+            // Every role resolves to one shared `BlockState`, anchored at the last persisted
+            // block, so there is no second chain to drift from.
             let shared = provider
                 .canonical_in_memory_state
                 .executed_state_by_hash(hash)
                 .expect("block is tracked in memory");
             assert_eq!(shared.hash(), hash);
             assert_eq!(shared.anchor(), genesis.num_hash());
-            assert!(Arc::ptr_eq(
-                &shared,
-                &provider
-                    .canonical_in_memory_state
-                    .executed_state_by_hash(hash)
-                    .expect("block is tracked in memory")
-            ));
 
             // Build the provider the way payload validation does, from that shared chain, and the
             // way a caller with only a hash does. Both must read the same in-memory state.
-            let overlay_manager = provider.database.overlay_manager();
             let from_shared: StateProviderBox = Box::new(
                 OverlayStateProviderFactory::new(
                     provider.database.clone(),
-                    overlay_manager.overlay_builder_for_state(Arc::clone(&shared)),
+                    provider.database.overlay_manager().overlay_builder_for_state(shared),
                 )
                 .database_provider_ro()?,
             );

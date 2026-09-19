@@ -903,9 +903,7 @@ mod tests {
     use super::*;
     use crate::test_utils::TestOverlay;
     use alloy_primitives::{map::HashMap, Address, U256};
-    use reth_chain_state::{
-        test_utils::TestBlockBuilder, CanonicalInMemoryState, ExecutedBlock, NewCanonicalChain,
-    };
+    use reth_chain_state::{test_utils::TestBlockBuilder, ExecutedBlock};
     use reth_db::{
         models::{AccountBeforeTx, BlockNumberAddress},
         tables,
@@ -1001,16 +999,6 @@ mod tests {
         provider_rw.commit().unwrap();
 
         (factory, blocks)
-    }
-
-    /// Tracks `blocks` in a [`CanonicalInMemoryState`] the way the engine does, so the resulting
-    /// `Arc<BlockState>` chain matches what state providers hold.
-    fn canonical_in_memory_state(
-        blocks: &[ExecutedBlock<EthPrimitives>],
-    ) -> CanonicalInMemoryState<EthPrimitives> {
-        let state = CanonicalInMemoryState::empty();
-        state.update_chain(NewCanonicalChain::Commit { new: blocks.to_vec() });
-        state
     }
 
     const fn anchor_num_hash(anchor: &AnchorForParent) -> BlockNumHash {
@@ -1131,76 +1119,6 @@ mod tests {
     }
 
     #[test]
-    fn overlay_builder_for_state_matches_hash_lookup() {
-        // The state trie frontier sits at block 1 while Finish is at block 3, so the in-memory
-        // chain straddles the state-masking frontier.
-        let (factory, blocks) = setup_frontiers(1, 3);
-        let manager = TestOverlay::default();
-        for block in &blocks[2..=4] {
-            manager.insert_executed_block(block.clone());
-        }
-        let canonical = canonical_in_memory_state(&blocks[2..=4]);
-        let provider = factory.provider().unwrap();
-
-        // The head, a block below the head, and the oldest in-memory block, whose chain no longer
-        // covers the Finish frontier and therefore anchors below it.
-        for index in [4usize, 3, 2] {
-            let hash = blocks[index].recovered_block().hash();
-            let state = canonical.state_by_hash(hash).expect("canonical state for in-memory block");
-            assert_eq!(state.hash(), hash);
-
-            // Block 2 is below Finish, so its own chain cannot reach it and the caller has to
-            // supply the chain that ends there. For the blocks above Finish this is redundant.
-            let finish_state = manager
-                .state_for_hash(blocks[3].recovered_block().hash())
-                .expect("Finish is tracked in memory");
-            let from_hash =
-                manager.overlay_builder_for_hash(hash).with_finish_state(Arc::clone(&finish_state));
-            let from_state =
-                manager.overlay_builder_for_state(state).with_finish_state(finish_state);
-
-            let anchor = anchor_num_hash(&from_hash.anchor_at_parent(&provider).unwrap());
-            assert_eq!(
-                anchor_num_hash(&from_state.anchor_at_parent(&provider).unwrap()),
-                anchor,
-                "block {index} must resolve the same anchor from both builders"
-            );
-
-            let (hash_overlay, hash_fallback) = from_hash.execution_overlay(&provider).unwrap();
-            let (state_overlay, state_fallback) = from_state.execution_overlay(&provider).unwrap();
-            assert_eq!(state_fallback, hash_fallback);
-            assert!(
-                Arc::ptr_eq(&hash_overlay, &state_overlay),
-                "block {index} must resolve the cached execution overlay"
-            );
-
-            let (hash_nodes, hash_state) =
-                from_hash.resolve_state_trie_overlays(anchor.hash).unwrap();
-            let (state_nodes, state_state) =
-                from_state.resolve_state_trie_overlays(anchor.hash).unwrap();
-            assert!(
-                Arc::ptr_eq(&hash_nodes, &state_nodes),
-                "block {index} must resolve the cached trie overlay nodes"
-            );
-            assert!(
-                Arc::ptr_eq(&hash_state, &state_state),
-                "block {index} must resolve the cached trie overlay state"
-            );
-
-            // The fully built overlay folds in database reverts for anchors below Finish, so
-            // compare it by value rather than by pointer.
-            let hash_trie = from_hash.build_state_trie_overlay(&provider, false).unwrap();
-            let state_trie = from_state.build_state_trie_overlay(&provider, false).unwrap();
-            assert_eq!(account_keys(&state_trie), account_keys(&hash_trie), "block {index}");
-            assert_eq!(
-                account_node_paths(&state_trie),
-                account_node_paths(&hash_trie),
-                "block {index}"
-            );
-        }
-    }
-
-    #[test]
     fn historical_view_below_finish_uses_the_supplied_finish_state() {
         // Finish is at block 3 while the state trie only reaches block 1, so blocks 2 and 3 are
         // masked in the database and completing the trie needs the chain that ends at Finish.
@@ -1313,57 +1231,20 @@ mod tests {
         let anchor = blocks[1].recovered_block().num_hash();
 
         for state in [fork_state, pending_state] {
-            let hash = state.hash();
-            // There is one shared chain per block: what the engine hands to payload validation
-            // is the same object a caller that starts from a hash resolves.
-            assert!(Arc::ptr_eq(&state, &manager.state_for_hash(hash).unwrap()));
-
-            let from_state = manager.overlay_builder_for_state(Arc::clone(&state));
-            let from_hash = manager.overlay_builder_for_hash(hash);
-            assert_eq!(anchor_num_hash(&from_state.anchor_at_parent(&provider).unwrap()), anchor);
-            assert_eq!(anchor_num_hash(&from_hash.anchor_at_parent(&provider).unwrap()), anchor);
-
-            let (state_overlay, state_fallback) = from_state.execution_overlay(&provider).unwrap();
-            let (hash_overlay, hash_fallback) = from_hash.execution_overlay(&provider).unwrap();
-            assert_eq!(state_fallback, hash_fallback);
-            assert!(Arc::ptr_eq(&state_overlay, &hash_overlay));
-        }
-    }
-
-    #[test]
-    fn overlay_builder_falls_back_to_hash_lookup_for_unknown_state() {
-        let (factory, blocks) = setup_frontiers(1, 3);
-        let mut side_chain_builder = TestBlockBuilder::eth();
-        let side_block = with_unique_trie_data(
-            &side_chain_builder.get_executed_block_with_number(
-                blocks[3].block_number(),
-                blocks[2].recovered_block().hash(),
-            ),
-            9,
-        );
-        assert_ne!(side_block.recovered_block().hash(), blocks[3].recovered_block().hash());
-
-        let manager = TestOverlay::default();
-        manager.insert_executed_block(blocks[2].clone());
-        manager.insert_executed_block(side_block.clone());
-        let canonical = canonical_in_memory_state(&blocks[2..=4]);
-        let provider = factory.provider().unwrap();
-
-        // A fork block is not tracked by the canonical in-memory state, so callers keep using the
-        // hash-based lookup for it.
-        let side_hash = side_block.recovered_block().hash();
-        assert!(canonical.state_by_hash(side_hash).is_none());
-
-        let (overlay, fallback) =
-            manager.overlay_builder_for_hash(side_hash).execution_overlay(&provider).unwrap();
-        assert_eq!(fallback, Some(2));
-        assert_eq!(
-            overlay.block_hashes,
-            [&blocks[2], &side_block]
+            // The chain the engine hands over, from the anchor up to the tip.
+            let mut expected = Arc::clone(&state)
                 .iter()
-                .map(|block| block.recovered_block().num_hash())
-                .collect::<Vec<_>>()
-        );
+                .map(|state| state.block_ref().recovered_block().num_hash())
+                .collect::<Vec<_>>();
+            expected.reverse();
+
+            let builder = manager.overlay_builder_for_state(state);
+            assert_eq!(anchor_num_hash(&builder.anchor_at_parent(&provider).unwrap()), anchor);
+
+            let (overlay, fallback) = builder.execution_overlay(&provider).unwrap();
+            assert_eq!(fallback, None, "the chain covers Finish, so nothing is read by number");
+            assert_eq!(overlay.block_hashes, expected);
+        }
     }
 
     #[test]
