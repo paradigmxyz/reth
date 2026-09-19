@@ -1,6 +1,5 @@
 //! Ordered transaction announcements used by the transaction manager and fetcher.
 
-use super::constants::SOFT_LIMIT_COUNT_HASHES_IN_NEW_POOLED_TRANSACTIONS_BROADCAST_MESSAGE;
 use alloy_primitives::{map::B256Set, TxHash, B128};
 use derive_more::IntoIterator;
 use reth_eth_wire::{EthVersion, HandleMempoolData, NewPooledTransactionHashes};
@@ -19,8 +18,7 @@ pub struct TransactionAnnouncement {
 
 impl TransactionAnnouncement {
     /// Normalizes a wire announcement, keeping the first occurrence of each hash and its metadata.
-    /// The scratch set is cleared before use and its allocation is kept for subsequent messages,
-    /// unless an oversized announcement grew it past twice the announcement soft limit.
+    /// The scratch set is cleared before use, retaining its allocation for subsequent messages.
     ///
     /// Returns an error if the hash, type and size arrays have different lengths.
     pub fn from_message(
@@ -59,9 +57,6 @@ impl TransactionAnnouncement {
                 }),
             },
         ));
-        if seen.capacity() > MAX_RETAINED_SCRATCH_CAPACITY {
-            *seen = B256Set::default();
-        }
         Ok(Self { entries, version: msg.version(), cell_mask })
     }
 
@@ -127,11 +122,6 @@ pub struct TransactionMetadata {
     /// The announced encoded transaction size in bytes.
     pub size: usize,
 }
-
-/// Scratch capacity kept between messages. Only oversized announcements grow the set past this
-/// bound, and dropping it avoids pinning their allocation for the caller's lifetime.
-const MAX_RETAINED_SCRATCH_CAPACITY: usize =
-    2 * SOFT_LIMIT_COUNT_HASHES_IN_NEW_POOLED_TRANSACTIONS_BROADCAST_MESSAGE;
 
 #[cfg(test)]
 mod tests {
@@ -216,7 +206,7 @@ mod tests {
     }
 
     #[test]
-    fn scratch_is_reused_between_messages_and_dropped_when_oversized() {
+    fn scratch_is_cleared_and_reused_between_messages() {
         let mut seen = B256Set::default();
         let msg = NewPooledTransactionHashes::Eth66(vec![B256::ZERO; 64].into());
         TransactionAnnouncement::from_message(&msg, &mut seen).unwrap();
@@ -226,19 +216,11 @@ mod tests {
         assert_eq!(second.len(), 1);
         assert_eq!(seen.capacity(), capacity);
 
-        // A full-size announcement keeps its allocation for later messages.
-        let full_len = SOFT_LIMIT_COUNT_HASHES_IN_NEW_POOLED_TRANSACTIONS_BROADCAST_MESSAGE;
-        let full = NewPooledTransactionHashes::Eth66(vec![B256::repeat_byte(1); full_len].into());
-        assert_eq!(TransactionAnnouncement::from_message(&full, &mut seen).unwrap().len(), 1);
+        let large = NewPooledTransactionHashes::Eth66(vec![B256::repeat_byte(1); 16384].into());
+        assert_eq!(TransactionAnnouncement::from_message(&large, &mut seen).unwrap().len(), 1);
         let capacity = seen.capacity();
-        assert!(capacity >= full_len && capacity <= MAX_RETAINED_SCRATCH_CAPACITY);
+        assert!(capacity >= 16384);
         assert_eq!(TransactionAnnouncement::from_message(&msg, &mut seen).unwrap().len(), 1);
         assert_eq!(seen.capacity(), capacity);
-
-        // An oversized announcement must not pin its allocation.
-        let oversized =
-            NewPooledTransactionHashes::Eth66(vec![B256::repeat_byte(2); 4 * full_len].into());
-        assert_eq!(TransactionAnnouncement::from_message(&oversized, &mut seen).unwrap().len(), 1);
-        assert_eq!(seen.capacity(), 0);
     }
 }
