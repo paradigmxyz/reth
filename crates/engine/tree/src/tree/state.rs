@@ -374,9 +374,8 @@ impl<N: NodePrimitives> TreeState<N> {
     /// replaces their [`BlockState`]. The tree has to pick those up: holding on to the previous
     /// states would keep the whole trimmed prefix alive through their parent links.
     fn rebind_shared_states(&mut self) {
-        let in_memory_state = self.in_memory_state.clone();
         for (hash, state) in &mut self.blocks_by_hash {
-            if let Some(shared) = in_memory_state.executed_state_by_hash(*hash) {
+            if let Some(shared) = self.in_memory_state.executed_state_by_hash(*hash) {
                 *state = shared;
             }
         }

@@ -7,7 +7,7 @@
 
 use crate::{OverlayBuilder, OverlayManager};
 use alloy_eips::BlockNumHash;
-use alloy_primitives::B256;
+use alloy_primitives::{BlockNumber, B256};
 use reth_chain_state::{BlockState, CanonicalInMemoryState, ExecutedBlock, NewCanonicalChain};
 use reth_ethereum_primitives::EthPrimitives;
 #[cfg(feature = "rayon")]
@@ -97,10 +97,11 @@ impl TestOverlay {
     /// Drops non-canonical blocks and prunes the manager's overlays for them.
     pub(crate) fn remove_forks(
         &self,
-        removed: impl IntoIterator<Item = B256> + Clone,
-        state_trie_frontier: u64,
+        removed: impl IntoIterator<Item = B256>,
+        state_trie_frontier: BlockNumber,
     ) {
-        self.blocks.remove_executed_blocks(removed.clone());
+        let removed = removed.into_iter().collect::<Vec<_>>();
+        self.blocks.remove_executed_blocks(removed.iter().copied());
         self.manager.remove_blocks(removed, state_trie_frontier);
     }
 }

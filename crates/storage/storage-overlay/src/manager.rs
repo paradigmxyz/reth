@@ -269,7 +269,7 @@ impl<N: NodePrimitives> OverlayManager<N> {
             target: "storage::overlay::manager",
             %hash,
             %parent_hash,
-            "inserted block into state trie overlay manager"
+            "extending cached overlays for new block"
         );
         if cached_parent_overlays.is_empty() {
             return
@@ -321,14 +321,15 @@ impl<N: NodePrimitives> OverlayManager<N> {
         });
     }
 
-    /// Removes blocks from the live block graph and prunes cached overlays that can no longer be
-    /// built from the remaining blocks.
+    /// Prunes the cached overlays that can no longer be requested.
+    ///
+    /// `hashes` are the in-memory blocks the caller's store just dropped, `state_trie_frontier`
+    /// the number of the block the database's state trie now reaches.
     #[tracing::instrument(
         level = "trace",
         target = "storage::overlay::manager",
         skip_all,
         fields(
-            block_count = tracing::field::Empty,
             removed_blocks = tracing::field::Empty,
             pruned_overlays = tracing::field::Empty,
         )
@@ -341,9 +342,8 @@ impl<N: NodePrimitives> OverlayManager<N> {
         let span = tracing::Span::current();
 
         let removed = hashes.into_iter().collect::<B256Set>();
-        let block_count = removed.len();
-        span.record("block_count", block_count);
-        span.record("removed_blocks", block_count);
+        let removed_blocks = removed.len();
+        span.record("removed_blocks", removed_blocks);
 
         let overlays_before = self.state_trie_overlays.len() + self.execution_overlays.len();
         self.state_trie_overlays
@@ -364,9 +364,10 @@ impl<N: NodePrimitives> OverlayManager<N> {
 
         debug!(
             target: "storage::overlay::manager",
-            block_count,
+            removed_blocks,
+            state_trie_frontier,
             pruned_overlays,
-            "removed blocks from state trie overlay manager"
+            "pruned cached overlays"
         );
     }
 
@@ -490,15 +491,6 @@ impl<N: NodePrimitives> OverlayManager<N> {
         let mut blocks = Self::blocks_from_parent_state(parent_state, anchor_hash)?;
         span.record("block_count", blocks.len());
 
-        // `blocks` runs from the tip down to the block right above the anchor, so the anchor's
-        // number is known here, before an entry is installed.
-        let anchor_number = blocks
-            .last()
-            .expect("a non-empty block path always reaches the anchor")
-            .recovered_block()
-            .number()
-            .saturating_sub(1);
-
         if !cache_config.write_to_cache {
             let parent_input = blocks.first().and_then(|block| {
                 let parent_hash = block.recovered_block().parent_hash();
@@ -521,6 +513,10 @@ impl<N: NodePrimitives> OverlayManager<N> {
             Wait(Arc<OverlayWaiter<T>>),
             Compute(Arc<OverlayWaiter<T>>),
         }
+
+        // `blocks` runs from the tip down to the block right above the anchor, so the anchor's
+        // number is known here, before an entry is installed.
+        let anchor_number = parent_state.number().saturating_sub(blocks.len() as u64);
 
         let action = match cache.entries.entry(key) {
             Entry::Occupied(entry) => {

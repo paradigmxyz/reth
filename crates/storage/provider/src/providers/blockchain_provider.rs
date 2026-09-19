@@ -238,12 +238,9 @@ impl<N: ProviderNodeTypes> BlockchainProvider<N> {
                 break
             }
         }
-        drop(provider);
 
         let Some(block_hash) = block_hash else { return Ok(None) };
-        // Re-open the transaction the overlay will read from, so the frontier and the chain
-        // resolved for it agree.
-        let provider = self.database.provider()?;
+        // Resolve the overlay against the transaction the block hash was found in.
         let builder = self.overlay_builder_for_hash(&provider, block_hash)?;
         drop(provider);
         let state_provider_factory =
