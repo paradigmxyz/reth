@@ -3,7 +3,10 @@
 //! The trie itself is rebuilt by the merkle stage, which commits its progress in chunks and checks
 //! the root against the target header, so a rebuild survives restarts on any state size.
 
-use crate::{SnapAccountStore, SnapAttemptStore, SnapCatchUpStore, SnapSyncError, SnapWrite};
+use crate::{
+    common::SnapRecord, SnapAccountStore, SnapAttemptStore, SnapCatchUpStore, SnapSyncError,
+    SnapWrite,
+};
 use alloy_eips::BlockNumHash;
 use alloy_primitives::{B256, KECCAK256_EMPTY};
 use reth_db_api::{cursor::DbCursorRO, tables, transaction::DbTx, RawKey, RawTable};
@@ -14,6 +17,7 @@ use reth_storage_api::{
     StageCheckpointReader, StageCheckpointWriter,
 };
 use reth_storage_errors::provider::{ProviderError, RootMismatch};
+use serde::{Deserialize, Serialize};
 use tokio_util::sync::CancellationToken;
 
 /// Accounts scanned between cancellation checks, bounding how long a cancelled session keeps
@@ -27,6 +31,7 @@ pub trait SnapStateVerifier {
     /// Hands complete state to the merkle stage, which rebuilds its trie from scratch.
     ///
     /// Progress the stage recorded before the hand-off describes other state, so it is discarded.
+    /// The hand-off is recorded for this attempt and pivot, so only a rebuild of this state counts.
     fn start_trie_rebuild(
         &self,
         write: SnapWrite,
@@ -34,7 +39,7 @@ pub trait SnapStateVerifier {
         cancel: &CancellationToken,
     ) -> Result<(), SnapSyncError>
     where
-        Self: StageCheckpointWriter + DBProvider;
+        Self: MetadataWriter + StageCheckpointWriter + DBProvider;
 
     /// Refuses to finish while any downloaded state is still pending. Storage commits with its
     /// accounts, so it needs no separate check.
@@ -92,13 +97,14 @@ impl<T: MetadataProvider> SnapStateVerifier for T {
         cancel: &CancellationToken,
     ) -> Result<(), SnapSyncError>
     where
-        Self: StageCheckpointWriter + DBProvider,
+        Self: MetadataWriter + StageCheckpointWriter + DBProvider,
     {
         self.verify_completeness(write, chunk, cancel)?;
         // Starting from block zero makes the stage clear the trie tables and rebuild them, since
         // downloaded state has no changesets to update an existing trie from.
         self.save_stage_checkpoint(StageId::MerkleExecute, StageCheckpoint::default())?;
         self.save_stage_checkpoint_progress(StageId::MerkleExecute, Vec::new())?;
+        StoredRebuild::new(write).write(self)?;
         Ok(())
     }
 
@@ -124,7 +130,7 @@ impl<T: MetadataProvider> SnapStateVerifier for T {
                 pivot: attempt.pivot().number,
             })
         }
-        missing_code(self.tx_ref(), chunk, cancel)
+        ensure_code_present(self.tx_ref(), chunk, cancel)
     }
 
     fn verify_state_root(&self, write: SnapWrite) -> Result<VerifiedSnapState, SnapSyncError>
@@ -146,9 +152,11 @@ impl<T: MetadataProvider> SnapStateVerifier for T {
             }))
             .into())
         }
-        // Until the stage reaches the pivot, the trie holds no state for it.
+        // Until the stage reaches the pivot after this state's hand-off, the trie holds no state
+        // for it: an earlier attempt's rebuild can end at the same block.
+        let handed_off = StoredRebuild::read(self)?.is_some_and(|stored| stored.write == write);
         let rebuilt = self.get_stage_checkpoint(StageId::MerkleExecute)?;
-        if rebuilt.map(|checkpoint| checkpoint.block_number) != Some(target.number) {
+        if !handed_off || rebuilt.map(|checkpoint| checkpoint.block_number) != Some(target.number) {
             return Err(ProviderError::StateForNumberNotFound(target.number).into())
         }
         self.verify_snap_attempt(write)?;
@@ -156,16 +164,38 @@ impl<T: MetadataProvider> SnapStateVerifier for T {
     }
 }
 
+// The trie rebuild hand-off as persisted, tied to the write it was made for.
+#[derive(Serialize, Deserialize)]
+struct StoredRebuild {
+    // Encoding version, checked before the rest is decoded.
+    version: u32,
+    // Attempt and pivot the state was handed off at.
+    write: SnapWrite,
+}
+
+impl SnapRecord for StoredRebuild {
+    const KEY: &'static str = "snap_trie_rebuild";
+    const VERSION: u32 = 1;
+}
+
+impl StoredRebuild {
+    // The hand-off of `write`'s state at this build's version.
+    const fn new(write: SnapWrite) -> Self {
+        Self { version: Self::VERSION, write }
+    }
+}
+
 // Refuses the first account whose code is not stored, checking for cancellation every `chunk`
 // accounts.
-fn missing_code(
+fn ensure_code_present(
     tx: &impl DbTx,
     chunk: u64,
     cancel: &CancellationToken,
 ) -> Result<(), SnapSyncError> {
+    let chunk = chunk.max(1);
     let mut cursor = tx.cursor_read::<tables::HashedAccounts>()?;
     for (scanned, entry) in cursor.walk(None)?.enumerate() {
-        if (scanned as u64).is_multiple_of(chunk.max(1)) && cancel.is_cancelled() {
+        if (scanned as u64).is_multiple_of(chunk) && cancel.is_cancelled() {
             return Err(SnapSyncError::Cancelled)
         }
         let (_, account) = entry?;
@@ -416,5 +446,40 @@ mod tests {
             }
             other => panic!("expected a state root mismatch, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn a_rebuild_for_an_earlier_attempt_is_not_trusted() {
+        let root = state_root(&accounts());
+        let (factory, write, blocks) = downloaded(root, accounts().len());
+        let provider = factory.database_provider_rw().unwrap();
+        start(&provider, write).unwrap();
+        run_merkle(&provider, 1).unwrap();
+
+        // A new attempt at the same pivot, with nothing downloaded yet.
+        let restarted = provider.start_snap_attempt(SnapGeneration::new(blocks[1], root)).unwrap();
+
+        assert_eq!(merkle_checkpoint(&provider), Some(1));
+        assert!(matches!(
+            provider.verify_state_root(restarted),
+            Err(SnapSyncError::Provider(ProviderError::StateForNumberNotFound(1)))
+        ));
+    }
+
+    #[test]
+    fn moving_the_pivot_after_the_hand_off_requires_a_new_one() {
+        let root = state_root(&accounts());
+        let (factory, write, blocks) = downloaded(root, accounts().len());
+        let provider = factory.database_provider_rw().unwrap();
+        start(&provider, write).unwrap();
+        let advanced =
+            provider.advance_snap_pivot(write, SnapGeneration::new(blocks[2], root)).unwrap();
+
+        run_merkle(&provider, 2).unwrap();
+
+        assert!(matches!(
+            provider.verify_state_root(advanced),
+            Err(SnapSyncError::Provider(ProviderError::StateForNumberNotFound(2)))
+        ));
     }
 }
