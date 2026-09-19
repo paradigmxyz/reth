@@ -201,6 +201,58 @@ mod tests {
     const PEER_A: PeerId = PeerId::new([1; 64]);
     const PEER_B: PeerId = PeerId::new([2; 64]);
 
+    #[tokio::test]
+    async fn paused_ingress_bounds_broadcasts_and_peer_churn() {
+        use crate::transactions::{
+            constants::tx_fetcher::MAX_COUNT_CANDIDATE_PEERS_PER_HASH, TransactionSource,
+        };
+        let mut harness = TxFetchHarness::with_config(
+            TransactionsManagerConfig { max_pending_pool_imports: 2, ..Default::default() },
+            [PEER_A],
+        )
+        .await;
+        let pause = harness.pool().transaction_ingress().unwrap().pause_handle().pause();
+        let txs = pooled_txs(64);
+        let first = *txs[0].tx_hash();
+        harness.manager.import_transactions(
+            PEER_A,
+            PooledTransactions(vec![txs[0].clone()]),
+            TransactionSource::Broadcast,
+        );
+        for n in 2..100 {
+            let peer_id = peer(n);
+            let (metadata, _session) =
+                new_mock_session_with_capacity(peer_id, EthVersion::Eth68, 1);
+            harness.manager.peers.insert(peer_id, metadata);
+            harness.manager.import_transactions(
+                peer_id,
+                PooledTransactions(vec![txs[0].clone()]),
+                TransactionSource::Broadcast,
+            );
+            harness.manager.peers.remove(&peer_id);
+        }
+        assert_eq!(
+            harness.manager.transactions_by_peers[&first].len(),
+            MAX_COUNT_CANDIDATE_PEERS_PER_HASH
+        );
+        for _ in 0..100 {
+            harness.manager.import_transactions(
+                PEER_A,
+                PooledTransactions(txs[1..].to_vec()),
+                TransactionSource::Broadcast,
+            );
+        }
+        assert_eq!(harness.manager.ingress_imports.len(), 2);
+        assert_eq!(harness.manager.transactions_by_peers.len(), 2);
+        assert_eq!(harness.num_tracked_hashes(), 0);
+        assert!(harness.pool().is_empty());
+        drop(pause);
+        harness.poll_until_idle().await;
+        assert_eq!(harness.pool().len(), 2);
+        assert!(harness.manager.ingress_imports.is_empty());
+        assert!(harness.manager.transactions_by_peers.is_empty());
+    }
+
     fn peer(n: u8) -> PeerId {
         PeerId::new([n; 64])
     }
@@ -372,7 +424,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn concurrent_responses_wait_for_pool_import_capacity() {
+    async fn concurrent_responses_are_dropped_at_paused_import_capacity() {
         let txs = pooled_txs(2);
         let hashes = txs.iter().map(|tx| *tx.tx_hash()).collect::<Vec<_>>();
         let config =
@@ -383,25 +435,23 @@ mod tests {
         harness.poll_until_idle().await;
         let requests = harness.take_requests();
         assert_eq!(requests.len(), 2);
+        let pause = harness.pool().transaction_ingress().unwrap().pause_handle().pause();
         for request in requests {
             let tx = txs.iter().find(|tx| request.request.0.contains(tx.tx_hash())).unwrap();
             request.response.send(Ok(PooledTransactions(vec![tx.clone()]))).unwrap();
         }
 
-        // Only one response can be consumed before imports are polled. The second remains
-        // inflight, and freeing capacity must wake the manager to consume it on the next poll.
+        // Full responses must not remain buffered behind a potentially long payload pause.
         harness.wake_flag.0.store(false, Ordering::Relaxed);
         let mut cx = Context::from_waker(&harness.waker);
         let _ = Pin::new(&mut harness.manager).poll(&mut cx);
-        assert_eq!(harness.manager.transaction_fetcher.num_inflight_requests(), 1);
-        if !harness.was_woken() {
-            tokio::time::timeout(std::time::Duration::from_secs(2), harness.wake_flag.1.notified())
-                .await
-                .unwrap();
-        }
-        assert!(harness.was_woken());
+        assert_eq!(harness.manager.transaction_fetcher.num_inflight_requests(), 0);
+        assert_eq!(harness.manager.ingress_imports.len(), 1);
+        assert_eq!(harness.num_tracked_hashes(), 0);
+        assert!(harness.take_requests().is_empty());
+        drop(pause);
         harness.poll_until_idle().await;
-        assert_eq!(harness.pool().get_all(hashes).len(), 2);
+        assert_eq!(harness.pool().get_all(hashes).len(), 1);
     }
 
     #[tokio::test]

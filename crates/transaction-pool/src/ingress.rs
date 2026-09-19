@@ -78,6 +78,12 @@ impl<T: PoolTransaction + 'static> TransactionIngress<T> {
         self.context.pause.clone()
     }
 
+    /// Reserves RPC capacity before asynchronous preparation, without waiting for space.
+    /// The caller must include all retained input and keep the permit until work ends.
+    pub fn reserve_rpc(&self, bytes: usize) -> Result<IngressPermit, IngressError> {
+        self.reserve(0, bytes)
+    }
+
     /// Tries to admit gossip without waiting or retaining additional work outside the budget.
     pub fn try_submit_pooled(
         &self,
@@ -100,7 +106,7 @@ impl<T: PoolTransaction + 'static> TransactionIngress<T> {
         origin: TransactionOrigin,
         transaction: T,
     ) -> Result<IngressResultReceiver<T>, IngressError> {
-        let permit = self.reserve(0, transaction.size())?;
+        let permit = self.reserve_rpc(transaction.ingress_size())?;
         self.send(0, origin, IngressInput::Recovered(transaction), permit, false, None)
     }
 
@@ -146,7 +152,7 @@ impl<T: PoolTransaction + 'static> TransactionIngress<T> {
         }
         // Sidecar conversion can expand an admitted RPC input. Charge the extra memory before
         // it re-enters the queue, without releasing its original count reservation.
-        permit.grow(transaction.size())?;
+        permit.grow(transaction.ingress_size())?;
         self.send(0, origin, IngressInput::Recovered(transaction), permit, false, None)
     }
 
@@ -260,7 +266,9 @@ pub type IngressResultReceiver<T> = oneshot::Receiver<Result<IngressOutcome<T>, 
 pub struct IngressPermit(PermitInner);
 
 impl IngressPermit {
-    fn grow(&mut self, bytes: usize) -> Result<(), IngressError> {
+    /// Raises the retained-byte reservation before input expands, without waiting for space.
+    /// Failure leaves the existing reservation intact until the permit is dropped.
+    pub fn grow(&mut self, bytes: usize) -> Result<(), IngressError> {
         let extra = bytes.saturating_sub(self.0._bytes.num_permits());
         if extra > 0 {
             let extra = u32::try_from(extra).map_err(|_| IngressError::Full)?;
@@ -403,6 +411,12 @@ pub async fn validate_ingress<V: TransactionValidator + ?Sized>(
         }
         permit.0.metrics.queue_duration.record(queued_at.elapsed());
         let recovery_start = Instant::now();
+        // RPC subscriptions and asynchronous preparation can retain the original encoding
+        // alongside the decoded transaction and its sidecar.
+        let raw_bytes = match &input {
+            IngressInput::Raw(bytes) => bytes.len(),
+            _ => 0,
+        };
         let recovered = match input {
             IngressInput::Raw(bytes) => match &context.cache {
                 Some(cache) => {
@@ -423,7 +437,9 @@ pub async fn validate_ingress<V: TransactionValidator + ?Sized>(
                 let _ = response.send(Err(IngressError::Recovery(error)));
             }
             Ok(transaction) => {
-                if let Err(error) = permit.grow(transaction.size()) {
+                if let Err(error) =
+                    permit.grow(transaction.ingress_size().saturating_add(raw_bytes))
+                {
                     let _ = response.send(Err(error));
                     continue
                 }
@@ -699,6 +715,45 @@ mod tests {
         assert!(matches!(ingress.reserve(0, 1), Err(IngressError::Full)));
         drop((first, second));
         assert!(ingress.reserve(0, 10).is_ok());
+    }
+
+    #[tokio::test]
+    async fn recovered_sidecars_and_preparation_growth_respect_byte_budget() {
+        use crate::EthPoolTransaction;
+        use alloy_eips::{
+            eip4844::{Blob, BlobTransactionSidecar},
+            eip7594::BlobTransactionSidecarEip7594,
+        };
+
+        let base = TransactionGenerator::new(rand::rng()).gen_eip4844_pooled();
+        for sidecar in [
+            BlobTransactionSidecar { blobs: vec![Blob::ZERO], ..Default::default() }.into(),
+            BlobTransactionSidecarEip7594 { blobs: vec![Blob::ZERO], ..Default::default() }.into(),
+        ] {
+            let transaction =
+                EthPooledTransaction::try_from_eip4844(base.clone().into_consensus(), sidecar)
+                    .unwrap();
+            let bytes = transaction.ingress_size() - 1;
+            assert!(transaction.size() < bytes);
+            let ingress = TransactionIngress::new(
+                TransactionIngressConfig { max_bytes: bytes, ..Default::default() },
+                1,
+                None,
+                |_| panic!("over-budget input must never reach a worker"),
+            );
+            assert!(matches!(
+                ingress.submit_recovered(TransactionOrigin::Local, transaction.clone()),
+                Err(IngressError::Full)
+            ));
+            let mut permit = ingress.reserve_rpc(transaction.size()).unwrap();
+            assert!(matches!(permit.grow(transaction.ingress_size()), Err(IngressError::Full)));
+            assert_eq!(ingress.lanes[0].bytes.available_permits(), bytes - transaction.size());
+            assert!(matches!(
+                ingress.submit_admitted(TransactionOrigin::Local, transaction, permit),
+                Err(IngressError::Full)
+            ));
+            assert_eq!(ingress.lanes[0].bytes.available_permits(), bytes);
+        }
     }
 
     #[tokio::test]

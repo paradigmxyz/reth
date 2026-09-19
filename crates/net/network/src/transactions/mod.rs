@@ -33,7 +33,8 @@ use policy::NetworkPolicies;
 pub(crate) use fetcher::{FetchEvent, TransactionFetcher};
 
 use self::constants::{
-    tx_manager::*, DEFAULT_SOFT_LIMIT_BYTE_SIZE_TRANSACTIONS_BROADCAST_MESSAGE,
+    tx_fetcher::MAX_COUNT_CANDIDATE_PEERS_PER_HASH, tx_manager::*,
+    DEFAULT_SOFT_LIMIT_BYTE_SIZE_TRANSACTIONS_BROADCAST_MESSAGE,
     SOFT_LIMIT_COUNT_HASHES_IN_GET_POOLED_TRANSACTIONS_REQUEST,
 };
 use crate::{
@@ -480,7 +481,8 @@ impl<Pool: TransactionPool, N: NetworkPrimitives> TransactionsManager<Pool, N> {
     ///
     /// Fetch responses are admitted in full when capacity remains, so one response can exceed
     /// the limit by at most 255 transactions (the 256-hash request cap minus one free slot).
-    /// Further responses and requests wait until imports fall below the limit again.
+    /// Further requests wait until imports fall below the limit again. Shared ingress drops
+    /// responses at capacity; custom pools wait before consuming another response.
     fn has_capacity_for_pending_pool_imports(&self) -> bool {
         self.remaining_pool_import_capacity() > 0
     }
@@ -657,16 +659,9 @@ impl<Pool: TransactionPool, N: NetworkPrimitives> TransactionsManager<Pool, N> {
                 }
             }
             Err(IngressError::Full | IngressError::Closed) => {
-                if let Some(peers) = self.transactions_by_peers.remove(&hash) {
-                    for peer in peers {
-                        if self.peers.contains_key(&peer) {
-                            self.transaction_fetcher.on_announcement(
-                                peer,
-                                vec![announcement::AnnouncedTransaction { hash, metadata: None }],
-                            );
-                        }
-                    }
-                }
+                // Local overload is neither a peer fault nor a reason to fetch the same
+                // transaction again while its memory requirements cannot be admitted.
+                self.transactions_by_peers.remove(&hash);
             }
         }
     }
@@ -1343,9 +1338,9 @@ where
 
     /// Starts the import process for the given transactions.
     ///
-    /// Callers must check import capacity before consuming a fetch response. Responses are
-    /// admitted in full and may overshoot the soft limit by one bounded response; broadcasts
-    /// are truncated to their available capacity.
+    /// Fetched responses may overshoot the soft limit by one bounded response. At capacity,
+    /// shared ingress drops further responses; custom pools must pause response consumption.
+    /// Broadcasts are truncated to their available capacity.
     fn import_transactions(
         &mut self,
         peer_id: PeerId,
@@ -1371,9 +1366,17 @@ where
         };
         let is_broadcast = source.is_broadcast();
         let mut transactions = transactions.0;
+        let ingress = self.pool.transaction_ingress();
 
-        // Fetched batches may exceed the soft limit: their request size is bounded, and the
-        // caller stops consuming responses until capacity becomes available again.
+        if !is_broadcast && ingress.is_some() && !self.has_capacity_for_pending_pool_imports() {
+            self.metrics
+                .skipped_transactions_pending_pool_imports_at_capacity
+                .increment(transactions.len() as u64);
+            return
+        }
+
+        // One fetched batch may exceed the soft limit because its request size is bounded.
+        // Subsequent responses are dropped above, or left unpolled for custom pools.
         if is_broadcast {
             let capacity = self.remaining_broadcast_import_capacity();
             if transactions.len() > capacity {
@@ -1432,7 +1435,9 @@ where
         transactions.retain(|tx| {
             if let Entry::Occupied(mut entry) = self.transactions_by_peers.entry(*tx.tx_hash()) {
                 let peers = entry.get_mut();
-                if !peers.contains(&peer_id) {
+                // Paused validation can outlive many peer sessions. Bound attribution even
+                // when distinct peers repeatedly deliver the same pending transaction.
+                if peers.len() < MAX_COUNT_CANDIDATE_PEERS_PER_HASH && !peers.contains(&peer_id) {
                     peers.push(peer_id);
                 }
                 return false
@@ -1460,9 +1465,8 @@ where
                 .increment(already_known_txns_count as u64);
         }
 
-        if let Some(ingress) = self.pool.transaction_ingress() {
+        if let Some(ingress) = ingress {
             let reported_recovery_failure = Arc::new(AtomicBool::new(false));
-            let mut deferred = Vec::new();
             for transaction in transactions {
                 let hash = *transaction.tx_hash();
                 // Entries are inserted as work is admitted, including duplicates in one message.
@@ -1498,14 +1502,8 @@ where
                         self.metrics
                             .skipped_transactions_pending_pool_imports_at_capacity
                             .increment(1);
-                        deferred.push(announcement::AnnouncedTransaction { hash, metadata: None });
                     }
                 }
-            }
-            // Admission failure is local overload. Preserve a bounded refetch opportunity rather
-            // than poisoning the bad-transaction cache or penalizing the source peer.
-            if !deferred.is_empty() && self.peers.contains_key(&peer_id) {
-                self.transaction_fetcher.on_announcement(peer_id, deferred);
             }
         } else {
             let txs_len = transactions.len();
@@ -1646,6 +1644,7 @@ where
         let mut poll_durations = TxManagerPollDurations::default();
 
         let this = self.get_mut();
+        let has_shared_ingress = this.pool.transaction_ingress().is_some();
 
         // All streams are polled until their corresponding budget is exhausted, then we manually
         // yield back control to tokio. See `NetworkManager` for more context on the design
@@ -1689,17 +1688,14 @@ where
         // Advance inflight fetch requests (flush transaction fetcher and queue for
         // import to pool).
         //
-        // Pace response consumption with the soft import limit. Dispatch checks capacity but
-        // does not reserve it for outstanding requests, so concurrent responses can exceed it.
-        // Admit one complete response while capacity remains (at most 256 transactions), then
-        // pause here if it fills or overshoots the limit. Existing requests continue in flight;
-        // completed responses wait in their channels until pool imports free capacity.
+        // Shared ingress drains and drops excess responses rather than retaining decoded bodies
+        // for the duration of a payload pause. Custom pools keep their existing soft-limit pacing.
         let mut maybe_more_tx_fetch_events = metered_poll_nested_stream_with_budget!(
             poll_durations.acc_fetch_events,
             "net::tx",
             "Transaction fetch events stream",
             DEFAULT_BUDGET_TRY_DRAIN_STREAM,
-            if this.has_capacity_for_pending_pool_imports() {
+            if has_shared_ingress || this.has_capacity_for_pending_pool_imports() {
                 this.transaction_fetcher.poll_next_unpin(cx)
             } else {
                 Poll::Pending
@@ -2492,7 +2488,7 @@ mod tests {
     >;
 
     #[tokio::test]
-    async fn ingress_overload_preserves_refetch_without_bad_import_caching() {
+    async fn ingress_overload_drops_without_refetch_or_bad_import_caching() {
         let (mut manager, _network) = new_tx_manager().await;
         let peer_id = PeerId::new([1; 64]);
         let (peer, _session) = new_mock_session(peer_id, EthVersion::Eth68);
@@ -2506,7 +2502,7 @@ mod tests {
         ));
         assert!(!manager.transactions_by_peers.contains_key(&hash));
         assert!(!manager.bad_imports.contains(&hash));
-        assert!(manager.transaction_fetcher.queued_hashes(&peer_id).contains(&hash));
+        assert!(!manager.transaction_fetcher.queued_hashes(&peer_id).contains(&hash));
     }
 
     #[tokio::test]

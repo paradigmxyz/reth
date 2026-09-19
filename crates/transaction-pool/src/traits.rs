@@ -1490,6 +1490,13 @@ pub trait PoolTransaction:
     /// Note: Implementations should cache this value.
     fn encoded_length(&self) -> usize;
 
+    /// Estimated memory retained before pool insertion, including any attached sidecar.
+    ///
+    /// Override this when [`InMemorySize::size`] excludes data removed during validation.
+    fn ingress_size(&self) -> usize {
+        self.size()
+    }
+
     /// Ensures that the transaction's code size does not exceed the provided `max_init_code_size`.
     ///
     /// This is specifically relevant for contract creation transactions ([`TxKind::Create`]),
@@ -1741,6 +1748,10 @@ impl PoolTransaction for EthPooledTransaction {
     /// Returns the length of the rlp encoded object
     fn encoded_length(&self) -> usize {
         self.encoded_length
+    }
+
+    fn ingress_size(&self) -> usize {
+        self.size().saturating_add(self.blob_sidecar.maybe_sidecar().map_or(0, |s| s.size()))
     }
 }
 

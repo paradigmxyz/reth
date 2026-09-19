@@ -57,19 +57,12 @@ where
         // admitted, but release the recovery worker while those services are awaited.
         match ingress.recover_raw(bytes.clone())?.await.map_err(|_| IngressError::Closed)?? {
             IngressOutcome::Recovered(transaction, permit) => {
-                // Conversion may spawn blocking work that outlives the RPC future. Keep
-                // preparation and its permit together even if that caller is canceled.
-                let this = self.clone();
-                tokio::spawn(async move {
-                    this.send_admitted_pool_transaction(
-                        origin,
-                        WithEncoded::new(bytes, transaction),
-                        Some(permit),
-                    )
-                    .await
-                })
+                self.send_admitted_pool_transaction(
+                    origin,
+                    WithEncoded::new(bytes, transaction),
+                    Some(permit),
+                )
                 .await
-                .map_err(|error| EthApiError::Internal(reth_errors::RethError::other(error)))?
             }
             IngressOutcome::Inserted(..) => unreachable!("recovery request"),
         }
@@ -96,6 +89,36 @@ where
         tx: WithEncoded<PoolTx<N::Pool>>,
         permit: Option<IngressPermit>,
     ) -> Result<B256, EthApiError> {
+        let permit =
+            match (permit, self.pool().transaction_ingress()) {
+                (Some(permit), _) => Some(permit),
+                (None, Some(ingress)) => Some(ingress.reserve_rpc(
+                    tx.value().ingress_size().saturating_add(tx.encoded_bytes().len()),
+                )?),
+                (None, None) => None,
+            };
+        let Some(permit) = permit else {
+            return self.prepare_pool_transaction(origin, tx, None).await
+        };
+        if self.raw_tx_forwarder().is_none() &&
+            !(self.inner.force_blob_sidecar_upcasting() && tx.value().is_eip4844())
+        {
+            return self.prepare_pool_transaction(origin, tx, Some(permit)).await
+        }
+        // Conversion can outlive a canceled RPC future. Keep its input and reservation together,
+        // including for already-recovered submissions that bypass raw recovery.
+        let this = self.clone();
+        tokio::spawn(async move { this.prepare_pool_transaction(origin, tx, Some(permit)).await })
+            .await
+            .map_err(|error| EthApiError::Internal(reth_errors::RethError::other(error)))?
+    }
+
+    async fn prepare_pool_transaction(
+        &self,
+        origin: reth_transaction_pool::TransactionOrigin,
+        tx: WithEncoded<PoolTx<N::Pool>>,
+        mut permit: Option<IngressPermit>,
+    ) -> Result<B256, EthApiError> {
         let (tx, mut pool_transaction) = tx.split();
 
         // Optionally convert legacy blob sidecars to EIP-7594 format when Osaka is active
@@ -120,6 +143,20 @@ where
                         .chain_spec()
                         .is_osaka_active_at_timestamp(latest.timestamp().saturating_add(12))
                     {
+                        if let Some(permit) = &mut permit {
+                            let proofs = sidecar
+                                .blobs
+                                .len()
+                                .saturating_mul(alloy_eips::eip7594::CELLS_PER_EXT_BLOB)
+                                .saturating_mul(alloy_eips::eip4844::BYTES_PER_PROOF);
+                            permit.grow(
+                                pool_transaction
+                                    .ingress_size()
+                                    .saturating_add(tx.len())
+                                    .saturating_add(sidecar.size())
+                                    .saturating_add(proofs),
+                            )?;
+                        }
                         BlobTransactionSidecarVariant::Eip7594(
                             self.blob_sidecar_converter().convert(sidecar).await.ok_or_else(
                                 || {
@@ -150,6 +187,14 @@ where
         // forward the transaction to the specific endpoint if configured.
         if let Some(client) = self.raw_tx_forwarder() {
             tracing::debug!(target: "rpc::eth", hash = %pool_transaction.hash(), "forwarding raw transaction to forwarder");
+            if let Some(permit) = &mut permit {
+                permit.grow(
+                    pool_transaction
+                        .ingress_size()
+                        .saturating_add(tx.len())
+                        .saturating_add(tx.len().saturating_mul(2).saturating_add(2)),
+                )?;
+            }
             let rlp_hex = hex::encode_prefixed(&tx);
 
             // broadcast raw transaction to subscribers if there is any.
@@ -353,6 +398,46 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn forwarding_reserves_encoding_before_contacting_remote() {
+        use reth_transaction_pool::{
+            test_utils::TestPoolBuilder, PoolConfig, TransactionIngressConfig,
+        };
+        let raw = raw_transfer_tx();
+        let tx = PoolTx::<TestPool>::recover_raw_transaction(&raw).unwrap();
+        let bytes = tx.ingress_size() + raw.len();
+        let pool: TestPool = TestPoolBuilder::default()
+            .with_config(PoolConfig {
+                ingress: TransactionIngressConfig { max_bytes: bytes, ..Default::default() },
+                ..Default::default()
+            })
+            .into();
+        let ingress = pool.transaction_ingress().unwrap();
+        let provider = MockEthProvider::default();
+        let evm = EthEvmConfig::new(provider.chain_spec());
+        let api = EthApi::builder(provider, pool, NoopNetwork::default(), evm)
+            .raw_tx_forwarder(reth_rpc_eth_types::ForwardConfig {
+                tx_forwarder: Some("http://127.0.0.1:1".parse().unwrap()),
+            })
+            .build();
+        for recovered in [false, true] {
+            let result = if recovered {
+                api.send_pool_transaction(
+                    TransactionOrigin::Local,
+                    WithEncoded::new(raw.clone(), tx.clone()),
+                )
+                .await
+            } else {
+                api.send_raw_transaction(raw.clone()).await
+            };
+            assert!(matches!(result,
+                Err(EthApiError::PoolError(RpcPoolError::Other(error)))
+                    if matches!(error.downcast_ref::<IngressError>(), Some(IngressError::Full))
+            ));
+            assert!(ingress.reserve_rpc(bytes).is_ok(), "failed preparation releases all bytes");
+        }
+    }
+
+    #[tokio::test]
     async fn canceled_rpc_preparation_retains_admission_until_completion() {
         use reth_transaction_pool::{
             test_utils::TestPoolBuilder, PoolConfig, TransactionIngressConfig,
@@ -386,28 +471,39 @@ mod tests {
                 tx_forwarder: Some(format!("http://{address}").parse().unwrap()),
             })
             .build();
-        let request =
-            tokio::spawn(async move { api.send_raw_transaction(raw_transfer_tx()).await });
-        tokio::time::timeout(Duration::from_secs(2), started.notified()).await.unwrap();
-        request.abort();
-        assert!(request.await.unwrap_err().is_cancelled());
-        assert!(matches!(ingress.recover_raw(Bytes::new()), Err(IngressError::Full)));
-        release.notify_one();
-        tokio::time::timeout(Duration::from_secs(2), async {
-            loop {
-                match ingress.recover_raw(Bytes::new()) {
-                    Ok(response) => {
-                        let _ = response.await;
-                        break;
-                    }
-                    Err(IngressError::Full) => tokio::task::yield_now().await,
-                    Err(error) => panic!("unexpected ingress error: {error}"),
+        for recovered in [false, true] {
+            let api = api.clone();
+            let request = tokio::spawn(async move {
+                let raw = raw_transfer_tx();
+                if recovered {
+                    let tx = PoolTx::<TestPool>::recover_raw_transaction(&raw).unwrap();
+                    api.send_pool_transaction(TransactionOrigin::Local, WithEncoded::new(raw, tx))
+                        .await
+                } else {
+                    api.send_raw_transaction(raw).await
                 }
-            }
-        })
-        .await
-        .unwrap();
-        assert_eq!(pool.len(), 1);
+            });
+            tokio::time::timeout(Duration::from_secs(2), started.notified()).await.unwrap();
+            request.abort();
+            assert!(request.await.unwrap_err().is_cancelled());
+            assert!(matches!(ingress.recover_raw(Bytes::new()), Err(IngressError::Full)));
+            release.notify_one();
+            tokio::time::timeout(Duration::from_secs(2), async {
+                loop {
+                    match ingress.recover_raw(Bytes::new()) {
+                        Ok(response) => {
+                            let _ = response.await;
+                            break;
+                        }
+                        Err(IngressError::Full) => tokio::task::yield_now().await,
+                        Err(error) => panic!("unexpected ingress error: {error}"),
+                    }
+                }
+            })
+            .await
+            .unwrap();
+            assert_eq!(pool.len(), 1);
+        }
         server.stop().unwrap();
     }
 
