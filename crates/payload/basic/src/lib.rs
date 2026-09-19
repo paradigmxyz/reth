@@ -932,10 +932,8 @@ pub struct BuildArguments<Attributes, Payload: BuiltPayload> {
     pub execution_cache: Option<SavedCache>,
     /// Optional state-root task handle, shared with the engine.
     ///
-    /// The preserved trie is shared with the engine, so a concurrent `newPayload` will
-    /// block until this task completes. The trie is anchored at the built block's state
-    /// root, so if the next `newPayload` is not on top of that block, the trie cache is
-    /// invalidated and cleared.
+    /// A concurrent `newPayload` waits for this task to finish before it can use the shared
+    /// sparse trie.
     pub state_root_handle: Option<PayloadStateRootHandle>,
     /// How to configure the payload.
     pub config: PayloadConfig<Attributes, HeaderTy<Payload::Primitives>>,
