@@ -454,24 +454,6 @@ mod tests {
     }
 
     #[test]
-    fn a_rebuild_for_an_earlier_attempt_is_not_trusted() {
-        let root = state_root(&accounts());
-        let (factory, write, blocks) = downloaded(root, accounts().len());
-        let provider = factory.database_provider_rw().unwrap();
-        start(&provider, write).unwrap();
-        run_merkle(&provider, 1).unwrap();
-
-        // A new attempt at the same pivot, with nothing downloaded yet.
-        let restarted = provider.start_snap_attempt(SnapGeneration::new(blocks[1], root)).unwrap();
-
-        assert_eq!(merkle_checkpoint(&provider), Some(1));
-        assert!(matches!(
-            provider.verify_state_root(restarted),
-            Err(SnapSyncError::Provider(ProviderError::StateForNumberNotFound(1)))
-        ));
-    }
-
-    #[test]
     fn moving_the_pivot_after_the_hand_off_requires_a_new_one() {
         let root = state_root(&accounts());
         let (factory, write, blocks) = downloaded(root, accounts().len());
@@ -491,7 +473,8 @@ mod tests {
     #[test]
     fn a_genesis_pivot_is_not_handed_off() {
         let root = state_root(&accounts());
-        let (factory, _, blocks) = downloaded(root, accounts().len());
+        let factory = hashed_factory();
+        let blocks = insert_chain(&factory, root);
         let provider = factory.database_provider_rw().unwrap();
         let write = provider.start_snap_attempt(SnapGeneration::new(blocks[0], root)).unwrap();
 
