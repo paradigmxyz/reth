@@ -13,7 +13,9 @@ use reth_provider::{
     StorageSettingsCache,
 };
 use reth_prune_types::{PruneCheckpoint, PruneMode, PrunePurpose, PruneSegment};
-use reth_stages_api::{ExecInput, ExecOutput, Stage, StageError, UnwindInput, UnwindOutput};
+use reth_stages_api::{
+    BlockRangeOutput, ExecInput, ExecOutput, Stage, StageError, UnwindInput, UnwindOutput,
+};
 use std::fmt::Debug;
 use tracing::info;
 
@@ -71,6 +73,10 @@ where
         provider: &Provider,
         mut input: ExecInput,
     ) -> Result<ExecOutput, StageError> {
+        let initial_sync = input.checkpoint.is_none();
+        let rebuild_from_empty = input.checkpoint().block_number == 0;
+        let mut prune_target_applied = false;
+
         if let Some((target_prunable_block, prune_mode)) = self
             .prune_mode
             .map(|mode| {
@@ -82,8 +88,10 @@ where
             })
             .transpose()?
             .flatten() &&
-            target_prunable_block > input.checkpoint().block_number
+            (target_prunable_block > input.checkpoint().block_number ||
+                target_prunable_block == 0 && input.checkpoint().block_number == 0)
         {
+            prune_target_applied = true;
             input.checkpoint = Some(StageCheckpoint::new(target_prunable_block));
 
             // Save prune checkpoint only if we don't have one already.
@@ -100,36 +108,48 @@ where
             }
         }
 
-        if input.target_reached() {
-            return Ok(ExecOutput::done(input.checkpoint()))
-        }
-
-        let mut range = input.next_block_range();
-        let first_sync = input.checkpoint().block_number == 0;
         let use_rocksdb = provider.cached_storage_settings().storage_v2;
-
-        // On first sync we might have history coming from genesis. We clear the table since it's
-        // faster to rebuild from scratch.
-        if first_sync {
+        if input.target_reached() && prune_target_applied {
             if use_rocksdb {
-                // Note: RocksDB clear() executes immediately (not deferred to commit like MDBX),
-                // but this is safe for first_sync because if we crash before commit, the
-                // checkpoint stays at 0 and we'll just clear and rebuild again on restart. The
-                // source data (changesets) is intact.
                 provider.rocksdb_provider().clear::<tables::StoragesHistory>()?;
             } else {
                 provider.tx_ref().clear::<tables::StoragesHistory>()?;
             }
-            range = 0..=*input.next_block_range().end();
+            return Ok(ExecOutput::done(input.checkpoint()))
+        }
+        if input.target_reached() && !initial_sync {
+            return Ok(ExecOutput::done(input.checkpoint()))
         }
 
-        info!(target: "sync::stages::index_storage_history::exec", ?first_sync, ?use_rocksdb, "Collecting indices");
-        let collector = if provider.cached_storage_settings().storage_v2 {
-            collect_storage_history_indices(provider, range.clone(), &self.etl_config)?
+        let BlockRangeOutput { mut block_range, is_final_range } =
+            if initial_sync && input.target() == 0 {
+                BlockRangeOutput { block_range: 0..=0, is_final_range: true }
+            } else {
+                input.next_block_range_with_threshold(self.commit_threshold.max(1))
+            };
+
+        // A zero checkpoint means no history range is durable. Clear stale rows before using the
+        // append-only loader, including when pruning advanced the in-memory checkpoint.
+        if rebuild_from_empty {
+            if use_rocksdb {
+                // RocksDB clear executes immediately. A crash before commit leaves the durable
+                // checkpoint at zero, so the next attempt clears and rebuilds again.
+                provider.rocksdb_provider().clear::<tables::StoragesHistory>()?;
+            } else {
+                provider.tx_ref().clear::<tables::StoragesHistory>()?;
+            }
+            if input.checkpoint().block_number == 0 && !prune_target_applied {
+                block_range = 0..=*block_range.end();
+            }
+        }
+
+        info!(target: "sync::stages::index_storage_history::exec", ?rebuild_from_empty, ?use_rocksdb, "Collecting indices");
+        let collector = if use_rocksdb {
+            collect_storage_history_indices(provider, block_range.clone(), &self.etl_config)?
         } else {
             collect_history_indices::<_, tables::StorageChangeSets, tables::StoragesHistory, _>(
                 provider,
-                BlockNumberAddress::range(range.clone()),
+                BlockNumberAddress::range(block_range.clone()),
                 |AddressStorageKey((address, storage_key)), highest_block_number| {
                     StorageShardedKey::new(address, storage_key, highest_block_number)
                 },
@@ -142,7 +162,7 @@ where
 
         provider.with_rocksdb_batch_auto_commit(|rocksdb_batch| {
             let mut writer = EitherWriter::new_storages_history(provider, rocksdb_batch)?;
-            load_storage_history(collector, first_sync, &mut writer)
+            load_storage_history(collector, rebuild_from_empty, &mut writer)
                 .map_err(|e| reth_provider::ProviderError::other(Box::new(e)))?;
             Ok(((), writer.into_raw_rocksdb_batch()))
         })?;
@@ -152,7 +172,10 @@ where
             provider.rocksdb_provider().flush(&[Tables::StoragesHistory.name()])?;
         }
 
-        Ok(ExecOutput { checkpoint: StageCheckpoint::new(*range.end()), done: true })
+        Ok(ExecOutput {
+            checkpoint: StageCheckpoint::new(*block_range.end()),
+            done: is_final_range,
+        })
     }
 
     /// Unwind the stage.
@@ -302,6 +325,56 @@ mod tests {
         // verify initial state
         let table = cast(db.table::<tables::StoragesHistory>().unwrap());
         assert_eq!(table, BTreeMap::from([(shard(u64::MAX), vec![0])]));
+    }
+
+    #[tokio::test]
+    async fn initial_target_zero_indexes_genesis() {
+        let db = TestStageDB::default();
+        partial_setup(&db);
+
+        run(&db, 0, None);
+
+        let table = cast(db.table::<tables::StoragesHistory>().unwrap());
+        assert_eq!(table, BTreeMap::from([(shard(u64::MAX), vec![0])]));
+    }
+
+    #[tokio::test]
+    async fn zero_commit_threshold_still_makes_progress() {
+        let db = TestStageDB::default();
+        partial_setup(&db);
+        let input = ExecInput { target: Some(1), checkpoint: None };
+        let mut stage = IndexStorageHistoryStage { commit_threshold: 0, ..Default::default() };
+        let provider = db.factory.database_provider_rw().unwrap();
+
+        let output = stage.execute(&provider, input).unwrap();
+
+        assert_eq!(output, ExecOutput { checkpoint: StageCheckpoint::new(1), done: true });
+        provider.commit().unwrap();
+        let table = cast(db.table::<tables::StoragesHistory>().unwrap());
+        assert_eq!(table, BTreeMap::from([(shard(u64::MAX), vec![0, 1])]));
+    }
+
+    #[tokio::test]
+    async fn execute_respects_commit_threshold() {
+        let db = TestStageDB::default();
+        partial_setup(&db);
+        let mut stage = IndexStorageHistoryStage { commit_threshold: 2, ..Default::default() };
+
+        let mut checkpoint = None;
+        for (expected_checkpoint, done) in [(2, false), (4, false), (5, true)] {
+            let input = ExecInput { target: Some(5), checkpoint };
+            let provider = db.factory.database_provider_rw().unwrap();
+            let output = stage.execute(&provider, input).unwrap();
+            assert_eq!(
+                output,
+                ExecOutput { checkpoint: StageCheckpoint::new(expected_checkpoint), done }
+            );
+            provider.commit().unwrap();
+            checkpoint = Some(output.checkpoint);
+        }
+
+        let table = cast(db.table::<tables::StoragesHistory>().unwrap());
+        assert_eq!(table, BTreeMap::from([(shard(u64::MAX), (0..=5).collect())]));
     }
 
     #[tokio::test]
@@ -515,6 +588,7 @@ mod tests {
                 .unwrap();
             tx.put::<tables::StorageChangeSets>(block_number_address(100), storage(STORAGE_KEY))
                 .unwrap();
+            tx.put::<tables::StoragesHistory>(shard(u64::MAX), list(&[1])).unwrap();
             Ok(())
         })
         .unwrap();
@@ -540,6 +614,34 @@ mod tests {
         // verify initial state
         let table = db.table::<tables::StoragesHistory>().unwrap();
         assert!(table.is_empty());
+    }
+
+    #[tokio::test]
+    async fn prune_target_zero_excludes_genesis() {
+        let db = TestStageDB::default();
+        db.commit(|tx| {
+            tx.put::<tables::StorageChangeSets>(block_number_address(0), storage(STORAGE_KEY))?;
+            tx.put::<tables::StorageChangeSets>(block_number_address(1), storage(STORAGE_KEY))?;
+            Ok(())
+        })
+        .unwrap();
+
+        let input = ExecInput { target: Some(20_000), ..Default::default() };
+        let mut stage = IndexStorageHistoryStage {
+            prune_mode: Some(PruneMode::Before(1)),
+            ..Default::default()
+        };
+        let provider = db.factory.database_provider_rw().unwrap();
+        let output = stage.execute(&provider, input).unwrap();
+        assert_eq!(output, ExecOutput { checkpoint: StageCheckpoint::new(20_000), done: true });
+        provider.commit().unwrap();
+
+        let table = cast(db.table::<tables::StoragesHistory>().unwrap());
+        assert_eq!(table, BTreeMap::from([(shard(u64::MAX), vec![1])]));
+        let provider = db.factory.provider().unwrap();
+        let prune_checkpoint =
+            provider.get_prune_checkpoint(PruneSegment::StorageHistory).unwrap().unwrap();
+        assert_eq!(prune_checkpoint.block_number, Some(0));
     }
 
     stage_test_suite_ext!(IndexStorageHistoryTestRunner, index_storage_history);
@@ -757,6 +859,79 @@ mod tests {
             let block_list = result.unwrap();
             let blocks: Vec<u64> = block_list.iter().collect();
             assert_eq!(blocks, (0..=10).collect::<Vec<_>>());
+        }
+
+        #[tokio::test]
+        async fn prune_bump_rebuilds_empty_table_then_merges_later_chunks() {
+            let db = TestStageDB::default();
+            setup_v2_storage_data(&db, 0..=10);
+            let rocksdb = db.factory.rocksdb_provider();
+            rocksdb.put::<tables::StoragesHistory>(shard(u64::MAX), &list(&[1])).unwrap();
+
+            let mut stage = IndexStorageHistoryStage {
+                commit_threshold: 2,
+                prune_mode: Some(PruneMode::Before(6)),
+                ..Default::default()
+            };
+            let mut checkpoint = None;
+            for (threshold, expected_checkpoint, done) in
+                [(2, 7, false), (2, 9, false), (u64::MAX, 20_000, true)]
+            {
+                stage.commit_threshold = threshold;
+                let input = ExecInput { target: Some(20_000), checkpoint };
+                let provider = db.factory.database_provider_rw().unwrap();
+                let output = stage.execute(&provider, input).unwrap();
+                assert_eq!(
+                    output,
+                    ExecOutput { checkpoint: StageCheckpoint::new(expected_checkpoint), done }
+                );
+                provider.commit().unwrap();
+                checkpoint = Some(output.checkpoint);
+            }
+
+            let result = rocksdb.get::<tables::StoragesHistory>(shard(u64::MAX)).unwrap().unwrap();
+            assert_eq!(result.iter().collect::<Vec<_>>(), (6..=10).collect::<Vec<_>>());
+        }
+
+        #[tokio::test]
+        async fn prune_rebuild_retries_after_checkpoint_rollback() {
+            let db = TestStageDB::default();
+            setup_v2_storage_data(&db, 0..=10);
+            let rocksdb = db.factory.rocksdb_provider();
+            rocksdb.put::<tables::StoragesHistory>(shard(u64::MAX), &list(&[1, 2, 3])).unwrap();
+            let input = || ExecInput { target: Some(20_000), checkpoint: None };
+            let mut stage = IndexStorageHistoryStage {
+                commit_threshold: 2,
+                prune_mode: Some(PruneMode::Before(6)),
+                ..Default::default()
+            };
+
+            let provider = db.factory.database_provider_rw().unwrap();
+            let output = stage.execute(&provider, input()).unwrap();
+            assert_eq!(output, ExecOutput { checkpoint: StageCheckpoint::new(7), done: false });
+            drop(provider);
+
+            let result = rocksdb.get::<tables::StoragesHistory>(shard(u64::MAX)).unwrap().unwrap();
+            assert_eq!(result.iter().collect::<Vec<_>>(), vec![6, 7]);
+            let provider = db.factory.provider().unwrap();
+            assert!(provider.get_prune_checkpoint(PruneSegment::StorageHistory).unwrap().is_none());
+            drop(provider);
+
+            let provider = db.factory.database_provider_rw().unwrap();
+            let output = stage.execute(&provider, input()).unwrap();
+            assert_eq!(output, ExecOutput { checkpoint: StageCheckpoint::new(7), done: false });
+            provider.commit().unwrap();
+            let result = rocksdb.get::<tables::StoragesHistory>(shard(u64::MAX)).unwrap().unwrap();
+            assert_eq!(result.iter().collect::<Vec<_>>(), vec![6, 7]);
+            let provider = db.factory.provider().unwrap();
+            assert_eq!(
+                provider
+                    .get_prune_checkpoint(PruneSegment::StorageHistory)
+                    .unwrap()
+                    .unwrap()
+                    .block_number,
+                Some(5)
+            );
         }
 
         /// Test that unwind works correctly when `storages_history_in_rocksdb` is enabled.
