@@ -186,6 +186,28 @@ macro_rules! tables {
             /// The number of tables in the database.
             pub const COUNT: usize = Self::ALL.len();
 
+            /// Resolves a table name to its in-memory identifier.
+            ///
+            /// This is const so [`Table::TABLE_ID`] needs no runtime name lookup.
+            pub const fn id_by_name(name: &str) -> Option<usize> {
+                let name = name.as_bytes();
+                let mut id = 0;
+                while id < Self::COUNT {
+                    let candidate = Self::ALL[id].name().as_bytes();
+                    if name.len() == candidate.len() {
+                        let mut offset = 0;
+                        while offset < name.len() && name[offset] == candidate[offset] {
+                            offset += 1;
+                        }
+                        if offset == name.len() {
+                            return Some(id);
+                        }
+                    }
+                    id += 1;
+                }
+                None
+            }
+
             /// Returns the name of the table as a string.
             pub const fn name(&self) -> &'static str {
                 match self {
@@ -622,6 +644,23 @@ pub type StageId = String;
 mod tests {
     use super::*;
     use std::str::FromStr;
+
+    #[test]
+    fn table_ids_match_registry_and_views() {
+        for (id, table) in Tables::ALL.iter().enumerate() {
+            assert_eq!(Tables::id_by_name(table.name()), Some(id));
+            tables_to_generic!(*table, |T| {
+                assert_eq!(<T as Table>::TABLE_ID, Some(id));
+                assert_eq!(RawTable::<T>::TABLE_ID, Some(id));
+            });
+        }
+        assert_eq!(PackedAccountsTrie::TABLE_ID, AccountsTrie::TABLE_ID);
+        assert_eq!(PackedStoragesTrie::TABLE_ID, StoragesTrie::TABLE_ID);
+        assert_eq!(RawDupSort::<StoragesTrie>::TABLE_ID, StoragesTrie::TABLE_ID);
+        assert_eq!(Tables::id_by_name("CustomTable"), None);
+        assert_eq!(Tables::id_by_name("HeadersSuffix"), None);
+        assert_eq!(Tables::id_by_name("Header"), None);
+    }
 
     #[test]
     fn parse_table_from_str() {
