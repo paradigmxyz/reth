@@ -7,7 +7,7 @@ use alloy_eip7928::bal::DecodedBal;
 use alloy_primitives::B256;
 use alloy_rpc_types_eth::{BlockId, TransactionInfo};
 use futures::Future;
-use reth_errors::RethError;
+use reth_errors::{ProviderError, RethError};
 use reth_evm::{
     block::BlockExecutor, evm::EvmFactoryExt, tracing::TracingCtx, ConfigureEvm, Evm, EvmEnvFor,
     EvmFor, HaltReasonFor, InspectorFor, IntoTxEnv, TxEnvFor,
@@ -15,21 +15,27 @@ use reth_evm::{
 use reth_primitives_traits::{BlockBody, BlockTy, Recovered, RecoveredBlock};
 use reth_rpc_eth_types::cache::db::{attach_bal_before_tx, StateCacheDb};
 use reth_storage_api::{ProviderBlock, ProviderTx};
-use revm::{context::Block, context_interface::result::ResultAndState, state::bal::Bal as RevmBal};
+use revm::{
+    context::Block, context_interface::result::ResultAndState, database::bal::EvmDatabaseError,
+    state::bal::Bal as RevmBal, Database,
+};
 use revm_inspectors::tracing::{TracingInspector, TracingInspectorConfig};
 use std::sync::Arc;
 
 /// Executes CPU heavy tasks.
 pub trait Trace: LoadState<Error: FromEvmError<Self::Evm>> + Call {
-    /// Executes the [`TxEnvFor`] with [`reth_evm::EvmEnv`] against the given [`StateCacheDb`]
+    /// Executes the [`TxEnvFor`] with [`reth_evm::EvmEnv`] against the given database
     /// without committing state changes.
-    fn inspect<'a>(
+    fn inspect<'a, DB>(
         &self,
-        db: &'a mut StateCacheDb,
+        db: &'a mut DB,
         evm_env: EvmEnvFor<Self::Evm>,
         tx_env: impl IntoTxEnv<TxEnvFor<Self::Evm>>,
-        inspector: impl InspectorFor<Self::Evm, &'a mut StateCacheDb>,
-    ) -> Result<ResultAndState<HaltReasonFor<Self::Evm>>, Self::Error> {
+        inspector: impl InspectorFor<Self::Evm, &'a mut DB>,
+    ) -> Result<ResultAndState<HaltReasonFor<Self::Evm>>, Self::Error>
+    where
+        DB: Database<Error = EvmDatabaseError<ProviderError>> + core::fmt::Debug,
+    {
         self.evm_config()
             .evm_with_env_and_inspector(db, evm_env, inspector)
             .transact(tx_env)
