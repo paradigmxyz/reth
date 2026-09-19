@@ -160,7 +160,7 @@ use reth_provider::{
     StorageSettingsCache,
 };
 use reth_revm::db::{states::bundle_state::BundleRetention, BundleAccount, State};
-use reth_storage_overlay::{OverlayManager, OverlayStateProviderFactory};
+use reth_storage_overlay::{database_state_frontiers, OverlayManager, OverlayStateProviderFactory};
 use reth_trie::{
     hashed_cursor::HashedCursorFactory, trie_cursor::TrieCursorFactory, updates::TrieUpdates,
     HashedPostState, KeccakKeyHasher, LazyTrieData,
@@ -1438,21 +1438,42 @@ where
 
     /// Creates an overlay state provider factory for the given parent hash.
     ///
+    /// When the parent is in memory its shared `BlockState` chain is handed to the overlay
+    /// manager directly, so no chain has to be resolved by hash.
+    ///
     /// Returns `None` when the parent is neither in memory nor persisted.
     fn overlay_state_provider_factory(
         &self,
         hash: B256,
         state: &EngineApiTreeState<N>,
     ) -> ProviderResult<Option<OverlayStateProviderFactory<P, N>>> {
-        if !state.tree_state.contains_hash(&hash) && self.provider.header(hash)?.is_none() {
-            debug!(target: "engine::tree::payload_validator", %hash, "no canonical state found for block");
-            return Ok(None)
-        }
+        let overlay_builder = match state.tree_state.block_state_by_hash(hash) {
+            Some(parent_state) => {
+                state.tree_state.overlay_manager.overlay_builder_for_state(parent_state)
+            }
+            None => {
+                if self.provider.header(hash)?.is_none() {
+                    debug!(target: "engine::tree::payload_validator", %hash, "no canonical state found for block");
+                    return Ok(None)
+                }
+                // The parent is durable, so it has no chain of its own. A partial state trie
+                // still masks the blocks up to Finish, and completing it needs the chain that
+                // ends there.
+                let builder = state.tree_state.overlay_manager.overlay_builder_for_persisted(hash);
+                let db_provider = self.provider.database_provider_ro()?;
+                let (state_trie_frontier, finish) = database_state_frontiers(&db_provider)?;
+                drop(db_provider);
+                match (state_trie_frontier != finish)
+                    .then(|| state.tree_state.in_memory_state.executed_state_by_hash(finish.hash))
+                    .flatten()
+                {
+                    Some(finish_state) => builder.with_finish_state(finish_state),
+                    None => builder,
+                }
+            }
+        };
 
-        Ok(Some(OverlayStateProviderFactory::new(
-            self.provider.clone(),
-            state.tree_state.overlay_manager.overlay_builder(hash),
-        )))
+        Ok(Some(OverlayStateProviderFactory::new(self.provider.clone(), overlay_builder)))
     }
 
     /// Called when an invalid block is encountered during validation.

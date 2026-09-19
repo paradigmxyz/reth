@@ -222,6 +222,8 @@ impl TestHarness {
 
         let header = chain_spec.genesis_header().clone();
         let header = SealedHeader::seal_slow(header);
+        let canonical_in_memory_state =
+            CanonicalInMemoryState::with_head(header.clone(), None, None);
         let engine_api_tree_state = EngineApiTreeState::new(
             10,
             10,
@@ -229,8 +231,8 @@ impl TestHarness {
             header.num_hash(),
             EngineApiKind::Ethereum,
             overlay_manager.clone(),
+            canonical_in_memory_state.clone(),
         );
-        let canonical_in_memory_state = CanonicalInMemoryState::with_head(header, None, None);
 
         let (to_payload_service, payload_command_rx) = unbounded_channel();
         let payload_builder = PayloadBuilderHandle::new(to_payload_service);
@@ -281,8 +283,17 @@ impl TestHarness {
     }
 
     fn with_blocks(mut self, blocks: Vec<ExecutedBlock>) -> Self {
+        // The canonical in-memory state owns the executed blocks; the tree only indexes the
+        // shared states it gets back.
+        let canonical_in_memory_state = CanonicalInMemoryState::empty();
+        canonical_in_memory_state.update_chain(NewCanonicalChain::Commit { new: blocks.clone() });
+        canonical_in_memory_state
+            .set_canonical_head(blocks.last().unwrap().recovered_block().clone_sealed_header());
+
+        let overlay_manager = self.tree.state.tree_state.overlay_manager.clone();
+
         let mut blocks_by_hash = B256Map::default();
-        let mut blocks_by_number = BTreeMap::new();
+        let mut blocks_by_number: BTreeMap<u64, Vec<_>> = BTreeMap::new();
         let mut parent_to_child: B256Map<B256Set> = B256Map::default();
         let mut parent_hash = B256::ZERO;
 
@@ -290,18 +301,17 @@ impl TestHarness {
             let sealed_block = block.recovered_block();
             let hash = sealed_block.hash();
             let number = sealed_block.number;
-            blocks_by_hash.insert(hash, block.clone());
-            blocks_by_number.entry(number).or_insert_with(Vec::new).push(block.clone());
+            let state =
+                canonical_in_memory_state.state_by_hash(hash).expect("block was just committed");
+            overlay_manager.insert_block(Arc::clone(&state));
+            blocks_by_hash.insert(hash, Arc::clone(&state));
+            blocks_by_number.entry(number).or_default().push(state);
             parent_to_child.entry(parent_hash).or_default().insert(hash);
             parent_hash = hash;
         }
 
-        let overlay_manager = self.tree.state.tree_state.overlay_manager.clone();
-        for block in &blocks {
-            overlay_manager.insert_block(block.clone());
-        }
-
         self.tree.state.tree_state = TreeState {
+            in_memory_state: canonical_in_memory_state.clone(),
             blocks_by_hash,
             blocks_by_number,
             current_canonical_head: blocks.last().unwrap().recovered_block().num_hash(),
@@ -310,10 +320,6 @@ impl TestHarness {
             overlay_manager,
         };
 
-        let canonical_in_memory_state = CanonicalInMemoryState::empty();
-        canonical_in_memory_state.update_chain(NewCanonicalChain::Commit { new: blocks.clone() });
-        canonical_in_memory_state
-            .set_canonical_head(blocks.last().unwrap().recovered_block().clone_sealed_header());
         self.tree.canonical_in_memory_state = canonical_in_memory_state;
 
         self.blocks = blocks.clone();
@@ -1588,6 +1594,19 @@ fn test_threshold_persistence_with_state_masking_blocks() {
     assert!(test_harness.tree.state.tree_state.executed_block_by_hash(retained_hash).is_some());
     assert!(test_harness.tree.canonical_in_memory_state.state_by_hash(removed_hash).is_none());
     assert!(test_harness.tree.canonical_in_memory_state.state_by_hash(retained_hash).is_some());
+    assert!(test_harness
+        .tree
+        .canonical_in_memory_state
+        .executed_state_by_hash(removed_hash)
+        .is_none());
+
+    // The single trim leaves the tree indexing the same shared state the canonical chain holds,
+    // re-linked so that it no longer keeps the trimmed prefix alive.
+    let retained = test_harness.tree.state.tree_state.block_state_by_hash(retained_hash).unwrap();
+    let shared = test_harness.tree.canonical_in_memory_state.state_by_hash(retained_hash).unwrap();
+    assert!(Arc::ptr_eq(&retained, &shared));
+    assert_eq!(retained.anchor(), state_trie_tip);
+    assert_eq!(retained.chain().count(), 1);
 }
 
 #[tokio::test]

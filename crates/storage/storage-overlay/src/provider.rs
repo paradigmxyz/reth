@@ -1027,7 +1027,7 @@ fn into_database_error(error: ProviderError) -> DatabaseError {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{ExecutionOverlay, OverlayManager};
+    use crate::{test_utils::TestOverlay, ExecutionOverlay};
     use alloy_eips::BlockNumHash;
     use alloy_primitives::{Address, U256};
     use reth_chain_state::{test_utils::TestBlockBuilder, ExecutedBlock};
@@ -1123,13 +1123,13 @@ mod tests {
     #[test]
     fn overlay_cache_is_keyed_by_both_durable_frontiers() {
         let (factory, blocks) = setup_frontiers(1, 3);
-        let manager = OverlayManager::default();
+        let manager = TestOverlay::default();
         for block in &blocks[2..=3] {
-            manager.insert_block(block.clone());
+            manager.insert_executed_block(block.clone());
         }
         let state_provider_factory = OverlayStateProviderFactory::new(
             factory.clone(),
-            manager.overlay_builder(blocks[3].recovered_block().hash()),
+            manager.overlay_builder_for_hash(blocks[3].recovered_block().hash()),
         );
 
         let provider = state_provider_factory.database_provider_ro().unwrap();
@@ -1158,13 +1158,13 @@ mod tests {
     #[test]
     fn overlays_are_computed_lazily() {
         let (factory, blocks) = setup_frontiers(1, 3);
-        let manager = OverlayManager::default();
+        let manager = TestOverlay::default();
         for block in &blocks[2..=3] {
-            manager.insert_block(block.clone());
+            manager.insert_executed_block(block.clone());
         }
         let state_provider_factory = OverlayStateProviderFactory::new(
             factory,
-            manager.overlay_builder(blocks[3].recovered_block().hash()),
+            manager.overlay_builder_for_hash(blocks[3].recovered_block().hash()),
         );
 
         let provider = state_provider_factory.database_provider_ro().unwrap();
@@ -1185,13 +1185,13 @@ mod tests {
     #[test]
     fn state_trie_overlay_cache_is_keyed_by_trie_changesets() {
         let (factory, blocks) = setup_frontiers(1, 3);
-        let manager = OverlayManager::default();
+        let manager = TestOverlay::default();
         for block in &blocks[2..=3] {
-            manager.insert_block(block.clone());
+            manager.insert_executed_block(block.clone());
         }
         let state_provider_factory = OverlayStateProviderFactory::new(
             factory,
-            manager.overlay_builder(blocks[3].recovered_block().hash()),
+            manager.overlay_builder_for_hash(blocks[3].recovered_block().hash()),
         );
         let provider = state_provider_factory.database_provider_ro().unwrap();
 
@@ -1218,17 +1218,20 @@ mod tests {
     #[test]
     fn lazy_overlays_survive_manager_block_removal() {
         let (factory, blocks) = setup_frontiers(1, 1);
-        let manager = OverlayManager::default();
+        let manager = TestOverlay::default();
         for block in &blocks[2..=3] {
-            manager.insert_block(block.clone());
+            manager.insert_executed_block(block.clone());
         }
         let state_provider_factory = OverlayStateProviderFactory::new(
             factory,
-            manager.overlay_builder(blocks[3].recovered_block().hash()),
+            manager.overlay_builder_for_hash(blocks[3].recovered_block().hash()),
         );
         let provider = state_provider_factory.database_provider_ro().unwrap();
 
-        manager.remove_blocks(blocks[2..=3].iter().map(|block| block.recovered_block().hash()));
+        manager.remove_blocks_until(
+            blocks[3].recovered_block().num_hash(),
+            blocks[2..=3].iter().map(|block| block.recovered_block().hash()).collect::<Vec<_>>(),
+        );
 
         let (execution_overlay, _) = provider.execution_overlay().unwrap();
         assert_eq!(
@@ -1244,12 +1247,12 @@ mod tests {
     #[test]
     fn skipped_state_trie_overlay_is_not_cached_or_used_for_state_roots() {
         let (factory, blocks) = setup_frontiers(3, 3);
-        let manager = OverlayManager::default();
-        manager.insert_block(blocks[4].clone());
+        let manager = TestOverlay::default();
+        manager.insert_executed_block(blocks[4].clone());
         let state_provider_factory = OverlayStateProviderFactory::new(
             factory,
             manager
-                .overlay_builder(blocks[4].recovered_block().hash())
+                .overlay_builder_for_hash(blocks[4].recovered_block().hash())
                 .with_skip_overlay_for_reused_sparse_trie(blocks[3].recovered_block().hash()),
         );
 
@@ -1354,7 +1357,7 @@ mod tests {
 
         let state_provider_factory = OverlayStateProviderFactory::<_, EthPrimitives>::new(
             factory,
-            OverlayManager::default().overlay_builder(blocks[1].recovered_block().hash()),
+            TestOverlay::default().overlay_builder_for_hash(blocks[1].recovered_block().hash()),
         );
         let provider = state_provider_factory.database_provider_ro().unwrap();
 

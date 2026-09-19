@@ -1195,7 +1195,7 @@ mod tests {
             reth_storage_overlay::OverlayManager::<
                 reth_ethereum_primitives::EthPrimitives,
             >::default()
-            .overlay_builder(anchor_hash),
+            .overlay_builder_for_persisted(anchor_hash),
         );
         let ctx = test_ctx(factory);
 

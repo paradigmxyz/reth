@@ -38,7 +38,7 @@ use reth_provider::{
 };
 use reth_revm::database::StateProviderDatabase;
 use reth_stages_api::ControlFlow;
-use reth_storage_overlay::OverlayManager;
+use reth_storage_overlay::{database_state_frontiers, OverlayManager};
 use reth_tasks::{spawn_os_thread, utils::increase_thread_priority};
 use reth_trie::ComputedTrieData;
 use revm::interpreter::debug_unreachable;
@@ -139,6 +139,7 @@ impl<N: NodePrimitives> EngineApiTreeState<N> {
         canonical_block: BlockNumHash,
         engine_kind: EngineApiKind,
         overlay_manager: OverlayManager<N>,
+        in_memory_state: CanonicalInMemoryState<N>,
     ) -> Self {
         Self {
             invalid_headers: InvalidHeaderCache::new(
@@ -146,7 +147,12 @@ impl<N: NodePrimitives> EngineApiTreeState<N> {
                 invalid_header_hit_eviction_threshold,
             ),
             buffer: BlockBuffer::new(block_buffer_limit),
-            tree_state: TreeState::new(canonical_block, engine_kind, overlay_manager),
+            tree_state: TreeState::new(
+                canonical_block,
+                engine_kind,
+                overlay_manager,
+                in_memory_state,
+            ),
             pending_sparse_trie_prune: false,
             forkchoice_state_tracker: ForkchoiceStateTracker::default(),
         }
@@ -466,6 +472,7 @@ where
             header.num_hash(),
             kind,
             overlay_manager,
+            canonical_in_memory_state.clone(),
         );
 
         let task = Self::new(
@@ -905,7 +912,7 @@ where
     /// given head.
     fn on_new_head(&self, new_head: B256) -> ProviderResult<Option<NewCanonicalChain<N>>> {
         // get the executed new head block
-        let Some(new_head_block) = self.state.tree_state.blocks_by_hash.get(&new_head) else {
+        let Some(new_head_block) = self.state.tree_state.executed_block_by_hash(new_head) else {
             debug!(target: "engine::tree", new_head=?new_head, "New head block not found in inmemory tree state");
             self.metrics.engine.executed_new_block_cache_miss.increment(1);
             return Ok(None)
@@ -914,8 +921,8 @@ where
         let new_head_number = new_head_block.recovered_block().number();
         let mut current_canonical_number = self.state.tree_state.current_canonical_head.number;
 
-        let mut new_chain = vec![new_head_block.clone()];
         let mut current_hash = new_head_block.recovered_block().parent_hash();
+        let mut new_chain = vec![new_head_block];
         let mut current_number = new_head_number - 1;
 
         // Walk back the new chain until we reach a block we know about
@@ -923,8 +930,7 @@ where
         // This is only done for in-memory blocks, because we should not have persisted any blocks
         // that are _above_ the current canonical head.
         while current_number > current_canonical_number {
-            if let Some(block) = self.state.tree_state.executed_block_by_hash(current_hash).cloned()
-            {
+            if let Some(block) = self.state.tree_state.executed_block_by_hash(current_hash) {
                 current_hash = block.recovered_block().parent_hash();
                 current_number -= 1;
                 new_chain.push(block);
@@ -968,8 +974,7 @@ where
             old_hash = block.recovered_block().parent_hash();
             old_chain.push(block);
 
-            if let Some(block) = self.state.tree_state.executed_block_by_hash(current_hash).cloned()
-            {
+            if let Some(block) = self.state.tree_state.executed_block_by_hash(current_hash) {
                 current_hash = block.recovered_block().parent_hash();
                 new_chain.push(block);
             } else {
@@ -1414,7 +1419,10 @@ where
             debug!(target: "engine::tree", ?new_tip_num, "Starting remove blocks job");
             self.state.set_pending_sparse_trie_prune(false);
             let (tx, rx) = crossbeam_channel::bounded(1);
-            let _ = self.persistence.remove_blocks_above(new_tip_num, tx);
+            // Unwinding a partial state trie needs the in-memory blocks the database masks. The
+            // canonical chain still has them, so hand it to the persistence service.
+            let finish_state = self.canonical_in_memory_state.head_state();
+            let _ = self.persistence.remove_blocks_above(new_tip_num, finish_state, tx);
             self.persistence_state.start_remove(new_tip_num, rx);
         }
     }
@@ -1875,7 +1883,7 @@ where
         } else {
             self.state.tree_state.remove_until(
                 backfill_num_hash,
-                self.persistence_state.last_persisted_block.hash,
+                self.persistence_state.last_persisted_block,
                 Some(backfill_num_hash),
             );
         }
@@ -2278,16 +2286,17 @@ where
             target = ?target,
             "Returning save input"
         );
-        while let Some(block) = self.state.tree_state.blocks_by_hash.get(&current_hash) {
-            if block.recovered_block().number() <= prev_partial_state_trie {
+        while let Some(state) = self.state.tree_state.block_state_by_hash(current_hash) {
+            let block = state.block_ref().recovered_block();
+            if block.number() <= prev_partial_state_trie {
                 break;
             }
 
-            if block.recovered_block().number() <= new_db_tip {
-                blocks.push(block.clone());
+            if block.number() <= new_db_tip {
+                blocks.push(state.block());
             }
 
-            current_hash = block.recovered_block().parent_hash();
+            current_hash = block.parent_hash();
         }
 
         // Reverse the order so that the oldest block comes first
@@ -2320,21 +2329,20 @@ where
         }
 
         let finalized = self.state.forkchoice_state_tracker.last_valid_finalized();
-        // Trim the canonical in-memory state first: state providers build their overlays from the
-        // canonical chain, so it must never reference blocks whose overlays the manager has
-        // already pruned. `remove_before` does not read the canonical in-memory state, so the
-        // order between the two trims is free to choose.
-        self.canonical_in_memory_state.remove_persisted_blocks_until(
-            self.persistence_state.last_persisted_block,
-            in_memory_persisted_block.number,
-        );
+        // A single trim. `remove_until` trims the shared in-memory state, then the tree, then
+        // the overlay manager, all at the same frontier. The shared state goes first so that a
+        // chain taken from it never references blocks whose overlays were already pruned.
         self.remove_before(in_memory_persisted_block, finalized)?;
         // Persistence changes the overlay anchor. Prepare the remaining canonical range before
         // the next payload needs to read execution state against the new durable frontier.
-        self.state.tree_state.overlay_manager.precompute_execution_overlay(
-            self.state.tree_state.canonical_block_hash(),
-            in_memory_persisted_block.hash,
-        );
+        if let Some(canonical_head) =
+            self.state.tree_state.block_state_by_hash(self.state.tree_state.canonical_block_hash())
+        {
+            self.state
+                .tree_state
+                .overlay_manager
+                .precompute_execution_overlay(canonical_head, in_memory_persisted_block.hash);
+        }
         self.state.set_pending_sparse_trie_prune(self.should_prune_sparse_trie());
         Ok(())
     }
@@ -2355,7 +2363,7 @@ where
         trace!(target: "engine::tree", ?hash, "Fetching executed block by hash");
         // check memory first
         if let Some(block) = self.state.tree_state.executed_block_by_hash(hash) {
-            return Ok(block.clone())
+            return Ok(block)
         }
 
         let (block, senders) = self
@@ -2382,11 +2390,15 @@ where
             "computing block trie updates",
         );
         let db_provider = self.provider.database_provider_ro()?;
-        let trie_updates = self
-            .state
-            .tree_state
-            .overlay_manager
-            .compute_block_trie_updates(&db_provider, block.number())?;
+        // Completing a masked state trie needs the in-memory chain at the Finish frontier, read
+        // from the same transaction the computation runs against.
+        let (_, finish) = database_state_frontiers(&db_provider)?;
+        let finish_state = self.canonical_in_memory_state.executed_state_by_hash(finish.hash);
+        let trie_updates = self.state.tree_state.overlay_manager.compute_block_trie_updates(
+            &db_provider,
+            block.number(),
+            finish_state,
+        )?;
 
         let sorted_hashed_state = Arc::new(hashed_state.into_sorted());
         let sorted_trie_updates = Arc::new(trie_updates);
@@ -3558,7 +3570,7 @@ where
 
         self.state.tree_state.remove_until(
             upper_bound,
-            self.persistence_state.last_persisted_block.hash,
+            self.persistence_state.last_persisted_block,
             num,
         );
         self.metrics.engine.executed_blocks.set(self.state.tree_state.block_count() as f64);

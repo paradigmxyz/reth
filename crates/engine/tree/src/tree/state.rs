@@ -6,12 +6,13 @@ use alloy_primitives::{
     map::{B256Map, B256Set},
     BlockNumber, B256,
 };
-use reth_chain_state::{EthPrimitives, ExecutedBlock};
+use reth_chain_state::{BlockState, CanonicalInMemoryState, EthPrimitives, ExecutedBlock};
 use reth_primitives_traits::{AlloyBlockHeader, NodePrimitives, SealedHeader};
 use reth_storage_overlay::OverlayManager;
 use std::{
     collections::{btree_map, hash_map, BTreeMap, VecDeque},
     ops::Bound,
+    sync::Arc,
 };
 use tracing::debug;
 
@@ -21,18 +22,24 @@ use tracing::debug;
 ///
 /// - This only stores blocks that are connected to the canonical chain.
 /// - All executed blocks are valid and have been executed.
+///
+/// The executed blocks themselves are owned by [`CanonicalInMemoryState`]. This type only holds
+/// the shared [`BlockState`] handles plus the indexes the engine needs on top of them.
 #[derive(Debug, Default)]
 pub struct TreeState<N: NodePrimitives = EthPrimitives> {
+    /// The shared owner of every executed in-memory block.
+    pub(crate) in_memory_state: CanonicalInMemoryState<N>,
     /// __All__ unique executed blocks by block hash that are connected to the canonical chain.
     ///
-    /// This includes blocks of all forks.
-    pub(crate) blocks_by_hash: B256Map<ExecutedBlock<N>>,
+    /// This includes blocks of all forks. The states are shared with
+    /// [`Self::in_memory_state`], which owns them.
+    pub(crate) blocks_by_hash: B256Map<Arc<BlockState<N>>>,
     /// Executed blocks grouped by their respective block number.
     ///
     /// This maps unique block number to all known blocks for that height.
     ///
     /// Note: there can be multiple blocks at the same height due to forks.
-    pub(crate) blocks_by_number: BTreeMap<BlockNumber, Vec<ExecutedBlock<N>>>,
+    pub(crate) blocks_by_number: BTreeMap<BlockNumber, Vec<Arc<BlockState<N>>>>,
     /// Map of any parent block hash to its children.
     pub(crate) parent_to_child: B256Map<B256Set>,
     /// Currently tracked canonical head of the chain.
@@ -49,8 +56,10 @@ impl<N: NodePrimitives> TreeState<N> {
         current_canonical_head: BlockNumHash,
         engine_kind: EngineApiKind,
         overlay_manager: OverlayManager<N>,
+        in_memory_state: CanonicalInMemoryState<N>,
     ) -> Self {
         Self {
+            in_memory_state,
             blocks_by_hash: B256Map::default(),
             blocks_by_number: BTreeMap::new(),
             current_canonical_head,
@@ -65,7 +74,9 @@ impl<N: NodePrimitives> TreeState<N> {
         let engine_kind = self.engine_kind;
         let removed_hashes = self.blocks_by_hash.keys().copied().collect::<Vec<_>>();
         if !removed_hashes.is_empty() {
-            self.overlay_manager.remove_blocks(removed_hashes);
+            self.in_memory_state.remove_executed_blocks(removed_hashes.iter().copied());
+            // A reset leaves nothing in memory, so no cached overlay can be anchored any more.
+            self.overlay_manager.remove_blocks(removed_hashes, BlockNumber::MAX);
         }
         self.blocks_by_hash.clear();
         self.blocks_by_number.clear();
@@ -80,8 +91,16 @@ impl<N: NodePrimitives> TreeState<N> {
     }
 
     /// Returns the [`ExecutedBlock`] by hash.
-    pub fn executed_block_by_hash(&self, hash: B256) -> Option<&ExecutedBlock<N>> {
-        self.blocks_by_hash.get(&hash)
+    pub fn executed_block_by_hash(&self, hash: B256) -> Option<ExecutedBlock<N>> {
+        self.blocks_by_hash.get(&hash).map(|state| state.block())
+    }
+
+    /// Returns the shared [`BlockState`] by hash.
+    ///
+    /// This is the chain that ends at `hash`; overlay providers for that block are built from it
+    /// directly, without a second lookup.
+    pub fn block_state_by_hash(&self, hash: B256) -> Option<Arc<BlockState<N>>> {
+        self.blocks_by_hash.get(&hash).cloned()
     }
 
     /// Returns `true` if a block with the given hash exists in memory.
@@ -91,7 +110,9 @@ impl<N: NodePrimitives> TreeState<N> {
 
     /// Returns the sealed block header by hash.
     pub fn sealed_header_by_hash(&self, hash: &B256) -> Option<SealedHeader<N::BlockHeader>> {
-        self.blocks_by_hash.get(hash).map(|b| b.sealed_block().sealed_header().clone())
+        self.blocks_by_hash
+            .get(hash)
+            .map(|state| state.block_ref().sealed_block().sealed_header().clone())
     }
 
     /// Returns all available blocks for the given hash that lead back to the canonical chain, from
@@ -100,12 +121,12 @@ impl<N: NodePrimitives> TreeState<N> {
     ///
     /// Returns `None` if the block for the given hash is not found.
     pub fn blocks_by_hash(&self, hash: B256) -> Option<(B256, Vec<ExecutedBlock<N>>)> {
-        let block = self.blocks_by_hash.get(&hash).cloned()?;
+        let block = self.blocks_by_hash.get(&hash)?.block();
         let mut parent_hash = block.recovered_block().parent_hash();
         let mut blocks = vec![block];
         while let Some(executed) = self.blocks_by_hash.get(&parent_hash) {
-            parent_hash = executed.recovered_block().parent_hash();
-            blocks.push(executed.clone());
+            parent_hash = executed.block_ref().recovered_block().parent_hash();
+            blocks.push(executed.block());
         }
 
         Some((parent_hash, blocks))
@@ -121,13 +142,12 @@ impl<N: NodePrimitives> TreeState<N> {
             return;
         }
 
-        let overlay_block = executed.clone();
-        self.blocks_by_hash.insert(hash, executed.clone());
-
-        self.blocks_by_number.entry(block_number).or_default().push(executed);
-
+        // The shared in-memory state owns the block and links it to its parent's state.
+        let state = self.in_memory_state.insert_executed(executed);
+        self.blocks_by_hash.insert(hash, Arc::clone(&state));
+        self.blocks_by_number.entry(block_number).or_default().push(Arc::clone(&state));
         self.parent_to_child.entry(parent_hash).or_default().insert(hash);
-        self.overlay_manager.insert_block(overlay_block);
+        self.overlay_manager.insert_block(state);
     }
 
     /// Remove single executed block by its hash.
@@ -135,11 +155,12 @@ impl<N: NodePrimitives> TreeState<N> {
     /// ## Returns
     ///
     /// The removed block and the block hashes of its children.
-    fn remove_by_hash(&mut self, hash: B256) -> Option<(ExecutedBlock<N>, B256Set)> {
+    fn remove_by_hash(&mut self, hash: B256) -> Option<(Arc<BlockState<N>>, B256Set)> {
         let executed = self.blocks_by_hash.remove(&hash)?;
 
         // Remove this block from collection of children of its parent block.
-        let parent_entry = self.parent_to_child.entry(executed.recovered_block().parent_hash());
+        let parent_entry =
+            self.parent_to_child.entry(executed.block_ref().recovered_block().parent_hash());
         if let hash_map::Entry::Occupied(mut entry) = parent_entry {
             entry.get_mut().remove(&hash);
 
@@ -152,10 +173,12 @@ impl<N: NodePrimitives> TreeState<N> {
         let children = self.parent_to_child.remove(&hash).unwrap_or_default();
 
         // Remove this block from `blocks_by_number`.
-        let block_number_entry = self.blocks_by_number.entry(executed.recovered_block().number());
+        let block_number_entry =
+            self.blocks_by_number.entry(executed.block_ref().recovered_block().number());
         if let btree_map::Entry::Occupied(mut entry) = block_number_entry {
             // We have to find the index of the block since it exists in a vec
-            if let Some(index) = entry.get().iter().position(|b| b.recovered_block().hash() == hash)
+            if let Some(index) =
+                entry.get().iter().position(|b| b.block_ref().recovered_block().hash() == hash)
             {
                 entry.get_mut().swap_remove(index);
 
@@ -177,7 +200,7 @@ impl<N: NodePrimitives> TreeState<N> {
         }
 
         while let Some(executed) = self.blocks_by_hash.get(&current_block) {
-            current_block = executed.recovered_block().parent_hash();
+            current_block = executed.block_ref().recovered_block().parent_hash();
             if current_block == hash {
                 return true
             }
@@ -206,10 +229,12 @@ impl<N: NodePrimitives> TreeState<N> {
         // upper bound
         let mut current_block = self.current_canonical_head.hash;
         while let Some(executed) = self.blocks_by_hash.get(&current_block) {
-            current_block = executed.recovered_block().parent_hash();
-            if executed.recovered_block().number() <= upper_bound {
-                let hash = executed.recovered_block().hash();
-                let num_hash = executed.recovered_block().num_hash();
+            let executed = executed.block_ref().recovered_block();
+            let hash = executed.hash();
+            let num_hash = executed.num_hash();
+            let number = executed.number();
+            current_block = executed.parent_hash();
+            if number <= upper_bound {
                 debug!(target: "engine::tree", ?num_hash, "Attempting to remove block walking back from the head");
                 if self.remove_by_hash(hash).is_some() {
                     removed_hashes.push(hash);
@@ -239,11 +264,11 @@ impl<N: NodePrimitives> TreeState<N> {
         let blocks_to_remove = self
             .blocks_by_number
             .range((Bound::Unbounded, Bound::Excluded(finalized_num)))
-            .flat_map(|(_, blocks)| blocks.iter().map(|b| b.recovered_block().hash()))
+            .flat_map(|(_, blocks)| blocks.iter().map(|b| b.block_ref().recovered_block().hash()))
             .collect::<Vec<_>>();
         for hash in blocks_to_remove {
             if let Some((removed, _)) = self.remove_by_hash(hash) {
-                debug!(target: "engine::tree", num_hash=?removed.recovered_block().num_hash(), "Removed finalized sidechain block");
+                debug!(target: "engine::tree", num_hash=?removed.block_ref().recovered_block().num_hash(), "Removed finalized sidechain block");
                 removed_hashes.push(hash);
             }
         }
@@ -257,8 +282,9 @@ impl<N: NodePrimitives> TreeState<N> {
         let mut blocks_to_remove = self.blocks_by_number.remove(&finalized_num).unwrap_or_default();
 
         // re-insert the finalized hash if we removed it
-        if let Some(position) =
-            blocks_to_remove.iter().position(|b| b.recovered_block().hash() == finalized_hash)
+        if let Some(position) = blocks_to_remove
+            .iter()
+            .position(|b| b.block_ref().recovered_block().hash() == finalized_hash)
         {
             let finalized_block = blocks_to_remove.swap_remove(position);
             self.blocks_by_number.insert(finalized_num, vec![finalized_block]);
@@ -266,11 +292,11 @@ impl<N: NodePrimitives> TreeState<N> {
 
         let mut blocks_to_remove = blocks_to_remove
             .into_iter()
-            .map(|e| e.recovered_block().hash())
+            .map(|e| e.block_ref().recovered_block().hash())
             .collect::<VecDeque<_>>();
         while let Some(block) = blocks_to_remove.pop_front() {
             if let Some((removed, children)) = self.remove_by_hash(block) {
-                debug!(target: "engine::tree", num_hash=?removed.recovered_block().num_hash(), "Removed finalized sidechain child block");
+                debug!(target: "engine::tree", num_hash=?removed.block_ref().recovered_block().num_hash(), "Removed finalized sidechain child block");
                 removed_hashes.push(block);
                 blocks_to_remove.extend(children);
             }
@@ -290,10 +316,15 @@ impl<N: NodePrimitives> TreeState<N> {
     pub fn remove_until(
         &mut self,
         upper_bound: BlockNumHash,
-        last_persisted_hash: B256,
+        last_persisted_block: BlockNumHash,
         finalized_num_hash: Option<BlockNumHash>,
     ) {
         debug!(target: "engine::tree", ?upper_bound, ?finalized_num_hash, "Removing blocks from the tree");
+
+        // Trim the shared store first, so the canonical chains handed to state providers never
+        // reference blocks whose overlays are about to be pruned below.
+        self.in_memory_state
+            .remove_persisted_blocks_until(last_persisted_block, upper_bound.number);
 
         // If the finalized num is ahead of the upper bound, and exists, we need to instead ensure
         // that the only blocks removed, are canonical blocks less than the upper bound
@@ -313,7 +344,11 @@ impl<N: NodePrimitives> TreeState<N> {
         // * fetch the number of the finalized hash, removing any sidechains that are __below__ the
         // finalized block
         let mut removed_hashes = Vec::new();
-        self.remove_canonical_until(upper_bound.number, last_persisted_hash, &mut removed_hashes);
+        self.remove_canonical_until(
+            upper_bound.number,
+            last_persisted_block.hash,
+            &mut removed_hashes,
+        );
 
         // Now, we have removed canonical blocks (assuming the upper bound is above the finalized
         // block) and only have sidechains below the finalized block.
@@ -322,7 +357,33 @@ impl<N: NodePrimitives> TreeState<N> {
         }
 
         if !removed_hashes.is_empty() {
-            self.overlay_manager.remove_blocks(removed_hashes);
+            // The shared in-memory state owns these blocks; canonical ones are dropped by
+            // `remove_persisted_blocks_until`, so this only clears pruned forks.
+            self.in_memory_state.remove_executed_blocks(removed_hashes.iter().copied());
+        }
+        // Overlays are keyed by their anchor, which moves to the new frontier, so this also
+        // drops the entries anchored below it even when no block was removed here.
+        self.overlay_manager.remove_blocks(removed_hashes, upper_bound.number);
+
+        self.rebind_shared_states();
+    }
+
+    /// Re-binds the indexes to the shared states.
+    ///
+    /// Trimming a persistence round re-links the surviving blocks onto the new frontier, which
+    /// replaces their [`BlockState`]. The tree has to pick those up: holding on to the previous
+    /// states would keep the whole trimmed prefix alive through their parent links.
+    fn rebind_shared_states(&mut self) {
+        let in_memory_state = self.in_memory_state.clone();
+        for (hash, state) in &mut self.blocks_by_hash {
+            if let Some(shared) = in_memory_state.executed_state_by_hash(*hash) {
+                *state = shared;
+            }
+        }
+
+        self.blocks_by_number.clear();
+        for state in self.blocks_by_hash.values() {
+            self.blocks_by_number.entry(state.number()).or_default().push(Arc::clone(state));
         }
     }
 
@@ -375,9 +436,9 @@ impl<N: NodePrimitives> TreeState<N> {
             return false
         };
 
-        while current_block.recovered_block().number() > first.number + 1 {
+        while current_block.block_ref().recovered_block().number() > first.number + 1 {
             let Some(block) =
-                self.blocks_by_hash.get(&current_block.recovered_block().parent_hash())
+                self.blocks_by_hash.get(&current_block.block_ref().recovered_block().parent_hash())
             else {
                 // If we can't find its parent in the tree, we can't continue, so return false
                 return false
@@ -387,7 +448,7 @@ impl<N: NodePrimitives> TreeState<N> {
         }
 
         // Now the block numbers should be equal, so we compare hashes.
-        current_block.recovered_block().parent_hash() == first.hash
+        current_block.block_ref().recovered_block().parent_hash() == first.hash
     }
 }
 
@@ -402,6 +463,7 @@ mod tests {
             BlockNumHash::default(),
             EngineApiKind::Ethereum,
             OverlayManager::default(),
+            CanonicalInMemoryState::default(),
         );
         let blocks: Vec<_> = TestBlockBuilder::eth().get_executed_blocks(1..4).collect();
 
@@ -429,6 +491,7 @@ mod tests {
             BlockNumHash::default(),
             EngineApiKind::Ethereum,
             OverlayManager::default(),
+            CanonicalInMemoryState::default(),
         );
         let blocks: Vec<_> = TestBlockBuilder::eth().get_executed_blocks(1..4).collect();
 
@@ -459,6 +522,7 @@ mod tests {
             BlockNumHash::default(),
             EngineApiKind::Ethereum,
             OverlayManager::default(),
+            CanonicalInMemoryState::default(),
         );
         let mut test_block_builder = TestBlockBuilder::eth();
         let blocks: Vec<_> = test_block_builder.get_executed_blocks(1..6).collect();
@@ -500,8 +564,12 @@ mod tests {
     #[tokio::test]
     async fn test_tree_state_remove_before() {
         let start_num_hash = BlockNumHash::default();
-        let mut tree_state =
-            TreeState::new(start_num_hash, EngineApiKind::Ethereum, OverlayManager::default());
+        let mut tree_state = TreeState::new(
+            start_num_hash,
+            EngineApiKind::Ethereum,
+            OverlayManager::default(),
+            CanonicalInMemoryState::default(),
+        );
         let blocks: Vec<_> = TestBlockBuilder::eth().get_executed_blocks(1..6).collect();
 
         for block in &blocks {
@@ -516,7 +584,7 @@ mod tests {
         // inclusive bound, so we should remove anything up to and including 2
         tree_state.remove_until(
             BlockNumHash::new(2, blocks[1].recovered_block().hash()),
-            start_num_hash.hash,
+            start_num_hash,
             Some(blocks[1].recovered_block().num_hash()),
         );
 
@@ -551,8 +619,12 @@ mod tests {
     #[tokio::test]
     async fn test_tree_state_remove_before_finalized() {
         let start_num_hash = BlockNumHash::default();
-        let mut tree_state =
-            TreeState::new(start_num_hash, EngineApiKind::Ethereum, OverlayManager::default());
+        let mut tree_state = TreeState::new(
+            start_num_hash,
+            EngineApiKind::Ethereum,
+            OverlayManager::default(),
+            CanonicalInMemoryState::default(),
+        );
         let blocks: Vec<_> = TestBlockBuilder::eth().get_executed_blocks(1..6).collect();
 
         for block in &blocks {
@@ -567,7 +639,7 @@ mod tests {
         // we should still remove everything up to and including 2
         tree_state.remove_until(
             BlockNumHash::new(2, blocks[1].recovered_block().hash()),
-            start_num_hash.hash,
+            start_num_hash,
             None,
         );
 
@@ -602,8 +674,12 @@ mod tests {
     #[tokio::test]
     async fn test_tree_state_remove_before_lower_finalized() {
         let start_num_hash = BlockNumHash::default();
-        let mut tree_state =
-            TreeState::new(start_num_hash, EngineApiKind::Ethereum, OverlayManager::default());
+        let mut tree_state = TreeState::new(
+            start_num_hash,
+            EngineApiKind::Ethereum,
+            OverlayManager::default(),
+            CanonicalInMemoryState::default(),
+        );
         let blocks: Vec<_> = TestBlockBuilder::eth().get_executed_blocks(1..6).collect();
 
         for block in &blocks {
@@ -618,7 +694,7 @@ mod tests {
         // we have no forks so we should still remove anything up to and including 2
         tree_state.remove_until(
             BlockNumHash::new(2, blocks[1].recovered_block().hash()),
-            start_num_hash.hash,
+            start_num_hash,
             Some(blocks[0].recovered_block().num_hash()),
         );
 

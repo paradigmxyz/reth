@@ -437,8 +437,13 @@ mod tests {
             )),
             ..Default::default()
         };
-        overlay_manager.insert_block(pending_block.clone());
         provider.canonical_in_memory_state().set_pending_block(pending_block);
+        overlay_manager.insert_block(
+            provider
+                .canonical_in_memory_state()
+                .pending_state()
+                .expect("pending block was just set"),
+        );
         let pending_next_base_fee = next_base_fee - next_base_fee / 8;
         for base_fee in [None, Some((pending_next_base_fee - 1) as u128)] {
             let response = api

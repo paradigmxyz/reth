@@ -1,6 +1,7 @@
 use crate::metrics::PersistenceMetrics;
 use alloy_eips::BlockNumHash;
 use crossbeam_channel::Sender as CrossbeamSender;
+use reth_chain_state::BlockState;
 use reth_errors::ProviderError;
 use reth_ethereum_primitives::EthPrimitives;
 use reth_primitives_traits::{FastInstant as Instant, NodePrimitives};
@@ -96,8 +97,8 @@ where
         // If the receiver errors then senders have disconnected, so the loop should then end.
         while let Ok(action) = self.incoming.recv() {
             match action {
-                PersistenceAction::RemoveBlocksAbove(new_tip_num, sender) => {
-                    let result = self.on_remove_blocks_above(new_tip_num)?;
+                PersistenceAction::RemoveBlocksAbove(new_tip_num, finish_state, sender) => {
+                    let result = self.on_remove_blocks_above(new_tip_num, finish_state)?;
                     // send new sync metrics based on removed blocks
                     let _ =
                         self.sync_metrics_tx.send(MetricEvent::SyncHeight { height: new_tip_num });
@@ -133,10 +134,13 @@ where
     fn on_remove_blocks_above(
         &self,
         new_tip_num: u64,
+        finish_state: Option<Arc<BlockState<N::Primitives>>>,
     ) -> Result<PersistenceResult, PersistenceError> {
         debug!(target: "engine::persistence", ?new_tip_num, "Removing blocks");
         let start_time = Instant::now();
-        let provider_rw = self.provider.database_provider_rw()?;
+        // Unwinding a partial state trie has to complete it at Finish first, from the in-memory
+        // blocks the caller still holds.
+        let provider_rw = self.provider.database_provider_rw()?.with_finish_state(finish_state);
 
         let new_tip_hash = provider_rw
             .block_hash(new_tip_num)?
@@ -271,7 +275,7 @@ pub enum PersistenceAction<N: NodePrimitives = EthPrimitives> {
     ///
     /// This will first update checkpoints from the database, then remove actual block data from
     /// static files.
-    RemoveBlocksAbove(u64, CrossbeamSender<PersistenceResult>),
+    RemoveBlocksAbove(u64, Option<Arc<BlockState<N>>>, CrossbeamSender<PersistenceResult>),
 
     /// Update the persisted finalized block on disk
     SaveFinalizedBlock(u64),
@@ -382,9 +386,10 @@ impl<T: NodePrimitives> PersistenceHandle<T> {
     pub fn remove_blocks_above(
         &self,
         block_num: u64,
+        finish_state: Option<Arc<BlockState<T>>>,
         tx: CrossbeamSender<PersistenceResult>,
     ) -> Result<(), SendError<PersistenceAction<T>>> {
-        self.send_action(PersistenceAction::RemoveBlocksAbove(block_num, tx))
+        self.send_action(PersistenceAction::RemoveBlocksAbove(block_num, finish_state, tx))
     }
 }
 
@@ -519,7 +524,7 @@ mod tests {
         let service = PersistenceService::new(provider, db_service_rx, pruner, sync_metrics_tx);
 
         assert!(matches!(
-            service.on_remove_blocks_above(1),
+            service.on_remove_blocks_above(1, None),
             Err(PersistenceError::ProviderError(ProviderError::HeaderNotFound(_)))
         ));
     }
