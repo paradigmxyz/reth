@@ -211,7 +211,7 @@ mod tests {
             [PEER_A],
         )
         .await;
-        let pause = harness.pool().transaction_ingress().unwrap().pause_handle().pause();
+        let pause = harness.manager.transaction_batcher.as_ref().unwrap().pause_handle().pause();
         let txs = pooled_txs(64);
         let first = *txs[0].tx_hash();
         harness.manager.import_transactions(
@@ -289,8 +289,9 @@ mod tests {
         // The single worker processes this barrier after the manager's queued batch, including
         // delivery of all its completion notifications.
         let barrier = harness
-            .pool()
-            .transaction_ingress()
+            .manager
+            .transaction_batcher
+            .as_ref()
             .unwrap()
             .try_submit_pooled(pooled_txs(1).pop().unwrap())
             .unwrap();
@@ -435,7 +436,7 @@ mod tests {
         harness.poll_until_idle().await;
         let requests = harness.take_requests();
         assert_eq!(requests.len(), 2);
-        let pause = harness.pool().transaction_ingress().unwrap().pause_handle().pause();
+        let pause = harness.manager.transaction_batcher.as_ref().unwrap().pause_handle().pause();
         for request in requests {
             let tx = txs.iter().find(|tx| request.request.0.contains(tx.tx_hash())).unwrap();
             request.response.send(Ok(PooledTransactions(vec![tx.clone()]))).unwrap();

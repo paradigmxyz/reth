@@ -31,9 +31,9 @@ use reth_tasks::{
 };
 use reth_transaction_pool::{
     blobstore::BlobSidecarConverter, noop::NoopTransactionPool, AddedTransactionOutcome,
-    BatchTxProcessor, BatchTxRequest, TransactionPool,
+    BatchTxHandle, BatchTxProcessor, TransactionPool,
 };
-use tokio::sync::{broadcast, mpsc, Mutex, Semaphore};
+use tokio::sync::{broadcast, Mutex, Semaphore};
 
 const DEFAULT_BROADCAST_CAPACITY: usize = 2000;
 
@@ -267,9 +267,8 @@ pub struct EthApiInner<N: RpcNodeCore, Rpc: RpcConvert> {
     /// Builder for pending block environment.
     next_env_builder: Box<dyn PendingEnvBuilder<N::Evm>>,
 
-    /// Transaction batch sender for batching tx insertions
-    tx_batch_sender:
-        mpsc::UnboundedSender<BatchTxRequest<<N::Pool as TransactionPool>::Transaction>>,
+    /// Bounded submission handle shared with the node's P2P transaction manager.
+    transaction_batcher: BatchTxHandle<<N::Pool as TransactionPool>::Transaction>,
 
     /// Blob sidecar converter
     blob_sidecar_converter: BlobSidecarConverter,
@@ -293,6 +292,7 @@ where
         converter: Rpc,
         next_env: impl PendingEnvBuilder<N::Evm>,
         raw_tx_forwarder: Option<RpcClient>,
+        transaction_batcher: Option<BatchTxHandle<<N::Pool as TransactionPool>::Transaction>>,
     ) -> Self {
         let signers = parking_lot::RwLock::new(Default::default());
         // get the block number of the latest block
@@ -308,10 +308,12 @@ where
 
         let (raw_tx_sender, _) = broadcast::channel(DEFAULT_BROADCAST_CAPACITY);
 
-        // Retain the legacy batch sender for custom pools without shared ingress and direct users.
-        let (processor, tx_batch_sender) =
-            BatchTxProcessor::new(components.pool().clone(), settings.max_batch_size);
-        task_spawner.spawn_critical_task("tx-batcher", processor);
+        let transaction_batcher = transaction_batcher.unwrap_or_else(|| {
+            let (processor, handle) =
+                BatchTxProcessor::new(components.pool().clone(), settings.max_batch_size);
+            task_spawner.spawn_critical_task("tx-batcher", processor);
+            handle
+        });
 
         Self {
             components,
@@ -332,7 +334,7 @@ where
             raw_tx_forwarder,
             converter,
             next_env_builder: Box::new(next_env),
-            tx_batch_sender,
+            transaction_batcher,
             blob_sidecar_converter: BlobSidecarConverter::new(),
         }
     }
@@ -483,41 +485,26 @@ where
         &self.raw_tx_sender
     }
 
-    /// Returns the transaction batch sender
-    #[inline]
-    pub const fn tx_batch_sender(
+    /// Returns the bounded admission handle used for transaction submissions.
+    pub const fn transaction_batcher(
         &self,
-    ) -> &mpsc::UnboundedSender<BatchTxRequest<<N::Pool as TransactionPool>::Transaction>> {
-        &self.tx_batch_sender
+    ) -> &BatchTxHandle<<N::Pool as TransactionPool>::Transaction> {
+        &self.transaction_batcher
     }
 
-    /// Adds an _unvalidated_ transaction through shared ingress, or the fallback batch sender.
-    #[inline]
+    /// Adds an unvalidated transaction through the bounded batch processor.
     pub async fn add_pool_transaction(
         &self,
         origin: reth_transaction_pool::TransactionOrigin,
         transaction: <N::Pool as TransactionPool>::Transaction,
     ) -> Result<AddedTransactionOutcome, EthApiError> {
-        if let Some(ingress) = self.components.pool().transaction_ingress() {
-            let result = ingress.submit_recovered(origin, transaction)?;
-            return match result
-                .await
-                .map_err(|_| reth_transaction_pool::ingress::IngressError::Closed)??
-            {
-                reth_transaction_pool::ingress::IngressOutcome::Inserted(outcome) => Ok(outcome),
-                reth_transaction_pool::ingress::IngressOutcome::Recovered(..) => {
-                    unreachable!("insertion request")
-                }
+        let result = self.transaction_batcher.submit_recovered(origin, transaction)?;
+        match result.await.map_err(|_| reth_transaction_pool::batcher::IngressError::Closed)?? {
+            reth_transaction_pool::batcher::IngressOutcome::Inserted(outcome) => Ok(outcome),
+            reth_transaction_pool::batcher::IngressOutcome::Recovered(..) => {
+                unreachable!("insertion request")
             }
         }
-        let (response_tx, response_rx) = tokio::sync::oneshot::channel();
-        let request = reth_transaction_pool::BatchTxRequest::new(origin, transaction, response_tx);
-
-        self.tx_batch_sender()
-            .send(request)
-            .map_err(|_| reth_rpc_eth_types::EthApiError::BatchTxSendError)?;
-
-        Ok(response_rx.await??)
     }
 
     /// Inserts a prepared transaction while retaining its original ingress admission.
@@ -525,23 +512,16 @@ where
         &self,
         origin: reth_transaction_pool::TransactionOrigin,
         transaction: <N::Pool as TransactionPool>::Transaction,
-        permit: Option<reth_transaction_pool::ingress::IngressPermit>,
+        permit: reth_transaction_pool::batcher::IngressPermit,
     ) -> Result<AddedTransactionOutcome, EthApiError> {
-        let Some(permit) = permit else {
-            return self.add_pool_transaction(origin, transaction).await
-        };
-        let ingress = self
-            .components
-            .pool()
-            .transaction_ingress()
-            .expect("permit belongs to the ingress service");
+        let ingress = self.transaction_batcher();
         match ingress
             .submit_admitted(origin, transaction, permit)?
             .await
-            .map_err(|_| reth_transaction_pool::ingress::IngressError::Closed)??
+            .map_err(|_| reth_transaction_pool::batcher::IngressError::Closed)??
         {
-            reth_transaction_pool::ingress::IngressOutcome::Inserted(outcome) => Ok(outcome),
-            reth_transaction_pool::ingress::IngressOutcome::Recovered(..) => {
+            reth_transaction_pool::batcher::IngressOutcome::Inserted(outcome) => Ok(outcome),
+            reth_transaction_pool::batcher::IngressOutcome::Recovered(..) => {
                 unreachable!("insertion request")
             }
         }

@@ -80,8 +80,8 @@ use reth_network_types::ReputationChangeKind;
 use reth_primitives_traits::{InMemorySize, SignedTransaction};
 use reth_tokio_util::EventStream;
 use reth_transaction_pool::{
+    batcher::{IngressError, IngressOutcome},
     error::{PoolError, PoolResult},
-    ingress::{IngressError, IngressOutcome},
     AddedTransactionOutcome, GetPooledTransactionLimit, PoolTransaction, PropagateKind,
     PropagatedTransactions, TransactionPool, ValidPoolTransaction,
 };
@@ -321,11 +321,13 @@ impl<N: NetworkPrimitives> TransactionsHandle<N> {
 /// Rate limiting via reputation, bad transaction isolation, peer scoring.
 #[derive(Debug)]
 #[must_use = "Manager does nothing unless polled."]
-pub struct TransactionsManager<Pool, N: NetworkPrimitives = EthNetworkPrimitives> {
+pub struct TransactionsManager<Pool: TransactionPool, N: NetworkPrimitives = EthNetworkPrimitives> {
     /// Access to the transaction pool.
     pool: Pool,
     /// Cache of recovered transaction senders shared with payload execution, if enabled.
     sender_recovery_cache: Option<SenderRecoveryCache>,
+    /// Shared bounded recovery and insertion service supplied by node construction.
+    transaction_batcher: Option<reth_transaction_pool::BatchTxHandle<Pool::Transaction>>,
     /// Network access.
     network: NetworkHandle<N>,
     /// Subscriptions to all network related events.
@@ -445,6 +447,7 @@ impl<Pool: TransactionPool, N: NetworkPrimitives> TransactionsManager<Pool, N> {
         Self {
             pool,
             sender_recovery_cache: None,
+            transaction_batcher: None,
             network,
             network_events,
             transaction_fetcher,
@@ -469,6 +472,15 @@ impl<Pool: TransactionPool, N: NetworkPrimitives> TransactionsManager<Pool, N> {
     /// Returns a new handle that can send commands to this type.
     pub fn handle(&self) -> TransactionsHandle<N> {
         TransactionsHandle { manager_tx: self.command_tx.clone() }
+    }
+
+    /// Uses the node's shared bounded transaction batcher for incoming bodies.
+    pub fn with_transaction_batcher(
+        mut self,
+        batcher: reth_transaction_pool::BatchTxHandle<Pool::Transaction>,
+    ) -> Self {
+        self.transaction_batcher = Some(batcher);
+        self
     }
 
     /// Uses the provided sender recovery cache.
@@ -1366,7 +1378,7 @@ where
         };
         let is_broadcast = source.is_broadcast();
         let mut transactions = transactions.0;
-        let ingress = self.pool.transaction_ingress();
+        let ingress = self.transaction_batcher.clone();
 
         if !is_broadcast && ingress.is_some() && !self.has_capacity_for_pending_pool_imports() {
             self.metrics
@@ -1644,7 +1656,7 @@ where
         let mut poll_durations = TxManagerPollDurations::default();
 
         let this = self.get_mut();
-        let has_shared_ingress = this.pool.transaction_ingress().is_some();
+        let has_shared_ingress = this.transaction_batcher.is_some();
 
         // All streams are polled until their corresponding budget is exhausted, then we manually
         // yield back control to tokio. See `NetworkManager` for more context on the design

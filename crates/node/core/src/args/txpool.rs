@@ -508,10 +508,6 @@ impl RethTransactionPoolConfig for TxPoolArgs {
     fn pool_config(&self) -> PoolConfig {
         let default_config = PoolConfig::default();
         PoolConfig {
-            ingress: reth_transaction_pool::TransactionIngressConfig {
-                max_batch_size: self.max_batch_size.max(1),
-                ..Default::default()
-            },
             local_transactions_config: LocalTransactionConfig {
                 no_exemptions: self.no_locals,
                 local_addresses: self.locals.iter().copied().collect(),

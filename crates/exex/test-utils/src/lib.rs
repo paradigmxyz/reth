@@ -272,9 +272,14 @@ pub async fn test_exex_context_with_chain_spec(
 
     let (_, payload_builder_handle) = NoopPayloadBuilderService::<EthEngineTypes>::new();
 
+    let (processor, transaction_batcher) =
+        reth_transaction_pool::BatchTxProcessor::new(transaction_pool.clone(), 32);
+    runtime.spawn_task(processor);
+
     let components = NodeAdapter::<FullNodeTypesAdapter<_, _, _>, _> {
         components: Components {
             transaction_pool,
+            transaction_batcher,
             evm_config,
             consensus,
             network,

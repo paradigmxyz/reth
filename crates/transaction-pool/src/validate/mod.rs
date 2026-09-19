@@ -234,23 +234,6 @@ pub trait TransactionValidator: Debug + Send + Sync {
         self.validate_transactions(transactions.into_iter().map(move |tx| (origin, tx)))
     }
 
-    /// Maximum ingress batches dispatched concurrently to this validator.
-    fn validation_concurrency(&self) -> usize {
-        1
-    }
-
-    /// Dispatches the entire ingress job to existing validation workers, when supported.
-    ///
-    /// The returned future must complete only after the worker finishes. The default returns
-    /// the unconsumed batch so the pool can run synchronous validators on a blocking task.
-    fn try_dispatch_ingress(
-        &self,
-        batch: crate::ingress::IngressBatch<Self::Transaction>,
-    ) -> Result<impl Future<Output = ()> + Send, crate::ingress::IngressBatch<Self::Transaction>>
-    {
-        Err::<std::future::Ready<()>, _>(batch)
-    }
-
     /// Invoked when the head block changes.
     ///
     /// This can be used to update fork specific values (timestamp).
@@ -295,26 +278,6 @@ where
         match self {
             Self::Left(v) => v.validate_transactions_with_origin(origin, transactions).await,
             Self::Right(v) => v.validate_transactions_with_origin(origin, transactions).await,
-        }
-    }
-
-    fn validation_concurrency(&self) -> usize {
-        match self {
-            Self::Left(v) => v.validation_concurrency(),
-            Self::Right(v) => v.validation_concurrency(),
-        }
-    }
-
-    fn try_dispatch_ingress(
-        &self,
-        batch: crate::ingress::IngressBatch<Self::Transaction>,
-    ) -> Result<impl Future<Output = ()> + Send, crate::ingress::IngressBatch<Self::Transaction>>
-    {
-        match self {
-            Self::Left(v) => v.try_dispatch_ingress(batch).map(futures_util::future::Either::Left),
-            Self::Right(v) => {
-                v.try_dispatch_ingress(batch).map(futures_util::future::Either::Right)
-            }
         }
     }
 

@@ -19,6 +19,22 @@ pub trait PoolBuilder<Node: FullNodeTypes, Evm>: Send {
         + Unpin
         + 'static;
 
+    /// Creates the batch submission service independently of the pool.
+    /// Override to use a concrete pool's validation workers for the complete batch job.
+    fn build_batcher(
+        ctx: &BuilderContext<Node>,
+        pool: Self::Pool,
+    ) -> (
+        reth_transaction_pool::BatchTxProcessor,
+        reth_transaction_pool::BatchTxHandle<<Self::Pool as TransactionPool>::Transaction>,
+    ) {
+        reth_transaction_pool::BatchTxProcessor::with_pool(
+            pool,
+            ctx.transaction_batcher_config(),
+            ctx.sender_recovery_cache().cloned(),
+        )
+    }
+
     /// Creates the transaction pool.
     fn build_pool(
         self,
@@ -150,14 +166,13 @@ where
     where
         BS: BlobStore,
     {
-        let TxPoolBuilder { ctx, validator } = self;
+        let TxPoolBuilder { validator, .. } = self;
         reth_transaction_pool::Pool::new(
             validator,
             CoinbaseTipOrdering::default(),
             blob_store,
             pool_config,
         )
-        .with_sender_recovery_cache(ctx.sender_recovery_cache().cloned())
     }
 
     /// Build the transaction pool and spawn its maintenance tasks.
@@ -198,8 +213,7 @@ where
         let TxPoolBuilder { ctx, validator, .. } = self;
 
         let transaction_pool =
-            reth_transaction_pool::Pool::new(validator, ordering, blob_store, pool_config.clone())
-                .with_sender_recovery_cache(ctx.sender_recovery_cache().cloned());
+            reth_transaction_pool::Pool::new(validator, ordering, blob_store, pool_config.clone());
 
         spawn_maintenance_tasks(ctx, transaction_pool.clone(), &pool_config)?;
 

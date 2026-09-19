@@ -333,29 +333,6 @@ where
         }
     }
 
-    fn validation_concurrency(&self) -> usize {
-        self.concurrency
-    }
-
-    fn try_dispatch_ingress(
-        &self,
-        batch: crate::ingress::IngressBatch<Self::Transaction>,
-    ) -> Result<impl Future<Output = ()> + Send, crate::ingress::IngressBatch<Self::Transaction>>
-    {
-        Ok(async move {
-            let (tx, rx) = oneshot::channel();
-            let validator = self.validator.clone();
-            let job = Box::pin(async move {
-                batch.run(validator.as_ref()).await;
-                let _ = tx.send(());
-            });
-            if self.to_validation_task.lock().await.send(job).await.is_err() {
-                return
-            }
-            let _ = rx.await;
-        })
-    }
-
     fn on_new_head_block(&self, new_tip_block: &SealedBlock<Self::Block>) {
         self.validator.on_new_head_block(new_tip_block)
     }

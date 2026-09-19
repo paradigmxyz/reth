@@ -44,6 +44,8 @@ pub struct EthApiBuilder<N: RpcNodeCore, Rpc, NextEnv = ()> {
     task_spawner: Runtime,
     next_env: NextEnv,
     max_batch_size: usize,
+    transaction_batcher:
+        Option<reth_transaction_pool::BatchTxHandle<reth_transaction_pool::PoolTx<N::Pool>>>,
     max_blocking_io_requests: usize,
     pending_block_kind: PendingBlockKind,
     raw_tx_forwarder: ForwardConfig,
@@ -98,6 +100,7 @@ impl<N: RpcNodeCore, Rpc, NextEnv> EthApiBuilder<N, Rpc, NextEnv> {
             task_spawner,
             next_env,
             max_batch_size,
+            transaction_batcher,
             max_blocking_io_requests,
             pending_block_kind,
             raw_tx_forwarder,
@@ -122,6 +125,7 @@ impl<N: RpcNodeCore, Rpc, NextEnv> EthApiBuilder<N, Rpc, NextEnv> {
             task_spawner,
             next_env,
             max_batch_size,
+            transaction_batcher,
             max_blocking_io_requests,
             pending_block_kind,
             raw_tx_forwarder,
@@ -157,6 +161,7 @@ where
             eth_state_cache_config: Default::default(),
             next_env: Default::default(),
             max_batch_size: 1,
+            transaction_batcher: None,
             max_blocking_io_requests: DEFAULT_MAX_BLOCKING_IO_REQUEST,
             pending_block_kind: PendingBlockKind::Full,
             raw_tx_forwarder: ForwardConfig::default(),
@@ -171,6 +176,18 @@ impl<N, Rpc, NextEnv> EthApiBuilder<N, Rpc, NextEnv>
 where
     N: RpcNodeCore,
 {
+    /// Uses the node's shared bounded transaction batcher. If absent, builds a bounded
+    /// processor for this standalone RPC instance using the pool's batch insertion API.
+    pub fn transaction_batcher(
+        mut self,
+        batcher: Option<
+            reth_transaction_pool::BatchTxHandle<reth_transaction_pool::PoolTx<N::Pool>>,
+        >,
+    ) -> Self {
+        self.transaction_batcher = batcher;
+        self
+    }
+
     /// Configures the task spawner used to spawn additional tasks.
     pub fn task_spawner(mut self, spawner: Runtime) -> Self {
         self.task_spawner = spawner;
@@ -199,6 +216,7 @@ where
             gas_oracle_config,
             next_env,
             max_batch_size,
+            transaction_batcher,
             max_blocking_io_requests,
             pending_block_kind,
             raw_tx_forwarder,
@@ -223,6 +241,7 @@ where
             gas_oracle_config,
             next_env,
             max_batch_size,
+            transaction_batcher,
             max_blocking_io_requests,
             pending_block_kind,
             raw_tx_forwarder,
@@ -254,6 +273,7 @@ where
             gas_oracle_config,
             next_env: _,
             max_batch_size,
+            transaction_batcher,
             max_blocking_io_requests,
             pending_block_kind,
             raw_tx_forwarder,
@@ -278,6 +298,7 @@ where
             gas_oracle_config,
             next_env,
             max_batch_size,
+            transaction_batcher,
             max_blocking_io_requests,
             pending_block_kind,
             raw_tx_forwarder,
@@ -361,8 +382,8 @@ where
         self
     }
 
-    /// Sets the max batch size for the fallback transaction insertion processor.
-    /// Pools with shared ingress use `PoolConfig::ingress` for batching.
+    /// Sets the max batch size when constructing a standalone transaction batcher.
+    /// An injected shared batcher uses its own configuration.
     pub const fn max_batch_size(mut self, max_batch_size: usize) -> Self {
         self.max_batch_size = max_batch_size;
         self
@@ -527,6 +548,7 @@ where
             task_spawner,
             next_env,
             max_batch_size,
+            transaction_batcher,
             max_blocking_io_requests,
             pending_block_kind,
             raw_tx_forwarder,
@@ -592,6 +614,7 @@ where
             rpc_converter,
             next_env,
             raw_tx_forwarder.forwarder_client(),
+            transaction_batcher,
         )
     }
 

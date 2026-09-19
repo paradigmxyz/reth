@@ -53,7 +53,6 @@ use reth_rpc_engine_api::{capabilities::EngineCapabilities, EngineApi};
 use reth_rpc_eth_types::{cache::cache_new_blocks_task, EthConfig, EthStateCache};
 use reth_tokio_util::EventSender;
 use reth_tracing::tracing::{debug, info};
-use reth_transaction_pool::TransactionPool;
 use std::{
     fmt::{self, Debug},
     future::Future,
@@ -1359,6 +1358,7 @@ impl<'a, N: FullNodeComponents<Types: NodeTypes<ChainSpec: Hardforks + EthereumH
     /// Provides a [`EthApiBuilder`] with preconfigured config and components.
     pub fn eth_api_builder(self) -> reth_rpc::EthApiBuilder<N, EthRpcConverterFor<N>> {
         reth_rpc::EthApiBuilder::new_with_components(self.components.clone())
+            .transaction_batcher(self.components.transaction_batcher().cloned())
             .eth_cache(self.cache)
             .eth_state_cache_config(self.config.cache)
             .task_spawner(self.components.task_executor().clone())
@@ -1537,7 +1537,7 @@ where
             ctx.node.task_executor().clone(),
         );
 
-        if let Some(ingress) = ctx.node.pool().transaction_ingress() {
+        if let Some(ingress) = ctx.node.transaction_batcher() {
             validator = validator.with_ingress_pause(ingress.pause_handle());
         }
 

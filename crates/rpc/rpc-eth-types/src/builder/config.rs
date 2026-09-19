@@ -100,7 +100,7 @@ pub struct EthConfig {
     /// The maximum number of getproof calls that can be executed concurrently.
     pub proof_permits: usize,
     /// Maximum batch size for the fallback transaction insertion processor.
-    /// Pools with shared ingress use their own admission and batch configuration.
+    /// An injected shared batcher uses its own admission and batch configuration.
     pub max_batch_size: usize,
     /// Controls how pending blocks are built when requested via RPC methods
     pub pending_block_kind: PendingBlockKind,
