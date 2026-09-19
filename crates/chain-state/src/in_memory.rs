@@ -55,6 +55,9 @@ pub(crate) struct InMemoryStateMetrics {
 /// By acquiring the numbers lock first, we ensure that read-only lookups don't deadlock updates.
 /// This holds, because only lookup by number functions need to acquire the numbers lock first to
 /// get the block hash.
+///
+/// The non-canonical map and the pending channel follow the same rule and come last, so that
+/// every path takes the locks in the order numbers -> blocks -> non-canonical -> pending.
 #[derive(Debug, Default)]
 pub(crate) struct InMemoryState<N: NodePrimitives = EthPrimitives> {
     /// All canonical blocks that are not on disk yet.
@@ -130,11 +133,6 @@ impl<N: NodePrimitives> InMemoryState<N> {
             return Some(state)
         }
         self.pending.borrow().clone().filter(|pending| pending.hash() == hash)
-    }
-
-    /// Returns the number of executed in-memory blocks, canonical and non-canonical.
-    pub(crate) fn executed_block_count(&self) -> usize {
-        self.blocks.read().len() + self.non_canonical.read().len()
     }
 
     /// Returns the state for a given block number.
@@ -333,11 +331,6 @@ impl<N: NodePrimitives> CanonicalInMemoryState<N> {
     /// Returns the state of any executed in-memory block: canonical, fork or pending.
     pub fn executed_state_by_hash(&self, hash: B256) -> Option<Arc<BlockState<N>>> {
         self.inner.in_memory_state.executed_state_by_hash(hash)
-    }
-
-    /// Returns the number of executed in-memory blocks, canonical and non-canonical.
-    pub fn executed_block_count(&self) -> usize {
-        self.inner.in_memory_state.executed_block_count()
     }
 
     /// Removes executed blocks that are no longer connected to the canonical chain.
@@ -1196,6 +1189,21 @@ impl<N: NodePrimitives<SignedTx: SignedTransaction>> NewCanonicalChain<N> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_utils::TestBlockBuilder;
+    use alloy_eips::eip7685::Requests;
+    use alloy_primitives::{Address, BlockNumber, Bytes, StorageKey, StorageValue};
+    use rand::Rng;
+    use reth_errors::ProviderResult;
+    use reth_ethereum_primitives::{EthPrimitives, Receipt};
+    use reth_primitives_traits::{Account, Bytecode};
+    use reth_storage_api::{
+        AccountReader, BlockHashReader, BytecodeReader, HashedPostStateProvider,
+        StateProofProvider, StateProvider, StateRootProvider, StorageRootProvider,
+    };
+    use reth_trie::{
+        updates::TrieUpdates, AccountProof, HashedPostState, HashedStorage, MultiProof,
+        MultiProofTargets, StorageMultiProof, StorageProof, TrieInput,
+    };
 
     #[test]
     fn executed_blocks_are_owned_once_and_relinked_on_trim() {
@@ -1247,8 +1255,6 @@ mod tests {
             &pending_state,
             &state.executed_state_by_hash(pending.recovered_block().hash()).unwrap()
         ));
-        assert_eq!(state.executed_block_count(), canonical.len() + 2);
-
         // Both chains reach back through the canonical blocks.
         assert_eq!(fork_state.chain().count(), 2);
         assert_eq!(pending_state.chain().count(), 4);
@@ -1298,22 +1304,6 @@ mod tests {
         state.remove_executed_blocks([old_hash]);
         assert!(state.executed_state_by_hash(old_hash).is_none());
     }
-
-    use crate::test_utils::TestBlockBuilder;
-    use alloy_eips::eip7685::Requests;
-    use alloy_primitives::{Address, BlockNumber, Bytes, StorageKey, StorageValue};
-    use rand::Rng;
-    use reth_errors::ProviderResult;
-    use reth_ethereum_primitives::{EthPrimitives, Receipt};
-    use reth_primitives_traits::{Account, Bytecode};
-    use reth_storage_api::{
-        AccountReader, BlockHashReader, BytecodeReader, HashedPostStateProvider,
-        StateProofProvider, StateProvider, StateRootProvider, StorageRootProvider,
-    };
-    use reth_trie::{
-        updates::TrieUpdates, AccountProof, HashedPostState, HashedStorage, MultiProof,
-        MultiProofTargets, StorageMultiProof, StorageProof, TrieInput,
-    };
 
     fn create_mock_state(
         test_block_builder: &mut TestBlockBuilder<EthPrimitives>,
