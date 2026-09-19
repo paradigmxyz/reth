@@ -23,7 +23,7 @@ reth-primitives-traits.workspace = true
 reth-execution-types.workspace = true
 reth-fs-util.workspace = true
 reth-storage-api.workspace = true
-reth-tasks.workspace = true
+reth-tasks = { workspace = true, features = ["rayon"] }
 revm.workspace = true
 
 # ethereum

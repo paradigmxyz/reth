@@ -19,6 +19,11 @@ impl Default for TaskPause {
 }
 
 impl TaskPause {
+    /// Returns whether a foreground producer currently holds a pause guard.
+    pub fn is_paused(&self) -> bool {
+        *self.active.borrow() != 0
+    }
+
     /// Pauses cooperating tasks until this and all overlapping guards have been dropped.
     pub fn pause(&self) -> TaskPauseGuard {
         self.active.send_modify(|active| *active += 1);
@@ -56,6 +61,11 @@ impl Drop for TaskPauseGuard {
 pub struct TransactionIngressPause(TaskPause);
 
 impl TransactionIngressPause {
+    /// Checks the pause without blocking a recovery or validation worker.
+    pub fn is_paused(&self) -> bool {
+        self.0.is_paused()
+    }
+
     /// Pauses transaction ingress until this and all overlapping guards have been dropped.
     /// Work that has already started finishes its current bounded unit.
     pub fn pause(&self) -> TaskPauseGuard {

@@ -7,13 +7,13 @@ use crate::{
     EthTransactionValidator, PoolTransaction, TransactionOrigin, TransactionValidationOutcome,
     TransactionValidator,
 };
-use futures_util::{lock::Mutex, StreamExt};
+use futures_util::{lock::Mutex, FutureExt, StreamExt};
 use reth_chainspec::{ChainSpecProvider, EthereumHardforks};
 use reth_evm::ConfigureEvm;
 use reth_primitives_traits::{HeaderTy, SealedBlock};
 use reth_storage_api::BlockReaderIdExt;
 use reth_tasks::Runtime;
-use std::{future::Future, pin::Pin, sync::Arc};
+use std::{future::Future, panic::AssertUnwindSafe, pin::Pin, sync::Arc};
 use tokio::{
     sync,
     sync::{mpsc, oneshot},
@@ -107,7 +107,7 @@ pub struct TransactionValidationTaskExecutor<V> {
     /// The validator that will validate transactions on a separate task.
     pub validator: Arc<V>,
     /// Configured validation worker count.
-    pub concurrency: usize,
+    concurrency: usize,
     /// The sender half to validation tasks that perform the actual validation.
     pub to_validation_task: Arc<sync::Mutex<ValidationJobSender>>,
 }
@@ -140,6 +140,39 @@ impl TransactionValidationTaskExecutor<()> {
 }
 
 impl<V> TransactionValidationTaskExecutor<V> {
+    /// Returns the number of blocking validation workers.
+    pub const fn concurrency(&self) -> usize {
+        self.concurrency
+    }
+
+    /// Runs an owned job on a validation worker and waits for its completion.
+    /// Canceling the caller does not cancel a dispatched job or release its resources early.
+    pub async fn dispatch<F, Fut, R>(&self, job: F) -> Result<R, TransactionValidatorError>
+    where
+        V: Send + Sync + 'static,
+        F: FnOnce(Arc<V>) -> Fut + Send + 'static,
+        Fut: Future<Output = R> + Send + 'static,
+        R: Send + 'static,
+    {
+        let validator = self.validator.clone();
+        let (tx, rx) = oneshot::channel();
+        self.to_validation_task
+            .lock()
+            .await
+            .send(Box::pin(async move {
+                // A failed job must release its inputs without taking down a shared worker.
+                match AssertUnwindSafe(async move { job(validator).await }).catch_unwind().await {
+                    Ok(result) => { let _ = tx.send(result); }
+                    Err(_) => {
+                        reth_metrics::metrics::counter!("transaction_pool.validation_job_panics").increment(1);
+                        tracing::warn!(target: "reth::transaction_pool", "Transaction validation job panicked");
+                    }
+                }
+            }))
+            .await?;
+        rx.await.map_err(|_| TransactionValidatorError::ValidationServiceUnreachable)
+    }
+
     /// Maps the given validator to a new type.
     pub fn map<F, T>(self, mut f: F) -> TransactionValidationTaskExecutor<T>
     where

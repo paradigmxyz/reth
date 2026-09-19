@@ -14,8 +14,12 @@ use reth_metrics::{
     Metrics,
 };
 use reth_primitives_traits::InMemorySize;
-use reth_tasks::pause::TransactionIngressPause;
+use reth_tasks::{
+    pause::TransactionIngressPause,
+    pool::{BlockingTaskHandle, BlockingTaskPool},
+};
 use std::{
+    collections::VecDeque,
     fmt,
     future::Future,
     pin::Pin,
@@ -45,7 +49,7 @@ impl BatchTxProcessor {
     }
 
     /// Creates a processor for any pool, including custom pool implementations.
-    /// Recovery and insertion run off the async executor, with bounded concurrent jobs.
+    /// Recovery runs on dedicated Rayon threads; insertion uses bounded blocking jobs.
     pub fn with_pool<P: TransactionPool + 'static>(
         pool: P,
         config: BatchTxConfig,
@@ -56,25 +60,24 @@ impl BatchTxProcessor {
             Box::pin(async move {
                 let runtime = tokio::runtime::Handle::current();
                 // The blocking job owns admission even if the processor is canceled.
-                let _ = tokio::task::spawn_blocking(move || {
+                let result = tokio::task::spawn_blocking(move || {
                     runtime.block_on(async move {
-                        let Some(context) = requests.first().map(|request| request.context.clone())
-                        else {
-                            return
-                        };
-                        let (mut transactions, mut completions) = recover_requests(requests).await;
-                        if transactions.is_empty() || !context.ready().await {
-                            return
+                        if requests.first().is_some_and(|r| r.context.pause.is_paused()) {
+                            return requests
+                        }
+                        let (mut transactions, mut completions) = recovered_transactions(requests);
+                        if transactions.is_empty() {
+                            return Vec::new()
                         }
                         if transactions.len() == 1 {
                             let (origin, transaction) = transactions.pop().unwrap();
-                            let (_, permit, response) = completions.pop().unwrap();
+                            let (_, permit, _recovery_slot, response) = completions.pop().unwrap();
                             let result = pool.add_transaction(origin, transaction).await;
                             let _ = response.send(
                                 result.map(IngressOutcome::Inserted).map_err(IngressError::Pool),
                             );
                             drop(permit);
-                            return
+                            return Vec::new()
                         }
                         let origin = transactions[0].0;
                         let results = if transactions.iter().all(|(other, _)| *other == origin) {
@@ -91,21 +94,32 @@ impl BatchTxProcessor {
                             completions.len(),
                             "pool must return one outcome per input"
                         );
-                        for ((_, permit, response), result) in completions.into_iter().zip(results)
+                        for ((_, permit, _recovery_slot, response), result) in
+                            completions.into_iter().zip(results)
                         {
                             let _ = response.send(
                                 result.map(IngressOutcome::Inserted).map_err(IngressError::Pool),
                             );
                             drop(permit);
                         }
+                        Vec::new()
                     })
                 })
                 .await;
+                match result {
+                    Ok(returned) => returned,
+                    Err(error) => {
+                        reth_metrics::metrics::counter!("transaction_pool.ingress.import_failures")
+                            .increment(1);
+                        tracing::warn!(target: "reth::transaction_pool", ?error, "Transaction import job failed");
+                        Vec::new()
+                    }
+                }
             })
         })
     }
 
-    /// Uses the pool's validation workers for recovery, validation and insertion in one job.
+    /// Re-batches recovered transactions for the pool's existing validation workers.
     /// The pool remains independent of this processor and never owns its submission handle.
     pub fn with_validation_executor<V, O, S>(
         pool: Pool<TransactionValidationTaskExecutor<V>, O, S>,
@@ -118,7 +132,7 @@ impl BatchTxProcessor {
         O: TransactionOrdering<Transaction = V::Transaction>,
         S: BlobStore + Clone,
     {
-        config.max_concurrent_batches = pool.validator().concurrency;
+        config.max_concurrent_batches = pool.validator().concurrency();
         Self::with_processor(config, cache, move |requests| {
             let pool = pool.clone();
             Box::pin(async move {
@@ -151,23 +165,23 @@ impl BatchTxProcessor {
                         }
                     }),
                 );
-                let (done, completion) = oneshot::channel();
-                let validator = executor.validator.clone();
-                let job = Box::pin(async move {
-                    batch.run(validator.as_ref()).await;
-                    let _ = done.send(());
-                });
-                if executor.to_validation_task.lock().await.send(job).await.is_ok() {
-                    let _ = completion.await;
-                }
+                executor
+                    .dispatch(move |validator| async move { batch.run(validator.as_ref()).await })
+                    .await
+                    .unwrap_or_default()
             })
         })
     }
 
+    // An adapter must release its stage reservations before its future completes, or return
+    // the owned requests for a pause retry. Completion is what wakes the capacity scheduler.
     fn with_processor<T: PoolTransaction + 'static>(
         config: BatchTxConfig,
         cache: Option<SenderRecoveryCache>,
-        process: impl Fn(Vec<BatchTxRequest<T>>) -> BoxFuture<'static, ()> + Send + Sync + 'static,
+        process: impl Fn(Vec<BatchTxRequest<T>>) -> BoxFuture<'static, Vec<BatchTxRequest<T>>>
+            + Send
+            + Sync
+            + 'static,
     ) -> (Self, BatchTxHandle<T>) {
         let (rpc_tx, rpc_rx) = mpsc::unbounded_channel();
         let (p2p_tx, p2p_rx) = mpsc::unbounded_channel();
@@ -185,16 +199,7 @@ impl BatchTxProcessor {
             context: context.clone(),
             lifetime,
         };
-        let processor = Self {
-            run: Box::pin(run(
-                [rpc_rx, p2p_rx],
-                config.max_batch_size.max(1).min(config.max_transactions.max(1)),
-                config.max_batch_bytes.max(1),
-                config.max_concurrent_batches.max(1),
-                context,
-                process,
-            )),
-        };
+        let processor = Self { run: Box::pin(run([rpc_rx, p2p_rx], config, context, process)) };
         (processor, handle)
     }
 }
@@ -243,7 +248,13 @@ impl<T: PoolTransaction + 'static> BatchTxHandle<T> {
         let (processor, handle) = BatchTxProcessor::with_processor(
             BatchTxConfig { max_concurrent_batches: concurrency, ..config },
             cache,
-            process,
+            move |requests| {
+                let future = process(requests);
+                Box::pin(async move {
+                    future.await;
+                    Vec::new()
+                })
+            },
         );
         tokio::spawn(processor);
         handle
@@ -294,7 +305,7 @@ impl<T: PoolTransaction + 'static> BatchTxHandle<T> {
         transaction: Bytes,
         on_recovered: impl FnOnce() + Send + 'static,
     ) -> Result<IngressResultReceiver<T>, IngressError> {
-        let permit = self.reserve(0, transaction.len())?;
+        let permit = self.reserve_raw(transaction.len())?;
         self.send(
             0,
             origin,
@@ -310,7 +321,7 @@ impl<T: PoolTransaction + 'static> BatchTxHandle<T> {
         &self,
         transaction: Bytes,
     ) -> Result<IngressResultReceiver<T>, IngressError> {
-        let permit = self.reserve(0, transaction.len())?;
+        let permit = self.reserve_raw(transaction.len())?;
         self.send(0, TransactionOrigin::Local, IngressInput::Raw(transaction), permit, true, None)
     }
 
@@ -330,6 +341,13 @@ impl<T: PoolTransaction + 'static> BatchTxHandle<T> {
         // it re-enters the queue, without releasing its original count reservation.
         permit.grow(transaction.ingress_size())?;
         self.send(0, origin, IngressInput::Recovered(transaction), permit, false, None)
+    }
+
+    fn reserve_raw(&self, encoded_len: usize) -> Result<IngressPermit, IngressError> {
+        // Reserve the retained encoding plus an initial decoded-size estimate before dispatch.
+        // Custom transaction types with larger heap representations must report ingress_size;
+        // growth is charged before publishing recovered input to the next stage.
+        self.reserve(0, encoded_len.saturating_mul(2).saturating_add(std::mem::size_of::<T>()))
     }
 
     fn reserve(&self, lane: usize, bytes: usize) -> Result<IngressPermit, IngressError> {
@@ -373,6 +391,8 @@ impl<T: PoolTransaction + 'static> BatchTxHandle<T> {
         self.lanes[lane]
             .sender
             .send(BatchTxRequest {
+                lane,
+                recovery_slot: None,
                 origin,
                 input,
                 permit,
@@ -390,13 +410,21 @@ impl<T: PoolTransaction + 'static> BatchTxHandle<T> {
 /// Limits apply separately to RPC and gossip, including queued and executing transactions.
 #[derive(Debug, Clone, Copy)]
 pub struct BatchTxConfig {
-    /// Maximum queued or running worker jobs dispatched by the processor.
+    /// Maximum queued or running validation/insertion jobs.
     pub max_concurrent_batches: usize,
+    /// Dedicated recovery threads and maximum outstanding Rayon jobs.
+    pub recovery_threads: usize,
+    /// Maximum transactions per recovery chunk, independent of validation batching.
+    pub recovery_batch_size: usize,
+    /// Maximum transactions dispatched to recovery but not yet finished importing.
+    /// Includes queued/running jobs and completion buffers. The per-lane byte limits
+    /// continue to cover every stage, including this recovered backlog.
+    pub max_recovered_transactions: usize,
     /// Maximum admitted transactions per lane.
     pub max_transactions: usize,
     /// Maximum estimated input bytes per lane.
     pub max_bytes: usize,
-    /// Maximum transactions per recovery/validation/insertion job.
+    /// Maximum transactions per validation/insertion job.
     pub max_batch_size: usize,
     /// Maximum estimated input bytes in a batch; one larger transaction runs alone.
     pub max_batch_bytes: usize,
@@ -406,6 +434,10 @@ impl Default for BatchTxConfig {
     fn default() -> Self {
         Self {
             max_concurrent_batches: 1,
+            recovery_threads: std::thread::available_parallelism()
+                .map_or(1, |n| (n.get() / 2).max(1)),
+            recovery_batch_size: 32,
+            max_recovered_transactions: 1024,
             max_transactions: 4096,
             max_bytes: 32 * 1024 * 1024,
             max_batch_size: 32,
@@ -473,6 +505,9 @@ impl IngressPermit {
 /// Execution adapters must preserve one result per request. Moving
 /// requests into the worker keeps permits alive even if the submitting task is canceled.
 struct BatchTxRequest<T: PoolTransaction> {
+    lane: usize,
+    // Reserved before recovery dispatch; retained through import completion and retries.
+    recovery_slot: Option<OwnedSemaphorePermit>,
     origin: TransactionOrigin,
     context: Arc<IngressContext>,
     queued_at: Instant,
@@ -498,6 +533,7 @@ struct ValidatedIngress<T: PoolTransaction> {
     origin: TransactionOrigin,
     outcome: TransactionValidationOutcome<T>,
     permit: IngressPermit,
+    recovery_slot: Option<OwnedSemaphorePermit>,
     response: oneshot::Sender<Result<IngressOutcome<T>, IngressError>>,
 }
 
@@ -509,7 +545,11 @@ impl<T: PoolTransaction> ValidatedIngress<T> {
         (
             self.origin,
             self.outcome,
-            IngressCompletion { _permit: self.permit, response: self.response },
+            IngressCompletion {
+                _permit: self.permit,
+                _recovery_slot: self.recovery_slot,
+                response: self.response,
+            },
         )
     }
 }
@@ -518,6 +558,7 @@ impl<T: PoolTransaction> ValidatedIngress<T> {
 #[derive(Debug)]
 struct IngressCompletion<T: PoolTransaction> {
     _permit: IngressPermit,
+    _recovery_slot: Option<OwnedSemaphorePermit>,
     response: oneshot::Sender<Result<IngressOutcome<T>, IngressError>>,
 }
 
@@ -529,10 +570,10 @@ impl<T: PoolTransaction> IngressCompletion<T> {
     }
 }
 
-/// Callback run on the validation worker after recovery and state validation.
+/// Callback run on the validation worker after state validation.
 type BatchTxCompletion<T> = Box<dyn FnOnce(Vec<ValidatedIngress<T>>) + Send>;
 
-/// An owned recovery/validation/insertion job for a validation worker.
+/// An owned validation/insertion job containing recovered transactions.
 struct BatchTxJob<T: PoolTransaction> {
     requests: Vec<BatchTxRequest<T>>,
     complete: BatchTxCompletion<T>,
@@ -544,15 +585,20 @@ impl<T: PoolTransaction> BatchTxJob<T> {
         Self { requests, complete }
     }
 
-    /// Runs all CPU work, including insertion. Call this on a blocking or validation worker.
-    async fn run<V: TransactionValidator<Transaction = T> + ?Sized>(self, validator: &V) {
-        let Some(context) = self.requests.first().map(|request| request.context.clone()) else {
-            return
-        };
+    /// Validates and inserts on a blocking worker. A queued job returns immediately if
+    /// payload work has started; an already running validation/insertion batch finishes.
+    async fn run<V: TransactionValidator<Transaction = T> + ?Sized>(
+        self,
+        validator: &V,
+    ) -> Vec<BatchTxRequest<T>> {
+        if self.requests.first().is_some_and(|r| r.context.pause.is_paused()) {
+            return self.requests
+        }
         let validated = validate_ingress(validator, self.requests).await;
-        if !validated.is_empty() && context.ready().await {
+        if !validated.is_empty() {
             (self.complete)(validated);
         }
+        Vec::new()
     }
 }
 
@@ -565,78 +611,93 @@ impl<T: PoolTransaction> fmt::Debug for BatchTxJob<T> {
 type BatchCompletions<T> = Vec<(
     TransactionOrigin,
     IngressPermit,
+    Option<OwnedSemaphorePermit>,
     oneshot::Sender<Result<IngressOutcome<T>, IngressError>>,
 )>;
 
-/// Recovers a bounded batch before opening the validator's state provider.
-async fn recover_requests<T: PoolTransaction>(
+/// Runs only decoding and sender recovery on a dedicated Rayon worker. A pause returns
+/// unfinished inputs to the coordinator instead of blocking a worker or a completion channel.
+fn recover_requests<T: PoolTransaction>(
     requests: Vec<BatchTxRequest<T>>,
-) -> (Vec<(TransactionOrigin, T)>, BatchCompletions<T>) {
-    let Some(context) = requests.first().map(|request| request.context.clone()) else {
-        return (Vec::new(), Vec::new())
-    };
-    let mut transactions = Vec::with_capacity(requests.len());
-    let mut completions = Vec::with_capacity(requests.len());
-    for request in requests {
-        let BatchTxRequest {
-            origin,
-            input,
-            mut permit,
-            recover_only,
-            on_recovered,
-            response,
-            queued_at,
-            context: _,
-        } = request;
-        if !context.ready().await {
-            return (Vec::new(), Vec::new())
+) -> Vec<BatchTxRequest<T>> {
+    let mut recovered = Vec::with_capacity(requests.len());
+    let mut requests = requests.into_iter();
+    while let Some(mut request) = requests.next() {
+        if request.context.shutdown.has_changed().is_err() {
+            break
         }
-        if response.is_closed() {
+        if request.response.is_closed() {
             continue
         }
-        permit.0.metrics.queue_duration.record(queued_at.elapsed());
+        if request.context.pause.is_paused() {
+            recovered.push(request);
+            recovered.extend(requests);
+            break
+        }
+        request.permit.0.metrics.queue_duration.record(request.queued_at.elapsed());
         let recovery_start = Instant::now();
-        // RPC subscriptions and asynchronous preparation can retain the original encoding
-        // alongside the decoded transaction and its sidecar.
-        let raw_bytes = match &input {
+        // RPC subscriptions and preparation may retain the encoding alongside decoded input.
+        let raw_bytes = match &request.input {
             IngressInput::Raw(bytes) => bytes.len(),
             _ => 0,
         };
-        let recovered = match input {
-            IngressInput::Raw(bytes) => match &context.cache {
+        let transaction = match request.input {
+            IngressInput::Raw(bytes) => match &request.context.cache {
                 Some(cache) => T::recover_raw_transaction_with_cache(&bytes, Some(cache)),
                 None => T::recover_raw_transaction(&bytes),
             },
-            IngressInput::Pooled(tx) => match &context.cache {
+            IngressInput::Pooled(tx) => match &request.context.cache {
                 Some(cache) => T::try_recover_with_cache(tx, cache),
                 None => T::try_recover(tx),
             }
             .map_err(|_| RawPoolTransactionError::InvalidTransactionSignature),
             IngressInput::Recovered(tx) => Ok(tx),
         };
-        permit.0.metrics.recovery_duration.record(recovery_start.elapsed());
-        match recovered {
+        request.permit.0.metrics.recovery_duration.record(recovery_start.elapsed());
+        match transaction {
             Err(error) => {
-                let _ = response.send(Err(IngressError::Recovery(error)));
+                let _ = request.response.send(Err(IngressError::Recovery(error)));
             }
             Ok(transaction) => {
                 if let Err(error) =
-                    permit.grow(transaction.ingress_size().saturating_add(raw_bytes))
+                    request.permit.grow(transaction.ingress_size().saturating_add(raw_bytes))
                 {
-                    let _ = response.send(Err(error));
+                    let _ = request.response.send(Err(error));
                     continue
                 }
-                if let Some(callback) = on_recovered {
+                if let Some(callback) = request.on_recovered.take() {
                     callback();
                 }
-                if recover_only {
-                    let _ = response.send(Ok(IngressOutcome::Recovered(transaction, permit)));
+                if request.recover_only {
+                    let _ = request
+                        .response
+                        .send(Ok(IngressOutcome::Recovered(transaction, request.permit)));
                 } else {
-                    transactions.push((origin, transaction));
-                    completions.push((origin, permit, response));
+                    request.input = IngressInput::Recovered(transaction);
+                    request.queued_at = Instant::now();
+                    recovered.push(request);
                 }
             }
         }
+    }
+    recovered
+}
+
+fn recovered_transactions<T: PoolTransaction>(
+    requests: Vec<BatchTxRequest<T>>,
+) -> (Vec<(TransactionOrigin, T)>, BatchCompletions<T>) {
+    let mut transactions = Vec::with_capacity(requests.len());
+    let mut completions = Vec::with_capacity(requests.len());
+    for request in requests {
+        if request.response.is_closed() {
+            continue
+        }
+        let IngressInput::Recovered(transaction) = request.input else {
+            unreachable!("only recovered inputs reach validation")
+        };
+        request.permit.0.metrics.validation_queue_duration.record(request.queued_at.elapsed());
+        transactions.push((request.origin, transaction));
+        completions.push((request.origin, request.permit, request.recovery_slot, request.response));
     }
     (transactions, completions)
 }
@@ -645,13 +706,11 @@ async fn validate_ingress<V: TransactionValidator + ?Sized>(
     validator: &V,
     requests: Vec<BatchTxRequest<V::Transaction>>,
 ) -> Vec<ValidatedIngress<V::Transaction>> {
-    let Some(context) = requests.first().map(|request| request.context.clone()) else {
-        return Vec::new()
-    };
-    let (transactions, completions) = recover_requests(requests).await;
-    if transactions.is_empty() || !context.ready().await {
+    let (transactions, completions) = recovered_transactions(requests);
+    if transactions.is_empty() {
         return Vec::new()
     }
+    let started = Instant::now();
     let origin = transactions[0].0;
     let outcomes = if transactions.iter().all(|(other, _)| *other == origin) {
         validator
@@ -660,14 +719,17 @@ async fn validate_ingress<V: TransactionValidator + ?Sized>(
     } else {
         validator.validate_transactions(transactions).await
     };
+    reth_metrics::metrics::histogram!("transaction_pool.ingress.validation_duration")
+        .record(started.elapsed());
     assert_eq!(outcomes.len(), completions.len(), "validator must return one outcome per input");
     completions
         .into_iter()
         .zip(outcomes)
-        .map(|((origin, permit, response), outcome)| ValidatedIngress {
+        .map(|((origin, permit, recovery_slot, response), outcome)| ValidatedIngress {
             origin,
             outcome,
             permit,
+            recovery_slot,
             response,
         })
         .collect()
@@ -721,6 +783,8 @@ struct IngressMetrics {
     queue_duration: Histogram,
     /// Time spent decoding and recovering an input.
     recovery_duration: Histogram,
+    /// Time recovered transactions spend waiting for a validation worker.
+    validation_queue_duration: Histogram,
     /// Number of transactions dispatched together.
     batch_size: Histogram,
 }
@@ -739,85 +803,204 @@ struct IngressContext {
     shutdown: watch::Receiver<()>,
 }
 
-impl IngressContext {
-    /// Closing every admission handle cancels paused work as well as the scheduler.
-    async fn ready(&self) -> bool {
-        let mut shutdown = self.shutdown.clone();
-        tokio::select! {
-            biased;
-            _ = shutdown.changed() => false,
-            _ = self.pause.resumed() => true,
-        }
-    }
-}
-
-async fn run<T: PoolTransaction>(
+/// One async coordinator owns every queue and dispatches both passive executors.
+async fn run<T: PoolTransaction + 'static>(
     mut lanes: [mpsc::UnboundedReceiver<BatchTxRequest<T>>; 2],
-    max_batch: usize,
-    max_batch_bytes: usize,
-    concurrency: usize,
+    config: BatchTxConfig,
     context: Arc<IngressContext>,
-    process: impl Fn(Vec<BatchTxRequest<T>>) -> BoxFuture<'static, ()>,
+    process: impl Fn(Vec<BatchTxRequest<T>>) -> BoxFuture<'static, Vec<BatchTxRequest<T>>>,
 ) {
-    let mut jobs = FuturesUnordered::new();
-    let mut next_lane = 0;
-    let mut closed = [false; 2];
-    let mut held = [None, None];
+    let mut imports: FuturesUnordered<BoxFuture<'static, Vec<BatchTxRequest<T>>>> =
+        FuturesUnordered::new();
+    let mut recoveries: FuturesUnordered<BlockingTaskHandle<Vec<BatchTxRequest<T>>>> =
+        FuturesUnordered::new();
+    let mut recovery_pool = None;
+    let recovery_slots = Arc::new(Semaphore::new(
+        config.max_recovered_transactions.clamp(1, Semaphore::MAX_PERMITS),
+    ));
+    let mut pending = [VecDeque::new(), VecDeque::new()];
+    let mut recovered = [VecDeque::new(), VecDeque::new()];
+    let mut next_recovery_lane = 0;
+    let mut next_import_lane = 0;
     loop {
-        // Completed jobs release admission before another input batch is selected.
-        while jobs.len() >= concurrency {
-            jobs.next().await;
-        }
-        if !context.ready().await {
-            break
-        }
-        let first = futures_util::future::poll_fn(|cx| {
-            while jobs.poll_next_unpin(cx) == std::task::Poll::Ready(Some(())) {}
-            for offset in 0..2 {
-                let lane = (next_lane + offset) % 2;
-                if let Some(request) = held[lane].take() {
-                    return std::task::Poll::Ready(Some((lane, request)))
+        // Keep this subscription alive while pending; worker completions must still be
+        // drained during a payload pause, and closing public handles must wake the service.
+        let mut shutdown = context.shutdown.clone();
+        let closed = shutdown.changed();
+        let resumed = context.pause.resumed();
+        tokio::pin!(closed, resumed);
+        let running = futures_util::future::poll_fn(|cx| {
+            if closed.as_mut().poll(cx).is_ready() {
+                return Poll::Ready(false)
+            }
+            let mut progress = false;
+            let can_dispatch = if context.pause.is_paused() {
+                if resumed.as_mut().poll(cx).is_ready() {
+                    // Start a new iteration before this completed future can be polled again.
+                    progress = true;
+                    true
+                } else {
+                    false
                 }
-                match lanes[lane].poll_recv(cx) {
-                    std::task::Poll::Ready(Some(request)) => {
-                        return std::task::Poll::Ready(Some((lane, request)))
+            } else {
+                true
+            };
+            // A poll budget prevents busy ingress from monopolizing the async executor.
+            for _ in 0..64 {
+                match imports.poll_next_unpin(cx) {
+                    Poll::Ready(Some(requests)) => {
+                        for request in requests.into_iter().rev() {
+                            recovered[request.lane].push_front(request);
+                        }
+                        progress = true;
                     }
-                    std::task::Poll::Ready(None) => closed[lane] = true,
-                    std::task::Poll::Pending => {}
+                    _ => break,
                 }
             }
-            if closed.iter().all(|closed| *closed) && jobs.is_empty() {
-                std::task::Poll::Ready(None)
+            for _ in 0..64 {
+                match recoveries.poll_next_unpin(cx) {
+                    Poll::Ready(Some(Ok(requests))) => {
+                        queue_recovery_results(requests, &mut recovered, &mut pending);
+                        progress = true;
+                    }
+                    Poll::Ready(Some(Err(_))) => {
+                        reth_metrics::metrics::counter!("transaction_pool.ingress.recovery_panics").increment(1);
+                        tracing::warn!(target: "reth::transaction_pool", "Transaction recovery job panicked");
+                        progress = true;
+                    }
+                    _ => break,
+                }
+            }
+            if can_dispatch {
+                if imports.len() < config.max_concurrent_batches.max(1) {
+                    for offset in 0..2 {
+                        let lane = (next_import_lane + offset) % 2;
+                        if recovered[lane].is_empty() {
+                            continue
+                        }
+                        let batch = take_batch(
+                            &mut recovered[lane],
+                            config.max_batch_size.max(1),
+                            config.max_batch_bytes.max(1),
+                        );
+                        batch[0].permit.0.metrics.batch_size.record(batch.len() as f64);
+                        imports.push(process(batch));
+                        next_import_lane = 1 - lane;
+                        progress = true;
+                        break
+                    }
+                }
+                if recoveries.len() < config.recovery_threads.max(1) {
+                    for offset in 0..2 {
+                        let lane = (next_recovery_lane + offset) % 2;
+                        // At most one lookahead input per lane is read without downstream
+                        // capacity. Returned partial chunks already own their reservations.
+                        if pending[lane].is_empty() &&
+                            let Poll::Ready(Some(request)) = lanes[lane].poll_recv(cx)
+                        {
+                            pending[lane].push_back(request);
+                        }
+                        let mut batch = Vec::new();
+                        let mut bytes = 0usize;
+                        while batch.len() < config.recovery_batch_size.max(1) {
+                            let Some(first) = pending[lane].front_mut() else { break };
+                            let size = first.permit.0._bytes.num_permits();
+                            if !batch.is_empty() &&
+                                bytes.saturating_add(size) > config.max_batch_bytes.max(1)
+                            {
+                                break
+                            }
+                            if first.recovery_slot.is_none() {
+                                let Ok(slot) = recovery_slots.clone().try_acquire_owned() else {
+                                    break
+                                };
+                                first.recovery_slot = Some(slot);
+                            }
+                            batch.push(pending[lane].pop_front().unwrap());
+                            bytes = bytes.saturating_add(size);
+                            if pending[lane].is_empty() &&
+                                let Ok(request) = lanes[lane].try_recv()
+                            {
+                                pending[lane].push_back(request);
+                            }
+                        }
+                        if batch.is_empty() {
+                            continue
+                        }
+                        if batch.iter().all(|r| matches!(r.input, IngressInput::Recovered(_))) {
+                            recovered[lane].extend(batch);
+                        } else {
+                            let pool = recovery_pool.get_or_insert_with(|| {
+                                BlockingTaskPool::new(
+                                    BlockingTaskPool::builder()
+                                        .num_threads(config.recovery_threads.max(1))
+                                        .thread_name(|i| format!("tx-recovery-{i}"))
+                                        .build()
+                                        .expect("transaction recovery thread pool"),
+                                )
+                            });
+                            // The job count bounds Rayon's otherwise unbounded submission queue;
+                            // reservations also cover completed results waiting to be polled.
+                            recoveries.push(pool.spawn(move || recover_requests(batch)));
+                        }
+                        next_recovery_lane = 1 - lane;
+                        progress = true;
+                        break
+                    }
+                }
+            }
+            if progress {
+                Poll::Ready(true)
             } else {
-                std::task::Poll::Pending
+                Poll::Pending
             }
         })
         .await;
-        let Some((lane, first)) = first else { break };
-        next_lane = 1 - lane;
-        let mut batch = Vec::with_capacity(max_batch);
-        let mut bytes = first.permit.0._bytes.num_permits();
-        let metrics = first.permit.0.metrics.clone();
-        batch.push(first);
-        while batch.len() < max_batch {
-            match lanes[lane].try_recv() {
-                Ok(request) => {
-                    let size = request.permit.0._bytes.num_permits();
-                    if bytes.saturating_add(size) > max_batch_bytes {
-                        held[lane] = Some(request);
-                        break
-                    }
-                    bytes += size;
-                    batch.push(request);
-                }
-                Err(_) => break,
-            }
+        if !running {
+            break
         }
-        metrics.batch_size.record(batch.len() as f64);
-        jobs.push(process(batch));
-        // Start each selected batch promptly, without intentionally delaying low-load traffic.
         tokio::task::yield_now().await;
     }
+}
+
+/// Keep reserved, unstarted work ahead of the slotless lookahead after a pause.
+/// Otherwise the lookahead can wait for capacity held by the requests behind it.
+fn queue_recovery_results<T: PoolTransaction>(
+    requests: Vec<BatchTxRequest<T>>,
+    recovered: &mut [VecDeque<BatchTxRequest<T>>; 2],
+    pending: &mut [VecDeque<BatchTxRequest<T>>; 2],
+) {
+    let mut unfinished = Vec::new();
+    for request in requests {
+        if matches!(request.input, IngressInput::Recovered(_)) {
+            // Recovered-input entry points already reserve their full size and have no callback.
+            recovered[request.lane].push_back(request);
+        } else {
+            unfinished.push(request);
+        }
+    }
+    for request in unfinished.into_iter().rev() {
+        pending[request.lane].push_front(request);
+    }
+}
+
+fn take_batch<T: PoolTransaction>(
+    queue: &mut VecDeque<BatchTxRequest<T>>,
+    max_count: usize,
+    max_bytes: usize,
+) -> Vec<BatchTxRequest<T>> {
+    let mut batch = Vec::new();
+    let mut bytes = 0usize;
+    while let Some(request) = queue.front() {
+        let size = request.permit.0._bytes.num_permits();
+        if batch.len() >= max_count || (!batch.is_empty() && bytes.saturating_add(size) > max_bytes)
+        {
+            break
+        }
+        bytes = bytes.saturating_add(size);
+        batch.push(queue.pop_front().unwrap());
+    }
+    batch
 }
 
 #[cfg(test)]
@@ -852,6 +1035,323 @@ mod tests {
                 None,
             )
             .unwrap()
+    }
+
+    #[tokio::test]
+    async fn stalled_validation_bounds_recovery_and_retains_canceled_work() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        let recovered = Arc::new(AtomicUsize::new(0));
+        let (started, mut batches) = mpsc::unbounded_channel();
+        let config = BatchTxConfig {
+            recovery_threads: 2,
+            recovery_batch_size: 1,
+            max_recovered_transactions: 4,
+            max_concurrent_batches: 1,
+            max_batch_size: 1,
+            max_transactions: 8,
+            ..Default::default()
+        };
+        let (processor, ingress) = BatchTxProcessor::with_processor(
+            config,
+            None,
+            move |requests: Vec<BatchTxRequest<EthPooledTransaction>>| {
+                let (release, wait) = oneshot::channel();
+                started.send(release).unwrap();
+                Box::pin(async move {
+                    let _ = wait.await;
+                    drop(requests);
+                    Vec::new()
+                })
+            },
+        );
+        let worker = tokio::spawn(processor);
+        let mut generator = TransactionGenerator::new(rand::rng());
+        let mut responses = Vec::new();
+        for nonce in 0..8 {
+            let count = recovered.clone();
+            responses.push(
+                ingress
+                    .submit_raw(
+                        TransactionOrigin::Local,
+                        generator.transaction().nonce(nonce).into_eip1559().encoded_2718().into(),
+                        move || {
+                            count.fetch_add(1, Ordering::SeqCst);
+                        },
+                    )
+                    .unwrap(),
+            );
+        }
+        let first = batches.recv().await.unwrap();
+        tokio::time::timeout(Duration::from_secs(2), async {
+            while recovered.load(Ordering::SeqCst) != 4 {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap();
+        for _ in 0..100 {
+            tokio::task::yield_now().await;
+        }
+        assert_eq!(recovered.load(Ordering::SeqCst), 4);
+        assert!(batches.try_recv().is_err());
+        assert!(matches!(ingress.reserve_rpc(1), Err(IngressError::Full)));
+        drop(responses.remove(0));
+        assert!(matches!(ingress.reserve_rpc(1), Err(IngressError::Full)));
+        first.send(()).unwrap();
+        let next =
+            tokio::time::timeout(Duration::from_secs(2), batches.recv()).await.unwrap().unwrap();
+        tokio::time::timeout(Duration::from_secs(2), async {
+            while recovered.load(Ordering::SeqCst) != 5 {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap();
+        let slots = ingress.lanes[0].slots.clone();
+        drop((ingress, responses, next));
+        tokio::time::timeout(Duration::from_secs(2), worker).await.unwrap().unwrap();
+        assert_eq!(slots.available_permits(), 8);
+    }
+
+    #[tokio::test]
+    async fn recovery_completion_order_does_not_couple_validation_or_replies() {
+        let (executor, worker) =
+            TransactionValidationTaskExecutor::new(OkValidator::<EthPooledTransaction>::default());
+        let worker = tokio::spawn(worker.run());
+        let pool = Pool::new(
+            executor,
+            CoinbaseTipOrdering::default(),
+            InMemoryBlobStore::default(),
+            PoolConfig::default(),
+        );
+        let (processor, ingress) = BatchTxProcessor::with_validation_executor(
+            pool.clone(),
+            BatchTxConfig { recovery_threads: 2, recovery_batch_size: 1, ..Default::default() },
+            None,
+        );
+        let processor = tokio::spawn(processor);
+        let mut generator = TransactionGenerator::new(rand::rng());
+        let slow = generator.gen_eip1559();
+        let fast = generator.transaction().nonce(1).into_eip1559();
+        let (started, waiting) = oneshot::channel();
+        let (release, blocked) = std::sync::mpsc::channel();
+        let first = ingress
+            .submit_raw(TransactionOrigin::Private, slow.encoded_2718().into(), move || {
+                assert!(std::thread::current().name().unwrap().starts_with("tx-recovery-"));
+                started.send(()).unwrap();
+                blocked.recv_timeout(Duration::from_secs(5)).unwrap();
+            })
+            .unwrap();
+        waiting.await.unwrap();
+        let second = ingress
+            .submit_raw(TransactionOrigin::Local, fast.encoded_2718().into(), || {})
+            .unwrap();
+        let result =
+            tokio::time::timeout(Duration::from_secs(2), second).await.unwrap().unwrap().unwrap();
+        assert!(
+            matches!(result, IngressOutcome::Inserted(outcome) if outcome.hash == *fast.tx_hash())
+        );
+        assert!(pool.get(slow.tx_hash()).is_none());
+        assert_eq!(pool.get(fast.tx_hash()).unwrap().origin, TransactionOrigin::Local);
+        release.send(()).unwrap();
+        let result = first.await.unwrap().unwrap();
+        assert!(
+            matches!(result, IngressOutcome::Inserted(outcome) if outcome.hash == *slow.tx_hash())
+        );
+        assert_eq!(pool.get(slow.tx_hash()).unwrap().origin, TransactionOrigin::Private);
+        drop((ingress, pool));
+        processor.await.unwrap();
+        worker.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn worker_panics_release_capacity_without_stopping_ingress() {
+        use std::sync::atomic::{AtomicBool, Ordering};
+
+        #[derive(Debug)]
+        struct Validator(AtomicBool);
+        impl TransactionValidator for Validator {
+            type Transaction = EthPooledTransaction;
+            type Block = reth_ethereum_primitives::Block;
+            async fn validate_transaction(
+                &self,
+                origin: TransactionOrigin,
+                transaction: Self::Transaction,
+            ) -> TransactionValidationOutcome<Self::Transaction> {
+                assert!(!self.0.swap(false, Ordering::SeqCst), "validation failed");
+                OkValidator::default().validate_transaction(origin, transaction).await
+            }
+        }
+        for panic_in_recovery in [true, false] {
+            let (executor, worker) = TransactionValidationTaskExecutor::new(Validator(
+                AtomicBool::new(!panic_in_recovery),
+            ));
+            let worker = tokio::spawn(worker.run());
+            let pool = Pool::new(
+                executor,
+                CoinbaseTipOrdering::default(),
+                InMemoryBlobStore::default(),
+                PoolConfig::default(),
+            );
+            let config = BatchTxConfig {
+                max_transactions: 1,
+                max_recovered_transactions: 1,
+                recovery_threads: 1,
+                ..Default::default()
+            };
+            let (processor, ingress) =
+                BatchTxProcessor::with_validation_executor(pool.clone(), config, None);
+            let processor = tokio::spawn(processor);
+            let transaction = TransactionGenerator::new(rand::rng()).gen_eip1559().encoded_2718();
+            let failed = ingress
+                .submit_raw(TransactionOrigin::Local, transaction.clone().into(), move || {
+                    assert!(!panic_in_recovery, "recovery callback failed");
+                })
+                .unwrap();
+            assert!(tokio::time::timeout(Duration::from_secs(2), failed).await.unwrap().is_err());
+            assert_eq!(ingress.lanes[0].slots.available_permits(), 1);
+            let response =
+                ingress.submit_raw(TransactionOrigin::Local, transaction.into(), || {}).unwrap();
+            tokio::time::timeout(Duration::from_secs(2), response).await.unwrap().unwrap().unwrap();
+            drop((ingress, pool));
+            processor.await.unwrap();
+            worker.await.unwrap();
+        }
+    }
+
+    #[tokio::test]
+    async fn pause_returns_reserved_inputs_ahead_of_slotless_lookahead() {
+        let (processor, ingress) = BatchTxProcessor::new(crate::test_utils::testing_pool(), 2);
+        let slots = Arc::new(Semaphore::new(2));
+        let make = |slot, bytes| BatchTxRequest::<MockTransaction> {
+            lane: 0,
+            recovery_slot: slot,
+            origin: TransactionOrigin::Local,
+            context: ingress.context.clone(),
+            queued_at: Instant::now(),
+            input: IngressInput::Raw(Bytes::new()),
+            permit: ingress.reserve_rpc(bytes).unwrap(),
+            recover_only: false,
+            on_recovered: None,
+            response: oneshot::channel().0,
+        };
+        let first = make(Some(slots.clone().try_acquire_owned().unwrap()), 1);
+        let second = make(Some(slots.clone().try_acquire_owned().unwrap()), 2);
+        let mut pending = [VecDeque::from([make(None, 3)]), VecDeque::new()];
+        let mut recovered = [VecDeque::new(), VecDeque::new()];
+        assert_eq!(slots.available_permits(), 0);
+        queue_recovery_results(vec![first, second], &mut recovered, &mut pending);
+        assert!(pending[0][0].recovery_slot.is_some());
+        assert!(pending[0][1].recovery_slot.is_some());
+        assert!(pending[0][2].recovery_slot.is_none());
+        assert_eq!(
+            pending[0].iter().map(|r| r.permit.0._bytes.num_permits()).collect::<Vec<_>>(),
+            vec![1, 2, 3]
+        );
+        // Resumption can dispatch the reserved work without acquiring a new slot.
+        drop(take_batch(&mut pending[0], 2, usize::MAX));
+        assert_eq!(slots.available_permits(), 2);
+        drop((processor, pending, recovered, ingress));
+    }
+
+    #[tokio::test]
+    async fn queued_import_returns_without_waiting_on_paused_worker() {
+        let pool = crate::test_utils::testing_pool();
+        let (processor, ingress) = BatchTxProcessor::new(pool, 1);
+        let transaction = MockTransaction::legacy();
+        let (response, result) = oneshot::channel();
+        let slots = Arc::new(Semaphore::new(1));
+        let request = BatchTxRequest {
+            lane: 0,
+            recovery_slot: Some(slots.clone().try_acquire_owned().unwrap()),
+            origin: TransactionOrigin::Private,
+            context: ingress.context.clone(),
+            queued_at: Instant::now(),
+            input: IngressInput::Recovered(transaction),
+            permit: ingress.reserve_rpc(1).unwrap(),
+            recover_only: false,
+            on_recovered: None,
+            response,
+        };
+        let paused = ingress.pause_handle().pause();
+        let job = BatchTxJob::new(vec![request], Box::new(|_| panic!("paused job inserted input")));
+        // This call runs on the worker, so waiting here would park that worker for the pause.
+        let returned = tokio::time::timeout(
+            Duration::from_secs(1),
+            job.run(&OkValidator::<MockTransaction>::default()),
+        )
+        .await
+        .unwrap();
+        assert_eq!(returned.len(), 1);
+        assert_eq!(slots.available_permits(), 0);
+        assert_eq!(returned[0].origin, TransactionOrigin::Private);
+        drop(paused);
+        let job = BatchTxJob::new(
+            returned,
+            Box::new(|validated| {
+                assert_eq!(validated.len(), 1);
+                drop(validated);
+            }),
+        );
+        assert!(job.run(&OkValidator::<MockTransaction>::default()).await.is_empty());
+        assert!(result.await.is_err());
+        assert_eq!(slots.available_permits(), 1);
+        drop((ingress, processor));
+    }
+
+    #[tokio::test]
+    async fn shutdown_retains_running_recovery_until_it_exits() {
+        let (executor, worker) =
+            TransactionValidationTaskExecutor::new(OkValidator::<EthPooledTransaction>::default());
+        let worker = tokio::spawn(worker.run());
+        let pool = Pool::new(
+            executor,
+            CoinbaseTipOrdering::default(),
+            InMemoryBlobStore::default(),
+            PoolConfig::default(),
+        );
+        let (processor, ingress) = BatchTxProcessor::with_validation_executor(
+            pool.clone(),
+            BatchTxConfig {
+                max_transactions: 2,
+                recovery_threads: 1,
+                recovery_batch_size: 1,
+                ..Default::default()
+            },
+            None,
+        );
+        let processor = tokio::spawn(processor);
+        let slots = ingress.lanes[0].slots.clone();
+        let (started, waiting) = oneshot::channel();
+        let (release, blocked) = std::sync::mpsc::channel();
+        let mut generator = TransactionGenerator::new(rand::rng());
+        let first = ingress
+            .submit_raw(
+                TransactionOrigin::Local,
+                generator.gen_eip1559().encoded_2718().into(),
+                move || {
+                    started.send(()).unwrap();
+                    blocked.recv_timeout(Duration::from_secs(5)).unwrap();
+                },
+            )
+            .unwrap();
+        waiting.await.unwrap();
+        let second = ingress
+            .submit_raw(
+                TransactionOrigin::Local,
+                generator.gen_eip1559().encoded_2718().into(),
+                || panic!("queued recovery ran after shutdown"),
+            )
+            .unwrap();
+        drop((ingress, pool));
+        tokio::time::timeout(Duration::from_secs(2), processor).await.unwrap().unwrap();
+        assert_eq!(slots.available_permits(), 1, "the running Rayon job still owns admission");
+        assert!(second.await.is_err());
+        release.send(()).unwrap();
+        assert!(tokio::time::timeout(Duration::from_secs(2), first).await.unwrap().is_err());
+        assert_eq!(slots.available_permits(), 2);
+        worker.await.unwrap();
     }
 
     #[tokio::test]
@@ -1319,7 +1819,10 @@ mod tests {
             None,
         );
         tokio::spawn(processor);
-        let response = ingress.submit_raw(TransactionOrigin::Local, Bytes::new(), || {}).unwrap();
+        let transaction = TransactionGenerator::new(rand::rng()).gen_eip1559();
+        let response = ingress
+            .submit_raw(TransactionOrigin::Local, transaction.encoded_2718().into(), || {})
+            .unwrap();
         assert!(tokio::time::timeout(Duration::from_secs(2), response).await.unwrap().is_err());
         assert_eq!(
             ingress.lanes[0].slots.available_permits(),

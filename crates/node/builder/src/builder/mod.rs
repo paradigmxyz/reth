@@ -837,14 +837,21 @@ impl<Node: FullNodeTypes> BuilderContext<Node> {
 
     /// Returns admission and scheduling limits for the shared transaction batcher.
     pub fn transaction_batcher_config(&self) -> reth_transaction_pool::BatchTxConfig {
+        let defaults = reth_transaction_pool::BatchTxConfig::default();
         reth_transaction_pool::BatchTxConfig {
+            recovery_threads: self
+                .config()
+                .txpool
+                .recovery_threads
+                .unwrap_or(defaults.recovery_threads),
+            recovery_batch_size: self.config().txpool.recovery_batch_size,
             max_batch_size: self.config().txpool.max_batch_size,
             max_concurrent_batches: self
                 .config()
                 .txpool
                 .additional_validation_tasks
                 .saturating_add(1),
-            ..Default::default()
+            ..defaults
         }
     }
 

@@ -735,7 +735,15 @@ TxPool:
           Disables transaction backup to disk on node shutdown
 
       --txpool.max-batch-size <MAX_BATCH_SIZE>
-          Max batch size for shared RPC and P2P transaction recovery, validation, and insertion
+          Max batch size for shared RPC and P2P transaction validation and insertion
+
+          [default: 32]
+
+      --txpool.recovery-threads <RECOVERY_THREADS>
+          Dedicated transaction recovery threads. Defaults to half the available CPUs, at least one
+
+      --txpool.recovery-batch-size <RECOVERY_BATCH_SIZE>
+          Maximum transactions dispatched together to a recovery thread
 
           [default: 32]
 

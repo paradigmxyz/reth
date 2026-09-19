@@ -286,8 +286,15 @@ mod tests {
             PooledTransactions(pooled_txs(512)),
             super::super::TransactionSource::Broadcast,
         );
-        // The single worker processes this barrier after the manager's queued batch, including
-        // delivery of all its completion notifications.
+        // Recovery can finish out of order. Wait until every input has reached insertion,
+        // then use the single import worker as a barrier for completion delivery.
+        tokio::time::timeout(std::time::Duration::from_secs(2), async {
+            while harness.manager.pool.len() != 512 {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap();
         let barrier = harness
             .manager
             .transaction_batcher
