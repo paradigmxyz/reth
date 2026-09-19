@@ -427,7 +427,7 @@ reth-trie-sparse = { path = "crates/trie/sparse", default-features = false }
 reth-zstd-compressors = { version = "0.7.0", default-features = false }
 
 # revm
-revm = { version = "43.0.2", default-features = false }
+revm = { git = "https://github.com/bluealloy/revm", rev = "3f24ccd59393446d8f68082b625eb741fd22aa76", default-features = false }
 revmc = { git = "https://github.com/paradigmxyz/revmc", branch = "main", default-features = false, features = ["llvm-prefer-static"] }
 revm-inspectors = "0.43.0"
 
@@ -438,7 +438,7 @@ alloy-sol-types = { version = "1.6.1", default-features = false }
 
 alloy-chains = { version = "0.2.33", default-features = false }
 alloy-eip2124 = { version = "0.2.0", default-features = false }
-alloy-eip7928 = { version = "0.4.10", default-features = false, features = ["rlp"] }
+alloy-eip7928 = { version = "0.4.11", git = "https://github.com/alloy-rs/eips", rev = "914593f3211aaac1e213371c78549445f4ef7894", default-features = false, features = ["rlp"] }
 alloy-evm = { version = "0.39.0", default-features = false }
 alloy-rlp = { version = "0.3.16", default-features = false, features = ["core-net"] }
 alloy-trie = { version = "0.9.4", default-features = false }
@@ -661,3 +661,18 @@ vergen-git2 = "10.0.1"
 
 # networking
 ipnet = "2.11"
+
+[patch.crates-io]
+alloy-eip7928 = { version = "0.4.11", git = "https://github.com/alloy-rs/eips", rev = "914593f3211aaac1e213371c78549445f4ef7894" }
+revm = { git = "https://github.com/bluealloy/revm", rev = "3f24ccd59393446d8f68082b625eb741fd22aa76" }
+revm-bytecode = { git = "https://github.com/bluealloy/revm", rev = "3f24ccd59393446d8f68082b625eb741fd22aa76" }
+revm-context = { git = "https://github.com/bluealloy/revm", rev = "3f24ccd59393446d8f68082b625eb741fd22aa76" }
+revm-context-interface = { git = "https://github.com/bluealloy/revm", rev = "3f24ccd59393446d8f68082b625eb741fd22aa76" }
+revm-database = { git = "https://github.com/bluealloy/revm", rev = "3f24ccd59393446d8f68082b625eb741fd22aa76" }
+revm-database-interface = { git = "https://github.com/bluealloy/revm", rev = "3f24ccd59393446d8f68082b625eb741fd22aa76" }
+revm-handler = { git = "https://github.com/bluealloy/revm", rev = "3f24ccd59393446d8f68082b625eb741fd22aa76" }
+revm-inspector = { git = "https://github.com/bluealloy/revm", rev = "3f24ccd59393446d8f68082b625eb741fd22aa76" }
+revm-interpreter = { git = "https://github.com/bluealloy/revm", rev = "3f24ccd59393446d8f68082b625eb741fd22aa76" }
+revm-precompile = { git = "https://github.com/bluealloy/revm", rev = "3f24ccd59393446d8f68082b625eb741fd22aa76" }
+revm-primitives = { git = "https://github.com/bluealloy/revm", rev = "3f24ccd59393446d8f68082b625eb741fd22aa76" }
+revm-state = { git = "https://github.com/bluealloy/revm", rev = "3f24ccd59393446d8f68082b625eb741fd22aa76" }

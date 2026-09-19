@@ -798,6 +798,30 @@ mod tests {
     use reth_storage_overlay::OverlayManager;
 
     #[test]
+    fn bal_conversion_and_trie_info_agree_on_code_hash() {
+        use alloy_eip7928::CodeChange;
+        use alloy_primitives::Bytes;
+        use revm::state::bal::Bal;
+
+        for code in [Bytes::new(), Bytes::from_static(&[0x60, 0x00])] {
+            let address = alloy_primitives::Address::with_last_byte(1);
+            for trie_first in [false, true] {
+                let changes = vec![AccountChanges::new(address)
+                    .with_code_change(CodeChange::new(BlockAccessIndex::new(1), code.clone()))];
+                if trie_first {
+                    assert_eq!(changes[0].account_info().code_hash, Some(keccak256(&code)));
+                }
+                let converted = Bal::clone_from_alloy(&changes).unwrap();
+                let (hash, bytecode) =
+                    &converted.accounts.get(&address).unwrap().account_info.code.writes[0].1;
+                assert_eq!(*hash, keccak256(&code));
+                assert_eq!(bytecode.hash_slow(), *hash);
+                assert_eq!(changes[0].account_info().code_hash, Some(*hash));
+            }
+        }
+    }
+
+    #[test]
     fn terminate_event_stops_transaction_execution() {
         let terminate_execution = Arc::new(AtomicBool::new(false));
         let ctx = PrewarmContext {
