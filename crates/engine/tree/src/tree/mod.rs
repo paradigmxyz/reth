@@ -70,6 +70,7 @@ pub mod payload_validator;
 mod persistence_state;
 pub mod precompile_cache;
 pub mod state_root_strategy;
+mod sync_policy;
 #[cfg(test)]
 mod tests;
 mod trie_updates;
@@ -2725,8 +2726,18 @@ where
     ///
     /// If the `local_tip` is greater than the `block`, then this will return false.
     #[inline]
-    const fn exceeds_backfill_run_threshold(&self, local_tip: u64, block: u64) -> bool {
-        block > local_tip && block - local_tip > MIN_BLOCKS_FOR_PIPELINE_RUN
+    fn exceeds_backfill_run_threshold(&self, local_tip: u64, block: u64) -> bool {
+        let flat_root_mode = std::env::var_os("TEMPO_FLATMPT").is_some() &&
+            std::env::var("TEMPO_FLATMPT_MODE").as_deref() == Ok("root");
+        // Stages do not invoke the custom engine state-root hook. Running them
+        // would leave the flat store behind the canonical database, so download
+        // and validate the missing blocks through the engine instead.
+        sync_policy::pipeline_gap_exceeded(
+            local_tip,
+            block,
+            MIN_BLOCKS_FOR_PIPELINE_RUN,
+            flat_root_mode,
+        )
     }
 
     /// Returns how far the local tip is from the given block. If the local tip is at the same

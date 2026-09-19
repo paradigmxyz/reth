@@ -101,6 +101,89 @@ use tracing::{debug, debug_span, instrument, warn, Span};
 /// Handle to a [`HashedPostState`] computed on a background thread.
 pub type LazyHashedPostState = reth_tasks::LazyHandle<Arc<HashedPostState>>;
 
+/// Input passed to a custom state-root computation handler after block execution.
+#[derive(Debug, Clone)]
+pub struct CustomStateRootInput<'a, N: NodePrimitives> {
+    /// The executed block.
+    pub block: &'a RecoveredBlock<N::Block>,
+    /// The block's parent header.
+    pub parent_block: &'a SealedHeader<N::BlockHeader>,
+    /// The execution output.
+    pub output: &'a BlockExecutionOutput<N::Receipt>,
+    /// Lazily computed hashed post-state.
+    pub hashed_state: &'a LazyHashedPostState,
+}
+
+/// A custom state-root computation handler.
+pub type CustomStateRoot<N> = Arc<
+    dyn Fn(CustomStateRootInput<'_, N>) -> ProviderResult<StateRootJobOutcome>
+        + Send
+        + Sync
+        + 'static,
+>;
+
+/// Adapts a custom post-execution callback to the state-root strategy interface.
+pub struct CustomStateRootStrategy<N: NodePrimitives> {
+    callback: CustomStateRoot<N>,
+}
+
+impl<N: NodePrimitives> CustomStateRootStrategy<N> {
+    /// Creates a custom callback-backed state-root strategy.
+    pub const fn new(callback: CustomStateRoot<N>) -> Self {
+        Self { callback }
+    }
+}
+
+impl<N: NodePrimitives> fmt::Debug for CustomStateRootStrategy<N> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("CustomStateRootStrategy").finish_non_exhaustive()
+    }
+}
+
+struct CustomStateRootJob<N: NodePrimitives> {
+    callback: CustomStateRoot<N>,
+    parent_block: SealedHeader<N::BlockHeader>,
+}
+
+impl<N: NodePrimitives> StateRootJob<N> for CustomStateRootJob<N> {
+    fn name(&self) -> &'static str {
+        "custom"
+    }
+
+    fn finish(
+        &mut self,
+        block: &RecoveredBlock<N::Block>,
+        output: Arc<BlockExecutionOutput<N::Receipt>>,
+        hashed_state: &LazyHashedPostState,
+    ) -> ProviderResult<StateRootJobOutcome> {
+        (self.callback)(CustomStateRootInput {
+            block,
+            parent_block: &self.parent_block,
+            output: &output,
+            hashed_state,
+        })
+    }
+}
+
+impl<N, P, Evm> StateRootStrategy<N, P, Evm> for CustomStateRootStrategy<N>
+where
+    N: NodePrimitives,
+    Evm: ConfigureEvm<Primitives = N>,
+{
+    fn prepare(
+        &self,
+        ctx: StateRootJobContext<'_, N, P, Evm>,
+    ) -> ProviderResult<PreparedStateRootJob<N>> {
+        Ok(PreparedStateRootJob::new(
+            Box::new(CustomStateRootJob {
+                callback: Arc::clone(&self.callback),
+                parent_block: ctx.parent_header.clone(),
+            }),
+            None,
+        ))
+    }
+}
+
 /// Strategy used by engine-tree validation to prepare per-block state-root work.
 pub trait StateRootStrategy<N, P, Evm>: Send + Sync
 where
@@ -1305,6 +1388,29 @@ mod tests {
     use reth_testing_utils::generators;
     use reth_trie::test_utils::state_root;
     use revm::state::{AccountInfo, AccountStatus, EvmState, EvmStorageSlot, TransactionId};
+
+    #[test]
+    fn custom_root_preserves_replacement_hashed_state() {
+        let replacement = Arc::new(HashedPostState::default());
+        let returned = replacement.clone();
+        let root = B256::repeat_byte(7);
+        let mut job = CustomStateRootJob::<EthPrimitives> {
+            callback: Arc::new(move |_| {
+                Ok(StateRootJobOutcome::new(root, Arc::new(TrieUpdates::default()))
+                    .with_hashed_state(Some(returned.clone())))
+            }),
+            parent_block: SealedHeader::seal_slow(Default::default()),
+        };
+        let block = TestBlockBuilder::eth().get_executed_blocks(1..2).next().unwrap();
+        let output = Arc::new(BlockExecutionOutput {
+            result: Default::default(),
+            state: Default::default(),
+        });
+        let fallback = reth_tasks::LazyHandle::ready(Arc::new(HashedPostState::default()));
+        let outcome = job.finish(block.recovered_block(), output, &fallback).unwrap();
+        assert_eq!(outcome.state_root, root);
+        assert!(Arc::ptr_eq(outcome.hashed_state.as_ref().unwrap(), &replacement));
+    }
 
     #[test]
     fn sparse_trie_prune_before_uses_requested_range() {
