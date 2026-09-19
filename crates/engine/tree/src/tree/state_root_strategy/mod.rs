@@ -71,12 +71,14 @@ use reth_provider::{
     StageCheckpointReader, StateRootProvider, StorageChangeSetReader, StorageSettingsCache,
 };
 use reth_storage_overlay::{OverlayManager, OverlayStateProviderFactory};
-use reth_tasks::utils::increase_thread_priority;
+use reth_tasks::{utils::increase_thread_priority, WorkerPool};
 use reth_trie::{
     hashed_cursor::HashedCursorFactory, trie_cursor::TrieCursorFactory, updates::TrieUpdates,
     HashedPostState,
 };
-use reth_trie_parallel::proof_task::{ProofResultMessage, ProofTaskCtx, ProofWorkerHandle};
+use reth_trie_parallel::proof_task::{
+    ProofResultMessage, ProofTaskCtx, ProofWorkerCounts, ProofWorkerHandle,
+};
 pub use reth_trie_parallel::{
     error::StateRootTaskError,
     state_root_task::{
@@ -478,15 +480,56 @@ impl fmt::Debug for DefaultStateRootStrategy {
 }
 
 impl DefaultStateRootStrategy {
-    /// Transaction count threshold below which proof workers are halved, since fewer transactions
-    /// produce fewer state changes and most workers would be idle overhead.
+    /// Transaction count at or below which a block gets half the base proof worker pool, since
+    /// fewer transactions produce fewer state changes and most workers would be idle overhead.
     const SMALL_BLOCK_PROOF_WORKER_TX_THRESHOLD: usize = 30;
+
+    /// Gas used at or above which a block also gets the overflow proof worker pool.
+    ///
+    /// More workers help drain the proof queue on large blocks while storage reads are blocked.
+    /// Keeping that capacity in a separate pool avoids waking unused threads on regular blocks.
+    const LARGE_BLOCK_PROOF_WORKER_GAS_THRESHOLD: u64 = 100_000_000;
+
+    /// Returns how many workers to spawn for the block being validated from one kind of proof
+    /// worker pool, given the base pool size and the size of the overflow pool extending it.
+    ///
+    /// Explicit counts take precedence. Otherwise, small transaction counts use half the base
+    /// pool, large gas usage uses both pools, and unknown or regular block sizes use the base pool.
+    /// The transaction threshold is checked first, regardless of gas usage.
+    const fn proof_worker_count(
+        base_pool_threads: usize,
+        overflow_pool_threads: usize,
+        configured_threads: Option<usize>,
+        transaction_count: Option<usize>,
+        gas_used: Option<u64>,
+    ) -> usize {
+        let count = if let Some(configured_threads) = configured_threads {
+            configured_threads
+        } else {
+            match (transaction_count, gas_used) {
+                (Some(count), _) if count <= Self::SMALL_BLOCK_PROOF_WORKER_TX_THRESHOLD => {
+                    base_pool_threads / 2
+                }
+                (_, Some(gas)) if gas >= Self::LARGE_BLOCK_PROOF_WORKER_GAS_THRESHOLD => {
+                    base_pool_threads + overflow_pool_threads
+                }
+                _ => base_pool_threads,
+            }
+        };
+
+        // Pools can be smaller than two threads, and a pinned count can be zero; a block without
+        // workers stalls the proofs.
+        if count == 0 {
+            1
+        } else {
+            count
+        }
+    }
 
     /// Spawns the default state-root computation pipeline.
     ///
     /// The authoritative update capability taken from the returned handle must be dropped or
     /// explicitly finished after execution so the task observes the end of the update stream.
-    /// An unknown transaction count uses the full proof-worker pool.
     #[instrument(level = "debug", target = "engine::tree::payload_processor", skip_all)]
     fn spawn_state_root<N, F>(
         &self,
@@ -507,6 +550,7 @@ impl DefaultStateRootStrategy {
             parent_header,
             preserved_sparse_trie,
             transaction_count,
+            gas_used,
             config,
             pending_sparse_trie_prune_blocks,
         } = options;
@@ -518,10 +562,24 @@ impl DefaultStateRootStrategy {
         let task_ctx = ProofTaskCtx::new(multiproof_provider_factory);
         #[cfg(feature = "trie-debug")]
         let task_ctx = task_ctx.with_proof_jitter(config.proof_jitter());
-        let halve_workers = transaction_count
-            .is_some_and(|count| count <= Self::SMALL_BLOCK_PROOF_WORKER_TX_THRESHOLD);
+        let worker_counts = ProofWorkerCounts::new(
+            Self::proof_worker_count(
+                executor.proof_storage_worker_pool().num_threads(),
+                executor.proof_storage_overflow_worker_pool().map_or(0, WorkerPool::num_threads),
+                executor.proof_storage_worker_threads_override(),
+                transaction_count,
+                gas_used,
+            ),
+            Self::proof_worker_count(
+                executor.proof_account_worker_pool().num_threads(),
+                executor.proof_account_overflow_worker_pool().map_or(0, WorkerPool::num_threads),
+                executor.proof_account_worker_threads_override(),
+                transaction_count,
+                gas_used,
+            ),
+        );
         let proof_handle =
-            ProofWorkerHandle::new(executor, task_ctx, halve_workers, proof_result_tx.clone());
+            ProofWorkerHandle::new(executor, task_ctx, worker_counts, proof_result_tx.clone());
 
         let (state_root_tx, state_root_rx) = mpsc::channel();
         let (hashed_state_tx, hashed_state_rx) = mpsc::channel();
@@ -746,6 +804,8 @@ struct StateRootTaskOptions<'a, N: NodePrimitives> {
     parent_header: SealedHeader<N::BlockHeader>,
     preserved_sparse_trie: Option<PreservedSparseTrie>,
     transaction_count: Option<usize>,
+    /// Gas the block claims to use, taken from the payload before execution.
+    gas_used: Option<u64>,
     config: &'a TreeConfig,
     pending_sparse_trie_prune_blocks: Option<Vec<ExecutedBlock<N>>>,
 }
@@ -858,6 +918,7 @@ where
                 parent_header: parent_header.clone(),
                 preserved_sparse_trie,
                 transaction_count: Some(env.transaction_count),
+                gas_used: Some(env.gas_used),
                 config,
                 pending_sparse_trie_prune_blocks,
             },
@@ -932,8 +993,10 @@ where
                 StateRootTaskOptions {
                     parent_header,
                     preserved_sparse_trie,
-                    // Tx count unknown at FCU time (block built incrementally): full proof workers.
+                    // Block built incrementally, so neither the tx count nor the gas is known at
+                    // FCU time: the payload builder gets the base pool.
                     transaction_count: None,
+                    gas_used: None,
                     config: ctx.config,
                     pending_sparse_trie_prune_blocks,
                 },
@@ -1307,6 +1370,58 @@ mod tests {
     use revm::state::{AccountInfo, AccountStatus, EvmState, EvmStorageSlot, TransactionId};
 
     #[test]
+    fn proof_worker_count_scales_with_block_gas() {
+        let base_pool_threads = 32;
+        let overflow_pool_threads = 32;
+        let count = |transaction_count, gas_used| {
+            DefaultStateRootStrategy::proof_worker_count(
+                base_pool_threads,
+                overflow_pool_threads,
+                None,
+                transaction_count,
+                gas_used,
+            )
+        };
+
+        // Small blocks keep half the base pool, whatever their gas.
+        assert_eq!(count(Some(30), Some(1_000_000)), 16);
+        assert_eq!(count(Some(30), Some(300_000_000)), 16);
+
+        // Gas heavy blocks spill into the overflow pool.
+        assert_eq!(count(Some(1_000), Some(100_000_000)), 64);
+        assert_eq!(count(Some(1_000), Some(300_000_000)), 64);
+
+        // Everything else, including a block whose size is not known yet, stays in the base pool
+        // and never names the overflow pool.
+        assert_eq!(count(Some(31), Some(99_999_999)), 32);
+        assert_eq!(count(Some(1_000), Some(15_000_000)), 32);
+        assert_eq!(count(None, None), 32);
+
+        // An explicitly configured count is used verbatim for every block.
+        for (transaction_count, gas_used) in
+            [(Some(30), Some(1_000_000)), (Some(1_000), Some(300_000_000)), (None, None)]
+        {
+            assert_eq!(
+                DefaultStateRootStrategy::proof_worker_count(
+                    32,
+                    16,
+                    Some(48),
+                    transaction_count,
+                    gas_used
+                ),
+                48
+            );
+        }
+
+        // Pools smaller than two threads, and a pinned count of zero, still get a worker.
+        assert_eq!(
+            DefaultStateRootStrategy::proof_worker_count(1, 0, None, Some(1), Some(1_000_000)),
+            1
+        );
+        assert_eq!(DefaultStateRootStrategy::proof_worker_count(32, 32, Some(0), None, None), 1);
+    }
+
+    #[test]
     fn sparse_trie_prune_before_uses_requested_range() {
         let new_epoch = TrieNodeEpoch::new(10);
         assert_eq!(sparse_trie_prune_before::<EthPrimitives>(None, new_epoch), None);
@@ -1467,6 +1582,7 @@ mod tests {
                 parent_header: SealedHeader::new(Default::default(), genesis_hash),
                 preserved_sparse_trie: None,
                 transaction_count: Some(env.transaction_count),
+                gas_used: Some(env.gas_used),
                 config: &TreeConfig::default(),
                 pending_sparse_trie_prune_blocks: None,
             },
