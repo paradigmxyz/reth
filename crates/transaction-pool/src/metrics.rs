@@ -139,12 +139,32 @@ pub struct AllTransactionsMetrics {
     pub base_fee: Gauge,
 }
 
-/// Transaction pool validation metrics
+/// Transaction pool validation metrics.
+///
+/// Rejection counters cover selected validation checks and count repeated attempts for the same
+/// transaction separately.
 #[derive(Metrics)]
 #[metrics(scope = "transaction_pool")]
 pub struct TxPoolValidationMetrics {
     /// How long to successfully validate a blob
     pub blob_validation_duration: Histogram,
+    /// Number of stateless validation attempts rejected due to transaction data exceeding the size
+    /// limit.
+    pub rejected_oversized_data: Counter,
+    /// Number of stateless validation attempts rejected due to a priority fee exceeding the max
+    /// fee per gas.
+    pub rejected_tip_above_fee_cap: Counter,
+    /// Number of stateless validation attempts rejected due to a local transaction fee exceeding
+    /// the configured fee cap.
+    pub rejected_exceeds_fee_cap: Counter,
+    /// Number of stateless validation attempts rejected due to a priority fee below the configured
+    /// minimum.
+    pub rejected_priority_fee_below_minimum: Counter,
+    /// Number of stateless validation attempts rejected due to a gas limit below the intrinsic or
+    /// floor gas cost.
+    pub rejected_intrinsic_gas_too_low: Counter,
+    /// Number of validation attempts rejected by blob count or blob sidecar checks.
+    pub invalid_4844: Counter,
 }
 
 /// Transaction pool validator task metrics
