@@ -20,6 +20,7 @@ reth-network-p2p.workspace = true
 reth-network-peers.workspace = true
 reth-primitives-traits = { workspace = true, features = ["eip7928"] }
 reth-storage-api = { workspace = true, features = ["db-api"] }
+reth-stages-types.workspace = true
 reth-storage-errors.workspace = true
 reth-tasks.workspace = true
 reth-trie-common.workspace = true
@@ -47,4 +48,6 @@ reth-ethereum-primitives.workspace = true
 reth-evm.workspace = true
 reth-evm-ethereum.workspace = true
 reth-provider = { workspace = true, features = ["test-utils"] }
+reth-stages.workspace = true
+reth-stages-api.workspace = true
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }

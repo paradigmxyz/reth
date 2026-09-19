@@ -128,8 +128,8 @@ mod tests {
     use super::*;
     use crate::{
         test_utils::{
-            account, byte_codes, generation, hashed_factory, key, state_root, verified_range,
-            ScriptedSnapClient,
+            account, byte_codes, generation, hashed_factory, insert_generation_headers, key,
+            state_root, verified_range, ScriptedSnapClient,
         },
         SnapAccountStore, SnapAttemptStore,
     };
@@ -168,6 +168,7 @@ mod tests {
     // An attempt that fetched all of `accounts` as one range, not yet committed.
     fn started(accounts: &[(B256, TrieAccount)]) -> (Factory, VerifiedRange) {
         let factory = hashed_factory();
+        insert_generation_headers(&factory);
         let provider = factory.database_provider_rw().unwrap();
         let write = provider.start_snap_attempt(generation(1, state_root(accounts))).unwrap();
         provider.start_account_coverage(write).unwrap();
