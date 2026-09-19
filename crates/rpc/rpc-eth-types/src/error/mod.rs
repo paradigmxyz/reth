@@ -1171,6 +1171,17 @@ pub enum SignError {
     NoChainId,
 }
 
+impl From<reth_transaction_pool::batcher::IngressError> for EthApiError {
+    fn from(error: reth_transaction_pool::batcher::IngressError) -> Self {
+        use reth_transaction_pool::batcher::IngressError;
+        match error {
+            IngressError::Recovery(error) => error.into(),
+            IngressError::Pool(error) => error.into(),
+            error => Self::PoolError(RpcPoolError::Other(Box::new(error))),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

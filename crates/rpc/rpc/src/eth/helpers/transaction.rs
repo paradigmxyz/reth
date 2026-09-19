@@ -3,7 +3,7 @@
 use crate::EthApi;
 use alloy_consensus::BlobTransactionValidationError;
 use alloy_eips::{eip7594::BlobTransactionSidecarVariant, BlockId, Typed2718};
-use alloy_primitives::{hex, B256};
+use alloy_primitives::{hex, Bytes, B256};
 use reth_chainspec::{ChainSpecProvider, EthereumHardforks};
 use reth_primitives_traits::{AlloyBlockHeader, WithEncoded};
 use reth_rpc_convert::RpcConvert;
@@ -14,8 +14,10 @@ use reth_rpc_eth_api::{
 use reth_rpc_eth_types::{error::RpcPoolError, EthApiError};
 use reth_storage_api::BlockReaderIdExt;
 use reth_transaction_pool::{
-    error::Eip4844PoolTransactionError, AddedTransactionOutcome, EthBlobTransactionSidecar,
-    EthPoolTransaction, PoolTransaction, PoolTx,
+    batcher::{IngressError, IngressOutcome, IngressPermit},
+    error::Eip4844PoolTransactionError,
+    AddedTransactionOutcome, EthBlobTransactionSidecar, EthPoolTransaction, PoolTransaction,
+    PoolTx,
 };
 
 impl<N, Rpc> EthTransactions for EthApi<N, Rpc>
@@ -29,11 +31,82 @@ where
         self.inner.signers()
     }
 
+    async fn send_raw_transaction(&self, bytes: Bytes) -> Result<B256, Self::Error> {
+        let ingress = self.inner.transaction_batcher();
+        let origin = reth_transaction_pool::TransactionOrigin::Local;
+        if self.raw_tx_forwarder().is_none() && !self.inner.force_blob_sidecar_upcasting() {
+            let notifications = self.inner.raw_tx_sender().clone();
+            let raw = bytes.clone();
+            let result = ingress.submit_raw(origin, bytes, move || {
+                let _ = notifications.send(raw);
+            })?;
+            return match result.await.map_err(|_| IngressError::Closed)?? {
+                IngressOutcome::Inserted(outcome) => Ok(outcome.hash),
+                IngressOutcome::Recovered(..) => unreachable!("insertion request"),
+            }
+        }
+        // Forwarding and optional sidecar conversion await other services. Keep their work
+        // admitted, but release the recovery worker while those services are awaited.
+        match ingress.recover_raw(bytes.clone())?.await.map_err(|_| IngressError::Closed)?? {
+            IngressOutcome::Recovered(transaction, permit) => {
+                self.send_admitted_pool_transaction(
+                    origin,
+                    WithEncoded::new(bytes, transaction),
+                    Some(permit),
+                )
+                .await
+            }
+            IngressOutcome::Inserted(..) => unreachable!("recovery request"),
+        }
+    }
+
     async fn send_pool_transaction(
         &self,
         origin: reth_transaction_pool::TransactionOrigin,
         tx: WithEncoded<PoolTx<Self::Pool>>,
     ) -> Result<B256, Self::Error> {
+        self.send_admitted_pool_transaction(origin, tx, None).await
+    }
+}
+
+impl<N, Rpc> EthApi<N, Rpc>
+where
+    N: RpcNodeCore,
+    EthApiError: FromEvmError<N::Evm>,
+    Rpc: RpcConvert<Primitives = N::Primitives, Error = EthApiError>,
+{
+    async fn send_admitted_pool_transaction(
+        &self,
+        origin: reth_transaction_pool::TransactionOrigin,
+        tx: WithEncoded<PoolTx<N::Pool>>,
+        permit: Option<IngressPermit>,
+    ) -> Result<B256, EthApiError> {
+        let permit = match permit {
+            Some(permit) => permit,
+            None => self
+                .inner
+                .transaction_batcher()
+                .reserve_rpc(tx.value().ingress_size().saturating_add(tx.encoded_bytes().len()))?,
+        };
+        if self.raw_tx_forwarder().is_none() &&
+            !(self.inner.force_blob_sidecar_upcasting() && tx.value().is_eip4844())
+        {
+            return self.prepare_pool_transaction(origin, tx, permit).await
+        }
+        // Conversion can outlive a canceled RPC future. Keep its input and reservation together,
+        // including for already-recovered submissions that bypass raw recovery.
+        let this = self.clone();
+        tokio::spawn(async move { this.prepare_pool_transaction(origin, tx, permit).await })
+            .await
+            .map_err(|error| EthApiError::Internal(reth_errors::RethError::other(error)))?
+    }
+
+    async fn prepare_pool_transaction(
+        &self,
+        origin: reth_transaction_pool::TransactionOrigin,
+        tx: WithEncoded<PoolTx<N::Pool>>,
+        mut permit: IngressPermit,
+    ) -> Result<B256, EthApiError> {
         let (tx, mut pool_transaction) = tx.split();
 
         // Optionally convert legacy blob sidecars to EIP-7594 format when Osaka is active
@@ -58,6 +131,19 @@ where
                         .chain_spec()
                         .is_osaka_active_at_timestamp(latest.timestamp().saturating_add(12))
                     {
+                        let proofs = sidecar
+                            .blobs
+                            .len()
+                            .saturating_mul(alloy_eips::eip7594::CELLS_PER_EXT_BLOB)
+                            .saturating_mul(alloy_eips::eip4844::BYTES_PER_PROOF);
+                        permit.grow(
+                            pool_transaction
+                                .ingress_size()
+                                .saturating_add(tx.len())
+                                .saturating_add(sidecar.size())
+                                .saturating_add(proofs),
+                        )?;
+
                         BlobTransactionSidecarVariant::Eip7594(
                             self.blob_sidecar_converter().convert(sidecar).await.ok_or_else(
                                 || {
@@ -88,6 +174,13 @@ where
         // forward the transaction to the specific endpoint if configured.
         if let Some(client) = self.raw_tx_forwarder() {
             tracing::debug!(target: "rpc::eth", hash = %pool_transaction.hash(), "forwarding raw transaction to forwarder");
+            permit.grow(
+                pool_transaction
+                    .ingress_size()
+                    .saturating_add(tx.len())
+                    .saturating_add(tx.len().saturating_mul(2).saturating_add(2)),
+            )?;
+
             let rlp_hex = hex::encode_prefixed(&tx);
 
             // broadcast raw transaction to subscribers if there is any.
@@ -99,7 +192,8 @@ where
                 }).map_err(EthApiError::other)?;
 
             // Retain tx in local tx pool after forwarding, for local RPC usage.
-            let _ = self.inner.add_pool_transaction(origin, pool_transaction).await;
+            let _ =
+                self.inner.add_admitted_pool_transaction(origin, pool_transaction, permit).await;
 
             return Ok(hash);
         }
@@ -108,7 +202,7 @@ where
         self.broadcast_raw_transaction(tx);
 
         let AddedTransactionOutcome { hash, .. } =
-            self.inner.add_pool_transaction(origin, pool_transaction).await?;
+            self.inner.add_admitted_pool_transaction(origin, pool_transaction, permit).await?;
 
         Ok(hash)
     }
@@ -226,6 +320,175 @@ mod tests {
         assert!(pool.get(&tx_2_result).is_some(), "tx2 not found in the pool");
         assert_eq!(pool.get(&tx_1_result).unwrap().origin, TransactionOrigin::Local);
         assert_eq!(pool.get(&tx_2_result).unwrap().origin, TransactionOrigin::Local);
+    }
+
+    #[tokio::test]
+    async fn canceled_paused_rpc_does_not_retain_api() {
+        let api = mock_eth_api(Default::default());
+        let weak = std::sync::Arc::downgrade(&api.inner);
+        let pause = api.inner.transaction_batcher().pause_handle().pause();
+        let mut submission = Box::pin(api.send_raw_transaction(raw_transfer_tx()));
+        assert!(futures::poll!(&mut submission).is_pending());
+        drop(submission);
+        drop(api);
+        assert!(weak.upgrade().is_none());
+        drop(pause);
+    }
+
+    #[tokio::test]
+    async fn raw_ingress_preserves_errors_and_subscription_delivery() {
+        let api = mock_eth_api(Default::default());
+        let mut raw = api.inner.subscribe_to_raw_transactions();
+        assert!(matches!(
+            api.send_raw_transaction(Bytes::new()).await,
+            Err(EthApiError::EmptyRawTransactionData)
+        ));
+        assert!(matches!(
+            api.send_raw_transaction(Bytes::from_static(&[0xff])).await,
+            Err(EthApiError::FailedToDecodeSignedTransaction)
+        ));
+        assert!(matches!(raw.try_recv(), Err(tokio::sync::broadcast::error::TryRecvError::Empty)));
+        let transaction = raw_transfer_tx();
+        api.send_raw_transaction(transaction.clone()).await.unwrap();
+        assert_eq!(raw.recv().await.unwrap(), transaction);
+        assert!(matches!(raw.try_recv(), Err(tokio::sync::broadcast::error::TryRecvError::Empty)));
+    }
+
+    #[tokio::test]
+    async fn raw_ingress_forwarding_returns_remote_hash_and_retains_local_transaction() {
+        let server =
+            jsonrpsee::server::ServerBuilder::default().build("127.0.0.1:0").await.unwrap();
+        let address = server.local_addr().unwrap();
+        let expected_raw = hex::encode_prefixed(raw_transfer_tx());
+        let remote_hash = B256::repeat_byte(7);
+        let mut module = jsonrpsee::RpcModule::new(());
+        module
+            .register_method("eth_sendRawTransaction", move |params, _, _| {
+                assert_eq!(params.one::<String>().unwrap(), expected_raw);
+                Ok::<_, jsonrpsee::types::ErrorObjectOwned>(remote_hash)
+            })
+            .unwrap();
+        let server = server.start(module);
+        let provider = MockEthProvider::default();
+        let evm = EthEvmConfig::new(provider.chain_spec());
+        let api = EthApi::builder(provider, testing_pool(), NoopNetwork::default(), evm)
+            .raw_tx_forwarder(reth_rpc_eth_types::ForwardConfig {
+                tx_forwarder: Some(format!("http://{address}").parse().unwrap()),
+            })
+            .build();
+        let mut raw = api.inner.subscribe_to_raw_transactions();
+        assert_eq!(api.send_raw_transaction(raw_transfer_tx()).await.unwrap(), remote_hash);
+        assert_eq!(api.pool().len(), 1);
+        assert_eq!(raw.recv().await.unwrap(), raw_transfer_tx());
+        server.stop().unwrap();
+    }
+
+    #[tokio::test]
+    async fn forwarding_reserves_encoding_before_contacting_remote() {
+        use reth_transaction_pool::{BatchTxConfig, BatchTxProcessor};
+        let raw = raw_transfer_tx();
+        let tx = PoolTx::<TestPool>::recover_raw_transaction(&raw).unwrap();
+        let bytes = tx.ingress_size() + raw.len();
+        let pool = testing_pool();
+        let (processor, ingress) = BatchTxProcessor::with_pool(
+            pool.clone(),
+            BatchTxConfig { max_bytes: bytes, ..Default::default() },
+            None,
+        );
+        tokio::spawn(processor);
+        let provider = MockEthProvider::default();
+        let evm = EthEvmConfig::new(provider.chain_spec());
+        let api = EthApi::builder(provider, pool, NoopNetwork::default(), evm)
+            .transaction_batcher(Some(ingress.clone()))
+            .raw_tx_forwarder(reth_rpc_eth_types::ForwardConfig {
+                tx_forwarder: Some("http://127.0.0.1:1".parse().unwrap()),
+            })
+            .build();
+        for recovered in [false, true] {
+            let result = if recovered {
+                api.send_pool_transaction(
+                    TransactionOrigin::Local,
+                    WithEncoded::new(raw.clone(), tx.clone()),
+                )
+                .await
+            } else {
+                api.send_raw_transaction(raw.clone()).await
+            };
+            assert!(matches!(result,
+                Err(EthApiError::PoolError(RpcPoolError::Other(error)))
+                    if matches!(error.downcast_ref::<IngressError>(), Some(IngressError::Full))
+            ));
+            assert!(ingress.reserve_rpc(bytes).is_ok(), "failed preparation releases all bytes");
+        }
+    }
+
+    #[tokio::test]
+    async fn canceled_rpc_preparation_retains_admission_until_completion() {
+        use reth_transaction_pool::{BatchTxConfig, BatchTxProcessor};
+        use std::sync::Arc;
+        let started = Arc::new(tokio::sync::Notify::new());
+        let release = Arc::new(tokio::sync::Notify::new());
+        let server =
+            jsonrpsee::server::ServerBuilder::default().build("127.0.0.1:0").await.unwrap();
+        let address = server.local_addr().unwrap();
+        let mut module = jsonrpsee::RpcModule::new((started.clone(), release.clone()));
+        module
+            .register_async_method("eth_sendRawTransaction", |_, signals, _| async move {
+                signals.0.notify_one();
+                signals.1.notified().await;
+                Ok::<_, jsonrpsee::types::ErrorObjectOwned>(B256::repeat_byte(7))
+            })
+            .unwrap();
+        let server = server.start(module);
+        let pool = testing_pool();
+        let (processor, ingress) = BatchTxProcessor::with_pool(
+            pool.clone(),
+            BatchTxConfig { max_transactions: 1, ..Default::default() },
+            None,
+        );
+        tokio::spawn(processor);
+        let provider = MockEthProvider::default();
+        let evm = EthEvmConfig::new(provider.chain_spec());
+        let api = EthApi::builder(provider, pool.clone(), NoopNetwork::default(), evm)
+            .transaction_batcher(Some(ingress.clone()))
+            .raw_tx_forwarder(reth_rpc_eth_types::ForwardConfig {
+                tx_forwarder: Some(format!("http://{address}").parse().unwrap()),
+            })
+            .build();
+        for recovered in [false, true] {
+            let api = api.clone();
+            let request = tokio::spawn(async move {
+                let raw = raw_transfer_tx();
+                if recovered {
+                    let tx = PoolTx::<TestPool>::recover_raw_transaction(&raw).unwrap();
+                    api.send_pool_transaction(TransactionOrigin::Local, WithEncoded::new(raw, tx))
+                        .await
+                } else {
+                    api.send_raw_transaction(raw).await
+                }
+            });
+            tokio::time::timeout(Duration::from_secs(2), started.notified()).await.unwrap();
+            request.abort();
+            assert!(request.await.unwrap_err().is_cancelled());
+            assert!(matches!(ingress.recover_raw(Bytes::new()), Err(IngressError::Full)));
+            release.notify_one();
+            tokio::time::timeout(Duration::from_secs(2), async {
+                loop {
+                    match ingress.recover_raw(Bytes::new()) {
+                        Ok(response) => {
+                            let _ = response.await;
+                            break;
+                        }
+                        Err(IngressError::Full) => tokio::task::yield_now().await,
+                        Err(error) => panic!("unexpected ingress error: {error}"),
+                    }
+                }
+            })
+            .await
+            .unwrap();
+            assert_eq!(pool.len(), 1);
+        }
+        server.stop().unwrap();
     }
 
     #[tokio::test]

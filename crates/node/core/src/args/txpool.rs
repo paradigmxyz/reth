@@ -58,9 +58,23 @@ pub struct DefaultTxPoolValues {
     transactions_backup_path: Option<PathBuf>,
     disable_transactions_backup: bool,
     max_batch_size: usize,
+    recovery_threads: Option<usize>,
+    recovery_batch_size: usize,
 }
 
 impl DefaultTxPoolValues {
+    /// Sets the dedicated recovery thread count; None selects half the available CPUs.
+    pub const fn with_recovery_threads(mut self, threads: Option<usize>) -> Self {
+        self.recovery_threads = threads;
+        self
+    }
+
+    /// Sets the maximum number of transactions in a recovery chunk.
+    pub const fn with_recovery_batch_size(mut self, size: usize) -> Self {
+        self.recovery_batch_size = size;
+        self
+    }
+
     /// Initialize the global transaction pool defaults with this configuration
     pub fn try_init(self) -> Result<(), Self> {
         TXPOOL_DEFAULTS.set(self)
@@ -284,7 +298,9 @@ impl Default for DefaultTxPoolValues {
             max_queued_lifetime: MAX_QUEUED_TRANSACTION_LIFETIME,
             transactions_backup_path: None,
             disable_transactions_backup: false,
-            max_batch_size: 1,
+            max_batch_size: 32,
+            recovery_threads: None,
+            recovery_batch_size: 32,
         }
     }
 }
@@ -411,9 +427,17 @@ pub struct TxPoolArgs {
     )]
     pub disable_transactions_backup: bool,
 
-    /// Max batch size for transaction pool insertions
+    /// Max batch size for shared RPC and P2P transaction validation and insertion
     #[arg(long = "txpool.max-batch-size", value_parser = RangedU64ValueParser::<usize>::new().range(1..), default_value_t = DefaultTxPoolValues::get_global().max_batch_size)]
     pub max_batch_size: usize,
+
+    /// Dedicated transaction recovery threads. Defaults to half the available CPUs, at least one.
+    #[arg(long = "txpool.recovery-threads", value_parser = RangedU64ValueParser::<usize>::new().range(1..), default_value = Resettable::from(DefaultTxPoolValues::get_global().recovery_threads.map(|v| v.to_string().into())))]
+    pub recovery_threads: Option<usize>,
+
+    /// Maximum transactions dispatched together to a recovery thread.
+    #[arg(long = "txpool.recovery-batch-size", value_parser = RangedU64ValueParser::<usize>::new().range(1..), default_value_t = DefaultTxPoolValues::get_global().recovery_batch_size)]
+    pub recovery_batch_size: usize,
 }
 
 impl TxPoolArgs {
@@ -467,6 +491,8 @@ impl Default for TxPoolArgs {
             transactions_backup_path,
             disable_transactions_backup,
             max_batch_size,
+            recovery_threads,
+            recovery_batch_size,
         } = DefaultTxPoolValues::get_global().clone();
         Self {
             pending_max_count,
@@ -499,6 +525,8 @@ impl Default for TxPoolArgs {
             transactions_backup_path,
             disable_transactions_backup,
             max_batch_size,
+            recovery_threads,
+            recovery_batch_size,
         }
     }
 }
@@ -640,6 +668,8 @@ mod tests {
             transactions_backup_path: Some(PathBuf::from("/tmp/txpool-backup")),
             disable_transactions_backup: false,
             max_batch_size: 10,
+            recovery_threads: None,
+            recovery_batch_size: 32,
         };
 
         let parsed_args = CommandParser::<TxPoolArgs>::parse_from([

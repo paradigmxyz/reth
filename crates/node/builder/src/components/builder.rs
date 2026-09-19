@@ -387,7 +387,11 @@ where
 
         let evm_config = executor_builder.build_evm(context).await?;
         let pool = pool_builder.build_pool(context, evm_config.clone()).await?;
-        let network = network_builder.build_network(context, pool.clone()).await?;
+        let (processor, transaction_batcher) = PoolB::build_batcher(context, pool.clone());
+        context.task_executor().spawn_critical_task("tx-batcher", processor);
+        let network = network_builder
+            .build_network(context, pool.clone(), transaction_batcher.clone())
+            .await?;
         let payload_builder_handle = payload_builder
             .spawn_payload_builder_service(context, pool.clone(), evm_config.clone())
             .await?;
@@ -395,6 +399,7 @@ where
 
         Ok(Components {
             transaction_pool: pool,
+            transaction_batcher,
             evm_config,
             network,
             payload_builder_handle,
@@ -518,6 +523,7 @@ where
         self,
         ctx: &BuilderContext<N>,
         _pool: Pool,
+        _batcher: reth_transaction_pool::BatchTxHandle<Pool::Transaction>,
     ) -> eyre::Result<Self::Network> {
         Ok(NoopNetwork::new().with_chain_id(ctx.chain_spec().chain_id()))
     }

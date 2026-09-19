@@ -33,13 +33,15 @@ use policy::NetworkPolicies;
 pub(crate) use fetcher::{FetchEvent, TransactionFetcher};
 
 use self::constants::{
-    tx_manager::*, DEFAULT_SOFT_LIMIT_BYTE_SIZE_TRANSACTIONS_BROADCAST_MESSAGE,
+    tx_fetcher::MAX_COUNT_CANDIDATE_PEERS_PER_HASH, tx_manager::*,
+    DEFAULT_SOFT_LIMIT_BYTE_SIZE_TRANSACTIONS_BROADCAST_MESSAGE,
     SOFT_LIMIT_COUNT_HASHES_IN_GET_POOLED_TRANSACTIONS_REQUEST,
 };
 use crate::{
     budget::{
         DEFAULT_BUDGET_TRY_DRAIN_NETWORK_TRANSACTION_EVENTS,
         DEFAULT_BUDGET_TRY_DRAIN_PENDING_POOL_IMPORTS, DEFAULT_BUDGET_TRY_DRAIN_STREAM,
+        DEFAULT_BUDGET_TRY_DRAIN_TRANSACTION_IMPORT_RESULTS,
     },
     cache::LruCache,
     duration_metered_exec, metered_poll_nested_stream_with_budget,
@@ -78,6 +80,7 @@ use reth_network_types::ReputationChangeKind;
 use reth_primitives_traits::{InMemorySize, SignedTransaction};
 use reth_tokio_util::EventStream;
 use reth_transaction_pool::{
+    batcher::{IngressError, IngressOutcome},
     error::{PoolError, PoolResult},
     AddedTransactionOutcome, GetPooledTransactionLimit, PoolTransaction, PropagateKind,
     PropagatedTransactions, TransactionPool, ValidPoolTransaction,
@@ -85,7 +88,7 @@ use reth_transaction_pool::{
 use std::{
     pin::Pin,
     sync::{
-        atomic::{AtomicUsize, Ordering},
+        atomic::{AtomicBool, AtomicUsize, Ordering},
         Arc,
     },
     task::{Context, Poll},
@@ -318,11 +321,13 @@ impl<N: NetworkPrimitives> TransactionsHandle<N> {
 /// Rate limiting via reputation, bad transaction isolation, peer scoring.
 #[derive(Debug)]
 #[must_use = "Manager does nothing unless polled."]
-pub struct TransactionsManager<Pool, N: NetworkPrimitives = EthNetworkPrimitives> {
+pub struct TransactionsManager<Pool: TransactionPool, N: NetworkPrimitives = EthNetworkPrimitives> {
     /// Access to the transaction pool.
     pool: Pool,
     /// Cache of recovered transaction senders shared with payload execution, if enabled.
     sender_recovery_cache: Option<SenderRecoveryCache>,
+    /// Shared bounded recovery and insertion service supplied by node construction.
+    transaction_batcher: Option<reth_transaction_pool::BatchTxHandle<Pool::Transaction>>,
     /// Network access.
     network: NetworkHandle<N>,
     /// Subscriptions to all network related events.
@@ -350,6 +355,8 @@ pub struct TransactionsManager<Pool, N: NetworkPrimitives = EthNetworkPrimitives
     /// [`TransactionPool::pending_transactions_listener`] and arrive at the `pending_transactions`
     /// receiver.
     pool_imports: FuturesUnordered<PoolImportFuture>,
+    /// Shared-ingress results complete independently of their original P2P message.
+    ingress_imports: FuturesUnordered<Pin<Box<dyn Future<Output = IngressImportResult> + Send>>>,
     /// Stats on pending pool imports that help the node self-monitor.
     pending_pool_imports_info: PendingPoolImportsInfo,
     /// Bad imports.
@@ -440,12 +447,14 @@ impl<Pool: TransactionPool, N: NetworkPrimitives> TransactionsManager<Pool, N> {
         Self {
             pool,
             sender_recovery_cache: None,
+            transaction_batcher: None,
             network,
             network_events,
             transaction_fetcher,
             transactions_by_peers: Default::default(),
             announcement_hashes: B256Set::default(),
             pool_imports: Default::default(),
+            ingress_imports: Default::default(),
             pending_pool_imports_info,
             bad_imports: LruCache::with_hasher(DEFAULT_MAX_COUNT_BAD_IMPORTS, Default::default()),
             peers: Default::default(),
@@ -465,6 +474,15 @@ impl<Pool: TransactionPool, N: NetworkPrimitives> TransactionsManager<Pool, N> {
         TransactionsHandle { manager_tx: self.command_tx.clone() }
     }
 
+    /// Uses the node's shared bounded transaction batcher for incoming bodies.
+    pub fn with_transaction_batcher(
+        mut self,
+        batcher: reth_transaction_pool::BatchTxHandle<Pool::Transaction>,
+    ) -> Self {
+        self.transaction_batcher = Some(batcher);
+        self
+    }
+
     /// Uses the provided sender recovery cache.
     pub fn with_sender_recovery_cache(mut self, cache: SenderRecoveryCache) -> Self {
         self.sender_recovery_cache = Some(cache);
@@ -475,7 +493,8 @@ impl<Pool: TransactionPool, N: NetworkPrimitives> TransactionsManager<Pool, N> {
     ///
     /// Fetch responses are admitted in full when capacity remains, so one response can exceed
     /// the limit by at most 255 transactions (the 256-hash request cap minus one free slot).
-    /// Further responses and requests wait until imports fall below the limit again.
+    /// Further requests wait until imports fall below the limit again. Shared ingress drops
+    /// responses at capacity; custom pools wait before consuming another response.
     fn has_capacity_for_pending_pool_imports(&self) -> bool {
         self.remaining_pool_import_capacity() > 0
     }
@@ -638,6 +657,30 @@ impl<Pool: TransactionPool, N: NetworkPrimitives> TransactionsManager<Pool, N> {
 }
 
 impl<Pool: TransactionPool, N: NetworkPrimitives> TransactionsManager<Pool, N> {
+    /// Applies a shared-batcher result to peer attribution and bad-transaction tracking.
+    /// Recovery failures penalize peers at most once per source message; local overload
+    /// only clears attribution without penalizing peers or scheduling a refetch.
+    fn on_ingress_import_result(&mut self, (hash, result, reported): IngressImportResult) {
+        match result {
+            Ok(_) => self.on_good_import(hash),
+            Err(IngressError::Pool(error)) => self.on_bad_import(error),
+            Err(IngressError::Recovery(_)) => {
+                if let Some(peers) = self.transactions_by_peers.remove(&hash) &&
+                    !reported.swap(true, Ordering::Relaxed)
+                {
+                    for peer in peers {
+                        self.report_peer_bad_transactions(peer);
+                    }
+                }
+            }
+            Err(IngressError::Full | IngressError::Closed) => {
+                // Local overload is neither a peer fault nor a reason to fetch the same
+                // transaction again while its memory requirements cannot be admitted.
+                self.transactions_by_peers.remove(&hash);
+            }
+        }
+    }
+
     /// Processes a batch import results.
     fn on_batch_import_result(&mut self, batch_results: Vec<PoolResult<AddedTransactionOutcome>>) {
         for res in batch_results {
@@ -1310,9 +1353,9 @@ where
 
     /// Starts the import process for the given transactions.
     ///
-    /// Callers must check import capacity before consuming a fetch response. Responses are
-    /// admitted in full and may overshoot the soft limit by one bounded response; broadcasts
-    /// are truncated to their available capacity.
+    /// Fetched responses may overshoot the soft limit by one bounded response. At capacity,
+    /// shared ingress drops further responses; custom pools must pause response consumption.
+    /// Broadcasts are truncated to their available capacity.
     fn import_transactions(
         &mut self,
         peer_id: PeerId,
@@ -1338,9 +1381,17 @@ where
         };
         let is_broadcast = source.is_broadcast();
         let mut transactions = transactions.0;
+        let ingress = self.transaction_batcher.clone();
 
-        // Fetched batches may exceed the soft limit: their request size is bounded, and the
-        // caller stops consuming responses until capacity becomes available again.
+        if !is_broadcast && ingress.is_some() && !self.has_capacity_for_pending_pool_imports() {
+            self.metrics
+                .skipped_transactions_pending_pool_imports_at_capacity
+                .increment(transactions.len() as u64);
+            return
+        }
+
+        // One fetched batch may exceed the soft limit because its request size is bounded.
+        // Subsequent responses are dropped above, or left unpolled for custom pools.
         if is_broadcast {
             let capacity = self.remaining_broadcast_import_capacity();
             if transactions.len() > capacity {
@@ -1399,7 +1450,9 @@ where
         transactions.retain(|tx| {
             if let Entry::Occupied(mut entry) = self.transactions_by_peers.entry(*tx.tx_hash()) {
                 let peers = entry.get_mut();
-                if !peers.contains(&peer_id) {
+                // Paused validation can outlive many peer sessions. Bound attribution even
+                // when distinct peers repeatedly deliver the same pending transaction.
+                if peers.len() < MAX_COUNT_CANDIDATE_PEERS_PER_HASH && !peers.contains(&peer_id) {
                     peers.push(peer_id);
                 }
                 return false
@@ -1427,66 +1480,108 @@ where
                 .increment(already_known_txns_count as u64);
         }
 
-        let txs_len = transactions.len();
-
-        let recover = |tx| {
-            let recovered = if let Some(cache) = &self.sender_recovery_cache {
-                Pool::Transaction::try_recover_with_cache(tx, cache)
-            } else {
-                Pool::Transaction::try_recover(tx)
-            };
-            match recovered {
-                Ok(tx) => Some(tx),
-                Err(badtx) => {
-                    trace!(target: "net::tx",
-                        peer_id=format!("{peer_id:#}"),
-                        hash=%badtx.tx_hash(),
-                        client_version=%client_version,
-                        "failed ecrecovery for transaction"
-                    );
-                    None
+        if let Some(ingress) = ingress {
+            let reported_recovery_failure = Arc::new(AtomicBool::new(false));
+            for transaction in transactions {
+                let hash = *transaction.tx_hash();
+                // Entries are inserted as work is admitted, including duplicates in one message.
+                if self.transactions_by_peers.contains_key(&hash) {
+                    continue
+                }
+                match ingress.try_submit_pooled(transaction) {
+                    Ok(response) => {
+                        self.transactions_by_peers.insert(hash, smallvec::smallvec![peer_id]);
+                        self.metrics.pending_pool_imports.increment(1.0);
+                        self.pending_pool_imports_info
+                            .pending_pool_imports
+                            .fetch_add(1, Ordering::Relaxed);
+                        let guard = PendingImportGuard {
+                            pending: self.pending_pool_imports_info.pending_pool_imports.clone(),
+                            metric: self.metrics.pending_pool_imports.clone(),
+                        };
+                        let reported = reported_recovery_failure.clone();
+                        self.ingress_imports.push(Box::pin(async move {
+                            let result = response.await.unwrap_or(Err(IngressError::Closed)).map(
+                                |outcome| match outcome {
+                                    IngressOutcome::Inserted(outcome) => outcome,
+                                    IngressOutcome::Recovered(..) => {
+                                        unreachable!("insertion request")
+                                    }
+                                },
+                            );
+                            drop(guard);
+                            (hash, result, reported)
+                        }));
+                    }
+                    Err(_) => {
+                        self.metrics
+                            .skipped_transactions_pending_pool_imports_at_capacity
+                            .increment(1);
+                    }
                 }
             }
-        };
+        } else {
+            let txs_len = transactions.len();
 
-        let new_txs = transactions.into_par_iter().filter_map(recover).collect::<Vec<_>>();
+            let recover = |tx| {
+                let recovered = if let Some(cache) = &self.sender_recovery_cache {
+                    Pool::Transaction::try_recover_with_cache(tx, cache)
+                } else {
+                    Pool::Transaction::try_recover(tx)
+                };
+                match recovered {
+                    Ok(tx) => Some(tx),
+                    Err(badtx) => {
+                        trace!(target: "net::tx",
+                            peer_id=format!("{peer_id:#}"),
+                            hash=%badtx.tx_hash(),
+                            client_version=%client_version,
+                            "failed ecrecovery for transaction"
+                        );
+                        None
+                    }
+                }
+            };
 
-        has_bad_transactions |= new_txs.len() != txs_len;
+            let new_txs = transactions.into_par_iter().filter_map(recover).collect::<Vec<_>>();
 
-        // Record the transactions as seen by the peer
-        for tx in &new_txs {
-            self.transactions_by_peers.insert(*tx.hash(), smallvec::smallvec![peer_id]);
-        }
+            has_bad_transactions |= new_txs.len() != txs_len;
 
-        // 3. import new transactions as a batch to minimize lock contention on the underlying
-        // pool
-        if !new_txs.is_empty() {
-            let pool = self.pool.clone();
-            // update metrics
-            let metric_pending_pool_imports = self.metrics.pending_pool_imports.clone();
-            metric_pending_pool_imports.increment(new_txs.len() as f64);
+            // Record the transactions as seen by the peer
+            for tx in &new_txs {
+                self.transactions_by_peers.insert(*tx.hash(), smallvec::smallvec![peer_id]);
+            }
 
-            // update self-monitoring info
-            self.pending_pool_imports_info
-                .pending_pool_imports
-                .fetch_add(new_txs.len(), Ordering::Relaxed);
-            let tx_manager_info_pending_pool_imports =
-                self.pending_pool_imports_info.pending_pool_imports.clone();
-
-            trace!(target: "net::tx::propagation", new_txs_len=?new_txs.len(), "Importing new transactions");
-            let import = Box::pin(async move {
-                let added = new_txs.len();
-                let res = pool.add_external_transactions(new_txs).await;
-
+            // 3. import new transactions as a batch to minimize lock contention on the underlying
+            // pool
+            if !new_txs.is_empty() {
+                let pool = self.pool.clone();
                 // update metrics
-                metric_pending_pool_imports.decrement(added as f64);
+                let metric_pending_pool_imports = self.metrics.pending_pool_imports.clone();
+                metric_pending_pool_imports.increment(new_txs.len() as f64);
+
                 // update self-monitoring info
-                tx_manager_info_pending_pool_imports.fetch_sub(added, Ordering::Relaxed);
+                self.pending_pool_imports_info
+                    .pending_pool_imports
+                    .fetch_add(new_txs.len(), Ordering::Relaxed);
+                let tx_manager_info_pending_pool_imports =
+                    self.pending_pool_imports_info.pending_pool_imports.clone();
 
-                res
-            });
+                trace!(target: "net::tx::propagation", new_txs_len=?new_txs.len(), "Importing new transactions");
+                let import = Box::pin(async move {
+                    let added = new_txs.len();
+                    let res = pool.add_external_transactions(new_txs).await;
 
-            self.pool_imports.push(import);
+                    // update metrics
+                    metric_pending_pool_imports.decrement(added as f64);
+                    // update self-monitoring info
+                    tx_manager_info_pending_pool_imports.fetch_sub(added, Ordering::Relaxed);
+
+                    res
+                });
+
+                self.pool_imports.push(import);
+            }
         }
 
         if num_already_seen_by_peer > 0 {
@@ -1564,11 +1659,20 @@ where
         let mut poll_durations = TxManagerPollDurations::default();
 
         let this = self.get_mut();
+        let has_shared_ingress = this.transaction_batcher.is_some();
 
         // All streams are polled until their corresponding budget is exhausted, then we manually
         // yield back control to tokio. See `NetworkManager` for more context on the design
         // pattern.
 
+        let mut maybe_more_ingress_results = metered_poll_nested_stream_with_budget!(
+            poll_durations.acc_pending_imports,
+            "net::tx",
+            "Shared transaction ingress results",
+            DEFAULT_BUDGET_TRY_DRAIN_TRANSACTION_IMPORT_RESULTS,
+            this.ingress_imports.poll_next_unpin(cx),
+            |result| this.on_ingress_import_result(result)
+        );
         // Advance network/peer related events (update peers map).
         let maybe_more_network_events = metered_poll_nested_stream_with_budget!(
             poll_durations.acc_network_events,
@@ -1599,17 +1703,14 @@ where
         // Advance inflight fetch requests (flush transaction fetcher and queue for
         // import to pool).
         //
-        // Pace response consumption with the soft import limit. Dispatch checks capacity but
-        // does not reserve it for outstanding requests, so concurrent responses can exceed it.
-        // Admit one complete response while capacity remains (at most 256 transactions), then
-        // pause here if it fills or overshoots the limit. Existing requests continue in flight;
-        // completed responses wait in their channels until pool imports free capacity.
+        // Shared ingress drains and drops excess responses rather than retaining decoded bodies
+        // for the duration of a payload pause. Custom pools keep their existing soft-limit pacing.
         let mut maybe_more_tx_fetch_events = metered_poll_nested_stream_with_budget!(
             poll_durations.acc_fetch_events,
             "net::tx",
             "Transaction fetch events stream",
             DEFAULT_BUDGET_TRY_DRAIN_STREAM,
-            if this.has_capacity_for_pending_pool_imports() {
+            if has_shared_ingress || this.has_capacity_for_pending_pool_imports() {
                 this.transaction_fetcher.poll_next_unpin(cx)
             } else {
                 Poll::Pending
@@ -1620,6 +1721,16 @@ where
         // Remember whether response polling stopped at capacity so imports completing below
         // can trigger another poll even if the waiting response has not registered a waker yet.
         let fetcher_paused_at_capacity = !this.has_capacity_for_pending_pool_imports();
+
+        // Newly admitted receivers must be polled before going idle to register wakeups.
+        maybe_more_ingress_results |= metered_poll_nested_stream_with_budget!(
+            poll_durations.acc_pending_imports,
+            "net::tx",
+            "Shared transaction ingress results",
+            DEFAULT_BUDGET_TRY_DRAIN_TRANSACTION_IMPORT_RESULTS,
+            this.ingress_imports.poll_next_unpin(cx),
+            |result| this.on_ingress_import_result(result)
+        );
 
         // Advance admitted batches and free capacity for more responses.
         let maybe_more_pool_imports = metered_poll_nested_stream_with_budget!(
@@ -1696,13 +1807,15 @@ where
         );
 
         this.transaction_fetcher.update_metrics();
+        this.update_poll_metrics(start, poll_durations);
 
         // Revisit the fetcher if imports freed capacity after response polling was paused.
         let resume_fetcher =
             fetcher_paused_at_capacity && this.has_capacity_for_pending_pool_imports();
 
         // all channels are fully drained and import futures pending
-        if maybe_more_network_events ||
+        if maybe_more_ingress_results ||
+            maybe_more_network_events ||
             maybe_more_commands ||
             maybe_more_tx_events ||
             maybe_more_tx_fetch_events ||
@@ -1714,8 +1827,6 @@ where
             cx.waker().wake_by_ref();
             return Poll::Pending
         }
-
-        this.update_poll_metrics(start, poll_durations);
 
         Poll::Pending
     }
@@ -2326,6 +2437,23 @@ impl<N: NetworkPrimitives> InMemorySize for NetworkTransactionEvent<N> {
     }
 }
 
+/// Releases manager bookkeeping even if the manager is dropped before polling an import.
+struct PendingImportGuard {
+    pending: Arc<AtomicUsize>,
+    metric: reth_metrics::metrics::Gauge,
+}
+
+impl Drop for PendingImportGuard {
+    fn drop(&mut self) {
+        self.pending.fetch_sub(1, Ordering::Relaxed);
+        self.metric.decrement(1.0);
+    }
+}
+
+/// A transaction's import result and a flag shared by its source message to deduplicate
+/// recovery-failure penalties.
+type IngressImportResult = (TxHash, Result<AddedTransactionOutcome, IngressError>, Arc<AtomicBool>);
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2375,6 +2503,24 @@ mod tests {
         CoinbaseTipOrdering<EthPooledTransaction>,
         InMemoryBlobStore,
     >;
+
+    #[tokio::test]
+    async fn ingress_overload_drops_without_refetch_or_bad_import_caching() {
+        let (mut manager, _network) = new_tx_manager().await;
+        let peer_id = PeerId::new([1; 64]);
+        let (peer, _session) = new_mock_session(peer_id, EthVersion::Eth68);
+        manager.peers.insert(peer_id, peer);
+        let hash = B256::random();
+        manager.transactions_by_peers.insert(hash, smallvec::smallvec![peer_id]);
+        manager.on_ingress_import_result((
+            hash,
+            Err(IngressError::Full),
+            Arc::new(AtomicBool::new(false)),
+        ));
+        assert!(!manager.transactions_by_peers.contains_key(&hash));
+        assert!(!manager.bad_imports.contains(&hash));
+        assert!(!manager.transaction_fetcher.queued_hashes(&peer_id).contains(&hash));
+    }
 
     #[tokio::test]
     async fn announcement_policy_preserves_order_and_skips_pending_and_bad_imports() {
@@ -2624,11 +2770,19 @@ mod tests {
             peer_id: *handle1.peer_id(),
             msg: Transactions(vec![signed_tx.clone()]),
         });
-        poll_fn(|cx| {
-            let _ = transactions.poll_unpin(cx);
-            Poll::Ready(())
-        })
-        .await;
+        tokio::time::timeout(
+            std::time::Duration::from_secs(2),
+            poll_fn(|cx| {
+                let _ = transactions.poll_unpin(cx);
+                if pool.is_empty() {
+                    Poll::Pending
+                } else {
+                    Poll::Ready(())
+                }
+            }),
+        )
+        .await
+        .unwrap();
         assert!(!NetworkInfo::is_initially_syncing(&network_handle));
         assert!(NetworkInfo::is_syncing(&network_handle));
         assert!(!pool.is_empty());
@@ -2728,12 +2882,19 @@ mod tests {
             .send(Ok(PooledTransactions(message)))
             .expect("should send peer_1 response to tx manager");
 
-        // adance the transaction manager future
-        poll_fn(|cx| {
-            let _ = tx_manager.poll_unpin(cx);
-            Poll::Ready(())
-        })
-        .await;
+        tokio::time::timeout(
+            std::time::Duration::from_secs(2),
+            poll_fn(|cx| {
+                let _ = tx_manager.poll_unpin(cx);
+                if pool.get_all(txs_hashes.clone()).len() == txs_hashes.len() {
+                    Poll::Ready(())
+                } else {
+                    Poll::Pending
+                }
+            }),
+        )
+        .await
+        .unwrap();
 
         // ensure that the transactions corresponding to the transaction hashes have been
         // successfully retrieved and stored in the Pool.
@@ -2807,11 +2968,19 @@ mod tests {
             .contains(handle1.peer_id()));
 
         // advance the transaction manager future
-        poll_fn(|cx| {
-            let _ = transactions.poll_unpin(cx);
-            Poll::Ready(())
-        })
-        .await;
+        tokio::time::timeout(
+            std::time::Duration::from_secs(2),
+            poll_fn(|cx| {
+                let _ = transactions.poll_unpin(cx);
+                if pool.is_empty() {
+                    Poll::Pending
+                } else {
+                    Poll::Ready(())
+                }
+            }),
+        )
+        .await
+        .unwrap();
 
         assert!(!pool.is_empty());
         assert!(pool.get(signed_tx.tx_hash()).is_some());

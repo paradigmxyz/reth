@@ -54,7 +54,7 @@ use tokio::{
 use crate::transactions::constants::tx_manager::DEFAULT_TX_MANAGER_CHANNEL_MEMORY_LIMIT_BYTES;
 
 /// A test network consisting of multiple peers.
-pub struct Testnet<C, Pool> {
+pub struct Testnet<C, Pool: TransactionPool> {
     /// All running peers in the network.
     peers: Vec<Peer<C, Pool>>,
 }
@@ -304,13 +304,13 @@ impl Testnet<NoopProvider, TestPool> {
     }
 }
 
-impl<C, Pool> Default for Testnet<C, Pool> {
+impl<C, Pool: TransactionPool> Default for Testnet<C, Pool> {
     fn default() -> Self {
         Self { peers: Vec::new() }
     }
 }
 
-impl<C, Pool> fmt::Debug for Testnet<C, Pool> {
+impl<C, Pool: TransactionPool> fmt::Debug for Testnet<C, Pool> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Testnet {{}}").finish_non_exhaustive()
     }
@@ -349,7 +349,7 @@ where
 
 /// A handle to a [`Testnet`] that can be shared.
 #[derive(Debug)]
-pub struct TestnetHandle<C, Pool> {
+pub struct TestnetHandle<C, Pool: TransactionPool> {
     _handle: JoinHandle<()>,
     peers: Vec<PeerHandle<Pool>>,
     terminate: oneshot::Sender<oneshot::Sender<Testnet<C, Pool>>>,
@@ -357,7 +357,7 @@ pub struct TestnetHandle<C, Pool> {
 
 // === impl TestnetHandle ===
 
-impl<C, Pool> TestnetHandle<C, Pool> {
+impl<C, Pool: TransactionPool> TestnetHandle<C, Pool> {
     /// Terminates the task and returns the [`Testnet`] back.
     pub async fn terminate(self) -> Testnet<C, Pool> {
         let (tx, rx) = oneshot::channel();
@@ -404,7 +404,7 @@ impl<C, Pool> TestnetHandle<C, Pool> {
 /// A peer in the [`Testnet`].
 #[pin_project]
 #[derive(Debug)]
-pub struct Peer<C, Pool = TestPool> {
+pub struct Peer<C, Pool: TransactionPool = TestPool> {
     #[pin]
     network: NetworkManager<EthNetworkPrimitives>,
     #[pin]

@@ -76,6 +76,14 @@ pub trait FullNodeComponents: FullNodeTypes + Clone + 'static {
     /// Network API.
     type Network: FullNetwork;
 
+    /// Returns the shared transaction batcher, when configured by node construction.
+    fn transaction_batcher(
+        &self,
+    ) -> Option<&reth_transaction_pool::BatchTxHandle<<Self::Pool as TransactionPool>::Transaction>>
+    {
+        None
+    }
+
     /// Returns the transaction pool of the node.
     fn pool(&self) -> &Self::Pool;
 

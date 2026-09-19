@@ -118,7 +118,7 @@ use alloy_primitives::{
     map::{AddressMap, B256Set},
     B256,
 };
-use reth_tasks::LazyHandle;
+use reth_tasks::{pause::TransactionIngressPause, LazyHandle};
 
 use crate::tree::{
     payload_processor::receipt_root_task::{IndexedReceipt, ReceiptRootTaskHandle},
@@ -306,6 +306,8 @@ where
     txpool_prewarm: Option<txpool_prewarm::Handle<Evm::Primitives, P, Evm>>,
     /// Scratch buffer reused for BAL hash encoding across validated blocks.
     bal_hash_buf: Vec<u8>,
+    /// Shared with the RPC/P2P batcher to pause ingress while processing a live block.
+    ingress_pause: Option<TransactionIngressPause>,
 }
 
 impl<N, P, Evm, V> BasicEngineValidator<P, Evm, V>
@@ -373,7 +375,14 @@ where
             state_root_strategy: Arc::new(DefaultStateRootStrategy::default()),
             txpool_prewarm: None,
             bal_hash_buf: Vec::new(),
+            ingress_pause: None,
         }
+    }
+
+    /// Shares the RPC/P2P transaction batcher's pause trigger with this payload validator.
+    pub fn with_ingress_pause(mut self, pause: TransactionIngressPause) -> Self {
+        self.ingress_pause = Some(pause);
+        self
     }
 
     /// Sets the state-root strategy used by payload validation.
@@ -493,6 +502,7 @@ where
         V: PayloadValidator<T, Block = N::Block> + Clone,
         Evm: ConfigureEngineEvm<T::ExecutionData, Primitives = N>,
     {
+        let _ingress_pause = self.ingress_pause.as_ref().map(TransactionIngressPause::pause);
         let parent_hash = input.parent_hash();
         let _txpool_pause = self.txpool_prewarm.as_ref().map(txpool_prewarm::Handle::pause);
         let txpool_snapshot =

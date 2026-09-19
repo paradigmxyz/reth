@@ -696,6 +696,20 @@ where
 {
     type Pool = EthTransactionPool<Node::Provider, DiskFileBlobStore, Evm>;
 
+    fn build_batcher(
+        ctx: &BuilderContext<Node>,
+        pool: Self::Pool,
+    ) -> (
+        reth_transaction_pool::BatchTxProcessor,
+        reth_transaction_pool::BatchTxHandle<<Self::Pool as TransactionPool>::Transaction>,
+    ) {
+        reth_transaction_pool::BatchTxProcessor::with_validation_executor(
+            pool,
+            ctx.transaction_batcher_config(),
+            ctx.sender_recovery_cache().cloned(),
+        )
+    }
+
     async fn build_pool(
         self,
         ctx: &BuilderContext<Node>,
@@ -780,9 +794,10 @@ where
         self,
         ctx: &BuilderContext<Node>,
         pool: Pool,
+        batcher: reth_transaction_pool::BatchTxHandle<Pool::Transaction>,
     ) -> eyre::Result<Self::Network> {
         let network = ctx.network_builder().await?;
-        let handle = ctx.start_network(network, pool);
+        let handle = ctx.start_network(network, pool, batcher);
         info!(target: "reth::cli", enode=%handle.local_node_record(), "P2P networking initialized");
         Ok(handle)
     }

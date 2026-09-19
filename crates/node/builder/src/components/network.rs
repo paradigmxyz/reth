@@ -17,6 +17,7 @@ pub trait NetworkBuilder<Node: FullNodeTypes, Pool: TransactionPool>: Send {
         self,
         ctx: &BuilderContext<Node>,
         pool: Pool,
+        batcher: reth_transaction_pool::BatchTxHandle<Pool::Transaction>,
     ) -> impl Future<Output = eyre::Result<Self::Network>> + Send;
 }
 
@@ -25,7 +26,12 @@ where
     Node: FullNodeTypes,
     Net: FullNetwork<Primitives: NetPrimitivesFor<PrimitivesTy<Node::Types>>>,
     Pool: TransactionPool,
-    F: Fn(&BuilderContext<Node>, Pool) -> Fut + Send,
+    F: Fn(
+            &BuilderContext<Node>,
+            Pool,
+            reth_transaction_pool::BatchTxHandle<Pool::Transaction>,
+        ) -> Fut
+        + Send,
     Fut: Future<Output = eyre::Result<Net>> + Send,
 {
     type Network = Net;
@@ -34,7 +40,8 @@ where
         self,
         ctx: &BuilderContext<Node>,
         pool: Pool,
+        batcher: reth_transaction_pool::BatchTxHandle<Pool::Transaction>,
     ) -> impl Future<Output = eyre::Result<Net>> + Send {
-        self(ctx, pool)
+        self(ctx, pool, batcher)
     }
 }

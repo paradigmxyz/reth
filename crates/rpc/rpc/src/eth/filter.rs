@@ -1050,7 +1050,7 @@ pub enum EthFilterError {
 impl From<EthFilterError> for jsonrpsee::types::error::ErrorObject<'static> {
     fn from(err: EthFilterError) -> Self {
         match err {
-            // geth and Nethermind answer -32000 for unknown filter ids
+            // Match the -32000 response used by other clients for unknown filter IDs.
             EthFilterError::FilterNotFound(_) => rpc_error_with_code(
                 jsonrpsee::types::error::CALL_EXECUTION_FAILED_CODE,
                 "filter not found",
