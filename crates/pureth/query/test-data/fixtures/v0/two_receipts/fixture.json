@@ -1,0 +1,43 @@
+{
+  "first_target": {
+    "field": "address",
+    "log_index": 0,
+    "receipt_index": 1
+  },
+  "receipt_count": 2,
+  "receipts": [
+    {
+      "contract_address": null,
+      "gas_used": 21000,
+      "logs": [
+        {
+          "address": "0x1111111111111111111111111111111111111111",
+          "data": "0x010203",
+          "topics": [
+            "0x2222222222222222222222222222222222222222222222222222222222222222"
+          ]
+        }
+      ],
+      "success": true,
+      "tx_type": 0
+    },
+    {
+      "contract_address": "0xcccccccccccccccccccccccccccccccccccccccc",
+      "gas_used": 29000,
+      "logs": [
+        {
+          "address": "0x3333333333333333333333333333333333333333",
+          "data": "0x04050607",
+          "topics": [
+            "0x4444444444444444444444444444444444444444444444444444444444444444"
+          ]
+        }
+      ],
+      "success": true,
+      "tx_type": 2
+    }
+  ],
+  "root_type": "ReceiptsSSZ",
+  "schema_id": "pureth-receipt-v0",
+  "source_scenario": "two ordered distinct receipts; target is receipt one log zero"
+}
