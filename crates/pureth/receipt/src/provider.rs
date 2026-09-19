@@ -5,11 +5,16 @@ use crate::{
 use alloy_consensus::{TxLegacy, TxType};
 use alloy_primitives::{Address, Bytes, Log, Signature, TxKind, B256};
 use reth_ethereum_primitives::{
-    Block, BlockBody, Receipt, Transaction as EthereumTransaction, TransactionSigned,
+    Block, BlockBody, EthPrimitives, Receipt, Transaction as EthereumTransaction, TransactionSigned,
 };
 use reth_primitives_traits::RecoveredBlock;
+use reth_provider::{
+    providers::{BlockchainProvider, ProviderNodeTypes},
+    BlockReader, ProviderError, ReceiptProvider, TransactionVariant,
+};
 
 pub const DETERMINISTIC_PRODUCER_REVISION: &str = "deterministic-receipt-provider-v0";
+pub const RETH_HISTORICAL_PRODUCER_REVISION: &str = "reth-historical-receipt-provider-v0";
 pub const SINGLETON_BLOCK_HASH: B256 =
     alloy_primitives::b256!("0101010101010101010101010101010101010101010101010101010101010101");
 pub const MULTIPLE_LOGS_BLOCK_HASH: B256 =
@@ -65,6 +70,44 @@ pub struct ProviderSnapshot {
 }
 
 impl ProviderSnapshot {
+    pub fn from_reth_historical<N>(
+        provider: &BlockchainProvider<N>,
+        block_hash: B256,
+    ) -> Result<Self, HistoricalAcquisitionError>
+    where
+        N: ProviderNodeTypes<Primitives = EthPrimitives>,
+    {
+        let (block, receipts) = {
+            let view = provider
+                .consistent_provider()
+                .map_err(HistoricalAcquisitionError::ConsistentView)?;
+            let block = view
+                .recovered_block(block_hash.into(), TransactionVariant::WithHash)
+                .map_err(HistoricalAcquisitionError::BlockRead)?
+                .ok_or(HistoricalAcquisitionError::BlockUnavailable)?;
+            let receipts = view
+                .receipts_by_block(block_hash.into())
+                .map_err(HistoricalAcquisitionError::ReceiptsRead)?
+                .ok_or(HistoricalAcquisitionError::ReceiptsUnavailable)?;
+            (block, receipts)
+        };
+
+        let receipts = convert_receipts(&block, &receipts)
+            .map_err(HistoricalAcquisitionError::ReceiptConversion)?;
+        let receipt_snapshot = ReceiptSnapshot::build(receipts)
+            .map_err(HistoricalAcquisitionError::TreeConstruction)?;
+
+        Ok(Self {
+            block_hash,
+            block_status: CanonicalityStatus::Canonical,
+            object: ObjectKind::Receipts,
+            schema_id: RECEIPT_SCHEMA_ID,
+            root_context: RootContext::RethExperimentalUnanchored,
+            producer_revision: RETH_HISTORICAL_PRODUCER_REVISION,
+            receipt_snapshot,
+        })
+    }
+
     pub const fn block_hash(&self) -> B256 {
         self.block_hash
     }
@@ -120,6 +163,17 @@ pub enum RootContext {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ProviderBuildError {
     RecoveredBlock,
+    ReceiptConversion(ReceiptConversionError),
+    TreeConstruction(TreeConstructionError),
+}
+
+#[derive(Debug)]
+pub enum HistoricalAcquisitionError {
+    ConsistentView(ProviderError),
+    BlockRead(ProviderError),
+    ReceiptsRead(ProviderError),
+    BlockUnavailable,
+    ReceiptsUnavailable,
     ReceiptConversion(ReceiptConversionError),
     TreeConstruction(TreeConstructionError),
 }
@@ -230,6 +284,117 @@ fn log(address: Address, topics: Vec<B256>, data: &[u8]) -> Log {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use reth_provider::{
+        test_utils::{create_test_provider_factory, MockNodeTypesWithDB},
+        BlockWriter, DBProvider, DatabaseProviderFactory, ExecutionOutcome, OriginalValuesKnown,
+        StateWriteConfig, StateWriter,
+    };
+
+    fn historical_provider(
+        receipts: Option<Vec<Receipt>>,
+    ) -> (BlockchainProvider<MockNodeTypesWithDB>, B256) {
+        let factory = create_test_provider_factory();
+        let provider = factory.database_provider_rw().unwrap();
+        let block = RecoveredBlock::try_new_unhashed(
+            Block {
+                header: Default::default(),
+                body: BlockBody { transactions: vec![transaction(0)], ..Default::default() },
+            },
+            vec![Address::repeat_byte(0x66)],
+        )
+        .unwrap();
+        let block_hash = block.hash();
+        provider.insert_block(&block).unwrap();
+        if let Some(receipts) = receipts {
+            provider
+                .write_state(
+                    &ExecutionOutcome {
+                        first_block: 0,
+                        receipts: vec![receipts],
+                        ..Default::default()
+                    },
+                    OriginalValuesKnown::No,
+                    StateWriteConfig::default(),
+                )
+                .unwrap();
+        }
+        provider.commit().unwrap();
+
+        (BlockchainProvider::new(factory).unwrap(), block_hash)
+    }
+
+    fn singleton_receipts() -> Vec<Receipt> {
+        vec![receipt(
+            21_000,
+            vec![log(Address::repeat_byte(0x11), vec![B256::repeat_byte(0x22)], &[1, 2, 3])],
+        )]
+    }
+
+    #[test]
+    fn historical_provider_returns_a_coherent_snapshot() {
+        let (provider, block_hash) = historical_provider(Some(singleton_receipts()));
+        let result = ProviderSnapshot::from_reth_historical(&provider, block_hash).unwrap();
+        let snapshot = result.receipt_snapshot();
+
+        assert_eq!(result.block_hash(), block_hash);
+        assert_eq!(result.block_status(), CanonicalityStatus::Canonical);
+        assert_eq!(result.object(), ObjectKind::Receipts);
+        assert_eq!(result.schema_id(), RECEIPT_SCHEMA_ID);
+        assert_eq!(result.root_context(), RootContext::RethExperimentalUnanchored);
+        assert_eq!(result.producer_revision(), RETH_HISTORICAL_PRODUCER_REVISION);
+        assert_eq!(snapshot.receipts().len(), 1);
+        assert_eq!(
+            snapshot.receipts().get(0).unwrap().logs()[0].address(),
+            Address::repeat_byte(0x11)
+        );
+        assert_eq!(
+            result.root(),
+            alloy_primitives::b256!(
+                "5036e5a260a45255df46094662d27826bb1f417e3dccb4b3a4fc313876cd4e33"
+            )
+        );
+        assert_eq!(result.root(), snapshot.root());
+        assert_eq!(result.root(), snapshot.tree().root());
+    }
+
+    #[test]
+    fn historical_provider_distinguishes_missing_blocks() {
+        let (provider, _) = historical_provider(Some(singleton_receipts()));
+
+        let result = ProviderSnapshot::from_reth_historical(&provider, B256::repeat_byte(0xff));
+        assert!(matches!(result, Err(HistoricalAcquisitionError::BlockUnavailable)));
+    }
+
+    #[test]
+    fn historical_provider_distinguishes_missing_receipts() {
+        let (provider, block_hash) = historical_provider(None);
+
+        let result = ProviderSnapshot::from_reth_historical(&provider, block_hash);
+        assert!(matches!(result, Err(HistoricalAcquisitionError::ReceiptsUnavailable)));
+    }
+
+    #[test]
+    fn historical_provider_preserves_conversion_errors() {
+        let receipts = vec![Receipt {
+            tx_type: TxType::Eip1559,
+            success: true,
+            cumulative_gas_used: 21_000,
+            logs: Vec::new(),
+        }];
+        let (provider, block_hash) = historical_provider(Some(receipts));
+
+        let result = ProviderSnapshot::from_reth_historical(&provider, block_hash);
+        assert!(matches!(
+            result,
+            Err(HistoricalAcquisitionError::ReceiptConversion(
+                ReceiptConversionError::TransactionTypeMismatch {
+                    index: 0,
+                    transaction,
+                    receipt,
+                }
+            )) if transaction == TxType::Legacy as u8 && receipt == TxType::Eip1559 as u8
+        ));
+    }
 
     #[test]
     fn known_blocks_return_their_coherent_snapshots() {

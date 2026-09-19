@@ -10047,6 +10047,7 @@ dependencies = [
  "alloy-primitives",
  "reth-ethereum-primitives",
  "reth-primitives-traits",
+ "reth-provider",
  "serde_json",
  "tree_hash",
 ]
