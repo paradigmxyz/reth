@@ -597,6 +597,10 @@ impl<N: NetworkPrimitives> SessionManager<N> {
                     conn.set_reject_block_announcements(true);
                 }
 
+                // Responses are correlated with their request before their payload is decoded,
+                // see `ActiveSession::on_raw_response`.
+                conn.set_lazy_responses(true);
+
                 let session = ActiveSession {
                     next_id: 0,
                     remote_peer_id: peer_id,
