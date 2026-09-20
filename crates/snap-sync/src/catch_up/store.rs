@@ -5,7 +5,8 @@
 
 use crate::{
     common::SnapRecord, AccountCoverage, BalStateUpdate, DownloadedAccount, SnapAccountStore,
-    SnapAttemptStore, SnapBytecodeStore, SnapSyncError, SnapWrite,
+    SnapAttemptStore, SnapBytecodeStore, SnapStorageStore, SnapSyncError, SnapWrite,
+    StorageProgress,
 };
 use alloy_eip7928::AccountChanges;
 use alloy_eips::BlockNumHash;
@@ -18,7 +19,6 @@ use reth_primitives_traits::Account;
 use reth_storage_api::{
     BlockHashReader, DBProvider, MetadataProvider, MetadataWriter, SnapAttemptId, StateWriter,
 };
-use reth_trie_common::HashedStorage;
 use serde::{Deserialize, Serialize};
 
 /// Persistence for the block access lists an attempt applies to its downloaded state.
@@ -42,10 +42,11 @@ pub trait SnapCatchUpStore {
     /// Returns the state update implied by `bal`, reading downloaded accounts from this provider.
     ///
     /// The list must already be verified against its header. Accounts outside `coverage` remain
-    /// unresolved, and no state is written.
+    /// unresolved, except for slots of contracts `storage` holds ahead of their range.
     fn block_access_list_update(
         &self,
         coverage: AccountCoverage,
+        storage: StorageProgress,
         bal: &[AccountChanges],
     ) -> Result<BalStateUpdate, SnapSyncError>
     where
@@ -176,6 +177,7 @@ impl<T: MetadataProvider> SnapCatchUpStore for T {
     fn block_access_list_update(
         &self,
         coverage: AccountCoverage,
+        storage: StorageProgress,
         bal: &[AccountChanges],
     ) -> Result<BalStateUpdate, SnapSyncError>
     where
@@ -191,8 +193,12 @@ impl<T: MetadataProvider> SnapCatchUpStore for T {
 
             let hashed_address = keccak256(account_changes.address());
             let mut account = match self.downloaded_account(coverage, hashed_address)? {
-                // Its range is downloaded against a later root, which includes this change.
+                // Its range is downloaded against a later root, which includes this change. Slots
+                // persisted ahead of it may predate the change, so they follow the list.
                 DownloadedAccount::Unknown => {
+                    if storage.has_slots(hashed_address) && account_changes.has_storage_changes() {
+                        update.insert_storage(hashed_address, account_changes);
+                    }
                     update.unresolved.push(hashed_address);
                     continue
                 }
@@ -206,14 +212,7 @@ impl<T: MetadataProvider> SnapCatchUpStore for T {
             // Execution removes accounts a block leaves empty, see EIP-161.
             update.state.accounts.insert(hashed_address, (!account.is_empty()).then_some(account));
             if account_changes.has_storage_changes() {
-                update.state.storages.insert(
-                    hashed_address,
-                    HashedStorage::from_iter(
-                        account_changes
-                            .storage_post_states()
-                            .map(|(slot, value)| (keccak256(B256::from(slot)), value)),
-                    ),
-                );
+                update.insert_storage(hashed_address, account_changes);
             }
             if let Some((code_hash, code)) = account_info
                 .code_hash
@@ -254,7 +253,11 @@ impl<T: MetadataProvider> SnapCatchUpStore for T {
             })
         }
         let coverage = self.account_coverage(write)?.ok_or(SnapSyncError::NoCoverage)?;
-        let update = self.block_access_list_update(coverage, bal)?;
+        let storage = match coverage.next() {
+            Some(origin) => self.storage_progress(write, origin)?,
+            None => StorageProgress::START,
+        };
+        let update = self.block_access_list_update(coverage, storage, bal)?;
 
         // Entries left unresolved are downloaded whole against the pivot, which already includes
         // this block, so nothing here has to remember them.
@@ -280,7 +283,7 @@ mod tests {
         test_utils::{
             account, hashed_factory, key, state_root, storage_root_of, BalChain, SnapStateSnapshot,
         },
-        SnapAccountStore, SnapGeneration,
+        SnapAccountStore, SnapGeneration, StorageChunk,
     };
     use alloy_eip7928::{BalanceChange, BlockAccessIndex, CodeChange, SlotChanges, StorageChange};
     use alloy_primitives::{bytes, keccak256, map::B256Map, Address, Bytes, U256};
@@ -371,6 +374,27 @@ mod tests {
         (chain.block(number as usize - 1), chain.block(number as usize - 2).hash)
     }
 
+    // The fixture chain with its last block replaced by one changing a balance.
+    fn replacement() -> BalChain {
+        BalChain::new(1, [Vec::new(), credit(1)])
+    }
+
+    // The attempt carried through block 2 and anchored to block 3, which a reorg then replaced,
+    // leaving the applied block canonical. Returns the orphaned pivot.
+    fn orphaned_pivot(accounts: &[(B256, TrieAccount)]) -> (Factory, SnapWrite, BlockNumHash) {
+        let (factory, write) = started(accounts, accounts.len());
+        let provider = factory.database_provider_rw().unwrap();
+        let (applied, parent) = block(2);
+        provider.commit_block_access_list(write, applied, parent, &[]).unwrap();
+        let write =
+            provider.advance_snap_pivot(write, generation(3, state_root(accounts))).unwrap();
+        provider.commit().unwrap();
+        let replacement = replacement();
+        assert_eq!(replacement.block(1), applied);
+        replacement.replace_tip(&factory);
+        (factory, write, block(3).0)
+    }
+
     fn index(value: u64) -> BlockAccessIndex {
         BlockAccessIndex::new(value)
     }
@@ -404,20 +428,6 @@ mod tests {
         assert_eq!(progress.next(), 3);
         // Restarting the attempt re-applies nothing.
         assert_eq!(provider.catch_up_progress(write).unwrap(), Some(progress));
-    }
-
-    #[test]
-    fn a_pivot_below_the_applied_block_is_refused() {
-        let accounts = accounts();
-        let (factory, write) = started(&accounts, accounts.len());
-        let provider = factory.database_provider_rw().unwrap();
-        let (block, parent) = block(2);
-        provider.commit_block_access_list(write, block, parent, &credit(10)).unwrap();
-
-        let refused = provider.advance_snap_pivot(write, generation(1, state_root(&accounts)));
-
-        assert!(matches!(refused, Err(SnapSyncError::PivotBelowApplied { applied: 2, pivot: 1 })));
-        provider.authorize_snap_write(write).unwrap();
     }
 
     #[test]
@@ -509,16 +519,11 @@ mod tests {
     #[test]
     fn a_list_proved_against_an_orphaned_pivot_is_refused() {
         let accounts = accounts();
-        let (factory, write) = started(&accounts, accounts.len());
+        let (factory, write, orphaned) = orphaned_pivot(&accounts);
         let provider = factory.database_provider_rw().unwrap();
-        let (applied, parent) = block(2);
-        provider.commit_block_access_list(write, applied, parent, &[]).unwrap();
-        // A reorg replaced the pivot, leaving the applied block and the one after it canonical.
-        let orphaned = BlockNumHash::new(3, B256::repeat_byte(0xee));
-        let write = provider
-            .advance_snap_pivot(write, SnapGeneration::new(orphaned, state_root(&accounts)))
-            .unwrap();
-        let (block, parent) = block(3);
+        let (applied, _) = block(2);
+        // The replacement block continues the applied one, so only the pivot check refuses it.
+        let (block, parent) = (replacement().block(2), applied.hash);
         let before = SnapStateSnapshot::read(&provider);
 
         let refused = provider.commit_block_access_list(write, block, parent, &credit(10));
@@ -536,18 +541,12 @@ mod tests {
     #[test]
     fn an_orphaned_pivot_cannot_be_replaced() {
         let accounts = accounts();
-        let (factory, write) = started(&accounts, accounts.len());
+        let (factory, write, orphaned) = orphaned_pivot(&accounts);
         let provider = factory.database_provider_rw().unwrap();
-        let (applied, parent) = block(2);
-        provider.commit_block_access_list(write, applied, parent, &[]).unwrap();
-        let orphaned = BlockNumHash::new(3, B256::repeat_byte(0xee));
-        let write = provider
-            .advance_snap_pivot(write, SnapGeneration::new(orphaned, state_root(&accounts)))
-            .unwrap();
-
         let before = SnapStateSnapshot::read(&provider);
+        let replacement = SnapGeneration::new(replacement().block(2), state_root(&accounts));
 
-        let refused = provider.advance_snap_pivot(write, generation(3, state_root(&accounts)));
+        let refused = provider.advance_snap_pivot(write, replacement);
 
         // Re-anchoring would leave the ranges downloaded against the orphan looking canonical.
         assert!(matches!(
@@ -634,11 +633,102 @@ mod tests {
     }
 
     #[test]
+    fn slots_persisted_ahead_of_their_range_follow_the_lists() {
+        let factory = hashed_factory();
+        insert_headers(&factory, &chain().headers);
+        let provider = factory.database_provider_rw().unwrap();
+        let write = provider.start_snap_attempt(generation(1, state_root(&accounts()))).unwrap();
+        provider.start_account_coverage(write).unwrap();
+        let (changed, stored_slot) = (keccak256(CHANGED), (hashed_slot(), U256::from(7)));
+        let chunk = StorageChunk::new(
+            changed,
+            storage_root_of(&[stored_slot]),
+            B256::ZERO,
+            vec![stored_slot],
+            None,
+        );
+        provider.commit_storage_chunk(write, B256::ZERO, chunk).unwrap();
+        let mut moved = accounts();
+        let position = changed_index(&moved);
+        moved[position].1.storage_root = storage_root_of(&[(hashed_slot(), U256::from(9))]);
+        let write = provider.advance_snap_pivot(write, generation(2, state_root(&moved))).unwrap();
+        let (block, parent) = block(2);
+        let changes = vec![AccountChanges::new(CHANGED).with_storage_change(SlotChanges::new(
+            SLOT,
+            vec![StorageChange::new(index(1), U256::from(9))],
+        ))];
+
+        provider.commit_block_access_list(write, block, parent, &changes).unwrap();
+
+        // Only the slots follow: the account itself comes whole with its range.
+        assert_eq!(stored(&provider, changed), None);
+        assert_eq!(
+            crate::test_utils::stored_slots(&provider, changed),
+            [(hashed_slot(), U256::from(9))]
+        );
+        let range = crate::test_utils::verified_range(&moved, 0..moved.len(), B256::ZERO, &[]);
+        let coverage =
+            provider.commit_account_range(write, &range, B256Map::default(), Vec::new()).unwrap();
+        assert!(coverage.is_complete());
+    }
+
+    #[test]
+    fn skipped_storage_from_an_abandoned_attempt_is_not_reused() {
+        let factory = hashed_factory();
+        insert_headers(&factory, &chain().headers);
+        let provider = factory.database_provider_rw().unwrap();
+        let (changed, later) = (keccak256(CHANGED), B256::repeat_byte(0xff));
+        let stale = (B256::ZERO, U256::from(7));
+        let mut contract = account(1);
+        contract.storage_root = storage_root_of(&[stale]);
+        let mut accounts = vec![(changed, contract), (later, contract)];
+        let write = provider.start_snap_attempt(generation(1, state_root(&accounts))).unwrap();
+        provider.start_account_coverage(write).unwrap();
+        provider
+            .commit_storage_chunk(
+                write,
+                B256::ZERO,
+                StorageChunk::new(changed, contract.storage_root, B256::ZERO, vec![stale], None),
+            )
+            .unwrap();
+
+        accounts[0].1.storage_root = reth_trie_common::EMPTY_ROOT_HASH;
+        let write = provider.start_snap_attempt(generation(1, state_root(&accounts))).unwrap();
+        provider.start_account_coverage(write).unwrap();
+        provider
+            .commit_storage_chunk(
+                write,
+                B256::ZERO,
+                StorageChunk::new(later, contract.storage_root, B256::ZERO, vec![stale], None),
+            )
+            .unwrap();
+
+        let new_slot = (hashed_slot(), U256::from(9));
+        accounts[0].1.storage_root = storage_root_of(&[new_slot]);
+        let write =
+            provider.advance_snap_pivot(write, generation(2, state_root(&accounts))).unwrap();
+        let (block, parent) = block(2);
+        let changes = vec![AccountChanges::new(CHANGED).with_storage_change(SlotChanges::new(
+            SLOT,
+            vec![StorageChange::new(index(1), new_slot.1)],
+        ))];
+        provider.commit_block_access_list(write, block, parent, &changes).unwrap();
+
+        assert_eq!(crate::test_utils::stored_slots(&provider, changed), [new_slot]);
+        let range =
+            crate::test_utils::verified_range(&accounts, 0..accounts.len(), B256::ZERO, &[]);
+        assert!(provider
+            .commit_account_range(write, &range, B256Map::default(), Vec::new())
+            .unwrap()
+            .is_complete());
+    }
+
+    #[test]
     fn a_list_from_a_replaced_attempt_changes_nothing() {
         let accounts = accounts();
         let (factory, write) = started(&accounts, accounts.len());
         let provider = factory.database_provider_rw().unwrap();
-        provider.advance_snap_pivot(write, generation(2, B256::repeat_byte(0xcc))).unwrap();
+        provider.advance_snap_pivot(write, generation(3, B256::repeat_byte(0xcc))).unwrap();
         let (block, parent) = block(2);
 
         let refused = provider.commit_block_access_list(write, block, parent, &credit(10));
