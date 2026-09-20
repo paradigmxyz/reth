@@ -1112,7 +1112,7 @@ mod tests {
     }
 
     #[test]
-    fn historical_view_below_finish_uses_the_supplied_finish_state() {
+    fn tips_below_finish_complete_the_masked_trie_from_a_supplied_chain() {
         // Finish is at block 3 while the state trie only reaches block 1, so blocks 2 and 3 are
         // masked in the database and completing the trie needs the chain that ends at Finish.
         let (factory, blocks) = setup_frontiers(1, 3);
@@ -1120,45 +1120,8 @@ mod tests {
         for block in &blocks[2..=4] {
             manager.insert_executed_block(block.clone());
         }
-        let provider = factory.provider().unwrap();
 
-        // A historical view is addressed by hash and the block is durable, so the builder has no
-        // chain of its own and cannot reach Finish.
-        let persisted_hash = blocks[1].recovered_block().hash();
-        let error = manager
-            .overlay_builder_for_persisted(persisted_hash)
-            .build_state_trie_overlay(&provider, false)
-            .unwrap_err();
-        assert!(error.to_string().contains("cannot be anchored"), "unexpected error: {error}");
-
-        let finish_state = manager
-            .state_for_hash(blocks[3].recovered_block().hash())
-            .expect("Finish is tracked in memory");
-        let overlay = manager
-            .overlay_builder_for_persisted(persisted_hash)
-            .with_finish_state(finish_state)
-            .build_state_trie_overlay(&provider, false)
-            .unwrap();
-
-        // The completed trie carries the nodes of the masked blocks 2 and 3.
-        assert_eq!(
-            account_node_paths(&overlay),
-            [3, 4].map(|id| Nibbles::from_nibbles([id])).to_vec()
-        );
-    }
-
-    #[test]
-    fn fork_below_finish_completes_the_masked_trie_from_the_supplied_finish_state() {
-        // Finish is at block 3 while the state trie only reaches block 1, so blocks 2 and 3 are
-        // masked in the database.
-        let (factory, blocks) = setup_frontiers(1, 3);
-        let manager = TestOverlay::default();
-        for block in &blocks[2..=4] {
-            manager.insert_executed_block(block.clone());
-        }
-
-        // A fork that branches off block 2, below Finish: Finish is not one of its ancestors, so
-        // its own chain cannot complete the masked trie.
+        // A fork off block 2 branches below Finish, so Finish is not one of its ancestors either.
         let fork = manager.insert_fork(with_unique_trie_data(
             &TestBlockBuilder::eth().get_executed_block_with_number(
                 blocks[3].block_number(),
@@ -1170,28 +1133,46 @@ mod tests {
         assert!(Arc::clone(&fork).iter().all(|state| state.hash() != finish_hash));
 
         let provider = factory.provider().unwrap();
-        let error = manager
-            .overlay_builder_for_state(Arc::clone(&fork))
-            .build_state_trie_overlay(&provider, false)
-            .unwrap_err();
-        assert!(error.to_string().contains("cannot be anchored"), "unexpected error: {error}");
+        let durable_hash = blocks[1].recovered_block().hash();
 
-        // The canonical chain has Finish as an ancestor, so supplying it is enough.
-        let head = manager
-            .state_for_hash(blocks[4].recovered_block().hash())
-            .expect("canonical head is tracked in memory");
-        let overlay = manager
-            .overlay_builder_for_state(fork)
-            .with_finish_state(head)
-            .build_state_trie_overlay(&provider, false)
-            .unwrap();
+        // A historical view of a durable block, which has no chain at all, and a state provider
+        // for a fork, whose chain stops at the branch point.
+        let builder_for = |durable: bool| {
+            if durable {
+                manager.overlay_builder_for_persisted(durable_hash)
+            } else {
+                manager.overlay_builder_for_state(Arc::clone(&fork))
+            }
+        };
 
-        // The masked blocks 2 and 3 complete the trie at Finish, on top of which the fork's own
-        // nodes are applied.
-        assert_eq!(
-            account_node_paths(&overlay),
-            [3, 4, 9].map(|id| Nibbles::from_nibbles([id])).to_vec()
-        );
+        // The masked blocks 2 and 3 complete the trie at Finish; the fork's own node sits on top.
+        for (durable, expected) in [(true, vec![3, 4]), (false, vec![3, 4, 9])] {
+            let error =
+                builder_for(durable).build_state_trie_overlay(&provider, false).unwrap_err();
+            assert!(
+                error.to_string().contains("cannot be anchored"),
+                "durable={durable}: unexpected error: {error}"
+            );
+
+            // The caller supplies the chain: directly for the durable tip, and through the
+            // resolver every state provider uses for the fork.
+            let supplied = if durable {
+                builder_for(durable).with_finish_state(
+                    manager.state_for_hash(finish_hash).expect("Finish is tracked in memory"),
+                )
+            } else {
+                builder_for(durable)
+                    .with_database_finish_state(&provider, |hash| manager.state_for_hash(hash))
+                    .unwrap()
+            };
+
+            let overlay = supplied.build_state_trie_overlay(&provider, false).unwrap();
+            assert_eq!(
+                account_node_paths(&overlay),
+                expected.iter().map(|id| Nibbles::from_nibbles([*id])).collect::<Vec<_>>(),
+                "durable={durable}"
+            );
+        }
     }
 
     #[test]
