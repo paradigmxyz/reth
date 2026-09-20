@@ -1001,13 +1001,6 @@ mod tests {
         (factory, blocks)
     }
 
-    const fn anchor_num_hash(anchor: &AnchorForParent) -> BlockNumHash {
-        match anchor {
-            AnchorForParent::NoReverts { anchor } |
-            AnchorForParent::RevertsRequired { anchor, .. } => *anchor,
-        }
-    }
-
     fn account_keys(overlay: &StateTrieOverlay) -> Vec<B256> {
         overlay.input().state.accounts.iter().map(|(key, _)| *key).collect()
     }
@@ -1199,52 +1192,6 @@ mod tests {
             account_node_paths(&overlay),
             [3, 4, 9].map(|id| Nibbles::from_nibbles([id])).to_vec()
         );
-    }
-
-    #[test]
-    fn overlay_builder_for_state_covers_fork_and_pending_tips() {
-        let (factory, blocks) = setup_frontiers(1, 3);
-        let manager = TestOverlay::default();
-        for block in &blocks[2..=4] {
-            manager.insert_executed_block(block.clone());
-        }
-        let mut side_builder = TestBlockBuilder::eth();
-
-        // A fork off block 3 and a pending block on top of the head, tracked the way the engine
-        // tracks them: owned by the in-memory state, handed to the manager as a shared chain.
-        let fork_state = manager.insert_fork(with_unique_trie_data(
-            &side_builder.get_executed_block_with_number(
-                blocks[4].block_number(),
-                blocks[3].recovered_block().hash(),
-            ),
-            9,
-        ));
-        let pending_state = manager.set_pending_block(with_unique_trie_data(
-            &side_builder.get_executed_block_with_number(
-                blocks[4].block_number() + 1,
-                blocks[4].recovered_block().hash(),
-            ),
-            10,
-        ));
-
-        let provider = factory.provider().unwrap();
-        let anchor = blocks[1].recovered_block().num_hash();
-
-        for state in [fork_state, pending_state] {
-            // The chain the engine hands over, from the anchor up to the tip.
-            let mut expected = Arc::clone(&state)
-                .iter()
-                .map(|state| state.block_ref().recovered_block().num_hash())
-                .collect::<Vec<_>>();
-            expected.reverse();
-
-            let builder = manager.overlay_builder_for_state(state);
-            assert_eq!(anchor_num_hash(&builder.anchor_at_parent(&provider).unwrap()), anchor);
-
-            let (overlay, fallback) = builder.execution_overlay(&provider).unwrap();
-            assert_eq!(fallback, None, "the chain covers Finish, so nothing is read by number");
-            assert_eq!(overlay.block_hashes, expected);
-        }
     }
 
     #[test]

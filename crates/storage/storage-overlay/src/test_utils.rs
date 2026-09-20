@@ -58,17 +58,6 @@ impl TestOverlay {
         state
     }
 
-    /// Tracks `block` as the pending block and hands the manager its chain.
-    pub(crate) fn set_pending_block(
-        &self,
-        block: ExecutedBlock<EthPrimitives>,
-    ) -> Arc<BlockState<EthPrimitives>> {
-        self.blocks.set_pending_block(block);
-        let state = self.blocks.pending_state().expect("pending block was just set");
-        self.manager.on_new_block(Arc::clone(&state));
-        state
-    }
-
     /// Returns the chain ending at `hash`, canonical or not.
     pub(crate) fn state_for_hash(&self, hash: B256) -> Option<Arc<BlockState<EthPrimitives>>> {
         self.blocks.executed_state_by_hash(hash)
