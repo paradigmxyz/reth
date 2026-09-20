@@ -943,6 +943,31 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_call_many_returns_an_entry_for_every_bundle() {
+        let provider = MockEthProvider::default();
+        let block = Block {
+            header: Header { number: 1, gas_limit: 30_000_000, ..Default::default() },
+            body: BlockBody::default(),
+        };
+        provider.add_block(block.header.hash_slow(), block);
+        let eth_api = build_test_eth_api(provider);
+        let call = TransactionRequest { to: Some(Address::random().into()), ..Default::default() };
+        let bundles = vec![
+            Bundle { transactions: vec![], block_override: None },
+            Bundle { transactions: vec![call.clone()], block_override: None },
+            Bundle { transactions: vec![], block_override: None },
+            Bundle { transactions: vec![call.clone(), call], block_override: None },
+        ];
+        let results = <EthApi<_, _> as EthApiServer<_, _, _, _, _, _>>::call_many(
+            &eth_api, bundles, None, None,
+        )
+        .await
+        .unwrap();
+        let lens = results.iter().map(Vec::len).collect::<Vec<_>>();
+        assert_eq!(lens, vec![0, 1, 0, 2], "one result set per bundle, in order");
+    }
+
+    #[tokio::test]
     async fn test_call_many_keeps_header_not_found_when_block_hash_absent() {
         let eth_api = build_test_eth_api(NoopProvider::default());
         let bundles = vec![Bundle {
