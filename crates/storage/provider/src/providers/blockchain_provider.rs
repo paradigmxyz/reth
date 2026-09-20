@@ -3332,7 +3332,8 @@ mod tests {
     }
 
     #[test]
-    fn latest_reads_in_memory_state_like_the_hash_lookup() -> eyre::Result<()> {
+    fn state_providers_share_one_block_state_for_canonical_pending_and_fork_hashes(
+    ) -> eyre::Result<()> {
         use crate::{AccountReader, StateProvider, StateProviderBox};
         use reth_storage_api::DatabaseProviderROFactory;
         use reth_storage_overlay::OverlayStateProviderFactory;
@@ -3342,52 +3343,12 @@ mod tests {
         let provider = BlockchainProvider::new(factory)?;
         let genesis = provider.canonical_in_memory_state.get_canonical_head();
 
-        let slot_key = B256::with_last_byte(1);
-        let value = U256::from(42);
-        let (executed, address, account) =
-            executed_block_with_account(&mut rng, genesis.num_hash(), 1, Some((slot_key, value)));
-        let block_hash = executed.recovered_block().hash();
-        commit_in_memory(&provider, vec![executed]);
-
-        // `latest` reuses the canonical `Arc<BlockState>` chain; a caller that starts from a hash
-        // resolves the very same chain through the provider. Both must observe the same
-        // in-memory account and storage values.
-        let db_provider = provider.database.provider()?;
-        let from_hash = OverlayStateProviderFactory::new(
-            provider.database.clone(),
-            provider.overlay_builder_for_hash(&db_provider, block_hash)?,
-        )
-        .database_provider_ro()?;
-        drop(db_provider);
-
-        for state in [
-            Box::new(from_hash) as StateProviderBox,
-            provider.latest()?,
-            provider.state_by_block_hash(block_hash)?,
-        ] {
-            assert_eq!(state.basic_account(&address)?, Some(account));
-            assert_eq!(state.storage(address, slot_key)?, Some(value));
-        }
-
-        Ok(())
-    }
-
-    #[test]
-    fn state_providers_share_one_block_state_for_canonical_pending_and_fork_hashes(
-    ) -> eyre::Result<()> {
-        use crate::{AccountReader, StateProviderBox};
-        use reth_storage_api::DatabaseProviderROFactory;
-        use reth_storage_overlay::OverlayStateProviderFactory;
-
-        let mut rng = generators::rng();
-        let factory = test_provider_factory_with_genesis()?;
-        let provider = BlockchainProvider::new(factory)?;
-        let genesis = provider.canonical_in_memory_state.get_canonical_head();
-
         // One executed block per role: canonical, a fork off genesis, and a pending block on top
-        // of the canonical head, tracked the way the engine tracks them.
+        // of the canonical head, tracked the way the engine tracks them. The canonical block also
+        // writes a storage slot, so its readers have to see more than the account.
+        let slot = (B256::with_last_byte(1), U256::from(42));
         let (canonical, canonical_address, canonical_account) =
-            executed_block_with_account(&mut rng, genesis.num_hash(), 1, None);
+            executed_block_with_account(&mut rng, genesis.num_hash(), 1, Some(slot));
         let canonical_num_hash = canonical.recovered_block().num_hash();
         commit_in_memory(&provider, vec![canonical]);
 
@@ -3412,13 +3373,14 @@ mod tests {
                 canonical_num_hash.hash,
                 canonical_address,
                 canonical_account,
-                Some(provider.latest()?),
+                Some(slot),
+                vec![provider.latest()?, provider.state_by_block_hash(canonical_num_hash.hash)?],
             ),
-            (fork_hash, fork_address, fork_account, None),
-            (pending_hash, pending_address, pending_account, Some(provider.pending()?)),
+            (fork_hash, fork_address, fork_account, None, vec![]),
+            (pending_hash, pending_address, pending_account, None, vec![provider.pending()?]),
         ];
 
-        for (hash, address, account, public_provider) in cases {
+        for (hash, address, account, storage, public_providers) in cases {
             // Every role resolves to one shared `BlockState`, anchored at the last persisted
             // block, so there is no second chain to drift from.
             let shared = provider
@@ -3447,10 +3409,13 @@ mod tests {
             );
             drop(db_provider);
 
-            assert_eq!(from_shared.basic_account(&address)?, Some(account));
-            assert_eq!(from_hash.basic_account(&address)?, Some(account));
-            if let Some(public_provider) = public_provider {
-                assert_eq!(public_provider.basic_account(&address)?, Some(account));
+            // The chain-built provider, the hash-built one and every public entry point for this
+            // role read the same in-memory state.
+            for state in [&from_shared, &from_hash].into_iter().chain(public_providers.iter()) {
+                assert_eq!(state.basic_account(&address)?, Some(account));
+                if let Some((slot_key, value)) = storage {
+                    assert_eq!(state.storage(address, slot_key)?, Some(value));
+                }
             }
         }
 
