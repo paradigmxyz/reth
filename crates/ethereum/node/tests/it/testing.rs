@@ -24,7 +24,8 @@ use tokio::sync::oneshot;
 #[tokio::test(flavor = "multi_thread")]
 async fn testing_rpc_build_block_works() -> eyre::Result<()> {
     let runtime = Runtime::test();
-    let mut rpc_args = reth_node_core::args::RpcServerArgs::default().with_http();
+    let mut rpc_args =
+        reth_node_core::args::RpcServerArgs::default().with_http().with_unused_ports();
     rpc_args.http_api = Some(RpcModuleSelection::from_iter([RethRpcModule::Testing]));
     let tempdir = tempdir().expect("temp datadir");
     let datadir_args = DatadirArgs {
@@ -95,7 +96,8 @@ async fn testing_rpc_build_block_works() -> eyre::Result<()> {
 #[tokio::test(flavor = "multi_thread")]
 async fn testing_rpc_commit_block_works() -> eyre::Result<()> {
     let runtime = Runtime::test();
-    let mut rpc_args = reth_node_core::args::RpcServerArgs::default().with_http();
+    let mut rpc_args =
+        reth_node_core::args::RpcServerArgs::default().with_http().with_unused_ports();
     rpc_args.http_api =
         Some(RpcModuleSelection::from_iter([RethRpcModule::Eth, RethRpcModule::Testing]));
     let tempdir = tempdir().expect("temp datadir");

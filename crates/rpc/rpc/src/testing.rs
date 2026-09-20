@@ -272,9 +272,7 @@ where
 
                 let has_requests = outcome.block.requests_hash().is_some();
                 let requests = has_requests.then_some(outcome.execution_result.requests);
-                let block_access_list = outcome
-                    .block_access_list
-                    .map(|block_access_list| alloy_rlp::encode(&block_access_list).into());
+                let block_access_list = outcome.block_access_list.map(|bal| bal.split().1);
 
                 Ok(EthBuiltPayload::new(
                     Arc::new(outcome.block),
