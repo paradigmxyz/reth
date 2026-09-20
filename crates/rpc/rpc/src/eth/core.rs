@@ -270,8 +270,7 @@ pub struct EthApiInner<N: RpcNodeCore, Rpc: RpcConvert> {
     next_env_builder: Box<dyn PendingEnvBuilder<N::Evm>>,
 
     /// Transaction batch sender for batching tx insertions
-    tx_batch_sender:
-        mpsc::UnboundedSender<BatchTxRequest<<N::Pool as TransactionPool>::Transaction>>,
+    tx_batch_sender: mpsc::Sender<BatchTxRequest<<N::Pool as TransactionPool>::Transaction>>,
 
     /// Configuration for pending block construction.
     pending_block_kind: PendingBlockKind,
@@ -505,7 +504,7 @@ where
     #[inline]
     pub const fn tx_batch_sender(
         &self,
-    ) -> &mpsc::UnboundedSender<BatchTxRequest<<N::Pool as TransactionPool>::Transaction>> {
+    ) -> &mpsc::Sender<BatchTxRequest<<N::Pool as TransactionPool>::Transaction>> {
         &self.tx_batch_sender
     }
 
@@ -521,6 +520,7 @@ where
 
         self.tx_batch_sender()
             .send(request)
+            .await
             .map_err(|_| reth_rpc_eth_types::EthApiError::BatchTxSendError)?;
 
         Ok(response_rx.await??)
