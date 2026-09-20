@@ -4047,15 +4047,20 @@ impl<TX: Send, N: NodeTypes> StoragePath for DatabaseProvider<TX, N> {
 mod tests {
     use super::*;
     use crate::{
-        test_utils::{blocks::BlockchainTestData, create_test_provider_factory},
-        BlockWriter,
+        test_utils::{
+            blocks::BlockchainTestData, create_test_provider_factory, MockNodeTypesWithDB,
+        },
+        BlockWriter, ProviderFactory,
     };
     use alloy_consensus::Header;
     use alloy_primitives::{
         map::{AddressMap, B256Map},
         U256,
     };
-    use reth_chain_state::{test_utils::TestBlockBuilder, ExecutedBlock};
+    use reth_chain_state::{
+        test_utils::TestBlockBuilder, CanonicalInMemoryState, EthPrimitives, ExecutedBlock,
+        NewCanonicalChain,
+    };
     use reth_db_api::models::StorageSettings;
     use reth_ethereum_primitives::Receipt;
     use reth_execution_types::{AccountRevertInit, BlockExecutionOutput, BlockExecutionResult};
@@ -4959,8 +4964,13 @@ mod tests {
         );
     }
 
-    #[test]
-    fn remove_block_and_execution_above_returns_persistence_frontiers() {
+    /// Persists blocks 1 to 4 with their state trie only reaching block 2, so that blocks 3 and 4
+    /// are masked in the database and only exist in the returned in-memory state.
+    fn partial_state_trie_fixture() -> (
+        ProviderFactory<MockNodeTypesWithDB>,
+        CanonicalInMemoryState<EthPrimitives>,
+        Vec<ExecutedBlock>,
+    ) {
         let factory = create_test_provider_factory();
         let mut test_block_builder = TestBlockBuilder::eth().with_state();
 
@@ -4973,8 +4983,6 @@ mod tests {
 
         // The in-memory state owns the executed blocks; the overlay manager only tracks the
         // chains it is handed.
-        use reth_chain_state::{CanonicalInMemoryState, NewCanonicalChain};
-
         let in_memory_state = CanonicalInMemoryState::empty();
         in_memory_state.update_chain(NewCanonicalChain::Commit { new: blocks[2..].to_vec() });
         for state in in_memory_state.canonical_chain() {
@@ -4982,9 +4990,16 @@ mod tests {
         }
 
         let provider_rw = factory.provider_rw().unwrap();
-        let input = SaveBlocksInput::new(blocks, 0, 0, 4, 2);
+        let input = SaveBlocksInput::new(blocks.clone(), 0, 0, 4, 2);
         provider_rw.save_blocks(&input).unwrap();
         provider_rw.commit().unwrap();
+
+        (factory, in_memory_state, blocks)
+    }
+
+    #[test]
+    fn remove_block_and_execution_above_returns_persistence_frontiers() {
+        let (factory, in_memory_state, _) = partial_state_trie_fixture();
 
         // Unwinding the partial state trie needs the in-memory blocks the database masks, which
         // the caller driving the unwind supplies.
@@ -4999,6 +5014,39 @@ mod tests {
         assert_eq!(
             checkpoint.finish_stage_checkpoint().and_then(|finish| finish.partial_state_trie()),
             Some(2)
+        );
+    }
+
+    #[test]
+    fn remove_block_and_execution_above_needs_a_chain_reaching_the_database_tip() {
+        let (factory, in_memory_state, blocks) = partial_state_trie_fixture();
+
+        // Without a chain the masked trie cannot be completed, so the unwind fails instead of
+        // writing a trie built from the masked rows.
+        let provider_rw = factory.provider_rw().unwrap();
+        let error = provider_rw.remove_block_and_execution_above(3).unwrap_err();
+        assert!(
+            error.to_string().contains("partial state trie frontier"),
+            "unexpected error: {error}"
+        );
+        drop(provider_rw);
+
+        // A chain that does not reach the database tip is rejected the same way. This is the
+        // shape a disk reorg leaves behind: the canonical head moved to a branch the database
+        // never saw, and only the branch it did see can complete the trie.
+        let fork = TestBlockBuilder::eth()
+            .with_state()
+            .get_executed_block_with_number(4, blocks[2].recovered_block().hash());
+        let fork_state = in_memory_state.insert_executed(fork);
+        assert!(Arc::clone(&fork_state)
+            .iter()
+            .all(|state| state.hash() != blocks[3].recovered_block().hash()));
+
+        let provider_rw = factory.provider_rw().unwrap().with_finish_state(Some(fork_state));
+        let error = provider_rw.remove_block_and_execution_above(3).unwrap_err();
+        assert!(
+            error.to_string().contains("partial state trie frontier"),
+            "unexpected error: {error}"
         );
     }
 
