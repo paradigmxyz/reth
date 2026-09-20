@@ -560,8 +560,16 @@ impl TreeConfig {
     }
 
     /// Setter for backfill run threshold.
+    ///
+    /// Grows the block buffer to twice the threshold so it can retain disconnected blocks while
+    /// downloading the gap, with room for incoming payloads. The limit saturates at `u32::MAX`.
     pub const fn with_backfill_run_threshold(mut self, backfill_run_threshold: u64) -> Self {
         self.backfill_run_threshold = backfill_run_threshold;
+        let buffer_limit = backfill_run_threshold.saturating_mul(2);
+        if buffer_limit > self.block_buffer_limit as u64 {
+            self.block_buffer_limit =
+                if buffer_limit > u32::MAX as u64 { u32::MAX } else { buffer_limit as u32 };
+        }
         self
     }
 
@@ -850,6 +858,24 @@ impl TreeConfig {
 #[cfg(test)]
 mod tests {
     use super::TreeConfig;
+
+    #[test]
+    fn backfill_threshold_grows_block_buffer() {
+        let default = TreeConfig::default();
+        for (threshold, expected_limit) in [
+            (0, default.block_buffer_limit()),
+            (32, default.block_buffer_limit()),
+            (500, 1000),
+            (u32::MAX as u64, u32::MAX),
+            (u64::MAX, u32::MAX),
+        ] {
+            let config = default.clone().with_backfill_run_threshold(threshold);
+            assert_eq!(config.backfill_run_threshold(), threshold);
+            assert_eq!(config.block_buffer_limit(), expected_limit);
+        }
+        let config = default.with_block_buffer_limit(2000).with_backfill_run_threshold(500);
+        assert_eq!(config.block_buffer_limit(), 2000);
+    }
 
     #[test]
     fn txpool_prewarming_is_disabled_by_default_and_can_be_enabled() {

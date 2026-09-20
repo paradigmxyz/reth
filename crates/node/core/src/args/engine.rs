@@ -763,14 +763,6 @@ impl EngineArgs {
             .with_memory_block_buffer_target(self.memory_block_buffer_target())
             .with_num_state_masking_blocks(self.num_state_masking_blocks())
             .with_backfill_run_threshold(self.backfill_run_threshold)
-            // Blocks awaiting a missing parent wait in the block buffer while the gap is
-            // downloaded, so the buffer must be able to hold at least a full gap plus new payloads
-            // arriving in the meantime.
-            .with_block_buffer_limit(
-                TreeConfig::default().block_buffer_limit().max(
-                    self.backfill_run_threshold.saturating_mul(2).try_into().unwrap_or(u32::MAX),
-                ),
-            )
             .with_invalid_header_hit_eviction_threshold(self.invalid_header_hit_eviction_threshold)
             .without_state_cache(self.state_cache_disabled)
             .without_prewarming(self.prewarming_disabled)

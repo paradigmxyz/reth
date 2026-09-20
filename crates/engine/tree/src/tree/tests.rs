@@ -8,7 +8,6 @@ use crate::{
         PersistTarget, TreeConfig,
     },
 };
-use reth_engine_primitives::DEFAULT_BACKFILL_RUN_THRESHOLD;
 use reth_storage_overlay::OverlayManager;
 
 use alloy_eip7928::bal::DecodedBal;
@@ -25,7 +24,9 @@ use alloy_rpc_types_engine::{
 use assert_matches::assert_matches;
 use reth_chain_state::test_utils::TestBlockBuilder;
 use reth_chainspec::{ChainSpec, HOLESKY, MAINNET};
-use reth_engine_primitives::{EngineApiValidator, ForkchoiceStatus, NoopInvalidBlockHook};
+use reth_engine_primitives::{
+    EngineApiValidator, ForkchoiceStatus, NoopInvalidBlockHook, DEFAULT_BACKFILL_RUN_THRESHOLD,
+};
 use reth_ethereum_consensus::EthBeaconConsensus;
 use reth_ethereum_engine_primitives::{EthEngineTypes, EthPayloadAttributes};
 use reth_ethereum_primitives::{Block, EthPrimitives};
@@ -3162,13 +3163,84 @@ fn test_exceeds_backfill_run_threshold_uses_configured_value() {
     assert!(!test_harness.tree.exceeds_backfill_run_threshold(0, default_threshold));
     assert!(test_harness.tree.exceeds_backfill_run_threshold(0, default_threshold + 1));
 
-    let threshold = default_threshold * 10;
-    test_harness.tree.config = TreeConfig::default().with_backfill_run_threshold(threshold);
-    assert!(!test_harness.tree.exceeds_backfill_run_threshold(0, default_threshold + 1));
-    assert!(!test_harness.tree.exceeds_backfill_run_threshold(0, threshold));
-    assert!(test_harness.tree.exceeds_backfill_run_threshold(0, threshold + 1));
-    // a block behind the local tip never exceeds the threshold
-    assert!(!test_harness.tree.exceeds_backfill_run_threshold(threshold + 1, 0));
+    for threshold in [0, 1, default_threshold * 10, u64::MAX] {
+        test_harness.tree.config = TreeConfig::default().with_backfill_run_threshold(threshold);
+        assert!(!test_harness.tree.exceeds_backfill_run_threshold(0, threshold));
+        if threshold < u64::MAX {
+            assert!(test_harness.tree.exceeds_backfill_run_threshold(0, threshold + 1));
+        }
+        assert!(!test_harness.tree.exceeds_backfill_run_threshold(100, 100));
+        assert!(!test_harness.tree.exceeds_backfill_run_threshold(100, 99));
+        assert_eq!(test_harness.tree.exceeds_backfill_run_threshold(100, 133), threshold < 33);
+    }
+}
+
+#[test]
+fn test_backfill_sync_target_uses_configured_threshold() {
+    let mut test_harness = TestHarness::new(MAINNET.clone());
+    let target = TestBlockBuilder::eth().get_executed_blocks(100..101).next().unwrap();
+    let target = target.recovered_block().clone_sealed_block();
+    let target_hash = target.hash();
+    let local_tip = 10;
+    let gap = target.number() - local_tip;
+    test_harness.tree.state.forkchoice_state_tracker.set_latest(
+        ForkchoiceState {
+            head_block_hash: target_hash,
+            safe_block_hash: target_hash,
+            finalized_block_hash: target_hash,
+        },
+        ForkchoiceStatus::Syncing,
+    );
+
+    for (threshold, expected) in [(gap, None), (gap - 1, Some(target_hash))] {
+        test_harness.tree.config = TreeConfig::default().with_backfill_run_threshold(threshold);
+        // Without the target block, the missing parent's number determines the gap.
+        assert_eq!(
+            test_harness.tree.backfill_sync_target(local_tip, target.number(), None),
+            expected
+        );
+        // A downloaded target takes precedence over the missing parent's number.
+        assert_eq!(
+            test_harness.tree.backfill_sync_target(local_tip, local_tip, Some(target.num_hash())),
+            expected
+        );
+    }
+
+    test_harness.tree.state.buffer.insert_block(target.into());
+    for (threshold, expected) in [(gap, None), (gap - 1, Some(target_hash))] {
+        test_harness.tree.config = TreeConfig::default().with_backfill_run_threshold(threshold);
+        // A buffered target also takes precedence, as in the post-backfill recheck.
+        assert_eq!(test_harness.tree.backfill_sync_target(local_tip, local_tip, None), expected);
+    }
+}
+
+#[test]
+fn test_disconnected_download_uses_configured_backfill_threshold() {
+    let mut test_harness = TestHarness::new(MAINNET.clone());
+    let target_hash = B256::from([0xAA; 32]);
+    test_harness.tree.state.forkchoice_state_tracker.set_latest(
+        ForkchoiceState {
+            head_block_hash: target_hash,
+            safe_block_hash: B256::ZERO,
+            finalized_block_hash: target_hash,
+        },
+        ForkchoiceStatus::Syncing,
+    );
+    let downloaded = BlockNumHash::new(111, B256::from([0xBB; 32]));
+    let missing_parent = BlockNumHash::new(110, B256::from([0xCC; 32]));
+    let local_tip = BlockNumHash::new(10, B256::ZERO);
+
+    test_harness.tree.config = TreeConfig::default().with_backfill_run_threshold(100);
+    assert!(matches!(
+        test_harness.tree.on_disconnected_downloaded_block(downloaded, missing_parent, local_tip),
+        Some(TreeEvent::Download(_))
+    ));
+    test_harness.tree.config = TreeConfig::default().with_backfill_run_threshold(99);
+    assert!(matches!(
+        test_harness.tree.on_disconnected_downloaded_block(downloaded, missing_parent, local_tip),
+        Some(TreeEvent::BackfillAction(BackfillAction::Start(target)))
+            if target.sync_target() == Some(target_hash)
+    ));
 }
 
 #[test]
@@ -3303,16 +3375,19 @@ fn test_on_disconnected_downloaded_block_eth_zero_finalized_targets_head() {
     }
 }
 
-/// Verifies that the post-backfill recheck path in `on_backfill_sync_finished` retriggers a
-/// new backfill targeting whichever block `backfill_target_hash` resolves to — head on OP
-/// Stack, finalized on Ethereum — when that block is buffered far ahead of where the
-/// just-finished pipeline landed.
-async fn assert_post_backfill_recheck_retriggers_to_buffered_target(engine_kind: EngineApiKind) {
+/// Verifies that the post-backfill recheck chooses between backfill and live sync using the
+/// configured threshold and the buffered target (head on OP Stack, finalized on Ethereum).
+async fn assert_post_backfill_recheck_uses_threshold(
+    engine_kind: EngineApiKind,
+    threshold: u64,
+    expect_backfill: bool,
+) {
     reth_tracing::init_test_tracing();
 
     let chain_spec = MAINNET.clone();
     let mut test_harness = TestHarness::new(chain_spec.clone());
     test_harness.tree.engine_kind = engine_kind;
+    test_harness.tree.config = TreeConfig::default().with_backfill_run_threshold(threshold);
 
     let base_chain: Vec<_> = test_harness.block_builder.get_executed_blocks(0..1).collect();
     test_harness = test_harness.with_blocks(base_chain.clone());
@@ -3344,7 +3419,7 @@ async fn assert_post_backfill_recheck_retriggers_to_buffered_target(engine_kind:
         ForkchoiceStatus::Syncing,
     );
 
-    // Simulate backfill finishing far below the buffered target (gap > threshold).
+    // Simulate backfill finishing with a gap larger than the default threshold.
     let backfill_finished_block_number = DEFAULT_BACKFILL_RUN_THRESHOLD + 1;
     let backfill_tip_block = main_chain[(backfill_finished_block_number - 1) as usize].clone();
     test_harness.provider.add_block(backfill_tip_block.hash(), backfill_tip_block.into_block());
@@ -3355,23 +3430,43 @@ async fn assert_post_backfill_recheck_retriggers_to_buffered_target(engine_kind:
 
     let event = test_harness.from_tree_rx.recv().await.unwrap();
     match event {
-        EngineApiEvent::BackfillAction(BackfillAction::Start(emitted_target)) => {
+        EngineApiEvent::BackfillAction(BackfillAction::Start(emitted_target))
+            if expect_backfill =>
+        {
             assert_eq!(
                 emitted_target.sync_target(),
                 Some(target_hash),
                 "post-backfill recheck should retrigger backfill to the buffered target"
             );
         }
-        _ => panic!("Expected BackfillAction(Start), got: {event:#?}"),
+        EngineApiEvent::Download(_) if !expect_backfill => {}
+        _ => panic!("Unexpected post-backfill event: {event:#?}"),
     }
 }
 
 #[tokio::test]
 async fn test_on_backfill_sync_finished_opstack_retriggers_backfill_to_buffered_head() {
-    assert_post_backfill_recheck_retriggers_to_buffered_target(EngineApiKind::OpStack).await;
+    assert_post_backfill_recheck_uses_threshold(
+        EngineApiKind::OpStack,
+        DEFAULT_BACKFILL_RUN_THRESHOLD,
+        true,
+    )
+    .await;
 }
 
 #[tokio::test]
 async fn test_on_backfill_sync_finished_eth_retriggers_backfill_to_buffered_finalized() {
-    assert_post_backfill_recheck_retriggers_to_buffered_target(EngineApiKind::Ethereum).await;
+    assert_post_backfill_recheck_uses_threshold(
+        EngineApiKind::Ethereum,
+        DEFAULT_BACKFILL_RUN_THRESHOLD,
+        true,
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn test_on_backfill_sync_finished_resumes_live_sync_with_higher_threshold() {
+    for engine_kind in [EngineApiKind::Ethereum, EngineApiKind::OpStack] {
+        assert_post_backfill_recheck_uses_threshold(engine_kind, 100, false).await;
+    }
 }
