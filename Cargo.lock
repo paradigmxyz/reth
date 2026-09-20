@@ -10032,6 +10032,7 @@ dependencies = [
  "jsonrpsee",
  "reth-ethereum-primitives",
  "reth-primitives-traits",
+ "reth-provider",
  "reth-pureth-receipt",
  "serde",
  "serde_json",
