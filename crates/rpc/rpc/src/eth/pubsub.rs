@@ -95,51 +95,34 @@ where
             }
             SubscriptionKind::Logs => {
                 // if no params are provided, used default filter params
-                let filter = match params {
-                    Some(Params::Logs(filter)) => *filter,
-                    Some(Params::Bool(_)) => {
-                        return Err(invalid_params_rpc_err("Invalid params for logs"))
-                    }
-                    _ => Default::default(),
-                };
+                let filter = logs_filter(params.as_ref())?;
                 pipe_from_stream(accepted_sink, self.log_stream(filter)).await
             }
             SubscriptionKind::NewPendingTransactions => {
-                if let Some(params) = params {
-                    match params {
-                        Params::Bool(true) => {
-                            // full transaction objects requested
-                            let stream = self.full_pending_transaction_stream().filter_map(|tx| {
-                                let tx_value = match self
-                                    .inner
-                                    .eth_api
-                                    .converter()
-                                    .fill_pending(tx.transaction.to_consensus())
-                                {
-                                    Ok(tx) => Some(tx),
-                                    Err(err) => {
-                                        error!(target = "rpc",
-                                            %err,
-                                            "Failed to fill transaction with block context"
-                                        );
-                                        None
-                                    }
-                                };
-                                std::future::ready(tx_value)
-                            });
-                            return pipe_from_stream(accepted_sink, stream).await
-                        }
-                        Params::Bool(false) | Params::None => {
-                            // only hashes requested
-                        }
-                        _ => {
-                            return Err(invalid_params_rpc_err(
-                                "Invalid params for newPendingTransactions",
-                            ))
-                        }
-                    }
+                if full_pending_transactions(params.as_ref())? {
+                    // full transaction objects requested
+                    let stream = self.full_pending_transaction_stream().filter_map(|tx| {
+                        let tx_value = match self
+                            .inner
+                            .eth_api
+                            .converter()
+                            .fill_pending(tx.transaction.to_consensus())
+                        {
+                            Ok(tx) => Some(tx),
+                            Err(err) => {
+                                error!(target = "rpc",
+                                    %err,
+                                    "Failed to fill transaction with block context"
+                                );
+                                None
+                            }
+                        };
+                        std::future::ready(tx_value)
+                    });
+                    return pipe_from_stream(accepted_sink, stream).await
                 }
 
+                // only hashes requested
                 pipe_from_stream(accepted_sink, self.pending_transaction_hashes_stream()).await
             }
             SubscriptionKind::Syncing => {
@@ -188,13 +171,7 @@ where
                 Ok(())
             }
             SubscriptionKind::TransactionReceipts => {
-                let filter = match params {
-                    Some(Params::TransactionReceipts(filter)) => filter,
-                    None | Some(Params::None) => TransactionReceiptsParams::default(),
-                    _ => {
-                        return Err(invalid_params_rpc_err("Invalid params for transactionReceipts"))
-                    }
-                };
+                let filter = transaction_receipts_params(params.as_ref())?;
 
                 pipe_from_stream(
                     accepted_sink,
@@ -219,6 +196,13 @@ where
         kind: SubscriptionKind,
         params: Option<Params>,
     ) -> jsonrpsee::core::SubscriptionResult {
+        // reject invalid params before accepting, otherwise the client would be handed a
+        // subscription id for a subscription that never delivers anything
+        if let Err(err) = validate_params(&kind, params.as_ref()) {
+            pending.reject(err).await;
+            return Ok(())
+        }
+
         let sink = pending.accept().await?;
         let pubsub = self.clone();
         self.inner.subscription_task_spawner.spawn_task(async move {
@@ -226,6 +210,48 @@ where
         });
 
         Ok(())
+    }
+}
+
+/// Validates the params of an `eth_subscribe` request for the given subscription kind.
+fn validate_params(
+    kind: &SubscriptionKind,
+    params: Option<&Params>,
+) -> Result<(), ErrorObject<'static>> {
+    match kind {
+        SubscriptionKind::Logs => logs_filter(params).map(drop),
+        SubscriptionKind::NewPendingTransactions => full_pending_transactions(params).map(drop),
+        SubscriptionKind::TransactionReceipts => transaction_receipts_params(params).map(drop),
+        _ => Ok(()),
+    }
+}
+
+/// Returns the log filter for a `logs` subscription, using the default filter if none is given.
+fn logs_filter(params: Option<&Params>) -> Result<Filter, ErrorObject<'static>> {
+    match params {
+        Some(Params::Logs(filter)) => Ok((**filter).clone()),
+        Some(Params::Bool(_)) => Err(invalid_params_rpc_err("Invalid params for logs")),
+        _ => Ok(Default::default()),
+    }
+}
+
+/// Returns whether a `newPendingTransactions` subscription requested full transactions.
+fn full_pending_transactions(params: Option<&Params>) -> Result<bool, ErrorObject<'static>> {
+    match params {
+        Some(Params::Bool(full)) => Ok(*full),
+        None | Some(Params::None) => Ok(false),
+        _ => Err(invalid_params_rpc_err("Invalid params for newPendingTransactions")),
+    }
+}
+
+/// Returns the params of a `transactionReceipts` subscription.
+fn transaction_receipts_params(
+    params: Option<&Params>,
+) -> Result<TransactionReceiptsParams, ErrorObject<'static>> {
+    match params {
+        Some(Params::TransactionReceipts(filter)) => Ok(filter.clone()),
+        None | Some(Params::None) => Ok(Default::default()),
+        _ => Err(invalid_params_rpc_err("Invalid params for transactionReceipts")),
     }
 }
 

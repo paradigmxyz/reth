@@ -104,6 +104,30 @@ async fn test_eth_subscribe_invalid_kind_rejected() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn test_eth_subscribe_invalid_params_rejected() {
+    reth_tracing::init_test_tracing();
+
+    let handle = launch_ws_eth().await;
+    let client = handle.ws_client().await.unwrap();
+
+    let cases: Vec<(&str, Value)> = vec![
+        ("logs", serde_json::json!(true)),
+        (
+            "newPendingTransactions",
+            serde_json::json!({"address": "0x0000000000000000000000000000000000000001"}),
+        ),
+        ("transactionReceipts", serde_json::json!(true)),
+    ];
+
+    for (kind, params) in cases {
+        let result: Result<Subscription<Value>, _> = client
+            .subscribe("eth_subscribe", jsonrpsee::rpc_params![kind, params], "eth_unsubscribe")
+            .await;
+        assert!(result.is_err(), "subscribe({kind}) with invalid params must be rejected");
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn test_eth_subscribe_server_survives_client_disconnect() {
     reth_tracing::init_test_tracing();
 
