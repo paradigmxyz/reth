@@ -18,13 +18,14 @@ on:
         default: ""
         type: string
       mode:
-        description: "Benchmark mode: Engine API blocks or RPC transactions"
+        description: "Benchmark mode: Engine API blocks, RPC transactions, or RPC call replay"
         required: false
         default: "engine"
         type: choice
         options:
           - engine
           - rpc
+          - call
       big_blocks:
         description: "Use big blocks mode: false, true, or target gas like 100M/2G"
         required: false
@@ -120,6 +121,16 @@ on:
         required: false
         default: "false"
         type: boolean
+      call_args:
+        description: "Call mode arguments as key=value pairs (corpus, class, methods, rps, duration, passes, concurrency)"
+        required: false
+        default: ""
+        type: string
+      txgen_ref:
+        description: "txgen branch or commit to install instead of the default branch"
+        required: false
+        default: ""
+        type: string
 
 env:
   CARGO_TERM_COLOR: always
@@ -174,6 +185,19 @@ jobs:
       otlp: ${{ steps.args.outputs.otlp }}
       node-bin: ${{ steps.args.outputs.node-bin }}
       mode: ${{ steps.args.outputs.mode }}
+      corpus: ${{ steps.args.outputs.corpus }}
+      class: ${{ steps.args.outputs.class }}
+      methods: ${{ steps.args.outputs.methods }}
+      rps: ${{ steps.args.outputs.rps }}
+      duration: ${{ steps.args.outputs.duration }}
+      passes: ${{ steps.args.outputs.passes }}
+      concurrency: ${{ steps.args.outputs.concurrency }}
+      top-gas: ${{ steps.args.outputs.top-gas }}
+      tracer: ${{ steps.args.outputs.tracer }}
+      tracer-config: ${{ steps.args.outputs.tracer-config }}
+      trace-options: ${{ steps.args.outputs.trace-options }}
+      namespace: ${{ steps.args.outputs.namespace }}
+      txgen-ref: ${{ steps.args.outputs.txgen-ref }}
       comment-id: ${{ steps.ack.outputs.comment-id }}
       pr-head-sha: ${{ steps.args.outputs.pr-head-sha }}
       pr-head-ref: ${{ steps.args.outputs.pr-head-ref }}
@@ -266,15 +290,62 @@ jobs:
       - name: Parse arguments
         id: args
         if: steps.command.outputs.command == 'bench'
+        env:
+          INPUT_BAL: ${{ github.event.inputs.bal }}
+          INPUT_BASELINE: ${{ github.event.inputs.baseline }}
+          INPUT_BASELINE_ARGS: ${{ github.event.inputs.baseline_args }}
+          INPUT_BIG_BLOCKS: ${{ github.event.inputs.big_blocks }}
+          INPUT_BLOCK_TIME: ${{ github.event.inputs.block_time }}
+          INPUT_BLOCKS: ${{ github.event.inputs.blocks }}
+          INPUT_CALL_ARGS: ${{ github.event.inputs.call_args }}
+          INPUT_CORES: ${{ github.event.inputs.cores }}
+          INPUT_FEATURE: ${{ github.event.inputs.feature }}
+          INPUT_FEATURE_ARGS: ${{ github.event.inputs.feature_args }}
+          INPUT_METRICS: ${{ github.event.inputs.metrics }}
+          INPUT_MODE: ${{ github.event.inputs.mode }}
+          INPUT_OTLP: ${{ github.event.inputs.otlp }}
+          INPUT_REORG: ${{ github.event.inputs.reorg }}
+          INPUT_RUN_PAIRS: ${{ github.event.inputs.run_pairs }}
+          INPUT_SAMPLY: ${{ github.event.inputs.samply }}
+          INPUT_SLACK: ${{ github.event.inputs.slack }}
+          INPUT_TRACING_CHROME: ${{ github.event.inputs.tracing_chrome }}
+          INPUT_TXGEN_REF: ${{ github.event.inputs.txgen_ref }}
+          INPUT_WAIT_TIME: ${{ github.event.inputs.wait_time }}
+          INPUT_WARMUP: ${{ github.event.inputs.warmup }}
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         with:
           github-token: ${{ secrets.DEREK_PAT }}
           script: |
             const validBalModes = new Set(['false', 'true', 'feature', 'baseline']);
             const validSlackModes = new Set(['always', 'on-win', 'on-error', 'never']);
-            const validModes = new Set(['engine', 'rpc']);
-            const usage = '`@decofe bench [mode=engine|rpc] [blocks=N] [big-blocks[=true|false|100M|2G]] [reorg[=N]] [bal=true|false|feature|baseline] [warmup=N] [baseline=REF] [feature=REF] [samply] [tracing-chrome] [skip-state-root] [slack=always|on-win|on-error|never] [cores=N] [run-pairs=N] [otlp=true|false] [metrics[=true|false]] [wait-time=DURATION] [block-time=DURATION] [baseline-args="..."] [feature-args="..."]`';
+            const validModes = new Set(['engine', 'rpc', 'call']);
+            const validCallClasses = new Set(['call', 'tracecall', 'tracetx', 'traceblock']);
+            const validNamespaces = new Set(['debug', 'trace']);
+            const validCallMethods = new Set([
+              'eth_call', 'eth_estimateGas', 'eth_createAccessList',
+              'debug_traceCall', 'trace_call',
+              'debug_traceTransaction', 'trace_transaction', 'trace_replayTransaction',
+              'debug_traceBlockByNumber', 'trace_block', 'trace_replayBlockTransactions',
+            ]);
+            // Per class request shape defaults: method set, open-loop rate and closed-loop workers.
+            const callClassDefaults = {
+              call: { methods: 'eth_call', rps: '100', concurrency: '16' },
+              tracecall: { methods: 'debug_traceCall,trace_call', rps: '20', concurrency: '8' },
+              tracetx: { methods: 'debug_traceTransaction,trace_transaction', rps: '20', concurrency: '8' },
+              traceblock: { methods: 'debug_traceBlockByNumber,trace_block,trace_replayBlockTransactions', rps: '2', concurrency: '2' },
+            };
+            // A tracer spec is a tracer name, `structlog`, or `js:NAME` for a script staged on the runner.
+            const tracerSpecValid = (value) => {
+              const specs = value.split(',').map(s => s.trim()).filter(Boolean);
+              return specs.length > 0 && specs.every(s => /^[A-Za-z0-9_]+$/.test(s) || /^js:[A-Za-z0-9._-]+$/.test(s));
+            };
+            const jsonObjectValid = (value) => {
+              try { const parsed = JSON.parse(value); return parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed); } catch { return false; }
+            };
+            const usage = '`@decofe bench [mode=engine|rpc|call] [blocks=N] [big-blocks[=true|false|100M|2G]] [reorg[=N]] [bal=true|false|feature|baseline] [warmup=N] [baseline=REF] [feature=REF] [samply] [tracing-chrome] [skip-state-root] [slack=always|on-win|on-error|never] [cores=N] [run-pairs=N] [otlp=true|false] [metrics[=true|false]] [wait-time=DURATION] [block-time=DURATION] [baseline-args="..."] [feature-args="..."] [corpus=static|NAME] [class=call|tracecall|tracetx|traceblock] [namespace=debug|trace] [methods=a,b] [rps=N] [duration=DUR] [passes=N] [concurrency=N] [top-gas=N] [tracer=SPEC[,SPEC]] [tracer-config=JSON] [trace-options=JSON] [txgen-ref=REF]`';
             let pr, actor, blocks, warmup, baseline, feature, samply, tracingChrome, cores, bigBlocks, bal;
+            let corpus, callClass, callMethods, callRps, callDuration, callPasses, callConcurrency, callTopGas;
+            let callTracer, callTracerConfig, callTraceOptions, callNamespace;
             let bigBlocksTargetGas = '';
             let reorg = '';
             let explicitBlocks = false;
@@ -306,43 +377,96 @@ jobs:
             };
 
             if (context.eventName === 'workflow_dispatch') {
-              actor = '${{ github.actor }}';
-              blocks = '${{ github.event.inputs.blocks }}' || '';
-              var mode = '${{ github.event.inputs.mode }}' || 'engine';
+              actor = (process.env.GITHUB_ACTOR || '');
+              blocks = (process.env.INPUT_BLOCKS || '') || '';
+              var mode = (process.env.INPUT_MODE || '') || 'engine';
               explicitBlocks = blocks !== '';
-              warmup = '${{ github.event.inputs.warmup }}' || '';
+              warmup = (process.env.INPUT_WARMUP || '') || '';
               explicitWarmup = warmup !== '';
-              baseline = '${{ github.event.inputs.baseline }}';
-              feature = '${{ github.event.inputs.feature }}';
-              samply = '${{ github.event.inputs.samply }}' === 'true' ? 'true' : 'false';
-              tracingChrome = '${{ github.event.inputs.tracing_chrome }}' === 'true' ? 'true' : 'false';
-              var slack = '${{ github.event.inputs.slack }}' || 'never';
-              cores = '${{ github.event.inputs.cores }}' || '0';
-              const parsedBigBlocks = parseBigBlocks('${{ github.event.inputs.big_blocks }}');
+              baseline = (process.env.INPUT_BASELINE || '');
+              feature = (process.env.INPUT_FEATURE || '');
+              samply = (process.env.INPUT_SAMPLY || '') === 'true' ? 'true' : 'false';
+              tracingChrome = (process.env.INPUT_TRACING_CHROME || '') === 'true' ? 'true' : 'false';
+              var slack = (process.env.INPUT_SLACK || '') || 'never';
+              cores = (process.env.INPUT_CORES || '') || '0';
+              const parsedBigBlocks = parseBigBlocks((process.env.INPUT_BIG_BLOCKS || ''));
               if (!parsedBigBlocks) {
-                core.setFailed(`Invalid big_blocks value: ${{ github.event.inputs.big_blocks }} (must be false, true, or a gas value like 100M or 2G)`);
+                core.setFailed(`Invalid big_blocks value: ${process.env.INPUT_BIG_BLOCKS || ''} (must be false, true, or a gas value like 100M or 2G)`);
                 return;
               }
               bigBlocks = parsedBigBlocks.enabled;
               bigBlocksTargetGas = parsedBigBlocks.targetGas;
-              reorg = parseReorg('${{ github.event.inputs.reorg }}');
+              reorg = parseReorg((process.env.INPUT_REORG || ''));
               if (reorg === null) {
-                core.setFailed(`Invalid reorg value: ${{ github.event.inputs.reorg }} (must be a positive integer)`);
+                core.setFailed(`Invalid reorg value: ${process.env.INPUT_REORG || ''} (must be a positive integer)`);
                 return;
               }
-              bal = '${{ github.event.inputs.bal }}' || 'false';
-              var runPairs = '${{ github.event.inputs.run_pairs }}' || '';
+              bal = (process.env.INPUT_BAL || '') || 'false';
+              var runPairs = (process.env.INPUT_RUN_PAIRS || '') || '';
               explicitRunPairs = runPairs !== '';
-              var otlp = '${{ github.event.inputs.otlp }}' === 'false' ? 'false' : 'true';
-              var metrics = '${{ github.event.inputs.metrics }}' === 'true' ? 'true' : 'false';
-              var waitTime = '${{ github.event.inputs.wait_time }}' || '';
-              var blockTime = '${{ github.event.inputs.block_time }}' || '';
-              var baselineNodeArgs = '${{ github.event.inputs.baseline_args }}' || '';
-              var featureNodeArgs = '${{ github.event.inputs.feature_args }}' || '';
+              var otlp = (process.env.INPUT_OTLP || '') === 'false' ? 'false' : 'true';
+              var metrics = (process.env.INPUT_METRICS || '') === 'true' ? 'true' : 'false';
+              var waitTime = (process.env.INPUT_WAIT_TIME || '') || '';
+              var blockTime = (process.env.INPUT_BLOCK_TIME || '') || '';
+              var baselineNodeArgs = (process.env.INPUT_BASELINE_ARGS || '') || '';
+              var featureNodeArgs = (process.env.INPUT_FEATURE_ARGS || '') || '';
               var skipStateRoot = 'false';
+              var txgenRef = (process.env.INPUT_TXGEN_REF || '') || '';
+              // call_args carries the call-mode keys a comment would, validated the same way.
+              const callArgErrors = [];
+              const callArgValues = { corpus: '', class: '', methods: '', rps: '', duration: '', passes: '', concurrency: '', 'top-gas': '', tracer: '', 'tracer-config': '', 'trace-options': '', namespace: '' };
+              const callArgParts = [];
+              const callArgRegex = /(\S+?="[^"]*"|\S+?='[^']*'|\S+)/g;
+              let callArgMatch;
+              while ((callArgMatch = callArgRegex.exec((process.env.INPUT_CALL_ARGS || ''))) !== null) callArgParts.push(callArgMatch[1]);
+              for (const part of callArgParts) {
+                const eq = part.indexOf('=');
+                const key = eq === -1 ? part : part.slice(0, eq);
+                let value = eq === -1 ? '' : part.slice(eq + 1);
+                if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) {
+                  value = value.slice(1, -1);
+                }
+                if (!(key in callArgValues)) {
+                  callArgErrors.push(`unknown call argument \`${part}\``);
+                } else if (key === 'corpus' && !/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(value)) {
+                  callArgErrors.push(`\`${part}\` (must be \`static\` or a corpus name without path separators)`);
+                } else if (key === 'class' && !validCallClasses.has(value)) {
+                  callArgErrors.push(`\`${part}\` (must be one of: ${[...validCallClasses].join(', ')})`);
+                } else if (key === 'methods' && !(value && value.split(',').every(m => validCallMethods.has(m.trim())))) {
+                  callArgErrors.push(`\`${part}\` (must be a comma separated list of supported methods)`);
+                } else if (key === 'duration' && !/^\d+(ms|s|m)$/.test(value)) {
+                  callArgErrors.push(`\`${part}\` (must be a duration like 500ms, 1s, 2m)`);
+                } else if (['rps', 'passes', 'concurrency', 'top-gas'].includes(key) && !/^\d+$/.test(value)) {
+                  callArgErrors.push(`\`${part}\` (must be a positive integer)`);
+                } else if (key === 'namespace' && !validNamespaces.has(value)) {
+                  callArgErrors.push(`\`${part}\` (must be debug or trace)`);
+                } else if (key === 'tracer' && !tracerSpecValid(value)) {
+                  callArgErrors.push(`\`${part}\` (must be comma separated tracer specs: a tracer name, structlog, or js:NAME)`);
+                } else if ((key === 'tracer-config' || key === 'trace-options') && !jsonObjectValid(value)) {
+                  callArgErrors.push(`\`${part}\` (must be a JSON object)`);
+                } else {
+                  callArgValues[key] = value;
+                }
+              }
+              if (callArgErrors.length) {
+                core.setFailed(`Invalid call_args: ${callArgErrors.join(', ')}`);
+                return;
+              }
+              corpus = callArgValues.corpus;
+              callClass = callArgValues.class;
+              callMethods = callArgValues.methods;
+              callRps = callArgValues.rps;
+              callDuration = callArgValues.duration;
+              callPasses = callArgValues.passes;
+              callConcurrency = callArgValues.concurrency;
+              callTopGas = callArgValues['top-gas'];
+              callTracer = callArgValues.tracer;
+              callTracerConfig = callArgValues['tracer-config'];
+              callTraceOptions = callArgValues['trace-options'];
+              callNamespace = callArgValues.namespace;
 
               // Find PR for the selected branch
-              const branch = '${{ github.ref_name }}';
+              const branch = (process.env.GITHUB_REF_NAME || '');
               const { data: prs } = await github.rest.pulls.list({
                 owner: context.repo.owner,
                 repo: context.repo.repo,
@@ -359,13 +483,13 @@ jobs:
               actor = context.payload.comment.user.login;
 
               const body = context.payload.comment.body.trim();
-              const intArgs = new Set(['warmup', 'cores', 'blocks', 'run-pairs']);
+              const intArgs = new Set(['warmup', 'cores', 'blocks', 'run-pairs', 'rps', 'passes', 'concurrency', 'top-gas']);
               const refArgs = new Set(['baseline', 'feature']);
               const boolArgs = new Set(['samply', 'tracing-chrome', 'otlp', 'metrics', 'skip-state-root']);
-              const enumArgs = new Map([['bal', validBalModes], ['slack', validSlackModes], ['mode', validModes]]);
-              const durationArgs = new Set(['wait-time', 'block-time']);
-              const stringArgs = new Set(['baseline-args', 'feature-args']);
-              const defaults = { mode: 'engine', blocks: '', warmup: '', baseline: '', feature: '', samply: 'false', 'tracing-chrome': 'false', slack: 'always', 'big-blocks': 'false', reorg: '', bal: 'false', cores: '0', 'run-pairs': '', otlp: 'true', metrics: 'false', 'skip-state-root': 'false', 'wait-time': '', 'block-time': '', 'baseline-args': '', 'feature-args': '' };
+              const enumArgs = new Map([['bal', validBalModes], ['slack', validSlackModes], ['mode', validModes], ['class', validCallClasses], ['namespace', validNamespaces]]);
+              const durationArgs = new Set(['wait-time', 'block-time', 'duration']);
+              const stringArgs = new Set(['baseline-args', 'feature-args', 'txgen-ref']);
+              const defaults = { mode: 'engine', blocks: '', warmup: '', baseline: '', feature: '', samply: 'false', 'tracing-chrome': 'false', slack: 'always', 'big-blocks': 'false', reorg: '', bal: 'false', cores: '0', 'run-pairs': '', otlp: 'true', metrics: 'false', 'skip-state-root': 'false', 'wait-time': '', 'block-time': '', 'baseline-args': '', 'feature-args': '', 'txgen-ref': '', corpus: '', class: '', methods: '', rps: '', duration: '', passes: '', concurrency: '', 'top-gas': '', tracer: '', 'tracer-config': '', 'trace-options': '', namespace: '' };
               const unknown = [];
               const invalid = [];
               const args = body.replace(/^(?:@decofe|derek) bench\s*/, '');
@@ -408,6 +532,22 @@ jobs:
                   } else {
                     invalid.push(`\`${key}=${value}\` (must be a positive integer)`);
                   }
+                } else if (key === 'corpus') {
+                  if (/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(value)) {
+                    defaults[key] = value;
+                  } else {
+                    invalid.push(`\`${key}=${value}\` (must be \`static\` or a corpus name without path separators)`);
+                  }
+                } else if (key === 'methods') {
+                  const requested = value.split(',').map(m => m.trim()).filter(Boolean);
+                  const unsupported = requested.filter(m => !validCallMethods.has(m));
+                  if (!requested.length) {
+                    invalid.push(`\`${key}=${value}\` (must be a comma separated method list)`);
+                  } else if (unsupported.length) {
+                    invalid.push(`\`${key}=${value}\` (unsupported method(s): ${unsupported.join(', ')})`);
+                  } else {
+                    defaults[key] = requested.join(',');
+                  }
                 } else if (boolArgs.has(key)) {
                   if (value === 'true' || value === 'false') {
                     defaults[key] = value;
@@ -440,6 +580,18 @@ jobs:
                     invalid.push(`\`${key}=\` (must be a git ref)`);
                   } else {
                     defaults[key] = value;
+                  }
+                } else if (key === 'tracer') {
+                  if (tracerSpecValid(value)) {
+                    defaults[key] = value;
+                  } else {
+                    invalid.push(`\`${key}=${value}\` (must be comma separated tracer specs: a tracer name, structlog, or js:NAME)`);
+                  }
+                } else if (key === 'tracer-config' || key === 'trace-options') {
+                  if (jsonObjectValid(value)) {
+                    defaults[key] = value;
+                  } else {
+                    invalid.push(`\`${key}=${value}\` (must be a quoted JSON object)`);
                   }
                 } else if (stringArgs.has(key)) {
                   defaults[key] = value;
@@ -482,7 +634,20 @@ jobs:
               var blockTime = defaults['block-time'];
               var baselineNodeArgs = defaults['baseline-args'];
               var featureNodeArgs = defaults['feature-args'];
+              var txgenRef = defaults['txgen-ref'];
               var skipStateRoot = defaults['skip-state-root'];
+              corpus = defaults.corpus;
+              callClass = defaults.class;
+              callMethods = defaults.methods;
+              callRps = defaults.rps;
+              callDuration = defaults.duration;
+              callPasses = defaults.passes;
+              callConcurrency = defaults.concurrency;
+              callTopGas = defaults['top-gas'];
+              callTracer = defaults.tracer;
+              callTracerConfig = defaults['tracer-config'];
+              callTraceOptions = defaults['trace-options'];
+              callNamespace = defaults.namespace;
             }
 
             if (skipStateRoot === 'true') {
@@ -491,8 +656,11 @@ jobs:
             }
 
             const isBigBlocks = bigBlocks === 'true';
+            // In call mode `blocks` counts the chain blocks a static corpus is generated
+            // from and `warmup` is a warmup duration in seconds.
+            const isCall = mode === 'call';
             if (!explicitBlocks) {
-              blocks = defaultBlocks(isBigBlocks);
+              blocks = isCall ? '20' : defaultBlocks(isBigBlocks);
             }
             if (!explicitRunPairs) {
               runPairs = defaultRunPairs(isBigBlocks);
@@ -506,7 +674,7 @@ jobs:
               return;
             }
             if (!explicitWarmup) {
-              warmup = defaultWarmup(blocks);
+              warmup = isCall ? '60' : defaultWarmup(blocks);
             }
             if (!/^[1-9]\d*$/.test(runPairs)) {
               core.setFailed(`Invalid run-pairs value: ${runPairs} (must be a positive integer greater than zero)`);
@@ -522,15 +690,15 @@ jobs:
               core.setFailed(`Invalid benchmark mode: ${mode}`);
               return;
             }
-            if (mode === 'rpc' && (isBigBlocks || reorg || bal !== 'false')) {
-              core.setFailed('RPC mode does not support big-blocks, reorg, or BAL');
+            if (mode !== 'engine' && (isBigBlocks || reorg || bal !== 'false')) {
+              core.setFailed(`${mode} mode does not support big-blocks, reorg, or BAL`);
               return;
             }
-            if (mode === 'engine' && blockTime) {
+            if (mode !== 'rpc' && blockTime) {
               core.setFailed('block-time is only supported in RPC mode');
               return;
             }
-            if (mode === 'rpc' && waitTime) {
+            if (mode !== 'engine' && waitTime) {
               core.setFailed('wait-time is only supported in Engine mode');
               return;
             }
@@ -538,8 +706,47 @@ jobs:
               blockTime = '1s';
             }
 
+            const callArgs = {
+              corpus, class: callClass, methods: callMethods,
+              rps: callRps, duration: callDuration, passes: callPasses, concurrency: callConcurrency,
+              'top-gas': callTopGas, tracer: callTracer, 'tracer-config': callTracerConfig, 'trace-options': callTraceOptions, namespace: callNamespace,
+            };
+            if (isCall) {
+              if (!corpus) corpus = 'static';
+              if (!callClass) callClass = 'call';
+              const classDefaults = callClassDefaults[callClass];
+              if (callNamespace && callClass === 'call') {
+                core.setFailed('namespace applies to the tracecall, tracetx and traceblock classes');
+                return;
+              }
+              if (!callMethods) {
+                // The namespace narrows the class default to one tracing API.
+                callMethods = classDefaults.methods.split(',').filter(m => !callNamespace || m.startsWith(`${callNamespace}_`)).join(',');
+              } else if (callNamespace) {
+                const outside = callMethods.split(',').filter(m => !m.startsWith(`${callNamespace}_`));
+                if (outside.length) {
+                  core.setFailed(`methods outside the ${callNamespace} namespace: ${outside.join(', ')}`);
+                  return;
+                }
+              }
+              if (!callRps) callRps = classDefaults.rps;
+              if (!callConcurrency) callConcurrency = classDefaults.concurrency;
+              if (!callDuration) callDuration = '120s';
+              if (!callPasses) callPasses = '20';
+              if (corpus !== 'static' && (callTracer || callTracerConfig || callTraceOptions)) {
+                core.setFailed('tracer, tracer-config and trace-options apply to corpus=static; a custom corpus carries its own tracer parameters');
+                return;
+              }
+            } else {
+              const provided = Object.entries(callArgs).filter(([, value]) => value !== '').map(([key]) => key);
+              if (provided.length) {
+                core.setFailed(`${provided.join(', ')} ${provided.length > 1 ? 'are' : 'is'} only supported in call mode`);
+                return;
+              }
+            }
+
             const releaseRef = (ref) => /^v\d+\.\d+\.\d+/.test(ref || '');
-            if (releaseRef(baseline) || releaseRef(feature) || '${{ github.ref_type }}' === 'tag') {
+            if (releaseRef(baseline) || releaseRef(feature) || (process.env.GITHUB_REF_TYPE || '') === 'tag') {
               otlp = 'false';
             }
 
@@ -557,7 +764,7 @@ jobs:
               core.setOutput('pr-head-repo', prData.head.repo.full_name);
               if (!featureName) featureName = prData.head.ref;
             } else {
-              if (!featureName) featureName = '${{ github.ref_name }}';
+              if (!featureName) featureName = (process.env.GITHUB_REF_NAME || '');
             }
 
             const nodeBin = bigBlocks === 'true' ? 'reth-bb' : 'reth';
@@ -588,6 +795,19 @@ jobs:
             core.setOutput('metrics', metrics);
             core.setOutput('node-bin', nodeBin);
             core.setOutput('mode', mode);
+            core.setOutput('corpus', corpus);
+            core.setOutput('class', callClass);
+            core.setOutput('methods', callMethods);
+            core.setOutput('rps', callRps);
+            core.setOutput('duration', callDuration);
+            core.setOutput('passes', callPasses);
+            core.setOutput('concurrency', callConcurrency);
+            core.setOutput('top-gas', callTopGas);
+            core.setOutput('tracer', callTracer);
+            core.setOutput('tracer-config', callTracerConfig);
+            core.setOutput('trace-options', callTraceOptions);
+            core.setOutput('namespace', callNamespace);
+            core.setOutput('txgen-ref', txgenRef);
 
       - name: Acknowledge request
         id: ack
@@ -658,6 +878,24 @@ jobs:
             const reorgNote = reorg ? `, reorg: \`${reorg}\`` : '';
             const balNote = bal !== 'false' ? `, BAL: \`${bal}\`` : '';
             const modeNote = mode !== 'engine' ? `, mode: \`${mode}\`` : '';
+            const corpus = '${{ steps.args.outputs.corpus }}';
+            const callClass = '${{ steps.args.outputs.class }}';
+            const callMethods = '${{ steps.args.outputs.methods }}';
+            const callRps = '${{ steps.args.outputs.rps }}';
+            const callDuration = '${{ steps.args.outputs.duration }}';
+            const callPasses = '${{ steps.args.outputs.passes }}';
+            const callConcurrency = '${{ steps.args.outputs.concurrency }}';
+            const callTopGas = '${{ steps.args.outputs.top-gas }}';
+            const callNamespace = '${{ steps.args.outputs.namespace }}';
+            const callTracer = '${{ steps.args.outputs.tracer }}';
+            const callExtras = [
+              callTopGas ? `top-gas: \`${callTopGas}\`` : '',
+              callNamespace ? `namespace: \`${callNamespace}\`` : '',
+              callTracer ? `tracer: \`${callTracer}\`` : '',
+            ].filter(Boolean).map(note => `, ${note}`).join('');
+            const callNote = mode === 'call'
+              ? `, corpus: \`${corpus}\`, class: \`${callClass}\`, methods: \`${callMethods}\`, rps: \`${callRps}\`, duration: \`${callDuration}\`, passes: \`${callPasses}\`, concurrency: \`${callConcurrency}\`${callExtras}`
+              : '';
             const cores = '${{ steps.args.outputs.cores }}';
             const coresNote = cores && cores !== '0' ? `, cores: \`${cores}\`` : '';
             const runPairs = '${{ steps.args.outputs.run-pairs }}' || '6';
@@ -675,8 +913,10 @@ jobs:
             const baselineArgsNote = baselineArgsVal ? `, baseline-args: \`${baselineArgsVal}\`` : '';
             const featureArgsVal = '${{ steps.args.outputs.feature-args }}';
             const featureArgsNote = featureArgsVal ? `, feature-args: \`${featureArgsVal}\`` : '';
-            const blocksDesc = bigBlocks ? `${blocks} big blocks, ${warmup} warmup blocks` : `${blocks} blocks, ${warmup} warmup blocks`;
-            const config = `**Config:** ${blocksDesc}, baseline: \`${baseline}\`, feature: \`${feature}\`${modeNote}${samplyNote}${tracingChromeNote}${slackNote}${reorgNote}${balNote}${coresNote}${runPairsNote}${otlpNote}${metricsNote}${waitTimeNote}${blockTimeNote}${baselineArgsNote}${featureArgsNote}`;
+            const blocksDesc = mode === 'call'
+              ? `${blocks} corpus blocks, ${warmup}s warmup`
+              : (bigBlocks ? `${blocks} big blocks, ${warmup} warmup blocks` : `${blocks} blocks, ${warmup} warmup blocks`);
+            const config = `**Config:** ${blocksDesc}, baseline: \`${baseline}\`, feature: \`${feature}\`${modeNote}${callNote}${samplyNote}${tracingChromeNote}${slackNote}${reorgNote}${balNote}${coresNote}${runPairsNote}${otlpNote}${metricsNote}${waitTimeNote}${blockTimeNote}${baselineArgsNote}${featureArgsNote}`;
 
             const { data: comment } = await github.rest.issues.createComment({
               owner: context.repo.owner,
@@ -713,6 +953,24 @@ jobs:
             const reorgNote = reorg ? `, reorg: \`${reorg}\`` : '';
             const balNote = bal !== 'false' ? `, BAL: \`${bal}\`` : '';
             const modeNote = mode !== 'engine' ? `, mode: \`${mode}\`` : '';
+            const corpus = '${{ steps.args.outputs.corpus }}';
+            const callClass = '${{ steps.args.outputs.class }}';
+            const callMethods = '${{ steps.args.outputs.methods }}';
+            const callRps = '${{ steps.args.outputs.rps }}';
+            const callDuration = '${{ steps.args.outputs.duration }}';
+            const callPasses = '${{ steps.args.outputs.passes }}';
+            const callConcurrency = '${{ steps.args.outputs.concurrency }}';
+            const callTopGas = '${{ steps.args.outputs.top-gas }}';
+            const callNamespace = '${{ steps.args.outputs.namespace }}';
+            const callTracer = '${{ steps.args.outputs.tracer }}';
+            const callExtras = [
+              callTopGas ? `top-gas: \`${callTopGas}\`` : '',
+              callNamespace ? `namespace: \`${callNamespace}\`` : '',
+              callTracer ? `tracer: \`${callTracer}\`` : '',
+            ].filter(Boolean).map(note => `, ${note}`).join('');
+            const callNote = mode === 'call'
+              ? `, corpus: \`${corpus}\`, class: \`${callClass}\`, methods: \`${callMethods}\`, rps: \`${callRps}\`, duration: \`${callDuration}\`, passes: \`${callPasses}\`, concurrency: \`${callConcurrency}\`${callExtras}`
+              : '';
             const cores = '${{ steps.args.outputs.cores }}';
             const coresNote = cores && cores !== '0' ? `, cores: \`${cores}\`` : '';
             const runPairs = '${{ steps.args.outputs.run-pairs }}' || '6';
@@ -730,8 +988,10 @@ jobs:
             const baselineArgsNote = baselineArgsVal ? `, baseline-args: \`${baselineArgsVal}\`` : '';
             const featureArgsVal = '${{ steps.args.outputs.feature-args }}';
             const featureArgsNote = featureArgsVal ? `, feature-args: \`${featureArgsVal}\`` : '';
-            const blocksDesc = bigBlocks ? `${blocks} big blocks, ${warmup} warmup blocks` : `${blocks} blocks, ${warmup} warmup blocks`;
-            const config = `**Config:** ${blocksDesc}, baseline: \`${baseline}\`, feature: \`${feature}\`${modeNote}${samplyNote}${tracingChromeNote}${slackNote}${reorgNote}${balNote}${coresNote}${runPairsNote}${otlpNote}${metricsNote}${waitTimeNote}${blockTimeNote}${baselineArgsNote}${featureArgsNote}`;
+            const blocksDesc = mode === 'call'
+              ? `${blocks} corpus blocks, ${warmup}s warmup`
+              : (bigBlocks ? `${blocks} big blocks, ${warmup} warmup blocks` : `${blocks} blocks, ${warmup} warmup blocks`);
+            const config = `**Config:** ${blocksDesc}, baseline: \`${baseline}\`, feature: \`${feature}\`${modeNote}${callNote}${samplyNote}${tracingChromeNote}${slackNote}${reorgNote}${balNote}${coresNote}${runPairsNote}${otlpNote}${metricsNote}${waitTimeNote}${blockTimeNote}${baselineArgsNote}${featureArgsNote}`;
             const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
 
             const numRunners = parseInt(process.env.BENCH_RUNNERS) || 1;
@@ -820,6 +1080,19 @@ jobs:
       BENCH_SLACK: ${{ needs.bench-ack.outputs.slack }}
       BENCH_NODE_BIN: ${{ needs.bench-ack.outputs.node-bin }}
       BENCH_EXECUTION_MODE: ${{ needs.bench-ack.outputs.mode }}
+      BENCH_CORPUS: ${{ needs.bench-ack.outputs.corpus }}
+      BENCH_CORPUS_DIR: /reth-bench/corpora
+      BENCH_CALL_CLASS: ${{ needs.bench-ack.outputs.class }}
+      BENCH_CALL_METHODS: ${{ needs.bench-ack.outputs.methods }}
+      BENCH_CALL_RPS: ${{ needs.bench-ack.outputs.rps }}
+      BENCH_CALL_DURATION: ${{ needs.bench-ack.outputs.duration }}
+      BENCH_CALL_PASSES: ${{ needs.bench-ack.outputs.passes }}
+      BENCH_CALL_CONCURRENCY: ${{ needs.bench-ack.outputs.concurrency }}
+      BENCH_CALL_TOP_GAS: ${{ needs.bench-ack.outputs.top-gas }}
+      BENCH_CALL_TRACER: ${{ needs.bench-ack.outputs.tracer }}
+      BENCH_CALL_TRACER_CONFIG: ${{ needs.bench-ack.outputs.tracer-config }}
+      BENCH_CALL_TRACE_OPTIONS: ${{ needs.bench-ack.outputs.trace-options }}
+      BENCH_CALL_NAMESPACE: ${{ needs.bench-ack.outputs.namespace }}
       BENCH_SNAPSHOT_MANIFEST_URL: ${{ secrets.BENCH_SNAPSHOT_MANIFEST_URL }}
       BENCH_METRICS_ADDR: "127.0.0.1:9001"
       BENCH_TARGET_METRICS_CONFIG: .github/config/bench-metrics-targets.json
@@ -893,6 +1166,24 @@ jobs:
             const reorgNote = reorg ? `, reorg: \`${reorg}\`` : '';
             const balNote = bal !== 'false' ? `, BAL: \`${bal}\`` : '';
             const modeNote = mode !== 'engine' ? `, mode: \`${mode}\`` : '';
+            const corpus = process.env.BENCH_CORPUS || '';
+            const callClass = process.env.BENCH_CALL_CLASS || '';
+            const callMethods = process.env.BENCH_CALL_METHODS || '';
+            const callRps = process.env.BENCH_CALL_RPS || '';
+            const callDuration = process.env.BENCH_CALL_DURATION || '';
+            const callPasses = process.env.BENCH_CALL_PASSES || '';
+            const callConcurrency = process.env.BENCH_CALL_CONCURRENCY || '';
+            const callTopGas = process.env.BENCH_CALL_TOP_GAS || '';
+            const callNamespace = process.env.BENCH_CALL_NAMESPACE || '';
+            const callTracer = process.env.BENCH_CALL_TRACER || '';
+            const callExtras = [
+              callTopGas ? `top-gas: \`${callTopGas}\`` : '',
+              callNamespace ? `namespace: \`${callNamespace}\`` : '',
+              callTracer ? `tracer: \`${callTracer}\`` : '',
+            ].filter(Boolean).map(note => `, ${note}`).join('');
+            const callNote = mode === 'call'
+              ? `, corpus: \`${corpus}\`, class: \`${callClass}\`, methods: \`${callMethods}\`, rps: \`${callRps}\`, duration: \`${callDuration}\`, passes: \`${callPasses}\`, concurrency: \`${callConcurrency}\`${callExtras}`
+              : '';
             const cores = process.env.BENCH_CORES || '0';
             const coresNote = cores && cores !== '0' ? `, cores: \`${cores}\`` : '';
             const runPairs = process.env.BENCH_RUN_PAIRS || '6';
@@ -910,8 +1201,10 @@ jobs:
             const baselineArgsNote = baselineArgsVal ? `, baseline-args: \`${baselineArgsVal}\`` : '';
             const featureArgsVal = process.env.BENCH_FEATURE_ARGS || '';
             const featureArgsNote = featureArgsVal ? `, feature-args: \`${featureArgsVal}\`` : '';
-            const blocksDesc = bigBlocks ? `${blocks} big blocks, ${warmup} warmup blocks` : `${blocks} blocks, ${warmup} warmup blocks`;
-            const config = `**Config:** ${blocksDesc}, baseline: \`${baseline}\`, feature: \`${feature}\`${modeNote}${samplyNote}${tracingChromeNote}${slackNote}${reorgNote}${balNote}${coresNote}${runPairsNote}${otlpNote}${metricsNote}${waitTimeNote}${blockTimeNote}${baselineArgsNote}${featureArgsNote}`;
+            const blocksDesc = mode === 'call'
+              ? `${blocks} corpus blocks, ${warmup}s warmup`
+              : (bigBlocks ? `${blocks} big blocks, ${warmup} warmup blocks` : `${blocks} blocks, ${warmup} warmup blocks`);
+            const config = `**Config:** ${blocksDesc}, baseline: \`${baseline}\`, feature: \`${feature}\`${modeNote}${callNote}${samplyNote}${tracingChromeNote}${slackNote}${reorgNote}${balNote}${coresNote}${runPairsNote}${otlpNote}${metricsNote}${waitTimeNote}${blockTimeNote}${baselineArgsNote}${featureArgsNote}`;
             core.exportVariable('BENCH_CONFIG', config);
 
             const pr = process.env.BENCH_PR;
@@ -1118,6 +1411,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TXGEN_DEPLOY_KEY: ${{ secrets.TXGEN_DEPLOY_KEY }}
           TXGEN_TOKEN: ${{ secrets.TXGEN_TOKEN }}
+          TXGEN_REF: ${{ needs.bench-ack.outputs.txgen-ref }}
           GH_PROJECT_TOKEN: ${{ secrets.GH_PROJECT_TOKEN }}
           DEREK_PAT: ${{ secrets.DEREK_PAT }}
           DEREK_TOKEN: ${{ secrets.DEREK_TOKEN }}
@@ -1255,6 +1549,22 @@ jobs:
             metrics="$BENCH_METRICS"
             slack="$BENCH_SLACK"
           )
+          if [ "$BENCH_EXECUTION_MODE" = "call" ]; then
+            derek_cmd+=(
+              corpus="$BENCH_CORPUS"
+              class="$BENCH_CALL_CLASS"
+              methods="$BENCH_CALL_METHODS"
+              rps="$BENCH_CALL_RPS"
+              duration="$BENCH_CALL_DURATION"
+              passes="$BENCH_CALL_PASSES"
+              concurrency="$BENCH_CALL_CONCURRENCY"
+            )
+            [ -n "$BENCH_CALL_TOP_GAS" ] && derek_cmd+=(top-gas="$BENCH_CALL_TOP_GAS")
+            [ -n "$BENCH_CALL_TRACER" ] && derek_cmd+=(tracer="$BENCH_CALL_TRACER")
+            [ -n "$BENCH_CALL_TRACER_CONFIG" ] && derek_cmd+=("tracer-config='$BENCH_CALL_TRACER_CONFIG'")
+            [ -n "$BENCH_CALL_TRACE_OPTIONS" ] && derek_cmd+=("trace-options='$BENCH_CALL_TRACE_OPTIONS'")
+            [ -n "$BENCH_CALL_NAMESPACE" ] && derek_cmd+=(namespace="$BENCH_CALL_NAMESPACE")
+          fi
           [ "$BENCH_SAMPLY" = "true" ] && derek_cmd+=(samply)
           [ "$BENCH_TRACING_CHROME" = "true" ] && derek_cmd+=(tracing-chrome)
           [ -n "$BENCH_WAIT_TIME" ] && derek_cmd+=(wait-time="$BENCH_WAIT_TIME")
@@ -1534,7 +1844,12 @@ jobs:
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: bench-raw-results
-          path: ${{ env.BENCH_WORK_DIR }}
+          # Replayed corpora can contain third-party traffic, so only their
+          # aggregate counts (corpus.meta.json) leave the runner.
+          path: |
+            ${{ env.BENCH_WORK_DIR }}
+            !${{ env.BENCH_WORK_DIR }}/txgen-payloads/corpus.jsonl
+            !${{ env.BENCH_WORK_DIR }}/txgen-payloads/corpus.jsonl.gz
 
       - name: Parse results
         id: results
@@ -1550,6 +1865,49 @@ jobs:
           BEHIND_BASELINE=0
           if [ -n "$BASELINE_HEAD" ] && [ "$BASELINE_REF" != "$BASELINE_HEAD" ]; then
             BEHIND_BASELINE=$(git rev-list --count "${BASELINE_REF}..${BASELINE_HEAD}" 2>/dev/null || echo "0")
+          fi
+
+          if [ "${BENCH_EXECUTION_MODE:-engine}" = "call" ]; then
+            mapfile -t BASELINE_DIRS < <(find "$BENCH_WORK_DIR" -mindepth 1 -maxdepth 1 -type d -name 'baseline-*' | sort -V)
+            mapfile -t FEATURE_DIRS < <(find "$BENCH_WORK_DIR" -mindepth 1 -maxdepth 1 -type d -name 'feature-*' | sort -V)
+            if [ "${#BASELINE_DIRS[@]}" -eq 0 ] || [ "${#FEATURE_DIRS[@]}" -eq 0 ]; then
+              echo "::error::Missing baseline or feature run directories"
+              exit 1
+            fi
+            CALL_ARGS="--output-summary $BENCH_WORK_DIR/summary.json"
+            CALL_ARGS="$CALL_ARGS --output-markdown $BENCH_WORK_DIR/comment.md"
+            CALL_ARGS="$CALL_ARGS --repo ${{ github.repository }}"
+            CALL_ARGS="$CALL_ARGS --baseline-ref ${BASELINE_REF}"
+            CALL_ARGS="$CALL_ARGS --baseline-name ${BASELINE_NAME}"
+            CALL_ARGS="$CALL_ARGS --feature-name ${FEATURE_NAME}"
+            CALL_ARGS="$CALL_ARGS --feature-ref ${FEATURE_REF}"
+            CALL_ARGS="$CALL_ARGS --baseline-dir ${BASELINE_DIRS[*]}"
+            CALL_ARGS="$CALL_ARGS --feature-dir ${FEATURE_DIRS[*]}"
+            CALL_ARGS="$CALL_ARGS --run-pairs ${BENCH_RUN_PAIRS:-6}"
+            CALL_ARGS="$CALL_ARGS --corpus-meta $TXGEN_PAYLOADS_DIR/corpus.meta.json"
+            CALL_ARGS="$CALL_ARGS --class ${BENCH_CALL_CLASS:-call}"
+            CALL_ARGS="$CALL_ARGS --rps ${BENCH_CALL_RPS:-100}"
+            CALL_ARGS="$CALL_ARGS --duration ${BENCH_CALL_DURATION:-120s}"
+            CALL_ARGS="$CALL_ARGS --passes ${BENCH_CALL_PASSES:-20}"
+            CALL_ARGS="$CALL_ARGS --concurrency ${BENCH_CALL_CONCURRENCY:-16}"
+            CALL_ARGS="$CALL_ARGS --warmup-seconds ${BENCH_WARMUP_BLOCKS:-0}"
+            if [ "$BEHIND_BASELINE" -gt 0 ]; then
+              CALL_ARGS="$CALL_ARGS --behind-baseline $BEHIND_BASELINE"
+            fi
+            if [ -n "${BENCH_ID:-}" ]; then
+              CALL_ARGS="$CALL_ARGS --benchmark-id $BENCH_ID"
+            fi
+            LOGS_URL='${{ steps.metrics.outputs.logs-url }}'
+            if [ -n "$LOGS_URL" ]; then
+              CALL_ARGS="$CALL_ARGS --logs-url $LOGS_URL"
+            fi
+            TRACES_URL='${{ steps.metrics.outputs.traces-url }}'
+            if [ -n "$TRACES_URL" ]; then
+              CALL_ARGS="$CALL_ARGS --traces-url $TRACES_URL"
+            fi
+            # shellcheck disable=SC2086
+            python3 .github/scripts/bench-call-summary.py $CALL_ARGS
+            exit 0
           fi
 
           SUMMARY_ARGS="--output-summary $BENCH_WORK_DIR/summary.json"
@@ -1614,8 +1972,9 @@ jobs:
           # shellcheck disable=SC2086
           python3 .github/scripts/bench-reth-summary.py $SUMMARY_ARGS
 
+      # Charts are block shaped; call mode reports latency distributions instead.
       - name: Generate charts
-        if: success()
+        if: success() && env.BENCH_EXECUTION_MODE != 'call'
         env:
           BASELINE_NAME: ${{ steps.refs.outputs.baseline-name }}
           FEATURE_NAME: ${{ steps.refs.outputs.feature-name }}
@@ -1639,7 +1998,12 @@ jobs:
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: bench-results
-          path: ${{ env.BENCH_WORK_DIR }}
+          # Replayed corpora can contain third-party traffic, so only their
+          # aggregate counts (corpus.meta.json) leave the runner.
+          path: |
+            ${{ env.BENCH_WORK_DIR }}
+            !${{ env.BENCH_WORK_DIR }}/txgen-payloads/corpus.jsonl
+            !${{ env.BENCH_WORK_DIR }}/txgen-payloads/corpus.jsonl.gz
 
       - name: Push benchmark artifacts
         id: push-charts
@@ -1669,7 +2033,9 @@ jobs:
             .github/scripts/configure-git-token-user.sh "${TMP_DIR}" "${DEREK_TOKEN}"
 
             mkdir -p "${TMP_DIR}/${CHART_DIR}"
-            cp "$BENCH_WORK_DIR"/charts/*.png "${TMP_DIR}/${CHART_DIR}/"
+            if compgen -G "$BENCH_WORK_DIR/charts/*.png" > /dev/null; then
+              cp "$BENCH_WORK_DIR"/charts/*.png "${TMP_DIR}/${CHART_DIR}/"
+            fi
             if [ "${BENCH_TRACING_CHROME:-false}" = "true" ]; then
               TRACE_DIR="${CHART_DIR}/tracing-chrome"
               mkdir -p "${TMP_DIR}/${TRACE_DIR}"
@@ -1755,7 +2121,8 @@ jobs:
             const prNumber = process.env.BENCH_PR || '0';
             const runId = '${{ github.run_id }}';
 
-            if (sha) {
+            // Call mode does not generate charts, so never link them.
+            if (sha && process.env.BENCH_EXECUTION_MODE !== 'call') {
               const baseUrl = `https://raw.githubusercontent.com/decofe/reth-bench-charts/${sha}/pr/${prNumber}/${runId}`;
               const charts = [
                 { file: 'latency_throughput.png', label: 'Latency, Throughput & Diff' },

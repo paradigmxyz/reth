@@ -82,6 +82,11 @@ module.exports = async function ({ core, context, chartSha, grafanaUrl, logsUrl,
   }
   md += '\n';
 
+  // Response parity (call mode)
+  if (summary.parity) {
+    md += `**Parity:** ${summary.parity.line}\n\n`;
+  }
+
   // Wait time breakdown
   const wtRows = waitTimeRows(summary);
   if (wtRows.length > 0) {
@@ -111,8 +116,8 @@ module.exports = async function ({ core, context, chartSha, grafanaUrl, logsUrl,
     md += '\n';
   }
 
-  // Charts
-  if (chartSha) {
+  // Charts (call mode does not generate any)
+  if (chartSha && summary.mode !== 'call') {
     const prNum = prNumber || '0';
     const baseUrl = `https://raw.githubusercontent.com/decofe/reth-bench-charts/${chartSha}/pr/${prNum}/${runId}`;
     const charts = [

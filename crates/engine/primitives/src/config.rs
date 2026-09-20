@@ -4,14 +4,14 @@ use alloy_eips::merge::EPOCH_SLOTS;
 use core::time::Duration;
 
 /// Triggers persistence when the number of canonical blocks in memory exceeds this threshold.
-pub const DEFAULT_PERSISTENCE_THRESHOLD: u64 = 7;
+pub const DEFAULT_PERSISTENCE_THRESHOLD: u64 = 50;
 
 /// Number of persisted blocks whose state/trie writes are masked by an in-memory suffix.
-pub const DEFAULT_NUM_STATE_MASKING_BLOCKS: u64 = 0;
+pub const DEFAULT_NUM_STATE_MASKING_BLOCKS: u64 = 30;
 
-/// Maximum number of blocks beyond the in-memory buffer target awaiting persistence before engine
-/// API processing is stalled.
-pub const DEFAULT_PERSISTENCE_BACKPRESSURE_THRESHOLD: u64 = 16;
+/// The engine stalls API processing when this many blocks are awaiting persistence beyond the
+/// in-memory buffer target.
+pub const MIN_PERSISTENCE_BACKPRESSURE_THRESHOLD: u64 = 16;
 
 /// How close to the canonical head we persist blocks.
 pub const DEFAULT_MEMORY_BLOCK_BUFFER_TARGET: u64 = 5;
@@ -225,7 +225,7 @@ impl Default for TreeConfig {
     fn default() -> Self {
         assert_backpressure_threshold_invariant(
             DEFAULT_PERSISTENCE_THRESHOLD,
-            DEFAULT_PERSISTENCE_BACKPRESSURE_THRESHOLD,
+            DEFAULT_PERSISTENCE_THRESHOLD * 2,
         );
         assert_state_masking_invariant(
             DEFAULT_PERSISTENCE_THRESHOLD,
@@ -236,7 +236,7 @@ impl Default for TreeConfig {
             persistence_threshold: DEFAULT_PERSISTENCE_THRESHOLD,
             num_state_masking_blocks: DEFAULT_NUM_STATE_MASKING_BLOCKS,
             memory_block_buffer_target: DEFAULT_MEMORY_BLOCK_BUFFER_TARGET,
-            persistence_backpressure_threshold: DEFAULT_PERSISTENCE_BACKPRESSURE_THRESHOLD,
+            persistence_backpressure_threshold: DEFAULT_PERSISTENCE_THRESHOLD * 2,
             block_buffer_limit: DEFAULT_BLOCK_BUFFER_LIMIT,
             max_invalid_header_cache_length: DEFAULT_MAX_INVALID_HEADER_CACHE_LENGTH,
             invalid_header_hit_eviction_threshold: DEFAULT_INVALID_HEADER_HIT_EVICTION_THRESHOLD,
@@ -303,6 +303,8 @@ impl TreeConfig {
         share_execution_cache_with_payload_builder: bool,
         share_sparse_trie_with_payload_builder: bool,
     ) -> Self {
+        let num_state_masking_blocks =
+            if persistence_threshold == 0 { 0 } else { num_state_masking_blocks };
         assert_backpressure_threshold_invariant(
             persistence_threshold,
             persistence_backpressure_threshold,
@@ -471,9 +473,12 @@ impl TreeConfig {
         self.allow_unwind_canonical_header
     }
 
-    /// Setter for persistence threshold.
+    /// Setter for persistence threshold. Setting this to zero disables state masking.
     pub const fn with_persistence_threshold(mut self, persistence_threshold: u64) -> Self {
         self.persistence_threshold = persistence_threshold;
+        if persistence_threshold == 0 {
+            self.num_state_masking_blocks = 0;
+        }
         assert_backpressure_threshold_invariant(
             self.persistence_threshold,
             self.persistence_backpressure_threshold,
@@ -487,8 +492,10 @@ impl TreeConfig {
     }
 
     /// Setter for the number of persisted blocks whose state/trie writes are masked.
+    /// State masking is disabled when the persistence threshold is zero.
     pub const fn with_num_state_masking_blocks(mut self, num_state_masking_blocks: u64) -> Self {
-        self.num_state_masking_blocks = num_state_masking_blocks;
+        self.num_state_masking_blocks =
+            if self.persistence_threshold == 0 { 0 } else { num_state_masking_blocks };
         assert_state_masking_invariant(
             self.persistence_threshold,
             self.num_state_masking_blocks,
@@ -814,7 +821,7 @@ impl TreeConfig {
 
 #[cfg(test)]
 mod tests {
-    use super::{TreeConfig, DEFAULT_NUM_STATE_MASKING_BLOCKS};
+    use super::TreeConfig;
 
     #[test]
     fn txpool_prewarming_is_disabled_by_default_and_can_be_enabled() {
@@ -842,16 +849,27 @@ mod tests {
     )]
     fn rejects_backpressure_threshold_at_or_below_persistence_threshold() {
         let _ = TreeConfig::default()
+            .with_num_state_masking_blocks(0)
             .with_persistence_threshold(4)
             .with_persistence_backpressure_threshold(4);
     }
 
     #[test]
-    fn state_masking_is_disabled_by_default() {
-        assert_eq!(
-            TreeConfig::default().num_state_masking_blocks(),
-            DEFAULT_NUM_STATE_MASKING_BLOCKS
-        );
+    fn default_persistence_settings() {
+        let config = TreeConfig::default();
+        assert_eq!(config.persistence_threshold(), 50);
+        assert_eq!(config.num_state_masking_blocks(), 30);
+        assert_eq!(config.persistence_backpressure_threshold(), 100);
+    }
+
+    #[test]
+    fn zero_persistence_threshold_disables_state_masking() {
+        let config = TreeConfig::default().with_persistence_threshold(0);
+        assert_eq!(config.num_state_masking_blocks(), 0);
+        let config = config.with_num_state_masking_blocks(u64::MAX);
+        assert_eq!(config.num_state_masking_blocks(), 0);
+        let config = config.with_memory_block_buffer_target(0);
+        assert_eq!(config.num_state_masking_blocks(), 0);
     }
 
     #[test]
@@ -860,6 +878,7 @@ mod tests {
     )]
     fn rejects_state_masking_window_at_or_above_persistence_threshold() {
         let _ = TreeConfig::default()
+            .with_num_state_masking_blocks(0)
             .with_persistence_threshold(4)
             .with_memory_block_buffer_target(2)
             .with_num_state_masking_blocks(2);

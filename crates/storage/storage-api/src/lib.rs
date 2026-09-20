@@ -106,7 +106,7 @@ pub use metadata::StoragePath;
 #[cfg(feature = "db-api")]
 pub use metadata::{MetadataProvider, MetadataWriter, StorageSettingsCache};
 #[cfg(feature = "db-api")]
-pub use reth_db_api::models::StorageSettings;
+pub use reth_db_api::models::{SnapAttempt, SnapAttemptId, StorageSettings, SNAP_ATTEMPT_VERSION};
 
 mod full;
 pub use full::*;
