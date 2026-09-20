@@ -91,8 +91,8 @@ impl<N: NodePrimitives> TreeState<N> {
     }
 
     /// Returns the [`ExecutedBlock`] by hash.
-    pub fn executed_block_by_hash(&self, hash: B256) -> Option<ExecutedBlock<N>> {
-        self.blocks_by_hash.get(&hash).map(|state| state.block())
+    pub fn executed_block_by_hash(&self, hash: B256) -> Option<&ExecutedBlock<N>> {
+        self.blocks_by_hash.get(&hash).map(|state| state.block_ref())
     }
 
     /// Returns the shared [`BlockState`] by hash.

@@ -922,7 +922,7 @@ where
         let mut current_canonical_number = self.state.tree_state.current_canonical_head.number;
 
         let mut current_hash = new_head_block.recovered_block().parent_hash();
-        let mut new_chain = vec![new_head_block];
+        let mut new_chain = vec![new_head_block.clone()];
         let mut current_number = new_head_number - 1;
 
         // Walk back the new chain until we reach a block we know about
@@ -933,7 +933,7 @@ where
             if let Some(block) = self.state.tree_state.executed_block_by_hash(current_hash) {
                 current_hash = block.recovered_block().parent_hash();
                 current_number -= 1;
-                new_chain.push(block);
+                new_chain.push(block.clone());
             } else {
                 warn!(target: "engine::tree", current_hash=?current_hash, "Sidechain block not found in TreeState");
                 // This should never happen as we're walking back a chain that should connect to
@@ -976,7 +976,7 @@ where
 
             if let Some(block) = self.state.tree_state.executed_block_by_hash(current_hash) {
                 current_hash = block.recovered_block().parent_hash();
-                new_chain.push(block);
+                new_chain.push(block.clone());
             } else {
                 // This shouldn't happen as we've already walked this path
                 warn!(target: "engine::tree", invalid_hash=?current_hash, "New chain block not found in TreeState");
@@ -2367,7 +2367,7 @@ where
         trace!(target: "engine::tree", ?hash, "Fetching executed block by hash");
         // check memory first
         if let Some(block) = self.state.tree_state.executed_block_by_hash(hash) {
-            return Ok(block)
+            return Ok(block.clone())
         }
 
         let (block, senders) = self
