@@ -12,6 +12,7 @@ use reth_dns_discovery::{
     DnsDiscoveryConfig, DnsDiscoveryHandle, DnsDiscoveryService, DnsNodeRecordUpdate, DnsResolver,
 };
 use reth_ethereum_forks::{EnrForkIdEntry, ForkId};
+use reth_net_nat::{NatResolver, ResolveNatInterval};
 use reth_network_api::{DiscoveredEvent, DiscoveryEvent};
 use reth_network_peers::{NodeRecord, PeerId};
 use reth_network_types::PeerAddr;
@@ -22,6 +23,7 @@ use std::{
     pin::Pin,
     sync::Arc,
     task::{ready, Context, Poll},
+    time::Duration,
 };
 use tokio::{net::UdpSocket, sync::mpsc, task::JoinHandle};
 use tokio_stream::{wrappers::ReceiverStream, Stream};
@@ -31,6 +33,11 @@ use tracing::{debug, trace};
 ///
 /// Default is 10 000 peers.
 pub const DEFAULT_MAX_CAPACITY_DISCOVERED_PEERS_CACHE: u32 = 10_000;
+
+/// How often the external ip is re-resolved if the node has to resolve it itself.
+///
+/// Matches the default interval of discv4.
+const RESOLVE_EXTERNAL_IP_INTERVAL: Duration = Duration::from_secs(60 * 5);
 
 /// An abstraction over the configured discovery protocol.
 ///
@@ -59,6 +66,9 @@ pub struct Discovery {
     _discv5_forwarder: Option<JoinHandle<()>>,
     /// Handler to interact with the DNS discovery service
     _dns_discovery: Option<DnsDiscoveryHandle>,
+    /// Periodically resolves the external ip if the node has to advertise it itself, i.e. if
+    /// discv4, which resolves it on its own, is disabled.
+    nat_resolver: Option<ResolveNatInterval>,
     /// Updates from the DNS discovery service.
     dns_discovery_updates: Option<ReceiverStream<DnsNodeRecordUpdate>>,
     /// The handle to the spawned DNS discovery service
@@ -243,7 +253,43 @@ impl Discovery {
             _dns_disc_service,
             _dns_discovery,
             dns_discovery_updates,
+            nat_resolver: None,
         })
+    }
+
+    /// Configures the [`NatResolver`] used to advertise the node's external ip.
+    ///
+    /// Discv4 resolves the external ip on its own, so the resolver is only run here if discv4 is
+    /// disabled. The resolved ip is applied to the local discv5 ENR, which would otherwise only
+    /// learn it once enough peers have voted on it.
+    pub fn with_nat_resolver(mut self, nat: Option<NatResolver>) -> Self {
+        if self.discv4.is_none() &&
+            let Some(nat) = nat
+        {
+            self.nat_resolver = Some(ResolveNatInterval::interval_at(
+                nat,
+                tokio::time::Instant::now(),
+                RESOLVE_EXTERNAL_IP_INTERVAL,
+            ));
+        }
+        self
+    }
+
+    /// Updates the advertised external ip of the local node.
+    fn on_external_ip(&mut self, external_ip: IpAddr) {
+        if self.local_enr.address == external_ip {
+            return
+        }
+        debug!(target: "net::discovery", ?external_ip, "Updating external ip");
+        self.local_enr.address = external_ip;
+        if let Some(discv5) = &self.discv5 {
+            let udp = SocketAddr::new(external_ip, discv5.local_port());
+            let tcp = SocketAddr::new(external_ip, self.local_enr.tcp_port);
+            discv5.with_discv5(|discv5| {
+                discv5.update_local_enr_socket(udp, false);
+                discv5.update_local_enr_socket(tcp, true);
+            });
+        }
     }
 
     /// Registers a listener for receiving [`DiscoveryEvent`] updates.
@@ -400,6 +446,13 @@ impl Discovery {
                 self.on_node_record_update(update.node_record, update.fork_id);
             }
 
+            // Advertise the externally resolved ip if the node has to resolve it itself
+            while let Some(Poll::Ready(Some(ip))) =
+                self.nat_resolver.as_mut().map(|resolver| resolver.poll_tick(cx))
+            {
+                self.on_external_ip(ip)
+            }
+
             if self.queued_events.is_empty() {
                 return Poll::Pending
             }
@@ -466,6 +519,7 @@ impl Discovery {
             dns_discovery_updates: None,
             _dns_disc_service: None,
             discovery_listeners: Default::default(),
+            nat_resolver: None,
         }
     }
 }
@@ -520,6 +574,65 @@ mod tests {
         )
         .await
         .expect("should build discv5 with discv4 downgrade")
+    }
+
+    #[tokio::test]
+    async fn discv5_only_advertises_resolved_external_ip() {
+        reth_tracing::init_test_tracing();
+        let secret_key = SecretKey::new(&mut rand_08::thread_rng());
+        let rlpx_addr: SocketAddr = "127.0.0.1:30309".parse().unwrap();
+        let discv5_addr: SocketAddr = "127.0.0.1:0".parse().unwrap();
+        let discv5_config = reth_discv5::Config::builder(rlpx_addr)
+            .discv5_config(discv5::ConfigBuilder::new(discv5_addr.into()).build())
+            .build();
+        let external_ip: IpAddr = "203.0.113.7".parse().unwrap();
+
+        // discv4 is disabled, so nothing else resolves the external ip
+        let mut discovery = Discovery::new(
+            rlpx_addr,
+            "127.0.0.1:0".parse().unwrap(),
+            secret_key,
+            None,
+            Some(discv5_config),
+            None,
+        )
+        .await
+        .expect("should start discv5")
+        .with_nat_resolver(Some(NatResolver::ExternalIp(external_ip)));
+        assert!(discovery.nat_resolver.is_some());
+
+        let discv5 = discovery.discv5().unwrap();
+        assert_ne!(discv5.node_record().map(|record| record.address), Some(external_ip));
+
+        // the resolver ticks immediately and the resolved ip is applied to the local enr
+        tokio::time::timeout(
+            Duration::from_secs(5),
+            futures::future::poll_fn(|cx| {
+                let _ = discovery.poll(cx);
+                if discv5.node_record().is_some_and(|record| record.address == external_ip) {
+                    Poll::Ready(())
+                } else {
+                    cx.waker().wake_by_ref();
+                    Poll::Pending
+                }
+            }),
+        )
+        .await
+        .expect("external ip should be advertised");
+
+        let record = discv5.node_record().unwrap();
+        assert_eq!(record.address, external_ip);
+        assert_eq!(record.udp_port, discv5.local_port());
+        assert_eq!(record.tcp_port, rlpx_addr.port());
+        assert_eq!(discovery.local_enr.address, external_ip);
+    }
+
+    #[tokio::test]
+    async fn nat_resolver_is_left_to_discv4_when_enabled() {
+        let discovery = start_discovery_node(40034, 40035)
+            .await
+            .with_nat_resolver(Some(NatResolver::ExternalIp("203.0.113.7".parse().unwrap())));
+        assert!(discovery.nat_resolver.is_none());
     }
 
     #[test]
