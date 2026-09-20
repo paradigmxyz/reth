@@ -341,6 +341,13 @@ where
     Provider: BlockReader + BalProvider + Clone + Unpin + 'static,
 {
     fn queue_fetch(&mut self, fetch: CacheFetch) {
+        if self.pending_fetches.is_empty() {
+            if let Ok(permit) = self.rate_limiter.clone().try_acquire_owned() {
+                self.spawn_fetch(fetch, permit);
+                return
+            }
+        }
+
         self.pending_fetches.push_back(fetch);
         self.spawn_pending_fetches();
     }
