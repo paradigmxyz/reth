@@ -20,6 +20,7 @@ jsonrpsee = { workspace = true, features = ["server", "macros"] }
 alloy-consensus.workspace = true
 reth-ethereum-primitives.workspace = true
 reth-primitives-traits.workspace = true
+reth-provider = { workspace = true, features = ["test-utils"] }
 serde_json.workspace = true
 tokio = { workspace = true, features = ["macros", "rt"] }
 
