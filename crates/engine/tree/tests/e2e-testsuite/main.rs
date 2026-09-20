@@ -644,12 +644,37 @@ async fn test_engine_tree_fcu_extends_canon_chain_v2_e2e() -> Result<()> {
     Ok(())
 }
 
+/// Persistence threshold for the disk-level reorg tests.
+const DISK_REORG_PERSISTENCE_THRESHOLD: u64 = 7;
+
+/// Number of blocks whose state and trie updates the database masks in the masked variant.
+const DISK_REORG_STATE_MASKING_BLOCKS: u64 = 2;
+
+/// Block number of the fork tip the reorg switches to.
+const DISK_REORG_FORK_TIP: u64 = 11;
+
+/// Blocks appended after the reorg. The unwind it schedules runs asynchronously, so the fork has
+/// to keep moving for the test to observe a persistence service that did not survive it.
+const DISK_REORG_FOLLOW_UP_BLOCKS: u64 = 8;
+
 /// Creates a 2-node setup for disk-level reorg testing.
 ///
 /// Uses unconnected nodes so fork blocks can be produced independently on Node 1 and then
 /// sent to Node 0 via newPayload only (no FCU), keeping Node 0's persisted chain intact
 /// until the final `ReorgTo` triggers `find_disk_reorg`.
-fn disk_reorg_setup(storage_v2: bool) -> Setup<EthEngineTypes> {
+fn disk_reorg_setup(storage_v2: bool, num_state_masking_blocks: u64) -> Setup<EthEngineTypes> {
+    let mut tree_config = TreeConfig::default()
+        .with_num_state_masking_blocks(0)
+        .with_persistence_threshold(DISK_REORG_PERSISTENCE_THRESHOLD)
+        .with_has_enough_parallelism(true);
+    if num_state_masking_blocks > 0 {
+        // The masking window plus the in-memory buffer has to stay below the persistence
+        // threshold, so shrink the buffer to make room for the masked blocks.
+        tree_config = tree_config
+            .with_memory_block_buffer_target(1)
+            .with_num_state_masking_blocks(num_state_masking_blocks);
+    }
+
     let mut setup = Setup::default()
         .with_chain_spec(Arc::new(
             ChainSpecBuilder::default()
@@ -664,12 +689,7 @@ fn disk_reorg_setup(storage_v2: bool) -> Setup<EthEngineTypes> {
                 .build(),
         ))
         .with_network(NetworkSetup::multi_node_unconnected(2))
-        .with_tree_config(
-            TreeConfig::default()
-                .with_num_state_masking_blocks(0)
-                .with_persistence_threshold(7)
-                .with_has_enough_parallelism(true),
-        );
+        .with_tree_config(tree_config);
     if storage_v2 {
         setup = setup.with_storage_v2();
     }
@@ -683,9 +703,9 @@ fn disk_reorg_setup(storage_v2: bool) -> Setup<EthEngineTypes> {
 /// 3. Node 1 builds an 8-block fork from block 3 (its canonical head)
 /// 4. Fork blocks are sent to Node 0 via newPayload (no FCU, old chain stays on disk)
 /// 5. FCU to fork tip on Node 0 triggers `find_disk_reorg` → `RemoveBlocksAbove(3)`
-fn disk_reorg_test(storage_v2: bool) -> TestBuilder<EthEngineTypes> {
+fn disk_reorg_test(storage_v2: bool, num_state_masking_blocks: u64) -> TestBuilder<EthEngineTypes> {
     TestBuilder::new()
-        .with_setup(disk_reorg_setup(storage_v2))
+        .with_setup(disk_reorg_setup(storage_v2, num_state_masking_blocks))
         .with_action(SelectActiveNode::new(0))
         .with_action(ProduceBlocks::<EthEngineTypes>::new(3))
         .with_action(MakeCanonical::new())
@@ -721,7 +741,7 @@ fn disk_reorg_test(storage_v2: bool) -> TestBuilder<EthEngineTypes> {
 #[tokio::test]
 async fn test_engine_tree_disk_reorg_v1_e2e() -> Result<()> {
     reth_tracing::init_test_tracing();
-    disk_reorg_test(false).run::<EthereumNode>().await?;
+    disk_reorg_test(false, 0).run::<EthereumNode>().await?;
     Ok(())
 }
 
@@ -732,6 +752,48 @@ async fn test_engine_tree_disk_reorg_v1_e2e() -> Result<()> {
 #[tokio::test]
 async fn test_engine_tree_disk_reorg_v2_e2e() -> Result<()> {
     reth_tracing::init_test_tracing();
-    disk_reorg_test(true).run::<EthereumNode>().await?;
+    disk_reorg_test(true, 0).run::<EthereumNode>().await?;
+    Ok(())
+}
+
+/// Verifies a disk-level reorg while the database's state trie is partial.
+///
+/// The masked blocks - the ones between the state trie frontier and the database tip - only
+/// exist in memory, and they sit on the branch the unwind is about to remove rather than on the
+/// new canonical chain. `RemoveBlocksAbove` therefore has to carry the chain of the persisted
+/// tip: completing the trie at Finish from the canonical head instead fails, which takes the
+/// persistence service down with it.
+///
+/// Extending the fork afterwards is the liveness check: every payload is validated against the
+/// unwound database, and the tip ends up far enough above it to start another save.
+#[tokio::test]
+async fn test_engine_tree_disk_reorg_with_masked_state_trie_e2e() -> Result<()> {
+    reth_tracing::init_test_tracing();
+
+    disk_reorg_test(false, DISK_REORG_STATE_MASKING_BLOCKS)
+        .with_action(SelectActiveNode::new(1))
+        .with_action(ProduceBlocksLocally::<EthEngineTypes>::new(DISK_REORG_FOLLOW_UP_BLOCKS))
+        .with_action(MakeCanonical::with_active_node())
+        .with_action(CaptureBlock::new("extended_fork_tip"))
+        .with_action(
+            SendNewPayloads::<EthEngineTypes>::new()
+                .with_source_node(1)
+                .with_target_node(0)
+                .with_start_block(DISK_REORG_FORK_TIP + 1)
+                .with_total_blocks(DISK_REORG_FOLLOW_UP_BLOCKS),
+        )
+        .with_action(
+            SendForkchoiceUpdate::<EthEngineTypes>::new(
+                BlockReference::Tag("extended_fork_tip".into()),
+                BlockReference::Tag("extended_fork_tip".into()),
+                BlockReference::Tag("extended_fork_tip".into()),
+            )
+            .with_expected_status(PayloadStatusEnum::Valid)
+            .with_node_idx(0),
+        )
+        .with_action(WaitForPersistence::new(0))
+        .run::<EthereumNode>()
+        .await?;
+
     Ok(())
 }
