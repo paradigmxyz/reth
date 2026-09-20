@@ -718,12 +718,32 @@ where
             None => discarded.iter().any(|tx| tx.hash() == hash),
         };
 
-        for meta in added_metas {
+        for mut meta in added_metas {
+            // Promotions can also be evicted by the capacity check.
+            let promoted = match &mut meta.added {
+                AddedTransaction::Pending(pending) => &mut pending.promoted,
+                AddedTransaction::Parked { promoted, .. } => promoted,
+            };
+            promoted.retain(|tx| !is_discarded(tx.hash()));
+
             if is_discarded(meta.added.hash()) {
-                // The transaction was evicted again before anyone was notified about it, so it
-                // must not be announced or stored. Only the sidecar it replaced needs cleanup.
+                // Insertion can still replace, promote, or discard other transactions even
+                // when the inserted transaction itself does not survive the capacity check.
                 if let Some(replaced) = meta.added.replaced_blob_transaction() {
                     self.delete_blob(replaced);
+                }
+                if let Some(replaced) = meta.added.replaced() {
+                    self.with_event_listener(|listener| {
+                        listener.replaced(replaced.clone(), *meta.added.hash());
+                    });
+                }
+                match meta.added {
+                    AddedTransaction::Pending(pending) => {
+                        self.notify_on_transaction_updates(pending.promoted, pending.discarded);
+                    }
+                    AddedTransaction::Parked { promoted, .. } => {
+                        self.notify_on_transaction_updates(promoted, Vec::new());
+                    }
                 }
                 continue
             }
@@ -1830,6 +1850,117 @@ mod tests {
         assert!(txs.pending.is_empty());
         assert_eq!(nonces(&txs.queued), [0, 1, 9]);
         assert_eq!(nonces(&pool.get_transactions_by_sender(sender)), [0, 1, 9]);
+    }
+
+    #[test]
+    fn insertion_only_notifies_surviving_promotions() {
+        // Cover pending and parked insertions that are evicted, partial eviction of
+        // promotions, and a surviving gap-filling insertion whose promotions are evicted.
+        for (nonce, state_nonce, limit, expected_nonces) in
+            [(3, 1, 2, vec![1, 2]), (3, 1, 1, vec![1]), (4, 1, 1, vec![1]), (0, 0, 1, vec![0])]
+        {
+            let config = PoolConfig {
+                pending_limit: SubPoolLimit::new(limit, usize::MAX),
+                ..Default::default()
+            };
+            let test_pool: TestPool = TestPoolBuilder::default().with_config(config).into();
+            insert_with_state_nonce(&test_pool, 1, 0, true);
+            insert_with_state_nonce(&test_pool, 2, 0, true);
+            let pool = &test_pool.pool;
+            let mut pending = pool.add_pending_listener(TransactionListenerKind::All);
+            let mut events = pool.add_all_transactions_event_listener();
+            let tx = MockTransaction::eip1559()
+                .with_sender(Address::with_last_byte(1))
+                .with_nonce(nonce)
+                .with_hash(B256::from([nonce as u8; 32]));
+            let result = pool.add_transactions(
+                TransactionOrigin::External,
+                [valid_with_state_nonce(tx, state_nonce)],
+            );
+            if nonce == 0 {
+                assert!(result[0].is_ok());
+            } else {
+                assert!(matches!(
+                    result[0].as_ref().unwrap_err().kind,
+                    PoolErrorKind::DiscardedOnInsert
+                ));
+            }
+            let txs = test_pool.all_transactions_by_sender(Address::with_last_byte(1));
+            assert_eq!(transaction_nonces(&txs.pending), expected_nonces);
+            let expected: Vec<_> =
+                expected_nonces.iter().map(|nonce| B256::from([*nonce as u8; 32])).collect();
+            let mut received = Vec::new();
+            while let Ok(hash) = pending.try_recv() {
+                received.push(hash);
+            }
+            received.sort_unstable();
+            assert_eq!(received, expected);
+            let mut pending_events = Vec::new();
+            while let Some(Some(event)) = events.next().now_or_never() {
+                if let FullTransactionEvent::Pending(hash) = event {
+                    pending_events.push(hash);
+                }
+            }
+            pending_events.sort_unstable();
+            assert_eq!(pending_events, expected);
+        }
+    }
+
+    fn valid_with_state_nonce(
+        tx: MockTransaction,
+        state_nonce: u64,
+    ) -> TransactionValidationOutcome<MockTransaction> {
+        TransactionValidationOutcome::Valid {
+            balance: U256::MAX,
+            state_nonce,
+            bytecode_hash: None,
+            transaction: ValidTransaction::Valid(tx),
+            propagate: true,
+            authorities: None,
+        }
+    }
+
+    #[test]
+    fn discarded_replacement_preserves_replaced_event() {
+        let config =
+            PoolConfig { pending_limit: SubPoolLimit::new(1, usize::MAX), ..Default::default() };
+        let test_pool: TestPool = TestPoolBuilder::default().with_config(config).into();
+        let pool = &test_pool.pool;
+        let original = MockTransaction::eip1559()
+            .with_sender(Address::with_last_byte(1))
+            .with_gas_price(10)
+            .with_hash(B256::from([1; 32]))
+            .inc_limit();
+        pool.add_transactions(
+            TransactionOrigin::External,
+            [valid_with_state_nonce(original.clone(), 0)],
+        )
+        .pop()
+        .unwrap()
+        .unwrap();
+        let mut events = pool.add_all_transactions_event_listener();
+        let replacement = original.clone().with_gas_price(20).with_hash(B256::from([2; 32]));
+        let better = MockTransaction::eip1559()
+            .with_sender(Address::with_last_byte(2))
+            .with_gas_price(1000)
+            .with_hash(B256::from([3; 32]))
+            .inc_limit();
+        let results = pool.add_transactions(
+            TransactionOrigin::External,
+            [valid_with_state_nonce(replacement.clone(), 0), valid_with_state_nonce(better, 0)],
+        );
+        assert!(matches!(results[0].as_ref().unwrap_err().kind, PoolErrorKind::DiscardedOnInsert));
+        assert!(results[1].is_ok());
+        assert!(pool.get(original.get_hash()).is_none());
+        let mut replaced = false;
+        while let Some(Some(event)) = events.next().now_or_never() {
+            if let FullTransactionEvent::Replaced { transaction, replaced_by } = event {
+                assert_eq!(transaction.hash(), original.get_hash());
+                assert_eq!(&replaced_by, replacement.get_hash());
+                replaced = true;
+            }
+        }
+        assert!(replaced, "removed original must receive its final replacement event");
     }
 
     #[test]
