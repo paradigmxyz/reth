@@ -31,7 +31,7 @@ The result is a mapping of addresses to their new balance after the block was ex
 
 Re-executes a block and returns its execution outcome: the bundle of state changes, the receipts and the EIP-7685 requests.
 
-If `count` is provided, `count` consecutive blocks starting at the given block are re-executed and the merged execution outcome is returned. `count` must be between 1 and 128.
+If `count` is provided, up to `count` consecutive available blocks starting at the given block are re-executed and the merged execution outcome is returned. `count` must be between 1 and 128.
 
 Returns `null` if the block is unknown. The genesis block yields an empty outcome because it has no parent state to execute against.
 
@@ -43,7 +43,7 @@ Returns `null` if the block is unknown. The genesis block yields an empty outcom
 
 ```js
 // > {"jsonrpc":"2.0","id":1,"method":"reth_getBlockExecutionOutcome","params":["latest"]}
-{"jsonrpc":"2.0","id":1,"result":{"bundle":{"state":{"0x95222290dd7278aa3ddd389cc1e1d165cc4bafe5":{"info":{"balance":"0x1bc16d674ec80000","nonce":0,"code_hash":"0xc5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470","code":null},"original_info":{"balance":"0x0","nonce":0,"code_hash":"0xc5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470","code":null},"storage":{},"status":"Changed"}},"contracts":{},"reverts":[[["0x95222290dd7278aa3ddd389cc1e1d165cc4bafe5",{"account":{"Some":{"balance":"0x0","nonce":0,"code_hash":"0xc5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470","code":null}},"storage":[],"previous_status":"Loaded","wipe_storage":false}]]],"state_size":1,"reverts_size":1},"receipts":[[]],"first_block":21000000,"requests":[]}}
+{"jsonrpc":"2.0","id":1,"result":{"bundle":{"state":{"0x95222290dd7278aa3ddd389cc1e1d165cc4bafe5":{"info":{"balance":"0x1bc16d674ec80000","nonce":0,"code_hash":"0xc5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470","code":null},"original_info":{"balance":"0x0","nonce":0,"code_hash":"0xc5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470","code":null},"storage":{},"status":"Changed"}},"contracts":{},"reverts":[[["0x95222290dd7278aa3ddd389cc1e1d165cc4bafe5",{"account":{"RevertTo":{"balance":"0x0","nonce":0,"code_hash":"0xc5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470","code":null}},"storage":{},"previous_status":"Loaded","wipe_storage":false}]]],"state_size":1,"reverts_size":1},"receipts":[[]],"first_block":21000000,"requests":[]}}
 ```
 
 The result contains the `bundle` of account and storage changes (including the reverts required to undo them), one list of `receipts` per executed block, the number of the `first_block` of the executed range and the `requests` (EIP-7685) of each block.
@@ -52,7 +52,7 @@ The result contains the `bundle` of account and storage changes (including the r
 
 Controls the JIT compilation backend of the EVM, if the node was built with one. The method is a no-op when no JIT backend is configured.
 
-The action is one of `enable`, `disable`, `pause` or `unpause`.
+The action is one of `enable`, `disable`, `pause`, `unpause` or `clear`. The `clear` action clears resident and persisted JIT artifacts.
 
 | Client | Method invocation                                    |
 | ------ | ---------------------------------------------------- |
@@ -85,7 +85,7 @@ The subscription emits events with the following structure:
 ```json
 {
     "jsonrpc": "2.0",
-    "method": "reth_subscription",
+    "method": "reth_subscribeChainNotifications",
     "params": {
         "subscription": "0xcd0c3e8af590364c09d0fa6a1210faf5",
         "result": {
@@ -114,8 +114,8 @@ This is particularly useful for applications that need to react immediately to c
 // responds with subscription ID
 {"jsonrpc":"2.0","id":1,"result":"0xcd0c3e8af590364c09d0fa6a1210faf5"}
 
-// Example notification when new blocks are committed
-{"jsonrpc":"2.0","method":"reth_subscription","params":{"subscription":"0xcd0c3e8af590364c09d0fa6a1210faf5","result":{"Commit":{"new":{"blocks":[...],"receipts":[...],"first_block":1000,"last_block":1000}}}}}
+// Example notification when new blocks are committed (nested values abbreviated)
+{"jsonrpc":"2.0","method":"reth_subscribeChainNotifications","params":{"subscription":"0xcd0c3e8af590364c09d0fa6a1210faf5","result":{"Commit":{"new":{"blocks":{"1000":...},"execution_outcome":{"bundle":...,"receipts":[...],"first_block":1000,"requests":[...]},"trie_data":{}}}}}}
 
 // Unsubscribe
 // > {"jsonrpc":"2.0","id":2,"method":"reth_unsubscribeChainNotifications","params":["0xcd0c3e8af590364c09d0fa6a1210faf5"]}
@@ -147,7 +147,7 @@ To unsubscribe from persisted block notifications, call `reth_unsubscribePersist
 {"jsonrpc":"2.0","id":1,"result":"0xab1c2d3e4f590364c09d0fa6a1210faf5"}
 
 // Example notification when a block is persisted
-{"jsonrpc":"2.0","method":"reth_subscription","params":{"subscription":"0xab1c2d3e4f590364c09d0fa6a1210faf5","result":{"number":"0x1a2b3c","hash":"0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef"}}}
+{"jsonrpc":"2.0","method":"reth_subscribePersistedBlock","params":{"subscription":"0xab1c2d3e4f590364c09d0fa6a1210faf5","result":{"number":"0x1a2b3c","hash":"0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef"}}}
 
 // Unsubscribe
 // > {"jsonrpc":"2.0","id":2,"method":"reth_unsubscribePersistedBlock","params":["0xab1c2d3e4f590364c09d0fa6a1210faf5"]}
@@ -160,7 +160,7 @@ This subscription is only available over WebSocket and IPC transports, as HTTP d
 
 ## `reth_subscribeFinalizedChainNotifications`, `reth_unsubscribeFinalizedChainNotifications`
 
-Subscribe to finalized chain notifications. Committed chain notifications are buffered and emitted once a new finalized block is received; each notification contains all committed chain segments up to (and including) the finalized block, in the same format as `reth_subscribeChainNotifications`.
+Subscribe to finalized chain notifications. Committed chain notifications are buffered and emitted once a new finalized block is received; each notification contains a list of buffered chain segments whose last block is at or below the finalized block. Each segment uses the same format as `reth_subscribeChainNotifications`. Segments that extend beyond the finalized block remain buffered until their last block is finalized.
 
 Blocks that were reverted by a reorg before they were finalized are dropped from the buffer, so subscribers only ever see the finalized chain.
 
@@ -180,8 +180,8 @@ To unsubscribe from finalized chain notifications, call `reth_unsubscribeFinaliz
 // responds with subscription ID
 {"jsonrpc":"2.0","id":1,"result":"0xcd2e3f4a5b6c7d8e9f0a1b2c3d4e5f60"}
 
-// Example notification once a new finalized block is known: a list of the committed chain segments
-{"jsonrpc":"2.0","method":"reth_subscription","params":{"subscription":"0xcd2e3f4a5b6c7d8e9f0a1b2c3d4e5f60","result":[{"Commit":{"new":{"blocks":[...],"receipts":[...],"first_block":1000,"last_block":1002}}}]}}
+// Example notification once a new finalized block is known (nested values abbreviated)
+{"jsonrpc":"2.0","method":"reth_subscribeFinalizedChainNotifications","params":{"subscription":"0xcd2e3f4a5b6c7d8e9f0a1b2c3d4e5f60","result":[{"Commit":{"new":{"blocks":{"1000":...,"1001":...,"1002":...},"execution_outcome":{"bundle":...,"receipts":[...],"first_block":1000,"requests":[...]},"trie_data":{}}}}]}}
 
 // Unsubscribe
 // > {"jsonrpc":"2.0","id":2,"method":"reth_unsubscribeFinalizedChainNotifications","params":["0xcd2e3f4a5b6c7d8e9f0a1b2c3d4e5f60"]}
