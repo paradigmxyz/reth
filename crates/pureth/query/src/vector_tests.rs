@@ -253,10 +253,10 @@ fn empty_ordering_boundary_and_value_mutation_records_match() {
 #[test]
 fn record_counts_are_not_used_as_proof_bounds() {
     let fixture = read_vector("two_receipts/fixture.json");
-    let proof = String::from_utf8(read_vector("two_receipts/proof.json"))
-        .unwrap()
-        .replace("\"log_counts\": [\n    1,\n    1\n  ]", "\"log_counts\": [1]");
-    let case = load_proof_case(&fixture, proof.as_bytes()).unwrap();
+    let mut proof: Value = serde_json::from_slice(&read_vector("two_receipts/proof.json")).unwrap();
+    assert_eq!(proof["log_counts"], serde_json::json!([1, 1]));
+    proof["log_counts"] = serde_json::json!([1]);
+    let case = load_proof_case(&fixture, &serde_json::to_vec(&proof).unwrap()).unwrap();
 
     assert_eq!(
         verify_receipt_log_address(
