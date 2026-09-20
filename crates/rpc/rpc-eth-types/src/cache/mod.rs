@@ -1040,9 +1040,15 @@ mod tests {
         assert!(service.bal_cache.contains_key(&hash));
     }
 
-    #[test]
-    fn cache_misses_wait_in_service_queue_for_db_slot() {
-        let mut service = test_service();
+    #[tokio::test]
+    async fn cache_misses_wait_in_service_queue_for_db_slot() {
+        let (started_tx, started_rx) = mpsc::sync_channel(1);
+        let (release_tx, release_rx) = mpsc::sync_channel(1);
+        let (_cache, mut service) = EthStateCache::<EthPrimitives>::create(
+            TestBalProvider::new_blocking(started_tx, release_rx),
+            Runtime::test(),
+            EthStateCacheConfig { max_concurrent_db_requests: 1, ..Default::default() },
+        );
         let permit = service.rate_limiter.clone().try_acquire_owned().unwrap();
 
         service.queue_fetch(CacheFetch::Bal(B256::repeat_byte(0x01)));
@@ -1053,7 +1059,9 @@ mod tests {
         drop(permit);
         service.spawn_pending_fetches();
 
+        started_rx.recv_timeout(Duration::from_secs(1)).expect("first fetch started");
         assert_eq!(service.pending_fetches.len(), 1);
+        release_tx.send(()).unwrap();
     }
 
     #[test]
