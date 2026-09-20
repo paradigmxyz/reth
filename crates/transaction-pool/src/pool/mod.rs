@@ -709,7 +709,24 @@ where
             (results, added_metas, discarded)
         };
 
+        // Linear search avoids allocating a hash set for small eviction batches.
+        const MAX_LINEAR_SEARCH_DISCARDS: usize = 4;
+        let discarded_hashes = (discarded.len() > MAX_LINEAR_SEARCH_DISCARDS)
+            .then(|| discarded.iter().map(|tx| *tx.hash()).collect::<HashSet<_>>());
+        let is_discarded = |hash: &TxHash| match &discarded_hashes {
+            Some(hashes) => hashes.contains(hash),
+            None => discarded.iter().any(|tx| tx.hash() == hash),
+        };
+
         for meta in added_metas {
+            if is_discarded(meta.added.hash()) {
+                // The transaction was evicted again before anyone was notified about it, so it
+                // must not be announced or stored. Only the sidecar it replaced needs cleanup.
+                if let Some(replaced) = meta.added.replaced_blob_transaction() {
+                    self.delete_blob(replaced);
+                }
+                continue
+            }
             self.on_added_transaction(meta);
         }
 
@@ -717,15 +734,6 @@ where
             // Delete any blobs associated with discarded blob transactions
             self.delete_discarded_blobs(discarded.iter());
             self.with_event_listener(|listener| listener.discarded_many(&discarded));
-
-            // Linear search avoids allocating a hash set for small eviction batches.
-            const MAX_LINEAR_SEARCH_DISCARDS: usize = 4;
-            let discarded_hashes = (discarded.len() > MAX_LINEAR_SEARCH_DISCARDS)
-                .then(|| discarded.iter().map(|tx| *tx.hash()).collect::<HashSet<_>>());
-            let is_discarded = |hash: &TxHash| match &discarded_hashes {
-                Some(hashes) => hashes.contains(hash),
-                None => discarded.iter().any(|tx| tx.hash() == hash),
-            };
 
             // A newly added transaction may be immediately discarded, so we need to
             // adjust the result here
@@ -1733,6 +1741,7 @@ impl<T: PoolTransaction> OnNewCanonicalStateOutcome<T> {
 mod tests {
     use crate::{
         blobstore::{BlobStore, InMemoryBlobStore, PooledBlobSidecar},
+        error::PoolErrorKind,
         identifier::SenderId,
         test_utils::{testing_pool, MockTransaction, TestPool, TestPoolBuilder},
         validate::ValidTransaction,
@@ -1821,6 +1830,55 @@ mod tests {
         assert!(txs.pending.is_empty());
         assert_eq!(nonces(&txs.queued), [0, 1, 9]);
         assert_eq!(nonces(&pool.get_transactions_by_sender(sender)), [0, 1, 9]);
+    }
+
+    #[test]
+    fn discarded_on_insert_transactions_are_not_announced() {
+        let config =
+            PoolConfig { pending_limit: SubPoolLimit::new(1, usize::MAX), ..Default::default() };
+        let test_pool: TestPool = TestPoolBuilder::default().with_config(config).into();
+        let pool = &test_pool.pool;
+        let mut pending = pool.add_pending_listener(TransactionListenerKind::All);
+        let mut new_txs = pool.add_new_transaction_listener(TransactionListenerKind::All);
+
+        let add = |tx: MockTransaction| {
+            pool.add_transactions(
+                TransactionOrigin::External,
+                [TransactionValidationOutcome::Valid {
+                    balance: U256::MAX,
+                    state_nonce: 0,
+                    bytecode_hash: None,
+                    transaction: ValidTransaction::Valid(tx),
+                    propagate: true,
+                    authorities: None,
+                }],
+            )
+            .pop()
+            .unwrap()
+        };
+
+        // a well priced transaction fills the pending pool
+        let good = MockTransaction::eip1559()
+            .with_sender(Address::with_last_byte(1))
+            .with_gas_price(1_000)
+            .inc_limit();
+        add(good.clone()).unwrap();
+        assert!(pending.try_recv().is_ok());
+        assert!(new_txs.try_recv().is_ok());
+
+        // an underpriced transaction from another sender is evicted right away
+        let bad = MockTransaction::eip1559()
+            .with_sender(Address::with_last_byte(2))
+            .with_gas_price(10)
+            .inc_limit();
+        let err = add(bad.clone()).unwrap_err();
+        assert!(matches!(err.kind, PoolErrorKind::DiscardedOnInsert), "{err:?}");
+        assert!(pool.get(bad.get_hash()).is_none());
+        assert!(pool.get(good.get_hash()).is_some());
+
+        // nobody must learn about a transaction that never made it into the pool
+        assert_eq!(pending.try_recv(), Err(TryRecvError::Empty), "pending listener");
+        assert!(new_txs.try_recv().is_err(), "new transaction listener");
     }
 
     #[test]
