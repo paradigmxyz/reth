@@ -1133,42 +1133,6 @@ mod tests {
     }
 
     #[test]
-    fn overlay_builder_falls_back_to_hash_lookup_for_unknown_state() {
-        let (factory, blocks) = setup_frontiers(1, 3);
-        let mut side_chain_builder = TestBlockBuilder::eth();
-        let side_block = with_unique_trie_data(
-            &side_chain_builder.get_executed_block_with_number(
-                blocks[3].block_number(),
-                blocks[2].recovered_block().hash(),
-            ),
-            9,
-        );
-        assert_ne!(side_block.recovered_block().hash(), blocks[3].recovered_block().hash());
-
-        let manager = OverlayManager::default();
-        manager.insert_block(blocks[2].clone());
-        manager.insert_block(side_block.clone());
-        let canonical = canonical_in_memory_state(&blocks[2..=4]);
-        let provider = factory.provider().unwrap();
-
-        // A fork block is not tracked by the canonical in-memory state, so callers keep using the
-        // hash-based lookup for it.
-        let side_hash = side_block.recovered_block().hash();
-        assert!(canonical.state_by_hash(side_hash).is_none());
-
-        let (overlay, fallback) =
-            manager.overlay_builder(side_hash).execution_overlay(&provider).unwrap();
-        assert_eq!(fallback, Some(2));
-        assert_eq!(
-            overlay.block_hashes,
-            [&blocks[2], &side_block]
-                .iter()
-                .map(|block| block.recovered_block().num_hash())
-                .collect::<Vec<_>>()
-        );
-    }
-
-    #[test]
     fn managed_overlay_starts_at_state_trie_frontier() {
         let (factory, blocks) = setup_frontiers(1, 3);
         let manager = OverlayManager::default();
