@@ -1921,6 +1921,22 @@ mod tests {
     }
 
     #[test]
+    fn transaction_updates_delete_discarded_blobs_without_listeners() {
+        let test_pool = testing_pool();
+        let pool = &test_pool.pool;
+        let tx = Arc::new(crate::test_utils::MockTransactionFactory::default().create_eip4844());
+        let hash = *tx.hash();
+        pool.blob_store()
+            .insert(hash, BlobTransactionSidecarVariant::Eip4844(Default::default()).into())
+            .unwrap();
+        assert!(pool.blob_store().contains(hash).unwrap());
+
+        pool.notify_on_transaction_updates(Vec::new(), vec![tx]);
+
+        assert!(!pool.blob_store().contains(hash).unwrap());
+    }
+
+    #[test]
     fn discarded_replacement_preserves_replaced_event() {
         let config =
             PoolConfig { pending_limit: SubPoolLimit::new(1, usize::MAX), ..Default::default() };
