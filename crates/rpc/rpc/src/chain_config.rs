@@ -76,7 +76,8 @@ where
         if let ForkCondition::Timestamp(ts) = spec.ethereum_fork_activation(*fork) &&
             let Some(params) = spec.blob_params_at_timestamp(ts)
         {
-            config.blob_schedule.insert(fork.name().to_lowercase(), params);
+            // Forks can share a timestamp, so preserve explicitly configured per-fork params.
+            config.blob_schedule.entry(fork.name().to_lowercase()).or_insert(params);
         }
     }
 
@@ -86,6 +87,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloy_eips::eip7840::BlobParams;
     use reth_chainspec::{ChainSpec, HOODI, MAINNET, SEPOLIA};
 
     #[test]
@@ -150,5 +152,18 @@ mod tests {
         let config = chain_config(&spec);
         assert_eq!(config.chain_id, 1337);
         assert_eq!(config.extra_fields.get("custom"), Some(&serde_json::json!(true)));
+    }
+
+    #[test]
+    fn genesis_blob_schedule_is_kept_when_forks_share_a_timestamp() {
+        let mut genesis = MAINNET.genesis().clone();
+        genesis.config.cancun_time = Some(0);
+        genesis.config.prague_time = Some(0);
+        genesis.config.blob_schedule.insert("cancun".to_string(), BlobParams::cancun());
+        genesis.config.blob_schedule.insert("prague".to_string(), BlobParams::prague());
+        let expected = genesis.config.blob_schedule.clone();
+        let spec = ChainSpec::from(genesis);
+
+        assert_eq!(chain_config(&spec).blob_schedule, expected);
     }
 }
