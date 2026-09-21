@@ -2,10 +2,12 @@
 //!
 //! Provides [`EngineOrchestratorBuilder`](crate::launch::EngineOrchestratorBuilder) which wires
 //! together all engine components and builds a
-//! [`ChainOrchestrator`](crate::chain::ChainOrchestrator) ready to be polled as a `Stream`.
+//! [`ChainOrchestrator`](crate::chain::ChainOrchestrator) ready to be polled as a `Stream`, with
+//! the staged pipeline or a caller-supplied [`BackfillSync`](crate::backfill::BackfillSync) as
+//! backfill.
 
 use crate::{
-    backfill::PipelineSync,
+    backfill::{BackfillSync, PipelineSync},
     chain::ChainOrchestrator,
     download::BasicBlockDownloader,
     engine::{EngineApiKind, EngineApiRequest, EngineApiRequestHandler, EngineHandler},
@@ -110,6 +112,18 @@ where
     pub fn build(
         self,
     ) -> EngineOrchestrator<N::Payload, N::Primitives, Client, S, PipelineSync<N>> {
+        self.build_with_backfill(PipelineSync::new)
+    }
+
+    /// Like [`Self::build`], backfilling through the [`BackfillSync`] `backfill` makes from the
+    /// staged [`Pipeline`] and its runtime instead of [`PipelineSync`].
+    ///
+    /// The engine stops writing once a run starts, so the backfill may hold the database until it
+    /// reports the run finished.
+    pub fn build_with_backfill<B: BackfillSync + Unpin>(
+        self,
+        backfill: impl FnOnce(Pipeline<N>, Runtime) -> B,
+    ) -> EngineOrchestrator<N::Payload, N::Primitives, Client, S, B> {
         let Self {
             engine_kind,
             consensus,
@@ -153,7 +167,7 @@ where
         let engine_handler = EngineApiRequestHandler::new(to_tree_tx, from_tree);
         let handler = EngineHandler::new(engine_handler, downloader, incoming_requests);
 
-        let backfill_sync = PipelineSync::new(pipeline, pipeline_task_spawner);
+        let backfill_sync = backfill(pipeline, pipeline_task_spawner);
 
         ChainOrchestrator::new(handler, backfill_sync)
     }
