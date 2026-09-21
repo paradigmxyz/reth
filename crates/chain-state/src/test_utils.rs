@@ -1,4 +1,7 @@
-#![cfg_attr(not(feature = "account-ext"), allow(clippy::clone_on_copy))]
+#![cfg_attr(
+    not(feature = "account-ext"),
+    allow(clippy::clone_on_copy, clippy::cloned_instead_of_copied)
+)]
 
 use crate::{
     in_memory::ExecutedBlock, CanonStateNotification, CanonStateNotifications,

@@ -1,5 +1,8 @@
 // Accounts are only Copy when account-ext is disabled.
-#![cfg_attr(not(feature = "account-ext"), allow(clippy::clone_on_copy))]
+#![cfg_attr(
+    not(feature = "account-ext"),
+    allow(clippy::clone_on_copy, clippy::cloned_instead_of_copied)
+)]
 
 use super::{DatabaseProviderRO, ProviderFactory, ProviderNodeTypes};
 use crate::{
