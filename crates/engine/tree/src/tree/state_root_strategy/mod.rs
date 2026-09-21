@@ -723,21 +723,11 @@ impl DefaultStateRootStrategy {
 
 /// Holds one worker's trie until `finish` accepts its state root.
 ///
-/// Shared by the job and worker so either can finish first. An unpublished trie is always
-/// deallocated in the background, even when the job drops the last reference on the engine thread.
+/// Shared by the job and worker so either can finish first.
 #[derive(Debug)]
 struct PendingSparseTrie {
     block_hash: B256,
     trie: Mutex<Option<PreservedSparseTrie>>,
-    executor: reth_tasks::Runtime,
-}
-
-impl Drop for PendingSparseTrie {
-    fn drop(&mut self) {
-        if let Some(trie) = self.trie.get_mut().take() {
-            self.executor.spawn_drop(trie);
-        }
-    }
 }
 
 struct SparseTrieTaskOptions<N: NodePrimitives> {
@@ -840,11 +830,8 @@ where
             state_provider_factory.clone()
         };
 
-        let pending_trie = Arc::new(PendingSparseTrie {
-            block_hash: env.hash,
-            trie: Mutex::new(None),
-            executor: executor.clone(),
-        });
+        let pending_trie =
+            Arc::new(PendingSparseTrie { block_hash: env.hash, trie: Mutex::new(None) });
         let mut handle = self.spawn_state_root(
             executor,
             proof_state_provider_factory,
@@ -1323,7 +1310,6 @@ mod tests {
                 let pending_trie = Arc::new(PendingSparseTrie {
                     block_hash: block.hash(),
                     trie: Mutex::new(Some(preserved)),
-                    executor: runtime.clone(),
                 });
                 let (result_tx, result_rx) = mpsc::channel();
                 result_tx
@@ -1378,12 +1364,7 @@ mod tests {
             let overlay_manager = OverlayManager::<EthPrimitives>::default();
             let block_hash = B256::with_last_byte(1);
             let (preserved, completer) = PreservedSparseTrie::pending(block_hash, B256::ZERO);
-            let runtime = reth_tasks::Runtime::test();
-            let pending_trie = PendingSparseTrie {
-                block_hash,
-                trie: Mutex::new(Some(preserved)),
-                executor: runtime.clone(),
-            };
+            let pending_trie = PendingSparseTrie { block_hash, trie: Mutex::new(Some(preserved)) };
             let next_hash = B256::with_last_byte(2);
             overlay_manager.store_sparse_trie(PreservedSparseTrie::anchored(
                 SparseStateTrie::default(),
@@ -1396,49 +1377,9 @@ mod tests {
                 drop(pending_trie);
             } else {
                 drop(pending_trie);
-                runtime.spawn_blocking_named("drop", || {}).get();
                 assert!(completer.complete(SparseStateTrie::default()).is_err());
             }
             assert_eq!(overlay_manager.take_sparse_trie().unwrap().block_hash(), next_hash);
-        }
-    }
-
-    #[test]
-    fn abandoned_sparse_trie_is_dropped_in_background() {
-        let runtime = reth_tasks::Runtime::test();
-        for worker_finishes_first in [false, true] {
-            let (started_tx, started_rx) = mpsc::channel();
-            let (release_tx, release_rx) = mpsc::channel();
-            runtime.spawn_blocking_named("drop", move || {
-                started_tx.send(()).unwrap();
-                release_rx.recv().unwrap();
-            });
-            started_rx.recv_timeout(Duration::from_secs(5)).unwrap();
-
-            let block_hash = B256::with_last_byte(1);
-            let job = Arc::new(PendingSparseTrie {
-                block_hash,
-                trie: Mutex::new(None),
-                executor: runtime.clone(),
-            });
-            let worker = job.clone();
-            let (preserved, completer) = PreservedSparseTrie::pending(block_hash, B256::ZERO);
-            if worker_finishes_first {
-                *worker.trie.lock() = Some(preserved);
-                drop(worker);
-                drop(job);
-            } else {
-                drop(job);
-                *worker.trie.lock() = Some(preserved);
-                drop(worker);
-            }
-
-            // The receiver must remain alive until the background drop runs, even when the
-            // job was abandoned before the worker staged its trie.
-            let result = completer.complete(SparseStateTrie::default());
-            release_tx.send(()).unwrap();
-            runtime.spawn_blocking_named("drop", || {}).get();
-            assert!(result.is_ok(), "pending receiver was dropped inline");
         }
     }
 
@@ -1628,7 +1569,6 @@ mod tests {
                 Arc::new(PendingSparseTrie {
                     block_hash: B256::with_last_byte(1),
                     trie: Mutex::new(None),
-                    executor: runtime.clone(),
                 })
             });
             let mut state_root_handle = DefaultStateRootStrategy::default().spawn_state_root(
