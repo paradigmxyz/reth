@@ -649,11 +649,27 @@ pub(crate) fn execute_transaction_with_condition<T: EvmTypes>(
 where
     T::Tx: Typed2718,
 {
-    let output = execute_transaction_without_commit(evm, transaction)?;
-    if !commit(&output.result).should_commit() {
-        return Ok(None)
+    let mut changes = TransactionChanges::default();
+    let result = match evm.transact(transaction) {
+        Ok(executed) => {
+            if let Some(code) = executed.result().error_code {
+                let _ = executed.discard();
+                Err(HandlerError::Fatal(code))
+            } else if commit(executed.result()).should_commit() {
+                let Ok(result) = executed.commit_with(&mut changes);
+                Ok(Some(result))
+            } else {
+                let _ = executed.discard();
+                Ok(None)
+            }
+        }
+        Err(error) => Err(error),
+    };
+    block_state.commit(&changes);
+    if stream_state {
+        send_state_update(changes.state, on_state_update);
     }
-    Ok(Some(commit_detached_transaction(evm, block_state, stream_state, on_state_update, output)))
+    result.map_err(|error| map_handler_error(evm, error))
 }
 
 pub(crate) fn execute_transaction_without_commit<T: EvmTypes>(

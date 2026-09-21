@@ -1082,6 +1082,12 @@ mod tests {
         let mut executor = factory.create_executor(evm, plan);
 
         executor.apply_pre_execution_changes().expect("first segment pre-execution");
+        assert!(executor
+            .execute_transaction_with_commit_condition(transfer(from, first_target, 0), |_| {
+                CommitChanges::No
+            })
+            .expect("discarded transaction")
+            .is_none());
         executor
             .execute_transaction_with_commit_condition(transfer(from, first_target, 0), |_| {
                 CommitChanges::Yes
