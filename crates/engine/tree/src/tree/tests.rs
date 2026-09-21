@@ -10,6 +10,7 @@ use crate::{
 };
 use reth_storage_overlay::OverlayManager;
 
+use alloy_eip7928::bal::DecodedBal;
 use alloy_eips::eip1898::BlockWithParent;
 use alloy_primitives::{
     map::{B256Map, B256Set},
@@ -21,6 +22,7 @@ use alloy_rpc_types_engine::{
     ForkchoiceUpdateError,
 };
 use assert_matches::assert_matches;
+use evm2::evm::Bal as EvmBal;
 use reth_chain_state::test_utils::TestBlockBuilder;
 use reth_chainspec::{ChainSpec, HOLESKY, MAINNET};
 use reth_engine_primitives::{EngineApiValidator, ForkchoiceStatus, NoopInvalidBlockHook};
@@ -1114,10 +1116,15 @@ fn test_validated_payload_bal_is_inserted_into_store() {
             child_block.block_with_parent(),
             child,
             |_, executed, _| {
-                Ok::<_, InsertPayloadError<Block>>(
-                    ValidationOutput::new(executed, None)
-                        .with_raw_bal(Some(RawBal::from(raw_bal.clone()))),
-                )
+                // `raw_bal` is the empty-list RLP, so the empty evm2 BAL is its decoded value.
+                let bal = DecodedBal::with_raw_bal(
+                    Arc::new(EvmBal::default()),
+                    RawBal::from(raw_bal.clone()),
+                );
+                Ok::<_, InsertPayloadError<Block>>(ValidationOutput::new(
+                    executed.with_bal(Some(Arc::new(bal))),
+                    None,
+                ))
             },
             |_, executed| Ok(executed.recovered_block().clone_sealed_block().into()),
         )

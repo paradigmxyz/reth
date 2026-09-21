@@ -375,9 +375,16 @@ where
     }
 
     fn finish_with_block_access_list(
-        mut self,
+        self,
     ) -> Result<(BlockExecutionOutput<Self::Receipt>, Option<BlockAccessList>), BlockExecutionError>
     {
+        let (output, bal) = self.finish_with_prepared_block_access_list()?;
+        Ok((output, bal.map(Into::into)))
+    }
+
+    fn finish_with_prepared_block_access_list(
+        mut self,
+    ) -> Result<(BlockExecutionOutput<Self::Receipt>, Option<Bal>), BlockExecutionError> {
         self.set_transaction_block_access_index();
         let context = Self::block_context(
             self.deposit_contract_address,
@@ -423,7 +430,7 @@ where
         )
         .map_err(BlockExecutionError::from)?;
 
-        let block_access_list = self.take_block_access_list();
+        let block_access_list = self.evm.state_mut().take_bal_builder();
         let block_gas_used = final_block_gas_used(
             self.separate_block_gas,
             self.cumulative_gas_used,
@@ -901,12 +908,19 @@ where
     }
 
     fn finish_with_block_access_list(
-        mut self,
+        self,
     ) -> Result<(BlockExecutionOutput<Receipt>, Option<BlockAccessList>), BlockExecutionError> {
+        let (output, bal) = self.finish_with_prepared_block_access_list()?;
+        Ok((output, bal.map(Into::into)))
+    }
+
+    fn finish_with_prepared_block_access_list(
+        mut self,
+    ) -> Result<(BlockExecutionOutput<Receipt>, Option<Bal>), BlockExecutionError> {
         self.initialize()?;
         let segment = self.finish_segment()?;
         self.merge_segment(segment);
-        let block_access_list = self.inner.take_block_access_list();
+        let block_access_list = self.inner.evm.state_mut().take_bal_builder();
         let result = reth_execution_types::BlockExecutionResult {
             receipts: core::mem::take(&mut self.inner.receipts),
             requests: self.requests,

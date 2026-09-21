@@ -22,6 +22,7 @@ evm2.workspace = true
 alloy-evm.workspace = true
 alloy-consensus.workspace = true
 alloy-primitives.workspace = true
+alloy-eip7928.workspace = true
 alloy-eips.workspace = true
 alloy-rlp = { workspace = true, optional = true }
 serde = { workspace = true, optional = true }
@@ -64,6 +65,7 @@ serde = [
     "reth-trie-common/serde",
     "reth-ethereum-primitives/serde",
     "evm2/serde",
+    "alloy-eip7928/serde",
 ]
 serde-bincode-compat = [
     "serde",
@@ -74,6 +76,7 @@ serde-bincode-compat = [
     "alloy-eips/serde-bincode-compat",
 ]
 std = [
+    "alloy-eip7928/std",
     "alloy-eips/std",
     "alloy-primitives/std",
     "revm/std",

@@ -10,7 +10,9 @@ use alloy_primitives::{map::B256Map, BlockNumber, TxHash, B256};
 use parking_lot::RwLock;
 use reth_chainspec::ChainInfo;
 use reth_ethereum_primitives::EthPrimitives;
-use reth_execution_types::{BlockExecutionOutput, BlockExecutionResult, Chain, ExecutionOutcome};
+use reth_execution_types::{
+    BlockExecutionOutput, BlockExecutionResult, Chain, DecodedEvmBal, ExecutionOutcome,
+};
 use reth_metrics::{metrics::Gauge, Metrics};
 use reth_primitives_traits::{
     BlockBody as _, IndexedTx, NodePrimitives, RecoveredBlock, SealedBlock, SealedHeader,
@@ -768,6 +770,18 @@ pub struct ExecutedBlock<N: NodePrimitives = EthPrimitives> {
     /// This allows deferring the computation of the trie data which can be expensive.
     /// The data can be populated asynchronously after the block was validated.
     pub trie_data: LazyTrieData,
+    /// The prepared block access list of the block, if one is available.
+    ///
+    /// `None` means no BAL was available when the block was constructed, not that the block
+    /// has none: only blocks the engine validated from a payload that carried a BAL have it
+    /// attached. Blocks from before the BAL fork, blocks built or loaded outside engine
+    /// validation (payload builder, persistence, tests) and downloaded blocks without a BAL
+    /// sidecar leave it unset; the BAL store is the source of truth in that case.
+    ///
+    /// When present, this carries the raw RLP (for the BAL store) together with the evm2
+    /// representation (for consumers like the RPC state cache), so that neither has to be
+    /// re-derived after validation.
+    pub bal: Option<Arc<DecodedEvmBal>>,
 }
 
 impl<N: NodePrimitives> Default for ExecutedBlock<N> {
@@ -784,13 +798,15 @@ impl<N: NodePrimitives> Default for ExecutedBlock<N> {
                 state: Default::default(),
             }),
             trie_data: LazyTrieData::ready(ComputedTrieData::default()),
+            bal: None,
         }
     }
 }
 
 impl<N: NodePrimitives> PartialEq for ExecutedBlock<N> {
     fn eq(&self, other: &Self) -> bool {
-        // Trie data is computed asynchronously and doesn't define block identity.
+        // Trie data is computed asynchronously and the block access list is derived data; neither
+        // defines block identity.
         self.recovered_block == other.recovered_block &&
             self.execution_output == other.execution_output
     }
@@ -806,7 +822,12 @@ impl<N: NodePrimitives> ExecutedBlock<N> {
         execution_output: Arc<BlockExecutionOutput<N::Receipt>>,
         trie_data: ComputedTrieData,
     ) -> Self {
-        Self { recovered_block, execution_output, trie_data: LazyTrieData::ready(trie_data) }
+        Self {
+            recovered_block,
+            execution_output,
+            trie_data: LazyTrieData::ready(trie_data),
+            bal: None,
+        }
     }
 
     /// Create a new [`ExecutedBlock`] with deferred trie data.
@@ -827,7 +848,21 @@ impl<N: NodePrimitives> ExecutedBlock<N> {
         execution_output: Arc<BlockExecutionOutput<N::Receipt>>,
         trie_data: LazyTrieData,
     ) -> Self {
-        Self { recovered_block, execution_output, trie_data }
+        Self { recovered_block, execution_output, trie_data, bal: None }
+    }
+
+    /// Attaches the prepared block access list of the block, or clears it with `None`.
+    pub fn with_bal(mut self, bal: Option<Arc<DecodedEvmBal>>) -> Self {
+        self.bal = bal;
+        self
+    }
+
+    /// Returns the prepared block access list of the block, if one is available.
+    ///
+    /// `None` only means no BAL was attached to this block; see the `bal` field for details.
+    #[inline]
+    pub const fn bal(&self) -> Option<&Arc<DecodedEvmBal>> {
+        self.bal.as_ref()
     }
 
     /// Returns a reference to an inner [`SealedBlock`]
@@ -970,7 +1005,7 @@ impl<N: NodePrimitives<SignedTx: SignedTransaction>> NewCanonicalChain<N> {
 
     /// Converts a slice of executed blocks into a [`Chain`].
     fn blocks_to_chain(blocks: &[ExecutedBlock<N>]) -> Chain<N> {
-        match blocks {
+        let mut chain = match blocks {
             [] => Chain::default(),
             [first, rest @ ..] => {
                 let mut chain = Chain::from_block(
@@ -993,7 +1028,13 @@ impl<N: NodePrimitives<SignedTx: SignedTransaction>> NewCanonicalChain<N> {
                 }
                 chain
             }
+        };
+        for exec in blocks {
+            if let Some(bal) = exec.bal() {
+                chain.insert_bal(exec.block_number(), Arc::clone(bal));
+            }
         }
+        chain
     }
 
     /// Returns the new tip of the chain.
@@ -1641,5 +1682,32 @@ mod tests {
                 ))
             }
         );
+    }
+
+    #[test]
+    fn test_to_chain_notification_carries_prepared_bal() {
+        let mut test_block_builder: TestBlockBuilder = TestBlockBuilder::default();
+        let block0 = test_block_builder.get_executed_block_with_number(0, B256::random());
+        let block1 = test_block_builder
+            .get_executed_block_with_number(1, block0.recovered_block.hash())
+            .with_bal(Some(Arc::new(DecodedEvmBal::new(
+                Arc::default(),
+                Bytes::from_static(&[0xc0]),
+            ))));
+
+        let chain = NewCanonicalChain::Commit { new: vec![block0, block1.clone()] };
+        let CanonStateNotification::Commit { new } = chain.to_chain_notification() else {
+            panic!("expected a commit notification")
+        };
+
+        // Only the block whose payload carried a BAL contributes one.
+        assert_eq!(new.bals().len(), 1);
+        assert_eq!(new.bal_at(1), block1.bal());
+
+        let mut blocks_and_bals = new.blocks_and_bals();
+        let (block, bal) = blocks_and_bals.next().expect("block with BAL");
+        assert_eq!(block.hash(), block1.recovered_block.hash());
+        assert_eq!(Some(bal), block1.bal());
+        assert!(blocks_and_bals.next().is_none());
     }
 }

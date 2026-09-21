@@ -25,6 +25,9 @@ pub use revm::state::EvmState;
 mod compat;
 pub use compat::*;
 
+mod bal;
+pub use bal::*;
+
 mod chain;
 pub use chain::*;
 

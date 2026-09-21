@@ -125,6 +125,7 @@ use crate::tree::{
 };
 use alloy_consensus::constants::KECCAK_EMPTY;
 use alloy_primitives::Address;
+use evm2::evm::Bal as EvmBal;
 use reth_chain_state::{CanonicalInMemoryState, ExecutedBlock, ExecutionTimingStats};
 use reth_consensus::{ConsensusError, FullConsensus, ReceiptRootBloom};
 use reth_engine_primitives::{
@@ -136,6 +137,7 @@ use reth_evm::{
     ConfigureEvm, EvmEnvFor, ExecutableTxFor, ExecutionCtxFor,
 };
 use reth_execution_cache::{CacheFillMode, CacheStats};
+use reth_execution_types::DecodedEvmBal;
 use reth_network_p2p::full_block::SealedBlockWithAccessList;
 use reth_payload_builder::{PayloadBuilderLease, PayloadBuilderResources};
 use reth_payload_primitives::{
@@ -724,7 +726,9 @@ where
         if let (Some(metrics), Some(stats)) = (&state_provider_metrics, &state_provider_stats) {
             metrics.record_totals(stats);
         }
-        let (output, senders, receipt_root_rx, built_bal) = ensure_ok!(execution_result);
+        let (output, senders, receipt_root_rx, executed_bal) = ensure_ok!(execution_result);
+        let (built_bal, evm_bal) =
+            executed_bal.map(|ExecutedBal { alloy, evm }| (alloy, evm)).unzip();
 
         // After executing the block we can stop prewarming transactions
         handle.stop_prewarming_execution();
@@ -899,10 +903,17 @@ where
             let _ = valid_block_tx.send(());
         }
 
-        let executed_block =
-            self.spawn_deferred_trie_task(Arc::new(block), output, hashed_state, trie_output);
-        let raw_bal = decoded_bal.map(|decoded_bal| decoded_bal.as_raw_bal().clone());
-        Ok(ValidationOutput::new(executed_block, timing_stats).with_raw_bal(raw_bal))
+        // The payload's raw bytes are already bound to this header: payload-to-block conversion
+        // and downloaded-sidecar verification both check their hash against it, so pairing them
+        // with the BAL this execution produced is sound. The zip leaves the BAL unset for a
+        // downloaded block that carried only a BAL hash and no sidecar.
+        let bal = evm_bal.zip(decoded_bal).map(|(evm_bal, decoded_bal)| {
+            Arc::new(DecodedEvmBal::with_raw_bal(evm_bal, decoded_bal.as_raw_bal().clone()))
+        });
+        let executed_block = self
+            .spawn_deferred_trie_task(Arc::new(block), output, hashed_state, trie_output)
+            .with_bal(bal);
+        Ok(ValidationOutput::new(executed_block, timing_stats))
     }
 
     /// Spawns a background task to convert a [`BlockOrPayload`] into a [`SealedBlock`] and perform
@@ -993,12 +1004,7 @@ where
         handle: &mut PayloadHandle<impl ExecutableTxFor<Evm>, Err, N::Receipt>,
         state_hook: Option<Box<dyn FnMut(reth_execution_types::EvmState) + Send + 'static>>,
     ) -> Result<
-        (
-            BlockExecutionOutput<N::Receipt>,
-            Vec<Address>,
-            ReceiptRootReceiver,
-            Option<BlockAccessList>,
-        ),
+        (BlockExecutionOutput<N::Receipt>, Vec<Address>, ReceiptRootReceiver, Option<ExecutedBal>),
         InsertBlockErrorKind,
     >
     where
@@ -1038,8 +1044,9 @@ where
                 )?;
 
                 let post_exec_start = Instant::now();
-                let (output, built_bal) =
-                    executor.finish_with_block_access_list().map_err(BlockExecutionError::other)?;
+                let (output, built_bal) = executor
+                    .finish_with_prepared_block_access_list()
+                    .map_err(BlockExecutionError::other)?;
                 self.metrics.record_post_execution(post_exec_start.elapsed());
                 Ok::<_, BlockExecutionError>((output, senders, built_bal))
             })?;
@@ -1050,7 +1057,12 @@ where
         self.metrics.record_block_execution_gas_bucket(output.result.gas_used, execution_duration);
         debug!(target: "engine::tree::payload_validator", elapsed = ?execution_duration, "Executed block");
 
-        Ok((output, senders, result_rx, built_bal))
+        Ok((
+            output,
+            senders,
+            result_rx,
+            built_bal.map(|bal| ExecutedBal { alloy: bal.clone().into(), evm: Arc::new(bal) }),
+        ))
     }
 
     /// Returns true when the BAL execute path should be used for this block.
@@ -1082,7 +1094,8 @@ where
     /// 2. Relies on BAL prewarm to stream state-root updates and optional state prefetches.
     /// 3. Spawns the receipt-root task.
     /// 4. Calls [`crate::tree::payload_processor::bal::execute_block`].
-    /// 5. Returns the rebuilt BAL for post-execution consensus validation.
+    /// 5. Returns the rebuilt BAL for post-execution consensus validation, paired with the evm2
+    ///    representation the workers consumed.
     #[instrument(level = "debug", target = "engine::tree::payload_validator", skip_all)]
     #[expect(clippy::type_complexity)]
     fn execute_block_bal<Tx, Err, MakeStateProvider, T>(
@@ -1092,12 +1105,7 @@ where
         handle: &PayloadHandle<Tx, Err, N::Receipt>,
         make_state_provider: &MakeStateProvider,
     ) -> Result<
-        (
-            BlockExecutionOutput<N::Receipt>,
-            Vec<Address>,
-            ReceiptRootReceiver,
-            Option<BlockAccessList>,
-        ),
+        (BlockExecutionOutput<N::Receipt>, Vec<Address>, ReceiptRootReceiver, Option<ExecutedBal>),
         InsertBlockErrorKind,
     >
     where
@@ -1123,17 +1131,18 @@ where
         let execution_start = Instant::now();
         let ctx =
             self.execution_ctx_for(input).map_err(|e| InsertBlockErrorKind::Other(Box::new(e)))?;
-        let (output, senders, built_bal) = crate::tree::payload_processor::bal::execute_block(
-            &self.runtime,
-            &self.evm_config,
-            &make_db,
-            input_bal,
-            env.evm_env,
-            ctx,
-            env.transaction_count,
-            handle.clone_transaction_receiver(),
-            receipt_tx,
-        )?;
+        let (output, senders, built_bal, received_bal_evm) =
+            crate::tree::payload_processor::bal::execute_block(
+                &self.runtime,
+                &self.evm_config,
+                &make_db,
+                input_bal,
+                env.evm_env,
+                ctx,
+                env.transaction_count,
+                handle.clone_transaction_receiver(),
+                receipt_tx,
+            )?;
         let execution_duration = execution_start.elapsed();
 
         self.metrics.record_block_execution(&output, execution_duration);
@@ -1144,7 +1153,15 @@ where
             "Executed block via BAL path",
         );
 
-        Ok((output, senders, result_rx, Some(built_bal)))
+        // The received BAL was already converted to the evm2 form to drive the workers. Once the
+        // post-execution hash check against the rebuilt BAL passes, both have the same content, so
+        // the converted one can be reused instead of converting the rebuilt BAL again.
+        Ok((
+            output,
+            senders,
+            result_rx,
+            Some(ExecutedBal { alloy: built_bal, evm: received_bal_evm }),
+        ))
     }
 
     fn spawn_receipt_root_task(
@@ -2025,4 +2042,12 @@ impl<T: PayloadTypes> BlockOrPayload<T> {
             Self::Block(block) => block.gas_limit(),
         }
     }
+}
+
+/// Block access list produced by executing a block.
+struct ExecutedBal {
+    /// Alloy form, only needed for the post-execution consensus checks (hash and gas limit).
+    alloy: BlockAccessList,
+    /// evm2 form, shared with the executed block so consumers can reuse it.
+    evm: Arc<EvmBal>,
 }

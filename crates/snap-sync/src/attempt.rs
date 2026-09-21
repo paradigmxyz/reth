@@ -4,18 +4,22 @@
 //! attempt produced it. Every write presents a [`SnapWrite`]; ones that no longer match are
 //! refused.
 
-use crate::{CatchUpProgress, SnapCatchUpStore, SnapGeneration, SnapSyncError};
+use crate::{
+    account::StoredCoverage, common::SnapRecord, storage::StoredProgress, verify::StoredRebuild,
+    CatchUpProgress, SnapGeneration, SnapSyncError,
+};
 use reth_storage_api::{
     BlockHashReader, MetadataProvider, MetadataWriter, SnapAttempt, SnapAttemptId, StorageSettings,
 };
+use serde::{Deserialize, Serialize};
 
 /// Persistence for the attempt that owns downloaded snap state.
 ///
 /// Blanket-implemented over node metadata access, so these writes join the caller's transaction:
 /// state, bytecode and the attempt record commit together or not at all.
 pub trait SnapAttemptStore {
-    /// Starts an attempt anchored to `generation`, superseding any already recorded, with its
-    /// catch-up progress at that pivot.
+    /// Starts an attempt anchored to `generation`, superseding any already recorded and the
+    /// progress it kept, with its catch-up progress at that pivot.
     fn start_snap_attempt(&self, generation: SnapGeneration) -> Result<SnapWrite, SnapSyncError>
     where
         Self: MetadataWriter;
@@ -39,8 +43,8 @@ pub trait SnapAttemptStore {
 
     /// Re-anchors the attempt to `generation`, refusing writes proved against the previous root.
     ///
-    /// The old pivot must still be canonical, and the new pivot must not be below the last block
-    /// whose list is applied. An orphaned pivot requires recovery or a fresh attempt.
+    /// Both pivots must be canonical and the new one past the old, so it descends from all
+    /// downloaded state. An orphaned pivot requires recovery or a fresh attempt.
     fn advance_snap_pivot(
         &self,
         write: SnapWrite,
@@ -61,7 +65,7 @@ pub trait SnapAttemptStore {
 }
 
 /// What a write presents to prove it belongs to the attempt owning the persisted state.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct SnapWrite {
     // Attempt this write belongs to.
     attempt: SnapAttemptId,
@@ -101,6 +105,11 @@ impl<T: MetadataProvider> SnapAttemptStore for T {
         self.write_snap_attempt(&attempt)?;
         // Ranges committed at this pivot need every list after it, however far the pivot moves.
         CatchUpProgress::at_pivot(attempt.pivot()).write(self, attempt.id())?;
+        // Earlier attempts' progress never applies to this one, and a record another build wrote
+        // would fail every read of it.
+        StoredCoverage::clear(self)?;
+        StoredProgress::clear(self)?;
+        StoredRebuild::clear(self)?;
         Ok(SnapWrite::of(&attempt))
     }
 
@@ -141,16 +150,18 @@ impl<T: MetadataProvider> SnapAttemptStore for T {
     {
         // Replacing an orphaned pivot would hide the fork that downloaded ranges belong to.
         let mut attempt = self.authorize_canonical_snap_write(write)?;
-        // Ranges downloaded at the new pivot would already hold the applied blocks' changes.
-        if let Some(progress) = self.catch_up_progress(write)? &&
-            generation.target().number < progress.applied().number
-        {
-            return Err(SnapSyncError::PivotBelowApplied {
-                applied: progress.applied().number,
-                pivot: generation.target().number,
+        let (pivot, target) = (attempt.pivot(), generation.target());
+        // Ranges already committed hold the old pivot's changes, which no list can undo.
+        if target.number <= pivot.number {
+            return Err(SnapSyncError::PivotNotAdvanced {
+                pivot: pivot.number,
+                target: target.number,
             })
         }
-        attempt.re_anchor(generation.target(), generation.state_root());
+        if self.block_hash(target.number)? != Some(target.hash) {
+            return Err(SnapSyncError::NonCanonicalBlock { block: target.number, hash: target.hash })
+        }
+        attempt.re_anchor(target, generation.state_root());
         self.write_snap_attempt(&attempt)?;
         Ok(SnapWrite::of(&attempt))
     }
@@ -269,6 +280,26 @@ mod tests {
     }
 
     #[test]
+    fn a_new_attempt_drops_progress_another_build_wrote() {
+        let factory = factory();
+        let provider = factory.database_provider_rw().unwrap();
+        let unreadable = br#"{"version":999}"#.to_vec();
+        for key in [StoredCoverage::KEY, StoredProgress::KEY, StoredRebuild::KEY] {
+            provider.write_metadata(key, unreadable.clone()).unwrap();
+        }
+
+        let write = provider.start_snap_attempt(generation(1)).unwrap();
+
+        assert_eq!(
+            crate::SnapAccountStore::start_account_coverage(&provider, write).unwrap(),
+            crate::AccountCoverage::START
+        );
+        for key in [StoredProgress::KEY, StoredRebuild::KEY] {
+            assert_eq!(provider.get_metadata(key).unwrap(), None);
+        }
+    }
+
+    #[test]
     fn restarting_at_the_same_pivot_takes_a_new_identity() {
         let factory = factory();
         let provider = factory.database_provider_rw().unwrap();
@@ -361,6 +392,73 @@ mod tests {
             Err(SnapSyncError::StaleWrite { .. })
         ));
         provider.authorize_snap_write(after).unwrap();
+    }
+
+    #[test]
+    fn the_pivot_advances_repeatedly_within_one_attempt() {
+        let factory = factory();
+        let provider = factory.database_provider_rw().unwrap();
+        let first = provider.start_snap_attempt(generation(1)).unwrap();
+
+        let second = provider.advance_snap_pivot(first, generation(2)).unwrap();
+        let third = provider.advance_snap_pivot(second, generation(3)).unwrap();
+
+        assert_eq!(third.attempt(), first.attempt());
+        assert_eq!(third.state_version(), first.state_version() + 2);
+        assert_eq!(provider.snap_attempt().unwrap().unwrap().pivot().number, 3);
+        for stale in [first, second] {
+            assert!(matches!(
+                provider.authorize_snap_write(stale),
+                Err(SnapSyncError::StaleWrite { .. })
+            ));
+        }
+    }
+
+    #[test]
+    fn the_pivot_only_moves_forward() {
+        let factory = factory();
+        let provider = factory.database_provider_rw().unwrap();
+        let write = provider.start_snap_attempt(generation(2)).unwrap();
+
+        // Committed ranges hold block 2's changes, which a lower pivot's lists cannot undo.
+        for target in [1, 2] {
+            assert!(matches!(
+                provider.advance_snap_pivot(write, generation(target)),
+                Err(SnapSyncError::PivotNotAdvanced { pivot: 2, target: refused })
+                    if refused == target
+            ));
+        }
+        provider.authorize_snap_write(write).unwrap();
+    }
+
+    #[test]
+    fn the_pivot_cannot_move_off_the_canonical_chain() {
+        let factory = factory();
+        let provider = factory.database_provider_rw().unwrap();
+        let write = provider.start_snap_attempt(generation(1)).unwrap();
+        let orphan = SnapGeneration::new(BlockNumHash::new(2, B256::repeat_byte(0xee)), B256::ZERO);
+
+        let refused = provider.advance_snap_pivot(write, orphan);
+
+        assert!(matches!(refused, Err(SnapSyncError::NonCanonicalBlock { block: 2, .. })));
+        provider.authorize_snap_write(write).unwrap();
+    }
+
+    #[test]
+    fn an_interrupted_advance_keeps_the_previous_pivot() {
+        let factory = factory();
+        let provider = factory.database_provider_rw().unwrap();
+        let write = provider.start_snap_attempt(generation(1)).unwrap();
+        provider.commit().unwrap();
+
+        let provider = factory.database_provider_rw().unwrap();
+        provider.advance_snap_pivot(write, generation(2)).unwrap();
+        drop(provider);
+
+        // Downloads still in flight against the old root keep committing.
+        let provider = factory.database_provider_rw().unwrap();
+        assert_eq!(provider.active_snap_write().unwrap(), Some(write));
+        assert_eq!(provider.authorize_snap_write(write).unwrap().pivot().number, 1);
     }
 
     #[test]

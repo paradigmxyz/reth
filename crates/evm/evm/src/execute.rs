@@ -470,6 +470,22 @@ pub trait BlockExecutor: Sized {
         self,
     ) -> Result<(BlockExecutionOutput<Self::Receipt>, Option<BlockAccessList>), BlockExecutionError>;
 
+    /// Finishes execution while retaining the prepared evm2 BAL for downstream consumers.
+    ///
+    /// Executors that build a native BAL can override this to avoid converting it back from the
+    /// canonical representation.
+    fn finish_with_prepared_block_access_list(
+        self,
+    ) -> Result<(BlockExecutionOutput<Self::Receipt>, Option<evm2::evm::Bal>), BlockExecutionError>
+    {
+        let (output, bal) = self.finish_with_block_access_list()?;
+        let bal = bal
+            .map(|bal| evm2::evm::Bal::try_from(bal.as_slice()))
+            .transpose()
+            .map_err(BlockExecutionError::other)?;
+        Ok((output, bal))
+    }
+
     /// Finishes block execution and returns the output.
     fn finish(self) -> Result<BlockExecutionOutput<Self::Receipt>, BlockExecutionError> {
         self.finish_with_block_access_list().map(|(output, _)| output)
@@ -502,6 +518,7 @@ pub trait BlockExecutorFactory {
         Transaction = Self::Transaction,
         Receipt = Self::Receipt,
         Evm = Self::Evm<'a>,
+        BlockAccessList = evm2::evm::Bal,
     >
     where
         Self: 'a;
