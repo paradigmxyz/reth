@@ -22,10 +22,14 @@ use tokio::sync::oneshot;
 pub(super) struct BlobFetcher<T> {
     buffer: BlobBuffer<T>,
     pending: B256Map<Pending>,
+    /// Cell availability learned from announcements. This outlives an individual fetch so a
+    /// pooled partial transaction can be reactivated when custody expands.
+    sources: B256Map<Sources>,
     requests: FuturesUnordered<RequestFuture>,
     verification: FuturesUnordered<VerifyFuture<T>>,
     budgets: HashMap<PeerId, Budget, FbBuildHasher<64>>,
     custody: CellCustody,
+    last_custody: B128,
     probability: u8,
     tick: tokio::time::Interval,
     metrics: BlobFetcherMetrics,
@@ -37,6 +41,7 @@ impl<T> std::fmt::Debug for BlobFetcher<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("BlobFetcher")
             .field("pending", &self.pending.len())
+            .field("sources", &self.sources.len())
             .field("requests", &self.requests.len())
             .finish_non_exhaustive()
     }
@@ -56,9 +61,11 @@ impl<T: PoolTransaction + 'static> BlobFetcher<T> {
         Self {
             buffer: Default::default(),
             pending: Default::default(),
+            sources: Default::default(),
             requests: Default::default(),
             verification: Default::default(),
             budgets: Default::default(),
+            last_custody: custody.get(),
             custody,
             probability: probability.clamp(15, 100),
             tick: tokio::time::interval(Duration::from_millis(100)),
@@ -66,7 +73,28 @@ impl<T: PoolTransaction + 'static> BlobFetcher<T> {
         }
     }
 
+    pub(super) fn remember_source(&mut self, hash: B256, peer: PeerId, mask: BlobCellMask) {
+        if mask.count() == 0 {
+            return
+        }
+        let now = Instant::now();
+        if !self.sources.contains_key(&hash) &&
+            !self.pending.contains_key(&hash) &&
+            self.sources.len() >= MAX_PENDING
+        {
+            return
+        }
+        let sources = self.sources.entry(hash).or_insert_with(Sources::default);
+        sources.updated = now;
+        if let Some(provider) = sources.providers.iter_mut().find(|(id, _)| *id == peer) {
+            provider.1 = mask;
+        } else if sources.providers.len() < 16 {
+            sources.providers.push((peer, mask));
+        }
+    }
+
     pub(super) fn announce(&mut self, hash: B256, peer: PeerId, mask: BlobCellMask) {
+        self.remember_source(hash, peer, mask);
         if mask.count() == 0 ||
             (!self.pending.contains_key(&hash) && self.pending.len() >= MAX_PENDING)
         {
@@ -80,6 +108,40 @@ impl<T: PoolTransaction + 'static> BlobFetcher<T> {
         }
     }
 
+    /// Requeues pooled partial sidecars after a custody expansion.
+    ///
+    /// The transaction pool owns the durable sidecar. The fetcher only borrows a cloned
+    /// transaction as the rendezvous body; a successful `PooledTransaction` event writes the
+    /// merged sidecar back to the blob store without reinserting the transaction.
+    pub(super) fn reconcile_pooled(&mut self, transactions: impl IntoIterator<Item = T>) {
+        let custody = BlobCellMask::new(self.custody.get());
+        let now = Instant::now();
+        for tx in transactions {
+            let Some(sidecar) = tx.blob_sidecar() else { continue };
+            let stored = sidecar.availability().get();
+            if custody.bits() & !stored.bits() == 0 {
+                continue
+            }
+            let hash = *tx.hash();
+            let providers = self
+                .sources
+                .get(&hash)
+                .map(|sources| sources.providers.clone())
+                .unwrap_or_default();
+            let peer = providers.first().map(|(peer, _)| *peer).unwrap_or_else(PeerId::random);
+
+            if self.buffer.body(peer, tx, now).is_err() {
+                continue
+            }
+            let pending = self.pending.entry(hash).or_insert_with(|| Pending::new(now));
+            pending.pooled = true;
+            pending.full = Some(false);
+            pending.received |= stored.bits();
+            pending.providers = providers;
+            pending.target = Some(BlobCellMask::from_bits(custody.bits() | pending.received));
+        }
+    }
+
     pub(super) fn body(&mut self, peer: PeerId, tx: T) -> Result<(), ()> {
         self.buffer.body(peer, tx, Instant::now())
     }
@@ -89,6 +151,10 @@ impl<T: PoolTransaction + 'static> BlobFetcher<T> {
         for pending in self.pending.values_mut() {
             pending.providers.retain(|(id, _)| *id != peer);
         }
+        for sources in self.sources.values_mut() {
+            sources.providers.retain(|(id, _)| *id != peer);
+        }
+        self.sources.retain(|_, sources| !sources.providers.is_empty());
     }
 
     pub(super) fn poll<N: NetworkPrimitives>(
@@ -107,8 +173,10 @@ impl<T: PoolTransaction + 'static> BlobFetcher<T> {
             } else {
                 self.metrics.invalid.increment(1);
             }
+            let pooled = self.pending.get(&hash).is_some_and(|pending| pending.pooled);
             self.pending.remove(&hash);
             return Poll::Ready(match result {
+                Ok((_peer, tx)) if pooled => BlobFetchEvent::PooledTransaction(tx),
                 Ok((peer, tx)) => BlobFetchEvent::Transaction(peer, tx),
                 Err(peers) => BlobFetchEvent::BadPeers(peers),
             })
@@ -164,18 +232,30 @@ impl<T: PoolTransaction + 'static> BlobFetcher<T> {
         while self.tick.poll_tick(cx).is_ready() {
             self.metrics.expired.increment(self.buffer.expire(now).len() as u64);
             self.pending.retain(|_, p| now.duration_since(p.created) < TTL);
+            self.sources.retain(|hash, sources| {
+                self.pending.contains_key(hash) || now.duration_since(sources.updated) < TTL
+            });
         }
         // A CL may expand its custody set after a transaction entered the sampler path. Extend
         // the target so the delta columns are fetched instead of leaving the pending transaction
         // on the old custody set (EIP-8070 ?engine_forkchoiceUpdatedV4).
         let custody = BlobCellMask::new(self.custody.get());
-        for pending in self.pending.values_mut() {
-            if pending.full == Some(false) &&
-                let Some(target) = pending.target
-            {
-                let expanded = custody.bits() & !target.bits();
-                if expanded != 0 {
-                    pending.target = Some(BlobCellMask::from_bits(target.bits() | expanded));
+        let custody_value = B128::from(custody.bits().to_le_bytes());
+        if custody_value != self.last_custody {
+            self.last_custody = custody_value;
+            for (&hash, pending) in &mut self.pending {
+                if pending.full == Some(false) &&
+                    let Some(target) = pending.target
+                {
+                    // Retain already received sample columns, discard columns that became
+                    // unnecessary during a custody contraction, and add every newly required
+                    // column. This makes completion a coverage check rather than exact mask
+                    // equality.
+                    if let Some(sources) = self.sources.get(&hash) {
+                        pending.providers = sources.providers.clone();
+                    }
+                    let retained = target.bits() & pending.received;
+                    pending.target = Some(BlobCellMask::from_bits(custody.bits() | retained));
                 }
             }
         }
@@ -317,6 +397,7 @@ impl<T: PoolTransaction + 'static> BlobFetcher<T> {
 
 pub(super) enum BlobFetchEvent<T> {
     Transaction(PeerId, T),
+    PooledTransaction(T),
     BadPeers(Vec<PeerId>),
 }
 struct Pending {
@@ -327,6 +408,7 @@ struct Pending {
     received: u128,
     inflight: bool,
     verifying: bool,
+    pooled: bool,
 }
 impl Pending {
     const fn new(created: Instant) -> Self {
@@ -338,7 +420,20 @@ impl Pending {
             received: 0,
             inflight: false,
             verifying: false,
+            pooled: false,
         }
+    }
+}
+
+#[derive(Debug)]
+struct Sources {
+    updated: Instant,
+    providers: Vec<(PeerId, BlobCellMask)>,
+}
+
+impl Default for Sources {
+    fn default() -> Self {
+        Self { updated: Instant::now(), providers: Vec::new() }
     }
 }
 struct Budget {
@@ -386,7 +481,10 @@ mod tests {
     use futures::task::noop_waker_ref;
     use reth_eth_wire::{EthNetworkPrimitives, EthVersion};
     use reth_network_api::{PeerKind, PeerRequestSender};
-    use reth_transaction_pool::EthPooledTransaction;
+    use reth_transaction_pool::{
+        blobstore::{BlobTxCellSidecar, PooledBlobSidecar},
+        EthPooledTransaction, PoolTransaction,
+    };
 
     fn peer(
         id: PeerId,
@@ -468,6 +566,90 @@ mod tests {
         let requested = u128::from_le_bytes(request.cell_mask.into());
         assert_eq!(requested & bits, bits);
         assert_eq!(requested.count_ones(), bits.count_ones() + 1);
+    }
+
+    #[tokio::test]
+    async fn pooled_partial_is_supplemented_after_custody_expansion() {
+        let (mut tx, cells) = super::super::blob_buffer::tests::fixture();
+        let hash = *tx.hash();
+        let stored = BlobCellMask::from_bits(1);
+        let expanded = BlobCellMask::from_bits(3);
+        let sparse = BlobTxCellSidecar {
+            commitments: cells.commitments.clone(),
+            proofs: cells.proofs.clone(),
+            cells: cells.get_cells(stored).unwrap(),
+            cell_mask: B128::from(stored.bits().to_le_bytes()),
+        };
+        tx.set_blob_sidecar(PooledBlobSidecar::from_cells(sparse));
+
+        let peer_id = PeerId::random();
+        let (peer, mut responses) = peer(peer_id);
+        let peers = HashMap::from_iter([(peer_id, peer)]);
+        let custody = CellCustody::default();
+        custody.set(B128::from(expanded.bits().to_le_bytes()));
+        let mut fetcher = BlobFetcher::new(custody, 15);
+        fetcher.announce(hash, peer_id, BlobCellMask::from_bits(u128::MAX));
+        fetcher.reconcile_pooled([tx]);
+
+        let mut cx = Context::from_waker(noop_waker_ref());
+        assert!(fetcher.poll(&mut cx, &peers).is_pending());
+        let PeerRequest::GetCells { request, response } = responses.try_recv().unwrap() else {
+            panic!("expected custody delta request")
+        };
+        let requested = BlobCellMask::from_bits(u128::from_le_bytes(request.cell_mask.into()));
+        assert_eq!(requested, BlobCellMask::from_bits(expanded.bits() & !stored.bits()));
+        response
+            .send(Ok(Cells {
+                hashes: vec![hash],
+                cells: vec![cells.get_cells(requested).unwrap()],
+                cell_mask: request.cell_mask,
+            }))
+            .unwrap();
+
+        let event = tokio::time::timeout(
+            Duration::from_secs(10),
+            std::future::poll_fn(|cx| fetcher.poll(cx, &peers)),
+        )
+        .await
+        .unwrap();
+        let BlobFetchEvent::PooledTransaction(tx) = event else {
+            panic!("supplemented pooled transaction must not be reimported")
+        };
+        let sidecar = tx.blob_sidecar().expect("merged sidecar");
+        assert_eq!(sidecar.cells().unwrap().mask(), expanded);
+    }
+
+    #[test]
+    fn custody_changes_reconcile_coverage_and_restore_sources() {
+        let custody = CellCustody::default();
+        custody.set(B128::from(1u128.to_le_bytes()));
+        let mut fetcher = BlobFetcher::<EthPooledTransaction>::new(custody.clone(), 15);
+        let hash = B256::random();
+        let peer = PeerId::random();
+        let mut pending = Pending::new(Instant::now());
+        pending.full = Some(false);
+        pending.target = Some(BlobCellMask::from_bits(1));
+        pending.received = 1;
+        fetcher.pending.insert(hash, pending);
+        fetcher.remember_source(hash, peer, BlobCellMask::from_bits(u128::MAX));
+
+        let peers = HashMap::default();
+        let mut cx = Context::from_waker(noop_waker_ref());
+        assert!(fetcher.poll(&mut cx, &peers).is_pending());
+        assert_eq!(fetcher.pending[&hash].target.unwrap().bits(), 1);
+        assert!(fetcher.pending[&hash].providers.is_empty());
+
+        custody.set(B128::from(3u128.to_le_bytes()));
+        assert!(fetcher.poll(&mut cx, &peers).is_pending());
+        assert_eq!(fetcher.pending[&hash].target.unwrap().bits(), 3);
+        assert_eq!(
+            fetcher.pending[&hash].providers,
+            vec![(peer, BlobCellMask::from_bits(u128::MAX))]
+        );
+
+        custody.set(B128::from(1u128.to_le_bytes()));
+        assert!(fetcher.poll(&mut cx, &peers).is_pending());
+        assert_eq!(fetcher.pending[&hash].target.unwrap().bits(), 1);
     }
 
     #[test]

@@ -49,7 +49,8 @@ impl<T: PoolTransaction> BlobBuffer<T> {
 
     /// Rejects malformed metadata before reserving buffer memory. Stateful admission happens later.
     pub(super) fn body(&mut self, peer: PeerId, tx: T, now: Instant) -> Result<(), ()> {
-        let sidecar = tx.blob_sidecar().and_then(|s| s.as_eip7594()).ok_or(())?;
+        let pooled_sidecar = tx.blob_sidecar().ok_or(())?;
+        let sidecar = pooled_sidecar.as_eip7594().ok_or(())?;
         let hashes = tx.blob_versioned_hashes().ok_or(())?;
         if !sidecar.blobs.is_empty() ||
             hashes.is_empty() ||
@@ -74,6 +75,13 @@ impl<T: PoolTransaction> BlobBuffer<T> {
         }
         let entry = self.entries.entry(hash).or_insert_with(|| Entry::new(now));
         if entry.body.is_none() {
+            // A pooled partial transaction already carries its verified cells. Seed the rendezvous
+            // mask with those cells so a custody expansion waits only for the delta columns.
+            if let Some(cells) = pooled_sidecar.cells().cloned() {
+                entry.mask |= cells.mask().bits();
+                entry.bytes += cells.cells.len() * core::mem::size_of::<Cell>();
+                self.bytes += cells.cells.len() * core::mem::size_of::<Cell>();
+            }
             entry.body = Some((peer, tx));
             entry.bytes += size;
             self.bytes += size;
@@ -144,6 +152,7 @@ impl<T: PoolTransaction> BufferedBlob<T> {
             .blob_sidecar()
             .and_then(|s| s.as_eip7594())
             .expect("buffer validates metadata");
+        let existing = self.transaction.blob_sidecar().cloned();
         let hashes = self.transaction.blob_versioned_hashes().expect("blob transaction");
         let mut bad = Vec::new();
         let mut verified = Vec::new();
@@ -167,6 +176,14 @@ impl<T: PoolTransaction> BufferedBlob<T> {
         if !bad.is_empty() {
             return Err(bad)
         }
+
+        // A custody contraction can make an already buffered pooled sidecar complete without any
+        // new delivery. Its cells were seeded into the buffer by `body`, so preserve the existing
+        // transaction unchanged in that case.
+        if verified.is_empty() {
+            return existing.map(|_| (self.peer, self.transaction)).ok_or_else(Vec::new)
+        }
+
         let mask = BlobCellMask::from_bits(mask);
         let mut cells = Vec::with_capacity(metadata.commitments.len() * mask.count());
         for blob in 0..metadata.commitments.len() {
@@ -179,16 +196,58 @@ impl<T: PoolTransaction> BufferedBlob<T> {
                 cells.push(source.cells[blob * source.mask().count() + offset]);
             }
         }
-        let sidecar = BlobTxCellSidecar {
+        let incoming = BlobTxCellSidecar {
             commitments: metadata.commitments.clone(),
             proofs: metadata.cell_proofs.clone(),
             cells,
             cell_mask: B128::from(mask.bits()),
         };
-        if !self.transaction.set_blob_sidecar(PooledBlobSidecar::from_cells(sidecar)) {
+        let sidecar = match existing {
+            Some(existing) => {
+                if let Some(stored) = existing.cells() {
+                    existing.with_cells(merge_cell_sidecars(stored, &incoming))
+                } else {
+                    PooledBlobSidecar::from_cells(incoming)
+                }
+            }
+            None => PooledBlobSidecar::from_cells(incoming),
+        };
+        if !self.transaction.set_blob_sidecar(sidecar) {
             return Err(Vec::new())
         }
         Ok((self.peer, self.transaction))
+    }
+}
+
+/// Merges two verified sparse sidecars, retaining cells in ascending column order for every blob.
+fn merge_cell_sidecars(
+    existing: &BlobTxCellSidecar,
+    incoming: &BlobTxCellSidecar,
+) -> BlobTxCellSidecar {
+    let existing_mask = existing.mask();
+    let incoming_mask = incoming.mask();
+    let merged_mask = BlobCellMask::from_bits(existing_mask.bits() | incoming_mask.bits());
+    let mut cells = Vec::with_capacity(existing.commitments.len() * merged_mask.count());
+
+    for blob in 0..existing.commitments.len() {
+        for column in merged_mask.selected_indices() {
+            if let Some(offset) = existing_mask.selected_indices().position(|i| i == column) {
+                cells.push(existing.cells[blob * existing_mask.count() + offset]);
+            } else {
+                let offset = incoming_mask
+                    .selected_indices()
+                    .position(|i| i == column)
+                    .expect("merged cell must be present in one sidecar");
+                cells.push(incoming.cells[blob * incoming_mask.count() + offset]);
+            }
+        }
+    }
+
+    BlobTxCellSidecar {
+        commitments: existing.commitments.clone(),
+        proofs: existing.proofs.clone(),
+        cells,
+        cell_mask: B128::from(merged_mask.bits()),
     }
 }
 

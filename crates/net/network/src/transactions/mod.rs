@@ -45,7 +45,7 @@ use alloy_eips::eip2718::Typed2718;
 use alloy_primitives::{
     bytes::BufMut,
     map::{hash_map::Entry, B256Map, B256Set, FbBuildHasher, HashMap, HashSet},
-    TxHash, B256,
+    TxHash, B128, B256,
 };
 use alloy_rlp::Encodable;
 use constants::SOFT_LIMIT_COUNT_HASHES_IN_NEW_POOLED_TRANSACTIONS_BROADCAST_MESSAGE;
@@ -381,6 +381,8 @@ pub struct TransactionsManager<Pool: TransactionPool, N: NetworkPrimitives = Eth
     metrics: TransactionsManagerMetrics,
     /// `AnnouncedTxTypes` metrics
     announced_tx_types_metrics: AnnouncedTxTypesMetrics,
+    /// Last custody value reconciled against pooled sparse blob transactions.
+    last_blob_custody: B128,
 }
 
 impl<Pool: TransactionPool, N: NetworkPrimitives> TransactionsManager<Pool, N> {
@@ -439,6 +441,7 @@ impl<Pool: TransactionPool, N: NetworkPrimitives> TransactionsManager<Pool, N> {
             reth_network_api::NetworkInfo::cell_custody(&network).clone(),
             transactions_manager_config.blob_fetch_probability,
         );
+        let last_blob_custody = reth_network_api::NetworkInfo::cell_custody(&network).get();
         Self {
             blob_fetcher,
             blob_responses: Arc::new(tokio::sync::Semaphore::new(16)),
@@ -460,6 +463,7 @@ impl<Pool: TransactionPool, N: NetworkPrimitives> TransactionsManager<Pool, N> {
             policies,
             metrics,
             announced_tx_types_metrics: AnnouncedTxTypesMetrics::default(),
+            last_blob_custody,
         }
     }
 
@@ -491,6 +495,39 @@ impl<Pool: TransactionPool, N: NetworkPrimitives> TransactionsManager<Pool, N> {
         self.pending_pool_imports_info.max_pending_pool_imports.saturating_sub(
             self.pending_pool_imports_info.pending_pool_imports.load(Ordering::Relaxed),
         )
+    }
+
+    /// Requeues sparse sidecars already retained by the pool when Engine API custody expands.
+    ///
+    /// Announcements are the normal source of peer availability, but a transaction may have
+    /// completed its initial sampling and been removed from the fetcher's active state already.
+    /// Scanning the pool on a custody transition gives those transactions the same delta-fetch
+    /// treatment as active announcements. The fetcher retains the sidecar body and the shared
+    /// availability is advanced only after the new cells verify.
+    fn reconcile_blob_custody(&mut self) {
+        let custody = reth_network_api::NetworkInfo::cell_custody(&self.network).get();
+        if custody == self.last_blob_custody {
+            return
+        }
+        self.last_blob_custody = custody;
+
+        let transactions = self
+            .pool
+            .all_transactions()
+            .iter()
+            .filter_map(|pooled| {
+                if !pooled.transaction.is_eip4844() {
+                    return None
+                }
+                let sidecar = self.pool.blob_store().get_pooled_sidecar(*pooled.hash()).ok()??;
+                if !sidecar.is_eip7594() {
+                    return None
+                }
+                let mut transaction = pooled.transaction.clone();
+                transaction.set_blob_sidecar(sidecar.as_ref().clone()).then_some(transaction)
+            })
+            .collect::<Vec<_>>();
+        self.blob_fetcher.reconcile_pooled(transactions);
     }
 
     fn report_peer_bad_transactions(&self, peer_id: PeerId) {
@@ -720,10 +757,7 @@ impl<Pool: TransactionPool, N: NetworkPrimitives> TransactionsManager<Pool, N> {
             self.report_peer(peer_id, ReputationChangeKind::BadAnnouncement);
         }
 
-        // 2. filter out transactions pending import to pool
-        partially_valid_msg.retain_by_hash(|hash| !self.transactions_by_peers.contains_key(hash));
-
-        // 3. filter out invalid entries (spam)
+        // 2. filter out invalid entries (spam)
         //
         // validates messages with respect to the given network, e.g. allowed tx types.
         // done before the pool lookup since these are cheap in-memory checks that shrink
@@ -785,6 +819,23 @@ impl<Pool: TransactionPool, N: NetworkPrimitives> TransactionsManager<Pool, N> {
         if should_report_peer {
             self.report_peer(peer_id, ReputationChangeKind::BadAnnouncement);
         }
+
+        // Record eth/72 cell availability before filtering known hashes. A pooled partial
+        // transaction still needs the announcing peer as a source when custody expands later.
+        if let Some(mask) = partially_valid_msg.eth72_cell_mask() {
+            let mask =
+                alloy_eips::eip7594::BlobCellMask::from_bits(u128::from_le_bytes(mask.into()));
+            for (&hash, metadata) in partially_valid_msg.iter() {
+                if metadata.is_some_and(|(ty, _)| ty == EIP4844_TX_TYPE_ID) {
+                    self.blob_fetcher.remember_source(hash, peer_id, mask);
+                }
+            }
+        }
+
+        // 3. filter out transactions pending import to pool. This intentionally happens after
+        // recording eth/72 sources: a known pooled partial transaction may still need this peer's
+        // newly announced cell availability after a custody expansion.
+        partially_valid_msg.retain_by_hash(|hash| !self.transactions_by_peers.contains_key(hash));
 
         // 4. filter out known hashes
         //
@@ -1741,6 +1792,7 @@ where
             |event| this.on_fetch_event(event),
         );
 
+        this.reconcile_blob_custody();
         if this.has_capacity_for_pending_pool_imports() &&
             let Poll::Ready(event) = this.blob_fetcher.poll(cx, &this.peers)
         {
@@ -1748,6 +1800,23 @@ where
                 BlobFetchEvent::Transaction(peer, tx) => {
                     this.transactions_by_peers.insert(*tx.hash(), smallvec::smallvec![peer]);
                     this.import_recovered_transactions(vec![tx]);
+                }
+                BlobFetchEvent::PooledTransaction(tx) => {
+                    if let Some(sidecar) = tx.blob_sidecar().cloned() {
+                        let hash = *tx.hash();
+                        let availability = sidecar.availability().clone();
+                        let mask = sidecar.cells().map(|cells| cells.mask());
+                        match this.pool.blob_store().insert(hash, sidecar) {
+                            Ok(()) => {
+                                if let Some(mask) = mask {
+                                    availability.extend(mask);
+                                }
+                            }
+                            Err(err) => {
+                                trace!(target: "net::tx", %err, %hash, "failed to persist supplemented blob cells");
+                            }
+                        }
+                    }
                 }
                 BlobFetchEvent::BadPeers(peers) => {
                     for peer in peers {
