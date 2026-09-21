@@ -119,7 +119,9 @@ impl<N: NodePrimitives> EthStateCache<N> {
         let idle_timeout = idle_timeout.filter(|timeout| !timeout.is_zero());
         let eviction_interval = idle_timeout.map(|timeout| {
             let _guard = action_task_spawner.handle().enter();
-            let period = timeout.min(Duration::from_secs(60));
+            // Tokio timers have millisecond resolution; shorter periods can busy-poll while
+            // catching up on ticks. Cache lookups still enforce the configured idle timeout.
+            let period = timeout.clamp(Duration::from_millis(1), Duration::from_secs(60));
             let mut interval = tokio::time::interval_at(Instant::now() + period, period);
             interval.set_missed_tick_behavior(MissedTickBehavior::Skip);
             interval
@@ -1157,6 +1159,69 @@ mod tests {
         let expired = retained.upgrade().is_none();
         service_task.abort();
         assert!(expired, "idle service did not register its next timer wakeup");
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn short_idle_timeout_stops_waking_when_idle() {
+        #[derive(Default)]
+        struct WakeCounter(AtomicUsize);
+
+        impl futures::task::ArcWake for WakeCounter {
+            fn wake_by_ref(arc_self: &Arc<Self>) {
+                arc_self.0.fetch_add(1, Ordering::Relaxed);
+            }
+        }
+
+        let (_cache, mut service) = EthStateCache::<EthPrimitives>::create(
+            NoopProvider::default(),
+            Runtime::test(),
+            EthStateCacheConfig {
+                idle_timeout: Some(Duration::from_nanos(1)),
+                ..Default::default()
+            },
+        );
+        let wake_counter = Arc::new(WakeCounter::default());
+        let waker = futures::task::waker_ref(&wake_counter);
+        let mut cx = Context::from_waker(&waker);
+        assert!(Pin::new(&mut service).poll(&mut cx).is_pending());
+
+        tokio::time::sleep(Duration::from_millis(2)).await;
+        // Allow a few overdue ticks to settle without advancing the clock any further.
+        for _ in 0..8 {
+            wake_counter.0.store(0, Ordering::Relaxed);
+            assert!(Pin::new(&mut service).poll(&mut cx).is_pending());
+            if wake_counter.0.load(Ordering::Relaxed) == 0 {
+                return
+            }
+        }
+        panic!("idle service kept waking itself for a sub-millisecond timeout");
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn short_idle_timeout_expires_on_access_before_sweep() {
+        let (cache, mut service) = EthStateCache::<EthPrimitives>::create(
+            NoopProvider::default(),
+            Runtime::test(),
+            EthStateCacheConfig {
+                idle_timeout: Some(Duration::from_nanos(1)),
+                ..Default::default()
+            },
+        );
+        let block = Arc::new(test_block());
+        let hash = block.hash();
+        let retained = Arc::downgrade(&block);
+        service.on_new_block(hash, Ok(Some(block)));
+        assert!(futures::poll!(&mut service).is_pending());
+
+        tokio::time::advance(Duration::from_micros(500)).await;
+        assert!(retained.upgrade().is_some());
+
+        let request = cache.get_maybe_block(hash);
+        futures::pin_mut!(request);
+        assert!(futures::poll!(&mut request).is_pending());
+        assert!(futures::poll!(&mut service).is_pending());
+        assert!(request.await.unwrap().is_none());
+        assert!(retained.upgrade().is_none());
     }
 
     #[test]
