@@ -2,14 +2,17 @@
 # Patches alloy dependencies in Cargo.toml for testing breaking changes.
 #
 # Usage:
-#   ./scripts/patch-alloy.sh [--alloy <branch>]
+#   ./scripts/patch-alloy.sh [--alloy <branch>] [--evm <branch>]
 #
 # Examples:
 #   ./scripts/patch-alloy.sh --alloy main
+#   ./scripts/patch-alloy.sh --alloy feat/new-api --evm main
+#   ./scripts/patch-alloy.sh --alloy main --evm main
 
 set -euo pipefail
 
 ALLOY_BRANCH=""
+ALLOY_EVM_BRANCH=""
 
 while [[ $# -gt 0 ]]; do
     case $1 in
@@ -17,11 +20,16 @@ while [[ $# -gt 0 ]]; do
             ALLOY_BRANCH="$2"
             shift 2
             ;;
+        --evm)
+            ALLOY_EVM_BRANCH="$2"
+            shift 2
+            ;;
         -h|--help)
-            echo "Usage: $0 [--alloy <branch>]"
+            echo "Usage: $0 [--alloy <branch>] [--evm <branch>]"
             echo ""
             echo "Options:"
             echo "  --alloy <branch>  Patch alloy-rs/alloy crates"
+            echo "  --evm <branch>    Patch alloy-rs/evm crates (alloy-evm, alloy-op-evm)"
             exit 0
             ;;
         *)
@@ -31,8 +39,8 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-if [[ -z "$ALLOY_BRANCH" ]]; then
-    echo "Error: --alloy must be specified"
+if [[ -z "$ALLOY_BRANCH" && -z "$ALLOY_EVM_BRANCH" ]]; then
+    echo "Error: At least one of --alloy or --evm must be specified"
     exit 1
 fi
 
@@ -72,6 +80,14 @@ alloy-transport = { git = "https://github.com/alloy-rs/alloy", branch = "$ALLOY_
 alloy-transport-http = { git = "https://github.com/alloy-rs/alloy", branch = "$ALLOY_BRANCH" }
 alloy-transport-ipc = { git = "https://github.com/alloy-rs/alloy", branch = "$ALLOY_BRANCH" }
 alloy-transport-ws = { git = "https://github.com/alloy-rs/alloy", branch = "$ALLOY_BRANCH" }
+EOF
+fi
+
+if [[ -n "$ALLOY_EVM_BRANCH" ]]; then
+    echo "Patching alloy-rs/evm with branch: $ALLOY_EVM_BRANCH"
+    cat >> "$CARGO_TOML" << EOF
+alloy-evm = { git = "https://github.com/alloy-rs/evm", branch = "$ALLOY_EVM_BRANCH" }
+alloy-op-evm = { git = "https://github.com/alloy-rs/evm", branch = "$ALLOY_EVM_BRANCH" }
 EOF
 fi
 
