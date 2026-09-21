@@ -89,7 +89,6 @@ unused-allowed-source = "allow"
 # Frequently patched dependencies
 allow-git = [
     "https://github.com/alloy-rs/alloy",
-    "https://github.com/alloy-rs/trie",
     "https://github.com/foundry-rs/block-explorers",
     "https://github.com/bluealloy/revm",
     "https://github.com/paradigmxyz/revm-inspectors",
