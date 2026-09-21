@@ -152,6 +152,8 @@ mod tests {
         let types = vec![1, 2, 3, 4];
         let sizes = vec![100, 200, 300, 400];
         let mask = Some(B128::repeat_byte(0x11));
+        let expected_mask =
+            mask.map(|mask| BlobCellMask::from_bits(u128::from_le_bytes(mask.into())));
         let messages = [
             NewPooledTransactionHashes::Eth66(hashes.to_vec().into()),
             NewPooledTransactionHashes68 {
@@ -188,7 +190,7 @@ mod tests {
             assert_eq!(announcement.iter().next().unwrap().hash, hashes[3]);
             assert_eq!(
                 announcement.cell_mask(),
-                if msg.version() == EthVersion::Eth72 { mask } else { None }
+                if msg.version() == EthVersion::Eth72 { expected_mask } else { None }
             );
         }
     }
