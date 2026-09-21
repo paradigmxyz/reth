@@ -30,7 +30,7 @@ pub use evm2::{
 /// Cached database adapters for payload building.
 pub mod cached;
 /// Cancellation markers for EVM execution work.
-pub mod cancelled;
+pub use reth_revm::cancelled;
 /// Database adapters for EVM execution.
 pub mod database;
 pub mod either;
