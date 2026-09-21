@@ -526,7 +526,22 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
             }
             request.as_mut().set_chain_id(chain_id.to());
 
-            self.fill_fee_defaults(&mut request).await?;
+            // set fee defaults if not already set before, same as `fill_transaction`
+            if request.as_ref().gas_price().is_none() {
+                let tip = if let Some(tip) = request.as_ref().max_priority_fee_per_gas() {
+                    tip
+                } else {
+                    let tip = self.suggested_priority_fee().await?.to::<u128>();
+                    request.as_mut().set_max_priority_fee_per_gas(tip);
+                    tip
+                };
+                if request.as_ref().max_fee_per_gas().is_none() {
+                    let header =
+                        self.provider().latest_header().map_err(Self::Error::from_eth_err)?;
+                    let base_fee = header.and_then(|h| h.base_fee_per_gas()).unwrap_or_default();
+                    request.as_mut().set_max_fee_per_gas(base_fee as u128 * 2 + tip);
+                }
+            }
 
             if request.as_ref().gas_limit().is_none() {
                 let estimated_gas = self
@@ -589,7 +604,12 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
             }
             request.as_mut().set_chain_id(chain_id.to());
 
-            self.fill_fee_defaults(&mut request).await?;
+            if request.as_ref().has_eip4844_fields() &&
+                request.as_ref().max_fee_per_blob_gas().is_none()
+            {
+                let blob_fee = self.blob_base_fee().await?;
+                request.as_mut().set_max_fee_per_blob_gas(blob_fee.to());
+            }
 
             // Use `sidecar.is_some()` instead of `blob_sidecar().is_some()` to handle
             // both EIP-4844 (v0) and EIP-7594 (v1) sidecar formats
@@ -604,33 +624,6 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
                     .estimate_gas_at(request.clone(), BlockId::pending(), EvmOverrides::default())
                     .await?;
                 request.as_mut().set_gas_limit(estimated_gas.to());
-            }
-
-            let tx = self.converter().build_simulate_v1_transaction(request)?;
-
-            let raw = tx.encoded_2718().into();
-
-            Ok(FillTransaction { raw, tx })
-        }
-    }
-
-    /// Fills the missing fee fields of the request, mirroring go-ethereum's `setFeeDefaults`:
-    /// EIP-4844 requests without `maxFeePerBlobGas` get the current blob base fee, and requests
-    /// without a legacy `gasPrice` get a suggested `maxPriorityFeePerGas` and a `maxFeePerGas` of
-    /// `2 * base_fee + tip`.
-    fn fill_fee_defaults(
-        &self,
-        request: &mut RpcTxReq<Self::NetworkTypes>,
-    ) -> impl Future<Output = Result<(), Self::Error>> + Send
-    where
-        Self: LoadFee,
-    {
-        async move {
-            if request.as_ref().has_eip4844_fields() &&
-                request.as_ref().max_fee_per_blob_gas().is_none()
-            {
-                let blob_fee = self.blob_base_fee().await?;
-                request.as_mut().set_max_fee_per_blob_gas(blob_fee.to());
             }
 
             if request.as_ref().gas_price().is_none() {
@@ -655,7 +648,11 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
                 }
             }
 
-            Ok(())
+            let tx = self.converter().build_simulate_v1_transaction(request)?;
+
+            let raw = tx.encoded_2718().into();
+
+            Ok(FillTransaction { raw, tx })
         }
     }
 
