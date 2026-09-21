@@ -633,7 +633,8 @@ mod tests {
         fetcher.pending.insert(hash, pending);
         fetcher.remember_source(hash, peer, BlobCellMask::from_bits(u128::MAX));
 
-        let peers = HashMap::default();
+        let peers: HashMap<PeerId, PeerMetadata<EthNetworkPrimitives>, FbBuildHasher<64>> =
+            HashMap::default();
         let mut cx = Context::from_waker(noop_waker_ref());
         assert!(fetcher.poll(&mut cx, &peers).is_pending());
         assert_eq!(fetcher.pending[&hash].target.unwrap().bits(), 1);

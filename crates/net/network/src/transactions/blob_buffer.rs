@@ -205,7 +205,7 @@ impl<T: PoolTransaction> BufferedBlob<T> {
         let sidecar = match existing {
             Some(existing) => {
                 if let Some(stored) = existing.cells() {
-                    existing.with_cells(merge_cell_sidecars(stored, &incoming))
+                    existing.with_cells(BlobTxCellSidecar::merge_cell_sidecars(stored, &incoming))
                 } else {
                     PooledBlobSidecar::from_cells(incoming)
                 }
@@ -216,38 +216,6 @@ impl<T: PoolTransaction> BufferedBlob<T> {
             return Err(Vec::new())
         }
         Ok((self.peer, self.transaction))
-    }
-}
-
-/// Merges two verified sparse sidecars, retaining cells in ascending column order for every blob.
-fn merge_cell_sidecars(
-    existing: &BlobTxCellSidecar,
-    incoming: &BlobTxCellSidecar,
-) -> BlobTxCellSidecar {
-    let existing_mask = existing.mask();
-    let incoming_mask = incoming.mask();
-    let merged_mask = BlobCellMask::from_bits(existing_mask.bits() | incoming_mask.bits());
-    let mut cells = Vec::with_capacity(existing.commitments.len() * merged_mask.count());
-
-    for blob in 0..existing.commitments.len() {
-        for column in merged_mask.selected_indices() {
-            if let Some(offset) = existing_mask.selected_indices().position(|i| i == column) {
-                cells.push(existing.cells[blob * existing_mask.count() + offset]);
-            } else {
-                let offset = incoming_mask
-                    .selected_indices()
-                    .position(|i| i == column)
-                    .expect("merged cell must be present in one sidecar");
-                cells.push(incoming.cells[blob * incoming_mask.count() + offset]);
-            }
-        }
-    }
-
-    BlobTxCellSidecar {
-        commitments: existing.commitments.clone(),
-        proofs: existing.proofs.clone(),
-        cells,
-        cell_mask: B128::from(merged_mask.bits()),
     }
 }
 
