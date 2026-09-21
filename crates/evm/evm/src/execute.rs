@@ -1343,7 +1343,13 @@ where
     type Recovered = Self;
 
     fn into_parts(self) -> (TxEnv, Self) {
-        (TxEnv::from_recovered_tx(self.to_recovered()), self)
+        (
+            TxEnv::from_recovered_tx(Recovered::new_unchecked(
+                (*self.inner()).clone(),
+                *self.signer_ref(),
+            )),
+            self,
+        )
     }
 }
 
