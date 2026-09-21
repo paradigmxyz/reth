@@ -8,6 +8,10 @@ homepage.workspace = true
 repository.workspace = true
 description = "snap/2 state synchronization"
 
+[package.metadata.cargo-udeps.ignore]
+# Used by snap/BAL tests, which are disabled when account-ext is enabled by --all-features.
+development = ["reth-evm-ethereum", "reth-stages", "reth-stages-api"]
+
 [lints]
 workspace = true
 

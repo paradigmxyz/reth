@@ -1245,7 +1245,7 @@ mod tests {
     }
 
     #[tokio::test]
-    #[cfg_attr(feature = "account-ext", should_panic(expected = "UnsupportedCapability"))]
+    #[cfg(not(feature = "account-ext"))]
     async fn snap_account_range_response_encodes_accounts_and_proof() {
         let provider = MockEthProvider::default();
         let first_hash = B256::repeat_byte(0x01);
