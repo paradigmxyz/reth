@@ -201,13 +201,23 @@ where
 
     // One pass over the attempt: pivot, catch-up, then up to `ranges_per_check` account ranges.
     async fn drive(&mut self, write: SnapWrite, head: u64) -> Result<Step, SnapSyncError> {
-        let applied = {
+        let (applied, covered) = {
             let provider = self.factory.database_provider_ro()?;
             if provider.is_trie_rebuild_started(write)? {
                 return Ok(Step::HandedOff(write))
             }
-            provider.catch_up_progress(write)?.ok_or(SnapSyncError::NoCatchUpProgress)?.applied()
+            let applied = provider
+                .catch_up_progress(write)?
+                .ok_or(SnapSyncError::NoCatchUpProgress)?
+                .applied();
+            let covered = provider.account_coverage(write)?.is_some_and(|c| c.is_complete());
+            (applied, covered)
         };
+        // Complete state carried to its pivot needs no further lists, only its trie rebuilt, so
+        // neither their retention nor a newer pivot applies to it.
+        if covered && applied == self.pivot()? {
+            return self.hand_off(write).await
+        }
         // Catch-up continues from the last applied block, not the pivot, so once that block's
         // successor is no longer served the state cannot be carried to any newer pivot.
         if !self.policy.is_catchable_from(applied.number, head) {
@@ -408,7 +418,7 @@ mod tests {
     use super::*;
     use crate::test_utils::{
         account, account_range, hashed_factory, header, key, policy, state_root, storage_ranges,
-        storage_root_of, ScriptedSnapClient,
+        storage_root_of, verified_range, ScriptedSnapClient,
     };
     use alloy_eip7928::{compute_block_access_list_hash, AccountChanges};
     use alloy_eips::eip7928::bal::Bal;
@@ -664,6 +674,33 @@ mod tests {
         };
         assert_eq!(pivot.number, 10);
         assert_ne!(attempt_id(&factory), attempt);
+        assert!(client.block_requests().is_empty());
+    }
+
+    #[tokio::test]
+    async fn complete_state_is_handed_off_past_the_served_lists() {
+        let accounts = accounts();
+        let factory = hashed_factory();
+        insert_chain(&factory, 11, state_root(&accounts));
+        // A run committed every range at pivot 2, then stopped before the hand-off.
+        let provider = factory.database_provider_rw().unwrap();
+        let pivot = provider.sealed_header(2).unwrap().unwrap();
+        let generation = SnapGeneration::new(pivot.num_hash(), pivot.state_root);
+        let downloaded = provider.start_snap_attempt(generation).unwrap();
+        provider.start_account_coverage(downloaded).unwrap();
+        let range = verified_range(&accounts, 0..3, B256::ZERO, &[]);
+        provider.commit_account_range(downloaded, &range, Default::default(), Vec::new()).unwrap();
+        provider.commit().unwrap();
+
+        // Block 3's list is past the served history under head 11, but nothing needs it.
+        let (client, mut resumed) = scripted(&factory, [], [11]);
+        let outcome = resumed.run().await.unwrap();
+
+        assert_eq!(
+            outcome,
+            SnapBootstrapOutcome::TrieRebuild { write: downloaded, pivot: pivot.num_hash() }
+        );
+        assert!(client.origins().is_empty());
         assert!(client.block_requests().is_empty());
     }
 
