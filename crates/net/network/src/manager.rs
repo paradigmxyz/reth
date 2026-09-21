@@ -298,9 +298,9 @@ impl<N: NetworkPrimitives> NetworkManager<N> {
             discovery_v4_config,
             discovery_v5_config,
             dns_discovery_config,
+            nat.clone(),
         )
-        .await?
-        .with_nat_resolver(nat.clone());
+        .await?;
         // need to retrieve the addr here since provided port could be `0`
         let local_peer_id = discovery.local_id();
         let discv4 = discovery.discv4();
