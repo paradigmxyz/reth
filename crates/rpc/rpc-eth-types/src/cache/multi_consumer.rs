@@ -183,17 +183,26 @@ where
         key: &K,
         now: Option<Instant>,
         idle_timeout: Option<Duration>,
-    ) -> Option<&P> {
-        if now.is_some() &&
-            idle_timeout.is_some_and(|timeout| !timeout.is_zero()) &&
-            self.cache.peek(key).is_some_and(|entry| entry.is_expired(now, idle_timeout))
-        {
-            self.cache.remove(key);
-            self.metrics_dirty = true;
+    ) -> Option<P>
+    where
+        P: Clone,
+    {
+        match self.cache.get(key) {
+            Some(entry) if !entry.is_expired(now, idle_timeout) => {
+                entry.last_access = now;
+                self.metrics.hits_total.increment(1);
+                return Some(entry.value.clone())
+            }
+            None => {
+                self.metrics.misses_total.increment(1);
+                return None
+            }
+            Some(_) => {}
         }
-        let entry = self.get(key)?;
-        entry.last_access = now;
-        Some(&entry.value)
+        self.cache.remove(key);
+        self.metrics_dirty = true;
+        self.metrics.misses_total.increment(1);
+        None
     }
 
     /// Checks for a live payload without renewing its idle timeout or recording a lookup.
@@ -227,6 +236,10 @@ where
 {
     /// Measures a payload once before inserting it into the cache.
     pub(super) fn insert_cached(&mut self, key: K, value: P, now: Option<Instant>) -> bool {
+        let limiter = self.cache.limiter();
+        if limiter.inner.max_length() == 0 || limiter.max_bytes == Some(0) {
+            return false
+        }
         self.insert(key, CachedEntry::new(value, now))
     }
 }
@@ -325,7 +338,7 @@ mod tests {
         Arc,
     };
 
-    #[derive(Debug, PartialEq, Eq)]
+    #[derive(Clone, Debug, PartialEq, Eq)]
     struct Weighted(usize);
 
     impl InMemorySize for Weighted {
@@ -343,6 +356,89 @@ mod tests {
         assert!(cache.get(&0).is_none());
         assert!(cache.queue(0, ()));
         assert!(!cache.queue(0, ()));
+    }
+
+    #[test]
+    fn cached_lookup_hashes_once_before_optional_expired_removal() {
+        #[derive(Debug)]
+        struct CountedKey(u64, Arc<AtomicUsize>);
+
+        impl PartialEq for CountedKey {
+            fn eq(&self, other: &Self) -> bool {
+                self.0 == other.0
+            }
+        }
+
+        impl Eq for CountedKey {}
+
+        impl Hash for CountedKey {
+            fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+                self.1.fetch_add(1, Ordering::Relaxed);
+                self.0.hash(state);
+            }
+        }
+
+        let timeout = Duration::from_secs(10);
+        for (idle_timeout, elapsed, key, hit, expected_hashes) in [
+            (None, 0, 1, true, 1),
+            (None, 0, 2, false, 1),
+            (Some(timeout), 5, 1, true, 1),
+            (Some(timeout), 5, 2, false, 1),
+            (Some(timeout), 10, 1, false, 2),
+        ] {
+            let hashes = Arc::new(AtomicUsize::new(0));
+            let mut cache: MultiConsumerLruCache<CountedKey, CachedEntry<u64>, ByLength, ()> =
+                MultiConsumerLruCache::new(2, "test");
+            let now = idle_timeout.map(|_| Instant::now());
+            assert!(cache.insert_cached(CountedKey(1, hashes.clone()), 42, now));
+            hashes.store(0, Ordering::Relaxed);
+
+            let result = cache.get_cached(
+                &CountedKey(key, hashes.clone()),
+                now.map(|now| now + Duration::from_secs(elapsed)),
+                idle_timeout,
+            );
+            assert_eq!(result.is_some(), hit);
+            assert_eq!(hashes.load(Ordering::Relaxed), expected_hashes);
+        }
+    }
+
+    #[test]
+    fn cached_lookup_counts_expiry_as_a_miss_and_updates_gauges() {
+        let mut cache: MultiConsumerLruCache<u64, CachedEntry<Arc<Weighted>>, ByLength, u64> =
+            MultiConsumerLruCache::new(2, "test");
+        let hits = Arc::new(metrics::atomics::AtomicU64::new(0));
+        let misses = Arc::new(metrics::atomics::AtomicU64::new(0));
+        cache.metrics.hits_total = metrics::Counter::from_arc(hits.clone());
+        cache.metrics.misses_total = metrics::Counter::from_arc(misses.clone());
+
+        let now = Instant::now();
+        let timeout = Duration::from_secs(10);
+        let value = Arc::new(Weighted(3));
+        let retained = Arc::downgrade(&value);
+        assert!(cache.insert_cached(1, value.clone(), Some(now)));
+        assert!(cache.update_cached_metrics());
+        let cached = cache.get_cached(&1, Some(now + timeout / 2), Some(timeout)).unwrap();
+        assert!(Arc::ptr_eq(&cached, &value));
+        drop(cached);
+        drop(value);
+        assert_eq!(hits.load(Ordering::Relaxed), 1);
+        assert_eq!(misses.load(Ordering::Relaxed), 0);
+        assert!(!cache.update_cached_metrics());
+
+        assert!(cache.get_cached(&2, Some(now + timeout / 2), Some(timeout)).is_none());
+        assert_eq!(misses.load(Ordering::Relaxed), 1);
+        assert!(!cache.update_cached_metrics());
+
+        assert!(cache.queue(1, 42));
+        assert!(cache.get_cached(&1, Some(now + timeout + timeout / 2), Some(timeout)).is_none());
+        assert_eq!(hits.load(Ordering::Relaxed), 1);
+        assert_eq!(misses.load(Ordering::Relaxed), 2);
+        assert_eq!(cache.memory_usage(), 0);
+        assert!(cache.update_cached_metrics());
+        assert!(!cache.update_cached_metrics());
+        assert!(retained.upgrade().is_none());
+        assert_eq!(cache.remove(&1), Some(vec![42]));
     }
 
     #[test]
@@ -482,6 +578,7 @@ mod tests {
 
     #[test]
     fn payload_size_is_only_measured_on_insertion() {
+        #[derive(Clone)]
         struct Measured(Arc<AtomicUsize>);
 
         impl InMemorySize for Measured {
@@ -503,6 +600,33 @@ mod tests {
         cache.evict_expired(now + timeout, timeout);
         assert_eq!(cache.memory_usage(), 0);
         assert_eq!(measurements.load(Ordering::Relaxed), 3);
+    }
+
+    #[test]
+    fn disabled_cache_does_not_measure_payloads() {
+        struct Measured(Arc<AtomicUsize>);
+
+        impl InMemorySize for Measured {
+            fn size(&self) -> usize {
+                self.0.fetch_add(1, Ordering::Relaxed);
+                3
+            }
+        }
+
+        for (count, bytes, enabled) in
+            [(0, None, false), (10, Some(0), false), (10, None, true), (10, Some(3), true)]
+        {
+            let measurements = Arc::new(AtomicUsize::new(0));
+            let mut cache: MultiConsumerLruCache<u64, CachedEntry<Measured>, ByLength, u64> =
+                MultiConsumerLruCache::new_with_limits(count, bytes, "test");
+            assert!(cache.queue(1, 42));
+
+            assert_eq!(cache.insert_cached(1, Measured(measurements.clone()), None), enabled);
+            assert_eq!(measurements.load(Ordering::Relaxed), usize::from(enabled));
+            assert_eq!(cache.memory_usage(), if enabled { 3 } else { 0 });
+            assert_eq!(cache.update_cached_metrics(), enabled);
+            assert_eq!(cache.remove(&1), Some(vec![42]));
+        }
     }
 
     #[test]

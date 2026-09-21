@@ -616,39 +616,41 @@ where
                     unreachable!("can't close")
                 }
                 Some(action) => {
-                    let now = this.cache_now();
                     match action {
                         CacheAction::GetCachedBlock { block_hash, response_tx } => {
-                            let _ = response_tx.send(
-                                this.full_block_cache
-                                    .get_cached(&block_hash, now, this.idle_timeout)
-                                    .cloned(),
-                            );
+                            let now = this.cache_now();
+                            let _ = response_tx.send(this.full_block_cache.get_cached(
+                                &block_hash,
+                                now,
+                                this.idle_timeout,
+                            ));
                         }
                         CacheAction::GetCachedBal { block_hash, response_tx } => {
-                            let _ = response_tx.send(
-                                this.bal_cache
-                                    .get_cached(&block_hash, now, this.idle_timeout)
-                                    .cloned(),
-                            );
+                            let now = this.cache_now();
+                            let _ = response_tx.send(this.bal_cache.get_cached(
+                                &block_hash,
+                                now,
+                                this.idle_timeout,
+                            ));
                         }
                         CacheAction::GetCachedBlockAndReceipts { block_hash, response_tx } => {
-                            let block = this
-                                .full_block_cache
-                                .get_cached(&block_hash, now, this.idle_timeout)
-                                .cloned();
-                            let receipts = this
-                                .receipts_cache
-                                .get_cached(&block_hash, now, this.idle_timeout)
-                                .cloned();
+                            let now = this.cache_now();
+                            let block = this.full_block_cache.get_cached(
+                                &block_hash,
+                                now,
+                                this.idle_timeout,
+                            );
+                            let receipts =
+                                this.receipts_cache.get_cached(&block_hash, now, this.idle_timeout);
                             let _ = response_tx.send((block, receipts));
                         }
                         CacheAction::GetBlockWithSenders { block_hash, response_tx } => {
-                            if let Some(block) = this
-                                .full_block_cache
-                                .get_cached(&block_hash, now, this.idle_timeout)
-                                .cloned()
-                            {
+                            let now = this.cache_now();
+                            if let Some(block) = this.full_block_cache.get_cached(
+                                &block_hash,
+                                now,
+                                this.idle_timeout,
+                            ) {
                                 let _ = response_tx.send(Ok(Some(block)));
                                 continue
                             }
@@ -659,11 +661,10 @@ where
                             }
                         }
                         CacheAction::GetReceipts { block_hash, response_tx } => {
+                            let now = this.cache_now();
                             // check if block is cached
-                            if let Some(receipts) = this
-                                .receipts_cache
-                                .get_cached(&block_hash, now, this.idle_timeout)
-                                .cloned()
+                            if let Some(receipts) =
+                                this.receipts_cache.get_cached(&block_hash, now, this.idle_timeout)
                             {
                                 let _ = response_tx.send(Ok(Some(receipts)));
                                 continue
@@ -675,10 +676,9 @@ where
                             }
                         }
                         CacheAction::GetBal { block_hash, response_tx } => {
-                            if let Some(bal) = this
-                                .bal_cache
-                                .get_cached(&block_hash, now, this.idle_timeout)
-                                .cloned()
+                            let now = this.cache_now();
+                            if let Some(bal) =
+                                this.bal_cache.get_cached(&block_hash, now, this.idle_timeout)
                             {
                                 let _ = response_tx.send(Ok(Some(bal)));
                                 continue
@@ -709,7 +709,7 @@ where
                             }
                         },
                         CacheAction::CacheNewCanonicalChain { chain_change } => {
-                            if let Some(now) = now {
+                            if let Some(now) = this.cache_now() {
                                 this.evict_expired(now);
                             }
                             for block in chain_change.blocks {
@@ -749,16 +749,19 @@ where
                             }
                         }
                         CacheAction::GetTransactionByHash { tx_hash, response_tx } => {
+                            let now = this.cache_now();
                             let result =
                                 this.tx_hash_index.get(&tx_hash).and_then(|(block_hash, idx)| {
-                                    let block = this
-                                        .full_block_cache
-                                        .get_cached(block_hash, now, this.idle_timeout)
-                                        .cloned()?;
-                                    let receipts = this
-                                        .receipts_cache
-                                        .get_cached(block_hash, now, this.idle_timeout)
-                                        .cloned();
+                                    let block = this.full_block_cache.get_cached(
+                                        block_hash,
+                                        now,
+                                        this.idle_timeout,
+                                    )?;
+                                    let receipts = this.receipts_cache.get_cached(
+                                        block_hash,
+                                        now,
+                                        this.idle_timeout,
+                                    );
                                     Some(CachedTransaction::new(block, *idx, receipts))
                                 });
                             let _ = response_tx.send(result);
