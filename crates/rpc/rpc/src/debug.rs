@@ -2,7 +2,7 @@ use alloy_consensus::{constants::KECCAK_EMPTY, transaction::TxHashRef, BlockHead
 use alloy_eips::{eip2718::Encodable2718, BlockId, BlockNumberOrTag};
 use alloy_evm::{env::BlockEnvironment, Evm};
 use alloy_genesis::ChainConfig;
-use alloy_primitives::{hex::decode, uint, Address, Bytes, B256, U256, U64};
+use alloy_primitives::{hex::decode, keccak256, uint, Address, Bytes, B256, U256, U64};
 use alloy_rlp::{Decodable, Encodable};
 use alloy_rpc_types::BlockTransactionsKind;
 use alloy_rpc_types_debug::ExecutionWitness;
@@ -19,7 +19,7 @@ use jsonrpsee::{core::RpcResult, PendingSubscriptionSink, SubscriptionMessage};
 use parking_lot::RwLock;
 use reth_chainspec::{ChainSpecProvider, EthereumHardforks};
 use reth_engine_primitives::ConsensusEngineEvent;
-use reth_errors::RethError;
+use reth_errors::{ProviderResult, RethError};
 use reth_evm::{block::BlockExecutor, execute::Executor, ConfigureEvm, EvmEnvFor};
 use reth_primitives_traits::{
     Block as BlockTrait, BlockBody, BlockTy, ReceiptWithBloom, RecoveredBlock,
@@ -35,14 +35,14 @@ use reth_rpc_eth_types::{EthApiError, StateCacheDb};
 use reth_rpc_server_types::{result::internal_rpc_err, ToRpcResult};
 use reth_storage_api::{
     BlockIdReader, BlockReaderIdExt, HashedPostStateProvider, HeaderProvider, ProviderBlock,
-    ReceiptProviderIdExt, StateProviderFactory, StateRootProvider, StorageRootProvider,
-    TransactionVariant,
+    ReceiptProviderIdExt, StateProofProvider, StateProviderFactory, StateRootProvider,
+    StorageRootProvider, TransactionVariant,
 };
 use reth_tasks::{pool::BlockingTaskGuard, Runtime};
 use reth_transaction_pool::TransactionPool;
 use reth_trie_common::{
     root::storage_root_unsorted, updates::TrieUpdates, ExecutionWitnessMode, HashedPostState,
-    HashedStorage,
+    HashedStorage, MultiProofTargets, Nibbles,
 };
 use revm::{database::states::bundle_state::BundleRetention, Database, DatabaseCommit};
 use revm_inspectors::tracing::{DebugInspector, TransactionContext};
@@ -784,6 +784,37 @@ where
             .map(|b| b.original_bytes()))
     }
 
+    /// Returns the raw RLP-encoded trie node with the given hash, resolved by walking the trie
+    /// along `path` (one nibble per byte). `hashed_address` selects the storage trie for that
+    /// hashed address, or the account trie if `None`. Returns `None` if the path doesn't lead to
+    /// a node with the requested hash.
+    pub async fn debug_get_trie_node_by_hash(
+        &self,
+        hashed_address: Option<B256>,
+        path: Bytes,
+        hash: B256,
+        block_id: Option<BlockId>,
+    ) -> Result<Option<Bytes>, Eth::Error> {
+        if path.iter().any(|&nibble| nibble > 0x0f) {
+            return Err(Eth::Error::from_eth_err(EthApiError::InvalidParams(
+                "path must contain one nibble (a value in 0..=15) per byte".to_string(),
+            )));
+        }
+        let path = Nibbles::from_nibbles(&path);
+
+        self.inner
+            .eth_api
+            .spawn_blocking_io(move |this| {
+                let state = this
+                    .provider()
+                    .state_by_block_id(block_id.unwrap_or_default())
+                    .map_err(Eth::Error::from_eth_err)?;
+                trie_node_by_hash(&state, hashed_address, &path, hash)
+                    .map_err(Eth::Error::from_eth_err)
+            })
+            .await
+    }
+
     /// Returns the state root of the `HashedPostState` on top of the state for the given block with
     /// trie updates.
     async fn debug_state_root_with_updates(
@@ -1246,6 +1277,18 @@ where
         Self::debug_code_by_hash(self, hash, block_id).await.map_err(Into::into)
     }
 
+    async fn debug_get_trie_node_by_hash(
+        &self,
+        hashed_address: Option<B256>,
+        path: Bytes,
+        hash: B256,
+        block_id: Option<BlockId>,
+    ) -> RpcResult<Option<Bytes>> {
+        Self::debug_get_trie_node_by_hash(self, hashed_address, path, hash, block_id)
+            .await
+            .map_err(Into::into)
+    }
+
     async fn debug_db_ancient(&self, _kind: String, _number: u64) -> RpcResult<()> {
         Ok(())
     }
@@ -1499,6 +1542,44 @@ impl<B: BlockTrait> Default for BadBlockStore<B> {
     }
 }
 
+/// Resolves the trie node at `path` (in the account trie, or the storage trie for
+/// `hashed_address` if given) whose RLP encoding hashes to `hash`.
+///
+/// `path` is walked via [`StateProofProvider::multiproof`] rather than looked up directly,
+/// since reth has no persistent hash-indexed node store; nodes only exist as positional
+/// artifacts of a path-directed trie walk. The result is verified against `hash` here rather
+/// than assumed from the walk alone, so the caller gets `None` (not a mismatched node) if
+/// `path` doesn't actually lead to a node with that hash.
+fn trie_node_by_hash(
+    state: &impl StateProofProvider,
+    hashed_address: Option<B256>,
+    path: &Nibbles,
+    hash: B256,
+) -> ProviderResult<Option<Bytes>> {
+    // Left-justify the nibble path into a zero-padded 32-byte probe key: the multiproof walk
+    // needs a full trie key to know which direction to walk at every branch.
+    let packed = path.pack();
+    let mut probe = [0u8; 32];
+    probe[..packed.len()].copy_from_slice(&packed);
+    let probe = B256::from(probe);
+
+    let targets = match hashed_address {
+        Some(addr) => MultiProofTargets::account_with_slots(addr, [probe]),
+        None => MultiProofTargets::accounts([probe]),
+    };
+
+    let multiproof = state.multiproof(Default::default(), targets)?;
+
+    let subtree = match hashed_address {
+        Some(addr) => multiproof.storages.get(&addr).map(|storage| &storage.subtree),
+        None => Some(&multiproof.account_subtree),
+    };
+
+    Ok(subtree
+        .and_then(|subtree| subtree.values().find(|node| keccak256(node.as_ref()) == hash))
+        .cloned())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1595,5 +1676,77 @@ mod tests {
 
         assert_eq!(storage.storage[&hashed_old_slot], U256::ZERO);
         assert_eq!(storage.storage[&hashed_new_slot], new_value);
+    }
+
+    #[test]
+    fn trie_node_by_hash_resolves_account_and_storage_nodes() {
+        let factory = create_test_provider_factory();
+
+        let addr_a = Address::with_last_byte(1);
+        let addr_b = Address::with_last_byte(2);
+        let hashed_a = keccak256(addr_a);
+        let hashed_b = keccak256(addr_b);
+        let hashed_slot = keccak256(B256::from(U256::from(1)));
+
+        let provider_rw = factory.provider_rw().unwrap();
+        provider_rw
+            .tx_ref()
+            .put::<tables::HashedAccounts>(
+                hashed_a,
+                reth_primitives_traits::Account {
+                    nonce: 1,
+                    balance: U256::from(1),
+                    bytecode_hash: None,
+                },
+            )
+            .unwrap();
+        provider_rw
+            .tx_ref()
+            .put::<tables::HashedAccounts>(
+                hashed_b,
+                reth_primitives_traits::Account {
+                    nonce: 2,
+                    balance: U256::from(2),
+                    bytecode_hash: None,
+                },
+            )
+            .unwrap();
+        provider_rw
+            .tx_ref()
+            .put::<tables::HashedStorages>(
+                hashed_a,
+                StorageEntry { key: hashed_slot, value: U256::from(100) },
+            )
+            .unwrap();
+        provider_rw.commit().unwrap();
+
+        let state = factory.latest().unwrap();
+
+        // Account trie: pick an arbitrary node from a real proof and resolve it back by
+        // (path, hash).
+        let account_multiproof =
+            state.multiproof(Default::default(), MultiProofTargets::account(hashed_a)).unwrap();
+        let (path, node) = account_multiproof.account_subtree.iter().next().unwrap();
+        let hash = keccak256(node.as_ref());
+
+        assert_eq!(trie_node_by_hash(&state, None, path, hash).unwrap().as_ref(), Some(node));
+        // A syntactically valid but non-matching hash resolves to `None`.
+        assert_eq!(trie_node_by_hash(&state, None, path, B256::ZERO).unwrap(), None);
+
+        // Storage trie: same check, scoped to `hashed_a`'s storage subtree.
+        let storage_multiproof = state
+            .multiproof(
+                Default::default(),
+                MultiProofTargets::account_with_slots(hashed_a, [hashed_slot]),
+            )
+            .unwrap();
+        let storage_subtree = &storage_multiproof.storages[&hashed_a].subtree;
+        let (storage_path, storage_node) = storage_subtree.iter().next().unwrap();
+        let storage_hash = keccak256(storage_node.as_ref());
+
+        assert_eq!(
+            trie_node_by_hash(&state, Some(hashed_a), storage_path, storage_hash).unwrap().as_ref(),
+            Some(storage_node)
+        );
     }
 }
