@@ -1,5 +1,6 @@
 //! Async caching support for eth RPC
 
+use self::multi_consumer::CachedEntry;
 use super::{EthStateCacheConfig, MultiConsumerLruCache};
 use crate::block::CachedTransaction;
 use alloy_consensus::transaction::TxHashRef;
@@ -28,10 +29,14 @@ use std::{
     pin::Pin,
     sync::Arc,
     task::{Context, Poll},
+    time::Duration,
 };
-use tokio::sync::{
-    mpsc::{unbounded_channel, UnboundedSender},
-    oneshot, OwnedSemaphorePermit, Semaphore,
+use tokio::{
+    sync::{
+        mpsc::{unbounded_channel, UnboundedSender},
+        oneshot, OwnedSemaphorePermit, Semaphore,
+    },
+    time::{Instant, Interval, MissedTickBehavior},
 };
 use tokio_stream::wrappers::UnboundedReceiverStream;
 
@@ -60,13 +65,17 @@ type TransactionHashResponseSender<B, R> = oneshot::Sender<Option<CachedTransact
 /// The type that can send the response to a requested revm BAL.
 type BalResponseSender = oneshot::Sender<ProviderResult<Option<CachedRevmBal>>>;
 
-type BlockLruCache<B, L> =
-    MultiConsumerLruCache<B256, Arc<RecoveredBlock<B>>, L, BlockWithSendersResponseSender<B>>;
+type BlockLruCache<B, L> = MultiConsumerLruCache<
+    B256,
+    CachedEntry<Arc<RecoveredBlock<B>>>,
+    L,
+    BlockWithSendersResponseSender<B>,
+>;
 
 type ReceiptsLruCache<R, L> =
-    MultiConsumerLruCache<B256, Arc<Vec<R>>, L, ReceiptsResponseSender<R>>;
+    MultiConsumerLruCache<B256, CachedEntry<Arc<Vec<R>>>, L, ReceiptsResponseSender<R>>;
 
-type BalLruCache<L> = MultiConsumerLruCache<B256, CachedRevmBal, L, BalResponseSender>;
+type BalLruCache<L> = MultiConsumerLruCache<B256, CachedEntry<CachedRevmBal>, L, BalResponseSender>;
 
 /// Provides async access to cached eth data
 ///
@@ -97,18 +106,40 @@ impl<N: NodePrimitives> EthStateCache<N> {
             max_blocks,
             max_receipts,
             max_bals,
+            max_blocks_bytes,
+            max_receipts_bytes,
+            max_bals_bytes,
+            idle_timeout,
             cache_computed_bals: _,
             prewarm_bals: _,
             max_concurrent_db_requests,
             max_cached_tx_hashes,
         } = config;
+        let idle_timeout = idle_timeout.filter(|timeout| !timeout.is_zero());
+        let eviction_interval = idle_timeout.map(|timeout| {
+            let _guard = action_task_spawner.handle().enter();
+            let period = timeout.min(Duration::from_secs(60));
+            let mut interval = tokio::time::interval_at(Instant::now() + period, period);
+            interval.set_missed_tick_behavior(MissedTickBehavior::Skip);
+            interval
+        });
         let (to_service, rx) = unbounded_channel();
 
         let service = EthStateCacheService {
             provider,
-            full_block_cache: BlockLruCache::new(max_blocks, "blocks"),
-            receipts_cache: ReceiptsLruCache::new(max_receipts, "receipts"),
-            bal_cache: BalLruCache::new(max_bals, "bals"),
+            full_block_cache: BlockLruCache::new_with_limits(
+                max_blocks,
+                max_blocks_bytes,
+                "blocks",
+            ),
+            receipts_cache: ReceiptsLruCache::new_with_limits(
+                max_receipts,
+                max_receipts_bytes,
+                "receipts",
+            ),
+            bal_cache: BalLruCache::new_with_limits(max_bals, max_bals_bytes, "bals"),
+            idle_timeout,
+            eviction_interval,
             action_tx: to_service.clone(),
             action_rx: UnboundedReceiverStream::new(rx),
             action_task_spawner,
@@ -123,7 +154,7 @@ impl<N: NodePrimitives> EthStateCache<N> {
     /// Creates a new async LRU backed cache service task and spawns it to a new task via the given
     /// spawner.
     ///
-    /// The cache is memory limited by the given max bytes values.
+    /// Optional byte budgets and idle expiration supplement the entry count limits.
     pub fn spawn_with<Provider>(
         provider: Provider,
         config: EthStateCacheConfig,
@@ -297,7 +328,7 @@ impl From<CacheServiceUnavailable> for ProviderError {
 /// `reth_rpc::EthApi` which is typically invoked by the RPC server, which already uses
 /// permits to limit concurrent requests.
 #[must_use = "Type does nothing unless spawned"]
-pub(crate) struct EthStateCacheService<
+struct EthStateCacheService<
     Provider,
     Tasks,
     LimitBlocks = ByLength,
@@ -305,9 +336,9 @@ pub(crate) struct EthStateCacheService<
     LimitBals = ByLength,
 > where
     Provider: BlockReader + BalProvider,
-    LimitBlocks: Limiter<B256, Arc<RecoveredBlock<Provider::Block>>>,
-    LimitReceipts: Limiter<B256, Arc<Vec<Provider::Receipt>>>,
-    LimitBals: Limiter<B256, CachedRevmBal>,
+    LimitBlocks: Limiter<B256, CachedEntry<Arc<RecoveredBlock<Provider::Block>>>>,
+    LimitReceipts: Limiter<B256, CachedEntry<Arc<Vec<Provider::Receipt>>>>,
+    LimitBals: Limiter<B256, CachedEntry<CachedRevmBal>>,
 {
     /// The type used to lookup data from disk
     provider: Provider,
@@ -317,6 +348,10 @@ pub(crate) struct EthStateCacheService<
     receipts_cache: ReceiptsLruCache<Provider::Receipt, LimitReceipts>,
     /// The LRU cache for revm BALs grouped by the block hash.
     bal_cache: BalLruCache<LimitBals>,
+    /// Maximum time without a cache hit, if idle expiration is enabled.
+    idle_timeout: Option<Duration>,
+    /// Wakes the service to reclaim expired data even when the chain and RPC are idle.
+    eviction_interval: Option<Interval>,
     /// Sender half of the action channel.
     action_tx: UnboundedSender<CacheAction<Provider::Block, Provider::Receipt>>,
     /// Receiver half of the action channel.
@@ -340,6 +375,18 @@ impl<Provider> EthStateCacheService<Provider, Runtime>
 where
     Provider: BlockReader + BalProvider + Clone + Unpin + 'static,
 {
+    fn cache_now(&self) -> Option<Instant> {
+        self.idle_timeout.map(|_| Instant::now())
+    }
+
+    fn evict_expired(&mut self, now: Instant) {
+        if let Some(timeout) = self.idle_timeout {
+            self.full_block_cache.evict_expired(now, timeout);
+            self.receipts_cache.evict_expired(now, timeout);
+            self.bal_cache.evict_expired(now, timeout);
+        }
+    }
+
     fn queue_fetch(&mut self, fetch: CacheFetch) {
         if self.pending_fetches.is_empty() &&
             let Ok(permit) = self.rate_limiter.clone().try_acquire_owned()
@@ -434,7 +481,11 @@ where
 
         // cache good block
         if let Ok(Some(block)) = res {
-            self.full_block_cache.insert(block_hash, block);
+            let now = self.cache_now();
+            if let Some(now) = now {
+                self.evict_expired(now);
+            }
+            self.full_block_cache.insert_cached(block_hash, block, now);
         }
     }
 
@@ -452,13 +503,18 @@ where
 
         // cache good receipts
         if let Ok(Some(receipts)) = res {
-            self.receipts_cache.insert(block_hash, receipts);
+            let now = self.cache_now();
+            if let Some(now) = now {
+                self.evict_expired(now);
+            }
+            self.receipts_cache.insert_cached(block_hash, receipts, now);
         }
     }
 
     fn on_new_bal(&mut self, block_hash: B256, res: ProviderResult<Option<CachedRevmBal>>) {
+        let now = self.cache_now();
         // A local replay may finish before an older provider lookup returns.
-        if self.bal_cache.contains_key(&block_hash) {
+        if self.bal_cache.contains_cached(&block_hash, now, self.idle_timeout) {
             return
         }
 
@@ -469,7 +525,10 @@ where
         }
 
         if let Ok(Some(bal)) = res {
-            self.bal_cache.insert(block_hash, bal);
+            if let Some(now) = now {
+                self.evict_expired(now);
+            }
+            self.bal_cache.insert_cached(block_hash, bal, now);
         }
     }
 
@@ -532,6 +591,17 @@ where
         let this = self.get_mut();
 
         loop {
+            if let Some(interval) = &mut this.eviction_interval &&
+                interval.poll_tick(cx).is_ready()
+            {
+                // poll_tick consumes the wakeup; poll again to register the next deadline before
+                // the idle action channel can return Pending. Very short periods may tick again.
+                if interval.poll_tick(cx).is_ready() {
+                    cx.waker().wake_by_ref();
+                }
+                this.evict_expired(Instant::now());
+            }
+
             let Poll::Ready(action) = this.action_rx.poll_next_unpin(cx) else {
                 // shrink queues if we don't have any work to do
                 this.shrink_queues();
@@ -546,21 +616,39 @@ where
                     unreachable!("can't close")
                 }
                 Some(action) => {
+                    let now = this.cache_now();
                     match action {
                         CacheAction::GetCachedBlock { block_hash, response_tx } => {
-                            let _ =
-                                response_tx.send(this.full_block_cache.get(&block_hash).cloned());
+                            let _ = response_tx.send(
+                                this.full_block_cache
+                                    .get_cached(&block_hash, now, this.idle_timeout)
+                                    .cloned(),
+                            );
                         }
                         CacheAction::GetCachedBal { block_hash, response_tx } => {
-                            let _ = response_tx.send(this.bal_cache.get(&block_hash).cloned());
+                            let _ = response_tx.send(
+                                this.bal_cache
+                                    .get_cached(&block_hash, now, this.idle_timeout)
+                                    .cloned(),
+                            );
                         }
                         CacheAction::GetCachedBlockAndReceipts { block_hash, response_tx } => {
-                            let block = this.full_block_cache.get(&block_hash).cloned();
-                            let receipts = this.receipts_cache.get(&block_hash).cloned();
+                            let block = this
+                                .full_block_cache
+                                .get_cached(&block_hash, now, this.idle_timeout)
+                                .cloned();
+                            let receipts = this
+                                .receipts_cache
+                                .get_cached(&block_hash, now, this.idle_timeout)
+                                .cloned();
                             let _ = response_tx.send((block, receipts));
                         }
                         CacheAction::GetBlockWithSenders { block_hash, response_tx } => {
-                            if let Some(block) = this.full_block_cache.get(&block_hash).cloned() {
+                            if let Some(block) = this
+                                .full_block_cache
+                                .get_cached(&block_hash, now, this.idle_timeout)
+                                .cloned()
+                            {
                                 let _ = response_tx.send(Ok(Some(block)));
                                 continue
                             }
@@ -572,7 +660,11 @@ where
                         }
                         CacheAction::GetReceipts { block_hash, response_tx } => {
                             // check if block is cached
-                            if let Some(receipts) = this.receipts_cache.get(&block_hash).cloned() {
+                            if let Some(receipts) = this
+                                .receipts_cache
+                                .get_cached(&block_hash, now, this.idle_timeout)
+                                .cloned()
+                            {
                                 let _ = response_tx.send(Ok(Some(receipts)));
                                 continue
                             }
@@ -583,7 +675,11 @@ where
                             }
                         }
                         CacheAction::GetBal { block_hash, response_tx } => {
-                            if let Some(bal) = this.bal_cache.get(&block_hash).cloned() {
+                            if let Some(bal) = this
+                                .bal_cache
+                                .get_cached(&block_hash, now, this.idle_timeout)
+                                .cloned()
+                            {
                                 let _ = response_tx.send(Ok(Some(bal)));
                                 continue
                             }
@@ -613,6 +709,9 @@ where
                             }
                         },
                         CacheAction::CacheNewCanonicalChain { chain_change } => {
+                            if let Some(now) = now {
+                                this.evict_expired(now);
+                            }
                             for block in chain_change.blocks {
                                 // Index transactions before caching the block
                                 this.index_block_transactions(&block);
@@ -652,8 +751,14 @@ where
                         CacheAction::GetTransactionByHash { tx_hash, response_tx } => {
                             let result =
                                 this.tx_hash_index.get(&tx_hash).and_then(|(block_hash, idx)| {
-                                    let block = this.full_block_cache.get(block_hash).cloned()?;
-                                    let receipts = this.receipts_cache.get(block_hash).cloned();
+                                    let block = this
+                                        .full_block_cache
+                                        .get_cached(block_hash, now, this.idle_timeout)
+                                        .cloned()?;
+                                    let receipts = this
+                                        .receipts_cache
+                                        .get_cached(block_hash, now, this.idle_timeout)
+                                        .cloned();
                                     Some(CachedTransaction::new(block, *idx, receipts))
                                 });
                             let _ = response_tx.send(result);
@@ -977,6 +1082,7 @@ mod tests {
                 prewarm_bals: None,
                 max_concurrent_db_requests: 1,
                 max_cached_tx_hashes: 16,
+                ..Default::default()
             },
         );
         service
@@ -1002,6 +1108,234 @@ mod tests {
         )
     }
 
+    #[tokio::test(start_paused = true)]
+    async fn idle_timeout_releases_cached_data_without_requests() {
+        let (_cache, mut service) = EthStateCache::<EthPrimitives>::create(
+            NoopProvider::default(),
+            Runtime::test(),
+            EthStateCacheConfig {
+                idle_timeout: Some(Duration::from_secs(10)),
+                ..Default::default()
+            },
+        );
+        let block = Arc::new(test_block());
+        let hash = block.hash();
+        service.on_new_block(hash, Ok(Some(block)));
+        service.on_new_receipts(hash, Ok(Some(Arc::new(vec![]))));
+        service.on_new_bal(hash, Ok(Some(CachedRevmBal::new(test_decoded_revm_bal()))));
+        let (response_tx, mut response_rx) = oneshot::channel();
+        service.full_block_cache.queue(hash, response_tx);
+        assert!(futures::poll!(&mut service).is_pending());
+
+        tokio::time::advance(Duration::from_secs(11)).await;
+        assert!(futures::poll!(&mut service).is_pending());
+
+        assert!(service.full_block_cache.get(&hash).is_none());
+        assert!(service.receipts_cache.get(&hash).is_none());
+        assert!(service.bal_cache.get(&hash).is_none());
+
+        service.on_new_block(hash, Ok(Some(Arc::new(test_block()))));
+        assert!(response_rx.try_recv().unwrap().unwrap().is_some());
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn idle_timer_continues_waking_after_its_first_tick() {
+        let (cache, service) = EthStateCache::<EthPrimitives>::create(
+            NoopProvider::default(),
+            Runtime::test(),
+            EthStateCacheConfig {
+                idle_timeout: Some(Duration::from_secs(10)),
+                ..Default::default()
+            },
+        );
+        let service_task = tokio::spawn(service);
+        tokio::task::yield_now().await;
+        tokio::time::advance(Duration::from_secs(3)).await;
+        let block = Arc::new(test_block());
+        let hash = block.hash();
+        let retained = Arc::downgrade(&block);
+        cache
+            .to_service
+            .send(CacheAction::BlockWithSendersResult { block_hash: hash, res: Ok(Some(block)) })
+            .unwrap();
+        assert!(cache.get_maybe_block(hash).await.unwrap().is_some());
+
+        tokio::time::advance(Duration::from_secs(7)).await;
+        tokio::task::yield_now().await;
+        assert!(retained.upgrade().is_some());
+        // No more cache actions: only the second timer tick can release this payload.
+        tokio::time::advance(Duration::from_secs(11)).await;
+        tokio::task::yield_now().await;
+        let expired = retained.upgrade().is_none();
+        service_task.abort();
+        assert!(expired, "idle service did not register its next timer wakeup");
+    }
+
+    #[test]
+    fn disabled_idle_timeout_needs_no_runtime_timer() {
+        for idle_timeout in [None, Some(Duration::ZERO)] {
+            let (_cache, service) = EthStateCache::<EthPrimitives>::create(
+                NoopProvider::default(),
+                Runtime::test(),
+                EthStateCacheConfig { idle_timeout, ..Default::default() },
+            );
+            assert!(service.eviction_interval.is_none());
+            assert!(service.cache_now().is_none());
+        }
+    }
+
+    #[test]
+    fn idle_timeout_can_be_configured_outside_a_runtime() {
+        let runtime = Runtime::test();
+        let (_cache, service) = EthStateCache::<EthPrimitives>::create(
+            NoopProvider::default(),
+            runtime,
+            EthStateCacheConfig {
+                idle_timeout: Some(Duration::from_secs(10)),
+                ..Default::default()
+            },
+        );
+        assert!(service.eviction_interval.is_some());
+    }
+
+    #[test]
+    fn oversized_results_reach_queued_consumers() {
+        let block = Arc::new(test_block());
+        let receipts = Arc::new(vec![Receipt::default()]);
+        let bal = CachedRevmBal::new(test_decoded_revm_bal());
+        let hash = block.hash();
+        let (_cache, mut service) = EthStateCache::<EthPrimitives>::create(
+            NoopProvider::default(),
+            Runtime::test(),
+            EthStateCacheConfig {
+                max_blocks_bytes: Some(block.size() - 1),
+                max_receipts_bytes: Some(receipts.size() - 1),
+                max_bals_bytes: Some(bal.size() - 1),
+                ..Default::default()
+            },
+        );
+        let (block_tx, mut block_rx) = oneshot::channel();
+        let (receipts_tx, mut receipts_rx) = oneshot::channel();
+        let (bal_tx, mut bal_rx) = oneshot::channel();
+        service.full_block_cache.queue(hash, block_tx);
+        service.receipts_cache.queue(hash, receipts_tx);
+        service.bal_cache.queue(hash, bal_tx);
+
+        service.on_new_block(hash, Ok(Some(block.clone())));
+        service.on_new_receipts(hash, Ok(Some(receipts.clone())));
+        service.on_new_bal(hash, Ok(Some(bal.clone())));
+
+        assert!(Arc::ptr_eq(&block_rx.try_recv().unwrap().unwrap().unwrap(), &block));
+        assert!(Arc::ptr_eq(&receipts_rx.try_recv().unwrap().unwrap().unwrap(), &receipts));
+        assert!(Arc::ptr_eq(&bal_rx.try_recv().unwrap().unwrap().unwrap().0, &bal.0));
+        assert!(service.full_block_cache.get(&hash).is_none());
+        assert!(service.receipts_cache.get(&hash).is_none());
+        assert!(service.bal_cache.get(&hash).is_none());
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn cached_transaction_lookup_renews_idle_timeout() {
+        let (cache, mut service) = EthStateCache::<EthPrimitives>::create(
+            NoopProvider::default(),
+            Runtime::test(),
+            EthStateCacheConfig {
+                idle_timeout: Some(Duration::from_secs(10)),
+                ..Default::default()
+            },
+        );
+        let block = Arc::new(test_block());
+        let hash = block.hash();
+        let tx_hash = *block.body().transactions().next().unwrap().tx_hash();
+        service.index_block_transactions(&block);
+        service.on_new_block(hash, Ok(Some(block)));
+        service.on_new_receipts(hash, Ok(Some(Arc::new(vec![Receipt::default()]))));
+
+        for delay in [6, 6, 11] {
+            tokio::time::advance(Duration::from_secs(delay)).await;
+            let request = cache.get_transaction_by_hash(tx_hash);
+            futures::pin_mut!(request);
+            assert!(futures::poll!(&mut request).is_pending());
+            assert!(futures::poll!(&mut service).is_pending());
+            let result = request.await;
+            if delay < 10 {
+                let result = result.expect("transaction is still cached after a renewed hit");
+                assert_eq!(result.block.hash(), hash);
+                assert!(result.receipts.is_some());
+            } else {
+                assert!(result.is_none());
+            }
+        }
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn expired_bal_does_not_suppress_a_new_result() {
+        let (_cache, mut service) = EthStateCache::<EthPrimitives>::create(
+            NoopProvider::default(),
+            Runtime::test(),
+            EthStateCacheConfig {
+                idle_timeout: Some(Duration::from_secs(10)),
+                ..Default::default()
+            },
+        );
+        let hash = B256::repeat_byte(0x69);
+        service.on_new_bal(hash, Ok(Some(CachedRevmBal::new(test_decoded_revm_bal()))));
+        tokio::time::advance(Duration::from_secs(10)).await;
+
+        let (tx, mut rx) = oneshot::channel();
+        service.bal_cache.queue(hash, tx);
+        let replacement = CachedRevmBal::new(test_decoded_revm_bal());
+        service.on_new_bal(hash, Ok(Some(replacement.clone())));
+        assert!(Arc::ptr_eq(&rx.try_recv().unwrap().unwrap().unwrap().0, &replacement.0));
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn canonical_notification_expires_data_before_next_timer_tick() {
+        let (cache, mut service) = EthStateCache::<EthPrimitives>::create(
+            NoopProvider::default(),
+            Runtime::test(),
+            EthStateCacheConfig {
+                idle_timeout: Some(Duration::from_secs(10)),
+                ..Default::default()
+            },
+        );
+        tokio::time::advance(Duration::from_secs(3)).await;
+        let block = Arc::new(test_block());
+        let hash = block.hash();
+        service.on_new_block(hash, Ok(Some(block)));
+        service.on_new_receipts(hash, Ok(Some(Arc::new(vec![]))));
+        service.on_new_bal(hash, Ok(Some(CachedRevmBal::new(test_decoded_revm_bal()))));
+
+        tokio::time::advance(Duration::from_secs(7)).await;
+        assert!(futures::poll!(&mut service).is_pending());
+        assert!(service.full_block_cache.get(&hash).is_some());
+        tokio::time::advance(Duration::from_secs(4)).await;
+        // The next timer tick is at 20s. The notification must reclaim the old data now.
+        cache
+            .to_service
+            .send(CacheAction::CacheNewCanonicalChain {
+                chain_change: ChainChange { blocks: vec![], receipts: vec![], bals: vec![] },
+            })
+            .unwrap();
+        assert!(futures::poll!(&mut service).is_pending());
+        assert!(service.full_block_cache.get(&hash).is_none());
+        assert!(service.receipts_cache.get(&hash).is_none());
+        assert!(service.bal_cache.get(&hash).is_none());
+    }
+
+    #[tokio::test]
+    async fn oversized_bal_is_fetched_and_returned_without_caching() {
+        let fetches = Arc::new(AtomicUsize::default());
+        let cache = EthStateCache::<EthPrimitives>::spawn_with(
+            TestBalProvider::new(fetches.clone()),
+            EthStateCacheConfig { max_bals_bytes: Some(1), ..Default::default() },
+            Runtime::test(),
+        );
+        let hash = B256::repeat_byte(0x75);
+        assert!(cache.get_bal(hash).await.unwrap().is_some());
+        assert!(cache.get_bal(hash).await.unwrap().is_some());
+        assert_eq!(fetches.load(Ordering::SeqCst), 2);
+    }
+
     #[test]
     fn reorg_removes_tx_hash_index_entries_unconditionally() {
         let mut service = test_service();
@@ -1020,7 +1354,11 @@ mod tests {
         let mut service = test_service();
         let block_hash = B256::repeat_byte(0x44);
 
-        assert!(service.bal_cache.insert(block_hash, CachedRevmBal::new(test_decoded_revm_bal())));
+        assert!(service.bal_cache.insert_cached(
+            block_hash,
+            CachedRevmBal::new(test_decoded_revm_bal()),
+            None
+        ));
         assert!(service.bal_cache.get(&block_hash).is_some());
 
         service.on_reorg_bal(block_hash, Ok(None));
@@ -1037,7 +1375,7 @@ mod tests {
         service.on_new_bal(hash, Ok(Some(CachedRevmBal::new(test_decoded_revm_bal()))));
         assert!(rx.try_recv().unwrap().unwrap().is_some());
         service.on_new_bal(hash, Ok(None));
-        assert!(service.bal_cache.contains_key(&hash));
+        assert!(service.bal_cache.contains_cached(&hash, None, None));
     }
 
     #[tokio::test]
@@ -1091,6 +1429,7 @@ mod tests {
                         prewarm_bals: None,
                         max_concurrent_db_requests: 1,
                         max_cached_tx_hashes: 0,
+                        ..Default::default()
                     },
                 );
 
@@ -1171,6 +1510,7 @@ mod tests {
                 prewarm_bals: None,
                 max_concurrent_db_requests: 1,
                 max_cached_tx_hashes: 0,
+                ..Default::default()
             },
             Runtime::test(),
         );
@@ -1198,6 +1538,7 @@ mod tests {
                 prewarm_bals: None,
                 max_concurrent_db_requests: 1,
                 max_cached_tx_hashes: 0,
+                ..Default::default()
             },
             Runtime::test(),
         );
@@ -1281,6 +1622,7 @@ mod tests {
                 prewarm_bals: None,
                 max_concurrent_db_requests: 1,
                 max_cached_tx_hashes: 0,
+                ..Default::default()
             },
             Runtime::test(),
         );
