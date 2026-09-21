@@ -122,7 +122,7 @@ dependencies = [
 [[package]]
 name = "alloy-consensus"
 version = "2.4.2"
-source = "git+https://github.com/alloy-rs/alloy?rev=a974a1305#a974a1305977423ea29219638f9200497e668d2e"
+source = "git+https://github.com/alloy-rs/alloy?rev=5d6ba78c17146f97388958dcdb9c092ed6c13575#5d6ba78c17146f97388958dcdb9c092ed6c13575"
 dependencies = [
  "alloy-eips",
  "alloy-primitives",
@@ -149,7 +149,7 @@ dependencies = [
 [[package]]
 name = "alloy-consensus-any"
 version = "2.4.2"
-source = "git+https://github.com/alloy-rs/alloy?rev=a974a1305#a974a1305977423ea29219638f9200497e668d2e"
+source = "git+https://github.com/alloy-rs/alloy?rev=5d6ba78c17146f97388958dcdb9c092ed6c13575#5d6ba78c17146f97388958dcdb9c092ed6c13575"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -280,7 +280,7 @@ dependencies = [
 [[package]]
 name = "alloy-eips"
 version = "2.4.2"
-source = "git+https://github.com/alloy-rs/alloy?rev=a974a1305#a974a1305977423ea29219638f9200497e668d2e"
+source = "git+https://github.com/alloy-rs/alloy?rev=5d6ba78c17146f97388958dcdb9c092ed6c13575#5d6ba78c17146f97388958dcdb9c092ed6c13575"
 dependencies = [
  "alloy-eip2124",
  "alloy-eip2930",
@@ -306,7 +306,7 @@ dependencies = [
 [[package]]
 name = "alloy-genesis"
 version = "2.4.2"
-source = "git+https://github.com/alloy-rs/alloy?rev=a974a1305#a974a1305977423ea29219638f9200497e668d2e"
+source = "git+https://github.com/alloy-rs/alloy?rev=5d6ba78c17146f97388958dcdb9c092ed6c13575#5d6ba78c17146f97388958dcdb9c092ed6c13575"
 dependencies = [
  "alloy-eips",
  "alloy-primitives",
@@ -400,7 +400,7 @@ dependencies = [
 [[package]]
 name = "alloy-network-primitives"
 version = "2.4.2"
-source = "git+https://github.com/alloy-rs/alloy?rev=a974a1305#a974a1305977423ea29219638f9200497e668d2e"
+source = "git+https://github.com/alloy-rs/alloy?rev=5d6ba78c17146f97388958dcdb9c092ed6c13575#5d6ba78c17146f97388958dcdb9c092ed6c13575"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -687,7 +687,7 @@ dependencies = [
 [[package]]
 name = "alloy-rpc-types-eth"
 version = "2.4.2"
-source = "git+https://github.com/alloy-rs/alloy?rev=a974a1305#a974a1305977423ea29219638f9200497e668d2e"
+source = "git+https://github.com/alloy-rs/alloy?rev=5d6ba78c17146f97388958dcdb9c092ed6c13575#5d6ba78c17146f97388958dcdb9c092ed6c13575"
 dependencies = [
  "alloy-consensus",
  "alloy-consensus-any",
@@ -699,7 +699,7 @@ dependencies = [
  "alloy-sol-types",
  "alloy-trie",
  "arbitrary",
- "itertools 0.13.0",
+ "itertools 0.14.0",
  "serde",
  "serde_json",
  "serde_with",
@@ -750,7 +750,7 @@ dependencies = [
 [[package]]
 name = "alloy-serde"
 version = "2.4.2"
-source = "git+https://github.com/alloy-rs/alloy?rev=a974a1305#a974a1305977423ea29219638f9200497e668d2e"
+source = "git+https://github.com/alloy-rs/alloy?rev=5d6ba78c17146f97388958dcdb9c092ed6c13575#5d6ba78c17146f97388958dcdb9c092ed6c13575"
 dependencies = [
  "alloy-primitives",
  "arbitrary",
@@ -943,8 +943,9 @@ dependencies = [
 
 [[package]]
 name = "alloy-trie"
-version = "0.9.5"
-source = "git+https://github.com/alloy-rs/trie?rev=30d6e84aa756ac70d61b7b7ccb7dba5924a88cb8#30d6e84aa756ac70d61b7b7ccb7dba5924a88cb8"
+version = "0.9.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ac2485105b71b87f3bb1ca9dca1870ef727576c15ddde8f9b08f564abecb13ff"
 dependencies = [
  "alloy-primitives",
  "alloy-rlp",
@@ -964,7 +965,7 @@ dependencies = [
 [[package]]
 name = "alloy-tx-macros"
 version = "2.4.2"
-source = "git+https://github.com/alloy-rs/alloy?rev=a974a1305#a974a1305977423ea29219638f9200497e668d2e"
+source = "git+https://github.com/alloy-rs/alloy?rev=5d6ba78c17146f97388958dcdb9c092ed6c13575#5d6ba78c17146f97388958dcdb9c092ed6c13575"
 dependencies = [
  "darling 0.23.0",
  "proc-macro2",
@@ -3674,7 +3675,7 @@ dependencies = [
 [[package]]
 name = "evm2"
 version = "0.1.0"
-source = "git+https://github.com/mediocregopher/evm2?rev=ea7dae5359ae58a68b75ccd290c1456f2eafaf10#ea7dae5359ae58a68b75ccd290c1456f2eafaf10"
+source = "git+https://github.com/mediocregopher/evm2?rev=ee87f1eff7b791f31eb22d0184baa5c377d51dcd#ee87f1eff7b791f31eb22d0184baa5c377d51dcd"
 dependencies = [
  "alloy-consensus",
  "alloy-eip7928",
@@ -3713,7 +3714,7 @@ dependencies = [
 [[package]]
 name = "evm2-inspectors"
 version = "0.1.0"
-source = "git+https://github.com/mediocregopher/evm2?rev=ea7dae5359ae58a68b75ccd290c1456f2eafaf10#ea7dae5359ae58a68b75ccd290c1456f2eafaf10"
+source = "git+https://github.com/mediocregopher/evm2?rev=ee87f1eff7b791f31eb22d0184baa5c377d51dcd#ee87f1eff7b791f31eb22d0184baa5c377d51dcd"
 dependencies = [
  "alloy-consensus",
  "alloy-eip2930",
@@ -3735,7 +3736,7 @@ dependencies = [
 [[package]]
 name = "evm2-jit"
 version = "0.1.0"
-source = "git+https://github.com/mediocregopher/evm2?rev=ea7dae5359ae58a68b75ccd290c1456f2eafaf10#ea7dae5359ae58a68b75ccd290c1456f2eafaf10"
+source = "git+https://github.com/mediocregopher/evm2?rev=ee87f1eff7b791f31eb22d0184baa5c377d51dcd#ee87f1eff7b791f31eb22d0184baa5c377d51dcd"
 dependencies = [
  "evm2",
  "evm2-jit-backend",
@@ -3750,7 +3751,7 @@ dependencies = [
 [[package]]
 name = "evm2-jit-backend"
 version = "0.1.0"
-source = "git+https://github.com/mediocregopher/evm2?rev=ea7dae5359ae58a68b75ccd290c1456f2eafaf10#ea7dae5359ae58a68b75ccd290c1456f2eafaf10"
+source = "git+https://github.com/mediocregopher/evm2?rev=ee87f1eff7b791f31eb22d0184baa5c377d51dcd#ee87f1eff7b791f31eb22d0184baa5c377d51dcd"
 dependencies = [
  "eyre",
  "ruint",
@@ -3759,12 +3760,12 @@ dependencies = [
 [[package]]
 name = "evm2-jit-build"
 version = "0.1.0"
-source = "git+https://github.com/mediocregopher/evm2?rev=ea7dae5359ae58a68b75ccd290c1456f2eafaf10#ea7dae5359ae58a68b75ccd290c1456f2eafaf10"
+source = "git+https://github.com/mediocregopher/evm2?rev=ee87f1eff7b791f31eb22d0184baa5c377d51dcd#ee87f1eff7b791f31eb22d0184baa5c377d51dcd"
 
 [[package]]
 name = "evm2-jit-builtins"
 version = "0.1.0"
-source = "git+https://github.com/mediocregopher/evm2?rev=ea7dae5359ae58a68b75ccd290c1456f2eafaf10#ea7dae5359ae58a68b75ccd290c1456f2eafaf10"
+source = "git+https://github.com/mediocregopher/evm2?rev=ee87f1eff7b791f31eb22d0184baa5c377d51dcd#ee87f1eff7b791f31eb22d0184baa5c377d51dcd"
 dependencies = [
  "alloy-primitives",
  "evm2",
@@ -3777,7 +3778,7 @@ dependencies = [
 [[package]]
 name = "evm2-jit-codegen"
 version = "0.1.0"
-source = "git+https://github.com/mediocregopher/evm2?rev=ea7dae5359ae58a68b75ccd290c1456f2eafaf10#ea7dae5359ae58a68b75ccd290c1456f2eafaf10"
+source = "git+https://github.com/mediocregopher/evm2?rev=ee87f1eff7b791f31eb22d0184baa5c377d51dcd#ee87f1eff7b791f31eb22d0184baa5c377d51dcd"
 dependencies = [
  "alloy-primitives",
  "bitflags 2.13.2",
@@ -3800,7 +3801,7 @@ dependencies = [
 [[package]]
 name = "evm2-jit-context"
 version = "0.1.0"
-source = "git+https://github.com/mediocregopher/evm2?rev=ea7dae5359ae58a68b75ccd290c1456f2eafaf10#ea7dae5359ae58a68b75ccd290c1456f2eafaf10"
+source = "git+https://github.com/mediocregopher/evm2?rev=ee87f1eff7b791f31eb22d0184baa5c377d51dcd#ee87f1eff7b791f31eb22d0184baa5c377d51dcd"
 dependencies = [
  "alloy-primitives",
  "evm2",
@@ -3810,7 +3811,7 @@ dependencies = [
 [[package]]
 name = "evm2-jit-llvm"
 version = "0.1.0"
-source = "git+https://github.com/mediocregopher/evm2?rev=ea7dae5359ae58a68b75ccd290c1456f2eafaf10#ea7dae5359ae58a68b75ccd290c1456f2eafaf10"
+source = "git+https://github.com/mediocregopher/evm2?rev=ee87f1eff7b791f31eb22d0184baa5c377d51dcd#ee87f1eff7b791f31eb22d0184baa5c377d51dcd"
 dependencies = [
  "alloy-primitives",
  "cc",
@@ -3823,7 +3824,7 @@ dependencies = [
 [[package]]
 name = "evm2-jit-runtime"
 version = "0.1.0"
-source = "git+https://github.com/mediocregopher/evm2?rev=ea7dae5359ae58a68b75ccd290c1456f2eafaf10#ea7dae5359ae58a68b75ccd290c1456f2eafaf10"
+source = "git+https://github.com/mediocregopher/evm2?rev=ee87f1eff7b791f31eb22d0184baa5c377d51dcd#ee87f1eff7b791f31eb22d0184baa5c377d51dcd"
 dependencies = [
  "alloy-primitives",
  "crossbeam-channel",
@@ -3850,7 +3851,7 @@ dependencies = [
 [[package]]
 name = "evm2-macros"
 version = "0.1.0"
-source = "git+https://github.com/mediocregopher/evm2?rev=ea7dae5359ae58a68b75ccd290c1456f2eafaf10#ea7dae5359ae58a68b75ccd290c1456f2eafaf10"
+source = "git+https://github.com/mediocregopher/evm2?rev=ee87f1eff7b791f31eb22d0184baa5c377d51dcd#ee87f1eff7b791f31eb22d0184baa5c377d51dcd"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -8413,7 +8414,7 @@ dependencies = [
 [[package]]
 name = "reth-codecs"
 version = "0.7.1"
-source = "git+https://github.com/paradigmxyz/reth-core?rev=7f792feecee49a707502ec6be2eb267602b947aa#7f792feecee49a707502ec6be2eb267602b947aa"
+source = "git+https://github.com/paradigmxyz/reth-core?rev=d29f8bfd1082b43a4235eb2cd832111ace00bb5c#d29f8bfd1082b43a4235eb2cd832111ace00bb5c"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -8433,7 +8434,7 @@ dependencies = [
 [[package]]
 name = "reth-codecs-derive"
 version = "0.7.1"
-source = "git+https://github.com/paradigmxyz/reth-core?rev=7f792feecee49a707502ec6be2eb267602b947aa#7f792feecee49a707502ec6be2eb267602b947aa"
+source = "git+https://github.com/paradigmxyz/reth-core?rev=d29f8bfd1082b43a4235eb2cd832111ace00bb5c#d29f8bfd1082b43a4235eb2cd832111ace00bb5c"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -10160,7 +10161,7 @@ dependencies = [
 [[package]]
 name = "reth-primitives-traits"
 version = "0.7.1"
-source = "git+https://github.com/paradigmxyz/reth-core?rev=7f792feecee49a707502ec6be2eb267602b947aa#7f792feecee49a707502ec6be2eb267602b947aa"
+source = "git+https://github.com/paradigmxyz/reth-core?rev=d29f8bfd1082b43a4235eb2cd832111ace00bb5c#d29f8bfd1082b43a4235eb2cd832111ace00bb5c"
 dependencies = [
  "alloy-consensus",
  "alloy-eip7928",
@@ -10667,7 +10668,7 @@ dependencies = [
 [[package]]
 name = "reth-rpc-traits"
 version = "0.7.1"
-source = "git+https://github.com/paradigmxyz/reth-core?rev=7f792feecee49a707502ec6be2eb267602b947aa#7f792feecee49a707502ec6be2eb267602b947aa"
+source = "git+https://github.com/paradigmxyz/reth-core?rev=d29f8bfd1082b43a4235eb2cd832111ace00bb5c#d29f8bfd1082b43a4235eb2cd832111ace00bb5c"
 dependencies = [
  "alloy-consensus",
  "alloy-network",
@@ -11251,7 +11252,7 @@ dependencies = [
 [[package]]
 name = "reth-zstd-compressors"
 version = "0.7.1"
-source = "git+https://github.com/paradigmxyz/reth-core?rev=7f792feecee49a707502ec6be2eb267602b947aa#7f792feecee49a707502ec6be2eb267602b947aa"
+source = "git+https://github.com/paradigmxyz/reth-core?rev=d29f8bfd1082b43a4235eb2cd832111ace00bb5c#d29f8bfd1082b43a4235eb2cd832111ace00bb5c"
 dependencies = [
  "zstd 0.13.3",
 ]
