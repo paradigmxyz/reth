@@ -578,7 +578,7 @@ mod tests {
             commitments: cells.commitments.clone(),
             proofs: cells.proofs.clone(),
             cells: cells.get_cells(stored).unwrap(),
-            cell_mask: B128::from(stored.bits().to_le_bytes()),
+            cell_mask: B128::from(stored.bits()),
         };
         tx.set_blob_sidecar(PooledBlobSidecar::from_cells(sparse));
 
@@ -586,7 +586,7 @@ mod tests {
         let (peer, mut responses) = peer(peer_id);
         let peers = HashMap::from_iter([(peer_id, peer)]);
         let custody = CellCustody::default();
-        custody.set(B128::from(expanded.bits().to_le_bytes()));
+        custody.set(B128::from(expanded.bits()));
         let mut fetcher = BlobFetcher::new(custody, 15);
         fetcher.announce(hash, peer_id, BlobCellMask::from_bits(u128::MAX));
         fetcher.reconcile_pooled([tx]);
@@ -622,7 +622,7 @@ mod tests {
     #[tokio::test]
     async fn custody_changes_reconcile_coverage_and_restore_sources() {
         let custody = CellCustody::default();
-        custody.set(B128::from(1u128.to_le_bytes()));
+        custody.set(B128::from(1u128));
         let mut fetcher = BlobFetcher::<EthPooledTransaction>::new(custody.clone(), 15);
         let hash = B256::random();
         let peer = PeerId::random();
@@ -640,7 +640,7 @@ mod tests {
         assert_eq!(fetcher.pending[&hash].target.unwrap().bits(), 1);
         assert!(fetcher.pending[&hash].providers.is_empty());
 
-        custody.set(B128::from(3u128.to_le_bytes()));
+        custody.set(B128::from(3u128));
         assert!(fetcher.poll(&mut cx, &peers).is_pending());
         assert_eq!(fetcher.pending[&hash].target.unwrap().bits(), 3);
         assert_eq!(
@@ -648,7 +648,7 @@ mod tests {
             vec![(peer, BlobCellMask::from_bits(u128::MAX))]
         );
 
-        custody.set(B128::from(1u128.to_le_bytes()));
+        custody.set(B128::from(1u128));
         assert!(fetcher.poll(&mut cx, &peers).is_pending());
         assert_eq!(fetcher.pending[&hash].target.unwrap().bits(), 1);
     }
