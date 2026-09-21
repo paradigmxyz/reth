@@ -5,9 +5,9 @@
 
 use crate::{
     AccountRangeDownload, AccountRangeStep, BlockAccessListCatchUp, BytecodeDownload, BytecodeStep,
-    CatchUpStep, SnapAccountStore, SnapAttemptStore, SnapGeneration, SnapPivotPolicy,
-    SnapStateVerifier, SnapSyncError, SnapSyncSession, SnapWrite, StorageRangeDownload,
-    StorageRangeStep, VerifiedRange, DEFAULT_SCAN_CHUNK,
+    CatchUpStep, SnapAccountStore, SnapAttemptStore, SnapCatchUpStore, SnapGeneration,
+    SnapPivotPolicy, SnapStateVerifier, SnapSyncError, SnapSyncSession, SnapWrite,
+    StorageRangeDownload, StorageRangeStep, VerifiedRange, DEFAULT_SCAN_CHUNK,
 };
 use alloy_eips::BlockNumHash;
 use reth_db_api::transaction::DbTxMut;
@@ -196,14 +196,17 @@ where
 
     // One pass over the attempt: pivot, catch-up, then up to `ranges_per_check` account ranges.
     async fn drive(&mut self, write: SnapWrite, head: u64) -> Result<Step, SnapSyncError> {
-        if self.factory.database_provider_ro()?.is_trie_rebuild_started(write)? {
-            return Ok(Step::HandedOff(write))
-        }
-        // Once the lists the attempt still needs are no longer served, its state cannot be
-        // carried to any newer pivot.
-        let generation = *self.session.target().expect("a resolved session holds its target");
-        if !self.policy.is_catchable(generation, head) {
-            info!(target: "sync::snap", pivot = ?generation.target(), head, "Snap pivot outlived the served block access lists, restarting");
+        let applied = {
+            let provider = self.factory.database_provider_ro()?;
+            if provider.is_trie_rebuild_started(write)? {
+                return Ok(Step::HandedOff(write))
+            }
+            provider.catch_up_progress(write)?.ok_or(SnapSyncError::NoCatchUpProgress)?.applied()
+        };
+        // Catch-up continues from the last applied block, not the pivot, so once that block's
+        // successor is no longer served the state cannot be carried to any newer pivot.
+        if !self.policy.is_catchable_from(applied.number, head) {
+            info!(target: "sync::snap", ?applied, head, "Snap catch-up outlived the served block access lists, restarting");
             return Ok(Step::Restart)
         }
         let write = self.advance_pivot(write, head)?;
@@ -451,6 +454,15 @@ mod tests {
         Ok(WithPeerId::new(PeerId::random(), SnapResponse::BlockAccessLists(message)))
     }
 
+    // A peer holding no list for the first block it is asked for.
+    fn no_lists(request_id: u64) -> PeerRequestResult<SnapResponse> {
+        let message = BlockAccessListsMessage {
+            request_id,
+            block_access_lists: BlockAccessLists(vec![None]),
+        };
+        Ok(WithPeerId::new(PeerId::random(), SnapResponse::BlockAccessLists(message)))
+    }
+
     fn scripted(
         factory: &Factory,
         responses: impl IntoIterator<Item = PeerRequestResult<SnapResponse>>,
@@ -615,6 +627,31 @@ mod tests {
 
         assert_eq!(bootstrap.run().await.unwrap(), SnapBootstrapOutcome::Stopped);
         assert!(client.origins().is_empty());
+    }
+
+    #[tokio::test]
+    async fn a_catch_up_stalled_past_the_served_lists_restarts() {
+        let accounts = accounts();
+        let factory = hashed_factory();
+        insert_chain(&factory, 11, state_root(&accounts));
+        // The pivot moves from 2 to 7, but no peer serves block 3's list.
+        let responses = [account_range(1, &accounts, 0..1, &[key(1)]), no_lists(1)];
+        let (_, stalled) = scripted(&factory, responses, [3, 8]);
+        let mut stalled = stalled.with_ranges_per_check(1);
+        assert_eq!(stalled.run().await.unwrap(), SnapBootstrapOutcome::Stopped);
+        let attempt = attempt_id(&factory);
+
+        // Pivot 7 is still recent under head 11, but block 3's list is past the served history.
+        let (client, mut restarted) =
+            scripted(&factory, [account_range(1, &accounts, 0..3, &[])], [11]);
+        let outcome = restarted.run().await.unwrap();
+
+        let SnapBootstrapOutcome::TrieRebuild { pivot, .. } = outcome else {
+            panic!("the state is complete: {outcome:?}")
+        };
+        assert_eq!(pivot.number, 10);
+        assert_ne!(attempt_id(&factory), attempt);
+        assert!(client.block_requests().is_empty());
     }
 
     // Serves heads in order, repeating the last, and ends the run at the first wait.
