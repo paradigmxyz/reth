@@ -115,7 +115,7 @@ where
         Ok(self
             .0
             .bytecode_by_hash(code_hash)?
-            .map(|code| Bytecode::new_raw(code.0.original_bytes()))
+            .map(|code| reth_execution_types::native_bytecode(&code.0))
             .unwrap_or_default())
     }
 

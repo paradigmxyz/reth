@@ -147,7 +147,7 @@ pub struct BundleSource<'a>(pub &'a BundleState);
 impl evm2::evm::StateChangeSource for BundleSource<'_> {
     fn visit<S: evm2::evm::StateChangeSink>(&self, sink: &mut S) -> Result<(), S::Error> {
         for (hash, code) in &self.0.contracts {
-            sink.bytecode(*hash, &evm2::bytecode::Bytecode::new_raw(code.original_bytes()))?;
+            sink.bytecode(*hash, &native_bytecode(code))?;
         }
         for (address, account) in &self.0.state {
             let original = account.original_info.as_ref().map(native_account);
@@ -181,11 +181,24 @@ pub fn native_account(info: &AccountInfo) -> evm2::evm::AccountInfo {
         balance: info.balance,
         nonce: info.nonce,
         code_hash: info.code_hash,
-        code: info
-            .code
-            .as_ref()
-            .map(|code| evm2::bytecode::Bytecode::new_raw(code.original_bytes())),
+        code: info.code.as_ref().map(native_bytecode),
         _non_exhaustive: (),
+    }
+}
+
+/// Converts persistent bytecode while retaining its analyzed jump destinations and padding.
+pub fn native_bytecode(code: &Bytecode) -> evm2::bytecode::Bytecode {
+    if code.is_empty() {
+        return evm2::bytecode::Bytecode::default()
+    }
+    if let Some(jumps) = code.legacy_jump_table() {
+        let jumps = evm2::bytecode::JumpTable::from_slice(jumps.as_slice(), code.len());
+        // SAFETY: revm and evm2 use the same legacy analysis and padding rules for PUSH and
+        // DUPN/SWAPN/EXCHANGE. The bytecode and jump map come from an already analyzed value;
+        // retaining its padded bytes preserves the interpreter's bounds invariants.
+        unsafe { evm2::bytecode::Bytecode::new_analyzed(code.bytes(), code.len(), jumps) }
+    } else {
+        evm2::bytecode::Bytecode::new_raw(code.original_bytes())
     }
 }
 
@@ -221,6 +234,47 @@ mod tests {
     use evm2::evm::{
         AccountChangeRef, AccountInfo as NativeAccount, StateChangeSink, StorageChange,
     };
+
+    #[test]
+    fn bytecode_conversion_preserves_analysis_and_padding() {
+        let mut cases = alloc::vec![
+            alloc::vec![],
+            alloc::vec![0x00],
+            alloc::vec![0x5b, 0x60, 0x5b, 0x00],
+            alloc::vec![0x5b; 24_576],
+        ];
+        for opcode in 0x60..=0x7f {
+            // Every truncated PUSH width, including a JUMPDEST inside its immediate data.
+            for available in 0..=usize::from(opcode - 0x60) {
+                let mut bytes = alloc::vec![opcode];
+                bytes.extend(core::iter::repeat_n(0x5b, available));
+                cases.push(bytes);
+            }
+        }
+        for opcode in [
+            revm::bytecode::opcode::DUPN,
+            revm::bytecode::opcode::SWAPN,
+            revm::bytecode::opcode::EXCHANGE,
+        ] {
+            cases.push(alloc::vec![opcode]);
+            cases.push(alloc::vec![opcode, 0]);
+        }
+        for bytes in cases {
+            let persistent = Bytecode::new_raw(bytes.into());
+            let native = native_bytecode(&persistent);
+            let analyzed = evm2::bytecode::Bytecode::new_raw(persistent.original_bytes());
+            assert_eq!(native, analyzed);
+            assert_eq!(native.bytes(), analyzed.bytes());
+            assert_eq!(native.legacy_jump_table(), analyzed.legacy_jump_table());
+            if !persistent.is_empty() {
+                assert_eq!(native.bytes().as_ptr(), persistent.bytes_ref().as_ptr());
+            }
+        }
+        let delegated = Bytecode::new_eip7702(Address::with_last_byte(7));
+        let native = native_bytecode(&delegated);
+        assert_eq!(native.eip7702_address(), Some(Address::with_last_byte(7)));
+        assert_eq!(native.original_bytes(), delegated.original_bytes());
+    }
 
     #[test]
     fn cached_bytecode_does_not_change_bundle_output() {
