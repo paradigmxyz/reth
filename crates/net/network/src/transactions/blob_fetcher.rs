@@ -240,7 +240,7 @@ impl<T: PoolTransaction + 'static> BlobFetcher<T> {
         // the target so the delta columns are fetched instead of leaving the pending transaction
         // on the old custody set (EIP-8070 ?engine_forkchoiceUpdatedV4).
         let custody = BlobCellMask::new(self.custody.get());
-        let custody_value = B128::from(custody.bits().to_le_bytes());
+        let custody_value = B128::from(custody.bits());
         if custody_value != self.last_custody {
             self.last_custody = custody_value;
             for (&hash, pending) in &mut self.pending {
