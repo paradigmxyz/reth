@@ -33,6 +33,36 @@ impl BlobTxCellSidecar {
         BlobCellMask::new(self.cell_mask)
     }
 
+    /// Merges two verified sparse sidecars, retaining cells in ascending column order for every
+    /// blob.
+    pub fn merge_cell_sidecars(existing: &Self, incoming: &Self) -> Self {
+        let existing_mask = existing.mask();
+        let incoming_mask = incoming.mask();
+        let merged_mask = BlobCellMask::from_bits(existing_mask.bits() | incoming_mask.bits());
+        let mut cells = Vec::with_capacity(existing.commitments.len() * merged_mask.count());
+
+        for blob in 0..existing.commitments.len() {
+            for column in merged_mask.selected_indices() {
+                if let Some(offset) = existing_mask.selected_indices().position(|i| i == column) {
+                    cells.push(existing.cells[blob * existing_mask.count() + offset]);
+                } else {
+                    let offset = incoming_mask
+                        .selected_indices()
+                        .position(|i| i == column)
+                        .expect("merged cell must be present in one sidecar");
+                    cells.push(incoming.cells[blob * incoming_mask.count() + offset]);
+                }
+            }
+        }
+
+        Self {
+            commitments: existing.commitments.clone(),
+            proofs: existing.proofs.clone(),
+            cells,
+            cell_mask: B128::from(merged_mask.bits()),
+        }
+    }
+
     /// Returns whether every blob can be recovered without network access.
     pub fn is_recoverable(&self) -> bool {
         self.mask().count() >= CELLS_PER_EXT_BLOB / 2
@@ -219,6 +249,23 @@ mod tests {
             .validate(&sparse.versioned_hashes().collect::<Vec<_>>(), EnvKzgSettings::Default.get())
             .unwrap();
         assert_eq!(&sparse.recover(EnvKzgSettings::Default.get()).unwrap(), full);
+    }
+
+    #[test]
+    fn merge_sparse_sidecars_preserves_blob_and_column_order() {
+        let (_, full) = fixture();
+        let existing = subset(BlobCellMask::from_bits((1 << 127) | 1));
+        let incoming = subset(BlobCellMask::from_bits((1 << 64) | (1 << 8)));
+        let merged = BlobTxCellSidecar::merge_cell_sidecars(&existing, &incoming);
+        let expected_mask = BlobCellMask::from_bits((1 << 127) | (1 << 64) | (1 << 8) | 1);
+
+        assert_eq!(merged.mask(), expected_mask);
+        assert_eq!(merged.cells, full.get_cells(expected_mask).unwrap());
+        assert_eq!(merged.commitments, existing.commitments);
+        assert_eq!(merged.proofs, existing.proofs);
+        merged
+            .validate(&merged.versioned_hashes().collect::<Vec<_>>(), EnvKzgSettings::Default.get())
+            .unwrap();
     }
 
     #[test]

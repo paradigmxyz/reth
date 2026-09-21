@@ -67,6 +67,17 @@ impl BlobCellAvailability {
         BlobCellMask::from_bits((high << 64) | low)
     }
 
+    /// Adds cells to the shared availability bitmap.
+    ///
+    /// Availability is monotonic for a pooled transaction: a verified cell merge can only add
+    /// columns, never remove them. Keeping this bitmap shared lets the transaction-pool view and
+    /// the blob-store view observe the same custody after a sparse sidecar is supplemented.
+    pub fn extend(&self, mask: BlobCellMask) {
+        let bits = mask.bits();
+        self.0[Self::LOW_WORD].fetch_or(bits as u64, Ordering::Relaxed);
+        self.0[Self::HIGH_WORD].fetch_or((bits >> 64) as u64, Ordering::Relaxed);
+    }
+
     /// Returns true if all blob cells are available.
     pub fn is_full(&self) -> bool {
         self.get().bits() == u128::MAX
@@ -115,6 +126,20 @@ impl PooledBlobSidecar {
             origin: crate::TransactionOrigin::External,
             recovered: Arc::new(parking_lot::Mutex::new(None)),
         }
+    }
+
+    /// Replaces the retained cell set while preserving the sidecar's shared availability and
+    /// persistence metadata.
+    ///
+    /// This is used when a pooled partial transaction receives verified custody delta columns.
+    /// The shared availability must be retained so the transaction already held by the pool sees
+    /// the newly persisted cells without being reinserted.
+    pub fn with_cells(&self, cells: BlobTxCellSidecar) -> Self {
+        let mut sidecar = self.clone();
+        sidecar.sidecar = cells.elided().into();
+        sidecar.cells = Some(Arc::new(cells));
+        *sidecar.recovered.lock() = None;
+        sidecar
     }
 
     /// Returns the stored cells, when this sidecar uses sparse storage.
