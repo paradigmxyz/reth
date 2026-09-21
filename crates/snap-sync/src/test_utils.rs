@@ -93,7 +93,7 @@ pub(crate) fn provider_with(headers: impl IntoIterator<Item = Header>) -> MockEt
 }
 
 /// A generation anchored to `block`, downloading against `state_root`.
-pub(crate) fn generation(block: u64, state_root: B256) -> SnapGeneration {
+pub(crate) const fn generation(block: u64, state_root: B256) -> SnapGeneration {
     SnapGeneration::new(BlockNumHash::new(block, B256::repeat_byte(block as u8)), state_root)
 }
 
@@ -132,6 +132,8 @@ pub(crate) fn account(nonce: u64) -> TrieAccount {
         balance: U256::from(1),
         storage_root: EMPTY_ROOT_HASH,
         code_hash: KECCAK256_EMPTY,
+        #[cfg(feature = "account-ext")]
+        extension: Default::default(),
     }
 }
 

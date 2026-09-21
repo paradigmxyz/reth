@@ -154,7 +154,7 @@ pub struct VerifiedRange {
 }
 
 impl VerifiedRange {
-    #[cfg(test)]
+    #[cfg(all(test, not(feature = "account-ext")))]
     pub(crate) const fn new(write: SnapWrite, range: VerifiedAccountRange) -> Self {
         Self { write, range }
     }
@@ -175,7 +175,7 @@ impl VerifiedRange {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, not(feature = "account-ext")))]
 mod tests {
     use super::*;
     use crate::test_utils::{

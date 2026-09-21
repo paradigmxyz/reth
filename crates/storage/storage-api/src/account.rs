@@ -6,7 +6,8 @@ use alloy_primitives::{Address, BlockNumber};
 use auto_impl::auto_impl;
 use core::ops::{RangeBounds, RangeInclusive};
 use reth_db_models::AccountBeforeTx;
-use reth_primitives_traits::Account;
+use reth_primitives_traits::{ensure_no_account_extensions as ensure_extensions_disabled, Account};
+
 use reth_storage_errors::provider::ProviderResult;
 
 /// Account reader
@@ -16,6 +17,16 @@ pub trait AccountReader {
     ///
     /// Returns `None` if the account doesn't exist.
     fn basic_account(&self, address: &Address) -> ProviderResult<Option<Account>>;
+}
+
+/// Rejects protocols that cannot commit to extension payloads in an account-ext build.
+pub const fn ensure_no_account_extensions(protocol: &'static str) -> ProviderResult<()> {
+    match ensure_extensions_disabled() {
+        Ok(()) => Ok(()),
+        Err(_) => Err(reth_storage_errors::provider::ProviderError::AccountExtensionsUnsupported(
+            protocol,
+        )),
+    }
 }
 
 /// Account reader

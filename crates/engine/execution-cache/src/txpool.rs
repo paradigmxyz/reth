@@ -28,14 +28,7 @@ impl TxPoolPrewarmCacheSnapshot {
 
     /// Returns a cached account, preserving cached non-existence.
     pub fn account(&self, address: &Address) -> Option<Option<Account>> {
-        self.reads.accounts.get(address).map(|account| {
-            account.info.as_ref().map(|info| Account {
-                nonce: info.nonce,
-                balance: info.balance,
-                bytecode_hash: (info.code_hash != alloy_primitives::KECCAK256_EMPTY)
-                    .then_some(info.code_hash),
-            })
-        })
+        self.reads.accounts.get(address).map(|account| account.info.as_ref().map(Account::from))
     }
 
     /// Returns a cached storage value, preserving cached zero values.
@@ -79,7 +72,16 @@ mod tests {
         let mut storage = U256Map::default();
         storage.insert(U256::from(1), U256::from(7));
         storage.insert(U256::from(2), U256::ZERO);
-        reads.insert_account(owner, AccountInfo { nonce: 3, ..Default::default() }, storage);
+        reads.insert_account(
+            owner,
+            AccountInfo {
+                nonce: 3,
+                #[cfg(feature = "account-ext")]
+                extension: vec![0x82; 32].into(),
+                ..Default::default()
+            },
+            storage,
+        );
         reads.accounts.insert(missing, CachedAccount { info: None, storage: Default::default() });
         reads.contracts.insert(code_hash, EvmBytecode::new_raw([0x60, 0x01].into()));
         reads.contracts.insert(empty_code_hash, EvmBytecode::default());
@@ -87,6 +89,8 @@ mod tests {
         let snapshot = TxPoolPrewarmCacheSnapshot::new(B256::ZERO, Arc::new(reads));
 
         assert_eq!(snapshot.account(&owner).unwrap().unwrap().nonce, 3);
+        #[cfg(feature = "account-ext")]
+        assert_eq!(snapshot.account(&owner).unwrap().unwrap().extension.as_ref(), &[0x82; 32]);
         assert_eq!(snapshot.account(&missing), Some(None), "non-existence is a cacheable fact");
         assert_eq!(snapshot.account(&Address::repeat_byte(0x03)), None);
 

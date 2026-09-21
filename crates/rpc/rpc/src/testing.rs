@@ -144,6 +144,9 @@ where
                     chain_spec.is_cancun_active_at_timestamp(request.payload_attributes.timestamp);
                 let is_osaka =
                     chain_spec.is_osaka_active_at_timestamp(request.payload_attributes.timestamp);
+                if is_amsterdam {
+                    reth_storage_api::ensure_no_account_extensions("BAL")?;
+                }
                 let withdrawals = request.payload_attributes.withdrawals.clone();
                 let withdrawals_rlp_length = withdrawals.as_ref().map(|w| w.length()).unwrap_or(0);
 

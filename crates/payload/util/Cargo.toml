@@ -22,3 +22,6 @@ alloy-consensus.workspace = true
 [dev-dependencies]
 reth-transaction-pool = { workspace = true, features = ["test-utils"] }
 alloy-primitives = { workspace = true, features = ["getrandom"] }
+
+[features]
+account-ext = ["reth-transaction-pool/account-ext"]

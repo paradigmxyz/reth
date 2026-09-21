@@ -129,13 +129,7 @@ where
 
 #[cfg(feature = "std")]
 fn account_to_evm(account: Account) -> AccountInfo {
-    AccountInfo {
-        balance: account.balance,
-        nonce: account.nonce,
-        code_hash: account.get_bytecode_hash(),
-        code: None,
-        _non_exhaustive: (),
-    }
+    account.into()
 }
 
 #[cfg(feature = "std")]

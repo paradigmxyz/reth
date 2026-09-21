@@ -1,3 +1,6 @@
+// Accounts are only Copy when account-ext is disabled.
+#![cfg_attr(not(feature = "account-ext"), allow(clippy::clone_on_copy))]
+
 use crate::{database_state_frontiers, ExecutionOverlay, OverlayBuilder, StateTrieOverlay};
 use alloy_primitives::{keccak256, map::AddressSet, Address, BlockHash, BlockNumber, B256, U256};
 use metrics::{Counter, Histogram};
@@ -412,13 +415,7 @@ where
     fn basic_account(&self, address: &Address) -> ProviderResult<Option<Account>> {
         let (overlay, historical_fallback) = self.execution_overlay()?;
         if let Some(account) = overlay.accounts().get(address) {
-            return Ok(account.as_ref().map(|info| Account {
-                nonce: info.nonce,
-                balance: info.balance,
-                bytecode_hash: (!info.code_hash.is_zero() &&
-                    info.code_hash != alloy_primitives::KECCAK256_EMPTY)
-                    .then_some(info.code_hash),
-            }))
+            return Ok(account.as_ref().map(Account::from))
         }
         if let Some(historical_fallback) = historical_fallback {
             return match self.provider().account_history_info(
@@ -1298,7 +1295,13 @@ mod tests {
     fn execution_overlay_readers_use_overlay_first() {
         let (factory, _) = setup_frontiers(1, 3);
         let address = Address::with_last_byte(1);
-        let account_info = AccountInfo { nonce: 1, balance: U256::from(2), ..Default::default() };
+        let account_info = AccountInfo {
+            nonce: 1,
+            balance: U256::from(2),
+            #[cfg(feature = "account-ext")]
+            extension: vec![0x82; 32].into(),
+            ..Default::default()
+        };
         let block_hash = B256::with_last_byte(3);
         let storage_key = B256::with_last_byte(4);
         let storage_value = U256::from(5);
@@ -1319,15 +1322,7 @@ mod tests {
             false,
         );
 
-        assert_eq!(
-            provider.basic_account(&address).unwrap(),
-            Some(Account {
-                nonce: account_info.nonce,
-                balance: account_info.balance,
-                bytecode_hash: (account_info.code_hash != alloy_primitives::KECCAK256_EMPTY)
-                    .then_some(account_info.code_hash)
-            })
-        );
+        assert_eq!(provider.basic_account(&address).unwrap(), Some(Account::from(account_info)));
         assert!(provider.basic_account(&Address::with_last_byte(2)).unwrap().is_none());
         assert_eq!(provider.block_hash(1).unwrap(), Some(block_hash));
         assert_eq!(provider.canonical_hashes_range(1, 2).unwrap(), vec![block_hash]);
@@ -1356,7 +1351,10 @@ mod tests {
             .unwrap();
         provider_rw
             .tx_ref()
-            .put::<tables::AccountChangeSets>(2, AccountBeforeTx { address, info: Some(account) })
+            .put::<tables::AccountChangeSets>(
+                2,
+                AccountBeforeTx { address, info: Some(account.clone()) },
+            )
             .unwrap();
         provider_rw
             .tx_ref()

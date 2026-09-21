@@ -1,4 +1,5 @@
 use alloc::vec::Vec;
+#[cfg(test)]
 use alloy_consensus::constants::KECCAK_EMPTY;
 use alloy_eips::eip7685::Requests;
 use alloy_primitives::{
@@ -238,12 +239,7 @@ impl StateChangeSource for IndexedBlockState {
 }
 
 fn account_info_to_reth(info: &AccountInfo) -> Account {
-    Account {
-        balance: info.balance,
-        nonce: info.nonce,
-        bytecode_hash: (!info.code_hash.is_zero() && info.code_hash != KECCAK_EMPTY)
-            .then_some(info.code_hash),
-    }
+    info.into()
 }
 
 #[cfg(test)]
@@ -276,6 +272,8 @@ mod tests {
             code_hash,
             code: Some(bytecode.clone()),
             _non_exhaustive: (),
+            #[cfg(feature = "account-ext")]
+            extension: Default::default(),
         };
         let mut state = BlockStateAccumulator::new();
 

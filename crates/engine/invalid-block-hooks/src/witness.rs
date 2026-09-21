@@ -353,6 +353,10 @@ mod tests {
                 balance: account.balance.checked_div(U256::from(2)).unwrap_or(U256::ZERO),
                 nonce: 0,
                 bytecode_hash: account.bytecode_hash,
+                #[cfg(feature = "account-ext")]
+                extension: reth_primitives_traits::AccountExtension::from_shared(
+                    account.extension.clone().into_shared(),
+                ),
             });
 
             state_accounts.push((addr, (original, Some(account), storage)));

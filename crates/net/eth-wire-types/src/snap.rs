@@ -117,6 +117,8 @@ pub struct AccountData {
 impl AccountData {
     /// Encodes `account` in snap/2's slim format.
     pub fn from_trie_account(hash: B256, account: &TrieAccount) -> Self {
+        reth_primitives_traits::ensure_no_account_extensions()
+            .expect("snap does not support account extensions");
         let body = alloy_rlp::encode(SlimAccountBodyRef {
             nonce: account.nonce,
             balance: account.balance,
@@ -131,6 +133,8 @@ impl AccountData {
     /// Range proofs are verified against the full encoding, so the omitted storage root and code
     /// hash are restored to their defaults here.
     pub fn trie_account(&self) -> alloy_rlp::Result<TrieAccount> {
+        reth_primitives_traits::ensure_no_account_extensions()
+            .map_err(|_| alloy_rlp::Error::Custom("snap does not support account extensions"))?;
         let slim = alloy_rlp::decode_exact::<SlimAccountBody>(&self.body)?;
 
         Ok(TrieAccount {
@@ -138,6 +142,8 @@ impl AccountData {
             balance: slim.balance,
             storage_root: SlimAccountBody::restore(&slim.storage_root, EMPTY_ROOT_HASH)?,
             code_hash: SlimAccountBody::restore(&slim.code_hash, KECCAK256_EMPTY)?,
+            #[cfg(feature = "account-ext")]
+            extension: Default::default(),
         })
     }
 
@@ -884,11 +890,13 @@ mod tests {
         assert_eq!(msg.limit_hash.unwrap_or(B256::repeat_byte(0xff)), B256::repeat_byte(0xff));
     }
 
+    #[cfg(not(feature = "account-ext"))]
     fn trie_account(storage_root: B256, code_hash: B256) -> TrieAccount {
         TrieAccount { nonce: 7, balance: U256::from(42), storage_root, code_hash }
     }
 
     #[test]
+    #[cfg(not(feature = "account-ext"))]
     fn slim_body_elides_empty_storage_and_code() {
         let account = trie_account(EMPTY_ROOT_HASH, KECCAK256_EMPTY);
         let hash = B256::repeat_byte(1);
@@ -902,6 +910,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(not(feature = "account-ext"))]
     fn slim_body_keeps_non_default_storage_and_code() {
         let account = trie_account(B256::repeat_byte(2), B256::repeat_byte(3));
         let encoded = AccountData::from_trie_account(B256::repeat_byte(1), &account);
@@ -922,6 +931,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(not(feature = "account-ext"))]
     fn slim_body_rejects_trailing_bytes() {
         let account = trie_account(EMPTY_ROOT_HASH, KECCAK256_EMPTY);
         let mut encoded = AccountData::from_trie_account(B256::repeat_byte(1), &account);

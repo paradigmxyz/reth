@@ -1012,6 +1012,8 @@ mod tests {
                         balance: U256::from(1337),
                         nonce: 7,
                         bytecode_hash: Some(KECCAK_EMPTY),
+                        #[cfg(feature = "account-ext")]
+                        extension: Default::default(),
                     }),
                     Default::default(),
                 ),

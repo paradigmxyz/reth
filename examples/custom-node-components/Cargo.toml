@@ -11,4 +11,6 @@ reth-tracing.workspace = true
 
 eyre.workspace = true
 
+[features]
+account-ext = ["reth-ethereum/account-ext"]
 [lints]

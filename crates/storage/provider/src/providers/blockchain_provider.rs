@@ -1,3 +1,6 @@
+// Accounts are only Copy when account-ext is disabled.
+#![cfg_attr(not(feature = "account-ext"), allow(clippy::clone_on_copy))]
+
 use crate::{
     providers::{
         ConsistentProvider, ProviderNodeTypes, RocksDBProvider, StaticFileProvider,
@@ -1043,7 +1046,7 @@ mod tests {
     use alloy_consensus::constants::EMPTY_ROOT_HASH;
     use alloy_eips::{BlockHashOrNumber, BlockNumHash, BlockNumberOrTag};
     use alloy_primitives::{
-        keccak256, map::AddressMap, Address, BlockNumber, TxNumber, B256, KECCAK256_EMPTY, U256,
+        keccak256, map::AddressMap, Address, BlockNumber, TxNumber, B256, U256,
     };
     use itertools::Itertools;
     use rand::Rng;
@@ -1116,8 +1119,8 @@ mod tests {
                 (
                     HashedPostState::default()
                         .with_accounts([
-                            (hashed_address, Some(account)),
-                            (keccak256(other_address), Some(account)),
+                            (hashed_address, Some(account.clone())),
+                            (keccak256(other_address), Some(account.clone())),
                         ])
                         .with_storages([(
                             hashed_address,
@@ -1136,8 +1139,8 @@ mod tests {
                     [(
                         address,
                         (
-                            Some(account),
-                            Some(account),
+                            Some(account.clone()),
+                            Some(account.clone()),
                             BTreeMap::from([(U256::from_be_bytes(slot.0), (U256::from(1), value))]),
                         ),
                     )],
@@ -1155,8 +1158,8 @@ mod tests {
             let mut updates = TrieUpdates::default();
             updates.storage_tries.insert(hashed_address, storage_updates);
             let state_root = reth_trie::test_utils::state_root([
-                (address, (account, storage.clone())),
-                (other_address, (account, BTreeMap::new())),
+                (address, (account.clone(), storage.clone())),
+                (other_address, (account.clone(), BTreeMap::new())),
             ]);
             storage_roots.push(reth_trie::test_utils::storage_root(storage.clone()));
             let block = Block {
@@ -1269,12 +1272,7 @@ mod tests {
     }
 
     fn account_to_revert(account: Account) -> RevertAccount {
-        RevertAccount {
-            balance: account.balance,
-            nonce: account.nonce,
-            code_hash: account.bytecode_hash.unwrap_or(KECCAK256_EMPTY),
-            code: None,
-        }
+        reth_execution_types::ExecutionAccountInfo::from(account).into()
     }
 
     #[expect(clippy::type_complexity)]
@@ -2093,9 +2091,9 @@ mod tests {
         let (in_memory_changesets, in_memory_state) = random_changeset_range(
             &mut rng,
             &in_memory_blocks,
-            database_state
-                .iter()
-                .map(|(address, (account, storage))| (*address, (*account, storage.clone()))),
+            database_state.iter().map(|(address, (account, storage))| {
+                (*address, (account.clone(), storage.clone()))
+            }),
             0..0,
             0..0,
         );
@@ -2120,7 +2118,7 @@ mod tests {
                     .map(|block_changesets| {
                         let mut accounts = AddressMap::default();
                         for (address, account, _) in block_changesets {
-                            accounts.insert(*address, Some(account_to_revert(*account)));
+                            accounts.insert(*address, Some(account_to_revert(account.clone())));
                         }
                         BlockReverts { accounts, storage: AddressMap::default() }
                     })
@@ -2147,14 +2145,14 @@ mod tests {
                     let senders = block.senders().expect("failed to recover senders");
                     let original_accounts = in_memory_changesets
                         .iter()
-                        .map(|(address, account, _)| (*address, *account))
+                        .map(|(address, account, _)| (*address, account.clone()))
                         .collect::<AddressMap<_>>();
                     let state = execution_state_from_init(
                         in_memory_state.into_iter().map(|(address, (account, _))| {
                             (
                                 address,
                                 (
-                                    original_accounts.get(&address).copied(),
+                                    original_accounts.get(&address).cloned(),
                                     Some(account),
                                     BTreeMap::default(),
                                 ),
@@ -3047,7 +3045,16 @@ mod tests {
     }
 
     fn random_account(nonce: u64) -> (Address, Account) {
-        (Address::random(), Account { nonce, balance: U256::from(nonce), bytecode_hash: None })
+        (
+            Address::random(),
+            Account {
+                nonce,
+                balance: U256::from(nonce),
+                bytecode_hash: None,
+                #[cfg(feature = "account-ext")]
+                extension: Default::default(),
+            },
+        )
     }
 
     /// [`BlockchainProvider::new`] needs a genesis header to initialize its chain tracker.
@@ -3071,14 +3078,16 @@ mod tests {
 
         let accounts: Vec<_> = (0..5u64).map(random_account).collect();
         provider_rw.insert_account_for_hashing(
-            accounts.iter().map(|(address, account)| (*address, Some(*account))),
+            accounts.iter().map(|(address, account)| (*address, Some(account.clone()))),
         )?;
         provider_rw.commit()?;
 
         let provider = BlockchainProvider::new(factory)?;
 
-        let mut expected: Vec<_> =
-            accounts.iter().map(|(address, account)| (keccak256(address), *account)).collect();
+        let mut expected: Vec<_> = accounts
+            .iter()
+            .map(|(address, account)| (keccak256(address), account.clone()))
+            .collect();
         expected.sort_by_key(|(hash, _)| *hash);
         let state = provider.state_range_provider(EMPTY_ROOT_HASH)?.unwrap();
 
@@ -3102,7 +3111,7 @@ mod tests {
 
         let accounts: Vec<_> = (0..5u64).map(random_account).collect();
         provider_rw.insert_account_for_hashing(
-            accounts.iter().map(|(address, account)| (*address, Some(*account))),
+            accounts.iter().map(|(address, account)| (*address, Some(account.clone()))),
         )?;
         provider_rw.commit()?;
 
@@ -3264,7 +3273,7 @@ mod tests {
         let (address, account) = random_account(1);
         let hashed_address = keccak256(address);
         let mut hashed_state = HashedPostState::default();
-        hashed_state.accounts.insert(hashed_address, Some(account));
+        hashed_state.accounts.insert(hashed_address, Some(account.clone()));
 
         // A root only the in-memory block carries, so a match proves the in-memory path (not
         // persisted history, which has no block with this root) resolved it.
@@ -3317,7 +3326,7 @@ mod tests {
         let (target_address, target_account) = random_account(1);
         let target_hashed = keccak256(target_address);
         let mut target_state = HashedPostState::default();
-        target_state.accounts.insert(target_hashed, Some(target_account));
+        target_state.accounts.insert(target_hashed, Some(target_account.clone()));
 
         let unique_root = B256::repeat_byte(0x77);
         let mut block = random_block(
@@ -3359,7 +3368,7 @@ mod tests {
         .try_recover()
         .expect("failed to seal block with senders");
         let mut noise_hashed_state = HashedPostState::default();
-        noise_hashed_state.accounts.insert(keccak256(noise_address), Some(noise_account));
+        noise_hashed_state.accounts.insert(keccak256(noise_address), Some(noise_account.clone()));
         let provider_rw = provider.database.provider_rw()?;
         let noise_state = execution_state_from_init(
             [(noise_address, (None, Some(noise_account), BTreeMap::default()))],
@@ -3408,7 +3417,7 @@ mod tests {
 
         let factory = test_provider_factory_with_genesis()?;
         let provider_rw = factory.provider_rw()?;
-        provider_rw.insert_account_for_hashing([(address, Some(account_a))])?;
+        provider_rw.insert_account_for_hashing([(address, Some(account_a.clone()))])?;
         provider_rw.insert_storage_for_hashing([(
             address,
             [StorageEntry { key: slot_key, value: value_a }],
@@ -3434,14 +3443,14 @@ mod tests {
         provider_rw.commit()?;
 
         // State B: a later block changes both the account and its storage slot.
-        let account_b = Account { nonce: 2, balance: U256::from(2), ..account_a };
+        let account_b = Account { nonce: 2, balance: U256::from(2), ..account_a.clone() };
         let value_b = U256::from(2);
 
         let mut storage = BTreeMap::default();
         storage.insert(slot, (value_a, value_b));
 
         let mut state_b = HashedPostState::default();
-        state_b.accounts.insert(hashed_address, Some(account_b));
+        state_b.accounts.insert(hashed_address, Some(account_b.clone()));
         state_b.storages.insert(hashed_address, HashedStorage::from_iter([(hashed_slot, value_b)]));
 
         let state_b_root = factory.latest()?.state_root(state_b.clone())?;
@@ -3457,11 +3466,11 @@ mod tests {
 
         let provider_rw = factory.provider_rw()?;
         let later_state = execution_state_from_init(
-            [(address, (Some(account_a), Some(account_b), storage.clone()))],
+            [(address, (Some(account_a.clone()), Some(account_b), storage.clone()))],
             [],
         );
         let mut later_revert_accounts = AddressMap::default();
-        later_revert_accounts.insert(address, Some(account_to_revert(account_a)));
+        later_revert_accounts.insert(address, Some(account_to_revert(account_a.clone())));
         let mut later_revert_storage = AddressMap::default();
         later_revert_storage.insert(
             address,

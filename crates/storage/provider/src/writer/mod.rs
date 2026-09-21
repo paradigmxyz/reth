@@ -1,3 +1,5 @@
+#![cfg_attr(not(feature = "account-ext"), allow(clippy::clone_on_copy))]
+
 use crate::{
     changesets_utils::StorageRevertsIter,
     providers::{DatabaseProvider, NodeTypesForProvider},
@@ -153,21 +155,11 @@ pub(crate) fn write_state_input_bytecodes<'a, R>(
 }
 
 fn execution_account_info_to_reth(info: &ExecutionAccountInfo) -> Account {
-    Account {
-        balance: info.balance,
-        nonce: info.nonce,
-        bytecode_hash: (!info.code_hash.is_zero() && info.code_hash != KECCAK_EMPTY)
-            .then_some(info.code_hash),
-    }
+    info.into()
 }
 
 fn execution_account_info_ref_to_reth(info: &ExecutionAccountInfo) -> Account {
-    Account {
-        balance: info.balance,
-        nonce: info.nonce,
-        bytecode_hash: (!info.code_hash.is_zero() && info.code_hash != KECCAK_EMPTY)
-            .then_some(info.code_hash),
-    }
+    info.into()
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -641,14 +633,26 @@ mod tests {
         let current_slot = U256::from(3);
         let code_hash = B256::repeat_byte(0x42);
         let bytecode = Bytecode::new_raw(Bytes::from_static(&[0x60, 0x00]));
-        let original_account = Account { balance: U256::from(4), nonce: 1, bytecode_hash: None };
-        let current_account = Account { balance: U256::from(5), nonce: 2, bytecode_hash: None };
+        let original_account = Account {
+            balance: U256::from(4),
+            nonce: 1,
+            bytecode_hash: None,
+            #[cfg(feature = "account-ext")]
+            extension: vec![1; 32].into(),
+        };
+        let current_account = Account {
+            balance: U256::from(5),
+            nonce: 2,
+            bytecode_hash: None,
+            #[cfg(feature = "account-ext")]
+            extension: vec![2; 32].into(),
+        };
         let state = execution_state_from_init(
             [(
                 address,
                 (
-                    Some(original_account),
-                    Some(current_account),
+                    Some(original_account.clone()),
+                    Some(current_account.clone()),
                     BTreeMap::from([(slot, (original_slot, current_slot))]),
                 ),
             )],
@@ -701,7 +705,7 @@ mod tests {
                     high_address,
                     (
                         None,
-                        Some(account),
+                        Some(account.clone()),
                         BTreeMap::from([
                             (U256::from(3), (U256::from(30), U256::from(300))),
                             (U256::from(1), (U256::from(10), U256::from(100))),
@@ -808,12 +812,7 @@ mod storage_tests {
     }
 
     fn native(account: Account) -> ExecutionAccountInfo {
-        ExecutionAccountInfo {
-            nonce: account.nonce,
-            balance: account.balance,
-            code_hash: account.get_bytecode_hash(),
-            ..Default::default()
-        }
+        account.into()
     }
 
     #[derive(Default)]
@@ -949,18 +948,30 @@ mod storage_tests {
         let address_b = Address::repeat_byte(0xff);
 
         let account_a = Account { balance: U256::from(1), nonce: 1, ..Default::default() };
-        let account_b = Account { balance: U256::from(2), nonce: 2, ..Default::default() };
-        let account_b_changed = Account { balance: U256::from(3), nonce: 3, ..Default::default() };
+        let account_b = Account {
+            balance: U256::from(2),
+            nonce: 2,
+            #[cfg(feature = "account-ext")]
+            extension: vec![1; 32].into(),
+            ..Default::default()
+        };
+        let account_b_changed = Account {
+            balance: U256::from(3),
+            nonce: 3,
+            #[cfg(feature = "account-ext")]
+            extension: vec![2; 32].into(),
+            ..Default::default()
+        };
 
         let mut state = StateFixture::default();
         state.insert_not_existing(address_a);
-        state.insert_account(address_b, account_b);
+        state.insert_account(address_b, account_b.clone());
 
         // 0x00.. is created
         state.commit(HashMap::from_iter([(
             address_a,
             AccountUpdate {
-                info: account_a,
+                info: account_a.clone(),
                 created: true,
                 destroyed: false,
                 storage: HashMap::default(),
@@ -971,7 +982,7 @@ mod storage_tests {
         state.commit(HashMap::from_iter([(
             address_b,
             AccountUpdate {
-                info: account_b_changed,
+                info: account_b_changed.clone(),
                 created: false,
                 destroyed: false,
                 storage: HashMap::default(),
@@ -993,7 +1004,7 @@ mod storage_tests {
 
         let reth_account_a = account_a;
         let reth_account_b = account_b;
-        let reth_account_b_changed = account_b_changed;
+        let reth_account_b_changed = account_b_changed.clone();
 
         // Check plain state
         assert_eq!(
@@ -1003,7 +1014,7 @@ mod storage_tests {
         );
         assert_eq!(
             provider.basic_account(&address_b).expect("Could not read account state"),
-            Some(reth_account_b_changed),
+            Some(reth_account_b_changed.clone()),
             "Account B state is wrong"
         );
 
@@ -1024,7 +1035,7 @@ mod storage_tests {
         );
 
         let mut state = StateFixture::default();
-        state.insert_account(address_b, account_b_changed);
+        state.insert_account(address_b, account_b_changed.clone());
 
         // 0xff.. is destroyed
         state.commit(HashMap::from_iter([(
@@ -1086,7 +1097,7 @@ mod storage_tests {
         state.insert_not_existing(address_a);
         state.insert_account_with_storage(
             address_b,
-            account_b,
+            account_b.clone(),
             HashMap::from_iter([(U256::from(1), U256::from(1))]),
         );
 
@@ -1276,7 +1287,7 @@ mod storage_tests {
         init_state.commit(HashMap::from_iter([(
             address1,
             AccountUpdate {
-                info: account_info,
+                info: account_info.clone(),
                 created: true,
                 destroyed: false,
                 // 0x00 => 0 => 1
@@ -1300,7 +1311,7 @@ mod storage_tests {
         let mut state = StateFixture::default();
         state.insert_account_with_storage(
             address1,
-            account_info,
+            account_info.clone(),
             HashMap::from_iter([(U256::ZERO, U256::from(1)), (U256::from(1), U256::from(2))]),
         );
 
@@ -1310,7 +1321,7 @@ mod storage_tests {
             AccountUpdate {
                 created: false,
                 destroyed: false,
-                info: account_info,
+                info: account_info.clone(),
                 // 0x00 => 1 => 2
                 storage: HashMap::from_iter([(
                     U256::ZERO,
@@ -1326,7 +1337,7 @@ mod storage_tests {
             AccountUpdate {
                 created: false,
                 destroyed: true,
-                info: account_info,
+                info: account_info.clone(),
                 storage: HashMap::default(),
             },
         )]));
@@ -1338,7 +1349,7 @@ mod storage_tests {
             AccountUpdate {
                 created: true,
                 destroyed: false,
-                info: account_info,
+                info: account_info.clone(),
                 storage: HashMap::default(),
             },
         )]));
@@ -1350,7 +1361,7 @@ mod storage_tests {
             AccountUpdate {
                 created: false,
                 destroyed: false,
-                info: account_info,
+                info: account_info.clone(),
                 // 0x00 => 0 => 2
                 // 0x02 => 0 => 4
                 // 0x06 => 0 => 6
@@ -1375,7 +1386,7 @@ mod storage_tests {
             AccountUpdate {
                 created: false,
                 destroyed: true,
-                info: account_info,
+                info: account_info.clone(),
                 storage: HashMap::default(),
             },
         )]));
@@ -1387,7 +1398,7 @@ mod storage_tests {
             AccountUpdate {
                 created: true,
                 destroyed: false,
-                info: account_info,
+                info: account_info.clone(),
                 storage: HashMap::default(),
             },
         )]));
@@ -1396,7 +1407,7 @@ mod storage_tests {
             AccountUpdate {
                 created: false,
                 destroyed: false,
-                info: account_info,
+                info: account_info.clone(),
                 // 0x00 => 0 => 2
                 storage: HashMap::from_iter([(
                     U256::ZERO,
@@ -1409,7 +1420,7 @@ mod storage_tests {
             AccountUpdate {
                 created: false,
                 destroyed: true,
-                info: account_info,
+                info: account_info.clone(),
                 storage: HashMap::default(),
             },
         )]));
@@ -1418,7 +1429,7 @@ mod storage_tests {
             AccountUpdate {
                 created: true,
                 destroyed: false,
-                info: account_info,
+                info: account_info.clone(),
                 storage: HashMap::default(),
             },
         )]));
@@ -1590,7 +1601,7 @@ mod storage_tests {
         init_state.commit(HashMap::from_iter([(
             address1,
             AccountUpdate {
-                info: account1,
+                info: account1.clone(),
                 created: true,
                 destroyed: false,
                 // 0x00 => 0 => 1
@@ -1613,7 +1624,7 @@ mod storage_tests {
         let mut state = StateFixture::default();
         state.insert_account_with_storage(
             address1,
-            account1,
+            account1.clone(),
             HashMap::from_iter([(U256::ZERO, U256::from(1)), (U256::from(1), U256::from(2))]),
         );
 
@@ -1623,7 +1634,7 @@ mod storage_tests {
             AccountUpdate {
                 created: false,
                 destroyed: true,
-                info: account1,
+                info: account1.clone(),
                 storage: HashMap::default(),
             },
         )]));
@@ -1633,7 +1644,7 @@ mod storage_tests {
             AccountUpdate {
                 created: true,
                 destroyed: false,
-                info: account1,
+                info: account1.clone(),
                 storage: HashMap::default(),
             },
         )]));
@@ -1714,7 +1725,13 @@ mod storage_tests {
         type PreState = BTreeMap<Address, (Account, BTreeMap<B256, U256>)>;
         let mut prestate: PreState = (0..10)
             .map(|key| {
-                let account = Account { nonce: 1, balance: U256::from(key), bytecode_hash: None };
+                let account = Account {
+                    nonce: 1,
+                    balance: U256::from(key),
+                    bytecode_hash: None,
+                    #[cfg(feature = "account-ext")]
+                    extension: Default::default(),
+                };
                 let storage =
                     (1..11).map(|key| (B256::with_last_byte(key), U256::from(key))).collect();
                 (Address::with_last_byte(key), (account, storage))
@@ -1728,7 +1745,7 @@ mod storage_tests {
         let tx = provider_rw.tx_ref();
         for (address, (account, storage)) in &prestate {
             let hashed_address = keccak256(address);
-            tx.put::<tables::HashedAccounts>(hashed_address, *account).unwrap();
+            tx.put::<tables::HashedAccounts>(hashed_address, account.clone()).unwrap();
             for (slot, value) in storage {
                 tx.put::<tables::HashedStorages>(
                     hashed_address,
@@ -1811,7 +1828,7 @@ mod storage_tests {
         let account2_slot2_old_value = *account2.1.get(&slot2_key).unwrap();
         state.insert_account_with_storage(
             address2,
-            account2.0,
+            account2.0.clone(),
             HashMap::from_iter([(slot2, account2_slot2_old_value)]),
         );
 
@@ -1822,7 +1839,7 @@ mod storage_tests {
             AccountUpdate {
                 created: false,
                 destroyed: false,
-                info: account2.0,
+                info: account2.0.clone(),
                 storage: HashMap::from_iter([(
                     slot2,
                     SlotUpdate::changed(account2_slot2_old_value, account2_slot2_new_value, 0),
@@ -1835,7 +1852,7 @@ mod storage_tests {
         // change balance of account 3
         let address3 = Address::with_last_byte(3);
         let account3 = prestate.get_mut(&address3).unwrap();
-        state.insert_account(address3, account3.0);
+        state.insert_account(address3, account3.0.clone());
 
         account3.0.balance = U256::from(24);
         state.commit(HashMap::from_iter([(
@@ -1843,7 +1860,7 @@ mod storage_tests {
             AccountUpdate {
                 created: false,
                 destroyed: false,
-                info: account3.0,
+                info: account3.0.clone(),
                 storage: HashMap::default(),
             },
         )]));
@@ -1853,7 +1870,7 @@ mod storage_tests {
         // change nonce of account 4
         let address4 = Address::with_last_byte(4);
         let account4 = prestate.get_mut(&address4).unwrap();
-        state.insert_account(address4, account4.0);
+        state.insert_account(address4, account4.0.clone());
 
         account4.0.nonce = 128;
         state.commit(HashMap::from_iter([(
@@ -1861,7 +1878,7 @@ mod storage_tests {
             AccountUpdate {
                 created: false,
                 destroyed: false,
-                info: account4.0,
+                info: account4.0.clone(),
                 storage: HashMap::default(),
             },
         )]));
@@ -1869,15 +1886,20 @@ mod storage_tests {
         assert_state_root(&state, &prestate, "changed nonce");
 
         // recreate account 1
-        let account1_new =
-            Account { nonce: 56, balance: U256::from(123), bytecode_hash: Some(B256::random()) };
-        prestate.insert(address1, (account1_new, BTreeMap::default()));
+        let account1_new = Account {
+            nonce: 56,
+            balance: U256::from(123),
+            bytecode_hash: Some(B256::random()),
+            #[cfg(feature = "account-ext")]
+            extension: Default::default(),
+        };
+        prestate.insert(address1, (account1_new.clone(), BTreeMap::default()));
         state.commit(HashMap::from_iter([(
             address1,
             AccountUpdate {
                 created: true,
                 destroyed: false,
-                info: account1_new,
+                info: account1_new.clone(),
                 storage: HashMap::default(),
             },
         )]));
@@ -1915,13 +1937,13 @@ mod storage_tests {
         let account2 = Account { nonce: 1, ..Default::default() };
 
         let present_state = reth_execution_types::execution_state_from_init(
-            [(address1, (None, Some(account1_changed), BTreeMap::new()))],
+            [(address1, (None, Some(account1_changed.clone()), BTreeMap::new()))],
             [],
         );
         let previous_state = reth_execution_types::execution_state_from_init(
             [
                 (address1, (None, Some(account1), BTreeMap::new())),
-                (address2, (None, Some(account2), BTreeMap::new())),
+                (address2, (None, Some(account2.clone()), BTreeMap::new())),
             ],
             [],
         );

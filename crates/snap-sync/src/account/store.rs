@@ -2,6 +2,8 @@
 //!
 //! Each range replaces its key interval, and ranges commit in key order.
 
+#![cfg_attr(not(feature = "account-ext"), allow(clippy::clone_on_copy))]
+
 use crate::{
     common::SnapRecord, storage::persisted_storage_root, SnapAttemptStore, SnapStorageStore,
     SnapSyncError, SnapWrite, StorageProgress,
@@ -225,7 +227,9 @@ impl RangeDependencies {
     ) -> Self {
         let state = HashedPostState::default()
             .with_accounts(
-                accounts.iter().map(|(hash, account)| (*hash, Some(Account::from(*account)))),
+                accounts
+                    .iter()
+                    .map(|(hash, account)| (*hash, Some(Account::from(account.clone())))),
             )
             .with_storages(storages)
             .into_sorted();
@@ -328,7 +332,7 @@ impl RangeDependencies {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, not(feature = "account-ext")))]
 mod tests {
     use super::*;
     use crate::{

@@ -1,3 +1,5 @@
+#![cfg_attr(not(feature = "account-ext"), allow(clippy::clone_on_copy))]
+
 use crate::{
     in_memory::ExecutedBlock, CanonStateNotification, CanonStateNotifications,
     CanonStateSubscriptions,
@@ -74,7 +76,7 @@ impl<N: NodePrimitives> Default for TestBlockBuilder<N> {
             chain_spec: ChainSpec::default(),
             signer,
             signer_pk,
-            signer_execute_account_info: initial_account_info,
+            signer_execute_account_info: initial_account_info.clone(),
             signer_build_account_info: initial_account_info,
             post_block_state: B256HashMap::default(),
             with_state: false,
@@ -258,8 +260,11 @@ impl<N: NodePrimitives> TestBlockBuilder<N> {
         let single_cost = Self::single_tx_cost();
 
         // Look up parent's post-block state for correct revert construction.
-        let (pre_info, old_slot_value) =
-            self.post_block_state.get(&parent_hash).copied().unwrap_or((initial_info, U256::ZERO));
+        let (pre_info, old_slot_value) = self
+            .post_block_state
+            .get(&parent_hash)
+            .cloned()
+            .unwrap_or_else(|| (initial_info.clone(), U256::ZERO));
 
         let mut final_balance = pre_info.balance;
         for _ in 0..num_txs {
@@ -272,14 +277,15 @@ impl<N: NodePrimitives> TestBlockBuilder<N> {
         let account_revert = if pre_info.balance == initial_info.balance && pre_info.nonce == 0 {
             Some(None)
         } else {
-            Some(Some(pre_info))
+            Some(Some(pre_info.clone()))
         };
 
         let new_slot_value = U256::from(block_number).wrapping_add(U256::from(1));
 
         let storage_key = B256::new(TEST_STORAGE_SLOT.to_be_bytes());
         let mut state_init = EvmStateInit::default();
-        state_init.insert(self.signer, (Some(pre_info), Some(post_info), Default::default()));
+        state_init
+            .insert(self.signer, (Some(pre_info), Some(post_info.clone()), Default::default()));
         state_init.insert(
             TEST_STORAGE_ADDRESS,
             (None, None, B256HashMap::from_iter([(storage_key, (old_slot_value, new_slot_value))])),
@@ -414,7 +420,7 @@ impl<N: NodePrimitives> TestBlockBuilder<N> {
         state_init.insert(
             self.signer,
             (
-                Some(self.signer_execute_account_info),
+                Some(self.signer_execute_account_info.clone()),
                 Some(Account { nonce: final_nonce, balance: final_balance, ..Default::default() }),
                 Default::default(),
             ),

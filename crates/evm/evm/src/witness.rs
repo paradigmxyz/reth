@@ -111,16 +111,9 @@ impl<'a, DB> ExecutionWitnessRecord<'a, DB> {
         let mut keys = Vec::new();
         for (address, account) in &self.state.cache.accounts {
             let hashed_address = keccak256(address);
-            hashed_state.accounts.insert(
-                hashed_address,
-                account.as_ref().map(|account| PrimitiveAccount {
-                    nonce: account.nonce,
-                    balance: account.balance,
-                    bytecode_hash: (!account.code_hash.is_zero() &&
-                        account.code_hash != alloy_consensus::constants::KECCAK_EMPTY)
-                        .then_some(account.code_hash),
-                }),
-            );
+            hashed_state
+                .accounts
+                .insert(hashed_address, account.as_ref().map(PrimitiveAccount::from));
             if account.is_some() {
                 keys.push(address.to_vec().into());
             }

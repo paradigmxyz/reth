@@ -67,3 +67,8 @@ test-utils = [
     "reth-primitives-traits/test-utils",
     "reth-ethereum-primitives/test-utils",
 ]
+account-ext = [
+    "alloy-genesis/account-ext",
+    "alloy-trie/account-ext",
+    "reth-primitives-traits/account-ext",
+]

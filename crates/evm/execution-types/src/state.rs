@@ -5,6 +5,8 @@ use alloy_primitives::{
     Address, B256, U256,
 };
 use core::{convert::Infallible, marker::PhantomData};
+#[cfg(feature = "account-ext")]
+use evm2::evm::AccountExtension;
 use evm2::{
     bytecode::Bytecode as ExecutableBytecode,
     evm::{
@@ -45,6 +47,13 @@ pub struct RevertAccount {
     pub code_hash: B256,
     /// Optional account bytecode.
     pub code: Option<ExecutableBytecode>,
+    /// Raw chain-specific account data before the block changed it.
+    #[cfg(feature = "account-ext")]
+    #[cfg_attr(
+        feature = "serde",
+        serde(default, skip_serializing_if = "AccountExtension::is_empty")
+    )]
+    pub extension: AccountExtension,
 }
 
 impl RevertAccount {
@@ -56,6 +65,8 @@ impl RevertAccount {
             code_hash: self.code_hash,
             code: self.code.clone(),
             _non_exhaustive: (),
+            #[cfg(feature = "account-ext")]
+            extension: self.extension.clone(),
         }
     }
 }
@@ -67,6 +78,8 @@ impl From<AccountInfo> for RevertAccount {
             nonce: value.nonce,
             code_hash: value.code_hash,
             code: value.code,
+            #[cfg(feature = "account-ext")]
+            extension: value.extension,
         }
     }
 }
@@ -78,6 +91,8 @@ impl From<&AccountInfo> for RevertAccount {
             nonce: value.nonce,
             code_hash: value.code_hash,
             code: value.code.clone(),
+            #[cfg(feature = "account-ext")]
+            extension: value.extension.clone(),
         }
     }
 }
@@ -90,6 +105,8 @@ impl From<RevertAccount> for AccountInfo {
             code_hash: value.code_hash,
             code: value.code,
             _non_exhaustive: (),
+            #[cfg(feature = "account-ext")]
+            extension: value.extension,
         }
     }
 }
@@ -101,6 +118,10 @@ impl From<&RevertAccount> for Account {
             balance: value.balance,
             bytecode_hash: (!value.code_hash.is_zero() && value.code_hash != KECCAK_EMPTY)
                 .then_some(value.code_hash),
+            #[cfg(feature = "account-ext")]
+            extension: reth_primitives_traits::AccountExtension::from_shared(
+                value.extension.clone().into_shared(),
+            ),
         }
     }
 }
@@ -611,22 +632,11 @@ where
     }
 }
 fn account_info_ref_to_reth(info: &AccountInfo) -> Account {
-    account_parts_to_reth(info.nonce, info.balance, info.code_hash)
+    info.into()
 }
 
 fn account_to_info(account: Account) -> AccountInfo {
-    AccountInfo {
-        balance: account.balance,
-        nonce: account.nonce,
-        code_hash: account.get_bytecode_hash(),
-        code: None,
-        _non_exhaustive: (),
-    }
-}
-
-fn account_parts_to_reth(nonce: u64, balance: alloy_primitives::U256, code_hash: B256) -> Account {
-    let bytecode_hash = (!code_hash.is_zero() && code_hash != KECCAK_EMPTY).then_some(code_hash);
-    Account { nonce, balance, bytecode_hash }
+    account.into()
 }
 
 #[cfg(test)]
@@ -636,6 +646,36 @@ mod tests {
     use evm2::evm::{AccountChangeRef, StorageChange, Tee};
     use reth_trie_common::KeccakKeyHasher;
 
+    #[test]
+    #[cfg(feature = "account-ext")]
+    fn extension_only_updates_survive_hashing_and_block_reverts() {
+        let address = Address::repeat_byte(0x42);
+        let original = AccountInfo {
+            nonce: 1,
+            extension: AccountExtension::copy_from_slice(&[1; 32]),
+            ..Default::default()
+        };
+        let current = AccountInfo {
+            extension: AccountExtension::copy_from_slice(&[2; 32]),
+            ..original.clone()
+        };
+        let mut pending = evm2::evm::PendingState::default();
+        pending.insert_account(address, Some(original.clone()), Some(current.clone()));
+        let mut state = BlockStateAccumulator::new();
+        let first_revert = extend_state_and_collect_reverts(&mut state, &pending);
+        let hashed = hashed_post_state_from_execution_state::<KeccakKeyHasher>(&state);
+        let account = hashed.accounts[&alloy_primitives::keccak256(address)].as_ref().unwrap();
+        assert_eq!(account.extension.as_ptr(), current.extension.as_ptr());
+        assert_eq!(first_revert.accounts[&address].as_ref().unwrap().extension, original.extension);
+
+        pending.insert_account(address, Some(current.clone()), Some(original.clone()));
+        let second_revert = extend_state_and_collect_reverts(&mut state, &pending);
+        assert_eq!(state.accounts().count(), 0);
+        let reverted = revert_execution_state(&state, &[first_revert, second_revert], 1);
+        let (_, delta) = reverted.accounts().next().unwrap();
+        assert_eq!(delta.original.as_ref(), Some(&original));
+        assert_eq!(delta.current.as_ref(), Some(&current));
+    }
     const fn account_change<'a>(
         address: Address,
         original: Option<&'a AccountInfo>,

@@ -1,9 +1,10 @@
+#![cfg_attr(not(feature = "account-ext"), allow(clippy::clone_on_copy))]
+
 use crate::{
     hashed_post_state_from_state_source, state, BlockExecutionOutput, BlockExecutionResult,
     BlockReverts, EvmState, IndexedBlockState, RevertAccount, RevertToSlot, StorageReverts,
 };
 use alloc::{collections::BTreeMap, vec, vec::Vec};
-use alloy_consensus::constants::KECCAK_EMPTY;
 use alloy_eips::eip7685::Requests;
 use alloy_primitives::{
     logs_bloom,
@@ -233,7 +234,7 @@ impl<T> ExecutionOutcome<T> {
                 accounts: reverts
                     .iter()
                     .filter_map(|(address, (original, _))| {
-                        original.map(|account| (*address, account.map(account_to_revert)))
+                        original.clone().map(|account| (*address, account.map(account_to_revert)))
                     })
                     .collect(),
                 storage: reverts
@@ -653,34 +654,27 @@ impl<T> From<(BlockExecutionOutput<T>, BlockNumber)> for ExecutionOutcome<T> {
 }
 
 fn account_info_from_reth(account: Account) -> AccountInfo {
-    AccountInfo {
-        balance: account.balance,
-        nonce: account.nonce,
-        code_hash: account.get_bytecode_hash(),
-        code: None,
-        _non_exhaustive: (),
-    }
+    account.into()
 }
 
 fn account_to_revert(account: Account) -> RevertAccount {
-    RevertAccount {
-        balance: account.balance,
-        nonce: account.nonce,
-        code_hash: account.get_bytecode_hash(),
-        code: None,
-    }
+    AccountInfo::from(account).into()
 }
 
 fn account_info_to_reth(info: &AccountInfo) -> Account {
-    let bytecode_hash =
-        (!info.code_hash.is_zero() && info.code_hash != KECCAK_EMPTY).then_some(info.code_hash);
-    Account { nonce: info.nonce, balance: info.balance, bytecode_hash }
+    info.into()
 }
 
 #[cfg(test)]
 fn multi_block_outcome_for_serde() -> ExecutionOutcome {
     let address = Address::repeat_byte(0x42);
-    let original = AccountInfo { balance: U256::from(1), nonce: 1, ..Default::default() };
+    let original = AccountInfo {
+        balance: U256::from(1),
+        nonce: 1,
+        #[cfg(feature = "account-ext")]
+        extension: evm2::evm::AccountExtension::copy_from_slice(&[0x82; 32]),
+        ..Default::default()
+    };
     let current = AccountInfo { balance: U256::from(3), nonce: 2, ..Default::default() };
     let mut block1 = BlockStateAccumulator::new();
     block1
@@ -926,7 +920,7 @@ pub(super) mod serde_bincode_compat {
         use serde_with::serde_as;
 
         #[test]
-        fn bincode_roundtrip_preserves_multi_block_operations() {
+        fn binary_roundtrip_preserves_multi_block_operations() {
             #[serde_as]
             #[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
             struct Data<T: reth_primitives_traits::Receipt> {
@@ -936,8 +930,12 @@ pub(super) mod serde_bincode_compat {
 
             let data = Data { data: multi_block_outcome_for_serde() };
 
-            let encoded = bincode::serialize(&data).unwrap();
-            let decoded = bincode::deserialize::<Data<Receipt>>(&encoded).unwrap();
+            #[cfg(not(feature = "account-ext"))]
+            let decoded =
+                bincode::deserialize::<Data<Receipt>>(&bincode::serialize(&data).unwrap()).unwrap();
+            #[cfg(feature = "account-ext")]
+            let decoded =
+                rmp_serde::from_slice::<Data<Receipt>>(&rmp_serde::to_vec(&data).unwrap()).unwrap();
             assert_serde_preserves_block_operations(data.data, decoded.data);
         }
     }
@@ -1124,8 +1122,10 @@ mod tests {
     #[test]
     fn serde_roundtrip_preserves_multi_block_operations() {
         let expected = multi_block_outcome_for_serde();
-        let encoded = bincode::serialize(&expected).unwrap();
-        let actual = bincode::deserialize(&encoded).unwrap();
+        #[cfg(not(feature = "account-ext"))]
+        let actual = bincode::deserialize(&bincode::serialize(&expected).unwrap()).unwrap();
+        #[cfg(feature = "account-ext")]
+        let actual = rmp_serde::from_slice(&rmp_serde::to_vec(&expected).unwrap()).unwrap();
 
         assert_serde_preserves_block_operations(expected, actual);
     }
@@ -1484,7 +1484,13 @@ mod tests {
                     address1,
                     (
                         None,
-                        Some(Account { nonce: 1, balance: U256::from(100), bytecode_hash: None }),
+                        Some(Account {
+                            nonce: 1,
+                            balance: U256::from(100),
+                            bytecode_hash: None,
+                            #[cfg(feature = "account-ext")]
+                            extension: Default::default(),
+                        }),
                         BTreeMap::default(),
                     ),
                 ),
@@ -1492,7 +1498,13 @@ mod tests {
                     address2,
                     (
                         None,
-                        Some(Account { nonce: 2, balance: U256::from(200), bytecode_hash: None }),
+                        Some(Account {
+                            nonce: 2,
+                            balance: U256::from(200),
+                            bytecode_hash: None,
+                            #[cfg(feature = "account-ext")]
+                            extension: Default::default(),
+                        }),
                         BTreeMap::default(),
                     ),
                 ),

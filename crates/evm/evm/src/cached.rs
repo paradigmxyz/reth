@@ -303,6 +303,8 @@ mod tests {
                 code_hash,
                 code: None,
                 _non_exhaustive: (),
+                #[cfg(feature = "account-ext")]
+                extension: Default::default(),
             }),
             code: Bytecode::new_raw([0x00].as_slice().into()),
             storage: value,

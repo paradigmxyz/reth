@@ -1,4 +1,6 @@
 //! Dummy blocks and data for tests
+#![cfg_attr(not(feature = "account-ext"), allow(clippy::clone_on_copy))]
+
 use crate::{DBProvider, DatabaseProviderRW, ExecutionOutcome};
 use alloy_consensus::{TxLegacy, EMPTY_OMMER_ROOT_HASH};
 use alloy_primitives::{
@@ -186,11 +188,17 @@ fn bundle_state_root(execution_outcome: &ExecutionOutcome) -> B256 {
 }
 
 const fn test_account(nonce: u64, balance: U256) -> Account {
-    Account { nonce, balance, bytecode_hash: None }
+    Account {
+        nonce,
+        balance,
+        bytecode_hash: None,
+        #[cfg(feature = "account-ext")]
+        extension: reth_primitives_traits::AccountExtension::new(),
+    }
 }
 
-const fn account_info_to_reth(info: &ExecutionAccountInfo) -> Account {
-    Account { nonce: info.nonce, balance: info.balance, bytecode_hash: None }
+fn account_info_to_reth(info: &ExecutionAccountInfo) -> Account {
+    info.into()
 }
 
 fn execution_outcome(
@@ -229,7 +237,11 @@ fn block1(
         [
             (
                 account1,
-                (None, Some(info), BTreeMap::from_iter([(slot, (U256::ZERO, U256::from(10)))])),
+                (
+                    None,
+                    Some(info.clone()),
+                    BTreeMap::from_iter([(slot, (U256::ZERO, U256::from(10)))]),
+                ),
             ),
             (account2, (None, Some(info), Default::default())),
         ],
@@ -291,6 +303,8 @@ fn block2(
                 balance: U256::from(10),
                 code_hash: alloy_primitives::KECCAK256_EMPTY,
                 code: None,
+                #[cfg(feature = "account-ext")]
+                extension: Default::default(),
             }),
         )]),
         storage: HashMap::from_iter([(
@@ -440,6 +454,8 @@ fn block4(
                 balance: U256::from(idx),
                 code_hash: alloy_primitives::KECCAK256_EMPTY,
                 code: None,
+                #[cfg(feature = "account-ext")]
+                extension: Default::default(),
             }),
         );
         block_reverts.storage.insert(
@@ -530,6 +546,8 @@ fn block5(
                     balance: U256::from(idx * 2),
                     code_hash: alloy_primitives::KECCAK256_EMPTY,
                     code: None,
+                    #[cfg(feature = "account-ext")]
+                    extension: Default::default(),
                 }),
             );
             block_reverts.storage.insert(

@@ -843,6 +843,10 @@ where
         let Self { executor, evm_env, transactions, ctx, parent, assembler } = self;
 
         let (output, block_access_list) = executor.finish_with_block_access_list()?;
+        if block_access_list.is_some() {
+            reth_storage_api::ensure_no_account_extensions("BAL")
+                .map_err(BlockExecutionError::other)?;
+        }
         let block_access_list = block_access_list.map(|bal| {
             let mut raw = Vec::new();
             let hash = compute_block_access_list_hash_with_buf(&bal, &mut raw);
@@ -1089,6 +1093,8 @@ where
             .map_err(BlockExecutionError::other)?;
         let mut executor = evm_config.block_executor_factory().create_executor(evm, ctx);
         if block.header().block_access_list_hash().is_some() {
+            reth_storage_api::ensure_no_account_extensions("BAL")
+                .map_err(BlockExecutionError::other)?;
             executor.enable_block_access_list_builder();
         }
         if let Some(hook) = state_hook &&

@@ -93,6 +93,11 @@ reqwest.workspace = true
 reth-rpc-layer.workspace = true
 
 [features]
+account-ext = [
+    "reth-node-builder/account-ext",
+    "reth-ethereum-consensus/account-ext",
+    "reth-ethereum-payload-builder/account-ext",
+]
 default = []
 gmp = ["evm2/gmp", "reth-evm/gmp", "reth-evm-ethereum/gmp"]
 jit = ["reth-evm-ethereum/jit"]

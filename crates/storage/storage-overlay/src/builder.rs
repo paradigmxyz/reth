@@ -870,6 +870,8 @@ mod tests {
                         nonce: id as u64,
                         balance: U256::from(id),
                         bytecode_hash: None,
+                        #[cfg(feature = "account-ext")]
+                        extension: Default::default(),
                     }),
                     [(slot, (U256::ZERO, U256::from(id)))].into(),
                 ),
@@ -949,6 +951,10 @@ mod tests {
                         nonce: account.nonce,
                         balance: account.balance,
                         bytecode_hash: Some(code_hash),
+                        #[cfg(feature = "account-ext")]
+                        extension: reth_primitives_traits::AccountExtension::from_shared(
+                            account.extension.clone().into_shared(),
+                        ),
                     }),
                     [(slot, (U256::ZERO, value))].into(),
                 ),

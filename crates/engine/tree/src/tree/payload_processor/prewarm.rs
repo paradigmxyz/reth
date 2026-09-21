@@ -1281,6 +1281,8 @@ mod tests {
             balance: U256::from(1),
             nonce: 3,
             bytecode_hash: Some(B256::repeat_byte(0xaa)),
+            #[cfg(feature = "account-ext")]
+            extension: Default::default(),
         };
         account.apply_bal_info(info);
 

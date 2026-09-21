@@ -179,7 +179,7 @@ impl<T: MetadataProvider> SnapAttemptStore for T {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, not(feature = "account-ext")))]
 mod tests {
     use super::*;
     use crate::test_utils::insert_generation_headers;
@@ -201,7 +201,7 @@ mod tests {
         Bytecode::new_raw(Bytes::from_static(&[0x60, 0x00]))
     }
 
-    fn generation(block: u64) -> SnapGeneration {
+    const fn generation(block: u64) -> SnapGeneration {
         SnapGeneration::new(
             BlockNumHash::new(block, B256::repeat_byte(block as u8)),
             B256::repeat_byte(0xaa),

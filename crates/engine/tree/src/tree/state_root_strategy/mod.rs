@@ -1388,6 +1388,8 @@ mod tests {
                     balance: U256::from(rng.random::<u64>()),
                     nonce: rng.random::<u64>(),
                     bytecode_hash: Some(KECCAK_EMPTY),
+                    #[cfg(feature = "account-ext")]
+                    extension: Default::default(),
                 };
                 state_init.push((address, (None, Some(account), storage)));
             }
@@ -1416,6 +1418,10 @@ mod tests {
                         nonce: info.nonce,
                         balance: info.balance,
                         bytecode_hash: Some(info.code_hash),
+                        #[cfg(feature = "account-ext")]
+                        extension: reth_primitives_traits::AccountExtension::from_shared(
+                            info.extension.clone().into_shared(),
+                        ),
                     });
                     (address, account)
                 });
@@ -1452,6 +1458,10 @@ mod tests {
                     nonce: info.nonce,
                     balance: info.balance,
                     bytecode_hash: Some(info.code_hash),
+                    #[cfg(feature = "account-ext")]
+                    extension: reth_primitives_traits::AccountExtension::from_shared(
+                        info.extension.clone().into_shared(),
+                    ),
                 };
                 entry.1.extend(storage);
             }

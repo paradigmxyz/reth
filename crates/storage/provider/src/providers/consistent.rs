@@ -1,3 +1,6 @@
+// Accounts are only Copy when account-ext is disabled.
+#![cfg_attr(not(feature = "account-ext"), allow(clippy::clone_on_copy))]
+
 use super::{DatabaseProviderRO, ProviderFactory, ProviderNodeTypes};
 use crate::{
     providers::{StaticFileProvider, StaticFileProviderRWRefMut},
@@ -1393,7 +1396,7 @@ mod tests {
         test_utils::create_test_provider_factory, BlockWriter,
     };
     use alloy_eips::BlockHashOrNumber;
-    use alloy_primitives::{map::AddressMap, Address, B256, KECCAK256_EMPTY, U256};
+    use alloy_primitives::{map::AddressMap, Address, B256, U256};
     use itertools::Itertools;
     use rand::Rng;
     use reth_chain_state::{ExecutedBlock, NewCanonicalChain};
@@ -1450,12 +1453,7 @@ mod tests {
     }
 
     fn account_to_revert(account: Account) -> RevertAccount {
-        RevertAccount {
-            balance: account.balance,
-            nonce: account.nonce,
-            code_hash: account.bytecode_hash.unwrap_or(KECCAK256_EMPTY),
-            code: None,
-        }
+        reth_execution_types::ExecutionAccountInfo::from(account).into()
     }
 
     fn block_revert(
@@ -1759,9 +1757,9 @@ mod tests {
         let (in_memory_changesets, in_memory_state) = random_changeset_range(
             &mut rng,
             &in_memory_blocks,
-            database_state
-                .iter()
-                .map(|(address, (account, storage))| (*address, (*account, storage.clone()))),
+            database_state.iter().map(|(address, (account, storage))| {
+                (*address, (account.clone(), storage.clone()))
+            }),
             0..0,
             0..0,
         );
@@ -1786,7 +1784,7 @@ mod tests {
                     .map(|block_changesets| {
                         let mut accounts = AddressMap::default();
                         for (address, account, _) in block_changesets {
-                            accounts.insert(*address, Some(account_to_revert(*account)));
+                            accounts.insert(*address, Some(account_to_revert(account.clone())));
                         }
                         BlockReverts { accounts, storage: AddressMap::default() }
                     })
@@ -1807,14 +1805,14 @@ mod tests {
                     let senders = block.senders().expect("failed to recover senders");
                     let original_accounts = in_memory_changesets
                         .iter()
-                        .map(|(address, account, _)| (*address, *account))
+                        .map(|(address, account, _)| (*address, account.clone()))
                         .collect::<AddressMap<_>>();
                     let state = execution_state_from_init(
                         in_memory_state.into_iter().map(|(address, (account, _))| {
                             (
                                 address,
                                 (
-                                    original_accounts.get(&address).copied(),
+                                    original_accounts.get(&address).cloned(),
                                     Some(account),
                                     BTreeMap::default(),
                                 ),
@@ -1879,6 +1877,8 @@ mod tests {
             nonce: 1,
             balance: U256::from(1000),
             bytecode_hash: None,
+            #[cfg(feature = "account-ext")]
+            extension: Default::default(),
         };
         let slot = U256::from(0x42);
         let slot_b256 = B256::from(slot);
@@ -1902,11 +1902,11 @@ mod tests {
             &{
                 let (state, block_reverts) = single_account_state_and_reverts(
                     address,
-                    account,
+                    account.clone(),
                     [(slot, (U256::ZERO, U256::from(100)))],
                     [
                         BlockReverts::default(),
-                        block_revert([(address, Some(account), vec![(slot, U256::ZERO)])]),
+                        block_revert([(address, Some(account.clone()), vec![(slot, U256::ZERO)])]),
                     ],
                 );
                 execution_outcome_from_state_and_reverts(state, block_reverts, 0)
@@ -1956,6 +1956,8 @@ mod tests {
             nonce: 1,
             balance: U256::from(1000),
             bytecode_hash: None,
+            #[cfg(feature = "account-ext")]
+            extension: Default::default(),
         };
         let slot = U256::from(0x42);
 
@@ -1968,9 +1970,9 @@ mod tests {
             &{
                 let (state, block_reverts) = single_account_state_and_reverts(
                     address,
-                    account,
+                    account.clone(),
                     [(slot, (U256::ZERO, U256::from(100)))],
-                    [block_revert([(address, Some(account), vec![(slot, U256::ZERO)])])],
+                    [block_revert([(address, Some(account.clone()), vec![(slot, U256::ZERO)])])],
                 );
                 execution_outcome_from_state_and_reverts(state, block_reverts, 0)
             },
@@ -1984,7 +1986,7 @@ mod tests {
         let senders = in_mem_block.senders().expect("failed to recover senders");
         let (state, _) = single_account_state_and_reverts(
             address,
-            account,
+            account.clone(),
             [(slot, (U256::from(100), U256::from(200)))],
             [block_revert([(address, Some(account), vec![(slot, U256::from(100))])])],
         );
@@ -2048,6 +2050,8 @@ mod tests {
             nonce: 1,
             balance: U256::from(1000),
             bytecode_hash: None,
+            #[cfg(feature = "account-ext")]
+            extension: Default::default(),
         };
         let slot = U256::from(0x42);
 
@@ -2060,10 +2064,10 @@ mod tests {
             &{
                 let (state, block_reverts) = single_account_state_and_reverts(
                     address,
-                    account,
+                    account.clone(),
                     [(slot, (U256::ZERO, U256::from(100)))],
                     [
-                        block_revert([(address, Some(account), vec![(slot, U256::ZERO)])]),
+                        block_revert([(address, Some(account.clone()), vec![(slot, U256::ZERO)])]),
                         BlockReverts::default(),
                     ],
                 );
@@ -2079,7 +2083,7 @@ mod tests {
         let senders = in_mem_block.senders().expect("failed to recover senders");
         let (state, _) = single_account_state_and_reverts(
             address,
-            account,
+            account.clone(),
             [(slot, (U256::from(100), U256::from(200)))],
             [block_revert([(address, Some(account), vec![(slot, U256::from(100))])])],
         );

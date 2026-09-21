@@ -4,6 +4,9 @@ use alloc::vec;
 use alloc::{format, string::String, vec::Vec};
 use alloy_primitives::{Address, BlockNumber, B256, U256};
 use core::ops::RangeInclusive;
+use reth_primitives_traits::Account;
+#[cfg(feature = "account-ext")]
+use reth_primitives_traits::AccountExtension;
 use reth_trie_common::{hash_builder::HashBuilderState, StoredSubNode};
 
 /// Saves the progress of Merkle stage.
@@ -73,8 +76,9 @@ impl reth_codecs::Compact for MerkleCheckpoint {
         len
     }
 
-    fn from_compact(mut buf: &[u8], _len: usize) -> (Self, &[u8]) {
+    fn from_compact(buf: &[u8], len: usize) -> (Self, &[u8]) {
         use bytes::Buf;
+        let (mut buf, trailing) = if len == 0 { (buf, &[][..]) } else { buf.split_at(len) };
         let target_block = buf.get_u64();
 
         let last_account_key = B256::from_slice(&buf[..32]);
@@ -103,7 +107,10 @@ impl reth_codecs::Compact for MerkleCheckpoint {
             }
         };
 
-        (Self { target_block, last_account_key, walker_stack, state, storage_root_checkpoint }, buf)
+        (
+            Self { target_block, last_account_key, walker_stack, state, storage_root_checkpoint },
+            if len == 0 { buf } else { trailing },
+        )
     }
 }
 
@@ -124,25 +131,28 @@ pub struct StorageRootMerkleCheckpoint {
     pub account_balance: U256,
     /// The account bytecode hash.
     pub account_bytecode_hash: B256,
+    /// Payload of the account whose storage root is in progress.
+    #[cfg(feature = "account-ext")]
+    pub account_extension: AccountExtension,
 }
 
 impl StorageRootMerkleCheckpoint {
     /// Creates a new storage root merkle checkpoint.
-    pub const fn new(
+    pub fn new(
         last_storage_key: B256,
         walker_stack: Vec<StoredSubNode>,
         state: HashBuilderState,
-        account_nonce: u64,
-        account_balance: U256,
-        account_bytecode_hash: B256,
+        account: Account,
     ) -> Self {
         Self {
             last_storage_key,
             walker_stack,
             state,
-            account_nonce,
-            account_balance,
-            account_bytecode_hash,
+            account_nonce: account.nonce,
+            account_balance: account.balance,
+            account_bytecode_hash: account.get_bytecode_hash(),
+            #[cfg(feature = "account-ext")]
+            account_extension: account.extension,
         }
     }
 }
@@ -177,12 +187,22 @@ impl reth_codecs::Compact for StorageRootMerkleCheckpoint {
 
         buf.put_slice(self.account_bytecode_hash.as_slice());
         len += 32;
+        #[cfg(feature = "account-ext")]
+        if !self.account_extension.is_empty() {
+            let extension_len = u16::try_from(self.account_extension.len())
+                .expect("account extension exceeds compact encoding limit");
+            buf.put_u16(extension_len);
+            len += 2;
+            buf.put_slice(&self.account_extension);
+            len += self.account_extension.len();
+        }
 
         len
     }
 
-    fn from_compact(mut buf: &[u8], _len: usize) -> (Self, &[u8]) {
+    fn from_compact(buf: &[u8], len: usize) -> (Self, &[u8]) {
         use bytes::Buf;
+        let (mut buf, trailing) = if len == 0 { (buf, &[][..]) } else { buf.split_at(len) };
 
         let last_storage_key = B256::from_slice(&buf[..32]);
         buf.advance(32);
@@ -203,6 +223,15 @@ impl reth_codecs::Compact for StorageRootMerkleCheckpoint {
         let (account_balance, mut buf) = U256::from_compact(buf, balance_len);
         let account_bytecode_hash = B256::from_slice(&buf[..32]);
         buf.advance(32);
+        #[cfg(feature = "account-ext")]
+        let (account_extension, buf) = if buf.is_empty() {
+            (AccountExtension::default(), buf)
+        } else {
+            let account_extension_len = buf.get_u16() as usize;
+            let account_extension =
+                AccountExtension::copy_from_slice(&buf[..account_extension_len]);
+            (account_extension, &buf[account_extension_len..])
+        };
 
         (
             Self {
@@ -212,8 +241,10 @@ impl reth_codecs::Compact for StorageRootMerkleCheckpoint {
                 account_nonce,
                 account_balance,
                 account_bytecode_hash,
+                #[cfg(feature = "account-ext")]
+                account_extension,
             },
-            buf,
+            if len == 0 { buf } else { trailing },
         )
     }
 }
@@ -647,12 +678,33 @@ mod tests {
             account_nonce: 0,
             account_balance: U256::ZERO,
             account_bytecode_hash: B256::ZERO,
+            #[cfg(feature = "account-ext")]
+            account_extension: vec![0x42; 32].into(),
         };
 
         let mut buf = Vec::new();
         let encoded = checkpoint.to_compact(&mut buf);
-        let (decoded, _) = StorageRootMerkleCheckpoint::from_compact(&buf, encoded);
+        assert_eq!(encoded, buf.len());
+
+        #[cfg(feature = "account-ext")]
+        {
+            let mut empty_checkpoint = checkpoint.clone();
+            empty_checkpoint.account_extension = Default::default();
+            let mut empty_buf = Vec::new();
+            let empty_encoded = empty_checkpoint.to_compact(&mut empty_buf);
+            assert_eq!(encoded, empty_encoded + 2 + checkpoint.account_extension.len());
+            assert_eq!(empty_encoded, empty_buf.len());
+            empty_buf.extend_from_slice(&[0x12, 0x34]);
+            let (decoded, rest) =
+                StorageRootMerkleCheckpoint::from_compact(&empty_buf, empty_encoded);
+            assert_eq!(decoded, empty_checkpoint);
+            assert_eq!(rest, &[0x12, 0x34]);
+        }
+
+        buf.extend_from_slice(&[0x12, 0x34]);
+        let (decoded, rest) = StorageRootMerkleCheckpoint::from_compact(&buf, encoded);
         assert_eq!(decoded, checkpoint);
+        assert_eq!(rest, &[0x12, 0x34]);
     }
 
     #[test]
@@ -673,6 +725,8 @@ mod tests {
             account_bytecode_hash: b256!(
                 "0x0fffffffffffffffffffffffffffffff0fffffffffffffffffffffffffffffff"
             ),
+            #[cfg(feature = "account-ext")]
+            account_extension: vec![0x42; 32].into(),
         };
 
         // Create a merkle checkpoint with the storage root checkpoint

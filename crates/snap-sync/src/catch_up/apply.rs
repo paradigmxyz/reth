@@ -43,7 +43,8 @@ impl BalStateUpdate {
 }
 
 /// What the downloaded state holds for an account a list changes.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[cfg_attr(not(feature = "account-ext"), derive(Copy))]
 pub enum DownloadedAccount {
     /// The account's range is not downloaded yet.
     Unknown,
@@ -53,7 +54,7 @@ pub enum DownloadedAccount {
     Present(Account),
 }
 
-#[cfg(test)]
+#[cfg(all(test, not(feature = "account-ext")))]
 mod tests {
     use super::*;
     use crate::{test_utils::hashed_factory, AccountCoverage, SnapCatchUpStore};
@@ -86,7 +87,7 @@ mod tests {
     const ACCOUNT: Address = Address::repeat_byte(0xaa);
     const SENDER: Address = Address::repeat_byte(0x11);
 
-    fn index(value: u64) -> BlockAccessIndex {
+    const fn index(value: u64) -> BlockAccessIndex {
         BlockAccessIndex::new(value)
     }
 
@@ -164,8 +165,13 @@ mod tests {
 
     #[test]
     fn untouched_fields_keep_their_downloaded_values() {
-        let existing =
-            Account { balance: U256::from(9), nonce: 4, bytecode_hash: Some(B256::repeat_byte(1)) };
+        let existing = Account {
+            balance: U256::from(9),
+            nonce: 4,
+            bytecode_hash: Some(B256::repeat_byte(1)),
+            #[cfg(feature = "account-ext")]
+            extension: Default::default(),
+        };
         let changes = AccountChanges::new(ACCOUNT)
             .with_balance_change(BalanceChange::new(index(1), U256::from(10)))
             .with_balance_change(BalanceChange::new(index(2), U256::from(20)));
@@ -180,14 +186,25 @@ mod tests {
         let update = apply(&changes, DownloadedAccount::Absent);
         assert_eq!(
             update.state.accounts[&keccak256(ACCOUNT)],
-            Some(Account { balance: U256::from(20), nonce: 0, bytecode_hash: None })
+            Some(Account {
+                balance: U256::from(20),
+                nonce: 0,
+                bytecode_hash: None,
+                #[cfg(feature = "account-ext")]
+                extension: Default::default(),
+            })
         );
     }
 
     #[test]
     fn zeroed_slots_and_cleared_code_are_written() {
-        let existing =
-            Account { balance: U256::from(1), nonce: 1, bytecode_hash: Some(B256::repeat_byte(1)) };
+        let existing = Account {
+            balance: U256::from(1),
+            nonce: 1,
+            bytecode_hash: Some(B256::repeat_byte(1)),
+            #[cfg(feature = "account-ext")]
+            extension: Default::default(),
+        };
         let changes = AccountChanges::new(ACCOUNT)
             .with_code_change(CodeChange::new(index(1), bytes!("6001")))
             .with_code_change(CodeChange::new(index(2), Bytes::new()))
@@ -236,6 +253,10 @@ mod tests {
                     balance: info.balance,
                     bytecode_hash: (info.code_hash != alloy_primitives::KECCAK256_EMPTY)
                         .then_some(info.code_hash),
+                    #[cfg(feature = "account-ext")]
+                    extension: reth_primitives_traits::AccountExtension::from_shared(
+                        info.extension.clone().into_shared(),
+                    ),
                 },
             );
             if let Some(storage) = db.cache.storage.get(address) {

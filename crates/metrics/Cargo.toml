@@ -29,3 +29,4 @@ libc.workspace = true
 
 [features]
 common = ["tokio", "futures", "tokio-util", "reth-primitives-traits"]
+account-ext = ["reth-primitives-traits?/account-ext"]

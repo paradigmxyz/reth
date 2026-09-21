@@ -237,7 +237,7 @@ pub(crate) fn persisted_storage_root(tx: &impl DbTx, account: B256) -> Result<B2
     failed.map_or(Ok(root), |error| Err(error.into()))
 }
 
-#[cfg(test)]
+#[cfg(all(test, not(feature = "account-ext")))]
 mod tests {
     use super::*;
     use crate::test_utils::{
@@ -251,7 +251,7 @@ mod tests {
 
     const CONTRACT: B256 = B256::repeat_byte(0x22);
 
-    fn slot(value: u8) -> B256 {
+    const fn slot(value: u8) -> B256 {
         B256::with_last_byte(value)
     }
 

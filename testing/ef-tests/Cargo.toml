@@ -18,6 +18,12 @@ asm-keccak = [
     "reth-evm/asm-keccak",
     "reth-evm-ethereum/asm-keccak",
 ]
+account-ext = [
+    "reth-db-common/account-ext",
+    "reth-ethereum-consensus/account-ext",
+    "reth-evm-ethereum/account-ext",
+    "reth-evm/account-ext",
+]
 
 [dependencies]
 reth-chainspec.workspace = true

@@ -18,4 +18,6 @@ serde_json.workspace = true
 tokio = { workspace = true, features = ["time"] }
 tracing.workspace = true
 
+[features]
+account-ext = ["reth-ethereum/account-ext"]
 [lints]

@@ -1,3 +1,6 @@
+// Accounts are only Copy when account-ext is disabled.
+#![cfg_attr(not(feature = "account-ext"), allow(clippy::clone_on_copy))]
+
 use alloy_primitives::{keccak256, Address, BlockNumber, TxHash, TxNumber, B256};
 use reth_chainspec::MAINNET;
 use reth_db::{
@@ -414,7 +417,7 @@ impl TestStageDB {
                 let hashed_address = keccak256(address);
 
                 // Insert into account tables.
-                tx.put::<tables::PlainAccountState>(address, account)?;
+                tx.put::<tables::PlainAccountState>(address, account.clone())?;
                 tx.put::<tables::HashedAccounts>(hashed_address, account)?;
 
                 // Insert into storage tables.

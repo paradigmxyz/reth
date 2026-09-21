@@ -266,6 +266,9 @@ where
     debug!(target: "engine::stream::reorg", number = reorg_target.header().number(), hash = %previous_hash, "Selected reorg target");
 
     let has_bal = reorg_target.header().block_access_list_hash().is_some();
+    if has_bal {
+        reth_storage_api::ensure_no_account_extensions("BAL")?;
+    }
     let state_provider = provider.state_by_block_hash(reorg_target.header().parent_hash())?;
     let evm_env = evm_config.evm_env(reorg_target.header()).map_err(RethError::other)?;
     let evm = evm_config

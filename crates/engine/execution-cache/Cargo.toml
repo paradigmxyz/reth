@@ -36,3 +36,4 @@ test-utils = [
     "reth-trie/test-utils",
     "reth-evm/test-utils",
 ]
+account-ext = ["reth-provider/account-ext", "reth-evm/account-ext"]

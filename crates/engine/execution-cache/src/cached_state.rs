@@ -1259,15 +1259,7 @@ impl ExecutionCache {
                 self.0.account_cache.remove(&address);
                 continue;
             };
-            self.insert_account(
-                address,
-                Some(Account {
-                    nonce: info.nonce,
-                    balance: info.balance,
-                    bytecode_hash: (!info.code_hash.is_zero() && info.code_hash != KECCAK256_EMPTY)
-                        .then_some(info.code_hash),
-                }),
-            );
+            self.insert_account(address, Some(info.into()));
         }
         for (key, value) in state_updates.storage() {
             self.insert_storage(key.address(), key.key().into(), Some(value.current));
@@ -1559,6 +1551,8 @@ mod tests {
                 code_hash: B256::random(), // Non-empty code hash
                 code: None,
                 _non_exhaustive: (),
+                #[cfg(feature = "account-ext")]
+                extension: Default::default(),
             }),
         );
 
@@ -1591,6 +1585,8 @@ mod tests {
                 code_hash: alloy_primitives::KECCAK256_EMPTY, // Empty code hash = EOA
                 code: None,
                 _non_exhaustive: (),
+                #[cfg(feature = "account-ext")]
+                extension: Default::default(),
             }),
         );
 

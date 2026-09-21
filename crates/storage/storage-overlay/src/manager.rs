@@ -1001,6 +1001,8 @@ mod tests {
                         nonce: id as u64,
                         balance: U256::from(id),
                         bytecode_hash: None,
+                        #[cfg(feature = "account-ext")]
+                        extension: Default::default(),
                     }),
                     [(slot, (U256::ZERO, U256::from(id)))].into(),
                 ),

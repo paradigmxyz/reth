@@ -182,6 +182,10 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
                     let build_bal = this.provider().chain_spec().is_amsterdam_active_at_timestamp(
                         evm_env.block_env().timestamp.to::<u64>(),
                     );
+                    if build_bal {
+                        reth_storage_api::ensure_no_account_extensions("BAL")
+                            .map_err(Self::Error::from_eth_err)?;
+                    }
 
                     let ctx = this
                         .evm_config()
