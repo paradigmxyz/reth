@@ -658,8 +658,8 @@ impl DefaultStateRootStrategy {
             );
 
             let result = task.run();
-            // Stage the trie before sending the result so `finish` can publish it after
-            // accepting the state root. Payload building supplies no output block hash.
+            // Stage the trie before sending the result so `publish_sparse_trie` can take it
+            // once `finish` accepts the state root. Payload building supplies no output block hash.
             let trie_completer = if result.is_ok() &&
                 let Some(block_hash) = sparse_trie.block_hash
             {
@@ -722,7 +722,7 @@ impl DefaultStateRootStrategy {
 /// Per-job slot holding the parent's trie before computation and the worker's trie afterward.
 ///
 /// The worker takes the input before computing, then stages the output before sending its result.
-/// `finish` may publish the output only after receiving and accepting that result.
+/// `finish` calls `publish_sparse_trie` only after receiving and accepting that result.
 #[derive(Debug)]
 struct SparseTrieSlot {
     /// Hash for the output trie. `None` lets payload builders consume without preserving a trie.
