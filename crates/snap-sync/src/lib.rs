@@ -46,6 +46,7 @@ mod generation;
 mod pivot;
 mod session;
 mod storage;
+mod verify;
 
 #[cfg(test)]
 mod test_utils;
@@ -68,3 +69,4 @@ pub use storage::{
     SnapStorageStore, StorageChunk, StorageProgress, StorageRangeDownload, StorageRangeStep,
     DEFAULT_STORAGE_ACCOUNTS,
 };
+pub use verify::{SnapStateVerifier, VerifiedSnapState, DEFAULT_SCAN_CHUNK};
