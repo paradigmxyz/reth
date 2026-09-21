@@ -146,7 +146,9 @@ impl ExecutionOverlay {
         #[allow(unused_mut)]
         let mut extend_accounts_and_storage = || {
             for (address, account) in state.state() {
-                accounts.insert(*address, Self::normalized_account_info(account.info.clone()));
+                if account.info != account.original_info {
+                    accounts.insert(*address, Self::normalized_account_info(account.info.clone()));
+                }
                 if account.was_destroyed() {
                     storage_wipes.insert(*address);
                     storage.remove(address);
@@ -1008,6 +1010,25 @@ mod tests {
 
         assert!(!overlay.storage.contains_key(&address));
         assert_eq!(overlay.storage_value(address, U256::ZERO), Some(U256::ZERO));
+    }
+
+    #[test]
+    fn execution_overlay_storage_changes_preserve_account_fallback() {
+        let address = Address::with_last_byte(1);
+        let info = AccountInfo::default().with_balance(U256::from(5));
+        let state = BundleState::builder(0..=0)
+            .state_original_account_info(address, info.clone())
+            .state_present_account_info(address, info.clone())
+            .state_storage(address, HashMap::from_iter([(U256::ZERO, (U256::ZERO, U256::from(1)))]))
+            .build();
+        let mut overlay = ExecutionOverlay::default();
+        overlay.extend_state(&state);
+        assert!(!overlay.accounts.contains_key(&address));
+        assert_eq!(overlay.storage_value(address, U256::ZERO), Some(U256::from(1)));
+
+        overlay.accounts.insert(address, Some(info.clone()));
+        overlay.extend_state(&state);
+        assert_eq!(overlay.accounts[&address], Some(info));
     }
 
     #[test]
