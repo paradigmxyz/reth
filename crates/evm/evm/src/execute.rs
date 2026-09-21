@@ -14,7 +14,7 @@ use alloy_primitives::{Address, B256};
 use core::fmt::Debug;
 #[cfg(feature = "std")]
 use evm2::evm::{CacheDB, Db};
-use evm2::{registry::HandlerError, ErrorCode};
+use evm2::{evm::StateChangeSink as EvmStateChangeSink, registry::HandlerError, ErrorCode};
 pub use reth_execution_errors::{
     BlockExecutionError, BlockValidationError, EvmError, InternalBlockExecutionError,
     InvalidTxError,
@@ -196,6 +196,17 @@ pub trait Evm {
         &mut self,
         moves: impl IntoIterator<Item = (Address, Address)>,
     ) -> Result<(), evm2::precompiles::MovePrecompileError>;
+
+    /// Executes a transaction and discards its writes while streaming observed state changes into
+    /// `sink`.
+    fn transact_and_discard<S>(
+        &mut self,
+        transaction: &Recovered<Self::Transaction>,
+        sink: &mut S,
+    ) -> Result<(), BlockExecutionError>
+    where
+        S: EvmStateChangeSink,
+        S::Error: Debug;
 }
 
 impl<'a, T: evm2::EvmTypes<Tx: Typed2718>> Evm for evm2::Evm<'a, T> {
@@ -278,6 +289,31 @@ impl<'a, T: evm2::EvmTypes<Tx: Typed2718>> Evm for evm2::Evm<'a, T> {
         moves: impl IntoIterator<Item = (Address, Address)>,
     ) -> Result<(), evm2::precompiles::MovePrecompileError> {
         self.precompiles_mut().move_precompiles(&moves.into_iter().collect::<Vec<_>>())
+    }
+
+    fn transact_and_discard<S>(
+        &mut self,
+        transaction: &Recovered<Self::Transaction>,
+        sink: &mut S,
+    ) -> Result<(), BlockExecutionError>
+    where
+        S: EvmStateChangeSink,
+        S::Error: Debug,
+    {
+        let executed = self.transact(transaction).map_err(|err| {
+            BlockExecutionError::msg(format!("discarded transaction execution failed: {err:?}"))
+        })?;
+
+        if let Some(code) = executed.result().error_code {
+            let _ = executed.discard();
+            return Err(BlockExecutionError::msg(format!(
+                "discarded transaction database error: {code:?}"
+            )))
+        }
+
+        executed.discard_with(sink).map(|_| ()).map_err(|err| {
+            BlockExecutionError::msg(format!("discarded state sink failed: {err:?}"))
+        })
     }
 }
 
