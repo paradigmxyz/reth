@@ -195,13 +195,13 @@ pub fn revm_bytecode(code: &evm2::bytecode::Bytecode) -> Bytecode {
 }
 
 /// Converts native account information into the persistent state representation.
-/// Empty bytecode is omitted because its presence depends on database cache state.
+/// Bytecode is carried separately by the change stream; account updates only need its hash.
 pub fn revm_account(info: &evm2::evm::AccountInfo) -> AccountInfo {
     AccountInfo {
         balance: info.balance,
         nonce: info.nonce,
         code_hash: info.code_hash,
-        code: info.code.as_ref().filter(|code| !code.is_empty()).map(revm_bytecode),
+        code: None,
         account_id: None,
     }
 }
@@ -223,9 +223,14 @@ mod tests {
     };
 
     #[test]
-    fn cached_empty_bytecode_does_not_change_bundle_output() {
+    fn cached_bytecode_does_not_change_bundle_output() {
         let address = Address::with_last_byte(1);
-        let info = NativeAccount { balance: U256::from(5), ..Default::default() };
+        let code = evm2::bytecode::Bytecode::new_raw(alloy_primitives::bytes!("60015b00"));
+        let info = NativeAccount {
+            balance: U256::from(5),
+            code_hash: code.hash_slow(),
+            ..Default::default()
+        };
         let bundle = |info: &NativeAccount| {
             let mut changes = TransactionChanges::default();
             changes
@@ -242,9 +247,38 @@ mod tests {
             block.into_bundle()
         };
         let uncached = bundle(&info);
-        let cached = bundle(&NativeAccount { code: Some(Default::default()), ..info });
+        let cached = bundle(&NativeAccount { code: Some(code), ..info });
         assert_eq!(uncached, cached);
         assert!(cached.contracts.is_empty());
+    }
+
+    #[test]
+    fn deployed_bytecode_is_retained_separately_from_account_metadata() {
+        let address = Address::with_last_byte(1);
+        let code = evm2::bytecode::Bytecode::new_raw(alloy_primitives::bytes!("60015b00"));
+        let hash = code.hash_slow();
+        let info = NativeAccount {
+            nonce: 1,
+            code_hash: hash,
+            code: Some(code.clone()),
+            ..Default::default()
+        };
+        let mut changes = TransactionChanges::default();
+        changes.bytecode(hash, &code).unwrap();
+        changes
+            .account(AccountChangeRef {
+                address,
+                original: None,
+                current: Some(&info),
+                created: true,
+                selfdestructed: false,
+            })
+            .unwrap();
+        let mut block = BlockState::new();
+        block.commit(&changes);
+        let bundle = block.into_bundle();
+        assert_eq!(bundle.contracts[&hash].original_bytes(), code.original_bytes());
+        assert_eq!(bundle.account(&address).unwrap().info.as_ref().unwrap().code_hash, hash);
     }
 
     #[test]
