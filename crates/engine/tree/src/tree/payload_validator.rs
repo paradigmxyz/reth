@@ -1051,18 +1051,15 @@ where
                 Ok::<_, BlockExecutionError>((output, senders, built_bal))
             })?;
         drop(receipt_tx);
+        let built_bal =
+            built_bal.map(|bal| ExecutedBal { alloy: bal.clone().into(), evm: Arc::new(bal) });
 
         let execution_duration = execution_start.elapsed();
         self.metrics.record_block_execution(&output, execution_duration);
         self.metrics.record_block_execution_gas_bucket(output.result.gas_used, execution_duration);
         debug!(target: "engine::tree::payload_validator", elapsed = ?execution_duration, "Executed block");
 
-        Ok((
-            output,
-            senders,
-            result_rx,
-            built_bal.map(|bal| ExecutedBal { alloy: bal.clone().into(), evm: Arc::new(bal) }),
-        ))
+        Ok((output, senders, result_rx, built_bal))
     }
 
     /// Returns true when the BAL execute path should be used for this block.
