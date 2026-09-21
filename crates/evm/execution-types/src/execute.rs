@@ -271,9 +271,9 @@ mod tests {
             nonce: 3,
             code_hash,
             code: Some(bytecode.clone()),
-            _non_exhaustive: (),
             #[cfg(feature = "account-ext")]
             extension: Default::default(),
+            _non_exhaustive: (),
         };
         let mut state = BlockStateAccumulator::new();
 

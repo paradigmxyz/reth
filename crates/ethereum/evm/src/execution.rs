@@ -1187,9 +1187,9 @@ const fn empty_account() -> AccountInfo {
         nonce: 0,
         code_hash: KECCAK256_EMPTY,
         code: None,
-        _non_exhaustive: (),
         #[cfg(feature = "account-ext")]
         extension: evm2::evm::AccountExtension::new(),
+        _non_exhaustive: (),
     }
 }
 

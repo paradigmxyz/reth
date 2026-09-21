@@ -322,8 +322,8 @@ reth-cli = { path = "crates/cli/cli" }
 reth-cli-commands = { path = "crates/cli/commands" }
 reth-cli-runner = { path = "crates/cli/runner" }
 reth-cli-util = { path = "crates/cli/util" }
-reth-codecs = { git = "https://github.com/paradigmxyz/reth-core", rev = "46c60167245c60e119f945723c8e7675635db23e", default-features = false }
-reth-codecs-derive = { git = "https://github.com/paradigmxyz/reth-core", rev = "46c60167245c60e119f945723c8e7675635db23e" }
+reth-codecs = { git = "https://github.com/paradigmxyz/reth-core", rev = "7f792feecee49a707502ec6be2eb267602b947aa", default-features = false }
+reth-codecs-derive = { git = "https://github.com/paradigmxyz/reth-core", rev = "7f792feecee49a707502ec6be2eb267602b947aa" }
 reth-config = { path = "crates/config", default-features = false }
 reth-consensus = { path = "crates/consensus/consensus", default-features = false }
 reth-consensus-common = { path = "crates/consensus/common", default-features = false }
@@ -390,7 +390,7 @@ reth-payload-builder-primitives = { path = "crates/payload/builder-primitives" }
 reth-payload-primitives = { path = "crates/payload/primitives" }
 reth-payload-validator = { path = "crates/payload/validator" }
 reth-payload-util = { path = "crates/payload/util" }
-reth-primitives-traits = { git = "https://github.com/paradigmxyz/reth-core", rev = "46c60167245c60e119f945723c8e7675635db23e", default-features = false }
+reth-primitives-traits = { git = "https://github.com/paradigmxyz/reth-core", rev = "7f792feecee49a707502ec6be2eb267602b947aa", default-features = false }
 reth-provider = { path = "crates/storage/provider" }
 reth-prune = { path = "crates/prune/prune" }
 reth-prune-types = { path = "crates/prune/types", default-features = false }
@@ -403,7 +403,7 @@ reth-rpc-eth-types = { path = "crates/rpc/rpc-eth-types", default-features = fal
 reth-rpc-layer = { path = "crates/rpc/rpc-layer" }
 reth-rpc-server-types = { path = "crates/rpc/rpc-server-types" }
 reth-rpc-convert = { path = "crates/rpc/rpc-convert" }
-reth-rpc-traits = { git = "https://github.com/paradigmxyz/reth-core", rev = "46c60167245c60e119f945723c8e7675635db23e", default-features = false }
+reth-rpc-traits = { git = "https://github.com/paradigmxyz/reth-core", rev = "7f792feecee49a707502ec6be2eb267602b947aa", default-features = false }
 reth-stages = { path = "crates/stages/stages" }
 reth-stages-api = { path = "crates/stages/api" }
 reth-stages-types = { path = "crates/stages/types", default-features = false }
@@ -423,13 +423,13 @@ reth-trie-common = { path = "crates/trie/common", default-features = false }
 reth-trie-db = { path = "crates/trie/db" }
 reth-trie-parallel = { path = "crates/trie/parallel" }
 reth-trie-sparse = { path = "crates/trie/sparse", default-features = false }
-reth-zstd-compressors = { git = "https://github.com/paradigmxyz/reth-core", rev = "46c60167245c60e119f945723c8e7675635db23e", default-features = false }
+reth-zstd-compressors = { git = "https://github.com/paradigmxyz/reth-core", rev = "7f792feecee49a707502ec6be2eb267602b947aa", default-features = false }
 
 # evm2
-evm2 = { git = "https://github.com/mediocregopher/evm2", rev = "dcaa81850f0027bba88c7bf48b88e415c8499d1d", default-features = false }
-evm2-inspectors = { git = "https://github.com/mediocregopher/evm2", rev = "dcaa81850f0027bba88c7bf48b88e415c8499d1d", default-features = false }
-evm2-jit = { git = "https://github.com/mediocregopher/evm2", rev = "dcaa81850f0027bba88c7bf48b88e415c8499d1d", default-features = false }
-evm2-macros = { git = "https://github.com/mediocregopher/evm2", rev = "dcaa81850f0027bba88c7bf48b88e415c8499d1d" }
+evm2 = { git = "https://github.com/mediocregopher/evm2", rev = "ea7dae5359ae58a68b75ccd290c1456f2eafaf10", default-features = false }
+evm2-inspectors = { git = "https://github.com/mediocregopher/evm2", rev = "ea7dae5359ae58a68b75ccd290c1456f2eafaf10", default-features = false }
+evm2-jit = { git = "https://github.com/mediocregopher/evm2", rev = "ea7dae5359ae58a68b75ccd290c1456f2eafaf10", default-features = false }
+evm2-macros = { git = "https://github.com/mediocregopher/evm2", rev = "ea7dae5359ae58a68b75ccd290c1456f2eafaf10" }
 
 # eth
 alloy-dyn-abi = "1.6.1"

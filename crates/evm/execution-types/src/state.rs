@@ -64,9 +64,9 @@ impl RevertAccount {
             nonce: self.nonce,
             code_hash: self.code_hash,
             code: self.code.clone(),
-            _non_exhaustive: (),
             #[cfg(feature = "account-ext")]
             extension: self.extension.clone(),
+            _non_exhaustive: (),
         }
     }
 }
@@ -104,9 +104,9 @@ impl From<RevertAccount> for AccountInfo {
             nonce: value.nonce,
             code_hash: value.code_hash,
             code: value.code,
-            _non_exhaustive: (),
             #[cfg(feature = "account-ext")]
             extension: value.extension,
+            _non_exhaustive: (),
         }
     }
 }

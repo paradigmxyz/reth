@@ -1550,9 +1550,9 @@ mod tests {
                 nonce: 1,
                 code_hash: B256::random(), // Non-empty code hash
                 code: None,
-                _non_exhaustive: (),
                 #[cfg(feature = "account-ext")]
                 extension: Default::default(),
+                _non_exhaustive: (),
             }),
         );
 
@@ -1584,9 +1584,9 @@ mod tests {
                 nonce: 1,
                 code_hash: alloy_primitives::KECCAK256_EMPTY, // Empty code hash = EOA
                 code: None,
-                _non_exhaustive: (),
                 #[cfg(feature = "account-ext")]
                 extension: Default::default(),
+                _non_exhaustive: (),
             }),
         );
 
