@@ -179,7 +179,7 @@ impl<T: MetadataProvider> SnapStateVerifier for T {
 
 // The trie rebuild hand-off as persisted, tied to the write it was made for.
 #[derive(Serialize, Deserialize)]
-struct StoredRebuild {
+pub(crate) struct StoredRebuild {
     // Encoding version, checked before the rest is decoded.
     version: u32,
     // Attempt and pivot the state was handed off at.

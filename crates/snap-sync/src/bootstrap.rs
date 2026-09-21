@@ -133,6 +133,11 @@ where
                         info!(target: "sync::snap", %error, "Snap pivot was reorged, restarting");
                         Step::Restart
                     }
+                    // Progress this build cannot read is unusable, so the attempt starts over.
+                    Err(error @ SnapSyncError::UnsupportedRecord { .. }) => {
+                        info!(target: "sync::snap", %error, "Snap progress is unreadable, restarting");
+                        Step::Restart
+                    }
                     Err(SnapSyncError::Cancelled) => Step::Stop,
                     Err(error) => return Err(error),
                 },
@@ -660,6 +665,33 @@ mod tests {
         assert_eq!(pivot.number, 10);
         assert_ne!(attempt_id(&factory), attempt);
         assert!(client.block_requests().is_empty());
+    }
+
+    #[tokio::test]
+    async fn unreadable_progress_restarts_the_attempt() {
+        let accounts = accounts();
+        let factory = hashed_factory();
+        insert_chain(&factory, 3, state_root(&accounts));
+        let (_, mut stopped) = scripted(&factory, [Err(RequestError::UnsupportedCapability)], [3]);
+        assert_eq!(stopped.run().await.unwrap(), SnapBootstrapOutcome::Stopped);
+        // Another build rewrote the coverage the attempt resumes from.
+        let provider = factory.database_provider_rw().unwrap();
+        let stale = provider.active_snap_write().unwrap().unwrap();
+        provider.write_metadata("snap_account_coverage", br#"{"version":999}"#.to_vec()).unwrap();
+        provider.commit().unwrap();
+
+        let (_, mut restarted) = scripted(&factory, [account_range(1, &accounts, 0..3, &[])], [3]);
+        let outcome = restarted.run().await.unwrap();
+
+        let SnapBootstrapOutcome::TrieRebuild { write, .. } = outcome else {
+            panic!("the state is complete: {outcome:?}")
+        };
+        assert_ne!(write.attempt(), stale.attempt());
+        let provider = factory.database_provider_ro().unwrap();
+        assert!(matches!(
+            provider.authorize_snap_write(stale),
+            Err(SnapSyncError::StaleWrite { .. })
+        ));
     }
 
     #[tokio::test]
