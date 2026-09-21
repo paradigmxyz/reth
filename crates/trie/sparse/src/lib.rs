@@ -33,3 +33,7 @@ pub mod errors {
         SparseTrieErrorKind, SparseTrieResult,
     };
 }
+
+/// Diagnostic synchronous phase accounting.
+#[cfg(feature = "metrics")]
+pub mod activity;

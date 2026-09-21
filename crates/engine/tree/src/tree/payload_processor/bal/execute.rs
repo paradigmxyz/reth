@@ -123,8 +123,13 @@ where
     MakeDb: Fn(bool) -> Result<DB, BalExecutionError> + Sync + 'scope,
     ReceiptTy<Evm::Primitives>: Clone,
 {
+    let _body = reth_trie_sparse::activity::ActivityGuard::new("bal_body");
     let bal = input_bal.as_bal();
-    let input_bal_revm = convert_alloy_to_revm_bal(bal)?;
+    let input_bal_revm = {
+        let _activity = reth_trie_sparse::activity::ActivityGuard::new("bal_convert");
+        convert_alloy_to_revm_bal(bal)?
+    };
+    let setup = reth_trie_sparse::activity::ActivityGuard::new("bal_setup");
 
     let block_gas_limit = evm_env.block_env.gas_limit();
     let enable_amsterdam_eip8037 = evm_env.cfg_env.enable_amsterdam_eip8037;
@@ -166,9 +171,14 @@ where
         let evm = evm_config.evm_with_env(&mut canonical_state, evm_env);
         let mut canonical_executor = evm_config.create_executor_with_state(evm, ctx.clone());
 
-        canonical_executor.apply_pre_execution_changes()?;
+        drop(setup);
+        {
+            let _activity = reth_trie_sparse::activity::ActivityGuard::new("bal_pre");
+            canonical_executor.apply_pre_execution_changes()?;
+        }
         let mut senders = Vec::with_capacity(transaction_count);
         let mut last_sent_len = 0usize;
+        let commit_loop = reth_trie_sparse::activity::ActivityGuard::new("bal_commit_loop");
         for output in ordered_worker_outputs(&result_rx, transaction_count) {
             let output = match output {
                 Ok(output) => output,
@@ -210,16 +220,26 @@ where
                 }
             }
         }
+        drop(commit_loop);
         drop(abort_guard);
 
         canonical_executor.evm_mut().db_mut().bump_bal_index();
-        let block_result = canonical_executor.apply_post_execution_changes()?;
+        let block_result = {
+            let _activity = reth_trie_sparse::activity::ActivityGuard::new("bal_post");
+            canonical_executor.apply_post_execution_changes()?
+        };
         (block_result, senders)
     };
 
-    let built_bal = take_built_bal_and_log_divergence(&mut canonical_state, bal);
+    let built_bal = {
+        let _activity = reth_trie_sparse::activity::ActivityGuard::new("bal_rebuild");
+        take_built_bal_and_log_divergence(&mut canonical_state, bal)
+    };
 
-    canonical_state.merge_transitions(BundleRetention::Reverts);
+    {
+        let _activity = reth_trie_sparse::activity::ActivityGuard::new("bal_merge");
+        canonical_state.merge_transitions(BundleRetention::Reverts);
+    }
     Ok((
         BlockExecutionOutput { state: canonical_state.take_bundle(), result: block_result },
         senders,

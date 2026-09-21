@@ -57,6 +57,10 @@ struct OrderedWorkerOutputs<'a, R> {
     total: usize,
     /// Set on a fatal error; the iterator is exhausted afterwards.
     failed: bool,
+    timing: bool,
+    receive_time: std::time::Duration,
+    receives: u64,
+    max_receive: std::time::Duration,
 }
 
 impl<'a, R> OrderedWorkerOutputs<'a, R> {
@@ -70,6 +74,10 @@ impl<'a, R> OrderedWorkerOutputs<'a, R> {
             next: 0,
             total,
             failed: false,
+            timing: tracing::enabled!(target: "engine::tree::critical", tracing::Level::TRACE),
+            receive_time: std::time::Duration::ZERO,
+            receives: 0,
+            max_receive: std::time::Duration::ZERO,
         }
     }
 }
@@ -88,7 +96,15 @@ impl<R> Iterator for OrderedWorkerOutputs<'_, R> {
                 return Some(slot.map_err(Into::into));
             }
 
-            let (index, slot) = match self.result_rx.recv() {
+            let started = self.timing.then(std::time::Instant::now);
+            let received = self.result_rx.recv();
+            if let Some(started) = started {
+                let elapsed = started.elapsed();
+                self.receive_time += elapsed;
+                self.receives += 1;
+                self.max_receive = self.max_receive.max(elapsed);
+            }
+            let (index, slot) = match received {
                 Ok(Ok(output)) => (output.index, Ok(output)),
                 Ok(Err(err)) => {
                     // Transaction failures are deferred to their transaction's slot so the
@@ -122,6 +138,14 @@ impl<R> Iterator for OrderedWorkerOutputs<'_, R> {
             );
 
             self.pending[index] = Some(slot);
+        }
+    }
+}
+
+impl<R> Drop for OrderedWorkerOutputs<'_, R> {
+    fn drop(&mut self) {
+        if self.timing {
+            tracing::trace!(target: "engine::tree::critical", receive_us = self.receive_time.as_secs_f64() * 1e6, receives = self.receives, max_receive_us = self.max_receive.as_secs_f64() * 1e6, "bal_ordered_receive_totals");
         }
     }
 }

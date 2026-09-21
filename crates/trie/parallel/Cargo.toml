@@ -45,6 +45,7 @@ rand = { workspace = true, optional = true }
 
 [dev-dependencies]
 # reth
+reth-db-common.workspace = true
 reth-chainspec.workspace = true
 reth-ethereum-primitives.workspace = true
 reth-primitives-traits.workspace = true

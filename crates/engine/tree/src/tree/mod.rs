@@ -747,6 +747,7 @@ where
         &mut self,
         payload: T::ExecutionData,
     ) -> Result<TreeOutcome<PayloadStatus>, InsertBlockProcessingError> {
+        let _activity = reth_trie_sparse::activity::ActivityGuard::new("new_payload");
         let _thread_resource_usage =
             self.metrics.engine.new_payload.measure_thread_resource_usage();
         trace!(target: "engine::tree", "invoked new payload");

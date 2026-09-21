@@ -190,6 +190,54 @@ mod platform {
     }
 }
 
+/// Current thread CPU time with nanosecond resolution, when supported.
+#[allow(clippy::missing_const_for_fn)]
+pub fn current_thread_cpu_time() -> Option<Duration> {
+    #[cfg(target_os = "linux")]
+    {
+        let mut ts = std::mem::MaybeUninit::<libc::timespec>::uninit();
+        // SAFETY: ts is writable and is read only after clock_gettime succeeds.
+        if unsafe { libc::clock_gettime(libc::CLOCK_THREAD_CPUTIME_ID, ts.as_mut_ptr()) } != 0 {
+            return None;
+        }
+        // SAFETY: clock_gettime initialized ts on success.
+        let ts = unsafe { ts.assume_init() };
+        Some(Duration::new(ts.tv_sec.try_into().ok()?, ts.tv_nsec.try_into().ok()?))
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        None
+    }
+}
+
+/// Current thread time queued to run, only when Linux scheduler statistics are enabled.
+#[allow(clippy::missing_const_for_fn)]
+pub fn current_thread_runqueue_time() -> Option<Duration> {
+    #[cfg(target_os = "linux")]
+    {
+        use std::{fs::File, os::unix::fs::FileExt};
+        thread_local! {
+            static SCHEDSTAT: Option<File> = (|| {
+                if std::fs::read_to_string("/proc/sys/kernel/sched_schedstats").ok()?.trim() == "1" {
+                    File::open("/proc/thread-self/schedstat").ok()
+                } else {
+                    None
+                }
+            })();
+        }
+        SCHEDSTAT.with(|file| {
+            let mut buf = [0u8; 128];
+            let n = file.as_ref()?.read_at(&mut buf, 0).ok()?;
+            let text = std::str::from_utf8(&buf[..n]).ok()?;
+            Some(Duration::from_nanos(text.split_whitespace().nth(1)?.parse().ok()?))
+        })
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        None
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
