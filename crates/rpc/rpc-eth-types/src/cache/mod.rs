@@ -23,6 +23,7 @@ use reth_storage_api::{BalProvider, BlockReader, TransactionVariant};
 use reth_tasks::Runtime;
 use schnellru::{ByLength, Limiter, LruMap};
 use std::{
+    collections::VecDeque,
     future::Future,
     pin::Pin,
     sync::Arc,
@@ -30,7 +31,7 @@ use std::{
 };
 use tokio::sync::{
     mpsc::{unbounded_channel, UnboundedSender},
-    oneshot, Semaphore,
+    oneshot, OwnedSemaphorePermit, Semaphore,
 };
 use tokio_stream::wrappers::UnboundedReceiverStream;
 
@@ -112,6 +113,7 @@ impl<N: NodePrimitives> EthStateCache<N> {
             action_rx: UnboundedReceiverStream::new(rx),
             action_task_spawner,
             rate_limiter: Arc::new(Semaphore::new(max_concurrent_db_requests)),
+            pending_fetches: VecDeque::new(),
             tx_hash_index: LruMap::new(ByLength::new(max_cached_tx_hashes)),
         };
         let cache = Self { to_service };
@@ -327,6 +329,11 @@ pub(crate) struct EthStateCacheService<
     ///
     /// This restricts the max concurrent fetch tasks at the same time.
     rate_limiter: Arc<Semaphore>,
+    /// Cache misses waiting for a database request slot.
+    ///
+    /// A request is only moved to the blocking pool after it acquires a permit. This prevents
+    /// cache misses that are waiting for a slot from occupying Tokio blocking threads.
+    pending_fetches: VecDeque<CacheFetch>,
     /// LRU index mapping transaction hashes to their block hash and index within the block.
     tx_hash_index: LruMap<TxHash, (B256, usize), ByLength>,
 }
@@ -335,6 +342,71 @@ impl<Provider> EthStateCacheService<Provider, Runtime>
 where
     Provider: BlockReader + BalProvider + Clone + Unpin + 'static,
 {
+    fn queue_fetch(&mut self, fetch: CacheFetch) {
+        if self.pending_fetches.is_empty() &&
+            let Ok(permit) = self.rate_limiter.clone().try_acquire_owned()
+        {
+            self.spawn_fetch(fetch, permit);
+            return
+        }
+
+        self.pending_fetches.push_back(fetch);
+        self.spawn_pending_fetches();
+    }
+
+    fn spawn_pending_fetches(&mut self) {
+        while let Some(fetch) = self.pending_fetches.pop_front() {
+            let Ok(permit) = self.rate_limiter.clone().try_acquire_owned() else {
+                self.pending_fetches.push_front(fetch);
+                return
+            };
+
+            self.spawn_fetch(fetch, permit);
+        }
+    }
+
+    fn spawn_fetch(&self, fetch: CacheFetch, permit: OwnedSemaphorePermit) {
+        let provider = self.provider.clone();
+        let action_tx = self.action_tx.clone();
+
+        match fetch {
+            CacheFetch::Block(block_hash) => {
+                let mut action_sender = ActionSender::new(CacheKind::Block, block_hash, action_tx);
+                self.action_task_spawner.spawn_blocking_task(async move {
+                    let block_sender = provider
+                        .sealed_block_with_senders(
+                            BlockHashOrNumber::Hash(block_hash),
+                            TransactionVariant::WithHash,
+                        )
+                        .map(|maybe_block| maybe_block.map(Arc::new));
+                    drop(permit);
+                    action_sender.send_block(block_sender);
+                });
+            }
+            CacheFetch::Receipts(block_hash) => {
+                let mut action_sender =
+                    ActionSender::new(CacheKind::Receipt, block_hash, action_tx);
+                self.action_task_spawner.spawn_blocking_task(async move {
+                    let res = provider
+                        .receipts_by_block(block_hash.into())
+                        .map(|maybe_receipts| maybe_receipts.map(Arc::new));
+                    drop(permit);
+                    action_sender.send_receipts(res);
+                });
+            }
+            CacheFetch::Bal(block_hash) => {
+                let mut action_sender = ActionSender::new(CacheKind::Bal, block_hash, action_tx);
+                self.action_task_spawner.spawn_blocking_task(async move {
+                    let res = provider.get_bal_by_hash(block_hash).and_then(|maybe_bal| {
+                        maybe_bal.map(CachedRevmBal::try_from_raw).transpose()
+                    });
+                    drop(permit);
+                    action_sender.send_bal(res);
+                });
+            }
+        }
+    }
+
     /// Indexes all transactions in a block by transaction hash.
     fn index_block_transactions(&mut self, block: &RecoveredBlock<Provider::Block>) {
         let block_hash = block.hash();
@@ -497,24 +569,7 @@ where
 
                             // block is not in the cache, request it if this is the first consumer
                             if this.full_block_cache.queue(block_hash, response_tx) {
-                                let provider = this.provider.clone();
-                                let action_tx = this.action_tx.clone();
-                                let rate_limiter = this.rate_limiter.clone();
-                                let mut action_sender =
-                                    ActionSender::new(CacheKind::Block, block_hash, action_tx);
-                                this.action_task_spawner.spawn_blocking_task(async move {
-                                    // Acquire permit
-                                    let _permit = rate_limiter.acquire().await;
-                                    // Only look in the database to prevent situations where we
-                                    // looking up the tree is blocking
-                                    let block_sender = provider
-                                        .sealed_block_with_senders(
-                                            BlockHashOrNumber::Hash(block_hash),
-                                            TransactionVariant::WithHash,
-                                        )
-                                        .map(|maybe_block| maybe_block.map(Arc::new));
-                                    action_sender.send_block(block_sender);
-                                });
+                                this.queue_fetch(CacheFetch::Block(block_hash));
                             }
                         }
                         CacheAction::GetReceipts { block_hash, response_tx } => {
@@ -526,20 +581,7 @@ where
 
                             // block is not in the cache, request it if this is the first consumer
                             if this.receipts_cache.queue(block_hash, response_tx) {
-                                let provider = this.provider.clone();
-                                let action_tx = this.action_tx.clone();
-                                let rate_limiter = this.rate_limiter.clone();
-                                let mut action_sender =
-                                    ActionSender::new(CacheKind::Receipt, block_hash, action_tx);
-                                this.action_task_spawner.spawn_blocking_task(async move {
-                                    // Acquire permit
-                                    let _permit = rate_limiter.acquire().await;
-                                    let res = provider
-                                        .receipts_by_block(block_hash.into())
-                                        .map(|maybe_receipts| maybe_receipts.map(Arc::new));
-
-                                    action_sender.send_receipts(res);
-                                });
+                                this.queue_fetch(CacheFetch::Receipts(block_hash));
                             }
                         }
                         CacheAction::GetBal { block_hash, response_tx } => {
@@ -549,20 +591,7 @@ where
                             }
 
                             if this.bal_cache.queue(block_hash, response_tx) {
-                                let provider = this.provider.clone();
-                                let action_tx = this.action_tx.clone();
-                                let rate_limiter = this.rate_limiter.clone();
-                                let mut action_sender =
-                                    ActionSender::new(CacheKind::Bal, block_hash, action_tx);
-                                this.action_task_spawner.spawn_blocking_task(async move {
-                                    let _permit = rate_limiter.acquire().await;
-                                    let res = provider.get_bal_by_hash(block_hash).and_then(
-                                        |maybe_bal| {
-                                            maybe_bal.map(CachedRevmBal::try_from_raw).transpose()
-                                        },
-                                    );
-                                    action_sender.send_bal(res);
-                                });
+                                this.queue_fetch(CacheFetch::Bal(block_hash));
                             }
                         }
                         CacheAction::ReceiptsResult { block_hash, res } => {
@@ -632,6 +661,7 @@ where
                             let _ = response_tx.send(result);
                         }
                     };
+                    this.spawn_pending_fetches();
                 }
             }
         }
@@ -734,6 +764,13 @@ enum CacheKind {
     Block,
     Receipt,
     Bal,
+}
+
+#[derive(Copy, Clone, Debug)]
+enum CacheFetch {
+    Block(B256),
+    Receipts(B256),
+    Bal(B256),
 }
 
 /// Drop aware sender struct that ensures a response is always emitted even if the db task panics
@@ -913,6 +950,7 @@ mod tests {
     use reth_ethereum_primitives::{
         Block, BlockBody, EthPrimitives, Receipt, Transaction, TransactionSigned,
     };
+    #[cfg(not(feature = "account-ext"))]
     use reth_execution_types::ExecutionOutcome;
     use reth_primitives_traits::{RecoveredBlock, SealedHeader};
     use reth_storage_api::{
@@ -920,7 +958,15 @@ mod tests {
         BlockHashReader, BlockNumReader, BlockReader, BlockSource, HeaderProvider, ReceiptProvider,
         TransactionVariant, TransactionsProvider,
     };
-    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::{
+        sync::{
+            atomic::{AtomicUsize, Ordering},
+            mpsc::{self, Receiver, SyncSender},
+            Mutex,
+        },
+        thread,
+        time::Duration,
+    };
 
     fn test_service() -> EthStateCacheService<NoopProvider, Runtime> {
         let (_cache, service) = EthStateCache::<EthPrimitives>::create(
@@ -995,6 +1041,78 @@ mod tests {
         assert!(rx.try_recv().unwrap().unwrap().is_some());
         service.on_new_bal(hash, Ok(None));
         assert!(service.bal_cache.contains_key(&hash));
+    }
+
+    #[tokio::test]
+    async fn cache_misses_wait_in_service_queue_for_db_slot() {
+        let (started_tx, started_rx) = mpsc::sync_channel(1);
+        let (release_tx, release_rx) = mpsc::sync_channel(1);
+        let (_cache, mut service) = EthStateCache::<EthPrimitives>::create(
+            TestBalProvider::new_blocking(started_tx, release_rx),
+            Runtime::test(),
+            EthStateCacheConfig { max_concurrent_db_requests: 1, ..Default::default() },
+        );
+        let permit = service.rate_limiter.clone().try_acquire_owned().unwrap();
+
+        service.queue_fetch(CacheFetch::Bal(B256::repeat_byte(0x01)));
+        service.queue_fetch(CacheFetch::Bal(B256::repeat_byte(0x02)));
+
+        assert_eq!(service.pending_fetches.len(), 2);
+
+        drop(permit);
+        service.spawn_pending_fetches();
+
+        started_rx.recv_timeout(Duration::from_secs(1)).expect("first fetch started");
+        assert_eq!(service.pending_fetches.len(), 1);
+        release_tx.send(()).unwrap();
+    }
+
+    #[test]
+    fn pending_cache_miss_does_not_block_unrelated_blocking_work() {
+        let (started_tx, started_rx) = mpsc::sync_channel(1);
+        let (release_tx, release_rx) = mpsc::sync_channel(1);
+        let (unrelated_tx, unrelated_rx) = mpsc::sync_channel(1);
+
+        let test = thread::spawn(move || {
+            let runtime = tokio::runtime::Builder::new_multi_thread()
+                .worker_threads(1)
+                .max_blocking_threads(1)
+                .enable_all()
+                .build()
+                .unwrap();
+
+            runtime.block_on(async move {
+                let provider = TestBalProvider::new_blocking(started_tx, release_rx);
+                let (_cache, mut service) = EthStateCache::<EthPrimitives>::create(
+                    provider,
+                    Runtime::test(),
+                    EthStateCacheConfig {
+                        max_blocks: 0,
+                        max_receipts: 0,
+                        max_bals: 0,
+                        cache_computed_bals: false,
+                        prewarm_bals: None,
+                        max_concurrent_db_requests: 1,
+                        max_cached_tx_hashes: 0,
+                    },
+                );
+
+                service.queue_fetch(CacheFetch::Bal(B256::repeat_byte(0x01)));
+                started_rx.recv_timeout(Duration::from_secs(1)).expect("first fetch started");
+
+                service.queue_fetch(CacheFetch::Bal(B256::repeat_byte(0x02)));
+                assert_eq!(service.pending_fetches.len(), 1);
+
+                tokio::task::spawn_blocking(move || unrelated_tx.send(()).unwrap());
+                release_tx.send(()).unwrap();
+
+                unrelated_rx
+                    .recv_timeout(Duration::from_secs(1))
+                    .expect("unrelated blocking work was not starved");
+            });
+        });
+
+        test.join().unwrap();
     }
 
     #[test]
@@ -1126,6 +1244,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[cfg(not(feature = "account-ext"))]
     async fn insert_bal_populates_cache_without_provider_fetch() {
         let fetches = Arc::new(AtomicUsize::default());
         let provider = TestBalProvider::new(fetches.clone());
@@ -1141,6 +1260,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[cfg(not(feature = "account-ext"))]
     async fn canonical_chain_notification_caches_prepared_bal() {
         let fetches = Arc::new(AtomicUsize::default());
         let provider = TestBalProvider::new(fetches.clone());
@@ -1211,12 +1331,25 @@ mod tests {
 
     impl TestBalProvider {
         fn new(fetches: Arc<AtomicUsize>) -> Self {
-            Self { bal_store: BalStoreHandle::new(TestBalStore { fetches }), block: None }
+            Self {
+                bal_store: BalStoreHandle::new(TestBalStore { fetches, blocking_fetch: None }),
+                block: None,
+            }
         }
 
         fn with_block(mut self, block: RecoveredBlock<Block>) -> Self {
             self.block = Some(block);
             self
+        }
+
+        fn new_blocking(started: SyncSender<()>, release: Receiver<()>) -> Self {
+            Self {
+                bal_store: BalStoreHandle::new(TestBalStore {
+                    fetches: Arc::new(AtomicUsize::default()),
+                    blocking_fetch: Some(BlockingFetch { started, release: Mutex::new(release) }),
+                }),
+                block: None,
+            }
         }
     }
 
@@ -1229,6 +1362,13 @@ mod tests {
     #[derive(Debug)]
     struct TestBalStore {
         fetches: Arc<AtomicUsize>,
+        blocking_fetch: Option<BlockingFetch>,
+    }
+
+    #[derive(Debug)]
+    struct BlockingFetch {
+        started: SyncSender<()>,
+        release: Mutex<Receiver<()>>,
     }
 
     impl BalStore for TestBalStore {
@@ -1242,6 +1382,10 @@ mod tests {
 
         fn get_by_hashes(&self, block_hashes: &[BlockHash]) -> ProviderResult<Vec<Option<Bytes>>> {
             self.fetches.fetch_add(1, Ordering::SeqCst);
+            if let Some(blocking_fetch) = &self.blocking_fetch {
+                blocking_fetch.started.send(()).unwrap();
+                blocking_fetch.release.lock().unwrap().recv().unwrap();
+            }
             Ok(block_hashes.iter().map(|_| Some(Bytes::from_static(&[0xc0]))).collect())
         }
     }

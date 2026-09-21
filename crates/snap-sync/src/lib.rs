@@ -46,6 +46,7 @@ mod generation;
 mod pivot;
 mod session;
 mod storage;
+mod verify;
 
 // Snap fixtures exercise the wire protocol, which rejects account extensions.
 #[cfg(all(test, not(feature = "account-ext")))]
@@ -69,3 +70,4 @@ pub use storage::{
     SnapStorageStore, StorageChunk, StorageProgress, StorageRangeDownload, StorageRangeStep,
     DEFAULT_STORAGE_ACCOUNTS,
 };
+pub use verify::{SnapStateVerifier, VerifiedSnapState, DEFAULT_SCAN_CHUNK};

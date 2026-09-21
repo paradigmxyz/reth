@@ -5,8 +5,8 @@
 #![cfg_attr(not(feature = "account-ext"), allow(clippy::clone_on_copy))]
 
 use crate::{
-    common::SnapRecord, storage::persisted_storage_root, SnapAttemptStore, SnapStorageStore,
-    SnapSyncError, SnapWrite, StorageProgress,
+    common::SnapRecord, storage::persisted_storage_root, SnapAttemptStore, SnapCatchUpStore,
+    SnapStorageStore, SnapSyncError, SnapWrite, StorageProgress,
 };
 use alloy_primitives::{
     map::{B256Map, B256Set},
@@ -45,7 +45,8 @@ pub trait SnapAccountStore {
     /// Persists `range` with its storage and code, replacing its key interval.
     ///
     /// Storage must match each account's root, supplied or persisted ahead of the range by
-    /// [`SnapStorageStore`], and code must be supplied or already stored.
+    /// [`SnapStorageStore`], and code must be supplied or already stored. Persisted storage only
+    /// counts once catch-up has carried it to the pivot.
     fn commit_account_range(
         &self,
         write: SnapWrite,
@@ -177,6 +178,16 @@ impl<T: MetadataProvider> SnapAccountStore for T {
         let coverage = self.account_coverage(write)?.ok_or(SnapSyncError::NoCoverage)?;
         let advanced = coverage.advance(range)?;
         let progress = self.storage_progress(write, range.origin())?;
+        // Slots persisted before the pivot moved hold its old values until the lists reach it.
+        if progress != StorageProgress::START &&
+            let Some(catch_up) = self.catch_up_progress(write)? &&
+            catch_up.applied().number < attempt.pivot().number
+        {
+            return Err(SnapSyncError::CatchUpBehindPivot {
+                applied: catch_up.applied().number,
+                pivot: attempt.pivot().number,
+            })
+        }
         let dependencies = RangeDependencies::new(range.accounts(), storages, bytecodes);
         let persisted = dependencies.verify(range.accounts(), &progress, self.tx_ref())?;
 
@@ -185,6 +196,10 @@ impl<T: MetadataProvider> SnapAccountStore for T {
         self.remove_storages_except(interval, &persisted)?;
         dependencies.write(self)?;
         StoredCoverage::new(write.attempt(), advanced).write(self)?;
+        // A page ending before contracts with persisted storage leaves them to the next range.
+        if let Some(next) = advanced.next() {
+            progress.carry_to(self, write, next)?;
+        }
         Ok(advanced)
     }
 
