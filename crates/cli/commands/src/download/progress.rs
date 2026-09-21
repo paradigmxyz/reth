@@ -3,11 +3,12 @@ use reth_cli_util::cancellation::CancellationToken;
 use std::{
     io::{self, Read, Write},
     sync::{
-        atomic::{AtomicBool, AtomicU64, Ordering},
+        atomic::{AtomicU64, Ordering},
         Arc, Condvar, Mutex,
     },
     time::{Duration, Instant},
 };
+use tokio::sync::Notify;
 use tracing::info;
 
 const BYTE_UNITS: [&str; 4] = ["B", "KB", "MB", "GB"];
@@ -133,7 +134,7 @@ pub(crate) struct SharedProgress {
     /// Number of archives currently verifying extracted outputs.
     pub(crate) active_verifications: AtomicU64,
     /// Signals the background progress task to exit.
-    pub(crate) done: AtomicBool,
+    pub(crate) done: Notify,
     /// Cancellation token shared by the whole command.
     cancel_token: CancellationToken,
 }
@@ -164,7 +165,7 @@ impl SharedProgress {
             active_download_requests: AtomicU64::new(0),
             active_extractions: AtomicU64::new(0),
             active_verifications: AtomicU64::new(0),
-            done: AtomicBool::new(false),
+            done: Notify::new(),
             cancel_token,
         })
     }
@@ -691,16 +692,15 @@ impl<R: Read> Read for SharedProgressReader<R> {
 }
 
 /// Spawns a background task that prints aggregated download progress.
-/// Returns a handle; drop it (or call `.abort()`) to stop.
+/// Notify [`SharedProgress::done`] and await the handle to print final progress and stop.
 pub(crate) fn spawn_progress_display(progress: Arc<SharedProgress>) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
         let mut interval = tokio::time::interval(Duration::from_secs(3));
         interval.tick().await;
         loop {
-            interval.tick().await;
-
-            if progress.done.load(Ordering::Relaxed) {
-                break;
+            tokio::select! {
+                _ = progress.done.notified() => break,
+                _ = interval.tick() => {}
             }
 
             let download_total = progress.total_download_bytes;
@@ -775,6 +775,30 @@ pub(crate) fn spawn_progress_display(progress: Arc<SharedProgress>) -> tokio::ta
 mod tests {
     use super::*;
     use std::sync::atomic::Ordering;
+
+    #[tokio::test(start_paused = true)]
+    async fn progress_display_finishes_without_waiting_for_next_tick() {
+        let progress = SharedProgress::new(0, 0, 0, CancellationToken::new());
+        let started = tokio::time::Instant::now();
+        let handle = spawn_progress_display(Arc::clone(&progress));
+        tokio::task::yield_now().await;
+
+        progress.done.notify_one();
+        handle.await.unwrap();
+
+        assert_eq!(started.elapsed(), Duration::ZERO);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn progress_display_handles_completion_before_start() {
+        let progress = SharedProgress::new(0, 0, 0, CancellationToken::new());
+        progress.done.notify_one();
+        let started = tokio::time::Instant::now();
+
+        spawn_progress_display(progress).await.unwrap();
+
+        assert_eq!(started.elapsed(), Duration::ZERO);
+    }
 
     #[test]
     fn shared_progress_separates_session_fetch_from_logical_progress() {
