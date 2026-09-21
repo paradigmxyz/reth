@@ -26,7 +26,7 @@ impl BlockState {
     pub fn commit(&mut self, changes: &TransactionChanges) {
         self.contracts.extend(changes.contracts.iter().map(|(hash, code)| (*hash, code.clone())));
         for (address, account) in &changes.state {
-            let original = changes.originals.get(address).expect("state has account metadata");
+            let original = (!account.is_loaded_as_not_existing()).then(|| account.original_info());
             let previous_status = self
                 .transitions
                 .transitions
@@ -50,7 +50,7 @@ impl BlockState {
                 TransitionAccount {
                     info: (!destroyed).then(|| account.info.clone()),
                     status,
-                    previous_info: original.clone(),
+                    previous_info: original,
                     previous_status,
                     storage: Some(alloc::borrow::Cow::Borrowed(&account.storage)),
                     storage_was_destroyed: wiped,
@@ -73,7 +73,6 @@ impl BlockState {
 pub struct TransactionChanges {
     /// State passed to the block accumulator and state-root hooks.
     pub state: revm::state::EvmState,
-    originals: alloy_primitives::map::AddressMap<Option<AccountInfo>>,
     wiped: AddressSet,
     contracts: alloy_primitives::map::B256Map<Bytecode>,
 }
@@ -107,8 +106,8 @@ impl evm2::evm::StateChangeSink for TransactionChanges {
     fn account(&mut self, change: evm2::evm::AccountChangeRef<'_>) -> Result<(), Self::Error> {
         let original = change.original.map(revm_account);
         let account = self.state.entry(change.address).or_default();
-        *account.original_info_mut() = original.clone().unwrap_or_default();
-        self.originals.insert(change.address, original);
+        account.status.set(revm::state::AccountStatus::LoadedAsNotExisting, original.is_none());
+        *account.original_info_mut() = original.unwrap_or_default();
         account.info = change.current.map(revm_account).unwrap_or_default();
         if let Some(code) = self.contracts.get(&account.info.code_hash) {
             account.info.code = Some(code.clone());
