@@ -619,8 +619,8 @@ mod tests {
         assert_eq!(sidecar.cells().unwrap().mask(), expanded);
     }
 
-    #[test]
-    fn custody_changes_reconcile_coverage_and_restore_sources() {
+    #[tokio::test]
+    async fn custody_changes_reconcile_coverage_and_restore_sources() {
         let custody = CellCustody::default();
         custody.set(B128::from(1u128.to_le_bytes()));
         let mut fetcher = BlobFetcher::<EthPooledTransaction>::new(custody.clone(), 15);
