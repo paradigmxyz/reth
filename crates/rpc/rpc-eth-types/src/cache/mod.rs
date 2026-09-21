@@ -22,7 +22,7 @@ use reth_revm::{
 };
 use reth_storage_api::{BalProvider, BlockReader, TransactionVariant};
 use reth_tasks::Runtime;
-use schnellru::{ByLength, Limiter, LruMap};
+use schnellru::{ByLength, LruMap};
 use std::{
     collections::VecDeque,
     future::Future,
@@ -65,17 +65,18 @@ type TransactionHashResponseSender<B, R> = oneshot::Sender<Option<CachedTransact
 /// The type that can send the response to a requested revm BAL.
 type BalResponseSender = oneshot::Sender<ProviderResult<Option<CachedRevmBal>>>;
 
-type BlockLruCache<B, L> = MultiConsumerLruCache<
+type BlockLruCache<B> = MultiConsumerLruCache<
     B256,
     CachedEntry<Arc<RecoveredBlock<B>>>,
-    L,
+    ByLength,
     BlockWithSendersResponseSender<B>,
 >;
 
-type ReceiptsLruCache<R, L> =
-    MultiConsumerLruCache<B256, CachedEntry<Arc<Vec<R>>>, L, ReceiptsResponseSender<R>>;
+type ReceiptsLruCache<R> =
+    MultiConsumerLruCache<B256, CachedEntry<Arc<Vec<R>>>, ByLength, ReceiptsResponseSender<R>>;
 
-type BalLruCache<L> = MultiConsumerLruCache<B256, CachedEntry<CachedRevmBal>, L, BalResponseSender>;
+type BalLruCache =
+    MultiConsumerLruCache<B256, CachedEntry<CachedRevmBal>, ByLength, BalResponseSender>;
 
 /// Provides async access to cached eth data
 ///
@@ -98,7 +99,7 @@ impl<N: NodePrimitives> EthStateCache<N> {
         provider: Provider,
         action_task_spawner: Runtime,
         config: EthStateCacheConfig,
-    ) -> (Self, EthStateCacheService<Provider, Runtime>)
+    ) -> (Self, EthStateCacheService<Provider>)
     where
         Provider: BlockReader<Block = N::Block, Receipt = N::Receipt> + BalProvider,
     {
@@ -328,26 +329,18 @@ impl From<CacheServiceUnavailable> for ProviderError {
 /// `reth_rpc::EthApi` which is typically invoked by the RPC server, which already uses
 /// permits to limit concurrent requests.
 #[must_use = "Type does nothing unless spawned"]
-struct EthStateCacheService<
-    Provider,
-    Tasks,
-    LimitBlocks = ByLength,
-    LimitReceipts = ByLength,
-    LimitBals = ByLength,
-> where
+struct EthStateCacheService<Provider>
+where
     Provider: BlockReader + BalProvider,
-    LimitBlocks: Limiter<B256, CachedEntry<Arc<RecoveredBlock<Provider::Block>>>>,
-    LimitReceipts: Limiter<B256, CachedEntry<Arc<Vec<Provider::Receipt>>>>,
-    LimitBals: Limiter<B256, CachedEntry<CachedRevmBal>>,
 {
     /// The type used to lookup data from disk
     provider: Provider,
     /// The LRU cache for full blocks grouped by their block hash.
-    full_block_cache: BlockLruCache<Provider::Block, LimitBlocks>,
+    full_block_cache: BlockLruCache<Provider::Block>,
     /// The LRU cache for block receipts grouped by the block hash.
-    receipts_cache: ReceiptsLruCache<Provider::Receipt, LimitReceipts>,
+    receipts_cache: ReceiptsLruCache<Provider::Receipt>,
     /// The LRU cache for revm BALs grouped by the block hash.
-    bal_cache: BalLruCache<LimitBals>,
+    bal_cache: BalLruCache,
     /// Maximum time without a cache hit, if idle expiration is enabled.
     idle_timeout: Option<Duration>,
     /// Wakes the service to reclaim expired data even when the chain and RPC are idle.
@@ -357,7 +350,7 @@ struct EthStateCacheService<
     /// Receiver half of the action channel.
     action_rx: UnboundedReceiverStream<CacheAction<Provider::Block, Provider::Receipt>>,
     /// The type that's used to spawn tasks that do the actual work
-    action_task_spawner: Tasks,
+    action_task_spawner: Runtime,
     /// Rate limiter for spawned fetch tasks.
     ///
     /// This restricts the max concurrent fetch tasks at the same time.
@@ -371,7 +364,7 @@ struct EthStateCacheService<
     tx_hash_index: LruMap<TxHash, (B256, usize), ByLength>,
 }
 
-impl<Provider> EthStateCacheService<Provider, Runtime>
+impl<Provider> EthStateCacheService<Provider>
 where
     Provider: BlockReader + BalProvider + Clone + Unpin + 'static,
 {
@@ -379,8 +372,8 @@ where
         self.idle_timeout.map(|_| Instant::now())
     }
 
-    fn evict_expired(&mut self, now: Instant) {
-        if let Some(timeout) = self.idle_timeout {
+    fn evict_expired(&mut self, now: Option<Instant>) {
+        if let (Some(now), Some(timeout)) = (now, self.idle_timeout) {
             self.full_block_cache.evict_expired(now, timeout);
             self.receipts_cache.evict_expired(now, timeout);
             self.bal_cache.evict_expired(now, timeout);
@@ -482,9 +475,7 @@ where
         // cache good block
         if let Ok(Some(block)) = res {
             let now = self.cache_now();
-            if let Some(now) = now {
-                self.evict_expired(now);
-            }
+            self.evict_expired(now);
             self.full_block_cache.insert_cached(block_hash, block, now);
         }
     }
@@ -504,9 +495,7 @@ where
         // cache good receipts
         if let Ok(Some(receipts)) = res {
             let now = self.cache_now();
-            if let Some(now) = now {
-                self.evict_expired(now);
-            }
+            self.evict_expired(now);
             self.receipts_cache.insert_cached(block_hash, receipts, now);
         }
     }
@@ -525,9 +514,7 @@ where
         }
 
         if let Ok(Some(bal)) = res {
-            if let Some(now) = now {
-                self.evict_expired(now);
-            }
+            self.evict_expired(now);
             self.bal_cache.insert_cached(block_hash, bal, now);
         }
     }
@@ -581,7 +568,7 @@ where
     }
 }
 
-impl<Provider> Future for EthStateCacheService<Provider, Runtime>
+impl<Provider> Future for EthStateCacheService<Provider>
 where
     Provider: BlockReader + BalProvider + Clone + Unpin + 'static,
 {
@@ -599,7 +586,7 @@ where
                 if interval.poll_tick(cx).is_ready() {
                     cx.waker().wake_by_ref();
                 }
-                this.evict_expired(Instant::now());
+                this.evict_expired(Some(Instant::now()));
             }
 
             let Poll::Ready(action) = this.action_rx.poll_next_unpin(cx) else {
@@ -709,9 +696,7 @@ where
                             }
                         },
                         CacheAction::CacheNewCanonicalChain { chain_change } => {
-                            if let Some(now) = this.cache_now() {
-                                this.evict_expired(now);
-                            }
+                            this.evict_expired(this.cache_now());
                             for block in chain_change.blocks {
                                 // Index transactions before caching the block
                                 this.index_block_transactions(&block);
@@ -1073,7 +1058,7 @@ mod tests {
         time::Duration,
     };
 
-    fn test_service() -> EthStateCacheService<NoopProvider, Runtime> {
+    fn test_service() -> EthStateCacheService<NoopProvider> {
         let (_cache, service) = EthStateCache::<EthPrimitives>::create(
             NoopProvider::default(),
             Runtime::test(),

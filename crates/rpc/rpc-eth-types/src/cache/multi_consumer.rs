@@ -193,14 +193,12 @@ where
                 self.metrics.hits_total.increment(1);
                 return Some(entry.value.clone())
             }
-            None => {
-                self.metrics.misses_total.increment(1);
-                return None
+            Some(_) => {
+                self.cache.remove(key);
+                self.metrics_dirty = true;
             }
-            Some(_) => {}
+            None => {}
         }
-        self.cache.remove(key);
-        self.metrics_dirty = true;
         self.metrics.misses_total.increment(1);
         None
     }
