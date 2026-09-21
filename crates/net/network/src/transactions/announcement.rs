@@ -1,7 +1,8 @@
 //! Ordered transaction announcements used by the transaction manager and fetcher.
 
 use super::constants::SOFT_LIMIT_COUNT_HASHES_IN_NEW_POOLED_TRANSACTIONS_BROADCAST_MESSAGE;
-use alloy_primitives::{map::B256Set, TxHash, B128};
+use alloy_eips::eip7594::BlobCellMask;
+use alloy_primitives::{map::B256Set, TxHash};
 use derive_more::IntoIterator;
 use reth_eth_wire::{EthVersion, HandleMempoolData, NewPooledTransactionHashes};
 
@@ -14,7 +15,7 @@ pub struct TransactionAnnouncement {
     #[into_iterator(owned, ref)]
     entries: Vec<AnnouncedTransaction>,
     version: EthVersion,
-    cell_mask: Option<B128>,
+    cell_mask: Option<BlobCellMask>,
 }
 
 impl TransactionAnnouncement {
@@ -32,9 +33,10 @@ impl TransactionAnnouncement {
             NewPooledTransactionHashes::Eth68(msg) => {
                 (Some((msg.types.as_slice(), msg.sizes.as_slice())), None)
             }
-            NewPooledTransactionHashes::Eth72(msg) => {
-                (Some((msg.types.as_slice(), msg.sizes.as_slice())), msg.cell_mask)
-            }
+            NewPooledTransactionHashes::Eth72(msg) => (
+                Some((msg.types.as_slice(), msg.sizes.as_slice())),
+                msg.cell_mask.map(|mask| BlobCellMask::from_bits(u128::from_le_bytes(mask.into()))),
+            ),
         };
         if let Some((types, sizes)) = metadata {
             for len in [types.len(), sizes.len()] {
@@ -71,7 +73,7 @@ impl TransactionAnnouncement {
     }
 
     /// Returns the eth/72 message-level cell mask, if present.
-    pub const fn cell_mask(&self) -> Option<B128> {
+    pub const fn cell_mask(&self) -> Option<BlobCellMask> {
         self.cell_mask
     }
 
@@ -136,7 +138,7 @@ const MAX_RETAINED_SCRATCH_CAPACITY: usize =
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_primitives::B256;
+    use alloy_primitives::{B128, B256};
     use reth_eth_wire::{NewPooledTransactionHashes68, NewPooledTransactionHashes72};
 
     #[test]
@@ -189,6 +191,22 @@ mod tests {
                 if msg.version() == EthVersion::Eth72 { mask } else { None }
             );
         }
+    }
+
+    #[test]
+    fn decodes_eth72_cell_mask_at_the_wire_boundary() {
+        let wire_mask = B128::from(1u128.to_le_bytes());
+        let message = NewPooledTransactionHashes72 {
+            hashes: vec![B256::ZERO],
+            types: vec![2],
+            sizes: vec![100],
+            cell_mask: Some(wire_mask),
+        };
+        let announcement =
+            TransactionAnnouncement::from_message(&message.into(), &mut B256Set::default())
+                .unwrap();
+
+        assert_eq!(announcement.cell_mask(), Some(BlobCellMask::from_bits(1)));
     }
 
     #[test]
