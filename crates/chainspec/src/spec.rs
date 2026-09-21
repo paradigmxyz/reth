@@ -146,7 +146,8 @@ pub static MAINNET: LazyLock<Arc<ChainSpec>> = LazyLock::new(|| {
 pub static SEPOLIA: LazyLock<Arc<ChainSpec>> = LazyLock::new(|| {
     let genesis = serde_json::from_str(include_str!("../res/genesis/sepolia.json"))
         .expect("Can't deserialize Sepolia genesis json");
-    let hardforks = EthereumHardfork::sepolia().into();
+    let mut hardforks: ChainHardforks = EthereumHardfork::sepolia().into();
+    hardforks.insert(EthereumHardfork::Amsterdam, ForkCondition::Timestamp(1791294816));
     let mut spec = ChainSpec {
         chain: Chain::sepolia(),
         genesis_header: SealedHeader::new(
@@ -1880,6 +1881,13 @@ Post-merge hard forks (timestamp based):
     }
 
     #[test]
+    fn sepolia_amsterdam_activation() {
+        assert!(!SEPOLIA.is_amsterdam_active_at_timestamp(1791294815));
+        assert!(SEPOLIA.is_amsterdam_active_at_timestamp(1791294816));
+        assert!(SEPOLIA.is_amsterdam_active_at_timestamp(1791294817));
+    }
+
+    #[test]
     fn sepolia_fork_ids() {
         test_fork_ids(
             &SEPOLIA,
@@ -1939,6 +1947,16 @@ Post-merge hard forks (timestamp based):
                         hash: ForkHash(hex!("0xe2ae4999")),
                         next: sepolia::SEPOLIA_BPO1_TIMESTAMP,
                     },
+                ),
+                // Last block before Amsterdam
+                (
+                    Head { number: 1735378, timestamp: 1791294815, ..Default::default() },
+                    ForkId { hash: ForkHash(hex!("0x268956b6")), next: 1791294816 },
+                ),
+                // First Amsterdam block
+                (
+                    Head { number: 1735379, timestamp: 1791294816, ..Default::default() },
+                    ForkId { hash: ForkHash(hex!("0x6c1d9423")), next: 0 },
                 ),
             ],
         );
@@ -2798,8 +2816,8 @@ Post-merge hard forks (timestamp based):
 
     #[test]
     fn latest_sepolia_mainnet_fork_id() {
-        // BPO2
-        assert_eq!(ForkId { hash: ForkHash(hex!("0x268956b6")), next: 0 }, SEPOLIA.latest_fork_id())
+        // Amsterdam
+        assert_eq!(ForkId { hash: ForkHash(hex!("0x6c1d9423")), next: 0 }, SEPOLIA.latest_fork_id())
     }
 
     #[test]
