@@ -262,33 +262,40 @@ where
                 Some(AccountRangeStep::Unavailable { .. }) => return Ok(Step::Wait),
                 None => return self.hand_off(write).await,
             };
-            if !self.download_storage_and_code(&range).await? {
-                return Ok(Step::Wait)
+            if let Some(step) = self.download_storage_and_code(&range).await? {
+                return Ok(step)
             }
             self.accounts.commit(range, Default::default(), Vec::new()).await?;
         }
         Ok(Step::Continue)
     }
 
-    // Persists the storage and code `range` needs, returning `false` when a peer did not serve
-    // them. Both commit as they arrive, so a range dropped here is fetched again without
-    // repeating them.
+    // Persists the storage and code `range` needs. `Some` ends the pass. Both commit as they
+    // arrive, so a range dropped here is fetched again without repeating them.
     async fn download_storage_and_code(
         &mut self,
         range: &VerifiedRange,
-    ) -> Result<bool, SnapSyncError> {
+    ) -> Result<Option<Step>, SnapSyncError> {
         loop {
             match self.storage.next(range).await? {
                 StorageRangeStep::Complete => break,
                 StorageRangeStep::Committed(_) => {}
-                StorageRangeStep::Unavailable { .. } => return Ok(false),
+                StorageRangeStep::Unavailable { .. } => return Ok(Some(Step::Wait)),
+            }
+            // A large contract takes many responses, each committed, so any of them is a
+            // resumable place to stop.
+            if self.cancel.is_cancelled() {
+                return Ok(Some(Step::Stop))
             }
         }
         loop {
             match self.bytecode.next(range).await? {
-                BytecodeStep::Complete => return Ok(true),
+                BytecodeStep::Complete => return Ok(None),
                 BytecodeStep::Committed { .. } => {}
-                BytecodeStep::Unavailable { .. } => return Ok(false),
+                BytecodeStep::Unavailable { .. } => return Ok(Some(Step::Wait)),
+            }
+            if self.cancel.is_cancelled() {
+                return Ok(Some(Step::Stop))
             }
         }
     }
@@ -395,11 +402,12 @@ enum Step {
 mod tests {
     use super::*;
     use crate::test_utils::{
-        account, account_range, hashed_factory, header, key, policy, state_root, ScriptedSnapClient,
+        account, account_range, hashed_factory, header, key, policy, state_root, storage_ranges,
+        storage_root_of, ScriptedSnapClient,
     };
     use alloy_eip7928::{compute_block_access_list_hash, AccountChanges};
     use alloy_eips::eip7928::bal::Bal;
-    use alloy_primitives::{Bytes, B256};
+    use alloy_primitives::{Bytes, B256, U256};
     use reth_eth_wire_types::{snap::BlockAccessListsMessage, BlockAccessLists};
     use reth_network_p2p::{
         error::{PeerRequestResult, RequestError},
@@ -652,6 +660,34 @@ mod tests {
         assert_eq!(pivot.number, 10);
         assert_ne!(attempt_id(&factory), attempt);
         assert!(client.block_requests().is_empty());
+    }
+
+    #[tokio::test]
+    async fn cancellation_between_storage_responses_stops_the_run() {
+        let slots = vec![(key(1), U256::from(11)), (key(2), U256::from(12))];
+        let mut contract = account(1);
+        contract.storage_root = storage_root_of(&slots);
+        let accounts = vec![(key(1), contract)];
+        let factory = hashed_factory();
+        insert_chain(&factory, 3, state_root(&accounts));
+        let cancel = CancellationToken::new();
+        let on_request = cancel.clone();
+        // The contract's storage takes two responses, and shutdown fires during the first.
+        let client = Arc::new(
+            ScriptedSnapClient::new([
+                account_range(1, &accounts, 0..1, &[]),
+                storage_ranges(1, &[&slots[..1]], &slots, &[B256::ZERO, key(1)]),
+            ])
+            .on_storage_request(move || on_request.cancel()),
+        );
+        let context = TestContext { heads: RefCell::new(VecDeque::from([3])), waits: 0 };
+        let mut bootstrap =
+            SnapBootstrap::new(Arc::clone(&client), factory.clone(), Runtime::test(), context)
+                .with_policy(policy())
+                .with_cancellation(cancel);
+
+        assert_eq!(bootstrap.run().await.unwrap(), SnapBootstrapOutcome::Stopped);
+        assert_eq!(client.storage_requests().len(), 1);
     }
 
     // Serves heads in order, repeating the last, and ends the run at the first wait.
