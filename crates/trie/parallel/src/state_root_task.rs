@@ -501,9 +501,16 @@ pub fn evm_state_to_hashed_post_state(update: EvmState) -> HashedPostState {
             // as a removal rather than as an all-zero account. This mirrors what revm does in
             // the bundle path (`CacheAccount::touch_empty_eip161`) and what the sibling
             // producer for this consumer already does in `send_bal_hashed_state`.
-            let info =
-                if destroyed || account.is_empty() { None } else { Some(account.info.into()) };
-            hashed_state.accounts.insert(hashed_address, info);
+            // An address that never existed and still does not exist is not a deletion: revm
+            // emits no transition for `LoadedNotExisting`. Skipping it matches the bundle
+            // producer; every `None` here becomes a storage-trie cursor walk in `StateRoot`.
+            let deleted = (destroyed || account.is_empty()) && !account.is_loaded_as_not_existing();
+            if deleted {
+                hashed_state.accounts.insert(hashed_address, None);
+            } else if account.info != account.original_info() {
+                // A touched but unchanged account produces no bundle transition either.
+                hashed_state.accounts.insert(hashed_address, Some(account.info.into()));
+            }
 
             let mut changed_storage_iter = account
                 .storage
@@ -690,6 +697,71 @@ mod tests {
             from_hook.accounts.get(&keccak256(address)).copied().flatten(),
             from_bundle.accounts.get(&keccak256(address)).copied().flatten(),
             "state-hook and bundle producers disagree about a created-empty account"
+        );
+    }
+
+    /// A zero-value call to an address that never existed leaves it non-existent. revm's bundle
+    /// path emits no transition for it (`CacheAccount::touch_empty_eip161` returns `None` for
+    /// `LoadedNotExisting`). Asserts the converter also emits nothing, rather than a deletion
+    /// that would queue a `HashedAccounts` delete and a storage-trie wipe for an unused address.
+    #[test]
+    fn touched_never_existing_account_matches_bundle_state() {
+        use revm::{
+            database::{states::bundle_state::BundleRetention, State},
+            DatabaseCommit,
+        };
+
+        let address = Address::repeat_byte(0x09);
+        let mut account = Account::new_not_existing(TransactionId::default());
+        account.mark_touch();
+        let evm_state = EvmState::from_iter([(address, account)]);
+
+        let mut db = State::builder().with_bundle_update().build();
+        db.commit(evm_state.clone());
+        db.merge_transitions(BundleRetention::PlainState);
+        let bundle = db.take_bundle();
+
+        let from_bundle =
+            HashedPostState::from_bundle_state::<reth_trie::KeccakKeyHasher>(bundle.state.iter());
+        let from_hook = evm_state_to_hashed_post_state(evm_state);
+
+        assert_eq!(
+            from_hook.accounts, from_bundle.accounts,
+            "state-hook and bundle producers disagree about a never-existing touched account"
+        );
+    }
+
+    /// An account touched without being changed. revm's bundle producer reports nothing for it.
+    /// Asserts the converter agrees, so a block full of zero-value calls does not rewrite
+    /// unchanged `HashedAccounts` rows.
+    #[test]
+    fn touched_unchanged_account_matches_bundle_state() {
+        use revm::{
+            database::{states::bundle_state::BundleRetention, State},
+            state::AccountInfo,
+            DatabaseCommit,
+        };
+
+        let address = Address::repeat_byte(0x0a);
+        let pre = AccountInfo { balance: U256::from(7), nonce: 1, ..Default::default() };
+        let mut account = Account::from(pre.clone());
+        account.mark_touch();
+        assert!(!account.is_empty());
+        let evm_state = EvmState::from_iter([(address, account)]);
+
+        let mut db = State::builder().with_bundle_update().build();
+        db.insert_account(address, pre);
+        db.commit(evm_state.clone());
+        db.merge_transitions(BundleRetention::PlainState);
+        let bundle = db.take_bundle();
+
+        let from_bundle =
+            HashedPostState::from_bundle_state::<reth_trie::KeccakKeyHasher>(bundle.state.iter());
+        let from_hook = evm_state_to_hashed_post_state(evm_state);
+
+        assert_eq!(
+            from_hook.accounts, from_bundle.accounts,
+            "state-hook and bundle producers disagree about a touched but unchanged account"
         );
     }
 
