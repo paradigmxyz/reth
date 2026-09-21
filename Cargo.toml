@@ -395,6 +395,7 @@ reth-primitives-traits = { version = "0.7.1", default-features = false }
 reth-provider = { path = "crates/storage/provider" }
 reth-prune = { path = "crates/prune/prune" }
 reth-prune-types = { path = "crates/prune/types", default-features = false }
+reth-revm = { path = "crates/revm", default-features = false }
 reth-rpc = { path = "crates/rpc/rpc" }
 reth-rpc-api = { path = "crates/rpc/rpc-api" }
 reth-rpc-builder = { path = "crates/rpc/rpc-builder" }
@@ -426,9 +427,8 @@ reth-trie-parallel = { path = "crates/trie/parallel" }
 reth-trie-sparse = { path = "crates/trie/sparse", default-features = false }
 reth-zstd-compressors = { version = "0.7.0", default-features = false }
 
+# revm
 revm = { version = "43.0.2", default-features = false }
-alloy-evm = { version = "0.39.0", default-features = false }
-reth-revm = { path = "crates/revm", default-features = false }
 # evm2
 evm2 = { git = "https://github.com/alloy-rs/evm2", rev = "93348876e0b2f5c6670a3cee0058a4a61b69e74f", default-features = false }
 evm2-inspectors = { git = "https://github.com/alloy-rs/evm2", rev = "93348876e0b2f5c6670a3cee0058a4a61b69e74f", default-features = false }
@@ -443,6 +443,7 @@ alloy-sol-types = { version = "1.6.1", default-features = false }
 alloy-chains = { version = "0.2.33", default-features = false }
 alloy-eip2124 = { version = "0.2.0", default-features = false }
 alloy-eip7928 = { version = "0.4.10", default-features = false, features = ["rlp"] }
+alloy-evm = { version = "0.39.0", default-features = false }
 alloy-rlp = { version = "0.3.16", default-features = false, features = ["core-net"] }
 alloy-trie = { version = "0.9.4", default-features = false }
 

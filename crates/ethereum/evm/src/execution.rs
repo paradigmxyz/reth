@@ -1,7 +1,7 @@
 //! EVM-backed Ethereum execution helpers.
 use reth_execution_types::{BlockState, EvmState, TransactionChanges};
 
-use crate::dao_fork;
+use alloy_evm::eth::dao_fork;
 
 use alloc::{
     boxed::Box,

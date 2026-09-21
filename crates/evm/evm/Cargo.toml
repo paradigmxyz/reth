@@ -25,6 +25,7 @@ reth-trie-common.workspace = true
 evm2.workspace = true
 
 # alloy
+alloy-evm.workspace = true
 alloy-primitives.workspace = true
 alloy-eips.workspace = true
 alloy-consensus.workspace = true
@@ -52,6 +53,7 @@ asm-keccak = [
     "reth-storage-api/asm-keccak",
     "alloy-primitives/asm-keccak",
     "revm/asm-keccak",
+    "alloy-evm/asm-keccak",
 ]
 c-kzg = [
     "evm2/c-kzg",
@@ -72,6 +74,7 @@ p256-aws-lc-rs = [
     "reth-execution-types/p256-aws-lc-rs",
 ]
 std = [
+    "alloy-evm/std",
     "reth-revm/std",
     "dep:moka",
     "dep:rayon",

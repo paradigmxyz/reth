@@ -10,6 +10,7 @@ use alloy_eip7928::{
     bal::DecodedBal, compute_block_access_list_hash_with_buf, BlockAccessIndex, BlockAccessList,
 };
 use alloy_eips::eip2718::{Typed2718, WithEncoded};
+pub use alloy_evm::{block::CommitChanges, RecoveredTx};
 use alloy_primitives::{Address, B256};
 use core::fmt::Debug;
 #[cfg(feature = "std")]
@@ -106,23 +107,6 @@ pub trait ReceiptBuilder {
             evm2::TxResult<T>,
         >,
     ) -> Self::Receipt;
-}
-
-/// Marks whether transaction changes should be committed into block executor state.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[must_use]
-pub enum CommitChanges {
-    /// Transaction changes should be committed.
-    Yes,
-    /// Transaction changes should not be committed.
-    No,
-}
-
-impl CommitChanges {
-    /// Returns `true` if transaction changes should be committed.
-    pub const fn should_commit(self) -> bool {
-        matches!(self, Self::Yes)
-    }
 }
 
 /// A detached block transaction output containing its raw execution result.
@@ -821,7 +805,7 @@ where
         ) -> CommitChanges,
     ) -> Result<Option<GasOutput>, BlockExecutionError> {
         let (tx_env, tx) = tx.into_parts();
-        let tx = tx.to_recovered();
+        let tx = Recovered::new_unchecked(tx.tx().clone(), *tx.signer());
         if let Some(output) =
             self.executor.execute_transaction_with_commit_condition((tx_env, &tx), f)?
         {
@@ -1273,94 +1257,6 @@ where
 
     fn take_bal(&mut self) -> Option<BlockAccessList> {
         None
-    }
-}
-
-/// Helper trait to abstract over recovered transaction wrappers.
-#[auto_impl::auto_impl(&)]
-pub trait RecoveredTx<T> {
-    /// Returns the transaction.
-    fn tx(&self) -> &T;
-
-    /// Returns the signer of the transaction.
-    fn signer(&self) -> &Address;
-
-    /// Clones this accessor into an owned recovered transaction.
-    fn to_recovered(&self) -> Recovered<T>
-    where
-        T: Clone,
-    {
-        Recovered::new_unchecked(self.tx().clone(), *self.signer())
-    }
-}
-
-impl<T> RecoveredTx<T> for Recovered<&T> {
-    fn tx(&self) -> &T {
-        self.inner()
-    }
-
-    fn signer(&self) -> &Address {
-        self.signer_ref()
-    }
-}
-
-impl<T> RecoveredTx<T> for Recovered<Arc<T>> {
-    fn tx(&self) -> &T {
-        self.inner().as_ref()
-    }
-
-    fn signer(&self) -> &Address {
-        self.signer_ref()
-    }
-}
-
-impl<T> RecoveredTx<T> for Recovered<T> {
-    fn tx(&self) -> &T {
-        self.inner()
-    }
-
-    fn signer(&self) -> &Address {
-        self.signer_ref()
-    }
-}
-
-impl<Tx, T: RecoveredTx<Tx>> RecoveredTx<Tx> for WithEncoded<T> {
-    fn tx(&self) -> &Tx {
-        self.1.tx()
-    }
-
-    fn signer(&self) -> &Address {
-        self.1.signer()
-    }
-}
-
-impl<L, R, Tx> RecoveredTx<Tx> for Either<L, R>
-where
-    L: RecoveredTx<Tx>,
-    R: RecoveredTx<Tx>,
-{
-    fn tx(&self) -> &Tx {
-        match self {
-            Self::Left(l) => l.tx(),
-            Self::Right(r) => r.tx(),
-        }
-    }
-
-    fn signer(&self) -> &Address {
-        match self {
-            Self::Left(l) => l.signer(),
-            Self::Right(r) => r.signer(),
-        }
-    }
-}
-
-impl<Tx, T: RecoveredTx<Tx>> RecoveredTx<Tx> for Arc<T> {
-    fn tx(&self) -> &Tx {
-        (**self).tx()
-    }
-
-    fn signer(&self) -> &Address {
-        (**self).signer()
     }
 }
 
