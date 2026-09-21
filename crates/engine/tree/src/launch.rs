@@ -2,10 +2,12 @@
 //!
 //! Provides [`build_engine_orchestrator`](crate::launch::build_engine_orchestrator) which wires
 //! together all engine components and returns a
-//! [`ChainOrchestrator`](crate::chain::ChainOrchestrator) ready to be polled as a `Stream`.
+//! [`ChainOrchestrator`](crate::chain::ChainOrchestrator) ready to be polled as a `Stream`, and
+//! [`build_engine_orchestrator_with_backfill`](crate::launch::build_engine_orchestrator_with_backfill)
+//! for callers supplying their own [`BackfillSync`].
 
 use crate::{
-    backfill::PipelineSync,
+    backfill::{BackfillSync, PipelineSync},
     chain::ChainOrchestrator,
     download::BasicBlockDownloader,
     engine::{EngineApiKind, EngineApiRequest, EngineApiRequestHandler, EngineHandler},
@@ -82,6 +84,65 @@ where
     V: EngineValidator<N::Payload> + WaitForCaches,
     C: ConfigureEvm<Primitives = N::Primitives> + 'static,
 {
+    build_engine_orchestrator_with_backfill(
+        engine_kind,
+        consensus,
+        client,
+        incoming_requests,
+        PipelineSync::new(pipeline, pipeline_task_spawner),
+        provider,
+        blockchain_db,
+        pruner,
+        payload_builder,
+        payload_validator,
+        overlay_manager,
+        tree_config,
+        sync_metrics_tx,
+        evm_config,
+        runtime,
+    )
+}
+
+/// Builds the engine [`ChainOrchestrator`] like [`build_engine_orchestrator`], backfilling through
+/// `backfill_sync` instead of the staged [`Pipeline`].
+///
+/// The engine stops writing once a run starts, so the backfill may hold the database until it
+/// reports the run finished.
+#[expect(clippy::too_many_arguments, clippy::type_complexity)]
+pub fn build_engine_orchestrator_with_backfill<N, Client, S, V, C, B>(
+    engine_kind: EngineApiKind,
+    consensus: Arc<dyn FullConsensus<N::Primitives>>,
+    client: Client,
+    incoming_requests: S,
+    backfill_sync: B,
+    provider: ProviderFactory<N>,
+    blockchain_db: BlockchainProvider<N>,
+    pruner: PrunerWithFactory<ProviderFactory<N>>,
+    payload_builder: PayloadBuilderHandle<N::Payload>,
+    payload_validator: V,
+    overlay_manager: OverlayManager<N::Primitives>,
+    tree_config: TreeConfig,
+    sync_metrics_tx: MetricEventsSender,
+    evm_config: C,
+    runtime: Runtime,
+) -> ChainOrchestrator<
+    EngineHandler<
+        EngineApiRequestHandler<EngineApiRequest<N::Payload, N::Primitives>, N::Primitives>,
+        S,
+        BasicBlockDownloader<Client, <N::Primitives as NodePrimitives>::Block>,
+    >,
+    B,
+>
+where
+    N: ProviderNodeTypes,
+    Client: BlockClient<Block = <N::Primitives as NodePrimitives>::Block>
+        + BlockAccessListsClient
+        + 'static,
+    S: Stream<Item = BeaconEngineMessage<N::Payload>> + Send + Sync + Unpin + 'static,
+    V: EngineValidator<N::Payload> + WaitForCaches,
+    C: ConfigureEvm<Primitives = N::Primitives> + 'static,
+    B: BackfillSync + Unpin,
+{
     let downloader = BasicBlockDownloader::new(client, consensus.clone());
 
     let persistence_handle =
@@ -105,8 +166,6 @@ where
 
     let engine_handler = EngineApiRequestHandler::new(to_tree_tx, from_tree);
     let handler = EngineHandler::new(engine_handler, downloader, incoming_requests);
-
-    let backfill_sync = PipelineSync::new(pipeline, pipeline_task_spawner);
 
     ChainOrchestrator::new(handler, backfill_sync)
 }
