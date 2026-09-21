@@ -204,7 +204,7 @@ mod tests {
         Bytecode::new_raw(Bytes::from_static(&[0x60, 0x00]))
     }
 
-    fn generation(block: u64) -> SnapGeneration {
+    const fn generation(block: u64) -> SnapGeneration {
         SnapGeneration::new(
             BlockNumHash::new(block, B256::repeat_byte(block as u8)),
             B256::repeat_byte(0xaa),

@@ -93,7 +93,7 @@ pub(crate) fn provider_with(headers: impl IntoIterator<Item = Header>) -> MockEt
 }
 
 /// A generation anchored to `block`, downloading against `state_root`.
-pub(crate) fn generation(block: u64, state_root: B256) -> SnapGeneration {
+pub(crate) const fn generation(block: u64, state_root: B256) -> SnapGeneration {
     SnapGeneration::new(BlockNumHash::new(block, B256::repeat_byte(block as u8)), state_root)
 }
 

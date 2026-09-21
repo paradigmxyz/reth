@@ -130,6 +130,7 @@ impl AccountData {
     }
 
     /// Consumes the wire value and returns its hashed key with the decoded trie account.
+    #[allow(clippy::missing_const_for_fn)] // Account extensions require dropping heap-backed data.
     pub fn into_trie_entry(self) -> (B256, TrieAccount) {
         (self.hash, self.body.0)
     }

@@ -96,7 +96,7 @@ mod tests {
     const ACCOUNT: Address = Address::repeat_byte(0xaa);
     const SENDER: Address = Address::repeat_byte(0x11);
 
-    fn index(value: u64) -> BlockAccessIndex {
+    const fn index(value: u64) -> BlockAccessIndex {
         BlockAccessIndex::new(value)
     }
 

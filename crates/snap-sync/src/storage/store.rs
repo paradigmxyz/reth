@@ -325,7 +325,7 @@ mod tests {
 
     const CONTRACT: B256 = B256::repeat_byte(0x22);
 
-    fn slot(value: u8) -> B256 {
+    const fn slot(value: u8) -> B256 {
         B256::with_last_byte(value)
     }
 
