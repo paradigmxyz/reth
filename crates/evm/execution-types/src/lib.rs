@@ -15,20 +15,21 @@ pub use evm2::{
     bytecode::Bytecode as ExecutableBytecode,
     evm::{
         AccountChangeRef as ExecutionAccountChangeRef, AccountInfo as ExecutionAccountInfo,
-        BlockStateAccumulator as EvmState, StateChangeSink as EvmStateChangeSink,
-        StateChangeSource as EvmStateChangeSource, StorageChange as ExecutionStorageChange,
+        StateChangeSink as EvmStateChangeSink, StateChangeSource as EvmStateChangeSource,
+        StorageChange as ExecutionStorageChange,
     },
 };
 pub use reth_trie_common::HashedPostState;
+pub use revm::state::EvmState;
+
+mod compat;
+pub use compat::*;
 
 mod chain;
 pub use chain::*;
 
 mod execute;
 pub use execute::*;
-
-mod state;
-pub use state::*;
 
 mod execution_outcome;
 pub use execution_outcome::*;

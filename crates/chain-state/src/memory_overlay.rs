@@ -4,7 +4,6 @@ use alloy_primitives::{
     keccak256, Address, BlockNumber, Bytes, StorageKey, StorageValue, B256, U256,
 };
 use reth_errors::ProviderResult;
-use reth_execution_types::EvmState;
 use reth_primitives_traits::{Account, Bytecode, NodePrimitives};
 use reth_storage_api::{
     AccountReader, BlockHashReader, BytecodeReader, HashedPostStateProvider, StateProofProvider,
@@ -14,6 +13,7 @@ use reth_trie::{
     updates::TrieUpdates, AccountProof, DecodedMultiProofV2, HashedPostState, HashedStorage,
     MultiProof, MultiProofTargets, MultiProofTargetsV2, StorageMultiProof, TrieInput,
 };
+use revm::database::BundleState;
 use std::{borrow::Cow, sync::OnceLock};
 
 /// A state provider that stores references to in-memory blocks along with their state as well as a
@@ -220,10 +220,15 @@ impl<N: NodePrimitives> StateProofProvider for MemoryOverlayStateProviderRef<'_,
 }
 
 impl<N: NodePrimitives> HashedPostStateProvider for MemoryOverlayStateProviderRef<'_, N> {
-    fn hashed_post_state(&self, bundle_state: &EvmState) -> ProviderResult<HashedPostState> {
+    fn hashed_post_state(&self, bundle_state: &BundleState) -> ProviderResult<HashedPostState> {
         let mut hashed_state = self.historical.hashed_post_state(bundle_state)?;
 
-        for address in reth_execution_types::destroyed_accounts(bundle_state) {
+        for (address, account) in bundle_state.state() {
+            // Accounts created in this bundle cannot have parent storage to zero.
+            if !account.was_destroyed() || account.original_info.is_none() {
+                continue
+            }
+
             let hashed_address = keccak256(address);
             let Some(parent_storage) = self.trie_input().state.storages.get(&hashed_address) else {
                 continue
@@ -313,8 +318,8 @@ reth_storage_api::macros::delegate_provider_impls!(MemoryOverlayStateProvider<N>
 mod tests {
     use super::*;
     use reth_ethereum_primitives::EthPrimitives;
-    use reth_execution_types::{EvmStateChangeSink, ExecutionAccountChangeRef};
     use reth_storage_api::noop::NoopProvider;
+    use revm::database::{AccountStatus, BundleAccount};
 
     #[test]
     fn created_and_destroyed_account_skips_in_memory_trie_aggregation() {
@@ -323,16 +328,11 @@ mod tests {
             Box::new(NoopProvider::default()),
             Vec::new(),
         );
-        let mut bundle_state = EvmState::default();
-        bundle_state
-            .account(ExecutionAccountChangeRef {
-                address,
-                original: None,
-                current: None,
-                created: true,
-                selfdestructed: true,
-            })
-            .unwrap();
+        let mut bundle_state = BundleState::default();
+        bundle_state.state.insert(
+            address,
+            BundleAccount::new(None, None, Default::default(), AccountStatus::Destroyed),
+        );
 
         provider.hashed_post_state(&bundle_state).unwrap();
 

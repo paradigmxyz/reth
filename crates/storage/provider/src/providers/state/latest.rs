@@ -274,14 +274,13 @@ impl<Provider: DBProvider + StorageSettingsCache> StateProofProvider
 impl<Provider: DBProvider> HashedPostStateProvider for LatestStateProviderRef<'_, Provider> {
     fn hashed_post_state(
         &self,
-        bundle_state: &reth_execution_types::EvmState,
+        bundle_state: &revm::database::BundleState,
     ) -> ProviderResult<HashedPostState> {
-        let mut hashed_state = reth_execution_types::hashed_post_state_from_execution_state::<
-            KeccakKeyHasher,
-        >(bundle_state);
+        let mut hashed_state =
+            HashedPostState::from_bundle_state::<KeccakKeyHasher>(bundle_state.state());
         zero_destroyed_account_storage(
             &reth_trie_db::DatabaseHashedCursorFactory::new(self.tx()),
-            reth_execution_types::destroyed_accounts(bundle_state),
+            bundle_state.state(),
             &mut hashed_state,
         )?;
         Ok(hashed_state)

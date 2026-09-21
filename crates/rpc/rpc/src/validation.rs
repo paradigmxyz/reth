@@ -206,8 +206,7 @@ where
             let result = executor.execute_one(&block).map_err(BlockExecutionError::other)?;
             let block_access_list_hash =
                 executor.take_bal().as_ref().map(|bal| compute_block_access_list_hash(bal));
-            let output =
-                BlockExecutionOutput::new(result, executor.into_state().into_execution_state());
+            let output = BlockExecutionOutput::new(result, executor.into_state());
             cached_db_handle.sync(&mut request_cache);
 
             if !self.disallow.is_empty() {
@@ -229,7 +228,7 @@ where
 
         self.ensure_payment(&block, &output, &message)?;
 
-        let hashed_state = state_provider.hashed_post_state(output.state.inner())?;
+        let hashed_state = state_provider.hashed_post_state(&output.state)?;
         let state_root = state_provider.state_root(hashed_state)?;
 
         if state_root != block.header().state_root() {
@@ -284,9 +283,9 @@ where
             }
         }
 
-        for (account, _) in output.state.inner().accounts() {
-            if self.disallow.contains(&account) {
-                return Err(ValidationApiError::Blacklist(account))
+        for account in output.state.state.keys() {
+            if self.disallow.contains(account) {
+                return Err(ValidationApiError::Blacklist(*account))
             }
         }
 
@@ -303,17 +302,18 @@ where
         output: &BlockExecutionOutput<<E::Primitives as NodePrimitives>::Receipt>,
         message: &BidTrace,
     ) -> Result<(), ValidationApiError> {
-        let (mut balance_before, balance_after) =
-            if let Some(acc) = output.account_state(&message.proposer_fee_recipient) {
-                let balance_before = acc.original.as_ref().map(|i| i.balance).unwrap_or_default();
-                let balance_after = acc.current.as_ref().map(|i| i.balance).unwrap_or_default();
+        let (mut balance_before, balance_after) = if let Some(acc) =
+            output.account_state(&message.proposer_fee_recipient)
+        {
+            let balance_before = acc.original_info.as_ref().map(|i| i.balance).unwrap_or_default();
+            let balance_after = acc.info.as_ref().map(|i| i.balance).unwrap_or_default();
 
-                (balance_before, balance_after)
-            } else {
-                // account might have balance but considering it zero is fine as long as we know
-                // that balance have not changed
-                (U256::ZERO, U256::ZERO)
-            };
+            (balance_before, balance_after)
+        } else {
+            // account might have balance but considering it zero is fine as long as we know
+            // that balance have not changed
+            (U256::ZERO, U256::ZERO)
+        };
 
         if let Some(withdrawals) = block.body().withdrawals() {
             for withdrawal in withdrawals {

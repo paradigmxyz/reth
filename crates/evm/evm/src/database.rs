@@ -112,7 +112,11 @@ where
     }
 
     fn get_code_by_hash(&mut self, code_hash: &B256) -> Result<Bytecode, Self::Error> {
-        Ok(self.0.bytecode_by_hash(code_hash)?.map(Into::into).unwrap_or_default())
+        Ok(self
+            .0
+            .bytecode_by_hash(code_hash)?
+            .map(|code| reth_execution_types::native_bytecode(&code.0))
+            .unwrap_or_default())
     }
 
     fn get_storage(&mut self, address: &Address, key: &Word) -> Result<Word, Self::Error> {

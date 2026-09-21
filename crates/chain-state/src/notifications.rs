@@ -378,7 +378,7 @@ mod tests {
         let receipts = vec![vec![receipt1.clone()]];
 
         // Define an `ExecutionOutcome` with the created receipts.
-        let execution_outcome = ExecutionOutcome::new_empty(0).with_receipts(receipts);
+        let execution_outcome = ExecutionOutcome { receipts, ..Default::default() };
 
         // Create a new chain segment with `block1` and `block2` and the execution outcome.
         let new_chain: Arc<Chain> = Arc::new(Chain::new(
@@ -438,7 +438,8 @@ mod tests {
         };
         let old_receipts = vec![vec![old_receipt.clone()]];
 
-        let old_execution_outcome = ExecutionOutcome::new_empty(0).with_receipts(old_receipts);
+        let old_execution_outcome =
+            ExecutionOutcome { receipts: old_receipts, ..Default::default() };
 
         // Create an old chain segment to be reverted, containing `old_block1`.
         let old_chain: Arc<Chain> =
@@ -466,7 +467,8 @@ mod tests {
         };
         let new_receipts = vec![vec![new_receipt.clone()]];
 
-        let new_execution_outcome = ExecutionOutcome::new_empty(0).with_receipts(new_receipts);
+        let new_execution_outcome =
+            ExecutionOutcome { receipts: new_receipts, ..Default::default() };
 
         // Create a new chain segment to be committed, containing `new_block1`.
         let new_chain =

@@ -185,15 +185,15 @@ mod tests {
     use crate::test_utils::insert_generation_headers;
     use alloy_eips::BlockNumHash;
     use alloy_primitives::{Bytes, B256};
-    use evm2::bytecode::Bytecode;
     use reth_db_api::{tables, transaction::DbTx};
     use reth_primitives_traits::Account;
     use reth_provider::{
         test_utils::{create_test_provider_factory, MockNodeTypesWithDB},
         DBProvider, DatabaseProviderFactory, ProviderFactory,
     };
-    use reth_storage_api::{metadata::keys, StateChangeset, StateWriter};
+    use reth_storage_api::{metadata::keys, StateWriter};
     use reth_trie_common::HashedPostState;
+    use revm::{bytecode::Bytecode, database::states::StateChangeset};
 
     const HASHED_ADDRESS: B256 = B256::repeat_byte(0xbb);
 
@@ -226,7 +226,7 @@ mod tests {
         provider.write_hashed_state(&state.into_sorted()).unwrap();
         provider
             .write_state_changes(StateChangeset {
-                contracts: vec![(code().hash_slow(), code().into())],
+                contracts: vec![(code().hash_slow(), code())],
                 ..Default::default()
             })
             .unwrap();

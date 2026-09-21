@@ -14,7 +14,6 @@ use reth_evm::{
     ConfigureEvm, ConvertTx, ExecutableTxFor, ExecutableTxIterator, ExecutableTxParts,
     ExecutableTxTuple, TxEnvFor, WithTxEnv,
 };
-use reth_execution_types::EvmState;
 use reth_primitives_traits::{FastInstant as Instant, NodePrimitives};
 use reth_provider::{
     BlockExecutionOutput, BlockNumReader, ChangeSetReader, DatabaseProviderFactory, HistoryReader,
@@ -30,6 +29,7 @@ pub use reth_trie_parallel::{
         StateRootSink, StateRootTaskCancelGuard, StateRootUpdateHook, StateRootUpdateStream,
     },
 };
+use revm::database::BundleState;
 use std::{
     ops::Not,
     sync::{
@@ -469,7 +469,7 @@ where
     pub fn on_inserted_executed_block(
         &self,
         block_with_parent: BlockWithParent,
-        block_state: &EvmState,
+        block_state: &BundleState,
     ) {
         let cache_state_metrics = self.cache_state_metrics.clone();
         self.execution_cache.update_with_guard(|cached| {
@@ -500,7 +500,11 @@ where
 
             // Insert the block's state into cache
             let new_cache = SavedCache::new(block_with_parent.block.hash, caches);
-            new_cache.cache().insert_state(block_state);
+            if new_cache.cache().insert_state(block_state).is_err() {
+                *cached = None;
+                debug!(target: "engine::caching", "cleared execution cache on update error");
+                return
+            }
             new_cache.update_metrics(cache_state_metrics.as_ref());
 
             // Replace with the updated cache
@@ -674,8 +678,7 @@ mod tests {
     use reth_chainspec::ChainSpec;
     use reth_evm_ethereum::EthEvmConfig;
     use reth_execution_cache::CachedStatus;
-    use reth_execution_types::{execution_state_from_init, EvmState};
-    use reth_primitives_traits::Account;
+    use revm::{database::BundleState, state::AccountInfo};
     use std::sync::{atomic::Ordering, Arc};
 
     type TestTx = reth_evm::execute::WithTxEnv<
@@ -933,7 +936,7 @@ mod tests {
             block: BlockNumHash { hash: block_hash, number: 1 },
             parent: parent_hash,
         };
-        let block_state = EvmState::default();
+        let block_state = BundleState::default();
 
         // Cache should be empty initially
         assert!(payload_processor.execution_cache.get_cache_for(block_hash).is_none());
@@ -968,7 +971,7 @@ mod tests {
             block: BlockNumHash { hash: block3_hash, number: 3 },
             parent: wrong_parent,
         };
-        let block_state = EvmState::default();
+        let block_state = BundleState::default();
 
         payload_processor.on_inserted_executed_block(block_with_parent, &block_state);
 
@@ -1003,21 +1006,18 @@ mod tests {
             .expect("expected parent cache checkout to succeed");
 
         let polluted_address = Address::random();
-        let block_state = execution_state_from_init(
-            [(
+        let block_state = BundleState::builder(2..=2)
+            .state_present_account_info(
                 polluted_address,
-                (
-                    None,
-                    Some(Account {
-                        balance: U256::from(1337),
-                        nonce: 7,
-                        bytecode_hash: Some(KECCAK_EMPTY),
-                    }),
-                    Default::default(),
-                ),
-            )],
-            [],
-        );
+                AccountInfo {
+                    balance: U256::from(1337),
+                    nonce: 7,
+                    code_hash: KECCAK_EMPTY,
+                    code: None,
+                    account_id: None,
+                },
+            )
+            .build();
 
         // Make parent match the cached slot so we bypass the parent-mismatch guard and exercise
         // the in-use guard specifically.

@@ -11,7 +11,9 @@ repository.workspace = true
 workspace = true
 
 [dependencies]
+revm.workspace = true
 # reth
+reth-revm.workspace = true
 reth-execution-errors.workspace = true
 reth-execution-types.workspace = true
 reth-metrics = { workspace = true, optional = true }
@@ -23,6 +25,7 @@ reth-trie-common.workspace = true
 evm2.workspace = true
 
 # alloy
+alloy-evm.workspace = true
 alloy-primitives.workspace = true
 alloy-eips.workspace = true
 alloy-consensus.workspace = true
@@ -49,6 +52,8 @@ asm-keccak = [
     "reth-execution-types/asm-keccak",
     "reth-storage-api/asm-keccak",
     "alloy-primitives/asm-keccak",
+    "revm/asm-keccak",
+    "alloy-evm/asm-keccak",
 ]
 c-kzg = [
     "evm2/c-kzg",
@@ -61,12 +66,16 @@ blst = [
 portable = [
     "evm2/portable",
     "reth-execution-types/portable",
+    "revm/portable",
+    "reth-revm/portable",
 ]
 p256-aws-lc-rs = [
     "evm2/p256-aws-lc-rs",
     "reth-execution-types/p256-aws-lc-rs",
 ]
 std = [
+    "alloy-evm/std",
+    "reth-revm/std",
     "dep:moka",
     "dep:rayon",
     "dep:tracing",
@@ -88,6 +97,7 @@ std = [
     "alloy-eip7928/std",
     "fixed-cache/std",
     "alloy-rlp?/std",
+    "revm/std",
 ]
 metrics = ["std", "dep:metrics", "dep:reth-metrics"]
 witness = ["dep:alloy-rlp", "dep:alloy-rpc-types-debug"]
@@ -95,4 +105,5 @@ test-utils = [
     "reth-primitives-traits/test-utils",
     "reth-trie-common/test-utils",
     "reth-ethereum-primitives/test-utils",
+    "reth-revm/test-utils",
 ]

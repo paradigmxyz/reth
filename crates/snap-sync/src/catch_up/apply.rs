@@ -406,9 +406,9 @@ mod tests {
             AccountCoverage::COMPLETE,
             pre.0.iter().map(|(address, account)| (*address, *account)),
         );
-        let executed = reth_execution_types::hashed_post_state_from_execution_state::<
-            KeccakKeyHasher,
-        >(output.state.inner());
+        let executed = reth_trie_common::HashedPostState::from_bundle_state::<KeccakKeyHasher>(
+            &output.state.state,
+        );
 
         let post = fold(pre.clone(), &update.state);
         assert!(update.unresolved.is_empty());

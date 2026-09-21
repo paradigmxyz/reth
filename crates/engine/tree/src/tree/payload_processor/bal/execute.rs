@@ -461,13 +461,13 @@ mod tests {
         block_header_only: SealedBlock<Block>,
         txs: Vec<Recovered<TransactionSigned>>,
     ) {
-        let (serial, reference_bal) =
+        let (mut serial, reference_bal) =
             run_serial_path(&evm_config, canonical_db_template.clone(), &block_header_only, &txs);
         let block = empty_amsterdam_block_with_gas_limit(
             compute_block_access_list_hash(&reference_bal),
             block_header_only.header().gas_limit(),
         );
-        let (bal_out, built_bal) = run_execute_block_full(
+        let (mut bal_out, built_bal) = run_execute_block_full(
             &Runtime::test(),
             evm_config,
             db_factory(canonical_db_template),
@@ -481,6 +481,8 @@ mod tests {
         assert_eq!(serial.receipts, bal_out.receipts, "receipts diverged");
         assert_eq!(serial.gas_used, bal_out.gas_used, "gas used diverged");
         assert_eq!(serial.requests, bal_out.requests, "requests diverged");
+        serial.state.reverts.sort();
+        bal_out.state.reverts.sort();
         assert_eq!(serial.state, bal_out.state, "execution state diverged");
     }
 

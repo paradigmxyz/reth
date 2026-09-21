@@ -1,32 +1,14 @@
-//! This example shows how to configure an evm2-backed custom EVM.
-//!
-//! It exercises the three extension points exposed by the integration:
-//!
-//! - a custom precompile provider,
-//! - a custom opcode table, and
-//! - a custom transaction registry and transaction envelope.
-//!
-//! The node path uses ordinary Ethereum wire transactions with the custom opcode and precompile.
-//! The standalone path below additionally uses a custom evm2 transaction type. A production node
-//! that puts that transaction on the wire must pair the same factory with custom node primitives,
-//! pool, network, and payload components.
+//! This example shows how to implement a node with a custom EVM
 
-#![allow(missing_docs, clippy::missing_const_for_fn)]
 #![warn(unused_crate_dependencies)]
 
-use alloy_consensus::transaction::Recovered;
-use alloy_eips::eip2718::Typed2718;
 use alloy_genesis::Genesis;
-use alloy_primitives::{Address, Bytes, U256};
-use config::{CustomBlockEnvExt, CustomSpecId, CustomTypes};
+use alloy_primitives::{address, Bytes};
 use evm2::{
-    env::BlockEnv,
-    evm::{precompile::NoPrecompiles, AccountInfo, InMemoryDB},
-    interpreter::{op, InstrStop},
-    registry::HandlerResult,
-    Evm,
+    evm::precompile::PrecompileOutput,
+    precompiles::{Precompile, PrecompileId},
+    BaseEvmTypes, SpecId,
 };
-use factory::{custom_block_env, CustomEvmFactory, NodeEvmFactory, CUSTOM_PRECOMPILE_ADDRESS};
 use reth_ethereum::{
     chainspec::{Chain, ChainSpec},
     evm::{EthEvmConfig, EvmFactory},
@@ -42,214 +24,64 @@ use reth_ethereum::{
 };
 use reth_tracing::{RethTracer, Tracer};
 
-mod config;
-mod factory;
-mod opcode;
-mod tx;
+/// Custom EVM configuration.
+#[derive(Debug, Clone, Default)]
+#[non_exhaustive]
+pub struct MyEvmFactory;
 
-use tx::{CustomEnvelope, ExecuteCodeTx};
+impl EvmFactory for MyEvmFactory {
+    type Types = BaseEvmTypes;
+    type SpecId = SpecId;
 
-#[tokio::main]
-async fn main() -> eyre::Result<()> {
-    custom_opcode()?;
-    l1_blocknumber_opcode()?;
-    custom_precompile()?;
-    custom_transaction()?;
-    mainnet_fallback()?;
-    launch_node().await
+    fn spec_id(&self, spec: SpecId) -> SpecId {
+        spec
+    }
+
+    fn tx_registry(
+        &self,
+        spec: SpecId,
+    ) -> evm2::registry::TxRegistry<BaseEvmTypes, evm2::TxResult<BaseEvmTypes>> {
+        evm2::ethereum::ethereum_tx_registry(spec)
+    }
+
+    fn precompiles(&self, spec: SpecId) -> evm2::Precompiles<BaseEvmTypes> {
+        let mut precompiles = evm2::Precompiles::base(spec);
+        if spec == SpecId::PRAGUE {
+            precompiles.as_map_mut().insert(Precompile::new(
+                address!("0x0000000000000000000000000000000000000999"),
+                PrecompileId::custom("custom"),
+                |_, _, _| Ok(PrecompileOutput::new(Bytes::new())),
+            ));
+        }
+        precompiles
+    }
 }
 
-fn custom_opcode() -> HandlerResult<()> {
-    let mut evm = custom_evm();
-    let tx = custom_opcode_tx(Bytes::from_static(&[
-        opcode::CUSTOM_OPCODE,
-        op::PUSH1,
-        0x01,
-        op::SSTORE,
-        op::STOP,
-    ]));
-
-    let result = evm.transact(&tx)?.commit();
-    let expected_gas = u64::from(opcode::CUSTOM_OPCODE_GAS) +
-        u64::from(opcode::CUSTOM_OPCODE_DYNAMIC_GAS) +
-        3 +
-        2100 +
-        20_000;
-
-    assert_eq!(result.stop, InstrStop::Stop);
-    assert!(result.status);
-    assert_eq!(result.tx_gas_used(), expected_gas);
-    assert!(result.ext.handled_custom_tx);
-    println!(
-        "custom opcode: type=0x{:02x} status={} gas_used={}",
-        tx.ty(),
-        result.status,
-        result.tx_gas_used()
-    );
-    Ok(())
-}
-
-fn custom_precompile() -> HandlerResult<()> {
-    let target = Address::from([0xcc; 20]);
-    let mut code =
-        vec![op::PUSH1, 0, op::PUSH1, 0, op::PUSH1, 0, op::PUSH1, 0, op::PUSH1, 0, op::PUSH20];
-    code.extend_from_slice(CUSTOM_PRECOMPILE_ADDRESS.as_slice());
-    code.extend_from_slice(&[op::PUSH2, 0xff, 0xff, op::CALL, op::STOP]);
-
-    let factory = CustomEvmFactory;
-    let spec = CustomSpecId::CustomOsaka;
-    let mut evm = Evm::<CustomTypes>::new_with_execution_config(
-        factory.execution_config(spec, factory.version(spec.into(), 1)),
-        spec,
-        BlockEnv::<CustomTypes> {
-            ext: CustomBlockEnvExt { l1_block_number: 42 },
-            ..custom_block_env()
-        },
-        factory.tx_registry(spec),
-        InMemoryDB::default(),
-        factory.precompiles(spec),
-    );
-    let tx = Recovered::new_unchecked(
-        CustomEnvelope::ExecuteCode(ExecuteCodeTx {
-            target,
-            code: code.into(),
-            gas_limit: 100_000,
-        }),
-        Address::ZERO,
-    );
-    let result = evm.transact(&tx)?;
-    let status = result.result().status;
-    drop(result);
-    assert!(status);
-    assert!(evm.precompiles().contains(&CUSTOM_PRECOMPILE_ADDRESS));
-    println!("custom precompile: address={CUSTOM_PRECOMPILE_ADDRESS}");
-    Ok(())
-}
-
-fn l1_blocknumber_opcode() -> HandlerResult<()> {
-    let mut evm = custom_evm();
-    let tx = custom_opcode_tx(Bytes::from_static(&[
-        opcode::L1_BLOCKNUMBER_OPCODE,
-        op::PUSH0,
-        op::MSTORE,
-        op::PUSH1,
-        32,
-        op::PUSH0,
-        op::RETURN,
-    ]));
-
-    let result = evm.transact(&tx)?.discard();
-    let expected = Bytes::copy_from_slice(&U256::from(42_u64).to_be_bytes::<32>());
-    assert_eq!(result.stop, InstrStop::Return);
-    assert!(result.status);
-    assert_eq!(result.output, expected);
-    assert!(result.ext.handled_custom_tx);
-    println!("L1 blocknumber opcode: output={expected:?}");
-    Ok(())
-}
-
-fn custom_transaction() -> HandlerResult<()> {
-    let target = Address::from([0xcc; 20]);
-    let mut database = InMemoryDB::default();
-    database.insert_account_info(&target, AccountInfo::default().with_nonce(1));
-    let mut evm = custom_evm_with_database(database);
-    let tx = Recovered::new_unchecked(
-        CustomEnvelope::ExecuteCode(ExecuteCodeTx {
-            target,
-            gas_limit: 100_000,
-            code: Bytes::from_static(&[
-                opcode::CUSTOM_OPCODE,
-                op::PUSH1,
-                0x01,
-                op::SSTORE,
-                op::STOP,
-            ]),
-        }),
-        Address::ZERO,
-    );
-
-    let result = evm.transact(&tx)?.commit();
-    assert!(result.status);
-    assert!(result.ext.handled_custom_tx);
-    println!("custom transaction: type=0x{:02x} handled=true", tx.ty());
-    Ok(())
-}
-
-fn mainnet_fallback() -> HandlerResult<()> {
-    let mut evm = mainnet_evm();
-    let tx = custom_opcode_tx(Bytes::from_static(&[opcode::CUSTOM_OPCODE, op::STOP]));
-
-    let result = evm.transact(&tx)?.discard();
-    assert_eq!(result.stop, InstrStop::InvalidOpcode);
-    assert!(!result.status);
-    println!("mainnet fallback: custom opcode remains invalid");
-    Ok(())
-}
-
-fn custom_opcode_tx(code: Bytes) -> Recovered<CustomEnvelope> {
-    Recovered::new_unchecked(
-        CustomEnvelope::ExecuteCode(ExecuteCodeTx {
-            target: Address::from([0xcc; 20]),
-            code,
-            gas_limit: 100_000,
-        }),
-        Address::ZERO,
-    )
-}
-
-fn custom_evm() -> Evm<'static, CustomTypes> {
-    custom_evm_with_database(InMemoryDB::default())
-}
-
-fn custom_evm_with_database(database: InMemoryDB) -> Evm<'static, CustomTypes> {
-    let factory = CustomEvmFactory;
-    let spec = CustomSpecId::CustomOsaka;
-    let version = factory.version(spec.into(), 1);
-    Evm::<CustomTypes>::new_with_execution_config(
-        factory.execution_config(spec, version),
-        spec,
-        BlockEnv::<CustomTypes> {
-            ext: CustomBlockEnvExt { l1_block_number: 42 },
-            ..BlockEnv::<CustomTypes>::default()
-        },
-        factory.tx_registry(spec),
-        database,
-        factory.precompiles(spec),
-    )
-}
-
-fn mainnet_evm() -> Evm<'static, CustomTypes> {
-    let factory = CustomEvmFactory;
-    let spec = CustomSpecId::MainnetOsaka;
-    let version = factory.version(spec.into(), 1);
-    Evm::<CustomTypes>::new_with_execution_config(
-        factory.execution_config(spec, version),
-        spec,
-        BlockEnv::<CustomTypes>::default(),
-        factory.tx_registry(spec),
-        InMemoryDB::default(),
-        NoPrecompiles::default(),
-    )
-}
-
-/// Builds a regular Ethereum executor that uses the custom node factory.
+/// Builds a regular ethereum block executor that uses the custom EVM.
 #[derive(Debug, Default, Clone, Copy)]
+#[non_exhaustive]
 pub struct MyExecutorBuilder;
 
 impl<Node> ExecutorBuilder<Node> for MyExecutorBuilder
 where
     Node: FullNodeTypes<Types: NodeTypes<ChainSpec = ChainSpec, Primitives = EthPrimitives>>,
 {
-    type EVM = EthEvmConfig<ChainSpec, NodeEvmFactory>;
+    type EVM = EthEvmConfig<ChainSpec, MyEvmFactory>;
 
     async fn build_evm(self, ctx: &BuilderContext<Node>) -> eyre::Result<Self::EVM> {
-        Ok(EthEvmConfig::new_with_evm_factory(ctx.chain_spec(), NodeEvmFactory))
+        let evm_config =
+            EthEvmConfig::new_with_evm_factory(ctx.chain_spec(), MyEvmFactory::default());
+        Ok(evm_config)
     }
 }
 
-async fn launch_node() -> eyre::Result<()> {
+#[tokio::main]
+async fn main() -> eyre::Result<()> {
     let _guard = RethTracer::new().init()?;
+
     let runtime = Runtime::test();
+
+    // create a custom chain spec
     let spec = ChainSpec::builder()
         .chain(Chain::mainnet())
         .genesis(Genesis::default())
@@ -258,32 +90,23 @@ async fn launch_node() -> eyre::Result<()> {
         .shanghai_activated()
         .cancun_activated()
         .prague_activated()
-        .osaka_activated()
         .build();
+
     let node_config =
         NodeConfig::test().with_rpc(RpcServerArgs::default().with_http()).with_chain(spec);
 
     let handle = NodeBuilder::new(node_config)
         .testing_node(runtime)
+        // configure the node with regular ethereum types
         .with_types::<EthereumNode>()
-        .with_components(EthereumNode::components().executor(MyExecutorBuilder))
+        // use default ethereum components but with our executor
+        .with_components(EthereumNode::components().executor(MyExecutorBuilder::default()))
         .with_add_ons(EthereumAddOns::default())
         .launch()
-        .await?;
-    handle.node_exit_future.await?;
-    Ok(())
-}
+        .await
+        .unwrap();
 
-#[cfg(test)]
-mod tests {
-    use super::*;
+    println!("Node started");
 
-    #[test]
-    fn custom_extensions_execute() {
-        custom_opcode().unwrap();
-        l1_blocknumber_opcode().unwrap();
-        custom_precompile().unwrap();
-        custom_transaction().unwrap();
-        mainnet_fallback().unwrap();
-    }
+    handle.node_exit_future.await
 }

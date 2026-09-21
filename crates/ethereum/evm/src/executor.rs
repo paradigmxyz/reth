@@ -1,4 +1,5 @@
 //! EVM-backed Ethereum executor.
+use reth_execution_types::{BlockState, EvmState};
 
 use crate::{
     execution::{
@@ -19,10 +20,8 @@ use alloy_eip7928::{BlockAccessIndex, BlockAccessList};
 use alloy_eips::{eip2718::Typed2718, eip4895::Withdrawal, eip7685::Requests};
 use alloy_primitives::{Address, B256};
 use evm2::{
-    ethereum::TxEnvelope,
-    evm::{Bal, BlockStateAccumulator, StateChangeSource},
-    interpreter::Host,
-    BaseEvmTypes, Evm, EvmTypes, TxResultWithState,
+    ethereum::TxEnvelope, evm::Bal, interpreter::Host, BaseEvmTypes, Evm, EvmTypes,
+    TxResultWithState,
 };
 use reth_chainspec::EthChainSpec;
 use reth_ethereum_forks::{EthereumHardfork, EthereumHardforks};
@@ -47,7 +46,7 @@ where
     base_block_reward: Option<u128>,
     dao_fork_transition: bool,
     deposit_contract_address: Option<Address>,
-    block_state: BlockStateAccumulator,
+    block_state: BlockState,
     state_update_hook: StateUpdateHook,
     receipts: Vec<R::Receipt>,
     cumulative_gas_used: u64,
@@ -87,7 +86,7 @@ impl<T: EvmTypes, TxType> EthTransactionResultWithState<T, TxType> {
     }
 }
 
-type StateUpdateHook = Option<Box<dyn FnMut(BlockStateAccumulator) + Send>>;
+type StateUpdateHook = Option<Box<dyn FnMut(EvmState) + Send>>;
 
 impl<'a, T, R> EthBlockExecutor<'a, T, R>
 where
@@ -124,7 +123,7 @@ where
             deposit_contract_address: chain_spec
                 .deposit_contract()
                 .map(|contract| contract.address),
-            block_state: BlockStateAccumulator::new(),
+            block_state: BlockState::new(),
             state_update_hook: None,
             receipts: Vec::new(),
             cumulative_gas_used: 0,
@@ -161,7 +160,7 @@ where
     }
 
     /// Returns the accumulated block state.
-    pub const fn block_state(&self) -> &BlockStateAccumulator {
+    pub const fn block_state(&self) -> &BlockState {
         &self.block_state
     }
 
@@ -206,7 +205,7 @@ where
         &mut self.evm
     }
 
-    fn set_state_hook(&mut self, hook: impl FnMut(BlockStateAccumulator) + Send + 'static) -> bool {
+    fn set_state_hook(&mut self, hook: impl FnMut(EvmState) + Send + 'static) -> bool {
         self.state_update_hook = Some(Box::new(hook));
         true
     }
@@ -438,7 +437,7 @@ where
                 gas_used: block_gas_used,
                 blob_gas_used: self.blob_gas_used,
             },
-            self.block_state,
+            self.block_state.into_bundle(),
         );
 
         Ok((output, block_access_list))
@@ -560,7 +559,6 @@ where
 }
 
 struct FinishedBigBlockSegment {
-    state: BlockStateAccumulator,
     requests: Requests,
     gas_used: u64,
     blob_gas_used: u64,
@@ -584,7 +582,6 @@ where
     segment_receipt_start: usize,
     worker_segment: Option<usize>,
     initialized: bool,
-    state: BlockStateAccumulator,
     requests: Requests,
     gas_used_offset: u64,
     blob_gas_used_offset: u64,
@@ -615,7 +612,6 @@ where
             segment_receipt_start: 0,
             worker_segment: None,
             initialized: false,
-            state: BlockStateAccumulator::new(),
             requests: Requests::default(),
             gas_used_offset: 0,
             blob_gas_used_offset: 0,
@@ -731,7 +727,6 @@ where
         .map_err(BlockExecutionError::from)?;
 
         Ok(FinishedBigBlockSegment {
-            state: core::mem::take(&mut self.inner.block_state),
             requests,
             gas_used: final_block_gas_used(
                 self.inner.separate_block_gas,
@@ -744,7 +739,6 @@ where
     }
 
     fn merge_segment(&mut self, segment: FinishedBigBlockSegment) {
-        let Ok(()) = segment.state.visit(&mut self.state);
         self.requests.extend(segment.requests);
         self.gas_used_offset += segment.gas_used;
         self.blob_gas_used_offset += segment.blob_gas_used;
@@ -804,7 +798,7 @@ where
         self.inner.evm_mut()
     }
 
-    fn set_state_hook(&mut self, hook: impl FnMut(BlockStateAccumulator) + Send + 'static) -> bool {
+    fn set_state_hook(&mut self, hook: impl FnMut(EvmState) + Send + 'static) -> bool {
         self.inner.set_state_hook(hook)
     }
 
@@ -919,7 +913,10 @@ where
             gas_used: self.gas_used_offset,
             blob_gas_used: self.blob_gas_used_offset,
         };
-        Ok((BlockExecutionOutput::new(result, self.state), block_access_list))
+        Ok((
+            BlockExecutionOutput::new(result, self.inner.block_state.into_bundle()),
+            block_access_list,
+        ))
     }
 }
 
@@ -949,7 +946,7 @@ fn map_transaction_execution_error(err: EthExecutionError, tx_hash: B256) -> Blo
     }
 }
 
-fn emit_state(hook: &mut StateUpdateHook, state: BlockStateAccumulator) {
+fn emit_state(hook: &mut StateUpdateHook, state: EvmState) {
     if let Some(hook) = hook.as_mut() {
         hook(state);
     }
@@ -1085,6 +1082,12 @@ mod tests {
         let mut executor = factory.create_executor(evm, plan);
 
         executor.apply_pre_execution_changes().expect("first segment pre-execution");
+        assert!(executor
+            .execute_transaction_with_commit_condition(transfer(from, first_target, 0), |_| {
+                CommitChanges::No
+            })
+            .expect("discarded transaction")
+            .is_none());
         executor
             .execute_transaction_with_commit_condition(transfer(from, first_target, 0), |_| {
                 CommitChanges::Yes
