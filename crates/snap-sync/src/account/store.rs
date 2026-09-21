@@ -3,7 +3,7 @@
 //! Each range replaces its key interval, and ranges commit in key order.
 
 use crate::{
-    common::SnapRecord, state::storage::persisted_storage_root, SnapAttemptStore, SnapCatchUpStore,
+    common::SnapRecord, storage::persisted_storage_root, SnapAttemptStore, SnapCatchUpStore,
     SnapStorageStore, SnapSyncError, SnapWrite, StorageProgress,
 };
 use alloy_primitives::{
@@ -113,7 +113,7 @@ impl AccountCoverage {
 
 // The coverage record as persisted, tied to the attempt that recorded it.
 #[derive(Serialize, Deserialize)]
-struct StoredCoverage {
+pub(crate) struct StoredCoverage {
     // Encoding version, checked before the rest is decoded.
     version: u32,
     // Attempt the coverage belongs to.

@@ -1,5 +1,7 @@
 //! Backfill implementations the launcher can hand to the engine orchestrator.
 
+mod context;
+mod handoff;
 mod snap;
 
 pub use snap::SnapBackfillSync;
@@ -61,21 +63,20 @@ mod tests {
     use reth_network_p2p::NoopFullBlockClient;
     use reth_provider::{
         test_utils::{create_test_provider_factory, MockNodeTypesWithDB},
-        DBProvider, DatabaseProviderFactory, StageCheckpointWriter,
+        DBProvider, DatabaseProviderFactory, MetadataWriter,
     };
     use reth_prune::PruneModes;
-    use reth_stages_api::{PipelineTarget, StageId};
+    use reth_stages_api::PipelineTarget;
     use reth_static_file::StaticFileProducer;
+    use reth_storage_api::metadata::keys;
     use std::task::Waker;
 
     #[tokio::test]
-    async fn only_snap_backfill_reads_the_generation_marker() {
+    async fn only_snap_backfill_reads_the_attempt_record() {
         for enabled in [false, true] {
             let factory = create_test_provider_factory();
             let provider = factory.database_provider_rw().unwrap();
-            provider
-                .save_stage_checkpoint_progress(StageId::Other("SnapSync"), vec![0xff])
-                .unwrap();
+            provider.write_metadata(keys::SNAP_ATTEMPT, vec![0xff]).unwrap();
             provider.commit().unwrap();
 
             let pipeline = Pipeline::<MockNodeTypesWithDB>::builder()

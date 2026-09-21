@@ -1,8 +1,33 @@
 //! snap/2 state synchronization for [EIP-8189](https://eips.ethereum.org/EIPS/eip-8189).
-//! Downloads accounts, storage and bytecode authenticated against a canonical pivot.
-//! [EIP-7928 block access lists](https://eips.ethereum.org/EIPS/eip-7928) advance the downloaded state.
-//! Domain modules separate downloads from persistence; progress commits with its state.
-//! The rebuilt trie must match the target header before handing state to the pipeline.
+//!
+//! Coordinates a state bootstrap that starts from a recent pivot block, downloads accounts, storage
+//! and bytecode authenticated against that pivot's state root, and advances the pivot with
+//! [EIP-7928 block access lists](https://eips.ethereum.org/EIPS/eip-7928) as the chain moves past
+//! it.
+//!
+//! This crate owns download progress only. Authenticated downloads come from
+//! `reth-downloaders`, and verified state is handed back to node integration once its trie root
+//! matches the target header. [`SnapBootstrap`] runs these steps as one resumable sync.
+//!
+//! Downloaded state goes into the hashed state tables, owned by an attempt record that commits
+//! with it, along with how far the account key space has been downloaded. An account range only
+//! commits with storage matching its accounts' roots and code matching their hashes, so committed
+//! progress never depends on work still pending. Storage too large for one response is persisted
+//! ahead of its range, under progress tied to the attempt, pivot and range.
+//!
+//! ```
+//! use reth_snap_sync::SnapPivotPolicy;
+//!
+//! let policy = SnapPivotPolicy::default();
+//! // Without a finalized block, anchor at the EIP's example distance.
+//! assert_eq!(policy.pivot_block(1_000, None), Some(936));
+//! // A recent finalized block is anchored to directly.
+//! assert_eq!(policy.pivot_block(1_000, Some(950)), Some(950));
+//! // Stalled finality falls back to the example distance.
+//! assert_eq!(policy.pivot_block(1_000, Some(500)), Some(936));
+//! // A chain shorter than the head distance has no pivot yet.
+//! assert_eq!(policy.pivot_block(4, None), None);
+//! ```
 
 #![doc(
     html_logo_url = "https://raw.githubusercontent.com/paradigmxyz/reth/main/assets/reth-docs.png",
@@ -11,41 +36,41 @@
 )]
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 
+mod account;
 mod attempt;
 mod bootstrap;
+mod bytecode;
 mod catch_up;
 mod common;
-mod context;
 mod error;
 mod generation;
-mod handoff;
 mod pivot;
 mod session;
-mod state;
-mod trie;
+mod storage;
 mod verify;
 
 #[cfg(test)]
 mod test_utils;
 
+pub use account::{
+    AccountCoverage, AccountRangeDownload, AccountRangeStep, SnapAccountStore, VerifiedRange,
+};
 pub use attempt::{SnapAttemptStore, SnapWrite};
-pub use bootstrap::{SnapBootstrap, SnapSyncOutcome};
+pub use bootstrap::{
+    SnapBootstrap, SnapBootstrapOutcome, SnapSyncContext, DEFAULT_RANGES_PER_CHECK,
+};
+pub use bytecode::{BytecodeDownload, BytecodeStep, SnapBytecodeStore, DEFAULT_CODE_HASHES};
 pub use catch_up::{
     BalStateUpdate, BlockAccessListCatchUp, CatchUpProgress, CatchUpStep, DownloadedAccount,
     SnapCatchUpStore, DEFAULT_BAL_RESPONSE_BYTES, DEFAULT_CATCH_UP_BLOCKS,
 };
 pub use common::{DEFAULT_RESPONSE_BYTES, MAX_HASH};
-pub use context::{NodeSnapContext, SnapSyncContext, SnapSyncProvider};
 pub use error::SnapSyncError;
-pub use generation::{SnapDownloadProgress, SnapGeneration, SnapPhase, SnapStateStore};
-pub use handoff::SnapPipelineHandoff;
+pub use generation::{SnapGeneration, SnapPhase};
 pub use pivot::SnapPivotPolicy;
 pub use session::{SnapSyncSession, SnapSyncSessionState};
-pub use state::{
-    AccountCoverage, AccountRangeDownload, AccountRangeStep, BytecodeDownload, BytecodeStep,
-    RangeBudget, SnapAccountStore, SnapBytecodeStore, SnapStorageStore, StateDownloadOutcome,
-    StateDownloader, StorageChunk, StorageProgress, StorageRangeDownload, StorageRangeStep,
-    VerifiedRange, DEFAULT_CODE_HASHES, DEFAULT_STORAGE_ACCOUNTS,
+pub use storage::{
+    SnapStorageStore, StorageChunk, StorageProgress, StorageRangeDownload, StorageRangeStep,
+    DEFAULT_STORAGE_ACCOUNTS,
 };
-pub use trie::TrieGenerator;
 pub use verify::{SnapStateVerifier, VerifiedSnapState, DEFAULT_SCAN_CHUNK};

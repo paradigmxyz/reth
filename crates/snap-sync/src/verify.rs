@@ -52,6 +52,10 @@ pub trait SnapStateVerifier {
     where
         Self: DBProvider;
 
+    /// Returns whether `write`'s state was handed to the merkle stage, so a resumed sync does not
+    /// reset its rebuild.
+    fn is_trie_rebuild_started(&self, write: SnapWrite) -> Result<bool, SnapSyncError>;
+
     /// Accepts the state once the merkle stage has rebuilt its trie up to the pivot.
     ///
     /// The stage checks the root against the pivot header, which must commit to the root the
@@ -138,6 +142,10 @@ impl<T: MetadataProvider> SnapStateVerifier for T {
         ensure_code_present(self.tx_ref(), chunk, cancel)
     }
 
+    fn is_trie_rebuild_started(&self, write: SnapWrite) -> Result<bool, SnapSyncError> {
+        Ok(StoredRebuild::read(self)?.is_some_and(|stored| stored.write == write))
+    }
+
     fn verify_state_root(&self, write: SnapWrite) -> Result<VerifiedSnapState, SnapSyncError>
     where
         Self: BlockHashReader + HeaderProvider + MetadataWriter + StageCheckpointReader,
@@ -159,7 +167,7 @@ impl<T: MetadataProvider> SnapStateVerifier for T {
         }
         // Until the stage reaches the pivot after this state's hand-off, the trie holds no state
         // for it: an earlier attempt's rebuild can end at the same block.
-        let handed_off = StoredRebuild::read(self)?.is_some_and(|stored| stored.write == write);
+        let handed_off = self.is_trie_rebuild_started(write)?;
         let rebuilt = self.get_stage_checkpoint(StageId::MerkleExecute)?;
         if !handed_off || rebuilt.map(|checkpoint| checkpoint.block_number) != Some(target.number) {
             return Err(ProviderError::StateForNumberNotFound(target.number).into())
@@ -171,7 +179,7 @@ impl<T: MetadataProvider> SnapStateVerifier for T {
 
 // The trie rebuild hand-off as persisted, tied to the write it was made for.
 #[derive(Serialize, Deserialize)]
-struct StoredRebuild {
+pub(crate) struct StoredRebuild {
     // Encoding version, checked before the rest is decoded.
     version: u32,
     // Attempt and pivot the state was handed off at.
@@ -188,20 +196,6 @@ impl StoredRebuild {
     const fn new(write: SnapWrite) -> Self {
         Self { version: Self::VERSION, write }
     }
-}
-
-// A matching hand-off preserves the Merkle stage's durable progress. Older bootstrap markers
-// have no hand-off record, so they must pass completeness checks and start a fresh rebuild.
-pub(crate) fn ensure_trie_rebuild(
-    provider: &(impl MetadataProvider + MetadataWriter + StageCheckpointWriter + DBProvider),
-    write: SnapWrite,
-    cancel: &CancellationToken,
-) -> Result<(), SnapSyncError> {
-    provider.authorize_snap_write(write)?;
-    if !StoredRebuild::read(provider)?.is_some_and(|stored| stored.write == write) {
-        provider.start_trie_rebuild(write, DEFAULT_SCAN_CHUNK, cancel)?;
-    }
-    Ok(())
 }
 
 // Refuses the first account whose code is not stored, checking for cancellation every `chunk`
@@ -445,30 +439,6 @@ mod tests {
         ));
         run_merkle(&provider, 1).unwrap();
         provider.verify_state_root(write).unwrap();
-    }
-
-    #[test]
-    fn resuming_after_rebuild_preserves_the_committed_checkpoint() {
-        let (factory, write, _) = downloaded(state_root(&accounts()), accounts().len());
-        let provider = factory.database_provider_rw().unwrap();
-        ensure_trie_rebuild(&provider, write, &CancellationToken::new()).unwrap();
-        run_merkle(&provider, 1).unwrap();
-        let checkpoint = provider.get_stage_checkpoint(StageId::MerkleExecute).unwrap();
-        provider.commit().unwrap();
-
-        // The process stopped after the stage commit but before accepting the state.
-        let provider = factory.database_provider_rw().unwrap();
-        ensure_trie_rebuild(&provider, write, &CancellationToken::new()).unwrap();
-        assert_eq!(provider.get_stage_checkpoint(StageId::MerkleExecute).unwrap(), checkpoint);
-        provider.verify_state_root(write).unwrap();
-        provider.commit().unwrap();
-        assert!(factory
-            .database_provider_ro()
-            .unwrap()
-            .snap_attempt()
-            .unwrap()
-            .unwrap()
-            .is_verified());
     }
 
     #[test]

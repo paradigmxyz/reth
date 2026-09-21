@@ -70,6 +70,7 @@ alloy-rpc-types-engine.workspace = true
 ## async
 futures.workspace = true
 tokio = { workspace = true, features = ["sync", "macros", "time", "rt-multi-thread"] }
+tokio-util.workspace = true
 tokio-stream.workspace = true
 
 ## crypto
@@ -88,6 +89,7 @@ serde_json.workspace = true
 tracing.workspace = true
 
 [dev-dependencies]
+reth-storage-api.workspace = true
 tempfile.workspace = true
 reth-ethereum-engine-primitives.workspace = true
 reth-payload-builder = { workspace = true, features = ["test-utils"] }

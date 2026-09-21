@@ -1,31 +1,38 @@
-//! Runs snapshot bootstrap under the engine's exclusive backfill database access.
+//! Runs snap bootstrap under the engine's exclusive backfill database access.
 //! Canonical headers precede state download; ordinary stages resume above the published pivot.
 
+use super::{context::NodeSnapContext, handoff::publish_snap_state};
+use alloy_eips::BlockNumHash;
 use futures::FutureExt;
 use reth_engine_tree::backfill::{BackfillAction, BackfillEvent, BackfillSync, PipelineSync};
 use reth_errors::RethError;
 use reth_network_p2p::{headers::client::HeadersClient, snap::client::SnapClient};
-use reth_provider::{providers::ProviderNodeTypes, ProviderFactory};
-use reth_snap_sync::{
-    NodeSnapContext, SnapBootstrap, SnapPivotPolicy, SnapStateStore, SnapSyncOutcome,
+use reth_provider::{
+    providers::ProviderNodeTypes, DBProvider, DatabaseProviderFactory, MetadataProvider,
+    ProviderFactory, ProviderResult, StageCheckpointReader, StageCheckpointWriter,
 };
-use reth_stages_api::{Pipeline, PipelineError, PipelineTarget, PipelineWithResult, StageId};
-use reth_tasks::{shutdown::signal, Runtime};
+use reth_snap_sync::{SnapBootstrap, SnapBootstrapOutcome, SnapPivotPolicy, SnapStateVerifier};
+use reth_stages::stages::MerkleStage;
+use reth_stages_api::{
+    ExecInput, Pipeline, PipelineError, PipelineTarget, PipelineWithResult, Stage, StageId,
+};
+use reth_tasks::Runtime;
 use std::task::{ready, Context, Poll};
 use tokio::sync::{oneshot, watch};
+use tokio_util::sync::CancellationToken;
 use tracing::{debug, info};
 
 /// Bootstraps headers, state and remaining stages before reporting backfill completion.
-/// Completed snapshots and databases with execution progress delegate to [`PipelineSync`].
+/// Databases with executed or verified state delegate to [`PipelineSync`].
 #[derive(Debug)]
 pub struct SnapBackfillSync<N: ProviderNodeTypes, C> {
-    /// Serves the snap requests, and reports peer counts to the session.
+    /// Serves the snap requests, and reports peer counts to the sync.
     client: C,
     /// Every phase of the bootstrap writes through this factory.
     provider_factory: ProviderFactory<N>,
     /// Spawns the bootstrap off the orchestrator's poll loop.
     task_spawner: Runtime,
-    /// Decides where generations are anchored.
+    /// Decides where attempts are anchored.
     policy: SnapPivotPolicy,
     /// Owns the pipeline while idle, the result channel while running.
     state: SnapBackfillState<N>,
@@ -73,13 +80,13 @@ impl<N: ProviderNodeTypes, C> SnapBackfillSync<N, C> {
 impl<N, C> SnapBackfillSync<N, C>
 where
     N: ProviderNodeTypes,
-    C: SnapClient + HeadersClient + Clone + Unpin + 'static,
+    C: SnapClient + HeadersClient + Clone + Unpin + Send + Sync + 'static,
 {
     /// Spawns one bootstrap if a target is queued and the pipeline is free.
     fn try_spawn(&mut self) -> Option<BackfillEvent> {
         let SnapBackfillState::Idle(pipeline) = &mut self.state else { return None };
         let target = self.pending_target.take()?;
-        match SnapStateStore::new(&self.provider_factory).requires_bootstrap() {
+        match needs_snap(&self.provider_factory) {
             Ok(true) => {}
             Ok(false) => {
                 let pipeline = pipeline.take().expect("idle backfill owns its pipeline");
@@ -132,7 +139,7 @@ where
 impl<N, C> BackfillSync for SnapBackfillSync<N, C>
 where
     N: ProviderNodeTypes,
-    C: SnapClient + HeadersClient + Clone + Unpin + 'static,
+    C: SnapClient + HeadersClient + Clone + Unpin + Send + Sync + 'static,
 {
     fn on_action(&mut self, action: BackfillAction) {
         if let SnapBackfillState::Pipeline(sync) = &mut self.state {
@@ -177,11 +184,21 @@ enum SnapBackfillState<N: ProviderNodeTypes> {
     Idle(Option<Box<Pipeline<N>>>),
     /// A bootstrap is running and will return the pipeline with its result.
     Running(oneshot::Receiver<PipelineWithResult<N>>),
-    /// Snapshot bootstrap is no longer needed; ordinary backfill owns the pipeline permanently.
+    /// Snap bootstrap is no longer needed; ordinary backfill owns the pipeline permanently.
     Pipeline(PipelineSync<N>),
 }
 
-/// Runs headers, then the state download, then the stages above the published pivot.
+// Snap bootstraps a node with nothing executed, and finishes any attempt it has not verified yet,
+// including one interrupted after its state was published.
+fn needs_snap<N: ProviderNodeTypes>(factory: &ProviderFactory<N>) -> ProviderResult<bool> {
+    let provider = factory.database_provider_ro()?;
+    if let Some(attempt) = provider.snap_attempt()? {
+        return Ok(!attempt.is_verified())
+    }
+    Ok(provider.get_stage_checkpoint(StageId::Execution)?.unwrap_or_default().block_number == 0)
+}
+
+/// Runs headers, then the state download and its trie rebuild, then the stages above the pivot.
 async fn bootstrap<N, C>(
     mut pipeline: Pipeline<N>,
     client: C,
@@ -192,10 +209,10 @@ async fn bootstrap<N, C>(
 ) -> PipelineWithResult<N>
 where
     N: ProviderNodeTypes,
-    C: SnapClient + HeadersClient,
+    C: SnapClient + HeadersClient + Clone + Unpin + Send + Sync + 'static,
 {
     let mut target;
-    loop {
+    let outcome = loop {
         target = *targets.borrow_and_update();
         // Snap needs canonical headers and their BAL commitments, but nothing below the pivot may
         // be executed, so only the header prefix of the pipeline runs first.
@@ -203,73 +220,102 @@ where
             return (pipeline, Err(error))
         }
 
-        // The session borrows locals, so the bootstrap owns the clones it was handed.
-        let (signal, shutdown) = signal();
-        let context = NodeSnapContext::new(&provider_factory, &client, shutdown);
-        let mut session = SnapBootstrap::new(&client, &provider_factory, context, runtime.clone())
-            .with_policy(policy);
+        let cancel = CancellationToken::new();
+        let context = NodeSnapContext::new(provider_factory.clone(), client.clone());
+        let mut session =
+            SnapBootstrap::new(client.clone(), provider_factory.clone(), runtime.clone(), context)
+                .with_policy(policy)
+                .with_cancellation(cancel.clone());
         let mut run = std::pin::pin!(session.run());
         let (outcome, updated) = tokio::select! {
             biased;
             changed = targets.changed() => {
-                let updated = changed.is_ok();
-                if updated {
-                    target = *targets.borrow_and_update();
-                }
-                // Let in-flight verification and writes finish before headers take the database.
-                signal.fire();
-                (run.await, updated)
+                // Let in-flight writes commit before headers take the database again.
+                cancel.cancel();
+                (run.await, changed.is_ok())
             }
             outcome = &mut run => (outcome, false),
         };
 
         match outcome {
-            Ok(SnapSyncOutcome::Complete { generation }) => {
-                info!(
-                    target: "sync::snap",
-                    block_number = generation.target_block,
-                    "Snap state published, resuming the pipeline above the pivot"
-                );
-                break
+            Ok(SnapBootstrapOutcome::Stopped) if updated => {}
+            Ok(SnapBootstrapOutcome::Stopped) => {
+                return (
+                    pipeline,
+                    Err(PipelineError::Internal(RethError::msg(
+                        "snap bootstrap stopped before its state was verified",
+                    ))),
+                )
             }
-            Ok(SnapSyncOutcome::Stalled { generation }) => {
-                debug!(
-                    target: "sync::snap",
-                    resumable = generation.is_some(),
-                    generation = ?generation,
-                    "Snap state download made no further progress"
-                );
-                if !updated {
-                    return (
-                        pipeline,
-                        Err(PipelineError::Internal(RethError::msg(
-                            "Snap bootstrap interrupted before state publication",
-                        ))),
-                    )
-                }
-            }
+            Ok(outcome) => break outcome,
             Err(error) => return (pipeline, Err(PipelineError::Internal(RethError::other(error)))),
         }
+    };
+
+    if let SnapBootstrapOutcome::TrieRebuild { write, pivot } = outcome {
+        let factory = provider_factory.clone();
+        // Publishing and the trie rebuild read every account, so they run on the blocking pool.
+        let activated = runtime
+            .spawn_blocking(move || -> Result<(), PipelineError> {
+                let provider = factory.database_provider_rw()?;
+                publish_snap_state(&provider, pivot.number)?;
+                provider.commit()?;
+                rebuild_trie(&factory, pivot)?;
+                let provider = factory.database_provider_rw()?;
+                provider
+                    .verify_state_root(write)
+                    .map_err(|error| PipelineError::Internal(RethError::other(error)))?;
+                provider.commit()?;
+                Ok(())
+            })
+            .await
+            .map_err(|error| PipelineError::Internal(RethError::other(error)))
+            .and_then(|result| result);
+        if let Err(error) = activated {
+            return (pipeline, Err(error))
+        }
+        info!(target: "sync::snap", ?pivot, "Snap state verified, resuming the pipeline above it");
     }
 
-    // Stages the published frontier satisfies skip straight to the pivot, so this only executes
+    // Stages the published state satisfies skip straight to the pivot, so this only executes
     // what is genuinely missing above it.
     pipeline.run_as_fut(Some(target)).await
+}
+
+// Rebuilds the trie from the downloaded state up to `pivot`, committing the stage's progress in
+// chunks so a restart resumes it. The stage checks the root against the pivot's header.
+fn rebuild_trie<N: ProviderNodeTypes>(
+    factory: &ProviderFactory<N>,
+    pivot: BlockNumHash,
+) -> Result<(), PipelineError> {
+    let mut stage = MerkleStage::default_execution();
+    loop {
+        let provider = factory.database_provider_rw()?;
+        let checkpoint = provider.get_stage_checkpoint(StageId::MerkleExecute)?;
+        let output =
+            stage.execute(&provider, ExecInput { target: Some(pivot.number), checkpoint })?;
+        provider.save_stage_checkpoint(StageId::MerkleExecute, output.checkpoint)?;
+        provider.commit()?;
+        if output.done {
+            return Ok(())
+        }
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use alloy_primitives::B256;
+    use reth_db_api::models::SnapAttempt;
     use reth_network_p2p::NoopFullBlockClient;
     use reth_provider::{
         test_utils::{create_test_provider_factory, MockNodeTypesWithDB},
-        DBProvider, DatabaseProviderFactory, MetadataWriter, StageCheckpointWriter,
-        StorageSettings, StorageSettingsCache,
+        DatabaseProviderFactory, MetadataWriter, StorageSettings, StorageSettingsCache,
     };
     use reth_prune::PruneModes;
     use reth_stages_api::{ControlFlow, StageCheckpoint};
     use reth_static_file::StaticFileProducer;
+    use reth_storage_api::metadata::keys;
     use std::task::Waker;
 
     fn backfill() -> SnapBackfillSync<MockNodeTypesWithDB, NoopFullBlockClient> {
@@ -287,12 +333,35 @@ mod tests {
         SnapBackfillSync::new(pipeline, NoopFullBlockClient::default(), factory, Runtime::test())
     }
 
+    // Records an attempt anchored at block 100, verified when `verified` is set.
+    fn record_attempt(
+        backfill: &SnapBackfillSync<MockNodeTypesWithDB, NoopFullBlockClient>,
+        verified: bool,
+    ) {
+        let provider = backfill.provider_factory.database_provider_rw().unwrap();
+        let mut attempt = SnapAttempt::start(
+            None,
+            BlockNumHash::new(100, B256::repeat_byte(1)),
+            B256::repeat_byte(2),
+        );
+        if verified {
+            attempt.verify();
+        }
+        provider.write_snap_attempt(&attempt).unwrap();
+        provider.commit().unwrap();
+    }
+
+    fn poll_once(
+        backfill: &mut SnapBackfillSync<MockNodeTypesWithDB, NoopFullBlockClient>,
+    ) -> Poll<BackfillEvent> {
+        backfill.poll(&mut Context::from_waker(Waker::noop()))
+    }
+
     #[test]
     fn an_idle_backfill_without_a_target_stays_pending() {
         let mut backfill = backfill();
-        let waker = Waker::noop();
 
-        assert!(backfill.poll(&mut Context::from_waker(waker)).is_pending());
+        assert!(poll_once(&mut backfill).is_pending());
     }
 
     #[test]
@@ -321,7 +390,7 @@ mod tests {
 
         // Nothing was queued, so polling cannot spawn a bootstrap towards it.
         assert!(backfill.pending_target.is_none());
-        assert!(backfill.poll(&mut Context::from_waker(Waker::noop())).is_pending());
+        assert!(poll_once(&mut backfill).is_pending());
     }
 
     #[test]
@@ -330,7 +399,7 @@ mod tests {
         let target = PipelineTarget::Sync(B256::repeat_byte(1));
 
         backfill.on_action(BackfillAction::Start(target));
-        let event = backfill.poll(&mut Context::from_waker(Waker::noop()));
+        let event = poll_once(&mut backfill);
 
         assert!(matches!(event, Poll::Ready(BackfillEvent::Started(started)) if started == target));
         // The pipeline moved into the running bootstrap, so no second run can start beside it.
@@ -338,22 +407,28 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn existing_state_uses_ordinary_backfill() {
-        for stage in [StageId::Execution, StageId::Finish, StageId::Other("SnapSync")] {
+    async fn executed_or_verified_state_uses_ordinary_backfill() {
+        for verified_attempt in [false, true] {
             let mut backfill = backfill();
-            let provider = backfill.provider_factory.database_provider_rw().unwrap();
-            provider.save_stage_checkpoint(stage, StageCheckpoint::new(42)).unwrap();
-            provider.commit().unwrap();
+            if verified_attempt {
+                record_attempt(&backfill, true);
+            } else {
+                let provider = backfill.provider_factory.database_provider_rw().unwrap();
+                provider
+                    .save_stage_checkpoint(StageId::Execution, StageCheckpoint::new(42))
+                    .unwrap();
+                provider.commit().unwrap();
+            }
 
             let target = PipelineTarget::Sync(B256::repeat_byte(1));
             backfill.on_action(BackfillAction::Start(target));
             assert!(
-                matches!(backfill.poll(&mut Context::from_waker(Waker::noop())), Poll::Ready(BackfillEvent::Started(started)) if started == target)
+                matches!(poll_once(&mut backfill), Poll::Ready(BackfillEvent::Started(started)) if started == target)
             );
             assert!(matches!(backfill.state, SnapBackfillState::Pipeline(_)));
 
-            // A target queued during ordinary backfill must stay with PipelineSync, not start
-            // another snapshot after the current run finishes.
+            // A target queued during ordinary backfill stays with `PipelineSync` rather than
+            // starting a snap bootstrap once the current run finishes.
             let next_target = PipelineTarget::Sync(B256::repeat_byte(2));
             backfill.on_action(BackfillAction::Start(next_target));
             assert!(matches!(
@@ -367,15 +442,11 @@ mod tests {
                 futures::future::poll_fn(|cx| backfill.poll(cx)).await,
                 BackfillEvent::Finished(Ok(_))
             ));
-            assert!(SnapStateStore::new(&backfill.provider_factory)
-                .interrupted_generation()
-                .unwrap()
-                .is_none());
         }
     }
 
     #[tokio::test]
-    async fn completed_bootstrap_hands_pending_target_to_pipeline() {
+    async fn a_verified_bootstrap_hands_the_pending_target_to_the_pipeline() {
         let mut backfill = backfill();
         let SnapBackfillState::Idle(ref mut pipeline) = backfill.state else { unreachable!() };
         let pipeline = pipeline.take().unwrap();
@@ -384,13 +455,8 @@ mod tests {
         let target = PipelineTarget::Sync(B256::repeat_byte(2));
         backfill.on_action(BackfillAction::Start(target));
 
-        // Model the atomic publication performed by the snapshot task before it returns its
-        // pipeline. The wrapper must observe the durable marker on the same instance.
-        let provider = backfill.provider_factory.database_provider_rw().unwrap();
-        provider
-            .save_stage_checkpoint(StageId::Other("SnapSync"), StageCheckpoint::new(42))
-            .unwrap();
-        provider.commit().unwrap();
+        // The bootstrap task verifies its state before returning the pipeline.
+        record_attempt(&backfill, true);
         tx.send((*pipeline, Ok(ControlFlow::NoProgress { block_number: None }))).unwrap();
 
         assert!(matches!(
@@ -401,47 +467,33 @@ mod tests {
             matches!(futures::future::poll_fn(|cx| backfill.poll(cx)).await, BackfillEvent::Started(started) if started == target)
         );
         assert!(matches!(backfill.state, SnapBackfillState::Pipeline(_)));
-        assert!(matches!(
-            futures::future::poll_fn(|cx| backfill.poll(cx)).await,
-            BackfillEvent::Finished(Ok(_))
-        ));
     }
 
     #[test]
-    fn interrupted_bootstrap_keeps_the_snapshot_path() {
+    fn an_unverified_attempt_keeps_the_snap_path_after_publication() {
         let mut backfill = backfill();
-        let store = SnapStateStore::new(&backfill.provider_factory);
-        let generation = reth_snap_sync::SnapDownloadProgress::new(
-            100,
-            B256::repeat_byte(1),
-            B256::repeat_byte(2),
-        );
-        store.begin_generation(generation).unwrap();
+        record_attempt(&backfill, false);
+        // Published state moves execution to the pivot before the trie is verified.
+        let provider = backfill.provider_factory.database_provider_rw().unwrap();
+        provider.save_stage_checkpoint(StageId::Execution, StageCheckpoint::new(100)).unwrap();
+        provider.commit().unwrap();
 
         backfill.on_action(BackfillAction::Start(PipelineTarget::Sync(B256::repeat_byte(3))));
-        assert!(matches!(
-            backfill.poll(&mut Context::from_waker(Waker::noop())),
-            Poll::Ready(BackfillEvent::Started(_))
-        ));
+
+        assert!(matches!(poll_once(&mut backfill), Poll::Ready(BackfillEvent::Started(_))));
         assert!(matches!(backfill.state, SnapBackfillState::Running(_)));
-        assert_eq!(
-            SnapStateStore::new(&backfill.provider_factory).interrupted_generation().unwrap(),
-            Some(generation)
-        );
     }
 
     #[test]
-    fn invalid_generation_does_not_start_either_sync_path() {
+    fn an_unreadable_attempt_starts_neither_sync_path() {
         let mut backfill = backfill();
         let provider = backfill.provider_factory.database_provider_rw().unwrap();
-        provider.save_stage_checkpoint_progress(StageId::Other("SnapSync"), vec![0xff]).unwrap();
+        provider.write_metadata(keys::SNAP_ATTEMPT, vec![0xff]).unwrap();
         provider.commit().unwrap();
 
         backfill.on_action(BackfillAction::Start(PipelineTarget::Sync(B256::repeat_byte(1))));
-        assert!(matches!(
-            backfill.poll(&mut Context::from_waker(Waker::noop())),
-            Poll::Ready(BackfillEvent::Finished(Err(_)))
-        ));
+
+        assert!(matches!(poll_once(&mut backfill), Poll::Ready(BackfillEvent::Finished(Err(_)))));
         assert!(matches!(backfill.state, SnapBackfillState::Idle(Some(_))));
     }
 }
