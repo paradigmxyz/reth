@@ -19,7 +19,6 @@ use alloy_primitives::{Address, Bytes, TxHash, B256, U256};
 use alloy_rpc_types_eth::{state::EvmOverrides, TransactionInfo};
 use futures::{Future, StreamExt};
 use reth_chain_state::CanonStateSubscriptions;
-use reth_evm::SenderRecoveryCache;
 use reth_primitives_traits::{
     BlockBody, Recovered, RecoveredBlock, SignedTransaction, TxTy, WithEncoded,
 };
@@ -102,7 +101,7 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
             .map_err(Self::Error::from_eth_err)?;
         <PoolTx<Self::Pool> as PoolTransaction>::try_recover_with_cache_opt(
             transaction,
-            self.sender_recovery_cache(),
+            self.eth_api_settings().sender_recovery_cache.as_ref(),
         )
         .map_err(|_| EthApiError::InvalidTransactionSignature.into())
     }
@@ -746,15 +745,10 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
 /// Behaviour shared by several `eth_` RPC methods, not exclusive to `eth_` transactions RPC
 /// methods.
 pub trait LoadTransaction: SpawnBlocking + FullEthApiTypes + RpcNodeCoreExt {
-    /// Returns the sender recovery cache shared with transaction ingress and execution, if enabled.
-    fn sender_recovery_cache(&self) -> Option<&SenderRecoveryCache> {
-        None
-    }
-
     /// Decodes and recovers a raw transaction, sharing sender recovery when configured.
     fn recover_raw_transaction<T: SignedTransaction>(&self, tx: &[u8]) -> EthResult<Recovered<T>> {
         let transaction = decode_raw_transaction::<T>(tx)?;
-        let signer = match self.sender_recovery_cache() {
+        let signer = match self.eth_api_settings().sender_recovery_cache.as_ref() {
             Some(cache) => cache.recover(&transaction),
             None => transaction.try_recover(),
         }

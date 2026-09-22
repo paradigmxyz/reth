@@ -120,9 +120,6 @@ where
     EthApiError: FromEvmError<N::Evm>,
     Rpc: RpcConvert<Primitives = N::Primitives, Error = EthApiError>,
 {
-    fn sender_recovery_cache(&self) -> Option<&reth_evm::SenderRecoveryCache> {
-        self.inner.sender_recovery_cache()
-    }
 }
 
 #[cfg(test)]

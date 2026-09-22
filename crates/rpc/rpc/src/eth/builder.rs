@@ -575,6 +575,7 @@ where
         );
 
         let settings = EthApiSettings {
+            sender_recovery_cache,
             proof_permits,
             max_batch_size,
             max_blocking_io_requests,
@@ -607,7 +608,6 @@ where
             rpc_converter,
             next_env,
             raw_tx_forwarder.forwarder_client(),
-            sender_recovery_cache,
         )
     }
 
