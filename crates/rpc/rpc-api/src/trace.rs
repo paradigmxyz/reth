@@ -52,13 +52,13 @@ pub trait TraceApi<TxReq> {
         trace_types: HashSet<TraceType>,
     ) -> RpcResult<Option<Vec<TraceResultsWithTransactionHash>>>;
 
-    /// Replays a transaction, returning the traces.
+    /// Replays a transaction, returning the traces or `None` if the transaction does not exist.
     #[method(name = "replayTransaction")]
     async fn replay_transaction(
         &self,
         transaction: B256,
         trace_types: HashSet<TraceType>,
-    ) -> RpcResult<TraceResults>;
+    ) -> RpcResult<Option<TraceResults>>;
 
     /// Returns traces created at given block.
     #[method(name = "block")]

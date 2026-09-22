@@ -191,12 +191,12 @@ where
             .await
     }
 
-    /// Replays a transaction, returning the traces.
+    /// Replays a transaction, returning the traces or `None` if the transaction does not exist.
     pub async fn replay_transaction(
         &self,
         hash: B256,
         trace_types: HashSet<TraceType>,
-    ) -> Result<TraceResults, Eth::Error> {
+    ) -> Result<Option<TraceResults>, Eth::Error> {
         let config = TracingInspectorConfig::from_parity_config(&trace_types);
         self.eth_api()
             .spawn_trace_transaction_in_block(hash, config, move |_, inspector, res, db| {
@@ -207,8 +207,6 @@ where
                 Ok(trace_res)
             })
             .await
-            .transpose()
-            .ok_or(EthApiError::TransactionNotFound)?
     }
 
     /// Returns transaction trace objects at the given index
@@ -753,7 +751,7 @@ where
         &self,
         transaction: B256,
         trace_types: HashSet<TraceType>,
-    ) -> RpcResult<TraceResults> {
+    ) -> RpcResult<Option<TraceResults>> {
         let _permit = self.acquire_trace_permit().await;
         Ok(Self::replay_transaction(self, transaction, trace_types).await.map_err(Into::into)?)
     }
@@ -887,6 +885,37 @@ fn reward_trace<H: BlockHeader>(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn replay_missing_transaction_returns_null() {
+        use crate::EthApiBuilder;
+        use reth_evm_ethereum::EthEvmConfig;
+        use reth_network_api::noop::NoopNetwork;
+        use reth_provider::test_utils::MockEthProvider;
+        use reth_transaction_pool::test_utils::testing_pool;
+
+        let provider = MockEthProvider::default();
+        let eth_api = EthApiBuilder::new(
+            provider.clone(),
+            testing_pool(),
+            NoopNetwork::default(),
+            EthEvmConfig::new(provider.chain_spec()),
+        )
+        .build();
+        let api = TraceApi::new(eth_api, BlockingTaskGuard::new(1), EthConfig::default());
+        let module = api.into_rpc();
+        for types in [serde_json::json!([]), serde_json::json!(["trace", "stateDiff", "vmTrace"])] {
+            let request = serde_json::json!({
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "trace_replayTransaction",
+                "params": [B256::with_last_byte(1), types],
+            });
+            let (response, _) = module.raw_json_request(&request.to_string(), 1).await.unwrap();
+            let response: serde_json::Value = serde_json::from_str(response.get()).unwrap();
+            assert_eq!(response, serde_json::json!({"jsonrpc": "2.0", "id": 1, "result": null}));
+        }
+    }
 
     fn localized_transaction_trace(
         block_number: u64,
