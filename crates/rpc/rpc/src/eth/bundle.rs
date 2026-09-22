@@ -90,10 +90,8 @@ where
             )
         }
 
-        let transactions = txs
-            .into_iter()
-            .map(|tx| self.eth_api().recover_raw_transaction::<PoolPooledTx<Eth::Pool>>(&tx))
-            .collect::<Result<Vec<_>, _>>()?;
+        let transactions =
+            self.eth_api().recover_raw_transactions::<PoolPooledTx<Eth::Pool>>(txs)?;
 
         let block_id: alloy_rpc_types_eth::BlockId = state_block_number.into();
         // Note: the block number is considered the `parent` block: <https://github.com/flashbots/mev-geth/blob/fddf97beec5877483f879a77b7dea2e58a58d653/internal/ethapi/api.go#L2104>
