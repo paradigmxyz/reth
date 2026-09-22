@@ -124,13 +124,11 @@ impl BroadcastItemCounter {
 
     /// Attempts to add `n` items. Returns `true` if under the limit, `false` if over (no change).
     pub(crate) fn try_add(&self, n: usize) -> bool {
-        let prev = self.0.fetch_add(n, Ordering::Relaxed);
-        if prev >= MAX_QUEUED_BROADCAST_ITEMS {
-            self.0.fetch_sub(n, Ordering::Relaxed);
-            false
-        } else {
-            true
-        }
+        self.0
+            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |current| {
+                current.checked_add(n).filter(|&next| next <= MAX_QUEUED_BROADCAST_ITEMS)
+            })
+            .is_ok()
     }
 
     /// Subtracts `n` items from the counter.
@@ -2115,6 +2113,22 @@ mod tests {
             .into();
 
         assert_eq!(2, msg.broadcast_item_count());
+    }
+
+    #[test]
+    fn broadcast_item_counter_never_exceeds_limit() {
+        let counter = BroadcastItemCounter::new();
+
+        assert!(counter.try_add(MAX_QUEUED_BROADCAST_ITEMS - 1));
+        assert_eq!(counter.get(), MAX_QUEUED_BROADCAST_ITEMS - 1);
+
+        assert!(!counter.try_add(2));
+        assert_eq!(counter.get(), MAX_QUEUED_BROADCAST_ITEMS - 1);
+
+        assert!(counter.try_add(1));
+        assert_eq!(counter.get(), MAX_QUEUED_BROADCAST_ITEMS);
+        assert!(!counter.try_add(1));
+        assert!(!BroadcastItemCounter::new().try_add(MAX_QUEUED_BROADCAST_ITEMS + 1));
     }
 
     #[test]
