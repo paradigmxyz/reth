@@ -4362,21 +4362,24 @@ struct MDBX_txn {
       size_t subtxn_arena_page_allocations; /* Pages allocated from subtxn_repnl */
       size_t subtxn_arena_refill_events;    /* Times fallback to parent was needed */
       osal_fastmutex_t *subtxn_alloc_mutex; /* Mutex for synchronized parent allocation */
+      atomic_pgno_t subtxn_first_unallocated; /* Published allocation bounds for child readers */
+      atomic_pgno_t subtxn_geo_now;
     } tw;
   };
 };
 
-/* For parallel subtxns, read first_unallocated from parent (single source of truth).
- * This eliminates O(n) sibling sync loops - siblings always read parent's authoritative value.
- * For regular txns, return the local geo value. */
-MDBX_NOTHROW_PURE_FUNCTION static inline pgno_t txn_first_unallocated(const MDBX_txn *txn) {
-  return (txn->flags & txn_parallel_subtx) ? txn->tw.subparent->geo.first_unallocated
-                                           : txn->geo.first_unallocated;
+/* Child readers do not hold the allocation mutex. Publish bounds atomically
+ * instead of racing with the allocator's writes to the parent's geometry. */
+static inline pgno_t txn_first_unallocated(const MDBX_txn *txn) {
+  return (txn->flags & txn_parallel_subtx)
+             ? atomic_load32(&txn->tw.subparent->tw.subtxn_first_unallocated, mo_AcquireRelease)
+             : txn->geo.first_unallocated;
 }
 
-/* For parallel subtxns, read geo.now from parent (single source of truth). */
-MDBX_NOTHROW_PURE_FUNCTION static inline pgno_t txn_geo_now(const MDBX_txn *txn) {
-  return (txn->flags & txn_parallel_subtx) ? txn->tw.subparent->geo.now : txn->geo.now;
+static inline pgno_t txn_geo_now(const MDBX_txn *txn) {
+  return (txn->flags & txn_parallel_subtx)
+             ? atomic_load32(&txn->tw.subparent->tw.subtxn_geo_now, mo_AcquireRelease)
+             : txn->geo.now;
 }
 
 #define CURSOR_STACK_SIZE (16 + MDBX_WORDBITS / 4)
@@ -16254,6 +16257,8 @@ LIBMDBX_API int mdbx_txn_create_subtxns(MDBX_txn *parent,
   }
 
   osal_free(gc_alloc);
+  atomic_store32(&parent->tw.subtxn_geo_now, parent->geo.now, mo_AcquireRelease);
+  atomic_store32(&parent->tw.subtxn_first_unallocated, parent->geo.first_unallocated, mo_AcquireRelease);
   return MDBX_SUCCESS;
 }
 
@@ -23751,6 +23756,8 @@ pgr_t gc_alloc_ex(const MDBX_cursor *const mc, const size_t num, uint8_t flags) 
       parent->flags |= MDBX_TXN_DIRTY;
     }
     parent->geo.first_unallocated = new_first;
+    atomic_store32(&parent->tw.subtxn_geo_now, parent->geo.now, mo_AcquireRelease);
+    atomic_store32(&parent->tw.subtxn_first_unallocated, new_first, mo_AcquireRelease);
     osal_fastmutex_release(txn->tw.subtxn_alloc_mutex);
     /* Put extra pages into subtxn_repnl for future use */
     if (extra > 0) {
@@ -24406,9 +24413,10 @@ __hot pgr_t gc_alloc_single(const MDBX_cursor *const mc) {
       parent->geo.now = new_first;
       parent->flags |= MDBX_TXN_DIRTY;
     }
-    /* Only update parent's first_unallocated - siblings read from parent via txn_first_unallocated().
-     * This is O(1) instead of O(n) sibling sync loop. */
+    /* Publish the new bounds before returning pages to this child. */
     parent->geo.first_unallocated = new_first;
+    atomic_store32(&parent->tw.subtxn_geo_now, parent->geo.now, mo_AcquireRelease);
+    atomic_store32(&parent->tw.subtxn_first_unallocated, new_first, mo_AcquireRelease);
     osal_fastmutex_release(txn->tw.subtxn_alloc_mutex);
     /* Put extra pages into subtxn_repnl for future use.
      * Note: We allocated (extra_for_repnl + 1 + MDBX_ENABLE_REFUND) pages total,
@@ -33257,9 +33265,7 @@ static __always_inline pgr_t page_get_inline(const uint16_t ILL, const MDBX_curs
   /* For parallel subtxns, siblings may have allocated pages that updated
    * the parent's first_unallocated but not ours. Read from parent to see
    * the current allocation frontier. */
-  const pgno_t first_unallocated = (txn->flags & txn_parallel_subtx)
-      ? txn->tw.subparent->geo.first_unallocated
-      : txn->geo.first_unallocated;
+  const pgno_t first_unallocated = txn_first_unallocated(txn);
   if (unlikely(pgno >= first_unallocated)) {
     ERROR("page #%" PRIaPGNO " beyond next-pgno", pgno);
     r.page = nullptr;
