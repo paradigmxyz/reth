@@ -53,7 +53,7 @@ use reth_storage_api::{BlockIdReader, ProviderTx};
 use reth_transaction_pool::validate::{FrameValidationInspector, FrameValidationPolicy};
 use revm::{
     context::Block,
-    context_interface::{result::ResultAndState, Cfg, Transaction},
+    context_interface::{result::ResultAndState, Cfg},
     Database, DatabaseCommit,
 };
 use revm_inspectors::{access_list::AccessListInspector, transfer::TransferInspector};
@@ -392,7 +392,7 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
             }
 
             self.spawn_with_state_at_block(at, move |this, db| {
-                let state = db.database.0;
+                let state_provider = db.database.0;
                 let mut prefix_env = evm_env.clone();
                 // The transaction pool can validate a nonce-gapped transaction. This endpoint has
                 // the same public-prefix semantics, while full execution retains the configured
@@ -404,11 +404,11 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
                     &prefix_env.cfg_env.gas_params,
                 );
                 let inspector = FrameValidationInspector::new(tx.sender, policy);
-                let mut prefix_evm = this.evm_config().evm_with_env_and_inspector(
-                    StateProviderDatabase::new(&state),
-                    prefix_env,
-                    inspector,
-                );
+                let prefix_db = State::builder()
+                    .with_database(StateProviderDatabase::new(&state_provider))
+                    .build();
+                let mut prefix_evm =
+                    this.evm_config().evm_with_env_and_inspector(prefix_db, prefix_env, inspector);
                 let prefix_result =
                     match prefix_evm.validate_frame_transaction(prefix_tx_env, policy.prefix_end) {
                         Some(Ok(result)) => result,
@@ -473,8 +473,10 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
                     tx.sender,
                     &evm_env.cfg_env.gas_params,
                 );
-                let mut evm =
-                    this.evm_config().evm_with_env(StateProviderDatabase::new(&state), evm_env);
+                let execution_db = State::builder()
+                    .with_database(StateProviderDatabase::new(&state_provider))
+                    .build();
+                let mut evm = this.evm_config().evm_with_env(execution_db, evm_env);
                 let execution_result = match evm.transact(execution_tx_env) {
                     Ok(result) => result.result,
                     Err(error) => return Err(Self::Error::from_evm_err(error)),
