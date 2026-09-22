@@ -34,8 +34,8 @@ pub fn increase_thread_priority() {
     }
 }
 
-/// Deprioritizes known background threads spawned by third-party libraries (`OpenTelemetry`,
-/// `tracing-appender`, `reqwest`) by scanning `/proc/<pid>/task/` for matching thread names and
+/// Deprioritizes known background threads spawned by third-party libraries (`tracing-appender`,
+/// `reqwest`) by scanning `/proc/<pid>/task/` for matching thread names and
 /// setting `SCHED_IDLE` scheduling policy + maximum niceness on them.
 ///
 /// This is a hack: these threads are spawned by libraries that do not expose a way to hook into
@@ -53,8 +53,7 @@ pub fn deprioritize_background_threads() {
 
 /// Thread name prefixes to deprioritize.
 #[cfg(target_os = "linux")]
-const DEPRIORITIZE_THREAD_PREFIXES: &[&str] =
-    &["OpenTelemetry.T", "tracing-appende", "reqwest-interna"];
+const DEPRIORITIZE_THREAD_PREFIXES: &[&str] = &["tracing-appende", "reqwest-interna"];
 
 #[cfg(target_os = "linux")]
 fn _deprioritize_background_threads() {
@@ -80,6 +79,12 @@ fn _deprioritize_background_threads() {
             Err(_) => continue,
         };
         let comm = comm.trim();
+
+        if comm.starts_with("OpenTelemetry.T") {
+            // SAFETY: the TID was read from this process's task directory.
+            let policy = unsafe { libc::sched_getscheduler(tid) };
+            tracing::debug!(tid, comm, policy, "preserving OpenTelemetry scheduling policy");
+        }
 
         if !DEPRIORITIZE_THREAD_PREFIXES.iter().any(|prefix| comm.starts_with(prefix)) {
             continue;
