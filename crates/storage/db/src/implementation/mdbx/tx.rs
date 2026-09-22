@@ -531,8 +531,8 @@ impl Tx<RW> {
 
     /// Enables parallel writes mode with arena size hints for specified tables.
     ///
-    /// Similar to [`enable_parallel_writes_for_tables`], but allows specifying an `arena_hint`
-    /// for each table to guide page pre-allocation. An `arena_hint` of 0 means use
+    /// Similar to [`Self::enable_parallel_writes_for_tables`], but allows specifying an
+    /// `arena_hint` for each table to guide page pre-allocation. An `arena_hint` of 0 means use
     /// equal distribution among all subtransactions.
     ///
     /// # Arguments

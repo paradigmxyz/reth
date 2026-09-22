@@ -824,7 +824,7 @@ impl Transaction<RW> {
 
     /// Enables parallel writes mode with arena size hints for specified DBIs.
     ///
-    /// Similar to [`enable_parallel_writes`], but allows specifying an `arena_hint`
+    /// Similar to [`Self::enable_parallel_writes`], but allows specifying an `arena_hint`
     /// for each DBI to guide page pre-allocation. An `arena_hint` of 0 means use
     /// equal distribution among all subtransactions.
     ///
