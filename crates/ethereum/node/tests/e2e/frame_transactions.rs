@@ -3,7 +3,7 @@
 use crate::utils::eth_payload_attributes_amsterdam;
 use alloy_consensus::{BlockHeader, TxEip8141};
 use alloy_eips::eip8141::{
-    Frame, FrameLimits, FrameMode, FrameSignature, SignatureScheme, TransactionFees,
+    Frame, FrameAddress, FrameLimits, FrameMode, FrameSignature, SignatureScheme, TransactionFees,
     ATOMIC_BATCH_FLAG, EXPIRY_VERIFIER,
 };
 use alloy_primitives::{Address, Bytes, U256};
@@ -47,7 +47,7 @@ fn self_verify_frame() -> Frame {
 fn sender_frame(target: Address) -> Frame {
     Frame {
         mode: FrameMode::Sender,
-        target: Bytes::copy_from_slice(target.as_slice()),
+        target: FrameAddress::from(target),
         limits: FrameLimits { execution: USER_OP_GAS, state: 0 },
         ..Default::default()
     }
@@ -175,7 +175,7 @@ async fn expiry_prefix_frame_is_admitted_and_mined() -> eyre::Result<()> {
     let deadline = node.payload.timestamp.saturating_add(600).to_be_bytes();
     let expiry = Frame {
         mode: FrameMode::Verify,
-        target: Bytes::copy_from_slice(EXPIRY_VERIFIER.as_slice()),
+        target: FrameAddress::from(EXPIRY_VERIFIER),
         limits: FrameLimits { execution: VERIFY_GAS, state: 0 },
         data: Bytes::copy_from_slice(&deadline),
         ..Default::default()
