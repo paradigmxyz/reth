@@ -199,7 +199,14 @@ impl<K: TransactionKind> ShardedCursor<K> {
             return self.cursors[0].get_current();
         }
         if self.deleted {
-            return pair(None)
+            // Within a duplicate set MDBX resolves CURRENT to the successor,
+            // or the final remaining duplicate when the deleted item was last.
+            for reverse in [false, true] {
+                if let Some((k, v)) = self.step(reverse, true, false)? {
+                    return pair(Some((k.into_owned(), v.into_owned())))
+                }
+            }
+            return self.step(false, false, false)
         }
         pair(self.current.as_ref().map(|(_, row)| row.clone()))
     }
@@ -371,6 +378,44 @@ mod tests {
         StorageEntry { key: B256::repeat_byte(prefix), value: U256::from(prefix as u64 + 1) }
     }
 
+    #[derive(Debug)]
+    struct Reference;
+    impl reth_db_api::table::Table for Reference {
+        const NAME: &'static str = "StorageReference";
+        const DUPSORT: bool = true;
+        type Key = B256;
+        type Value = StorageEntry;
+    }
+    impl reth_db_api::table::DupSort for Reference {
+        type SubKey = B256;
+    }
+
+    #[test]
+    fn logical_cursor_matches_unsharded_cursor_after_deletion() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = init_db(dir.path(), DatabaseArguments::test()).unwrap();
+        let raw = db.inner.begin_rw_txn().unwrap();
+        raw.create_db(Some("StorageReference"), reth_libmdbx::DatabaseFlags::DUP_SORT).unwrap();
+        raw.commit().unwrap();
+        let tx = db.tx_mut().unwrap();
+        let mut reference = tx.cursor_dup_write::<Reference>().unwrap();
+        let mut sharded = tx.cursor_dup_write::<HashedStorages>().unwrap();
+        for key in [B256::ZERO, B256::repeat_byte(1)] {
+            for prefix in [0, 32, 64, 96, 128, 160, 192, 224] {
+                reference.upsert(key, &entry(prefix)).unwrap();
+                sharded.upsert(key, &entry(prefix)).unwrap();
+            }
+        }
+        for prefix in [32, 64, 224] {
+            reference.seek_by_key_subkey(B256::ZERO, entry(prefix).key).unwrap();
+            sharded.seek_by_key_subkey(B256::ZERO, entry(prefix).key).unwrap();
+            reference.delete_current().unwrap();
+            sharded.delete_current().unwrap();
+            assert_eq!(sharded.current().unwrap(), reference.current().unwrap(), "prefix {prefix}");
+            assert_eq!(sharded.next().unwrap(), reference.next().unwrap(), "prefix {prefix}");
+        }
+    }
+
     #[test]
     fn prefix_shards_preserve_cursor_order_deletion_and_reopen() {
         let dir = tempfile::tempdir().unwrap();
@@ -468,6 +513,72 @@ mod tests {
                 if commit { 4 } else { 0 }
             );
         }
+    }
+
+    #[test]
+    fn hot_contract_parallel_shards_survive_rewrites_abort_and_pinned_reader() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = init_db(dir.path(), DatabaseArguments::test()).unwrap();
+        let mut pinned = None;
+        for round in 0..12u64 {
+            let tx = db.tx_mut().unwrap();
+            tx.enable_parallel_writes_for_tables_with_hints(&[("HashedStorages", 16000)]).unwrap();
+            let cursors = tx.cursor_dup_write_shards::<HashedStorages>().unwrap();
+            std::thread::scope(|scope| {
+                for (shard, mut c) in cursors.into_iter().enumerate() {
+                    scope.spawn(move || {
+                        for index in 0..4096u32 {
+                            let mut slot = [0u8; 32];
+                            slot[0] = (shard * 64) as u8;
+                            slot[28..].copy_from_slice(&index.to_be_bytes());
+                            let key = B256::from(slot);
+                            if c.seek_by_key_subkey(B256::ZERO, key)
+                                .unwrap()
+                                .is_some_and(|v| v.key == key)
+                            {
+                                c.delete_current().unwrap();
+                            }
+                            c.upsert(
+                                B256::ZERO,
+                                &StorageEntry { key, value: U256::from(round + 1) },
+                            )
+                            .unwrap();
+                        }
+                    });
+                }
+            });
+            tx.commit_subtxns().unwrap();
+            if round % 3 == 2 {
+                tx.abort();
+            } else {
+                tx.commit().unwrap();
+            }
+            if round == 0 {
+                pinned = Some(db.tx().unwrap());
+            }
+            let expected = if round % 3 == 2 { round } else { round + 1 };
+            let read = db.tx().unwrap();
+            assert_eq!(read.entries::<HashedStorages>().unwrap(), 16384);
+            assert_eq!(
+                read.cursor_read::<HashedStorages>()
+                    .unwrap()
+                    .walk(None)
+                    .unwrap()
+                    .inspect(|row| {
+                        assert_eq!(row.as_ref().unwrap().1.value, U256::from(expected));
+                    })
+                    .count(),
+                16384
+            );
+            assert_eq!(
+                pinned.as_ref().unwrap().get::<HashedStorages>(B256::ZERO).unwrap().unwrap().value,
+                U256::from(1)
+            );
+        }
+        drop(pinned);
+        drop(db);
+        let db = open_db(dir.path(), DatabaseArguments::test()).unwrap();
+        assert_eq!(db.tx().unwrap().entries::<HashedStorages>().unwrap(), 16384);
     }
 
     #[test]
