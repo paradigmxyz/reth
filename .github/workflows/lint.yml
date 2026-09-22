@@ -413,6 +413,8 @@ jobs:
     name: cargo deny check
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    env:
+      RUSTC_WRAPPER: ""
     permissions:
       contents: read
       id-token: write

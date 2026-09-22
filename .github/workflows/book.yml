@@ -19,6 +19,9 @@ jobs:
       id-token: write
       contents: read
     timeout-minutes: 90
+    env:
+      # Include the system trust store containing Aegis's CA for Bun and Node.
+      NODE_EXTRA_CA_CERTS: /etc/ssl/certs/ca-certificates.crt
     steps:
       - name: Secure runner
         uses: tempoxyz/gh-actions/actions/secure-runner@48ff2b0c97ede86c9f10d105424380b9605f790d
