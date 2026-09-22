@@ -477,7 +477,6 @@ where
         // cache good block
         if let Ok(Some(block)) = res {
             let now = self.cache_now();
-            self.evict_expired(now);
             self.full_block_cache.insert_cached(block_hash, block, now);
         }
     }
@@ -497,7 +496,6 @@ where
         // cache good receipts
         if let Ok(Some(receipts)) = res {
             let now = self.cache_now();
-            self.evict_expired(now);
             self.receipts_cache.insert_cached(block_hash, receipts, now);
         }
     }
@@ -516,7 +514,6 @@ where
         }
 
         if let Ok(Some(bal)) = res {
-            self.evict_expired(now);
             self.bal_cache.insert_cached(block_hash, bal, now);
         }
     }
@@ -678,26 +675,23 @@ where
                             }
                         }
                         CacheAction::ReceiptsResult { block_hash, res } => {
+                            this.evict_expired(this.cache_now());
                             this.on_new_receipts(block_hash, res);
                         }
                         CacheAction::BalResult { block_hash, res } => {
+                            this.evict_expired(this.cache_now());
                             this.on_new_bal(block_hash, res);
                         }
                         CacheAction::InsertBal { block_hash, bal } => {
+                            this.evict_expired(this.cache_now());
                             this.on_new_bal(block_hash, Ok(Some(bal)));
                         }
-                        CacheAction::BlockWithSendersResult { block_hash, res } => match res {
-                            Ok(Some(block_with_senders)) => {
-                                this.on_new_block(block_hash, Ok(Some(block_with_senders)));
-                            }
-                            Ok(None) => {
-                                this.on_new_block(block_hash, Ok(None));
-                            }
-                            Err(e) => {
-                                this.on_new_block(block_hash, Err(e));
-                            }
-                        },
+                        CacheAction::BlockWithSendersResult { block_hash, res } => {
+                            this.evict_expired(this.cache_now());
+                            this.on_new_block(block_hash, res);
+                        }
                         CacheAction::CacheNewCanonicalChain { chain_change } => {
+                            // Reclaim idle entries once for the whole notification.
                             this.evict_expired(this.cache_now());
                             for block in chain_change.blocks {
                                 // Index transactions before caching the block
@@ -1099,38 +1093,8 @@ mod tests {
     }
 
     #[tokio::test(start_paused = true)]
-    async fn idle_timeout_releases_cached_data_without_requests() {
-        let (_cache, mut service) = EthStateCache::<EthPrimitives>::create(
-            NoopProvider::default(),
-            Runtime::test(),
-            EthStateCacheConfig {
-                idle_timeout: Some(Duration::from_secs(10)),
-                ..Default::default()
-            },
-        );
-        let block = Arc::new(test_block());
-        let hash = block.hash();
-        service.on_new_block(hash, Ok(Some(block)));
-        service.on_new_receipts(hash, Ok(Some(Arc::new(vec![]))));
-        service.on_new_bal(hash, Ok(Some(CachedRevmBal::new(test_decoded_revm_bal()))));
-        let (response_tx, mut response_rx) = oneshot::channel();
-        service.full_block_cache.queue(hash, response_tx);
-        assert!(futures::poll!(&mut service).is_pending());
-
-        tokio::time::advance(Duration::from_secs(11)).await;
-        assert!(futures::poll!(&mut service).is_pending());
-
-        assert!(service.full_block_cache.get(&hash).is_none());
-        assert!(service.receipts_cache.get(&hash).is_none());
-        assert!(service.bal_cache.get(&hash).is_none());
-
-        service.on_new_block(hash, Ok(Some(Arc::new(test_block()))));
-        assert!(response_rx.try_recv().unwrap().unwrap().is_some());
-    }
-
-    #[tokio::test(start_paused = true)]
     async fn idle_timer_continues_waking_after_its_first_tick() {
-        let (cache, service) = EthStateCache::<EthPrimitives>::create(
+        let (cache, mut service) = EthStateCache::<EthPrimitives>::create(
             NoopProvider::default(),
             Runtime::test(),
             EthStateCacheConfig {
@@ -1138,27 +1102,46 @@ mod tests {
                 ..Default::default()
             },
         );
-        let service_task = tokio::spawn(service);
-        tokio::task::yield_now().await;
         tokio::time::advance(Duration::from_secs(3)).await;
         let block = Arc::new(test_block());
         let hash = block.hash();
-        let retained = Arc::downgrade(&block);
-        cache
-            .to_service
-            .send(CacheAction::BlockWithSendersResult { block_hash: hash, res: Ok(Some(block)) })
-            .unwrap();
+        let receipts = Arc::new(vec![]);
+        let bal = CachedRevmBal::new(test_decoded_revm_bal());
+        let retained_block = Arc::downgrade(&block);
+        let retained_receipts = Arc::downgrade(&receipts);
+        let retained_bal = Arc::downgrade(&bal.0);
+        service.on_new_block(hash, Ok(Some(block)));
+        service.on_new_receipts(hash, Ok(Some(receipts)));
+        service.on_new_bal(hash, Ok(Some(bal)));
+        let (response_tx, response_rx) = oneshot::channel();
+        service.full_block_cache.queue(hash, response_tx);
+        let service_task = tokio::spawn(service);
         assert!(cache.get_maybe_block(hash).await.unwrap().is_some());
 
         tokio::time::advance(Duration::from_secs(7)).await;
         tokio::task::yield_now().await;
-        assert!(retained.upgrade().is_some());
-        // No more cache actions: only the second timer tick can release this payload.
+        assert!(retained_block.upgrade().is_some());
+        assert!(retained_receipts.upgrade().is_some());
+        assert!(retained_bal.upgrade().is_some());
+        // No more cache actions: only the second timer tick can release these payloads.
         tokio::time::advance(Duration::from_secs(11)).await;
         tokio::task::yield_now().await;
-        let expired = retained.upgrade().is_none();
+        let expired = retained_block.upgrade().is_none() &&
+            retained_receipts.upgrade().is_none() &&
+            retained_bal.upgrade().is_none();
+
+        // Expiration must leave pending consumers available for the next result.
+        cache
+            .to_service
+            .send(CacheAction::BlockWithSendersResult {
+                block_hash: hash,
+                res: Ok(Some(Arc::new(test_block()))),
+            })
+            .unwrap();
+        let response = response_rx.await.unwrap();
         service_task.abort();
         assert!(expired, "idle service did not register its next timer wakeup");
+        assert!(response.unwrap().is_some());
     }
 
     #[tokio::test(start_paused = true)]
@@ -1342,37 +1325,47 @@ mod tests {
     }
 
     #[tokio::test(start_paused = true)]
-    async fn canonical_notification_expires_data_before_next_timer_tick() {
-        let (cache, mut service) = EthStateCache::<EthPrimitives>::create(
-            NoopProvider::default(),
-            Runtime::test(),
-            EthStateCacheConfig {
-                idle_timeout: Some(Duration::from_secs(10)),
-                ..Default::default()
-            },
-        );
-        tokio::time::advance(Duration::from_secs(3)).await;
-        let block = Arc::new(test_block());
-        let hash = block.hash();
-        service.on_new_block(hash, Ok(Some(block)));
-        service.on_new_receipts(hash, Ok(Some(Arc::new(vec![]))));
-        service.on_new_bal(hash, Ok(Some(CachedRevmBal::new(test_decoded_revm_bal()))));
-
-        tokio::time::advance(Duration::from_secs(7)).await;
-        assert!(futures::poll!(&mut service).is_pending());
-        assert!(service.full_block_cache.get(&hash).is_some());
-        tokio::time::advance(Duration::from_secs(4)).await;
-        // The next timer tick is at 20s. The notification must reclaim the old data now.
-        cache
-            .to_service
-            .send(CacheAction::CacheNewCanonicalChain {
+    async fn cache_updates_expire_data_before_next_timer_tick() {
+        let block = Arc::new(RecoveredBlock::new_unhashed(Block::default(), vec![]));
+        let block_hash = block.hash();
+        for action in [
+            CacheAction::CacheNewCanonicalChain {
                 chain_change: ChainChange { blocks: vec![], receipts: vec![], bals: vec![] },
-            })
-            .unwrap();
-        assert!(futures::poll!(&mut service).is_pending());
-        assert!(service.full_block_cache.get(&hash).is_none());
-        assert!(service.receipts_cache.get(&hash).is_none());
-        assert!(service.bal_cache.get(&hash).is_none());
+            },
+            CacheAction::BlockWithSendersResult { block_hash, res: Ok(Some(block)) },
+            CacheAction::ReceiptsResult { block_hash, res: Ok(Some(Arc::new(vec![]))) },
+            CacheAction::BalResult {
+                block_hash,
+                res: Ok(Some(CachedRevmBal::new(test_decoded_revm_bal()))),
+            },
+            CacheAction::InsertBal { block_hash, bal: CachedRevmBal::new(test_decoded_revm_bal()) },
+        ] {
+            let (cache, mut service) = EthStateCache::<EthPrimitives>::create(
+                NoopProvider::default(),
+                Runtime::test(),
+                EthStateCacheConfig {
+                    idle_timeout: Some(Duration::from_secs(10)),
+                    ..Default::default()
+                },
+            );
+            tokio::time::advance(Duration::from_secs(3)).await;
+            let block = Arc::new(test_block());
+            let hash = block.hash();
+            service.on_new_block(hash, Ok(Some(block)));
+            service.on_new_receipts(hash, Ok(Some(Arc::new(vec![]))));
+            service.on_new_bal(hash, Ok(Some(CachedRevmBal::new(test_decoded_revm_bal()))));
+
+            tokio::time::advance(Duration::from_secs(7)).await;
+            assert!(futures::poll!(&mut service).is_pending());
+            assert!(service.full_block_cache.get(&hash).is_some());
+            tokio::time::advance(Duration::from_secs(4)).await;
+            // The next timer tick is six seconds away. Reclaim the old data now.
+            cache.to_service.send(action).unwrap();
+            assert!(futures::poll!(&mut service).is_pending());
+            assert!(service.full_block_cache.get(&hash).is_none());
+            assert!(service.receipts_cache.get(&hash).is_none());
+            assert!(service.bal_cache.get(&hash).is_none());
+        }
     }
 
     #[tokio::test]

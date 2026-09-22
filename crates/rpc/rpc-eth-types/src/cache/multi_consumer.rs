@@ -403,53 +403,44 @@ mod tests {
 
     #[test]
     fn cached_lookup_counts_expiry_as_a_miss_and_updates_gauges() {
-        let mut cache: MultiConsumerLruCache<u64, CachedEntry<Arc<Weighted>>, ByLength, u64> =
-            MultiConsumerLruCache::new(2, "test");
-        let hits = Arc::new(metrics::atomics::AtomicU64::new(0));
-        let misses = Arc::new(metrics::atomics::AtomicU64::new(0));
-        cache.metrics.hits_total = metrics::Counter::from_arc(hits.clone());
-        cache.metrics.misses_total = metrics::Counter::from_arc(misses.clone());
+        for max_bytes in [None, Some(10)] {
+            let mut cache: MultiConsumerLruCache<u64, CachedEntry<Arc<Weighted>>, ByLength, u64> =
+                MultiConsumerLruCache::new_with_limits(2, max_bytes, "test");
+            let hits = Arc::new(metrics::atomics::AtomicU64::new(0));
+            let misses = Arc::new(metrics::atomics::AtomicU64::new(0));
+            cache.metrics.hits_total = metrics::Counter::from_arc(hits.clone());
+            cache.metrics.misses_total = metrics::Counter::from_arc(misses.clone());
 
-        let now = Instant::now();
-        let timeout = Duration::from_secs(10);
-        let value = Arc::new(Weighted(3));
-        let retained = Arc::downgrade(&value);
-        assert!(cache.insert_cached(1, value.clone(), Some(now)));
-        assert!(cache.update_cached_metrics());
-        let cached = cache.get_cached(&1, Some(now + timeout / 2), Some(timeout)).unwrap();
-        assert!(Arc::ptr_eq(&cached, &value));
-        drop(cached);
-        drop(value);
-        assert_eq!(hits.load(Ordering::Relaxed), 1);
-        assert_eq!(misses.load(Ordering::Relaxed), 0);
-        assert!(!cache.update_cached_metrics());
+            let now = Instant::now();
+            let timeout = Duration::from_secs(10);
+            let value = Arc::new(Weighted(3));
+            let retained = Arc::downgrade(&value);
+            assert!(cache.insert_cached(1, value.clone(), Some(now)));
+            assert!(cache.update_cached_metrics());
+            let cached = cache.get_cached(&1, Some(now + timeout / 2), Some(timeout)).unwrap();
+            assert!(Arc::ptr_eq(&cached, &value));
+            drop(cached);
+            drop(value);
+            assert_eq!(hits.load(Ordering::Relaxed), 1);
+            assert_eq!(misses.load(Ordering::Relaxed), 0);
+            assert!(!cache.update_cached_metrics());
 
-        assert!(cache.get_cached(&2, Some(now + timeout / 2), Some(timeout)).is_none());
-        assert_eq!(misses.load(Ordering::Relaxed), 1);
-        assert!(!cache.update_cached_metrics());
+            assert!(cache.get_cached(&2, Some(now + timeout / 2), Some(timeout)).is_none());
+            assert_eq!(misses.load(Ordering::Relaxed), 1);
+            assert!(!cache.update_cached_metrics());
 
-        assert!(cache.queue(1, 42));
-        assert!(cache.get_cached(&1, Some(now + timeout + timeout / 2), Some(timeout)).is_none());
-        assert_eq!(hits.load(Ordering::Relaxed), 1);
-        assert_eq!(misses.load(Ordering::Relaxed), 2);
-        assert_eq!(cache.memory_usage(), 0);
-        assert!(cache.update_cached_metrics());
-        assert!(!cache.update_cached_metrics());
-        assert!(retained.upgrade().is_none());
-        assert_eq!(cache.remove(&1), Some(vec![42]));
-    }
-
-    #[test]
-    fn expired_lookup_keeps_waiting_consumers() {
-        let mut cache: MultiConsumerLruCache<u64, CachedEntry<Weighted>, ByLength, u64> =
-            MultiConsumerLruCache::new_with_limits(10, Some(10), "test");
-        let now = Instant::now();
-        let timeout = Duration::from_secs(10);
-        assert!(cache.insert_cached(1, Weighted(3), Some(now)));
-        assert!(cache.queue(1, 42));
-        assert!(cache.get_cached(&1, Some(now + timeout), Some(timeout)).is_none());
-        assert_eq!(cache.memory_usage(), 0);
-        assert_eq!(cache.remove(&1), Some(vec![42]));
+            assert!(cache.queue(1, 42));
+            assert!(cache
+                .get_cached(&1, Some(now + timeout + timeout / 2), Some(timeout))
+                .is_none());
+            assert_eq!(hits.load(Ordering::Relaxed), 1);
+            assert_eq!(misses.load(Ordering::Relaxed), 2);
+            assert_eq!(cache.memory_usage(), 0);
+            assert!(cache.update_cached_metrics());
+            assert!(!cache.update_cached_metrics());
+            assert!(retained.upgrade().is_none());
+            assert_eq!(cache.remove(&1), Some(vec![42]));
+        }
     }
 
     #[test]
