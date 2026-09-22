@@ -470,6 +470,9 @@ mod tests {
         let tx_req = TransactionRequest {
             from: Some(address),
             transaction_type: Some(0x06),
+            // The outer RPC field must not override the canonical reservation derived from the
+            // frame execution and state limits.
+            gas: Some(1),
             frames: Some(vec![Frame { limits, ..Default::default() }]),
             ..Default::default()
         };

@@ -47,6 +47,11 @@ pub trait EstimateCall: Call {
     ///  - `disable_base_fee` is set to `true`
     ///  - `disable_fee_charge` is set to `true`
     ///  - `nonce` is set to `None`
+    ///
+    /// For frame transactions, the per-frame execution and state limits are part of the
+    /// transaction envelope. The request is executed once with those declared limits and the
+    /// derived outer reservation is returned; the scalar `gas` request field never replaces the
+    /// frame reservation.
     fn estimate_gas_with<S>(
         &self,
         mut evm_env: EvmEnvFor<Self::Evm>,
@@ -74,6 +79,23 @@ pub trait EstimateCall: Call {
         let is_frame = Into::<u8>::into(request.as_ref().output_tx_type()) == 0x06;
         if !is_frame {
             request.as_mut().take_nonce();
+        } else {
+            // `eth_estimateGas` accepts unsigned frame requests. Build a structurally complete
+            // envelope for simulation without changing any caller-supplied frame limits.
+            if request.as_ref().signatures.is_none() {
+                request.as_mut().signatures = Some(Vec::new());
+            }
+            if request.as_ref().eip8141_fees.is_none() {
+                if request.as_ref().max_fee_per_gas().is_none() {
+                    request.as_mut().set_max_fee_per_gas(0);
+                }
+                if request.as_ref().max_priority_fee_per_gas().is_none() {
+                    request.as_mut().set_max_priority_fee_per_gas(0);
+                }
+                if request.as_ref().max_fee_per_blob_gas().is_none() {
+                    request.as_mut().set_max_fee_per_blob_gas(0);
+                }
+            }
         }
 
         // Keep a copy of gas related request values
