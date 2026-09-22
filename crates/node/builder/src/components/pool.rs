@@ -19,6 +19,22 @@ pub trait PoolBuilder<Node: FullNodeTypes, Evm>: Send {
         + Unpin
         + 'static;
 
+    /// Creates the batch submission service independently of the pool.
+    /// Override to use a concrete pool's validation workers for the complete batch job.
+    fn build_batcher(
+        ctx: &BuilderContext<Node>,
+        pool: Self::Pool,
+    ) -> (
+        reth_transaction_pool::BatchTxProcessor,
+        reth_transaction_pool::BatchTxHandle<<Self::Pool as TransactionPool>::Transaction>,
+    ) {
+        reth_transaction_pool::BatchTxProcessor::with_pool(
+            pool,
+            ctx.transaction_batcher_config(),
+            ctx.sender_recovery_cache().cloned(),
+        )
+    }
+
     /// Creates the transaction pool.
     fn build_pool(
         self,

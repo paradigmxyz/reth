@@ -65,6 +65,50 @@ alloy_sol_types::sol! {
     }
 }
 
+#[tokio::test]
+async fn test_rpc_batcher_shares_admission_pause_and_payload_sender_cache() -> eyre::Result<()> {
+    use reth_primitives_traits::SignedTransaction;
+    use reth_transaction_pool::test_utils::TransactionGenerator;
+
+    let chain_spec = Arc::new(ChainSpecBuilder::mainnet().cancun_activated().build());
+    let (mut nodes, _) =
+        E2ETestSetupBuilder::<EthereumNode, _>::new(1, chain_spec, eth_payload_attributes)
+            .with_node_config_modifier(|mut config| {
+                config.engine.sender_recovery_cache_enabled = true;
+                config
+            })
+            .build()
+            .await?;
+    let node = nodes.pop().unwrap();
+    let cache = node.inner.evm_config.sender_recovery_cache.as_ref().unwrap();
+    let transaction =
+        TransactionGenerator::new(rand::rng()).transaction().chain_id(2).into_legacy();
+    let hash = *transaction.tx_hash();
+    let sender = transaction.try_recover()?;
+    assert_eq!(cache.get(&hash), None);
+    let client = node.rpc_client().unwrap();
+    let raw = Bytes::from(transaction.encoded_2718());
+    let batcher = node.rpc.inner.eth_api().transaction_batcher();
+    let admission =
+        batcher.reserve_rpc(reth_transaction_pool::BatchTxConfig::default().max_bytes)?;
+    let overloaded = client.request::<B256, _>("eth_sendRawTransaction", (raw.clone(),)).await;
+    assert!(overloaded.unwrap_err().to_string().contains("capacity exhausted"));
+    assert_eq!(cache.get(&hash), None, "rejected admission must not start recovery");
+    drop(admission);
+
+    let paused = batcher.pause_handle().pause();
+    let mut request = Box::pin(client.request::<B256, _>("eth_sendRawTransaction", (raw,)));
+    assert!(tokio::time::timeout(std::time::Duration::from_millis(100), &mut request)
+        .await
+        .is_err());
+    assert_eq!(cache.get(&hash), None);
+    drop(paused);
+    let result = tokio::time::timeout(std::time::Duration::from_secs(5), request).await?;
+    assert!(result.is_err(), "wrong-chain transaction must still be rejected");
+    assert_eq!(cache.get(&hash), Some(sender));
+    Ok(())
+}
+
 async fn inject_blob_transaction(
     node: &NodeHelperType<EthereumNode>,
     wallet: &Wallet,

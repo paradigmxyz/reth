@@ -279,7 +279,7 @@
 pub use imbl::OrdMap;
 
 pub use crate::{
-    batcher::{BatchTxProcessor, BatchTxRequest},
+    batcher::{BatchTxConfig, BatchTxHandle, BatchTxProcessor},
     blobstore::{BlobStore, BlobStoreError},
     config::{
         LocalTransactionConfig, PoolConfig, PriceBumpConfig, SubPoolLimit,

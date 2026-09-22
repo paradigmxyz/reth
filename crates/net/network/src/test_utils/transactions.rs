@@ -43,12 +43,15 @@ pub async fn new_tx_manager_with_config(
         .build(client);
 
     let pool = testing_pool();
+    let (processor, batcher) = reth_transaction_pool::BatchTxProcessor::new(pool.clone(), 32);
+    tokio::spawn(processor);
 
     let (_network_handle, network, transactions, _) = NetworkManager::new(config)
         .await
         .unwrap()
         .into_builder()
         .transactions(pool.clone(), transactions_manager_config)
+        .map_transactions(|manager| manager.with_transaction_batcher(batcher))
         .split_with_handle();
 
     (transactions, network)

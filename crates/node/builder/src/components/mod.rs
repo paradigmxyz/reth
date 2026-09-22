@@ -48,6 +48,14 @@ pub trait NodeComponents<T: FullNodeTypes>: Clone + Debug + Unpin + Send + Sync 
     /// Network API.
     type Network: FullNetwork<Primitives: NetPrimitivesFor<<T::Types as NodeTypes>::Primitives>>;
 
+    /// Returns the shared transaction batcher, when configured by node construction.
+    fn transaction_batcher(
+        &self,
+    ) -> Option<&reth_transaction_pool::BatchTxHandle<<Self::Pool as TransactionPool>::Transaction>>
+    {
+        None
+    }
+
     /// Returns the transaction pool of the node.
     fn pool(&self) -> &Self::Pool;
 
@@ -69,9 +77,11 @@ pub trait NodeComponents<T: FullNodeTypes>: Clone + Debug + Unpin + Send + Sync 
 ///
 /// This provides access to all the components of the node.
 #[derive(Debug)]
-pub struct Components<Node: FullNodeTypes, Network, Pool, EVM, Consensus> {
+pub struct Components<Node: FullNodeTypes, Network, Pool: TransactionPool, EVM, Consensus> {
     /// The transaction pool of the node.
     pub transaction_pool: Pool,
+    /// Shared admission, recovery and insertion service.
+    pub transaction_batcher: reth_transaction_pool::BatchTxHandle<Pool::Transaction>,
     /// The node's EVM configuration, defining settings for the Ethereum Virtual Machine.
     pub evm_config: EVM,
     /// The consensus implementation of the node.
@@ -102,6 +112,13 @@ where
     type Evm = EVM;
     type Consensus = Cons;
     type Network = Network;
+
+    fn transaction_batcher(
+        &self,
+    ) -> Option<&reth_transaction_pool::BatchTxHandle<<Self::Pool as TransactionPool>::Transaction>>
+    {
+        Some(&self.transaction_batcher)
+    }
 
     fn pool(&self) -> &Self::Pool {
         &self.transaction_pool
@@ -135,6 +152,7 @@ where
     fn clone(&self) -> Self {
         Self {
             transaction_pool: self.transaction_pool.clone(),
+            transaction_batcher: self.transaction_batcher.clone(),
             evm_config: self.evm_config.clone(),
             consensus: self.consensus.clone(),
             network: self.network.clone(),

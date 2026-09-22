@@ -100,6 +100,16 @@ impl<T: FullNodeTypes, C: NodeComponents<T>> FullNodeComponents for NodeAdapter<
     type Consensus = C::Consensus;
     type Network = C::Network;
 
+    fn transaction_batcher(
+        &self,
+    ) -> Option<
+        &reth_transaction_pool::BatchTxHandle<
+            <Self::Pool as reth_transaction_pool::TransactionPool>::Transaction,
+        >,
+    > {
+        self.components.transaction_batcher()
+    }
+
     fn pool(&self) -> &Self::Pool {
         self.components.pool()
     }
@@ -337,6 +347,9 @@ mod test {
 
     #[test]
     fn test_noop_components() {
+        let pool = NoopTransactionPool::default();
+        let (_processor, transaction_batcher) =
+            reth_transaction_pool::BatchTxProcessor::new(pool.clone(), 32);
         let components = Components::<
             FullNodeTypesAdapter<EthereumNode, DatabaseMock, NoopProvider>,
             NoopNetwork<EthNetworkPrimitives>,
@@ -344,7 +357,8 @@ mod test {
             NoopEvmConfig<MockEvmConfig>,
             _,
         > {
-            transaction_pool: NoopTransactionPool::default(),
+            transaction_pool: pool,
+            transaction_batcher,
             evm_config: NoopEvmConfig::default(),
             consensus: NoopConsensus::default(),
             network: NoopNetwork::default(),

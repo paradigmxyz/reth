@@ -835,6 +835,26 @@ impl<Node: FullNodeTypes> BuilderContext<Node> {
         self.sender_recovery_cache.as_ref()
     }
 
+    /// Returns admission and scheduling limits for the shared transaction batcher.
+    pub fn transaction_batcher_config(&self) -> reth_transaction_pool::BatchTxConfig {
+        let defaults = reth_transaction_pool::BatchTxConfig::default();
+        reth_transaction_pool::BatchTxConfig {
+            recovery_threads: self
+                .config()
+                .txpool
+                .recovery_threads
+                .unwrap_or(defaults.recovery_threads),
+            recovery_batch_size: self.config().txpool.recovery_batch_size,
+            max_batch_size: self.config().txpool.max_batch_size,
+            max_concurrent_batches: self
+                .config()
+                .txpool
+                .additional_validation_tasks
+                .saturating_add(1),
+            ..defaults
+        }
+    }
+
     /// Returns the chain spec of the node.
     pub fn chain_spec(&self) -> Arc<<Node::Types as NodeTypes>::ChainSpec> {
         self.provider().chain_spec()
@@ -868,6 +888,7 @@ impl<Node: FullNodeTypes> BuilderContext<Node> {
         &self,
         builder: NetworkBuilder<(), (), N>,
         pool: Pool,
+        batcher: reth_transaction_pool::BatchTxHandle<Pool::Transaction>,
     ) -> NetworkHandle<N>
     where
         N: NetworkPrimitives,
@@ -883,6 +904,7 @@ impl<Node: FullNodeTypes> BuilderContext<Node> {
         self.start_network_with(
             builder,
             pool,
+            batcher,
             self.config().network.transactions_manager_config(),
             self.config().network.tx_propagation_policy,
         )
@@ -899,6 +921,7 @@ impl<Node: FullNodeTypes> BuilderContext<Node> {
         &self,
         builder: NetworkBuilder<(), (), N>,
         pool: Pool,
+        batcher: reth_transaction_pool::BatchTxHandle<Pool::Transaction>,
         tx_config: TransactionsManagerConfig,
         propagation_policy: Policy,
     ) -> NetworkHandle<N>
@@ -917,6 +940,7 @@ impl<Node: FullNodeTypes> BuilderContext<Node> {
         self.start_network_with_policies(
             builder,
             pool,
+            batcher,
             tx_config,
             propagation_policy,
             StrictEthAnnouncementFilter::default(),
@@ -935,6 +959,7 @@ impl<Node: FullNodeTypes> BuilderContext<Node> {
         &self,
         builder: NetworkBuilder<(), (), N>,
         pool: Pool,
+        batcher: reth_transaction_pool::BatchTxHandle<Pool::Transaction>,
         tx_config: TransactionsManagerConfig,
         propagation_policy: PropPolicy,
         announcement_policy: AnnPolicy,
@@ -959,13 +984,7 @@ impl<Node: FullNodeTypes> BuilderContext<Node> {
                 propagation_policy,
                 announcement_policy,
             )
-            .map_transactions(|transactions| {
-                if let Some(cache) = self.sender_recovery_cache.clone() {
-                    transactions.with_sender_recovery_cache(cache)
-                } else {
-                    transactions
-                }
-            })
+            .map_transactions(|transactions| transactions.with_transaction_batcher(batcher))
             .request_handler_with_blob_store(self.provider().clone(), pool.blob_store())
             .split_with_handle();
 

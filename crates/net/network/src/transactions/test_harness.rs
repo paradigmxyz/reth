@@ -110,21 +110,25 @@ impl TxFetchHarness {
     /// buffered work is processed.
     ///
     /// Returns the number of polls.
-    fn poll_until_idle(&mut self) -> usize {
+    async fn poll_until_idle(&mut self) -> usize {
         // Polled outside of tokio's cooperative budget: inside a tokio task the manager's channels
         // stop making progress after a number of polls and defer a wake that this loop would
         // never see, leaving responses unprocessed.
-        let manager = &mut self.manager;
-        let mut manager =
-            tokio::task::unconstrained(poll_fn(|cx| Pin::new(&mut *manager).poll(cx)));
         let mut polls = 0;
         loop {
             self.wake_flag.0.store(false, Ordering::Relaxed);
             let mut cx = Context::from_waker(&self.waker);
-            let _ = Pin::new(&mut manager).poll(&mut cx);
+            let manager = &mut self.manager;
+            let mut unconstrained =
+                tokio::task::unconstrained(poll_fn(|cx| Pin::new(&mut *manager).poll(cx)));
+            let _ = Pin::new(&mut unconstrained).poll(&mut cx);
+            drop(unconstrained);
             polls += 1;
             if !self.wake_flag.0.load(Ordering::Relaxed) {
-                return polls
+                if self.manager.ingress_imports.is_empty() {
+                    return polls
+                }
+                self.wake_flag.1.notified().await;
             }
         }
     }
@@ -172,7 +176,7 @@ struct MockRequest {
 
 /// Records whether the manager asked to be polled again.
 #[derive(Debug, Default)]
-struct WakeFlag(AtomicBool);
+struct WakeFlag(AtomicBool, tokio::sync::Notify);
 
 impl Wake for WakeFlag {
     fn wake(self: Arc<Self>) {
@@ -181,6 +185,7 @@ impl Wake for WakeFlag {
 
     fn wake_by_ref(self: &Arc<Self>) {
         self.0.store(true, Ordering::Relaxed);
+        self.1.notify_one();
     }
 }
 
@@ -195,6 +200,58 @@ mod tests {
 
     const PEER_A: PeerId = PeerId::new([1; 64]);
     const PEER_B: PeerId = PeerId::new([2; 64]);
+
+    #[tokio::test]
+    async fn paused_ingress_bounds_broadcasts_and_peer_churn() {
+        use crate::transactions::{
+            constants::tx_fetcher::MAX_COUNT_CANDIDATE_PEERS_PER_HASH, TransactionSource,
+        };
+        let mut harness = TxFetchHarness::with_config(
+            TransactionsManagerConfig { max_pending_pool_imports: 2, ..Default::default() },
+            [PEER_A],
+        )
+        .await;
+        let pause = harness.manager.transaction_batcher.as_ref().unwrap().pause_handle().pause();
+        let txs = pooled_txs(64);
+        let first = *txs[0].tx_hash();
+        harness.manager.import_transactions(
+            PEER_A,
+            PooledTransactions(vec![txs[0].clone()]),
+            TransactionSource::Broadcast,
+        );
+        for n in 2..100 {
+            let peer_id = peer(n);
+            let (metadata, _session) =
+                new_mock_session_with_capacity(peer_id, EthVersion::Eth68, 1);
+            harness.manager.peers.insert(peer_id, metadata);
+            harness.manager.import_transactions(
+                peer_id,
+                PooledTransactions(vec![txs[0].clone()]),
+                TransactionSource::Broadcast,
+            );
+            harness.manager.peers.remove(&peer_id);
+        }
+        assert_eq!(
+            harness.manager.transactions_by_peers[&first].len(),
+            MAX_COUNT_CANDIDATE_PEERS_PER_HASH
+        );
+        for _ in 0..100 {
+            harness.manager.import_transactions(
+                PEER_A,
+                PooledTransactions(txs[1..].to_vec()),
+                TransactionSource::Broadcast,
+            );
+        }
+        assert_eq!(harness.manager.ingress_imports.len(), 2);
+        assert_eq!(harness.manager.transactions_by_peers.len(), 2);
+        assert_eq!(harness.num_tracked_hashes(), 0);
+        assert!(harness.pool().is_empty());
+        drop(pause);
+        harness.poll_until_idle().await;
+        assert_eq!(harness.pool().len(), 2);
+        assert!(harness.manager.ingress_imports.is_empty());
+        assert!(harness.manager.transactions_by_peers.is_empty());
+    }
 
     fn peer(n: u8) -> PeerId {
         PeerId::new([n; 64])
@@ -221,6 +278,50 @@ mod tests {
             .collect()
     }
 
+    #[tokio::test]
+    async fn completed_ingress_releases_a_transaction_batch_in_one_poll() {
+        let mut harness = TxFetchHarness::new([PEER_A]).await;
+        harness.manager.import_transactions(
+            PEER_A,
+            PooledTransactions(pooled_txs(512)),
+            super::super::TransactionSource::Broadcast,
+        );
+        // Recovery can finish out of order. Wait until every input has reached insertion,
+        // then use the single import worker as a barrier for completion delivery.
+        tokio::time::timeout(std::time::Duration::from_secs(2), async {
+            while harness.manager.pool.len() != 512 {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap();
+        let barrier = harness
+            .manager
+            .transaction_batcher
+            .as_ref()
+            .unwrap()
+            .try_submit_pooled(pooled_txs(1).pop().unwrap())
+            .unwrap();
+        tokio::time::timeout(std::time::Duration::from_secs(2), barrier)
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            harness.manager.pending_pool_imports_info.pending_pool_imports.load(Ordering::Relaxed),
+            512
+        );
+        tokio::task::unconstrained(poll_fn(|cx| {
+            let _ = Pin::new(&mut harness.manager).poll(cx);
+            std::task::Poll::Ready(())
+        }))
+        .await;
+        assert_eq!(
+            harness.manager.pending_pool_imports_info.pending_pool_imports.load(Ordering::Relaxed),
+            0
+        );
+    }
+
     fn announcement(hashes: &[TxHash]) -> NewPooledTransactionHashes {
         NewPooledTransactionHashes::Eth68(NewPooledTransactionHashes68 {
             types: vec![2; hashes.len()],
@@ -237,7 +338,7 @@ mod tests {
 
         harness.announce(PEER_A, announcement(&hashes));
         harness.announce(PEER_B, announcement(&hashes));
-        harness.poll_until_idle();
+        harness.poll_until_idle().await;
 
         let mut requests = harness.take_requests();
         assert_eq!(requests.len(), 1, "a hash is only requested from one peer at a time");
@@ -247,7 +348,7 @@ mod tests {
         assert_eq!(request.request.0.iter().copied().collect::<B256Set>(), expected);
 
         request.response.send(Err(RequestError::Timeout)).unwrap();
-        harness.poll_until_idle();
+        harness.poll_until_idle().await;
 
         let mut requests = harness.take_requests();
         assert_eq!(requests.len(), 1);
@@ -258,7 +359,7 @@ mod tests {
         assert!(!harness.was_woken(), "nothing happened since the last poll");
         request.response.send(Ok(PooledTransactions(txs))).unwrap();
         assert!(harness.was_woken(), "the response must wake the manager");
-        harness.poll_until_idle();
+        harness.poll_until_idle().await;
         assert!(harness.take_requests().is_empty());
         assert_eq!(harness.pool().get_all(hashes).len(), 3, "delivered transactions are imported");
     }
@@ -272,7 +373,7 @@ mod tests {
             let hashes = (i as u64 * 64..(i as u64 + 1) * 64).map(hash).collect::<Vec<_>>();
             harness.announce(*peer_id, announcement(&hashes));
         }
-        harness.poll_until_idle();
+        harness.poll_until_idle().await;
         let requests = harness.take_requests();
         assert_eq!(requests.len(), 64);
         assert_eq!(harness.num_tracked_hashes(), 64 * 64);
@@ -280,7 +381,7 @@ mod tests {
         for request in requests {
             request.response.send(Err(RequestError::Timeout)).unwrap();
         }
-        let polls = harness.poll_until_idle();
+        let polls = harness.poll_until_idle().await;
         assert!(
             polls > 1,
             "the fetch events exceed the budget of a single poll, got {polls} polls"
@@ -291,7 +392,7 @@ mod tests {
         for request in retries {
             request.response.send(Err(RequestError::Timeout)).unwrap();
         }
-        harness.poll_until_idle();
+        harness.poll_until_idle().await;
         assert_eq!(harness.num_tracked_hashes(), 0);
         assert!(harness.take_requests().is_empty());
     }
@@ -310,7 +411,7 @@ mod tests {
         for (peer_id, hash) in peers.iter().zip(&hashes) {
             harness.announce(*peer_id, announcement(std::slice::from_ref(hash)));
         }
-        harness.poll_until_idle();
+        harness.poll_until_idle().await;
         let mut responses = 0;
         loop {
             let requests = harness.take_requests();
@@ -321,7 +422,7 @@ mod tests {
                 let txs = request.request.0.iter().map(|hash| by_hash[hash].clone()).collect();
                 request.response.send(Ok(PooledTransactions(txs))).unwrap();
                 responses += 1;
-                harness.poll_until_idle();
+                harness.poll_until_idle().await;
             }
         }
 
@@ -331,7 +432,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn concurrent_responses_wait_for_pool_import_capacity() {
+    async fn concurrent_responses_are_dropped_at_paused_import_capacity() {
         let txs = pooled_txs(2);
         let hashes = txs.iter().map(|tx| *tx.tx_hash()).collect::<Vec<_>>();
         let config =
@@ -339,23 +440,26 @@ mod tests {
         let mut harness = TxFetchHarness::with_config(config, [PEER_A, PEER_B]).await;
         harness.announce(PEER_A, announcement(&hashes[..1]));
         harness.announce(PEER_B, announcement(&hashes[1..]));
-        harness.poll_until_idle();
+        harness.poll_until_idle().await;
         let requests = harness.take_requests();
         assert_eq!(requests.len(), 2);
+        let pause = harness.manager.transaction_batcher.as_ref().unwrap().pause_handle().pause();
         for request in requests {
             let tx = txs.iter().find(|tx| request.request.0.contains(tx.tx_hash())).unwrap();
             request.response.send(Ok(PooledTransactions(vec![tx.clone()]))).unwrap();
         }
 
-        // Only one response can be consumed before imports are polled. The second remains
-        // inflight, and freeing capacity must wake the manager to consume it on the next poll.
+        // Full responses must not remain buffered behind a potentially long payload pause.
         harness.wake_flag.0.store(false, Ordering::Relaxed);
         let mut cx = Context::from_waker(&harness.waker);
         let _ = Pin::new(&mut harness.manager).poll(&mut cx);
-        assert_eq!(harness.manager.transaction_fetcher.num_inflight_requests(), 1);
-        assert!(harness.was_woken());
-        harness.poll_until_idle();
-        assert_eq!(harness.pool().get_all(hashes).len(), 2);
+        assert_eq!(harness.manager.transaction_fetcher.num_inflight_requests(), 0);
+        assert_eq!(harness.manager.ingress_imports.len(), 1);
+        assert_eq!(harness.num_tracked_hashes(), 0);
+        assert!(harness.take_requests().is_empty());
+        drop(pause);
+        harness.poll_until_idle().await;
+        assert_eq!(harness.pool().get_all(hashes).len(), 1);
     }
 
     #[tokio::test]
@@ -366,7 +470,7 @@ mod tests {
             TransactionsManagerConfig { max_pending_pool_imports: 256, ..Default::default() };
         let mut harness = TxFetchHarness::with_config(config, [PEER_A, PEER_B]).await;
         harness.announce(PEER_A, announcement(&hashes[..256]));
-        harness.poll_until_idle();
+        harness.poll_until_idle().await;
         let request = harness.take_requests().pop().unwrap();
         assert_eq!(request.request.0.len(), 256);
         request.response.send(Ok(PooledTransactions(txs[..256].to_vec()))).unwrap();
@@ -404,7 +508,7 @@ mod tests {
         harness.manager.peers.remove(&PEER_A);
         harness.manager.transaction_fetcher.on_peer_disconnected(&PEER_A);
         harness.announce(PEER_B, announcement(&hashes[..256]));
-        harness.poll_until_idle();
+        harness.poll_until_idle().await;
         assert!(harness.take_requests().is_empty());
         assert_eq!(harness.pool().get_all(hashes[..256].to_vec()).len(), 256);
         assert_eq!(harness.manager.remaining_pool_import_capacity(), 256);
@@ -418,7 +522,7 @@ mod tests {
             TransactionsManagerConfig { max_pending_pool_imports: 2, ..Default::default() };
         let mut harness = TxFetchHarness::with_config(config, [PEER_A, PEER_B]).await;
         harness.announce(PEER_A, announcement(&[hash(0), hash(1)]));
-        harness.poll_until_idle();
+        harness.poll_until_idle().await;
         let requests = harness.take_requests();
         assert_eq!(requests.len(), 1);
         assert_eq!(harness.manager.transaction_fetcher.num_fetching_hashes(), 2);
@@ -427,7 +531,7 @@ mod tests {
             PooledTransactions(txs),
             crate::transactions::TransactionSource::Broadcast,
         );
-        harness.poll_until_idle();
+        harness.poll_until_idle().await;
         assert!(
             harness.pool().get(&tx_hash).is_some(),
             "stalled requests must leave broadcast capacity"
@@ -451,14 +555,14 @@ mod tests {
             );
             assert!(harness.manager.remaining_pool_import_capacity() >= 1);
         }
-        harness.poll_until_idle();
+        harness.poll_until_idle().await;
         let request =
             harness.take_requests().pop().expect("broadcast pressure leaves fetch capacity");
         request.response.send(Ok(PooledTransactions(txs[..1].to_vec()))).unwrap();
         // The response retains its original session metadata even if disconnect is processed first.
         harness.manager.peers.remove(&PEER_A);
         harness.manager.transaction_fetcher.on_peer_disconnected(&PEER_A);
-        harness.poll_until_idle();
+        harness.poll_until_idle().await;
         assert_eq!(harness.pool().get_all(vec![hashes[0]]).len(), 1);
     }
 }
