@@ -516,8 +516,8 @@ impl Tx<RW> {
 
     /// Enables parallel writes mode only for the specified tables.
     ///
-    /// Creates subtransactions only for the listed tables, allowing parallel
-    /// writes to those tables while other tables continue using the main transaction.
+    /// Creates subtransactions only for the listed tables. Parent transaction operations,
+    /// including writes to other tables, must wait until all children commit.
     ///
     /// # Arguments
     /// * `tables` - Slice of table names to create subtransactions for.

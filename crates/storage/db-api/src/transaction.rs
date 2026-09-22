@@ -126,8 +126,8 @@ pub trait DbTxMut: Send {
 
     /// Enables parallel writes mode only for the specified tables.
     ///
-    /// This creates subtransactions only for the listed tables, allowing parallel
-    /// writes to those tables while other tables continue using the main transaction.
+    /// This creates subtransactions only for the listed tables. Parent transaction
+    /// operations, including writes to other tables, must wait until all children commit.
     fn enable_parallel_writes_for_tables(&self, tables: &[&str]) -> Result<(), DatabaseError> {
         let hints: Vec<_> = tables.iter().map(|&t| (t, 0usize)).collect();
         self.enable_parallel_writes_for_tables_with_hints(&hints)
