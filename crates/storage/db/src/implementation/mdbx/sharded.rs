@@ -414,6 +414,14 @@ mod tests {
             assert_eq!(sharded.current().unwrap(), reference.current().unwrap(), "prefix {prefix}");
             assert_eq!(sharded.next().unwrap(), reference.next().unwrap(), "prefix {prefix}");
         }
+        for key in [B256::ZERO, B256::repeat_byte(1)] {
+            sharded.seek_exact(key).unwrap();
+            reference.seek_exact(key).unwrap();
+            sharded.delete_current_duplicates().unwrap();
+            reference.delete_current_duplicates().unwrap();
+            assert_eq!(sharded.current().unwrap(), reference.current().unwrap());
+            assert_eq!(sharded.next().unwrap(), reference.next().unwrap());
+        }
     }
 
     #[test]
