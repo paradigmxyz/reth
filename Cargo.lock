@@ -9521,6 +9521,7 @@ dependencies = [
  "reth-engine-primitives",
  "reth-engine-tree",
  "reth-engine-util",
+ "reth-errors",
  "reth-ethereum-engine-primitives",
  "reth-evm",
  "reth-evm-ethereum",
@@ -9546,7 +9547,9 @@ dependencies = [
  "reth-rpc-engine-api",
  "reth-rpc-eth-types",
  "reth-rpc-layer",
+ "reth-snap-sync",
  "reth-stages",
+ "reth-stages-api",
  "reth-static-file",
  "reth-storage-overlay",
  "reth-tasks",
@@ -9558,6 +9561,7 @@ dependencies = [
  "tempfile",
  "tokio",
  "tokio-stream",
+ "tokio-util",
  "tracing",
 ]
 
