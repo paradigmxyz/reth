@@ -53,9 +53,8 @@ pub fn deprioritize_background_threads() {
 
 /// Thread name prefixes to deprioritize.
 ///
-/// `OpenTelemetry` span producers synchronously enqueue into a bounded channel. Its `try_send`
-/// can spin until the receiver finishes updating a slot, so making that receiver `SCHED_IDLE`
-/// can stall higher-priority application threads waiting for it.
+/// Do not re-add the OTLP span exporter (`OpenTelemetry.T`) to avoid CPU spinning.
+/// See <https://github.com/paradigmxyz/reth/pull/27370>.
 #[cfg(target_os = "linux")]
 const DEPRIORITIZE_THREAD_PREFIXES: &[&str] = &["tracing-appende", "reqwest-interna"];
 
