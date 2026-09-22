@@ -2,10 +2,7 @@
 
 use alloy_primitives::B256;
 use reth_trie_sparse::SparseStateTrie;
-use std::{
-    fmt,
-    sync::mpsc::{self, Receiver, Sender},
-};
+use std::{fmt, sync::mpsc::Receiver};
 use tracing::debug;
 
 /// Type alias for the sparse trie type used in preservation.
@@ -42,13 +39,9 @@ impl PreservedSparseTrie {
         Self { trie: PreservedSparseTrieInner::Ready(trie), block_hash, anchor_hash }
     }
 
-    /// Creates a pending preserved trie and a completer that will publish the trie later.
-    pub fn pending(block_hash: B256, anchor_hash: B256) -> (Self, PreservedSparseTrieCompleter) {
-        let (tx, rx) = mpsc::channel();
-        (
-            Self { trie: PreservedSparseTrieInner::Pending(rx), block_hash, anchor_hash },
-            PreservedSparseTrieCompleter { tx },
-        )
+    /// Associates a trie still being finalized with its completed block and pruning anchor.
+    pub const fn pending(trie: Receiver<SparseTrie>, block_hash: B256, anchor_hash: B256) -> Self {
+        Self { trie: PreservedSparseTrieInner::Pending(trie), block_hash, anchor_hash }
     }
 
     /// Returns the hash of the block whose post-state this trie represents.
@@ -129,32 +122,21 @@ enum PreservedSparseTrieInner {
     Pending(Receiver<SparseTrie>),
 }
 
-/// Completes a pending preserved sparse trie.
-#[derive(Debug)]
-pub struct PreservedSparseTrieCompleter {
-    tx: Sender<SparseTrie>,
-}
-
-impl PreservedSparseTrieCompleter {
-    /// Publishes the trie for a pending preserved sparse trie.
-    pub fn complete(self, trie: SparseTrie) -> Result<(), SparseTrie> {
-        self.tx.send(trie).map_err(|err| err.0)
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::mpsc;
 
     #[test]
     fn pending_trie_exposes_block_hash_before_completion() {
         let block_hash = B256::with_last_byte(1);
         let anchor_hash = B256::with_last_byte(2);
-        let (preserved, completer) = PreservedSparseTrie::pending(block_hash, anchor_hash);
+        let (tx, rx) = mpsc::channel();
+        let preserved = PreservedSparseTrie::pending(rx, block_hash, anchor_hash);
 
         assert_eq!(preserved.block_hash(), block_hash);
         assert_eq!(preserved.anchor_hash(), anchor_hash);
-        completer.complete(SparseTrie::default()).unwrap();
+        tx.send(SparseTrie::default()).unwrap();
         assert!(preserved.into_trie_for(block_hash).unwrap().is_some());
     }
 
@@ -163,9 +145,10 @@ mod tests {
         let block_hash = B256::with_last_byte(1);
         let other_block_hash = B256::with_last_byte(2);
         let anchor_hash = B256::with_last_byte(3);
-        let (preserved, completer) = PreservedSparseTrie::pending(block_hash, anchor_hash);
+        let (tx, rx) = mpsc::channel();
+        let preserved = PreservedSparseTrie::pending(rx, block_hash, anchor_hash);
 
         assert!(preserved.into_trie_for(other_block_hash).unwrap().is_none());
-        assert!(completer.complete(SparseTrie::default()).is_err());
+        assert!(tx.send(SparseTrie::default()).is_err());
     }
 }
