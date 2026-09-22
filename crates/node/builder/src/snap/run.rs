@@ -53,11 +53,7 @@ where
         // Returning without progress hands control back to the engine without a fatal error.
         let stopped = Ok(ControlFlow::NoProgress { block_number: None });
         loop {
-            let target = *targets.borrow_and_update();
-            // Snap needs canonical headers and their BAL commitments, but nothing below the pivot
-            // may execute, so only the header stage runs.
-            let headers = pipeline.run_until(StageId::Headers, Some(PipelineTarget::Sync(target)));
-            let Some(headers) = self.stop.run_until_cancelled(headers).await else {
+            let Some(headers) = self.sync_headers(pipeline, &mut targets).await else {
                 return stopped
             };
             headers?;
@@ -101,6 +97,40 @@ where
             }
         }
     }
+
+    // Runs the header stage to the latest target, or returns `None` once the run is stopped.
+    // Snap needs canonical headers and their BAL commitments, but nothing below the pivot may
+    // execute, so only the header stage runs.
+    async fn sync_headers(
+        &self,
+        pipeline: &mut Pipeline<N>,
+        targets: &mut watch::Receiver<B256>,
+    ) -> Option<Result<ControlFlow, PipelineError>> {
+        let tip = pipeline.tip_sender();
+        let target = *targets.borrow_and_update();
+        let mut headers =
+            pin!(pipeline.run_until(StageId::Headers, Some(PipelineTarget::Sync(target))));
+        let headers = async {
+            loop {
+                tokio::select! {
+                    biased;
+                    result = &mut headers => return result,
+                    // The header stage re-reads the tip when polled, so a new target replaces one
+                    // no peer serves anymore, such as a hash reorged out.
+                    changed = targets.changed() => match changed {
+                        Ok(()) => {
+                            if let Some(tip) = &tip {
+                                tip.send_replace(*targets.borrow_and_update());
+                            }
+                        }
+                        // The backfill is gone, and its stop token ends this run.
+                        Err(_) => return headers.await,
+                    },
+                }
+            }
+        };
+        self.stop.run_until_cancelled(headers).await
+    }
 }
 
 // Resolves once `interval` has passed and forkchoice has moved, or once the backfill is gone.
@@ -112,9 +142,16 @@ async fn refresh_due(targets: &mut watch::Receiver<B256>, interval: Duration) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::snap::tests::{headers_done, headers_reach, pipeline, NEXT_TARGET, TARGET};
+    use crate::snap::tests::{
+        headers_done, headers_reach, pipeline, pipeline_with, NEXT_TARGET, TARGET,
+    };
     use reth_network_p2p::NoopFullBlockClient;
+    use reth_provider::test_utils::MockNodeTypesWithDB;
+    use reth_stages::{
+        ExecInput, ExecOutput, Stage, StageCheckpoint, StageError, UnwindInput, UnwindOutput,
+    };
     use reth_stages_api::test_utils::TestStage;
+    use std::task::{Context, Poll};
 
     #[tokio::test]
     async fn a_new_target_refreshes_headers_then_resumes_until_stopped() {
@@ -122,15 +159,7 @@ mod tests {
             TestStage::new(StageId::Headers).add_exec(headers_done(0)).add_exec(headers_done(1)),
         );
         let (targets, receiver) = watch::channel(TARGET);
-        let client: NoopFullBlockClient = NoopFullBlockClient::default();
-        let stop = CancellationToken::new();
-        let run = SnapRun {
-            client,
-            factory: factory.clone(),
-            runtime: Runtime::test(),
-            header_refresh: Duration::ZERO,
-            stop: stop.clone(),
-        };
+        let (run, stop) = snap_run(&factory);
         let run = tokio::spawn(run.run(pipeline, receiver));
         headers_reach(&factory, 0).await;
 
@@ -143,5 +172,80 @@ mod tests {
         stop.cancel();
         let (_pipeline, result) = run.await.unwrap();
         assert!(matches!(result, Ok(ControlFlow::NoProgress { block_number: None })));
+    }
+
+    #[tokio::test]
+    async fn a_new_target_retargets_a_pending_header_download() {
+        let (tip, tip_rx) = watch::channel(B256::ZERO);
+        let mut pipeline_tip = tip.subscribe();
+        let (pipeline, factory) = pipeline_with(PendingUntilRetargeted(tip_rx), tip);
+        let (targets, receiver) = watch::channel(TARGET);
+        let (run, stop) = snap_run(&factory);
+        let run = tokio::spawn(run.run(pipeline, receiver));
+        // Headers are downloading towards the first target before forkchoice moves.
+        pipeline_tip.wait_for(|tip| *tip == TARGET).await.unwrap();
+
+        targets.send(NEXT_TARGET).unwrap();
+
+        tokio::time::timeout(Duration::from_secs(5), headers_reach(&factory, 1))
+            .await
+            .expect("the pending header download moves to the new target");
+        stop.cancel();
+        let (_pipeline, result) = run.await.unwrap();
+        assert!(matches!(result, Ok(ControlFlow::NoProgress { block_number: None })));
+    }
+
+    // A run over `factory` that refreshes headers as soon as forkchoice moves.
+    fn snap_run(
+        factory: &ProviderFactory<MockNodeTypesWithDB>,
+    ) -> (SnapRun<MockNodeTypesWithDB, NoopFullBlockClient>, CancellationToken) {
+        let stop = CancellationToken::new();
+        let run = SnapRun {
+            client: NoopFullBlockClient::default(),
+            factory: factory.clone(),
+            runtime: Runtime::test(),
+            header_refresh: Duration::ZERO,
+            stop: stop.clone(),
+        };
+        (run, stop)
+    }
+
+    // A header stage stuck until the tip moves to `NEXT_TARGET`, like a download retrying a hash
+    // no peer serves.
+    #[derive(Debug)]
+    struct PendingUntilRetargeted(watch::Receiver<B256>);
+
+    impl<Provider> Stage<Provider> for PendingUntilRetargeted {
+        fn id(&self) -> StageId {
+            StageId::Headers
+        }
+
+        fn poll_execute_ready(
+            &mut self,
+            cx: &mut Context<'_>,
+            _input: ExecInput,
+        ) -> Poll<Result<(), StageError>> {
+            if *self.0.borrow() == NEXT_TARGET {
+                return Poll::Ready(Ok(()))
+            }
+            cx.waker().wake_by_ref();
+            Poll::Pending
+        }
+
+        fn execute(
+            &mut self,
+            _provider: &Provider,
+            _input: ExecInput,
+        ) -> Result<ExecOutput, StageError> {
+            Ok(ExecOutput { checkpoint: StageCheckpoint::new(1), done: true })
+        }
+
+        fn unwind(
+            &mut self,
+            _provider: &Provider,
+            _input: UnwindInput,
+        ) -> Result<UnwindOutput, StageError> {
+            unreachable!("nothing unwinds in this test")
+        }
     }
 }

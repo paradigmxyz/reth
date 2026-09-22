@@ -162,7 +162,7 @@ mod tests {
         StorageSettings, StorageSettingsCache,
     };
     use reth_prune::PruneModes;
-    use reth_stages::{ControlFlow, ExecOutput, StageCheckpoint, StageError, StageId};
+    use reth_stages::{ControlFlow, ExecOutput, Stage, StageCheckpoint, StageError, StageId};
     use reth_stages_api::test_utils::TestStage;
     use reth_static_file::StaticFileProducer;
     use std::{task::Waker, time::Duration};
@@ -183,6 +183,18 @@ mod tests {
     pub(super) fn pipeline(
         headers: TestStage,
     ) -> (Pipeline<MockNodeTypesWithDB>, ProviderFactory<MockNodeTypesWithDB>) {
+        pipeline_with(headers, watch::channel(B256::ZERO).0)
+    }
+
+    // Like `pipeline`, with any header stage and a tip channel the test can observe.
+    pub(super) fn pipeline_with<S>(
+        headers: S,
+        tip: watch::Sender<B256>,
+    ) -> (Pipeline<MockNodeTypesWithDB>, ProviderFactory<MockNodeTypesWithDB>)
+    where
+        S: Stage<<ProviderFactory<MockNodeTypesWithDB> as DatabaseProviderFactory>::ProviderRW>
+            + 'static,
+    {
         let factory = create_test_provider_factory();
         let provider = factory.database_provider_rw().unwrap();
         provider.write_storage_settings(StorageSettings::v2()).unwrap();
@@ -190,7 +202,7 @@ mod tests {
         factory.set_storage_settings_cache(StorageSettings::v2());
         let pipeline = Pipeline::<MockNodeTypesWithDB>::builder()
             .add_stage(headers)
-            .with_tip_sender(watch::channel(B256::ZERO).0)
+            .with_tip_sender(tip)
             .build(
                 factory.clone(),
                 StaticFileProducer::new(factory.clone(), PruneModes::default()),
