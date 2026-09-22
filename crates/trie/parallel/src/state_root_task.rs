@@ -504,7 +504,7 @@ pub fn evm_state_to_hashed_post_state(update: EvmState) -> HashedPostState {
             // An address that never existed and still does not exist is not a deletion: revm
             // emits no transition for `LoadedNotExisting`. Skipping it matches the bundle
             // producer; every `None` here becomes a storage-trie cursor walk in `StateRoot`.
-            let deleted = (destroyed || account.is_empty()) && !account.is_loaded_as_not_existing();
+            let deleted = destroyed || (account.is_empty() && !account.is_loaded_as_not_existing());
             if deleted {
                 hashed_state.accounts.insert(hashed_address, None);
             } else if account.info != account.original_info() {
@@ -543,7 +543,7 @@ mod tests {
     #[test]
     fn created_selfdestruct_does_not_emit_storage() {
         let address = Address::repeat_byte(0x01);
-        let mut account = Account::default();
+        let mut account = Account::new_not_existing(TransactionId::ZERO);
         account.mark_touch();
         assert!(account.mark_created_locally());
         assert!(account.mark_selfdestructed_locally());
