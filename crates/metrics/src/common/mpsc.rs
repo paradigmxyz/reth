@@ -450,12 +450,6 @@ struct Budgeted<T> {
 ///
 /// Uses a shared atomic counter to track memory usage. Each message's size is added
 /// to the counter on send and subtracted when the message is dequeued by the receiver.
-///
-/// The current call sites (specifically [`crate::common::mpsc::MemoryBoundedSender`] used
-/// for the `NetworkManager → TransactionsManager` channel) have a single producer driven
-/// from a single `poll`, so the `fetch_add → check → fetch_sub-on-overflow` reservation
-/// pattern can never race with itself. The atomic is still used so the receiver can
-/// release budget from a different task.
 #[derive(Debug, Clone)]
 pub struct MemoryBoundedSender<T: InMemorySize> {
     /// The underlying unbounded metered sender
@@ -471,11 +465,14 @@ impl<T: InMemorySize> MemoryBoundedSender<T> {
     pub fn try_send(&self, msg: T) -> Result<(), TrySendError<T>> {
         let size = msg.size();
 
-        // Reserve budget: add first, check after
-        let prev = self.budget.used.fetch_add(size, Ordering::Relaxed);
-        if prev.saturating_add(size) > self.budget.max_bytes {
-            // Over budget, undo
-            self.budget.used.fetch_sub(size, Ordering::Relaxed);
+        if self
+            .budget
+            .used
+            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |used| {
+                used.checked_add(size).filter(|&next| next <= self.budget.max_bytes)
+            })
+            .is_err()
+        {
             return Err(TrySendError::Full(msg));
         }
 
@@ -547,4 +544,37 @@ pub fn memory_bounded_channel<T: InMemorySize>(
     let receiver = MemoryBoundedReceiver { inner: rx };
 
     (sender, receiver)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[derive(Debug)]
+    struct SizedMessage(usize);
+
+    impl InMemorySize for SizedMessage {
+        fn size(&self) -> usize {
+            self.0
+        }
+    }
+
+    #[tokio::test]
+    async fn memory_bounded_channel_enforces_and_releases_byte_budget() {
+        let (tx, mut rx) = memory_bounded_channel(8, "test_memory_bounded_channel");
+
+        tx.try_send(SizedMessage(6)).unwrap();
+        assert!(matches!(tx.try_send(SizedMessage(3)), Err(TrySendError::Full(_))));
+
+        assert_eq!(rx.recv().await.unwrap().0, 6);
+        tx.try_send(SizedMessage(8)).unwrap();
+    }
+
+    #[test]
+    fn memory_bounded_channel_rejects_budget_overflow() {
+        let (tx, _rx) = memory_bounded_channel(usize::MAX, "test_memory_bounded_channel");
+
+        tx.try_send(SizedMessage(1)).unwrap();
+        assert!(matches!(tx.try_send(SizedMessage(usize::MAX)), Err(TrySendError::Full(_))));
+    }
 }
