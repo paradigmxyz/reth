@@ -47,6 +47,13 @@ jobs:
         with:
           persist-credentials: false
 
+      - uses: tempoxyz/gh-actions/vendor/dtolnay/rust-toolchain@e8f9d5c23ab43d0645c6d50fb73e98b362cdec02
+        with:
+          toolchain: "1.95.0"
+
+      - name: Check Reth dependencies through Aegis
+        run: cargo fetch --locked --manifest-path Cargo.toml
+
       - name: Set up Depot CLI
         uses: depot/setup-action@91bc8495a33ebfc504ffc89e5674379ccf23c29c # v1.7.2
 

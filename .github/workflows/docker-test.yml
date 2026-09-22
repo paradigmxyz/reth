@@ -49,6 +49,15 @@ jobs:
             echo "is_fork=false" >> "$GITHUB_OUTPUT"
           fi
 
+      - uses: tempoxyz/gh-actions/vendor/dtolnay/rust-toolchain@e8f9d5c23ab43d0645c6d50fb73e98b362cdec02
+        if: steps.fork.outputs.is_fork == 'false'
+        with:
+          toolchain: "1.95.0"
+
+      - name: Check Reth dependencies through Aegis
+        if: steps.fork.outputs.is_fork == 'false'
+        run: cargo fetch --locked --manifest-path Cargo.toml
+
       # Depot build (upstream only)
       - name: Set up Depot CLI
         if: steps.fork.outputs.is_fork == 'false'
