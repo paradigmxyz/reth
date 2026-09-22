@@ -14,11 +14,12 @@ pub fn progressive_withdrawals_root(withdrawals: &[Withdrawal]) -> B256 {
 }
 
 fn withdrawal_root(withdrawal: &Withdrawal) -> B256 {
+    let Withdrawal { index, validator_index, address, amount } = withdrawal;
     let fields = [
-        withdrawal.index.tree_hash_root(),
-        withdrawal.validator_index.tree_hash_root(),
-        withdrawal.address.tree_hash_root(),
-        withdrawal.amount.tree_hash_root(),
+        index.tree_hash_root(),
+        validator_index.tree_hash_root(),
+        address.tree_hash_root(),
+        amount.tree_hash_root(),
     ];
     hash_pair(progressive_root(&fields), WITHDRAWAL_ACTIVE_FIELDS)
 }
@@ -163,11 +164,15 @@ mod tests {
 
     #[test]
     fn withdrawal_fields_use_ssz_encoding() {
+        let address_bytes = [
+            0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e,
+            0x0f, 0x10, 0x11, 0x12, 0x13, 0x14,
+        ];
         let withdrawal = Withdrawal {
             index: 0x0102_0304_0506_0708,
             validator_index: 0x1122_3344_5566_7788,
+            address: Address::from(address_bytes),
             amount: u64::MAX,
-            ..withdrawal_a()
         };
 
         let mut index = [0; 32];
@@ -183,12 +188,12 @@ mod tests {
         assert_eq!(withdrawal.amount.tree_hash_root(), B256::from(amount));
 
         let mut address = [0; 32];
-        address[..20].fill(0x11);
+        address[..20].copy_from_slice(&address_bytes);
         assert_eq!(withdrawal.address.tree_hash_root(), B256::from(address));
 
         assert_eq!(
             withdrawal_root(&withdrawal),
-            b256!("0x9e37c11c2397a10b17a16ab7ef8b02dc7c8d4645d704f4b326b9327e42cc7727")
+            b256!("0xa4f3a4080091de758c1df824a5aeaf30f4a598607b2828a33ad8f9f99edb1354")
         );
     }
 

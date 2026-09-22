@@ -40,28 +40,30 @@ fn build_receipts_tree(receipts: &ReceiptsSsz) -> Result<RetainedNode, TreeConst
 }
 
 fn build_receipt_tree(receipt: &ReceiptSsz) -> Result<RetainedNode, TreeConstructionError> {
-    let log_nodes = receipt.logs.iter().map(build_log_tree).collect::<Result<Vec<_>, _>>()?;
+    let ReceiptSsz { tx_type, success, gas_used, contract_address, logs } = receipt;
+    let log_nodes = logs.iter().map(build_log_tree).collect::<Result<Vec<_>, _>>()?;
 
-    let logs = mix_in_length(merkleize_progressive(log_nodes)?, receipt.logs.len());
+    let logs_tree = mix_in_length(merkleize_progressive(log_nodes)?, logs.len());
 
     merkleize_fixed(
         vec![
-            RetainedNode::leaf(receipt.tx_type.tree_hash_root()),
-            RetainedNode::leaf(receipt.success.tree_hash_root()),
-            RetainedNode::leaf(receipt.gas_used.tree_hash_root()),
-            optional_address_tree(receipt.contract_address),
-            logs,
+            RetainedNode::leaf(tx_type.tree_hash_root()),
+            RetainedNode::leaf(success.tree_hash_root()),
+            RetainedNode::leaf(gas_used.tree_hash_root()),
+            optional_address_tree(*contract_address),
+            logs_tree,
         ],
         8,
     )
 }
 
 fn build_log_tree(log: &LogSsz) -> Result<RetainedNode, TreeConstructionError> {
+    let LogSsz { address, topics, data } = log;
     merkleize_fixed(
         vec![
-            RetainedNode::leaf(log.address.tree_hash_root()),
-            topics_tree(&log.topics)?,
-            progressive_byte_list(log.data.as_ref())?,
+            RetainedNode::leaf(address.tree_hash_root()),
+            topics_tree(topics)?,
+            progressive_byte_list(data.as_ref())?,
         ],
         4,
     )
