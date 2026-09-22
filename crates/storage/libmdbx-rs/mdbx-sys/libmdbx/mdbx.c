@@ -16283,10 +16283,12 @@ static void subtx_free_resources(MDBX_txn *subtxn) {
   subtxn->signature = 0;
 }
 
-static void subtx_unlink_from_parent(MDBX_txn *subtxn) {
+/* Detach the last child's shared mutex, but let the caller release its lock
+ * before destroying it. Unlocking an already freed mutex corrupts the heap. */
+static osal_fastmutex_t *subtx_unlink_from_parent(MDBX_txn *subtxn) {
   MDBX_txn *parent = subtxn->tw.subparent;
   if (!parent)
-    return;
+    return nullptr;
 
   /* O(1) doubly-linked list unlink */
   if (subtxn->tw.subtxn_prev)
@@ -16300,12 +16302,13 @@ static void subtx_unlink_from_parent(MDBX_txn *subtxn) {
   subtxn->tw.subtxn_prev = nullptr;
   subtxn->tw.subparent = nullptr;
 
-  /* If this was the last subtxn, cleanup the allocation mutex */
+  /* If this was the last subtxn, transfer cleanup responsibility to the caller. */
   if (!parent->tw.subtxn_list && parent->tw.subtxn_alloc_mutex) {
-    osal_fastmutex_destroy(parent->tw.subtxn_alloc_mutex);
-    osal_free(parent->tw.subtxn_alloc_mutex);
+    osal_fastmutex_t *mutex = parent->tw.subtxn_alloc_mutex;
     parent->tw.subtxn_alloc_mutex = nullptr;
+    return mutex;
   }
+  return nullptr;
 }
 
 /* Commit a parallel subtxn, merging its changes into the parent txn.
@@ -16533,10 +16536,14 @@ LIBMDBX_API int mdbx_subtx_commit(MDBX_txn *subtxn) {
 
   /* Unlink from parent's list while still holding mutex to prevent races
    * with concurrent subtxn commits checking/modifying the list. */
-  subtx_unlink_from_parent(subtxn);
+  osal_fastmutex_t *detached_mutex = subtx_unlink_from_parent(subtxn);
 
   if (subtxn->tw.subtxn_alloc_mutex)
     osal_fastmutex_release(subtxn->tw.subtxn_alloc_mutex);
+  if (detached_mutex) {
+    osal_fastmutex_destroy(detached_mutex);
+    osal_free(detached_mutex);
+  }
 
   /* ===== POST-MERGE DIAGNOSTIC (outside mutex - O(n²) checks on snapshot) ===== */
 #if MDBX_DEBUG
@@ -16659,7 +16666,11 @@ LIBMDBX_API int mdbx_subtx_abort(MDBX_txn *subtxn) {
     }
   }
 
-  subtx_unlink_from_parent(subtxn);
+  osal_fastmutex_t *detached_mutex = subtx_unlink_from_parent(subtxn);
+  if (detached_mutex) {
+    osal_fastmutex_destroy(detached_mutex);
+    osal_free(detached_mutex);
+  }
   subtx_free_resources(subtxn);
   osal_free(subtxn);
 
