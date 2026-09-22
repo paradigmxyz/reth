@@ -7,11 +7,9 @@ const SENDER_RECOVERY_CACHE_CAPACITY: usize = 1 << 17;
 
 /// Shared cache of recovered transaction senders.
 ///
-/// When enabled with `--engine.sender-recovery-cache`, this bounded, lock-free cache shares
-/// recovered senders across P2P transaction ingress, RPC raw transaction submission (including
-/// `eth_sendRawTransaction` and `eth_sendRawTransactionSync`), raw transaction tracing, bundle
-/// simulation, and payload execution. Repeated transactions reuse the recovered sender while
-/// still undergoing the validation required by each caller.
+/// This bounded, lock-free cache shares recovered senders across transaction ingress and payload
+/// execution. Repeated transactions reuse the recovered sender while still undergoing the
+/// validation required by each caller.
 ///
 /// The default cache retains up to 131,072 transaction hash-to-sender entries. Cloning the cache
 /// shares these entries rather than allocating another cache.
