@@ -158,6 +158,26 @@ impl<N: ProviderNodeTypes> BlockchainProvider<N> {
         Ok(Box::new(state_provider_factory.database_provider_ro()?))
     }
 
+    /// Checks retention before lazy state reads can turn provider errors into execution errors.
+    fn ensure_state_history_available(
+        provider: &impl PruneCheckpointReader,
+        block_number: BlockNumber,
+    ) -> ProviderResult<()> {
+        for segment in [PruneSegment::AccountHistory, PruneSegment::StorageHistory] {
+            if let Some(pruned) = provider
+                .get_prune_checkpoint(segment)?
+                .and_then(|checkpoint| checkpoint.block_number)
+            {
+                // Post-state at N requires changesets starting at N + 1, so the checkpoint's
+                // own post-state is still available.
+                if block_number < pruned {
+                    return Err(ProviderError::StateAtBlockPruned(block_number))
+                }
+            }
+        }
+        Ok(())
+    }
+
     /// Returns a historical state provider using an existing database snapshot.
     pub fn state_provider_from_database(
         &self,
@@ -776,13 +796,17 @@ impl<N: ProviderNodeTypes> StateProviderFactory for BlockchainProvider<N> {
         let hash = provider
             .block_hash(block_number)?
             .ok_or_else(|| ProviderError::HeaderNotFound(block_number.into()))?;
+        Self::ensure_state_history_available(&provider, block_number)?;
         Ok(self.state_provider_from_database(provider.into_database_provider(), hash))
     }
 
     fn history_by_block_hash(&self, block_hash: BlockHash) -> ProviderResult<StateProviderBox> {
         trace!(target: "providers::blockchain", ?block_hash, "Getting history by block hash");
         let provider = self.consistent_provider()?;
-        provider.block_number(block_hash)?.ok_or(ProviderError::BlockHashNotFound(block_hash))?;
+        let block_number = provider
+            .block_number(block_hash)?
+            .ok_or(ProviderError::BlockHashNotFound(block_hash))?;
+        Self::ensure_state_history_available(&provider, block_number)?;
         Ok(self.state_provider_from_database(provider.into_database_provider(), block_hash))
     }
 
@@ -790,15 +814,14 @@ impl<N: ProviderNodeTypes> StateProviderFactory for BlockchainProvider<N> {
         trace!(target: "providers::blockchain", ?hash, "Getting state by block hash");
         if let Some(state) = self.canonical_in_memory_state.state_by_hash(hash) {
             self.state_provider_at_block_hash(state.hash())
-        } else if let Ok(state) = self.history_by_block_hash(hash) {
-            // This could be tracked by a historical block
-            Ok(state)
-        } else if let Ok(Some(pending)) = self.pending_state_by_hash(hash) {
-            // .. or this could be the pending state
-            Ok(pending)
         } else {
-            // if we couldn't find it anywhere, then we should return an error
-            Err(ProviderError::StateForHashNotFound(hash))
+            match self.history_by_block_hash(hash) {
+                Ok(state) => Ok(state),
+                Err(ProviderError::BlockHashNotFound(_)) => self
+                    .pending_state_by_hash(hash)?
+                    .ok_or(ProviderError::StateForHashNotFound(hash)),
+                Err(err) => Err(err),
+            }
         }
     }
 
@@ -2180,6 +2203,60 @@ mod tests {
                 .collect::<Vec<_>>()
         );
 
+        Ok(())
+    }
+
+    #[test]
+    fn historical_state_rejects_pruned_history_before_reads() -> eyre::Result<()> {
+        use reth_prune_types::{PruneCheckpoint, PruneMode, PruneSegment};
+        use reth_storage_api::PruneCheckpointWriter;
+
+        let mut rng = generators::rng();
+        for segment in [PruneSegment::AccountHistory, PruneSegment::StorageHistory] {
+            let (provider, blocks, _, _) = provider_with_random_blocks(
+                &mut rng,
+                TEST_BLOCKS_COUNT,
+                0,
+                BlockRangeParams::default(),
+            )?;
+            let pruned = blocks[2].number;
+            let writer = provider.database.provider_rw()?;
+            writer.save_prune_checkpoint(
+                segment,
+                PruneCheckpoint {
+                    block_number: Some(pruned),
+                    tx_number: None,
+                    prune_mode: PruneMode::Before(pruned + 1),
+                },
+            )?;
+            writer.commit()?;
+
+            for block in &blocks[..2] {
+                for result in [
+                    provider.history_by_block_number(block.number),
+                    provider.history_by_block_hash(block.hash()),
+                    provider.state_by_block_hash(block.hash()),
+                ] {
+                    assert!(
+                        matches!(result, Err(ProviderError::StateAtBlockPruned(number)) if number == block.number)
+                    );
+                }
+            }
+            // Reconstructing post-state at the checkpoint only needs later changesets.
+            for block in &blocks[2..4] {
+                assert!(provider.history_by_block_number(block.number).is_ok());
+                assert!(provider.history_by_block_hash(block.hash()).is_ok());
+                assert!(provider.state_by_block_hash(block.hash()).is_ok());
+            }
+            assert!(matches!(
+                provider.history_by_block_hash(B256::ZERO),
+                Err(ProviderError::BlockHashNotFound(_))
+            ));
+            assert!(matches!(
+                provider.state_by_block_hash(B256::ZERO),
+                Err(ProviderError::StateForHashNotFound(_))
+            ));
+        }
         Ok(())
     }
 
