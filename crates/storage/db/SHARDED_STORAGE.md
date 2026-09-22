@@ -31,15 +31,21 @@ the same nibble partition. Empty trie paths are not persisted, as before.
 
 `tempo bench-shard-storage --database DATADIR/db` invokes the conversion helper.
 The accompanying `scripts/bench-prepare-storage-layout.sh` and `bench-e2e.nu` hook
-restore the same unsharded virgin snapshot before each phase and convert only
-the candidate's disposable copy, outside measurement. Baseline snapshot generation
-uses the baseline binary. Never promote a migrated snapshot for an unsharded run.
+restore the same baseline-generated state before each phase. For an unsharded
+baseline versus a sharded candidate, `scripts/bench-cache-storage-layout.sh`
+converts an independent copy once, outside measurement. Both layouts are kept in
+the virgin snapshot under separate paths: the ordinary `db/` remains unsharded.
+After each restore, only the candidate activates the pristine converted copy.
+Ownership, job-key, schema, and available-space checks fail closed; an interrupted
+conversion never replaces the source database. Other comparisons retain the
+per-phase conversion path. Baseline snapshot generation uses the baseline binary.
 
 The harness syncs and drops page caches after preparation on both sides so the
 conversion does not grant a warm-cache advantage. Compare paired runs and an
 identical-baseline control, keep warmup/workload/OTEL settings equal, and report
 persistence latency and backpressure alongside TPS. Migration time is not included
-in node throughput. Large migrations may need substantial extra disk space.
+in node throughput. Caching requires space for both layouts and migration scratch
+pages; it trades extra disk usage for avoiding repeated large conversions.
 
 This remains an experimental MDBX fork, not a production-compatible upgrade.
 Cursor/reopen/abort/migration recovery tests and successful benchmarks do not prove
