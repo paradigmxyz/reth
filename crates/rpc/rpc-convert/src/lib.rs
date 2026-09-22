@@ -17,7 +17,8 @@ pub mod transaction;
 pub use fees::{CallFees, CallFeesError};
 pub use rpc::*;
 pub use transaction::{
-    EthTxEnvError, RpcConvert, RpcConverter, TransactionConversionError, TryIntoTxEnv,
+    normalize_transaction_request, EthTxEnvError, RpcConvert, RpcConverter,
+    TransactionConversionError, TryIntoTxEnv,
 };
 
 // Re-export traits from reth-rpc-traits

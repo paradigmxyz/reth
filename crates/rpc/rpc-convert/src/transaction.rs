@@ -399,21 +399,66 @@ where
     }
 }
 
-fn transaction_request_to_evm2(
-    request: TransactionRequest,
+/// Fills missing fields for simulation using the selected EVM environment.
+///
+/// Explicit fee caps and flat `gasPrice` values are preserved. The returned fees describe
+/// execution pricing, which may be lower than the request's maximum fee cap. No state lookup,
+/// gas estimation, or fee suggestion is performed; callers should resolve the account nonce
+/// before calling this helper when it is needed.
+///
+/// `to` is left unchanged so callers with their own call representation can use this helper.
+/// Recover signatures from the original request before filling defaults.
+pub fn normalize_transaction_request(
+    request: &mut TransactionRequest,
     evm_env: &impl EvmEnv,
-) -> Result<RecoveredTxEnvelope, EthTxEnvError> {
+) -> Result<CallFees, EthTxEnvError> {
     if request.blob_versioned_hashes.as_ref().is_some_and(Vec::is_empty) {
         return Err(crate::CallFeesError::BlobTransactionMissingBlobHashes.into())
     }
+    let input = request.input.clone().try_into_unique_input()?;
+    let fees = CallFees::ensure_fees(
+        request.gas_price.map(U256::from),
+        request.max_fee_per_gas.map(U256::from),
+        request.max_priority_fee_per_gas.map(U256::from),
+        U256::from(evm_env.block_base_fee()),
+        request.blob_versioned_hashes.as_deref(),
+        request.max_fee_per_blob_gas.map(U256::from),
+        Some(U256::from(evm_env.block_blob_base_fee())),
+    )?;
 
+    if request.gas_price.is_none() {
+        if matches!(request.minimal_tx_type(), TxType::Legacy | TxType::Eip2930) {
+            request.gas_price = Some(fees.gas_price.saturating_to());
+        } else {
+            request.max_fee_per_gas.get_or_insert(fees.gas_price.saturating_to());
+            request.max_priority_fee_per_gas.get_or_insert(0);
+        }
+    }
+    if let Some(blob_fee) = fees.max_fee_per_blob_gas {
+        request.max_fee_per_blob_gas.get_or_insert(blob_fee.saturating_to());
+    }
+    request.from.get_or_insert(Address::ZERO);
+    request.nonce.get_or_insert(0);
+    request.gas.get_or_insert_with(|| evm_env.block_env().gas_limit.saturating_to());
+    request.chain_id.get_or_insert_with(|| evm_env.chain_id());
+    request.value.get_or_insert(U256::ZERO);
+    request.input = alloy_rpc_types_eth::TransactionInput::new(input.unwrap_or_default());
+    Ok(fees)
+}
+
+fn transaction_request_to_evm2(
+    mut request: TransactionRequest,
+    evm_env: &impl EvmEnv,
+) -> Result<RecoveredTxEnvelope, EthTxEnvError> {
     let tx_type = request.minimal_tx_type();
+    let CallFees { max_priority_fee_per_gas, gas_price, max_fee_per_blob_gas } =
+        normalize_transaction_request(&mut request, evm_env)?;
     let TransactionRequest {
         from,
         to,
-        gas_price,
-        max_fee_per_gas,
-        max_priority_fee_per_gas,
+        gas_price: _,
+        max_fee_per_gas: _,
+        max_priority_fee_per_gas: _,
         gas,
         value,
         input,
@@ -421,28 +466,17 @@ fn transaction_request_to_evm2(
         access_list,
         chain_id,
         blob_versioned_hashes,
-        max_fee_per_blob_gas,
+        max_fee_per_blob_gas: _,
         authorization_list,
         transaction_type: _,
         sidecar: _,
     } = request;
     let input = input.try_into_unique_input()?.unwrap_or_default();
-    let CallFees { max_priority_fee_per_gas, gas_price, max_fee_per_blob_gas } =
-        CallFees::ensure_fees(
-            gas_price.map(U256::from),
-            max_fee_per_gas.map(U256::from),
-            max_priority_fee_per_gas.map(U256::from),
-            U256::from(evm_env.block_base_fee()),
-            blob_versioned_hashes.as_deref(),
-            max_fee_per_blob_gas.map(U256::from),
-            Some(U256::from(evm_env.block_blob_base_fee())),
-        )?;
-
     let caller = from.unwrap_or_default();
     let to = to.unwrap_or(TxKind::Create);
-    let gas_limit = gas.unwrap_or_else(|| evm_env.block_env().gas_limit.saturating_to());
+    let gas_limit = gas.expect("gas limit normalized");
     let nonce = nonce.unwrap_or_default();
-    let chain_id = chain_id.unwrap_or_else(|| evm_env.chain_id());
+    let chain_id = chain_id.expect("chain ID normalized");
     let value = value.unwrap_or_default();
     let access_list = access_list.unwrap_or_default();
     let gas_price = gas_price.saturating_to();
