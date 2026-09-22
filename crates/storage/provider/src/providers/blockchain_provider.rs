@@ -160,20 +160,25 @@ impl<N: ProviderNodeTypes> BlockchainProvider<N> {
 
     /// Checks retention before lazy state reads can turn provider errors into execution errors.
     fn ensure_state_history_available(
-        provider: &impl PruneCheckpointReader,
+        provider: &(impl PruneCheckpointReader + BlockNumReader),
         block_number: BlockNumber,
     ) -> ProviderResult<()> {
+        let mut earliest_available = 0;
         for segment in [PruneSegment::AccountHistory, PruneSegment::StorageHistory] {
             if let Some(pruned) = provider
                 .get_prune_checkpoint(segment)?
                 .and_then(|checkpoint| checkpoint.block_number)
             {
-                // Post-state at N requires changesets starting at N + 1, so the checkpoint's
-                // own post-state is still available.
-                if block_number < pruned {
-                    return Err(ProviderError::StateAtBlockPruned(block_number))
-                }
+                earliest_available = earliest_available.max(pruned);
             }
+        }
+        // Post-state at N requires changesets starting at N + 1, so the checkpoint's
+        // own post-state is still available.
+        if block_number < earliest_available {
+            return Err(ProviderError::InsufficientChangesets {
+                requested: block_number,
+                available: earliest_available..=provider.best_block_number()?,
+            })
         }
         Ok(())
     }
@@ -2212,7 +2217,7 @@ mod tests {
         use reth_storage_api::PruneCheckpointWriter;
 
         let mut rng = generators::rng();
-        for segment in [PruneSegment::AccountHistory, PruneSegment::StorageHistory] {
+        for (account_pruned, storage_pruned) in [(2, 0), (0, 2), (1, 2), (2, 1)] {
             let (provider, blocks, _, _) = provider_with_random_blocks(
                 &mut rng,
                 TEST_BLOCKS_COUNT,
@@ -2221,14 +2226,20 @@ mod tests {
             )?;
             let pruned = blocks[2].number;
             let writer = provider.database.provider_rw()?;
-            writer.save_prune_checkpoint(
-                segment,
-                PruneCheckpoint {
-                    block_number: Some(pruned),
-                    tx_number: None,
-                    prune_mode: PruneMode::Before(pruned + 1),
-                },
-            )?;
+            for (segment, index) in [
+                (PruneSegment::AccountHistory, account_pruned),
+                (PruneSegment::StorageHistory, storage_pruned),
+            ] {
+                let checkpoint = blocks[index].number;
+                writer.save_prune_checkpoint(
+                    segment,
+                    PruneCheckpoint {
+                        block_number: Some(checkpoint),
+                        tx_number: None,
+                        prune_mode: PruneMode::Before(checkpoint + 1),
+                    },
+                )?;
+            }
             writer.commit()?;
 
             for block in &blocks[..2] {
@@ -2238,7 +2249,8 @@ mod tests {
                     provider.state_by_block_hash(block.hash()),
                 ] {
                     assert!(
-                        matches!(result, Err(ProviderError::StateAtBlockPruned(number)) if number == block.number)
+                        matches!(result, Err(ProviderError::InsufficientChangesets { requested, available })
+                            if requested == block.number && available == (pruned..=blocks.last().unwrap().number))
                     );
                 }
             }

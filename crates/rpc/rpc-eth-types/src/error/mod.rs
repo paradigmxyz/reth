@@ -92,9 +92,6 @@ pub enum EthApiError {
         /// The earliest block number that is still available
         earliest_available: u64,
     },
-    /// State is unavailable because the node pruned its account or storage history.
-    #[error("state at block #{0} is pruned")]
-    StateAtBlockPruned(u64),
     /// Receipts not found for block hash/number/tag
     #[error("receipts not found")]
     ReceiptsNotFound(BlockId),
@@ -362,7 +359,7 @@ impl From<EthApiError> for jsonrpsee_types::error::ErrorObject<'static> {
                 internal_rpc_err(err.to_string())
             }
             err @ EthApiError::TransactionInputError(_) => invalid_params_rpc_err(err.to_string()),
-            EthApiError::PrunedHistoryUnavailable { .. } | EthApiError::StateAtBlockPruned(_) => {
+            EthApiError::PrunedHistoryUnavailable { .. } => {
                 rpc_error_with_code(4444, error.to_string())
             }
             EthApiError::Other(err) => err.to_rpc_error(),
@@ -548,7 +545,6 @@ impl From<reth_errors::ProviderError> for EthApiError {
             ProviderError::BlockExpired { requested, earliest_available } => {
                 Self::PrunedHistoryUnavailable { requested, earliest_available }
             }
-            ProviderError::StateAtBlockPruned(block) => Self::StateAtBlockPruned(block),
             ProviderError::InsufficientChangesets { requested, available }
                 if requested < *available.start() =>
             {
@@ -1267,10 +1263,6 @@ mod tests {
     #[test]
     fn pruned_state_errors_use_history_unavailable_code() {
         use reth_errors::ProviderError;
-
-        let err = EthApiError::from(ProviderError::StateAtBlockPruned(2)).into_rpc_err();
-        assert_eq!(err.code(), 4444);
-        assert_eq!(err.message(), "state at block #2 is pruned");
 
         let err = EthApiError::from(ProviderError::InsufficientChangesets {
             requested: 1,
