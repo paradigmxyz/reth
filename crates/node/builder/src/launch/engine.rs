@@ -17,7 +17,7 @@ use reth_db::{database_metrics::DatabaseMetrics, Database};
 use reth_engine_tree::{
     chain::{ChainEvent, FromOrchestrator},
     engine::{EngineApiKind, EngineApiRequest, EngineRequestHandler},
-    launch::{build_engine_orchestrator_with_backfill, EngineOrchestratorConfig},
+    launch::EngineOrchestratorBuilder,
     tree::TreeConfig,
 };
 use reth_engine_util::EngineMessageStreamExt;
@@ -245,32 +245,30 @@ impl EngineNodeLauncher {
             EngineApiKind::Ethereum
         };
 
-        let backfill_sync = NodeBackfillSync::new(
-            node_config.network.snap_v2,
+        let snap_v2 = node_config.network.snap_v2;
+        let (backfill_client, backfill_factory) =
+            (network_client.clone(), ctx.provider_factory().clone());
+        let mut orchestrator = EngineOrchestratorBuilder {
+            engine_kind,
+            consensus,
+            client: network_client,
+            incoming_requests: Box::pin(consensus_engine_stream),
             pipeline,
-            network_client.clone(),
-            ctx.provider_factory().clone(),
-            ctx.task_executor().clone(),
-        );
-        let mut orchestrator = build_engine_orchestrator_with_backfill(
-            EngineOrchestratorConfig {
-                engine_kind,
-                consensus: consensus.clone(),
-                client: network_client.clone(),
-                incoming_requests: Box::pin(consensus_engine_stream),
-                provider: ctx.provider_factory().clone(),
-                blockchain_db: ctx.blockchain_db().clone(),
-                pruner,
-                payload_builder: ctx.components().payload_builder_handle().clone(),
-                payload_validator: engine_validator,
-                overlay_manager,
-                tree_config: engine_tree_config,
-                sync_metrics_tx: ctx.sync_metrics_tx(),
-                evm_config: ctx.components().evm_config().clone(),
-                runtime: ctx.task_executor().clone(),
-            },
-            backfill_sync,
-        );
+            pipeline_task_spawner: ctx.task_executor().clone(),
+            provider: ctx.provider_factory().clone(),
+            blockchain_db: ctx.blockchain_db().clone(),
+            pruner,
+            payload_builder: ctx.components().payload_builder_handle().clone(),
+            payload_validator: engine_validator,
+            overlay_manager,
+            tree_config: engine_tree_config,
+            sync_metrics_tx: ctx.sync_metrics_tx(),
+            evm_config: ctx.components().evm_config().clone(),
+            runtime: ctx.task_executor().clone(),
+        }
+        .build_with_backfill(|pipeline, runtime| {
+            NodeBackfillSync::new(snap_v2, pipeline, backfill_client, backfill_factory, runtime)
+        });
 
         info!(target: "reth::cli", "Consensus engine initialized");
 

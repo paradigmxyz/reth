@@ -1,14 +1,19 @@
-//! Publishes snap-downloaded state as the staged pipeline's starting point.
+//! Activates snap-downloaded state as the staged pipeline's starting point.
 //! History below the pivot was never downloaded, so it is marked pruned and anchors the static
-//! files; the merkle rebuild and `Finish` are left to run once the state is checked.
+//! files; the merkle stage then rebuilds the trie before the state is accepted.
 
+use alloy_eips::BlockNumHash;
 use reth_db_api::{tables, transaction::DbTxMut};
+use reth_errors::RethError;
 use reth_provider::{
-    DBProvider, ProviderResult, PruneCheckpointWriter, StageCheckpointWriter,
+    providers::ProviderNodeTypes, DBProvider, DatabaseProviderFactory, ProviderFactory,
+    ProviderResult, PruneCheckpointWriter, StageCheckpointReader, StageCheckpointWriter,
     StaticFileProviderFactory, StaticFileSegment, StaticFileWriter,
 };
 use reth_prune::{PruneCheckpoint, PruneMode, PruneSegment};
-use reth_stages_api::{StageCheckpoint, StageId};
+use reth_snap_sync::{SnapStateVerifier, SnapWrite};
+use reth_stages::stages::MerkleStage;
+use reth_stages_api::{ExecInput, PipelineError, Stage, StageCheckpoint, StageId};
 use tracing::info;
 
 // Stages the downloaded state satisfies at the pivot. Headers were downloaded for real, the merkle
@@ -36,6 +41,27 @@ const PRUNED_SEGMENTS: [PruneSegment; 6] = [
     PruneSegment::AccountHistory,
     PruneSegment::StorageHistory,
 ];
+
+/// Publishes the state downloaded under `write` at `pivot`, rebuilds its trie and accepts it, so
+/// the pipeline continues above the pivot.
+///
+/// Every step commits on its own and repeats safely, so an interrupted activation runs again.
+pub(super) fn activate<N: ProviderNodeTypes>(
+    factory: &ProviderFactory<N>,
+    write: SnapWrite,
+    pivot: BlockNumHash,
+) -> Result<(), PipelineError> {
+    let provider = factory.database_provider_rw()?;
+    publish_snap_state(&provider, pivot.number)?;
+    provider.commit()?;
+    rebuild_trie(factory, pivot)?;
+    let provider = factory.database_provider_rw()?;
+    provider
+        .verify_state_root(write)
+        .map_err(|error| PipelineError::Internal(RethError::other(error)))?;
+    provider.commit()?;
+    Ok(())
+}
 
 /// Moves every stage the downloaded state covers to `pivot`, records the history below it as
 /// pruned and anchors the non-header static files there, so the pipeline continues at `pivot + 1`.
@@ -75,6 +101,26 @@ pub(crate) fn publish_snap_state(
 
     info!(target: "sync::snap", pivot, "Snap state published; history below it is unavailable");
     Ok(())
+}
+
+// Rebuilds the trie from the downloaded state up to `pivot`, committing the stage's progress in
+// chunks so a restart resumes it. The stage checks the root against the pivot's header.
+fn rebuild_trie<N: ProviderNodeTypes>(
+    factory: &ProviderFactory<N>,
+    pivot: BlockNumHash,
+) -> Result<(), PipelineError> {
+    let mut stage = MerkleStage::default_execution();
+    loop {
+        let provider = factory.database_provider_rw()?;
+        let checkpoint = provider.get_stage_checkpoint(StageId::MerkleExecute)?;
+        let output =
+            stage.execute(&provider, ExecInput { target: Some(pivot.number), checkpoint })?;
+        provider.save_stage_checkpoint(StageId::MerkleExecute, output.checkpoint)?;
+        provider.commit()?;
+        if output.done {
+            return Ok(())
+        }
+    }
 }
 
 #[cfg(test)]

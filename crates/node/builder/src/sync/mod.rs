@@ -1,11 +1,6 @@
 //! Backfill implementations the launcher can hand to the engine orchestrator.
 
-mod context;
-mod handoff;
-mod snap;
-
-pub use snap::SnapBackfillSync;
-
+use crate::snap::SnapBackfillSync;
 use reth_engine_tree::backfill::{BackfillAction, BackfillEvent, BackfillSync, PipelineSync};
 use reth_network_p2p::{headers::client::HeadersClient, snap::client::SnapClient};
 use reth_provider::{providers::ProviderNodeTypes, ProviderFactory};

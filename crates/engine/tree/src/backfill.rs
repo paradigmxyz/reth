@@ -66,7 +66,8 @@ pub trait BackfillSync: Send {
 pub enum BackfillAction {
     /// Start backfilling with the given target.
     Start(PipelineTarget),
-    /// Updates the target of an active bootstrap without starting another backfill run.
+    /// Moves the target of a running backfill, as forkchoice advances, without starting another
+    /// run.
     UpdateTarget(PipelineTarget),
 }
 
@@ -322,5 +323,15 @@ mod tests {
         assert_matches!(next_ready, BackfillEvent::Finished(result) => {
             assert_matches!(result, Ok(control_flow) => assert_eq!(control_flow, ControlFlow::Continue { block_number: PIPELINE_DONE_AFTER }));
         });
+    }
+
+    #[tokio::test]
+    async fn target_updates_do_not_start_the_pipeline() {
+        let TestHarness { mut pipeline_sync, tip } = TestHarness::new(10, 5);
+
+        pipeline_sync.on_action(BackfillAction::UpdateTarget(PipelineTarget::Sync(tip)));
+
+        assert_matches!(poll!(poll_fn(|cx| pipeline_sync.poll(cx))), Poll::Pending);
+        assert!(pipeline_sync.is_pipeline_idle());
     }
 }
