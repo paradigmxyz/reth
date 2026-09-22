@@ -375,6 +375,27 @@ impl<K: TransactionKind> DbTx for Tx<K> {
         self.new_cursor()
     }
 
+    fn cursor_dup_read_shard<T: DupSort>(
+        &self,
+        subkey: T::SubKey,
+    ) -> Result<Self::DupCursor<T>, DatabaseError> {
+        let Some(names) = super::sharded::names(T::NAME) else { return self.new_cursor() };
+        let encoded = subkey.encode();
+        let prefix = encoded.as_ref().first().copied().unwrap_or(0);
+        let shard = usize::from(prefix >> T::storage_shard_shift().unwrap_or(6));
+        let name = names
+            .get(shard)
+            .ok_or_else(|| DatabaseError::InitCursor(reth_libmdbx::Error::BadValSize.into()))?;
+        let inner = self
+            .inner
+            .cursor_with_dbi(self.get_dbi_raw(name)?)
+            .map_err(|e| DatabaseError::InitCursor(e.into()))?;
+        Ok(Cursor::new_with_metrics(
+            inner,
+            self.metrics_handler.as_ref().map(|h| h.env_metrics.table_operation_metrics(T::NAME)),
+        ))
+    }
+
     /// Returns number of entries in the table using cheap DB stats invocation.
     fn entries<T: Table>(&self) -> Result<usize, DatabaseError> {
         self.shard_dbis::<T>()?.into_iter().try_fold(0, |sum, dbi| {

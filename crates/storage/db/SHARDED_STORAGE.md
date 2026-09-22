@@ -19,6 +19,8 @@ the same nibble partition. Empty trie paths are not persisted, as before.
 - Logical cursors merge `(key, encoded value)` ordering across shards. Duplicate
   seeks start in the matching prefix range; deletion of all duplicates visits all
   shards. `get`, `entries`, `clear`, and raw typed views use the logical table.
+- Exact hashed-storage point reads open only their selected physical shard, then
+  verify subkey equality. The restricted cursor must not be used for range scans.
 - Schema version 3 rejects old unsharded databases. New `init` and binary-dump
   imports naturally populate the new tables through normal database APIs.
 - The conversion helper exclusively locks an offline database. It reads the trie

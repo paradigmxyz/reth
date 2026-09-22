@@ -65,6 +65,17 @@ pub trait DbTx: Debug + Send {
     fn cursor_read<T: Table>(&self) -> Result<Self::Cursor<T>, DatabaseError>;
     /// Iterate over read only values in dup sorted table.
     fn cursor_dup_read<T: DupSort>(&self) -> Result<Self::DupCursor<T>, DatabaseError>;
+    /// Opens a cursor covering the physical shard containing `subkey`.
+    ///
+    /// Only use this for an exact subkey lookup, and still check the returned
+    /// subkey for equality. Range iteration may omit other shards. Backends
+    /// without partitioning return their ordinary duplicate cursor.
+    fn cursor_dup_read_shard<T: DupSort>(
+        &self,
+        _subkey: T::SubKey,
+    ) -> Result<Self::DupCursor<T>, DatabaseError> {
+        self.cursor_dup_read::<T>()
+    }
     /// Returns number of entries in the table.
     fn entries<T: Table>(&self) -> Result<usize, DatabaseError>;
     /// Disables long-lived read transaction safety guarantees.

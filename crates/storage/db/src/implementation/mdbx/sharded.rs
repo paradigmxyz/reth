@@ -431,6 +431,36 @@ mod tests {
     }
 
     #[test]
+    fn single_shard_point_reads_match_logical_reads() {
+        let db = crate::test_utils::create_test_rw_db();
+        let tx = db.tx_mut().unwrap();
+        let address = B256::repeat_byte(1);
+        for prefix in [0, 31, 64, 95, 128, 159, 192, 255] {
+            tx.put::<HashedStorages>(address, entry(prefix)).unwrap();
+        }
+        tx.commit().unwrap();
+        let tx = db.tx().unwrap();
+        for key in [address, B256::repeat_byte(2)] {
+            for prefix in 0..=255 {
+                let subkey = B256::repeat_byte(prefix);
+                let expected = tx
+                    .cursor_dup_read::<HashedStorages>()
+                    .unwrap()
+                    .seek_by_key_subkey(key, subkey)
+                    .unwrap()
+                    .filter(|value| value.key == subkey);
+                let actual = tx
+                    .cursor_dup_read_shard::<HashedStorages>(subkey)
+                    .unwrap()
+                    .seek_by_key_subkey(key, subkey)
+                    .unwrap()
+                    .filter(|value| value.key == subkey);
+                assert_eq!(actual, expected, "key={key}, prefix={prefix}");
+            }
+        }
+    }
+
+    #[test]
     fn prefix_shards_preserve_cursor_order_deletion_and_reopen() {
         let dir = tempfile::tempdir().unwrap();
         let db = init_db(dir.path(), DatabaseArguments::test()).unwrap();
