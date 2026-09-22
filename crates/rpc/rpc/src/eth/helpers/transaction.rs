@@ -136,7 +136,7 @@ mod tests {
     use alloy_consensus::{
         BlobTransactionSidecar, Block, Header, SidecarBuilder, SimpleCoder, Transaction,
     };
-    use alloy_eips::eip8141::{Frame, FrameLimits};
+    use alloy_eips::eip8141::{Frame, FrameAddress, FrameLimits, FrameMode};
     use alloy_primitives::{map::AddressMap, Address, Bytes, U256};
     use alloy_rpc_types_eth::{request::TransactionRequest, state::EvmOverrides};
     use reth_chainspec::{ChainSpec, ChainSpecBuilder};
@@ -464,7 +464,8 @@ mod tests {
         let limits = FrameLimits { execution: 45_000, state: 7_000 };
         let accounts = AddressMap::from_iter([(
             address,
-            ExtendedAccount::new(0, U256::from(10_000_000_000_000_000_000u64)),
+            ExtendedAccount::new(0, U256::from(10_000_000_000_000_000_000u64))
+                .with_bytecode(Bytes::from_static(&[0x60, 0x03, 0x5f, 0x5f, 0xaa, 0x00])),
         )]);
         let eth_api = mock_eth_api(accounts);
         let tx_req = TransactionRequest {
@@ -473,12 +474,26 @@ mod tests {
             // The outer RPC field must not override the canonical reservation derived from the
             // frame execution and state limits.
             gas: Some(1),
-            frames: Some(vec![Frame { limits, ..Default::default() }]),
+            frames: Some(vec![Frame {
+                mode: FrameMode::Verify,
+                flags: 3,
+                target: FrameAddress::from(address),
+                limits,
+                ..Default::default()
+            }]),
             ..Default::default()
         };
         let expected = eth_api
             .converter()
-            .build_simulate_v1_transaction(tx_req.clone())
+            .build_simulate_v1_transaction(TransactionRequest {
+                nonce: Some(0),
+                gas: None,
+                max_fee_per_gas: Some(0),
+                max_priority_fee_per_gas: Some(0),
+                max_fee_per_blob_gas: Some(0),
+                signatures: Some(Vec::new()),
+                ..tx_req.clone()
+            })
             .expect("frame request should convert")
             .gas_limit();
 
