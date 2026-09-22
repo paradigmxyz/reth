@@ -39,6 +39,21 @@ scope. Keep subjects under 50 characters where practical. Explain what changed
 and why in one short paragraph. Link related issues and include real measurements
 for performance claims; omit templates and validation boilerplate.
 
+## Notes
+
+- **Testing**: Use fuzz tests for parsing and serialization, and property tests for invariants.
+- **Hot paths**: Avoid unnecessary allocations; reuse buffers and borrow where practical.
+- **Logging and metrics**: Follow the component's existing `tracing` targets and metrics conventions.
+- **Filesystem**: Use `reth_fs_util` for filesystem operations and its error context.
+- **Async work**: Keep blocking work off executor threads; follow the component's task model.
+- **Vendored code**: Do not edit `crates/storage/libmdbx-rs/mdbx-sys/libmdbx/`.
+- **Type order**: Keep the file's primary type before supporting types and private helpers.
+- **Documentation**: Update relevant docs when behavior or public APIs change. Regenerate CLI
+  reference pages with `make update-book-cli` after changing commands or flags; do not edit
+  generated pages by hand.
+- **Dependencies**: Run `zepter run check` and `make lint-toml` for dependency changes.
+- **PR labels**: Check available labels and apply those relevant to the change.
+
 ## Code Style
 
 - Follow existing patterns and keep changes focused.
@@ -69,18 +84,3 @@ for performance claims; omit templates and validation boilerplate.
 - When type hints are needed, prefer turbofish (`let x = Type::<X, Y>::new()`) over annotation (`let x: Type<X, Y> = Type::new()`).
 - In tests, avoid `.contains` assertions for error/output strings when the project has snapshot testing support such as `snapbox`. Prefer exact snapshot assertions (`stderr_eq`, `stdout_eq`, `assert_data_eq!`, etc.) and use redactions only for genuinely variable parts.
 - Always leave a blank line in between module doc-comments, items or item categories, unless in rare exceptions: it's a one-shot struct with one single impl block, or it's a list of impls that are all very similar. But in general blank line in between items is the norm but it's just unenforced. Items includes imports (together) too. The previous rules apply first.
-
-## Notes
-
-- **Testing**: Use fuzz tests for parsing and serialization, and property tests for invariants.
-- **Hot paths**: Avoid unnecessary allocations; reuse buffers and borrow where practical.
-- **Logging and metrics**: Follow the component's existing `tracing` targets and metrics conventions.
-- **Filesystem**: Use `reth_fs_util` for filesystem operations and its error context.
-- **Async work**: Keep blocking work off executor threads; follow the component's task model.
-- **Vendored code**: Do not edit `crates/storage/libmdbx-rs/mdbx-sys/libmdbx/`.
-- **Type order**: Keep the file's primary type before supporting types and private helpers.
-- **Documentation**: Update relevant docs when behavior or public APIs change. Regenerate CLI
-  reference pages with `make update-book-cli` after changing commands or flags; do not edit
-  generated pages by hand.
-- **Dependencies**: Run `zepter run check` and `make lint-toml` for dependency changes.
-- **PR labels**: Check available labels and apply those relevant to the change.
