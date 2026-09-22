@@ -799,11 +799,26 @@ pub(crate) struct ValidationMetrics {
 #[cfg(test)]
 mod tests {
     use super::{
-        hash_disallow_list, validate_message_against_payload, AddressSet, ValidationApiError,
+        hash_disallow_list, validate_message_against_payload, AddressSet, ValidationApi,
+        ValidationApiConfig, ValidationApiError,
     };
-    use alloy_primitives::{Address, B256};
+    use alloy_consensus::{BlockHeader, Header};
+    use alloy_primitives::{Address, B256, U256};
     use alloy_rpc_types_beacon::relay::BidTrace;
-    use alloy_rpc_types_engine::{ExecutionPayload, ExecutionPayloadV1};
+    use alloy_rpc_types_engine::{ExecutionData, ExecutionPayload, ExecutionPayloadV1};
+    use reth_consensus::noop::NoopConsensus;
+    use reth_engine_primitives::PayloadValidator;
+    use reth_ethereum_engine_primitives::EthPayloadTypes;
+    use reth_ethereum_primitives::Block;
+    use reth_evm_ethereum::EthEvmConfig;
+    use reth_execution_types::BlockExecutionOutput;
+    use reth_node_api::NewPayloadError;
+    use reth_primitives_traits::{RecoveredBlock, SealedBlock, SealedHeader};
+    use reth_provider::test_utils::MockEthProvider;
+    use reth_revm::db::{states::bundle_state::BundleState, AccountStatus, BundleAccount};
+    use reth_tasks::Runtime;
+    use revm::state::AccountInfo;
+    use std::sync::Arc;
 
     fn test_execution_payload() -> ExecutionPayload {
         ExecutionPayload::V1(ExecutionPayloadV1 {
@@ -942,5 +957,133 @@ mod tests {
         let expected_hash = "ee14e9d115e182f61871a5a385ab2f32ecf434f3b17bdbacc71044810d89e608";
         let hash = hash_disallow_list(&blocklist);
         assert_eq!(expected_hash, hash);
+    }
+
+    /// Only [`ValidationApi::validate_message_against_block`] is exercised below, which never
+    /// converts a payload.
+    #[derive(Debug)]
+    struct UnusedPayloadValidator;
+
+    impl PayloadValidator<EthPayloadTypes> for UnusedPayloadValidator {
+        type Block = Block;
+
+        fn convert_payload_to_block(
+            &self,
+            _payload: ExecutionData,
+        ) -> Result<SealedBlock<Self::Block>, NewPayloadError> {
+            unimplemented!()
+        }
+    }
+
+    fn test_validation_api(
+        provider: MockEthProvider,
+    ) -> ValidationApi<MockEthProvider, EthEvmConfig, EthPayloadTypes> {
+        ValidationApi::new(
+            provider,
+            NoopConsensus::arc(),
+            EthEvmConfig::mainnet(),
+            ValidationApiConfig::default(),
+            Runtime::test(),
+            Arc::new(UnusedPayloadValidator),
+        )
+    }
+
+    /// A submission whose payload pays the proposer nothing, like a trustless ePBS bid: there the
+    /// payment settles from the builder's stake on the consensus layer.
+    fn payment_free_submission() -> (MockEthProvider, RecoveredBlock<Block>, BidTrace) {
+        let provider = MockEthProvider::default();
+
+        let parent = Header { gas_limit: 30_000_000, ..Default::default() };
+        let parent = SealedHeader::seal_slow(parent);
+        provider.add_block(
+            parent.hash(),
+            Block { header: parent.clone_header(), body: Default::default() },
+        );
+
+        let header = Header {
+            parent_hash: parent.hash(),
+            number: parent.number() + 1,
+            gas_limit: parent.gas_limit(),
+            timestamp: parent.timestamp() + 12,
+            ..Default::default()
+        };
+        let block = SealedBlock::seal_slow(Block { header, body: Default::default() })
+            .try_recover()
+            .unwrap();
+        provider.state_roots.lock().push(block.state_root());
+
+        let message = BidTrace {
+            parent_hash: block.parent_hash(),
+            block_hash: block.hash(),
+            gas_limit: block.gas_limit(),
+            gas_used: block.gas_used(),
+            proposer_fee_recipient: Address::repeat_byte(0x42),
+            value: U256::from(1_000_000_000_000_000_000u64),
+            ..Default::default()
+        };
+
+        (provider, block, message)
+    }
+
+    #[tokio::test]
+    async fn test_payment_check_runs_for_a_nonzero_bid() {
+        let (provider, block, message) = payment_free_submission();
+        let registered_gas_limit = block.gas_limit();
+
+        let err = test_validation_api(provider)
+            .validate_message_against_block(block, message, registered_gas_limit, None)
+            .await
+            .unwrap_err();
+
+        assert!(matches!(err, ValidationApiError::ProposerPayment), "unexpected error: {err}");
+    }
+
+    #[tokio::test]
+    async fn test_zero_value_bid_skips_the_payment_check() {
+        let (provider, block, mut message) = payment_free_submission();
+        let registered_gas_limit = block.gas_limit();
+        message.value = U256::ZERO;
+
+        test_validation_api(provider)
+            .validate_message_against_block(block, message, registered_gas_limit, None)
+            .await
+            .unwrap();
+    }
+
+    /// A zero-value bid promises the proposer nothing, so there is nothing to verify. The
+    /// balance-delta branch already lets one through whenever the fee recipient's balance does
+    /// not fall -- but a fee recipient that merely sends a transaction of its own in the same
+    /// block ends it poorer, drops through to the last-transaction fallback and is rejected.
+    #[test]
+    fn test_zero_value_bid_is_accepted_when_the_fee_recipient_spends() {
+        let (provider, block, mut message) = payment_free_submission();
+        message.value = U256::ZERO;
+
+        let output = BlockExecutionOutput {
+            result: Default::default(),
+            state: fee_recipient_spent(message.proposer_fee_recipient),
+        };
+
+        test_validation_api(provider)
+            .ensure_payment(block.sealed_block(), &output, &message)
+            .unwrap();
+    }
+
+    /// Execution state for a block in which `address` ended up poorer than it started.
+    fn fee_recipient_spent(address: Address) -> BundleState {
+        let balance =
+            |wei: u64| Some(AccountInfo { balance: U256::from(wei), ..Default::default() });
+
+        let mut state = BundleState::default();
+        state.state.insert(
+            address,
+            BundleAccount {
+                original_info: balance(1_000),
+                info: balance(999),
+                storage: Default::default(),
+                status: AccountStatus::Changed,
+            },
+        );
+        state
     }
 }
