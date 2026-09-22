@@ -733,7 +733,7 @@ mod tests {
     ///
     /// This demonstrates using the parallel subtxn API to write to two different
     /// tables concurrently from separate threads, then committing serially.
-    /// Uses pure FFI to test parallel writes with WriteMap mode (required for parallel subtxns).
+    /// Uses pure FFI to test parallel writes with `WriteMap` mode (required for parallel subtxns).
     #[test]
     fn db_parallel_writes_two_tables() {
         use std::{
@@ -747,7 +747,7 @@ mod tests {
         unsafe {
             // Create environment with WriteMap (required for parallel subtxns)
             let mut env: *mut ffi::MDBX_env = ptr::null_mut();
-            let rc = ffi::mdbx_env_create(&mut env);
+            let rc = ffi::mdbx_env_create(&raw mut env);
             assert_eq!(rc, 0, "mdbx_env_create failed");
 
             ffi::mdbx_env_set_option(env, ffi::MDBX_opt_max_db, 4);
@@ -765,7 +765,7 @@ mod tests {
                 env,
                 ptr::null_mut(),
                 ffi::MDBX_TXN_READWRITE,
-                &mut parent_ptr,
+                &raw mut parent_ptr,
                 ptr::null_mut(),
             );
             assert_eq!(rc, 0, "mdbx_txn_begin failed: {rc}");
@@ -779,7 +779,7 @@ mod tests {
                 parent_ptr,
                 db0_name.as_ptr(),
                 ffi::MDBX_CREATE,
-                &mut headers_dbi,
+                &raw mut headers_dbi,
             );
             assert_eq!(rc, 0, "open headers dbi failed");
 
@@ -788,7 +788,7 @@ mod tests {
                 parent_ptr,
                 db1_name.as_ptr(),
                 ffi::MDBX_CREATE,
-                &mut canonical_dbi,
+                &raw mut canonical_dbi,
             );
             assert_eq!(rc, 0, "open canonical dbi failed");
 
@@ -818,8 +818,7 @@ mod tests {
                 let value = format!("header_data_{i}");
                 let value_bytes = value.as_bytes();
 
-                let mut k =
-                    ffi::MDBX_val { iov_base: key_bytes.as_ptr() as *mut c_void, iov_len: 8 };
+                let k = ffi::MDBX_val { iov_base: key_bytes.as_ptr() as *mut c_void, iov_len: 8 };
                 let mut v = ffi::MDBX_val {
                     iov_base: value_bytes.as_ptr() as *mut c_void,
                     iov_len: value_bytes.len(),
@@ -828,8 +827,8 @@ mod tests {
                 let rc = ffi::mdbx_put(
                     headers_subtx,
                     headers_dbi,
-                    &mut k,
-                    &mut v,
+                    &raw const k,
+                    &raw mut v,
                     ffi::MDBX_put_flags_t::default(),
                 );
                 assert_eq!(rc, 0, "headers put {i} failed: {rc}");
@@ -841,16 +840,15 @@ mod tests {
                 let mut hash_bytes = [0u8; 32];
                 hash_bytes[31] = i as u8;
 
-                let mut k =
-                    ffi::MDBX_val { iov_base: key_bytes.as_ptr() as *mut c_void, iov_len: 8 };
+                let k = ffi::MDBX_val { iov_base: key_bytes.as_ptr() as *mut c_void, iov_len: 8 };
                 let mut v =
                     ffi::MDBX_val { iov_base: hash_bytes.as_ptr() as *mut c_void, iov_len: 32 };
 
                 let rc = ffi::mdbx_put(
                     canonical_subtx,
                     canonical_dbi,
-                    &mut k,
-                    &mut v,
+                    &raw const k,
+                    &raw mut v,
                     ffi::MDBX_put_flags_t::default(),
                 );
                 assert_eq!(rc, 0, "canonical put {i} failed: {rc}");
@@ -873,7 +871,7 @@ mod tests {
                 env,
                 ptr::null_mut(),
                 ffi::MDBX_TXN_RDONLY,
-                &mut read_txn,
+                &raw mut read_txn,
                 ptr::null_mut(),
             );
             assert_eq!(rc, 0, "read txn begin failed");
@@ -883,7 +881,7 @@ mod tests {
                 let key_bytes = i.to_be_bytes();
                 let k = ffi::MDBX_val { iov_base: key_bytes.as_ptr() as *mut c_void, iov_len: 8 };
                 let mut v = ffi::MDBX_val { iov_base: ptr::null_mut(), iov_len: 0 };
-                let rc = ffi::mdbx_get(read_txn, headers_dbi, &k, &mut v);
+                let rc = ffi::mdbx_get(read_txn, headers_dbi, &raw const k, &raw mut v);
                 assert_eq!(rc, 0, "header {i} not found");
             }
 
@@ -892,7 +890,7 @@ mod tests {
                 let key_bytes = i.to_be_bytes();
                 let k = ffi::MDBX_val { iov_base: key_bytes.as_ptr() as *mut c_void, iov_len: 8 };
                 let mut v = ffi::MDBX_val { iov_base: ptr::null_mut(), iov_len: 0 };
-                let rc = ffi::mdbx_get(read_txn, canonical_dbi, &k, &mut v);
+                let rc = ffi::mdbx_get(read_txn, canonical_dbi, &raw const k, &raw mut v);
                 assert_eq!(rc, 0, "canonical header {i} not found");
 
                 // Verify the value matches expected hash

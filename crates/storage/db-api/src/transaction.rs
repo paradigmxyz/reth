@@ -135,12 +135,12 @@ pub trait DbTxMut: Send {
 
     /// Enables parallel writes mode only for the specified tables with arena size hints.
     ///
-    /// Similar to [`enable_parallel_writes_for_tables`], but allows specifying an arena_hint
-    /// for each table to guide page pre-allocation. An arena_hint of 0 means use
+    /// Similar to [`enable_parallel_writes_for_tables`], but allows specifying an `arena_hint`
+    /// for each table to guide page pre-allocation. An `arena_hint` of 0 means use
     /// equal distribution among all subtransactions.
     ///
     /// # Arguments
-    /// * `tables` - Slice of (table_name, arena_hint) tuples.
+    /// * `tables` - Slice of (`table_name`, `arena_hint`) tuples.
     fn enable_parallel_writes_for_tables_with_hints(
         &self,
         _tables: &[(&str, usize)],

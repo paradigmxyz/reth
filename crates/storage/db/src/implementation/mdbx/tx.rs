@@ -531,12 +531,12 @@ impl Tx<RW> {
 
     /// Enables parallel writes mode with arena size hints for specified tables.
     ///
-    /// Similar to [`enable_parallel_writes_for_tables`], but allows specifying an arena_hint
-    /// for each table to guide page pre-allocation. An arena_hint of 0 means use
+    /// Similar to [`enable_parallel_writes_for_tables`], but allows specifying an `arena_hint`
+    /// for each table to guide page pre-allocation. An `arena_hint` of 0 means use
     /// equal distribution among all subtransactions.
     ///
     /// # Arguments
-    /// * `tables` - Slice of (table_name, arena_hint) tuples.
+    /// * `tables` - Slice of (`table_name`, `arena_hint`) tuples.
     ///
     /// # Returns
     /// Ok(()) on success, or an error if subtransaction creation fails.
@@ -633,30 +633,30 @@ impl DbTxMut for Tx<RW> {
     }
 
     fn enable_parallel_writes(&self) -> Result<(), DatabaseError> {
-        Tx::enable_parallel_writes(self)
+        Self::enable_parallel_writes(self)
     }
 
     fn is_parallel_writes_enabled(&self) -> bool {
-        Tx::is_parallel_writes_enabled(self)
+        Self::is_parallel_writes_enabled(self)
     }
 
     fn commit_subtxns(&self) -> Result<(), DatabaseError> {
-        Tx::commit_subtxns(self)
+        Self::commit_subtxns(self)
     }
 
     fn commit_subtxns_with_metrics(&self) -> Result<(), DatabaseError> {
-        Tx::commit_subtxns_with_metrics(self)
+        Self::commit_subtxns_with_metrics(self)
     }
 
     fn enable_parallel_writes_for_tables(&self, tables: &[&str]) -> Result<(), DatabaseError> {
-        Tx::enable_parallel_writes_for_tables(self, tables)
+        Self::enable_parallel_writes_for_tables(self, tables)
     }
 
     fn enable_parallel_writes_for_tables_with_hints(
         &self,
         tables: &[(&str, usize)],
     ) -> Result<(), DatabaseError> {
-        Tx::enable_parallel_writes_for_tables_with_hints(self, tables)
+        Self::enable_parallel_writes_for_tables_with_hints(self, tables)
     }
 
     fn record_arena_estimation(
@@ -664,7 +664,7 @@ impl DbTxMut for Tx<RW> {
         table: &'static str,
         stats: &reth_db_api::transaction::ArenaHintEstimationStats,
     ) {
-        Tx::record_arena_estimation(self, table, stats)
+        Self::record_arena_estimation(self, table, stats)
     }
 }
 
@@ -746,7 +746,7 @@ mod tests {
         let barrier = std::sync::Arc::new(Barrier::new(2));
         let tx_clone = &tx;
         let barrier1 = barrier.clone();
-        let barrier2 = barrier.clone();
+        let barrier2 = barrier;
 
         thread::scope(|s| {
             let handle1 = s.spawn(move || {
