@@ -244,6 +244,9 @@ impl<N: NodePrimitives> OverlayManager<N> {
             }
         }
 
+        self.remove_ready_sibling_overlays(&self.state_trie_overlays, parent_hash);
+        self.remove_ready_sibling_overlays(&self.execution_overlays, parent_hash);
+
         // Snapshot matching parent overlays before spawning so DashMap iteration guards are
         // dropped.
         let cached_parent_overlays = self
@@ -277,6 +280,16 @@ impl<N: NodePrimitives> OverlayManager<N> {
                 self.precompute_execution_overlay(hash, anchor_hash);
             }
         }
+    }
+
+    /// Removes ready overlays for other candidates built on `parent_hash`.
+    fn remove_ready_sibling_overlays<T>(&self, cache: &OverlayCache<T>, parent_hash: B256) {
+        cache.retain(|key, entry| {
+            !matches!(entry, OverlayCacheEntry::Ready(_)) ||
+                self.blocks
+                    .get(&key.tip_hash)
+                    .is_none_or(|block| block.recovered_block().parent_hash() != parent_hash)
+        });
     }
 
     /// Optimistically computes an execution overlay from `anchor_hash` to `tip_hash`.
@@ -1128,6 +1141,40 @@ mod tests {
             .execution_overlay_for_parent(blocks[2].recovered_block().hash(), short_anchor)
             .unwrap();
         assert_eq!(short.accounts().len(), 1);
+    }
+
+    #[test]
+    fn inserting_sibling_evicts_ready_cached_overlays() {
+        let manager = OverlayManager::default();
+        let mut builder = TestBlockBuilder::eth();
+        let anchor_hash = B256::random();
+        let parent = builder.get_executed_block_with_number(1, anchor_hash);
+        let parent_hash = parent.recovered_block().hash();
+        let first = builder.get_executed_block_with_number(2, parent_hash);
+        let sibling = builder.get_executed_block_with_number(2, parent_hash);
+        let parent_key = OverlayCacheKey { anchor_hash, tip_hash: parent_hash };
+        let first_key = OverlayCacheKey { anchor_hash, tip_hash: first.recovered_block().hash() };
+
+        manager.insert_block(parent);
+        manager.insert_block(first);
+        manager
+            .state_trie_overlays
+            .entries
+            .insert(first_key, OverlayCacheEntry::Ready(Arc::new(TrieInputSorted::default())));
+        manager
+            .execution_overlays
+            .entries
+            .insert(parent_key, OverlayCacheEntry::Ready(Arc::new(ExecutionOverlay::default())));
+        manager
+            .execution_overlays
+            .entries
+            .insert(first_key, OverlayCacheEntry::Ready(Arc::new(ExecutionOverlay::default())));
+
+        manager.insert_block(sibling);
+
+        assert!(!manager.state_trie_overlays.entries.contains_key(&first_key));
+        assert!(manager.execution_overlays.entries.contains_key(&parent_key));
+        assert!(!manager.execution_overlays.entries.contains_key(&first_key));
     }
 
     #[test]
