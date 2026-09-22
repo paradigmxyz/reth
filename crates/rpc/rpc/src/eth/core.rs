@@ -551,6 +551,7 @@ mod tests {
     use crate::{eth::helpers::types::EthRpcConverter, EthApi, EthApiBuilder};
     use alloy_consensus::{Block, BlockBody, Header};
     use alloy_eips::{BlockId, BlockNumberOrTag};
+    use alloy_network::TransactionBuilder;
     use alloy_primitives::{Address, Bytes, Signature, B256, U256, U64};
     use alloy_rpc_types::FeeHistory;
     use alloy_rpc_types_eth::{
