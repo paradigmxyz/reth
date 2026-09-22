@@ -56,8 +56,9 @@ where
             let Some(headers) = self.sync_headers(pipeline, &mut targets).await else {
                 return stopped
             };
-            // A detached head unwinds headers short of the target, so sync them again.
-            if headers?.is_unwind() {
+            // A detached head unwinds headers short of the target, and a target that moved during
+            // the pass is not synced yet, so both sync headers again before the bootstrap.
+            if headers?.is_unwind() || targets.has_changed().unwrap_or(false) {
                 continue
             }
 
@@ -103,35 +104,15 @@ where
 
     // Runs the header stage to the latest target, or returns `None` once the run is stopped.
     // Snap needs canonical headers and their BAL commitments, but nothing below the pivot may
-    // execute, so only the header stage runs.
+    // execute, so only the header stage runs. Targets arriving meanwhile stay unseen on `targets`
+    // for the next pass.
     async fn sync_headers(
         &self,
         pipeline: &mut Pipeline<N>,
         targets: &mut watch::Receiver<B256>,
     ) -> Option<Result<ControlFlow, PipelineError>> {
-        let tip = pipeline.tip_sender();
         let target = *targets.borrow_and_update();
-        let mut headers =
-            pin!(pipeline.run_until(StageId::Headers, Some(PipelineTarget::Sync(target))));
-        let headers = async {
-            loop {
-                tokio::select! {
-                    biased;
-                    result = &mut headers => return result,
-                    // The header stage re-reads the tip when polled, so a new target replaces one
-                    // no peer serves anymore, such as a hash reorged out.
-                    changed = targets.changed() => match changed {
-                        Ok(()) => {
-                            if let Some(tip) = &tip {
-                                tip.send_replace(*targets.borrow_and_update());
-                            }
-                        }
-                        // The backfill is gone, and its stop token ends this run.
-                        Err(_) => return headers.await,
-                    },
-                }
-            }
-        };
+        let headers = pipeline.run_until(StageId::Headers, Some(PipelineTarget::Sync(target)));
         self.stop.run_until_cancelled(headers).await
     }
 }
@@ -148,15 +129,21 @@ mod tests {
     use crate::snap::tests::{
         headers_done, headers_reach, pipeline, pipeline_with, NEXT_TARGET, TARGET,
     };
+    use alloy_consensus::Header;
     use alloy_eips::{eip1898::BlockWithParent, BlockNumHash};
     use reth_consensus::ConsensusError;
     use reth_network_p2p::NoopFullBlockClient;
-    use reth_provider::test_utils::MockNodeTypesWithDB;
-    use reth_stages::{
-        ExecInput, ExecOutput, Stage, StageCheckpoint, StageError, UnwindInput, UnwindOutput,
+    use reth_primitives_traits::SealedHeader;
+    use reth_provider::{
+        test_utils::{insert_headers, MockNodeTypesWithDB},
+        MetadataProvider,
     };
+    use reth_stages::{ExecInput, ExecOutput, Stage, StageError, UnwindInput, UnwindOutput};
     use reth_stages_api::test_utils::TestStage;
-    use std::task::{Context, Poll};
+    use std::{
+        sync::{Arc, Mutex},
+        task::{Context, Poll},
+    };
 
     #[tokio::test]
     async fn a_new_target_refreshes_headers_then_resumes_until_stopped() {
@@ -180,24 +167,51 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_new_target_retargets_a_pending_header_download() {
-        let (tip, tip_rx) = watch::channel(B256::ZERO);
+    async fn a_target_moved_during_headers_is_synced_before_the_bootstrap() {
+        let (open, gate) = watch::channel(false);
+        let attempts = Arc::new(Mutex::new(Vec::new()));
+        let headers = GatedHeaders {
+            gate,
+            attempts: attempts.clone(),
+            stage: TestStage::new(StageId::Headers)
+                .add_exec(headers_done(1))
+                .add_exec(headers_done(2)),
+        };
+        let (tip, _) = watch::channel(B256::ZERO);
         let mut pipeline_tip = tip.subscribe();
-        let (pipeline, factory) = pipeline_with(PendingUntilRetargeted(tip_rx), tip);
+        let (pipeline, factory) = pipeline_with(headers, tip);
+        // Headers with block access list commitments, so a bootstrap can anchor a pivot.
+        let mut parent = B256::ZERO;
+        let stored: Vec<_> = (0..=64)
+            .map(|number| {
+                let header = SealedHeader::seal_slow(Header {
+                    number,
+                    parent_hash: parent,
+                    block_access_list_hash: Some(B256::ZERO),
+                    ..Default::default()
+                });
+                parent = header.hash();
+                header
+            })
+            .collect();
+        insert_headers(&factory, &stored);
         let (targets, receiver) = watch::channel(TARGET);
         let (run, stop) = snap_run(&factory);
         let run = tokio::spawn(run.run(pipeline, receiver));
-        // Headers are downloading towards the first target before forkchoice moves.
+
+        // Forkchoice moves while the first header pass is still downloading.
         pipeline_tip.wait_for(|tip| *tip == TARGET).await.unwrap();
-
         targets.send(NEXT_TARGET).unwrap();
+        open.send(true).unwrap();
 
-        tokio::time::timeout(Duration::from_secs(5), headers_reach(&factory, 1))
+        tokio::time::timeout(Duration::from_secs(5), headers_reach(&factory, 2))
             .await
-            .expect("the pending header download moves to the new target");
+            .expect("headers are synced to the moved target");
         stop.cancel();
         let (_pipeline, result) = run.await.unwrap();
         assert!(matches!(result, Ok(ControlFlow::NoProgress { block_number: None })));
+        // No bootstrap recorded an attempt on the outdated headers between the two passes.
+        assert_eq!(*attempts.lock().unwrap(), [false, false]);
     }
 
     #[tokio::test]
@@ -228,6 +242,50 @@ mod tests {
         assert!(matches!(result, Ok(ControlFlow::NoProgress { block_number: None })));
     }
 
+    // A header stage that waits for `gate`, then records whether a snap attempt exists at each
+    // pass.
+    #[derive(Debug)]
+    struct GatedHeaders {
+        gate: watch::Receiver<bool>,
+        attempts: Arc<Mutex<Vec<bool>>>,
+        stage: TestStage,
+    }
+
+    impl<Provider: MetadataProvider> Stage<Provider> for GatedHeaders {
+        fn id(&self) -> StageId {
+            StageId::Headers
+        }
+
+        fn poll_execute_ready(
+            &mut self,
+            cx: &mut Context<'_>,
+            _input: ExecInput,
+        ) -> Poll<Result<(), StageError>> {
+            if *self.gate.borrow() {
+                return Poll::Ready(Ok(()))
+            }
+            cx.waker().wake_by_ref();
+            Poll::Pending
+        }
+
+        fn execute(
+            &mut self,
+            provider: &Provider,
+            input: ExecInput,
+        ) -> Result<ExecOutput, StageError> {
+            self.attempts.lock().unwrap().push(provider.snap_attempt()?.is_some());
+            self.stage.execute(provider, input)
+        }
+
+        fn unwind(
+            &mut self,
+            _provider: &Provider,
+            _input: UnwindInput,
+        ) -> Result<UnwindOutput, StageError> {
+            unreachable!("nothing unwinds in this test")
+        }
+    }
+
     // A run over `factory` that refreshes headers as soon as forkchoice moves.
     fn snap_run(
         factory: &ProviderFactory<MockNodeTypesWithDB>,
@@ -241,44 +299,5 @@ mod tests {
             stop: stop.clone(),
         };
         (run, stop)
-    }
-
-    // A header stage stuck until the tip moves to `NEXT_TARGET`, like a download retrying a hash
-    // no peer serves.
-    #[derive(Debug)]
-    struct PendingUntilRetargeted(watch::Receiver<B256>);
-
-    impl<Provider> Stage<Provider> for PendingUntilRetargeted {
-        fn id(&self) -> StageId {
-            StageId::Headers
-        }
-
-        fn poll_execute_ready(
-            &mut self,
-            cx: &mut Context<'_>,
-            _input: ExecInput,
-        ) -> Poll<Result<(), StageError>> {
-            if *self.0.borrow() == NEXT_TARGET {
-                return Poll::Ready(Ok(()))
-            }
-            cx.waker().wake_by_ref();
-            Poll::Pending
-        }
-
-        fn execute(
-            &mut self,
-            _provider: &Provider,
-            _input: ExecInput,
-        ) -> Result<ExecOutput, StageError> {
-            Ok(ExecOutput { checkpoint: StageCheckpoint::new(1), done: true })
-        }
-
-        fn unwind(
-            &mut self,
-            _provider: &Provider,
-            _input: UnwindInput,
-        ) -> Result<UnwindOutput, StageError> {
-            unreachable!("nothing unwinds in this test")
-        }
     }
 }

@@ -115,11 +115,6 @@ impl<N: ProviderNodeTypes> Pipeline<N> {
         });
     }
 
-    /// Returns the tip channel, so the tip can move while a run holds the pipeline.
-    pub fn tip_sender(&self) -> Option<watch::Sender<B256>> {
-        self.tip_tx.clone()
-    }
-
     /// Listen for events on the pipeline.
     pub fn events(&self) -> EventStream<PipelineEvent> {
         self.event_sender.new_listener()
