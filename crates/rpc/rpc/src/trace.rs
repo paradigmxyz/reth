@@ -1284,9 +1284,13 @@ mod tests {
                         child_code
                     );
                 }
-                let individual =
-                    api.replay_transaction(trace.transaction_hash, types.clone()).await.unwrap();
-                assert_eq!(trace.full_trace, individual);
+                let individual = api
+                    .replay_transaction(trace.transaction_hash, types.clone())
+                    .await
+                    .unwrap()
+                    .unwrap();
+                assert_eq!(individual.transaction_hash, trace.transaction_hash);
+                assert_eq!(trace.full_trace, individual.full_trace);
             }
         }
     }
