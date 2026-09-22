@@ -4,6 +4,7 @@ use crate::{eth::core::EthApiInner, EthApi};
 use alloy_network::Ethereum;
 use reth_chain_state::CanonStateSubscriptions;
 use reth_chainspec::ChainSpecProvider;
+use reth_evm::SenderRecoveryCache;
 use reth_primitives_traits::HeaderTy;
 use reth_rpc_convert::{RpcConvert, RpcConverter};
 use reth_rpc_eth_api::{
@@ -47,6 +48,7 @@ pub struct EthApiBuilder<N: RpcNodeCore, Rpc, NextEnv = ()> {
     max_blocking_io_requests: usize,
     pending_block_kind: PendingBlockKind,
     raw_tx_forwarder: ForwardConfig,
+    sender_recovery_cache: Option<SenderRecoveryCache>,
     send_raw_transaction_sync_timeout: Duration,
     evm_memory_limit: u64,
     force_blob_sidecar_upcasting: bool,
@@ -101,6 +103,7 @@ impl<N: RpcNodeCore, Rpc, NextEnv> EthApiBuilder<N, Rpc, NextEnv> {
             max_blocking_io_requests,
             pending_block_kind,
             raw_tx_forwarder,
+            sender_recovery_cache,
             send_raw_transaction_sync_timeout,
             evm_memory_limit,
             force_blob_sidecar_upcasting,
@@ -125,6 +128,7 @@ impl<N: RpcNodeCore, Rpc, NextEnv> EthApiBuilder<N, Rpc, NextEnv> {
             max_blocking_io_requests,
             pending_block_kind,
             raw_tx_forwarder,
+            sender_recovery_cache,
             send_raw_transaction_sync_timeout,
             evm_memory_limit,
             force_blob_sidecar_upcasting,
@@ -160,6 +164,7 @@ where
             max_blocking_io_requests: DEFAULT_MAX_BLOCKING_IO_REQUEST,
             pending_block_kind: PendingBlockKind::Full,
             raw_tx_forwarder: ForwardConfig::default(),
+            sender_recovery_cache: None,
             send_raw_transaction_sync_timeout: Duration::from_secs(30),
             evm_memory_limit: (1 << 32) - 1,
             force_blob_sidecar_upcasting: false,
@@ -202,6 +207,7 @@ where
             max_blocking_io_requests,
             pending_block_kind,
             raw_tx_forwarder,
+            sender_recovery_cache,
             send_raw_transaction_sync_timeout,
             evm_memory_limit,
             force_blob_sidecar_upcasting,
@@ -226,6 +232,7 @@ where
             max_blocking_io_requests,
             pending_block_kind,
             raw_tx_forwarder,
+            sender_recovery_cache,
             send_raw_transaction_sync_timeout,
             evm_memory_limit,
             force_blob_sidecar_upcasting,
@@ -257,6 +264,7 @@ where
             max_blocking_io_requests,
             pending_block_kind,
             raw_tx_forwarder,
+            sender_recovery_cache,
             send_raw_transaction_sync_timeout,
             evm_memory_limit,
             force_blob_sidecar_upcasting,
@@ -281,6 +289,7 @@ where
             max_blocking_io_requests,
             pending_block_kind,
             raw_tx_forwarder,
+            sender_recovery_cache,
             send_raw_transaction_sync_timeout,
             evm_memory_limit,
             force_blob_sidecar_upcasting,
@@ -376,6 +385,12 @@ where
     /// Sets the pending block kind
     pub const fn pending_block_kind(mut self, pending_block_kind: PendingBlockKind) -> Self {
         self.pending_block_kind = pending_block_kind;
+        self
+    }
+
+    /// Sets the sender recovery cache shared with transaction ingress and execution.
+    pub fn sender_recovery_cache(mut self, cache: Option<SenderRecoveryCache>) -> Self {
+        self.sender_recovery_cache = cache;
         self
     }
 
@@ -529,6 +544,7 @@ where
             max_blocking_io_requests,
             pending_block_kind,
             raw_tx_forwarder,
+            sender_recovery_cache,
             send_raw_transaction_sync_timeout,
             evm_memory_limit,
             force_blob_sidecar_upcasting,
@@ -592,6 +608,7 @@ where
             next_env,
             raw_tx_forwarder.forwarder_client(),
         )
+        .with_sender_recovery_cache(sender_recovery_cache)
     }
 
     /// Builds the [`EthApi`] instance.

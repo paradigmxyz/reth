@@ -1420,15 +1420,21 @@ pub trait PoolTransaction:
     /// Implementations can override this to avoid constructing the pooled transaction as an
     /// intermediate value when the raw representation can be converted directly into `Self`.
     fn recover_raw_transaction(data: &[u8]) -> Result<Self, RawPoolTransactionError> {
+        Self::try_recover(Self::decode_raw_transaction(data)?)
+            .map_err(|_| RawPoolTransactionError::InvalidTransactionSignature)
+    }
+
+    /// Decodes a raw pooled transaction without recovering its sender.
+    ///
+    /// The entire input must be consumed; trailing bytes are rejected. Implementations can override
+    /// this to customize raw decoding independently of sender recovery.
+    fn decode_raw_transaction(data: &[u8]) -> Result<Self::Pooled, RawPoolTransactionError> {
         if data.is_empty() {
             return Err(RawPoolTransactionError::EmptyRawTransactionData)
         }
 
-        let transaction = Self::Pooled::decode_2718_exact(data)
-            .map_err(|_| RawPoolTransactionError::FailedToDecodeSignedTransaction)?;
-
-        Self::try_recover(transaction)
-            .map_err(|_| RawPoolTransactionError::InvalidTransactionSignature)
+        Self::Pooled::decode_2718_exact(data)
+            .map_err(|_| RawPoolTransactionError::FailedToDecodeSignedTransaction)
     }
 
     /// Tries to convert the `Consensus` type into the `Pooled` type.

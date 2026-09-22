@@ -11,6 +11,7 @@ use alloy_primitives::{Bytes, U256};
 use alloy_rpc_client::RpcClient;
 use derive_more::Deref;
 use reth_chainspec::{ChainSpec, ChainSpecProvider};
+use reth_evm::SenderRecoveryCache;
 use reth_evm_ethereum::EthEvmConfig;
 use reth_network_api::noop::NoopNetwork;
 use reth_node_api::{FullNodeComponents, FullNodeTypes};
@@ -258,6 +259,9 @@ pub struct EthApiInner<N: RpcNodeCore, Rpc: RpcConvert> {
     /// Transaction broadcast channel
     raw_tx_sender: broadcast::Sender<Bytes>,
 
+    /// Cache of recovered transaction senders shared with other node components.
+    sender_recovery_cache: Option<SenderRecoveryCache>,
+
     /// Raw transaction forwarder
     raw_tx_forwarder: Option<RpcClient>,
 
@@ -280,6 +284,17 @@ where
     N: RpcNodeCore,
     Rpc: RpcConvert,
 {
+    /// Sets the shared sender recovery cache.
+    pub fn with_sender_recovery_cache(mut self, cache: Option<SenderRecoveryCache>) -> Self {
+        self.sender_recovery_cache = cache;
+        self
+    }
+
+    /// Returns the shared sender recovery cache, if enabled.
+    pub const fn sender_recovery_cache(&self) -> Option<&SenderRecoveryCache> {
+        self.sender_recovery_cache.as_ref()
+    }
+
     /// Creates a new, shareable instance using the default tokio task spawner.
     #[expect(clippy::too_many_arguments)]
     pub fn new(
@@ -330,6 +345,7 @@ where
             settings,
             raw_tx_sender,
             raw_tx_forwarder,
+            sender_recovery_cache: None,
             converter,
             next_env_builder: Box::new(next_env),
             tx_batch_sender,

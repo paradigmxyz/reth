@@ -26,7 +26,7 @@ use reth_rpc_eth_api::{
     helpers::{Call, LoadPendingBlock, LoadTransaction, Trace, TraceExt},
     FromEthApiError, RpcNodeCore,
 };
-use reth_rpc_eth_types::{error::EthApiError, utils::recover_raw_transaction, EthConfig};
+use reth_rpc_eth_types::{error::EthApiError, EthConfig};
 use reth_storage_api::{BlockNumReader, BlockReader};
 use reth_tasks::pool::BlockingTaskGuard;
 use reth_transaction_pool::{PoolPooledTx, PoolTransaction, TransactionPool};
@@ -124,7 +124,9 @@ where
         trace_types: HashSet<TraceType>,
         block_id: Option<BlockId>,
     ) -> Result<TraceResults, Eth::Error> {
-        let tx = recover_raw_transaction::<PoolPooledTx<Eth::Pool>>(&tx)?
+        let tx = self
+            .eth_api()
+            .recover_raw_transaction::<PoolPooledTx<Eth::Pool>>(&tx)?
             .map(<Eth::Pool as TransactionPool>::Transaction::pooled_into_consensus);
 
         let (evm_env, at) = self.eth_api().evm_env_at(block_id.unwrap_or_default()).await?;

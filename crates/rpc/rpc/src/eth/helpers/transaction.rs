@@ -120,6 +120,9 @@ where
     EthApiError: FromEvmError<N::Evm>,
     Rpc: RpcConvert<Primitives = N::Primitives, Error = EthApiError>,
 {
+    fn sender_recovery_cache(&self) -> Option<&reth_evm::SenderRecoveryCache> {
+        self.inner.sender_recovery_cache()
+    }
 }
 
 #[cfg(test)]
@@ -131,19 +134,23 @@ mod tests {
     use alloy_consensus::{
         BlobTransactionSidecar, Block, Header, SidecarBuilder, SimpleCoder, Transaction,
     };
-    use alloy_primitives::{map::AddressMap, Address, Bytes, U256};
+    use alloy_eips::eip2718::Encodable2718;
+    use alloy_primitives::{map::AddressMap, Address, Bytes, Signature, U256};
     use alloy_rpc_types_eth::request::TransactionRequest;
     use reth_chainspec::{ChainSpec, ChainSpecBuilder};
+    use reth_ethereum_primitives::TransactionSigned;
+    use reth_evm::SenderRecoveryCache;
     use reth_evm_ethereum::EthEvmConfig;
     use reth_network_api::noop::NoopNetwork;
+    use reth_primitives_traits::SignedTransaction;
     use reth_provider::{
         test_utils::{ExtendedAccount, MockEthProvider},
         ChainSpecProvider,
     };
     use reth_rpc_eth_api::node::RpcNodeCoreAdapter;
     use reth_transaction_pool::{
-        test_utils::{testing_pool, TestPool},
-        TransactionOrigin, TransactionPool,
+        test_utils::{testing_pool, TestPool, TransactionGenerator},
+        EthPooledTransaction, PoolPooledTx, TransactionOrigin, TransactionPool,
     };
 
     fn mock_eth_api(
@@ -159,6 +166,17 @@ mod tests {
         accounts: AddressMap<ExtendedAccount>,
         send_raw_transaction_sync_timeout: Duration,
     ) -> EthApi<
+        RpcNodeCoreAdapter<MockEthProvider, TestPool, NoopNetwork, EthEvmConfig>,
+        EthRpcConverter<ChainSpec>,
+    > {
+        mock_eth_api_builder(accounts)
+            .send_raw_transaction_sync_timeout(send_raw_transaction_sync_timeout)
+            .build()
+    }
+
+    fn mock_eth_api_builder(
+        accounts: AddressMap<ExtendedAccount>,
+    ) -> crate::EthApiBuilder<
         RpcNodeCoreAdapter<MockEthProvider, TestPool, NoopNetwork, EthEvmConfig>,
         EthRpcConverter<ChainSpec>,
     > {
@@ -183,8 +201,6 @@ mod tests {
         mock_provider.add_block(genesis_hash, Block::new(genesis_header, Default::default()));
 
         EthApi::builder(mock_provider, pool, NoopNetwork::default(), evm_config)
-            .send_raw_transaction_sync_timeout(send_raw_transaction_sync_timeout)
-            .build()
     }
 
     fn raw_transfer_tx() -> Bytes {
@@ -192,6 +208,127 @@ mod tests {
         Bytes::from(hex!(
             "02f871018303579880850555633d1b82520894eee27662c2b8eba3cd936a23f039f3189633e4c887ad591c62bdaeb180c080a07ea72c68abfb8fca1bd964f0f99132ed9280261bdca3e549546c0205e800f7d0a05b4ef3039e9c9b9babc179a1878fb825b5aaf5aed2fa8744854150157b08d6f3"
         ))
+    }
+
+    #[tokio::test]
+    async fn raw_transaction_recovery_shares_sender_cache() {
+        let cache = SenderRecoveryCache::new(16);
+        let eth_api = mock_eth_api_builder(Default::default())
+            .sender_recovery_cache(Some(cache.clone()))
+            .build();
+        let mut generator = TransactionGenerator::new(rand::rng());
+
+        for (transaction, warm_cache) in [
+            (generator.transaction().into_legacy(), false),
+            (generator.transaction().nonce(1).into_eip1559(), true),
+        ] {
+            let raw = Bytes::from(transaction.encoded_2718());
+            let hash = *transaction.tx_hash();
+            let sender = transaction.try_recover().unwrap();
+            assert_eq!(cache.get(&hash), None);
+            if warm_cache {
+                let recovered =
+                    eth_api.recover_raw_transaction::<PoolPooledTx<TestPool>>(&raw).unwrap();
+                assert_eq!(recovered.signer(), sender);
+                assert_eq!(cache.get(&hash), Some(sender));
+            }
+
+            assert_eq!(eth_api.send_raw_transaction(raw.clone()).await.unwrap(), hash);
+            assert_eq!(cache.get(&hash), Some(sender));
+            let recovered =
+                eth_api.recover_raw_transaction::<PoolPooledTx<TestPool>>(&raw).unwrap();
+            assert_eq!(recovered.signer(), sender);
+            assert_eq!(eth_api.recover_raw_pool_transaction(&raw).unwrap().sender(), sender);
+        }
+    }
+
+    #[tokio::test]
+    async fn raw_transaction_recovery_preserves_errors() {
+        let invalid = TransactionSigned::new_unhashed(
+            alloy_consensus::TxLegacy::default().into(),
+            Signature::new(U256::ZERO, U256::ZERO, false),
+        );
+        let mut trailing = raw_transfer_tx().to_vec();
+        trailing.push(0);
+
+        for enabled in [false, true] {
+            let cache = SenderRecoveryCache::new(16);
+            let eth_api = mock_eth_api_builder(Default::default())
+                .sender_recovery_cache(enabled.then(|| cache.clone()))
+                .build();
+            let valid = eth_api.recover_raw_pool_transaction(&raw_transfer_tx()).unwrap();
+            assert_eq!(cache.get(valid.hash()), enabled.then_some(valid.sender()));
+            for (raw, expected) in [
+                (vec![], EthApiError::EmptyRawTransactionData),
+                (vec![2], EthApiError::FailedToDecodeSignedTransaction),
+                (trailing.clone(), EthApiError::FailedToDecodeSignedTransaction),
+                (invalid.encoded_2718(), EthApiError::InvalidTransactionSignature),
+            ] {
+                let err = eth_api.send_raw_transaction(raw.clone().into()).await.unwrap_err();
+                assert_eq!(err.to_string(), expected.to_string());
+                let err =
+                    eth_api.recover_raw_transaction::<PoolPooledTx<TestPool>>(&raw).unwrap_err();
+                assert_eq!(err.to_string(), expected.to_string());
+            }
+            assert!(eth_api.pool().is_empty());
+            assert_eq!(cache.get(invalid.tx_hash()), None);
+        }
+    }
+
+    #[tokio::test]
+    async fn cached_raw_transaction_preserves_blob_sidecar() {
+        let cache = SenderRecoveryCache::new(16);
+        let provider = MockEthProvider::default();
+        let evm_config = EthEvmConfig::new(provider.chain_spec());
+        let eth_api = EthApi::builder(
+            provider,
+            reth_transaction_pool::noop::NoopTransactionPool::default(),
+            NoopNetwork::default(),
+            evm_config,
+        )
+        .sender_recovery_cache(Some(cache.clone()))
+        .build();
+        let mut builder = SidecarBuilder::<SimpleCoder>::new();
+        builder.ingest(b"cached blob transaction");
+        let sidecar =
+            BlobTransactionSidecarVariant::from(builder.build::<BlobTransactionSidecar>().unwrap());
+        let transaction = TransactionSigned::new_unhashed(
+            alloy_consensus::TxEip4844 {
+                blob_versioned_hashes: sidecar.versioned_hashes().collect(),
+                ..Default::default()
+            }
+            .into(),
+            Signature::test_signature(),
+        );
+        let hash = *transaction.tx_hash();
+        let sender = transaction.try_recover().unwrap();
+        let raw = transaction.try_into_pooled_eip4844(sidecar.clone()).unwrap().encoded_2718();
+
+        for _ in 0..2 {
+            let mut recovered = eth_api.recover_raw_pool_transaction(&raw).unwrap();
+            assert_eq!(recovered.sender(), sender);
+            assert_eq!(cache.get(&hash), Some(sender));
+            let EthBlobTransactionSidecar::Present(actual) = recovered.take_blob() else {
+                panic!("missing blob sidecar")
+            };
+            assert_eq!(actual.into_sidecar(), sidecar);
+        }
+    }
+
+    #[tokio::test]
+    async fn send_raw_transaction_sync_populates_sender_cache() {
+        let cache = SenderRecoveryCache::new(16);
+        let eth_api = mock_eth_api_builder(Default::default())
+            .sender_recovery_cache(Some(cache.clone()))
+            .build();
+        let raw = raw_transfer_tx();
+        let transaction = EthPooledTransaction::decode_raw_transaction(&raw).unwrap();
+        let sender = transaction.try_recover().unwrap();
+
+        let err = eth_api.send_raw_transaction_sync(raw, Some(1)).await.unwrap_err();
+        assert!(matches!(err, EthApiError::TransactionConfirmationTimeout { .. }));
+        assert_eq!(cache.get(transaction.tx_hash()), Some(sender));
+        assert_eq!(eth_api.pool().len(), 1);
     }
 
     #[tokio::test]
