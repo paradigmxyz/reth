@@ -96,11 +96,19 @@ pub trait EstimateCall: Call {
         // the gas limit of the corresponding block
         let block_gas_limit = evm_env.block_env.gas_limit();
         // If EIP-8037 is enabled, the transaction gas limit cap is not applicable
-        let max_gas_limit = if evm_env.cfg_env.is_amsterdam_eip8037_enabled() {
+        let mut max_gas_limit = if evm_env.cfg_env.is_amsterdam_eip8037_enabled() {
             block_gas_limit
         } else {
             evm_env.cfg_env.tx_gas_limit_cap().min(block_gas_limit)
         };
+
+        // Apply the RPC gas cap (`--rpc.gascap`) the same way `prepare_call_env` does for
+        // `eth_call`. Zero means unlimited. This happens before the request gas limit is clamped
+        // so the first execution, binary search, and out-of-gas retries all stay within the cap.
+        let gas_cap = self.call_gas_limit();
+        if gas_cap != 0 {
+            max_gas_limit = max_gas_limit.min(gas_cap);
+        }
 
         // Determine the highest possible gas limit, considering both the request's specified limit
         // and the block's limit.

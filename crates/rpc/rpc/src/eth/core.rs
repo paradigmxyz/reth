@@ -550,10 +550,13 @@ where
 mod tests {
     use crate::{eth::helpers::types::EthRpcConverter, EthApi, EthApiBuilder};
     use alloy_consensus::{Block, BlockBody, Header};
-    use alloy_eips::BlockNumberOrTag;
-    use alloy_primitives::{Address, Signature, B256, U256, U64};
+    use alloy_eips::{BlockId, BlockNumberOrTag};
+    use alloy_primitives::{Address, Bytes, Signature, B256, U256, U64};
     use alloy_rpc_types::FeeHistory;
-    use alloy_rpc_types_eth::{Bundle, TransactionRequest};
+    use alloy_rpc_types_eth::{
+        state::{AccountOverride, EvmOverrides, StateOverride},
+        Bundle, TransactionRequest,
+    };
     use jsonrpsee_types::error::INVALID_PARAMS_CODE;
     use rand::Rng;
     use reth_chain_state::CanonStateSubscriptions;
@@ -565,7 +568,8 @@ mod tests {
         test_utils::{ExtendedAccount, MockEthProvider, NoopProvider},
         PruneCheckpointReader, StageCheckpointReader,
     };
-    use reth_rpc_eth_api::{node::RpcNodeCoreAdapter, EthApiServer};
+    use reth_rpc_eth_api::{helpers::EthCall, node::RpcNodeCoreAdapter, EthApiServer};
+    use reth_rpc_eth_types::RpcInvalidTransactionError;
     use reth_storage_api::{BalProvider, BlockReader, BlockReaderIdExt, StateProviderFactory};
     use reth_testing_utils::generators;
     use reth_transaction_pool::test_utils::{testing_pool, TestPool};
@@ -600,6 +604,17 @@ mod tests {
             NoopNetwork::default(),
             EthEvmConfig::new(provider.chain_spec()),
         )
+        .build()
+    }
+
+    fn build_test_eth_api_with_gas_cap(provider: MockEthProvider, gas_cap: u64) -> FakeEthApi {
+        EthApiBuilder::new(
+            provider.clone(),
+            testing_pool(),
+            NoopNetwork::default(),
+            EthEvmConfig::new(provider.chain_spec()),
+        )
+        .gas_cap(gas_cap.into())
         .build()
     }
 
@@ -1058,5 +1073,72 @@ mod tests {
             fee_history.reward.is_none(),
             "all: no percentiles were requested, so there should be no rewards result"
         );
+    }
+
+    /// A call that only succeeds once remaining gas exceeds 60_000 must not estimate above the
+    /// RPC gas cap when the block gas limit is higher.
+    #[tokio::test]
+    async fn estimate_gas_respects_rpc_gas_cap() {
+        const BLOCK_GAS_LIMIT: u64 = 30_000_000;
+        const LOW_GAS_CAP: u64 = 50_000;
+        const HIGH_GAS_CAP: u64 = 200_000;
+        // Succeeds only when `GAS > 60_000` (PUSH2 0xea60). Intrinsic gas keeps that above
+        // `LOW_GAS_CAP` and below `HIGH_GAS_CAP`.
+        // GAS, PUSH2 0xea60, LT, PUSH1 0x09, JUMPI, INVALID, JUMPDEST, STOP
+        let code =
+            Bytes::from_static(&[0x5a, 0x61, 0xea, 0x60, 0x10, 0x60, 0x09, 0x57, 0xfe, 0x5b, 0x00]);
+
+        let provider = MockEthProvider::default();
+        let sender = Address::repeat_byte(0x11);
+        let contract = Address::repeat_byte(0xaa);
+        provider.add_account(sender, ExtendedAccount::new(0, U256::MAX));
+        provider.add_block(
+            B256::repeat_byte(0x42),
+            Block {
+                header: Header { number: 1, gas_limit: BLOCK_GAS_LIMIT, ..Default::default() },
+                body: BlockBody::default(),
+            },
+        );
+
+        let request = TransactionRequest::default()
+            .with_from(sender)
+            .with_to(contract)
+            .with_gas_limit(1_000_000)
+            .with_gas_price(0);
+        let mut state_override = StateOverride::default();
+        state_override.insert(contract, AccountOverride { code: Some(code), ..Default::default() });
+        let overrides = EvmOverrides::state(Some(state_override));
+        let at = BlockId::Number(BlockNumberOrTag::Latest);
+
+        let capped = build_test_eth_api_with_gas_cap(provider.clone(), LOW_GAS_CAP);
+        let estimate_err =
+            EthCall::estimate_gas_at(&capped, request.clone(), at, overrides.clone())
+                .await
+                .expect_err("estimation above the rpc gas cap must fail");
+        assert!(
+            matches!(
+                estimate_err.as_invalid_transaction(),
+                Some(RpcInvalidTransactionError::EvmHalt(_))
+            ),
+            "{estimate_err}"
+        );
+
+        let call_err = EthCall::call(&capped, request.clone(), Some(at), overrides.clone())
+            .await
+            .expect_err("eth_call is capped the same way");
+        assert!(
+            matches!(
+                call_err.as_invalid_transaction(),
+                Some(RpcInvalidTransactionError::EvmHalt(_))
+            ),
+            "{call_err}"
+        );
+
+        let relaxed = build_test_eth_api_with_gas_cap(provider, HIGH_GAS_CAP);
+        let estimated = EthCall::estimate_gas_at(&relaxed, request, at, overrides)
+            .await
+            .expect("same call fits under a higher rpc gas cap");
+        assert!(estimated > U256::from(LOW_GAS_CAP), "{estimated}");
+        assert!(estimated <= U256::from(HIGH_GAS_CAP), "{estimated}");
     }
 }
