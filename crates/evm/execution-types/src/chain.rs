@@ -553,12 +553,11 @@ pub struct BlockReceipts<T = reth_ethereum_primitives::Receipt> {
 #[cfg(feature = "serde-bincode-compat")]
 pub(super) mod serde_bincode_compat {
     use crate::serde_bincode_compat;
-    use alloc::{collections::BTreeMap, sync::Arc, vec::Vec};
-    use alloy_primitives::{Address, BlockNumber, Bytes};
-    use alloy_rlp::Decodable;
+    use alloc::{borrow::Cow, collections::BTreeMap, sync::Arc, vec::Vec};
+    use alloy_primitives::{Address, BlockNumber};
     use core::marker::PhantomData;
     use reth_ethereum_primitives::EthPrimitives;
-    use reth_primitives_traits::{NodePrimitives, SealedBlock};
+    use reth_primitives_traits::{Block, NodePrimitives, SealedBlock};
     use reth_trie_common::ComputedTrieData;
     use serde::{Deserialize, Deserializer, Serialize, Serializer};
     use serde_with::{DeserializeAs, SerializeAs};
@@ -586,7 +585,7 @@ pub(super) mod serde_bincode_compat {
     {
         #[serde(skip)]
         _phantom: PhantomData<N>,
-        blocks: BTreeMap<BlockNumber, RecoveredBlockRepr>,
+        blocks: BTreeMap<BlockNumber, RecoveredBlockRepr<'a, N::Block>>,
         execution_outcome: serde_bincode_compat::ExecutionOutcome<'a>,
         #[serde(default)]
         trie_updates: BTreeMap<
@@ -601,8 +600,10 @@ pub(super) mod serde_bincode_compat {
     }
 
     #[derive(Debug, Serialize, Deserialize)]
-    struct RecoveredBlockRepr {
-        rlp: Bytes,
+    #[serde(bound = "")]
+    struct RecoveredBlockRepr<'a, B: Block> {
+        #[serde(with = "crate::serde_rlp")]
+        rlp: Cow<'a, SealedBlock<B>>,
         senders: Vec<Address>,
     }
 
@@ -618,7 +619,7 @@ pub(super) mod serde_bincode_compat {
                     .iter()
                     .map(|(num, recovered)| {
                         let senders = recovered.senders().to_vec();
-                        let rlp = Bytes::from(alloy_rlp::encode(recovered.sealed_block()));
+                        let rlp = Cow::Borrowed(recovered.sealed_block());
                         (*num, RecoveredBlockRepr { rlp, senders })
                     })
                     .collect(),
@@ -667,9 +668,7 @@ pub(super) mod serde_bincode_compat {
                 .blocks
                 .into_iter()
                 .map(|(num, repr)| {
-                    let block = N::Block::decode(&mut repr.rlp.as_ref())
-                        .expect("invalid RLP for block in serde_bincode_compat");
-                    let sealed = SealedBlock::new_unhashed(block);
+                    let sealed = repr.rlp.into_owned();
                     (num, Arc::new(RecoveredBlock::new_sealed(sealed, repr.senders)))
                 })
                 .collect();
@@ -711,12 +710,70 @@ pub(super) mod serde_bincode_compat {
 
     #[cfg(test)]
     mod tests {
-        use super::super::{serde_bincode_compat, Chain};
+        use super::{
+            super::{serde_bincode_compat, Chain},
+            RecoveredBlockRepr,
+        };
+        use alloc::borrow::Cow;
+        use alloy_primitives::{Address, Bytes};
         use arbitrary::Arbitrary;
         use rand::Rng;
         use reth_primitives_traits::RecoveredBlock;
         use serde::{Deserialize, Serialize};
         use serde_with::serde_as;
+
+        #[test]
+        fn recovered_block_preserves_binary_encoding() {
+            #[derive(Serialize, Deserialize)]
+            struct PreviousRepr {
+                rlp: Bytes,
+                senders: Vec<Address>,
+            }
+
+            let block: reth_primitives_traits::SealedBlock<reth_ethereum_primitives::Block> =
+                reth_primitives_traits::SealedBlock::seal_slow(Default::default());
+            let previous = PreviousRepr {
+                rlp: alloy_rlp::encode(&block).into(),
+                senders: vec![Address::repeat_byte(1)],
+            };
+            let current = RecoveredBlockRepr {
+                rlp: Cow::Borrowed(&block),
+                senders: previous.senders.clone(),
+            };
+
+            let msgpack = rmp_serde::to_vec(&previous).unwrap();
+            assert_eq!(rmp_serde::to_vec(&current).unwrap(), msgpack);
+            let decoded: RecoveredBlockRepr<'_, reth_ethereum_primitives::Block> =
+                rmp_serde::from_read(msgpack.as_slice()).unwrap();
+            assert_eq!(decoded.rlp.as_ref(), &block);
+            assert_eq!(decoded.senders, previous.senders);
+
+            let bincode = bincode::serialize(&previous).unwrap();
+            assert_eq!(bincode::serialize(&current).unwrap(), bincode);
+            let decoded: RecoveredBlockRepr<'_, reth_ethereum_primitives::Block> =
+                bincode::deserialize(&bincode).unwrap();
+            assert_eq!(decoded.rlp.as_ref(), &block);
+            assert_eq!(decoded.senders, previous.senders);
+        }
+
+        #[test]
+        fn recovered_block_returns_decode_errors() {
+            #[derive(Serialize)]
+            struct EncodedBlock {
+                rlp: Bytes,
+                senders: Vec<Address>,
+            }
+
+            let encoded =
+                rmp_serde::to_vec(&EncodedBlock { rlp: Bytes::new(), senders: Vec::new() })
+                    .unwrap();
+            assert!(
+                rmp_serde::from_slice::<RecoveredBlockRepr<'_, reth_ethereum_primitives::Block>>(
+                    &encoded
+                )
+                .is_err()
+            );
+        }
 
         #[test]
         fn test_chain_bincode_roundtrip() {

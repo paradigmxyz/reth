@@ -11,6 +11,9 @@
 
 extern crate alloc;
 
+#[cfg(feature = "serde")]
+pub mod serde_rlp;
+
 mod bal;
 pub use bal::*;
 
