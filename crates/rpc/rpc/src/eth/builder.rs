@@ -607,8 +607,8 @@ where
             rpc_converter,
             next_env,
             raw_tx_forwarder.forwarder_client(),
+            sender_recovery_cache,
         )
-        .with_sender_recovery_cache(sender_recovery_cache)
     }
 
     /// Builds the [`EthApi`] instance.

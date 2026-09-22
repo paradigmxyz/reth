@@ -284,12 +284,6 @@ where
     N: RpcNodeCore,
     Rpc: RpcConvert,
 {
-    /// Sets the shared sender recovery cache.
-    pub fn with_sender_recovery_cache(mut self, cache: Option<SenderRecoveryCache>) -> Self {
-        self.sender_recovery_cache = cache;
-        self
-    }
-
     /// Returns the shared sender recovery cache, if enabled.
     pub const fn sender_recovery_cache(&self) -> Option<&SenderRecoveryCache> {
         self.sender_recovery_cache.as_ref()
@@ -308,6 +302,7 @@ where
         converter: Rpc,
         next_env: impl PendingEnvBuilder<N::Evm>,
         raw_tx_forwarder: Option<RpcClient>,
+        sender_recovery_cache: Option<SenderRecoveryCache>,
     ) -> Self {
         let signers = parking_lot::RwLock::new(Default::default());
         // get the block number of the latest block
@@ -345,7 +340,7 @@ where
             settings,
             raw_tx_sender,
             raw_tx_forwarder,
-            sender_recovery_cache: None,
+            sender_recovery_cache,
             converter,
             next_env_builder: Box::new(next_env),
             tx_batch_sender,
