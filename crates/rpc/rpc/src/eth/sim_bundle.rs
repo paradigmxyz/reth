@@ -21,7 +21,6 @@ use reth_rpc_eth_api::{
 use reth_rpc_eth_types::{utils::recover_raw_transaction, EthApiError};
 use reth_storage_api::ProviderTx;
 use reth_tasks::pool::BlockingTaskGuard;
-use reth_transaction_pool::{PoolPooledTx, PoolTransaction, TransactionPool};
 use revm::{
     context::Block, context_interface::result::ResultAndState, DatabaseCommit, DatabaseRef,
 };
@@ -229,10 +228,7 @@ where
             while idx < body.len() {
                 match &body[idx] {
                     BundleItem::Tx { tx, can_revert } => {
-                        let recovered_tx = recover_raw_transaction::<PoolPooledTx<Eth::Pool>>(tx)?;
-                        let tx = recovered_tx.map(
-                            <Eth::Pool as TransactionPool>::Transaction::pooled_into_consensus,
-                        );
+                        let tx = recover_raw_transaction::<ProviderTx<Eth::Provider>>(tx)?;
 
                         let refund_percent =
                             validity.as_ref().and_then(|v| v.refund.as_ref()).and_then(|refunds| {

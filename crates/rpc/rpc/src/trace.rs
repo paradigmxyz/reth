@@ -27,9 +27,8 @@ use reth_rpc_eth_api::{
     FromEthApiError, RpcNodeCore,
 };
 use reth_rpc_eth_types::{error::EthApiError, utils::recover_raw_transaction, EthConfig};
-use reth_storage_api::{BlockNumReader, BlockReader};
+use reth_storage_api::{BlockNumReader, BlockReader, ProviderTx};
 use reth_tasks::pool::BlockingTaskGuard;
-use reth_transaction_pool::{PoolPooledTx, PoolTransaction, TransactionPool};
 use revm::DatabaseCommit;
 use revm_inspectors::{
     opcode::OpcodeGasInspector,
@@ -124,8 +123,7 @@ where
         trace_types: HashSet<TraceType>,
         block_id: Option<BlockId>,
     ) -> Result<TraceResults, Eth::Error> {
-        let tx = recover_raw_transaction::<PoolPooledTx<Eth::Pool>>(&tx)?
-            .map(<Eth::Pool as TransactionPool>::Transaction::pooled_into_consensus);
+        let tx = recover_raw_transaction::<ProviderTx<Eth::Provider>>(&tx)?;
 
         let (evm_env, at) = self.eth_api().evm_env_at(block_id.unwrap_or_default()).await?;
 
