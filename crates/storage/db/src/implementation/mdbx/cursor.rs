@@ -303,6 +303,7 @@ impl<T: Table> DbCursorRW<T> for Cursor<RW, T> {
     fn append(&mut self, key: T::Key, value: &T::Value) -> Result<(), DatabaseError> {
         let key = key.encode();
         let value = compress_to_buf_or_ref!(self, value);
+
         self.execute_with_operation_metric(
             Operation::CursorAppend,
             Some(value.unwrap_or(&self.buf).len()),
