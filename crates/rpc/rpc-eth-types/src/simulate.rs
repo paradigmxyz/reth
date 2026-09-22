@@ -6,7 +6,7 @@ use crate::{
 };
 use alloy_chains::Chain;
 use alloy_consensus::{transaction::TxHashRef, BlockHeader, Transaction as _};
-use alloy_eips::{eip2718::WithEncoded, eip8141::FrameStatus};
+use alloy_eips::eip2718::WithEncoded;
 use alloy_evm::{
     block::TxResult, eth::transaction_gas_reservation, precompiles::PrecompilesMap, TransactionTr,
 };
@@ -33,7 +33,10 @@ use revm::{
     primitives::{Address, Bytes, TxKind, U256},
     Database,
 };
-use serde::{Deserialize, Serialize};
+
+pub use alloy_rpc_types_eth::simulate::{
+    FrameSimulationFrameResult, FrameSimulationPrefixShape, FrameSimulationResult,
+};
 
 /// Fallback seconds added between simulated block timestamps when neither the user nor the chain
 /// hint provides a value.
@@ -50,85 +53,6 @@ pub const SIMULATE_REVERT_CODE: i32 = 3;
 ///
 /// <https://github.com/ethereum/execution-apis>
 pub const SIMULATE_VM_ERROR_CODE: i32 = -32015;
-
-/// Recognized shape of an EIP-8141 validation prefix.
-///
-/// An optional expiry verifier may precede each shape and is not represented in this value.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub enum FrameSimulationPrefixShape {
-    /// The sender verifies and approves both execution and payment.
-    SelfVerify,
-    /// A deployment frame precedes sender verification and approval.
-    DeploySelfVerify,
-    /// The sender approves execution before a separate payer approves payment.
-    OnlyVerifyPay,
-    /// A deployment frame precedes separate sender and payer approvals.
-    DeployOnlyVerifyPay,
-}
-
-/// Result for one EIP-8141 frame.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct FrameSimulationFrameResult {
-    /// Execution gas consumed by this frame.
-    #[serde(with = "alloy_serde::quantity")]
-    pub execution_gas: u64,
-    /// State gas consumed by this frame.
-    #[serde(with = "alloy_serde::quantity")]
-    pub state_gas: u64,
-    /// Exact EIP-8141 outcome of this frame.
-    pub status: FrameStatus,
-}
-
-/// Result returned by `eth_simulateFrameTransaction`.
-///
-/// `valid` reports whether the transaction's public validation prefix passed against the selected
-/// state. It does not assert pool admission: nonce ordering and other pool-local policy remain
-/// outside this simulation. When the prefix is valid, the optional execution fields describe a
-/// separate, non-committing execution of the complete transaction.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct FrameSimulationResult {
-    /// Whether the public validation prefix passed.
-    pub valid: bool,
-    /// Maximum transaction cost approved by the payer.
-    pub max_cost: U256,
-    /// Structurally recognized validation-prefix shape.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub prefix_shape: Option<FrameSimulationPrefixShape>,
-    /// Account that approved the maximum transaction cost.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub payer: Option<Address>,
-    /// Reason the validation prefix was not accepted.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub violation: Option<String>,
-    /// Aggregate gas used by the complete transaction for fee accounting.
-    #[serde(skip_serializing_if = "Option::is_none", with = "alloy_serde::quantity::opt")]
-    pub gas_used: Option<u64>,
-    /// Results for frames reached during complete execution.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub frames: Option<Vec<FrameSimulationFrameResult>>,
-}
-
-impl FrameSimulationResult {
-    /// Creates a response for a transaction whose public validation prefix was not accepted.
-    pub fn invalid(
-        max_cost: U256,
-        prefix_shape: Option<FrameSimulationPrefixShape>,
-        violation: impl Into<String>,
-    ) -> Self {
-        Self {
-            valid: false,
-            max_cost,
-            prefix_shape,
-            payer: None,
-            violation: Some(violation.into()),
-            gas_used: None,
-            frames: None,
-        }
-    }
-}
 
 /// Errors which may occur during `eth_simulateV1` execution.
 #[derive(Debug, thiserror::Error)]

@@ -372,7 +372,14 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
                 Ok(policy) => policy,
                 Err(reason) => return Ok(FrameSimulationResult::invalid(max_cost, None, reason)),
             };
-            let prefix_shape = Some(frame_simulation_prefix_shape(policy));
+            let prefix_shape = Some(
+                FrameSimulationPrefixShape::from_validation_prefix(
+                    policy.prefix_end,
+                    policy.deploy_index,
+                    policy.expiry_index,
+                )
+                .expect("frame validation policy accepted an unknown prefix shape"),
+            );
 
             if self.call_gas_limit() != 0 && tx_env.gas_limit() > self.call_gas_limit() {
                 return Err(EthApiError::other(EthSimulateError::GasLimitReached).into())
@@ -1137,16 +1144,5 @@ pub trait Call:
         }
 
         Ok((evm_env, tx_env))
-    }
-}
-
-fn frame_simulation_prefix_shape(policy: FrameValidationPolicy) -> FrameSimulationPrefixShape {
-    let leading_expiry_frame = usize::from(policy.expiry_index.is_some());
-    match (policy.deploy_index.is_some(), policy.prefix_end.saturating_sub(leading_expiry_frame)) {
-        (false, 1) => FrameSimulationPrefixShape::SelfVerify,
-        (true, 2) => FrameSimulationPrefixShape::DeploySelfVerify,
-        (false, 2) => FrameSimulationPrefixShape::OnlyVerifyPay,
-        (true, 3) => FrameSimulationPrefixShape::DeployOnlyVerifyPay,
-        _ => unreachable!("frame validation policy accepted an unknown prefix shape"),
     }
 }

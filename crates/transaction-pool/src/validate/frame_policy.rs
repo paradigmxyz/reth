@@ -87,27 +87,26 @@ impl FrameValidationPolicy {
 }
 
 fn is_deploy(frame: &Frame) -> bool {
-    frame.mode == FrameMode::Default && frame.flags == 0 && frame.has_valid_target_encoding()
+    frame.mode == FrameMode::Default && frame.flags == 0
 }
 
 fn is_sender_verify(frame: &Frame, sender: Address, flags: u8) -> bool {
     frame.mode == FrameMode::Verify &&
         frame.flags == flags &&
-        frame.has_valid_target_encoding() &&
         frame.target_address().is_none_or(|target| target == sender)
 }
 
 fn is_pay(frame: &Frame) -> bool {
-    frame.mode == FrameMode::Verify && frame.flags == 1 && frame.has_valid_target_encoding()
+    frame.mode == FrameMode::Verify && frame.flags == 1
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_eips::eip8141::{FrameLimits, EXPIRY_DATA_LENGTH, EXPIRY_VERIFIER};
+    use alloy_eips::eip8141::{FrameAddress, FrameLimits, EXPIRY_DATA_LENGTH, EXPIRY_VERIFIER};
     use alloy_primitives::{Bytes, U256};
 
-    fn frame(mode: FrameMode, flags: u8, target: Bytes) -> Frame {
+    fn frame(mode: FrameMode, flags: u8, target: FrameAddress) -> Frame {
         Frame {
             mode,
             flags,
@@ -122,8 +121,8 @@ mod tests {
         TxEip8141 { sender: Address::repeat_byte(0x11), frames, ..Default::default() }
     }
 
-    fn sender() -> Bytes {
-        Bytes::copy_from_slice(Address::repeat_byte(0x11).as_slice())
+    fn sender() -> FrameAddress {
+        Address::repeat_byte(0x11).into()
     }
 
     #[test]
@@ -133,7 +132,7 @@ mod tests {
             (vec![frame(FrameMode::Verify, 3, s.clone())], 1),
             (
                 vec![
-                    frame(FrameMode::Default, 0, Bytes::new()),
+                    frame(FrameMode::Default, 0, FrameAddress::default()),
                     frame(FrameMode::Verify, 3, s.clone()),
                 ],
                 2,
@@ -141,15 +140,15 @@ mod tests {
             (
                 vec![
                     frame(FrameMode::Verify, 2, s.clone()),
-                    frame(FrameMode::Verify, 1, Bytes::new()),
+                    frame(FrameMode::Verify, 1, FrameAddress::default()),
                 ],
                 2,
             ),
             (
                 vec![
-                    frame(FrameMode::Default, 0, Bytes::new()),
+                    frame(FrameMode::Default, 0, FrameAddress::default()),
                     frame(FrameMode::Verify, 2, s),
-                    frame(FrameMode::Verify, 1, Bytes::new()),
+                    frame(FrameMode::Verify, 1, FrameAddress::default()),
                 ],
                 3,
             ),
@@ -161,8 +160,7 @@ mod tests {
 
     #[test]
     fn expiry_and_suffix_rules() {
-        let mut expiry =
-            frame(FrameMode::Verify, 0, Bytes::copy_from_slice(EXPIRY_VERIFIER.as_slice()));
+        let mut expiry = frame(FrameMode::Verify, 0, EXPIRY_VERIFIER.into());
         expiry.data = Bytes::from(vec![0; EXPIRY_DATA_LENGTH]);
         expiry.limits.state = 0;
         let s = sender();
@@ -171,7 +169,7 @@ mod tests {
         assert_eq!(p.expiry_index, Some(0));
         t.frames[0].limits.execution = MAX_VERIFY_GAS;
         assert_eq!(FrameValidationPolicy::new(&t, 0), Err("verification gas budget exceeded"));
-        t.frames.push(frame(FrameMode::Verify, 0, Bytes::new()));
+        t.frames.push(frame(FrameMode::Verify, 0, FrameAddress::default()));
         assert_eq!(FrameValidationPolicy::new(&t, 1), Err("verify frame after validation prefix"));
     }
 
@@ -180,15 +178,15 @@ mod tests {
         let s = sender();
         for bad in [
             vec![frame(FrameMode::Verify, 7, s.clone())],
-            vec![frame(FrameMode::Verify, 3, Bytes::from(vec![1; 19]))],
-            vec![frame(FrameMode::Verify, 3, Bytes::from(vec![0x22; 20]))],
+            vec![frame(FrameMode::Verify, 3, Address::repeat_byte(0x22).into())],
+            vec![frame(FrameMode::Verify, 2, s.clone())],
         ] {
             assert!(FrameValidationPolicy::new(&tx(bad), 1).is_err());
         }
         assert!(FrameValidationPolicy::new(
             &tx(vec![
                 frame(FrameMode::Verify, 3, s.clone()),
-                frame(FrameMode::Default, 0, Bytes::new()),
+                frame(FrameMode::Default, 0, FrameAddress::default()),
             ]),
             1
         )
