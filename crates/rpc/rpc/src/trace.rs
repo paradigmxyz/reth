@@ -191,12 +191,12 @@ where
             .await
     }
 
-    /// Replays a transaction, returning the traces.
+    /// Replays a transaction, returning the traces or `None` if the transaction does not exist.
     pub async fn replay_transaction(
         &self,
         hash: B256,
         trace_types: HashSet<TraceType>,
-    ) -> Result<TraceResults, Eth::Error> {
+    ) -> Result<Option<TraceResultsWithTransactionHash>, Eth::Error> {
         let config = TracingInspectorConfig::from_parity_config(&trace_types);
         self.eth_api()
             .spawn_trace_transaction_in_block(hash, config, move |_, inspector, res, db| {
@@ -204,32 +204,39 @@ where
                     .into_parity_builder()
                     .into_trace_results_with_state(&res, &trace_types, &db)
                     .map_err(Eth::Error::from_eth_err)?;
-                Ok(trace_res)
+                Ok(TraceResultsWithTransactionHash {
+                    transaction_hash: hash,
+                    full_trace: trace_res,
+                })
             })
             .await
-            .transpose()
-            .ok_or(EthApiError::TransactionNotFound)?
     }
 
-    /// Returns transaction trace objects at the given index
+    /// Returns the transaction trace at the given `traceAddress` path.
     ///
-    /// Note: For compatibility reasons this only supports 1 single index, since this method is
-    /// supposed to return a single trace. See also: <https://github.com/ledgerwatch/erigon/blob/862faf054b8a0fa15962a9c73839b619886101eb/turbo/jsonrpc/trace_filtering.go#L114-L133>
-    ///
-    /// This returns `None` if `indices` is empty
+    /// An empty path selects the root. Returns `None` if the transaction or path does not exist.
     pub async fn trace_get(
         &self,
         hash: B256,
         indices: Vec<usize>,
     ) -> Result<Option<LocalizedTransactionTrace>, Eth::Error> {
-        if indices.len() != 1 {
-            // The OG impl failed if it gets more than a single index
-            return Ok(None)
-        }
-        self.trace_get_index(hash, indices[0]).await
+        self.eth_api()
+            .spawn_trace_transaction_in_block(
+                hash,
+                TracingInspectorConfig::default_parity(),
+                move |tx_info, inspector, _, _| {
+                    Ok(inspector
+                        .into_parity_builder()
+                        .into_localized_transaction_traces_iter(tx_info)
+                        .find(|trace| trace.trace.trace_address == indices))
+                },
+            )
+            .await
+            .map(Option::flatten)
     }
 
-    /// Returns transaction trace object at the given index.
+    /// Returns the transaction trace at the given flat index, unlike [`Self::trace_get`], which
+    /// selects a `traceAddress` path.
     ///
     /// Returns `None` if the trace object at that index does not exist
     pub async fn trace_get_index(
@@ -753,7 +760,7 @@ where
         &self,
         transaction: B256,
         trace_types: HashSet<TraceType>,
-    ) -> RpcResult<TraceResults> {
+    ) -> RpcResult<Option<TraceResultsWithTransactionHash>> {
         let _permit = self.acquire_trace_permit().await;
         Ok(Self::replay_transaction(self, transaction, trace_types).await.map_err(Into::into)?)
     }
@@ -887,6 +894,217 @@ fn reward_trace<H: BlockHeader>(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn trace_get_selects_tree_paths() {
+        use crate::EthApiBuilder;
+        use alloy_consensus::{Header, TxLegacy};
+        use alloy_primitives::{Signature, TxKind};
+        use reth_chain_state::CanonStateNotification;
+        use reth_ethereum_primitives::{Block, BlockBody, TransactionSigned};
+        use reth_evm_ethereum::EthEvmConfig;
+        use reth_execution_types::{Chain, ExecutionOutcome};
+        use reth_network_api::noop::NoopNetwork;
+        use reth_primitives_traits::{RecoveredBlock, SignerRecoverable};
+        use reth_provider::test_utils::{ExtendedAccount, MockEthProvider};
+        use reth_rpc_eth_types::cache::cache_new_blocks_task;
+        use reth_transaction_pool::test_utils::testing_pool;
+
+        let provider = MockEthProvider::default();
+        // The root calls 0x43 (which calls 0x44), then calls 0x45.
+        for (address, code) in [
+            (0x42, "60006000600060006000604361fffff15060006000600060006000604561fffff15000"),
+            (0x43, "600060006000600060006044611000f15000"),
+        ] {
+            provider.add_account(
+                Address::with_last_byte(address),
+                ExtendedAccount::new(0, U256::ZERO).with_bytecode(code.parse().unwrap()),
+            );
+        }
+        let tx = TransactionSigned::new_unhashed(
+            TxLegacy {
+                gas_limit: 500_000,
+                to: TxKind::Call(Address::with_last_byte(0x42)),
+                value: U256::from(1),
+                ..Default::default()
+            }
+            .into(),
+            Signature::test_signature(),
+        );
+        let hash = *tx.hash();
+        let sender = tx.recover_signer().unwrap();
+        provider.add_account(sender, ExtendedAccount::new(0, U256::from(1_000_000)));
+        let parent = Header { gas_limit: 30_000_000, ..Default::default() };
+        let parent_hash = parent.hash_slow();
+        provider.add_header(parent_hash, parent);
+        let block = Block {
+            header: Header { parent_hash, number: 1, gas_limit: 30_000_000, ..Default::default() },
+            body: BlockBody { transactions: vec![tx], ..Default::default() },
+        };
+        let block_hash = block.header.hash_slow();
+        provider.add_block(block_hash, block.clone());
+        let eth_api = EthApiBuilder::new(
+            provider.clone(),
+            testing_pool(),
+            NoopNetwork::default(),
+            EthEvmConfig::new(provider.chain_spec()),
+        )
+        .build();
+        // MockEthProvider does not implement recovered_block, so seed the RPC cache.
+        cache_new_blocks_task(
+            eth_api.cache().clone(),
+            futures::stream::iter([CanonStateNotification::Commit {
+                new: Arc::new(Chain::new(
+                    [RecoveredBlock::new_unhashed(block, vec![sender])],
+                    ExecutionOutcome {
+                        receipts: vec![vec![]],
+                        first_block: 1,
+                        ..Default::default()
+                    },
+                    Default::default(),
+                )),
+            }]),
+        )
+        .await;
+        let api = TraceApi::new(eth_api, BlockingTaskGuard::new(1), EthConfig::default());
+        let module = api.clone().into_rpc();
+        let traces = api.trace_transaction(hash).await.unwrap().unwrap();
+        let paths: Vec<_> = traces.iter().map(|trace| trace.trace.trace_address.clone()).collect();
+        assert_eq!(paths, [vec![], vec![0], vec![0, 0], vec![1]]);
+        for (path, expected) in [
+            (vec![], Some(&traces[0])),
+            (vec![0], Some(&traces[1])),
+            (vec![0, 0], Some(&traces[2])),
+            (vec![1], Some(&traces[3])),
+            (vec![2], None),
+            (vec![0, 1], None),
+            (vec![1, 0], None),
+        ] {
+            let indices: Vec<_> = path.iter().map(|index| format!("0x{index:x}")).collect();
+            let request = serde_json::json!({
+                "jsonrpc": "2.0", "id": 1, "method": "trace_get", "params": [hash, indices],
+            });
+            let (response, _) = module.raw_json_request(&request.to_string(), 1).await.unwrap();
+            let response: serde_json::Value = serde_json::from_str(response.get()).unwrap();
+            assert!(response.get("error").is_none(), "{response}");
+            assert_eq!(response["result"], serde_json::to_value(expected).unwrap());
+        }
+        assert!(api.trace_get(B256::ZERO, vec![]).await.unwrap().is_none());
+        assert!(api.trace_get(B256::ZERO, vec![0, 0]).await.unwrap().is_none());
+        assert_eq!(api.trace_get_index(hash, 2).await.unwrap().as_ref(), Some(&traces[2]));
+    }
+
+    #[tokio::test]
+    async fn replay_missing_transaction_returns_null() {
+        use crate::EthApiBuilder;
+        use reth_evm_ethereum::EthEvmConfig;
+        use reth_network_api::noop::NoopNetwork;
+        use reth_provider::test_utils::MockEthProvider;
+        use reth_transaction_pool::test_utils::testing_pool;
+
+        let provider = MockEthProvider::default();
+        let eth_api = EthApiBuilder::new(
+            provider.clone(),
+            testing_pool(),
+            NoopNetwork::default(),
+            EthEvmConfig::new(provider.chain_spec()),
+        )
+        .build();
+        let api = TraceApi::new(eth_api, BlockingTaskGuard::new(1), EthConfig::default());
+        let module = api.into_rpc();
+        for types in [serde_json::json!([]), serde_json::json!(["trace", "stateDiff", "vmTrace"])] {
+            let request = serde_json::json!({
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "trace_replayTransaction",
+                "params": [B256::with_last_byte(1), types],
+            });
+            let (response, _) = module.raw_json_request(&request.to_string(), 1).await.unwrap();
+            let response: serde_json::Value = serde_json::from_str(response.get()).unwrap();
+            assert_eq!(response, serde_json::json!({"jsonrpc": "2.0", "id": 1, "result": null}));
+        }
+    }
+
+    #[tokio::test]
+    async fn replay_transaction_includes_transaction_hash() {
+        use crate::EthApiBuilder;
+        use alloy_consensus::{Header, TxLegacy};
+        use alloy_primitives::{Signature, TxKind};
+        use reth_chain_state::CanonStateNotification;
+        use reth_ethereum_primitives::{Block, BlockBody, TransactionSigned};
+        use reth_evm_ethereum::EthEvmConfig;
+        use reth_execution_types::{Chain, ExecutionOutcome};
+        use reth_network_api::noop::NoopNetwork;
+        use reth_primitives_traits::{RecoveredBlock, SignerRecoverable};
+        use reth_provider::test_utils::{ExtendedAccount, MockEthProvider};
+        use reth_rpc_eth_types::cache::cache_new_blocks_task;
+        use reth_transaction_pool::test_utils::testing_pool;
+
+        let provider = MockEthProvider::default();
+        let tx = TransactionSigned::new_unhashed(
+            TxLegacy {
+                gas_limit: 21_000,
+                to: TxKind::Call(Address::with_last_byte(0x42)),
+                value: U256::from(1),
+                ..Default::default()
+            }
+            .into(),
+            Signature::test_signature(),
+        );
+        let hash = *tx.hash();
+        let sender = tx.recover_signer().unwrap();
+        provider.add_account(sender, ExtendedAccount::new(0, U256::from(1_000_000)));
+        let parent = Header { gas_limit: 30_000_000, ..Default::default() };
+        let parent_hash = parent.hash_slow();
+        provider.add_header(parent_hash, parent);
+        let block = Block {
+            header: Header { parent_hash, number: 1, gas_limit: 30_000_000, ..Default::default() },
+            body: BlockBody { transactions: vec![tx], ..Default::default() },
+        };
+        let block_hash = block.header.hash_slow();
+        provider.add_block(block_hash, block.clone());
+        let eth_api = EthApiBuilder::new(
+            provider.clone(),
+            testing_pool(),
+            NoopNetwork::default(),
+            EthEvmConfig::new(provider.chain_spec()),
+        )
+        .build();
+        // MockEthProvider does not implement recovered_block, so seed the RPC cache.
+        cache_new_blocks_task(
+            eth_api.cache().clone(),
+            futures::stream::iter([CanonStateNotification::Commit {
+                new: Arc::new(Chain::new(
+                    [RecoveredBlock::new_unhashed(block, vec![sender])],
+                    ExecutionOutcome {
+                        receipts: vec![vec![]],
+                        first_block: 1,
+                        ..Default::default()
+                    },
+                    Default::default(),
+                )),
+            }]),
+        )
+        .await;
+        let api = TraceApi::new(eth_api, BlockingTaskGuard::new(1), EthConfig::default());
+        let module = api.clone().into_rpc();
+        for types in
+            [HashSet::default(), HashSet::from_iter([TraceType::Trace, TraceType::StateDiff])]
+        {
+            let request = serde_json::json!({
+                "jsonrpc": "2.0", "id": 1, "method": "trace_replayTransaction",
+                "params": [hash, types],
+            });
+            let (response, _) = module.raw_json_request(&request.to_string(), 1).await.unwrap();
+            let response: serde_json::Value = serde_json::from_str(response.get()).unwrap();
+            assert!(response.get("error").is_none(), "{response}");
+            assert_eq!(response["result"]["transactionHash"], serde_json::json!(hash));
+
+            let block_replay =
+                api.replay_block_transactions(block_hash.into(), types).await.unwrap().unwrap();
+            assert_eq!(response["result"], serde_json::to_value(&block_replay[0]).unwrap());
+        }
+    }
 
     fn localized_transaction_trace(
         block_number: u64,

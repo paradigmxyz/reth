@@ -435,9 +435,9 @@ mod tests {
     use reth_provider::{
         providers::{BlockchainProvider, ProviderFactoryBuilder, ReadOnlyConfig},
         test_utils::{create_test_provider_factory, MockNodeTypes},
-        AccountReader, BalConfig, BalNotificationStream, BalStore, BalStoreHandle,
-        ChainSpecProvider, HeaderProvider, InMemoryBalStore, ProviderError, ProviderResult, RawBal,
-        StateProviderFactory, StorageSettingsCache,
+        AccountReader, BalConfig, BalStore, BalStoreHandle, ChainSpecProvider, HeaderProvider,
+        InMemoryBalStore, ProviderError, ProviderResult, RawBal, StateProviderFactory,
+        StorageSettingsCache,
     };
     use reth_prune::Pruner;
     use reth_prune_types::PruneMode;
@@ -553,10 +553,6 @@ mod tests {
 
         fn get_by_hashes(&self, block_hashes: &[BlockHash]) -> ProviderResult<Vec<Option<Bytes>>> {
             Ok(vec![None; block_hashes.len()])
-        }
-
-        fn bal_stream(&self) -> BalNotificationStream {
-            BalStoreHandle::noop().bal_stream()
         }
     }
 

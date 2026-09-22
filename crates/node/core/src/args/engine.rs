@@ -8,7 +8,7 @@ use eyre::ensure;
 use reth_cli_util::{parse_duration_from_secs_or_ms, parsers::format_duration_as_secs_or_ms};
 use reth_engine_primitives::{
     TreeConfig, DEFAULT_INVALID_HEADER_HIT_EVICTION_THRESHOLD, DEFAULT_MULTIPROOF_TASK_CHUNK_SIZE,
-    DEFAULT_NUM_STATE_MASKING_BLOCKS, DEFAULT_PERSISTENCE_BACKPRESSURE_THRESHOLD,
+    DEFAULT_NUM_STATE_MASKING_BLOCKS, MIN_PERSISTENCE_BACKPRESSURE_THRESHOLD,
 };
 use std::{sync::OnceLock, time::Duration};
 
@@ -75,7 +75,7 @@ impl DefaultEngineValues {
         self
     }
 
-    /// Set the default persistence backpressure threshold
+    /// Set the minimum default persistence backpressure threshold.
     pub const fn with_persistence_backpressure_threshold(mut self, v: u64) -> Self {
         self.persistence_backpressure_threshold = v;
         self
@@ -263,7 +263,7 @@ impl Default for DefaultEngineValues {
     fn default() -> Self {
         Self {
             persistence_threshold: DEFAULT_PERSISTENCE_THRESHOLD,
-            persistence_backpressure_threshold: DEFAULT_PERSISTENCE_BACKPRESSURE_THRESHOLD,
+            persistence_backpressure_threshold: MIN_PERSISTENCE_BACKPRESSURE_THRESHOLD,
             num_state_masking_blocks: DEFAULT_NUM_STATE_MASKING_BLOCKS,
             memory_block_buffer_target: DEFAULT_MEMORY_BLOCK_BUFFER_TARGET,
             invalid_header_hit_eviction_threshold: DEFAULT_INVALID_HEADER_HIT_EVICTION_THRESHOLD,
@@ -323,7 +323,7 @@ pub struct EngineArgs {
     /// Configure the maximum number of blocks beyond the in-memory buffer target that may await
     /// persistence before engine API processing stalls.
     ///
-    /// If omitted, this defaults to the larger of the default backpressure threshold and twice
+    /// If omitted, this defaults to the larger of the minimum backpressure threshold and twice
     /// `--engine.persistence-threshold`.
     ///
     /// This value must be greater than `--engine.persistence-threshold`.
@@ -846,7 +846,7 @@ mod tests {
     }
 
     #[test]
-    fn default_backpressure_threshold_uses_global_default_when_larger() {
+    fn default_backpressure_threshold_uses_minimum_when_larger() {
         let args = CommandParser::<EngineArgs>::parse_from([
             "reth",
             "--engine.persistence-threshold",
@@ -858,6 +858,7 @@ mod tests {
             args.persistence_backpressure_threshold(),
             DefaultEngineValues::get_global().persistence_backpressure_threshold
         );
+        assert_eq!(args.persistence_backpressure_threshold(), 16);
     }
 
     #[test]
