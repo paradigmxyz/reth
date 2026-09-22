@@ -29,6 +29,16 @@ use reth_storage_overlay::OverlayManager;
 use reth_tasks::Runtime;
 use std::sync::Arc;
 
+/// The [`ChainOrchestrator`] built by [`EngineOrchestratorBuilder`].
+pub type EngineOrchestrator<T, N, Client, S, B> = ChainOrchestrator<
+    EngineHandler<
+        EngineApiRequestHandler<EngineApiRequest<T, N>, N>,
+        S,
+        BasicBlockDownloader<Client, <N as NodePrimitives>::Block>,
+    >,
+    B,
+>;
+
 /// Components needed to build the engine [`ChainOrchestrator`] that drives the chain forward.
 ///
 /// [`build`](Self::build) spawns and wires together the following components:
@@ -97,17 +107,9 @@ where
     C: ConfigureEvm<Primitives = N::Primitives> + 'static,
 {
     /// Spawns the engine services and returns the [`ChainOrchestrator`] driving them.
-    #[expect(clippy::type_complexity)]
     pub fn build(
         self,
-    ) -> ChainOrchestrator<
-        EngineHandler<
-            EngineApiRequestHandler<EngineApiRequest<N::Payload, N::Primitives>, N::Primitives>,
-            S,
-            BasicBlockDownloader<Client, <N::Primitives as NodePrimitives>::Block>,
-        >,
-        PipelineSync<N>,
-    > {
+    ) -> EngineOrchestrator<N::Payload, N::Primitives, Client, S, PipelineSync<N>> {
         let Self {
             engine_kind,
             consensus,
