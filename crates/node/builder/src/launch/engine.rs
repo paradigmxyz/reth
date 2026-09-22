@@ -246,8 +246,8 @@ impl EngineNodeLauncher {
 
         let mut orchestrator = EngineOrchestratorBuilder {
             engine_kind,
-            consensus: consensus.clone(),
-            client: network_client.clone(),
+            consensus,
+            client: network_client,
             incoming_requests: Box::pin(consensus_engine_stream),
             pipeline,
             pipeline_task_spawner: ctx.task_executor().clone(),
