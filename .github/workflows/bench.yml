@@ -1580,7 +1580,7 @@ jobs:
           done
           echo "DEREK_BENCH_COMMAND=${DEREK_BENCH_COMMAND}" >> "$GITHUB_ENV"
 
-          BENCH_ID="ci-${{ github.run_id }}"
+          BENCH_ID="ci-${{ github.run_id }}-${{ github.run_attempt }}"
           BENCH_REFERENCE_EPOCH=$(date +%s)
           echo "BENCH_ID=${BENCH_ID}" >> "$GITHUB_ENV"
           echo "BENCH_REFERENCE_EPOCH=${BENCH_REFERENCE_EPOCH}" >> "$GITHUB_ENV"
@@ -1673,7 +1673,7 @@ jobs:
         run: |
           FROM_MS=$(( BENCH_REFERENCE_EPOCH * 1000 ))
           TO_MS=$(( $(date +%s) * 1000 ))
-          GRAFANA_URL="https://tempoxyz.grafana.net/d/reth-bench-ghr/reth-bench-ghr?orgId=1&from=${FROM_MS}&to=${TO_MS}&timezone=browser&var-datasource=efk1hcn87dnnkd&var-job=github-reth-bench&var-benchmark_id=${BENCH_ID}&var-benchmark_run=\$__all"
+          GRAFANA_URL="https://tempoxyz.grafana.net/d/reth-bench-ghr/reth-bench-ghr?orgId=1&from=${FROM_MS}&to=${TO_MS}&timezone=browser&var-datasource=efk1hcn87dnnkd&var-job=github-reth-bench&var-benchmark_id=${BENCH_ID}&var-execution_id=${{ github.repository_owner }}:${{ github.event.repository.name }}:${{ github.run_id }}:${{ github.run_attempt }}&var-benchmark_run=\$__all"
           OBSERVABILITY_URLS="$(python3 - "$BENCH_ID" "$FROM_MS" "$TO_MS" <<'PY'
           from datetime import datetime, timezone
           import json
@@ -1993,6 +1993,16 @@ jobs:
           # shellcheck disable=SC2086
           uv run --with matplotlib python3 .github/scripts/bench-reth-charts.py $CHART_ARGS
 
+      - name: Publish benchmark execution
+        if: always()
+        continue-on-error: true
+        env:
+          CLICKHOUSE_HOST: ${{ secrets.CLICKHOUSE_HOST }}
+          CLICKHOUSE_USER: ${{ secrets.CLICKHOUSE_USER }}
+          CLICKHOUSE_PASSWORD: ${{ secrets.CLICKHOUSE_PASSWORD }}
+          EXECUTION_STATUS: ${{ job.status }}
+        run: python3 .github/scripts/bench-execution.py "$BENCH_WORK_DIR" --status "$EXECUTION_STATUS"
+
       - name: Upload results
         if: "!cancelled()"
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -2172,7 +2182,8 @@ jobs:
             } catch (e) {}
 
             const runUrl = process.env.BENCH_RUN_URL || `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
-            const body = `cc @${process.env.BENCH_ACTOR}\n\n✅ Benchmark complete! [View run](${runUrl})\n\n${comment}`;
+            const executionUrl = `https://dev-eu-tempo-internal-perf.tail388b2e.ts.net/execution/${context.repo.owner}:${context.repo.repo}:${context.runId}:${process.env.GITHUB_RUN_ATTEMPT}`;
+            const body = `cc @${process.env.BENCH_ACTOR}\n\n✅ Benchmark complete! [Benchmark results](${executionUrl}) · [View run](${runUrl})\n\n${comment}`;
             const ackCommentId = process.env.BENCH_COMMENT_ID;
 
             if (ackCommentId) {

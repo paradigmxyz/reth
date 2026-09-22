@@ -607,7 +607,7 @@ jobs:
         run: |
           FROM_MS=$(( BENCH_REFERENCE_EPOCH * 1000 ))
           TO_MS=$(( $(date +%s) * 1000 ))
-          GRAFANA_URL="https://tempoxyz.grafana.net/d/reth-bench-ghr/reth-bench-ghr?orgId=1&from=${FROM_MS}&to=${TO_MS}&timezone=browser&var-datasource=efk1hcn87dnnkd&var-job=github-reth-bench&var-benchmark_id=${BENCH_ID}&var-benchmark_run=\$__all"
+          GRAFANA_URL="https://tempoxyz.grafana.net/d/reth-bench-ghr/reth-bench-ghr?orgId=1&from=${FROM_MS}&to=${TO_MS}&timezone=browser&var-datasource=efk1hcn87dnnkd&var-job=github-reth-bench&var-benchmark_id=${BENCH_ID}&var-execution_id=${{ github.repository_owner }}:${{ github.event.repository.name }}:${{ github.run_id }}:${{ github.run_attempt }}&var-benchmark_run=\$__all"
           echo "grafana-url=${GRAFANA_URL}" >> "$GITHUB_OUTPUT"
           echo "Grafana URL: ${GRAFANA_URL}"
 
@@ -718,6 +718,16 @@ jobs:
           CHART_ARGS="$CHART_ARGS --feature-name ${FEATURE_NAME}"
           # shellcheck disable=SC2086
           uv run --with matplotlib python3 .github/scripts/bench-reth-charts.py $CHART_ARGS
+
+      - name: Publish benchmark execution
+        if: always()
+        continue-on-error: true
+        env:
+          CLICKHOUSE_HOST: ${{ secrets.CLICKHOUSE_HOST }}
+          CLICKHOUSE_USER: ${{ secrets.CLICKHOUSE_USER }}
+          CLICKHOUSE_PASSWORD: ${{ secrets.CLICKHOUSE_PASSWORD }}
+          EXECUTION_STATUS: ${{ job.status }}
+        run: python3 .github/scripts/bench-execution.py "$BENCH_WORK_DIR" --status "$EXECUTION_STATUS"
 
       - name: Upload results
         if: "!cancelled()"

@@ -69,6 +69,8 @@ module.exports = async function ({ core, context, chartSha, grafanaUrl, logsUrl,
 
   let md = `# ${emoji} ${label}\n\n`;
   md += metaParts.join(' · ') + '\n\n';
+  const executionUrl = `https://dev-eu-tempo-internal-perf.tail388b2e.ts.net/execution/${context.repo.owner}:${context.repo.repo}:${runId}:${process.env.GITHUB_RUN_ATTEMPT}`;
+  md += `[Benchmark results](${executionUrl}) · [Workflow](https://github.com/${repo}/actions/runs/${runId}/attempts/${process.env.GITHUB_RUN_ATTEMPT})\n\n`;
   md += `**Baseline:** ${baselineLink}\n`;
   md += `**Feature:** ${featureLink} ([diff](${diffUrl}))\n`;
   md += blocksLabel(summary).map(p => `**${p.key}:** ${p.value}`).join(' · ') + '\n\n';
