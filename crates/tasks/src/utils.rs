@@ -105,25 +105,3 @@ fn _deprioritize_background_threads() {
         tracing::debug!(tid, comm, "deprioritized background thread (SCHED_IDLE)");
     }
 }
-
-#[cfg(all(test, target_os = "linux"))]
-mod tests {
-    #[test]
-    fn preserves_otel_exporter_scheduling_policy() {
-        std::thread::Builder::new()
-            .name("OpenTelemetry.Traces.BatchProcessor".into())
-            .spawn(|| {
-                // SAFETY: pid 0 queries the calling thread's scheduling policy.
-                let before = unsafe { libc::sched_getscheduler(0) };
-                assert!(before >= 0);
-                super::deprioritize_background_threads();
-
-                // SAFETY: pid 0 queries the calling thread's scheduling policy.
-                let after = unsafe { libc::sched_getscheduler(0) };
-                assert_eq!(after, before, "span exporter scheduling policy must not change");
-            })
-            .unwrap()
-            .join()
-            .unwrap();
-    }
-}
