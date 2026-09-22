@@ -87,6 +87,7 @@ where
                         return match ev {
                             HandlerEvent::BackfillAction(target) => {
                                 // bubble up backfill sync request
+                                // Only a new run, not a target update, makes downloads stale.
                                 if matches!(target, BackfillAction::Start(_)) {
                                     self.downloader.on_action(DownloadAction::Clear);
                                 }
