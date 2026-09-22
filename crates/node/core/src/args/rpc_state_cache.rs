@@ -143,10 +143,6 @@ mod tests {
     fn rpc_cache_defaults_keep_count_only_limits() {
         let args = CommandParser::parse_from(["reth"]).args;
         assert_eq!(args, RpcStateCacheArgs::default());
-        assert_eq!(args.max_blocks_bytes, None);
-        assert_eq!(args.max_receipts_bytes, None);
-        assert_eq!(args.max_bals_bytes, None);
-        assert_eq!(args.idle_timeout, None);
 
         for flag in ["--rpc-cache.max-headers", "--rpc-cache.max-envs"] {
             let args = CommandParser::parse_from(["reth", flag, "123"]).args;

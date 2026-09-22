@@ -1208,30 +1208,18 @@ mod tests {
     }
 
     #[test]
-    fn disabled_idle_timeout_needs_no_runtime_timer() {
-        for idle_timeout in [None, Some(Duration::ZERO)] {
+    fn idle_timeout_controls_timer_creation_outside_a_runtime() {
+        for (idle_timeout, enabled) in
+            [(None, false), (Some(Duration::ZERO), false), (Some(Duration::from_secs(10)), true)]
+        {
             let (_cache, service) = EthStateCache::<EthPrimitives>::create(
                 NoopProvider::default(),
                 Runtime::test(),
                 EthStateCacheConfig { idle_timeout, ..Default::default() },
             );
-            assert!(service.eviction_interval.is_none());
-            assert!(service.cache_now().is_none());
+            assert_eq!(service.eviction_interval.is_some(), enabled);
+            assert_eq!(service.cache_now().is_some(), enabled);
         }
-    }
-
-    #[test]
-    fn idle_timeout_can_be_configured_outside_a_runtime() {
-        let runtime = Runtime::test();
-        let (_cache, service) = EthStateCache::<EthPrimitives>::create(
-            NoopProvider::default(),
-            runtime,
-            EthStateCacheConfig {
-                idle_timeout: Some(Duration::from_secs(10)),
-                ..Default::default()
-            },
-        );
-        assert!(service.eviction_interval.is_some());
     }
 
     #[test]
@@ -1366,20 +1354,6 @@ mod tests {
             assert!(service.receipts_cache.get(&hash).is_none());
             assert!(service.bal_cache.get(&hash).is_none());
         }
-    }
-
-    #[tokio::test]
-    async fn oversized_bal_is_fetched_and_returned_without_caching() {
-        let fetches = Arc::new(AtomicUsize::default());
-        let cache = EthStateCache::<EthPrimitives>::spawn_with(
-            TestBalProvider::new(fetches.clone()),
-            EthStateCacheConfig { max_bals_bytes: Some(1), ..Default::default() },
-            Runtime::test(),
-        );
-        let hash = B256::repeat_byte(0x75);
-        assert!(cache.get_bal(hash).await.unwrap().is_some());
-        assert!(cache.get_bal(hash).await.unwrap().is_some());
-        assert_eq!(fetches.load(Ordering::SeqCst), 2);
     }
 
     #[test]
@@ -1543,29 +1517,31 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn get_bal_uses_cached_revm_bal() {
-        let fetches = Arc::new(AtomicUsize::default());
-        let provider = TestBalProvider::new(fetches.clone());
-        let cache = EthStateCache::<EthPrimitives>::spawn_with(
-            provider,
-            EthStateCacheConfig {
-                max_blocks: 0,
-                max_receipts: 0,
-                max_bals: 4,
-                cache_computed_bals: false,
-                prewarm_bals: None,
-                max_concurrent_db_requests: 1,
-                max_cached_tx_hashes: 0,
-                ..Default::default()
-            },
-            Runtime::test(),
-        );
-        let block_hash = B256::repeat_byte(0x66);
+    async fn get_bal_only_caches_results_within_budget() {
+        for (max_bals_bytes, expected_fetches) in [(None, 1), (Some(1), 2)] {
+            let fetches = Arc::new(AtomicUsize::default());
+            let cache = EthStateCache::<EthPrimitives>::spawn_with(
+                TestBalProvider::new(fetches.clone()),
+                EthStateCacheConfig {
+                    max_blocks: 0,
+                    max_receipts: 0,
+                    max_bals: 4,
+                    max_bals_bytes,
+                    cache_computed_bals: false,
+                    prewarm_bals: None,
+                    max_concurrent_db_requests: 1,
+                    max_cached_tx_hashes: 0,
+                    ..Default::default()
+                },
+                Runtime::test(),
+            );
+            let block_hash = B256::repeat_byte(0x66);
 
-        assert!(cache.get_bal(block_hash).await.unwrap().is_some());
-        assert!(cache.get_bal(block_hash).await.unwrap().is_some());
+            assert!(cache.get_bal(block_hash).await.unwrap().is_some());
+            assert!(cache.get_bal(block_hash).await.unwrap().is_some());
 
-        assert_eq!(fetches.load(Ordering::SeqCst), 1);
+            assert_eq!(fetches.load(Ordering::SeqCst), expected_fetches);
+        }
     }
 
     #[tokio::test]

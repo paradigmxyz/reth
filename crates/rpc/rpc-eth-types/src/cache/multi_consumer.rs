@@ -345,6 +345,16 @@ mod tests {
         }
     }
 
+    #[derive(Clone)]
+    struct Measured(Arc<AtomicUsize>);
+
+    impl InMemorySize for Measured {
+        fn size(&self) -> usize {
+            self.0.fetch_add(1, Ordering::Relaxed);
+            3
+        }
+    }
+
     #[test]
     fn empty_cache_operations_do_not_require_in_memory_size() {
         struct Unmeasured;
@@ -567,16 +577,6 @@ mod tests {
 
     #[test]
     fn payload_size_is_only_measured_on_insertion() {
-        #[derive(Clone)]
-        struct Measured(Arc<AtomicUsize>);
-
-        impl InMemorySize for Measured {
-            fn size(&self) -> usize {
-                self.0.fetch_add(1, Ordering::Relaxed);
-                3
-            }
-        }
-
         let measurements = Arc::new(AtomicUsize::new(0));
         let mut cache: MultiConsumerLruCache<u64, CachedEntry<Measured>, ByLength, ()> =
             MultiConsumerLruCache::new_with_limits(10, Some(3), "test");
@@ -593,15 +593,6 @@ mod tests {
 
     #[test]
     fn disabled_cache_does_not_measure_payloads() {
-        struct Measured(Arc<AtomicUsize>);
-
-        impl InMemorySize for Measured {
-            fn size(&self) -> usize {
-                self.0.fetch_add(1, Ordering::Relaxed);
-                3
-            }
-        }
-
         for (count, bytes, enabled) in
             [(0, None, false), (10, Some(0), false), (10, None, true), (10, Some(3), true)]
         {
@@ -619,16 +610,6 @@ mod tests {
     }
 
     #[test]
-    fn replacement_does_not_double_count_memory() {
-        let mut cache: MultiConsumerLruCache<u64, u64, ByLength, ()> =
-            MultiConsumerLruCache::new(2, "test");
-        assert!(cache.insert(1, 10));
-        assert!(cache.insert(1, 20));
-        assert_eq!(cache.memory_usage(), size_of::<u64>());
-        assert_eq!(cache.get(&1), Some(&mut 20));
-    }
-
-    #[test]
     fn gauges_only_republished_after_cache_changes() {
         let mut cache: MultiConsumerLruCache<u64, u64, ByLength, ()> =
             MultiConsumerLruCache::new(2, "test");
@@ -636,6 +617,12 @@ mod tests {
 
         assert!(cache.insert(0, 0));
         assert!(cache.update_cached_metrics());
+        assert!(!cache.update_cached_metrics());
+
+        // Replacing a value with the same size leaves both gauges unchanged.
+        assert!(cache.insert(0, 1));
+        assert_eq!(cache.memory_usage(), size_of::<u64>());
+        assert_eq!(cache.get(&0), Some(&mut 1));
         assert!(!cache.update_cached_metrics());
 
         // hits do not touch the gauges
