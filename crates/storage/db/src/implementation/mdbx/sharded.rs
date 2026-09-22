@@ -218,8 +218,11 @@ impl<K: TransactionKind> ShardedCursor<K> {
         let start = self.shard(value);
         for i in start..self.cursors.len() {
             if let Some(v) = self.cursors[i].get_both_range::<Vec<u8>>(key, value)? {
-                self.select(Some((i, (key.to_vec(), v.clone()))))?;
-                return Ok(Some(Cow::Owned(v)))
+                // Keep one owned anchor for subsequent cursor movement. Return
+                // a borrow of it instead of copying it through select and back.
+                self.current = Some((i, (key.to_vec(), v)));
+                self.deleted = false;
+                return Ok(self.current.as_ref().map(|(_, (_, v))| Cow::Borrowed(v.as_slice())))
             }
         }
         Ok(None)
@@ -306,12 +309,15 @@ impl<K: TransactionKind> ShardedCursor<K> {
         if self.cursors.len() == 1 {
             return self.cursors[0].last_dup()
         }
-        let Some((_, (key, _))) = self.current.clone() else { return Ok(None) };
+        let Some(key) = self.current.as_ref().map(|(_, (key, _))| key.clone()) else {
+            return Ok(None)
+        };
         for i in (0..self.cursors.len()).rev() {
             if self.cursors[i].set::<Vec<u8>>(&key)?.is_some() {
                 let value = self.cursors[i].last_dup::<Vec<u8>>()?.expect("positioned key");
-                self.select(Some((i, (key, value.clone()))))?;
-                return Ok(Some(Cow::Owned(value)))
+                self.current = Some((i, (key, value)));
+                self.deleted = false;
+                return Ok(self.current.as_ref().map(|(_, (_, v))| Cow::Borrowed(v.as_slice())))
             }
         }
         Ok(None)
