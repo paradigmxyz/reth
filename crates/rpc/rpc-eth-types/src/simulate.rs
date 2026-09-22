@@ -704,7 +704,7 @@ mod tests {
                 "frames": [{
                     "executionGas": "0x5",
                     "stateGas": "0x7",
-                    "status": "Failure",
+                    "status": "0x0",
                 }],
             })
         );
