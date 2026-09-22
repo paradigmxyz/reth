@@ -580,6 +580,7 @@ where
         pool: &mut RwLockWriteGuard<'_, TxPool<T>>,
         origin: TransactionOrigin,
         tx: TransactionValidationOutcome<T::Transaction>,
+        timestamp: Instant,
     ) -> (PoolResult<AddedTransactionOutcome>, Option<AddedTransactionMeta<T::Transaction>>) {
         match tx {
             TransactionValidationOutcome::Valid {
@@ -609,7 +610,7 @@ where
                     transaction,
                     transaction_id,
                     propagate,
-                    timestamp: Instant::now(),
+                    timestamp,
                     origin,
                     authority_ids: authorities.map(|auths| self.get_sender_ids(auths)),
                 };
@@ -679,10 +680,11 @@ where
         // Collect results and metadata while holding the pool write lock
         let (mut results, added_metas, discarded) = {
             let mut pool = self.pool.write();
+            let timestamp = Instant::now();
 
             let results = transactions
                 .map(|(origin, tx)| {
-                    let (result, meta) = self.add_transaction(&mut pool, origin, tx);
+                    let (result, meta) = self.add_transaction(&mut pool, origin, tx, timestamp);
 
                     // Only collect metadata for successful insertions
                     if result.is_ok() &&
@@ -1219,6 +1221,14 @@ where
         sender: Address,
     ) -> Vec<Arc<ValidPoolTransaction<T::Transaction>>> {
         let Some(sender_id) = self.sender_id(&sender) else { return Vec::new() };
+        self.get_pending_transactions_by_sender_id(sender_id)
+    }
+
+    /// Returns all pending transactions for a resolved sender ID.
+    pub fn get_pending_transactions_by_sender_id(
+        &self,
+        sender_id: SenderId,
+    ) -> Vec<Arc<ValidPoolTransaction<T::Transaction>>> {
         self.get_pool_data().pending_txs_by_sender(sender_id)
     }
 
@@ -1228,6 +1238,14 @@ where
         sender: Address,
     ) -> Option<Arc<ValidPoolTransaction<T::Transaction>>> {
         let sender_id = self.sender_id(&sender)?;
+        self.get_highest_transaction_by_sender_id(sender_id)
+    }
+
+    /// Returns the highest transaction for a resolved sender ID.
+    pub fn get_highest_transaction_by_sender_id(
+        &self,
+        sender_id: SenderId,
+    ) -> Option<Arc<ValidPoolTransaction<T::Transaction>>> {
         self.get_pool_data().get_highest_transaction_by_sender(sender_id)
     }
 
@@ -1238,6 +1256,15 @@ where
         on_chain_nonce: u64,
     ) -> Option<Arc<ValidPoolTransaction<T::Transaction>>> {
         let sender_id = self.sender_id(&sender)?;
+        self.get_highest_consecutive_transaction_by_sender_id(sender_id, on_chain_nonce)
+    }
+
+    /// Returns the highest consecutive transaction for a resolved sender ID and on-chain nonce.
+    pub fn get_highest_consecutive_transaction_by_sender_id(
+        &self,
+        sender_id: SenderId,
+        on_chain_nonce: u64,
+    ) -> Option<Arc<ValidPoolTransaction<T::Transaction>>> {
         self.get_pool_data().get_highest_consecutive_transaction_by_sender(
             sender_id.into_transaction_id(on_chain_nonce),
         )
@@ -1768,6 +1795,20 @@ mod tests {
         let txs = pool.all_transactions_by_sender(sender);
         assert_eq!(nonces(&txs.pending), [0, 1]);
         assert_eq!(nonces(&txs.queued), [9]);
+
+        let sender_id = pool.inner().sender_id(&sender).unwrap();
+        assert_eq!(nonces(&pool.inner().get_pending_transactions_by_sender_id(sender_id)), [0, 1]);
+        assert_eq!(
+            pool.inner().get_highest_transaction_by_sender_id(sender_id).unwrap().nonce(),
+            9
+        );
+        assert_eq!(
+            pool.inner()
+                .get_highest_consecutive_transaction_by_sender_id(sender_id, 0)
+                .unwrap()
+                .nonce(),
+            1
+        );
 
         // a higher base fee reclassifies the pending transactions as queued; the snapshot must
         // report each of them on exactly one side
