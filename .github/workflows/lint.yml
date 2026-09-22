@@ -407,30 +407,10 @@ jobs:
       - run: zepter run check
 
   deny:
-    name: cargo deny check
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    env:
-      RUSTC_WRAPPER: ""
+    uses: tempoxyz/ci/.github/workflows/deny.yml@a75700dae1a185e3968a902dd095c917782ced76
     permissions:
       contents: read
       id-token: write
-    steps:
-      - name: Secure runner
-        uses: tempoxyz/gh-actions/actions/secure-runner@48ff2b0c97ede86c9f10d105424380b9605f790d
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772 # master
-        with:
-          toolchain: nightly
-      - name: Install cargo-deny
-        uses: tempoxyz/gh-actions/vendor/taiki-e/install-action@48ff2b0c97ede86c9f10d105424380b9605f790d
-        with:
-          tool: cargo-deny@0.20.2
-          checksum: true
-          fallback: none
-      - run: cargo deny --all-features check all
 
   lint-success:
     name: lint success
