@@ -19,6 +19,7 @@ extern crate alloc;
 
 use crate::execute::{BasicBlockBuilder, Executor};
 use alloc::{string::String, vec::Vec};
+use alloy_consensus::TxEip8141;
 use alloy_eips::eip4895::Withdrawals;
 use alloy_evm::{
     block::{BlockExecutorFactory, BlockExecutorFor},
@@ -200,6 +201,7 @@ pub trait ConfigureEvm: Clone + Debug + Send + Sync + Unpin {
         EvmFactory: EvmFactory<
             Tx: TransactionEnvMut
                     + FromRecoveredTx<TxTy<Self::Primitives>>
+                    + FromRecoveredTx<TxEip8141>
                     + FromTxWithEncoded<TxTy<Self::Primitives>>,
             Precompiles = PrecompilesMap,
             Spec: Into<SpecId>,
