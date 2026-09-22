@@ -196,7 +196,7 @@ where
         &self,
         hash: B256,
         trace_types: HashSet<TraceType>,
-    ) -> Result<TraceResults, Eth::Error> {
+    ) -> Result<TraceResultsWithTransactionHash, Eth::Error> {
         let config = TracingInspectorConfig::from_parity_config(&trace_types);
         self.eth_api()
             .spawn_trace_transaction_in_block(hash, config, move |_, inspector, res, db| {
@@ -204,7 +204,10 @@ where
                     .into_parity_builder()
                     .into_trace_results_with_state(&res, &trace_types, &db)
                     .map_err(Eth::Error::from_eth_err)?;
-                Ok(trace_res)
+                Ok(TraceResultsWithTransactionHash {
+                    transaction_hash: hash,
+                    full_trace: trace_res,
+                })
             })
             .await
             .transpose()
@@ -753,7 +756,7 @@ where
         &self,
         transaction: B256,
         trace_types: HashSet<TraceType>,
-    ) -> RpcResult<TraceResults> {
+    ) -> RpcResult<TraceResultsWithTransactionHash> {
         let _permit = self.acquire_trace_permit().await;
         Ok(Self::replay_transaction(self, transaction, trace_types).await.map_err(Into::into)?)
     }
@@ -887,6 +890,87 @@ fn reward_trace<H: BlockHeader>(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn replay_transaction_includes_transaction_hash() {
+        use crate::EthApiBuilder;
+        use alloy_consensus::{Header, TxLegacy};
+        use alloy_primitives::{Signature, TxKind};
+        use reth_chain_state::CanonStateNotification;
+        use reth_ethereum_primitives::{Block, BlockBody, TransactionSigned};
+        use reth_evm_ethereum::EthEvmConfig;
+        use reth_execution_types::{Chain, ExecutionOutcome};
+        use reth_network_api::noop::NoopNetwork;
+        use reth_primitives_traits::{RecoveredBlock, SignerRecoverable};
+        use reth_provider::test_utils::{ExtendedAccount, MockEthProvider};
+        use reth_rpc_eth_types::cache::cache_new_blocks_task;
+        use reth_transaction_pool::test_utils::testing_pool;
+
+        let provider = MockEthProvider::default();
+        let tx = TransactionSigned::new_unhashed(
+            TxLegacy {
+                gas_limit: 21_000,
+                to: TxKind::Call(Address::with_last_byte(0x42)),
+                value: U256::from(1),
+                ..Default::default()
+            }
+            .into(),
+            Signature::test_signature(),
+        );
+        let hash = *tx.hash();
+        let sender = tx.recover_signer().unwrap();
+        provider.add_account(sender, ExtendedAccount::new(0, U256::from(1_000_000)));
+        let parent = Header { gas_limit: 30_000_000, ..Default::default() };
+        let parent_hash = parent.hash_slow();
+        provider.add_header(parent_hash, parent);
+        let block = Block {
+            header: Header { parent_hash, number: 1, gas_limit: 30_000_000, ..Default::default() },
+            body: BlockBody { transactions: vec![tx], ..Default::default() },
+        };
+        let block_hash = block.header.hash_slow();
+        provider.add_block(block_hash, block.clone());
+        let eth_api = EthApiBuilder::new(
+            provider.clone(),
+            testing_pool(),
+            NoopNetwork::default(),
+            EthEvmConfig::new(provider.chain_spec()),
+        )
+        .build();
+        // MockEthProvider does not implement recovered_block, so seed the RPC cache.
+        cache_new_blocks_task(
+            eth_api.cache().clone(),
+            futures::stream::iter([CanonStateNotification::Commit {
+                new: Arc::new(Chain::new(
+                    [RecoveredBlock::new_unhashed(block, vec![sender])],
+                    ExecutionOutcome {
+                        receipts: vec![vec![]],
+                        first_block: 1,
+                        ..Default::default()
+                    },
+                    Default::default(),
+                )),
+            }]),
+        )
+        .await;
+        let api = TraceApi::new(eth_api, BlockingTaskGuard::new(1), EthConfig::default());
+        let module = api.clone().into_rpc();
+        for types in
+            [HashSet::default(), HashSet::from_iter([TraceType::Trace, TraceType::StateDiff])]
+        {
+            let request = serde_json::json!({
+                "jsonrpc": "2.0", "id": 1, "method": "trace_replayTransaction",
+                "params": [hash, types],
+            });
+            let (response, _) = module.raw_json_request(&request.to_string(), 1).await.unwrap();
+            let response: serde_json::Value = serde_json::from_str(response.get()).unwrap();
+            assert!(response.get("error").is_none(), "{response}");
+            assert_eq!(response["result"]["transactionHash"], serde_json::json!(hash));
+
+            let block_replay =
+                api.replay_block_transactions(block_hash.into(), types).await.unwrap().unwrap();
+            assert_eq!(response["result"], serde_json::to_value(&block_replay[0]).unwrap());
+        }
+    }
 
     fn localized_transaction_trace(
         block_number: u64,

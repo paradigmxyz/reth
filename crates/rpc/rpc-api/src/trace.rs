@@ -58,7 +58,7 @@ pub trait TraceApi<TxReq> {
         &self,
         transaction: B256,
         trace_types: HashSet<TraceType>,
-    ) -> RpcResult<TraceResults>;
+    ) -> RpcResult<TraceResultsWithTransactionHash>;
 
     /// Returns traces created at given block.
     #[method(name = "block")]
