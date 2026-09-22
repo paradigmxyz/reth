@@ -579,14 +579,32 @@ mod tests {
                 16384
             );
             assert_eq!(
-                pinned.as_ref().unwrap().get::<HashedStorages>(B256::ZERO).unwrap().unwrap().value,
-                U256::from(1)
+                pinned
+                    .as_ref()
+                    .unwrap()
+                    .cursor_read::<HashedStorages>()
+                    .unwrap()
+                    .walk(None)
+                    .unwrap()
+                    .inspect(|row| assert_eq!(row.as_ref().unwrap().1.value, U256::from(1)))
+                    .count(),
+                16384
             );
         }
         drop(pinned);
         drop(db);
         let db = open_db(dir.path(), DatabaseArguments::test()).unwrap();
-        assert_eq!(db.tx().unwrap().entries::<HashedStorages>().unwrap(), 16384);
+        assert_eq!(
+            db.tx()
+                .unwrap()
+                .cursor_read::<HashedStorages>()
+                .unwrap()
+                .walk(None)
+                .unwrap()
+                .inspect(|row| assert_eq!(row.as_ref().unwrap().1.value, U256::from(11)))
+                .count(),
+            16384
+        );
     }
 
     #[test]
