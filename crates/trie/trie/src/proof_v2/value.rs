@@ -131,10 +131,7 @@ where
         if let Some(prefix_set) = self.storage_prefix_sets.get(&self.hashed_address) {
             storage_proof_calculator = storage_proof_calculator.with_prefix_set(prefix_set.clone());
         }
-        let root_node = storage_proof_calculator.storage_root_node(self.hashed_address)?;
-        let storage_root = storage_proof_calculator
-            .compute_root_hash(&[root_node])?
-            .expect("storage_root_node returns a node at empty path");
+        let storage_root = storage_proof_calculator.storage_root_hash(self.hashed_address)?;
 
         let trie_account = self.account.into_trie_account(storage_root);
         trie_account.encode(buf);
