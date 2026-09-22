@@ -42,5 +42,6 @@ pub use gas_oracle::{
 };
 pub use id_provider::EthSubscriptionIdProvider;
 pub use pending_block::{PendingBlock, PendingBlockEnv, PendingBlockEnvOrigin};
+pub use simulate::{FrameSimulationFrameResult, FrameSimulationPrefixShape, FrameSimulationResult};
 pub use transaction::TransactionSource;
 pub use tx_forward::ForwardConfig;

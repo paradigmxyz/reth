@@ -225,6 +225,9 @@ pub enum EthApiError {
     /// Error thrown when trying to access block access list for blocks before Amsterdam
     #[error("Block access list not available for pre-Amsterdam blocks")]
     BlockAccessListNotAvailablePreAmsterdam,
+    /// Error thrown when a frame transaction method targets a block before Bogota.
+    #[error("frame transactions are not active at the requested block")]
+    FrameTransactionsNotActive,
     /// Any other error
     #[error("{0}")]
     Other(Box<dyn ToRpcError>),
@@ -316,7 +319,8 @@ impl From<EthApiError> for jsonrpsee_types::error::ErrorObject<'static> {
             EthApiError::EvmCustom(_) => internal_rpc_err(error.to_string()),
             EthApiError::UnknownBlockOrTxIndex |
             EthApiError::TransactionNotFound |
-            EthApiError::BlockAccessListNotAvailablePreAmsterdam => {
+            EthApiError::BlockAccessListNotAvailablePreAmsterdam |
+            EthApiError::FrameTransactionsNotActive => {
                 rpc_error_with_code(EthRpcErrorCode::ResourceNotFound.code(), error.to_string())
             }
             EthApiError::TracingTransactionNotFound | EthApiError::GenesisNotTraceable => {
