@@ -3,7 +3,7 @@ use alloy_primitives::{map::FbBuildHasher, Address, B256};
 use reth_primitives_traits::{transaction::signed::RecoveryError, SignedTransaction};
 
 /// Number of entries retained in the default sender recovery cache: 131,072.
-const SENDER_RECOVERY_CACHE_CAPACITY: usize = 131_072;
+const SENDER_RECOVERY_CACHE_CAPACITY: usize = 1 << 17;
 
 /// Shared cache of recovered transaction senders.
 ///
