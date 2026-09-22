@@ -4,7 +4,7 @@
 //! together all engine components and returns a
 //! [`ChainOrchestrator`](crate::chain::ChainOrchestrator) ready to be polled as a `Stream`, and
 //! [`build_engine_orchestrator_with_backfill`](crate::launch::build_engine_orchestrator_with_backfill)
-//! for callers supplying their own [`BackfillSync`].
+//! for callers supplying their own [`BackfillSync`](crate::backfill::BackfillSync).
 
 use crate::{
     backfill::{BackfillSync, PipelineSync},
