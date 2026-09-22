@@ -22,7 +22,7 @@ tracing.workspace = true
 
 [dev-dependencies]
 reth-tracing.workspace = true
-tokio = { workspace = true, features = ["macros"] }
+tokio = { workspace = true, features = ["macros", "sync", "test-util"] }
 
 [features]
 default = ["serde"]
