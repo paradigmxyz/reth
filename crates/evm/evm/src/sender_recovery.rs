@@ -2,14 +2,19 @@ use alloc::sync::Arc;
 use alloy_primitives::{map::FbBuildHasher, Address, B256};
 use reth_primitives_traits::{transaction::signed::RecoveryError, SignedTransaction};
 
-/// Number of entries retained in the default sender recovery cache.
-const SENDER_RECOVERY_CACHE_CAPACITY: usize = 1 << 17;
+/// Number of entries retained in the default sender recovery cache: 131,072.
+const SENDER_RECOVERY_CACHE_CAPACITY: usize = 131_072;
 
 /// Shared cache of recovered transaction senders.
 ///
-/// Sender recovery is performed when a transaction enters the pool and again when the same
-/// transaction is received in an execution payload. Sharing this bounded, lock-free cache lets
-/// payload prewarming reuse the result produced by transaction-pool ingress.
+/// When enabled with `--engine.sender-recovery-cache`, this bounded, lock-free cache shares
+/// recovered senders across P2P transaction ingress, RPC raw transaction submission (including
+/// `eth_sendRawTransaction` and `eth_sendRawTransactionSync`), raw transaction tracing, bundle
+/// simulation, and payload execution. Repeated transactions reuse the recovered sender while
+/// still undergoing the validation required by each caller.
+///
+/// The default cache retains up to 131,072 transaction hash-to-sender entries. Cloning the cache
+/// shares these entries rather than allocating another cache.
 #[derive(Clone, Debug)]
 pub struct SenderRecoveryCache {
     cache: Arc<fixed_cache::Cache<B256, Address, FbBuildHasher<32>, SenderRecoveryCacheConfig>>,
