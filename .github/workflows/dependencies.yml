@@ -15,8 +15,6 @@ jobs:
   update:
     if: github.repository == 'paradigmxyz/reth'
     permissions:
-      contents: write
-      pull-requests: write
-    uses: tempoxyz/ci/.github/workflows/cargo-update-pr.yml@main
-    secrets:
-      token: ${{ secrets.GITHUB_TOKEN }}
+      contents: read
+      id-token: write
+    uses: tempoxyz/ci/.github/workflows/cargo-update-pr.yml@921d47ce30160fb82a5181c840b41fbbac77c18f

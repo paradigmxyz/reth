@@ -1,0 +1,14 @@
+# Only the pinned dependency updater on main may create dependency PRs.
+subject:
+  - repo:paradigmxyz/reth:ref:refs/heads/main
+  - repo:paradigmxyz@97369466/reth@537233603:ref:refs/heads/main
+
+claim_pattern:
+  repository_id: '537233603'
+  event_name: '(schedule|workflow_dispatch)'
+  workflow_ref: 'paradigmxyz/reth/\.github/workflows/dependencies\.yml@refs/heads/main'
+  job_workflow_ref: 'tempoxyz/ci/\.github/workflows/cargo-update-pr\.yml@921d47ce30160fb82a5181c840b41fbbac77c18f'
+
+permissions:
+  contents: write
+  pull_requests: write
