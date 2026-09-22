@@ -56,7 +56,10 @@ where
             let Some(headers) = self.sync_headers(pipeline, &mut targets).await else {
                 return stopped
             };
-            headers?;
+            // A detached head unwinds headers short of the target, so sync them again.
+            if headers?.is_unwind() {
+                continue
+            }
 
             let run_stop = self.stop.child_token();
             let context =
@@ -145,6 +148,8 @@ mod tests {
     use crate::snap::tests::{
         headers_done, headers_reach, pipeline, pipeline_with, NEXT_TARGET, TARGET,
     };
+    use alloy_eips::{eip1898::BlockWithParent, BlockNumHash};
+    use reth_consensus::ConsensusError;
     use reth_network_p2p::NoopFullBlockClient;
     use reth_provider::test_utils::MockNodeTypesWithDB;
     use reth_stages::{
@@ -190,6 +195,34 @@ mod tests {
         tokio::time::timeout(Duration::from_secs(5), headers_reach(&factory, 1))
             .await
             .expect("the pending header download moves to the new target");
+        stop.cancel();
+        let (_pipeline, result) = run.await.unwrap();
+        assert!(matches!(result, Ok(ControlFlow::NoProgress { block_number: None })));
+    }
+
+    #[tokio::test]
+    async fn a_detached_head_syncs_headers_again_before_the_bootstrap() {
+        let block = |number| BlockWithParent {
+            parent: B256::ZERO,
+            block: BlockNumHash::new(number, B256::repeat_byte(number as u8)),
+        };
+        let (pipeline, factory) = pipeline(
+            TestStage::new(StageId::Headers)
+                .add_exec(Err(StageError::DetachedHead {
+                    local_head: Box::new(block(1)),
+                    header: Box::new(block(2)),
+                    error: Box::new(ConsensusError::BaseFeeMissing),
+                }))
+                .add_exec(headers_done(2)),
+        );
+        let (_targets, receiver) = watch::channel(TARGET);
+        let (run, stop) = snap_run(&factory);
+        let run = tokio::spawn(run.run(pipeline, receiver));
+
+        // Forkchoice never moves, so only the unwind itself can trigger the second header run.
+        tokio::time::timeout(Duration::from_secs(5), headers_reach(&factory, 2))
+            .await
+            .expect("headers are synced again after the unwind");
         stop.cancel();
         let (_pipeline, result) = run.await.unwrap();
         assert!(matches!(result, Ok(ControlFlow::NoProgress { block_number: None })));
