@@ -562,6 +562,8 @@ where
             proof_permits,
             max_batch_size,
             max_blocking_io_requests,
+            cache_computed_bals: eth_state_cache_config.cache_computed_bals ||
+                eth_state_cache_config.prewarm_bals.is_some(),
             gas_cap: gas_cap.into(),
             max_simulate_blocks,
             compute_state_root_for_eth_simulate,

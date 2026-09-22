@@ -74,7 +74,7 @@ where
         else {
             return Ok(StorageRangeStep::Complete)
         };
-        let end = contracts.accounts().len().min(first.saturating_add(self.max_accounts));
+        let end = progress.request_end(contracts.accounts(), first, self.max_accounts);
         let batch = contracts.range(first..end).expect("positions are inside the batch");
         let from = progress.resume_at(batch.accounts()[0].0).expect("first contract is incomplete");
 
@@ -169,11 +169,12 @@ mod tests {
     use super::*;
     use crate::{
         test_utils::{
-            account, generation, hashed_factory, key, state_root, storage_ranges, storage_root_of,
-            stored_slots, verified_range, ScriptedSnapClient,
+            account, generation, hashed_factory, insert_generation_headers, key, state_root,
+            storage_ranges, storage_root_of, stored_slots, verified_range, ScriptedSnapClient,
         },
-        SnapAccountStore, SnapAttemptStore,
+        SnapAccountStore, SnapAttemptStore, SnapCatchUpStore,
     };
+    use alloy_eips::BlockNumHash;
     use alloy_primitives::U256;
     use reth_eth_wire_types::snap::StorageRangesMessage;
     use reth_network_p2p::{error::PeerRequestResult, snap::client::SnapResponse};
@@ -215,6 +216,7 @@ mod tests {
     // An attempt that fetched all of `accounts` as one range, not yet committed.
     fn started(accounts: &[(B256, TrieAccount)]) -> (Factory, VerifiedRange) {
         let factory = hashed_factory();
+        insert_generation_headers(&factory);
         let provider = factory.database_provider_rw().unwrap();
         let write = provider.start_snap_attempt(generation(1, state_root(accounts))).unwrap();
         provider.start_account_coverage(write).unwrap();
@@ -381,5 +383,86 @@ mod tests {
 
         assert!(matches!(download.next(&range).await, Err(SnapSyncError::StaleWrite { .. })));
         assert_eq!(client.storage_requests().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn storage_part_way_through_resumes_at_the_new_root() {
+        let accounts = accounts();
+        let (factory, range) = started(&accounts);
+        let (large, small) = (large(), small());
+        // The new pivot turned the first account into a contract, ahead of the carried one.
+        let mut moved = accounts.clone();
+        moved[0].1 = contract(1, &small);
+        let responses = [
+            storage_ranges(1, &[&large[..1]], &large, &[B256::ZERO, key(1)]),
+            storage_ranges(2, &[&small[..]], &small, &[]),
+            storage_ranges(3, &[&large[1..]], &large, &[key(2), key(3)]),
+            storage_ranges(4, &[&small[..]], &small, &[]),
+        ];
+        let (client, mut download) = download(responses, factory.clone());
+        committed(&mut download, &range).await;
+
+        let provider = factory.database_provider_rw().unwrap();
+        let write =
+            provider.advance_snap_pivot(range.write(), generation(2, state_root(&moved))).unwrap();
+        provider.commit().unwrap();
+        let range =
+            VerifiedRange::new(write, verified_range(&moved, 0..moved.len(), B256::ZERO, &[]));
+        for _ in 0..3 {
+            committed(&mut download, &range).await;
+        }
+        assert!(matches!(download.next(&range).await.unwrap(), StorageRangeStep::Complete));
+        assert_eq!(
+            *client.storage_requests(),
+            [
+                (vec![key(2), key(3)], B256::ZERO),
+                (vec![key(1)], B256::ZERO),
+                (vec![key(2), key(3)], key(2)),
+                (vec![key(3)], B256::ZERO),
+            ]
+        );
+
+        // The carried slot holds pivot 1's value until the lists reach the new pivot.
+        let provider = factory.database_provider_rw().unwrap();
+        assert!(matches!(
+            provider.commit_account_range(write, range.range(), Default::default(), Vec::new()),
+            Err(SnapSyncError::CatchUpBehindPivot { applied: 1, pivot: 2 })
+        ));
+        let block = BlockNumHash::new(2, B256::repeat_byte(2));
+        provider.commit_block_access_list(write, block, B256::repeat_byte(1), &[]).unwrap();
+        let coverage = provider
+            .commit_account_range(write, range.range(), Default::default(), Vec::new())
+            .unwrap();
+        provider.commit().unwrap();
+        assert!(coverage.is_complete());
+        assert_eq!(slots_of(&factory, key(1)), small);
+        assert_eq!(slots_of(&factory, key(2)), large);
+    }
+
+    #[tokio::test]
+    async fn a_page_ending_before_a_carried_contract_hands_it_to_the_next_range() {
+        let accounts = accounts();
+        let (factory, range) = started(&accounts);
+        let large = large();
+        let first = storage_ranges(1, &[&large[..1]], &large, &[B256::ZERO, key(1)]);
+        let (_, mut download) = download([first], factory.clone());
+        committed(&mut download, &range).await;
+        let provider = factory.database_provider_rw().unwrap();
+        let write = provider
+            .advance_snap_pivot(range.write(), generation(2, state_root(&accounts)))
+            .unwrap();
+        let block = BlockNumHash::new(2, B256::repeat_byte(2));
+        provider.commit_block_access_list(write, block, B256::repeat_byte(1), &[]).unwrap();
+
+        // The new root's page stops before the contract part way through.
+        let page = verified_range(&accounts, 0..1, B256::ZERO, &[B256::ZERO, key(1)]);
+        let next = provider
+            .commit_account_range(write, &page, Default::default(), Vec::new())
+            .unwrap()
+            .next()
+            .unwrap();
+
+        assert!(next <= key(2));
+        assert_eq!(provider.storage_progress(write, next).unwrap().resume_at(key(2)), Some(key(2)));
     }
 }

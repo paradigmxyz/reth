@@ -91,6 +91,11 @@ where
         entry
     }
 
+    /// Checks for a cached value without changing recency or lookup metrics.
+    pub(crate) fn contains_key(&self, key: &K) -> bool {
+        self.cache.peek(key).is_some()
+    }
+
     /// Inserts a new element into the map.
     ///
     /// Can fail if the element is rejected by the limiter or if we fail to grow an empty map.
