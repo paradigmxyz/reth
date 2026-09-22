@@ -6,6 +6,7 @@ use crate::{
     DatabaseError,
 };
 use reth_db_api::{
+    cursor::DbCursorRW,
     table::{Compress, DupSort, Encode, IntoVec, Table, TableImporter},
     transaction::{DbTx, DbTxMut},
 };
@@ -92,15 +93,26 @@ impl<K: TransactionKind> Tx<K> {
         self.get_dbi_raw(T::NAME)
     }
 
+    fn shard_dbis<T: Table>(&self) -> Result<Vec<MDBX_dbi>, DatabaseError> {
+        if let Some(names) = super::sharded::names(T::NAME) {
+            names.iter().map(|name| self.get_dbi_raw(name)).collect()
+        } else {
+            Ok(vec![self.get_dbi::<T>()?])
+        }
+    }
+
     /// Create db Cursor
     pub fn new_cursor<T: Table>(&self) -> Result<Cursor<K, T>, DatabaseError> {
-        let inner = self
-            .inner
-            .cursor_with_dbi(self.get_dbi::<T>()?)
-            .map_err(|e| DatabaseError::InitCursor(e.into()))?;
+        let cursors = self
+            .shard_dbis::<T>()?
+            .into_iter()
+            .map(|dbi| {
+                self.inner.cursor_with_dbi(dbi).map_err(|e| DatabaseError::InitCursor(e.into()))
+            })
+            .collect::<Result<Vec<_>, _>>()?;
 
-        Ok(Cursor::new_with_metrics(
-            inner,
+        Ok(Cursor::new_sharded(
+            cursors,
             self.metrics_handler.as_ref().map(|h| h.env_metrics.table_operation_metrics(T::NAME)),
         ))
     }
@@ -301,10 +313,14 @@ impl<K: TransactionKind> DbTx for Tx<K> {
         key: &<T::Key as Encode>::Encoded,
     ) -> Result<Option<T::Value>, DatabaseError> {
         self.execute_with_operation_metric::<T, _>(Operation::Get, None, |tx| {
-            tx.get(self.get_dbi::<T>()?, key.as_ref())
-                .map_err(|e| DatabaseError::Read(e.into()))?
-                .map(decode_one::<T>)
-                .transpose()
+            for dbi in self.shard_dbis::<T>()? {
+                if let Some(value) =
+                    tx.get(dbi, key.as_ref()).map_err(|e| DatabaseError::Read(e.into()))?
+                {
+                    return decode_one::<T>(value).map(Some)
+                }
+            }
+            Ok(None)
         })
     }
 
@@ -361,11 +377,13 @@ impl<K: TransactionKind> DbTx for Tx<K> {
 
     /// Returns number of entries in the table using cheap DB stats invocation.
     fn entries<T: Table>(&self) -> Result<usize, DatabaseError> {
-        Ok(self
-            .inner
-            .db_stat_with_dbi(self.get_dbi::<T>()?)
-            .map_err(|e| DatabaseError::Stats(e.into()))?
-            .entries())
+        self.shard_dbis::<T>()?.into_iter().try_fold(0, |sum, dbi| {
+            Ok(sum +
+                self.inner
+                    .db_stat_with_dbi(dbi)
+                    .map_err(|e| DatabaseError::Stats(e.into()))?
+                    .entries())
+        })
     }
 
     /// Disables long-lived read transaction safety guarantees, such as backtrace recording and
@@ -410,10 +428,16 @@ impl Tx<RW> {
         key: T::Key,
         value: T::Value,
     ) -> Result<(), DatabaseError> {
+        if matches!(kind, PutKind::Append) && T::storage_shard_shift().is_some() {
+            return self.cursor_write::<T>()?.append(key, &value)
+        }
         let key = key.encode();
         let value = value.compress();
         let (operation, write_operation, flags) = kind.into_operation_and_flags();
-        let dbi = self.get_dbi::<T>()?;
+        let dbis = self.shard_dbis::<T>()?;
+        let shard =
+            T::storage_shard_shift().map_or(0, |shift| usize::from(value.as_ref()[0] >> shift));
+        let dbi = dbis[shard];
 
         if self.is_parallel_writes_enabled() {
             self.execute_with_operation_metric::<T, _>(
@@ -502,14 +526,18 @@ impl Tx<RW> {
     /// Creates a cursor for the given table, using the subtransaction if parallel writes is
     /// enabled.
     pub fn new_cursor_parallel<T: Table>(&self) -> Result<Cursor<RW, T>, DatabaseError> {
-        let dbi = self.get_dbi::<T>()?;
-        let inner = self
-            .inner
-            .cursor_with_dbi_parallel_owned(dbi)
-            .map_err(|e| DatabaseError::InitCursor(e.into()))?;
+        let cursors = self
+            .shard_dbis::<T>()?
+            .into_iter()
+            .map(|dbi| {
+                self.inner
+                    .cursor_with_dbi_parallel_owned(dbi)
+                    .map_err(|e| DatabaseError::InitCursor(e.into()))
+            })
+            .collect::<Result<Vec<_>, _>>()?;
 
-        Ok(Cursor::new_with_metrics(
-            inner,
+        Ok(Cursor::new_sharded(
+            cursors,
             self.metrics_handler.as_ref().map(|h| h.env_metrics.table_operation_metrics(T::NAME)),
         ))
     }
@@ -544,10 +572,16 @@ impl Tx<RW> {
         &self,
         tables: &[(&str, usize)],
     ) -> Result<(), DatabaseError> {
-        let specs: Vec<(MDBX_dbi, usize)> = tables
-            .iter()
-            .filter_map(|(name, hint)| self.dbis.get(*name).map(|&dbi| (dbi, *hint)))
-            .collect();
+        let mut specs = Vec::new();
+        for &(name, hint) in tables {
+            if let Some(names) = super::sharded::names(name) {
+                for name in names {
+                    specs.push((self.get_dbi_raw(name)?, hint.div_ceil(4)));
+                }
+            } else {
+                specs.push((self.get_dbi_raw(name)?, hint));
+            }
+        }
 
         if specs.is_empty() {
             return Ok(());
@@ -596,22 +630,30 @@ impl DbTxMut for Tx<RW> {
             data = Some(value.as_ref());
         };
 
-        let dbi = self.get_dbi::<T>()?;
+        let dbis = self.shard_dbis::<T>()?;
         let encoded_key = key.encode();
 
-        if self.is_parallel_writes_enabled() {
-            self.execute_with_operation_metric::<T, _>(Operation::Delete, None, |tx| {
-                tx.del_parallel(dbi, encoded_key, data).map_err(|e| DatabaseError::Delete(e.into()))
-            })
-        } else {
-            self.execute_with_operation_metric::<T, _>(Operation::Delete, None, |tx| {
-                tx.del(dbi, encoded_key, data).map_err(|e| DatabaseError::Delete(e.into()))
-            })
+        let mut deleted = false;
+        for dbi in dbis {
+            deleted |= if self.is_parallel_writes_enabled() {
+                self.execute_with_operation_metric::<T, _>(Operation::Delete, None, |tx| {
+                    tx.del_parallel(dbi, encoded_key.as_ref(), data)
+                        .map_err(|e| DatabaseError::Delete(e.into()))
+                })
+            } else {
+                self.execute_with_operation_metric::<T, _>(Operation::Delete, None, |tx| {
+                    tx.del(dbi, encoded_key.as_ref(), data)
+                        .map_err(|e| DatabaseError::Delete(e.into()))
+                })
+            }?;
         }
+        Ok(deleted)
     }
 
     fn clear<T: Table>(&self) -> Result<(), DatabaseError> {
-        self.inner.clear_db(self.get_dbi::<T>()?).map_err(|e| DatabaseError::Delete(e.into()))?;
+        for dbi in self.shard_dbis::<T>()? {
+            self.inner.clear_db(dbi).map_err(|e| DatabaseError::Delete(e.into()))?;
+        }
 
         Ok(())
     }
@@ -630,6 +672,28 @@ impl DbTxMut for Tx<RW> {
         } else {
             self.new_cursor()
         }
+    }
+
+    fn cursor_dup_write_shards<T: DupSort>(
+        &self,
+    ) -> Result<Vec<Self::DupCursorMut<T>>, DatabaseError> {
+        self.shard_dbis::<T>()?
+            .into_iter()
+            .map(|dbi| {
+                let inner = if self.is_parallel_writes_enabled() {
+                    self.inner.cursor_with_dbi_parallel_owned(dbi)
+                } else {
+                    self.inner.cursor_with_dbi(dbi)
+                }
+                .map_err(|e| DatabaseError::InitCursor(e.into()))?;
+                Ok(Cursor::new_with_metrics(
+                    inner,
+                    self.metrics_handler
+                        .as_ref()
+                        .map(|h| h.env_metrics.table_operation_metrics(T::NAME)),
+                ))
+            })
+            .collect()
     }
 
     fn enable_parallel_writes(&self) -> Result<(), DatabaseError> {

@@ -1,0 +1,46 @@
+# Experimental prefix-sharded persistence
+
+The parallel-table experiment leaves hashed storage and the storage trie on one
+worker each. Split each logical table into four physical DUPSORT tables by the
+top two bits of the storage-slot hash / first trie nibble. This distributes a
+single hot contract, unlike address-only sharding. Account state/trie stay intact.
+
+The original table name is shard zero; suffixes `Shard1` through `Shard3` hold the
+remaining ranges. Keys, values, trie encoding, state roots, and logical ordering
+are unchanged. Legacy and packed trie encodings have different byte shifts but
+the same nibble partition. Empty trie paths are not persisted, as before.
+
+## Invariants
+
+- Exactly one worker owns each physical-table cursor. Workers never use the parent
+  transaction. All workers join and drop cursors before children merge.
+- Children are merged serially; **one parent commit** makes all tables and block
+  metadata visible atomically. This does not introduce independent durable commits.
+- Logical cursors merge `(key, encoded value)` ordering across shards. Duplicate
+  seeks start in the matching prefix range; deletion of all duplicates visits all
+  shards. `get`, `entries`, `clear`, and raw typed views use the logical table.
+- Schema version 3 rejects old unsharded databases. New `init` and binary-dump
+  imports naturally populate the new tables through normal database APIs.
+- The conversion helper exclusively locks an offline database. It reads the trie
+  encoding from persisted storage settings, fences normal opens with version
+  3000003, and repartitions both tables plus a completion marker in one transaction.
+  Both version-file transitions use fsync + atomic rename. An interrupted conversion
+  is resumed by rerunning it; never manually replace the version file.
+
+## Tempo comparison
+
+`tempo bench-shard-storage --database DATADIR/db` invokes the conversion helper.
+The accompanying `scripts/bench-prepare-storage-layout.sh` and `bench-e2e.nu` hook
+restore the same unsharded virgin snapshot before each phase and convert only
+the candidate's disposable copy, outside measurement. Baseline snapshot generation
+uses the baseline binary. Never promote a migrated snapshot for an unsharded run.
+
+The harness syncs and drops page caches after preparation on both sides so the
+conversion does not grant a warm-cache advantage. Compare paired runs and an
+identical-baseline control, keep warmup/workload/OTEL settings equal, and report
+persistence latency and backpressure alongside TPS. Migration time is not included
+in node throughput. Large migrations may need substantial extra disk space.
+
+This remains an experimental MDBX fork, not a production-compatible upgrade.
+Cursor/reopen/abort/migration recovery tests and successful benchmarks do not prove
+race freedom, power-loss safety, or correctness under arbitrary allocation failures.

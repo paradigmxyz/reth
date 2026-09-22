@@ -9,7 +9,7 @@ use reth_db_api::{
 use reth_primitives_traits::StorageEntry;
 use reth_storage_errors::provider::ProviderResult;
 use reth_trie::{updates::TrieUpdatesSorted, HashedPostStateSorted};
-use reth_trie_db::{DatabaseStorageTrieCursor, TrieTableAdapter};
+use reth_trie_db::{StorageTrieEntryLike, TrieTableAdapter};
 
 /// Joins every worker before merging the children into their single parent transaction.
 /// Block metadata, bytecode and history writes must occur outside this scope.
@@ -36,11 +36,16 @@ pub(super) fn write_parallel<TX: DbTxMut, A: TrieTableAdapter>(
 
     // Cursors are created before workers start. No worker accesses the parent transaction.
     let mut accounts = tx.cursor_write::<tables::HashedAccounts>()?;
-    let mut storage = tx.cursor_dup_write::<tables::HashedStorages>()?;
+    let storage_cursors = tx.cursor_dup_write_shards::<tables::HashedStorages>()?;
     let mut account_trie = tx.cursor_write::<A::AccountTrieTable>()?;
-    let mut storage_trie = tx.cursor_dup_write::<A::StorageTrieTable>()?;
-    let mut results: [ProviderResult<()>; 4] = [Ok(()), Ok(()), Ok(()), Ok(())];
-    let [accounts_result, storage_result, account_trie_result, storage_trie_result] = &mut results;
+    let trie_cursors = tx.cursor_dup_write_shards::<A::StorageTrieTable>()?;
+    let storage_shards = storage_cursors.len();
+    let trie_shards = trie_cursors.len();
+    let mut results: Vec<ProviderResult<()>> =
+        (0..2 + storage_shards + trie_shards).map(|_| Ok(())).collect();
+    let (account_results, shard_results) = results.split_at_mut(2);
+    let [accounts_result, account_trie_result] = account_results else { unreachable!() };
+    let (storage_results, trie_results) = shard_results.split_at_mut(storage_shards);
     let span = tracing::Span::current();
     runtime.storage_pool().in_place_scope(|scope| {
         scope.spawn(|_| {
@@ -56,25 +61,38 @@ pub(super) fn write_parallel<TX: DbTxMut, A: TrieTableAdapter>(
                 Ok(())
             })();
         });
-        scope.spawn(|_| {
-            let _guard = span.enter();
-            *storage_result = (|| {
-                for (address, changes) in storages {
-                    for (slot, value) in changes.storage_slots_ref() {
-                        let entry = StorageEntry { key: *slot, value: *value };
-                        if let Some(existing) = storage.seek_by_key_subkey(*address, entry.key)? &&
-                            existing.key == entry.key
-                        {
-                            storage.delete_current()?;
-                        }
-                        if !value.is_zero() {
-                            storage.upsert(*address, &entry)?;
+        for (shard, (mut storage, storage_result)) in
+            storage_cursors.into_iter().zip(storage_results).enumerate()
+        {
+            let storages = &storages;
+            let span = &span;
+            scope.spawn(move |_| {
+                let _guard = span.enter();
+                let started = std::time::Instant::now();
+                *storage_result = (|| {
+                    for &(address, changes) in storages {
+                        for (slot, value) in changes.storage_slots_ref() {
+                            if storage_shards > 1 && usize::from(slot[0] >> 6) != shard {
+                                continue
+                            }
+                            let entry = StorageEntry { key: *slot, value: *value };
+                            if let Some(existing) =
+                                storage.seek_by_key_subkey(*address, entry.key)? &&
+                                existing.key == entry.key
+                            {
+                                storage.delete_current()?;
+                            }
+                            if !value.is_zero() {
+                                storage.upsert(*address, &entry)?;
+                            }
                         }
                     }
-                }
-                Ok(())
-            })();
-        });
+                    Ok(())
+                })();
+                tracing::debug!(target: "engine::persistence", shard,
+                    table = "HashedStorages", elapsed = ?started.elapsed(), "Finished storage shard writes");
+            });
+        }
         scope.spawn(|_| {
             let _guard = span.enter();
             *account_trie_result = (|| {
@@ -91,20 +109,45 @@ pub(super) fn write_parallel<TX: DbTxMut, A: TrieTableAdapter>(
                 Ok(())
             })();
         });
-        scope.spawn(|_| {
-            let _guard = span.enter();
-            *storage_trie_result = (|| {
-                for (address, updates) in storage_tries {
-                    let mut cursor: DatabaseStorageTrieCursor<_, A> =
-                        DatabaseStorageTrieCursor::new(storage_trie, *address);
-                    cursor.write_storage_trie_updates_sorted(updates)?;
-                    storage_trie = cursor.cursor;
-                }
-                Ok(())
-            })();
-        });
+        for (shard, (mut storage_trie, storage_trie_result)) in
+            trie_cursors.into_iter().zip(trie_results).enumerate()
+        {
+            let storage_tries = &storage_tries;
+            let span = &span;
+            scope.spawn(move |_| {
+                let _guard = span.enter();
+                let started = std::time::Instant::now();
+                *storage_trie_result = (|| {
+                    for &(address, updates) in storage_tries {
+                        for (nibbles, node) in updates.storage_nodes_ref() {
+                            if nibbles.is_empty() ||
+                                (trie_shards > 1 &&
+                                    usize::from(nibbles.get_unchecked(0) >> 2) != shard)
+                            {
+                                continue
+                            }
+                            let key = A::StorageSubKey::from(*nibbles);
+                            if storage_trie
+                                .seek_by_key_subkey(*address, key.clone())?
+                                .as_ref()
+                                .is_some_and(|entry| *entry.nibbles() == key)
+                            {
+                                storage_trie.delete_current()?;
+                            }
+                            if let Some(node) = node {
+                                storage_trie
+                                    .upsert(*address, &A::StorageValue::new(key, node.clone()))?;
+                            }
+                        }
+                    }
+                    Ok(())
+                })();
+                tracing::debug!(target: "engine::persistence", shard,
+                    table = "StoragesTrie", elapsed = ?started.elapsed(), "Finished storage shard writes");
+            });
+        }
     });
-    drop((accounts, storage, account_trie));
+    drop((accounts, account_trie));
     // The storage-trie worker owns and drops its cursor, including on an error.
     for result in results {
         result?;

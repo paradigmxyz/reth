@@ -34,6 +34,8 @@ use tx::Tx;
 pub mod cursor;
 pub mod tx;
 
+mod sharded;
+pub use sharded::migrate_storage_shards;
 mod utils;
 
 /// 1 KB in bytes
@@ -317,7 +319,9 @@ impl DatabaseMetrics for DatabaseEnv {
 
         let _ = self
             .view(|tx| {
-                for table in Tables::ALL.iter().map(Tables::name) {
+                for table in Tables::ALL.iter().flat_map(|t| {
+                    sharded::names(t.name()).map_or_else(|| vec![t.name()], |names| names.to_vec())
+                }) {
                     let table_db =
                         tx.inner().open_db(Some(table)).wrap_err("Could not open db.")?;
 
@@ -609,6 +613,14 @@ impl DatabaseEnv {
                 .create_db(Some(table.name()), flags)
                 .map_err(|e| DatabaseError::CreateTable(e.into()))?;
             handles.push((table.name(), db.dbi()));
+            if let Some(names) = sharded::names(table.name()) {
+                for &name in &names[1..] {
+                    let db = tx
+                        .create_db(Some(name), DatabaseFlags::DUP_SORT)
+                        .map_err(|e| DatabaseError::CreateTable(e.into()))?;
+                    handles.push((name, db.dbi()));
+                }
+            }
         }
 
         tx.commit().map_err(|e| DatabaseError::Commit(e.into()))?;

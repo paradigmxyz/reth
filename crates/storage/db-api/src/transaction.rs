@@ -100,6 +100,15 @@ pub trait DbTxMut: Send {
     /// `DupCursor` mut.
     fn cursor_dup_write<T: DupSort>(&self) -> Result<Self::DupCursorMut<T>, DatabaseError>;
 
+    /// Creates exclusive cursors for the physical prefix shards, in prefix order.
+    /// The caller must give each cursor to at most one worker and join all workers
+    /// before merging their child transactions. Non-sharded backends return one cursor.
+    fn cursor_dup_write_shards<T: DupSort>(
+        &self,
+    ) -> Result<Vec<Self::DupCursorMut<T>>, DatabaseError> {
+        Ok(vec![self.cursor_dup_write::<T>()?])
+    }
+
     /// Enables parallel writes mode, allowing multiple threads to write to different tables
     /// simultaneously. Must be called before any parallel cursor operations.
     fn enable_parallel_writes(&self) -> Result<(), DatabaseError> {

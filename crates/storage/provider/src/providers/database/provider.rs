@@ -5500,17 +5500,25 @@ mod tests {
                     );
                     state.storages.insert(
                         address,
-                        HashedStorage::from_iter([(
-                            keccak256([index, 0]),
-                            if deleted { U256::ZERO } else { U256::from(round + 1) },
-                        )]),
+                        HashedStorage::from_iter((0..256u16).map(|slot| {
+                            (
+                                keccak256([index, slot as u8]),
+                                if deleted { U256::ZERO } else { U256::from(round + 1) },
+                            )
+                        })),
                     );
                     let node = (!deleted).then(|| BranchNodeCompact::new(0b11, 0, 0, vec![], None));
                     let key = Nibbles::from_nibbles([index]);
                     nodes.push((key, node.clone()));
                     tries.insert(
                         address,
-                        StorageTrieUpdatesSorted { storage_nodes: vec![(key, node)] },
+                        StorageTrieUpdatesSorted {
+                            storage_nodes: (0..16u8)
+                                .map(|prefix| {
+                                    (Nibbles::from_nibbles([prefix, index]), node.clone())
+                                })
+                                .collect(),
+                        },
                     );
                 }
                 let state = state.into_sorted();
