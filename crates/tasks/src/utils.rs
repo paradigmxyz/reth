@@ -34,9 +34,9 @@ pub fn increase_thread_priority() {
     }
 }
 
-/// Deprioritizes known background threads spawned by third-party libraries (`OpenTelemetry`,
-/// `tracing-appender`, `reqwest`) by scanning `/proc/<pid>/task/` for matching thread names and
-/// setting `SCHED_IDLE` scheduling policy + maximum niceness on them.
+/// Deprioritizes known background threads spawned by third-party libraries (`tracing-appender`,
+/// `reqwest`) by scanning `/proc/<pid>/task/` for matching thread names and setting `SCHED_IDLE`
+/// scheduling policy on them.
 ///
 /// This is a hack: these threads are spawned by libraries that do not expose a way to hook into
 /// thread initialization or expose the TIDs, so we have to discover them after the fact by
@@ -52,9 +52,12 @@ pub fn deprioritize_background_threads() {
 }
 
 /// Thread name prefixes to deprioritize.
+///
+/// `OpenTelemetry` span producers synchronously enqueue into a bounded channel. Its `try_send`
+/// can spin until the receiver finishes updating a slot, so making that receiver `SCHED_IDLE`
+/// can stall higher-priority application threads waiting for it.
 #[cfg(target_os = "linux")]
-const DEPRIORITIZE_THREAD_PREFIXES: &[&str] =
-    &["OpenTelemetry.T", "tracing-appende", "reqwest-interna"];
+const DEPRIORITIZE_THREAD_PREFIXES: &[&str] = &["tracing-appende", "reqwest-interna"];
 
 #[cfg(target_os = "linux")]
 fn _deprioritize_background_threads() {
@@ -101,5 +104,27 @@ fn _deprioritize_background_threads() {
         }
 
         tracing::debug!(tid, comm, "deprioritized background thread (SCHED_IDLE)");
+    }
+}
+
+#[cfg(all(test, target_os = "linux"))]
+mod tests {
+    #[test]
+    fn preserves_otel_exporter_scheduling_policy() {
+        std::thread::Builder::new()
+            .name("OpenTelemetry.Traces.BatchProcessor".into())
+            .spawn(|| {
+                // SAFETY: pid 0 queries the calling thread's scheduling policy.
+                let before = unsafe { libc::sched_getscheduler(0) };
+                assert!(before >= 0);
+                super::deprioritize_background_threads();
+
+                // SAFETY: pid 0 queries the calling thread's scheduling policy.
+                let after = unsafe { libc::sched_getscheduler(0) };
+                assert_eq!(after, before, "span exporter scheduling policy must not change");
+            })
+            .unwrap()
+            .join()
+            .unwrap();
     }
 }
