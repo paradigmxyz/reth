@@ -14,10 +14,7 @@ use reth_primitives_traits::{HeaderTy, SealedBlock};
 use reth_storage_api::BlockReaderIdExt;
 use reth_tasks::Runtime;
 use std::{future::Future, pin::Pin, sync::Arc};
-use tokio::{
-    sync,
-    sync::{mpsc, oneshot},
-};
+use tokio::sync::{mpsc, oneshot};
 use tokio_stream::wrappers::ReceiverStream;
 
 /// Represents a future outputting unit type and is sendable.
@@ -106,8 +103,9 @@ impl ValidationJobSender {
 pub struct TransactionValidationTaskExecutor<V> {
     /// The validator that will validate transactions on a separate task.
     pub validator: Arc<V>,
-    /// The sender half to validation tasks that perform the actual validation.
-    pub to_validation_task: Arc<sync::Mutex<ValidationJobSender>>,
+    /// The bounded multi-producer queue supplies backpressure without serializing
+    /// producers behind an additional lock.
+    pub to_validation_task: Arc<ValidationJobSender>,
 }
 
 impl<V> Clone for TransactionValidationTaskExecutor<V> {
@@ -202,13 +200,7 @@ impl<V> TransactionValidationTaskExecutor<V> {
     /// validation tasks.
     pub fn new(validator: V) -> (Self, ValidationTask) {
         let (tx, task) = ValidationTask::new();
-        (
-            Self {
-                validator: Arc::new(validator),
-                to_validation_task: Arc::new(sync::Mutex::new(tx)),
-            },
-            task,
-        )
+        (Self { validator: Arc::new(validator), to_validation_task: Arc::new(tx) }, task)
     }
 
     /// Creates a new executor and spawns the validation tasks on the given runtime.
@@ -229,7 +221,7 @@ impl<V> TransactionValidationTaskExecutor<V> {
             task.run().await;
         });
 
-        Self { validator: Arc::new(validator), to_validation_task: Arc::new(sync::Mutex::new(tx)) }
+        Self { validator: Arc::new(validator), to_validation_task: Arc::new(tx) }
     }
 }
 
@@ -254,7 +246,7 @@ where
                     let res = validator.validate_transaction(origin, transaction).await;
                     let _ = tx.send(res);
                 });
-                self.to_validation_task.lock().await.send(fut).await
+                self.to_validation_task.send(fut).await
             };
             if res.is_err() {
                 return TransactionValidationOutcome::Error(
@@ -288,7 +280,7 @@ where
                     let res = validator.validate_transactions(transactions).await;
                     let _ = tx.send(res);
                 });
-                self.to_validation_task.lock().await.send(fut).await
+                self.to_validation_task.send(fut).await
             };
             if res.is_err() {
                 return validation_service_error_outcomes(hashes)
@@ -314,7 +306,7 @@ where
             let _ = tx.send(res);
         });
 
-        if self.to_validation_task.lock().await.send(fut).await.is_err() {
+        if self.to_validation_task.send(fut).await.is_err() {
             return validation_service_error_outcomes(hashes)
         }
 
@@ -440,6 +432,57 @@ mod tests {
         let out = executor.validate_transactions(txs).await;
         assert_eq!(out.len(), 2);
         assert!(out.iter().all(|o| matches!(o, TransactionValidationOutcome::Valid { .. })));
+    }
+
+    #[tokio::test]
+    async fn cloned_executors_share_bounded_queue() {
+        let (executor, task) = TransactionValidationTaskExecutor::new(NoopValidator);
+        let mut submissions = tokio::task::JoinSet::new();
+        for index in 0..64 {
+            let executor = executor.clone();
+            submissions.spawn(async move {
+                let transaction = MockTransaction::legacy();
+                let outcomes = match index % 3 {
+                    0 => vec![
+                        executor.validate_transaction(TransactionOrigin::Local, transaction).await,
+                    ],
+                    1 => {
+                        executor
+                            .validate_transactions(vec![(TransactionOrigin::Local, transaction)])
+                            .await
+                    }
+                    _ => {
+                        executor
+                            .validate_transactions_with_origin(
+                                TransactionOrigin::Local,
+                                vec![transaction],
+                            )
+                            .await
+                    }
+                };
+                assert_eq!(outcomes.len(), 1);
+                assert!(matches!(outcomes[0], TransactionValidationOutcome::Valid { .. }));
+            });
+        }
+
+        // No worker has started: one job can be queued and the other producers
+        // must remain pending on the same bounded channel.
+        tokio::task::yield_now().await;
+        assert_eq!(executor.to_validation_task.tx.capacity(), 0);
+        assert!(submissions.try_join_next().is_none());
+
+        let first_worker = tokio::spawn(task.clone().run());
+        let second_worker = tokio::spawn(task.run());
+        tokio::time::timeout(std::time::Duration::from_secs(5), async {
+            while let Some(result) = submissions.join_next().await {
+                result.unwrap();
+            }
+            drop(executor);
+            first_worker.await.unwrap();
+            second_worker.await.unwrap();
+        })
+        .await
+        .expect("concurrent producers and workers must drain and shut down");
     }
 
     #[derive(Debug)]
