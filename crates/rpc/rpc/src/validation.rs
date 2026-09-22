@@ -289,6 +289,11 @@ where
         output: &BlockExecutionOutput<<E::Primitives as NodePrimitives>::Receipt>,
         message: &BidTrace,
     ) -> Result<(), ValidationApiError> {
+        // A zero-value bid promises the proposer nothing, so the payload owes nothing.
+        if message.value.is_zero() {
+            return Ok(())
+        }
+
         let (mut balance_before, balance_after) = if let Some(acc) =
             output.state.state.get(&message.proposer_fee_recipient)
         {
