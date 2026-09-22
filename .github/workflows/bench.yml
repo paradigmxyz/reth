@@ -1103,7 +1103,7 @@ jobs:
       BENCH_VICTORIAMETRICS_URL: ${{ needs.bench-ack.outputs.metrics == 'true' && secrets.BENCH_VICTORIAMETRICS_URL || '' }}
     steps:
       - name: Secure runner
-        uses: tempoxyz/gh-actions/actions/secure-runner@48ff2b0c97ede86c9f10d105424380b9605f790d
+        uses: tempoxyz/gh-actions/actions/secure-runner@7e2ea6e1a8f5a22f16c2d4b389ffde25da93fa1b # 2026-09-22T22-21-59Z-7e2ea6e1
       - name: Clean up previous bench-work
         run: sudo rm -rf "$BENCH_WORK_DIR" 2>/dev/null || true
 
