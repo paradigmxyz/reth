@@ -16,7 +16,7 @@ use reth_db::{database_metrics::DatabaseMetrics, Database};
 use reth_engine_tree::{
     chain::{ChainEvent, FromOrchestrator},
     engine::{EngineApiKind, EngineApiRequest, EngineRequestHandler},
-    launch::build_engine_orchestrator,
+    launch::EngineOrchestratorBuilder,
     tree::TreeConfig,
 };
 use reth_engine_util::EngineMessageStreamExt;
@@ -244,24 +244,25 @@ impl EngineNodeLauncher {
             EngineApiKind::Ethereum
         };
 
-        let mut orchestrator = build_engine_orchestrator(
+        let mut orchestrator = EngineOrchestratorBuilder {
             engine_kind,
-            consensus.clone(),
-            network_client.clone(),
-            Box::pin(consensus_engine_stream),
+            consensus,
+            client: network_client,
+            incoming_requests: Box::pin(consensus_engine_stream),
             pipeline,
-            ctx.task_executor().clone(),
-            ctx.provider_factory().clone(),
-            ctx.blockchain_db().clone(),
+            pipeline_task_spawner: ctx.task_executor().clone(),
+            provider: ctx.provider_factory().clone(),
+            blockchain_db: ctx.blockchain_db().clone(),
             pruner,
-            ctx.components().payload_builder_handle().clone(),
-            engine_validator,
+            payload_builder: ctx.components().payload_builder_handle().clone(),
+            payload_validator: engine_validator,
             overlay_manager,
-            engine_tree_config,
-            ctx.sync_metrics_tx(),
-            ctx.components().evm_config().clone(),
-            ctx.task_executor().clone(),
-        );
+            tree_config: engine_tree_config,
+            sync_metrics_tx: ctx.sync_metrics_tx(),
+            evm_config: ctx.components().evm_config().clone(),
+            runtime: ctx.task_executor().clone(),
+        }
+        .build();
 
         info!(target: "reth::cli", "Consensus engine initialized");
 
