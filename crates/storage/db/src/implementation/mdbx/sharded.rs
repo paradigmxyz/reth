@@ -137,7 +137,8 @@ impl<K: TransactionKind> ShardedCursor<K> {
             self.current = Some((i, row.clone()));
             pair(Some(row))
         } else {
-            // MDBX retains the current position on a failed movement.
+            // A failed logical movement does not select a new row. Callers
+            // should explicitly seek before relying on the position afterward.
             pair(None)
         }
     }
@@ -198,12 +199,27 @@ impl<K: TransactionKind> ShardedCursor<K> {
         if self.cursors.len() == 1 {
             return self.cursors[0].get_current();
         }
+        if !self.deleted &&
+            let Some((i, (key, value))) = &self.current
+        {
+            // Another cursor in the same write transaction may have deleted our
+            // anchor. Do not return cached bytes for a row that no longer exists.
+            self.deleted = self.cursors[*i].get_both::<Vec<u8>>(key, value)?.is_none();
+        }
         if self.deleted {
             // Within a duplicate set MDBX resolves CURRENT to the successor,
             // or the final remaining duplicate when the deleted item was last.
+            let anchor = self.current.clone();
             for reverse in [false, true] {
                 if let Some((k, v)) = self.step(reverse, true, false)? {
-                    return pair(Some((k.into_owned(), v.into_owned())))
+                    let row = (k.into_owned(), v.into_owned());
+                    if reverse {
+                        // CURRENT reports the preceding duplicate at the end of
+                        // a deleted range without consuming the deletion anchor.
+                        self.current = anchor;
+                        self.deleted = true;
+                    }
+                    return pair(Some(row))
                 }
             }
             return self.step(false, false, false)
@@ -353,7 +369,12 @@ impl ShardedCursor<RW> {
         if self.cursors.len() == 1 {
             return self.cursors[0].del(flags)
         }
-        let Some((i, (key, value))) = self.current.clone() else { return Err(Error::NotFound) };
+        let (key, value) = self.get_current()?.ok_or(Error::NotFound)?;
+        let (key, value) = (key.into_owned(), value.into_owned());
+        if self.deleted {
+            return Err(Error::NoData)
+        }
+        let i = self.shard(&value);
         if flags.contains(WriteFlags::NO_DUP_DATA) {
             for c in &mut self.cursors {
                 if c.set::<Vec<u8>>(&key)?.is_some() {
@@ -364,6 +385,7 @@ impl ShardedCursor<RW> {
             self.cursors[i].get_both::<Vec<u8>>(&key, &value)?.ok_or(Error::NotFound)?;
             self.cursors[i].del(flags)?;
         }
+        self.current = Some((i, (key, value)));
         self.deleted = true;
         Ok(())
     }
@@ -427,6 +449,95 @@ mod tests {
             reference.delete_current_duplicates().unwrap();
             assert_eq!(sharded.current().unwrap(), reference.current().unwrap());
             assert_eq!(sharded.next().unwrap(), reference.next().unwrap());
+        }
+    }
+
+    #[test]
+    fn logical_cursors_observe_deletions_by_other_cursors() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = init_db(dir.path(), DatabaseArguments::test()).unwrap();
+        let raw = db.inner.begin_rw_txn().unwrap();
+        raw.create_db(Some("StorageReference"), reth_libmdbx::DatabaseFlags::DUP_SORT).unwrap();
+        raw.commit().unwrap();
+        let tx = db.tx_mut().unwrap();
+        let mut reference = tx.cursor_dup_write::<Reference>().unwrap();
+        let mut sharded = tx.cursor_dup_write::<HashedStorages>().unwrap();
+        for prefix in [0, 32, 64, 96, 128, 160, 192, 224] {
+            reference.upsert(B256::ZERO, &entry(prefix)).unwrap();
+            sharded.upsert(B256::ZERO, &entry(prefix)).unwrap();
+        }
+        let mut reference_other = tx.cursor_dup_write::<Reference>().unwrap();
+        let mut sharded_other = tx.cursor_dup_write::<HashedStorages>().unwrap();
+        for prefix in [0, 64, 224] {
+            reference.seek_by_key_subkey(B256::ZERO, entry(prefix).key).unwrap();
+            sharded.seek_by_key_subkey(B256::ZERO, entry(prefix).key).unwrap();
+            reference_other.seek_by_key_subkey(B256::ZERO, entry(prefix).key).unwrap();
+            sharded_other.seek_by_key_subkey(B256::ZERO, entry(prefix).key).unwrap();
+            reference_other.delete_current().unwrap();
+            sharded_other.delete_current().unwrap();
+            assert_eq!(sharded.current().unwrap(), reference.current().unwrap(), "prefix {prefix}");
+        }
+    }
+
+    #[test]
+    fn positioned_logical_cursor_operations_match_mdbx() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = init_db(dir.path(), DatabaseArguments::test()).unwrap();
+        let raw = db.inner.begin_rw_txn().unwrap();
+        raw.create_db(Some("StorageReference"), reth_libmdbx::DatabaseFlags::DUP_SORT).unwrap();
+        raw.commit().unwrap();
+        let tx = db.tx_mut().unwrap();
+        let mut reference = tx.cursor_dup_write::<Reference>().unwrap();
+        let mut sharded = tx.cursor_dup_write::<HashedStorages>().unwrap();
+        for address in 0..3 {
+            for prefix in (0..=255).step_by(16) {
+                reference.upsert(B256::repeat_byte(address), &entry(prefix)).unwrap();
+                sharded.upsert(B256::repeat_byte(address), &entry(prefix)).unwrap();
+            }
+        }
+        let mut random = 0x123456789abcdef0u64;
+        for step in 0..4096 {
+            random ^= random << 13;
+            random ^= random >> 7;
+            random ^= random << 17;
+            let operation = (random >> 1) % 10;
+            let key = B256::repeat_byte(((random >> 12) % 3) as u8);
+            let value = entry((random >> 32) as u8);
+            let r = &mut reference;
+            let s = &mut sharded;
+            let (expected, actual) = match operation {
+                0 => (r.first(), s.first()),
+                1 => (r.last(), s.last()),
+                2 => (r.seek_exact(key), s.seek_exact(key)),
+                3 => (r.current(), s.current()),
+                4 => (r.next(), s.next()),
+                5 => (r.prev(), s.prev()),
+                6 => (r.next_dup(), s.next_dup()),
+                7 => (r.next_no_dup(), s.next_no_dup()),
+                8 => {
+                    let row = r.current().unwrap();
+                    assert_eq!(s.current().unwrap(), row, "before delete at {step}");
+                    if let Some((key, value)) = row {
+                        r.seek_by_key_subkey(key, value.key).unwrap();
+                        s.seek_by_key_subkey(key, value.key).unwrap();
+                        (r.delete_current().map(|()| None), s.delete_current().map(|()| None))
+                    } else {
+                        (Ok(None), Ok(None))
+                    }
+                }
+                _ => (r.upsert(key, &value).map(|()| None), s.upsert(key, &value).map(|()| None)),
+            };
+            let unpositioned = operation < 8 && expected.as_ref().is_ok_and(Option::is_none);
+            assert_eq!(
+                actual.map_err(|error| error.to_string()),
+                expected.map_err(|error| error.to_string()),
+                "step {step}, operation {operation}"
+            );
+            // Failed movement has backend-specific positioning. Start subsequent
+            // operations from an explicitly positioned row on both backends.
+            if unpositioned {
+                assert_eq!(s.first().unwrap(), r.first().unwrap());
+            }
         }
     }
 
