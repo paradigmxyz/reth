@@ -34,6 +34,7 @@ use tx::Tx;
 pub mod cursor;
 pub mod tx;
 
+mod persistence_timing;
 mod utils;
 
 /// 1 KB in bytes

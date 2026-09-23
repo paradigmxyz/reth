@@ -73,6 +73,20 @@ pub trait DbTx: Debug + Send {
 
 /// Read write transaction that allows writing to database
 pub trait DbTxMut: Send {
+    /// Starts opt-in, transaction-local database operation timing for `save_blocks`.
+    fn begin_persistence_timing(&self, _block: u64, _state_block: u64) {}
+
+    /// Block-data and state-trie frontiers identifying the current persistence batch.
+    fn persistence_timing_frontiers(&self) -> (u64, u64) {
+        (0, 0)
+    }
+
+    /// Ends timing after all cursors/workers finish and returns per-table operation totals.
+    /// These are summed operation durations, not table worker wall times.
+    fn end_persistence_timing(&self) -> Vec<(&'static str, u64, u64)> {
+        Vec::new()
+    }
+
     /// Read-Write Cursor type
     type CursorMut<T: Table>: DbCursorRW<T> + DbCursorRO<T> + Send;
     /// Read-Write `DupCursor` type
