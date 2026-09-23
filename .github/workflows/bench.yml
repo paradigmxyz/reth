@@ -1374,9 +1374,9 @@ jobs:
             sudo install "$HOME/.cargo/bin/schelk" /usr/local/bin/
           fi
 
-          # Install the pinned samply edge revision, including on reused hosts.
+          # Refresh samply from edge for profiling runs, including on reused hosts.
           if [ "${BENCH_SAMPLY:-false}" = "true" ]; then
-            cargo install samply --git https://github.com/DaniPopes/samply --rev 24fd6ce78f206513751f996b6aae7a2cba54e5e7 --locked
+            cargo install samply --git https://github.com/DaniPopes/samply --branch edge --locked
             sudo install "$HOME/.cargo/bin/samply" /usr/local/bin/
           fi
 
