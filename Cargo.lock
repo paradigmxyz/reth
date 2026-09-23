@@ -10435,6 +10435,7 @@ dependencies = [
  "reth-network-peers",
  "reth-primitives-traits",
  "reth-provider",
+ "reth-prune-types",
  "reth-stages",
  "reth-stages-api",
  "reth-stages-types",

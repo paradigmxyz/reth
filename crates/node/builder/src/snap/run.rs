@@ -1,6 +1,9 @@
 //! Alternates header catch-up and snap bootstrap until the state is downloaded.
 
-use super::context::NodeSnapContext;
+use super::{
+    context::NodeSnapContext,
+    handoff::{Activation, SnapActivation},
+};
 use alloy_primitives::B256;
 use reth_errors::RethError;
 use reth_network_p2p::snap::client::SnapClient;
@@ -90,16 +93,43 @@ where
                 SnapBootstrapOutcome::Stopped => {
                     debug!(target: "sync::snap", "Refreshing headers before resuming snap sync");
                 }
-                SnapBootstrapOutcome::TrieRebuild { pivot, .. } |
+                SnapBootstrapOutcome::TrieRebuild { write, pivot } => {
+                    let activation = SnapActivation::new(self.factory.clone());
+                    // Publishing and the trie rebuild read every account, so they run on the
+                    // blocking pool.
+                    let activation = self
+                        .runtime
+                        .spawn_blocking(move || activation.activate(write, pivot))
+                        .await
+                        .map_err(|error| PipelineError::Internal(RethError::other(error)))??;
+                    if activation == Activation::PivotReorged {
+                        info!(target: "sync::snap", ?pivot, "Snap pivot was reorged before activation, restarting");
+                        continue
+                    }
+                    info!(target: "sync::snap", ?pivot, "Snap state verified, resuming the pipeline");
+                    return self.finish(pipeline, &mut targets).await
+                }
                 SnapBootstrapOutcome::Verified { pivot } => {
-                    info!(target: "sync::snap", ?pivot, "Snap state downloaded");
-                    // Failing keeps the engine from executing on top of unactivated state.
-                    return Err(PipelineError::Internal(RethError::msg(
-                        "activating snap state is not supported yet",
-                    )))
+                    info!(target: "sync::snap", ?pivot, "Snap state verified, resuming the pipeline");
+                    return self.finish(pipeline, &mut targets).await
                 }
             }
         }
+    }
+
+    // Runs every stage to the latest target above the verified pivot, which the published
+    // checkpoints skip to.
+    async fn finish(
+        &self,
+        pipeline: &mut Pipeline<N>,
+        targets: &mut watch::Receiver<B256>,
+    ) -> Result<ControlFlow, PipelineError> {
+        let target = PipelineTarget::Sync(*targets.borrow_and_update());
+        let stages = pipeline.run_until(StageId::Finish, Some(target));
+        self.stop
+            .run_until_cancelled(stages)
+            .await
+            .unwrap_or(Ok(ControlFlow::NoProgress { block_number: None }))
     }
 
     // Runs the header stage to the latest target, or returns `None` once the run is stopped.

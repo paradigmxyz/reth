@@ -26,6 +26,7 @@
 //! rebuilding its trie and accepting it come with activation.
 
 mod context;
+mod handoff;
 mod run;
 
 use alloy_primitives::B256;
@@ -33,8 +34,11 @@ use futures::FutureExt;
 use reth_engine_tree::backfill::{BackfillAction, BackfillEvent, BackfillSync};
 use reth_errors::RethError;
 use reth_network_p2p::snap::client::SnapClient;
-use reth_provider::{providers::ProviderNodeTypes, ProviderFactory};
-use reth_stages::{Pipeline, PipelineError, PipelineTarget, PipelineWithResult};
+use reth_provider::{
+    providers::ProviderNodeTypes, DatabaseProviderFactory, MetadataProvider, ProviderFactory,
+    ProviderResult, StageCheckpointReader,
+};
+use reth_stages::{Pipeline, PipelineError, PipelineTarget, PipelineWithResult, StageId};
 use reth_tasks::Runtime;
 use run::{SnapRun, HEADER_REFRESH};
 use std::task::{ready, Context, Poll};
@@ -82,8 +86,32 @@ where
 {
     // Spawns a run if a target is queued and the pipeline is free.
     fn try_spawn(&mut self) -> Option<BackfillEvent> {
+        if !matches!(self.state, SnapBackfillState::Idle(_)) {
+            return None
+        }
+        let target = self.pending_target.take()?;
+        // Once snap state is verified, or the node was not synced by snap, the staged pipeline
+        // backfills alone, including unwinds.
+        let needs_snap = self.needs_snap();
         let SnapBackfillState::Idle(pipeline) = &mut self.state else { return None };
-        let target = match self.pending_target.take()? {
+        match needs_snap {
+            Ok(true) => {}
+            Ok(false) => {
+                let pipeline = pipeline.take().expect("idle backfill owns its pipeline");
+                let (result_tx, result) = oneshot::channel();
+                self.runtime.spawn_critical_blocking_task("pipeline task", async move {
+                    let _ = result_tx.send(pipeline.run_as_fut(Some(target)).await);
+                });
+                self.state = SnapBackfillState::Staged(result);
+                return Some(BackfillEvent::Started(target))
+            }
+            Err(error) => {
+                return Some(BackfillEvent::Finished(Err(PipelineError::Internal(
+                    RethError::other(error),
+                ))))
+            }
+        }
+        let target = match target {
             PipelineTarget::Sync(hash) => hash,
             // Nothing executes on top of snap state before activation, so there is nothing a
             // snap backfill could unwind.
@@ -113,6 +141,16 @@ where
         self.state = SnapBackfillState::Running { _stop: stop.drop_guard(), targets, result };
 
         Some(BackfillEvent::Started(PipelineTarget::Sync(target)))
+    }
+
+    // Snap bootstraps a node with nothing executed, and finishes any attempt it has not verified
+    // yet, including one interrupted after its state was published.
+    fn needs_snap(&self) -> ProviderResult<bool> {
+        let provider = self.provider_factory.database_provider_ro()?;
+        if let Some(attempt) = provider.snap_attempt()? {
+            return Ok(!attempt.is_verified())
+        }
+        Ok(provider.get_stage_checkpoint(StageId::Execution)?.unwrap_or_default().block_number == 0)
     }
 }
 
@@ -144,7 +182,9 @@ where
         if let Some(event) = self.try_spawn() {
             return Poll::Ready(event)
         }
-        let SnapBackfillState::Running { result, .. } = &mut self.state else {
+        let (SnapBackfillState::Running { result, .. } | SnapBackfillState::Staged(result)) =
+            &mut self.state
+        else {
             return Poll::Pending
         };
         let event = match ready!(result.poll_unpin(cx)) {
@@ -171,6 +211,8 @@ enum SnapBackfillState<N: ProviderNodeTypes> {
         // Returns the pipeline with the run's result.
         result: oneshot::Receiver<PipelineWithResult<N>>,
     },
+    // The staged pipeline runs alone, over state that is verified or was never snap synced.
+    Staged(oneshot::Receiver<PipelineWithResult<N>>),
 }
 
 #[cfg(test)]
@@ -181,7 +223,7 @@ mod tests {
     use reth_provider::{
         test_utils::{create_test_provider_factory, MockNodeTypesWithDB},
         DBProvider, DatabaseProviderFactory, MetadataWriter, StageCheckpointReader,
-        StorageSettings, StorageSettingsCache,
+        StageCheckpointWriter, StorageSettings, StorageSettingsCache,
     };
     use reth_prune::PruneModes;
     use reth_stages::{ControlFlow, ExecOutput, Stage, StageCheckpoint, StageError, StageId};
@@ -234,6 +276,30 @@ mod tests {
 
     pub(super) fn headers_done(block: u64) -> Result<ExecOutput, StageError> {
         Ok(ExecOutput { checkpoint: StageCheckpoint::new(block), done: true })
+    }
+
+    #[tokio::test]
+    async fn executed_state_backfills_with_the_staged_pipeline() {
+        let headers = TestStage::new(StageId::Headers).add_exec(headers_done(5));
+        let (pipeline, factory) = pipeline(headers);
+        let provider = factory.database_provider_rw().unwrap();
+        provider.save_stage_checkpoint(StageId::Execution, StageCheckpoint::new(42)).unwrap();
+        provider.commit().unwrap();
+        let mut backfill = SnapBackfillSync::new(
+            pipeline,
+            NoopFullBlockClient::default(),
+            factory.clone(),
+            Runtime::test(),
+        );
+
+        // Executed state has nothing for snap to download, so the pipeline runs alone.
+        backfill.on_action(BackfillAction::Start(PipelineTarget::Sync(TARGET)));
+        assert!(matches!(poll_once(&mut backfill), Poll::Ready(BackfillEvent::Started(_))));
+        assert!(matches!(backfill.state, SnapBackfillState::Staged(_)));
+        assert!(matches!(poll_fn(|cx| backfill.poll(cx)).await, BackfillEvent::Finished(Ok(_))));
+
+        assert_eq!(headers_checkpoint(&factory), Some(5));
+        assert!(matches!(backfill.state, SnapBackfillState::Idle(Some(_))));
     }
 
     fn poll_once(backfill: &mut TestBackfill) -> Poll<BackfillEvent> {
