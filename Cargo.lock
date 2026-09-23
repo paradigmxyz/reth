@@ -9060,7 +9060,7 @@ dependencies = [
  "reth-primitives-traits",
  "reth-provider",
  "reth-revm",
- "reth-trie",
+ "reth-storage-api",
  "revm",
  "tracing",
 ]

@@ -36,7 +36,9 @@ use reth_primitives_traits::{
 use reth_revm::{cached::CachedReads, database::StateProviderDatabase};
 use reth_rpc_api::BlockSubmissionValidationApiServer;
 use reth_rpc_server_types::result::{internal_rpc_err, invalid_params_rpc_err};
-use reth_storage_api::{BlockReaderIdExt, HashedPostStateProvider, StateProviderFactory};
+use reth_storage_api::{
+    BlockReaderIdExt, HashedPostStateProvider, StateProvider, StateProviderFactory,
+};
 use reth_tasks::Runtime;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -196,7 +198,8 @@ where
         let mut request_cache = self.cached_reads(parent_header_hash).await;
 
         let (output, block_access_list_hash) = {
-            let cached_db = request_cache.as_db_mut(StateProviderDatabase::new(&state_provider));
+            let cached_db = request_cache
+                .as_db_mut(StateProviderDatabase::new((&state_provider).into_evm_state_provider()));
             let mut executor = self.evm_config.batch_executor(cached_db);
 
             let result = executor.execute_one(&block)?;
