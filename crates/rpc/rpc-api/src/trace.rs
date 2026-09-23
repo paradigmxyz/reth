@@ -73,12 +73,11 @@ pub trait TraceApi<TxReq> {
     #[method(name = "filter")]
     async fn trace_filter(&self, filter: TraceFilter) -> RpcResult<Vec<LocalizedTransactionTrace>>;
 
-    /// Returns transaction trace at given index.
+    /// Returns the transaction trace at the given `traceAddress` path.
     ///
-    /// `indices` represent the index positions of the traces.
-    ///
-    /// Note: This expects a list of indices but only one is supported since this function returns a
-    /// single [`LocalizedTransactionTrace`].
+    /// An empty path selects the root, `[0]` selects its first child, and `[0, 1]` selects that
+    /// child's second child. Returns `None` if the transaction or path does not exist.
+    /// Callers requiring a flat index can index the result of `trace_transaction` instead.
     #[method(name = "get")]
     async fn trace_get(
         &self,
