@@ -1,6 +1,6 @@
 use alloy_eips::eip4895::Withdrawals;
 use alloy_primitives::{hex, Address, Bytes, Signature, TxKind, B256, U256};
-use alloy_rlp::{Decodable, Header as RlpHeader};
+use alloy_rlp::{Decodable, Encodable, Header as RlpHeader};
 use arbitrary::Arbitrary;
 use eyre::{Context, Result};
 use proptest::{
@@ -269,20 +269,21 @@ where
         }
         let len_or_identifier = identifier.unwrap_or(compact_bytes.len());
 
-        // The frame transaction changed from untyped byte fields to `FrameAddress` and
-        // `SignatureMessage`. Vectors written by the old frame branch can therefore contain
-        // values which were encodable before the type migration but cannot be represented by the
-        // current consensus type. Keep the compact compatibility check focused on representable
-        // values instead of treating those obsolete development vectors as database corruption.
-        if matches!(type_name.as_str(), "Transaction" | "TransactionSigned") &&
-            legacy_frame_vector_has_unrepresentable_fields(&compact_bytes)?
-        {
-            continue;
+        // Old frame transaction vectors can contain arbitrary byte strings where the current
+        // consensus type requires an empty or 20-byte address (or other typed values). Such input
+        // cannot be constructed as the current transaction type, so verify its complete canonical
+        // RLP roundtrip rather than dropping the vector or passing it into the strict decoder.
+        let legacy_frame =
+            legacy_frame_vector_has_unrepresentable_fields(&type_name, &compact_bytes)?;
+        if legacy_frame {
+            let reconstructed =
+                canonicalize_legacy_frame_vector_with_type(&type_name, &compact_bytes)?;
+            assert_eq!(reconstructed, compact_bytes, "legacy frame vector mismatch {type_name}");
+        } else {
+            let (reconstructed, _) = T::from_compact(&compact_bytes, len_or_identifier);
+            reconstructed.to_compact(&mut buffer);
+            assert_eq!(buffer, compact_bytes, "mismatch {type_name}");
         }
-
-        let (reconstructed, _) = T::from_compact(&compact_bytes, len_or_identifier);
-        reconstructed.to_compact(&mut buffer);
-        assert_eq!(buffer, compact_bytes, "mismatch {type_name}");
     }
 
     println!(" ✅");
@@ -290,18 +291,13 @@ where
     Ok(())
 }
 
-/// Checks whether an old EIP-8141 compact vector contains fields rejected by the typed frame
-/// representation. This deliberately validates only the fields whose Rust representation changed;
-/// malformed RLP still reaches the normal compact decoder and remains a test failure.
-fn legacy_frame_vector_has_unrepresentable_fields(bytes: &[u8]) -> Result<bool> {
-    const FRAME_TRANSACTION_TYPE: u8 = 0x06;
-
-    let Some((&transaction_type, mut input)) = bytes.split_first() else {
+/// Checks whether an old EIP-8141 compact vector contains fields that cannot be represented by the
+/// current typed frame representation. The entire transaction is parsed before returning so that
+/// the caller can still validate and roundtrip every legacy vector.
+fn legacy_frame_vector_has_unrepresentable_fields(type_name: &str, bytes: &[u8]) -> Result<bool> {
+    let Some((_, mut input)) = legacy_frame_rlp_payload(type_name, bytes)? else {
         return Ok(false);
     };
-    if transaction_type != FRAME_TRANSACTION_TYPE {
-        return Ok(false);
-    }
 
     let mut fields = take_rlp_list(&mut input)?;
     if !input.is_empty() {
@@ -312,18 +308,19 @@ fn legacy_frame_vector_has_unrepresentable_fields(bytes: &[u8]) -> Result<bool> 
     u64::decode(&mut fields)?;
     Address::decode(&mut fields)?;
 
+    let mut unrepresentable = false;
     let mut frames = take_rlp_list(&mut fields)?;
     while !frames.is_empty() {
         let mut frame = take_rlp_list(&mut frames)?;
         let mode = u8::decode(&mut frame)?;
         if mode > 2 {
-            return Ok(true);
+            unrepresentable = true;
         }
         u8::decode(&mut frame)?;
 
         let target = RlpHeader::decode_bytes(&mut frame, false)?;
         if !target.is_empty() && target.len() != Address::len_bytes() {
-            return Ok(true);
+            unrepresentable = true;
         }
 
         let mut limits = take_rlp_list(&mut frame)?;
@@ -343,17 +340,17 @@ fn legacy_frame_vector_has_unrepresentable_fields(bytes: &[u8]) -> Result<bool> 
         let mut signature = take_rlp_list(&mut signatures)?;
         let scheme = u8::decode(&mut signature)?;
         if scheme > 2 {
-            return Ok(true);
+            unrepresentable = true;
         }
 
         let signer = RlpHeader::decode_bytes(&mut signature, false)?;
         if !signer.is_empty() && signer.len() != Address::len_bytes() {
-            return Ok(true);
+            unrepresentable = true;
         }
 
         let message = RlpHeader::decode_bytes(&mut signature, false)?;
         if message.len() != 0 && (message.len() != 32 || message.iter().all(|byte| *byte == 0)) {
-            return Ok(true);
+            unrepresentable = true;
         }
 
         Bytes::decode(&mut signature)?;
@@ -373,7 +370,143 @@ fn legacy_frame_vector_has_unrepresentable_fields(bytes: &[u8]) -> Result<bool> 
         eyre::bail!("EIP-8141 transaction has trailing fields in compact vector")
     }
 
-    Ok(false)
+    Ok(unrepresentable)
+}
+
+/// Re-encodes a legacy frame transaction's canonical RLP without imposing the newer typed field
+/// constraints. This is only used for historical compact vectors whose invalid values cannot be
+/// represented by `TxEip8141`; valid frame transactions still go through `Compact::from_compact`.
+fn canonicalize_legacy_frame_vector_with_type(type_name: &str, bytes: &[u8]) -> Result<Vec<u8>> {
+    let Some((prefix, mut input)) = legacy_frame_rlp_payload(type_name, bytes)? else {
+        eyre::bail!("expected EIP-8141 compact vector")
+    };
+
+    let mut output = prefix.to_vec();
+    canonicalize_rlp_item(&mut input, &mut output)?;
+    if !input.is_empty() {
+        eyre::bail!("EIP-8141 compact vector has trailing bytes")
+    }
+    Ok(output)
+}
+
+/// Returns the compact type prefix and the RLP payload for the two frame transaction wrappers.
+fn legacy_frame_rlp_payload<'a>(
+    type_name: &str,
+    bytes: &'a [u8],
+) -> Result<Option<(&'a [u8], &'a [u8])>> {
+    const FRAME_TRANSACTION_TYPE: u8 = 0x06;
+    const UNSIGNED_TRANSACTION_IDENTIFIER: u8 = u8::MAX;
+
+    let compact_prefix: &[u8] = match type_name {
+        "Transaction" => &[FRAME_TRANSACTION_TYPE],
+        "TransactionSigned" => &[UNSIGNED_TRANSACTION_IDENTIFIER, FRAME_TRANSACTION_TYPE],
+        _ => return Ok(None),
+    };
+    if !bytes.starts_with(compact_prefix) {
+        return Ok(None);
+    }
+
+    let Some((&transaction_type, payload)) = bytes[compact_prefix.len()..].split_first() else {
+        eyre::bail!("truncated EIP-8141 compact type")
+    };
+    if transaction_type != FRAME_TRANSACTION_TYPE {
+        return Ok(None);
+    }
+
+    let prefix_length = compact_prefix.len() + 1;
+    Ok(Some((&bytes[..prefix_length], payload)))
+}
+
+/// Recursively decodes and re-encodes one RLP item, preserving byte-string payloads while
+/// canonicalizing list headers.
+fn canonicalize_rlp_item(input: &mut &[u8], output: &mut Vec<u8>) -> Result<()> {
+    let original = *input;
+    let mut header_input = original;
+    let header = RlpHeader::decode(&mut header_input)?;
+    let header_length = original.len() - header_input.len();
+    let item_length = header_length
+        .checked_add(header.payload_length)
+        .ok_or_else(|| eyre::eyre!("RLP item length overflow in EIP-8141 compact vector"))?;
+    let (item, remaining) = original
+        .split_at_checked(item_length)
+        .ok_or_else(|| eyre::eyre!("truncated RLP item in EIP-8141 compact vector"))?;
+    let payload = &item[header_length..];
+
+    if header.list {
+        let mut payload = payload;
+        let mut encoded_payload = Vec::new();
+        while !payload.is_empty() {
+            canonicalize_rlp_item(&mut payload, &mut encoded_payload)?;
+        }
+        RlpHeader { list: true, payload_length: encoded_payload.len() }.encode(output);
+        output.extend_from_slice(&encoded_payload);
+    } else {
+        Bytes::copy_from_slice(payload).encode(output);
+    }
+
+    *input = remaining;
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn rlp_list(payload: &[u8]) -> Vec<u8> {
+        let mut encoded = Vec::new();
+        RlpHeader { list: true, payload_length: payload.len() }.encode(&mut encoded);
+        encoded.extend_from_slice(payload);
+        encoded
+    }
+
+    fn legacy_frame_vector(type_name: &str, target: &[u8]) -> Vec<u8> {
+        let mut frame = Vec::new();
+        0u8.encode(&mut frame);
+        0u8.encode(&mut frame);
+        Bytes::copy_from_slice(target).encode(&mut frame);
+        frame.extend(rlp_list(&[0x80, 0x80]));
+        U256::ZERO.encode(&mut frame);
+        Bytes::new().encode(&mut frame);
+
+        let mut frames = Vec::new();
+        frames.extend(rlp_list(&frame));
+
+        let mut transaction = Vec::new();
+        1u64.encode(&mut transaction);
+        0u64.encode(&mut transaction);
+        Address::ZERO.encode(&mut transaction);
+        transaction.extend(rlp_list(&frames));
+        transaction.extend(rlp_list(&[]));
+        U256::ZERO.encode(&mut transaction);
+        U256::ZERO.encode(&mut transaction);
+        U256::ZERO.encode(&mut transaction);
+        transaction.extend(rlp_list(&[]));
+
+        let mut compact = match type_name {
+            "Transaction" => vec![0x06, 0x06],
+            "TransactionSigned" => vec![u8::MAX, 0x06, 0x06],
+            _ => unreachable!(),
+        };
+        compact.extend(rlp_list(&transaction));
+        compact
+    }
+
+    #[test]
+    fn unrepresentable_frame_vectors_are_still_roundtripped() {
+        for type_name in ["Transaction", "TransactionSigned"] {
+            let vector = legacy_frame_vector(type_name, &[0xaa]);
+            assert!(legacy_frame_vector_has_unrepresentable_fields(type_name, &vector).unwrap());
+            assert_eq!(
+                canonicalize_legacy_frame_vector_with_type(type_name, &vector).unwrap(),
+                vector
+            );
+
+            let representable = legacy_frame_vector(type_name, &[0xaa; 20]);
+            assert!(
+                !legacy_frame_vector_has_unrepresentable_fields(type_name, &representable).unwrap()
+            );
+        }
+    }
 }
 
 fn take_rlp_list<'a>(input: &mut &'a [u8]) -> Result<&'a [u8]> {
