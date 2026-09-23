@@ -12,10 +12,7 @@ use reth_storage_overlay::OverlayManager;
 
 use alloy_eip7928::bal::DecodedBal;
 use alloy_eips::eip1898::BlockWithParent;
-use alloy_primitives::{
-    map::{B256Map, B256Set},
-    Bytes, B256,
-};
+use alloy_primitives::{map::B256Set, Bytes, B256};
 use alloy_rlp::Decodable;
 use alloy_rpc_types_engine::{
     ExecutionData, ExecutionPayloadSidecar, ExecutionPayloadV1, ForkchoiceState,
@@ -36,7 +33,6 @@ use reth_tasks::spawn_os_thread;
 use reth_trie_common::ComputedTrieData;
 use revm::state::bal::Bal as RevmBal;
 use std::{
-    collections::BTreeMap,
     str::FromStr,
     sync::{
         mpsc::{Receiver, Sender},
@@ -230,7 +226,8 @@ impl TestHarness {
             EngineApiKind::Ethereum,
             overlay_manager.clone(),
         );
-        let canonical_in_memory_state = CanonicalInMemoryState::with_head(header, None, None);
+        let canonical_in_memory_state = overlay_manager.in_memory_state().clone();
+        canonical_in_memory_state.set_canonical_head(header);
 
         let (to_payload_service, payload_command_rx) = unbounded_channel();
         let payload_builder = PayloadBuilderHandle::new(to_payload_service);
@@ -281,40 +278,12 @@ impl TestHarness {
     }
 
     fn with_blocks(mut self, blocks: Vec<ExecutedBlock>) -> Self {
-        let mut blocks_by_hash = B256Map::default();
-        let mut blocks_by_number = BTreeMap::new();
-        let mut parent_to_child: B256Map<B256Set> = B256Map::default();
-        let mut parent_hash = B256::ZERO;
+        let head = blocks.last().unwrap().recovered_block();
+        self.tree.state.tree_state.reset(head.num_hash());
 
-        for block in &blocks {
-            let sealed_block = block.recovered_block();
-            let hash = sealed_block.hash();
-            let number = sealed_block.number;
-            blocks_by_hash.insert(hash, block.clone());
-            blocks_by_number.entry(number).or_insert_with(Vec::new).push(block.clone());
-            parent_to_child.entry(parent_hash).or_default().insert(hash);
-            parent_hash = hash;
-        }
-
-        let overlay_manager = self.tree.state.tree_state.overlay_manager.clone();
-        for block in &blocks {
-            overlay_manager.insert_block(block.clone());
-        }
-
-        self.tree.state.tree_state = TreeState {
-            blocks_by_hash,
-            blocks_by_number,
-            current_canonical_head: blocks.last().unwrap().recovered_block().num_hash(),
-            parent_to_child,
-            engine_kind: EngineApiKind::Ethereum,
-            overlay_manager,
-        };
-
-        let canonical_in_memory_state = CanonicalInMemoryState::empty();
+        let canonical_in_memory_state = &self.tree.canonical_in_memory_state;
         canonical_in_memory_state.update_chain(NewCanonicalChain::Commit { new: blocks.clone() });
-        canonical_in_memory_state
-            .set_canonical_head(blocks.last().unwrap().recovered_block().clone_sealed_header());
-        self.tree.canonical_in_memory_state = canonical_in_memory_state;
+        canonical_in_memory_state.set_canonical_head(head.clone_sealed_header());
 
         self.blocks = blocks.clone();
 

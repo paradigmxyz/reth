@@ -308,8 +308,9 @@ where
     persistence_state: PersistenceState,
     /// Flag indicating the state of the node's backfill synchronization process.
     backfill_sync_state: BackfillSyncState,
-    /// Keeps track of the state of the canonical chain that isn't persisted yet.
-    /// This is intended to be accessed from external sources, such as rpc.
+    /// Keeps track of the executed blocks that aren't persisted yet, canonical and pending.
+    /// This is the same instance the tree state uses, and is intended to be accessed from external
+    /// sources, such as rpc.
     canonical_in_memory_state: CanonicalInMemoryState<N>,
     /// Handle to the payload builder that will receive payload attributes for valid forkchoice
     /// updates
@@ -401,6 +402,10 @@ where
         evm_config: C,
         runtime: reth_tasks::Runtime,
     ) -> Self {
+        debug_assert!(
+            canonical_in_memory_state.ptr_eq(state.tree_state.in_memory_state()),
+            "the engine and its tree state must share the node's in-memory state"
+        );
         let (incoming_tx, incoming) = crossbeam_channel::unbounded();
 
         let (payload_builds, payload_build_finished) = PayloadBuildTracker::new();
@@ -905,7 +910,7 @@ where
     /// given head.
     fn on_new_head(&self, new_head: B256) -> ProviderResult<Option<NewCanonicalChain<N>>> {
         // get the executed new head block
-        let Some(new_head_block) = self.state.tree_state.blocks_by_hash.get(&new_head) else {
+        let Some(new_head_block) = self.state.tree_state.executed_block_by_hash(new_head) else {
             debug!(target: "engine::tree", new_head=?new_head, "New head block not found in inmemory tree state");
             self.metrics.engine.executed_new_block_cache_miss.increment(1);
             return Ok(None)
@@ -914,17 +919,16 @@ where
         let new_head_number = new_head_block.recovered_block().number();
         let mut current_canonical_number = self.state.tree_state.current_canonical_head.number;
 
-        let mut new_chain = vec![new_head_block.clone()];
         let mut current_hash = new_head_block.recovered_block().parent_hash();
         let mut current_number = new_head_number - 1;
+        let mut new_chain = vec![new_head_block];
 
         // Walk back the new chain until we reach a block we know about
         //
         // This is only done for in-memory blocks, because we should not have persisted any blocks
         // that are _above_ the current canonical head.
         while current_number > current_canonical_number {
-            if let Some(block) = self.state.tree_state.executed_block_by_hash(current_hash).cloned()
-            {
+            if let Some(block) = self.state.tree_state.executed_block_by_hash(current_hash) {
                 current_hash = block.recovered_block().parent_hash();
                 current_number -= 1;
                 new_chain.push(block);
@@ -968,8 +972,7 @@ where
             old_hash = block.recovered_block().parent_hash();
             old_chain.push(block);
 
-            if let Some(block) = self.state.tree_state.executed_block_by_hash(current_hash).cloned()
-            {
+            if let Some(block) = self.state.tree_state.executed_block_by_hash(current_hash) {
                 current_hash = block.recovered_block().parent_hash();
                 new_chain.push(block);
             } else {
@@ -1886,9 +1889,9 @@ where
         // remove all buffered blocks below the backfill height
         self.state.buffer.remove_old_blocks(backfill_height);
         self.purge_timing_stats(backfill_height, None);
-        // we remove all entries because now we're synced to the backfill target and consider this
-        // the canonical chain
-        self.canonical_in_memory_state.clear_state();
+        // no in-memory block is canonical anymore, because we're now synced to the backfill target
+        // and consider it the canonical head
+        self.canonical_in_memory_state.demote_canonical_chain();
 
         if let Ok(Some(new_head)) = self.provider.sealed_header(backfill_height) {
             // update the tracked chain height, after backfill sync both the canonical height and
@@ -2278,16 +2281,15 @@ where
             target = ?target,
             "Returning save input"
         );
-        while let Some(block) = self.state.tree_state.blocks_by_hash.get(&current_hash) {
+        while let Some(block) = self.state.tree_state.executed_block_by_hash(current_hash) {
             if block.recovered_block().number() <= prev_partial_state_trie {
                 break;
             }
 
-            if block.recovered_block().number() <= new_db_tip {
-                blocks.push(block.clone());
-            }
-
             current_hash = block.recovered_block().parent_hash();
+            if block.recovered_block().number() <= new_db_tip {
+                blocks.push(block);
+            }
         }
 
         // Reverse the order so that the oldest block comes first
@@ -2320,14 +2322,9 @@ where
         }
 
         let finalized = self.state.forkchoice_state_tracker.last_valid_finalized();
-        // Trim the canonical in-memory state first: state providers build their overlays from the
-        // canonical chain, so it must never reference blocks whose overlays the manager has
-        // already pruned. `remove_before` does not read the canonical in-memory state, so the
-        // order between the two trims is free to choose.
-        self.canonical_in_memory_state.remove_persisted_blocks_until(
-            self.persistence_state.last_persisted_block,
-            in_memory_persisted_block.number,
-        );
+        self.canonical_in_memory_state.set_persisted(self.persistence_state.last_persisted_block);
+        // Trims the canonical chain to the state/trie frontier and prunes pending blocks below the
+        // finalized block, before the overlay manager drops the overlays of the removed blocks.
         self.remove_before(in_memory_persisted_block, finalized)?;
         // Persistence changes the overlay anchor. Prepare the remaining canonical range before
         // the next payload needs to read execution state against the new durable frontier.
@@ -2355,7 +2352,7 @@ where
         trace!(target: "engine::tree", ?hash, "Fetching executed block by hash");
         // check memory first
         if let Some(block) = self.state.tree_state.executed_block_by_hash(hash) {
-            return Ok(block.clone())
+            return Ok(block)
         }
 
         let (block, senders) = self
@@ -2935,12 +2932,7 @@ where
     /// This reinserts any blocks in the new chain that do not already exist in the tree
     fn reinsert_reorged_blocks(&mut self, new_chain: Vec<ExecutedBlock<N>>) {
         for block in new_chain {
-            if self
-                .state
-                .tree_state
-                .executed_block_by_hash(block.recovered_block().hash())
-                .is_none()
-            {
+            if !self.state.tree_state.contains_hash(&block.recovered_block().hash()) {
                 trace!(target: "engine::tree", num=?block.recovered_block().number(), hash=?block.recovered_block().hash(), "Reinserting block into tree state");
                 self.state.tree_state.insert_executed(block);
             }
