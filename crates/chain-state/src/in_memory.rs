@@ -5,7 +5,10 @@ use crate::{
 };
 use alloy_consensus::{transaction::TransactionMeta, BlockHeader};
 use alloy_eips::{BlockHashOrNumber, BlockNumHash};
-use alloy_primitives::{map::B256Map, BlockNumber, TxHash, B256};
+use alloy_primitives::{
+    map::{B256Map, B256Set},
+    BlockNumber, TxHash, B256,
+};
 use parking_lot::RwLock;
 use reth_chainspec::ChainInfo;
 use reth_ethereum_primitives::EthPrimitives;
@@ -20,7 +23,11 @@ use reth_primitives_traits::{
 use reth_trie::{
     updates::TrieUpdatesSorted, ComputedTrieData, HashedPostStateSorted, LazyTrieData,
 };
-use std::{collections::BTreeMap, sync::Arc, time::Instant};
+use std::{
+    collections::{BTreeMap, VecDeque},
+    sync::Arc,
+    time::Instant,
+};
 use tokio::sync::{broadcast, watch};
 
 /// Size of the broadcast channel used to notify canonical state events.
@@ -36,31 +43,347 @@ pub(crate) struct InMemoryStateMetrics {
     pub(crate) latest_block: Gauge,
     /// The number of blocks in the in-memory state.
     pub(crate) num_blocks: Gauge,
+    /// The number of executed in-memory blocks that are not canonical.
+    pub(crate) num_pending_blocks: Gauge,
 }
 
-/// Container type for in memory state data of the canonical chain.
+/// Block counts of the in-memory state, taken under the lock and recorded after releasing it.
+#[derive(Debug, Clone, Copy)]
+struct InMemoryStateStats {
+    earliest: Option<BlockNumber>,
+    latest: Option<BlockNumber>,
+    canonical: usize,
+    pending: usize,
+}
+
+/// The canonical chain above the persisted frontier.
+#[derive(Debug, Default)]
+struct CanonicalBlocks<N: NodePrimitives> {
+    /// Canonical blocks by hash.
+    blocks: B256Map<Arc<BlockState<N>>>,
+    /// Canonical block hashes by number.
+    numbers: BTreeMap<BlockNumber, B256>,
+}
+
+impl<N: NodePrimitives> CanonicalBlocks<N> {
+    fn head(&self) -> Option<&Arc<BlockState<N>>> {
+        self.numbers.last_key_value().and_then(|(_, hash)| self.blocks.get(hash))
+    }
+
+    /// Returns the hash of the block the in-memory canonical chain builds on.
+    fn anchor_hash(&self) -> Option<B256> {
+        self.numbers
+            .first_key_value()
+            .and_then(|(_, hash)| self.blocks.get(hash))
+            .map(|state| state.parent_hash())
+    }
+
+    /// Inserts a canonical block and returns the canonical block it displaces at its height.
+    fn insert(&mut self, state: Arc<BlockState<N>>) -> Option<Arc<BlockState<N>>> {
+        let hash = state.hash();
+        let displaced = self
+            .numbers
+            .insert(state.number(), hash)
+            .filter(|displaced| *displaced != hash)
+            .and_then(|displaced| self.blocks.remove(&displaced));
+        self.blocks.insert(hash, state);
+        displaced
+    }
+
+    fn remove(&mut self, hash: &B256) -> Option<Arc<BlockState<N>>> {
+        let state = self.blocks.remove(hash)?;
+        if self.numbers.get(&state.number()) == Some(hash) {
+            self.numbers.remove(&state.number());
+        }
+        Some(state)
+    }
+
+    /// Returns the canonical block built on `parent`, if there is one.
+    fn child_of(&self, parent: &BlockState<N>) -> Option<B256> {
+        self.numbers.get(&(parent.number() + 1)).copied().filter(|hash| {
+            self.blocks.get(hash).is_some_and(|child| child.parent_hash() == parent.hash())
+        })
+    }
+}
+
+/// Executed blocks that are not canonical.
 ///
-/// This tracks blocks and their state that haven't been persisted to disk yet but are part of the
-/// canonical chain that can be traced back to a canonical block on disk.
+/// These are blocks that were validated but are not (yet) part of the canonical chain: payloads
+/// that await a forkchoice update, blocks of forks, and blocks a reorg moved off the canonical
+/// chain. They stay here until they become canonical or can no longer become canonical.
+#[derive(Debug, Default)]
+struct PendingBlocks<N: NodePrimitives> {
+    /// Pending blocks by hash.
+    blocks: B256Map<Arc<BlockState<N>>>,
+    /// Pending block hashes by number. Forks can put several blocks at the same height.
+    numbers: BTreeMap<BlockNumber, B256Set>,
+    /// Pending block hashes by parent hash. The parent can be pending, canonical or persisted.
+    children: B256Map<B256Set>,
+}
+
+impl<N: NodePrimitives> PendingBlocks<N> {
+    fn insert(&mut self, state: Arc<BlockState<N>>) {
+        let hash = state.hash();
+        self.numbers.entry(state.number()).or_default().insert(hash);
+        self.children.entry(state.parent_hash()).or_default().insert(hash);
+        self.blocks.insert(hash, state);
+    }
+
+    fn remove(&mut self, hash: &B256) -> Option<Arc<BlockState<N>>> {
+        let state = self.blocks.remove(hash)?;
+        if let Some(hashes) = self.numbers.get_mut(&state.number()) {
+            hashes.remove(hash);
+            if hashes.is_empty() {
+                self.numbers.remove(&state.number());
+            }
+        }
+        if let Some(hashes) = self.children.get_mut(&state.parent_hash()) {
+            hashes.remove(hash);
+            if hashes.is_empty() {
+                self.children.remove(&state.parent_hash());
+            }
+        }
+        Some(state)
+    }
+
+    fn children_of(&self, parent_hash: B256) -> impl Iterator<Item = B256> + '_ {
+        self.children.get(&parent_hash).into_iter().flatten().copied()
+    }
+}
+
+/// All executed in-memory blocks, split into the canonical and the pending section.
+///
+/// Every block lives in exactly one section. Its parent link points at the [`BlockState`] this
+/// type holds for the parent, in either section, or is `None` if the parent is not in memory.
+#[derive(Debug, Default)]
+struct Blocks<N: NodePrimitives> {
+    /// The canonical chain above the persisted frontier.
+    canonical: CanonicalBlocks<N>,
+    /// Executed blocks that are not canonical.
+    pending: PendingBlocks<N>,
+    /// Hash of the block served as the pending block, see
+    /// [`CanonicalInMemoryState::set_pending_block`].
+    pending_block: Option<B256>,
+}
+
+impl<N: NodePrimitives> Blocks<N> {
+    fn get(&self, hash: &B256) -> Option<&Arc<BlockState<N>>> {
+        self.canonical.blocks.get(hash).or_else(|| self.pending.blocks.get(hash))
+    }
+
+    fn contains(&self, hash: &B256) -> bool {
+        self.canonical.blocks.contains_key(hash) || self.pending.blocks.contains_key(hash)
+    }
+
+    fn pending_state(&self) -> Option<Arc<BlockState<N>>> {
+        self.pending_block.and_then(|hash| self.get(&hash)).cloned()
+    }
+
+    fn stats(&self) -> InMemoryStateStats {
+        InMemoryStateStats {
+            earliest: self.canonical.numbers.first_key_value().map(|(number, _)| *number),
+            latest: self.canonical.numbers.last_key_value().map(|(number, _)| *number),
+            canonical: self.canonical.blocks.len(),
+            pending: self.pending.blocks.len(),
+        }
+    }
+
+    /// Returns the hashes of all blocks, in either section, that are built on `parent`.
+    fn children_of<'a>(&'a self, parent: &BlockState<N>) -> impl Iterator<Item = B256> + 'a {
+        self.canonical.child_of(parent).into_iter().chain(self.pending.children_of(parent.hash()))
+    }
+
+    /// Replaces the state of a tracked block, keeping it in its section.
+    fn replace(&mut self, state: Arc<BlockState<N>>) {
+        let hash = state.hash();
+        if let Some(existing) = self.canonical.blocks.get_mut(&hash) {
+            *existing = state;
+        } else if let Some(existing) = self.pending.blocks.get_mut(&hash) {
+            *existing = state;
+        }
+    }
+
+    /// Re-links every descendant of `parents` whose parent link no longer points at the state
+    /// this type holds for its parent.
+    ///
+    /// This is required after a block was removed, which must not stay reachable through the
+    /// parent links of the blocks built on it, and after a block was inserted that other tracked
+    /// blocks are already built on. A re-linked block gets a new [`BlockState`], so its
+    /// descendants are re-linked as well.
+    fn relink_children<'a>(&mut self, parents: impl IntoIterator<Item = &'a Arc<BlockState<N>>>)
+    where
+        N: 'a,
+    {
+        let mut queue = parents
+            .into_iter()
+            .flat_map(|parent| self.children_of(parent))
+            .collect::<VecDeque<_>>();
+        while let Some(hash) = queue.pop_front() {
+            let Some(state) = self.get(&hash) else { continue };
+            let parent = self.get(&state.parent_hash());
+            let linked = match (state.parent.as_ref(), parent) {
+                (None, None) => true,
+                (Some(linked), Some(parent)) => Arc::ptr_eq(linked, parent),
+                _ => false,
+            };
+            if linked {
+                continue
+            }
+            let relinked = Arc::new(BlockState::with_parent(state.block.clone(), parent.cloned()));
+            queue.extend(self.children_of(&relinked));
+            self.replace(relinked);
+        }
+    }
+
+    /// Inserts a block into the pending section unless it is already tracked, and returns its
+    /// state.
+    fn insert_pending(&mut self, block: ExecutedBlock<N>) -> Arc<BlockState<N>> {
+        let hash = block.recovered_block().hash();
+        if let Some(existing) = self.get(&hash) {
+            return Arc::clone(existing)
+        }
+        let parent = self.get(&block.recovered_block().parent_hash()).cloned();
+        let state = Arc::new(BlockState::with_parent(block, parent));
+        self.pending.insert(Arc::clone(&state));
+        // Blocks built on this one can already be tracked if it was persisted and trimmed before,
+        // for example when a reorg brings it back into memory.
+        self.relink_children([&state]);
+        state
+    }
+
+    /// Makes `new` canonical and moves the canonical blocks of `reorged` to the pending section.
+    ///
+    /// Blocks that are already tracked keep their state, so everyone holding it keeps sharing
+    /// it. Reorged blocks that are not canonical in memory are ignored.
+    fn update_chain(&mut self, new: Vec<ExecutedBlock<N>>, reorged: Vec<ExecutedBlock<N>>) {
+        for block in reorged {
+            if let Some(state) = self.canonical.remove(&block.recovered_block().hash()) {
+                self.pending.insert(state);
+            }
+        }
+
+        let mut inserted = Vec::new();
+        for block in new {
+            let hash = block.recovered_block().hash();
+            let state = if let Some(state) = self.pending.remove(&hash) {
+                state
+            } else if let Some(state) = self.canonical.blocks.get(&hash) {
+                Arc::clone(state)
+            } else {
+                let parent = self.get(&block.recovered_block().parent_hash()).cloned();
+                let state = Arc::new(BlockState::with_parent(block, parent));
+                inserted.push(Arc::clone(&state));
+                state
+            };
+            if let Some(displaced) = self.canonical.insert(state) {
+                self.pending.insert(displaced);
+            }
+        }
+
+        self.pending_block = None;
+        self.relink_children(&inserted);
+    }
+
+    /// Removes canonical blocks up to and including `remove_until`, if `persisted_hash` is part of
+    /// the in-memory canonical chain or the block it builds on, and returns their hashes.
+    fn remove_canonical_until(
+        &mut self,
+        persisted_hash: B256,
+        remove_until: BlockNumber,
+    ) -> Vec<B256> {
+        // If the persisted hash is not on the canonical chain, canonical blocks were not actually
+        // persisted. This can happen if the persistence task takes a long time, while a reorg is
+        // happening.
+        if !self.canonical.blocks.contains_key(&persisted_hash) &&
+            self.canonical.anchor_hash() != Some(persisted_hash)
+        {
+            return Vec::new()
+        }
+
+        let hashes = self
+            .canonical
+            .numbers
+            .range(..=remove_until)
+            .map(|(_, hash)| *hash)
+            .collect::<Vec<_>>();
+        let removed =
+            hashes.iter().filter_map(|hash| self.canonical.remove(hash)).collect::<Vec<_>>();
+        self.relink_children(&removed);
+        hashes
+    }
+
+    /// Removes pending blocks that can never become canonical once `finalized` is final, and
+    /// returns their hashes.
+    ///
+    /// These are all pending blocks below the finalized block, all other pending blocks at its
+    /// height and all blocks built on those.
+    fn prune_pending_below(&mut self, finalized: BlockNumHash) -> Vec<B256> {
+        let BlockNumHash { number: finalized_number, hash: finalized_hash } = finalized;
+
+        let below = self
+            .pending
+            .numbers
+            .range(..finalized_number)
+            .flat_map(|(_, hashes)| hashes.iter().copied())
+            .collect::<Vec<_>>();
+        let mut removed =
+            below.iter().filter_map(|hash| self.pending.remove(hash)).collect::<Vec<_>>();
+
+        let mut forks = self
+            .pending
+            .numbers
+            .get(&finalized_number)
+            .into_iter()
+            .flatten()
+            .copied()
+            .filter(|hash| *hash != finalized_hash)
+            .collect::<VecDeque<_>>();
+        while let Some(hash) = forks.pop_front() {
+            if let Some(state) = self.pending.remove(&hash) {
+                forks.extend(self.pending.children_of(hash));
+                removed.push(state);
+            }
+        }
+
+        if self.pending_block.is_some_and(|hash| !self.contains(&hash)) {
+            self.pending_block = None;
+        }
+        self.relink_children(&removed);
+        removed.iter().map(|state| state.hash()).collect()
+    }
+
+    /// Moves every canonical block to the pending section and clears the pending block.
+    fn demote_canonical(&mut self) {
+        let canonical = std::mem::take(&mut self.canonical);
+        for state in canonical.blocks.into_values() {
+            self.pending.insert(state);
+        }
+        self.pending_block = None;
+    }
+
+    /// Removes all blocks and returns their hashes.
+    fn clear(&mut self) -> Vec<B256> {
+        let hashes =
+            self.canonical.blocks.keys().chain(self.pending.blocks.keys()).copied().collect();
+        *self = Self::default();
+        hashes
+    }
+}
+
+/// Container type for the executed blocks that are not on disk yet.
+///
+/// This tracks the canonical chain that can be traced back to a canonical block on disk, and all
+/// other executed blocks that can still become canonical, see [`CanonicalInMemoryState`].
 ///
 /// # Locking behavior on state updates
 ///
-/// All update calls must acquire all locks at once before modifying state to ensure the internal
-/// state remains consistent. This prevents readers from observing partially updated state where
-/// the numbers and blocks maps are out of sync.
-/// Update functions ensure that the numbers write lock is always acquired first, because lookup by
-/// numbers first read the numbers map and then the blocks map.
-/// By acquiring the numbers lock first, we ensure that read-only lookups don't deadlock updates.
-/// This holds, because only lookup by number functions need to acquire the numbers lock first to
-/// get the block hash.
+/// Both sections and the pending block are guarded by a single lock. Updates take the write lock
+/// once, so readers never observe a block in neither or both sections, or a partially applied
+/// update. Metrics are recorded after the lock is released.
 #[derive(Debug, Default)]
 pub(crate) struct InMemoryState<N: NodePrimitives = EthPrimitives> {
-    /// All canonical blocks that are not on disk yet.
-    blocks: RwLock<B256Map<Arc<BlockState<N>>>>,
-    /// Mapping of block numbers to block hashes.
-    numbers: RwLock<BTreeMap<u64, B256>>,
-    /// The pending block that has not yet been made canonical.
-    pending: watch::Sender<Option<BlockState<N>>>,
+    /// The canonical and the pending section.
+    blocks: RwLock<Blocks<N>>,
     /// Metrics for the in-memory state.
     metrics: InMemoryStateMetrics,
 }
@@ -71,70 +394,79 @@ impl<N: NodePrimitives> InMemoryState<N> {
         numbers: BTreeMap<u64, B256>,
         pending: Option<BlockState<N>>,
     ) -> Self {
-        let (pending, _) = watch::channel(pending);
-        let this = Self {
-            blocks: RwLock::new(blocks),
-            numbers: RwLock::new(numbers),
-            pending,
-            metrics: Default::default(),
+        let mut state = Blocks {
+            canonical: CanonicalBlocks { blocks, numbers },
+            pending: PendingBlocks::default(),
+            pending_block: None,
         };
-        this.update_metrics();
+        if let Some(pending) = pending {
+            state.pending_block = Some(pending.hash());
+            state.pending.insert(Arc::new(pending));
+        }
+        let stats = state.stats();
+        let this = Self { blocks: RwLock::new(state), metrics: Default::default() };
+        this.record_metrics(stats);
         this
     }
 
-    /// Update the metrics for the in-memory state.
-    ///
-    /// # Locking behavior
-    ///
-    /// This tries to acquire a read lock. Drop any write locks before calling this.
-    pub(crate) fn update_metrics(&self) {
-        let (count, earliest, latest) = {
-            let numbers = self.numbers.read();
-            let count = numbers.len();
-            let earliest = numbers.first_key_value().map(|(number, _)| *number);
-            let latest = numbers.last_key_value().map(|(number, _)| *number);
-            (count, earliest, latest)
+    /// Applies `f` under the write lock and records the metrics after releasing it.
+    fn update<R>(&self, f: impl FnOnce(&mut Blocks<N>) -> R) -> R {
+        let (result, stats) = {
+            let mut blocks = self.blocks.write();
+            let result = f(&mut blocks);
+            (result, blocks.stats())
         };
-        if let Some(earliest_block_number) = earliest {
-            self.metrics.earliest_block.set(earliest_block_number as f64);
-        }
-        if let Some(latest_block_number) = latest {
-            self.metrics.latest_block.set(latest_block_number as f64);
-        }
-        self.metrics.num_blocks.set(count as f64);
+        self.record_metrics(stats);
+        result
     }
 
-    /// Returns the state for a given block hash.
+    /// Records the metrics for the in-memory state.
+    fn record_metrics(&self, stats: InMemoryStateStats) {
+        if let Some(earliest_block_number) = stats.earliest {
+            self.metrics.earliest_block.set(earliest_block_number as f64);
+        }
+        if let Some(latest_block_number) = stats.latest {
+            self.metrics.latest_block.set(latest_block_number as f64);
+        }
+        self.metrics.num_blocks.set(stats.canonical as f64);
+        self.metrics.num_pending_blocks.set(stats.pending as f64);
+    }
+
+    /// Returns the state for a given canonical block hash.
     pub(crate) fn state_by_hash(&self, hash: B256) -> Option<Arc<BlockState<N>>> {
+        self.blocks.read().canonical.blocks.get(&hash).cloned()
+    }
+
+    /// Returns the state for a given block hash, canonical or pending.
+    pub(crate) fn executed_state_by_hash(&self, hash: B256) -> Option<Arc<BlockState<N>>> {
         self.blocks.read().get(&hash).cloned()
     }
 
-    /// Returns the state for a given block number.
+    /// Returns the state for a given canonical block number.
     pub(crate) fn state_by_number(&self, number: u64) -> Option<Arc<BlockState<N>>> {
-        let hash = self.hash_by_number(number)?;
-        self.state_by_hash(hash)
+        let blocks = self.blocks.read();
+        blocks
+            .canonical
+            .numbers
+            .get(&number)
+            .and_then(|hash| blocks.canonical.blocks.get(hash))
+            .cloned()
     }
 
-    /// Returns the hash for a specific block number
+    /// Returns the hash for a specific canonical block number
     pub(crate) fn hash_by_number(&self, number: u64) -> Option<B256> {
-        self.numbers.read().get(&number).copied()
+        self.blocks.read().canonical.numbers.get(&number).copied()
     }
 
     /// Returns the current chain head state.
     pub(crate) fn head_state(&self) -> Option<Arc<BlockState<N>>> {
-        let hash = *self.numbers.read().last_key_value()?.1;
-        self.state_by_hash(hash)
+        self.blocks.read().canonical.head().cloned()
     }
 
     /// Returns the pending state corresponding to the current head plus one,
     /// from the payload received in newPayload that does not have a FCU yet.
-    pub(crate) fn pending_state(&self) -> Option<BlockState<N>> {
-        self.pending.borrow().clone()
-    }
-
-    #[cfg(test)]
-    fn block_count(&self) -> usize {
-        self.blocks.read().len()
+    pub(crate) fn pending_state(&self) -> Option<Arc<BlockState<N>>> {
+        self.blocks.read().pending_state()
     }
 }
 
@@ -145,38 +477,41 @@ pub(crate) struct CanonicalInMemoryStateInner<N: NodePrimitives> {
     /// Tracks certain chain information, such as the canonical head, safe head, and finalized
     /// head.
     pub(crate) chain_info_tracker: ChainInfoTracker<N>,
-    /// Tracks blocks at the tip of the chain that have not been persisted to disk yet.
+    /// Tracks the executed blocks that have not been persisted to disk yet.
     pub(crate) in_memory_state: InMemoryState<N>,
     /// A broadcast stream that emits events when the canonical chain is updated.
     pub(crate) canon_state_notification_sender: CanonStateNotificationSender<N>,
 }
 
-impl<N: NodePrimitives> CanonicalInMemoryStateInner<N> {
-    /// Clears all entries in the in memory state.
-    fn clear(&self) {
-        {
-            // acquire locks, starting with the numbers lock
-            let mut numbers = self.in_memory_state.numbers.write();
-            let mut blocks = self.in_memory_state.blocks.write();
-            numbers.clear();
-            blocks.clear();
-            self.in_memory_state.pending.send_modify(|p| {
-                p.take();
-            });
-        }
-        self.in_memory_state.update_metrics();
-    }
-}
-
 type PendingBlockAndReceipts<N> =
     (RecoveredBlock<<N as NodePrimitives>::Block>, Vec<reth_primitives_traits::ReceiptTy<N>>);
 
-/// This type is responsible for providing the blocks, receipts, and state for
-/// all canonical blocks not on disk yet and keeps track of the block range that
-/// is in memory.
+/// This type is responsible for providing the blocks, receipts, and state for all executed blocks
+/// that are not on disk yet.
+///
+/// It is the only place that tracks executed in-memory blocks, in two sections:
+///
+/// - **canonical**: the canonical chain above the persisted frontier, which can be traced back to a
+///   canonical block on disk.
+/// - **pending**: every other executed block that can still become canonical: payloads that await a
+///   forkchoice update, fork blocks, and blocks a reorg moved off the canonical chain.
+///
+/// Every block is tracked as one shared [`BlockState`] whose parent link points at its parent's
+/// state in either section. Making a block canonical moves that state between the sections
+/// instead of rebuilding it. The pending block served over RPC, see [`Self::set_pending_block`],
+/// is one of the blocks in the pending section.
+///
+/// Clones share the same state. A node keeps a single instance that the engine, the providers
+/// and the state overlay manager all hold.
 #[derive(Debug, Clone)]
 pub struct CanonicalInMemoryState<N: NodePrimitives = EthPrimitives> {
     pub(crate) inner: Arc<CanonicalInMemoryStateInner<N>>,
+}
+
+impl<N: NodePrimitives> Default for CanonicalInMemoryState<N> {
+    fn default() -> Self {
+        Self::empty()
+    }
 }
 
 impl<N: NodePrimitives> CanonicalInMemoryState<N> {
@@ -231,6 +566,27 @@ impl<N: NodePrimitives> CanonicalInMemoryState<N> {
         Self { inner: Arc::new(inner) }
     }
 
+    /// Returns `true` if both handles share the same state.
+    pub fn ptr_eq(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.inner, &other.inner)
+    }
+
+    /// Sets the canonical head and, if they are known, the finalized and safe headers.
+    pub fn set_head_markers(
+        &self,
+        head: SealedHeader<N::BlockHeader>,
+        finalized: Option<SealedHeader<N::BlockHeader>>,
+        safe: Option<SealedHeader<N::BlockHeader>>,
+    ) {
+        self.set_canonical_head(head);
+        if let Some(finalized) = finalized {
+            self.set_finalized(finalized);
+        }
+        if let Some(safe) = safe {
+            self.set_safe(safe);
+        }
+    }
+
     /// Returns the block hash corresponding to the given number.
     pub fn hash_by_number(&self, number: u64) -> Option<B256> {
         self.inner.in_memory_state.hash_by_number(number)
@@ -242,76 +598,51 @@ impl<N: NodePrimitives> CanonicalInMemoryState<N> {
             .map(|block| block.block_ref().recovered_block().clone_sealed_header())
     }
 
-    /// Clears all entries in the in memory state.
-    pub fn clear_state(&self) {
-        self.inner.clear()
+    /// Removes all blocks, canonical and pending, and returns their hashes.
+    pub fn clear_state(&self) -> Vec<B256> {
+        self.inner.in_memory_state.update(Blocks::clear)
+    }
+
+    /// Moves every canonical block to the pending section and clears the pending block.
+    ///
+    /// This is used when the canonical head is reset to a persisted block, e.g. after a backfill
+    /// run: none of the in-memory blocks is canonical anymore, but they remain fork candidates.
+    pub fn demote_canonical_chain(&self) {
+        self.inner.in_memory_state.update(Blocks::demote_canonical)
+    }
+
+    /// Inserts an executed block into the pending section and returns its state.
+    ///
+    /// The block is linked to its parent's state if the parent is in memory, canonical or not.
+    /// If the block is already tracked, its existing state is returned.
+    pub fn insert_pending(&self, block: ExecutedBlock<N>) -> Arc<BlockState<N>> {
+        self.inner.in_memory_state.update(|blocks| blocks.insert_pending(block))
     }
 
     /// Updates the pending block with the given block.
     ///
-    /// Note: This assumes that the parent block of the pending block is canonical.
+    /// The pending block is one of the blocks in the pending section, typically the child of the
+    /// canonical head the engine validated last. The block is inserted into the pending section
+    /// unless it is already tracked.
     pub fn set_pending_block(&self, pending: ExecutedBlock<N>) {
-        // fetch the state of the pending block's parent block
-        let parent = self.state_by_hash(pending.recovered_block().parent_hash());
-        let pending = BlockState::with_parent(pending, parent);
-        self.inner.in_memory_state.pending.send_modify(|p| {
-            p.replace(pending);
-        });
-        self.inner.in_memory_state.update_metrics();
-    }
-
-    /// Append new blocks to the in memory state.
-    ///
-    /// This removes all reorged blocks and appends the new blocks to the tracked chain and connects
-    /// them to their parent blocks.
-    fn update_blocks<I, R>(&self, new_blocks: I, reorged: R)
-    where
-        I: IntoIterator<Item = ExecutedBlock<N>>,
-        R: IntoIterator<Item = ExecutedBlock<N>>,
-    {
-        {
-            // acquire locks, starting with the numbers lock
-            let mut numbers = self.inner.in_memory_state.numbers.write();
-            let mut blocks = self.inner.in_memory_state.blocks.write();
-
-            // we first remove the blocks from the reorged chain
-            for block in reorged {
-                let hash = block.recovered_block().hash();
-                let number = block.recovered_block().number();
-                blocks.remove(&hash);
-                numbers.remove(&number);
-            }
-
-            // insert the new blocks
-            for block in new_blocks {
-                let parent = blocks.get(&block.recovered_block().parent_hash()).cloned();
-                let block_state = BlockState::with_parent(block, parent);
-                let hash = block_state.hash();
-                let number = block_state.number();
-
-                // append new blocks
-                blocks.insert(hash, Arc::new(block_state));
-                numbers.insert(number, hash);
-            }
-
-            // remove the pending state
-            self.inner.in_memory_state.pending.send_modify(|p| {
-                p.take();
-            });
-        }
-        self.inner.in_memory_state.update_metrics();
+        self.inner.in_memory_state.update(|blocks| {
+            let hash = pending.recovered_block().hash();
+            blocks.insert_pending(pending);
+            blocks.pending_block = Some(hash);
+        })
     }
 
     /// Update the in memory state with the given chain update.
+    ///
+    /// This moves the new blocks from the pending to the canonical section and the reorged blocks
+    /// from the canonical to the pending section, and clears the pending block. New blocks that
+    /// are not tracked yet are inserted and linked to their parents.
     pub fn update_chain(&self, new_chain: NewCanonicalChain<N>) {
-        match new_chain {
-            NewCanonicalChain::Commit { new } => {
-                self.update_blocks(new, vec![]);
-            }
-            NewCanonicalChain::Reorg { new, old } => {
-                self.update_blocks(new, old);
-            }
-        }
+        let (new, reorged) = match new_chain {
+            NewCanonicalChain::Commit { new } => (new, Vec::new()),
+            NewCanonicalChain::Reorg { new, old } => (new, old),
+        };
+        self.inner.in_memory_state.update(|blocks| blocks.update_chain(new, reorged))
     }
 
     /// Removes blocks from the in memory state that are persisted to the given height.
@@ -330,62 +661,79 @@ impl<N: NodePrimitives> CanonicalInMemoryState<N> {
         remove_until: BlockNumber,
     ) {
         self.set_persisted(persisted_num_hash);
-        // if the persisted hash is not in the canonical in memory state, do nothing, because it
-        // means canonical blocks were not actually persisted.
-        //
-        // This can happen if the persistence task takes a long time, while a reorg is happening.
-        {
-            if self.inner.in_memory_state.blocks.read().get(&persisted_num_hash.hash).is_none() {
-                // do nothing
-                return
-            }
-        }
+        self.remove_canonical_blocks_until(
+            persisted_num_hash.hash,
+            remove_until.min(persisted_num_hash.number),
+        );
+    }
 
-        {
-            // acquire locks, starting with the numbers lock
-            let mut numbers = self.inner.in_memory_state.numbers.write();
-            let mut blocks = self.inner.in_memory_state.blocks.write();
+    /// Removes canonical blocks up to and including `remove_until` and returns their hashes.
+    ///
+    /// This only removes blocks if `persisted_hash` is part of the in-memory canonical chain, or
+    /// is the block it builds on. Otherwise canonical blocks were not actually persisted, which
+    /// can happen if the persistence task takes a long time while a reorg is happening.
+    ///
+    /// The remaining blocks of both sections are re-linked, so that no removed block stays
+    /// reachable through their parent links.
+    pub fn remove_canonical_blocks_until(
+        &self,
+        persisted_hash: B256,
+        remove_until: BlockNumber,
+    ) -> Vec<B256> {
+        self.inner
+            .in_memory_state
+            .update(|blocks| blocks.remove_canonical_until(persisted_hash, remove_until))
+    }
 
-            let remove_until = remove_until.min(persisted_num_hash.number);
-
-            // clear all numbers
-            numbers.clear();
-
-            // Drain all blocks and keep only the suffix that still has to stay in memory.
-            let mut old_blocks = blocks
-                .drain()
-                .filter(|(_, b)| b.block_ref().recovered_block().number() > remove_until)
-                .map(|(_, b)| b.block.clone())
-                .collect::<Vec<_>>();
-
-            // sort the blocks by number so we can insert them back in natural order (low -> high)
-            old_blocks.sort_unstable_by_key(|block| block.recovered_block().number());
-
-            // re-insert the blocks in natural order and connect them to their parent blocks
-            for block in old_blocks {
-                let parent = blocks.get(&block.recovered_block().parent_hash()).cloned();
-                let block_state = BlockState::with_parent(block, parent);
-                let hash = block_state.hash();
-                let number = block_state.number();
-
-                // append new blocks
-                blocks.insert(hash, Arc::new(block_state));
-                numbers.insert(number, hash);
-            }
-
-            // also shift the pending state if it exists
-            self.inner.in_memory_state.pending.send_modify(|p| {
-                if let Some(p) = p.as_mut() {
-                    p.parent = blocks.get(&p.block_ref().recovered_block().parent_hash()).cloned();
-                }
-            });
-        }
-        self.inner.in_memory_state.update_metrics();
+    /// Removes pending blocks that can never become canonical with `finalized` finalized, and
+    /// returns their hashes.
+    ///
+    /// These are all pending blocks below the finalized block, all other pending blocks at its
+    /// height, and all blocks built on those.
+    pub fn prune_pending_below(&self, finalized: BlockNumHash) -> Vec<B256> {
+        self.inner.in_memory_state.update(|blocks| blocks.prune_pending_below(finalized))
     }
 
     /// Returns in memory state corresponding the given hash.
+    ///
+    /// This only returns canonical blocks, see [`Self::executed_state_by_hash`] for all blocks.
     pub fn state_by_hash(&self, hash: B256) -> Option<Arc<BlockState<N>>> {
         self.inner.in_memory_state.state_by_hash(hash)
+    }
+
+    /// Returns the state of the executed in-memory block with the given hash, canonical or
+    /// pending.
+    pub fn executed_state_by_hash(&self, hash: B256) -> Option<Arc<BlockState<N>>> {
+        self.inner.in_memory_state.executed_state_by_hash(hash)
+    }
+
+    /// Returns the states of all pending blocks built on `parent_hash`.
+    pub fn pending_children(&self, parent_hash: B256) -> Vec<Arc<BlockState<N>>> {
+        let blocks = self.inner.in_memory_state.blocks.read();
+        blocks
+            .pending
+            .children_of(parent_hash)
+            .filter_map(|hash| blocks.pending.blocks.get(&hash))
+            .cloned()
+            .collect()
+    }
+
+    /// Returns the states of all executed in-memory blocks at the given height, canonical first.
+    pub fn blocks_at_number(&self, number: BlockNumber) -> Vec<Arc<BlockState<N>>> {
+        let blocks = self.inner.in_memory_state.blocks.read();
+        let canonical = blocks.canonical.numbers.get(&number).into_iter();
+        let pending = blocks.pending.numbers.get(&number).into_iter().flatten();
+        canonical.chain(pending).filter_map(|hash| blocks.get(hash)).cloned().collect()
+    }
+
+    /// Returns the number of blocks in the canonical section.
+    pub fn canonical_block_count(&self) -> usize {
+        self.inner.in_memory_state.blocks.read().canonical.blocks.len()
+    }
+
+    /// Returns the number of blocks in the pending section.
+    pub fn pending_block_count(&self) -> usize {
+        self.inner.in_memory_state.blocks.read().pending.blocks.len()
     }
 
     /// Returns in memory state corresponding the block number.
@@ -399,7 +747,7 @@ impl<N: NodePrimitives> CanonicalInMemoryState<N> {
     }
 
     /// Returns the in memory pending state.
-    pub fn pending_state(&self) -> Option<BlockState<N>> {
+    pub fn pending_state(&self) -> Option<Arc<BlockState<N>>> {
         self.inner.in_memory_state.pending_state()
     }
 
@@ -612,6 +960,11 @@ impl<N: NodePrimitives> BlockState<N> {
             current = parent;
         }
         current.block.recovered_block().parent_num_hash()
+    }
+
+    /// Returns the hash of the parent block.
+    fn parent_hash(&self) -> B256 {
+        self.block.recovered_block().parent_hash()
     }
 
     /// Returns the executed block that determines the state.
@@ -1029,6 +1382,154 @@ mod tests {
     use rand::Rng;
     use reth_ethereum_primitives::{EthPrimitives, Receipt};
 
+    fn hash(block: &ExecutedBlock) -> B256 {
+        block.recovered_block().hash()
+    }
+
+    #[test]
+    fn executed_blocks_move_between_sections_and_are_relinked_on_trim() {
+        let mut builder = TestBlockBuilder::eth();
+        let state = CanonicalInMemoryState::empty();
+
+        // Blocks are validated first and made canonical afterwards, the way the engine does it.
+        let canonical = builder.get_executed_blocks(1..4).collect::<Vec<_>>();
+        let inserted =
+            canonical.iter().map(|block| state.insert_pending(block.clone())).collect::<Vec<_>>();
+        assert_eq!(state.pending_block_count(), 3);
+        assert!(state.head_state().is_none());
+        assert!(Arc::ptr_eq(inserted[2].parent.as_ref().unwrap(), &inserted[1]));
+
+        state.update_chain(NewCanonicalChain::Commit { new: canonical.clone() });
+        assert_eq!(state.canonical_block_count(), 3);
+        assert_eq!(state.pending_block_count(), 0);
+        for (block, before) in canonical.iter().zip(&inserted) {
+            let after = state.state_by_hash(hash(block)).unwrap();
+            assert!(Arc::ptr_eq(before, &after), "canonicalization must move the state");
+        }
+
+        // A fork off block 1 and the pending block on top of the head live in the pending section.
+        let fork = builder.get_executed_block_with_number(2, hash(&canonical[0]));
+        let fork_state = state.insert_pending(fork.clone());
+        let pending = builder.get_executed_block_with_number(4, hash(&canonical[2]));
+        state.set_pending_block(pending);
+        let pending_state = state.pending_state().unwrap();
+        assert!(state.state_by_hash(hash(&fork)).is_none());
+        assert!(Arc::ptr_eq(&fork_state, &state.executed_state_by_hash(hash(&fork)).unwrap()));
+        assert_eq!(state.pending_children(hash(&canonical[0])).len(), 1);
+        assert_eq!(state.blocks_at_number(2).len(), 2);
+        assert_eq!(fork_state.chain().count(), 2);
+        assert_eq!(pending_state.chain().count(), 4);
+
+        // Persisting up to block 2 re-links every remaining block, canonical or not, so nothing
+        // keeps the trimmed prefix alive.
+        let trimmed = inserted[..2].iter().map(Arc::downgrade).collect::<Vec<_>>();
+        drop((inserted, fork_state, pending_state));
+        let persisted = canonical[1].recovered_block().num_hash();
+        let removed = state.remove_canonical_blocks_until(persisted.hash, persisted.number);
+        assert_eq!(removed, vec![hash(&canonical[0]), hash(&canonical[1])]);
+        assert!(trimmed.iter().all(|state| state.upgrade().is_none()), "trimmed blocks are pinned");
+
+        let head = state.head_state().unwrap();
+        assert_eq!(head.hash(), hash(&canonical[2]));
+        assert!(head.parent.is_none());
+        let pending_state = state.pending_state().unwrap();
+        assert!(Arc::ptr_eq(pending_state.parent.as_ref().unwrap(), &head));
+        // The fork's parent was trimmed, so its chain now starts at the fork itself.
+        let fork_state = state.executed_state_by_hash(hash(&fork)).unwrap();
+        assert!(fork_state.parent.is_none());
+        assert_eq!(fork_state.anchor(), canonical[0].recovered_block().num_hash());
+    }
+
+    #[test]
+    fn reorg_moves_blocks_between_sections() {
+        let mut builder = TestBlockBuilder::eth();
+        let state = CanonicalInMemoryState::empty();
+
+        let base = builder.get_executed_block_with_number(1, B256::random());
+        let old_tip = builder.get_executed_block_with_number(2, hash(&base));
+        state.update_chain(NewCanonicalChain::Commit { new: vec![base.clone(), old_tip.clone()] });
+        let old_tip_state = state.state_by_hash(hash(&old_tip)).unwrap();
+
+        let new_tip = builder.get_executed_block_with_number(2, hash(&base));
+        let new_tip_state = state.insert_pending(new_tip.clone());
+        state.set_pending_block(new_tip.clone());
+        state.update_chain(NewCanonicalChain::Reorg {
+            new: vec![new_tip.clone()],
+            old: vec![old_tip.clone()],
+        });
+
+        assert!(Arc::ptr_eq(&new_tip_state, &state.head_state().unwrap()));
+        assert!(state.state_by_hash(hash(&old_tip)).is_none());
+        // The reorged block stays tracked as a fork candidate, with the same state.
+        assert!(Arc::ptr_eq(
+            &old_tip_state,
+            &state.executed_state_by_hash(hash(&old_tip)).unwrap()
+        ));
+        assert!(Arc::ptr_eq(&old_tip_state, &state.pending_children(hash(&base))[0]));
+        assert!(state.pending_state().is_none(), "a chain update clears the pending block");
+
+        // Reorging back moves the same states back.
+        state.update_chain(NewCanonicalChain::Reorg {
+            new: vec![old_tip],
+            old: vec![new_tip.clone()],
+        });
+        assert!(Arc::ptr_eq(&old_tip_state, &state.head_state().unwrap()));
+        assert!(Arc::ptr_eq(
+            &new_tip_state,
+            &state.executed_state_by_hash(hash(&new_tip)).unwrap()
+        ));
+        assert_eq!(state.canonical_block_count(), 2);
+        assert_eq!(state.pending_block_count(), 1);
+    }
+
+    #[test]
+    fn prune_pending_below_removes_blocks_that_cannot_become_canonical() {
+        let mut builder = TestBlockBuilder::eth();
+        let state = CanonicalInMemoryState::empty();
+        let canonical = builder.get_executed_blocks(1..5).collect::<Vec<_>>();
+        state.update_chain(NewCanonicalChain::Commit { new: canonical.clone() });
+
+        let fork_a = builder.get_executed_block_with_number(2, hash(&canonical[0]));
+        let fork_a_child = builder.get_executed_block_with_number(3, hash(&fork_a));
+        let fork_b = builder.get_executed_block_with_number(3, hash(&canonical[1]));
+        let fork_b_child = builder.get_executed_block_with_number(4, hash(&fork_b));
+        let fork_c = builder.get_executed_block_with_number(4, hash(&canonical[2]));
+        for block in [&fork_a, &fork_a_child, &fork_b, &fork_b_child, &fork_c] {
+            state.insert_pending(block.clone());
+        }
+        state.set_pending_block(fork_b_child.clone());
+
+        // With block 3 finalized, only the fork built on it can still become canonical.
+        let removed = state.prune_pending_below(canonical[2].recovered_block().num_hash());
+        assert_eq!(
+            removed.into_iter().collect::<B256Set>(),
+            B256Set::from_iter([fork_a, fork_a_child, fork_b, fork_b_child].iter().map(hash))
+        );
+        assert_eq!(state.pending_block_count(), 1);
+        assert!(state.executed_state_by_hash(hash(&fork_c)).is_some());
+        assert!(state.pending_state().is_none(), "the pruned pending block is cleared");
+        assert_eq!(state.canonical_block_count(), 4, "canonical blocks are trimmed separately");
+    }
+
+    #[test]
+    fn inserting_a_trimmed_parent_relinks_its_children() {
+        let mut builder = TestBlockBuilder::eth();
+        let state = CanonicalInMemoryState::empty();
+        let blocks = builder.get_executed_blocks(1..4).collect::<Vec<_>>();
+        state.update_chain(NewCanonicalChain::Commit { new: blocks.clone() });
+        let persisted = blocks[0].recovered_block().num_hash();
+        state.remove_canonical_blocks_until(persisted.hash, persisted.number);
+        assert_eq!(state.head_state().unwrap().chain().count(), 2);
+
+        // A reorg can bring a persisted block back into memory.
+        let parent = state.insert_pending(blocks[0].clone());
+        let lowest = state.state_by_hash(hash(&blocks[1])).unwrap();
+        let head = state.head_state().unwrap();
+        assert!(Arc::ptr_eq(lowest.parent.as_ref().unwrap(), &parent));
+        assert!(Arc::ptr_eq(head.parent.as_ref().unwrap(), &lowest));
+        assert_eq!(head.chain().count(), 3);
+    }
+
     fn create_mock_state(
         test_block_builder: &mut TestBlockBuilder<EthPrimitives>,
         block_number: u64,
@@ -1183,7 +1684,8 @@ mod tests {
             block1.recovered_block().hash()
         );
 
-        let chain = NewCanonicalChain::Reorg { new: vec![block2.clone()], old: vec![block1] };
+        let chain =
+            NewCanonicalChain::Reorg { new: vec![block2.clone()], old: vec![block1.clone()] };
         state.update_chain(chain);
         assert_eq!(
             state.head_state().unwrap().block_ref().recovered_block().hash(),
@@ -1194,7 +1696,11 @@ mod tests {
             block2.recovered_block().hash()
         );
 
-        assert_eq!(state.inner.in_memory_state.block_count(), 1);
+        // The reorged block is no longer canonical but stays tracked as a fork candidate.
+        assert_eq!(state.canonical_block_count(), 1);
+        assert_eq!(state.pending_block_count(), 1);
+        assert!(state.state_by_hash(block1.recovered_block().hash()).is_none());
+        assert!(state.executed_state_by_hash(block1.recovered_block().hash()).is_some());
     }
 
     #[test]
@@ -1216,40 +1722,54 @@ mod tests {
         // Assert that the pending state is None before setting it
         assert!(state.pending_state().is_none());
 
-        // Set the pending block
-        state.set_pending_block(block2.clone());
+        // Set the pending block on top of the canonical head
+        let block3 =
+            test_block_builder.get_executed_block_with_number(2, block2.recovered_block().hash());
+        state.set_pending_block(block3.clone());
 
         // Check the pending state
         assert_eq!(
-            state.pending_state().unwrap(),
-            BlockState::with_parent(block2.clone(), Some(Arc::new(BlockState::new(block1))))
+            *state.pending_state().unwrap(),
+            BlockState::with_parent(
+                block3.clone(),
+                Some(Arc::new(BlockState::with_parent(
+                    block2,
+                    Some(Arc::new(BlockState::new(block1)))
+                )))
+            )
         );
+        // The pending block lives in the pending section
+        assert!(Arc::ptr_eq(
+            &state.pending_state().unwrap(),
+            &state.executed_state_by_hash(block3.recovered_block().hash()).unwrap()
+        ));
+        assert!(state.state_by_hash(block3.recovered_block().hash()).is_none());
 
         // Check the pending block
-        assert_eq!(state.pending_block().unwrap(), block2.recovered_block().sealed_block().clone());
+        assert_eq!(state.pending_block().unwrap(), block3.recovered_block().sealed_block().clone());
 
         // Check the pending block number and hash
         assert_eq!(
             state.pending_block_num_hash().unwrap(),
-            BlockNumHash { number: 1, hash: block2.recovered_block().hash() }
+            BlockNumHash { number: 2, hash: block3.recovered_block().hash() }
         );
 
         // Check the pending header
-        assert_eq!(state.pending_header().unwrap(), block2.recovered_block().header().clone());
+        assert_eq!(state.pending_header().unwrap(), block3.recovered_block().header().clone());
 
         // Check the pending sealed header
         assert_eq!(
             state.pending_sealed_header().unwrap(),
-            block2.recovered_block().clone_sealed_header()
+            block3.recovered_block().clone_sealed_header()
         );
 
         // Check the pending block with senders
-        assert_eq!(state.pending_recovered_block().unwrap(), block2.recovered_block().clone());
+        assert_eq!(state.pending_recovered_block().unwrap(), block3.recovered_block().clone());
 
         // Check the pending block and receipts
         assert_eq!(
             state.pending_block_and_receipts().unwrap(),
-            (block2.recovered_block().clone(), vec![])
+            (block3.recovered_block().clone(), vec![])
         );
     }
 
@@ -1285,7 +1805,7 @@ mod tests {
         for i in 1..=3 {
             let block = block_builder.get_executed_block_with_number(i, parent_hash);
             let hash = block.recovered_block().hash();
-            state.update_blocks(Some(block), None);
+            state.update_chain(NewCanonicalChain::Commit { new: vec![block] });
             parent_hash = hash;
         }
 
@@ -1307,7 +1827,7 @@ mod tests {
         for i in 1..=2 {
             let block = block_builder.get_executed_block_with_number(i, parent_hash);
             let hash = block.recovered_block().hash();
-            state.update_blocks(Some(block), None);
+            state.update_chain(NewCanonicalChain::Commit { new: vec![block] });
             parent_hash = hash;
         }
 
