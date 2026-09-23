@@ -361,7 +361,7 @@ pub struct EngineArgs {
     ///
     /// On chains with short block times a pipeline run may take longer than it takes the chain to
     /// produce another gap of this size, in which case raising this value lets the node catch up
-    /// via live sync.
+    /// via live sync. Values above 1024 are clamped to the peer header response limit.
     #[arg(
         long = "engine.backfill-threshold",
         env = "RETH_ENGINE_BACKFILL_THRESHOLD",
@@ -1065,6 +1065,18 @@ mod tests {
         let config = args.tree_config();
         assert_eq!(config.backfill_run_threshold(), 500);
         assert_eq!(config.block_buffer_limit(), 1000);
+
+        for threshold in ["1024", "1025", "18446744073709551615"] {
+            let args = CommandParser::<EngineArgs>::parse_from([
+                "reth",
+                "--engine.backfill-threshold",
+                threshold,
+            ])
+            .args;
+            let config = args.tree_config();
+            assert_eq!(config.backfill_run_threshold(), 1024);
+            assert_eq!(config.block_buffer_limit(), 2048);
+        }
     }
 
     #[test]

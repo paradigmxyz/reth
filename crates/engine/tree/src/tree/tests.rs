@@ -26,6 +26,7 @@ use reth_chain_state::test_utils::TestBlockBuilder;
 use reth_chainspec::{ChainSpec, HOLESKY, MAINNET};
 use reth_engine_primitives::{
     EngineApiValidator, ForkchoiceStatus, NoopInvalidBlockHook, DEFAULT_BACKFILL_RUN_THRESHOLD,
+    MAX_BACKFILL_RUN_THRESHOLD,
 };
 use reth_ethereum_consensus::EthBeaconConsensus;
 use reth_ethereum_engine_primitives::{EthEngineTypes, EthPayloadAttributes};
@@ -3165,6 +3166,7 @@ fn test_exceeds_backfill_run_threshold_uses_configured_value() {
 
     for threshold in [0, 1, default_threshold * 10, u64::MAX] {
         test_harness.tree.config = TreeConfig::default().with_backfill_run_threshold(threshold);
+        let threshold = threshold.min(MAX_BACKFILL_RUN_THRESHOLD);
         assert!(!test_harness.tree.exceeds_backfill_run_threshold(0, threshold));
         if threshold < u64::MAX {
             assert!(test_harness.tree.exceeds_backfill_run_threshold(0, threshold + 1));
@@ -3468,5 +3470,46 @@ async fn test_on_backfill_sync_finished_eth_retriggers_backfill_to_buffered_fina
 async fn test_on_backfill_sync_finished_resumes_live_sync_with_higher_threshold() {
     for engine_kind in [EngineApiKind::Ethereum, EngineApiKind::OpStack] {
         assert_post_backfill_recheck_uses_threshold(engine_kind, 100, false).await;
+    }
+}
+
+#[test]
+fn test_backfill_threshold_above_header_limit_triggers_backfill() {
+    let mut test_harness = TestHarness::new(MAINNET.clone());
+    let target_hash = B256::from([0xAA; 32]);
+    test_harness.tree.state.forkchoice_state_tracker.set_latest(
+        ForkchoiceState {
+            head_block_hash: target_hash,
+            safe_block_hash: B256::ZERO,
+            finalized_block_hash: target_hash,
+        },
+        ForkchoiceStatus::Syncing,
+    );
+    let local_tip = BlockNumHash::new(10, B256::ZERO);
+    let parent_hash = B256::from([0xBB; 32]);
+    for threshold in [1024, 1025, 2048, u64::MAX] {
+        test_harness.tree.config = TreeConfig::default().with_backfill_run_threshold(threshold);
+        for gap in [1024, 1025] {
+            let missing_parent = BlockNumHash::new(local_tip.number + gap, parent_hash);
+            let downloaded = BlockNumHash::new(missing_parent.number + 1, B256::from([0xCC; 32]));
+            let event = test_harness.tree.on_disconnected_downloaded_block(
+                downloaded,
+                missing_parent,
+                local_tip,
+            );
+            if gap == 1024 {
+                assert!(matches!(
+                    event,
+                    Some(TreeEvent::Download(DownloadRequest::BlockRange { hash, count: 1024, .. }))
+                        if hash == parent_hash
+                ));
+            } else {
+                assert!(matches!(
+                    event,
+                    Some(TreeEvent::BackfillAction(BackfillAction::Start(target)))
+                        if target.sync_target() == Some(target_hash)
+                ));
+            }
+        }
     }
 }
