@@ -9,11 +9,8 @@ use reth_db_api::{
     tables, DatabaseError,
 };
 use reth_prune_types::PruneMode;
-use reth_storage_api::{
-    BalNotification, BalNotificationStream, BalStore, GetBlockAccessListLimit, RawBal,
-};
+use reth_storage_api::{BalStore, GetBlockAccessListLimit, RawBal};
 use reth_storage_errors::provider::{ProviderError, ProviderResult};
-use reth_tokio_util::EventSender;
 use std::{
     collections::{BTreeMap, BTreeSet, HashMap},
     sync::Arc,
@@ -36,8 +33,6 @@ pub struct RocksDBBalStore {
     rocksdb: RocksDBProvider,
     /// Shared recent-read cache and pending-write state.
     buffer: Arc<RwLock<RocksDBBalStoreBuffer>>,
-    /// Broadcasts BAL insert notifications.
-    notifications: EventSender<BalNotification>,
 }
 
 impl RocksDBBalStore {
@@ -54,7 +49,6 @@ impl RocksDBBalStore {
             buffer_retention_distance: blocks,
             rocksdb,
             buffer: Arc::new(RwLock::new(RocksDBBalStoreBuffer::default())),
-            notifications: EventSender::new(super::DEFAULT_BAL_NOTIFICATION_CHANNEL_SIZE),
         }
     }
 
@@ -131,11 +125,7 @@ impl std::fmt::Debug for RocksDBBalStore {
 
 impl BalStore for RocksDBBalStore {
     fn insert(&self, block: NumHash, bal: RawBal) -> ProviderResult<()> {
-        let mut buffer = self.buffer.write();
-        buffer.insert(block, bal.clone());
-        drop(buffer);
-
-        self.notifications.notify(BalNotification::new(block, bal));
+        self.buffer.write().insert(block, bal);
         Ok(())
     }
 
@@ -146,13 +136,8 @@ impl BalStore for RocksDBBalStore {
 
         let mut buffer = self.buffer.write();
         buffer.entries.reserve(entries.len());
-        for (block, bal) in &entries {
-            buffer.insert(*block, bal.clone());
-        }
-        drop(buffer);
-
         for (block, bal) in entries {
-            self.notifications.notify(BalNotification::new(block, bal));
+            buffer.insert(block, bal);
         }
         Ok(())
     }
@@ -209,10 +194,6 @@ impl BalStore for RocksDBBalStore {
             }
         }
         Ok(())
-    }
-
-    fn bal_stream(&self) -> BalNotificationStream {
-        self.notifications.new_listener()
     }
 }
 
@@ -354,7 +335,6 @@ mod tests {
     use super::*;
     use crate::providers::{RocksDBBuilder, RocksDBProvider};
     use alloy_primitives::B256;
-    use tokio_stream::StreamExt;
 
     fn test_rocksdb(dir: &tempfile::TempDir) -> RocksDBProvider {
         RocksDBBuilder::new(dir.path())
@@ -592,17 +572,5 @@ mod tests {
             retry.iter().map(|(key, _)| NumHash::new(key.number(), key.hash())).collect::<Vec<_>>(),
             vec![first, second]
         );
-    }
-
-    #[tokio::test]
-    async fn insert_notifies_subscribers() {
-        let (_dir, store) = test_store();
-        let mut stream = store.bal_stream();
-        let block = NumHash::new(1, B256::with_last_byte(1));
-        let bal = RawBal::from(Bytes::from_static(&[0xc0]));
-
-        store.insert(block, bal.clone()).unwrap();
-
-        assert_eq!(stream.next().await.unwrap(), BalNotification::new(block, bal));
     }
 }

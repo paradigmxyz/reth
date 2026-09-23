@@ -314,6 +314,33 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn send_transaction_fills_missing_fee_fields() {
+        let signers = DevSigner::random_signers(1);
+        let address = signers[0].accounts()[0];
+        let accounts = AddressMap::from_iter([(
+            address,
+            ExtendedAccount::new(0, U256::from(10_000_000_000_000_000_000u64)),
+        )]);
+        let eth_api = mock_eth_api(accounts);
+        eth_api.signers().write().extend(signers);
+
+        // no gas, gasPrice or 1559 fee fields: the node is expected to fill them
+        let tx_req = TransactionRequest {
+            from: Some(address),
+            to: Some(address.into()),
+            value: Some(U256::from(1)),
+            ..Default::default()
+        };
+
+        let hash = eth_api
+            .send_transaction_request(tx_req)
+            .await
+            .expect("send_transaction should fill the missing fee fields");
+        let pooled = eth_api.pool().get(&hash).expect("transaction should be in the pool");
+        assert!(pooled.transaction.max_fee_per_gas() > 0);
+    }
+
+    #[tokio::test]
     async fn send_transaction_rejects_mismatched_chain_id() {
         let signers = DevSigner::random_signers(1);
         let address = signers[0].accounts()[0];

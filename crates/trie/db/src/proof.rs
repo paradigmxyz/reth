@@ -7,7 +7,7 @@ use reth_trie::{
     proof::{Proof, StorageProof},
     trie_cursor::InMemoryTrieCursorFactory,
     AccountProof, DecodedMultiProofV2, HashedPostStateSorted, HashedStorage, MultiProof,
-    MultiProofTargets, MultiProofTargetsV2, StorageMultiProof, TrieInput,
+    MultiProofTargets, MultiProofTargetsV2, StorageMultiProof, TrieInput, TrieInputSorted,
 };
 
 /// Extends [`Proof`] with operations specific for working with a database transaction.
@@ -114,7 +114,7 @@ pub trait DatabaseStorageProof<'a, TX> {
         tx: &'a TX,
         address: Address,
         slots: &[B256],
-        storage: HashedStorage,
+        input: TrieInputSorted,
     ) -> Result<StorageMultiProof, StateProofError>;
 }
 
@@ -158,21 +158,21 @@ impl<'a, TX: DbTx, A: TrieTableAdapter> DatabaseStorageProof<'a, TX>
         tx: &'a TX,
         address: Address,
         slots: &[B256],
-        storage: HashedStorage,
+        mut input: TrieInputSorted,
     ) -> Result<StorageMultiProof, StateProofError> {
         let hashed_address = keccak256(address);
         let targets = slots.iter().map(keccak256).collect();
-        let prefix_set = storage.construct_prefix_set();
-        let state_sorted = HashedPostStateSorted::new(
-            Default::default(),
-            HashMap::from_iter([(hashed_address, storage.into_sorted())]),
-        );
         StorageProof::new(
-            DatabaseTrieCursorFactory::<_, A>::new(tx),
-            HashedPostStateCursorFactory::new(DatabaseHashedCursorFactory::new(tx), &state_sorted),
+            InMemoryTrieCursorFactory::new(
+                DatabaseTrieCursorFactory::<_, A>::new(tx),
+                &input.nodes,
+            ),
+            HashedPostStateCursorFactory::new(DatabaseHashedCursorFactory::new(tx), &input.state),
             address,
         )
-        .with_prefix_set_mut(prefix_set)
+        .with_prefix_set_mut(
+            input.prefix_sets.storage_prefix_sets.remove(&hashed_address).unwrap_or_default(),
+        )
         .storage_multiproof(targets)
     }
 }

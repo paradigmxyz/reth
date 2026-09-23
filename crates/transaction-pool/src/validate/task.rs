@@ -208,9 +208,10 @@ impl<V> TransactionValidationTaskExecutor<V> {
     /// This spawns `additional_tasks` extra blocking tasks plus one critical blocking task
     /// for the validation service.
     pub fn spawn(validator: V, tasks: &Runtime, additional_tasks: usize) -> Self {
-        // Keep a bounded handoff buffer for the configured workers, so a busy
-        // pool does not require a producer wakeup before every worker dequeue.
-        let (tx, task) = ValidationTask::with_capacity(additional_tasks.saturating_add(1));
+        // Buffer two jobs per worker so workers can dequeue without waiting for
+        // a producer to refill the channel after every handoff.
+        let (tx, task) =
+            ValidationTask::with_capacity(additional_tasks.saturating_add(1).saturating_mul(2));
 
         for _ in 0..additional_tasks {
             let task = task.clone();
@@ -490,16 +491,16 @@ mod tests {
     #[tokio::test]
     async fn configured_workers_have_bounded_handoff_capacity() {
         let runtime = Runtime::test();
-        for additional_tasks in [0, 8] {
+        for (additional_tasks, expected_capacity) in [(0, 2), (1, 4), (8, 18)] {
             let executor =
                 TransactionValidationTaskExecutor::spawn(NoopValidator, &runtime, additional_tasks);
-            assert_eq!(executor.to_validation_task.tx.max_capacity(), additional_tasks + 1);
+            assert_eq!(executor.to_validation_task.tx.max_capacity(), expected_capacity);
             let outcome = tokio::time::timeout(
                 std::time::Duration::from_secs(5),
                 executor.validate_transaction(TransactionOrigin::Local, MockTransaction::legacy()),
             )
             .await
-            .expect("configured validation workers must process submissions");
+            .expect("configured validation workers must process jobs");
             assert!(matches!(outcome, TransactionValidationOutcome::Valid { .. }));
         }
     }
