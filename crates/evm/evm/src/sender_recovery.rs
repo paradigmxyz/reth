@@ -37,9 +37,22 @@ impl SenderRecoveryCache {
     /// Failed recoveries are not cached.
     #[inline]
     pub fn recover<T: SignedTransaction>(&self, transaction: &T) -> Result<Address, RecoveryError> {
+        self.recover_with(transaction, SignedTransaction::try_recover)
+    }
+
+    /// Returns the cached sender or uses the given recovery function on a cache miss.
+    ///
+    /// The recovery function must validate the transaction's signature. It can also prepare
+    /// transaction-specific metadata alongside sender recovery. Failed recoveries are not cached.
+    #[inline]
+    pub fn recover_with<T: SignedTransaction>(
+        &self,
+        transaction: &T,
+        recover: impl FnOnce(&T) -> Result<Address, RecoveryError>,
+    ) -> Result<Address, RecoveryError> {
         self.cache.get_or_try_insert_with_ref(
             transaction.tx_hash(),
-            |_| transaction.try_recover(),
+            |_| recover(transaction),
             |hash| *hash,
         )
     }
@@ -89,5 +102,51 @@ mod tests {
 
         assert!(cache.recover(&transaction).is_err());
         assert_eq!(cache.get(transaction.tx_hash()), None);
+    }
+
+    #[test]
+    fn custom_recovery_runs_only_on_cache_miss() {
+        let transaction = TransactionSigned::new_unhashed(
+            Transaction::Legacy(TxLegacy::default()),
+            Signature::test_signature(),
+        );
+        let cache = SenderRecoveryCache::new(4);
+        let mut recovered = None;
+
+        let sender = cache
+            .recover_with(&transaction, |tx| {
+                let signer = tx.try_recover()?;
+                recovered = Some(signer);
+                Ok(signer)
+            })
+            .unwrap();
+
+        assert_eq!(recovered, Some(sender));
+        assert_eq!(cache.get(transaction.tx_hash()), Some(sender));
+        assert_eq!(
+            cache.recover_with(&transaction, |_| panic!("cache hit must skip recovery")).unwrap(),
+            sender
+        );
+    }
+
+    #[test]
+    fn failed_custom_recovery_is_retried() {
+        let transaction = TransactionSigned::new_unhashed(
+            Transaction::Legacy(TxLegacy::default()),
+            Signature::new(U256::ZERO, U256::ZERO, false),
+        );
+        let cache = SenderRecoveryCache::new(4);
+        let mut attempts = 0;
+
+        for _ in 0..2 {
+            assert!(cache
+                .recover_with(&transaction, |tx| {
+                    attempts += 1;
+                    tx.try_recover()
+                })
+                .is_err());
+            assert_eq!(cache.get(transaction.tx_hash()), None);
+        }
+        assert_eq!(attempts, 2);
     }
 }
