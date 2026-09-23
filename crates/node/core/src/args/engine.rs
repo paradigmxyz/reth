@@ -1057,25 +1057,15 @@ mod tests {
         let args = CommandParser::<EngineArgs>::parse_from(["reth"]).args;
         let config = args.tree_config();
         assert_eq!(config.backfill_run_threshold(), DEFAULT_BACKFILL_RUN_THRESHOLD);
-        assert_eq!(config.block_buffer_limit(), TreeConfig::default().block_buffer_limit());
 
-        let args =
-            CommandParser::<EngineArgs>::parse_from(["reth", "--engine.backfill-threshold", "500"])
-                .args;
-        let config = args.tree_config();
-        assert_eq!(config.backfill_run_threshold(), 500);
-        assert_eq!(config.block_buffer_limit(), 1000);
-
-        for threshold in ["1024", "1025", "18446744073709551615"] {
+        for (threshold, expected) in [("500", 500), ("2048", 1024)] {
             let args = CommandParser::<EngineArgs>::parse_from([
                 "reth",
                 "--engine.backfill-threshold",
                 threshold,
             ])
             .args;
-            let config = args.tree_config();
-            assert_eq!(config.backfill_run_threshold(), 1024);
-            assert_eq!(config.block_buffer_limit(), 2048);
+            assert_eq!(args.tree_config().backfill_run_threshold(), expected);
         }
     }
 

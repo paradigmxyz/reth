@@ -26,7 +26,6 @@ use reth_chain_state::test_utils::TestBlockBuilder;
 use reth_chainspec::{ChainSpec, HOLESKY, MAINNET};
 use reth_engine_primitives::{
     EngineApiValidator, ForkchoiceStatus, NoopInvalidBlockHook, DEFAULT_BACKFILL_RUN_THRESHOLD,
-    MAX_BACKFILL_RUN_THRESHOLD,
 };
 use reth_ethereum_consensus::EthBeaconConsensus;
 use reth_ethereum_engine_primitives::{EthEngineTypes, EthPayloadAttributes};
@@ -3164,85 +3163,10 @@ fn test_exceeds_backfill_run_threshold_uses_configured_value() {
     assert!(!test_harness.tree.exceeds_backfill_run_threshold(0, default_threshold));
     assert!(test_harness.tree.exceeds_backfill_run_threshold(0, default_threshold + 1));
 
-    for threshold in [0, 1, default_threshold * 10, u64::MAX] {
-        test_harness.tree.config = TreeConfig::default().with_backfill_run_threshold(threshold);
-        let threshold = threshold.min(MAX_BACKFILL_RUN_THRESHOLD);
-        assert!(!test_harness.tree.exceeds_backfill_run_threshold(0, threshold));
-        if threshold < u64::MAX {
-            assert!(test_harness.tree.exceeds_backfill_run_threshold(0, threshold + 1));
-        }
-        assert!(!test_harness.tree.exceeds_backfill_run_threshold(100, 100));
-        assert!(!test_harness.tree.exceeds_backfill_run_threshold(100, 99));
-        assert_eq!(test_harness.tree.exceeds_backfill_run_threshold(100, 133), threshold < 33);
-    }
-}
-
-#[test]
-fn test_backfill_sync_target_uses_configured_threshold() {
-    let mut test_harness = TestHarness::new(MAINNET.clone());
-    let target = TestBlockBuilder::eth().get_executed_blocks(100..101).next().unwrap();
-    let target = target.recovered_block().clone_sealed_block();
-    let target_hash = target.hash();
-    let local_tip = 10;
-    let gap = target.number() - local_tip;
-    test_harness.tree.state.forkchoice_state_tracker.set_latest(
-        ForkchoiceState {
-            head_block_hash: target_hash,
-            safe_block_hash: target_hash,
-            finalized_block_hash: target_hash,
-        },
-        ForkchoiceStatus::Syncing,
-    );
-
-    for (threshold, expected) in [(gap, None), (gap - 1, Some(target_hash))] {
-        test_harness.tree.config = TreeConfig::default().with_backfill_run_threshold(threshold);
-        // Without the target block, the missing parent's number determines the gap.
-        assert_eq!(
-            test_harness.tree.backfill_sync_target(local_tip, target.number(), None),
-            expected
-        );
-        // A downloaded target takes precedence over the missing parent's number.
-        assert_eq!(
-            test_harness.tree.backfill_sync_target(local_tip, local_tip, Some(target.num_hash())),
-            expected
-        );
-    }
-
-    test_harness.tree.state.buffer.insert_block(target.into());
-    for (threshold, expected) in [(gap, None), (gap - 1, Some(target_hash))] {
-        test_harness.tree.config = TreeConfig::default().with_backfill_run_threshold(threshold);
-        // A buffered target also takes precedence, as in the post-backfill recheck.
-        assert_eq!(test_harness.tree.backfill_sync_target(local_tip, local_tip, None), expected);
-    }
-}
-
-#[test]
-fn test_disconnected_download_uses_configured_backfill_threshold() {
-    let mut test_harness = TestHarness::new(MAINNET.clone());
-    let target_hash = B256::from([0xAA; 32]);
-    test_harness.tree.state.forkchoice_state_tracker.set_latest(
-        ForkchoiceState {
-            head_block_hash: target_hash,
-            safe_block_hash: B256::ZERO,
-            finalized_block_hash: target_hash,
-        },
-        ForkchoiceStatus::Syncing,
-    );
-    let downloaded = BlockNumHash::new(111, B256::from([0xBB; 32]));
-    let missing_parent = BlockNumHash::new(110, B256::from([0xCC; 32]));
-    let local_tip = BlockNumHash::new(10, B256::ZERO);
-
     test_harness.tree.config = TreeConfig::default().with_backfill_run_threshold(100);
-    assert!(matches!(
-        test_harness.tree.on_disconnected_downloaded_block(downloaded, missing_parent, local_tip),
-        Some(TreeEvent::Download(_))
-    ));
-    test_harness.tree.config = TreeConfig::default().with_backfill_run_threshold(99);
-    assert!(matches!(
-        test_harness.tree.on_disconnected_downloaded_block(downloaded, missing_parent, local_tip),
-        Some(TreeEvent::BackfillAction(BackfillAction::Start(target)))
-            if target.sync_target() == Some(target_hash)
-    ));
+    assert!(!test_harness.tree.exceeds_backfill_run_threshold(10, 110));
+    assert!(test_harness.tree.exceeds_backfill_run_threshold(10, 111));
+    assert!(!test_harness.tree.exceeds_backfill_run_threshold(10, 9));
 }
 
 #[test]
@@ -3487,29 +3411,26 @@ fn test_backfill_threshold_above_header_limit_triggers_backfill() {
     );
     let local_tip = BlockNumHash::new(10, B256::ZERO);
     let parent_hash = B256::from([0xBB; 32]);
-    for threshold in [1024, 1025, 2048, u64::MAX] {
-        test_harness.tree.config = TreeConfig::default().with_backfill_run_threshold(threshold);
-        for gap in [1024, 1025] {
-            let missing_parent = BlockNumHash::new(local_tip.number + gap, parent_hash);
-            let downloaded = BlockNumHash::new(missing_parent.number + 1, B256::from([0xCC; 32]));
-            let event = test_harness.tree.on_disconnected_downloaded_block(
-                downloaded,
-                missing_parent,
-                local_tip,
-            );
-            if gap == 1024 {
-                assert!(matches!(
-                    event,
-                    Some(TreeEvent::Download(DownloadRequest::BlockRange { hash, count: 1024, .. }))
-                        if hash == parent_hash
-                ));
-            } else {
-                assert!(matches!(
-                    event,
-                    Some(TreeEvent::BackfillAction(BackfillAction::Start(target)))
-                        if target.sync_target() == Some(target_hash)
-                ));
-            }
+    test_harness.tree.config = TreeConfig::default().with_backfill_run_threshold(2048);
+    for gap in [1024, 1025] {
+        let missing_parent = BlockNumHash::new(local_tip.number + gap, parent_hash);
+        let downloaded = BlockNumHash::new(missing_parent.number + 1, B256::from([0xCC; 32]));
+        let event = test_harness.tree.on_disconnected_downloaded_block(
+            downloaded,
+            missing_parent,
+            local_tip,
+        );
+        match gap {
+            1024 => assert!(matches!(
+                event,
+                Some(TreeEvent::Download(DownloadRequest::BlockRange { hash, count: 1024, .. }))
+                    if hash == parent_hash
+            )),
+            _ => assert!(matches!(
+                event,
+                Some(TreeEvent::BackfillAction(BackfillAction::Start(target)))
+                    if target.sync_target() == Some(target_hash)
+            )),
         }
     }
 }

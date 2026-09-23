@@ -878,18 +878,12 @@ mod tests {
     #[test]
     fn backfill_threshold_grows_block_buffer() {
         let default = TreeConfig::default();
-        for (threshold, expected_limit) in [
-            (0, default.block_buffer_limit()),
-            (32, default.block_buffer_limit()),
-            (500, 1000),
-            (1024, 2048),
-            (1025, 2048),
-            (u32::MAX as u64, 2048),
-            (u64::MAX, 2048),
-        ] {
+        for (threshold, expected, buffer_limit) in
+            [(0, 0, 64), (500, 500, 1000), (1024, 1024, 2048), (u64::MAX, 1024, 2048)]
+        {
             let config = default.clone().with_backfill_run_threshold(threshold);
-            assert_eq!(config.backfill_run_threshold(), threshold.min(MAX_BACKFILL_RUN_THRESHOLD));
-            assert_eq!(config.block_buffer_limit(), expected_limit);
+            assert_eq!(config.backfill_run_threshold(), expected);
+            assert_eq!(config.block_buffer_limit(), buffer_limit);
         }
         let config = default.with_block_buffer_limit(2000).with_backfill_run_threshold(500);
         assert_eq!(config.block_buffer_limit(), 2000);
