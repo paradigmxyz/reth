@@ -353,7 +353,6 @@ mod tests {
     use reth_provider::{
         providers::BlockchainProvider, test_utils::create_test_provider_factory_with_chain_spec,
     };
-    use reth_storage_overlay::OverlayManager;
     use reth_testing_utils::generators::{self, generate_key, sign_tx_with_key_pair};
     use reth_transaction_pool::test_utils::testing_pool;
 
@@ -388,9 +387,7 @@ mod tests {
             )]);
         let chain_spec =
             Arc::new(ChainSpecBuilder::mainnet().cancun_activated().genesis(genesis).build());
-        let overlay_manager = OverlayManager::default();
-        let factory = create_test_provider_factory_with_chain_spec(chain_spec)
-            .with_overlay_manager(overlay_manager.clone());
+        let factory = create_test_provider_factory_with_chain_spec(chain_spec);
         init_genesis(&factory).unwrap();
         let provider = BlockchainProvider::new(factory).unwrap();
 
@@ -437,7 +434,6 @@ mod tests {
             )),
             ..Default::default()
         };
-        overlay_manager.insert_block(pending_block.clone());
         provider.canonical_in_memory_state().set_pending_block(pending_block);
         let pending_next_base_fee = next_base_fee - next_base_fee / 8;
         for base_fee in [None, Some((pending_next_base_fee - 1) as u128)] {

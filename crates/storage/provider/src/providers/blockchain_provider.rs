@@ -101,6 +101,9 @@ impl<N: ProviderNodeTypes> BlockchainProvider<N> {
     /// Create new provider instance that wraps the database and the blockchain tree, using the
     /// provided latest header to initialize the chain info tracker.
     ///
+    /// The provider uses the in-memory state of the storage's overlay manager, so the provider,
+    /// the overlay manager and the engine share a single [`CanonicalInMemoryState`].
+    ///
     /// This returns a `ProviderResult` since it tries the retrieve the last finalized header from
     /// `database`.
     pub fn with_latest(
@@ -124,16 +127,10 @@ impl<N: ProviderNodeTypes> BlockchainProvider<N> {
             .transpose()?
             .flatten();
         let bal_store = storage.bal_store().clone();
+        let canonical_in_memory_state = storage.overlay_manager().in_memory_state().clone();
+        canonical_in_memory_state.set_head_markers(latest, finalized_header, safe_header);
 
-        Ok(Self {
-            database: storage,
-            canonical_in_memory_state: CanonicalInMemoryState::with_head(
-                latest,
-                finalized_header,
-                safe_header,
-            ),
-            bal_store,
-        })
+        Ok(Self { database: storage, canonical_in_memory_state, bal_store })
     }
 
     /// Gets a clone of `canonical_in_memory_state`.
@@ -1224,7 +1221,7 @@ mod tests {
         let writer = factory.provider_rw()?;
         writer.save_blocks(&SaveBlocksInput::new(blocks[1..].to_vec(), 0, 0, 2, 1))?;
         writer.commit()?;
-        factory.overlay_manager().insert_block(blocks[2].clone());
+        factory.overlay_manager().in_memory_state().insert_pending(blocks[2].clone());
         let provider = BlockchainProvider::new(factory)?;
 
         for number in [1, 2] {
@@ -1377,9 +1374,6 @@ mod tests {
                 .collect(),
         };
         provider.canonical_in_memory_state.update_chain(chain);
-        for state in provider.canonical_in_memory_state.canonical_chain() {
-            provider.database.overlay_manager().insert_block(state.block());
-        }
 
         // Get canonical, safe, and finalized blocks
         let blocks = database_blocks.iter().chain(in_memory_blocks.iter()).collect::<Vec<_>>();
@@ -3310,7 +3304,6 @@ mod tests {
                 Arc::new(TrieUpdates::default().into_sorted()),
             ),
         );
-        provider.database.overlay_manager().insert_block(executed.clone());
         provider
             .canonical_in_memory_state
             .update_chain(NewCanonicalChain::Commit { new: vec![executed] });
@@ -3374,7 +3367,6 @@ mod tests {
             state: Default::default(),
         };
         let executed = ExecutedBlock::new(Arc::new(block), Arc::new(execution_output), trie_data);
-        provider.database.overlay_manager().insert_block(executed.clone());
         provider
             .canonical_in_memory_state
             .update_chain(NewCanonicalChain::Commit { new: vec![executed] });
@@ -3423,7 +3415,6 @@ mod tests {
             state: Default::default(),
         };
         let executed = ExecutedBlock::new(Arc::new(block), Arc::new(execution_output), trie_data);
-        provider.database.overlay_manager().insert_block(executed.clone());
         provider
             .canonical_in_memory_state
             .update_chain(NewCanonicalChain::Commit { new: vec![executed] });

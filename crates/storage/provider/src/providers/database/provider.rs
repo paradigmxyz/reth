@@ -4948,7 +4948,7 @@ mod tests {
         provider_rw.commit().unwrap();
 
         for block in &blocks[2..] {
-            factory.overlay_manager().insert_block(block.clone());
+            factory.overlay_manager().in_memory_state().insert_pending(block.clone());
         }
 
         let provider_rw = factory.provider_rw().unwrap();
