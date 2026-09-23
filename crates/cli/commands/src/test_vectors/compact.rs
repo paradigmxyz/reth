@@ -1,6 +1,6 @@
 use alloy_eips::eip4895::Withdrawals;
 use alloy_primitives::{hex, Address, Bytes, Signature, TxKind, B256, U256};
-use alloy_rlp::{Decodable, Header};
+use alloy_rlp::{Decodable, Header as RlpHeader};
 use arbitrary::Arbitrary;
 use eyre::{Context, Result};
 use proptest::{
@@ -321,7 +321,7 @@ fn legacy_frame_vector_has_unrepresentable_fields(bytes: &[u8]) -> Result<bool> 
         }
         u8::decode(&mut frame)?;
 
-        let target = Header::decode_bytes(&mut frame, false)?;
+        let target = RlpHeader::decode_bytes(&mut frame, false)?;
         if !target.is_empty() && target.len() != Address::len_bytes() {
             return Ok(true);
         }
@@ -346,12 +346,12 @@ fn legacy_frame_vector_has_unrepresentable_fields(bytes: &[u8]) -> Result<bool> 
             return Ok(true);
         }
 
-        let signer = Header::decode_bytes(&mut signature, false)?;
+        let signer = RlpHeader::decode_bytes(&mut signature, false)?;
         if !signer.is_empty() && signer.len() != Address::len_bytes() {
             return Ok(true);
         }
 
-        let message = Header::decode_bytes(&mut signature, false)?;
+        let message = RlpHeader::decode_bytes(&mut signature, false)?;
         if message.len() != 0 && (message.len() != 32 || message.iter().all(|byte| *byte == 0)) {
             return Ok(true);
         }
@@ -377,7 +377,7 @@ fn legacy_frame_vector_has_unrepresentable_fields(bytes: &[u8]) -> Result<bool> 
 }
 
 fn take_rlp_list<'a>(input: &mut &'a [u8]) -> Result<&'a [u8]> {
-    let header = Header::decode(input)?;
+    let header = RlpHeader::decode(input)?;
     if !header.list {
         eyre::bail!("expected an RLP list in EIP-8141 compact vector")
     }
