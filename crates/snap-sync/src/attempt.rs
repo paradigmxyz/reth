@@ -3,11 +3,11 @@
 //! Snap writes land in the canonical hashed state tables, so nothing in the data says which
 //! attempt produced it. Every write presents a [`SnapWrite`]; ones that no longer match are
 //! refused.
-//!
-//! Automatic cleanup of abandoned snap state is not yet supported. The database must be dropped
-//! before starting another attempt.
 
-use crate::{CatchUpProgress, SnapGeneration, SnapSyncError};
+use crate::{
+    account::StoredCoverage, common::SnapRecord, storage::StoredProgress, verify::StoredRebuild,
+    CatchUpProgress, SnapGeneration, SnapSyncError,
+};
 use reth_storage_api::{
     BlockHashReader, MetadataProvider, MetadataWriter, SnapAttempt, SnapAttemptId, StorageSettings,
 };
@@ -18,8 +18,8 @@ use serde::{Deserialize, Serialize};
 /// Blanket-implemented over node metadata access, so these writes join the caller's transaction:
 /// state, bytecode and the attempt record commit together or not at all.
 pub trait SnapAttemptStore {
-    /// Starts an attempt anchored to `generation` on a database no attempt has written into, with
-    /// its catch-up progress at that pivot.
+    /// Starts an attempt anchored to `generation`, superseding any already recorded and the
+    /// progress it kept, with its catch-up progress at that pivot.
     fn start_snap_attempt(&self, generation: SnapGeneration) -> Result<SnapWrite, SnapSyncError>
     where
         Self: MetadataWriter;
@@ -58,7 +58,7 @@ pub trait SnapAttemptStore {
     where
         Self: MetadataWriter;
 
-    /// Gives up on an unfinished attempt, refusing its outstanding writes and any later attempt.
+    /// Gives up on an unfinished attempt, refusing its outstanding writes.
     fn abandon_snap_attempt(&self) -> Result<(), SnapSyncError>
     where
         Self: MetadataWriter;
@@ -100,15 +100,16 @@ impl<T: MetadataProvider> SnapAttemptStore for T {
             return Err(SnapSyncError::UnsupportedStorage)
         }
 
-        // Whatever an earlier attempt wrote is still in the tables and would pass as this one's.
-        if let Some(attempt) = self.snap_attempt()? {
-            return Err(SnapSyncError::ExistingAttempt { attempt: attempt.id() })
-        }
-
-        let attempt = SnapAttempt::start(None, generation.target(), generation.state_root());
+        let attempt =
+            SnapAttempt::start(self.snap_attempt()?, generation.target(), generation.state_root());
         self.write_snap_attempt(&attempt)?;
         // Ranges committed at this pivot need every list after it, however far the pivot moves.
         CatchUpProgress::at_pivot(attempt.pivot()).write(self, attempt.id())?;
+        // Earlier attempts' progress never applies to this one, and a record another build wrote
+        // would fail every read of it.
+        StoredCoverage::clear(self)?;
+        StoredProgress::clear(self)?;
+        StoredRebuild::clear(self)?;
         Ok(SnapWrite::of(&attempt))
     }
 
@@ -279,43 +280,56 @@ mod tests {
     }
 
     #[test]
-    fn an_unfinished_attempt_is_resumed_rather_than_replaced() {
+    fn a_new_attempt_drops_progress_another_build_wrote() {
         let factory = factory();
         let provider = factory.database_provider_rw().unwrap();
-        let write = provider.start_snap_attempt(generation(1)).unwrap();
-        download(&provider);
-
-        // A new attempt at any pivot would adopt what this one already wrote.
-        for block in [1, 2] {
-            assert!(matches!(
-                provider.start_snap_attempt(generation(block)),
-                Err(SnapSyncError::ExistingAttempt { attempt }) if attempt == write.attempt()
-            ));
+        let unreadable = br#"{"version":999}"#.to_vec();
+        for key in [StoredCoverage::KEY, StoredProgress::KEY, StoredRebuild::KEY] {
+            provider.write_metadata(key, unreadable.clone()).unwrap();
         }
-        assert_eq!(provider.active_snap_write().unwrap(), Some(write));
-        provider.authorize_snap_write(write).unwrap();
+
+        let write = provider.start_snap_attempt(generation(1)).unwrap();
+
+        assert_eq!(
+            crate::SnapAccountStore::start_account_coverage(&provider, write).unwrap(),
+            crate::AccountCoverage::START
+        );
+        for key in [StoredProgress::KEY, StoredRebuild::KEY] {
+            assert_eq!(provider.get_metadata(key).unwrap(), None);
+        }
     }
 
     #[test]
-    fn an_abandoned_database_hosts_no_further_attempt() {
+    fn restarting_at_the_same_pivot_takes_a_new_identity() {
         let factory = factory();
         let provider = factory.database_provider_rw().unwrap();
-        let abandoned = provider.start_snap_attempt(generation(1)).unwrap();
-        download(&provider);
-        provider.abandon_snap_attempt().unwrap();
-        provider.commit().unwrap();
 
-        let reopened = factory.database_provider_rw().unwrap();
+        let first = provider.start_snap_attempt(generation(1)).unwrap();
+        let second = provider.start_snap_attempt(generation(1)).unwrap();
 
-        assert_eq!(reopened.active_snap_write().unwrap(), None);
-        // The abandoned rows are not reclaimed, so no later attempt may pick them up.
-        assert_eq!(downloaded(&reopened), (true, true));
+        assert_ne!(first.attempt(), second.attempt());
+        // The superseded attempt's outstanding downloads no longer own the state.
         assert!(matches!(
-            reopened.start_snap_attempt(generation(2)),
-            Err(SnapSyncError::ExistingAttempt { attempt }) if attempt == abandoned.attempt()
+            provider.authorize_snap_write(first),
+            Err(SnapSyncError::StaleWrite { .. })
         ));
+        provider.authorize_snap_write(second).unwrap();
+    }
+
+    #[test]
+    fn abandoning_an_attempt_keeps_its_identity_taken() {
+        let factory = factory();
+        let provider = factory.database_provider_rw().unwrap();
+
+        let abandoned = provider.start_snap_attempt(generation(1)).unwrap();
+        provider.abandon_snap_attempt().unwrap();
+        assert_eq!(provider.active_snap_write().unwrap(), None);
+        let started = provider.start_snap_attempt(generation(2)).unwrap();
+
+        assert_ne!(abandoned.attempt(), started.attempt());
+        // The abandoned attempt's outstanding downloads cannot pass as the new attempt's work.
         assert!(matches!(
-            reopened.authorize_snap_write(abandoned),
+            provider.authorize_snap_write(abandoned),
             Err(SnapSyncError::StaleWrite { .. })
         ));
     }
@@ -464,11 +478,6 @@ mod tests {
         // Verified state is complete, so abandoning cannot turn it into leftovers.
         provider.abandon_snap_attempt().unwrap();
         assert!(provider.snap_attempt().unwrap().unwrap().is_verified());
-        // Nor can a new attempt start over it.
-        assert!(matches!(
-            provider.start_snap_attempt(generation(2)),
-            Err(SnapSyncError::ExistingAttempt { .. })
-        ));
     }
 
     #[test]

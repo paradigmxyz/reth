@@ -1132,6 +1132,72 @@ mod tests {
     }
 
     #[test]
+    fn block_range_readers_reject_expired_history() {
+        use crate::BlockReader;
+        use reth_static_file_types::{SegmentHeader, SegmentRangeInclusive, StaticFileSegment};
+
+        let factory = create_test_provider_factory();
+        let mut rng = generators::rng();
+        let provider_rw = factory.provider_rw().unwrap();
+        let mut parent = None;
+        for number in 0..6 {
+            let block = random_block(
+                &mut rng,
+                number,
+                BlockParams { parent, tx_count: Some(1), ..Default::default() },
+            );
+            parent = Some(block.hash());
+            provider_rw.insert_block(&block.try_recover().unwrap()).unwrap();
+        }
+        provider_rw.commit().unwrap();
+
+        // history below block 3 has been expired
+        let static_provider = factory.static_file_provider();
+        {
+            let mut writer =
+                static_provider.latest_writer(StaticFileSegment::Transactions).unwrap();
+            let header = writer.user_header().clone();
+            *writer.user_header_mut() = SegmentHeader::new(
+                header.expected_block_range(),
+                Some(SegmentRangeInclusive::new(3, 5)),
+                header.tx_range(),
+                StaticFileSegment::Transactions,
+            );
+            writer.inner().set_dirty();
+            writer.commit().unwrap();
+        }
+        static_provider.initialize_index().unwrap();
+        assert_eq!(static_provider.earliest_history_height(), 3);
+
+        let provider = factory.provider().unwrap();
+        // single block lookups already reject expired blocks
+        assert_matches!(
+            provider.block(1.into()),
+            Err(ProviderError::BlockExpired { requested: 1, earliest_available: 3 })
+        );
+        assert_matches!(
+            provider.recovered_block(1.into(), Default::default()),
+            Err(ProviderError::BlockExpired { requested: 1, earliest_available: 3 })
+        );
+        // and so must the range readers instead of returning blocks with stripped bodies
+        assert_matches!(
+            provider.block_range(1..=4),
+            Err(ProviderError::BlockExpired { requested: 1, earliest_available: 3 })
+        );
+        assert_matches!(
+            provider.block_with_senders_range(1..=4),
+            Err(ProviderError::BlockExpired { requested: 1, earliest_available: 3 })
+        );
+        assert_matches!(
+            provider.recovered_block_range(1..=4),
+            Err(ProviderError::BlockExpired { requested: 1, earliest_available: 3 })
+        );
+        // ranges within the available history keep working
+        assert_eq!(provider.block_range(3..=5).unwrap().len(), 3);
+        assert_eq!(provider.recovered_block_range(3..=5).unwrap().len(), 3);
+    }
+
+    #[test]
     fn insert_block_with_prune_modes() {
         let block = TEST_BLOCK.clone();
 

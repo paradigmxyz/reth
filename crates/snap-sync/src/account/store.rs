@@ -113,7 +113,7 @@ impl AccountCoverage {
 
 // The coverage record as persisted, tied to the attempt that recorded it.
 #[derive(Serialize, Deserialize)]
-struct StoredCoverage {
+pub(crate) struct StoredCoverage {
     // Encoding version, checked before the rest is decoded.
     version: u32,
     // Attempt the coverage belongs to.

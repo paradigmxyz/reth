@@ -190,6 +190,26 @@ pub enum SnapSyncError {
     Cancelled,
 }
 
+impl SnapSyncError {
+    /// Whether the node's progress resolves this error, as new peers serve the state or missing
+    /// headers are downloaded.
+    ///
+    /// A closed channel means the network is gone, not that peers lack the state.
+    pub const fn is_transient(&self) -> bool {
+        match self {
+            Self::Request(error) => !error.is_channel_closed(),
+            Self::MissingHeader { .. } => true,
+            _ => false,
+        }
+    }
+
+    /// Whether a block the attempt builds on left the canonical chain, so its downloaded state
+    /// belongs to another fork.
+    pub const fn is_reorg(&self) -> bool {
+        matches!(self, Self::NonCanonicalBlock { .. } | Self::ForkedBlock { .. })
+    }
+}
+
 impl From<DatabaseError> for SnapSyncError {
     fn from(error: DatabaseError) -> Self {
         Self::Provider(error.into())
