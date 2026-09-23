@@ -19,6 +19,13 @@ the same nibble partition. Empty trie paths are not persisted, as before.
 - Logical cursors merge `(key, encoded value)` ordering across shards. Duplicate
   seeks start in the matching prefix range; deletion of all duplicates visits all
   shards. `get`, `entries`, `clear`, and raw typed views use the logical table.
+- Logical cursors must explicitly re-seek after another cursor mutates the same
+  table, and after a failed movement before relying on their position. Their
+  ordered-value anchors do not reproduce all native MDBX cursor bookkeeping:
+  deleting another cursor's row and inserting before its former successor can
+  change that cursor's next result. Arbitrary interleaved mutation-position
+  equivalence is not supported. Persistence workers use exclusive physical
+  cursors and do not depend on this logical-cursor behavior.
 - Exact hashed-storage point reads open only their selected physical shard, then
   verify subkey equality. The restricted cursor must not be used for range scans.
 - Schema version 3 rejects old unsharded databases. New `init` and binary-dump
