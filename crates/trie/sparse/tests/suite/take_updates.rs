@@ -14,8 +14,7 @@ pub(super) fn test_take_updates_returns_empty_when_not_tracking<T: SparseTrie>(
     let mut trie: T = harness.init_trie_fully_revealed(false, new_trie);
 
     let updates = trie.take_updates();
-    assert!(updates.updated_nodes.is_empty(), "updated_nodes should be empty when not tracking");
-    assert!(updates.removed_nodes.is_empty(), "removed_nodes should be empty when not tracking");
+    assert!(updates.is_empty(), "updates should be empty when not tracking");
 }
 
 /// Consecutive takes are independent.
@@ -47,16 +46,13 @@ pub(super) fn test_take_updates_resets_after_take<T: SparseTrie>(new_trie: fn() 
     let _ = trie.root(epoch(0));
     let updates1 = trie.take_updates();
 
-    assert!(
-        !updates1.updated_nodes.is_empty() || !updates1.removed_nodes.is_empty(),
-        "updates1 should be non-empty after adding leaf A",
-    );
+    assert!(!updates1.is_empty(), "updates1 should be non-empty after adding leaf A",);
 
     // Immediately taking again (no new mutations) should yield empty updates,
     // proving the accumulator was reset by the first take.
     let updates_empty = trie.take_updates();
     assert!(
-        updates_empty.updated_nodes.is_empty() && updates_empty.removed_nodes.is_empty(),
+        updates_empty.is_empty(),
         "take_updates right after a take should be empty (accumulator was reset)",
     );
 
@@ -70,18 +66,15 @@ pub(super) fn test_take_updates_resets_after_take<T: SparseTrie>(new_trie: fn() 
     let _ = trie.root(epoch(0));
     let updates2 = trie.take_updates();
 
-    assert!(
-        !updates2.updated_nodes.is_empty() || !updates2.removed_nodes.is_empty(),
-        "updates2 should be non-empty after adding leaf B",
-    );
+    assert!(!updates2.is_empty(), "updates2 should be non-empty after adding leaf B",);
 }
 
 /// `take_updates` contains both updated and removed nodes, mutually exclusive.
 ///
 /// Uses a 3-level branching structure so that intermediate branches are "real" DB nodes
 /// (non-empty `BranchNodeMasks`). After removing one group entirely and modifying the
-/// other, `take_updates` should report real branches in `removed_nodes` and modified
-/// branches in `updated_nodes`, with the two sets mutually exclusive.
+/// other, `take_updates` should report deletions for persisted branches and insertions
+/// for modified branches, sorted with one entry per path.
 pub(super) fn test_take_updates_contains_updated_and_removed_nodes<T: SparseTrie>(
     new_trie: fn() -> T,
 ) {
@@ -98,7 +91,7 @@ pub(super) fn test_take_updates_contains_updated_and_removed_nodes<T: SparseTrie
     //   Total: 512 leaves. [2,0,H] has branch children → "real" DB nodes.
     //
     // After removing group 0x2 entirely, [2,0] and [2,0,H] should appear in
-    // removed_nodes. The sub-sub-branches [2,0,H,L] have only leaf children
+    // the deletions. The sub-sub-branches [2,0,H,L] have only leaf children
     // → empty masks → NOT in DB.
     let mut storage: BTreeMap<B256, U256> = BTreeMap::new();
     let mut val = 1u64;
@@ -145,7 +138,7 @@ pub(super) fn test_take_updates_contains_updated_and_removed_nodes<T: SparseTrie
             changeset.insert(key, U256::ZERO);
         }
     }
-    // Add a new leaf in the 0x1 group to trigger updated_nodes.
+    // Add a new leaf in the 0x1 group to trigger insertions.
     let mut new_key = B256::ZERO;
     new_key.0[0] = 0x10;
     new_key.0[1] = 0xFF;
@@ -158,44 +151,39 @@ pub(super) fn test_take_updates_contains_updated_and_removed_nodes<T: SparseTrie
     let _ = trie.root(epoch(0));
     let updates = trie.take_updates();
 
-    // updated_nodes should contain at least the branch at [1,0] (modified group).
+    // Insertions should contain at least the branch at [1,0] (modified group).
     assert!(
-        updates.updated_nodes.contains_key(&Nibbles::from_nibbles([0x1, 0x0])),
-        "branch [1,0] should be in updated_nodes after adding a leaf in group 0x1"
+        updates
+            .iter()
+            .any(|(path, node)| *path == Nibbles::from_nibbles([0x1, 0x0]) && node.is_some()),
+        "branch [1,0] should have an insertion after adding a leaf in group 0x1"
     );
 
-    // removed_nodes should contain [2,0] — it was a "real" DB node (had branch
+    // Deletions should contain [2,0] — it was a "real" DB node (had branch
     // children → non-empty hash_mask) and was fully removed.
     assert!(
-        updates.removed_nodes.contains(&Nibbles::from_nibbles([0x2, 0x0])),
-        "[2,0] was a real DB node and should appear in removed_nodes"
+        updates.contains(&(Nibbles::from_nibbles([0x2, 0x0]), None)),
+        "[2,0] was a real DB node and should have a deletion"
     );
 
     // The 16 sub-branches [2,0,H] were also "real" DB nodes (each had branch
-    // children at [2,0,H,L]) and should appear in removed_nodes.
+    // children at [2,0,H,L]) and should have a deletion.
     for nibble in 0u8..16 {
         let sub_path = Nibbles::from_nibbles([0x2, 0x0, nibble]);
         assert!(
-            updates.removed_nodes.contains(&sub_path),
-            "[2,0,{nibble:x}] was a real DB node and should appear in removed_nodes"
+            updates.contains(&(sub_path, None)),
+            "[2,0,{nibble:x}] was a real DB node and should have a deletion"
         );
     }
 
-    // The two sets must be mutually exclusive — no path in both.
-    for path in &updates.removed_nodes {
-        assert!(
-            !updates.updated_nodes.contains_key(path),
-            "path {path:?} appears in both updated_nodes and removed_nodes"
-        );
-    }
+    assert!(updates.windows(2).all(|pair| pair[0].0 < pair[1].0));
 }
 
-/// Multiple `root()` calls without intermediate `take_updates()` → sets are mutually exclusive.
+/// A later deletion overrides an insertion across multiple `root()` calls.
 ///
 /// When a branch is created inside the trie (giving it non-empty `hash_mask` →
-/// `updated_nodes` entry) and then destroyed (clearing `hash_mask` → `removed_nodes`
-/// entry) across two `root()` cycles without `take_updates()` in between, the
-/// accumulated updates must cross-cancel so the same path does not appear in both.
+/// insertion) and then destroyed (clearing `hash_mask` → deletion) across two
+/// `root()` cycles without `take_updates()` in between, only the deletion must remain.
 ///
 /// Key structure (nibble paths):
 /// - Initial: `0xAA12...` `[A,A,1,2,...]`, `0xAA20...` `[A,A,2,0,...]`, `0xBB00...` `[B,B,...]`
@@ -261,65 +249,59 @@ pub(super) fn test_take_updates_cross_cancellation_across_root_calls<T: SparseTr
 
     let updates = trie.take_updates();
 
-    for path in &updates.removed_nodes {
-        assert!(
-            !updates.updated_nodes.contains_key(path),
-            "path {path:?} appears in both updated_nodes and removed_nodes \
-             (cross-cancellation bug)"
-        );
-    }
+    assert!(updates.windows(2).all(|pair| pair[0].0 < pair[1].0));
+    assert!(updates.contains(&(Nibbles::from_nibbles([0xa, 0xa, 1]), None)));
 }
 
-/// Remove then re-insert at same path → sets are mutually exclusive.
-///
-/// When a branch collapses (leaf removal) and then a new branch is created at the same path
-/// (leaf insertion), `take_updates` must not report the same path in both `updated_nodes` and
-/// `removed_nodes`. The insertion must win.
+/// Reinsertion overrides a deletion, and later hashes override earlier node values.
 pub(super) fn test_take_updates_no_duplicate_updated_and_removed_nodes<T: SparseTrie>(
     new_trie: fn() -> T,
 ) {
-    // 3 leaves sharing the first nibble → branch at nibble 0x0.
-    let mut key_a = B256::ZERO;
-    key_a.0[0] = 0x00;
-    let mut key_b = B256::ZERO;
-    key_b.0[0] = 0x01;
-    let mut key_c = B256::ZERO;
-    key_c.0[0] = 0x02;
-
-    let storage: BTreeMap<B256, U256> =
-        BTreeMap::from([(key_a, U256::from(1)), (key_b, U256::from(2)), (key_c, U256::from(3))]);
-
+    let key = |bytes: &[u8]| {
+        let mut key = B256::ZERO;
+        key.0[..bytes.len()].copy_from_slice(bytes);
+        key
+    };
+    let key_a = key(&[0xaa, 0x10, 0x00]);
+    let key_b = key(&[0xaa, 0x10, 0x10]);
+    let storage = BTreeMap::from([
+        (key(&[0xaa, 0x12]), U256::from(1)),
+        (key(&[0xaa, 0x20]), U256::from(2)),
+        (key(&[0xbb]), U256::from(3)),
+        (key_a, U256::from(4)),
+        (key_b, U256::from(5)),
+    ]);
     let harness = SuiteTestHarness::new(storage);
-    let mut trie: T = harness.init_trie_fully_revealed(true, new_trie);
+    let branch_path = Nibbles::from_nibbles([0xa, 0xa, 1]);
 
-    // Cache initial hashes.
-    let _ = trie.root(epoch(0));
+    for hash_after_removal in [false, true] {
+        let mut trie = harness.init_trie_fully_revealed(true, new_trie);
+        trie.root(epoch(0));
+        trie.take_updates();
 
-    // Step 1: Remove key_c — with only 3 keys under the root branch, removing one causes
-    // structural changes (branch may collapse or lose a child).
-    let mut remove_changeset: BTreeMap<B256, U256> = BTreeMap::new();
-    remove_changeset.insert(key_c, U256::ZERO);
-    let mut remove_updates = SuiteTestHarness::leaf_updates(&remove_changeset);
-    harness.reveal_and_update(&mut trie, &mut remove_updates);
+        let removals = BTreeMap::from([(key_a, U256::ZERO), (key_b, U256::ZERO)]);
+        harness.reveal_and_update(&mut trie, &mut SuiteTestHarness::leaf_updates(&removals));
+        if hash_after_removal {
+            trie.root(epoch(1));
+        }
 
-    // Step 2: Insert a new key at 0x03 — re-creates/modifies the branch structure at the
-    // same path that was affected by the removal.
-    let mut key_d = B256::ZERO;
-    key_d.0[0] = 0x03;
-    let mut insert_changeset: BTreeMap<B256, U256> = BTreeMap::new();
-    insert_changeset.insert(key_d, U256::from(4));
-    let mut insert_updates = SuiteTestHarness::leaf_updates(&insert_changeset);
-    harness.reveal_and_update(&mut trie, &mut insert_updates);
+        let reinsertions = BTreeMap::from([(key_a, U256::from(6)), (key_b, U256::from(7))]);
+        harness.reveal_and_update(&mut trie, &mut SuiteTestHarness::leaf_updates(&reinsertions));
+        trie.root(epoch(2));
 
-    // Finalize and take updates.
-    let _ = trie.root(epoch(0));
-    let updates = trie.take_updates();
+        let changes = BTreeMap::from([(key_a, U256::from(8)), (key_b, U256::from(9))]);
+        harness.reveal_and_update(&mut trie, &mut SuiteTestHarness::leaf_updates(&changes));
+        let root = trie.root(epoch(3));
+        let updates = trie.take_updates();
 
-    // The two sets must be mutually exclusive — no path in both.
-    for path in &updates.removed_nodes {
-        assert!(
-            !updates.updated_nodes.contains_key(path),
-            "path {path:?} appears in both updated_nodes and removed_nodes"
+        let (expected_root, expected_updates) = harness.get_root_with_updates(&changes);
+        assert_eq!(root, expected_root);
+        assert!(updates.windows(2).all(|pair| pair[0].0 < pair[1].0));
+        let expected_branch = expected_updates.storage_nodes.get(&branch_path).unwrap();
+        assert_eq!(
+            updates.iter().find(|(path, _)| *path == branch_path),
+            Some(&(branch_path, Some(expected_branch.clone()))),
         );
+        assert!(trie.take_updates().is_empty());
     }
 }

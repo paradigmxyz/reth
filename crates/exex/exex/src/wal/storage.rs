@@ -191,8 +191,8 @@ mod tests {
     use reth_trie_common::{
         serde_bincode_compat,
         updates::{StorageTrieUpdates, StorageTrieUpdatesSorted, TrieUpdates},
-        BranchNodeCompact, ComputedTrieData, HashedPostState, HashedStorage, HashedStorageSorted,
-        LazyTrieData, Nibbles,
+        BranchNodeCompact, HashedPostState, HashedStorage, HashedStorageSorted,
+        LazyHashedPostStateSorted, Nibbles,
     };
     use std::{collections::BTreeMap, fs::File, sync::Arc};
 
@@ -318,10 +318,10 @@ mod tests {
             )]),
         };
 
-        let trie_data = LazyTrieData::ready(ComputedTrieData::new(
-            Arc::new(hashed_state.into_sorted()),
+        let trie_data = (
+            LazyHashedPostStateSorted::ready(Arc::new(hashed_state.into_sorted())),
             Arc::new(trie_updates.into_sorted()),
-        ));
+        );
 
         let notification: ExExNotification<reth_ethereum_primitives::EthPrimitives> =
             ExExNotification::ChainCommitted {

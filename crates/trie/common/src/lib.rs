@@ -14,9 +14,8 @@ extern crate alloc;
 mod execution_witness;
 pub use execution_witness::ExecutionWitnessMode;
 
-/// Lazy initialization wrapper for trie data.
-mod trie_data;
-pub use trie_data::{ComputedTrieData, LazyTrieData, SortedTrieData};
+mod lazy_hashed_state;
+pub use lazy_hashed_state::{HashedPostStateSortedProducer, LazyHashedPostStateSorted};
 
 /// In-memory hashed state.
 mod hashed_state;

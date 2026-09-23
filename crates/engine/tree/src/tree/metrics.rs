@@ -10,7 +10,7 @@ use reth_metrics::{
     Metrics,
 };
 use reth_primitives_traits::{constants::gas_units::MEGAGAS, FastInstant as Instant};
-use reth_trie::updates::TrieUpdates;
+use reth_trie::updates::TrieUpdatesSorted;
 use std::time::Duration;
 
 /// Upper bounds for each gas bucket. The last bucket is a catch-all for
@@ -606,7 +606,7 @@ pub struct BlockValidationMetrics {
 
 impl BlockValidationMetrics {
     /// Records a new state root time, updating both the histogram and state root gauge
-    pub fn record_state_root(&self, trie_output: &TrieUpdates, elapsed_as_secs: f64) {
+    pub fn record_state_root(&self, trie_output: &TrieUpdatesSorted, elapsed_as_secs: f64) {
         self.state_root_storage_tries_updated_total
             .increment(trie_output.storage_tries_ref().len() as u64);
         self.state_root_duration.set(elapsed_as_secs);

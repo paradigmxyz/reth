@@ -2,11 +2,8 @@
 
 use core::fmt::Debug;
 
-use alloc::{borrow::Cow, vec::Vec};
-use alloy_primitives::{
-    map::{B256Map, HashMap, HashSet},
-    B256,
-};
+use alloc::vec::Vec;
+use alloy_primitives::{map::B256Map, B256};
 use alloy_trie::BranchNodeCompact;
 use reth_execution_errors::SparseTrieResult;
 use reth_trie_common::{
@@ -188,11 +185,6 @@ pub trait SparseTrie: Sized + Debug + Send + Sync {
         expected_value: Option<&Vec<u8>>,
     ) -> Result<LeafLookup, LeafLookupError>;
 
-    /// Returns a reference to the current sparse trie updates.
-    ///
-    /// If no updates have been made/recorded, returns an empty update set.
-    fn updates_ref(&self) -> Cow<'_, SparseTrieUpdates>;
-
     /// Consumes and returns the currently accumulated trie updates.
     ///
     /// This is useful when you want to apply the updates to an external database
@@ -200,7 +192,8 @@ pub trait SparseTrie: Sized + Debug + Send + Sync {
     ///
     /// # Returns
     ///
-    /// The accumulated updates, or an empty set if updates weren't being tracked.
+    /// Updates sorted by path with only the latest update for each path retained, or an empty
+    /// vector if updates weren't being tracked.
     fn take_updates(&mut self) -> SparseTrieUpdates;
 
     /// This clears all data structures in the sparse trie, keeping the backing data structures
@@ -246,27 +239,10 @@ pub trait SparseTrie: Sized + Debug + Send + Sync {
     ) -> SparseTrieResult<()>;
 }
 
-/// Tracks modifications to the sparse trie structure.
+/// Chronological updates to persisted branches, with `None` indicating removal.
 ///
-/// Maintains references to both modified and pruned/removed branches, enabling
-/// one to make batch updates to a persistent database.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct SparseTrieUpdates {
-    /// Collection of updated intermediate nodes indexed by full path.
-    pub updated_nodes: HashMap<Nibbles, BranchNodeCompact>,
-    /// Collection of removed intermediate nodes indexed by full path.
-    pub removed_nodes: HashSet<Nibbles>,
-}
-
-impl SparseTrieUpdates {
-    /// Initialize a [`Self`] with given capacities.
-    pub fn with_capacity(num_updated_nodes: usize, num_removed_nodes: usize) -> Self {
-        Self {
-            updated_nodes: HashMap::with_capacity_and_hasher(num_updated_nodes, Default::default()),
-            removed_nodes: HashSet::with_capacity_and_hasher(num_removed_nodes, Default::default()),
-        }
-    }
-}
+/// [`SparseTrie::take_updates`] sorts these by path and retains the latest update for each path.
+pub type SparseTrieUpdates = Vec<(Nibbles, Option<BranchNodeCompact>)>;
 
 /// Error type for a leaf lookup operation
 #[derive(Debug, Clone, PartialEq, Eq)]

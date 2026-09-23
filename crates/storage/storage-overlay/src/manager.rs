@@ -838,8 +838,6 @@ fn compute_overlay<N: NodePrimitives>(
 
     let overlay = match input {
         ComputeOverlayInput::ExtendCached { block, parent_input } => {
-            let trie_data = block.trie_data();
-
             trace!(
                 target: "storage::overlay::manager",
                 %anchor_hash,
@@ -850,8 +848,8 @@ fn compute_overlay<N: NodePrimitives>(
             let mut parent_input = parent_input;
             extend_overlay(
                 Arc::make_mut(&mut parent_input),
-                &trie_data.sorted.hashed_state,
-                &trie_data.sorted.trie_updates,
+                block.hashed_state_ref(),
+                block.trie_updates_ref(),
             );
             Arc::try_unwrap(parent_input).expect("Arc::make_mut leaves the child overlay unique")
         }
@@ -874,30 +872,18 @@ fn compute_overlay<N: NodePrimitives>(
 }
 
 fn merge_blocks<N: NodePrimitives>(blocks: Vec<ExecutedBlock<N>>) -> TrieInputSorted {
-    let trie_data = blocks.iter().map(ExecutedBlock::trie_data).collect::<Vec<_>>();
+    let hashed_states = blocks.iter().map(ExecutedBlock::hashed_state).collect::<Vec<_>>();
 
     #[cfg(feature = "rayon")]
     let (nodes, state) = rayon::join(
-        || {
-            TrieUpdatesSorted::merge_batch(
-                trie_data.iter().map(|data| Arc::clone(&data.sorted.trie_updates)),
-            )
-        },
-        || {
-            HashedPostStateSorted::merge_batch(
-                trie_data.iter().map(|data| Arc::clone(&data.sorted.hashed_state)),
-            )
-        },
+        || TrieUpdatesSorted::merge_batch(blocks.iter().map(ExecutedBlock::trie_updates)),
+        || HashedPostStateSorted::merge_batch(hashed_states.iter().cloned()),
     );
 
     #[cfg(not(feature = "rayon"))]
     let (nodes, state) = (
-        TrieUpdatesSorted::merge_batch(
-            trie_data.iter().map(|data| Arc::clone(&data.sorted.trie_updates)),
-        ),
-        HashedPostStateSorted::merge_batch(
-            trie_data.iter().map(|data| Arc::clone(&data.sorted.hashed_state)),
-        ),
+        TrieUpdatesSorted::merge_batch(blocks.iter().map(ExecutedBlock::trie_updates)),
+        HashedPostStateSorted::merge_batch(hashed_states.iter().cloned()),
     );
 
     TrieInputSorted::new(nodes, state, Default::default())
@@ -988,7 +974,7 @@ mod tests {
     use reth_primitives_traits::Account;
     #[cfg(feature = "rayon")]
     use reth_tasks::WorkerPool;
-    use reth_trie::{updates::TrieUpdatesSorted, ComputedTrieData, HashedPostState, HashedStorage};
+    use reth_trie::{updates::TrieUpdatesSorted, HashedPostState, HashedStorage};
     use revm::{
         bytecode::Bytecode,
         database::BundleState,
@@ -1035,7 +1021,8 @@ mod tests {
         ExecutedBlock::new(
             Arc::clone(&block.recovered_block),
             Arc::new(execution_output),
-            ComputedTrieData::new(Arc::new(hashed_state), Arc::new(TrieUpdatesSorted::default())),
+            Arc::new(hashed_state),
+            Arc::new(TrieUpdatesSorted::default()),
         )
     }
 
