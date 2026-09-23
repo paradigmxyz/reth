@@ -41,8 +41,6 @@ pub struct Tx<K: TransactionKind> {
     ///
     /// If [Some], then metrics are reported.
     metrics_handler: Option<MetricsHandler<K>>,
-    /// Per-table operation accounting, enabled only inside an instrumented persistence batch.
-    persistence_timing: super::persistence_timing::PersistenceTiming,
 }
 
 impl<K: TransactionKind> Tx<K> {
@@ -62,7 +60,7 @@ impl<K: TransactionKind> Tx<K> {
                 Ok(handler)
             })
             .transpose()?;
-        Ok(Self { inner, dbis, metrics_handler, persistence_timing: Default::default() })
+        Ok(Self { inner, dbis, metrics_handler })
     }
 
     /// Returns a reference to the inner libmdbx transaction.
@@ -104,8 +102,7 @@ impl<K: TransactionKind> Tx<K> {
         Ok(Cursor::new_with_metrics(
             inner,
             self.metrics_handler.as_ref().map(|h| h.env_metrics.table_operation_metrics(T::NAME)),
-        )
-        .with_persistence_timing(self.persistence_timing.table(T::NAME)))
+        ))
     }
 
     /// If `self.metrics_handler == Some(_)`, measure the time it takes to execute the closure and
@@ -165,20 +162,14 @@ impl<K: TransactionKind> Tx<K> {
         value_size: Option<usize>,
         f: impl FnOnce(&Transaction<K>) -> R,
     ) -> R {
-        let timing = self.persistence_timing.table(T::NAME);
-        let started = timing.as_ref().map(|_| Instant::now());
-        let result = if let Some(metrics_handler) = &self.metrics_handler {
+        if let Some(metrics_handler) = &self.metrics_handler {
             metrics_handler.log_backtrace_on_long_read_transaction();
             metrics_handler
                 .env_metrics
                 .record_operation(T::NAME, operation, value_size, || f(&self.inner))
         } else {
             f(&self.inner)
-        };
-        if let (Some(timing), Some(started)) = (timing, started) {
-            timing.record(started);
         }
-        result
     }
 }
 
@@ -412,17 +403,6 @@ impl Tx<RW> {
 }
 
 impl DbTxMut for Tx<RW> {
-    fn begin_persistence_timing(&self, block: u64, state_block: u64) {
-        self.persistence_timing.begin(block, state_block);
-    }
-
-    fn persistence_timing_frontiers(&self) -> (u64, u64) {
-        self.persistence_timing.frontiers()
-    }
-
-    fn end_persistence_timing(&self) -> Vec<(&'static str, u64, u64)> {
-        self.persistence_timing.end()
-    }
     type CursorMut<T: Table> = Cursor<RW, T>;
     type DupCursorMut<T: DupSort> = Cursor<RW, T>;
 

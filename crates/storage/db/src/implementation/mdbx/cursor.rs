@@ -14,7 +14,6 @@ use reth_db_api::{
     table::{Compress, Decode, Decompress, DupSort, Encode, IntoVec, Table},
 };
 use reth_libmdbx::{Error as MDBXError, TransactionKind, WriteFlags, RO, RW};
-use reth_primitives_traits::FastInstant;
 use reth_storage_errors::db::{DatabaseErrorInfo, DatabaseWriteError, DatabaseWriteOperation};
 use std::{borrow::Cow, collections::Bound, marker::PhantomData, ops::RangeBounds};
 
@@ -32,8 +31,6 @@ pub struct Cursor<K: TransactionKind, T: Table> {
     buf: Vec<u8>,
     /// Per-table operation metrics. If `None`, metrics are not recorded.
     metrics: Option<TableOperationMetrics>,
-    /// Optional operation accounting for the current persistence batch.
-    persistence_timing: Option<super::persistence_timing::CursorTiming>,
     /// Phantom data to enforce encoding/decoding.
     _dbi: PhantomData<T>,
 }
@@ -43,7 +40,7 @@ impl<K: TransactionKind, T: Table> Cursor<K, T> {
         inner: reth_libmdbx::Cursor<K>,
         metrics: Option<TableOperationMetrics>,
     ) -> Self {
-        Self { inner, buf: Vec::new(), metrics, persistence_timing: None, _dbi: PhantomData }
+        Self { inner, buf: Vec::new(), metrics, _dbi: PhantomData }
     }
 
     /// If `self.metrics` is `Some(...)`, record a metric with the provided operation and value
@@ -56,24 +53,11 @@ impl<K: TransactionKind, T: Table> Cursor<K, T> {
         value_size: Option<usize>,
         f: impl FnOnce(&mut Self) -> R,
     ) -> R {
-        let started = self.persistence_timing.as_ref().map(|_| FastInstant::now());
-        let result = if let Some(metrics) = self.metrics.clone() {
+        if let Some(metrics) = self.metrics.clone() {
             metrics[operation.index()].record(value_size, || f(self))
         } else {
             f(self)
-        };
-        if let (Some(timing), Some(started)) = (&mut self.persistence_timing, started) {
-            timing.record(started);
         }
-        result
-    }
-
-    pub(super) fn with_persistence_timing(
-        mut self,
-        timing: Option<std::sync::Arc<super::persistence_timing::TableTiming>>,
-    ) -> Self {
-        self.persistence_timing = timing.map(super::persistence_timing::CursorTiming::new);
-        self
     }
 }
 
