@@ -5,6 +5,7 @@ use crate::{
     hooks::NodeHooks,
     rpc::{EngineShutdown, EngineValidatorAddOn, EngineValidatorBuilder, RethRpcAddOns, RpcHandle},
     setup::build_networked_pipeline,
+    sync::NodeBackfillSync,
     AddOns, AddOnsContext, FullNode, LaunchContext, LaunchNode, Node, NodeAdapter,
     NodeBuilderWithComponents, NodeComponents, NodeComponentsBuilder, NodeHandle, NodeTypesAdapter,
     RethFullAdapter,
@@ -23,6 +24,7 @@ use reth_engine_util::EngineMessageStreamExt;
 use reth_exex::ExExManagerHandle;
 use reth_network::{types::BlockRangeUpdate, NetworkSyncUpdater, SyncState};
 use reth_network_api::BlockDownloaderProvider;
+use reth_network_p2p::snap::client::SnapClient;
 use reth_node_api::{
     BuiltPayload, ConsensusEngineHandle, FullNodeTypes, NodeTypes, NodeTypesWithDBAdapter,
 };
@@ -35,7 +37,7 @@ use reth_node_core::{
 use reth_node_events::node;
 use reth_provider::{
     providers::{BlockchainProvider, NodeTypesForProvider},
-    BlockNumReader, StorageSettingsCache,
+    BlockNumReader, DatabaseProviderFactory, StorageSettingsCache,
 };
 use reth_storage_overlay::OverlayManager;
 use reth_tasks::TaskExecutor;
@@ -81,6 +83,8 @@ impl EngineNodeLauncher {
         CB: NodeComponentsBuilder<T>,
         AO: RethRpcAddOns<NodeAdapter<T, CB::Components>>
             + EngineValidatorAddOn<NodeAdapter<T, CB::Components>>,
+        <<CB::Components as NodeComponents<T>>::Network as BlockDownloaderProvider>::Client:
+            SnapClient,
     {
         let Self { ctx, engine_tree_config } = self;
         let NodeBuilderWithComponents {
@@ -245,6 +249,11 @@ impl EngineNodeLauncher {
             EngineApiKind::Ethereum
         };
 
+        let snap_v2 = node_config.network.snap_v2;
+        // Refuses a database this selection cannot serve, before anything is downloaded.
+        ctx.provider_factory().database_provider_ro()?.ensure_snap_backfill_eligible(snap_v2)?;
+        let (backfill_client, backfill_factory) =
+            (network_client.clone(), ctx.provider_factory().clone());
         let mut orchestrator = EngineOrchestratorBuilder {
             engine_kind,
             consensus,
@@ -263,7 +272,9 @@ impl EngineNodeLauncher {
             evm_config: ctx.components().evm_config().clone(),
             runtime: ctx.task_executor().clone(),
         }
-        .build();
+        .build_with_backfill(|pipeline, runtime| {
+            NodeBackfillSync::new(snap_v2, pipeline, backfill_client, backfill_factory, runtime)
+        });
 
         info!(target: "reth::cli", "Consensus engine initialized");
 
@@ -458,6 +469,8 @@ where
     AO: RethRpcAddOns<NodeAdapter<T, CB::Components>>
         + EngineValidatorAddOn<NodeAdapter<T, CB::Components>>
         + 'static,
+    // Snap sync requests state through the same client the pipeline downloads blocks with.
+    <<CB::Components as NodeComponents<T>>::Network as BlockDownloaderProvider>::Client: SnapClient,
 {
     type Node = NodeHandle<NodeAdapter<T, CB::Components>, AO>;
     type Future = Pin<Box<dyn Future<Output = eyre::Result<Self::Node>> + Send>>;

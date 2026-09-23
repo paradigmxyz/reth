@@ -3,7 +3,8 @@
 use alloy_rpc_types_engine::PayloadAttributes;
 use node::NodeTestContext;
 use reth_db::{test_utils::TempDatabase, DatabaseEnv};
-use reth_network_api::test_utils::PeersHandleProvider;
+use reth_network_api::{test_utils::PeersHandleProvider, BlockDownloaderProvider};
+use reth_network_p2p::snap::client::SnapClient;
 use reth_node_builder::{
     components::NodeComponentsBuilder,
     rpc::{EngineValidatorAddOn, RethRpcAddOns},
@@ -81,7 +82,10 @@ where
             TmpNodeAdapter<Self>,
             ComponentsBuilder: NodeComponentsBuilder<
                 TmpNodeAdapter<Self>,
-                Components: NodeComponents<TmpNodeAdapter<Self>, Network: PeersHandleProvider>,
+                Components: NodeComponents<
+                    TmpNodeAdapter<Self>,
+                    Network: PeersHandleProvider + BlockDownloaderProvider<Client: SnapClient>,
+                >,
             >,
             AddOns: RethRpcAddOns<Adapter<Self>> + EngineValidatorAddOn<Adapter<Self>>,
         >,
@@ -95,7 +99,10 @@ impl<T> NodeBuilderHelper for T where
             TmpNodeAdapter<Self>,
             ComponentsBuilder: NodeComponentsBuilder<
                 TmpNodeAdapter<Self>,
-                Components: NodeComponents<TmpNodeAdapter<Self>, Network: PeersHandleProvider>,
+                Components: NodeComponents<
+                    TmpNodeAdapter<Self>,
+                    Network: PeersHandleProvider + BlockDownloaderProvider<Client: SnapClient>,
+                >,
             >,
             AddOns: RethRpcAddOns<Adapter<Self>> + EngineValidatorAddOn<Adapter<Self>>,
         >

@@ -43,6 +43,9 @@ pub use handle::NodeHandle;
 
 pub mod rpc;
 
+/// Backfill implementations for the engine orchestrator.
+pub(crate) mod sync;
+
 pub mod setup;
 
 pub mod snap;

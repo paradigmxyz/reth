@@ -1009,6 +1009,7 @@ mod tests {
         BlockHashReader, BlockNumReader, BlockWriter, DBProvider, HeaderSyncGapProvider,
         TransactionsProvider,
     };
+    use alloy_eips::BlockNumHash;
     use alloy_primitives::{TxNumber, B256};
     use assert_matches::assert_matches;
     use reth_chainspec::ChainSpecBuilder;
@@ -1016,9 +1017,10 @@ mod tests {
         mdbx::DatabaseArguments,
         test_utils::{create_test_rocksdb_dir, create_test_static_files_dir, ERROR_TEMPDIR},
     };
-    use reth_db_api::tables;
+    use reth_db_api::{models::SnapAttempt, tables};
     use reth_primitives_traits::SignerRecoverable;
     use reth_prune_types::{PruneMode, PruneModes};
+    use reth_storage_api::MetadataWriter;
     use reth_storage_errors::provider::ProviderError;
     use reth_testing_utils::generators::{self, random_block, random_header, BlockParams};
     use std::{ops::RangeInclusive, sync::Arc};
@@ -1232,5 +1234,45 @@ mod tests {
         let local_head = provider.local_tip_header(checkpoint).unwrap();
 
         assert_eq!(local_head, head);
+    }
+
+    #[test]
+    fn a_backfill_selection_the_database_cannot_serve_is_refused() {
+        let factory = create_test_provider_factory();
+        factory.set_storage_settings_cache(StorageSettings::v2());
+        let mut attempt = SnapAttempt::start(
+            None,
+            BlockNumHash::new(10, B256::repeat_byte(1)),
+            B256::repeat_byte(2),
+        );
+        let provider = factory.database_provider_rw().unwrap();
+        provider.write_snap_attempt(&attempt).unwrap();
+        provider.commit().unwrap();
+
+        // Only snap finishes what an interrupted attempt left in the state tables.
+        let provider = factory.database_provider_ro().unwrap();
+        assert!(matches!(
+            provider.ensure_snap_backfill_eligible(false).err(),
+            Some(ProviderError::UnverifiedSnapState { attempt: 0 })
+        ));
+        assert!(provider.ensure_snap_backfill_eligible(true).is_ok());
+
+        // A verified attempt leaves the pipeline free to continue above the pivot.
+        attempt.verify();
+        let provider = factory.database_provider_rw().unwrap();
+        provider.write_snap_attempt(&attempt).unwrap();
+        provider.commit().unwrap();
+        assert!(factory
+            .database_provider_ro()
+            .unwrap()
+            .ensure_snap_backfill_eligible(false)
+            .is_ok());
+
+        // Snap downloads hashed state, which the older layout does not store.
+        factory.set_storage_settings_cache(StorageSettings::v1());
+        assert!(matches!(
+            factory.database_provider_ro().unwrap().ensure_snap_backfill_eligible(true).err(),
+            Some(ProviderError::SnapStorageLayoutUnsupported)
+        ));
     }
 }
