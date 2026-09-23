@@ -12,8 +12,12 @@ permissions: {}
 jobs:
   release-homebrew:
     runs-on: ubuntu-latest
-    permissions: {}
+    permissions:
+      contents: read
+      id-token: write
     steps:
+      - name: Secure runner
+        uses: tempoxyz/gh-actions/actions/secure-runner@117919c943b804057be733b0c4034c5542e58959 # 2026-09-23T05-09-41Z-117919c9
       - name: Update Homebrew formula
         uses: dawidd6/action-homebrew-bump-formula@b12d2bc99c46444125e606142f28200ec71a1214 # v10
         with:

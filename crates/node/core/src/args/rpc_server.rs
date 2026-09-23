@@ -636,7 +636,7 @@ pub struct RpcServerArgs {
     #[arg(long = "rpc.max-logs-per-response", alias = "rpc-max-logs-per-response", value_name = "COUNT", default_value_t = DefaultRpcServerArgs::get_global().rpc_max_logs_per_response)]
     pub rpc_max_logs_per_response: ZeroAsNoneU64,
 
-    /// Maximum gas limit for `eth_call` and call tracing RPC methods.
+    /// Maximum gas limit for `eth_call`, `eth_estimateGas`, and call tracing RPC methods.
     #[arg(
         long = "rpc.gascap",
         alias = "rpc-gascap",
@@ -1262,6 +1262,7 @@ mod tests {
                 prewarm_bals: Some(0),
                 max_concurrent_db_requests: 512,
                 max_cached_tx_hashes: 100_000,
+                ..Default::default()
             },
             gas_price_oracle: GasPriceOracleArgs {
                 blocks: 20,

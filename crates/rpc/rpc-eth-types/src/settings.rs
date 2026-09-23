@@ -22,7 +22,7 @@ pub struct EthApiSettings {
     pub max_blocking_io_requests: usize,
     /// Cache computed block access lists for transaction tracing.
     pub cache_computed_bals: bool,
-    /// Maximum gas limit for `eth_call` and call tracing RPC methods.
+    /// Maximum gas limit for `eth_call`, `eth_estimateGas`, and call tracing RPC methods.
     pub gas_cap: u64,
     /// Maximum number of blocks for `eth_simulateV1`.
     pub max_simulate_blocks: u64,
