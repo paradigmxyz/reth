@@ -461,7 +461,7 @@ impl<N: ProviderNodeTypes> ProviderFactory<N> {
     pub fn latest(&self) -> ProviderResult<StateProviderBox> {
         trace!(target: "providers::db", "Returning latest state provider");
         let provider = self.database_provider_ro()?;
-        provider.ensure_no_snap_attempt()?;
+        provider.ensure_snap_state_verified()?;
         Ok(Box::new(LatestStateProvider::new(provider)))
     }
 
@@ -469,7 +469,7 @@ impl<N: ProviderNodeTypes> ProviderFactory<N> {
     /// [`ProviderError::MustUnwind`] otherwise. Snap state is refused first, since
     /// [`Self::check_consistency`] may heal or unwind it.
     pub fn assert_consistent(self) -> ProviderResult<Self> {
-        self.ensure_no_snap_attempt()?;
+        self.ensure_snap_state_verified()?;
         let (rocksdb_unwind, static_file_unwind) = self.check_consistency()?;
 
         let source = match (rocksdb_unwind, static_file_unwind) {
@@ -1076,7 +1076,7 @@ mod tests {
     }
 
     #[test]
-    fn snap_state_is_refused_across_reopening() {
+    fn unverified_snap_state_is_refused_across_reopening() {
         let chain_spec = Arc::new(ChainSpecBuilder::mainnet().build());
         let datadir = tempfile::TempDir::new().expect(ERROR_TEMPDIR);
         let config = ReadOnlyConfig::from_datadir(datadir.path()).no_watch();
@@ -1112,8 +1112,8 @@ mod tests {
         let mut abandoned = unfinished;
         abandoned.abandon();
 
-        // Verified state is refused too, since verifying does not hand it to the node.
-        for attempt in [unfinished, verified, abandoned] {
+        // Only the state a running attempt is still downloading is refused.
+        for attempt in [unfinished, abandoned] {
             let factory = open();
             let provider = factory.provider_rw().unwrap();
             provider.write_snap_attempt(&attempt).unwrap();
@@ -1122,13 +1122,23 @@ mod tests {
 
             assert_matches!(
                 open().assert_consistent(),
-                Err(ProviderError::UnavailableSnapState { attempt: 0 })
+                Err(ProviderError::UnverifiedSnapState { attempt: 0 })
             );
             assert_matches!(
                 open_read_only().unwrap_err().downcast_ref(),
-                Some(ProviderError::UnavailableSnapState { attempt: 0 })
+                Some(ProviderError::UnverifiedSnapState { attempt: 0 })
             );
         }
+
+        // Verified state is the node's own, so it opens like any other database.
+        let factory = open();
+        let provider = factory.provider_rw().unwrap();
+        provider.write_snap_attempt(&verified).unwrap();
+        provider.commit().unwrap();
+        drop(factory);
+
+        open().assert_consistent().unwrap();
+        open_read_only().unwrap();
     }
 
     #[test]

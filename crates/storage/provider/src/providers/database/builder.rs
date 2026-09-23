@@ -31,7 +31,7 @@ impl<N> ProviderFactoryBuilder<N> {
 
     /// Opens the database with the given chainspec and [`ReadOnlyConfig`].
     ///
-    /// Refuses a database holding snap state, see [`MetadataProvider::ensure_no_snap_attempt`].
+    /// Refuses unverified snap state, see [`MetadataProvider::ensure_snap_state_verified`].
     ///
     /// # Open a monitored instance
     ///
@@ -114,7 +114,7 @@ impl<N> ProviderFactoryBuilder<N> {
         let factory =
             ProviderFactory::new(db, chainspec, static_file_provider, rocksdb_provider, runtime)?;
         // Checked before the watcher spawns, since it keeps the database open for the process.
-        factory.ensure_no_snap_attempt()?;
+        factory.ensure_snap_state_verified()?;
         Ok(factory.with_read_only_sync(watch))
     }
 }

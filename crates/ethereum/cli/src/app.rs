@@ -281,7 +281,7 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread")]
-    async fn re_execute_refuses_snap_state() {
+    async fn re_execute_refuses_unverified_snap_state() {
         let datadir = tempfile::tempdir().unwrap();
         let args = ["reth", "--chain", "dev", "--datadir", datadir.path().to_str().unwrap()];
         let env = || EnvironmentArgs::<EthereumChainSpecParser>::parse_from(args);
@@ -307,7 +307,7 @@ mod tests {
         let mut abandoned = unfinished;
         abandoned.abandon();
 
-        for attempt in [unfinished, verified, abandoned] {
+        for attempt in [unfinished, abandoned] {
             let factory = env()
                 .init::<EthereumNode>(AccessRights::RwInconsistent, runtime.clone())
                 .unwrap()
@@ -321,10 +321,22 @@ mod tests {
             assert!(
                 matches!(
                     err.unwrap_err().downcast_ref(),
-                    Some(ProviderError::UnavailableSnapState { attempt: 0 })
+                    Some(ProviderError::UnverifiedSnapState { attempt: 0 })
                 ),
                 "{attempt:?}"
             );
         }
+
+        // Verified state is the node's own, so the command runs over it.
+        let factory = env()
+            .init::<EthereumNode>(AccessRights::RwInconsistent, runtime.clone())
+            .unwrap()
+            .provider_factory;
+        let provider = factory.provider_rw().unwrap();
+        provider.write_snap_attempt(&verified).unwrap();
+        provider.commit().unwrap();
+        drop(factory);
+
+        command().execute::<EthereumNode>(components, runtime.clone()).await.unwrap();
     }
 }

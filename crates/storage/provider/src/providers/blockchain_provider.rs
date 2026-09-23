@@ -156,7 +156,7 @@ impl<N: ProviderNodeTypes> BlockchainProvider<N> {
             self.database.overlay_manager().overlay_builder(block_hash),
         );
         let provider = state_provider_factory.database_provider_ro()?;
-        provider.ensure_no_snap_attempt()?;
+        provider.ensure_snap_state_verified()?;
         Ok(Box::new(provider))
     }
 
@@ -244,7 +244,7 @@ impl<N: ProviderNodeTypes> StateRangeProviderFactory for BlockchainProvider<N> {
             None => self.historical_state_range_provider(state_root)?,
         };
         if let Some(provider) = &provider {
-            provider.ensure_no_snap_attempt()?;
+            provider.ensure_snap_state_verified()?;
         }
         Ok(provider
             .map(|provider| Box::new(HistoricalStateRangeView { provider }) as StateRangeView))
@@ -782,7 +782,7 @@ impl<N: ProviderNodeTypes> StateProviderFactory for BlockchainProvider<N> {
             .block_hash(block_number)?
             .ok_or_else(|| ProviderError::HeaderNotFound(block_number.into()))?;
         let provider = provider.into_database_provider();
-        provider.ensure_no_snap_attempt()?;
+        provider.ensure_snap_state_verified()?;
         Ok(self.state_provider_from_database(provider, hash))
     }
 
@@ -791,7 +791,7 @@ impl<N: ProviderNodeTypes> StateProviderFactory for BlockchainProvider<N> {
         let provider = self.consistent_provider()?;
         provider.block_number(block_hash)?.ok_or(ProviderError::BlockHashNotFound(block_hash))?;
         let provider = provider.into_database_provider();
-        provider.ensure_no_snap_attempt()?;
+        provider.ensure_snap_state_verified()?;
         Ok(self.state_provider_from_database(provider, block_hash))
     }
 
@@ -1760,7 +1760,7 @@ mod tests {
         provider_rw.commit()?;
 
         let refused = |result: Result<(), ProviderError>| {
-            matches!(result, Err(ProviderError::UnavailableSnapState { attempt: 0 }))
+            matches!(result, Err(ProviderError::UnverifiedSnapState { attempt: 0 }))
         };
         assert!(refused(provider.latest().map(drop)));
         assert!(refused(provider.database.latest().map(drop)));

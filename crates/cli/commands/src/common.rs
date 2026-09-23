@@ -214,7 +214,7 @@ impl<C: ChainSpecParser> EnvironmentArgs<C> {
 
         // Checked read-write access heals below, which may unwind the state tables.
         if matches!(access, AccessRights::RW) {
-            factory.ensure_no_snap_attempt()?;
+            factory.ensure_snap_state_verified()?;
         }
 
         // Check for consistency between database and static files.

@@ -97,7 +97,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
 
         let Environment { provider_factory, .. } = self.env.init::<N>(AccessRights::RO, runtime)?;
         // Read-only access still executes against the state tables.
-        provider_factory.ensure_no_snap_attempt()?;
+        provider_factory.ensure_snap_state_verified()?;
 
         let components = components(provider_factory.chain_spec());
 
