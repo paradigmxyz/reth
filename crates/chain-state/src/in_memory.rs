@@ -285,12 +285,12 @@ impl<N: NodePrimitives> Blocks<N> {
     }
 
     /// Removes canonical blocks up to and including `remove_until`, if `persisted_hash` is part of
-    /// the in-memory canonical chain or the block it builds on, and returns their hashes.
+    /// the in-memory canonical chain or the block it builds on, and returns their states.
     fn remove_canonical_until(
         &mut self,
         persisted_hash: B256,
         remove_until: BlockNumber,
-    ) -> Vec<B256> {
+    ) -> Vec<Arc<BlockState<N>>> {
         // If the persisted hash is not on the canonical chain, canonical blocks were not actually
         // persisted. This can happen if the persistence task takes a long time, while a reorg is
         // happening.
@@ -309,15 +309,15 @@ impl<N: NodePrimitives> Blocks<N> {
         let removed =
             hashes.iter().filter_map(|hash| self.canonical.remove(hash)).collect::<Vec<_>>();
         self.relink_children(&removed);
-        hashes
+        removed
     }
 
     /// Removes pending blocks that can never become canonical once `finalized` is final, and
-    /// returns their hashes.
+    /// returns their states.
     ///
     /// These are all pending blocks below the finalized block, all other pending blocks at its
     /// height and all blocks built on those.
-    fn prune_pending_below(&mut self, finalized: BlockNumHash) -> Vec<B256> {
+    fn prune_pending_below(&mut self, finalized: BlockNumHash) -> Vec<Arc<BlockState<N>>> {
         let BlockNumHash { number: finalized_number, hash: finalized_hash } = finalized;
 
         let below = self
@@ -349,7 +349,7 @@ impl<N: NodePrimitives> Blocks<N> {
             self.pending_block = None;
         }
         self.relink_children(&removed);
-        removed.iter().map(|state| state.hash()).collect()
+        removed
     }
 
     /// Moves every canonical block to the pending section and clears the pending block.
@@ -361,12 +361,9 @@ impl<N: NodePrimitives> Blocks<N> {
         self.pending_block = None;
     }
 
-    /// Removes all blocks and returns their hashes.
-    fn clear(&mut self) -> Vec<B256> {
-        let hashes =
-            self.canonical.blocks.keys().chain(self.pending.blocks.keys()).copied().collect();
-        *self = Self::default();
-        hashes
+    /// Returns the hashes of all blocks, canonical first.
+    fn into_hashes(self) -> Vec<B256> {
+        self.canonical.blocks.into_keys().chain(self.pending.blocks.into_keys()).collect()
     }
 }
 
@@ -379,7 +376,7 @@ impl<N: NodePrimitives> Blocks<N> {
 ///
 /// Both sections and the pending block are guarded by a single lock. Updates take the write lock
 /// once, so readers never observe a block in neither or both sections, or a partially applied
-/// update. Metrics are recorded after the lock is released.
+/// update. Metrics are recorded, and removed blocks dropped, after the lock is released.
 #[derive(Debug, Default)]
 pub(crate) struct InMemoryState<N: NodePrimitives = EthPrimitives> {
     /// The canonical and the pending section.
@@ -410,6 +407,9 @@ impl<N: NodePrimitives> InMemoryState<N> {
     }
 
     /// Applies `f` under the write lock and records the metrics after releasing it.
+    ///
+    /// Removals return the removed states, so that they are dropped after the lock is released:
+    /// the store can hold the last reference to a block and its execution output.
     fn update<R>(&self, f: impl FnOnce(&mut Blocks<N>) -> R) -> R {
         let (result, stats) = {
             let mut blocks = self.blocks.write();
@@ -600,7 +600,7 @@ impl<N: NodePrimitives> CanonicalInMemoryState<N> {
 
     /// Removes all blocks, canonical and pending, and returns their hashes.
     pub fn clear_state(&self) -> Vec<B256> {
-        self.inner.in_memory_state.update(Blocks::clear)
+        self.inner.in_memory_state.update(std::mem::take).into_hashes()
     }
 
     /// Moves every canonical block to the pending section and clears the pending block.
@@ -680,9 +680,11 @@ impl<N: NodePrimitives> CanonicalInMemoryState<N> {
         persisted_hash: B256,
         remove_until: BlockNumber,
     ) -> Vec<B256> {
-        self.inner
+        let removed = self
+            .inner
             .in_memory_state
-            .update(|blocks| blocks.remove_canonical_until(persisted_hash, remove_until))
+            .update(|blocks| blocks.remove_canonical_until(persisted_hash, remove_until));
+        removed.iter().map(|state| state.hash()).collect()
     }
 
     /// Removes pending blocks that can never become canonical with `finalized` finalized, and
@@ -691,7 +693,9 @@ impl<N: NodePrimitives> CanonicalInMemoryState<N> {
     /// These are all pending blocks below the finalized block, all other pending blocks at its
     /// height, and all blocks built on those.
     pub fn prune_pending_below(&self, finalized: BlockNumHash) -> Vec<B256> {
-        self.inner.in_memory_state.update(|blocks| blocks.prune_pending_below(finalized))
+        let removed =
+            self.inner.in_memory_state.update(|blocks| blocks.prune_pending_below(finalized));
+        removed.iter().map(|state| state.hash()).collect()
     }
 
     /// Returns in memory state corresponding the given hash.
