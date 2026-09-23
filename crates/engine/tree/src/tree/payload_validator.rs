@@ -165,7 +165,7 @@ use reth_trie::{
     hashed_cursor::HashedCursorFactory,
     trie_cursor::TrieCursorFactory,
     updates::{TrieUpdates, TrieUpdatesSorted},
-    HashedPostState, KeccakKeyHasher, LazyTrieData,
+    HashedPostState, KeccakKeyHasher, LazyHashedPostStateSorted,
 };
 use revm::state::bal::Bal as RevmBal;
 use std::{
@@ -928,7 +928,7 @@ where
             Arc::new(DecodedRevmBal::with_raw_bal(revm_bal, decoded_bal.as_raw_bal().clone()))
         });
         let executed_block = self
-            .spawn_deferred_trie_task(Arc::new(block), output, hashed_state, trie_output)
+            .spawn_deferred_hashed_state_task(Arc::new(block), output, hashed_state, trie_output)
             .with_bal(bal);
         Ok(ValidationOutput::new(executed_block, timing_stats))
     }
@@ -1518,67 +1518,57 @@ where
         }
     }
 
-    /// Spawns a background task to compute and sort trie data for the executed block.
-    ///
-    /// This function creates a [`LazyTrieData`] handle and spawns a blocking task that:
-    /// 1. Sorts the block's hashed state.
-    /// 2. Publishes the result with the already sorted trie updates.
-    ///
-    /// If the background task hasn't completed when `trie_data()` is called, callers wait for the
-    /// publishing task instead of computing synchronously.
-    ///
-    /// The validation hot path can return immediately after state root verification,
-    /// while consumers (DB writes, overlay providers, proofs) get trie data from the completed
-    /// task.
-    fn spawn_deferred_trie_task(
+    /// Sorts hashed state in the background while exposing the validated trie updates immediately.
+    fn spawn_deferred_hashed_state_task(
         &self,
         block: Arc<RecoveredBlock<N::Block>>,
         execution_outcome: Arc<BlockExecutionOutput<N::Receipt>>,
         hashed_state: LazyHashedPostState,
         trie_output: Arc<TrieUpdatesSorted>,
     ) -> ExecutedBlock<N> {
-        // Create a deferred handle and task owning the hashed state and sorted trie updates.
         // Resolve the lazy handle into Arc<HashedPostState>. By this point the hashed state has
         // already been computed and used for state root verification, so .get() returns instantly.
         let hashed_state = match hashed_state.try_into_inner() {
             Ok(state) => state,
             Err(handle) => handle.get().clone(),
         };
-        let (deferred_trie_data, deferred_trie_task) =
-            LazyTrieData::pending(hashed_state, trie_output);
+        let (deferred_hashed_state, producer) = LazyHashedPostStateSorted::pending(hashed_state);
+        self.metrics
+            .block_validation
+            .trie_updates_sorted_size
+            .record(trie_output.total_len() as f64);
         let block_validation_metrics = self.metrics.block_validation.clone();
 
         // Capture block info for tracing.
         let block_number = block.number();
 
-        // Spawn background task to compute trie data.
-        let compute_trie_input_task = move || {
+        // Sort hashed state outside the validation path.
+        let sort_hashed_state_task = move || {
             let _span = debug_span!(
                 target: "engine::tree::payload_validator",
-                "compute_trie_input_task",
+                "sort_hashed_state_task",
                 block_number
             )
             .entered();
 
             let compute_start = Instant::now();
-            let computed = deferred_trie_task.compute_and_publish();
+            let computed = producer.compute_and_publish();
             block_validation_metrics
                 .deferred_trie_compute_duration
                 .record(compute_start.elapsed().as_secs_f64());
 
-            // Record sizes of the computed trie data
-            block_validation_metrics
-                .hashed_post_state_size
-                .record(computed.sorted.hashed_state.total_len() as f64);
-            block_validation_metrics
-                .trie_updates_sorted_size
-                .record(computed.sorted.trie_updates.total_len() as f64);
+            // Record the sorted hashed-state size.
+            block_validation_metrics.hashed_post_state_size.record(computed.total_len() as f64);
         };
 
-        // Spawn task that computes trie data asynchronously.
-        self.runtime.spawn_blocking_named(DEFERRED_TRIE_WORKER_NAME, compute_trie_input_task);
+        self.runtime.spawn_blocking_named(DEFERRED_TRIE_WORKER_NAME, sort_hashed_state_task);
 
-        ExecutedBlock::with_deferred_trie_data(block, execution_outcome, deferred_trie_data)
+        ExecutedBlock::with_deferred_hashed_state(
+            block,
+            execution_outcome,
+            deferred_hashed_state,
+            trie_output,
+        )
     }
 
     fn calculate_timing_stats(
@@ -1884,7 +1874,7 @@ where
             &block.execution_output.state,
         );
 
-        Ok(self.spawn_deferred_trie_task(
+        Ok(self.spawn_deferred_hashed_state_task(
             block.recovered_block,
             block.execution_output,
             LazyHashedPostState::ready(block.hashed_state),

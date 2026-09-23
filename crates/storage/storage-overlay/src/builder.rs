@@ -852,7 +852,7 @@ mod tests {
     };
     use reth_stages_types::{FinishCheckpoint, StageCheckpoint};
     use reth_storage_api::StageCheckpointWriter;
-    use reth_trie::{BranchNodeCompact, ComputedTrieData, HashedPostState, HashedStorage, Nibbles};
+    use reth_trie::{BranchNodeCompact, HashedPostState, HashedStorage, Nibbles};
     use revm::{
         bytecode::Bytecode,
         database::{AccountStatus, BundleAccount, BundleState},
@@ -901,7 +901,8 @@ mod tests {
         ExecutedBlock::new(
             Arc::clone(&block.recovered_block),
             Arc::new(execution_output),
-            ComputedTrieData::new(Arc::new(hashed_state), Arc::new(trie_updates)),
+            Arc::new(hashed_state),
+            Arc::new(trie_updates),
         )
     }
 

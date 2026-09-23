@@ -40,7 +40,6 @@ use reth_revm::database::StateProviderDatabase;
 use reth_stages_api::ControlFlow;
 use reth_storage_overlay::OverlayManager;
 use reth_tasks::{spawn_os_thread, utils::increase_thread_priority};
-use reth_trie::ComputedTrieData;
 use revm::interpreter::debug_unreachable;
 use state::TreeState;
 use std::{
@@ -2386,7 +2385,6 @@ where
 
         let sorted_hashed_state = Arc::new(hashed_state.into_sorted());
         let sorted_trie_updates = Arc::new(trie_updates);
-        let trie_data = ComputedTrieData::new(sorted_hashed_state, sorted_trie_updates);
 
         let execution_output = Arc::new(BlockExecutionOutput {
             state: execution_output.bundle,
@@ -2401,7 +2399,8 @@ where
         Ok(ExecutedBlock::new(
             Arc::new(RecoveredBlock::new_sealed(block, senders)),
             execution_output,
-            trie_data,
+            sorted_hashed_state,
+            sorted_trie_updates,
         ))
     }
 
