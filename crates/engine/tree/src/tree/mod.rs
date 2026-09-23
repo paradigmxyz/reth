@@ -1829,7 +1829,7 @@ where
     ///
     /// This will also do the necessary housekeeping of the tree state, this includes:
     ///  - removing all blocks below the backfill height
-    ///  - resetting the canonical in-memory state
+    ///  - moving the remaining canonical in-memory blocks to the pending section
     ///
     /// In case backfill resulted in an unwind, this will clear the tree state above the unwind
     /// target block.

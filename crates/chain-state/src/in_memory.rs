@@ -41,7 +41,7 @@ pub(crate) struct InMemoryStateMetrics {
     pub(crate) earliest_block: Gauge,
     /// The block number of the latest block in the in-memory state.
     pub(crate) latest_block: Gauge,
-    /// The number of blocks in the in-memory state.
+    /// The number of canonical blocks in the in-memory state.
     pub(crate) num_blocks: Gauge,
     /// The number of executed in-memory blocks that are not canonical.
     pub(crate) num_pending_blocks: Gauge,
@@ -936,8 +936,10 @@ impl<N: NodePrimitives> CanonicalInMemoryState<N> {
     }
 }
 
-/// State after applying the given block, this block is part of the canonical chain that partially
-/// stored in memory and can be traced back to a canonical block on disk.
+/// State after applying the given block, which is part of a chain that is partially stored in
+/// memory and can be traced back to a block on disk.
+///
+/// The parent link points at the state of the parent block while the parent is in memory.
 #[derive(Debug, Clone)]
 pub struct BlockState<N: NodePrimitives = EthPrimitives> {
     /// The executed block that determines the state after this block has been executed.

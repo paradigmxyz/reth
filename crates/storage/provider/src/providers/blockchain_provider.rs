@@ -102,7 +102,9 @@ impl<N: ProviderNodeTypes> BlockchainProvider<N> {
     /// provided latest header to initialize the chain info tracker.
     ///
     /// The provider uses the in-memory state of the storage's overlay manager, so the provider,
-    /// the overlay manager and the engine share a single [`CanonicalInMemoryState`].
+    /// the overlay manager and the engine share a single [`CanonicalInMemoryState`]. Every provider
+    /// built from the same storage resets the canonical, safe and finalized headers of that state,
+    /// so providers should be built before the engine starts updating it.
     ///
     /// This returns a `ProviderResult` since it tries the retrieve the last finalized header from
     /// `database`.
@@ -149,7 +151,7 @@ impl<N: ProviderNodeTypes> BlockchainProvider<N> {
     /// Returns a state provider for the post-state of an already resolved in-memory chain.
     ///
     /// This is the post-state of `state.hash()`. Because the caller already holds the in-memory
-    /// chain, the overlay manager does not have to rebuild an identical one from its block graph.
+    /// chain, the overlay manager does not have to look it up again.
     fn state_provider_for_state(
         &self,
         state: Arc<BlockState<N::Primitives>>,
