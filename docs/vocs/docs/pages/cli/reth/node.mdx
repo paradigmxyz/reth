@@ -552,17 +552,17 @@ RPC State Cache:
       --rpc-cache.max-blocks-bytes <BYTES>
           Maximum estimated block cache memory in bytes or with a unit (e.g. 1GB, 500MB). Units use powers of 1024. Zero disables caching. The entry count limit also applies
 
-          [default: 2000000000]
+          [default: 2147483648]
 
       --rpc-cache.max-receipts-bytes <BYTES>
           Maximum estimated receipts cache memory in bytes or with a unit (e.g. 1GB, 500MB). Units use powers of 1024. Zero disables caching. The entry count limit also applies
 
-          [default: 1000000000]
+          [default: 1073741824]
 
       --rpc-cache.max-bals-bytes <BYTES>
           Maximum estimated block access list cache memory in bytes or with a unit (e.g. 1GB, 500MB). Units use powers of 1024. Zero disables caching. The entry count limit also applies
 
-          [default: 500000000]
+          [default: 524288000]
 
       --rpc-cache.idle-timeout <DURATION>
           Evict blocks, receipts, and block access lists after this duration without a cache hit (e.g. 5m, 30s). Zero disables expiration. Cleanup starts every 1 to 60 seconds and removes at most five entries per cache per poll

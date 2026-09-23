@@ -116,14 +116,14 @@ pub mod gas_oracle {
 pub mod cache {
     use std::time::Duration;
 
-    /// Default estimated block payload limit: 2 GB.
-    pub const DEFAULT_BLOCK_CACHE_MAX_BYTES: usize = 2_000_000_000;
+    /// Default estimated block payload limit: 2 GiB.
+    pub const DEFAULT_BLOCK_CACHE_MAX_BYTES: usize = 2 * 1024 * 1024 * 1024;
 
-    /// Default estimated receipts payload limit: 1 GB.
-    pub const DEFAULT_RECEIPT_CACHE_MAX_BYTES: usize = 1_000_000_000;
+    /// Default estimated receipts payload limit: 1 GiB.
+    pub const DEFAULT_RECEIPT_CACHE_MAX_BYTES: usize = 1024 * 1024 * 1024;
 
-    /// Default estimated block access list payload limit: 500 MB.
-    pub const DEFAULT_BAL_CACHE_MAX_BYTES: usize = 500_000_000;
+    /// Default estimated block access list payload limit: 500 MiB.
+    pub const DEFAULT_BAL_CACHE_MAX_BYTES: usize = 500 * 1024 * 1024;
 
     /// Default idle timeout for cached blocks, receipts, and block access lists.
     pub const DEFAULT_CACHE_IDLE_TIMEOUT: Duration = Duration::from_secs(60 * 60);

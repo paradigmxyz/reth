@@ -30,15 +30,15 @@ pub struct EthStateCacheConfig {
     pub max_bals: u32,
     /// Maximum estimated memory retained by the block cache, in bytes.
     ///
-    /// Defaults to 2 GB. Zero disables caching. The entry count limit also applies.
+    /// Defaults to 2 GiB. Zero disables caching. The entry count limit also applies.
     pub max_blocks_bytes: usize,
     /// Maximum estimated memory retained by the receipts cache, in bytes.
     ///
-    /// Defaults to 1 GB. Zero disables caching. The entry count limit also applies.
+    /// Defaults to 1 GiB. Zero disables caching. The entry count limit also applies.
     pub max_receipts_bytes: usize,
     /// Maximum estimated memory retained by the BAL cache, in bytes.
     ///
-    /// Defaults to 500 MB. Zero disables caching. The entry count limit also applies.
+    /// Defaults to 500 MiB. Zero disables caching. The entry count limit also applies.
     pub max_bals_bytes: usize,
     /// Duration after which an unused block, receipts collection, or BAL is evicted.
     ///
