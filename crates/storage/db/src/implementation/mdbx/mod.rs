@@ -34,6 +34,8 @@ use tx::Tx;
 pub mod cursor;
 pub mod tx;
 
+mod persistence_timing;
+
 mod sharded;
 pub use sharded::migrate_storage_shards;
 mod utils;

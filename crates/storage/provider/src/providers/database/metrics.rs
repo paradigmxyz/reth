@@ -3,6 +3,43 @@ use reth_metrics::Metrics;
 use reth_primitives_traits::FastInstant as Instant;
 use std::time::Duration;
 
+/// Wall time of a table-writing task, including its loop and database calls.
+/// A completed batch is required before interpreting these records as successful writes.
+pub(super) struct PersistenceTableTimer {
+    table: &'static str,
+    shard: usize,
+    started: std::time::Instant,
+    start_offset_seconds: f64,
+    frontiers: (u64, u64),
+}
+
+impl PersistenceTableTimer {
+    pub(super) fn new(
+        table: &'static str,
+        shard: usize,
+        batch: std::time::Instant,
+        frontiers: (u64, u64),
+    ) -> Self {
+        Self {
+            frontiers,
+            table,
+            shard,
+            started: std::time::Instant::now(),
+            start_offset_seconds: batch.elapsed().as_secs_f64(),
+        }
+    }
+}
+
+impl Drop for PersistenceTableTimer {
+    fn drop(&mut self) {
+        tracing::debug!(target: "engine::persistence", table = self.table, shard = self.shard,
+            last_block_number = self.frontiers.0, state_block_number = self.frontiers.1,
+            start_offset_seconds = self.start_offset_seconds,
+            elapsed_seconds = self.started.elapsed().as_secs_f64(),
+            thread = ?std::thread::current().id(), "Persistence table task");
+    }
+}
+
 #[derive(Debug)]
 pub(crate) struct DurationsRecorder<'a> {
     start: Instant,
