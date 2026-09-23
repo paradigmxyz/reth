@@ -514,6 +514,15 @@ impl<N: NodePrimitives> OverlayManager<N> {
             Compute(Arc<OverlayWaiter<T>>),
         }
 
+        let parent_hash = parent_state.block_ref().recovered_block().parent_hash();
+        cache.retain(|sibling_key, entry| {
+            sibling_key.tip_hash == tip_hash ||
+                !matches!(entry, OverlayCacheEntry::Ready(_)) ||
+                self.blocks
+                    .get(&sibling_key.tip_hash)
+                    .is_none_or(|block| block.recovered_block().parent_hash() != parent_hash)
+        });
+
         let action = match cache.entries.entry(key) {
             Entry::Occupied(entry) => {
                 let entry = entry.get().clone();
@@ -1128,6 +1137,37 @@ mod tests {
             .execution_overlay_for_parent(blocks[2].recovered_block().hash(), short_anchor)
             .unwrap();
         assert_eq!(short.accounts().len(), 1);
+    }
+
+    #[test]
+    fn computing_sibling_evicts_ready_cached_overlays() {
+        let manager = OverlayManager::default();
+        let mut builder = TestBlockBuilder::eth();
+        let anchor_hash = B256::random();
+        let parent = builder.get_executed_block_with_number(1, anchor_hash);
+        let parent_hash = parent.recovered_block().hash();
+        let first = builder.get_executed_block_with_number(2, parent_hash);
+        let sibling = builder.get_executed_block_with_number(2, parent_hash);
+        let sibling_hash = sibling.recovered_block().hash();
+        let first_key = OverlayCacheKey { anchor_hash, tip_hash: first.recovered_block().hash() };
+
+        manager.insert_block(parent);
+        manager.insert_block(first);
+        manager.insert_block(sibling);
+        manager
+            .state_trie_overlays
+            .entries
+            .insert(first_key, OverlayCacheEntry::Ready(Arc::new(TrieInputSorted::default())));
+        manager
+            .execution_overlays
+            .entries
+            .insert(first_key, OverlayCacheEntry::Ready(Arc::new(ExecutionOverlay::default())));
+
+        overlay_for_parent(&manager, sibling_hash, anchor_hash).unwrap();
+        manager.execution_overlay_for_parent(sibling_hash, anchor_hash).unwrap();
+
+        assert!(!manager.state_trie_overlays.entries.contains_key(&first_key));
+        assert!(!manager.execution_overlays.entries.contains_key(&first_key));
     }
 
     #[test]
