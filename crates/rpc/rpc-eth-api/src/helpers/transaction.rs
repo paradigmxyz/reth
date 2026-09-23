@@ -97,13 +97,15 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
 
     /// Decodes and recovers a raw pool transaction, sharing sender recovery when configured.
     fn recover_raw_pool_transaction(&self, tx: &[u8]) -> Result<PoolTx<Self::Pool>, Self::Error> {
-        let transaction = <PoolTx<Self::Pool> as PoolTransaction>::decode_raw_transaction(tx)
-            .map_err(Self::Error::from_eth_err)?;
-        <PoolTx<Self::Pool> as PoolTransaction>::try_recover_with_cache_opt(
-            transaction,
-            self.eth_api_settings().sender_recovery_cache.as_ref(),
-        )
-        .map_err(|_| EthApiError::InvalidTransactionSignature.into())
+        match self.eth_api_settings().sender_recovery_cache.as_ref() {
+            Some(cache) => {
+                <PoolTx<Self::Pool> as PoolTransaction>::recover_raw_transaction_with_cache(
+                    tx, cache,
+                )
+            }
+            None => <PoolTx<Self::Pool> as PoolTransaction>::recover_raw_transaction(tx),
+        }
+        .map_err(Self::Error::from_eth_err)
     }
 
     /// Submits the transaction to the pool with the given [`TransactionOrigin`].

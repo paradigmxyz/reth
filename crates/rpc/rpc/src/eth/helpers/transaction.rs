@@ -240,6 +240,24 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn raw_transaction_recovery_uses_pool_overrides() {
+        let raw = raw_transfer_tx();
+        for enabled in [false, true] {
+            let cache = SenderRecoveryCache::new(16);
+            let eth_api = mock_eth_api_builder(Default::default())
+                .sender_recovery_cache(enabled.then(|| cache.clone()))
+                .build();
+
+            // MockTransaction's raw hooks retain the input length instead of its in-memory size.
+            for _ in 0..2 {
+                let transaction = eth_api.recover_raw_pool_transaction(&raw).unwrap();
+                assert_eq!(transaction.encoded_length(), raw.len());
+                assert_eq!(cache.get(transaction.hash()), enabled.then_some(transaction.sender()));
+            }
+        }
+    }
+
+    #[tokio::test]
     async fn raw_transaction_recovery_preserves_errors() {
         let invalid = TransactionSigned::new_unhashed(
             alloy_consensus::TxLegacy::default().into(),

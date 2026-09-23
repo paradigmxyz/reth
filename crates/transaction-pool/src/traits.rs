@@ -1432,8 +1432,24 @@ pub trait PoolTransaction:
     ///
     /// Implementations can override this to avoid constructing the pooled transaction as an
     /// intermediate value when the raw representation can be converted directly into `Self`.
+    /// RPC uses this hook when no sender recovery cache is configured. Override
+    /// [`Self::recover_raw_transaction_with_cache`] to specialize the cached path as well.
     fn recover_raw_transaction(data: &[u8]) -> Result<Self, RawPoolTransactionError> {
         Self::try_recover(Self::decode_raw_transaction(data)?)
+            .map_err(|_| RawPoolTransactionError::InvalidTransactionSignature)
+    }
+
+    /// Decodes and recovers a raw pool transaction using the provided sender recovery cache.
+    ///
+    /// RPC uses this hook when a sender recovery cache is configured. Implementations can override
+    /// it to reuse the raw bytes or encoded length during recovery and construction. The default
+    /// implementation decodes and recovers separately; it does not call
+    /// [`Self::recover_raw_transaction`].
+    fn recover_raw_transaction_with_cache(
+        data: &[u8],
+        cache: &reth_evm::SenderRecoveryCache,
+    ) -> Result<Self, RawPoolTransactionError> {
+        Self::try_recover_with_cache(Self::decode_raw_transaction(data)?, cache)
             .map_err(|_| RawPoolTransactionError::InvalidTransactionSignature)
     }
 
