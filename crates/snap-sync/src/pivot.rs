@@ -94,7 +94,15 @@ impl SnapPivotPolicy {
     ///
     /// Once they are not, its state cannot be carried forward and the attempt has to restart.
     pub const fn is_catchable(&self, generation: SnapGeneration, head: u64) -> bool {
-        generation.lag(head) <= self.history
+        self.is_catchable_from(generation.target().number, head)
+    }
+
+    /// Returns whether the list of the block after `applied` remains servable under `head`.
+    ///
+    /// Catch-up continues from the last applied block, which trails the pivot while lists are
+    /// missing, so an attempt whose pivot is recent can still need an expired list.
+    pub const fn is_catchable_from(&self, applied: u64, head: u64) -> bool {
+        head.saturating_sub(applied) <= self.history
     }
 
     /// Returns a fresh generation for the canonical pivot under `head`.
