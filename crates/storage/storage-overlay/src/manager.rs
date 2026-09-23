@@ -399,7 +399,14 @@ impl<N: NodePrimitives> OverlayManager<N> {
                 anchor_hash,
                 parent_state,
                 cache_config,
-                |input, span| self.compute_state_trie_overlay(input, anchor_hash, span),
+                |input, span| {
+                    self.compute_state_trie_overlay(
+                        input,
+                        anchor_hash,
+                        span,
+                        cache_config.write_to_cache,
+                    )
+                },
             )?
             .expect("required overlay lookup cannot skip an in-progress computation");
         Ok((Arc::clone(&input.nodes), Arc::clone(&input.state)))
@@ -457,7 +464,14 @@ impl<N: NodePrimitives> OverlayManager<N> {
             anchor_hash,
             parent_state,
             cache_config,
-            |input, span| self.compute_execution_overlay(input, anchor_hash, span),
+            |input, span| {
+                self.compute_execution_overlay(
+                    input,
+                    anchor_hash,
+                    span,
+                    cache_config.write_to_cache,
+                )
+            },
         )
     }
 
@@ -649,7 +663,12 @@ impl<N: NodePrimitives> OverlayManager<N> {
         compute_input: ComputeOverlayInput<N, TrieInputSorted>,
         anchor_hash: B256,
         _span: tracing::Span,
+        write_to_cache: bool,
     ) -> TrieInputSorted {
+        if !write_to_cache {
+            return compute_overlay(compute_input, anchor_hash, &self.metrics)
+        }
+
         #[cfg(feature = "rayon")]
         {
             if let Some(worker_pool) = &self.worker_pool {
@@ -670,7 +689,16 @@ impl<N: NodePrimitives> OverlayManager<N> {
         compute_input: ComputeOverlayInput<N, ExecutionOverlay>,
         anchor_hash: B256,
         _span: tracing::Span,
+        write_to_cache: bool,
     ) -> ExecutionOverlay {
+        if !write_to_cache {
+            return compute_execution_overlay_inner(
+                compute_input,
+                anchor_hash,
+                &self.execution_metrics,
+            )
+        }
+
         #[cfg(feature = "rayon")]
         {
             if let Some(worker_pool) = &self.worker_pool {
@@ -1296,6 +1324,42 @@ mod tests {
         assert!(!manager.state_trie_overlays.entries.contains_key(&child_key));
         assert!(manager.execution_overlays.entries.contains_key(&parent_key));
         assert!(!manager.execution_overlays.entries.contains_key(&child_key));
+    }
+
+    #[cfg(feature = "rayon")]
+    #[test]
+    fn uncached_overlays_do_not_use_worker_pool() {
+        let worker_pool = Arc::new(WorkerPool::new(1, "uncached-overlay-test"));
+        let manager = OverlayManager::new(Arc::clone(&worker_pool));
+        let block = test_blocks().remove(0);
+        let anchor_hash = block.recovered_block().parent_hash();
+        let parent_state = BlockState::new(block);
+        let cache_config = OverlayCacheConfig { precompute: false, write_to_cache: false };
+
+        let (started_tx, started_rx) = mpsc::channel();
+        let (release_tx, release_rx) = mpsc::channel();
+        worker_pool.spawn(move || {
+            started_tx.send(()).unwrap();
+            release_rx.recv().unwrap();
+        });
+        started_rx.recv().unwrap();
+
+        let (completed_tx, completed_rx) = mpsc::channel();
+        let task = thread::spawn(move || {
+            let execution =
+                manager.execution_overlay_for_block_state(&parent_state, anchor_hash, cache_config);
+            let state = manager.overlay_for_parent(&parent_state, anchor_hash, cache_config);
+            completed_tx.send((execution, state)).unwrap();
+        });
+
+        let completed = completed_rx.recv_timeout(Duration::from_millis(100));
+        release_tx.send(()).unwrap();
+        task.join().unwrap();
+
+        assert!(completed.is_ok(), "uncached overlay used the worker pool");
+        let (execution, state) = completed.unwrap();
+        assert!(execution.is_ok());
+        assert!(state.is_ok());
     }
 
     #[cfg(feature = "rayon")]

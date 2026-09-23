@@ -7947,12 +7947,10 @@ dependencies = [
  "pin-project",
  "rand 0.9.4",
  "reth-chainspec",
- "reth-errors",
  "reth-ethereum-primitives",
  "reth-execution-types",
  "reth-metrics",
  "reth-primitives-traits",
- "reth-storage-api",
  "reth-testing-utils",
  "reth-trie",
  "reth-trie-sparse",
@@ -10614,6 +10612,7 @@ dependencies = [
  "alloy-primitives",
  "alloy-rpc-types-engine",
  "auto_impl",
+ "reth-chain-state",
  "reth-chainspec",
  "reth-db-api",
  "reth-db-models",
@@ -10626,6 +10625,7 @@ dependencies = [
  "reth-trie-common",
  "revm",
  "serde_json",
+ "tokio",
 ]
 
 [[package]]
@@ -10686,6 +10686,7 @@ dependencies = [
  "alloy-rpc-types",
  "alloy-rpc-types-engine",
  "dashmap",
+ "reth-chain-state",
  "reth-chainspec",
  "reth-db-api",
  "reth-errors",
