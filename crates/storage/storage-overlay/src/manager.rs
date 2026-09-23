@@ -95,8 +95,20 @@ impl<N: NodePrimitives> OverlayManager<N> {
     }
 
     /// Creates an overlay builder for `parent_hash`.
+    ///
+    /// This rebuilds the in-memory chain ending at `parent_hash` from the manager's block graph.
+    /// Prefer [`Self::overlay_builder_for_state`] whenever the caller already holds the chain.
     pub fn overlay_builder(&self, parent_hash: B256) -> OverlayBuilder<N> {
-        OverlayBuilder::new(parent_hash, self.block_state(parent_hash), self.clone())
+        OverlayBuilder::new(parent_hash, self.block_state(parent_hash).map(Arc::new), self.clone())
+    }
+
+    /// Creates an overlay builder for an already materialized in-memory chain.
+    ///
+    /// The chain tip is used as the parent hash, so no block graph lookup or chain rebuild is
+    /// performed. The builder only reads `state`, which makes it safe to share the same
+    /// [`BlockState`] with other holders.
+    pub fn overlay_builder_for_state(&self, state: Arc<BlockState<N>>) -> OverlayBuilder<N> {
+        OverlayBuilder::new(state.hash(), Some(state), self.clone())
     }
 
     pub(crate) fn block_state(&self, parent_hash: B256) -> Option<BlockState<N>> {
