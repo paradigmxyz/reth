@@ -1271,6 +1271,17 @@ impl SavedCache {
         &self.caches
     }
 
+    /// Consumes the saved cache and returns its [`ExecutionCache`].
+    pub fn into_cache(self) -> ExecutionCache {
+        self.caches
+    }
+
+    /// Returns whether `self` and `other` refer to the same [`ExecutionCache`] data,
+    /// regardless of their block hashes.
+    pub fn shares_cache_with(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.caches.0, &other.caches.0)
+    }
+
     /// Updates the cache metrics (size/capacity/collisions) from the stats handlers.
     pub fn update_metrics(&self, metrics: Option<&CachedStateCacheMetrics>) {
         if let Some(metrics) = metrics {

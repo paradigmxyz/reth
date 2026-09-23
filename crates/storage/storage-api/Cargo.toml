@@ -35,13 +35,10 @@ alloy-rpc-types-engine.workspace = true
 
 auto_impl.workspace = true
 serde_json = { workspace = true, optional = true }
-reth-tokio-util = { workspace = true, optional = true }
 tokio = { workspace = true, features = ["sync"], optional = true }
 
 [dev-dependencies]
 alloy-primitives = { workspace = true, features = ["getrandom"] }
-tokio = { workspace = true, features = ["macros", "rt"] }
-tokio-stream.workspace = true
 
 [features]
 default = ["std"]
@@ -61,7 +58,6 @@ std = [
     "reth-db-models/std",
     "reth-trie-common/std",
     "serde_json?/std",
-    "dep:reth-tokio-util",
     "alloy-eip7928/std",
 ]
 
