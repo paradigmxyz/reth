@@ -70,9 +70,49 @@ impl TableTiming {
     }
 }
 
+/// Accumulate locally so parallel shard workers do not contend on timing counters.
+#[derive(Debug)]
+pub(super) struct CursorTiming {
+    table: Arc<TableTiming>,
+    operations: u64,
+    nanos: u64,
+}
+
+impl CursorTiming {
+    pub(super) const fn new(table: Arc<TableTiming>) -> Self {
+        Self { table, operations: 0, nanos: 0 }
+    }
+
+    pub(super) fn record(&mut self, started: FastInstant) {
+        self.nanos += started.elapsed().as_nanos() as u64;
+        self.operations += 1;
+    }
+}
+
+impl Drop for CursorTiming {
+    fn drop(&mut self) {
+        self.table.operations.fetch_add(self.operations, Ordering::Relaxed);
+        self.table.nanos.fetch_add(self.nanos, Ordering::Relaxed);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn cursor_counters_are_flushed_once_on_drop() {
+        let table = Arc::new(TableTiming::default());
+        {
+            let mut first = CursorTiming::new(table.clone());
+            let mut second = CursorTiming::new(table.clone());
+            first.record(FastInstant::now());
+            first.record(FastInstant::now());
+            second.record(FastInstant::now());
+            assert_eq!(table.operations.load(Ordering::Relaxed), 0);
+        }
+        assert_eq!(table.operations.load(Ordering::Relaxed), 3);
+    }
 
     #[test]
     fn accounting_is_transaction_local_and_resets_between_batches() {
