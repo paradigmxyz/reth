@@ -14,7 +14,7 @@ use reth_evm::{
     TxEnvFor,
 };
 use reth_revm::{
-    database::{EvmStateProvider, StateProviderDatabase},
+    database::StateProviderDatabase,
     db::{bal::EvmDatabaseError, State},
 };
 use reth_rpc_convert::{RpcConvert, RpcTxReq};
@@ -26,6 +26,7 @@ use reth_rpc_eth_types::{
     EthApiError, RpcInvalidTransactionError,
 };
 use reth_rpc_server_types::constants::gas_oracle::{CALL_STIPEND_GAS, ESTIMATE_GAS_ERROR_RATIO};
+use reth_storage_api::{EvmStateProvider, StateProvider};
 use revm::{
     context::Block,
     context_interface::{result::ExecutionResult, Cfg, Transaction},
@@ -317,7 +318,13 @@ pub trait EstimateCall: Call {
 
             self.spawn_blocking_io_fut(async move |this| {
                 let state = this.state_at_block_id(at).await?;
-                EstimateCall::estimate_gas_with(&this, evm_env, request, state, overrides)
+                EstimateCall::estimate_gas_with(
+                    &this,
+                    evm_env,
+                    request,
+                    state.into_evm_state_provider(),
+                    overrides,
+                )
             })
             .await
         }

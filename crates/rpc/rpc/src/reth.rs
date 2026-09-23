@@ -17,7 +17,8 @@ use reth_primitives_traits::{NodePrimitives, SealedHeader};
 use reth_rpc_api::{RethApiServer, RethJitAction};
 use reth_rpc_eth_types::{EthApiError, EthResult};
 use reth_storage_api::{
-    BlockReader, BlockReaderIdExt, ChangeSetReader, StateProviderFactory, TransactionVariant,
+    BlockReader, BlockReaderIdExt, ChangeSetReader, StateProvider, StateProviderFactory,
+    TransactionVariant,
 };
 use reth_tasks::{pool::BlockingTaskGuard, Runtime};
 use serde::Serialize;
@@ -159,7 +160,9 @@ where
         }
 
         let state_provider = self.provider().history_by_block_number(start_block - 1)?;
-        let db = reth_revm::database::StateProviderDatabase::new(&state_provider);
+        let db = reth_revm::database::StateProviderDatabase::new(
+            (&state_provider).into_evm_state_provider(),
+        );
 
         let mut blocks = Vec::with_capacity(block_count as usize);
         for block_number in start_block..start_block + block_count {

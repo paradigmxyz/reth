@@ -24,7 +24,7 @@ use reth_rpc_eth_types::{
     PendingBlockEnv, PendingBlockEnvOrigin,
 };
 use reth_storage_api::{
-    noop::NoopProvider, BlockReader, BlockReaderIdExt, ProviderHeader, ProviderTx,
+    noop::NoopProvider, BlockReader, BlockReaderIdExt, ProviderHeader, ProviderTx, StateProvider,
     StateProviderBox, StateProviderFactory,
 };
 use reth_transaction_pool::{
@@ -255,7 +255,7 @@ pub trait LoadPendingBlock:
             .provider()
             .history_by_block_hash(parent.hash())
             .map_err(Self::Error::from_eth_err)?;
-        let state = StateProviderDatabase::new(state_provider);
+        let state = StateProviderDatabase::new(state_provider.into_evm_state_provider());
         let mut db = State::builder().with_database(state).with_bundle_update().build();
 
         let mut builder = self

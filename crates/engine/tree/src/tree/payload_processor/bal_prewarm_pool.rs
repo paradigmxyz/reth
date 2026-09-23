@@ -2,8 +2,7 @@
 
 use alloy_primitives::{Address, StorageKey};
 use reth_execution_cache::{CachedStateProvider, ExecutionCache, TxPoolPrewarmCacheSnapshot};
-use reth_provider::ProviderResult;
-use reth_revm::database::{EvmStateProvider, EvmStateProviderBox};
+use reth_provider::{EvmStateProvider, EvmStateProviderBox, ProviderResult};
 use std::{
     sync::{
         atomic::{AtomicUsize, Ordering},

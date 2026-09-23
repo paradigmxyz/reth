@@ -20,6 +20,7 @@ reth-errors.workspace = true
 reth-metrics = { workspace = true, features = ["common"] }
 reth-primitives-traits = { workspace = true, features = ["std"] }
 reth-revm.workspace = true
+reth-storage-api.workspace = true
 tracing.workspace = true
 
 [dev-dependencies]

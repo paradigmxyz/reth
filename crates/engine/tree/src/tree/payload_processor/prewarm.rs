@@ -28,10 +28,11 @@ use reth_metrics::Metrics;
 use reth_primitives_traits::{FastInstant as Instant, NodePrimitives};
 use reth_provider::{
     BlockExecutionOutput, BlockNumReader, ChangeSetReader, DatabaseProviderFactory,
-    DatabaseProviderROFactory, HistoryReader, PruneCheckpointReader, StageCheckpointReader,
-    StorageChangeSetReader, StorageSettingsCache,
+    DatabaseProviderROFactory, EvmStateProvider, EvmStateProviderBox, HistoryReader,
+    PruneCheckpointReader, StageCheckpointReader, StateProvider, StorageChangeSetReader,
+    StorageSettingsCache,
 };
-use reth_revm::database::{EvmStateProvider, EvmStateProviderBox, StateProviderDatabase};
+use reth_revm::database::StateProviderDatabase;
 use reth_storage_overlay::OverlayStateProviderFactory;
 use reth_tasks::{pool::WorkerPool, Runtime};
 use reth_trie_common::MultiProofTargetsV2;
@@ -436,7 +437,9 @@ where
             let caches = saved_cache.cache().clone();
             let state_provider_factory = ctx.provider.clone();
             let build = Arc::new(move || {
-                state_provider_factory.database_provider_ro().map(EvmStateProviderBox::new)
+                state_provider_factory.database_provider_ro().map(|provider| {
+                    Box::new(provider.into_evm_state_provider()) as EvmStateProviderBox
+                })
             });
 
             pool.begin_block(build, caches, ctx.env.txpool_snapshot.clone());
@@ -599,7 +602,7 @@ where
     #[instrument(level = "debug", target = "engine::tree::payload_processor::prewarm", skip_all)]
     fn evm_for_ctx(&self) -> PrewarmEvmState<Evm> {
         let mut state_provider = match self.provider.database_provider_ro() {
-            Ok(provider) => EvmStateProviderBox::new(provider),
+            Ok(provider) => Box::new(provider.into_evm_state_provider()) as EvmStateProviderBox,
             Err(err) => {
                 trace!(
                     target: "engine::tree::payload_processor::prewarm",
@@ -613,7 +616,7 @@ where
         // Use the caches to create a new provider with caching
         if let Some(saved_cache) = &self.saved_cache {
             let caches = saved_cache.cache().clone();
-            state_provider = EvmStateProviderBox::new(
+            state_provider = Box::new(
                 CachedStateProvider::new_prewarm(state_provider, caches)
                     .with_txpool_snapshot(self.env.txpool_snapshot.clone()),
             );
@@ -718,7 +721,7 @@ where
                 .entered();
 
                 let inner = match self.provider.database_provider_ro() {
-                    Ok(p) => p,
+                    Ok(p) => p.into_evm_state_provider(),
                     Err(err) => {
                         warn!(
                             target: "engine::tree::payload_processor::prewarm",
@@ -728,16 +731,17 @@ where
                         return;
                     }
                 };
-                let boxed = match (self.disable_bal_batch_io, &self.saved_cache) {
-                    (false, Some(saved)) => {
-                        let caches = saved.cache().clone();
-                        EvmStateProviderBox::new(
-                            CachedStateProvider::new_prewarm(inner, caches)
-                                .with_txpool_snapshot(self.env.txpool_snapshot.clone()),
-                        )
-                    }
-                    _ => EvmStateProviderBox::new(inner),
-                };
+                let boxed: EvmStateProviderBox =
+                    match (self.disable_bal_batch_io, &self.saved_cache) {
+                        (false, Some(saved)) => {
+                            let caches = saved.cache().clone();
+                            Box::new(
+                                CachedStateProvider::new_prewarm(inner, caches)
+                                    .with_txpool_snapshot(self.env.txpool_snapshot.clone()),
+                            )
+                        }
+                        _ => Box::new(inner),
+                    };
                 *provider = Some(boxed);
             }
             let account_reader = provider.as_ref().expect("provider just initialized");

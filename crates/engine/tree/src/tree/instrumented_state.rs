@@ -4,7 +4,7 @@ use metrics::{Gauge, Histogram};
 use reth_errors::ProviderResult;
 use reth_metrics::Metrics;
 use reth_primitives_traits::{Account, Bytecode, FastInstant as Instant};
-use reth_revm::database::EvmStateProvider;
+use reth_provider::EvmStateProvider;
 use std::{
     sync::{
         atomic::{AtomicU64, AtomicUsize, Ordering},

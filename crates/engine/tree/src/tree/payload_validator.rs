@@ -154,14 +154,12 @@ use reth_primitives_traits::{
 };
 use reth_provider::{
     BlockExecutionOutput, BlockHashReader, BlockReader, ChangeSetReader, DatabaseProviderFactory,
-    DatabaseProviderROFactory, HashedPostStateProvider, HistoryReader, ProviderError,
-    PruneCheckpointReader, StageCheckpointReader, StateProvider, StateProviderFactory, StateReader,
-    StateRootProvider, StorageChangeSetReader, StorageSettingsCache,
+    DatabaseProviderROFactory, EvmStateProvider, EvmStateProviderBox, HashedPostStateProvider,
+    HistoryReader, ProviderError, PruneCheckpointReader, StageCheckpointReader, StateProvider,
+    StateProviderFactory, StateReader, StateRootProvider, StorageChangeSetReader,
+    StorageSettingsCache,
 };
-use reth_revm::{
-    database::{EvmStateProvider, EvmStateProviderBox},
-    db::{states::bundle_state::BundleRetention, BundleAccount, State},
-};
+use reth_revm::db::{states::bundle_state::BundleRetention, BundleAccount, State};
 use reth_storage_overlay::{OverlayManager, OverlayStateProviderFactory};
 use reth_trie::{
     hashed_cursor::HashedCursorFactory, trie_cursor::TrieCursorFactory, updates::TrieUpdates,
@@ -682,35 +680,36 @@ where
         // The second parameter `instrument_state_provider` controls whether we should
         // instrument the state provider with metrics.
         let make_state_provider = |fill_on_miss: bool| -> ProviderResult<EvmStateProviderBox> {
-            let provider = state_provider_factory.database_provider_ro()?;
-            let provider = if let Some((caches, cache_metrics)) = &execution_cache {
-                let fill_mode = if fill_on_miss {
-                    CacheFillMode::FillOnMiss
-                } else {
-                    CacheFillMode::LookupOnly
-                };
-                EvmStateProviderBox::new(
-                    CachedStateProvider::new_with_mode(
-                        provider,
-                        caches.clone(),
-                        fill_mode,
-                        cache_metrics.clone(),
-                        cache_stats.clone(),
+            let provider = state_provider_factory.database_provider_ro()?.into_evm_state_provider();
+            let provider: EvmStateProviderBox =
+                if let Some((caches, cache_metrics)) = &execution_cache {
+                    let fill_mode = if fill_on_miss {
+                        CacheFillMode::FillOnMiss
+                    } else {
+                        CacheFillMode::LookupOnly
+                    };
+                    Box::new(
+                        CachedStateProvider::new_with_mode(
+                            provider,
+                            caches.clone(),
+                            fill_mode,
+                            cache_metrics.clone(),
+                            cache_stats.clone(),
+                        )
+                        .with_txpool_snapshot(txpool_snapshot.clone()),
                     )
-                    .with_txpool_snapshot(txpool_snapshot.clone()),
-                )
-            } else {
-                EvmStateProviderBox::new(provider)
-            };
+                } else {
+                    Box::new(provider)
+                };
 
-            let provider = if instrument_state_provider {
+            let provider: EvmStateProviderBox = if instrument_state_provider {
                 let stats = state_provider_stats
                     .as_ref()
                     .expect("instrumented state provider requires shared stats");
                 let metrics = state_provider_metrics
                     .as_ref()
                     .expect("instrumented state provider requires metrics");
-                EvmStateProviderBox::new(InstrumentedStateProvider::with_stats(
+                Box::new(InstrumentedStateProvider::with_stats(
                     provider,
                     metrics.clone(),
                     Arc::clone(stats),

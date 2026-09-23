@@ -10,7 +10,8 @@ use parking_lot::Once;
 use reth_errors::ProviderResult;
 use reth_metrics::Metrics;
 use reth_primitives_traits::{Account, Bytecode};
-use reth_revm::{database::EvmStateProvider, db::BundleState};
+use reth_revm::db::BundleState;
+use reth_storage_api::EvmStateProvider;
 use std::{
     cell::Cell,
     fmt,
@@ -1311,6 +1312,7 @@ mod tests {
     use alloy_primitives::{map::HashMap, U256};
     use reth_provider::test_utils::{ExtendedAccount, MockEthProvider};
     use reth_revm::db::{AccountStatus, BundleAccount};
+    use reth_storage_api::StateProvider;
     use revm::state::AccountInfo;
 
     #[test]
@@ -1324,7 +1326,7 @@ mod tests {
 
         let caches = ExecutionCache::new(1000);
         let state_provider = CachedStateProvider::new(
-            provider,
+            provider.into_evm_state_provider(),
             caches,
             Some(CachedStateMetrics::zeroed(CachedStateMetricsSource::Test)),
         );
@@ -1347,7 +1349,7 @@ mod tests {
 
         let caches = ExecutionCache::new(1000);
         let state_provider = CachedStateProvider::new(
-            provider,
+            provider.into_evm_state_provider(),
             caches,
             Some(CachedStateMetrics::zeroed(CachedStateMetricsSource::Test)),
         );
