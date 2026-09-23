@@ -25,12 +25,9 @@ pub struct TreeState<N: NodePrimitives = EthPrimitives> {
     pub(crate) current_canonical_head: BlockNumHash,
     /// The engine API variant of this handler
     pub(crate) engine_kind: EngineApiKind,
-    /// Manages state trie overlays for in-memory blocks.
+    /// Manages state trie overlays for in-memory blocks, and holds the in-memory state that
+    /// tracks the executed blocks.
     pub(crate) overlay_manager: OverlayManager<N>,
-    /// Tracks the executed in-memory blocks, canonical and pending.
-    ///
-    /// This is the in-memory state of the [`OverlayManager`].
-    pub(crate) in_memory_state: CanonicalInMemoryState<N>,
 }
 
 impl<N: NodePrimitives> Default for TreeState<N> {
@@ -43,20 +40,19 @@ impl<N: NodePrimitives> TreeState<N> {
     /// Returns a new tree state that points to the given canonical head.
     ///
     /// The executed blocks are tracked by the in-memory state of `overlay_manager`.
-    pub fn new(
+    pub const fn new(
         current_canonical_head: BlockNumHash,
         engine_kind: EngineApiKind,
         overlay_manager: OverlayManager<N>,
     ) -> Self {
-        let in_memory_state = overlay_manager.in_memory_state().clone();
-        Self { current_canonical_head, engine_kind, overlay_manager, in_memory_state }
+        Self { current_canonical_head, engine_kind, overlay_manager }
     }
 
     /// Resets the state and points to the given canonical head.
     ///
     /// This removes all executed in-memory blocks, canonical and pending.
     pub fn reset(&mut self, current_canonical_head: BlockNumHash) {
-        let removed_hashes = self.in_memory_state.clear_state();
+        let removed_hashes = self.in_memory_state().clear_state();
         if !removed_hashes.is_empty() {
             self.overlay_manager.on_blocks_removed(removed_hashes);
         }
@@ -69,18 +65,21 @@ impl<N: NodePrimitives> TreeState<N> {
     }
 
     /// Returns the in-memory state that tracks the executed blocks.
+    ///
+    /// This is the in-memory state of the [`OverlayManager`].
     pub const fn in_memory_state(&self) -> &CanonicalInMemoryState<N> {
-        &self.in_memory_state
+        self.overlay_manager.in_memory_state()
     }
 
     /// Returns the number of executed blocks stored.
     pub fn block_count(&self) -> usize {
-        self.in_memory_state.canonical_block_count() + self.in_memory_state.pending_block_count()
+        self.in_memory_state().canonical_block_count() +
+            self.in_memory_state().pending_block_count()
     }
 
     /// Returns the [`BlockState`] of the executed block with the given hash.
     pub fn executed_state_by_hash(&self, hash: B256) -> Option<Arc<BlockState<N>>> {
-        self.in_memory_state.executed_state_by_hash(hash)
+        self.in_memory_state().executed_state_by_hash(hash)
     }
 
     /// Returns the [`ExecutedBlock`] by hash.
@@ -123,7 +122,7 @@ impl<N: NodePrimitives> TreeState<N> {
             return;
         }
 
-        self.in_memory_state.insert_pending(executed);
+        self.in_memory_state().insert_pending(executed);
         self.overlay_manager.on_block_inserted(hash, parent_hash);
     }
 
@@ -177,12 +176,12 @@ impl<N: NodePrimitives> TreeState<N> {
         // * remove canonical blocks that are persisted
         // * remove forks whose root are below the finalized block
         let mut removed_hashes = self
-            .in_memory_state
+            .in_memory_state()
             .remove_canonical_blocks_until(last_persisted_hash, upper_bound.number);
         debug!(target: "engine::tree", ?upper_bound, ?last_persisted_hash, removed = removed_hashes.len(), "Removed canonical blocks from the tree");
 
         if let Some(finalized_num_hash) = finalized_num_hash {
-            let pruned = self.in_memory_state.prune_pending_below(finalized_num_hash);
+            let pruned = self.in_memory_state().prune_pending_below(finalized_num_hash);
             debug!(target: "engine::tree", ?finalized_num_hash, pruned = pruned.len(), "Removed finalized sidechain blocks");
             removed_hashes.extend(pruned);
         }
@@ -270,12 +269,14 @@ mod tests {
     /// Makes `blocks` canonical the way the engine does on a forkchoice update.
     fn make_canonical(tree_state: &mut TreeState, blocks: &[ExecutedBlock]) {
         tree_state.set_canonical_head(blocks.last().unwrap().recovered_block().num_hash());
-        tree_state.in_memory_state.update_chain(NewCanonicalChain::Commit { new: blocks.to_vec() });
+        tree_state
+            .in_memory_state()
+            .update_chain(NewCanonicalChain::Commit { new: blocks.to_vec() });
     }
 
     fn pending_children(tree_state: &TreeState, parent: &ExecutedBlock) -> B256Set {
         tree_state
-            .in_memory_state
+            .in_memory_state()
             .pending_children(parent.recovered_block().hash())
             .iter()
             .map(|state| state.hash())
@@ -327,11 +328,9 @@ mod tests {
         );
         assert!(pending_children(&tree_state, &blocks[2]).is_empty());
 
-        // Executed blocks are pending until a forkchoice update makes them canonical, and they
-        // share the in-memory state of the overlay manager.
-        assert_eq!(tree_state.in_memory_state.pending_block_count(), 3);
-        assert_eq!(tree_state.in_memory_state.canonical_block_count(), 0);
-        assert!(tree_state.in_memory_state.ptr_eq(tree_state.overlay_manager.in_memory_state()));
+        // Executed blocks are pending until a forkchoice update makes them canonical.
+        assert_eq!(tree_state.in_memory_state().pending_block_count(), 3);
+        assert_eq!(tree_state.in_memory_state().canonical_block_count(), 0);
         let (anchor, chain) =
             tree_state.blocks_by_hash(blocks[2].recovered_block().hash()).unwrap();
         assert_eq!(anchor, blocks[0].recovered_block().parent_hash());
@@ -363,7 +362,7 @@ mod tests {
 
         assert_eq!(tree_state.block_count(), 8);
         // two blocks at height 3 (original and fork)
-        assert_eq!(tree_state.in_memory_state.blocks_at_number(3).len(), 2);
+        assert_eq!(tree_state.in_memory_state().blocks_at_number(3).len(), 2);
         assert_eq!(pending_children(&tree_state, &blocks[1]).len(), 1); // the fork block
 
         // verify that we can insert the same block again without issues
@@ -375,17 +374,17 @@ mod tests {
         assert!(pending_children(&tree_state, &fork_block_4)
             .contains(&fork_block_5.recovered_block().hash()));
 
-        assert_eq!(tree_state.in_memory_state.blocks_at_number(4).len(), 2);
-        assert_eq!(tree_state.in_memory_state.blocks_at_number(5).len(), 2);
+        assert_eq!(tree_state.in_memory_state().blocks_at_number(4).len(), 2);
+        assert_eq!(tree_state.in_memory_state().blocks_at_number(5).len(), 2);
 
         // Reorging to the fork moves the replaced canonical blocks to the pending section.
         tree_state.set_canonical_head(fork_block_5.recovered_block().num_hash());
-        tree_state.in_memory_state.update_chain(NewCanonicalChain::Reorg {
+        tree_state.in_memory_state().update_chain(NewCanonicalChain::Reorg {
             new: vec![fork_block_3.clone(), fork_block_4, fork_block_5],
             old: blocks[2..].to_vec(),
         });
         assert_eq!(tree_state.block_count(), 8);
-        assert_eq!(tree_state.in_memory_state.canonical_block_count(), 5);
+        assert_eq!(tree_state.in_memory_state().canonical_block_count(), 5);
         assert!(tree_state.is_canonical(fork_block_3.recovered_block().hash()));
         assert!(!tree_state.is_canonical(blocks[2].recovered_block().hash()));
         assert!(tree_state.contains_hash(&blocks[4].recovered_block().hash()));
@@ -399,15 +398,15 @@ mod tests {
     fn assert_removed_through_block_2(tree_state: &TreeState, blocks: &[ExecutedBlock]) {
         assert!(!tree_state.contains_hash(&blocks[0].recovered_block().hash()));
         assert!(!tree_state.contains_hash(&blocks[1].recovered_block().hash()));
-        assert!(tree_state.in_memory_state.blocks_at_number(1).is_empty());
-        assert!(tree_state.in_memory_state.blocks_at_number(2).is_empty());
+        assert!(tree_state.in_memory_state().blocks_at_number(1).is_empty());
+        assert!(tree_state.in_memory_state().blocks_at_number(2).is_empty());
 
         assert!(tree_state.contains_hash(&blocks[2].recovered_block().hash()));
         assert!(tree_state.contains_hash(&blocks[3].recovered_block().hash()));
         assert!(tree_state.contains_hash(&blocks[4].recovered_block().hash()));
-        assert!(!tree_state.in_memory_state.blocks_at_number(3).is_empty());
-        assert!(!tree_state.in_memory_state.blocks_at_number(4).is_empty());
-        assert!(!tree_state.in_memory_state.blocks_at_number(5).is_empty());
+        assert!(!tree_state.in_memory_state().blocks_at_number(3).is_empty());
+        assert!(!tree_state.in_memory_state().blocks_at_number(4).is_empty());
+        assert!(!tree_state.in_memory_state().blocks_at_number(5).is_empty());
 
         // The remaining chain starts right after the removed blocks.
         let (anchor, chain) =
