@@ -84,12 +84,12 @@ on:
       samply:
         description: "Enable samply profiling"
         required: false
-        default: "false"
+        default: false
         type: boolean
       tracing_chrome:
         description: "Enable Chrome trace recording"
         required: false
-        default: "false"
+        default: false
         type: boolean
       cores:
         description: "Limit reth to N CPU cores (0 = all available)"
@@ -114,12 +114,12 @@ on:
       otlp:
         description: "Export OTLP traces and logs"
         required: false
-        default: "true"
+        default: true
         type: boolean
       metrics:
         description: "Upload txgen metrics to VictoriaMetrics"
         required: false
-        default: "false"
+        default: false
         type: boolean
       call_args:
         description: "Call mode arguments as key=value pairs (corpus, class, methods, rps, duration, passes, concurrency)"
@@ -2393,10 +2393,10 @@ jobs:
         run: |
           # Restore frequency scaling to full range
           for f in /sys/devices/system/cpu/cpu*/cpufreq/scaling_min_freq; do
-            cat "$(dirname "$f")/cpuinfo_min_freq" | sudo tee "$f" > /dev/null 2>&1 || true
+            printf '%s\n' "$(< "$(dirname "$f")/cpuinfo_min_freq")" | sudo tee "$f" > /dev/null 2>&1 || true
           done
           for f in /sys/devices/system/cpu/cpu*/cpufreq/scaling_max_freq; do
-            cat "$(dirname "$f")/cpuinfo_max_freq" | sudo tee "$f" > /dev/null 2>&1 || true
+            printf '%s\n' "$(< "$(dirname "$f")/cpuinfo_max_freq")" | sudo tee "$f" > /dev/null 2>&1 || true
           done
           # Restore amd-pstate to active (EPP) mode with powersave governor
           echo active | sudo tee /sys/devices/system/cpu/amd_pstate/status 2>/dev/null || true
