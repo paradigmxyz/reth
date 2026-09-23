@@ -87,7 +87,7 @@ impl ValidationJobSender {
         job: Pin<Box<dyn Future<Output = ()> + Send>>,
     ) -> Result<(), TransactionValidatorError> {
         self.metrics.inflight_validation_jobs.increment(1);
-        let _guard = ValidationSendGuard(&self.metrics.inflight_validation_jobs);
+        let _guard = DecrementPendingOnDrop(&self.metrics.inflight_validation_jobs);
         self.tx.send(job).await.map_err(|_| TransactionValidatorError::ValidationServiceUnreachable)
     }
 }
@@ -320,9 +320,9 @@ where
 }
 
 /// Decrements the pending-send count even if the send future is cancelled.
-struct ValidationSendGuard<'a>(&'a metrics::Gauge);
+struct DecrementPendingOnDrop<'a>(&'a metrics::Gauge);
 
-impl Drop for ValidationSendGuard<'_> {
+impl Drop for DecrementPendingOnDrop<'_> {
     fn drop(&mut self) {
         self.0.decrement(1);
     }
