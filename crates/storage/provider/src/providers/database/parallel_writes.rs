@@ -48,15 +48,12 @@ pub(super) fn write_parallel<TX: DbTxMut, A: TrieTableAdapter>(
     let [accounts_result, account_trie_result] = account_results else { unreachable!() };
     let (storage_results, trie_results) = shard_results.split_at_mut(storage_shards);
     let span = tracing::Span::current();
-    let frontiers = tx.persistence_timing_frontiers();
-    let batch_started = std::time::Instant::now();
-    tracing::debug!(target: "engine::persistence", elapsed_seconds = preparation_started.elapsed().as_secs_f64(),
-        last_block_number = frontiers.0, state_block_number = frontiers.1,
-        storage_threads = runtime.storage_pool().current_num_threads(), "Persistence worker preparation");
+    metrics::histogram!("storage.providers.database.persistence_worker_preparation_seconds")
+        .record(preparation_started.elapsed());
     runtime.storage_pool().in_place_scope(|scope| {
         scope.spawn(|_| {
             let _guard = span.enter();
-            let _timer = super::metrics::PersistenceTableTimer::new(tables::HashedAccounts::NAME, 0, batch_started, frontiers);
+            let _timer = super::metrics::PersistenceTableTimer::new(tables::HashedAccounts::NAME, 0);
             *accounts_result = (|| {
                 for (address, account) in state.accounts() {
                     if let Some(account) = account {
@@ -75,7 +72,7 @@ pub(super) fn write_parallel<TX: DbTxMut, A: TrieTableAdapter>(
             let span = &span;
             scope.spawn(move |_| {
                 let _guard = span.enter();
-                let _timer = super::metrics::PersistenceTableTimer::new(tables::HashedStorages::NAME, shard, batch_started, frontiers);
+                let _timer = super::metrics::PersistenceTableTimer::new(tables::HashedStorages::NAME, shard);
                 let started = std::time::Instant::now();
                 *storage_result = (|| {
                     for &(address, changes) in storages {
@@ -103,7 +100,7 @@ pub(super) fn write_parallel<TX: DbTxMut, A: TrieTableAdapter>(
         }
         scope.spawn(|_| {
             let _guard = span.enter();
-            let _timer = super::metrics::PersistenceTableTimer::new(A::AccountTrieTable::NAME, 0, batch_started, frontiers);
+            let _timer = super::metrics::PersistenceTableTimer::new(A::AccountTrieTable::NAME, 0);
             *account_trie_result = (|| {
                 for (key, node) in trie.account_nodes_ref() {
                     let encoded = A::AccountKey::from(*key);
@@ -125,7 +122,7 @@ pub(super) fn write_parallel<TX: DbTxMut, A: TrieTableAdapter>(
             let span = &span;
             scope.spawn(move |_| {
                 let _guard = span.enter();
-                let _timer = super::metrics::PersistenceTableTimer::new(A::StorageTrieTable::NAME, shard, batch_started, frontiers);
+                let _timer = super::metrics::PersistenceTableTimer::new(A::StorageTrieTable::NAME, shard);
                 let started = std::time::Instant::now();
                 *storage_trie_result = (|| {
                     for &(address, updates) in storage_tries {
@@ -164,8 +161,7 @@ pub(super) fn write_parallel<TX: DbTxMut, A: TrieTableAdapter>(
     }
     let child_commit_started = std::time::Instant::now();
     tx.commit_subtxns_with_metrics()?;
-    tracing::debug!(target: "engine::persistence", elapsed_seconds = child_commit_started.elapsed().as_secs_f64(),
-        last_block_number = frontiers.0, state_block_number = frontiers.1,
-        "Persistence child transaction commits");
+    metrics::histogram!("storage.providers.database.persistence_child_commit_seconds")
+        .record(child_commit_started.elapsed());
     Ok(())
 }

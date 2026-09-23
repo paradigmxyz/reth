@@ -3,40 +3,29 @@ use reth_metrics::Metrics;
 use reth_primitives_traits::FastInstant as Instant;
 use std::time::Duration;
 
-/// Wall time of a table-writing task, including its loop and database calls.
-/// A completed batch is required before interpreting these records as successful writes.
+/// Wall time of a table-writing task, including preparation, seeks and writes.
+/// One observation per task, never per cursor operation. Parallel observations overlap.
+/// These helpers also serve sync/import; select the benchmark phase when comparing persistence.
 pub(super) struct PersistenceTableTimer {
-    table: &'static str,
-    shard: usize,
-    started: std::time::Instant,
-    start_offset_seconds: f64,
-    frontiers: (u64, u64),
+    duration: Histogram,
+    started: Instant,
 }
 
 impl PersistenceTableTimer {
-    pub(super) fn new(
-        table: &'static str,
-        shard: usize,
-        batch: std::time::Instant,
-        frontiers: (u64, u64),
-    ) -> Self {
+    pub(super) fn new(table: &'static str, shard: usize) -> Self {
         Self {
-            frontiers,
-            table,
-            shard,
-            started: std::time::Instant::now(),
-            start_offset_seconds: batch.elapsed().as_secs_f64(),
+            duration: metrics::histogram!(
+                "storage.providers.database.table_write_seconds",
+                "table" => table, "shard" => shard.to_string()
+            ),
+            started: Instant::now(),
         }
     }
 }
 
 impl Drop for PersistenceTableTimer {
     fn drop(&mut self) {
-        tracing::debug!(target: "engine::persistence", table = self.table, shard = self.shard,
-            last_block_number = self.frontiers.0, state_block_number = self.frontiers.1,
-            start_offset_seconds = self.start_offset_seconds,
-            elapsed_seconds = self.started.elapsed().as_secs_f64(),
-            thread = ?std::thread::current().id(), "Persistence table task");
+        self.duration.record(self.started.elapsed());
     }
 }
 
@@ -191,6 +180,19 @@ pub(crate) struct CommitTimings {
 impl DatabaseProviderMetrics {
     /// Records the duration for the given action.
     pub(crate) fn record_duration(&self, action: Action, duration: Duration) {
+        let table = match action {
+            Action::InsertHeaderNumbers => Some("HeaderNumbers"),
+            Action::InsertBlockBodyIndices => Some("BlockBodyIndices"),
+            Action::InsertTransactionBlocks => Some("TransactionBlocks"),
+            Action::InsertTransactionSenders => Some("TransactionSenders"),
+            Action::InsertTransactionHashNumbers => Some("TransactionHashNumbers"),
+            _ => None,
+        };
+        if let Some(table) = table {
+            metrics::histogram!("storage.providers.database.table_write_seconds",
+                "table" => table, "shard" => "0")
+            .record(duration);
+        }
         match action {
             Action::InsertBlock => self.insert_block.record(duration),
             Action::InsertState => self.insert_state.record(duration),
