@@ -1,3 +1,4 @@
+use super::database::parse_byte_size;
 use clap::Args;
 use reth_rpc_server_types::constants::cache::{
     DEFAULT_BAL_CACHE_MAX_BYTES, DEFAULT_BAL_CACHE_MAX_LEN, DEFAULT_BLOCK_CACHE_MAX_BYTES,
@@ -41,19 +42,19 @@ pub struct RpcStateCacheArgs {
     )]
     pub max_bals: u32,
 
-    /// Maximum estimated block cache memory in bytes. Zero disables caching. The entry count
-    /// limit also applies.
-    #[arg(long = "rpc-cache.max-blocks-bytes", value_name = "BYTES", default_value_t = DEFAULT_BLOCK_CACHE_MAX_BYTES)]
+    /// Maximum estimated block cache memory in bytes or with a unit (e.g. 1GB, 500MB).
+    /// Units use powers of 1024. Zero disables caching. The entry count limit also applies.
+    #[arg(long = "rpc-cache.max-blocks-bytes", value_name = "BYTES", value_parser = parse_byte_size, default_value_t = DEFAULT_BLOCK_CACHE_MAX_BYTES)]
     pub max_blocks_bytes: usize,
 
-    /// Maximum estimated receipts cache memory in bytes. Zero disables caching. The entry count
-    /// limit also applies.
-    #[arg(long = "rpc-cache.max-receipts-bytes", value_name = "BYTES", default_value_t = DEFAULT_RECEIPT_CACHE_MAX_BYTES)]
+    /// Maximum estimated receipts cache memory in bytes or with a unit (e.g. 1GB, 500MB).
+    /// Units use powers of 1024. Zero disables caching. The entry count limit also applies.
+    #[arg(long = "rpc-cache.max-receipts-bytes", value_name = "BYTES", value_parser = parse_byte_size, default_value_t = DEFAULT_RECEIPT_CACHE_MAX_BYTES)]
     pub max_receipts_bytes: usize,
 
-    /// Maximum estimated block access list cache memory in bytes. Zero disables caching. The entry
-    /// count limit also applies.
-    #[arg(long = "rpc-cache.max-bals-bytes", value_name = "BYTES", default_value_t = DEFAULT_BAL_CACHE_MAX_BYTES)]
+    /// Maximum estimated block access list cache memory in bytes or with a unit (e.g. 1GB, 500MB).
+    /// Units use powers of 1024. Zero disables caching. The entry count limit also applies.
+    #[arg(long = "rpc-cache.max-bals-bytes", value_name = "BYTES", value_parser = parse_byte_size, default_value_t = DEFAULT_BAL_CACHE_MAX_BYTES)]
     pub max_bals_bytes: usize,
 
     /// Evict blocks, receipts, and block access lists after this duration without a cache hit
@@ -176,17 +177,46 @@ mod tests {
     #[test]
     fn rpc_cache_byte_limits_reject_invalid_values() {
         let overflow = format!("{}0", usize::MAX);
+        let unit_overflow = format!("{}GB", usize::MAX);
         for flag in [
             "--rpc-cache.max-blocks-bytes",
             "--rpc-cache.max-receipts-bytes",
             "--rpc-cache.max-bals-bytes",
         ] {
-            for value in ["-1", "1MB", overflow.as_str()] {
+            for value in ["-1", "-1GB", "1XB", "1.5GB", &overflow, &unit_overflow] {
                 assert!(
                     CommandParser::try_parse_from(["reth", &format!("{flag}={value}")]).is_err(),
                     "accepted {flag}={value}"
                 );
             }
+        }
+    }
+
+    #[test]
+    fn rpc_cache_byte_limits_accept_units() {
+        for (value, expected) in [
+            ("0GB", 0),
+            ("1024B", 1024),
+            ("1KB", 1024),
+            ("500MB", 500 * 1024 * 1024),
+            ("1GB", 1024 * 1024 * 1024),
+            ("1gb", 1024 * 1024 * 1024),
+            (" 500 MB ", 500 * 1024 * 1024),
+            ("1TB", 1024usize.pow(4)),
+        ] {
+            let args = CommandParser::parse_from([
+                "reth",
+                "--rpc-cache.max-blocks-bytes",
+                value,
+                "--rpc-cache.max-receipts-bytes",
+                value,
+                "--rpc-cache.max-bals-bytes",
+                value,
+            ])
+            .args;
+            assert_eq!(args.max_blocks_bytes, expected);
+            assert_eq!(args.max_receipts_bytes, expected);
+            assert_eq!(args.max_bals_bytes, expected);
         }
     }
 
