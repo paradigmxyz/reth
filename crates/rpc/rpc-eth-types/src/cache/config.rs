@@ -17,11 +17,11 @@ use reth_rpc_server_types::constants::cache::{
 pub struct EthStateCacheConfig {
     /// Max number of blocks in cache.
     ///
-    /// Default is 5000.
+    /// Default is 1000.
     pub max_blocks: u32,
-    /// Max number receipts in cache.
+    /// Max number of blocks' receipts in cache.
     ///
-    /// Default is 2000.
+    /// Default is 500.
     pub max_receipts: u32,
     /// Max number of EVM BALs in cache.
     ///

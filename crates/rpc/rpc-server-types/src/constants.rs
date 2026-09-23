@@ -114,11 +114,11 @@ pub mod gas_oracle {
 
 /// Cache specific constants
 pub mod cache {
-    /// Default cache size for the block cache: 5000 blocks.
-    pub const DEFAULT_BLOCK_CACHE_MAX_LEN: u32 = 5000;
+    /// Default cache size for the block cache: 1000 blocks.
+    pub const DEFAULT_BLOCK_CACHE_MAX_LEN: u32 = 1000;
 
-    /// Default cache size for the receipts cache: 2000 receipts.
-    pub const DEFAULT_RECEIPT_CACHE_MAX_LEN: u32 = 2000;
+    /// Default cache size for the receipts cache: 500 blocks' receipts.
+    pub const DEFAULT_RECEIPT_CACHE_MAX_LEN: u32 = 500;
 
     /// Legacy default for the no-op RPC header cache option.
     pub const DEFAULT_HEADER_CACHE_MAX_LEN: u32 = 1000;
