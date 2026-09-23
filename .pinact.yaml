@@ -1,0 +1,6 @@
+version: 3
+rules:
+  # Keep the reviewed immutable deny pin; tempoxyz/ci has no release tags.
+  - ignore: true
+    conditions:
+      - expr: ActionName == "tempoxyz/ci/.github/workflows/deny.yml" && ActionVersion == "feeee35d6e4047767f0d97881ac6e83fe3c9ebf3"
