@@ -333,10 +333,14 @@ impl RocksDBBuilder {
     /// - [`tables::TransactionHashNumbers`] - Transaction hash to number mapping
     /// - [`tables::AccountsHistory`] - Account history index
     /// - [`tables::StoragesHistory`] - Storage history index
+    /// - [`tables::BlockAccessLists`] - Block access list payloads
+    /// - [`tables::BlockAccessListBlockNumbers`] - Block access list hash index
     pub fn with_default_tables(self) -> Self {
         self.with_table::<tables::TransactionHashNumbers>()
             .with_table::<tables::AccountsHistory>()
             .with_table::<tables::StoragesHistory>()
+            .with_table::<tables::BlockAccessLists>()
+            .with_table::<tables::BlockAccessListBlockNumbers>()
     }
 
     /// Enables metrics.
@@ -3169,8 +3173,8 @@ mod tests {
         drop(provider);
 
         let column_families = DB::list_cf(&Options::default(), temp_dir.path()).unwrap();
-        assert!(!column_families.iter().any(|name| name == tables::BlockAccessLists::NAME));
-        assert!(!column_families
+        assert!(column_families.iter().any(|name| name == tables::BlockAccessLists::NAME));
+        assert!(column_families
             .iter()
             .any(|name| name == tables::BlockAccessListBlockNumbers::NAME));
     }
