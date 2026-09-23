@@ -141,7 +141,7 @@ pub(super) fn test_insert_multiple_leaves_into_empty_trie<T: SparseTrie>(new_tri
 
     let updates = trie.take_updates();
     assert!(
-        !updates.updated_nodes.is_empty(),
+        updates.iter().any(|(_, node)| node.is_some()),
         "take_updates should contain updated nodes after 256 insertions"
     );
 }
@@ -226,10 +226,7 @@ pub(super) fn test_two_leaves_at_adjacent_keys_root_correctness<T: SparseTrie>(
     assert_eq!(root, expected.original_root(), "root should match reference two-leaf trie");
 
     let updates = trie.take_updates();
-    assert!(
-        updates.updated_nodes.is_empty() && updates.removed_nodes.is_empty(),
-        "take_updates should be empty — no branch masks were set"
-    );
+    assert!(updates.is_empty(), "take_updates should be empty — no branch masks were set");
 }
 
 /// Remove a leaf via `LeafUpdate::Changed(vec![])` and verify root.
@@ -349,10 +346,10 @@ pub(super) fn test_remove_leaf_branch_collapses_to_leaf<T: SparseTrie>(new_trie:
     // The root branch path is Nibbles::default() (empty path).
     let root_path = Nibbles::default();
 
-    // The collapsed root branch should NOT appear in updated_nodes.
+    // The collapsed root branch should not have an insertion.
     assert!(
-        !updates.updated_nodes.contains_key(&root_path),
-        "root branch path should NOT be in updated_nodes after collapse"
+        !updates.iter().any(|(path, node)| *path == root_path && node.is_some()),
+        "root branch path should not have an insertion after collapse"
     );
 }
 

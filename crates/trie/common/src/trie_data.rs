@@ -3,10 +3,7 @@
 //! Provides a no-std compatible [`LazyTrieData`] type for lazily initialized
 //! trie-related data containing sorted hashed state and trie updates.
 
-use crate::{
-    updates::{TrieUpdates, TrieUpdatesSorted},
-    HashedPostState, HashedPostStateSorted,
-};
+use crate::{updates::TrieUpdatesSorted, HashedPostState, HashedPostStateSorted};
 use alloc::sync::Arc;
 use core::fmt;
 use reth_primitives_traits::sync::OnceLock;
@@ -115,7 +112,7 @@ impl LazyTrieData {
     #[cfg(feature = "std")]
     pub fn pending(
         hashed_state: Arc<HashedPostState>,
-        trie_updates: Arc<TrieUpdates>,
+        trie_updates: Arc<TrieUpdatesSorted>,
     ) -> (Self, LazyTrieDataProducer) {
         let value = Arc::new(OnceLock::new());
         (
@@ -205,7 +202,7 @@ impl fmt::Debug for LazyTrieDataMode {
 pub struct LazyTrieDataProducer {
     /// Shared result initialized exactly once by this producer.
     value: Arc<OnceLock<ComputedTrieData>>,
-    /// Unsorted inputs consumed when the producer computes trie data.
+    /// Execution outputs consumed when the producer computes trie data.
     inputs: PendingInputs,
 }
 
@@ -219,41 +216,13 @@ impl LazyTrieDataProducer {
     /// Computes sorted trie data, publishes it to waiters, and returns it to the task owner.
     pub fn compute_and_publish(self) -> ComputedTrieData {
         let Self { value, inputs } = self;
-        let computed = Self::sort(inputs.hashed_state, inputs.trie_updates);
+        let sorted_hashed_state = match Arc::try_unwrap(inputs.hashed_state) {
+            Ok(state) => state.into_sorted(),
+            Err(state) => state.clone_into_sorted(),
+        };
+        let computed = ComputedTrieData::new(Arc::new(sorted_hashed_state), inputs.trie_updates);
         let _ = value.set(computed.clone());
         computed
-    }
-
-    /// Sorts block execution outputs.
-    pub fn sort(
-        hashed_state: Arc<HashedPostState>,
-        trie_updates: Arc<TrieUpdates>,
-    ) -> ComputedTrieData {
-        #[cfg(feature = "rayon")]
-        let (sorted_hashed_state, sorted_trie_updates) = rayon::join(
-            || match Arc::try_unwrap(hashed_state) {
-                Ok(state) => state.into_sorted(),
-                Err(arc) => arc.clone_into_sorted(),
-            },
-            || match Arc::try_unwrap(trie_updates) {
-                Ok(updates) => updates.into_sorted(),
-                Err(arc) => arc.clone_into_sorted(),
-            },
-        );
-
-        #[cfg(not(feature = "rayon"))]
-        let (sorted_hashed_state, sorted_trie_updates) = (
-            match Arc::try_unwrap(hashed_state) {
-                Ok(state) => state.into_sorted(),
-                Err(arc) => arc.clone_into_sorted(),
-            },
-            match Arc::try_unwrap(trie_updates) {
-                Ok(updates) => updates.into_sorted(),
-                Err(arc) => arc.clone_into_sorted(),
-            },
-        );
-
-        ComputedTrieData::new(Arc::new(sorted_hashed_state), Arc::new(sorted_trie_updates))
     }
 }
 
@@ -262,13 +231,13 @@ impl LazyTrieDataProducer {
 struct PendingInputs {
     /// Unsorted hashed post-state from execution.
     hashed_state: Arc<HashedPostState>,
-    /// Unsorted trie updates from state root computation.
-    trie_updates: Arc<TrieUpdates>,
+    /// Sorted trie updates from state root computation.
+    trie_updates: Arc<TrieUpdatesSorted>,
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::HashedStorage;
+    use crate::{HashedStorage, Nibbles};
 
     use super::*;
     use alloy_primitives::{map::B256Map, B256, U256};
@@ -281,7 +250,7 @@ mod tests {
     fn empty_pending() -> (LazyTrieData, LazyTrieDataProducer) {
         LazyTrieData::pending(
             Arc::new(HashedPostState::default()),
-            Arc::new(TrieUpdates::default()),
+            Arc::new(TrieUpdatesSorted::default()),
         )
     }
 
@@ -322,9 +291,15 @@ mod tests {
 
     #[test]
     fn pending_waits_for_task_and_caches_result() {
-        let (deferred, task) = empty_pending();
+        let updates = Arc::new(TrieUpdatesSorted::new(
+            vec![(Nibbles::from_nibbles([1]), None), (Nibbles::from_nibbles([2]), None)],
+            Default::default(),
+        ));
+        let (deferred, task) =
+            LazyTrieData::pending(Arc::new(HashedPostState::default()), updates.clone());
 
         let published = task.compute_and_publish();
+        assert!(Arc::ptr_eq(&updates, &published.sorted.trie_updates));
         let first = deferred.get();
         let second = deferred.get();
 
@@ -377,7 +352,7 @@ mod tests {
             )]);
 
         let (deferred, task) =
-            LazyTrieData::pending(Arc::new(hashed_state), Arc::new(TrieUpdates::default()));
+            LazyTrieData::pending(Arc::new(hashed_state), Arc::new(TrieUpdatesSorted::default()));
         let _ = task.compute_and_publish();
         let result = deferred.get().clone();
 
@@ -393,7 +368,7 @@ mod tests {
         }
         let (deferred, task) = LazyTrieData::pending(
             Arc::new(HashedPostState { accounts, storages: Default::default() }),
-            Arc::new(TrieUpdates::default()),
+            Arc::new(TrieUpdatesSorted::default()),
         );
 
         let _ = task.compute_and_publish();

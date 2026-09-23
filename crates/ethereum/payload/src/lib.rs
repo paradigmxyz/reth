@@ -472,7 +472,7 @@ where
                 debug!(target: "payload_builder", id=%payload_id, state_root=?outcome.state_root, job = task.name(), "received state root from state-root job");
                 builder.finish(
                     state_provider.as_ref(),
-                    Some((outcome.state_root, Arc::unwrap_or_clone(outcome.trie_updates))),
+                    Some((outcome.state_root, Arc::unwrap_or_clone(outcome.trie_updates).into())),
                 )?
             }
             Err(err) => {

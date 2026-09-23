@@ -51,10 +51,7 @@ pub(super) fn test_full_lifecycle_update_root_take_updates<T: SparseTrie>(new_tr
 
     // Take updates — should be non-empty with hashed branch children.
     let updates = trie.take_updates();
-    assert!(
-        !updates.updated_nodes.is_empty() || !updates.removed_nodes.is_empty(),
-        "updates should be non-empty after mutations"
-    );
+    assert!(!updates.is_empty(), "updates should be non-empty after mutations");
 
     // Taking updates should not affect the cached root.
     let hash2 = trie.root(epoch(0));

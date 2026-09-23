@@ -11,7 +11,7 @@ use crate::error::StateRootTaskError;
 use alloy_evm::block::OnStateHook;
 use alloy_primitives::{keccak256, map::B256Map, B256};
 use reth_trie::{
-    updates::TrieUpdates, HashedPostState, HashedStorage, MultiProofTargetsV2, ProofV2Target,
+    updates::TrieUpdatesSorted, HashedPostState, HashedStorage, MultiProofTargetsV2, ProofV2Target,
 };
 use revm::state::EvmState;
 use std::{fmt, sync::Arc};
@@ -40,7 +40,7 @@ pub struct StateRootComputeOutcome {
     /// The state root.
     pub state_root: B256,
     /// The trie updates.
-    pub trie_updates: Arc<TrieUpdates>,
+    pub trie_updates: Arc<TrieUpdatesSorted>,
     /// Hashed post state produced while computing the state root.
     pub hashed_state: Arc<HashedPostState>,
 }
@@ -916,7 +916,7 @@ mod tests {
         state_root_tx
             .send(Ok(StateRootComputeOutcome {
                 state_root: B256::repeat_byte(0x42),
-                trie_updates: Arc::new(TrieUpdates::default()),
+                trie_updates: Arc::new(TrieUpdatesSorted::default()),
                 hashed_state: Arc::new(HashedPostState::default()),
             }))
             .unwrap();

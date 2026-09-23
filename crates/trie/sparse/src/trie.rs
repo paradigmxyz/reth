@@ -458,17 +458,3 @@ pub struct RlpNodeStackItem {
     /// Type of the node.
     pub node_type: SparseNodeType,
 }
-
-impl SparseTrieUpdates {
-    /// Clears the updates, but keeps the backing data structures allocated.
-    pub fn clear(&mut self) {
-        self.updated_nodes.clear();
-        self.removed_nodes.clear();
-    }
-
-    /// Extends the updates with another set of updates.
-    pub fn extend(&mut self, other: Self) {
-        self.updated_nodes.extend(other.updated_nodes);
-        self.removed_nodes.extend(other.removed_nodes);
-    }
-}

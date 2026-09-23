@@ -162,7 +162,9 @@ use reth_provider::{
 use reth_revm::db::{states::bundle_state::BundleRetention, BundleAccount, State};
 use reth_storage_overlay::{OverlayManager, OverlayStateProviderFactory};
 use reth_trie::{
-    hashed_cursor::HashedCursorFactory, trie_cursor::TrieCursorFactory, updates::TrieUpdates,
+    hashed_cursor::HashedCursorFactory,
+    trie_cursor::TrieCursorFactory,
+    updates::{TrieUpdates, TrieUpdatesSorted},
     HashedPostState, KeccakKeyHasher, LazyTrieData,
 };
 use revm::state::bal::Bal as RevmBal;
@@ -889,7 +891,7 @@ where
                 &parent_block,
                 &block,
                 &output,
-                Some((&trie_output, state_root)),
+                Some((&trie_output.as_ref().clone().into(), state_root)),
                 ctx.state_mut(),
             );
             let block_state_root = block.header().state_root();
@@ -1519,8 +1521,8 @@ where
     /// Spawns a background task to compute and sort trie data for the executed block.
     ///
     /// This function creates a [`LazyTrieData`] handle and spawns a blocking task that:
-    /// 1. Sort the block's hashed state and trie updates
-    /// 2. Publishes the result so subsequent calls return immediately
+    /// 1. Sorts the block's hashed state.
+    /// 2. Publishes the result with the already sorted trie updates.
     ///
     /// If the background task hasn't completed when `trie_data()` is called, callers wait for the
     /// publishing task instead of computing synchronously.
@@ -1533,9 +1535,9 @@ where
         block: Arc<RecoveredBlock<N::Block>>,
         execution_outcome: Arc<BlockExecutionOutput<N::Receipt>>,
         hashed_state: LazyHashedPostState,
-        trie_output: Arc<TrieUpdates>,
+        trie_output: Arc<TrieUpdatesSorted>,
     ) -> ExecutedBlock<N> {
-        // Create deferred handle and task that owns the unsorted inputs.
+        // Create a deferred handle and task owning the hashed state and sorted trie updates.
         // Resolve the lazy handle into Arc<HashedPostState>. By this point the hashed state has
         // already been computed and used for state root verification, so .get() returns instantly.
         let hashed_state = match hashed_state.try_into_inner() {
@@ -1886,7 +1888,7 @@ where
             block.recovered_block,
             block.execution_output,
             LazyHashedPostState::ready(block.hashed_state),
-            block.trie_updates,
+            Arc::new(Arc::unwrap_or_clone(block.trie_updates).into_sorted()),
         ))
     }
 
