@@ -219,6 +219,31 @@ where
         kind: SubscriptionKind,
         params: Option<Params>,
     ) -> jsonrpsee::core::SubscriptionResult {
+        // Reject malformed params before accepting the subscription; errors from the spawned
+        // handler can no longer be returned to the caller.
+        let invalid = match (&kind, &params) {
+            (SubscriptionKind::Logs, Some(params))
+                if !matches!(params, Params::Logs(_) | Params::None) =>
+            {
+                Some("Invalid params for logs")
+            }
+            (SubscriptionKind::NewPendingTransactions, Some(params))
+                if !matches!(params, Params::Bool(_) | Params::None) =>
+            {
+                Some("Invalid params for newPendingTransactions")
+            }
+            (SubscriptionKind::TransactionReceipts, Some(params))
+                if !matches!(params, Params::TransactionReceipts(_) | Params::None) =>
+            {
+                Some("Invalid params for transactionReceipts")
+            }
+            _ => None,
+        };
+        if let Some(reason) = invalid {
+            pending.reject(invalid_params_rpc_err(reason)).await;
+            return Ok(())
+        }
+
         let sink = pending.accept().await?;
         let pubsub = self.clone();
         self.inner.subscription_task_spawner.spawn_task(async move {
