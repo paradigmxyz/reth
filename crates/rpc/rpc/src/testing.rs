@@ -43,7 +43,7 @@ use reth_revm::{database::StateProviderDatabase, db::State};
 use reth_rpc_api::{TestingApiServer, TestingBuildBlockRequestV1};
 use reth_rpc_eth_api::{helpers::Call, FromEthApiError};
 use reth_rpc_eth_types::EthApiError;
-use reth_storage_api::{BlockReader, BlockReaderIdExt, HeaderProvider, StateProvider};
+use reth_storage_api::{BlockReader, BlockReaderIdExt, HeaderProvider};
 use reth_transaction_pool::{BestTransactionsAttributes, PoolTransaction, TransactionPool};
 use revm::context::Block;
 use std::sync::Arc;
@@ -125,7 +125,7 @@ where
         let gas_limit_override = self.gas_limit_override;
         self.eth_api
             .spawn_with_state_at_block(request.parent_block_hash, move |eth_api, state| {
-                let state = state.database.into_inner().into_inner();
+                let state = state.database.into_inner();
                 let parent = eth_api
                     .provider()
                     .sealed_header_by_hash(request.parent_block_hash)?
@@ -140,7 +140,7 @@ where
                     chain_spec.is_osaka_active_at_timestamp(request.payload_attributes.timestamp);
                 let mut db = State::builder()
                     .with_bundle_update()
-                    .with_database(StateProviderDatabase::new((&state).into_evm_state_provider()))
+                    .with_database(StateProviderDatabase::new(&state))
                     .with_bal_builder_if(is_amsterdam)
                     .build();
 
@@ -268,7 +268,7 @@ where
                     block_transactions_rlp_length += tx_rlp_len;
                     total_fees += U256::from(tip) * U256::from(gas_used);
                 }
-                let outcome = builder.finish(&state, None).map_err(Eth::Error::from_eth_err)?;
+                let outcome = builder.finish(&*state, None).map_err(Eth::Error::from_eth_err)?;
 
                 let has_requests = outcome.block.requests_hash().is_some();
                 let requests = has_requests.then_some(outcome.execution_result.requests);

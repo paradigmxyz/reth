@@ -108,11 +108,9 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
 
             self.spawn_with_state_at_block(block, move |this, db| {
                 let _permit = permit;
-                let state_provider = db.database.into_inner().into_inner();
+                let state_provider = db.database.into_inner();
                 let mut db = State::builder()
-                    .with_database(StateProviderDatabase::new(
-                        (&state_provider).into_evm_state_provider(),
-                    ))
+                    .with_database(StateProviderDatabase::new(&state_provider))
                     .with_bundle_update()
                     .build();
                 let mut parent = parent;
@@ -243,7 +241,7 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
 
                         simulate::execute_transactions(
                             builder,
-                            &state_provider,
+                            &*state_provider,
                             calls,
                             &mut remaining_call_gas_limit,
                             chain_id,
@@ -265,7 +263,7 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
 
                         simulate::execute_transactions(
                             builder,
-                            &state_provider,
+                            &*state_provider,
                             calls,
                             &mut remaining_call_gas_limit,
                             chain_id,

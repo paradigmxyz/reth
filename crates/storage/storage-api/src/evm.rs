@@ -34,13 +34,6 @@ pub type EvmStateProviderBox = Box<dyn EvmStateProvider + Send>;
 #[derive(Debug, Clone, Copy)]
 pub struct EvmStateProviderAdapter<P>(pub P);
 
-impl<P> EvmStateProviderAdapter<P> {
-    /// Consumes the adapter and returns its inner provider.
-    pub fn into_inner(self) -> P {
-        self.0
-    }
-}
-
 impl<P> Deref for EvmStateProviderAdapter<P> {
     type Target = P;
 
@@ -106,7 +99,7 @@ mod tests {
         let provider = NoopProvider::default();
         let adapter = (&provider).into_evm_state_provider();
         assert_eq!(adapter.account_balance(&Address::ZERO).unwrap(), None);
-        assert!(core::ptr::eq(adapter.into_inner(), &raw const provider));
+        assert!(core::ptr::eq(*adapter, &raw const provider));
     }
 
     fn assert_reads(provider: impl EvmStateProvider) {
