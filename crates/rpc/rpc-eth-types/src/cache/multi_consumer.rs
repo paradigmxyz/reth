@@ -84,8 +84,16 @@ impl<K: Hash + Eq, V, S> MultiConsumerLruCache<K, V, S> {
 
     /// Returns a reference to the value and refreshes its recency and idle timestamp.
     pub fn get(&mut self, key: &K) -> Option<&V> {
+        self.get_at(key, Instant::now())
+    }
+
+    /// Returns a reference to the value and refreshes its recency using the supplied timestamp.
+    ///
+    /// Use nondecreasing timestamps for lookups and [`Self::insert_at`] to keep idle eviction in
+    /// LRU order.
+    pub fn get_at(&mut self, key: &K, now: Instant) -> Option<&V> {
         if let Some(entry) = self.cache.get(key) {
-            entry.last_access = Instant::now();
+            entry.last_access = now;
             self.metrics.hits_total.increment(1);
             Some(&entry.value)
         } else {
@@ -103,6 +111,17 @@ impl<K: Hash + Eq, V, S> MultiConsumerLruCache<K, V, S> {
     ///
     /// Oversized values are rejected without evicting existing entries or queued consumers.
     pub fn insert(&mut self, key: K, value: V) -> bool
+    where
+        V: InMemorySize,
+    {
+        self.insert_at(key, value, Instant::now())
+    }
+
+    /// Inserts an element using the supplied timestamp, enforcing the same limits as
+    /// [`Self::insert`].
+    ///
+    /// Use the same nondecreasing timestamps as [`Self::get_at`] when batching cache operations.
+    pub fn insert_at(&mut self, key: K, value: V, now: Instant) -> bool
     where
         V: InMemorySize,
     {
@@ -126,8 +145,7 @@ impl<K: Hash + Eq, V, S> MultiConsumerLruCache<K, V, S> {
         }
 
         let previous_len = self.cache.len();
-        let inserted =
-            self.cache.insert(key, CachedValue { value, size, last_access: Instant::now() });
+        let inserted = self.cache.insert(key, CachedValue { value, size, last_access: now });
         if inserted {
             self.memory_usage += size;
             self.metrics_dirty = true;
@@ -313,5 +331,30 @@ mod tests {
         assert!(!cache.update_cached_metrics());
         cache.remove(&0);
         assert!(cache.update_cached_metrics());
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn batched_timestamps_preserve_idle_eviction_order() {
+        let mut cache = MultiConsumerLruCache::<u64, _, ()>::new(4, 12, "test");
+        let start = Instant::now();
+        let timeout = Duration::from_secs(10);
+        for key in 0..3 {
+            assert!(cache.insert_at(key, Weighted(3), start));
+        }
+        tokio::time::advance(timeout / 2).await;
+        let now = Instant::now();
+        assert!(cache.get_at(&0, now).is_some());
+
+        // Insertions and later hits in a batch share its timestamp even if the clock advances.
+        tokio::time::advance(timeout / 2).await;
+        assert!(cache.insert_at(3, Weighted(3), now));
+        assert!(cache.get_at(&2, now).is_some());
+        cache.evict_expired(Instant::now(), timeout);
+        assert!(!cache.contains_key(&1));
+        assert_eq!(cache.memory_usage, 9);
+
+        tokio::time::advance(timeout / 2).await;
+        cache.evict_expired(Instant::now(), timeout);
+        assert_eq!(cache.memory_usage, 0);
     }
 }

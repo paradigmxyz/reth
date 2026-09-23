@@ -23,6 +23,7 @@ use reth_storage_api::{BalProvider, BlockReader, TransactionVariant};
 use reth_tasks::Runtime;
 use schnellru::{ByLength, LruMap};
 use std::{
+    cell::LazyCell,
     collections::VecDeque,
     future::Future,
     pin::Pin,
@@ -437,6 +438,7 @@ where
         &mut self,
         block_hash: B256,
         res: ProviderResult<Option<Arc<RecoveredBlock<Provider::Block>>>>,
+        now: Instant,
     ) {
         if let Some(queued) = self.full_block_cache.remove(&block_hash) {
             // send the response to queued senders
@@ -447,7 +449,7 @@ where
 
         // cache good block
         if let Ok(Some(block)) = res {
-            self.full_block_cache.insert(block_hash, block);
+            self.full_block_cache.insert_at(block_hash, block, now);
         }
     }
 
@@ -455,6 +457,7 @@ where
         &mut self,
         block_hash: B256,
         res: ProviderResult<Option<Arc<Vec<Provider::Receipt>>>>,
+        now: Instant,
     ) {
         if let Some(queued) = self.receipts_cache.remove(&block_hash) {
             // send the response to queued senders
@@ -465,11 +468,16 @@ where
 
         // cache good receipts
         if let Ok(Some(receipts)) = res {
-            self.receipts_cache.insert(block_hash, receipts);
+            self.receipts_cache.insert_at(block_hash, receipts, now);
         }
     }
 
-    fn on_new_bal(&mut self, block_hash: B256, res: ProviderResult<Option<CachedRevmBal>>) {
+    fn on_new_bal(
+        &mut self,
+        block_hash: B256,
+        res: ProviderResult<Option<CachedRevmBal>>,
+        now: Instant,
+    ) {
         // A local replay may finish before an older provider lookup returns.
         if self.bal_cache.contains_key(&block_hash) {
             return
@@ -482,7 +490,7 @@ where
         }
 
         if let Ok(Some(bal)) = res {
-            self.bal_cache.insert(block_hash, bal);
+            self.bal_cache.insert_at(block_hash, bal, now);
         }
     }
 
@@ -543,10 +551,12 @@ where
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let this = self.get_mut();
+        // All inserts and hits in this poll share a clock read, preserving timestamp/LRU order.
+        let now = LazyCell::new(Instant::now);
 
         // Poll until pending to register the next timer wakeup before draining requests.
         while this.eviction_interval.poll_tick(cx).is_ready() {
-            let now = Instant::now();
+            let now = *now;
             this.full_block_cache.evict_expired(now, this.idle_timeout);
             this.receipts_cache.evict_expired(now, this.idle_timeout);
             this.bal_cache.evict_expired(now, this.idle_timeout);
@@ -567,21 +577,25 @@ where
                     unreachable!("can't close")
                 }
                 Some(action) => {
+                    let now = *now;
                     match action {
                         CacheAction::GetCachedBlock { block_hash, response_tx } => {
-                            let _ =
-                                response_tx.send(this.full_block_cache.get(&block_hash).cloned());
+                            let _ = response_tx
+                                .send(this.full_block_cache.get_at(&block_hash, now).cloned());
                         }
                         CacheAction::GetCachedBal { block_hash, response_tx } => {
-                            let _ = response_tx.send(this.bal_cache.get(&block_hash).cloned());
+                            let _ =
+                                response_tx.send(this.bal_cache.get_at(&block_hash, now).cloned());
                         }
                         CacheAction::GetCachedBlockAndReceipts { block_hash, response_tx } => {
-                            let block = this.full_block_cache.get(&block_hash).cloned();
-                            let receipts = this.receipts_cache.get(&block_hash).cloned();
+                            let block = this.full_block_cache.get_at(&block_hash, now).cloned();
+                            let receipts = this.receipts_cache.get_at(&block_hash, now).cloned();
                             let _ = response_tx.send((block, receipts));
                         }
                         CacheAction::GetBlockWithSenders { block_hash, response_tx } => {
-                            if let Some(block) = this.full_block_cache.get(&block_hash).cloned() {
+                            if let Some(block) =
+                                this.full_block_cache.get_at(&block_hash, now).cloned()
+                            {
                                 let _ = response_tx.send(Ok(Some(block)));
                                 continue
                             }
@@ -593,7 +607,9 @@ where
                         }
                         CacheAction::GetReceipts { block_hash, response_tx } => {
                             // check if block is cached
-                            if let Some(receipts) = this.receipts_cache.get(&block_hash).cloned() {
+                            if let Some(receipts) =
+                                this.receipts_cache.get_at(&block_hash, now).cloned()
+                            {
                                 let _ = response_tx.send(Ok(Some(receipts)));
                                 continue
                             }
@@ -604,7 +620,7 @@ where
                             }
                         }
                         CacheAction::GetBal { block_hash, response_tx } => {
-                            if let Some(bal) = this.bal_cache.get(&block_hash).cloned() {
+                            if let Some(bal) = this.bal_cache.get_at(&block_hash, now).cloned() {
                                 let _ = response_tx.send(Ok(Some(bal)));
                                 continue
                             }
@@ -614,36 +630,29 @@ where
                             }
                         }
                         CacheAction::ReceiptsResult { block_hash, res } => {
-                            this.on_new_receipts(block_hash, res);
+                            this.on_new_receipts(block_hash, res, now);
                         }
                         CacheAction::BalResult { block_hash, res } => {
-                            this.on_new_bal(block_hash, res);
+                            this.on_new_bal(block_hash, res, now);
                         }
                         CacheAction::InsertBal { block_hash, bal } => {
-                            this.on_new_bal(block_hash, Ok(Some(bal)));
+                            this.on_new_bal(block_hash, Ok(Some(bal)), now);
                         }
-                        CacheAction::BlockWithSendersResult { block_hash, res } => match res {
-                            Ok(Some(block_with_senders)) => {
-                                this.on_new_block(block_hash, Ok(Some(block_with_senders)));
-                            }
-                            Ok(None) => {
-                                this.on_new_block(block_hash, Ok(None));
-                            }
-                            Err(e) => {
-                                this.on_new_block(block_hash, Err(e));
-                            }
-                        },
+                        CacheAction::BlockWithSendersResult { block_hash, res } => {
+                            this.on_new_block(block_hash, res, now);
+                        }
                         CacheAction::CacheNewCanonicalChain { chain_change } => {
                             for block in chain_change.blocks {
                                 // Index transactions before caching the block
                                 this.index_block_transactions(&block);
-                                this.on_new_block(block.hash(), Ok(Some(block)));
+                                this.on_new_block(block.hash(), Ok(Some(block)), now);
                             }
 
                             for block_receipts in chain_change.receipts {
                                 this.on_new_receipts(
                                     block_receipts.block_hash,
                                     Ok(Some(block_receipts.receipts)),
+                                    now,
                                 );
                             }
 
@@ -651,6 +660,7 @@ where
                                 this.on_new_bal(
                                     block_hash,
                                     Ok(Some(CachedRevmBal::from_shared(bal))),
+                                    now,
                                 );
                             }
                         }
@@ -673,8 +683,10 @@ where
                         CacheAction::GetTransactionByHash { tx_hash, response_tx } => {
                             let result =
                                 this.tx_hash_index.get(&tx_hash).and_then(|(block_hash, idx)| {
-                                    let block = this.full_block_cache.get(block_hash).cloned()?;
-                                    let receipts = this.receipts_cache.get(block_hash).cloned();
+                                    let block =
+                                        this.full_block_cache.get_at(block_hash, now).cloned()?;
+                                    let receipts =
+                                        this.receipts_cache.get_at(block_hash, now).cloned();
                                     Some(CachedTransaction::new(block, *idx, receipts))
                                 });
                             let _ = response_tx.send(result);
@@ -1039,9 +1051,9 @@ mod tests {
         let retained_block = Arc::downgrade(&block);
         let retained_receipts = Arc::downgrade(&receipts);
         let retained_bal = Arc::downgrade(&bal.0);
-        service.on_new_block(hash, Ok(Some(block)));
-        service.on_new_receipts(hash, Ok(Some(receipts)));
-        service.on_new_bal(hash, Ok(Some(bal)));
+        service.on_new_block(hash, Ok(Some(block)), Instant::now());
+        service.on_new_receipts(hash, Ok(Some(receipts)), Instant::now());
+        service.on_new_bal(hash, Ok(Some(bal)), Instant::now());
         let (response_tx, response_rx) = oneshot::channel();
         service.full_block_cache.queue(hash, response_tx);
         let service_task = tokio::spawn(service);
@@ -1096,9 +1108,9 @@ mod tests {
         service.receipts_cache.queue(hash, receipts_tx);
         service.bal_cache.queue(hash, bal_tx);
 
-        service.on_new_block(hash, Ok(Some(block.clone())));
-        service.on_new_receipts(hash, Ok(Some(receipts.clone())));
-        service.on_new_bal(hash, Ok(Some(bal.clone())));
+        service.on_new_block(hash, Ok(Some(block.clone())), Instant::now());
+        service.on_new_receipts(hash, Ok(Some(receipts.clone())), Instant::now());
+        service.on_new_bal(hash, Ok(Some(bal.clone())), Instant::now());
 
         assert!(Arc::ptr_eq(&block_rx.try_recv().unwrap().unwrap().unwrap(), &block));
         assert!(Arc::ptr_eq(&receipts_rx.try_recv().unwrap().unwrap().unwrap(), &receipts));
@@ -1119,8 +1131,8 @@ mod tests {
         let hash = block.hash();
         let tx_hash = *block.body().transactions().next().unwrap().tx_hash();
         service.index_block_transactions(&block);
-        service.on_new_block(hash, Ok(Some(block)));
-        service.on_new_receipts(hash, Ok(Some(Arc::new(vec![Receipt::default()]))));
+        service.on_new_block(hash, Ok(Some(block)), Instant::now());
+        service.on_new_receipts(hash, Ok(Some(Arc::new(vec![Receipt::default()]))), Instant::now());
 
         for delay in [6, 6, 11] {
             tokio::time::advance(Duration::from_secs(delay)).await;
@@ -1171,9 +1183,13 @@ mod tests {
         let hash = B256::repeat_byte(0x69);
         let (tx, mut rx) = oneshot::channel();
         assert!(service.bal_cache.queue(hash, tx));
-        service.on_new_bal(hash, Ok(Some(CachedRevmBal::new(test_decoded_revm_bal()))));
+        service.on_new_bal(
+            hash,
+            Ok(Some(CachedRevmBal::new(test_decoded_revm_bal()))),
+            Instant::now(),
+        );
         assert!(rx.try_recv().unwrap().unwrap().is_some());
-        service.on_new_bal(hash, Ok(None));
+        service.on_new_bal(hash, Ok(None), Instant::now());
         assert!(service.bal_cache.contains_key(&hash));
     }
 
