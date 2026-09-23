@@ -634,7 +634,7 @@ where
                     .execute_with_state_closure(&block, |statedb: &State<_>| {
                         witness =
                             Some(ExecutionWitnessRecord::new(statedb).into_execution_witness(
-                                &statedb.database.database.0 .0,
+                                statedb.database.database.as_ref().as_ref(),
                                 eth_api.provider(),
                                 block_number,
                                 mode,
@@ -744,11 +744,7 @@ where
                 hashed_storage.storage.into_iter().filter(|(_, value)| !value.is_zero()),
             )
         } else {
-            db.database
-                .0
-                 .0
-                .storage_root(address, hashed_storage)
-                .map_err(Eth::Error::from_eth_err)?
+            db.database.storage_root(address, hashed_storage).map_err(Eth::Error::from_eth_err)?
         };
 
         Ok(Some(Account { balance, nonce, code_hash, storage_root }))
@@ -835,14 +831,10 @@ where
                     // Compute state root from the accumulated state changes
                     let hashed_state = state
                         .database
-                        .0
-                         .0
                         .hashed_post_state(&state.bundle_state)
                         .map_err(Eth::Error::from_eth_err)?;
                     let root = state
                         .database
-                        .0
-                         .0
                         .state_root(hashed_state)
                         .map_err(Eth::Error::from_eth_err)?;
                     roots.push(root);

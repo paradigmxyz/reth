@@ -108,7 +108,7 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
 
             self.spawn_with_state_at_block(block, move |this, db| {
                 let _permit = permit;
-                let state_provider = db.database.0 .0;
+                let state_provider = db.database.into_inner().into_inner();
                 let mut db = State::builder()
                     .with_database(StateProviderDatabase::new(
                         (&state_provider).into_evm_state_provider(),

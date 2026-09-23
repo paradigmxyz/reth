@@ -83,7 +83,7 @@ where
                             witness = Some(
                                 ExecutionWitnessRecord::new(statedb)
                                     .into_execution_witness_without_headers(
-                                        &statedb.database.0 .0,
+                                        statedb.database.as_ref().as_ref(),
                                         ExecutionWitnessMode::Canonical,
                                     ),
                             );

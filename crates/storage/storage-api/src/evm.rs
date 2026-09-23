@@ -3,6 +3,7 @@
 use crate::StateProvider;
 use alloc::boxed::Box;
 use alloy_primitives::{Address, BlockNumber, StorageKey, StorageValue, B256};
+use core::ops::Deref;
 use reth_primitives_traits::{Account, Bytecode};
 use reth_storage_errors::provider::ProviderResult;
 
@@ -32,6 +33,27 @@ pub type EvmStateProviderBox = Box<dyn EvmStateProvider + Send>;
 /// Adapts an owned or borrowed full state provider for EVM execution.
 #[derive(Debug, Clone, Copy)]
 pub struct EvmStateProviderAdapter<P>(pub P);
+
+impl<P> EvmStateProviderAdapter<P> {
+    /// Consumes the adapter and returns its inner provider.
+    pub fn into_inner(self) -> P {
+        self.0
+    }
+}
+
+impl<P> AsRef<P> for EvmStateProviderAdapter<P> {
+    fn as_ref(&self) -> &P {
+        &self.0
+    }
+}
+
+impl<P> Deref for EvmStateProviderAdapter<P> {
+    type Target = P;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
 
 impl<P: StateProvider> EvmStateProvider for EvmStateProviderAdapter<P> {
     fn basic_account(&self, address: &Address) -> ProviderResult<Option<Account>> {
@@ -83,6 +105,15 @@ mod tests {
         let boxed = Box::new(provider.into_evm_state_provider()) as EvmStateProviderBox;
         assert_reads(boxed);
         assert_reads(Arc::new(NoopProvider::default().into_evm_state_provider()));
+    }
+
+    #[test]
+    fn exposes_inner_state_provider() {
+        let provider = NoopProvider::default();
+        let adapter = (&provider).into_evm_state_provider();
+        assert_eq!(adapter.account_balance(&Address::ZERO).unwrap(), None);
+        assert!(core::ptr::eq(*adapter.as_ref(), &raw const provider));
+        assert!(core::ptr::eq(adapter.into_inner(), &raw const provider));
     }
 
     fn assert_reads(provider: impl EvmStateProvider) {

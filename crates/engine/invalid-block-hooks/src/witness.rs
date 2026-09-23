@@ -124,7 +124,7 @@ fn collect_execution_data(
     let bundle_state = db.take_bundle();
     let mut codes = BTreeMap::new();
     let mut preimages = BTreeMap::new();
-    let mut hashed_state = db.database.0 .0.hashed_post_state(&bundle_state)?;
+    let mut hashed_state = db.database.hashed_post_state(&bundle_state)?;
 
     // Collect codes
     db.cache.contracts.values().chain(bundle_state.contracts.values()).for_each(|code| {
