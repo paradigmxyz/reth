@@ -618,9 +618,14 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
     where
         F: FnOnce(&mut StaticFileProviderRWRefMut<'_, N>) -> ProviderResult<()>,
     {
+        let started = std::time::Instant::now();
         let mut w = self.get_writer(first_block_number, segment)?;
         f(&mut w)?;
-        w.sync_all()
+        w.sync_all()?;
+        metrics::histogram!("storage.providers.static_file.segment_write_seconds",
+            "segment" => segment.to_string())
+        .record(started.elapsed());
+        Ok(())
     }
 
     /// Writes all static file data for multiple blocks in parallel per-segment.

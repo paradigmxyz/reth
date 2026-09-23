@@ -1429,21 +1429,33 @@ impl RocksDBProvider {
             if write_tx_hash {
                 s.spawn(|_| {
                     let _guard = span.enter();
+                    let started = std::time::Instant::now();
                     r_tx_hash = Some(self.write_tx_hash_numbers(blocks, tx_nums, &ctx));
+                    metrics::histogram!("storage.providers.rocksdb.table_write_seconds",
+                        "table" => "TransactionHashNumbers")
+                    .record(started.elapsed());
                 });
             }
 
             if write_account_history {
                 s.spawn(|_| {
                     let _guard = span.enter();
+                    let started = std::time::Instant::now();
                     r_account_history = Some(self.write_account_history(blocks, &ctx));
+                    metrics::histogram!("storage.providers.rocksdb.table_write_seconds",
+                        "table" => "AccountsHistory")
+                    .record(started.elapsed());
                 });
             }
 
             if write_storage_history {
                 s.spawn(|_| {
                     let _guard = span.enter();
+                    let started = std::time::Instant::now();
                     r_storage_history = Some(self.write_storage_history(blocks, &ctx));
+                    metrics::histogram!("storage.providers.rocksdb.table_write_seconds",
+                        "table" => "StoragesHistory")
+                    .record(started.elapsed());
                 });
             }
         });
