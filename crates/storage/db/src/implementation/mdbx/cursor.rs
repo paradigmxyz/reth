@@ -33,7 +33,7 @@ pub struct Cursor<K: TransactionKind, T: Table> {
     /// Per-table operation metrics. If `None`, metrics are not recorded.
     metrics: Option<TableOperationMetrics>,
     /// Optional operation accounting for the current persistence batch.
-    persistence_timing: Option<std::sync::Arc<super::persistence_timing::TableTiming>>,
+    persistence_timing: Option<super::persistence_timing::CursorTiming>,
     /// Phantom data to enforce encoding/decoding.
     _dbi: PhantomData<T>,
 }
@@ -78,7 +78,7 @@ impl<K: TransactionKind, T: Table> Cursor<K, T> {
         } else {
             f(self)
         };
-        if let (Some(timing), Some(started)) = (&self.persistence_timing, started) {
+        if let (Some(timing), Some(started)) = (&mut self.persistence_timing, started) {
             timing.record(started);
         }
         result
@@ -88,7 +88,7 @@ impl<K: TransactionKind, T: Table> Cursor<K, T> {
         mut self,
         timing: Option<std::sync::Arc<super::persistence_timing::TableTiming>>,
     ) -> Self {
-        self.persistence_timing = timing;
+        self.persistence_timing = timing.map(super::persistence_timing::CursorTiming::new);
         self
     }
 }
