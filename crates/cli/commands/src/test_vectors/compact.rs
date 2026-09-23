@@ -274,7 +274,7 @@ where
         // values which were encodable before the type migration but cannot be represented by the
         // current consensus type. Keep the compact compatibility check focused on representable
         // values instead of treating those obsolete development vectors as database corruption.
-        if type_name == "TransactionSigned" &&
+        if matches!(type_name.as_str(), "Transaction" | "TransactionSigned") &&
             legacy_frame_vector_has_unrepresentable_fields(&compact_bytes)?
         {
             continue;
