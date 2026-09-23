@@ -1,4 +1,7 @@
-use crate::{manager::OverlayCacheConfig, OverlayManager};
+use crate::{
+    manager::{OverlayCacheConfig, StateTrieOverlayError},
+    OverlayManager,
+};
 use alloy_eips::BlockNumHash;
 use alloy_primitives::{
     map::{AddressMap, AddressSet, B256Map, U256Map},
@@ -46,11 +49,6 @@ impl StateTrieOverlay {
     /// Returns the trie input represented by this overlay.
     pub const fn input(&self) -> &TrieInputSorted {
         &self.input
-    }
-
-    /// Consumes the overlay and returns its trie input.
-    pub fn into_input(self) -> TrieInputSorted {
-        self.input
     }
 
     pub(crate) const fn skipped_for_reused_sparse_trie(&self) -> bool {
@@ -396,8 +394,8 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
     ///
     /// Set `trie_changesets` only for consumers that produce [`TrieUpdates`], such as
     /// [`StateRootProvider::state_root_with_updates`]. Other consumers, including roots, proofs,
-    /// multiproofs, and witnesses, should leave it false: reverts are then represented by
-    /// hashed-state prefix sets instead of querying trie changesets.
+    /// multiproofs, and witnesses, should leave it false: complete the cached trie at Finish and
+    /// invalidate hashed-state revert prefixes instead of querying trie changesets.
     #[cfg(test)]
     #[instrument(level = "debug", target = "storage::overlay", skip_all)]
     fn build_state_trie_overlay<Provider>(
@@ -482,9 +480,32 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
                         )?;
                     retrieve_trie_reverts_duration = start.elapsed();
                     accumulated_reverts
-                } else {
+                } else if state_trie_tip_block == finish_tip_block {
                     retrieve_trie_reverts_duration = Duration::ZERO;
                     Arc::default()
+                } else {
+                    // Revert prefixes describe changes since the anchor, not stale hashes in
+                    // masked DB rows. Complete the trie at Finish before applying those prefixes.
+                    let start = Instant::now();
+                    let finish_state = self
+                        .overlay_manager
+                        .block_state(finish_tip_block.hash)
+                        .ok_or_else(|| {
+                            ProviderError::other(StateTrieOverlayError {
+                                tip_hash: finish_tip_block.hash,
+                                anchor_hash: state_trie_tip_block.hash,
+                            })
+                        })?;
+                    let (nodes, _) = self
+                        .overlay_manager
+                        .overlay_for_parent(
+                            &finish_state,
+                            state_trie_tip_block.hash,
+                            OverlayCacheConfig::default(),
+                        )
+                        .map_err(ProviderError::other)?;
+                    retrieve_trie_reverts_duration = start.elapsed();
+                    nodes
                 };
 
                 let mut hashed_state_reverts = {
@@ -1109,7 +1130,7 @@ mod tests {
 
     #[test]
     fn state_trie_overlay_uses_revert_prefix_sets_without_trie_changesets() {
-        let (factory, blocks) = setup_frontiers(2, 3);
+        let (factory, blocks) = setup_frontiers(3, 3);
         let provider_rw = factory.provider_rw().unwrap();
         provider_rw
             .tx_ref()

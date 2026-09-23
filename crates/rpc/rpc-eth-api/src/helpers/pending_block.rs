@@ -58,7 +58,9 @@ pub trait LoadPendingBlock:
     fn pending_env_builder(&self) -> &dyn PendingEnvBuilder<Self::Evm>;
 
     /// Returns the pending block kind
-    fn pending_block_kind(&self) -> PendingBlockKind;
+    fn pending_block_kind(&self) -> PendingBlockKind {
+        self.eth_api_settings().pending_block_kind
+    }
 
     /// Configures the [`PendingBlockEnv`] for the pending block
     ///

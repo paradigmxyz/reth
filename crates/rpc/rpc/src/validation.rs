@@ -289,6 +289,11 @@ where
         output: &BlockExecutionOutput<<E::Primitives as NodePrimitives>::Receipt>,
         message: &BidTrace,
     ) -> Result<(), ValidationApiError> {
+        // A zero-value bid promises the proposer nothing, so the payload owes nothing.
+        if message.value.is_zero() {
+            return Ok(())
+        }
+
         let (mut balance_before, balance_after) = if let Some(acc) =
             output.state.state.get(&message.proposer_fee_recipient)
         {
@@ -427,8 +432,11 @@ where
         &self,
         request: BuilderBlockValidationRequestV5,
     ) -> Result<(), ValidationApiError> {
+        let payload = ExecutionPayload::V3(request.request.execution_payload);
+        validate_message_against_payload(&request.request.message, &payload)?;
+
         let block = self.payload_validator.ensure_well_formed_payload(ExecutionData {
-            payload: ExecutionPayload::V3(request.request.execution_payload),
+            payload,
             sidecar: ExecutionPayloadSidecar::v4(
                 CancunPayloadFields {
                     parent_beacon_block_root: request.parent_beacon_block_root,
@@ -469,12 +477,15 @@ where
         &self,
         request: BuilderBlockValidationRequestV6,
     ) -> Result<(), ValidationApiError> {
+        let payload = ExecutionPayload::V4(request.request.execution_payload);
+        validate_message_against_payload(&request.request.message, &payload)?;
+
         let decoded_bal =
-            DecodedBal::from_rlp_bytes(request.request.execution_payload.block_access_list.clone())
+            DecodedBal::from_rlp_bytes(payload.as_v4().unwrap().block_access_list.clone())
                 .map_err(ValidationApiError::InvalidBlockAccessList)?;
 
         let block = self.payload_validator.ensure_well_formed_payload(ExecutionData {
-            payload: ExecutionPayload::V4(request.request.execution_payload),
+            payload,
             sidecar: ExecutionPayloadSidecar::v4(
                 CancunPayloadFields {
                     parent_beacon_block_root: request.parent_beacon_block_root,
@@ -635,6 +646,38 @@ pub struct ValidationApiInner<Provider, E: ConfigureEvm, T: PayloadTypes> {
     metrics: ValidationMetrics,
 }
 
+/// Ensures that the raw execution payload fields match the corresponding [`BidTrace`] fields.
+fn validate_message_against_payload(
+    message: &BidTrace,
+    payload: &ExecutionPayload,
+) -> Result<(), ValidationApiError> {
+    let payload = payload.as_v1();
+
+    if payload.block_hash != message.block_hash {
+        Err(ValidationApiError::BlockHashMismatch(GotExpected {
+            got: message.block_hash,
+            expected: payload.block_hash,
+        }))
+    } else if payload.parent_hash != message.parent_hash {
+        Err(ValidationApiError::ParentHashMismatch(GotExpected {
+            got: message.parent_hash,
+            expected: payload.parent_hash,
+        }))
+    } else if payload.gas_limit != message.gas_limit {
+        Err(ValidationApiError::GasLimitMismatch(GotExpected {
+            got: message.gas_limit,
+            expected: payload.gas_limit,
+        }))
+    } else if payload.gas_used != message.gas_used {
+        Err(ValidationApiError::GasUsedMismatch(GotExpected {
+            got: message.gas_used,
+            expected: payload.gas_used,
+        }))
+    } else {
+        Ok(())
+    }
+}
+
 /// Calculates a deterministic hash of the blocklist for change detection.
 ///
 /// This function sorts addresses to ensure deterministic output regardless of
@@ -760,8 +803,113 @@ pub(crate) struct ValidationMetrics {
 
 #[cfg(test)]
 mod tests {
-    use super::{hash_disallow_list, AddressSet};
-    use alloy_primitives::Address;
+    use super::{
+        hash_disallow_list, validate_message_against_payload, AddressSet, ValidationApi,
+        ValidationApiConfig, ValidationApiError,
+    };
+    use alloy_consensus::{BlockHeader, Header};
+    use alloy_primitives::{Address, B256, U256};
+    use alloy_rpc_types_beacon::relay::BidTrace;
+    use alloy_rpc_types_engine::{ExecutionData, ExecutionPayload, ExecutionPayloadV1};
+    use reth_consensus::noop::NoopConsensus;
+    use reth_engine_primitives::PayloadValidator;
+    use reth_ethereum_engine_primitives::EthPayloadTypes;
+    use reth_ethereum_primitives::Block;
+    use reth_evm_ethereum::EthEvmConfig;
+    use reth_execution_types::BlockExecutionOutput;
+    use reth_node_api::NewPayloadError;
+    use reth_primitives_traits::{RecoveredBlock, SealedBlock, SealedHeader};
+    use reth_provider::test_utils::MockEthProvider;
+    use reth_revm::db::{states::bundle_state::BundleState, AccountStatus, BundleAccount};
+    use reth_tasks::Runtime;
+    use revm::state::AccountInfo;
+    use std::sync::Arc;
+
+    fn test_execution_payload() -> ExecutionPayload {
+        ExecutionPayload::V1(ExecutionPayloadV1 {
+            parent_hash: B256::repeat_byte(0x11),
+            fee_recipient: Address::ZERO,
+            state_root: B256::ZERO,
+            receipts_root: B256::ZERO,
+            logs_bloom: Default::default(),
+            prev_randao: B256::ZERO,
+            block_number: 1,
+            gas_limit: 30_000_000,
+            gas_used: 15_000_000,
+            timestamp: 1,
+            extra_data: Default::default(),
+            base_fee_per_gas: Default::default(),
+            block_hash: B256::repeat_byte(0x22),
+            transactions: Default::default(),
+        })
+    }
+
+    fn matching_bid_trace(payload: &ExecutionPayload) -> BidTrace {
+        let payload = payload.as_v1();
+        BidTrace {
+            parent_hash: payload.parent_hash,
+            block_hash: payload.block_hash,
+            gas_limit: payload.gas_limit,
+            gas_used: payload.gas_used,
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn test_validate_message_against_payload_block_hash_mismatch() {
+        let payload = test_execution_payload();
+        let mut message = matching_bid_trace(&payload);
+        message.block_hash = B256::repeat_byte(0x33);
+
+        let err = validate_message_against_payload(&message, &payload).unwrap_err();
+        let ValidationApiError::BlockHashMismatch(mismatch) = err else {
+            panic!("unexpected error: {err}")
+        };
+        assert_eq!(mismatch.got, message.block_hash);
+        assert_eq!(mismatch.expected, payload.block_hash());
+    }
+
+    #[test]
+    fn test_validate_message_against_payload_parent_hash_mismatch() {
+        let payload = test_execution_payload();
+        let mut message = matching_bid_trace(&payload);
+        message.parent_hash = B256::repeat_byte(0x33);
+
+        let err = validate_message_against_payload(&message, &payload).unwrap_err();
+        let ValidationApiError::ParentHashMismatch(mismatch) = err else {
+            panic!("unexpected error: {err}")
+        };
+        assert_eq!(mismatch.got, message.parent_hash);
+        assert_eq!(mismatch.expected, payload.parent_hash());
+    }
+
+    #[test]
+    fn test_validate_message_against_payload_gas_limit_mismatch() {
+        let payload = test_execution_payload();
+        let mut message = matching_bid_trace(&payload);
+        message.gas_limit += 1;
+
+        let err = validate_message_against_payload(&message, &payload).unwrap_err();
+        let ValidationApiError::GasLimitMismatch(mismatch) = err else {
+            panic!("unexpected error: {err}")
+        };
+        assert_eq!(mismatch.got, message.gas_limit);
+        assert_eq!(mismatch.expected, payload.gas_limit());
+    }
+
+    #[test]
+    fn test_validate_message_against_payload_gas_used_mismatch() {
+        let payload = test_execution_payload();
+        let mut message = matching_bid_trace(&payload);
+        message.gas_used += 1;
+
+        let err = validate_message_against_payload(&message, &payload).unwrap_err();
+        let ValidationApiError::GasUsedMismatch(mismatch) = err else {
+            panic!("unexpected error: {err}")
+        };
+        assert_eq!(mismatch.got, message.gas_used);
+        assert_eq!(mismatch.expected, payload.as_v1().gas_used);
+    }
 
     #[test]
     fn test_hash_disallow_list_deterministic() {
@@ -814,5 +962,133 @@ mod tests {
         let expected_hash = "ee14e9d115e182f61871a5a385ab2f32ecf434f3b17bdbacc71044810d89e608";
         let hash = hash_disallow_list(&blocklist);
         assert_eq!(expected_hash, hash);
+    }
+
+    /// Only [`ValidationApi::validate_message_against_block`] is exercised below, which never
+    /// converts a payload.
+    #[derive(Debug)]
+    struct UnusedPayloadValidator;
+
+    impl PayloadValidator<EthPayloadTypes> for UnusedPayloadValidator {
+        type Block = Block;
+
+        fn convert_payload_to_block(
+            &self,
+            _payload: ExecutionData,
+        ) -> Result<SealedBlock<Self::Block>, NewPayloadError> {
+            unimplemented!()
+        }
+    }
+
+    fn test_validation_api(
+        provider: MockEthProvider,
+    ) -> ValidationApi<MockEthProvider, EthEvmConfig, EthPayloadTypes> {
+        ValidationApi::new(
+            provider,
+            NoopConsensus::arc(),
+            EthEvmConfig::mainnet(),
+            ValidationApiConfig::default(),
+            Runtime::test(),
+            Arc::new(UnusedPayloadValidator),
+        )
+    }
+
+    /// A submission whose payload pays the proposer nothing, like a trustless ePBS bid: there the
+    /// payment settles from the builder's stake on the consensus layer.
+    fn payment_free_submission() -> (MockEthProvider, RecoveredBlock<Block>, BidTrace) {
+        let provider = MockEthProvider::default();
+
+        let parent = Header { gas_limit: 30_000_000, ..Default::default() };
+        let parent = SealedHeader::seal_slow(parent);
+        provider.add_block(
+            parent.hash(),
+            Block { header: parent.clone_header(), body: Default::default() },
+        );
+
+        let header = Header {
+            parent_hash: parent.hash(),
+            number: parent.number() + 1,
+            gas_limit: parent.gas_limit(),
+            timestamp: parent.timestamp() + 12,
+            ..Default::default()
+        };
+        let block = SealedBlock::seal_slow(Block { header, body: Default::default() })
+            .try_recover()
+            .unwrap();
+        provider.state_roots.lock().push(block.state_root());
+
+        let message = BidTrace {
+            parent_hash: block.parent_hash(),
+            block_hash: block.hash(),
+            gas_limit: block.gas_limit(),
+            gas_used: block.gas_used(),
+            proposer_fee_recipient: Address::repeat_byte(0x42),
+            value: U256::from(1_000_000_000_000_000_000u64),
+            ..Default::default()
+        };
+
+        (provider, block, message)
+    }
+
+    #[tokio::test]
+    async fn test_payment_check_runs_for_a_nonzero_bid() {
+        let (provider, block, message) = payment_free_submission();
+        let registered_gas_limit = block.gas_limit();
+
+        let err = test_validation_api(provider)
+            .validate_message_against_block(block, message, registered_gas_limit, None)
+            .await
+            .unwrap_err();
+
+        assert!(matches!(err, ValidationApiError::ProposerPayment), "unexpected error: {err}");
+    }
+
+    #[tokio::test]
+    async fn test_zero_value_bid_skips_the_payment_check() {
+        let (provider, block, mut message) = payment_free_submission();
+        let registered_gas_limit = block.gas_limit();
+        message.value = U256::ZERO;
+
+        test_validation_api(provider)
+            .validate_message_against_block(block, message, registered_gas_limit, None)
+            .await
+            .unwrap();
+    }
+
+    /// A zero-value bid promises the proposer nothing, so there is nothing to verify. The
+    /// balance-delta branch already lets one through whenever the fee recipient's balance does
+    /// not fall -- but a fee recipient that merely sends a transaction of its own in the same
+    /// block ends it poorer, drops through to the last-transaction fallback and is rejected.
+    #[test]
+    fn test_zero_value_bid_is_accepted_when_the_fee_recipient_spends() {
+        let (provider, block, mut message) = payment_free_submission();
+        message.value = U256::ZERO;
+
+        let output = BlockExecutionOutput {
+            result: Default::default(),
+            state: fee_recipient_spent(message.proposer_fee_recipient),
+        };
+
+        test_validation_api(provider)
+            .ensure_payment(block.sealed_block(), &output, &message)
+            .unwrap();
+    }
+
+    /// Execution state for a block in which `address` ended up poorer than it started.
+    fn fee_recipient_spent(address: Address) -> BundleState {
+        let balance =
+            |wei: u64| Some(AccountInfo { balance: U256::from(wei), ..Default::default() });
+
+        let mut state = BundleState::default();
+        state.state.insert(
+            address,
+            BundleAccount {
+                original_info: balance(1_000),
+                info: balance(999),
+                storage: Default::default(),
+                status: AccountStatus::Changed,
+            },
+        );
+        state
     }
 }

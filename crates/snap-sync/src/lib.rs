@@ -7,7 +7,13 @@
 //!
 //! This crate owns download progress only. Authenticated downloads come from
 //! `reth-downloaders`, and verified state is handed back to node integration once its trie root
-//! matches the target header.
+//! matches the target header. [`SnapBootstrap`] runs these steps as one resumable sync.
+//!
+//! Downloaded state goes into the hashed state tables, owned by an attempt record that commits
+//! with it, along with how far the account key space has been downloaded. An account range only
+//! commits with storage matching its accounts' roots and code matching their hashes, so committed
+//! progress never depends on work still pending. Storage too large for one response is persisted
+//! ahead of its range, under progress tied to the attempt, pivot and range.
 //!
 //! ```
 //! use reth_snap_sync::SnapPivotPolicy;
@@ -30,15 +36,41 @@
 )]
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 
+mod account;
+mod attempt;
+mod bootstrap;
+mod bytecode;
+mod catch_up;
+mod common;
 mod error;
 mod generation;
 mod pivot;
 mod session;
+mod storage;
+mod verify;
 
 #[cfg(test)]
 mod test_utils;
 
+pub use account::{
+    AccountCoverage, AccountRangeDownload, AccountRangeStep, SnapAccountStore, VerifiedRange,
+};
+pub use attempt::{SnapAttemptStore, SnapWrite};
+pub use bootstrap::{
+    SnapBootstrap, SnapBootstrapOutcome, SnapSyncContext, DEFAULT_RANGES_PER_CHECK,
+};
+pub use bytecode::{BytecodeDownload, BytecodeStep, SnapBytecodeStore, DEFAULT_CODE_HASHES};
+pub use catch_up::{
+    BalStateUpdate, BlockAccessListCatchUp, CatchUpProgress, CatchUpStep, DownloadedAccount,
+    SnapCatchUpStore, DEFAULT_BAL_RESPONSE_BYTES, DEFAULT_CATCH_UP_BLOCKS,
+};
+pub use common::{DEFAULT_RESPONSE_BYTES, MAX_HASH};
 pub use error::SnapSyncError;
 pub use generation::{SnapGeneration, SnapPhase};
 pub use pivot::SnapPivotPolicy;
 pub use session::{SnapSyncSession, SnapSyncSessionState};
+pub use storage::{
+    SnapStorageStore, StorageChunk, StorageProgress, StorageRangeDownload, StorageRangeStep,
+    DEFAULT_STORAGE_ACCOUNTS,
+};
+pub use verify::{SnapStateVerifier, VerifiedSnapState, DEFAULT_SCAN_CHUNK};
