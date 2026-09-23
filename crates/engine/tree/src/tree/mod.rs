@@ -573,7 +573,12 @@ where
                 LoopEvent::EngineMessage(msg) => {
                     debug!(target: "engine::tree", %msg, "received new engine message");
                     match self.on_engine_message(msg) {
-                        Ok(ops::ControlFlow::Break(())) => return,
+                        Ok(ops::ControlFlow::Break(tx)) => {
+                            if let Err(err) = self.finish_termination(tx) {
+                                error!(target: "engine::tree", %err, "Termination failed");
+                            }
+                            return
+                        }
                         Ok(ops::ControlFlow::Continue(())) => {}
                         Err(fatal) => {
                             error!(target: "engine::tree", %fatal, "insert block fatal error");
@@ -1448,16 +1453,18 @@ where
         Ok(())
     }
 
-    /// Finishes termination by persisting all remaining blocks and signaling completion.
+    /// Finishes termination by persisting all remaining blocks and releasing engine resources.
     ///
-    /// This blocks until all persistence is complete. Always signals completion,
-    /// even if an error occurs.
+    /// Signals completion after teardown, even if persistence fails.
     fn finish_termination(
-        &mut self,
+        mut self,
         pending_termination: oneshot::Sender<()>,
     ) -> Result<(), AdvancePersistenceError> {
         trace!(target: "engine::tree", "finishing termination, persisting remaining blocks");
         let result = self.persist_until_complete();
+        // The CLI can exit as soon as it receives this acknowledgement. Release the validator's
+        // workers and join the persistence service before allowing native database teardown.
+        drop(self);
         let _ = pending_termination.send(());
         result
     }
@@ -1564,11 +1571,11 @@ where
 
     /// Handles a message from the engine.
     ///
-    /// Returns `ControlFlow::Break(())` if the engine should terminate.
+    /// Returns the completion sender in `ControlFlow::Break` if the engine should terminate.
     fn on_engine_message(
         &mut self,
         msg: FromEngine<EngineApiRequest<T, N>, N::Block>,
-    ) -> Result<ops::ControlFlow<()>, InsertBlockFatalError> {
+    ) -> Result<ops::ControlFlow<oneshot::Sender<()>>, InsertBlockFatalError> {
         match msg {
             FromEngine::Event(event) => match event {
                 FromOrchestrator::BackfillSyncStarted => {
@@ -1580,10 +1587,7 @@ where
                 }
                 FromOrchestrator::Terminate { tx } => {
                     debug!(target: "engine::tree", "received terminate request");
-                    if let Err(err) = self.finish_termination(tx) {
-                        error!(target: "engine::tree", %err, "Termination failed");
-                    }
-                    return Ok(ops::ControlFlow::Break(()))
+                    return Ok(ops::ControlFlow::Break(tx))
                 }
             },
             FromEngine::Request(request) => {
