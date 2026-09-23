@@ -87,13 +87,8 @@ impl ValidationJobSender {
         job: Pin<Box<dyn Future<Output = ()> + Send>>,
     ) -> Result<(), TransactionValidatorError> {
         self.metrics.inflight_validation_jobs.increment(1);
-        let res = self
-            .tx
-            .send(job)
-            .await
-            .map_err(|_| TransactionValidatorError::ValidationServiceUnreachable);
-        self.metrics.inflight_validation_jobs.decrement(1);
-        res
+        let _guard = ValidationSendGuard(&self.metrics.inflight_validation_jobs);
+        self.tx.send(job).await.map_err(|_| TransactionValidatorError::ValidationServiceUnreachable)
     }
 }
 
@@ -324,6 +319,15 @@ where
     }
 }
 
+/// Decrements the pending-send count even if the send future is cancelled.
+struct ValidationSendGuard<'a>(&'a metrics::Gauge);
+
+impl Drop for ValidationSendGuard<'_> {
+    fn drop(&mut self) {
+        self.0.decrement(1);
+    }
+}
+
 #[inline]
 fn validation_service_error_outcomes<T: PoolTransaction>(
     hashes: Vec<alloy_primitives::TxHash>,
@@ -348,6 +352,42 @@ mod tests {
         TransactionOrigin,
     };
     use alloy_primitives::{Address, U256};
+    use metrics::atomics::AtomicU64;
+    use std::sync::atomic::Ordering;
+
+    #[tokio::test]
+    async fn validation_send_metrics_track_cancellation_and_completion() {
+        for close_channel in [false, true] {
+            let (mut sender, task) = ValidationTask::new();
+            let gauge = Arc::new(AtomicU64::new(0));
+            sender.metrics.inflight_validation_jobs = metrics::Gauge::from_arc(gauge.clone());
+            let pending_sends = || f64::from_bits(gauge.load(Ordering::Relaxed));
+
+            sender.send(Box::pin(async {})).await.unwrap();
+            assert_eq!(pending_sends(), 0.0);
+
+            // Keep the channel full so every producer waits for capacity.
+            let mut producers =
+                (0..8).map(|_| Box::pin(sender.send(Box::pin(async {})))).collect::<Vec<_>>();
+            for producer in &mut producers {
+                assert!(futures_util::poll!(producer.as_mut()).is_pending());
+            }
+            assert_eq!(pending_sends(), 8.0);
+
+            let survivor = producers.remove(0);
+            drop(producers);
+            assert_eq!(pending_sends(), 1.0);
+
+            if close_channel {
+                drop(task);
+            } else {
+                // Free a slot for the remaining producer.
+                drop(task.validation_jobs.lock().await.next().await.unwrap());
+            }
+            assert_eq!(survivor.await.is_err(), close_channel);
+            assert_eq!(pending_sends(), 0.0);
+        }
+    }
 
     #[tokio::test]
     async fn cloned_workers_validate_while_another_job_is_blocked() {
