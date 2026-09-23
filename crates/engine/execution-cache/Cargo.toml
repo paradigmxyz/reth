@@ -32,4 +32,5 @@ revm.workspace = true
 test-utils = [
     "reth-primitives-traits/test-utils",
     "reth-revm/test-utils",
+    "reth-provider/test-utils",
 ]
