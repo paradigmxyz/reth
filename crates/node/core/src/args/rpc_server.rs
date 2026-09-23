@@ -1262,6 +1262,7 @@ mod tests {
                 prewarm_bals: Some(0),
                 max_concurrent_db_requests: 512,
                 max_cached_tx_hashes: 100_000,
+                ..Default::default()
             },
             gas_price_oracle: GasPriceOracleArgs {
                 blocks: 20,
