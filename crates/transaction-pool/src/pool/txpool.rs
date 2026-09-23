@@ -3613,6 +3613,83 @@ mod tests {
     }
 
     #[test]
+    fn base_fee_round_trip_via_set_block_info_repairs_parked_descendants() {
+        fn set_base_fee(pool: &mut TxPool<MockOrdering>, base_fee: u64) {
+            let mut info = pool.block_info();
+            info.pending_basefee = base_fee;
+            pool.set_block_info(info);
+        }
+
+        fn tx(sender: Address, nonce: u64, max_fee: u128) -> MockTransaction {
+            MockTransaction::eip1559()
+                .with_sender(sender)
+                .with_nonce(nonce)
+                .with_gas_limit(21_000)
+                .with_max_fee(max_fee)
+                .with_priority_fee(1)
+                .rng_hash()
+        }
+
+        const LOW_BASE_FEE: u64 = 100;
+        const HIGH_BASE_FEE: u64 = 500;
+
+        let sender = address!("0x0000000000000000000000000000000000000011");
+        let other = address!("0x0000000000000000000000000000000000000012");
+
+        let mut f = MockTransactionFactory::default();
+        let mut pool = TxPool::new(MockOrdering::default(), Default::default());
+        set_base_fee(&mut pool, LOW_BASE_FEE);
+
+        // Nonce 0 only covers the low base fee, every other transaction covers both.
+        let nonce0 = f.validated(tx(sender, 0, 200));
+        let nonce1 = f.validated(tx(sender, 1, 1_000));
+        let unrelated = f.validated(tx(other, 0, 1_000));
+        let (nonce0_id, nonce1_id, unrelated_id) = (*nonce0.id(), *nonce1.id(), *unrelated.id());
+        pool.add_transaction(nonce0, U256::MAX, 0, None).unwrap();
+        pool.add_transaction(nonce1, U256::MAX, 0, None).unwrap();
+        pool.add_transaction(unrelated, U256::MAX, 0, None).unwrap();
+
+        // An all-transactions pass records the low base fee as the last full update's fees.
+        pool.update_accounts(FxHashMap::default());
+        assert_eq!(pool.all_transactions.last_full_update_fees, pool.all_transactions.pending_fees);
+        assert_eq!(pool.all_transactions.txs.get(&nonce1_id).unwrap().subpool, SubPool::Pending);
+
+        // The base fee rises above nonce 0's cap, which parks the sender's transactions.
+        set_base_fee(&mut pool, HIGH_BASE_FEE);
+        assert_eq!(pool.all_transactions.txs.get(&nonce0_id).unwrap().subpool, SubPool::BaseFee);
+        assert_eq!(pool.all_transactions.txs.get(&nonce1_id).unwrap().subpool, SubPool::BaseFee);
+
+        // The sender submits another transaction while the base fee is high. The insert walk
+        // correctly records that nonce 1 and nonce 2 sit behind a parked ancestor.
+        let nonce2 = f.validated(tx(sender, 2, 1_000));
+        let nonce2_id = *nonce2.id();
+        pool.add_transaction(nonce2, U256::MAX, 0, None).unwrap();
+        let parked = pool.all_transactions.txs.get(&nonce1_id).unwrap();
+        assert_eq!(parked.subpool, SubPool::Queued);
+        assert!(!parked.state.contains(TxState::NO_PARKED_ANCESTORS));
+
+        // The base fee falls back to where it was. Nonce 0 is promoted out of the base fee pool,
+        // but the queued descendants are not re-derived by the fee update itself.
+        set_base_fee(&mut pool, LOW_BASE_FEE);
+        assert_eq!(pool.all_transactions.txs.get(&nonce0_id).unwrap().subpool, SubPool::Pending);
+        assert_eq!(pool.all_transactions.txs.get(&nonce1_id).unwrap().subpool, SubPool::Queued);
+
+        // The next account update is what must repair them.
+        let mut changed = FxHashMap::default();
+        changed.insert(unrelated_id.sender, SenderInfo { state_nonce: 0, balance: U256::MAX });
+        pool.update_accounts(changed);
+
+        assert_eq!(pool.all_transactions.txs.get(&nonce1_id).unwrap().subpool, SubPool::Pending);
+        assert_eq!(pool.all_transactions.txs.get(&nonce2_id).unwrap().subpool, SubPool::Pending);
+        let nonces = pool
+            .best_transactions()
+            .filter(|tx| tx.sender() == sender)
+            .map(|tx| tx.nonce())
+            .collect::<Vec<_>>();
+        assert_eq!(nonces, vec![0, 1, 2]);
+    }
+
+    #[test]
     fn changed_sender_update_matches_full_update() {
         let senders = [
             address!("0x000000000000000000000000000000000000000a"),
