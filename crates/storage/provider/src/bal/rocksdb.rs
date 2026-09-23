@@ -337,11 +337,7 @@ mod tests {
     use alloy_primitives::B256;
 
     fn test_rocksdb(dir: &tempfile::TempDir) -> RocksDBProvider {
-        RocksDBBuilder::new(dir.path())
-            .with_table::<tables::BlockAccessLists>()
-            .with_table::<tables::BlockAccessListBlockNumbers>()
-            .build()
-            .unwrap()
+        RocksDBBuilder::new(dir.path()).with_default_tables().build().unwrap()
     }
 
     fn test_store() -> (tempfile::TempDir, RocksDBBalStore) {
