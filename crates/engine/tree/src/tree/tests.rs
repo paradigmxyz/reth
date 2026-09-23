@@ -1489,6 +1489,45 @@ async fn test_get_canonical_blocks_to_persist() {
 }
 
 #[test]
+fn canonicalization_moves_executed_blocks_between_sections() {
+    let mut builder = TestBlockBuilder::eth();
+    let blocks: Vec<_> = builder.get_executed_blocks(0..4).collect();
+    let mut test_harness = TestHarness::new(MAINNET.clone()).with_blocks(blocks[..2].to_vec());
+    let in_memory_state = test_harness.tree.canonical_in_memory_state.clone();
+    let hash = |block: &ExecutedBlock| block.recovered_block().hash();
+
+    // Executed blocks wait in the pending section for a forkchoice update.
+    let executed = blocks[2..]
+        .iter()
+        .map(|block| {
+            test_harness.tree.state.tree_state.insert_executed(block.clone());
+            in_memory_state.executed_state_by_hash(hash(block)).unwrap()
+        })
+        .collect::<Vec<_>>();
+    assert!(in_memory_state.state_by_hash(hash(&blocks[3])).is_none());
+    assert_eq!(in_memory_state.pending_block_count(), 2);
+
+    // Making them canonical moves the same states to the canonical section.
+    test_harness.tree.make_canonical(hash(&blocks[3])).unwrap();
+    for (block, state) in blocks[2..].iter().zip(&executed) {
+        assert!(Arc::ptr_eq(state, &in_memory_state.state_by_hash(hash(block)).unwrap()));
+    }
+    assert_eq!(in_memory_state.canonical_block_count(), 4);
+    assert_eq!(in_memory_state.pending_block_count(), 0);
+
+    // A reorg to a fork off block 1 moves the replaced blocks back to the pending section.
+    let fork = builder.get_executed_block_with_number(2, hash(&blocks[1]));
+    test_harness.tree.state.tree_state.insert_executed(fork.clone());
+    test_harness.tree.make_canonical(hash(&fork)).unwrap();
+    assert_eq!(in_memory_state.head_state().unwrap().hash(), hash(&fork));
+    for (block, state) in blocks[2..].iter().zip(&executed) {
+        assert!(in_memory_state.state_by_hash(hash(block)).is_none());
+        assert!(Arc::ptr_eq(state, &in_memory_state.executed_state_by_hash(hash(block)).unwrap()));
+    }
+    assert_eq!(test_harness.tree.state.tree_state.block_count(), 5);
+}
+
+#[test]
 fn threshold_persistence_uses_canonical_in_memory_chain_length() {
     let blocks: Vec<_> = TestBlockBuilder::eth().get_executed_blocks(0..10).collect();
     let mut test_harness = TestHarness::new(MAINNET.clone()).with_blocks(blocks.clone());
