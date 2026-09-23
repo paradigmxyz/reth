@@ -550,16 +550,24 @@ RPC State Cache:
           [default: 1000]
 
       --rpc-cache.max-blocks-bytes <BYTES>
-          Maximum estimated block cache memory in bytes. Zero disables caching. The entry count limit also applies. No byte limit by default
+          Maximum estimated block cache memory in bytes. Zero disables caching. The entry count limit also applies
+
+          [default: 2000000000]
 
       --rpc-cache.max-receipts-bytes <BYTES>
-          Maximum estimated receipts cache memory in bytes. Zero disables caching. The entry count limit also applies. No byte limit by default
+          Maximum estimated receipts cache memory in bytes. Zero disables caching. The entry count limit also applies
+
+          [default: 1000000000]
 
       --rpc-cache.max-bals-bytes <BYTES>
-          Maximum estimated block access list cache memory in bytes. Zero disables caching. The entry count limit also applies. No byte limit by default
+          Maximum estimated block access list cache memory in bytes. Zero disables caching. The entry count limit also applies
+
+          [default: 500000000]
 
       --rpc-cache.idle-timeout <DURATION>
-          Evict blocks, receipts, and block access lists after this duration without a cache hit (e.g. 5m, 30s). Zero disables expiration. Disabled by default
+          Evict blocks, receipts, and block access lists after this duration without a cache hit (e.g. 5m, 30s). Zero disables expiration. Cleanup runs at most once per second and at least once per minute, so idle entries may remain until the next sweep
+
+          [default: 1h]
 
       --rpc-cache.cache-computed-bals
           Cache block access lists computed by RPC requests for transaction tracing

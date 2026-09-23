@@ -332,10 +332,10 @@ mod tests {
                     max_blocks: 10,
                     max_receipts: 20,
                     max_bals: 30,
-                    max_blocks_bytes: Some(1024),
-                    max_receipts_bytes: Some(0),
-                    max_bals_bytes: Some(4096),
-                    idle_timeout: Some(expected_timeout),
+                    max_blocks_bytes: 1024,
+                    max_receipts_bytes: 0,
+                    max_bals_bytes: 4096,
+                    idle_timeout: expected_timeout,
                     ..Default::default()
                 }
             );

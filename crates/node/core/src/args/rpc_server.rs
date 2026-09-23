@@ -1258,14 +1258,11 @@ mod tests {
                 max_receipts: 2000,
                 max_headers: 1000,
                 max_bals: 1000,
-                max_blocks_bytes: None,
-                max_receipts_bytes: None,
-                max_bals_bytes: None,
-                idle_timeout: None,
                 cache_computed_bals: true,
                 prewarm_bals: Some(0),
                 max_concurrent_db_requests: 512,
                 max_cached_tx_hashes: 100_000,
+                ..Default::default()
             },
             gas_price_oracle: GasPriceOracleArgs {
                 blocks: 20,

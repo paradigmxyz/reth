@@ -1,7 +1,9 @@
 use clap::Args;
 use reth_rpc_server_types::constants::cache::{
-    DEFAULT_BAL_CACHE_MAX_LEN, DEFAULT_BLOCK_CACHE_MAX_LEN, DEFAULT_CONCURRENT_DB_REQUESTS,
-    DEFAULT_HEADER_CACHE_MAX_LEN, DEFAULT_MAX_CACHED_TX_HASHES, DEFAULT_RECEIPT_CACHE_MAX_LEN,
+    DEFAULT_BAL_CACHE_MAX_BYTES, DEFAULT_BAL_CACHE_MAX_LEN, DEFAULT_BLOCK_CACHE_MAX_BYTES,
+    DEFAULT_BLOCK_CACHE_MAX_LEN, DEFAULT_CACHE_IDLE_TIMEOUT, DEFAULT_CONCURRENT_DB_REQUESTS,
+    DEFAULT_HEADER_CACHE_MAX_LEN, DEFAULT_MAX_CACHED_TX_HASHES, DEFAULT_RECEIPT_CACHE_MAX_BYTES,
+    DEFAULT_RECEIPT_CACHE_MAX_LEN,
 };
 use std::time::Duration;
 
@@ -40,24 +42,25 @@ pub struct RpcStateCacheArgs {
     pub max_bals: u32,
 
     /// Maximum estimated block cache memory in bytes. Zero disables caching. The entry count
-    /// limit also applies. No byte limit by default.
-    #[arg(long = "rpc-cache.max-blocks-bytes", value_name = "BYTES")]
-    pub max_blocks_bytes: Option<usize>,
+    /// limit also applies.
+    #[arg(long = "rpc-cache.max-blocks-bytes", value_name = "BYTES", default_value_t = DEFAULT_BLOCK_CACHE_MAX_BYTES)]
+    pub max_blocks_bytes: usize,
 
     /// Maximum estimated receipts cache memory in bytes. Zero disables caching. The entry count
-    /// limit also applies. No byte limit by default.
-    #[arg(long = "rpc-cache.max-receipts-bytes", value_name = "BYTES")]
-    pub max_receipts_bytes: Option<usize>,
+    /// limit also applies.
+    #[arg(long = "rpc-cache.max-receipts-bytes", value_name = "BYTES", default_value_t = DEFAULT_RECEIPT_CACHE_MAX_BYTES)]
+    pub max_receipts_bytes: usize,
 
     /// Maximum estimated block access list cache memory in bytes. Zero disables caching. The entry
-    /// count limit also applies. No byte limit by default.
-    #[arg(long = "rpc-cache.max-bals-bytes", value_name = "BYTES")]
-    pub max_bals_bytes: Option<usize>,
+    /// count limit also applies.
+    #[arg(long = "rpc-cache.max-bals-bytes", value_name = "BYTES", default_value_t = DEFAULT_BAL_CACHE_MAX_BYTES)]
+    pub max_bals_bytes: usize,
 
     /// Evict blocks, receipts, and block access lists after this duration without a cache hit
-    /// (e.g. 5m, 30s). Zero disables expiration. Disabled by default.
-    #[arg(long = "rpc-cache.idle-timeout", value_name = "DURATION", value_parser = humantime::parse_duration)]
-    pub idle_timeout: Option<Duration>,
+    /// (e.g. 5m, 30s). Zero disables expiration. Cleanup runs at most once per second and at least
+    /// once per minute, so idle entries may remain until the next sweep.
+    #[arg(long = "rpc-cache.idle-timeout", value_name = "DURATION", value_parser = humantime::parse_duration, default_value = "1h")]
+    pub idle_timeout: Duration,
 
     /// Cache block access lists computed by RPC requests for transaction tracing.
     #[arg(long = "rpc-cache.cache-computed-bals")]
@@ -99,10 +102,10 @@ impl RpcStateCacheArgs {
         self.max_receipts = 0;
         self.max_headers = 0;
         self.max_bals = 0;
-        self.max_blocks_bytes = Some(0);
-        self.max_receipts_bytes = Some(0);
-        self.max_bals_bytes = Some(0);
-        self.idle_timeout = None;
+        self.max_blocks_bytes = 0;
+        self.max_receipts_bytes = 0;
+        self.max_bals_bytes = 0;
+        self.idle_timeout = Duration::ZERO;
         self.cache_computed_bals = false;
         self.prewarm_bals = None;
     }
@@ -115,10 +118,10 @@ impl Default for RpcStateCacheArgs {
             max_receipts: DEFAULT_RECEIPT_CACHE_MAX_LEN,
             max_headers: DEFAULT_HEADER_CACHE_MAX_LEN,
             max_bals: DEFAULT_BAL_CACHE_MAX_LEN,
-            max_blocks_bytes: None,
-            max_receipts_bytes: None,
-            max_bals_bytes: None,
-            idle_timeout: None,
+            max_blocks_bytes: DEFAULT_BLOCK_CACHE_MAX_BYTES,
+            max_receipts_bytes: DEFAULT_RECEIPT_CACHE_MAX_BYTES,
+            max_bals_bytes: DEFAULT_BAL_CACHE_MAX_BYTES,
+            idle_timeout: DEFAULT_CACHE_IDLE_TIMEOUT,
             cache_computed_bals: false,
             prewarm_bals: None,
             max_concurrent_db_requests: DEFAULT_CONCURRENT_DB_REQUESTS,
@@ -140,7 +143,7 @@ mod tests {
     }
 
     #[test]
-    fn rpc_cache_defaults_keep_count_only_limits() {
+    fn rpc_cache_defaults() {
         let args = CommandParser::parse_from(["reth"]).args;
         assert_eq!(args, RpcStateCacheArgs::default());
 
@@ -164,9 +167,9 @@ mod tests {
                 &value,
             ])
             .args;
-            assert_eq!(args.max_blocks_bytes, Some(limit));
-            assert_eq!(args.max_receipts_bytes, Some(limit));
-            assert_eq!(args.max_bals_bytes, Some(limit));
+            assert_eq!(args.max_blocks_bytes, limit);
+            assert_eq!(args.max_receipts_bytes, limit);
+            assert_eq!(args.max_bals_bytes, limit);
         }
     }
 
@@ -196,7 +199,7 @@ mod tests {
             ("5m", Duration::from_secs(300)),
         ] {
             let args = CommandParser::parse_from(["reth", "--rpc-cache.idle-timeout", value]).args;
-            assert_eq!(args.idle_timeout, Some(expected));
+            assert_eq!(args.idle_timeout, expected);
         }
         for value in ["-1s", "invalid", "18446744073709551616s"] {
             assert!(CommandParser::try_parse_from([
@@ -211,10 +214,10 @@ mod tests {
     fn disabling_rpc_cache_overrides_positive_byte_limits() {
         let mut config = NodeConfig::default();
         config.rpc.rpc_state_cache = RpcStateCacheArgs {
-            max_blocks_bytes: Some(1024),
-            max_receipts_bytes: Some(2048),
-            max_bals_bytes: Some(4096),
-            idle_timeout: Some(Duration::from_secs(60)),
+            max_blocks_bytes: 1024,
+            max_receipts_bytes: 2048,
+            max_bals_bytes: 4096,
+            idle_timeout: Duration::from_secs(60),
             cache_computed_bals: true,
             prewarm_bals: Some(10),
             ..Default::default()
@@ -224,10 +227,10 @@ mod tests {
         assert_eq!(args.max_blocks, 0);
         assert_eq!(args.max_receipts, 0);
         assert_eq!(args.max_bals, 0);
-        assert_eq!(args.max_blocks_bytes, Some(0));
-        assert_eq!(args.max_receipts_bytes, Some(0));
-        assert_eq!(args.max_bals_bytes, Some(0));
-        assert_eq!(args.idle_timeout, None);
+        assert_eq!(args.max_blocks_bytes, 0);
+        assert_eq!(args.max_receipts_bytes, 0);
+        assert_eq!(args.max_bals_bytes, 0);
+        assert_eq!(args.idle_timeout, Duration::ZERO);
         assert!(!args.cache_computed_bals);
         assert_eq!(args.prewarm_bals, None);
     }
