@@ -3,6 +3,32 @@ use reth_metrics::Metrics;
 use reth_primitives_traits::FastInstant as Instant;
 use std::time::Duration;
 
+/// Wall time of a table-writing task, including preparation, seeks and writes.
+/// One observation per task, never per cursor operation. Parallel observations overlap.
+/// These helpers also serve sync/import; select the benchmark phase when comparing persistence.
+pub(super) struct PersistenceTableTimer {
+    duration: Histogram,
+    started: Instant,
+}
+
+impl PersistenceTableTimer {
+    pub(super) fn new(table: &'static str, shard: usize) -> Self {
+        Self {
+            duration: metrics::histogram!(
+                "storage.providers.database.table_write_seconds",
+                "table" => table, "shard" => shard.to_string()
+            ),
+            started: Instant::now(),
+        }
+    }
+}
+
+impl Drop for PersistenceTableTimer {
+    fn drop(&mut self) {
+        self.duration.record(self.started.elapsed());
+    }
+}
+
 #[derive(Debug)]
 pub(crate) struct DurationsRecorder<'a> {
     start: Instant,
@@ -154,6 +180,19 @@ pub(crate) struct CommitTimings {
 impl DatabaseProviderMetrics {
     /// Records the duration for the given action.
     pub(crate) fn record_duration(&self, action: Action, duration: Duration) {
+        let table = match action {
+            Action::InsertHeaderNumbers => Some("HeaderNumbers"),
+            Action::InsertBlockBodyIndices => Some("BlockBodyIndices"),
+            Action::InsertTransactionBlocks => Some("TransactionBlocks"),
+            Action::InsertTransactionSenders => Some("TransactionSenders"),
+            Action::InsertTransactionHashNumbers => Some("TransactionHashNumbers"),
+            _ => None,
+        };
+        if let Some(table) = table {
+            metrics::histogram!("storage.providers.database.table_write_seconds",
+                "table" => table, "shard" => "0")
+            .record(duration);
+        }
         match action {
             Action::InsertBlock => self.insert_block.record(duration),
             Action::InsertState => self.insert_state.record(duration),

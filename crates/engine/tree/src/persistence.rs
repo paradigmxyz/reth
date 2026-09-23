@@ -3,7 +3,7 @@ use alloy_eips::BlockNumHash;
 use crossbeam_channel::Sender as CrossbeamSender;
 use reth_errors::ProviderError;
 use reth_ethereum_primitives::EthPrimitives;
-use reth_primitives_traits::{FastInstant as Instant, NodePrimitives};
+use reth_primitives_traits::{BlockBody, FastInstant as Instant, NodePrimitives};
 use reth_provider::{
     providers::ProviderNodeTypes, BalProvider, BlockExecutionWriter, BlockHashReader,
     ChainStateBlockWriter, DBProvider, DatabaseProviderFactory, ProviderFactory, SaveBlocksInput,
@@ -210,7 +210,9 @@ where
             }
         }
 
+        let commit_started = Instant::now();
         provider_rw.commit()?;
+        let commit_seconds = commit_started.elapsed().as_secs_f64();
         // BALs live outside the main database and are intentionally flushed last.
         let _ = self.provider.bal_store().flush(&canonical_blocks).inspect_err(|err| {
             warn!(target: "engine::persistence", last=?last_block, ?err, "Failed to flush BAL store");
@@ -218,7 +220,22 @@ where
         debug!(target: "engine::persistence", first=?first_block, last=?last_block, "Saved range of blocks");
 
         let elapsed = start_time.elapsed();
+        debug!(target: "engine::persistence", block_count,
+            last_block_number = last_block.number, state_block_number = last_state_trie_block.number, commit_seconds,
+            elapsed_seconds = elapsed.as_secs_f64(), "Persistence batch complete");
         self.metrics.save_blocks_batch_size.record(block_count as f64);
+        self.metrics.persisted_blocks_total.increment(block_count as u64);
+        self.metrics
+            .persisted_state_trie_blocks_total
+            .increment(input.state_trie_blocks().len() as u64);
+        self.metrics.persisted_transactions_total.increment(
+            input
+                .persist_rest_blocks()
+                .iter()
+                .map(|b| b.recovered_block().body().transaction_count() as u64)
+                .sum(),
+        );
+        self.metrics.commit_duration_seconds.record(commit_seconds);
         self.metrics.save_blocks_duration_seconds.record(elapsed);
 
         Ok(PersistenceResult { last_block, last_state_trie_block, commit_duration: Some(elapsed) })

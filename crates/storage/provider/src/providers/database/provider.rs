@@ -585,6 +585,7 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
             .recovered_block()
             .number();
         let first_number = blocks.first().map(|block| block.recovered_block().number());
+        let state_block_number = partial_state_trie.unwrap_or(last_block_number);
 
         debug!(target: "providers::db", block_count, "Writing blocks and execution data to storage");
 
@@ -767,6 +768,7 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
 
             // Update pipeline progress
             let start = Instant::now();
+            let checkpoint_timer = metrics::PersistenceTableTimer::new("StageCheckpoints", 0);
             if !blocks.is_empty() {
                 self.update_pipeline_stages(last_block_number, false)?;
             }
@@ -781,6 +783,7 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
                 self.save_stage_checkpoint(StageId::Finish, checkpoint)?;
             }
             timings.update_pipeline_stages = start.elapsed();
+            drop(checkpoint_timer);
 
             timings.mdbx = mdbx_start.elapsed();
 
@@ -801,6 +804,17 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
         }
 
         timings.total = total_start.elapsed();
+
+        let transaction_count: usize =
+            blocks.iter().map(|block| block.recovered_block().body().transaction_count()).sum();
+        let state_trie_block_count = state_trie_blocks.len();
+        debug!(target: "engine::persistence", block_count, transaction_count,
+            state_trie_block_count, last_block_number, state_block_number,
+            elapsed_seconds = timings.total.as_secs_f64(),
+            mdbx_seconds = timings.mdbx.as_secs_f64(),
+            static_file_seconds = timings.sf.as_secs_f64(),
+            rocksdb_seconds = timings.rocksdb.as_secs_f64(),
+            "Persistence batch writes");
 
         self.metrics.record_save_blocks(&timings);
         if let Some(first_number) = first_number {
@@ -945,6 +959,7 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
         &self,
         bytecodes: impl IntoIterator<Item = (B256, Bytecode)>,
     ) -> ProviderResult<()> {
+        let _timer = metrics::PersistenceTableTimer::new(tables::Bytecodes::NAME, 0);
         let mut bytecodes_cursor = self.tx_ref().cursor_write::<tables::Bytecodes>()?;
         for (hash, bytecode) in bytecodes {
             bytecodes_cursor.upsert(hash, &bytecode)?;
@@ -2558,6 +2573,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
             ));
         }
 
+        let _timer = metrics::PersistenceTableTimer::new("Receipts", 0);
         let mut receipts_writer = EitherWriter::new_receipts(self, first_block)?;
 
         let has_contract_log_filter = !self.prune_modes.receipts_log_filter.is_empty();
@@ -2630,6 +2646,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
     ) -> ProviderResult<()> {
         // Write storage changes
         if config.write_storage_changesets {
+            let _timer = metrics::PersistenceTableTimer::new("StorageChangeSets", 0);
             tracing::trace!("Writing storage changes");
             let mut storages_cursor =
                 self.tx_ref().cursor_dup_write::<tables::PlainStorageState>()?;
@@ -2685,6 +2702,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
         }
 
         // Write account changes
+        let _timer = metrics::PersistenceTableTimer::new("AccountChangeSets", 0);
         tracing::trace!(?first_block, "Writing account changes");
         for (block_index, account_block_reverts) in reverts.accounts.into_iter().enumerate() {
             let block_number = first_block + block_index as BlockNumber;
@@ -2709,6 +2727,8 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
         changes.contracts.par_sort_by_key(|a| a.0);
 
         if !self.cached_storage_settings().use_hashed_state() {
+            let accounts_timer =
+                metrics::PersistenceTableTimer::new(tables::PlainAccountState::NAME, 0);
             // Write new account state
             tracing::trace!(len = changes.accounts.len(), "Writing new account state");
             let mut accounts_cursor = self.tx_ref().cursor_write::<tables::PlainAccountState>()?;
@@ -2723,6 +2743,9 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
                 }
             }
 
+            drop(accounts_timer);
+            let _storage_timer =
+                metrics::PersistenceTableTimer::new(tables::PlainStorageState::NAME, 0);
             // Write new storage state and wipe storage if needed.
             tracing::trace!(len = changes.storage.len(), "Writing new storage state");
             let mut storages_cursor =
@@ -2767,6 +2790,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
 
     #[instrument(level = "debug", target = "providers::db", skip_all)]
     fn write_hashed_state(&self, hashed_state: &HashedPostStateSorted) -> ProviderResult<()> {
+        let accounts_timer = metrics::PersistenceTableTimer::new(tables::HashedAccounts::NAME, 0);
         // Write hashed account updates.
         let mut hashed_accounts_cursor = self.tx_ref().cursor_write::<tables::HashedAccounts>()?;
         for (hashed_address, account) in hashed_state.accounts() {
@@ -2777,6 +2801,8 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
             }
         }
 
+        drop(accounts_timer);
+        let _storage_timer = metrics::PersistenceTableTimer::new(tables::HashedStorages::NAME, 0);
         // Write hashed storage changes.
         let sorted_storages = hashed_state.account_storages().iter().sorted_by_key(|(key, _)| *key);
         let mut hashed_storage_cursor =
@@ -3162,6 +3188,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> DatabaseProvider<TX, N> {
         TX: DbTxMut,
     {
         let mut account_trie_cursor = tx.cursor_write::<A::AccountTrieTable>()?;
+        let _timer = metrics::PersistenceTableTimer::new(A::AccountTrieTable::NAME, 0);
         // Process sorted account nodes
         for (key, updated_node) in trie_updates.account_nodes_ref() {
             let nibbles = A::AccountKey::from(*key);
@@ -3192,6 +3219,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> DatabaseProvider<TX, N> {
         TX: DbTxMut,
     {
         let mut cursor = tx.cursor_dup_write::<A::StorageTrieTable>()?;
+        let _timer = metrics::PersistenceTableTimer::new(A::StorageTrieTable::NAME, 0);
         for (hashed_address, storage_trie_updates) in storage_tries {
             let mut db_storage_trie_cursor: DatabaseStorageTrieCursor<_, A> =
                 DatabaseStorageTrieCursor::new(cursor, *hashed_address);
@@ -3512,11 +3540,13 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> HistoryWriter for DatabaseProvi
     fn update_history_indices(&self, range: RangeInclusive<BlockNumber>) -> ProviderResult<()> {
         let storage_settings = self.cached_storage_settings();
         if !storage_settings.storage_v2 {
+            let _timer = metrics::PersistenceTableTimer::new("AccountsHistory", 0);
             let indices = self.changed_accounts_and_blocks_with_range(range.clone())?;
             self.insert_account_history_index(indices)?;
         }
 
         if !storage_settings.storage_v2 {
+            let _timer = metrics::PersistenceTableTimer::new("StoragesHistory", 0);
             let indices = self.changed_storages_and_blocks_with_range(range)?;
             self.insert_storage_history_index(indices)?;
         }
