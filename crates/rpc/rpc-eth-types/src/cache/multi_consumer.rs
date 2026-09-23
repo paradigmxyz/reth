@@ -178,19 +178,28 @@ impl<K: Hash + Eq, V, S> MultiConsumerLruCache<K, V, S> {
         true
     }
 
-    /// Removes idle entries without disturbing consumers waiting for a database result.
-    pub(crate) fn evict_expired(&mut self, now: Instant, idle_timeout: Duration) {
+    /// Removes at most five idle entries without disturbing consumers waiting for a database
+    /// result.
+    ///
+    /// Returns whether more expired entries remain for the next poll.
+    pub(crate) fn evict_expired(&mut self, now: Instant, idle_timeout: Duration) -> bool {
         if idle_timeout.is_zero() {
-            return
+            return false
         }
+        let mut remaining = 5;
         // Hits update timestamps and LRU order together, so the first live entry ends the scan.
         while self
             .cache
             .peek_oldest()
             .is_some_and(|(_, entry)| now.duration_since(entry.last_access) >= idle_timeout)
         {
+            if remaining == 0 {
+                return true
+            }
             self.pop_oldest();
+            remaining -= 1;
         }
+        false
     }
 
     fn pop_oldest(&mut self) {
@@ -356,5 +365,29 @@ mod tests {
         tokio::time::advance(timeout / 2).await;
         cache.evict_expired(Instant::now(), timeout);
         assert_eq!(cache.memory_usage, 0);
+    }
+
+    #[test]
+    fn idle_eviction_is_bounded_and_preserves_renewed_entries() {
+        let mut cache = MultiConsumerLruCache::new(12, 36, "test");
+        let start = Instant::now();
+        let timeout = Duration::from_secs(10);
+        for key in 0..12 {
+            assert!(cache.insert_at(key, Weighted(3), start));
+        }
+        assert!(cache.queue(0, 42));
+        let now = start + timeout;
+
+        assert!(cache.evict_expired(now, timeout));
+        assert_eq!(cache.memory_usage, 21);
+        assert!(!cache.contains_key(&4));
+        assert!(cache.get_at(&5, now).is_some());
+
+        assert!(cache.evict_expired(now, timeout));
+        assert_eq!(cache.memory_usage, 6);
+        assert!(!cache.evict_expired(now, timeout));
+        assert_eq!(cache.memory_usage, 3);
+        assert!(cache.contains_key(&5));
+        assert_eq!(cache.remove(&0), Some(vec![42]));
     }
 }

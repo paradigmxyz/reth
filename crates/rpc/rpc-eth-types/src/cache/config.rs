@@ -43,7 +43,8 @@ pub struct EthStateCacheConfig {
     /// Duration after which an unused block, receipts collection, or BAL is evicted.
     ///
     /// Defaults to one hour. Successful lookups refresh the timeout. Zero disables expiration.
-    /// Idle entries remain cached until the next periodic sweep, up to one minute later.
+    /// Periodic cleanup starts at least once per minute and removes expired entries in bounded
+    /// batches.
     pub idle_timeout: Duration,
     /// Cache BALs computed by RPC requests for transaction tracing. Disabled by default.
     #[serde(default)]

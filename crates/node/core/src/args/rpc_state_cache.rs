@@ -58,8 +58,8 @@ pub struct RpcStateCacheArgs {
     pub max_bals_bytes: usize,
 
     /// Evict blocks, receipts, and block access lists after this duration without a cache hit
-    /// (e.g. 5m, 30s). Zero disables expiration. Cleanup runs at most once per second and at least
-    /// once per minute, so idle entries may remain until the next sweep.
+    /// (e.g. 5m, 30s). Zero disables expiration. Cleanup starts every 1 to 60 seconds and removes
+    /// at most five entries per cache per poll.
     #[arg(long = "rpc-cache.idle-timeout", value_name = "DURATION", value_parser = humantime::parse_duration, default_value = "1h")]
     pub idle_timeout: Duration,
 

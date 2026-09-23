@@ -127,6 +127,7 @@ impl<N: NodePrimitives> EthStateCache<N> {
             bal_cache: BalLruCache::new(max_bals, max_bals_bytes, "bals"),
             idle_timeout,
             eviction_interval,
+            eviction_pending: false,
             action_tx: to_service.clone(),
             action_rx: UnboundedReceiverStream::new(rx),
             action_task_spawner,
@@ -331,6 +332,8 @@ where
     idle_timeout: Duration,
     /// Reclaims idle entries even when there are no requests or new blocks.
     eviction_interval: Interval,
+    /// Whether an idle sweep has more entries to remove in a subsequent poll.
+    eviction_pending: bool,
     /// Sender half of the action channel.
     action_tx: UnboundedSender<CacheAction<Provider::Block, Provider::Receipt>>,
     /// Receiver half of the action channel.
@@ -555,11 +558,18 @@ where
         let now = LazyCell::new(Instant::now);
 
         // Poll until pending to register the next timer wakeup before draining requests.
-        while this.eviction_interval.poll_tick(cx).is_ready() {
+        while !this.idle_timeout.is_zero() && this.eviction_interval.poll_tick(cx).is_ready() {
+            this.eviction_pending = true;
+        }
+        if this.eviction_pending {
             let now = *now;
-            this.full_block_cache.evict_expired(now, this.idle_timeout);
-            this.receipts_cache.evict_expired(now, this.idle_timeout);
-            this.bal_cache.evict_expired(now, this.idle_timeout);
+            this.eviction_pending = this.full_block_cache.evict_expired(now, this.idle_timeout);
+            this.eviction_pending |= this.receipts_cache.evict_expired(now, this.idle_timeout);
+            this.eviction_pending |= this.bal_cache.evict_expired(now, this.idle_timeout);
+            if this.eviction_pending {
+                // Process requests before continuing the sweep in another poll.
+                cx.waker().wake_by_ref();
+            }
         }
 
         loop {
@@ -994,9 +1004,19 @@ mod tests {
             mpsc::{self, Receiver, SyncSender},
             Mutex,
         },
+        task::{Wake, Waker},
         thread,
         time::Duration,
     };
+
+    #[derive(Default)]
+    struct WakeCounter(AtomicUsize);
+
+    impl Wake for WakeCounter {
+        fn wake(self: Arc<Self>) {
+            self.0.fetch_add(1, Ordering::Relaxed);
+        }
+    }
 
     fn test_service() -> EthStateCacheService<NoopProvider> {
         let (_cache, service) = EthStateCache::<EthPrimitives>::create(
@@ -1083,6 +1103,75 @@ mod tests {
         service_task.abort();
         assert!(expired, "idle service did not register its next timer wakeup");
         assert!(response.unwrap().is_some());
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn idle_eviction_yields_between_batches_and_serves_requests() {
+        let (cache, mut service) = EthStateCache::<EthPrimitives>::create(
+            NoopProvider::default(),
+            Runtime::test(),
+            EthStateCacheConfig { idle_timeout: Duration::from_secs(10), ..Default::default() },
+        );
+        let mut retained = Vec::new();
+        for key in 0..12 {
+            let hash = B256::with_last_byte(key);
+            let block = Arc::new(test_block());
+            let receipts = Arc::new(vec![]);
+            let bal = CachedRevmBal::new(test_decoded_revm_bal());
+            retained.push((
+                Arc::downgrade(&block),
+                Arc::downgrade(&receipts),
+                Arc::downgrade(&bal.0),
+            ));
+            service.on_new_block(hash, Ok(Some(block)), Instant::now());
+            service.on_new_receipts(hash, Ok(Some(receipts)), Instant::now());
+            service.on_new_bal(hash, Ok(Some(bal)), Instant::now());
+        }
+        let (response_tx, mut response_rx) = oneshot::channel();
+        cache
+            .to_service
+            .send(CacheAction::GetCachedBlock { block_hash: B256::repeat_byte(0xff), response_tx })
+            .unwrap();
+        tokio::time::advance(Duration::from_secs(10)).await;
+
+        let wakes = Arc::new(WakeCounter::default());
+        let waker = Waker::from(wakes.clone());
+        let mut cx = Context::from_waker(&waker);
+        for (remaining, expected_wakes) in [(7, 1), (2, 2), (0, 2)] {
+            assert!(Pin::new(&mut service).poll(&mut cx).is_pending());
+            assert_eq!(wakes.0.load(Ordering::Relaxed), expected_wakes);
+            assert_eq!(
+                retained.iter().filter(|(block, _, _)| block.strong_count() > 0).count(),
+                remaining
+            );
+            assert_eq!(
+                retained.iter().filter(|(_, receipts, _)| receipts.strong_count() > 0).count(),
+                remaining
+            );
+            assert_eq!(
+                retained.iter().filter(|(_, _, bal)| bal.strong_count() > 0).count(),
+                remaining
+            );
+            if remaining == 7 {
+                assert!(response_rx.try_recv().unwrap().is_none());
+            }
+        }
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn disabled_idle_timeout_does_not_schedule_cleanup() {
+        let (_cache, mut service) = EthStateCache::<EthPrimitives>::create(
+            NoopProvider::default(),
+            Runtime::test(),
+            EthStateCacheConfig { idle_timeout: Duration::ZERO, ..Default::default() },
+        );
+        let wakes = Arc::new(WakeCounter::default());
+        let waker = Waker::from(wakes.clone());
+        let mut cx = Context::from_waker(&waker);
+        assert!(Pin::new(&mut service).poll(&mut cx).is_pending());
+
+        tokio::time::advance(Duration::from_secs(10)).await;
+        assert_eq!(wakes.0.load(Ordering::Relaxed), 0);
     }
 
     #[test]
