@@ -1374,8 +1374,8 @@ jobs:
             sudo install "$HOME/.cargo/bin/schelk" /usr/local/bin/
           fi
 
-          # samply (optional CPU profiler, invoked via sudo)
-          if [ "${BENCH_SAMPLY:-false}" = "true" ] && ! sudo sh -c 'command -v samply' &>/dev/null; then
+          # Refresh samply from edge for profiling runs, including on reused hosts.
+          if [ "${BENCH_SAMPLY:-false}" = "true" ]; then
             cargo install samply --git https://github.com/DaniPopes/samply --branch edge --locked
             sudo install "$HOME/.cargo/bin/samply" /usr/local/bin/
           fi
