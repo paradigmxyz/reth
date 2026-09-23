@@ -9372,6 +9372,7 @@ dependencies = [
  "alloy-primitives",
  "alloy-rpc-types-engine",
  "alloy-sol-types",
+ "codspeed-criterion-compat",
  "evm2",
  "evm2-jit",
  "metrics",

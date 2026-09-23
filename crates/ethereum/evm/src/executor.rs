@@ -1073,6 +1073,49 @@ mod tests {
     }
 
     #[test]
+    fn detached_commits_match_combined_receipts_and_gas() {
+        let from = Address::with_last_byte(0xaa);
+        let target = Address::with_last_byte(0xbb);
+        let factory = super::super::factory::EthBlockExecutorFactory::new(Arc::new(
+            ChainSpecBuilder::mainnet().london_activated().build(),
+        ));
+        let env = EthEvmEnv::new(
+            SpecId::LONDON,
+            BlockEnv::<BaseEvmTypes> { gas_limit: U256::from(100_000), ..Default::default() },
+            1,
+        );
+        let mut expected = None;
+        for detached in [false, true] {
+            let mut database = TestDatabase::default();
+            database
+                .accounts
+                .insert(from, AccountInfo::default().with_balance(U256::from(1_000_000)));
+            let evm = factory.evm_with_env(Db::new(database), env.clone());
+            let mut executor = factory.create_executor(evm, segment(0, 1, B256::ZERO).ctx);
+            // An uncommitted result must not advance the sender nonce or record a receipt.
+            drop(executor.execute_transaction_without_commit(transfer(from, target, 0)).unwrap());
+            for nonce in 0..2 {
+                let tx = transfer(from, target, nonce);
+                if detached {
+                    let output = executor.execute_transaction_without_commit(tx).unwrap();
+                    executor.commit_transaction(output).unwrap();
+                } else {
+                    executor.execute_transaction(tx).unwrap();
+                }
+            }
+            let (output, _) = executor.finish_with_block_access_list().unwrap();
+            assert_eq!(output.result.receipts.len(), 2);
+            assert_eq!(output.result.gas_used, 42_000);
+            assert_eq!(output.account(&target).unwrap().unwrap().balance, U256::from(2));
+            if let Some(expected) = &expected {
+                assert_eq!(&output, expected);
+            } else {
+                expected = Some(output);
+            }
+        }
+    }
+
+    #[test]
     fn big_block_executor_preserves_state_across_segment_switch() {
         let from = address!("0000000000000000000000000000000000000001");
         let first_target = address!("0000000000000000000000000000000000000010");

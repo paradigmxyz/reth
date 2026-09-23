@@ -37,11 +37,16 @@ metrics = { workspace = true, optional = true }
 reth-metrics = { workspace = true, optional = true }
 
 [dev-dependencies]
+criterion.workspace = true
 reth-testing-utils.workspace = true
 reth-trie-common.workspace = true
 reth-evm = { workspace = true, features = ["test-utils"] }
 secp256k1.workspace = true
 alloy-genesis.workspace = true
+
+[[bench]]
+name = "transaction_commit"
+harness = false
 
 [features]
 gmp = ["evm2/gmp", "reth-evm/gmp"]

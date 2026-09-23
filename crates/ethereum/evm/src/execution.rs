@@ -333,7 +333,16 @@ pub(crate) fn commit_detached_transaction<T: EvmTypes>(
     output: TxResultWithState<T>,
 ) -> TxResult<T> {
     let TxResultWithState { result, pending_state, .. } = output;
-    commit_pending_state(evm, block_state, stream_state, on_state_update, &pending_state);
+    let mut changes = TransactionChanges::default();
+    let Ok(()) = pending_state.visit(&mut changes);
+    block_state.commit(&changes);
+    if stream_state {
+        send_state_update(changes.state, on_state_update);
+    }
+    // Detaching clears transaction scratch. Reattach the owned overlay at the commit boundary
+    // so accepting it retains the empty account/storage buffers for the next transaction.
+    evm.state_mut().set_pending_state(pending_state);
+    evm.state_mut().commit_transaction();
     result
 }
 
@@ -741,6 +750,185 @@ mod tests {
     use std::sync::{mpsc, Arc};
 
     type BlockEnv = EvmBlockEnv<evm2::BaseEvmTypes>;
+
+    fn detached_test_evm(spec: SpecId, code: &[u8]) -> Evm<'static, evm2::BaseEvmTypes> {
+        let mut database = InMemoryDB::default();
+        for address in [Address::with_last_byte(0xaa), Address::with_last_byte(0xbb)] {
+            database.insert_account_info(
+                &address,
+                AccountInfo::default()
+                    .with_nonce(1)
+                    .with_balance(U256::from(10))
+                    .with_code(Bytecode::new_raw(Bytes::copy_from_slice(code))),
+            );
+        }
+        Evm::new(
+            spec,
+            BlockEnv::default(),
+            evm2::registry::TxRegistry::new(),
+            database,
+            evm2::Precompiles::base(spec),
+        )
+    }
+
+    fn commit_test_result(
+        evm: &mut Evm<'_, evm2::BaseEvmTypes>,
+        block_state: &mut BlockState,
+        hooks: &mut Vec<EvmState>,
+        output: TxResultWithState,
+        owned: bool,
+    ) -> TxResult {
+        if owned {
+            commit_detached_transaction(
+                evm,
+                block_state,
+                true,
+                &mut |state| hooks.push(state),
+                output,
+            )
+        } else {
+            commit_pending_state(
+                evm,
+                block_state,
+                true,
+                &mut |state| hooks.push(state),
+                &output.pending_state,
+            );
+            output.result
+        }
+    }
+
+    #[test]
+    fn detached_commit_matches_borrowed_state_and_clears_transaction_scratch() {
+        // Increment slot 0, copy transient slot 0 to persistent slot 1, set transient slot 0,
+        // and emit a log. Transient storage must start empty on every transaction.
+        let code = [
+            op::PUSH0,
+            op::SLOAD,
+            op::PUSH1,
+            1,
+            op::ADD,
+            op::PUSH0,
+            op::SSTORE,
+            op::PUSH0,
+            op::TLOAD,
+            op::PUSH1,
+            1,
+            op::SSTORE,
+            op::PUSH1,
+            7,
+            op::PUSH0,
+            op::TSTORE,
+            op::PUSH0,
+            op::PUSH0,
+            op::LOG0,
+            op::STOP,
+        ];
+        let target = Address::with_last_byte(0xaa);
+        let mut expected = None;
+        for owned in [false, true] {
+            let mut evm = detached_test_evm(SpecId::PRAGUE, &code);
+            evm.state_mut().enable_bal_builder();
+            let mut block_state = BlockState::default();
+            let mut hooks = Vec::new();
+            let mut results = Vec::new();
+            for _ in 0..3 {
+                evm.state_mut().bump_bal_index();
+                let output = evm.system_call(SystemTx::new(target, Bytes::new())).unwrap().detach();
+                assert!(output.result.status);
+                results.push(commit_test_result(
+                    &mut evm,
+                    &mut block_state,
+                    &mut hooks,
+                    output,
+                    owned,
+                ));
+                // Neither dropping a detached result nor discarding an executed handle may commit
+                // it.
+                drop(evm.system_call(SystemTx::new(target, Bytes::new())).unwrap().detach());
+                let _ = evm.system_call(SystemTx::new(target, Bytes::new())).unwrap().discard();
+            }
+            assert_eq!(
+                evm.state_mut().storage_slot_untracked(&target, &U256::ZERO).unwrap(),
+                U256::from(3)
+            );
+            assert_eq!(
+                evm.state_mut().storage_slot_untracked(&target, &U256::from(1)).unwrap(),
+                U256::ZERO
+            );
+            assert_eq!(hooks.len(), 3);
+            let actual = (
+                results,
+                evm.overlay_db().cache.clone(),
+                block_state.into_bundle(),
+                hooks,
+                evm.state_mut().take_bal_builder(),
+            );
+            if let Some(expected) = &expected {
+                assert_eq!(&actual, expected);
+            } else {
+                expected = Some(actual);
+            }
+        }
+    }
+
+    #[test]
+    fn detached_commit_handles_worker_results_reverts_and_selfdestruct() {
+        let first = Address::with_last_byte(0xaa);
+        let second = Address::with_last_byte(0xbb);
+        let cases: &[(SpecId, &[u8], bool)] = &[
+            // Persistent write.
+            (SpecId::LONDON, &[op::PUSH1, 9, op::PUSH1, 0, op::SSTORE, op::STOP], true),
+            // Reverted persistent write.
+            (
+                SpecId::LONDON,
+                &[op::PUSH1, 9, op::PUSH1, 0, op::SSTORE, op::PUSH1, 0, op::PUSH1, 0, op::REVERT],
+                false,
+            ),
+            // Pre-Cancun destruction: delete the account and transfer its balance.
+            (SpecId::LONDON, &[op::ADDRESS, op::PUSH1, 1, op::ADD, op::SELFDESTRUCT], true),
+        ];
+        for &(spec, code, success) in cases {
+            let mut expected = None;
+            for owned in [false, true] {
+                let mut evm = detached_test_evm(spec, code);
+                evm.state_mut().enable_bal_builder();
+                let mut worker = detached_test_evm(spec, code);
+                let first_output =
+                    worker.system_call(SystemTx::new(first, Bytes::new())).unwrap().detach();
+                let second_output =
+                    evm.system_call(SystemTx::new(second, Bytes::new())).unwrap().detach();
+                assert_eq!(first_output.result.status, success);
+                assert_eq!(second_output.result.status, success);
+                let mut block_state = BlockState::default();
+                let mut hooks = Vec::new();
+                let mut results = Vec::new();
+                // Committing one result must not disturb another outstanding detached result.
+                for output in [second_output, first_output] {
+                    evm.state_mut().bump_bal_index();
+                    results.push(commit_test_result(
+                        &mut evm,
+                        &mut block_state,
+                        &mut hooks,
+                        output,
+                        owned,
+                    ));
+                }
+                let actual = (
+                    results,
+                    evm.overlay_db().cache.clone(),
+                    block_state.into_bundle(),
+                    hooks,
+                    evm.state_mut().take_bal_builder(),
+                );
+                if let Some(expected) = &expected {
+                    assert_eq!(&actual, expected);
+                } else {
+                    expected = Some(actual);
+                }
+            }
+        }
+    }
 
     fn execute_block(
         spec: SpecId,
