@@ -210,7 +210,9 @@ where
             }
         }
 
+        let commit_started = Instant::now();
         provider_rw.commit()?;
+        let commit_seconds = commit_started.elapsed().as_secs_f64();
         // BALs live outside the main database and are intentionally flushed last.
         let _ = self.provider.bal_store().flush(&canonical_blocks).inspect_err(|err| {
             warn!(target: "engine::persistence", last=?last_block, ?err, "Failed to flush BAL store");
@@ -218,6 +220,9 @@ where
         debug!(target: "engine::persistence", first=?first_block, last=?last_block, "Saved range of blocks");
 
         let elapsed = start_time.elapsed();
+        debug!(target: "engine::persistence", block_count,
+            last_block_number = last_block.number, state_block_number = last_state_trie_block.number, commit_seconds,
+            elapsed_seconds = elapsed.as_secs_f64(), "Persistence batch complete");
         self.metrics.save_blocks_batch_size.record(block_count as f64);
         self.metrics.save_blocks_duration_seconds.record(elapsed);
 

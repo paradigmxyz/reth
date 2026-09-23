@@ -585,6 +585,8 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
             .recovered_block()
             .number();
         let first_number = blocks.first().map(|block| block.recovered_block().number());
+        let state_block_number = partial_state_trie.unwrap_or(last_block_number);
+        self.tx.begin_persistence_timing(last_block_number, state_block_number);
 
         debug!(target: "providers::db", block_count, "Writing blocks and execution data to storage");
 
@@ -797,6 +799,22 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
         }
 
         timings.total = total_start.elapsed();
+
+        let transaction_count: usize =
+            blocks.iter().map(|block| block.recovered_block().body().transaction_count()).sum();
+        let state_trie_block_count = state_trie_blocks.len();
+        for (table, operations, operation_nanos) in self.tx.end_persistence_timing() {
+            debug!(target: "engine::persistence", table, operations, operation_nanos,
+                block_count, transaction_count, state_trie_block_count, last_block_number, state_block_number,
+                "Persistence table operations");
+        }
+        debug!(target: "engine::persistence", block_count, transaction_count,
+            state_trie_block_count, last_block_number, state_block_number,
+            elapsed_seconds = timings.total.as_secs_f64(),
+            mdbx_seconds = timings.mdbx.as_secs_f64(),
+            static_file_seconds = timings.sf.as_secs_f64(),
+            rocksdb_seconds = timings.rocksdb.as_secs_f64(),
+            "Persistence batch writes");
 
         self.metrics.record_save_blocks(&timings);
         if let Some(first_number) = first_number {
@@ -2763,6 +2781,13 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
 
     #[instrument(level = "debug", target = "providers::db", skip_all)]
     fn write_hashed_state(&self, hashed_state: &HashedPostStateSorted) -> ProviderResult<()> {
+        let task_batch = std::time::Instant::now();
+        let accounts_timer = metrics::PersistenceTableTimer::new(
+            tables::HashedAccounts::NAME,
+            0,
+            task_batch,
+            self.tx.persistence_timing_frontiers(),
+        );
         // Write hashed account updates.
         let mut hashed_accounts_cursor = self.tx_ref().cursor_write::<tables::HashedAccounts>()?;
         for (hashed_address, account) in hashed_state.accounts() {
@@ -2773,6 +2798,13 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
             }
         }
 
+        drop(accounts_timer);
+        let _storage_timer = metrics::PersistenceTableTimer::new(
+            tables::HashedStorages::NAME,
+            0,
+            task_batch,
+            self.tx.persistence_timing_frontiers(),
+        );
         // Write hashed storage changes.
         let sorted_storages = hashed_state.account_storages().iter().sorted_by_key(|(key, _)| *key);
         let mut hashed_storage_cursor =
@@ -3158,6 +3190,12 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> DatabaseProvider<TX, N> {
         TX: DbTxMut,
     {
         let mut account_trie_cursor = tx.cursor_write::<A::AccountTrieTable>()?;
+        let _timer = metrics::PersistenceTableTimer::new(
+            A::AccountTrieTable::NAME,
+            0,
+            std::time::Instant::now(),
+            tx.persistence_timing_frontiers(),
+        );
         // Process sorted account nodes
         for (key, updated_node) in trie_updates.account_nodes_ref() {
             let nibbles = A::AccountKey::from(*key);
@@ -3188,6 +3226,12 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> DatabaseProvider<TX, N> {
         TX: DbTxMut,
     {
         let mut cursor = tx.cursor_dup_write::<A::StorageTrieTable>()?;
+        let _timer = metrics::PersistenceTableTimer::new(
+            A::StorageTrieTable::NAME,
+            0,
+            std::time::Instant::now(),
+            tx.persistence_timing_frontiers(),
+        );
         for (hashed_address, storage_trie_updates) in storage_tries {
             let mut db_storage_trie_cursor: DatabaseStorageTrieCursor<_, A> =
                 DatabaseStorageTrieCursor::new(cursor, *hashed_address);
