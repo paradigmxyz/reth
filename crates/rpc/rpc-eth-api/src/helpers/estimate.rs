@@ -96,23 +96,20 @@ pub trait EstimateCall: Call {
         // the gas limit of the corresponding block
         let block_gas_limit = evm_env.block_env.gas_limit();
         // If EIP-8037 is enabled, the transaction gas limit cap is not applicable
-        let max_gas_limit = if evm_env.cfg_env.is_amsterdam_eip8037_enabled() {
+        let mut max_gas_limit = if evm_env.cfg_env.is_amsterdam_eip8037_enabled() {
             block_gas_limit
         } else {
             evm_env.cfg_env.tx_gas_limit_cap().min(block_gas_limit)
         };
 
-        // Determine the highest possible gas limit, considering both the request's specified limit
-        // and the block's limit.
-        let mut highest_gas_limit = tx_request_gas_limit
-            .map(|mut tx_gas_limit| {
-                if max_gas_limit < tx_gas_limit {
-                    // requested gas limit is higher than the allowed gas limit, capping
-                    tx_gas_limit = max_gas_limit;
-                }
-                tx_gas_limit
-            })
-            .unwrap_or(max_gas_limit);
+        // Also bound diagnostic retries by the RPC gas cap. Zero means unlimited.
+        let gas_cap = self.call_gas_limit();
+        if gas_cap != 0 {
+            max_gas_limit = max_gas_limit.min(gas_cap);
+        }
+
+        let mut highest_gas_limit =
+            tx_request_gas_limit.unwrap_or(max_gas_limit).min(max_gas_limit);
 
         let mut tx_env = self.create_txn_env(&evm_env, request, &mut db)?;
 
@@ -152,7 +149,7 @@ pub trait EstimateCall: Call {
             // consumed by a successful run is the exact gas required. EIP-2780 can make that less
             // than 21_000.
             let mut min_tx_env = tx_env.clone();
-            min_tx_env.set_gas_limit(MIN_TRANSACTION_GAS);
+            min_tx_env.set_gas_limit(MIN_TRANSACTION_GAS.min(max_gas_limit));
 
             // Reuse the same EVM instance
             if let Ok(res) = evm.transact(min_tx_env).map_err(Self::Error::from_evm_err) &&
