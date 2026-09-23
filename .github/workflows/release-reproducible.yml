@@ -4,7 +4,7 @@ name: release-reproducible
 
 permissions: {}
 
-on:
+on: # zizmor: ignore[dangerous-triggers] Only successful same-repository release pushes or manual releases are accepted below.
   workflow_run:
     workflows: [release]
     types: [completed]
@@ -15,7 +15,11 @@ env:
 jobs:
   extract-version:
     name: extract version
-    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    if: >-
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.head_repository.full_name == github.repository &&
+      github.event.workflow_run.path == '.github/workflows/release.yml' &&
+      (github.event.workflow_run.event == 'push' || github.event.workflow_run.event == 'workflow_dispatch')
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -37,7 +41,7 @@ jobs:
             exit 1
           fi
 
-          echo "VERSION=$TAG" >> $GITHUB_OUTPUT
+          echo "VERSION=$TAG" >> "$GITHUB_OUTPUT"
     outputs:
       VERSION: ${{ steps.extract_version.outputs.VERSION }}
 
@@ -51,11 +55,11 @@ jobs:
       contents: write
     steps:
       - name: Secure runner
-        uses: tempoxyz/gh-actions/actions/secure-runner@117919c943b804057be733b0c4034c5542e58959
+        uses: tempoxyz/gh-actions/actions/secure-runner@117919c943b804057be733b0c4034c5542e58959 # 2026-09-23T05-09-41Z-117919c9
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-          ref: ${{ needs.extract-version.outputs.VERSION }}
+          ref: ${{ github.event.workflow_run.head_sha }}
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.3.0
@@ -71,7 +75,7 @@ jobs:
         id: rust_version
         run: |
           RUST_TOOLCHAIN=$(rustc --version | cut -d' ' -f2)
-          echo "RUST_TOOLCHAIN=$RUST_TOOLCHAIN" >> $GITHUB_OUTPUT
+          echo "RUST_TOOLCHAIN=$RUST_TOOLCHAIN" >> "$GITHUB_OUTPUT"
 
       - name: Build reproducible artifacts
         uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
@@ -104,29 +108,34 @@ jobs:
           DOCKER_BUILD_RECORD_UPLOAD: false
 
       - name: Prepare artifacts from Docker build
+        env:
+          INPUT_VERSION: ${{ needs.extract-version.outputs.VERSION }}
         run: |
           mkdir reproducible-artifacts
-          cp docker-artifacts/reth reproducible-artifacts/reth-reproducible-${{ needs.extract-version.outputs.VERSION }}-x86_64-unknown-linux-gnu
+          cp docker-artifacts/reth reproducible-artifacts/reth-reproducible-"${INPUT_VERSION}"-x86_64-unknown-linux-gnu
           cp -R docker-artifacts/LICENSES reproducible-artifacts/LICENSES
           cp docker-artifacts/README.md reproducible-artifacts/README.md
-          cp docker-artifacts/*.deb reproducible-artifacts/reth-${{ needs.extract-version.outputs.VERSION }}-x86_64-unknown-linux-gnu-reproducible.deb
+          cp docker-artifacts/*.deb reproducible-artifacts/reth-"${INPUT_VERSION}"-x86_64-unknown-linux-gnu-reproducible.deb
 
       - name: Configure GPG and create artifacts
         env:
+          INPUT_VERSION: ${{ needs.extract-version.outputs.VERSION }}
           GPG_SIGNING_KEY: ${{ secrets.GPG_SIGNING_KEY }}
           GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
         run: |
-          export GPG_TTY=$(tty)
+          GPG_TTY=$(tty)
+          export GPG_TTY
           echo -n "$GPG_SIGNING_KEY" | base64 --decode | gpg --batch --import
 
           cd reproducible-artifacts
-          tar -czf reth-reproducible-${{ needs.extract-version.outputs.VERSION }}-x86_64-unknown-linux-gnu.tar.gz reth-reproducible-${{ needs.extract-version.outputs.VERSION }}-x86_64-unknown-linux-gnu LICENSES README.md --remove-files
-          echo "$GPG_PASSPHRASE" | gpg --passphrase-fd 0 --pinentry-mode loopback --batch -ab reth-reproducible-${{ needs.extract-version.outputs.VERSION }}-x86_64-unknown-linux-gnu.tar.gz
-          echo "$GPG_PASSPHRASE" | gpg --passphrase-fd 0 --pinentry-mode loopback --batch -ab reth-${{ needs.extract-version.outputs.VERSION }}-x86_64-unknown-linux-gnu-reproducible.deb
+          tar -czf reth-reproducible-"${INPUT_VERSION}"-x86_64-unknown-linux-gnu.tar.gz reth-reproducible-"${INPUT_VERSION}"-x86_64-unknown-linux-gnu LICENSES README.md --remove-files
+          echo "$GPG_PASSPHRASE" | gpg --passphrase-fd 0 --pinentry-mode loopback --batch -ab reth-reproducible-"${INPUT_VERSION}"-x86_64-unknown-linux-gnu.tar.gz
+          echo "$GPG_PASSPHRASE" | gpg --passphrase-fd 0 --pinentry-mode loopback --batch -ab reth-"${INPUT_VERSION}"-x86_64-unknown-linux-gnu-reproducible.deb
 
       - name: Upload reproducible artifacts to release
         env:
+          INPUT_VERSION: ${{ needs.extract-version.outputs.VERSION }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          gh release upload ${{ needs.extract-version.outputs.VERSION }} \
+          gh release upload "${INPUT_VERSION}" \
             reproducible-artifacts/*
