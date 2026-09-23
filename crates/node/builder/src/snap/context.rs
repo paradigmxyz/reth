@@ -8,9 +8,14 @@ use reth_provider::{
 use reth_snap_sync::{SnapSyncContext, SnapSyncError};
 use std::time::Duration;
 use tokio::sync::watch;
+use tracing::debug;
 
 // Sampling well below the block time resumes a stalled step soon after new peers connect.
 const DEFAULT_SAMPLE_INTERVAL: Duration = Duration::from_secs(2);
+
+// A peer that starts serving the pivot state, or one replacing another, leaves the peer count
+// where it was, so a step stalled on such a peer only resumes by retrying.
+const DEFAULT_RETRY_INTERVAL: Duration = Duration::from_secs(30);
 
 /// [`SnapSyncContext`] for one bootstrap run inside the snap backfill.
 ///
@@ -24,6 +29,7 @@ pub(crate) struct NodeSnapContext<N: ProviderNodeTypes, C> {
     // Forkchoice targets forwarded by the engine.
     targets: watch::Receiver<B256>,
     interval: Duration,
+    retry: Duration,
 }
 
 impl<N: ProviderNodeTypes, C> NodeSnapContext<N, C> {
@@ -32,12 +38,19 @@ impl<N: ProviderNodeTypes, C> NodeSnapContext<N, C> {
         client: C,
         targets: watch::Receiver<B256>,
     ) -> Self {
-        Self { factory, client, targets, interval: DEFAULT_SAMPLE_INTERVAL }
+        Self {
+            factory,
+            client,
+            targets,
+            interval: DEFAULT_SAMPLE_INTERVAL,
+            retry: DEFAULT_RETRY_INTERVAL,
+        }
     }
 
     #[cfg(test)]
-    const fn with_interval(mut self, interval: Duration) -> Self {
+    const fn with_intervals(mut self, interval: Duration, retry: Duration) -> Self {
         self.interval = interval;
+        self.retry = retry;
         self
     }
 }
@@ -54,11 +67,18 @@ where
     async fn wait_for_progress(&mut self, _head: u64) -> bool {
         // Peers connected before the wait already failed to serve the stalled step.
         let peers = self.client.num_connected_peers();
+        let retry = tokio::time::sleep(self.retry);
+        tokio::pin!(retry);
         loop {
             tokio::select! {
                 // New headers need the pipeline, which only runs once this run stops. A closed
                 // channel means the backfill is gone.
                 _ = self.targets.changed() => return false,
+                // Peers the count cannot distinguish are retried instead of waited out.
+                () = &mut retry => {
+                    debug!(target: "sync::snap", peers, "Retrying the stalled snap step");
+                    return true
+                }
                 () = tokio::time::sleep(self.interval) => {}
             }
             if self.client.num_connected_peers() > peers {
@@ -76,13 +96,14 @@ mod tests {
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     const TEST_INTERVAL: Duration = Duration::from_millis(5);
+    const TEST_RETRY: Duration = Duration::from_millis(500);
 
     fn context(
         peers: &TestPeers,
     ) -> (watch::Sender<B256>, NodeSnapContext<MockNodeTypesWithDB, &TestPeers>) {
         let (targets, receiver) = watch::channel(B256::repeat_byte(1));
         let context = NodeSnapContext::new(create_test_provider_factory(), peers, receiver)
-            .with_interval(TEST_INTERVAL);
+            .with_intervals(TEST_INTERVAL, TEST_RETRY);
         (targets, context)
     }
 
@@ -118,6 +139,15 @@ mod tests {
         });
 
         assert!(progressed);
+    }
+
+    #[tokio::test]
+    async fn an_unchanged_peer_count_retries_once_the_wait_is_out() {
+        // A peer that starts serving the state mid-wait keeps the count where it was.
+        let peers = TestPeers(AtomicUsize::new(1));
+        let (_targets, mut context) = context(&peers);
+
+        assert!(context.wait_for_progress(0).await);
     }
 
     // A peer count the test moves between samples.
