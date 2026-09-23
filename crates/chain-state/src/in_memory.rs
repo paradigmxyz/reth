@@ -308,6 +308,7 @@ impl<N: NodePrimitives> Blocks<N> {
             .collect::<Vec<_>>();
         let removed =
             hashes.iter().filter_map(|hash| self.canonical.remove(hash)).collect::<Vec<_>>();
+        self.clear_untracked_pending_block();
         self.relink_children(&removed);
         removed
     }
@@ -345,11 +346,16 @@ impl<N: NodePrimitives> Blocks<N> {
             }
         }
 
+        self.clear_untracked_pending_block();
+        self.relink_children(&removed);
+        removed
+    }
+
+    /// Clears the pending block if it is no longer tracked.
+    fn clear_untracked_pending_block(&mut self) {
         if self.pending_block.is_some_and(|hash| !self.contains(&hash)) {
             self.pending_block = None;
         }
-        self.relink_children(&removed);
-        removed
     }
 
     /// Moves every canonical block to the pending section and clears the pending block.
@@ -1390,6 +1396,120 @@ mod tests {
         block.recovered_block().hash()
     }
 
+    /// Asserts that every block is tracked in exactly one section, that the number and parent
+    /// indexes match the tracked blocks, that every parent link points at the state tracked for
+    /// the parent, and that the pending block is tracked.
+    fn assert_consistent(state: &CanonicalInMemoryState) {
+        let blocks = state.inner.in_memory_state.blocks.read();
+        let Blocks { canonical, pending, pending_block } = &*blocks;
+
+        assert_eq!(canonical.numbers.len(), canonical.blocks.len());
+        for (number, hash) in &canonical.numbers {
+            assert_eq!(canonical.blocks[hash].number(), *number);
+            assert!(!pending.blocks.contains_key(hash), "block {hash} is in both sections");
+        }
+
+        let by_number = pending
+            .numbers
+            .iter()
+            .flat_map(|(number, hashes)| hashes.iter().map(move |hash| (*number, *hash)))
+            .collect::<Vec<_>>();
+        assert_eq!(by_number.len(), pending.blocks.len());
+        for (number, hash) in by_number {
+            assert_eq!(pending.blocks[&hash].number(), number);
+        }
+        let by_parent = pending
+            .children
+            .iter()
+            .flat_map(|(parent, hashes)| hashes.iter().map(move |hash| (*parent, *hash)))
+            .collect::<Vec<_>>();
+        assert_eq!(by_parent.len(), pending.blocks.len());
+        for (parent, hash) in by_parent {
+            assert_eq!(pending.blocks[&hash].parent_hash(), parent);
+        }
+        assert!(pending
+            .numbers
+            .values()
+            .chain(pending.children.values())
+            .all(|set| !set.is_empty()));
+
+        for state in canonical.blocks.values().chain(pending.blocks.values()) {
+            match (state.parent.as_ref(), blocks.get(&state.parent_hash())) {
+                (None, None) => {}
+                (Some(linked), Some(parent)) => assert!(Arc::ptr_eq(linked, parent)),
+                (linked, parent) => panic!(
+                    "block {} is linked to {:?}, but its tracked parent is {:?}",
+                    state.hash(),
+                    linked.map(|linked| linked.hash()),
+                    parent.map(|parent| parent.hash()),
+                ),
+            }
+        }
+
+        assert!(pending_block.is_none_or(|hash| blocks.contains(&hash)));
+    }
+
+    #[test]
+    fn every_operation_keeps_sections_and_indexes_consistent() {
+        let mut builder = TestBlockBuilder::eth();
+        let state = CanonicalInMemoryState::empty();
+        let blocks = builder.get_executed_blocks(1..6).collect::<Vec<_>>();
+
+        for block in &blocks[1..] {
+            state.insert_pending(block.clone());
+        }
+        assert_consistent(&state);
+
+        // Block 1 arrives last, e.g. loaded from the database, and has to be linked to its
+        // already tracked children.
+        state.update_chain(NewCanonicalChain::Commit { new: blocks[..3].to_vec() });
+        assert_consistent(&state);
+        assert_eq!(state.executed_state_by_hash(hash(&blocks[4])).unwrap().chain().count(), 5);
+
+        let fork = builder.get_executed_block_with_number(3, hash(&blocks[1]));
+        let fork_child = builder.get_executed_block_with_number(4, hash(&fork));
+        state.insert_pending(fork.clone());
+        state.set_pending_block(fork_child.clone());
+        assert_consistent(&state);
+
+        state.update_chain(NewCanonicalChain::Reorg {
+            new: vec![fork.clone(), fork_child.clone()],
+            old: vec![blocks[2].clone()],
+        });
+        assert_consistent(&state);
+        state.update_chain(NewCanonicalChain::Reorg {
+            new: blocks[2..].to_vec(),
+            old: vec![fork, fork_child],
+        });
+        assert_consistent(&state);
+        assert_eq!(state.canonical_block_count(), 5);
+        assert_eq!(state.pending_block_count(), 2);
+
+        // The pending block can be a canonical block, and is cleared once that block is trimmed.
+        state.set_pending_block(blocks[0].clone());
+        let persisted = blocks[1].recovered_block().num_hash();
+        state.remove_canonical_blocks_until(persisted.hash, persisted.number);
+        assert_consistent(&state);
+        assert!(state.pending_state().is_none());
+        state.insert_pending(blocks[0].clone());
+        assert!(state.pending_state().is_none(), "a trimmed pending block must not come back");
+        assert_consistent(&state);
+
+        state.prune_pending_below(blocks[2].recovered_block().num_hash());
+        assert_consistent(&state);
+        assert_eq!(state.pending_block_count(), 0);
+
+        state.set_pending_block(builder.get_executed_block_with_number(6, hash(&blocks[4])));
+        state.demote_canonical_chain();
+        assert_consistent(&state);
+        assert_eq!(state.canonical_block_count(), 0);
+        assert_eq!(state.pending_block_count(), 4);
+
+        assert_eq!(state.clear_state().len(), 4);
+        assert_consistent(&state);
+        assert_eq!(state.pending_block_count(), 0);
+    }
+
     #[test]
     fn executed_blocks_move_between_sections_and_are_relinked_on_trim() {
         let mut builder = TestBlockBuilder::eth();
@@ -1498,9 +1618,8 @@ mod tests {
         let fork_b = builder.get_executed_block_with_number(3, hash(&canonical[1]));
         let fork_b_child = builder.get_executed_block_with_number(4, hash(&fork_b));
         let fork_c = builder.get_executed_block_with_number(4, hash(&canonical[2]));
-        for block in [&fork_a, &fork_a_child, &fork_b, &fork_b_child, &fork_c] {
-            state.insert_pending(block.clone());
-        }
+        let inserted = [&fork_a, &fork_a_child, &fork_b, &fork_b_child, &fork_c]
+            .map(|block| Arc::downgrade(&state.insert_pending(block.clone())));
         state.set_pending_block(fork_b_child.clone());
 
         // With block 3 finalized, only the fork built on it can still become canonical.
@@ -1512,6 +1631,10 @@ mod tests {
         assert_eq!(state.pending_block_count(), 1);
         assert!(state.executed_state_by_hash(hash(&fork_c)).is_some());
         assert!(state.pending_state().is_none(), "the pruned pending block is cleared");
+        assert!(
+            inserted[..4].iter().all(|state| state.upgrade().is_none()),
+            "pruned forks are pinned"
+        );
         assert_eq!(state.canonical_block_count(), 4, "canonical blocks are trimmed separately");
     }
 
