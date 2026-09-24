@@ -23,7 +23,7 @@ use reth_engine_primitives::{
     NewPayloadTimings, OnForkChoiceUpdated, SlowBlockInfo,
 };
 use reth_errors::{ConsensusError, ProviderResult};
-use reth_evm::{debug_unreachable, ConfigureEvm};
+use reth_evm::ConfigureEvm;
 use reth_network_p2p::full_block::SealedBlockWithAccessList;
 use reth_payload_builder::{BuildNewPayload, PayloadBuilderHandle, PayloadBuilderLease};
 use reth_payload_primitives::{BuiltPayload, NewPayloadError, PayloadAttributes, PayloadTypes};
@@ -36,6 +36,8 @@ use reth_provider::{
     StageCheckpointReader, StateProviderFactory, StateReader, StorageChangeSetReader,
     StorageSettingsCache, TransactionVariant,
 };
+
+use reth_evm::debug_unreachable;
 use reth_stages_api::ControlFlow;
 use reth_storage_overlay::OverlayManager;
 use reth_tasks::{spawn_os_thread, utils::increase_thread_priority};
@@ -2361,14 +2363,14 @@ where
             .provider
             .get_state(block.header().number())?
             .ok_or_else(|| ProviderError::StateForNumberNotFound(block.header().number()))?;
-        let block_state = execution_output.execution_state();
+        let bundle_state = execution_output.state();
         // `get_state` can return an in-memory execution outcome that retains destruction statuses.
         // Hashing it requires the parent provider to expand a pre-existing destroyed account's
         // storage into zero-valued slots.
         let hashed_state = self
             .provider
             .state_by_block_hash(block.parent_hash())?
-            .hashed_post_state(&block_state)?;
+            .hashed_post_state(bundle_state)?;
 
         debug!(
             target: "engine::tree",
@@ -2386,15 +2388,15 @@ where
         let sorted_trie_updates = Arc::new(trie_updates);
         let trie_data = ComputedTrieData::new(sorted_hashed_state, sorted_trie_updates);
 
-        let execution_output = Arc::new(BlockExecutionOutput::new(
-            BlockExecutionResult {
+        let execution_output = Arc::new(BlockExecutionOutput {
+            state: execution_output.bundle,
+            result: BlockExecutionResult {
                 receipts: execution_output.receipts.pop().unwrap_or_default(),
                 requests: execution_output.requests.pop().unwrap_or_default(),
                 gas_used: block.gas_used(),
                 blob_gas_used: block.blob_gas_used().unwrap_or_default(),
             },
-            block_state,
-        ));
+        });
 
         Ok(ExecutedBlock::new(
             Arc::new(RecoveredBlock::new_sealed(block, senders)),
@@ -3211,13 +3213,10 @@ where
 
         let start = Instant::now();
 
-        let ValidationOutput {
-            executed_block: executed,
-            execution_timing_stats: timing_stats,
-            raw_bal,
-        } = execute(&mut self.payload_validator, input, ctx)?;
+        let ValidationOutput { executed_block: executed, execution_timing_stats: timing_stats } =
+            execute(&mut self.payload_validator, input, ctx)?;
 
-        if let Some(raw_bal) = raw_bal {
+        if let Some(raw_bal) = executed.bal().map(|bal| bal.as_raw_bal().clone()) {
             let num_hash = executed.recovered_block().num_hash();
             if let Err(err) = self.provider.bal_store().insert(num_hash, raw_bal) {
                 warn!(

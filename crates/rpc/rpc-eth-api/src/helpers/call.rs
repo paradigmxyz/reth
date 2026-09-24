@@ -774,7 +774,7 @@ pub trait Call:
                     .pre_block_state_changes(&mut db, evm_env.clone(), block.number(), ctx)
                     .map_err(|err| EthApiError::EvmCustom(err.to_string()))
                     .map_err(Self::Error::from_eth_err)?;
-                db.commit_source(&changes);
+                db.commit_source(&reth_execution_types::BundleSource(&changes));
 
                 let mut evm =
                     this.evm_config().block_executor_factory().evm_with_database(&mut db, evm_env);

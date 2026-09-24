@@ -30,6 +30,9 @@ itertools = { workspace = true, features = ["use_alloc"] }
 nybbles = { workspace = true, features = ["rlp"] }
 thiserror.workspace = true
 
+# reth
+revm.workspace = true
+
 # `serde` feature
 serde = { workspace = true, optional = true }
 
@@ -82,6 +85,7 @@ std = [
     "serde_with?/std",
     "serde_json/std",
     "thiserror/std",
+    "revm/std",
     "reth-codecs?/std",
     "alloy-eips/std",
 ]
@@ -97,6 +101,7 @@ serde = [
     "alloy-rpc-types-eth?/serde",
     "reth-primitives-traits/serde",
     "reth-codecs?/serde",
+    "revm/serde",
     "alloy-eips/serde",
 ]
 reth-codec = ["dep:reth-codecs", "reth-codecs/alloy", "dep:bytes", "dep:arrayvec"]
@@ -128,6 +133,7 @@ arbitrary = [
     "reth-codecs/arbitrary",
     "alloy-rpc-types-eth?/arbitrary",
     "alloy-eips/arbitrary",
+    "revm/arbitrary",
 ]
 rayon = ["dep:rayon"]
 account-ext = [

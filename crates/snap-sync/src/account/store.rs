@@ -5,14 +5,13 @@
 #![cfg_attr(not(feature = "account-ext"), allow(clippy::clone_on_copy))]
 
 use crate::{
-    common::SnapRecord, storage::persisted_storage_root, SnapAttemptStore, SnapStorageStore,
-    SnapSyncError, SnapWrite, StorageProgress,
+    common::SnapRecord, storage::persisted_storage_root, SnapAttemptStore, SnapCatchUpStore,
+    SnapStorageStore, SnapSyncError, SnapWrite, StorageProgress,
 };
 use alloy_primitives::{
     map::{B256Map, B256Set},
     B256, KECCAK256_EMPTY, U256,
 };
-use evm2::bytecode::Bytecode;
 use reth_db_api::{
     tables,
     transaction::{DbTx, DbTxMut},
@@ -20,13 +19,12 @@ use reth_db_api::{
 };
 use reth_downloaders::snap::VerifiedAccountRange;
 use reth_primitives_traits::Account;
-use reth_storage_api::{
-    DBProvider, MetadataProvider, MetadataWriter, SnapAttemptId, StateChangeset, StateWriter,
-};
+use reth_storage_api::{DBProvider, MetadataProvider, MetadataWriter, SnapAttemptId, StateWriter};
 use reth_trie_common::{
     root::storage_root, HashedPostState, HashedPostStateSorted, HashedStorage, TrieAccount,
     EMPTY_ROOT_HASH,
 };
+use revm::{bytecode::Bytecode, database::states::StateChangeset};
 use serde::{Deserialize, Serialize};
 use std::ops::Bound;
 
@@ -47,7 +45,8 @@ pub trait SnapAccountStore {
     /// Persists `range` with its storage and code, replacing its key interval.
     ///
     /// Storage must match each account's root, supplied or persisted ahead of the range by
-    /// [`SnapStorageStore`], and code must be supplied or already stored.
+    /// [`SnapStorageStore`], and code must be supplied or already stored. Persisted storage only
+    /// counts once catch-up has carried it to the pivot.
     fn commit_account_range(
         &self,
         write: SnapWrite,
@@ -116,7 +115,7 @@ impl AccountCoverage {
 
 // The coverage record as persisted, tied to the attempt that recorded it.
 #[derive(Serialize, Deserialize)]
-struct StoredCoverage {
+pub(crate) struct StoredCoverage {
     // Encoding version, checked before the rest is decoded.
     version: u32,
     // Attempt the coverage belongs to.
@@ -179,6 +178,16 @@ impl<T: MetadataProvider> SnapAccountStore for T {
         let coverage = self.account_coverage(write)?.ok_or(SnapSyncError::NoCoverage)?;
         let advanced = coverage.advance(range)?;
         let progress = self.storage_progress(write, range.origin())?;
+        // Slots persisted before the pivot moved hold its old values until the lists reach it.
+        if progress != StorageProgress::START &&
+            let Some(catch_up) = self.catch_up_progress(write)? &&
+            catch_up.applied().number < attempt.pivot().number
+        {
+            return Err(SnapSyncError::CatchUpBehindPivot {
+                applied: catch_up.applied().number,
+                pivot: attempt.pivot().number,
+            })
+        }
         let dependencies = RangeDependencies::new(range.accounts(), storages, bytecodes);
         let persisted = dependencies.verify(range.accounts(), &progress, self.tx_ref())?;
 
@@ -187,6 +196,10 @@ impl<T: MetadataProvider> SnapAccountStore for T {
         self.remove_storages_except(interval, &persisted)?;
         dependencies.write(self)?;
         StoredCoverage::new(write.attempt(), advanced).write(self)?;
+        // A page ending before contracts with persisted storage leaves them to the next range.
+        if let Some(next) = advanced.next() {
+            progress.carry_to(self, write, next)?;
+        }
         Ok(advanced)
     }
 
@@ -321,11 +334,7 @@ impl RangeDependencies {
     fn write(self, writer: &impl StateWriter) -> Result<(), SnapSyncError> {
         writer.write_hashed_state(&self.state)?;
         writer.write_state_changes(StateChangeset {
-            contracts: self
-                .bytecodes
-                .into_iter()
-                .map(|(hash, code)| (hash, reth_primitives_traits::Bytecode(code)))
-                .collect(),
+            contracts: self.bytecodes,
             ..Default::default()
         })?;
         Ok(())
@@ -553,7 +562,7 @@ mod tests {
         let provider = factory.database_provider_rw().unwrap();
         provider
             .write_state_changes(StateChangeset {
-                contracts: vec![(code().hash_slow(), code().into())],
+                contracts: vec![(code().hash_slow(), code())],
                 ..Default::default()
             })
             .unwrap();

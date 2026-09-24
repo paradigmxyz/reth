@@ -11,6 +11,7 @@ repository.workspace = true
 workspace = true
 
 [dependencies]
+revm.workspace = true
 # reth
 reth-engine-primitives.workspace = true
 reth-evm = { workspace = true, features = ["witness"] }

@@ -37,8 +37,6 @@ pub mod test_utils;
 pub mod either_writer;
 pub use either_writer::*;
 
-mod writer;
-
 mod bal;
 pub use bal::{BalConfig, InMemoryBalStore, RocksDBBalStore};
 
@@ -48,13 +46,13 @@ pub use reth_chain_state::{
 };
 pub use reth_execution_types::*;
 /// Re-export `OriginalValuesKnown`
-pub use reth_storage_api::OriginalValuesKnown;
+pub use revm::database::states::OriginalValuesKnown;
 // reexport traits to avoid breaking changes
 pub use reth_static_file_types as static_file;
 pub use reth_storage_api::{
-    BalNotification, BalNotificationStream, BalProvider, BalStore, BalStoreHandle,
-    GetBlockAccessListLimit, HistoryWriter, MetadataProvider, MetadataWriter, NoopBalStore, RawBal,
-    StateWriteConfig, StatsReader, StorageSettings, StorageSettingsCache,
+    BalProvider, BalStore, BalStoreHandle, GetBlockAccessListLimit, HistoryWriter,
+    MetadataProvider, MetadataWriter, NoopBalStore, RawBal, StateWriteConfig, StatsReader,
+    StorageSettings, StorageSettingsCache,
 };
 /// Re-export provider error.
 pub use reth_storage_errors::provider::{ProviderError, ProviderResult};

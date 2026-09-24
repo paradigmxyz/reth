@@ -57,6 +57,7 @@ mod sparse_trie;
 
 use self::sparse_trie::{SparseTrieCacheTask, SparseTrieTaskMetrics};
 use crate::tree::{metrics::BlockValidationMetrics, EngineApiTreeState, ExecutionEnv, TreeConfig};
+use alloy_evm::block::OnStateHook;
 use alloy_primitives::B256;
 use crossbeam_channel::{Receiver as CrossbeamReceiver, Sender as CrossbeamSender};
 use reth_chain_state::{ExecutedBlock, PreservedSparseTrie};
@@ -1040,7 +1041,7 @@ where
         let (fallback_tx, fallback_rx) = mpsc::channel();
         executor.spawn_blocking_named("serial-root", move || {
             let result = (|| {
-                let hashed_state = Arc::new(provider.hashed_post_state(output.state.inner())?);
+                let hashed_state = Arc::new(provider.hashed_post_state(&output.state)?);
                 let (root, updates) =
                     provider.state_root_with_updates(hashed_state.as_ref().clone())?;
                 Ok((root, updates, hashed_state))
@@ -1060,7 +1061,7 @@ where
         output: &BlockExecutionOutput<N::Receipt>,
     ) -> ProviderResult<StateRootJobOutcome> {
         let provider = self.state_provider_factory.database_provider_ro()?;
-        let hashed_state = Arc::new(provider.hashed_post_state(output.state.inner())?);
+        let hashed_state = Arc::new(provider.hashed_post_state(&output.state)?);
         let (state_root, trie_updates) =
             provider.state_root_with_updates(hashed_state.as_ref().clone())?;
         self.metrics.state_root_task_fallback_success_total.increment(1);
@@ -1243,7 +1244,7 @@ where
     debug!(target: "engine::tree::state_root_strategy", "Comparing trie updates with serial computation");
 
     match state_provider_factory.database_provider_ro().and_then(|provider| {
-        let hashed_state = provider.hashed_post_state(output.state.inner())?;
+        let hashed_state = provider.hashed_post_state(&output.state)?;
         provider.state_root_with_updates(hashed_state)
     }) {
         Ok((serial_root, serial_trie_updates)) => {
@@ -1299,8 +1300,8 @@ mod tests {
     use reth_chainspec::ChainSpec;
     use reth_db_common::init::init_genesis;
     use reth_ethereum_primitives::EthPrimitives;
+    use reth_evm::OnStateHook;
     use reth_evm_ethereum::EthEvmConfig;
-    use reth_execution_types::{execution_state_from_init, EvmState};
     use reth_primitives_traits::{Account, StorageEntry};
     use reth_provider::{
         providers::BlockchainProvider, test_utils::create_test_provider_factory_with_chain_spec,
@@ -1309,7 +1310,7 @@ mod tests {
     use reth_storage_overlay::{OverlayManager, OverlayStateProviderFactory};
     use reth_testing_utils::generators;
     use reth_trie::test_utils::state_root;
-    use std::collections::BTreeMap;
+    use revm::state::{AccountInfo, AccountStatus, EvmState, EvmStorageSlot, TransactionId};
 
     #[test]
     fn sparse_trie_prune_before_uses_requested_range() {
@@ -1373,28 +1374,39 @@ mod tests {
 
         for _ in 0..updates_per_account {
             let num_accounts_in_update = rng.random_range(1..=num_accounts);
-            let mut state_init = Vec::with_capacity(num_accounts_in_update);
+            let mut state_update = EvmState::default();
 
             for &address in &all_addresses[0..num_accounts_in_update] {
-                let mut storage = BTreeMap::new();
+                let mut storage = HashMap::default();
                 if rng.random_bool(0.7) {
                     for _ in 0..rng.random_range(1..10) {
                         let slot = U256::from(rng.random::<u64>());
-                        storage.insert(slot, (U256::ZERO, U256::from(rng.random::<u64>())));
+                        storage.insert(
+                            slot,
+                            EvmStorageSlot::new_changed(
+                                U256::ZERO,
+                                U256::from(rng.random::<u64>()),
+                                TransactionId::ZERO,
+                            ),
+                        );
                     }
                 }
 
-                let account = Account {
+                let mut account = revm::state::Account::default();
+                account.info = AccountInfo {
                     balance: U256::from(rng.random::<u64>()),
                     nonce: rng.random::<u64>(),
-                    bytecode_hash: Some(KECCAK_EMPTY),
-                    #[cfg(feature = "account-ext")]
-                    extension: Default::default(),
+                    code_hash: KECCAK_EMPTY,
+                    code: Some(Default::default()),
+                    account_id: None,
                 };
-                state_init.push((address, (None, Some(account), storage)));
+                account.storage = storage;
+                account.status = AccountStatus::Touched;
+                account.transaction_id = TransactionId::ZERO;
+                state_update.insert(address, account);
             }
 
-            updates.push(execution_state_from_init(state_init, []));
+            updates.push(state_update);
         }
 
         updates
@@ -1413,30 +1425,18 @@ mod tests {
         {
             let provider_rw = factory.provider_rw().expect("failed to get provider");
             for update in &state_updates {
-                let account_updates = update.accounts().map(|(address, account)| {
-                    let account = account.current.as_ref().map(|info| Account {
-                        nonce: info.nonce,
-                        balance: info.balance,
-                        bytecode_hash: Some(info.code_hash),
-                        #[cfg(feature = "account-ext")]
-                        extension: reth_primitives_traits::AccountExtension::from_shared(
-                            info.extension.clone().into_shared(),
-                        ),
-                    });
-                    (address, account)
+                let account_updates = update.iter().map(|(address, account)| {
+                    (*address, Some(Account::from_revm_account(account)))
                 });
                 provider_rw
                     .insert_account_for_hashing(account_updates)
                     .expect("failed to insert accounts");
 
-                let storage_updates = update.accounts().map(|(address, _)| {
-                    let storage_entries = update.storage().filter_map(move |(key, value)| {
-                        (key.address() == address).then_some(StorageEntry {
-                            key: B256::new(key.key().to_be_bytes()),
-                            value: value.current,
-                        })
+                let storage_updates = update.iter().map(|(address, account)| {
+                    let storage_entries = account.storage.iter().map(|(slot, value)| {
+                        StorageEntry { key: B256::from(*slot), value: value.present_value }
                     });
-                    (address, storage_entries)
+                    (*address, storage_entries)
                 });
                 provider_rw
                     .insert_storage_for_hashing(storage_updates)
@@ -1446,23 +1446,14 @@ mod tests {
         }
 
         for update in &state_updates {
-            for (address, account) in update.accounts() {
-                let storage: HashMap<B256, U256> = update
-                    .storage()
-                    .filter(|(key, _)| key.address() == address)
-                    .map(|(key, value)| (B256::new(key.key().to_be_bytes()), value.current))
+            for (address, account) in update {
+                let storage: HashMap<B256, U256> = account
+                    .storage
+                    .iter()
+                    .map(|(key, value)| (B256::from(*key), value.present_value))
                     .collect();
-                let info = account.current.as_ref().expect("mock update has a present account");
-                let entry = accumulated_state.entry(address).or_default();
-                entry.0 = Account {
-                    nonce: info.nonce,
-                    balance: info.balance,
-                    bytecode_hash: Some(info.code_hash),
-                    #[cfg(feature = "account-ext")]
-                    extension: reth_primitives_traits::AccountExtension::from_shared(
-                        info.extension.clone().into_shared(),
-                    ),
-                };
+                let entry = accumulated_state.entry(*address).or_default();
+                entry.0 = Account::from_revm_account(account);
                 entry.1.extend(storage);
             }
         }

@@ -1,21 +1,14 @@
 //! EVM-backed Ethereum execution helpers.
+use reth_execution_types::{BlockState, EvmState, TransactionChanges};
 
-use crate::dao_fork;
+use alloy_evm::eth::dao_fork;
 
-#[cfg(test)]
-use crate::convert::recovered_tx_envelope;
-#[cfg(test)]
-use crate::RethReceiptBuilder;
 use alloc::{
     boxed::Box,
     format,
     string::{String, ToString},
     vec::Vec,
 };
-#[cfg(test)]
-use alloy_consensus::Transaction;
-#[cfg(test)]
-use alloy_consensus::TxType;
 use alloy_consensus::{
     constants::ETH_TO_WEI, transaction::Recovered, BlockHeader, Header, TxReceipt,
 };
@@ -27,49 +20,20 @@ use alloy_eips::{
     eip7251::CONSOLIDATION_REQUEST_TYPE,
     eip7685::Requests,
 };
-#[cfg(test)]
-use alloy_primitives::keccak256;
 use alloy_primitives::{map::AddressMap, Address, Bytes, Log, B256, KECCAK256_EMPTY, U256};
 use alloy_sol_types::{sol, SolEvent};
-use core::{any::Any, convert::Infallible};
-#[cfg(test)]
-use evm2::evm::Db;
-#[cfg(test)]
-use evm2::Precompiles;
+use core::any::Any;
 use evm2::{
-    bytecode::Bytecode as ExecutableBytecode,
     evm::{
-        AccountChangeRef, AccountInfo, BlockStateAccumulator, StateChangeSink, StateChangeSource,
-        StorageChange, SystemTx, BEACON_ROOTS_ADDRESS, BUILDER_DEPOSIT_REQUEST_ADDRESS,
-        BUILDER_EXIT_REQUEST_ADDRESS, CONSOLIDATION_REQUEST_ADDRESS, HISTORY_STORAGE_ADDRESS,
-        WITHDRAWAL_REQUEST_ADDRESS,
+        AccountChangeRef, AccountInfo, StateChangeSink, StateChangeSource, SystemTx,
+        BEACON_ROOTS_ADDRESS, BUILDER_DEPOSIT_REQUEST_ADDRESS, BUILDER_EXIT_REQUEST_ADDRESS,
+        CONSOLIDATION_REQUEST_ADDRESS, HISTORY_STORAGE_ADDRESS, WITHDRAWAL_REQUEST_ADDRESS,
     },
     registry::HandlerError,
     ErrorCode, Evm, EvmTypes, SpecId, TxResult, TxResultWithState,
 };
-#[cfg(test)]
-use evm2::{
-    env::BlockEnv as EvmBlockEnv,
-    ethereum::{ethereum_tx_registry, RecoveredTxEnvelope},
-    evm::{precompile::PrecompileProvider, Database, DynDatabase},
-    BaseEvmTypes, ExecutionConfig, Version,
-};
-#[cfg(test)]
-type BlockEnv = EvmBlockEnv<BaseEvmTypes>;
 use reth_ethereum_forks::EthereumHardforks;
-#[cfg(test)]
-use reth_ethereum_primitives::eip7997::{FACTORY_ADDRESS, FACTORY_CODE};
-#[cfg(test)]
-use reth_ethereum_primitives::Receipt;
-#[cfg(test)]
-use reth_ethereum_primitives::TransactionSigned;
 use reth_evm::{BlockExecutionError, BlockValidationError, EvmError, InvalidTxError};
-#[cfg(test)]
-use reth_evm::{ReceiptBuilder, ReceiptBuilderCtx};
-#[cfg(test)]
-use reth_execution_types::{BlockExecutionOutput, BlockExecutionResult};
-#[cfg(test)]
-use reth_trie_common::{HashedPostState, KeccakKeyHasher};
 
 const DEPOSIT_BYTES_SIZE: usize = 48 + 32 + 8 + 96 + 8;
 const BUILDER_DEPOSIT_REQUEST_TYPE: u8 = 0x03;
@@ -253,50 +217,6 @@ const fn handler_error_is_invalid_tx(err: &HandlerError) -> bool {
     !matches!(err, HandlerError::Fatal(_) | HandlerError::WrongTransactionType { .. })
 }
 
-/// Error returned by payload execution over a fallible transaction stream.
-#[cfg(test)]
-#[derive(Debug)]
-pub(crate) enum PayloadExecutionError<E, TxErr, ReceiptErr = Infallible> {
-    /// The payload executor failed while executing the block.
-    Execution(E),
-    /// The transaction stream failed before yielding the next transaction.
-    Transaction(TxErr),
-    /// The receipt callback failed after a transaction committed.
-    Receipt(ReceiptErr),
-}
-
-#[cfg(test)]
-impl<E, TxErr, ReceiptErr> From<E> for PayloadExecutionError<E, TxErr, ReceiptErr> {
-    fn from(err: E) -> Self {
-        Self::Execution(err)
-    }
-}
-
-#[cfg(test)]
-impl<E, TxErr, ReceiptErr> core::fmt::Display for PayloadExecutionError<E, TxErr, ReceiptErr>
-where
-    E: core::fmt::Display,
-    TxErr: core::fmt::Display,
-    ReceiptErr: core::fmt::Display,
-{
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        match self {
-            Self::Execution(err) => write!(f, "payload execution error: {err}"),
-            Self::Transaction(err) => write!(f, "transaction stream error: {err}"),
-            Self::Receipt(err) => write!(f, "receipt callback error: {err}"),
-        }
-    }
-}
-
-#[cfg(test)]
-impl<E, TxErr, ReceiptErr> core::error::Error for PayloadExecutionError<E, TxErr, ReceiptErr>
-where
-    E: core::error::Error + Send + Sync + 'static,
-    TxErr: core::error::Error + Send + Sync + 'static,
-    ReceiptErr: core::error::Error + Send + Sync + 'static,
-{
-}
-
 /// Additional block-level execution context.
 #[derive(Debug, Clone, Copy, Default)]
 pub(crate) struct BlockExecutionContext<'a> {
@@ -319,289 +239,6 @@ pub(crate) struct BlockSystemCalls {
     pub parent_beacon_block_root: Option<B256>,
 }
 
-/// Inputs required to execute an Ethereum block with evm2.
-#[cfg(test)]
-pub(crate) struct BlockExecutionInput<'a, DB> {
-    spec_id: SpecId,
-    block_env: BlockEnv,
-    database: DB,
-    block_number: u64,
-    context: BlockExecutionContext<'a>,
-    precompiles: Box<dyn PrecompileProvider<BaseEvmTypes>>,
-}
-
-#[cfg(test)]
-impl<'a, DB> BlockExecutionInput<'a, DB> {
-    /// Creates a new Ethereum block execution input.
-    pub(crate) fn new(
-        spec_id: SpecId,
-        block_env: BlockEnv,
-        database: DB,
-        block_number: u64,
-        context: BlockExecutionContext<'a>,
-        precompiles: Box<dyn PrecompileProvider<BaseEvmTypes>>,
-    ) -> Self {
-        Self { spec_id, block_env, database, block_number, context, precompiles }
-    }
-}
-
-#[cfg(test)]
-impl<DB> BlockExecutionInput<'_, DB>
-where
-    DB: DynDatabase,
-{
-    /// Executes recovered Ethereum transactions.
-    pub(crate) fn execute_recovered_transactions(
-        self,
-        transactions: impl IntoIterator<Item = Recovered<TransactionSigned>>,
-    ) -> Result<BlockExecutionOutput<Receipt>, EthExecutionError> {
-        match self.execute_fallible_envelopes::<Infallible, Infallible, _, _, _, _>(
-            transactions.into_iter().map(recovered_tx_envelope).map(Ok::<_, Infallible>),
-            ExecutionHooks::new(|_| {}, ignore_receipt, |_| {}, false),
-        ) {
-            Ok(output) => Ok(output),
-            Err(PayloadExecutionError::Execution(err)) => Err(err),
-            Err(PayloadExecutionError::Transaction(err) | PayloadExecutionError::Receipt(err)) => {
-                match err {}
-            }
-        }
-    }
-
-    /// Executes a fallible stream of EVM-native recovered transaction envelopes.
-    ///
-    /// This consumes each transaction only when execution reaches it, so upstream transaction
-    /// conversion can continue in parallel with earlier transaction execution.
-    pub(crate) fn execute_fallible_envelopes<TxErr, ReceiptErr, I, F, R, H>(
-        self,
-        transactions: I,
-        hooks: ExecutionHooks<F, R, H>,
-    ) -> Result<
-        BlockExecutionOutput<Receipt>,
-        PayloadExecutionError<EthExecutionError, TxErr, ReceiptErr>,
-    >
-    where
-        I: IntoIterator<Item = Result<RecoveredTxEnvelope, TxErr>>,
-        F: FnMut(usize),
-        R: for<'receipt> FnMut(usize, &'receipt Receipt) -> Result<(), ReceiptErr>,
-        H: FnMut(BlockStateAccumulator),
-    {
-        let Self { spec_id, block_env, database, block_number, context, precompiles } = self;
-        let ExecutionHooks {
-            mut on_transaction_executed,
-            mut on_receipt,
-            mut on_state_update,
-            stream_state,
-        } = hooks;
-
-        let block_beneficiary = block_env.beneficiary;
-        let mut version = Version::new(spec_id);
-        version.chain_id = 1;
-        let mut evm = Evm::<BaseEvmTypes>::new_with_execution_config(
-            ExecutionConfig::for_spec_and_version(spec_id, version),
-            spec_id,
-            block_env,
-            ethereum_tx_registry(spec_id),
-            database,
-            precompiles,
-        );
-        let mut block_state = BlockStateAccumulator::new();
-        pre_execution_system_call_state_changes(
-            &mut evm,
-            &mut block_state,
-            stream_state,
-            &mut on_state_update,
-            spec_id,
-            block_number,
-            context,
-        )?;
-        let mut receipts = Vec::new();
-        let mut cumulative_gas_used = 0;
-        let mut blob_gas_used = 0;
-
-        for (index, transaction) in transactions.into_iter().enumerate() {
-            let transaction = transaction.map_err(PayloadExecutionError::Transaction)?;
-            let tx_blob_gas_used = transaction_blob_gas_used(&transaction);
-            let tx_type =
-                TxType::try_from(transaction.ty()).expect("transaction envelope has valid type");
-            let outcome = execute_transaction(
-                &mut evm,
-                &mut block_state,
-                stream_state,
-                &mut on_state_update,
-                &transaction,
-            )?;
-            cumulative_gas_used += outcome.tx_gas_used();
-            blob_gas_used += tx_blob_gas_used;
-            let receipt = RethReceiptBuilder.build_receipt::<BaseEvmTypes>(ReceiptBuilderCtx {
-                tx_type,
-                result: outcome,
-                cumulative_gas_used,
-            });
-            on_receipt(index, &receipt).map_err(PayloadExecutionError::Receipt)?;
-            receipts.push(receipt);
-            on_transaction_executed(index + 1);
-        }
-
-        let mut requests = block_requests_from_receipts(spec_id, context, &receipts)?;
-        post_execution_system_call_state_changes(
-            &mut evm,
-            &mut block_state,
-            stream_state,
-            &mut on_state_update,
-            spec_id,
-            context,
-            &mut requests,
-        )?;
-
-        post_block_balance_state_changes(
-            &mut evm,
-            &mut block_state,
-            stream_state,
-            &mut on_state_update,
-            base_block_reward_for_spec_id(spec_id),
-            false,
-            block_number,
-            block_beneficiary,
-            context.ommers,
-            context.withdrawals,
-        )?;
-
-        let gas_used = receipts.last().map_or(0, TxReceipt::cumulative_gas_used);
-        let output = BlockExecutionOutput::new(
-            BlockExecutionResult { receipts, requests, gas_used, blob_gas_used },
-            block_state,
-        );
-
-        Ok(output)
-    }
-}
-
-#[cfg(test)]
-pub(crate) fn transaction_blob_gas_used(transaction: &RecoveredTxEnvelope) -> u64 {
-    transaction.as_eip4844().map(|tx| tx.blob_gas_used().unwrap_or_default()).unwrap_or_default()
-}
-
-/// Hooks invoked while executing an Ethereum block.
-#[cfg(test)]
-pub(crate) struct ExecutionHooks<F, R, H> {
-    on_transaction_executed: F,
-    on_receipt: R,
-    on_state_update: H,
-    stream_state: bool,
-}
-
-#[cfg(test)]
-impl<F, R, H> ExecutionHooks<F, R, H> {
-    /// Creates execution hooks.
-    pub(crate) const fn new(
-        on_transaction_executed: F,
-        on_receipt: R,
-        on_state_update: H,
-        stream_state: bool,
-    ) -> Self {
-        Self { on_transaction_executed, on_receipt, on_state_update, stream_state }
-    }
-}
-
-#[cfg(test)]
-const fn ignore_receipt(_index: usize, _receipt: &Receipt) -> Result<(), Infallible> {
-    Ok(())
-}
-
-/// Executes a block worth of recovered Ethereum transactions with the active EVM.
-#[cfg(test)]
-fn execute_block<DB>(
-    spec_id: SpecId,
-    block_env: BlockEnv,
-    database: DB,
-    block_number: u64,
-    transactions: impl IntoIterator<Item = Recovered<TransactionSigned>>,
-) -> Result<BlockExecutionOutput<Receipt>, EthExecutionError>
-where
-    DB: Database,
-{
-    execute_block_with_withdrawals(spec_id, block_env, database, block_number, transactions, None)
-}
-
-/// Executes a block worth of recovered Ethereum transactions and post-block withdrawals with the
-/// active EVM.
-#[cfg(test)]
-fn execute_block_with_withdrawals<DB>(
-    spec_id: SpecId,
-    block_env: BlockEnv,
-    database: DB,
-    block_number: u64,
-    transactions: impl IntoIterator<Item = Recovered<TransactionSigned>>,
-    withdrawals: Option<&[Withdrawal]>,
-) -> Result<BlockExecutionOutput<Receipt>, EthExecutionError>
-where
-    DB: Database,
-{
-    execute_block_with_context(
-        spec_id,
-        block_env,
-        database,
-        block_number,
-        transactions,
-        BlockExecutionContext {
-            system_calls: None,
-            ommers: None,
-            withdrawals,
-            deposit_contract_address: None,
-        },
-    )
-}
-
-/// Executes a block worth of recovered Ethereum transactions with additional block-level context.
-#[cfg(test)]
-fn execute_block_with_context<DB>(
-    spec_id: SpecId,
-    block_env: BlockEnv,
-    database: DB,
-    block_number: u64,
-    transactions: impl IntoIterator<Item = Recovered<TransactionSigned>>,
-    context: BlockExecutionContext<'_>,
-) -> Result<BlockExecutionOutput<Receipt>, EthExecutionError>
-where
-    DB: Database,
-{
-    execute_block_with_context_and_precompiles(
-        spec_id,
-        block_env,
-        database,
-        block_number,
-        transactions,
-        context,
-        Box::new(Precompiles::base(spec_id)),
-    )
-}
-
-/// Executes a block worth of recovered Ethereum transactions with additional block-level context
-/// and the provided precompile provider.
-#[cfg(test)]
-fn execute_block_with_context_and_precompiles<DB>(
-    spec_id: SpecId,
-    block_env: BlockEnv,
-    database: DB,
-    block_number: u64,
-    transactions: impl IntoIterator<Item = Recovered<TransactionSigned>>,
-    context: BlockExecutionContext<'_>,
-    precompiles: Box<dyn PrecompileProvider<BaseEvmTypes>>,
-) -> Result<BlockExecutionOutput<Receipt>, EthExecutionError>
-where
-    DB: Database,
-{
-    BlockExecutionInput::new(
-        spec_id,
-        block_env,
-        Db::new(database),
-        block_number,
-        context,
-        precompiles,
-    )
-    .execute_recovered_transactions(transactions)
-}
-
 fn map_handler_error<T: EvmTypes>(evm: &mut Evm<'_, T>, err: HandlerError) -> EthExecutionError {
     match err {
         HandlerError::Fatal(code) => map_db_error_code(evm, code),
@@ -616,124 +253,31 @@ fn take_database_error<T: EvmTypes>(evm: &mut Evm<'_, T>, code: ErrorCode) -> Dy
     DynamicDatabaseError::new(evm.database_mut().error(code))
 }
 
-struct RethStateSink<'a> {
-    execution_sink: Option<&'a mut dyn StateChangeSink<Error = Infallible>>,
-    block_state: &'a mut BlockStateAccumulator,
-    // Transfer native changes to consumers without hashing keys on the execution thread.
-    streamed_state: Option<BlockStateAccumulator>,
-}
-
-impl<'a> RethStateSink<'a> {
-    fn new(
-        execution_sink: Option<&'a mut dyn StateChangeSink<Error = Infallible>>,
-        block_state: &'a mut BlockStateAccumulator,
-        stream_state: bool,
-    ) -> Self {
-        Self {
-            execution_sink,
-            block_state,
-            streamed_state: stream_state.then(BlockStateAccumulator::default),
-        }
-    }
-
-    fn flush_streamed_state(self, on_state_update: &mut impl FnMut(BlockStateAccumulator)) {
-        if let Some(streamed_state) = self.streamed_state {
-            send_state_update(streamed_state, on_state_update);
-        }
-    }
-}
-
-impl StateChangeSink for RethStateSink<'_> {
-    type Error = Infallible;
-
-    fn bytecode(&mut self, code_hash: B256, code: &ExecutableBytecode) -> Result<(), Self::Error> {
-        if let Some(execution_sink) = self.execution_sink.as_deref_mut() {
-            execution_sink.bytecode(code_hash, code)?;
-        }
-        self.block_state.bytecode(code_hash, code)?;
-        if let Some(streamed_state) = self.streamed_state.as_mut() {
-            streamed_state.bytecode(code_hash, code)?;
-        }
-        Ok(())
-    }
-
-    fn account(&mut self, change: AccountChangeRef<'_>) -> Result<(), Self::Error> {
-        if let Some(execution_sink) = self.execution_sink.as_deref_mut() {
-            execution_sink.account(change)?;
-        }
-        self.block_state.account(change)?;
-        if let Some(streamed_state) = self.streamed_state.as_mut() {
-            streamed_state.account(change)?;
-        }
-        Ok(())
-    }
-
-    fn storage_wipe(&mut self, address: Address) -> Result<(), Self::Error> {
-        if let Some(execution_sink) = self.execution_sink.as_deref_mut() {
-            execution_sink.storage_wipe(address)?;
-        }
-        self.block_state.storage_wipe(address)?;
-        if let Some(streamed_state) = self.streamed_state.as_mut() {
-            streamed_state.storage_wipe(address)?;
-        }
-        Ok(())
-    }
-
-    fn storage(&mut self, change: StorageChange) -> Result<(), Self::Error> {
-        if let Some(execution_sink) = self.execution_sink.as_deref_mut() {
-            execution_sink.storage(change)?;
-        }
-        self.block_state.storage(change)?;
-        if let Some(streamed_state) = self.streamed_state.as_mut() {
-            streamed_state.storage(change)?;
-        }
-        Ok(())
-    }
-}
-
-fn send_state_update(
-    state: BlockStateAccumulator,
-    on_state_update: &mut impl FnMut(BlockStateAccumulator),
-) {
+fn send_state_update(state: EvmState, on_state_update: &mut impl FnMut(EvmState)) {
     if !state.is_empty() {
         on_state_update(state);
     }
 }
 
-#[cfg(test)]
-pub(crate) fn execute_transaction<T: EvmTypes>(
-    evm: &mut Evm<'_, T>,
-    block_state: &mut BlockStateAccumulator,
-    stream_state: bool,
-    on_state_update: &mut impl FnMut(BlockStateAccumulator),
-    transaction: &Recovered<T::Tx>,
-) -> Result<TxResult<T>, EthExecutionError>
-where
-    T::Tx: Typed2718,
-{
-    let output = execute_transaction_without_commit(evm, transaction)?;
-    Ok(commit_detached_transaction(evm, block_state, stream_state, on_state_update, output))
-}
-
 pub(crate) fn execute_transaction_with_condition<T: EvmTypes>(
     evm: &mut Evm<'_, T>,
-    block_state: &mut BlockStateAccumulator,
+    block_state: &mut BlockState,
     stream_state: bool,
-    on_state_update: &mut impl FnMut(BlockStateAccumulator),
+    on_state_update: &mut impl FnMut(EvmState),
     transaction: &Recovered<T::Tx>,
     commit: impl FnOnce(&TxResult<T>) -> reth_evm::CommitChanges,
 ) -> Result<Option<TxResult<T>>, EthExecutionError>
 where
     T::Tx: Typed2718,
 {
-    let mut sink = RethStateSink::new(None, block_state, stream_state);
+    let mut changes = TransactionChanges::default();
     let result = match evm.transact(transaction) {
         Ok(executed) => {
             if let Some(code) = executed.result().error_code {
                 let _ = executed.discard();
                 Err(HandlerError::Fatal(code))
             } else if commit(executed.result()).should_commit() {
-                let Ok(result) = executed.commit_with(&mut sink);
+                let Ok(result) = executed.commit_with(&mut changes);
                 Ok(Some(result))
             } else {
                 let _ = executed.discard();
@@ -742,7 +286,10 @@ where
         }
         Err(error) => Err(error),
     };
-    sink.flush_streamed_state(on_state_update);
+    block_state.commit(&changes);
+    if stream_state {
+        send_state_update(changes.state, on_state_update);
+    }
     result.map_err(|error| map_handler_error(evm, error))
 }
 
@@ -780,9 +327,9 @@ where
 
 pub(crate) fn commit_detached_transaction<T: EvmTypes>(
     evm: &mut Evm<'_, T>,
-    block_state: &mut BlockStateAccumulator,
+    block_state: &mut BlockState,
     stream_state: bool,
-    on_state_update: &mut impl FnMut(BlockStateAccumulator),
+    on_state_update: &mut impl FnMut(EvmState),
     output: TxResultWithState<T>,
 ) -> TxResult<T> {
     let TxResultWithState { result, pending_state, .. } = output;
@@ -792,15 +339,16 @@ pub(crate) fn commit_detached_transaction<T: EvmTypes>(
 
 pub(crate) fn commit_pending_state<T: EvmTypes>(
     evm: &mut Evm<'_, T>,
-    block_state: &mut BlockStateAccumulator,
+    block_state: &mut BlockState,
     stream_state: bool,
-    on_state_update: &mut impl FnMut(BlockStateAccumulator),
+    on_state_update: &mut impl FnMut(EvmState),
     pending_state: &evm2::evm::PendingState,
 ) {
-    {
-        let mut sink = RethStateSink::new(None, block_state, stream_state);
-        let Ok(()) = pending_state.visit(&mut sink);
-        sink.flush_streamed_state(on_state_update);
+    let mut changes = TransactionChanges::default();
+    let Ok(()) = pending_state.visit(&mut changes);
+    block_state.commit(&changes);
+    if stream_state {
+        send_state_update(changes.state, on_state_update);
     }
     evm.overlay_db_mut().commit_pending(pending_state);
 }
@@ -815,9 +363,9 @@ fn map_db_error_code<T: EvmTypes>(evm: &mut Evm<'_, T>, code: ErrorCode) -> EthE
 
 pub(crate) fn pre_execution_system_call_state_changes<T: EvmTypes>(
     evm: &mut Evm<'_, T>,
-    block_state: &mut BlockStateAccumulator,
+    block_state: &mut BlockState,
     stream_state: bool,
-    on_state_update: &mut impl FnMut(BlockStateAccumulator),
+    on_state_update: &mut impl FnMut(EvmState),
     spec_id: SpecId,
     block_number: u64,
     context: BlockExecutionContext<'_>,
@@ -917,9 +465,9 @@ where
 
 pub(crate) fn post_execution_system_call_state_changes<T: EvmTypes>(
     evm: &mut Evm<'_, T>,
-    block_state: &mut BlockStateAccumulator,
+    block_state: &mut BlockState,
     stream_state: bool,
-    on_state_update: &mut impl FnMut(BlockStateAccumulator),
+    on_state_update: &mut impl FnMut(EvmState),
     spec_id: SpecId,
     context: BlockExecutionContext<'_>,
     requests: &mut Requests,
@@ -987,14 +535,14 @@ pub(crate) fn post_execution_system_call_state_changes<T: EvmTypes>(
 
 fn execute_system_call<T: EvmTypes>(
     evm: &mut Evm<'_, T>,
-    block_state: &mut BlockStateAccumulator,
+    block_state: &mut BlockState,
     stream_state: bool,
-    on_state_update: &mut impl FnMut(BlockStateAccumulator),
+    on_state_update: &mut impl FnMut(EvmState),
     address: Address,
     data: Bytes,
 ) -> Result<TxResult<T>, EthExecutionError> {
     enum SystemCallResolution<U: EvmTypes> {
-        Outcome(TxResult<U>),
+        Outcome(TxResultWithState<U>),
         DatabaseError(ErrorCode),
         HandlerError(HandlerError),
         Failed(String),
@@ -1010,12 +558,7 @@ fn execute_system_call<T: EvmTypes>(
                 let _ = executed.discard();
                 SystemCallResolution::Failed(reason)
             } else {
-                let outcome = {
-                    let mut sink = RethStateSink::new(None, block_state, stream_state);
-                    let Ok(outcome) = executed.commit_with(&mut sink);
-                    sink.flush_streamed_state(on_state_update);
-                    outcome
-                };
+                let outcome = executed.detach();
                 SystemCallResolution::<T>::Outcome(outcome)
             }
         }
@@ -1023,7 +566,13 @@ fn execute_system_call<T: EvmTypes>(
     };
 
     match resolution {
-        SystemCallResolution::Outcome(outcome) => Ok(outcome),
+        SystemCallResolution::Outcome(outcome) => Ok(commit_detached_transaction(
+            evm,
+            block_state,
+            stream_state,
+            on_state_update,
+            outcome,
+        )),
         SystemCallResolution::DatabaseError(code) => Err(map_db_error_code(evm, code)),
         SystemCallResolution::HandlerError(err) => Err(map_handler_error(evm, err)),
         SystemCallResolution::Failed(reason) => {
@@ -1034,43 +583,35 @@ fn execute_system_call<T: EvmTypes>(
 
 fn commit_state_changes<T: EvmTypes>(
     evm: &mut Evm<'_, T>,
-    block_state: &mut BlockStateAccumulator,
+    block_state: &mut BlockState,
     stream_state: bool,
-    on_state_update: &mut impl FnMut(BlockStateAccumulator),
+    on_state_update: &mut impl FnMut(EvmState),
     changes: &[(Address, Option<AccountInfo>, Option<AccountInfo>)],
 ) {
-    let result = {
-        let mut sink = RethStateSink::new(
-            Some(evm.overlay_db_mut() as &mut dyn StateChangeSink<Error = Infallible>),
-            block_state,
-            stream_state,
-        );
-        let result = changes.iter().try_for_each(|(address, original, current)| {
-            sink.account(AccountChangeRef {
-                address: *address,
-                original: original.as_ref(),
-                current: current.as_ref(),
-                created: false,
-                selfdestructed: false,
-            })
-        });
-        if result.is_ok() {
-            sink.flush_streamed_state(on_state_update);
-        }
-        result
-    };
-    match result {
-        Ok(()) => {}
-        Err(err) => match err {},
+    let mut converted = TransactionChanges::default();
+    for (address, original, current) in changes {
+        let change = AccountChangeRef {
+            address: *address,
+            original: original.as_ref(),
+            current: current.as_ref(),
+            created: false,
+            selfdestructed: false,
+        };
+        let Ok(()) = evm.overlay_db_mut().account(change);
+        let Ok(()) = converted.account(change);
+    }
+    block_state.commit(&converted);
+    if stream_state {
+        send_state_update(converted.state, on_state_update);
     }
 }
 
 #[expect(clippy::too_many_arguments)]
 pub(crate) fn post_block_balance_state_changes<T: EvmTypes>(
     evm: &mut Evm<'_, T>,
-    block_state: &mut BlockStateAccumulator,
+    block_state: &mut BlockState,
     stream_state: bool,
-    on_state_update: &mut impl FnMut(BlockStateAccumulator),
+    on_state_update: &mut impl FnMut(EvmState),
     base_block_reward: Option<u128>,
     dao_fork_transition: bool,
     block_number: u64,
@@ -1159,19 +700,6 @@ where
     }
 }
 
-#[cfg(test)]
-const fn base_block_reward_for_spec_id(spec_id: SpecId) -> Option<u128> {
-    if spec_id.enables(SpecId::MERGE) {
-        None
-    } else if spec_id.enables(SpecId::PETERSBURG) {
-        Some(ETH_TO_WEI * 2)
-    } else if spec_id.enables(SpecId::BYZANTIUM) {
-        Some(ETH_TO_WEI * 3)
-    } else {
-        Some(ETH_TO_WEI * 5)
-    }
-}
-
 const fn block_reward(base_block_reward: u128, ommers: usize) -> u128 {
     base_block_reward + (base_block_reward >> 5) * ommers as u128
 }
@@ -1196,59 +724,94 @@ const fn empty_account() -> AccountInfo {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloc::{collections::BTreeMap, vec::Vec};
-    use alloy_consensus::{SignableTransaction, TxLegacy};
-    use alloy_eips::{
-        eip2935::{HISTORY_SERVE_WINDOW, HISTORY_STORAGE_CODE},
-        eip4788::BEACON_ROOTS_CODE,
-        eip4895::Withdrawal,
-        eip7002::WITHDRAWAL_REQUEST_PREDEPLOY_CODE,
-    };
+    use alloy_consensus::{SignableTransaction, TxLegacy, TxType};
     use alloy_genesis::Genesis;
-    use alloy_primitives::{address, Address, Bytes, Log, Signature, TxKind, B256, U256};
-    use core::convert::Infallible;
+    use alloy_primitives::{address, keccak256, Signature, TxKind};
     use evm2::{
-        bytecode::Bytecode,
-        evm::AccountInfo,
-        interpreter::{opcode::op, Word},
+        bytecode::Bytecode, env::BlockEnv as EvmBlockEnv, evm::InMemoryDB, interpreter::opcode::op,
     };
     use reth_chainspec::{Chain, ChainSpec};
     use reth_ethereum_forks::{EthereumHardfork, ForkCondition};
-    use reth_execution_types::hashed_post_state_from_execution_state;
+    use reth_ethereum_primitives::{
+        eip7997::{FACTORY_ADDRESS, FACTORY_CODE},
+        Block, BlockBody, Receipt, TransactionSigned,
+    };
+    use reth_evm::{ConfigureEvm, Executor};
+    use reth_execution_types::BlockExecutionOutput;
+    use reth_primitives_traits::RecoveredBlock;
+    use reth_trie_common::{HashedPostState, KeccakKeyHasher};
+    use std::sync::{mpsc, Arc};
 
-    fn assert_hashed_state_matches_streamed_updates(
-        output: &BlockExecutionOutput<Receipt>,
-        updates: Vec<BlockStateAccumulator>,
-    ) {
-        let mut streamed = HashedPostState::default();
-        for update in updates {
-            streamed.extend(hashed_post_state_from_execution_state::<KeccakKeyHasher>(&update));
+    type BlockEnv = EvmBlockEnv<evm2::BaseEvmTypes>;
+
+    fn execute_block(
+        spec: SpecId,
+        env: BlockEnv,
+        database: InMemoryDB,
+        transactions: impl IntoIterator<Item = Recovered<TransactionSigned>>,
+        withdrawals: Option<&[Withdrawal]>,
+    ) -> Result<BlockExecutionOutput<Receipt>, BlockExecutionError> {
+        let builder = ChainSpec::builder().chain(Chain::mainnet()).genesis(Genesis::default());
+        let chain = match spec {
+            SpecId::LONDON => builder.london_activated(),
+            SpecId::SHANGHAI => builder.shanghai_activated(),
+            SpecId::PRAGUE => builder.prague_activated(),
+            SpecId::AMSTERDAM => builder.amsterdam_activated(),
+            _ => panic!("unsupported test fork"),
         }
-        let recomputed =
-            hashed_post_state_from_execution_state::<KeccakKeyHasher>(output.state.inner());
-
-        assert_eq!(streamed.into_sorted(), recomputed.into_sorted());
-    }
-
-    fn legacy_transfer(
-        caller: Address,
-        target: Address,
-        value: U256,
-    ) -> Recovered<TransactionSigned> {
-        Recovered::new_unchecked(
-            TransactionSigned::Legacy(
-                TxLegacy {
-                    gas_price: 1,
-                    gas_limit: 21_000,
-                    to: TxKind::Call(target),
-                    value,
-                    input: Bytes::new(),
+        .build();
+        let (transactions, senders) = transactions.into_iter().map(Recovered::into_parts).unzip();
+        let block = RecoveredBlock::new_unhashed(
+            Block {
+                header: Header {
+                    number: 1,
+                    beneficiary: env.beneficiary,
+                    gas_limit: env.gas_limit.to(),
+                    timestamp: env.timestamp.to(),
+                    base_fee_per_gas: Some(env.basefee.to()),
+                    excess_blob_gas: Some(0),
+                    parent_beacon_block_root: Some(B256::ZERO),
                     ..Default::default()
+                },
+                body: BlockBody {
+                    transactions,
+                    withdrawals: withdrawals.map(|withdrawals| withdrawals.to_vec().into()),
+                    ..Default::default()
+                },
+            },
+            senders,
+        );
+        let (tx, rx) = mpsc::channel();
+        let output = crate::EthEvmConfig::new(Arc::new(chain))
+            .batch_executor(database)
+            .execute_with_state_hook(&block, move |state| tx.send(state).unwrap())?;
+        let mut streamed = HashedPostState::default();
+        for update in rx.try_iter() {
+            for (address, account) in update {
+                let hash = keccak256(address);
+                if account.is_selfdestructed() || account.info != account.original_info() {
+                    streamed.accounts.insert(
+                        hash,
+                        (!account.is_selfdestructed()).then(|| account.info.clone().into()),
+                    );
                 }
-                .into_signed(Signature::test_signature()),
-            ),
-            caller,
-        )
+                if !account.is_selfdestructed() {
+                    for (key, value) in account.storage {
+                        if value.is_changed() {
+                            streamed
+                                .storages
+                                .entry(hash)
+                                .or_default()
+                                .storage
+                                .insert(keccak256(B256::from(key)), value.present_value);
+                        }
+                    }
+                }
+            }
+        }
+        let recomputed = HashedPostState::from_bundle_state::<KeccakKeyHasher>(&output.state.state);
+        assert_eq!(streamed.into_sorted(), recomputed.into_sorted());
+        Ok(output)
     }
 
     fn create2_address(deployer: Address, salt: &[u8; 32], init_code: &Bytes) -> Address {
@@ -1259,66 +822,6 @@ mod tests {
         input.extend_from_slice(keccak256(init_code).as_slice());
         let hash = keccak256(input);
         Address::from_slice(&hash.as_slice()[12..])
-    }
-
-    #[derive(Default)]
-    struct TestDatabase {
-        accounts: BTreeMap<Address, AccountInfo>,
-        storage: BTreeMap<(Address, Word), Word>,
-    }
-
-    impl Database for TestDatabase {
-        type Error = Infallible;
-
-        fn get_account(&mut self, address: &Address) -> Result<Option<AccountInfo>, Self::Error> {
-            Ok(self.accounts.get(address).cloned())
-        }
-
-        fn get_code_by_hash(&mut self, _code_hash: &B256) -> Result<Bytecode, Self::Error> {
-            Ok(Bytecode::default())
-        }
-
-        fn get_storage(&mut self, address: &Address, key: &Word) -> Result<Word, Self::Error> {
-            Ok(self.storage.get(&(*address, *key)).copied().unwrap_or_default())
-        }
-
-        fn get_block_hash(&mut self, _number: &Word) -> Result<B256, Self::Error> {
-            Ok(B256::ZERO)
-        }
-    }
-
-    #[derive(Debug)]
-    struct TestTxError;
-
-    impl core::fmt::Display for TestTxError {
-        fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-            f.write_str("test transaction stream error")
-        }
-    }
-
-    impl core::error::Error for TestTxError {}
-
-    #[test]
-    fn executes_legacy_transfer() {
-        let caller = address!("0000000000000000000000000000000000000001");
-        let target = address!("0000000000000000000000000000000000001000");
-        let mut database = TestDatabase::default();
-        database
-            .accounts
-            .insert(caller, AccountInfo::default().with_balance(U256::from(1_000_000u64)));
-        let transaction = legacy_transfer(caller, target, U256::from(1));
-
-        let output =
-            execute_block(SpecId::FRONTIER, BlockEnv::default(), database, 1, [transaction])
-                .expect("EVM execution succeeds");
-
-        assert_eq!(output.result.gas_used, 21_000);
-        assert_eq!(output.result.receipts.len(), 1);
-        assert!(output.result.receipts[0].success);
-        assert_eq!(
-            output.account_state(&target).unwrap().current.as_ref().unwrap().balance,
-            U256::from(1)
-        );
     }
 
     #[test]
@@ -1340,13 +843,13 @@ mod tests {
         let target = create2_address(FACTORY_ADDRESS, &salt, &init_code);
         let input = Bytes::from([salt.as_slice(), init_code.as_ref()].concat());
 
-        let mut database = TestDatabase::default();
-        database.accounts.insert(
-            caller,
+        let mut database = InMemoryDB::default();
+        database.insert_account_info(
+            &caller,
             AccountInfo::default().with_nonce(1).with_balance(U256::from(ETH_TO_WEI)),
         );
-        database.accounts.insert(
-            FACTORY_ADDRESS,
+        database.insert_account_info(
+            &FACTORY_ADDRESS,
             AccountInfo::default().with_nonce(1).with_code(Bytecode::new_raw(FACTORY_CODE)),
         );
 
@@ -1369,176 +872,33 @@ mod tests {
             SpecId::AMSTERDAM,
             BlockEnv { gas_limit: U256::from(2_000_000), ..Default::default() },
             database,
-            1,
             [transaction],
+            None,
         )
         .expect("factory transaction succeeds");
 
         assert!(output.result.receipts[0].success);
-        let factory = output.account_state(&FACTORY_ADDRESS).unwrap().current.as_ref().unwrap();
+        let factory = output.account_state(&FACTORY_ADDRESS).unwrap().info.as_ref().unwrap();
         assert_eq!(factory.balance, U256::ZERO);
         assert_eq!(factory.code_hash, keccak256(FACTORY_CODE.as_ref()));
         assert_eq!(factory.nonce, 2);
 
-        let account = output.account_state(&target).unwrap().current.as_ref().unwrap();
+        let account = output.account_state(&target).unwrap().info.as_ref().unwrap();
         assert_eq!(account.nonce, 1);
         assert_eq!(output.bytecode(&account.code_hash).unwrap().original_bytes().as_ref(), &[0]);
-    }
-
-    #[test]
-    fn fallible_transaction_stream_is_consumed_lazily() {
-        let caller = address!("0000000000000000000000000000000000000001");
-        let target = address!("0000000000000000000000000000000000001000");
-        let mut database = TestDatabase::default();
-        database
-            .accounts
-            .insert(caller, AccountInfo::default().with_balance(U256::from(1_000_000u64)));
-        let transaction = legacy_transfer(caller, target, U256::from(1));
-
-        let mut executed = 0;
-        let result = BlockExecutionInput::new(
-            SpecId::FRONTIER,
-            BlockEnv::default(),
-            Db::new(database),
-            1,
-            BlockExecutionContext::default(),
-            Box::new(Precompiles::base(SpecId::FRONTIER)),
-        )
-        .execute_fallible_envelopes::<TestTxError, Infallible, _, _, _, _>(
-            [Ok(recovered_tx_envelope(transaction)), Err(TestTxError)],
-            ExecutionHooks::new(|count| executed = count, ignore_receipt, |_| {}, false),
-        );
-
-        assert_eq!(executed, 1);
-        assert!(matches!(result, Err(PayloadExecutionError::Transaction(TestTxError))));
-    }
-
-    #[test]
-    fn receipt_callback_streams_ordered_transaction_receipts() {
-        let caller = address!("0000000000000000000000000000000000000001");
-        let other = address!("0000000000000000000000000000000000000002");
-        let target = address!("0000000000000000000000000000000000001000");
-        let mut database = TestDatabase::default();
-        database
-            .accounts
-            .insert(caller, AccountInfo::default().with_balance(U256::from(1_000_000u64)));
-        database
-            .accounts
-            .insert(other, AccountInfo::default().with_balance(U256::from(1_000_000u64)));
-        let first = legacy_transfer(caller, target, U256::from(1));
-        let second = legacy_transfer(other, target, U256::from(2));
-
-        let mut streamed_receipts = Vec::new();
-        let output = BlockExecutionInput::new(
-            SpecId::FRONTIER,
-            BlockEnv::default(),
-            Db::new(database),
-            1,
-            BlockExecutionContext::default(),
-            Box::new(Precompiles::base(SpecId::FRONTIER)),
-        )
-        .execute_fallible_envelopes::<Infallible, Infallible, _, _, _, _>(
-            [Ok(recovered_tx_envelope(first)), Ok(recovered_tx_envelope(second))],
-            ExecutionHooks::new(
-                |_| {},
-                |index, receipt: &Receipt| {
-                    streamed_receipts.push((index, receipt.clone()));
-                    Ok::<(), Infallible>(())
-                },
-                |_| {},
-                false,
-            ),
-        )
-        .expect("EVM execution succeeds");
-
-        assert_eq!(streamed_receipts.len(), 2);
-        assert_eq!(streamed_receipts[0].0, 0);
-        assert_eq!(streamed_receipts[1].0, 1);
-        assert_eq!(streamed_receipts[0].1.cumulative_gas_used, 21_000);
-        assert_eq!(streamed_receipts[1].1.cumulative_gas_used, 42_000);
-        assert_eq!(
-            streamed_receipts.into_iter().map(|(_, receipt)| receipt).collect::<Vec<_>>(),
-            output.result.receipts
-        );
-    }
-
-    #[test]
-    fn state_hook_streams_updates() {
-        let caller = address!("0000000000000000000000000000000000000001");
-        let target = address!("0000000000000000000000000000000000001000");
-        let mut database = TestDatabase::default();
-        database
-            .accounts
-            .insert(caller, AccountInfo::default().with_balance(U256::from(1_000_000u64)));
-        let transaction = legacy_transfer(caller, target, U256::from(1));
-
-        let mut streamed_updates = Vec::new();
-        let output = BlockExecutionInput::new(
-            SpecId::FRONTIER,
-            BlockEnv::default(),
-            Db::new(database),
-            1,
-            BlockExecutionContext::default(),
-            Box::new(Precompiles::base(SpecId::FRONTIER)),
-        )
-        .execute_fallible_envelopes::<Infallible, Infallible, _, _, _, _>(
-            [Ok(recovered_tx_envelope(transaction))],
-            ExecutionHooks::new(
-                |_| {},
-                ignore_receipt,
-                |update| streamed_updates.push(update),
-                true,
-            ),
-        )
-        .expect("EVM execution succeeds");
-
-        assert!(!streamed_updates.is_empty());
-        assert_hashed_state_matches_streamed_updates(&output, streamed_updates);
-    }
-
-    #[test]
-    fn disabled_state_stream_does_not_emit_updates() {
-        let caller = address!("0000000000000000000000000000000000000001");
-        let target = address!("0000000000000000000000000000000000001000");
-        let mut database = TestDatabase::default();
-        database
-            .accounts
-            .insert(caller, AccountInfo::default().with_balance(U256::from(1_000_000u64)));
-        let transaction = legacy_transfer(caller, target, U256::from(1));
-
-        let mut streamed_updates = Vec::new();
-        let _output = BlockExecutionInput::new(
-            SpecId::FRONTIER,
-            BlockEnv::default(),
-            Db::new(database),
-            1,
-            BlockExecutionContext::default(),
-            Box::new(Precompiles::base(SpecId::FRONTIER)),
-        )
-        .execute_fallible_envelopes::<Infallible, Infallible, _, _, _, _>(
-            [Ok(recovered_tx_envelope(transaction))],
-            ExecutionHooks::new(
-                |_| {},
-                ignore_receipt,
-                |update| streamed_updates.push(update),
-                false,
-            ),
-        )
-        .expect("EVM execution succeeds");
-
-        assert!(streamed_updates.is_empty());
     }
 
     #[test]
     fn charges_london_sstore_set_gas() {
         let caller = address!("0000000000000000000000000000000000000001");
         let contract = address!("0000000000000000000000000000000000001000");
-        let mut database = TestDatabase::default();
-        database
-            .accounts
-            .insert(caller, AccountInfo::default().with_balance(U256::from(ETH_TO_WEI)));
-        database.accounts.insert(
-            contract,
+        let mut database = InMemoryDB::default();
+        database.insert_account_info(
+            &caller,
+            AccountInfo::default().with_balance(U256::from(ETH_TO_WEI)),
+        );
+        database.insert_account_info(
+            &contract,
             AccountInfo::default().with_nonce(1).with_code(Bytecode::new_raw(Bytes::from(vec![
                 op::PUSH1,
                 10,
@@ -1554,6 +914,7 @@ mod tests {
                     gas_price: 1_000_000_000,
                     gas_limit: 100_000,
                     to: TxKind::Call(contract),
+                    value: U256::from(1),
                     ..Default::default()
                 }
                 .into_signed(Signature::test_signature()),
@@ -1569,64 +930,37 @@ mod tests {
                 ..Default::default()
             },
             database,
-            1,
             [transaction],
+            None,
         )
         .expect("EVM execution succeeds");
 
         assert_eq!(output.result.receipts[0].cumulative_gas_used, 43_106);
+        assert!(output.result.receipts[0].success);
+        assert_eq!(output.account(&contract).unwrap().unwrap().balance, U256::from(1));
+        let sender = output.account(&caller).unwrap().unwrap();
+        assert_eq!(sender.nonce, 1);
+        assert_eq!(sender.balance, U256::from(ETH_TO_WEI) - U256::from(43_106_000_000_001u64));
         assert_eq!(output.storage(&contract, U256::ZERO).unwrap(), U256::from(10));
-    }
-
-    #[test]
-    fn rejects_transaction_gas_limit_above_block_gas_limit() {
-        let caller = address!("0000000000000000000000000000000000000001");
-        let mut database = TestDatabase::default();
-        database
-            .accounts
-            .insert(caller, AccountInfo::default().with_balance(U256::from(ETH_TO_WEI)));
-        let transaction = Recovered::new_unchecked(
-            TransactionSigned::Legacy(
-                TxLegacy {
-                    gas_price: 1,
-                    gas_limit: 2_500_000,
-                    to: TxKind::Call(Address::ZERO),
-                    ..Default::default()
-                }
-                .into_signed(Signature::test_signature()),
-            ),
-            caller,
-        );
-
-        let block_env = BlockEnv { gas_limit: U256::from(1_500_000), ..Default::default() };
-        let err = execute_block(SpecId::FRONTIER, block_env, database, 1, [transaction])
-            .expect_err("transaction gas limit above block gas limit should fail");
-
-        assert!(matches!(
-            err,
-            EthExecutionError::InvalidTx(EthInvalidTxError(
-                HandlerError::GasLimitMoreThanBlock { gas_limit, block_gas_limit }
-            )) if gas_limit == 2_500_000 && block_gas_limit == U256::from(1_500_000)
-        ));
     }
 
     #[test]
     fn applies_withdrawals_to_block_output() {
         let existing = address!("0000000000000000000000000000000000000001");
         let new = address!("0000000000000000000000000000000000000002");
-        let mut database = TestDatabase::default();
-        database.accounts.insert(existing, AccountInfo::default().with_balance(U256::from(100)));
+        let mut database = InMemoryDB::default();
+        database
+            .insert_account_info(&existing, AccountInfo::default().with_balance(U256::from(100)));
         let withdrawals = [
             Withdrawal { index: 0, validator_index: 0, address: existing, amount: 1 },
             Withdrawal { index: 1, validator_index: 1, address: new, amount: 2 },
             Withdrawal { index: 2, validator_index: 2, address: new, amount: 3 },
         ];
 
-        let output = execute_block_with_withdrawals(
+        let output = execute_block(
             SpecId::SHANGHAI,
             BlockEnv::default(),
             database,
-            1,
             core::iter::empty::<Recovered<TransactionSigned>>(),
             Some(&withdrawals),
         )
@@ -1634,11 +968,11 @@ mod tests {
 
         assert!(output.result.receipts.is_empty());
         assert_eq!(
-            output.account_state(&existing).unwrap().current.as_ref().unwrap().balance,
+            output.account_state(&existing).unwrap().info.as_ref().unwrap().balance,
             U256::from(1_000_000_100)
         );
         assert_eq!(
-            output.account_state(&new).unwrap().current.as_ref().unwrap().balance,
+            output.account_state(&new).unwrap().info.as_ref().unwrap().balance,
             U256::from(5_000_000_000u64)
         );
     }
@@ -1648,27 +982,26 @@ mod tests {
         let nonexistent = address!("0000000000000000000000000000000000000001");
         let empty = address!("0000000000000000000000000000000000000002");
         let contract = address!("0000000000000000000000000000000000000003");
-        let mut database = TestDatabase::default();
-        database.accounts.insert(empty, AccountInfo::default());
-        database.accounts.insert(contract, AccountInfo::default().with_nonce(1));
+        let mut database = InMemoryDB::default();
+        database.insert_account_info(&empty, AccountInfo::default());
+        database.insert_account_info(&contract, AccountInfo::default().with_nonce(1));
         let withdrawals = [
             Withdrawal { index: 0, validator_index: 0, address: nonexistent, amount: 0 },
             Withdrawal { index: 1, validator_index: 1, address: empty, amount: 0 },
             Withdrawal { index: 2, validator_index: 2, address: contract, amount: 0 },
         ];
 
-        let output = execute_block_with_withdrawals(
+        let output = execute_block(
             SpecId::SHANGHAI,
             BlockEnv::default(),
             database,
-            1,
             core::iter::empty::<Recovered<TransactionSigned>>(),
             Some(&withdrawals),
         )
         .expect("EVM execution succeeds");
 
         assert!(output.account_state(&nonexistent).is_none());
-        assert!(output.account_state(&empty).unwrap().current.is_none());
+        assert!(output.account_state(&empty).unwrap().info.is_none());
         assert!(output.account_state(&contract).is_none());
     }
 
@@ -1692,180 +1025,23 @@ mod tests {
     }
 
     #[test]
-    fn rejects_missing_cancun_parent_beacon_root() {
-        let err = execute_block_with_context(
-            SpecId::CANCUN,
-            BlockEnv::default(),
-            TestDatabase::default(),
-            1,
-            core::iter::empty::<Recovered<TransactionSigned>>(),
-            BlockExecutionContext {
-                system_calls: Some(BlockSystemCalls {
-                    parent_hash: B256::ZERO,
-                    parent_beacon_block_root: None,
-                }),
-                ommers: None,
-                withdrawals: None,
-                deposit_contract_address: None,
-            },
-        )
-        .expect_err("missing parent beacon block root should fail");
-
-        assert!(matches!(err, EthExecutionError::MissingParentBeaconBlockRoot));
-    }
-
-    #[test]
-    fn rejects_nonzero_cancun_genesis_parent_beacon_root() {
-        let root = B256::from([1u8; 32]);
-        let err = execute_block_with_context(
-            SpecId::CANCUN,
-            BlockEnv::default(),
-            TestDatabase::default(),
-            0,
-            core::iter::empty::<Recovered<TransactionSigned>>(),
-            BlockExecutionContext {
-                system_calls: Some(BlockSystemCalls {
-                    parent_hash: B256::ZERO,
-                    parent_beacon_block_root: Some(root),
-                }),
-                ommers: None,
-                withdrawals: None,
-                deposit_contract_address: None,
-            },
-        )
-        .expect_err("nonzero Cancun genesis parent beacon block root should fail");
-
-        assert!(matches!(
-            err,
-            EthExecutionError::CancunGenesisParentBeaconBlockRootNotZero(actual) if actual == root
-        ));
-    }
-
-    #[test]
-    fn writes_beacon_root_contract_storage() {
-        let mut database = TestDatabase::default();
-        database.accounts.insert(
-            BEACON_ROOTS_ADDRESS,
-            AccountInfo::default()
-                .with_nonce(1)
-                .with_code(Bytecode::new_raw(BEACON_ROOTS_CODE.clone())),
-        );
-
-        let timestamp = U256::from(1);
-        let parent_beacon_block_root = B256::with_last_byte(0x69);
-        let output = execute_block_with_context(
-            SpecId::CANCUN,
-            BlockEnv { number: U256::from(1), timestamp, ..Default::default() },
-            database,
-            1,
-            core::iter::empty::<Recovered<TransactionSigned>>(),
-            BlockExecutionContext {
-                system_calls: Some(BlockSystemCalls {
-                    parent_hash: B256::ZERO,
-                    parent_beacon_block_root: Some(parent_beacon_block_root),
-                }),
-                ommers: None,
-                withdrawals: None,
-                deposit_contract_address: None,
-            },
-        )
-        .expect("beacon roots system call succeeds");
-
-        let timestamp_index = timestamp % U256::from(HISTORY_SERVE_WINDOW);
-        let root_index = timestamp_index + U256::from(HISTORY_SERVE_WINDOW);
-        assert_eq!(output.storage(&BEACON_ROOTS_ADDRESS, timestamp_index).unwrap(), timestamp);
-        assert_eq!(
-            output.storage(&BEACON_ROOTS_ADDRESS, root_index).unwrap(),
-            U256::from_be_bytes(parent_beacon_block_root.0)
-        );
-    }
-
-    #[test]
-    fn writes_parent_hash_history_storage() {
-        let mut database = TestDatabase::default();
-        database.accounts.insert(
-            HISTORY_STORAGE_ADDRESS,
-            AccountInfo::default()
-                .with_nonce(1)
-                .with_code(Bytecode::new_raw(HISTORY_STORAGE_CODE.clone())),
-        );
-
-        let parent_hash = B256::with_last_byte(0x42);
-        let output = execute_block_with_context(
-            SpecId::PRAGUE,
-            BlockEnv { number: U256::from(1), ..Default::default() },
-            database,
-            1,
-            core::iter::empty::<Recovered<TransactionSigned>>(),
-            BlockExecutionContext {
-                system_calls: Some(BlockSystemCalls {
-                    parent_hash,
-                    parent_beacon_block_root: Some(B256::ZERO),
-                }),
-                ommers: None,
-                withdrawals: None,
-                deposit_contract_address: None,
-            },
-        )
-        .expect("history storage system call succeeds");
-
-        assert_eq!(
-            output.storage(&HISTORY_STORAGE_ADDRESS, U256::ZERO).unwrap(),
-            U256::from_be_bytes(parent_hash.0)
-        );
-    }
-
-    #[test]
-    fn runs_pre_execution_system_calls_without_receipts() {
-        let output = execute_block_with_context(
-            SpecId::PRAGUE,
-            BlockEnv::default(),
-            TestDatabase::default(),
-            1,
-            core::iter::empty::<Recovered<TransactionSigned>>(),
-            BlockExecutionContext {
-                system_calls: Some(BlockSystemCalls {
-                    parent_hash: B256::from([2u8; 32]),
-                    parent_beacon_block_root: Some(B256::ZERO),
-                }),
-                ommers: None,
-                withdrawals: None,
-                deposit_contract_address: None,
-            },
-        )
-        .expect("system calls to absent contracts are no-ops");
-
-        assert!(output.result.receipts.is_empty());
-        assert_eq!(output.state.accounts().count(), 0);
-    }
-
-    #[test]
     fn collects_post_execution_system_call_requests() {
-        let mut database = TestDatabase::default();
-        database.accounts.insert(
-            WITHDRAWAL_REQUEST_ADDRESS,
+        let mut database = InMemoryDB::default();
+        database.insert_account_info(
+            &WITHDRAWAL_REQUEST_ADDRESS,
             AccountInfo::default().with_code(return_byte_code(0xaa)),
         );
-        database.accounts.insert(
-            CONSOLIDATION_REQUEST_ADDRESS,
+        database.insert_account_info(
+            &CONSOLIDATION_REQUEST_ADDRESS,
             AccountInfo::default().with_code(return_byte_code(0xbb)),
         );
 
-        let output = execute_block_with_context(
+        let output = execute_block(
             SpecId::PRAGUE,
             BlockEnv::default(),
             database,
-            1,
             core::iter::empty::<Recovered<TransactionSigned>>(),
-            BlockExecutionContext {
-                system_calls: Some(BlockSystemCalls {
-                    parent_hash: B256::ZERO,
-                    parent_beacon_block_root: Some(B256::ZERO),
-                }),
-                ommers: None,
-                withdrawals: None,
-                deposit_contract_address: None,
-            },
+            None,
         )
         .expect("system calls succeed");
 
@@ -1881,33 +1057,25 @@ mod tests {
 
     #[test]
     fn collects_amsterdam_builder_requests() {
-        let mut database = TestDatabase::default();
+        let mut database = InMemoryDB::default();
         for (address, byte) in [
             (WITHDRAWAL_REQUEST_ADDRESS, 0xaa),
             (CONSOLIDATION_REQUEST_ADDRESS, 0xbb),
             (BUILDER_DEPOSIT_REQUEST_ADDRESS, 0xcc),
             (BUILDER_EXIT_REQUEST_ADDRESS, 0xdd),
         ] {
-            database
-                .accounts
-                .insert(address, AccountInfo::default().with_code(return_byte_code(byte)));
+            database.insert_account_info(
+                &address,
+                AccountInfo::default().with_code(return_byte_code(byte)),
+            );
         }
 
-        let output = execute_block_with_context(
+        let output = execute_block(
             SpecId::AMSTERDAM,
             BlockEnv::default(),
             database,
-            1,
             core::iter::empty::<Recovered<TransactionSigned>>(),
-            BlockExecutionContext {
-                system_calls: Some(BlockSystemCalls {
-                    parent_hash: B256::ZERO,
-                    parent_beacon_block_root: Some(B256::ZERO),
-                }),
-                ommers: None,
-                withdrawals: None,
-                deposit_contract_address: None,
-            },
+            None,
         )
         .expect("system calls succeed");
 
@@ -1955,64 +1123,6 @@ mod tests {
         assert_eq!(requests.len(), 1);
         assert_eq!(requests[0][0], DEPOSIT_REQUEST_TYPE);
         assert_eq!(requests[0].len(), 1 + DEPOSIT_BYTES_SIZE);
-    }
-
-    #[test]
-    fn executes_withdrawal_request_contract() {
-        let caller = address!("0000000000000000000000000000000000000001");
-        let mut database = TestDatabase::default();
-        database.accounts.insert(
-            caller,
-            AccountInfo::default().with_nonce(1).with_balance(U256::from(ETH_TO_WEI)),
-        );
-        database.accounts.insert(
-            WITHDRAWAL_REQUEST_ADDRESS,
-            AccountInfo::default()
-                .with_nonce(1)
-                .with_code(Bytecode::new_raw(WITHDRAWAL_REQUEST_PREDEPLOY_CODE.clone())),
-        );
-
-        let validator_public_key = [0x11; 48];
-        let withdrawal_amount = [0x22; 8];
-        let input =
-            Bytes::from([validator_public_key.as_slice(), withdrawal_amount.as_slice()].concat());
-        let transaction = Recovered::new_unchecked(
-            TransactionSigned::Legacy(
-                TxLegacy {
-                    nonce: 1,
-                    gas_price: 1,
-                    gas_limit: 135_856,
-                    to: TxKind::Call(WITHDRAWAL_REQUEST_ADDRESS),
-                    value: U256::from(2),
-                    input,
-                    ..Default::default()
-                }
-                .into_signed(Signature::test_signature()),
-            ),
-            caller,
-        );
-
-        let output = execute_block_with_context(
-            SpecId::PRAGUE,
-            BlockEnv { gas_limit: U256::from(1_500_000), ..Default::default() },
-            database,
-            1,
-            [transaction],
-            BlockExecutionContext {
-                system_calls: Some(BlockSystemCalls {
-                    parent_hash: B256::ZERO,
-                    parent_beacon_block_root: Some(B256::ZERO),
-                }),
-                ommers: None,
-                withdrawals: None,
-                deposit_contract_address: None,
-            },
-        )
-        .expect("withdrawal request transaction succeeds");
-
-        assert!(output.result.receipts.first().unwrap().success);
-        assert_eq!(output.result.requests.len(), 1);
-        assert_eq!(output.result.requests[0][0], WITHDRAWAL_REQUEST_TYPE);
     }
 
     fn return_byte_code(value: u8) -> Bytecode {

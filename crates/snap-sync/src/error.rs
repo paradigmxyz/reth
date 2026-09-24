@@ -68,12 +68,21 @@ pub enum SnapSyncError {
         /// Block the list was applied for.
         block: u64,
     },
-    /// The pivot was moved below the last block whose list is applied.
-    #[error("pivot {pivot} is below applied block {applied}")]
-    PivotBelowApplied {
+    /// The pivot was moved to a block not past the current one.
+    #[error("pivot {pivot} cannot move to block {target}, which is not past it")]
+    PivotNotAdvanced {
+        /// Block the attempt is anchored to.
+        pivot: u64,
+        /// Block the pivot was moved to.
+        target: u64,
+    },
+    /// Catch-up has not carried the downloaded state to the pivot, which committing storage
+    /// persisted ahead of its range or completing the attempt requires.
+    #[error("catch-up applied block {applied}, the pivot is {pivot}")]
+    CatchUpBehindPivot {
         /// Last block whose list is applied.
         applied: u64,
-        /// Block the pivot was moved to.
+        /// Block the attempt is anchored to.
         pivot: u64,
     },
     /// A list was applied for a block the canonical chain no longer holds.
@@ -161,6 +170,38 @@ pub enum SnapSyncError {
         /// Hash of the supplied code.
         got: B256,
     },
+    /// Account ranges remain to be downloaded.
+    #[error("accounts from {next} are not downloaded yet")]
+    IncompleteAccounts {
+        /// Key the next range is requested from.
+        next: B256,
+    },
+    /// The pivot is the genesis block, whose trie the merkle stage never rebuilds.
+    #[error("snap synchronization cannot anchor to the genesis block")]
+    GenesisPivot,
+    /// Work stopped because its session was cancelled.
+    #[error("snap synchronization was cancelled")]
+    Cancelled,
+}
+
+impl SnapSyncError {
+    /// Whether the node's progress resolves this error, as new peers serve the state or missing
+    /// headers are downloaded.
+    ///
+    /// A closed channel means the network is gone, not that peers lack the state.
+    pub const fn is_transient(&self) -> bool {
+        match self {
+            Self::Request(error) => !error.is_channel_closed(),
+            Self::MissingHeader { .. } => true,
+            _ => false,
+        }
+    }
+
+    /// Whether a block the attempt builds on left the canonical chain, so its downloaded state
+    /// belongs to another fork.
+    pub const fn is_reorg(&self) -> bool {
+        matches!(self, Self::NonCanonicalBlock { .. } | Self::ForkedBlock { .. })
+    }
 }
 
 impl From<DatabaseError> for SnapSyncError {

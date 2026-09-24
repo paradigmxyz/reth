@@ -29,7 +29,6 @@ use alloy_network::{EthereumWallet, TransactionBuilder};
 use alloy_primitives::{Address, Bytes, TxKind, B256, U256};
 use alloy_provider::{Provider, ProviderBuilder};
 use alloy_rpc_types_eth::{TransactionReceipt, TransactionRequest};
-use evm2::evm::{AccountInfo, Tracked};
 use futures::StreamExt;
 use reth_chainspec::{ChainSpec, ChainSpecBuilder, EthereumHardfork, MAINNET};
 use reth_e2e_test_utils::{
@@ -40,6 +39,7 @@ use reth_e2e_test_utils::{
 use reth_node_api::TreeConfig;
 use reth_node_ethereum::EthereumNode;
 use reth_provider::Chain;
+use reth_revm::db::BundleAccount;
 use std::{sync::Arc, time::Duration};
 
 const MAX_FEE_PER_GAS: u128 = 20_000_000_000;
@@ -179,9 +179,9 @@ impl<P: Provider> SuiteCtx<P> {
         Ok(receipts)
     }
 
-    /// Returns the account entry of the most recently committed block's native execution state.
-    fn bundle_account(&self, address: Address) -> Option<&Tracked<Option<AccountInfo>>> {
-        self.last_committed.as_ref().unwrap().execution_outcome().account_state(&address)
+    /// Returns the account entry of the most recently committed block's bundle state.
+    fn bundle_account(&self, address: Address) -> Option<&BundleAccount> {
+        self.last_committed.as_ref().unwrap().execution_outcome().bundle.account(&address)
     }
 
     async fn balance(&self, address: Address) -> eyre::Result<U256> {
@@ -293,8 +293,8 @@ async fn prefunded_create2_selfdestruct<P: Provider>(ctx: &mut SuiteCtx<P>) -> e
     // the account existed in the database before this block, so the bundle must mark it as
     // destroyed with no post-block info
     let account = ctx.bundle_account(destroyed).expect("prefunded account must be in the bundle");
-    assert!(account.current.is_none(), "prefunded create2: bundle must mark account destroyed");
-    assert!(account.current.is_none(), "prefunded create2: destroyed account must have no info");
+    assert!(account.was_destroyed(), "prefunded create2: bundle must mark account destroyed");
+    assert!(account.info.is_none(), "prefunded create2: destroyed account must have no info");
 
     // touching the address again must start from a clean account
     ctx.mine_block(vec![transfer_tx(destroyed, eth_tenths(3))]).await?;
@@ -368,8 +368,8 @@ async fn create_and_destroy_in_different_txs_of_same_block<P: Provider>(
     assert_eq!(ctx.provider.get_transaction_count(contract).await?, 1, "nonce must persist");
     assert_eq!(ctx.balance(beneficiary(4)).await?, eth_tenths(2));
     let account = ctx.bundle_account(contract).expect("contract must be in the bundle");
-    assert!(!account.current.is_none(), "same-block create: account must not be destroyed");
-    assert!(account.current.is_some(), "same-block create: account must persist");
+    assert!(!account.was_destroyed(), "same-block create: account must not be destroyed");
+    assert!(account.info.is_some(), "same-block create: account must persist");
 
     // repeated selfdestruct of the now pre-existing contract with zero balance
     ctx.mine_block(vec![call_tx(contract)]).await?;
@@ -451,7 +451,7 @@ async fn reverted_selfdestruct<P: Provider>(
     .await?;
     assert_eq!(ctx.balance(beneficiary(7)).await?, U256::ZERO, "transfer must be reverted");
     if let Some(account) = ctx.bundle_account(fixtures.revert_child) {
-        assert!(!account.current.is_none(), "reverted selfdestruct: account must not be destroyed");
+        assert!(!account.was_destroyed(), "reverted selfdestruct: account must not be destroyed");
     }
 
     Ok(())

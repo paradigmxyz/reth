@@ -961,15 +961,18 @@ fn compute_execution_overlay_inner<N: NodePrimitives>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_primitives::{Address, U256};
-    use evm2::bytecode::Bytecode;
+    use alloy_primitives::{map::HashMap, Address, U256};
     use reth_chain_state::{test_utils::TestBlockBuilder, ExecutedBlock, SparseTrie};
     use reth_ethereum_primitives::EthPrimitives;
-    use reth_execution_types::execution_state_from_init;
     use reth_primitives_traits::Account;
     #[cfg(feature = "rayon")]
     use reth_tasks::WorkerPool;
     use reth_trie::{updates::TrieUpdatesSorted, ComputedTrieData, HashedPostState, HashedStorage};
+    use revm::{
+        bytecode::Bytecode,
+        database::BundleState,
+        state::{AccountId, AccountInfo},
+    };
     use std::{
         sync::{mpsc, Arc},
         thread,
@@ -992,25 +995,21 @@ mod tests {
         let address = Address::with_last_byte(id);
         let slot = U256::from(id);
         let code_hash = B256::with_last_byte(id.saturating_add(64));
-        let state = execution_state_from_init(
-            [(
+        let state = BundleState::builder(block.block_number()..=block.block_number())
+            .state_present_account_info(
                 address,
-                (
-                    None,
-                    Some(Account {
-                        nonce: id as u64,
-                        balance: U256::from(id),
-                        bytecode_hash: None,
-                        #[cfg(feature = "account-ext")]
-                        extension: Default::default(),
-                    }),
-                    [(slot, (U256::ZERO, U256::from(id)))].into(),
-                ),
-            )],
-            [(code_hash, reth_primitives_traits::Bytecode(Bytecode::new_raw(vec![id].into())))],
-        );
+                AccountInfo {
+                    nonce: id as u64,
+                    balance: U256::from(id),
+                    account_id: AccountId::new(id as usize),
+                    ..Default::default()
+                },
+            )
+            .state_storage(address, HashMap::from_iter([(slot, (U256::ZERO, U256::from(id)))]))
+            .contract(code_hash, Bytecode::new_raw(vec![id].into()))
+            .build();
         let mut execution_output = (*block.execution_output).clone();
-        execution_output.state = state.into();
+        execution_output.state = state;
 
         ExecutedBlock::new(
             Arc::clone(&block.recovered_block),
@@ -1110,6 +1109,7 @@ mod tests {
             let address = Address::with_last_byte(id);
             let code_hash = B256::with_last_byte(id + 64);
             assert_eq!(overlay.accounts()[&address].as_ref().unwrap().nonce, id as u64);
+            assert_eq!(overlay.accounts()[&address].as_ref().unwrap().account_id, None);
             assert_eq!(overlay.storage()[&address][&U256::from(id)], U256::from(id));
             assert_eq!(overlay.code_hashes()[&code_hash], Bytecode::new_raw(vec![id].into()));
         }
@@ -1209,7 +1209,7 @@ mod tests {
             .accounts()
             .values()
             .flatten()
-            .all(|account| account.code.is_none()));
+            .all(|account| account.account_id.is_none()));
     }
 
     #[test]

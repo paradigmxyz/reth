@@ -42,7 +42,7 @@ impl TxPoolPrewarmCacheSnapshot {
     /// as a miss and the caller's fallback tier decides.
     pub fn bytecode(&self, code_hash: &B256) -> Option<Option<Bytecode>> {
         let code = self.reads.contracts.get(code_hash)?;
-        (!code.is_empty()).then(|| Some(Bytecode(code.clone())))
+        (!code.is_empty()).then(|| Some(Bytecode::new_raw(code.original_bytes())))
     }
 
     /// Returns `(accounts, storage slots, bytecodes)` in the snapshot.

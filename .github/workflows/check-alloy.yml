@@ -10,6 +10,10 @@ on:
         description: 'Branch/rev for alloy-rs/alloy (leave empty to skip)'
         required: false
         type: string
+      alloy_evm_branch:
+        description: 'Branch/rev for alloy-rs/evm (alloy-evm, alloy-op-evm) (leave empty to skip)'
+        required: false
+        type: string
       op_alloy_branch:
         description: 'Branch/rev for alloy-rs/op-alloy (leave empty to skip)'
         required: false
@@ -31,7 +35,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: rui314/setup-mold@7e4f20ad28a2e8ca6fd0892ccf72e2abb706b9c3 # v1
+      - uses: rui314/setup-mold@10ca16bf91dc22e05ebdc935cad9c75ea248f621 # v1
 
       - run: .github/scripts/install_llvm.sh ubuntu
 
@@ -44,11 +48,15 @@ jobs:
       - name: Apply alloy patches
         env:
           ALLOY_BRANCH: ${{ inputs.alloy_branch }}
+          ALLOY_EVM_BRANCH: ${{ inputs.alloy_evm_branch }}
           OP_ALLOY_BRANCH: ${{ inputs.op_alloy_branch }}
         run: |
           ARGS=""
           if [ -n "$ALLOY_BRANCH" ]; then
             ARGS="$ARGS --alloy $ALLOY_BRANCH"
+          fi
+          if [ -n "$ALLOY_EVM_BRANCH" ]; then
+            ARGS="$ARGS --evm $ALLOY_EVM_BRANCH"
           fi
           if [ -n "$OP_ALLOY_BRANCH" ]; then
             ARGS="$ARGS --op $OP_ALLOY_BRANCH"

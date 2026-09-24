@@ -108,6 +108,9 @@ mod tests {
         let c = ManualCancel::default();
         let cloned_cancel = c.clone();
 
+        // we want to make sure that:
+        // * we can spawn tasks that do things
+        // * those tasks can run to completion and the flag remains unset unless we call cancel
         let mut handles = vec![];
         for _ in 0..10 {
             let c = c.clone();
@@ -121,12 +124,15 @@ mod tests {
             handles.push(handle);
         }
 
+        // wait for all the threads to finish
         for handle in handles {
             handle.join().unwrap();
         }
 
+        // check that the flag is still unset
         assert!(!c.is_cancelled());
 
+        // cancel and check that the flag is set
         c.cancel();
         assert!(cloned_cancel.is_cancelled());
     }
@@ -136,11 +142,15 @@ mod tests {
         let cancel = CancelOnDrop::default();
         assert!(!cancel.is_cancelled());
 
+        // Clone the CancelOnDrop
         let cloned_cancel = cancel.clone();
         assert!(!cloned_cancel.is_cancelled());
 
+        // Drop the original - this should set the cancelled flag
         drop(cancel);
 
+        // The cloned instance should now see the cancelled flag as true
+        assert!(cloned_cancel.is_interrupted());
         assert!(cloned_cancel.is_cancelled());
     }
 
@@ -156,6 +166,7 @@ mod tests {
         assert!(!clone2.is_cancelled());
         assert!(!clone3.is_cancelled());
 
+        // Drop one clone - this should cancel all instances
         drop(clone1);
 
         assert!(cancel.is_interrupted());

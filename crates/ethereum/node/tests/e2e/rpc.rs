@@ -1003,6 +1003,56 @@ async fn test_eth_config() -> eyre::Result<()> {
     Ok(())
 }
 
+#[tokio::test]
+async fn test_sepolia_amsterdam_eth_config() -> eyre::Result<()> {
+    use alloy_consensus::Header;
+    use alloy_primitives::hex;
+    use reth_chainspec::{
+        sepolia::{SEPOLIA_AMSTERDAM_TIMESTAMP, SEPOLIA_BPO2_TIMESTAMP},
+        SEPOLIA,
+    };
+    use reth_primitives_traits::SealedHeader;
+    use reth_provider::CanonChainTracker;
+
+    let node_config = NodeConfig::test()
+        .with_chain(SEPOLIA.clone())
+        .with_unused_ports()
+        .with_rpc(RpcServerArgs::default().with_unused_ports().with_http());
+    let NodeHandle { node, .. } = NodeBuilder::new(node_config)
+        .testing_node(Runtime::test())
+        .node(EthereumNode::default())
+        .launch()
+        .await?;
+    let provider =
+        ProviderBuilder::new().connect_http(node.rpc_server_handle().http_url().unwrap().parse()?);
+
+    // eth_config reads the canonical header; move it across the fork without syncing the testnet.
+    for timestamp in [SEPOLIA_AMSTERDAM_TIMESTAMP - 1, SEPOLIA_AMSTERDAM_TIMESTAMP] {
+        node.provider.set_canonical_head(SealedHeader::seal_slow(Header {
+            number: 10_000_000,
+            timestamp,
+            base_fee_per_gas: Some(1_000_000_000),
+            excess_blob_gas: Some(0),
+            ..Default::default()
+        }));
+        let config = provider.client().request_noparams::<EthConfig>("eth_config").await?;
+        if timestamp < SEPOLIA_AMSTERDAM_TIMESTAMP {
+            assert_eq!(config.current.activation_time, SEPOLIA_BPO2_TIMESTAMP);
+            assert_eq!(config.current.fork_id, Bytes::from_static(&hex!("268956b6")));
+            let next = config.next.unwrap();
+            assert_eq!(next.activation_time, SEPOLIA_AMSTERDAM_TIMESTAMP);
+            assert_eq!(next.fork_id, Bytes::from_static(&hex!("6c1d9423")));
+            assert_eq!(config.last.unwrap(), next);
+        } else {
+            assert_eq!(config.current.activation_time, SEPOLIA_AMSTERDAM_TIMESTAMP);
+            assert_eq!(config.current.fork_id, Bytes::from_static(&hex!("6c1d9423")));
+            assert!(config.next.is_none());
+            assert!(config.last.is_none());
+        }
+    }
+    Ok(())
+}
+
 // <https://github.com/paradigmxyz/reth/issues/19765>
 #[tokio::test]
 async fn test_admin_external_ip() -> eyre::Result<()> {

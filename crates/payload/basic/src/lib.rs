@@ -224,12 +224,13 @@ where
         // extract the state from the notification and put it into the cache
         let committed = new_state.committed();
         let new_execution_outcome = committed.execution_outcome();
-        for (addr, acc) in new_execution_outcome.accounts_iter() {
-            if let Some(info) = acc.cloned() {
+        for (addr, acc) in new_execution_outcome.bundle_accounts_iter() {
+            if let Some(info) = acc.info.clone() {
                 // we want pre cache existing accounts and their storage
                 // this only includes changed accounts and storage but is better than nothing
-                let storage = new_execution_outcome.storage_changes_for(addr).collect();
-                cached.insert_account(addr, info, storage);
+                let storage =
+                    acc.storage.iter().map(|(key, slot)| (*key, slot.present_value)).collect();
+                cached.insert_account(addr, reth_execution_types::native_account(&info), storage);
             }
         }
 

@@ -1309,8 +1309,14 @@ mod tests {
             Ok(SnapResponse::AccountRange(AccountRangeMessage {
                 request_id: 1,
                 accounts: vec![
-                    AccountData { hash: first_hash, body: full_body.into() },
-                    AccountData { hash: second_hash, body: empty_body },
+                    AccountData {
+                        hash: first_hash,
+                        body: alloy_rlp::decode_exact(&full_body).unwrap()
+                    },
+                    AccountData {
+                        hash: second_hash,
+                        body: alloy_rlp::decode_exact(&empty_body).unwrap()
+                    },
                 ],
                 proof,
             }))

@@ -11,6 +11,8 @@ repository.workspace = true
 workspace = true
 
 [dependencies]
+revm.workspace = true
+alloy-evm.workspace = true
 evm2.workspace = true
 # reth
 reth-chain-state.workspace = true
@@ -109,6 +111,8 @@ asm-keccak = [
     "reth-node-ethereum/asm-keccak",
     "reth-evm-ethereum/asm-keccak",
     "evm2/asm-keccak",
+    "alloy-evm/asm-keccak",
+    "revm/asm-keccak",
 ]
 portable = [
     "reth-evm/portable",
@@ -116,6 +120,7 @@ portable = [
     "reth-node-ethereum/portable",
     "reth-evm-ethereum/portable",
     "evm2/portable",
+    "revm/portable",
 ]
 account-ext = [
     "reth-evm/account-ext",

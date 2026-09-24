@@ -32,6 +32,7 @@ use alloy_eip7928::{
 };
 use alloy_primitives::Address;
 use crossbeam_channel::{Receiver, Sender};
+use evm2::evm::Bal as EvmBal;
 use reth_engine_primitives::BlockAccessListDecodeError;
 use reth_evm::{
     BlockExecutionOutput, BlockExecutor, BlockExecutorFactory, BlockExecutorFor, ConfigureEvm,
@@ -44,6 +45,9 @@ use std::sync::Arc;
 use crate::tree::payload_processor::receipt_root_task::IndexedReceipt;
 
 /// Executes one block on the BAL path using the runtime's persistent BAL worker pool.
+///
+/// Returns the execution output, recovered senders, rebuilt BAL, and the prepared BAL
+/// shared by the workers.
 #[expect(clippy::too_many_arguments, clippy::type_complexity)]
 pub fn execute_block<'a, Evm, Tx, Err, DB, MakeDb>(
     runtime: &Runtime,
@@ -56,7 +60,7 @@ pub fn execute_block<'a, Evm, Tx, Err, DB, MakeDb>(
     txs: Receiver<(usize, Result<Tx, Err>)>,
     receipt_tx: Sender<IndexedReceipt<ReceiptTy<Evm::Primitives>>>,
 ) -> Result<
-    (BlockExecutionOutput<ReceiptTy<Evm::Primitives>>, Vec<Address>, BlockAccessList),
+    (BlockExecutionOutput<ReceiptTy<Evm::Primitives>>, Vec<Address>, BlockAccessList, Arc<EvmBal>),
     BalExecutionError,
 >
 where
@@ -100,7 +104,7 @@ fn execute_block_inner<'scope, Evm, Tx, Err, DB, MakeDb>(
     receipt_tx: Sender<IndexedReceipt<ReceiptTy<Evm::Primitives>>>,
     worker_count: usize,
 ) -> Result<
-    (BlockExecutionOutput<ReceiptTy<Evm::Primitives>>, Vec<Address>, BlockAccessList),
+    (BlockExecutionOutput<ReceiptTy<Evm::Primitives>>, Vec<Address>, BlockAccessList, Arc<EvmBal>),
     BalExecutionError,
 >
 where
@@ -175,7 +179,7 @@ where
     let (output, built_bal) = canonical_executor.finish_with_block_access_list()?;
     let built_bal = built_bal.expect("BAL builder was enabled for parallel execution");
     log_bal_divergence(&built_bal, input_bal.as_bal());
-    Ok((output, senders, built_bal))
+    Ok((output, senders, built_bal, received_bal))
 }
 
 fn log_bal_divergence(built_bal: &BlockAccessList, received_bal: &Bal) {
@@ -395,7 +399,7 @@ mod tests {
             tx_stream(txs),
             receipt_tx,
         )
-        .map(|(output, _, built_bal)| (output, built_bal))
+        .map(|(output, _, built_bal, _)| (output, built_bal))
     }
 
     fn insert_funded(db: &mut TestDatabase, address: Address, balance: U256) {
@@ -461,13 +465,13 @@ mod tests {
         block_header_only: SealedBlock<Block>,
         txs: Vec<Recovered<TransactionSigned>>,
     ) {
-        let (serial, reference_bal) =
+        let (mut serial, reference_bal) =
             run_serial_path(&evm_config, canonical_db_template.clone(), &block_header_only, &txs);
         let block = empty_amsterdam_block_with_gas_limit(
             compute_block_access_list_hash(&reference_bal),
             block_header_only.header().gas_limit(),
         );
-        let (bal_out, built_bal) = run_execute_block_full(
+        let (mut bal_out, built_bal) = run_execute_block_full(
             &Runtime::test(),
             evm_config,
             db_factory(canonical_db_template),
@@ -481,6 +485,8 @@ mod tests {
         assert_eq!(serial.receipts, bal_out.receipts, "receipts diverged");
         assert_eq!(serial.gas_used, bal_out.gas_used, "gas used diverged");
         assert_eq!(serial.requests, bal_out.requests, "requests diverged");
+        serial.state.reverts.sort();
+        bal_out.state.reverts.sort();
         assert_eq!(serial.state, bal_out.state, "execution state diverged");
     }
 

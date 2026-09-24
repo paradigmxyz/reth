@@ -1048,9 +1048,7 @@ mod tests {
     };
     use alloy_consensus::constants::EMPTY_ROOT_HASH;
     use alloy_eips::{BlockHashOrNumber, BlockNumHash, BlockNumberOrTag};
-    use alloy_primitives::{
-        keccak256, map::AddressMap, Address, BlockNumber, TxNumber, B256, U256,
-    };
+    use alloy_primitives::{keccak256, Address, BlockNumber, TxNumber, B256, U256};
     use itertools::Itertools;
     use rand::Rng;
     use reth_chain_state::{
@@ -1062,8 +1060,7 @@ mod tests {
     use reth_errors::ProviderError;
     use reth_ethereum_primitives::{Block, Receipt};
     use reth_execution_types::{
-        execution_state_from_init, BlockExecutionOutput, BlockExecutionResult, BlockReverts, Chain,
-        ExecutionOutcome, RevertAccount, RevertToSlot, StorageReverts,
+        BlockExecutionOutput, BlockExecutionResult, Chain, ExecutionOutcome,
     };
     use reth_primitives_traits::{
         Account, Block as _, RecoveredBlock, SealedBlock, SignerRecoverable, StorageEntry,
@@ -1072,18 +1069,19 @@ mod tests {
     use reth_storage_api::{
         BlockBodyIndicesProvider, BlockHashReader, BlockIdReader, BlockNumReader, BlockReader,
         BlockReaderIdExt, BlockSource, ChangeSetReader, DBProvider, DatabaseProviderFactory,
-        HashingWriter, HeaderProvider, OriginalValuesKnown, RangeEnd, ReceiptProvider,
-        ReceiptProviderIdExt, StageCheckpointWriter, StateProviderFactory, StateRangeProvider,
-        StateRangeProviderFactory, StateRootProvider, StateWriteConfig, StateWriter,
-        StorageRootProvider, TransactionVariant, TransactionsProvider,
+        HashingWriter, HeaderProvider, RangeEnd, ReceiptProvider, ReceiptProviderIdExt,
+        StageCheckpointWriter, StateProviderFactory, StateRangeProvider, StateRangeProviderFactory,
+        StateRootProvider, StateWriteConfig, StateWriter, StorageRootProvider, TransactionVariant,
+        TransactionsProvider,
     };
     use reth_testing_utils::generators::{
         self, random_block, random_block_range, random_changeset_range, random_eoa_accounts,
         random_receipt, BlockParams, BlockRangeParams,
     };
     use reth_trie::{updates::TrieUpdates, ComputedTrieData, HashedPostState, HashedStorage};
+    use revm::database::{BundleState, OriginalValuesKnown};
     use std::{
-        collections::BTreeMap,
+        collections::{BTreeMap, HashMap},
         ops::{Bound, Range, RangeBounds},
         sync::Arc,
     };
@@ -1093,6 +1091,7 @@ mod tests {
         use crate::{StaticFileProviderFactory, StaticFileSegment, StaticFileWriter};
         use reth_storage_api::{StorageSettings, StorageSettingsCache, TrieWriter};
         use reth_trie::{test_utils::TrieTestHarness, MultiProofTargetsV2};
+        use revm::state::AccountInfo;
 
         let address = Address::with_last_byte(1);
         let other_address = Address::with_last_byte(2);
@@ -1138,18 +1137,21 @@ mod tests {
                 let (_, updates) = trie.get_root_with_updates(&changes);
                 trie.apply_changeset(changes);
                 storage.insert(slot, value);
-                output.state = execution_state_from_init(
-                    [(
+                let info = AccountInfo::from_balance(account.balance);
+                output.state = BundleState::builder(number..=number)
+                    .state_original_account_info(address, info.clone())
+                    .state_present_account_info(address, info)
+                    .state_storage(
                         address,
-                        (
-                            Some(account.clone()),
-                            Some(account.clone()),
-                            BTreeMap::from([(U256::from_be_bytes(slot.0), (U256::from(1), value))]),
-                        ),
-                    )],
-                    [],
-                )
-                .into();
+                        std::iter::once((U256::from_be_bytes(slot.0), (U256::from(1), value)))
+                            .collect(),
+                    )
+                    .revert_storage(
+                        number,
+                        address,
+                        vec![(U256::from_be_bytes(slot.0), U256::from(1))],
+                    )
+                    .build();
                 (
                     HashedPostState::from_hashed_storage(
                         hashed_address,
@@ -1274,10 +1276,6 @@ mod tests {
         (database_blocks.to_vec(), in_memory_blocks.to_vec())
     }
 
-    fn account_to_revert(account: Account) -> RevertAccount {
-        reth_execution_types::ExecutionAccountInfo::from(account).into()
-    }
-
     #[expect(clippy::type_complexity)]
     fn provider_with_chain_spec_and_random_blocks(
         rng: &mut impl Rng,
@@ -1320,8 +1318,11 @@ mod tests {
         // Insert receipts into the database
         if let Some(first_block) = database_blocks.first() {
             provider_rw.write_state(
-                &ExecutionOutcome::new_empty(first_block.number)
-                    .with_receipts(receipts.iter().take(database_blocks.len()).cloned().collect()),
+                &ExecutionOutcome {
+                    first_block: first_block.number,
+                    receipts: receipts.iter().take(database_blocks.len()).cloned().collect(),
+                    ..Default::default()
+                },
                 OriginalValuesKnown::No,
                 StateWriteConfig::default(),
             )?;
@@ -1338,15 +1339,15 @@ mod tests {
                 .map(|block| {
                     let senders = block.senders().expect("failed to recover senders");
                     let block_receipts = receipts.get(block.number as usize).unwrap().clone();
-                    let execution_outcome = BlockExecutionOutput::new(
-                        BlockExecutionResult {
+                    let execution_outcome = BlockExecutionOutput {
+                        result: BlockExecutionResult {
                             receipts: block_receipts,
                             requests: Default::default(),
                             gas_used: 0,
                             blob_gas_used: 0,
                         },
-                        Default::default(),
-                    );
+                        state: BundleState::default(),
+                    };
 
                     ExecutedBlock {
                         recovered_block: Arc::new(RecoveredBlock::new_sealed(
@@ -2109,30 +2110,20 @@ mod tests {
                 .into_iter()
                 .map(|b| b.try_recover().expect("failed to seal block with senders"))
                 .collect(),
-            &{
-                let state = execution_state_from_init(
+            &ExecutionOutcome {
+                bundle: BundleState::new(
                     database_state.into_iter().map(|(address, (account, _))| {
-                        (address, (None, Some(account), BTreeMap::default()))
+                        (address, None, Some(account.into()), Default::default())
                     }),
-                    [],
-                );
-                let block_reverts = database_changesets
-                    .iter()
-                    .map(|block_changesets| {
-                        let mut accounts = AddressMap::default();
-                        for (address, account, _) in block_changesets {
-                            accounts.insert(*address, Some(account_to_revert(account.clone())));
-                        }
-                        BlockReverts { accounts, storage: AddressMap::default() }
-                    })
-                    .collect();
-                ExecutionOutcome::from_state_and_reverts(
-                    state,
-                    block_reverts,
+                    database_changesets.iter().map(|block_changesets| {
+                        block_changesets.iter().map(|(address, account, _)| {
+                            (*address, Some(Some((*account).into())), [])
+                        })
+                    }),
                     Vec::new(),
-                    first_database_block,
-                    Vec::new(),
-                )
+                ),
+                first_block: first_database_block,
+                ..Default::default()
             },
             Default::default(),
         )?;
@@ -2146,37 +2137,28 @@ mod tests {
                 .first()
                 .map(|block| {
                     let senders = block.senders().expect("failed to recover senders");
-                    let original_accounts = in_memory_changesets
-                        .iter()
-                        .map(|(address, account, _)| (*address, account.clone()))
-                        .collect::<AddressMap<_>>();
-                    let state = execution_state_from_init(
-                        in_memory_state.into_iter().map(|(address, (account, _))| {
-                            (
-                                address,
-                                (
-                                    original_accounts.get(&address).cloned(),
-                                    Some(account),
-                                    BTreeMap::default(),
-                                ),
-                            )
-                        }),
-                        [],
-                    );
                     ExecutedBlock {
                         recovered_block: Arc::new(RecoveredBlock::new_sealed(
                             block.clone(),
                             senders,
                         )),
-                        execution_output: Arc::new(BlockExecutionOutput::new(
-                            BlockExecutionResult {
+                        execution_output: Arc::new(BlockExecutionOutput {
+                            state: BundleState::new(
+                                in_memory_state.into_iter().map(|(address, (account, _))| {
+                                    (address, None, Some(account.into()), Default::default())
+                                }),
+                                [in_memory_changesets.iter().map(|(address, account, _)| {
+                                    (*address, Some(Some((*account).into())), Vec::new())
+                                })],
+                                [],
+                            ),
+                            result: BlockExecutionResult {
                                 receipts: Default::default(),
                                 requests: Default::default(),
                                 gas_used: 0,
                                 blob_gas_used: 0,
                             },
-                            state,
-                        )),
+                        }),
                         ..Default::default()
                     }
                 })
@@ -3370,26 +3352,21 @@ mod tests {
         )
         .try_recover()
         .expect("failed to seal block with senders");
-        let mut noise_hashed_state = HashedPostState::default();
-        noise_hashed_state.accounts.insert(keccak256(noise_address), Some(noise_account.clone()));
+        let mut noise_state = HashedPostState::default();
+        noise_state.accounts.insert(keccak256(noise_address), Some(noise_account));
         let provider_rw = provider.database.provider_rw()?;
-        let noise_state = execution_state_from_init(
-            [(noise_address, (None, Some(noise_account), BTreeMap::default()))],
-            [],
-        );
-        let mut noise_revert_accounts = AddressMap::default();
-        noise_revert_accounts.insert(noise_address, None);
-        let noise_execution = ExecutionOutcome::from_state_and_reverts(
-            noise_state,
-            vec![BlockReverts { accounts: noise_revert_accounts, storage: AddressMap::default() }],
-            Vec::new(),
-            genesis.number + 1,
-            Vec::new(),
-        );
         provider_rw.append_blocks_with_state(
             vec![noise_block],
-            &noise_execution,
-            noise_hashed_state.into_sorted(),
+            &ExecutionOutcome {
+                bundle: BundleState::new(
+                    [(noise_address, None, Some(noise_account.into()), Default::default())],
+                    [[(noise_address, Some(None), [])]],
+                    [],
+                ),
+                first_block: genesis.number + 1,
+                ..Default::default()
+            },
+            noise_state.into_sorted(),
         )?;
         provider_rw
             .save_stage_checkpoint(StageId::Finish, StageCheckpoint::new(genesis.number + 1))?;
@@ -3449,7 +3426,7 @@ mod tests {
         let account_b = Account { nonce: 2, balance: U256::from(2), ..account_a.clone() };
         let value_b = U256::from(2);
 
-        let mut storage = BTreeMap::default();
+        let mut storage = HashMap::default();
         storage.insert(slot, (value_a, value_b));
 
         let mut state_b = HashedPostState::default();
@@ -3468,30 +3445,17 @@ mod tests {
             later_block.seal_slow().try_recover().expect("failed to seal block with senders");
 
         let provider_rw = factory.provider_rw()?;
-        let later_state = execution_state_from_init(
-            [(address, (Some(account_a.clone()), Some(account_b), storage.clone()))],
-            [],
-        );
-        let mut later_revert_accounts = AddressMap::default();
-        later_revert_accounts.insert(address, Some(account_to_revert(account_a.clone())));
-        let mut later_revert_storage = AddressMap::default();
-        later_revert_storage.insert(
-            address,
-            StorageReverts {
-                slots: std::iter::once((slot, RevertToSlot::Some(value_a))).collect(),
-                ..Default::default()
-            },
-        );
-        let later_execution = ExecutionOutcome::from_state_and_reverts(
-            later_state,
-            vec![BlockReverts { accounts: later_revert_accounts, storage: later_revert_storage }],
-            Vec::new(),
-            2,
-            Vec::new(),
-        );
         provider_rw.append_blocks_with_state(
             vec![later_block],
-            &later_execution,
+            &ExecutionOutcome {
+                bundle: BundleState::new(
+                    [(address, Some(account_a.into()), Some(account_b.into()), storage)],
+                    [[(address, Some(Some(account_a.into())), [(slot, value_a)])]],
+                    [],
+                ),
+                first_block: 2,
+                ..Default::default()
+            },
             state_b.into_sorted(),
         )?;
         provider_rw.save_stage_checkpoint(StageId::Finish, StageCheckpoint::new(2))?;

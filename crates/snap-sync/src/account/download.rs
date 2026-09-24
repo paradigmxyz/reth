@@ -5,7 +5,6 @@ use crate::{
     SnapWrite, MAX_HASH,
 };
 use alloy_primitives::{map::B256Map, B256};
-use evm2::bytecode::Bytecode;
 use reth_db_api::transaction::DbTxMut;
 use reth_downloaders::snap::{AccountRangeDownloader, AccountRangeOutcome, VerifiedAccountRange};
 use reth_eth_wire_types::snap::GetAccountRangeMessage;
@@ -16,6 +15,7 @@ use reth_storage_api::{
 };
 use reth_tasks::Runtime;
 use reth_trie_common::HashedStorage;
+use revm::bytecode::Bytecode;
 use std::fmt;
 
 /// Downloads the account ranges an attempt still needs, one at a time in key order.

@@ -414,7 +414,7 @@ pub trait Trace: LoadState<Error: FromEvmError<Self::Evm>> + Call {
         &self,
         block: &RecoveredBlock<ProviderBlock<Self::Provider>>,
         db: &mut StateCacheDb,
-    ) -> Result<reth_evm::EvmState, Self::Error> {
+    ) -> Result<revm::database::BundleState, Self::Error> {
         let evm_env = self.evm_env_for_header(block.sealed_block().sealed_header())?;
         let ctx = self
             .evm_config()
@@ -426,7 +426,7 @@ pub trait Trace: LoadState<Error: FromEvmError<Self::Evm>> + Call {
             .pre_block_state_changes(&mut *db, evm_env, block.number(), ctx)
             .map_err(|err| EthApiError::EvmCustom(err.to_string()))
             .map_err(Self::Error::from_eth_err)?;
-        db.commit_source(&changes);
+        db.commit_source(&reth_execution_types::BundleSource(&changes));
         Ok(changes)
     }
 }

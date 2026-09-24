@@ -112,10 +112,7 @@ use alloy_eip7928::{
     BlockAccessList,
 };
 use alloy_eips::{eip1898::BlockWithParent, eip4895::Withdrawal, NumHash};
-use alloy_primitives::{
-    map::{AddressSet, B256Set},
-    B256,
-};
+use alloy_primitives::{map::B256Set, B256};
 use reth_tasks::LazyHandle;
 
 use crate::tree::{
@@ -128,6 +125,7 @@ use crate::tree::{
 };
 use alloy_consensus::constants::KECCAK_EMPTY;
 use alloy_primitives::Address;
+use evm2::evm::Bal as EvmBal;
 use reth_chain_state::{CanonicalInMemoryState, ExecutedBlock, ExecutionTimingStats};
 use reth_consensus::{ConsensusError, FullConsensus, ReceiptRootBloom};
 use reth_engine_primitives::{
@@ -139,6 +137,7 @@ use reth_evm::{
     ConfigureEvm, EvmEnvFor, ExecutableTxFor, ExecutionCtxFor,
 };
 use reth_execution_cache::{CacheFillMode, CacheStats};
+use reth_execution_types::DecodedEvmBal;
 use reth_network_p2p::full_block::SealedBlockWithAccessList;
 use reth_payload_builder::{PayloadBuilderLease, PayloadBuilderResources};
 use reth_payload_primitives::{
@@ -159,8 +158,9 @@ use reth_provider::{
 use reth_storage_overlay::{OverlayManager, OverlayStateProviderFactory};
 use reth_trie::{
     hashed_cursor::HashedCursorFactory, trie_cursor::TrieCursorFactory, updates::TrieUpdates,
-    KeccakKeyHasher, LazyTrieData,
+    HashedPostState, KeccakKeyHasher, LazyTrieData,
 };
+use revm::database::BundleAccount;
 use std::{
     sync::{
         atomic::{AtomicUsize, Ordering},
@@ -734,7 +734,9 @@ where
         if let (Some(metrics), Some(stats)) = (&state_provider_metrics, &state_provider_stats) {
             metrics.record_totals(stats);
         }
-        let (output, senders, receipt_root_rx, built_bal) = ensure_ok!(execution_result);
+        let (output, senders, receipt_root_rx, executed_bal) = ensure_ok!(execution_result);
+        let (built_bal, evm_bal) =
+            executed_bal.map(|ExecutedBal { alloy, evm }| (alloy, evm)).unzip();
 
         // After executing the block we can stop prewarming transactions
         handle.stop_prewarming_execution();
@@ -751,15 +753,6 @@ where
         // Spawn hashed post state computation in background so it runs concurrently with
         // block conversion and receipt root computation. This is a pure CPU-bound task
         // (keccak256 hashing of all changed addresses and storage slots).
-        // A destroyed existing account needs zero updates for every slot in its parent trie.
-        // Transaction streams only know the slots observed during execution.
-        let destroyed_state =
-            if reth_execution_types::destroyed_accounts(output.state.inner()).next().is_some() {
-                let provider = ensure_ok!(state_provider_factory.database_provider_ro());
-                Some(Arc::new(ensure_ok!(provider.hashed_post_state(output.state.inner()))))
-            } else {
-                None
-            };
         let hashed_state_output = output.clone();
         let mut hashed_state_rx = state_root_job.take_hashed_state_rx();
         let mut hashed_state: LazyHashedPostState =
@@ -769,14 +762,12 @@ where
                     "hashed_post_state",
                 )
                 .entered();
-                if let Some(state) = destroyed_state {
-                    state
-                } else if let Some(Ok(state)) = hashed_state_rx.as_mut().map(|rx| rx.recv()) {
+                if let Some(Ok(state)) = hashed_state_rx.as_mut().map(|rx| rx.recv()) {
                     state
                 } else {
-                    Arc::new(reth_execution_types::hashed_post_state_from_execution_state::<
-                        KeccakKeyHasher,
-                    >(hashed_state_output.state.inner()))
+                    Arc::new(HashedPostState::from_bundle_state::<KeccakKeyHasher>(
+                        hashed_state_output.state.state(),
+                    ))
                 }
             });
 
@@ -920,10 +911,17 @@ where
             let _ = valid_block_tx.send(());
         }
 
-        let executed_block =
-            self.spawn_deferred_trie_task(Arc::new(block), output, hashed_state, trie_output);
-        let raw_bal = decoded_bal.map(|decoded_bal| decoded_bal.as_raw_bal().clone());
-        Ok(ValidationOutput::new(executed_block, timing_stats).with_raw_bal(raw_bal))
+        // The payload's raw bytes are already bound to this header: payload-to-block conversion
+        // and downloaded-sidecar verification both check their hash against it, so pairing them
+        // with the BAL this execution produced is sound. The zip leaves the BAL unset for a
+        // downloaded block that carried only a BAL hash and no sidecar.
+        let bal = evm_bal.zip(decoded_bal).map(|(evm_bal, decoded_bal)| {
+            Arc::new(DecodedEvmBal::with_raw_bal(evm_bal, decoded_bal.as_raw_bal().clone()))
+        });
+        let executed_block = self
+            .spawn_deferred_trie_task(Arc::new(block), output, hashed_state, trie_output)
+            .with_bal(bal);
+        Ok(ValidationOutput::new(executed_block, timing_stats))
     }
 
     /// Spawns a background task to convert a [`BlockOrPayload`] into a [`SealedBlock`] and perform
@@ -1014,12 +1012,7 @@ where
         handle: &mut PayloadHandle<impl ExecutableTxFor<Evm>, Err, N::Receipt>,
         state_hook: Option<Box<dyn FnMut(reth_execution_types::EvmState) + Send + 'static>>,
     ) -> Result<
-        (
-            BlockExecutionOutput<N::Receipt>,
-            Vec<Address>,
-            ReceiptRootReceiver,
-            Option<BlockAccessList>,
-        ),
+        (BlockExecutionOutput<N::Receipt>, Vec<Address>, ReceiptRootReceiver, Option<ExecutedBal>),
         InsertBlockErrorKind,
     >
     where
@@ -1059,12 +1052,15 @@ where
                 )?;
 
                 let post_exec_start = Instant::now();
-                let (output, built_bal) =
-                    executor.finish_with_block_access_list().map_err(BlockExecutionError::other)?;
+                let (output, built_bal) = executor
+                    .finish_with_prepared_block_access_list()
+                    .map_err(BlockExecutionError::other)?;
                 self.metrics.record_post_execution(post_exec_start.elapsed());
                 Ok::<_, BlockExecutionError>((output, senders, built_bal))
             })?;
         drop(receipt_tx);
+        let built_bal =
+            built_bal.map(|bal| ExecutedBal { alloy: bal.clone().into(), evm: Arc::new(bal) });
 
         let execution_duration = execution_start.elapsed();
         self.metrics.record_block_execution(&output, execution_duration);
@@ -1103,7 +1099,8 @@ where
     /// 2. Relies on BAL prewarm to stream state-root updates and optional state prefetches.
     /// 3. Spawns the receipt-root task.
     /// 4. Calls [`crate::tree::payload_processor::bal::execute_block`].
-    /// 5. Returns the rebuilt BAL for post-execution consensus validation.
+    /// 5. Returns the rebuilt BAL for post-execution consensus validation, paired with the evm2
+    ///    representation the workers consumed.
     #[instrument(level = "debug", target = "engine::tree::payload_validator", skip_all)]
     #[expect(clippy::type_complexity)]
     fn execute_block_bal<Tx, Err, MakeStateProvider, T>(
@@ -1113,12 +1110,7 @@ where
         handle: &PayloadHandle<Tx, Err, N::Receipt>,
         make_state_provider: &MakeStateProvider,
     ) -> Result<
-        (
-            BlockExecutionOutput<N::Receipt>,
-            Vec<Address>,
-            ReceiptRootReceiver,
-            Option<BlockAccessList>,
-        ),
+        (BlockExecutionOutput<N::Receipt>, Vec<Address>, ReceiptRootReceiver, Option<ExecutedBal>),
         InsertBlockErrorKind,
     >
     where
@@ -1144,17 +1136,18 @@ where
         let execution_start = Instant::now();
         let ctx =
             self.execution_ctx_for(input).map_err(|e| InsertBlockErrorKind::Other(Box::new(e)))?;
-        let (output, senders, built_bal) = crate::tree::payload_processor::bal::execute_block(
-            &self.runtime,
-            &self.evm_config,
-            &make_db,
-            input_bal,
-            env.evm_env,
-            ctx,
-            env.transaction_count,
-            handle.clone_transaction_receiver(),
-            receipt_tx,
-        )?;
+        let (output, senders, built_bal, received_bal_evm) =
+            crate::tree::payload_processor::bal::execute_block(
+                &self.runtime,
+                &self.evm_config,
+                &make_db,
+                input_bal,
+                env.evm_env,
+                ctx,
+                env.transaction_count,
+                handle.clone_transaction_receiver(),
+                receipt_tx,
+            )?;
         let execution_duration = execution_start.elapsed();
 
         self.metrics.record_block_execution(&output, execution_duration);
@@ -1165,7 +1158,15 @@ where
             "Executed block via BAL path",
         );
 
-        Ok((output, senders, result_rx, Some(built_bal)))
+        // The received BAL was already converted to the evm2 form to drive the workers. Once the
+        // post-execution hash check against the rebuilt BAL passes, both have the same content, so
+        // the converted one can be reused instead of converting the rebuilt BAL again.
+        Ok((
+            output,
+            senders,
+            result_rx,
+            Some(ExecutedBal { alloy: built_bal, evm: received_bal_evm }),
+        ))
     }
 
     fn spawn_receipt_root_task(
@@ -1517,54 +1518,50 @@ where
         let code_read = provider_stats.total_code_fetches();
         let code_bytes_read = provider_stats.total_code_fetched_bytes();
 
-        // Write stats from the final state changes.
-        let storage_wipes = output.state.storage_wipes().collect::<AddressSet>();
-        let accounts_changed = output.state.accounts().count();
-        let accounts_deleted = output
-            .state
-            .accounts()
-            .filter(|(address, acc)| acc.current.is_none() || storage_wipes.contains(address))
-            .count();
-        let storage_slots_changed = output.state.storage().count();
+        // Write stats from BundleState (final state changes)
+        let accounts_changed = output.state.state.len();
+        let accounts_deleted =
+            output.state.state.values().filter(|acc| acc.was_destroyed()).count();
+        let storage_slots_changed =
+            output.state.state.values().map(|account| account.storage.len()).sum::<usize>();
         let storage_slots_deleted = output
             .state
-            .storage()
-            .filter(|(_, slot)| slot.current.is_zero() && !slot.original.is_zero())
-            .count();
-
-        let bytecodes_changed = output
             .state
-            .accounts()
-            .filter(|(_, acc)| {
-                let has_code_now =
-                    acc.current.as_ref().is_some_and(|info| info.code_hash != KECCAK_EMPTY);
-                let had_no_code_before = acc
-                    .original
-                    .as_ref()
-                    .map(|info| info.code_hash == KECCAK_EMPTY)
-                    .unwrap_or(true);
-                has_code_now && had_no_code_before
+            .values()
+            .flat_map(|account| account.storage.values())
+            .filter(|slot| {
+                slot.present_value.is_zero() && !slot.previous_or_original_value.is_zero()
             })
             .count();
+
+        // Helper: check if account represents a new contract deployment
+        let is_new_deployment = |acc: &BundleAccount| -> bool {
+            let has_code_now = acc.info.as_ref().is_some_and(|info| info.code_hash != KECCAK_EMPTY);
+            let had_no_code_before = acc
+                .original_info
+                .as_ref()
+                .map(|info| info.code_hash == KECCAK_EMPTY)
+                .unwrap_or(true);
+            has_code_now && had_no_code_before
+        };
+
+        let bytecodes_changed =
+            output.state.state.values().filter(|acc| is_new_deployment(acc)).count();
 
         // Unique new code hashes to count actual bytes persisted (deduplicated)
         let unique_new_code_hashes: B256Set = output
             .state
-            .accounts()
-            .filter(|(_, acc)| {
-                let has_code_now =
-                    acc.current.as_ref().is_some_and(|info| info.code_hash != KECCAK_EMPTY);
-                let had_no_code_before = acc
-                    .original
-                    .as_ref()
-                    .map(|info| info.code_hash == KECCAK_EMPTY)
-                    .unwrap_or(true);
-                has_code_now && had_no_code_before
-            })
-            .filter_map(|(_, acc)| acc.current.as_ref().map(|info| info.code_hash))
+            .state
+            .values()
+            .filter(|acc| is_new_deployment(acc))
+            .filter_map(|acc| acc.info.as_ref().map(|info| info.code_hash))
             .collect();
-        let code_bytes_written: usize =
-            unique_new_code_hashes.iter().filter_map(|hash| output.bytecode_len(hash)).sum();
+        let code_bytes_written: usize = unique_new_code_hashes
+            .iter()
+            .filter_map(|hash| {
+                output.state.contracts.get(hash).map(|bytecode| bytecode.original_bytes().len())
+            })
+            .sum();
 
         // Total time spent fetching state during execution
         let state_read_duration = provider_stats.total_account_fetch_latency() +
@@ -1574,29 +1571,27 @@ where
         // EIP-7702 delegation tracking from bytecode changes
         // Count new EIP-7702 bytecodes as delegations set
         let eip7702_delegations_set =
-            output.state.code().filter(|(_, bytecode)| bytecode.is_eip7702()).count();
+            output.state.contracts.values().filter(|bytecode| bytecode.is_eip7702()).count();
         // Delegations cleared: accounts where bytecode changed FROM EIP-7702 TO empty
         // This detects when an EIP-7702 delegation is removed by setting code to empty
         // Note: Clearing a delegation does NOT destroy the account - it just empties the
         // bytecode
         let eip7702_delegations_cleared = output
             .state
-            .accounts()
-            .filter(|(_, acc)| {
+            .state
+            .values()
+            .filter(|acc| {
                 // Check if original bytecode was EIP-7702
                 let original_was_eip7702 = acc
-                    .original
+                    .original_info
                     .as_ref()
                     .and_then(|info| info.code.as_ref())
                     .map(|bytecode| bytecode.is_eip7702())
                     .unwrap_or(false);
 
                 // Check if current code is empty (delegation cleared)
-                let code_now_empty = acc
-                    .current
-                    .as_ref()
-                    .map(|info| info.code_hash == KECCAK_EMPTY)
-                    .unwrap_or(false);
+                let code_now_empty =
+                    acc.info.as_ref().map(|info| info.code_hash == KECCAK_EMPTY).unwrap_or(false);
 
                 original_was_eip7702 && code_now_empty
             })
@@ -1809,7 +1804,7 @@ where
     ) -> ProviderResult<ExecutedBlock<N>> {
         self.payload_processor.on_inserted_executed_block(
             block.recovered_block.block_with_parent(),
-            block.execution_output.state.inner(),
+            &block.execution_output.state,
         );
 
         Ok(self.spawn_deferred_trie_task(
@@ -2052,4 +2047,12 @@ impl<T: PayloadTypes> BlockOrPayload<T> {
             Self::Block(block) => block.gas_limit(),
         }
     }
+}
+
+/// Block access list produced by executing a block.
+struct ExecutedBal {
+    /// Alloy form, only needed for the post-execution consensus checks (hash and gas limit).
+    alloy: BlockAccessList,
+    /// evm2 form, shared with the executed block so consumers can reuse it.
+    evm: Arc<EvmBal>,
 }

@@ -1,87 +1,26 @@
-#![cfg_attr(not(feature = "account-ext"), allow(clippy::clone_on_copy))]
-
-use crate::{
-    hashed_post_state_from_state_source, state, BlockExecutionOutput, BlockExecutionResult,
-    BlockReverts, EvmState, IndexedBlockState, RevertAccount, RevertToSlot, StorageReverts,
-};
-use alloc::{collections::BTreeMap, vec, vec::Vec};
+use crate::{BlockExecutionOutput, BlockExecutionResult};
+use alloc::{vec, vec::Vec};
 use alloy_eips::eip7685::Requests;
 use alloy_primitives::{
     logs_bloom,
     map::{AddressMap, B256Map, HashMap},
     Address, BlockNumber, Bloom, Log, B256, U256,
 };
-use evm2::evm::{
-    AccountChangeRef, AccountInfo, BlockStateAccumulator, StateChangeSink, StorageChange, Tracked,
-};
 use reth_primitives_traits::{Account, Bytecode, Receipt, StorageEntry};
+use reth_trie_common::{HashedPostState, KeyHasher};
+use revm::{
+    database::{states::BundleState, BundleAccount},
+    state::AccountInfo,
+};
 
-/// Type used to initialize execution state.
-pub type EvmStateInit = AddressMap<(Option<Account>, Option<Account>, B256Map<(U256, U256)>)>;
+/// Type used to initialize revms bundle state.
+pub type BundleStateInit = AddressMap<(Option<Account>, Option<Account>, B256Map<(U256, U256)>)>;
 
-/// Types used inside `RevertsInit` to initialize reverts.
+/// Types used inside `RevertsInit` to initialize revms reverts.
 pub type AccountRevertInit = (Option<Option<Account>>, Vec<StorageEntry>);
 
-/// Type used to initialize reverts.
+/// Type used to initialize revms reverts.
 pub type RevertsInit = HashMap<BlockNumber, AddressMap<AccountRevertInit>>;
-
-/// Accumulated state produced by batch execution.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct ExecutionOutcomeState {
-    /// Aggregated execution state changes.
-    state: EvmState,
-    /// Per-block execution state changes.
-    block_states: Vec<EvmState>,
-    /// Per-block reverts.
-    block_reverts: Vec<BlockReverts>,
-}
-
-impl ExecutionOutcomeState {
-    /// Creates a new accumulated execution state.
-    pub const fn new(
-        state: EvmState,
-        block_states: Vec<EvmState>,
-        block_reverts: Vec<BlockReverts>,
-    ) -> Self {
-        Self { state, block_states, block_reverts }
-    }
-
-    /// Creates accumulated execution state from per-block states.
-    pub fn from_block_states(states: impl IntoIterator<Item = EvmState>) -> Self {
-        let mut value = Self::default();
-        for state in states {
-            value.push_block_state(state);
-        }
-        value
-    }
-
-    /// Appends one block's execution state and derives its reverts.
-    pub fn push_block_state(&mut self, block_state: EvmState) {
-        self.block_reverts
-            .push(state::extend_state_and_collect_reverts(&mut self.state, &block_state));
-        self.block_states.push(block_state);
-    }
-
-    /// Returns an approximate size hint for the accumulated execution state.
-    pub fn size_hint(&self) -> usize {
-        state::state_source_size_hint(&self.state)
-    }
-
-    /// Returns per-block reverts accumulated during batch execution.
-    pub fn block_reverts(&self) -> &[BlockReverts] {
-        &self.block_reverts
-    }
-
-    /// Consumes the accumulator and returns the aggregate execution state.
-    pub fn into_execution_state(self) -> EvmState {
-        self.state
-    }
-
-    /// Returns the accumulated state parts.
-    pub(crate) fn into_parts(self) -> (EvmState, Vec<EvmState>, Vec<BlockReverts>) {
-        (self.state, self.block_states, self.block_reverts)
-    }
-}
 
 /// Represents a changed account
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -106,18 +45,15 @@ impl ChangedAccount {
 /// The `ExecutionOutcome` structure aggregates the state changes over an arbitrary number of
 /// blocks, capturing the resulting state, receipts, and requests following the execution.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct ExecutionOutcome<T = reth_ethereum_primitives::Receipt> {
-    /// Aggregated execution state changes.
-    state: IndexedBlockState,
-    /// Per-block execution state changes when available.
-    block_states: Vec<EvmState>,
-    /// Per-block reverts.
-    block_reverts: Vec<BlockReverts>,
+    /// Bundle state with reverts.
+    pub bundle: BundleState,
     /// The collection of receipts.
     /// Outer vector stores receipts for each block sequentially.
     /// The inner vector stores receipts ordered by transaction number.
     pub receipts: Vec<Vec<T>>,
-    /// First block of execution state.
+    /// First block of bundle state.
     pub first_block: BlockNumber,
     /// The collection of EIP-7685 requests.
     /// Outer vector stores requests for each block sequentially.
@@ -131,9 +67,7 @@ pub struct ExecutionOutcome<T = reth_ethereum_primitives::Receipt> {
 impl<T> Default for ExecutionOutcome<T> {
     fn default() -> Self {
         Self {
-            state: Default::default(),
-            block_states: Default::default(),
-            block_reverts: Default::default(),
+            bundle: Default::default(),
             receipts: Default::default(),
             first_block: Default::default(),
             requests: Default::default(),
@@ -142,47 +76,17 @@ impl<T> Default for ExecutionOutcome<T> {
 }
 
 impl<T> ExecutionOutcome<T> {
-    fn aggregate_block_states(states: &[EvmState]) -> EvmState {
-        let mut accumulator = BlockStateAccumulator::new();
-        for state in states {
-            state::extend_execution_state(&mut accumulator, state);
-        }
-        accumulator
-    }
-
-    fn from_parts(
-        state: EvmState,
-        block_states: Vec<EvmState>,
-        block_reverts: Vec<BlockReverts>,
+    /// Creates a new `ExecutionOutcome`.
+    ///
+    /// This constructor initializes a new `ExecutionOutcome` instance with the provided
+    /// bundle state, receipts, first block number, and EIP-7685 requests.
+    pub const fn new(
+        bundle: BundleState,
         receipts: Vec<Vec<T>>,
         first_block: BlockNumber,
         requests: Vec<Requests>,
     ) -> Self {
-        Self { state: state.into(), block_states, block_reverts, receipts, first_block, requests }
-    }
-
-    /// Creates a new `ExecutionOutcome` from aggregate execution state and per-block reverts.
-    pub fn from_state_and_reverts(
-        state: EvmState,
-        block_reverts: Vec<BlockReverts>,
-        receipts: Vec<Vec<T>>,
-        first_block: BlockNumber,
-        requests: Vec<Requests>,
-    ) -> Self {
-        let block_states = if block_reverts.len() <= 1 { vec![state.clone()] } else { Vec::new() };
-        Self::from_parts(state, block_states, block_reverts, receipts, first_block, requests)
-    }
-
-    /// Creates an empty execution outcome beginning at `first_block`.
-    pub fn new_empty(first_block: BlockNumber) -> Self {
-        Self::from_parts(
-            Default::default(),
-            Vec::new(),
-            Vec::new(),
-            Vec::new(),
-            first_block,
-            Vec::new(),
-        )
+        Self { bundle, receipts, first_block, requests }
     }
 
     /// Creates a new `ExecutionOutcome` from initialization parameters.
@@ -190,107 +94,65 @@ impl<T> ExecutionOutcome<T> {
     /// This constructor initializes a new `ExecutionOutcome` instance using detailed
     /// initialization parameters.
     pub fn new_init(
-        state_init: EvmStateInit,
-        mut revert_init: RevertsInit,
+        state_init: BundleStateInit,
+        revert_init: RevertsInit,
         contracts_init: impl IntoIterator<Item = (B256, Bytecode)>,
         receipts: Vec<Vec<T>>,
         first_block: BlockNumber,
         requests: Vec<Requests>,
     ) -> Self {
-        let mut accumulator = BlockStateAccumulator::new();
-        for (address, (original, current, storage)) in state_init {
-            let original = original.map(account_info_from_reth);
-            let current = current.map(account_info_from_reth);
-            accumulator
-                .account(AccountChangeRef {
+        // sort reverts by block number
+        let mut reverts = revert_init.into_iter().collect::<Vec<_>>();
+        reverts.sort_unstable_by_key(|a| a.0);
+
+        // initialize revm bundle
+        let bundle = BundleState::new(
+            state_init.into_iter().map(|(address, (original, present, storage))| {
+                (
                     address,
-                    original: original.as_ref(),
-                    current: current.as_ref(),
-                    created: false,
-                    selfdestructed: false,
-                })
-                .expect("infallible");
-            for (slot, (original, current)) in storage {
-                StateChangeSink::storage(
-                    &mut accumulator,
-                    StorageChange { address, key: U256::from_be_bytes(slot.0), original, current },
+                    original.map(Into::into),
+                    present.map(Into::into),
+                    storage.into_iter().map(|(k, s)| (k.into(), s)).collect(),
                 )
-                .expect("infallible");
-            }
-        }
-        for (code_hash, bytecode) in contracts_init {
-            accumulator.bytecode(code_hash, &bytecode.into()).expect("infallible");
-        }
+            }),
+            reverts.into_iter().map(|(_, reverts)| {
+                // does not need to be sorted, it is done when taking reverts.
+                reverts.into_iter().map(|(address, (original, storage))| {
+                    (
+                        address,
+                        original.map(|i| i.map(Into::into)),
+                        storage.into_iter().map(|entry| (entry.key.into(), entry.value)),
+                    )
+                })
+            }),
+            contracts_init.into_iter().map(|(code_hash, bytecode)| (code_hash, bytecode.0)),
+        );
 
-        // Genesis initialization includes reverts without a receipts entry.
-        let end_block = revert_init
-            .keys()
-            .max()
-            .map_or(first_block, |number| number + 1)
-            .max(first_block + receipts.len() as u64);
-        let block_reverts = (first_block..end_block)
-            .map(|number| revert_init.remove(&number).unwrap_or_default())
-            .map(|reverts| BlockReverts {
-                accounts: reverts
-                    .iter()
-                    .filter_map(|(address, (original, _))| {
-                        original.clone().map(|account| (*address, account.map(account_to_revert)))
-                    })
-                    .collect(),
-                storage: reverts
-                    .into_iter()
-                    .filter_map(|(address, (_, storage))| {
-                        let slots = storage
-                            .into_iter()
-                            .map(|entry| {
-                                (U256::from_be_bytes(entry.key.0), RevertToSlot::Some(entry.value))
-                            })
-                            .collect::<BTreeMap<_, _>>();
-                        (!slots.is_empty())
-                            .then_some((address, StorageReverts { slots, ..Default::default() }))
-                    })
-                    .collect(),
-            })
-            .collect::<Vec<_>>();
-
-        Self::from_state_and_reverts(accumulator, block_reverts, receipts, first_block, requests)
+        Self { bundle, receipts, first_block, requests }
     }
 
     /// Creates a new `ExecutionOutcome` from a single block execution result.
     pub fn single(block_number: u64, output: BlockExecutionOutput<T>) -> Self {
-        let block_reverts = state::block_reverts_from_state_source(&output.state);
-        let block_state = output.state.inner().clone();
         Self {
-            state: output.state,
-            block_states: vec![block_state],
-            block_reverts: vec![block_reverts],
+            bundle: output.state,
             receipts: vec![output.result.receipts],
             first_block: block_number,
             requests: vec![output.result.requests],
         }
     }
 
-    /// Appends a single block execution output.
-    pub fn push_block(&mut self, block_number: u64, output: BlockExecutionOutput<T>) {
-        self.extend(Self::single(block_number, output));
-    }
-
     /// Creates a new `ExecutionOutcome` from multiple [`BlockExecutionResult`]s.
-    fn from_parts_and_results(
+    pub fn from_blocks(
         first_block: u64,
-        state: EvmState,
-        block_states: Vec<EvmState>,
-        block_reverts: Vec<BlockReverts>,
+        bundle: BundleState,
         results: Vec<BlockExecutionResult<T>>,
     ) -> Self {
-        let mut value = Self::from_parts(
-            state,
-            block_states,
-            block_reverts,
-            Vec::with_capacity(results.len()),
+        let mut value = Self {
+            bundle,
             first_block,
-            Vec::with_capacity(results.len()),
-        );
+            receipts: Vec::with_capacity(results.len()),
+            requests: Vec::with_capacity(results.len()),
+        };
         for result in results {
             value.receipts.push(result.receipts);
             value.requests.push(result.requests);
@@ -298,65 +160,14 @@ impl<T> ExecutionOutcome<T> {
         value
     }
 
-    /// Creates a new `ExecutionOutcome` from accumulated batch state and execution results.
-    pub fn from_blocks(
-        first_block: u64,
-        state: ExecutionOutcomeState,
-        results: Vec<BlockExecutionResult<T>>,
-    ) -> Self {
-        let (state, block_states, mut block_reverts) = state.into_parts();
-        Self::adjust_reverts_for_prior_wipes(&EvmState::default(), &mut block_reverts);
-        Self::from_parts_and_results(first_block, state, block_states, block_reverts, results)
+    /// Return revm bundle state.
+    pub const fn state(&self) -> &BundleState {
+        &self.bundle
     }
 
-    /// Creates a new `ExecutionOutcome` from execution states and execution results.
-    pub fn from_block_states(
-        first_block: u64,
-        states: impl IntoIterator<Item = EvmState>,
-        results: Vec<BlockExecutionResult<T>>,
-    ) -> Self {
-        Self::from_blocks(first_block, ExecutionOutcomeState::from_block_states(states), results)
-    }
-
-    /// Returns mutable per-block reverts.
-    pub const fn block_reverts_mut(&mut self) -> &mut Vec<BlockReverts> {
-        &mut self.block_reverts
-    }
-
-    /// Returns per-block reverts.
-    pub const fn block_reverts(&self) -> &[BlockReverts] {
-        self.block_reverts.as_slice()
-    }
-
-    /// Returns changed storage slot indices for all changed accounts.
-    pub fn storage_change_keys(&self) -> impl Iterator<Item = (Address, U256)> + '_ {
-        self.state.storage().map(|(key, _)| (key.address(), key.key()))
-    }
-
-    /// Returns current changed storage values for `address`.
-    pub fn storage_changes_for(&self, address: Address) -> impl Iterator<Item = (U256, U256)> + '_ {
-        self.state
-            .storage()
-            .filter(move |(key, _)| key.address() == address)
-            .map(|(key, value)| (key.key(), value.current))
-    }
-
-    /// Returns bytecodes changed by this execution outcome.
-    pub fn bytecodes(&self) -> impl Iterator<Item = (B256, Bytecode)> + '_ {
-        self.state
-            .code()
-            .filter(|(hash, _)| **hash != alloy_consensus::constants::KECCAK_EMPTY)
-            .map(|(hash, bytecode)| (*hash, bytecode.clone().into()))
-    }
-
-    /// Returns the current state changes as a frozen execution state.
-    pub fn execution_state(&self) -> EvmState {
-        self.state.inner().clone()
-    }
-
-    /// Returns the aggregate execution state.
-    pub const fn execution_state_ref(&self) -> &EvmState {
-        self.state.inner()
+    /// Returns mutable revm bundle state.
+    pub const fn state_mut(&mut self) -> &mut BundleState {
+        &mut self.bundle
     }
 
     /// Set first block.
@@ -364,46 +175,42 @@ impl<T> ExecutionOutcome<T> {
         self.first_block = first_block;
     }
 
-    /// Prepends state without overriding existing changes or updating receipts and reverts.
-    pub fn prepend_state(&mut self, mut other: EvmState) {
-        state::extend_execution_state(&mut other, &self.state);
-        self.state = other.into();
-    }
-
     /// Return iterator over all accounts
     pub fn accounts_iter(&self) -> impl Iterator<Item = (Address, Option<&AccountInfo>)> {
-        self.state.accounts().map(|(address, account)| (address, account.current.as_ref()))
+        self.bundle.state().iter().map(|(a, acc)| (*a, acc.info.as_ref()))
+    }
+
+    /// Return iterator over all [`BundleAccount`]s in the bundle
+    pub fn bundle_accounts_iter(&self) -> impl Iterator<Item = (Address, &BundleAccount)> {
+        self.bundle.state().iter().map(|(a, acc)| (*a, acc))
     }
 
     /// Get account if account is known.
     pub fn account(&self, address: &Address) -> Option<Option<Account>> {
-        self.account_state(address)
-            .map(|account| account.current.as_ref().map(account_info_to_reth))
+        self.bundle.account(address).map(|a| a.info.as_ref().map(Into::into))
     }
 
-    /// Returns the state account change for the given account.
-    pub fn account_state(&self, address: &Address) -> Option<&Tracked<Option<AccountInfo>>> {
-        self.state.account_state(address)
+    /// Returns the state [`BundleAccount`] for the given account.
+    pub fn account_state(&self, address: &Address) -> Option<&BundleAccount> {
+        self.bundle.account(address)
     }
 
     /// Get storage if value is known.
     ///
     /// This means that depending on status we can potentially return `U256::ZERO`.
     pub fn storage(&self, address: &Address, storage_key: U256) -> Option<U256> {
-        self.state.storage_value(address, storage_key)
+        self.bundle.account(address).and_then(|a| a.storage_slot(storage_key))
     }
 
     /// Return bytecode if known.
     pub fn bytecode(&self, code_hash: &B256) -> Option<Bytecode> {
-        self.state.bytecode(code_hash)
+        self.bundle.bytecode(code_hash).map(Bytecode)
     }
 
-    /// Returns [`reth_trie_common::HashedPostState`] for this execution outcome.
-    /// Returns the hashed post-state represented by the aggregate execution state.
-    pub fn hash_state_slow<KH: reth_trie_common::KeyHasher>(
-        &self,
-    ) -> reth_trie_common::HashedPostState {
-        hashed_post_state_from_state_source::<KH, _>(&self.state)
+    /// Returns [`HashedPostState`] for this execution outcome.
+    /// See [`HashedPostState::from_bundle_state`] for more info.
+    pub fn hash_state_slow<KH: KeyHasher>(&self) -> HashedPostState {
+        HashedPostState::from_bundle_state::<KH>(&self.bundle.state)
     }
 
     /// Transform block number to the index of block.
@@ -475,35 +282,31 @@ impl<T> ExecutionOutcome<T> {
 
     /// Revert the state to the given block number.
     ///
-    /// Returns false if the block number is not in the execution state.
+    /// Returns false if the block number is not in the bundle state.
     ///
     /// # Note
     ///
-    /// The provided block number will stay inside the execution state.
+    /// The provided block number will stay inside the bundle state.
     pub fn revert_to(&mut self, block_number: BlockNumber) -> bool {
         let Some(index) = self.block_number_to_index(block_number) else { return false };
 
         // +1 is for number of blocks that we have as index is included.
         let new_len = index + 1;
+        let rm_trx: usize = self.len() - new_len;
+
         // remove receipts
         self.receipts.truncate(new_len);
         // remove requests
         self.requests.truncate(new_len);
-        if self.block_states.is_empty() {
-            self.state =
-                state::revert_execution_state(self.state.inner(), &self.block_reverts, new_len)
-                    .into();
-        } else {
-            self.truncate_block_states(new_len);
-        }
-        self.block_reverts.truncate(new_len);
+        // Revert last n reverts.
+        self.bundle.revert(rm_trx);
 
         true
     }
 
     /// Splits the block range state at a given block number.
     /// Returns two split states ([..at], [at..]).
-    /// The plain state of the 2nd execution state will contain extra changes
+    /// The plain state of the 2nd bundle state will contain extra changes
     /// that were made in state transitions belonging to the lower state.
     ///
     /// # Panics
@@ -530,8 +333,7 @@ impl<T> ExecutionOutcome<T> {
         if at_idx < higher_state.requests.len() {
             higher_state.requests = higher_state.requests.split_off(at_idx);
         }
-        higher_state.block_reverts.drain(..at_idx.min(higher_state.block_reverts.len()));
-        higher_state.drop_first_block_states(at_idx);
+        higher_state.bundle.take_n_reverts(at_idx);
         higher_state.first_block = at;
 
         (Some(lower_state), higher_state)
@@ -543,58 +345,25 @@ impl<T> ExecutionOutcome<T> {
     /// we know that other state was build on top of this one.
     /// In most cases this would be true.
     pub fn extend(&mut self, other: Self) {
-        let Self {
-            state: other_state,
-            block_states: other_block_states,
-            mut block_reverts,
-            receipts,
-            requests,
-            ..
-        } = other;
-        let other_receipts_len = receipts.len();
-        Self::adjust_reverts_for_prior_wipes(self.state.inner(), &mut block_reverts);
-        let mut accumulator = core::mem::take(&mut self.state).into_inner();
-        state::extend_execution_state(&mut accumulator, &other_state);
-        self.state = accumulator.into();
-        self.extend_block_states(other_block_states, other_receipts_len);
-        self.block_reverts.extend(block_reverts);
-        self.receipts.extend(receipts);
-        self.requests.extend(requests);
+        self.bundle.extend(other.bundle);
+        self.receipts.extend(other.receipts);
+        self.requests.extend(other.requests);
     }
 
-    fn truncate_block_states(&mut self, new_len: usize) {
-        if !self.block_states.is_empty() {
-            self.block_states.truncate(new_len);
-            self.state = Self::aggregate_block_states(&self.block_states).into();
-        }
-    }
-
-    fn drop_first_block_states(&mut self, n: usize) {
-        if !self.block_states.is_empty() {
-            self.block_states.drain(..n.min(self.block_states.len()));
-            self.state = Self::aggregate_block_states(&self.block_states).into();
-        }
-    }
-
-    fn extend_block_states(&mut self, other: Vec<EvmState>, other_receipts_len: usize) {
-        if self.block_states.len() == self.receipts.len() && other.len() == other_receipts_len {
-            self.block_states.extend(other);
-        } else {
-            self.block_states.clear();
-        }
-    }
-
-    fn adjust_reverts_for_prior_wipes(prior_state: &EvmState, block_reverts: &mut [BlockReverts]) {
-        for address in prior_state.storage_wipes() {
-            for reverts in block_reverts.iter_mut() {
-                if let Some(storage_reverts) = reverts.storage.get_mut(&address) &&
-                    storage_reverts.wiped
-                {
-                    storage_reverts.previous_wipe = true;
-                    break
-                }
-            }
-        }
+    /// Prepends present the state with the given `BundleState`.
+    /// It adds changes from the given state but does not override any existing changes.
+    ///
+    /// Reverts and receipts are not updated.
+    pub fn prepend_state(&mut self, mut other: BundleState) {
+        let other_len = other.reverts.len();
+        // take this bundle
+        let this_bundle = core::mem::take(&mut self.bundle);
+        // extend other bundle with this
+        other.extend(this_bundle);
+        // discard other reverts
+        other.take_n_reverts(other_len);
+        // swap bundles
+        core::mem::swap(&mut self.bundle, &mut other)
     }
 
     /// Create a new instance with updated receipts.
@@ -653,157 +422,13 @@ impl<T> From<(BlockExecutionOutput<T>, BlockNumber)> for ExecutionOutcome<T> {
     }
 }
 
-fn account_info_from_reth(account: Account) -> AccountInfo {
-    account.into()
-}
-
-fn account_to_revert(account: Account) -> RevertAccount {
-    AccountInfo::from(account).into()
-}
-
-fn account_info_to_reth(info: &AccountInfo) -> Account {
-    info.into()
-}
-
-#[cfg(test)]
-fn multi_block_outcome_for_serde() -> ExecutionOutcome {
-    let address = Address::repeat_byte(0x42);
-    let original = AccountInfo {
-        balance: U256::from(1),
-        nonce: 1,
-        #[cfg(feature = "account-ext")]
-        extension: evm2::evm::AccountExtension::copy_from_slice(&[0x82; 32]),
-        ..Default::default()
-    };
-    let current = AccountInfo { balance: U256::from(3), nonce: 2, ..Default::default() };
-    let mut block1 = BlockStateAccumulator::new();
-    block1
-        .account(AccountChangeRef {
-            address,
-            original: None,
-            current: Some(&original),
-            created: false,
-            selfdestructed: false,
-        })
-        .unwrap();
-    StateChangeSink::storage(
-        &mut block1,
-        StorageChange { address, key: U256::from(1), original: U256::ZERO, current: U256::from(2) },
-    )
-    .unwrap();
-
-    let mut block2 = BlockStateAccumulator::new();
-    block2
-        .account(AccountChangeRef {
-            address,
-            original: Some(&original),
-            current: Some(&current),
-            created: false,
-            selfdestructed: false,
-        })
-        .unwrap();
-    block2.storage_wipe(address).unwrap();
-    StateChangeSink::storage(
-        &mut block2,
-        StorageChange { address, key: U256::from(3), original: U256::ZERO, current: U256::from(4) },
-    )
-    .unwrap();
-
-    let results: Vec<BlockExecutionResult<reth_ethereum_primitives::Receipt>> = vec![
-        BlockExecutionResult { gas_used: 1, ..Default::default() },
-        BlockExecutionResult { gas_used: 2, ..Default::default() },
-    ];
-    ExecutionOutcome::from_block_states(10, [block1, block2], results)
-}
-
-#[cfg(test)]
-fn assert_serde_preserves_block_operations(expected: ExecutionOutcome, actual: ExecutionOutcome) {
-    assert_eq!(actual, expected);
-
-    let mut expected_reverted = expected.clone();
-    let mut actual_reverted = actual.clone();
-    assert!(expected_reverted.revert_to(10));
-    assert!(actual_reverted.revert_to(10));
-    assert_eq!(actual_reverted, expected_reverted);
-
-    assert_eq!(actual.split_at(11), expected.split_at(11));
-}
-
-#[cfg(feature = "serde")]
-mod serde_impl {
-    use super::*;
-    use alloc::vec::Vec;
-    use alloy_eips::eip7685::Requests;
-    use alloy_primitives::BlockNumber;
-    use serde::{Deserialize, Deserializer, Serialize, Serializer};
-
-    #[derive(Serialize)]
-    struct ExecutionOutcomeSerde<'a, T> {
-        state: &'a EvmState,
-        block_states: &'a [EvmState],
-        block_reverts: &'a [BlockReverts],
-        receipts: &'a Vec<Vec<T>>,
-        first_block: BlockNumber,
-        requests: &'a Vec<Requests>,
-    }
-
-    #[derive(Deserialize)]
-    struct ExecutionOutcomeSerdeOwned<T> {
-        state: EvmState,
-        block_states: Vec<EvmState>,
-        block_reverts: Vec<BlockReverts>,
-        receipts: Vec<Vec<T>>,
-        first_block: BlockNumber,
-        requests: Vec<Requests>,
-    }
-
-    impl<T> Serialize for ExecutionOutcome<T>
-    where
-        T: Serialize,
-    {
-        fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-        where
-            S: Serializer,
-        {
-            ExecutionOutcomeSerde {
-                state: self.state.inner(),
-                block_states: &self.block_states,
-                block_reverts: self.block_reverts(),
-                receipts: &self.receipts,
-                first_block: self.first_block,
-                requests: &self.requests,
-            }
-            .serialize(serializer)
-        }
-    }
-
-    impl<'de, T> Deserialize<'de> for ExecutionOutcome<T>
-    where
-        T: Deserialize<'de>,
-    {
-        fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-        where
-            D: Deserializer<'de>,
-        {
-            let value = ExecutionOutcomeSerdeOwned::<T>::deserialize(deserializer)?;
-            Ok(Self::from_parts(
-                value.state,
-                value.block_states,
-                value.block_reverts,
-                value.receipts,
-                value.first_block,
-                value.requests,
-            ))
-        }
-    }
-}
-
 #[cfg(feature = "serde-bincode-compat")]
 pub(super) mod serde_bincode_compat {
     use alloc::{borrow::Cow, vec::Vec};
     use alloy_eips::eip7685::Requests;
     use alloy_primitives::{BlockNumber, Bytes};
     use reth_primitives_traits::Receipt;
+    use revm::database::BundleState;
     use serde::{Deserialize, Deserializer, Serialize, Serializer};
     use serde_with::{DeserializeAs, SerializeAs};
 
@@ -824,9 +449,7 @@ pub(super) mod serde_bincode_compat {
     /// ```
     #[derive(Debug, Serialize, Deserialize)]
     pub struct ExecutionOutcome<'a> {
-        state: Cow<'a, super::EvmState>,
-        block_states: Vec<super::EvmState>,
-        block_reverts: Vec<super::BlockReverts>,
+        bundle: Cow<'a, BundleState>,
         receipts: Vec<Vec<Bytes>>,
         first_block: BlockNumber,
         #[expect(clippy::owned_cow)]
@@ -839,9 +462,7 @@ pub(super) mod serde_bincode_compat {
     {
         fn from(value: &'a super::ExecutionOutcome<T>) -> Self {
             ExecutionOutcome {
-                state: Cow::Borrowed(value.state.inner()),
-                block_states: value.block_states.clone(),
-                block_reverts: value.block_reverts.clone(),
+                bundle: Cow::Borrowed(&value.bundle),
                 receipts: value
                     .receipts
                     .iter()
@@ -860,11 +481,9 @@ pub(super) mod serde_bincode_compat {
         T: Receipt,
     {
         fn from(value: ExecutionOutcome<'_>) -> Self {
-            Self::from_parts(
-                value.state.into_owned(),
-                value.block_states,
-                value.block_reverts,
-                value
+            Self {
+                bundle: value.bundle.into_owned(),
+                receipts: value
                     .receipts
                     .into_iter()
                     .map(|vec| {
@@ -876,9 +495,9 @@ pub(super) mod serde_bincode_compat {
                             .collect()
                     })
                     .collect(),
-                value.first_block,
-                value.requests.into_owned(),
-            )
+                first_block: value.first_block,
+                requests: value.requests.into_owned(),
+            }
         }
     }
 
@@ -911,16 +530,14 @@ pub(super) mod serde_bincode_compat {
 
     #[cfg(test)]
     mod tests {
-        use super::super::{
-            assert_serde_preserves_block_operations, multi_block_outcome_for_serde,
-            serde_bincode_compat, ExecutionOutcome,
-        };
+        use super::super::{serde_bincode_compat, ExecutionOutcome};
+        use rand::Rng;
         use reth_ethereum_primitives::Receipt;
         use serde::{Deserialize, Serialize};
         use serde_with::serde_as;
 
         #[test]
-        fn binary_roundtrip_preserves_multi_block_operations() {
+        fn test_chain_bincode_roundtrip() {
             #[serde_as]
             #[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
             struct Data<T: reth_primitives_traits::Receipt> {
@@ -928,15 +545,20 @@ pub(super) mod serde_bincode_compat {
                 data: ExecutionOutcome<T>,
             }
 
-            let data = Data { data: multi_block_outcome_for_serde() };
+            let mut bytes = [0u8; 1024];
+            rand::rng().fill(bytes.as_mut_slice());
+            let data = Data {
+                data: ExecutionOutcome {
+                    bundle: Default::default(),
+                    receipts: vec![],
+                    first_block: 0,
+                    requests: vec![],
+                },
+            };
 
-            #[cfg(not(feature = "account-ext"))]
-            let decoded =
-                bincode::deserialize::<Data<Receipt>>(&bincode::serialize(&data).unwrap()).unwrap();
-            #[cfg(feature = "account-ext")]
-            let decoded =
-                rmp_serde::from_slice::<Data<Receipt>>(&rmp_serde::to_vec(&data).unwrap()).unwrap();
-            assert_serde_preserves_block_operations(data.data, decoded.data);
+            let encoded = bincode::serialize(&data).unwrap();
+            let decoded = bincode::deserialize::<Data<Receipt>>(&encoded).unwrap();
+            assert_eq!(decoded, data);
         }
     }
 }
@@ -944,194 +566,18 @@ pub(super) mod serde_bincode_compat {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::execution_state_from_init;
     use alloy_consensus::TxType;
-    use alloy_primitives::{bytes, Address, LogData};
-
-    #[test]
-    fn reconstructed_outcome_preserves_genesis_reverts_without_receipts() {
-        let address = Address::repeat_byte(1);
-        let outcome: ExecutionOutcome = ExecutionOutcome::new_init(
-            AddressMap::default(),
-            HashMap::from_iter([(
-                0,
-                AddressMap::from_iter([(
-                    address,
-                    (Some(None), vec![StorageEntry { key: B256::ZERO, value: U256::ZERO }]),
-                )]),
-            )]),
-            [],
-            vec![],
-            0,
-            vec![],
-        );
-
-        assert_eq!(outcome.block_reverts().len(), 1);
-        assert_eq!(outcome.block_reverts()[0].accounts.get(&address), Some(&None));
-        assert_eq!(
-            outcome.block_reverts()[0].storage[&address].slots[&U256::ZERO],
-            RevertToSlot::Some(U256::ZERO)
-        );
-    }
-
-    #[test]
-    fn reconstructed_outcome_reverts_account_and_storage() {
-        let address = Address::repeat_byte(1);
-        let account = |nonce| Account { nonce, ..Default::default() };
-        let outcome: ExecutionOutcome = ExecutionOutcome::new_init(
-            AddressMap::from_iter([(
-                address,
-                (
-                    Some(account(0)),
-                    Some(account(0)),
-                    B256Map::from_iter([(B256::ZERO, (U256::ZERO, U256::ZERO))]),
-                ),
-            )]),
-            HashMap::from_iter([
-                (
-                    10,
-                    AddressMap::from_iter([(
-                        address,
-                        (
-                            Some(Some(account(0))),
-                            vec![StorageEntry { key: B256::ZERO, value: U256::ZERO }],
-                        ),
-                    )]),
-                ),
-                (
-                    12,
-                    AddressMap::from_iter([(
-                        address,
-                        (
-                            Some(Some(account(1))),
-                            vec![StorageEntry { key: B256::ZERO, value: U256::from(1) }],
-                        ),
-                    )]),
-                ),
-            ]),
-            [],
-            vec![vec![], vec![], vec![]],
-            10,
-            vec![],
-        );
-        let mut reverted = outcome.clone();
-        assert!(reverted.revert_to(11));
-        assert_eq!(reverted.account(&address), Some(Some(account(1))));
-        assert_eq!(reverted.storage(&address, U256::ZERO), Some(U256::from(1)));
-        let (lower, higher) = outcome.split_at(12);
-        assert_eq!(lower.unwrap().state, reverted.state);
-        assert_eq!(higher.first_block(), 12);
-        assert_eq!(higher.len(), 1);
-    }
-
-    #[test]
-    fn reconstructed_outcome_reverts_storage_wipes() {
-        let expected = multi_block_outcome_for_serde();
-        let mut actual = ExecutionOutcome::from_state_and_reverts(
-            expected.state.inner().clone(),
-            expected.block_reverts.clone(),
-            expected.receipts.clone(),
-            expected.first_block,
-            expected.requests.clone(),
-        );
-        let mut expected = expected;
-        assert!(actual.revert_to(10));
-        assert!(expected.revert_to(10));
-        assert_eq!(actual.state, expected.state);
-    }
-
-    #[test]
-    fn reconstructed_outcome_reverts_deletion_and_recreation() {
-        let address = Address::repeat_byte(2);
-        let account = |nonce| AccountInfo { nonce, ..Default::default() };
-        let mut blocks = Vec::new();
-        for (original, current, wipe, slot) in [
-            (Some(account(1)), Some(account(2)), false, Some((0, 10, 20))),
-            (Some(account(2)), Some(account(3)), true, Some((1, 0, 30))),
-            (Some(account(3)), None, false, None),
-            (None, Some(account(4)), false, Some((2, 0, 40))),
-        ] {
-            let mut block = BlockStateAccumulator::new();
-            block
-                .account(AccountChangeRef {
-                    address,
-                    original: original.as_ref(),
-                    current: current.as_ref(),
-                    created: false,
-                    selfdestructed: false,
-                })
-                .unwrap();
-            if wipe {
-                block.storage_wipe(address).unwrap();
-            }
-            if let Some((key, original, current)) = slot {
-                StateChangeSink::storage(
-                    &mut block,
-                    StorageChange {
-                        address,
-                        key: U256::from(key),
-                        original: U256::from(original),
-                        current: U256::from(current),
-                    },
-                )
-                .unwrap();
-            }
-            blocks.push(block);
-        }
-        let expected: ExecutionOutcome = ExecutionOutcome::from_block_states(
-            10,
-            blocks,
-            (0..4).map(|_| BlockExecutionResult::default()).collect(),
-        );
-        let mut actual = ExecutionOutcome::from_state_and_reverts(
-            expected.state.inner().clone(),
-            expected.block_reverts.clone(),
-            expected.receipts.clone(),
-            expected.first_block,
-            expected.requests.clone(),
-        );
-        for number in (10..=12).rev() {
-            let mut prefix = expected.clone();
-            assert!(prefix.revert_to(number));
-            assert!(actual.revert_to(number));
-            assert_eq!(
-                actual.hash_state_slow::<reth_trie_common::KeccakKeyHasher>(),
-                prefix.hash_state_slow::<reth_trie_common::KeccakKeyHasher>(),
-                "block {number}"
-            );
-            assert_eq!(actual.account(&address), prefix.account(&address));
-            for key in 0..3 {
-                assert_eq!(
-                    actual.storage(&address, U256::from(key)),
-                    prefix.storage(&address, U256::from(key)),
-                    "block {number}, slot {key}"
-                );
-            }
-        }
-    }
-
-    fn outcome_with_receipts<T>(
-        first_block: BlockNumber,
-        receipts: Vec<Vec<T>>,
-        requests: Vec<Requests>,
-    ) -> ExecutionOutcome<T> {
-        ExecutionOutcome::new_empty(first_block).with_receipts(receipts).with_requests(requests)
-    }
-
-    #[cfg(feature = "serde")]
-    #[test]
-    fn serde_roundtrip_preserves_multi_block_operations() {
-        let expected = multi_block_outcome_for_serde();
-        #[cfg(not(feature = "account-ext"))]
-        let actual = bincode::deserialize(&bincode::serialize(&expected).unwrap()).unwrap();
-        #[cfg(feature = "account-ext")]
-        let actual = rmp_serde::from_slice(&rmp_serde::to_vec(&expected).unwrap()).unwrap();
-
-        assert_serde_preserves_block_operations(expected, actual);
-    }
+    use alloy_primitives::{bytes, Address, LogData, B256};
 
     #[test]
     fn test_initialization() {
+        // Create a new BundleState object with initial data
+        let bundle = BundleState::new(
+            vec![(Address::new([2; 20]), None, Some(AccountInfo::default()), HashMap::default())],
+            vec![vec![(Address::new([2; 20]), None, vec![])]],
+            vec![],
+        );
+
         // Create a Receipts object with a vector of receipt vectors
         let receipts = vec![vec![Some(reth_ethereum_primitives::Receipt {
             tx_type: TxType::Legacy,
@@ -1146,52 +592,33 @@ mod tests {
         // Define the first block number
         let first_block = 123;
 
-        // Create a EvmStateInit object and insert initial data
-        let mut state_init: EvmStateInit = AddressMap::default();
+        // Create a ExecutionOutcome object with the created bundle, receipts, requests, and
+        // first_block
+        let exec_res = ExecutionOutcome {
+            bundle: bundle.clone(),
+            receipts: receipts.clone(),
+            requests: requests.clone(),
+            first_block,
+        };
+
+        // Assert that creating a new ExecutionOutcome using the constructor matches exec_res
+        assert_eq!(
+            ExecutionOutcome::new(bundle, receipts.clone(), first_block, requests.clone()),
+            exec_res
+        );
+
+        // Create a BundleStateInit object and insert initial data
+        let mut state_init: BundleStateInit = AddressMap::default();
         state_init
             .insert(Address::new([2; 20]), (None, Some(Account::default()), B256Map::default()));
 
         // Create an AddressMap for account reverts and insert initial data
         let mut revert_inner: AddressMap<AccountRevertInit> = AddressMap::default();
-        revert_inner.insert(Address::new([2; 20]), (Some(None), vec![]));
+        revert_inner.insert(Address::new([2; 20]), (None, vec![]));
 
         // Create a RevertsInit object and insert the revert_inner data
         let mut revert_init: RevertsInit = HashMap::default();
-        revert_init.insert(first_block, revert_inner);
-
-        let block_reverts = vec![BlockReverts {
-            accounts: AddressMap::from_iter([(Address::new([2; 20]), None)]),
-            storage: Default::default(),
-        }];
-        let state = execution_state_from_init(
-            state_init.clone().into_iter().map(|(address, (original, present, storage))| {
-                (
-                    address,
-                    (original, present, storage.into_iter().map(|(k, s)| (k.into(), s)).collect()),
-                )
-            }),
-            vec![],
-        );
-
-        let exec_res = ExecutionOutcome::from_state_and_reverts(
-            state.clone(),
-            block_reverts.clone(),
-            receipts.clone(),
-            first_block,
-            requests.clone(),
-        );
-
-        // Assert that creating a new ExecutionOutcome using the constructor matches exec_res
-        assert_eq!(
-            ExecutionOutcome::from_state_and_reverts(
-                state,
-                block_reverts,
-                receipts.clone(),
-                first_block,
-                requests.clone(),
-            ),
-            exec_res
-        );
+        revert_init.insert(123, revert_inner);
 
         // Assert that creating a new ExecutionOutcome using the new_init method matches
         // exec_res
@@ -1221,9 +648,14 @@ mod tests {
         // Define the first block number
         let first_block = 123;
 
-        // Create a ExecutionOutcome object with the created execution outcome, receipts, requests,
-        // and first_block
-        let exec_res = outcome_with_receipts(first_block, receipts, vec![]);
+        // Create a ExecutionOutcome object with the created bundle, receipts, requests, and
+        // first_block
+        let exec_res = ExecutionOutcome {
+            bundle: Default::default(),
+            receipts,
+            requests: vec![],
+            first_block,
+        };
 
         // Test before the first block
         assert_eq!(exec_res.block_number_to_index(12), None);
@@ -1248,9 +680,14 @@ mod tests {
         // Define the first block number
         let first_block = 123;
 
-        // Create a ExecutionOutcome object with the created execution outcome, receipts, requests,
-        // and first_block
-        let exec_res = outcome_with_receipts(first_block, receipts, vec![]);
+        // Create a ExecutionOutcome object with the created bundle, receipts, requests, and
+        // first_block
+        let exec_res = ExecutionOutcome {
+            bundle: Default::default(),
+            receipts,
+            requests: vec![],
+            first_block,
+        };
 
         // Get logs for block number 123
         let logs: Vec<&Log> = exec_res.logs(123).unwrap().collect();
@@ -1272,9 +709,14 @@ mod tests {
         // Define the first block number
         let first_block = 123;
 
-        // Create a ExecutionOutcome object with the created execution outcome, receipts, requests,
-        // and first_block
-        let exec_res = outcome_with_receipts(first_block, receipts, vec![]);
+        // Create a ExecutionOutcome object with the created bundle, receipts, requests, and
+        // first_block
+        let exec_res = ExecutionOutcome {
+            bundle: Default::default(), // Default value for bundle
+            receipts,                   // Include the created receipts
+            requests: vec![],           // Empty vector for requests
+            first_block,                // Set the first block number
+        };
 
         // Get receipts for block number 123 and convert the result into a vector
         let receipts_by_block: Vec<_> = exec_res.receipts_by_block(123).iter().collect();
@@ -1307,9 +749,14 @@ mod tests {
         // Define the first block number
         let first_block = 123;
 
-        // Create a ExecutionOutcome object with the created execution outcome, receipts, requests,
-        // and first_block
-        let exec_res = outcome_with_receipts(first_block, receipts, vec![]);
+        // Create a ExecutionOutcome object with the created bundle, receipts, requests, and
+        // first_block
+        let exec_res = ExecutionOutcome {
+            bundle: Default::default(), // Default value for bundle
+            receipts,                   // Include the created receipts
+            requests: vec![],           // Empty vector for requests
+            first_block,                // Set the first block number
+        };
 
         // Assert that the length of receipts in exec_res is 1
         assert_eq!(exec_res.len(), 1);
@@ -1318,8 +765,12 @@ mod tests {
         assert!(!exec_res.is_empty());
 
         // Create a ExecutionOutcome object with an empty Receipts object
-        let exec_res_empty_receipts: ExecutionOutcome =
-            outcome_with_receipts(first_block, receipts_empty, vec![]);
+        let exec_res_empty_receipts: ExecutionOutcome = ExecutionOutcome {
+            bundle: Default::default(), // Default value for bundle
+            receipts: receipts_empty,   // Include the empty receipts
+            requests: vec![],           // Empty vector for requests
+            first_block,                // Set the first block number
+        };
 
         // Assert that the length of receipts in exec_res_empty_receipts is 0
         assert_eq!(exec_res_empty_receipts.len(), 0);
@@ -1351,9 +802,10 @@ mod tests {
         let requests =
             vec![Requests::new(vec![request.clone()]), Requests::new(vec![request.clone()])];
 
-        // Create a ExecutionOutcome object with the created execution outcome, receipts, requests,
-        // and first_block
-        let mut exec_res = outcome_with_receipts(first_block, receipts, requests);
+        // Create a ExecutionOutcome object with the created bundle, receipts, requests, and
+        // first_block
+        let mut exec_res =
+            ExecutionOutcome { bundle: Default::default(), receipts, requests, first_block };
 
         // Assert that the revert_to method returns true when reverting to the initial block number.
         assert!(exec_res.revert_to(123));
@@ -1396,7 +848,8 @@ mod tests {
         let first_block = 123;
 
         // Create an ExecutionOutcome object.
-        let mut exec_res = outcome_with_receipts(first_block, receipts, requests);
+        let mut exec_res =
+            ExecutionOutcome { bundle: Default::default(), receipts, requests, first_block };
 
         // Extend the ExecutionOutcome object by itself.
         exec_res.extend(exec_res.clone());
@@ -1404,11 +857,12 @@ mod tests {
         // Assert the extended ExecutionOutcome matches the expected outcome.
         assert_eq!(
             exec_res,
-            outcome_with_receipts(
-                123,
-                vec![vec![Some(receipt.clone())], vec![Some(receipt)]],
-                vec![Requests::new(vec![request.clone()]), Requests::new(vec![request])],
-            )
+            ExecutionOutcome {
+                bundle: Default::default(),
+                receipts: vec![vec![Some(receipt.clone())], vec![Some(receipt)]],
+                requests: vec![Requests::new(vec![request.clone()]), Requests::new(vec![request])],
+                first_block: 123,
+            }
         );
     }
 
@@ -1442,26 +896,29 @@ mod tests {
             Requests::new(vec![request.clone()]),
         ];
 
-        // Create a ExecutionOutcome object with the created execution outcome, receipts, requests,
-        // and first_block
-        let exec_res = outcome_with_receipts(first_block, receipts, requests);
+        // Create a ExecutionOutcome object with the created bundle, receipts, requests, and
+        // first_block
+        let exec_res =
+            ExecutionOutcome { bundle: Default::default(), receipts, requests, first_block };
 
         // Split the ExecutionOutcome at block number 124
         let result = exec_res.clone().split_at(124);
 
         // Define the expected lower ExecutionOutcome after splitting
-        let lower_execution_outcome = outcome_with_receipts(
+        let lower_execution_outcome = ExecutionOutcome {
+            bundle: Default::default(),
+            receipts: vec![vec![Some(receipt.clone())]],
+            requests: vec![Requests::new(vec![request.clone()])],
             first_block,
-            vec![vec![Some(receipt.clone())]],
-            vec![Requests::new(vec![request.clone()])],
-        );
+        };
 
         // Define the expected higher ExecutionOutcome after splitting
-        let higher_execution_outcome = outcome_with_receipts(
-            124,
-            vec![vec![Some(receipt.clone())], vec![Some(receipt)]],
-            vec![Requests::new(vec![request.clone()]), Requests::new(vec![request])],
-        );
+        let higher_execution_outcome = ExecutionOutcome {
+            bundle: Default::default(),
+            receipts: vec![vec![Some(receipt.clone())], vec![Some(receipt)]],
+            requests: vec![Requests::new(vec![request.clone()]), Requests::new(vec![request])],
+            first_block: 124,
+        };
 
         // Assert that the split result matches the expected lower and higher outcomes
         assert_eq!(result.0, Some(lower_execution_outcome));
@@ -1478,43 +935,60 @@ mod tests {
         let address2 = Address::random();
         let address3 = Address::random();
 
-        let state = execution_state_from_init(
-            vec![
-                (
-                    address1,
-                    (
-                        None,
-                        Some(Account {
-                            nonce: 1,
-                            balance: U256::from(100),
-                            bytecode_hash: None,
-                            #[cfg(feature = "account-ext")]
-                            extension: Default::default(),
-                        }),
-                        BTreeMap::default(),
-                    ),
-                ),
-                (
-                    address2,
-                    (
-                        None,
-                        Some(Account {
-                            nonce: 2,
-                            balance: U256::from(200),
-                            bytecode_hash: None,
-                            #[cfg(feature = "account-ext")]
-                            extension: Default::default(),
-                        }),
-                        BTreeMap::default(),
-                    ),
-                ),
-                (address3, (None, None, BTreeMap::default())),
-            ],
-            vec![],
+        // Set up account info with some changes
+        let account_info1 = AccountInfo {
+            nonce: 1,
+            balance: U256::from(100),
+            code_hash: B256::ZERO,
+            code: None,
+            account_id: None,
+        };
+        let account_info2 = AccountInfo {
+            nonce: 2,
+            balance: U256::from(200),
+            code_hash: B256::ZERO,
+            code: None,
+            account_id: None,
+        };
+
+        // Set up the bundle state with these accounts
+        let mut bundle_state = BundleState::default();
+        bundle_state.state.insert(
+            address1,
+            BundleAccount {
+                info: Some(account_info1),
+                storage: Default::default(),
+                original_info: Default::default(),
+                status: Default::default(),
+            },
+        );
+        bundle_state.state.insert(
+            address2,
+            BundleAccount {
+                info: Some(account_info2),
+                storage: Default::default(),
+                original_info: Default::default(),
+                status: Default::default(),
+            },
         );
 
-        let execution_outcome: ExecutionOutcome =
-            ExecutionOutcome::from_state_and_reverts(state, vec![], Default::default(), 0, vec![]);
+        // Unchanged account
+        bundle_state.state.insert(
+            address3,
+            BundleAccount {
+                info: None,
+                storage: Default::default(),
+                original_info: Default::default(),
+                status: Default::default(),
+            },
+        );
+
+        let execution_outcome: ExecutionOutcome = ExecutionOutcome {
+            bundle: bundle_state,
+            receipts: Default::default(),
+            first_block: 0,
+            requests: vec![],
+        };
 
         // Get the changed accounts
         let changed_accounts: Vec<ChangedAccount> = execution_outcome.changed_accounts().collect();

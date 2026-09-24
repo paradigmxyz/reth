@@ -243,7 +243,6 @@ where
             // Prewarm workers must not commit speculative writes into the reused worker EVM:
             // task scheduling would otherwise make later prewarm reads observe non-canonical state.
             let mut proof_targets = PrewarmProofTargetsSink::default();
-
             match evm.transact_and_discard(&tx_env, &mut proof_targets) {
                 Ok(()) => {}
                 Err(err) => {
@@ -310,7 +309,10 @@ where
                 let new_cache = SavedCache::new(hash, saved_cache.into_cache());
 
                 // Update under the mutex so no checkout can observe partially updated state.
-                new_cache.cache().insert_state(execution_outcome.state.inner());
+                if new_cache.cache().insert_state(&execution_outcome.state).is_err() {
+                    debug!(target: "engine::caching", "cleared execution cache on update error");
+                    return (cached.take(), Some(new_cache));
+                }
 
                 new_cache.update_metrics(cache_state_metrics.as_ref());
 
@@ -888,7 +890,7 @@ mod tests {
         runtime: &Runtime,
         execution_cache: &PayloadExecutionCache,
         saved_cache: SavedCache,
-        state: reth_execution_types::EvmState,
+        state: revm::database::BundleState,
         valid: bool,
         saving_duration: Gauge,
     ) {
@@ -900,7 +902,7 @@ mod tests {
         }
         drop(valid_tx);
         task.save_cache(
-            Arc::new(BlockExecutionOutput { state: state.into(), result: Default::default() }),
+            Arc::new(BlockExecutionOutput { state, result: Default::default() }),
             valid_rx,
         );
     }
@@ -1027,7 +1029,7 @@ mod tests {
             inspected: inspected_rx,
             result: result_tx,
         });
-        let code = evm2::bytecode::Bytecode::new_eip7702_raw(bytes.into()).unwrap();
+        let code = revm::bytecode::Bytecode::new_eip7702_raw(bytes.into()).unwrap();
         saved
             .cache()
             .insert_code(B256::repeat_byte(3), Some(reth_primitives_traits::Bytecode(code)));
