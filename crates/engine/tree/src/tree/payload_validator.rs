@@ -651,7 +651,7 @@ where
         ));
 
         if !parallel_bal_execution {
-            std::thread::sleep(Duration::from_millis(2));
+            std::thread::sleep(Duration::from_millis(1));
         }
 
         // Create optional cache stats for detailed block logging
