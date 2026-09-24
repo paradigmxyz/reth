@@ -728,7 +728,7 @@ where
         let execution_result = if parallel_bal_execution {
             self.execute_block_bal(env, &input, &handle, &make_state_provider)
         } else {
-            let state_provider = make_state_provider(false);
+            let state_provider = make_state_provider(true);
             match state_provider {
                 Ok(state_provider) => self.execute_block(
                     state_provider,
