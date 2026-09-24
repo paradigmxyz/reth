@@ -328,12 +328,26 @@ pub(crate) fn commit_detached_transaction<T: EvmTypes>(
     output: TxResultWithState<T>,
 ) -> TxResult<T> {
     let TxResultWithState { result, pending_state, .. } = output;
-    commit_pending_state(evm, block_state, stream_state, on_state_update, &pending_state);
+    accumulate_pending_state(block_state, stream_state, on_state_update, &pending_state);
+    // Reattach the finalized transaction so evm2 retains its account capacity and recycles
+    // storage maps for the next transaction instead of dropping the detached allocations.
+    evm.state_mut().set_pending_state(pending_state);
+    evm.state_mut().commit_transaction();
     result
 }
 
 pub(crate) fn commit_pending_state<T: EvmTypes>(
     evm: &mut Evm<'_, T>,
+    block_state: &mut BlockState,
+    stream_state: bool,
+    on_state_update: &mut impl FnMut(EvmState),
+    pending_state: &evm2::evm::PendingState,
+) {
+    accumulate_pending_state(block_state, stream_state, on_state_update, pending_state);
+    evm.overlay_db_mut().commit_pending(pending_state);
+}
+
+fn accumulate_pending_state(
     block_state: &mut BlockState,
     stream_state: bool,
     on_state_update: &mut impl FnMut(EvmState),
@@ -345,7 +359,6 @@ pub(crate) fn commit_pending_state<T: EvmTypes>(
     if stream_state {
         send_state_update(changes.state, on_state_update);
     }
-    evm.overlay_db_mut().commit_pending(pending_state);
 }
 
 fn map_db_error_code<T: EvmTypes>(evm: &mut Evm<'_, T>, code: ErrorCode) -> EthExecutionError {
