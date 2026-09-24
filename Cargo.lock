@@ -9459,7 +9459,6 @@ dependencies = [
  "reth-primitives-traits",
  "reth-trie-common",
  "revm",
- "rmp-serde",
  "serde",
  "serde_with",
 ]
