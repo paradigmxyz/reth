@@ -7,9 +7,10 @@ use alloy_provider::{Provider, ProviderBuilder};
 use alloy_rpc_types_engine::{ForkchoiceState, PayloadStatusEnum};
 use jsonrpsee_core::client::Error;
 use reth_chainspec::{ChainSpecBuilder, MAINNET};
-use reth_e2e_test_utils::setup_engine_with_connection;
+use reth_e2e_test_utils::E2ETestSetupBuilder;
 use reth_node_ethereum::{EthEngineTypes, EthereumNode};
 use reth_rpc_api::{EngineApiClient, TestingBuildBlockRequestV1};
+use reth_rpc_server_types::{RethRpcModule, RpcModuleSelection};
 use std::sync::Arc;
 
 #[tokio::test]
@@ -23,15 +24,16 @@ async fn invalid_forkchoice_preserves_canonical_state() -> eyre::Result<()> {
             .cancun_activated()
             .build(),
     );
-    let (mut nodes, _) = setup_engine_with_connection::<EthereumNode>(
-        2,
-        chain_spec,
-        false,
-        Default::default(),
-        eth_payload_attributes,
-        false,
-    )
-    .await?;
+    let (mut nodes, _) =
+        E2ETestSetupBuilder::<EthereumNode, _>::new(2, chain_spec, eth_payload_attributes)
+            .with_connect_nodes(false)
+            .with_node_config_modifier(|mut config| {
+                config.rpc.http_api =
+                    Some(RpcModuleSelection::from([RethRpcModule::Eth, RethRpcModule::Testing]));
+                config
+            })
+            .build()
+            .await?;
     let node = nodes.pop().unwrap();
     let producer = nodes.pop().unwrap();
     let genesis = node.block_hash(0);
