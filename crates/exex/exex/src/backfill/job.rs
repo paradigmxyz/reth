@@ -441,6 +441,13 @@ mod tests {
             );
         }
 
+        let mut expected = to_execution_outcome(1, &pipeline_results[0].1);
+        expected.extend(to_execution_outcome(2, &pipeline_results[1].1));
+        expected.state_mut().reverts.sort();
+        let mut actual = chain.execution_outcome().clone();
+        actual.state_mut().reverts.sort();
+        assert_eq!(actual, expected, "batch state and reverts must match sequential execution");
+
         Ok(())
     }
 

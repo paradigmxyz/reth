@@ -151,7 +151,7 @@ where
         // The bundle is simulated on top of the state block, so default to the next block's base
         // fee. <https://github.com/flashbots/mev-geth/blob/fddf97beec5877483f879a77b7dea2e58a58d653/internal/ethapi/api.go#L2130>
         if let Some(base_fee) = base_fee {
-            evm_env.block_env_mut().basefee = U256::from(base_fee);
+            evm_env.block_env_mut().basefee = U256::from(base_fee.min(u64::MAX as u128));
         } else if let Some(next_base_fee) = self
             .eth_api()
             .provider()
@@ -408,6 +408,18 @@ mod tests {
                 assert_bundle_fees(&response, expected_tip);
             }
         }
+
+        let error = api
+            .call_bundle(EthCallBundle { base_fee: Some(u128::MAX), ..bundle.clone() })
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(
+                error.as_invalid_transaction(),
+                Some(reth_rpc_eth_types::RpcInvalidTransactionError::FeeCapTooLow)
+            ),
+            "{error:?}"
+        );
 
         // An actual pending block is not canonical and has its own base fee.
         let chain_spec = provider.chain_spec();

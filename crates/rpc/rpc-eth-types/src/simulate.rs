@@ -18,8 +18,9 @@ use evm2::{precompiles::MovePrecompileError, EvmFeatures, TxResult};
 use jsonrpsee_types::{error::INTERNAL_ERROR_CODE, ErrorObject};
 use reth_evm::{
     execute::{BlockBuilder, BlockBuilderOutcome},
-    Database, Evm as RethEvm, EvmEnv,
+    BlockExecutionError, Database, Evm as RethEvm, EvmEnv,
 };
+use reth_execution_types::HashedPostState;
 use reth_primitives_traits::{
     BlockBody as _, BlockTy, NodePrimitives, Recovered, RecoveredBlock, SealedHeader,
 };
@@ -312,7 +313,7 @@ pub fn execute_transactions<S, T, EvmTypes>(
     calls: Vec<RpcTxReq<T::Network>>,
     remaining_call_gas_limit: &mut Option<u64>,
     chain_id: u64,
-    compute_state_root: bool,
+    hashed_state: Option<&mut HashedPostState>,
     converter: &T,
 ) -> Result<(BlockBuilderOutcome<S::Primitives>, Vec<TxResult<EvmTypes>>), EthApiError>
 where
@@ -399,8 +400,19 @@ where
         block_state_gas_used = block_state_gas_used.saturating_add(gas_output.state_gas_used());
     }
 
-    let result = if compute_state_root {
-        builder.finish(state_provider, None)?
+    let result = if let Some(hashed_state) = hashed_state {
+        builder.finish_with_state_root(&state_provider, |output| {
+            // Every simulated block is rooted against the original provider snapshot.
+            hashed_state.extend(
+                state_provider
+                    .hashed_post_state(&output.state)
+                    .map_err(BlockExecutionError::other)?,
+            );
+            state_provider
+                .state_root_with_updates(hashed_state.clone())
+                .map(Some)
+                .map_err(BlockExecutionError::other)
+        })?
     } else {
         builder.finish(NoopProvider::default(), None)?
     };

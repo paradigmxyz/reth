@@ -548,25 +548,33 @@ where
 
 #[cfg(test)]
 mod tests {
+    use super::*;
     use crate::{eth::helpers::types::EthRpcConverter, EthApi, EthApiBuilder};
     use alloy_consensus::{Block, BlockBody, Header};
     use alloy_eips::{BlockId, BlockNumberOrTag};
+    use alloy_genesis::{Genesis, GenesisAccount};
     use alloy_network::TransactionBuilder;
     use alloy_primitives::{Address, Bytes, Signature, B256, U256, U64};
     use alloy_rpc_types::FeeHistory;
     use alloy_rpc_types_eth::{
+        simulate::{SimBlock, SimulatePayload},
         state::{AccountOverride, EvmOverrides, StateOverride},
-        Bundle, TransactionRequest,
+        BlockOverrides, Bundle, TransactionRequest,
     };
     use jsonrpsee_types::error::INVALID_PARAMS_CODE;
     use rand::Rng;
     use reth_chain_state::CanonStateSubscriptions;
     use reth_chainspec::{ChainSpec, ChainSpecBuilder, ChainSpecProvider, EthChainSpec};
+    use reth_db_common::init::init_genesis;
     use reth_ethereum_primitives::TransactionSigned;
     use reth_evm_ethereum::EthEvmConfig;
     use reth_network_api::noop::NoopNetwork;
     use reth_provider::{
-        test_utils::{ExtendedAccount, MockEthProvider, NoopProvider},
+        providers::BlockchainProvider,
+        test_utils::{
+            create_test_provider_factory_with_chain_spec, ExtendedAccount, MockEthProvider,
+            NoopProvider,
+        },
         PruneCheckpointReader, StageCheckpointReader,
     };
     use reth_rpc_eth_api::{
@@ -1235,5 +1243,135 @@ mod tests {
                     .unwrap();
             assert_eq!(block.header.size, Some(U256::from(block_size)));
         }
+    }
+
+    #[tokio::test]
+    async fn simulate_preserves_state_between_blocks() {
+        let sender = Address::repeat_byte(0x11);
+        let contract = Address::repeat_byte(0xaa);
+        // Increment slot zero and return both the counter and the contract balance.
+        let code = alloy_primitives::bytes!("60005460010180600055600052303160205260406000f3");
+        let genesis =
+            Genesis::default().with_gas_limit(30_000_000).with_base_fee(Some(0)).extend_accounts([
+                (sender, GenesisAccount::default().with_balance(U256::from(1_000_000))),
+                (contract, GenesisAccount::default().with_nonce(Some(1)).with_code(Some(code))),
+            ]);
+        let chain_spec =
+            Arc::new(ChainSpecBuilder::mainnet().cancun_activated().genesis(genesis).build());
+        let factory = create_test_provider_factory_with_chain_spec(chain_spec);
+        init_genesis(&factory).unwrap();
+        let provider = BlockchainProvider::new(factory).unwrap();
+        let api = EthApiBuilder::new(
+            provider.clone(),
+            testing_pool(),
+            NoopNetwork::default(),
+            EthEvmConfig::new(provider.chain_spec()),
+        )
+        .compute_state_root_for_eth_simulate(true)
+        .build();
+        for trace_transfers in [false, true] {
+            let payload = SimulatePayload {
+                validation: true,
+                trace_transfers,
+                block_state_calls: vec![
+                    SimBlock::default()
+                        .call(
+                            TransactionRequest::default()
+                                .with_from(sender)
+                                .with_to(contract)
+                                .with_nonce(0)
+                                .with_gas_limit(100_000)
+                                .with_value(U256::from(1)),
+                        )
+                        .call(
+                            // This recipient is only changed in the first block.
+                            TransactionRequest::default()
+                                .with_from(sender)
+                                .with_to(Address::repeat_byte(0xbb))
+                                .with_nonce(1)
+                                .with_gas_limit(21_000)
+                                .with_value(U256::from(1)),
+                        ),
+                    SimBlock::default().call(
+                        TransactionRequest::default()
+                            .with_from(sender)
+                            .with_to(contract)
+                            .with_nonce(2)
+                            .with_gas_limit(100_000),
+                    ),
+                ],
+                ..Default::default()
+            };
+            let combined = SimulatePayload {
+                block_state_calls: vec![SimBlock::default().extend_calls(
+                    payload.block_state_calls.iter().flat_map(|block| block.calls.clone()),
+                )],
+                ..payload.clone()
+            };
+            let expected = EthCall::simulate_v1(&api, combined, None).await.unwrap();
+            let blocks = EthCall::simulate_v1(&api, payload, None).await.unwrap();
+            assert_eq!(blocks[1].inner.header.state_root, expected[0].inner.header.state_root);
+            assert_eq!(blocks.len(), 2);
+            for (index, block) in blocks.iter().enumerate() {
+                let result = &block.calls[0];
+                assert!(result.status, "{result:?}");
+                assert_eq!(U256::from_be_slice(&result.return_data[..32]), U256::from(index + 1));
+                assert_eq!(U256::from_be_slice(&result.return_data[32..]), U256::from(1));
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn call_saturates_oversized_block_overrides() {
+        let contract = Address::repeat_byte(0xaa);
+        let sender = Address::repeat_byte(0x11);
+        let provider = MockEthProvider::default()
+            .with_chain_spec(ChainSpecBuilder::mainnet().cancun_activated().build());
+        provider.add_account(sender, ExtendedAccount::new(0, U256::MAX));
+        provider.add_block(
+            B256::repeat_byte(0x42),
+            Block {
+                header: Header {
+                    number: 1,
+                    gas_limit: 30_000_000,
+                    excess_blob_gas: Some(0),
+                    ..Default::default()
+                },
+                body: BlockBody::default(),
+            },
+        );
+        let api = build_test_eth_api(provider);
+        // Return NUMBER, BASEFEE, and BLOBBASEFEE.
+        let overrides = EvmOverrides::state(Some(StateOverride::from_iter([(
+            contract,
+            AccountOverride {
+                code: Some(alloy_primitives::bytes!("43600052486020524a60405260606000f3")),
+                ..Default::default()
+            },
+        )])))
+        .with_block(Box::new(BlockOverrides {
+            number: Some(U256::MAX),
+            base_fee: Some(U256::MAX),
+            blob_base_fee: Some(U256::MAX),
+            ..Default::default()
+        }));
+        let result = EthCall::call(
+            &api,
+            TransactionRequest {
+                gas_price: Some(1),
+                ..TransactionRequest::default()
+                    .with_from(sender)
+                    .with_to(contract)
+                    .with_gas_limit(100_000)
+            },
+            None,
+            overrides,
+        )
+        .await
+        .unwrap();
+        assert_eq!(result.len(), 96);
+        assert_eq!(U256::from_be_slice(&result[..32]), U256::from(u64::MAX));
+        assert_eq!(U256::from_be_slice(&result[32..64]), U256::from(u64::MAX));
+        assert_eq!(U256::from_be_slice(&result[64..]), U256::from(u128::MAX));
     }
 }

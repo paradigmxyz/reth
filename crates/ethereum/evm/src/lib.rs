@@ -142,11 +142,11 @@ where
     }
 
     fn block_base_fee(&self) -> u64 {
-        self.block.basefee.to()
+        self.block.basefee.saturating_to()
     }
 
     fn block_blob_base_fee(&self) -> u64 {
-        self.block.blob_basefee.to()
+        self.block.blob_basefee.saturating_to()
     }
 
     fn transaction_validation_limits(&self) -> reth_evm::EvmTransactionValidationLimits {

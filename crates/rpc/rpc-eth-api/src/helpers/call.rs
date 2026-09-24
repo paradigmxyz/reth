@@ -25,6 +25,7 @@ use reth_evm::{
     execute::{BlockBuilder, BlockExecutor, BlockExecutorFactory},
     ConfigureEvm, Database, Evm, EvmEnv, EvmEnvFor, EvmTypesFor, TxEnvFor, TxResultWithStateFor,
 };
+use reth_execution_types::{BundleSource, HashedPostState};
 use reth_node_api::BlockBody;
 use reth_primitives_traits::Recovered;
 use reth_rpc_convert::{RpcConvert, RpcTxReq};
@@ -100,6 +101,8 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
                     (&state_provider).into_evm_state_provider(),
                 )));
                 let mut parent = parent;
+                let mut hashed_state =
+                    this.compute_state_root_for_eth_simulate().then(HashedPostState::default);
 
                 let chain_id = this.provider().chain_spec().chain_id();
 
@@ -226,7 +229,7 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
                             calls,
                             &mut remaining_call_gas_limit,
                             chain_id,
-                            this.compute_state_root_for_eth_simulate(),
+                            hashed_state.as_mut(),
                             this.converter(),
                         )
                         .map_err(map_err)?
@@ -255,12 +258,13 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
                             calls,
                             &mut remaining_call_gas_limit,
                             chain_id,
-                            this.compute_state_root_for_eth_simulate(),
+                            hashed_state.as_mut(),
                             this.converter(),
                         )
                         .map_err(map_err)?
                     };
 
+                    db.commit_source(&BundleSource(&result.execution_state));
                     let simulated_header = result.block.clone_sealed_header();
                     db.insert_block_hash(
                         &U256::from(simulated_header.number()),

@@ -45,7 +45,7 @@ pub fn apply_block_overrides<DB>(
 
     let block = evm_env.block_env_mut();
     if let Some(number) = number {
-        block.number = number;
+        block.number = U256::from(number.saturating_to::<u64>());
     }
     if let Some(difficulty) = difficulty {
         block.difficulty = difficulty;
@@ -63,10 +63,10 @@ pub fn apply_block_overrides<DB>(
         block.prevrandao = U256::from_be_slice(random.as_slice());
     }
     if let Some(base_fee) = base_fee {
-        block.basefee = U256::from(base_fee);
+        block.basefee = U256::from(base_fee.saturating_to::<u64>());
     }
     if let Some(blob_base_fee) = blob_base_fee {
-        block.blob_basefee = U256::from(blob_base_fee);
+        block.blob_basefee = U256::from(blob_base_fee.saturating_to::<u128>());
     }
 }
 
