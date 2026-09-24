@@ -11,18 +11,18 @@ use std::collections::VecDeque;
 /// Maximum number of individual blobs retained across competing submissions.
 const VALIDATED_BLOB_CACHE_CAPACITY: usize = 12;
 
+/// Reuses KZG validation only for exact blob, commitment, and proof matches.
+#[derive(Debug, Default)]
+pub(super) struct BlobValidationCache {
+    entries: Mutex<VecDeque<ValidatedBlob>>,
+}
+
 /// A validated tuple includes the proof format, so a matching commitment alone cannot skip
 /// verification of different blob data or proofs.
 #[derive(Debug)]
 enum ValidatedBlob {
     V1 { blob: Bytes, commitment: Bytes48, proof: Bytes48 },
     V2 { blob: Bytes, commitment: Bytes48, proofs: Vec<Bytes48> },
-}
-
-/// Reuses KZG validation only for exact blob, commitment, and proof matches.
-#[derive(Debug, Default)]
-pub(super) struct BlobValidationCache {
-    entries: Mutex<VecDeque<ValidatedBlob>>,
 }
 
 impl BlobValidationCache {
