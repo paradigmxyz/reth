@@ -4,7 +4,9 @@ use alloc::{boxed::Box, sync::Arc};
 use alloy_consensus::Header;
 use reth_chainspec::{ChainSpec, EthChainSpec, EthereumHardforks};
 #[cfg(feature = "std")]
-use reth_evm::precompile_cache::{CachedPrecompileProvider, PrecompileCacheMap};
+use reth_evm::precompile_cache::{
+    CachedPrecompileProvider, PrecompileCacheMap, PrecompileCachePolicy,
+};
 
 #[cfg(feature = "jit")]
 pub use evm2_jit::{
@@ -82,6 +84,12 @@ where
 
     /// Applies factory-specific configuration to a newly created EVM.
     fn configure_evm(&self, _evm: &mut evm2::Evm<'_, Self::Types>) {}
+
+    /// Selects pure precompiles eligible for shared caching. Custom factories default to uncached.
+    #[cfg(feature = "std")]
+    fn precompile_cache_policy(&self, _spec: Self::SpecId) -> PrecompileCachePolicy {
+        PrecompileCachePolicy::Disabled
+    }
 }
 
 impl EvmFactory for () {
@@ -90,6 +98,11 @@ impl EvmFactory for () {
 
     fn spec_id(&self, spec: evm2::SpecId) -> evm2::SpecId {
         spec
+    }
+
+    #[cfg(feature = "std")]
+    fn precompile_cache_policy(&self, _spec: Self::SpecId) -> PrecompileCachePolicy {
+        PrecompileCachePolicy::All
     }
 
     fn tx_registry(
@@ -319,6 +332,7 @@ impl<R, C, F: EvmFactory> EthBlockExecutorFactory<R, C, F> {
                     precompiles,
                     self.precompile_cache_map.clone(),
                     spec,
+                    self.evm_factory.precompile_cache_policy(spec),
                     self.precompile_cache_metrics,
                 ))
             };
@@ -357,6 +371,7 @@ impl<R, C, F: EvmFactory> EthBlockExecutorFactory<R, C, F> {
                     precompiles,
                     self.precompile_cache_map.clone(),
                     spec,
+                    self.evm_factory.precompile_cache_policy(spec),
                     self.precompile_cache_metrics,
                 ))
             };
@@ -456,6 +471,11 @@ impl EvmFactory for RethEvmFactory {
 
     fn spec_id(&self, spec: evm2::SpecId) -> evm2::SpecId {
         spec
+    }
+
+    #[cfg(feature = "std")]
+    fn precompile_cache_policy(&self, _spec: Self::SpecId) -> PrecompileCachePolicy {
+        PrecompileCachePolicy::All
     }
 
     fn tx_registry(

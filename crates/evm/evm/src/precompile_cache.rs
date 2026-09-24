@@ -1,7 +1,7 @@
 //! Precompile cache for payload prewarming.
 
 use alloy_primitives::{
-    map::{DefaultHashBuilder, FbBuildHasher},
+    map::{AddressSet, DefaultHashBuilder, FbBuildHasher},
     Address, Bytes,
 };
 use evm2::{
@@ -126,6 +126,7 @@ where
     inner: evm2::Precompiles<T>,
     cache_map: PrecompileCacheMap<S>,
     spec_id: S,
+    policy: PrecompileCachePolicy,
     #[cfg_attr(not(feature = "metrics"), allow(dead_code))]
     metrics_enabled: bool,
 }
@@ -153,9 +154,10 @@ where
         inner: evm2::Precompiles<T>,
         cache_map: PrecompileCacheMap<S>,
         spec_id: S,
+        policy: PrecompileCachePolicy,
         metrics_enabled: bool,
     ) -> Self {
-        Self { inner, cache_map, spec_id, metrics_enabled }
+        Self { inner, cache_map, spec_id, policy, metrics_enabled }
     }
 }
 
@@ -178,6 +180,25 @@ where
     ) -> Result<(), evm2::precompiles::MovePrecompileError> {
         self.inner.move_precompiles(moves)?;
         if moves.iter().any(|(source, dest)| source != dest) {
+            if let PrecompileCachePolicy::Addresses(addresses) = &mut self.policy {
+                let mut sources = AddressSet::default();
+                let moved = moves
+                    .iter()
+                    .filter(|(source, dest)| source != dest && sources.insert(*source))
+                    .map(|(source, dest)| (*source, *dest, addresses.contains(source)))
+                    .collect::<Vec<_>>();
+                let addresses = Arc::make_mut(addresses);
+                for (source, _, _) in &moved {
+                    addresses.remove(source);
+                }
+                for (_, dest, cacheable) in moved {
+                    if cacheable {
+                        addresses.insert(dest);
+                    } else {
+                        addresses.remove(&dest);
+                    }
+                }
+            }
             // The shared cache still belongs to the unmodified table used by other EVMs.
             // Relocated entries need a private cache because address alone no longer identifies
             // the same precompile implementation.
@@ -197,6 +218,9 @@ where
         gas: &mut GasTracker,
     ) -> Option<Result<PrecompileOutput, PrecompileError>> {
         let address = message.code_address;
+        if !self.policy.allows(&address) {
+            return self.inner.execute(evm, message, gas);
+        }
         let cache = self.cache_map.cache_for_address(address);
         #[cfg(feature = "metrics")]
         let metrics = self.metrics_enabled.then(|| {
@@ -285,6 +309,31 @@ where
     }
 }
 
+/// Precompiles whose output and gas usage depend only on input and specification.
+///
+/// Eligible precompiles must not read execution context or state, mutate state, or emit logs.
+/// Custom factories are uncached unless they explicitly select a policy.
+#[derive(Debug, Clone, Default)]
+pub enum PrecompileCachePolicy {
+    /// No precompiles are eligible for caching.
+    #[default]
+    Disabled,
+    /// Every installed precompile is pure and eligible for caching.
+    All,
+    /// Only these precompile implementations are eligible for caching.
+    Addresses(Arc<AddressSet>),
+}
+
+impl PrecompileCachePolicy {
+    fn allows(&self, address: &Address) -> bool {
+        match self {
+            Self::Disabled => false,
+            Self::All => true,
+            Self::Addresses(addresses) => addresses.contains(address),
+        }
+    }
+}
+
 #[derive(Debug)]
 struct GasSnapshot {
     spent: u64,
@@ -351,6 +400,7 @@ mod tests {
             precompiles,
             PrecompileCacheMap::default(),
             SpecId::OSAKA,
+            PrecompileCachePolicy::All,
             false,
         );
         assert_eq!(cached.precompile_ids(), expected);
@@ -365,8 +415,13 @@ mod tests {
         let mut precompiles = evm2::Precompiles::<BaseEvmTypes>::base(spec);
         let custom_entry = precompiles.as_map_mut().remove(identity).unwrap().with_address(custom);
         precompiles.as_map_mut().insert(custom_entry);
-        let provider =
-            CachedPrecompileProvider::new(precompiles, PrecompileCacheMap::default(), spec, false);
+        let provider = CachedPrecompileProvider::new(
+            precompiles,
+            PrecompileCacheMap::default(),
+            spec,
+            PrecompileCachePolicy::All,
+            false,
+        );
         let mut database = InMemoryDB::default();
         let mut evm = Evm::<BaseEvmTypes>::new(
             spec,
@@ -408,6 +463,7 @@ mod tests {
             evm2::Precompiles::<BaseEvmTypes>::base(spec),
             shared.clone(),
             spec,
+            PrecompileCachePolicy::Addresses(Arc::new(AddressSet::from_iter([identity]))),
             false,
         );
         provider.move_precompiles(&[(identity, destination)]).unwrap();
@@ -456,6 +512,7 @@ mod tests {
             evm2::Precompiles::base(SpecId::OSAKA),
             cache_map.clone(),
             SpecId::OSAKA,
+            PrecompileCachePolicy::All,
             false,
         );
         let mut evm = Evm::<BaseEvmTypes>::new(
@@ -506,6 +563,7 @@ mod tests {
             evm2::Precompiles::base(SpecId::OSAKA),
             cache.clone(),
             SpecId::OSAKA,
+            PrecompileCachePolicy::All,
             false,
         );
         let mut evm = Evm::<BaseEvmTypes>::new(
@@ -537,6 +595,55 @@ mod tests {
                     .is_some(),
                 len == 2048
             );
+        }
+    }
+
+    #[test]
+    fn caller_dependent_precompiles_are_not_cached() {
+        let spec = SpecId::OSAKA;
+        let custom = Address::with_last_byte(0x40);
+        let identity = Address::with_last_byte(4);
+        for policy in [
+            PrecompileCachePolicy::Disabled,
+            PrecompileCachePolicy::Addresses(Arc::new(AddressSet::from_iter([identity]))),
+        ] {
+            let cache = PrecompileCacheMap::default();
+            let mut precompiles = evm2::Precompiles::<BaseEvmTypes>::base(spec);
+            precompiles.as_map_mut().insert(evm2::precompiles::Precompile::new(
+                custom,
+                evm2::precompiles::PrecompileId::custom("caller"),
+                |_, message, gas| {
+                    gas.spend(10)?;
+                    Ok(PrecompileOutput::new(Bytes::copy_from_slice(message.caller.as_slice())))
+                },
+            ));
+            let mut provider =
+                CachedPrecompileProvider::new(precompiles, cache.clone(), spec, policy, false);
+            // Move the stateful implementation onto a formerly cacheable address.
+            provider.move_precompiles(&[(identity, custom), (custom, identity)]).unwrap();
+            let mut evm = Evm::<BaseEvmTypes>::new(
+                spec,
+                BlockEnv::<BaseEvmTypes>::default(),
+                TxRegistry::new(),
+                InMemoryDB::default(),
+                NoPrecompiles::default(),
+            );
+            for caller in [Address::repeat_byte(0xaa), Address::repeat_byte(0xbb)] {
+                let message = Message::<BaseEvmTypes> {
+                    caller,
+                    destination: identity,
+                    code_address: identity,
+                    gas_limit: 30_000,
+                    ..Default::default()
+                };
+                let output = provider
+                    .execute(&mut evm, &message, &mut GasTracker::new(30_000))
+                    .unwrap()
+                    .unwrap();
+                assert_eq!(output.bytes(), caller.as_slice());
+            }
+            assert!(!cache.0.contains_key(&identity));
+            assert!(!provider.cache_map.0.contains_key(&identity));
         }
     }
 }
