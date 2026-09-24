@@ -20,8 +20,10 @@ pub use reth_execution_errors::{
     BlockExecutionError, BlockValidationError, EvmError, InternalBlockExecutionError,
     InvalidTxError,
 };
+#[cfg(feature = "std")]
+use reth_execution_types::BundleSource;
 pub use reth_execution_types::{BlockExecutionOutput, ExecutionOutcome};
-use reth_execution_types::{BlockExecutionResult, BundleSource, EvmState, HashedPostState};
+use reth_execution_types::{BlockExecutionResult, EvmState, HashedPostState};
 #[cfg(feature = "std")]
 use reth_primitives_traits::BlockTy;
 use reth_primitives_traits::{

@@ -18,7 +18,7 @@ use reth_storage_api::EvmStateProvider;
 #[cfg(feature = "std")]
 use reth_storage_errors::provider::ProviderError;
 
-/// A database wrapper backed by an [`EvmStateProvider`](reth_storage_api::EvmStateProvider).
+/// A database wrapper backed by an [execution state provider](reth_storage_api::EvmStateProvider).
 #[derive(Clone)]
 pub struct StateProviderDatabase<DB>(pub DB);
 

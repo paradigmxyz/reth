@@ -1000,6 +1000,7 @@ mod tests {
     use reth_ethereum_primitives::{
         Block, BlockBody, EthPrimitives, Receipt, Transaction, TransactionSigned,
     };
+    #[cfg(not(feature = "account-ext"))]
     use reth_execution_types::ExecutionOutcome;
     use reth_primitives_traits::{RecoveredBlock, SealedHeader};
     use reth_storage_api::{
