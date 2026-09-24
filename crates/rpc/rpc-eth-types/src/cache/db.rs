@@ -84,9 +84,7 @@ pub fn apply_state_overrides<DB: DynDatabase>(
             account.nonce = nonce;
         }
         if let Some(code) = account_override.code {
-            let code = Bytecode::new_raw_checked(code)?;
-            account.code_hash = code.hash_slow();
-            account.code = Some(code);
+            account.set_code(Bytecode::new_raw_checked(code)?);
         }
         if let Some(balance) = account_override.balance {
             account.balance = balance;
