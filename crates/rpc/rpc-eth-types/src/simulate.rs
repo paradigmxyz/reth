@@ -17,7 +17,7 @@ use alloy_rpc_types_eth::{
 use evm2::{precompiles::MovePrecompileError, EvmFeatures, TxResult};
 use jsonrpsee_types::{error::INTERNAL_ERROR_CODE, ErrorObject};
 use reth_evm::{
-    execute::{BlockBuilder, BlockBuilderOutcome},
+    execute::{BlockBuilder, BlockBuilderOutcome, BlockTransactionResult},
     BlockExecutionError, Database, Evm as RethEvm, EvmEnv,
 };
 use reth_execution_types::HashedPostState;
@@ -383,6 +383,7 @@ where
 
         let mut tx_regular_gas_used = 0;
         let gas_output = builder.execute_transaction_with_result_closure(tx, |output| {
+            let output = &output.result().result;
             tx_regular_gas_used = output.execution_gas_spent();
             results.push(output.clone())
         })?;

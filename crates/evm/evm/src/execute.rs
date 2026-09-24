@@ -621,26 +621,21 @@ pub trait BlockBuilder: Sized {
         ) -> CommitChanges,
     ) -> Result<Option<GasOutput>, BlockExecutionError>;
 
-    /// Executes a transaction, invokes `f` with the borrowed execution result, and saves it
-    /// for block assembly.
+    /// Executes a transaction, invokes `f` with the detached result and state changes, and saves
+    /// it for block assembly.
     fn execute_transaction_with_result_closure(
         &mut self,
         tx: impl ExecutorTx<Self::Executor>,
-        f: impl FnOnce(&evm2::TxResult<<<Self::Executor as BlockExecutor>::Evm as Evm>::EvmTypes>),
-    ) -> Result<GasOutput, BlockExecutionError> {
-        self.execute_transaction_with_commit_condition(tx, |result| {
-            f(result);
-            CommitChanges::Yes
-        })
-        .map(Option::unwrap_or_default)
-    }
+        f: impl FnOnce(&<Self::Executor as BlockExecutor>::TransactionResultWithState),
+    ) -> Result<GasOutput, BlockExecutionError>;
 
     /// Executes a transaction and saves it for block assembly.
     fn execute_transaction(
         &mut self,
         tx: impl ExecutorTx<Self::Executor>,
     ) -> Result<GasOutput, BlockExecutionError> {
-        self.execute_transaction_with_result_closure(tx, |_| ())
+        self.execute_transaction_with_commit_condition(tx, |_| CommitChanges::Yes)
+            .map(Option::unwrap_or_default)
     }
 
     /// Completes block building.
@@ -791,6 +786,20 @@ where
         } else {
             Ok(None)
         }
+    }
+
+    fn execute_transaction_with_result_closure(
+        &mut self,
+        tx: impl ExecutorTx<Self::Executor>,
+        f: impl FnOnce(&<Self::Executor as BlockExecutor>::TransactionResultWithState),
+    ) -> Result<GasOutput, BlockExecutionError> {
+        let (tx_env, tx) = tx.into_parts();
+        let tx = Recovered::new_unchecked(tx.tx().clone(), *tx.signer());
+        let output = self.executor.execute_transaction_without_commit((tx_env, &tx))?;
+        f(&output);
+        let gas_output = self.executor.commit_transaction(output)?;
+        self.transactions.push(tx);
+        Ok(gas_output)
     }
 
     fn finish_with_state_root(
