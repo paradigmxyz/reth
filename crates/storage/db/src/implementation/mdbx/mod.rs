@@ -34,6 +34,8 @@ use tx::Tx;
 pub mod cursor;
 pub mod tx;
 
+#[cfg(target_os = "linux")]
+mod bytecode_prefetch;
 mod utils;
 
 /// 1 KB in bytes

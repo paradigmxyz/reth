@@ -301,10 +301,17 @@ impl<K: TransactionKind> DbTx for Tx<K> {
         key: &<T::Key as Encode>::Encoded,
     ) -> Result<Option<T::Value>, DatabaseError> {
         self.execute_with_operation_metric::<T, _>(Operation::Get, None, |tx| {
-            tx.get(self.get_dbi::<T>()?, key.as_ref())
-                .map_err(|e| DatabaseError::Read(e.into()))?
-                .map(decode_one::<T>)
-                .transpose()
+            let dbi = self.get_dbi::<T>()?;
+            #[cfg(target_os = "linux")]
+            let value = if T::NAME == crate::tables::Bytecodes::NAME {
+                tx.get::<super::bytecode_prefetch::PrefetchBytecode<'_>>(dbi, key.as_ref())
+                    .map(|value| value.map(|value| value.0))
+            } else {
+                tx.get(dbi, key.as_ref())
+            };
+            #[cfg(not(target_os = "linux"))]
+            let value = tx.get(dbi, key.as_ref());
+            value.map_err(|e| DatabaseError::Read(e.into()))?.map(decode_one::<T>).transpose()
         })
     }
 
