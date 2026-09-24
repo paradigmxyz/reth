@@ -3362,17 +3362,31 @@ where
     }
 
     /// Attempts to find the header for the given block hash if it is canonical.
+    ///
+    /// A persisted header can still be found by hash while its disk reorg is pending, so it is
+    /// only canonical if it is not above the canonical head and matches the canonical hash at its
+    /// height. The in-memory canonical hash is preferred over the persisted one.
     pub fn find_canonical_header(
         &self,
         hash: B256,
     ) -> Result<Option<SealedHeader<N::BlockHeader>>, ProviderError> {
-        let mut canonical = self.canonical_in_memory_state.header_by_hash(hash);
-
-        if canonical.is_none() {
-            canonical = self.provider.header(hash)?.map(|header| SealedHeader::new(header, hash));
+        if let Some(header) = self.canonical_in_memory_state.header_by_hash(hash) {
+            return Ok(Some(header))
         }
 
-        Ok(canonical)
+        let Some(header) = self.provider.header(hash)? else { return Ok(None) };
+        let number = header.number();
+        if number > self.canonical_in_memory_state.get_canonical_block_number() {
+            return Ok(None)
+        }
+        let canonical_hash =
+            if let Some(hash) = self.canonical_in_memory_state.hash_by_number(number) {
+                Some(hash)
+            } else {
+                self.provider.block_hash(number)?
+            };
+
+        Ok((canonical_hash == Some(hash)).then(|| SealedHeader::new(header, hash)))
     }
 
     /// Checks that nonzero safe and finalized hashes belong to the chain defined by the FCU head.
@@ -3386,9 +3400,9 @@ where
     /// `chain_update` describes a proposed commit or reorg that has not yet been applied. Its new
     /// blocks and the canonical prefix below its first block form the proposed chain. Without a
     /// chain update, the proposed head is already canonical, so only canonical blocks through its
-    /// height are eligible. For a canonical-prefix hash, the current in-memory or persisted
-    /// canonical hash must match too: a stale persisted header may still be found by hash while
-    /// disk reorg cleanup is pending. A zero safe or finalized hash leaves that marker unchanged.
+    /// height are eligible. Canonical-prefix hashes are resolved via
+    /// [`Self::find_canonical_header`], which rejects stale persisted headers whose disk reorg
+    /// cleanup is pending. A zero safe or finalized hash leaves that marker unchanged.
     /// Returns `Ok(false)` for an unknown or off-chain hash and propagates provider errors.
     ///
     /// [Engine API forkchoiceUpdated specification]: https://github.com/ethereum/execution-apis/blob/main/src/engine/paris.md#specification-1
@@ -3417,19 +3431,6 @@ where
             }
             let Some(header) = self.find_canonical_header(hash)? else { return Ok(false) };
             if header.number() > canonical_head_number {
-                return Ok(false)
-            }
-
-            // A persisted header can still be found by hash while its disk reorg is pending.
-            // Prefer the in-memory canonical hash at this height over the persisted one.
-            let canonical_hash = if let Some(hash) =
-                self.canonical_in_memory_state.hash_by_number(header.number())
-            {
-                Some(hash)
-            } else {
-                self.provider.block_hash(header.number())?
-            };
-            if canonical_hash != Some(hash) {
                 return Ok(false)
             }
         }
