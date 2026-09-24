@@ -4,10 +4,11 @@ pub(crate) use reth_engine_primitives::BigBlockData;
 
 use alloy_consensus::Header;
 use alloy_eips::Decodable2718;
-use alloy_primitives::Bytes;
+use alloy_primitives::{Bytes, U256};
 use alloy_rpc_types::engine::ExecutionData;
 use core::{convert::Infallible, fmt};
 use reth_chainspec::{ChainSpec, EthChainSpec, EthereumHardforks};
+use reth_engine_primitives::ExecutionPayload;
 use reth_ethereum_forks::Hardforks;
 use reth_ethereum_primitives::{Block, EthPrimitives, TransactionSigned};
 use reth_evm::{
@@ -179,7 +180,12 @@ where
         payload: &BigBlockData<ExecutionData>,
     ) -> Result<EvmEnvFor<Self>, Self::Error> {
         let first = payload.env_switches.first().expect("big-block payload has no segments");
-        self.inner.evm_env_for_payload(first)
+        let mut env = self.inner.evm_env_for_payload(first)?;
+        // Prewarming uses this environment for transactions from every segment, whose fee caps
+        // can be below the first segment's base fee.
+        env.version.features.remove(evm2::EvmFeatures::BASE_FEE_CHECK);
+        env.block.gas_limit = U256::from(payload.gas_limit());
+        Ok(env)
     }
 
     fn context_for_payload<'a>(
@@ -191,7 +197,8 @@ where
         let mut start_tx = 0;
         let mut segments = Vec::with_capacity(payload.env_switches.len());
         for data in &payload.env_switches {
-            let evm_env = self.inner.evm_env_for_payload(data)?;
+            let mut evm_env = self.inner.evm_env_for_payload(data)?;
+            evm_env.version.features.remove(evm2::EvmFeatures::BASE_FEE_CHECK);
             let ctx = self.inner.context_for_payload(data)?;
             segments.push(EthBigBlockSegment { start_tx, evm_env, ctx });
             start_tx += data.payload.transactions().len();
@@ -226,6 +233,59 @@ mod tests {
     use evm2::evm::{EmptyDB, SystemTx};
     use metrics_util::debugging::{DebugValue, DebuggingRecorder};
     use reth_evm_ethereum::EthEvmEnv;
+
+    #[test]
+    fn prewarm_accepts_later_segment_with_lower_base_fee() {
+        use alloy_consensus::TxLegacy;
+        use alloy_primitives::{Signature, TxKind};
+        use alloy_rpc_types::engine::{ExecutionPayloadSidecar, ExecutionPayloadV1};
+        use reth_evm::EvmEnv;
+
+        let segment = |base_fee| ExecutionData {
+            payload: ExecutionPayloadV1::from_block_unchecked(
+                Default::default(),
+                &Block {
+                    header: Header {
+                        number: 16_000_000,
+                        timestamp: 1_670_000_000,
+                        gas_limit: 30_000_000,
+                        base_fee_per_gas: Some(base_fee),
+                        ..Default::default()
+                    },
+                    body: Default::default(),
+                },
+            )
+            .into(),
+            sidecar: ExecutionPayloadSidecar::none(),
+        };
+        let payload = BigBlockData {
+            env_switches: vec![segment(100u64), segment(50u64)],
+            prior_block_hashes: Vec::new(),
+            block_number: 16_000_000,
+            merged_block_access_list: None,
+        };
+        let config = BbEvmConfig::new(EthEvmConfig::mainnet());
+        let env = config
+            .evm_env_for_payload(&payload)
+            .unwrap()
+            .with_nonce_check_disabled()
+            .with_balance_check_disabled();
+        let mut evm = config.evm_with_env(EmptyDB::default(), env);
+        let tx = TransactionSigned::new_unhashed(
+            TxLegacy {
+                gas_price: 50,
+                gas_limit: 21_000,
+                to: TxKind::Call(Address::with_last_byte(100)),
+                ..Default::default()
+            }
+            .into(),
+            Signature::new(U256::from(1), U256::from(1), false),
+        )
+        .with_signer(Address::with_last_byte(101))
+        .convert();
+        assert!(evm.transact(&tx).unwrap().discard().status);
+        assert_eq!(evm.block().gas_limit, U256::from(60_000_000));
+    }
 
     #[test]
     #[expect(clippy::redundant_clone, reason = "verify cache settings and sharing across clones")]
