@@ -715,10 +715,36 @@ mod tests {
             api.eth_api_settings()
         }
 
+        fn assert_settings(actual: &EthApiSettings, expected: &EthApiSettings) {
+            assert_eq!(actual.proof_permits, expected.proof_permits);
+            assert_eq!(actual.max_batch_size, expected.max_batch_size);
+            assert_eq!(actual.max_blocking_io_requests, expected.max_blocking_io_requests);
+            assert_eq!(actual.cache_computed_bals, expected.cache_computed_bals);
+            assert_eq!(actual.gas_cap, expected.gas_cap);
+            assert_eq!(actual.max_simulate_blocks, expected.max_simulate_blocks);
+            assert_eq!(
+                actual.compute_state_root_for_eth_simulate,
+                expected.compute_state_root_for_eth_simulate
+            );
+            assert_eq!(actual.eth_proof_window, expected.eth_proof_window);
+            assert_eq!(actual.pending_block_kind, expected.pending_block_kind);
+            assert_eq!(
+                actual.send_raw_transaction_sync_timeout,
+                expected.send_raw_transaction_sync_timeout
+            );
+            assert_eq!(actual.evm_memory_limit, expected.evm_memory_limit);
+            assert_eq!(actual.force_blob_sidecar_upcasting, expected.force_blob_sidecar_upcasting);
+            assert_eq!(
+                actual.sender_recovery_cache.is_some(),
+                expected.sender_recovery_cache.is_some()
+            );
+        }
+
         let default_api = build_test_eth_api(MockEthProvider::default());
-        assert_eq!(settings(&default_api), &EthApiSettings::default());
+        assert_settings(settings(&default_api), &EthApiSettings::default());
 
         let expected = EthApiSettings {
+            sender_recovery_cache: Some(reth_evm::SenderRecoveryCache::new(16)),
             proof_permits: 3,
             max_batch_size: 5,
             max_blocking_io_requests: 7,
@@ -742,6 +768,7 @@ mod tests {
             cache_computed_bals: true,
             ..Default::default()
         })
+        .sender_recovery_cache(expected.sender_recovery_cache.clone())
         .proof_permits(expected.proof_permits)
         .max_batch_size(expected.max_batch_size)
         .max_blocking_io_requests(expected.max_blocking_io_requests)
@@ -755,7 +782,7 @@ mod tests {
         .force_blob_sidecar_upcasting(expected.force_blob_sidecar_upcasting)
         .build();
 
-        assert_eq!(settings(&api), &expected);
+        assert_settings(settings(&api), &expected);
         assert_eq!(
             api.inner.blocking_io_request_semaphore().available_permits(),
             expected.max_blocking_io_requests
