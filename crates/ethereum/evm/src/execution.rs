@@ -272,7 +272,11 @@ where
                 let _ = executed.discard();
                 Err(HandlerError::Fatal(code))
             } else if commit(executed.result()).should_commit() {
-                let Ok(result) = executed.commit_with(&mut changes);
+                let Ok(result) = if stream_state {
+                    executed.commit_with(&mut changes)
+                } else {
+                    executed.commit_with(&mut block_state.transaction_sink())
+                };
                 Ok(Some(result))
             } else {
                 let _ = executed.discard();
@@ -281,8 +285,8 @@ where
         }
         Err(error) => Err(error),
     };
-    block_state.commit(&changes);
     if stream_state {
+        block_state.commit(&changes);
         send_state_update(changes.state, on_state_update);
     }
     result.map_err(|error| map_handler_error(evm, error))
@@ -353,11 +357,13 @@ fn accumulate_pending_state(
     on_state_update: &mut impl FnMut(EvmState),
     pending_state: &evm2::evm::PendingState,
 ) {
-    let mut changes = TransactionChanges::default();
-    let Ok(()) = pending_state.visit(&mut changes);
-    block_state.commit(&changes);
     if stream_state {
+        let mut changes = TransactionChanges::default();
+        let Ok(()) = pending_state.visit(&mut changes);
+        block_state.commit(&changes);
         send_state_update(changes.state, on_state_update);
+    } else {
+        let Ok(()) = pending_state.visit(&mut block_state.transaction_sink());
     }
 }
 
@@ -732,13 +738,106 @@ mod tests {
     use reth_chainspec::{Chain, ChainSpec, MAINNET};
     use reth_ethereum_forks::{EthereumHardfork, ForkCondition};
     use reth_ethereum_primitives::{Block, BlockBody, Receipt, TransactionSigned};
-    use reth_evm::{ConfigureEvm, Executor};
+    use reth_evm::{BlockExecutorFactory, ConfigureEvm, Executor};
     use reth_execution_types::BlockExecutionOutput;
     use reth_primitives_traits::RecoveredBlock;
     use reth_trie_common::{HashedPostState, KeccakKeyHasher};
     use std::sync::{mpsc, Arc};
 
     type BlockEnv = EvmBlockEnv<evm2::BaseEvmTypes>;
+
+    #[test]
+    fn detached_commits_preserve_storage_hooks_and_bal() {
+        let caller = Address::with_last_byte(1);
+        let contract = address!("0000000000000000000000000000000000001000");
+        let mut database = InMemoryDB::default();
+        database.insert_account_info(
+            &caller,
+            AccountInfo::default().with_balance(U256::from(ETH_TO_WEI)),
+        );
+        database.insert_account_info(
+            &contract,
+            AccountInfo::default()
+                .with_nonce(1)
+                .with_code(Bytecode::new_raw(alloy_primitives::bytes!("5f546001015f5500"))),
+        );
+        let factory = crate::EthBlockExecutorFactory::new(MAINNET.clone());
+        let mut expected = None;
+        let mut expected_updates = None;
+        for mode in 0..3 {
+            for stream_state in [false, true] {
+                let env = crate::EthEvmEnv::new(
+                    SpecId::AMSTERDAM,
+                    BlockEnv { gas_limit: U256::from(10_000_000), ..Default::default() },
+                    1,
+                );
+                let mut evm = factory.evm_with_env(evm2::evm::Db::new(database.clone()), env);
+                evm.state_mut().enable_bal_builder();
+                let mut block = BlockState::new();
+                let mut updates = Vec::new();
+                for nonce in 0..2 {
+                    evm.state_mut().set_bal_index(alloy_eip7928::BlockAccessIndex::new(nonce + 1));
+                    let transaction = Recovered::new_unchecked(
+                        evm2::ethereum::TxEnvelope::Legacy(TxLegacy {
+                            nonce,
+                            gas_limit: 1_000_000,
+                            gas_price: 1,
+                            to: TxKind::Call(contract),
+                            ..Default::default()
+                        }),
+                        caller,
+                    );
+                    let mut hook = |state| updates.push(state);
+                    if mode == 0 {
+                        let result = execute_transaction_with_condition(
+                            &mut evm,
+                            &mut block,
+                            stream_state,
+                            &mut hook,
+                            &transaction,
+                            |_| reth_evm::CommitChanges::Yes,
+                        )
+                        .unwrap()
+                        .unwrap();
+                        assert!(result.status, "{result:?}");
+                    } else {
+                        let output =
+                            execute_transaction_without_commit(&mut evm, &transaction).unwrap();
+                        assert!(output.result.status, "{:?}", output.result);
+                        if mode == 1 {
+                            let _ = commit_detached_transaction(
+                                &mut evm,
+                                &mut block,
+                                stream_state,
+                                &mut hook,
+                                output,
+                            );
+                        } else {
+                            commit_pending_state(
+                                &mut evm,
+                                &mut block,
+                                stream_state,
+                                &mut hook,
+                                &output.pending_state,
+                            );
+                        }
+                    }
+                }
+                let bundle = block.into_bundle();
+                assert_eq!(bundle.storage(&contract, U256::ZERO), Some(U256::from(2)));
+                assert_eq!(updates.len(), if stream_state { 2 } else { 0 });
+                if stream_state {
+                    assert_eq!(expected_updates.get_or_insert_with(|| updates.clone()), &updates);
+                }
+                let output = (bundle, evm.state_mut().take_bal_builder());
+                if let Some(expected) = &expected {
+                    assert_eq!(&output, expected);
+                } else {
+                    expected = Some(output);
+                }
+            }
+        }
+    }
 
     fn execute_block(
         spec: SpecId,
@@ -778,9 +877,12 @@ mod tests {
             senders,
         );
         let (tx, rx) = mpsc::channel();
-        let output = crate::EthEvmConfig::new(Arc::new(chain))
+        let config = crate::EthEvmConfig::new(Arc::new(chain));
+        let without_hook = config.batch_executor(database.clone()).execute(&block)?;
+        let output = config
             .batch_executor(database)
             .execute_with_state_hook(&block, move |state| tx.send(state).unwrap())?;
+        assert_eq!(without_hook, output);
         let mut streamed = HashedPostState::default();
         for update in rx.try_iter() {
             for (address, account) in update {
