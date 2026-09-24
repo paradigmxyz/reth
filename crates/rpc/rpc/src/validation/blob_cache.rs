@@ -29,6 +29,9 @@ impl BlobValidationCache {
         {
             return Err(ValidationApiError::InvalidBlobsBundle)
         }
+        if bundle.blobs.is_empty() {
+            return Ok(Vec::new())
+        }
 
         let versioned_hashes = bundle.versioned_hashes();
         let hits = {
@@ -162,6 +165,16 @@ mod tests {
         v2.proofs.pop();
         assert!(matches!(cache.validate(v2), Err(ValidationApiError::InvalidBlobsBundle)));
         assert!(cache.entries.lock().is_empty());
+    }
+
+    #[test]
+    fn empty_bundle_still_checks_lengths() {
+        let cache = BlobValidationCache::default();
+        assert!(cache.validate(BlobsBundleV2::empty()).unwrap().is_empty());
+
+        let mut malformed = BlobsBundleV2::empty();
+        malformed.proofs.push(Bytes48::ZERO);
+        assert!(matches!(cache.validate(malformed), Err(ValidationApiError::InvalidBlobsBundle)));
     }
 
     #[test]
