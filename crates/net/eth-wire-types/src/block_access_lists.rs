@@ -59,6 +59,7 @@ impl Decodable for BlockAccessLists {
         }
         // Payload length checked by Header::decode.
         let (mut payload, rest) = buf.split_at(payload_length);
+        *buf = rest;
         let mut bals = Vec::new();
 
         while !payload.is_empty() {
@@ -80,7 +81,6 @@ impl Decodable for BlockAccessLists {
             payload = &payload[item_header.payload_length..];
         }
 
-        *buf = rest;
         Ok(Self(bals))
     }
 }
@@ -217,7 +217,7 @@ mod tests {
         let encoded = [0xc1, 0x01, 0xaa];
         let mut input = encoded.as_slice();
         assert!(BlockAccessLists::decode(&mut input).is_err());
-        assert_eq!(input, &encoded[1..]);
+        assert_eq!(input, &encoded[2..]);
     }
 
     #[test]
