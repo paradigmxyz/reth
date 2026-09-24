@@ -1,10 +1,10 @@
-use crate::proof_task::StorageProofResultMessage;
+use crate::proof_task::{StorageProofResultMessage, StorageRootCache};
 use alloy_primitives::{map::B256Map, B256};
 use alloy_rlp::Encodable;
 use core::cell::RefCell;
 use crossbeam_channel::Receiver as CrossbeamReceiver;
 use reth_execution_errors::trie::StateProofError;
-use reth_primitives_traits::{dashmap::DashMap, Account};
+use reth_primitives_traits::Account;
 use reth_storage_errors::db::DatabaseError;
 use reth_trie::{
     hashed_cursor::HashedStorageCursor,
@@ -66,7 +66,7 @@ pub(crate) enum AsyncAccountDeferredValueEncoder<TC, HC> {
         /// root.
         storage_calculator: Rc<RefCell<StorageProofCalculator<TC, HC>>>,
         /// Cache to store computed storage roots for future reuse.
-        cached_storage_roots: Arc<DashMap<B256, B256>>,
+        cached_storage_roots: Arc<StorageRootCache>,
     },
     /// The storage root was found in cache.
     FromCache { account: Account, root: B256 },
@@ -77,7 +77,7 @@ pub(crate) enum AsyncAccountDeferredValueEncoder<TC, HC> {
         hashed_address: B256,
         account: Account,
         /// Cache to store computed storage roots for future reuse.
-        cached_storage_roots: Arc<DashMap<B256, B256>>,
+        cached_storage_roots: Arc<StorageRootCache>,
     },
 }
 
@@ -215,7 +215,7 @@ pub(crate) struct AsyncAccountValueEncoder<TC, HC> {
     dispatched: B256Map<CrossbeamReceiver<StorageProofResultMessage>>,
     /// Storage roots which have already been computed. This can be used only if a storage proof
     /// wasn't dispatched for an account, otherwise we must consume the proof result.
-    cached_storage_roots: Arc<DashMap<B256, B256>>,
+    cached_storage_roots: Arc<StorageRootCache>,
     /// Tracks storage proof results received from the storage workers. [`Rc`] + [`RefCell`] is
     /// required because [`DeferredValueEncoder`] cannot have a lifetime.
     storage_proof_results: Rc<RefCell<B256Map<Vec<ProofTrieNodeV2>>>>,
@@ -236,7 +236,7 @@ impl<TC, HC> AsyncAccountValueEncoder<TC, HC> {
     /// - `storage_calculator`: Shared storage proof calculator for synchronous computation
     pub(crate) fn new(
         dispatched: B256Map<CrossbeamReceiver<StorageProofResultMessage>>,
-        cached_storage_roots: Arc<DashMap<B256, B256>>,
+        cached_storage_roots: Arc<StorageRootCache>,
         storage_calculator: Rc<RefCell<StorageProofCalculator<TC, HC>>>,
     ) -> Self {
         Self {
