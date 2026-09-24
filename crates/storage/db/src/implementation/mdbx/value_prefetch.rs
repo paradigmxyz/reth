@@ -1,7 +1,7 @@
 //! Targeted read-ahead for mapped table values spanning multiple OS pages.
 
 use reth_libmdbx::{ffi, TableObject, TransactionKind};
-use std::{borrow::Cow, sync::LazyLock};
+use std::borrow::Cow;
 
 /// Hints a mapped table value's pages before returning its bytes for decoding.
 pub(super) struct PrefetchValue<'a>(pub(super) Cow<'a, [u8]>);
@@ -30,8 +30,6 @@ impl<'a> TableObject for PrefetchValue<'a> {
     }
 }
 
-static PAGE_SIZE: LazyLock<usize> = LazyLock::new(page_size::get);
-
 /// Returns the OS pages to prefetch, excluding small and dirty values.
 ///
 /// # Safety
@@ -40,7 +38,8 @@ unsafe fn prefetch_range<K: TransactionKind>(
     txn: *const ffi::MDBX_txn,
     value: ffi::MDBX_val,
 ) -> Option<(usize, usize)> {
-    if value.iov_len <= *PAGE_SIZE {
+    let page_size = page_size::get();
+    if value.iov_len <= page_size {
         return None;
     }
     // Unchanged values can also be read through writable transactions.
@@ -49,7 +48,7 @@ unsafe fn prefetch_range<K: TransactionKind>(
     if !K::IS_READ_ONLY && unsafe { ffi::mdbx_is_dirty(txn, value.iov_base) } != ffi::MDBX_SUCCESS {
         return None;
     }
-    Some(page_range(value.iov_base as usize, value.iov_len, *PAGE_SIZE))
+    Some(page_range(value.iov_base as usize, value.iov_len, page_size))
 }
 
 /// Rounds a valid mapped value's range to complete pages using the OS page size.
@@ -127,7 +126,7 @@ mod tests {
         .with_metrics();
         db.create_tables().unwrap();
         // Larger than an OS page even on systems with 64 KiB pages.
-        let code = Bytecode::new_raw(vec![0x5b; 6 * *PAGE_SIZE].into());
+        let code = Bytecode::new_raw(vec![0x5b; 6 * page_size::get()].into());
         let key = B256::repeat_byte(1);
         let small_key = B256::repeat_byte(2);
         let small_code = Bytecode::new_raw(vec![0].into());
@@ -155,14 +154,14 @@ mod tests {
             .unwrap()
             .0
             .unwrap();
-        assert_eq!(range.0 % *PAGE_SIZE, 0);
+        assert_eq!(range.0 % page_size::get(), 0);
         assert!(range.1 >= code.original_byte_slice().len());
         assert_eq!(
             tx.prefetch(true).get_by_encoded_key::<tables::Bytecodes>(&key.encode()).unwrap(),
             Some(code.clone())
         );
         // A value becomes ineligible again when overwritten in the same transaction.
-        let replacement = Bytecode::new_raw(vec![0; 6 * *PAGE_SIZE].into());
+        let replacement = Bytecode::new_raw(vec![0; 6 * page_size::get()].into());
         DbTxMut::put::<tables::Bytecodes>(&tx, key, replacement.clone()).unwrap();
         assert!(tx
             .inner()
@@ -214,7 +213,7 @@ mod tests {
         db.create_tables().unwrap();
         let key = ShardedKey::new(Address::ZERO, 1);
         // One RoaringTreemap entry with an invalid bitmap header.
-        let mut invalid_history = vec![0; 6 * *PAGE_SIZE];
+        let mut invalid_history = vec![0; 6 * page_size::get()];
         invalid_history[..8].copy_from_slice(&1u64.to_le_bytes());
         let tx = db.tx_mut().unwrap();
         tx.put::<tables::RawTable<tables::AccountsHistory>>(
@@ -249,7 +248,7 @@ mod tests {
         let db = create_test_rw_db();
         let tx = db.tx_mut().unwrap();
         let key = B256::repeat_byte(1);
-        let code = Bytecode::new_raw(vec![0x5b; 6 * *PAGE_SIZE].into());
+        let code = Bytecode::new_raw(vec![0x5b; 6 * page_size::get()].into());
         let mut ordinary = tx.cursor_read::<tables::Bytecodes>().unwrap();
         assert!(std::ptr::eq(tx.prefetch(true), &raw const tx));
         // Writes, statistics, gets, misses, and cursor creation preserve the setting.
@@ -302,7 +301,7 @@ mod tests {
     fn prefetch_covers_cursor_reads_and_walks() {
         let db = create_test_rw_db();
         let tx = db.tx_mut().unwrap();
-        let code = Bytecode::new_raw(vec![0x5b; 6 * *PAGE_SIZE].into());
+        let code = Bytecode::new_raw(vec![0x5b; 6 * page_size::get()].into());
         let keys = [B256::repeat_byte(1), B256::repeat_byte(2), B256::repeat_byte(3)];
         for key in keys {
             DbTxMut::put::<tables::Bytecodes>(&tx, key, code.clone()).unwrap();
