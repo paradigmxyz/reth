@@ -1430,11 +1430,10 @@ where
         let txs_len = transactions.len();
 
         let recover = |tx| {
-            let recovered = if let Some(cache) = &self.sender_recovery_cache {
-                Pool::Transaction::try_recover_with_cache(tx, cache)
-            } else {
-                Pool::Transaction::try_recover(tx)
-            };
+            let recovered = Pool::Transaction::try_recover_with_cache_opt(
+                tx,
+                self.sender_recovery_cache.as_ref(),
+            );
             match recovered {
                 Ok(tx) => Some(tx),
                 Err(badtx) => {
