@@ -121,9 +121,7 @@ impl Discv5 {
         key: Vec<u8>,
         value: impl alloy_rlp::Encodable,
     ) {
-        let mut buf = Vec::new();
-        value.encode(&mut buf);
-        self.set_eip868_in_local_enr(key, buf.into())
+        self.set_eip868_in_local_enr(key, alloy_rlp::encode(value).into())
     }
 
     /// Adds the peer and id to the ban list.

@@ -210,9 +210,6 @@ impl alloy_rlp::Decodable for PingNodeEndpoint {
             return Err(alloy_rlp::Error::UnexpectedString);
         }
         let started_len = b.len();
-        if started_len < payload_length {
-            return Err(alloy_rlp::Error::InputTooShort);
-        }
 
         // Geth allows the ipaddr to be possibly empty:
         // <https://github.com/ethereum/go-ethereum/blob/380688c636a654becc8f114438c2a5d93d2db032/p2p/discover/v4_udp.go#L206-L209>

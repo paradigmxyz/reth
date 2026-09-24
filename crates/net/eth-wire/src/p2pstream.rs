@@ -474,8 +474,7 @@ impl<S> DisconnectP2P for P2PStream<S> {
         // clear any buffered messages and queue in
         self.outgoing_messages.clear();
         let disconnect = P2PMessage::Disconnect(reason);
-        let mut buf = Vec::with_capacity(disconnect.length());
-        disconnect.encode(&mut buf);
+        let buf = alloy_rlp::encode(&disconnect);
 
         // we do not add the capability offset because the disconnect message is a `p2p` reserved
         // message
