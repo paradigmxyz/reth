@@ -366,7 +366,7 @@ where
     /// Returns all transaction traces that match the given filter.
     ///
     /// This is similar to [`Self::trace_block`] but only returns traces for transactions that match
-    /// the filter.
+    /// the filter. Omitted range bounds default to the latest block.
     pub async fn trace_filter(
         &self,
         filter: TraceFilter,
@@ -374,9 +374,9 @@ where
         // We'll reuse the matcher across multiple blocks that are traced in parallel
         let matcher = Arc::new(filter.matcher());
         let TraceFilter { from_block, to_block, mut after, count, .. } = filter;
-        let start = from_block.unwrap_or(0);
 
         let latest_block = self.provider().best_block_number().map_err(Eth::Error::from_eth_err)?;
+        let start = from_block.unwrap_or(latest_block);
         if start > latest_block {
             // can't trace that range
             return Err(EthApiError::HeaderNotFound(start.into()).into());
@@ -940,6 +940,47 @@ mod tests {
         let (response, _) = module.raw_json_request(&request.to_string(), 1).await.unwrap();
         let response: serde_json::Value = serde_json::from_str(response.get()).unwrap();
         assert_eq!(response["result"], serde_json::to_value(latest).unwrap());
+    }
+
+    #[tokio::test]
+    async fn trace_filter_defaults_to_latest() {
+        let provider = MockEthProvider::default();
+        for number in [1, 2] {
+            let header = Header { number, gas_limit: 30_000_000, ..Default::default() };
+            provider.add_block(header.hash_slow(), Block { header, body: BlockBody::default() });
+        }
+        let eth_api = EthApiBuilder::new(
+            provider.clone(),
+            testing_pool(),
+            NoopNetwork::default(),
+            EthEvmConfig::new(provider.chain_spec()),
+        )
+        .build();
+        let api = TraceApi::new(
+            eth_api,
+            BlockingTaskGuard::new(1),
+            EthConfig::default().max_trace_filter_blocks(1),
+        );
+
+        let omitted = api.trace_filter(TraceFilter::default()).await.unwrap();
+        let latest =
+            api.trace_filter(TraceFilter::default().from_block(2).to_block(2)).await.unwrap();
+        assert_eq!(omitted, latest);
+        assert!(api.trace_filter(TraceFilter::default().from_block(1).to_block(2)).await.is_ok());
+
+        let module = api.into_rpc();
+        let request = serde_json::json!({
+            "jsonrpc": "2.0", "id": 1, "method": "trace_filter", "params": [{"toBlock": "0x1"}],
+        });
+        let (response, _) = module.raw_json_request(&request.to_string(), 1).await.unwrap();
+        let response: serde_json::Value = serde_json::from_str(response.get()).unwrap();
+        assert_eq!(
+            response["error"],
+            serde_json::json!({
+                "code": -32602,
+                "message": "invalid parameters: fromBlock cannot be greater than toBlock",
+            })
+        );
     }
 
     #[tokio::test]
