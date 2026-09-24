@@ -1119,6 +1119,7 @@ jobs:
       pull-requests: write
     timeout-minutes: 120
     env:
+      BENCH_VALIDATE_REEXEC: "true"
       BENCH_RPC_URL: http://ethereum-mainnet-stable-reth-greedy-goose:8545
       SCHELK_MOUNT: /reth-bench
       RETH_SCOPE: reth-bench.scope
@@ -1162,7 +1163,7 @@ jobs:
       BENCH_CALL_TRACER_CONFIG: ${{ needs.bench-ack.outputs.tracer-config }}
       BENCH_CALL_TRACE_OPTIONS: ${{ needs.bench-ack.outputs.trace-options }}
       BENCH_CALL_NAMESPACE: ${{ needs.bench-ack.outputs.namespace }}
-      BENCH_SNAPSHOT_MANIFEST_URL: ${{ secrets.BENCH_SNAPSHOT_MANIFEST_URL }}
+      BENCH_SNAPSHOT_MANIFEST_URL: http://10.10.0.50:9000/reth-snapshots/reth-1-minimal-stable-weekly-2026-W37/manifest.json
       BENCH_METRICS_ADDR: "127.0.0.1:9001"
       BENCH_TARGET_METRICS_CONFIG: .github/config/bench-metrics-targets.json
       BENCH_TARGET_METRICS_SCRAPE_INTERVAL_MS: "200"
