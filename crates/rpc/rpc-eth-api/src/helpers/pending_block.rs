@@ -143,7 +143,7 @@ pub trait LoadPendingBlock:
             if self.pending_block_kind().is_none() {
                 return Ok(None);
             }
-            let pending = self.pending_block_env_and_cfg()?;
+            let pending = self.spawn_blocking_io(|this| this.pending_block_env_and_cfg()).await?;
             let parent = match pending.origin {
                 PendingBlockEnvOrigin::ActualPending(..) => return Ok(None),
                 PendingBlockEnvOrigin::DerivedFromLatest(parent) => parent,

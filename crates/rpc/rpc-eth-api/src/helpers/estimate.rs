@@ -313,7 +313,7 @@ pub trait EstimateCall: Call {
         async move {
             let (evm_env, at) = self.evm_env_at(at).await?;
 
-            self.spawn_blocking_io_with_state(Some(at), move |this, state| {
+            self.spawn_blocking_io_with_state(at, move |this, state| {
                 EstimateCall::estimate_gas_with(
                     &this,
                     evm_env,

@@ -464,8 +464,6 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
             let block_id = block_number.unwrap_or_default();
             let (evm_env, at) = self.evm_env_at(block_id).await?;
 
-            // `create_access_list_with` runs on its own blocking task, so waiting for it from
-            // another blocking task would hold two threads for one request.
             self.create_access_list_with(evm_env, at, request, state_override).await
         }
     }
@@ -646,7 +644,7 @@ pub trait Call:
         F: FnOnce(Self, StateCacheDb) -> Result<R, Self::Error> + Send + 'static,
         R: Send + 'static,
     {
-        self.spawn_blocking_io_with_state(Some(at.into()), move |this, state| {
+        self.spawn_blocking_io_with_state(at.into(), move |this, state| {
             let db = State::builder()
                 .with_database(StateProviderDatabase::new(state.into_evm_state_provider()))
                 .build();
