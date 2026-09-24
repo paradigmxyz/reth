@@ -318,10 +318,15 @@ pub trait LoadState:
         self.provider().history_by_block_hash(block_hash).map_err(Self::Error::from_eth_err)
     }
 
-    /// Returns the state at the given [`BlockId`] enum.
+    /// Returns the state at the given [`BlockId`], preferring locally built state for `pending`.
     ///
-    /// Note: if not [`BlockNumberOrTag::Pending`](alloy_eips::BlockNumberOrTag) then this
-    /// will only return canonical state. See also <https://github.com/paradigmxyz/reth/issues/4515>
+    /// If local pending state is unavailable or fails to build, falls back to the provider's
+    /// pending state. Other block IDs resolve only canonical state. See
+    /// <https://github.com/paradigmxyz/reth/issues/4515>.
+    ///
+    /// Pending block construction may spawn blocking work, so await this outside a blocking task.
+    /// Provider access in this method is synchronous on the calling task; RPC handlers should use
+    /// [`Self::spawn_blocking_io_with_state`] to keep those reads on the blocking pool.
     fn state_at_block_id(
         &self,
         at: BlockId,
