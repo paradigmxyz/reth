@@ -291,7 +291,12 @@ impl<N: NetworkPrimitives> NetworkManager<N> {
 
         if let Some(discv5) = discovery_v5_config.as_mut() {
             // merge configured boot nodes
-            discv5.extend_unsigned_boot_nodes(resolved_boot_nodes)
+            discv5.extend_unsigned_boot_nodes(resolved_boot_nodes);
+            if matches!(nat, Some(NatResolver::ExternalAddr(_))) {
+                // An explicit hostname is authoritative just like a literal NAT address.
+                // Resolving it later must not let peer votes override that configuration.
+                discv5.discv5_config_mut().enr_update = false;
+            }
         }
 
         let discovery = Discovery::new(

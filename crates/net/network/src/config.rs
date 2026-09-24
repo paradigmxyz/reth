@@ -94,7 +94,10 @@ pub struct NetworkConfig<C, N: NetworkPrimitives = EthNetworkPrimitives> {
     pub tx_gossip_disabled: bool,
     /// How to instantiate transactions manager.
     pub transactions_manager_config: TransactionsManagerConfig,
-    /// The NAT resolver for external IP
+    /// The NAT resolver for the external IP.
+    ///
+    /// Hostnames resolve asynchronously when the network is polled. Node info retains the
+    /// last successful result and uses the local address until the first result is available.
     pub nat: Option<NatResolver>,
     /// The Ethereum P2P handshake, see also:
     /// <https://github.com/ethereum/devp2p/blob/master/rlpx.md#initial-handshake>.
