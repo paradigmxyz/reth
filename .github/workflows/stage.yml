@@ -3,6 +3,7 @@
 name: stage-test
 
 on:
+  workflow_dispatch:
   pull_request:
   merge_group:
   push:
@@ -24,7 +25,7 @@ jobs:
   stage:
     name: stage-run-test
     # Only run stage commands test in merge groups
-    if: github.event_name == 'merge_group'
+    if: github.event_name == 'merge_group' || github.event_name == 'workflow_dispatch'
     runs-on: ${{ github.repository == 'paradigmxyz/reth' && 'depot-ubuntu-latest' || 'ubuntu-latest' }}
     permissions:
       contents: read

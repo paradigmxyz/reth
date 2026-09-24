@@ -61,6 +61,8 @@ jobs:
         run: |
           ${{ matrix.chain.bin }} db --chain ${{ matrix.chain.chain }} get static-file headers ${{ matrix.chain.block }} \
             | grep ${{ matrix.chain.tip }}
+      - name: Re-execute synced history
+        run: reth re-execute --chain mainnet --from 1 --to 100000 --num-tasks 4 --blocks-per-chunk 5000
       - name: Run stage unwind for 100 blocks
         run: |
           ${{ matrix.chain.bin }} stage unwind num-blocks 100 --chain ${{ matrix.chain.chain }}

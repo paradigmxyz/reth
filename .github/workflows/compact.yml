@@ -6,6 +6,7 @@
 # 4) deserialize previously generated test vectors
 
 on:
+  workflow_dispatch:
   pull_request:
   merge_group:
   push:

@@ -828,3 +828,13 @@ fi
 if [ "$EXECUTION_MODE" != "call" ]; then
   python3 .github/scripts/bench-txgen-report-to-reth-csv.py "$OUTPUT_DIR/report.json" "$OUTPUT_DIR"
 fi
+
+# Validation-only branch: verify the persisted execution result before snapshot rollback.
+if [ "${BENCH_VALIDATE_REEXEC:-false}" = "true" ] && [ "$LABEL" = "feature" ]; then
+  tip_hex=$(curl -fsS -H 'Content-Type: application/json' --data '{"jsonrpc":"2.0","id":1,"method":"eth_blockNumber","params":[]}' http://127.0.0.1:8545 | jq -er '.result')
+  tip=$((tip_hex))
+  first=$((tip - BLOCKS + 1))
+  sudo systemctl stop "$RETH_SCOPE"
+  sync
+  sudo "$BINARY" re-execute --datadir "$DATADIR" --from "$first" --to "$tip" --num-tasks 8 --blocks-per-chunk 500 --log.file.max-files 0 2>&1 | tee "$OUTPUT_DIR/re-execute.log"
+fi
