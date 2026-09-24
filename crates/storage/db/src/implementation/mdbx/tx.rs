@@ -41,7 +41,7 @@ pub struct Tx<K: TransactionKind> {
     ///
     /// If [Some], then metrics are reported.
     metrics_handler: Option<MetricsHandler<K>>,
-    /// Read-ahead request consumed by the next get or cursor creation.
+    /// Persistent read-ahead setting for gets and newly created cursors.
     #[cfg(target_os = "linux")]
     prefetch: AtomicBool,
 }
@@ -103,8 +103,6 @@ impl<K: TransactionKind> Tx<K> {
 
     /// Create db Cursor
     pub fn new_cursor<T: Table>(&self) -> Result<Cursor<K, T>, DatabaseError> {
-        #[cfg(target_os = "linux")]
-        let prefetch = self.take_prefetch();
         let inner = self
             .inner
             .cursor_with_dbi(self.get_dbi::<T>()?)
@@ -114,7 +112,7 @@ impl<K: TransactionKind> Tx<K> {
             inner,
             self.metrics_handler.as_ref().map(|h| h.env_metrics.table_operation_metrics(T::NAME)),
             #[cfg(target_os = "linux")]
-            prefetch,
+            self.prefetch.load(Ordering::Relaxed),
         ))
     }
 
@@ -183,12 +181,6 @@ impl<K: TransactionKind> Tx<K> {
         } else {
             f(&self.inner)
         }
-    }
-
-    /// Consumes the pending hint without an atomic write on ordinary reads.
-    #[cfg(target_os = "linux")]
-    fn take_prefetch(&self) -> bool {
-        self.prefetch.load(Ordering::Relaxed) && self.prefetch.swap(false, Ordering::Relaxed)
     }
 }
 
@@ -319,24 +311,18 @@ impl<K: TransactionKind> DbTx for Tx<K> {
         &self,
         key: &<T::Key as Encode>::Encoded,
     ) -> Result<Option<T::Value>, DatabaseError> {
-        #[cfg(target_os = "linux")]
-        let prefetch = self.take_prefetch();
         self.execute_with_operation_metric::<T, _>(Operation::Get, None, |tx| {
+            let dbi = self.get_dbi::<T>()?;
             #[cfg(target_os = "linux")]
-            if prefetch {
-                return tx
-                    .get::<super::value_prefetch::PrefetchValue<'_>>(
-                        self.get_dbi::<T>()?,
-                        key.as_ref(),
-                    )
-                    .map_err(|e| DatabaseError::Read(e.into()))?
-                    .map(|value| decode_one::<T>(value.0))
-                    .transpose();
-            }
-            tx.get(self.get_dbi::<T>()?, key.as_ref())
-                .map_err(|e| DatabaseError::Read(e.into()))?
-                .map(decode_one::<T>)
-                .transpose()
+            let value = if self.prefetch.load(Ordering::Relaxed) {
+                tx.get::<super::value_prefetch::PrefetchValue<'_>>(dbi, key.as_ref())
+                    .map(|value| value.map(|value| value.0))
+            } else {
+                tx.get(dbi, key.as_ref())
+            };
+            #[cfg(not(target_os = "linux"))]
+            let value = tx.get(dbi, key.as_ref());
+            value.map_err(|e| DatabaseError::Read(e.into()))?.map(decode_one::<T>).transpose()
         })
     }
 
@@ -386,8 +372,8 @@ impl<K: TransactionKind> DbTx for Tx<K> {
     }
 
     #[cfg(target_os = "linux")]
-    fn prefetch(&self) -> &Self {
-        self.prefetch.store(true, Ordering::Relaxed);
+    fn prefetch(&self, enabled: bool) -> &Self {
+        self.prefetch.store(enabled, Ordering::Relaxed);
         self
     }
 }

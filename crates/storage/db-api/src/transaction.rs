@@ -47,16 +47,14 @@ pub trait DbTx: Debug + Send {
     /// Disables long-lived read transaction safety guarantees.
     fn disable_long_read_transaction_safety(&mut self);
 
-    /// Requests best-effort read-ahead for the next get or cursor creation on this transaction.
+    /// Enables or disables best-effort read-ahead for this transaction.
     ///
-    /// Mutates transaction state and returns the same transaction for chaining. A get consumes
-    /// the request even on a missing key or error. A new read or write cursor consumes the request
-    /// and enables read-ahead for all of its value reads, including walks and duplicate reads.
-    /// Writes and statistics queries do not consume the request. Existing cursors are unaffected.
-    /// Concurrent callers sharing the transaction may consume each other's requests.
-    /// Backends without support ignore the request.
+    /// Defaults to disabled and persists across operations until explicitly changed. Applies to
+    /// gets in every table. New read and write cursors inherit the setting; existing cursors keep
+    /// their own setting, configurable with [`DbCursorRO::prefetch`]. Returns the transaction for
+    /// chaining. Backends without support ignore the setting.
     #[inline]
-    fn prefetch(&self) -> &Self {
+    fn prefetch(&self, _enabled: bool) -> &Self {
         self
     }
 }

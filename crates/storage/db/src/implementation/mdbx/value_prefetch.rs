@@ -148,7 +148,7 @@ mod tests {
             .unwrap()
             .0
             .is_none());
-        assert_eq!(tx.prefetch().get::<tables::Bytecodes>(key).unwrap(), Some(code.clone()));
+        assert_eq!(tx.prefetch(true).get::<tables::Bytecodes>(key).unwrap(), Some(code.clone()));
         assert_eq!(tx.get::<tables::Bytecodes>(key).unwrap(), Some(code.clone()));
         tx.commit().unwrap();
 
@@ -164,7 +164,7 @@ mod tests {
         assert_eq!(range.0 % *PAGE_SIZE, 0);
         assert!(range.1 >= code.original_byte_slice().len());
         assert_eq!(
-            tx.prefetch().get_by_encoded_key::<tables::Bytecodes>(&key.encode()).unwrap(),
+            tx.prefetch(true).get_by_encoded_key::<tables::Bytecodes>(&key.encode()).unwrap(),
             Some(code.clone())
         );
         // A value becomes ineligible again when overwritten in the same transaction.
@@ -177,7 +177,7 @@ mod tests {
             .unwrap()
             .0
             .is_none());
-        assert_eq!(tx.prefetch().get::<tables::Bytecodes>(key).unwrap(), Some(replacement));
+        assert_eq!(tx.prefetch(true).get::<tables::Bytecodes>(key).unwrap(), Some(replacement));
         tx.abort();
 
         let tx = db.tx().unwrap();
@@ -188,7 +188,7 @@ mod tests {
             .unwrap()
             .0
             .is_some());
-        assert_eq!(tx.prefetch().get::<tables::Bytecodes>(key).unwrap(), Some(code));
+        assert_eq!(tx.prefetch(true).get::<tables::Bytecodes>(key).unwrap(), Some(code));
         assert!(tx
             .inner()
             .get::<PrefetchRange>(dbi, small_key.encode().as_ref())
@@ -196,13 +196,16 @@ mod tests {
             .unwrap()
             .0
             .is_none());
-        assert_eq!(tx.prefetch().get::<tables::Bytecodes>(small_key).unwrap(), Some(small_code));
+        assert_eq!(
+            tx.prefetch(true).get::<tables::Bytecodes>(small_key).unwrap(),
+            Some(small_code)
+        );
         assert!(tx
             .inner()
             .get::<PrefetchRange>(dbi, B256::ZERO.encode().as_ref())
             .unwrap()
             .is_none());
-        assert_eq!(tx.prefetch().get::<tables::Bytecodes>(B256::ZERO).unwrap(), None);
+        assert_eq!(tx.prefetch(true).get::<tables::Bytecodes>(B256::ZERO).unwrap(), None);
     }
 
     #[test]
@@ -230,42 +233,75 @@ mod tests {
         let tx = db.tx().unwrap();
         with_prefetch_reads(1, || {
             assert_eq!(
-                tx.prefetch().get::<tables::AccountsHistory>(key.clone()).unwrap_err().to_string(),
-                tx.get::<tables::AccountsHistory>(key).unwrap_err().to_string()
+                tx.prefetch(true)
+                    .get::<tables::AccountsHistory>(key.clone())
+                    .unwrap_err()
+                    .to_string(),
+                tx.prefetch(false)
+                    .get::<tables::AccountsHistory>(key.clone())
+                    .unwrap_err()
+                    .to_string()
             )
+        });
+        tx.prefetch(true);
+        with_prefetch_reads(2, || {
+            assert!(tx.get::<tables::AccountsHistory>(key.clone()).is_err());
+            assert!(tx.get::<tables::AccountsHistory>(key).is_err());
         });
     }
 
     #[test]
-    fn transaction_prefetch_is_consumed_by_get_or_cursor() {
+    fn transaction_and_cursor_prefetch_persist_until_changed() {
         let db = create_test_rw_db();
         let tx = db.tx_mut().unwrap();
         let key = B256::repeat_byte(1);
         let code = Bytecode::new_raw(vec![0x5b; 6 * *PAGE_SIZE].into());
-        assert!(std::ptr::eq(tx.prefetch(), &raw const tx));
-        // Writes and statistics leave the pending request intact.
+        let mut ordinary = tx.cursor_read::<tables::Bytecodes>().unwrap();
+        assert!(std::ptr::eq(tx.prefetch(true), &raw const tx));
+        // Writes, statistics, gets, misses, and cursor creation preserve the setting.
         DbTxMut::put::<tables::Bytecodes>(&tx, key, code.clone()).unwrap();
         assert_eq!(tx.entries::<tables::Bytecodes>().unwrap(), 1);
+        with_prefetch_reads(2, || {
+            assert_eq!(tx.get::<tables::Bytecodes>(key).unwrap(), Some(code.clone()));
+            assert_eq!(
+                tx.get_by_encoded_key::<tables::Bytecodes>(&key).unwrap(),
+                Some(code.clone())
+            );
+        });
         with_prefetch_reads(1, || {
-            assert_eq!(tx.get::<tables::Bytecodes>(key).unwrap(), Some(code.clone()))
+            assert!(tx.get::<tables::Bytecodes>(B256::ZERO).unwrap().is_none());
+            tx.get::<tables::Bytecodes>(key).unwrap();
         });
-        with_prefetch_reads(0, || tx.get::<tables::Bytecodes>(key).unwrap());
+        let mut prefetched = tx.cursor_write::<tables::Bytecodes>().unwrap();
+        let mut sibling = tx.cursor_read::<tables::Bytecodes>().unwrap();
+        with_prefetch_reads(0, || ordinary.first().unwrap());
+        with_prefetch_reads(3, || {
+            assert_eq!(prefetched.first().unwrap(), Some((key, code)));
+            sibling.first().unwrap();
+            tx.get::<tables::Bytecodes>(key).unwrap();
+        });
 
-        // A miss also consumes the request, without invoking the value decoder.
-        with_prefetch_reads(0, || {
-            assert!(tx.prefetch().get::<tables::Bytecodes>(B256::ZERO).unwrap().is_none());
+        // A cursor can disable its inherited setting without changing its position or siblings.
+        with_prefetch_reads(0, || prefetched.prefetch(false).current().unwrap());
+        with_prefetch_reads(2, || {
+            sibling.current().unwrap();
             tx.get::<tables::Bytecodes>(key).unwrap();
         });
-        let mut ordinary = tx.cursor_read::<tables::Bytecodes>().unwrap();
-        let mut prefetched = tx.prefetch().cursor_write::<tables::Bytecodes>().unwrap();
+        tx.prefetch(false);
         with_prefetch_reads(0, || {
-            ordinary.first().unwrap();
             tx.get::<tables::Bytecodes>(key).unwrap();
+            tx.cursor_read::<tables::Bytecodes>().unwrap().first().unwrap();
         });
-        with_prefetch_reads(1, || assert_eq!(prefetched.first().unwrap(), Some((key, code))));
-        // Writes through an opted-in cursor keep its read-ahead setting.
+        with_prefetch_reads(1, || sibling.current().unwrap());
+
+        // Cursor overrides are independent of the transaction and persist through writes.
+        with_prefetch_reads(1, || prefetched.prefetch(true).current().unwrap());
         prefetched.upsert(key, &Bytecode::new_raw(vec![0].into())).unwrap();
         with_prefetch_reads(1, || prefetched.current().unwrap());
+        with_prefetch_reads(0, || {
+            ordinary.current().unwrap();
+            tx.get::<tables::Bytecodes>(key).unwrap();
+        });
     }
 
     #[test]
@@ -279,7 +315,7 @@ mod tests {
         }
         tx.commit().unwrap();
         let tx = db.tx().unwrap();
-        let mut cursor = tx.prefetch().cursor_read::<tables::Bytecodes>().unwrap();
+        let mut cursor = tx.prefetch(true).cursor_read::<tables::Bytecodes>().unwrap();
         with_prefetch_reads(7, || {
             assert_eq!(cursor.first().unwrap(), Some((keys[0], code.clone())));
             assert_eq!(cursor.next().unwrap(), Some((keys[1], code.clone())));
@@ -322,6 +358,18 @@ mod tests {
                 expected
             );
         });
+        with_prefetch_reads(0, || {
+            assert_eq!(
+                cursor.prefetch(false).walk(None).unwrap().collect::<Result<Vec<_>, _>>().unwrap(),
+                expected
+            );
+        });
+        with_prefetch_reads(3, || {
+            assert_eq!(
+                cursor.prefetch(true).walk(None).unwrap().collect::<Result<Vec<_>, _>>().unwrap(),
+                expected
+            );
+        });
     }
 
     #[test]
@@ -339,7 +387,7 @@ mod tests {
         tx.commit().unwrap();
         let tx = db.tx_mut().unwrap();
         // Both read-only and writable duplicate cursor factories inherit the flag.
-        let mut cursor = tx.prefetch().cursor_dup_read::<tables::PlainStorageState>().unwrap();
+        let mut cursor = tx.prefetch(true).cursor_dup_read::<tables::PlainStorageState>().unwrap();
         with_prefetch_reads(7, || {
             assert_eq!(cursor.first().unwrap(), Some((address, entries[0])));
             assert_eq!(cursor.next_dup().unwrap(), Some((address, entries[1])));
@@ -352,7 +400,7 @@ mod tests {
                 Some(entries[1])
             );
         });
-        let mut cursor = tx.prefetch().cursor_dup_write::<tables::PlainStorageState>().unwrap();
+        let mut cursor = tx.prefetch(true).cursor_dup_write::<tables::PlainStorageState>().unwrap();
         for (key, subkey, reads) in [
             (Some(address), Some(entries[0].key), 3),
             (Some(address), None, 3),
@@ -366,5 +414,19 @@ mod tests {
                 );
             });
         }
+        with_prefetch_reads(0, || {
+            assert_eq!(
+                cursor.prefetch(false).seek_by_key_subkey(address, entries[0].key).unwrap(),
+                Some(entries[0])
+            );
+            assert_eq!(cursor.next_dup_val().unwrap(), Some(entries[1]));
+        });
+        with_prefetch_reads(2, || {
+            assert_eq!(
+                cursor.prefetch(true).seek_by_key_subkey(address, entries[0].key).unwrap(),
+                Some(entries[0])
+            );
+            assert_eq!(cursor.next_dup_val().unwrap(), Some(entries[1]));
+        });
     }
 }

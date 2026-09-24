@@ -193,6 +193,12 @@ impl<K: TransactionKind, T: Table> DbCursorRO<T> for Cursor<K, T> {
 
         Ok(ReverseWalker::new(self, start))
     }
+
+    #[cfg(target_os = "linux")]
+    fn prefetch(&mut self, enabled: bool) -> &mut Self {
+        self.prefetch = enabled;
+        self
+    }
 }
 
 impl<K: TransactionKind, T: DupSort> DbDupCursorRO<T> for Cursor<K, T> {
