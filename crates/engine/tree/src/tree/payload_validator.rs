@@ -1045,9 +1045,7 @@ where
                 )?;
 
                 let post_exec_start = Instant::now();
-                let (output, built_bal) = executor
-                    .finish_with_prepared_block_access_list()
-                    .map_err(BlockExecutionError::other)?;
+                let (output, built_bal) = executor.finish_with_prepared_block_access_list()?;
                 self.metrics.record_post_execution(post_exec_start.elapsed());
                 Ok::<_, BlockExecutionError>((output, senders, built_bal))
             })?;
@@ -1196,9 +1194,8 @@ where
         Err: core::error::Error + Send + Sync + 'static,
     {
         let pre_exec_start = Instant::now();
-        debug_span!(target: "engine::tree", "pre_execution").in_scope(|| {
-            executor.apply_pre_execution_changes().map_err(BlockExecutionError::other)
-        })?;
+        debug_span!(target: "engine::tree", "pre_execution")
+            .in_scope(|| executor.apply_pre_execution_changes())?;
         self.metrics.record_pre_execution(pre_exec_start.elapsed());
 
         let exec_span = debug_span!(target: "engine::tree", "execution").entered();
@@ -1225,7 +1222,7 @@ where
             }
 
             let tx_start = Instant::now();
-            executor.execute_transaction(tx).map_err(BlockExecutionError::other)?;
+            executor.execute_transaction(tx)?;
             self.metrics.record_transaction_execution(tx_start.elapsed());
             executed_tx_index.store(senders.len(), Ordering::Relaxed);
 
