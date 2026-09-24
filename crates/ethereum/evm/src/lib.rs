@@ -332,7 +332,6 @@ mod convert;
 pub use convert::ExecutableRecoveredTx;
 
 mod execution;
-pub use execution::EthExecutionError;
 
 mod receipt;
 pub use receipt::RethReceiptBuilder;

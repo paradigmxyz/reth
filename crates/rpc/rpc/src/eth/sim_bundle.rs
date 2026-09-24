@@ -327,7 +327,7 @@ where
 
                 let initial_coinbase_balance = db
                     .get_account(&coinbase)
-                    .map_err(|code| EthApiError::EvmCustom(db.error(code).to_string()))?
+                    .map_err(EthApiError::from)?
                     .map(|acc| acc.balance)
                     .unwrap_or_default();
 
@@ -372,7 +372,7 @@ where
                     db.commit_source(&state);
                     let coinbase_balance_after_tx = db
                         .get_account(&coinbase)
-                        .map_err(|code| EthApiError::EvmCustom(db.error(code).to_string()))?
+                        .map_err(EthApiError::from)?
                         .map(|acc| acc.balance)
                         .unwrap_or(coinbase_balance_before_tx);
 

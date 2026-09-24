@@ -551,8 +551,8 @@ impl From<BlockExecutionError> for EthApiError {
     }
 }
 
-impl From<evm2::AnyError> for EthApiError {
-    fn from(error: evm2::AnyError) -> Self {
+impl From<evm2::DatabaseError> for EthApiError {
+    fn from(error: evm2::DatabaseError) -> Self {
         Self::EvmCustom(error.to_string())
     }
 }

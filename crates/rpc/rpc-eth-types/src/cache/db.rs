@@ -73,12 +73,10 @@ pub fn apply_block_overrides<DB>(
 pub fn apply_state_overrides<DB: DynDatabase>(
     overrides: StateOverride,
     db: &mut CacheDB<DB>,
-) -> Result<(), StateOverrideError<evm2::AnyError>> {
+) -> Result<(), StateOverrideError<evm2::DatabaseError>> {
     for (address, account_override) in overrides {
-        let mut account = db
-            .get_account(&address)
-            .map_err(|code| StateOverrideError::Database(db.error(code)))?
-            .unwrap_or_default();
+        let mut account =
+            db.get_account(&address).map_err(StateOverrideError::Database)?.unwrap_or_default();
 
         if let Some(nonce) = account_override.nonce {
             account.nonce = nonce;

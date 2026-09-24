@@ -720,7 +720,7 @@ where
     fn account(db: &mut StateCacheDb, address: Address) -> Result<Option<Account>, Eth::Error> {
         let account = db
             .get_account(&address)
-            .map_err(|code| EthApiError::EvmCustom(db.error(code).to_string()))
+            .map_err(EthApiError::from)
             .map_err(Eth::Error::from_eth_err)?;
         let Some(account) = account else { return Ok(None) };
 
@@ -746,7 +746,7 @@ where
     fn account_info(db: &mut StateCacheDb, address: Address) -> Result<AccountInfo, Eth::Error> {
         let account = db
             .get_account(&address)
-            .map_err(|code| EthApiError::EvmCustom(db.error(code).to_string()))
+            .map_err(EthApiError::from)
             .map_err(Eth::Error::from_eth_err)?
             .unwrap_or_default();
         let code = if account.code_hash == KECCAK_EMPTY {
@@ -755,7 +755,7 @@ where
             code.original_bytes()
         } else {
             db.get_code_by_hash(&account.code_hash)
-                .map_err(|code| EthApiError::EvmCustom(db.error(code).to_string()))
+                .map_err(EthApiError::from)
                 .map_err(Eth::Error::from_eth_err)?
                 .original_bytes()
         };

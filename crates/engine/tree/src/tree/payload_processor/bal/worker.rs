@@ -152,6 +152,10 @@ struct WorkerDatabase<DB>(std::rc::Rc<std::cell::RefCell<DB>>);
 impl<DB: Database> Database for WorkerDatabase<DB> {
     type Error = DB::Error;
 
+    fn is_fatal(error: &Self::Error) -> bool {
+        DB::is_fatal(error)
+    }
+
     fn get_account(
         &mut self,
         address: &Address,

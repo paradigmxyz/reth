@@ -102,6 +102,10 @@ where
 {
     type Error = DB::Error;
 
+    fn is_fatal(error: &Self::Error) -> bool {
+        DB::is_fatal(error)
+    }
+
     fn get_account(&mut self, address: &Address) -> Result<Option<AccountInfo>, Self::Error> {
         if let Some(account) = self.cached.borrow().accounts.get(address) {
             return Ok(account.info.clone())

@@ -4,9 +4,9 @@ use reth_execution_types::{BlockState, EvmState};
 use crate::{
     execution::{
         base_block_reward, block_requests_from_receipts, commit_detached_transaction,
-        commit_pending_state, execute_transaction_without_commit, post_block_balance_state_changes,
-        post_execution_system_call_state_changes, pre_execution_system_call_state_changes,
-        BlockExecutionContext, BlockSystemCalls, EthExecutionError,
+        commit_pending_state, execute_transaction_without_commit, map_transaction_error,
+        post_block_balance_state_changes, post_execution_system_call_state_changes,
+        pre_execution_system_call_state_changes, BlockExecutionContext, BlockSystemCalls,
     },
     factory::{EthBlockExecutorFactory, EvmFactory},
     EthBlockExecutionCtx, EthEvmEnv, RethReceiptBuilder,
@@ -255,7 +255,6 @@ where
             block_number,
             context,
         )
-        .map_err(Into::into)
     }
 
     fn validate_transaction_gas_limit(
@@ -307,7 +306,7 @@ where
             &transaction,
             commit,
         )
-        .map_err(|error| map_transaction_execution_error(error, *tx.tx().tx_hash()))?
+        .map_err(|error| map_transaction_error(error, *tx.tx().tx_hash()))?
         else {
             return Ok(None);
         };
@@ -337,7 +336,7 @@ where
         let blob_gas_used = tx.tx().blob_gas_used().unwrap_or_default();
         let tx_type = tx.tx().tx_type();
         let result = execute_transaction_without_commit(&mut self.evm, &transaction)
-            .map_err(|err| map_transaction_execution_error(err, *tx.tx().tx_hash()))?;
+            .map_err(|err| map_transaction_error(err, *tx.tx().tx_hash()))?;
         Ok(EthTransactionResultWithState::new(result, tx_type, blob_gas_used))
     }
 
@@ -403,8 +402,7 @@ where
             self.spec_id,
             context,
             &mut requests,
-        )
-        .map_err(BlockExecutionError::from)?;
+        )?;
 
         let withdrawals = self.ctx.withdrawals.clone();
         let context = Self::block_context(
@@ -427,8 +425,7 @@ where
             block_beneficiary,
             context.ommers,
             context.withdrawals,
-        )
-        .map_err(BlockExecutionError::from)?;
+        )?;
 
         let block_access_list = self.evm.state_mut().take_bal_builder();
         let block_gas_used = final_block_gas_used(
@@ -708,8 +705,7 @@ where
             self.inner.spec_id,
             context,
             &mut requests,
-        )
-        .map_err(BlockExecutionError::from)?;
+        )?;
 
         let withdrawals = self.inner.ctx.withdrawals.clone();
         let context = EthBlockExecutor::<F::Types>::block_context(
@@ -732,8 +728,7 @@ where
             block_beneficiary,
             context.ommers,
             context.withdrawals,
-        )
-        .map_err(BlockExecutionError::from)?;
+        )?;
 
         Ok(FinishedBigBlockSegment {
             requests,
@@ -950,15 +945,6 @@ const fn final_block_gas_used(
         }
     } else {
         cumulative_gas_used
-    }
-}
-
-fn map_transaction_execution_error(err: EthExecutionError, tx_hash: B256) -> BlockExecutionError {
-    match err {
-        EthExecutionError::BlockAccessListNotCovered => {
-            BlockValidationError::BlockAccessListNotCovered.into()
-        }
-        err => BlockExecutionError::evm(err, tx_hash),
     }
 }
 

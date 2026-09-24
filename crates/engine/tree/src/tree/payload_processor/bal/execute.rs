@@ -906,13 +906,16 @@ mod tests {
 
         match result {
             Err(BalExecutionError::Execution(err)) => {
-                assert!(
-                    matches!(
-                        err.as_validation(),
-                        Some(BlockValidationError::BlockAccessListNotCovered)
-                    ),
-                    "expected BAL validation error, got {err:?}"
-                );
+                let Some(BlockValidationError::EVM { error, .. }) = err.as_validation() else {
+                    panic!("expected EVM validation error, got {err:?}");
+                };
+                let Some(evm2::registry::HandlerError::Database(database_error)) =
+                    error.downcast_ref::<evm2::registry::HandlerError>()
+                else {
+                    panic!("expected owned database error, got {error:?}");
+                };
+                assert!(!database_error.is_fatal());
+                assert!(database_error.downcast_ref::<evm2::evm::bal::BalError>().is_some());
             }
             Err(err) => panic!("expected BAL execution error, got {err:?}"),
             Ok(_) => panic!("expected BAL execution error, got Ok"),
