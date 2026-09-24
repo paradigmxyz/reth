@@ -79,10 +79,8 @@ pub trait EthState: LoadState + SpawnBlocking {
         address: Address,
         block_id: Option<BlockId>,
     ) -> impl Future<Output = Result<U256, Self::Error>> + Send {
-        self.spawn_blocking_io_fut(async move |this| {
-            Ok(this
-                .state_at_block_id_or_latest(block_id)
-                .await?
+        self.spawn_blocking_io_with_state(block_id, move |_, state| {
+            Ok(state
                 .account_balance(&address)
                 .map_err(Self::Error::from_eth_err)?
                 .unwrap_or_default())
@@ -96,10 +94,9 @@ pub trait EthState: LoadState + SpawnBlocking {
         index: JsonStorageKey,
         block_id: Option<BlockId>,
     ) -> impl Future<Output = Result<B256, Self::Error>> + Send {
-        self.spawn_blocking_io_fut(async move |this| {
+        self.spawn_blocking_io_with_state(block_id, move |_, state| {
             Ok(B256::new(
-                this.state_at_block_id_or_latest(block_id)
-                    .await?
+                state
                     .storage(address, index.as_b256())
                     .map_err(Self::Error::from_eth_err)?
                     .unwrap_or_default()
@@ -132,9 +129,7 @@ pub trait EthState: LoadState + SpawnBlocking {
                 )));
             }
 
-            self.spawn_blocking_io_fut(async move |this| {
-                let state = this.state_at_block_id_or_latest(block_id).await?;
-
+            self.spawn_blocking_io_with_state(block_id, move |_, state| {
                 let mut result = HashMap::with_capacity(requests.len());
                 for (address, slots) in requests {
                     let mut values = Vec::with_capacity(slots.len());
@@ -177,9 +172,8 @@ pub trait EthState: LoadState + SpawnBlocking {
             let block_id = block_id.unwrap_or_default();
             self.ensure_within_proof_window(block_id)?;
 
-            self.spawn_blocking_io_fut(move |this| async move {
+            self.spawn_blocking_io_with_state(Some(block_id), move |_, state| {
                 let _permit = permit;
-                let state = this.state_at_block_id(block_id).await?;
                 let storage_keys = keys.iter().map(|key| key.as_b256()).collect::<Vec<_>>();
                 let proof = state
                     .proof(Default::default(), address, &storage_keys)
@@ -212,9 +206,8 @@ pub trait EthState: LoadState + SpawnBlocking {
             let block_id = block_id.unwrap_or_default();
             self.ensure_within_proof_window(block_id)?;
 
-            self.spawn_blocking_io_fut(move |this| async move {
+            self.spawn_blocking_io_with_state(Some(block_id), move |_, state| {
                 let _permit = permit;
-                let state = this.state_at_block_id(block_id).await?;
                 let mut proof_targets = MultiProofTargetsV2::default();
                 proof_targets.account_targets.reserve(targets.len());
                 proof_targets.storage_targets.reserve(targets.len());
@@ -261,8 +254,7 @@ pub trait EthState: LoadState + SpawnBlocking {
         async move {
             self.ensure_within_proof_window(block_id)?;
 
-            self.spawn_blocking_io_fut(async move |this| {
-                let state = this.state_at_block_id(block_id).await?;
+            self.spawn_blocking_io_with_state(Some(block_id), move |_, state| {
                 let account = state.basic_account(&address).map_err(Self::Error::from_eth_err)?;
                 let Some(account) = account else { return Ok(None) };
 
@@ -288,8 +280,7 @@ pub trait EthState: LoadState + SpawnBlocking {
         address: Address,
         block_id: BlockId,
     ) -> impl Future<Output = Result<AccountInfo, Self::Error>> + Send {
-        self.spawn_blocking_io_fut(async move |this| {
-            let state = this.state_at_block_id(block_id).await?;
+        self.spawn_blocking_io_with_state(Some(block_id), move |_, state| {
             let account = state
                 .basic_account(&address)
                 .map_err(Self::Error::from_eth_err)?
@@ -370,6 +361,43 @@ pub trait LoadState:
             } else {
                 Ok(self.latest_state()?)
             }
+        }
+    }
+
+    /// Executes `f` with the state at the given [`BlockId`], or the latest state if `None`, on a
+    /// blocking IO task.
+    ///
+    /// The `pending` state is resolved on the calling task, before the blocking task starts.
+    /// Building the pending block needs a blocking task of its own, so a blocking task that waited
+    /// for it could hold the thread the build needs. Every other state is a synchronous provider
+    /// read and is resolved inside the blocking task.
+    fn spawn_blocking_io_with_state<F, R>(
+        &self,
+        block_id: Option<BlockId>,
+        f: F,
+    ) -> impl Future<Output = Result<R, Self::Error>> + Send
+    where
+        Self: SpawnBlocking,
+        F: FnOnce(Self, StateProviderBox) -> Result<R, Self::Error> + Send + 'static,
+        R: Send + 'static,
+    {
+        async move {
+            let pending = match block_id {
+                Some(at) if at.is_pending() => self.local_pending_state().await.ok().flatten(),
+                _ => None,
+            };
+
+            self.spawn_blocking_io(move |this| {
+                let state = match (pending, block_id) {
+                    (Some(state), _) => state,
+                    (None, Some(at)) => {
+                        this.provider().state_by_block_id(at).map_err(Self::Error::from_eth_err)?
+                    }
+                    (None, None) => this.latest_state()?,
+                };
+                f(this, state)
+            })
+            .await
         }
     }
 
@@ -511,11 +539,9 @@ pub trait LoadState:
     where
         Self: SpawnBlocking,
     {
-        self.spawn_blocking_io_fut(async move |this| {
+        self.spawn_blocking_io_with_state(block_id, move |this, state| {
             // first fetch the on chain nonce of the account
-            let on_chain_account_nonce = this
-                .state_at_block_id_or_latest(block_id)
-                .await?
+            let on_chain_account_nonce = state
                 .account_nonce(&address)
                 .map_err(Self::Error::from_eth_err)?
                 .unwrap_or_default();
@@ -557,10 +583,8 @@ pub trait LoadState:
     where
         Self: SpawnBlocking,
     {
-        self.spawn_blocking_io_fut(async move |this| {
-            Ok(this
-                .state_at_block_id_or_latest(block_id)
-                .await?
+        self.spawn_blocking_io_with_state(block_id, move |_, state| {
+            Ok(state
                 .account_code(&address)
                 .map_err(Self::Error::from_eth_err)?
                 .unwrap_or_default()
