@@ -569,7 +569,11 @@ mod tests {
         test_utils::{ExtendedAccount, MockEthProvider, NoopProvider},
         PruneCheckpointReader, StageCheckpointReader,
     };
-    use reth_rpc_eth_api::{helpers::EthCall, node::RpcNodeCoreAdapter, EthApiServer};
+    use reth_rpc_eth_api::{
+        helpers::{EthBlocks, EthCall},
+        node::RpcNodeCoreAdapter,
+        EthApiServer,
+    };
     use reth_rpc_eth_types::RpcInvalidTransactionError;
     use reth_storage_api::{
         BalProvider, BlockReader, BlockReaderIdExt, NodePrimitivesProvider, StateProviderFactory,
@@ -1176,5 +1180,33 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(estimated, U256::from(21_000));
+    }
+
+    #[tokio::test]
+    async fn header_responses_omit_size_while_blocks_keep_it() {
+        let provider = MockEthProvider::default();
+        let block = Block {
+            header: Header { number: 1, ..Default::default() },
+            body: BlockBody::default(),
+        };
+        let hash = block.header.hash_slow();
+        let block_size = alloy_rlp::encode(&block).len();
+        provider.add_block(hash, block);
+
+        let api = build_test_eth_api(provider);
+        for block_id in [BlockId::Number(BlockNumberOrTag::Number(1)), BlockId::Hash(hash.into())] {
+            let header = EthBlocks::rpc_block_header(&api, block_id).await.unwrap().unwrap();
+            let response = serde_json::to_value(&header).unwrap();
+            assert!(response.get("size").is_none());
+        }
+
+        for full in [false, true] {
+            let block =
+                EthBlocks::rpc_block(&api, BlockId::Number(BlockNumberOrTag::Number(1)), full)
+                    .await
+                    .unwrap()
+                    .unwrap();
+            assert_eq!(block.header.size, Some(U256::from(block_size)));
+        }
     }
 }

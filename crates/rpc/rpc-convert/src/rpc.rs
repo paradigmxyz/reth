@@ -2,15 +2,23 @@ use std::fmt::Debug;
 
 use alloy_json_rpc::RpcObject;
 use alloy_network::{primitives::HeaderResponse, Network, ReceiptResponse, TransactionResponse};
+use alloy_primitives::U256;
 use alloy_rpc_types_eth::TransactionRequest;
 
 /// A header response carrying the non-consensus `size` field.
 pub trait SizedHeader {
-    /// Clears the `size` field so it is omitted from the response.
+    /// Sets the `size` field for a full block response.
+    fn set_size(&mut self, size: usize);
+
+    /// Clears the `size` field so it is omitted from a header response.
     fn clear_size(&mut self);
 }
 
 impl<H> SizedHeader for alloy_rpc_types_eth::Header<H> {
+    fn set_size(&mut self, size: usize) {
+        self.size = Some(U256::from(size));
+    }
+
     fn clear_size(&mut self) {
         self.size = None;
     }

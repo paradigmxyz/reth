@@ -67,10 +67,11 @@ pub trait EthBlocks: LoadBlock<RpcConvert: RpcConvert<Primitives = Self::Primiti
         async move {
             let Some(block) = self.recovered_block(block_id).await? else { return Ok(None) };
 
+            let block_size = block.rlp_length();
             let block = block.clone_into_rpc_block(
                 full.into(),
                 |tx, tx_info| self.converter().fill(tx, tx_info),
-                |header, size| self.converter().convert_header(header, size),
+                |header| self.converter().convert_header(header, block_size),
             )?;
             Ok(Some(block))
         }

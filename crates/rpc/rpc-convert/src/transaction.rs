@@ -1,7 +1,7 @@
 //! Compatibility functions for rpc `Transaction` type.
 use crate::{
     RpcHeader, RpcLog, RpcReceipt, RpcTransaction, RpcTxReq, RpcTypes, SignableTxRequest,
-    TryIntoTxEnv,
+    SizedHeader, TryIntoTxEnv,
 };
 use alloy_consensus::{error::ValueError, transaction::Recovered};
 use alloy_primitives::Address;
@@ -84,7 +84,7 @@ pub trait HeaderConverter<Consensus, Rpc>: Send + Sync + Unpin + Clone + 'static
 /// headers.
 impl<Consensus, Rpc> HeaderConverter<Consensus, Rpc> for ()
 where
-    Rpc: FromConsensusHeader<Consensus>,
+    Rpc: FromConsensusHeader<Consensus> + SizedHeader,
 {
     type Err = Infallible;
 
@@ -93,7 +93,9 @@ where
         header: SealedHeader<Consensus>,
         block_size: usize,
     ) -> Result<Rpc, Self::Err> {
-        Ok(Rpc::from_consensus_header(header, block_size))
+        let mut rpc_header = Rpc::from_consensus_header(header);
+        rpc_header.set_size(block_size);
+        Ok(rpc_header)
     }
 }
 

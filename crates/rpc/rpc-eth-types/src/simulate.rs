@@ -575,10 +575,11 @@ where
         calls.push(call);
     }
 
+    let block_size = block.rlp_length();
     let block = block.into_rpc_block(
         txs_kind,
         |tx, tx_info| converter.fill(tx, tx_info),
-        |header, size| converter.convert_header(header, size),
+        |header| converter.convert_header(header, block_size),
     )?;
     Ok(SimulatedBlock { inner: block, calls })
 }
