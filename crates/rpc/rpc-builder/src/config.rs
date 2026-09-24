@@ -3,7 +3,7 @@ use reth_node_core::{args::RpcServerArgs, utils::get_or_create_jwt_secret_from_p
 use reth_rpc::ValidationApiConfig;
 use reth_rpc_eth_types::{EthConfig, EthStateCacheConfig, GasPriceOracleConfig};
 use reth_rpc_layer::{JwtError, JwtSecret};
-use reth_rpc_server_types::{RethRpcModule, RpcModuleSelection};
+use reth_rpc_server_types::RpcModuleSelection;
 use std::{net::SocketAddr, path::PathBuf};
 use tower::layer::util::Identity;
 use tracing::{debug, warn};
@@ -205,17 +205,6 @@ impl RethRpcServerConfig for RpcServerArgs {
             warn!(
                 target: "reth::cli",
                 "The --ws.api flag is set but --ws is not enabled. WS RPC API will not be exposed."
-            );
-        }
-
-        if (self.http &&
-            self.http_api.as_ref().is_some_and(|api| api.contains(&RethRpcModule::Testing))) ||
-            (self.ws &&
-                self.ws_api.as_ref().is_some_and(|api| api.contains(&RethRpcModule::Testing)))
-        {
-            warn!(
-                target: "reth::cli",
-                "The testing RPC namespace can build and commit blocks. Do not expose it to untrusted clients."
             );
         }
 
