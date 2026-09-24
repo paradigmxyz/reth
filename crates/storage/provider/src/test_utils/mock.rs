@@ -27,7 +27,7 @@ use reth_db_api::{
     models::{AccountBeforeTx, StorageSettings, StoredBlockBodyIndices},
 };
 use reth_ethereum_primitives::EthPrimitives;
-use reth_execution_types::{ExecutionOutcome, PendingBlockAndExecutionOutput};
+use reth_execution_types::{ExecutionOutcome, RecoveredBlockAndExecutionOutput};
 use reth_primitives_traits::{
     Account, Block, BlockBody, Bytecode, GotExpected, NodePrimitives, RecoveredBlock, SealedHeader,
     SignerRecoverable, StorageEntry,
@@ -941,7 +941,7 @@ impl<T: NodePrimitives, ChainSpec: EthChainSpec + Send + Sync + 'static> BlockRe
 
     fn pending_block_and_receipts(
         &self,
-    ) -> ProviderResult<Option<PendingBlockAndExecutionOutput<Self::Block, T::Receipt>>> {
+    ) -> ProviderResult<Option<RecoveredBlockAndExecutionOutput<Self::Block, T::Receipt>>> {
         Ok(None)
     }
 

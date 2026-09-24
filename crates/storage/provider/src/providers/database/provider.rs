@@ -54,7 +54,7 @@ use reth_db_api::{
 };
 use reth_execution_types::{
     BlockExecutionOutput, BlockExecutionResult, Chain, ExecutionOutcome,
-    PendingBlockAndExecutionOutput,
+    RecoveredBlockAndExecutionOutput,
 };
 use reth_node_types::{BlockTy, BodyTy, HeaderTy, NodeTypes, ReceiptTy, TxTy};
 use reth_primitives_traits::{
@@ -1905,7 +1905,7 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> BlockReader for DatabaseProvid
 
     fn pending_block_and_receipts(
         &self,
-    ) -> ProviderResult<Option<PendingBlockAndExecutionOutput<Self::Block, Self::Receipt>>> {
+    ) -> ProviderResult<Option<RecoveredBlockAndExecutionOutput<Self::Block, Self::Receipt>>> {
         Ok(None)
     }
 

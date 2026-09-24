@@ -21,7 +21,7 @@ use reth_chain_state::{
 };
 use reth_chainspec::ChainInfo;
 use reth_db_api::models::{AccountBeforeTx, BlockNumberAddress, StoredBlockBodyIndices};
-use reth_execution_types::{ExecutionOutcome, PendingBlockAndExecutionOutput};
+use reth_execution_types::{ExecutionOutcome, RecoveredBlockAndExecutionOutput};
 use reth_node_types::{BlockTy, HeaderTy, NodeTypes, NodeTypesWithDB, ReceiptTy, TxTy};
 use reth_primitives_traits::{
     Account, RecoveredBlock, SealedHeader, SealedOrRecoveredBlock, StorageEntry,
@@ -527,7 +527,7 @@ impl<N: ProviderNodeTypes> BlockReader for BlockchainProvider<N> {
 
     fn pending_block_and_receipts(
         &self,
-    ) -> ProviderResult<Option<PendingBlockAndExecutionOutput<Self::Block, Self::Receipt>>> {
+    ) -> ProviderResult<Option<RecoveredBlockAndExecutionOutput<Self::Block, Self::Receipt>>> {
         Ok(self.canonical_in_memory_state.pending_block_and_receipts())
     }
 

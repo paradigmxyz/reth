@@ -11,7 +11,7 @@ use reth_chainspec::ChainInfo;
 use reth_ethereum_primitives::EthPrimitives;
 use reth_execution_types::{
     BlockExecutionOutput, BlockExecutionResult, Chain, DecodedRevmBal, ExecutionOutcome,
-    PendingBlockAndExecutionOutput,
+    RecoveredBlockAndExecutionOutput,
 };
 use reth_metrics::{metrics::Gauge, Metrics};
 use reth_primitives_traits::{
@@ -503,9 +503,9 @@ impl<N: NodePrimitives> CanonicalInMemoryState<N> {
     /// Returns the pending recovered block and its execution output, which contains the receipts.
     pub fn pending_block_and_receipts(
         &self,
-    ) -> Option<PendingBlockAndExecutionOutput<N::Block, N::Receipt>> {
+    ) -> Option<RecoveredBlockAndExecutionOutput<N::Block, N::Receipt>> {
         self.pending_state().map(|block_state| {
-            PendingBlockAndExecutionOutput::new(
+            RecoveredBlockAndExecutionOutput::new(
                 Arc::clone(&block_state.block_ref().recovered_block),
                 Arc::clone(&block_state.block_ref().execution_output),
             )

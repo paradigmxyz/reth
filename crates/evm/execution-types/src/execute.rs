@@ -65,16 +65,16 @@ impl<T> Default for BlockExecutionOutput<T> {
     }
 }
 
-/// A pending recovered block and its shared execution output.
+/// A recovered block and its shared execution output.
 ///
 /// The execution output contains the block's receipts.
 #[derive(Debug)]
-pub struct PendingBlockAndExecutionOutput<B: Block, R> {
+pub struct RecoveredBlockAndExecutionOutput<B: Block, R> {
     block: Arc<RecoveredBlock<B>>,
     execution_output: Arc<BlockExecutionOutput<R>>,
 }
 
-impl<B: Block, R> PendingBlockAndExecutionOutput<B, R> {
+impl<B: Block, R> RecoveredBlockAndExecutionOutput<B, R> {
     /// Creates a block with its execution output.
     pub const fn new(
         block: Arc<RecoveredBlock<B>>,

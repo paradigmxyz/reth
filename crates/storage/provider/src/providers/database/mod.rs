@@ -21,7 +21,7 @@ use reth_chainspec::ChainInfo;
 use reth_db::{init_db, mdbx::DatabaseArguments, DatabaseEnv};
 use reth_db_api::{database::Database, models::StoredBlockBodyIndices};
 use reth_errors::{RethError, RethResult};
-use reth_execution_types::PendingBlockAndExecutionOutput;
+use reth_execution_types::RecoveredBlockAndExecutionOutput;
 use reth_node_types::{
     BlockTy, HeaderTy, NodeTypesWithDB, NodeTypesWithDBAdapter, ReceiptTy, TxTy,
 };
@@ -727,7 +727,7 @@ impl<N: ProviderNodeTypes> BlockReader for ProviderFactory<N> {
 
     fn pending_block_and_receipts(
         &self,
-    ) -> ProviderResult<Option<PendingBlockAndExecutionOutput<Self::Block, Self::Receipt>>> {
+    ) -> ProviderResult<Option<RecoveredBlockAndExecutionOutput<Self::Block, Self::Receipt>>> {
         self.provider()?.pending_block_and_receipts()
     }
 
