@@ -17,6 +17,7 @@ reth-ethereum-cli.workspace = true
 reth-chainspec.workspace = true
 reth-ethereum-primitives.workspace = true
 reth-cli-util.workspace = true
+reth-cli-runner.workspace = true
 reth-node-core.workspace = true
 reth-node-ethereum.workspace = true
 reth-node-builder.workspace = true
@@ -64,6 +65,8 @@ metrics.workspace = true
 eyre.workspace = true
 
 [features]
+state-trie-db = ["reth-node-builder/state-trie-db"]
+
 default = [
     "jemalloc",
     "reth-cli-util/jemalloc",

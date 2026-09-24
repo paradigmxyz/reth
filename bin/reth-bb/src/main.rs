@@ -12,6 +12,7 @@ use alloy_rpc_types::engine::ExecutionData;
 use clap::Parser;
 use evm_config::{BbEvmConfig, BigBlockData};
 use reth_chainspec::{ChainSpec, EthereumHardforks};
+use reth_cli_runner::{CliRunner, CliRunnerConfig};
 use reth_consensus::noop::NoopConsensus;
 use reth_ethereum_cli::{chainspec::EthereumChainSpecParser, interface::Cli};
 use reth_ethereum_primitives::{Block, EthPrimitives};
@@ -213,7 +214,7 @@ where
 // Main
 // ---------------------------------------------------------------------------
 
-fn main() {
+fn main() -> eyre::Result<()> {
     reth_cli_util::sigsegv_handler::install();
 
     if std::env::var_os("RUST_BACKTRACE").is_none() {
@@ -222,13 +223,14 @@ fn main() {
 
     let _ = DefaultEngineValues::default().with_bal_parallel_execution_disabled(false).try_init();
 
-    if let Err(err) = Cli::<EthereumChainSpecParser>::parse().run(async move |builder, _| {
+    // Big-block persistence can take minutes to drain after replay stops.
+    let runner = CliRunner::try_default_runtime()?.with_config(
+        CliRunnerConfig::new().with_graceful_shutdown_timeout(std::time::Duration::from_secs(900)),
+    );
+    Cli::<EthereumChainSpecParser>::parse().with_runner(runner, async move |builder, _| {
         info!(target: "reth::cli", "Launching big block node");
         let handle = builder.launch_node(BbNode::default()).await?;
 
         handle.wait_for_node_exit().await
-    }) {
-        eprintln!("Error: {err:?}");
-        std::process::exit(1);
-    }
+    })
 }

@@ -7889,6 +7889,7 @@ dependencies = [
  "metrics",
  "reth-chain-state",
  "reth-chainspec",
+ "reth-cli-runner",
  "reth-cli-util",
  "reth-consensus",
  "reth-engine-primitives",
