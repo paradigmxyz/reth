@@ -147,6 +147,20 @@ impl DatabaseEnvMetrics {
             .expect("transaction outcome metric handle not found")
             .record(open_duration, close_duration, commit_latency);
     }
+
+    /// Records a complete prefetched read separately from ordinary database operations.
+    #[cfg(target_os = "linux")]
+    pub(crate) fn record_prefetched_read<R>(
+        &self,
+        table: &'static str,
+        f: impl FnOnce() -> R,
+    ) -> R {
+        if let Some(metrics) = self.operations.get(table) {
+            metrics[Operation::GetWithPrefetch.index()].record_prefetched_read(f)
+        } else {
+            f()
+        }
+    }
 }
 
 /// Transaction mode for the database, either read-only or read-write.
@@ -223,6 +237,8 @@ pub(crate) enum Operation {
     CursorDeleteCurrent,
     /// Database cursor delete current duplicates operation.
     CursorDeleteCurrentDuplicates,
+    /// Database get operation with best-effort read-ahead before decoding.
+    GetWithPrefetch,
 }
 
 impl Operation {
@@ -239,6 +255,7 @@ impl Operation {
             Self::CursorAppendDup => 7,
             Self::CursorDeleteCurrent => 8,
             Self::CursorDeleteCurrentDuplicates => 9,
+            Self::GetWithPrefetch => 10,
         }
     }
 
@@ -255,6 +272,7 @@ impl Operation {
             7 => Self::CursorAppendDup,
             8 => Self::CursorDeleteCurrent,
             9 => Self::CursorDeleteCurrentDuplicates,
+            10 => Self::GetWithPrefetch,
             _ => panic!("invalid operation index"),
         }
     }
@@ -272,6 +290,7 @@ impl Operation {
             Self::CursorAppendDup => "cursor-append-dup",
             Self::CursorDeleteCurrent => "cursor-delete-current",
             Self::CursorDeleteCurrentDuplicates => "cursor-delete-current-duplicates",
+            Self::GetWithPrefetch => "get-with-prefetch",
         }
     }
 }
@@ -382,6 +401,8 @@ pub(crate) struct OperationMetrics {
     /// The time it took to execute a database operation (`put/upsert/insert/append/append_dup`)
     /// with value larger than [`LARGE_VALUE_THRESHOLD_BYTES`] bytes.
     large_value_duration_seconds: Histogram,
+    /// Full prefetched-read duration, including lookup, read-ahead advice, and decoding.
+    prefetched_read_duration_seconds: Histogram,
 }
 
 impl OperationMetrics {
@@ -402,5 +423,15 @@ impl OperationMetrics {
         } else {
             f()
         }
+    }
+
+    /// Counts opt-in reads (including skipped hints) and times the complete operation.
+    #[cfg(target_os = "linux")]
+    fn record_prefetched_read<R>(&self, f: impl FnOnce() -> R) -> R {
+        self.calls_total.increment(1);
+        let start = Instant::now();
+        let result = f();
+        self.prefetched_read_duration_seconds.record(start.elapsed());
+        result
     }
 }

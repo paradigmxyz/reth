@@ -318,8 +318,7 @@ impl<Provider: DBProvider + BlockHashReader> BytecodeReader
 {
     /// Get account code by its hash
     fn bytecode_by_hash(&self, code_hash: &B256) -> ProviderResult<Option<Bytecode>> {
-        self.tx().prefetch::<tables::Bytecodes>(code_hash)?;
-        self.tx().get_by_encoded_key::<tables::Bytecodes>(code_hash).map_err(Into::into)
+        self.tx().prefetch().get_by_encoded_key::<tables::Bytecodes>(code_hash).map_err(Into::into)
     }
 }
 

@@ -354,11 +354,23 @@ impl<K: TransactionKind> DbTx for Tx<K> {
     }
 
     #[cfg(target_os = "linux")]
-    fn prefetch<T: Table>(&self, key: &<T::Key as Encode>::Encoded) -> Result<(), DatabaseError> {
-        self.inner
-            .get::<super::value_prefetch::PrefetchValue>(self.get_dbi::<T>()?, key.as_ref())
-            .map(|_| ())
-            .map_err(|e| DatabaseError::Read(e.into()))
+    fn get_by_encoded_key_with_prefetch<T: Table>(
+        &self,
+        key: &<T::Key as Encode>::Encoded,
+    ) -> Result<Option<T::Value>, DatabaseError> {
+        let read = || {
+            self.inner
+                .get::<super::value_prefetch::PrefetchValue<'_>>(self.get_dbi::<T>()?, key.as_ref())
+                .map_err(|e| DatabaseError::Read(e.into()))?
+                .map(|value| decode_one::<T>(value.0))
+                .transpose()
+        };
+        if let Some(metrics_handler) = &self.metrics_handler {
+            metrics_handler.log_backtrace_on_long_read_transaction();
+            metrics_handler.env_metrics.record_prefetched_read(T::NAME, read)
+        } else {
+            read()
+        }
     }
 }
 

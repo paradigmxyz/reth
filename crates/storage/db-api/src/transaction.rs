@@ -47,13 +47,23 @@ pub trait DbTx: Debug + Send {
     /// Disables long-lived read transaction safety guarantees.
     fn disable_long_read_transaction_safety(&mut self);
 
-    /// Hints that the value at an encoded key will be read soon, without decoding it.
+    /// Returns an adapter that requests read-ahead when fetching a value.
     ///
-    /// This is best-effort: implementations may do nothing, and missing keys are ignored.
-    /// Lookup errors are returned, but failures to issue a read-ahead hint are ignored.
-    /// For duplicate-sorted tables, only the first value for the key is considered.
-    fn prefetch<T: Table>(&self, _key: &<T::Key as Encode>::Encoded) -> Result<(), DatabaseError> {
-        Ok(())
+    /// Creating the adapter performs no database operation and does not change the transaction.
+    #[inline]
+    fn prefetch(&self) -> PrefetchTx<'_, Self> {
+        PrefetchTx { tx: self }
+    }
+
+    /// Gets a value, optionally hinting its pages before decoding it.
+    ///
+    /// Backends supporting read-ahead should perform the hint and read in one lookup.
+    /// The default implementation falls back to an ordinary read.
+    fn get_by_encoded_key_with_prefetch<T: Table>(
+        &self,
+        key: &<T::Key as Encode>::Encoded,
+    ) -> Result<Option<T::Value>, DatabaseError> {
+        self.get_by_encoded_key::<T>(key)
     }
 }
 
@@ -85,4 +95,31 @@ pub trait DbTxMut: Send {
     fn cursor_write<T: Table>(&self) -> Result<Self::CursorMut<T>, DatabaseError>;
     /// `DupCursor` mut.
     fn cursor_dup_write<T: DupSort>(&self) -> Result<Self::DupCursorMut<T>, DatabaseError>;
+}
+
+/// A borrowed transaction adapter for a single read with best-effort read-ahead.
+///
+/// It holds no mutable transaction state. Ordinary reads on the original transaction are
+/// unaffected. For duplicate-sorted tables, reads return the first value for the key.
+#[derive(Debug)]
+#[must_use]
+pub struct PrefetchTx<'a, TX: ?Sized> {
+    tx: &'a TX,
+}
+
+impl<TX: DbTx + ?Sized> PrefetchTx<'_, TX> {
+    /// Gets a value by an owned key, requesting read-ahead before decoding it.
+    #[inline]
+    pub fn get<T: Table>(self, key: T::Key) -> Result<Option<T::Value>, DatabaseError> {
+        self.get_by_encoded_key::<T>(&key.encode())
+    }
+
+    /// Gets a value by an encoded key, requesting read-ahead before decoding it.
+    #[inline]
+    pub fn get_by_encoded_key<T: Table>(
+        self,
+        key: &<T::Key as Encode>::Encoded,
+    ) -> Result<Option<T::Value>, DatabaseError> {
+        self.tx.get_by_encoded_key_with_prefetch::<T>(key)
+    }
 }
