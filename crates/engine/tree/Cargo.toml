@@ -102,6 +102,7 @@ rand.workspace = true
 rand_08.workspace = true
 
 [features]
+state-trie-db = ["reth-trie-parallel/state-trie-db", "reth-storage-overlay/state-trie-db"]
 test-utils = [
     "reth-chain-state/test-utils",
     "reth-chainspec/test-utils",

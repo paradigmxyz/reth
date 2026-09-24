@@ -57,6 +57,7 @@ rand.workspace = true
 tokio = { workspace = true, features = ["rt", "rt-multi-thread", "macros"] }
 
 [features]
+state-trie-db = []
 default = ["metrics"]
 metrics = ["reth-metrics", "dep:metrics", "reth-trie/metrics"]
 trie-debug = [

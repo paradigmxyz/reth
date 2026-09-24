@@ -87,6 +87,7 @@ toml.workspace = true
 zstd.workspace = true
 
 [features]
+state-trie-db = ["reth-node-builder/state-trie-db"]
 default = [
     "jemalloc",
     "otlp",

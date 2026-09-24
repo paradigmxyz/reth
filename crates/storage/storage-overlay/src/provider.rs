@@ -22,6 +22,7 @@ use reth_trie::{
         zero_destroyed_account_storage, HashedCursorFactory, HashedPostStateCursorFactory,
     },
     proof::{Proof, StorageProof as TrieStorageProof},
+    state_trie_cursor::{InMemoryStateTrieCursor, StateTrieCursor, StateTrieCursorFactory},
     trie_cursor::{
         InMemoryTrieCursor, InMemoryTrieCursorFactory, TrieCursor, TrieCursorFactory,
         TrieStorageCursor,
@@ -30,11 +31,12 @@ use reth_trie::{
     witness::TrieWitness,
     AccountProof, DecodedMultiProofV2, ExecutionWitnessMode, HashedPostState,
     HashedPostStateSorted, HashedStorage, KeccakKeyHasher, MultiProof, MultiProofTargets,
-    MultiProofTargetsV2, StateRoot, StorageMultiProof, StorageProof, StorageRoot, TrieInput,
-    TrieInputSorted,
+    MultiProofTargetsV2, Nibbles, StateRoot, StateTrieNode, StateTrieUpdatesSorted,
+    StorageMultiProof, StorageProof, StorageRoot, TrieInput, TrieInputSorted,
 };
 use reth_trie_db::{
     DatabaseAccountTrieCursor, DatabaseHashedCursorFactory, DatabaseProof, DatabaseStateRoot,
+    DatabaseStateTrieAccountCursor, DatabaseStateTrieCursorFactory, DatabaseStateTrieStorageCursor,
     DatabaseStorageProof, DatabaseStorageRoot, DatabaseStorageTrieCursor,
     DatabaseTrieCursorFactory, LegacyKeyAdapter, PackedAccountsTrie, PackedKeyAdapter,
     PackedStoragesTrie,
@@ -307,7 +309,12 @@ where
         if overlay.skipped_for_reused_sparse_trie() {
             return Err(ProviderError::UnsupportedProvider)
         }
-        let TrieInputSorted { nodes: input_nodes, state: input_state, mut prefix_sets } = input;
+        let TrieInputSorted {
+            nodes: input_nodes,
+            state: input_state,
+            mut prefix_sets,
+            state_trie: input_state_trie,
+        } = input;
         let overlay_input = overlay.input();
         let mut nodes = Arc::clone(&overlay_input.nodes);
         let mut state = Arc::clone(&overlay_input.state);
@@ -320,7 +327,12 @@ where
         }
 
         prefix_sets.extend_ref(&overlay_input.prefix_sets);
-        Ok(TrieInputSorted::new(nodes, state, prefix_sets))
+        let mut input = TrieInputSorted::new(nodes, state, prefix_sets);
+        input.state_trie = Arc::new(StateTrieUpdatesSorted::merge_slice(&[
+            input_state_trie.as_ref(),
+            overlay_input.state_trie.as_ref(),
+        ]));
+        Ok(input)
     }
 
     fn execution_overlay(
@@ -410,6 +422,13 @@ where
         + BlockNumReader,
 {
     fn basic_account(&self, address: &Address) -> ProviderResult<Option<Account>> {
+        if cfg!(feature = "state-trie-db") {
+            let path = Nibbles::unpack(alloy_primitives::keccak256(address));
+            return Ok(self.state_trie_account_cursor()?.get(path)?.and_then(|n| match n {
+                StateTrieNode::Leaf { value, .. } => Some(value.into()),
+                _ => None,
+            }));
+        }
         let (overlay, historical_fallback) = self.execution_overlay()?;
         if let Some(account) = overlay.accounts().get(address) {
             return Ok(account.as_ref().map(Account::from))
@@ -664,7 +683,7 @@ where
         slots: &[B256],
     ) -> ProviderResult<AccountProof> {
         reth_trie_db::with_adapter!(self.provider(), |A| {
-            let TrieInputSorted { nodes, state, prefix_sets } =
+            let TrieInputSorted { nodes, state, prefix_sets, .. } =
                 self.build_overlay(TrieInputSorted::from_unsorted(input), false)?;
             let input = TrieInput::new(
                 Arc::unwrap_or_clone(nodes).into(),
@@ -682,7 +701,7 @@ where
         targets: MultiProofTargets,
     ) -> ProviderResult<MultiProof> {
         reth_trie_db::with_adapter!(self.provider(), |A| {
-            let TrieInputSorted { nodes, state, prefix_sets } =
+            let TrieInputSorted { nodes, state, prefix_sets, .. } =
                 self.build_overlay(TrieInputSorted::from_unsorted(input), false)?;
             let input = TrieInput::new(
                 Arc::unwrap_or_clone(nodes).into(),
@@ -700,7 +719,7 @@ where
         targets: MultiProofTargetsV2,
     ) -> ProviderResult<DecodedMultiProofV2> {
         reth_trie_db::with_adapter!(self.provider(), |A| {
-            let TrieInputSorted { nodes, state, prefix_sets } =
+            let TrieInputSorted { nodes, state, prefix_sets, .. } =
                 self.build_overlay(TrieInputSorted::from_unsorted(input), false)?;
             let input = TrieInput::new(
                 Arc::unwrap_or_clone(nodes).into(),
@@ -719,7 +738,7 @@ where
         mode: ExecutionWitnessMode,
     ) -> ProviderResult<Vec<alloy_primitives::Bytes>> {
         reth_trie_db::with_adapter!(self.provider(), |A| {
-            let TrieInputSorted { nodes, state, prefix_sets } =
+            let TrieInputSorted { nodes, state, prefix_sets, .. } =
                 self.build_overlay(TrieInputSorted::from_unsorted(input), false)?;
             let witness = TrieWitness::new(
                 InMemoryTrieCursorFactory::new(
@@ -800,6 +819,16 @@ where
         address: Address,
         storage_key: alloy_primitives::StorageKey,
     ) -> ProviderResult<Option<alloy_primitives::StorageValue>> {
+        if cfg!(feature = "state-trie-db") {
+            let path = Nibbles::unpack(alloy_primitives::keccak256(storage_key));
+            return Ok(self
+                .state_trie_storage_cursor(alloy_primitives::keccak256(address))?
+                .get(path)?
+                .and_then(|n| match n {
+                    StateTrieNode::Leaf { value, .. } => Some(value),
+                    _ => None,
+                }));
+        }
         let (overlay, historical_fallback) = self.execution_overlay()?;
         if let Some(value) = overlay.storage_value(address, U256::from_be_bytes(storage_key.0)) {
             return Ok(Some(value));
@@ -1024,6 +1053,52 @@ fn into_database_error(error: ProviderError) -> DatabaseError {
     }
 }
 
+impl<Provider, N: NodePrimitives> StateTrieCursorFactory for OverlayStateProvider<Provider, N>
+where
+    Provider: Deref,
+    Provider::Target: DBProvider
+        + StageCheckpointReader
+        + PruneCheckpointReader
+        + ChangeSetReader
+        + StorageChangeSetReader
+        + BlockNumReader
+        + StorageSettingsCache,
+{
+    type AccountCursor<'a>
+        = InMemoryStateTrieCursor<
+        'a,
+        DatabaseStateTrieAccountCursor<
+            <<Provider::Target as DbTxProvider>::Tx as DbTx>::Cursor<tables::StateTrieAccounts>,
+        >,
+    >
+    where
+        Self: 'a;
+    type StorageCursor<'a>
+        = InMemoryStateTrieCursor<
+        'a,
+        DatabaseStateTrieStorageCursor<
+            <<Provider::Target as DbTxProvider>::Tx as DbTx>::DupCursor<tables::StateTrieStorages>,
+        >,
+    >
+    where
+        Self: 'a;
+    fn state_trie_account_cursor(&self) -> Result<Self::AccountCursor<'_>, DatabaseError> {
+        let overlay = self.state_trie_overlay(true).map_err(into_database_error)?;
+        let cursor =
+            DatabaseStateTrieCursorFactory(self.provider().tx()).state_trie_account_cursor()?;
+        Ok(InMemoryStateTrieCursor::new(cursor, &overlay.input().state_trie.account_nodes))
+    }
+    fn state_trie_storage_cursor(
+        &self,
+        address: B256,
+    ) -> Result<Self::StorageCursor<'_>, DatabaseError> {
+        let overlay = self.state_trie_overlay(true).map_err(into_database_error)?;
+        let cursor = DatabaseStateTrieCursorFactory(self.provider().tx())
+            .state_trie_storage_cursor(address)?;
+        Ok(InMemoryStateTrieCursor::new_storage(cursor, &overlay.input().state_trie, address))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1048,7 +1123,7 @@ mod tests {
     use reth_storage_api::StageCheckpointWriter;
     use reth_trie::{
         updates::TrieUpdatesSorted, BranchNodeCompact, ComputedTrieData, HashedPostState,
-        HashedStorage, Nibbles,
+        HashedStorage,
     };
     use revm::{bytecode::Bytecode as RevmBytecode, state::AccountInfo};
 
@@ -1120,6 +1195,90 @@ mod tests {
         overlay.input().nodes.account_nodes_ref().iter().map(|(path, _)| *path).collect()
     }
 
+    #[cfg(feature = "state-trie-db")]
+    #[test]
+    fn complete_state_reads_merge_cached_updates_and_deletions() {
+        use reth_trie::TrieAccount;
+        use reth_trie_db::write_state_trie_updates;
+
+        for warm_parent in [false, true] {
+            let (factory, mut blocks) = setup_frontiers(0, 0);
+            let address = Address::with_last_byte(1);
+            let removed = Address::with_last_byte(2);
+            let hashed_address = alloy_primitives::keccak256(address);
+            let path = Nibbles::unpack(hashed_address);
+            let removed_path = Nibbles::unpack(alloy_primitives::keccak256(removed));
+            let slot = B256::with_last_byte(1);
+            let inherited_slot = B256::with_last_byte(2);
+            let slot_path = Nibbles::unpack(alloy_primitives::keccak256(slot));
+            let inherited_path = Nibbles::unpack(alloy_primitives::keccak256(inherited_slot));
+            let account = |balance| StateTrieNode::Leaf {
+                short_key_len: 63,
+                value: TrieAccount { balance: U256::from(balance), ..Default::default() },
+            };
+            let storage =
+                |value| StateTrieNode::Leaf { short_key_len: 63, value: U256::from(value) };
+            let updates = |mut accounts: Vec<_>, mut slots: Vec<_>| {
+                accounts.sort_unstable_by_key(|(p, _)| *p);
+                slots.sort_unstable_by_key(|(p, _)| *p);
+                StateTrieUpdatesSorted {
+                    account_nodes: accounts,
+                    storage_tries: std::iter::once((hashed_address, slots)).collect(),
+                }
+            };
+            let rw = factory.provider_rw().unwrap();
+            write_state_trie_updates(
+                rw.tx_ref(),
+                &updates(
+                    vec![(path, Some(account(10))), (removed_path, Some(account(10)))],
+                    vec![(slot_path, Some(storage(10)))],
+                ),
+            )
+            .unwrap();
+            rw.commit().unwrap();
+            blocks[1].state_trie_updates = Some(Arc::new(updates(
+                vec![(path, Some(account(20)))],
+                vec![(slot_path, Some(storage(20))), (inherited_path, Some(storage(22)))],
+            )));
+            blocks[2].state_trie_updates = Some(Arc::new(updates(
+                vec![(path, Some(account(30))), (removed_path, None)],
+                vec![(slot_path, None)],
+            )));
+            let manager = OverlayManager::default();
+            for block in &blocks[1..=2] {
+                manager.insert_block(block.clone());
+            }
+            if warm_parent {
+                let parent = OverlayStateProviderFactory::new(
+                    factory.clone(),
+                    manager.overlay_builder(blocks[1].recovered_block().hash()),
+                );
+                assert_eq!(
+                    parent
+                        .database_provider_ro()
+                        .unwrap()
+                        .basic_account(&address)
+                        .unwrap()
+                        .unwrap()
+                        .balance,
+                    U256::from(20)
+                );
+            }
+            let child = OverlayStateProviderFactory::new(
+                factory,
+                manager
+                    .overlay_builder(blocks[2].recovered_block().hash())
+                    .with_skip_overlay_for_reused_sparse_trie(blocks[0].recovered_block().hash()),
+            );
+            let provider = child.database_provider_ro().unwrap();
+            assert_eq!(provider.basic_account(&address).unwrap().unwrap().balance, U256::from(30));
+            assert_eq!(provider.basic_account(&removed).unwrap(), None);
+            assert_eq!(provider.storage(address, slot).unwrap(), None);
+            assert_eq!(provider.storage(address, inherited_slot).unwrap(), Some(U256::from(22)));
+            assert!(!provider.state_trie_overlay(false).unwrap().skipped_for_reused_sparse_trie());
+        }
+    }
+
     #[test]
     fn overlay_cache_is_keyed_by_both_durable_frontiers() {
         let (factory, blocks) = setup_frontiers(1, 3);
@@ -1174,9 +1333,15 @@ mod tests {
         assert!(state_provider_factory.state_trie_overlay_cache.is_empty());
 
         provider.basic_account(&Address::ZERO).unwrap();
-        assert!(provider.state_trie_overlay.get().is_none());
-        assert!(provider.execution_overlay.get().is_some());
-        assert!(state_provider_factory.state_trie_overlay_cache.is_empty());
+        assert_eq!(
+            provider.state_trie_overlay_with_trie_changesets.get().is_some(),
+            cfg!(feature = "state-trie-db")
+        );
+        assert_eq!(provider.execution_overlay.get().is_some(), !cfg!(feature = "state-trie-db"));
+        assert_eq!(
+            state_provider_factory.state_trie_overlay_cache.is_empty(),
+            !cfg!(feature = "state-trie-db")
+        );
 
         provider.account_trie_cursor().unwrap();
         assert_eq!(state_provider_factory.state_trie_overlay_cache.len(), 1);
@@ -1241,6 +1406,7 @@ mod tests {
         );
     }
 
+    #[cfg(not(feature = "state-trie-db"))]
     #[test]
     fn skipped_state_trie_overlay_is_not_cached_or_used_for_state_roots() {
         let (factory, blocks) = setup_frontiers(3, 3);
@@ -1288,11 +1454,16 @@ mod tests {
             false,
         );
 
-        assert_eq!(provider.basic_account(&address).unwrap(), Some(Account::from(account_info)));
-        assert!(provider.basic_account(&Address::with_last_byte(2)).unwrap().is_none());
+        if !cfg!(feature = "state-trie-db") {
+            assert_eq!(
+                provider.basic_account(&address).unwrap(),
+                Some(Account::from(account_info))
+            );
+            assert!(provider.basic_account(&Address::with_last_byte(2)).unwrap().is_none());
+            assert_eq!(provider.storage(address, storage_key).unwrap(), Some(storage_value));
+        }
         assert_eq!(provider.block_hash(1).unwrap(), Some(block_hash));
         assert_eq!(provider.canonical_hashes_range(1, 2).unwrap(), vec![block_hash]);
-        assert_eq!(provider.storage(address, storage_key).unwrap(), Some(storage_value));
         assert_eq!(
             provider.bytecode_by_hash(&code_hash).unwrap(),
             Some(reth_primitives_traits::Bytecode(bytecode))
@@ -1358,7 +1529,12 @@ mod tests {
         );
         let provider = state_provider_factory.database_provider_ro().unwrap();
 
-        assert_eq!(provider.basic_account(&address).unwrap(), Some(account));
-        assert_eq!(provider.storage(address, storage_key).unwrap(), Some(storage));
+        if cfg!(feature = "state-trie-db") {
+            assert!(provider.basic_account(&address).is_err());
+            assert!(provider.storage(address, storage_key).is_err());
+        } else {
+            assert_eq!(provider.basic_account(&address).unwrap(), Some(account));
+            assert_eq!(provider.storage(address, storage_key).unwrap(), Some(storage));
+        }
     }
 }

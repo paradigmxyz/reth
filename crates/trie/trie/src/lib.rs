@@ -20,6 +20,9 @@ pub mod forward_cursor;
 /// The cursor implementations for navigating account and storage tries.
 pub mod trie_cursor;
 
+/// Complete state trie cursors.
+pub mod state_trie_cursor;
+
 /// The cursor implementations for navigating hashed state.
 pub mod hashed_cursor;
 
@@ -34,6 +37,9 @@ pub mod proof;
 
 /// Merkle proof generation v2 (leaf-only implementation).
 pub mod proof_v2;
+
+/// Bottom-up proof generation over complete state tries.
+pub mod proof_v3;
 
 /// Trie witness generation.
 pub mod witness;

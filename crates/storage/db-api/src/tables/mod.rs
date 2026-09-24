@@ -35,7 +35,8 @@ use reth_prune_types::{PruneCheckpoint, PruneSegment};
 use reth_stages_types::StageCheckpoint;
 use reth_trie_common::{
     BranchNodeCompact, PackedStorageTrieEntry, PackedStoredNibbles, PackedStoredNibblesSubKey,
-    StorageTrieEntry, StoredNibbles, StoredNibblesSubKey,
+    StateTrieNode, StateTrieStorageEntry, StorageTrieEntry, StoredNibbles, StoredNibblesSubKey,
+    TrieAccount,
 };
 use serde::{Deserialize, Serialize};
 use std::fmt;
@@ -487,6 +488,19 @@ tables! {
         type Key = B256;
         type Value = StorageEntry;
         type SubKey = B256;
+    }
+
+    /// Complete account trie, including every leaf and branch.
+    table StateTrieAccounts {
+        type Key = PackedStoredNibbles;
+        type Value = StateTrieNode<TrieAccount>;
+    }
+
+    /// Complete storage tries, including every leaf and branch.
+    table StateTrieStorages {
+        type Key = B256;
+        type Value = StateTrieStorageEntry;
+        type SubKey = PackedStoredNibblesSubKey;
     }
 
     /// Stores the current state's Merkle Patricia Tree.

@@ -366,13 +366,10 @@ impl<N: NodePrimitives> OverlayManager<N> {
         parent_state: &BlockState<N>,
         anchor_hash: B256,
         cache_config: OverlayCacheConfig,
-    ) -> Result<(Arc<TrieUpdatesSorted>, Arc<HashedPostStateSorted>), StateTrieOverlayError> {
+    ) -> Result<Arc<TrieInputSorted>, StateTrieOverlayError> {
         let parent_hash = parent_state.hash();
         if parent_hash == anchor_hash {
-            return Ok((
-                Arc::new(TrieUpdatesSorted::default()),
-                Arc::new(HashedPostStateSorted::default()),
-            ))
+            return Ok(Arc::default())
         }
         debug!(
             target: "storage::overlay::manager",
@@ -390,7 +387,7 @@ impl<N: NodePrimitives> OverlayManager<N> {
                 |input, span| self.compute_state_trie_overlay(input, anchor_hash, span),
             )?
             .expect("required overlay lookup cannot skip an in-progress computation");
-        Ok((Arc::clone(&input.nodes), Arc::clone(&input.state)))
+        Ok(input)
     }
 
     /// Returns execution data for the in-memory chain from `anchor_hash` to `parent_hash`.
@@ -832,6 +829,13 @@ fn compute_overlay<N: NodePrimitives>(
                 &trie_data.sorted.hashed_state,
                 &trie_data.sorted.trie_updates,
             );
+            if let Some(updates) = &block.state_trie_updates {
+                let input = Arc::make_mut(&mut parent_input);
+                input.state_trie = Arc::new(reth_trie::StateTrieUpdatesSorted::merge_slice(&[
+                    updates.as_ref(),
+                    input.state_trie.as_ref(),
+                ]));
+            }
             Arc::try_unwrap(parent_input).expect("Arc::make_mut leaves the child overlay unique")
         }
         ComputeOverlayInput::MergeBlocks(blocks) => merge_blocks(blocks),
@@ -879,7 +883,11 @@ fn merge_blocks<N: NodePrimitives>(blocks: Vec<ExecutedBlock<N>>) -> TrieInputSo
         ),
     );
 
-    TrieInputSorted::new(nodes, state, Default::default())
+    let mut input = TrieInputSorted::new(nodes, state, Default::default());
+    input.state_trie = reth_trie::StateTrieUpdatesSorted::merge_batch(
+        blocks.iter().filter_map(|b| b.state_trie_updates.clone()),
+    );
+    input
 }
 
 fn extend_overlay(
@@ -1054,7 +1062,9 @@ mod tests {
         let parent_state = manager
             .block_state(parent_hash)
             .ok_or(StateTrieOverlayError { tip_hash: parent_hash, anchor_hash })?;
-        manager.overlay_for_parent(&parent_state, anchor_hash, OverlayCacheConfig::default())
+        manager
+            .overlay_for_parent(&parent_state, anchor_hash, OverlayCacheConfig::default())
+            .map(|input| (input.nodes.clone(), input.state.clone()))
     }
 
     #[test]
@@ -1232,13 +1242,12 @@ mod tests {
         overlay_for_parent(&manager, parent_hash, anchor_hash).unwrap();
         manager.execution_overlay_for_parent(parent_hash, anchor_hash).unwrap();
 
-        let (_, state) =
-            manager.overlay_for_parent(&child_state, anchor_hash, cache_config).unwrap();
+        let input = manager.overlay_for_parent(&child_state, anchor_hash, cache_config).unwrap();
         let execution = manager
             .execution_overlay_for_block_state(&child_state, anchor_hash, cache_config)
             .unwrap();
 
-        assert_eq!(state.accounts.len(), 3);
+        assert_eq!(input.state.accounts.len(), 3);
         assert_eq!(execution.accounts().len(), 3);
         assert!(manager.state_trie_overlays.entries.contains_key(&parent_key));
         assert!(!manager.state_trie_overlays.entries.contains_key(&child_key));
@@ -1442,7 +1451,7 @@ mod tests {
         thread::spawn(move || {
             let res = manager
                 .overlay_for_parent(&parent_state, key.anchor_hash, OverlayCacheConfig::default())
-                .map(|(_, state)| state);
+                .map(|input| input.state.clone());
             tx.send(res).unwrap();
         });
 

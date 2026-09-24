@@ -146,25 +146,32 @@ pub struct TrieInputSorted {
     pub nodes: Arc<TrieUpdatesSorted>,
     /// Sorted in-memory overlay hashed state.
     pub state: Arc<HashedPostStateSorted>,
+    /// Complete state trie overlay, including leaf deletions.
+    pub state_trie: Arc<crate::StateTrieUpdatesSorted>,
     /// Prefix sets for computation.
     pub prefix_sets: TriePrefixSetsMut,
 }
 
 impl TrieInputSorted {
     /// Create new sorted trie input.
-    pub const fn new(
+    pub fn new(
         nodes: Arc<TrieUpdatesSorted>,
         state: Arc<HashedPostStateSorted>,
         prefix_sets: TriePrefixSetsMut,
     ) -> Self {
-        Self { nodes, state, prefix_sets }
+        Self { nodes, state, prefix_sets, state_trie: Default::default() }
     }
 
     /// Create new sorted trie input from sorted in-memory state. The prefix sets will be
     /// constructed and set automatically.
     pub fn from_state(state: HashedPostStateSorted) -> Self {
         let prefix_sets = state.construct_prefix_sets();
-        Self { nodes: Default::default(), state: Arc::new(state), prefix_sets }
+        Self {
+            nodes: Default::default(),
+            state: Arc::new(state),
+            prefix_sets,
+            state_trie: Default::default(),
+        }
     }
 
     /// Create from unsorted [`TrieInput`] by sorting.
@@ -173,6 +180,7 @@ impl TrieInputSorted {
             nodes: Arc::new(input.nodes.into_sorted()),
             state: Arc::new(input.state.into_sorted()),
             prefix_sets: input.prefix_sets,
+            state_trie: Default::default(),
         }
     }
 }

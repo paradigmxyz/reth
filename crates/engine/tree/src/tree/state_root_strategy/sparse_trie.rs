@@ -518,6 +518,8 @@ where
         self.storage_cache_misses = 0;
 
         Ok(StateRootComputeOutcome {
+            state_trie_updates: cfg!(feature = "state-trie-db")
+                .then(|| Arc::new(self.trie.take_state_trie_updates())),
             state_root,
             trie_updates: Arc::new(trie_updates),
             hashed_state: finalized_hashed_state
@@ -615,7 +617,10 @@ where
             }
             SparseTrieTaskMessage::FinishedStateUpdates => {
                 let hashed_state = Arc::new(core::mem::take(&mut self.final_hashed_state));
+                #[cfg(not(feature = "state-trie-db"))]
                 let _ = self.final_hashed_state_tx.take().unwrap().send(Arc::clone(&hashed_state));
+                #[cfg(feature = "state-trie-db")]
+                self.final_hashed_state_tx.take();
                 self.finished_state_updates = true;
                 Some(hashed_state)
             }
@@ -692,6 +697,7 @@ where
             self.pending_account_updates.insert(address, Some(account));
         }
 
+        #[cfg(not(feature = "state-trie-db"))]
         self.final_hashed_state.extend(hashed_state_update);
     }
 

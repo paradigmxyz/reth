@@ -51,4 +51,5 @@ reth-trie = { workspace = true, features = ["test-utils"] }
 alloy-consensus.workspace = true
 
 [features]
+state-trie-db = []
 rayon = ["dep:rayon", "dep:reth-tasks"]

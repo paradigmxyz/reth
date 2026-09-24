@@ -163,8 +163,10 @@ use reth_revm::db::{states::bundle_state::BundleRetention, BundleAccount, State}
 use reth_storage_overlay::{OverlayManager, OverlayStateProviderFactory};
 use reth_trie::{
     hashed_cursor::HashedCursorFactory, trie_cursor::TrieCursorFactory, updates::TrieUpdates,
-    HashedPostState, KeccakKeyHasher, LazyTrieData,
+    LazyTrieData,
 };
+#[cfg(not(feature = "state-trie-db"))]
+use reth_trie::{HashedPostState, KeccakKeyHasher};
 use revm::state::bal::Bal as RevmBal;
 use std::{
     sync::{
@@ -330,6 +332,7 @@ where
     OverlayStateProviderFactory<P, N>: DatabaseProviderROFactory<
             Provider: TrieCursorFactory
                           + HashedCursorFactory
+                          + reth_trie::state_trie_cursor::StateTrieCursorFactory
                           + HashedPostStateProvider
                           + StateRootProvider
                           + StateProvider
@@ -760,8 +763,13 @@ where
         // Spawn hashed post state computation in background so it runs concurrently with
         // block conversion and receipt root computation. This is a pure CPU-bound task
         // (keccak256 hashing of all changed addresses and storage slots).
+        #[cfg(not(feature = "state-trie-db"))]
         let hashed_state_output = output.clone();
+        #[cfg(not(feature = "state-trie-db"))]
         let mut hashed_state_rx = state_root_job.take_hashed_state_rx();
+        #[cfg(feature = "state-trie-db")]
+        let mut hashed_state: LazyHashedPostState = LazyHandle::ready(Arc::default());
+        #[cfg(not(feature = "state-trie-db"))]
         let mut hashed_state: LazyHashedPostState =
             self.runtime.spawn_blocking_named("hash-post-state", move || {
                 let _span = debug_span!(
@@ -925,9 +933,21 @@ where
         let bal = revm_bal.zip(decoded_bal).map(|(revm_bal, decoded_bal)| {
             Arc::new(DecodedRevmBal::with_raw_bal(revm_bal, decoded_bal.as_raw_bal().clone()))
         });
+        #[cfg(not(feature = "state-trie-db"))]
         let executed_block = self
             .spawn_deferred_trie_task(Arc::new(block), output, hashed_state, trie_output)
             .with_bal(bal);
+        #[cfg(feature = "state-trie-db")]
+        let executed_block = {
+            let mut executed =
+                ExecutedBlock::new(Arc::new(block), output, Default::default()).with_bal(bal);
+            executed.state_trie_updates = Some(
+                root_outcome
+                    .state_trie_updates
+                    .expect("state trie database requires sparse trie updates"),
+            );
+            executed
+        };
         Ok(ValidationOutput::new(executed_block, timing_stats))
     }
 
@@ -1830,6 +1850,7 @@ where
     OverlayStateProviderFactory<P, N>: DatabaseProviderROFactory<
             Provider: TrieCursorFactory
                           + HashedCursorFactory
+                          + reth_trie::state_trie_cursor::StateTrieCursorFactory
                           + HashedPostStateProvider
                           + StateRootProvider
                           + StateProvider

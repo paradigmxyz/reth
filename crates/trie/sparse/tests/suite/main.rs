@@ -32,6 +32,8 @@ mod prune;
 mod reveal_nodes;
 mod root;
 mod set_root;
+mod state_trie_updates;
+mod take_state_trie_updates;
 mod take_updates;
 mod update_leaves;
 mod wipe_clear;
@@ -198,6 +200,7 @@ use prune::*;
 use reveal_nodes::*;
 use root::*;
 use set_root::*;
+use take_state_trie_updates::*;
 use take_updates::*;
 use update_leaves::*;
 use wipe_clear::*;
@@ -206,7 +209,10 @@ use wipe_clear::*;
 // Test registration
 // ---------------------------------------------------------------------------
 
+use state_trie_updates::*;
+
 sparse_trie_tests! {
+    test_complete_updates_match_rebuild,
     // set_root
     test_set_root_with_branch_node,
     test_set_root_with_leaf_node,
@@ -273,6 +279,12 @@ sparse_trie_tests! {
     test_take_updates_no_duplicate_updated_and_removed_nodes,
     test_take_updates_cross_cancellation_across_root_calls,
 
+
+    test_take_state_trie_updates_returns_empty_when_not_tracking,
+    test_take_state_trie_updates_resets_after_take,
+    test_take_state_trie_updates_contains_updated_and_removed_nodes,
+    test_take_state_trie_updates_cross_cancellation_across_root_calls,
+    test_take_state_trie_updates_no_duplicate_updated_and_removed_nodes,
 
     // prune
     test_prune_retains_recent_leaves,

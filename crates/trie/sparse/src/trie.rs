@@ -46,6 +46,15 @@ impl<T: Default> Default for RevealableSparseTrie<T> {
 }
 
 impl<T: SparseTrieTrait + Default> RevealableSparseTrie<T> {
+    /// Configure complete node update retention, including before the root is revealed.
+    pub fn set_state_trie_updates(&mut self, retain: bool) {
+        let trie = match self {
+            Self::Blind(trie) => trie.get_or_insert_with(Box::default),
+            Self::Revealed(trie) => trie,
+        };
+        trie.set_state_trie_updates(retain);
+    }
+
     /// Creates a new revealed but empty sparse trie.
     pub fn revealed_empty() -> Self {
         Self::Revealed(Box::default())
