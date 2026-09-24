@@ -132,7 +132,8 @@ impl<T: Decodable> SnappyRlpCodec<T> {
 impl<T: Encodable> SnappyRlpCodec<T> {
     /// Encode data into compressed format
     pub fn encode(&self, data: &T) -> Result<Vec<u8>, E2sError> {
-        let rlp_data = alloy_rlp::encode(data);
+        let mut rlp_data = Vec::new();
+        data.encode(&mut rlp_data);
 
         let mut compressed = Vec::new();
         {
