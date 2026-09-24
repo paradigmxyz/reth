@@ -206,7 +206,9 @@ pub trait ConfigureEvm: Clone + Debug + Send + Sync + Unpin {
     type BlockExecutorFactory: crate::execute::BlockExecutorFactory<
         Transaction = TxTy<Self::Primitives>,
         Receipt = ReceiptTy<Self::Primitives>,
-        EvmTypes: evm2::EvmTypes<Tx: From<TxTy<Self::Primitives>> + Transaction + Clone>,
+        EvmTypes: evm2::EvmTypes<
+            Tx: crate::execute::FromTxWithEncoded<TxTy<Self::Primitives>> + Transaction + Clone,
+        >,
     >;
 
     /// Configured block assembler.

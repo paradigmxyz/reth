@@ -600,7 +600,7 @@ pub trait BlockBuilder: Sized {
     type Executor: BlockExecutor<
         Transaction = TxTy<Self::Primitives>,
         Receipt = ReceiptTy<Self::Primitives>,
-        Evm: Evm<Transaction: From<TxTy<Self::Primitives>>>,
+        Evm: Evm<Transaction: FromTxWithEncoded<TxTy<Self::Primitives>>>,
     >;
     /// EVM environment used for block execution.
     type EvmEnv: EvmEnv;
@@ -760,7 +760,7 @@ where
     Assembler: BlockAssembler<F, Block = N::Block>,
     N: NodePrimitives,
     TxTy<N>: Clone,
-    <<Executor as BlockExecutor>::Evm as Evm>::Transaction: From<TxTy<N>>,
+    <<Executor as BlockExecutor>::Evm as Evm>::Transaction: FromTxWithEncoded<TxTy<N>>,
 {
     type Primitives = N;
     type Executor = Executor;
@@ -1254,12 +1254,22 @@ pub trait FromRecoveredTx<T> {
     fn from_recovered_tx(tx: Recovered<T>) -> Self;
 }
 
-impl<T, TxEnv> FromRecoveredTx<T> for Recovered<TxEnv>
+impl<T> FromRecoveredTx<T> for evm2::ethereum::TxEnvelope
 where
-    TxEnv: From<T>,
+    Self: From<T>,
 {
     fn from_recovered_tx(tx: Recovered<T>) -> Self {
-        tx.convert()
+        tx.into_inner().into()
+    }
+}
+
+impl<T, TxEnv> FromRecoveredTx<T> for Recovered<TxEnv>
+where
+    TxEnv: FromRecoveredTx<T>,
+{
+    fn from_recovered_tx(tx: Recovered<T>) -> Self {
+        let signer = tx.signer();
+        Self::new_unchecked(TxEnv::from_recovered_tx(tx), signer)
     }
 }
 
@@ -1276,7 +1286,17 @@ pub trait FromTxWithEncoded<T>: FromRecoveredTx<T> {
     }
 }
 
-impl<T, TxEnv> FromTxWithEncoded<T> for Recovered<TxEnv> where TxEnv: From<T> {}
+impl<T> FromTxWithEncoded<T> for evm2::ethereum::TxEnvelope where Self: From<T> {}
+
+impl<T, TxEnv> FromTxWithEncoded<T> for Recovered<TxEnv>
+where
+    TxEnv: FromTxWithEncoded<T>,
+{
+    fn from_tx_with_encoded(tx: WithEncoded<Recovered<T>>) -> Self {
+        let signer = tx.1.signer();
+        Self::new_unchecked(TxEnv::from_tx_with_encoded(tx), signer)
+    }
+}
 
 /// Converts transaction wrappers into the configured transaction environment.
 pub trait IntoTxEnv<TxEnv> {
