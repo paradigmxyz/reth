@@ -775,6 +775,32 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
         Ok(())
     }
 
+    /// Anchors an empty non-header segment so the next append starts at `block + 1`.
+    /// Preserves the file's expected range; refuses segments containing blocks or rows.
+    pub fn initialize_pruned_anchor(&mut self, block: BlockNumber) -> ProviderResult<()> {
+        let header = self.user_header();
+        if header.segment().is_headers() ||
+            header.block_range().is_some() ||
+            self.writer.rows() != 0
+        {
+            return Err(ProviderError::other(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "pruned anchor requires a fresh non-header segment",
+            )))
+        }
+        if !header.expected_block_range().contains(block) {
+            return Err(ProviderError::other(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "pruned anchor is outside the static file range",
+            )))
+        }
+        self.writer.user_header_mut().set_block_range(block, block);
+        if self.user_header().segment().is_change_based() {
+            self.current_changeset_offset = Some(ChangesetOffset::new(0, 0));
+        }
+        Ok(())
+    }
+
     /// Allows to increment the [`SegmentHeader`] end block. It will commit the current static file,
     /// and create the next one if we are past the end range.
     pub fn increment_block(&mut self, expected_block_number: BlockNumber) -> ProviderResult<()> {

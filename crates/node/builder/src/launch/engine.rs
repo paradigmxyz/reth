@@ -5,6 +5,7 @@ use crate::{
     hooks::NodeHooks,
     rpc::{EngineShutdown, EngineValidatorAddOn, EngineValidatorBuilder, RethRpcAddOns, RpcHandle},
     setup::build_networked_pipeline,
+    sync::NodeBackfillSync,
     AddOns, AddOnsContext, FullNode, LaunchContext, LaunchNode, Node, NodeAdapter,
     NodeBuilderWithComponents, NodeComponents, NodeComponentsBuilder, NodeHandle, NodeTypesAdapter,
     RethFullAdapter,
@@ -244,6 +245,9 @@ impl EngineNodeLauncher {
             EngineApiKind::Ethereum
         };
 
+        let snap_v2 = node_config.network.snap_v2;
+        let (backfill_client, backfill_factory) =
+            (network_client.clone(), ctx.provider_factory().clone());
         let mut orchestrator = EngineOrchestratorBuilder {
             engine_kind,
             consensus,
@@ -262,7 +266,9 @@ impl EngineNodeLauncher {
             evm_config: ctx.components().evm_config().clone(),
             runtime: ctx.task_executor().clone(),
         }
-        .build();
+        .build_with_backfill(|pipeline, runtime| {
+            NodeBackfillSync::new(snap_v2, pipeline, backfill_client, backfill_factory, runtime)
+        });
 
         info!(target: "reth::cli", "Consensus engine initialized");
 
