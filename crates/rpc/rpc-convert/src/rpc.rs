@@ -2,34 +2,14 @@ use std::fmt::Debug;
 
 use alloy_json_rpc::RpcObject;
 use alloy_network::{primitives::HeaderResponse, Network, ReceiptResponse, TransactionResponse};
-use alloy_primitives::U256;
 use alloy_rpc_types_eth::TransactionRequest;
-
-/// A header response carrying the non-consensus `size` field.
-pub trait SizedHeader {
-    /// Sets the `size` field for a full block response.
-    fn set_size(&mut self, size: usize);
-
-    /// Clears the `size` field so it is omitted from a header response.
-    fn clear_size(&mut self);
-}
-
-impl<H> SizedHeader for alloy_rpc_types_eth::Header<H> {
-    fn set_size(&mut self, size: usize) {
-        self.size = Some(U256::from(size));
-    }
-
-    fn clear_size(&mut self) {
-        self.size = None;
-    }
-}
 
 /// RPC types used by the `eth_` RPC API.
 ///
 /// This is a subset of [`Network`] trait with only RPC response types kept.
 pub trait RpcTypes: Send + Sync + Clone + Unpin + Debug + 'static {
     /// Header response type.
-    type Header: RpcObject + HeaderResponse + SizedHeader;
+    type Header: RpcObject + HeaderResponse;
     /// Receipt response type.
     type Receipt: RpcObject + ReceiptResponse;
     /// Log response type.
@@ -43,7 +23,6 @@ pub trait RpcTypes: Send + Sync + Clone + Unpin + Debug + 'static {
 impl<T> RpcTypes for T
 where
     T: Network<TransactionRequest: AsRef<TransactionRequest> + AsMut<TransactionRequest>> + Unpin,
-    T::HeaderResponse: SizedHeader,
 {
     type Header = T::HeaderResponse;
     type Receipt = T::ReceiptResponse;

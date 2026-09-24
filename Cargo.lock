@@ -8118,8 +8118,7 @@ dependencies = [
 [[package]]
 name = "reth-codecs"
 version = "0.8.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ad11731b56bf0337977b86311638eb0dd300135a1b1c970d5c6a843040879ebf"
+source = "git+https://github.com/paradigmxyz/reth-core?rev=2f4ec880b4e38714f6cd0872a8097a803726b12e#2f4ec880b4e38714f6cd0872a8097a803726b12e"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -8139,8 +8138,7 @@ dependencies = [
 [[package]]
 name = "reth-codecs-derive"
 version = "0.8.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "203e6fef7c9396b92710c47889229dcf9447ec0dfaa4a5b0283e34b2716c8564"
+source = "git+https://github.com/paradigmxyz/reth-core?rev=2f4ec880b4e38714f6cd0872a8097a803726b12e#2f4ec880b4e38714f6cd0872a8097a803726b12e"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -9868,8 +9866,7 @@ dependencies = [
 [[package]]
 name = "reth-primitives-traits"
 version = "0.8.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d34b35de6dfb09d4fecbc62993e02b6bc6e3827c004ec9b127ad46daa7cb5214"
+source = "git+https://github.com/paradigmxyz/reth-core?rev=2f4ec880b4e38714f6cd0872a8097a803726b12e#2f4ec880b4e38714f6cd0872a8097a803726b12e"
 dependencies = [
  "alloy-consensus",
  "alloy-eip7928",
@@ -10399,8 +10396,7 @@ dependencies = [
 [[package]]
 name = "reth-rpc-traits"
 version = "0.8.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0504072d8dc0fb41240dc567aae8e87ed4bbba9aa71a67dbbfb24c8514ce0310"
+source = "git+https://github.com/paradigmxyz/reth-core?rev=2f4ec880b4e38714f6cd0872a8097a803726b12e#2f4ec880b4e38714f6cd0872a8097a803726b12e"
 dependencies = [
  "alloy-consensus",
  "alloy-network",
@@ -10988,8 +10984,7 @@ dependencies = [
 [[package]]
 name = "reth-zstd-compressors"
 version = "0.8.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b94534b883a0cbbd2e6bfa081be414ec2f22de6cebb19219a623eccff07682f8"
+source = "git+https://github.com/paradigmxyz/reth-core?rev=2f4ec880b4e38714f6cd0872a8097a803726b12e#2f4ec880b4e38714f6cd0872a8097a803726b12e"
 dependencies = [
  "zstd",
 ]
