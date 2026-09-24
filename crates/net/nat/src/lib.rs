@@ -306,7 +306,56 @@ async fn resolve_external_ip_url(client: &reqwest::Client, url: &str) -> Option<
     let response = client.get(url).send().await.ok()?;
     let response = response.error_for_status().ok()?;
     let text = response.text().await.ok()?;
-    text.trim().parse().ok()
+    let ip = text.trim().parse().ok()?;
+    if !is_public_ip(ip) {
+        debug!(target: "net::nat", %ip, %url, "Ignoring non-public IP from external IP API");
+        return None;
+    }
+    Some(ip)
+}
+
+/// Filters HTTP provider results only; configured and interface addresses may be private.
+///
+/// Uses the IANA special-purpose registries until `IpAddr::is_global` is stable.
+/// <https://www.iana.org/assignments/iana-ipv4-special-registry/>
+/// <https://www.iana.org/assignments/iana-ipv6-special-registry/>
+fn is_public_ip(ip: IpAddr) -> bool {
+    match ip {
+        IpAddr::V4(ip) => {
+            let [a, b, c, d] = ip.octets();
+            !(a == 0 ||
+                a >= 224 ||
+                ip.is_private() ||
+                ip.is_loopback() ||
+                ip.is_link_local() ||
+                ip.is_documentation() ||
+                (a == 100 && (64..=127).contains(&b)) ||
+                (a == 198 && (18..=19).contains(&b)) ||
+                (a == 192 && b == 0 && c == 0 && d != 9 && d != 10) ||
+                (a == 192 && b == 88 && c == 99))
+        }
+        IpAddr::V6(ip) => {
+            let segments = ip.segments();
+            match segments {
+                // Globally reachable exceptions within the IETF protocol assignments.
+                [0x2001, 1, 0, 0, 0, 0, 0, 1..=3] |
+                [0x2001, 3, ..] |
+                [0x2001, 4, 0x112, ..] |
+                [0x2001, 0x20..=0x3f, ..] => true,
+                // The well-known NAT64 prefix inherits the embedded IPv4 address's scope.
+                [0x64, 0xff9b, 0, 0, 0, 0, a, b] => is_public_ip(
+                    std::net::Ipv4Addr::from((u32::from(a) << 16) | u32::from(b)).into(),
+                ),
+                [0x2001, 0..=0x1ff, ..] |
+                [0x2001, 0xdb8, ..] |
+                [0x2002, ..] |
+                [0x3fff, 0..=0xfff, ..] => false,
+                // Public unicast allocations are within 2000::/3. This excludes local,
+                // mapped, multicast, discard-only and reserved address space.
+                [first, ..] => first & 0xe000 == 0x2000,
+            }
+        }
+    }
 }
 
 #[cfg(test)]
@@ -314,6 +363,10 @@ mod tests {
     use super::*;
     use futures_util::FutureExt;
     use std::net::{Ipv4Addr, Ipv6Addr};
+    use tokio::{
+        io::{AsyncReadExt, AsyncWriteExt},
+        net::TcpListener,
+    };
 
     #[tokio::test]
     #[ignore]
@@ -417,5 +470,107 @@ mod tests {
         let s = "extip:0.0.0.0";
         assert_eq!(ip, s.parse().unwrap());
         assert_eq!(ip.to_string(), s);
+    }
+
+    #[test]
+    fn public_ip_scope() {
+        for addr in [
+            "0.0.0.0",
+            "0.1.2.3",
+            "10.0.0.1",
+            "100.64.0.1",
+            "100.127.255.255",
+            "127.0.0.1",
+            "169.254.1.1",
+            "172.16.0.1",
+            "192.168.1.1",
+            "192.0.0.8",
+            "192.0.2.1",
+            "192.88.99.2",
+            "198.18.0.1",
+            "198.19.255.255",
+            "198.51.100.1",
+            "203.0.113.1",
+            "224.0.0.1",
+            "240.0.0.1",
+            "255.255.255.255",
+            "::",
+            "::1",
+            "::ffff:8.8.8.8",
+            "64:ff9b::a00:1",
+            "64:ff9b:1::1",
+            "100::1",
+            "100:0:0:1::1",
+            "2001::1",
+            "2001:2::1",
+            "2001:db8::1",
+            "2002::1",
+            "3fff::1",
+            "3fff:fff:ffff::1",
+            "5f00::1",
+            "fc00::1",
+            "fd00::1",
+            "fe80::1",
+            "fec0::1",
+            "ff0e::1",
+        ] {
+            assert!(!is_public_ip(addr.parse().unwrap()), "{addr}");
+        }
+        for addr in [
+            "1.1.1.1",
+            "8.8.8.8",
+            "100.63.255.255",
+            "100.128.0.1",
+            "192.0.0.9",
+            "192.0.0.10",
+            "198.17.255.255",
+            "198.20.0.1",
+            "64:ff9b::808:808",
+            "2001:1::1",
+            "2001:1::2",
+            "2001:1::3",
+            "2001:3::1",
+            "2001:4:112::1",
+            "2001:20::1",
+            "2001:30::1",
+            "2001:4860:4860::8888",
+            "2606:4700:4700::1111",
+            "3fff:1000::1",
+        ] {
+            assert!(is_public_ip(addr.parse().unwrap()), "{addr}");
+        }
+    }
+
+    #[tokio::test]
+    async fn provider_rejects_non_public_responses() {
+        let client = reqwest::Client::builder().no_proxy().build().unwrap();
+        for (body, expected) in [
+            ("127.0.0.1", None),
+            ("fd00::1", None),
+            ("not an IP", None),
+            (" 8.8.8.8\n", Some("8.8.8.8".parse().unwrap())),
+        ] {
+            let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let url = format!("http://{}", listener.local_addr().unwrap());
+            let server = tokio::spawn(async move {
+                let (mut socket, _) = listener.accept().await.unwrap();
+                let mut request = [0; 1024];
+                socket.read(&mut request).await.unwrap();
+                let response = format!(
+                    "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                    body.len()
+                );
+                socket.write_all(response.as_bytes()).await.unwrap();
+            });
+            assert_eq!(resolve_external_ip_url(&client, &url).await, expected);
+            server.await.unwrap();
+        }
+    }
+
+    #[tokio::test]
+    async fn configured_private_addresses_remain_valid() {
+        let ip = "10.0.0.1".parse().unwrap();
+        assert_eq!(NatResolver::ExternalIp(ip).external_addr().await, Some(ip));
+        assert_eq!(NatResolver::ExternalAddr("10.0.0.1".into()).external_addr().await, Some(ip));
     }
 }
