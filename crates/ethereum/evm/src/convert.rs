@@ -1,11 +1,8 @@
 //! Conversion helpers for Ethereum execution.
 
-use alloy_consensus::{
-    transaction::{Recovered, TxHashRef},
-    BlockHeader,
-};
+use alloy_consensus::{transaction::Recovered, BlockHeader};
 use alloy_eips::eip7840::BlobParams;
-use alloy_primitives::{Address, BlockNumber, BlockTimestamp, B256, U256};
+use alloy_primitives::{Address, BlockNumber, BlockTimestamp, U256};
 use alloy_rpc_types_engine::ExecutionData;
 use evm2::{
     env::{BlockEnv, BlockEnvExt},
@@ -14,7 +11,7 @@ use evm2::{
 };
 use reth_chainspec::EthereumHardforks;
 use reth_ethereum_primitives::TransactionSigned;
-use reth_evm::{ExecutableTxParts, FromRecoveredTx, FromTxWithEncoded, RecoveredTx};
+use reth_evm::{ExecutableTxParts, RecoveredTx};
 
 /// Map the latest active Ethereum hardfork at `timestamp` or `block_number` to a [`SpecId`].
 pub(crate) fn spec_id_by_timestamp_and_block_number<C>(
@@ -119,51 +116,19 @@ fn blob_basefee(excess_blob_gas: Option<u64>, blob_params: Option<BlobParams>) -
         .unwrap_or_default()
 }
 
-/// Cached transaction environment used by engine execution and prewarming.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct EthTxEnv {
-    envelope: RecoveredTxEnvelope,
-    tx_hash: B256,
-}
-
-impl EthTxEnv {
-    /// Returns the original transaction hash.
-    pub const fn tx_hash(&self) -> B256 {
-        self.tx_hash
-    }
-
-    /// Consumes the wrapper and returns the transaction envelope.
-    pub fn into_envelope(self) -> RecoveredTxEnvelope {
-        self.envelope
-    }
-}
-
-impl From<Recovered<TransactionSigned>> for EthTxEnv {
-    fn from(value: Recovered<TransactionSigned>) -> Self {
-        let tx_hash = *value.tx_hash();
-        Self { envelope: recovered_tx_envelope(value), tx_hash }
-    }
-}
-
-impl FromRecoveredTx<TransactionSigned> for EthTxEnv {
-    fn from_recovered_tx(tx: Recovered<TransactionSigned>) -> Self {
-        tx.into()
-    }
-}
-
-impl FromTxWithEncoded<TransactionSigned> for EthTxEnv {}
-
 /// Recovered Ethereum transaction paired with its cached transaction environment.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ExecutableRecoveredTx {
-    tx_env: EthTxEnv,
+    tx_env: RecoveredTxEnvelope,
     tx: Recovered<TransactionSigned>,
 }
 
 impl ExecutableRecoveredTx {
     /// Creates a transaction wrapper and precomputes the transaction environment.
     pub fn new(tx: Recovered<TransactionSigned>) -> Self {
-        let tx_env = tx.clone().into();
+        // Cache the hash before cloning so neither envelope hashes on the execution thread.
+        tx.inner().tx_hash();
+        let tx_env = tx.clone().convert();
         Self { tx_env, tx }
     }
 }
@@ -182,13 +147,8 @@ impl ExecutableTxParts<RecoveredTxEnvelope, TransactionSigned> for ExecutableRec
     type Recovered = Recovered<TransactionSigned>;
 
     fn into_parts(self) -> (RecoveredTxEnvelope, Self::Recovered) {
-        (self.tx_env.into_envelope(), self.tx)
+        (self.tx_env, self.tx)
     }
-}
-
-/// Converts an owned recovered Reth Ethereum transaction into a recovered envelope.
-pub(crate) fn recovered_tx_envelope(tx: Recovered<TransactionSigned>) -> RecoveredTxEnvelope {
-    tx.convert()
 }
 
 #[cfg(test)]

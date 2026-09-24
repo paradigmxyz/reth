@@ -329,7 +329,7 @@ pub use factory::{
 pub use factory::{EthBigBlockExecutorFactory, EthBlockExecutorFactory, EvmFactory};
 
 mod convert;
-pub use convert::{EthTxEnv, ExecutableRecoveredTx};
+pub use convert::ExecutableRecoveredTx;
 
 mod execution;
 pub use execution::EthExecutionError;
