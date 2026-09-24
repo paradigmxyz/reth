@@ -651,8 +651,11 @@ fn matching_v2_proof_nodes<'a>(
 fn encode_v2_proof_nodes<'a>(nodes: impl Iterator<Item = &'a ProofTrieNodeV2>) -> Vec<Bytes> {
     let mut proof = Vec::new();
     for proof_node in nodes {
-        if proof_node.path.is_empty() || proof_node.node.length() >= B256::len_bytes() {
-            proof.push(Bytes::from(alloy_rlp::encode(&proof_node.node)));
+        let encoded_len = proof_node.node.length();
+        if proof_node.path.is_empty() || encoded_len >= B256::len_bytes() {
+            let mut encoded = Vec::with_capacity(encoded_len);
+            proof_node.node.encode(&mut encoded);
+            proof.push(Bytes::from(encoded));
         }
 
         if let TrieNodeV2::Branch(branch) = &proof_node.node &&
