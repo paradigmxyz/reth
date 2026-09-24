@@ -11216,7 +11216,7 @@ dependencies = [
 [[package]]
 name = "revmc"
 version = "0.1.0"
-source = "git+https://github.com/paradigmxyz/revmc?branch=main#87ea260a9bd25759beab64753d2f36227891ca4a"
+source = "git+https://github.com/paradigmxyz/revmc?branch=mattsse%2Fjit-pause-observations#da81ae0f2c41215e6c226d4966e99684e14126fa"
 dependencies = [
  "revm-bytecode",
  "revm-context-interface",
@@ -11236,7 +11236,7 @@ dependencies = [
 [[package]]
 name = "revmc-backend"
 version = "0.1.0"
-source = "git+https://github.com/paradigmxyz/revmc?branch=main#87ea260a9bd25759beab64753d2f36227891ca4a"
+source = "git+https://github.com/paradigmxyz/revmc?branch=mattsse%2Fjit-pause-observations#da81ae0f2c41215e6c226d4966e99684e14126fa"
 dependencies = [
  "eyre",
  "ruint",
@@ -11245,12 +11245,12 @@ dependencies = [
 [[package]]
 name = "revmc-build"
 version = "0.1.0"
-source = "git+https://github.com/paradigmxyz/revmc?branch=main#87ea260a9bd25759beab64753d2f36227891ca4a"
+source = "git+https://github.com/paradigmxyz/revmc?branch=mattsse%2Fjit-pause-observations#da81ae0f2c41215e6c226d4966e99684e14126fa"
 
 [[package]]
 name = "revmc-builtins"
 version = "0.1.0"
-source = "git+https://github.com/paradigmxyz/revmc?branch=main#87ea260a9bd25759beab64753d2f36227891ca4a"
+source = "git+https://github.com/paradigmxyz/revmc?branch=mattsse%2Fjit-pause-observations#da81ae0f2c41215e6c226d4966e99684e14126fa"
 dependencies = [
  "paste",
  "revm-bytecode",
@@ -11265,7 +11265,7 @@ dependencies = [
 [[package]]
 name = "revmc-codegen"
 version = "0.1.0"
-source = "git+https://github.com/paradigmxyz/revmc?branch=main#87ea260a9bd25759beab64753d2f36227891ca4a"
+source = "git+https://github.com/paradigmxyz/revmc?branch=mattsse%2Fjit-pause-observations#da81ae0f2c41215e6c226d4966e99684e14126fa"
 dependencies = [
  "alloy-primitives",
  "bitflags 2.13.1",
@@ -11296,7 +11296,7 @@ dependencies = [
 [[package]]
 name = "revmc-context"
 version = "0.1.0"
-source = "git+https://github.com/paradigmxyz/revmc?branch=main#87ea260a9bd25759beab64753d2f36227891ca4a"
+source = "git+https://github.com/paradigmxyz/revmc?branch=mattsse%2Fjit-pause-observations#da81ae0f2c41215e6c226d4966e99684e14126fa"
 dependencies = [
  "revm-context",
  "revm-context-interface",
@@ -11311,7 +11311,7 @@ dependencies = [
 [[package]]
 name = "revmc-llvm"
 version = "0.1.0"
-source = "git+https://github.com/paradigmxyz/revmc?branch=main#87ea260a9bd25759beab64753d2f36227891ca4a"
+source = "git+https://github.com/paradigmxyz/revmc?branch=mattsse%2Fjit-pause-observations#da81ae0f2c41215e6c226d4966e99684e14126fa"
 dependencies = [
  "alloy-primitives",
  "cc",
@@ -11324,7 +11324,7 @@ dependencies = [
 [[package]]
 name = "revmc-runtime"
 version = "0.1.0"
-source = "git+https://github.com/paradigmxyz/revmc?branch=main#87ea260a9bd25759beab64753d2f36227891ca4a"
+source = "git+https://github.com/paradigmxyz/revmc?branch=mattsse%2Fjit-pause-observations#da81ae0f2c41215e6c226d4966e99684e14126fa"
 dependencies = [
  "alloy-evm",
  "alloy-primitives",
