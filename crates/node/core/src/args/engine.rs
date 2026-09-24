@@ -7,8 +7,9 @@ use clap::{
 use eyre::ensure;
 use reth_cli_util::{parse_duration_from_secs_or_ms, parsers::format_duration_as_secs_or_ms};
 use reth_engine_primitives::{
-    TreeConfig, DEFAULT_INVALID_HEADER_HIT_EVICTION_THRESHOLD, DEFAULT_MULTIPROOF_TASK_CHUNK_SIZE,
-    DEFAULT_NUM_STATE_MASKING_BLOCKS, MIN_PERSISTENCE_BACKPRESSURE_THRESHOLD,
+    TreeConfig, DEFAULT_BACKFILL_RUN_THRESHOLD, DEFAULT_INVALID_HEADER_HIT_EVICTION_THRESHOLD,
+    DEFAULT_MULTIPROOF_TASK_CHUNK_SIZE, DEFAULT_NUM_STATE_MASKING_BLOCKS,
+    MIN_PERSISTENCE_BACKPRESSURE_THRESHOLD,
 };
 use std::{sync::OnceLock, time::Duration};
 
@@ -29,6 +30,7 @@ pub struct DefaultEngineValues {
     persistence_backpressure_threshold: u64,
     num_state_masking_blocks: u64,
     memory_block_buffer_target: u64,
+    backfill_run_threshold: u64,
     invalid_header_hit_eviction_threshold: u8,
     state_cache_disabled: bool,
     prewarming_disabled: bool,
@@ -90,6 +92,12 @@ impl DefaultEngineValues {
     /// Set the default memory block buffer target
     pub const fn with_memory_block_buffer_target(mut self, v: u64) -> Self {
         self.memory_block_buffer_target = v;
+        self
+    }
+
+    /// Set the default backfill run threshold
+    pub const fn with_backfill_run_threshold(mut self, v: u64) -> Self {
+        self.backfill_run_threshold = v;
         self
     }
 
@@ -266,6 +274,7 @@ impl Default for DefaultEngineValues {
             persistence_backpressure_threshold: MIN_PERSISTENCE_BACKPRESSURE_THRESHOLD,
             num_state_masking_blocks: DEFAULT_NUM_STATE_MASKING_BLOCKS,
             memory_block_buffer_target: DEFAULT_MEMORY_BLOCK_BUFFER_TARGET,
+            backfill_run_threshold: DEFAULT_BACKFILL_RUN_THRESHOLD,
             invalid_header_hit_eviction_threshold: DEFAULT_INVALID_HEADER_HIT_EVICTION_THRESHOLD,
             state_cache_disabled: false,
             prewarming_disabled: false,
@@ -345,6 +354,20 @@ pub struct EngineArgs {
     /// configured default memory block buffer target.
     #[arg(long = "engine.memory-block-buffer-target")]
     pub memory_block_buffer_target: Option<u64>,
+
+    /// Configure the largest gap, in blocks, between the local head and the forkchoice head that
+    /// is closed by downloading the missing blocks directly. Larger gaps trigger a full pipeline
+    /// (backfill) run instead.
+    ///
+    /// On chains with short block times a pipeline run may take longer than it takes the chain to
+    /// produce another gap of this size, in which case raising this value lets the node catch up
+    /// via live sync. Values above 1024 are clamped to the peer header response limit.
+    #[arg(
+        long = "engine.backfill-threshold",
+        env = "RETH_ENGINE_BACKFILL_THRESHOLD",
+        default_value_t = DefaultEngineValues::get_global().backfill_run_threshold
+    )]
+    pub backfill_run_threshold: u64,
 
     /// Configure how many cache hits an invalid header can accumulate before it is evicted and
     /// reprocessed.
@@ -586,6 +609,7 @@ impl Default for EngineArgs {
             persistence_backpressure_threshold: _,
             num_state_masking_blocks,
             memory_block_buffer_target: _,
+            backfill_run_threshold,
             invalid_header_hit_eviction_threshold,
             state_cache_disabled,
             prewarming_disabled,
@@ -619,6 +643,7 @@ impl Default for EngineArgs {
             persistence_backpressure_threshold: None,
             num_state_masking_blocks,
             memory_block_buffer_target: None,
+            backfill_run_threshold,
             invalid_header_hit_eviction_threshold,
             state_root_task_compare_updates,
             legacy_state_root_task_enabled: false,
@@ -737,6 +762,7 @@ impl EngineArgs {
             .with_persistence_threshold(self.persistence_threshold)
             .with_memory_block_buffer_target(self.memory_block_buffer_target())
             .with_num_state_masking_blocks(self.num_state_masking_blocks())
+            .with_backfill_run_threshold(self.backfill_run_threshold)
             .with_invalid_header_hit_eviction_threshold(self.invalid_header_hit_eviction_threshold)
             .without_state_cache(self.state_cache_disabled)
             .without_prewarming(self.prewarming_disabled)
@@ -896,6 +922,7 @@ mod tests {
             persistence_backpressure_threshold: Some(101),
             num_state_masking_blocks: DEFAULT_NUM_STATE_MASKING_BLOCKS,
             memory_block_buffer_target: Some(50),
+            backfill_run_threshold: 100,
             invalid_header_hit_eviction_threshold: 7,
             legacy_state_root_task_enabled: true,
             caching_and_prewarming_enabled: true,
@@ -942,6 +969,8 @@ mod tests {
             "101",
             "--engine.memory-block-buffer-target",
             "50",
+            "--engine.backfill-threshold",
+            "100",
             "--engine.invalid-header-cache-hit-eviction-threshold",
             "7",
             "--engine.legacy-state-root",
@@ -1021,6 +1050,23 @@ mod tests {
         .args;
 
         assert_eq!(args.tree_config().num_state_masking_blocks(), 7);
+    }
+
+    #[test]
+    fn test_parse_backfill_threshold() {
+        let args = CommandParser::<EngineArgs>::parse_from(["reth"]).args;
+        let config = args.tree_config();
+        assert_eq!(config.backfill_run_threshold(), DEFAULT_BACKFILL_RUN_THRESHOLD);
+
+        for (threshold, expected) in [("500", 500), ("2048", 1024)] {
+            let args = CommandParser::<EngineArgs>::parse_from([
+                "reth",
+                "--engine.backfill-threshold",
+                threshold,
+            ])
+            .args;
+            assert_eq!(args.tree_config().backfill_run_threshold(), expected);
+        }
     }
 
     #[test]
