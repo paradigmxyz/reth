@@ -692,6 +692,8 @@ pub(crate) fn post_block_balance_state_changes<T: EvmTypes>(
             Some(current)
         };
         if original == current {
+            // Zero-value withdrawals still count as account accesses in the BAL.
+            let Ok(()) = evm.overlay_db_mut().account_read(address, original.as_ref());
             continue
         }
         changes.push((address, original, current));
@@ -1018,7 +1020,7 @@ mod tests {
         let output = execute_block(
             SpecId::SHANGHAI,
             BlockEnv::default(),
-            database,
+            database.clone(),
             core::iter::empty::<Recovered<TransactionSigned>>(),
             Some(&withdrawals),
         )
@@ -1027,6 +1029,27 @@ mod tests {
         assert!(output.account_state(&nonexistent).is_none());
         assert!(output.account_state(&empty).unwrap().info.is_none());
         assert!(output.account_state(&contract).is_none());
+        let factory = crate::EthBlockExecutorFactory::new(MAINNET.clone());
+        let env = crate::EthEvmEnv::new(SpecId::AMSTERDAM, BlockEnv::default(), 1);
+        let mut evm = factory.evm_with_env(evm2::evm::Db::new(database), env);
+        evm.state_mut().enable_bal_builder();
+        post_block_balance_state_changes(
+            &mut evm,
+            &mut BlockState::new(),
+            false,
+            &mut |_| {},
+            None,
+            false,
+            1,
+            Address::ZERO,
+            None,
+            Some(&withdrawals),
+        )
+        .unwrap();
+        let bal = evm.state_mut().take_bal_builder().unwrap();
+        for withdrawal in withdrawals {
+            assert!(bal.accounts.contains_key(&withdrawal.address));
+        }
     }
 
     #[test]
