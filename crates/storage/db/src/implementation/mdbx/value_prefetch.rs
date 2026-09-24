@@ -48,14 +48,17 @@ unsafe fn prefetch_range<K: TransactionKind>(
     if !K::IS_READ_ONLY && unsafe { ffi::mdbx_is_dirty(txn, value.iov_base) } != ffi::MDBX_SUCCESS {
         return None;
     }
-    Some(page_range(value.iov_base as usize, value.iov_len, page_size))
+    page_range(value.iov_base as usize, value.iov_len, page_size)
 }
 
-/// Rounds a valid mapped value's range to complete pages using the OS page size.
-const fn page_range(address: usize, len: usize, page_size: usize) -> (usize, usize) {
+/// Rounds a nonempty value's range to complete pages, rejecting invalid sizes and overflow.
+fn page_range(address: usize, len: usize, page_size: usize) -> Option<(usize, usize)> {
+    if len == 0 || !page_size.is_power_of_two() {
+        return None;
+    }
     let start = address & !(page_size - 1);
-    let end = (address + len + page_size - 1) & !(page_size - 1);
-    (start, end - start)
+    let end = address.checked_add(len)?.checked_add(page_size - 1)? & !(page_size - 1);
+    Some((start, end.checked_sub(start)?))
 }
 
 #[cfg(test)]
@@ -90,11 +93,16 @@ mod tests {
 
     #[test]
     fn rounds_to_os_pages() {
-        assert_eq!(page_range(0x1014, 27_693, 4096), (0x1000, 7 * 4096));
-        assert_eq!(page_range(0x1000, 4096, 4096), (0x1000, 4096));
-        assert_eq!(page_range(0x1fff, 2, 4096), (0x1000, 8192));
-        assert_eq!(page_range(0x1014, 0xfec, 4096), (0x1000, 4096));
-        assert_eq!(page_range(0x1ffff, 2, 65536), (0x10000, 2 * 65536));
+        assert_eq!(page_range(0x1014, 27_693, 4096), Some((0x1000, 7 * 4096)));
+        assert_eq!(page_range(0x1000, 4096, 4096), Some((0x1000, 4096)));
+        assert_eq!(page_range(0x1fff, 2, 4096), Some((0x1000, 8192)));
+        assert_eq!(page_range(0x1014, 0xfec, 4096), Some((0x1000, 4096)));
+        assert_eq!(page_range(0x1ffff, 2, 65536), Some((0x10000, 2 * 65536)));
+        assert_eq!(page_range(0x1000, 0, 4096), None);
+        assert_eq!(page_range(usize::MAX - 10, 20, 4096), None);
+        assert_eq!(page_range(usize::MAX - 10, 1, 4096), None);
+        assert_eq!(page_range(0x1000, 4096, 0), None);
+        assert_eq!(page_range(0x1000, 4096, 3), None);
     }
 
     /// Inspects the same prefetch eligibility decision used by the value decoder.
