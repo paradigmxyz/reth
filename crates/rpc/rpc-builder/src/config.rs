@@ -377,6 +377,38 @@ mod tests {
     }
 
     #[test]
+    fn test_testing_namespace_requires_explicit_selection() {
+        let args = CommandParser::<RpcServerArgs>::parse_from([
+            "reth",
+            "--http",
+            "--http.api",
+            "all",
+            "--ws",
+            "--ws.api",
+            "all",
+        ])
+        .args;
+        let config = args.transport_rpc_module_config();
+        assert!(!config.contains_http(&RethRpcModule::Testing));
+        assert!(!config.contains_ws(&RethRpcModule::Testing));
+        assert!(!config.contains_ipc(&RethRpcModule::Testing));
+
+        let args = CommandParser::<RpcServerArgs>::parse_from([
+            "reth",
+            "--http",
+            "--http.api",
+            "eth,testing",
+            "--ws",
+            "--ws.api",
+            "eth,testing",
+        ])
+        .args;
+        let config = args.transport_rpc_module_config();
+        assert!(config.contains_http(&RethRpcModule::Testing));
+        assert!(config.contains_ws(&RethRpcModule::Testing));
+    }
+
+    #[test]
     fn test_transport_rpc_module_trim_config() {
         let args = CommandParser::<RpcServerArgs>::parse_from([
             "reth",
