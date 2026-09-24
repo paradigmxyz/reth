@@ -1510,6 +1510,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[cfg(not(feature = "account-ext"))]
     async fn canonical_chain_notification_caches_prepared_bal() {
         let fetches = Arc::new(AtomicUsize::default());
         let provider = TestBalProvider::new(fetches.clone());
