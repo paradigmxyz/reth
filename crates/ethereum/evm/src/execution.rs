@@ -716,7 +716,7 @@ mod tests {
     use evm2::{
         bytecode::Bytecode, env::BlockEnv as EvmBlockEnv, evm::InMemoryDB, interpreter::opcode::op,
     };
-    use reth_chainspec::{Chain, ChainSpec};
+    use reth_chainspec::{Chain, ChainSpec, MAINNET};
     use reth_ethereum_forks::{EthereumHardfork, ForkCondition};
     use reth_ethereum_primitives::{Block, BlockBody, Receipt, TransactionSigned};
     use reth_evm::{ConfigureEvm, Executor};
@@ -912,6 +912,42 @@ mod tests {
         assert!(output.account_state(&nonexistent).is_none());
         assert!(output.account_state(&empty).unwrap().info.is_none());
         assert!(output.account_state(&contract).is_none());
+    }
+
+    #[test]
+    fn test_calc_base_block_reward() {
+        // ((block number, td), reward)
+        let cases = [
+            // Pre-byzantium
+            ((0, U256::ZERO), Some(ETH_TO_WEI * 5)),
+            // Byzantium
+            ((4370000, U256::ZERO), Some(ETH_TO_WEI * 3)),
+            // Petersburg
+            ((7280000, U256::ZERO), Some(ETH_TO_WEI * 2)),
+            // Merge
+            ((15537394, U256::from(58_750_000_000_000_000_000_000_u128)), None),
+        ];
+
+        for ((block_number, _td), expected_reward) in cases {
+            assert_eq!(base_block_reward(&*MAINNET, block_number), expected_reward);
+        }
+    }
+
+    #[test]
+    fn test_calc_full_block_reward() {
+        let base_reward = ETH_TO_WEI;
+        let one_thirty_twoth_reward = base_reward >> 5;
+
+        // (num_ommers, reward)
+        let cases = [
+            (0, base_reward),
+            (1, base_reward + one_thirty_twoth_reward),
+            (2, base_reward + one_thirty_twoth_reward * 2),
+        ];
+
+        for (num_ommers, expected_reward) in cases {
+            assert_eq!(block_reward(base_reward, num_ommers), expected_reward);
+        }
     }
 
     #[test]
