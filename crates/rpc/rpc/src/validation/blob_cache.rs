@@ -52,17 +52,19 @@ impl BlobValidationCache {
             return Ok(versioned_hashes)
         }
 
-        let mut missing = Vec::new();
+        let mut cached = BlobsBundleV2::empty();
+        let mut missing = BlobsBundleV2::empty();
         for hit in hits {
-            let sidecar = bundle.pop_sidecar(1);
-            if !hit {
-                missing.push(sidecar);
-            }
+            let partition = if hit { &mut cached } else { &mut missing };
+            // The checked lengths keep each blob, commitment, and proof group aligned.
+            partition.blobs.extend(bundle.blobs.drain(..1));
+            partition.commitments.extend(bundle.commitments.drain(..1));
+            partition.proofs.extend(bundle.proofs.drain(..CELLS_PER_EXT_BLOB));
         }
+        drop(cached);
 
-        let sidecar = BlobsBundleV2::new(missing)
-            .try_into_sidecar()
-            .map_err(|_| ValidationApiError::InvalidBlobsBundle)?;
+        let sidecar =
+            missing.try_into_sidecar().map_err(|_| ValidationApiError::InvalidBlobsBundle)?;
         let missing_hashes = sidecar.versioned_hashes().collect::<Vec<_>>();
         sidecar.validate(&missing_hashes, EnvKzgSettings::default().get())?;
 
