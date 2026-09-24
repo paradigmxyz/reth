@@ -1,12 +1,12 @@
 //! Targeted read-ahead for mapped table values spanning multiple OS pages.
 
 use reth_libmdbx::{ffi, TableObject, TransactionKind};
-use std::sync::LazyLock;
+use std::{borrow::Cow, sync::LazyLock};
 
-/// Prefetches a mapped table value without copying or decompressing it.
-pub(super) struct PrefetchValue;
+/// Hints a mapped table value's pages before returning its bytes for decoding.
+pub(super) struct PrefetchValue<'a>(pub(super) Cow<'a, [u8]>);
 
-impl TableObject for PrefetchValue {
+impl<'a> TableObject for PrefetchValue<'a> {
     fn decode(_: &[u8]) -> reth_libmdbx::Result<Self> {
         unreachable!("value prefetch requires the MDBX transaction context")
     }
@@ -23,7 +23,8 @@ impl TableObject for PrefetchValue {
             // Advice is best-effort and must not turn a successful lookup into an error.
             let _ = unsafe { libc::madvise(start as *mut libc::c_void, len, libc::MADV_WILLNEED) };
         }
-        Ok(Self)
+        // SAFETY: Preserve libmdbx's borrowing/copying behavior for the original value.
+        unsafe { <Cow<'a, [u8]> as TableObject>::decode_val::<K>(txn, value).map(Self) }
     }
 }
 
@@ -109,7 +110,8 @@ mod tests {
             DatabaseEnvKind::RW,
             DatabaseArguments::new(ClientVersion::default()),
         )
-        .unwrap();
+        .unwrap()
+        .with_metrics();
         db.create_tables().unwrap();
         // Larger than an OS page even on systems with 64 KiB pages.
         let code = Bytecode::new_raw(vec![0x5b; 6 * *PAGE_SIZE].into());
@@ -127,7 +129,7 @@ mod tests {
             .unwrap()
             .0
             .is_none());
-        tx.prefetch::<tables::Bytecodes>(&key.encode()).unwrap();
+        assert_eq!(tx.prefetch().get::<tables::Bytecodes>(key).unwrap(), Some(code.clone()));
         assert_eq!(tx.get::<tables::Bytecodes>(key).unwrap(), Some(code.clone()));
         tx.commit().unwrap();
 
@@ -142,9 +144,8 @@ mod tests {
             .unwrap();
         assert_eq!(range.0 % *PAGE_SIZE, 0);
         assert!(range.1 >= code.original_byte_slice().len());
-        tx.prefetch::<tables::Bytecodes>(&key.encode()).unwrap();
         assert_eq!(
-            tx.get_by_encoded_key::<tables::Bytecodes>(&key.encode()).unwrap(),
+            tx.prefetch().get_by_encoded_key::<tables::Bytecodes>(&key.encode()).unwrap(),
             Some(code.clone())
         );
         // A value becomes ineligible again when overwritten in the same transaction.
@@ -157,8 +158,7 @@ mod tests {
             .unwrap()
             .0
             .is_none());
-        tx.prefetch::<tables::Bytecodes>(&key.encode()).unwrap();
-        assert_eq!(tx.get::<tables::Bytecodes>(key).unwrap(), Some(replacement));
+        assert_eq!(tx.prefetch().get::<tables::Bytecodes>(key).unwrap(), Some(replacement));
         tx.abort();
 
         let tx = db.tx().unwrap();
@@ -169,8 +169,7 @@ mod tests {
             .unwrap()
             .0
             .is_some());
-        tx.prefetch::<tables::Bytecodes>(&key.encode()).unwrap();
-        assert_eq!(tx.get::<tables::Bytecodes>(key).unwrap(), Some(code));
+        assert_eq!(tx.prefetch().get::<tables::Bytecodes>(key).unwrap(), Some(code));
         assert!(tx
             .inner()
             .get::<PrefetchRange>(dbi, small_key.encode().as_ref())
@@ -178,19 +177,17 @@ mod tests {
             .unwrap()
             .0
             .is_none());
-        tx.prefetch::<tables::Bytecodes>(&small_key.encode()).unwrap();
-        assert_eq!(tx.get::<tables::Bytecodes>(small_key).unwrap(), Some(small_code));
+        assert_eq!(tx.prefetch().get::<tables::Bytecodes>(small_key).unwrap(), Some(small_code));
         assert!(tx
             .inner()
             .get::<PrefetchRange>(dbi, B256::ZERO.encode().as_ref())
             .unwrap()
             .is_none());
-        tx.prefetch::<tables::Bytecodes>(&B256::ZERO.encode()).unwrap();
-        assert_eq!(tx.get::<tables::Bytecodes>(B256::ZERO).unwrap(), None);
+        assert_eq!(tx.prefetch().get::<tables::Bytecodes>(B256::ZERO).unwrap(), None);
     }
 
     #[test]
-    fn prefetches_other_tables_without_decoding() {
+    fn prefetched_reads_preserve_decode_errors() {
         let dir = tempfile::tempdir().unwrap();
         let mut db = DatabaseEnv::open(
             dir.path(),
@@ -212,7 +209,9 @@ mod tests {
         tx.commit().unwrap();
 
         let tx = db.tx().unwrap();
-        tx.prefetch::<tables::AccountsHistory>(&key.clone().encode()).unwrap();
-        assert!(tx.get::<tables::AccountsHistory>(key).is_err());
+        assert_eq!(
+            tx.prefetch().get::<tables::AccountsHistory>(key.clone()).unwrap_err().to_string(),
+            tx.get::<tables::AccountsHistory>(key).unwrap_err().to_string()
+        );
     }
 }
