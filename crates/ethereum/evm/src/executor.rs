@@ -1146,7 +1146,7 @@ mod tests {
     }
 
     #[test]
-    fn executor_applies_dao_fork_balance_transfer() {
+    fn executor_applies_dao_fork_balance_transfer_before_rewards() {
         let dao_account = address!("d4fe7bc31cedb7bfb8a345f31e668033056b2728");
         let beneficiary = address!("bf4ed7b27f1d666546e30d74d50d173d20bca754");
         let mut database = TestDatabase::default();
@@ -1161,6 +1161,7 @@ mod tests {
             BlockEnv::<BaseEvmTypes> {
                 number: U256::from(1),
                 gas_limit: U256::from(30_000),
+                beneficiary: dao_account,
                 ..Default::default()
             },
             1,
@@ -1183,7 +1184,10 @@ mod tests {
         let (output, _) =
             executor.finish_with_block_access_list().expect("DAO block post-execution succeeds");
 
-        assert_eq!(output.account(&dao_account).unwrap().unwrap().balance, U256::ZERO);
+        assert_eq!(
+            output.account(&dao_account).unwrap().unwrap().balance,
+            U256::from(5 * alloy_consensus::constants::ETH_TO_WEI)
+        );
         assert_eq!(output.account(&beneficiary).unwrap().unwrap().balance, U256::from(7));
     }
 

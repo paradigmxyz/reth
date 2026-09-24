@@ -433,7 +433,10 @@ fn execute_system_call<T: EvmTypes>(
     data: Bytes,
 ) -> Result<TxResult<T>, BlockExecutionError> {
     let executed = evm.system_call(SystemTx::new(address, data)).map_err(map_handler_error)?;
-    if !executed.result().status {
+    // History and beacon-root calls accept reverts and halts, unlike request-producing calls.
+    if !executed.result().status &&
+        !matches!(address, BEACON_ROOTS_ADDRESS | HISTORY_STORAGE_ADDRESS)
+    {
         let reason = executed.result().stop;
         let _ = executed.discard();
         return Err(match address {
@@ -529,6 +532,9 @@ pub(crate) fn post_block_balance_state_changes<T: EvmTypes>(
             *balance_increments.entry(dao_fork::DAO_HARDFORK_BENEFICIARY).or_default() +=
                 drained_balance;
         }
+        // Reward recipients may also be drained accounts. Read their balances after the drain.
+        commit_state_changes(evm, block_state, stream_state, on_state_update, &changes);
+        changes.clear();
     }
 
     if balance_increments.is_empty() {
@@ -1043,8 +1049,13 @@ mod tests {
     }
 
     #[test]
-    fn failed_request_system_calls_are_validation_errors() {
-        for address in [WITHDRAWAL_REQUEST_ADDRESS, CONSOLIDATION_REQUEST_ADDRESS] {
+    fn system_call_failures_follow_contract_policy() {
+        for address in [
+            BEACON_ROOTS_ADDRESS,
+            HISTORY_STORAGE_ADDRESS,
+            WITHDRAWAL_REQUEST_ADDRESS,
+            CONSOLIDATION_REQUEST_ADDRESS,
+        ] {
             for code in [
                 Bytes::from_static(&[op::PUSH0, op::PUSH0, op::REVERT]),
                 Bytes::from_static(&[op::INVALID]),
@@ -1054,15 +1065,19 @@ mod tests {
                     &address,
                     AccountInfo::default().with_code(Bytecode::new_legacy(code)),
                 );
-                let error = execute_block(
+                let result = execute_block(
                     SpecId::PRAGUE,
-                    BlockEnv::default(),
+                    BlockEnv { number: U256::from(1), ..Default::default() },
                     database,
                     core::iter::empty::<Recovered<TransactionSigned>>(),
                     None,
-                )
-                .unwrap_err();
-                assert!(error.as_validation().is_some(), "{error:?}");
+                );
+                if matches!(address, BEACON_ROOTS_ADDRESS | HISTORY_STORAGE_ADDRESS) {
+                    result.unwrap();
+                } else {
+                    let error = result.unwrap_err();
+                    assert!(error.as_validation().is_some(), "{error:?}");
+                }
             }
         }
     }
