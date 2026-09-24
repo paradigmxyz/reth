@@ -3,12 +3,7 @@ use reth_execution_types::{BlockState, EvmState, TransactionChanges};
 
 use alloy_evm::eth::dao_fork;
 
-use alloc::{
-    boxed::Box,
-    format,
-    string::{String, ToString},
-    vec::Vec,
-};
+use alloc::{boxed::Box, string::ToString, vec::Vec};
 use alloy_consensus::{
     constants::ETH_TO_WEI, transaction::Recovered, BlockHeader, Header, TxReceipt,
 };
@@ -29,11 +24,15 @@ use evm2::{
         BEACON_ROOTS_ADDRESS, BUILDER_DEPOSIT_REQUEST_ADDRESS, BUILDER_EXIT_REQUEST_ADDRESS,
         CONSOLIDATION_REQUEST_ADDRESS, HISTORY_STORAGE_ADDRESS, WITHDRAWAL_REQUEST_ADDRESS,
     },
+    interpreter::InstrStop,
     registry::HandlerError,
-    ErrorCode, Evm, EvmTypes, SpecId, TxResult, TxResultWithState,
+    Evm, EvmTypes, SpecId, TxResult, TxResultWithState,
 };
 use reth_ethereum_forks::EthereumHardforks;
-use reth_evm::{BlockExecutionError, BlockValidationError, EvmError, InvalidTxError};
+use reth_evm::{
+    execute::{map_database_error, map_handler_error},
+    BlockExecutionError, BlockValidationError, InternalBlockExecutionError, InvalidTxError,
+};
 
 const DEPOSIT_BYTES_SIZE: usize = 48 + 32 + 8 + 96 + 8;
 const BUILDER_DEPOSIT_REQUEST_TYPE: u8 = 0x03;
@@ -50,81 +49,9 @@ sol! {
     );
 }
 
-/// Error returned by EVM-backed Ethereum execution.
-#[derive(Debug)]
-pub enum EthExecutionError<E = DynamicDatabaseError> {
-    /// EVM rejected the transaction during validation.
-    InvalidTx(EthInvalidTxError),
-    /// EVM rejected or halted transaction execution before producing a Reth output.
-    Handler(HandlerError),
-    /// EVM reported a database error and the typed database error was available.
-    Database(E),
-    /// An attached EIP-7928 BAL did not cover a transaction state read.
-    BlockAccessListNotCovered,
-    /// Cancun requires a parent beacon block root after genesis.
-    MissingParentBeaconBlockRoot,
-    /// Cancun genesis payloads must carry a zero parent beacon block root.
-    CancunGenesisParentBeaconBlockRootNotZero(B256),
-    /// A pre-block system call reverted or halted without producing a successful result.
-    SystemCallFailed {
-        /// System contract address that was called.
-        address: Address,
-        /// EVM stop reason for the failed call.
-        reason: String,
-    },
-    /// Deposit request logs could not be decoded.
-    DepositRequestDecode(String),
-}
-
-/// Database error returned through evm2's dynamic database interface.
-#[derive(Debug)]
-pub struct DynamicDatabaseError(String);
-
-impl DynamicDatabaseError {
-    fn new(error: impl core::fmt::Display) -> Self {
-        Self(error.to_string())
-    }
-}
-
-impl core::fmt::Display for DynamicDatabaseError {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        f.write_str(&self.0)
-    }
-}
-
-impl core::error::Error for DynamicDatabaseError {}
-
-impl<E> core::fmt::Display for EthExecutionError<E>
-where
-    E: core::fmt::Display,
-{
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        match self {
-            Self::InvalidTx(err) => write!(f, "invalid transaction: {err}"),
-            Self::Handler(err) => write!(f, "EVM execution error: {err}"),
-            Self::Database(err) => write!(f, "EVM database error: {err}"),
-            Self::BlockAccessListNotCovered => {
-                f.write_str("block access list does not cover transaction state reads")
-            }
-            Self::MissingParentBeaconBlockRoot => {
-                f.write_str("missing parent beacon block root for Cancun system call")
-            }
-            Self::CancunGenesisParentBeaconBlockRootNotZero(root) => {
-                write!(f, "Cancun genesis parent beacon block root must be zero, got {root}")
-            }
-            Self::SystemCallFailed { address, reason } => {
-                write!(f, "EVM system call to {address} failed: {reason}")
-            }
-            Self::DepositRequestDecode(err) => write!(f, "failed to decode deposit request: {err}"),
-        }
-    }
-}
-
-impl<E> core::error::Error for EthExecutionError<E> where E: core::error::Error + Send + 'static {}
-
 /// Ethereum transaction validation error returned by evm2 handlers.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct EthInvalidTxError(HandlerError);
+struct EthInvalidTxError(HandlerError);
 
 impl core::fmt::Display for EthInvalidTxError {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
@@ -156,73 +83,38 @@ impl InvalidTxError for EthInvalidTxError {
     }
 }
 
-impl<E> EvmError for EthExecutionError<E>
-where
-    E: core::error::Error + Send + Sync + 'static,
-{
-    type InvalidTransaction = EthInvalidTxError;
+impl TryFrom<HandlerError> for EthInvalidTxError {
+    type Error = HandlerError;
 
-    fn as_invalid_tx_err(&self) -> Option<&<Self as EvmError>::InvalidTransaction> {
-        match self {
-            Self::InvalidTx(err) => Some(err),
-            _ => None,
+    fn try_from(error: HandlerError) -> Result<Self, Self::Error> {
+        match error {
+            HandlerError::Database(_) |
+            HandlerError::Fatal(_) |
+            HandlerError::WrongTransactionType { .. } => Err(error),
+            HandlerError::External(_) |
+            HandlerError::UnsupportedTransactionType(_) |
+            HandlerError::InvalidNonce { .. } |
+            HandlerError::InvalidChainId { .. } |
+            HandlerError::MissingChainId |
+            HandlerError::IntrinsicGasTooLow { .. } |
+            HandlerError::InsufficientFunds |
+            HandlerError::RejectCallerWithCode |
+            HandlerError::NonceOverflow |
+            HandlerError::GasLimitMoreThanBlock { .. } |
+            HandlerError::TxGasLimitGreaterThanCap { .. } |
+            HandlerError::CreateInitCodeSizeLimit { .. } |
+            HandlerError::OutOfFunds |
+            HandlerError::SignerRecoveryFailed |
+            HandlerError::FeeCapLessThanBaseFee { .. } |
+            HandlerError::EmptyAuthorizationList |
+            HandlerError::BlobFeeCapLessThanBlobBaseFee { .. } |
+            HandlerError::EmptyBlobs |
+            HandlerError::TooManyBlobs { .. } |
+            HandlerError::BlobVersionNotSupported |
+            HandlerError::PriorityFeeGreaterThanMaxFee |
+            HandlerError::UnsupportedCaller(_) => Ok(Self(error)),
         }
     }
-
-    fn try_into_invalid_tx_err(self) -> Result<<Self as EvmError>::InvalidTransaction, Self> {
-        match self {
-            Self::InvalidTx(err) => Ok(err),
-            err => Err(err),
-        }
-    }
-
-    fn is_fatal(&self) -> bool {
-        self.as_invalid_tx_err().is_none()
-    }
-}
-
-impl<E> From<EthExecutionError<E>> for BlockExecutionError
-where
-    E: core::error::Error + Send + Sync + 'static,
-{
-    fn from(err: EthExecutionError<E>) -> Self {
-        match err {
-            EthExecutionError::InvalidTx(err) => BlockValidationError::Other(Box::new(err)).into(),
-            EthExecutionError::MissingParentBeaconBlockRoot => {
-                BlockValidationError::MissingParentBeaconBlockRoot.into()
-            }
-            EthExecutionError::CancunGenesisParentBeaconBlockRootNotZero(
-                parent_beacon_block_root,
-            ) => BlockValidationError::CancunGenesisParentBeaconBlockRootNotZero {
-                parent_beacon_block_root,
-            }
-            .into(),
-            EthExecutionError::BlockAccessListNotCovered => {
-                BlockValidationError::BlockAccessListNotCovered.into()
-            }
-            EthExecutionError::DepositRequestDecode(err) => {
-                BlockValidationError::DepositRequestDecode(err).into()
-            }
-            EthExecutionError::SystemCallFailed { address, reason }
-                if address == WITHDRAWAL_REQUEST_ADDRESS =>
-            {
-                BlockValidationError::WithdrawalRequestsContractCall { message: reason }.into()
-            }
-            EthExecutionError::SystemCallFailed { address, reason }
-                if address == CONSOLIDATION_REQUEST_ADDRESS =>
-            {
-                BlockValidationError::ConsolidationRequestsContractCall { message: reason }.into()
-            }
-            err @ EthExecutionError::SystemCallFailed { .. } => {
-                BlockValidationError::Other(Box::new(err)).into()
-            }
-            err => Self::other(err),
-        }
-    }
-}
-
-const fn handler_error_is_invalid_tx(err: &HandlerError) -> bool {
-    !matches!(err, HandlerError::Fatal(_) | HandlerError::WrongTransactionType { .. })
 }
 
 /// Additional block-level execution context.
@@ -247,18 +139,20 @@ pub(crate) struct BlockSystemCalls {
     pub parent_beacon_block_root: Option<B256>,
 }
 
-fn map_handler_error<T: EvmTypes>(evm: &mut Evm<'_, T>, err: HandlerError) -> EthExecutionError {
-    match err {
-        HandlerError::Fatal(code) => map_db_error_code(evm, code),
-        err if handler_error_is_invalid_tx(&err) => {
-            EthExecutionError::InvalidTx(EthInvalidTxError(err))
+pub(crate) fn map_transaction_error(error: HandlerError, hash: B256) -> BlockExecutionError {
+    let error = match EthInvalidTxError::try_from(error) {
+        Ok(error) => {
+            return BlockValidationError::InvalidTx { hash, error: Box::new(error) }.into();
         }
-        err => EthExecutionError::Handler(err),
+        Err(error) => error,
+    };
+    if let HandlerError::Database(database_error) = &error &&
+        !database_error.is_fatal()
+    {
+        BlockValidationError::EVM { hash, error: Box::new(error) }.into()
+    } else {
+        InternalBlockExecutionError::EVM { hash, error: Box::new(error) }.into()
     }
-}
-
-fn take_database_error<T: EvmTypes>(evm: &mut Evm<'_, T>, code: ErrorCode) -> DynamicDatabaseError {
-    DynamicDatabaseError::new(evm.database_mut().error(code))
 }
 
 fn send_state_update(state: EvmState, on_state_update: &mut impl FnMut(EvmState)) {
@@ -274,17 +168,14 @@ pub(crate) fn execute_transaction_with_condition<T: EvmTypes>(
     on_state_update: &mut impl FnMut(EvmState),
     transaction: &Recovered<T::Tx>,
     commit: impl FnOnce(&TxResult<T>) -> reth_evm::CommitChanges,
-) -> Result<Option<TxResult<T>>, EthExecutionError>
+) -> Result<Option<TxResult<T>>, HandlerError>
 where
     T::Tx: Typed2718,
 {
     let mut changes = TransactionChanges::default();
     let result = match evm.transact(transaction) {
         Ok(executed) => {
-            if let Some(code) = executed.result().error_code {
-                let _ = executed.discard();
-                Err(HandlerError::Fatal(code))
-            } else if commit(executed.result()).should_commit() {
+            if commit(executed.result()).should_commit() {
                 let Ok(result) = if stream_state {
                     executed.commit_with(&mut changes)
                 } else {
@@ -302,39 +193,17 @@ where
         block_state.commit(&changes);
         send_state_update(changes.state, on_state_update);
     }
-    result.map_err(|error| map_handler_error(evm, error))
+    result
 }
 
 pub(crate) fn execute_transaction_without_commit<T: EvmTypes>(
     evm: &mut Evm<'_, T>,
     transaction: &Recovered<T::Tx>,
-) -> Result<TxResultWithState<T>, EthExecutionError>
+) -> Result<TxResultWithState<T>, HandlerError>
 where
     T::Tx: Typed2718,
 {
-    enum TransactionResolution<U: EvmTypes> {
-        Outcome(TxResultWithState<U>),
-        DatabaseError(ErrorCode),
-        HandlerError(HandlerError),
-    }
-
-    let resolution = match evm.transact(transaction) {
-        Ok(executed) => {
-            if let Some(code) = executed.result().error_code {
-                let _ = executed.discard();
-                TransactionResolution::DatabaseError(code)
-            } else {
-                TransactionResolution::<T>::Outcome(executed.detach())
-            }
-        }
-        Err(err) => TransactionResolution::HandlerError(err),
-    };
-
-    match resolution {
-        TransactionResolution::Outcome(outcome) => Ok(outcome),
-        TransactionResolution::DatabaseError(code) => Err(map_db_error_code(evm, code)),
-        TransactionResolution::HandlerError(err) => Err(map_handler_error(evm, err)),
-    }
+    evm.transact(transaction).map(|executed| executed.detach())
 }
 
 pub(crate) fn commit_detached_transaction<T: EvmTypes>(
@@ -380,14 +249,6 @@ fn accumulate_pending_state(
     }
 }
 
-fn map_db_error_code<T: EvmTypes>(evm: &mut Evm<'_, T>, code: ErrorCode) -> EthExecutionError {
-    if code == ErrorCode::BAL_NOT_COVERED {
-        EthExecutionError::BlockAccessListNotCovered
-    } else {
-        EthExecutionError::Database(take_database_error(evm, code))
-    }
-}
-
 pub(crate) fn pre_execution_system_call_state_changes<T: EvmTypes>(
     evm: &mut Evm<'_, T>,
     block_state: &mut BlockState,
@@ -396,7 +257,7 @@ pub(crate) fn pre_execution_system_call_state_changes<T: EvmTypes>(
     spec_id: SpecId,
     block_number: u64,
     context: BlockExecutionContext<'_>,
-) -> Result<(), EthExecutionError> {
+) -> Result<(), BlockExecutionError> {
     let Some(system_calls) = context.system_calls else {
         return Ok(());
     };
@@ -415,13 +276,14 @@ pub(crate) fn pre_execution_system_call_state_changes<T: EvmTypes>(
     if spec_id.enables(SpecId::CANCUN) {
         let parent_beacon_block_root = system_calls
             .parent_beacon_block_root
-            .ok_or(EthExecutionError::MissingParentBeaconBlockRoot)?;
+            .ok_or(BlockValidationError::MissingParentBeaconBlockRoot)?;
 
         if block_number == 0 {
             if parent_beacon_block_root != B256::ZERO {
-                return Err(EthExecutionError::CancunGenesisParentBeaconBlockRootNotZero(
+                return Err(BlockValidationError::CancunGenesisParentBeaconBlockRootNotZero {
                     parent_beacon_block_root,
-                ));
+                }
+                .into());
             }
         } else {
             let _ = execute_system_call(
@@ -442,7 +304,7 @@ pub(crate) fn block_requests_from_receipts<R>(
     spec_id: SpecId,
     context: BlockExecutionContext<'_>,
     receipts: &[R],
-) -> Result<Requests, EthExecutionError>
+) -> Result<Requests, BlockExecutionError>
 where
     R: TxReceipt<Log = Log>,
 {
@@ -465,7 +327,7 @@ where
 fn parse_deposit_requests_from_receipts<R>(
     deposit_contract_address: Address,
     receipts: &[R],
-) -> Result<Vec<u8>, EthExecutionError>
+) -> Result<Vec<u8>, BlockExecutionError>
 where
     R: TxReceipt<Log = Log>,
 {
@@ -479,7 +341,7 @@ where
             }
 
             let decoded = DepositEvent::decode_log(log)
-                .map_err(|err| EthExecutionError::DepositRequestDecode(err.to_string()))?;
+                .map_err(|err| BlockValidationError::DepositRequestDecode(err.to_string()))?;
             out.reserve(DEPOSIT_BYTES_SIZE);
             out.extend_from_slice(decoded.pubkey.as_ref());
             out.extend_from_slice(decoded.withdrawal_credentials.as_ref());
@@ -500,7 +362,7 @@ pub(crate) fn post_execution_system_call_state_changes<T: EvmTypes>(
     spec_id: SpecId,
     context: BlockExecutionContext<'_>,
     requests: &mut Requests,
-) -> Result<(), EthExecutionError> {
+) -> Result<(), BlockExecutionError> {
     if context.system_calls.is_none() || !spec_id.enables(SpecId::PRAGUE) {
         return Ok(());
     }
@@ -569,45 +431,26 @@ fn execute_system_call<T: EvmTypes>(
     on_state_update: &mut impl FnMut(EvmState),
     address: Address,
     data: Bytes,
-) -> Result<TxResult<T>, EthExecutionError> {
-    enum SystemCallResolution<U: EvmTypes> {
-        Outcome(TxResultWithState<U>),
-        DatabaseError(ErrorCode),
-        HandlerError(HandlerError),
-        Failed(String),
-    }
-
-    let resolution = match evm.system_call(SystemTx::new(address, data)) {
-        Ok(executed) => {
-            if let Some(code) = executed.result().error_code {
-                let _ = executed.discard();
-                SystemCallResolution::DatabaseError(code)
-            } else if !executed.result().status {
-                let reason = format!("{:?}", executed.result().stop);
-                let _ = executed.discard();
-                SystemCallResolution::Failed(reason)
-            } else {
-                let outcome = executed.detach();
-                SystemCallResolution::<T>::Outcome(outcome)
+) -> Result<TxResult<T>, BlockExecutionError> {
+    let executed = evm.system_call(SystemTx::new(address, data)).map_err(map_handler_error)?;
+    if !executed.result().status {
+        let reason = executed.result().stop;
+        let _ = executed.discard();
+        return Err(match address {
+            WITHDRAWAL_REQUEST_ADDRESS => BlockValidationError::WithdrawalRequestsContractCall {
+                message: alloc::format!("{reason:?}"),
+            },
+            CONSOLIDATION_REQUEST_ADDRESS => {
+                BlockValidationError::ConsolidationRequestsContractCall {
+                    message: alloc::format!("{reason:?}"),
+                }
             }
+            _ => BlockValidationError::Other(Box::new(SystemCallFailed { address, reason })),
         }
-        Err(err) => SystemCallResolution::HandlerError(err),
-    };
-
-    match resolution {
-        SystemCallResolution::Outcome(outcome) => Ok(commit_detached_transaction(
-            evm,
-            block_state,
-            stream_state,
-            on_state_update,
-            outcome,
-        )),
-        SystemCallResolution::DatabaseError(code) => Err(map_db_error_code(evm, code)),
-        SystemCallResolution::HandlerError(err) => Err(map_handler_error(evm, err)),
-        SystemCallResolution::Failed(reason) => {
-            Err(EthExecutionError::SystemCallFailed { address, reason })
-        }
+        .into());
     }
+    let outcome = executed.detach();
+    Ok(commit_detached_transaction(evm, block_state, stream_state, on_state_update, outcome))
 }
 
 fn commit_state_changes<T: EvmTypes>(
@@ -647,7 +490,7 @@ pub(crate) fn post_block_balance_state_changes<T: EvmTypes>(
     block_beneficiary: Address,
     ommers: Option<&[Header]>,
     withdrawals: Option<&[Withdrawal]>,
-) -> Result<(), EthExecutionError> {
+) -> Result<(), BlockExecutionError> {
     let mut balance_increments = AddressMap::<U256>::default();
 
     if let Some(base_block_reward) = base_block_reward {
@@ -670,8 +513,7 @@ pub(crate) fn post_block_balance_state_changes<T: EvmTypes>(
         core::hint::cold_path();
         let mut drained_balance = U256::ZERO;
         for address in dao_fork::DAO_HARDFORK_ACCOUNTS {
-            let original =
-                evm.read_account_info(&address).map_err(|code| map_db_error_code(evm, code))?;
+            let original = evm.read_account_info(&address).map_err(map_database_error)?;
             let Some(original) = original else { continue };
             if original.balance.is_zero() {
                 continue
@@ -694,8 +536,7 @@ pub(crate) fn post_block_balance_state_changes<T: EvmTypes>(
     }
 
     for (address, increment) in balance_increments {
-        let original =
-            evm.read_account_info(&address).map_err(|code| map_db_error_code(evm, code))?;
+        let original = evm.read_account_info(&address).map_err(map_database_error)?;
         let current = if increment.is_zero() && original.as_ref().is_none_or(AccountInfo::is_empty)
         {
             None
@@ -740,6 +581,21 @@ fn ommer_reward(base_block_reward: u128, block_number: u64, ommer_block_number: 
     let distance = 8u64.saturating_add(ommer_block_number).saturating_sub(block_number);
     (u128::from(distance) * base_block_reward) >> 3
 }
+
+/// A system contract reverted or halted without producing a successful result.
+#[derive(Debug)]
+struct SystemCallFailed {
+    address: Address,
+    reason: InstrStop,
+}
+
+impl core::fmt::Display for SystemCallFailed {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        write!(f, "EVM system call to {} failed: {:?}", self.address, self.reason)
+    }
+}
+
+impl core::error::Error for SystemCallFailed {}
 
 #[cfg(test)]
 mod tests {

@@ -15,7 +15,7 @@ use alloy_primitives::{Address, B256};
 use core::fmt::Debug;
 #[cfg(feature = "std")]
 use evm2::evm::{CacheDB, Db};
-use evm2::{evm::StateChangeSink as EvmStateChangeSink, registry::HandlerError, ErrorCode};
+use evm2::{evm::StateChangeSink as EvmStateChangeSink, registry::HandlerError, DatabaseError};
 pub use reth_execution_errors::{
     BlockExecutionError, BlockValidationError, EvmError, InternalBlockExecutionError,
     InvalidTxError,
@@ -201,8 +201,9 @@ impl<'a, T: evm2::EvmTypes<Tx: Typed2718>> Evm for evm2::Evm<'a, T> {
         &mut self,
         transaction: &Recovered<Self::Transaction>,
     ) -> Result<evm2::TxResultWithState<T>, BlockExecutionError> {
-        let resolution = transaction_resolution(evm2::Evm::transact(self, transaction));
-        resolve_transaction(self, resolution)
+        evm2::Evm::transact(self, transaction)
+            .map(|executed| executed.detach())
+            .map_err(map_handler_error)
     }
 
     fn transact_commit(
@@ -226,8 +227,9 @@ impl<'a, T: evm2::EvmTypes<Tx: Typed2718>> Evm for evm2::Evm<'a, T> {
     ) -> Result<(I, evm2::TxResultWithState<T>), BlockExecutionError> {
         // TODO(dani): use either `&mut Inspector` or `clear_inspector_as`.
         evm2::Evm::set_inspector(self, inspector);
-        let resolution = transaction_resolution(evm2::Evm::transact(self, transaction));
-        let result = resolve_transaction(self, resolution);
+        let result = evm2::Evm::transact(self, transaction)
+            .map(|executed| executed.detach())
+            .map_err(map_handler_error);
         let inspector = self.clear_inspector().expect("inspector was set before execution");
         // SAFETY: the boxed inspector was created from `I` immediately above and was not replaced.
         let inspector = unsafe { Box::from_raw(Box::into_raw(inspector).cast::<I>()) };
@@ -262,10 +264,7 @@ impl<'a, T: evm2::EvmTypes<Tx: Typed2718>> Evm for evm2::Evm<'a, T> {
         &mut self,
         address: &Address,
     ) -> Result<Option<evm2::evm::AccountInfo>, BlockExecutionError> {
-        match self.state_mut().account_info_untracked(address) {
-            Ok(account) => Ok(account),
-            Err(code) => Err(BlockExecutionError::other(self.database_mut().error(code))),
-        }
+        self.state_mut().account_info_untracked(address).map_err(map_database_error)
     }
 
     fn move_precompiles(
@@ -284,16 +283,7 @@ impl<'a, T: evm2::EvmTypes<Tx: Typed2718>> Evm for evm2::Evm<'a, T> {
         S: EvmStateChangeSink,
         S::Error: Debug,
     {
-        let executed = self.transact(transaction).map_err(|err| {
-            BlockExecutionError::msg(format!("discarded transaction execution failed: {err:?}"))
-        })?;
-
-        if let Some(code) = executed.result().error_code {
-            let _ = executed.discard();
-            return Err(BlockExecutionError::msg(format!(
-                "discarded transaction database error: {code:?}"
-            )))
-        }
+        let executed = self.transact(transaction).map_err(map_handler_error)?;
 
         executed.discard_with(sink).map(|_| ()).map_err(|err| {
             BlockExecutionError::msg(format!("discarded state sink failed: {err:?}"))
@@ -306,58 +296,28 @@ fn execute_result<T: evm2::EvmTypes<Tx: Typed2718>>(
     transaction: &Recovered<T::Tx>,
     commit: bool,
 ) -> Result<evm2::TxResult<T>, BlockExecutionError> {
-    let result = match evm2::Evm::transact(evm, transaction) {
-        Ok(executed) => {
-            if let Some(code) = executed.result().error_code {
-                let _ = executed.discard();
-                Err(HandlerError::Fatal(code))
-            } else {
-                Ok(if commit { executed.commit() } else { executed.discard() })
-            }
+    let executed = evm2::Evm::transact(evm, transaction).map_err(map_handler_error)?;
+    Ok(if commit { executed.commit() } else { executed.discard() })
+}
+
+/// Converts a handler error into a block error without transaction hash context.
+/// Validation errors retain the original handler error for downstream classification.
+pub fn map_handler_error(error: HandlerError) -> BlockExecutionError {
+    match error {
+        HandlerError::Database(error) => map_database_error(error),
+        HandlerError::Fatal(_) | HandlerError::WrongTransactionType { .. } => {
+            BlockExecutionError::other(error)
         }
-        Err(error) => Err(error),
-    };
-    result.map_err(|error| match error {
-        HandlerError::Fatal(code) => BlockExecutionError::other(evm.database_mut().error(code)),
         error => BlockValidationError::Other(Box::new(error)).into(),
-    })
-}
-
-enum TransactionResolution<T: evm2::EvmTypes> {
-    Result(evm2::TxResultWithState<T>),
-    DatabaseError(ErrorCode),
-    HandlerError(HandlerError),
-}
-
-fn transaction_resolution<T: evm2::EvmTypes>(
-    executed: Result<evm2::ExecutedTx<'_, '_, T>, HandlerError>,
-) -> TransactionResolution<T> {
-    match executed {
-        Ok(executed) => {
-            if let Some(code) = executed.result().error_code {
-                let _ = executed.discard();
-                TransactionResolution::DatabaseError(code)
-            } else {
-                TransactionResolution::Result(executed.detach())
-            }
-        }
-        Err(err) => TransactionResolution::HandlerError(err),
     }
 }
 
-fn resolve_transaction<T: evm2::EvmTypes>(
-    evm: &mut evm2::Evm<'_, T>,
-    resolution: TransactionResolution<T>,
-) -> Result<evm2::TxResultWithState<T>, BlockExecutionError> {
-    match resolution {
-        TransactionResolution::Result(result) => Ok(result),
-        TransactionResolution::DatabaseError(code) |
-        TransactionResolution::HandlerError(HandlerError::Fatal(code)) => {
-            Err(BlockExecutionError::other(evm.database_mut().error(code)))
-        }
-        TransactionResolution::HandlerError(err) => {
-            Err(BlockValidationError::Other(Box::new(err)).into())
-        }
+/// Converts an owned database error using its internal-failure classification.
+pub fn map_database_error(error: DatabaseError) -> BlockExecutionError {
+    if error.is_fatal() {
+        BlockExecutionError::other(error)
+    } else {
+        BlockValidationError::Other(Box::new(error)).into()
     }
 }
 

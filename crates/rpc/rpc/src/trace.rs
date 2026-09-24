@@ -15,7 +15,6 @@ use alloy_rpc_types_trace::{
     tracerequest::TraceCallRequest,
 };
 use async_trait::async_trait;
-use evm2::evm::DynDatabase;
 use evm2_inspectors::{
     opcode::OpcodeGasInspector,
     storage::StorageInspector,
@@ -114,7 +113,7 @@ where
                 let trace_res = inspector
                     .into_parity_builder()
                     .into_trace_results_with_state(&res, &trace_request.trace_types, &mut *db)
-                    .map_err(|code| EthApiError::EvmCustom(db.error(code).to_string()))
+                    .map_err(EthApiError::from)
                     .map_err(Eth::Error::from_eth_err)?;
                 Ok(trace_res)
             })
@@ -148,7 +147,7 @@ where
                     inspector
                         .into_parity_builder()
                         .into_trace_results_with_state(&res, &trace_types, &mut db)
-                        .map_err(|code| EthApiError::EvmCustom(db.error(code).to_string()))
+                        .map_err(EthApiError::from)
                         .map_err(Eth::Error::from_eth_err)
                 },
             )
@@ -191,7 +190,7 @@ where
                     let trace_res = inspector
                         .into_parity_builder()
                         .into_trace_results_with_state(&res, &trace_types, &mut db)
-                        .map_err(|code| EthApiError::EvmCustom(db.error(code).to_string()))
+                        .map_err(EthApiError::from)
                         .map_err(Eth::Error::from_eth_err)?;
 
                     results.push(trace_res);
@@ -220,7 +219,7 @@ where
                 let trace_res = inspector
                     .into_parity_builder()
                     .into_trace_results_with_state(&res, &trace_types, &mut db)
-                    .map_err(|code| EthApiError::EvmCustom(db.error(code).to_string()))
+                    .map_err(EthApiError::from)
                     .map_err(Eth::Error::from_eth_err)?;
                 Ok(TraceResultsWithTransactionHash {
                     transaction_hash: hash,
@@ -598,7 +597,7 @@ where
                     // nonce from pre-state
                     if let Some(ref mut state_diff) = full_trace.state_diff {
                         populate_state_diff(state_diff, db, &result.pending_state)
-                            .map_err(|code| EthApiError::EvmCustom(db.error(code).to_string()))
+                            .map_err(EthApiError::from)
                             .map_err(Eth::Error::from_eth_err)?;
                     }
 

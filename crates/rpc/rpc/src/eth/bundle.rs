@@ -172,9 +172,7 @@ where
 
                 let initial_coinbase = db
                     .get_account(&coinbase)
-                    .map_err(|code| {
-                        Eth::Error::from_eth_err(EthApiError::EvmCustom(db.error(code).to_string()))
-                    })?
+                    .map_err(|error| Eth::Error::from_eth_err(EthApiError::from(error)))?
                     .map(|acc| acc.balance)
                     .unwrap_or_default();
                 let mut coinbase_balance_before_tx = initial_coinbase;
@@ -220,11 +218,7 @@ where
                     db.commit_source(&state);
                     coinbase_balance_after_tx = db
                         .get_account(&coinbase)
-                        .map_err(|code| {
-                            Eth::Error::from_eth_err(EthApiError::EvmCustom(
-                                db.error(code).to_string(),
-                            ))
-                        })?
+                        .map_err(|error| Eth::Error::from_eth_err(EthApiError::from(error)))?
                         .map(|acc| acc.balance)
                         .unwrap_or(coinbase_balance_before_tx);
                     let coinbase_diff =
