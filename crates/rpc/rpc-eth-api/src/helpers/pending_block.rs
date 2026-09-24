@@ -114,9 +114,9 @@ pub trait LoadPendingBlock:
 
     /// Returns a [`StateProviderBox`] on a mem-pool built pending block overlaying latest.
     ///
-    /// This is used by `state_at_block_id`. State RPCs using `spawn_blocking_io_with_state` select
-    /// their pending source through [`Self::local_pending_block_or_state`] instead. The default
-    /// opens the provider state on a blocking task after building the pending block.
+    /// This is used by `state_at_block_id` and, by default, by
+    /// [`Self::local_pending_block_or_state`]. This method's default opens the provider state on a
+    /// blocking task after building the pending block.
     fn local_pending_state(
         &self,
     ) -> impl Future<Output = Result<Option<StateProviderBox>, Self::Error>> + Send
@@ -144,18 +144,17 @@ pub trait LoadPendingBlock:
 
     /// Selects the local pending source for state RPCs.
     ///
-    /// By default, returns the pool-built block without opening its state provider. The state RPC
-    /// opens the block's parent state and appends it on its blocking task. Chains with another
-    /// pending state must override this method and return [`PendingStateSource::State`]. Returning
-    /// `None` falls back to the provider's pending state. Overriding [`Self::local_pending_state`]
-    /// alone does not change this path.
+    /// By default, delegates to [`Self::local_pending_state`] so existing chain-specific overrides
+    /// continue to apply. Implementations can return [`PendingStateSource::Block`] to defer opening
+    /// the block's state provider until the state RPC's blocking task. Returning `None` falls back
+    /// to the provider's pending state.
     fn local_pending_block_or_state(
         &self,
     ) -> impl Future<Output = Result<Option<PendingStateSource<Self::Primitives>>, Self::Error>> + Send
     where
         Self: SpawnBlocking,
     {
-        async move { Ok(self.pool_pending_block().await?.map(PendingStateSource::Block)) }
+        async move { Ok(self.local_pending_state().await?.map(PendingStateSource::State)) }
     }
 
     /// Returns a cached or newly built pending block from the transaction pool.

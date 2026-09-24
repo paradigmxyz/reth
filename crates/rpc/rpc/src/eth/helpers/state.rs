@@ -44,15 +44,12 @@ mod tests {
         ChainSpecProvider,
     };
     use reth_rpc_eth_api::{
-        helpers::{
-            pending_block::{PendingEnvBuilder, PendingStateSource},
-            EthCall, EthState, SpawnBlocking,
-        },
+        helpers::{pending_block::PendingEnvBuilder, EthCall, EthState, SpawnBlocking},
         node::{RpcNodeCoreAdapter, RpcNodeCoreExt},
         EthApiTypes,
     };
     use reth_rpc_eth_types::{EthApiSettings, EthStateCache, PendingBlock};
-    use reth_storage_api::StateProviderFactory;
+    use reth_storage_api::{StateProviderBox, StateProviderFactory};
     use reth_tasks::{
         pool::{BlockingTaskGuard, BlockingTaskPool},
         Runtime,
@@ -243,14 +240,11 @@ mod tests {
             self.inner.pending_env_builder()
         }
 
-        fn local_pending_block_or_state(
+        fn local_pending_state(
             &self,
-        ) -> impl Future<Output = Result<Option<PendingStateSource<Self::Primitives>>, Self::Error>> + Send
-        where
-            Self: SpawnBlocking,
-        {
+        ) -> impl Future<Output = Result<Option<StateProviderBox>, Self::Error>> + Send {
             let state = self.pending.latest().map_err(EthApiError::from);
-            async move { state.map(|state| Some(PendingStateSource::State(state))) }
+            async move { state.map(Some) }
         }
     }
 
@@ -259,7 +253,7 @@ mod tests {
     impl EthState for CustomPendingState {}
 
     #[tokio::test]
-    async fn pending_state_reads_use_custom_state_source() {
+    async fn pending_state_reads_use_existing_override() {
         let address = Address::random();
         let chain = AddressMap::from_iter([(address, ExtendedAccount::new(0, U256::from(1337)))]);
         let eth_api = mock_eth_api(chain);
