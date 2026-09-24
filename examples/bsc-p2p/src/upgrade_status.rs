@@ -16,6 +16,10 @@ pub struct UpgradeStatus {
 }
 
 impl Encodable for UpgradeStatus {
+    fn length(&self) -> usize {
+        UPGRADE_STATUS_MESSAGE_ID.length() + self.extension.length()
+    }
+
     fn encode(&self, out: &mut dyn BufMut) {
         UPGRADE_STATUS_MESSAGE_ID.encode(out);
         self.extension.encode(out);

@@ -348,6 +348,10 @@ impl From<Vec<Capability>> for Capabilities {
 }
 
 impl Encodable for Capabilities {
+    fn length(&self) -> usize {
+        self.inner.length()
+    }
+
     fn encode(&self, out: &mut dyn BufMut) {
         self.inner.encode(out)
     }

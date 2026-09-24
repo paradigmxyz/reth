@@ -117,6 +117,15 @@ pub enum TrieNodeV2 {
 }
 
 impl Encodable for TrieNodeV2 {
+    fn length(&self) -> usize {
+        match self {
+            Self::EmptyRoot => 1,
+            Self::Leaf(leaf) => leaf.as_ref().length(),
+            Self::Branch(branch) => branch.length(),
+            Self::Extension(ext) => ext.length(),
+        }
+    }
+
     fn encode(&self, out: &mut dyn bytes::BufMut) {
         match self {
             Self::EmptyRoot => {
