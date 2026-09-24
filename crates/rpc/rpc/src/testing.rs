@@ -17,10 +17,7 @@
 use alloy_consensus::Transaction;
 use alloy_eips::{eip1559::calculate_block_gas_limit, eip2718::Decodable2718};
 use alloy_evm::{Evm, RecoveredTx};
-use alloy_primitives::{
-    map::{DefaultHashBuilder, HashSet},
-    Address, Bytes, B256, U256,
-};
+use alloy_primitives::{map::AddressSet, Bytes, B256, U256};
 use alloy_rlp::Encodable;
 use alloy_rpc_types_engine::{
     BlobsBundleV2, ExecutionData, ExecutionPayloadEnvelopeV5, ExecutionPayloadSidecar,
@@ -175,7 +172,7 @@ where
                 let mut total_fees = U256::ZERO;
                 let base_fee = builder.evm_mut().block().basefee();
 
-                let mut invalid_senders: HashSet<Address, DefaultHashBuilder> = HashSet::default();
+                let mut invalid_senders = AddressSet::default();
                 let mut block_transactions_rlp_length = 0usize;
 
                 // If no transactions are provided in the request, use transactions from the pool.

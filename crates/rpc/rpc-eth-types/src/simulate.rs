@@ -41,12 +41,12 @@ const SIMULATE_FALLBACK_TIMESTAMP_INCREMENT: u64 = 12;
 /// Consistent with `eth_call` revert error code.
 ///
 /// <https://github.com/ethereum/execution-apis/pull/748>
-pub const SIMULATE_REVERT_CODE: i32 = 3;
+pub const SIMULATE_REVERT_CODE: i32 = SimulateError::EXECUTION_REVERTED_CODE;
 
 /// Error code for VM execution errors (e.g., out of gas) in `eth_simulateV1`.
 ///
 /// <https://github.com/ethereum/execution-apis>
-pub const SIMULATE_VM_ERROR_CODE: i32 = -32015;
+pub const SIMULATE_VM_ERROR_CODE: i32 = SimulateError::VM_EXECUTION_ERROR_CODE;
 
 /// Errors which may occur during `eth_simulateV1` execution.
 #[derive(Debug, thiserror::Error)]
@@ -193,7 +193,7 @@ where
 
         // Default block number to prev + 1 if not specified.
         let target_number = if let Some(n) = overrides.number {
-            u64::try_from(n).unwrap_or(u64::MAX)
+            n.saturating_to()
         } else {
             let n = prev_number.saturating_add(1);
             overrides.number = Some(U256::from(n));
@@ -524,7 +524,7 @@ where
                     error: Some(SimulateError {
                         message: error.to_string(),
                         code: SIMULATE_VM_ERROR_CODE,
-                        ..SimulateError::invalid_params()
+                        data: None,
                     }),
                     gas_used: gas.tx_gas_used(),
                     max_used_gas: Some(gas.total_gas_spent().max(gas.floor_gas())),

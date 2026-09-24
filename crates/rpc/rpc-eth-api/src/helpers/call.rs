@@ -195,7 +195,7 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
                             .map_err(Self::Error::from_eth_err)?;
                     }
 
-                    let chain_id = evm_env.cfg_env.chain_id;
+                    let chain_id = evm_env.chainid();
 
                     // Each simulated block needs its own BAL, including when crossing Amsterdam.
                     if this.provider().chain_spec().is_amsterdam_active_at_timestamp(

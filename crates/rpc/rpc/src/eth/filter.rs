@@ -4,7 +4,8 @@ use alloy_consensus::BlockHeader;
 use alloy_eips::BlockNumberOrTag;
 use alloy_primitives::{Sealable, TxHash};
 use alloy_rpc_types_eth::{
-    Filter, FilterBlockOption, FilterChanges, FilterId, PendingTransactionFilterKind,
+    error::EthRpcErrorCode, Filter, FilterBlockOption, FilterChanges, FilterId,
+    PendingTransactionFilterKind,
 };
 use async_trait::async_trait;
 use futures::{
@@ -1060,7 +1061,7 @@ impl From<EthFilterError> for jsonrpsee::types::error::ErrorObject<'static> {
             }
             EthFilterError::EthAPIError(err) => err.into(),
             err @ EthFilterError::ReceiptsUnavailable(_) => {
-                rpc_error_with_code(4444, err.to_string())
+                rpc_error_with_code(EthRpcErrorCode::PrunedHistory.code(), err.to_string())
             }
             err @ (EthFilterError::InvalidBlockRangeParams |
             EthFilterError::QueryExceedsMaxBlocks(_) |

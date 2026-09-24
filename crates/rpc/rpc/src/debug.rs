@@ -1,4 +1,4 @@
-use alloy_consensus::{constants::KECCAK_EMPTY, transaction::TxHashRef, BlockHeader};
+use alloy_consensus::{transaction::TxHashRef, BlockHeader};
 use alloy_eips::{eip2718::Encodable2718, BlockId, BlockNumberOrTag};
 use alloy_evm::{env::BlockEnvironment, Evm};
 use alloy_genesis::ChainConfig;
@@ -759,7 +759,7 @@ where
         EthApiError: From<DB::Error>,
     {
         let account = db.basic(address).map_err(Eth::Error::from_eth_err)?.unwrap_or_default();
-        let code = if account.code_hash == KECCAK_EMPTY {
+        let code = if account.is_empty_code_hash() {
             Default::default()
         } else if let Some(code) = account.code {
             code.original_bytes()
