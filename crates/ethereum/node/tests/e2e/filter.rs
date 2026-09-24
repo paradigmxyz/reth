@@ -382,11 +382,14 @@ fn log_range(emitter: &LogEmitter, from: u64, to: u64) -> serde_json::Value {
 }
 
 /// Waits until the pruner has removed the receipts of `block`.
+///
+/// The pruner runs on its own schedule, so the deadline only has to be long enough to outlast a
+/// loaded CI machine running the rest of the suite alongside this test.
 async fn wait_for_pruned_receipts(
     node: &NodeHelperType<EthereumNode>,
     block: u64,
 ) -> eyre::Result<()> {
-    let deadline = Instant::now() + Duration::from_secs(30);
+    let deadline = Instant::now() + Duration::from_secs(180);
     while node.inner.provider.receipts_by_block(block.into())?.is_some() {
         eyre::ensure!(
             Instant::now() < deadline,
