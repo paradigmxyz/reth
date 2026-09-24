@@ -21,7 +21,7 @@ evm2-inspectors = { workspace = true, features = ["std"] }
 reth-primitives-traits = { workspace = true, features = ["rpc-compat"] }
 reth-errors.workspace = true
 reth-evm.workspace = true
-reth-storage-api.workspace = true
+reth-storage-api = { workspace = true, features = ["chain-state"] }
 reth-rpc-convert.workspace = true
 reth-tasks = { workspace = true, features = ["rayon"] }
 reth-transaction-pool.workspace = true

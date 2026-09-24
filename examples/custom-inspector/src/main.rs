@@ -24,7 +24,7 @@ use reth_ethereum::{
     node::{builder::NodeHandle, EthereumNode},
     pool::TransactionPool,
     rpc::api::eth::helpers::Trace,
-    storage::{BlockReaderIdExt, StateProviderFactory},
+    storage::{BlockReaderIdExt, StateProvider, StateProviderFactory},
 };
 
 fn main() {
@@ -77,7 +77,9 @@ fn main() {
                         };
                         let tx_env = node.evm_config.tx_env(tx.to_consensus());
 
-                        let mut db = CacheDB::new(Db::new(StateProviderDatabase::new(state)));
+                        let mut db = CacheDB::new(Db::new(StateProviderDatabase::new(
+                            state.into_evm_state_provider(),
+                        )));
                         let result =
                             eth_api.inspect(&mut db, evm_env, &tx_env, DummyInspector::default());
 

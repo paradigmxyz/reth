@@ -17,7 +17,7 @@ use reth_rpc_eth_types::{
     EthApiError, RpcInvalidTransactionError,
 };
 use reth_rpc_server_types::constants::gas_oracle::{CALL_STIPEND_GAS, ESTIMATE_GAS_ERROR_RATIO};
-use reth_storage_api::{StateProvider, StateProviderBox};
+use reth_storage_api::{EvmStateProvider, StateProvider};
 use tracing::trace;
 
 /// Gas execution estimates
@@ -42,7 +42,7 @@ pub trait EstimateCall: Call {
         overrides: EvmOverrides,
     ) -> Result<U256, Self::Error>
     where
-        S: StateProvider + Send + 'static,
+        S: EvmStateProvider + Send + 'static,
     {
         // Disabled because eth_estimateGas is sometimes used with eoa senders
         // See <https://github.com/paradigmxyz/reth/issues/1959>
@@ -65,7 +65,7 @@ pub trait EstimateCall: Call {
         let tx_request_gas_price = request.as_ref().gas_price();
 
         // Configure the evm env
-        let state: StateProviderBox = Box::new(state);
+        let state: reth_storage_api::EvmStateProviderBox = Box::new(state);
         let mut db = evm2::evm::CacheDB::new(evm2::evm::Db::new(
             reth_evm::database::StateProviderDatabase::new(state),
         ));
@@ -86,17 +86,20 @@ pub trait EstimateCall: Call {
         // the gas limit of the corresponding block
         let block_gas_limit = evm_env.block_env().gas_limit.to::<u64>();
         // If EIP-8037 is enabled, the transaction gas limit cap is not applicable
-        let max_gas_limit = if evm_env.version().feature(EvmFeatures::EIP8037) {
+        let mut max_gas_limit = if evm_env.version().feature(EvmFeatures::EIP8037) {
             block_gas_limit
         } else {
             evm_env.version().tx_gas_limit_cap.min(block_gas_limit)
         };
 
-        // Determine the highest possible gas limit, considering both the request's specified limit
-        // and the block's limit.
-        let mut highest_gas_limit = tx_request_gas_limit
-            .map(|tx_gas_limit| tx_gas_limit.min(max_gas_limit))
-            .unwrap_or(max_gas_limit);
+        // Also bound diagnostic retries by the RPC gas cap. Zero means unlimited.
+        let gas_cap = self.call_gas_limit();
+        if gas_cap != 0 {
+            max_gas_limit = max_gas_limit.min(gas_cap);
+        }
+
+        let mut highest_gas_limit =
+            tx_request_gas_limit.unwrap_or(max_gas_limit).min(max_gas_limit);
 
         // Check if this is a basic transfer (no input data to account with no code)
         let is_basic_transfer = if request.as_ref().input().is_none_or(|input| input.is_empty()) &&
@@ -133,7 +136,7 @@ pub trait EstimateCall: Call {
 
         // For basic transfers, try using minimum gas before running full binary search
         if is_basic_transfer &&
-            let Ok(res) = execute(MIN_TRANSACTION_GAS) &&
+            let Ok(res) = execute(MIN_TRANSACTION_GAS.min(max_gas_limit)) &&
             res.status
         {
             return Ok(U256::from(res.tx_gas_used()))
@@ -287,7 +290,13 @@ pub trait EstimateCall: Call {
 
             self.spawn_blocking_io_fut(async move |this| {
                 let state = this.state_at_block_id(at).await?;
-                EstimateCall::estimate_gas_with(&this, evm_env, request, state, overrides)
+                EstimateCall::estimate_gas_with(
+                    &this,
+                    evm_env,
+                    request,
+                    state.into_evm_state_provider(),
+                    overrides,
+                )
             })
             .await
         }

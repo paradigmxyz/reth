@@ -45,7 +45,7 @@ use reth_primitives_traits::{
 use reth_rpc_api::{TestingApiServer, TestingBuildBlockRequestV1};
 use reth_rpc_eth_api::{helpers::Call, FromEthApiError};
 use reth_rpc_eth_types::EthApiError;
-use reth_storage_api::{BlockReader, BlockReaderIdExt, HeaderProvider};
+use reth_storage_api::{BlockReader, BlockReaderIdExt, HeaderProvider, StateProvider};
 use reth_transaction_pool::{BestTransactionsAttributes, PoolTransaction, TransactionPool};
 use std::sync::Arc;
 use tracing::debug;
@@ -126,9 +126,9 @@ where
         let gas_limit_override = self.gas_limit_override;
         self.eth_api
             .spawn_with_state_at_block(request.parent_block_hash, move |eth_api, state| {
-                let state_provider = state.db.into_inner().into_inner();
+                let state_provider = state.db.into_inner().into_inner().0;
                 let mut state = evm2::evm::CacheDB::new(evm2::evm::Db::new(
-                    StateProviderDatabase::new(&state_provider),
+                    StateProviderDatabase::new((&state_provider).into_evm_state_provider()),
                 ));
                 let parent = eth_api
                     .provider()

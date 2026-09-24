@@ -189,7 +189,9 @@ impl FromStr for ByteSize {
             _ => return Err(format!("Invalid unit: {unit}. Use B, KB, MB, GB, or TB.")),
         };
 
-        Ok(Self(num * multiplier))
+        num.checked_mul(multiplier)
+            .map(Self)
+            .ok_or_else(|| "Byte size exceeds the maximum supported value".to_string())
     }
 }
 
@@ -217,7 +219,7 @@ impl fmt::Display for ByteSize {
 }
 
 /// Value parser function that supports various formats.
-fn parse_byte_size(s: &str) -> Result<usize, String> {
+pub(super) fn parse_byte_size(s: &str) -> Result<usize, String> {
     s.parse::<ByteSize>().map(Into::into)
 }
 

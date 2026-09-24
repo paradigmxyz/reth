@@ -6,7 +6,7 @@ use alloy_rpc_types_eth::BlockId;
 use reth_errors::RethError;
 use reth_evm::{database::StateProviderDatabase, BlockExecutor, ConfigureEvm};
 use reth_rpc_eth_types::{error::FromEthApiError, EthApiError};
-use reth_storage_api::StateProviderFactory;
+use reth_storage_api::{StateProvider, StateProviderFactory};
 use std::sync::Arc;
 
 use crate::{
@@ -50,7 +50,7 @@ pub trait GetBlockAccessList: Trace + Call + LoadBlock + RpcNodeCoreExt {
                     .provider()
                     .state_by_block_id(block.parent_hash().into())
                     .map_err(Self::Error::from_eth_err)?;
-                let db = StateProviderDatabase::new(state.as_ref());
+                let db = StateProviderDatabase::new(state.as_ref().into_evm_state_provider());
                 let mut executor = RpcNodeCore::evm_config(&eth_api)
                     .executor_for_block(db, block.sealed_block())
                     .map_err(RethError::other)

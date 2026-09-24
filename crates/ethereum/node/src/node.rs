@@ -348,6 +348,7 @@ where
             ctx.config.rpc.flashbots_config(),
             ctx.node.task_executor().clone(),
             Arc::new(EthereumEngineValidator::new(ctx.config.chain.clone())),
+            ctx.sender_recovery_cache.clone(),
         );
 
         let eth_config =

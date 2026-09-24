@@ -639,7 +639,7 @@ where
 
                 Ok(ExecutionWitnessRecord::new(&db)
                     .into_execution_witness(
-                        &db.db.inner().0,
+                        &db.db.inner().0 .0,
                         eth_api.provider(),
                         block_number,
                         mode,
@@ -928,7 +928,7 @@ where
         }
 
         for entry in entries {
-            let rlp = alloy_rlp::encode(entry.block.sealed_block()).into();
+            let rlp = Bytes::from(alloy_rlp::encode(entry.block.sealed_block()));
             let hash = entry.block.hash();
 
             let block = entry
@@ -936,7 +936,9 @@ where
                 .clone_into_rpc_block(
                     BlockTransactionsKind::Full,
                     |tx, tx_info| self.eth_api().converter().fill(tx, tx_info),
-                    |header, size| self.eth_api().converter().convert_header(header, size),
+                    |header, block_size| {
+                        self.eth_api().converter().convert_header(header, Some(block_size))
+                    },
                 )
                 .map_err(|err| Eth::Error::from(err).into())?;
 

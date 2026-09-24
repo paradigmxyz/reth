@@ -26,9 +26,9 @@ use reth_primitives_traits::{
 use reth_rpc_convert::{transaction::RpcConvert, RpcTxReq, TransactionConversionError};
 use reth_rpc_eth_types::{
     block::convert_transaction_receipt,
-    utils::binary_search,
+    utils::{binary_search, decode_raw_transaction},
     EthApiError::{self, TransactionConfirmationTimeout},
-    FillTransaction, SignError, TransactionSource,
+    EthResult, FillTransaction, SignError, TransactionSource,
 };
 use reth_storage_api::{
     BlockNumReader, BlockReaderIdExt, ProviderBlock, ProviderReceipt, ProviderTx, ReceiptProvider,
@@ -86,15 +86,26 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
         tx: Bytes,
     ) -> impl Future<Output = Result<B256, Self::Error>> + Send {
         async move {
-            let pool_transaction =
-                <PoolTx<Self::Pool> as PoolTransaction>::recover_raw_transaction(&tx)
-                    .map_err(Self::Error::from_eth_err)?;
+            let pool_transaction = self.recover_raw_pool_transaction(&tx)?;
             self.send_pool_transaction(
                 TransactionOrigin::Local,
                 WithEncoded::new(tx, pool_transaction),
             )
             .await
         }
+    }
+
+    /// Decodes and recovers a raw pool transaction, sharing sender recovery when configured.
+    fn recover_raw_pool_transaction(&self, tx: &[u8]) -> Result<PoolTx<Self::Pool>, Self::Error> {
+        match self.eth_api_settings().sender_recovery_cache.as_ref() {
+            Some(cache) => {
+                <PoolTx<Self::Pool> as PoolTransaction>::recover_raw_transaction_with_cache(
+                    tx, cache,
+                )
+            }
+            None => <PoolTx<Self::Pool> as PoolTransaction>::recover_raw_transaction(tx),
+        }
+        .map_err(Self::Error::from_eth_err)
     }
 
     /// Submits the transaction to the pool with the given [`TransactionOrigin`].
@@ -493,7 +504,7 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
         mut request: RpcTxReq<Self::NetworkTypes>,
     ) -> impl Future<Output = Result<B256, Self::Error>> + Send
     where
-        Self: EthApiSpec + LoadBlock + EstimateCall,
+        Self: EthApiSpec + LoadBlock + EstimateCall + LoadFee,
     {
         async move {
             let from = match request.as_ref().from() {
@@ -525,6 +536,23 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
                 .into())
             }
             request.as_mut().set_chain_id(chain_id.to());
+
+            // set fee defaults if not already set before, same as `fill_transaction`
+            if request.as_ref().gas_price().is_none() {
+                let tip = if let Some(tip) = request.as_ref().max_priority_fee_per_gas() {
+                    tip
+                } else {
+                    let tip = self.suggested_priority_fee().await?.to::<u128>();
+                    request.as_mut().set_max_priority_fee_per_gas(tip);
+                    tip
+                };
+                if request.as_ref().max_fee_per_gas().is_none() {
+                    let header =
+                        self.provider().latest_header().map_err(Self::Error::from_eth_err)?;
+                    let base_fee = header.and_then(|h| h.base_fee_per_gas()).unwrap_or_default();
+                    request.as_mut().set_max_fee_per_gas(base_fee as u128 * 2 + tip);
+                }
+            }
 
             if request.as_ref().gas_limit().is_none() {
                 let estimated_gas = self
@@ -719,6 +747,27 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
 /// Behaviour shared by several `eth_` RPC methods, not exclusive to `eth_` transactions RPC
 /// methods.
 pub trait LoadTransaction: SpawnBlocking + FullEthApiTypes + RpcNodeCoreExt {
+    /// Decodes and recovers a raw transaction, sharing sender recovery when configured.
+    fn recover_raw_transaction<T: SignedTransaction>(&self, tx: &[u8]) -> EthResult<Recovered<T>> {
+        let transaction = decode_raw_transaction::<T>(tx)?;
+        let signer = match self.eth_api_settings().sender_recovery_cache.as_ref() {
+            Some(cache) => cache.recover(&transaction),
+            None => transaction.try_recover(),
+        }
+        .map_err(|_| EthApiError::InvalidTransactionSignature)?;
+        Ok(Recovered::new_unchecked(transaction, signer))
+    }
+
+    /// Decodes and recovers raw transactions in order, stopping at the first error.
+    ///
+    /// Uses [`Self::recover_raw_transaction`] to share sender recovery when configured.
+    fn recover_raw_transactions<T: SignedTransaction>(
+        &self,
+        txs: impl IntoIterator<Item = impl AsRef<[u8]>>,
+    ) -> EthResult<Vec<Recovered<T>>> {
+        txs.into_iter().map(|tx| self.recover_raw_transaction(tx.as_ref())).collect()
+    }
+
     /// Returns the transaction by hash.
     ///
     /// Checks the pool and state.

@@ -10,11 +10,11 @@ use evm2::{
     interpreter::Word,
 };
 #[cfg(feature = "std")]
-use reth_storage_api::StateProvider;
+use reth_storage_api::EvmStateProvider;
 #[cfg(feature = "std")]
 use reth_storage_errors::provider::ProviderError;
 
-/// A database wrapper backed by a [`reth_storage_api::StateProvider`].
+/// A database wrapper backed by a [`reth_storage_api::EvmStateProvider`].
 #[derive(Clone)]
 pub struct StateProviderDatabase<DB>(pub DB);
 
@@ -59,7 +59,7 @@ impl<DB> DerefMut for StateProviderDatabase<DB> {
 #[cfg(feature = "std")]
 impl<DB> Database for StateProviderDatabase<DB>
 where
-    DB: StateProvider,
+    DB: EvmStateProvider,
 {
     type Error = ProviderError;
 
@@ -90,12 +90,15 @@ where
 #[cfg(all(test, feature = "std"))]
 mod tests {
     use super::*;
-    use reth_storage_api::noop::NoopProvider;
+    use reth_storage_api::{noop::NoopProvider, StateProvider};
 
     #[test]
     fn missing_block_hash_matches_revm_adapter() {
-        let mut native = StateProviderDatabase::new(NoopProvider::mainnet());
-        let mut revm = reth_revm::database::StateProviderDatabase::new(NoopProvider::mainnet());
+        let mut native =
+            StateProviderDatabase::new(NoopProvider::mainnet().into_evm_state_provider());
+        let mut revm = reth_revm::database::StateProviderDatabase::new(
+            NoopProvider::mainnet().into_evm_state_provider(),
+        );
         assert_eq!(
             native.get_block_hash(&Word::from(42)).unwrap(),
             revm::Database::block_hash(&mut revm, 42).unwrap()

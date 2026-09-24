@@ -11,11 +11,12 @@ use evm2::{
     evm::{Bal as EvmBal, CacheDB, Db, DynDatabase},
 };
 use reth_evm::{database::StateProviderDatabase, EvmEnv};
-use reth_storage_api::StateProviderBox;
+use reth_storage_api::{EvmStateProviderAdapter, StateProviderBox};
 use std::sync::Arc;
 
 /// Helper alias type for cached state access.
-pub type StateCacheDb = CacheDB<Db<StateProviderDatabase<StateProviderBox>>>;
+pub type StateCacheDb =
+    CacheDB<Db<StateProviderDatabase<EvmStateProviderAdapter<StateProviderBox>>>>;
 
 /// Applies RPC block overrides to an evm2 environment and state cache.
 pub fn apply_block_overrides<DB>(

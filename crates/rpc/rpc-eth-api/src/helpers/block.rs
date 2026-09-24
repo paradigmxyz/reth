@@ -43,8 +43,8 @@ pub trait EthBlocks: LoadBlock<RpcConvert: RpcConvert<Primitives = Self::Primiti
     {
         async move {
             let Some(block) = self.recovered_block(block_id).await? else { return Ok(None) };
-            let header =
-                self.converter().convert_header(block.clone_sealed_header(), block.rlp_length())?;
+            // Header responses omit the block size: https://github.com/ethereum/execution-apis/pull/877
+            let header = self.converter().convert_header(block.clone_sealed_header(), None)?;
             Ok(Some(header))
         }
     }
@@ -67,7 +67,7 @@ pub trait EthBlocks: LoadBlock<RpcConvert: RpcConvert<Primitives = Self::Primiti
             let block = block.clone_into_rpc_block(
                 full.into(),
                 |tx, tx_info| self.converter().fill(tx, tx_info),
-                |header, size| self.converter().convert_header(header, size),
+                |header, block_size| self.converter().convert_header(header, Some(block_size)),
             )?;
             Ok(Some(block))
         }
@@ -236,7 +236,7 @@ pub trait EthBlocks: LoadBlock<RpcConvert: RpcConvert<Primitives = Self::Primiti
                     let size = block.length();
                     let header = self
                         .converter()
-                        .convert_header(SealedHeader::new_unhashed(block.header), size)?;
+                        .convert_header(SealedHeader::new_unhashed(block.header), Some(size))?;
                     Ok(Block {
                         uncles: vec![],
                         header,

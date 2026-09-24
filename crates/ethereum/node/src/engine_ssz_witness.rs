@@ -10,7 +10,7 @@ use reth_evm::{
     ConfigureEvm,
 };
 use reth_primitives_traits::{AlloyBlockHeader, Block};
-use reth_provider::{HeaderProvider, StateProviderFactory};
+use reth_provider::{HeaderProvider, StateProvider, StateProviderFactory};
 use reth_tasks::Runtime;
 use reth_trie_common::ExecutionWitnessMode;
 use std::{future::Future, pin::Pin};
@@ -73,8 +73,9 @@ where
                                 source: eyre::Report::new(source),
                             }
                         })?;
-                    let mut db =
-                        CacheDB::new(Db::new(StateProviderDatabase::new(state_provider.as_ref())));
+                    let mut db = CacheDB::new(Db::new(StateProviderDatabase::new(
+                        state_provider.as_ref().into_evm_state_provider(),
+                    )));
                     let output =
                         evm_config.executor(&mut db).execute(&block).map_err(eyre::Report::new)?;
                     db.commit_source(&reth_execution_types::BundleSource(&output.state));

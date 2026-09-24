@@ -34,7 +34,7 @@ use reth_rpc_eth_types::{
     simulate::{self, EthSimulateError},
     EthApiError, RpcInvalidTransactionError, StateCacheDb,
 };
-use reth_storage_api::{BlockIdReader, ProviderTx};
+use reth_storage_api::{BlockIdReader, ProviderTx, StateProvider};
 use std::fmt;
 use tracing::{trace, warn};
 
@@ -95,9 +95,10 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
 
             self.spawn_with_state_at_block(block, move |this, db| {
                 let _permit = permit;
-                let state_provider = db.db.into_inner().into_inner();
-                let mut db =
-                    CacheDB::new(evm2::evm::Db::new(StateProviderDatabase::new(&state_provider)));
+                let state_provider = db.db.into_inner().into_inner().0;
+                let mut db = CacheDB::new(evm2::evm::Db::new(StateProviderDatabase::new(
+                    (&state_provider).into_evm_state_provider(),
+                )));
                 let mut parent = parent;
 
                 let chain_id = this.provider().chain_spec().chain_id();
@@ -221,7 +222,7 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
 
                         simulate::execute_transactions(
                             builder,
-                            &state_provider,
+                            &*state_provider,
                             calls,
                             &mut remaining_call_gas_limit,
                             chain_id,
@@ -250,7 +251,7 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
 
                         simulate::execute_transactions(
                             builder,
-                            &state_provider,
+                            &*state_provider,
                             calls,
                             &mut remaining_call_gas_limit,
                             chain_id,
@@ -655,7 +656,9 @@ pub trait Call:
         let at = at.into();
         self.spawn_blocking_io_fut(async move |this| {
             let state = this.state_at_block_id(at).await?;
-            let db = evm2::evm::CacheDB::new(evm2::evm::Db::new(StateProviderDatabase::new(state)));
+            let db = evm2::evm::CacheDB::new(evm2::evm::Db::new(StateProviderDatabase::new(
+                state.into_evm_state_provider(),
+            )));
             f(this, db)
         })
     }
