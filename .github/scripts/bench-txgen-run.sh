@@ -799,6 +799,11 @@ $BENCH_NICE "$TXGEN_BENCH" "${TXGEN_REPLAY_ARGS[@]}" \
   -m "git-sha=$GIT_SHA" \
   -m "git-ref=$GIT_REF" \
   -m "job=github-reth-bench" \
+  -m "github_repository=${GITHUB_REPOSITORY:-}" \
+  -m "github_run_id=${GITHUB_RUN_ID:-}" \
+  -m "github_run_attempt=${GITHUB_RUN_ATTEMPT:-}" \
+  -m "github_workflow_ref=${GITHUB_WORKFLOW_REF:-}" \
+  -m "pr_number=${BENCH_PR:-}" \
   -m "platform=ethereum" \
   -m "scenario=$BENCH_SCENARIO" \
   -m "bal-mode=${BENCH_BAL:-false}" \
