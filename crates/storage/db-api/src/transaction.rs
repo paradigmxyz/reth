@@ -46,6 +46,15 @@ pub trait DbTx: Debug + Send {
     fn entries<T: Table>(&self) -> Result<usize, DatabaseError>;
     /// Disables long-lived read transaction safety guarantees.
     fn disable_long_read_transaction_safety(&mut self);
+
+    /// Hints that the value at an encoded key will be read soon, without decoding it.
+    ///
+    /// This is best-effort: implementations may do nothing, and missing keys are ignored.
+    /// Lookup errors are returned, but failures to issue a read-ahead hint are ignored.
+    /// For duplicate-sorted tables, only the first value for the key is considered.
+    fn prefetch<T: Table>(&self, _key: &<T::Key as Encode>::Encoded) -> Result<(), DatabaseError> {
+        Ok(())
+    }
 }
 
 /// Read write transaction that allows writing to database

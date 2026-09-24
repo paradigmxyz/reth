@@ -301,17 +301,10 @@ impl<K: TransactionKind> DbTx for Tx<K> {
         key: &<T::Key as Encode>::Encoded,
     ) -> Result<Option<T::Value>, DatabaseError> {
         self.execute_with_operation_metric::<T, _>(Operation::Get, None, |tx| {
-            let dbi = self.get_dbi::<T>()?;
-            #[cfg(target_os = "linux")]
-            let value = if T::NAME == crate::tables::Bytecodes::NAME {
-                tx.get::<super::value_prefetch::PrefetchValue<'_>>(dbi, key.as_ref())
-                    .map(|value| value.map(|value| value.0))
-            } else {
-                tx.get(dbi, key.as_ref())
-            };
-            #[cfg(not(target_os = "linux"))]
-            let value = tx.get(dbi, key.as_ref());
-            value.map_err(|e| DatabaseError::Read(e.into()))?.map(decode_one::<T>).transpose()
+            tx.get(self.get_dbi::<T>()?, key.as_ref())
+                .map_err(|e| DatabaseError::Read(e.into()))?
+                .map(decode_one::<T>)
+                .transpose()
         })
     }
 
@@ -358,6 +351,14 @@ impl<K: TransactionKind> DbTx for Tx<K> {
         }
 
         self.inner.disable_timeout();
+    }
+
+    #[cfg(target_os = "linux")]
+    fn prefetch<T: Table>(&self, key: &<T::Key as Encode>::Encoded) -> Result<(), DatabaseError> {
+        self.inner
+            .get::<super::value_prefetch::PrefetchValue>(self.get_dbi::<T>()?, key.as_ref())
+            .map(|_| ())
+            .map_err(|e| DatabaseError::Read(e.into()))
     }
 }
 
