@@ -9,7 +9,7 @@ use parking_lot::Mutex;
 use std::collections::VecDeque;
 
 /// Maximum number of individual blobs retained across competing submissions.
-const VALIDATED_BLOB_CACHE_CAPACITY: usize = 12;
+const VALIDATED_BLOB_CACHE_CAPACITY: usize = 15;
 
 /// Reuses KZG validation only for exact V2 blob sidecar matches.
 #[derive(Debug, Default)]
@@ -165,7 +165,7 @@ mod tests {
     }
 
     #[test]
-    fn retains_only_twelve_recent_blobs() {
+    fn retains_only_fifteen_recent_blobs() {
         let cache = BlobValidationCache::default();
         let blob = Blob::default();
         for index in 0..=VALIDATED_BLOB_CACHE_CAPACITY {
