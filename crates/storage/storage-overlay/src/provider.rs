@@ -518,7 +518,7 @@ where
         }
         self.provider()
             .tx()
-            .prefetch()
+            .prefetch(true)
             .get_by_encoded_key::<tables::Bytecodes>(code_hash)
             .map_err(Into::into)
     }

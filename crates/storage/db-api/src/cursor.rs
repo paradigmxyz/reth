@@ -58,6 +58,19 @@ pub trait DbCursorRO<T: Table> {
     ) -> Result<ReverseWalker<'_, T, Self>, DatabaseError>
     where
         Self: Sized;
+
+    /// Enables or disables best-effort read-ahead for subsequent value reads on this cursor.
+    ///
+    /// Overrides the setting inherited when the cursor was created, without changing its position,
+    /// transaction, or other cursors. Persists across reads, walks, and writes until changed again.
+    /// Returns the cursor for chaining. Backends without support ignore the setting.
+    #[inline]
+    fn prefetch(&mut self, _enabled: bool) -> &mut Self
+    where
+        Self: Sized,
+    {
+        self
+    }
 }
 
 /// A read-only cursor over the dup table `T`.
