@@ -27,6 +27,11 @@ pub struct BlockExecutionOutput<T> {
 }
 
 impl<T> BlockExecutionOutput<T> {
+    /// Combines execution results with their persistent state.
+    pub const fn new(result: BlockExecutionResult<T>, state: BundleState) -> Self {
+        Self { result, state }
+    }
+
     /// Return bytecode if known.
     pub fn bytecode(&self, code_hash: &B256) -> Option<Bytecode> {
         self.state.bytecode(code_hash).map(Bytecode)

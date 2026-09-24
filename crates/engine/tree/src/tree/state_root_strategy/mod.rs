@@ -57,11 +57,12 @@ mod sparse_trie;
 
 use self::sparse_trie::{SparseTrieCacheTask, SparseTrieTaskMetrics};
 use crate::tree::{metrics::BlockValidationMetrics, EngineApiTreeState, ExecutionEnv, TreeConfig};
+use alloy_evm::block::OnStateHook;
 use alloy_primitives::B256;
 use crossbeam_channel::{Receiver as CrossbeamReceiver, Sender as CrossbeamSender};
 use reth_chain_state::{ExecutedBlock, PreservedSparseTrie};
 use reth_errors::ProviderResult;
-use reth_evm::{ConfigureEvm, OnStateHook};
+use reth_evm::ConfigureEvm;
 use reth_primitives_traits::{
     AlloyBlockHeader, FastInstant as Instant, NodePrimitives, RecoveredBlock, SealedHeader,
 };
@@ -378,8 +379,13 @@ impl<N: NodePrimitives> PreparedStateRootJob<N> {
     }
 
     /// Takes the execution hook, present only when the job wants normal execution updates.
-    pub fn take_execution_hook(&mut self) -> Option<Box<dyn OnStateHook + 'static>> {
-        self.execution_hook.take().map(|hook| Box::new(hook) as Box<dyn OnStateHook + 'static>)
+    pub fn take_execution_hook(
+        &mut self,
+    ) -> Option<Box<dyn FnMut(reth_execution_types::EvmState) + Send + 'static>> {
+        self.execution_hook.take().map(|mut hook| {
+            Box::new(move |state| hook.on_state(state))
+                as Box<dyn FnMut(reth_execution_types::EvmState) + Send + 'static>
+        })
     }
 
     /// Takes the hint stream for transaction prewarming.

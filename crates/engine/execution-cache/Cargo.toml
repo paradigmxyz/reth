@@ -12,6 +12,7 @@ description = "Cross-block execution cache for payload processing"
 workspace = true
 
 [dependencies]
+reth-evm.workspace = true
 alloy-primitives.workspace = true
 fixed-cache = { workspace = true, features = ["stats"] }
 metrics.workspace = true
@@ -34,4 +35,5 @@ test-utils = [
     "reth-primitives-traits/test-utils",
     "reth-revm/test-utils",
     "reth-provider/test-utils",
+    "reth-evm/test-utils",
 ]

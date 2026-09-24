@@ -1,7 +1,7 @@
 [workspace.package]
 version = "2.5.2"
 edition = "2024"
-rust-version = "1.95"
+rust-version = "1.96"
 license = "MIT OR Apache-2.0"
 homepage = "https://paradigmxyz.github.io/reth"
 repository = "https://github.com/paradigmxyz/reth"
@@ -428,8 +428,11 @@ reth-zstd-compressors = { version = "0.8.1", default-features = false }
 
 # revm
 revm = { version = "43.0.3", default-features = false }
-revmc = { git = "https://github.com/paradigmxyz/revmc", branch = "main", default-features = false, features = ["llvm-prefer-static"] }
-revm-inspectors = "0.43.0"
+# evm2
+evm2 = { git = "https://github.com/alloy-rs/evm2", rev = "70ba73d88580468b68dc85c3a7499e15d6623a7f", default-features = false }
+evm2-inspectors = { git = "https://github.com/alloy-rs/evm2", rev = "70ba73d88580468b68dc85c3a7499e15d6623a7f", default-features = false }
+evm2-jit = { git = "https://github.com/alloy-rs/evm2", rev = "70ba73d88580468b68dc85c3a7499e15d6623a7f", default-features = false }
+evm2-macros = { git = "https://github.com/alloy-rs/evm2", rev = "70ba73d88580468b68dc85c3a7499e15d6623a7f" }
 
 # eth
 alloy-dyn-abi = "1.6.1"
@@ -516,7 +519,9 @@ sha2 = { version = "0.10", default-features = false }
 slotmap = "1"
 smallvec = "1"
 strum = { version = "0.27", default-features = false }
-thiserror = { version = "2.0.0", default-features = false }
+strum_macros = "0.27"
+syn = "2.0"
+thiserror = { version = "2.0.20", default-features = false }
 tar = "0.4.46"
 tracing = { version = "0.1.0", default-features = false, features = ["attributes"] }
 tracing-appender = "0.2.5"

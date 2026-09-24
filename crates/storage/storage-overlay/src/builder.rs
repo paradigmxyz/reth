@@ -146,10 +146,15 @@ impl ExecutionOverlay {
         #[allow(unused_mut)]
         let mut extend_accounts_and_storage = || {
             for (address, account) in state.state() {
-                accounts.insert(*address, Self::normalized_account_info(account.info.clone()));
+                if account.info != account.original_info {
+                    accounts.insert(*address, Self::normalized_account_info(account.info.clone()));
+                }
                 if account.was_destroyed() {
                     storage_wipes.insert(*address);
                     storage.remove(address);
+                }
+                if account.storage.is_empty() {
+                    continue
                 }
                 let account_storage = storage.entry(*address).or_default();
                 for (slot, value) in &account.storage {
@@ -970,6 +975,7 @@ mod tests {
     #[test]
     fn execution_overlay_extends_bundle_state_without_account_ids() {
         let address = Address::with_last_byte(1);
+        let no_storage = Address::with_last_byte(2);
         let slot = U256::from(2);
         let value = U256::from(3);
         let code = Bytecode::new_raw(vec![0x60, 0x00].into());
@@ -983,6 +989,7 @@ mod tests {
         };
         let state = BundleState::builder(0..=0)
             .state_present_account_info(address, account.clone())
+            .state_present_account_info(no_storage, AccountInfo::default())
             .state_storage(address, HashMap::from_iter([(slot, (U256::ZERO, value))]))
             .contract(code_hash, code.clone())
             .build();
@@ -1000,6 +1007,8 @@ mod tests {
         );
         assert_eq!(stored_account.code, Some(code.clone()));
         assert_eq!(overlay.storage[&address][&slot], value);
+        assert!(!overlay.storage.contains_key(&no_storage));
+        assert_eq!(overlay.storage_value(no_storage, slot), None);
         assert_eq!(overlay.code_hashes[&code_hash], code);
     }
 
@@ -1018,9 +1027,30 @@ mod tests {
         );
 
         let mut overlay = ExecutionOverlay::default();
+        overlay.storage.entry(address).or_default().insert(U256::ZERO, U256::from(1));
         overlay.extend_state(&state);
 
+        assert!(!overlay.storage.contains_key(&address));
         assert_eq!(overlay.storage_value(address, U256::ZERO), Some(U256::ZERO));
+    }
+
+    #[test]
+    fn execution_overlay_storage_changes_preserve_account_fallback() {
+        let address = Address::with_last_byte(1);
+        let info = AccountInfo::default().with_balance(U256::from(5));
+        let state = BundleState::builder(0..=0)
+            .state_original_account_info(address, info.clone())
+            .state_present_account_info(address, info.clone())
+            .state_storage(address, HashMap::from_iter([(U256::ZERO, (U256::ZERO, U256::from(1)))]))
+            .build();
+        let mut overlay = ExecutionOverlay::default();
+        overlay.extend_state(&state);
+        assert!(!overlay.accounts.contains_key(&address));
+        assert_eq!(overlay.storage_value(address, U256::ZERO), Some(U256::from(1)));
+
+        overlay.accounts.insert(address, Some(info.clone()));
+        overlay.extend_state(&state);
+        assert_eq!(overlay.accounts[&address], Some(info));
     }
 
     #[test]

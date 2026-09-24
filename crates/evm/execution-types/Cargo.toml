@@ -16,6 +16,7 @@ reth-primitives-traits.workspace = true
 reth-trie-common.workspace = true
 
 revm.workspace = true
+evm2.workspace = true
 
 # alloy
 alloy-evm.workspace = true
@@ -39,6 +40,19 @@ rand.workspace = true
 alloy-rlp.workspace = true
 
 [features]
+asm-keccak = [
+    "evm2/asm-keccak",
+    "alloy-evm/asm-keccak",
+    "alloy-primitives/asm-keccak",
+    "revm/asm-keccak",
+]
+c-kzg = ["evm2/c-kzg"]
+blst = ["evm2/blst"]
+portable = [
+    "evm2/portable",
+    "revm/portable",
+]
+p256-aws-lc-rs = ["evm2/p256-aws-lc-rs"]
 default = ["std"]
 serde = [
     "dep:serde",
@@ -50,6 +64,7 @@ serde = [
     "alloy-consensus/serde",
     "reth-trie-common/serde",
     "reth-ethereum-primitives/serde",
+    "evm2/serde",
     "alloy-eip7928/serde",
 ]
 serde-bincode-compat = [
@@ -74,4 +89,5 @@ std = [
     "reth-trie-common/std",
     "alloy-evm/std",
     "alloy-rlp?/std",
+    "evm2/std",
 ]

@@ -33,12 +33,14 @@ where
     type Error = Inner::Error;
     type NextBlockEnvCtx = Inner::NextBlockEnvCtx;
     type BlockExecutorFactory = Inner::BlockExecutorFactory;
+    #[cfg(feature = "std")]
     type BlockAssembler = Inner::BlockAssembler;
-
+    #[cfg(feature = "std")]
     fn block_executor_factory(&self) -> &Self::BlockExecutorFactory {
         self.inner().block_executor_factory()
     }
 
+    #[cfg(feature = "std")]
     fn block_assembler(&self) -> &Self::BlockAssembler {
         self.inner().block_assembler()
     }
@@ -58,7 +60,10 @@ where
     fn context_for_block<'a>(
         &self,
         block: &'a SealedBlock<BlockTy<Self::Primitives>>,
-    ) -> Result<crate::ExecutionCtxFor<'a, Self>, Self::Error> {
+    ) -> Result<crate::ExecutionCtxFor<'a, Self>, Self::Error>
+    where
+        Self: 'a,
+    {
         self.inner().context_for_block(block)
     }
 

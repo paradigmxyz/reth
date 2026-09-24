@@ -10,7 +10,7 @@ use parking_lot::RwLock;
 use reth_chainspec::ChainInfo;
 use reth_ethereum_primitives::EthPrimitives;
 use reth_execution_types::{
-    BlockExecutionOutput, BlockExecutionResult, Chain, DecodedRevmBal, ExecutionOutcome,
+    BlockExecutionOutput, BlockExecutionResult, Chain, DecodedEvmBal, ExecutionOutcome,
 };
 use reth_metrics::{metrics::Gauge, Metrics};
 use reth_primitives_traits::{
@@ -748,10 +748,10 @@ pub struct ExecutedBlock<N: NodePrimitives = EthPrimitives> {
     /// validation (payload builder, persistence, tests) and downloaded blocks without a BAL
     /// sidecar leave it unset; the BAL store is the source of truth in that case.
     ///
-    /// When present, this carries the raw RLP (for the BAL store) together with the revm
+    /// When present, this carries the raw RLP (for the BAL store) together with the evm2
     /// representation (for consumers like the RPC state cache), so that neither has to be
     /// re-derived after validation.
-    pub bal: Option<Arc<DecodedRevmBal>>,
+    pub bal: Option<Arc<DecodedEvmBal>>,
 }
 
 impl<N: NodePrimitives> Default for ExecutedBlock<N> {
@@ -822,7 +822,7 @@ impl<N: NodePrimitives> ExecutedBlock<N> {
     }
 
     /// Attaches the prepared block access list of the block, or clears it with `None`.
-    pub fn with_bal(mut self, bal: Option<Arc<DecodedRevmBal>>) -> Self {
+    pub fn with_bal(mut self, bal: Option<Arc<DecodedEvmBal>>) -> Self {
         self.bal = bal;
         self
     }
@@ -831,7 +831,7 @@ impl<N: NodePrimitives> ExecutedBlock<N> {
     ///
     /// `None` only means no BAL was attached to this block; see the `bal` field for details.
     #[inline]
-    pub const fn bal(&self) -> Option<&Arc<DecodedRevmBal>> {
+    pub const fn bal(&self) -> Option<&Arc<DecodedEvmBal>> {
         self.bal.as_ref()
     }
 
@@ -1475,8 +1475,8 @@ mod tests {
         let block0 = test_block_builder.get_executed_block_with_number(0, B256::random());
         let block1 = test_block_builder
             .get_executed_block_with_number(1, block0.recovered_block.hash())
-            .with_bal(Some(Arc::new(DecodedRevmBal::new(
-                Arc::new(revm::state::bal::Bal::default()),
+            .with_bal(Some(Arc::new(DecodedEvmBal::new(
+                Arc::default(),
                 Bytes::from_static(&[0xc0]),
             ))));
 

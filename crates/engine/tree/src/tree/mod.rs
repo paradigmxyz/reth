@@ -36,12 +36,12 @@ use reth_provider::{
     StageCheckpointReader, StateProviderFactory, StateReader, StorageChangeSetReader,
     StorageSettingsCache, TransactionVariant,
 };
-use reth_revm::database::StateProviderDatabase;
+
+use reth_evm::debug_unreachable;
 use reth_stages_api::ControlFlow;
 use reth_storage_overlay::OverlayManager;
 use reth_tasks::{spawn_os_thread, utils::increase_thread_priority};
 use reth_trie::ComputedTrieData;
-use revm::interpreter::debug_unreachable;
 use state::TreeState;
 use std::{
     fmt::Debug,

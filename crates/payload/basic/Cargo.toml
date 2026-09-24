@@ -12,6 +12,7 @@ description = "A basic payload builder for reth that uses the txpool API to buil
 workspace = true
 
 [dependencies]
+reth-execution-types.workspace = true
 # reth
 reth-execution-cache.workspace = true
 reth-trie-parallel.workspace = true
@@ -19,8 +20,8 @@ reth-primitives-traits.workspace = true
 reth-payload-builder.workspace = true
 reth-payload-builder-primitives.workspace = true
 reth-payload-primitives.workspace = true
+reth-evm.workspace = true
 reth-tasks.workspace = true
-reth-revm.workspace = true
 reth-storage-api.workspace = true
 reth-chain-state.workspace = true
 

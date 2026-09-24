@@ -14,7 +14,6 @@ workspace = true
 # reth
 reth-storage-errors.workspace = true
 
-alloy-evm.workspace = true
 alloy-primitives.workspace = true
 alloy-rlp.workspace = true
 nybbles.workspace = true
@@ -29,5 +28,4 @@ std = [
     "thiserror/std",
     "nybbles/std",
     "reth-storage-errors/std",
-    "alloy-evm/std",
 ]

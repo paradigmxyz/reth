@@ -2,33 +2,16 @@
 
 #![warn(unused_crate_dependencies)]
 
-use alloy_evm::{
-    eth::EthEvmContext,
-    precompiles::PrecompilesMap,
-    revm::{
-        context::DBErrorMarker,
-        handler::EthPrecompiles,
-        precompile::{Precompile, PrecompileId},
-    },
-    EvmFactory,
-};
 use alloy_genesis::Genesis;
 use alloy_primitives::{address, Bytes};
+use evm2::{
+    evm::precompile::PrecompileOutput,
+    precompiles::{Precompile, PrecompileId},
+    BaseEvmTypes, SpecId,
+};
 use reth_ethereum::{
     chainspec::{Chain, ChainSpec},
-    evm::{
-        primitives::{Database, EvmEnv},
-        revm::{
-            context::{BlockEnv, Context, TxEnv},
-            context_interface::result::{EVMError, HaltReason},
-            inspector::{Inspector, NoOpInspector},
-            interpreter::interpreter::EthInterpreter,
-            precompile::{PrecompileOutput, Precompiles},
-            primitives::hardfork::SpecId,
-            MainBuilder, MainContext,
-        },
-        EthEvm, EthEvmConfig,
-    },
+    evm::{EthEvmConfig, EvmFactory},
     node::{
         api::{FullNodeTypes, NodeTypes},
         builder::{components::ExecutorBuilder, BuilderContext, NodeBuilder},
@@ -40,7 +23,6 @@ use reth_ethereum::{
     EthPrimitives,
 };
 use reth_tracing::{RethTracer, Tracer};
-use std::sync::OnceLock;
 
 /// Custom EVM configuration.
 #[derive(Debug, Clone, Default)]
@@ -48,39 +30,30 @@ use std::sync::OnceLock;
 pub struct MyEvmFactory;
 
 impl EvmFactory for MyEvmFactory {
-    type Evm<DB: Database, I: Inspector<EthEvmContext<DB>, EthInterpreter>> =
-        EthEvm<DB, I, Self::Precompiles>;
-    type Tx = TxEnv;
-    type Error<DBError: DBErrorMarker> = EVMError<DBError>;
-    type HaltReason = HaltReason;
-    type Context<DB: Database> = EthEvmContext<DB>;
-    type Spec = SpecId;
-    type BlockEnv = BlockEnv;
-    type Precompiles = PrecompilesMap;
+    type Types = BaseEvmTypes;
+    type SpecId = SpecId;
 
-    fn create_evm<DB: Database>(&self, db: DB, input: EvmEnv) -> Self::Evm<DB, NoOpInspector> {
-        let spec = input.cfg_env.spec;
-        let mut evm = Context::mainnet()
-            .with_db(db)
-            .with_cfg(input.cfg_env)
-            .with_block(input.block_env)
-            .build_mainnet_with_inspector(NoOpInspector {})
-            .with_precompiles(PrecompilesMap::from_static(EthPrecompiles::new(spec).precompiles));
-
-        if spec == SpecId::PRAGUE {
-            evm = evm.with_precompiles(PrecompilesMap::from_static(prague_custom()));
-        }
-
-        EthEvm::new(evm, false)
+    fn spec_id(&self, spec: SpecId) -> SpecId {
+        spec
     }
 
-    fn create_evm_with_inspector<DB: Database, I: Inspector<Self::Context<DB>, EthInterpreter>>(
+    fn tx_registry(
         &self,
-        db: DB,
-        input: EvmEnv,
-        inspector: I,
-    ) -> Self::Evm<DB, I> {
-        EthEvm::new(self.create_evm(db, input).into_inner().with_inspector(inspector), true)
+        spec: SpecId,
+    ) -> evm2::registry::TxRegistry<BaseEvmTypes, evm2::TxResult<BaseEvmTypes>> {
+        evm2::ethereum::ethereum_tx_registry(spec)
+    }
+
+    fn precompiles(&self, spec: SpecId) -> evm2::Precompiles<BaseEvmTypes> {
+        let mut precompiles = evm2::Precompiles::base(spec);
+        if spec == SpecId::PRAGUE {
+            precompiles.as_map_mut().insert(Precompile::new(
+                address!("0x0000000000000000000000000000000000000999"),
+                PrecompileId::custom("custom"),
+                |_, _, _| Ok(PrecompileOutput::new(Bytes::new())),
+            ));
+        }
+        precompiles
     }
 }
 
@@ -100,22 +73,6 @@ where
             EthEvmConfig::new_with_evm_factory(ctx.chain_spec(), MyEvmFactory::default());
         Ok(evm_config)
     }
-}
-
-/// Returns precompiles for Prague spec.
-pub fn prague_custom() -> &'static Precompiles {
-    static INSTANCE: OnceLock<Precompiles> = OnceLock::new();
-    INSTANCE.get_or_init(|| {
-        let mut precompiles = Precompiles::prague().clone();
-        // Custom precompile.
-        let precompile = Precompile::new(
-            PrecompileId::custom("custom"),
-            address!("0x0000000000000000000000000000000000000999"),
-            |_, _, _| Ok(PrecompileOutput::new(0, Bytes::new(), 0)),
-        );
-        precompiles.extend([precompile]);
-        precompiles
-    })
 }
 
 #[tokio::main]

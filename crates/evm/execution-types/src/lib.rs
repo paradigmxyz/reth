@@ -11,6 +11,16 @@
 
 extern crate alloc;
 
+pub use evm2::evm::{
+    AccountChangeRef as ExecutionAccountChangeRef, AccountInfo as ExecutionAccountInfo,
+    StateChangeSink as EvmStateChangeSink, StorageChange as ExecutionStorageChange,
+};
+pub use reth_trie_common::HashedPostState;
+pub use revm::state::EvmState;
+
+mod compat;
+pub use compat::*;
+
 mod bal;
 pub use bal::*;
 

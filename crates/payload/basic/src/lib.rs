@@ -14,6 +14,7 @@ use alloy_primitives::{B256, U256};
 use futures_core::ready;
 use futures_util::FutureExt;
 use reth_chain_state::CanonStateNotification;
+use reth_evm::{cached::CachedReads, cancelled::CancelOnDrop};
 use reth_execution_cache::SavedCache;
 use reth_payload_builder::{
     BuildNewPayload, KeepPayloadJobAlive, PayloadBuilderLease, PayloadId, PayloadJob,
@@ -22,7 +23,6 @@ use reth_payload_builder::{
 use reth_payload_builder_primitives::PayloadBuilderError;
 use reth_payload_primitives::{BuiltPayload, PayloadAttributes, PayloadKind};
 use reth_primitives_traits::{HeaderTy, NodePrimitives, SealedHeader};
-use reth_revm::{cached::CachedReads, cancelled::CancelOnDrop};
 use reth_storage_api::{BlockReaderIdExt, StateProviderFactory};
 use reth_tasks::Runtime;
 use reth_trie_parallel::state_root_task::PayloadStateRootHandle;
@@ -230,7 +230,7 @@ where
                 // this only includes changed accounts and storage but is better than nothing
                 let storage =
                     acc.storage.iter().map(|(key, slot)| (*key, slot.present_value)).collect();
-                cached.insert_account(addr, info, storage);
+                cached.insert_account(addr, reth_execution_types::native_account(&info), storage);
             }
         }
 

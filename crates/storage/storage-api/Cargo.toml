@@ -41,6 +41,11 @@ tokio = { workspace = true, features = ["sync"], optional = true }
 alloy-primitives = { workspace = true, features = ["getrandom"] }
 
 [features]
+asm-keccak = [
+    "reth-execution-types/asm-keccak",
+    "alloy-primitives/asm-keccak",
+    "revm/asm-keccak",
+]
 default = ["std"]
 std = [
     "reth-chainspec/std",

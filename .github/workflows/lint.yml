@@ -194,7 +194,7 @@ jobs:
       - run: .github/scripts/install_llvm.sh ubuntu
       - uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de # v1
         with:
-          toolchain: "1.95" # MSRV
+          toolchain: "1.96" # MSRV
       - uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:

@@ -362,10 +362,10 @@ async fn can_handle_invalid_payload_with_transactions() -> eyre::Result<()> {
     Ok(())
 }
 
-/// Tests that `engine_newPayloadV1` returns `INVALID` for an in-range but unrecoverable
-/// transaction signature, and still accepts the valid payload afterwards.
+/// Tests that sender recovery and EVM transaction validation failures return `INVALID`,
+/// and that the valid payload is still accepted afterwards.
 #[tokio::test]
-async fn unrecoverable_signature_is_invalid_payload() -> eyre::Result<()> {
+async fn invalid_transaction_is_invalid_payload() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
 
     let chain_spec = Arc::new(
@@ -382,7 +382,7 @@ async fn unrecoverable_signature_is_invalid_payload() -> eyre::Result<()> {
         .await?;
     let mut node = nodes.pop().unwrap();
 
-    let raw_tx = TransactionTestContext::transfer_tx_bytes(1, wallet.inner).await;
+    let raw_tx = TransactionTestContext::transfer_tx_bytes(1, wallet.inner.clone()).await;
     node.rpc.inject_tx(raw_tx).await?;
     let payload = node.new_payload().await?;
     let block = payload.block().clone();
@@ -395,25 +395,33 @@ async fn unrecoverable_signature_is_invalid_payload() -> eyre::Result<()> {
     let tx = TransactionSigned::decode_2718_exact(&raw_tx)?;
     let recovery_error = tx.try_recover().unwrap_err();
 
-    // Recompute the transaction root and block hash so validation reaches sender recovery.
-    let mut invalid_block = block.clone().into_block();
-    invalid_block.body.transactions = vec![tx];
-    invalid_block.header.transactions_root =
-        calculate_transaction_root(&invalid_block.body.transactions);
-    let invalid_payload =
-        ExecutionPayloadV1::from_block_unchecked(invalid_block.header.hash_slow(), &invalid_block);
-
+    let invalid_nonce =
+        TransactionTestContext::transfer_tx_bytes_with_nonce(1, wallet.inner, 1).await;
+    let invalid_nonce = TransactionSigned::decode_2718_exact(&invalid_nonce)?;
     let engine = node.auth_server_handle().http_client();
-    let status = EngineApiClient::<reth_node_ethereum::EthEngineTypes>::new_payload_v1(
-        &engine,
-        invalid_payload,
-    )
-    .await?;
-    let PayloadStatusEnum::Invalid { validation_error } = status.status else {
-        panic!("Expected INVALID for an unrecoverable signature, got {status:?}");
-    };
-    assert!(validation_error.contains(&recovery_error.to_string()), "{validation_error}");
-    assert_eq!(status.latest_valid_hash, Some(block.parent_hash));
+    for (tx, expected_error) in [(tx, recovery_error.to_string()), (invalid_nonce, "nonce".into())]
+    {
+        // Keep the payload well-formed so validation reaches recovery and execution.
+        let mut invalid_block = block.clone().into_block();
+        invalid_block.body.transactions = vec![tx];
+        invalid_block.header.transactions_root =
+            calculate_transaction_root(&invalid_block.body.transactions);
+        let invalid_payload = ExecutionPayloadV1::from_block_unchecked(
+            invalid_block.header.hash_slow(),
+            &invalid_block,
+        );
+
+        let status = EngineApiClient::<reth_node_ethereum::EthEngineTypes>::new_payload_v1(
+            &engine,
+            invalid_payload,
+        )
+        .await?;
+        let PayloadStatusEnum::Invalid { validation_error } = status.status else {
+            panic!("Expected INVALID for {expected_error}, got {status:?}");
+        };
+        assert!(validation_error.contains(&expected_error), "{validation_error}");
+        assert_eq!(status.latest_valid_hash, Some(block.parent_hash));
+    }
 
     let status = EngineApiClient::<reth_node_ethereum::EthEngineTypes>::new_payload_v1(
         &engine,

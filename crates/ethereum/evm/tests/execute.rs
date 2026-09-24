@@ -8,26 +8,23 @@ use alloy_eips::{
     eip7002::{WITHDRAWAL_REQUEST_PREDEPLOY_ADDRESS, WITHDRAWAL_REQUEST_PREDEPLOY_CODE},
     eip7685::EMPTY_REQUESTS_HASH,
 };
-use alloy_evm::block::BlockValidationError;
-use alloy_primitives::{b256, fixed_bytes, keccak256, Bytes, TxKind, B256, U256};
+use alloy_primitives::{address, b256, fixed_bytes, keccak256, Bytes, TxKind, B256, U256};
+use evm2::{
+    bytecode::Bytecode,
+    evm::{AccountInfo, CacheDB, Database, EmptyDB},
+};
 use reth_chainspec::{ChainSpecBuilder, EthereumHardfork, ForkCondition, MAINNET};
 use reth_ethereum_primitives::{Block, BlockBody, Transaction};
 use reth_evm::{
     execute::{BasicBlockExecutor, Executor},
-    ConfigureEvm,
+    BlockValidationError, ConfigureEvm,
 };
 use reth_evm_ethereum::EthEvmConfig;
-use reth_execution_types::BlockExecutionResult;
+use reth_execution_types::{BlockExecutionResult, BundleSource, EvmState};
 use reth_primitives_traits::{
     crypto::secp256k1::public_key_to_address, Block as _, RecoveredBlock,
 };
 use reth_testing_utils::generators::{self, sign_tx_with_key_pair};
-use revm::{
-    database::{CacheDB, EmptyDB, TransitionState},
-    primitives::address,
-    state::{AccountInfo, Bytecode, EvmState},
-    Database,
-};
 use std::sync::{mpsc, Arc};
 
 fn create_database_with_beacon_root_contract() -> CacheDB<EmptyDB> {
@@ -38,10 +35,10 @@ fn create_database_with_beacon_root_contract() -> CacheDB<EmptyDB> {
         code_hash: keccak256(BEACON_ROOTS_CODE.clone()),
         nonce: 1,
         code: Some(Bytecode::new_raw(BEACON_ROOTS_CODE.clone())),
-        account_id: None,
+        ..AccountInfo::empty()
     };
 
-    db.insert_account_info(BEACON_ROOTS_ADDRESS, beacon_root_contract_account);
+    db.insert_account_info(&BEACON_ROOTS_ADDRESS, beacon_root_contract_account);
 
     db
 }
@@ -54,11 +51,11 @@ fn create_database_with_withdrawal_requests_contract() -> CacheDB<EmptyDB> {
         balance: U256::ZERO,
         code_hash: keccak256(WITHDRAWAL_REQUEST_PREDEPLOY_CODE.clone()),
         code: Some(Bytecode::new_raw(WITHDRAWAL_REQUEST_PREDEPLOY_CODE.clone())),
-        account_id: None,
+        ..AccountInfo::empty()
     };
 
     db.insert_account_info(
-        WITHDRAWAL_REQUEST_PREDEPLOY_ADDRESS,
+        &WITHDRAWAL_REQUEST_PREDEPLOY_ADDRESS,
         withdrawal_requests_contract_account,
     );
 
@@ -70,7 +67,7 @@ fn eip_4788_non_genesis_call() {
     let mut header =
         Header { timestamp: 1, number: 1, excess_blob_gas: Some(0), ..Header::default() };
 
-    let db = create_database_with_beacon_root_contract();
+    let mut db = create_database_with_beacon_root_contract();
 
     let chain_spec = Arc::new(
         ChainSpecBuilder::from(&*MAINNET)
@@ -81,7 +78,7 @@ fn eip_4788_non_genesis_call() {
 
     let provider = EthEvmConfig::new(chain_spec);
 
-    let mut executor = BasicBlockExecutor::new(provider, db);
+    let mut executor = BasicBlockExecutor::new(provider, db.clone());
 
     // attempt to execute a block without parent beacon block root, expect err
     let err = executor
@@ -123,17 +120,15 @@ fn eip_4788_non_genesis_call() {
     let parent_beacon_block_root_index =
         timestamp_index % history_buffer_length + history_buffer_length;
 
-    let timestamp_storage = executor.with_state_mut(|state| {
-        state.storage(BEACON_ROOTS_ADDRESS, U256::from(timestamp_index)).unwrap()
-    });
+    db.commit_source(&BundleSource(&executor.into_state()));
+    let timestamp_storage =
+        db.get_storage(&BEACON_ROOTS_ADDRESS, &U256::from(timestamp_index)).unwrap();
     assert_eq!(timestamp_storage, U256::from(header.timestamp));
 
     // get parent beacon block root storage and compare
-    let parent_beacon_block_root_storage = executor.with_state_mut(|state| {
-        state
-            .storage(BEACON_ROOTS_ADDRESS, U256::from(parent_beacon_block_root_index))
-            .expect("storage value should exist")
-    });
+    let parent_beacon_block_root_storage = db
+        .get_storage(&BEACON_ROOTS_ADDRESS, &U256::from(parent_beacon_block_root_index))
+        .expect("storage value should exist");
     assert_eq!(parent_beacon_block_root_storage, U256::from(0x69));
 }
 
@@ -182,7 +177,7 @@ fn eip_4788_empty_account_call() {
     let mut db = create_database_with_beacon_root_contract();
 
     // insert an empty SYSTEM_ADDRESS
-    db.insert_account_info(SYSTEM_ADDRESS, Default::default());
+    db.insert_account_info(&SYSTEM_ADDRESS, Default::default());
 
     let chain_spec = Arc::new(
         ChainSpecBuilder::from(&*MAINNET)
@@ -202,7 +197,7 @@ fn eip_4788_empty_account_call() {
         ..Header::default()
     };
 
-    let mut executor = BasicBlockExecutor::new(provider, db);
+    let mut executor = BasicBlockExecutor::new(provider, db.clone());
 
     // attempt to execute an empty block with parent beacon block root, this should not fail
     executor
@@ -216,8 +211,8 @@ fn eip_4788_empty_account_call() {
         .expect("Executing a block with no transactions while cancun is active should not fail");
 
     // ensure that the nonce of the system address account has not changed
-    let nonce =
-        executor.with_state_mut(|state| state.basic(SYSTEM_ADDRESS).unwrap().unwrap().nonce);
+    db.commit_source(&BundleSource(&executor.into_state()));
+    let nonce = db.get_account(&SYSTEM_ADDRESS).unwrap().unwrap().nonce;
     assert_eq!(nonce, 0);
 }
 
@@ -261,14 +256,8 @@ fn eip_4788_genesis_call() {
         ))
         .unwrap();
 
-    // there is no system contract call so there should be NO STORAGE CHANGES
-    // this means we'll check the transition state
-    let transition_state = executor.with_state_mut(|state| {
-        state.transition_state.take().expect("the evm should be initialized with bundle updates")
-    });
-
-    // assert that it is the default (empty) transition state
-    assert_eq!(transition_state, TransitionState::default());
+    // Genesis must not produce a system-call state transition.
+    assert!(executor.into_state().state.is_empty());
 }
 
 #[test]
@@ -284,7 +273,7 @@ fn eip_4788_high_base_fee() {
         ..Header::default()
     };
 
-    let db = create_database_with_beacon_root_contract();
+    let mut db = create_database_with_beacon_root_contract();
 
     let chain_spec = Arc::new(
         ChainSpecBuilder::from(&*MAINNET)
@@ -296,7 +285,7 @@ fn eip_4788_high_base_fee() {
     let provider = EthEvmConfig::new(chain_spec);
 
     // execute header
-    let mut executor = BasicBlockExecutor::new(provider, db);
+    let mut executor = BasicBlockExecutor::new(provider, db.clone());
 
     // Now execute a block with the fixed header, ensure that it does not fail
     executor
@@ -317,15 +306,14 @@ fn eip_4788_high_base_fee() {
         timestamp_index % history_buffer_length + history_buffer_length;
 
     // get timestamp storage and compare
-    let timestamp_storage = executor.with_state_mut(|state| {
-        state.storage(BEACON_ROOTS_ADDRESS, U256::from(timestamp_index)).unwrap()
-    });
+    db.commit_source(&BundleSource(&executor.into_state()));
+    let timestamp_storage =
+        db.get_storage(&BEACON_ROOTS_ADDRESS, &U256::from(timestamp_index)).unwrap();
     assert_eq!(timestamp_storage, U256::from(header.timestamp));
 
     // get parent beacon block root storage and compare
-    let parent_beacon_block_root_storage = executor.with_state_mut(|state| {
-        state.storage(BEACON_ROOTS_ADDRESS, U256::from(parent_beacon_block_root_index)).unwrap()
-    });
+    let parent_beacon_block_root_storage =
+        db.get_storage(&BEACON_ROOTS_ADDRESS, &U256::from(parent_beacon_block_root_index)).unwrap();
     assert_eq!(parent_beacon_block_root_storage, U256::from(0x69));
 }
 
@@ -341,16 +329,16 @@ fn create_database_with_block_hashes(latest_block: u64) -> CacheDB<EmptyDB> {
         code_hash: keccak256(HISTORY_STORAGE_CODE.clone()),
         code: Some(Bytecode::new_raw(HISTORY_STORAGE_CODE.clone())),
         nonce: 1,
-        account_id: None,
+        ..AccountInfo::empty()
     };
 
-    db.insert_account_info(HISTORY_STORAGE_ADDRESS, blockhashes_contract_account);
+    db.insert_account_info(&HISTORY_STORAGE_ADDRESS, blockhashes_contract_account);
 
     db
 }
 #[test]
 fn eip_2935_pre_fork() {
-    let db = create_database_with_block_hashes(1);
+    let mut db = create_database_with_block_hashes(1);
 
     let chain_spec = Arc::new(
         ChainSpecBuilder::from(&*MAINNET)
@@ -360,7 +348,7 @@ fn eip_2935_pre_fork() {
     );
 
     let provider = EthEvmConfig::new(chain_spec);
-    let mut executor = BasicBlockExecutor::new(provider, db);
+    let mut executor = BasicBlockExecutor::new(provider, db.clone());
 
     // construct the header for block one
     let header = Header { timestamp: 1, number: 1, ..Header::default() };
@@ -375,18 +363,14 @@ fn eip_2935_pre_fork() {
 
     // ensure that the block hash was *not* written to storage, since this is before the fork
     // was activated
-    //
-    // we load the account first, because revm expects it to be
-    // loaded
-    executor.with_state_mut(|state| state.basic(HISTORY_STORAGE_ADDRESS).unwrap());
-    assert!(executor.with_state_mut(|state| {
-        state.storage(HISTORY_STORAGE_ADDRESS, U256::ZERO).unwrap().is_zero()
-    }));
+
+    db.commit_source(&BundleSource(&executor.into_state()));
+    assert!(db.get_storage(&HISTORY_STORAGE_ADDRESS, &U256::ZERO).unwrap().is_zero());
 }
 
 #[test]
 fn eip_2935_fork_activation_genesis() {
-    let db = create_database_with_block_hashes(0);
+    let mut db = create_database_with_block_hashes(0);
 
     let chain_spec = Arc::new(
         ChainSpecBuilder::from(&*MAINNET)
@@ -398,7 +382,7 @@ fn eip_2935_fork_activation_genesis() {
 
     let header = chain_spec.genesis_header().clone();
     let provider = EthEvmConfig::new(chain_spec);
-    let mut executor = BasicBlockExecutor::new(provider, db);
+    let mut executor = BasicBlockExecutor::new(provider, db.clone());
 
     // attempt to execute genesis block, this should not fail
     executor
@@ -410,19 +394,15 @@ fn eip_2935_fork_activation_genesis() {
 
     // ensure that the block hash was *not* written to storage, since there are no blocks
     // preceding genesis
-    //
-    // we load the account first, because revm expects it to be
-    // loaded
-    executor.with_state_mut(|state| state.basic(HISTORY_STORAGE_ADDRESS).unwrap());
-    assert!(executor.with_state_mut(|state| {
-        state.storage(HISTORY_STORAGE_ADDRESS, U256::ZERO).unwrap().is_zero()
-    }));
+
+    db.commit_source(&BundleSource(&executor.into_state()));
+    assert!(db.get_storage(&HISTORY_STORAGE_ADDRESS, &U256::ZERO).unwrap().is_zero());
 }
 
 #[test]
 fn eip_2935_fork_activation_within_window_bounds() {
     let fork_activation_block = (HISTORY_SERVE_WINDOW - 10) as u64;
-    let db = create_database_with_block_hashes(fork_activation_block);
+    let mut db = create_database_with_block_hashes(fork_activation_block);
 
     let chain_spec = Arc::new(
         ChainSpecBuilder::from(&*MAINNET)
@@ -442,7 +422,7 @@ fn eip_2935_fork_activation_within_window_bounds() {
         ..Header::default()
     };
     let provider = EthEvmConfig::new(chain_spec);
-    let mut executor = BasicBlockExecutor::new(provider, db);
+    let mut executor = BasicBlockExecutor::new(provider, db.clone());
 
     // attempt to execute the fork activation block, this should not fail
     executor
@@ -453,27 +433,25 @@ fn eip_2935_fork_activation_within_window_bounds() {
         .expect("Executing a block with no transactions while Prague is active should not fail");
 
     // the hash for the ancestor of the fork activation block should be present
-    assert!(
-        executor.with_state_mut(|state| state.basic(HISTORY_STORAGE_ADDRESS).unwrap().is_some())
-    );
+    db.commit_source(&BundleSource(&executor.into_state()));
+    assert!(db.get_account(&HISTORY_STORAGE_ADDRESS).unwrap().is_some());
     assert_ne!(
-        executor.with_state_mut(|state| state
-            .storage(HISTORY_STORAGE_ADDRESS, U256::from(fork_activation_block - 1))
-            .unwrap()),
+        db.get_storage(&HISTORY_STORAGE_ADDRESS, &U256::from(fork_activation_block - 1)).unwrap(),
         U256::ZERO
     );
 
     // the hash of the block itself should not be in storage
-    assert!(executor.with_state_mut(|state| {
-        state.storage(HISTORY_STORAGE_ADDRESS, U256::from(fork_activation_block)).unwrap().is_zero()
-    }));
+    assert!(db
+        .get_storage(&HISTORY_STORAGE_ADDRESS, &U256::from(fork_activation_block))
+        .unwrap()
+        .is_zero());
 }
 
 // <https://github.com/ethereum/EIPs/pull/9144>
 #[test]
 fn eip_2935_fork_activation_outside_window_bounds() {
     let fork_activation_block = (HISTORY_SERVE_WINDOW + 256) as u64;
-    let db = create_database_with_block_hashes(fork_activation_block);
+    let mut db = create_database_with_block_hashes(fork_activation_block);
 
     let chain_spec = Arc::new(
         ChainSpecBuilder::from(&*MAINNET)
@@ -484,7 +462,7 @@ fn eip_2935_fork_activation_outside_window_bounds() {
     );
 
     let provider = EthEvmConfig::new(chain_spec);
-    let mut executor = BasicBlockExecutor::new(provider, db);
+    let mut executor = BasicBlockExecutor::new(provider, db.clone());
 
     let header = Header {
         parent_hash: B256::random(),
@@ -505,15 +483,12 @@ fn eip_2935_fork_activation_outside_window_bounds() {
         .expect("Executing a block with no transactions while Prague is active should not fail");
 
     // the hash for the ancestor of the fork activation block should be present
-    assert!(
-        executor.with_state_mut(|state| state.basic(HISTORY_STORAGE_ADDRESS).unwrap().is_some())
-    );
+    db.commit_source(&BundleSource(&executor.into_state()));
+    assert!(db.get_account(&HISTORY_STORAGE_ADDRESS).unwrap().is_some());
 }
 
 #[test]
 fn eip_2935_state_transition_inside_fork() {
-    let db = create_database_with_block_hashes(2);
-
     let chain_spec = Arc::new(
         ChainSpecBuilder::from(&*MAINNET)
             .shanghai_activated()
@@ -522,96 +497,47 @@ fn eip_2935_state_transition_inside_fork() {
             .build(),
     );
 
-    let header = chain_spec.genesis_header().clone();
-    let header_hash = header.hash_slow();
+    // Check every prefix, including genesis, through the production batch executor.
+    for last_block in 0..=2 {
+        let mut db = create_database_with_block_hashes(2);
+        let mut executor =
+            BasicBlockExecutor::new(EthEvmConfig::new(chain_spec.clone()), db.clone());
+        let mut header = chain_spec.genesis_header().clone();
+        let mut parent_hashes = Vec::new();
+        for number in 0..=last_block {
+            if number != 0 {
+                let parent_hash = header.hash_slow();
+                parent_hashes.push(parent_hash);
+                header = Header {
+                    parent_hash,
+                    timestamp: 1,
+                    number,
+                    requests_hash: Some(EMPTY_REQUESTS_HASH),
+                    excess_blob_gas: Some(0),
+                    parent_beacon_block_root: Some(B256::random()),
+                    ..Header::default()
+                };
+            }
+            executor
+                .execute_one(&RecoveredBlock::new_unhashed(
+                    Block { header: header.clone(), body: Default::default() },
+                    vec![],
+                ))
+                .expect("Prague block execution succeeds");
+        }
 
-    let provider = EthEvmConfig::new(chain_spec);
-    let mut executor = BasicBlockExecutor::new(provider, db);
-
-    // attempt to execute the genesis block, this should not fail
-    executor
-        .execute_one(&RecoveredBlock::new_unhashed(
-            Block { header, body: Default::default() },
-            vec![],
-        ))
-        .expect("Executing a block with no transactions while Prague is active should not fail");
-
-    // nothing should be written as the genesis has no ancestors
-    //
-    // we load the account first, because revm expects it to be
-    // loaded
-    executor.with_state_mut(|state| state.basic(HISTORY_STORAGE_ADDRESS).unwrap());
-    assert!(executor.with_state_mut(|state| {
-        state.storage(HISTORY_STORAGE_ADDRESS, U256::ZERO).unwrap().is_zero()
-    }));
-
-    // attempt to execute block 1, this should not fail
-    let header = Header {
-        parent_hash: header_hash,
-        timestamp: 1,
-        number: 1,
-        requests_hash: Some(EMPTY_REQUESTS_HASH),
-        excess_blob_gas: Some(0),
-        parent_beacon_block_root: Some(B256::random()),
-        ..Header::default()
-    };
-    let header_hash = header.hash_slow();
-
-    executor
-        .execute_one(&RecoveredBlock::new_unhashed(
-            Block { header, body: Default::default() },
-            vec![],
-        ))
-        .expect("Executing a block with no transactions while Prague is active should not fail");
-
-    // the block hash of genesis should now be in storage, but not block 1
-    assert!(
-        executor.with_state_mut(|state| state.basic(HISTORY_STORAGE_ADDRESS).unwrap().is_some())
-    );
-    assert_ne!(
-        executor
-            .with_state_mut(|state| state.storage(HISTORY_STORAGE_ADDRESS, U256::ZERO).unwrap()),
-        U256::ZERO
-    );
-    assert!(executor.with_state_mut(|state| {
-        state.storage(HISTORY_STORAGE_ADDRESS, U256::from(1)).unwrap().is_zero()
-    }));
-
-    // attempt to execute block 2, this should not fail
-    let header = Header {
-        parent_hash: header_hash,
-        timestamp: 1,
-        number: 2,
-        requests_hash: Some(EMPTY_REQUESTS_HASH),
-        excess_blob_gas: Some(0),
-        parent_beacon_block_root: Some(B256::random()),
-        ..Header::default()
-    };
-
-    executor
-        .execute_one(&RecoveredBlock::new_unhashed(
-            Block { header, body: Default::default() },
-            vec![],
-        ))
-        .expect("Executing a block with no transactions while Prague is active should not fail");
-
-    // the block hash of genesis and block 1 should now be in storage, but not block 2
-    assert!(
-        executor.with_state_mut(|state| state.basic(HISTORY_STORAGE_ADDRESS).unwrap().is_some())
-    );
-    assert_ne!(
-        executor
-            .with_state_mut(|state| state.storage(HISTORY_STORAGE_ADDRESS, U256::ZERO).unwrap()),
-        U256::ZERO
-    );
-    assert_ne!(
-        executor
-            .with_state_mut(|state| state.storage(HISTORY_STORAGE_ADDRESS, U256::from(1)).unwrap()),
-        U256::ZERO
-    );
-    assert!(executor.with_state_mut(|state| {
-        state.storage(HISTORY_STORAGE_ADDRESS, U256::from(2)).unwrap().is_zero()
-    }));
+        db.commit_source(&BundleSource(&executor.into_state()));
+        for (number, hash) in parent_hashes.into_iter().enumerate() {
+            assert_eq!(
+                db.get_storage(&HISTORY_STORAGE_ADDRESS, &U256::from(number)).unwrap(),
+                U256::from_be_bytes(hash.0)
+            );
+        }
+        assert!(db
+            .get_storage(&HISTORY_STORAGE_ADDRESS, &U256::from(last_block))
+            .unwrap()
+            .is_zero());
+    }
 }
 
 #[test]
@@ -630,7 +556,7 @@ fn eip_7002() {
     let sender_address = public_key_to_address(sender_key_pair.public_key());
 
     db.insert_account_info(
-        sender_address,
+        &sender_address,
         AccountInfo { nonce: 1, balance: U256::from(ETH_TO_WEI), ..Default::default() },
     );
 
@@ -689,6 +615,7 @@ fn block_gas_limit_error() {
     let chain_spec = Arc::new(
         ChainSpecBuilder::from(&*MAINNET)
             .shanghai_activated()
+            .cancun_activated()
             .with_fork(EthereumHardfork::Prague, ForkCondition::Timestamp(0))
             .build(),
     );
@@ -703,7 +630,7 @@ fn block_gas_limit_error() {
 
     // Insert the sender account into the state with a nonce of 1 and a balance of 1 ETH in Wei
     db.insert_account_info(
-        sender_address,
+        &sender_address,
         AccountInfo { nonce: 1, balance: U256::from(ETH_TO_WEI), ..Default::default() },
     );
 
@@ -777,7 +704,7 @@ fn test_balance_increment_not_duplicated() {
     let mut db = CacheDB::new(EmptyDB::default());
     let initial_balance = 100;
     db.insert_account_info(
-        withdrawal_recipient,
+        &withdrawal_recipient,
         AccountInfo { balance: U256::from(initial_balance), nonce: 1, ..Default::default() },
     );
 
@@ -821,11 +748,10 @@ fn test_balance_increment_not_duplicated() {
     drop(tx);
     let balance_changes: Vec<U256> = rx.try_iter().collect();
 
-    if let Some(final_balance) = balance_changes.last() {
-        let expected_final_balance = U256::from(initial_balance) + U256::from(1_000_000_000); // initial + 1 Gwei in Wei
-        assert_eq!(
-            *final_balance, expected_final_balance,
-            "Final balance should match expected value after withdrawal"
-        );
-    }
+    let expected_final_balance = U256::from(initial_balance) + U256::from(1_000_000_000);
+    assert_eq!(
+        balance_changes,
+        [expected_final_balance],
+        "withdrawal must be streamed exactly once"
+    );
 }

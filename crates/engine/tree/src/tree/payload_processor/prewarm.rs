@@ -13,17 +13,20 @@
 
 use super::{bal_prewarm_pool::BalPrewarmPool, StateRootHintStream, StateRootUpdateStream};
 use crate::tree::{
-    precompile_cache::{CachedPrecompile, PrecompileCacheMap},
     CachedStateCacheMetrics, CachedStateMetrics, CachedStateProvider, ExecutionEnv,
     PayloadExecutionCache, SavedCache,
 };
-use alloy_consensus::transaction::TxHashRef;
 use alloy_eip7928::bal::DecodedBal;
 use alloy_eips::eip4895::Withdrawal;
-use alloy_primitives::keccak256;
+use alloy_primitives::{keccak256, Address};
+use core::convert::Infallible;
 use metrics::{Counter, Gauge, Histogram};
 use rayon::prelude::*;
-use reth_evm::{execute::ExecutableTxFor, ConfigureEvm, Evm, EvmFor, RecoveredTx, SpecFor};
+use reth_evm::{
+    database::StateProviderDatabase, ConfigureEvm, Evm as EvmInstance, EvmEnv, EvmFor,
+    ExecutableTxFor,
+};
+use reth_execution_types::{EvmStateChangeSink, ExecutionAccountChangeRef, ExecutionStorageChange};
 use reth_metrics::Metrics;
 use reth_primitives_traits::{FastInstant as Instant, NodePrimitives};
 use reth_provider::{
@@ -32,10 +35,9 @@ use reth_provider::{
     PruneCheckpointReader, StageCheckpointReader, StateProvider, StorageChangeSetReader,
     StorageSettingsCache,
 };
-use reth_revm::database::StateProviderDatabase;
 use reth_storage_overlay::OverlayStateProviderFactory;
 use reth_tasks::{pool::WorkerPool, Runtime};
-use reth_trie_common::MultiProofTargetsV2;
+use reth_trie_common::{MultiProofTargetsV2, ProofV2Target};
 use std::sync::{
     atomic::{AtomicBool, AtomicUsize, Ordering},
     mpsc::{self, channel, Receiver, Sender},
@@ -238,15 +240,16 @@ where
 
             let start = Instant::now();
 
-            let (tx_env, tx) = tx.into_parts();
-            let res = match evm.transact(tx_env) {
-                Ok(res) => res,
+            let (tx_env, _tx) = tx.into_parts();
+            // Prewarm workers must not commit speculative writes into the reused worker EVM:
+            // task scheduling would otherwise make later prewarm reads observe non-canonical state.
+            let mut proof_targets = PrewarmProofTargetsSink::default();
+            match evm.transact_and_discard(&tx_env, &mut proof_targets) {
+                Ok(()) => {}
                 Err(err) => {
                     trace!(
                         target: "engine::tree::payload_processor::prewarm",
                         %err,
-                        tx_hash=%tx.tx().tx_hash(),
-                        sender=%tx.signer(),
                         "Error when executing prewarm transaction",
                     );
                     ctx.metrics.transaction_errors.increment(1);
@@ -260,7 +263,7 @@ where
             }
 
             if index > 0 {
-                let (targets, storage_targets) = MultiProofTargetsV2::from_state(res.state);
+                let (targets, storage_targets) = proof_targets.into_parts();
                 ctx.metrics.prefetch_storage_targets.record(storage_targets as f64);
                 if let Some(state_root_hint_stream) = state_root_hint_stream {
                     state_root_hint_stream.on_access_hint(targets.into());
@@ -569,10 +572,6 @@ where
     /// loop. Prewarm workers skip transactions with `index < counter` since those have already
     /// been executed.
     pub executed_tx_index: Arc<AtomicUsize>,
-    /// Whether the precompile cache is disabled.
-    pub precompile_cache_disabled: bool,
-    /// The precompile cache map.
-    pub precompile_cache_map: PrecompileCacheMap<SpecFor<Evm>>,
     /// Whether to disable BAL-driven parallel state root computation.
     /// Only valid when BAL parallel execution is also disabled.
     pub disable_bal_parallel_state_root: bool,
@@ -582,7 +581,7 @@ where
 
 /// Per-thread EVM state initialised by [`PrewarmContext::evm_for_ctx`] and stored in
 /// [`WorkerPool`] workers via [`Worker::get_or_init`](reth_tasks::pool::Worker::get_or_init).
-type PrewarmEvmState<Evm> = Option<EvmFor<Evm, StateProviderDatabase<EvmStateProviderBox>>>;
+type PrewarmEvmState<Evm> = Option<EvmFor<'static, Evm>>;
 
 impl<N, P, Evm> PrewarmContext<N, P, Evm>
 where
@@ -622,35 +621,10 @@ where
             );
         }
 
-        let state_provider = StateProviderDatabase::new(state_provider);
+        let evm_env =
+            self.env.evm_env.clone().with_nonce_check_disabled().with_balance_check_disabled();
 
-        let mut evm_env = self.env.evm_env.clone();
-
-        // we must disable the nonce check so that we can execute the transaction even if the nonce
-        // doesn't match what's on chain.
-        evm_env.cfg_env.disable_nonce_check = true;
-
-        // disable the balance check so that transactions from senders who were funded by earlier
-        // transactions in the block can still be prewarmed
-        evm_env.cfg_env.disable_balance_check = true;
-
-        // create a new executor and disable nonce checks in the env
-        let spec_id = *evm_env.spec_id();
-        let mut evm = self.evm_config.evm_with_env(state_provider, evm_env);
-
-        if !self.precompile_cache_disabled {
-            // Only cache pure precompiles to avoid issues with stateful precompiles
-            evm.precompiles_mut().map_cacheable_precompiles(|address, precompile| {
-                CachedPrecompile::wrap(
-                    precompile,
-                    self.precompile_cache_map.cache_for_address(*address),
-                    spec_id,
-                    None, // No metrics for prewarm
-                )
-            });
-        }
-
-        Some(evm)
+        Some(self.evm_config.evm_with_env(StateProviderDatabase::new(state_provider), evm_env))
     }
 
     /// Returns `true` if prewarming should stop.
@@ -771,6 +745,59 @@ where
     }
 }
 
+#[derive(Debug, Default)]
+struct PrewarmProofTargetsSink {
+    targets: MultiProofTargetsV2,
+    storage_targets: usize,
+    selfdestructed: Vec<Address>,
+    last_storage_address: Option<(Address, alloy_primitives::B256)>,
+}
+
+impl PrewarmProofTargetsSink {
+    fn into_parts(mut self) -> (MultiProofTargetsV2, usize) {
+        // A transaction can write storage before selfdestructing. Such writes do not need
+        // speculative proofs, regardless of the order in which the stream reports them.
+        for address in self.selfdestructed {
+            if let Some(slots) = self.targets.storage_targets.remove(&keccak256(address)) {
+                self.storage_targets -= slots.len();
+            }
+        }
+        (self.targets, self.storage_targets)
+    }
+
+    fn storage_targets_for_address(&mut self, address: Address) -> &mut Vec<ProofV2Target> {
+        let hash = match self.last_storage_address {
+            Some((previous, hash)) if previous == address => hash,
+            _ => {
+                let hash = keccak256(address);
+                self.last_storage_address = Some((address, hash));
+                hash
+            }
+        };
+        self.targets.storage_targets.entry(hash).or_default()
+    }
+}
+
+impl EvmStateChangeSink for PrewarmProofTargetsSink {
+    type Error = Infallible;
+
+    fn account(&mut self, change: ExecutionAccountChangeRef<'_>) -> Result<(), Self::Error> {
+        if change.selfdestructed {
+            self.selfdestructed.push(change.address);
+        } else if change.original != change.current {
+            self.targets.account_targets.push(ProofV2Target::new(keccak256(change.address)));
+        }
+        Ok(())
+    }
+
+    fn storage(&mut self, change: ExecutionStorageChange) -> Result<(), Self::Error> {
+        self.storage_targets_for_address(change.address)
+            .push(ProofV2Target::new(keccak256(change.key.to_be_bytes::<32>())));
+        self.storage_targets += 1;
+        Ok(())
+    }
+}
+
 /// Returns [`MultiProofTargetsV2`] for withdrawal addresses.
 ///
 /// Withdrawals only modify account balances (no storage), so the targets contain
@@ -813,8 +840,6 @@ mod tests {
             cache_state_metrics: None,
             terminate_execution: Arc::clone(&terminate_execution),
             executed_tx_index: Arc::new(AtomicUsize::new(0)),
-            precompile_cache_disabled: false,
-            precompile_cache_map: PrecompileCacheMap::default(),
             disable_bal_parallel_state_root: false,
             disable_bal_batch_io: false,
         };
@@ -856,8 +881,6 @@ mod tests {
             cache_state_metrics: None,
             terminate_execution: Arc::new(AtomicBool::new(false)),
             executed_tx_index: Arc::new(AtomicUsize::new(0)),
-            precompile_cache_disabled: false,
-            precompile_cache_map: PrecompileCacheMap::default(),
             disable_bal_parallel_state_root: false,
             disable_bal_batch_io: false,
         }
@@ -867,7 +890,7 @@ mod tests {
         runtime: &Runtime,
         execution_cache: &PayloadExecutionCache,
         saved_cache: SavedCache,
-        state: reth_revm::db::BundleState,
+        state: revm::database::BundleState,
         valid: bool,
         saving_duration: Gauge,
     ) {
@@ -1006,7 +1029,7 @@ mod tests {
             inspected: inspected_rx,
             result: result_tx,
         });
-        let code = reth_revm::bytecode::Bytecode::new_eip7702_raw(bytes.into()).unwrap();
+        let code = revm::bytecode::Bytecode::new_eip7702_raw(bytes.into()).unwrap();
         saved
             .cache()
             .insert_code(B256::repeat_byte(3), Some(reth_primitives_traits::Bytecode(code)));
@@ -1064,9 +1087,7 @@ mod tests {
         assert_ne!(drop_thread, prewarm_thread);
     }
 
-    fn assert_save_cache_drops_removed_caches(slot: CacheSlot, valid: bool, insert_error: bool) {
-        use reth_revm::db::{AccountStatus, BundleAccount, BundleState};
-
+    fn assert_save_cache_drops_removed_caches(slot: CacheSlot, valid: bool) {
         let runtime = Runtime::test();
         let execution_cache = PayloadExecutionCache::default();
         let cache_to_save =
@@ -1082,7 +1103,7 @@ mod tests {
                 CacheSlot::Distinct => distinct_previous.clone(),
             };
         });
-        let expect_saved_cache = valid && !insert_error;
+        let expect_saved_cache = valid;
         let mut drops = Vec::new();
         if let Some(previous) = &distinct_previous {
             drops.push(observe_cache_drop(previous, &execution_cache, expect_saved_cache));
@@ -1099,14 +1120,7 @@ mod tests {
             let _ = release_rx.recv();
         });
 
-        let mut state = BundleState::default();
-        if insert_error {
-            // Modified accounts without current info are rejected by insert_state.
-            state.state.insert(
-                address!("0000000000000000000000000000000000000001"),
-                BundleAccount::new(None, None, Default::default(), AccountStatus::Changed),
-            );
-        }
+        let state = Default::default();
         save_test_cache(&runtime, &execution_cache, cache_to_save, state, valid, Gauge::noop());
 
         for (result, reader) in drops {
@@ -1133,33 +1147,120 @@ mod tests {
 
     #[test]
     fn save_cache_drops_replaced_allocation_after_unlock() {
-        assert_save_cache_drops_removed_caches(CacheSlot::Distinct, true, false);
+        assert_save_cache_drops_removed_caches(CacheSlot::Distinct, true);
     }
 
     #[test]
     fn save_cache_drops_invalid_allocations_after_unlock() {
-        assert_save_cache_drops_removed_caches(CacheSlot::Distinct, false, false);
-    }
-
-    #[test]
-    fn save_cache_drops_allocations_after_unlock_on_insert_error() {
-        assert_save_cache_drops_removed_caches(CacheSlot::Distinct, true, true);
+        assert_save_cache_drops_removed_caches(CacheSlot::Distinct, false);
     }
 
     #[test]
     fn save_cache_drops_shared_allocation_after_unlock_on_invalid_block() {
-        assert_save_cache_drops_removed_caches(CacheSlot::Shared, false, false);
-    }
-
-    #[test]
-    fn save_cache_drops_shared_allocation_after_unlock_on_insert_error() {
-        assert_save_cache_drops_removed_caches(CacheSlot::Shared, true, true);
+        assert_save_cache_drops_removed_caches(CacheSlot::Shared, false);
     }
 
     #[test]
     fn save_cache_handles_empty_slot() {
-        for (valid, insert_error) in [(true, false), (false, false), (true, true)] {
-            assert_save_cache_drops_removed_caches(CacheSlot::Empty, valid, insert_error);
+        for valid in [true, false] {
+            assert_save_cache_drops_removed_caches(CacheSlot::Empty, valid);
+        }
+    }
+
+    #[test]
+    fn prewarm_targets_ignore_unchanged_reads() {
+        let address = Address::repeat_byte(1);
+        let slot = U256::from(7);
+        let mut sink = PrewarmProofTargetsSink::default();
+        sink.account_read(address, None).unwrap();
+        sink.storage_read(address, slot, U256::from(8)).unwrap();
+        let (targets, count) = sink.into_parts();
+        assert!(targets.account_targets.is_empty());
+        assert!(targets.storage_targets.is_empty());
+        assert_eq!(count, 0);
+    }
+
+    #[test]
+    fn prewarm_targets_include_changes() {
+        let address = Address::repeat_byte(1);
+        let slot = U256::from(7);
+        let original = reth_execution_types::ExecutionAccountInfo::default();
+        let current = reth_execution_types::ExecutionAccountInfo { nonce: 1, ..original.clone() };
+        let mut sink = PrewarmProofTargetsSink::default();
+        sink.account(ExecutionAccountChangeRef {
+            address,
+            original: Some(&original),
+            current: Some(&current),
+            created: false,
+            selfdestructed: false,
+        })
+        .unwrap();
+        sink.storage(ExecutionStorageChange {
+            address,
+            key: slot,
+            original: U256::ZERO,
+            current: U256::from(8),
+        })
+        .unwrap();
+        let (targets, count) = sink.into_parts();
+        assert_eq!(
+            targets.account_targets.iter().map(ProofV2Target::key).collect::<Vec<_>>(),
+            vec![keccak256(address)]
+        );
+        assert_eq!(
+            targets.storage_targets[&keccak256(address)]
+                .iter()
+                .map(ProofV2Target::key)
+                .collect::<Vec<_>>(),
+            vec![keccak256(slot.to_be_bytes::<32>())]
+        );
+        assert_eq!(count, 1);
+    }
+
+    #[test]
+    fn prewarm_targets_discard_selfdestructed_storage() {
+        let address = Address::repeat_byte(1);
+        let retained = Address::repeat_byte(2);
+        let info = reth_execution_types::ExecutionAccountInfo::default();
+        for account_first in [false, true] {
+            let mut sink = PrewarmProofTargetsSink::default();
+            let destroyed = ExecutionAccountChangeRef {
+                address,
+                original: Some(&info),
+                current: None,
+                created: true,
+                selfdestructed: true,
+            };
+            if account_first {
+                sink.account(destroyed).unwrap();
+            }
+            sink.storage_wipe(address).unwrap();
+            for address in [address, retained] {
+                sink.storage(ExecutionStorageChange {
+                    address,
+                    key: U256::from(7),
+                    original: U256::ZERO,
+                    current: U256::from(8),
+                })
+                .unwrap();
+            }
+            if !account_first {
+                sink.account(destroyed).unwrap();
+            }
+            // Lifecycle flags alone do not imply an account trie update.
+            sink.account(ExecutionAccountChangeRef {
+                address: retained,
+                original: Some(&info),
+                current: Some(&info),
+                created: true,
+                selfdestructed: false,
+            })
+            .unwrap();
+            let (targets, count) = sink.into_parts();
+            assert!(targets.account_targets.is_empty());
+            assert_eq!(targets.storage_targets.len(), 1);
+            assert!(targets.storage_targets.contains_key(&keccak256(retained)));
+            assert_eq!(count, 1);
         }
     }
 
@@ -1194,7 +1295,7 @@ mod tests {
 /// The events the pre-warm task can handle.
 ///
 /// Generic over `R` (receipt type) to allow sharing `Arc<ExecutionOutcome<R>>` with the main
-/// execution path without cloning the expensive `BundleState`.
+/// execution path without cloning the execution state.
 #[derive(Debug)]
 pub enum PrewarmTaskEvent<R> {
     /// Signals the prewarm workers to stop executing further transactions.
@@ -1213,7 +1314,7 @@ pub enum PrewarmTaskEvent<R> {
     Terminate {
         /// The final execution outcome, or `None` when the task is torn down without one (e.g. a
         /// dropped handle). Using `Arc` allows sharing with the main execution path without
-        /// cloning the expensive `BundleState`.
+        /// cloning the execution state.
         execution_outcome: Option<Arc<BlockExecutionOutput<R>>>,
         /// Receiver for the block validation result.
         ///
