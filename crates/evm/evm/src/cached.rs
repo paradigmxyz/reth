@@ -297,13 +297,7 @@ mod tests {
         let value = U256::from(5);
         let reads = Rc::new(ReadCounts::default());
         let db = CountingDb {
-            account: Some(AccountInfo {
-                balance: U256::from(1),
-                nonce: 2,
-                code_hash,
-                code: None,
-                _non_exhaustive: (),
-            }),
+            account: Some(AccountInfo::new(U256::from(1), 2, code_hash, None)),
             code: Bytecode::new_raw([0x00].as_slice().into()),
             storage: value,
             block_hash,

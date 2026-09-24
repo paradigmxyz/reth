@@ -108,7 +108,9 @@ where
     type Error = ProviderError;
 
     fn get_account(&mut self, address: &Address) -> Result<Option<AccountInfo>, Self::Error> {
-        Ok(self.0.basic_account(address)?.map(account_to_evm))
+        Ok(self.0.basic_account(address)?.map(|account| {
+            AccountInfo::new(account.balance, account.nonce, account.get_bytecode_hash(), None)
+        }))
     }
 
     fn get_code_by_hash(&mut self, code_hash: &B256) -> Result<Bytecode, Self::Error> {
@@ -128,17 +130,6 @@ where
         self.0
             .block_hash(number)?
             .ok_or(ProviderError::HeaderNotFound(BlockHashOrNumber::Number(number)))
-    }
-}
-
-#[cfg(feature = "std")]
-fn account_to_evm(account: Account) -> AccountInfo {
-    AccountInfo {
-        balance: account.balance,
-        nonce: account.nonce,
-        code_hash: account.get_bytecode_hash(),
-        code: None,
-        _non_exhaustive: (),
     }
 }
 

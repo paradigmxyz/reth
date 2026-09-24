@@ -176,13 +176,12 @@ impl evm2::evm::StateChangeSource for BundleSource<'_> {
 
 /// Converts persistent account information into evm2's execution representation.
 pub fn native_account(info: &AccountInfo) -> evm2::evm::AccountInfo {
-    evm2::evm::AccountInfo {
-        balance: info.balance,
-        nonce: info.nonce,
-        code_hash: info.code_hash,
-        code: info.code.as_ref().map(native_bytecode),
-        _non_exhaustive: (),
-    }
+    evm2::evm::AccountInfo::new(
+        info.balance,
+        info.nonce,
+        info.code_hash,
+        info.code.as_ref().map(native_bytecode),
+    )
 }
 
 /// Converts persistent bytecode while retaining its analyzed jump destinations and padding.

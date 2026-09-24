@@ -20,7 +20,7 @@ use alloy_eips::{
     eip7251::CONSOLIDATION_REQUEST_TYPE,
     eip7685::Requests,
 };
-use alloy_primitives::{map::AddressMap, Address, Bytes, Log, B256, KECCAK256_EMPTY, U256};
+use alloy_primitives::{map::AddressMap, Address, Bytes, Log, B256, U256};
 use alloy_sol_types::{sol, SolEvent};
 use core::any::Any;
 use evm2::{
@@ -670,7 +670,7 @@ pub(crate) fn post_block_balance_state_changes<T: EvmTypes>(
         {
             None
         } else {
-            let mut current = original.clone().unwrap_or_else(empty_account);
+            let mut current = original.clone().unwrap_or_else(AccountInfo::empty);
             current.balance = current.balance.saturating_add(increment);
             Some(current)
         };
@@ -707,16 +707,6 @@ const fn block_reward(base_block_reward: u128, ommers: usize) -> u128 {
 fn ommer_reward(base_block_reward: u128, block_number: u64, ommer_block_number: u64) -> u128 {
     let distance = 8u64.saturating_add(ommer_block_number).saturating_sub(block_number);
     (u128::from(distance) * base_block_reward) >> 3
-}
-
-const fn empty_account() -> AccountInfo {
-    AccountInfo {
-        balance: U256::ZERO,
-        nonce: 0,
-        code_hash: KECCAK256_EMPTY,
-        code: None,
-        _non_exhaustive: (),
-    }
 }
 
 #[cfg(test)]
