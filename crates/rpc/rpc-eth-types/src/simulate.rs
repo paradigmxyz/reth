@@ -34,6 +34,10 @@ use revm::{
     Database,
 };
 
+pub use alloy_rpc_types_eth::simulate::{
+    FrameSimulationFrameResult, FrameSimulationPrefixShape, FrameSimulationResult,
+};
+
 /// Fallback seconds added between simulated block timestamps when neither the user nor the chain
 /// hint provides a value.
 const SIMULATE_FALLBACK_TIMESTAMP_INCREMENT: u64 = 12;
@@ -655,13 +659,15 @@ where
 mod tests {
     use super::{
         apply_precompile_overrides, ensure_frame_simulation_gas, sanitize_chain, EthSimulateError,
+        FrameSimulationFrameResult, FrameSimulationPrefixShape, FrameSimulationResult,
         INTERNAL_ERROR_CODE,
     };
     use crate::{error::ToRpcError, EthApiError};
     use alloy_chains::Chain;
     use alloy_consensus::Header;
+    use alloy_eips::eip8141::FrameStatus;
     use alloy_evm::precompiles::PrecompilesMap;
-    use alloy_primitives::{address, U256};
+    use alloy_primitives::{address, Address, U256};
     use alloy_rpc_types_eth::{
         simulate::SimBlock,
         state::{AccountOverride, StateOverride},
@@ -669,6 +675,40 @@ mod tests {
     };
     use reth_primitives_traits::SealedHeader;
     use revm::precompile::Precompiles;
+    use serde_json::json;
+
+    #[test]
+    fn frame_simulation_result_serializes_rpc_fields() {
+        let result = FrameSimulationResult {
+            valid: true,
+            max_cost: U256::from(123),
+            prefix_shape: Some(FrameSimulationPrefixShape::OnlyVerifyPay),
+            payer: Some(Address::repeat_byte(0x11)),
+            violation: None,
+            gas_used: Some(456),
+            frames: Some(vec![FrameSimulationFrameResult {
+                execution_gas: 5,
+                state_gas: 7,
+                status: FrameStatus::Failure,
+            }]),
+        };
+
+        assert_eq!(
+            serde_json::to_value(result).unwrap(),
+            json!({
+                "valid": true,
+                "maxCost": "0x7b",
+                "prefixShape": "onlyVerifyPay",
+                "payer": "0x1111111111111111111111111111111111111111",
+                "gasUsed": "0x1c8",
+                "frames": [{
+                    "executionGas": "0x5",
+                    "stateGas": "0x7",
+                    "status": "0x0",
+                }],
+            })
+        );
+    }
 
     #[test]
     fn frame_simulation_checks_resolved_budget_and_separate_dimensions() {

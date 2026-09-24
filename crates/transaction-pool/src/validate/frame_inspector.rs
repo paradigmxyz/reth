@@ -276,7 +276,7 @@ where
 mod tests {
     use super::*;
     use alloy_consensus::TxEip8141;
-    use alloy_eips::eip8141::{Frame, FrameLimits, FrameMode};
+    use alloy_eips::eip8141::{Frame, FrameAddress, FrameLimits, FrameMode};
     use alloy_primitives::Bytes;
     use revm::{
         context::{transaction::FrameTransaction, Context, ContextSetters, TxEnv},
@@ -415,7 +415,7 @@ mod tests {
                     },
                     Frame {
                         mode: FrameMode::Sender,
-                        target: Bytes::copy_from_slice(suffix.as_slice()),
+                        target: FrameAddress::from(suffix),
                         limits: FrameLimits { execution: 10_000, state: 0 },
                         ..Default::default()
                     },

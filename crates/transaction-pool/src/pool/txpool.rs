@@ -1780,13 +1780,19 @@ impl<T: PoolTransaction> AllTransactions<T> {
             }
         }
 
-        match tx.transaction.max_fee_per_blob_gas() {
-            Some(blob_fee_cap) if blob_fee_cap < pending_fees.blob_fee => {
-                tx.state.remove(TxState::ENOUGH_BLOB_FEE_CAP_BLOCK);
+        if tx.transaction.is_blob_transaction() {
+            match tx.transaction.max_fee_per_blob_gas() {
+                Some(blob_fee_cap) if blob_fee_cap < pending_fees.blob_fee => {
+                    tx.state.remove(TxState::ENOUGH_BLOB_FEE_CAP_BLOCK);
+                }
+                _ => {
+                    tx.state.insert(TxState::ENOUGH_BLOB_FEE_CAP_BLOCK);
+                }
             }
-            _ => {
-                tx.state.insert(TxState::ENOUGH_BLOB_FEE_CAP_BLOCK);
-            }
+        } else {
+            // Frame transactions may carry a zero blob-fee field even when they have no blob
+            // hashes. They must not be parked by the blob-fee subpool gate.
+            tx.state.insert(TxState::ENOUGH_BLOB_FEE_CAP_BLOCK);
         }
     }
 

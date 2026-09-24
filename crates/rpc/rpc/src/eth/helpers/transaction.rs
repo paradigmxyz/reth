@@ -136,8 +136,9 @@ mod tests {
     use alloy_consensus::{
         BlobTransactionSidecar, Block, Header, SidecarBuilder, SimpleCoder, Transaction,
     };
+    use alloy_eips::eip8141::{Frame, FrameAddress, FrameLimits, FrameMode};
     use alloy_primitives::{map::AddressMap, Address, Bytes, U256};
-    use alloy_rpc_types_eth::request::TransactionRequest;
+    use alloy_rpc_types_eth::{request::TransactionRequest, state::EvmOverrides};
     use reth_chainspec::{ChainSpec, ChainSpecBuilder};
     use reth_evm_ethereum::EthEvmConfig;
     use reth_network_api::noop::NoopNetwork;
@@ -145,7 +146,7 @@ mod tests {
         test_utils::{ExtendedAccount, MockEthProvider},
         ChainSpecProvider,
     };
-    use reth_rpc_eth_api::node::RpcNodeCoreAdapter;
+    use reth_rpc_eth_api::{helpers::EthCall, node::RpcNodeCoreAdapter};
     use reth_transaction_pool::{
         test_utils::{testing_pool, TestPool},
         TransactionOrigin, TransactionPool,
@@ -168,7 +169,7 @@ mod tests {
         EthRpcConverter<ChainSpec>,
     > {
         let mock_provider = MockEthProvider::default()
-            .with_chain_spec(ChainSpecBuilder::mainnet().cancun_activated().build());
+            .with_chain_spec(ChainSpecBuilder::mainnet().bogota_activated().build());
         mock_provider.extend_accounts(accounts);
 
         let evm_config = EthEvmConfig::new(mock_provider.chain_spec());
@@ -426,6 +427,82 @@ mod tests {
             eth_api.fill_transaction(tx_req).await.expect("fill_transaction should succeed");
 
         assert_eq!(filled.tx.nonce(), nonce);
+    }
+
+    #[tokio::test]
+    async fn fill_frame_transaction_preserves_frame_limits() {
+        let address = Address::random();
+        let nonce = 42u64;
+        let limits = FrameLimits { execution: 45_000, state: 7_000 };
+        let accounts = AddressMap::from_iter([(
+            address,
+            ExtendedAccount::new(nonce, U256::from(10_000_000_000_000_000_000u64)),
+        )]);
+        let eth_api = mock_eth_api(accounts);
+
+        let tx_req = TransactionRequest {
+            from: Some(address),
+            transaction_type: Some(0x06),
+            frames: Some(vec![Frame { limits: limits.clone(), ..Default::default() }]),
+            ..Default::default()
+        };
+
+        let filled = eth_api.fill_transaction(tx_req).await.expect("frame fill should succeed");
+        let frame_tx = filled.tx.frame_transaction().expect("filled transaction should be a frame");
+
+        assert_eq!(frame_tx.sender, address);
+        assert_eq!(frame_tx.nonce, nonce);
+        assert_eq!(frame_tx.chain_id, 1);
+        assert_eq!(frame_tx.frames[0].limits, limits);
+        assert!(frame_tx.signatures.is_empty());
+        assert_eq!(filled.tx.gas_limit(), frame_tx.calculate_gas_limit());
+    }
+
+    #[tokio::test]
+    async fn estimate_frame_transaction_returns_derived_outer_limit() {
+        let address = Address::random();
+        let limits = FrameLimits { execution: 45_000, state: 7_000 };
+        let accounts = AddressMap::from_iter([(
+            address,
+            ExtendedAccount::new(0, U256::from(10_000_000_000_000_000_000u64))
+                .with_bytecode(Bytes::from_static(&[0x60, 0x03, 0x5f, 0x5f, 0xaa, 0x00])),
+        )]);
+        let eth_api = mock_eth_api(accounts);
+        let tx_req = TransactionRequest {
+            from: Some(address),
+            transaction_type: Some(0x06),
+            // The outer RPC field must not override the canonical reservation derived from the
+            // frame execution and state limits.
+            gas: Some(1),
+            frames: Some(vec![Frame {
+                mode: FrameMode::Verify,
+                flags: 3,
+                target: FrameAddress::from(address),
+                limits,
+                ..Default::default()
+            }]),
+            ..Default::default()
+        };
+        let expected = eth_api
+            .converter()
+            .build_simulate_v1_transaction(TransactionRequest {
+                nonce: Some(0),
+                gas: None,
+                max_fee_per_gas: Some(0),
+                max_priority_fee_per_gas: Some(0),
+                max_fee_per_blob_gas: Some(0),
+                signatures: Some(Vec::new()),
+                ..tx_req.clone()
+            })
+            .expect("frame request should convert")
+            .gas_limit();
+
+        let estimated =
+            EthCall::estimate_gas_at(&eth_api, tx_req, BlockId::latest(), EvmOverrides::default())
+                .await
+                .expect("frame gas estimation should succeed");
+
+        assert_eq!(estimated, U256::from(expected));
     }
 
     #[tokio::test]

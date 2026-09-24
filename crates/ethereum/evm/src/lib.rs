@@ -18,7 +18,7 @@
 extern crate alloc;
 
 use alloc::{borrow::Cow, sync::Arc};
-use alloy_consensus::Header;
+use alloy_consensus::{Header, TxEip8141};
 use alloy_evm::{
     eth::{EthBlockExecutionCtx, EthBlockExecutorFactory},
     EthEvmFactory, FromRecoveredTx, FromTxWithEncoded,
@@ -142,6 +142,7 @@ where
     EvmF: EvmFactory<
             Tx: TransactionEnvMut
                     + FromRecoveredTx<TransactionSigned>
+                    + FromRecoveredTx<TxEip8141>
                     + FromTxWithEncoded<TransactionSigned>,
             Spec = SpecId,
             BlockEnv = BlockEnv,
@@ -275,6 +276,7 @@ where
     EvmF: EvmFactory<
             Tx: TransactionEnvMut
                     + FromRecoveredTx<TransactionSigned>
+                    + FromRecoveredTx<TxEip8141>
                     + FromTxWithEncoded<TransactionSigned>,
             Spec = SpecId,
             BlockEnv = BlockEnv,

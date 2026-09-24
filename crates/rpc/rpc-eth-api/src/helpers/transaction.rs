@@ -14,7 +14,7 @@ use alloy_consensus::{
 use alloy_dyn_abi::TypedData;
 use alloy_eip7928::bal::DecodedBal;
 use alloy_eips::{eip2718::Encodable2718, BlockId};
-use alloy_network::{TransactionBuilder, TransactionBuilder4844};
+use alloy_network::{NetworkTransactionBuilder, TransactionBuilder, TransactionBuilder4844};
 use alloy_primitives::{Address, Bytes, TxHash, B256, U256};
 use alloy_rpc_types_eth::{state::EvmOverrides, TransactionInfo};
 use futures::{Future, StreamExt};
@@ -560,6 +560,100 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
         Self: EthApiSpec + LoadBlock + EstimateCall + LoadFee,
     {
         async move {
+            let is_frame = Into::<u8>::into(request.as_ref().output_tx_type()) == 0x06;
+            if is_frame {
+                if request.as_ref().from.is_none() {
+                    return Err(EthApiError::InvalidParams(
+                        "frame transactions require a sender before filling".into(),
+                    )
+                    .into())
+                }
+                if request.as_ref().frames.is_none() {
+                    return Err(EthApiError::InvalidParams(
+                        "frame transactions require frames with execution and state gas limits"
+                            .into(),
+                    )
+                    .into())
+                }
+
+                let has_signatures = request
+                    .as_ref()
+                    .signatures
+                    .as_ref()
+                    .is_some_and(|signatures| !signatures.is_empty());
+                if has_signatures &&
+                    (request.as_ref().chain_id().is_none() ||
+                        request.as_ref().nonce().is_none() ||
+                        request.as_ref().complete_8141().is_err())
+                {
+                    return Err(EthApiError::InvalidParams(
+                        "signed frame transactions must include their sender, nonce, chainId, frames, and fees before filling"
+                            .into(),
+                    )
+                    .into())
+                }
+
+                let chain_id = self.chain_id();
+                if let Some(request_chain_id) = request.as_ref().chain_id() &&
+                    request_chain_id != chain_id.to::<u64>()
+                {
+                    return Err(EthApiError::InvalidParams(format!(
+                        "chainId does not match node's (have={request_chain_id}, want={})",
+                        chain_id.to::<u64>()
+                    ))
+                    .into())
+                }
+                if request.as_ref().chain_id().is_none() {
+                    request.as_mut().set_chain_id(chain_id.to());
+                }
+
+                if request.as_ref().nonce().is_none() {
+                    let nonce = self.next_available_nonce_for(&request).await?;
+                    request.as_mut().set_nonce(nonce);
+                }
+                if request.as_ref().signatures.is_none() {
+                    request.as_mut().signatures = Some(Vec::new());
+                }
+
+                // Frame limits are part of the canonical envelope. The request type represents
+                // each limit as a concrete value, so zero must retain its protocol meaning rather
+                // than being treated as an omitted value to estimate or overwrite.
+                if request.as_ref().eip8141_fees.is_none() {
+                    if request.as_ref().max_fee_per_blob_gas().is_none() {
+                        let max_fee_per_blob_gas = if request
+                            .as_ref()
+                            .blob_versioned_hashes
+                            .as_ref()
+                            .is_some_and(|hashes| !hashes.is_empty())
+                        {
+                            self.blob_base_fee().await?.to::<u128>()
+                        } else {
+                            0
+                        };
+                        request.as_mut().set_max_fee_per_blob_gas(max_fee_per_blob_gas);
+                    }
+
+                    let tip = if let Some(tip) = request.as_ref().max_priority_fee_per_gas() {
+                        tip
+                    } else {
+                        let tip = self.suggested_priority_fee().await?.to::<u128>();
+                        request.as_mut().set_max_priority_fee_per_gas(tip);
+                        tip
+                    };
+                    if request.as_ref().max_fee_per_gas().is_none() {
+                        let header =
+                            self.provider().latest_header().map_err(Self::Error::from_eth_err)?;
+                        let base_fee =
+                            header.and_then(|h| h.base_fee_per_gas()).unwrap_or_default();
+                        request.as_mut().set_max_fee_per_gas(base_fee as u128 * 2 + tip);
+                    }
+                }
+
+                let tx = self.converter().build_simulate_v1_transaction(request)?;
+                let raw = tx.encoded_2718().into();
+                return Ok(FillTransaction { raw, tx })
+            }
+
             if request.as_ref().value().is_none() {
                 request.as_mut().set_value(U256::ZERO);
             }

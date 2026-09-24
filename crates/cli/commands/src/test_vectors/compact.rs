@@ -1,5 +1,12 @@
-use alloy_eips::eip4895::Withdrawals;
-use alloy_primitives::{hex, Signature, TxKind, B256};
+use alloy_eips::{
+    eip4895::Withdrawals,
+    eip8141::{
+        constants::FRAME_TX_TYPE, FrameAddress, FrameLimits, FrameMode, SignatureMessage,
+        SignatureScheme, TransactionFees,
+    },
+};
+use alloy_primitives::{hex, Address, Bytes, Signature, TxKind, B256, U256};
+use alloy_rlp::{Decodable, Encodable, RlpDecodable, RlpEncodable};
 use arbitrary::Arbitrary;
 use eyre::{Context, Result};
 use proptest::{
@@ -268,14 +275,137 @@ where
         }
         let len_or_identifier = identifier.unwrap_or(compact_bytes.len());
 
-        let (reconstructed, _) = T::from_compact(&compact_bytes, len_or_identifier);
-        reconstructed.to_compact(&mut buffer);
+        match decode_legacy_frame_vector(&type_name, &compact_bytes)? {
+            Some((prefix_len, legacy)) if !legacy.is_representable() => {
+                buffer.extend_from_slice(&compact_bytes[..prefix_len]);
+                legacy.encode(&mut buffer);
+            }
+            _ => {
+                let (reconstructed, _) = T::from_compact(&compact_bytes, len_or_identifier);
+                reconstructed.to_compact(&mut buffer);
+            }
+        }
         assert_eq!(buffer, compact_bytes, "mismatch {type_name}");
     }
 
     println!(" ✅");
 
     Ok(())
+}
+
+/// The previous frame wire layout allowed arbitrary bytes in targets and signature metadata.
+#[derive(Debug, RlpEncodable, RlpDecodable)]
+struct LegacyFrame {
+    mode: FrameMode,
+    flags: u8,
+    target: Bytes,
+    limits: FrameLimits,
+    value: U256,
+    data: Bytes,
+}
+
+#[derive(Debug, RlpEncodable, RlpDecodable)]
+struct LegacyFrameSignature {
+    scheme: SignatureScheme,
+    signer: Bytes,
+    msg: Bytes,
+    signature: Bytes,
+}
+
+#[derive(Debug, RlpEncodable, RlpDecodable)]
+struct LegacyFrameTransaction {
+    chain_id: u64,
+    nonce: u64,
+    sender: Address,
+    frames: Vec<LegacyFrame>,
+    signatures: Vec<LegacyFrameSignature>,
+    fees: TransactionFees,
+    blob_versioned_hashes: Vec<B256>,
+}
+
+impl LegacyFrameTransaction {
+    fn is_representable(&self) -> bool {
+        self.frames.iter().all(|frame| FrameAddress::try_from(frame.target.as_ref()).is_ok()) &&
+            self.signatures.iter().all(|signature| {
+                FrameAddress::try_from(signature.signer.as_ref()).is_ok() &&
+                    SignatureMessage::try_from(signature.msg.as_ref()).is_ok()
+            })
+    }
+}
+
+/// Decodes an old frame transaction vector without imposing the current typed field constraints.
+fn decode_legacy_frame_vector(
+    type_name: &str,
+    bytes: &[u8],
+) -> Result<Option<(usize, LegacyFrameTransaction)>> {
+    let prefix: &[u8] = match type_name {
+        "Transaction" => &[FRAME_TX_TYPE, FRAME_TX_TYPE],
+        "TransactionSigned" => &[u8::MAX, FRAME_TX_TYPE, FRAME_TX_TYPE],
+        _ => return Ok(None),
+    };
+    let Some(mut payload) = bytes.strip_prefix(prefix) else {
+        return Ok(None);
+    };
+    let transaction = LegacyFrameTransaction::decode(&mut payload)?;
+    if !payload.is_empty() {
+        eyre::bail!("EIP-8141 compact vector has trailing bytes");
+    }
+    Ok(Some((prefix.len(), transaction)))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use reth_codecs::Compact;
+
+    #[test]
+    fn legacy_frame_vectors_roundtrip_with_nested_fees() {
+        // Previous frame encoding: one frame with an unrepresentable one-byte target, no
+        // signatures, and a nested three-field fee list.
+        let payload = hex::decode(concat!(
+            "e8018094",
+            "0000000000000000000000000000000000000000",
+            "cac9808081aac280808080",
+            "c0c3808080c0",
+        ))
+        .unwrap();
+
+        for (type_name, prefix) in [
+            ("Transaction", &[FRAME_TX_TYPE, FRAME_TX_TYPE][..]),
+            ("TransactionSigned", &[u8::MAX, FRAME_TX_TYPE, FRAME_TX_TYPE][..]),
+        ] {
+            let mut vector = prefix.to_vec();
+            vector.extend_from_slice(&payload);
+            let (prefix_len, mut legacy) =
+                decode_legacy_frame_vector(type_name, &vector).unwrap().unwrap();
+            assert_eq!(prefix_len, prefix.len());
+            assert!(!legacy.is_representable());
+
+            let mut roundtrip = vector[..prefix_len].to_vec();
+            legacy.encode(&mut roundtrip);
+            assert_eq!(roundtrip, vector);
+
+            legacy.frames[0].target = Bytes::new();
+            assert!(legacy.is_representable());
+            let mut representable = prefix.to_vec();
+            legacy.encode(&mut representable);
+
+            let mut decoded = Vec::new();
+            if type_name == "Transaction" {
+                let mut type_bytes = Vec::new();
+                let identifier = TxType::Eip8141.to_compact(&mut type_bytes);
+                let (tx, remaining) = Transaction::from_compact(&representable, identifier);
+                assert!(remaining.is_empty());
+                tx.to_compact(&mut decoded);
+            } else {
+                let (tx, remaining) =
+                    TransactionSigned::from_compact(&representable, representable.len());
+                assert!(remaining.is_empty());
+                tx.to_compact(&mut decoded);
+            }
+            assert_eq!(decoded, representable);
+        }
+    }
 }
 
 /// Returns the type name for the given type.
