@@ -219,8 +219,8 @@ pub struct OverlayBuilder<N: NodePrimitives = EthPrimitives> {
     overlay_manager: OverlayManager<N>,
     /// Snapshot of the in-memory chain ending at the requested parent.
     ///
-    /// This is shared with the caller so that a chain that is already maintained elsewhere (for
-    /// example the canonical in-memory chain) can be reused instead of rebuilt.
+    /// This is the chain the in-memory state tracks, shared with every other holder, unless the
+    /// caller extended it with [`Self::with_appended_block`].
     parent_state: Option<Arc<BlockState<N>>>,
     /// Anchor hash of the reused sparse trie, if this task reused one.
     reused_sparse_trie_anchor_hash: Option<B256>,
@@ -492,7 +492,8 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
                     let start = Instant::now();
                     let finish_state = self
                         .overlay_manager
-                        .block_state(finish_tip_block.hash)
+                        .in_memory_state()
+                        .executed_state_by_hash(finish_tip_block.hash)
                         .ok_or_else(|| {
                             ProviderError::other(StateTrieOverlayError {
                                 tip_hash: finish_tip_block.hash,
@@ -842,9 +843,7 @@ enum AnchorForParent {
 mod tests {
     use super::*;
     use alloy_primitives::{map::HashMap, Address, U256};
-    use reth_chain_state::{
-        test_utils::TestBlockBuilder, CanonicalInMemoryState, ExecutedBlock, NewCanonicalChain,
-    };
+    use reth_chain_state::{test_utils::TestBlockBuilder, ExecutedBlock, NewCanonicalChain};
     use reth_db::{
         models::{AccountBeforeTx, BlockNumberAddress},
         tables,
@@ -940,16 +939,6 @@ mod tests {
         provider_rw.commit().unwrap();
 
         (factory, blocks)
-    }
-
-    /// Tracks `blocks` in a [`CanonicalInMemoryState`] the way the engine does, so the resulting
-    /// `Arc<BlockState>` chain matches what state providers hold.
-    fn canonical_in_memory_state(
-        blocks: &[ExecutedBlock<EthPrimitives>],
-    ) -> CanonicalInMemoryState<EthPrimitives> {
-        let state = CanonicalInMemoryState::empty();
-        state.update_chain(NewCanonicalChain::Commit { new: blocks.to_vec() });
-        state
     }
 
     const fn anchor_num_hash(anchor: &AnchorForParent) -> BlockNumHash {
@@ -1075,10 +1064,10 @@ mod tests {
         // chain straddles the state-masking frontier.
         let (factory, blocks) = setup_frontiers(1, 3);
         let manager = OverlayManager::default();
-        for block in &blocks[2..=4] {
-            manager.insert_block(block.clone());
-        }
-        let canonical = canonical_in_memory_state(&blocks[2..=4]);
+        manager
+            .in_memory_state()
+            .update_chain(NewCanonicalChain::Commit { new: blocks[2..=4].to_vec() });
+        let canonical = manager.in_memory_state();
         let provider = factory.provider().unwrap();
 
         // The head, a block below the head, and the oldest in-memory block, whose chain no longer
@@ -1137,7 +1126,7 @@ mod tests {
         let (factory, blocks) = setup_frontiers(1, 3);
         let manager = OverlayManager::default();
         for block in &blocks[2..=4] {
-            manager.insert_block(block.clone());
+            manager.in_memory_state().insert_pending(block.clone());
         }
         let provider = factory.provider().unwrap();
 
@@ -1166,7 +1155,7 @@ mod tests {
     fn managed_overlay_skips_when_finish_is_the_anchor() {
         let (factory, blocks) = setup_frontiers(3, 3);
         let manager = OverlayManager::default();
-        manager.insert_block(blocks[4].clone());
+        manager.in_memory_state().insert_pending(blocks[4].clone());
         let provider = factory.provider().unwrap();
 
         let overlay = manager
@@ -1294,7 +1283,7 @@ mod tests {
         let (factory, blocks) = setup_frontiers(1, 3);
         let manager = OverlayManager::default();
         for block in &blocks[2..=4] {
-            manager.insert_block(block.clone());
+            manager.in_memory_state().insert_pending(block.clone());
         }
         let provider = factory.provider().unwrap();
 
@@ -1367,8 +1356,8 @@ mod tests {
         );
 
         let manager = OverlayManager::default();
-        manager.insert_block(side_block_two.clone());
-        manager.insert_block(side_block_three.clone());
+        manager.in_memory_state().insert_pending(side_block_two.clone());
+        manager.in_memory_state().insert_pending(side_block_three.clone());
         let provider = factory.provider().unwrap();
 
         let (overlay, fallback_block_number) = manager
@@ -1395,7 +1384,7 @@ mod tests {
         let (factory, blocks) = setup_frontiers(1, 1);
         let manager = OverlayManager::default();
         for block in &blocks[2..=3] {
-            manager.insert_block(block.clone());
+            manager.in_memory_state().insert_pending(block.clone());
         }
         let provider = factory.provider().unwrap();
 
@@ -1413,7 +1402,7 @@ mod tests {
     fn managed_overlay_uses_persisted_parent_even_if_retained() {
         let (factory, blocks) = setup_frontiers(2, 3);
         let manager = OverlayManager::default();
-        manager.insert_block(blocks[1].clone());
+        manager.in_memory_state().insert_pending(blocks[1].clone());
         let provider = factory.provider().unwrap();
         let builder = manager.overlay_builder(blocks[1].recovered_block().hash());
         match builder.anchor_at_parent(&provider).unwrap() {
@@ -1432,7 +1421,7 @@ mod tests {
         let manager = OverlayManager::default();
         let blocks = test_blocks();
         for block in &blocks[2..=4] {
-            manager.insert_block(block.clone());
+            manager.in_memory_state().insert_pending(block.clone());
         }
 
         let block = TestBlockBuilder::eth().get_executed_block_with_number(
@@ -1516,7 +1505,7 @@ mod tests {
         let blocks = test_blocks();
         let manager = OverlayManager::default();
         for block in &blocks[2..=4] {
-            manager.insert_block(block.clone());
+            manager.in_memory_state().insert_pending(block.clone());
         }
         let builder = manager
             .overlay_builder(blocks[4].recovered_block().hash())

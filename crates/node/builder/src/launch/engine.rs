@@ -92,7 +92,8 @@ impl EngineNodeLauncher {
         } = target;
         let NodeHooks { on_component_initialized, on_node_started, .. } = hooks;
 
-        // Create the overlay manager that will be shared across the provider and engine.
+        // Create the overlay manager that will be shared across the provider and engine. It owns
+        // the node's in-memory state, which the blockchain provider and the engine tree use too.
         let overlay_manager = OverlayManager::<N::Primitives>::new(
             ctx.task_executor.state_trie_overlay_worker_pool(),
         );

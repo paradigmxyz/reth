@@ -2,96 +2,100 @@
 
 use crate::engine::EngineApiKind;
 use alloy_eips::BlockNumHash;
-use alloy_primitives::{
-    map::{B256Map, B256Set},
-    BlockNumber, B256,
-};
-use reth_chain_state::{EthPrimitives, ExecutedBlock};
+use alloy_primitives::{BlockNumber, B256};
+use reth_chain_state::{BlockState, CanonicalInMemoryState, EthPrimitives, ExecutedBlock};
 use reth_primitives_traits::{AlloyBlockHeader, NodePrimitives, SealedHeader};
 use reth_storage_overlay::OverlayManager;
-use std::{
-    collections::{btree_map, hash_map, BTreeMap, VecDeque},
-    ops::Bound,
-};
+use std::sync::Arc;
 use tracing::debug;
 
 /// Keeps track of the state of the tree.
 ///
+/// The executed blocks themselves are tracked by the node's [`CanonicalInMemoryState`], which this
+/// type shares with the providers and the [`OverlayManager`]: newly executed blocks go into its
+/// pending section, and the engine moves them to its canonical section on forkchoice updates.
+///
 /// ## Invariants
 ///
-/// - This only stores blocks that are connected to the canonical chain.
+/// - This only tracks blocks that are connected to the canonical chain.
 /// - All executed blocks are valid and have been executed.
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct TreeState<N: NodePrimitives = EthPrimitives> {
-    /// __All__ unique executed blocks by block hash that are connected to the canonical chain.
-    ///
-    /// This includes blocks of all forks.
-    pub(crate) blocks_by_hash: B256Map<ExecutedBlock<N>>,
-    /// Executed blocks grouped by their respective block number.
-    ///
-    /// This maps unique block number to all known blocks for that height.
-    ///
-    /// Note: there can be multiple blocks at the same height due to forks.
-    pub(crate) blocks_by_number: BTreeMap<BlockNumber, Vec<ExecutedBlock<N>>>,
-    /// Map of any parent block hash to its children.
-    pub(crate) parent_to_child: B256Map<B256Set>,
     /// Currently tracked canonical head of the chain.
     pub(crate) current_canonical_head: BlockNumHash,
     /// The engine API variant of this handler
     pub(crate) engine_kind: EngineApiKind,
-    /// Manages state trie overlays for in-memory blocks.
+    /// Manages state trie overlays for in-memory blocks, and holds the in-memory state that
+    /// tracks the executed blocks.
     pub(crate) overlay_manager: OverlayManager<N>,
 }
 
+impl<N: NodePrimitives> Default for TreeState<N> {
+    fn default() -> Self {
+        Self::new(Default::default(), Default::default(), Default::default())
+    }
+}
+
 impl<N: NodePrimitives> TreeState<N> {
-    /// Returns a new, empty tree state that points to the given canonical head.
-    pub fn new(
+    /// Returns a new tree state that points to the given canonical head.
+    ///
+    /// The executed blocks are tracked by the in-memory state of `overlay_manager`.
+    pub const fn new(
         current_canonical_head: BlockNumHash,
         engine_kind: EngineApiKind,
         overlay_manager: OverlayManager<N>,
     ) -> Self {
-        Self {
-            blocks_by_hash: B256Map::default(),
-            blocks_by_number: BTreeMap::new(),
-            current_canonical_head,
-            parent_to_child: B256Map::default(),
-            engine_kind,
-            overlay_manager,
-        }
+        Self { current_canonical_head, engine_kind, overlay_manager }
     }
 
     /// Resets the state and points to the given canonical head.
+    ///
+    /// This removes all executed in-memory blocks, canonical and pending.
     pub fn reset(&mut self, current_canonical_head: BlockNumHash) {
-        let engine_kind = self.engine_kind;
-        let removed_hashes = self.blocks_by_hash.keys().copied().collect::<Vec<_>>();
+        let removed_hashes = self.in_memory_state().clear_state();
         if !removed_hashes.is_empty() {
-            self.overlay_manager.remove_blocks(removed_hashes);
+            self.overlay_manager.on_blocks_removed(removed_hashes);
         }
-        self.blocks_by_hash.clear();
-        self.blocks_by_number.clear();
-        self.parent_to_child.clear();
         self.current_canonical_head = current_canonical_head;
-        self.engine_kind = engine_kind;
+    }
+
+    /// Returns the engine API variant of this handler.
+    pub const fn engine_kind(&self) -> EngineApiKind {
+        self.engine_kind
+    }
+
+    /// Returns the in-memory state that tracks the executed blocks.
+    ///
+    /// This is the in-memory state of the [`OverlayManager`].
+    pub const fn in_memory_state(&self) -> &CanonicalInMemoryState<N> {
+        self.overlay_manager.in_memory_state()
     }
 
     /// Returns the number of executed blocks stored.
     pub fn block_count(&self) -> usize {
-        self.blocks_by_hash.len()
+        self.in_memory_state().canonical_block_count() +
+            self.in_memory_state().pending_block_count()
+    }
+
+    /// Returns the [`BlockState`] of the executed block with the given hash.
+    pub fn executed_state_by_hash(&self, hash: B256) -> Option<Arc<BlockState<N>>> {
+        self.in_memory_state().executed_state_by_hash(hash)
     }
 
     /// Returns the [`ExecutedBlock`] by hash.
-    pub fn executed_block_by_hash(&self, hash: B256) -> Option<&ExecutedBlock<N>> {
-        self.blocks_by_hash.get(&hash)
+    pub fn executed_block_by_hash(&self, hash: B256) -> Option<ExecutedBlock<N>> {
+        self.executed_state_by_hash(hash).map(|state| state.block())
     }
 
     /// Returns `true` if a block with the given hash exists in memory.
     pub fn contains_hash(&self, hash: &B256) -> bool {
-        self.blocks_by_hash.contains_key(hash)
+        self.executed_state_by_hash(*hash).is_some()
     }
 
     /// Returns the sealed block header by hash.
     pub fn sealed_header_by_hash(&self, hash: &B256) -> Option<SealedHeader<N::BlockHeader>> {
-        self.blocks_by_hash.get(hash).map(|b| b.sealed_block().sealed_header().clone())
+        self.executed_state_by_hash(*hash)
+            .map(|state| state.block_ref().sealed_block().sealed_header().clone())
     }
 
     /// Returns all available blocks for the given hash that lead back to the canonical chain, from
@@ -100,73 +104,26 @@ impl<N: NodePrimitives> TreeState<N> {
     ///
     /// Returns `None` if the block for the given hash is not found.
     pub fn blocks_by_hash(&self, hash: B256) -> Option<(B256, Vec<ExecutedBlock<N>>)> {
-        let block = self.blocks_by_hash.get(&hash).cloned()?;
-        let mut parent_hash = block.recovered_block().parent_hash();
-        let mut blocks = vec![block];
-        while let Some(executed) = self.blocks_by_hash.get(&parent_hash) {
-            parent_hash = executed.recovered_block().parent_hash();
-            blocks.push(executed.clone());
-        }
-
+        let state = self.executed_state_by_hash(hash)?;
+        let blocks = state.chain().map(BlockState::block).collect::<Vec<_>>();
+        let parent_hash = state.anchor().hash;
         Some((parent_hash, blocks))
     }
 
     /// Insert executed block into the state.
+    ///
+    /// The block is added to the pending section of the in-memory state until a forkchoice
+    /// update makes it canonical.
     pub fn insert_executed(&mut self, executed: ExecutedBlock<N>) {
         let hash = executed.recovered_block().hash();
         let parent_hash = executed.recovered_block().parent_hash();
-        let block_number = executed.recovered_block().number();
 
-        if self.blocks_by_hash.contains_key(&hash) {
+        if self.contains_hash(&hash) {
             return;
         }
 
-        let overlay_block = executed.clone();
-        self.blocks_by_hash.insert(hash, executed.clone());
-
-        self.blocks_by_number.entry(block_number).or_default().push(executed);
-
-        self.parent_to_child.entry(parent_hash).or_default().insert(hash);
-        self.overlay_manager.insert_block(overlay_block);
-    }
-
-    /// Remove single executed block by its hash.
-    ///
-    /// ## Returns
-    ///
-    /// The removed block and the block hashes of its children.
-    fn remove_by_hash(&mut self, hash: B256) -> Option<(ExecutedBlock<N>, B256Set)> {
-        let executed = self.blocks_by_hash.remove(&hash)?;
-
-        // Remove this block from collection of children of its parent block.
-        let parent_entry = self.parent_to_child.entry(executed.recovered_block().parent_hash());
-        if let hash_map::Entry::Occupied(mut entry) = parent_entry {
-            entry.get_mut().remove(&hash);
-
-            if entry.get().is_empty() {
-                entry.remove();
-            }
-        }
-
-        // Remove point to children of this block.
-        let children = self.parent_to_child.remove(&hash).unwrap_or_default();
-
-        // Remove this block from `blocks_by_number`.
-        let block_number_entry = self.blocks_by_number.entry(executed.recovered_block().number());
-        if let btree_map::Entry::Occupied(mut entry) = block_number_entry {
-            // We have to find the index of the block since it exists in a vec
-            if let Some(index) = entry.get().iter().position(|b| b.recovered_block().hash() == hash)
-            {
-                entry.get_mut().swap_remove(index);
-
-                // If there are no blocks left then remove the entry for this block
-                if entry.get().is_empty() {
-                    entry.remove();
-                }
-            }
-        }
-
-        Some((executed, children))
+        self.in_memory_state().insert_pending(executed);
+        self.overlay_manager.on_block_inserted(hash, parent_hash);
     }
 
     /// Returns whether or not the hash is part of the canonical chain.
@@ -176,8 +133,8 @@ impl<N: NodePrimitives> TreeState<N> {
             return true
         }
 
-        while let Some(executed) = self.blocks_by_hash.get(&current_block) {
-            current_block = executed.recovered_block().parent_hash();
+        while let Some(executed) = self.executed_state_by_hash(current_block) {
+            current_block = executed.block_ref().recovered_block().parent_hash();
             if current_block == hash {
                 return true
             }
@@ -186,103 +143,13 @@ impl<N: NodePrimitives> TreeState<N> {
         false
     }
 
-    /// Removes canonical blocks below the upper bound, only if the last persisted hash is
-    /// part of the canonical chain.
-    fn remove_canonical_until(
-        &mut self,
-        upper_bound: BlockNumber,
-        last_persisted_hash: B256,
-        removed_hashes: &mut Vec<B256>,
-    ) {
-        debug!(target: "engine::tree", ?upper_bound, ?last_persisted_hash, "Removing canonical blocks from the tree");
-
-        // If the last persisted hash is not canonical, then we don't want to remove any canonical
-        // blocks yet.
-        if !self.is_canonical(last_persisted_hash) {
-            return
-        }
-
-        // First, let's walk back the canonical chain and remove canonical blocks lower than the
-        // upper bound
-        let mut current_block = self.current_canonical_head.hash;
-        while let Some(executed) = self.blocks_by_hash.get(&current_block) {
-            current_block = executed.recovered_block().parent_hash();
-            if executed.recovered_block().number() <= upper_bound {
-                let hash = executed.recovered_block().hash();
-                let num_hash = executed.recovered_block().num_hash();
-                debug!(target: "engine::tree", ?num_hash, "Attempting to remove block walking back from the head");
-                if self.remove_by_hash(hash).is_some() {
-                    removed_hashes.push(hash);
-                }
-            }
-        }
-        debug!(target: "engine::tree", ?upper_bound, ?last_persisted_hash, "Removed canonical blocks from the tree");
-    }
-
-    /// Removes all blocks that are below the finalized block, as well as removing non-canonical
-    /// sidechains that fork from below the finalized block.
-    fn prune_finalized_sidechains(
-        &mut self,
-        finalized_num_hash: BlockNumHash,
-        removed_hashes: &mut Vec<B256>,
-    ) {
-        let BlockNumHash { number: finalized_num, hash: finalized_hash } = finalized_num_hash;
-
-        // We remove disconnected sidechains in three steps:
-        // * first, remove everything with a block number __below__ the finalized block.
-        // * next, we populate a vec with parents __at__ the finalized block.
-        // * finally, we iterate through the vec, removing children until the vec is empty
-        // (BFS).
-
-        // We _exclude_ the finalized block because we will be dealing with the blocks __at__
-        // the finalized block later.
-        let blocks_to_remove = self
-            .blocks_by_number
-            .range((Bound::Unbounded, Bound::Excluded(finalized_num)))
-            .flat_map(|(_, blocks)| blocks.iter().map(|b| b.recovered_block().hash()))
-            .collect::<Vec<_>>();
-        for hash in blocks_to_remove {
-            if let Some((removed, _)) = self.remove_by_hash(hash) {
-                debug!(target: "engine::tree", num_hash=?removed.recovered_block().num_hash(), "Removed finalized sidechain block");
-                removed_hashes.push(hash);
-            }
-        }
-
-        // The only block that should remain at the `finalized` number now, is the finalized
-        // block, if it exists.
-        //
-        // For all other blocks, we  first put their children into this vec.
-        // Then, we will iterate over them, removing them, adding their children, etc,
-        // until the vec is empty.
-        let mut blocks_to_remove = self.blocks_by_number.remove(&finalized_num).unwrap_or_default();
-
-        // re-insert the finalized hash if we removed it
-        if let Some(position) =
-            blocks_to_remove.iter().position(|b| b.recovered_block().hash() == finalized_hash)
-        {
-            let finalized_block = blocks_to_remove.swap_remove(position);
-            self.blocks_by_number.insert(finalized_num, vec![finalized_block]);
-        }
-
-        let mut blocks_to_remove = blocks_to_remove
-            .into_iter()
-            .map(|e| e.recovered_block().hash())
-            .collect::<VecDeque<_>>();
-        while let Some(block) = blocks_to_remove.pop_front() {
-            if let Some((removed, children)) = self.remove_by_hash(block) {
-                debug!(target: "engine::tree", num_hash=?removed.recovered_block().num_hash(), "Removed finalized sidechain child block");
-                removed_hashes.push(block);
-                blocks_to_remove.extend(children);
-            }
-        }
-    }
-
     /// Remove all blocks up to __and including__ the given block number.
     ///
     /// If a finalized hash is provided, the only non-canonical blocks which will be removed are
     /// those which have a fork point at or below the finalized hash.
     ///
-    /// Canonical blocks below the upper bound will still be removed.
+    /// Canonical blocks below the upper bound will still be removed, but only if the last
+    /// persisted hash is part of the canonical chain.
     ///
     /// NOTE: if the finalized block is greater than the upper bound, the only blocks that will be
     /// removed are canonical blocks and sidechains that fork below the `upper_bound`. This is the
@@ -308,21 +175,19 @@ impl<N: NodePrimitives> TreeState<N> {
         // We want to do two things:
         // * remove canonical blocks that are persisted
         // * remove forks whose root are below the finalized block
-        // We can do this in 2 steps:
-        // * remove all canonical blocks below the upper bound
-        // * fetch the number of the finalized hash, removing any sidechains that are __below__ the
-        // finalized block
-        let mut removed_hashes = Vec::new();
-        self.remove_canonical_until(upper_bound.number, last_persisted_hash, &mut removed_hashes);
+        let mut removed_hashes = self
+            .in_memory_state()
+            .remove_canonical_blocks_until(last_persisted_hash, upper_bound.number);
+        debug!(target: "engine::tree", ?upper_bound, ?last_persisted_hash, removed = removed_hashes.len(), "Removed canonical blocks from the tree");
 
-        // Now, we have removed canonical blocks (assuming the upper bound is above the finalized
-        // block) and only have sidechains below the finalized block.
         if let Some(finalized_num_hash) = finalized_num_hash {
-            self.prune_finalized_sidechains(finalized_num_hash, &mut removed_hashes);
+            let pruned = self.in_memory_state().prune_pending_below(finalized_num_hash);
+            debug!(target: "engine::tree", ?finalized_num_hash, pruned = pruned.len(), "Removed finalized sidechain blocks");
+            removed_hashes.extend(pruned);
         }
 
         if !removed_hashes.is_empty() {
-            self.overlay_manager.remove_blocks(removed_hashes);
+            self.overlay_manager.on_blocks_removed(removed_hashes);
         }
     }
 
@@ -370,14 +235,14 @@ impl<N: NodePrimitives> TreeState<N> {
         }
 
         // iterate through parents of the second until we reach the number
-        let Some(mut current_block) = self.blocks_by_hash.get(&second.parent) else {
+        let Some(mut current_block) = self.executed_block_by_hash(second.parent) else {
             // If we can't find its parent in the tree, we can't continue, so return false
             return false
         };
 
         while current_block.recovered_block().number() > first.number + 1 {
             let Some(block) =
-                self.blocks_by_hash.get(&current_block.recovered_block().parent_hash())
+                self.executed_block_by_hash(current_block.recovered_block().parent_hash())
             else {
                 // If we can't find its parent in the tree, we can't continue, so return false
                 return false
@@ -394,15 +259,33 @@ impl<N: NodePrimitives> TreeState<N> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use reth_chain_state::test_utils::TestBlockBuilder;
+    use alloy_primitives::map::B256Set;
+    use reth_chain_state::{test_utils::TestBlockBuilder, NewCanonicalChain};
+
+    fn tree_state(head: BlockNumHash) -> TreeState {
+        TreeState::new(head, EngineApiKind::Ethereum, OverlayManager::default())
+    }
+
+    /// Makes `blocks` canonical the way the engine does on a forkchoice update.
+    fn make_canonical(tree_state: &mut TreeState, blocks: &[ExecutedBlock]) {
+        tree_state.set_canonical_head(blocks.last().unwrap().recovered_block().num_hash());
+        tree_state
+            .in_memory_state()
+            .update_chain(NewCanonicalChain::Commit { new: blocks.to_vec() });
+    }
+
+    fn pending_children(tree_state: &TreeState, parent: &ExecutedBlock) -> B256Set {
+        tree_state
+            .in_memory_state()
+            .pending_children(parent.recovered_block().hash())
+            .iter()
+            .map(|state| state.hash())
+            .collect()
+    }
 
     #[test]
     fn test_tree_state_normal_descendant() {
-        let mut tree_state = TreeState::new(
-            BlockNumHash::default(),
-            EngineApiKind::Ethereum,
-            OverlayManager::default(),
-        );
+        let mut tree_state = tree_state(BlockNumHash::default());
         let blocks: Vec<_> = TestBlockBuilder::eth().get_executed_blocks(1..4).collect();
 
         tree_state.insert_executed(blocks[0].clone());
@@ -425,48 +308,46 @@ mod tests {
 
     #[tokio::test]
     async fn test_tree_state_insert_executed() {
-        let mut tree_state = TreeState::new(
-            BlockNumHash::default(),
-            EngineApiKind::Ethereum,
-            OverlayManager::default(),
-        );
+        let mut tree_state = tree_state(BlockNumHash::default());
         let blocks: Vec<_> = TestBlockBuilder::eth().get_executed_blocks(1..4).collect();
 
         tree_state.insert_executed(blocks[0].clone());
         tree_state.insert_executed(blocks[1].clone());
 
         assert_eq!(
-            tree_state.parent_to_child.get(&blocks[0].recovered_block().hash()),
-            Some(&B256Set::from_iter([blocks[1].recovered_block().hash()]))
+            pending_children(&tree_state, &blocks[0]),
+            B256Set::from_iter([blocks[1].recovered_block().hash()])
         );
-
-        assert!(!tree_state.parent_to_child.contains_key(&blocks[1].recovered_block().hash()));
+        assert!(pending_children(&tree_state, &blocks[1]).is_empty());
 
         tree_state.insert_executed(blocks[2].clone());
 
         assert_eq!(
-            tree_state.parent_to_child.get(&blocks[1].recovered_block().hash()),
-            Some(&B256Set::from_iter([blocks[2].recovered_block().hash()]))
+            pending_children(&tree_state, &blocks[1]),
+            B256Set::from_iter([blocks[2].recovered_block().hash()])
         );
-        assert!(tree_state.parent_to_child.contains_key(&blocks[1].recovered_block().hash()));
+        assert!(pending_children(&tree_state, &blocks[2]).is_empty());
 
-        assert!(!tree_state.parent_to_child.contains_key(&blocks[2].recovered_block().hash()));
+        // Executed blocks are pending until a forkchoice update makes them canonical.
+        assert_eq!(tree_state.in_memory_state().pending_block_count(), 3);
+        assert_eq!(tree_state.in_memory_state().canonical_block_count(), 0);
+        let (anchor, chain) =
+            tree_state.blocks_by_hash(blocks[2].recovered_block().hash()).unwrap();
+        assert_eq!(anchor, blocks[0].recovered_block().parent_hash());
+        assert_eq!(chain, blocks.iter().rev().cloned().collect::<Vec<_>>());
     }
 
     #[tokio::test]
     async fn test_tree_state_insert_executed_with_reorg() {
-        let mut tree_state = TreeState::new(
-            BlockNumHash::default(),
-            EngineApiKind::Ethereum,
-            OverlayManager::default(),
-        );
+        let mut tree_state = tree_state(BlockNumHash::default());
         let mut test_block_builder = TestBlockBuilder::eth();
         let blocks: Vec<_> = test_block_builder.get_executed_blocks(1..6).collect();
 
         for block in &blocks {
             tree_state.insert_executed(block.clone());
         }
-        assert_eq!(tree_state.blocks_by_hash.len(), 5);
+        make_canonical(&mut tree_state, &blocks);
+        assert_eq!(tree_state.block_count(), 5);
 
         let fork_block_3 = test_block_builder
             .get_executed_block_with_number(3, blocks[1].recovered_block().hash());
@@ -479,39 +360,71 @@ mod tests {
         tree_state.insert_executed(fork_block_4.clone());
         tree_state.insert_executed(fork_block_5.clone());
 
-        assert_eq!(tree_state.blocks_by_hash.len(), 8);
-        assert_eq!(tree_state.blocks_by_number[&3].len(), 2); // two blocks at height 3 (original
-                                                              // and fork)
-        assert_eq!(tree_state.parent_to_child[&blocks[1].recovered_block().hash()].len(), 2); // block 2 should have two children
+        assert_eq!(tree_state.block_count(), 8);
+        // two blocks at height 3 (original and fork)
+        assert_eq!(tree_state.in_memory_state().blocks_at_number(3).len(), 2);
+        assert_eq!(pending_children(&tree_state, &blocks[1]).len(), 1); // the fork block
 
         // verify that we can insert the same block again without issues
         tree_state.insert_executed(fork_block_4.clone());
-        assert_eq!(tree_state.blocks_by_hash.len(), 8);
+        assert_eq!(tree_state.block_count(), 8);
 
-        assert!(tree_state.parent_to_child[&fork_block_3.recovered_block().hash()]
+        assert!(pending_children(&tree_state, &fork_block_3)
             .contains(&fork_block_4.recovered_block().hash()));
-        assert!(tree_state.parent_to_child[&fork_block_4.recovered_block().hash()]
+        assert!(pending_children(&tree_state, &fork_block_4)
             .contains(&fork_block_5.recovered_block().hash()));
 
-        assert_eq!(tree_state.blocks_by_number[&4].len(), 2);
-        assert_eq!(tree_state.blocks_by_number[&5].len(), 2);
+        assert_eq!(tree_state.in_memory_state().blocks_at_number(4).len(), 2);
+        assert_eq!(tree_state.in_memory_state().blocks_at_number(5).len(), 2);
+
+        // Reorging to the fork moves the replaced canonical blocks to the pending section.
+        tree_state.set_canonical_head(fork_block_5.recovered_block().num_hash());
+        tree_state.in_memory_state().update_chain(NewCanonicalChain::Reorg {
+            new: vec![fork_block_3.clone(), fork_block_4, fork_block_5],
+            old: blocks[2..].to_vec(),
+        });
+        assert_eq!(tree_state.block_count(), 8);
+        assert_eq!(tree_state.in_memory_state().canonical_block_count(), 5);
+        assert!(tree_state.is_canonical(fork_block_3.recovered_block().hash()));
+        assert!(!tree_state.is_canonical(blocks[2].recovered_block().hash()));
+        assert!(tree_state.contains_hash(&blocks[4].recovered_block().hash()));
+        assert_eq!(
+            pending_children(&tree_state, &blocks[1]),
+            B256Set::from_iter([blocks[2].recovered_block().hash()])
+        );
+    }
+
+    /// Asserts that blocks 1 and 2 were removed, and blocks 3 to 5 kept.
+    fn assert_removed_through_block_2(tree_state: &TreeState, blocks: &[ExecutedBlock]) {
+        assert!(!tree_state.contains_hash(&blocks[0].recovered_block().hash()));
+        assert!(!tree_state.contains_hash(&blocks[1].recovered_block().hash()));
+        assert!(tree_state.in_memory_state().blocks_at_number(1).is_empty());
+        assert!(tree_state.in_memory_state().blocks_at_number(2).is_empty());
+
+        assert!(tree_state.contains_hash(&blocks[2].recovered_block().hash()));
+        assert!(tree_state.contains_hash(&blocks[3].recovered_block().hash()));
+        assert!(tree_state.contains_hash(&blocks[4].recovered_block().hash()));
+        assert!(!tree_state.in_memory_state().blocks_at_number(3).is_empty());
+        assert!(!tree_state.in_memory_state().blocks_at_number(4).is_empty());
+        assert!(!tree_state.in_memory_state().blocks_at_number(5).is_empty());
+
+        // The remaining chain starts right after the removed blocks.
+        let (anchor, chain) =
+            tree_state.blocks_by_hash(blocks[4].recovered_block().hash()).unwrap();
+        assert_eq!(anchor, blocks[1].recovered_block().hash());
+        assert_eq!(chain.len(), 3);
     }
 
     #[tokio::test]
     async fn test_tree_state_remove_before() {
         let start_num_hash = BlockNumHash::default();
-        let mut tree_state =
-            TreeState::new(start_num_hash, EngineApiKind::Ethereum, OverlayManager::default());
+        let mut tree_state = tree_state(start_num_hash);
         let blocks: Vec<_> = TestBlockBuilder::eth().get_executed_blocks(1..6).collect();
 
         for block in &blocks {
             tree_state.insert_executed(block.clone());
         }
-
-        let last = blocks.last().unwrap();
-
-        // set the canonical head
-        tree_state.set_canonical_head(last.recovered_block().num_hash());
+        make_canonical(&mut tree_state, &blocks);
 
         // inclusive bound, so we should remove anything up to and including 2
         tree_state.remove_until(
@@ -520,49 +433,19 @@ mod tests {
             Some(blocks[1].recovered_block().num_hash()),
         );
 
-        assert!(!tree_state.blocks_by_hash.contains_key(&blocks[0].recovered_block().hash()));
-        assert!(!tree_state.blocks_by_hash.contains_key(&blocks[1].recovered_block().hash()));
-        assert!(!tree_state.blocks_by_number.contains_key(&1));
-        assert!(!tree_state.blocks_by_number.contains_key(&2));
-
-        assert!(tree_state.blocks_by_hash.contains_key(&blocks[2].recovered_block().hash()));
-        assert!(tree_state.blocks_by_hash.contains_key(&blocks[3].recovered_block().hash()));
-        assert!(tree_state.blocks_by_hash.contains_key(&blocks[4].recovered_block().hash()));
-        assert!(tree_state.blocks_by_number.contains_key(&3));
-        assert!(tree_state.blocks_by_number.contains_key(&4));
-        assert!(tree_state.blocks_by_number.contains_key(&5));
-
-        assert!(!tree_state.parent_to_child.contains_key(&blocks[0].recovered_block().hash()));
-        assert!(!tree_state.parent_to_child.contains_key(&blocks[1].recovered_block().hash()));
-        assert!(tree_state.parent_to_child.contains_key(&blocks[2].recovered_block().hash()));
-        assert!(tree_state.parent_to_child.contains_key(&blocks[3].recovered_block().hash()));
-        assert!(!tree_state.parent_to_child.contains_key(&blocks[4].recovered_block().hash()));
-
-        assert_eq!(
-            tree_state.parent_to_child.get(&blocks[2].recovered_block().hash()),
-            Some(&B256Set::from_iter([blocks[3].recovered_block().hash()]))
-        );
-        assert_eq!(
-            tree_state.parent_to_child.get(&blocks[3].recovered_block().hash()),
-            Some(&B256Set::from_iter([blocks[4].recovered_block().hash()]))
-        );
+        assert_removed_through_block_2(&tree_state, &blocks);
     }
 
     #[tokio::test]
     async fn test_tree_state_remove_before_finalized() {
         let start_num_hash = BlockNumHash::default();
-        let mut tree_state =
-            TreeState::new(start_num_hash, EngineApiKind::Ethereum, OverlayManager::default());
+        let mut tree_state = tree_state(start_num_hash);
         let blocks: Vec<_> = TestBlockBuilder::eth().get_executed_blocks(1..6).collect();
 
         for block in &blocks {
             tree_state.insert_executed(block.clone());
         }
-
-        let last = blocks.last().unwrap();
-
-        // set the canonical head
-        tree_state.set_canonical_head(last.recovered_block().num_hash());
+        make_canonical(&mut tree_state, &blocks);
 
         // we should still remove everything up to and including 2
         tree_state.remove_until(
@@ -571,49 +454,19 @@ mod tests {
             None,
         );
 
-        assert!(!tree_state.blocks_by_hash.contains_key(&blocks[0].recovered_block().hash()));
-        assert!(!tree_state.blocks_by_hash.contains_key(&blocks[1].recovered_block().hash()));
-        assert!(!tree_state.blocks_by_number.contains_key(&1));
-        assert!(!tree_state.blocks_by_number.contains_key(&2));
-
-        assert!(tree_state.blocks_by_hash.contains_key(&blocks[2].recovered_block().hash()));
-        assert!(tree_state.blocks_by_hash.contains_key(&blocks[3].recovered_block().hash()));
-        assert!(tree_state.blocks_by_hash.contains_key(&blocks[4].recovered_block().hash()));
-        assert!(tree_state.blocks_by_number.contains_key(&3));
-        assert!(tree_state.blocks_by_number.contains_key(&4));
-        assert!(tree_state.blocks_by_number.contains_key(&5));
-
-        assert!(!tree_state.parent_to_child.contains_key(&blocks[0].recovered_block().hash()));
-        assert!(!tree_state.parent_to_child.contains_key(&blocks[1].recovered_block().hash()));
-        assert!(tree_state.parent_to_child.contains_key(&blocks[2].recovered_block().hash()));
-        assert!(tree_state.parent_to_child.contains_key(&blocks[3].recovered_block().hash()));
-        assert!(!tree_state.parent_to_child.contains_key(&blocks[4].recovered_block().hash()));
-
-        assert_eq!(
-            tree_state.parent_to_child.get(&blocks[2].recovered_block().hash()),
-            Some(&B256Set::from_iter([blocks[3].recovered_block().hash()]))
-        );
-        assert_eq!(
-            tree_state.parent_to_child.get(&blocks[3].recovered_block().hash()),
-            Some(&B256Set::from_iter([blocks[4].recovered_block().hash()]))
-        );
+        assert_removed_through_block_2(&tree_state, &blocks);
     }
 
     #[tokio::test]
     async fn test_tree_state_remove_before_lower_finalized() {
         let start_num_hash = BlockNumHash::default();
-        let mut tree_state =
-            TreeState::new(start_num_hash, EngineApiKind::Ethereum, OverlayManager::default());
+        let mut tree_state = tree_state(start_num_hash);
         let blocks: Vec<_> = TestBlockBuilder::eth().get_executed_blocks(1..6).collect();
 
         for block in &blocks {
             tree_state.insert_executed(block.clone());
         }
-
-        let last = blocks.last().unwrap();
-
-        // set the canonical head
-        tree_state.set_canonical_head(last.recovered_block().num_hash());
+        make_canonical(&mut tree_state, &blocks);
 
         // we have no forks so we should still remove anything up to and including 2
         tree_state.remove_until(
@@ -622,31 +475,49 @@ mod tests {
             Some(blocks[0].recovered_block().num_hash()),
         );
 
-        assert!(!tree_state.blocks_by_hash.contains_key(&blocks[0].recovered_block().hash()));
-        assert!(!tree_state.blocks_by_hash.contains_key(&blocks[1].recovered_block().hash()));
-        assert!(!tree_state.blocks_by_number.contains_key(&1));
-        assert!(!tree_state.blocks_by_number.contains_key(&2));
+        assert_removed_through_block_2(&tree_state, &blocks);
+    }
 
-        assert!(tree_state.blocks_by_hash.contains_key(&blocks[2].recovered_block().hash()));
-        assert!(tree_state.blocks_by_hash.contains_key(&blocks[3].recovered_block().hash()));
-        assert!(tree_state.blocks_by_hash.contains_key(&blocks[4].recovered_block().hash()));
-        assert!(tree_state.blocks_by_number.contains_key(&3));
-        assert!(tree_state.blocks_by_number.contains_key(&4));
-        assert!(tree_state.blocks_by_number.contains_key(&5));
+    #[tokio::test]
+    async fn test_tree_state_remove_until_prunes_finalized_sidechains() {
+        let start_num_hash = BlockNumHash::default();
+        let mut tree_state = tree_state(start_num_hash);
+        let mut builder = TestBlockBuilder::eth();
+        let blocks: Vec<_> = builder.get_executed_blocks(1..6).collect();
+        for block in &blocks {
+            tree_state.insert_executed(block.clone());
+        }
+        make_canonical(&mut tree_state, &blocks);
 
-        assert!(!tree_state.parent_to_child.contains_key(&blocks[0].recovered_block().hash()));
-        assert!(!tree_state.parent_to_child.contains_key(&blocks[1].recovered_block().hash()));
-        assert!(tree_state.parent_to_child.contains_key(&blocks[2].recovered_block().hash()));
-        assert!(tree_state.parent_to_child.contains_key(&blocks[3].recovered_block().hash()));
-        assert!(!tree_state.parent_to_child.contains_key(&blocks[4].recovered_block().hash()));
+        // A fork off block 1 can never become canonical once block 2 is finalized, a fork off
+        // block 3 still can.
+        let dead_fork =
+            builder.get_executed_block_with_number(2, blocks[0].recovered_block().hash());
+        let dead_fork_child =
+            builder.get_executed_block_with_number(3, dead_fork.recovered_block().hash());
+        let live_fork =
+            builder.get_executed_block_with_number(4, blocks[2].recovered_block().hash());
+        for block in [&dead_fork, &dead_fork_child, &live_fork] {
+            tree_state.insert_executed(block.clone());
+        }
+        assert_eq!(tree_state.block_count(), 8);
 
-        assert_eq!(
-            tree_state.parent_to_child.get(&blocks[2].recovered_block().hash()),
-            Some(&B256Set::from_iter([blocks[3].recovered_block().hash()]))
+        tree_state.remove_until(
+            BlockNumHash::new(2, blocks[1].recovered_block().hash()),
+            start_num_hash.hash,
+            Some(blocks[1].recovered_block().num_hash()),
         );
-        assert_eq!(
-            tree_state.parent_to_child.get(&blocks[3].recovered_block().hash()),
-            Some(&B256Set::from_iter([blocks[4].recovered_block().hash()]))
-        );
+
+        assert_removed_through_block_2(&tree_state, &blocks);
+        assert!(!tree_state.contains_hash(&dead_fork.recovered_block().hash()));
+        assert!(!tree_state.contains_hash(&dead_fork_child.recovered_block().hash()));
+        assert!(tree_state.contains_hash(&live_fork.recovered_block().hash()));
+        assert_eq!(tree_state.block_count(), 4);
+
+        // The surviving fork is re-linked to the remaining canonical chain.
+        let (anchor, chain) =
+            tree_state.blocks_by_hash(live_fork.recovered_block().hash()).unwrap();
+        assert_eq!(anchor, blocks[1].recovered_block().hash());
+        assert_eq!(chain.len(), 2);
     }
 }
