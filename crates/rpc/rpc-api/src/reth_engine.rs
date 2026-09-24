@@ -100,8 +100,9 @@ where
 /// waiting for persistence and cache locks before processing.
 ///
 /// By default, the endpoint waits for both in-flight persistence and cache updates to complete
-/// before executing the payload, providing unbiased timing measurements. Each can be independently
-/// disabled via `wait_for_persistence` and `wait_for_caches`.
+/// before executing the payload. Execution-cache allocations removed by those updates may still
+/// be destroyed concurrently after unlocking; their cleanup is excluded from cache wait timings.
+/// Each wait can be independently disabled via `wait_for_persistence` and `wait_for_caches`.
 ///
 /// Responses include timing breakdowns with server-measured execution latency.
 #[cfg_attr(not(feature = "client"), rpc(server, namespace = "reth"))]

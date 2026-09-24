@@ -19,7 +19,7 @@ use alloy_primitives::{
     Address, BlockHash, BlockNumber, Bytes, StorageKey, StorageValue, TxHash, TxNumber, B256, U256,
 };
 use parking_lot::Mutex;
-use reth_chain_state::{CanonStateNotifications, CanonStateSubscriptions};
+use reth_chain_state::{CanonStateNotifications, CanonStateSubscriptions, ExecutedBlock};
 use reth_chainspec::{ChainInfo, EthChainSpec};
 use reth_db::transaction::DbTx;
 use reth_db_api::{
@@ -947,18 +947,20 @@ impl<T: NodePrimitives, ChainSpec: EthChainSpec + Send + Sync + 'static> BlockRe
 
     fn recovered_block(
         &self,
-        _id: BlockHashOrNumber,
+        id: BlockHashOrNumber,
         _transaction_kind: TransactionVariant,
     ) -> ProviderResult<Option<RecoveredBlock<Self::Block>>> {
-        Ok(None)
+        self.block(id)?
+            .map(|block| block.try_into_recovered().map_err(ProviderError::other))
+            .transpose()
     }
 
     fn sealed_block_with_senders(
         &self,
-        _id: BlockHashOrNumber,
-        _transaction_kind: TransactionVariant,
+        id: BlockHashOrNumber,
+        transaction_kind: TransactionVariant,
     ) -> ProviderResult<Option<RecoveredBlock<Self::Block>>> {
-        Ok(None)
+        self.recovered_block(id, transaction_kind)
     }
 
     fn block_range(&self, range: RangeInclusive<BlockNumber>) -> ProviderResult<Vec<Self::Block>> {
@@ -1221,9 +1223,19 @@ impl<T: NodePrimitives, ChainSpec: Send + Sync> StorageSettingsCache
 impl<T: NodePrimitives, ChainSpec: EthChainSpec + Send + Sync + 'static> StateProviderFactory
     for MockEthProvider<T, ChainSpec>
 {
+    type Primitives = T;
+
     fn latest(&self) -> ProviderResult<StateProviderBox> {
         self.ensure_snap_state_reads_succeed()?;
         Ok(Box::new(self.clone()))
+    }
+
+    fn state_with_block_appended(
+        &self,
+        _parent_hash: BlockHash,
+        _block: ExecutedBlock<T>,
+    ) -> ProviderResult<StateProviderBox> {
+        Err(ProviderError::UnsupportedProvider)
     }
 
     fn state_by_block_number_or_tag(
@@ -1358,6 +1370,8 @@ impl<T: NodePrimitives, ChainSpec: Send + Sync> StateReader for MockEthProvider<
 impl<T: NodePrimitives, ChainSpec: Send + Sync> CanonStateSubscriptions
     for MockEthProvider<T, ChainSpec>
 {
+    type Primitives = T;
+
     fn subscribe_to_canonical_state(&self) -> CanonStateNotifications<T> {
         broadcast::channel(1).1
     }

@@ -114,11 +114,25 @@ pub mod gas_oracle {
 
 /// Cache specific constants
 pub mod cache {
-    /// Default cache size for the block cache: 5000 blocks.
-    pub const DEFAULT_BLOCK_CACHE_MAX_LEN: u32 = 5000;
+    use std::time::Duration;
 
-    /// Default cache size for the receipts cache: 2000 receipts.
-    pub const DEFAULT_RECEIPT_CACHE_MAX_LEN: u32 = 2000;
+    /// Default estimated block payload limit: 2 GiB.
+    pub const DEFAULT_BLOCK_CACHE_MAX_BYTES: usize = 2 * 1024 * 1024 * 1024;
+
+    /// Default estimated receipts payload limit: 1 GiB.
+    pub const DEFAULT_RECEIPT_CACHE_MAX_BYTES: usize = 1024 * 1024 * 1024;
+
+    /// Default estimated block access list payload limit: 500 MiB.
+    pub const DEFAULT_BAL_CACHE_MAX_BYTES: usize = 500 * 1024 * 1024;
+
+    /// Default idle timeout for cached blocks, receipts, and block access lists.
+    pub const DEFAULT_CACHE_IDLE_TIMEOUT: Duration = Duration::from_secs(60 * 60);
+
+    /// Default cache size for the block cache: 1000 blocks.
+    pub const DEFAULT_BLOCK_CACHE_MAX_LEN: u32 = 1000;
+
+    /// Default cache size for the receipts cache: 500 blocks' receipts.
+    pub const DEFAULT_RECEIPT_CACHE_MAX_LEN: u32 = 500;
 
     /// Legacy default for the no-op RPC header cache option.
     pub const DEFAULT_HEADER_CACHE_MAX_LEN: u32 = 1000;

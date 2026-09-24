@@ -6,7 +6,7 @@ use alloy_rpc_types_engine::ExecutionData;
 use reth_ethereum_primitives::{EthPrimitives, TransactionSigned};
 use reth_evm::{execute::Executor, ConfigureEvm};
 use reth_primitives_traits::{AlloyBlockHeader, Block};
-use reth_provider::{HeaderProvider, StateProviderFactory};
+use reth_provider::{HeaderProvider, StateProvider, StateProviderBox, StateProviderFactory};
 use reth_revm::{database::StateProviderDatabase, witness::ExecutionWitnessRecord};
 use reth_tasks::Runtime;
 use reth_trie_common::ExecutionWitnessMode;
@@ -70,8 +70,9 @@ where
                                 source: eyre::Report::new(source),
                             }
                         })?;
-                    let block_executor =
-                        evm_config.executor(StateProviderDatabase::new(state_provider));
+                    let block_executor = evm_config.executor(StateProviderDatabase::new(
+                        state_provider.into_evm_state_provider(),
+                    ));
                     let mut witness = None;
                     let mut first_header = block_number.saturating_sub(1);
                     block_executor
@@ -81,8 +82,8 @@ where
                             }
                             witness = Some(
                                 ExecutionWitnessRecord::new(statedb)
-                                    .into_execution_witness_without_headers(
-                                        &statedb.database.0,
+                                    .into_execution_witness_without_headers::<StateProviderBox>(
+                                        &statedb.database,
                                         ExecutionWitnessMode::Canonical,
                                     ),
                             );

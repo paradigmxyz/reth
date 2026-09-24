@@ -545,6 +545,11 @@ impl From<reth_errors::ProviderError> for EthApiError {
             ProviderError::BlockExpired { requested, earliest_available } => {
                 Self::PrunedHistoryUnavailable { requested, earliest_available }
             }
+            ProviderError::InsufficientChangesets { requested, available }
+                if requested < *available.start() =>
+            {
+                Self::PrunedHistoryUnavailable { requested, earliest_available: *available.start() }
+            }
             err => Self::Internal(err.into()),
         }
     }
@@ -1253,6 +1258,28 @@ mod tests {
             err.message(),
             "pruned history unavailable: requested 5, earliest available 100"
         );
+    }
+
+    #[test]
+    fn pruned_state_errors_use_history_unavailable_code() {
+        use reth_errors::ProviderError;
+
+        let err = EthApiError::from(ProviderError::InsufficientChangesets {
+            requested: 1,
+            available: 43..=48,
+        })
+        .into_rpc_err();
+        assert_eq!(err.code(), 4444);
+        assert_eq!(err.message(), "pruned history unavailable: requested 1, earliest available 43");
+
+        for requested in [43, 49] {
+            let err = EthApiError::from(ProviderError::InsufficientChangesets {
+                requested,
+                available: 43..=48,
+            })
+            .into_rpc_err();
+            assert_eq!(err.code(), -32603);
+        }
     }
 
     #[test]
