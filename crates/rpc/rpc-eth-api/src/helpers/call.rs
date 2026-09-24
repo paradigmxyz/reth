@@ -29,9 +29,7 @@ use reth_node_api::BlockBody;
 use reth_primitives_traits::Recovered;
 use reth_rpc_convert::{RpcConvert, RpcTxReq};
 use reth_rpc_eth_types::{
-    cache::db::{
-        apply_block_overrides, apply_state_overrides, attach_bal_before_tx, merge_state_cache,
-    },
+    cache::db::{apply_block_overrides, apply_state_overrides, attach_bal_before_tx},
     error::{AsEthApiError, FromEthApiError},
     simulate::{self, EthSimulateError},
     EthApiError, RpcInvalidTransactionError, StateCacheDb,
@@ -783,7 +781,7 @@ pub trait Call:
                 let res = evm.transact(&tx_env).map_err(Self::Error::from_evm_err)?;
                 let cache = evm.take_state_cache();
                 drop(evm);
-                merge_state_cache(&mut db, cache);
+                db.cache.merge(cache);
                 f(tx_info, res, db)
             })
             .await

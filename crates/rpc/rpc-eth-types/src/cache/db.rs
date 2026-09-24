@@ -115,21 +115,6 @@ pub fn apply_state_overrides<DB: DynDatabase>(
     Ok(())
 }
 
-/// Incorporates an EVM's accepted overlay and read cache into its caller-owned database.
-/// Storage wipes shadow all earlier cached slots; ordinary updates retain untouched reads.
-pub fn merge_state_cache<DB>(db: &mut CacheDB<DB>, cache: evm2::evm::Cache) {
-    db.cache.accounts.extend(cache.accounts);
-    db.cache.contracts.extend(cache.contracts);
-    db.cache.block_hashes.extend(cache.block_hashes);
-    for (address, storage) in cache.storage {
-        let target = db.cache.storage.entry(address).or_default();
-        if storage.wiped {
-            target.wipe();
-        }
-        target.slots.extend(storage.slots);
-    }
-}
-
 /// Attaches `bal` to the database, positioned at the state right before the transaction at
 /// `tx_index`.
 ///

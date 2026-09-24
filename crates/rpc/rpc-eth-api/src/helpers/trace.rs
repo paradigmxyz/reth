@@ -15,10 +15,7 @@ use reth_evm::{
     TxResultWithStateFor,
 };
 use reth_primitives_traits::{BlockBody, BlockTy, RecoveredBlock};
-use reth_rpc_eth_types::{
-    cache::db::{attach_bal_before_tx, merge_state_cache},
-    EthApiError, StateCacheDb,
-};
+use reth_rpc_eth_types::{cache::db::attach_bal_before_tx, EthApiError, StateCacheDb};
 use reth_storage_api::ProviderBlock;
 use std::sync::Arc;
 
@@ -211,7 +208,7 @@ pub trait Trace: LoadState<Error: FromEvmError<Self::Evm>> + Call {
         )?;
         let cache = evm.take_state_cache();
         drop(evm);
-        merge_state_cache(db, cache);
+        db.cache.merge(cache);
         Ok(())
     }
 
@@ -254,7 +251,7 @@ pub trait Trace: LoadState<Error: FromEvmError<Self::Evm>> + Call {
             .map_err(Self::Error::from_evm_err)?;
         let cache = evm.take_state_cache();
         drop(evm);
-        merge_state_cache(db, cache);
+        db.cache.merge(cache);
         Ok((inspector, result, evm_env))
     }
 

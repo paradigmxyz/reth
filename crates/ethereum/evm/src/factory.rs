@@ -50,19 +50,7 @@ where
 
     /// Converts the standard Ethereum block environment into the factory's block environment.
     fn block_env(&self, block: evm2::env::BlockEnv) -> evm2::env::BlockEnv<Self::Types> {
-        evm2::env::BlockEnv::<Self::Types> {
-            number: block.number,
-            beneficiary: block.beneficiary,
-            timestamp: block.timestamp,
-            gas_limit: block.gas_limit,
-            basefee: block.basefee,
-            difficulty: block.difficulty,
-            prevrandao: block.prevrandao,
-            blob_basefee: block.blob_basefee,
-            slot_num: block.slot_num,
-            ext: Default::default(),
-            _non_exhaustive: (),
-        }
+        block.with_ext(Default::default())
     }
 
     /// Returns the runtime version for an Ethereum hardfork.
