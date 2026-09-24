@@ -46,7 +46,7 @@ impl<T> BlockExecutionOutput<T> {
     ///
     /// This means that depending on status we can potentially return `U256::ZERO`.
     pub fn storage(&self, address: &Address, storage_key: U256) -> Option<U256> {
-        self.state.account(address).and_then(|a| a.storage_slot(storage_key))
+        self.state.storage(address, storage_key)
     }
 }
 

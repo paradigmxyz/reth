@@ -184,11 +184,7 @@ impl<C: TrieCursor, K: AsRef<AddedRemovedKeys>> TrieWalker<C, K> {
     pub fn next_unprocessed_key(&self) -> Option<(B256, Nibbles)> {
         self.key()
             .and_then(|key| if self.can_skip_current_node { key.increment() } else { Some(*key) })
-            .map(|key| {
-                let mut packed = key.pack();
-                packed.resize(32, 0);
-                (B256::from_slice(packed.as_slice()), key)
-            })
+            .map(|key| (B256::right_padding_from(&key.pack()), key))
     }
 
     /// Updates the skip node flag based on the walker's current state.

@@ -177,11 +177,11 @@ where
         let is_post_merge = self.chain_spec.is_paris_active_at_block(header.number());
 
         if is_post_merge {
-            if !header.difficulty().is_zero() {
+            if !header.is_zero_difficulty() {
                 return Err(ConsensusError::TheMergeDifficultyIsNotZero);
             }
 
-            if !header.nonce().is_some_and(|nonce| nonce.is_zero()) {
+            if !header.is_nonce_zero() {
                 return Err(ConsensusError::TheMergeNonceIsNotZero);
             }
 
@@ -196,9 +196,7 @@ where
                     .unwrap()
                     .as_secs();
 
-                if header.timestamp() >
-                    present_timestamp + alloy_eips::merge::ALLOWED_FUTURE_BLOCK_TIME_SECONDS
-                {
+                if header.exceeds_allowed_future_timestamp(present_timestamp) {
                     return Err(ConsensusError::TimestampIsInFuture {
                         timestamp: header.timestamp(),
                         present_timestamp,

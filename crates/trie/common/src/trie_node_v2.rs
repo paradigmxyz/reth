@@ -131,6 +131,15 @@ impl Encodable for TrieNodeV2 {
             }
         }
     }
+
+    fn length(&self) -> usize {
+        match self {
+            Self::EmptyRoot => 1,
+            Self::Leaf(leaf) => leaf.as_ref().length(),
+            Self::Branch(branch) => branch.length(),
+            Self::Extension(ext) => ext.length(),
+        }
+    }
 }
 
 impl Decodable for TrieNodeV2 {
@@ -234,5 +243,47 @@ impl Encodable for BranchNodeV2 {
             .expect("branch_rlp_node must always be present for extension nodes");
 
         ExtensionNodeRef::new(&self.key, branch_rlp_node.as_slice()).length()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use alloy_primitives::B256;
+
+    #[test]
+    fn trie_node_v2_length_matches_encoding() {
+        let hash_child = RlpNode::word_rlp(&B256::repeat_byte(0x11));
+        let inline_child = RlpNode::from_rlp(&alloy_rlp::encode(LeafNode::new(
+            Nibbles::from_nibbles([0x1]),
+            vec![0x2],
+        )));
+        let stack = vec![hash_child.clone(), inline_child, hash_child.clone()];
+        let state_mask = TrieMask::new(0b1000_0000_0010_0001);
+        let branch_rlp_node =
+            RlpNode::from_rlp(&alloy_rlp::encode(BranchNodeRef::new(&stack, state_mask)));
+
+        let nodes = [
+            TrieNodeV2::EmptyRoot,
+            TrieNodeV2::Leaf(LeafNode::new(Nibbles::from_nibbles([0x1, 0x2, 0x3]), vec![0x4])),
+            TrieNodeV2::Leaf(LeafNode::new(Nibbles::from_nibbles([0xa; 64]), vec![0xbb; 100])),
+            TrieNodeV2::Branch(BranchNodeV2::new(
+                Nibbles::default(),
+                stack.clone(),
+                state_mask,
+                None,
+            )),
+            TrieNodeV2::Branch(BranchNodeV2::new(
+                Nibbles::from_nibbles([0x5, 0x6]),
+                stack,
+                state_mask,
+                Some(branch_rlp_node),
+            )),
+            TrieNodeV2::Extension(ExtensionNode::new(Nibbles::from_nibbles([0x7]), hash_child)),
+        ];
+
+        for node in nodes {
+            assert_eq!(node.length(), alloy_rlp::encode(&node).len(), "{node:?}");
+        }
     }
 }

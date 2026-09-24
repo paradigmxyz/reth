@@ -40,14 +40,11 @@ use reth_evm::{ConfigureEngineEvm, ExecutableTxIterator};
 #[allow(unused_imports)]
 use {
     alloy_eips::Decodable2718,
-    alloy_primitives::{Bytes, U256},
+    alloy_primitives::Bytes,
     alloy_rpc_types_engine::ExecutionData,
-    reth_chainspec::EthereumHardforks,
     reth_evm::{EvmEnvFor, ExecutionCtxFor},
-    reth_primitives_traits::{constants::MAX_TX_GAS_LIMIT_OSAKA, SignedTransaction, TxTy},
+    reth_primitives_traits::{SignedTransaction, TxTy},
     reth_storage_errors::any::AnyError,
-    revm::context::CfgEnv,
-    revm::context_interface::block::BlobExcessGasAndPrice,
 };
 
 pub use alloy_evm::EthEvm;
@@ -287,51 +284,12 @@ where
         + 'static,
 {
     fn evm_env_for_payload(&self, payload: &ExecutionData) -> Result<EvmEnvFor<Self>, Self::Error> {
-        let timestamp = payload.payload.timestamp();
-        let block_number = payload.payload.block_number();
-
-        let blob_params = self.chain_spec().blob_params_at_timestamp(timestamp);
-        let spec =
-            revm_spec_by_timestamp_and_block_number(self.chain_spec(), timestamp, block_number);
-
-        // configure evm env based on parent block
-        let mut cfg_env = CfgEnv::new()
-            .with_chain_id(self.chain_spec().chain().id())
-            .with_spec_and_mainnet_gas_params(spec);
-
-        if let Some(blob_params) = &blob_params {
-            cfg_env.set_max_blobs_per_tx(blob_params.max_blobs_per_tx);
-        }
-
-        if self.chain_spec().is_osaka_active_at_timestamp(timestamp) {
-            cfg_env.tx_gas_limit_cap = Some(MAX_TX_GAS_LIMIT_OSAKA);
-        }
-
-        // derive the EIP-4844 blob fees from the header's `excess_blob_gas` and the current
-        // blobparams
-        let blob_excess_gas_and_price =
-            payload.payload.excess_blob_gas().zip(blob_params).map(|(excess_blob_gas, params)| {
-                let blob_gasprice = params.calc_blob_fee(excess_blob_gas);
-                BlobExcessGasAndPrice { excess_blob_gas, blob_gasprice }
-            });
-
-        let block_env = BlockEnv {
-            number: U256::from(block_number),
-            beneficiary: payload.payload.fee_recipient(),
-            timestamp: U256::from(timestamp),
-            difficulty: if spec >= SpecId::MERGE {
-                U256::ZERO
-            } else {
-                payload.payload.as_v1().prev_randao.into()
-            },
-            prevrandao: (spec >= SpecId::MERGE).then(|| payload.payload.as_v1().prev_randao),
-            gas_limit: payload.payload.gas_limit(),
-            basefee: payload.payload.saturated_base_fee_per_gas(),
-            blob_excess_gas_and_price,
-            slot_num: payload.payload.as_v4().map(|v4| v4.slot_number).unwrap_or_default(),
-        };
-
-        Ok(EvmEnv { cfg_env, block_env })
+        Ok(EvmEnv::for_eth_payload(
+            &payload.payload,
+            self.chain_spec(),
+            self.chain_spec().chain().id(),
+            self.chain_spec().blob_params_at_timestamp(payload.payload.timestamp()),
+        ))
     }
 
     fn context_for_payload<'a>(
@@ -376,6 +334,7 @@ mod tests {
     use super::*;
     use alloy_consensus::Header;
     use alloy_genesis::Genesis;
+    use alloy_primitives::U256;
     use reth_chainspec::{Chain, ChainSpec};
     use reth_evm::{execute::ProviderError, EvmEnv};
     use revm::{

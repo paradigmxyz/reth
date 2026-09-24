@@ -6,7 +6,10 @@
 
 use super::RocksDBProvider;
 use crate::StaticFileProviderFactory;
-use alloy_primitives::BlockNumber;
+use alloy_primitives::{
+    map::{AddressSet, HashSet},
+    BlockNumber,
+};
 use reth_chainspec::{ChainSpecProvider, EthChainSpec};
 use reth_db::models::{storage_sharded_key::StorageShardedKey, ShardedKey};
 use reth_db_api::{table::Value, tables};
@@ -18,7 +21,6 @@ use reth_storage_api::{
     StorageChangeSetReader, StorageSettingsCache, TransactionsProviderExt,
 };
 use reth_storage_errors::provider::ProviderResult;
-use std::collections::HashSet;
 
 /// Batch size for changeset iteration during history healing.
 /// Balances memory usage against iteration overhead.
@@ -445,7 +447,8 @@ impl RocksDBProvider {
 
             let changesets = provider.account_changesets_range(batch_start..=batch_end)?;
 
-            let mut addresses = HashSet::with_capacity(changesets.len());
+            let mut addresses =
+                AddressSet::with_capacity_and_hasher(changesets.len(), Default::default());
             addresses.extend(changesets.iter().map(|(_, cs)| cs.address));
             let unwind_from = checkpoint + 1;
             let indices: Vec<_> = addresses.into_iter().map(|addr| (addr, unwind_from)).collect();

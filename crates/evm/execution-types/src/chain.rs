@@ -302,11 +302,7 @@ impl<N: NodePrimitives> Chain<N> {
 
     /// Get the block at which this chain forked.
     pub fn fork_block(&self) -> ForkBlock {
-        let first = self.first();
-        ForkBlock {
-            number: first.header().number().saturating_sub(1),
-            hash: first.header().parent_hash(),
-        }
+        self.first().header().parent_num_hash()
     }
 
     /// Get the first block in this chain.
