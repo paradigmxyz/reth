@@ -3375,6 +3375,7 @@ where
         }
 
         let Some(header) = self.provider.sealed_header_by_hash(hash)? else { return Ok(None) };
+        // Disk reorgs lag behind memory, so reject headers above or outside the canonical chain.
         let number = header.number();
         if number > self.canonical_in_memory_state.get_canonical_block_number() {
             return Ok(None)
