@@ -5,6 +5,7 @@ use alloy_consensus::{Blob, Bytes48, EnvKzgSettings};
 use alloy_eips::eip7594::CELLS_PER_EXT_BLOB;
 use alloy_primitives::{Bytes, B256};
 use alloy_rpc_types_engine::{BlobsBundleV1, BlobsBundleV2};
+use itertools::izip;
 use parking_lot::Mutex;
 use std::collections::VecDeque;
 
@@ -23,49 +24,33 @@ impl BlobValidationCache {
         &self,
         bundle: BlobsBundleV1,
     ) -> Result<Vec<B256>, ValidationApiError> {
-        if bundle.blobs.len() != bundle.commitments.len() ||
-            bundle.blobs.len() != bundle.proofs.len()
-        {
-            return Err(ValidationApiError::InvalidBlobsBundle)
-        }
-
-        let versioned_hashes = bundle.versioned_hashes();
+        let mut sidecar =
+            bundle.try_into_sidecar().map_err(|_| ValidationApiError::InvalidBlobsBundle)?;
+        let versioned_hashes = sidecar.versioned_hashes().collect();
         let hits = {
-            let mut entries = self.entries.lock();
-            bundle
-                .blobs
-                .iter()
-                .zip(&bundle.commitments)
-                .zip(&bundle.proofs)
-                .map(|((blob, commitment), proof)| {
-                    Self::contains_v1(&mut entries, blob, commitment, proof)
+            let entries = self.entries.lock();
+            izip!(&sidecar.blobs, &sidecar.commitments, &sidecar.proofs)
+                .map(|(blob, commitment, proof)| {
+                    entries
+                        .iter()
+                        .any(|entry| entry.matches(blob, commitment, std::slice::from_ref(proof)))
                 })
                 .collect::<Vec<_>>()
         };
 
-        let (misses, miss_hashes) = Self::v1_misses(bundle, hits, &versioned_hashes);
+        Self::retain_misses(&mut sidecar.blobs, &hits, 1);
+        Self::retain_misses(&mut sidecar.commitments, &hits, 1);
+        Self::retain_misses(&mut sidecar.proofs, &hits, 1);
 
-        if misses.blobs.is_empty() {
-            return Ok(versioned_hashes)
-        }
+        if !sidecar.blobs.is_empty() {
+            let miss_hashes = sidecar.versioned_hashes().collect::<Vec<_>>();
+            sidecar.validate(&miss_hashes, EnvKzgSettings::default().get())?;
 
-        let sidecar =
-            misses.try_into_sidecar().map_err(|_| ValidationApiError::InvalidBlobsBundle)?;
-        sidecar.validate(&miss_hashes, EnvKzgSettings::default().get())?;
-
-        let mut entries = self.entries.lock();
-        for ((blob, commitment), proof) in
-            sidecar.blobs.iter().zip(&sidecar.commitments).zip(&sidecar.proofs)
-        {
-            if !Self::contains_v1(&mut entries, blob, commitment, proof) {
-                Self::insert(
-                    &mut entries,
-                    ValidatedBlob::V1 {
-                        blob: Bytes::copy_from_slice(blob.as_slice()),
-                        commitment: *commitment,
-                        proof: *proof,
-                    },
-                );
+            let mut entries = self.entries.lock();
+            for (blob, commitment, proof) in
+                izip!(&sidecar.blobs, &sidecar.commitments, &sidecar.proofs)
+            {
+                Self::insert(&mut entries, blob, commitment, std::slice::from_ref(proof));
             }
         }
 
@@ -77,174 +62,82 @@ impl BlobValidationCache {
         &self,
         bundle: BlobsBundleV2,
     ) -> Result<Vec<B256>, ValidationApiError> {
-        if bundle.blobs.len() != bundle.commitments.len() ||
-            bundle.blobs.len().checked_mul(CELLS_PER_EXT_BLOB) != Some(bundle.proofs.len())
-        {
-            return Err(ValidationApiError::InvalidBlobsBundle)
-        }
-
-        let versioned_hashes = bundle.versioned_hashes();
+        let mut sidecar =
+            bundle.try_into_sidecar().map_err(|_| ValidationApiError::InvalidBlobsBundle)?;
+        let versioned_hashes = sidecar.versioned_hashes().collect();
         let hits = {
-            let mut entries = self.entries.lock();
-            bundle
-                .blobs
-                .iter()
-                .zip(&bundle.commitments)
-                .zip(bundle.proofs.as_chunks::<CELLS_PER_EXT_BLOB>().0)
-                .map(|((blob, commitment), proofs)| {
-                    Self::contains_v2(&mut entries, blob, commitment, proofs)
-                })
-                .collect::<Vec<_>>()
+            let entries = self.entries.lock();
+            izip!(
+                &sidecar.blobs,
+                &sidecar.commitments,
+                sidecar.cell_proofs.as_chunks::<CELLS_PER_EXT_BLOB>().0
+            )
+            .map(|(blob, commitment, proofs)| {
+                entries.iter().any(|entry| entry.matches(blob, commitment, proofs))
+            })
+            .collect::<Vec<_>>()
         };
 
-        let (misses, miss_hashes) = Self::v2_misses(bundle, hits, &versioned_hashes);
+        Self::retain_misses(&mut sidecar.blobs, &hits, 1);
+        Self::retain_misses(&mut sidecar.commitments, &hits, 1);
+        Self::retain_misses(&mut sidecar.cell_proofs, &hits, CELLS_PER_EXT_BLOB);
 
-        if misses.blobs.is_empty() {
-            return Ok(versioned_hashes)
-        }
+        if !sidecar.blobs.is_empty() {
+            let miss_hashes = sidecar.versioned_hashes().collect::<Vec<_>>();
+            sidecar.validate(&miss_hashes, EnvKzgSettings::default().get())?;
 
-        let sidecar =
-            misses.try_into_sidecar().map_err(|_| ValidationApiError::InvalidBlobsBundle)?;
-        sidecar.validate(&miss_hashes, EnvKzgSettings::default().get())?;
-
-        let mut entries = self.entries.lock();
-        for ((blob, commitment), proofs) in sidecar
-            .blobs
-            .iter()
-            .zip(&sidecar.commitments)
-            .zip(sidecar.cell_proofs.as_chunks::<CELLS_PER_EXT_BLOB>().0)
-        {
-            if !Self::contains_v2(&mut entries, blob, commitment, proofs) {
-                Self::insert(
-                    &mut entries,
-                    ValidatedBlob::V2 {
-                        blob: Bytes::copy_from_slice(blob.as_slice()),
-                        commitment: *commitment,
-                        proofs: proofs.to_vec(),
-                    },
-                );
+            let mut entries = self.entries.lock();
+            for (blob, commitment, proofs) in izip!(
+                &sidecar.blobs,
+                &sidecar.commitments,
+                sidecar.cell_proofs.as_chunks::<CELLS_PER_EXT_BLOB>().0
+            ) {
+                Self::insert(&mut entries, blob, commitment, proofs);
             }
         }
 
         Ok(versioned_hashes)
     }
 
-    fn v1_misses(
-        mut bundle: BlobsBundleV1,
-        hits: Vec<bool>,
-        versioned_hashes: &[B256],
-    ) -> (BlobsBundleV1, Vec<B256>) {
-        let miss_hashes = versioned_hashes
-            .iter()
-            .zip(&hits)
-            .filter_map(|(hash, hit)| (!hit).then_some(*hash))
-            .collect();
-
-        let mut index = 0;
-        bundle.blobs.retain(|_| {
-            let keep = !hits[index];
-            index += 1;
-            keep
-        });
-        let mut index = 0;
-        bundle.commitments.retain(|_| {
-            let keep = !hits[index];
-            index += 1;
-            keep
-        });
-        let mut index = 0;
-        bundle.proofs.retain(|_| {
-            let keep = !hits[index];
-            index += 1;
-            keep
-        });
-
-        (bundle, miss_hashes)
+    fn retain_misses<T>(items: &mut Vec<T>, hits: &[bool], per_blob: usize) {
+        let mut keep = hits.iter().flat_map(|hit| std::iter::repeat_n(!hit, per_blob));
+        items.retain(|_| keep.next().expect("validated sidecar lengths match"));
     }
 
-    fn v2_misses(
-        mut bundle: BlobsBundleV2,
-        hits: Vec<bool>,
-        versioned_hashes: &[B256],
-    ) -> (BlobsBundleV2, Vec<B256>) {
-        let miss_hashes = versioned_hashes
-            .iter()
-            .zip(&hits)
-            .filter_map(|(hash, hit)| (!hit).then_some(*hash))
-            .collect();
-
-        let mut index = 0;
-        bundle.blobs.retain(|_| {
-            let keep = !hits[index];
-            index += 1;
-            keep
-        });
-        let mut index = 0;
-        bundle.commitments.retain(|_| {
-            let keep = !hits[index];
-            index += 1;
-            keep
-        });
-        let mut index = 0;
-        bundle.proofs.retain(|_| {
-            let keep = !hits[index / CELLS_PER_EXT_BLOB];
-            index += 1;
-            keep
-        });
-
-        (bundle, miss_hashes)
-    }
-
-    fn contains_v1(
-        entries: &mut VecDeque<ValidatedBlob>,
-        blob: &Blob,
-        commitment: &Bytes48,
-        proof: &Bytes48,
-    ) -> bool {
-        let blob_bytes = blob.as_slice();
-        let Some(index) = entries.iter().position(|entry| {
-            matches!(entry, ValidatedBlob::V1 { blob: cached_blob, commitment: cached_commitment, proof: cached_proof }
-                if cached_commitment == commitment && cached_proof == proof && cached_blob.as_ref() == blob_bytes)
-        }) else {
-            return false
-        };
-        let entry = entries.remove(index).expect("cache entry at a valid index");
-        entries.push_back(entry);
-        true
-    }
-
-    fn contains_v2(
+    fn insert(
         entries: &mut VecDeque<ValidatedBlob>,
         blob: &Blob,
         commitment: &Bytes48,
         proofs: &[Bytes48],
-    ) -> bool {
-        let blob_bytes = blob.as_slice();
-        let Some(index) = entries.iter().position(|entry| {
-            matches!(entry, ValidatedBlob::V2 { blob: cached_blob, commitment: cached_commitment, proofs: cached_proofs }
-                if cached_commitment == commitment && cached_proofs == proofs && cached_blob.as_ref() == blob_bytes)
-        }) else {
-            return false
-        };
-        let entry = entries.remove(index).expect("cache entry at a valid index");
-        entries.push_back(entry);
-        true
-    }
-
-    fn insert(entries: &mut VecDeque<ValidatedBlob>, entry: ValidatedBlob) {
+    ) {
+        if entries.iter().any(|entry| entry.matches(blob, commitment, proofs)) {
+            return;
+        }
         if entries.len() == VALIDATED_BLOB_CACHE_CAPACITY {
             entries.pop_front();
         }
-        entries.push_back(entry);
+        entries.push_back(ValidatedBlob {
+            blob: Bytes::copy_from_slice(blob.as_slice()),
+            commitment: *commitment,
+            proofs: proofs.to_vec(),
+        });
     }
 }
 
-/// A validated tuple includes the proof format, so a matching commitment alone cannot skip
-/// verification of different blob data or proofs.
+/// A proof list of length one is V1; a full cell-proof list is V2.
 #[derive(Debug)]
-enum ValidatedBlob {
-    V1 { blob: Bytes, commitment: Bytes48, proof: Bytes48 },
-    V2 { blob: Bytes, commitment: Bytes48, proofs: Vec<Bytes48> },
+struct ValidatedBlob {
+    blob: Bytes,
+    commitment: Bytes48,
+    proofs: Vec<Bytes48>,
+}
+
+impl ValidatedBlob {
+    fn matches(&self, blob: &Blob, commitment: &Bytes48, proofs: &[Bytes48]) -> bool {
+        self.commitment == *commitment &&
+            self.proofs == proofs &&
+            self.blob.as_ref() == blob.as_slice()
+    }
 }
 
 #[cfg(test)]
@@ -297,6 +190,24 @@ mod tests {
     }
 
     #[test]
+    fn mixed_bundles_validate_only_missing_blobs() {
+        let cache = BlobValidationCache::default();
+        let mut v1 = valid_v1_bundle(b"first blob");
+        let second = valid_v1_bundle(b"second blob");
+        cache.validate_v1(v1.clone()).unwrap();
+
+        v1.blobs.extend(second.blobs);
+        v1.commitments.extend(second.commitments);
+        v1.proofs.extend(second.proofs);
+        assert_eq!(cache.validate_v1(v1.clone()).unwrap(), v1.versioned_hashes());
+
+        cache.validate_v2(valid_v2_bundle(b"first blob")).unwrap();
+        let v2 = v1.try_into_v2().unwrap();
+        assert_eq!(cache.validate_v2(v2.clone()).unwrap(), v2.versioned_hashes());
+        assert_eq!(cache.entries.lock().len(), 4);
+    }
+
+    #[test]
     fn v2_reuses_only_exact_validated_blobs() {
         let cache = BlobValidationCache::default();
         let hashes = valid_v2_bundle(b"peer das blob").versioned_hashes();
@@ -342,20 +253,17 @@ mod tests {
     #[test]
     fn retains_only_twelve_recent_blobs() {
         let mut entries = VecDeque::new();
+        let blob = Blob::default();
         for index in 0..=VALIDATED_BLOB_CACHE_CAPACITY {
             BlobValidationCache::insert(
                 &mut entries,
-                ValidatedBlob::V1 {
-                    blob: Bytes::new(),
-                    commitment: Bytes48::repeat_byte(index as u8),
-                    proof: Bytes48::ZERO,
-                },
+                &blob,
+                &Bytes48::repeat_byte(index as u8),
+                &[Bytes48::ZERO],
             );
         }
 
         assert_eq!(entries.len(), VALIDATED_BLOB_CACHE_CAPACITY);
-        assert!(
-            matches!(entries.front(), Some(ValidatedBlob::V1 { commitment, .. }) if *commitment == Bytes48::repeat_byte(1))
-        );
+        assert_eq!(entries.front().unwrap().commitment, Bytes48::repeat_byte(1));
     }
 }
