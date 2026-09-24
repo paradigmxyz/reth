@@ -83,7 +83,9 @@ impl Discovery {
     ///
     /// This will spawn the [`reth_discv4::Discv4Service`] onto a new task and establish a listener
     /// channel to receive all discovered nodes. When only discv5 is enabled, `nat` periodically
-    /// resolves its advertised external IP without waiting for peer votes.
+    /// resolves its advertised external IP without waiting for peer votes. Automatic resolution
+    /// respects disabled ENR updates and discv5 reachability checks; explicit NAT addresses remain
+    /// authoritative.
     pub async fn new(
         tcp_addr: SocketAddr,
         discovery_v4_addr: SocketAddr,
@@ -170,6 +172,23 @@ impl Discovery {
                 (None, None, None, None, None)
             };
 
+        // Discv4 owns NAT resolution when enabled. Automatic resolvers must respect pinned
+        // addresses and discv5 reachability checks: writing ENR fields does not arm its
+        // connectivity timer. Explicit NAT addresses remain authoritative.
+        let nat_resolver = if discv4.is_none() &&
+            let Some(config) = &mut discv5_config
+        {
+            let config = config.discv5_config_mut();
+            nat.filter(|nat| match nat {
+                NatResolver::None => false,
+                NatResolver::ExternalIp(_) | NatResolver::ExternalAddr(_) => true,
+                _ => config.enr_update && config.auto_nat_listen_duration.is_none(),
+            })
+            .map(|nat| ResolveNatInterval::interval(nat, RESOLVE_EXTERNAL_IP_INTERVAL))
+        } else {
+            None
+        };
+
         // Start discv5, wiring in the shared socket if in shared-port mode.
         let (discv5, discv5_updates) = if let Some(mut config) = discv5_config {
             // Set OS-assigned advertised RLPx ports to the bound listener port.
@@ -239,15 +258,6 @@ impl Discovery {
             } else {
                 (None, None, None)
             };
-
-        // Discv4 owns NAT resolution when enabled. Without either protocol there is no ENR
-        // to update, so avoid issuing unused external IP requests.
-        let nat_resolver = if discv4.is_none() && discv5.is_some() {
-            nat.filter(|nat| !matches!(nat, NatResolver::None))
-                .map(|nat| ResolveNatInterval::interval(nat, RESOLVE_EXTERNAL_IP_INTERVAL))
-        } else {
-            None
-        };
 
         Ok(Self {
             discovery_listeners: Default::default(),
@@ -580,16 +590,8 @@ mod tests {
         .expect("should build discv5 with discv4 downgrade")
     }
 
-    async fn start_discv5_only(
-        listen_config: discv5::ListenConfig,
-        nat: Option<NatResolver>,
-    ) -> Discovery {
+    async fn start_discv5_only(config: reth_discv5::Config, nat: Option<NatResolver>) -> Discovery {
         let secret_key = SecretKey::new(&mut rand_08::thread_rng());
-        // The advertised TCP port may differ from the listener port behind NAT.
-        let advertised_addr: SocketAddr = "127.0.0.1:30309".parse().unwrap();
-        let mut config = reth_discv5::Config::builder(advertised_addr).build();
-        // Install pre-bound sockets after the builder normalizes its listen addresses.
-        config.discv5_config_mut().listen_config = listen_config;
         Discovery::new(
             "127.0.0.1:30303".parse().unwrap(),
             "127.0.0.1:0".parse().unwrap(),
@@ -608,11 +610,16 @@ mod tests {
         let socket = Arc::new(UdpSocket::bind("0.0.0.0:0").await.unwrap());
         let udp_port = socket.local_addr().unwrap().port();
         let external_ip = "203.0.113.7".parse().unwrap();
-        let mut discovery = start_discv5_only(
-            discv5::ListenConfig::FromSockets { ipv4: Some(socket), ipv6: None },
-            Some(NatResolver::ExternalIp(external_ip)),
-        )
-        .await;
+        // The advertised TCP port may differ from the listener port behind NAT.
+        let mut config = reth_discv5::Config::builder("127.0.0.1:30309".parse().unwrap()).build();
+        // Install pre-bound sockets after the builder normalizes its listen addresses.
+        let discv5_config = config.discv5_config_mut();
+        discv5_config.listen_config =
+            discv5::ListenConfig::FromSockets { ipv4: Some(socket), ipv6: None };
+        // Explicit NAT addresses still apply when peer-driven ENR updates are disabled.
+        discv5_config.enr_update = false;
+        let mut discovery =
+            start_discv5_only(config, Some(NatResolver::ExternalIp(external_ip))).await;
         let discv5 = discovery.discv5().unwrap();
         assert!(discv5.local_enr().ip4().is_none());
 
@@ -647,6 +654,25 @@ mod tests {
         });
         discovery.on_external_ip(external_ip);
         assert_eq!(discv5.node_record().unwrap(), NodeRecord { udp_port: 30310, ..record });
+    }
+
+    #[tokio::test]
+    async fn discv5_only_respects_enr_update_policy() {
+        for (enr_update, auto_nat_listen_duration) in
+            [(false, None), (true, Some(Duration::from_secs(300)))]
+        {
+            let mut config = reth_discv5::Config::builder((Ipv4Addr::LOCALHOST, 0).into()).build();
+            let discv5_config = config.discv5_config_mut();
+            discv5_config.listen_config =
+                discv5::ListenConfig::Ipv4 { ip: Ipv4Addr::LOCALHOST, port: 0 };
+            discv5_config.enr_update = enr_update;
+            // Set this after building: the upstream builder clears the reachability timer.
+            discv5_config.auto_nat_listen_duration = auto_nat_listen_duration;
+            let discovery = start_discv5_only(config, Some(NatResolver::Any)).await;
+
+            // No automatic lookup may overwrite a pinned address or bypass reachability checks.
+            assert!(discovery.nat_resolver.is_none());
+        }
     }
 
     #[test]
