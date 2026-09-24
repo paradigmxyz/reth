@@ -1,14 +1,14 @@
-//! Targeted read-ahead for bytecode values spanning multiple OS pages.
+//! Targeted read-ahead for mapped table values spanning multiple OS pages.
 
 use reth_libmdbx::{ffi, TableObject, TransactionKind};
 use std::{borrow::Cow, sync::LazyLock};
 
-/// Prefetches mapped bytecode before it is copied or decompressed.
-pub(super) struct PrefetchBytecode<'a>(pub(super) Cow<'a, [u8]>);
+/// Prefetches a mapped table value before it is copied or decompressed.
+pub(super) struct PrefetchValue<'a>(pub(super) Cow<'a, [u8]>);
 
-impl<'a> TableObject for PrefetchBytecode<'a> {
+impl<'a> TableObject for PrefetchValue<'a> {
     fn decode(_: &[u8]) -> reth_libmdbx::Result<Self> {
-        unreachable!("bytecode prefetch requires the MDBX transaction context")
+        unreachable!("value prefetch requires the MDBX transaction context")
     }
 
     unsafe fn decode_val<K: TransactionKind>(
@@ -18,7 +18,7 @@ impl<'a> TableObject for PrefetchBytecode<'a> {
         // SAFETY: MDBX invokes this decoder with a value from the live transaction.
         if let Some((start, len)) = unsafe { prefetch_range::<K>(txn, value) } {
             // MDBX disables general read-ahead. Hint only this value's pages to avoid
-            // serial faults while decoding large bytecode, without enabling general read-ahead.
+            // serial faults while decoding large values, without enabling general read-ahead.
             // SAFETY: The complete rounded range belongs to the live MDBX file mapping.
             // Advice is best-effort and must not turn a successful lookup into an error.
             let _ = unsafe { libc::madvise(start as *mut libc::c_void, len, libc::MADV_WILLNEED) };
@@ -41,7 +41,7 @@ unsafe fn prefetch_range<K: TransactionKind>(
     if value.iov_len <= *PAGE_SIZE {
         return None;
     }
-    // Pipeline execution also reads unchanged bytecode through writable transactions.
+    // Unchanged values can also be read through writable transactions.
     // Dirty values can be heap-backed; never advise them, even with `return-borrowed`.
     // SAFETY: This is the original value pointer, before any copy or transaction mutation.
     if !K::IS_READ_ONLY && unsafe { ffi::mdbx_is_dirty(txn, value.iov_base) } != ffi::MDBX_SUCCESS {
@@ -85,7 +85,7 @@ mod tests {
         assert_eq!(page_range(0x1000, 4096, 3), None);
     }
 
-    /// Inspects the same prefetch eligibility decision used by the bytecode decoder.
+    /// Inspects the same prefetch eligibility decision used by the value decoder.
     struct PrefetchRange(Option<(usize, usize)>);
 
     impl TableObject for PrefetchRange {

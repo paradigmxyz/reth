@@ -304,7 +304,7 @@ impl<K: TransactionKind> DbTx for Tx<K> {
             let dbi = self.get_dbi::<T>()?;
             #[cfg(target_os = "linux")]
             let value = if T::NAME == crate::tables::Bytecodes::NAME {
-                tx.get::<super::bytecode_prefetch::PrefetchBytecode<'_>>(dbi, key.as_ref())
+                tx.get::<super::value_prefetch::PrefetchValue<'_>>(dbi, key.as_ref())
                     .map(|value| value.map(|value| value.0))
             } else {
                 tx.get(dbi, key.as_ref())
