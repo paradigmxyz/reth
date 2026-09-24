@@ -3383,7 +3383,20 @@ where
         Ok(canonical)
     }
 
-    /// Checks safe/finalized ancestry before changing the canonical chain or either marker.
+    /// Checks that nonzero safe and finalized hashes belong to the chain defined by the FCU head.
+    ///
+    /// The [Engine API forkchoiceUpdated specification] requires `-38002` when a `VALID` head's
+    /// safe or finalized hash is outside that chain, and requires all forkchoice state updates to
+    /// be atomic. This check must therefore run before canonicalizing the head or updating either
+    /// marker; checking only after canonicalization would leave an invalid reorg applied.
+    ///
+    /// `chain_update` describes a proposed commit or reorg that has not yet been applied. Its new
+    /// blocks and the canonical prefix below its first block form the proposed chain. Without a
+    /// chain update, the proposed head is already canonical, so only canonical blocks through its
+    /// height are eligible. A zero safe or finalized hash leaves that marker unchanged.
+    /// Returns `Ok(false)` for an unknown or off-chain hash and propagates provider errors.
+    ///
+    /// [Engine API forkchoiceUpdated specification]: https://github.com/ethereum/execution-apis/blob/main/src/engine/paris.md#specification-1
     fn is_consistent_forkchoice_state(
         &self,
         state: ForkchoiceState,
