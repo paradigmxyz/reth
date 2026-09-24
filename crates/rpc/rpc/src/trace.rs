@@ -143,8 +143,8 @@ where
             .await
     }
 
-    /// Performs multiple call traces on top of the same block. i.e. transaction n will be executed
-    /// on top of a pending block with all n-1 transactions applied (traced) first.
+    /// Performs multiple call traces on top of the same block. Defaults to the latest block when
+    /// no block is specified. Each call is executed with the preceding calls applied first.
     ///
     /// Note: Allows tracing dependent transactions, hence all transactions are traced in sequence
     pub async fn trace_call_many(
@@ -152,7 +152,7 @@ where
         calls: Vec<(RpcTxReq<Eth::NetworkTypes>, HashSet<TraceType>)>,
         block_id: Option<BlockId>,
     ) -> Result<Vec<TraceResults>, Eth::Error> {
-        let at = block_id.unwrap_or(BlockId::pending());
+        let at = block_id.unwrap_or_default();
         let (evm_env, at) = self.eth_api().evm_env_at(at).await?;
 
         // execute all transactions on top of each other and record the traces
@@ -894,6 +894,53 @@ fn reward_trace<H: BlockHeader>(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::EthApiBuilder;
+    use alloy_consensus::Header;
+    use alloy_rpc_types_eth::TransactionRequest;
+    use reth_ethereum_primitives::{Block, BlockBody};
+    use reth_evm_ethereum::EthEvmConfig;
+    use reth_network_api::noop::NoopNetwork;
+    use reth_provider::test_utils::{ExtendedAccount, MockEthProvider};
+    use reth_transaction_pool::test_utils::testing_pool;
+
+    #[tokio::test]
+    async fn trace_call_many_defaults_to_latest() {
+        let provider = MockEthProvider::default();
+        let target = Address::with_last_byte(0x42);
+        // Return NUMBER as a 32-byte word.
+        provider.add_account(
+            target,
+            ExtendedAccount::new(0, U256::ZERO)
+                .with_bytecode("4360005260206000f3".parse().unwrap()),
+        );
+        let header = Header { number: 1, gas_limit: 30_000_000, ..Default::default() };
+        provider.add_block(header.hash_slow(), Block { header, body: BlockBody::default() });
+        let eth_api = EthApiBuilder::new(
+            provider.clone(),
+            testing_pool(),
+            NoopNetwork::default(),
+            EthEvmConfig::new(provider.chain_spec()),
+        )
+        .build();
+        let api = TraceApi::new(eth_api, BlockingTaskGuard::new(1), EthConfig::default());
+        let calls = vec![(TransactionRequest::default().to(target), HashSet::default())];
+
+        let omitted = api.trace_call_many(calls.clone(), None).await.unwrap();
+        let latest = api.trace_call_many(calls.clone(), Some(BlockId::latest())).await.unwrap();
+        let request = serde_json::json!({
+            "jsonrpc": "2.0", "id": 1, "method": "trace_callMany", "params": [calls.clone()],
+        });
+        let pending = api.trace_call_many(calls, Some(BlockId::pending())).await.unwrap();
+        assert_eq!(omitted, latest);
+        assert_ne!(omitted, pending);
+        assert_eq!(U256::from_be_slice(&omitted[0].output), U256::from(1));
+        assert_eq!(U256::from_be_slice(&pending[0].output), U256::from(2));
+
+        let module = api.into_rpc();
+        let (response, _) = module.raw_json_request(&request.to_string(), 1).await.unwrap();
+        let response: serde_json::Value = serde_json::from_str(response.get()).unwrap();
+        assert_eq!(response["result"], serde_json::to_value(latest).unwrap());
+    }
 
     #[tokio::test]
     async fn trace_get_selects_tree_paths() {
