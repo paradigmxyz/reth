@@ -125,7 +125,7 @@ where
         let gas_limit_override = self.gas_limit_override;
         self.eth_api
             .spawn_with_state_at_block(request.parent_block_hash, move |eth_api, state| {
-                let state = state.database.0;
+                let state = state.database.into_inner();
                 let parent = eth_api
                     .provider()
                     .sealed_header_by_hash(request.parent_block_hash)?
@@ -271,7 +271,7 @@ where
                     block_transactions_rlp_length += tx_rlp_len;
                     total_fees += U256::from(tip) * U256::from(gas_used);
                 }
-                let outcome = builder.finish(&state, None).map_err(Eth::Error::from_eth_err)?;
+                let outcome = builder.finish(&*state, None).map_err(Eth::Error::from_eth_err)?;
 
                 let has_requests = outcome.block.requests_hash().is_some();
                 let requests = has_requests.then_some(outcome.execution_result.requests);

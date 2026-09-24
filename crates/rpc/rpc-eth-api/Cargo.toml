@@ -19,7 +19,7 @@ revm-inspectors.workspace = true
 reth-primitives-traits = { workspace = true, features = ["rpc-compat"] }
 reth-errors.workspace = true
 reth-evm.workspace = true
-reth-storage-api.workspace = true
+reth-storage-api = { workspace = true, features = ["chain-state"] }
 reth-revm.workspace = true
 reth-rpc-convert.workspace = true
 reth-tasks = { workspace = true, features = ["rayon"] }

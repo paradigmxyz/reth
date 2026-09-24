@@ -371,6 +371,7 @@ pub(crate) struct ScriptedSnapClient {
     code_requests: Mutex<Vec<Vec<B256>>>,
     block_requests: Mutex<Vec<Vec<B256>>>,
     on_block_request: Mutex<Option<Box<dyn FnOnce() + Send>>>,
+    on_storage_request: Mutex<Option<Box<dyn FnOnce() + Send>>>,
 }
 
 impl ScriptedSnapClient {
@@ -384,12 +385,19 @@ impl ScriptedSnapClient {
             code_requests: Mutex::new(Vec::new()),
             block_requests: Mutex::new(Vec::new()),
             on_block_request: Mutex::new(None),
+            on_storage_request: Mutex::new(None),
         }
     }
 
     /// Runs `hook` after the next BAL request is recorded, before returning its response.
     pub(crate) fn on_block_request(self, hook: impl FnOnce() + Send + 'static) -> Self {
         *self.on_block_request.lock().unwrap() = Some(Box::new(hook));
+        self
+    }
+
+    /// Runs `hook` after the next storage request is recorded, before returning its response.
+    pub(crate) fn on_storage_request(self, hook: impl FnOnce() + Send + 'static) -> Self {
+        *self.on_storage_request.lock().unwrap() = Some(Box::new(hook));
         self
     }
 
@@ -456,6 +464,9 @@ impl SnapClient for ScriptedSnapClient {
     ) -> Self::Output {
         let from = request.starting_hash.unwrap_or(B256::ZERO);
         self.storage_requests.lock().unwrap().push((request.account_hashes, from));
+        if let Some(hook) = self.on_storage_request.lock().unwrap().take() {
+            hook();
+        }
         self.next_response()
     }
 

@@ -154,8 +154,8 @@ use reth_primitives_traits::{
 };
 use reth_provider::{
     BlockExecutionOutput, BlockHashReader, BlockReader, ChangeSetReader, DatabaseProviderFactory,
-    DatabaseProviderROFactory, HashedPostStateProvider, HistoryReader, ProviderError,
-    PruneCheckpointReader, StageCheckpointReader, StateProvider, StateProviderBox,
+    DatabaseProviderROFactory, EvmStateProvider, EvmStateProviderBox, HashedPostStateProvider,
+    HistoryReader, ProviderError, PruneCheckpointReader, StageCheckpointReader, StateProvider,
     StateProviderFactory, StateReader, StateRootProvider, StorageChangeSetReader,
     StorageSettingsCache,
 };
@@ -687,41 +687,44 @@ where
         //
         // The second parameter `instrument_state_provider` controls whether we should
         // instrument the state provider with metrics.
-        let make_state_provider = |fill_on_miss: bool| -> ProviderResult<StateProviderBox> {
-            let provider = state_provider_factory.database_provider_ro()?;
-            let mut provider = if let Some((caches, cache_metrics)) = &execution_cache {
-                let fill_mode = if fill_on_miss {
-                    CacheFillMode::FillOnMiss
-                } else {
-                    CacheFillMode::LookupOnly
-                };
-                Box::new(
-                    CachedStateProvider::new_with_mode(
-                        provider,
-                        caches.clone(),
-                        fill_mode,
-                        cache_metrics.clone(),
-                        cache_stats.clone(),
+        let make_state_provider = |fill_on_miss: bool| -> ProviderResult<EvmStateProviderBox> {
+            let provider = state_provider_factory.database_provider_ro()?.into_evm_state_provider();
+            let provider: EvmStateProviderBox =
+                if let Some((caches, cache_metrics)) = &execution_cache {
+                    let fill_mode = if fill_on_miss {
+                        CacheFillMode::FillOnMiss
+                    } else {
+                        CacheFillMode::LookupOnly
+                    };
+                    Box::new(
+                        CachedStateProvider::new_with_mode(
+                            provider,
+                            caches.clone(),
+                            fill_mode,
+                            cache_metrics.clone(),
+                            cache_stats.clone(),
+                        )
+                        .with_txpool_snapshot(txpool_snapshot.clone()),
                     )
-                    .with_txpool_snapshot(txpool_snapshot.clone()),
-                ) as StateProviderBox
-            } else {
-                Box::new(provider) as StateProviderBox
-            };
+                } else {
+                    Box::new(provider)
+                };
 
-            if instrument_state_provider {
+            let provider: EvmStateProviderBox = if instrument_state_provider {
                 let stats = state_provider_stats
                     .as_ref()
                     .expect("instrumented state provider requires shared stats");
                 let metrics = state_provider_metrics
                     .as_ref()
                     .expect("instrumented state provider requires metrics");
-                provider = Box::new(InstrumentedStateProvider::with_stats(
+                Box::new(InstrumentedStateProvider::with_stats(
                     provider,
                     metrics.clone(),
                     Arc::clone(stats),
-                ));
-            }
+                ))
+            } else {
+                provider
+            };
 
             Ok(provider)
         };
@@ -1031,7 +1034,7 @@ where
         InsertBlockErrorKind,
     >
     where
-        S: StateProvider + Send,
+        S: EvmStateProvider + Send,
         Err: core::error::Error + Send + Sync + 'static,
         V: PayloadValidator<T, Block = N::Block>,
         T: PayloadTypes<BuiltPayload: BuiltPayload<Primitives = N>>,
@@ -1171,7 +1174,7 @@ where
     where
         Tx: ExecutableTxFor<Evm> + Send,
         Err: core::error::Error + Send + Sync + 'static,
-        MakeStateProvider: Fn(bool) -> ProviderResult<StateProviderBox> + Sync,
+        MakeStateProvider: Fn(bool) -> ProviderResult<EvmStateProviderBox> + Sync,
         Evm: ConfigureEngineEvm<T::ExecutionData, Primitives = N>,
         T: PayloadTypes<BuiltPayload: BuiltPayload<Primitives = N>>,
         V: PayloadValidator<T, Block = N::Block>,

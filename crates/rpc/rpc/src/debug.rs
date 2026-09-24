@@ -35,8 +35,8 @@ use reth_rpc_eth_types::{EthApiError, StateCacheDb};
 use reth_rpc_server_types::{result::internal_rpc_err, ToRpcResult};
 use reth_storage_api::{
     BlockIdReader, BlockReaderIdExt, HashedPostStateProvider, HeaderProvider, ProviderBlock,
-    ReceiptProviderIdExt, StateProviderFactory, StateRootProvider, StorageRootProvider,
-    TransactionVariant,
+    ReceiptProviderIdExt, StateProviderBox, StateProviderFactory, StateRootProvider,
+    StorageRootProvider, TransactionVariant,
 };
 use reth_tasks::{pool::BlockingTaskGuard, Runtime};
 use reth_transaction_pool::TransactionPool;
@@ -632,13 +632,15 @@ where
                 let mut witness = None;
                 let _ = block_executor
                     .execute_with_state_closure(&block, |statedb: &State<_>| {
-                        witness =
-                            Some(ExecutionWitnessRecord::new(statedb).into_execution_witness(
-                                &statedb.database.database.0,
-                                eth_api.provider(),
-                                block_number,
-                                mode,
-                            ));
+                        witness = Some(
+                            ExecutionWitnessRecord::new(statedb)
+                                .into_execution_witness::<StateProviderBox, _>(
+                                    &statedb.database.database,
+                                    eth_api.provider(),
+                                    block_number,
+                                    mode,
+                                ),
+                        );
                     })
                     .map_err(|err| EthApiError::Internal(err.into()))?;
 

@@ -93,7 +93,7 @@ where
         header: SealedHeader<Consensus>,
         block_size: usize,
     ) -> Result<Rpc, Self::Err> {
-        Ok(Rpc::from_consensus_header(header, block_size))
+        Ok(Rpc::from_consensus_header(header, Some(block_size)))
     }
 }
 

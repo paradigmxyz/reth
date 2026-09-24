@@ -20,7 +20,7 @@ use reth_primitives_traits::{
     block::Block as _, BlockBody as _, BlockTy, HeaderTy, SealedBlock, SignedTransaction,
 };
 use reth_revm::{database::StateProviderDatabase, db::State};
-use reth_storage_api::{errors::ProviderError, BlockReader, StateProviderFactory};
+use reth_storage_api::{errors::ProviderError, BlockReader, StateProvider, StateProviderFactory};
 use std::{
     collections::VecDeque,
     future::Future,
@@ -273,7 +273,7 @@ where
     }
     let state_provider = provider.state_by_block_hash(reorg_target.header().parent_hash())?;
     let mut state = State::builder()
-        .with_database_ref(StateProviderDatabase::new(&state_provider))
+        .with_database_ref(StateProviderDatabase::new((&state_provider).into_evm_state_provider()))
         .with_bundle_update()
         .with_bal_builder_if(has_bal)
         .build();
