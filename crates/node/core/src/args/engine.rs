@@ -481,12 +481,13 @@ pub struct EngineArgs {
     #[arg(long = "engine.allow-unwind-canonical-header", default_value_t = DefaultEngineValues::get_global().allow_unwind_canonical_header)]
     pub allow_unwind_canonical_header: bool,
 
-    /// Configure the number of storage proof workers in the Tokio blocking pool.
-    /// If not specified, defaults to 2x available parallelism.
+    /// Configure the number of storage proof workers spawned for each block.
+    /// If not specified, the count is derived from the block: 2x available parallelism, halved for
+    /// blocks with few transactions and doubled for blocks at or above 100M gas.
     #[arg(long = "engine.storage-worker-count", default_value = Resettable::from(DefaultEngineValues::get_global().storage_worker_count.map(|v| v.to_string().into())))]
     pub storage_worker_count: Option<usize>,
 
-    /// Configure the number of account proof workers in the Tokio blocking pool.
+    /// Configure the number of account proof workers spawned for each block.
     /// If not specified, defaults to the same count as storage workers.
     #[arg(long = "engine.account-worker-count", default_value = Resettable::from(DefaultEngineValues::get_global().account_worker_count.map(|v| v.to_string().into())))]
     pub account_worker_count: Option<usize>,
