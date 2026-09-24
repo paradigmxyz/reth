@@ -9354,6 +9354,7 @@ dependencies = [
  "reth-fs-util",
  "reth-metrics",
  "reth-net-banlist",
+ "reth-net-nat",
  "reth-network",
  "reth-network-api",
  "reth-network-p2p",
