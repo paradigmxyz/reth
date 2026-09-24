@@ -44,11 +44,19 @@ mod tests {
         ChainSpecProvider,
     };
     use reth_rpc_eth_api::{
-        helpers::{EthCall, EthState},
-        node::RpcNodeCoreAdapter,
+        helpers::{pending_block::PendingEnvBuilder, EthCall, EthState, SpawnBlocking},
+        node::{RpcNodeCoreAdapter, RpcNodeCoreExt},
+        EthApiTypes,
+    };
+    use reth_rpc_eth_types::{EthApiSettings, EthStateCache, PendingBlock};
+    use reth_storage_api::{StateProviderBox, StateProviderFactory};
+    use reth_tasks::{
+        pool::{BlockingTaskGuard, BlockingTaskPool},
+        Runtime,
     };
     use reth_transaction_pool::test_utils::{testing_pool, TestPool};
-    use std::time::Duration;
+    use std::{future::Future, sync::Arc, time::Duration};
+    use tokio::sync::{Mutex, Semaphore};
 
     fn noop_eth_api() -> EthApi<
         RpcNodeCoreAdapter<NoopProvider, TestPool, NoopNetwork, EthEvmConfig>,
@@ -148,5 +156,118 @@ mod tests {
             result.expect("RPC timed out on one blocking thread").expect("RPC returned an error"),
             U256::from(1337)
         );
+    }
+
+    type MockEthApi = EthApi<
+        RpcNodeCoreAdapter<MockEthProvider, TestPool, NoopNetwork, EthEvmConfig>,
+        EthRpcConverter<ChainSpec>,
+    >;
+
+    /// Serves `pending` state from its own provider, the way a chain with its own pending source
+    /// overrides [`LoadPendingBlock::local_pending_state`].
+    #[derive(Clone)]
+    struct CustomPendingState {
+        inner: MockEthApi,
+        pending: MockEthProvider,
+    }
+
+    impl EthApiTypes for CustomPendingState {
+        type Error = EthApiError;
+        type NetworkTypes = <MockEthApi as EthApiTypes>::NetworkTypes;
+        type RpcConvert = <MockEthApi as EthApiTypes>::RpcConvert;
+
+        fn eth_api_settings(&self) -> &EthApiSettings {
+            self.inner.eth_api_settings()
+        }
+
+        fn converter(&self) -> &Self::RpcConvert {
+            self.inner.converter()
+        }
+    }
+
+    impl RpcNodeCore for CustomPendingState {
+        type Primitives = <MockEthApi as RpcNodeCore>::Primitives;
+        type Provider = <MockEthApi as RpcNodeCore>::Provider;
+        type Pool = <MockEthApi as RpcNodeCore>::Pool;
+        type Evm = <MockEthApi as RpcNodeCore>::Evm;
+        type Network = <MockEthApi as RpcNodeCore>::Network;
+
+        fn pool(&self) -> &Self::Pool {
+            self.inner.pool()
+        }
+
+        fn evm_config(&self) -> &Self::Evm {
+            self.inner.evm_config()
+        }
+
+        fn network(&self) -> &Self::Network {
+            self.inner.network()
+        }
+
+        fn provider(&self) -> &Self::Provider {
+            self.inner.provider()
+        }
+    }
+
+    impl RpcNodeCoreExt for CustomPendingState {
+        fn cache(&self) -> &EthStateCache<Self::Primitives> {
+            self.inner.cache()
+        }
+    }
+
+    impl SpawnBlocking for CustomPendingState {
+        fn io_task_spawner(&self) -> &Runtime {
+            self.inner.io_task_spawner()
+        }
+
+        fn tracing_task_pool(&self) -> &BlockingTaskPool {
+            self.inner.tracing_task_pool()
+        }
+
+        fn tracing_task_guard(&self) -> &BlockingTaskGuard {
+            self.inner.tracing_task_guard()
+        }
+
+        fn blocking_io_task_guard(&self) -> &Arc<Semaphore> {
+            self.inner.blocking_io_task_guard()
+        }
+    }
+
+    impl LoadPendingBlock for CustomPendingState {
+        fn pending_block(&self) -> &Mutex<Option<PendingBlock<Self::Primitives>>> {
+            self.inner.pending_block()
+        }
+
+        fn pending_env_builder(&self) -> &dyn PendingEnvBuilder<Self::Evm> {
+            self.inner.pending_env_builder()
+        }
+
+        fn local_pending_state(
+            &self,
+        ) -> impl Future<Output = Result<Option<StateProviderBox>, Self::Error>> + Send {
+            let state = self.pending.latest().map_err(EthApiError::from);
+            async move { state.map(Some) }
+        }
+    }
+
+    impl LoadState for CustomPendingState {}
+
+    impl EthState for CustomPendingState {}
+
+    /// `pending` state reads must use a chain's own pending state, not the pool-built block.
+    #[tokio::test]
+    async fn pending_state_reads_use_the_local_pending_state_hook() {
+        let address = Address::random();
+        let chain = AddressMap::from_iter([(address, ExtendedAccount::new(0, U256::from(1337)))]);
+        let eth_api = mock_eth_api(chain);
+        eth_api.provider().add_block(B256::ZERO, Block::default());
+
+        let pending = MockEthProvider::default();
+        pending.extend_accounts([(address, ExtendedAccount::new(0, U256::from(42)))]);
+        let eth_api = CustomPendingState { inner: eth_api, pending };
+
+        let pending = Some(BlockId::pending());
+        assert_eq!(eth_api.balance(address, pending).await.unwrap(), U256::from(42));
+        assert_eq!(eth_api.balance(address, None).await.unwrap(), U256::from(1337));
     }
 }
