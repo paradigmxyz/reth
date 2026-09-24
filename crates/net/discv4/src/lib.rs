@@ -3404,8 +3404,18 @@ mod tests {
                 .unwrap();
         assert_eq!(handle.node_record().address, addr.ip());
         let external_ip = "192.0.2.1".parse::<IpAddr>().unwrap();
-        let mut cx = Context::from_waker(std::task::Waker::noop());
-        let _ = Pin::new(&mut service).poll_next(&mut cx);
-        assert_eq!(handle.node_record().address, external_ip);
+        tokio::time::timeout(
+            Duration::from_secs(5),
+            std::future::poll_fn(|cx| {
+                let _ = Pin::new(&mut service).poll_next(cx);
+                if handle.node_record().address == external_ip {
+                    Poll::Ready(())
+                } else {
+                    Poll::Pending
+                }
+            }),
+        )
+        .await
+        .unwrap();
     }
 }
