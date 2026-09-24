@@ -550,7 +550,7 @@ mod test {
 
         assert!(!all.contains(&RethRpcModule::Testing));
         assert!(!all.to_selection().contains(&RethRpcModule::Testing));
-        assert!(!all.clone().into_selection().contains(&RethRpcModule::Testing));
+        assert!(!all.into_selection().contains(&RethRpcModule::Testing));
         assert!(explicit.contains(&RethRpcModule::Testing));
         assert!(explicit.iter_selection().any(|module| module == RethRpcModule::Testing));
     }
