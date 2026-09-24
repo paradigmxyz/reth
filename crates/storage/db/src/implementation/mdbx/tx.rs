@@ -41,6 +41,9 @@ pub struct Tx<K: TransactionKind> {
     ///
     /// If [Some], then metrics are reported.
     metrics_handler: Option<MetricsHandler<K>>,
+    /// Read-ahead request consumed by the next get or cursor creation.
+    #[cfg(target_os = "linux")]
+    prefetch: AtomicBool,
 }
 
 impl<K: TransactionKind> Tx<K> {
@@ -60,7 +63,13 @@ impl<K: TransactionKind> Tx<K> {
                 Ok(handler)
             })
             .transpose()?;
-        Ok(Self { inner, dbis, metrics_handler })
+        Ok(Self {
+            inner,
+            dbis,
+            metrics_handler,
+            #[cfg(target_os = "linux")]
+            prefetch: AtomicBool::new(false),
+        })
     }
 
     /// Returns a reference to the inner libmdbx transaction.
@@ -94,6 +103,8 @@ impl<K: TransactionKind> Tx<K> {
 
     /// Create db Cursor
     pub fn new_cursor<T: Table>(&self) -> Result<Cursor<K, T>, DatabaseError> {
+        #[cfg(target_os = "linux")]
+        let prefetch = self.take_prefetch();
         let inner = self
             .inner
             .cursor_with_dbi(self.get_dbi::<T>()?)
@@ -102,6 +113,8 @@ impl<K: TransactionKind> Tx<K> {
         Ok(Cursor::new_with_metrics(
             inner,
             self.metrics_handler.as_ref().map(|h| h.env_metrics.table_operation_metrics(T::NAME)),
+            #[cfg(target_os = "linux")]
+            prefetch,
         ))
     }
 
@@ -170,6 +183,12 @@ impl<K: TransactionKind> Tx<K> {
         } else {
             f(&self.inner)
         }
+    }
+
+    /// Consumes the pending hint without an atomic write on ordinary reads.
+    #[cfg(target_os = "linux")]
+    fn take_prefetch(&self) -> bool {
+        self.prefetch.load(Ordering::Relaxed) && self.prefetch.swap(false, Ordering::Relaxed)
     }
 }
 
@@ -300,7 +319,20 @@ impl<K: TransactionKind> DbTx for Tx<K> {
         &self,
         key: &<T::Key as Encode>::Encoded,
     ) -> Result<Option<T::Value>, DatabaseError> {
+        #[cfg(target_os = "linux")]
+        let prefetch = self.take_prefetch();
         self.execute_with_operation_metric::<T, _>(Operation::Get, None, |tx| {
+            #[cfg(target_os = "linux")]
+            if prefetch {
+                return tx
+                    .get::<super::value_prefetch::PrefetchValue<'_>>(
+                        self.get_dbi::<T>()?,
+                        key.as_ref(),
+                    )
+                    .map_err(|e| DatabaseError::Read(e.into()))?
+                    .map(|value| decode_one::<T>(value.0))
+                    .transpose();
+            }
             tx.get(self.get_dbi::<T>()?, key.as_ref())
                 .map_err(|e| DatabaseError::Read(e.into()))?
                 .map(decode_one::<T>)
@@ -354,23 +386,9 @@ impl<K: TransactionKind> DbTx for Tx<K> {
     }
 
     #[cfg(target_os = "linux")]
-    fn get_by_encoded_key_with_prefetch<T: Table>(
-        &self,
-        key: &<T::Key as Encode>::Encoded,
-    ) -> Result<Option<T::Value>, DatabaseError> {
-        let read = || {
-            self.inner
-                .get::<super::value_prefetch::PrefetchValue<'_>>(self.get_dbi::<T>()?, key.as_ref())
-                .map_err(|e| DatabaseError::Read(e.into()))?
-                .map(|value| decode_one::<T>(value.0))
-                .transpose()
-        };
-        if let Some(metrics_handler) = &self.metrics_handler {
-            metrics_handler.log_backtrace_on_long_read_transaction();
-            metrics_handler.env_metrics.record_prefetched_read(T::NAME, read)
-        } else {
-            read()
-        }
+    fn prefetch(&self) -> &Self {
+        self.prefetch.store(true, Ordering::Relaxed);
+        self
     }
 }
 
