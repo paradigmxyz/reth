@@ -2494,7 +2494,7 @@ where
             // Edge case: the `latestValid` field is the zero hash if the parent block is the
             // terminal PoW block, which we need to identify by looking at the parent's block
             // difficulty
-            Some(parent) if !parent.is_zero_difficulty() => Some(B256::ZERO),
+            Some(parent) if !parent.difficulty().is_zero() => Some(B256::ZERO),
             Some(_) => Some(parent_hash),
             None => self.latest_valid_hash_for_invalid_payload(parent_hash)?,
         };
