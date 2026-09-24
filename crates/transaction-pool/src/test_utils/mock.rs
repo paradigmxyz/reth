@@ -16,7 +16,7 @@ use alloy_consensus::{
     TxLegacy, TxType, Typed2718,
 };
 use alloy_eips::{
-    eip1559::MIN_PROTOCOL_BASE_FEE,
+    eip1559::{calc_effective_gas_price, MIN_PROTOCOL_BASE_FEE},
     eip2718::Encodable2718,
     eip2930::AccessList,
     eip4844::{BlobTransactionSidecar, BlobTransactionValidationError, DATA_GAS_PER_BLOB},
@@ -840,24 +840,10 @@ impl alloy_consensus::Transaction for MockTransaction {
     }
 
     fn effective_gas_price(&self, base_fee: Option<u64>) -> u128 {
-        base_fee.map_or_else(
-            || self.max_fee_per_gas(),
-            |base_fee| {
-                // if the tip is greater than the max priority fee per gas, set it to the max
-                // priority fee per gas + base fee
-                let tip = self.max_fee_per_gas().saturating_sub(base_fee as u128);
-                if let Some(max_tip) = self.max_priority_fee_per_gas() {
-                    if tip > max_tip {
-                        max_tip + base_fee as u128
-                    } else {
-                        // otherwise return the max fee per gas
-                        self.max_fee_per_gas()
-                    }
-                } else {
-                    self.max_fee_per_gas()
-                }
-            },
-        )
+        match self.max_priority_fee_per_gas() {
+            Some(max_tip) => calc_effective_gas_price(self.max_fee_per_gas(), max_tip, base_fee),
+            None => self.max_fee_per_gas(),
+        }
     }
 
     fn is_dynamic_fee(&self) -> bool {
@@ -966,8 +952,7 @@ impl TryFrom<Recovered<TransactionSigned>> for MockTransaction {
     type Error = TryFromRecoveredTransactionError;
 
     fn try_from(tx: Recovered<TransactionSigned>) -> Result<Self, Self::Error> {
-        let sender = tx.signer();
-        let transaction = tx.into_inner();
+        let (transaction, sender) = tx.into_parts();
         let hash = *transaction.tx_hash();
         let size = transaction.size();
 
@@ -1110,8 +1095,7 @@ impl TryFrom<Recovered<EthereumTxEnvelope<TxEip4844Variant<BlobTransactionSideca
     fn try_from(
         tx: Recovered<EthereumTxEnvelope<TxEip4844Variant<BlobTransactionSidecarVariant>>>,
     ) -> Result<Self, Self::Error> {
-        let sender = tx.signer();
-        let transaction = tx.into_inner();
+        let (transaction, sender) = tx.into_parts();
         let hash = *transaction.tx_hash();
         let size = transaction.size();
 
@@ -1215,8 +1199,7 @@ impl TryFrom<Recovered<EthereumTxEnvelope<TxEip4844Variant<BlobTransactionSideca
 
 impl From<Recovered<PooledTransactionVariant>> for MockTransaction {
     fn from(tx: Recovered<PooledTransactionVariant>) -> Self {
-        let (tx, signer) = tx.into_parts();
-        Recovered::<TransactionSigned>::new_unchecked(tx.into(), signer).try_into().expect(
+        tx.convert::<TransactionSigned>().try_into().expect(
             "Failed to convert from PooledTransactionsElementEcRecovered to MockTransaction",
         )
     }

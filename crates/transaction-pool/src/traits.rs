@@ -1361,8 +1361,7 @@ pub trait PoolTransaction:
     fn try_from_consensus(
         tx: Recovered<Self::Consensus>,
     ) -> Result<Self, Self::TryFromConsensusError> {
-        let (tx, signer) = tx.into_parts();
-        Ok(Self::from_pooled(Recovered::new_unchecked(tx.try_into()?, signer)))
+        Ok(Self::from_pooled(tx.try_convert()?))
     }
 
     /// Clone the transaction into a consensus variant.
@@ -1433,17 +1432,13 @@ pub trait PoolTransaction:
 
     /// Tries to convert the `Consensus` type into the `Pooled` type.
     fn try_into_pooled(self) -> Result<Recovered<Self::Pooled>, Self::TryFromConsensusError> {
-        let consensus = self.into_consensus();
-        let (tx, signer) = consensus.into_parts();
-        Ok(Recovered::new_unchecked(tx.try_into()?, signer))
+        self.into_consensus().try_convert()
     }
 
     /// Clones the consensus transactions and tries to convert the `Consensus` type into the
     /// `Pooled` type.
     fn clone_into_pooled(&self) -> Result<Recovered<Self::Pooled>, Self::TryFromConsensusError> {
-        let consensus = self.clone_into_consensus();
-        let (tx, signer) = consensus.into_parts();
-        Ok(Recovered::new_unchecked(tx.try_into()?, signer))
+        self.clone_into_consensus().try_convert()
     }
 
     /// Converts the `Pooled` type into the `Consensus` type.
@@ -1662,7 +1657,7 @@ impl PoolTransaction for EthPooledTransaction {
     }
 
     fn consensus_ref(&self) -> Recovered<&Self::Consensus> {
-        Recovered::new_unchecked(&*self.transaction, self.transaction.signer())
+        self.transaction.as_recovered_ref()
     }
 
     fn into_consensus(self) -> Recovered<Self::Consensus> {
@@ -1827,11 +1822,9 @@ impl EthPoolTransaction for EthPooledTransaction {
         self,
         sidecar: Arc<BlobTransactionSidecarVariant>,
     ) -> Option<Recovered<Self::Pooled>> {
-        let (signed_transaction, signer) = self.into_consensus().into_parts();
-        let pooled_transaction =
-            signed_transaction.try_into_pooled_eip4844(Arc::unwrap_or_clone(sidecar)).ok()?;
-
-        Some(Recovered::new_unchecked(pooled_transaction, signer))
+        self.into_consensus()
+            .try_map(|tx| tx.try_into_pooled_eip4844(Arc::unwrap_or_clone(sidecar)))
+            .ok()
     }
 
     fn try_from_eip4844(

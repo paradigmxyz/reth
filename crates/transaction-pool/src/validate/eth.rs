@@ -22,7 +22,7 @@ use alloy_consensus::{
 };
 use alloy_eips::{
     eip1559::ETHEREUM_BLOCK_GAS_LIMIT_30M, eip4844::env_settings::EnvKzgSettings,
-    eip7840::BlobParams, BlockId,
+    eip7840::BlobParams, merge::SLOT_DURATION_SECS, BlockId,
 };
 use alloy_primitives::U256;
 use alloy_rlp::Encodable;
@@ -744,7 +744,7 @@ where
         {
             let is_eip7702 = if self.fork_tracker.is_prague_activated() {
                 match state.bytecode_by_hash(code_hash) {
-                    Ok(bytecode) => bytecode.unwrap_or_default().is_eip7702(),
+                    Ok(bytecode) => bytecode.is_some_and(|b| b.is_eip7702()),
                     Err(err) => {
                         return Err(TransactionValidationOutcome::Error(
                             *transaction.hash(),
@@ -978,9 +978,15 @@ where
         let tip_timestamp = self.fork_tracker.tip_timestamp();
 
         // If next block is Osaka, allow 7594 sidecars
-        if self.chain_spec().is_osaka_active_at_timestamp(tip_timestamp.saturating_add(12)) {
+        if self
+            .chain_spec()
+            .is_osaka_active_at_timestamp(tip_timestamp.saturating_add(SLOT_DURATION_SECS))
+        {
             true
-        } else if self.chain_spec().is_osaka_active_at_timestamp(tip_timestamp.saturating_add(24)) {
+        } else if self
+            .chain_spec()
+            .is_osaka_active_at_timestamp(tip_timestamp.saturating_add(2 * SLOT_DURATION_SECS))
+        {
             let current_timestamp =
                 SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_secs();
 
@@ -1530,7 +1536,7 @@ pub fn ensure_intrinsic_gas<T: EthPoolTransaction>(
         revm::context_interface::cfg::gas_params::Eip2780TxInfo {
             value: transaction.value(),
             // Self-transfer: a `Call` whose recipient is the sender itself.
-            is_self_transfer: transaction.kind().to() == Some(&transaction.sender()),
+            is_self_transfer: transaction.to() == Some(transaction.sender()),
         }
     });
 
@@ -1539,16 +1545,13 @@ pub fn ensure_intrinsic_gas<T: EthPoolTransaction>(
         transaction.input(),
         transaction.is_create(),
         transaction.access_list().map(|l| l.len()).unwrap_or_default() as u64,
-        transaction
-            .access_list()
-            .map(|l| l.iter().map(|i| i.storage_keys.len()).sum::<usize>())
-            .unwrap_or_default() as u64,
-        transaction.authorization_list().map(|l| l.len()).unwrap_or_default() as u64,
+        transaction.access_list().map(|l| l.storage_keys_count()).unwrap_or_default() as u64,
+        transaction.authorization_count().unwrap_or_default(),
         eip2780,
     );
 
     let gas_limit = transaction.gas_limit();
-    if gas_limit < gas.initial_total_gas() || gas_limit < gas.floor_gas {
+    if gas_limit < gas.initial_total_gas() || gas_limit < gas.floor_gas() {
         Err(InvalidPoolTransactionError::IntrinsicGasTooLow)
     } else {
         Ok(())
