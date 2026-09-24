@@ -290,7 +290,7 @@ pub struct NetworkArgs {
     pub no_persist_peers: bool,
 
     /// NAT resolution method
-    /// (any|none|upnp|publicip|extip:\<IP\>|extaddr:\<DOMAIN\>|netif[:\<IF_NAME\>])
+    /// (any|none|upnp|publicip|extip:\<IP\>|extaddr:\<DOMAIN\>|netif[:\<INTERFACE\>])
     ///
     /// With `netif`, uses `--net-if.experimental` if set, otherwise `eth0`.
     #[arg(long, default_value_t = DefaultNetworkArgs::get_global().nat.clone())]
