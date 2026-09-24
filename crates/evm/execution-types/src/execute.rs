@@ -32,11 +32,6 @@ impl<T> BlockExecutionOutput<T> {
         Self { result, state }
     }
 
-    /// Returns the original length of known bytecode.
-    pub fn bytecode_len(&self, hash: &B256) -> Option<usize> {
-        self.state.contracts.get(hash).map(|code| code.original_bytes().len())
-    }
-
     /// Return bytecode if known.
     pub fn bytecode(&self, code_hash: &B256) -> Option<Bytecode> {
         self.state.bytecode(code_hash).map(Bytecode)

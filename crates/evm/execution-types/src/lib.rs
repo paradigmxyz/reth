@@ -11,13 +11,9 @@
 
 extern crate alloc;
 
-pub use evm2::{
-    bytecode::Bytecode as ExecutableBytecode,
-    evm::{
-        AccountChangeRef as ExecutionAccountChangeRef, AccountInfo as ExecutionAccountInfo,
-        StateChangeSink as EvmStateChangeSink, StateChangeSource as EvmStateChangeSource,
-        StorageChange as ExecutionStorageChange,
-    },
+pub use evm2::evm::{
+    AccountChangeRef as ExecutionAccountChangeRef, AccountInfo as ExecutionAccountInfo,
+    StateChangeSink as EvmStateChangeSink, StorageChange as ExecutionStorageChange,
 };
 pub use reth_trie_common::HashedPostState;
 pub use revm::state::EvmState;

@@ -21,7 +21,7 @@ use alloy_primitives::{Address, Bytes, B256};
 use alloy_rpc_types_engine::ExecutionData;
 #[cfg(feature = "jit")]
 use core::any::Any;
-use core::{convert::Infallible, fmt::Debug, marker::PhantomData};
+use core::{convert::Infallible, fmt::Debug};
 use reth_chainspec::{ChainSpec, EthChainSpec, EthereumHardforks, MAINNET};
 use reth_ethereum_forks::Hardforks;
 #[cfg(feature = "std")]
@@ -41,11 +41,6 @@ use reth_storage_errors::any::AnyError;
 use convert::{block_env_with_blob_params, spec_id};
 #[cfg(feature = "std")]
 use convert::{payload_block_env, spec_id_by_timestamp_and_block_number};
-
-/// Compatibility marker for the legacy exported Ethereum EVM type.
-///
-/// Ethereum EVM instances are created through [`EthBlockExecutorFactory`] as `evm2::Evm`.
-pub type EthEvm<DB = (), I = (), P = ()> = PhantomData<(DB, I, P)>;
 
 /// Configured Ethereum EVM environment.
 pub struct EthEvmEnv<T = evm2::BaseEvmTypes>

@@ -59,8 +59,6 @@ pub enum EthExecutionError<E = DynamicDatabaseError> {
     Handler(HandlerError),
     /// EVM reported a database error and the typed database error was available.
     Database(E),
-    /// EVM reported a database error, but the typed database error was no longer available.
-    MissingDatabaseError(ErrorCode),
     /// An attached EIP-7928 BAL did not cover a transaction state read.
     BlockAccessListNotCovered,
     /// Cancun requires a parent beacon block root after genesis.
@@ -105,9 +103,6 @@ where
             Self::InvalidTx(err) => write!(f, "invalid transaction: {err}"),
             Self::Handler(err) => write!(f, "EVM execution error: {err}"),
             Self::Database(err) => write!(f, "EVM database error: {err}"),
-            Self::MissingDatabaseError(code) => {
-                write!(f, "EVM database error {code:?} was not available")
-            }
             Self::BlockAccessListNotCovered => {
                 f.write_str("block access list does not cover transaction state reads")
             }
@@ -433,6 +428,8 @@ where
     Ok(requests)
 }
 
+// TODO: Replace the local deposit event and encoding with alloy-eips helpers once
+// https://github.com/alloy-rs/alloy/pull/4244 is released.
 fn parse_deposit_requests_from_receipts<R>(
     deposit_contract_address: Address,
     receipts: &[R],
