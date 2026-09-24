@@ -23,7 +23,7 @@ const MAX_CACHE_SIZE: u32 = 1024 * 1024;
 const MAX_PRECOMPILE_CACHE_INPUT_SIZE: usize = 2 * 1024;
 
 /// Stores caches for each precompile.
-pub struct PrecompileCacheMap<S>(Arc<DashMap<Address, PrecompileCache<S>, FbBuildHasher<20>>>);
+pub struct PrecompileCacheMap<S>(Arc<DashMap<Address, Arc<PrecompileCache<S>>, FbBuildHasher<20>>>);
 
 impl<S> fmt::Debug for PrecompileCacheMap<S> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -48,7 +48,7 @@ where
     S: Eq + Hash + std::fmt::Debug + Send + Sync + Clone + 'static,
 {
     /// Get the precompile cache for the given address.
-    fn cache_for_address(&self, address: Address) -> PrecompileCache<S> {
+    fn cache_for_address(&self, address: Address) -> Arc<PrecompileCache<S>> {
         if let Some(cache) = self.0.get(&address) {
             return cache.clone()
         }
@@ -58,17 +58,15 @@ where
 }
 
 /// Cache for one precompile's inputs and outputs.
-struct PrecompileCache<S>(moka::sync::Cache<Bytes, CacheEntry<S>, DefaultHashBuilder>);
+struct PrecompileCache<S> {
+    cache: moka::sync::Cache<Bytes, CacheEntry<S>, DefaultHashBuilder>,
+    #[cfg(feature = "metrics")]
+    metrics: std::sync::OnceLock<CachedPrecompileMetrics>,
+}
 
 impl<S> fmt::Debug for PrecompileCache<S> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("PrecompileCache").finish_non_exhaustive()
-    }
-}
-
-impl<S> Clone for PrecompileCache<S> {
-    fn clone(&self) -> Self {
-        Self(self.0.clone())
     }
 }
 
@@ -77,15 +75,17 @@ where
     S: Eq + Hash + std::fmt::Debug + Send + Sync + Clone + 'static,
 {
     fn default() -> Self {
-        Self(
-            moka::sync::CacheBuilder::new(MAX_CACHE_SIZE as u64)
+        Self {
+            cache: moka::sync::CacheBuilder::new(MAX_CACHE_SIZE as u64)
                 .initial_capacity(MAX_CACHE_SIZE as usize)
                 .eviction_policy(EvictionPolicy::lru())
                 .weigher(|key: &Bytes, value: &CacheEntry<S>| {
                     (key.len() + value.output.bytes().len()) as u32
                 })
                 .build_with_hasher(Default::default()),
-        )
+            #[cfg(feature = "metrics")]
+            metrics: Default::default(),
+        }
     }
 }
 
@@ -94,12 +94,12 @@ where
     S: Eq + Hash + std::fmt::Debug + Send + Sync + Clone + 'static,
 {
     fn get(&self, input: &[u8], spec: S) -> Option<CacheEntry<S>> {
-        self.0.get(input).filter(|entry| entry.spec == spec)
+        self.cache.get(input).filter(|entry| entry.spec == spec)
     }
 
     fn insert(&self, input: Bytes, value: CacheEntry<S>) -> usize {
-        self.0.insert(input, value);
-        self.0.entry_count() as usize
+        self.cache.insert(input, value);
+        self.cache.entry_count() as usize
     }
 }
 
@@ -127,7 +127,7 @@ where
     cache_map: PrecompileCacheMap<S>,
     spec_id: S,
     #[cfg_attr(not(feature = "metrics"), allow(dead_code))]
-    metrics: Option<CachedPrecompileMetrics>,
+    metrics_enabled: bool,
 }
 
 impl<T, S> fmt::Debug for CachedPrecompileProvider<T, S>
@@ -146,48 +146,16 @@ where
     S: Eq + Hash + std::fmt::Debug + Send + Sync + Clone + 'static,
 {
     /// Creates a new cached precompile provider.
+    ///
+    /// Metrics are labelled by address and shared with the cache. Disable them for prewarming
+    /// so speculative work does not count towards execution cache statistics.
     pub const fn new(
         inner: evm2::Precompiles<T>,
         cache_map: PrecompileCacheMap<S>,
         spec_id: S,
-        metrics: Option<CachedPrecompileMetrics>,
+        metrics_enabled: bool,
     ) -> Self {
-        Self { inner, cache_map, spec_id, metrics }
-    }
-
-    #[cfg_attr(not(feature = "metrics"), allow(clippy::missing_const_for_fn))]
-    fn increment_by_one_precompile_cache_hits(&self) {
-        #[cfg(feature = "metrics")]
-        if let Some(metrics) = &self.metrics {
-            metrics.precompile_cache_hits.increment(1);
-        }
-    }
-
-    #[cfg_attr(not(feature = "metrics"), allow(clippy::missing_const_for_fn))]
-    fn increment_by_one_precompile_cache_misses(&self) {
-        #[cfg(feature = "metrics")]
-        if let Some(metrics) = &self.metrics {
-            metrics.precompile_cache_misses.increment(1);
-        }
-    }
-
-    #[cfg_attr(not(feature = "metrics"), allow(clippy::missing_const_for_fn))]
-    fn set_precompile_cache_size_metric(&self, to: f64) {
-        #[cfg(not(feature = "metrics"))]
-        let _ = to;
-
-        #[cfg(feature = "metrics")]
-        if let Some(metrics) = &self.metrics {
-            metrics.precompile_cache_size.set(to);
-        }
-    }
-
-    #[cfg_attr(not(feature = "metrics"), allow(clippy::missing_const_for_fn))]
-    fn increment_by_one_precompile_errors(&self) {
-        #[cfg(feature = "metrics")]
-        if let Some(metrics) = &self.metrics {
-            metrics.precompile_errors.increment(1);
-        }
+        Self { inner, cache_map, spec_id, metrics_enabled }
     }
 }
 
@@ -230,6 +198,10 @@ where
     ) -> Option<Result<PrecompileOutput, PrecompileError>> {
         let address = message.code_address;
         let cache = self.cache_map.cache_for_address(address);
+        #[cfg(feature = "metrics")]
+        let metrics = self.metrics_enabled.then(|| {
+            cache.metrics.get_or_init(|| CachedPrecompileMetrics::new_with_address(address))
+        });
 
         let cacheable_input = message.input.len() <= MAX_PRECOMPILE_CACHE_INPUT_SIZE;
         if cacheable_input &&
@@ -237,11 +209,17 @@ where
         {
             return Some(match gas.spend(entry.regular_gas_used).map_err(PrecompileError::from) {
                 Ok(()) => {
-                    self.increment_by_one_precompile_cache_hits();
+                    #[cfg(feature = "metrics")]
+                    if let Some(metrics) = metrics {
+                        metrics.precompile_cache_hits.increment(1);
+                    }
                     Ok(entry.to_precompile_result())
                 }
                 Err(err) => {
-                    self.increment_by_one_precompile_errors();
+                    #[cfg(feature = "metrics")]
+                    if let Some(metrics) = metrics {
+                        metrics.precompile_errors.increment(1);
+                    }
                     Err(err)
                 }
             })
@@ -272,7 +250,7 @@ where
                         "cacheable precompile changed refund gas, skipping cache insertion"
                     );
                 } else if let Some(regular_gas_used) = after.spent.checked_sub(before.spent) {
-                    let size = cache.insert(
+                    let _size = cache.insert(
                         Bytes::copy_from_slice(message.input.as_ref()),
                         CacheEntry {
                             output: output.clone(),
@@ -280,8 +258,11 @@ where
                             spec: self.spec_id.clone(),
                         },
                     );
-                    self.set_precompile_cache_size_metric(size as f64);
-                    self.increment_by_one_precompile_cache_misses();
+                    #[cfg(feature = "metrics")]
+                    if let Some(metrics) = metrics {
+                        metrics.precompile_cache_size.set(_size as f64);
+                        metrics.precompile_cache_misses.increment(1);
+                    }
                 } else {
                     error!(
                         target: "evm::precompile_cache",
@@ -291,8 +272,12 @@ where
                 }
             }
             Ok(_) => {}
-            Err(_) => {
-                self.increment_by_one_precompile_errors();
+            Err(_) =>
+            {
+                #[cfg(feature = "metrics")]
+                if let Some(metrics) = metrics {
+                    metrics.precompile_errors.increment(1);
+                }
             }
         }
 
@@ -337,10 +322,13 @@ pub struct CachedPrecompileMetrics {
     pub precompile_errors: metrics::Counter,
 }
 
-/// Metrics for the cached precompile.
-#[cfg(not(feature = "metrics"))]
-#[derive(Debug, Clone)]
-pub struct CachedPrecompileMetrics;
+#[cfg(feature = "metrics")]
+impl CachedPrecompileMetrics {
+    /// Registers cache metrics labelled by the precompile address.
+    pub fn new_with_address(address: Address) -> Self {
+        Self::new_with_labels(&[("address", format!("0x{address:02x}"))])
+    }
+}
 
 #[cfg(test)]
 mod tests {
@@ -363,7 +351,7 @@ mod tests {
             precompiles,
             PrecompileCacheMap::default(),
             SpecId::OSAKA,
-            None,
+            false,
         );
         assert_eq!(cached.precompile_ids(), expected);
     }
@@ -378,7 +366,7 @@ mod tests {
         let custom_entry = precompiles.as_map_mut().remove(identity).unwrap().with_address(custom);
         precompiles.as_map_mut().insert(custom_entry);
         let provider =
-            CachedPrecompileProvider::new(precompiles, PrecompileCacheMap::default(), spec, None);
+            CachedPrecompileProvider::new(precompiles, PrecompileCacheMap::default(), spec, false);
         let mut database = InMemoryDB::default();
         let mut evm = Evm::<BaseEvmTypes>::new(
             spec,
@@ -420,7 +408,7 @@ mod tests {
             evm2::Precompiles::<BaseEvmTypes>::base(spec),
             shared.clone(),
             spec,
-            None,
+            false,
         );
         provider.move_precompiles(&[(identity, destination)]).unwrap();
         let mut evm = Evm::<BaseEvmTypes>::new(
@@ -468,7 +456,7 @@ mod tests {
             evm2::Precompiles::base(SpecId::OSAKA),
             cache_map.clone(),
             SpecId::OSAKA,
-            None,
+            false,
         );
         let mut evm = Evm::<BaseEvmTypes>::new(
             SpecId::OSAKA,
@@ -518,7 +506,7 @@ mod tests {
             evm2::Precompiles::base(SpecId::OSAKA),
             cache.clone(),
             SpecId::OSAKA,
-            None,
+            false,
         );
         let mut evm = Evm::<BaseEvmTypes>::new(
             SpecId::OSAKA,

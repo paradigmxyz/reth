@@ -128,6 +128,9 @@ where
     /// Whether to disable the shared precompile cache.
     #[cfg(feature = "std")]
     precompile_cache_disabled: bool,
+    /// Whether EVMs record precompile cache metrics.
+    #[cfg(feature = "std")]
+    precompile_cache_metrics: bool,
     /// EVM factory configuration.
     evm_factory: F,
 }
@@ -212,6 +215,8 @@ impl<R: Clone, C, F: EvmFactory> Clone for EthBlockExecutorFactory<R, C, F> {
             precompile_cache_map: self.precompile_cache_map.clone(),
             #[cfg(feature = "std")]
             precompile_cache_disabled: self.precompile_cache_disabled,
+            #[cfg(feature = "std")]
+            precompile_cache_metrics: self.precompile_cache_metrics,
             evm_factory: self.evm_factory.clone(),
         }
     }
@@ -245,6 +250,8 @@ impl<R, C, F: EvmFactory> EthBlockExecutorFactory<R, C, F> {
             precompile_cache_map: PrecompileCacheMap::default(),
             #[cfg(feature = "std")]
             precompile_cache_disabled: false,
+            #[cfg(feature = "std")]
+            precompile_cache_metrics: false,
             evm_factory,
         }
     }
@@ -285,6 +292,21 @@ impl<R, C, F: EvmFactory> EthBlockExecutorFactory<R, C, F> {
         }
     }
 
+    /// Enables address-labelled precompile cache metrics for subsequently created EVMs.
+    pub const fn with_precompile_cache_metrics(self, enabled: bool) -> Self {
+        #[cfg(feature = "std")]
+        {
+            let mut this = self;
+            this.precompile_cache_metrics = enabled;
+            this
+        }
+        #[cfg(not(feature = "std"))]
+        {
+            let _ = enabled;
+            self
+        }
+    }
+
     /// Creates an EVM instance with the configured Ethereum execution environment.
     pub(crate) fn build_evm_with_env<'a, DB>(
         &self,
@@ -309,7 +331,7 @@ impl<R, C, F: EvmFactory> EthBlockExecutorFactory<R, C, F> {
                     precompiles,
                     self.precompile_cache_map.clone(),
                     spec,
-                    None,
+                    self.precompile_cache_metrics,
                 ))
             };
         #[cfg(not(feature = "std"))]
@@ -347,7 +369,7 @@ impl<R, C, F: EvmFactory> EthBlockExecutorFactory<R, C, F> {
                     precompiles,
                     self.precompile_cache_map.clone(),
                     spec,
-                    None,
+                    self.precompile_cache_metrics,
                 ))
             };
         #[cfg(not(feature = "std"))]

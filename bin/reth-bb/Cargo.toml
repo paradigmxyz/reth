@@ -63,6 +63,9 @@ evm2.workspace = true
 # std
 eyre.workspace = true
 
+[dev-dependencies]
+metrics-util = { workspace = true, features = ["debugging"] }
+
 [features]
 default = [
     "jemalloc",

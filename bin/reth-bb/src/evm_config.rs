@@ -96,6 +96,14 @@ where
     type BlockExecutorFactory = EthBigBlockExecutorFactory<C>;
     type BlockAssembler = BbBlockAssembler;
 
+    fn with_precompile_cache_disabled(self, disabled: bool) -> Self {
+        Self::new(self.inner.with_precompile_cache_disabled(disabled))
+    }
+
+    fn with_precompile_cache_metrics(self, enabled: bool) -> Self {
+        Self::new(self.inner.with_precompile_cache_metrics(enabled))
+    }
+
     fn block_executor_factory(&self) -> &Self::BlockExecutorFactory {
         &self.executor_factory
     }
@@ -208,5 +216,97 @@ where
         };
 
         Ok((transactions, convert))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use alloy_primitives::Address;
+    use evm2::evm::{EmptyDB, SystemTx};
+    use metrics_util::debugging::{DebugValue, DebuggingRecorder};
+    use reth_evm_ethereum::EthEvmEnv;
+
+    #[test]
+    #[expect(clippy::redundant_clone, reason = "verify cache settings and sharing across clones")]
+    fn precompile_cache_settings_and_metrics() {
+        let recorder = DebuggingRecorder::new();
+        metrics::with_local_recorder(&recorder, || {
+            let metrics_snapshot = || {
+                recorder
+                    .snapshotter()
+                    .snapshot()
+                    .into_vec()
+                    .into_iter()
+                    .filter(|(key, ..)| key.key().name().starts_with("sync.caching.precompile"))
+                    .collect::<Vec<_>>()
+            };
+            let config = BbEvmConfig::new(EthEvmConfig::mainnet());
+            let identity = Address::with_last_byte(4);
+            let sha256 = Address::with_last_byte(2);
+            let ecadd = Address::with_last_byte(6);
+            let call = |config: &BbEvmConfig, address, input: Bytes| {
+                let mut evm = config.evm_with_env(EmptyDB::default(), EthEvmEnv::default());
+                evm.system_call(SystemTx::new(address, input)).unwrap().commit().status
+            };
+
+            // Prewarming fills the shared cache without recording execution metrics.
+            let warm_input = Bytes::from_static(b"prewarmed");
+            assert!(call(&config, identity, warm_input.clone()));
+            assert!(metrics_snapshot().is_empty());
+
+            let measured = config.clone().with_precompile_cache_metrics(true);
+            assert!(call(&measured, identity, warm_input.clone()));
+            let new_input = Bytes::from_static(b"uncached");
+            assert!(call(&measured, identity, new_input.clone()));
+            assert!(call(&measured.clone(), identity, new_input));
+            assert!(call(&measured, sha256, warm_input.clone()));
+            assert!(!call(&measured, ecadd, Bytes::from(vec![0xff; 128])));
+
+            let snapshot = metrics_snapshot();
+            let counter = |address, name| {
+                let label = format!("0x{address:02x}");
+                let (_, _, _, value) = snapshot
+                    .iter()
+                    .find(|(key, ..)| {
+                        key.key().name() == name &&
+                            key.key()
+                                .labels()
+                                .any(|l| l.key() == "address" && l.value() == label)
+                    })
+                    .expect("address-labelled metric registered");
+                value
+            };
+            assert_eq!(
+                counter(identity, "sync.caching.precompile_cache_hits"),
+                &DebugValue::Counter(2)
+            );
+            assert_eq!(
+                counter(identity, "sync.caching.precompile_cache_misses"),
+                &DebugValue::Counter(1)
+            );
+            assert_eq!(
+                counter(sha256, "sync.caching.precompile_cache_misses"),
+                &DebugValue::Counter(1)
+            );
+            assert_eq!(counter(ecadd, "sync.caching.precompile_errors"), &DebugValue::Counter(1));
+            assert!(matches!(
+                counter(identity, "sync.caching.precompile_cache_size"),
+                DebugValue::Gauge(_)
+            ));
+
+            // Disabling the cache must reach the big-block factory, even after cloning.
+            let disabled = measured.clone().with_precompile_cache_disabled(true);
+            assert!(call(&disabled.clone(), identity, warm_input.clone()));
+            assert!(call(
+                &measured.clone().with_precompile_cache_metrics(false),
+                identity,
+                warm_input
+            ));
+            // The debugging recorder resets values on each snapshot.
+            assert!(metrics_snapshot().iter().all(|(.., value)| {
+                value == &DebugValue::Counter(0) || value == &DebugValue::Gauge(0.0.into())
+            }));
+        });
     }
 }

@@ -8236,6 +8236,7 @@ dependencies = [
  "eyre",
  "jsonrpsee",
  "metrics",
+ "metrics-util",
  "reth-chain-state",
  "reth-chainspec",
  "reth-cli-util",

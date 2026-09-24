@@ -1020,7 +1020,8 @@ where
         let (receipt_tx, result_rx) = self.spawn_receipt_root_task(transaction_count);
         let executed_tx_index = Arc::clone(handle.executed_tx_index());
         let execution_start = Instant::now();
-        let evm_config = self.evm_config.clone().with_jit_support();
+        let evm_config =
+            self.evm_config.clone().with_jit_support().with_precompile_cache_metrics(true);
         let execution_ctx = self.execution_ctx_for(input).map_err(BlockExecutionError::other)?;
 
         let (output, senders, built_bal) = debug_span!(target: "engine::tree", "execute_block")
@@ -1128,10 +1129,11 @@ where
         let execution_start = Instant::now();
         let ctx =
             self.execution_ctx_for(input).map_err(|e| InsertBlockErrorKind::Other(Box::new(e)))?;
+        let evm_config = self.evm_config.clone().with_precompile_cache_metrics(true);
         let (output, senders, built_bal, received_bal_evm) =
             crate::tree::payload_processor::bal::execute_block(
                 &self.runtime,
-                &self.evm_config,
+                &evm_config,
                 &make_db,
                 input_bal,
                 env.evm_env,

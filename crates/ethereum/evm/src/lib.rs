@@ -482,6 +482,11 @@ where
         self
     }
 
+    fn with_precompile_cache_metrics(mut self, enabled: bool) -> Self {
+        self.executor_factory = self.executor_factory.with_precompile_cache_metrics(enabled);
+        self
+    }
+
     fn jit_backend(&self) -> Option<&dyn reth_evm::JitBackend> {
         #[cfg(feature = "jit")]
         if let Some(factory) = (self.executor_factory.evm_factory() as &dyn Any)
