@@ -48,7 +48,9 @@ use reth_stages::{
 };
 use reth_stages_api::{Pipeline, StageSet};
 use reth_static_file::StaticFileProducer;
-use reth_storage_api::{StorageChangeSetReader, StorageSettings, StorageSettingsCache};
+use reth_storage_api::{
+    StateProvider, StorageChangeSetReader, StorageSettings, StorageSettingsCache,
+};
 use reth_testing_utils::generators::{self, generate_key, sign_tx_with_key_pair};
 use reth_trie::{HashedPostState, KeccakKeyHasher, StateRoot};
 use reth_trie_db::DatabaseStateRoot;
@@ -552,7 +554,7 @@ fn setup_create2_selfdestruct_scenario() -> eyre::Result<Create2SelfdestructScen
     let output = {
         let provider = provider_factory.database_provider_rw()?;
         let state_provider = provider.latest();
-        let db = StateProviderDatabase::new(&*state_provider);
+        let db = StateProviderDatabase::new((&*state_provider).into_evm_state_provider());
         evm_config.batch_executor(db).execute(&preview_block)?
     };
     let child_was_destroyed =
@@ -1094,7 +1096,7 @@ fn execute_and_commit_block(
 
     let output = {
         let state_provider = provider.latest();
-        let db = StateProviderDatabase::new(&*state_provider);
+        let db = StateProviderDatabase::new((&*state_provider).into_evm_state_provider());
         let executor = evm_config.batch_executor(db);
         executor.execute(&block_with_senders)?
     };

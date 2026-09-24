@@ -9,9 +9,9 @@
 #   release — Compares the latest GitHub release tag against the current nightly
 #             Docker build. Runs daily to track nightly vs release performance.
 #
-# State is persisted between runs via the decofe/reth-bench-charts repo: each
-# successful run saves the feature commit SHA so the next run knows what to
-# compare against.
+# State is an Actions artifact containing the feature SHA from a successful run,
+# scoped by mode and branch. After 90 days without retained state, the existing
+# first-run baseline rules apply. No PAT or separate repository is needed.
 
 on:
   schedule:
@@ -143,14 +143,14 @@ jobs:
       - name: Resolve refs
         id: refs
         env:
+          INPUT_MODE: ${{ steps.mode.outputs.mode }}
           GH_TOKEN: ${{ github.token }}
-          DEREK_TOKEN: ${{ secrets.DEREK_TOKEN }}
           GITHUB_REPOSITORY: ${{ github.repository }}
           GITHUB_RUN_ID: ${{ github.run_id }}
           INPUT_FORCE: ${{ inputs.force || 'false' }}
         run: |
           FORCE="${INPUT_FORCE:-false}"
-          MODE="${{ steps.mode.outputs.mode }}"
+          MODE="${INPUT_MODE}"
           .github/scripts/bench-scheduled-refs.sh "$FORCE" "$MODE"
 
       - name: Alert on long-running hourly
@@ -199,6 +199,9 @@ jobs:
         if: steps.mode.outputs.mode == 'nightly' && steps.refs.outputs.is-stale == 'true' && !(github.event_name == 'workflow_dispatch' && inputs.slack == 'never')
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         env:
+          INPUT_FEATURE_REF: ${{ steps.refs.outputs.feature-ref }}
+          INPUT_NIGHTLY_CREATED: ${{ steps.refs.outputs.nightly-created }}
+          INPUT_STALE_AGE_HOURS: ${{ steps.refs.outputs.stale-age-hours }}
           SLACK_BENCH_BOT_TOKEN: ${{ secrets.SLACK_BENCH_BOT_TOKEN }}
           SLACK_BENCH_CHANNEL: ${{ secrets.SLACK_BENCH_CHANNEL }}
         with:
@@ -210,9 +213,9 @@ jobs:
               return;
             }
 
-            const ageHours = '${{ steps.refs.outputs.stale-age-hours }}';
-            const created = '${{ steps.refs.outputs.nightly-created }}';
-            const featureRef = '${{ steps.refs.outputs.feature-ref }}';
+            const ageHours = process.env.INPUT_STALE_AGE_HOURS;
+            const created = process.env.INPUT_NIGHTLY_CREATED;
+            const featureRef = process.env.INPUT_FEATURE_REF;
             const shortSha = featureRef.slice(0, 8);
             const repo = '${{ github.repository }}';
             const runUrl = `${context.serverUrl}/${repo}/actions/runs/${context.runId}`;
@@ -286,6 +289,7 @@ jobs:
     name: bench-scheduled
     runs-on: [self-hosted, Linux, X64, available]
     permissions:
+      id-token: write
       contents: read
       actions: read
     timeout-minutes: 120
@@ -323,6 +327,8 @@ jobs:
       CLICKHOUSE_PASSWORD: ${{ secrets.CLICKHOUSE_PASSWORD }}
       BENCH_VICTORIAMETRICS_URL: ${{ secrets.BENCH_VICTORIAMETRICS_URL }}
     steps:
+      - name: Secure runner
+        uses: tempoxyz/gh-actions/actions/secure-runner@117919c943b804057be733b0c4034c5542e58959 # 2026-09-23T05-09-41Z-117919c9
       - name: Clean up previous bench-work
         run: sudo rm -rf "$BENCH_WORK_DIR" 2>/dev/null || true
 
@@ -348,7 +354,9 @@ jobs:
             core.exportVariable('BENCH_JOB_URL', jobUrl);
 
       - uses: rui314/setup-mold@10ca16bf91dc22e05ebdc935cad9c75ea248f621 # v1
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de # v1
+        with:
+          toolchain: stable
       - uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
         continue-on-error: true
       - uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
@@ -361,6 +369,7 @@ jobs:
 
           # apt packages
           sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends gh
           sudo apt-get install -y --no-install-recommends \
             python3 make jq zstd curl dmsetup m4 \
             linux-tools-"$(uname -r)" || \
@@ -402,7 +411,7 @@ jobs:
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
           echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
           missing=()
-          for cmd in mc schelk cpupower taskset stdbuf python3 curl make uv jq m4; do
+          for cmd in mc schelk cpupower taskset stdbuf python3 curl make uv jq m4 gh; do
             command -v "$cmd" &>/dev/null || missing+=("$cmd")
           done
           if [ ${#missing[@]} -gt 0 ]; then
@@ -418,15 +427,21 @@ jobs:
         run: |
           FEATURE_SHORT=$(echo "$FEATURE_REF" | cut -c1-8)
           if [ "$BENCH_MODE" = "release" ] && [ -n "$RELEASE_TAG" ]; then
-            echo "baseline-name=${RELEASE_TAG}" >> "$GITHUB_OUTPUT"
-            echo "baseline-ref=${RELEASE_TAG}" >> "$GITHUB_OUTPUT"
+            {
+              echo "baseline-name=${RELEASE_TAG}"
+              echo "baseline-ref=${RELEASE_TAG}"
+            } >> "$GITHUB_OUTPUT"
           else
             BASELINE_SHORT=$(echo "$BASELINE_REF" | cut -c1-8)
-            echo "baseline-name=${BENCH_MODE}-${BASELINE_SHORT}" >> "$GITHUB_OUTPUT"
-            echo "baseline-ref=$BASELINE_REF" >> "$GITHUB_OUTPUT"
+            {
+              echo "baseline-name=${BENCH_MODE}-${BASELINE_SHORT}"
+              echo "baseline-ref=$BASELINE_REF"
+            } >> "$GITHUB_OUTPUT"
           fi
-          echo "feature-name=${BENCH_MODE}-${FEATURE_SHORT}" >> "$GITHUB_OUTPUT"
-          echo "feature-ref=$FEATURE_REF" >> "$GITHUB_OUTPUT"
+          {
+            echo "feature-name=${BENCH_MODE}-${FEATURE_SHORT}"
+            echo "feature-ref=$FEATURE_REF"
+          } >> "$GITHUB_OUTPUT"
 
       - name: Prepare source dirs
         run: |
@@ -630,14 +645,18 @@ jobs:
               fi
               printf '<details><summary><b>%s</b>: %d panic(s), %d error(s)</summary>\n\n' "$run_dir" "$panics" "$errors" >> "$ERRORS_FILE"
               if [ "$panics" -gt 0 ]; then
-                printf '**Panics:**\n```\n' >> "$ERRORS_FILE"
-                grep -E 'panicked at' "$LOG" | head -10 >> "$ERRORS_FILE"
-                printf '```\n' >> "$ERRORS_FILE"
+                {
+                  printf '**Panics:**\n```\n'
+                  grep -E 'panicked at' "$LOG" | head -10
+                  printf '```\n'
+                } >> "$ERRORS_FILE"
               fi
               if [ "$errors" -gt 0 ]; then
-                printf '**Errors (first 20):**\n```\n' >> "$ERRORS_FILE"
-                grep ' ERROR ' "$LOG" | head -20 >> "$ERRORS_FILE"
-                printf '```\n' >> "$ERRORS_FILE"
+                {
+                  printf '**Errors (first 20):**\n```\n'
+                  grep ' ERROR ' "$LOG" | head -20
+                  printf '```\n'
+                } >> "$ERRORS_FILE"
               fi
               printf '\n</details>\n\n' >> "$ERRORS_FILE"
             fi
@@ -647,6 +666,7 @@ jobs:
         id: results
         if: success()
         env:
+          INPUT_GRAFANA_URL: ${{ steps.metrics.outputs.grafana-url }}
           BASELINE_NAME: ${{ steps.refs.outputs.baseline-name }}
           FEATURE_NAME: ${{ steps.refs.outputs.feature-name }}
           BASELINE_REF_DISPLAY: ${{ steps.refs.outputs.baseline-ref }}
@@ -667,7 +687,7 @@ jobs:
           SUMMARY_ARGS="$SUMMARY_ARGS --feature-csv $FEATURE_CSVS"
           SUMMARY_ARGS="$SUMMARY_ARGS --run-pairs $BENCH_RUN_PAIRS"
 
-          GRAFANA_URL='${{ steps.metrics.outputs.grafana-url }}'
+          GRAFANA_URL="${INPUT_GRAFANA_URL}"
           if [ -n "$GRAFANA_URL" ]; then
             SUMMARY_ARGS="$SUMMARY_ARGS --grafana-url $GRAFANA_URL"
           fi
@@ -680,6 +700,7 @@ jobs:
       - name: Upload to ClickHouse
         if: success()
         env:
+          INPUT_GRAFANA_URL: ${{ steps.metrics.outputs.grafana-url }}
           CLICKHOUSE_HOST: ${{ secrets.CLICKHOUSE_HOST }}
           CLICKHOUSE_USER: ${{ secrets.CLICKHOUSE_USER }}
           CLICKHOUSE_PASSWORD: ${{ secrets.CLICKHOUSE_PASSWORD }}
@@ -690,7 +711,7 @@ jobs:
             WORKFLOW_NAME="workflows-nightly-regression-${{ github.run_id }}"
           fi
           DIFF_URL="https://github.com/${{ github.repository }}/compare/${BASELINE_REF}...${FEATURE_REF}"
-          GRAFANA_URL='${{ steps.metrics.outputs.grafana-url }}'
+          GRAFANA_URL="${INPUT_GRAFANA_URL}"
           JOB_URL="${BENCH_JOB_URL:-${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}}"
 
           python3 .github/scripts/bench-upload-clickhouse.py \
@@ -726,55 +747,18 @@ jobs:
           name: bench-scheduled-results
           path: ${{ env.BENCH_WORK_DIR }}
 
-      - name: Push charts
-        id: push-charts
+      - name: Upload chart attachments
+        id: upload-charts
         if: success() && env.BENCH_MODE != 'hourly'
         env:
-          DEREK_TOKEN: ${{ secrets.DEREK_TOKEN }}
-          RUN_ID: ${{ github.run_id }}
-        run: |
-          CHART_DIR="${BENCH_MODE}/${RUN_ID}"
-          CHARTS_REPO="https://x-access-token:${DEREK_TOKEN}@github.com/decofe/reth-bench-charts.git"
-
-          TMP_DIR=""
-          prepare_charts() {
-            if [ -n "${TMP_DIR}" ]; then
-              rm -rf "${TMP_DIR}"
-            fi
-
-            TMP_DIR=$(mktemp -d)
-            if git clone --depth 1 "${CHARTS_REPO}" "${TMP_DIR}" 2>/dev/null; then
-              true
-            else
-              git init "${TMP_DIR}"
-              git -C "${TMP_DIR}" remote add origin "${CHARTS_REPO}"
-            fi
-            .github/scripts/configure-git-token-user.sh "${TMP_DIR}" "${DEREK_TOKEN}"
-
-            mkdir -p "${TMP_DIR}/${CHART_DIR}"
-            cp "$BENCH_WORK_DIR"/charts/*.png "${TMP_DIR}/${CHART_DIR}/"
-            git -C "${TMP_DIR}" add "${CHART_DIR}"
-          }
-
-          for attempt in 1 2 3 4 5; do
-            prepare_charts
-            git -C "${TMP_DIR}" commit -m "nightly bench charts for run ${RUN_ID}"
-            if git -C "${TMP_DIR}" push origin HEAD:main; then
-              break
-            fi
-            if [ "$attempt" -eq 5 ]; then
-              echo "::error::Failed to push charts after ${attempt} attempts"
-              rm -rf "${TMP_DIR}"
-              exit 1
-            fi
-            sleep "$attempt"
-          done
-          echo "sha=$(git -C "${TMP_DIR}" rev-parse HEAD)" >> "$GITHUB_OUTPUT"
-          rm -rf "${TMP_DIR}"
+          GH_TOKEN: ${{ secrets.DEREK_PAT }}
+        run: bash .github/scripts/bench-upload-charts.sh "$GITHUB_REPOSITORY" "$BENCH_WORK_DIR/charts" > "$BENCH_WORK_DIR/charts.md"
 
       - name: Write job summary
         if: success()
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        env:
+          INPUT_GRAFANA_URL: ${{ steps.metrics.outputs.grafana-url }}
         with:
           script: |
             const fs = require('fs');
@@ -821,25 +805,11 @@ jobs:
               md += '\n';
             }
 
-            // Charts
-            const chartSha = '${{ steps.push-charts.outputs.sha }}';
-            if (chartSha) {
-              const runId = '${{ github.run_id }}';
-              const baseUrl = `https://raw.githubusercontent.com/decofe/reth-bench-charts/${chartSha}/nightly/${runId}`;
-              const charts = [
-                { file: 'latency_throughput.png', label: 'Latency, Throughput & Diff' },
-                { file: 'wait_breakdown.png', label: 'Wait Time Breakdown' },
-                { file: 'gas_vs_latency.png', label: 'Gas vs Latency' },
-              ];
-              md += `### Charts\n\n`;
-              for (const chart of charts) {
-                md += `<details><summary>${chart.label}</summary>\n\n`;
-                md += `![${chart.label}](${baseUrl}/${chart.file})\n\n`;
-                md += `</details>\n\n`;
-              }
+            if (process.env.BENCH_MODE !== 'hourly') {
+              md += fs.readFileSync(process.env.BENCH_WORK_DIR + '/charts.md', 'utf8');
             }
 
-            const grafanaUrl = '${{ steps.metrics.outputs.grafana-url }}';
+            const grafanaUrl = process.env.INPUT_GRAFANA_URL;
             if (grafanaUrl) {
               md += `### Grafana Dashboard\n\n[View real-time metrics](${grafanaUrl})\n\n`;
             }
@@ -1092,34 +1062,21 @@ jobs:
     if: success()
     name: save-state
     runs-on: ubuntu-latest
+    permissions: {}
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-          sparse-checkout: .github/scripts
-          sparse-checkout-cone-mode: true
-
-      - name: Push state to charts repo
+      - name: Prepare benchmark state
         env:
-          DEREK_TOKEN: ${{ secrets.DEREK_TOKEN }}
+          FEATURE_REF: ${{ needs.resolve-refs.outputs.feature-ref }}
         run: |
-          MODE="${{ needs.resolve-refs.outputs.mode }}"
-          FEATURE_REF="${{ needs.resolve-refs.outputs.feature-ref }}"
-          CHARTS_REPO="https://x-access-token:${DEREK_TOKEN}@github.com/decofe/reth-bench-charts.git"
+          [[ "$FEATURE_REF" =~ ^[0-9a-f]{40}$ ]] || exit 1
+          mkdir -p "$RUNNER_TEMP/bench-state"
+          printf '%s\n' "$FEATURE_REF" > "$RUNNER_TEMP/bench-state/feature-ref"
 
-          TMP_DIR=$(mktemp -d)
-          if git clone --depth 1 --branch state "${CHARTS_REPO}" "${TMP_DIR}" 2>/dev/null; then
-            true
-          else
-            git init "${TMP_DIR}"
-            git -C "${TMP_DIR}" remote add origin "${CHARTS_REPO}"
-          fi
-          .github/scripts/configure-git-token-user.sh "${TMP_DIR}" "${DEREK_TOKEN}"
-
-          mkdir -p "${TMP_DIR}/state"
-          echo "${FEATURE_REF}" > "${TMP_DIR}/state/${MODE}-last-feature-ref"
-          git -C "${TMP_DIR}" add state/
-          git -C "${TMP_DIR}" diff --cached --quiet && echo "No state change" && exit 0
-          git -C "${TMP_DIR}" commit -m "bench: update ${MODE} state to ${FEATURE_REF}"
-          git -C "${TMP_DIR}" push origin HEAD:state
-          rm -rf "${TMP_DIR}"
+      - name: Save benchmark state
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: bench-state-${{ needs.resolve-refs.outputs.mode }}
+          path: ${{ runner.temp }}/bench-state/feature-ref
+          retention-days: 90
+          if-no-files-found: error
+          overwrite: true
