@@ -991,7 +991,7 @@ mod tests {
     use reth_ethereum_primitives::{
         Block, BlockBody, EthPrimitives, Receipt, Transaction, TransactionSigned,
     };
-    use reth_execution_types::{BlockExecutionOutput, ExecutionOutcome};
+    use reth_execution_types::{ExecutionOutcome, PendingBlockAndExecutionOutput};
     use reth_primitives_traits::{RecoveredBlock, SealedHeader};
     use reth_storage_api::{
         noop::NoopProvider, BalProvider, BalStore, BalStoreHandle, BlockBodyIndicesProvider,
@@ -1803,9 +1803,8 @@ mod tests {
 
         fn pending_block_and_receipts(
             &self,
-        ) -> ProviderResult<
-            Option<(Arc<RecoveredBlock<Self::Block>>, Arc<BlockExecutionOutput<Self::Receipt>>)>,
-        > {
+        ) -> ProviderResult<Option<PendingBlockAndExecutionOutput<Self::Block, Self::Receipt>>>
+        {
             Ok(None)
         }
 

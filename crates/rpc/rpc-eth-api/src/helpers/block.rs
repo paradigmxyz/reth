@@ -165,11 +165,12 @@ pub trait EthBlocks: LoadBlock<RpcConvert: RpcConvert<Primitives = Self::Primiti
 
                 // First, try to get the pending block from the provider, in case we already
                 // received the actual pending block from the CL.
-                if let Some((block, output)) = self
+                if let Some(pending) = self
                     .provider()
                     .pending_block_and_receipts()
                     .map_err(Self::Error::from_eth_err)?
                 {
+                    let (block, output) = pending.into_parts();
                     return Ok(Some((block, output.into())));
                 }
 

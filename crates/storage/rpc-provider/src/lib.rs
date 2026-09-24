@@ -39,7 +39,7 @@ use reth_db_api::{
     models::StoredBlockBodyIndices,
 };
 use reth_errors::{ProviderError, ProviderResult};
-use reth_execution_types::BlockExecutionOutput;
+use reth_execution_types::PendingBlockAndExecutionOutput;
 use reth_node_types::{
     Block, BlockBody, BlockTy, HeaderTy, NodeTypes, PrimitivesTy, ReceiptTy, TxTy,
 };
@@ -501,9 +501,7 @@ where
 
     fn pending_block_and_receipts(
         &self,
-    ) -> ProviderResult<
-        Option<(Arc<RecoveredBlock<Self::Block>>, Arc<BlockExecutionOutput<Self::Receipt>>)>,
-    > {
+    ) -> ProviderResult<Option<PendingBlockAndExecutionOutput<Self::Block, Self::Receipt>>> {
         Err(ProviderError::UnsupportedProvider)
     }
 
@@ -1536,10 +1534,8 @@ where
 
     fn pending_block_and_receipts(
         &self,
-    ) -> Result<
-        Option<(Arc<RecoveredBlock<Self::Block>>, Arc<BlockExecutionOutput<Self::Receipt>>)>,
-        ProviderError,
-    > {
+    ) -> Result<Option<PendingBlockAndExecutionOutput<Self::Block, Self::Receipt>>, ProviderError>
+    {
         Err(ProviderError::UnsupportedProvider)
     }
 

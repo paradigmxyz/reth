@@ -21,7 +21,7 @@ use reth_chain_state::{
 };
 use reth_chainspec::ChainInfo;
 use reth_db_api::models::{AccountBeforeTx, BlockNumberAddress, StoredBlockBodyIndices};
-use reth_execution_types::{BlockExecutionOutput, ExecutionOutcome};
+use reth_execution_types::{ExecutionOutcome, PendingBlockAndExecutionOutput};
 use reth_node_types::{BlockTy, HeaderTy, NodeTypes, NodeTypesWithDB, ReceiptTy, TxTy};
 use reth_primitives_traits::{
     Account, RecoveredBlock, SealedHeader, SealedOrRecoveredBlock, StorageEntry,
@@ -527,9 +527,7 @@ impl<N: ProviderNodeTypes> BlockReader for BlockchainProvider<N> {
 
     fn pending_block_and_receipts(
         &self,
-    ) -> ProviderResult<
-        Option<(Arc<RecoveredBlock<Self::Block>>, Arc<BlockExecutionOutput<Self::Receipt>>)>,
-    > {
+    ) -> ProviderResult<Option<PendingBlockAndExecutionOutput<Self::Block, Self::Receipt>>> {
         Ok(self.canonical_in_memory_state.pending_block_and_receipts())
     }
 
@@ -1664,9 +1662,9 @@ mod tests {
             RecoveredBlock::new_sealed(block.clone(), block.senders().unwrap())
         );
 
-        let (block_with_receipts, output) = provider.pending_block_and_receipts()?.unwrap();
-        assert!(Arc::ptr_eq(&pending_block, &block_with_receipts));
-        assert!(output.receipts.is_empty());
+        let pending = provider.pending_block_and_receipts()?.unwrap();
+        assert!(Arc::ptr_eq(&pending_block, pending.block()));
+        assert!(pending.execution_output().receipts.is_empty());
 
         Ok(())
     }

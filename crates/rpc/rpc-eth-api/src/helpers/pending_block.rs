@@ -66,9 +66,11 @@ pub trait LoadPendingBlock:
     ///
     /// If no pending block is available, this will derive it from the `latest` block
     fn pending_block_env_and_cfg(&self) -> Result<PendingBlockEnv<Self::Evm>, Self::Error> {
-        if let Some((block, output)) =
+        if let Some(pending) =
             self.provider().pending_block_and_receipts().map_err(Self::Error::from_eth_err)?
         {
+            let (block, output) = pending.into_parts();
+
             // Note: for the PENDING block we assume it is past the known merge block and
             // thus this will not fail when looking up the total
             // difficulty value for the blockenv.

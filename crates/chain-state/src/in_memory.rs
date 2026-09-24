@@ -11,6 +11,7 @@ use reth_chainspec::ChainInfo;
 use reth_ethereum_primitives::EthPrimitives;
 use reth_execution_types::{
     BlockExecutionOutput, BlockExecutionResult, Chain, DecodedRevmBal, ExecutionOutcome,
+    PendingBlockAndExecutionOutput,
 };
 use reth_metrics::{metrics::Gauge, Metrics};
 use reth_primitives_traits::{
@@ -167,11 +168,6 @@ impl<N: NodePrimitives> CanonicalInMemoryStateInner<N> {
         self.in_memory_state.update_metrics();
     }
 }
-
-type PendingBlockAndReceipts<N> = (
-    Arc<RecoveredBlock<<N as NodePrimitives>::Block>>,
-    Arc<BlockExecutionOutput<reth_primitives_traits::ReceiptTy<N>>>,
-);
 
 /// This type is responsible for providing the blocks, receipts, and state for
 /// all canonical blocks not on disk yet and keeps track of the block range that
@@ -505,9 +501,11 @@ impl<N: NodePrimitives> CanonicalInMemoryState<N> {
     }
 
     /// Returns the pending recovered block and its execution output, which contains the receipts.
-    pub fn pending_block_and_receipts(&self) -> Option<PendingBlockAndReceipts<N>> {
+    pub fn pending_block_and_receipts(
+        &self,
+    ) -> Option<PendingBlockAndExecutionOutput<N::Block, N::Receipt>> {
         self.pending_state().map(|block_state| {
-            (
+            PendingBlockAndExecutionOutput::new(
                 Arc::clone(&block_state.block_ref().recovered_block),
                 Arc::clone(&block_state.block_ref().execution_output),
             )
@@ -1256,9 +1254,9 @@ mod tests {
         assert!(Arc::ptr_eq(&pending_block, &block2.recovered_block));
 
         // Check the pending block and receipts
-        let (pending_block, output) = state.pending_block_and_receipts().unwrap();
-        assert!(Arc::ptr_eq(&pending_block, &block2.recovered_block));
-        assert!(Arc::ptr_eq(&output, &block2.execution_output));
+        let pending = state.pending_block_and_receipts().unwrap();
+        assert!(Arc::ptr_eq(pending.block(), &block2.recovered_block));
+        assert!(Arc::ptr_eq(pending.execution_output(), &block2.execution_output));
     }
 
     #[test]

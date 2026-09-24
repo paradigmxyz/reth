@@ -6,7 +6,7 @@ use alloc::{sync::Arc, vec::Vec};
 use alloy_eips::{BlockHashOrNumber, BlockId, BlockNumberOrTag};
 use alloy_primitives::{BlockNumber, TxNumber, B256};
 use core::ops::RangeInclusive;
-use reth_execution_types::BlockExecutionOutput;
+use reth_execution_types::PendingBlockAndExecutionOutput;
 use reth_primitives_traits::{Block as _, RecoveredBlock, SealedHeader, SealedOrRecoveredBlock};
 use reth_storage_errors::provider::ProviderResult;
 
@@ -103,12 +103,9 @@ pub trait BlockReader:
     fn pending_block(&self) -> ProviderResult<Option<Arc<RecoveredBlock<Self::Block>>>>;
 
     /// Returns the pending block and its execution output, including receipts, if available.
-    #[expect(clippy::type_complexity)]
     fn pending_block_and_receipts(
         &self,
-    ) -> ProviderResult<
-        Option<(Arc<RecoveredBlock<Self::Block>>, Arc<BlockExecutionOutput<Self::Receipt>>)>,
-    >;
+    ) -> ProviderResult<Option<PendingBlockAndExecutionOutput<Self::Block, Self::Receipt>>>;
 
     /// Returns the block with matching hash from the database.
     ///
@@ -194,9 +191,7 @@ impl<T: BlockReader + Send + Sync> BlockReader for Arc<T> {
     }
     fn pending_block_and_receipts(
         &self,
-    ) -> ProviderResult<
-        Option<(Arc<RecoveredBlock<Self::Block>>, Arc<BlockExecutionOutput<Self::Receipt>>)>,
-    > {
+    ) -> ProviderResult<Option<PendingBlockAndExecutionOutput<Self::Block, Self::Receipt>>> {
         T::pending_block_and_receipts(self)
     }
     fn block_by_hash(&self, hash: B256) -> ProviderResult<Option<Self::Block>> {
@@ -264,9 +259,7 @@ impl<T: BlockReader + Send + Sync> BlockReader for &T {
     }
     fn pending_block_and_receipts(
         &self,
-    ) -> ProviderResult<
-        Option<(Arc<RecoveredBlock<Self::Block>>, Arc<BlockExecutionOutput<Self::Receipt>>)>,
-    > {
+    ) -> ProviderResult<Option<PendingBlockAndExecutionOutput<Self::Block, Self::Receipt>>> {
         T::pending_block_and_receipts(self)
     }
     fn block_by_hash(&self, hash: B256) -> ProviderResult<Option<Self::Block>> {

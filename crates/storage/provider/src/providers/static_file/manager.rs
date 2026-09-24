@@ -33,7 +33,7 @@ use reth_db_api::{
     transaction::DbTx,
 };
 use reth_ethereum_primitives::{Receipt, TransactionSigned};
-use reth_execution_types::BlockExecutionOutput;
+use reth_execution_types::PendingBlockAndExecutionOutput;
 use reth_nippy_jar::{NippyJar, NippyJarChecker};
 use reth_node_types::NodePrimitives;
 use reth_primitives_traits::{
@@ -3033,9 +3033,7 @@ impl<N: NodePrimitives<SignedTx: Value, Receipt: Value, BlockHeader: Value>> Blo
 
     fn pending_block_and_receipts(
         &self,
-    ) -> ProviderResult<
-        Option<(Arc<RecoveredBlock<Self::Block>>, Arc<BlockExecutionOutput<Self::Receipt>>)>,
-    > {
+    ) -> ProviderResult<Option<PendingBlockAndExecutionOutput<Self::Block, Self::Receipt>>> {
         // Required data not present in static_files
         Err(ProviderError::UnsupportedProvider)
     }
