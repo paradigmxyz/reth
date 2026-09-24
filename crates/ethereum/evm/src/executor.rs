@@ -628,7 +628,9 @@ where
     fn configure_segment(&mut self, segment_idx: usize) {
         let segment = &self.plan.segments[segment_idx];
         let env = &segment.evm_env;
-        if self.inner.evm.config_spec_id() == env.spec {
+        if self.inner.evm.config_spec_id() == env.spec &&
+            self.inner.evm.version().features == env.version.features
+        {
             self.inner.evm.set_block(env.block);
         } else {
             self.factory.reconfigure_evm(&mut self.inner.evm, env);
@@ -1083,16 +1085,20 @@ mod tests {
             .insert(from, AccountInfo::default().with_balance(U256::from(1_000_000u64)));
 
         let mut first = segment(0, 1, B256::with_last_byte(1));
-        first.evm_env = EthEvmEnv::new(SpecId::FRONTIER, first.evm_env.block, 1);
+        first.evm_env = EthEvmEnv::new(SpecId::LONDON, first.evm_env.block, 1);
+        first.evm_env.block.basefee = U256::from(1);
         let mut second = segment(1, 2, B256::with_last_byte(2));
-        second.evm_env = EthEvmEnv::new(SpecId::LONDON, second.evm_env.block, 1);
+        second.evm_env = EthEvmEnv::new(SpecId::SHANGHAI, second.evm_env.block, 1);
+        second.evm_env.block.basefee = U256::from(1);
         let plan = EthBigBlockPlan::new(vec![first, second], Vec::new(), 2);
         let chain_spec =
             ChainSpecBuilder::mainnet().chain(Chain::mainnet()).paris_activated().build();
         let factory = super::super::factory::EthBigBlockExecutorFactory::new(
             super::super::factory::EthBlockExecutorFactory::new(Arc::new(chain_spec)),
         );
-        let evm = factory.evm_with_env(Db::new(database), plan.segments[0].evm_env.clone());
+        let mut env = plan.segments[0].evm_env.clone();
+        env.version.features.remove(evm2::EvmFeatures::BASE_FEE_CHECK);
+        let evm = factory.evm_with_env(Db::new(database), env);
         let mut executor = factory.create_executor(evm, plan);
 
         executor.apply_pre_execution_changes().expect("first segment pre-execution");
@@ -1120,6 +1126,15 @@ mod tests {
         assert_eq!(output.result.gas_used, 42_000);
         assert_eq!(output.account(&first_target).unwrap().unwrap().balance, U256::from(1));
         assert_eq!(output.account(&second_target).unwrap().unwrap().balance, U256::from(1));
+        // The prewarming environment must not change the beneficiary reward during execution.
+        assert_eq!(
+            output
+                .account(&Address::ZERO)
+                .flatten()
+                .map(|account| account.balance)
+                .unwrap_or_default(),
+            U256::ZERO
+        );
     }
 
     #[test]

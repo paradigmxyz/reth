@@ -197,8 +197,7 @@ where
         let mut start_tx = 0;
         let mut segments = Vec::with_capacity(payload.env_switches.len());
         for data in &payload.env_switches {
-            let mut evm_env = self.inner.evm_env_for_payload(data)?;
-            evm_env.version.features.remove(evm2::EvmFeatures::BASE_FEE_CHECK);
+            let evm_env = self.inner.evm_env_for_payload(data)?;
             let ctx = self.inner.context_for_payload(data)?;
             segments.push(EthBigBlockSegment { start_tx, evm_env, ctx });
             start_tx += data.payload.transactions().len();
@@ -285,6 +284,12 @@ mod tests {
         .convert();
         assert!(evm.transact(&tx).unwrap().discard().status);
         assert_eq!(evm.block().gas_limit, U256::from(60_000_000));
+        assert!(config
+            .context_for_payload(&payload)
+            .unwrap()
+            .segments
+            .iter()
+            .all(|segment| segment.evm_env.version.feature(evm2::EvmFeatures::BASE_FEE_CHECK)));
     }
 
     #[test]
