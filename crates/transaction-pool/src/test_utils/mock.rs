@@ -1,6 +1,7 @@
 //! Mock types.
 
 use crate::{
+    error::RawPoolTransactionError,
     identifier::{SenderIdentifiers, TransactionId},
     pool::txpool::TxPool,
     traits::TransactionOrigin,
@@ -727,6 +728,24 @@ impl PoolTransaction for MockTransaction {
 
     fn from_pooled(pooled: Recovered<Self::Pooled>) -> Self {
         pooled.into()
+    }
+
+    fn recover_raw_transaction(data: &[u8]) -> Result<Self, RawPoolTransactionError> {
+        let mut transaction = Self::try_recover(Self::decode_raw_transaction(data)?)
+            .map_err(|_| RawPoolTransactionError::InvalidTransactionSignature)?;
+        transaction.set_size(data.len());
+        Ok(transaction)
+    }
+
+    fn recover_raw_transaction_with_cache(
+        data: &[u8],
+        cache: &reth_evm::SenderRecoveryCache,
+    ) -> Result<Self, RawPoolTransactionError> {
+        let mut transaction =
+            Self::try_recover_with_cache(Self::decode_raw_transaction(data)?, cache)
+                .map_err(|_| RawPoolTransactionError::InvalidTransactionSignature)?;
+        transaction.set_size(data.len());
+        Ok(transaction)
     }
 
     fn hash(&self) -> &TxHash {
