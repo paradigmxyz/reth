@@ -13,8 +13,6 @@
 #[cfg(feature = "reth-codec")]
 use reth_codecs as _;
 
-pub mod eip7997;
-
 mod receipt;
 pub use receipt::*;
 

@@ -12,7 +12,6 @@ description = "Ethereum primitive types"
 workspace = true
 
 [dependencies]
-alloy-primitives.workspace = true
 # reth
 reth-codecs = { workspace = true, optional = true, features = ["alloy"] }
 reth-primitives-traits.workspace = true
