@@ -14,6 +14,7 @@ use futures::Future;
 use reth_node_api::BlockBody;
 use reth_primitives_traits::{AlloyBlockHeader, RecoveredBlock, SealedHeader, TransactionMeta};
 use reth_rpc_convert::{transaction::ConvertReceiptInput, RpcConvert, RpcHeader};
+use reth_rpc_eth_types::block::SharedReceipts;
 use reth_storage_api::{BlockIdReader, BlockReader, ProviderHeader, ProviderReceipt, ProviderTx};
 use reth_transaction_pool::{PoolTransaction, TransactionPool};
 use revm::state::bal::Bal as RevmBal;
@@ -25,7 +26,7 @@ pub type BlockReceiptsResult<N, E> = Result<Option<Vec<RpcReceipt<N>>>, E>;
 pub type BlockAndReceiptsResult<Eth> = Result<
     Option<(
         Arc<RecoveredBlock<<<Eth as RpcNodeCore>::Provider as BlockReader>::Block>>,
-        Arc<Vec<ProviderReceipt<<Eth as RpcNodeCore>::Provider>>>,
+        SharedReceipts<ProviderReceipt<<Eth as RpcNodeCore>::Provider>>,
     )>,
     <Eth as EthApiTypes>::Error,
 >;
@@ -105,7 +106,7 @@ pub trait EthBlocks: LoadBlock<RpcConvert: RpcConvert<Primitives = Self::Primiti
 
                 let inputs = block
                     .transactions_recovered()
-                    .zip(Arc::unwrap_or_clone(receipts))
+                    .zip(receipts.into_vec())
                     .enumerate()
                     .map(|(idx, (tx, receipt))| {
                         let meta = TransactionMeta {
@@ -164,12 +165,12 @@ pub trait EthBlocks: LoadBlock<RpcConvert: RpcConvert<Primitives = Self::Primiti
 
                 // First, try to get the pending block from the provider, in case we already
                 // received the actual pending block from the CL.
-                if let Some((block, receipts)) = self
+                if let Some((block, output)) = self
                     .provider()
                     .pending_block_and_receipts()
                     .map_err(Self::Error::from_eth_err)?
                 {
-                    return Ok(Some((Arc::new(block), Arc::new(receipts))));
+                    return Ok(Some((block, output.into())));
                 }
 
                 // If no pending block from provider, build the pending block locally.
@@ -186,7 +187,7 @@ pub trait EthBlocks: LoadBlock<RpcConvert: RpcConvert<Primitives = Self::Primiti
                     .await
                     .map_err(Self::Error::from_eth_err)?
             {
-                return Ok(Some((block, receipts)));
+                return Ok(Some((block, receipts.into())));
             }
 
             Ok(None)
@@ -274,7 +275,7 @@ pub trait LoadBlock: LoadPendingBlock + SpawnBlocking + RpcNodeCoreExt {
                 if let Some(pending_block) =
                     self.provider().pending_block().map_err(Self::Error::from_eth_err)?
                 {
-                    return Ok(Some(Arc::new(pending_block)));
+                    return Ok(Some(pending_block));
                 }
 
                 // If no pending block from provider, try to get local pending block

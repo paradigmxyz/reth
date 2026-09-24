@@ -168,8 +168,10 @@ impl<N: NodePrimitives> CanonicalInMemoryStateInner<N> {
     }
 }
 
-type PendingBlockAndReceipts<N> =
-    (RecoveredBlock<<N as NodePrimitives>::Block>, Vec<reth_primitives_traits::ReceiptTy<N>>);
+type PendingBlockAndReceipts<N> = (
+    Arc<RecoveredBlock<<N as NodePrimitives>::Block>>,
+    Arc<BlockExecutionOutput<reth_primitives_traits::ReceiptTy<N>>>,
+);
 
 /// This type is responsible for providing the blocks, receipts, and state for
 /// all canonical blocks not on disk yet and keeps track of the block range that
@@ -498,20 +500,16 @@ impl<N: NodePrimitives> CanonicalInMemoryState<N> {
     }
 
     /// Returns the `RecoveredBlock` corresponding to the pending state.
-    pub fn pending_recovered_block(&self) -> Option<RecoveredBlock<N::Block>>
-    where
-        N::SignedTx: SignedTransaction,
-    {
-        self.pending_state().map(|block_state| block_state.block_ref().recovered_block().clone())
+    pub fn pending_recovered_block(&self) -> Option<Arc<RecoveredBlock<N::Block>>> {
+        self.pending_state().map(|block_state| Arc::clone(&block_state.block_ref().recovered_block))
     }
 
-    /// Returns a tuple with the `SealedBlock` corresponding to the pending
-    /// state and a vector of its `Receipt`s.
+    /// Returns the pending recovered block and its execution output, which contains the receipts.
     pub fn pending_block_and_receipts(&self) -> Option<PendingBlockAndReceipts<N>> {
         self.pending_state().map(|block_state| {
             (
-                block_state.block_ref().recovered_block().clone(),
-                block_state.executed_block_receipts(),
+                Arc::clone(&block_state.block_ref().recovered_block),
+                Arc::clone(&block_state.block_ref().execution_output),
             )
         })
     }
@@ -1254,13 +1252,13 @@ mod tests {
         );
 
         // Check the pending block with senders
-        assert_eq!(state.pending_recovered_block().unwrap(), block2.recovered_block().clone());
+        let pending_block = state.pending_recovered_block().unwrap();
+        assert!(Arc::ptr_eq(&pending_block, &block2.recovered_block));
 
         // Check the pending block and receipts
-        assert_eq!(
-            state.pending_block_and_receipts().unwrap(),
-            (block2.recovered_block().clone(), vec![])
-        );
+        let (pending_block, output) = state.pending_block_and_receipts().unwrap();
+        assert!(Arc::ptr_eq(&pending_block, &block2.recovered_block));
+        assert!(Arc::ptr_eq(&output, &block2.execution_output));
     }
 
     #[test]

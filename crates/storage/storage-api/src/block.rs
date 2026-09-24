@@ -6,6 +6,7 @@ use alloc::{sync::Arc, vec::Vec};
 use alloy_eips::{BlockHashOrNumber, BlockId, BlockNumberOrTag};
 use alloy_primitives::{BlockNumber, TxNumber, B256};
 use core::ops::RangeInclusive;
+use reth_execution_types::BlockExecutionOutput;
 use reth_primitives_traits::{Block as _, RecoveredBlock, SealedHeader, SealedOrRecoveredBlock};
 use reth_storage_errors::provider::ProviderResult;
 
@@ -95,17 +96,19 @@ pub trait BlockReader:
     /// Returns `None` if block is not found.
     fn block(&self, id: BlockHashOrNumber) -> ProviderResult<Option<Self::Block>>;
 
-    /// Returns the pending block if available
+    /// Returns the pending block if available.
     ///
-    /// Note: This returns a [`RecoveredBlock`] because it's expected that this is sealed by
-    /// the provider and the caller does not know the hash.
-    fn pending_block(&self) -> ProviderResult<Option<RecoveredBlock<Self::Block>>>;
+    /// Returns a shared [`RecoveredBlock`] because the provider has already sealed it and the
+    /// caller does not know the hash.
+    fn pending_block(&self) -> ProviderResult<Option<Arc<RecoveredBlock<Self::Block>>>>;
 
-    /// Returns the pending block and receipts if available.
+    /// Returns the pending block and its execution output, including receipts, if available.
     #[expect(clippy::type_complexity)]
     fn pending_block_and_receipts(
         &self,
-    ) -> ProviderResult<Option<(RecoveredBlock<Self::Block>, Vec<Self::Receipt>)>>;
+    ) -> ProviderResult<
+        Option<(Arc<RecoveredBlock<Self::Block>>, Arc<BlockExecutionOutput<Self::Receipt>>)>,
+    >;
 
     /// Returns the block with matching hash from the database.
     ///
@@ -186,12 +189,14 @@ impl<T: BlockReader + Send + Sync> BlockReader for Arc<T> {
     fn block(&self, id: BlockHashOrNumber) -> ProviderResult<Option<Self::Block>> {
         T::block(self, id)
     }
-    fn pending_block(&self) -> ProviderResult<Option<RecoveredBlock<Self::Block>>> {
+    fn pending_block(&self) -> ProviderResult<Option<Arc<RecoveredBlock<Self::Block>>>> {
         T::pending_block(self)
     }
     fn pending_block_and_receipts(
         &self,
-    ) -> ProviderResult<Option<(RecoveredBlock<Self::Block>, Vec<Self::Receipt>)>> {
+    ) -> ProviderResult<
+        Option<(Arc<RecoveredBlock<Self::Block>>, Arc<BlockExecutionOutput<Self::Receipt>>)>,
+    > {
         T::pending_block_and_receipts(self)
     }
     fn block_by_hash(&self, hash: B256) -> ProviderResult<Option<Self::Block>> {
@@ -254,12 +259,14 @@ impl<T: BlockReader + Send + Sync> BlockReader for &T {
     fn block(&self, id: BlockHashOrNumber) -> ProviderResult<Option<Self::Block>> {
         T::block(self, id)
     }
-    fn pending_block(&self) -> ProviderResult<Option<RecoveredBlock<Self::Block>>> {
+    fn pending_block(&self) -> ProviderResult<Option<Arc<RecoveredBlock<Self::Block>>>> {
         T::pending_block(self)
     }
     fn pending_block_and_receipts(
         &self,
-    ) -> ProviderResult<Option<(RecoveredBlock<Self::Block>, Vec<Self::Receipt>)>> {
+    ) -> ProviderResult<
+        Option<(Arc<RecoveredBlock<Self::Block>>, Arc<BlockExecutionOutput<Self::Receipt>>)>,
+    > {
         T::pending_block_and_receipts(self)
     }
     fn block_by_hash(&self, hash: B256) -> ProviderResult<Option<Self::Block>> {
