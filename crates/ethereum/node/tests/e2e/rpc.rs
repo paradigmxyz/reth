@@ -1,7 +1,9 @@
 use crate::utils::{eth_payload_attributes, eth_payload_attributes_amsterdam};
-use alloy_eips::{eip2718::Encodable2718, eip7910::EthConfig, BlockNumberOrTag};
+use alloy_eips::{
+    eip2718::Encodable2718, eip7910::EthConfig, eip7928::BlockAccessList, BlockNumberOrTag,
+};
 use alloy_genesis::Genesis;
-use alloy_primitives::{Address, Bytes, B256, U256};
+use alloy_primitives::{keccak256, Address, Bytes, B256, U256};
 use alloy_provider::{
     ext::DebugApi,
     network::{EthereumWallet, TransactionBuilder},
@@ -9,8 +11,8 @@ use alloy_provider::{
 };
 use alloy_rpc_types_beacon::relay::{
     BidTrace, BuilderBlockValidationRequestV3, BuilderBlockValidationRequestV4,
-    BuilderBlockValidationRequestV6, SignedBidSubmissionV3, SignedBidSubmissionV4,
-    SignedBidSubmissionV6,
+    BuilderBlockValidationRequestV5, BuilderBlockValidationRequestV6, SignedBidSubmissionV3,
+    SignedBidSubmissionV4, SignedBidSubmissionV5, SignedBidSubmissionV6,
 };
 use alloy_rpc_types_engine::{
     BlobsBundleV1, CancunPayloadFields, ExecutionPayload, ExecutionPayloadSidecar,
@@ -27,7 +29,10 @@ use alloy_rpc_types_trace::geth::{
 use jsonrpsee::core::client::{ClientT, Subscription, SubscriptionClientT};
 use rand::{rngs::StdRng, Rng, SeedableRng};
 use reth_chainspec::{ChainSpecBuilder, EthChainSpec, MAINNET};
-use reth_e2e_test_utils::{setup_engine, wallet::Wallet, E2ETestSetupBuilder};
+use reth_e2e_test_utils::{
+    setup_engine, transaction::TransactionTestContext, wallet::Wallet, E2ETestSetupBuilder,
+    NodeHelperType,
+};
 use reth_network::{types::NatResolver, PeersInfo};
 use reth_node_builder::{NodeBuilder, NodeHandle};
 use reth_node_core::{
@@ -58,6 +63,48 @@ alloy_sol_types::sol! {
             }
         }
     }
+}
+
+#[tokio::test]
+async fn test_rpc_shares_sender_recovery_cache_with_execution() -> eyre::Result<()> {
+    use reth_primitives_traits::SignedTransaction;
+    use reth_transaction_pool::test_utils::TransactionGenerator;
+
+    let chain_spec = Arc::new(ChainSpecBuilder::mainnet().cancun_activated().build());
+    let (mut nodes, _) =
+        E2ETestSetupBuilder::<EthereumNode, _>::new(1, chain_spec, eth_payload_attributes)
+            .with_node_config_modifier(|mut config| {
+                config.engine.sender_recovery_cache_enabled = true;
+                config
+            })
+            .build()
+            .await?;
+    let node = nodes.pop().unwrap();
+    let cache = node.inner.evm_config.sender_recovery_cache.as_ref().unwrap();
+    let client = node.rpc_client().unwrap();
+    let transaction =
+        TransactionGenerator::new(rand::rng()).transaction().chain_id(2).into_legacy();
+    let hash = *transaction.tx_hash();
+    let sender = transaction.try_recover()?;
+    let raw = Bytes::from(transaction.encoded_2718());
+    assert_eq!(cache.get(&hash), None);
+
+    for _ in 0..2 {
+        let result = client.request::<B256, _>("eth_sendRawTransaction", (raw.clone(),)).await;
+        assert!(result.unwrap_err().to_string().contains("chain ID"));
+        assert_eq!(cache.get(&hash), Some(sender));
+    }
+    Ok(())
+}
+
+async fn inject_blob_transaction(
+    node: &NodeHelperType<EthereumNode>,
+    wallet: &Wallet,
+) -> eyre::Result<()> {
+    let blob_wallet = wallet.wallet_gen().swap_remove(0);
+    let blob_tx = TransactionTestContext::tx_with_blobs_bytes(1, blob_wallet).await?;
+    node.rpc.inject_tx(blob_tx).await?;
+    Ok(())
 }
 
 #[tokio::test]
@@ -98,6 +145,90 @@ async fn test_block_access_list_lookup_semantics() -> eyre::Result<()> {
         assert_eq!(error.code(), EthRpcErrorCode::ResourceNotFound.code());
     }
 
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_bal_prewarming_for_transaction_replay() -> eyre::Result<()> {
+    for (cache_computed, prewarm) in [(false, false), (true, false), (false, true)] {
+        let chain_spec = Arc::new(
+            ChainSpecBuilder::default()
+                .chain(MAINNET.chain)
+                .genesis(serde_json::from_str(include_str!("../assets/genesis.json"))?)
+                .cancun_activated()
+                .build(),
+        );
+        let (mut nodes, wallet) =
+            E2ETestSetupBuilder::<EthereumNode, _>::new(1, chain_spec, eth_payload_attributes)
+                .with_node_config_modifier(move |mut config| {
+                    config.rpc.rpc_state_cache.cache_computed_bals = cache_computed;
+                    config.rpc.rpc_state_cache.prewarm_bals = prewarm.then_some(0);
+                    config
+                })
+                .build()
+                .await?;
+        let mut node = nodes.pop().unwrap();
+        let provider = ProviderBuilder::new()
+            .wallet(EthereumWallet::new(wallet.wallet_gen().swap_remove(0)))
+            .connect_http(node.rpc_url());
+        let first = provider
+            .send_transaction(TransactionRequest::default().to(Address::ZERO).value(U256::from(1)))
+            .await?;
+        let second = provider
+            .send_transaction(TransactionRequest::default().to(Address::ZERO).value(U256::from(2)))
+            .await?;
+        node.advance_block().await?;
+        let receipt = second.get_receipt().await?;
+        assert_eq!(receipt.transaction_index, Some(1));
+        let block_hash = receipt.block_hash.unwrap();
+        let client = node.rpc_client().unwrap();
+        let cache = node.rpc.inner.eth_api().cache();
+        let opts =
+            serde_json::json!({"tracer": "prestateTracer", "tracerConfig": {"diffMode": true}});
+        let hashes = [*first.tx_hash(), receipt.transaction_hash];
+        let mut expected = Vec::new();
+        if prewarm {
+            tokio::time::timeout(std::time::Duration::from_secs(10), async {
+                loop {
+                    let (_, bal) =
+                        cache.get_recovered_block_and_maybe_bal(block_hash).await?.unwrap();
+                    if bal.is_some() {
+                        return Ok::<_, eyre::Report>(());
+                    }
+                    tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+                }
+            })
+            .await??;
+        } else {
+            assert!(cache
+                .get_recovered_block_and_maybe_bal(block_hash)
+                .await?
+                .unwrap()
+                .1
+                .is_none());
+            for hash in hashes {
+                expected.push(
+                    client
+                        .request::<serde_json::Value, _>("debug_traceTransaction", (hash, &opts))
+                        .await?,
+                );
+            }
+        }
+        let bal: BlockAccessList = client.request("eth_getBlockAccessList", (block_hash,)).await?;
+        assert!(!bal.is_empty());
+        let raw: Bytes = client.request("debug_getRawBlockAccessList", (block_hash,)).await?;
+        assert_eq!(raw.as_ref(), alloy_rlp::encode(&bal));
+        let (_, cached_bal) = cache.get_recovered_block_and_maybe_bal(block_hash).await?.unwrap();
+        assert_eq!(cached_bal.is_some(), cache_computed || prewarm);
+
+        for (index, hash) in hashes.into_iter().enumerate() {
+            let actual: serde_json::Value =
+                client.request("debug_traceTransaction", (hash, &opts)).await?;
+            if !prewarm {
+                assert_eq!(actual, expected[index]);
+            }
+        }
+    }
     Ok(())
 }
 
@@ -539,7 +670,92 @@ async fn test_flashbots_validate_v4() -> eyre::Result<()> {
     Ok(())
 }
 
-#[tokio::test]
+// Keep blob JSON decoding off the test thread's deeper debug stack.
+#[tokio::test(flavor = "multi_thread")]
+async fn test_flashbots_validate_v5() -> eyre::Result<()> {
+    reth_tracing::init_test_tracing();
+
+    let chain_spec = Arc::new(
+        ChainSpecBuilder::default()
+            .chain(MAINNET.chain)
+            .genesis(serde_json::from_str(include_str!("../assets/genesis.json")).unwrap())
+            .osaka_activated()
+            .build(),
+    );
+
+    let (mut nodes, wallet) =
+        E2ETestSetupBuilder::<EthereumNode, _>::new(1, chain_spec, eth_payload_attributes)
+            .with_node_config_modifier(|config| {
+                config.with_rpc(
+                    RpcServerArgs::default()
+                        .with_unused_ports()
+                        .with_http()
+                        .with_http_api(RpcModuleSelection::All)
+                        .with_force_blob_sidecar_upcasting(),
+                )
+            })
+            .build()
+            .await?;
+    let mut node = nodes.pop().unwrap();
+    let provider = ProviderBuilder::new()
+        .wallet(EthereumWallet::new(wallet.wallet_gen().swap_remove(0)))
+        .connect_http(node.rpc_url());
+
+    inject_blob_transaction(&node, &wallet).await?;
+    let payload = node.new_payload().await?;
+    let envelope = payload.clone().try_into_v5()?;
+    assert!(!envelope.blobs_bundle.blobs.is_empty());
+
+    let request = BuilderBlockValidationRequestV5 {
+        request: SignedBidSubmissionV5 {
+            message: BidTrace {
+                parent_hash: payload.block().parent_hash,
+                block_hash: payload.block().hash(),
+                gas_used: payload.block().gas_used,
+                gas_limit: payload.block().gas_limit,
+                ..Default::default()
+            },
+            execution_payload: envelope.execution_payload,
+            blobs_bundle: envelope.blobs_bundle,
+            execution_requests: envelope.execution_requests.try_into().unwrap(),
+            signature: Default::default(),
+        },
+        parent_beacon_block_root: payload.block().parent_beacon_block_root.unwrap(),
+        registered_gas_limit: payload.block().gas_limit,
+    };
+
+    provider
+        .raw_request::<_, ()>("flashbots_validateBuilderSubmissionV5".into(), (&request,))
+        .await
+        .expect("request should validate");
+
+    let mut invalid_proof_request = request.clone();
+    invalid_proof_request.request.blobs_bundle.proofs[0] =
+        invalid_proof_request.request.blobs_bundle.proofs[1];
+    let err = provider
+        .raw_request::<_, ()>(
+            "flashbots_validateBuilderSubmissionV5".into(),
+            (&invalid_proof_request,),
+        )
+        .await
+        .unwrap_err();
+    assert!(err.to_string().contains("invalid KZG proof"), "{err}");
+
+    invalid_proof_request.request.message.block_hash = B256::ZERO;
+    let err = provider
+        .raw_request::<_, ()>(
+            "flashbots_validateBuilderSubmissionV5".into(),
+            (&invalid_proof_request,),
+        )
+        .await
+        .unwrap_err();
+    assert!(err.to_string().contains("block hash mismatch"), "{err}");
+
+    Ok(())
+}
+
+// Keep blob JSON decoding off the test thread's deeper debug stack.
+#[tokio::test(flavor = "multi_thread")]
 async fn test_flashbots_validate_v6() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
 
@@ -551,30 +767,34 @@ async fn test_flashbots_validate_v6() -> eyre::Result<()> {
             .build(),
     );
 
-    let (mut nodes, wallet) = setup_engine::<EthereumNode>(
+    let (mut nodes, wallet) = E2ETestSetupBuilder::<EthereumNode, _>::new(
         1,
-        chain_spec.clone(),
-        false,
-        Default::default(),
+        chain_spec,
         eth_payload_attributes_amsterdam,
     )
+    .with_node_config_modifier(|config| {
+        config.with_rpc(
+            RpcServerArgs::default()
+                .with_unused_ports()
+                .with_http()
+                .with_http_api(RpcModuleSelection::All)
+                .with_force_blob_sidecar_upcasting(),
+        )
+    })
+    .build()
     .await?;
     let mut node = nodes.pop().unwrap();
     let provider = ProviderBuilder::new()
         .wallet(EthereumWallet::new(wallet.wallet_gen().swap_remove(0)))
         .connect_http(node.rpc_url());
 
-    for nonce in 0..3 {
-        let _ = provider
-            .send_transaction(TransactionRequest::default().to(Address::ZERO).nonce(nonce))
-            .await?;
-    }
-
+    inject_blob_transaction(&node, &wallet).await?;
     let payload = node.new_payload().await?;
-    assert!(payload.block_access_list().is_some());
-    assert!(payload.block().body().transactions().count() >= 3);
+    let block_access_list = payload.block_access_list().expect("amsterdam payload has a BAL");
+    assert_eq!(Some(keccak256(block_access_list)), payload.block().block_access_list_hash);
 
     let envelope = payload.clone().try_into_v6()?;
+    assert!(!envelope.blobs_bundle.blobs.is_empty());
     let mut request = BuilderBlockValidationRequestV6 {
         request: SignedBidSubmissionV6 {
             message: BidTrace {
@@ -597,6 +817,18 @@ async fn test_flashbots_validate_v6() -> eyre::Result<()> {
         .raw_request::<_, ()>("flashbots_validateBuilderSubmissionV6".into(), (&request,))
         .await
         .expect("request should validate");
+
+    let mut invalid_proof_request = request.clone();
+    invalid_proof_request.request.blobs_bundle.proofs[0] =
+        invalid_proof_request.request.blobs_bundle.proofs[1];
+    let err = provider
+        .raw_request::<_, ()>(
+            "flashbots_validateBuilderSubmissionV6".into(),
+            (&invalid_proof_request,),
+        )
+        .await
+        .unwrap_err();
+    assert!(err.to_string().contains("invalid KZG proof"), "{err}");
 
     request.registered_gas_limit -= 1;
     assert!(provider
@@ -800,6 +1032,56 @@ async fn test_eth_config() -> eyre::Result<()> {
     assert_eq!(config.current.activation_time, prague_timestamp);
     assert_eq!(config.next.unwrap().activation_time, osaka_timestamp);
 
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_sepolia_amsterdam_eth_config() -> eyre::Result<()> {
+    use alloy_consensus::Header;
+    use alloy_primitives::hex;
+    use reth_chainspec::{
+        sepolia::{SEPOLIA_AMSTERDAM_TIMESTAMP, SEPOLIA_BPO2_TIMESTAMP},
+        SEPOLIA,
+    };
+    use reth_primitives_traits::SealedHeader;
+    use reth_provider::CanonChainTracker;
+
+    let node_config = NodeConfig::test()
+        .with_chain(SEPOLIA.clone())
+        .with_unused_ports()
+        .with_rpc(RpcServerArgs::default().with_unused_ports().with_http());
+    let NodeHandle { node, .. } = NodeBuilder::new(node_config)
+        .testing_node(Runtime::test())
+        .node(EthereumNode::default())
+        .launch()
+        .await?;
+    let provider =
+        ProviderBuilder::new().connect_http(node.rpc_server_handle().http_url().unwrap().parse()?);
+
+    // eth_config reads the canonical header; move it across the fork without syncing the testnet.
+    for timestamp in [SEPOLIA_AMSTERDAM_TIMESTAMP - 1, SEPOLIA_AMSTERDAM_TIMESTAMP] {
+        node.provider.set_canonical_head(SealedHeader::seal_slow(Header {
+            number: 10_000_000,
+            timestamp,
+            base_fee_per_gas: Some(1_000_000_000),
+            excess_blob_gas: Some(0),
+            ..Default::default()
+        }));
+        let config = provider.client().request_noparams::<EthConfig>("eth_config").await?;
+        if timestamp < SEPOLIA_AMSTERDAM_TIMESTAMP {
+            assert_eq!(config.current.activation_time, SEPOLIA_BPO2_TIMESTAMP);
+            assert_eq!(config.current.fork_id, Bytes::from_static(&hex!("268956b6")));
+            let next = config.next.unwrap();
+            assert_eq!(next.activation_time, SEPOLIA_AMSTERDAM_TIMESTAMP);
+            assert_eq!(next.fork_id, Bytes::from_static(&hex!("6c1d9423")));
+            assert_eq!(config.last.unwrap(), next);
+        } else {
+            assert_eq!(config.current.activation_time, SEPOLIA_AMSTERDAM_TIMESTAMP);
+            assert_eq!(config.current.fork_id, Bytes::from_static(&hex!("6c1d9423")));
+            assert!(config.next.is_none());
+            assert!(config.last.is_none());
+        }
+    }
     Ok(())
 }
 

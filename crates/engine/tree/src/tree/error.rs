@@ -17,6 +17,9 @@ pub enum AdvancePersistenceError {
     /// The persistence channel was closed unexpectedly
     #[error("persistence channel closed")]
     ChannelClosed,
+    /// State/trie catch-up could not construct an input despite split persistence frontiers.
+    #[error("state/trie catch-up input unavailable while persistence frontiers are split")]
+    StateTrieCatchupUnavailable,
     /// A provider error
     #[error(transparent)]
     Provider(#[from] ProviderError),

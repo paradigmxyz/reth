@@ -1,8 +1,7 @@
 //! Types for tracking the canonical chain state in memory.
 
 use crate::{
-    CanonStateNotification, CanonStateNotificationSender, CanonStateNotifications,
-    ChainInfoTracker, MemoryOverlayStateProvider,
+    CanonStateNotification, CanonStateNotificationSender, CanonStateNotifications, ChainInfoTracker,
 };
 use alloy_consensus::{transaction::TransactionMeta, BlockHeader};
 use alloy_eips::{BlockHashOrNumber, BlockNumHash};
@@ -10,13 +9,14 @@ use alloy_primitives::{map::B256Map, BlockNumber, TxHash, B256};
 use parking_lot::RwLock;
 use reth_chainspec::ChainInfo;
 use reth_ethereum_primitives::EthPrimitives;
-use reth_execution_types::{BlockExecutionOutput, BlockExecutionResult, Chain, ExecutionOutcome};
+use reth_execution_types::{
+    BlockExecutionOutput, BlockExecutionResult, Chain, DecodedRevmBal, ExecutionOutcome,
+};
 use reth_metrics::{metrics::Gauge, Metrics};
 use reth_primitives_traits::{
     BlockBody as _, IndexedTx, NodePrimitives, RecoveredBlock, SealedBlock, SealedHeader,
     SignedTransaction,
 };
-use reth_storage_api::StateProviderBox;
 use reth_trie::{
     updates::TrieUpdatesSorted, ComputedTrieData, HashedPostStateSorted, LazyTrieData,
 };
@@ -543,24 +543,6 @@ impl<N: NodePrimitives> CanonicalInMemoryState<N> {
         self.inner.canon_state_notification_sender.send(event).ok();
     }
 
-    /// Return state provider with reference to in-memory blocks that overlay database state.
-    ///
-    /// This merges the state of all blocks that are part of the chain that the requested block is
-    /// the head of. This includes all blocks that connect back to the canonical block on disk.
-    pub fn state_provider(
-        &self,
-        hash: B256,
-        historical: StateProviderBox,
-    ) -> MemoryOverlayStateProvider<N> {
-        let in_memory = if let Some(state) = self.state_by_hash(hash) {
-            state.chain().map(|block_state| block_state.block()).collect()
-        } else {
-            Vec::new()
-        };
-
-        MemoryOverlayStateProvider::new(historical, in_memory)
-    }
-
     /// Returns an iterator over all __canonical blocks__ in the in-memory state, from newest to
     /// oldest (highest to lowest).
     ///
@@ -715,16 +697,6 @@ impl<N: NodePrimitives> BlockState<N> {
         std::iter::successors(Some(self), |state| state.parent.clone())
     }
 
-    /// Return state provider with reference to in-memory blocks that overlay database state.
-    ///
-    /// This merges the state of all blocks that are part of the chain that the this block is
-    /// the head of. This includes all blocks that connect back to the canonical block on disk.
-    pub fn state_provider(&self, historical: StateProviderBox) -> MemoryOverlayStateProvider<N> {
-        let in_memory = self.chain().map(|block_state| block_state.block()).collect();
-
-        MemoryOverlayStateProvider::new(historical, in_memory)
-    }
-
     /// Tries to find a block by [`BlockHashOrNumber`] in the chain ending at this block.
     pub fn block_on_chain(&self, hash_or_num: BlockHashOrNumber) -> Option<&Self> {
         self.chain().find(|block| match hash_or_num {
@@ -768,6 +740,18 @@ pub struct ExecutedBlock<N: NodePrimitives = EthPrimitives> {
     /// This allows deferring the computation of the trie data which can be expensive.
     /// The data can be populated asynchronously after the block was validated.
     pub trie_data: LazyTrieData,
+    /// The prepared block access list of the block, if one is available.
+    ///
+    /// `None` means no BAL was available when the block was constructed, not that the block
+    /// has none: only blocks the engine validated from a payload that carried a BAL have it
+    /// attached. Blocks from before the BAL fork, blocks built or loaded outside engine
+    /// validation (payload builder, persistence, tests) and downloaded blocks without a BAL
+    /// sidecar leave it unset; the BAL store is the source of truth in that case.
+    ///
+    /// When present, this carries the raw RLP (for the BAL store) together with the revm
+    /// representation (for consumers like the RPC state cache), so that neither has to be
+    /// re-derived after validation.
+    pub bal: Option<Arc<DecodedRevmBal>>,
 }
 
 impl<N: NodePrimitives> Default for ExecutedBlock<N> {
@@ -784,13 +768,15 @@ impl<N: NodePrimitives> Default for ExecutedBlock<N> {
                 state: Default::default(),
             }),
             trie_data: LazyTrieData::ready(ComputedTrieData::default()),
+            bal: None,
         }
     }
 }
 
 impl<N: NodePrimitives> PartialEq for ExecutedBlock<N> {
     fn eq(&self, other: &Self) -> bool {
-        // Trie data is computed asynchronously and doesn't define block identity.
+        // Trie data is computed asynchronously and the block access list is derived data; neither
+        // defines block identity.
         self.recovered_block == other.recovered_block &&
             self.execution_output == other.execution_output
     }
@@ -806,7 +792,12 @@ impl<N: NodePrimitives> ExecutedBlock<N> {
         execution_output: Arc<BlockExecutionOutput<N::Receipt>>,
         trie_data: ComputedTrieData,
     ) -> Self {
-        Self { recovered_block, execution_output, trie_data: LazyTrieData::ready(trie_data) }
+        Self {
+            recovered_block,
+            execution_output,
+            trie_data: LazyTrieData::ready(trie_data),
+            bal: None,
+        }
     }
 
     /// Create a new [`ExecutedBlock`] with deferred trie data.
@@ -827,7 +818,21 @@ impl<N: NodePrimitives> ExecutedBlock<N> {
         execution_output: Arc<BlockExecutionOutput<N::Receipt>>,
         trie_data: LazyTrieData,
     ) -> Self {
-        Self { recovered_block, execution_output, trie_data }
+        Self { recovered_block, execution_output, trie_data, bal: None }
+    }
+
+    /// Attaches the prepared block access list of the block, or clears it with `None`.
+    pub fn with_bal(mut self, bal: Option<Arc<DecodedRevmBal>>) -> Self {
+        self.bal = bal;
+        self
+    }
+
+    /// Returns the prepared block access list of the block, if one is available.
+    ///
+    /// `None` only means no BAL was attached to this block; see the `bal` field for details.
+    #[inline]
+    pub const fn bal(&self) -> Option<&Arc<DecodedRevmBal>> {
+        self.bal.as_ref()
     }
 
     /// Returns a reference to an inner [`SealedBlock`]
@@ -970,7 +975,7 @@ impl<N: NodePrimitives<SignedTx: SignedTransaction>> NewCanonicalChain<N> {
 
     /// Converts a slice of executed blocks into a [`Chain`].
     fn blocks_to_chain(blocks: &[ExecutedBlock<N>]) -> Chain<N> {
-        match blocks {
+        let mut chain = match blocks {
             [] => Chain::default(),
             [first, rest @ ..] => {
                 let mut chain = Chain::from_block(
@@ -993,7 +998,13 @@ impl<N: NodePrimitives<SignedTx: SignedTransaction>> NewCanonicalChain<N> {
                 }
                 chain
             }
+        };
+        for exec in blocks {
+            if let Some(bal) = exec.bal() {
+                chain.insert_bal(exec.block_number(), Arc::clone(bal));
+            }
         }
+        chain
     }
 
     /// Returns the new tip of the chain.
@@ -1001,11 +1012,21 @@ impl<N: NodePrimitives<SignedTx: SignedTransaction>> NewCanonicalChain<N> {
     /// Returns the new tip for [`Self::Reorg`] and [`Self::Commit`] variants which commit at least
     /// 1 new block.
     pub fn tip(&self) -> &RecoveredBlock<N::Block> {
+        self.new_blocks().last().expect("non empty blocks").recovered_block()
+    }
+
+    /// Returns the blocks added to the canonical chain by this update.
+    pub fn new_blocks(&self) -> &[ExecutedBlock<N>] {
         match self {
-            Self::Commit { new } | Self::Reorg { new, .. } => {
-                new.last().expect("non empty blocks").recovered_block()
-            }
+            Self::Commit { new } | Self::Reorg { new, .. } => new,
         }
+    }
+
+    /// Returns whether the newly canonicalized blocks contain the given hash.
+    ///
+    /// This does not include the unchanged canonical prefix before the first new block.
+    pub fn contains(&self, hash: B256) -> bool {
+        self.new_blocks().iter().any(|block| block.recovered_block().hash() == hash)
     }
 }
 
@@ -1014,19 +1035,9 @@ mod tests {
     use super::*;
     use crate::test_utils::TestBlockBuilder;
     use alloy_eips::eip7685::Requests;
-    use alloy_primitives::{Address, BlockNumber, Bytes, StorageKey, StorageValue};
+    use alloy_primitives::Bytes;
     use rand::Rng;
-    use reth_errors::ProviderResult;
     use reth_ethereum_primitives::{EthPrimitives, Receipt};
-    use reth_primitives_traits::{Account, Bytecode};
-    use reth_storage_api::{
-        AccountReader, BlockHashReader, BytecodeReader, HashedPostStateProvider,
-        StateProofProvider, StateProvider, StateRootProvider, StorageRootProvider,
-    };
-    use reth_trie::{
-        updates::TrieUpdates, AccountProof, HashedPostState, HashedStorage, MultiProof,
-        MultiProofTargets, StorageMultiProof, StorageProof, TrieInput,
-    };
 
     fn create_mock_state(
         test_block_builder: &mut TestBlockBuilder<EthPrimitives>,
@@ -1057,141 +1068,6 @@ mod tests {
         }
 
         chain
-    }
-
-    struct MockStateProvider;
-
-    impl StateProvider for MockStateProvider {
-        fn storage(
-            &self,
-            _address: Address,
-            _storage_key: StorageKey,
-        ) -> ProviderResult<Option<StorageValue>> {
-            Ok(None)
-        }
-    }
-
-    impl BytecodeReader for MockStateProvider {
-        fn bytecode_by_hash(&self, _code_hash: &B256) -> ProviderResult<Option<Bytecode>> {
-            Ok(None)
-        }
-    }
-
-    impl BlockHashReader for MockStateProvider {
-        fn block_hash(&self, _number: BlockNumber) -> ProviderResult<Option<B256>> {
-            Ok(None)
-        }
-
-        fn canonical_hashes_range(
-            &self,
-            _start: BlockNumber,
-            _end: BlockNumber,
-        ) -> ProviderResult<Vec<B256>> {
-            Ok(vec![])
-        }
-    }
-
-    impl AccountReader for MockStateProvider {
-        fn basic_account(&self, _address: &Address) -> ProviderResult<Option<Account>> {
-            Ok(None)
-        }
-    }
-
-    impl StateRootProvider for MockStateProvider {
-        fn state_root(&self, _hashed_state: HashedPostState) -> ProviderResult<B256> {
-            Ok(B256::random())
-        }
-
-        fn state_root_from_nodes(&self, _input: TrieInput) -> ProviderResult<B256> {
-            Ok(B256::random())
-        }
-
-        fn state_root_with_updates(
-            &self,
-            _hashed_state: HashedPostState,
-        ) -> ProviderResult<(B256, TrieUpdates)> {
-            Ok((B256::random(), TrieUpdates::default()))
-        }
-
-        fn state_root_from_nodes_with_updates(
-            &self,
-            _input: TrieInput,
-        ) -> ProviderResult<(B256, TrieUpdates)> {
-            Ok((B256::random(), TrieUpdates::default()))
-        }
-    }
-
-    impl HashedPostStateProvider for MockStateProvider {
-        fn hashed_post_state(
-            &self,
-            _bundle_state: &revm::database::BundleState,
-        ) -> ProviderResult<HashedPostState> {
-            Ok(HashedPostState::default())
-        }
-    }
-
-    impl StorageRootProvider for MockStateProvider {
-        fn storage_root(
-            &self,
-            _address: Address,
-            _hashed_storage: HashedStorage,
-        ) -> ProviderResult<B256> {
-            Ok(B256::random())
-        }
-
-        fn storage_proof(
-            &self,
-            _address: Address,
-            slot: B256,
-            _hashed_storage: HashedStorage,
-        ) -> ProviderResult<StorageProof> {
-            Ok(StorageProof::new(slot))
-        }
-
-        fn storage_multiproof(
-            &self,
-            _address: Address,
-            _slots: &[B256],
-            _hashed_storage: HashedStorage,
-        ) -> ProviderResult<StorageMultiProof> {
-            Ok(StorageMultiProof::empty())
-        }
-    }
-
-    impl StateProofProvider for MockStateProvider {
-        fn proof(
-            &self,
-            _input: TrieInput,
-            _address: Address,
-            _slots: &[B256],
-        ) -> ProviderResult<AccountProof> {
-            Ok(AccountProof::new(Address::random()))
-        }
-
-        fn multiproof(
-            &self,
-            _input: TrieInput,
-            _targets: MultiProofTargets,
-        ) -> ProviderResult<MultiProof> {
-            Ok(MultiProof::default())
-        }
-
-        fn multiproof_v2(
-            &self,
-            _input: TrieInput,
-            _targets: reth_trie::MultiProofTargetsV2,
-        ) -> ProviderResult<reth_trie::DecodedMultiProofV2> {
-            Ok(reth_trie::DecodedMultiProofV2::default())
-        }
-
-        fn witness(
-            &self,
-            _input: TrieInput,
-            _target: HashedPostState,
-            _mode: reth_trie::ExecutionWitnessMode,
-        ) -> ProviderResult<Vec<Bytes>> {
-            Ok(Vec::default())
-        }
     }
 
     #[test]
@@ -1385,56 +1261,6 @@ mod tests {
             state.pending_block_and_receipts().unwrap(),
             (block2.recovered_block().clone(), vec![])
         );
-    }
-
-    #[test]
-    fn test_canonical_in_memory_state_state_provider() {
-        let mut test_block_builder: TestBlockBuilder = TestBlockBuilder::default();
-        let block1 = test_block_builder.get_executed_block_with_number(1, B256::random());
-        let block2 =
-            test_block_builder.get_executed_block_with_number(2, block1.recovered_block().hash());
-        let block3 =
-            test_block_builder.get_executed_block_with_number(3, block2.recovered_block().hash());
-
-        let state1 = Arc::new(BlockState::new(block1.clone()));
-        let state2 = Arc::new(BlockState::with_parent(block2.clone(), Some(state1.clone())));
-        let state3 = Arc::new(BlockState::with_parent(block3.clone(), Some(state2.clone())));
-
-        let mut blocks = B256Map::default();
-        blocks.insert(block1.recovered_block().hash(), state1);
-        blocks.insert(block2.recovered_block().hash(), state2);
-        blocks.insert(block3.recovered_block().hash(), state3);
-
-        let mut numbers = BTreeMap::new();
-        numbers.insert(1, block1.recovered_block().hash());
-        numbers.insert(2, block2.recovered_block().hash());
-        numbers.insert(3, block3.recovered_block().hash());
-
-        let canonical_state = CanonicalInMemoryState::new(blocks, numbers, None, None, None);
-
-        let historical: StateProviderBox = Box::new(MockStateProvider);
-
-        let overlay_provider =
-            canonical_state.state_provider(block3.recovered_block().hash(), historical);
-
-        assert_eq!(overlay_provider.in_memory.len(), 3);
-        assert_eq!(overlay_provider.in_memory[0].recovered_block().number, 3);
-        assert_eq!(overlay_provider.in_memory[1].recovered_block().number, 2);
-        assert_eq!(overlay_provider.in_memory[2].recovered_block().number, 1);
-
-        assert_eq!(
-            overlay_provider.in_memory[0].recovered_block().parent_hash,
-            overlay_provider.in_memory[1].recovered_block().hash()
-        );
-        assert_eq!(
-            overlay_provider.in_memory[1].recovered_block().parent_hash,
-            overlay_provider.in_memory[2].recovered_block().hash()
-        );
-
-        let unknown_hash = B256::random();
-        let empty_overlay_provider =
-            canonical_state.state_provider(unknown_hash, Box::new(MockStateProvider));
-        assert_eq!(empty_overlay_provider.in_memory.len(), 0);
     }
 
     #[test]
@@ -1641,5 +1467,32 @@ mod tests {
                 ))
             }
         );
+    }
+
+    #[test]
+    fn test_to_chain_notification_carries_prepared_bal() {
+        let mut test_block_builder: TestBlockBuilder = TestBlockBuilder::default();
+        let block0 = test_block_builder.get_executed_block_with_number(0, B256::random());
+        let block1 = test_block_builder
+            .get_executed_block_with_number(1, block0.recovered_block.hash())
+            .with_bal(Some(Arc::new(DecodedRevmBal::new(
+                Arc::new(revm::state::bal::Bal::default()),
+                Bytes::from_static(&[0xc0]),
+            ))));
+
+        let chain = NewCanonicalChain::Commit { new: vec![block0, block1.clone()] };
+        let CanonStateNotification::Commit { new } = chain.to_chain_notification() else {
+            panic!("expected a commit notification")
+        };
+
+        // Only the block whose payload carried a BAL contributes one.
+        assert_eq!(new.bals().len(), 1);
+        assert_eq!(new.bal_at(1), block1.bal());
+
+        let mut blocks_and_bals = new.blocks_and_bals();
+        let (block, bal) = blocks_and_bals.next().expect("block with BAL");
+        assert_eq!(block.hash(), block1.recovered_block.hash());
+        assert_eq!(Some(bal), block1.bal());
+        assert!(blocks_and_bals.next().is_none());
     }
 }

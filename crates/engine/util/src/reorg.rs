@@ -20,7 +20,7 @@ use reth_primitives_traits::{
     block::Block as _, BlockBody as _, BlockTy, HeaderTy, SealedBlock, SignedTransaction,
 };
 use reth_revm::{database::StateProviderDatabase, db::State};
-use reth_storage_api::{errors::ProviderError, BlockReader, StateProviderFactory};
+use reth_storage_api::{errors::ProviderError, BlockReader, StateProvider, StateProviderFactory};
 use std::{
     collections::VecDeque,
     future::Future,
@@ -270,7 +270,7 @@ where
     let has_bal = reorg_target.header().block_access_list_hash().is_some();
     let state_provider = provider.state_by_block_hash(reorg_target.header().parent_hash())?;
     let mut state = State::builder()
-        .with_database_ref(StateProviderDatabase::new(&state_provider))
+        .with_database_ref(StateProviderDatabase::new((&state_provider).into_evm_state_provider()))
         .with_bundle_update()
         .with_bal_builder_if(has_bal)
         .build();
@@ -309,7 +309,5 @@ where
     let BlockBuilderOutcome { block, block_access_list, .. } =
         builder.finish(&state_provider, None)?;
 
-    let encoded_bal: Option<Bytes> = block_access_list.map(|bal| alloy_rlp::encode(&bal).into());
-
-    Ok((block.into_sealed_block(), encoded_bal))
+    Ok((block.into_sealed_block(), block_access_list.map(|bal| bal.split().1)))
 }

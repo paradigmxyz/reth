@@ -3,7 +3,7 @@ use crate::{
     pool::{NEW_TX_LISTENER_BUFFER_SIZE, PENDING_TX_LISTENER_BUFFER_SIZE},
     PoolSize, TransactionOrigin,
 };
-use alloy_consensus::constants::EIP4844_TX_TYPE_ID;
+use alloy_consensus::{constants::EIP4844_TX_TYPE_ID, Transaction};
 use alloy_eips::eip1559::{ETHEREUM_BLOCK_GAS_LIMIT_30M, MIN_PROTOCOL_BASE_FEE};
 use alloy_primitives::{map::AddressSet, Address};
 use std::{ops::Mul, time::Duration};
@@ -72,6 +72,13 @@ pub struct PoolConfig {
     ///
     /// This restricts how many executable transaction a delegated sender can stack.
     pub max_inflight_delegated_slot_limit: usize,
+    /// Whether to enforce the sender nonce tracked from canonical updates over the nonce a
+    /// transaction was validated against, rejecting transactions below it.
+    ///
+    /// Closes the window in which a validation result that predates a block inserts an already
+    /// mined nonce as pending. Assumes sender nonces only move forward, so this is primarily
+    /// recommended for chains without reorgs and very low block times. Disabled by default.
+    pub enforce_tracked_nonce: bool,
 }
 
 impl PoolConfig {
@@ -97,6 +104,13 @@ impl PoolConfig {
         max_inflight_delegation_limit: usize,
     ) -> Self {
         self.max_inflight_delegated_slot_limit = max_inflight_delegation_limit;
+        self
+    }
+
+    /// Configures whether the sender nonce tracked from canonical updates is enforced on
+    /// insertion, see [`Self::enforce_tracked_nonce`].
+    pub const fn with_enforce_tracked_nonce(mut self, enforce: bool) -> Self {
+        self.enforce_tracked_nonce = enforce;
         self
     }
 
@@ -129,6 +143,7 @@ impl Default for PoolConfig {
             max_new_pending_txs_notifications: MAX_NEW_PENDING_TXS_NOTIFICATIONS,
             max_queued_lifetime: MAX_QUEUED_TRANSACTION_LIFETIME,
             max_inflight_delegated_slot_limit: DEFAULT_MAX_INFLIGHT_DELEGATED_SLOTS,
+            enforce_tracked_nonce: false,
         }
     }
 }
@@ -201,6 +216,58 @@ impl PriceBumpConfig {
             return self.replace_blob_tx_price_bump
         }
         self.default_price_bump
+    }
+
+    /// Determines whether a candidate transaction (`maybe_replacement`) is underpriced compared to
+    /// an existing transaction in the pool.
+    ///
+    /// A transaction is considered underpriced if it doesn't meet the required fee bump threshold.
+    /// This applies to both standard gas fees and, for blob-carrying transactions (EIP-4844),
+    /// the blob-specific fees.
+    #[inline]
+    pub fn is_replacement_underpriced<T: Transaction + ?Sized>(
+        &self,
+        existing: &T,
+        maybe_replacement: &T,
+    ) -> bool {
+        // Retrieve the required price bump percentage for this type of transaction.
+        //
+        // The bump is different for EIP-4844 and other transactions. See `PriceBumpConfig`.
+        let price_bump = self.price_bump(existing.ty());
+        let required_bumped_fee =
+            |existing_fee: u128| existing_fee.saturating_mul(100 + price_bump).div_ceil(100);
+
+        // Check if the max fee per gas is underpriced.
+        if maybe_replacement.max_fee_per_gas() < required_bumped_fee(existing.max_fee_per_gas()) {
+            return true
+        }
+
+        let existing_max_priority_fee_per_gas =
+            existing.max_priority_fee_per_gas().unwrap_or_default();
+        let replacement_max_priority_fee_per_gas =
+            maybe_replacement.max_priority_fee_per_gas().unwrap_or_default();
+
+        // Check max priority fee per gas (relevant for EIP-1559 transactions only)
+        if existing_max_priority_fee_per_gas != 0 &&
+            replacement_max_priority_fee_per_gas != 0 &&
+            replacement_max_priority_fee_per_gas <
+                required_bumped_fee(existing_max_priority_fee_per_gas)
+        {
+            return true
+        }
+
+        // Check max blob fee per gas
+        if let Some(existing_max_blob_fee_per_gas) = existing.max_fee_per_blob_gas() {
+            // This enforces that blob txs can only be replaced by blob txs
+            let replacement_max_blob_fee_per_gas =
+                maybe_replacement.max_fee_per_blob_gas().unwrap_or_default();
+            if replacement_max_blob_fee_per_gas < required_bumped_fee(existing_max_blob_fee_per_gas)
+            {
+                return true
+            }
+        }
+
+        false
     }
 }
 
@@ -278,7 +345,56 @@ impl LocalTransactionConfig {
 
 #[cfg(test)]
 mod tests {
+    use alloy_consensus::{TxEip1559, TxEip4844};
+
     use super::*;
+
+    #[test]
+    fn replacement_uses_configured_price_bump() {
+        let config = PriceBumpConfig { default_price_bump: 25, ..Default::default() };
+        let existing =
+            TxEip1559 { max_fee_per_gas: 100, max_priority_fee_per_gas: 10, ..Default::default() };
+        let mut replacement = existing.clone();
+        replacement.max_fee_per_gas = 125;
+        replacement.max_priority_fee_per_gas = 12;
+        assert!(config.is_replacement_underpriced(&existing, &replacement));
+
+        replacement.max_priority_fee_per_gas = 13;
+        assert!(!config.is_replacement_underpriced(&existing, &replacement));
+
+        replacement.max_fee_per_gas = 124;
+        assert!(config.is_replacement_underpriced(&existing, &replacement));
+    }
+
+    #[test]
+    fn blob_replacement_requires_all_fee_bumps() {
+        let config = PriceBumpConfig::default();
+        let existing = TxEip4844 {
+            max_fee_per_gas: 100,
+            max_priority_fee_per_gas: 10,
+            max_fee_per_blob_gas: 50,
+            ..Default::default()
+        };
+        let replacement = TxEip4844 {
+            max_fee_per_gas: 200,
+            max_priority_fee_per_gas: 20,
+            max_fee_per_blob_gas: 100,
+            ..existing.clone()
+        };
+        assert!(!config.is_replacement_underpriced(&existing, &replacement));
+
+        let mut underpriced = replacement.clone();
+        underpriced.max_fee_per_gas -= 1;
+        assert!(config.is_replacement_underpriced(&existing, &underpriced));
+
+        let mut underpriced = replacement.clone();
+        underpriced.max_priority_fee_per_gas -= 1;
+        assert!(config.is_replacement_underpriced(&existing, &underpriced));
+
+        let mut underpriced = replacement;
+        underpriced.max_fee_per_blob_gas -= 1;
+        assert!(config.is_replacement_underpriced(&existing, &underpriced));
+    }
 
     #[test]
     fn test_pool_size_sanity() {

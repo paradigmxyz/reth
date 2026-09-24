@@ -41,12 +41,21 @@ jobs:
       contents: read
       id-token: write
     steps:
+      - name: Secure runner
+        uses: tempoxyz/gh-actions/actions/secure-runner@117919c943b804057be733b0c4034c5542e58959 # 2026-09-23T05-09-41Z-117919c9
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
+      - uses: tempoxyz/gh-actions/vendor/dtolnay/rust-toolchain@117919c943b804057be733b0c4034c5542e58959 # 2026-09-23T05-09-41Z-117919c9
+        with:
+          toolchain: "1.95.0"
+
+      - name: Check Reth dependencies through Aegis
+        run: cargo fetch --locked --manifest-path Cargo.toml
+
       - name: Set up Depot CLI
-        uses: depot/setup-action@15c09a5f77a0840ad4bce955686522a257853461 # v1.7.1
+        uses: depot/setup-action@91bc8495a33ebfc504ffc89e5674379ccf23c29c # v1.7.2
 
       - name: Log in to GHCR
         uses: docker/login-action@4907a6ddec9925e35a0a9e82d7399ccc52663121 # v4.1.0
@@ -58,9 +67,11 @@ jobs:
       - name: Get git info for vergen
         id: git
         run: |
-          echo "sha=${{ github.sha }}" >> "$GITHUB_OUTPUT"
-          echo "describe=$(git describe --always --tags)" >> "$GITHUB_OUTPUT"
-          echo "dirty=false" >> "$GITHUB_OUTPUT"
+          {
+            echo "sha=${{ github.sha }}"
+            echo "describe=$(git describe --always --tags)"
+            echo "dirty=false"
+          } >> "$GITHUB_OUTPUT"
 
       - name: Determine build parameters
         id: params
@@ -84,28 +95,32 @@ jobs:
                 echo "EOF"
               } >> "$GITHUB_OUTPUT"
             else
-              echo "ethereum_tags=${REGISTRY}/reth:${VERSION}" >> "$GITHUB_OUTPUT"
-              echo "ethereum_set=ethereum.tags=${REGISTRY}/reth:${VERSION}" >> "$GITHUB_OUTPUT"
+              {
+                echo "ethereum_tags=${REGISTRY}/reth:${VERSION}"
+                echo "ethereum_set=ethereum.tags=${REGISTRY}/reth:${VERSION}"
+              } >> "$GITHUB_OUTPUT"
             fi
 
           elif [[ "${EVENT_NAME}" == "schedule" ]] || [[ "${BUILD_TYPE}" == "nightly" ]]; then
-            echo "targets=nightly" >> "$GITHUB_OUTPUT"
-            echo "ethereum_tags=${REGISTRY}/reth:nightly" >> "$GITHUB_OUTPUT"
+            {
+              echo "targets=nightly"
+              echo "ethereum_tags=${REGISTRY}/reth:nightly"
+            } >> "$GITHUB_OUTPUT"
             {
               echo "ethereum_set<<EOF"
               echo "ethereum.tags=${REGISTRY}/reth:nightly"
               echo "ethereum.args.RETH_ENGINE_TXPOOL_PREWARMING=true"
               echo "ethereum.args.RETH_ENGINE_SENDER_RECOVERY_CACHE=true"
-              echo "ethereum.args.RETH_ENGINE_PERSISTENCE_THRESHOLD=50"
-              echo "ethereum.args.RETH_ENGINE_NUM_STATE_MASKING_BLOCKS=30"
               echo "EOF"
             } >> "$GITHUB_OUTPUT"
 
           else
             # git-sha build
-            echo "targets=ethereum" >> "$GITHUB_OUTPUT"
-            echo "ethereum_tags=${REGISTRY}/reth:${{ github.sha }}" >> "$GITHUB_OUTPUT"
-            echo "ethereum_set=ethereum.tags=${REGISTRY}/reth:${{ github.sha }}" >> "$GITHUB_OUTPUT"
+            {
+              echo "targets=ethereum"
+              echo "ethereum_tags=${REGISTRY}/reth:${{ github.sha }}"
+              echo "ethereum_set=ethereum.tags=${REGISTRY}/reth:${{ github.sha }}"
+            } >> "$GITHUB_OUTPUT"
           fi
 
       - name: Build and push images
@@ -127,12 +142,14 @@ jobs:
 
       - name: Verify image architectures
         env:
+          INPUT_ETHEREUM_TAGS: ${{ steps.params.outputs.ethereum_tags }}
+          INPUT_TARGETS: ${{ steps.params.outputs.targets }}
           DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run }}
         run: |
           ./.github/scripts/verify_image_arch.sh \
-            "${{ steps.params.outputs.targets }}" \
+            "${INPUT_TARGETS}" \
             "ghcr.io/${{ github.repository_owner }}" \
-            "${{ steps.params.outputs.ethereum_tags }}"
+            "${INPUT_ETHEREUM_TAGS}"
 
   notify:
     name: Notify on failure

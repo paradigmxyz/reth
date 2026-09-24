@@ -17,7 +17,7 @@ use async_trait::async_trait;
 use futures::Stream;
 use jsonrpsee::{core::RpcResult, PendingSubscriptionSink, SubscriptionMessage};
 use parking_lot::RwLock;
-use reth_chainspec::{ChainSpecProvider, EthChainSpec, EthereumHardforks};
+use reth_chainspec::{ChainSpecProvider, EthereumHardforks};
 use reth_engine_primitives::ConsensusEngineEvent;
 use reth_errors::RethError;
 use reth_evm::{block::BlockExecutor, execute::Executor, ConfigureEvm, EvmEnvFor};
@@ -29,14 +29,14 @@ use reth_rpc_api::DebugApiServer;
 use reth_rpc_convert::RpcTxReq;
 use reth_rpc_eth_api::{
     helpers::{EthTransactions, TraceExt},
-    FromEthApiError, FromEvmError, RpcConvert, RpcNodeCore,
+    AsEthApiError, FromEthApiError, FromEvmError, RpcConvert, RpcNodeCore,
 };
 use reth_rpc_eth_types::{EthApiError, StateCacheDb};
 use reth_rpc_server_types::{result::internal_rpc_err, ToRpcResult};
 use reth_storage_api::{
     BlockIdReader, BlockReaderIdExt, HashedPostStateProvider, HeaderProvider, ProviderBlock,
-    ReceiptProviderIdExt, StateProviderFactory, StateRootProvider, StorageRootProvider,
-    TransactionVariant,
+    ReceiptProviderIdExt, StateProviderBox, StateProviderFactory, StateRootProvider,
+    StorageRootProvider, TransactionVariant,
 };
 use reth_tasks::{pool::BlockingTaskGuard, Runtime};
 use reth_transaction_pool::TransactionPool;
@@ -411,6 +411,13 @@ where
                 Ok(trace)
             })
             .await
+            .map_err(|err| match err.as_err() {
+                Some(EthApiError::HeaderNotFound(id)) if *id == at => {
+                    // Unknown blocks use -32000: https://github.com/ethereum/execution-apis/pull/855
+                    EthApiError::TracingBlockNotFound(at).into()
+                }
+                _ => err,
+            })
     }
 
     /// Helper method to execute `debug_trace_call` at a specific transaction index within a block.
@@ -429,7 +436,7 @@ where
             .eth_api()
             .recovered_block_and_maybe_bal(block_id)
             .await?
-            .ok_or(EthApiError::HeaderNotFound(block_id))?;
+            .ok_or(EthApiError::TracingBlockNotFound(block_id))?;
 
         if tx_index >= block.transaction_count() {
             // tx_index out of bounds
@@ -625,13 +632,15 @@ where
                 let mut witness = None;
                 let _ = block_executor
                     .execute_with_state_closure(&block, |statedb: &State<_>| {
-                        witness =
-                            Some(ExecutionWitnessRecord::new(statedb).into_execution_witness(
-                                &statedb.database.database.0,
-                                eth_api.provider(),
-                                block_number,
-                                mode,
-                            ));
+                        witness = Some(
+                            ExecutionWitnessRecord::new(statedb)
+                                .into_execution_witness::<StateProviderBox, _>(
+                                    &statedb.database.database,
+                                    eth_api.provider(),
+                                    block_number,
+                                    mode,
+                                ),
+                        );
                     })
                     .map_err(|err| EthApiError::Internal(err.into()))?;
 
@@ -931,7 +940,7 @@ where
         }
 
         for entry in entries {
-            let rlp = alloy_rlp::encode(entry.block.sealed_block()).into();
+            let rlp = Bytes::from(alloy_rlp::encode(entry.block.sealed_block()));
             let hash = entry.block.hash();
 
             let block = entry
@@ -939,7 +948,9 @@ where
                 .clone_into_rpc_block(
                     BlockTransactionsKind::Full,
                     |tx, tx_info| self.eth_api().converter().fill(tx, tx_info),
-                    |header, size| self.eth_api().converter().convert_header(header, size),
+                    |header, block_size| {
+                        self.eth_api().converter().convert_header(header, Some(block_size))
+                    },
                 )
                 .map_err(|err| Eth::Error::from(err).into())?;
 
@@ -1224,7 +1235,7 @@ where
     }
 
     async fn debug_chain_config(&self) -> RpcResult<ChainConfig> {
-        Ok(self.provider().chain_spec().genesis().config.clone())
+        Ok(crate::chain_config::chain_config(&*self.provider().chain_spec()))
     }
 
     async fn debug_chaindb_property(&self, _property: String) -> RpcResult<()> {
@@ -1495,14 +1506,58 @@ impl<B: BlockTrait> Default for BadBlockStore<B> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::{eth::helpers::types::EthRpcConverter, EthApi};
     use alloy_primitives::{keccak256, U256};
+    use reth_chainspec::ChainSpec;
     use reth_db_api::{tables, transaction::DbTxMut};
+    use reth_evm_ethereum::EthEvmConfig;
+    use reth_network_api::noop::NoopNetwork;
     use reth_primitives_traits::StorageEntry;
-    use reth_provider::test_utils::create_test_provider_factory;
+    use reth_provider::test_utils::{create_test_provider_factory, NoopProvider};
+    use reth_rpc_eth_api::EthApiServer;
+    use reth_transaction_pool::test_utils::testing_pool;
     use revm::{
         database::{states::StorageSlot, AccountStatus, BundleAccount, BundleState},
         state::AccountInfo as RevmAccountInfo,
     };
+
+    #[tokio::test]
+    async fn trace_call_out_of_range_block_error() {
+        let eth_api = EthApi::<_, EthRpcConverter<ChainSpec>>::builder(
+            NoopProvider::default(),
+            testing_pool(),
+            NoopNetwork::default(),
+            EthEvmConfig::mainnet(),
+        )
+        .build();
+        let debug_api = DebugApi::new(
+            eth_api.clone(),
+            BlockingTaskGuard::new(1),
+            &Runtime::test(),
+            futures::stream::empty(),
+        );
+        let block_id = BlockId::number(0xfffffffff);
+        for tx_index in [None, Some(0)] {
+            let mut opts: GethDebugTracingCallOptions =
+                serde_json::from_value(serde_json::json!({ "tracer": "callTracer" })).unwrap();
+            opts.tx_index = tx_index;
+            let err = DebugApiServer::debug_trace_call(
+                &debug_api,
+                Default::default(),
+                Some(block_id),
+                Some(opts),
+            )
+            .await
+            .unwrap_err();
+            assert_eq!(err.code(), -32000);
+            assert!(err.message().contains("not found"));
+        }
+
+        let err = EthApiServer::call(&eth_api, Default::default(), Some(block_id), None, None)
+            .await
+            .unwrap_err();
+        assert_eq!(err.code(), -32001);
+    }
 
     #[test]
     fn hashed_post_state_zeroes_destroyed_account_parent_storage() {

@@ -58,7 +58,7 @@ use crate::{
         TransactionListenerKind,
     },
     validate::{TransactionValidationOutcome, TransactionValidator, ValidPoolTransaction},
-    AddedTransactionOutcome, AllTransactionsEvents,
+    AddedTransactionOutcome, AllTransactionsEvents, PriceBumpConfig,
 };
 use alloy_consensus::{error::ValueError, transaction::TxHashRef, BlockHeader, Signed, Typed2718};
 use alloy_eips::{
@@ -68,12 +68,12 @@ use alloy_eips::{
         env_settings::KzgSettings, BlobAndProofV1, BlobAndProofV2, BlobCellsAndProofsV1,
         BlobTransactionValidationError,
     },
-    eip7594::BlobTransactionSidecarVariant,
+    eip7594::{BlobCellMask, BlobTransactionSidecarVariant},
     eip7702::SignedAuthorization,
 };
 use alloy_primitives::{
     map::{AddressSet, B256Map},
-    Address, Bytes, TxHash, TxKind, B128, B256, U256,
+    Address, Bytes, TxHash, TxKind, B256, U256,
 };
 use futures_util::{ready, Stream};
 use reth_eth_wire_types::HandleMempoolData;
@@ -755,7 +755,7 @@ pub trait TransactionPool: Clone + Debug + Send + Sync {
     fn get_blobs_for_versioned_hashes_v4(
         &self,
         versioned_hashes: &[B256],
-        indices_bitarray: B128,
+        cell_mask: BlobCellMask,
     ) -> Result<Vec<Option<BlobCellsAndProofsV1>>, BlobStoreError>;
 
     /// Return whether each requested blob versioned hash is available.
@@ -1415,20 +1415,55 @@ pub trait PoolTransaction:
         }
     }
 
+    /// Recovers and converts a pooled transaction, using the sender recovery cache if provided.
+    ///
+    /// Delegates to [`Self::try_recover`] when no cache is configured.
+    fn try_recover_with_cache_opt(
+        pooled: Self::Pooled,
+        cache: Option<&reth_evm::SenderRecoveryCache>,
+    ) -> Result<Self, Self::Pooled> {
+        match cache {
+            Some(cache) => Self::try_recover_with_cache(pooled, cache),
+            None => Self::try_recover(pooled),
+        }
+    }
+
     /// Decodes and recovers a raw transaction into this pool transaction type.
     ///
     /// Implementations can override this to avoid constructing the pooled transaction as an
     /// intermediate value when the raw representation can be converted directly into `Self`.
+    /// RPC uses this hook when no sender recovery cache is configured. Override
+    /// [`Self::recover_raw_transaction_with_cache`] to specialize the cached path as well.
     fn recover_raw_transaction(data: &[u8]) -> Result<Self, RawPoolTransactionError> {
+        Self::try_recover(Self::decode_raw_transaction(data)?)
+            .map_err(|_| RawPoolTransactionError::InvalidTransactionSignature)
+    }
+
+    /// Decodes and recovers a raw pool transaction using the provided sender recovery cache.
+    ///
+    /// RPC uses this hook when a sender recovery cache is configured. Implementations can override
+    /// it to reuse the raw bytes or encoded length during recovery and construction. The default
+    /// implementation decodes and recovers separately; it does not call
+    /// [`Self::recover_raw_transaction`].
+    fn recover_raw_transaction_with_cache(
+        data: &[u8],
+        cache: &reth_evm::SenderRecoveryCache,
+    ) -> Result<Self, RawPoolTransactionError> {
+        Self::try_recover_with_cache(Self::decode_raw_transaction(data)?, cache)
+            .map_err(|_| RawPoolTransactionError::InvalidTransactionSignature)
+    }
+
+    /// Decodes a raw pooled transaction without recovering its sender.
+    ///
+    /// The entire input must be consumed; trailing bytes are rejected. Implementations can override
+    /// this to customize raw decoding independently of sender recovery.
+    fn decode_raw_transaction(data: &[u8]) -> Result<Self::Pooled, RawPoolTransactionError> {
         if data.is_empty() {
             return Err(RawPoolTransactionError::EmptyRawTransactionData)
         }
 
-        let transaction = Self::Pooled::decode_2718_exact(data)
-            .map_err(|_| RawPoolTransactionError::FailedToDecodeSignedTransaction)?;
-
-        Self::try_recover(transaction)
-            .map_err(|_| RawPoolTransactionError::InvalidTransactionSignature)
+        Self::Pooled::decode_2718_exact(data)
+            .map_err(|_| RawPoolTransactionError::FailedToDecodeSignedTransaction)
     }
 
     /// Tries to convert the `Consensus` type into the `Pooled` type.
@@ -1491,6 +1526,27 @@ pub trait PoolTransaction:
         }
     }
 
+    /// Returns whether `replacement` is underpriced relative to this transaction.
+    ///
+    /// Called on the existing transaction when another transaction would replace it.
+    /// By default, delegates to [`PriceBumpConfig::is_replacement_underpriced`].
+    /// Implementations may override this to define transaction-specific replacement semantics.
+    fn is_replacement_underpriced(
+        &self,
+        replacement: &Self,
+        price_bumps: &PriceBumpConfig,
+    ) -> bool {
+        price_bumps.is_replacement_underpriced(self, replacement)
+    }
+
+    /// Whether the transaction's nonce must be below [`u64::MAX`] according to EIP-2681.
+    ///
+    /// Defaults to `true`. Transactions with alternative nonce semantics can override this
+    /// independently of the sender nonce check in [`Self::requires_nonce_check`].
+    fn requires_nonce_bound_check(&self) -> bool {
+        true
+    }
+
     /// Allows to communicate to the pool that the transaction doesn't require a nonce check.
     fn requires_nonce_check(&self) -> bool {
         true
@@ -1544,6 +1600,7 @@ pub trait EthPoolTransaction: PoolTransaction {
 ///
 /// - `cost`: Pre-calculated max cost (gas * price + value + blob costs)
 /// - `encoded_length`: Cached RLP encoding length for size limits
+/// - `in_memory_size`: Cached transaction size for subpool memory accounting
 /// - `blob_sidecar`: Blob data state (None/Missing/Present)
 /// - `blob_cell_availability`: Cached blob cell availability for eth/72 announcements
 ///
@@ -1562,6 +1619,11 @@ pub struct EthPooledTransaction<T = TransactionSigned> {
     /// This is the RLP length of the transaction, computed when the transaction is added to the
     /// pool.
     pub encoded_length: usize,
+
+    /// Cached in-memory size of `transaction`, excluding the blob sidecar.
+    ///
+    /// Must be updated if `transaction` is modified or replaced.
+    pub in_memory_size: usize,
 
     /// The blob side car for this transaction
     pub blob_sidecar: EthBlobTransactionSidecar,
@@ -1601,7 +1663,15 @@ impl<T: SignedTransaction> EthPooledTransaction<T> {
             blob_cell_availability = Some(BlobCellAvailability::full());
         }
 
-        Self { transaction, cost, encoded_length, blob_sidecar, blob_cell_availability }
+        let in_memory_size = transaction.size();
+        Self {
+            transaction,
+            cost,
+            encoded_length,
+            in_memory_size,
+            blob_sidecar,
+            blob_cell_availability,
+        }
     }
 
     /// Return the reference to the underlying transaction.
@@ -1699,8 +1769,9 @@ impl<T: Typed2718> Typed2718 for EthPooledTransaction<T> {
 }
 
 impl<T: InMemorySize> InMemorySize for EthPooledTransaction<T> {
+    #[inline]
     fn size(&self) -> usize {
-        self.transaction.size()
+        self.in_memory_size
     }
 }
 
@@ -1990,7 +2061,7 @@ mod tests {
         EthereumTxEnvelope, SignableTransaction, TxEip1559, TxEip2930, TxEip4844, TxEip7702,
         TxEnvelope, TxLegacy,
     };
-    use alloy_eips::{eip4844::DATA_GAS_PER_BLOB, eip7594::BlobCellMask};
+    use alloy_eips::eip4844::DATA_GAS_PER_BLOB;
     use alloy_primitives::Signature;
 
     #[test]

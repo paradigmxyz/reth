@@ -6,6 +6,7 @@ mod dev;
 mod eip6780;
 mod eth;
 mod filter;
+mod forkchoice;
 mod invalid_payload;
 mod p2p;
 mod pool;
