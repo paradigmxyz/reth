@@ -16,7 +16,9 @@ use reth_evm::{
     execute::{BlockBuilder, BlockBuilderOutcome, BlockExecutionOutput},
     ConfigureEvm, Evm, EvmEnvFor, NextBlockEnvAttributes,
 };
-use reth_primitives_traits::{transaction::error::InvalidTransactionError, HeaderTy, SealedHeader};
+use reth_primitives_traits::{
+    transaction::error::InvalidTransactionError, HeaderTy, NodePrimitives, SealedHeader,
+};
 use reth_revm::{database::StateProviderDatabase, db::State};
 use reth_rpc_convert::RpcConvert;
 use reth_rpc_eth_types::{
@@ -112,9 +114,8 @@ pub trait LoadPendingBlock:
 
     /// Returns a [`StateProviderBox`] on a mem-pool built pending block overlaying latest.
     ///
-    /// This is the state that `pending` state reads use. Chains with their own pending source can
-    /// override it. The default opens the provider state on a blocking IO task. Callers must await
-    /// this outside a blocking task.
+    /// This is used by `state_at_block_id`. State RPCs using `spawn_blocking_io_with_state` select
+    /// their pending source through [`Self::local_pending_block_or_state`] instead.
     fn local_pending_state(
         &self,
     ) -> impl Future<Output = Result<Option<StateProviderBox>, Self::Error>> + Send
@@ -126,18 +127,31 @@ pub trait LoadPendingBlock:
                 return Ok(None);
             };
 
-            self.spawn_blocking_io(move |this| {
-                Ok(Some(
-                    this.provider()
-                        .state_with_block_appended(
-                            pending_block.block().parent_hash(),
-                            pending_block.executed_block,
-                        )
-                        .map_err(Self::Error::from_eth_err)?,
-                ))
-            })
-            .await
+            Ok(Some(
+                self.provider()
+                    .state_with_block_appended(
+                        pending_block.block().parent_hash(),
+                        pending_block.executed_block,
+                    )
+                    .map_err(Self::Error::from_eth_err)?,
+            ))
         }
+    }
+
+    /// Selects the local pending source for state RPCs.
+    ///
+    /// By default, returns the pool-built block without opening its state provider. The state RPC
+    /// opens the block's parent state and appends it on its blocking task. Chains with another
+    /// pending state must override this method and return [`PendingStateSource::State`]. Returning
+    /// `None` falls back to the provider's pending state. Overriding [`Self::local_pending_state`]
+    /// alone does not change this path.
+    fn local_pending_block_or_state(
+        &self,
+    ) -> impl Future<Output = Result<Option<PendingStateSource<Self::Primitives>>, Self::Error>> + Send
+    where
+        Self: SpawnBlocking,
+    {
+        async move { Ok(self.pool_pending_block().await?.map(PendingStateSource::Block)) }
     }
 
     /// Returns a cached or newly built pending block from the transaction pool.
@@ -455,6 +469,23 @@ pub trait LoadPendingBlock:
                 Arc::new(trie_updates.into_sorted()),
             ),
         ))
+    }
+}
+
+/// Local pending state selected for a state RPC.
+pub enum PendingStateSource<N: NodePrimitives> {
+    /// A block whose state provider must be opened on the state RPC's blocking task.
+    Block(PendingBlock<N>),
+    /// A chain-specific state provider that is already open.
+    State(StateProviderBox),
+}
+
+impl<N: NodePrimitives> std::fmt::Debug for PendingStateSource<N> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Block(_) => f.write_str("PendingStateSource::Block(..)"),
+            Self::State(_) => f.write_str("PendingStateSource::State(..)"),
+        }
     }
 }
 

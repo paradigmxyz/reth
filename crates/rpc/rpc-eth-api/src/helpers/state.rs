@@ -1,9 +1,11 @@
 //! Loads a pending block from database. Helper trait for `eth_` block, transaction, call and trace
 //! RPC methods.
 
-use super::{EthApiSpec, LoadBlock, LoadPendingBlock, SpawnBlocking};
+use super::{
+    pending_block::PendingStateSource, EthApiSpec, LoadBlock, LoadPendingBlock, SpawnBlocking,
+};
 use crate::{EthApiTypes, FromEthApiError, RpcNodeCore, RpcNodeCoreExt};
-use alloy_consensus::constants::KECCAK_EMPTY;
+use alloy_consensus::{constants::KECCAK_EMPTY, BlockHeader};
 use alloy_eips::BlockId;
 use alloy_primitives::{keccak256, Address, Bytes, B256, U256};
 use alloy_rpc_types_eth::{Account, AccountInfo, EIP1186AccountProofResponse};
@@ -371,10 +373,8 @@ pub trait LoadState:
 
     /// Executes `f` with the state at the given [`BlockId`] on a blocking IO task.
     ///
-    /// `pending` state comes from [`LoadPendingBlock::local_pending_state`], so chains that
-    /// override it keep their pending state. Pending block construction may spawn blocking work,
-    /// so it must finish before this task occupies a blocking thread. If there is no local pending
-    /// state, `pending` falls back to the provider's pending state.
+    /// Resolves the chain's pending-state source before occupying a blocking thread, since
+    /// building a pending block may need a blocking thread of its own.
     fn spawn_blocking_io_with_state<F, R>(
         &self,
         at: BlockId,
@@ -387,14 +387,22 @@ pub trait LoadState:
     {
         async move {
             let pending = if at.is_pending() {
-                self.local_pending_state().await.ok().flatten()
+                self.local_pending_block_or_state().await.ok().flatten()
             } else {
                 None
             };
 
             self.spawn_blocking_io(move |this| {
                 let state = match pending {
-                    Some(state) => state,
+                    Some(PendingStateSource::Block(pending)) => this
+                        .provider()
+                        .state_with_block_appended(
+                            pending.block().parent_hash(),
+                            pending.executed_block,
+                        )
+                        .or_else(|_| this.provider().state_by_block_id(BlockId::pending()))
+                        .map_err(Self::Error::from_eth_err)?,
+                    Some(PendingStateSource::State(state)) => state,
                     None if at.is_latest() => this.latest_state()?,
                     None => {
                         this.provider().state_by_block_id(at).map_err(Self::Error::from_eth_err)?
