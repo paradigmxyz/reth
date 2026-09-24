@@ -8117,8 +8117,9 @@ dependencies = [
 
 [[package]]
 name = "reth-codecs"
-version = "0.8.0"
-source = "git+https://github.com/paradigmxyz/reth-core?rev=2f4ec880b4e38714f6cd0872a8097a803726b12e#2f4ec880b4e38714f6cd0872a8097a803726b12e"
+version = "0.8.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ef769807575055ccafe9db3a9d7eca3b97ca8213122942e71c47915776ec52b2"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -8137,8 +8138,9 @@ dependencies = [
 
 [[package]]
 name = "reth-codecs-derive"
-version = "0.8.0"
-source = "git+https://github.com/paradigmxyz/reth-core?rev=2f4ec880b4e38714f6cd0872a8097a803726b12e#2f4ec880b4e38714f6cd0872a8097a803726b12e"
+version = "0.8.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0652b5da6dcce54dc8bcfb69c5241b0ef09211963f76929d4d63e23767b43bf6"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -9865,8 +9867,9 @@ dependencies = [
 
 [[package]]
 name = "reth-primitives-traits"
-version = "0.8.0"
-source = "git+https://github.com/paradigmxyz/reth-core?rev=2f4ec880b4e38714f6cd0872a8097a803726b12e#2f4ec880b4e38714f6cd0872a8097a803726b12e"
+version = "0.8.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c6835d57ed17047c8ba42992550b3cd1232cb92deb119715d32f63079fb5844d"
 dependencies = [
  "alloy-consensus",
  "alloy-eip7928",
@@ -10395,8 +10398,9 @@ dependencies = [
 
 [[package]]
 name = "reth-rpc-traits"
-version = "0.8.0"
-source = "git+https://github.com/paradigmxyz/reth-core?rev=2f4ec880b4e38714f6cd0872a8097a803726b12e#2f4ec880b4e38714f6cd0872a8097a803726b12e"
+version = "0.8.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8d6c3c55bf695994b2ce87e05eaf49c1135c84d3d1f5e774df6077a8173ebdb0"
 dependencies = [
  "alloy-consensus",
  "alloy-network",
@@ -10983,8 +10987,9 @@ dependencies = [
 
 [[package]]
 name = "reth-zstd-compressors"
-version = "0.8.0"
-source = "git+https://github.com/paradigmxyz/reth-core?rev=2f4ec880b4e38714f6cd0872a8097a803726b12e#2f4ec880b4e38714f6cd0872a8097a803726b12e"
+version = "0.8.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "253f7d5772f3c8d0dcc3fdac398db6bca4f6f6e602d240c3bc47338dde0910dd"
 dependencies = [
  "zstd",
 ]
