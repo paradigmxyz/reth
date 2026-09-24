@@ -17,7 +17,7 @@ use async_trait::async_trait;
 use futures::Stream;
 use jsonrpsee::{core::RpcResult, PendingSubscriptionSink, SubscriptionMessage};
 use parking_lot::RwLock;
-use reth_chainspec::{ChainSpecProvider, EthChainSpec, EthereumHardforks};
+use reth_chainspec::{ChainSpecProvider, EthereumHardforks};
 use reth_engine_primitives::ConsensusEngineEvent;
 use reth_errors::RethError;
 use reth_evm::{block::BlockExecutor, execute::Executor, ConfigureEvm, EvmEnvFor};
@@ -35,8 +35,8 @@ use reth_rpc_eth_types::{EthApiError, StateCacheDb};
 use reth_rpc_server_types::{result::internal_rpc_err, ToRpcResult};
 use reth_storage_api::{
     BlockIdReader, BlockReaderIdExt, HashedPostStateProvider, HeaderProvider, ProviderBlock,
-    ReceiptProviderIdExt, StateProviderFactory, StateRootProvider, StorageRootProvider,
-    TransactionVariant,
+    ReceiptProviderIdExt, StateProviderBox, StateProviderFactory, StateRootProvider,
+    StorageRootProvider, TransactionVariant,
 };
 use reth_tasks::{pool::BlockingTaskGuard, Runtime};
 use reth_transaction_pool::TransactionPool;
@@ -632,13 +632,15 @@ where
                 let mut witness = None;
                 let _ = block_executor
                     .execute_with_state_closure(&block, |statedb: &State<_>| {
-                        witness =
-                            Some(ExecutionWitnessRecord::new(statedb).into_execution_witness(
-                                &statedb.database.database.0,
-                                eth_api.provider(),
-                                block_number,
-                                mode,
-                            ));
+                        witness = Some(
+                            ExecutionWitnessRecord::new(statedb)
+                                .into_execution_witness::<StateProviderBox, _>(
+                                    &statedb.database.database,
+                                    eth_api.provider(),
+                                    block_number,
+                                    mode,
+                                ),
+                        );
                     })
                     .map_err(|err| EthApiError::Internal(err.into()))?;
 
@@ -1231,7 +1233,7 @@ where
     }
 
     async fn debug_chain_config(&self) -> RpcResult<ChainConfig> {
-        Ok(self.provider().chain_spec().genesis().config.clone())
+        Ok(crate::chain_config::chain_config(&*self.provider().chain_spec()))
     }
 
     async fn debug_chaindb_property(&self, _property: String) -> RpcResult<()> {

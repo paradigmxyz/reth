@@ -58,7 +58,7 @@ use crate::{
         TransactionListenerKind,
     },
     validate::{TransactionValidationOutcome, TransactionValidator, ValidPoolTransaction},
-    AddedTransactionOutcome, AllTransactionsEvents,
+    AddedTransactionOutcome, AllTransactionsEvents, PriceBumpConfig,
 };
 use alloy_consensus::{error::ValueError, transaction::TxHashRef, BlockHeader, Signed, Typed2718};
 use alloy_eips::{
@@ -68,12 +68,12 @@ use alloy_eips::{
         env_settings::KzgSettings, BlobAndProofV1, BlobAndProofV2, BlobCellsAndProofsV1,
         BlobTransactionValidationError,
     },
-    eip7594::BlobTransactionSidecarVariant,
+    eip7594::{BlobCellMask, BlobTransactionSidecarVariant},
     eip7702::SignedAuthorization,
 };
 use alloy_primitives::{
     map::{AddressSet, B256Map},
-    Address, Bytes, TxHash, TxKind, B128, B256, U256,
+    Address, Bytes, TxHash, TxKind, B256, U256,
 };
 use futures_util::{ready, Stream};
 use reth_eth_wire_types::HandleMempoolData;
@@ -755,7 +755,7 @@ pub trait TransactionPool: Clone + Debug + Send + Sync {
     fn get_blobs_for_versioned_hashes_v4(
         &self,
         versioned_hashes: &[B256],
-        indices_bitarray: B128,
+        cell_mask: BlobCellMask,
     ) -> Result<Vec<Option<BlobCellsAndProofsV1>>, BlobStoreError>;
 
     /// Return whether each requested blob versioned hash is available.
@@ -1491,6 +1491,27 @@ pub trait PoolTransaction:
         }
     }
 
+    /// Returns whether `replacement` is underpriced relative to this transaction.
+    ///
+    /// Called on the existing transaction when another transaction would replace it.
+    /// By default, delegates to [`PriceBumpConfig::is_replacement_underpriced`].
+    /// Implementations may override this to define transaction-specific replacement semantics.
+    fn is_replacement_underpriced(
+        &self,
+        replacement: &Self,
+        price_bumps: &PriceBumpConfig,
+    ) -> bool {
+        price_bumps.is_replacement_underpriced(self, replacement)
+    }
+
+    /// Whether the transaction's nonce must be below [`u64::MAX`] according to EIP-2681.
+    ///
+    /// Defaults to `true`. Transactions with alternative nonce semantics can override this
+    /// independently of the sender nonce check in [`Self::requires_nonce_check`].
+    fn requires_nonce_bound_check(&self) -> bool {
+        true
+    }
+
     /// Allows to communicate to the pool that the transaction doesn't require a nonce check.
     fn requires_nonce_check(&self) -> bool {
         true
@@ -2005,7 +2026,7 @@ mod tests {
         EthereumTxEnvelope, SignableTransaction, TxEip1559, TxEip2930, TxEip4844, TxEip7702,
         TxEnvelope, TxLegacy,
     };
-    use alloy_eips::{eip4844::DATA_GAS_PER_BLOB, eip7594::BlobCellMask};
+    use alloy_eips::eip4844::DATA_GAS_PER_BLOB;
     use alloy_primitives::Signature;
 
     #[test]

@@ -81,6 +81,8 @@ impl DownloadSession {
 pub(crate) struct ArchiveProcessContext {
     /// Directory where extracted output files are written.
     target_dir: PathBuf,
+    /// Custom location of static file outputs.
+    static_files_dir: Option<PathBuf>,
     /// Directory used for cached archive downloads, when enabled.
     cache_dir: Option<PathBuf>,
     /// Shared command-scoped download state.
@@ -91,15 +93,21 @@ impl ArchiveProcessContext {
     /// Creates the context used while processing modular archives.
     pub(crate) fn new(
         target_dir: PathBuf,
+        static_files_dir: Option<PathBuf>,
         cache_dir: Option<PathBuf>,
         session: DownloadSession,
     ) -> Self {
-        Self { target_dir, cache_dir, session }
+        Self { target_dir, static_files_dir, cache_dir, session }
     }
 
     /// Returns the directory where extracted outputs should be written.
     pub(crate) fn target_dir(&self) -> &Path {
         &self.target_dir
+    }
+
+    /// Returns the custom static files directory, if configured.
+    pub(crate) fn static_files_dir(&self) -> Option<&Path> {
+        self.static_files_dir.as_deref()
     }
 
     /// Returns the cache directory for two-phase downloads, if enabled.

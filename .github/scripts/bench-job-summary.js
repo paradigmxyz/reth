@@ -81,6 +81,11 @@ module.exports = async function ({ core, context, grafanaUrl, logsUrl, tracesUrl
   }
   md += '\n';
 
+  // Response parity (call mode)
+  if (summary.parity) {
+    md += `**Parity:** ${summary.parity.line}\n\n`;
+  }
+
   // Wait time breakdown
   const wtRows = waitTimeRows(summary);
   if (wtRows.length > 0) {
@@ -110,7 +115,9 @@ module.exports = async function ({ core, context, grafanaUrl, logsUrl, tracesUrl
     md += '\n';
   }
 
-  md += fs.readFileSync(process.env.BENCH_WORK_DIR + '/charts.md', 'utf8');
+  if (summary.mode !== 'call') {
+    md += fs.readFileSync(process.env.BENCH_WORK_DIR + '/charts.md', 'utf8');
+  }
 
   // Samply profiles
   const samplyUrls = loadSamplyUrls(process.env.BENCH_WORK_DIR);

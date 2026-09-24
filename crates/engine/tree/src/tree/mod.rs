@@ -6,7 +6,7 @@ use crate::{
     tree::{error::InsertPayloadError, payload_validator::TreeCtx},
 };
 use alloy_consensus::BlockHeader;
-use alloy_eips::{eip1898::BlockWithParent, merge::EPOCH_SLOTS, BlockNumHash, NumHash};
+use alloy_eips::{eip1898::BlockWithParent, BlockNumHash, NumHash};
 use alloy_primitives::{map::B256Map, B256};
 use alloy_rpc_types_engine::{
     ForkchoiceState, PayloadStatus, PayloadStatusEnum, PayloadValidationError,
@@ -95,17 +95,6 @@ pub use txpool_prewarm::{
 pub use types::{ExecutionEnv, ValidationOutcome, ValidationOutput};
 
 pub mod state;
-
-/// The largest gap for which the tree will be used to sync individual blocks by downloading them.
-///
-/// This is the default threshold, and represents the distance (gap) from the local head to a
-/// new (canonical) block, e.g. the forkchoice head block. If the block distance from the local head
-/// exceeds this threshold, the pipeline will be used to backfill the gap more efficiently.
-///
-/// E.g.: Local head `block.number` is 100 and the forkchoice head `block.number` is 133 (more than
-/// an epoch has slots), then this exceeds the threshold at which the pipeline should be used to
-/// backfill this gap.
-pub(crate) const MIN_BLOCKS_FOR_PIPELINE_RUN: u64 = EPOCH_SLOTS;
 
 /// The minimum number of blocks to retain in the changeset cache after eviction.
 ///
@@ -504,17 +493,14 @@ where
         self.incoming_tx.clone()
     }
 
-    /// How many blocks the canonical tip is ahead of the last persisted block. A large gap means
-    /// persistence is falling behind execution.
-    const fn persistence_gap(&self) -> u64 {
-        self.state
-            .tree_state
-            .canonical_block_number()
-            .saturating_sub(self.persistence_state.last_persisted_block.number)
+    /// How many canonical blocks are retained in memory. A large count means persistence is
+    /// falling behind execution.
+    fn persistence_gap(&self) -> u64 {
+        self.canonical_in_memory_state.canonical_chain().count() as u64
     }
 
     /// How many blocks beyond the configured in-memory buffer are awaiting persistence.
-    const fn persistence_backpressure_gap(&self) -> u64 {
+    fn persistence_backpressure_gap(&self) -> u64 {
         self.persistence_gap().saturating_sub(self.config.memory_block_buffer_target())
     }
 
@@ -522,7 +508,7 @@ where
     ///
     /// This is the case when persistence is already running and the number of blocks beyond the
     /// configured in-memory buffer has reached the configured threshold.
-    const fn should_backpressure(&self) -> bool {
+    fn should_backpressure(&self) -> bool {
         self.persistence_state.in_progress() &&
             self.persistence_backpressure_gap() >=
                 self.config.persistence_backpressure_threshold()
@@ -1629,6 +1615,10 @@ where
                         let is_pending = self.state.tree_state.canonical_block_hash() ==
                             block.recovered_block().parent_hash();
                         self.state.tree_state.insert_executed(block.clone());
+                        self.metrics
+                            .engine
+                            .executed_blocks
+                            .set(self.state.tree_state.block_count() as f64);
 
                         if is_pending {
                             debug!(target: "engine::tree", pending=?block_num_hash, "updating pending block");
@@ -2319,10 +2309,20 @@ where
         }
 
         let finalized = self.state.forkchoice_state_tracker.last_valid_finalized();
-        self.remove_before(in_memory_persisted_block, finalized)?;
+        // Trim the canonical in-memory state first: state providers build their overlays from the
+        // canonical chain, so it must never reference blocks whose overlays the manager has
+        // already pruned. `remove_before` does not read the canonical in-memory state, so the
+        // order between the two trims is free to choose.
         self.canonical_in_memory_state.remove_persisted_blocks_until(
             self.persistence_state.last_persisted_block,
             in_memory_persisted_block.number,
+        );
+        self.remove_before(in_memory_persisted_block, finalized)?;
+        // Persistence changes the overlay anchor. Prepare the remaining canonical range before
+        // the next payload needs to read execution state against the new durable frontier.
+        self.state.tree_state.overlay_manager.precompute_execution_overlay(
+            self.state.tree_state.canonical_block_hash(),
+            in_memory_persisted_block.hash,
         );
         self.state.set_pending_sparse_trie_prune(self.should_prune_sparse_trie());
         Ok(())
@@ -2719,7 +2719,7 @@ where
     /// If the `local_tip` is greater than the `block`, then this will return false.
     #[inline]
     const fn exceeds_backfill_run_threshold(&self, local_tip: u64, block: u64) -> bool {
-        block > local_tip && block - local_tip > MIN_BLOCKS_FOR_PIPELINE_RUN
+        block > local_tip && block - local_tip > self.config.backfill_run_threshold()
     }
 
     /// Returns how far the local tip is from the given block. If the local tip is at the same
@@ -2934,6 +2934,7 @@ where
                 self.state.tree_state.insert_executed(block);
             }
         }
+        self.metrics.engine.executed_blocks.set(self.state.tree_state.block_count() as f64);
     }
 
     /// This handles downloaded blocks that are shown to be disconnected from the canonical chain.
@@ -3205,13 +3206,10 @@ where
 
         let start = Instant::now();
 
-        let ValidationOutput {
-            executed_block: executed,
-            execution_timing_stats: timing_stats,
-            raw_bal,
-        } = execute(&mut self.payload_validator, input, ctx)?;
+        let ValidationOutput { executed_block: executed, execution_timing_stats: timing_stats } =
+            execute(&mut self.payload_validator, input, ctx)?;
 
-        if let Some(raw_bal) = raw_bal {
+        if let Some(raw_bal) = executed.bal().map(|bal| bal.as_raw_bal().clone()) {
             let num_hash = executed.recovered_block().num_hash();
             if let Err(err) = self.provider.bal_store().insert(num_hash, raw_bal) {
                 warn!(
@@ -3552,6 +3550,7 @@ where
             self.persistence_state.last_persisted_block.hash,
             num,
         );
+        self.metrics.engine.executed_blocks.set(self.state.tree_state.block_count() as f64);
         Ok(())
     }
 }
@@ -3675,7 +3674,7 @@ enum PersistTarget {
 /// Result of waiting for caches to become available.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct CacheWaitDurations {
-    /// Time spent waiting for the execution cache lock.
+    /// Time spent waiting for the execution cache lock, excluding post-unlock cache destruction.
     pub execution_cache: Duration,
     /// Time spent waiting for the sparse trie lock.
     pub sparse_trie: Duration,
@@ -3683,8 +3682,8 @@ pub struct CacheWaitDurations {
 
 /// Trait for types that can wait for caches to become available.
 ///
-/// This is used by `reth_newPayload` endpoint to ensure that payload processing
-/// waits for any ongoing operations to complete before starting.
+/// Used by `reth_newPayload` to wait for cache updates before starting payload processing.
+/// Removed execution-cache allocations may still be destroyed concurrently after unlocking.
 pub trait WaitForCaches {
     /// Waits for cache updates to complete.
     ///

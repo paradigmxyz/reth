@@ -288,7 +288,7 @@ async function success({ core, context }) {
     jobUrl,
     repo,
     samplyUrls,
-    });
+  });
   const text = `Bench: ${summary.baseline.name} vs ${summary.feature.name}`;
 
   const slackMode = process.env.BENCH_SLACK || 'always';

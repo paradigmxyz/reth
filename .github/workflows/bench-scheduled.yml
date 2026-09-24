@@ -143,13 +143,14 @@ jobs:
       - name: Resolve refs
         id: refs
         env:
+          INPUT_MODE: ${{ steps.mode.outputs.mode }}
           GH_TOKEN: ${{ github.token }}
           GITHUB_REPOSITORY: ${{ github.repository }}
           GITHUB_RUN_ID: ${{ github.run_id }}
           INPUT_FORCE: ${{ inputs.force || 'false' }}
         run: |
           FORCE="${INPUT_FORCE:-false}"
-          MODE="${{ steps.mode.outputs.mode }}"
+          MODE="${INPUT_MODE}"
           .github/scripts/bench-scheduled-refs.sh "$FORCE" "$MODE"
 
       - name: Alert on long-running hourly
@@ -198,6 +199,9 @@ jobs:
         if: steps.mode.outputs.mode == 'nightly' && steps.refs.outputs.is-stale == 'true' && !(github.event_name == 'workflow_dispatch' && inputs.slack == 'never')
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         env:
+          INPUT_FEATURE_REF: ${{ steps.refs.outputs.feature-ref }}
+          INPUT_NIGHTLY_CREATED: ${{ steps.refs.outputs.nightly-created }}
+          INPUT_STALE_AGE_HOURS: ${{ steps.refs.outputs.stale-age-hours }}
           SLACK_BENCH_BOT_TOKEN: ${{ secrets.SLACK_BENCH_BOT_TOKEN }}
           SLACK_BENCH_CHANNEL: ${{ secrets.SLACK_BENCH_CHANNEL }}
         with:
@@ -209,9 +213,9 @@ jobs:
               return;
             }
 
-            const ageHours = '${{ steps.refs.outputs.stale-age-hours }}';
-            const created = '${{ steps.refs.outputs.nightly-created }}';
-            const featureRef = '${{ steps.refs.outputs.feature-ref }}';
+            const ageHours = process.env.INPUT_STALE_AGE_HOURS;
+            const created = process.env.INPUT_NIGHTLY_CREATED;
+            const featureRef = process.env.INPUT_FEATURE_REF;
             const shortSha = featureRef.slice(0, 8);
             const repo = '${{ github.repository }}';
             const runUrl = `${context.serverUrl}/${repo}/actions/runs/${context.runId}`;
@@ -285,6 +289,7 @@ jobs:
     name: bench-scheduled
     runs-on: [self-hosted, Linux, X64, available]
     permissions:
+      id-token: write
       contents: read
       actions: read
     timeout-minutes: 120
@@ -322,6 +327,8 @@ jobs:
       CLICKHOUSE_PASSWORD: ${{ secrets.CLICKHOUSE_PASSWORD }}
       BENCH_VICTORIAMETRICS_URL: ${{ secrets.BENCH_VICTORIAMETRICS_URL }}
     steps:
+      - name: Secure runner
+        uses: tempoxyz/gh-actions/actions/secure-runner@117919c943b804057be733b0c4034c5542e58959 # 2026-09-23T05-09-41Z-117919c9
       - name: Clean up previous bench-work
         run: sudo rm -rf "$BENCH_WORK_DIR" 2>/dev/null || true
 
@@ -346,11 +353,13 @@ jobs:
             const jobUrl = job ? job.html_url : `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
             core.exportVariable('BENCH_JOB_URL', jobUrl);
 
-      - uses: rui314/setup-mold@7e4f20ad28a2e8ca6fd0892ccf72e2abb706b9c3 # v1
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: rui314/setup-mold@10ca16bf91dc22e05ebdc935cad9c75ea248f621 # v1
+      - uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de # v1
+        with:
+          toolchain: stable
       - uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
         continue-on-error: true
-      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+      - uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
 
       - name: Install dependencies
         env:
@@ -418,15 +427,21 @@ jobs:
         run: |
           FEATURE_SHORT=$(echo "$FEATURE_REF" | cut -c1-8)
           if [ "$BENCH_MODE" = "release" ] && [ -n "$RELEASE_TAG" ]; then
-            echo "baseline-name=${RELEASE_TAG}" >> "$GITHUB_OUTPUT"
-            echo "baseline-ref=${RELEASE_TAG}" >> "$GITHUB_OUTPUT"
+            {
+              echo "baseline-name=${RELEASE_TAG}"
+              echo "baseline-ref=${RELEASE_TAG}"
+            } >> "$GITHUB_OUTPUT"
           else
             BASELINE_SHORT=$(echo "$BASELINE_REF" | cut -c1-8)
-            echo "baseline-name=${BENCH_MODE}-${BASELINE_SHORT}" >> "$GITHUB_OUTPUT"
-            echo "baseline-ref=$BASELINE_REF" >> "$GITHUB_OUTPUT"
+            {
+              echo "baseline-name=${BENCH_MODE}-${BASELINE_SHORT}"
+              echo "baseline-ref=$BASELINE_REF"
+            } >> "$GITHUB_OUTPUT"
           fi
-          echo "feature-name=${BENCH_MODE}-${FEATURE_SHORT}" >> "$GITHUB_OUTPUT"
-          echo "feature-ref=$FEATURE_REF" >> "$GITHUB_OUTPUT"
+          {
+            echo "feature-name=${BENCH_MODE}-${FEATURE_SHORT}"
+            echo "feature-ref=$FEATURE_REF"
+          } >> "$GITHUB_OUTPUT"
 
       - name: Prepare source dirs
         run: |
@@ -630,14 +645,18 @@ jobs:
               fi
               printf '<details><summary><b>%s</b>: %d panic(s), %d error(s)</summary>\n\n' "$run_dir" "$panics" "$errors" >> "$ERRORS_FILE"
               if [ "$panics" -gt 0 ]; then
-                printf '**Panics:**\n```\n' >> "$ERRORS_FILE"
-                grep -E 'panicked at' "$LOG" | head -10 >> "$ERRORS_FILE"
-                printf '```\n' >> "$ERRORS_FILE"
+                {
+                  printf '**Panics:**\n```\n'
+                  grep -E 'panicked at' "$LOG" | head -10
+                  printf '```\n'
+                } >> "$ERRORS_FILE"
               fi
               if [ "$errors" -gt 0 ]; then
-                printf '**Errors (first 20):**\n```\n' >> "$ERRORS_FILE"
-                grep ' ERROR ' "$LOG" | head -20 >> "$ERRORS_FILE"
-                printf '```\n' >> "$ERRORS_FILE"
+                {
+                  printf '**Errors (first 20):**\n```\n'
+                  grep ' ERROR ' "$LOG" | head -20
+                  printf '```\n'
+                } >> "$ERRORS_FILE"
               fi
               printf '\n</details>\n\n' >> "$ERRORS_FILE"
             fi
@@ -647,6 +666,7 @@ jobs:
         id: results
         if: success()
         env:
+          INPUT_GRAFANA_URL: ${{ steps.metrics.outputs.grafana-url }}
           BASELINE_NAME: ${{ steps.refs.outputs.baseline-name }}
           FEATURE_NAME: ${{ steps.refs.outputs.feature-name }}
           BASELINE_REF_DISPLAY: ${{ steps.refs.outputs.baseline-ref }}
@@ -667,7 +687,7 @@ jobs:
           SUMMARY_ARGS="$SUMMARY_ARGS --feature-csv $FEATURE_CSVS"
           SUMMARY_ARGS="$SUMMARY_ARGS --run-pairs $BENCH_RUN_PAIRS"
 
-          GRAFANA_URL='${{ steps.metrics.outputs.grafana-url }}'
+          GRAFANA_URL="${INPUT_GRAFANA_URL}"
           if [ -n "$GRAFANA_URL" ]; then
             SUMMARY_ARGS="$SUMMARY_ARGS --grafana-url $GRAFANA_URL"
           fi
@@ -680,6 +700,7 @@ jobs:
       - name: Upload to ClickHouse
         if: success()
         env:
+          INPUT_GRAFANA_URL: ${{ steps.metrics.outputs.grafana-url }}
           CLICKHOUSE_HOST: ${{ secrets.CLICKHOUSE_HOST }}
           CLICKHOUSE_USER: ${{ secrets.CLICKHOUSE_USER }}
           CLICKHOUSE_PASSWORD: ${{ secrets.CLICKHOUSE_PASSWORD }}
@@ -690,7 +711,7 @@ jobs:
             WORKFLOW_NAME="workflows-nightly-regression-${{ github.run_id }}"
           fi
           DIFF_URL="https://github.com/${{ github.repository }}/compare/${BASELINE_REF}...${FEATURE_REF}"
-          GRAFANA_URL='${{ steps.metrics.outputs.grafana-url }}'
+          GRAFANA_URL="${INPUT_GRAFANA_URL}"
           JOB_URL="${BENCH_JOB_URL:-${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}}"
 
           python3 .github/scripts/bench-upload-clickhouse.py \
@@ -736,6 +757,8 @@ jobs:
       - name: Write job summary
         if: success()
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        env:
+          INPUT_GRAFANA_URL: ${{ steps.metrics.outputs.grafana-url }}
         with:
           script: |
             const fs = require('fs');
@@ -786,7 +809,7 @@ jobs:
               md += fs.readFileSync(process.env.BENCH_WORK_DIR + '/charts.md', 'utf8');
             }
 
-            const grafanaUrl = '${{ steps.metrics.outputs.grafana-url }}';
+            const grafanaUrl = process.env.INPUT_GRAFANA_URL;
             if (grafanaUrl) {
               md += `### Grafana Dashboard\n\n[View real-time metrics](${grafanaUrl})\n\n`;
             }
