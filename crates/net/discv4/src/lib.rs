@@ -3407,7 +3407,7 @@ mod tests {
         tokio::time::timeout(
             Duration::from_secs(5),
             std::future::poll_fn(|cx| {
-                let _ = Pin::new(&mut service).poll_next(cx);
+                while let Poll::Ready(Some(_)) = Pin::new(&mut service).poll_next(cx) {}
                 if handle.node_record().address == external_ip {
                     Poll::Ready(())
                 } else {
