@@ -4,7 +4,6 @@ use alloy_consensus::BlockHeader;
 use alloy_eips::{
     eip7840::BlobParams,
     eip7910::{EthConfig, EthForkConfig, SystemContract},
-    eip8282,
 };
 use alloy_evm::precompiles::Precompile;
 use alloy_primitives::Address;
@@ -69,17 +68,7 @@ where
         }
 
         if chain_spec.is_amsterdam_active_at_timestamp(timestamp) {
-            // Preserve the existing variants in the typed response.
-            system_contracts.extend([
-                (
-                    SystemContract::Other("BUILDER_DEPOSIT_CONTRACT_ADDRESS".into()),
-                    eip8282::BUILDER_DEPOSIT_CONTRACT_ADDRESS,
-                ),
-                (
-                    SystemContract::Other("BUILDER_EXIT_CONTRACT_ADDRESS".into()),
-                    eip8282::BUILDER_EXIT_CONTRACT_ADDRESS,
-                ),
-            ]);
+            system_contracts.extend(SystemContract::amsterdam());
         }
 
         // Fork config only exists for timestamp-based hardforks.
