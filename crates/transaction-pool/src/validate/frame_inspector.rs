@@ -1,7 +1,10 @@
 //! Public frame-prefix trace restrictions. This inspector never warms EVM state.
 
 use super::{frame_policy::FrameValidationPolicy, frame_state::FrameDependencies};
-use alloy_eips::eip8141::{EXPIRY_VERIFIER, EXPIRY_VERIFIER_RUNTIME};
+use alloy_eips::{
+    eip8141::{EXPIRY_VERIFIER, EXPIRY_VERIFIER_RUNTIME},
+    eip8272::{RECENT_ROOT_ADDRESS, RECENT_ROOT_CODE},
+};
 use alloy_primitives::{Address, U256};
 use revm::{
     context_interface::{ContextTr, JournalTr, LocalContextTr},
@@ -74,6 +77,29 @@ impl FrameValidationInspector {
 
     fn deploying<CTX: ContextTr>(&self, ctx: &CTX) -> bool {
         self.policy.deploy_index.is_some() && self.policy.deploy_index == Self::frame_index(ctx)
+    }
+
+    /// Returns whether the currently executing instruction is inside the one canonical recent-root
+    /// verifier allowed by EIP-8272. The exception is deliberately tied to the top-level frame,
+    /// target address, and exact runtime so nested calls and delegated code never inherit it.
+    fn executing_recent_root_verifier<CTX: ContextTr>(
+        &self,
+        interp: &Interpreter,
+        ctx: &CTX,
+    ) -> bool {
+        self.depth == 1 &&
+            self.policy.recent_root.as_ref().is_some_and(|verifier| {
+                Some(verifier.index) == Self::frame_index(ctx) &&
+                    interp.input.target_address() == RECENT_ROOT_ADDRESS &&
+                    interp.input.bytecode_address() == Some(&RECENT_ROOT_ADDRESS) &&
+                    interp.bytecode.bytecode_slice() == RECENT_ROOT_CODE.as_ref()
+            })
+    }
+
+    fn is_recent_root_storage_slot(&self, slot: U256) -> bool {
+        self.policy.recent_root.as_ref().is_some_and(|verifier| {
+            verifier.references.iter().any(|reference| reference.dependency().storage_key == slot)
+        })
     }
 
     /// Read through the journal without changing warm/cold access accounting.
@@ -153,6 +179,7 @@ where
         let opcode = interp.bytecode.opcode();
         let deploying = self.deploying(ctx);
         let address = interp.input.target_address();
+        let recent_root = self.executing_recent_root_verifier(interp, ctx);
         let expiry_timestamp = opcode == 0x42 &&
             self.policy.expiry_index.is_some() &&
             self.policy.expiry_index == Self::frame_index(ctx) &&
@@ -161,10 +188,11 @@ where
 
         match opcode {
             // Environment-dependent opcodes, arbitrary balance reads and state destruction.
-            0x31 | 0x3a | 0x40 | 0x41 | 0x43..=0x45 | 0x47 | 0x48 | 0x4a | 0x4b | 0xfe | 0xff => {
+            0x31 | 0x3a | 0x40 | 0x41 | 0x43..=0x45 | 0x47 | 0x48 | 0x4a | 0xfe | 0xff => {
                 self.reject("banned opcode in validation prefix")
             }
             0x42 if !expiry_timestamp => self.reject("TIMESTAMP outside canonical expiry verifier"),
+            0x4b if !recent_root => self.reject("SLOTNUM outside canonical recent root verifier"),
             0x5a if !matches!(
                 interp.bytecode.bytecode_slice().get(interp.bytecode.pc() + 1),
                 Some(0xf1 | 0xf2 | 0xf4 | 0xfa)
@@ -176,7 +204,17 @@ where
                 self.reject("code installation outside deploy frame")
             }
             0x54 | 0x55 => {
-                if address != self.sender {
+                if recent_root {
+                    if opcode == 0x55 {
+                        self.reject("recent root verifier attempted a storage write")
+                    } else if let Some(slot) = interp.stack.data().last() {
+                        if self.is_recent_root_storage_slot(*slot) {
+                            self.storage.insert((RECENT_ROOT_ADDRESS, *slot));
+                        } else {
+                            self.reject("recent root verifier accessed an undeclared storage slot")
+                        }
+                    }
+                } else if address != self.sender {
                     self.reject("validation accessed storage outside sender")
                 } else if opcode == 0x55 && !deploying {
                     self.reject("storage write outside deploy frame")
@@ -225,6 +263,13 @@ where
                     Err(_) => self.reject("invalid expiry deadline encoding"),
                 }
             }
+        }
+        if top_level &&
+            index == self.policy.recent_root.as_ref().map(|verifier| verifier.index) &&
+            (inputs.bytecode_address != RECENT_ROOT_ADDRESS ||
+                inputs.known_bytecode.1.original_byte_slice() != RECENT_ROOT_CODE.as_ref())
+        {
+            self.reject("recent root verifier runtime does not match canonical code");
         }
         self.error.map(|_| {
             CallOutcome::new_oog(

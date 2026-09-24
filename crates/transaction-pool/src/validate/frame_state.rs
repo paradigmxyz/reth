@@ -1,3 +1,4 @@
+use super::frame_policy::RecentRootDependency;
 use std::{
     collections::{BTreeMap, HashMap, HashSet},
     sync::Arc,
@@ -30,6 +31,8 @@ pub struct FrameValidation {
     pub dependencies: FrameDependencies,
     /// Optional expiration timestamp.
     pub expires_at: Option<u64>,
+    /// EIP-8272 predicates whose storage entries and ages must remain valid.
+    pub recent_root_dependencies: Vec<RecentRootDependency>,
     /// Whether this frame consumes the payer's exclusive pending slot.
     pub exclusive_payer: bool,
 }
@@ -56,6 +59,7 @@ pub struct FrameReservations {
     storage: HashMap<(Address, U256), HashSet<TxHash>>,
     storage_address: HashMap<Address, HashSet<TxHash>>,
     expiry: BTreeMap<u64, HashSet<TxHash>>,
+    recent_root_expiry: BTreeMap<u64, HashSet<TxHash>>,
 }
 
 /// Aggregate exposure held against one payer.
@@ -79,7 +83,10 @@ impl FrameReservations {
 
     /// Iterates reservations in increasing expiry order for resource-pressure eviction.
     pub fn expiring_hashes(&self) -> impl Iterator<Item = B256> + '_ {
-        self.expiry.values().flat_map(|hashes| hashes.iter().copied())
+        self.expiry
+            .values()
+            .chain(self.recent_root_expiry.values())
+            .flat_map(|hashes| hashes.iter().copied())
     }
 
     /// Atomically inserts a frame, optionally replacing its same-sender nonce.
@@ -165,6 +172,9 @@ impl FrameReservations {
         if let Some(t) = metadata.expires_at {
             self.expiry.entry(t).or_default().insert(hash);
         }
+        for dependency in &metadata.recent_root_dependencies {
+            self.recent_root_expiry.entry(dependency.expires_at_slot).or_default().insert(hash);
+        }
         Ok(())
     }
 
@@ -227,6 +237,14 @@ impl FrameReservations {
                 self.expiry.remove(&t);
             }
         }
+        for dependency in &m.recent_root_dependencies {
+            if let Some(v) = self.recent_root_expiry.get_mut(&dependency.expires_at_slot) {
+                v.remove(&hash);
+                if v.is_empty() {
+                    self.recent_root_expiry.remove(&dependency.expires_at_slot);
+                }
+            }
+        }
     }
 
     /// Returns indexed frame usage for a payer.
@@ -238,7 +256,12 @@ impl FrameReservations {
         self.payer_usage(payer).frame_cost
     }
     /// Returns reservations affected by changed state or expiration.
-    pub fn affected(&self, changed: &FrameDependencies, timestamp: u64) -> HashSet<TxHash> {
+    pub fn affected(
+        &self,
+        changed: &FrameDependencies,
+        timestamp: u64,
+        current_slot: Option<u64>,
+    ) -> HashSet<TxHash> {
         let mut out = HashSet::new();
         for a in &changed.accounts {
             if let Some(v) = self.accounts.get(a) {
@@ -264,6 +287,11 @@ impl FrameReservations {
         for (_, v) in self.expiry.range(..timestamp) {
             out.extend(v.iter().copied())
         }
+        if let Some(current_slot) = current_slot {
+            for (_, v) in self.recent_root_expiry.range(..=current_slot) {
+                out.extend(v.iter().copied())
+            }
+        }
         out
     }
 }
@@ -288,6 +316,7 @@ mod tests {
                 storage: vec![],
             },
             expires_at: None,
+            recent_root_dependencies: vec![],
             exclusive_payer: false,
         }
     }
@@ -338,18 +367,18 @@ mod tests {
             storage: vec![(address, slot + U256::from(1))],
             ..Default::default()
         };
-        assert!(r.affected(&other_slot, 0).is_empty());
+        assert!(r.affected(&other_slot, 0, None).is_empty());
         for changed in [
             FrameDependencies { accounts: vec![address], ..Default::default() },
             FrameDependencies { storage: vec![(address, slot)], ..Default::default() },
             FrameDependencies { accounts: vec![Address::repeat_byte(1)], ..Default::default() },
         ] {
-            assert_eq!(r.affected(&changed, 0), HashSet::from([B256::repeat_byte(1)]));
+            assert_eq!(r.affected(&changed, 0, None), HashSet::from([B256::repeat_byte(1)]));
             r.remove(&B256::repeat_byte(99));
         }
         r.remove(&B256::repeat_byte(1));
         let changed = FrameDependencies { accounts: vec![address], ..Default::default() };
-        assert!(r.affected(&changed, u64::MAX).is_empty());
+        assert!(r.affected(&changed, u64::MAX, None).is_empty());
     }
     #[test]
     fn removal_preserves_exclusive_admission_invariants() {
@@ -425,10 +454,30 @@ mod tests {
         x.expires_at = Some(5);
         put(&mut r, 1, x).unwrap();
         let d = FrameDependencies { accounts: vec![Address::repeat_byte(9)], ..Default::default() };
-        assert!(r.affected(&d, 4).contains(&B256::repeat_byte(1)));
-        assert!(r.affected(&FrameDependencies::default(), 6).contains(&B256::repeat_byte(1)));
+        assert!(r.affected(&d, 4, None).contains(&B256::repeat_byte(1)));
+        assert!(r.affected(&FrameDependencies::default(), 6, None).contains(&B256::repeat_byte(1)));
         r.remove(&B256::repeat_byte(1));
         r.remove(&B256::repeat_byte(1));
         assert_eq!(r.payer_exposure(&Address::repeat_byte(1)), U256::ZERO);
+    }
+
+    #[test]
+    fn recent_root_expiry_is_indexed_and_removed() {
+        let mut r = FrameReservations::default();
+        let mut x = m(1, 0, 1, 1);
+        x.recent_root_dependencies = vec![RecentRootDependency {
+            storage_key: U256::from(7),
+            entry_hash: B256::repeat_byte(3),
+            expires_at_slot: 12,
+        }];
+        put(&mut r, 1, x).unwrap();
+
+        assert!(r.affected(&FrameDependencies::default(), 0, Some(11)).is_empty());
+        assert!(r
+            .affected(&FrameDependencies::default(), 0, Some(12))
+            .contains(&B256::repeat_byte(1)));
+
+        r.remove(&B256::repeat_byte(1));
+        assert!(r.affected(&FrameDependencies::default(), 0, Some(u64::MAX)).is_empty());
     }
 }

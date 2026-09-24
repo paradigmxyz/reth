@@ -90,6 +90,7 @@ use crate::{
     TransactionValidator,
 };
 
+use alloy_consensus::BlockHeader;
 use alloy_primitives::{
     map::{AddressSet, HashSet},
     Address, TxHash, B256,
@@ -561,6 +562,10 @@ where
 
         let block_info = update.block_info();
         let timestamp = update.timestamp();
+        // Public EIP-8272 validation uses the earliest possible next-payload slot. Its
+        // expiration predicate is therefore evaluated against the new canonical tip plus one.
+        let current_slot =
+            update.new_tip.header().slot_number().and_then(|slot| slot.checked_add(1));
         let CanonicalStateUpdate {
             new_tip, changed_accounts, mined_transactions, update_kind, ..
         } = update;
@@ -574,7 +579,7 @@ where
         // update the pool
         let outcome = {
             let mut pool = self.pool.write();
-            let affected = pool.affected_frame_transactions(&dependencies, timestamp);
+            let affected = pool.affected_frame_transactions(&dependencies, timestamp, current_slot);
             let mut queue = self.frame_revalidation.lock();
             for hash in &mined_transactions {
                 queue.cancel(hash);
@@ -653,7 +658,7 @@ where
         let changed_senders = self.changed_senders(accounts.into_iter());
         let UpdateOutcome { promoted, discarded } = {
             let mut pool = self.pool.write();
-            let affected = pool.affected_frame_transactions(&dependencies, 0);
+            let affected = pool.affected_frame_transactions(&dependencies, 0, None);
             let mut queue = self.frame_revalidation.lock();
             for tx in pool.remove_transactions(affected) {
                 queue.insert(tx);

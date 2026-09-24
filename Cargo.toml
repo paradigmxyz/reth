@@ -434,7 +434,7 @@ reth-zstd-compressors = { version = "0.7.0", default-features = false }
 
 # revm
 revm = { version = "43.0.0", default-features = false }
-revmc = { git = "https://github.com/Soubhik-10/revmc", rev = "5a5718bb4c758c53f99f304135cb4fcbc49a7331", default-features = false, features = ["llvm-prefer-static"] }
+revmc = { git = "https://github.com/Soubhik-10/revmc", rev = "292dcb747cecccb5a9a84b4352a6a14ebeef0f69", default-features = false, features = ["llvm-prefer-static"] }
 revm-inspectors = "0.43.0"
 
 # eth
@@ -733,7 +733,7 @@ alloy-transport-ws = { git = "https://github.com/Rimeeeeee/alloy", rev = "a3ed59
 alloy-tx-macros = { git = "https://github.com/Rimeeeeee/alloy", rev = "a3ed59a939dfeef39521648a55c81f4762af8f9c" }
 
 # EIP-8141 execution adapter and VM.
-alloy-evm = { git = "https://github.com/Soubhik-10/evm", rev = "6d74f8d87dbd4448614be8326541c22b2ae42ca2" }
+alloy-evm = { git = "https://github.com/Soubhik-10/evm", rev = "654595c76b049c6a75f471433ad43113cac8b226" }
 reth-codecs = { git = "https://github.com/Soubhik-10/reth-core", rev = "faccb0de4a2af32819fb655c3ae19b82876197af" }
 reth-codecs-derive = { git = "https://github.com/Soubhik-10/reth-core", rev = "faccb0de4a2af32819fb655c3ae19b82876197af" }
 reth-primitives-traits = { git = "https://github.com/Soubhik-10/reth-core", rev = "faccb0de4a2af32819fb655c3ae19b82876197af" }

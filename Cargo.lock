@@ -304,7 +304,7 @@ dependencies = [
 [[package]]
 name = "alloy-evm"
 version = "0.39.0"
-source = "git+https://github.com/Soubhik-10/evm?rev=6d74f8d87dbd4448614be8326541c22b2ae42ca2#6d74f8d87dbd4448614be8326541c22b2ae42ca2"
+source = "git+https://github.com/Soubhik-10/evm?rev=654595c76b049c6a75f471433ad43113cac8b226#654595c76b049c6a75f471433ad43113cac8b226"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -702,7 +702,7 @@ dependencies = [
  "alloy-serde",
  "alloy-sol-types",
  "arbitrary",
- "itertools 0.13.0",
+ "itertools 0.14.0",
  "serde",
  "serde_json",
  "serde_with",
@@ -889,7 +889,7 @@ source = "git+https://github.com/Rimeeeeee/alloy?rev=a3ed59a939dfeef39521648a55c
 dependencies = [
  "alloy-json-rpc",
  "alloy-transport",
- "itertools 0.13.0",
+ "itertools 0.14.0",
  "reqwest",
  "serde_json",
  "tower",
@@ -1016,7 +1016,7 @@ version = "1.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "40c48f72fd53cd289104fc64099abca73db4166ad86ea0b4341abe65af83dadc"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -1027,7 +1027,7 @@ checksum = "291e6a250ff86cd4a820112fb8898808a366d8f9f58ce16d1f538353ad55747d"
 dependencies = [
  "anstyle",
  "once_cell_polyfill",
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -3466,7 +3466,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -5198,7 +5198,7 @@ checksum = "3640c1c38b8e4e43584d8df18be5fc6b0aa314ce6ebf51b53313d4306cca8e46"
 dependencies = [
  "hermit-abi",
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -6310,7 +6310,7 @@ version = "0.50.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7957b9740744892f114936ab4a57b3f487491bbeafaf8083688b16841a4240e5"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -7354,7 +7354,7 @@ dependencies = [
  "once_cell",
  "socket2",
  "tracing",
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -11116,7 +11116,7 @@ dependencies = [
 [[package]]
 name = "revmc"
 version = "0.1.0"
-source = "git+https://github.com/Soubhik-10/revmc?rev=5a5718bb4c758c53f99f304135cb4fcbc49a7331#5a5718bb4c758c53f99f304135cb4fcbc49a7331"
+source = "git+https://github.com/Soubhik-10/revmc?rev=292dcb747cecccb5a9a84b4352a6a14ebeef0f69#292dcb747cecccb5a9a84b4352a6a14ebeef0f69"
 dependencies = [
  "revm-bytecode",
  "revm-context-interface",
@@ -11136,7 +11136,7 @@ dependencies = [
 [[package]]
 name = "revmc-backend"
 version = "0.1.0"
-source = "git+https://github.com/Soubhik-10/revmc?rev=5a5718bb4c758c53f99f304135cb4fcbc49a7331#5a5718bb4c758c53f99f304135cb4fcbc49a7331"
+source = "git+https://github.com/Soubhik-10/revmc?rev=292dcb747cecccb5a9a84b4352a6a14ebeef0f69#292dcb747cecccb5a9a84b4352a6a14ebeef0f69"
 dependencies = [
  "eyre",
  "ruint",
@@ -11145,12 +11145,12 @@ dependencies = [
 [[package]]
 name = "revmc-build"
 version = "0.1.0"
-source = "git+https://github.com/Soubhik-10/revmc?rev=5a5718bb4c758c53f99f304135cb4fcbc49a7331#5a5718bb4c758c53f99f304135cb4fcbc49a7331"
+source = "git+https://github.com/Soubhik-10/revmc?rev=292dcb747cecccb5a9a84b4352a6a14ebeef0f69#292dcb747cecccb5a9a84b4352a6a14ebeef0f69"
 
 [[package]]
 name = "revmc-builtins"
 version = "0.1.0"
-source = "git+https://github.com/Soubhik-10/revmc?rev=5a5718bb4c758c53f99f304135cb4fcbc49a7331#5a5718bb4c758c53f99f304135cb4fcbc49a7331"
+source = "git+https://github.com/Soubhik-10/revmc?rev=292dcb747cecccb5a9a84b4352a6a14ebeef0f69#292dcb747cecccb5a9a84b4352a6a14ebeef0f69"
 dependencies = [
  "paste",
  "revm-bytecode",
@@ -11165,7 +11165,7 @@ dependencies = [
 [[package]]
 name = "revmc-codegen"
 version = "0.1.0"
-source = "git+https://github.com/Soubhik-10/revmc?rev=5a5718bb4c758c53f99f304135cb4fcbc49a7331#5a5718bb4c758c53f99f304135cb4fcbc49a7331"
+source = "git+https://github.com/Soubhik-10/revmc?rev=292dcb747cecccb5a9a84b4352a6a14ebeef0f69#292dcb747cecccb5a9a84b4352a6a14ebeef0f69"
 dependencies = [
  "alloy-primitives",
  "bitflags 2.13.1",
@@ -11196,7 +11196,7 @@ dependencies = [
 [[package]]
 name = "revmc-context"
 version = "0.1.0"
-source = "git+https://github.com/Soubhik-10/revmc?rev=5a5718bb4c758c53f99f304135cb4fcbc49a7331#5a5718bb4c758c53f99f304135cb4fcbc49a7331"
+source = "git+https://github.com/Soubhik-10/revmc?rev=292dcb747cecccb5a9a84b4352a6a14ebeef0f69#292dcb747cecccb5a9a84b4352a6a14ebeef0f69"
 dependencies = [
  "revm-context",
  "revm-context-interface",
@@ -11211,7 +11211,7 @@ dependencies = [
 [[package]]
 name = "revmc-llvm"
 version = "0.1.0"
-source = "git+https://github.com/Soubhik-10/revmc?rev=5a5718bb4c758c53f99f304135cb4fcbc49a7331#5a5718bb4c758c53f99f304135cb4fcbc49a7331"
+source = "git+https://github.com/Soubhik-10/revmc?rev=292dcb747cecccb5a9a84b4352a6a14ebeef0f69#292dcb747cecccb5a9a84b4352a6a14ebeef0f69"
 dependencies = [
  "alloy-primitives",
  "cc",
@@ -11224,7 +11224,7 @@ dependencies = [
 [[package]]
 name = "revmc-runtime"
 version = "0.1.0"
-source = "git+https://github.com/Soubhik-10/revmc?rev=5a5718bb4c758c53f99f304135cb4fcbc49a7331#5a5718bb4c758c53f99f304135cb4fcbc49a7331"
+source = "git+https://github.com/Soubhik-10/revmc?rev=292dcb747cecccb5a9a84b4352a6a14ebeef0f69#292dcb747cecccb5a9a84b4352a6a14ebeef0f69"
 dependencies = [
  "alloy-evm",
  "alloy-primitives",
@@ -11464,7 +11464,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys",
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -11544,7 +11544,7 @@ dependencies = [
  "security-framework",
  "security-framework-sys",
  "webpki-root-certs 1.0.9",
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -12157,7 +12157,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c3d1e2c7f27f8d4cb10542a02c49005dbd6e93095799d6f3be745fae9f8fedd4"
 dependencies = [
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -12416,7 +12416,7 @@ dependencies = [
  "getrandom 0.4.3",
  "once_cell",
  "rustix",
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -13637,7 +13637,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]

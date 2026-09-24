@@ -61,6 +61,7 @@ where
         prefix_end = prefix.prefix_end,
         deploy_index = ?prefix.deploy_index,
         expiry_index = ?prefix.expiry_index,
+        recent_root_index = ?prefix.recent_root.as_ref().map(|verifier| verifier.index),
         declared_execution_gas = prefix.declared_execution_gas,
         declared_state_gas = prefix.state_gas,
         "recognized EIP-8141 public-pool validation prefix"
@@ -69,6 +70,27 @@ where
         .latest_header()
         .map_err(|_| policy("cannot read canonical head"))?
         .ok_or_else(|| policy("canonical head unavailable"))?;
+    let (current_slot, recent_root_dependencies) = if let Some(verifier) = &prefix.recent_root {
+        // EIP-8272 deliberately validates against the earliest possible next payload slot, not
+        // against time. Empty slots therefore do not advance a public-pool root reference.
+        let current_slot = head
+            .slot_number()
+            .ok_or_else(|| policy("canonical head slot unavailable"))?
+            .checked_add(1)
+            .ok_or_else(|| policy("canonical head slot overflows"))?;
+        for reference in &verifier.references {
+            let dependency = reference.dependency();
+            if reference.slot >= current_slot {
+                return Err(policy("recent root reference is not before current slot"))
+            }
+            if dependency.expires_at_slot <= current_slot {
+                return Err(policy("recent root reference expired"))
+            }
+        }
+        (Some(current_slot), verifier.dependencies())
+    } else {
+        (None, Vec::new())
+    };
     let state = client
         .state_by_block_hash(head.hash())
         .map_err(|_| policy("canonical state unavailable"))?;
@@ -78,12 +100,15 @@ where
     // transactions behind their missing ancestors; this simulation only validates the frame
     // prefix and must not reject a valid future nonce before the pool can do that bookkeeping.
     env.cfg_env.disable_nonce_check = true;
+    if let Some(current_slot) = current_slot {
+        env.block_env.slot_num = current_slot;
+    }
     let tx = TxEnvFor::<EvmConfig>::from_recovered_tx_with_gas_params(
         transaction.transaction.inner(),
         frame.sender,
         &env.cfg_env.gas_params,
     );
-    let inspector = FrameValidationInspector::new(frame.sender, prefix);
+    let inspector = FrameValidationInspector::new(frame.sender, prefix.clone());
     let mut evm =
         evm_config.evm_with_env_and_inspector(StateProviderDatabase::new(&state), env, inspector);
     let result = match evm.validate_frame_transaction(tx, prefix.prefix_end) {
@@ -215,6 +240,7 @@ where
         head_hash: head.hash(),
         dependencies,
         expires_at: expiry,
+        recent_root_dependencies,
         exclusive_payer,
     }))
 }
