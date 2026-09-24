@@ -27,8 +27,8 @@ use reth_provider::{
         BlockchainProvider, NodeTypesForProvider, RocksDBProvider, StaticFileProvider,
         StaticFileProviderBuilder,
     },
-    BalConfig, BalStoreHandle, InMemoryBalStore, ProviderFactory, StaticFileProviderFactory,
-    StorageSettings,
+    BalConfig, BalStoreHandle, InMemoryBalStore, MetadataProvider, ProviderFactory,
+    StaticFileProviderFactory, StorageSettings,
 };
 use reth_stages::{sets::DefaultStages, Pipeline, PipelineTarget};
 use reth_static_file::StaticFileProducer;
@@ -211,6 +211,11 @@ impl<C: ChainSpecParser> EnvironmentArgs<C> {
         .with_prune_modes(config.prune.segments.clone())
         .with_minimum_pruning_distance(config.prune.minimum_pruning_distance)
         .with_bal_store(bal_store);
+
+        // Checked read-write access heals below, which may unwind the state tables.
+        if matches!(access, AccessRights::RW) {
+            factory.ensure_snap_state_verified()?;
+        }
 
         // Check for consistency between database and static files.
         if !access.skips_consistency_check() &&

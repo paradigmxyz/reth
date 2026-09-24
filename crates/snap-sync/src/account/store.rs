@@ -582,49 +582,22 @@ mod tests {
     }
 
     #[test]
-    fn a_write_from_a_replaced_attempt_changes_nothing() {
+    fn a_write_from_an_abandoned_attempt_changes_nothing() {
         let accounts = accounts();
-        let (factory, replaced, generation) = started(&accounts);
+        let (factory, abandoned, _) = started(&accounts);
         let range = verified_range(&accounts, 0..3, B256::ZERO, &[]);
         let (storages, bytecodes) = dependencies();
         let provider = factory.database_provider_rw().unwrap();
-        let current = provider.start_snap_attempt(generation).unwrap();
+        provider.abandon_snap_attempt().unwrap();
 
-        let refused = provider.commit_account_range(replaced, &range, storages, bytecodes);
+        let refused = provider.commit_account_range(abandoned, &range, storages, bytecodes);
 
         assert!(matches!(refused, Err(SnapSyncError::StaleWrite { .. })));
         assert_eq!(stored(&provider), (Vec::new(), false, false));
-        // The replaced attempt's coverage is not the new attempt's either.
-        assert_eq!(provider.account_coverage(current).unwrap(), None);
         assert!(matches!(
-            provider.account_coverage(replaced),
+            provider.account_coverage(abandoned),
             Err(SnapSyncError::StaleWrite { .. })
         ));
-    }
-
-    #[test]
-    fn a_new_attempt_replaces_what_an_earlier_one_left_in_the_interval() {
-        let earlier = accounts();
-        let (factory, write, _) = started(&earlier);
-        let (storages, bytecodes) = dependencies();
-        let provider = factory.database_provider_rw().unwrap();
-        let range = verified_range(&earlier, 0..3, B256::ZERO, &[]);
-        provider.commit_account_range(write, &range, storages, bytecodes).unwrap();
-        provider.commit().unwrap();
-
-        // At the new root the contract is gone and the first account changed.
-        let current = vec![(key(1), account(9)), (FAR, account(3))];
-        let provider = factory.database_provider_rw().unwrap();
-        let write = provider.start_snap_attempt(generation(2, state_root(&current))).unwrap();
-        provider.start_account_coverage(write).unwrap();
-        let range = verified_range(&current, 0..2, B256::ZERO, &[]);
-        let coverage =
-            provider.commit_account_range(write, &range, Default::default(), Vec::new()).unwrap();
-
-        assert!(coverage.is_complete());
-        assert_eq!(stored(&provider), (vec![key(1), FAR], false, true));
-        let first = provider.tx_ref().get::<tables::HashedAccounts>(key(1)).unwrap().unwrap();
-        assert_eq!(first.nonce, 9);
     }
 
     #[test]

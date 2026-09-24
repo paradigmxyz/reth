@@ -18,7 +18,8 @@ use reth_node_core::args::JitArgs;
 use reth_primitives_traits::{format_gas_throughput, Account, BlockBody, GotExpected};
 use reth_provider::{
     providers::BlockchainProvider, BlockHashReader, BlockNumReader, BlockReader, ChainSpecProvider,
-    DatabaseProviderFactory, ReceiptProvider, StaticFileProviderFactory, TransactionVariant,
+    DatabaseProviderFactory, MetadataProvider, ReceiptProvider, StaticFileProviderFactory,
+    TransactionVariant,
 };
 use reth_revm::{
     database::StateProviderDatabase,
@@ -95,6 +96,8 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
         }
 
         let Environment { provider_factory, .. } = self.env.init::<N>(AccessRights::RO, runtime)?;
+        // Read-only access still executes against the state tables.
+        provider_factory.ensure_snap_state_verified()?;
 
         let components = components(provider_factory.chain_spec());
 

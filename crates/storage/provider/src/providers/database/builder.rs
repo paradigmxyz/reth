@@ -2,7 +2,7 @@
 
 use crate::{
     providers::{NodeTypesForProvider, RocksDBProvider, StaticFileProvider},
-    ProviderFactory,
+    MetadataProvider, ProviderFactory,
 };
 use reth_db::{
     mdbx::{DatabaseArguments, MaxReadTransactionDuration},
@@ -30,6 +30,8 @@ impl<N> ProviderFactoryBuilder<N> {
     }
 
     /// Opens the database with the given chainspec and [`ReadOnlyConfig`].
+    ///
+    /// Refuses unverified snap state, see [`MetadataProvider::ensure_snap_state_verified`].
     ///
     /// # Open a monitored instance
     ///
@@ -110,9 +112,10 @@ impl<N> ProviderFactoryBuilder<N> {
             .with_read_only(true)
             .build()?;
         let factory =
-            ProviderFactory::new(db, chainspec, static_file_provider, rocksdb_provider, runtime)?
-                .with_read_only_sync(watch);
-        Ok(factory)
+            ProviderFactory::new(db, chainspec, static_file_provider, rocksdb_provider, runtime)?;
+        // Checked before the watcher spawns, since it keeps the database open for the process.
+        factory.ensure_snap_state_verified()?;
+        Ok(factory.with_read_only_sync(watch))
     }
 }
 

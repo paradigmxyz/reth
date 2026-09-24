@@ -87,7 +87,10 @@ where
                         return match ev {
                             HandlerEvent::BackfillAction(target) => {
                                 // bubble up backfill sync request
-                                self.downloader.on_action(DownloadAction::Clear);
+                                // Only a new run, not a target update, makes downloads stale.
+                                if matches!(target, BackfillAction::Start(_)) {
+                                    self.downloader.on_action(DownloadAction::Clear);
+                                }
                                 Poll::Ready(HandlerEvent::BackfillAction(target))
                             }
                             HandlerEvent::Event(ev) => {
@@ -384,5 +387,74 @@ impl DownloadRequest {
             }
         }
         self
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use reth_stages_api::PipelineTarget;
+    use std::{collections::VecDeque, task::Waker};
+
+    type TestBlock = <EthPrimitives as NodePrimitives>::Block;
+
+    #[test]
+    fn only_a_new_backfill_run_clears_downloads() {
+        let target = PipelineTarget::Sync(B256::repeat_byte(1));
+        let actions =
+            VecDeque::from([BackfillAction::UpdateTarget(target), BackfillAction::Start(target)]);
+        let mut handler = EngineHandler::new(
+            QueuedActions(actions),
+            CountedClears::default(),
+            futures::stream::empty::<()>(),
+        );
+        let mut cx = Context::from_waker(Waker::noop());
+
+        assert!(matches!(
+            ChainHandler::poll(&mut handler, &mut cx),
+            Poll::Ready(HandlerEvent::BackfillAction(BackfillAction::UpdateTarget(_)))
+        ));
+        assert_eq!(handler.downloader.0, 0);
+
+        assert!(matches!(
+            ChainHandler::poll(&mut handler, &mut cx),
+            Poll::Ready(HandlerEvent::BackfillAction(BackfillAction::Start(_)))
+        ));
+        assert_eq!(handler.downloader.0, 1);
+    }
+
+    // Emits one queued backfill action per poll.
+    struct QueuedActions(VecDeque<BackfillAction>);
+
+    impl EngineRequestHandler for QueuedActions {
+        type Event = ();
+        type Request = ();
+        type Block = TestBlock;
+
+        fn on_event(&mut self, _event: FromEngine<Self::Request, Self::Block>) {}
+
+        fn poll(&mut self, _cx: &mut Context<'_>) -> Poll<RequestHandlerEvent<Self::Event>> {
+            self.0.pop_front().map_or(Poll::Pending, |action| {
+                Poll::Ready(RequestHandlerEvent::HandlerEvent(HandlerEvent::BackfillAction(action)))
+            })
+        }
+    }
+
+    // Counts how often in-flight downloads are cleared.
+    #[derive(Default)]
+    struct CountedClears(usize);
+
+    impl BlockDownloader for CountedClears {
+        type Block = TestBlock;
+
+        fn on_action(&mut self, action: DownloadAction) {
+            if matches!(action, DownloadAction::Clear) {
+                self.0 += 1;
+            }
+        }
+
+        fn poll(&mut self, _cx: &mut Context<'_>) -> Poll<DownloadOutcome<Self::Block>> {
+            Poll::Pending
+        }
     }
 }

@@ -324,14 +324,14 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_range_fetched_under_a_replaced_attempt_is_refused_at_commit() {
+    async fn a_range_fetched_under_an_abandoned_attempt_is_refused_at_commit() {
         let accounts = accounts();
         let factory = started(&accounts);
         let (_, mut download) = download([account_range(1, &accounts, 0..3, &[])], factory.clone());
         let range = verified(&mut download).await;
-        // The attempt is replaced after the range was fetched.
+        // The attempt is abandoned after the range was fetched.
         let provider = factory.database_provider_rw().unwrap();
-        provider.start_snap_attempt(generation(1, state_root(&accounts))).unwrap();
+        provider.abandon_snap_attempt().unwrap();
         provider.commit().unwrap();
 
         let error = download.commit(range, Default::default(), Vec::new()).await.unwrap_err();
