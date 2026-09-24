@@ -650,6 +650,10 @@ where
             parallel_bal_execution,
         ));
 
+        if !parallel_bal_execution {
+            std::thread::sleep(Duration::from_millis(2));
+        }
+
         // Create optional cache stats for detailed block logging
         let slow_block_enabled = self.config.slow_block_threshold().is_some();
         let cache_stats = slow_block_enabled.then(|| Arc::new(CacheStats::default()));
