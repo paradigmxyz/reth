@@ -302,6 +302,7 @@ where
 
     /// Calculates the base block reward for the given block:
     ///
+    /// - the genesis block is not mined, so no block rewards are given
     /// - if Paris hardfork is activated, no block rewards are given
     /// - if Paris hardfork is not activated, calculate block rewards with block number only
     fn calculate_base_block_reward<H: BlockHeader>(
@@ -310,7 +311,7 @@ where
     ) -> Result<Option<u128>, Eth::Error> {
         let chain_spec = self.provider().chain_spec();
 
-        if chain_spec.is_paris_active_at_block(header.number()) {
+        if header.number() == 0 || chain_spec.is_paris_active_at_block(header.number()) {
             return Ok(None)
         }
 
@@ -488,7 +489,8 @@ where
                     } else {
                         // Blocks are processed in ascending order, so once a historical range
                         // reaches post-Paris blocks, later blocks in the range have no rewards.
-                        include_reward_traces = false;
+                        // The genesis block has no reward, but later pre-Paris blocks do.
+                        include_reward_traces = block.number() == 0;
                         Vec::new()
                     }
                 } else {
@@ -898,11 +900,21 @@ mod tests {
     use super::*;
     use crate::EthApiBuilder;
     use alloy_consensus::Header;
+    use alloy_genesis::Genesis;
     use alloy_rpc_types_eth::TransactionRequest;
+    use reth_chainspec::ChainSpecBuilder;
+    use reth_db_common::init::init_genesis;
     use reth_ethereum_primitives::{Block, BlockBody};
     use reth_evm_ethereum::EthEvmConfig;
     use reth_network_api::noop::NoopNetwork;
-    use reth_provider::test_utils::{ExtendedAccount, MockEthProvider};
+    use reth_primitives_traits::Block as _;
+    use reth_provider::{
+        providers::BlockchainProvider,
+        test_utils::{
+            create_test_provider_factory_with_chain_spec, ExtendedAccount, MockEthProvider,
+        },
+        BlockWriter, StageCheckpointWriter,
+    };
     use reth_transaction_pool::test_utils::testing_pool;
 
     #[tokio::test]
@@ -1193,6 +1205,51 @@ mod tests {
             let block_replay =
                 api.replay_block_transactions(block_hash.into(), types).await.unwrap().unwrap();
             assert_eq!(response["result"], serde_json::to_value(&block_replay[0]).unwrap());
+        }
+    }
+
+    #[tokio::test]
+    async fn genesis_block_has_no_reward_trace() {
+        // Paris is not active at genesis, so blocks after genesis carry block rewards.
+        let coinbase = Address::repeat_byte(0x11);
+        let genesis = Genesis::default().with_gas_limit(30_000_000).with_coinbase(coinbase);
+        let chain_spec = Arc::new(ChainSpecBuilder::mainnet().genesis(genesis).build());
+        let factory = create_test_provider_factory_with_chain_spec(chain_spec);
+        let genesis_hash = init_genesis(&factory).unwrap();
+        let block = Block {
+            header: Header {
+                parent_hash: genesis_hash,
+                number: 1,
+                beneficiary: coinbase,
+                gas_limit: 30_000_000,
+                ..Default::default()
+            },
+            body: BlockBody::default(),
+        };
+        let provider_rw = factory.provider_rw().unwrap();
+        provider_rw.insert_block(&block.seal_slow().try_recover().unwrap()).unwrap();
+        provider_rw.update_pipeline_stages(1, false).unwrap();
+        provider_rw.commit().unwrap();
+
+        let provider = BlockchainProvider::new(factory).unwrap();
+        let eth_api = EthApiBuilder::new(
+            provider.clone(),
+            testing_pool(),
+            NoopNetwork::default(),
+            EthEvmConfig::new(provider.chain_spec()),
+        )
+        .build();
+        let api = TraceApi::new(eth_api, BlockingTaskGuard::new(1), EthConfig::default());
+
+        assert_eq!(api.trace_block(0.into()).await.unwrap(), Some(vec![]));
+        assert_eq!(
+            trace_order(&api.trace_block(1.into()).await.unwrap().unwrap()),
+            [(1, None, true)]
+        );
+        for (to_block, expected) in [(0, vec![]), (1, vec![(1, None, true)])] {
+            let filter =
+                TraceFilter { from_block: Some(0), to_block: Some(to_block), ..Default::default() };
+            assert_eq!(trace_order(&api.trace_filter(filter).await.unwrap()), expected);
         }
     }
 
