@@ -1,5 +1,7 @@
 use self::blob_cache::BlobValidationCache;
-use alloy_consensus::{BlobTransactionValidationError, BlockHeader, Transaction, TxReceipt};
+use alloy_consensus::{
+    BlobTransactionValidationError, BlockHeader, EnvKzgSettings, Transaction, TxReceipt,
+};
 use alloy_eip7928::{bal::DecodedBal, compute_block_access_list_hash};
 use alloy_eips::eip7685::RequestsOrHash;
 use alloy_primitives::{map::AddressSet, Address, B256, U256};
@@ -362,13 +364,16 @@ where
     }
 
     /// Validates the given [`BlobsBundleV1`] and returns versioned hashes for blobs.
-    ///
-    /// Exact blob, commitment, and proof matches from recent submissions reuse KZG validation.
     pub fn validate_blobs_bundle(
         &self,
         blobs_bundle: BlobsBundleV1,
     ) -> Result<Vec<B256>, ValidationApiError> {
-        self.validated_blobs.validate_v1(blobs_bundle)
+        let versioned_hashes = blobs_bundle.versioned_hashes();
+        let sidecar =
+            blobs_bundle.try_into_sidecar().map_err(|_| ValidationApiError::InvalidBlobsBundle)?;
+
+        sidecar.validate(&versioned_hashes, EnvKzgSettings::default().get())?;
+        Ok(versioned_hashes)
     }
 
     /// Validates the given [`BlobsBundleV2`] and returns versioned hashes for blobs.
@@ -379,7 +384,7 @@ where
         &self,
         blobs_bundle: BlobsBundleV2,
     ) -> Result<Vec<B256>, ValidationApiError> {
-        self.validated_blobs.validate_v2(blobs_bundle)
+        self.validated_blobs.validate(blobs_bundle)
     }
 
     /// Converts the payload into a block and recovers the transaction senders.
@@ -673,7 +678,7 @@ pub struct ValidationApiInner<Provider, E: ConfigureEvm, T: PayloadTypes> {
     /// latest head block state. Uses async `RwLock` to safely handle concurrent validation
     /// requests.
     cached_state: RwLock<(B256, CachedReads)>,
-    /// Recently validated blob, commitment, and proof tuples shared by competing submissions.
+    /// Recently validated blob, commitment, and cell-proof tuples shared by V2 submissions.
     validated_blobs: BlobValidationCache,
     /// Task spawner for blocking operations
     task_spawner: Runtime,
