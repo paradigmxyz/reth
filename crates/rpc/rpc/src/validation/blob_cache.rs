@@ -17,14 +17,6 @@ pub(super) struct BlobValidationCache {
     entries: Mutex<VecDeque<ValidatedBlob>>,
 }
 
-/// A validated tuple includes the proof format, so a matching commitment alone cannot skip
-/// verification of different blob data or proofs.
-#[derive(Debug)]
-enum ValidatedBlob {
-    V1 { blob: Bytes, commitment: Bytes48, proof: Bytes48 },
-    V2 { blob: Bytes, commitment: Bytes48, proofs: Vec<Bytes48> },
-}
-
 impl BlobValidationCache {
     /// Validates a V1 bundle, verifying only blobs absent from the cache.
     pub(super) fn validate_v1(
@@ -245,6 +237,14 @@ impl BlobValidationCache {
         }
         entries.push_back(entry);
     }
+}
+
+/// A validated tuple includes the proof format, so a matching commitment alone cannot skip
+/// verification of different blob data or proofs.
+#[derive(Debug)]
+enum ValidatedBlob {
+    V1 { blob: Bytes, commitment: Bytes48, proof: Bytes48 },
+    V2 { blob: Bytes, commitment: Bytes48, proofs: Vec<Bytes48> },
 }
 
 #[cfg(test)]
