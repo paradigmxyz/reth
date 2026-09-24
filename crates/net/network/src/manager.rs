@@ -45,6 +45,7 @@ use reth_chainspec::EnrForkIdEntry;
 use reth_eth_wire::{DisconnectReason, EthNetworkPrimitives, NetworkPrimitives};
 use reth_fs_util::{self as fs, FsPathError};
 use reth_metrics::common::mpsc::MemoryBoundedSender;
+use reth_net_nat::{NatResolver, ResolveNatInterval};
 use reth_network_api::{
     events::{PeerEvent, SessionInfo},
     test_utils::PeersHandle,
@@ -148,6 +149,8 @@ pub struct NetworkManager<N: NetworkPrimitives = EthNetworkPrimitives> {
     pending_session_failure_metrics: PendingSessionFailureMetrics,
     /// Backed off peers metrics, split by reason.
     backed_off_peers_metrics: BackedOffPeersMetrics,
+    /// Refreshes configured NAT hostnames when no discovery service owns resolution.
+    nat_resolver: Option<ResolveNatInterval>,
 }
 
 impl NetworkManager {
@@ -306,6 +309,19 @@ impl<N: NetworkPrimitives> NetworkManager<N> {
         let discv4 = discovery.discv4();
         let discv5 = discovery.discv5();
 
+        let external_ip = match &nat {
+            Some(NatResolver::ExternalIp(ip)) => Some(*ip),
+            _ => None,
+        };
+        // Discovery owns hostname refresh when enabled. Without discovery, node-info still
+        // needs the configured external address, but reads must never perform DNS themselves.
+        let nat_resolver = if discv4.is_none() && discv5.is_none() {
+            nat.filter(|nat| matches!(nat, NatResolver::ExternalAddr(_)))
+                .map(|nat| ResolveNatInterval::interval(nat, Duration::from_secs(60 * 5)))
+        } else {
+            None
+        };
+
         let num_active_peers = Arc::new(AtomicUsize::new(0));
 
         let sessions = SessionManager::new(
@@ -347,7 +363,7 @@ impl<N: NetworkPrimitives> NetworkManager<N> {
             discv4,
             discv5,
             event_sender.clone(),
-            nat,
+            external_ip,
         );
 
         // Spawn required block peer filter if configured
@@ -370,6 +386,7 @@ impl<N: NetworkPrimitives> NetworkManager<N> {
             closed_sessions_metrics: Default::default(),
             pending_session_failure_metrics: Default::default(),
             backed_off_peers_metrics: Default::default(),
+            nat_resolver,
         })
     }
 
@@ -1139,6 +1156,12 @@ impl<N: NetworkPrimitives> Future for NetworkManager<N> {
         let mut poll_durations = NetworkManagerPollDurations::default();
 
         let this = self.get_mut();
+
+        if let Some(resolver) = &mut this.nat_resolver &&
+            let Poll::Ready(Some(ip)) = resolver.poll_tick(cx)
+        {
+            this.handle.set_external_ip(ip);
+        }
 
         // poll new block imports (expected to be a noop for POS)
         while let Poll::Ready(outcome) = this.block_import.poll(cx) {

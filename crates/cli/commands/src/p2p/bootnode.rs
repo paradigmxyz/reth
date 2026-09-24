@@ -56,7 +56,7 @@ impl Command {
         // A discovery-only bootnode serves no RLPx, so advertise TCP port 0
         // (`enode://…@<ip>:0?discport=<udp>`).
         let local_enr = NodeRecord::from_secret_key(self.addr, &sk).with_tcp_port(0);
-        let nat = self.resolved_nat()?;
+        let nat = self.resolved_nat().await?;
 
         let discv4_config = self.discv4_config(&nat);
 
@@ -169,11 +169,11 @@ impl Command {
     /// resolution, and any fixed IP is also advertised in the discv5 ENR. Two `extip:<IP>` values
     /// (one per family) advertise a dual-stack discv5 record; discv4 advertises only the family
     /// matching `--addr`, since it binds a single socket.
-    fn resolved_nat(&self) -> eyre::Result<BootnodeNat> {
+    async fn resolved_nat(&self) -> eyre::Result<BootnodeNat> {
         match self.nat.as_slice() {
-            [] => Ok(BootnodeNat::single(NatResolver::Any, self.addr.port())),
+            [] => Ok(BootnodeNat::single(NatResolver::Any).await),
             [nat] => {
-                let mut single = BootnodeNat::single(nat.clone(), self.addr.port());
+                let mut single = BootnodeNat::single(nat.clone()).await;
                 // A static IP (`extip`/`extaddr`) of the opposite family to `--addr` can't drive
                 // discv4 (it binds only the `--addr` family): advertise it via discv5 only, and
                 // use `None` rather than `Any` so discv4 doesn't silently auto-resolve an address
@@ -257,9 +257,14 @@ struct BootnodeNat {
 }
 
 impl BootnodeNat {
-    fn single(resolver: NatResolver, port: u16) -> Self {
-        let advertised_ips = resolver.clone().as_external_ip(port).into_iter().collect();
-        Self { resolver, advertised_ips }
+    async fn single(resolver: NatResolver) -> Self {
+        let ip = match &resolver {
+            NatResolver::ExternalIp(_) | NatResolver::ExternalAddr(_) => {
+                resolver.clone().external_addr().await
+            }
+            _ => None,
+        };
+        Self { resolver, advertised_ips: ip.into_iter().collect() }
     }
 }
 
@@ -314,8 +319,8 @@ mod tests {
     use super::*;
     use reth_discv5::build_local_enr;
 
-    #[test]
-    fn repeated_nat_uses_matching_addr_family_as_primary() {
+    #[tokio::test]
+    async fn repeated_nat_uses_matching_addr_family_as_primary() {
         let command = Command::parse_from([
             "reth",
             "--addr",
@@ -326,7 +331,7 @@ mod tests {
             "extip:2001:db8::1",
         ]);
 
-        let nat = command.resolved_nat().unwrap();
+        let nat = command.resolved_nat().await.unwrap();
 
         // discv4 binds the `--addr` (IPv6) family, so its resolver uses the IPv6 extip; both
         // families are still advertised by discv5.
@@ -334,33 +339,33 @@ mod tests {
         assert_eq!(nat.advertised_ips.len(), 2);
     }
 
-    #[test]
-    fn repeated_nat_requires_extip_values() {
+    #[tokio::test]
+    async fn repeated_nat_requires_extip_values() {
         let command = Command::parse_from(["reth", "--nat", "any", "--nat", "extip:2001:db8::1"]);
 
-        assert!(command.resolved_nat().is_err());
+        assert!(command.resolved_nat().await.is_err());
     }
 
-    #[test]
-    fn repeated_nat_requires_distinct_ip_families() {
+    #[tokio::test]
+    async fn repeated_nat_requires_distinct_ip_families() {
         let command =
             Command::parse_from(["reth", "--nat", "extip:1.2.3.4", "--nat", "extip:5.6.7.8"]);
 
-        assert!(command.resolved_nat().is_err());
+        assert!(command.resolved_nat().await.is_err());
     }
 
-    #[test]
-    fn single_extip_is_advertised() {
+    #[tokio::test]
+    async fn single_extip_is_advertised() {
         let command =
             Command::parse_from(["reth", "--addr", "0.0.0.0:30301", "--nat", "extip:1.2.3.4"]);
 
-        let nat = command.resolved_nat().unwrap();
+        let nat = command.resolved_nat().await.unwrap();
 
         assert_eq!(nat.advertised_ips, vec!["1.2.3.4".parse::<IpAddr>().unwrap()]);
     }
 
-    #[test]
-    fn discv5_advertises_single_extip_of_other_family_than_addr() {
+    #[tokio::test]
+    async fn discv5_advertises_single_extip_of_other_family_than_addr() {
         // A v6 extip under a v4 `--addr` must still be bound and advertised, not silently dropped.
         let command = Command::parse_from([
             "reth",
@@ -370,7 +375,7 @@ mod tests {
             "--nat",
             "extip:2001:db8::1",
         ]);
-        let nat = command.resolved_nat().unwrap();
+        let nat = command.resolved_nat().await.unwrap();
         let config = command.discv5_config(&nat);
         let sk = SecretKey::from_byte_array(&[1u8; 32]).unwrap();
 
@@ -381,8 +386,8 @@ mod tests {
         assert_eq!(enr.udp6(), Some(45678));
     }
 
-    #[test]
-    fn discv5_config_single_stack_ipv4_uses_addr_port() {
+    #[tokio::test]
+    async fn discv5_config_single_stack_ipv4_uses_addr_port() {
         // A single-family (v4-only) bootnode: discv5 listens/advertises the `--addr` port, v4 only.
         let command = Command::parse_from([
             "reth",
@@ -392,7 +397,7 @@ mod tests {
             "--nat",
             "extip:1.2.3.4",
         ]);
-        let nat = command.resolved_nat().unwrap();
+        let nat = command.resolved_nat().await.unwrap();
         let config = command.discv5_config(&nat);
         let sk = SecretKey::from_byte_array(&[1u8; 32]).unwrap();
 
@@ -403,8 +408,8 @@ mod tests {
         assert_eq!(enr.udp6(), None);
     }
 
-    #[test]
-    fn discv5_config_single_stack_ipv6_uses_addr_port() {
+    #[tokio::test]
+    async fn discv5_config_single_stack_ipv6_uses_addr_port() {
         // A single-family (v6-only) bootnode: discv5 listens/advertises the `--addr` port, v6 only.
         let command = Command::parse_from([
             "reth",
@@ -414,7 +419,7 @@ mod tests {
             "--nat",
             "extip:2001:db8::1",
         ]);
-        let nat = command.resolved_nat().unwrap();
+        let nat = command.resolved_nat().await.unwrap();
         let config = command.discv5_config(&nat);
         let sk = SecretKey::from_byte_array(&[1u8; 32]).unwrap();
 
@@ -425,8 +430,8 @@ mod tests {
         assert_eq!(enr.udp4(), None);
     }
 
-    #[test]
-    fn single_opposite_family_extip_does_not_drive_discv4() {
+    #[tokio::test]
+    async fn single_opposite_family_extip_does_not_drive_discv4() {
         // A single v6 extip under a v4 `--addr` must not become discv4's external IP (discv4 binds
         // only the v4 shared socket); it is still advertised via discv5.
         let command = Command::parse_from([
@@ -437,7 +442,7 @@ mod tests {
             "--nat",
             "extip:2001:db8::1",
         ]);
-        let nat = command.resolved_nat().unwrap();
+        let nat = command.resolved_nat().await.unwrap();
 
         assert_eq!(nat.resolver, NatResolver::None);
         assert_eq!(nat.advertised_ips, vec!["2001:db8::1".parse::<IpAddr>().unwrap()]);
@@ -461,8 +466,8 @@ mod tests {
         assert_eq!(v6.local_addr().unwrap().port(), port);
     }
 
-    #[test]
-    fn discv4_config_advertises_only_the_addr_family() {
+    #[tokio::test]
+    async fn discv4_config_advertises_only_the_addr_family() {
         // discv4 binds a single socket, so it must not advertise the secondary (IPv6) family it
         // cannot serve; the IPv4 resolver drives discv4 and only discv5 carries both families.
         let command = Command::parse_from([
@@ -474,15 +479,15 @@ mod tests {
             "--nat",
             "extip:2001:db8::1",
         ]);
-        let nat = command.resolved_nat().unwrap();
+        let nat = command.resolved_nat().await.unwrap();
         let config = command.discv4_config(&nat);
 
         assert_eq!(nat.resolver, NatResolver::ExternalIp("1.2.3.4".parse().unwrap()));
         assert!(config.additional_eip868_rlp_pairs.is_empty());
     }
 
-    #[test]
-    fn discv5_config_advertises_dual_stack_nat_endpoints() {
+    #[tokio::test]
+    async fn discv5_config_advertises_dual_stack_nat_endpoints() {
         let command = Command::parse_from([
             "reth",
             "--addr",
@@ -493,7 +498,7 @@ mod tests {
             "--nat",
             "extip:2001:db8::1",
         ]);
-        let nat = command.resolved_nat().unwrap();
+        let nat = command.resolved_nat().await.unwrap();
         let config = command.discv5_config(&nat);
         let sk = SecretKey::from_byte_array(&[1u8; 32]).unwrap();
 
@@ -512,5 +517,29 @@ mod tests {
         let record = NodeRecord::try_from(&enr).unwrap();
         assert_eq!(record.tcp_port, 0);
         assert_eq!(record.udp_port, 45678);
+    }
+
+    #[test]
+    fn bootnode_hostname_resolution_yields() {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .max_blocking_threads(1)
+            .build()
+            .unwrap();
+        let (release_tx, release_rx) = std::sync::mpsc::channel();
+        let worker = runtime.spawn_blocking(move || {
+            release_rx.recv_timeout(std::time::Duration::from_secs(5)).unwrap();
+        });
+        runtime.block_on(async {
+            let mut lookup =
+                std::pin::pin!(BootnodeNat::single(NatResolver::ExternalAddr("localhost".into()),));
+            let pending = futures::poll!(&mut lookup).is_pending();
+            release_tx.send(()).unwrap();
+            assert!(pending, "hostname lookup must yield while the blocking worker is busy");
+            let nat = lookup.await;
+            assert_eq!(nat.advertised_ips.len(), 1);
+            assert!(nat.advertised_ips[0].is_loopback());
+            worker.await.unwrap();
+        });
     }
 }

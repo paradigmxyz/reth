@@ -682,15 +682,12 @@ impl Discv4Service {
         self.lookup_interval = tokio::time::interval(duration);
     }
 
-    /// Sets the external Ip to the configured external IP if [`NatResolver::ExternalIp`] or
-    /// [`NatResolver::ExternalAddr`]. In the case of [`NatResolver::ExternalAddr`], it will return
-    /// the first IP address found for the domain associated with the discv4 UDP port.
+    /// Applies a literal NAT address immediately. Hostnames are resolved by the async interval.
     fn resolve_external_ip(&mut self) {
         if let Some(r) = &self.resolve_external_ip_interval &&
-            let Some(external_ip) =
-                r.resolver().clone().as_external_ip(self.local_node_record.udp_port)
+            let NatResolver::ExternalIp(ip) = r.resolver()
         {
-            self.set_external_ip_addr(external_ip);
+            self.set_external_ip_addr(*ip);
         }
     }
 
@@ -3392,5 +3389,24 @@ mod tests {
 
         // flag should be false when lookups are disabled
         assert!(!service.pending_lookup_reset);
+    }
+
+    #[tokio::test]
+    async fn nat_hostname_resolution_waits_for_poll() {
+        let secret_key = SecretKey::new(&mut rand_08::thread_rng());
+        let addr = "127.0.0.1:0".parse::<SocketAddr>().unwrap();
+        let config = Discv4Config::builder()
+            .external_ip_resolver(Some(NatResolver::ExternalAddr("192.0.2.1".into())))
+            .build();
+        let (handle, mut service) =
+            Discv4::bind(addr, NodeRecord::from_secret_key(addr, &secret_key), secret_key, config)
+                .await
+                .unwrap();
+        assert_eq!(handle.node_record().address, addr.ip());
+        let external_ip = "192.0.2.1".parse::<IpAddr>().unwrap();
+        let waker = futures::task::noop_waker();
+        let mut cx = Context::from_waker(&waker);
+        let _ = Pin::new(&mut service).poll_next(&mut cx);
+        assert_eq!(handle.node_record().address, external_ip);
     }
 }

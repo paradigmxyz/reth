@@ -679,10 +679,13 @@ impl<N: NetworkPrimitives> NetworkConfigBuilder<N> {
         });
 
         let listener_addr = listener_addr.unwrap_or(DEFAULT_DISCOVERY_ADDRESS);
-        // Static NAT addresses (`extip`/`extaddr`) tell peers which IP to dial, but that IP may
+        // Static NAT addresses tell peers which IP to dial, but that IP may
         // not exist on a local interface. Keep binding to `listener_addr` and use the NAT IP only
         // as the ENR address.
-        let advertised_ip = nat.clone().and_then(|nat| nat.as_external_ip(listener_addr.port()));
+        let advertised_ip = match &nat {
+            Some(NatResolver::ExternalIp(ip)) => Some(*ip),
+            _ => None,
+        };
 
         discovery_v5_builder = discovery_v5_builder.map(|mut builder| {
             let fork_id = chain_spec.fork_id(&head);

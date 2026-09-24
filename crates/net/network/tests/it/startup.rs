@@ -1,6 +1,10 @@
 use std::{
+    future::{poll_fn, Future},
     io,
     net::{IpAddr, Ipv4Addr, SocketAddr, SocketAddrV4},
+    pin::Pin,
+    task::Poll,
+    time::Duration,
 };
 
 use reth_chainspec::MAINNET;
@@ -195,4 +199,53 @@ async fn test_node_record_address_with_nat_disable_discovery() {
     let record = network.handle().local_node_record();
 
     assert_eq!(record.address, IpAddr::V4(std::net::Ipv4Addr::LOCALHOST));
+}
+
+#[tokio::test]
+async fn nat_hostname_node_info_uses_cached_resolution() {
+    for discovery_enabled in [false, true] {
+        let secret_key = SecretKey::new(&mut rand_08::thread_rng());
+        let mut builder = NetworkConfigBuilder::eth(secret_key, Runtime::test())
+            .external_ip_resolver(NatResolver::ExternalAddr("192.0.2.1".into()))
+            .disable_discv4_discovery()
+            .disable_dns_discovery()
+            .listener_addr("127.0.0.1:0".parse().unwrap());
+        if discovery_enabled {
+            builder = builder.discovery_v5(
+                reth_discv5::Config::builder("127.0.0.1:0".parse().unwrap()).discv5_config(
+                    discv5::ConfigBuilder::new(discv5::ListenConfig::from_ip(
+                        Ipv4Addr::LOCALHOST.into(),
+                        0,
+                    ))
+                    .build(),
+                ),
+            );
+        } else {
+            builder = builder.disable_discovery();
+        }
+        let mut network =
+            NetworkManager::new(builder.build(NoopProvider::default())).await.unwrap();
+        let handle = network.handle().clone();
+        // Reading node info must not resolve even a numeric hostname synchronously.
+        assert_eq!(handle.local_node_record().address, IpAddr::V4(Ipv4Addr::LOCALHOST));
+        let external_ip = "192.0.2.1".parse::<IpAddr>().unwrap();
+        tokio::time::timeout(
+            Duration::from_secs(5),
+            poll_fn(|cx| {
+                let _ = Pin::new(&mut network).poll(cx);
+                if handle.local_node_record().address == external_ip {
+                    Poll::Ready(())
+                } else {
+                    Poll::Pending
+                }
+            }),
+        )
+        .await
+        .unwrap();
+        let record = handle.local_node_record();
+        assert_eq!(record.tcp_port, network.local_addr().port());
+        assert_eq!(handle.local_enr().ip4(), Some(Ipv4Addr::new(192, 0, 2, 1)));
+        drop(network);
+        assert_eq!(handle.local_node_record(), record);
+    }
 }

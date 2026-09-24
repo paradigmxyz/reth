@@ -6,7 +6,7 @@ use alloy_primitives::B256;
 use enr::Enr;
 use futures::StreamExt;
 use parking_lot::Mutex;
-use reth_discv4::{Discv4, NatResolver};
+use reth_discv4::Discv4;
 use reth_discv5::Discv5;
 use reth_eth_wire::{
     BlockRangeUpdate, BroadcastPoolTransactions, DisconnectReason, EthNetworkPrimitives,
@@ -26,7 +26,7 @@ use reth_network_types::{PeerAddr, PeerKind, Reputation, ReputationChangeKind};
 use reth_tokio_util::{EventSender, EventStream};
 use secp256k1::SecretKey;
 use std::{
-    net::SocketAddr,
+    net::{IpAddr, SocketAddr},
     sync::{
         atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering},
         Arc,
@@ -65,7 +65,7 @@ impl<N: NetworkPrimitives> NetworkHandle<N> {
         discv4: Option<Discv4>,
         discv5: Option<Discv5>,
         event_sender: EventSender<NetworkEvent<PeerRequest<N>>>,
-        nat: Option<NatResolver>,
+        external_ip: Option<IpAddr>,
     ) -> Self {
         let inner = NetworkInner {
             num_active_peers,
@@ -83,7 +83,7 @@ impl<N: NetworkPrimitives> NetworkHandle<N> {
             discv4,
             discv5,
             event_sender,
-            nat,
+            external_ip: Mutex::new(external_ip),
         };
         Self { inner: Arc::new(inner) }
     }
@@ -222,6 +222,11 @@ impl<N: NetworkPrimitives> NetworkHandle<N> {
     pub fn discv5(&self) -> Option<&Discv5> {
         self.inner.discv5.as_ref()
     }
+
+    /// Stores a successful NAT lookup for synchronous node-info readers.
+    pub(crate) fn set_external_ip(&self, ip: IpAddr) {
+        *self.inner.external_ip.lock() = Some(ip);
+    }
 }
 
 // === API Implementations ===
@@ -268,10 +273,7 @@ impl<N: NetworkPrimitives> PeersInfo for NetworkHandle<N> {
             // record here
             discv4.node_record()
         } else if let Some(discv5) = self.inner.discv5.as_ref() {
-            // for disv5 we must check if we have an external ip configured
-            if let Some(external) =
-                self.inner.nat.clone().and_then(|nat| nat.as_external_ip(discv5.local_port()))
-            {
+            if let Some(external) = *self.inner.external_ip.lock() {
                 NodeRecord::new((external, discv5.local_port()).into(), *self.peer_id())
             } else {
                 // use the node record that discv5 tracks or use localhost
@@ -288,8 +290,7 @@ impl<N: NetworkPrimitives> PeersInfo for NetworkHandle<N> {
         } else {
             let mut socket_addr = *self.inner.listener_address.lock();
 
-            let external_ip =
-                self.inner.nat.clone().and_then(|nat| nat.as_external_ip(socket_addr.port()));
+            let external_ip = *self.inner.external_ip.lock();
 
             if let Some(ip) = external_ip {
                 // if able to resolve external ip, use it instead and also set the local address
@@ -558,8 +559,8 @@ struct NetworkInner<N: NetworkPrimitives = EthNetworkPrimitives> {
     discv5: Option<Discv5>,
     /// Sender for high level network events.
     event_sender: EventSender<NetworkEvent<PeerRequest<N>>>,
-    /// The NAT resolver
-    nat: Option<NatResolver>,
+    /// Literal NAT address or the last successful DNS result when discovery is disabled.
+    external_ip: Mutex<Option<IpAddr>>,
 }
 
 /// Provides access to modify the network's additional protocol handlers.
