@@ -339,17 +339,13 @@ fn is_public_ip(ip: IpAddr) -> bool {
             match segments {
                 // Globally reachable exceptions within the IETF protocol assignments.
                 [0x2001, 1, 0, 0, 0, 0, 0, 1..=3] |
-                [0x2001, 3, ..] |
-                [0x2001, 4, 0x112, ..] |
-                [0x2001, 0x20..=0x3f, ..] => true,
+                [0x2001, 3 | 0x20..=0x3f, ..] |
+                [0x2001, 4, 0x112, ..] => true,
                 // The well-known NAT64 prefix inherits the embedded IPv4 address's scope.
                 [0x64, 0xff9b, 0, 0, 0, 0, a, b] => is_public_ip(
                     std::net::Ipv4Addr::from((u32::from(a) << 16) | u32::from(b)).into(),
                 ),
-                [0x2001, 0..=0x1ff, ..] |
-                [0x2001, 0xdb8, ..] |
-                [0x2002, ..] |
-                [0x3fff, 0..=0xfff, ..] => false,
+                [0x2001, 0..=0x1ff | 0xdb8, ..] | [0x2002, ..] | [0x3fff, 0..=0xfff, ..] => false,
                 // Public unicast allocations are within 2000::/3. This excludes local,
                 // mapped, multicast, discard-only and reserved address space.
                 [first, ..] => first & 0xe000 == 0x2000,
@@ -555,7 +551,12 @@ mod tests {
             let server = tokio::spawn(async move {
                 let (mut socket, _) = listener.accept().await.unwrap();
                 let mut request = [0; 1024];
-                socket.read(&mut request).await.unwrap();
+                let mut len = 0;
+                while !request[..len].ends_with(b"\r\n\r\n") {
+                    let read = socket.read(&mut request[len..]).await.unwrap();
+                    assert!(read > 0);
+                    len += read;
+                }
                 let response = format!(
                     "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
                     body.len()
