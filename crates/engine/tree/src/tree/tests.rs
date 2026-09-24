@@ -3350,3 +3350,39 @@ async fn test_on_backfill_sync_finished_opstack_retriggers_backfill_to_buffered_
 async fn test_on_backfill_sync_finished_eth_retriggers_backfill_to_buffered_finalized() {
     assert_post_backfill_recheck_retriggers_to_buffered_target(EngineApiKind::Ethereum).await;
 }
+
+/// A stale persisted hash must not count as an ancestor after an in-memory reorg.
+#[test]
+fn test_forkchoice_rejects_stale_persisted_prefix_hash() {
+    let mut test_harness = TestHarness::new(MAINNET.clone());
+    let old: Vec<_> = test_harness.block_builder.get_executed_blocks(0..3).collect();
+    test_harness = test_harness.with_blocks(old.clone());
+
+    let new: Vec<_> = test_harness
+        .block_builder
+        .create_fork(old[0].recovered_block(), 2)
+        .into_iter()
+        .map(|block| {
+            ExecutedBlock::new(
+                Arc::new(block),
+                Arc::new(BlockExecutionOutput::default()),
+                ComputedTrieData::default(),
+            )
+        })
+        .collect();
+    test_harness.tree.canonical_in_memory_state.update_chain(NewCanonicalChain::Reorg {
+        new: vec![new[0].clone()],
+        old: old[1..].to_vec(),
+    });
+
+    let state = ForkchoiceState {
+        head_block_hash: new[1].recovered_block().hash(),
+        safe_block_hash: old[1].recovered_block().hash(),
+        finalized_block_hash: old[0].recovered_block().hash(),
+    };
+    let update = NewCanonicalChain::Commit { new: vec![new[1].clone()] };
+    assert!(!test_harness.tree.is_consistent_forkchoice_state(state, Some(&update)).unwrap());
+
+    let state = ForkchoiceState { safe_block_hash: new[0].recovered_block().hash(), ..state };
+    assert!(test_harness.tree.is_consistent_forkchoice_state(state, Some(&update)).unwrap());
+}

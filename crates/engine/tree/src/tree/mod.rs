@@ -3387,13 +3387,16 @@ where
     ///
     /// The [Engine API forkchoiceUpdated specification] requires `-38002` when a `VALID` head's
     /// safe or finalized hash is outside that chain, and requires all forkchoice state updates to
-    /// be atomic. This check must therefore run before canonicalizing the head or updating either
-    /// marker; checking only after canonicalization would leave an invalid reorg applied.
+    /// be atomic. In direct FCU processing, this check must therefore run before canonicalizing
+    /// the head or updating either marker; checking only after canonicalization would leave an
+    /// invalid reorg applied.
     ///
     /// `chain_update` describes a proposed commit or reorg that has not yet been applied. Its new
     /// blocks and the canonical prefix below its first block form the proposed chain. Without a
     /// chain update, the proposed head is already canonical, so only canonical blocks through its
-    /// height are eligible. A zero safe or finalized hash leaves that marker unchanged.
+    /// height are eligible. For a canonical-prefix hash, the current in-memory or persisted
+    /// canonical hash must match too: a stale persisted header may still be found by hash while
+    /// disk reorg cleanup is pending. A zero safe or finalized hash leaves that marker unchanged.
     /// Returns `Ok(false)` for an unknown or off-chain hash and propagates provider errors.
     ///
     /// [Engine API forkchoiceUpdated specification]: https://github.com/ethereum/execution-apis/blob/main/src/engine/paris.md#specification-1
@@ -3420,10 +3423,21 @@ where
             if hash.is_zero() || chain_update.is_some_and(|update| update.contains(hash)) {
                 continue
             }
-            if self
-                .find_canonical_header(hash)?
-                .is_none_or(|header| header.number() > canonical_head_number)
+            let Some(header) = self.find_canonical_header(hash)? else { return Ok(false) };
+            if header.number() > canonical_head_number {
+                return Ok(false)
+            }
+
+            // A persisted header can still be found by hash while its disk reorg is pending.
+            // Prefer the in-memory canonical hash at this height over the persisted one.
+            let canonical_hash = if let Some(hash) =
+                self.canonical_in_memory_state.hash_by_number(header.number())
             {
+                Some(hash)
+            } else {
+                self.provider.block_hash(header.number())?
+            };
+            if canonical_hash != Some(hash) {
                 return Ok(false)
             }
         }
