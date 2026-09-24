@@ -2,6 +2,28 @@
 //!
 //! Headers and snap state writes alternate in one task while the engine skips forkchoice, so no
 //! other writer touches the database during the run.
+//!
+//! # Lifecycle
+//!
+//! The engine starts a backfill with a target hash, as it does for the staged pipeline. A run
+//! then repeats four steps until the state is downloaded or the run stops:
+//!
+//! 1. Headers sync to the target, and nothing else: no stage below the pivot may execute over state
+//!    the node has not downloaded yet.
+//! 2. A pivot is selected under the head, or the attempt an earlier run recorded resumes, while its
+//!    pivot is still canonical.
+//! 3. Accounts, storage and code download against that pivot's state root and commit as they
+//!    arrive, while block access lists carry what is downloaded to a newer pivot as the chain moves
+//!    past it.
+//! 4. Once every account is covered, the state is handed to the merkle stage.
+//!
+//! A forkchoice update ends the current step at its next boundary, so headers catch up before
+//! the run continues from the progress it committed. Peers that do not serve the pivot's state
+//! wait instead of failing the run.
+//!
+//! The hand-off is where this ends today: [`SnapBackfillSync`] returns an error rather than
+//! publishing the state, so nothing executes on state the node has not verified. Publishing it,
+//! rebuilding its trie and accepting it come with activation.
 
 mod context;
 mod run;
