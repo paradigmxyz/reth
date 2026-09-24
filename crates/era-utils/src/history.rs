@@ -1,5 +1,5 @@
 use alloy_consensus::{
-    proofs::calculate_receipt_root, BlockHeader, Eip658Value, ReceiptEnvelope, ReceiptWithBloom,
+    proofs::calculate_receipt_root, BlockHeader, ReceiptEnvelope, ReceiptWithBloom,
     RlpDecodableReceipt, TxReceipt,
 };
 use alloy_primitives::{BlockHash, BlockNumber, Bloom, U256};
@@ -579,7 +579,7 @@ fn receipts_from_envelopes<R: RlpDecodableReceipt>(
     envelopes: Vec<ReceiptEnvelope>,
 ) -> eyre::Result<Vec<R>> {
     for envelope in &envelopes {
-        if matches!(envelope.status_or_post_state(), Eip658Value::PostState(_)) {
+        if envelope.status_or_post_state().is_post_state() {
             eyre::bail!(
                 "block {number} has pre-Byzantium receipts, which commit to a post-state root \
                  rather than a success status and so cannot be represented by this node's receipt \
@@ -870,7 +870,9 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_consensus::{Header, Receipt as RlpReceipt, ReceiptWithBloom, TxLegacy, TxType};
+    use alloy_consensus::{
+        Eip658Value, Header, Receipt as RlpReceipt, ReceiptWithBloom, TxLegacy, TxType,
+    };
     use alloy_primitives::{Address, Bytes, Log, Signature, B256};
     use reth_db_common::init::init_genesis;
     use reth_era::{

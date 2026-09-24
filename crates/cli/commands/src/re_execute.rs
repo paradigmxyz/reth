@@ -6,7 +6,10 @@ use crate::common::{
 };
 use alloy_consensus::{transaction::TxHashRef, BlockHeader, TxReceipt};
 use alloy_eip7928::bal::Bal;
-use alloy_primitives::{Address, B256, U256};
+use alloy_primitives::{
+    map::{AddressMap, B256Map},
+    B256,
+};
 use clap::Parser;
 use eyre::WrapErr;
 use reth_chainspec::{EthChainSpec, EthereumHardforks, Hardforks};
@@ -30,7 +33,6 @@ use reth_revm::{
 use reth_stages::stages::calculate_gas_used_from_headers;
 use reth_storage_api::{ChangeSetReader, DBProvider, StateProvider, StorageChangeSetReader};
 use std::{
-    collections::HashMap,
     sync::{
         atomic::{AtomicU64, Ordering},
         Arc,
@@ -413,13 +415,13 @@ where
     for (i, block_reverts) in bundle.reverts.iter().rev().enumerate() {
         let block_number = last_block - i as u64;
 
-        let mut cs_accounts: HashMap<Address, Option<Account>> = provider
+        let mut cs_accounts = provider
             .account_block_changeset(block_number)?
             .into_iter()
             .map(|cs| (cs.address, cs.info))
-            .collect();
+            .collect::<AddressMap<_>>();
 
-        let mut cs_storage: HashMap<Address, HashMap<B256, U256>> = HashMap::new();
+        let mut cs_storage = AddressMap::<B256Map<_>>::default();
         for (bna, entry) in provider.storage_changeset(block_number)? {
             cs_storage.entry(bna.address()).or_default().insert(entry.key, entry.value);
         }
