@@ -62,6 +62,8 @@ pub enum NatResolver {
     NetIf,
     /// Resolve nothing
     None,
+    /// Resolve external IP via the named network interface.
+    NetIfNamed(String),
 }
 
 impl NatResolver {
@@ -102,6 +104,7 @@ impl fmt::Display for NatResolver {
             Self::ExternalAddr(domain) => write!(f, "extaddr:{domain}"),
             Self::NetIf => f.write_str("netif"),
             Self::None => f.write_str("none"),
+            Self::NetIfNamed(name) => write!(f, "netif:{name}"),
         }
     }
 }
@@ -132,6 +135,9 @@ impl FromStr for NatResolver {
                     Self::ExternalIp(ip.parse()?)
                 } else if let Some(domain) = s.strip_prefix("extaddr:") {
                     Self::ExternalAddr(domain.to_string())
+                } else if let Some(name) = s.strip_prefix("netif:").filter(|name| !name.is_empty())
+                {
+                    Self::NetIfNamed(name.to_string())
                 } else {
                     return Err(ParseNatResolverError::UnknownVariant(format!(
                         "Unknown Nat Resolver: {s}"
@@ -243,21 +249,7 @@ pub async fn external_addr_with(resolver: NatResolver) -> Option<IpAddr> {
     match resolver {
         NatResolver::Any | NatResolver::Upnp | NatResolver::PublicIp => resolve_external_ip().await,
         NatResolver::ExternalIp(ip) => Some(ip),
-        NatResolver::NetIf => tokio::task::spawn_blocking(|| {
-            resolve_net_if_ip(DEFAULT_NET_IF_NAME)
-        })
-        .await
-        .inspect_err(|err| {
-            debug!(target: "net::nat", %err, "Failed to join network interface resolution task");
-        })
-        .ok()?
-        .inspect_err(|err| {
-            debug!(target: "net::nat",
-                 %err,
-                "Failed to resolve network interface IP"
-            );
-        })
-        .ok(),
+        NatResolver::NetIf => resolve_interface_ip(DEFAULT_NET_IF_NAME.to_string()).await,
         NatResolver::ExternalAddr(domain) => tokio::net::lookup_host(format!("{domain}:0"))
             .await
             .inspect_err(|err| {
@@ -266,6 +258,7 @@ pub async fn external_addr_with(resolver: NatResolver) -> Option<IpAddr> {
             .ok()
             .and_then(|mut addrs| addrs.next().map(|addr| addr.ip())),
         NatResolver::None => None,
+        NatResolver::NetIfNamed(name) => resolve_interface_ip(name).await,
     }
 }
 
@@ -307,6 +300,22 @@ async fn resolve_external_ip_url(client: &reqwest::Client, url: &str) -> Option<
     let response = response.error_for_status().ok()?;
     let text = response.text().await.ok()?;
     text.trim().parse().ok()
+}
+
+async fn resolve_interface_ip(name: String) -> Option<IpAddr> {
+    tokio::task::spawn_blocking(move || resolve_net_if_ip(&name))
+        .await
+        .inspect_err(|err| {
+            debug!(target: "net::nat", %err, "Failed to join network interface resolution task");
+        })
+        .ok()?
+        .inspect_err(|err| {
+            debug!(target: "net::nat",
+                 %err,
+                "Failed to resolve network interface IP"
+            );
+        })
+        .ok()
 }
 
 #[cfg(test)]
@@ -417,5 +426,25 @@ mod tests {
         let s = "extip:0.0.0.0";
         assert_eq!(ip, s.parse().unwrap());
         assert_eq!(ip.to_string(), s);
+    }
+
+    #[test]
+    fn named_interface_roundtrip() {
+        let resolver = NatResolver::NetIfNamed("en0".into());
+        assert_eq!(resolver.to_string(), "netif:en0");
+        assert_eq!("netif:en0".parse::<NatResolver>().unwrap(), resolver);
+        assert_eq!("netif".parse::<NatResolver>().unwrap(), NatResolver::NetIf);
+        assert!("netif:".parse::<NatResolver>().is_err());
+    }
+
+    #[tokio::test]
+    async fn named_interface_resolves_selected_interface() {
+        let name = if cfg!(target_os = "macos") { "lo0" } else { "lo" };
+        let expected = resolve_net_if_ip(name).unwrap();
+        assert_eq!(NatResolver::NetIfNamed(name.into()).external_addr().await, Some(expected));
+        assert_eq!(
+            NatResolver::NetIfNamed("reth-missing-interface".into()).external_addr().await,
+            None
+        );
     }
 }

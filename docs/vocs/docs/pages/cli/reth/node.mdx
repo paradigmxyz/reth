@@ -179,7 +179,9 @@ Networking:
           Do not persist peers.
 
       --nat <NAT>
-          NAT resolution method (any|none|upnp|publicip|extip:\<IP\>)
+          NAT resolution method (any|none|upnp|publicip|extip:\<IP\>|extaddr:\<DOMAIN\>|netif[:\<IF_NAME\>])
+
+          With `netif`, uses `--net-if.experimental` if set, otherwise `eth0`.
 
           [default: any]
 

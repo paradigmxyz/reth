@@ -289,7 +289,10 @@ pub struct NetworkArgs {
     #[arg(long, verbatim_doc_comment)]
     pub no_persist_peers: bool,
 
-    /// NAT resolution method (any|none|upnp|publicip|extip:\<IP\>)
+    /// NAT resolution method
+    /// (any|none|upnp|publicip|extip:\<IP\>|extaddr:\<DOMAIN\>|netif[:\<IF_NAME\>])
+    ///
+    /// With `netif`, uses `--net-if.experimental` if set, otherwise `eth0`.
     #[arg(long, default_value_t = DefaultNetworkArgs::get_global().nat.clone())]
     pub nat: NatResolver,
 
@@ -485,6 +488,14 @@ impl NetworkArgs {
         self.discovery.addr
     }
 
+    /// Selects the interface used for periodic NAT resolution without changing other NAT modes.
+    fn resolved_nat(&self) -> NatResolver {
+        match (&self.nat, self.net_if.as_deref().filter(|name| !name.is_empty())) {
+            (NatResolver::NetIf, Some(name)) => NatResolver::NetIfNamed(name.to_string()),
+            _ => self.nat.clone(),
+        }
+    }
+
     /// Returns the resolved bootnodes if any are provided.
     pub fn resolved_bootnodes(&self) -> Option<Vec<NodeRecord>> {
         self.bootnodes.as_deref().map(|bootnodes| {
@@ -591,7 +602,7 @@ impl NetworkArgs {
 
         // Configure basic network stack
         NetworkConfigBuilder::<N>::new(secret_key, executor)
-            .external_ip_resolver(self.nat.clone())
+            .external_ip_resolver(self.resolved_nat())
             .sessions_config(
                 config.sessions.clone().with_upscaled_event_buffer(peers_config.max_peers()),
             )
@@ -1661,5 +1672,27 @@ mod tests {
 
         let args = NetworkArgs { bootnodes: Some(vec![enode.parse().unwrap()]), ..args };
         assert_eq!(boot_nodes(&args), vec![enode.parse::<TrustedPeer>().unwrap()]);
+    }
+
+    #[test]
+    fn nat_netif_follows_selected_interface() {
+        let mut args = NetworkArgs { nat: NatResolver::NetIf, ..Default::default() };
+        assert_eq!(args.resolved_nat(), NatResolver::NetIf);
+        args.net_if = Some("en0".into());
+        assert_eq!(args.resolved_nat(), NatResolver::NetIfNamed("en0".into()));
+        args.net_if = Some(String::new());
+        assert_eq!(args.resolved_nat(), NatResolver::NetIf);
+
+        args.net_if = Some("en0".into());
+        for resolver in [
+            NatResolver::Any,
+            NatResolver::None,
+            NatResolver::ExternalIp("10.0.0.1".parse().unwrap()),
+            NatResolver::ExternalAddr("localhost".into()),
+            NatResolver::NetIfNamed("eth1".into()),
+        ] {
+            args.nat = resolver.clone();
+            assert_eq!(args.resolved_nat(), resolver);
+        }
     }
 }
