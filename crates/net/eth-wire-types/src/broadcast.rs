@@ -173,6 +173,7 @@ pub fn decode_list_with_memory_budget<T: Decodable + InMemorySize>(
     if !list {
         return Err(alloy_rlp::Error::UnexpectedString)
     }
+    // Payload length checked by Header::decode.
     let (mut payload, rest) = buf.split_at(payload_length);
 
     let mut txs = Vec::with_capacity(estimated_transaction_list_capacity(payload_length));
@@ -738,6 +739,7 @@ impl Decodable for NewPooledTransactionHashes68 {
         if !list {
             return Err(alloy_rlp::Error::UnexpectedString)
         }
+        // Payload length checked by Header::decode.
         let (mut payload, rest) = buf.split_at(payload_length);
         let (types, sizes, hashes) = decode_pooled_transaction_hashes_payload(&mut payload)?;
 
@@ -921,6 +923,7 @@ impl Decodable for NewPooledTransactionHashes72 {
         if !list {
             return Err(alloy_rlp::Error::UnexpectedString)
         }
+        // Payload length checked by Header::decode.
         let (mut payload, rest) = buf.split_at(payload_length);
         let (types, sizes, hashes) = decode_pooled_transaction_hashes_payload(&mut payload)?;
         let Some(first_byte) = payload.first().copied() else {

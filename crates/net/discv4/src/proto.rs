@@ -209,6 +209,7 @@ impl alloy_rlp::Decodable for PingNodeEndpoint {
         if !list {
             return Err(alloy_rlp::Error::UnexpectedString);
         }
+        // Payload length checked by Header::decode.
         let started_len = b.len();
 
         // Geth allows the ipaddr to be possibly empty:

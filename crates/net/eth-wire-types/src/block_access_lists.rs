@@ -57,6 +57,7 @@ impl Decodable for BlockAccessLists {
         if !list {
             return Err(alloy_rlp::Error::UnexpectedString)
         }
+        // Payload length checked by Header::decode.
         let (mut payload, rest) = buf.split_at(payload_length);
         let mut bals = Vec::new();
 
