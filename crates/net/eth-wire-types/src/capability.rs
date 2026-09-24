@@ -355,10 +355,6 @@ impl Encodable for Capabilities {
     fn encode(&self, out: &mut dyn BufMut) {
         self.inner.encode(out)
     }
-
-    fn length(&self) -> usize {
-        self.inner.length()
-    }
 }
 
 impl Decodable for Capabilities {
