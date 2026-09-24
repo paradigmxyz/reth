@@ -667,8 +667,10 @@ mod tests {
 
             let encoded = alloy_rlp::encode(&msg);
             assert_eq!(msg.length(), encoded.len());
-            let decoded = Ping::decode(&mut encoded.as_slice()).unwrap();
+            let mut buf = encoded.as_slice();
+            let decoded = Ping::decode(&mut buf).unwrap();
             assert_eq!(msg, decoded);
+            assert!(buf.is_empty());
         }
     }
 
@@ -687,8 +689,10 @@ mod tests {
 
             let encoded = alloy_rlp::encode(&msg);
             assert_eq!(msg.length(), encoded.len());
-            let decoded = Ping::decode(&mut encoded.as_slice()).unwrap();
+            let mut buf = encoded.as_slice();
+            let decoded = Ping::decode(&mut buf).unwrap();
             assert_eq!(msg, decoded);
+            assert!(buf.is_empty());
         }
     }
 
@@ -707,8 +711,10 @@ mod tests {
 
             let encoded = alloy_rlp::encode(&msg);
             assert_eq!(msg.length(), encoded.len());
-            let decoded = Pong::decode(&mut encoded.as_slice()).unwrap();
+            let mut buf = encoded.as_slice();
+            let decoded = Pong::decode(&mut buf).unwrap();
             assert_eq!(msg, decoded);
+            assert!(buf.is_empty());
         }
     }
 
@@ -727,8 +733,10 @@ mod tests {
 
             let encoded = alloy_rlp::encode(&msg);
             assert_eq!(msg.length(), encoded.len());
-            let decoded = Pong::decode(&mut encoded.as_slice()).unwrap();
+            let mut buf = encoded.as_slice();
+            let decoded = Pong::decode(&mut buf).unwrap();
             assert_eq!(msg, decoded);
+            assert!(buf.is_empty());
         }
     }
 

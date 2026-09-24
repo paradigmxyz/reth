@@ -1,7 +1,7 @@
 //! Implement BSC upgrade message which is required during handshake with other BSC clients, e.g.,
 //! geth.
 use alloy_rlp::{Decodable, Encodable, RlpDecodable, RlpEncodable};
-use bytes::{Buf, BufMut, Bytes, BytesMut};
+use bytes::{BufMut, Bytes, BytesMut};
 
 /// The message id for the upgrade status message, used in the BSC handshake.
 const UPGRADE_STATUS_MESSAGE_ID: u8 = 0x0b;
@@ -32,7 +32,6 @@ impl Decodable for UpgradeStatus {
         if message_id != UPGRADE_STATUS_MESSAGE_ID {
             return Err(alloy_rlp::Error::Custom("Invalid message ID"));
         }
-        buf.advance(1);
         let extension = UpgradeStatusExtension::decode(buf)?;
         Ok(Self { extension })
     }
@@ -55,4 +54,22 @@ pub struct UpgradeStatusExtension {
     // TODO: support disable_peer_tx_broadcast flag
     /// To notify a peer to disable the broadcast of transactions or not.
     pub disable_peer_tx_broadcast: bool,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn upgrade_status_rlp_roundtrip_and_length() {
+        for disable_peer_tx_broadcast in [false, true] {
+            let status =
+                UpgradeStatus { extension: UpgradeStatusExtension { disable_peer_tx_broadcast } };
+            let encoded = alloy_rlp::encode(&status);
+            assert_eq!(status.length(), encoded.len());
+            let mut buf = encoded.as_slice();
+            assert_eq!(UpgradeStatus::decode(&mut buf).unwrap(), status);
+            assert!(buf.is_empty());
+        }
+    }
 }
