@@ -215,9 +215,8 @@ where
         let _ = self.provider.bal_store().flush(&canonical_blocks).inspect_err(|err| {
             warn!(target: "engine::persistence", last=?last_block, ?err, "Failed to flush BAL store");
         });
-        debug!(target: "engine::persistence", first=?first_block, last=?last_block, "Saved range of blocks");
-
         let elapsed = start_time.elapsed();
+        debug!(target: "engine::persistence", first=?first_block, last=?last_block, elapsed_us = elapsed.as_micros(), "Saved range of blocks");
         self.metrics.save_blocks_batch_size.record(block_count as f64);
         self.metrics.save_blocks_duration_seconds.record(elapsed);
 

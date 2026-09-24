@@ -793,6 +793,7 @@ where
 
         let proof_elapsed = proof_start.elapsed();
         *storage_proofs_processed += 1;
+        debug!(target: "trie::proof_timing", kind = "storage", proof_time_us = proof_elapsed.as_micros(), "Proof calculated");
 
         let root = result.as_ref().ok().and_then(|result| result.root());
 
@@ -1105,6 +1106,7 @@ where
         let proof_elapsed = proof_start.elapsed();
         let total_elapsed = start.elapsed();
         *account_proofs_processed += 1;
+        debug!(target: "trie::proof_timing", kind = "account", proof_time_us = proof_elapsed.as_micros(), "Proof calculated");
 
         // Send result to SparseTrieCacheTask
         if result_tx.send(ProofResultMessage { result, elapsed: total_elapsed, state }).is_err() {
@@ -1248,6 +1250,7 @@ where
             idle_time += idle_start.elapsed();
             self.availability.mark_busy(self.worker_id);
             let StorageProofInput { hashed_address, mut targets, needs_root } = input;
+            let proof_start = Instant::now();
             let result = (|| -> Result<StorageProofResult, StateProofError> {
                 let proof = if targets.is_empty() {
                     vec![calculator.storage_root_node(hashed_address)?]
@@ -1261,6 +1264,7 @@ where
                 }
                 Ok(StorageProofResult { proof, root })
             })();
+            debug!(target: "trie::proof_timing", kind = "storage", proof_time_us = proof_start.elapsed().as_micros(), "Proof calculated");
             let _ = proof_result_sender.send(StorageProofResultMessage { hashed_address, result });
             self.availability.mark_idle(self.worker_id);
             idle_start = Instant::now();
@@ -1299,6 +1303,7 @@ where
             idle_time += idle_start.elapsed();
             self.availability.mark_busy(self.worker_id);
             let AccountMultiproofInput { targets, proof_result_sender } = *input;
+            let proof_start = Instant::now();
             let result = (|| -> Result<DecodedMultiProofV2, StateRootTaskError> {
                 let MultiProofTargetsV2 { mut account_targets, storage_targets } = targets;
                 let receivers =
@@ -1314,6 +1319,7 @@ where
                 }
                 Ok(DecodedMultiProofV2 { account_proofs, storage_proofs })
             })();
+            debug!(target: "trie::proof_timing", kind = "account", proof_time_us = proof_start.elapsed().as_micros(), "Proof calculated");
             let ProofResultContext { sender, state, start_time } = proof_result_sender;
             let _ =
                 sender.send(ProofResultMessage { result, state, elapsed: start_time.elapsed() });
