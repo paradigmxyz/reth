@@ -73,7 +73,7 @@ where
         .iter()
         .chain(EthereumHardfork::bpo_variants());
     for fork in blob_forks {
-        if let ForkCondition::Timestamp(ts) = spec.ethereum_fork_activation(*fork) &&
+        if let Some(ts) = spec.ethereum_fork_activation(*fork).as_timestamp() &&
             let Some(params) = spec.blob_params_at_timestamp(ts)
         {
             // Forks can share a timestamp, so preserve explicitly configured per-fork params.

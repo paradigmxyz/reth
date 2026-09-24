@@ -25,7 +25,7 @@
 #![cfg_attr(docsrs, feature(doc_cfg))]
 
 use alloy_consensus::{constants::KECCAK_EMPTY, transaction::TransactionMeta, BlockHeader};
-use alloy_eips::{BlockHashOrNumber, BlockNumberOrTag};
+use alloy_eips::BlockHashOrNumber;
 use alloy_network::{primitives::HeaderResponse, BlockResponse};
 use alloy_primitives::{Address, BlockHash, BlockNumber, StorageKey, TxHash, TxNumber, B256, U256};
 use alloy_provider::{ext::DebugApi, network::Network, Provider};
@@ -305,7 +305,7 @@ where
         self.block_on_async(async {
             let block = self
                 .provider
-                .get_block(BlockId::Number(BlockNumberOrTag::Latest))
+                .get_block(BlockId::latest())
                 .await
                 .map_err(ProviderError::other)?
                 .ok_or(ProviderError::HeaderNotFound(0.into()))?;

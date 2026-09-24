@@ -1,9 +1,9 @@
-use alloy_consensus::{constants::KECCAK_EMPTY, transaction::TxHashRef, BlockHeader};
+use alloy_consensus::{transaction::TxHashRef, BlockHeader};
 use alloy_eips::{eip2718::Encodable2718, BlockId, BlockNumberOrTag};
 use alloy_evm::{env::BlockEnvironment, Evm};
 use alloy_genesis::ChainConfig;
 use alloy_primitives::{hex::decode, uint, Address, Bytes, B256, U256, U64};
-use alloy_rlp::{Decodable, Encodable};
+use alloy_rlp::Decodable;
 use alloy_rpc_types::BlockTransactionsKind;
 use alloy_rpc_types_debug::ExecutionWitness;
 use alloy_rpc_types_eth::{
@@ -759,7 +759,7 @@ where
         EthApiError: From<DB::Error>,
     {
         let account = db.basic(address).map_err(Eth::Error::from_eth_err)?.unwrap_or_default();
-        let code = if account.code_hash == KECCAK_EMPTY {
+        let code = if account.is_empty_code_hash() {
             Default::default()
         } else if let Some(code) = account.code {
             code.original_bytes()
@@ -868,9 +868,7 @@ where
         }
         .ok_or(EthApiError::HeaderNotFound(block_id))?;
 
-        let mut res = Vec::new();
-        header.encode(&mut res);
-        Ok(res.into())
+        Ok(alloy_rlp::encode(&header).into())
     }
 
     /// Handler for `debug_getRawBlock`
@@ -880,9 +878,7 @@ where
             .block_by_id(block_id)
             .to_rpc_result()?
             .ok_or(EthApiError::HeaderNotFound(block_id))?;
-        let mut res = Vec::new();
-        block.encode(&mut res);
-        Ok(res.into())
+        Ok(alloy_rlp::encode(&block).into())
     }
 
     /// Handler for `debug_getRawBlockAccessList`

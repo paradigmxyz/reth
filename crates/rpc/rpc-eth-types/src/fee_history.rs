@@ -375,9 +375,7 @@ where
         Self {
             header: block.header().clone(),
             gas_used_ratio: header.gas_used() as f64 / header.gas_limit() as f64,
-            base_fee_per_blob_gas: header
-                .excess_blob_gas()
-                .and_then(|excess_blob_gas| Some(blob_params?.calc_blob_fee(excess_blob_gas))),
+            base_fee_per_blob_gas: blob_params.and_then(|params| header.blob_fee(params)),
             blob_gas_used_ratio: checked_blob_gas_used_ratio(
                 block.body().blob_gas_used(),
                 blob_params

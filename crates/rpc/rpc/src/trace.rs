@@ -1,6 +1,6 @@
 use alloy_consensus::BlockHeader as _;
-use alloy_eips::BlockId;
-use alloy_evm::block::calc::{base_block_reward_pre_merge, block_reward, ommer_reward};
+use alloy_eips::{BlockId, BlockNumHash};
+use alloy_evm::block::calc::{base_block_reward, block_reward, ommer_reward};
 use alloy_primitives::{
     map::{HashMap, HashSet},
     Address, BlockHash, Bytes, B256, U256,
@@ -18,7 +18,7 @@ use alloy_rpc_types_trace::{
 use async_trait::async_trait;
 use futures::{FutureExt, StreamExt};
 use jsonrpsee::core::RpcResult;
-use reth_chainspec::{ChainSpecProvider, EthereumHardforks};
+use reth_chainspec::ChainSpecProvider;
 use reth_primitives_traits::{BlockBody, BlockHeader};
 use reth_rpc_api::TraceApiServer;
 use reth_rpc_convert::RpcTxReq;
@@ -302,17 +302,8 @@ where
     ///
     /// - if Paris hardfork is activated, no block rewards are given
     /// - if Paris hardfork is not activated, calculate block rewards with block number only
-    fn calculate_base_block_reward<H: BlockHeader>(
-        &self,
-        header: &H,
-    ) -> Result<Option<u128>, Eth::Error> {
-        let chain_spec = self.provider().chain_spec();
-
-        if chain_spec.is_paris_active_at_block(header.number()) {
-            return Ok(None)
-        }
-
-        Ok(Some(base_block_reward_pre_merge(&chain_spec, header.number())))
+    fn calculate_base_block_reward<H: BlockHeader>(&self, header: &H) -> Option<u128> {
+        base_block_reward(self.provider().chain_spec(), header.number())
     }
 
     /// Extracts the reward traces for the given block:
@@ -328,30 +319,29 @@ where
         let ommers_cnt = ommers.map(|o| o.len()).unwrap_or_default();
         let mut traces = Vec::with_capacity(ommers_cnt + 1);
 
+        let block = BlockNumHash::new(header.number(), block_hash);
         let block_reward = block_reward(base_block_reward, ommers_cnt);
-        traces.push(reward_trace(
-            block_hash,
-            header,
+        traces.push(
             RewardAction {
                 author: header.beneficiary(),
                 reward_type: RewardType::Block,
                 value: U256::from(block_reward),
-            },
-        ));
+            }
+            .into_localized_trace(block),
+        );
 
         let Some(ommers) = ommers else { return traces };
 
         for uncle in ommers {
             let uncle_reward = ommer_reward(base_block_reward, header.number(), uncle.number());
-            traces.push(reward_trace(
-                block_hash,
-                header,
+            traces.push(
                 RewardAction {
                     author: uncle.beneficiary(),
                     reward_type: RewardType::Uncle,
                     value: U256::from(uncle_reward),
-                },
-            ));
+                }
+                .into_localized_trace(block),
+            );
         }
         traces
     }
@@ -472,7 +462,7 @@ where
                 let (block, traces) = block_replay?;
                 let reward_traces = if include_reward_traces {
                     if let Some(base_block_reward) =
-                        self.calculate_base_block_reward(block.header())?
+                        self.calculate_base_block_reward(block.header())
                     {
                         self.extract_reward_traces(
                             block.header(),
@@ -544,7 +534,7 @@ where
             .map(|traces| traces.into_iter().flatten().collect::<Vec<_>>());
 
         if let Some(traces) = traces.as_mut() &&
-            let Some(base_block_reward) = self.calculate_base_block_reward(block.header())?
+            let Some(base_block_reward) = self.calculate_base_block_reward(block.header())
         {
             traces.extend(self.extract_reward_traces(
                 block.header(),
@@ -869,28 +859,6 @@ pub struct BlockStorageAccess {
     pub transactions: Vec<TransactionStorageAccess>,
 }
 
-/// Helper to construct a [`LocalizedTransactionTrace`] that describes a reward to the block
-/// beneficiary.
-fn reward_trace<H: BlockHeader>(
-    block_hash: BlockHash,
-    header: &H,
-    reward: RewardAction,
-) -> LocalizedTransactionTrace {
-    LocalizedTransactionTrace {
-        block_hash: Some(block_hash),
-        block_number: Some(header.number()),
-        transaction_hash: None,
-        transaction_position: None,
-        trace: TransactionTrace {
-            trace_address: vec![],
-            subtraces: 0,
-            action: Action::Reward(reward),
-            error: None,
-            result: None,
-        },
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1120,23 +1088,8 @@ mod tests {
     }
 
     fn localized_reward_trace(block_number: u64) -> LocalizedTransactionTrace {
-        LocalizedTransactionTrace {
-            block_hash: Some(B256::ZERO),
-            block_number: Some(block_number),
-            transaction_hash: None,
-            transaction_position: None,
-            trace: TransactionTrace {
-                trace_address: vec![],
-                subtraces: 0,
-                action: Action::Reward(RewardAction {
-                    author: Address::ZERO,
-                    reward_type: RewardType::Block,
-                    value: U256::ZERO,
-                }),
-                error: None,
-                result: None,
-            },
-        }
+        RewardAction { author: Address::ZERO, reward_type: RewardType::Block, value: U256::ZERO }
+            .into_localized_trace(BlockNumHash::new(block_number, B256::ZERO))
     }
 
     fn trace_order(traces: &[LocalizedTransactionTrace]) -> Vec<(u64, Option<u64>, bool)> {

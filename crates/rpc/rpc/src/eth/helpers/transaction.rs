@@ -2,7 +2,9 @@
 
 use crate::EthApi;
 use alloy_consensus::BlobTransactionValidationError;
-use alloy_eips::{eip7594::BlobTransactionSidecarVariant, BlockId, Typed2718};
+use alloy_eips::{
+    eip7594::BlobTransactionSidecarVariant, merge::SLOT_DURATION_SECS, BlockId, Typed2718,
+};
 use alloy_primitives::{hex, B256};
 use reth_chainspec::{ChainSpecProvider, EthereumHardforks};
 use reth_primitives_traits::{AlloyBlockHeader, WithEncoded};
@@ -53,11 +55,9 @@ where
                         .latest_header()?
                         .ok_or(EthApiError::HeaderNotFound(BlockId::latest()))?;
                     // Convert to EIP-7594 if next block is Osaka
-                    if self
-                        .provider()
-                        .chain_spec()
-                        .is_osaka_active_at_timestamp(latest.timestamp().saturating_add(12))
-                    {
+                    if self.provider().chain_spec().is_osaka_active_at_timestamp(
+                        latest.timestamp().saturating_add(SLOT_DURATION_SECS),
+                    ) {
                         BlobTransactionSidecarVariant::Eip7594(
                             self.blob_sidecar_converter().convert(sidecar).await.ok_or_else(
                                 || {

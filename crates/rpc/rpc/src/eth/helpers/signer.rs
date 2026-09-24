@@ -247,10 +247,7 @@ mod tests {
             gas: Some(1000),
             gas_price: Some(1000u128),
             value: Some(U256::from(1000)),
-            input: TransactionInput {
-                data: Some(Bytes::from(message.to_vec())),
-                input: Some(Bytes::from(message.to_vec())),
-            },
+            input: TransactionInput::both(Bytes::from(message.to_vec())),
             nonce: Some(0u64),
             ..Default::default()
         };
