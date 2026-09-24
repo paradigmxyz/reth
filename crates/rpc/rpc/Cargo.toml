@@ -20,7 +20,7 @@ reth-rpc-eth-api.workspace = true
 reth-engine-primitives.workspace = true
 reth-errors.workspace = true
 reth-metrics.workspace = true
-reth-storage-api.workspace = true
+reth-storage-api = { workspace = true, features = ["chain-state"] }
 reth-execution-types = { workspace = true, features = ["serde"] }
 reth-chain-state.workspace = true
 reth-transaction-pool.workspace = true
@@ -108,4 +108,10 @@ js-tracer = [
     "evm2-inspectors/js-tracer",
     "reth-rpc-eth-types/js-tracer",
     "reth-rpc-eth-api/js-tracer",
+]
+account-ext = [
+    "reth-consensus-common/account-ext",
+    "reth-rpc-engine-api/account-ext",
+    "evm2/account-ext",
+    "revm/account-ext",
 ]

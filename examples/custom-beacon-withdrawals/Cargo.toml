@@ -17,5 +17,11 @@ evm2.workspace = true
 
 eyre.workspace = true
 
+[features]
+account-ext = [
+    "reth-ethereum/account-ext",
+    "evm2/account-ext",
+    "revm/account-ext",
+]
 [lints]
 workspace = true

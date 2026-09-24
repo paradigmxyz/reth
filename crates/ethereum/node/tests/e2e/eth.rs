@@ -31,6 +31,7 @@ use reth_node_ethereum::{
 use reth_provider::{BlockNumReader, StateProviderFactory};
 use reth_rpc_api::TestingBuildBlockRequestV1;
 use reth_rpc_layer::secret_to_bearer_header;
+use reth_rpc_server_types::{RethRpcModule, RpcModuleSelection};
 use reth_tasks::Runtime;
 use ssz::{Decode, Encode};
 use std::sync::Arc;
@@ -224,10 +225,9 @@ async fn test_testing_build_block_v1_osaka() -> eyre::Result<()> {
 
     let node_config =
         NodeConfig::test().with_chain(chain_spec.clone()).with_unused_ports().with_rpc(
-            RpcServerArgs::default()
-                .with_unused_ports()
-                .with_http()
-                .with_http_api(reth_rpc_server_types::RpcModuleSelection::All),
+            RpcServerArgs::default().with_unused_ports().with_http().with_http_api(
+                RpcModuleSelection::from([RethRpcModule::Eth, RethRpcModule::Testing]),
+            ),
         );
 
     let NodeHandle { node, node_exit_future: _ } = NodeBuilder::new(node_config)
@@ -299,10 +299,9 @@ async fn test_engine_ssz_proxy_can_mine_block() -> eyre::Result<()> {
     let genesis_hash = chain_spec.genesis_hash();
     let node_config =
         NodeConfig::test().with_chain(chain_spec.clone()).with_unused_ports().with_rpc(
-            RpcServerArgs::default()
-                .with_unused_ports()
-                .with_http()
-                .with_http_api(reth_rpc_server_types::RpcModuleSelection::All),
+            RpcServerArgs::default().with_unused_ports().with_http().with_http_api(
+                RpcModuleSelection::from([RethRpcModule::Eth, RethRpcModule::Testing]),
+            ),
         );
 
     let NodeHandle { node, node_exit_future: _ } = NodeBuilder::new(node_config)

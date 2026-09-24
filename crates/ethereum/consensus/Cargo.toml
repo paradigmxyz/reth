@@ -39,6 +39,7 @@ std = [
     "reth-primitives-traits/std",
     "tracing/std",
 ]
+account-ext = ["reth-consensus-common/account-ext"]
 
 [dev-dependencies]
 reth-ethereum-primitives.workspace = true

@@ -639,7 +639,7 @@ where
 
                 Ok(ExecutionWitnessRecord::new(&db)
                     .into_execution_witness(
-                        &db.db.inner().0,
+                        &db.db.inner().0 .0,
                         eth_api.provider(),
                         block_number,
                         mode,
@@ -724,9 +724,6 @@ where
             .map_err(Eth::Error::from_eth_err)?;
         let Some(account) = account else { return Ok(None) };
 
-        let balance = account.balance;
-        let nonce = account.nonce;
-        let code_hash = account.code_hash;
         let storage = db.cache.storage.get(&address);
         let hashed_storage = storage.map_or_else(HashedStorage::default, |s| {
             HashedStorage::from_plain_storage(s.slots.iter())
@@ -739,7 +736,10 @@ where
             db.db.inner().storage_root(address, hashed_storage).map_err(Eth::Error::from_eth_err)?
         };
 
-        Ok(Some(Account { balance, nonce, code_hash, storage_root }))
+        Ok(Some(
+            reth_primitives_traits::Account::from(reth_execution_types::revm_account(&account))
+                .into_trie_account(storage_root),
+        ))
     }
 
     /// Retrieves the account's balance, nonce, and code from the given state.
@@ -760,7 +760,15 @@ where
                 .original_bytes()
         };
 
-        Ok(AccountInfo { balance: account.balance, nonce: account.nonce, code })
+        Ok(AccountInfo {
+            balance: account.balance,
+            nonce: account.nonce,
+            code,
+            #[cfg(feature = "account-ext")]
+            extension: reth_primitives_traits::AccountExtension::from_shared(
+                account.extension.into_shared(),
+            ),
+        })
     }
 
     /// Returns the code associated with a given hash at the specified block ID. If no code is

@@ -107,3 +107,11 @@ test-utils = [
     "reth-ethereum-primitives/test-utils",
     "reth-revm/test-utils",
 ]
+account-ext = [
+    "evm2/account-ext",
+    "reth-metrics?/account-ext",
+    "reth-storage-api/account-ext",
+    "reth-execution-errors/account-ext",
+    "reth-revm/account-ext",
+    "revm/account-ext",
+]

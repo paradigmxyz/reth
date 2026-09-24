@@ -49,3 +49,10 @@ reth-testing-utils.workspace = true
 reth-tracing.workspace = true
 
 assert_matches.workspace = true
+
+[features]
+account-ext = [
+    "reth-config/account-ext",
+    "reth-exex-types/account-ext",
+    "reth-provider/account-ext",
+]

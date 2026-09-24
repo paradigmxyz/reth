@@ -80,7 +80,7 @@ pub struct TrieNodeIter<C, H: HashedCursor, K> {
 
 impl<C, H: HashedCursor, K> TrieNodeIter<C, H, K>
 where
-    H::Value: Copy,
+    H::Value: Clone,
     K: AsRef<AddedRemovedKeys>,
 {
     /// Creates a new [`TrieNodeIter`] for the state trie.
@@ -123,14 +123,13 @@ where
     ///
     /// If `metrics` feature is enabled, it also updates the metrics.
     fn seek_hashed_entry(&mut self, key: B256) -> Result<Option<(B256, H::Value)>, DatabaseError> {
-        if let Some((last_key, last_value)) = self.last_next_result &&
-            last_key == key
+        if let Some((last_key, _)) = self.last_next_result.as_ref() &&
+            *last_key == key
         {
             trace!(target: "trie::node_iter", seek_key = ?key, "reusing result from last next() call instead of seeking");
-            self.last_next_result = None; // Consume the cached value
-
-            let result = Some((last_key, last_value));
-            self.last_seeked_hashed_entry = Some(SeekedHashedEntry { seeked_key: key, result });
+            let result = self.last_next_result.take();
+            self.last_seeked_hashed_entry =
+                Some(SeekedHashedEntry { seeked_key: key, result: result.clone() });
 
             return Ok(result);
         }
@@ -139,7 +138,7 @@ where
             .last_seeked_hashed_entry
             .as_ref()
             .filter(|entry| entry.seeked_key == key)
-            .map(|entry| entry.result)
+            .map(|entry| entry.result.clone())
         {
             #[cfg(feature = "metrics")]
             self.metrics.inc_leaf_nodes_same_seeked();
@@ -148,7 +147,8 @@ where
 
         trace!(target: "trie::node_iter", ?key, "performing hashed cursor seek");
         let result = self.hashed_cursor.seek(key)?;
-        self.last_seeked_hashed_entry = Some(SeekedHashedEntry { seeked_key: key, result });
+        self.last_seeked_hashed_entry =
+            Some(SeekedHashedEntry { seeked_key: key, result: result.clone() });
 
         #[cfg(feature = "metrics")]
         {
@@ -163,7 +163,7 @@ where
     fn next_hashed_entry(&mut self) -> Result<Option<(B256, H::Value)>, DatabaseError> {
         let next = self.hashed_cursor.next()?;
 
-        self.last_next_result = next;
+        self.last_next_result = next.clone();
 
         #[cfg(feature = "metrics")]
         {
@@ -177,7 +177,7 @@ impl<C, H, K> TrieNodeIter<C, H, K>
 where
     C: TrieCursor,
     H: HashedCursor,
-    H::Value: Copy,
+    H::Value: Clone,
     K: AsRef<AddedRemovedKeys>,
 {
     /// Return the next trie node to be added to the hash builder.
@@ -407,14 +407,13 @@ mod tests {
         let account_3 = b256!("0x0000000000000000000000000000000000000000000000000000000000000100");
         let account_4 = b256!("0x0000000000000000000000000000000000000000000000000000000000000101");
         let account_5 = b256!("0x0000000000000000000000000000000000000000000000000000000000000110");
-        let empty_account = Account::default();
 
         let hash_builder_branch_nodes = get_hash_builder_branch_nodes(vec![
-            (Nibbles::unpack(account_1), empty_account),
-            (Nibbles::unpack(account_2), empty_account),
-            (Nibbles::unpack(account_3), empty_account),
-            (Nibbles::unpack(account_4), empty_account),
-            (Nibbles::unpack(account_5), empty_account),
+            (Nibbles::unpack(account_1), Account::default()),
+            (Nibbles::unpack(account_2), Account::default()),
+            (Nibbles::unpack(account_3), Account::default()),
+            (Nibbles::unpack(account_4), Account::default()),
+            (Nibbles::unpack(account_5), Account::default()),
         ]);
 
         let branch_node_1_rlp = RlpNode::from_rlp(&alloy_rlp::encode(BranchNode::new(
@@ -479,11 +478,11 @@ mod tests {
 
         let hashed_cursor_factory = MockHashedCursorFactory::new(
             BTreeMap::from([
-                (account_1, empty_account),
-                (account_2, empty_account),
-                (account_3, empty_account),
-                (account_4, empty_account),
-                (account_5, empty_account),
+                (account_1, Account::default()),
+                (account_2, Account::default()),
+                (account_3, Account::default()),
+                (account_4, Account::default()),
+                (account_5, Account::default()),
             ]),
             B256Map::default(),
         );

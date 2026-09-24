@@ -21,4 +21,6 @@ serde_json.workspace = true
 serde.workspace = true
 thiserror.workspace = true
 
+[features]
+account-ext = ["reth-ethereum/account-ext"]
 [lints]

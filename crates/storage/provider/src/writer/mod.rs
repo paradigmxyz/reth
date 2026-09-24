@@ -156,7 +156,7 @@ mod tests {
         );
         assert_eq!(
             provider.basic_account(&address_b).expect("Could not read account state"),
-            Some(reth_account_b_changed),
+            Some(reth_account_b_changed.clone()),
             "Account B state is wrong"
         );
 
@@ -891,7 +891,13 @@ mod tests {
         type PreState = BTreeMap<Address, (Account, BTreeMap<B256, U256>)>;
         let mut prestate: PreState = (0..10)
             .map(|key| {
-                let account = Account { nonce: 1, balance: U256::from(key), bytecode_hash: None };
+                let account = Account {
+                    nonce: 1,
+                    balance: U256::from(key),
+                    bytecode_hash: None,
+                    #[cfg(feature = "account-ext")]
+                    extension: Default::default(),
+                };
                 let storage =
                     (1..11).map(|key| (B256::with_last_byte(key), U256::from(key))).collect();
                 (Address::with_last_byte(key), (account, storage))
@@ -905,7 +911,7 @@ mod tests {
         let tx = provider_rw.tx_ref();
         for (address, (account, storage)) in &prestate {
             let hashed_address = keccak256(address);
-            tx.put::<tables::HashedAccounts>(hashed_address, *account).unwrap();
+            tx.put::<tables::HashedAccounts>(hashed_address, account.clone()).unwrap();
             for (slot, value) in storage {
                 tx.put::<tables::HashedStorages>(
                     hashed_address,
@@ -1050,9 +1056,14 @@ mod tests {
         assert_state_root(&state, &prestate, "changed nonce");
 
         // recreate account 1
-        let account1_new =
-            Account { nonce: 56, balance: U256::from(123), bytecode_hash: Some(B256::random()) };
-        prestate.insert(address1, (account1_new, BTreeMap::default()));
+        let account1_new = Account {
+            nonce: 56,
+            balance: U256::from(123),
+            bytecode_hash: Some(B256::random()),
+            #[cfg(feature = "account-ext")]
+            extension: Default::default(),
+        };
+        prestate.insert(address1, (account1_new.clone(), BTreeMap::default()));
         state.commit(HashMap::from_iter([(
             address1,
             RevmAccount {

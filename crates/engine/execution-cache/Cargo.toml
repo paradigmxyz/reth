@@ -13,6 +13,7 @@ workspace = true
 
 [dependencies]
 reth-evm.workspace = true
+reth-execution-types.workspace = true
 alloy-primitives.workspace = true
 fixed-cache = { workspace = true, features = ["stats"] }
 metrics.workspace = true
@@ -20,9 +21,8 @@ parking_lot.workspace = true
 reth-errors.workspace = true
 reth-metrics = { workspace = true, features = ["common"] }
 reth-primitives-traits = { workspace = true, features = ["std"] }
-reth-provider.workspace = true
 reth-revm.workspace = true
-reth-trie.workspace = true
+reth-storage-api.workspace = true
 tracing.workspace = true
 
 [dev-dependencies]
@@ -36,6 +36,12 @@ test-utils = [
     "reth-primitives-traits/test-utils",
     "reth-revm/test-utils",
     "reth-provider/test-utils",
-    "reth-trie/test-utils",
     "reth-evm/test-utils",
+]
+account-ext = [
+    "reth-evm/account-ext",
+    "reth-execution-types/account-ext",
+    "reth-provider/account-ext",
+    "reth-revm/account-ext",
+    "revm/account-ext",
 ]

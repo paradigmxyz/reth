@@ -56,7 +56,7 @@ impl SnapGeneration {
     }
 
     /// Returns this generation moved to `phase`.
-    #[cfg(test)]
+    #[cfg(all(test, not(feature = "account-ext")))]
     pub(crate) const fn with_phase(mut self, phase: SnapPhase) -> Self {
         self.phase = phase;
         self

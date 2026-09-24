@@ -97,7 +97,7 @@ where
         header: SealedHeader<Consensus>,
         block_size: usize,
     ) -> Result<Rpc, Self::Err> {
-        Ok(Rpc::from_consensus_header(header, block_size))
+        Ok(Rpc::from_consensus_header(header, Some(block_size)))
     }
 }
 
@@ -430,12 +430,12 @@ pub fn normalize_transaction_request(
         if matches!(request.minimal_tx_type(), TxType::Legacy | TxType::Eip2930) {
             request.gas_price = Some(fees.gas_price.saturating_to());
         } else {
-            request.max_fee_per_gas.get_or_insert(fees.gas_price.saturating_to());
+            request.max_fee_per_gas.get_or_insert_with(|| fees.gas_price.saturating_to());
             request.max_priority_fee_per_gas.get_or_insert(0);
         }
     }
     if let Some(blob_fee) = fees.max_fee_per_blob_gas {
-        request.max_fee_per_blob_gas.get_or_insert(blob_fee.saturating_to());
+        request.max_fee_per_blob_gas.get_or_insert_with(|| blob_fee.saturating_to());
     }
     request.from.get_or_insert(Address::ZERO);
     request.nonce.get_or_insert(0);

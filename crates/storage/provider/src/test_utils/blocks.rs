@@ -1,4 +1,6 @@
 //! Dummy blocks and data for tests
+#![cfg_attr(not(feature = "account-ext"), allow(clippy::clone_on_copy))]
+
 use crate::{DBProvider, DatabaseProviderRW, ExecutionOutcome};
 use alloy_consensus::{TxLegacy, EMPTY_OMMER_ROOT_HASH};
 use alloy_primitives::{

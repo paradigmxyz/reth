@@ -25,3 +25,6 @@ rand_08.workspace = true
 
 [dev-dependencies]
 alloy-rlp.workspace = true
+
+[features]
+account-ext = ["alloy-genesis/account-ext", "reth-ethereum-primitives/account-ext"]

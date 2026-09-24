@@ -68,6 +68,13 @@ itertools.workspace = true
 reth-db-models.workspace = true
 reth-storage-api = { workspace = true, features = ["std"] }
 serde_json.workspace = true
+tokio = { workspace = true, features = ["test-util"] }
 
 [features]
 js-tracer = ["evm2-inspectors/js-tracer"]
+account-ext = [
+    "reth-evm/account-ext",
+    "reth-rpc-convert/account-ext",
+    "reth-transaction-pool/account-ext",
+    "evm2/account-ext",
+]

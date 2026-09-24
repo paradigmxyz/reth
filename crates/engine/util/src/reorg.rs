@@ -19,7 +19,7 @@ use reth_payload_primitives::{BuiltPayload, PayloadTypes};
 use reth_primitives_traits::{
     block::Block as _, BlockBody as _, BlockTy, HeaderTy, SealedBlock, SignedTransaction,
 };
-use reth_storage_api::{errors::ProviderError, BlockReader, StateProviderFactory};
+use reth_storage_api::{errors::ProviderError, BlockReader, StateProvider, StateProviderFactory};
 use std::{
     collections::VecDeque,
     future::Future,
@@ -266,10 +266,15 @@ where
     debug!(target: "engine::stream::reorg", number = reorg_target.header().number(), hash = %previous_hash, "Selected reorg target");
 
     let has_bal = reorg_target.header().block_access_list_hash().is_some();
+    if has_bal {
+        reth_storage_api::ensure_no_account_extensions("BAL")?;
+    }
     let state_provider = provider.state_by_block_hash(reorg_target.header().parent_hash())?;
     let evm_env = evm_config.evm_env(reorg_target.header()).map_err(RethError::other)?;
-    let evm = evm_config
-        .evm_with_env(StateProviderDatabase::new(state_provider.as_ref()), evm_env.clone());
+    let evm = evm_config.evm_with_env(
+        StateProviderDatabase::new((&state_provider).into_evm_state_provider()),
+        evm_env.clone(),
+    );
     let ctx = evm_config.context_for_block(&reorg_target).map_err(RethError::other)?;
     let mut builder = evm_config.create_block_builder(evm, evm_env, &reorg_target_parent, ctx);
     if has_bal {

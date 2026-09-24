@@ -544,6 +544,8 @@ mod tests {
                 nonce: 1,
                 balance: U256::from(1000),
                 bytecode_hash: Some(keccak256(b"code1")),
+                #[cfg(feature = "account-ext")]
+                extension: Default::default(),
             },
         );
 
@@ -613,6 +615,8 @@ mod tests {
                     nonce: i as u64,
                     balance: U256::from(i as u64 * 1000),
                     bytecode_hash: (i == 2).then(|| keccak256([i])),
+                    #[cfg(feature = "account-ext")]
+                    extension: Default::default(),
                 },
             );
 

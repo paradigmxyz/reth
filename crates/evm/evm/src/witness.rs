@@ -131,13 +131,9 @@ impl<'a, DB> ExecutionWitnessRecord<'a, DB> {
             let hashed_address = keccak256(address);
             hashed_state.accounts.insert(
                 hashed_address,
-                account.as_ref().map(|account| PrimitiveAccount {
-                    nonce: account.nonce,
-                    balance: account.balance,
-                    bytecode_hash: (!account.code_hash.is_zero() &&
-                        account.code_hash != alloy_consensus::constants::KECCAK_EMPTY)
-                        .then_some(account.code_hash),
-                }),
+                account
+                    .as_ref()
+                    .map(|info| PrimitiveAccount::from(reth_execution_types::revm_account(info))),
             );
             if account.is_some() {
                 keys.push(address.to_vec().into());

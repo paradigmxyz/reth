@@ -1,3 +1,6 @@
+// Accounts are only Copy when account-ext is disabled.
+#![cfg_attr(not(feature = "account-ext"), allow(clippy::clone_on_copy))]
+
 use alloy_primitives::{keccak256, B256};
 use itertools::Itertools;
 use reth_config::config::{EtlConfig, HashingConfig};
@@ -115,11 +118,8 @@ impl AccountHashingStage {
                 provider.tx_ref().cursor_write::<tables::AccountChangeSets>()?;
             for (t, (addr, acc)) in opts.blocks.zip(&accounts) {
                 let Account { nonce, balance, .. } = acc;
-                let prev_acc = Account {
-                    nonce: nonce - 1,
-                    balance: balance - U256::from(1),
-                    bytecode_hash: None,
-                };
+                let prev_acc =
+                    Account { nonce: nonce - 1, balance: balance - U256::from(1), ..acc.clone() };
                 let acc_before_tx = AccountBeforeTx { address: *addr, info: Some(prev_acc) };
                 acc_changeset_cursor.append(t, &acc_before_tx)?;
             }
@@ -464,6 +464,8 @@ mod tests {
                             nonce: nonce - 1,
                             balance: balance - U256::from(1),
                             bytecode_hash: None,
+                            #[cfg(feature = "account-ext")]
+                            extension: Default::default(),
                         };
                         let hashed_addr = keccak256(address);
                         if let Some((_, acc)) = hashed_acc_cursor.seek_exact(hashed_addr)? {

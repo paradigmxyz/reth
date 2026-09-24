@@ -42,3 +42,6 @@ metrics.workspace = true
 # misc
 tracing.workspace = true
 serde.workspace = true
+
+[features]
+account-ext = ["reth-payload-builder/account-ext"]

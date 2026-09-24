@@ -17,7 +17,8 @@ use reth_primitives_traits::{NodePrimitives, SealedHeader};
 use reth_rpc_api::{RethApiServer, RethJitAction};
 use reth_rpc_eth_types::{EthApiError, EthResult};
 use reth_storage_api::{
-    BlockReader, BlockReaderIdExt, ChangeSetReader, StateProviderFactory, TransactionVariant,
+    BlockReader, BlockReaderIdExt, ChangeSetReader, StateProvider, StateProviderFactory,
+    TransactionVariant,
 };
 use reth_tasks::{pool::BlockingTaskGuard, Runtime};
 use serde::Serialize;
@@ -94,7 +95,7 @@ where
             AddressMap::default(),
             |mut hash_map, account_before| -> RethResult<_> {
                 let current_balance = state.account_balance(&account_before.address)?;
-                let prev_balance = account_before.info.map(|info| info.balance);
+                let prev_balance = account_before.info.as_ref().map(|info| info.balance);
                 if current_balance != prev_balance {
                     hash_map.insert(account_before.address, current_balance.unwrap_or_default());
                 }
@@ -159,7 +160,7 @@ where
         }
 
         let state_provider = self.provider().history_by_block_number(start_block - 1)?;
-        let db = StateProviderDatabase::new(&state_provider);
+        let db = StateProviderDatabase::new((&state_provider).into_evm_state_provider());
 
         let mut blocks = Vec::with_capacity(block_count as usize);
         for block_number in start_block..start_block + block_count {
@@ -191,12 +192,15 @@ where
     Provider: BlockReaderIdExt
         + ChangeSetReader
         + StateProviderFactory
-        + BlockReader<Block = <Provider::Primitives as NodePrimitives>::Block>
-        + CanonStateSubscriptions
-        + ForkChoiceSubscriptions<Header = <Provider::Primitives as NodePrimitives>::BlockHeader>
+        + BlockReader<
+            Block = <<Provider as CanonStateSubscriptions>::Primitives as NodePrimitives>::Block,
+        > + CanonStateSubscriptions
+        + ForkChoiceSubscriptions<
+            Header = <<Provider as CanonStateSubscriptions>::Primitives as NodePrimitives>::BlockHeader,
+        >
         + PersistedBlockSubscriptions
         + 'static,
-    EvmConfig: ConfigureEvm<Primitives = Provider::Primitives> + 'static,
+    EvmConfig: ConfigureEvm<Primitives = <Provider as CanonStateSubscriptions>::Primitives> + 'static,
 {
     /// Handler for `reth_getBalanceChangesInBlock`
     async fn reth_get_balance_changes_in_block(

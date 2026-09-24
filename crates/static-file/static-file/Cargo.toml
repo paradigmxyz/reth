@@ -36,3 +36,6 @@ reth-testing-utils.workspace = true
 
 assert_matches.workspace = true
 tempfile.workspace = true
+
+[features]
+account-ext = ["reth-provider/account-ext"]

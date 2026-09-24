@@ -71,6 +71,7 @@ where
     MakeDb: Fn(bool) -> Result<DB, BalExecutionError> + Sync + 'a,
     ReceiptTy<Evm::Primitives>: Clone,
 {
+    reth_provider::ensure_no_account_extensions("BAL")?;
     let worker_pool = runtime.bal_streaming_pool();
     let worker_count = worker_pool.current_num_threads().max(1).min(transaction_count);
 
@@ -210,7 +211,7 @@ impl AbortGuard {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, not(feature = "account-ext")))]
 mod tests {
     use super::*;
     use alloy_consensus::{BlockHeader, Header, TxLegacy};
@@ -404,7 +405,6 @@ mod tests {
     fn insert_funded(db: &mut TestDatabase, address: Address, balance: U256) {
         db.insert_account_info(&address, AccountInfo::default().with_balance(balance));
     }
-
     fn run_serial_path(
         evm_config: &EthEvmConfig,
         canonical_db: TestDatabase,

@@ -29,9 +29,11 @@ use alloy_eips::{BlockHashOrNumber, BlockNumberOrTag};
 use alloy_network::{primitives::HeaderResponse, BlockResponse};
 use alloy_primitives::{Address, BlockHash, BlockNumber, StorageKey, TxHash, TxNumber, B256, U256};
 use alloy_provider::{ext::DebugApi, network::Network, Provider};
-use alloy_rpc_types::{AccountInfo, BlockId};
+use alloy_rpc_types::BlockId;
 use alloy_rpc_types_engine::ForkchoiceState;
+use alloy_rpc_types_eth::AccountInfo;
 use dashmap::DashMap;
+use reth_chain_state::ExecutedBlock;
 use reth_chainspec::{ChainInfo, ChainSpecProvider};
 use reth_db_api::{
     mock::{DatabaseMock, TxMock},
@@ -737,8 +739,18 @@ where
     N: Network,
     Node: NodeTypes,
 {
+    type Primitives = PrimitivesTy<Node>;
+
     fn latest(&self) -> Result<StateProviderBox, ProviderError> {
         Ok(Box::new(self.create_state_provider(self.best_block_number()?.into())))
+    }
+
+    fn state_with_block_appended(
+        &self,
+        _parent_hash: BlockHash,
+        _block: ExecutedBlock<PrimitivesTy<Node>>,
+    ) -> ProviderResult<StateProviderBox> {
+        Err(ProviderError::UnsupportedProvider)
     }
 
     fn state_by_block_id(&self, block_id: BlockId) -> Result<StateProviderBox, ProviderError> {
@@ -879,6 +891,8 @@ where
     N: Network,
     Node: NodeTypes,
 {
+    type Primitives = PrimitivesTy<Node>;
+
     fn subscribe_to_canonical_state(&self) -> CanonStateNotifications<PrimitivesTy<Node>> {
         trace!(target: "alloy-provider", "Subscribing to canonical state notifications");
         self.canon_state_notification.subscribe()
@@ -1022,6 +1036,11 @@ impl<P: Clone, Node: NodeTypes, N> RpcBlockchainStateProvider<P, Node, N> {
         P: Provider<N> + Clone + 'static,
         N: Network,
     {
+        if Account::EXTENSIONS_ENABLED && !self.reth_rpc_support {
+            return Err(ProviderError::other(std::io::Error::other(
+                "account extensions require reth_rpc_support and an extension-aware eth_getAccountInfo endpoint",
+            )));
+        }
         let account_info = self.block_on_async(async {
             // Get account info in a single RPC call using `eth_getAccountInfo`
             if self.reth_rpc_support {
@@ -1043,6 +1062,8 @@ impl<P: Clone, Node: NodeTypes, N> RpcBlockchainStateProvider<P, Node, N> {
                 balance: balance.map_err(ProviderError::other)?,
                 nonce: nonce.map_err(ProviderError::other)?,
                 code: code.map_err(ProviderError::other)?,
+                #[cfg(feature = "account-ext")]
+                extension: Default::default(),
             };
 
             let code_hash = account_info.code_hash();
@@ -1054,9 +1075,7 @@ impl<P: Clone, Node: NodeTypes, N> RpcBlockchainStateProvider<P, Node, N> {
             Ok(account_info)
         })?;
 
-        // Only return account if it exists (has balance, nonce, or code)
-        if account_info.balance.is_zero() && account_info.nonce == 0 && account_info.code.is_empty()
-        {
+        if account_info.is_empty() {
             Ok(None)
         } else {
             let bytecode_hash =
@@ -1066,6 +1085,8 @@ impl<P: Clone, Node: NodeTypes, N> RpcBlockchainStateProvider<P, Node, N> {
                 balance: account_info.balance,
                 nonce: account_info.nonce,
                 bytecode_hash,
+                #[cfg(feature = "account-ext")]
+                extension: account_info.extension,
             }))
         }
     }
@@ -1794,8 +1815,18 @@ where
     N: Network,
     Self: Clone + 'static,
 {
+    type Primitives = PrimitivesTy<Node>;
+
     fn latest(&self) -> Result<StateProviderBox, ProviderError> {
         Ok(Box::new(self.with_block_id(self.best_block_number()?.into())))
+    }
+
+    fn state_with_block_appended(
+        &self,
+        _parent_hash: BlockHash,
+        _block: ExecutedBlock<PrimitivesTy<Node>>,
+    ) -> ProviderResult<StateProviderBox> {
+        Err(ProviderError::UnsupportedProvider)
     }
 
     fn state_by_block_id(&self, block_id: BlockId) -> Result<StateProviderBox, ProviderError> {

@@ -123,7 +123,7 @@ pub enum BytecodeStep {
     Complete,
 }
 
-#[cfg(test)]
+#[cfg(all(test, not(feature = "account-ext")))]
 mod tests {
     use super::*;
     use crate::{

@@ -40,3 +40,11 @@ alloy-consensus.workspace = true
 alloy-primitives.workspace = true
 
 tracing.workspace = true
+
+[features]
+account-ext = [
+    "reth-basic-payload-builder/account-ext",
+    "reth-consensus-common/account-ext",
+    "reth-payload-validator/account-ext",
+    "reth-transaction-pool/account-ext",
+]

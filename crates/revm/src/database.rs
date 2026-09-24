@@ -1,63 +1,9 @@
-use crate::primitives::alloy_primitives::{BlockNumber, StorageKey, StorageValue};
 use alloy_primitives::{Address, B256, U256};
 use core::ops::{Deref, DerefMut};
 use reth_primitives_traits::Account;
-use reth_storage_api::{AccountReader, BlockHashReader, BytecodeReader, StateProvider};
+use reth_storage_api::{AccountReader, BytecodeReader, EvmStateProvider};
 use reth_storage_errors::provider::{ProviderError, ProviderResult};
 use revm::{bytecode::Bytecode, state::AccountInfo, Database, DatabaseRef};
-
-/// A helper trait responsible for providing state necessary for EVM execution.
-///
-/// This serves as the data layer for [`Database`].
-pub trait EvmStateProvider {
-    /// Get basic account information.
-    ///
-    /// Returns [`None`] if the account doesn't exist.
-    fn basic_account(&self, address: &Address) -> ProviderResult<Option<Account>>;
-
-    /// Get the hash of the block with the given number. Returns [`None`] if no block with this
-    /// number exists.
-    fn block_hash(&self, number: BlockNumber) -> ProviderResult<Option<B256>>;
-
-    /// Get account code by hash.
-    fn bytecode_by_hash(
-        &self,
-        code_hash: &B256,
-    ) -> ProviderResult<Option<reth_primitives_traits::Bytecode>>;
-
-    /// Get storage of the given account.
-    fn storage(
-        &self,
-        account: Address,
-        storage_key: StorageKey,
-    ) -> ProviderResult<Option<StorageValue>>;
-}
-
-// Blanket implementation of EvmStateProvider for any type that implements StateProvider.
-impl<T: StateProvider> EvmStateProvider for T {
-    fn basic_account(&self, address: &Address) -> ProviderResult<Option<Account>> {
-        <T as AccountReader>::basic_account(self, address)
-    }
-
-    fn block_hash(&self, number: BlockNumber) -> ProviderResult<Option<B256>> {
-        <T as BlockHashReader>::block_hash(self, number)
-    }
-
-    fn bytecode_by_hash(
-        &self,
-        code_hash: &B256,
-    ) -> ProviderResult<Option<reth_primitives_traits::Bytecode>> {
-        <T as BytecodeReader>::bytecode_by_hash(self, code_hash)
-    }
-
-    fn storage(
-        &self,
-        account: Address,
-        storage_key: StorageKey,
-    ) -> ProviderResult<Option<StorageValue>> {
-        <T as StateProvider>::storage(self, account, storage_key)
-    }
-}
 
 /// A [Database] and [`DatabaseRef`] implementation that uses [`EvmStateProvider`] as the underlying
 /// data source.
@@ -65,12 +11,12 @@ impl<T: StateProvider> EvmStateProvider for T {
 pub struct StateProviderDatabase<DB>(pub DB);
 
 impl<DB> StateProviderDatabase<DB> {
-    /// Create new State with generic `StateProvider`.
+    /// Creates a database backed by an [`EvmStateProvider`].
     pub const fn new(db: DB) -> Self {
         Self(db)
     }
 
-    /// Consume State and return inner `StateProvider`.
+    /// Consumes the database and returns its inner provider.
     pub fn into_inner(self) -> DB {
         self.0
     }
@@ -173,8 +119,8 @@ impl<DB: EvmStateProvider> DatabaseRef for StateProviderDatabase<DB> {
 /// A [`DatabaseRef`] backed account info reader.
 ///
 /// This adapts account and bytecode reads from revm's database interface back into Reth's storage
-/// reader traits. It is intentionally not a full [`StateProvider`] because [`DatabaseRef`] does
-/// not expose roots or proofs.
+/// reader traits. It is intentionally not a full [`reth_storage_api::StateProvider`] because
+/// [`DatabaseRef`] does not expose roots or proofs.
 ///
 /// Note: [`DatabaseRef::code_by_hash_ref`] returns [`Bytecode`] directly, so this adapter cannot
 /// distinguish missing bytecode from the database's default bytecode and wraps whatever the
@@ -315,13 +261,21 @@ mod tests {
             code_hash: KECCAK_EMPTY,
             code: None,
             account_id: None,
+            #[cfg(feature = "account-ext")]
+            extension: Default::default(),
         };
         let db = CountingDatabaseRef::new(address, Some(account), Bytecode::default());
         let provider = DatabaseStateProvider::new(db);
 
         assert_eq!(
             provider.basic_account(&address).unwrap(),
-            Some(Account { nonce: 7, balance: U256::from(42), bytecode_hash: None })
+            Some(Account {
+                nonce: 7,
+                balance: U256::from(42),
+                bytecode_hash: None,
+                #[cfg(feature = "account-ext")]
+                extension: Default::default(),
+            })
         );
     }
 
@@ -336,13 +290,21 @@ mod tests {
             code_hash,
             code: Some(bytecode.clone()),
             account_id: None,
+            #[cfg(feature = "account-ext")]
+            extension: Default::default(),
         };
         let db = CountingDatabaseRef::new(address, Some(account), bytecode.clone());
         let provider = DatabaseStateProvider::new(db);
 
         assert_eq!(
             provider.basic_account(&address).unwrap(),
-            Some(Account { nonce: 7, balance: U256::from(42), bytecode_hash: Some(code_hash) })
+            Some(Account {
+                nonce: 7,
+                balance: U256::from(42),
+                bytecode_hash: Some(code_hash),
+                #[cfg(feature = "account-ext")]
+                extension: Default::default(),
+            })
         );
         assert_eq!(
             provider.bytecode_by_hash(&code_hash).unwrap(),
@@ -395,6 +357,8 @@ mod tests {
             code_hash,
             code: Some(bytecode.clone()),
             account_id: None,
+            #[cfg(feature = "account-ext")]
+            extension: Default::default(),
         };
         let db = CountingDatabaseRef::new(address, Some(account), bytecode.clone());
         let account_reads = db.account_reads.clone();
@@ -404,11 +368,23 @@ mod tests {
 
         assert_eq!(
             provider.basic_account(&address).unwrap(),
-            Some(Account { nonce: 7, balance: U256::from(42), bytecode_hash: Some(code_hash) })
+            Some(Account {
+                nonce: 7,
+                balance: U256::from(42),
+                bytecode_hash: Some(code_hash),
+                #[cfg(feature = "account-ext")]
+                extension: Default::default(),
+            })
         );
         assert_eq!(
             provider.basic_account(&address).unwrap(),
-            Some(Account { nonce: 7, balance: U256::from(42), bytecode_hash: Some(code_hash) })
+            Some(Account {
+                nonce: 7,
+                balance: U256::from(42),
+                bytecode_hash: Some(code_hash),
+                #[cfg(feature = "account-ext")]
+                extension: Default::default(),
+            })
         );
         assert_eq!(account_reads.load(Ordering::Relaxed), 1);
 

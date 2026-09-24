@@ -84,3 +84,8 @@ arbitrary = [
     "reth-trie-common/arbitrary",
     "smallvec/arbitrary",
 ]
+account-ext = [
+    "reth-metrics?/account-ext",
+    "reth-execution-errors/account-ext",
+    "reth-primitives-traits?/account-ext",
+]

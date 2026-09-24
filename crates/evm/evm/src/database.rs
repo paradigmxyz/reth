@@ -2,6 +2,7 @@
 
 #[cfg(feature = "std")]
 use alloy_eips::BlockHashOrNumber;
+#[cfg(feature = "std")]
 use alloy_primitives::{Address, BlockNumber, B256, U256};
 use core::ops::{Deref, DerefMut};
 #[cfg(feature = "std")]
@@ -10,55 +11,14 @@ use evm2::{
     evm::{AccountInfo, Database},
     interpreter::Word,
 };
+#[cfg(feature = "std")]
 use reth_primitives_traits::Account;
-use reth_storage_api::{AccountReader, BlockHashReader, BytecodeReader, StateProvider};
+#[cfg(feature = "std")]
+use reth_storage_api::EvmStateProvider;
 #[cfg(feature = "std")]
 use reth_storage_errors::provider::ProviderError;
-use reth_storage_errors::provider::ProviderResult;
 
-/// A helper trait responsible for providing state necessary for EVM execution.
-pub(crate) trait EvmStateProvider {
-    /// Get basic account information.
-    ///
-    /// Returns [`None`] if the account doesn't exist.
-    fn basic_account(&self, address: &Address) -> ProviderResult<Option<Account>>;
-
-    /// Get the hash of the block with the given number. Returns [`None`] if no block with this
-    /// number exists.
-    fn block_hash(&self, number: BlockNumber) -> ProviderResult<Option<B256>>;
-
-    /// Get account code by hash.
-    fn bytecode_by_hash(
-        &self,
-        code_hash: &B256,
-    ) -> ProviderResult<Option<reth_primitives_traits::Bytecode>>;
-
-    /// Get storage of the given account.
-    fn storage(&self, account: Address, storage_key: B256) -> ProviderResult<Option<U256>>;
-}
-
-impl<T: StateProvider> EvmStateProvider for T {
-    fn basic_account(&self, address: &Address) -> ProviderResult<Option<Account>> {
-        <T as AccountReader>::basic_account(self, address)
-    }
-
-    fn block_hash(&self, number: BlockNumber) -> ProviderResult<Option<B256>> {
-        <T as BlockHashReader>::block_hash(self, number)
-    }
-
-    fn bytecode_by_hash(
-        &self,
-        code_hash: &B256,
-    ) -> ProviderResult<Option<reth_primitives_traits::Bytecode>> {
-        <T as BytecodeReader>::bytecode_by_hash(self, code_hash)
-    }
-
-    fn storage(&self, account: Address, storage_key: B256) -> ProviderResult<Option<U256>> {
-        <T as StateProvider>::storage(self, account, storage_key)
-    }
-}
-
-/// A database wrapper backed by a [`StateProvider`].
+/// A database wrapper backed by an [execution state provider](reth_storage_api::EvmStateProvider).
 #[derive(Clone)]
 pub struct StateProviderDatabase<DB>(pub DB);
 
@@ -133,13 +93,7 @@ where
 
 #[cfg(feature = "std")]
 fn account_to_evm(account: Account) -> AccountInfo {
-    AccountInfo {
-        balance: account.balance,
-        nonce: account.nonce,
-        code_hash: account.get_bytecode_hash(),
-        code: None,
-        _non_exhaustive: (),
-    }
+    reth_execution_types::native_account(&account.into())
 }
 
 #[cfg(feature = "std")]

@@ -37,3 +37,4 @@ std = [
     "reth-ethereum-primitives/std",
     "alloy-primitives/std",
 ]
+account-ext = ["reth-chainspec/account-ext", "reth-consensus/account-ext"]

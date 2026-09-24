@@ -29,3 +29,4 @@ std = [
     "nybbles/std",
     "reth-storage-errors/std",
 ]
+account-ext = ["reth-storage-errors/account-ext"]

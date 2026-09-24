@@ -8,6 +8,10 @@ homepage.workspace = true
 repository.workspace = true
 description = "snap/2 state synchronization"
 
+[package.metadata.cargo-udeps.ignore]
+# Used by snap/BAL tests, which are disabled when account-ext is enabled by --all-features.
+development = ["reth-evm-ethereum", "reth-stages", "reth-stages-api"]
+
 [lints]
 workspace = true
 
@@ -53,3 +57,10 @@ reth-provider = { workspace = true, features = ["test-utils"] }
 reth-stages.workspace = true
 reth-stages-api.workspace = true
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+
+[features]
+account-ext = [
+    "reth-storage-api/account-ext",
+    "evm2/account-ext",
+    "revm/account-ext",
+]

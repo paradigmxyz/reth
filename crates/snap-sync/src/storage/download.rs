@@ -164,7 +164,7 @@ fn chunks(
         .collect())
 }
 
-#[cfg(test)]
+#[cfg(all(test, not(feature = "account-ext")))]
 mod tests {
     use super::*;
     use crate::{

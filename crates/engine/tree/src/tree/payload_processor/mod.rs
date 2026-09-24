@@ -1015,6 +1015,8 @@ mod tests {
                     code_hash: KECCAK_EMPTY,
                     code: None,
                     account_id: None,
+                    #[cfg(feature = "account-ext")]
+                    extension: Default::default(),
                 },
             )
             .build();

@@ -51,6 +51,7 @@ thiserror.workspace = true
 tracing.workspace = true
 
 [dev-dependencies]
+revm.workspace = true
 reth-db-common.workspace = true
 reth-evm-ethereum = { workspace = true, features = ["test-utils"] }
 reth-execution-types.workspace = true
@@ -81,4 +82,6 @@ serde = [
     "reth-ethereum-primitives/serde",
     "reth-chain-state/serde",
     "reth-execution-types/serde",
+    "revm/serde",
 ]
+account-ext = ["reth-node-api/account-ext", "reth-stages-api/account-ext"]

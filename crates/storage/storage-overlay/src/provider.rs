@@ -1,3 +1,6 @@
+// Accounts are only Copy when account-ext is disabled.
+#![cfg_attr(not(feature = "account-ext"), allow(clippy::clone_on_copy))]
+
 use crate::{database_state_frontiers, ExecutionOverlay, OverlayBuilder, StateTrieOverlay};
 use alloy_primitives::{Address, BlockHash, BlockNumber, B256, U256};
 use metrics::{Counter, Histogram};
@@ -1267,7 +1270,13 @@ mod tests {
     fn execution_overlay_readers_use_overlay_first() {
         let (factory, _) = setup_frontiers(1, 3);
         let address = Address::with_last_byte(1);
-        let account_info = AccountInfo { nonce: 1, balance: U256::from(2), ..Default::default() };
+        let account_info = AccountInfo {
+            nonce: 1,
+            balance: U256::from(2),
+            #[cfg(feature = "account-ext")]
+            extension: vec![0x82; 32].into(),
+            ..Default::default()
+        };
         let block_hash = B256::with_last_byte(3);
         let storage_key = B256::with_last_byte(4);
         let storage_value = U256::from(5);
@@ -1317,7 +1326,10 @@ mod tests {
             .unwrap();
         provider_rw
             .tx_ref()
-            .put::<tables::AccountChangeSets>(2, AccountBeforeTx { address, info: Some(account) })
+            .put::<tables::AccountChangeSets>(
+                2,
+                AccountBeforeTx { address, info: Some(account.clone()) },
+            )
             .unwrap();
         provider_rw
             .tx_ref()

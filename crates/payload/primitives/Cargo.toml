@@ -56,3 +56,4 @@ std = [
     "serde_json/std",
     "sha2/std",
 ]
+account-ext = ["reth-chainspec/account-ext", "reth-errors/account-ext"]

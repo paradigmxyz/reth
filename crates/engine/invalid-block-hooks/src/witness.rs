@@ -6,7 +6,7 @@ use reth_engine_primitives::InvalidBlockHook;
 use reth_evm::{database::StateProviderDatabase, ConfigureEvm, Executor};
 use reth_execution_types::BundleSource;
 use reth_primitives_traits::{NodePrimitives, RecoveredBlock, SealedHeader};
-use reth_provider::{BlockExecutionOutput, StateProviderFactory};
+use reth_provider::{BlockExecutionOutput, StateProvider, StateProviderFactory};
 use reth_rpc_api::DebugApiClient;
 use reth_tracing::tracing::warn;
 use reth_trie::updates::TrieUpdates;
@@ -151,7 +151,7 @@ where
     ) -> eyre::Result<(ExecutionWitness, BundleState, reth_trie::HashedPostState)> {
         let state_provider = self.provider.state_by_block_hash(parent_header.hash())?;
         let mut database = evm2::evm::CacheDB::new(evm2::evm::Db::new(StateProviderDatabase::new(
-            state_provider.as_ref(),
+            (&state_provider).into_evm_state_provider(),
         )));
         let output = self.evm_config.executor(&mut database).execute(block)?;
         let hashed_state = state_provider.hashed_post_state(&output.state)?;
@@ -387,6 +387,8 @@ mod tests {
                     code_hash: account.bytecode_hash.unwrap_or_default(),
                     code: None,
                     account_id: None,
+                    #[cfg(feature = "account-ext")]
+                    extension: Default::default(),
                 }),
                 original_info: (i == 0).then(|| AccountInfo {
                     balance: account.balance.checked_div(U256::from(2)).unwrap_or(U256::ZERO),
@@ -394,6 +396,8 @@ mod tests {
                     code_hash: account.bytecode_hash.unwrap_or_default(),
                     code: None,
                     account_id: None,
+                    #[cfg(feature = "account-ext")]
+                    extension: Default::default(),
                 }),
                 storage,
                 status: AccountStatus::default(),

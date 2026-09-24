@@ -83,3 +83,8 @@ arbitrary = [
     "reth-ethereum-primitives/arbitrary",
     "alloy-eips/arbitrary",
 ]
+account-ext = [
+    "reth-db-models/account-ext",
+    "reth-ethereum-primitives/account-ext",
+    "reth-storage-errors/account-ext",
+]

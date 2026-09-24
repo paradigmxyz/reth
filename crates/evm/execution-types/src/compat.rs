@@ -181,6 +181,8 @@ pub fn native_account(info: &AccountInfo) -> evm2::evm::AccountInfo {
         nonce: info.nonce,
         code_hash: info.code_hash,
         code: info.code.as_ref().map(native_bytecode),
+        #[cfg(feature = "account-ext")]
+        extension: evm2::evm::AccountExtension::from_shared(info.extension.clone().into_shared()),
         _non_exhaustive: (),
     }
 }
@@ -208,13 +210,17 @@ pub fn revm_bytecode(code: &evm2::bytecode::Bytecode) -> Bytecode {
 
 /// Converts native account information into the persistent state representation.
 /// Bytecode is carried separately by the change stream; account updates only need its hash.
-pub const fn revm_account(info: &evm2::evm::AccountInfo) -> AccountInfo {
+// Cloning the optional shared extension is not a const operation.
+#[cfg_attr(not(feature = "account-ext"), allow(clippy::missing_const_for_fn))]
+pub fn revm_account(info: &evm2::evm::AccountInfo) -> AccountInfo {
     AccountInfo {
         balance: info.balance,
         nonce: info.nonce,
         code_hash: info.code_hash,
         code: None,
         account_id: None,
+        #[cfg(feature = "account-ext")]
+        extension: revm::state::AccountExtension::from_shared(info.extension.clone().into_shared()),
     }
 }
 
@@ -233,6 +239,56 @@ mod tests {
     use evm2::evm::{
         AccountChangeRef, AccountInfo as NativeAccount, StateChangeSink, StorageChange,
     };
+
+    #[test]
+    #[cfg(feature = "account-ext")]
+    fn account_extensions_survive_conversion_commit_cache_and_revert() {
+        use evm2::evm::{AccountExtension, BlockStateAccumulator, StateChangeSource};
+
+        let address = Address::with_last_byte(1);
+        let original = NativeAccount {
+            extension: AccountExtension::copy_from_slice(&[1; 32]),
+            ..Default::default()
+        };
+        let current = NativeAccount {
+            extension: AccountExtension::copy_from_slice(&[2; 32]),
+            ..original.clone()
+        };
+        let persistent = revm_account(&current);
+        assert_eq!(persistent.extension.as_ptr(), current.extension.as_ptr());
+        assert_eq!(native_account(&persistent), current);
+        assert_eq!(native_account(&persistent).extension.as_ptr(), current.extension.as_ptr());
+
+        let mut changes = TransactionChanges::default();
+        changes
+            .account(AccountChangeRef {
+                address,
+                original: Some(&original),
+                current: Some(&current),
+                created: false,
+                selfdestructed: false,
+            })
+            .unwrap();
+        let mut block = BlockState::new();
+        block.commit(&changes);
+        let mut bundle = block.into_bundle();
+        assert_eq!(
+            native_account(bundle.account(&address).unwrap().info.as_ref().unwrap()),
+            current
+        );
+
+        let mut cached = BlockStateAccumulator::new();
+        BundleSource(&bundle).visit(&mut cached).unwrap();
+        let (_, account) = cached.accounts().next().unwrap();
+        assert_eq!(account.original, Some(original.clone()));
+        assert_eq!(account.current, Some(current));
+
+        assert!(bundle.revert_latest());
+        assert_eq!(
+            native_account(bundle.account(&address).unwrap().info.as_ref().unwrap()),
+            original
+        );
+    }
 
     #[test]
     fn bytecode_conversion_preserves_analysis_and_padding() {

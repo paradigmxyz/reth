@@ -144,6 +144,9 @@ where
                     chain_spec.is_cancun_active_at_timestamp(request.payload_attributes.timestamp);
                 let is_osaka =
                     chain_spec.is_osaka_active_at_timestamp(request.payload_attributes.timestamp);
+                if is_amsterdam {
+                    reth_storage_api::ensure_no_account_extensions("BAL")?;
+                }
                 let withdrawals = request.payload_attributes.withdrawals.clone();
                 let withdrawals_rlp_length = withdrawals.as_ref().map(|w| w.length()).unwrap_or(0);
 
@@ -268,7 +271,7 @@ where
                     total_fees += U256::from(tip) * U256::from(gas_used);
                 }
                 let outcome =
-                    builder.finish(&state_provider, None).map_err(Eth::Error::from_eth_err)?;
+                    builder.finish(&*state_provider, None).map_err(Eth::Error::from_eth_err)?;
 
                 let has_requests = outcome.block.requests_hash().is_some();
                 let requests = has_requests.then_some(outcome.execution_result.requests);
