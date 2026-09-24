@@ -3404,8 +3404,7 @@ mod tests {
                 .unwrap();
         assert_eq!(handle.node_record().address, addr.ip());
         let external_ip = "192.0.2.1".parse::<IpAddr>().unwrap();
-        let waker = futures::task::noop_waker();
-        let mut cx = Context::from_waker(&waker);
+        let mut cx = Context::from_waker(std::task::Waker::noop());
         let _ = Pin::new(&mut service).poll_next(&mut cx);
         assert_eq!(handle.node_record().address, external_ip);
     }
