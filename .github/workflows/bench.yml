@@ -1119,6 +1119,7 @@ jobs:
       pull-requests: write
     timeout-minutes: 120
     env:
+      BENCH_VALIDATE_REEXEC: "true"
       BENCH_RPC_URL: http://ethereum-mainnet-stable-reth-greedy-goose:8545
       SCHELK_MOUNT: /reth-bench
       RETH_SCOPE: reth-bench.scope
