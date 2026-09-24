@@ -1,8 +1,6 @@
 //! State provider database adapter used by EVM execution.
 
 #[cfg(feature = "std")]
-use alloy_eips::BlockHashOrNumber;
-#[cfg(feature = "std")]
 use alloy_primitives::{Address, B256};
 use core::ops::{Deref, DerefMut};
 #[cfg(feature = "std")]
@@ -85,8 +83,22 @@ where
 
     fn get_block_hash(&mut self, number: &Word) -> Result<B256, Self::Error> {
         let number = number.saturating_to::<u64>();
-        self.0
-            .block_hash(number)?
-            .ok_or(ProviderError::HeaderNotFound(BlockHashOrNumber::Number(number)))
+        Ok(self.0.block_hash(number)?.unwrap_or_default())
+    }
+}
+
+#[cfg(all(test, feature = "std"))]
+mod tests {
+    use super::*;
+    use reth_storage_api::noop::NoopProvider;
+
+    #[test]
+    fn missing_block_hash_matches_revm_adapter() {
+        let mut native = StateProviderDatabase::new(NoopProvider::mainnet());
+        let mut revm = reth_revm::database::StateProviderDatabase::new(NoopProvider::mainnet());
+        assert_eq!(
+            native.get_block_hash(&Word::from(42)).unwrap(),
+            revm::Database::block_hash(&mut revm, 42).unwrap()
+        );
     }
 }
