@@ -3402,21 +3402,22 @@ where
         state: ForkchoiceState,
         chain_update: Option<&NewCanonicalChain<N>>,
     ) -> ProviderResult<bool> {
-        let (canonical_head_number, new) = match chain_update {
-            Some(NewCanonicalChain::Commit { new } | NewCanonicalChain::Reorg { new, .. }) => {
+        let canonical_head_number = match chain_update {
+            Some(chain_update) => {
+                let new = chain_update.new_blocks();
                 // Only the canonical prefix below the new branch remains on the proposed chain.
-                (new.first().expect("non empty chain").block_number() - 1, new.as_slice())
+                new.first().expect("non empty chain").block_number() - 1
             }
             None => {
                 let Some(head) = self.find_canonical_header(state.head_block_hash)? else {
                     return Ok(false)
                 };
-                (head.number(), &[][..])
+                head.number()
             }
         };
 
         for hash in [state.finalized_block_hash, state.safe_block_hash] {
-            if hash.is_zero() || new.iter().any(|block| block.recovered_block().hash() == hash) {
+            if hash.is_zero() || chain_update.is_some_and(|update| update.contains(hash)) {
                 continue
             }
             if self
