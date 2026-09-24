@@ -3374,7 +3374,7 @@ where
             return Ok(Some(header))
         }
 
-        let Some(header) = self.provider.header(hash)? else { return Ok(None) };
+        let Some(header) = self.provider.sealed_header_by_hash(hash)? else { return Ok(None) };
         let number = header.number();
         if number > self.canonical_in_memory_state.get_canonical_block_number() {
             return Ok(None)
@@ -3386,7 +3386,7 @@ where
                 self.provider.block_hash(number)?
             };
 
-        Ok((canonical_hash == Some(hash)).then(|| SealedHeader::new(header, hash)))
+        Ok((canonical_hash == Some(hash)).then_some(header))
     }
 
     /// Checks that nonzero safe and finalized hashes belong to the chain defined by the FCU head.
