@@ -1,7 +1,5 @@
 //! Contains RPC handler implementations specific to transactions
 
-use std::time::Duration;
-
 use crate::EthApi;
 use alloy_consensus::BlobTransactionValidationError;
 use alloy_eips::{eip7594::BlobTransactionSidecarVariant, BlockId, Typed2718};
@@ -29,11 +27,6 @@ where
     #[inline]
     fn signers(&self) -> &SignersForRpc<Self::Provider, Self::NetworkTypes> {
         self.inner.signers()
-    }
-
-    #[inline]
-    fn send_raw_transaction_sync_timeout(&self) -> Duration {
-        self.inner.send_raw_transaction_sync_timeout()
     }
 
     async fn send_pool_transaction(
@@ -131,6 +124,8 @@ where
 
 #[cfg(test)]
 mod tests {
+    use std::time::Duration;
+
     use super::*;
     use crate::eth::helpers::{signer::DevSigner, types::EthRpcConverter};
     use alloy_consensus::{
@@ -316,6 +311,33 @@ mod tests {
         let pooled = eth_api.pool().get(&hash).expect("transaction should be in the pool");
 
         assert_eq!(pooled.transaction.gas_limit(), provided_gas_limit);
+    }
+
+    #[tokio::test]
+    async fn send_transaction_fills_missing_fee_fields() {
+        let signers = DevSigner::random_signers(1);
+        let address = signers[0].accounts()[0];
+        let accounts = AddressMap::from_iter([(
+            address,
+            ExtendedAccount::new(0, U256::from(10_000_000_000_000_000_000u64)),
+        )]);
+        let eth_api = mock_eth_api(accounts);
+        eth_api.signers().write().extend(signers);
+
+        // no gas, gasPrice or 1559 fee fields: the node is expected to fill them
+        let tx_req = TransactionRequest {
+            from: Some(address),
+            to: Some(address.into()),
+            value: Some(U256::from(1)),
+            ..Default::default()
+        };
+
+        let hash = eth_api
+            .send_transaction_request(tx_req)
+            .await
+            .expect("send_transaction should fill the missing fee fields");
+        let pooled = eth_api.pool().get(&hash).expect("transaction should be in the pool");
+        assert!(pooled.transaction.max_fee_per_gas() > 0);
     }
 
     #[tokio::test]

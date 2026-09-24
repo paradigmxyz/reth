@@ -22,10 +22,8 @@ else
 fi
 
 EXTRA_FEATURES=""
-EXTRA_RUSTFLAGS=""
 if [ "${BENCH_TRACY:-off}" != "off" ]; then
   EXTRA_FEATURES="tracy,tracy-client/ondemand"
-  EXTRA_RUSTFLAGS=" -C force-frame-pointers=yes"
 fi
 
 build_node_binary() {
@@ -39,7 +37,7 @@ build_node_binary() {
   fi
 
   # shellcheck disable=SC2086
-  RUSTFLAGS="-C target-cpu=native${EXTRA_RUSTFLAGS}" \
+  RUSTFLAGS="-C target-cpu=native -C force-frame-pointers=yes" \
     cargo build --locked --profile profiling $NODE_PKG $workspace_arg $features_arg
 }
 

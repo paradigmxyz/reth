@@ -3,10 +3,10 @@
 //!
 //! Persistence and range selection are handled by the snap sync orchestrator.
 
-use alloy_primitives::B256;
+use alloy_primitives::{map::B256Set, B256, KECCAK256_EMPTY};
 use futures::Future;
 use reth_eth_wire_types::snap::{
-    AccountRangeMessage, GetAccountRangeMessage, GetStorageRangesMessage,
+    AccountData, AccountRangeMessage, GetAccountRangeMessage, GetStorageRangesMessage,
 };
 use reth_network_p2p::{
     error::RequestError,
@@ -134,6 +134,18 @@ impl VerifiedAccountRange {
             state_root: self.state_root,
             accounts: self.accounts.iter().map(|(hash, account)| (*hash, account)).collect(),
         }
+    }
+
+    /// Code hashes the accounts reference, once each and in the order they appear.
+    ///
+    /// Accounts sharing code therefore yield one hash, so it is downloaded and stored once.
+    pub fn code_hashes(&self) -> Vec<B256> {
+        let mut seen = B256Set::default();
+        self.accounts
+            .iter()
+            .map(|(_, account)| account.code_hash)
+            .filter(|hash| *hash != KECCAK256_EMPTY && seen.insert(*hash))
+            .collect()
     }
 
     /// Borrows only the accounts that have storage, together with the root that authenticated
@@ -286,17 +298,8 @@ fn verify_account_range(
         return Err(RequestError::BadResponse)
     }
 
-    // Decode first so malformed account values are attributed to the responder.
-    let mut accounts = response
-        .accounts
-        .into_iter()
-        .map(|data| {
-            data.into_trie_entry().map_err(|error| {
-                debug!(target: "downloaders::snap", %error, "Invalid account data");
-                RequestError::BadResponse
-            })
-        })
-        .collect::<Result<Vec<_>, _>>()?;
+    let mut accounts =
+        response.accounts.into_iter().map(AccountData::into_trie_entry).collect::<Vec<_>>();
     let next = verify_proof(request, &accounts, &response.proof)?;
 
     // Authenticate the boundary account before removing it from the requested range. Once
@@ -333,7 +336,7 @@ fn verify_proof(
 mod tests {
     use super::{request::MAX_RETRIES, test_utils::TestSnapClient, *};
     use alloy_primitives::{Bytes, KECCAK256_EMPTY, U256};
-    use reth_eth_wire_types::snap::{AccountData, ByteCodesMessage};
+    use reth_eth_wire_types::snap::ByteCodesMessage;
     use reth_network_p2p::{error::PeerRequestResult, priority::Priority};
     use reth_network_peers::WithPeerId;
     use reth_trie_common::{proof::ProofRetainer, HashBuilder, Nibbles};
@@ -494,6 +497,28 @@ mod tests {
         assert_eq!(chunk.state_root(), root_hash);
 
         assert_eq!(batch.range(2..4), None);
+    }
+
+    #[test]
+    fn code_hashes_are_listed_once_in_the_order_the_accounts_reference_them() {
+        let shared = B256::repeat_byte(0x11);
+        let mut first = account(1);
+        first.code_hash = shared;
+        let mut third = account(3);
+        third.code_hash = shared;
+        let mut fourth = account(4);
+        fourth.code_hash = B256::repeat_byte(0x44);
+        let accounts =
+            vec![(key(1), first), (key(2), account(2)), (key(3), third), (key(4), fourth)];
+        let range = VerifiedAccountRange {
+            state_root: root(&accounts),
+            origin: B256::ZERO,
+            accounts,
+            has_more: false,
+            next: None,
+        };
+
+        assert_eq!(range.code_hashes(), vec![shared, B256::repeat_byte(0x44)]);
     }
 
     #[test]

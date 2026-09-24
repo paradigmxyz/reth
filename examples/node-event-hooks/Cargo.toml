@@ -7,3 +7,5 @@ license.workspace = true
 
 [dependencies]
 reth-ethereum = { workspace = true, features = ["node", "cli"] }
+
+[lints]

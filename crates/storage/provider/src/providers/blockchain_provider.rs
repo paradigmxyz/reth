@@ -16,8 +16,8 @@ use alloy_eips::{BlockHashOrNumber, BlockId, BlockNumHash, BlockNumberOrTag};
 use alloy_primitives::{Address, BlockHash, BlockNumber, Bytes, TxHash, TxNumber, B256};
 use alloy_rpc_types_engine::ForkchoiceState;
 use reth_chain_state::{
-    CanonicalInMemoryState, ForkChoiceNotifications, ForkChoiceSubscriptions,
-    PersistedBlockNotifications, PersistedBlockSubscriptions,
+    BlockState, CanonicalInMemoryState, ExecutedBlock, ForkChoiceNotifications,
+    ForkChoiceSubscriptions, PersistedBlockNotifications, PersistedBlockSubscriptions,
 };
 use reth_chainspec::ChainInfo;
 use reth_db_api::models::{AccountBeforeTx, BlockNumberAddress, StoredBlockBodyIndices};
@@ -149,11 +149,17 @@ impl<N: ProviderNodeTypes> BlockchainProvider<N> {
         ConsistentProvider::new(self.database.clone(), self.canonical_in_memory_state())
     }
 
-    /// Returns a state provider for the post-state of `block_hash`.
-    fn state_provider_at_block_hash(&self, block_hash: B256) -> ProviderResult<StateProviderBox> {
+    /// Returns a state provider for the post-state of an already resolved in-memory chain.
+    ///
+    /// This is the post-state of `state.hash()`. Because the caller already holds the in-memory
+    /// chain, the overlay manager does not have to rebuild an identical one from its block graph.
+    fn state_provider_for_state(
+        &self,
+        state: Arc<BlockState<N::Primitives>>,
+    ) -> ProviderResult<StateProviderBox> {
         let state_provider_factory = OverlayStateProviderFactory::new(
             self.database.clone(),
-            self.database.overlay_manager().overlay_builder(block_hash),
+            self.database.overlay_manager().overlay_builder_for_state(state),
         );
         Ok(Box::new(state_provider_factory.database_provider_ro()?))
     }
@@ -185,7 +191,7 @@ impl<N: ProviderNodeTypes> BlockchainProvider<N> {
 
         let state_provider_factory = OverlayStateProviderFactory::new(
             self.database.clone(),
-            self.database.overlay_manager().overlay_builder(matched.hash()),
+            self.database.overlay_manager().overlay_builder_for_state(matched),
         );
         state_provider_factory.database_provider_ro().map(Some)
     }
@@ -723,17 +729,31 @@ impl<N: NodeTypesWithDB> ChainSpecProvider for BlockchainProvider<N> {
 }
 
 impl<N: ProviderNodeTypes> StateProviderFactory for BlockchainProvider<N> {
+    type Primitives = N::Primitives;
+
     /// Storage provider for latest block
     fn latest(&self) -> ProviderResult<StateProviderBox> {
         trace!(target: "providers::blockchain", "Getting latest block state provider");
         // use latest state provider if the head state exists
         if let Some(state) = self.canonical_in_memory_state.head_state() {
             trace!(target: "providers::blockchain", "Using head state for latest state provider");
-            self.state_provider_at_block_hash(state.hash())
+            self.state_provider_for_state(state)
         } else {
             trace!(target: "providers::blockchain", "Using database state for latest state provider");
             self.database.latest()
         }
+    }
+
+    fn state_with_block_appended(
+        &self,
+        parent_hash: BlockHash,
+        block: ExecutedBlock<N::Primitives>,
+    ) -> ProviderResult<StateProviderBox> {
+        let state_provider_factory = OverlayStateProviderFactory::new(
+            self.database.clone(),
+            self.database.overlay_manager().overlay_builder(parent_hash).with_appended_block(block),
+        );
+        Ok(Box::new(state_provider_factory.database_provider_ro()?))
     }
 
     /// Returns a [`StateProviderBox`] indexed by the given block number or tag.
@@ -789,7 +809,7 @@ impl<N: ProviderNodeTypes> StateProviderFactory for BlockchainProvider<N> {
     fn state_by_block_hash(&self, hash: BlockHash) -> ProviderResult<StateProviderBox> {
         trace!(target: "providers::blockchain", ?hash, "Getting state by block hash");
         if let Some(state) = self.canonical_in_memory_state.state_by_hash(hash) {
-            self.state_provider_at_block_hash(state.hash())
+            self.state_provider_for_state(state)
         } else if let Ok(state) = self.history_by_block_hash(hash) {
             // This could be tracked by a historical block
             Ok(state)
@@ -811,7 +831,7 @@ impl<N: ProviderNodeTypes> StateProviderFactory for BlockchainProvider<N> {
 
         if let Some(pending) = self.canonical_in_memory_state.pending_state() {
             // we have a pending block
-            return self.state_provider_at_block_hash(pending.hash());
+            return self.state_provider_for_state(Arc::new(pending));
         }
 
         // fallback to latest state if the pending block is not available
@@ -822,14 +842,14 @@ impl<N: ProviderNodeTypes> StateProviderFactory for BlockchainProvider<N> {
         if let Some(pending) = self.canonical_in_memory_state.pending_state() &&
             pending.hash() == block_hash
         {
-            return self.state_provider_at_block_hash(pending.hash()).map(Some);
+            return self.state_provider_for_state(Arc::new(pending)).map(Some);
         }
         Ok(None)
     }
 
     fn maybe_pending(&self) -> ProviderResult<Option<StateProviderBox>> {
         if let Some(pending) = self.canonical_in_memory_state.pending_state() {
-            return self.state_provider_at_block_hash(pending.hash()).map(Some)
+            return self.state_provider_for_state(Arc::new(pending)).map(Some)
         }
 
         Ok(None)
@@ -896,6 +916,8 @@ where
 }
 
 impl<N: ProviderNodeTypes> CanonStateSubscriptions for BlockchainProvider<N> {
+    type Primitives = N::Primitives;
+
     fn subscribe_to_canonical_state(&self) -> CanonStateNotifications<Self::Primitives> {
         self.canonical_in_memory_state.subscribe_canon_state()
     }
@@ -1079,6 +1101,159 @@ mod tests {
         ops::{Bound, Range, RangeBounds},
         sync::Arc,
     };
+
+    #[test]
+    fn historical_proofs_complete_masked_trie_rows() -> eyre::Result<()> {
+        use crate::{StaticFileProviderFactory, StaticFileSegment, StaticFileWriter};
+        use reth_storage_api::{StorageSettings, StorageSettingsCache, TrieWriter};
+        use reth_trie::{test_utils::TrieTestHarness, MultiProofTargetsV2};
+        use revm::state::AccountInfo;
+
+        let address = Address::with_last_byte(1);
+        let other_address = Address::with_last_byte(2);
+        let hashed_address = keccak256(address);
+        let account = Account { balance: U256::from(1), ..Default::default() };
+        // Branches 00, 01 and 02 share the cached row at 0. The first two change
+        // in different blocks; the third keeps proof-v2's branch-collapse path inactive.
+        let slots: Vec<B256> = (0..=2u8)
+            .flat_map(|prefix| {
+                (0..u64::MAX)
+                    .map(|slot| B256::from(U256::from(slot)))
+                    .filter(move |slot| keccak256(slot)[0] == prefix)
+                    .take(2)
+            })
+            .collect();
+        let mut storage: BTreeMap<_, _> = slots.iter().map(|&slot| (slot, U256::from(1))).collect();
+        let mut trie = TrieTestHarness::new(
+            storage.iter().map(|(slot, value)| (keccak256(slot), *value)).collect(),
+        );
+        let mut blocks = Vec::<ExecutedBlock>::new();
+        let mut storage_roots = Vec::new();
+        for number in 0..=2 {
+            let mut output = (*ExecutedBlock::<reth_ethereum_primitives::EthPrimitives>::default()
+                .execution_output)
+                .clone();
+            let (state, storage_updates) = if number == 0 {
+                (
+                    HashedPostState::default()
+                        .with_accounts([
+                            (hashed_address, Some(account)),
+                            (keccak256(other_address), Some(account)),
+                        ])
+                        .with_storages([(
+                            hashed_address,
+                            HashedStorage::from_iter(trie.storage().iter().map(|(k, v)| (*k, *v))),
+                        )]),
+                    trie.storage_trie_updates().clone(),
+                )
+            } else {
+                let slot = slots[(number as usize - 1) * 2];
+                let value = U256::from(number + 1);
+                let changes = BTreeMap::from([(keccak256(slot), value)]);
+                let (_, updates) = trie.get_root_with_updates(&changes);
+                trie.apply_changeset(changes);
+                storage.insert(slot, value);
+                let info = AccountInfo::from_balance(account.balance);
+                output.state = BundleState::builder(number..=number)
+                    .state_original_account_info(address, info.clone())
+                    .state_present_account_info(address, info)
+                    .state_storage(
+                        address,
+                        std::iter::once((U256::from_be_bytes(slot.0), (U256::from(1), value)))
+                            .collect(),
+                    )
+                    .revert_storage(
+                        number,
+                        address,
+                        vec![(U256::from_be_bytes(slot.0), U256::from(1))],
+                    )
+                    .build();
+                (
+                    HashedPostState::from_hashed_storage(
+                        hashed_address,
+                        HashedStorage::from_iter([(keccak256(slot), value)]),
+                    ),
+                    updates,
+                )
+            };
+            let mut updates = TrieUpdates::default();
+            updates.storage_tries.insert(hashed_address, storage_updates);
+            let state_root = reth_trie::test_utils::state_root([
+                (address, (account, storage.clone())),
+                (other_address, (account, BTreeMap::new())),
+            ]);
+            storage_roots.push(reth_trie::test_utils::storage_root(storage.clone()));
+            let block = Block {
+                header: alloy_consensus::Header {
+                    number,
+                    parent_hash: blocks
+                        .last()
+                        .map(|b| b.recovered_block().hash())
+                        .unwrap_or_default(),
+                    state_root,
+                    ..Default::default()
+                },
+                ..Default::default()
+            };
+            blocks.push(ExecutedBlock::new(
+                Arc::new(RecoveredBlock::new_unhashed(block, vec![])),
+                Arc::new(output),
+                ComputedTrieData::new(
+                    Arc::new(state.into_sorted()),
+                    Arc::new(updates.into_sorted()),
+                ),
+            ));
+        }
+
+        let factory = create_test_provider_factory();
+        factory.set_storage_settings_cache(StorageSettings::v2());
+        let writer = factory.provider_rw()?;
+        writer.insert_block(blocks[0].recovered_block())?;
+        writer.write_hashed_state(blocks[0].hashed_state_ref())?;
+        writer.write_trie_updates_sorted(blocks[0].trie_updates_ref())?;
+        writer.commit()?;
+        let static_files = factory.static_file_provider();
+        static_files.get_writer(0, StaticFileSegment::Receipts)?.increment_block(0)?;
+        static_files
+            .get_writer(0, StaticFileSegment::AccountChangeSets)?
+            .append_account_changeset(vec![], 0)?;
+        static_files
+            .get_writer(0, StaticFileSegment::StorageChangeSets)?
+            .append_storage_changeset(vec![], 0)?;
+        static_files.commit()?;
+        let writer = factory.provider_rw()?;
+        writer.save_blocks(&SaveBlocksInput::new(blocks[1..].to_vec(), 0, 0, 2, 1))?;
+        writer.commit()?;
+        factory.overlay_manager().insert_block(blocks[2].clone());
+        let provider = BlockchainProvider::new(factory)?;
+
+        for number in [1, 2] {
+            let state = provider.history_by_block_hash(blocks[number].recovered_block().hash())?;
+            let root = blocks[number].recovered_block().state_root;
+            state
+                .multiproof_v2(
+                    Default::default(),
+                    MultiProofTargetsV2 {
+                        account_targets: vec![keccak256(other_address).into()],
+                        ..Default::default()
+                    },
+                )?
+                .account_proof(other_address, &[])?
+                .verify(root)?;
+            assert_eq!(state.state_root(HashedPostState::default())?, root);
+            assert_eq!(
+                state.storage_root(address, HashedStorage::default())?,
+                storage_roots[number]
+            );
+            state
+                .storage_proof(address, slots[2], HashedStorage::default())?
+                .verify(storage_roots[number])?;
+            let proof = state.storage_multiproof(address, &[slots[2]], HashedStorage::default())?;
+            assert_eq!(proof.root, storage_roots[number]);
+            proof.storage_proof(slots[2])?.verify(storage_roots[number])?;
+        }
+        Ok(())
+    }
 
     const TEST_BLOCKS_COUNT: usize = 5;
 
@@ -3075,6 +3250,88 @@ mod tests {
         provider_rw.commit()?;
 
         assert!(provider.state_range_provider(EMPTY_ROOT_HASH)?.is_some());
+
+        Ok(())
+    }
+
+    #[test]
+    fn latest_reads_in_memory_state_like_the_hash_lookup() -> eyre::Result<()> {
+        use crate::{AccountReader, StateProvider, StateProviderBox};
+        use reth_storage_api::DatabaseProviderROFactory;
+        use reth_storage_overlay::OverlayStateProviderFactory;
+
+        let mut rng = generators::rng();
+        let factory = test_provider_factory_with_genesis()?;
+        let provider = BlockchainProvider::new(factory)?;
+        let genesis = provider.canonical_in_memory_state.get_canonical_head();
+
+        let (address, account) = random_account(1);
+        let hashed_address = keccak256(address);
+        let slot_key = B256::with_last_byte(1);
+        let slot = U256::from_be_bytes(slot_key.0);
+        let value = U256::from(42);
+
+        let mut hashed_state = HashedPostState::default();
+        hashed_state.accounts.insert(hashed_address, Some(account));
+        hashed_state
+            .storages
+            .insert(hashed_address, HashedStorage::from_iter([(keccak256(slot_key), value)]));
+
+        let mut storage = HashMap::default();
+        storage.insert(slot, (U256::ZERO, value));
+
+        let block = random_block(
+            &mut rng,
+            genesis.number + 1,
+            BlockParams { parent: Some(genesis.hash()), tx_count: Some(0), ..Default::default() },
+        )
+        .try_recover()
+        .expect("failed to seal block with senders");
+        let block_hash = block.hash();
+
+        let execution_output = BlockExecutionOutput {
+            result: BlockExecutionResult {
+                receipts: Default::default(),
+                requests: Default::default(),
+                gas_used: 0,
+                blob_gas_used: 0,
+            },
+            state: BundleState::new(
+                [(address, None, Some(account.into()), storage)],
+                [[(address, Some(None), [])]],
+                [],
+            ),
+        };
+        let executed = ExecutedBlock::new(
+            Arc::new(block),
+            Arc::new(execution_output),
+            ComputedTrieData::new(
+                Arc::new(hashed_state.into_sorted()),
+                Arc::new(TrieUpdates::default().into_sorted()),
+            ),
+        );
+        provider.database.overlay_manager().insert_block(executed.clone());
+        provider
+            .canonical_in_memory_state
+            .update_chain(NewCanonicalChain::Commit { new: vec![executed] });
+
+        // `latest` reuses the canonical `Arc<BlockState>` chain, while the hash-based lookup
+        // rebuilds an equivalent chain from the overlay manager's block graph. Both must observe
+        // the same in-memory account and storage values.
+        let rebuilt_from_hash = OverlayStateProviderFactory::new(
+            provider.database.clone(),
+            provider.database.overlay_manager().overlay_builder(block_hash),
+        )
+        .database_provider_ro()?;
+
+        for state in [
+            Box::new(rebuilt_from_hash) as StateProviderBox,
+            provider.latest()?,
+            provider.state_by_block_hash(block_hash)?,
+        ] {
+            assert_eq!(state.basic_account(&address)?, Some(account));
+            assert_eq!(state.storage(address, slot_key)?, Some(value));
+        }
 
         Ok(())
     }

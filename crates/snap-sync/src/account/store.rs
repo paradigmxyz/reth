@@ -3,8 +3,8 @@
 //! Each range replaces its key interval, and ranges commit in key order.
 
 use crate::{
-    storage::persisted_storage_root, SnapAttemptStore, SnapStorageStore, SnapSyncError, SnapWrite,
-    StorageProgress,
+    common::SnapRecord, storage::persisted_storage_root, SnapAttemptStore, SnapCatchUpStore,
+    SnapStorageStore, SnapSyncError, SnapWrite, StorageProgress,
 };
 use alloy_primitives::{
     map::{B256Map, B256Set},
@@ -18,7 +18,6 @@ use reth_db_api::{
 use reth_downloaders::snap::VerifiedAccountRange;
 use reth_primitives_traits::Account;
 use reth_storage_api::{DBProvider, MetadataProvider, MetadataWriter, SnapAttemptId, StateWriter};
-use reth_storage_errors::provider::ProviderError;
 use reth_trie_common::{
     root::storage_root, HashedPostState, HashedPostStateSorted, HashedStorage, TrieAccount,
     EMPTY_ROOT_HASH,
@@ -26,12 +25,6 @@ use reth_trie_common::{
 use revm::{bytecode::Bytecode, database::states::StateChangeset};
 use serde::{Deserialize, Serialize};
 use std::ops::Bound;
-
-// Metadata key of the coverage record.
-const COVERAGE_KEY: &str = "snap_account_coverage";
-
-// Encoding version of the coverage record this build writes.
-const COVERAGE_VERSION: u32 = 1;
 
 /// Persistence for the account ranges an attempt downloads.
 ///
@@ -50,7 +43,8 @@ pub trait SnapAccountStore {
     /// Persists `range` with its storage and code, replacing its key interval.
     ///
     /// Storage must match each account's root, supplied or persisted ahead of the range by
-    /// [`SnapStorageStore`], and code must be supplied or already stored.
+    /// [`SnapStorageStore`], and code must be supplied or already stored. Persisted storage only
+    /// counts once catch-up has carried it to the pivot.
     fn commit_account_range(
         &self,
         write: SnapWrite,
@@ -119,7 +113,7 @@ impl AccountCoverage {
 
 // The coverage record as persisted, tied to the attempt that recorded it.
 #[derive(Serialize, Deserialize)]
-struct StoredCoverage {
+pub(crate) struct StoredCoverage {
     // Encoding version, checked before the rest is decoded.
     version: u32,
     // Attempt the coverage belongs to.
@@ -128,22 +122,15 @@ struct StoredCoverage {
     coverage: AccountCoverage,
 }
 
-impl StoredCoverage {
-    // Serializes `coverage` for `attempt` at this build's version.
-    fn encode(attempt: SnapAttemptId, coverage: AccountCoverage) -> Result<Vec<u8>, SnapSyncError> {
-        let stored = Self { version: COVERAGE_VERSION, attempt, coverage };
-        Ok(serde_json::to_vec(&stored).map_err(ProviderError::other)?)
-    }
+impl SnapRecord for StoredCoverage {
+    const KEY: &'static str = "snap_account_coverage";
+    const VERSION: u32 = 1;
+}
 
-    // Checks the version first, so a record from another build is reported rather than misread.
-    fn decode(bytes: &[u8]) -> Result<Self, SnapSyncError> {
-        let value: serde_json::Value =
-            serde_json::from_slice(bytes).map_err(ProviderError::other)?;
-        let version = value.get("version").and_then(serde_json::Value::as_u64);
-        if version != Some(COVERAGE_VERSION as u64) {
-            return Err(SnapSyncError::UnsupportedCoverage { version })
-        }
-        Ok(serde_json::from_value(value).map_err(ProviderError::other)?)
+impl StoredCoverage {
+    // `coverage` for `attempt` at this build's version.
+    const fn new(attempt: SnapAttemptId, coverage: AccountCoverage) -> Self {
+        Self { version: Self::VERSION, attempt, coverage }
     }
 }
 
@@ -157,15 +144,14 @@ impl<T: MetadataProvider> SnapAccountStore for T {
             return Ok(coverage)
         }
         let start = AccountCoverage::START;
-        self.write_metadata(COVERAGE_KEY, StoredCoverage::encode(write.attempt(), start)?)?;
+        StoredCoverage::new(write.attempt(), start).write(self)?;
         Ok(start)
     }
 
     // A record left by another attempt reads as no coverage.
     fn account_coverage(&self, write: SnapWrite) -> Result<Option<AccountCoverage>, SnapSyncError> {
         self.authorize_snap_write(write)?;
-        let Some(bytes) = self.get_metadata(COVERAGE_KEY)? else { return Ok(None) };
-        let stored = StoredCoverage::decode(&bytes)?;
+        let Some(stored) = StoredCoverage::read(self)? else { return Ok(None) };
         Ok((stored.attempt == write.attempt()).then_some(stored.coverage))
     }
 
@@ -190,6 +176,16 @@ impl<T: MetadataProvider> SnapAccountStore for T {
         let coverage = self.account_coverage(write)?.ok_or(SnapSyncError::NoCoverage)?;
         let advanced = coverage.advance(range)?;
         let progress = self.storage_progress(write, range.origin())?;
+        // Slots persisted before the pivot moved hold its old values until the lists reach it.
+        if progress != StorageProgress::START &&
+            let Some(catch_up) = self.catch_up_progress(write)? &&
+            catch_up.applied().number < attempt.pivot().number
+        {
+            return Err(SnapSyncError::CatchUpBehindPivot {
+                applied: catch_up.applied().number,
+                pivot: attempt.pivot().number,
+            })
+        }
         let dependencies = RangeDependencies::new(range.accounts(), storages, bytecodes);
         let persisted = dependencies.verify(range.accounts(), &progress, self.tx_ref())?;
 
@@ -197,7 +193,11 @@ impl<T: MetadataProvider> SnapAccountStore for T {
         self.remove::<tables::HashedAccounts>(interval)?;
         self.remove_storages_except(interval, &persisted)?;
         dependencies.write(self)?;
-        self.write_metadata(COVERAGE_KEY, StoredCoverage::encode(write.attempt(), advanced)?)?;
+        StoredCoverage::new(write.attempt(), advanced).write(self)?;
+        // A page ending before contracts with persisted storage leaves them to the next range.
+        if let Some(next) = advanced.next() {
+            progress.carry_to(self, write, next)?;
+        }
         Ok(advanced)
     }
 
@@ -463,12 +463,7 @@ mod tests {
         assert!(tail.accounts().is_empty());
         let provider = factory.database_provider_rw().unwrap();
         let coverage = AccountCoverage { next: Some(key(3)) };
-        provider
-            .write_metadata(
-                COVERAGE_KEY,
-                StoredCoverage::encode(write.attempt(), coverage).unwrap(),
-            )
-            .unwrap();
+        StoredCoverage::new(write.attempt(), coverage).write(&provider).unwrap();
 
         let coverage =
             provider.commit_account_range(write, &tail, Default::default(), Vec::new()).unwrap();
@@ -738,11 +733,11 @@ mod tests {
 
         for record in [br#"{"version":999}"#.to_vec(), b"{}".to_vec()] {
             let provider = factory.database_provider_rw().unwrap();
-            provider.write_metadata(COVERAGE_KEY, record).unwrap();
+            provider.write_metadata(StoredCoverage::KEY, record).unwrap();
 
             assert!(matches!(
                 provider.account_coverage(write),
-                Err(SnapSyncError::UnsupportedCoverage { .. })
+                Err(SnapSyncError::UnsupportedRecord { .. })
             ));
         }
     }

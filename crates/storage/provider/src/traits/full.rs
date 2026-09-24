@@ -35,13 +35,13 @@ pub trait FullProvider<N: NodeTypesWithDB>:
         Receipt = ReceiptTy<N>,
         Header = HeaderTy<N>,
     > + BalProvider
-    + StateProviderFactory
+    + StateProviderFactory<Primitives = N::Primitives>
     + StateRangeProviderFactory
     + StateReader
     + ChainSpecProvider<ChainSpec = N::ChainSpec>
     + ChangeSetReader
     + StorageChangeSetReader
-    + CanonStateSubscriptions
+    + CanonStateSubscriptions<Primitives = N::Primitives>
     + ForkChoiceSubscriptions<Header = HeaderTy<N>>
     + PersistedBlockSubscriptions
     + StageCheckpointReader
@@ -73,13 +73,13 @@ impl<T, N: NodeTypesWithDB> FullProvider<N> for T where
             Receipt = ReceiptTy<N>,
             Header = HeaderTy<N>,
         > + BalProvider
-        + StateProviderFactory
+        + StateProviderFactory<Primitives = N::Primitives>
         + StateRangeProviderFactory
         + StateReader
         + ChainSpecProvider<ChainSpec = N::ChainSpec>
         + ChangeSetReader
         + StorageChangeSetReader
-        + CanonStateSubscriptions
+        + CanonStateSubscriptions<Primitives = N::Primitives>
         + ForkChoiceSubscriptions<Header = HeaderTy<N>>
         + PersistedBlockSubscriptions
         + StageCheckpointReader

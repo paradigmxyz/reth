@@ -1,8 +1,8 @@
 //! Downloads the storage of an account range's contracts, committing every verified response.
 
 use crate::{
-    SnapStorageStore, SnapSyncError, SnapWrite, StorageChunk, StorageProgress, VerifiedRange,
-    DEFAULT_RESPONSE_BYTES, MAX_HASH,
+    common::DownloadContext, SnapStorageStore, SnapSyncError, StorageChunk, StorageProgress,
+    VerifiedRange, MAX_HASH,
 };
 use alloy_primitives::B256;
 use reth_db_api::transaction::DbTxMut;
@@ -15,7 +15,6 @@ use reth_network_peers::PeerId;
 use reth_storage_api::{
     DBProvider, DatabaseProviderFactory, MetadataProvider, MetadataWriter, StateWriter,
 };
-use reth_storage_errors::provider::ProviderError;
 use reth_tasks::Runtime;
 use std::fmt;
 
@@ -27,33 +26,23 @@ pub const DEFAULT_STORAGE_ACCOUNTS: usize = 128;
 /// Every verified response is committed before the next request, so at most one response is held
 /// however large a contract is, and a download resumes from the persisted progress.
 pub struct StorageRangeDownload<C, F> {
-    client: C,
-    factory: F,
-    // Proof verification and commits run on the blocking pool.
-    runtime: Runtime,
-    response_bytes: u64,
+    context: DownloadContext<C, F>,
     // Contracts asked for per request.
     max_accounts: usize,
-    // Distinguishes responses to reissued requests.
-    request_id: u64,
 }
 
 impl<C, F> StorageRangeDownload<C, F> {
     /// Creates a download that continues from the progress the store records.
     pub const fn new(client: C, factory: F, runtime: Runtime) -> Self {
         Self {
-            client,
-            factory,
-            runtime,
-            response_bytes: DEFAULT_RESPONSE_BYTES,
+            context: DownloadContext::new(client, factory, runtime),
             max_accounts: DEFAULT_STORAGE_ACCOUNTS,
-            request_id: 0,
         }
     }
 
     /// Returns this download asking peers for at most `response_bytes` per response.
     pub const fn with_response_bytes(mut self, response_bytes: u64) -> Self {
-        self.response_bytes = response_bytes;
+        self.context.set_response_bytes(response_bytes);
         self
     }
 
@@ -77,31 +66,31 @@ where
     /// can commit without supplying their storage. A failed request leaves the progress in place.
     pub async fn next(&mut self, range: &VerifiedRange) -> Result<StorageRangeStep, SnapSyncError> {
         let (write, origin) = (range.write(), range.origin());
-        let progress = self.factory.database_provider_ro()?.storage_progress(write, origin)?;
+        let progress =
+            self.context.factory().database_provider_ro()?.storage_progress(write, origin)?;
         let contracts = range.range().storage_batch();
         let Some(first) =
             contracts.accounts().iter().position(|(account, _)| !progress.is_complete(*account))
         else {
             return Ok(StorageRangeStep::Complete)
         };
-        let end = contracts.accounts().len().min(first.saturating_add(self.max_accounts));
+        let end = progress.request_end(contracts.accounts(), first, self.max_accounts);
         let batch = contracts.range(first..end).expect("positions are inside the batch");
         let from = progress.resume_at(batch.accounts()[0].0).expect("first contract is incomplete");
 
-        self.request_id = self.request_id.wrapping_add(1);
         let request = GetStorageRangesMessage {
-            request_id: self.request_id,
+            request_id: self.context.next_request_id(),
             root_hash: batch.state_root(),
             account_hashes: batch.accounts().iter().map(|(account, _)| *account).collect(),
             starting_hash: from.into(),
             limit_hash: MAX_HASH.into(),
-            response_bytes: self.response_bytes,
+            response_bytes: self.context.response_bytes(),
         };
         let downloader = StorageRangeDownloader::new(
-            self.client.clone(),
+            self.context.client().clone(),
             request,
             &batch,
-            self.runtime.clone(),
+            self.context.runtime().clone(),
         )?;
         let ranges = match downloader.await? {
             StorageRangeOutcome::Verified(ranges) => ranges,
@@ -110,39 +99,27 @@ where
             }
         };
         let chunks = chunks(ranges, batch, from)?;
-        self.commit(write, origin, chunks).await.map(StorageRangeStep::Committed)
-    }
-
-    // Commits one response's chunks together.
-    async fn commit(
-        &self,
-        write: SnapWrite,
-        origin: B256,
-        chunks: Vec<StorageChunk>,
-    ) -> Result<StorageProgress, SnapSyncError> {
-        let factory = self.factory.clone();
-        self.runtime
-            .spawn_blocking(move || -> Result<StorageProgress, SnapSyncError> {
-                let provider = factory.database_provider_rw()?;
+        // One response's chunks commit together.
+        let committed = self
+            .context
+            .commit(move |provider| {
                 let mut progress = StorageProgress::START;
                 for chunk in chunks {
                     progress = provider.commit_storage_chunk(write, origin, chunk)?;
                 }
-                provider.commit()?;
                 Ok(progress)
             })
-            .await
-            .map_err(|error| SnapSyncError::Provider(ProviderError::other(error)))?
+            .await?;
+        Ok(StorageRangeStep::Committed(committed))
     }
 }
 
 impl<C, F> fmt::Debug for StorageRangeDownload<C, F> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("StorageRangeDownload")
-            .field("response_bytes", &self.response_bytes)
+            .field("context", &self.context)
             .field("max_accounts", &self.max_accounts)
-            .field("request_id", &self.request_id)
-            .finish_non_exhaustive()
+            .finish()
     }
 }
 
@@ -192,11 +169,12 @@ mod tests {
     use super::*;
     use crate::{
         test_utils::{
-            account, generation, hashed_factory, key, state_root, storage_ranges, storage_root_of,
-            stored_slots, verified_range, ScriptedSnapClient,
+            account, generation, hashed_factory, insert_generation_headers, key, state_root,
+            storage_ranges, storage_root_of, stored_slots, verified_range, ScriptedSnapClient,
         },
-        SnapAccountStore, SnapAttemptStore,
+        SnapAccountStore, SnapAttemptStore, SnapCatchUpStore,
     };
+    use alloy_eips::BlockNumHash;
     use alloy_primitives::U256;
     use reth_eth_wire_types::snap::StorageRangesMessage;
     use reth_network_p2p::{error::PeerRequestResult, snap::client::SnapResponse};
@@ -238,6 +216,7 @@ mod tests {
     // An attempt that fetched all of `accounts` as one range, not yet committed.
     fn started(accounts: &[(B256, TrieAccount)]) -> (Factory, VerifiedRange) {
         let factory = hashed_factory();
+        insert_generation_headers(&factory);
         let provider = factory.database_provider_rw().unwrap();
         let write = provider.start_snap_attempt(generation(1, state_root(accounts))).unwrap();
         provider.start_account_coverage(write).unwrap();
@@ -404,5 +383,86 @@ mod tests {
 
         assert!(matches!(download.next(&range).await, Err(SnapSyncError::StaleWrite { .. })));
         assert_eq!(client.storage_requests().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn storage_part_way_through_resumes_at_the_new_root() {
+        let accounts = accounts();
+        let (factory, range) = started(&accounts);
+        let (large, small) = (large(), small());
+        // The new pivot turned the first account into a contract, ahead of the carried one.
+        let mut moved = accounts.clone();
+        moved[0].1 = contract(1, &small);
+        let responses = [
+            storage_ranges(1, &[&large[..1]], &large, &[B256::ZERO, key(1)]),
+            storage_ranges(2, &[&small[..]], &small, &[]),
+            storage_ranges(3, &[&large[1..]], &large, &[key(2), key(3)]),
+            storage_ranges(4, &[&small[..]], &small, &[]),
+        ];
+        let (client, mut download) = download(responses, factory.clone());
+        committed(&mut download, &range).await;
+
+        let provider = factory.database_provider_rw().unwrap();
+        let write =
+            provider.advance_snap_pivot(range.write(), generation(2, state_root(&moved))).unwrap();
+        provider.commit().unwrap();
+        let range =
+            VerifiedRange::new(write, verified_range(&moved, 0..moved.len(), B256::ZERO, &[]));
+        for _ in 0..3 {
+            committed(&mut download, &range).await;
+        }
+        assert!(matches!(download.next(&range).await.unwrap(), StorageRangeStep::Complete));
+        assert_eq!(
+            *client.storage_requests(),
+            [
+                (vec![key(2), key(3)], B256::ZERO),
+                (vec![key(1)], B256::ZERO),
+                (vec![key(2), key(3)], key(2)),
+                (vec![key(3)], B256::ZERO),
+            ]
+        );
+
+        // The carried slot holds pivot 1's value until the lists reach the new pivot.
+        let provider = factory.database_provider_rw().unwrap();
+        assert!(matches!(
+            provider.commit_account_range(write, range.range(), Default::default(), Vec::new()),
+            Err(SnapSyncError::CatchUpBehindPivot { applied: 1, pivot: 2 })
+        ));
+        let block = BlockNumHash::new(2, B256::repeat_byte(2));
+        provider.commit_block_access_list(write, block, B256::repeat_byte(1), &[]).unwrap();
+        let coverage = provider
+            .commit_account_range(write, range.range(), Default::default(), Vec::new())
+            .unwrap();
+        provider.commit().unwrap();
+        assert!(coverage.is_complete());
+        assert_eq!(slots_of(&factory, key(1)), small);
+        assert_eq!(slots_of(&factory, key(2)), large);
+    }
+
+    #[tokio::test]
+    async fn a_page_ending_before_a_carried_contract_hands_it_to_the_next_range() {
+        let accounts = accounts();
+        let (factory, range) = started(&accounts);
+        let large = large();
+        let first = storage_ranges(1, &[&large[..1]], &large, &[B256::ZERO, key(1)]);
+        let (_, mut download) = download([first], factory.clone());
+        committed(&mut download, &range).await;
+        let provider = factory.database_provider_rw().unwrap();
+        let write = provider
+            .advance_snap_pivot(range.write(), generation(2, state_root(&accounts)))
+            .unwrap();
+        let block = BlockNumHash::new(2, B256::repeat_byte(2));
+        provider.commit_block_access_list(write, block, B256::repeat_byte(1), &[]).unwrap();
+
+        // The new root's page stops before the contract part way through.
+        let page = verified_range(&accounts, 0..1, B256::ZERO, &[B256::ZERO, key(1)]);
+        let next = provider
+            .commit_account_range(write, &page, Default::default(), Vec::new())
+            .unwrap()
+            .next()
+            .unwrap();
+
+        assert!(next <= key(2));
+        assert_eq!(provider.storage_progress(write, next).unwrap().resume_at(key(2)), Some(key(2)));
     }
 }
