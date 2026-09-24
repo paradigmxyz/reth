@@ -53,7 +53,7 @@ futures.workspace = true
 pin-project.workspace = true
 tokio = { workspace = true, features = ["io-util", "net", "macros", "rt-multi-thread", "time"] }
 socket2 = { workspace = true, features = ["all"] }
-tokio-stream.workspace = true
+tokio-stream = { workspace = true, features = ["sync"] }
 tokio-util = { workspace = true, features = ["codec"] }
 
 # io

@@ -57,7 +57,7 @@ use std::{
 };
 use tokio::{
     net::UdpSocket,
-    sync::{mpsc, mpsc::error::TrySendError, oneshot, oneshot::Sender as OneshotSender},
+    sync::{mpsc, mpsc::error::TrySendError, oneshot, oneshot::Sender as OneshotSender, watch},
     task::{JoinHandle, JoinSet},
     time::Interval,
 };
@@ -171,6 +171,8 @@ pub struct Discv4 {
     ///
     /// This includes the currently tracked external IP address of the node.
     node_record: Arc<Mutex<NodeRecord>>,
+    /// Latest address selected by NAT resolution.
+    external_ip: watch::Receiver<Option<IpAddr>>,
 }
 
 impl Discv4 {
@@ -201,6 +203,7 @@ impl Discv4 {
         Self {
             local_addr,
             to_service,
+            external_ip: watch::channel(None).1,
             node_record: Arc::new(Mutex::new(NodeRecord::new(
                 "127.0.0.1:3030".parse().unwrap(),
                 PeerId::random(),
@@ -464,6 +467,13 @@ impl Discv4 {
     pub fn terminate(&self) {
         self.send_to_service(Discv4Command::Terminated);
     }
+
+    /// Subscribes to the latest NAT-resolved IP, including results obtained before subscribing.
+    ///
+    /// This does not publish the bind address or copy UDP port mappings between protocols.
+    pub fn external_ip_updates(&self) -> watch::Receiver<Option<IpAddr>> {
+        self.external_ip.clone()
+    }
 }
 
 /// Manages discv4 peer discovery over UDP.
@@ -553,6 +563,8 @@ pub struct Discv4Service {
     expire_interval: Interval,
     /// Cached signed `FindNode` packet to avoid redundant ECDSA signing during lookups.
     cached_find_node: Option<CachedFindNode>,
+    /// Publishes NAT results independently of the bounded peer update stream.
+    external_ip: watch::Sender<Option<IpAddr>>,
 }
 
 impl Discv4Service {
@@ -660,6 +672,7 @@ impl Discv4Service {
             received_pongs: Default::default(),
             expire_interval: tokio::time::interval(EXPIRE_DURATION),
             cached_find_node: None,
+            external_ip: watch::channel(None).0,
         }
     }
 
@@ -669,6 +682,7 @@ impl Discv4Service {
             local_addr: self.local_address,
             to_service: self.to_service.clone(),
             node_record: self.shared_node_record.clone(),
+            external_ip: self.external_ip.subscribe(),
         }
     }
 
@@ -705,6 +719,8 @@ impl Discv4Service {
             *lock = self.local_node_record;
             debug!(target: "discv4", enr=?self.local_eip_868_enr, "Updated local ENR");
         }
+        // Re-publish successful resolutions so other protocols can reconcile peer-voted IPs.
+        self.external_ip.send_replace(Some(external_ip));
     }
 
     /// Returns the [`PeerId`] that identifies this node

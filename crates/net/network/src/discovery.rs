@@ -26,7 +26,10 @@ use std::{
     time::Duration,
 };
 use tokio::{net::UdpSocket, sync::mpsc, task::JoinHandle};
-use tokio_stream::{wrappers::ReceiverStream, Stream};
+use tokio_stream::{
+    wrappers::{ReceiverStream, WatchStream},
+    Stream,
+};
 use tracing::{debug, trace};
 
 /// Default max capacity for cache of discovered peers.
@@ -76,6 +79,8 @@ pub struct Discovery {
     queued_events: VecDeque<DiscoveryEvent>,
     /// List of listeners subscribed to discovery events.
     discovery_listeners: Vec<mpsc::UnboundedSender<DiscoveryEvent>>,
+    /// Latest NAT result from discv4, shared with discv5 without a second resolver.
+    discv4_external_ip: Option<WatchStream<Option<IpAddr>>>,
 }
 
 impl Discovery {
@@ -249,7 +254,13 @@ impl Discovery {
             None
         };
 
+        let discv4_external_ip = discv4
+            .as_ref()
+            .filter(|_| discv5.is_some())
+            .map(|discv4| WatchStream::new(discv4.external_ip_updates()));
+
         Ok(Self {
+            discv4_external_ip,
             discovery_listeners: Default::default(),
             local_enr,
             discv4,
@@ -418,6 +429,14 @@ impl Discovery {
                 self.on_discv4_update(update)
             }
 
+            while let Some(Poll::Ready(Some(ip))) =
+                self.discv4_external_ip.as_mut().map(|updates| updates.poll_next_unpin(cx))
+            {
+                if let Some(ip) = ip {
+                    self.on_external_ip(ip);
+                }
+            }
+
             // drain the discv5 update stream
             while let Some(Poll::Ready(Some(update))) =
                 self.discv5_updates.as_mut().map(|updates| updates.poll_next_unpin(cx))
@@ -519,6 +538,7 @@ impl Discovery {
             _dns_disc_service: None,
             discovery_listeners: Default::default(),
             nat_resolver: None,
+            discv4_external_ip: None,
         }
     }
 }
@@ -703,6 +723,7 @@ mod tests {
                     .await
                     .unwrap();
             assert_eq!(discovery.nat_resolver.is_some(), should_resolve);
+            assert_eq!(discovery.discv4_external_ip.is_some(), enable_v4 && enable_v5);
         }
     }
 
@@ -995,5 +1016,53 @@ mod tests {
         )
         .await
         .expect("discovery should start with shared port + dual-stack");
+    }
+
+    #[tokio::test]
+    async fn discv4_nat_updates_reach_discv5() {
+        let secret_key = SecretKey::new(&mut rand_08::thread_rng());
+        let addr = "127.0.0.1:0".parse::<SocketAddr>().unwrap();
+        let initial_ip = "192.0.2.1".parse::<IpAddr>().unwrap();
+        let config = Discv4ConfigBuilder::default()
+            .external_ip_resolver(Some(NatResolver::ExternalIp(initial_ip)))
+            .build();
+        let (discv4, mut service) =
+            Discv4::bind(addr, NodeRecord::from_secret_key(addr, &secret_key), secret_key, config)
+                .await
+                .unwrap();
+        // The initial NAT result precedes the subscription.
+        let socket = Arc::new(UdpSocket::bind(addr).await.unwrap());
+        let mut discovery = start_discv5_only(
+            discv5::ListenConfig::FromSockets { ipv4: Some(socket), ipv6: None },
+            None,
+        )
+        .await;
+        discovery.discv4_external_ip = Some(WatchStream::new(discv4.external_ip_updates()));
+        let discv5 = discovery.discv5().unwrap();
+        let before = discv5.local_enr();
+        let waker = futures::task::noop_waker();
+        let mut cx = Context::from_waker(&waker);
+        let _ = discovery.poll(&mut cx);
+        assert_eq!(discv5.node_record().unwrap().address, initial_ip);
+
+        // Coalesce updates without losing the newest result, even if the peer queue is idle.
+        service.set_external_ip_addr("192.0.2.2".parse().unwrap());
+        service.set_external_ip_addr("192.0.2.3".parse().unwrap());
+        let _ = discovery.poll(&mut cx);
+        let after = discv5.local_enr();
+        assert_eq!(after.ip4(), Some(Ipv4Addr::new(192, 0, 2, 3)));
+        assert_eq!(after.tcp4(), before.tcp4());
+        assert_eq!(after.udp4(), before.udp4());
+        service.set_external_ip_addr("192.0.2.3".parse().unwrap());
+        let _ = discovery.poll(&mut cx);
+        assert_eq!(discv5.local_enr().seq(), after.seq());
+
+        discv5.with_discv5(|discv5| {
+            discv5.update_local_enr_socket((Ipv4Addr::LOCALHOST, 30310).into(), false);
+        });
+        service.set_external_ip_addr("192.0.2.3".parse().unwrap());
+        let _ = discovery.poll(&mut cx);
+        assert_eq!(discv5.local_enr().ip4(), after.ip4());
+        assert_eq!(discv5.local_enr().udp4(), Some(30310));
     }
 }
