@@ -1,5 +1,5 @@
-//! Loads a pending block from database. Helper trait for `eth_` block, transaction, call and trace
-//! RPC methods.
+//! Loads provider pending blocks or builds them from the transaction pool for `eth_` block,
+//! transaction, call and trace RPC methods.
 
 use super::SpawnBlocking;
 use crate::{EthApiTypes, FromEthApiError, FromEvmError, RpcNodeCore};
@@ -40,7 +40,7 @@ use std::{
 use tokio::sync::Mutex;
 use tracing::debug;
 
-/// Loads a pending block from database.
+/// Loads a provider pending block or builds one from the transaction pool.
 ///
 /// Behaviour shared by several `eth_` RPC methods, not exclusive to `eth_` blocks RPC methods.
 pub trait LoadPendingBlock:
@@ -57,14 +57,15 @@ pub trait LoadPendingBlock:
     /// Returns a [`PendingEnvBuilder`] for the pending block.
     fn pending_env_builder(&self) -> &dyn PendingEnvBuilder<Self::Evm>;
 
-    /// Returns the pending block kind
+    /// Returns the pending block kind.
     fn pending_block_kind(&self) -> PendingBlockKind {
         self.eth_api_settings().pending_block_kind
     }
 
-    /// Configures the [`PendingBlockEnv`] for the pending block
+    /// Returns the pending block environment and its origin.
     ///
-    /// If no pending block is available, this will derive it from the `latest` block
+    /// Uses the provider's pending block when available; otherwise derives the next block
+    /// environment from the latest header. This method performs synchronous provider reads.
     fn pending_block_env_and_cfg(&self) -> Result<PendingBlockEnv<Self::Evm>, Self::Error> {
         if let Some((block, receipts)) =
             self.provider().pending_block_and_receipts().map_err(Self::Error::from_eth_err)?
@@ -132,7 +133,12 @@ pub trait LoadPendingBlock:
         }
     }
 
-    /// Returns a mem-pool built pending block.
+    /// Returns a cached or newly built pending block from the transaction pool.
+    ///
+    /// Returns `None` if local pending blocks are disabled or the provider has an actual pending
+    /// block. Resolves the environment on a blocking thread before awaiting the cache lock and
+    /// potentially spawning another blocking task to build the block. Callers must await this
+    /// outside a blocking task.
     fn pool_pending_block(
         &self,
     ) -> impl Future<Output = Result<Option<PendingBlock<Self::Primitives>>, Self::Error>> + Send
@@ -153,10 +159,10 @@ pub trait LoadPendingBlock:
         }
     }
 
-    /// Builds or returns a cached pending block from the transaction pool.
+    /// Returns a cached or newly built pending block for the given parent and environment.
     ///
-    /// This is the shared implementation used by both [`Self::pool_pending_block`] and
-    /// [`Self::local_pending_block`] to avoid resolving the pending block environment twice.
+    /// Holds the async cache lock while rebuilding, which may spawn blocking work. The resolved
+    /// parent and environment let callers reuse the result of their provider lookup.
     fn build_pool_pending_block(
         &self,
         parent: SealedHeader<ProviderHeader<Self::Provider>>,
@@ -207,7 +213,7 @@ pub trait LoadPendingBlock:
         }
     }
 
-    /// Returns the locally built pending block
+    /// When enabled, returns the provider's pending block or builds one from the pool.
     fn local_pending_block(
         &self,
     ) -> impl Future<Output = Result<Option<BlockAndReceipts<Self::Primitives>>, Self::Error>> + Send
