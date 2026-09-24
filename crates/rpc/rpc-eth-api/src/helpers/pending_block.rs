@@ -136,9 +136,8 @@ pub trait LoadPendingBlock:
     /// Returns a cached or newly built pending block from the transaction pool.
     ///
     /// Returns `None` if local pending blocks are disabled or the provider has an actual pending
-    /// block. Resolves the environment on a blocking thread before awaiting the cache lock and
-    /// potentially spawning another blocking task to build the block. Callers must await this
-    /// outside a blocking task.
+    /// block. Resolves the environment before awaiting the cache lock, then may spawn a blocking
+    /// task to build the block. Callers must await this outside a blocking task.
     fn pool_pending_block(
         &self,
     ) -> impl Future<Output = Result<Option<PendingBlock<Self::Primitives>>, Self::Error>> + Send
@@ -149,7 +148,7 @@ pub trait LoadPendingBlock:
             if self.pending_block_kind().is_none() {
                 return Ok(None);
             }
-            let pending = self.spawn_blocking_io(|this| this.pending_block_env_and_cfg()).await?;
+            let pending = self.pending_block_env_and_cfg()?;
             let parent = match pending.origin {
                 PendingBlockEnvOrigin::ActualPending(..) => return Ok(None),
                 PendingBlockEnvOrigin::DerivedFromLatest(parent) => parent,
