@@ -1536,7 +1536,7 @@ pub fn ensure_intrinsic_gas<T: EthPoolTransaction>(
         revm::context_interface::cfg::gas_params::Eip2780TxInfo {
             value: transaction.value(),
             // Self-transfer: a `Call` whose recipient is the sender itself.
-            is_self_transfer: transaction.to() == Some(transaction.sender()),
+            is_self_transfer: transaction.kind().to() == Some(&transaction.sender()),
         }
     });
 
