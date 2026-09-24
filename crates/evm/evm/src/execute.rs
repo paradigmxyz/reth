@@ -300,15 +300,20 @@ fn execute_result<T: evm2::EvmTypes<Tx: Typed2718>>(
     Ok(if commit { executed.commit() } else { executed.discard() })
 }
 
-fn map_handler_error(error: HandlerError) -> BlockExecutionError {
+/// Converts a handler error into a block error without transaction hash context.
+/// Validation errors retain the original handler error for downstream classification.
+pub fn map_handler_error(error: HandlerError) -> BlockExecutionError {
     match error {
         HandlerError::Database(error) => map_database_error(error),
-        HandlerError::Fatal(error) => BlockExecutionError::other(error),
+        HandlerError::Fatal(_) | HandlerError::WrongTransactionType { .. } => {
+            BlockExecutionError::other(error)
+        }
         error => BlockValidationError::Other(Box::new(error)).into(),
     }
 }
 
-fn map_database_error(error: DatabaseError) -> BlockExecutionError {
+/// Converts an owned database error using its internal-failure classification.
+pub fn map_database_error(error: DatabaseError) -> BlockExecutionError {
     if error.is_fatal() {
         BlockExecutionError::other(error)
     } else {

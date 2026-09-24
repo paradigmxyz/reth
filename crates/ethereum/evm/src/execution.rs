@@ -26,10 +26,11 @@ use evm2::{
     },
     interpreter::InstrStop,
     registry::HandlerError,
-    DatabaseError, Evm, EvmTypes, SpecId, TxResult, TxResultWithState,
+    Evm, EvmTypes, SpecId, TxResult, TxResultWithState,
 };
 use reth_ethereum_forks::EthereumHardforks;
 use reth_evm::{
+    execute::{map_database_error, map_handler_error},
     BlockExecutionError, BlockValidationError, InternalBlockExecutionError, InvalidTxError,
 };
 
@@ -136,22 +137,6 @@ pub(crate) struct BlockSystemCalls {
     pub parent_hash: B256,
     /// Parent beacon block root for EIP-4788 beacon roots.
     pub parent_beacon_block_root: Option<B256>,
-}
-
-fn map_handler_error(error: HandlerError) -> BlockExecutionError {
-    match EthInvalidTxError::try_from(error) {
-        Ok(error) => BlockValidationError::Other(Box::new(error)).into(),
-        Err(HandlerError::Database(error)) => map_database_error(error),
-        Err(error) => BlockExecutionError::other(error),
-    }
-}
-
-fn map_database_error(error: DatabaseError) -> BlockExecutionError {
-    if error.is_fatal() {
-        BlockExecutionError::other(error)
-    } else {
-        BlockValidationError::Other(Box::new(error)).into()
-    }
 }
 
 pub(crate) fn map_transaction_error(error: HandlerError, hash: B256) -> BlockExecutionError {
