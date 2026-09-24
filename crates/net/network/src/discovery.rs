@@ -83,9 +83,9 @@ impl Discovery {
     ///
     /// This will spawn the [`reth_discv4::Discv4Service`] onto a new task and establish a listener
     /// channel to receive all discovered nodes. When only discv5 is enabled, `nat` periodically
-    /// resolves its advertised external IP without waiting for peer votes. Automatic resolution
-    /// respects disabled ENR updates and discv5 reachability checks; explicit NAT addresses remain
-    /// authoritative.
+    /// resolves its advertised external IP without waiting for peer votes. When ENR updates are
+    /// disabled or discv5 checks inbound connectivity, only explicit `extip` or `extaddr` settings
+    /// are applied.
     pub async fn new(
         tcp_addr: SocketAddr,
         discovery_v4_addr: SocketAddr,
@@ -172,16 +172,17 @@ impl Discovery {
                 (None, None, None, None, None)
             };
 
-        // Discv4 owns NAT resolution when enabled. Automatic resolvers must respect pinned
-        // addresses and discv5 reachability checks: writing ENR fields does not arm its
-        // connectivity timer. Explicit NAT addresses remain authoritative.
+        // Discv4 resolves its own external IP when enabled.
         let nat_resolver = if discv4.is_none() &&
             let Some(config) = &mut discv5_config
         {
             let config = config.discv5_config_mut();
             nat.filter(|nat| match nat {
                 NatResolver::None => false,
+                // Use the address or hostname explicitly configured by the operator.
                 NatResolver::ExternalIp(_) | NatResolver::ExternalAddr(_) => true,
+                // Preserve manual addresses and let discv5 handle reachability checks. Its check
+                // for incoming connections starts when peer votes change the advertised address.
                 _ => config.enr_update && config.auto_nat_listen_duration.is_none(),
             })
             .map(|nat| ResolveNatInterval::interval(nat, RESOLVE_EXTERNAL_IP_INTERVAL))
