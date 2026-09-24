@@ -1006,9 +1006,11 @@ impl ExecutionCache {
 
     /// Build an [`ExecutionCache`] struct, so that execution caches can be easily cloned.
     pub fn new(total_cache_size: usize) -> Self {
-        let code_cache_size = (total_cache_size * 556) / 10000; // 5.56% of total
-        let storage_cache_size = (total_cache_size * 8888) / 10000; // 88.88% of total
-        let account_cache_size = (total_cache_size * 556) / 10000; // 5.56% of total
+        // Power-of-two rounding keeps the default 4 GiB storage cache at 16M entries while
+        // increasing the code cache from 16K to 131K entries for bytecode-heavy blocks.
+        let code_cache_size = (total_cache_size * 4444) / 10000; // 44.44% of total.
+        let storage_cache_size = (total_cache_size * 5000) / 10000; // 50% of total.
+        let account_cache_size = (total_cache_size * 556) / 10000; // 5.56% of total.
 
         let code_capacity = Self::bytes_to_entries(code_cache_size, CODE_CACHE_ENTRY_SIZE);
         let storage_capacity = Self::bytes_to_entries(storage_cache_size, STORAGE_CACHE_ENTRY_SIZE);
@@ -1576,18 +1578,15 @@ mod tests {
     }
 
     #[test]
-    fn test_code_cache_capacity_with_default_budget() {
-        // Default cross-block cache is 4 GB; code gets 5.56% = ~228 MB.
-        let total_cache_size = 4 * 1024 * 1024 * 1024; // 4 GB
-        let code_budget = (total_cache_size * 556) / 10000; // 228 MB
+    fn test_cache_capacities_with_default_budget() {
+        let total_cache_size = 4 * 1024 * 1024 * 1024;
+        let code_budget = (total_cache_size * 4444) / 10000;
+        let storage_budget = (total_cache_size * 5000) / 10000;
 
-        let capacity = ExecutionCache::bytes_to_entries(code_budget, CODE_CACHE_ENTRY_SIZE);
-
-        // With ESTIMATED_AVG_CODE_SIZE (8 KiB) we expect 16384 entries.
-        // If someone accidentally reverts to MAX_CODE_SIZE (48 KiB), this would drop to 4096.
+        assert_eq!(ExecutionCache::bytes_to_entries(code_budget, CODE_CACHE_ENTRY_SIZE), 131072);
         assert_eq!(
-            capacity, 16384,
-            "code cache should have 16384 entries with default 4 GB budget"
+            ExecutionCache::bytes_to_entries(storage_budget, STORAGE_CACHE_ENTRY_SIZE),
+            16777216
         );
     }
 }
