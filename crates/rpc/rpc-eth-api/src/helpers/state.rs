@@ -327,8 +327,8 @@ pub trait LoadState:
     /// <https://github.com/paradigmxyz/reth/issues/4515>.
     ///
     /// Pending block construction may spawn blocking work, so await this outside a blocking task.
-    /// Provider access in this method is synchronous on the calling task; RPC handlers should use
-    /// [`Self::spawn_blocking_io_with_state`] to keep those reads on the blocking pool.
+    /// The fallback provider lookup is synchronous on the calling task; RPC handlers should use
+    /// [`Self::spawn_blocking_io_with_state`] to keep that read on the blocking pool.
     fn state_at_block_id(
         &self,
         at: BlockId,

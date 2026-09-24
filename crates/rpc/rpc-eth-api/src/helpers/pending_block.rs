@@ -115,7 +115,8 @@ pub trait LoadPendingBlock:
     /// Returns a [`StateProviderBox`] on a mem-pool built pending block overlaying latest.
     ///
     /// This is used by `state_at_block_id`. State RPCs using `spawn_blocking_io_with_state` select
-    /// their pending source through [`Self::local_pending_block_or_state`] instead.
+    /// their pending source through [`Self::local_pending_block_or_state`] instead. The default
+    /// opens the provider state on a blocking task after building the pending block.
     fn local_pending_state(
         &self,
     ) -> impl Future<Output = Result<Option<StateProviderBox>, Self::Error>> + Send
@@ -127,14 +128,17 @@ pub trait LoadPendingBlock:
                 return Ok(None);
             };
 
-            Ok(Some(
-                self.provider()
-                    .state_with_block_appended(
-                        pending_block.block().parent_hash(),
-                        pending_block.executed_block,
-                    )
-                    .map_err(Self::Error::from_eth_err)?,
-            ))
+            self.spawn_blocking_io(move |this| {
+                Ok(Some(
+                    this.provider()
+                        .state_with_block_appended(
+                            pending_block.block().parent_hash(),
+                            pending_block.executed_block,
+                        )
+                        .map_err(Self::Error::from_eth_err)?,
+                ))
+            })
+            .await
         }
     }
 
