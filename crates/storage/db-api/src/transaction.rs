@@ -47,23 +47,17 @@ pub trait DbTx: Debug + Send {
     /// Disables long-lived read transaction safety guarantees.
     fn disable_long_read_transaction_safety(&mut self);
 
-    /// Returns an adapter that requests read-ahead when fetching a value.
+    /// Requests best-effort read-ahead for the next get or cursor creation on this transaction.
     ///
-    /// Creating the adapter performs no database operation and does not change the transaction.
+    /// Mutates transaction state and returns the same transaction for chaining. A get consumes
+    /// the request even on a missing key or error. A new read or write cursor consumes the request
+    /// and enables read-ahead for all of its value reads, including walks and duplicate reads.
+    /// Writes and statistics queries do not consume the request. Existing cursors are unaffected.
+    /// Concurrent callers sharing the transaction may consume each other's requests.
+    /// Backends without support ignore the request.
     #[inline]
-    fn prefetch(&self) -> PrefetchTx<'_, Self> {
-        PrefetchTx { tx: self }
-    }
-
-    /// Gets a value, optionally hinting its pages before decoding it.
-    ///
-    /// Backends supporting read-ahead should perform the hint and read in one lookup.
-    /// The default implementation falls back to an ordinary read.
-    fn get_by_encoded_key_with_prefetch<T: Table>(
-        &self,
-        key: &<T::Key as Encode>::Encoded,
-    ) -> Result<Option<T::Value>, DatabaseError> {
-        self.get_by_encoded_key::<T>(key)
+    fn prefetch(&self) -> &Self {
+        self
     }
 }
 
@@ -95,31 +89,4 @@ pub trait DbTxMut: Send {
     fn cursor_write<T: Table>(&self) -> Result<Self::CursorMut<T>, DatabaseError>;
     /// `DupCursor` mut.
     fn cursor_dup_write<T: DupSort>(&self) -> Result<Self::DupCursorMut<T>, DatabaseError>;
-}
-
-/// A borrowed transaction adapter for a single read with best-effort read-ahead.
-///
-/// It holds no mutable transaction state. Ordinary reads on the original transaction are
-/// unaffected. For duplicate-sorted tables, reads return the first value for the key.
-#[derive(Debug)]
-#[must_use]
-pub struct PrefetchTx<'a, TX: ?Sized> {
-    tx: &'a TX,
-}
-
-impl<TX: DbTx + ?Sized> PrefetchTx<'_, TX> {
-    /// Gets a value by an owned key, requesting read-ahead before decoding it.
-    #[inline]
-    pub fn get<T: Table>(self, key: T::Key) -> Result<Option<T::Value>, DatabaseError> {
-        self.get_by_encoded_key::<T>(&key.encode())
-    }
-
-    /// Gets a value by an encoded key, requesting read-ahead before decoding it.
-    #[inline]
-    pub fn get_by_encoded_key<T: Table>(
-        self,
-        key: &<T::Key as Encode>::Encoded,
-    ) -> Result<Option<T::Value>, DatabaseError> {
-        self.tx.get_by_encoded_key_with_prefetch::<T>(key)
-    }
 }
