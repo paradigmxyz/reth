@@ -3,7 +3,7 @@ use reth_node_core::{args::RpcServerArgs, utils::get_or_create_jwt_secret_from_p
 use reth_rpc::ValidationApiConfig;
 use reth_rpc_eth_types::{EthConfig, EthStateCacheConfig, GasPriceOracleConfig};
 use reth_rpc_layer::{JwtError, JwtSecret};
-use reth_rpc_server_types::RpcModuleSelection;
+use reth_rpc_server_types::{RethRpcModule, RpcModuleSelection};
 use std::{net::SocketAddr, path::PathBuf};
 use tower::layer::util::Identity;
 use tracing::{debug, warn};
@@ -208,6 +208,17 @@ impl RethRpcServerConfig for RpcServerArgs {
             );
         }
 
+        if (self.http &&
+            self.http_api.as_ref().is_some_and(|api| api.contains(&RethRpcModule::Testing))) ||
+            (self.ws &&
+                self.ws_api.as_ref().is_some_and(|api| api.contains(&RethRpcModule::Testing)))
+        {
+            warn!(
+                target: "reth::cli",
+                "The testing RPC namespace can build and commit blocks. Do not expose it to untrusted clients."
+            );
+        }
+
         if self.http {
             let socket_address = SocketAddr::new(self.http_addr, self.http_port);
             config = config
@@ -325,6 +336,38 @@ mod tests {
             config.ws().cloned().unwrap().into_selection(),
             RpcModuleSelection::standard_modules()
         );
+    }
+
+    #[test]
+    fn test_testing_namespace_requires_explicit_selection() {
+        let args = CommandParser::<RpcServerArgs>::parse_from([
+            "reth",
+            "--http",
+            "--http.api",
+            "all",
+            "--ws",
+            "--ws.api",
+            "all",
+        ])
+        .args;
+        let config = args.transport_rpc_module_config();
+        assert!(!config.contains_http(&RethRpcModule::Testing));
+        assert!(!config.contains_ws(&RethRpcModule::Testing));
+        assert!(!config.contains_ipc(&RethRpcModule::Testing));
+
+        let args = CommandParser::<RpcServerArgs>::parse_from([
+            "reth",
+            "--http",
+            "--http.api",
+            "eth,testing",
+            "--ws",
+            "--ws.api",
+            "eth,testing",
+        ])
+        .args;
+        let config = args.transport_rpc_module_config();
+        assert!(config.contains_http(&RethRpcModule::Testing));
+        assert!(config.contains_ws(&RethRpcModule::Testing));
     }
 
     #[test]
