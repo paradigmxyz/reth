@@ -203,6 +203,19 @@ where
             EthExecutionError::DepositRequestDecode(err) => {
                 BlockValidationError::DepositRequestDecode(err).into()
             }
+            EthExecutionError::SystemCallFailed { address, reason }
+                if address == WITHDRAWAL_REQUEST_ADDRESS =>
+            {
+                BlockValidationError::WithdrawalRequestsContractCall { message: reason }.into()
+            }
+            EthExecutionError::SystemCallFailed { address, reason }
+                if address == CONSOLIDATION_REQUEST_ADDRESS =>
+            {
+                BlockValidationError::ConsolidationRequestsContractCall { message: reason }.into()
+            }
+            err @ EthExecutionError::SystemCallFailed { .. } => {
+                BlockValidationError::Other(Box::new(err)).into()
+            }
             err => Self::other(err),
         }
     }
@@ -1171,6 +1184,31 @@ mod tests {
                 Bytes::from_static(&[BUILDER_EXIT_REQUEST_TYPE, 0xdd]),
             ]
         );
+    }
+
+    #[test]
+    fn failed_request_system_calls_are_validation_errors() {
+        for address in [WITHDRAWAL_REQUEST_ADDRESS, CONSOLIDATION_REQUEST_ADDRESS] {
+            for code in [
+                Bytes::from_static(&[op::PUSH0, op::PUSH0, op::REVERT]),
+                Bytes::from_static(&[op::INVALID]),
+            ] {
+                let mut database = InMemoryDB::default();
+                database.insert_account_info(
+                    &address,
+                    AccountInfo::default().with_code(Bytecode::new_legacy(code)),
+                );
+                let error = execute_block(
+                    SpecId::PRAGUE,
+                    BlockEnv::default(),
+                    database,
+                    core::iter::empty::<Recovered<TransactionSigned>>(),
+                    None,
+                )
+                .unwrap_err();
+                assert!(error.as_validation().is_some(), "{error:?}");
+            }
+        }
     }
 
     #[test]
