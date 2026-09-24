@@ -23,9 +23,9 @@ pub trait TraceApi<TxReq> {
         block_overrides: Option<Box<BlockOverrides>>,
     ) -> RpcResult<TraceResults>;
 
-    /// Performs multiple call traces on top of the same block. i.e. transaction n will be executed
-    /// on top of a pending block with all n-1 transactions applied (traced) first. Allows to trace
-    /// dependent transactions.
+    /// Performs multiple call traces on top of the same block, defaulting to latest when no block
+    /// is specified. Each call is executed with the preceding calls applied first, allowing
+    /// dependent transactions to be traced.
     #[method(name = "callMany")]
     async fn trace_call_many(
         &self,
