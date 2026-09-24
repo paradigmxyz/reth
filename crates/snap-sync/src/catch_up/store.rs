@@ -413,7 +413,7 @@ mod tests {
         (factory, write, block(3).0)
     }
 
-    fn index(value: u64) -> BlockAccessIndex {
+    const fn index(value: u64) -> BlockAccessIndex {
         BlockAccessIndex::new(value)
     }
 

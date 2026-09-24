@@ -2,6 +2,7 @@
 
 #[cfg(feature = "std")]
 use alloy_eips::BlockHashOrNumber;
+#[cfg(feature = "std")]
 use alloy_primitives::{Address, BlockNumber, B256, U256};
 use core::ops::{Deref, DerefMut};
 #[cfg(feature = "std")]
@@ -10,12 +11,14 @@ use evm2::{
     evm::{AccountInfo, Database},
     interpreter::Word,
 };
+#[cfg(feature = "std")]
 use reth_primitives_traits::Account;
+#[cfg(feature = "std")]
 use reth_storage_api::EvmStateProvider;
 #[cfg(feature = "std")]
 use reth_storage_errors::provider::ProviderError;
 
-/// A database wrapper backed by an [`EvmStateProvider`].
+/// A database wrapper backed by an [`EvmStateProvider`](reth_storage_api::EvmStateProvider).
 #[derive(Clone)]
 pub struct StateProviderDatabase<DB>(pub DB);
 

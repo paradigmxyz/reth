@@ -210,6 +210,8 @@ pub fn revm_bytecode(code: &evm2::bytecode::Bytecode) -> Bytecode {
 
 /// Converts native account information into the persistent state representation.
 /// Bytecode is carried separately by the change stream; account updates only need its hash.
+// Cloning the optional shared extension is not a const operation.
+#[cfg_attr(not(feature = "account-ext"), allow(clippy::missing_const_for_fn))]
 pub fn revm_account(info: &evm2::evm::AccountInfo) -> AccountInfo {
     AccountInfo {
         balance: info.balance,
