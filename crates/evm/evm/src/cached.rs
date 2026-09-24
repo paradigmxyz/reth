@@ -158,7 +158,7 @@ where
     }
 
     fn get_block_hash(&mut self, number: &Word) -> Result<B256, Self::Error> {
-        let number = u256_to_u64_saturating(*number);
+        let number = number.saturating_to::<u64>();
         if let Some(hash) = self.cached.borrow().block_hashes.get(&number) {
             return Ok(*hash)
         }
@@ -182,14 +182,6 @@ impl CachedAccount {
     /// Creates a cached account with no storage slots.
     pub fn new(info: Option<AccountInfo>) -> Self {
         Self { info, storage: U256Map::default() }
-    }
-}
-
-fn u256_to_u64_saturating(value: U256) -> u64 {
-    if value > U256::from(u64::MAX) {
-        u64::MAX
-    } else {
-        value.to()
     }
 }
 

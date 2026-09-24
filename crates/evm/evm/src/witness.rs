@@ -1,3 +1,4 @@
+use alloc::vec::Vec;
 use alloy_primitives::{keccak256, Bytes, B256};
 use alloy_rpc_types_debug::ExecutionWitness;
 use evm2::evm::CacheDB;
