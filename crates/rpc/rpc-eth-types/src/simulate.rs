@@ -23,7 +23,7 @@ use reth_primitives_traits::{
     BlockBody as _, BlockTy, NodePrimitives, Recovered, RecoveredBlock, SealedHeader,
 };
 use reth_rpc_convert::{RpcBlock, RpcConvert, RpcTxReq};
-use reth_rpc_server_types::result::{block_id_to_str, rpc_err};
+use reth_rpc_server_types::result::rpc_err;
 use reth_storage_api::{noop::NoopProvider, StateProvider};
 use revm::{
     context::Block,
@@ -61,7 +61,7 @@ pub enum EthSimulateError {
     #[error("Client adjustable limit reached")]
     GasLimitReached,
     /// Base block for the simulation was not found.
-    #[error("block not found: {}", block_id_to_str(*block))]
+    #[error("block not found: {block}")]
     BlockNotFound {
         /// The block id that was requested.
         block: BlockId,
@@ -578,7 +578,7 @@ where
     let block = block.into_rpc_block(
         txs_kind,
         |tx, tx_info| converter.fill(tx, tx_info),
-        |header, size| converter.convert_header(header, size),
+        |header, block_size| converter.convert_header(header, Some(block_size)),
     )?;
     Ok(SimulatedBlock { inner: block, calls })
 }

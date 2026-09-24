@@ -427,8 +427,6 @@ tables! {
     /// * for N=150 we would get second shard.
     /// * If max block number is 200 and we ask for N=250 we would fetch last shard and know that needed entry is in `AccountPlainState`.
     /// * If there were no shard we would get `None` entry or entry of different storage key.
-    ///
-    /// Code example can be found in `reth_provider::HistoricalStateProviderRef`
     table AccountsHistory {
         type Key = ShardedKey<Address>;
         type Value = BlockNumberList;
@@ -449,8 +447,6 @@ tables! {
     /// * for N=150 we would get second shard.
     /// * If max block number is 200 and we ask for N=250 we would fetch last shard and know that needed entry is in `StoragePlainState`.
     /// * If there were no shard we would get `None` entry or entry of different storage key.
-    ///
-    /// Code example can be found in `reth_provider::HistoricalStateProviderRef`
     table StoragesHistory {
         type Key = StorageShardedKey;
         type Value = BlockNumberList;

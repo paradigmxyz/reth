@@ -1,7 +1,7 @@
 //! Shared types for blockchain tree validation.
 
 use crate::tree::error::InsertPayloadError;
-use alloy_eip7928::bal::{DecodedBal, RawBal};
+use alloy_eip7928::bal::DecodedBal;
 use alloy_eips::eip4895::Withdrawal;
 use alloy_primitives::B256;
 use reth_chain_state::{ExecutedBlock, ExecutionTimingStats};
@@ -76,8 +76,6 @@ pub struct ValidationOutput<N: NodePrimitives> {
     pub executed_block: ExecutedBlock<N>,
     /// Optional execution timing stats collected during validation.
     pub execution_timing_stats: Option<Box<ExecutionTimingStats>>,
-    /// Validated raw block access list carried by the payload.
-    pub raw_bal: Option<RawBal>,
 }
 
 impl<N: NodePrimitives> ValidationOutput<N> {
@@ -86,12 +84,6 @@ impl<N: NodePrimitives> ValidationOutput<N> {
         executed_block: ExecutedBlock<N>,
         execution_timing_stats: Option<Box<ExecutionTimingStats>>,
     ) -> Self {
-        Self { executed_block, execution_timing_stats, raw_bal: None }
-    }
-
-    /// Sets the validated raw block access list carried by the payload.
-    pub fn with_raw_bal(mut self, raw_bal: Option<RawBal>) -> Self {
-        self.raw_bal = raw_bal;
-        self
+        Self { executed_block, execution_timing_stats }
     }
 }
