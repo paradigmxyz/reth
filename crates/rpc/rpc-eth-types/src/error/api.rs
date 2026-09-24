@@ -110,11 +110,11 @@ impl AsEthApiError for EthApiError {
 
 /// Helper trait to convert from EVM errors.
 pub trait FromEvmError<Evm: ConfigureEvm>:
-    FromEthApiError + FromEvmHalt<InstrStop> + FromRevert
+    FromEthApiError + From<BlockExecutionError> + FromEvmHalt<InstrStop> + FromRevert
 {
-    /// Converts from EVM error to this type.
+    /// Converts an execution error before chain-specific details are erased by the RPC mapping.
     fn from_evm_err(err: BlockExecutionError) -> Self {
-        Self::from_eth_err(err)
+        Self::from(err)
     }
 
     /// Ensures the execution result is successful or returns an error.
@@ -131,7 +131,7 @@ pub trait FromEvmError<Evm: ConfigureEvm>:
 
 impl<T, Evm> FromEvmError<Evm> for T
 where
-    T: FromEthApiError + FromEvmHalt<InstrStop> + FromRevert,
+    T: FromEthApiError + From<BlockExecutionError> + FromEvmHalt<InstrStop> + FromRevert,
     Evm: ConfigureEvm,
 {
 }
