@@ -3,7 +3,7 @@ use alloy_eips::{eip2718::Encodable2718, BlockId, BlockNumberOrTag};
 use alloy_evm::{env::BlockEnvironment, Evm};
 use alloy_genesis::ChainConfig;
 use alloy_primitives::{hex::decode, uint, Address, Bytes, B256, U256, U64};
-use alloy_rlp::Decodable;
+use alloy_rlp::{Decodable, Encodable};
 use alloy_rpc_types::BlockTransactionsKind;
 use alloy_rpc_types_debug::ExecutionWitness;
 use alloy_rpc_types_eth::{
@@ -868,7 +868,9 @@ where
         }
         .ok_or(EthApiError::HeaderNotFound(block_id))?;
 
-        Ok(alloy_rlp::encode(&header).into())
+        let mut res = Vec::new();
+        header.encode(&mut res);
+        Ok(res.into())
     }
 
     /// Handler for `debug_getRawBlock`
@@ -878,7 +880,9 @@ where
             .block_by_id(block_id)
             .to_rpc_result()?
             .ok_or(EthApiError::HeaderNotFound(block_id))?;
-        Ok(alloy_rlp::encode(&block).into())
+        let mut res = Vec::new();
+        block.encode(&mut res);
+        Ok(res.into())
     }
 
     /// Handler for `debug_getRawBlockAccessList`
