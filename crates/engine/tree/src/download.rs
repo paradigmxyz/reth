@@ -22,6 +22,9 @@ use std::{
 };
 use tracing::trace;
 
+/// Maximum number of headers served in one peer response.
+const MAX_BLOCK_RANGE_DOWNLOAD: u64 = 1024;
+
 /// A trait that can download blocks on demand.
 pub trait BlockDownloader: Send + Sync {
     /// Type of the block being downloaded.
@@ -124,6 +127,8 @@ where
 
     /// Processes a block range download request.
     fn download_block_range(&mut self, hash: B256, count: u64, access_lists: bool) {
+        // Peers serve at most 1024 headers, and the range fetcher retries shorter responses.
+        let count = count.min(MAX_BLOCK_RANGE_DOWNLOAD);
         if count == 1 {
             self.download_full_block(hash, access_lists);
         } else {
@@ -485,6 +490,35 @@ mod tests {
                 assert_eq!(blocks[num - 1].number(), num as u64);
             }
         });
+    }
+
+    #[tokio::test]
+    async fn block_downloader_caps_large_range() {
+        let TestHarness { mut block_downloader, client } =
+            TestHarness::new(MAX_BLOCK_RANGE_DOWNLOAD as usize + 1);
+        let tip = client.highest_block().unwrap();
+
+        block_downloader.on_action(DownloadAction::Download(DownloadRequest::block_range(
+            tip.hash(),
+            tip.number,
+        )));
+        assert_eq!(block_downloader.inflight_block_range_requests.len(), 1);
+        assert_eq!(
+            block_downloader.inflight_block_range_requests[0].count(),
+            MAX_BLOCK_RANGE_DOWNLOAD
+        );
+
+        assert_matches!(
+            poll_fn(|cx| block_downloader.poll(cx)).await,
+            DownloadOutcome::NewDownloadStarted { remaining_blocks: 1024, .. }
+        );
+        assert_matches!(poll_fn(|cx| block_downloader.poll(cx)).await,
+            DownloadOutcome::Blocks(blocks) => {
+                assert_eq!(blocks.len(), 1024);
+                assert_eq!(blocks.first().unwrap().number(), 2);
+                assert_eq!(blocks.last().unwrap().number(), 1025);
+            }
+        );
     }
 
     #[tokio::test]
