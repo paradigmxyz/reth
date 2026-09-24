@@ -516,6 +516,7 @@ where
         if let Some(bytecode) = overlay.code_hashes().get(code_hash) {
             return Ok(Some(reth_primitives_traits::Bytecode(bytecode.clone())));
         }
+        self.provider().tx().prefetch::<tables::Bytecodes>(code_hash)?;
         self.provider().tx().get_by_encoded_key::<tables::Bytecodes>(code_hash).map_err(Into::into)
     }
 }

@@ -1,12 +1,12 @@
 //! Targeted read-ahead for mapped table values spanning multiple OS pages.
 
 use reth_libmdbx::{ffi, TableObject, TransactionKind};
-use std::{borrow::Cow, sync::LazyLock};
+use std::sync::LazyLock;
 
-/// Prefetches a mapped table value before it is copied or decompressed.
-pub(super) struct PrefetchValue<'a>(pub(super) Cow<'a, [u8]>);
+/// Prefetches a mapped table value without copying or decompressing it.
+pub(super) struct PrefetchValue;
 
-impl<'a> TableObject for PrefetchValue<'a> {
+impl TableObject for PrefetchValue {
     fn decode(_: &[u8]) -> reth_libmdbx::Result<Self> {
         unreachable!("value prefetch requires the MDBX transaction context")
     }
@@ -23,8 +23,7 @@ impl<'a> TableObject for PrefetchValue<'a> {
             // Advice is best-effort and must not turn a successful lookup into an error.
             let _ = unsafe { libc::madvise(start as *mut libc::c_void, len, libc::MADV_WILLNEED) };
         }
-        // SAFETY: Preserve libmdbx's borrowing/copying behavior for the original value.
-        unsafe { <Cow<'a, [u8]> as TableObject>::decode_val::<K>(txn, value).map(Self) }
+        Ok(Self)
     }
 }
 
@@ -64,10 +63,10 @@ fn page_range(address: usize, len: usize, page_size: usize) -> Option<(usize, us
 mod tests {
     use super::*;
     use crate::{mdbx::DatabaseArguments, tables, DatabaseEnv, DatabaseEnvKind};
-    use alloy_primitives::B256;
+    use alloy_primitives::{Address, B256};
     use reth_db_api::{
         database::Database,
-        models::ClientVersion,
+        models::{ClientVersion, ShardedKey},
         table::Encode,
         transaction::{DbTx, DbTxMut},
     };
@@ -128,6 +127,7 @@ mod tests {
             .unwrap()
             .0
             .is_none());
+        tx.prefetch::<tables::Bytecodes>(&key.encode()).unwrap();
         assert_eq!(tx.get::<tables::Bytecodes>(key).unwrap(), Some(code.clone()));
         tx.commit().unwrap();
 
@@ -142,6 +142,7 @@ mod tests {
             .unwrap();
         assert_eq!(range.0 % *PAGE_SIZE, 0);
         assert!(range.1 >= code.original_byte_slice().len());
+        tx.prefetch::<tables::Bytecodes>(&key.encode()).unwrap();
         assert_eq!(
             tx.get_by_encoded_key::<tables::Bytecodes>(&key.encode()).unwrap(),
             Some(code.clone())
@@ -156,6 +157,7 @@ mod tests {
             .unwrap()
             .0
             .is_none());
+        tx.prefetch::<tables::Bytecodes>(&key.encode()).unwrap();
         assert_eq!(tx.get::<tables::Bytecodes>(key).unwrap(), Some(replacement));
         tx.abort();
 
@@ -167,6 +169,7 @@ mod tests {
             .unwrap()
             .0
             .is_some());
+        tx.prefetch::<tables::Bytecodes>(&key.encode()).unwrap();
         assert_eq!(tx.get::<tables::Bytecodes>(key).unwrap(), Some(code));
         assert!(tx
             .inner()
@@ -175,12 +178,41 @@ mod tests {
             .unwrap()
             .0
             .is_none());
+        tx.prefetch::<tables::Bytecodes>(&small_key.encode()).unwrap();
         assert_eq!(tx.get::<tables::Bytecodes>(small_key).unwrap(), Some(small_code));
         assert!(tx
             .inner()
             .get::<PrefetchRange>(dbi, B256::ZERO.encode().as_ref())
             .unwrap()
             .is_none());
+        tx.prefetch::<tables::Bytecodes>(&B256::ZERO.encode()).unwrap();
         assert_eq!(tx.get::<tables::Bytecodes>(B256::ZERO).unwrap(), None);
+    }
+
+    #[test]
+    fn prefetches_other_tables_without_decoding() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut db = DatabaseEnv::open(
+            dir.path(),
+            DatabaseEnvKind::RW,
+            DatabaseArguments::new(ClientVersion::default()),
+        )
+        .unwrap();
+        db.create_tables().unwrap();
+        let key = ShardedKey::new(Address::ZERO, 1);
+        // One RoaringTreemap entry with an invalid bitmap header.
+        let mut invalid_history = vec![0; 6 * *PAGE_SIZE];
+        invalid_history[..8].copy_from_slice(&1u64.to_le_bytes());
+        let tx = db.tx_mut().unwrap();
+        tx.put::<tables::RawTable<tables::AccountsHistory>>(
+            tables::RawKey::new(key.clone()),
+            tables::RawValue::from_vec(invalid_history),
+        )
+        .unwrap();
+        tx.commit().unwrap();
+
+        let tx = db.tx().unwrap();
+        tx.prefetch::<tables::AccountsHistory>(&key.clone().encode()).unwrap();
+        assert!(tx.get::<tables::AccountsHistory>(key).is_err());
     }
 }
