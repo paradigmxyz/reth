@@ -117,6 +117,15 @@ pub enum TrieNodeV2 {
 }
 
 impl Encodable for TrieNodeV2 {
+    fn length(&self) -> usize {
+        match self {
+            Self::EmptyRoot => 1,
+            Self::Leaf(leaf) => leaf.as_ref().length(),
+            Self::Branch(branch) => branch.length(),
+            Self::Extension(ext) => ext.length(),
+        }
+    }
+
     fn encode(&self, out: &mut dyn bytes::BufMut) {
         match self {
             Self::EmptyRoot => {
@@ -234,5 +243,41 @@ impl Encodable for BranchNodeV2 {
             .expect("branch_rlp_node must always be present for extension nodes");
 
         ExtensionNodeRef::new(&self.key, branch_rlp_node.as_slice()).length()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use alloy_primitives::B256;
+    use proptest::prelude::*;
+
+    fn assert_roundtrip_and_length(node: TrieNodeV2) {
+        let encoded = alloy_rlp::encode(&node);
+        assert_eq!(node.length(), encoded.len());
+        let mut buf = encoded.as_slice();
+        assert_eq!(TrieNodeV2::decode(&mut buf).unwrap(), node);
+        assert!(buf.is_empty());
+    }
+
+    #[test]
+    fn trie_node_variants_rlp_roundtrip_and_length() {
+        assert_roundtrip_and_length(TrieNodeV2::EmptyRoot);
+        assert_roundtrip_and_length(TrieNodeV2::Branch(BranchNodeV2::default()));
+        assert_roundtrip_and_length(TrieNodeV2::Extension(ExtensionNode::new(
+            Nibbles::from_nibbles([1]),
+            RlpNode::word_rlp(&B256::repeat_byte(0xaa)),
+        )));
+    }
+
+    proptest! {
+        #[test]
+        fn leaf_rlp_roundtrip_and_length(
+            key in proptest::collection::vec(0u8..16, 0..64),
+            value in proptest::collection::vec(any::<u8>(), 0..128),
+        ) {
+            let node = TrieNodeV2::Leaf(LeafNode::new(Nibbles::from_nibbles(key), value));
+            assert_roundtrip_and_length(node);
+        }
     }
 }
