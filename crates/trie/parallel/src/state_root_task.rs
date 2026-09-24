@@ -694,8 +694,8 @@ mod tests {
         let from_hook = evm_state_to_hashed_post_state(evm_state);
 
         assert_eq!(
-            from_hook.accounts.get(&keccak256(address)).cloned().flatten(),
-            from_bundle.accounts.get(&keccak256(address)).cloned().flatten(),
+            from_hook.accounts.get(&keccak256(address)).and_then(Option::as_ref),
+            from_bundle.accounts.get(&keccak256(address)).and_then(Option::as_ref),
             "state-hook and bundle producers disagree about a created-empty account"
         );
     }
