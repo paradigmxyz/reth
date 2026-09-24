@@ -455,7 +455,7 @@ alloy-eips = { version = "2.5.0", default-features = false }
 alloy-genesis = { version = "2.5.0", default-features = false }
 alloy-json-rpc = { version = "2.5.0", default-features = false }
 alloy-network = { version = "2.5.0", default-features = false }
-alloy-node-bindings = "2.4.2"
+alloy-node-bindings = "2.5.0"
 alloy-provider = { version = "2.5.0", features = ["reqwest", "debug-api"], default-features = false }
 alloy-rpc-client = { version = "2.5.0", default-features = false }
 alloy-rpc-types = { version = "2.5.0", features = ["eth"], default-features = false }

@@ -94,4 +94,5 @@ account-ext = [
     "reth-storage-api/account-ext",
     "reth-testing-utils?/account-ext",
     "reth-tasks/account-ext",
+    "reth-ethereum-primitives?/account-ext",
 ]

@@ -125,4 +125,6 @@ account-ext = [
     "reth-era-utils/account-ext",
     "reth-exex/account-ext",
     "reth-testing-utils?/account-ext",
+    "reth-ethereum-primitives?/account-ext",
+    "reth-revm/account-ext",
 ]

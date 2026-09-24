@@ -67,7 +67,7 @@ pub trait EstimateCall: Call {
         // Configure the evm env
         let state: StateProviderBox = Box::new(state);
         let mut db = evm2::evm::CacheDB::new(evm2::evm::Db::new(
-            reth_evm::database::StateProviderDatabase::new(state),
+            reth_evm::database::StateProviderDatabase::new(state.into_evm_state_provider()),
         ));
 
         // Apply any block overrides before deriving block-derived limits and the tx env so
@@ -86,17 +86,20 @@ pub trait EstimateCall: Call {
         // the gas limit of the corresponding block
         let block_gas_limit = evm_env.block_env().gas_limit.to::<u64>();
         // If EIP-8037 is enabled, the transaction gas limit cap is not applicable
-        let max_gas_limit = if evm_env.version().feature(EvmFeatures::EIP8037) {
+        let mut max_gas_limit = if evm_env.version().feature(EvmFeatures::EIP8037) {
             block_gas_limit
         } else {
             evm_env.version().tx_gas_limit_cap.min(block_gas_limit)
         };
 
-        // Determine the highest possible gas limit, considering both the request's specified limit
-        // and the block's limit.
-        let mut highest_gas_limit = tx_request_gas_limit
-            .map(|tx_gas_limit| tx_gas_limit.min(max_gas_limit))
-            .unwrap_or(max_gas_limit);
+        // Also bound diagnostic retries by the RPC gas cap. Zero means unlimited.
+        let gas_cap = self.call_gas_limit();
+        if gas_cap != 0 {
+            max_gas_limit = max_gas_limit.min(gas_cap);
+        }
+
+        let mut highest_gas_limit =
+            tx_request_gas_limit.unwrap_or(max_gas_limit).min(max_gas_limit);
 
         // Check if this is a basic transfer (no input data to account with no code)
         let is_basic_transfer = if request.as_ref().input().is_none_or(|input| input.is_empty()) &&
@@ -133,7 +136,7 @@ pub trait EstimateCall: Call {
 
         // For basic transfers, try using minimum gas before running full binary search
         if is_basic_transfer &&
-            let Ok(res) = execute(MIN_TRANSACTION_GAS) &&
+            let Ok(res) = execute(MIN_TRANSACTION_GAS.min(max_gas_limit)) &&
             res.status
         {
             return Ok(U256::from(res.tx_gas_used()))

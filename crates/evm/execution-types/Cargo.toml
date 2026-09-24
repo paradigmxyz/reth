@@ -92,4 +92,9 @@ std = [
     "alloy-rlp?/std",
     "evm2/std",
 ]
-account-ext = ["evm2/account-ext", "reth-ethereum-primitives/account-ext", "reth-trie-common/account-ext"]
+account-ext = [
+    "evm2/account-ext",
+    "reth-ethereum-primitives/account-ext",
+    "reth-trie-common/account-ext",
+    "revm/account-ext",
+]

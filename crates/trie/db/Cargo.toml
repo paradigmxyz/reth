@@ -78,4 +78,5 @@ account-ext = [
     "reth-storage-api/account-ext",
     "reth-trie/account-ext",
     "reth-provider/account-ext",
+    "revm/account-ext",
 ]

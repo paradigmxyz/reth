@@ -127,6 +127,11 @@ account-ext = [
     "reth-payload-builder/account-ext",
     "reth-stages?/account-ext",
     "reth-stages-api/account-ext",
+    "evm2/account-ext",
+    "reth-chainspec?/account-ext",
+    "reth-prune-types?/account-ext",
+    "reth-static-file?/account-ext",
+    "revm/account-ext",
 ]
 test-utils = [
     "reth-chain-state/test-utils",

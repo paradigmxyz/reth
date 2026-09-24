@@ -39,4 +39,7 @@ serde_json.workspace = true
 
 [features]
 default = []
-account-ext = ["reth-evm/account-ext"]
+account-ext = [
+    "reth-evm/account-ext",
+    "evm2/account-ext",
+]

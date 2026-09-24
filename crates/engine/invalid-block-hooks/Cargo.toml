@@ -49,4 +49,8 @@ reth-testing-utils.workspace = true
 tempfile.workspace = true
 
 [features]
-account-ext = ["reth-rpc-api/account-ext"]
+account-ext = [
+    "reth-rpc-api/account-ext",
+    "evm2/account-ext",
+    "revm/account-ext",
+]

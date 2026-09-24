@@ -639,7 +639,7 @@ where
 
                 Ok(ExecutionWitnessRecord::new(&db)
                     .into_execution_witness(
-                        &db.db.inner().0,
+                        &db.db.inner().0 .0,
                         eth_api.provider(),
                         block_number,
                         mode,
@@ -736,7 +736,10 @@ where
             db.db.inner().storage_root(address, hashed_storage).map_err(Eth::Error::from_eth_err)?
         };
 
-        Ok(Some(reth_primitives_traits::Account::from(account).into_trie_account(storage_root)))
+        Ok(Some(
+            reth_primitives_traits::Account::from(reth_execution_types::revm_account(&account))
+                .into_trie_account(storage_root),
+        ))
     }
 
     /// Retrieves the account's balance, nonce, and code from the given state.

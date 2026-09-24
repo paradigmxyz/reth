@@ -84,4 +84,8 @@ rpc = [
     "dep:alloy-rpc-types-eth",
     "alloy-rpc-types-eth?/serde",
 ]
-account-ext = ["reth-codecs?/account-ext", "reth-primitives-traits/account-ext"]
+account-ext = [
+    "reth-codecs?/account-ext",
+    "reth-primitives-traits/account-ext",
+    "alloy-rpc-types-eth?/account-ext",
+]

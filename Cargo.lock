@@ -436,9 +436,9 @@ dependencies = [
 
 [[package]]
 name = "alloy-node-bindings"
-version = "2.4.2"
+version = "2.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3a58b30703aa2afe3b3ba66b0e9422393a9e869c6b84bff3b0a2f7e23f6fe5d1"
+checksum = "75442e1238881ace33211a369d0cf614507cafb0211af3d0c37c81210ffb6589"
 dependencies = [
  "alloy-genesis",
  "alloy-hardforks 0.2.13",
@@ -8299,12 +8299,10 @@ dependencies = [
  "pin-project",
  "rand 0.9.4",
  "reth-chainspec",
- "reth-errors",
  "reth-ethereum-primitives",
  "reth-execution-types",
  "reth-metrics",
  "reth-primitives-traits",
- "reth-storage-api",
  "reth-testing-utils",
  "reth-trie",
  "reth-trie-sparse",
@@ -9421,11 +9419,12 @@ dependencies = [
  "parking_lot",
  "reth-errors",
  "reth-evm",
+ "reth-execution-types",
  "reth-metrics",
  "reth-primitives-traits",
  "reth-provider",
  "reth-revm",
- "reth-trie",
+ "reth-storage-api",
  "revm",
  "tracing",
 ]
@@ -9501,6 +9500,7 @@ dependencies = [
  "reth-testing-utils",
  "reth-tracing",
  "reth-trie-common",
+ "revm",
  "rmp-serde",
  "secp256k1 0.30.0",
  "tempfile",
@@ -10979,6 +10979,7 @@ dependencies = [
  "alloy-primitives",
  "alloy-rpc-types-engine",
  "auto_impl",
+ "reth-chain-state",
  "reth-chainspec",
  "reth-db-api",
  "reth-db-models",
@@ -10991,6 +10992,7 @@ dependencies = [
  "reth-trie-common",
  "revm",
  "serde_json",
+ "tokio",
 ]
 
 [[package]]
@@ -11052,6 +11054,7 @@ dependencies = [
  "alloy-rpc-types-engine",
  "alloy-rpc-types-eth",
  "dashmap",
+ "reth-chain-state",
  "reth-chainspec",
  "reth-db-api",
  "reth-errors",

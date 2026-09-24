@@ -112,4 +112,6 @@ account-ext = [
     "reth-metrics?/account-ext",
     "reth-storage-api/account-ext",
     "reth-execution-errors/account-ext",
+    "reth-revm/account-ext",
+    "revm/account-ext",
 ]

@@ -28,7 +28,12 @@ impl TxPoolPrewarmCacheSnapshot {
 
     /// Returns a cached account, preserving cached non-existence.
     pub fn account(&self, address: &Address) -> Option<Option<Account>> {
-        self.reads.accounts.get(address).map(|account| account.info.as_ref().map(Account::from))
+        self.reads.accounts.get(address).map(|account| {
+            account
+                .info
+                .as_ref()
+                .map(|info| Account::from(reth_execution_types::revm_account(info)))
+        })
     }
 
     /// Returns a cached storage value, preserving cached zero values.

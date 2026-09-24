@@ -112,4 +112,10 @@ test-utils = [
     "reth-primitives-traits/test-utils",
     "reth-trie-common/test-utils",
 ]
-account-ext = ["reth-evm/account-ext", "reth-metrics?/account-ext"]
+account-ext = [
+    "reth-evm/account-ext",
+    "reth-metrics?/account-ext",
+    "evm2/account-ext",
+    "reth-storage-errors?/account-ext",
+    "revm/account-ext",
+]

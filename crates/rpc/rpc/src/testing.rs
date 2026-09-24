@@ -271,7 +271,7 @@ where
                     total_fees += U256::from(tip) * U256::from(gas_used);
                 }
                 let outcome =
-                    builder.finish(&state_provider, None).map_err(Eth::Error::from_eth_err)?;
+                    builder.finish(&*state_provider, None).map_err(Eth::Error::from_eth_err)?;
 
                 let has_requests = outcome.block.requests_hash().is_some();
                 let requests = has_requests.then_some(outcome.execution_result.requests);

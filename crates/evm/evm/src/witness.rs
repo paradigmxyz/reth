@@ -129,9 +129,12 @@ impl<'a, DB> ExecutionWitnessRecord<'a, DB> {
         let mut keys = Vec::new();
         for (address, account) in &self.state.cache.accounts {
             let hashed_address = keccak256(address);
-            hashed_state
-                .accounts
-                .insert(hashed_address, account.as_ref().map(PrimitiveAccount::from));
+            hashed_state.accounts.insert(
+                hashed_address,
+                account
+                    .as_ref()
+                    .map(|info| PrimitiveAccount::from(reth_execution_types::revm_account(info))),
+            );
             if account.is_some() {
                 keys.push(address.to_vec().into());
             }

@@ -30,9 +30,10 @@ use reth_execution_types::{EvmStateChangeSink, ExecutionAccountChangeRef, Execut
 use reth_metrics::Metrics;
 use reth_primitives_traits::{FastInstant as Instant, NodePrimitives};
 use reth_provider::{
-    AccountReader, BlockExecutionOutput, BlockNumReader, ChangeSetReader, DatabaseProviderFactory,
-    DatabaseProviderROFactory, HistoryReader, PruneCheckpointReader, StageCheckpointReader,
-    StateProviderBox, StorageChangeSetReader, StorageSettingsCache,
+    BlockExecutionOutput, BlockNumReader, ChangeSetReader, DatabaseProviderFactory,
+    DatabaseProviderROFactory, EvmStateProvider, EvmStateProviderBox, HistoryReader,
+    PruneCheckpointReader, StageCheckpointReader, StateProvider, StorageChangeSetReader,
+    StorageSettingsCache,
 };
 use reth_storage_overlay::OverlayStateProviderFactory;
 use reth_tasks::{pool::WorkerPool, Runtime};
@@ -403,8 +404,7 @@ where
 
                 stream_bal.as_bal().par_iter().for_each(|account_changes| {
                     WorkerPool::with_worker_mut(|worker| {
-                        let provider =
-                            worker.get_or_init::<Option<Box<dyn AccountReader>>>(|| None);
+                        let provider = worker.get_or_init::<Option<EvmStateProviderBox>>(|| None);
                         ctx.send_bal_hashed_state(
                             &parent_span,
                             provider,
@@ -440,9 +440,9 @@ where
             let caches = saved_cache.cache().clone();
             let state_provider_factory = ctx.provider.clone();
             let build = Arc::new(move || {
-                state_provider_factory
-                    .database_provider_ro()
-                    .map(|provider| Box::new(provider) as _)
+                state_provider_factory.database_provider_ro().map(|provider| {
+                    Box::new(provider.into_evm_state_provider()) as EvmStateProviderBox
+                })
             });
 
             pool.begin_block(build, caches, ctx.env.txpool_snapshot.clone());
@@ -600,8 +600,8 @@ where
     /// Creates a per-thread EVM for prewarming.
     #[instrument(level = "debug", target = "engine::tree::payload_processor::prewarm", skip_all)]
     fn evm_for_ctx(&self) -> PrewarmEvmState<Evm> {
-        let mut state_provider: StateProviderBox = match self.provider.database_provider_ro() {
-            Ok(provider) => Box::new(provider),
+        let mut state_provider = match self.provider.database_provider_ro() {
+            Ok(provider) => Box::new(provider.into_evm_state_provider()) as EvmStateProviderBox,
             Err(err) => {
                 trace!(
                     target: "engine::tree::payload_processor::prewarm",
@@ -651,7 +651,7 @@ where
     fn send_bal_hashed_state(
         &self,
         parent_span: &Span,
-        provider: &mut Option<Box<dyn AccountReader>>,
+        provider: &mut Option<EvmStateProviderBox>,
         account_changes: &alloy_eip7928::AccountChanges,
         hashed_update_stream: &StateRootUpdateStream,
     ) {
@@ -695,7 +695,7 @@ where
                 .entered();
 
                 let inner = match self.provider.database_provider_ro() {
-                    Ok(p) => p,
+                    Ok(p) => p.into_evm_state_provider(),
                     Err(err) => {
                         warn!(
                             target: "engine::tree::payload_processor::prewarm",
@@ -705,7 +705,7 @@ where
                         return;
                     }
                 };
-                let boxed: Box<dyn AccountReader> =
+                let boxed: EvmStateProviderBox =
                     match (self.disable_bal_batch_io, &self.saved_cache) {
                         (false, Some(saved)) => {
                             let caches = saved.cache().clone();

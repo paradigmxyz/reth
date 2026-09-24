@@ -82,6 +82,7 @@ account-ext = [
     "reth-trie-db?/account-ext",
     "reth-network-api?/account-ext",
     "reth-tasks?/account-ext",
+    "alloy-rpc-types-eth?/account-ext",
 ]
 default = ["std"]
 std = [

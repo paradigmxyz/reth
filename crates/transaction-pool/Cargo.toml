@@ -133,6 +133,7 @@ account-ext = [
     "reth-eth-wire-types/account-ext",
     "reth-evm-ethereum/account-ext",
     "reth-tasks/account-ext",
+    "evm2/account-ext",
 ]
 
 [[bench]]

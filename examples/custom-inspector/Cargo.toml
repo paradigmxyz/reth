@@ -13,6 +13,9 @@ futures-util.workspace = true
 alloy-primitives.workspace = true
 
 [features]
-account-ext = ["reth-ethereum/account-ext"]
+account-ext = [
+    "reth-ethereum/account-ext",
+    "evm2/account-ext",
+]
 [lints]
 workspace = true

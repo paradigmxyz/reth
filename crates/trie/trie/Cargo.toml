@@ -67,7 +67,11 @@ rand.workspace = true
 serde.workspace = true
 
 [features]
-account-ext = ["reth-metrics?/account-ext", "reth-trie-sparse/account-ext"]
+account-ext = [
+    "reth-metrics?/account-ext",
+    "reth-trie-sparse/account-ext",
+    "revm/account-ext",
+]
 metrics = ["reth-metrics", "dep:metrics"]
 serde = [
     "alloy-primitives/serde",
@@ -85,6 +89,7 @@ serde = [
     "parking_lot/serde",
     "rand/serde",
     "revm/serde",
+    "reth-codecs/serde",
 ]
 test-utils = [
     "triehash",

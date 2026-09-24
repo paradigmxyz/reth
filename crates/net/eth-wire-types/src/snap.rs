@@ -11,6 +11,7 @@ use alloy_primitives::{Bytes, B256, KECCAK256_EMPTY, U256};
 use alloy_rlp::{BufMut, Decodable, Encodable, Header, RlpDecodable, RlpEncodable};
 use alloy_trie::{TrieAccount, EMPTY_ROOT_HASH};
 use reth_codecs_derive::add_arbitrary_tests;
+use reth_primitives_traits::ensure_no_account_extensions;
 
 /// Supported SNAP protocol versions.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Hash)]
@@ -106,7 +107,7 @@ pub struct GetAccountRangeMessage {
 /// Account data in the response.
 #[derive(Debug, Clone, PartialEq, Eq, RlpEncodable, RlpDecodable)]
 #[cfg_attr(any(test, feature = "arbitrary"), derive(arbitrary::Arbitrary))]
-#[add_arbitrary_tests(rlp)]
+#[cfg_attr(not(feature = "account-ext"), add_arbitrary_tests(rlp))]
 pub struct AccountData {
     /// Hash of the account address (trie path)
     pub hash: B256,
@@ -123,12 +124,14 @@ impl AccountData {
     /// Returns the account the trie leaf commits to.
     ///
     /// Default storage roots and code hashes are restored when decoding the slim body.
-    pub const fn trie_account(&self) -> TrieAccount {
-        self.body.0
+    #[allow(clippy::clone_on_copy)] // TrieAccount is only Copy without account-ext.
+    pub fn trie_account(&self) -> TrieAccount {
+        self.body.0.clone()
     }
 
     /// Consumes the wire value and returns its hashed key with the decoded trie account.
-    pub const fn into_trie_entry(self) -> (B256, TrieAccount) {
+    #[allow(clippy::missing_const_for_fn)] // Account extensions require dropping heap-backed data.
+    pub fn into_trie_entry(self) -> (B256, TrieAccount) {
         (self.hash, self.body.0)
     }
 }
@@ -137,7 +140,7 @@ impl AccountData {
 // http://github.com/ethereum/devp2p/blob/master/caps/snap.md#accountrange-0x01
 #[derive(Debug, Clone, PartialEq, Eq, RlpEncodable, RlpDecodable)]
 #[cfg_attr(any(test, feature = "arbitrary"), derive(arbitrary::Arbitrary))]
-#[add_arbitrary_tests(rlp)]
+#[cfg_attr(not(feature = "account-ext"), add_arbitrary_tests(rlp))]
 pub struct AccountRangeMessage {
     /// ID of the request this is a response for
     pub request_id: u64,
@@ -512,11 +515,13 @@ impl SnapProtocolMessage {
 }
 
 /// A trie account encoded with default storage and code hashes replaced by empty byte strings.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(not(feature = "account-ext"), derive(Copy))]
 pub struct SlimAccountBody(TrieAccount);
 
 impl SlimAccountBody {
     fn as_rlp(&self) -> SlimAccountBodyRef<'_> {
+        ensure_no_account_extensions().expect("snap does not support account extensions");
         SlimAccountBodyRef {
             nonce: self.0.nonce,
             balance: self.0.balance,
@@ -535,8 +540,10 @@ impl SlimAccountBody {
 }
 
 impl From<&TrieAccount> for SlimAccountBody {
+    #[allow(clippy::clone_on_copy)] // TrieAccount is only Copy without account-ext.
     fn from(account: &TrieAccount) -> Self {
-        Self(*account)
+        ensure_no_account_extensions().expect("snap does not support account extensions");
+        Self(account.clone())
     }
 }
 
@@ -552,6 +559,8 @@ impl Encodable for SlimAccountBody {
 
 impl Decodable for SlimAccountBody {
     fn decode(buf: &mut &[u8]) -> alloy_rlp::Result<Self> {
+        ensure_no_account_extensions()
+            .map_err(|_| alloy_rlp::Error::Custom("snap does not support account extensions"))?;
         let mut payload = Header::decode_bytes(buf, true)?;
         let nonce = u64::decode(&mut payload)?;
         let balance = U256::decode(&mut payload)?;
@@ -561,7 +570,14 @@ impl Decodable for SlimAccountBody {
         if !payload.is_empty() {
             return Err(alloy_rlp::Error::UnexpectedLength)
         }
-        Ok(Self(TrieAccount { nonce, balance, storage_root, code_hash }))
+        Ok(Self(TrieAccount {
+            nonce,
+            balance,
+            storage_root,
+            code_hash,
+            #[cfg(feature = "account-ext")]
+            extension: Default::default(),
+        }))
     }
 }
 
@@ -575,6 +591,8 @@ impl<'a> arbitrary::Arbitrary<'a> for SlimAccountBody {
             balance: u.arbitrary()?,
             storage_root,
             code_hash,
+            #[cfg(feature = "account-ext")]
+            extension: Default::default(),
         }))
     }
 }
@@ -652,6 +670,7 @@ mod tests {
             response_bytes: 1024,
         }));
 
+        #[cfg(not(feature = "account-ext"))]
         test_roundtrip(SnapProtocolMessage::AccountRange(AccountRangeMessage {
             request_id: 42,
             accounts: vec![AccountData::from_trie_account(
@@ -914,12 +933,29 @@ mod tests {
         assert_eq!(msg.limit_hash.unwrap_or(B256::repeat_byte(0xff)), B256::repeat_byte(0xff));
     }
 
+    #[test]
+    #[cfg(feature = "account-ext")]
+    #[should_panic(expected = "snap does not support account extensions")]
+    fn slim_body_rejects_account_extension_build() {
+        AccountData::from_trie_account(B256::ZERO, &TrieAccount::default());
+    }
+
+    #[test]
+    #[cfg(feature = "account-ext")]
+    fn slim_body_decode_rejects_account_extension_build() {
+        assert_eq!(
+            alloy_rlp::decode_exact::<SlimAccountBody>(&alloy_primitives::hex!("c4072a8080")),
+            Err(alloy_rlp::Error::Custom("snap does not support account extensions"))
+        );
+    }
+
     #[cfg(not(feature = "account-ext"))]
     fn trie_account(storage_root: B256, code_hash: B256) -> TrieAccount {
         TrieAccount { nonce: 7, balance: U256::from(42), storage_root, code_hash }
     }
 
     #[test]
+    #[cfg(not(feature = "account-ext"))]
     fn account_range_matches_nested_account_wire_encoding() {
         // [request_id, [[hash, [nonce, balance, storage_root, code_hash]]], proof]
         let wire = alloy_primitives::hex!(
@@ -947,6 +983,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(not(feature = "account-ext"))]
     fn account_data_consumes_only_its_own_list() {
         let account = AccountData::from_trie_account(
             B256::repeat_byte(1),
@@ -973,6 +1010,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(not(feature = "account-ext"))]
     fn slim_body_elides_empty_storage_and_code() {
         let account = trie_account(EMPTY_ROOT_HASH, KECCAK256_EMPTY);
         let hash = B256::repeat_byte(1);
@@ -997,6 +1035,7 @@ mod tests {
         assert_eq!(encoded.trie_account(), account);
     }
 
+    #[cfg(not(feature = "account-ext"))]
     #[test_case(1)]
     #[test_case(16)]
     #[test_case(31)]

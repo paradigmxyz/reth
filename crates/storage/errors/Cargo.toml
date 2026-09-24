@@ -46,4 +46,5 @@ account-ext = [
     "reth-codecs/account-ext",
     "reth-prune-types/account-ext",
     "reth-static-file-types/account-ext",
+    "revm/account-ext",
 ]

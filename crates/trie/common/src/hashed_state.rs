@@ -855,6 +855,8 @@ mod tests {
             code_hash: B256::random(),
             code: Some(Bytecode::new_raw(Bytes::from(vec![1, 2]))),
             account_id: None,
+            #[cfg(feature = "account-ext")]
+            extension: Default::default(),
         };
 
         let mut storage = StorageWithOriginalValues::default();
@@ -961,6 +963,8 @@ mod tests {
             code_hash: B256::random(),
             code: None,
             account_id: None,
+            #[cfg(feature = "account-ext")]
+            extension: Default::default(),
         };
 
         // Create hashed accounts with addresses.

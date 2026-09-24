@@ -163,6 +163,7 @@ account-ext = [
     "reth-transaction-pool/account-ext",
     "reth-discv5/account-ext",
     "reth-network-api/account-ext",
+    "reth-evm-ethereum?/account-ext",
 ]
 
 [[bench]]

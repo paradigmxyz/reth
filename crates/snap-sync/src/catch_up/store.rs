@@ -287,7 +287,9 @@ mod extension_tests {
     fn rejects_bal_updates_with_account_extensions() {
         let factory = create_test_provider_factory();
         let provider = factory.database_provider_rw().unwrap();
-        let error = provider.block_access_list_update(AccountCoverage::COMPLETE, &[]).unwrap_err();
+        let error = provider
+            .block_access_list_update(AccountCoverage::COMPLETE, StorageProgress::START, &[])
+            .unwrap_err();
         assert_eq!(error.to_string(), "BAL does not support account extensions");
     }
 }

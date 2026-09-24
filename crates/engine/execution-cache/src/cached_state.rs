@@ -10,15 +10,8 @@ use parking_lot::Once;
 use reth_errors::ProviderResult;
 use reth_metrics::Metrics;
 use reth_primitives_traits::{Account, Bytecode};
-use reth_provider::{
-    AccountReader, BlockHashReader, BytecodeReader, HashedPostStateProvider, StateProofProvider,
-    StateProvider, StateRootProvider, StorageRootProvider,
-};
 use reth_revm::db::BundleState;
-use reth_trie::{
-    updates::TrieUpdates, AccountProof, HashedPostState, HashedStorage, MultiProof,
-    MultiProofTargets, StorageMultiProof, StorageProof, TrieInput,
-};
+use reth_storage_api::EvmStateProvider;
 use std::{
     cell::Cell,
     fmt,
@@ -844,7 +837,12 @@ impl<K: PartialEq, V> StatsHandler<K, V> for CacheStatsHandler {
     }
 }
 
-impl<S: AccountReader> AccountReader for CachedStateProvider<S> {
+#[inline]
+fn nonzero_storage_value(value: StorageValue) -> Option<StorageValue> {
+    (!value.is_zero()).then_some(value)
+}
+
+impl<S: EvmStateProvider> EvmStateProvider for CachedStateProvider<S> {
     fn basic_account(&self, address: &Address) -> ProviderResult<Option<Account>> {
         if let Some(snapshot) = &self.txpool_snapshot {
             if let Some(account) = snapshot.account(address) {
@@ -875,18 +873,7 @@ impl<S: AccountReader> AccountReader for CachedStateProvider<S> {
             self.state_provider.basic_account(address)
         }
     }
-}
 
-#[inline]
-fn nonzero_storage_value(value: StorageValue) -> Option<StorageValue> {
-    if value.is_zero() {
-        None
-    } else {
-        Some(value)
-    }
-}
-
-impl<S: StateProvider> StateProvider for CachedStateProvider<S> {
     fn storage(
         &self,
         account: Address,
@@ -921,9 +908,7 @@ impl<S: StateProvider> StateProvider for CachedStateProvider<S> {
             self.state_provider.storage(account, storage_key)
         }
     }
-}
 
-impl<S: BytecodeReader> BytecodeReader for CachedStateProvider<S> {
     fn bytecode_by_hash(&self, code_hash: &B256) -> ProviderResult<Option<Bytecode>> {
         if let Some(snapshot) = &self.txpool_snapshot {
             if let Some(code) = snapshot.bytecode(code_hash) {
@@ -954,116 +939,9 @@ impl<S: BytecodeReader> BytecodeReader for CachedStateProvider<S> {
             self.state_provider.bytecode_by_hash(code_hash)
         }
     }
-}
 
-impl<S: StateRootProvider> StateRootProvider for CachedStateProvider<S> {
-    fn state_root(&self, hashed_state: HashedPostState) -> ProviderResult<B256> {
-        self.state_provider.state_root(hashed_state)
-    }
-
-    fn state_root_from_nodes(&self, input: TrieInput) -> ProviderResult<B256> {
-        self.state_provider.state_root_from_nodes(input)
-    }
-
-    fn state_root_with_updates(
-        &self,
-        hashed_state: HashedPostState,
-    ) -> ProviderResult<(B256, TrieUpdates)> {
-        self.state_provider.state_root_with_updates(hashed_state)
-    }
-
-    fn state_root_from_nodes_with_updates(
-        &self,
-        input: TrieInput,
-    ) -> ProviderResult<(B256, TrieUpdates)> {
-        self.state_provider.state_root_from_nodes_with_updates(input)
-    }
-}
-
-impl<S: StateProofProvider> StateProofProvider for CachedStateProvider<S> {
-    fn proof(
-        &self,
-        input: TrieInput,
-        address: Address,
-        slots: &[B256],
-    ) -> ProviderResult<AccountProof> {
-        self.state_provider.proof(input, address, slots)
-    }
-
-    fn multiproof(
-        &self,
-        input: TrieInput,
-        targets: MultiProofTargets,
-    ) -> ProviderResult<MultiProof> {
-        self.state_provider.multiproof(input, targets)
-    }
-
-    fn multiproof_v2(
-        &self,
-        input: TrieInput,
-        targets: reth_trie::MultiProofTargetsV2,
-    ) -> ProviderResult<reth_trie::DecodedMultiProofV2> {
-        self.state_provider.multiproof_v2(input, targets)
-    }
-
-    fn witness(
-        &self,
-        input: TrieInput,
-        target: HashedPostState,
-        mode: reth_trie::ExecutionWitnessMode,
-    ) -> ProviderResult<Vec<alloy_primitives::Bytes>> {
-        self.state_provider.witness(input, target, mode)
-    }
-}
-
-impl<S: StorageRootProvider> StorageRootProvider for CachedStateProvider<S> {
-    fn storage_root(
-        &self,
-        address: Address,
-        hashed_storage: HashedStorage,
-    ) -> ProviderResult<B256> {
-        self.state_provider.storage_root(address, hashed_storage)
-    }
-
-    fn storage_proof(
-        &self,
-        address: Address,
-        slot: B256,
-        hashed_storage: HashedStorage,
-    ) -> ProviderResult<StorageProof> {
-        self.state_provider.storage_proof(address, slot, hashed_storage)
-    }
-
-    fn storage_multiproof(
-        &self,
-        address: Address,
-        slots: &[B256],
-        hashed_storage: HashedStorage,
-    ) -> ProviderResult<StorageMultiProof> {
-        self.state_provider.storage_multiproof(address, slots, hashed_storage)
-    }
-}
-
-impl<S: BlockHashReader> BlockHashReader for CachedStateProvider<S> {
     fn block_hash(&self, number: alloy_primitives::BlockNumber) -> ProviderResult<Option<B256>> {
         self.state_provider.block_hash(number)
-    }
-
-    fn canonical_hashes_range(
-        &self,
-        start: alloy_primitives::BlockNumber,
-        end: alloy_primitives::BlockNumber,
-    ) -> ProviderResult<Vec<B256>> {
-        self.state_provider.canonical_hashes_range(start, end)
-    }
-}
-
-impl<S: HashedPostStateProvider> HashedPostStateProvider for CachedStateProvider<S> {
-    fn hashed_post_state(
-        &self,
-        bundle_state: &reth_revm::db::BundleState,
-    ) -> ProviderResult<HashedPostState> {
-        self.state_provider.hashed_post_state(bundle_state)
     }
 }
 
@@ -1434,6 +1312,7 @@ mod tests {
     use alloy_primitives::{map::HashMap, U256};
     use reth_provider::test_utils::{ExtendedAccount, MockEthProvider};
     use reth_revm::db::{AccountStatus, BundleAccount};
+    use reth_storage_api::StateProvider;
     use revm::state::AccountInfo;
 
     #[test]
@@ -1447,7 +1326,7 @@ mod tests {
 
         let caches = ExecutionCache::new(1000);
         let state_provider = CachedStateProvider::new(
-            provider,
+            provider.into_evm_state_provider(),
             caches,
             Some(CachedStateMetrics::zeroed(CachedStateMetricsSource::Test)),
         );
@@ -1470,7 +1349,7 @@ mod tests {
 
         let caches = ExecutionCache::new(1000);
         let state_provider = CachedStateProvider::new(
-            provider,
+            provider.into_evm_state_provider(),
             caches,
             Some(CachedStateMetrics::zeroed(CachedStateMetricsSource::Test)),
         );
@@ -1568,6 +1447,8 @@ mod tests {
                         code_hash: B256::random(), // Non-empty code hash
                         code: None,
                         account_id: None,
+                        #[cfg(feature = "account-ext")]
+                        extension: Default::default(),
                     }),
                     None, // Destroyed, so no current info
                     Default::default(),
@@ -1613,6 +1494,8 @@ mod tests {
                         code_hash: alloy_primitives::KECCAK256_EMPTY, // Empty code hash = EOA
                         code: None,
                         account_id: None,
+                        #[cfg(feature = "account-ext")]
+                        extension: Default::default(),
                     }),
                     None, // Destroyed
                     Default::default(),

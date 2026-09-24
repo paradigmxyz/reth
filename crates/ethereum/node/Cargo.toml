@@ -99,6 +99,8 @@ account-ext = [
     "reth-node-builder/account-ext",
     "reth-ethereum-consensus/account-ext",
     "reth-ethereum-payload-builder/account-ext",
+    "evm2/account-ext",
+    "reth-revm/account-ext",
 ]
 default = []
 gmp = ["evm2/gmp", "reth-evm/gmp", "reth-evm-ethereum/gmp"]

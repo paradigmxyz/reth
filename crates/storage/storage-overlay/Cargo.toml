@@ -56,4 +56,5 @@ account-ext = [
     "reth-chain-state/account-ext",
     "reth-trie-db/account-ext",
     "reth-tasks?/account-ext",
+    "revm/account-ext",
 ]
