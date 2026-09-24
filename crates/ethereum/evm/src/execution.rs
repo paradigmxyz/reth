@@ -635,6 +635,7 @@ pub(crate) fn post_block_balance_state_changes<T: EvmTypes>(
     let mut changes = Vec::new();
 
     if dao_fork_transition {
+        core::hint::cold_path();
         let mut drained_balance = U256::ZERO;
         for address in dao_fork::DAO_HARDFORK_ACCOUNTS {
             let original =
