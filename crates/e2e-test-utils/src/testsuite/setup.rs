@@ -9,7 +9,7 @@ use reth_chainspec::ChainSpec;
 use reth_ethereum_primitives::Block;
 use reth_network_p2p::sync::{NetworkSyncUpdater, SyncState};
 use reth_node_api::{EngineTypes, NodeTypes, PayloadTypes, TreeConfig};
-use reth_node_core::primitives::RecoveredBlock;
+use reth_node_core::{args::StorageArgs, primitives::RecoveredBlock};
 use revm::state::EvmState;
 use std::{marker::PhantomData, path::Path, sync::Arc};
 use tokio::{
@@ -37,7 +37,9 @@ pub struct Setup<I> {
     shutdown_tx: Option<mpsc::Sender<()>>,
     /// Is this setup in dev mode
     pub is_dev: bool,
-    /// Whether to use v2 storage mode (hashed keys, static file changesets, rocksdb history)
+    /// Whether to use v2 storage mode (hashed keys, static file changesets, rocksdb history).
+    ///
+    /// Defaults to the node's `--storage.v2` default. Not applied to chains imported from RLP.
     pub storage_v2: bool,
     /// Tracks instance generic.
     _phantom: PhantomData<I>,
@@ -59,7 +61,7 @@ impl<I> Default for Setup<I> {
             tree_config: TreeConfig::default(),
             shutdown_tx: None,
             is_dev: true,
-            storage_v2: false,
+            storage_v2: StorageArgs::default().v2,
             _phantom: Default::default(),
             import_result_holder: None,
             import_rlp_path: None,
@@ -128,9 +130,9 @@ where
         self
     }
 
-    /// Enable v2 storage mode (hashed keys, static file changesets, rocksdb history)
-    pub const fn with_storage_v2(mut self) -> Self {
-        self.storage_v2 = true;
+    /// Set whether to use v2 storage mode (hashed keys, static file changesets, rocksdb history)
+    pub const fn with_storage_v2(mut self, storage_v2: bool) -> Self {
+        self.storage_v2 = storage_v2;
         self
     }
 
@@ -202,13 +204,12 @@ where
         self.shutdown_tx = Some(shutdown_tx);
 
         let is_dev = self.is_dev;
-        let storage_v2 = self.storage_v2;
         let node_count = self.network.node_count;
         let tree_config = self.tree_config.clone();
 
         let attributes_generator = Self::create_static_attributes_generator::<N>();
 
-        let mut builder = E2ETestSetupBuilder::<N, _>::new(
+        let result = E2ETestSetupBuilder::<N, _>::new(
             node_count,
             Arc::<N::ChainSpec>::new((*chain_spec).clone().into()),
             attributes_generator,
@@ -217,13 +218,10 @@ where
             tree_config.clone().with_cross_block_cache_size(base.cross_block_cache_size())
         })
         .with_node_config_modifier(move |config| config.set_dev(is_dev))
-        .with_connect_nodes(self.network.connect_nodes);
-
-        if storage_v2 {
-            builder = builder.with_storage_v2();
-        }
-
-        let result = builder.build().await;
+        .with_storage_v2(self.storage_v2)
+        .with_connect_nodes(self.network.connect_nodes)
+        .build()
+        .await;
 
         let mut node_clients = Vec::new();
         match result {
