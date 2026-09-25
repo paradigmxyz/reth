@@ -14,14 +14,14 @@ use reth_node_builder::{rpc::RethRpcAddOns, FullNode, NodeTypes};
 
 use reth_payload_primitives::BuiltPayload;
 use reth_provider::{
-    BlockReader, BlockReaderIdExt, CanonStateNotificationStream, CanonStateSubscriptions,
-    HeaderProvider, StageCheckpointReader,
+    BlockNumReader, BlockReader, BlockReaderIdExt, CanonStateNotificationStream,
+    CanonStateSubscriptions, DatabaseProviderFactory, HeaderProvider, StageCheckpointReader,
 };
 use reth_rpc_api::TestingBuildBlockRequestV1;
 use reth_rpc_builder::auth::AuthServerHandle;
 use reth_rpc_eth_api::helpers::{EthApiSpec, EthTransactions, TraceExt};
 use reth_stages_types::StageId;
-use std::pin::Pin;
+use std::{pin::Pin, sync::Arc};
 use tokio_stream::StreamExt;
 use url::Url;
 
@@ -334,7 +334,8 @@ where
     ///
     /// This helper method extracts the necessary handles and creates a client
     /// that can interact with both the regular RPC and Engine API endpoints.
-    /// It automatically includes the beacon engine handle for direct consensus engine interaction.
+    /// It automatically includes the beacon engine handle for direct consensus engine interaction
+    /// and read-only access to the node's database.
     pub fn to_node_client(&self) -> eyre::Result<crate::testsuite::NodeClient<Payload>> {
         let rpc = self
             .rpc_client()
@@ -346,6 +347,10 @@ where
         let mut client =
             crate::testsuite::NodeClient::new_with_beacon_engine(rpc, auth, url, beacon_handle);
         client.payload_builder = Some(self.inner.payload_builder_handle.clone());
+        let provider = self.inner.provider.clone();
+        client.database = Some(Arc::new(move || {
+            provider.database_provider_ro().map(|db| Box::new(db) as Box<dyn BlockNumReader>)
+        }));
         Ok(client)
     }
 
