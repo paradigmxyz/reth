@@ -4,8 +4,14 @@
 //!
 //! [EIP-8178]: https://eips.ethereum.org/EIPS/eip-8178
 
-use crate::{
-    engine_ssz_containers::{
+use crate::engine_ssz_witness::{
+    EngineSszWitness, EngineSszWitnessError, PayloadStatusWithWitness,
+};
+use alloy_consensus::{Transaction, TxEnvelope};
+use alloy_eips::{eip2718::Decodable2718, eip7685::Requests};
+use alloy_primitives::{Bytes, B128, B256};
+use alloy_rpc_types_engine::{
+    ssz_engine_types::{
         BlobsV1Request, BlobsV1Response, BlobsV2Response, BlobsV3Response, BlobsV4Request,
         BlobsV4Response, BodiesByHashRequest, BodiesResponse, BuiltPayloadAmsterdam,
         BuiltPayloadOsaka, BuiltPayloadParis, BuiltPayloadPrague, BuiltPayloadShanghai,
@@ -16,17 +22,11 @@ use crate::{
         ForkchoiceUpdateAmsterdam, ForkchoiceUpdateCancun, ForkchoiceUpdateOsaka,
         ForkchoiceUpdateParis, ForkchoiceUpdatePrague, ForkchoiceUpdateResponse,
         ForkchoiceUpdateShanghai, Optional, PayloadStatus as EngineSszPayloadStatus,
-        PayloadStatusWithWitness,
+        PayloadStatusKind, MAX_BLOBS_REQUEST, MAX_BODIES_REQUEST,
     },
-    engine_ssz_witness::{EngineSszWitness, EngineSszWitnessError},
-};
-use alloy_consensus::{Transaction, TxEnvelope};
-use alloy_eips::{eip2718::Decodable2718, eip7685::Requests};
-use alloy_primitives::{Bytes, B128, B256};
-use alloy_rpc_types_engine::{
     CancunPayloadFields, ExecutionData, ExecutionPayload, ExecutionPayloadBodyV1,
     ExecutionPayloadFieldV2, ExecutionPayloadSidecar, ForkchoiceState, PayloadAttributes,
-    PayloadId, PayloadStatusEnum, PraguePayloadFields,
+    PayloadId, PraguePayloadFields,
 };
 use futures::future::{BoxFuture, Either};
 use http_body_util::{BodyExt, LengthLimitError, Limited};
@@ -65,9 +65,7 @@ const STATUS_INTERNAL_SERVER_ERROR: u16 = 500;
 const STATUS_SERVICE_UNAVAILABLE: u16 = 503;
 const STATUS_UNSUPPORTED_MEDIA_TYPE: u16 = 415;
 
-const MAX_BLOB_LIMIT: usize = crate::engine_ssz_containers::MAX_BLOBS_REQUEST;
-const MAX_BLOB_REQUEST_BYTES: usize = 4 + 16 + MAX_BLOB_LIMIT * 32;
-const MAX_BODIES_REQUEST: usize = crate::engine_ssz_containers::MAX_BODIES_REQUEST;
+const MAX_BLOB_REQUEST_BYTES: usize = 4 + 16 + MAX_BLOBS_REQUEST * 32;
 const MAX_BODIES_REQUEST_BYTES: usize = 4 + MAX_BODIES_REQUEST * 32;
 const MAX_PAYLOAD_BYTES: usize = 64 * 1024 * 1024;
 const PROBLEM_JSON: &str = "application/problem+json";
@@ -407,7 +405,7 @@ where
             Err(response) => return response,
         };
         let witness = match status.status {
-            PayloadStatusEnum::Valid => match witness_handler.generate_witness(payload).await {
+            PayloadStatusKind::Valid => match witness_handler.generate_witness(payload).await {
                 Ok(witness) => Some(witness),
                 // The block is valid but its parent is only known to the engine tree. The
                 // status stays authoritative; resubmitting once forkchoice has made the parent
@@ -540,7 +538,7 @@ where
                 Ok(request) => request,
                 Err(_) => return problem_response(STATUS_BAD_REQUEST, "ssz-decode-error", None),
             };
-            if request.versioned_hashes.len() > MAX_BLOB_LIMIT {
+            if request.versioned_hashes.len() > MAX_BLOBS_REQUEST {
                 return problem_response(STATUS_PAYLOAD_TOO_LARGE, "request-too-large", None)
             }
             return blob_response::<BlobsV4Response, _>(
@@ -551,7 +549,7 @@ where
             Ok(request) => request,
             Err(_) => return problem_response(STATUS_BAD_REQUEST, "ssz-decode-error", None),
         };
-        if request.versioned_hashes.len() > MAX_BLOB_LIMIT {
+        if request.versioned_hashes.len() > MAX_BLOBS_REQUEST {
             return problem_response(STATUS_PAYLOAD_TOO_LARGE, "request-too-large", None)
         }
         let hashes = request.versioned_hashes;
@@ -797,7 +795,7 @@ fn handle_capabilities(witness_enabled: bool) -> HttpResponse {
         "unscoped_endpoints": ["capabilities", "identity"],
         "limits": {
             "bodies.max_count": MAX_BODIES_REQUEST,
-            "blobs.max_versioned_hashes": MAX_BLOB_LIMIT,
+            "blobs.max_versioned_hashes": MAX_BLOBS_REQUEST,
             "payload.max_bytes": MAX_PAYLOAD_BYTES,
         },
     }))
@@ -923,11 +921,11 @@ fn payload_bodies_response<LegacyBody, ForkBody>(
     convert: impl Fn(LegacyBody) -> Option<ForkBody>,
     fork: EngineSszFork,
     chain_spec: &impl EthereumHardforks,
-) -> Result<BodiesResponse<ForkBody>, EngineApiError>
+) -> Result<BodiesResponse<ForkBody>, HttpResponse>
 where
     ForkBody: Default + ssz::Encode + ssz::Decode,
 {
-    let bodies = response?;
+    let bodies = response.map_err(engine_error_response)?;
     let bodies = bodies
         .into_iter()
         .map(|body| {
@@ -935,7 +933,9 @@ where
                 .map(|(_, body)| body)
         })
         .collect();
-    Ok(BodiesResponse::from_optional_bodies(bodies, convert))
+    BodiesResponse::from_optional_bodies(bodies, convert).map_err(|error| {
+        problem_response(STATUS_INTERNAL_SERVER_ERROR, "internal", Some(error.to_string()))
+    })
 }
 
 fn payload_bodies_http_response<LegacyBody, ForkBody>(
@@ -949,7 +949,7 @@ where
 {
     match payload_bodies_response(response, convert, fork, chain_spec) {
         Ok(response) => ssz_response(response),
-        Err(err) => engine_error_response(err),
+        Err(response) => response,
     }
 }
 
@@ -1255,6 +1255,10 @@ fn problem_response(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloy_rpc_types_engine::ssz_engine_types::{
+        PayloadAttributesAmsterdam, PayloadAttributesCancun, PayloadAttributesParis,
+        PayloadAttributesShanghai,
+    };
     use ssz::Encode;
 
     #[tokio::test]
@@ -1273,7 +1277,7 @@ mod tests {
                 _: ExecutionData,
             ) -> BoxFuture<
                 'static,
-                Result<crate::engine_ssz_containers::ExecutionWitnessV1, EngineSszWitnessError>,
+                Result<crate::engine_ssz_witness::ExecutionWitnessV1, EngineSszWitnessError>,
             > {
                 Box::pin(async { Ok(Default::default()) })
             }
@@ -1375,9 +1379,6 @@ mod tests {
 
     #[test]
     fn forkchoice_withdrawal_bounds() {
-        use crate::engine_ssz_containers::{
-            PayloadAttributesAmsterdam, PayloadAttributesCancun, PayloadAttributesShanghai,
-        };
         for count in [16, 17] {
             let withdrawals = vec![Default::default(); count];
             let state = ForkchoiceState::default();
@@ -1421,7 +1422,6 @@ mod tests {
 
     #[test]
     fn paris_forkchoice_uses_fixed_size_optional_attributes() {
-        use crate::engine_ssz_containers::PayloadAttributesParis;
         let request = ForkchoiceUpdateParis {
             forkchoice_state: ForkchoiceState::default(),
             payload_attributes: Optional::some(PayloadAttributesParis {
@@ -1698,7 +1698,7 @@ mod tests {
             safe_block_hash: B256::ZERO,
             finalized_block_hash: B256::ZERO,
         };
-        let attrs = crate::engine_ssz_containers::PayloadAttributesCancun {
+        let attrs = PayloadAttributesCancun {
             timestamp: 1,
             prev_randao: B256::with_last_byte(2),
             suggested_fee_recipient: Default::default(),

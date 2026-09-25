@@ -1,21 +1,25 @@
 //! Testing gossiping of transactions.
 use alloy_consensus::TxLegacy;
-use alloy_primitives::{Signature, U256};
+use alloy_primitives::{map::B256Set, Signature, TxHash, U256};
 use reth_ethereum_primitives::TransactionSigned;
 use reth_network::{
-    test_utils::{NetworkEventStream, Testnet},
+    test_utils::{NetworkEventStream, PeerHandle, Testnet},
     transactions::config::{
         TransactionIngressPolicy, TransactionPropagationKind, TransactionsManagerConfig,
     },
     NetworkEventListenerProvider, Peers,
 };
-use reth_network_api::{PeerKind, PeersInfo};
+use reth_network_api::{PeerId, PeerKind, PeersInfo};
 use reth_provider::test_utils::{ExtendedAccount, MockEthProvider};
 use reth_transaction_pool::{
-    test_utils::TransactionGenerator, AddedTransactionOutcome, PoolTransaction, TransactionPool,
+    test_utils::TransactionGenerator, AddedTransactionOutcome, EthPooledTransaction,
+    PoolTransaction, TransactionPool,
 };
-use std::sync::Arc;
+use std::{sync::Arc, time::Duration};
 use tokio::join;
+
+/// How long a peer may take to observe a session or an announcement.
+const TIMEOUT: Duration = Duration::from_secs(30);
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_tx_gossip() {
@@ -192,6 +196,81 @@ async fn test_tx_ingress_policy_trusted_only() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn test_tx_propagation_policy_trusted_only_on_connect() {
+    reth_tracing::init_test_tracing();
+
+    let provider = MockEthProvider::default().with_genesis_block();
+    let net = Testnet::create_with(3, provider.clone()).await;
+    let net = net
+        .with_eth_pool_config_and_policy(Default::default(), TransactionPropagationKind::Trusted);
+    let handle = net.spawn();
+
+    let [peer0, untrusted, trusted] = handle.peers() else { unreachable!() };
+    let pool0 = peer0.pool().unwrap();
+
+    // insert the tx before connecting, so it can only be learned from the announcement of the
+    // pending pool sent on session establishment
+    let pending = pool0.add_external_transaction(funded_transaction(&provider)).await.unwrap().hash;
+
+    connect_untrusted_and_trusted(peer0, untrusted, trusted).await;
+
+    // ensure the trusted peer learns about the pending tx
+    wait_for_announcement(trusted, peer0, pending).await;
+
+    // announcements to a peer are delivered in order, so the untrusted peer receives any
+    // announcement sent on session establishment before this one
+    let marker = pool0.add_external_transaction(funded_transaction(&provider)).await.unwrap().hash;
+    peer0.transactions().unwrap().propagate_hash_to(marker, *untrusted.peer_id());
+
+    // ensure the untrusted peer never learned about the pending tx
+    let announced = wait_for_announcement(untrusted, peer0, marker).await;
+    assert!(!announced.contains(&pending));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_tx_propagation_policy_trusted_only_get_pooled_transactions() {
+    reth_tracing::init_test_tracing();
+
+    let provider = MockEthProvider::default().with_genesis_block();
+    let net = Testnet::create_with(3, provider.clone()).await;
+    let net = net
+        .with_eth_pool_config_and_policy(Default::default(), TransactionPropagationKind::Trusted);
+    let handle = net.spawn();
+
+    let [peer0, untrusted, trusted] = handle.peers() else { unreachable!() };
+
+    let pending = peer0
+        .pool()
+        .unwrap()
+        .add_external_transaction(funded_transaction(&provider))
+        .await
+        .unwrap()
+        .hash;
+
+    connect_untrusted_and_trusted(peer0, untrusted, trusted).await;
+
+    // ensure the untrusted peer can't request the pending tx
+    let txs = untrusted
+        .transactions()
+        .unwrap()
+        .get_pooled_transactions_from(*peer0.peer_id(), vec![pending])
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(txs.is_empty());
+
+    // ensure the trusted peer can
+    let txs = trusted
+        .transactions()
+        .unwrap()
+        .get_pooled_transactions_from(*peer0.peer_id(), vec![pending])
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(txs.iter().map(|tx| *tx.hash()).collect::<Vec<_>>(), vec![pending]);
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn test_4844_tx_gossip_penalization() {
     reth_tracing::init_test_tracing();
     let provider = MockEthProvider::default().with_genesis_block();
@@ -291,4 +370,64 @@ async fn test_sending_invalid_transactions() {
 
     // ensure txs never made it to the pool
     assert!(tx_listener.try_recv().is_err());
+}
+
+/// Returns a transaction from a new sender that is funded in the provider.
+fn funded_transaction(provider: &MockEthProvider) -> EthPooledTransaction {
+    let tx = TransactionGenerator::new(rand::rng()).gen_eip1559_pooled();
+    provider.add_account(tx.sender(), ExtendedAccount::new(0, U256::from(100_000_000)));
+    tx
+}
+
+/// Connects `peer` to `untrusted` as a basic peer and to `trusted` as a trusted peer, and waits
+/// until the transactions managers of all peers handled the new sessions.
+async fn connect_untrusted_and_trusted<Pool>(
+    peer: &PeerHandle<Pool>,
+    untrusted: &PeerHandle<Pool>,
+    trusted: &PeerHandle<Pool>,
+) {
+    peer.network().add_peer(*untrusted.peer_id(), untrusted.local_addr());
+    peer.network().add_trusted_peer(*trusted.peer_id(), trusted.local_addr());
+
+    wait_for_active_peers(peer, &[*untrusted.peer_id(), *trusted.peer_id()]).await;
+    wait_for_active_peers(untrusted, &[*peer.peer_id()]).await;
+    wait_for_active_peers(trusted, &[*peer.peer_id()]).await;
+}
+
+/// Waits until the transactions manager of `peer` has active sessions with all `peers`.
+async fn wait_for_active_peers<Pool>(peer: &PeerHandle<Pool>, peers: &[PeerId]) {
+    let transactions = peer.transactions().unwrap();
+    tokio::time::timeout(TIMEOUT, async {
+        loop {
+            let active = transactions.get_active_peers().await.unwrap();
+            if peers.iter().all(|peer| active.contains(peer)) {
+                return
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("timed out waiting for sessions");
+}
+
+/// Waits until `peer` learned from `announcer` that it has `hash`, and returns all hashes `peer`
+/// knows `announcer` has.
+async fn wait_for_announcement<Pool>(
+    peer: &PeerHandle<Pool>,
+    announcer: &PeerHandle<Pool>,
+    hash: TxHash,
+) -> B256Set {
+    let transactions = peer.transactions().unwrap();
+    tokio::time::timeout(TIMEOUT, async {
+        loop {
+            let hashes =
+                transactions.get_peer_transaction_hashes(*announcer.peer_id()).await.unwrap();
+            if hashes.contains(&hash) {
+                return hashes
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("timed out waiting for announcement")
 }
