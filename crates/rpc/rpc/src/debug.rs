@@ -1548,6 +1548,42 @@ mod tests {
     }
 
     #[test]
+    fn destroyed_account_witness_includes_parent_storage_proofs() {
+        use alloy_genesis::{Genesis, GenesisAccount};
+        use reth_chainspec::ChainSpecBuilder;
+        use reth_db_common::init::init_genesis;
+        use reth_provider::test_utils::create_test_provider_factory_with_chain_spec;
+
+        let address = Address::with_last_byte(1);
+        let slots = [B256::with_last_byte(1), B256::with_last_byte(2)];
+        let genesis = Genesis::default().extend_accounts([(
+            address,
+            GenesisAccount::default().with_nonce(Some(1)).with_storage(Some(
+                slots.into_iter().map(|slot| (slot, B256::with_last_byte(10))).collect(),
+            )),
+        )]);
+        let factory = create_test_provider_factory_with_chain_spec(Arc::new(
+            ChainSpecBuilder::mainnet().genesis(genesis).build(),
+        ));
+        init_genesis(&factory).unwrap();
+        let provider = factory.latest().unwrap();
+        let proof = provider.proof(Default::default(), address, &slots).unwrap();
+        let mut state = evm2::evm::CacheDB::<evm2::evm::EmptyDB>::default();
+        state.cache.accounts.insert(address, None);
+        state.cache.storage.entry(address).or_default().wipe();
+
+        for mode in [ExecutionWitnessMode::Legacy, ExecutionWitnessMode::Canonical] {
+            let witness = ExecutionWitnessRecord::new(&state)
+                .into_execution_witness_without_headers(&provider, mode)
+                .unwrap();
+            for storage in &proof.storage_proofs {
+                assert!(!storage.proof.is_empty());
+                assert!(storage.proof.iter().all(|node| witness.state.contains(node)));
+            }
+        }
+    }
+
+    #[test]
     fn hashed_post_state_zeroes_destroyed_account_parent_storage() {
         let factory = create_test_provider_factory();
         let address = Address::with_last_byte(1);

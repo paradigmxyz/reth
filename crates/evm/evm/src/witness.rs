@@ -3,7 +3,9 @@ use alloy_primitives::{keccak256, Bytes, B256};
 use alloy_rpc_types_debug::ExecutionWitness;
 use evm2::evm::CacheDB;
 use reth_primitives_traits::Account as PrimitiveAccount;
-use reth_storage_api::{HashedPostStateProvider, HeaderProvider, StateProofProvider};
+use reth_storage_api::{
+    AccountReader, HashedPostStateProvider, HeaderProvider, StateProofProvider,
+};
 use reth_storage_errors::provider::ProviderResult;
 use reth_trie_common::{ExecutionWitnessMode, HashedPostState};
 
@@ -45,7 +47,7 @@ impl<'a, DB> ExecutionWitnessRecord<'a, DB> {
         mode: ExecutionWitnessMode,
     ) -> ProviderResult<ExecutionWitness>
     where
-        SP: StateProofProvider + HashedPostStateProvider + ?Sized,
+        SP: StateProofProvider + HashedPostStateProvider + AccountReader + ?Sized,
         HP: HeaderProvider + ?Sized,
         HP::Header: alloy_rlp::Encodable,
     {
@@ -76,7 +78,7 @@ impl<'a, DB> ExecutionWitnessRecord<'a, DB> {
         mode: ExecutionWitnessMode,
     ) -> ProviderResult<ExecutionWitness>
     where
-        SP: StateProofProvider + HashedPostStateProvider + ?Sized,
+        SP: StateProofProvider + HashedPostStateProvider + AccountReader + ?Sized,
     {
         let mut codes = self
             .state
@@ -103,7 +105,8 @@ impl<'a, DB> ExecutionWitnessRecord<'a, DB> {
                 wiped_state.state.insert(
                     *address,
                     revm::database::BundleAccount::new(
-                        info.clone(),
+                        // Original existence determines whether parent storage proofs are needed.
+                        state_provider.basic_account(address)?.map(Into::into),
                         info.clone(),
                         Default::default(),
                         if info.is_some() {
