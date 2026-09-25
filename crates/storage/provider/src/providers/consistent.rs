@@ -1826,7 +1826,7 @@ mod tests {
         let account = reth_primitives_traits::Account {
             nonce: 1,
             balance: U256::from(1000),
-            bytecode_hash: None,
+            ..Default::default()
         };
         let slot = U256::from(0x42);
         let slot_b256 = B256::from(slot);
@@ -1909,7 +1909,7 @@ mod tests {
         let account = reth_primitives_traits::Account {
             nonce: 1,
             balance: U256::from(1000),
-            bytecode_hash: None,
+            ..Default::default()
         };
         let slot = U256::from(0x42);
 
@@ -2008,7 +2008,7 @@ mod tests {
         let account = reth_primitives_traits::Account {
             nonce: 1,
             balance: U256::from(1000),
-            bytecode_hash: None,
+            ..Default::default()
         };
         let slot = U256::from(0x42);
 
