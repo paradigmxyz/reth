@@ -17,6 +17,7 @@ pub mod integer_list;
 pub mod metadata;
 pub mod sharded_key;
 pub mod snap;
+pub mod state_trie;
 pub mod storage_sharded_key;
 
 pub use accounts::*;

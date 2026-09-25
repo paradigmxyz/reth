@@ -36,7 +36,6 @@ use reth_trie::{
 };
 use reth_trie_db::{
     DatabaseAccountTrieCursor, DatabaseHashedCursorFactory, DatabaseProof, DatabaseStateRoot,
-    DatabaseStateTrieAccountCursor, DatabaseStateTrieCursorFactory, DatabaseStateTrieStorageCursor,
     DatabaseStorageProof, DatabaseStorageRoot, DatabaseStorageTrieCursor,
     DatabaseTrieCursorFactory, LegacyKeyAdapter, PackedAccountsTrie, PackedKeyAdapter,
     PackedStoragesTrie,
@@ -413,6 +412,7 @@ impl<Provider, N: NodePrimitives> AccountReader for OverlayStateProvider<Provide
 where
     Provider: Deref,
     Provider::Target: DBProvider
+        + StateTrieCursorFactory
         + HistoryReader
         + StorageSettingsCache
         + StageCheckpointReader
@@ -456,12 +456,12 @@ where
 impl<Provider, N: NodePrimitives> OverlayStateProvider<Provider, N>
 where
     Provider: Deref,
-    Provider::Target: DBProvider + StorageSettingsCache,
+    Provider::Target: DBProvider + StateTrieCursorFactory + StorageSettingsCache,
 {
     fn basic_account_from_db(&self, address: &Address) -> ProviderResult<Option<Account>> {
         if cfg!(feature = "state-trie-db") {
             let path = Nibbles::unpack(alloy_primitives::keccak256(address));
-            Ok(self.provider().tx().get::<tables::StateTrieAccounts>(path.into())?.and_then(
+            Ok(self.provider().state_trie_account_cursor()?.get(path)?.and_then(
                 |node| match node {
                     StateTrieNode::Leaf { value, .. } => Some(value.into()),
                     _ => None,
@@ -809,6 +809,7 @@ impl<Provider, N: NodePrimitives> StateProvider for OverlayStateProvider<Provide
 where
     Provider: Deref,
     Provider::Target: DBProvider
+        + StateTrieCursorFactory
         + HistoryReader
         + BlockHashReader
         + StorageSettingsCache
@@ -859,7 +860,7 @@ where
 impl<Provider, N: NodePrimitives> OverlayStateProvider<Provider, N>
 where
     Provider: Deref,
-    Provider::Target: DBProvider + StorageSettingsCache,
+    Provider::Target: DBProvider + StateTrieCursorFactory + StorageSettingsCache,
 {
     fn storage_from_db(
         &self,
@@ -869,7 +870,8 @@ where
     ) -> ProviderResult<Option<alloy_primitives::StorageValue>> {
         if cfg!(feature = "state-trie-db") {
             let path = Nibbles::unpack(alloy_primitives::keccak256(storage_key));
-            let value = DatabaseStateTrieCursorFactory(self.provider().tx())
+            let value = self
+                .provider()
                 .state_trie_storage_cursor(alloy_primitives::keccak256(address))?
                 .get(path)?
                 .and_then(|node| match node {
@@ -1064,6 +1066,7 @@ impl<Provider, N: NodePrimitives> StateTrieCursorFactory for OverlayStateProvide
 where
     Provider: Deref,
     Provider::Target: DBProvider
+        + StateTrieCursorFactory
         + StageCheckpointReader
         + PruneCheckpointReader
         + ChangeSetReader
@@ -1072,27 +1075,18 @@ where
         + StorageSettingsCache,
 {
     type AccountCursor<'a>
-        = InMemoryStateTrieCursor<
-        'a,
-        DatabaseStateTrieAccountCursor<
-            <<Provider::Target as DbTxProvider>::Tx as DbTx>::Cursor<tables::StateTrieAccounts>,
-        >,
-    >
+        =
+        InMemoryStateTrieCursor<'a, <Provider::Target as StateTrieCursorFactory>::AccountCursor<'a>>
     where
         Self: 'a;
     type StorageCursor<'a>
-        = InMemoryStateTrieCursor<
-        'a,
-        DatabaseStateTrieStorageCursor<
-            <<Provider::Target as DbTxProvider>::Tx as DbTx>::DupCursor<tables::StateTrieStorages>,
-        >,
-    >
+        =
+        InMemoryStateTrieCursor<'a, <Provider::Target as StateTrieCursorFactory>::StorageCursor<'a>>
     where
         Self: 'a;
     fn state_trie_account_cursor(&self) -> Result<Self::AccountCursor<'_>, DatabaseError> {
         let overlay = self.state_trie_overlay(true).map_err(into_database_error)?;
-        let cursor =
-            DatabaseStateTrieCursorFactory(self.provider().tx()).state_trie_account_cursor()?;
+        let cursor = self.provider().state_trie_account_cursor()?;
         Ok(InMemoryStateTrieCursor::new(cursor, &overlay.input().state_trie.account_nodes))
     }
     fn state_trie_storage_cursor(
@@ -1100,8 +1094,7 @@ where
         address: B256,
     ) -> Result<Self::StorageCursor<'_>, DatabaseError> {
         let overlay = self.state_trie_overlay(true).map_err(into_database_error)?;
-        let cursor = DatabaseStateTrieCursorFactory(self.provider().tx())
-            .state_trie_storage_cursor(address)?;
+        let cursor = self.provider().state_trie_storage_cursor(address)?;
         Ok(InMemoryStateTrieCursor::new_storage(cursor, &overlay.input().state_trie, address))
     }
 }
@@ -1206,7 +1199,6 @@ mod tests {
     #[test]
     fn complete_trie_cursors_merge_cached_updates_and_deletions() {
         use reth_trie::TrieAccount;
-        use reth_trie_db::write_state_trie_updates;
 
         for warm_parent in [false, true] {
             let (factory, mut blocks) = setup_frontiers(0, 0);
@@ -1234,13 +1226,10 @@ mod tests {
                 }
             };
             let rw = factory.provider_rw().unwrap();
-            write_state_trie_updates(
-                rw.tx_ref(),
-                &updates(
-                    vec![(path, Some(account(10))), (removed_path, Some(account(10)))],
-                    vec![(slot_path, Some(storage(10)))],
-                ),
-            )
+            rw.write_state_trie_updates(&updates(
+                vec![(path, Some(account(10))), (removed_path, Some(account(10)))],
+                vec![(slot_path, Some(storage(10)))],
+            ))
             .unwrap();
             rw.commit().unwrap();
             blocks[1].state_trie_updates = Some(Arc::new(updates(
@@ -1294,25 +1283,31 @@ mod tests {
         let db_slot = B256::with_last_byte(2);
         let db_account = TrieAccount { balance: U256::from(10), ..Default::default() };
         let rw = factory.provider_rw().unwrap();
-        for address in [address, db_address] {
-            rw.tx_ref()
-                .put::<tables::StateTrieAccounts>(
-                    Nibbles::unpack(alloy_primitives::keccak256(address)).into(),
-                    StateTrieNode::Leaf { short_key_len: 63, value: db_account },
-                )
-                .unwrap();
-        }
-        for slot in [slot, db_slot] {
-            rw.tx_ref()
-                .put::<tables::StateTrieStorages>(
-                    alloy_primitives::keccak256(address),
-                    reth_trie::StateTrieStorageEntry {
-                        nibbles: Nibbles::unpack(alloy_primitives::keccak256(slot)).into(),
-                        node: StateTrieNode::Leaf { short_key_len: 63, value: U256::from(10) },
-                    },
-                )
-                .unwrap();
-        }
+        let updates = reth_trie::StateTrieUpdatesSorted {
+            account_nodes: [address, db_address]
+                .into_iter()
+                .map(|address| {
+                    (
+                        Nibbles::unpack(alloy_primitives::keccak256(address)),
+                        Some(StateTrieNode::Leaf { short_key_len: 63, value: db_account }),
+                    )
+                })
+                .collect(),
+            storage_tries: std::iter::once((
+                alloy_primitives::keccak256(address),
+                [slot, db_slot]
+                    .into_iter()
+                    .map(|slot| {
+                        (
+                            Nibbles::unpack(alloy_primitives::keccak256(slot)),
+                            Some(StateTrieNode::Leaf { short_key_len: 63, value: U256::from(10) }),
+                        )
+                    })
+                    .collect(),
+            ))
+            .collect(),
+        };
+        rw.write_state_trie_updates(&updates).unwrap();
         rw.commit().unwrap();
 
         let account = AccountInfo { balance: U256::from(20), ..Default::default() };

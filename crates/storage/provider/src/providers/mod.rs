@@ -30,7 +30,7 @@ pub(crate) mod rocksdb;
 pub use rocksdb::{
     OwnedRocksReadSnapshot, PruneShardOutcome, PrunedIndices, RocksDBBatch, RocksDBBuilder,
     RocksDBIter, RocksDBProvider, RocksDBRawIter, RocksDBStats, RocksDBTableStats,
-    RocksReadSnapshot, RocksTx,
+    RocksReadSnapshot, RocksStateTrieCursor, RocksTx,
 };
 
 /// Helper trait to bound [`NodeTypes`] so that combined with database they satisfy

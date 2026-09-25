@@ -646,3 +646,14 @@ mod tests {
         }
     }
 }
+
+/// `RocksDB` view of complete storage nodes, with the account and path in a single key.
+#[derive(Debug)]
+pub struct RocksStateTrieStorages;
+
+impl Table for RocksStateTrieStorages {
+    const NAME: &'static str = <StateTrieStorages as Table>::NAME;
+    const DUPSORT: bool = false;
+    type Key = crate::models::state_trie::StateTrieStorageKey;
+    type Value = StateTrieNode<alloy_primitives::U256>;
+}

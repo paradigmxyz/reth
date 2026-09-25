@@ -65,6 +65,7 @@ metrics.workspace = true
 eyre.workspace = true
 
 [features]
+state-trie-rocksdb = ["state-trie-db", "reth-node-builder/state-trie-rocksdb"]
 state-trie-db = ["reth-node-builder/state-trie-db"]
 
 default = [

@@ -50,7 +50,7 @@ use reth_db_api::{
     table::Table,
     tables,
     transaction::{DbTx, DbTxMut},
-    BlockNumberList,
+    BlockNumberList, DatabaseError,
 };
 use reth_execution_types::{BlockExecutionOutput, BlockExecutionResult, Chain, ExecutionOutcome};
 use reth_node_types::{BlockTy, BodyTy, HeaderTy, NodeTypes, ReceiptTy, TxTy};
@@ -210,6 +210,9 @@ pub struct DatabaseProvider<TX, N: NodeTypes> {
     /// `RocksDB` versions its cached iterators were created on for that long; see
     /// [`Self::history_rocksdb_snapshot`].
     rocksdb_history_snapshot: OnceLock<Option<OwnedRocksReadSnapshot>>,
+    /// Pinned alongside the MDBX transaction so proofs and execution share one durable view.
+    #[cfg(feature = "state-trie-rocksdb")]
+    state_trie_snapshot: OwnedRocksReadSnapshot,
     /// Manager for state trie overlays and cached changesets.
     overlay_manager: OverlayManager<N::Primitives>,
     /// Task runtime for spawning parallel I/O work.
@@ -386,6 +389,8 @@ impl<TX: DbTxMut, N: NodeTypes> DatabaseProvider<TX, N> {
             prune_modes,
             storage,
             storage_settings,
+            #[cfg(feature = "state-trie-rocksdb")]
+            state_trie_snapshot: rocksdb_provider.owned_snapshot(),
             rocksdb_provider,
             overlay_manager,
             runtime,
@@ -469,6 +474,22 @@ impl<TX, N: NodeTypes> AsRef<Self> for DatabaseProvider<TX, N> {
 }
 
 impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX, N> {
+    /// Stage complete trie updates in the selected backend for the next provider commit.
+    pub fn write_state_trie_updates(
+        &self,
+        updates: &reth_trie::StateTrieUpdatesSorted,
+    ) -> ProviderResult<()> {
+        #[cfg(not(feature = "state-trie-rocksdb"))]
+        reth_trie_db::write_state_trie_updates(self.tx_ref(), updates)?;
+        #[cfg(feature = "state-trie-rocksdb")]
+        if !updates.is_empty() {
+            let mut batch = self.rocksdb_provider.batch();
+            batch.write_state_trie_updates(updates)?;
+            self.set_pending_rocksdb_batch(batch.into_inner());
+        }
+        Ok(())
+    }
+
     /// Executes a closure with a `RocksDB` batch, automatically registering it for commit.
     ///
     /// This helper encapsulates all the cfg-gated `RocksDB` batch handling.
@@ -759,7 +780,7 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
                     .collect();
                 let updates =
                     reth_trie::StateTrieUpdatesSorted::disjointed_merge_batch(&batch, &mask);
-                reth_trie_db::write_state_trie_updates(self.tx_ref(), &updates)?;
+                self.write_state_trie_updates(&updates)?;
                 timings.write_trie_updates += start.elapsed();
             }
 
@@ -1046,6 +1067,8 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> DatabaseProvider<TX, N> {
             prune_modes,
             storage,
             storage_settings,
+            #[cfg(feature = "state-trie-rocksdb")]
+            state_trie_snapshot: rocksdb_provider.owned_snapshot(),
             rocksdb_provider,
             overlay_manager,
             runtime,
@@ -3940,6 +3963,57 @@ impl<TX: DbTxMut, N: NodeTypes> ChainStateBlockWriter for DatabaseProvider<TX, N
     }
 }
 
+impl<TX: DbTx, N: NodeTypes> reth_trie::state_trie_cursor::StateTrieCursorFactory
+    for DatabaseProvider<TX, N>
+{
+    #[cfg(not(feature = "state-trie-rocksdb"))]
+    type AccountCursor<'a>
+        = reth_trie_db::DatabaseStateTrieAccountCursor<TX::Cursor<tables::StateTrieAccounts>>
+    where
+        Self: 'a;
+    #[cfg(not(feature = "state-trie-rocksdb"))]
+    type StorageCursor<'a>
+        = reth_trie_db::DatabaseStateTrieStorageCursor<TX::DupCursor<tables::StateTrieStorages>>
+    where
+        Self: 'a;
+    #[cfg(feature = "state-trie-rocksdb")]
+    type AccountCursor<'a>
+        = crate::providers::rocksdb::RocksStateTrieCursor<'a, 'a, reth_trie::TrieAccount>
+    where
+        Self: 'a;
+    #[cfg(feature = "state-trie-rocksdb")]
+    type StorageCursor<'a>
+        = crate::providers::rocksdb::RocksStateTrieCursor<'a, 'a, alloy_primitives::U256>
+    where
+        Self: 'a;
+
+    fn state_trie_account_cursor(&self) -> Result<Self::AccountCursor<'_>, DatabaseError> {
+        #[cfg(not(feature = "state-trie-rocksdb"))]
+        {
+            Ok(reth_trie_db::DatabaseStateTrieAccountCursor(self.tx.cursor_read()?))
+        }
+        #[cfg(feature = "state-trie-rocksdb")]
+        {
+            self.state_trie_snapshot.as_snapshot().state_trie_account_cursor()
+        }
+    }
+
+    fn state_trie_storage_cursor(
+        &self,
+        address: B256,
+    ) -> Result<Self::StorageCursor<'_>, DatabaseError> {
+        #[cfg(not(feature = "state-trie-rocksdb"))]
+        {
+            reth_trie_db::DatabaseStateTrieCursorFactory(&self.tx)
+                .state_trie_storage_cursor(address)
+        }
+        #[cfg(feature = "state-trie-rocksdb")]
+        {
+            self.state_trie_snapshot.as_snapshot().state_trie_storage_cursor(address)
+        }
+    }
+}
+
 impl<TX: DbTx + 'static, N: NodeTypes + 'static> DbTxProvider for DatabaseProvider<TX, N> {
     type Tx = TX;
 
@@ -3979,6 +4053,8 @@ impl<TX: DbTx + 'static, N: NodeTypes + 'static> DBProvider for DatabaseProvider
             self.static_file_provider.finalize()?;
             timings.sf = start.elapsed();
 
+            #[cfg(feature = "state-trie-rocksdb")]
+            let _state_trie_commit = self.rocksdb_provider.state_trie_commit_lock().write();
             let start = Instant::now();
             let batches = std::mem::take(&mut *self.pending_rocksdb_batches.lock());
             for batch in batches {
@@ -4904,7 +4980,6 @@ mod tests {
             state_trie_cursor::{StateTrieCursor, StateTrieCursorFactory},
             StateTrieNode, StateTrieUpdatesSorted, TrieAccount,
         };
-        use reth_trie_db::{write_state_trie_updates, DatabaseStateTrieCursorFactory};
 
         for move_leaf in [false, true] {
             let factory = create_test_provider_factory();
@@ -4935,7 +5010,7 @@ mod tests {
             };
             let rw = factory.provider_rw().unwrap();
             save_genesis(&rw, &genesis).unwrap();
-            write_state_trie_updates(rw.tx_ref(), &updates(Some(1))).unwrap();
+            rw.write_state_trie_updates(&updates(Some(1))).unwrap();
             rw.commit().unwrap();
             let mut suffix = updates(move_leaf.then_some(2));
             if move_leaf {
@@ -4958,6 +5033,7 @@ mod tests {
                 );
                 block.state_trie_updates = Some(Arc::new(update));
             }
+            let initial = factory.provider().unwrap();
             // Persist block bodies, then the masked prefix, then the suffix.
             for (db_tip, partial_tip, new_partial_tip) in [(0, 0, 0), (2, 0, 1), (2, 1, 2)] {
                 let rw = factory.provider_rw().unwrap();
@@ -4970,8 +5046,24 @@ mod tests {
                 );
                 rw.save_blocks(&input).unwrap();
                 rw.commit().unwrap();
+                assert_eq!(
+                    initial.state_trie_account_cursor().unwrap().get(path).unwrap(),
+                    updates(Some(1)).account_nodes[0].1
+                );
+                assert_eq!(
+                    initial.state_trie_storage_cursor(address).unwrap().get(path).unwrap(),
+                    updates(Some(1)).storage_tries[&address][0].1
+                );
                 let ro = factory.provider().unwrap();
-                let cursors = DatabaseStateTrieCursorFactory(ro.tx_ref());
+                #[cfg(feature = "state-trie-rocksdb")]
+                assert_eq!(
+                    (
+                        ro.tx_ref().entries::<tables::StateTrieAccounts>().unwrap(),
+                        ro.tx_ref().entries::<tables::StateTrieStorages>().unwrap()
+                    ),
+                    (0, 0)
+                );
+                let cursors = &ro;
                 let expected = match new_partial_tip {
                     0 => updates(Some(1)),
                     1 => updates(Some(if move_leaf { 2 } else { 1 })),

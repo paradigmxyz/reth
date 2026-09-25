@@ -322,7 +322,6 @@ mod test {
     use super::*;
     use crate::components::Components;
     use reth_consensus::noop::NoopConsensus;
-    use reth_db_api::mock::DatabaseMock;
     use reth_ethereum_engine_primitives::EthEngineTypes;
     use reth_evm::noop::NoopEvmConfig;
     use reth_evm_ethereum::MockEvmConfig;
@@ -331,14 +330,14 @@ mod test {
     use reth_node_api::FullNodeTypesAdapter;
     use reth_node_ethereum::EthereumNode;
     use reth_payload_builder::PayloadBuilderHandle;
-    use reth_provider::noop::NoopProvider;
+    use reth_provider::{providers::BlockchainProvider, test_utils::create_test_provider_factory};
     use reth_tasks::Runtime;
     use reth_transaction_pool::noop::NoopTransactionPool;
 
     #[test]
     fn test_noop_components() {
         let components = Components::<
-            FullNodeTypesAdapter<EthereumNode, DatabaseMock, NoopProvider>,
+            FullNodeTypesAdapter<EthereumNode, _, _>,
             NoopNetwork<EthNetworkPrimitives>,
             _,
             NoopEvmConfig<MockEvmConfig>,
@@ -353,7 +352,10 @@ mod test {
 
         let task_executor = Runtime::test();
 
-        let node = NodeAdapter { components, task_executor, provider: NoopProvider::default() };
+        let provider =
+            BlockchainProvider::with_latest(create_test_provider_factory(), Default::default())
+                .unwrap();
+        let node = NodeAdapter { components, task_executor, provider };
 
         // test that node implements `FullNodeComponents``
         <NodeAdapter<_, _> as FullNodeComponents>::pool(&node);

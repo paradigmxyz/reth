@@ -379,6 +379,8 @@ impl<N: ProviderNodeTypes> ProviderFactory<N> {
     /// data.
     #[track_caller]
     pub fn provider(&self) -> ProviderResult<DatabaseProviderRO<N::DB, N>> {
+        #[cfg(feature = "state-trie-rocksdb")]
+        let _state_trie_read = self.rocksdb_provider.state_trie_commit_lock().read();
         let db_tx = self.db.tx()?;
 
         // Sync providers after opening the database transaction to make

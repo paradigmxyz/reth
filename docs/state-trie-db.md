@@ -36,6 +36,40 @@ Serial fallback, reorgs, historical state, pipeline sync, RPC state queries,
 payload building, and whole-account storage wipes are outside its scope. After
 executing blocks with this feature, the legacy hashed/trie tables are stale.
 
+## RocksDB backend
+
+`state-trie-rocksdb` includes `state-trie-db` and selects RocksDB for the complete
+trie tables. The update types, overlay merging, sparse trie and proof calculator
+are shared with the MDBX backend. Execution still uses the BundleState overlay;
+only database misses and proof cursors select the new backend.
+
+```sh
+cargo +stable build --profile profiling -p reth-trie-db --example migrate_state_trie
+target/profiling/examples/migrate_state_trie /schelk/reth/db --rocksdb /schelk/reth/rocksdb
+target/profiling/examples/migrate_state_trie /schelk/reth/db --rocksdb /schelk/reth/rocksdb --check
+cargo +stable build --profile profiling -p reth-bb --features state-trie-rocksdb
+```
+
+The two column families are named `StateTrieAccounts` and `StateTrieStorages`.
+Account keys use the existing 33-byte packed path. Storage keys concatenate the
+32-byte account hash and the packed path, for a 65-byte key. Values use the same
+tagged node encoding as MDBX. RocksDB uses the provider's existing compression,
+cache, compaction and synchronous WAL settings.
+
+Migration rebuilds from the old hashed tables, checks the legacy root, flushes
+and compacts RocksDB, verifies its persisted root, and records a separate
+completion marker. It retains both MDBX schemas. `--restart` applies only to the
+selected destination. RocksDB size output reports SST and memtable bytes;
+entry counts from RocksDB properties are estimates.
+
+Normal commits apply the masked update batch to RocksDB before committing the
+MDBX persistence frontier. Acquiring an MDBX read transaction and its RocksDB
+snapshot is synchronized with that commit, so each reader sees matching
+frontiers and nodes. Existing readers retain their snapshots across commits.
+As with the MDBX PoC, crash recovery and reorg handling are outside the supported
+forward-validation path. After replay, recover the baseline before switching
+backends; each replay updates only the selected complete-trie backend.
+
 ## Tables and proofs
 
 `StateTrieAccounts` maps packed paths to `StateTrieNode<TrieAccount>`.

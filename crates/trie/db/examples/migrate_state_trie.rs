@@ -4,10 +4,11 @@ use alloy_primitives::{B256, U256};
 use reth_db::{mdbx::DatabaseArguments, Database, DatabaseEnv, DatabaseEnvKind};
 use reth_db_api::{
     cursor::DbCursorRO,
-    models::StorageSettings,
+    models::{state_trie::StateTrieStorageKey, StorageSettings},
     tables,
     transaction::{DbTx, DbTxMut},
 };
+use reth_provider::providers::RocksDBProvider;
 use reth_trie::{
     hashed_cursor::HashedCursorFactory, proof_v2, proof_v3,
     state_trie_cursor::StateTrieCursorFactory, trie_cursor::TrieCursorFactory, Nibbles,
@@ -33,16 +34,20 @@ fn old_root<A: TrieTableAdapter>(tx: &impl DbTx) -> Result<B256> {
     Ok(calc.compute_root_hash(&[root])?.expect("root"))
 }
 
-fn verify_persisted_root(db: &DatabaseEnv, expected: B256) -> Result<()> {
-    let tx = db.tx()?;
-    let mut calculator = proof_v3::ProofCalculator::new(
-        DatabaseStateTrieCursorFactory(&tx).state_trie_account_cursor()?,
-    );
+fn verify_persisted_root(factory: impl StateTrieCursorFactory, expected: B256) -> Result<()> {
+    let mut calculator = proof_v3::ProofCalculator::new(factory.state_trie_account_cursor()?);
     let root = calculator.root_node()?;
     let actual = calculator.compute_root_hash(&[root])?.expect("root");
     assert_eq!(actual, expected, "persisted root must match the source trie");
     println!("persisted_state_root={actual}");
     Ok(())
+}
+
+fn rocks_sizes(rocksdb: &RocksDBProvider) {
+    for stat in rocksdb.table_stats().into_iter().filter(|s| s.name.starts_with("StateTrie")) {
+        println!("rocksdb_table={} estimated_entries={} sst_bytes={} memtable_bytes={} pending_compaction_bytes={}",
+            stat.name, stat.estimated_num_keys, stat.sst_size_bytes, stat.memtable_size_bytes, stat.pending_compaction_bytes);
+    }
 }
 
 fn sizes(db: &DatabaseEnv) -> Result<(usize, usize)> {
@@ -69,6 +74,7 @@ fn sizes(db: &DatabaseEnv) -> Result<(usize, usize)> {
 
 struct Writer<'a> {
     db: &'a DatabaseEnv,
+    rocksdb: Option<&'a RocksDBProvider>,
     accounts: Vec<(Nibbles, StateTrieNode<TrieAccount>)>,
     storage: Vec<(B256, Nibbles, StateTrieNode<U256>)>,
     count: usize,
@@ -80,17 +86,31 @@ impl Writer<'_> {
         if count == 0 {
             return Ok(())
         }
-        let tx = self.db.tx_mut()?;
-        for (path, node) in self.accounts.drain(..) {
-            tx.put::<tables::StateTrieAccounts>(path.into(), node)?;
+        if let Some(rocksdb) = self.rocksdb {
+            let mut batch = rocksdb.batch();
+            for (path, node) in self.accounts.drain(..) {
+                batch.put::<tables::StateTrieAccounts>(path.into(), &node)?;
+            }
+            for (address, path, node) in self.storage.drain(..) {
+                batch.put::<tables::RocksStateTrieStorages>(
+                    StateTrieStorageKey { address, path: path.into() },
+                    &node,
+                )?;
+            }
+            batch.commit()?;
+        } else {
+            let tx = self.db.tx_mut()?;
+            for (path, node) in self.accounts.drain(..) {
+                tx.put::<tables::StateTrieAccounts>(path.into(), node)?;
+            }
+            for (address, path, node) in self.storage.drain(..) {
+                tx.put::<tables::StateTrieStorages>(
+                    address,
+                    StateTrieStorageEntry { nibbles: path.into(), node },
+                )?;
+            }
+            tx.commit()?;
         }
-        for (address, path, node) in self.storage.drain(..) {
-            tx.put::<tables::StateTrieStorages>(
-                address,
-                StateTrieStorageEntry { nibbles: path.into(), node },
-            )?;
-        }
-        tx.commit()?;
         self.count += count;
         let _ = writeln!(
             std::io::stderr(),
@@ -109,9 +129,32 @@ impl Writer<'_> {
 }
 
 fn main() -> Result<()> {
-    let path = std::env::args()
-        .nth(1)
-        .ok_or("usage: migrate_state_trie DATADIR/db [--check | --restart]")?;
+    migrate(std::env::args().skip(1))
+}
+
+fn migrate(mut args: impl Iterator<Item = String>) -> Result<()> {
+    let path = args
+        .next()
+        .ok_or("usage: migrate_state_trie DATADIR/db [--rocksdb PATH] [--check | --restart]")?;
+    let (mut check, mut restart, mut rocks_path) = (false, false, None);
+    while let Some(arg) = args.next() {
+        match arg.as_str() {
+            "--check" => check = true,
+            "--restart" => restart = true,
+            "--rocksdb" => {
+                rocks_path = Some(args.next().ok_or("--rocksdb requires a destination path")?)
+            }
+            _ => return Err(format!("unknown argument: {arg}").into()),
+        }
+    }
+    if check && restart {
+        return Err("--check and --restart are mutually exclusive".into())
+    }
+    let marker = if rocks_path.is_some() {
+        "state_trie_rocksdb_migration"
+    } else {
+        "state_trie_db_migration"
+    };
     // Read and assert the frontier before opening a write environment or creating any tables.
     let db = reth_db::open_db_read_only(&path, DatabaseArguments::default())?;
     let tx = db.tx()?;
@@ -139,9 +182,18 @@ fn main() -> Result<()> {
     println!("expected_state_root={expected}");
     drop(tx);
     sizes(&db)?;
-    if std::env::args().any(|s| s == "--check") {
-        if db.tx()?.get::<tables::Metadata>("state_trie_db_migration".into())?.is_some() {
-            verify_persisted_root(&db, expected)?;
+    let rocksdb = rocks_path
+        .as_ref()
+        .map(|path| {
+            RocksDBProvider::builder(path).with_default_tables().with_read_only(check).build()
+        })
+        .transpose()?;
+    if check {
+        if let Some(rocksdb) = &rocksdb {
+            verify_persisted_root(rocksdb.snapshot(), expected)?;
+            rocks_sizes(rocksdb);
+        } else if db.tx()?.get::<tables::Metadata>(marker.into())?.is_some() {
+            verify_persisted_root(DatabaseStateTrieCursorFactory(&db.tx()?), expected)?;
         }
         return Ok(())
     }
@@ -152,30 +204,45 @@ fn main() -> Result<()> {
         DatabaseArguments::default(),
     )?;
     db.create_tables()?;
-    if std::env::args().any(|s| s == "--restart") {
-        let tx = db.tx_mut()?;
+    assert!(
+        db.tx()?.get::<tables::Metadata>(marker.into())?.is_none(),
+        "destination migration already completed"
+    );
+    if let Some(rocksdb) = &rocksdb {
+        if restart {
+            rocksdb.clear::<tables::StateTrieAccounts>()?;
+            rocksdb.clear::<tables::RocksStateTrieStorages>()?;
+        }
         assert!(
-            tx.get::<tables::Metadata>("state_trie_db_migration".into())?.is_none(),
-            "refusing to restart a completed migration"
+            rocksdb.first::<tables::StateTrieAccounts>()?.is_none(),
+            "destination account table must be empty"
         );
-        tx.clear::<tables::StateTrieAccounts>()?;
-        tx.clear::<tables::StateTrieStorages>()?;
-        tx.commit()?;
+        assert!(
+            rocksdb.first::<tables::RocksStateTrieStorages>()?.is_none(),
+            "destination storage table must be empty"
+        );
+    } else {
+        if restart {
+            let tx = db.tx_mut()?;
+            tx.clear::<tables::StateTrieAccounts>()?;
+            tx.clear::<tables::StateTrieStorages>()?;
+            tx.commit()?;
+        }
+        let tx = db.tx()?;
+        assert_eq!(
+            tx.entries::<tables::StateTrieAccounts>()?,
+            0,
+            "destination account table must be empty"
+        );
+        assert_eq!(
+            tx.entries::<tables::StateTrieStorages>()?,
+            0,
+            "destination storage table must be empty"
+        );
     }
-    let tx = db.tx()?;
-    assert_eq!(
-        tx.entries::<tables::StateTrieAccounts>()?,
-        0,
-        "destination account table must be empty"
-    );
-    assert_eq!(
-        tx.entries::<tables::StateTrieStorages>()?,
-        0,
-        "destination storage table must be empty"
-    );
-    drop(tx);
     let mut writer = Writer {
         db: &db,
+        rocksdb: rocksdb.as_ref(),
         accounts: Vec::new(),
         storage: Vec::new(),
         count: 0,
@@ -226,14 +293,107 @@ fn main() -> Result<()> {
     })?;
     assert_eq!(actual, expected, "migrated root must match the source trie");
     writer.flush()?;
-    verify_persisted_root(&db, expected)?;
+    if let Some(rocksdb) = &rocksdb {
+        rocksdb.flush_and_compact_tables(&["StateTrieAccounts", "StateTrieStorages"])?;
+        verify_persisted_root(rocksdb.snapshot(), expected)?;
+        rocks_sizes(rocksdb);
+    } else {
+        verify_persisted_root(DatabaseStateTrieCursorFactory(&db.tx()?), expected)?;
+    }
     let tx = db.tx_mut()?;
     tx.put::<tables::Metadata>(
-        "state_trie_db_migration".into(),
+        marker.into(),
         format!("{}:{actual}", checkpoint.block_number).into_bytes(),
     )?;
     tx.commit()?;
     let (old, new) = sizes(&db)?;
-    println!("source_bytes={old} state_trie_bytes={new} difference_bytes={} ratio={:.6} state_root={actual}", new as i128-old as i128, new as f64 / old as f64);
+    if rocksdb.is_none() {
+        println!("source_bytes={old} state_trie_bytes={new} difference_bytes={} ratio={:.6} state_root={actual}", new as i128-old as i128, new as f64 / old as f64);
+    }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use reth_primitives_traits::{Account, StorageEntry};
+    use reth_stages_types::{FinishCheckpoint, StageCheckpoint};
+
+    #[test]
+    fn migration_preserves_source_and_populates_both_backends() {
+        let (dir, _) = reth_db::test_utils::create_test_rocksdb_dir();
+        let path = dir.path().join("db");
+        let rocks = dir.path().join("rocksdb");
+        let db = reth_db::init_db(&path, DatabaseArguments::test()).unwrap();
+        let tx = db.tx_mut().unwrap();
+        tx.put::<tables::StageCheckpoints>("Finish".into(), StageCheckpoint::new(7)).unwrap();
+        for i in 1..5 {
+            let address = B256::with_last_byte(i);
+            tx.put::<tables::HashedAccounts>(
+                address,
+                Account { nonce: i as u64, ..Default::default() },
+            )
+            .unwrap();
+            for j in 1..4 {
+                tx.put::<tables::HashedStorages>(
+                    address,
+                    StorageEntry { key: B256::with_last_byte(j), value: U256::from(j) },
+                )
+                .unwrap();
+            }
+        }
+        tx.commit().unwrap();
+        drop(db);
+        let path = path.to_str().unwrap().to_owned();
+        let rocks = rocks.to_str().unwrap().to_owned();
+        migrate([path.clone()].into_iter()).unwrap();
+        migrate([path.clone(), "--rocksdb".into(), rocks.clone()].into_iter()).unwrap();
+        migrate([path.clone(), "--check".into()].into_iter()).unwrap();
+        migrate([path.clone(), "--rocksdb".into(), rocks.clone(), "--check".into()].into_iter())
+            .unwrap();
+        let db = reth_db::open_db_read_only(&path, DatabaseArguments::test()).unwrap();
+        let tx = db.tx().unwrap();
+        assert_eq!(tx.entries::<tables::HashedAccounts>().unwrap(), 4);
+        assert_eq!(tx.entries::<tables::HashedStorages>().unwrap(), 12);
+        let rocks = RocksDBProvider::builder(rocks).with_default_tables().build().unwrap();
+        for row in tx.cursor_read::<tables::StateTrieAccounts>().unwrap().walk(None).unwrap() {
+            let (key, node) = row.unwrap();
+            assert_eq!(rocks.get::<tables::StateTrieAccounts>(key).unwrap(), Some(node));
+        }
+        for row in tx.cursor_read::<tables::StateTrieStorages>().unwrap().walk(None).unwrap() {
+            let (address, entry) = row.unwrap();
+            assert_eq!(
+                rocks
+                    .get::<tables::RocksStateTrieStorages>(StateTrieStorageKey {
+                        address,
+                        path: entry.nibbles.0.into()
+                    })
+                    .unwrap(),
+                Some(entry.node)
+            );
+        }
+    }
+
+    #[test]
+    fn migration_rejects_partial_state_before_opening_rocksdb() {
+        let (dir, _) = reth_db::test_utils::create_test_rocksdb_dir();
+        let path = dir.path().join("db");
+        let rocks = dir.path().join("rocksdb");
+        let db = reth_db::init_db(&path, DatabaseArguments::test()).unwrap();
+        let tx = db.tx_mut().unwrap();
+        tx.put::<tables::StageCheckpoints>(
+            "Finish".into(),
+            StageCheckpoint::new(7)
+                .with_finish_stage_checkpoint(FinishCheckpoint { partial_state_trie: Some(6) }),
+        )
+        .unwrap();
+        tx.commit().unwrap();
+        drop(db);
+        assert!(std::panic::catch_unwind(|| migrate(
+            [path.to_str().unwrap().into(), "--rocksdb".into(), rocks.to_str().unwrap().into()]
+                .into_iter()
+        ))
+        .is_err());
+        assert!(!rocks.exists());
+    }
 }

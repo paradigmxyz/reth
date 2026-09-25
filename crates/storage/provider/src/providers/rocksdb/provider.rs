@@ -1,3 +1,4 @@
+mod state_trie;
 use super::metrics::{RocksDBMetrics, RocksDBOperation, ROCKSDB_TABLES};
 use crate::providers::{compute_history_rank, needs_prev_shard_check, HistoryInfo};
 use alloy_consensus::transaction::TxHashRef;
@@ -31,6 +32,7 @@ use rocksdb::{
     OptimisticTransactionOptions, Options, ReadOptions, SnapshotWithThreadMode, Transaction,
     WriteBatchWithTransaction, WriteBufferManager, WriteOptions, DB, DEFAULT_COLUMN_FAMILY_NAME,
 };
+pub use state_trie::RocksStateTrieCursor;
 use std::{
     collections::BTreeMap,
     fmt,
@@ -337,6 +339,8 @@ impl RocksDBBuilder {
         self.with_table::<tables::TransactionHashNumbers>()
             .with_table::<tables::AccountsHistory>()
             .with_table::<tables::StoragesHistory>()
+            .with_table::<tables::StateTrieAccounts>()
+            .with_table::<tables::RocksStateTrieStorages>()
     }
 
     /// Enables metrics.
@@ -463,11 +467,11 @@ impl RocksDBBuilder {
                     code: -1,
                 }))
             })?;
-            Ok(RocksDBProvider(Arc::new(RocksDBProviderInner::Secondary {
-                db,
-                metrics,
-                secondary_path,
-            })))
+            Ok(RocksDBProvider(
+                Arc::new(RocksDBProviderInner::Secondary { db, metrics, secondary_path }),
+                #[cfg(feature = "state-trie-rocksdb")]
+                Default::default(),
+            ))
         } else {
             // Use OptimisticTransactionDB for MDBX-like transaction semantics (read-your-writes,
             // rollback) OptimisticTransactionDB uses optimistic concurrency control (conflict
@@ -481,7 +485,11 @@ impl RocksDBBuilder {
                             code: -1,
                         }))
                     })?;
-            Ok(RocksDBProvider(Arc::new(RocksDBProviderInner::ReadWrite { db, metrics })))
+            Ok(RocksDBProvider(
+                Arc::new(RocksDBProviderInner::ReadWrite { db, metrics }),
+                #[cfg(feature = "state-trie-rocksdb")]
+                Default::default(),
+            ))
         }
     }
 }
@@ -502,7 +510,10 @@ macro_rules! compress_to_buf_or_ref {
 
 /// `RocksDB` provider for auxiliary storage layer beside main database MDBX.
 #[derive(Debug)]
-pub struct RocksDBProvider(Arc<RocksDBProviderInner>);
+pub struct RocksDBProvider(
+    Arc<RocksDBProviderInner>,
+    #[cfg(feature = "state-trie-rocksdb")] Arc<parking_lot::RwLock<()>>,
+);
 
 /// Inner state for `RocksDB` provider.
 enum RocksDBProviderInner {
@@ -760,7 +771,11 @@ impl Drop for RocksDBProviderInner {
 
 impl Clone for RocksDBProvider {
     fn clone(&self) -> Self {
-        Self(self.0.clone())
+        Self(
+            self.0.clone(),
+            #[cfg(feature = "state-trie-rocksdb")]
+            self.1.clone(),
+        )
     }
 }
 
@@ -804,6 +819,12 @@ impl DatabaseMetrics for RocksDBProvider {
 }
 
 impl RocksDBProvider {
+    /// Couples MDBX transaction acquisition with the `RocksDB` state snapshot.
+    #[cfg(feature = "state-trie-rocksdb")]
+    pub(crate) fn state_trie_commit_lock(&self) -> &parking_lot::RwLock<()> {
+        &self.1
+    }
+
     /// Creates a new `RocksDB` provider.
     pub fn new(path: impl AsRef<Path>) -> ProviderResult<Self> {
         RocksDBBuilder::new(path).build()
@@ -1171,11 +1192,19 @@ impl RocksDBProvider {
     /// Panics if the provider is in read-only mode.
     #[instrument(level = "debug", target = "providers::rocksdb", skip_all)]
     pub fn flush_and_compact(&self) -> ProviderResult<()> {
-        self.flush(ROCKSDB_TABLES)?;
+        self.flush_and_compact_tables(ROCKSDB_TABLES)
+    }
+
+    /// Flushes and compacts the selected column families.
+    ///
+    /// # Panics
+    /// Panics if the provider is in read-only mode.
+    pub fn flush_and_compact_tables(&self, tables: &[&'static str]) -> ProviderResult<()> {
+        self.flush(tables)?;
 
         let db = self.0.db_rw();
 
-        for cf_name in ROCKSDB_TABLES {
+        for cf_name in tables {
             if let Some(cf) = db.cf_handle(cf_name) {
                 db.compact_range_cf(&cf, None::<&[u8]>, None::<&[u8]>);
             }
@@ -2875,6 +2904,20 @@ impl RocksDBRawIterEnum<'_> {
         match self {
             Self::ReadWrite(iter) => iter.seek(key),
             Self::ReadOnly(iter) => iter.seek(key),
+        }
+    }
+
+    fn seek_for_prev(&mut self, key: impl AsRef<[u8]>) {
+        match self {
+            Self::ReadWrite(iter) => iter.seek_for_prev(key),
+            Self::ReadOnly(iter) => iter.seek_for_prev(key),
+        }
+    }
+
+    fn seek_to_last(&mut self) {
+        match self {
+            Self::ReadWrite(iter) => iter.seek_to_last(),
+            Self::ReadOnly(iter) => iter.seek_to_last(),
         }
     }
 

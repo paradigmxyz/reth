@@ -314,7 +314,8 @@ impl<N, P, Evm, V> BasicEngineValidator<P, Evm, V>
 where
     N: NodePrimitives,
     P: DatabaseProviderFactory<
-            Provider: BlockReader
+            Provider: reth_trie::state_trie_cursor::StateTrieCursorFactory
+                          + BlockReader
                           + BlockHashReader
                           + StageCheckpointReader
                           + PruneCheckpointReader
@@ -1832,7 +1833,8 @@ pub trait EngineValidator<
 impl<N, Types, P, Evm, V> EngineValidator<Types> for BasicEngineValidator<P, Evm, V>
 where
     P: DatabaseProviderFactory<
-            Provider: BlockReader
+            Provider: reth_trie::state_trie_cursor::StateTrieCursorFactory
+                          + BlockReader
                           + BlockHashReader
                           + StageCheckpointReader
                           + PruneCheckpointReader
