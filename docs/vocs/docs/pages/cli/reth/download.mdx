@@ -223,6 +223,11 @@ Storage:
 
           [default: 8]
 
+      --retry-backoff <DURATION>
+          Override the delay between retry attempts (for example, 500ms or 5s).
+
+          Applies to requests, extraction, output verification, and segmented downloads. By default, retries wait five seconds; segmented requests use adaptive backoff. This does not change the number of attempts.
+
       --list
           List available snapshots and exit.
 

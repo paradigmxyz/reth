@@ -118,6 +118,7 @@ use std::{
     collections::BTreeMap,
     path::{Path, PathBuf},
     sync::{Arc, OnceLock},
+    time::Duration,
 };
 use tracing::info;
 use tui::{run_selector, SelectorOutput};
@@ -442,6 +443,14 @@ pub struct DownloadCommand<C: ChainSpecParser> {
     #[arg(long, default_value_t = MAX_CONCURRENT_DOWNLOADS)]
     download_concurrency: usize,
 
+    /// Override the delay between retry attempts (for example, 500ms or 5s).
+    ///
+    /// Applies to requests, extraction, output verification, and segmented downloads.
+    /// By default, retries wait five seconds; segmented requests use adaptive backoff.
+    /// This does not change the number of attempts.
+    #[arg(long, value_name = "DURATION", value_parser = reth_cli_util::parse_duration_from_secs_or_ms)]
+    retry_backoff: Option<Duration>,
+
     /// List available snapshots and exit.
     ///
     /// Queries the snapshots API and prints all available snapshots for the selected chain,
@@ -466,6 +475,11 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> DownloadCo
             return Ok(None);
         }
 
+        let data_dir = self.env.datadir.clone().resolve_datadir(chain);
+        let static_files_dir = data_dir.static_files();
+        let static_files_dir = (static_files_dir != data_dir.data_dir().join("static_files"))
+            .then_some(static_files_dir);
+
         // Legacy single-URL mode: download one archive and extract it
         if let Some(ref url) = self.url {
             let cancel_token = CancellationToken::new();
@@ -473,7 +487,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> DownloadCo
             let data_dir = self.env.datadir.clone().resolve_datadir(chain);
             let target_dir = data_dir.data_dir();
             if self.force {
-                clear_existing_datadir(target_dir)?;
+                clear_existing_datadir(target_dir, static_files_dir.as_deref())?;
             }
             fs::create_dir_all(target_dir)?;
 
@@ -487,10 +501,11 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> DownloadCo
             stream_and_extract(
                 url,
                 data_dir.data_dir(),
-                None,
+                static_files_dir.as_deref(),
                 self.resumable,
                 Some(request_limiter),
                 cancel_token.clone(),
+                self.retry_backoff,
             )
             .await?;
             info!(target: "reth::cli", "Snapshot downloaded and extracted successfully");
@@ -512,10 +527,11 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> DownloadCo
         let cancel_token = CancellationToken::new();
         let _cancel_guard = cancel_token.drop_guard();
         if self.force {
-            clear_existing_datadir(target_dir)?;
+            clear_existing_datadir(target_dir, static_files_dir.as_deref())?;
         }
         fs::create_dir_all(target_dir)?;
-        let startup_summary = summarize_download_startup(&planned.archives, target_dir)?;
+        let startup_summary =
+            summarize_download_startup(&planned.archives, target_dir, static_files_dir.as_deref())?;
         info!(target: "reth::cli",
             reusable = startup_summary.reusable,
             needs_download = startup_summary.needs_download,
@@ -532,8 +548,10 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> DownloadCo
         run_modular_downloads(
             planned,
             target_dir,
+            static_files_dir.as_deref(),
             self.download_concurrency.max(1),
             cancel_token.clone(),
+            self.retry_backoff,
         )
         .await?;
 
@@ -579,6 +597,11 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> DownloadCo
 
         info!(target: "reth::cli", source = %manifest_source, "Fetching snapshot manifest");
         let mut manifest = fetch_manifest_from_source(&manifest_source).await?;
+        eyre::ensure!(
+            manifest.chain_id == chain_id,
+            "Snapshot chain ID {} does not match selected chain ID {chain_id}",
+            manifest.chain_id
+        );
         manifest.base_url = Some(resolve_manifest_base_url(&manifest, &manifest_source)?);
 
         info!(target: "reth::cli",
@@ -900,14 +923,14 @@ fn selection_from_prune_mode(mode: Option<PruneMode>, snapshot_block: u64) -> Co
 }
 
 /// Removes existing snapshot data that is managed by `reth download`.
-fn clear_existing_datadir(target_dir: &Path) -> Result<()> {
-    if !target_dir.try_exists()? {
-        return Ok(());
-    }
-
+fn clear_existing_datadir(target_dir: &Path, static_files_dir: Option<&Path>) -> Result<()> {
     info!(target: "reth::cli", dir = ?target_dir, "Clearing existing snapshot data");
     for entry in FORCE_REMOVED_DATADIR_PATHS {
-        let path = target_dir.join(entry);
+        let path = if *entry == "static_files" {
+            static_files_dir.map_or_else(|| target_dir.join(entry), Path::to_path_buf)
+        } else {
+            target_dir.join(entry)
+        };
         if !path.try_exists()? {
             continue;
         }
@@ -1221,6 +1244,26 @@ mod tests {
         assert_eq!(defaults.default_base_url, "https://custom.example.com");
         assert_eq!(defaults.available_snapshots.len(), 4); // 2 defaults + 2 added
         assert_eq!(defaults.long_help, Some("Custom help for snapshots".to_string()));
+    }
+
+    #[test]
+    fn test_download_retry_backoff() {
+        let parse = |args: Vec<&str>| {
+            CommandParser::<DownloadCommand<EthereumChainSpecParser>>::try_parse_from(args)
+        };
+        assert_eq!(parse(vec!["reth"]).unwrap().args.retry_backoff, None);
+        for (value, expected) in [
+            ("0ms", Duration::ZERO),
+            ("250ms", Duration::from_millis(250)),
+            ("2s", Duration::from_secs(2)),
+        ] {
+            assert_eq!(
+                parse(vec!["reth", "--retry-backoff", value]).unwrap().args.retry_backoff,
+                Some(expected)
+            );
+        }
+        assert!(parse(vec!["reth", "--retry-backoff=-1s"]).is_err());
+        assert!(parse(vec!["reth", "--retry-backoff", "invalid"]).is_err());
     }
 
     #[test]

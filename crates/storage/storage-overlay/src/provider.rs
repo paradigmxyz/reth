@@ -533,10 +533,8 @@ where
 {
     fn state_root(&self, hashed_state: HashedPostState) -> ProviderResult<B256> {
         reth_trie_db::with_adapter!(self.provider(), |A| {
-            let input = self.build_overlay(
-                TrieInputSorted::from_unsorted(TrieInput::from_state(hashed_state)),
-                false,
-            )?;
+            let input =
+                self.build_overlay(TrieInputSorted::from_state(hashed_state.into_sorted()), false)?;
             Ok(<DbStateRoot<'_, _, A>>::overlay_root_from_nodes(self.provider().tx(), input)?)
         })
     }
@@ -556,10 +554,8 @@ where
         hashed_state: HashedPostState,
     ) -> ProviderResult<(B256, TrieUpdates)> {
         reth_trie_db::with_adapter!(self.provider(), |A| {
-            let input = self.build_overlay(
-                TrieInputSorted::from_unsorted(TrieInput::from_state(hashed_state)),
-                true,
-            )?;
+            let input =
+                self.build_overlay(TrieInputSorted::from_state(hashed_state.into_sorted()), true)?;
             Ok(<DbStateRoot<'_, _, A>>::overlay_root_from_nodes_with_updates(
                 self.provider().tx(),
                 input,
@@ -600,23 +596,15 @@ where
         hashed_storage: HashedStorage,
     ) -> ProviderResult<B256> {
         reth_trie_db::with_adapter!(self.provider(), |A| {
+            let hashed_address = alloy_primitives::keccak256(address);
             let input = self.build_overlay(
-                TrieInputSorted::from_unsorted(TrieInput::from_state(
-                    HashedPostState::from_hashed_storage(
-                        alloy_primitives::keccak256(address),
-                        hashed_storage,
-                    ),
-                )),
+                TrieInputSorted::from_state(
+                    HashedPostState::from_hashed_storage(hashed_address, hashed_storage)
+                        .into_sorted(),
+                ),
                 false,
             )?;
-            let hashed_storage = input
-                .state
-                .account_storages()
-                .get(&alloy_primitives::keccak256(address))
-                .cloned()
-                .unwrap_or_default()
-                .into();
-            <DbStorageRoot<'_, _, A>>::overlay_root(self.provider().tx(), address, hashed_storage)
+            <DbStorageRoot<'_, _, A>>::overlay_root(self.provider().tx(), address, input)
                 .map_err(|err| ProviderError::Database(err.into()))
         })
     }
@@ -627,31 +615,9 @@ where
         slot: B256,
         hashed_storage: HashedStorage,
     ) -> ProviderResult<StorageProof> {
-        reth_trie_db::with_adapter!(self.provider(), |A| {
-            let input = self.build_overlay(
-                TrieInputSorted::from_unsorted(TrieInput::from_state(
-                    HashedPostState::from_hashed_storage(
-                        alloy_primitives::keccak256(address),
-                        hashed_storage,
-                    ),
-                )),
-                false,
-            )?;
-            let hashed_storage = input
-                .state
-                .account_storages()
-                .get(&alloy_primitives::keccak256(address))
-                .cloned()
-                .unwrap_or_default()
-                .into();
-            <DbStorageProof<'_, _, A>>::overlay_storage_proof(
-                self.provider().tx(),
-                address,
-                slot,
-                hashed_storage,
-            )
+        self.storage_multiproof(address, &[slot], hashed_storage)?
+            .storage_proof(slot)
             .map_err(ProviderError::from)
-        })
     }
 
     fn storage_multiproof(
@@ -661,27 +627,19 @@ where
         hashed_storage: HashedStorage,
     ) -> ProviderResult<StorageMultiProof> {
         reth_trie_db::with_adapter!(self.provider(), |A| {
+            let hashed_address = alloy_primitives::keccak256(address);
             let input = self.build_overlay(
-                TrieInputSorted::from_unsorted(TrieInput::from_state(
-                    HashedPostState::from_hashed_storage(
-                        alloy_primitives::keccak256(address),
-                        hashed_storage,
-                    ),
-                )),
+                TrieInputSorted::from_state(
+                    HashedPostState::from_hashed_storage(hashed_address, hashed_storage)
+                        .into_sorted(),
+                ),
                 false,
             )?;
-            let hashed_storage = input
-                .state
-                .account_storages()
-                .get(&alloy_primitives::keccak256(address))
-                .cloned()
-                .unwrap_or_default()
-                .into();
             <DbStorageProof<'_, _, A>>::overlay_storage_multiproof(
                 self.provider().tx(),
                 address,
                 slots,
-                hashed_storage,
+                input,
             )
             .map_err(ProviderError::from)
         })

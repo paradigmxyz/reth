@@ -153,6 +153,7 @@ jobs:
     name: bench-benchmarkoor
     runs-on: [self-hosted, Linux, X64, available]
     permissions:
+      id-token: write
       contents: read
     timeout-minutes: 180
     env:
@@ -175,6 +176,8 @@ jobs:
       BENCHMARKOOR_REPLAY_PATH: ${{ inputs.benchmarkoor_replay_path || '~/projects/benchmarkoor-replay' }}
       BENCHMARKOOR_CACHE: ${{ github.workspace }}/bench-work/benchmarkoor-cache
     steps:
+      - name: Secure runner
+        uses: tempoxyz/gh-actions/actions/secure-runner@117919c943b804057be733b0c4034c5542e58959 # 2026-09-23T05-09-41Z-117919c9
       - name: Clean up previous bench-work
         run: sudo rm -rf "$BENCH_WORK_DIR" 2>/dev/null || true
 
@@ -196,7 +199,9 @@ jobs:
           submodules: true
           fetch-depth: 0
 
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de # v1
+        with:
+          toolchain: stable
 
       - uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
         continue-on-error: true
@@ -259,6 +264,8 @@ jobs:
           set -euo pipefail
 
           replay_path="$BENCHMARKOOR_REPLAY_PATH"
+          # Match a literal tilde before expanding it ourselves.
+          # shellcheck disable=SC2088
           case "$replay_path" in
             "~") replay_path="$HOME" ;;
             "~/"*) replay_path="$HOME/${replay_path#"~/"}" ;;
@@ -306,6 +313,8 @@ jobs:
           set -euo pipefail
 
           metadata_root="$BENCHMARKOOR_METADATA_ROOT"
+          # Match a literal tilde before expanding it ourselves.
+          # shellcheck disable=SC2088
           case "$metadata_root" in
             "~") metadata_root="$HOME" ;;
             "~/"*) metadata_root="$HOME/${metadata_root#"~/"}" ;;
@@ -377,6 +386,11 @@ jobs:
           } >> "$GITHUB_OUTPUT"
 
       - name: Prepare source dirs
+        env:
+          INPUT_BASELINE_REF: ${{ steps.refs.outputs.baseline-ref }}
+          INPUT_DOWNLOAD_NAME: ${{ steps.refs.outputs.download-name }}
+          INPUT_DOWNLOAD_REF: ${{ steps.refs.outputs.download-ref }}
+          INPUT_FEATURE_REF: ${{ steps.refs.outputs.feature-ref }}
         run: |
           set -euo pipefail
           prepare_source_dir() {
@@ -400,13 +414,16 @@ jobs:
             git -C "$dir" submodule update --init --recursive
           }
 
-          prepare_source_dir ../reth-baseline "${{ steps.refs.outputs.baseline-ref }}"
-          prepare_source_dir ../reth-feature "${{ steps.refs.outputs.feature-ref }}"
-          prepare_source_dir ../reth-download "${{ steps.refs.outputs.download-ref }}" "${{ steps.refs.outputs.download-name }}"
+          prepare_source_dir ../reth-baseline "${INPUT_BASELINE_REF}"
+          prepare_source_dir ../reth-feature "${INPUT_FEATURE_REF}"
+          prepare_source_dir ../reth-download "${INPUT_DOWNLOAD_REF}" "${INPUT_DOWNLOAD_NAME}"
 
       - name: Build binaries
         id: build
         env:
+          INPUT_BASELINE_REF: ${{ steps.refs.outputs.baseline-ref }}
+          INPUT_DOWNLOAD_REF: ${{ steps.refs.outputs.download-ref }}
+          INPUT_FEATURE_REF: ${{ steps.refs.outputs.feature-ref }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           DEREK_PAT: ${{ secrets.DEREK_PAT }}
           DEREK_TOKEN: ${{ secrets.DEREK_TOKEN }}
@@ -418,11 +435,11 @@ jobs:
           FEATURE_DIR="$(cd ../reth-feature && pwd)"
           DOWNLOAD_DIR="$(cd ../reth-download && pwd)"
 
-          .github/scripts/bench-txgen-build.sh baseline "$BASELINE_DIR" "${{ steps.refs.outputs.baseline-ref }}" &
+          .github/scripts/bench-txgen-build.sh baseline "$BASELINE_DIR" "${INPUT_BASELINE_REF}" &
           PID_BASELINE=$!
-          .github/scripts/bench-txgen-build.sh feature "$FEATURE_DIR" "${{ steps.refs.outputs.feature-ref }}" &
+          .github/scripts/bench-txgen-build.sh feature "$FEATURE_DIR" "${INPUT_FEATURE_REF}" &
           PID_FEATURE=$!
-          .github/scripts/bench-txgen-build.sh baseline "$DOWNLOAD_DIR" "${{ steps.refs.outputs.download-ref }}" &
+          .github/scripts/bench-txgen-build.sh baseline "$DOWNLOAD_DIR" "${INPUT_DOWNLOAD_REF}" &
           PID_DOWNLOAD=$!
 
           FAIL=0
@@ -566,10 +583,13 @@ jobs:
 
       - name: Import snapshot into schelk
         id: snapshot
+        env:
+          INPUT_DOWNLOAD_NAME: ${{ steps.refs.outputs.download-name }}
+          INPUT_DOWNLOAD_REF: ${{ steps.refs.outputs.download-ref }}
         run: |
           set -euo pipefail
           DOWNLOAD_RETH_BINARY="$(pwd)/../reth-download/target/profiling/reth"
-          echo "Using download reth from ${{ steps.refs.outputs.download-name }} (${{ steps.refs.outputs.download-ref }})"
+          echo "Using download reth from ${INPUT_DOWNLOAD_NAME} (${INPUT_DOWNLOAD_REF})"
           "$DOWNLOAD_RETH_BINARY" --version
           BENCH_RETH_BINARY="$DOWNLOAD_RETH_BINARY" \
             .github/scripts/bench-benchmarkoor-snapshot.sh
@@ -649,6 +669,11 @@ jobs:
       - name: Parse results
         id: results
         if: success()
+        env:
+          INPUT_BASELINE_NAME: ${{ steps.refs.outputs.baseline-name }}
+          INPUT_BASELINE_REF: ${{ steps.refs.outputs.baseline-ref }}
+          INPUT_FEATURE_NAME: ${{ steps.refs.outputs.feature-name }}
+          INPUT_FEATURE_REF: ${{ steps.refs.outputs.feature-ref }}
         run: |
           set -euo pipefail
           RESULTS="$BENCH_WORK_DIR/results.jsonl"
@@ -666,10 +691,10 @@ jobs:
             --output-json "$BENCH_WORK_DIR/summary.json" \
             --output-markdown "$BENCH_WORK_DIR/summary.md" \
             --repo "${{ github.repository }}" \
-            --baseline-name "${{ steps.refs.outputs.baseline-name }}" \
-            --baseline-ref "${{ steps.refs.outputs.baseline-ref }}" \
-            --feature-name "${{ steps.refs.outputs.feature-name }}" \
-            --feature-ref "${{ steps.refs.outputs.feature-ref }}"
+            --baseline-name "${INPUT_BASELINE_NAME}" \
+            --baseline-ref "${INPUT_BASELINE_REF}" \
+            --feature-name "${INPUT_FEATURE_NAME}" \
+            --feature-ref "${INPUT_FEATURE_REF}"
 
       - name: Write job summary
         if: success()
