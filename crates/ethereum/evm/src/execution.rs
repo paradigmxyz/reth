@@ -103,16 +103,13 @@ impl TryFrom<HandlerError> for EthInvalidTxError {
             HandlerError::GasLimitMoreThanBlock { .. } |
             HandlerError::TxGasLimitGreaterThanCap { .. } |
             HandlerError::CreateInitCodeSizeLimit { .. } |
-            HandlerError::OutOfFunds |
-            HandlerError::SignerRecoveryFailed |
             HandlerError::FeeCapLessThanBaseFee { .. } |
             HandlerError::EmptyAuthorizationList |
             HandlerError::BlobFeeCapLessThanBlobBaseFee { .. } |
             HandlerError::EmptyBlobs |
             HandlerError::TooManyBlobs { .. } |
             HandlerError::BlobVersionNotSupported |
-            HandlerError::PriorityFeeGreaterThanMaxFee |
-            HandlerError::UnsupportedCaller(_) => Ok(Self(error)),
+            HandlerError::PriorityFeeGreaterThanMaxFee => Ok(Self(error)),
         }
     }
 }
