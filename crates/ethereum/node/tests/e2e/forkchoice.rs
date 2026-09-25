@@ -1,4 +1,4 @@
-//! Tests for atomic forkchoice state updates via the Engine API.
+//! Tests for canonical chain and atomic forkchoice state updates via the Engine API.
 
 use crate::utils::eth_payload_attributes;
 use alloy_eips::BlockNumberOrTag;
@@ -7,11 +7,12 @@ use alloy_provider::{Provider, ProviderBuilder};
 use alloy_rpc_types_engine::{ForkchoiceState, PayloadStatusEnum};
 use jsonrpsee_core::client::Error;
 use reth_chainspec::{ChainSpecBuilder, MAINNET};
-use reth_e2e_test_utils::E2ETestSetupBuilder;
+use reth_e2e_test_utils::{trie::wait_for_persisted_block, E2ETestSetupBuilder};
 use reth_node_ethereum::{EthEngineTypes, EthereumNode};
+use reth_provider::{DatabaseProviderFactory, HeaderProvider};
 use reth_rpc_api::{EngineApiClient, TestingBuildBlockRequestV1};
 use reth_rpc_server_types::{RethRpcModule, RpcModuleSelection};
-use std::sync::Arc;
+use std::{sync::Arc, time::Duration};
 
 #[tokio::test]
 async fn invalid_forkchoice_preserves_canonical_state() -> eyre::Result<()> {
@@ -156,6 +157,132 @@ async fn invalid_forkchoice_preserves_canonical_state() -> eyre::Result<()> {
         rpc.get_block_by_number(BlockNumberOrTag::Finalized).await?.unwrap().header.hash,
         b[2]
     );
+
+    Ok(())
+}
+
+/// Restoring a persisted head must update canonical state before disk reorg cleanup completes.
+#[tokio::test]
+async fn fcu_restores_reorged_out_persisted_head() -> eyre::Result<()> {
+    assert_fcu_restores_reorged_out_persisted_head(3).await
+}
+
+/// A stale persisted head above a shorter sibling branch must also become canonical again.
+#[tokio::test]
+async fn fcu_restores_reorged_out_persisted_head_above_shorter_branch() -> eyre::Result<()> {
+    assert_fcu_restores_reorged_out_persisted_head(1).await
+}
+
+/// Holds the database writer lock across both FCUs so disk cleanup cannot win the race.
+async fn assert_fcu_restores_reorged_out_persisted_head(sibling_len: u64) -> eyre::Result<()> {
+    reth_tracing::init_test_tracing();
+
+    let chain_spec = Arc::new(
+        ChainSpecBuilder::default()
+            .chain(MAINNET.chain)
+            .genesis(serde_json::from_str(include_str!("../assets/genesis.json")).unwrap())
+            .cancun_activated()
+            .build(),
+    );
+    let (mut nodes, _) =
+        E2ETestSetupBuilder::<EthereumNode, _>::new(2, chain_spec, eth_payload_attributes)
+            .with_connect_nodes(false)
+            .with_tree_config_modifier(|config| {
+                config
+                    .with_num_state_masking_blocks(0)
+                    .with_persistence_threshold(0)
+                    .with_memory_block_buffer_target(0)
+            })
+            .with_node_config_modifier(|mut config| {
+                config.rpc.http_api =
+                    Some(RpcModuleSelection::from([RethRpcModule::Eth, RethRpcModule::Testing]));
+                config
+            })
+            .build()
+            .await?;
+    let node = nodes.pop().unwrap();
+    let producer = nodes.pop().unwrap();
+    let genesis = node.block_hash(0);
+    let engine = node.auth_server_handle().http_client();
+    let producer_engine = producer.auth_server_handle().http_client();
+    let rpc = ProviderBuilder::new().connect_http(node.rpc_url());
+
+    // Persist A through block 3, then import a sibling branch without canonicalizing it.
+    let mut chains = [vec![genesis], vec![genesis]];
+    for (branch, length) in [3, sibling_len].into_iter().enumerate() {
+        for number in 1..=length {
+            let envelope = producer
+                .testing_build_block_v1(TestingBuildBlockRequestV1 {
+                    parent_block_hash: *chains[branch].last().unwrap(),
+                    payload_attributes: eth_payload_attributes(number + branch as u64 * 10),
+                    transactions: vec![],
+                    extra_data: None,
+                })
+                .await?;
+            let payload = envelope.execution_payload;
+            let hash = payload.payload_inner.payload_inner.block_hash;
+            for client in [&producer_engine, &engine] {
+                let status = EngineApiClient::<EthEngineTypes>::new_payload_v3(
+                    client,
+                    payload.clone(),
+                    vec![],
+                    B256::ZERO,
+                )
+                .await?;
+                assert_eq!(status.status, PayloadStatusEnum::Valid);
+            }
+            producer.update_forkchoice(genesis, hash).await?;
+            chains[branch].push(hash);
+        }
+        if branch == 0 {
+            node.update_forkchoice(genesis, chains[0][3]).await?;
+            wait_for_persisted_block(&node.inner.provider, 3, Duration::from_secs(30)).await?;
+        }
+    }
+    let [a, b] = chains;
+
+    // MDBX allows only one writer. Acquire it off the executor and keep it alive while the
+    // persistence task attempts to remove A, leaving the old headers visible on disk.
+    let provider = node.inner.provider.clone();
+    let disk_reorg_guard =
+        tokio::task::spawn_blocking(move || provider.database_provider_rw()).await??;
+    for head in [*b.last().unwrap(), a[3]] {
+        let status = tokio::time::timeout(
+            Duration::from_secs(10),
+            EngineApiClient::<EthEngineTypes>::fork_choice_updated_v3(
+                &engine,
+                ForkchoiceState {
+                    head_block_hash: head,
+                    safe_block_hash: B256::ZERO,
+                    finalized_block_hash: B256::ZERO,
+                },
+                None,
+            ),
+        )
+        .await??;
+        assert_eq!(status.payload_status.status, PayloadStatusEnum::Valid);
+        assert_eq!(
+            node.inner.provider.database_provider_ro()?.sealed_header(3)?.unwrap().hash(),
+            a[3],
+            "The old tip must remain on disk throughout both FCUs"
+        );
+        assert_eq!(
+            rpc.get_block_by_number(BlockNumberOrTag::Latest).await?.unwrap().header.hash,
+            head,
+            "A VALID FCU must make the requested sibling tip canonical"
+        );
+    }
+    for (number, hash) in a.into_iter().enumerate() {
+        assert_eq!(
+            rpc.get_block_by_number(BlockNumberOrTag::Number(number as u64))
+                .await?
+                .unwrap()
+                .header
+                .hash,
+            hash
+        );
+    }
+    drop(disk_reorg_guard);
 
     Ok(())
 }
