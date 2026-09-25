@@ -30,11 +30,11 @@ use reth_rpc_eth_types::{error::EthApiError, utils::recover_raw_transaction, Eth
 use reth_storage_api::{BlockNumReader, BlockReader};
 use reth_tasks::pool::BlockingTaskGuard;
 use reth_transaction_pool::{PoolPooledTx, PoolTransaction, TransactionPool};
-use revm::{context::result::ResultAndState, DatabaseCommit};
+use revm::DatabaseCommit;
 use revm_inspectors::{
     opcode::OpcodeGasInspector,
     storage::StorageInspector,
-    tracing::{parity::populate_state_diff, TracingInspector, TracingInspectorConfig},
+    tracing::{TracingInspector, TracingInspectorConfig},
 };
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
@@ -569,24 +569,16 @@ where
                 None,
                 TracingInspectorConfig::from_parity_config(&trace_types),
                 move |tx_info, mut ctx| {
-                    let builder = ctx.take_inspector().into_parity_builder();
-                    let full_trace = if trace_types.contains(&TraceType::VmTrace) {
-                        // VM traces need the execution database to resolve bytecode, including
-                        // code reached through CALLCODE and DELEGATECALL.
-                        let res = ResultAndState { result: ctx.result, state: ctx.state.clone() };
-                        builder
-                            .into_trace_results_with_state(&res, &trace_types, &ctx.db)
-                            .map_err(Eth::Error::from_eth_err)?
-                    } else {
-                        let mut full_trace = builder.into_trace_results(&ctx.result, &trace_types);
-                        // Preserve the pre-state balance and nonce without cloning state for
-                        // requests that do not need VM bytecode.
-                        if let Some(ref mut state_diff) = full_trace.state_diff {
-                            populate_state_diff(state_diff, &ctx.db, ctx.state.iter())
-                                .map_err(Eth::Error::from_eth_err)?;
-                        }
-                        full_trace
-                    };
+                    let full_trace = ctx
+                        .take_inspector()
+                        .into_parity_builder()
+                        .into_trace_results_with_state_parts(
+                            &ctx.result,
+                            ctx.state,
+                            &trace_types,
+                            &ctx.db,
+                        )
+                        .map_err(Eth::Error::from_eth_err)?;
 
                     let trace = TraceResultsWithTransactionHash {
                         transaction_hash: tx_info.hash.expect("tx hash is set"),
