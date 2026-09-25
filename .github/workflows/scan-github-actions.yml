@@ -1,0 +1,19 @@
+name: Scan GitHub Actions
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  scan:
+    uses: tempoxyz/gh-actions/.github/workflows/scan-github-actions.yml@b35994a23aaf6acf4d5e2f91d18235a6e2f90e95 # 2026-09-23T08-07-21Z-b35994a2
+    permissions:
+      actions: read
+      contents: read
+      id-token: write
+    with:
+      secure-runner-fail-on-violation: false

@@ -95,11 +95,23 @@ impl<N: NodePrimitives> OverlayManager<N> {
     }
 
     /// Creates an overlay builder for `parent_hash`.
+    ///
+    /// This rebuilds the in-memory chain ending at `parent_hash` from the manager's block graph.
+    /// Prefer [`Self::overlay_builder_for_state`] whenever the caller already holds the chain.
     pub fn overlay_builder(&self, parent_hash: B256) -> OverlayBuilder<N> {
-        OverlayBuilder::new(parent_hash, self.block_state(parent_hash), self.clone())
+        OverlayBuilder::new(parent_hash, self.block_state(parent_hash).map(Arc::new), self.clone())
     }
 
-    fn block_state(&self, parent_hash: B256) -> Option<BlockState<N>> {
+    /// Creates an overlay builder for an already materialized in-memory chain.
+    ///
+    /// The chain tip is used as the parent hash, so no block graph lookup or chain rebuild is
+    /// performed. The builder only reads `state`, which makes it safe to share the same
+    /// [`BlockState`] with other holders.
+    pub fn overlay_builder_for_state(&self, state: Arc<BlockState<N>>) -> OverlayBuilder<N> {
+        OverlayBuilder::new(state.hash(), Some(state), self.clone())
+    }
+
+    pub(crate) fn block_state(&self, parent_hash: B256) -> Option<BlockState<N>> {
         let mut blocks = self.parent_chain(parent_hash).collect::<Vec<_>>();
         blocks.pop().map(|oldest| {
             blocks.into_iter().rev().fold(BlockState::new(oldest), |parent, block| {
@@ -266,11 +278,6 @@ impl<N: NodePrimitives> OverlayManager<N> {
             return
         }
 
-        #[cfg(feature = "rayon")]
-        let Some(worker_pool) = self.worker_pool.clone() else {
-            return
-        };
-
         #[cfg(not(feature = "rayon"))]
         let _ = cached_parent_overlays;
 
@@ -278,23 +285,38 @@ impl<N: NodePrimitives> OverlayManager<N> {
         // overlay for it
         #[cfg(feature = "rayon")]
         {
-            let parent_span = span;
             for anchor_hash in cached_parent_overlays {
-                let manager = self.clone();
-                let parent_span = parent_span.clone();
-                worker_pool.spawn(move || {
-                    let _span = tracing::trace_span!(
-                        target: "storage::overlay::manager",
-                        parent: parent_span,
-                        "precompute_execution_overlay",
-                        tip_hash = %hash,
-                        anchor_hash = %anchor_hash,
-                    )
-                    .entered();
-                    let _ = manager.precompute_execution_overlay_for_parent(hash, anchor_hash);
-                });
+                self.precompute_execution_overlay(hash, anchor_hash);
             }
         }
+    }
+
+    /// Optimistically computes an execution overlay from `anchor_hash` to `tip_hash`.
+    ///
+    /// This returns without waiting for computation. No work is scheduled without a worker pool
+    /// or when the tip is already persisted at the anchor. A concurrent persistence or reorg may
+    /// make the requested range unavailable, in which case the background task skips it.
+    #[cfg(feature = "rayon")]
+    pub fn precompute_execution_overlay(&self, tip_hash: B256, anchor_hash: B256) {
+        if tip_hash == anchor_hash {
+            return
+        }
+        let Some(worker_pool) = &self.worker_pool else { return };
+        let manager = self.clone();
+        let parent_span = tracing::Span::current();
+        worker_pool.spawn(move || {
+            let _span = tracing::trace_span!(
+                target: "storage::overlay::manager",
+                parent: parent_span,
+                "precompute_execution_overlay",
+                %tip_hash,
+                %anchor_hash,
+            )
+            .entered();
+            if let Err(err) = manager.precompute_execution_overlay_for_parent(tip_hash, anchor_hash) {
+                debug!(target: "storage::overlay::manager", %err, "Skipping execution overlay precompute");
+            }
+        });
     }
 
     /// Removes blocks from the live block graph and prunes cached overlays that can no longer be
@@ -377,7 +399,14 @@ impl<N: NodePrimitives> OverlayManager<N> {
                 anchor_hash,
                 parent_state,
                 cache_config,
-                |input, span| self.compute_state_trie_overlay(input, anchor_hash, span),
+                |input, span| {
+                    self.compute_state_trie_overlay(
+                        input,
+                        anchor_hash,
+                        span,
+                        cache_config.write_to_cache,
+                    )
+                },
             )?
             .expect("required overlay lookup cannot skip an in-progress computation");
         Ok((Arc::clone(&input.nodes), Arc::clone(&input.state)))
@@ -435,7 +464,14 @@ impl<N: NodePrimitives> OverlayManager<N> {
             anchor_hash,
             parent_state,
             cache_config,
-            |input, span| self.compute_execution_overlay(input, anchor_hash, span),
+            |input, span| {
+                self.compute_execution_overlay(
+                    input,
+                    anchor_hash,
+                    span,
+                    cache_config.write_to_cache,
+                )
+            },
         )
     }
 
@@ -503,6 +539,15 @@ impl<N: NodePrimitives> OverlayManager<N> {
             Wait(Arc<OverlayWaiter<T>>),
             Compute(Arc<OverlayWaiter<T>>),
         }
+
+        let parent_hash = parent_state.block_ref().recovered_block().parent_hash();
+        cache.retain(|sibling_key, entry| {
+            sibling_key.tip_hash == tip_hash ||
+                !matches!(entry, OverlayCacheEntry::Ready(_)) ||
+                self.blocks
+                    .get(&sibling_key.tip_hash)
+                    .is_none_or(|block| block.recovered_block().parent_hash() != parent_hash)
+        });
 
         let action = match cache.entries.entry(key) {
             Entry::Occupied(entry) => {
@@ -618,7 +663,12 @@ impl<N: NodePrimitives> OverlayManager<N> {
         compute_input: ComputeOverlayInput<N, TrieInputSorted>,
         anchor_hash: B256,
         _span: tracing::Span,
+        write_to_cache: bool,
     ) -> TrieInputSorted {
+        if !write_to_cache {
+            return compute_overlay(compute_input, anchor_hash, &self.metrics)
+        }
+
         #[cfg(feature = "rayon")]
         {
             if let Some(worker_pool) = &self.worker_pool {
@@ -639,7 +689,16 @@ impl<N: NodePrimitives> OverlayManager<N> {
         compute_input: ComputeOverlayInput<N, ExecutionOverlay>,
         anchor_hash: B256,
         _span: tracing::Span,
+        write_to_cache: bool,
     ) -> ExecutionOverlay {
+        if !write_to_cache {
+            return compute_execution_overlay_inner(
+                compute_input,
+                anchor_hash,
+                &self.execution_metrics,
+            )
+        }
+
         #[cfg(feature = "rayon")]
         {
             if let Some(worker_pool) = &self.worker_pool {
@@ -675,9 +734,9 @@ impl Default for OverlayCacheConfig {
 #[derive(Debug)]
 pub(crate) struct StateTrieOverlayError {
     /// Requested in-memory tip hash.
-    tip_hash: B256,
+    pub(crate) tip_hash: B256,
     /// Requested anchor hash.
-    anchor_hash: B256,
+    pub(crate) anchor_hash: B256,
 }
 
 impl fmt::Display for StateTrieOverlayError {
@@ -1121,6 +1180,37 @@ mod tests {
     }
 
     #[test]
+    fn computing_sibling_evicts_ready_cached_overlays() {
+        let manager = OverlayManager::default();
+        let mut builder = TestBlockBuilder::eth();
+        let anchor_hash = B256::random();
+        let parent = builder.get_executed_block_with_number(1, anchor_hash);
+        let parent_hash = parent.recovered_block().hash();
+        let first = builder.get_executed_block_with_number(2, parent_hash);
+        let sibling = builder.get_executed_block_with_number(2, parent_hash);
+        let sibling_hash = sibling.recovered_block().hash();
+        let first_key = OverlayCacheKey { anchor_hash, tip_hash: first.recovered_block().hash() };
+
+        manager.insert_block(parent);
+        manager.insert_block(first);
+        manager.insert_block(sibling);
+        manager
+            .state_trie_overlays
+            .entries
+            .insert(first_key, OverlayCacheEntry::Ready(Arc::new(TrieInputSorted::default())));
+        manager
+            .execution_overlays
+            .entries
+            .insert(first_key, OverlayCacheEntry::Ready(Arc::new(ExecutionOverlay::default())));
+
+        overlay_for_parent(&manager, sibling_hash, anchor_hash).unwrap();
+        manager.execution_overlay_for_parent(sibling_hash, anchor_hash).unwrap();
+
+        assert!(!manager.state_trie_overlays.entries.contains_key(&first_key));
+        assert!(!manager.execution_overlays.entries.contains_key(&first_key));
+    }
+
+    #[test]
     fn execution_overlay_for_parent_at_anchor_is_empty() {
         let manager = OverlayManager::<EthPrimitives>::default();
         let anchor_hash = B256::with_last_byte(1);
@@ -1238,6 +1328,42 @@ mod tests {
 
     #[cfg(feature = "rayon")]
     #[test]
+    fn uncached_overlays_do_not_use_worker_pool() {
+        let worker_pool = Arc::new(WorkerPool::new(1, "uncached-overlay-test"));
+        let manager = OverlayManager::new(Arc::clone(&worker_pool));
+        let block = test_blocks().remove(0);
+        let anchor_hash = block.recovered_block().parent_hash();
+        let parent_state = BlockState::new(block);
+        let cache_config = OverlayCacheConfig { precompute: false, write_to_cache: false };
+
+        let (started_tx, started_rx) = mpsc::channel();
+        let (release_tx, release_rx) = mpsc::channel();
+        worker_pool.spawn(move || {
+            started_tx.send(()).unwrap();
+            release_rx.recv().unwrap();
+        });
+        started_rx.recv().unwrap();
+
+        let (completed_tx, completed_rx) = mpsc::channel();
+        let task = thread::spawn(move || {
+            let execution =
+                manager.execution_overlay_for_block_state(&parent_state, anchor_hash, cache_config);
+            let state = manager.overlay_for_parent(&parent_state, anchor_hash, cache_config);
+            completed_tx.send((execution, state)).unwrap();
+        });
+
+        let completed = completed_rx.recv_timeout(Duration::from_millis(100));
+        release_tx.send(()).unwrap();
+        task.join().unwrap();
+
+        assert!(completed.is_ok(), "uncached overlay used the worker pool");
+        let (execution, state) = completed.unwrap();
+        assert!(execution.is_ok());
+        assert!(state.is_ok());
+    }
+
+    #[cfg(feature = "rayon")]
+    #[test]
     fn precomputes_execution_overlay_for_cached_parent() {
         let manager = OverlayManager::new(Arc::new(WorkerPool::new(1, "execution-overlay-test")));
         let blocks = test_blocks();
@@ -1264,6 +1390,53 @@ mod tests {
             anchor_hash,
             tip_hash: blocks[0].recovered_block().hash(),
         }));
+    }
+
+    #[cfg(feature = "rayon")]
+    #[test]
+    fn precomputes_execution_overlay_after_anchor_advances() {
+        let manager = OverlayManager::new(Arc::new(WorkerPool::new(1, "execution-overlay-test")));
+        let blocks = test_blocks();
+        for block in &blocks {
+            manager.insert_block(block.clone());
+        }
+        let tip_hash = blocks[2].recovered_block().hash();
+        let old_anchor = blocks[0].recovered_block().parent_hash();
+        manager.execution_overlay_for_parent(tip_hash, old_anchor).unwrap();
+
+        // The state/trie frontier advances to block 1. Block 2 may already be persisted at the
+        // Finish frontier, but its execution state must remain in the overlay until trie
+        // persistence.
+        let new_anchor = blocks[0].recovered_block().hash();
+        manager.remove_blocks([new_anchor]);
+        assert!(!manager
+            .execution_overlays
+            .entries
+            .contains_key(&OverlayCacheKey { anchor_hash: old_anchor, tip_hash }));
+
+        manager.precompute_execution_overlay(tip_hash, new_anchor);
+
+        let key = OverlayCacheKey { anchor_hash: new_anchor, tip_hash };
+        let deadline = std::time::Instant::now() + Duration::from_secs(1);
+        let overlay = loop {
+            if let Some(overlay) = manager.execution_overlays.ready(&key) {
+                break overlay
+            }
+            assert!(std::time::Instant::now() < deadline, "new anchor overlay was not precomputed");
+            thread::sleep(Duration::from_millis(10));
+        };
+        assert_eq!(
+            overlay.block_hashes(),
+            blocks[1..].iter().map(|block| block.recovered_block().num_hash()).collect::<Vec<_>>(),
+        );
+        assert!(!overlay.accounts().contains_key(&Address::with_last_byte(1)));
+        for id in 2..=3 {
+            let address = Address::with_last_byte(id);
+            assert_eq!(overlay.accounts()[&address].as_ref().unwrap().nonce, id as u64);
+            assert_eq!(overlay.storage()[&address][&U256::from(id)], U256::from(id));
+        }
+        let cached = manager.execution_overlay_for_parent(tip_hash, new_anchor).unwrap();
+        assert!(Arc::ptr_eq(&overlay, &cached));
     }
 
     #[cfg(feature = "rayon")]

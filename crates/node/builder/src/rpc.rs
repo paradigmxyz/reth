@@ -16,11 +16,14 @@ use crate::{
     invalid_block_hook::InvalidBlockHookExt, txpool_prewarm, ConfigureEngineEvm,
     ConsensusEngineEvent, ConsensusEngineHandle,
 };
+use alloy_consensus::BlockHeader;
+use alloy_eips::BlockNumberOrTag;
 use alloy_rpc_types::engine::ClientVersionV1;
 use alloy_rpc_types_engine::ExecutionData;
+use futures::{Stream, StreamExt};
 use jsonrpsee::RpcModule;
 use parking_lot::Mutex;
-use reth_chain_state::CanonStateSubscriptions;
+use reth_chain_state::{CanonStateNotification, CanonStateSubscriptions};
 use reth_chainspec::{ChainSpecProvider, EthChainSpec, EthereumHardforks, Hardforks};
 use reth_node_api::{
     AddOnsContext, BlockTy, EngineApiValidator, EngineTypes, FullNodeComponents, FullNodeTypes,
@@ -32,11 +35,15 @@ use reth_node_core::{
     version::{version_metadata, CLIENT_CODE},
 };
 use reth_payload_builder::{PayloadBuilderHandle, PayloadStore};
+use reth_primitives_traits::NodePrimitives;
 use reth_rpc::{
     eth::{core::EthRpcConverterFor, DevSigner, EthApiTypes, FullEthApiServer},
     AdminApi,
 };
-use reth_rpc_api::{eth::helpers::EthTransactions, IntoEngineApiRpcModule};
+use reth_rpc_api::{
+    eth::helpers::{EthTransactions, GetBlockAccessList},
+    IntoEngineApiRpcModule,
+};
 use reth_rpc_builder::{
     auth::{AuthRpcModule, AuthServerHandle},
     config::RethRpcServerConfig,
@@ -1134,7 +1141,14 @@ where
         let Self { eth_api_builder, engine_api_builder, hooks, .. } = self;
 
         let engine_api = engine_api_builder.build_engine_api(&ctx).await?;
-        let AddOnsContext { node, config, beacon_engine_handle, jwt_secret, engine_events } = ctx;
+        let AddOnsContext {
+            node,
+            config,
+            beacon_engine_handle,
+            jwt_secret,
+            engine_events,
+            sender_recovery_cache,
+        } = ctx;
 
         info!(target: "reth::cli", "Engine API handler initialized");
 
@@ -1150,14 +1164,30 @@ where
             cache_new_blocks_task(c, new_canonical_blocks).await;
         });
 
+        let prewarm_bals = config
+            .rpc
+            .eth_config()
+            .cache
+            .prewarm_bals
+            .map(|count| (count, node.provider().canonical_state_stream()));
+
         let eth_config = config.rpc.eth_config().max_batch_size(config.txpool.max_batch_size());
         let ctx = EthApiCtx {
             components: &node,
             config: eth_config,
             cache,
             engine_handle: beacon_engine_handle.clone(),
+            sender_recovery_cache,
         };
         let eth_api = eth_api_builder.build_eth_api(ctx).await?;
+
+        if let Some((count, events)) = prewarm_bals {
+            node.task_executor().spawn_task(prewarm_new_block_bals_task(
+                eth_api.clone(),
+                events,
+                count,
+            ));
+        }
 
         let auth_config = config.rpc.auth_server_config(jwt_secret)?;
         let module_config = config.rpc.transport_rpc_module_config();
@@ -1326,6 +1356,8 @@ pub struct EthApiCtx<'a, N: FullNodeTypes> {
     pub config: EthConfig,
     /// Cache for eth state
     pub cache: EthStateCache<PrimitivesTy<N::Types>>,
+    /// Cache of recovered transaction senders shared by node components, if enabled.
+    pub sender_recovery_cache: Option<reth_evm::SenderRecoveryCache>,
     /// Handle to the beacon consensus engine
     pub engine_handle: ConsensusEngineHandle<<N::Types as NodeTypes>::Payload>,
 }
@@ -1337,6 +1369,8 @@ impl<'a, N: FullNodeComponents<Types: NodeTypes<ChainSpec: Hardforks + EthereumH
     pub fn eth_api_builder(self) -> reth_rpc::EthApiBuilder<N, EthRpcConverterFor<N>> {
         reth_rpc::EthApiBuilder::new_with_components(self.components.clone())
             .eth_cache(self.cache)
+            .sender_recovery_cache(self.sender_recovery_cache)
+            .eth_state_cache_config(self.config.cache)
             .task_spawner(self.components.task_executor().clone())
             .gas_cap(self.config.rpc_gas_cap.into())
             .max_simulate_blocks(self.config.rpc_max_simulate_blocks)
@@ -1656,4 +1690,152 @@ impl Default for EngineShutdown {
 pub struct EngineShutdownRequest {
     /// Channel to signal shutdown completion.
     pub done_tx: oneshot::Sender<()>,
+}
+
+/// Prewarms recent and new canonical blocks until a block includes a BAL hash.
+async fn prewarm_new_block_bals_task<EthApi: GetBlockAccessList, N: NodePrimitives>(
+    eth_api: EthApi,
+    mut events: impl Stream<Item = CanonStateNotification<N>> + Unpin,
+    startup_blocks: usize,
+) {
+    let mut startup = match eth_api.recovered_block(BlockNumberOrTag::Latest.into()).await {
+        Ok(Some(head)) => {
+            if head.block_access_list_hash().is_some() {
+                debug!(target: "reth::cli", block_hash = ?head.hash(), "Stopping BAL prewarming: native BALs available");
+                return;
+            }
+
+            // Leave the newest BALs in the cache if the startup range exceeds its capacity.
+            head.number().saturating_sub(startup_blocks as u64)..head.number()
+        }
+        Err(err) => {
+            debug!(target: "reth::cli", %err, "Failed to load head for BAL prewarming");
+            0..0
+        }
+        Ok(None) => 0..0,
+    }
+    .map(|number| number + 1);
+
+    loop {
+        tokio::select! {
+            // Observe new blocks (including native BAL activation) between startup replays.
+            biased;
+            Some(event) = events.next() => {
+                let committed = event.committed();
+                if let Some(block) = committed.blocks_iter().find(|block| block.block_access_list_hash().is_some()) {
+                    debug!(target: "reth::cli", block_hash = ?block.hash(), "Stopping BAL prewarming: native BALs available");
+                    return;
+                }
+
+                for block in committed.blocks_iter() {
+                    if let Err(err) = eth_api.get_block_access_list(block.hash().into()).await {
+                        debug!(
+                            target: "reth::cli",
+                            %err,
+                            block_hash = ?block.hash(),
+                            "Failed to prewarm BAL for canonical block",
+                        );
+                    }
+                }
+            }
+            Some(number) = async { startup.next() } => {
+                if let Err(err) = eth_api.get_block_access_list(number.into()).await {
+                    debug!(target: "reth::cli", %err, block_number = number, "Failed to prewarm BAL on startup");
+                }
+            }
+            else => break,
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use alloy_consensus::{Block, BlockBody, Header};
+    use alloy_primitives::B256;
+    use reth_evm_ethereum::EthEvmConfig;
+    use reth_network_api::noop::NoopNetwork;
+    use reth_primitives_traits::RecoveredBlock;
+    use reth_provider::{test_utils::MockEthProvider, Chain, ExecutionOutcome};
+    use reth_rpc::EthApiBuilder;
+    use reth_rpc_eth_types::EthStateCacheConfig;
+    use reth_transaction_pool::noop::NoopTransactionPool;
+
+    #[tokio::test]
+    async fn bal_prewarming_startup_range_and_native_stop() {
+        for (count, native, native_event) in [
+            (0, false, false),
+            (2, false, false),
+            (10, false, false),
+            (2, true, false),
+            (10, false, true),
+        ] {
+            let provider = MockEthProvider::default();
+            let blocks: Vec<_> = (0..=3)
+                .map(|number| {
+                    let block = RecoveredBlock::new_unhashed(
+                        Block {
+                            header: Header {
+                                number,
+                                block_access_list_hash: (native && number == 3)
+                                    .then_some(B256::ZERO),
+                                ..Default::default()
+                            },
+                            body: BlockBody::default(),
+                        },
+                        Vec::new(),
+                    );
+                    provider.add_block(block.hash(), block.clone_block());
+                    block
+                })
+                .collect();
+            let api = EthApiBuilder::new(
+                provider,
+                NoopTransactionPool::default(),
+                NoopNetwork::default(),
+                EthEvmConfig::mainnet(),
+            )
+            .eth_state_cache_config(EthStateCacheConfig {
+                prewarm_bals: Some(count),
+                ..Default::default()
+            })
+            .build();
+
+            let chain = Chain::new(
+                blocks.clone(),
+                ExecutionOutcome { receipts: vec![vec![]; blocks.len()], ..Default::default() },
+                Default::default(),
+            );
+            cache_new_blocks_task(
+                api.cache().clone(),
+                futures::stream::iter([reth_chain_state::CanonStateNotification::Commit {
+                    new: Arc::new(chain),
+                }]),
+            )
+            .await;
+            let events = futures::stream::iter(native_event.then(|| {
+                let mut block = blocks.last().unwrap().clone_block();
+                block.header.number += 1;
+                block.header.block_access_list_hash = Some(B256::ZERO);
+                CanonStateNotification::Commit {
+                    new: Arc::new(Chain::<reth_chain_state::EthPrimitives>::new(
+                        [RecoveredBlock::new_unhashed(block, Vec::new())],
+                        Default::default(),
+                        Default::default(),
+                    )),
+                }
+            }));
+            prewarm_new_block_bals_task(api.clone(), events, count).await;
+            for (number, block) in blocks.iter().enumerate() {
+                assert_eq!(
+                    api.cache().get_bal(block.hash()).await.unwrap().is_some(),
+                    !native &&
+                        !native_event &&
+                        number != 0 &&
+                        number > 3_usize.saturating_sub(count),
+                    "count={count}, native={native}, native_event={native_event}, block={number}",
+                );
+            }
+        }
+    }
 }

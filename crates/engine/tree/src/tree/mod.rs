@@ -6,7 +6,7 @@ use crate::{
     tree::{error::InsertPayloadError, payload_validator::TreeCtx},
 };
 use alloy_consensus::BlockHeader;
-use alloy_eips::{eip1898::BlockWithParent, merge::EPOCH_SLOTS, BlockNumHash, NumHash};
+use alloy_eips::{eip1898::BlockWithParent, BlockNumHash, NumHash};
 use alloy_primitives::{map::B256Map, B256};
 use alloy_rpc_types_engine::{
     ForkchoiceState, PayloadStatus, PayloadStatusEnum, PayloadValidationError,
@@ -96,17 +96,6 @@ pub use txpool_prewarm::{
 pub use types::{ExecutionEnv, ValidationOutcome, ValidationOutput};
 
 pub mod state;
-
-/// The largest gap for which the tree will be used to sync individual blocks by downloading them.
-///
-/// This is the default threshold, and represents the distance (gap) from the local head to a
-/// new (canonical) block, e.g. the forkchoice head block. If the block distance from the local head
-/// exceeds this threshold, the pipeline will be used to backfill the gap more efficiently.
-///
-/// E.g.: Local head `block.number` is 100 and the forkchoice head `block.number` is 133 (more than
-/// an epoch has slots), then this exceeds the threshold at which the pipeline should be used to
-/// backfill this gap.
-pub(crate) const MIN_BLOCKS_FOR_PIPELINE_RUN: u64 = EPOCH_SLOTS;
 
 /// The minimum number of blocks to retain in the changeset cache after eviction.
 ///
@@ -505,17 +494,14 @@ where
         self.incoming_tx.clone()
     }
 
-    /// How many blocks the canonical tip is ahead of the last persisted block. A large gap means
-    /// persistence is falling behind execution.
-    const fn persistence_gap(&self) -> u64 {
-        self.state
-            .tree_state
-            .canonical_block_number()
-            .saturating_sub(self.persistence_state.last_persisted_block.number)
+    /// How many canonical blocks are retained in memory. A large count means persistence is
+    /// falling behind execution.
+    fn persistence_gap(&self) -> u64 {
+        self.canonical_in_memory_state.canonical_chain().count() as u64
     }
 
     /// How many blocks beyond the configured in-memory buffer are awaiting persistence.
-    const fn persistence_backpressure_gap(&self) -> u64 {
+    fn persistence_backpressure_gap(&self) -> u64 {
         self.persistence_gap().saturating_sub(self.config.memory_block_buffer_target())
     }
 
@@ -523,7 +509,7 @@ where
     ///
     /// This is the case when persistence is already running and the number of blocks beyond the
     /// configured in-memory buffer has reached the configured threshold.
-    const fn should_backpressure(&self) -> bool {
+    fn should_backpressure(&self) -> bool {
         self.persistence_state.in_progress() &&
             self.persistence_backpressure_gap() >=
                 self.config.persistence_backpressure_threshold()
@@ -1256,6 +1242,10 @@ where
 
         trace!(target: "engine::tree", "fcu head hash is already canonical");
 
+        if !self.is_consistent_forkchoice_state(state, None)? {
+            return Ok(Some(TreeOutcome::new(OnForkChoiceUpdated::invalid_state())));
+        }
+
         // Update the safe and finalized blocks and ensure their values are valid
         if let Err(outcome) = self.ensure_consistent_forkchoice_state(state) {
             // safe or finalized hashes are invalid
@@ -1324,6 +1314,10 @@ where
                 return Ok(Some(TreeOutcome::new(OnForkChoiceUpdated::too_deep_reorg())));
             }
 
+            if !self.is_consistent_forkchoice_state(state, None)? {
+                return Ok(Some(TreeOutcome::new(OnForkChoiceUpdated::invalid_state())));
+            }
+
             // We need to effectively unwind the _canonical_ chain to the FCU's head, which is
             // part of the canonical chain. We need to update the latest block state to reflect
             // the canonical ancestor. This ensures that state providers and the transaction
@@ -1352,6 +1346,10 @@ where
 
         // Ensure we can apply a new chain update for the head block
         if let Some(chain_update) = self.on_new_head(state.head_block_hash)? {
+            if !self.is_consistent_forkchoice_state(state, Some(&chain_update))? {
+                return Ok(Some(TreeOutcome::new(OnForkChoiceUpdated::invalid_state())));
+            }
+
             let tip = chain_update.tip().clone_sealed_header();
             self.on_canonical_chain_update(chain_update);
 
@@ -1630,6 +1628,10 @@ where
                         let is_pending = self.state.tree_state.canonical_block_hash() ==
                             block.recovered_block().parent_hash();
                         self.state.tree_state.insert_executed(block.clone());
+                        self.metrics
+                            .engine
+                            .executed_blocks
+                            .set(self.state.tree_state.block_count() as f64);
 
                         if is_pending {
                             debug!(target: "engine::tree", pending=?block_num_hash, "updating pending block");
@@ -2320,10 +2322,20 @@ where
         }
 
         let finalized = self.state.forkchoice_state_tracker.last_valid_finalized();
-        self.remove_before(in_memory_persisted_block, finalized)?;
+        // Trim the canonical in-memory state first: state providers build their overlays from the
+        // canonical chain, so it must never reference blocks whose overlays the manager has
+        // already pruned. `remove_before` does not read the canonical in-memory state, so the
+        // order between the two trims is free to choose.
         self.canonical_in_memory_state.remove_persisted_blocks_until(
             self.persistence_state.last_persisted_block,
             in_memory_persisted_block.number,
+        );
+        self.remove_before(in_memory_persisted_block, finalized)?;
+        // Persistence changes the overlay anchor. Prepare the remaining canonical range before
+        // the next payload needs to read execution state against the new durable frontier.
+        self.state.tree_state.overlay_manager.precompute_execution_overlay(
+            self.state.tree_state.canonical_block_hash(),
+            in_memory_persisted_block.hash,
         );
         self.state.set_pending_sparse_trie_prune(self.should_prune_sparse_trie());
         Ok(())
@@ -2720,7 +2732,7 @@ where
     /// If the `local_tip` is greater than the `block`, then this will return false.
     #[inline]
     const fn exceeds_backfill_run_threshold(&self, local_tip: u64, block: u64) -> bool {
-        block > local_tip && block - local_tip > MIN_BLOCKS_FOR_PIPELINE_RUN
+        block > local_tip && block - local_tip > self.config.backfill_run_threshold()
     }
 
     /// Returns how far the local tip is from the given block. If the local tip is at the same
@@ -2935,6 +2947,7 @@ where
                 self.state.tree_state.insert_executed(block);
             }
         }
+        self.metrics.engine.executed_blocks.set(self.state.tree_state.block_count() as f64);
     }
 
     /// This handles downloaded blocks that are shown to be disconnected from the canonical chain.
@@ -3206,13 +3219,10 @@ where
 
         let start = Instant::now();
 
-        let ValidationOutput {
-            executed_block: executed,
-            execution_timing_stats: timing_stats,
-            raw_bal,
-        } = execute(&mut self.payload_validator, input, ctx)?;
+        let ValidationOutput { executed_block: executed, execution_timing_stats: timing_stats } =
+            execute(&mut self.payload_validator, input, ctx)?;
 
-        if let Some(raw_bal) = raw_bal {
+        if let Some(raw_bal) = executed.bal().map(|bal| bal.as_raw_bal().clone()) {
             let num_hash = executed.recovered_block().num_hash();
             if let Err(err) = self.provider.bal_store().insert(num_hash, raw_bal) {
                 warn!(
@@ -3353,17 +3363,81 @@ where
     }
 
     /// Attempts to find the header for the given block hash if it is canonical.
+    ///
+    /// A persisted header can still be found by hash while its disk reorg is pending, so it is
+    /// only canonical if it is not above the canonical head and matches the canonical hash at its
+    /// height. The in-memory canonical hash is preferred over the persisted one.
     pub fn find_canonical_header(
         &self,
         hash: B256,
     ) -> Result<Option<SealedHeader<N::BlockHeader>>, ProviderError> {
-        let mut canonical = self.canonical_in_memory_state.header_by_hash(hash);
-
-        if canonical.is_none() {
-            canonical = self.provider.header(hash)?.map(|header| SealedHeader::new(header, hash));
+        if let Some(header) = self.canonical_in_memory_state.header_by_hash(hash) {
+            return Ok(Some(header))
         }
 
-        Ok(canonical)
+        let Some(header) = self.provider.sealed_header_by_hash(hash)? else { return Ok(None) };
+        // Reorged-out headers remain on disk until persistence catches up, so reject old tips above
+        // the in-memory head and use in-memory hashes to reject old blocks at shared heights.
+        let number = header.number();
+        if number > self.canonical_in_memory_state.get_canonical_block_number() {
+            return Ok(None)
+        }
+        let canonical_hash =
+            if let Some(hash) = self.canonical_in_memory_state.hash_by_number(number) {
+                Some(hash)
+            } else {
+                self.provider.block_hash(number)?
+            };
+
+        Ok((canonical_hash == Some(hash)).then_some(header))
+    }
+
+    /// Checks that nonzero safe and finalized hashes belong to the chain defined by the FCU head.
+    ///
+    /// The [Engine API forkchoiceUpdated specification] requires `-38002` when a `VALID` head's
+    /// safe or finalized hash is outside that chain, and requires all forkchoice state updates to
+    /// be atomic. In direct FCU processing, this check must therefore run before canonicalizing
+    /// the head or updating either marker; checking only after canonicalization would leave an
+    /// invalid reorg applied.
+    ///
+    /// `chain_update` describes a proposed commit or reorg that has not yet been applied. Its new
+    /// blocks and the canonical prefix below its first block form the proposed chain. Without a
+    /// chain update, the proposed head is already canonical, so only canonical blocks through its
+    /// height are eligible. Canonical-prefix hashes are resolved via
+    /// [`Self::find_canonical_header`], which rejects stale persisted headers whose disk reorg
+    /// cleanup is pending. A zero safe or finalized hash leaves that marker unchanged.
+    /// Returns `Ok(false)` for an unknown or off-chain hash and propagates provider errors.
+    ///
+    /// [Engine API forkchoiceUpdated specification]: https://github.com/ethereum/execution-apis/blob/main/src/engine/paris.md#specification-1
+    fn is_consistent_forkchoice_state(
+        &self,
+        state: ForkchoiceState,
+        chain_update: Option<&NewCanonicalChain<N>>,
+    ) -> ProviderResult<bool> {
+        let canonical_head_number = match chain_update {
+            Some(chain_update) => {
+                let new = chain_update.new_blocks();
+                // Only the canonical prefix below the new branch remains on the proposed chain.
+                new.first().expect("non empty chain").block_number() - 1
+            }
+            None => {
+                let Some(head) = self.find_canonical_header(state.head_block_hash)? else {
+                    return Ok(false)
+                };
+                head.number()
+            }
+        };
+
+        for hash in [state.finalized_block_hash, state.safe_block_hash] {
+            if hash.is_zero() || chain_update.is_some_and(|update| update.contains(hash)) {
+                continue
+            }
+            let Some(header) = self.find_canonical_header(hash)? else { return Ok(false) };
+            if header.number() > canonical_head_number {
+                return Ok(false)
+            }
+        }
+        Ok(true)
     }
 
     /// Updates the tracked finalized block if we have it.
@@ -3553,6 +3627,7 @@ where
             self.persistence_state.last_persisted_block.hash,
             num,
         );
+        self.metrics.engine.executed_blocks.set(self.state.tree_state.block_count() as f64);
         Ok(())
     }
 }
@@ -3676,7 +3751,7 @@ enum PersistTarget {
 /// Result of waiting for caches to become available.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct CacheWaitDurations {
-    /// Time spent waiting for the execution cache lock.
+    /// Time spent waiting for the execution cache lock, excluding post-unlock cache destruction.
     pub execution_cache: Duration,
     /// Time spent waiting for the sparse trie lock.
     pub sparse_trie: Duration,
@@ -3684,8 +3759,8 @@ pub struct CacheWaitDurations {
 
 /// Trait for types that can wait for caches to become available.
 ///
-/// This is used by `reth_newPayload` endpoint to ensure that payload processing
-/// waits for any ongoing operations to complete before starting.
+/// Used by `reth_newPayload` to wait for cache updates before starting payload processing.
+/// Removed execution-cache allocations may still be destroyed concurrently after unlocking.
 pub trait WaitForCaches {
     /// Waits for cache updates to complete.
     ///

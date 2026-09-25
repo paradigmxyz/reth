@@ -268,7 +268,7 @@ async fn account_range_roundtrip_carries_slim_encoding_and_proof() {
     assert_eq!(returned.len(), expected.len());
     for (account, (expected_hash, expected_account)) in returned.iter().zip(&expected) {
         assert_eq!(&account.hash, expected_hash);
-        let decoded = account.trie_account().unwrap();
+        let decoded = account.trie_account();
         assert_eq!(decoded.nonce, expected_account.nonce);
         assert_eq!(decoded.balance, expected_account.balance);
         // Freshly generated EOAs have no storage/code, so the slim encoding elides both fields
