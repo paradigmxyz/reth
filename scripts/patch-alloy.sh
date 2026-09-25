@@ -29,7 +29,7 @@ while [[ $# -gt 0 ]]; do
             echo ""
             echo "Options:"
             echo "  --alloy <branch>  Patch alloy-rs/alloy crates"
-            echo "  --evm <branch>    Patch alloy-rs/evm crates (alloy-evm, alloy-op-evm)"
+            echo "  --evm <branch>    Patch alloy-rs/evm crates (alloy-evm)"
             exit 0
             ;;
         *)
@@ -101,7 +101,6 @@ if [[ -n "$ALLOY_EVM_BRANCH" ]]; then
     echo "Patching alloy-rs/evm with branch: $ALLOY_EVM_BRANCH"
     cat >> "$CARGO_TOML" << EOF
 alloy-evm = { git = "https://github.com/alloy-rs/evm", branch = "$ALLOY_EVM_BRANCH" }
-alloy-op-evm = { git = "https://github.com/alloy-rs/evm", branch = "$ALLOY_EVM_BRANCH" }
 EOF
 fi
 
