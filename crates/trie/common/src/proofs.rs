@@ -4,7 +4,6 @@ use crate::{
     BranchNodeMasks, BranchNodeMasksMap, Nibbles, ProofTrieNodeV2, TrieAccount, TrieNodeV2,
 };
 use alloc::{borrow::Cow, collections::VecDeque, vec::Vec};
-use alloy_consensus::constants::KECCAK_EMPTY;
 use alloy_primitives::{
     keccak256,
     map::{hash_map, B256Map, B256Set},
@@ -246,11 +245,7 @@ impl MultiProof {
                 nibbles.ends_with(&leaf.key)
             {
                 let account = TrieAccount::decode(&mut &leaf.value[..])?;
-                break 'info Some(Account {
-                    balance: account.balance,
-                    nonce: account.nonce,
-                    bytecode_hash: (account.code_hash != KECCAK_EMPTY).then_some(account.code_hash),
-                })
+                break 'info Some(Account::from(account))
             }
             None
         };
@@ -375,11 +370,7 @@ impl DecodedMultiProof {
                 nibbles.ends_with(&leaf.key)
             {
                 let account = TrieAccount::decode(&mut &leaf.value[..])?;
-                break 'info Some(Account {
-                    balance: account.balance,
-                    nonce: account.nonce,
-                    bytecode_hash: (account.code_hash != KECCAK_EMPTY).then_some(account.code_hash),
-                })
+                break 'info Some(Account::from(account))
             }
             None
         };
@@ -484,15 +475,8 @@ impl DecodedMultiProofV2 {
                 nibbles.ends_with(&leaf.key)
             {
                 let account = TrieAccount::decode(&mut &leaf.value[..])?;
-                break 'account (
-                    Some(Account {
-                        balance: account.balance,
-                        nonce: account.nonce,
-                        bytecode_hash: (account.code_hash != KECCAK_EMPTY)
-                            .then_some(account.code_hash),
-                    }),
-                    account.storage_root,
-                )
+                let storage_root = account.storage_root;
+                break 'account (Some(Account::from(account)), storage_root)
             }
             (None, EMPTY_ROOT_HASH)
         };
@@ -923,7 +907,7 @@ impl AccountProof {
         let (storage_root, info) = if nonce == 0 &&
             balance.is_zero() &&
             (storage_hash.is_zero() || storage_hash == EMPTY_ROOT_HASH) &&
-            (code_hash == KECCAK_EMPTY || code_hash.is_zero())
+            (code_hash == alloy_consensus::constants::KECCAK_EMPTY || code_hash.is_zero())
         {
             // Account does not exist in state. Return `None` here to prevent proof
             // verification.
@@ -1171,6 +1155,7 @@ pub mod triehash {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloy_consensus::constants::KECCAK_EMPTY;
     use alloy_trie::{
         nodes::{BranchNode, ExtensionNode, LeafNode, RlpNode},
         TrieMask,

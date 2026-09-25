@@ -726,9 +726,6 @@ where
         let account = db.basic(address).map_err(Eth::Error::from_eth_err)?;
         let Some(account) = account else { return Ok(None) };
 
-        let balance = account.balance;
-        let nonce = account.nonce;
-        let code_hash = account.code_hash;
         let (hashed_storage, status) = db
             .cache
             .accounts
@@ -749,7 +746,7 @@ where
             db.database.storage_root(address, hashed_storage).map_err(Eth::Error::from_eth_err)?
         };
 
-        Ok(Some(Account { balance, nonce, code_hash, storage_root }))
+        Ok(Some(reth_primitives_traits::Account::from(account).into_trie_account(storage_root)))
     }
 
     /// Retrieves the account's balance, nonce, and code from the given state.

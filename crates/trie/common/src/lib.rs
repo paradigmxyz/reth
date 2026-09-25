@@ -11,6 +11,9 @@
 
 extern crate alloc;
 
+// Used directly only by the `eip1186` feature and tests.
+use alloy_consensus as _;
+
 mod execution_witness;
 pub use execution_witness::ExecutionWitnessMode;
 
