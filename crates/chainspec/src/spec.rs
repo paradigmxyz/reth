@@ -272,12 +272,7 @@ pub fn create_chain_config(
     let block_num = |fork: EthereumHardfork| hardforks.fork(fork).block_number();
 
     // Helper to extract timestamp from a hardfork condition
-    let timestamp = |fork: EthereumHardfork| -> Option<u64> {
-        match hardforks.fork(fork) {
-            ForkCondition::Timestamp(t) => Some(t),
-            _ => None,
-        }
-    };
+    let timestamp = |fork: EthereumHardfork| hardforks.fork(fork).as_timestamp();
 
     // Extract TTD from Paris fork
     let (terminal_total_difficulty, terminal_total_difficulty_passed) =
@@ -352,9 +347,7 @@ pub fn blob_params_to_schedule(
     let bpo_forks = EthereumHardfork::bpo_variants();
     for (timestamp, blob_params) in &params.scheduled {
         for bpo_fork in bpo_forks {
-            if let ForkCondition::Timestamp(fork_ts) = hardforks.fork(bpo_fork) &&
-                fork_ts == *timestamp
-            {
+            if hardforks.fork(bpo_fork).as_timestamp() == Some(*timestamp) {
                 schedule.insert(bpo_fork.name().to_lowercase(), *blob_params);
                 break;
             }
@@ -532,7 +525,7 @@ impl<H: BlockHeader> ChainSpec<H> {
             self.genesis.base_fee_per_gas.map(|fee| fee as u64).unwrap_or(INITIAL_BASE_FEE);
 
         // If London is activated at genesis, we set the initial base fee as per EIP-1559.
-        self.hardforks.fork(EthereumHardfork::London).active_at_block(0).then_some(genesis_base_fee)
+        self.is_london_active_at_block(0).then_some(genesis_base_fee)
     }
 
     /// Get the [`BaseFeeParams`] for the chain at the given timestamp.
@@ -582,19 +575,16 @@ impl<H: BlockHeader> ChainSpec<H> {
         // Create an iterator with hardfork, condition, and optional blob metadata
         let hardforks_with_meta = self.hardforks.forks_iter().map(|(fork, condition)| {
             // Generate blob metadata for timestamp-based hardforks that have blob params
-            let metadata = match condition {
-                ForkCondition::Timestamp(timestamp) => {
-                    // Try to get blob params for this timestamp
-                    // This automatically handles all hardforks with blob support
-                    EthChainSpec::blob_params_at_timestamp(self, timestamp).map(|params| {
-                        format!(
-                            "blob: (target: {}, max: {}, fraction: {})",
-                            params.target_blob_count, params.max_blob_count, params.update_fraction
-                        )
-                    })
-                }
-                _ => None,
-            };
+            let metadata = condition.as_timestamp().and_then(|timestamp| {
+                // Try to get blob params for this timestamp
+                // This automatically handles all hardforks with blob support
+                EthChainSpec::blob_params_at_timestamp(self, timestamp).map(|params| {
+                    format!(
+                        "blob: (target: {}, max: {}, fraction: {})",
+                        params.target_blob_count, params.max_blob_count, params.update_fraction
+                    )
+                })
+            });
             (fork, condition, metadata)
         });
 

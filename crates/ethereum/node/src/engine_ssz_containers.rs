@@ -1451,9 +1451,7 @@ impl ssz::Decode for PayloadStatusWithWitness {
         let mut decoder = builder.build()?;
         let response =
             Self { payload_status: decoder.decode_next()?, witness: decoder.decode_next()? };
-        if response.witness.is_some() &&
-            !matches!(response.payload_status.status, PayloadStatusEnum::Valid)
-        {
+        if response.witness.is_some() && !response.payload_status.status.is_valid() {
             return Err(ssz::DecodeError::BytesInvalid(
                 "execution witness is only valid for VALID payload status".into(),
             ))

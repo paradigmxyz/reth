@@ -1,7 +1,7 @@
 //! Example tests using the test suite framework.
 
 use alloy_primitives::{Address, B256};
-use alloy_rpc_types_engine::{ForkchoiceState, PayloadAttributes, PayloadStatusEnum};
+use alloy_rpc_types_engine::{ForkchoiceState, PayloadAttributes};
 use eyre::Result;
 use reth_chainspec::{ChainSpecBuilder, MAINNET};
 use reth_e2e_test_utils::{
@@ -88,7 +88,7 @@ async fn test_apply_with_import() -> Result<()> {
                     None,
                 )
                 .await?;
-            if response.payload_status.status != PayloadStatusEnum::Syncing {
+            if !response.is_syncing() {
                 return expect_fcu_valid(&response, "imported head");
             }
             tokio::time::sleep(std::time::Duration::from_millis(100)).await;

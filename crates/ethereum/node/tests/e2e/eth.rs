@@ -659,7 +659,7 @@ async fn test_engine_ssz_proxy_returns_canonical_witness() -> eyre::Result<()> {
         .await?;
     assert_eq!(response.status(), reqwest::StatusCode::OK);
     let response = PayloadStatusWithWitness::from_ssz_bytes(&response.bytes().await?).unwrap();
-    assert!(matches!(response.payload_status.status, PayloadStatusEnum::Invalid { .. }));
+    assert!(response.payload_status.status.is_invalid());
     assert!(response.witness.is_none());
     invalid.payload.payload_inner.payload_inner.payload_inner.transactions =
         vec![alloy_primitives::Bytes::from_static(&[2])];
@@ -797,11 +797,7 @@ async fn test_engine_ssz_request_validation() -> eyre::Result<()> {
     let url = auth.http_url();
     let jwt = secret_to_bearer_header(auth.jwt_secret());
     let client = reqwest::Client::new();
-    let state = ForkchoiceState {
-        head_block_hash: chain.genesis_hash(),
-        safe_block_hash: chain.genesis_hash(),
-        finalized_block_hash: chain.genesis_hash(),
-    };
+    let state = ForkchoiceState::same_hash(chain.genesis_hash());
     for (fork, withdrawals, expected_error) in [
         ("cancun", 0, Some("unsupported-fork")),
         ("osaka", 0, Some("unsupported-fork")),
@@ -837,7 +833,7 @@ async fn test_engine_ssz_request_validation() -> eyre::Result<()> {
             assert_eq!(response.status(), reqwest::StatusCode::OK);
             let fcu =
                 SszForkchoiceUpdateResponse::from_ssz_bytes(&response.bytes().await?).unwrap();
-            assert!(matches!(fcu.payload_status.status, PayloadStatusEnum::Valid));
+            assert!(fcu.payload_status.status.is_valid());
             let id = fcu.payload_id.into_option().unwrap();
             let response = client
                 .get(format!("{url}{ENGINE_PAYLOADS_ROUTE}/{id}"))
