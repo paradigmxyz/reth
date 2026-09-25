@@ -2,41 +2,34 @@ use alloy_genesis::Genesis;
 use alloy_primitives::{b256, hex, Address};
 use futures::StreamExt;
 use reth_chainspec::ChainSpec;
+use reth_e2e_test_utils::E2ETestSetupExt;
 use reth_node_api::{BlockBody, FullNodeComponents};
-use reth_node_builder::{rpc::RethRpcAddOns, FullNode, NodeBuilder, NodeConfig, NodeHandle};
-use reth_node_core::args::DevArgs;
-use reth_node_ethereum::{node::EthereumAddOns, EthereumNode};
+use reth_node_builder::{rpc::RethRpcAddOns, FullNode};
+use reth_node_ethereum::EthereumNode;
 use reth_primitives_traits::transaction::TxHashRef;
-use reth_provider::{
-    providers::BlockchainProvider, BlockIdReader, BlockNumReader, CanonStateSubscriptions,
-};
+use reth_provider::{BlockIdReader, BlockNumReader, CanonStateSubscriptions};
 use reth_rpc_eth_api::{helpers::EthTransactions, EthApiServer};
-use reth_tasks::Runtime;
 use std::{num::NonZeroUsize, sync::Arc, time::Duration};
 
 #[tokio::test]
 async fn can_run_dev_node() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
-    let runtime = Runtime::test();
 
-    let node_config = NodeConfig::test().with_chain(custom_chain()).with_dev(DevArgs {
-        dev: true,
-        finality_depth: NonZeroUsize::new(1).unwrap(),
-        ..Default::default()
-    });
-    let NodeHandle { node, .. } = NodeBuilder::new(node_config.clone())
-        .testing_node(runtime.clone())
-        .with_types_and_provider::<EthereumNode, BlockchainProvider<_>>()
-        .with_components(EthereumNode::components())
-        .with_add_ons(EthereumAddOns::default())
-        .launch_with_debug_capabilities()
+    let (node, _) = EthereumNode::test_setup(1, custom_chain())
+        .with_dev_mining(None)
+        .with_node_config_modifier(|mut config| {
+            config.dev.finality_depth = NonZeroUsize::new(1).unwrap();
+            config
+        })
+        .build_single()
         .await?;
+    let node = &node.inner;
 
     let canon_state = node.provider.canonical_in_memory_state();
     let mut safe_block = canon_state.subscribe_safe_block();
     let mut finalized_block = canon_state.subscribe_finalized_block();
 
-    assert_chain_advances(&node).await;
+    assert_chain_advances(node).await;
 
     let chain_info = node.provider.chain_info()?;
     // Startup can leave an unread genesis notification, and the canonical head notification
@@ -63,25 +56,19 @@ async fn can_run_dev_node() -> eyre::Result<()> {
 #[tokio::test]
 async fn can_run_dev_node_custom_attributes() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
-    let runtime = Runtime::test();
 
-    let node_config = NodeConfig::test()
-        .with_chain(custom_chain())
-        .with_dev(DevArgs { dev: true, ..Default::default() });
     let fee_recipient = Address::random();
-    let NodeHandle { node, .. } = NodeBuilder::new(node_config.clone())
-        .testing_node(runtime.clone())
-        .with_types_and_provider::<EthereumNode, BlockchainProvider<_>>()
-        .with_components(EthereumNode::components())
-        .with_add_ons(EthereumAddOns::default())
-        .launch_with_debug_capabilities()
-        .map_debug_payload_attributes(move |mut attributes| {
+    let (node, _) = EthereumNode::test_setup(1, custom_chain())
+        .with_dev_mining(None)
+        .map_dev_payload_attributes(move |mut attributes| {
             attributes.suggested_fee_recipient = fee_recipient;
             attributes
         })
+        .build_single()
         .await?;
+    let node = &node.inner;
 
-    assert_chain_advances(&node).await;
+    assert_chain_advances(node).await;
 
     assert!(
         node.rpc_registry.eth_api().balance(fee_recipient, Default::default()).await.unwrap() > 0
@@ -98,6 +85,27 @@ async fn can_run_dev_node_custom_attributes() -> eyre::Result<()> {
             .beneficiary ==
             fee_recipient
     );
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn can_run_dev_node_with_block_time() -> eyre::Result<()> {
+    reth_tracing::init_test_tracing();
+
+    let (node, _) = EthereumNode::test_setup(1, custom_chain())
+        .with_dev_mining(Some(Duration::from_millis(100)))
+        .build_single()
+        .await?;
+
+    // The local miner builds a block on every interval, even without pending transactions.
+    tokio::time::timeout(Duration::from_secs(10), async {
+        while node.inner.provider.best_block_number()? < 2 {
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+        eyre::Ok(())
+    })
+    .await??;
 
     Ok(())
 }

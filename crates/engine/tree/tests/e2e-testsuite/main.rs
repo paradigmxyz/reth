@@ -8,8 +8,9 @@ use alloy_rpc_types_engine::{
 };
 use eyre::Result;
 use futures::future::BoxFuture;
-use reth_chainspec::{ChainSpecBuilder, MAINNET};
+use reth_chainspec::EthereumHardfork;
 use reth_e2e_test_utils::{
+    test_chain_spec,
     testsuite::{
         actions::{
             Action, AssertChainTip, BlockReference, CaptureBlock, CompareNodeChainTips, CreateFork,
@@ -26,10 +27,7 @@ use reth_e2e_test_utils::{
 use reth_engine_tree::tree::TreeConfig;
 use reth_ethereum_engine_primitives::EthEngineTypes;
 use reth_node_ethereum::EthereumNode;
-use std::{
-    sync::Arc,
-    time::{Duration, Instant},
-};
+use std::time::{Duration, Instant};
 use tokio::time::sleep;
 
 /// Waits for in-flight persistence by resubmitting the latest built payload to a node.
@@ -261,18 +259,7 @@ impl Action<EthEngineTypes> for WaitForPersistedChain {
 /// Uses the node's default storage mode.
 fn default_engine_tree_setup() -> Setup<EthEngineTypes> {
     Setup::default()
-        .with_chain_spec(Arc::new(
-            ChainSpecBuilder::default()
-                .chain(MAINNET.chain)
-                .genesis(
-                    serde_json::from_str(include_str!(
-                        "../../../../e2e-test-utils/src/testsuite/assets/genesis.json"
-                    ))
-                    .unwrap(),
-                )
-                .cancun_activated()
-                .build(),
-        ))
+        .with_chain_spec(test_chain_spec(EthereumHardfork::Cancun))
         .with_network(NetworkSetup::single_node())
         .with_tree_config(TreeConfig::default().with_has_enough_parallelism(true))
 }
@@ -516,18 +503,7 @@ async fn test_engine_tree_buffered_blocks_are_eventually_connected_e2e() -> Resu
     let test = TestBuilder::new()
         .with_setup(
             Setup::default()
-                .with_chain_spec(Arc::new(
-                    ChainSpecBuilder::default()
-                        .chain(MAINNET.chain)
-                        .genesis(
-                            serde_json::from_str(include_str!(
-                                "../../../../e2e-test-utils/src/testsuite/assets/genesis.json"
-                            ))
-                            .unwrap(),
-                        )
-                        .cancun_activated()
-                        .build(),
-                ))
+                .with_chain_spec(test_chain_spec(EthereumHardfork::Cancun))
                 .with_network(NetworkSetup::multi_node_unconnected(2)) // Need 2 disconnected nodes
                 .with_tree_config(TreeConfig::default().with_has_enough_parallelism(true)),
         )
@@ -609,18 +585,7 @@ async fn test_engine_tree_live_sync_transition_eventually_canonical_e2e() -> Res
     let test = TestBuilder::new()
         .with_setup(
             Setup::default()
-                .with_chain_spec(Arc::new(
-                    ChainSpecBuilder::default()
-                        .chain(MAINNET.chain)
-                        .genesis(
-                            serde_json::from_str(include_str!(
-                                "../../../../e2e-test-utils/src/testsuite/assets/genesis.json"
-                            ))
-                            .unwrap(),
-                        )
-                        .cancun_activated()
-                        .build(),
-                ))
+                .with_chain_spec(test_chain_spec(EthereumHardfork::Cancun))
                 .with_network(NetworkSetup::multi_node(2)) // Two connected nodes
                 .with_tree_config(TreeConfig::default().with_has_enough_parallelism(true)),
         )
@@ -670,18 +635,7 @@ async fn test_engine_tree_pipeline_sync_catches_up_masked_state_e2e() -> Result<
     let test = TestBuilder::new()
         .with_setup(
             Setup::default()
-                .with_chain_spec(Arc::new(
-                    ChainSpecBuilder::default()
-                        .chain(MAINNET.chain)
-                        .genesis(
-                            serde_json::from_str(include_str!(
-                                "../../../../e2e-test-utils/src/testsuite/assets/genesis.json"
-                            ))
-                            .unwrap(),
-                        )
-                        .cancun_activated()
-                        .build(),
-                ))
+                .with_chain_spec(test_chain_spec(EthereumHardfork::Cancun))
                 .with_network(NetworkSetup::multi_node(2))
                 .with_storage_v2(true)
                 .with_tree_config(
@@ -821,18 +775,7 @@ async fn test_engine_tree_fcu_extends_canon_chain_v2_e2e() -> Result<()> {
 /// on the chain lengths and not on how fast persistence keeps up with block production.
 fn disk_reorg_setup(storage_v2: bool) -> Setup<EthEngineTypes> {
     Setup::default()
-        .with_chain_spec(Arc::new(
-            ChainSpecBuilder::default()
-                .chain(MAINNET.chain)
-                .genesis(
-                    serde_json::from_str(include_str!(
-                        "../../../../e2e-test-utils/src/testsuite/assets/genesis.json"
-                    ))
-                    .unwrap(),
-                )
-                .cancun_activated()
-                .build(),
-        ))
+        .with_chain_spec(test_chain_spec(EthereumHardfork::Cancun))
         .with_network(NetworkSetup::multi_node_unconnected(2))
         .with_storage_v2(storage_v2)
         .with_tree_config(
