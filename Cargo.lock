@@ -8609,6 +8609,7 @@ dependencies = [
  "reth-chainspec",
  "reth-consensus",
  "reth-db",
+ "reth-db-api",
  "reth-db-common",
  "reth-e2e-test-utils",
  "reth-engine-primitives",
