@@ -851,7 +851,7 @@ mod tests {
             nonce: 42,
             code_hash: B256::random(),
             code: Some(Bytecode::new_raw(Bytes::from(vec![1, 2]))),
-            account_id: None,
+            ..Default::default()
         };
 
         let mut storage = StorageWithOriginalValues::default();
@@ -957,7 +957,7 @@ mod tests {
             nonce: 1,
             code_hash: B256::random(),
             code: None,
-            account_id: None,
+            ..Default::default()
         };
 
         // Create hashed accounts with addresses.
@@ -1275,7 +1275,7 @@ mod tests {
     #[test]
     fn test_hashed_post_state_sorted_disjointed_merge_batch() {
         fn account(nonce: u64) -> Account {
-            Account { nonce, balance: U256::ZERO, bytecode_hash: None }
+            Account { nonce, ..Default::default() }
         }
 
         let kept_account = B256::with_last_byte(1);
@@ -1358,7 +1358,7 @@ mod tests {
     #[test]
     fn test_hashed_post_state_sorted_disjointed_merge_batch_removes_overlapping_batch_key() {
         fn account(nonce: u64) -> Account {
-            Account { nonce, balance: U256::ZERO, bytecode_hash: None }
+            Account { nonce, ..Default::default() }
         }
 
         let overlapping_account = B256::with_last_byte(21);
@@ -1384,7 +1384,7 @@ mod tests {
     #[test]
     fn test_hashed_post_state_sorted_disjointed_merge_batch_keeps_equal_overlaps() {
         fn account(nonce: u64) -> Account {
-            Account { nonce, balance: U256::ZERO, bytecode_hash: None }
+            Account { nonce, ..Default::default() }
         }
 
         let address = B256::with_last_byte(21);
@@ -1542,7 +1542,7 @@ mod tests {
 
         let state = HashedPostState {
             accounts: B256Map::from_iter([
-                (addr1, Some(Account { nonce: 1, balance: U256::from(100), bytecode_hash: None })),
+                (addr1, Some(Account { nonce: 1, balance: U256::from(100), ..Default::default() })),
                 (addr2, None),
                 (addr3, Some(Account::default())),
             ]),

@@ -335,7 +335,7 @@ fn verify_proof(
 #[cfg(test)]
 mod tests {
     use super::{request::MAX_RETRIES, test_utils::TestSnapClient, *};
-    use alloy_primitives::{Bytes, KECCAK256_EMPTY, U256};
+    use alloy_primitives::{Bytes, U256};
     use reth_eth_wire_types::snap::ByteCodesMessage;
     use reth_network_p2p::{error::PeerRequestResult, priority::Priority};
     use reth_network_peers::WithPeerId;
@@ -349,12 +349,7 @@ mod tests {
     }
 
     fn account(nonce: u64) -> TrieAccount {
-        TrieAccount {
-            nonce,
-            balance: U256::from(1),
-            storage_root: EMPTY_ROOT_HASH,
-            code_hash: KECCAK256_EMPTY,
-        }
+        TrieAccount { nonce, balance: U256::from(1), ..Default::default() }
     }
 
     fn root(accounts: &[(B256, TrieAccount)]) -> B256 {

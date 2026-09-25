@@ -19,6 +19,7 @@ use reth_e2e_test_utils::{
 };
 use reth_node_api::TreeConfig;
 use reth_node_ethereum::{EthEngineTypes, EthereumNode};
+use reth_provider::{DatabaseProviderFactory, MetadataProvider, StorageSettings};
 use std::sync::Arc;
 use tempfile::TempDir;
 use tracing::debug;
@@ -294,8 +295,10 @@ async fn test_testsuite_deep_reorg() -> Result<()> {
         .with_action(CreateFork::<EthEngineTypes>::new(1, 1))
         .with_action(CaptureBlock::new("blockA_height2"))
         .with_action(MakeCanonical::new())
-        // receive newPayload with block hash B and height 2
+        // send forkchoiceUpdated back to block 1. Building block A finalized block 1, and a
+        // canonical ancestor at the finalized block is accepted without unwinding the chain.
         .with_action(ReorgTo::<EthEngineTypes>::new_from_tag("block1"))
+        // receive newPayload with block hash B and height 2
         .with_action(CreateFork::<EthEngineTypes>::new(1, 1))
         .with_action(CaptureBlock::new("blockB_height2"))
         // receive forkchoiceUpdated with block hash B as head
@@ -387,6 +390,41 @@ async fn test_setup_builder_with_custom_tree_config() -> Result<()> {
 
     let genesis_hash = nodes[0].block_hash(0);
     assert_ne!(genesis_hash, B256::ZERO);
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_setup_builder_with_storage_v2() -> Result<()> {
+    reth_tracing::init_test_tracing();
+
+    let chain_spec = Arc::new(
+        ChainSpecBuilder::default()
+            .chain(MAINNET.chain)
+            .genesis(
+                serde_json::from_str(include_str!(
+                    "../../../../crates/e2e-test-utils/src/testsuite/assets/genesis.json"
+                ))
+                .unwrap(),
+            )
+            .cancun_activated()
+            .build(),
+    );
+
+    for storage_v2 in [false, true] {
+        // A node config modifier set afterwards must not reset the storage mode.
+        let (nodes, _wallet) =
+            E2ETestSetupBuilder::<EthereumNode, _>::new(1, chain_spec.clone(), |_| {
+                PayloadAttributes::default()
+            })
+            .with_storage_v2(storage_v2)
+            .with_node_config_modifier(|config| config.set_dev(true))
+            .build()
+            .await?;
+
+        let provider = nodes[0].inner.provider.database_provider_ro()?;
+        assert_eq!(provider.storage_settings()?, Some(StorageSettings { storage_v2 }));
+    }
 
     Ok(())
 }

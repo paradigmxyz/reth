@@ -19,7 +19,7 @@ use alloy_primitives::{
     Address, BlockHash, BlockNumber, Bytes, StorageKey, StorageValue, TxHash, TxNumber, B256, U256,
 };
 use parking_lot::Mutex;
-use reth_chain_state::{CanonStateNotifications, CanonStateSubscriptions};
+use reth_chain_state::{CanonStateNotifications, CanonStateSubscriptions, ExecutedBlock};
 use reth_chainspec::{ChainInfo, EthChainSpec};
 use reth_db::transaction::DbTx;
 use reth_db_api::{
@@ -27,7 +27,7 @@ use reth_db_api::{
     models::{AccountBeforeTx, StorageSettings, StoredBlockBodyIndices},
 };
 use reth_ethereum_primitives::EthPrimitives;
-use reth_execution_types::ExecutionOutcome;
+use reth_execution_types::{ExecutionOutcome, RecoveredBlockAndExecutionOutput};
 use reth_primitives_traits::{
     Account, Block, BlockBody, Bytecode, GotExpected, NodePrimitives, RecoveredBlock, SealedHeader,
     SignerRecoverable, StorageEntry,
@@ -473,7 +473,7 @@ impl ExtendedAccount {
     /// Create new instance of extended account
     pub fn new(nonce: u64, balance: U256) -> Self {
         Self {
-            account: Account { nonce, balance, bytecode_hash: None },
+            account: Account { nonce, balance, ..Default::default() },
             bytecode: None,
             storage: Default::default(),
         }
@@ -935,13 +935,13 @@ impl<T: NodePrimitives, ChainSpec: EthChainSpec + Send + Sync + 'static> BlockRe
         }
     }
 
-    fn pending_block(&self) -> ProviderResult<Option<RecoveredBlock<Self::Block>>> {
+    fn pending_block(&self) -> ProviderResult<Option<Arc<RecoveredBlock<Self::Block>>>> {
         Ok(None)
     }
 
     fn pending_block_and_receipts(
         &self,
-    ) -> ProviderResult<Option<(RecoveredBlock<Self::Block>, Vec<T::Receipt>)>> {
+    ) -> ProviderResult<Option<RecoveredBlockAndExecutionOutput<Self::Block, T::Receipt>>> {
         Ok(None)
     }
 
@@ -1223,9 +1223,19 @@ impl<T: NodePrimitives, ChainSpec: Send + Sync> StorageSettingsCache
 impl<T: NodePrimitives, ChainSpec: EthChainSpec + Send + Sync + 'static> StateProviderFactory
     for MockEthProvider<T, ChainSpec>
 {
+    type Primitives = T;
+
     fn latest(&self) -> ProviderResult<StateProviderBox> {
         self.ensure_snap_state_reads_succeed()?;
         Ok(Box::new(self.clone()))
+    }
+
+    fn state_with_block_appended(
+        &self,
+        _parent_hash: BlockHash,
+        _block: ExecutedBlock<T>,
+    ) -> ProviderResult<StateProviderBox> {
+        Err(ProviderError::UnsupportedProvider)
     }
 
     fn state_by_block_number_or_tag(
@@ -1360,6 +1370,8 @@ impl<T: NodePrimitives, ChainSpec: Send + Sync> StateReader for MockEthProvider<
 impl<T: NodePrimitives, ChainSpec: Send + Sync> CanonStateSubscriptions
     for MockEthProvider<T, ChainSpec>
 {
+    type Primitives = T;
+
     fn subscribe_to_canonical_state(&self) -> CanonStateNotifications<T> {
         broadcast::channel(1).1
     }

@@ -49,7 +49,7 @@ use reth_db_common::init::{
 };
 use reth_downloaders::{bodies::noop::NoopBodiesDownloader, headers::noop::NoopHeaderDownloader};
 use reth_engine_local::MiningMode;
-use reth_evm::{noop::NoopEvmConfig, ConfigureEvm};
+use reth_evm::{noop::NoopEvmConfig, ConfigureEvm, SenderRecoveryCache};
 use reth_exex::ExExManagerHandle;
 use reth_fs_util as fs;
 use reth_network_p2p::headers::client::HeadersClient;
@@ -71,10 +71,10 @@ use reth_node_metrics::{
 };
 use reth_provider::{
     providers::{NodeTypesForProvider, ProviderNodeTypes, RocksDBProvider, StaticFileProvider},
-    BalConfig, BalStoreHandle, BlockHashReader, BlockNumReader, DBProvider,
-    DatabaseProviderFactory, InMemoryBalStore, MetadataProvider, MetadataWriter, ProviderError,
-    ProviderFactory, ProviderResult, RocksDBProviderFactory, StageCheckpointReader,
-    StaticFileProviderBuilder, StaticFileProviderFactory, StorageSettingsCache,
+    BalStoreHandle, BlockHashReader, BlockNumReader, DBProvider, DatabaseProviderFactory,
+    MetadataProvider, MetadataWriter, ProviderError, ProviderFactory, ProviderResult,
+    RocksDBBalStore, RocksDBProviderFactory, StageCheckpointReader, StaticFileProviderBuilder,
+    StaticFileProviderFactory, StorageSettingsCache,
 };
 use reth_prune::{PruneMode, PruneModes, PrunerBuilder};
 use reth_rpc_builder::config::RethRpcServerConfig;
@@ -522,14 +522,15 @@ where
                 .build()?
         };
 
-        let balstore_cache_size = self
+        let bal_store = self
             .node_config()
             .db
             .balstore_cache_size
-            .unwrap_or(BalConfig::DEFAULT_IN_MEMORY_RETENTION_DISTANCE);
-        let bal_store = BalStoreHandle::new(InMemoryBalStore::new(
-            BalConfig::with_in_memory_retention_distance(balstore_cache_size),
-        ));
+            .map(|distance| {
+                RocksDBBalStore::with_buffer_retention_distance(rocksdb_provider.clone(), distance)
+            })
+            .unwrap_or_else(|| RocksDBBalStore::new(rocksdb_provider.clone()));
+        let bal_store = BalStoreHandle::new(bal_store);
         let factory = ProviderFactory::new(
             self.right().clone(),
             self.chain_spec(),
@@ -945,6 +946,7 @@ where
             },
             node_adapter,
             head,
+            sender_recovery_cache: builder_ctx.sender_recovery_cache().cloned(),
         };
 
         let ctx = LaunchContextWith {
@@ -1005,6 +1007,11 @@ where
     /// Returns mutable reference to the configured `NodeAdapter`.
     pub const fn node_adapter_mut(&mut self) -> &mut NodeAdapter<T, CB::Components> {
         &mut self.right_mut().node_adapter
+    }
+
+    /// Returns the cache of recovered transaction senders shared by node components, if enabled.
+    pub const fn sender_recovery_cache(&self) -> Option<&SenderRecoveryCache> {
+        self.right().sender_recovery_cache.as_ref()
     }
 
     /// Returns a reference to the blockchain provider.
@@ -1370,6 +1377,8 @@ where
     db_provider_container: WithMeteredProvider<NodeTypesWithDBAdapter<T::Types, T::DB>>,
     node_adapter: NodeAdapter<T, CB::Components>,
     head: Head,
+    /// Cache of recovered transaction senders shared by node components, if enabled.
+    sender_recovery_cache: Option<SenderRecoveryCache>,
 }
 
 /// Returns the metrics hooks for the node.

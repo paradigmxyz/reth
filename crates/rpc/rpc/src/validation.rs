@@ -1,3 +1,4 @@
+use self::blob_cache::BlobValidationCache;
 use alloy_consensus::{
     BlobTransactionValidationError, BlockHeader, EnvKzgSettings, Transaction, TxReceipt,
 };
@@ -22,7 +23,7 @@ use reth_consensus::{Consensus, FullConsensus};
 use reth_consensus_common::validation::MAX_RLP_BLOCK_SIZE;
 use reth_engine_primitives::PayloadValidator;
 use reth_errors::{BlockExecutionError, ConsensusError, ProviderError};
-use reth_evm::{execute::Executor, ConfigureEvm};
+use reth_evm::{execute::Executor, ConfigureEvm, SenderRecoveryCache};
 use reth_execution_types::BlockExecutionOutput;
 use reth_metrics::{
     metrics,
@@ -31,18 +32,23 @@ use reth_metrics::{
 };
 use reth_node_api::{NewPayloadError, PayloadTypes};
 use reth_primitives_traits::{
-    BlockBody, GotExpected, NodePrimitives, RecoveredBlock, SealedBlock, SealedHeaderFor,
+    block::error::SealedBlockRecoveryError, BlockBody, GotExpected, NodePrimitives, RecoveredBlock,
+    SealedBlock, SealedHeaderFor,
 };
 use reth_revm::{cached::CachedReads, database::StateProviderDatabase};
 use reth_rpc_api::BlockSubmissionValidationApiServer;
 use reth_rpc_server_types::result::{internal_rpc_err, invalid_params_rpc_err};
-use reth_storage_api::{BlockReaderIdExt, HashedPostStateProvider, StateProviderFactory};
+use reth_storage_api::{
+    BlockReaderIdExt, HashedPostStateProvider, StateProvider, StateProviderFactory,
+};
 use reth_tasks::Runtime;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::sync::Arc;
 use tokio::sync::{oneshot, RwLock};
 use tracing::warn;
+
+mod blob_cache;
 
 /// The type that implements the `validation` rpc namespace trait
 #[derive(Clone, Debug, derive_more::Deref)]
@@ -57,6 +63,9 @@ where
     T: PayloadTypes,
 {
     /// Create a new instance of the [`ValidationApi`]
+    ///
+    /// If a `sender_recovery_cache` is given, the senders of submitted blocks are recovered
+    /// through it, reusing senders that other node components have already recovered.
     pub fn new(
         provider: Provider,
         consensus: Arc<dyn FullConsensus<E::Primitives>>,
@@ -66,6 +75,7 @@ where
         payload_validator: Arc<
             dyn PayloadValidator<T, Block = <E::Primitives as NodePrimitives>::Block>,
         >,
+        sender_recovery_cache: Option<SenderRecoveryCache>,
     ) -> Self {
         let ValidationApiConfig { disallow, validation_window } = config;
 
@@ -77,7 +87,9 @@ where
             disallow,
             validation_window,
             cached_state: Default::default(),
+            validated_blobs: Default::default(),
             task_spawner,
+            sender_recovery_cache,
             metrics: Default::default(),
         });
 
@@ -196,7 +208,8 @@ where
         let mut request_cache = self.cached_reads(parent_header_hash).await;
 
         let (output, block_access_list_hash) = {
-            let cached_db = request_cache.as_db_mut(StateProviderDatabase::new(&state_provider));
+            let cached_db = request_cache
+                .as_db_mut(StateProviderDatabase::new((&state_provider).into_evm_state_provider()));
             let mut executor = self.evm_config.batch_executor(cached_db);
 
             let result = executor.execute_one(&block)?;
@@ -364,16 +377,42 @@ where
     }
 
     /// Validates the given [`BlobsBundleV2`] and returns versioned hashes for blobs.
+    ///
+    /// Exact blob, commitment, and cell-proof matches from recent submissions reuse KZG
+    /// validation. The resulting hashes are still checked against the block's EIP-4844
+    /// transactions during payload validation.
     pub fn validate_blobs_bundle_v2(
         &self,
         blobs_bundle: BlobsBundleV2,
     ) -> Result<Vec<B256>, ValidationApiError> {
-        let versioned_hashes = blobs_bundle.versioned_hashes();
-        let sidecar =
-            blobs_bundle.try_into_sidecar().map_err(|_| ValidationApiError::InvalidBlobsBundle)?;
+        self.validated_blobs.validate(blobs_bundle)
+    }
 
-        sidecar.validate(&versioned_hashes, EnvKzgSettings::default().get())?;
-        Ok(versioned_hashes)
+    /// Converts the payload into a block and recovers the transaction senders.
+    ///
+    /// Like the engine's `newPayload` handling, this leaves payload validation and conversion to
+    /// the payload validator and recovers senders through the shared [`SenderRecoveryCache`] if
+    /// one is configured, so senders already recovered on transaction ingress or payload
+    /// execution are reused. Without a cache, this calls
+    /// [`PayloadValidator::ensure_well_formed_payload`] so validator overrides are preserved.
+    ///
+    /// Senders recovered here are cached before the block is validated. Competing submissions for
+    /// the same slot share most of their transactions, so the senders are likely to be needed again
+    /// even if this submission is rejected, and only successfully recovered senders can be cached.
+    fn recover_payload(
+        &self,
+        payload: ExecutionData,
+    ) -> Result<RecoveredBlock<<E::Primitives as NodePrimitives>::Block>, ValidationApiError> {
+        let Some(cache) = &self.sender_recovery_cache else {
+            return self.payload_validator.ensure_well_formed_payload(payload).map_err(Into::into)
+        };
+
+        let block = self.payload_validator.convert_payload_to_block(payload)?;
+        let recovered = match cache.recover_signers(block.body().transactions()) {
+            Ok(senders) => Ok(RecoveredBlock::new_sealed(block, senders)),
+            Err(_) => Err(SealedBlockRecoveryError::new(block)),
+        };
+        recovered.map_err(|err| NewPayloadError::Other(err.into()).into())
     }
 
     /// Core logic for validating the builder submission v3
@@ -381,7 +420,7 @@ where
         &self,
         request: BuilderBlockValidationRequestV3,
     ) -> Result<(), ValidationApiError> {
-        let block = self.payload_validator.ensure_well_formed_payload(ExecutionData {
+        let block = self.recover_payload(ExecutionData {
             payload: ExecutionPayload::V3(request.request.execution_payload),
             sidecar: ExecutionPayloadSidecar::v3(CancunPayloadFields {
                 parent_beacon_block_root: request.parent_beacon_block_root,
@@ -403,7 +442,7 @@ where
         &self,
         request: BuilderBlockValidationRequestV4,
     ) -> Result<(), ValidationApiError> {
-        let block = self.payload_validator.ensure_well_formed_payload(ExecutionData {
+        let block = self.recover_payload(ExecutionData {
             payload: ExecutionPayload::V3(request.request.execution_payload),
             sidecar: ExecutionPayloadSidecar::v4(
                 CancunPayloadFields {
@@ -435,7 +474,7 @@ where
         let payload = ExecutionPayload::V3(request.request.execution_payload);
         validate_message_against_payload(&request.request.message, &payload)?;
 
-        let block = self.payload_validator.ensure_well_formed_payload(ExecutionData {
+        let block = self.recover_payload(ExecutionData {
             payload,
             sidecar: ExecutionPayloadSidecar::v4(
                 CancunPayloadFields {
@@ -484,7 +523,7 @@ where
             DecodedBal::from_rlp_bytes(payload.as_v4().unwrap().block_access_list.clone())
                 .map_err(ValidationApiError::InvalidBlockAccessList)?;
 
-        let block = self.payload_validator.ensure_well_formed_payload(ExecutionData {
+        let block = self.recover_payload(ExecutionData {
             payload,
             sidecar: ExecutionPayloadSidecar::v4(
                 CancunPayloadFields {
@@ -640,8 +679,13 @@ pub struct ValidationApiInner<Provider, E: ConfigureEvm, T: PayloadTypes> {
     /// latest head block state. Uses async `RwLock` to safely handle concurrent validation
     /// requests.
     cached_state: RwLock<(B256, CachedReads)>,
+    /// Recently validated blob, commitment, and cell-proof tuples shared by V2 submissions.
+    validated_blobs: BlobValidationCache,
     /// Task spawner for blocking operations
     task_spawner: Runtime,
+    /// Cache of recovered transaction senders shared with transaction ingress and payload
+    /// execution, if enabled.
+    sender_recovery_cache: Option<SenderRecoveryCache>,
     /// Validation metrics
     metrics: ValidationMetrics,
 }
@@ -980,6 +1024,46 @@ mod tests {
         }
     }
 
+    #[derive(Debug)]
+    struct SpecializedPayloadValidator;
+
+    impl PayloadValidator<EthPayloadTypes> for SpecializedPayloadValidator {
+        type Block = Block;
+
+        fn convert_payload_to_block(
+            &self,
+            _payload: ExecutionData,
+        ) -> Result<SealedBlock<Self::Block>, NewPayloadError> {
+            panic!("the specialized recovery method must be used without a cache")
+        }
+
+        fn ensure_well_formed_payload(
+            &self,
+            _payload: ExecutionData,
+        ) -> Result<RecoveredBlock<Self::Block>, NewPayloadError> {
+            Ok(SealedBlock::seal_slow(Block::default()).try_recover().unwrap())
+        }
+    }
+
+    #[test]
+    fn recover_payload_without_cache_uses_validator_override() {
+        let api = ValidationApi::new(
+            MockEthProvider::default(),
+            NoopConsensus::arc(),
+            EthEvmConfig::mainnet(),
+            ValidationApiConfig::default(),
+            Runtime::test(),
+            Arc::new(SpecializedPayloadValidator),
+            None,
+        );
+
+        api.recover_payload(ExecutionData {
+            payload: test_execution_payload(),
+            sidecar: Default::default(),
+        })
+        .unwrap();
+    }
+
     fn test_validation_api(
         provider: MockEthProvider,
     ) -> ValidationApi<MockEthProvider, EthEvmConfig, EthPayloadTypes> {
@@ -990,6 +1074,7 @@ mod tests {
             ValidationApiConfig::default(),
             Runtime::test(),
             Arc::new(UnusedPayloadValidator),
+            None,
         )
     }
 

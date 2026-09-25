@@ -3,8 +3,15 @@ use crate::utils::{
 };
 use alloy_eips::eip7685::RequestsOrHash;
 use alloy_genesis::Genesis;
-use alloy_primitives::{Address, B256};
+use alloy_primitives::{Address, Bytes, B256};
 use alloy_rpc_types_engine::{
+    ssz_engine_types::{
+        BlobsV1Request, BlobsV1Response, BlobsV2Response, BlobsV3Response, BlobsV4Request,
+        BlobsV4Response, BodiesByHashRequest, BodiesResponsePrague, BuiltPayloadPrague,
+        ExecutionPayloadEnvelopeAmsterdam, ExecutionPayloadEnvelopePrague, ExecutionPayloadPrague,
+        ForkchoiceUpdateCancun, ForkchoiceUpdateResponse as SszForkchoiceUpdateResponse, Optional,
+        PayloadAttributesCancun, PayloadStatus as SszPayloadStatus, PayloadStatusKind,
+    },
     ClientVersionV1, ForkchoiceState, PayloadAttributes, PayloadStatusEnum,
 };
 use jsonrpsee_core::client::ClientT;
@@ -20,17 +27,12 @@ use reth_node_core::{
     version::{version_metadata, CLIENT_CODE},
 };
 use reth_node_ethereum::{
-    engine_ssz_containers::{
-        BlobsV1Request, BlobsV1Response, BlobsV2Response, BlobsV3Response, BlobsV4Request,
-        BlobsV4Response, BodiesByHashRequest, BodiesResponsePrague,
-        ExecutionPayloadEnvelopeAmsterdam, ForkchoiceUpdateResponse as SszForkchoiceUpdateResponse,
-        PayloadStatus as SszPayloadStatus, PayloadStatusWithWitness,
-    },
-    EthereumAddOns, EthereumNode,
+    engine_ssz_witness::PayloadStatusWithWitness, EthereumAddOns, EthereumNode,
 };
 use reth_provider::{BlockNumReader, StateProviderFactory};
 use reth_rpc_api::TestingBuildBlockRequestV1;
 use reth_rpc_layer::secret_to_bearer_header;
+use reth_rpc_server_types::{RethRpcModule, RpcModuleSelection};
 use reth_tasks::Runtime;
 use ssz::{Decode, Encode};
 use std::sync::Arc;
@@ -224,10 +226,9 @@ async fn test_testing_build_block_v1_osaka() -> eyre::Result<()> {
 
     let node_config =
         NodeConfig::test().with_chain(chain_spec.clone()).with_unused_ports().with_rpc(
-            RpcServerArgs::default()
-                .with_unused_ports()
-                .with_http()
-                .with_http_api(reth_rpc_server_types::RpcModuleSelection::All),
+            RpcServerArgs::default().with_unused_ports().with_http().with_http_api(
+                RpcModuleSelection::from([RethRpcModule::Eth, RethRpcModule::Testing]),
+            ),
         );
 
     let NodeHandle { node, node_exit_future: _ } = NodeBuilder::new(node_config)
@@ -299,10 +300,9 @@ async fn test_engine_ssz_proxy_can_mine_block() -> eyre::Result<()> {
     let genesis_hash = chain_spec.genesis_hash();
     let node_config =
         NodeConfig::test().with_chain(chain_spec.clone()).with_unused_ports().with_rpc(
-            RpcServerArgs::default()
-                .with_unused_ports()
-                .with_http()
-                .with_http_api(reth_rpc_server_types::RpcModuleSelection::All),
+            RpcServerArgs::default().with_unused_ports().with_http().with_http_api(
+                RpcModuleSelection::from([RethRpcModule::Eth, RethRpcModule::Testing]),
+            ),
         );
 
     let NodeHandle { node, node_exit_future: _ } = NodeBuilder::new(node_config)
@@ -420,7 +420,7 @@ async fn test_engine_ssz_proxy_can_mine_block() -> eyre::Result<()> {
     assert_eq!(new_payload_response.status(), reqwest::StatusCode::OK);
 
     let status = SszPayloadStatus::from_ssz_bytes(&new_payload_response.bytes().await?).unwrap();
-    assert_eq!(status.status, PayloadStatusEnum::Valid);
+    assert_eq!(status.status, PayloadStatusKind::Valid);
 
     let fcu_response = client
         .post(format!("{auth_url}{ENGINE_FORKCHOICE_ROUTE}"))
@@ -466,7 +466,7 @@ async fn test_engine_ssz_proxy_can_mine_block() -> eyre::Result<()> {
     assert!(!blobs.entries.last().unwrap().available);
 
     let fcu = SszForkchoiceUpdateResponse::from_ssz_bytes(&fcu_response.bytes().await?).unwrap();
-    assert_eq!(fcu.payload_status.status, PayloadStatusEnum::Valid);
+    assert_eq!(fcu.payload_status.status, PayloadStatusKind::Valid);
 
     node.wait_block(1, block_hash, false).await?;
 
@@ -640,7 +640,7 @@ async fn test_engine_ssz_proxy_returns_canonical_witness() -> eyre::Result<()> {
         let bytes = response.bytes().await?;
         assert_eq!(status, reqwest::StatusCode::OK, "{}", String::from_utf8_lossy(&bytes));
         let response = PayloadStatusWithWitness::from_ssz_bytes(&bytes).unwrap();
-        assert_eq!(response.payload_status.status, PayloadStatusEnum::Valid);
+        assert_eq!(response.payload_status.status, PayloadStatusKind::Valid);
         let witness = response.witness.as_ref().expect("valid payload includes a witness");
         assert!(!witness.state.is_empty());
         assert!(witness.state.windows(2).all(|pair| pair[0] < pair[1]));
@@ -660,7 +660,7 @@ async fn test_engine_ssz_proxy_returns_canonical_witness() -> eyre::Result<()> {
         .await?;
     assert_eq!(response.status(), reqwest::StatusCode::OK);
     let response = PayloadStatusWithWitness::from_ssz_bytes(&response.bytes().await?).unwrap();
-    assert!(matches!(response.payload_status.status, PayloadStatusEnum::Invalid { .. }));
+    assert_eq!(response.payload_status.status, PayloadStatusKind::Invalid);
     assert!(response.witness.is_none());
     invalid.payload.payload_inner.payload_inner.payload_inner.transactions =
         vec![alloy_primitives::Bytes::from_static(&[2])];
@@ -778,12 +778,6 @@ async fn test_sparse_trie_reuse_across_blocks() -> eyre::Result<()> {
 
 #[tokio::test]
 async fn test_engine_ssz_request_validation() -> eyre::Result<()> {
-    use alloy_primitives::Bytes;
-    use reth_node_ethereum::engine_ssz_containers::{
-        BuiltPayloadPrague, ExecutionPayloadEnvelopePrague, ExecutionPayloadPrague,
-        ForkchoiceUpdateCancun, Optional, PayloadAttributesCancun,
-    };
-
     let chain = Arc::new(
         ChainSpecBuilder::default()
             .chain(MAINNET.chain)
@@ -838,7 +832,7 @@ async fn test_engine_ssz_request_validation() -> eyre::Result<()> {
             assert_eq!(response.status(), reqwest::StatusCode::OK);
             let fcu =
                 SszForkchoiceUpdateResponse::from_ssz_bytes(&response.bytes().await?).unwrap();
-            assert!(matches!(fcu.payload_status.status, PayloadStatusEnum::Valid));
+            assert_eq!(fcu.payload_status.status, PayloadStatusKind::Valid);
             let id = fcu.payload_id.into_option().unwrap();
             let response = client
                 .get(format!("{url}{ENGINE_PAYLOADS_ROUTE}/{id}"))
@@ -1003,7 +997,7 @@ async fn test_engine_ssz_witness_omitted_without_provider_parent_state() -> eyre
         .await?;
     assert_eq!(response.status(), reqwest::StatusCode::OK);
     let response = PayloadStatusWithWitness::from_ssz_bytes(&response.bytes().await?).unwrap();
-    assert_eq!(response.payload_status.status, PayloadStatusEnum::Valid);
+    assert_eq!(response.payload_status.status, PayloadStatusKind::Valid);
     assert!(response.witness.is_none());
     Ok(())
 }
