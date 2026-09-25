@@ -588,14 +588,14 @@ impl RocksDBProviderInner {
         self.db_rw().delete_cf(cf, key)
     }
 
-    /// Deletes a range of values from a column family.
-    fn delete_range_cf<K: AsRef<[u8]>>(
+    /// Deletes a range of values from a column family and syncs it to the WAL.
+    fn delete_range_cf_synced<K: AsRef<[u8]>>(
         &self,
         cf: &rocksdb::ColumnFamily,
         from: K,
         to: K,
     ) -> Result<(), rocksdb::Error> {
-        self.db_rw().delete_range_cf(cf, from, to)
+        self.db_rw().delete_range_cf_opt(cf, from, to, &synced_write_options())
     }
 
     /// Returns an iterator over a column family.
@@ -1026,10 +1026,11 @@ impl RocksDBProvider {
     /// Uses `delete_range_cf` from empty key to a max key (256 bytes of 0xFF).
     /// This end key must exceed the maximum encoded key size for any table.
     /// Current max is ~60 bytes (`StorageShardedKey` = 20 + 32 + 8).
+    /// The range tombstone is WAL-synced before returning.
     pub fn clear<T: Table>(&self) -> ProviderResult<()> {
         let cf = self.get_cf_handle::<T>()?;
 
-        self.0.delete_range_cf(cf, &[] as &[u8], &[0xFF; 256]).map_err(|e| {
+        self.0.delete_range_cf_synced(cf, &[] as &[u8], &[0xFF; 256]).map_err(|e| {
             ProviderError::Database(DatabaseError::Delete(DatabaseErrorInfo {
                 message: e.to_string().into(),
                 code: -1,
@@ -3422,6 +3423,28 @@ mod tests {
         for i in 0..100 {
             assert!(provider.get::<TestTable>(i).unwrap().is_some(), "Data should be readable");
         }
+    }
+
+    #[test]
+    fn test_clear_survives_reopen() {
+        let temp_dir = TempDir::new().unwrap();
+
+        {
+            let provider =
+                RocksDBBuilder::new(temp_dir.path()).with_table::<TestTable>().build().unwrap();
+            let mut batch = provider.batch();
+            for key in [0, 1, u64::MAX] {
+                batch.put::<TestTable>(key, &vec![42]).unwrap();
+            }
+            batch.commit().unwrap();
+
+            provider.clear::<TestTable>().unwrap();
+            assert!(provider.first::<TestTable>().unwrap().is_none());
+        }
+
+        let reopened =
+            RocksDBBuilder::new(temp_dir.path()).with_table::<TestTable>().build().unwrap();
+        assert!(reopened.first::<TestTable>().unwrap().is_none());
     }
 
     #[test]
