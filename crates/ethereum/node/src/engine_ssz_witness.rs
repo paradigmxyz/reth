@@ -1,13 +1,14 @@
-//! Execution witness generation and wire types for the SSZ Engine API extension.
+//! Execution witness generation for the SSZ Engine API extension.
 
-use alloy_primitives::{Bytes, B256};
-use alloy_rpc_types_engine::{
-    ssz_engine_types::{Optional, PayloadStatus, PayloadStatusKind},
-    ExecutionData,
-};
+use alloy_primitives::{Address, B256};
+use alloy_rpc_types_engine::{ssz_engine_types::ExecutionWitness, ExecutionData};
+use rayon::prelude::*;
 use reth_ethereum_primitives::{EthPrimitives, TransactionSigned};
 use reth_evm::{execute::Executor, ConfigureEvm};
-use reth_primitives_traits::{AlloyBlockHeader, Block};
+use reth_primitives_traits::{
+    crypto::{secp256k1::recover_public_key, UncompressedPublicKey},
+    AlloyBlockHeader, RecoveredBlock,
+};
 use reth_provider::{HeaderProvider, StateProvider, StateProviderBox, StateProviderFactory};
 use reth_revm::{database::StateProviderDatabase, witness::ExecutionWitnessRecord};
 use reth_tasks::Runtime;
@@ -45,7 +46,9 @@ where
         payload: ExecutionData,
     ) -> Pin<
         Box<
-            dyn Future<Output = Result<ExecutionWitnessV1, EngineSszWitnessError>> + Send + 'static,
+            dyn Future<Output = Result<EngineSszWitnessOutput, EngineSszWitnessError>>
+                + Send
+                + 'static,
         >,
     > {
         let provider = self.provider.clone();
@@ -59,9 +62,20 @@ where
                     let block = payload
                         .payload
                         .try_into_block_with_sidecar::<TransactionSigned>(&payload.sidecar)
-                        .map_err(eyre::Report::new)?
-                        .try_into_recovered()
                         .map_err(eyre::Report::new)?;
+                    // Recover each sender once, keeping its public key for the response.
+                    let public_keys = block
+                        .body
+                        .transactions
+                        .par_iter()
+                        .map(|tx| recover_public_key(tx.signature(), tx.signature_hash()))
+                        .collect::<Result<Vec<_>, _>>()
+                        .map_err(eyre::Report::new)?;
+                    let senders = public_keys
+                        .iter()
+                        .map(|public_key| Address::from_raw_public_key(&public_key[1..]))
+                        .collect();
+                    let block = RecoveredBlock::new_unhashed(block, senders);
 
                     let block_number = block.header().number;
                     let parent_hash = block.header().parent_hash;
@@ -109,7 +123,14 @@ where
                     }
                     headers.reverse();
 
-                    Ok(ExecutionWitnessV1 { state: witness.state, codes: witness.codes, headers })
+                    Ok(EngineSszWitnessOutput {
+                        witness: ExecutionWitness {
+                            state: witness.state,
+                            codes: witness.codes,
+                            headers,
+                        },
+                        public_keys,
+                    })
                 })
                 .await
                 .map_err(eyre::Report::new)?
@@ -125,9 +146,20 @@ pub trait EngineSszWitness: Send + Sync + 'static {
         payload: ExecutionData,
     ) -> Pin<
         Box<
-            dyn Future<Output = Result<ExecutionWitnessV1, EngineSszWitnessError>> + Send + 'static,
+            dyn Future<Output = Result<EngineSszWitnessOutput, EngineSszWitnessError>>
+                + Send
+                + 'static,
         >,
     >;
+}
+
+/// Witness material returned for a valid payload.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct EngineSszWitnessOutput {
+    /// Stateless execution witness.
+    pub witness: ExecutionWitness,
+    /// Uncompressed sender public keys, one per payload transaction in order.
+    pub public_keys: Vec<UncompressedPublicKey>,
 }
 
 /// Failure to produce a witness for a validated payload.
@@ -168,128 +200,5 @@ impl std::error::Error for EngineSszWitnessError {
                 Some(source.as_ref())
             }
         }
-    }
-}
-
-/// A trie-node byte list in an [`ExecutionWitnessV1`].
-pub type WitnessNodeV1 = Bytes;
-
-/// A contract-code byte list in an [`ExecutionWitnessV1`].
-pub type WitnessCodeV1 = Bytes;
-
-/// An RLP-encoded header byte list in an [`ExecutionWitnessV1`].
-pub type WitnessHeaderV1 = Bytes;
-
-/// Canonical execution witness for `POST /payloads/witness`.
-///
-/// `state` and `codes` are produced in lexicographic ascending byte order. `headers` are
-/// RLP-encoded and ordered by ascending block number; consecutive headers must be parent-linked.
-/// These ordering rules are producer-side requirements from the execution-specs witness builder.
-///
-/// This is a REST-SSZ wire container, not the JSON-RPC debug witness shape.
-#[derive(Clone, Debug, Default, PartialEq, Eq, ssz_derive::Encode, ssz_derive::Decode)]
-pub struct ExecutionWitnessV1 {
-    /// Hashed trie-node preimages required during execution and state-root recomputation.
-    pub state: Vec<WitnessNodeV1>,
-    /// Contract bytecode preimages required from the pre-state.
-    pub codes: Vec<WitnessCodeV1>,
-    /// RLP-encoded ancestor headers used for pre-state and `BLOCKHASH` correctness proofs.
-    pub headers: Vec<WitnessHeaderV1>,
-}
-
-/// Canonical execution witness for `POST /payloads/witness`.
-pub type ExecutionWitness = ExecutionWitnessV1;
-
-/// REST-SSZ response for `POST /payloads/witness`.
-///
-/// The witness uses the Engine REST-SSZ `Optional[T]` encoding from execution-apis and is present
-/// only when the payload status is `VALID`. A `VALID` status without a witness means the parent
-/// state was not yet available through the provider (the parent is only known to the engine
-/// tree); resubmitting the payload once forkchoice has made the parent canonical yields it.
-#[derive(Clone, Debug, PartialEq, Eq, ssz_derive::Encode)]
-pub struct PayloadStatusWithWitness {
-    /// Result of processing the submitted payload.
-    pub payload_status: PayloadStatus,
-    /// Execution witness produced for a valid payload.
-    pub witness: Optional<ExecutionWitnessV1>,
-}
-
-impl PayloadStatusWithWitness {
-    /// Creates a response, converting the witness into the REST-SSZ `Optional[T]` representation.
-    pub fn new(payload_status: PayloadStatus, witness: Option<ExecutionWitnessV1>) -> Self {
-        let witness = match payload_status.status {
-            PayloadStatusKind::Valid => witness.into(),
-            _ => Optional::none(),
-        };
-        Self { payload_status, witness }
-    }
-}
-
-/// Backwards-compatible alias for the experimental witness response name.
-pub type NewPayloadWithWitnessResponseV1 = PayloadStatusWithWitness;
-
-impl ssz::Decode for PayloadStatusWithWitness {
-    fn is_ssz_fixed_len() -> bool {
-        false
-    }
-
-    fn from_ssz_bytes(bytes: &[u8]) -> Result<Self, ssz::DecodeError> {
-        let mut builder = ssz::SszDecoderBuilder::new(bytes);
-        builder.register_type::<PayloadStatus>()?;
-        builder.register_type::<Optional<ExecutionWitnessV1>>()?;
-        let mut decoder = builder.build()?;
-        let response =
-            Self { payload_status: decoder.decode_next()?, witness: decoder.decode_next()? };
-        if response.witness.is_some() && response.payload_status.status != PayloadStatusKind::Valid
-        {
-            return Err(ssz::DecodeError::BytesInvalid(
-                "execution witness is only valid for VALID payload status".into(),
-            ))
-        }
-        Ok(response)
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use ssz::{Decode, Encode};
-
-    fn assert_roundtrip<T>(value: &T)
-    where
-        T: Encode + Decode + PartialEq + core::fmt::Debug,
-    {
-        assert_eq!(T::from_ssz_bytes(&value.as_ssz_bytes()).unwrap(), *value);
-    }
-
-    #[test]
-    fn witness_response_roundtrips_when_status_is_valid() {
-        let payload_status = PayloadStatus {
-            status: PayloadStatusKind::Valid,
-            latest_valid_hash: Optional::none(),
-            validation_error: Optional::none(),
-        };
-        let witness = ExecutionWitnessV1 {
-            state: vec![vec![1, 2, 3].into()],
-            codes: vec![vec![4, 5].into()],
-            headers: vec![vec![6].into()],
-        };
-        let response = PayloadStatusWithWitness::new(payload_status, Some(witness));
-
-        assert_roundtrip(&response);
-    }
-
-    #[test]
-    fn witness_response_omits_witness_for_non_valid_status() {
-        let payload_status = PayloadStatus {
-            status: PayloadStatusKind::Syncing,
-            latest_valid_hash: Optional::none(),
-            validation_error: Optional::none(),
-        };
-        let response =
-            PayloadStatusWithWitness::new(payload_status, Some(ExecutionWitnessV1::default()));
-
-        assert!(response.witness.is_none());
-        assert_roundtrip(&response);
     }
 }

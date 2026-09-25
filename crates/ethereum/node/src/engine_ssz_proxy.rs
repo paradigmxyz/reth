@@ -4,9 +4,7 @@
 //!
 //! [EIP-8178]: https://eips.ethereum.org/EIPS/eip-8178
 
-use crate::engine_ssz_witness::{
-    EngineSszWitness, EngineSszWitnessError, PayloadStatusWithWitness,
-};
+use crate::engine_ssz_witness::{EngineSszWitness, EngineSszWitnessError};
 use alloy_consensus::{Transaction, TxEnvelope};
 use alloy_eips::{eip2718::Decodable2718, eip7685::Requests};
 use alloy_primitives::{Bytes, B128, B256};
@@ -22,7 +20,7 @@ use alloy_rpc_types_engine::{
         ForkchoiceUpdateAmsterdam, ForkchoiceUpdateCancun, ForkchoiceUpdateOsaka,
         ForkchoiceUpdateParis, ForkchoiceUpdatePrague, ForkchoiceUpdateResponse,
         ForkchoiceUpdateShanghai, Optional, PayloadStatus as EngineSszPayloadStatus,
-        PayloadStatusKind, MAX_BLOBS_REQUEST, MAX_BODIES_REQUEST,
+        PayloadStatusKind, PayloadStatusWithWitness, MAX_BLOBS_REQUEST, MAX_BODIES_REQUEST,
     },
     CancunPayloadFields, ExecutionData, ExecutionPayload, ExecutionPayloadBodyV1,
     ExecutionPayloadFieldV2, ExecutionPayloadSidecar, ForkchoiceState, PayloadAttributes,
@@ -404,9 +402,9 @@ where
             Ok(status) => status,
             Err(response) => return response,
         };
-        let witness = match status.status {
+        let (witness, public_keys) = match status.status {
             PayloadStatusKind::Valid => match witness_handler.generate_witness(payload).await {
-                Ok(witness) => Some(witness),
+                Ok(output) => (Some(output.witness), output.public_keys),
                 // The block is valid but its parent is only known to the engine tree. The
                 // status stays authoritative; resubmitting once forkchoice has made the parent
                 // canonical yields the witness.
@@ -417,7 +415,7 @@ where
                         %source,
                         "witness omitted for valid payload"
                     );
-                    None
+                    (None, Vec::new())
                 }
                 Err(err) => {
                     return problem_response(
@@ -427,9 +425,9 @@ where
                     )
                 }
             },
-            _ => None,
+            _ => (None, Vec::new()),
         };
-        ssz_response(PayloadStatusWithWitness::new(status, witness))
+        ssz_response(PayloadStatusWithWitness::new(status, witness, public_keys))
     }
 
     async fn get_payload(&self, fork: EngineSszFork, payload_id: PayloadId) -> HttpResponse {
@@ -1255,6 +1253,7 @@ fn problem_response(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::engine_ssz_witness::EngineSszWitnessOutput;
     use alloy_rpc_types_engine::ssz_engine_types::{
         PayloadAttributesAmsterdam, PayloadAttributesCancun, PayloadAttributesParis,
         PayloadAttributesShanghai,
@@ -1275,10 +1274,8 @@ mod tests {
             fn generate_witness(
                 &self,
                 _: ExecutionData,
-            ) -> BoxFuture<
-                'static,
-                Result<crate::engine_ssz_witness::ExecutionWitnessV1, EngineSszWitnessError>,
-            > {
+            ) -> BoxFuture<'static, Result<EngineSszWitnessOutput, EngineSszWitnessError>>
+            {
                 Box::pin(async { Ok(Default::default()) })
             }
         }
