@@ -335,6 +335,7 @@ jobs:
   deny:
     permissions:
       contents: read
+      id-token: write
     uses: tempoxyz/ci/.github/workflows/deny.yml@main
 
   lint-success:
