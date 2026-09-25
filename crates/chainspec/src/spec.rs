@@ -2804,7 +2804,7 @@ Post-merge hard forks (timestamp based):
     #[test]
     fn latest_sepolia_mainnet_fork_id() {
         // BPO2
-        assert_eq!(ForkId { hash: ForkHash(hex!("0x268956b6")), next: 0 }, SEPOLIA.latest_fork_id())
+        assert_eq!(ForkId { hash: ForkHash(hex!("0x6c1d9423")), next: 0 }, SEPOLIA.latest_fork_id())
     }
 
     #[test]
