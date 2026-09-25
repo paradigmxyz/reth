@@ -357,7 +357,11 @@ pub fn native_bytecode(code: &Bytecode) -> evm2::bytecode::Bytecode {
 
 /// Converts native bytecode into the persistent state representation.
 pub fn revm_bytecode(code: &evm2::bytecode::Bytecode) -> Bytecode {
-    Bytecode::new_raw(code.original_bytes())
+    if code.is_eip7702() {
+        Bytecode::new_raw(code.original_bytes())
+    } else {
+        Bytecode::new_legacy(code.original_bytes())
+    }
 }
 
 /// Converts native account information into the persistent state representation.
@@ -451,6 +455,8 @@ mod tests {
             alloc::vec![0x00],
             alloc::vec![0x5b, 0x60, 0x5b, 0x00],
             alloc::vec![0x5b; 24_576],
+            alloc::vec![0xef, 0x01],
+            Bytecode::new_eip7702(Address::with_last_byte(7)).original_bytes().to_vec(),
         ];
         for opcode in 0x60..=0x7f {
             // Every truncated PUSH width, including a JUMPDEST inside its immediate data.
@@ -469,10 +475,11 @@ mod tests {
             cases.push(alloc::vec![opcode, 0]);
         }
         for bytes in cases {
-            let persistent = Bytecode::new_raw(bytes.into());
+            let persistent = Bytecode::new_legacy(bytes.into());
             let native = native_bytecode(&persistent);
-            let analyzed = evm2::bytecode::Bytecode::new_raw(persistent.original_bytes());
+            let analyzed = evm2::bytecode::Bytecode::new_legacy(persistent.original_bytes());
             assert_eq!(native, analyzed);
+            assert_eq!(revm_bytecode(&native), persistent);
             assert_eq!(native.bytes(), analyzed.bytes());
             assert_eq!(native.legacy_jump_table(), analyzed.legacy_jump_table());
             if !persistent.is_empty() {
@@ -483,6 +490,7 @@ mod tests {
         let native = native_bytecode(&delegated);
         assert_eq!(native.eip7702_address(), Some(Address::with_last_byte(7)));
         assert_eq!(native.original_bytes(), delegated.original_bytes());
+        assert_eq!(revm_bytecode(&native), delegated);
     }
 
     #[test]

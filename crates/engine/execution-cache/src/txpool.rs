@@ -49,7 +49,7 @@ impl TxPoolPrewarmCacheSnapshot {
     /// as a miss and the caller's fallback tier decides.
     pub fn bytecode(&self, code_hash: &B256) -> Option<Option<Bytecode>> {
         let code = self.reads.contracts.get(code_hash)?;
-        (!code.is_empty()).then(|| Some(Bytecode::new_raw(code.original_bytes())))
+        (!code.is_empty()).then(|| Some(Bytecode(reth_execution_types::revm_bytecode(code))))
     }
 
     /// Returns `(accounts, storage slots, bytecodes)` in the snapshot.
@@ -81,7 +81,7 @@ mod tests {
         storage.insert(U256::from(2), U256::ZERO);
         reads.insert_account(owner, AccountInfo { nonce: 3, ..Default::default() }, storage);
         reads.accounts.insert(missing, CachedAccount { info: None, storage: Default::default() });
-        reads.contracts.insert(code_hash, EvmBytecode::new_raw([0x60, 0x01].into()));
+        reads.contracts.insert(code_hash, EvmBytecode::new_legacy([0xef, 0x01].into()));
         reads.contracts.insert(empty_code_hash, EvmBytecode::default());
 
         let snapshot = TxPoolPrewarmCacheSnapshot::new(B256::ZERO, Arc::new(reads));
@@ -96,7 +96,9 @@ mod tests {
         assert_eq!(snapshot.storage(owner, slot(9)), None);
         assert_eq!(snapshot.storage(missing, slot(1)), None);
 
-        assert!(snapshot.bytecode(&code_hash).unwrap().is_some());
+        let code = snapshot.bytecode(&code_hash).unwrap().unwrap();
+        assert!(code.is_legacy());
+        assert_eq!(code.original_bytes().as_ref(), &[0xef, 0x01]);
         assert_eq!(snapshot.bytecode(&empty_code_hash), None, "empty code reads as a miss");
         assert_eq!(snapshot.bytecode(&B256::repeat_byte(0x0E)), None);
 
