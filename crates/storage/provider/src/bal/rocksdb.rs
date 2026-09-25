@@ -1,7 +1,7 @@
 use crate::providers::RocksDBProvider;
 use alloy_eip7928::BAL_RETENTION_PERIOD_SLOTS;
 use alloy_eips::NumHash;
-use alloy_primitives::{BlockHash, BlockNumber, Bytes};
+use alloy_primitives::{map::B256Map, BlockHash, BlockNumber, Bytes};
 use parking_lot::RwLock;
 use reth_db_api::{
     models::{StoredBlockAccessList, StoredBlockAccessListKey},
@@ -12,7 +12,7 @@ use reth_prune_types::PruneMode;
 use reth_storage_api::{BalStore, GetBlockAccessListLimit, RawBal};
 use reth_storage_errors::provider::{ProviderError, ProviderResult};
 use std::{
-    collections::{BTreeMap, BTreeSet, HashMap},
+    collections::{BTreeMap, BTreeSet},
     sync::Arc,
 };
 
@@ -204,7 +204,7 @@ impl BalStore for RocksDBBalStore {
 #[derive(Debug, Default)]
 struct RocksDBBalStoreBuffer {
     /// Hash index for serving recent hash-only lookups.
-    entries: HashMap<BlockHash, RocksDBBalEntry>,
+    entries: B256Map<RocksDBBalEntry>,
     /// Block-number index for pruning buffered entries.
     hashes_by_number: BTreeMap<BlockNumber, Vec<BlockHash>>,
     /// Validated BALs waiting to be confirmed canonical and flushed.

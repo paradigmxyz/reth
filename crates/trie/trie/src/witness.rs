@@ -130,9 +130,7 @@ where
             let (root_hash, root_node) = if let Some(root_node) =
                 multiproof.account_proofs.into_iter().find(|n| n.path.is_empty())
             {
-                let mut encoded = Vec::new();
-                root_node.node.encode(&mut encoded);
-                let bytes = Bytes::from(encoded);
+                let bytes = Bytes::from(alloy_rlp::encode(&root_node.node));
                 (keccak256(&bytes), bytes)
             } else {
                 (EMPTY_ROOT_HASH, Bytes::from([EMPTY_STRING_CODE]))

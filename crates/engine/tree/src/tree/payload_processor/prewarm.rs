@@ -787,6 +787,7 @@ mod tests {
     use super::*;
     use alloy_consensus::transaction::Recovered;
     use alloy_eip7928::{AccountChanges, BalanceChange, BlockAccessIndex};
+    use alloy_eips::eip7702::constants::EIP7702_CLEARED_DELEGATION;
     use alloy_primitives::{address, B256, U256};
     use reth_chainspec::ChainSpec;
     use reth_ethereum_primitives::{EthPrimitives, TransactionSigned};
@@ -970,7 +971,7 @@ mod tests {
 
     impl AsRef<[u8]> for CacheDropProbe {
         fn as_ref(&self) -> &[u8] {
-            &[0xef, 0x01, 0x00, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+            &EIP7702_CLEARED_DELEGATION
         }
     }
 

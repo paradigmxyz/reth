@@ -1,10 +1,13 @@
 use crate::tree::metrics::BlockBufferMetrics;
 use alloy_consensus::BlockHeader;
-use alloy_primitives::{BlockHash, BlockNumber};
+use alloy_primitives::{
+    map::{hash_map::Entry, B256Map, B256Set, FbBuildHasher},
+    BlockHash, BlockNumber,
+};
 use indexmap::IndexSet;
 use reth_network_p2p::full_block::SealedBlockWithAccessList;
 use reth_primitives_traits::{Block, SealedBlock};
-use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
+use std::collections::{BTreeMap, VecDeque};
 
 /// Contains the tree of pending blocks that cannot be executed due to missing parent.
 /// It allows to store unconnected blocks for potential future inclusion.
@@ -20,14 +23,14 @@ use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 #[derive(Debug)]
 pub struct BlockBuffer<B: Block> {
     /// All blocks in the buffer stored by their block hash.
-    pub(crate) blocks: HashMap<BlockHash, SealedBlockWithAccessList<B>>,
+    pub(crate) blocks: B256Map<SealedBlockWithAccessList<B>>,
     /// Map of any parent block hash (even the ones not currently in the buffer)
     /// to the buffered children.
     /// Allows connecting buffered blocks by parent.
-    pub(crate) parent_to_child: HashMap<BlockHash, IndexSet<BlockHash>>,
+    pub(crate) parent_to_child: B256Map<IndexSet<BlockHash, FbBuildHasher<32>>>,
     /// `BTreeMap` tracking the earliest blocks by block number.
     /// Used for removal of old blocks that precede finalization.
-    pub(crate) earliest_blocks: BTreeMap<BlockNumber, HashSet<BlockHash>>,
+    pub(crate) earliest_blocks: BTreeMap<BlockNumber, B256Set>,
     /// FIFO queue tracking block insertion order for eviction.
     /// When the buffer reaches its capacity limit, the oldest block is evicted first.
     pub(crate) block_queue: VecDeque<BlockHash>,
@@ -69,14 +72,14 @@ impl<B: Block> BlockBuffer<B> {
         let hash = block.hash();
 
         match self.blocks.entry(hash) {
-            std::collections::hash_map::Entry::Occupied(mut entry) => {
+            Entry::Occupied(mut entry) => {
                 // a duplicate that includes access list data is preferred over one without
                 if entry.get().data().is_none() && block.data().is_some() {
                     entry.insert(block);
                 }
                 return
             }
-            std::collections::hash_map::Entry::Vacant(entry) => {
+            Entry::Vacant(entry) => {
                 self.parent_to_child.entry(block.parent_hash()).or_default().insert(hash);
                 self.earliest_blocks.entry(block.number()).or_default().insert(hash);
                 entry.insert(block);

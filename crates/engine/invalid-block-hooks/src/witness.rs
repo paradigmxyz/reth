@@ -128,8 +128,7 @@ fn collect_execution_data(
 
     // Collect codes
     db.cache.contracts.values().chain(bundle_state.contracts.values()).for_each(|code| {
-        let code_bytes = code.original_bytes();
-        codes.insert(keccak256(&code_bytes), code_bytes);
+        codes.insert(code.hash_slow(), code.original_bytes());
     });
 
     // Collect preimages

@@ -319,6 +319,8 @@ where
             number: U256::from(block_number),
             beneficiary: payload.payload.fee_recipient(),
             timestamp: U256::from(timestamp),
+            // Derive merge payload fields from the selected EVM spec so custom fork schedules
+            // that activate a later fork without Paris retain the same environment.
             difficulty: if spec >= SpecId::MERGE {
                 U256::ZERO
             } else {
