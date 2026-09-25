@@ -6,13 +6,21 @@
 use crate::{
     error::PoolError, AddedTransactionOutcome, PoolTransaction, TransactionOrigin, TransactionPool,
 };
+use futures_util::{stream::FuturesUnordered, StreamExt};
 use pin_project::pin_project;
 use std::{
+    fmt,
     future::Future,
     pin::Pin,
     task::{ready, Context, Poll},
 };
 use tokio::sync::{mpsc, oneshot};
+
+/// Maximum number of transaction insertions waiting for the batch processor.
+pub const DEFAULT_BATCH_TX_CHANNEL_CAPACITY: usize = 1024;
+
+/// Maximum number of transaction insertion batches processed concurrently.
+pub const DEFAULT_MAX_BATCH_TX_IN_FLIGHT: usize = 8;
 
 /// A single batch transaction request
 #[derive(Debug)]
@@ -41,13 +49,23 @@ where
 
 /// Transaction batch processor that handles batch processing
 #[pin_project]
-#[derive(Debug)]
 pub struct BatchTxProcessor<Pool: TransactionPool> {
     pool: Pool,
     max_batch_size: usize,
     buf: Vec<BatchTxRequest<Pool::Transaction>>,
     #[pin]
-    request_rx: mpsc::UnboundedReceiver<BatchTxRequest<Pool::Transaction>>,
+    request_rx: mpsc::Receiver<BatchTxRequest<Pool::Transaction>>,
+    in_flight: FuturesUnordered<Pin<Box<dyn Future<Output = ()> + Send>>>,
+}
+
+impl<Pool: TransactionPool> fmt::Debug for BatchTxProcessor<Pool> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("BatchTxProcessor")
+            .field("max_batch_size", &self.max_batch_size)
+            .field("buffered_requests", &self.buf.len())
+            .field("in_flight_batches", &self.in_flight.len())
+            .finish_non_exhaustive()
+    }
 }
 
 impl<Pool> BatchTxProcessor<Pool>
@@ -58,10 +76,16 @@ where
     pub fn new(
         pool: Pool,
         max_batch_size: usize,
-    ) -> (Self, mpsc::UnboundedSender<BatchTxRequest<Pool::Transaction>>) {
-        let (request_tx, request_rx) = mpsc::unbounded_channel();
+    ) -> (Self, mpsc::Sender<BatchTxRequest<Pool::Transaction>>) {
+        let (request_tx, request_rx) = mpsc::channel(DEFAULT_BATCH_TX_CHANNEL_CAPACITY);
 
-        let processor = Self { pool, max_batch_size, buf: Vec::with_capacity(1), request_rx };
+        let processor = Self {
+            pool,
+            max_batch_size,
+            buf: Vec::with_capacity(1),
+            request_rx,
+            in_flight: FuturesUnordered::new(),
+        };
 
         (processor, request_tx)
     }
@@ -73,9 +97,9 @@ where
     }
 
     /// Process a batch of transaction requests with per-transaction origins
-    async fn process_batch(pool: &Pool, batch: Vec<BatchTxRequest<Pool::Transaction>>) {
+    async fn process_batch(pool: Pool, batch: Vec<BatchTxRequest<Pool::Transaction>>) {
         if batch.len() == 1 {
-            Self::process_request(pool, batch.into_iter().next().expect("batch is not empty"))
+            Self::process_request(&pool, batch.into_iter().next().expect("batch is not empty"))
                 .await;
             return
         }
@@ -115,22 +139,27 @@ where
         let mut this = self.project();
 
         loop {
-            // Drain all available requests from the receiver
-            ready!(this.request_rx.poll_recv_many(cx, this.buf, *this.max_batch_size));
+            while this.in_flight.len() < DEFAULT_MAX_BATCH_TX_IN_FLIGHT {
+                let Poll::Ready(_) =
+                    this.request_rx.poll_recv_many(cx, this.buf, *this.max_batch_size)
+                else {
+                    break
+                };
 
-            if !this.buf.is_empty() {
+                if this.buf.is_empty() {
+                    break
+                }
+
                 let batch = std::mem::take(this.buf);
-                let pool = this.pool.clone();
-                tokio::spawn(async move {
-                    Self::process_batch(&pool, batch).await;
-                });
+                this.in_flight.push(Box::pin(Self::process_batch(this.pool.clone(), batch)));
                 this.buf.reserve(1);
-
-                continue;
             }
 
-            // No requests available, return Pending to wait for more
-            return Poll::Pending;
+            if this.in_flight.is_empty() {
+                return if this.request_rx.is_closed() { Poll::Ready(()) } else { Poll::Pending }
+            }
+
+            ready!(this.in_flight.poll_next_unpin(cx));
         }
     }
 }
@@ -140,7 +169,10 @@ mod tests {
     use super::*;
     use crate::test_utils::{testing_pool, MockTransaction};
     use futures::stream::{FuturesUnordered, StreamExt};
-    use std::time::Duration;
+    use std::{
+        task::{Context, Poll},
+        time::Duration,
+    };
     use tokio::time::timeout;
 
     #[tokio::test]
@@ -158,7 +190,7 @@ mod tests {
             responses.push(response_rx);
         }
 
-        BatchTxProcessor::process_batch(&pool, batch_requests).await;
+        BatchTxProcessor::process_batch(pool, batch_requests).await;
 
         for response_rx in responses {
             let result = timeout(Duration::from_millis(5), response_rx)
@@ -188,7 +220,7 @@ mod tests {
             responses.push(response_rx);
         }
 
-        BatchTxProcessor::process_batch(&pool, batch_requests).await;
+        BatchTxProcessor::process_batch(pool, batch_requests).await;
 
         for response_rx in responses {
             let result = timeout(Duration::from_millis(5), response_rx)
@@ -215,11 +247,10 @@ mod tests {
 
             request_tx
                 .send(BatchTxRequest::new(TransactionOrigin::Local, tx, response_tx))
+                .await
                 .expect("Could not send batch tx");
             responses.push(response_rx);
         }
-
-        tokio::time::sleep(Duration::from_millis(10)).await;
 
         for rx in responses {
             let result = timeout(Duration::from_millis(10), rx)
@@ -230,7 +261,10 @@ mod tests {
         }
 
         drop(request_tx);
-        handle.abort();
+        timeout(Duration::from_secs(1), handle)
+            .await
+            .expect("processor should stop after draining requests")
+            .expect("processor task should not panic");
     }
 
     #[tokio::test]
@@ -246,7 +280,7 @@ mod tests {
             let tx = MockTransaction::legacy().with_nonce(i).with_gas_price(100);
             let (response_tx, response_rx) = tokio::sync::oneshot::channel();
             let request = BatchTxRequest::new(TransactionOrigin::Local, tx, response_tx);
-            request_tx.send(request).expect("Could not send batch tx");
+            request_tx.send(request).await.expect("Could not send batch tx");
             results.push(response_rx);
         }
 
@@ -277,7 +311,7 @@ mod tests {
             let request_tx_clone = request_tx.clone();
 
             let tx_fut = async move {
-                request_tx_clone.send(request).expect("Could not send batch tx");
+                request_tx_clone.send(request).await.expect("Could not send batch tx");
                 response_rx.await.expect("Could not receive batch response")
             };
             futures.push(tx_fut);
@@ -291,5 +325,64 @@ mod tests {
         }
 
         handle.abort();
+    }
+
+    #[test]
+    fn request_channel_is_bounded() {
+        let pool = testing_pool();
+        let (_processor, request_tx) = BatchTxProcessor::new(pool, 1);
+
+        for nonce in 0..DEFAULT_BATCH_TX_CHANNEL_CAPACITY {
+            let (response_tx, _response_rx) = tokio::sync::oneshot::channel();
+            let request = BatchTxRequest::new(
+                TransactionOrigin::Local,
+                MockTransaction::legacy().with_nonce(nonce as u64).with_gas_price(100),
+                response_tx,
+            );
+            request_tx.try_send(request).unwrap();
+        }
+
+        let (response_tx, _response_rx) = tokio::sync::oneshot::channel();
+        let request = BatchTxRequest::new(
+            TransactionOrigin::Local,
+            MockTransaction::legacy().with_nonce(DEFAULT_BATCH_TX_CHANNEL_CAPACITY as u64),
+            response_tx,
+        );
+        assert!(request_tx.try_send(request).is_err());
+    }
+
+    #[test]
+    fn batch_processor_waits_for_an_in_flight_slot() {
+        let pool = testing_pool();
+        let (mut processor, request_tx) = BatchTxProcessor::new(pool, 1);
+        let mut completions = Vec::with_capacity(DEFAULT_MAX_BATCH_TX_IN_FLIGHT);
+
+        for _ in 0..DEFAULT_MAX_BATCH_TX_IN_FLIGHT {
+            let (completion_tx, completion_rx) = tokio::sync::oneshot::channel();
+            processor.in_flight.push(Box::pin(async move {
+                let _ = completion_rx.await;
+            }));
+            completions.push(completion_tx);
+        }
+
+        let (response_tx, _response_rx) = tokio::sync::oneshot::channel();
+        request_tx
+            .try_send(BatchTxRequest::new(
+                TransactionOrigin::Local,
+                MockTransaction::legacy().with_nonce(0).with_gas_price(100),
+                response_tx,
+            ))
+            .unwrap();
+
+        let waker = futures::task::noop_waker();
+        let mut cx = Context::from_waker(&waker);
+        assert!(matches!(Pin::new(&mut processor).poll(&mut cx), Poll::Pending));
+        assert_eq!(processor.in_flight.len(), DEFAULT_MAX_BATCH_TX_IN_FLIGHT);
+        assert_eq!(processor.request_rx.len(), 1);
+
+        completions.pop().unwrap().send(()).unwrap();
+        assert!(matches!(Pin::new(&mut processor).poll(&mut cx), Poll::Pending));
+        assert!(processor.in_flight.len() <= DEFAULT_MAX_BATCH_TX_IN_FLIGHT);
+        assert_eq!(processor.request_rx.len(), 0);
     }
 }
