@@ -350,17 +350,17 @@ where
                     }
                     Err(err) => return Err(err),
                 };
-                // a `blockHash` filter's block never changes, so a poll acknowledges all blocks up
-                // to the head instead of only the delivered block, which would repeat it every poll
-                let acknowledged = if is_block_hash_filter { best_number } else { delivered_to };
-                self.advance_filter_cursor(&id, acknowledged + 1).await;
+                // a `blockHash` filter's single block never changes, so once it is delivered no
+                // later poll has anything to return
+                let next = if is_block_hash_filter { u64::MAX } else { delivered_to + 1 };
+                self.advance_filter_cursor(&id, next).await;
                 Ok(FilterChanges::Logs(logs))
             }
         }
     }
 
     /// Moves the cursor of the filter with the given id to `next`, the first block a subsequent
-    /// poll returns changes for.
+    /// poll returns changes for, or `u64::MAX` once the filter has nothing left to deliver.
     ///
     /// This runs after the changes were fetched so that a failed poll is retried by the next one.
     /// A poll therefore delivers its range at least once: two polls of the same filter that run
@@ -2538,7 +2538,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_block_hash_filter_changes_empty_without_new_block() {
+    async fn test_block_hash_filter_changes_delivers_once() {
         let provider = MockEthProvider::default();
         add_blocks_with_log(&provider, 0..=3);
         let eth_filter = EthFilter::new(
@@ -2547,10 +2547,14 @@ mod tests {
             Runtime::test(),
         );
 
-        // a `blockHash` filter below the head must not repeat the block's logs on every poll
+        // a `blockHash` filter's block never changes, so it is delivered once and neither a
+        // repeated poll nor a new head brings it back
         let hash = provider.header_by_number(1).unwrap().unwrap().hash_slow();
         let id = eth_filter.new_filter(Filter::new().at_block_hash(hash)).await.unwrap();
         assert_eq!(poll_log_blocks(&eth_filter, &id).await, vec![1]);
+        assert_eq!(poll_log_blocks(&eth_filter, &id).await, Vec::<u64>::new());
+
+        add_blocks_with_log(&provider, 4..=5);
         assert_eq!(poll_log_blocks(&eth_filter, &id).await, Vec::<u64>::new());
     }
 
