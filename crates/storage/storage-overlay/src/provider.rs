@@ -1268,9 +1268,7 @@ mod tests {
             }
             let child = OverlayStateProviderFactory::new(
                 factory,
-                manager
-                    .overlay_builder(blocks[2].recovered_block().hash())
-                    .with_skip_overlay_for_reused_sparse_trie(blocks[0].recovered_block().hash()),
+                manager.overlay_builder(blocks[2].recovered_block().hash()),
             );
             let provider = child.database_provider_ro().unwrap();
             let mut accounts = provider.state_trie_account_cursor().unwrap();
@@ -1467,7 +1465,6 @@ mod tests {
         );
     }
 
-    #[cfg(not(feature = "state-trie-db"))]
     #[test]
     fn skipped_state_trie_overlay_is_not_cached_or_used_for_state_roots() {
         let (factory, blocks) = setup_frontiers(3, 3);
@@ -1482,6 +1479,18 @@ mod tests {
 
         let provider = state_provider_factory.database_provider_ro().unwrap();
         assert!(provider.state_trie_overlay(false).unwrap().skipped_for_reused_sparse_trie());
+        assert!(provider
+            .state_trie_account_cursor()
+            .unwrap()
+            .get(Nibbles::new())
+            .unwrap()
+            .is_none());
+        assert!(provider
+            .state_trie_storage_cursor(B256::ZERO)
+            .unwrap()
+            .get(Nibbles::new())
+            .unwrap()
+            .is_none());
         assert!(state_provider_factory.state_trie_overlay_cache.is_empty());
         assert!(matches!(
             provider.state_root(HashedPostState::default()),

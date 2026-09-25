@@ -572,12 +572,10 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
                 // If no reverts are needed, use the manager overlay directly unless the reused
                 // sparse trie already covers both durable frontiers through the
                 // requested parent.
-                if !cfg!(feature = "state-trie-db") &&
-                    self.should_skip_overlay_for_reused_sparse_trie(
-                        state_trie_tip_block.hash,
-                        finish_tip_block.hash,
-                    )
-                {
+                if self.should_skip_overlay_for_reused_sparse_trie(
+                    state_trie_tip_block.hash,
+                    finish_tip_block.hash,
+                ) {
                     self.metrics.sparse_trie_overlay_skips.increment(1);
 
                     return Ok(StateTrieOverlay::empty())
@@ -1099,8 +1097,10 @@ mod tests {
             .build_state_trie_overlay(&provider, true)
             .unwrap();
 
-        assert_eq!(overlay.input().state.is_empty(), !cfg!(feature = "state-trie-db"));
-        assert_eq!(overlay.input().nodes.is_empty(), !cfg!(feature = "state-trie-db"));
+        assert!(overlay.skipped_for_reused_sparse_trie());
+        assert!(overlay.input().state.is_empty());
+        assert!(overlay.input().nodes.is_empty());
+        assert!(overlay.input().state_trie.is_empty());
     }
 
     #[test]

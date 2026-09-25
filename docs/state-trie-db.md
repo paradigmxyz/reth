@@ -59,7 +59,8 @@ They are independent of compact trie update tracking. Overlays merge newest
 values first; persistence applies the same disjoint suffix masking used for the
 legacy trie updates. Execution reads use the BundleState-based execution overlay,
 with direct leaf lookups in the new tables on a miss. They do not construct the
-trie overlay.
+trie overlay. Proof workers also skip that overlay when the reused sparse trie
+covers both persistence frontiers through the parent.
 
 ## Size measurement
 
