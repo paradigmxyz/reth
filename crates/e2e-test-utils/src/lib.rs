@@ -40,6 +40,10 @@ pub mod test_rlp_utils;
 /// Helpers for verifying the persisted state and trie representation
 pub mod trie;
 
+pub mod receipt;
+
+pub mod wait;
+
 mod chain_spec;
 pub use chain_spec::{
     eth_payload_attributes, test_chain_spec, test_chain_spec_builder, test_genesis,

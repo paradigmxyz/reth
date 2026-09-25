@@ -13,7 +13,9 @@ use alloy_provider::Provider;
 use alloy_rpc_types_eth::TransactionRequest;
 use futures::StreamExt;
 use reth_chainspec::EthereumHardfork;
-use reth_e2e_test_utils::{wallet::Wallet, E2ETestSetupExt, NodeHelperType};
+use reth_e2e_test_utils::{
+    receipt::PendingTransactionExt, wallet::Wallet, E2ETestSetupExt, NodeHelperType,
+};
 use reth_node_ethereum::EthereumNode;
 use reth_revm::db::BundleAccount;
 
@@ -140,8 +142,7 @@ async fn test_selfdestruct_post_dencun() -> eyre::Result<()> {
         .send_transaction(deploy_tx(signer.address(), 0, selfdestruct_contract_init_code()))
         .await?;
     node.advance_block().await?;
-    let receipt = pending.get_receipt().await?;
-    assert!(receipt.status(), "Contract deployment should succeed");
+    let receipt = pending.successful_receipt().await?;
 
     let contract_address = receipt.contract_address.expect("Should have contract address");
 
@@ -151,8 +152,7 @@ async fn test_selfdestruct_post_dencun() -> eyre::Result<()> {
     // Trigger SELFDESTRUCT by calling the contract
     let pending = provider.send_transaction(call_tx(signer.address(), contract_address, 1)).await?;
     node.advance_block().await?;
-    let receipt = pending.get_receipt().await?;
-    assert!(receipt.status(), "Selfdestruct tx should succeed");
+    pending.successful_receipt().await?;
 
     // Get the canonical notification for the selfdestruct block
     let notification = node.canonical_stream.next().await.unwrap();
@@ -179,8 +179,7 @@ async fn test_selfdestruct_post_dencun() -> eyre::Result<()> {
     // balance)
     let pending = provider.send_transaction(call_tx(signer.address(), contract_address, 2)).await?;
     node.advance_block().await?;
-    let receipt = pending.get_receipt().await?;
-    assert!(receipt.status(), "Second call to contract should succeed");
+    pending.successful_receipt().await?;
 
     // Consume the canonical notification
     let notification = node.canonical_stream.next().await.unwrap();
@@ -228,8 +227,7 @@ async fn test_selfdestruct_same_tx_post_dencun() -> eyre::Result<()> {
         .send_transaction(deploy_tx(signer.address(), 0, selfdestruct_in_constructor_init_code()))
         .await?;
     node.advance_block().await?;
-    let receipt = pending.get_receipt().await?;
-    assert!(receipt.status(), "Contract deployment with selfdestruct should succeed");
+    pending.successful_receipt().await?;
 
     // Calculate the contract address (CREATE uses sender + nonce)
     let contract_address = signer.address().create(0);
@@ -258,8 +256,7 @@ async fn test_selfdestruct_same_tx_post_dencun() -> eyre::Result<()> {
         .send_transaction(transfer_tx(signer.address(), contract_address, 1, U256::from(1000)))
         .await?;
     node.advance_block().await?;
-    let receipt = pending.get_receipt().await?;
-    assert!(receipt.status(), "ETH transfer to destroyed address should succeed");
+    pending.successful_receipt().await?;
 
     // Consume the canonical notification
     let _ = node.canonical_stream.next().await;
@@ -297,8 +294,7 @@ async fn test_selfdestruct_pre_dencun() -> eyre::Result<()> {
         .send_transaction(deploy_tx(signer.address(), 0, selfdestruct_contract_init_code()))
         .await?;
     node.advance_block().await?;
-    let receipt = pending.get_receipt().await?;
-    assert!(receipt.status(), "Contract deployment should succeed");
+    let receipt = pending.successful_receipt().await?;
 
     let contract_address = receipt.contract_address.expect("Should have contract address");
 
@@ -308,8 +304,7 @@ async fn test_selfdestruct_pre_dencun() -> eyre::Result<()> {
     // Trigger SELFDESTRUCT by calling the contract
     let pending = provider.send_transaction(call_tx(signer.address(), contract_address, 1)).await?;
     node.advance_block().await?;
-    let receipt = pending.get_receipt().await?;
-    assert!(receipt.status(), "Selfdestruct tx should succeed");
+    pending.successful_receipt().await?;
 
     // Get the canonical notification for the selfdestruct block
     let notification = node.canonical_stream.next().await.unwrap();
@@ -337,8 +332,7 @@ async fn test_selfdestruct_pre_dencun() -> eyre::Result<()> {
         .send_transaction(transfer_tx(signer.address(), contract_address, 2, U256::from(1000)))
         .await?;
     node.advance_block().await?;
-    let receipt = pending.get_receipt().await?;
-    assert!(receipt.status(), "ETH transfer to destroyed contract address should succeed");
+    pending.successful_receipt().await?;
 
     // Consume the canonical notification
     let notification = node.canonical_stream.next().await.unwrap();
@@ -405,8 +399,7 @@ async fn test_selfdestruct_same_tx_preexisting_account_post_dencun() -> eyre::Re
         ))
         .await?;
     node.advance_block().await?;
-    let receipt = pending.get_receipt().await?;
-    assert!(receipt.status(), "ETH transfer should succeed");
+    pending.successful_receipt().await?;
 
     // Consume the canonical notification
     let _ = node.canonical_stream.next().await;
@@ -420,8 +413,7 @@ async fn test_selfdestruct_same_tx_preexisting_account_post_dencun() -> eyre::Re
         .send_transaction(deploy_tx(signer.address(), 1, selfdestruct_in_constructor_init_code()))
         .await?;
     node.advance_block().await?;
-    let receipt = pending.get_receipt().await?;
-    assert!(receipt.status(), "Contract deployment with selfdestruct should succeed");
+    let receipt = pending.successful_receipt().await?;
 
     // Verify deployment went to the expected address
     assert_eq!(
@@ -470,8 +462,7 @@ async fn test_selfdestruct_same_tx_preexisting_account_post_dencun() -> eyre::Re
         ))
         .await?;
     node.advance_block().await?;
-    let receipt = pending.get_receipt().await?;
-    assert!(receipt.status(), "ETH transfer should succeed");
+    pending.successful_receipt().await?;
 
     // Consume notification
     let _ = node.canonical_stream.next().await;

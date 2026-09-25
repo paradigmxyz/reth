@@ -1,4 +1,9 @@
-use crate::{network::NetworkTestContext, payload::PayloadTestContext, rpc::RpcTestContext};
+use crate::{
+    network::NetworkTestContext,
+    payload::PayloadTestContext,
+    rpc::RpcTestContext,
+    wait::{poll_until, WAIT_TIMEOUT},
+};
 use alloy_consensus::{transaction::TxHashRef, BlockHeader};
 use alloy_eips::BlockId;
 use alloy_network::{Ethereum, IntoWallet};
@@ -9,7 +14,7 @@ use alloy_provider::{
 };
 use alloy_rpc_types_engine::{ExecutionPayloadEnvelopeV5, ForkchoiceState, ForkchoiceUpdated};
 use alloy_rpc_types_eth::BlockNumberOrTag;
-use eyre::{eyre, Ok};
+use eyre::{ensure, eyre, Ok};
 use futures_util::Future;
 use jsonrpsee::{core::client::ClientT, http_client::HttpClient};
 use reth_chainspec::EthereumHardforks;
@@ -28,10 +33,6 @@ use reth_stages_types::StageId;
 use std::{pin::Pin, sync::Arc, time::Duration};
 use tokio_stream::StreamExt;
 use url::Url;
-
-/// Maximum time the wait helpers of [`NodeTestContext`] wait for the node, e.g. to sync to or
-/// commit a block.
-pub const WAIT_TIMEOUT: Duration = Duration::from_secs(60);
 
 /// Interval at which the alloy providers of [`NodeTestContext`] poll the node, e.g. for receipts
 /// of pending transactions.
@@ -126,6 +127,30 @@ where
         Ok(chain)
     }
 
+    /// Injects the raw transaction into the pool and advances the node one block, returning the
+    /// transaction hash and the built payload.
+    ///
+    /// Returns an error if the transaction is not included in the block.
+    pub async fn inject_and_advance(
+        &mut self,
+        raw_tx: Bytes,
+    ) -> eyre::Result<(B256, Payload::BuiltPayload)>
+    where
+        AddOns::EthApi: EthApiSpec<Provider: BlockReader<Block = BlockTy<Node::Types>>>
+            + EthTransactions
+            + TraceExt,
+    {
+        let tx_hash = self.rpc.inject_tx(raw_tx).await?;
+        let payload = self.advance_block().await?;
+        let block = payload.block();
+        ensure!(
+            block.body().transactions().iter().any(|tx| *tx.tx_hash() == tx_hash),
+            "transaction {tx_hash} was not included in block {}",
+            block.number()
+        );
+        Ok((tx_hash, payload))
+    }
+
     /// Returns the current forkchoice state of the node.
     pub fn current_forkchoice_state(&self) -> eyre::Result<ForkchoiceState> {
         let latest_header =
@@ -202,61 +227,61 @@ where
         expected_block_hash: BlockHash,
         wait_finish_checkpoint: bool,
     ) -> eyre::Result<()> {
-        let wait = async {
-            let mut check = !wait_finish_checkpoint;
-            loop {
-                tokio::time::sleep(Duration::from_millis(20)).await;
-
-                if !check &&
-                    wait_finish_checkpoint &&
-                    let Some(checkpoint) =
-                        self.inner.provider.get_stage_checkpoint(StageId::Finish)? &&
-                    checkpoint.block_number >= number
-                {
-                    check = true
-                }
-
-                if check {
-                    if let Some(latest_header) = self.inner.provider.header_by_number(number)? {
-                        assert_eq!(latest_header.hash_slow(), expected_block_hash);
-                        break
-                    }
-                    assert!(
-                        !wait_finish_checkpoint,
-                        "Finish checkpoint matches, but could not fetch block."
-                    );
-                }
+        let provider = &self.inner.provider;
+        poll_until(format_args!("block {number}"), move || async move {
+            if wait_finish_checkpoint &&
+                provider
+                    .get_stage_checkpoint(StageId::Finish)?
+                    .is_none_or(|checkpoint| checkpoint.block_number < number)
+            {
+                return Ok(None)
             }
-            Ok(())
-        };
-        tokio::time::timeout(WAIT_TIMEOUT, wait)
-            .await
-            .map_err(|_| eyre!("timed out waiting for block {number}"))?
+            let Some(header) = provider.header_by_number(number)? else {
+                ensure!(
+                    !wait_finish_checkpoint,
+                    "Finish checkpoint matches, but could not fetch block {number}"
+                );
+                return Ok(None)
+            };
+            let hash = header.hash_slow();
+            ensure!(
+                hash == expected_block_hash,
+                "block {number} is {hash}, expected {expected_block_hash}"
+            );
+            Ok(Some(()))
+        })
+        .await
     }
 
     /// Waits for the node to unwind to the given block number.
     ///
     /// Returns an error if the node does not unwind within [`WAIT_TIMEOUT`].
     pub async fn wait_unwind(&self, number: BlockNumber) -> eyre::Result<()> {
-        let wait = async {
-            loop {
-                tokio::time::sleep(Duration::from_millis(10)).await;
-                if let Some(checkpoint) =
-                    self.inner.provider.get_stage_checkpoint(StageId::Headers)? &&
-                    checkpoint.block_number == number
-                {
-                    break
-                }
-            }
-            Ok(())
-        };
-        tokio::time::timeout(WAIT_TIMEOUT, wait)
-            .await
-            .map_err(|_| eyre!("timed out waiting for unwind to block {number}"))?
+        let provider = &self.inner.provider;
+        poll_until(format_args!("unwind to block {number}"), move || async move {
+            let checkpoint = provider.get_stage_checkpoint(StageId::Headers)?;
+            Ok(checkpoint.is_some_and(|checkpoint| checkpoint.block_number == number).then_some(()))
+        })
+        .await
     }
 
-    /// Asserts that a new block has been added to the blockchain
-    /// and the tx has been included in the block.
+    /// Waits until `condition` holds for the transaction pool of the node.
+    ///
+    /// Returns an error if the condition does not hold within [`WAIT_TIMEOUT`].
+    pub async fn wait_for_pool(
+        &self,
+        mut condition: impl FnMut(&Node::Pool) -> bool,
+    ) -> eyre::Result<()> {
+        let pool = &self.inner.pool;
+        poll_until("transaction pool condition", move || {
+            let ready = condition(pool);
+            async move { Ok(ready.then_some(())) }
+        })
+        .await
+    }
+
+    /// Asserts that a new block has been added to the blockchain and the tx has been included in
+    /// the block, at any position.
     ///
     /// Does NOT work for pipeline since there's no stream notification! Returns an error if the
     /// block is not committed within [`WAIT_TIMEOUT`].
@@ -266,39 +291,36 @@ where
         block_hash: B256,
         block_number: BlockNumber,
     ) -> eyre::Result<()> {
-        let wait =
-            async {
-                // get head block from notifications stream and verify the tx has been pushed to the
-                // pool is actually present in the canonical block
-                let head = self
-                    .canonical_stream
-                    .next()
-                    .await
-                    .ok_or_else(|| eyre!("canonical state stream closed"))?;
-                let tx =
-                    head.tip().body().transactions().first().ok_or_else(|| {
-                        eyre!("block {} has no transactions", head.tip().number())
-                    })?;
-                assert_eq!(tx.tx_hash().as_slice(), tip_tx_hash.as_slice());
-
-                loop {
-                    // wait for the block to commit
-                    tokio::time::sleep(Duration::from_millis(20)).await;
-                    if let Some(latest_block) =
-                        self.inner.provider.block_by_number_or_tag(BlockNumberOrTag::Latest)? &&
-                        latest_block.header().number() == block_number
-                    {
-                        // make sure the block hash we submitted via FCU engine api is the new
-                        // latest block using an RPC call
-                        assert_eq!(latest_block.header().hash_slow(), block_hash);
-                        break
-                    }
-                }
-                Ok(())
-            };
-        tokio::time::timeout(WAIT_TIMEOUT, wait)
+        // get head block from notifications stream and verify the tx has been pushed to the pool is
+        // actually present in the canonical block
+        let head = tokio::time::timeout(WAIT_TIMEOUT, self.canonical_stream.next())
             .await
-            .map_err(|_| eyre!("timed out waiting for block {block_number} to be committed"))?
+            .map_err(|_| eyre!("timed out waiting for block {block_number}"))?
+            .ok_or_else(|| eyre!("canonical state stream closed"))?;
+        ensure!(
+            head.tip().body().transactions().iter().any(|tx| *tx.tx_hash() == tip_tx_hash),
+            "transaction {tip_tx_hash} is not included in block {}",
+            head.tip().number()
+        );
+
+        // wait for the block to commit and make sure the block hash we submitted via FCU engine
+        // api is the new latest block
+        let provider = &self.inner.provider;
+        poll_until(format_args!("block {block_number} to be committed"), move || async move {
+            let Some(latest) = provider.block_by_number_or_tag(BlockNumberOrTag::Latest)? else {
+                return Ok(None)
+            };
+            if latest.header().number() != block_number {
+                return Ok(None)
+            }
+            let hash = latest.header().hash_slow();
+            ensure!(
+                hash == block_hash,
+                "latest block {block_number} is {hash}, expected {block_hash}"
+            );
+            Ok(Some(()))
+        })
+        .await
     }
 
     /// Gets block hash by number.

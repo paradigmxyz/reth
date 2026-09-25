@@ -8,8 +8,8 @@ use reth_node_builder::{rpc::RpcRegistry, NodeTypes};
 use reth_provider::BlockReader;
 use reth_rpc_api::DebugApiServer;
 use reth_rpc_eth_api::{
-    helpers::{EthApiSpec, EthTransactions, TraceExt},
-    EthApiTypes,
+    helpers::{EthApiSpec, EthTransactions, LoadReceipt, TraceExt},
+    EthApiTypes, RpcReceipt,
 };
 
 #[expect(missing_debug_implementations)]
@@ -54,5 +54,17 @@ where
             .await?
             .ok_or_else(|| eyre::eyre!("transaction {hash} not found"))?;
         Ok(T::decode_2718_exact(&tx)?)
+    }
+
+    /// Returns the RPC receipt of the transaction with the given hash, if it is included in a
+    /// canonical block.
+    pub async fn transaction_receipt(
+        &self,
+        hash: B256,
+    ) -> Result<Option<RpcReceipt<EthApi::NetworkTypes>>, EthApi::Error>
+    where
+        EthApi: LoadReceipt + 'static,
+    {
+        self.inner.eth_api().transaction_receipt(hash).await
     }
 }

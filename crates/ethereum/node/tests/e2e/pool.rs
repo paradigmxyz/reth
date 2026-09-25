@@ -5,7 +5,8 @@ use alloy_provider::Provider;
 use alloy_rpc_types_eth::TransactionRequest;
 use reth_chainspec::EthereumHardfork;
 use reth_e2e_test_utils::{
-    test_chain_spec, transaction::TransactionTestContext, wallet::Wallet, E2ETestSetupExt,
+    test_chain_spec, transaction::TransactionTestContext, wait::poll_until, wallet::Wallet,
+    E2ETestSetupExt,
 };
 use reth_node_core::args::TxPoolArgs;
 use reth_node_ethereum::EthereumNode;
@@ -207,28 +208,24 @@ async fn maintain_txpool_reorg() -> eyre::Result<()> {
 
     node.update_forkchoice(genesis_hash, block_hash1).await?;
 
-    loop {
-        // wait for pool to process `CanonStateNotification::Commit` event correctly, and finally
-        // tx1 will be removed and tx2 is still in the pool
-        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
-        if txpool.get(&tx_hash1).is_none() && txpool.get(&tx_hash2).is_some() {
-            break;
-        }
-    }
+    // wait for pool to process `CanonStateNotification::Commit` event correctly, and finally tx1
+    // will be removed and tx2 is still in the pool
+    poll_until("pool to process the commit", || async {
+        Ok((txpool.get(&tx_hash1).is_none() && txpool.get(&tx_hash2).is_some()).then_some(()))
+    })
+    .await?;
 
     // submit payload2
     let block_hash2 = node.submit_payload(payload2).await?;
 
     node.update_forkchoice(genesis_hash, block_hash2).await?;
 
-    loop {
-        // wait for pool to process `CanonStateNotification::Reorg` event properly, and finally tx1
-        // will be added back to the pool and tx2 will be removed.
-        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
-        if txpool.get(&tx_hash1).is_some() && txpool.get(&tx_hash2).is_none() {
-            break;
-        }
-    }
+    // wait for pool to process `CanonStateNotification::Reorg` event properly, and finally tx1
+    // will be added back to the pool and tx2 will be removed.
+    poll_until("pool to process the reorg", || async {
+        Ok((txpool.get(&tx_hash1).is_some() && txpool.get(&tx_hash2).is_none()).then_some(()))
+    })
+    .await?;
 
     Ok(())
 }
@@ -288,14 +285,10 @@ async fn maintain_txpool_commit() -> eyre::Result<()> {
     let _ = node.rpc.inject_tx(envelop.encoded_2718().into()).await.unwrap();
     let _ = node.advance_block().await.unwrap();
 
-    loop {
-        // wait for pool to process `CanonStateNotification::Commit` event correctly, and finally
-        // the pool will be cleared
-        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
-        if txpool.is_empty() {
-            break;
-        }
-    }
+    // wait for pool to process `CanonStateNotification::Commit` event correctly, and finally the
+    // pool will be cleared
+    poll_until("pool to process the commit", || async { Ok(txpool.is_empty().then_some(())) })
+        .await?;
 
     Ok(())
 }

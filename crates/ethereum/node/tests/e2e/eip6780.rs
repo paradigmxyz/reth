@@ -32,6 +32,7 @@ use alloy_rpc_types_eth::{TransactionReceipt, TransactionRequest};
 use futures::StreamExt;
 use reth_chainspec::EthereumHardfork;
 use reth_e2e_test_utils::{
+    receipt::await_successful_receipts,
     trie::{assert_trie_consistency, wait_for_persisted_block},
     E2ETestSetupExt, NodeHelperType,
 };
@@ -159,19 +160,7 @@ impl<P: Provider> SuiteCtx<P> {
             .ok_or_else(|| eyre::eyre!("canonical stream ended"))?;
         self.last_committed = Some(notification.committed());
 
-        let mut receipts = Vec::with_capacity(expected);
-        for tx in pending {
-            receipts.push(tx.get_receipt().await?);
-        }
-        for (index, receipt) in receipts.iter().enumerate() {
-            assert!(
-                receipt.status(),
-                "transaction {index} in block {:?} reverted: gas used {}",
-                receipt.block_number,
-                receipt.gas_used,
-            );
-        }
-        Ok(receipts)
+        await_successful_receipts(pending).await
     }
 
     /// Returns the account entry of the most recently committed block's bundle state.

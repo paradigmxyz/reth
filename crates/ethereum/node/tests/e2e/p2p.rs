@@ -101,17 +101,12 @@ async fn can_sync() -> eyre::Result<()> {
     let mut second_node = nodes.pop().unwrap();
     let mut first_node = nodes.pop().unwrap();
 
-    // Make the first node advance
-    let tx_hash = first_node.rpc.inject_tx(raw_tx).await?;
-
     // make the node advance
-    let payload = first_node.advance_block().await?;
-
+    let (tx_hash, payload) = first_node.inject_and_advance(raw_tx).await?;
     let block_hash = payload.block().hash();
-    let block_number = payload.block().number;
 
     // assert the block has been committed to the blockchain
-    first_node.assert_new_block(tx_hash, block_hash, block_number).await?;
+    first_node.assert_new_block(tx_hash, block_hash, payload.block().number).await?;
 
     // only send forkchoice update to second node
     second_node.update_forkchoice(block_hash, block_hash).await?;
@@ -390,8 +385,7 @@ async fn test_tx_propagation() -> eyre::Result<()> {
 
     // Advance all nodes for 1 block so that they don't consider themselves unsynced
     let tx = build_tx();
-    nodes[0].rpc.inject_tx(tx.encoded_2718().into()).await?;
-    let payload = nodes[0].advance_block().await?;
+    let (_, payload) = nodes[0].inject_and_advance(tx.encoded_2718().into()).await?;
     nodes[1..]
         .iter_mut()
         .map(|node| async {

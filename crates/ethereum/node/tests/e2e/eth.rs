@@ -48,16 +48,10 @@ async fn can_run_eth_node() -> eyre::Result<()> {
     let raw_tx = TransactionTestContext::transfer_tx_bytes(1, wallet.inner).await;
 
     // make the node advance
-    let tx_hash = node.rpc.inject_tx(raw_tx).await?;
-
-    // make the node advance
-    let payload = node.advance_block().await?;
-
-    let block_hash = payload.block().hash();
-    let block_number = payload.block().number;
+    let (tx_hash, payload) = node.inject_and_advance(raw_tx).await?;
 
     // assert the block has been committed to the blockchain
-    node.assert_new_block(tx_hash, block_hash, block_number).await?;
+    node.assert_new_block(tx_hash, payload.block().hash(), payload.block().number).await?;
 
     Ok(())
 }
@@ -76,16 +70,10 @@ async fn can_run_eth_node_with_auth_engine_api_over_ipc() -> eyre::Result<()> {
     let raw_tx = TransactionTestContext::transfer_tx_bytes(1, wallet.inner).await;
 
     // make the node advance
-    let tx_hash = node.rpc.inject_tx(raw_tx).await?;
-
-    // make the node advance
-    let payload = node.advance_block().await?;
-
-    let block_hash = payload.block().hash();
-    let block_number = payload.block().number;
+    let (tx_hash, payload) = node.inject_and_advance(raw_tx).await?;
 
     // assert the block has been committed to the blockchain
-    node.assert_new_block(tx_hash, block_hash, block_number).await?;
+    node.assert_new_block(tx_hash, payload.block().hash(), payload.block().number).await?;
 
     Ok(())
 }
@@ -112,8 +100,7 @@ async fn test_engine_graceful_shutdown() -> eyre::Result<()> {
         EthereumNode::test_setup_for(EthereumHardfork::Cancun).build_single().await?;
 
     let raw_tx = TransactionTestContext::transfer_tx_bytes(1, wallet.inner).await;
-    let tx_hash = node.rpc.inject_tx(raw_tx).await?;
-    let payload = node.advance_block().await?;
+    let (tx_hash, payload) = node.inject_and_advance(raw_tx).await?;
     node.assert_new_block(tx_hash, payload.block().hash(), payload.block().number).await?;
 
     // Get block number before shutdown
