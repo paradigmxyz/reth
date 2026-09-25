@@ -67,13 +67,7 @@ async fn test_rpc_shares_sender_recovery_cache_with_execution() -> eyre::Result<
     use reth_transaction_pool::test_utils::TransactionGenerator;
 
     let chain_spec = Arc::new(ChainSpecBuilder::mainnet().cancun_activated().build());
-    let (node, _) = EthereumNode::test_setup(1, chain_spec)
-        .with_node_config_modifier(|mut config| {
-            config.engine.sender_recovery_cache_enabled = true;
-            config
-        })
-        .build_single()
-        .await?;
+    let (node, _) = EthereumNode::test_setup(1, chain_spec).build_single().await?;
     let cache = node.inner.evm_config.sender_recovery_cache.as_ref().unwrap();
     let client = node.rpc_client().unwrap();
     let transaction =
@@ -495,13 +489,7 @@ async fn test_flashbots_validate_uses_shared_sender_recovery_cache() -> eyre::Re
 
     let chain_spec = test_chain_spec(EthereumHardfork::Cancun);
 
-    let (mut node, wallet) = EthereumNode::test_setup(1, chain_spec)
-        .with_node_config_modifier(|mut config| {
-            config.engine.sender_recovery_cache_enabled = true;
-            config
-        })
-        .build_single()
-        .await?;
+    let (mut node, wallet) = EthereumNode::test_setup(1, chain_spec).build_single().await?;
     let cache = node.inner.evm_config.sender_recovery_cache.clone().expect("cache is enabled");
 
     let signer = wallet.wallet_gen().swap_remove(0);
