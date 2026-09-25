@@ -88,7 +88,8 @@ pub trait EthSubscriptions:
                 .committed()
                 .blocks_iter()
                 .filter_map(|block| {
-                    match converter.convert_header(block.clone_sealed_header(), block.rlp_length())
+                    match converter
+                        .convert_header(block.clone_sealed_header(), Some(block.rlp_length()))
                     {
                         Ok(header) => Some(header),
                         Err(err) => {

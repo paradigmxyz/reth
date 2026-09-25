@@ -218,7 +218,10 @@ pub struct OverlayBuilder<N: NodePrimitives = EthPrimitives> {
     /// Manager used for cached changesets and overlays.
     overlay_manager: OverlayManager<N>,
     /// Snapshot of the in-memory chain ending at the requested parent.
-    parent_state: Option<BlockState<N>>,
+    ///
+    /// This is shared with the caller so that a chain that is already maintained elsewhere (for
+    /// example the canonical in-memory chain) can be reused instead of rebuilt.
+    parent_state: Option<Arc<BlockState<N>>>,
     /// Anchor hash of the reused sparse trie, if this task reused one.
     reused_sparse_trie_anchor_hash: Option<B256>,
     /// Whether building the overlay may query revert changesets.
@@ -233,7 +236,7 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
     /// Create a new manager-backed overlay builder.
     pub(crate) fn new(
         parent_hash: B256,
-        parent_state: Option<BlockState<N>>,
+        parent_state: Option<Arc<BlockState<N>>>,
         overlay_manager: OverlayManager<N>,
     ) -> Self {
         Self {
@@ -268,7 +271,7 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
         debug_assert_eq!(block.recovered_block().parent_hash(), self.parent_hash);
         self.parent_hash = block.recovered_block().hash();
         self.parent_state =
-            Some(BlockState::with_parent(block, self.parent_state.take().map(Arc::new)));
+            Some(Arc::new(BlockState::with_parent(block, self.parent_state.take())));
         self.reused_sparse_trie_anchor_hash = None;
         self.overlay_cache_config.write_to_cache = false;
         self
@@ -668,7 +671,7 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
         if anchor_hash == self.parent_hash {
             Ok((Arc::new(TrieUpdatesSorted::default()), Arc::new(HashedPostStateSorted::default())))
         } else {
-            let parent_state = self.parent_state.as_ref().ok_or_else(|| {
+            let parent_state = self.parent_state.as_deref().ok_or_else(|| {
                 ProviderError::other(std::io::Error::other(
                     "state trie overlay cannot be anchored without in-memory parent state",
                 ))
@@ -687,7 +690,7 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
         if anchor_hash == self.parent_hash {
             Ok(Arc::new(ExecutionOverlay::default()))
         } else {
-            let parent_state = self.parent_state.as_ref().ok_or_else(|| {
+            let parent_state = self.parent_state.as_deref().ok_or_else(|| {
                 ProviderError::other(std::io::Error::other("missing in-memory parent state"))
             })?;
             self.overlay_manager
@@ -839,7 +842,9 @@ enum AnchorForParent {
 mod tests {
     use super::*;
     use alloy_primitives::{map::HashMap, Address, U256};
-    use reth_chain_state::{test_utils::TestBlockBuilder, ExecutedBlock};
+    use reth_chain_state::{
+        test_utils::TestBlockBuilder, CanonicalInMemoryState, ExecutedBlock, NewCanonicalChain,
+    };
     use reth_db::{
         models::{AccountBeforeTx, BlockNumberAddress},
         tables,
@@ -935,6 +940,23 @@ mod tests {
         provider_rw.commit().unwrap();
 
         (factory, blocks)
+    }
+
+    /// Tracks `blocks` in a [`CanonicalInMemoryState`] the way the engine does, so the resulting
+    /// `Arc<BlockState>` chain matches what state providers hold.
+    fn canonical_in_memory_state(
+        blocks: &[ExecutedBlock<EthPrimitives>],
+    ) -> CanonicalInMemoryState<EthPrimitives> {
+        let state = CanonicalInMemoryState::empty();
+        state.update_chain(NewCanonicalChain::Commit { new: blocks.to_vec() });
+        state
+    }
+
+    const fn anchor_num_hash(anchor: &AnchorForParent) -> BlockNumHash {
+        match anchor {
+            AnchorForParent::NoReverts { anchor } |
+            AnchorForParent::RevertsRequired { anchor, .. } => *anchor,
+        }
     }
 
     fn account_keys(overlay: &StateTrieOverlay) -> Vec<B256> {
@@ -1045,6 +1067,69 @@ mod tests {
         assert_eq!(overlay.storage_value(address, U256::from(14)), Some(U256::ZERO));
         assert!(overlay.code_hashes.contains_key(&first_code_hash));
         assert!(overlay.code_hashes.contains_key(&later_code_hash));
+    }
+
+    #[test]
+    fn overlay_builder_for_state_matches_hash_lookup() {
+        // The state trie frontier sits at block 1 while Finish is at block 3, so the in-memory
+        // chain straddles the state-masking frontier.
+        let (factory, blocks) = setup_frontiers(1, 3);
+        let manager = OverlayManager::default();
+        for block in &blocks[2..=4] {
+            manager.insert_block(block.clone());
+        }
+        let canonical = canonical_in_memory_state(&blocks[2..=4]);
+        let provider = factory.provider().unwrap();
+
+        // The head, a block below the head, and the oldest in-memory block, whose chain no longer
+        // covers the Finish frontier and therefore anchors below it.
+        for index in [4usize, 3, 2] {
+            let hash = blocks[index].recovered_block().hash();
+            let state = canonical.state_by_hash(hash).expect("canonical state for in-memory block");
+            assert_eq!(state.hash(), hash);
+
+            let from_hash = manager.overlay_builder(hash);
+            let from_state = manager.overlay_builder_for_state(state);
+
+            let anchor = anchor_num_hash(&from_hash.anchor_at_parent(&provider).unwrap());
+            assert_eq!(
+                anchor_num_hash(&from_state.anchor_at_parent(&provider).unwrap()),
+                anchor,
+                "block {index} must resolve the same anchor from both builders"
+            );
+
+            let (hash_overlay, hash_fallback) = from_hash.execution_overlay(&provider).unwrap();
+            let (state_overlay, state_fallback) = from_state.execution_overlay(&provider).unwrap();
+            assert_eq!(state_fallback, hash_fallback);
+            assert!(
+                Arc::ptr_eq(&hash_overlay, &state_overlay),
+                "block {index} must resolve the cached execution overlay"
+            );
+
+            let (hash_nodes, hash_state) =
+                from_hash.resolve_state_trie_overlays(anchor.hash).unwrap();
+            let (state_nodes, state_state) =
+                from_state.resolve_state_trie_overlays(anchor.hash).unwrap();
+            assert!(
+                Arc::ptr_eq(&hash_nodes, &state_nodes),
+                "block {index} must resolve the cached trie overlay nodes"
+            );
+            assert!(
+                Arc::ptr_eq(&hash_state, &state_state),
+                "block {index} must resolve the cached trie overlay state"
+            );
+
+            // The fully built overlay folds in database reverts for anchors below Finish, so
+            // compare it by value rather than by pointer.
+            let hash_trie = from_hash.build_state_trie_overlay(&provider, false).unwrap();
+            let state_trie = from_state.build_state_trie_overlay(&provider, false).unwrap();
+            assert_eq!(account_keys(&state_trie), account_keys(&hash_trie), "block {index}");
+            assert_eq!(
+                account_node_paths(&state_trie),
+                account_node_paths(&hash_trie),
+                "block {index}"
+            );
+        }
     }
 
     #[test]
@@ -1340,6 +1425,32 @@ mod tests {
                 panic!("persisted parent below Finish must require reverts")
             }
         }
+    }
+
+    #[test]
+    fn builder_appends_block_to_parent_state() {
+        let manager = OverlayManager::default();
+        let blocks = test_blocks();
+        for block in &blocks[2..=4] {
+            manager.insert_block(block.clone());
+        }
+
+        let block = TestBlockBuilder::eth().get_executed_block_with_number(
+            blocks[4].recovered_block().number() + 1,
+            blocks[4].recovered_block().hash(),
+        );
+        let builder = manager
+            .overlay_builder(block.recovered_block().parent_hash())
+            .with_appended_block(block.clone());
+
+        assert_eq!(builder.parent_hash, block.recovered_block().hash());
+        assert_eq!(
+            builder.parent_state.unwrap().chain().map(BlockState::hash).collect::<Vec<_>>(),
+            std::iter::once(&block)
+                .chain(blocks[2..=4].iter().rev())
+                .map(|block| block.recovered_block().hash())
+                .collect::<Vec<_>>(),
+        );
     }
 
     #[test]
