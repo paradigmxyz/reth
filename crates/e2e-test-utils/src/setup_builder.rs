@@ -33,6 +33,7 @@ use tracing::{span, Instrument, Level};
 /// - build payloads with [`eth_payload_attributes`] for the hardforks active in the chain spec,
 /// - have discovery disabled, use unused ports and serve all RPC modules except `testing` over
 ///   HTTP,
+/// - report an idle sync state from startup, so they gossip transactions before their first block,
 /// - are connected to each other.
 ///
 /// Once launched, each node receives a forkchoice update that makes genesis the head, safe and
@@ -156,6 +157,14 @@ impl<N: NodeBuilderHelper> E2ETestSetupBuilder<N> {
     pub const fn with_storage_v2(mut self, storage_v2: bool) -> Self {
         self.storage_v2 = storage_v2;
         self
+    }
+
+    /// Sets whether the nodes run in dev mode (`--dev`).
+    ///
+    /// Unlike [dev mining](Self::with_dev_mining), this only sets the dev flag and does not start a
+    /// local miner.
+    pub fn with_dev_mode(self, dev: bool) -> Self {
+        self.with_node_config_modifier(move |config| config.set_dev(dev))
     }
 
     /// Launches the node in dev mode with a local miner that builds a block every `block_time`, or
@@ -340,10 +349,10 @@ pub(crate) fn test_tree_config() -> TreeConfig {
 
 /// Returns the base configuration of a test node.
 ///
-/// Discovery is disabled, all ports are unused and all RPC modules except `testing` are served
-/// over HTTP.
+/// Discovery is disabled, all ports are unused, all RPC modules except `testing` are served over
+/// HTTP and the node reports an idle sync state from startup.
 pub(crate) fn test_node_config<C>(chain_spec: Arc<C>) -> NodeConfig<C> {
-    NodeConfig::new(chain_spec)
+    let mut config = NodeConfig::new(chain_spec)
         .with_network(NetworkArgs {
             discovery: DiscoveryArgs { disable_discovery: true, ..DiscoveryArgs::default() },
             ..NetworkArgs::default()
@@ -354,7 +363,11 @@ pub(crate) fn test_node_config<C>(chain_spec: Arc<C>) -> NodeConfig<C> {
                 .with_unused_ports()
                 .with_http()
                 .with_http_api(RpcModuleSelection::All),
-        )
+        );
+    // Nodes otherwise report that they are syncing until their first canonical block, which
+    // e.g. stops transaction gossip.
+    config.debug.startup_sync_state_idle = true;
+    config
 }
 
 /// Launches a test node with the engine launcher.

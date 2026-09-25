@@ -212,7 +212,7 @@ where
         .with_tree_config_modifier(move |base| {
             tree_config.clone().with_cross_block_cache_size(base.cross_block_cache_size())
         })
-        .with_node_config_modifier(move |config| config.set_dev(is_dev))
+        .with_dev_mode(is_dev)
         .with_storage_v2(self.storage_v2)
         .with_connect_nodes(self.network.connect_nodes)
         .build()

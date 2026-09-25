@@ -5,9 +5,9 @@ use alloy_network::{Ethereum, IntoWallet};
 use alloy_primitives::{BlockHash, BlockNumber, Bytes, Sealable, B256};
 use alloy_provider::{
     fillers::{FillProvider, RecommendedFillers, TxFiller},
-    ProviderBuilder, RootProvider,
+    Provider, ProviderBuilder, RootProvider,
 };
-use alloy_rpc_types_engine::{ExecutionPayloadEnvelopeV5, ForkchoiceState};
+use alloy_rpc_types_engine::{ExecutionPayloadEnvelopeV5, ForkchoiceState, ForkchoiceUpdated};
 use alloy_rpc_types_eth::BlockNumberOrTag;
 use eyre::{eyre, Ok};
 use futures_util::Future;
@@ -32,6 +32,13 @@ use url::Url;
 /// Maximum time the wait helpers of [`NodeTestContext`] wait for the node, e.g. to sync to or
 /// commit a block.
 pub const WAIT_TIMEOUT: Duration = Duration::from_secs(60);
+
+/// Interval at which the alloy providers of [`NodeTestContext`] poll the node, e.g. for receipts
+/// of pending transactions.
+///
+/// Much shorter than alloy's default for local nodes, since test nodes build blocks on demand or
+/// with short dev block times.
+pub const RPC_PROVIDER_POLL_INTERVAL: Duration = Duration::from_millis(10);
 
 /// A helper struct to handle node actions
 #[expect(missing_debug_implementations)]
@@ -332,9 +339,14 @@ where
         Ok(())
     }
 
-    /// Sends a forkchoice update message to the engine.
-    pub async fn update_forkchoice(&self, current_head: B256, new_head: B256) -> eyre::Result<()> {
-        self.inner
+    /// Sends a forkchoice update message to the engine and returns its response.
+    pub async fn update_forkchoice(
+        &self,
+        current_head: B256,
+        new_head: B256,
+    ) -> eyre::Result<ForkchoiceUpdated> {
+        Ok(self
+            .inner
             .add_ons_handle
             .beacon_engine_handle
             .fork_choice_updated(
@@ -345,13 +357,12 @@ where
                 },
                 None,
             )
-            .await?;
-
-        Ok(())
+            .await?)
     }
 
-    /// Sends forkchoice update to the engine api with a zero finalized hash
-    pub async fn update_optimistic_forkchoice(&self, hash: B256) -> eyre::Result<()> {
+    /// Sends forkchoice update to the engine api with a zero finalized hash and returns its
+    /// response.
+    pub async fn update_optimistic_forkchoice(&self, hash: B256) -> eyre::Result<ForkchoiceUpdated> {
         self.update_forkchoice(B256::ZERO, hash).await
     }
 
@@ -406,7 +417,7 @@ where
     }
 
     /// Returns an alloy provider for the network `Net` with its recommended fillers connected to
-    /// the HTTP RPC server.
+    /// the HTTP RPC server, polling every [`RPC_PROVIDER_POLL_INTERVAL`].
     ///
     /// This is [`Self::rpc_provider`] for nodes whose RPC types differ from Ethereum's.
     ///
@@ -417,11 +428,13 @@ where
         &self,
     ) -> FillProvider<impl TxFiller<Net> + use<Net, Node, Payload, AddOns>, RootProvider<Net>, Net>
     {
-        ProviderBuilder::new_with_network::<Net>().connect_http(self.rpc_url())
+        let provider = ProviderBuilder::new_with_network::<Net>().connect_http(self.rpc_url());
+        provider.client().set_poll_interval(RPC_PROVIDER_POLL_INTERVAL);
+        provider
     }
 
     /// Returns an alloy provider for the network `Net` with its recommended fillers and the given
-    /// wallet connected to the HTTP RPC server.
+    /// wallet connected to the HTTP RPC server, polling every [`RPC_PROVIDER_POLL_INTERVAL`].
     ///
     /// This is [`Self::rpc_provider_with_wallet`] for nodes whose RPC types differ from
     /// Ethereum's.
@@ -437,7 +450,10 @@ where
         Net: RecommendedFillers,
         W: IntoWallet<Net, NetworkWallet: Clone>,
     {
-        ProviderBuilder::new_with_network::<Net>().wallet(wallet).connect_http(self.rpc_url())
+        let provider =
+            ProviderBuilder::new_with_network::<Net>().wallet(wallet).connect_http(self.rpc_url());
+        provider.client().set_poll_interval(RPC_PROVIDER_POLL_INTERVAL);
+        provider
     }
 
     /// Returns an Engine API client.
