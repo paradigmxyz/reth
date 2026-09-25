@@ -4,12 +4,12 @@
 //! configurations through closures that modify `NodeConfig` and `TreeConfig`.
 
 use crate::{
-    eth_payload_attributes, node::NodeTestContext, wallet::Wallet, NodeBuilderHelper,
-    NodeHelperType,
+    eth_payload_attributes, node::NodeTestContext, test_chain_spec, wallet::Wallet,
+    NodeBuilderHelper, NodeHelperType,
 };
 use eyre::ensure;
 use futures_util::future::TryJoinAll;
-use reth_chainspec::EthChainSpec;
+use reth_chainspec::{ChainSpec, EthChainSpec, EthereumHardfork};
 use reth_node_api::{PayloadAttrTy, TreeConfig};
 use reth_node_builder::{EngineNodeLauncher, NodeBuilder, NodeConfig, NodeHandle};
 use reth_node_core::args::{DiscoveryArgs, NetworkArgs, PruningArgs, RpcServerArgs, StorageArgs};
@@ -34,10 +34,11 @@ use tracing::{span, Instrument, Level};
 ///
 /// Configuration and tree configuration modifiers are applied in the order they are added.
 ///
-/// Use [`E2ETestSetupExt::test_setup`] to create the builder without naming the node type twice:
+/// Use [`E2ETestSetupExt::test_setup_for`] to set up nodes on the [`test_chain_spec`] at a
+/// hardfork, or [`E2ETestSetupExt::test_setup`] for any other chain spec:
 ///
 /// ```ignore
-/// let (mut node, wallet) = EthereumNode::test_setup(1, test_chain_spec(EthereumHardfork::Cancun))
+/// let (mut node, wallet) = EthereumNode::test_setup_for(EthereumHardfork::Cancun)
 ///     .with_tree_config_modifier(|config| config.with_persistence_threshold(0))
 ///     .build_single()
 ///     .await?;
@@ -66,6 +67,12 @@ impl<N: NodeBuilderHelper> E2ETestSetupBuilder<N> {
             node_config_modifiers: Vec::new(),
             storage_v2: StorageArgs::default().v2,
         }
+    }
+
+    /// Sets the number of nodes to launch.
+    pub const fn with_num_nodes(mut self, num_nodes: usize) -> Self {
+        self.num_nodes = num_nodes;
+        self
     }
 
     /// Launches the nodes on the given runtime instead of a new [`Runtime::test`].
@@ -230,6 +237,18 @@ pub trait E2ETestSetupExt: NodeBuilderHelper {
     /// Returns an [`E2ETestSetupBuilder`] for `num_nodes` nodes of this type.
     fn test_setup(num_nodes: usize, chain_spec: Arc<Self::ChainSpec>) -> E2ETestSetupBuilder<Self> {
         E2ETestSetupBuilder::new(num_nodes, chain_spec)
+    }
+
+    /// Returns an [`E2ETestSetupBuilder`] for a single node of this type on the
+    /// [`test_chain_spec`] with every hardfork up to and including `fork` active at genesis.
+    ///
+    /// Use [`E2ETestSetupBuilder::with_num_nodes`] to launch more nodes.
+    fn test_setup_for(fork: EthereumHardfork) -> E2ETestSetupBuilder<Self>
+    where
+        Self::ChainSpec: From<ChainSpec>,
+    {
+        let chain_spec = Arc::unwrap_or_clone(test_chain_spec(fork));
+        E2ETestSetupBuilder::new(1, Arc::new(chain_spec.into()))
     }
 }
 

@@ -325,8 +325,8 @@ async fn can_handle_invalid_payload_with_transactions() -> eyre::Result<()> {
 async fn unrecoverable_signature_is_invalid_payload() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
 
-    let chain_spec = test_chain_spec(EthereumHardfork::Paris);
-    let (mut node, wallet) = EthereumNode::test_setup(1, chain_spec).build_single().await?;
+    let (mut node, wallet) =
+        EthereumNode::test_setup_for(EthereumHardfork::Paris).build_single().await?;
 
     let raw_tx = TransactionTestContext::transfer_tx_bytes(1, wallet.inner).await;
     node.rpc.inject_tx(raw_tx).await?;
@@ -378,9 +378,8 @@ async fn unrecoverable_signature_is_invalid_payload() -> eyre::Result<()> {
 async fn undecodable_bal_is_invalid_payload() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
 
-    let chain_spec = test_chain_spec(EthereumHardfork::Amsterdam);
-
-    let (mut node, wallet) = EthereumNode::test_setup(1, chain_spec).build_single().await?;
+    let (mut node, wallet) =
+        EthereumNode::test_setup_for(EthereumHardfork::Amsterdam).build_single().await?;
 
     // Build a valid Amsterdam payload without making it canonical.
     let raw_tx = TransactionTestContext::transfer_tx_bytes(1, wallet.inner).await;

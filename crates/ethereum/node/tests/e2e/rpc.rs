@@ -99,9 +99,7 @@ async fn inject_blob_transaction(
 async fn test_block_access_list_lookup_semantics() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
 
-    let chain_spec = test_chain_spec(EthereumHardfork::Cancun);
-
-    let (node, _) = EthereumNode::test_setup(1, chain_spec).build_single().await?;
+    let (node, _) = EthereumNode::test_setup_for(EthereumHardfork::Cancun).build_single().await?;
     let client = node.rpc_client().unwrap();
 
     let pending: Option<serde_json::Value> =
@@ -125,8 +123,7 @@ async fn test_block_access_list_lookup_semantics() -> eyre::Result<()> {
 #[tokio::test(flavor = "multi_thread")]
 async fn test_bal_prewarming_for_transaction_replay() -> eyre::Result<()> {
     for (cache_computed, prewarm) in [(false, false), (true, false), (false, true)] {
-        let chain_spec = test_chain_spec(EthereumHardfork::Cancun);
-        let (mut node, wallet) = EthereumNode::test_setup(1, chain_spec)
+        let (mut node, wallet) = EthereumNode::test_setup_for(EthereumHardfork::Cancun)
             .with_node_config_modifier(move |mut config| {
                 config.rpc.rpc_state_cache.cache_computed_bals = cache_computed;
                 config.rpc.rpc_state_cache.prewarm_bals = prewarm.then_some(0);
@@ -273,8 +270,7 @@ async fn test_fee_history() -> eyre::Result<()> {
 async fn test_debug_trace_chain_subscription() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
 
-    let chain_spec = test_chain_spec(EthereumHardfork::Cancun);
-    let (mut node, wallet) = EthereumNode::test_setup(1, chain_spec)
+    let (mut node, wallet) = EthereumNode::test_setup_for(EthereumHardfork::Cancun)
         .with_rpc_modifier(|rpc| rpc.with_ws().with_ws_api(RpcModuleSelection::All))
         .build_single()
         .await?;
@@ -487,9 +483,8 @@ async fn test_flashbots_validate_v3() -> eyre::Result<()> {
 async fn test_flashbots_validate_uses_shared_sender_recovery_cache() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
 
-    let chain_spec = test_chain_spec(EthereumHardfork::Cancun);
-
-    let (mut node, wallet) = EthereumNode::test_setup(1, chain_spec).build_single().await?;
+    let (mut node, wallet) =
+        EthereumNode::test_setup_for(EthereumHardfork::Cancun).build_single().await?;
     let cache = node.inner.evm_config.sender_recovery_cache.clone().expect("cache is enabled");
 
     let signer = wallet.wallet_gen().swap_remove(0);
@@ -606,9 +601,7 @@ async fn test_flashbots_validate_v4() -> eyre::Result<()> {
 async fn test_flashbots_validate_v5() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
 
-    let chain_spec = test_chain_spec(EthereumHardfork::Osaka);
-
-    let (mut node, wallet) = EthereumNode::test_setup(1, chain_spec)
+    let (mut node, wallet) = EthereumNode::test_setup_for(EthereumHardfork::Osaka)
         .with_rpc_modifier(|rpc| rpc.with_force_blob_sidecar_upcasting())
         .build_single()
         .await?;
@@ -672,9 +665,7 @@ async fn test_flashbots_validate_v5() -> eyre::Result<()> {
 async fn test_flashbots_validate_v6() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
 
-    let chain_spec = test_chain_spec(EthereumHardfork::Amsterdam);
-
-    let (mut node, wallet) = EthereumNode::test_setup(1, chain_spec)
+    let (mut node, wallet) = EthereumNode::test_setup_for(EthereumHardfork::Amsterdam)
         .with_rpc_modifier(|rpc| rpc.with_force_blob_sidecar_upcasting())
         .build_single()
         .await?;
@@ -781,9 +772,8 @@ async fn test_flashbots_validate_v6() -> eyre::Result<()> {
 async fn test_estimate_gas_basic_transfers_post_amsterdam() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
 
-    let chain_spec = test_chain_spec(EthereumHardfork::Amsterdam);
-
-    let (node, _) = EthereumNode::test_setup(1, chain_spec).build_single().await?;
+    let (node, _) =
+        EthereumNode::test_setup_for(EthereumHardfork::Amsterdam).build_single().await?;
     let provider = node.rpc_provider();
 
     let mut signers = Wallet::new(2).wallet_gen();

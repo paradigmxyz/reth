@@ -95,7 +95,7 @@ async fn can_sync() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
 
     let (mut nodes, wallet) =
-        EthereumNode::test_setup(2, test_chain_spec(EthereumHardfork::Cancun)).build().await?;
+        EthereumNode::test_setup_for(EthereumHardfork::Cancun).with_num_nodes(2).build().await?;
 
     let raw_tx = TransactionTestContext::transfer_tx_bytes(1, wallet.inner).await;
     let mut second_node = nodes.pop().unwrap();

@@ -123,9 +123,8 @@ async fn test_simulate_v1_block_access_list_hash_across_amsterdam() -> eyre::Res
 async fn test_simulate_v1_explicit_gas_uses_remaining_block_gas() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
 
-    let chain_spec = test_chain_spec(EthereumHardfork::Cancun);
-
-    let (node, wallet) = EthereumNode::test_setup(1, chain_spec).build_single().await?;
+    let (node, wallet) =
+        EthereumNode::test_setup_for(EthereumHardfork::Cancun).build_single().await?;
     let provider = node.rpc_provider_with_wallet(wallet.wallet_gen().swap_remove(0));
 
     let tx = TransactionRequest::default().to(Address::ZERO).gas_limit(3_000_000);
@@ -146,9 +145,8 @@ async fn test_simulate_v1_explicit_gas_uses_remaining_block_gas() -> eyre::Resul
 async fn test_simulate_v1_no_fields_call_defaults_to_remaining_block_gas() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
 
-    let chain_spec = test_chain_spec(EthereumHardfork::Cancun);
-
-    let (node, wallet) = EthereumNode::test_setup(1, chain_spec).build_single().await?;
+    let (node, wallet) =
+        EthereumNode::test_setup_for(EthereumHardfork::Cancun).build_single().await?;
     let provider = node.rpc_provider_with_wallet(wallet.wallet_gen().swap_remove(0));
 
     let first_tx_gas_limit = 21_000;
@@ -178,7 +176,7 @@ async fn test_simulate_v1_no_fields_call_defaults_to_remaining_block_gas() -> ey
 async fn assert_validation_uses_remaining_gas(fork: EthereumHardfork) -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
 
-    let (node, wallet) = EthereumNode::test_setup(1, test_chain_spec(fork)).build_single().await?;
+    let (node, wallet) = EthereumNode::test_setup_for(fork).build_single().await?;
     let provider = node.rpc_provider_with_wallet(wallet.wallet_gen().swap_remove(0));
 
     let from: Address = "0xc000000000000000000000000000000000000000".parse()?;
@@ -231,9 +229,8 @@ async fn test_simulate_v1_validation_omitted_gas_uses_remaining_gas_amsterdam() 
 async fn test_simulate_v1_blockhash_reads_prior_simulated_block() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
 
-    let chain_spec = test_chain_spec(EthereumHardfork::Cancun);
-
-    let (node, wallet) = EthereumNode::test_setup(1, chain_spec).build_single().await?;
+    let (node, wallet) =
+        EthereumNode::test_setup_for(EthereumHardfork::Cancun).build_single().await?;
     let provider = node.rpc_provider_with_wallet(wallet.wallet_gen().swap_remove(0));
 
     let contract = Address::with_last_byte(0x42);
@@ -270,9 +267,8 @@ async fn test_simulate_v1_blockhash_reads_prior_simulated_block() -> eyre::Resul
 async fn test_simulate_v1_explicit_gas_over_remaining_block_gas_errors() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
 
-    let chain_spec = test_chain_spec(EthereumHardfork::Cancun);
-
-    let (node, wallet) = EthereumNode::test_setup(1, chain_spec).build_single().await?;
+    let (node, wallet) =
+        EthereumNode::test_setup_for(EthereumHardfork::Cancun).build_single().await?;
     let provider = node.rpc_provider_with_wallet(wallet.wallet_gen().swap_remove(0));
 
     let sim_block = SimBlock::default()
@@ -351,9 +347,8 @@ async fn test_simulate_v1_with_max_fee_per_blob_gas_only() -> eyre::Result<()> {
 async fn test_simulate_v1_too_many_blocks_error() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
 
-    let chain_spec = test_chain_spec(EthereumHardfork::Cancun);
-
-    let (node, wallet) = EthereumNode::test_setup(1, chain_spec).build_single().await?;
+    let (node, wallet) =
+        EthereumNode::test_setup_for(EthereumHardfork::Cancun).build_single().await?;
     let provider = node.rpc_provider_with_wallet(wallet.wallet_gen().swap_remove(0));
 
     let payload: SimulatePayload<TransactionRequest> =

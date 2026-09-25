@@ -32,7 +32,6 @@ use alloy_rpc_types_eth::{TransactionReceipt, TransactionRequest};
 use futures::StreamExt;
 use reth_chainspec::EthereumHardfork;
 use reth_e2e_test_utils::{
-    test_chain_spec,
     trie::{assert_trie_consistency, wait_for_persisted_block},
     E2ETestSetupExt, NodeHelperType,
 };
@@ -68,7 +67,7 @@ async fn run_selfdestruct_suite(fork: EthereumHardfork) -> eyre::Result<()> {
 
     // low persistence thresholds so the scenario blocks reach the database and the persisted
     // trie representation can be verified at the end of the suite
-    let (node, wallet) = EthereumNode::test_setup(1, test_chain_spec(fork))
+    let (node, wallet) = EthereumNode::test_setup_for(fork)
         .with_tree_config_modifier(|config| {
             config
                 .with_num_state_masking_blocks(0)

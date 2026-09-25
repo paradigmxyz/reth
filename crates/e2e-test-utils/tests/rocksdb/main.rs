@@ -74,10 +74,10 @@ async fn poll_tx_in_rocksdb<P: RocksDBProviderFactory>(provider: &P, tx_hash: B2
 async fn test_rocksdb_node_startup() -> Result<()> {
     reth_tracing::init_test_tracing();
 
-    let chain_spec = test_chain_spec(EthereumHardfork::Cancun);
-
-    let (nodes, _wallet) =
-        EthereumNode::test_setup(1, chain_spec).with_storage_v2(true).build().await?;
+    let (nodes, _wallet) = EthereumNode::test_setup_for(EthereumHardfork::Cancun)
+        .with_storage_v2(true)
+        .build()
+        .await?;
 
     assert_eq!(nodes.len(), 1);
 
