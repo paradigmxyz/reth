@@ -12,7 +12,7 @@ use futures_util::future::TryJoinAll;
 use reth_chainspec::EthChainSpec;
 use reth_node_api::{PayloadAttrTy, TreeConfig};
 use reth_node_builder::{EngineNodeLauncher, NodeBuilder, NodeConfig, NodeHandle};
-use reth_node_core::args::{DiscoveryArgs, NetworkArgs, PruningArgs, RpcServerArgs};
+use reth_node_core::args::{DiscoveryArgs, NetworkArgs, PruningArgs, RpcServerArgs, StorageArgs};
 use reth_primitives_traits::AlloyBlockHeader;
 use reth_provider::providers::BlockchainProvider;
 use reth_rpc_server_types::RpcModuleSelection;
@@ -50,6 +50,7 @@ pub struct E2ETestSetupBuilder<N: NodeBuilderHelper> {
     connect_nodes: bool,
     tree_config_modifiers: Vec<TreeConfigModifier>,
     node_config_modifiers: Vec<NodeConfigModifier<N::ChainSpec>>,
+    storage_v2: bool,
 }
 
 impl<N: NodeBuilderHelper> E2ETestSetupBuilder<N> {
@@ -63,6 +64,7 @@ impl<N: NodeBuilderHelper> E2ETestSetupBuilder<N> {
             connect_nodes: true,
             tree_config_modifiers: Vec::new(),
             node_config_modifiers: Vec::new(),
+            storage_v2: StorageArgs::default().v2,
         }
     }
 
@@ -136,15 +138,14 @@ impl<N: NodeBuilderHelper> E2ETestSetupBuilder<N> {
         self.with_node_config_modifier(move |config| config.with_pruning(pruning.clone()))
     }
 
-    /// Enables v2 storage defaults (`--storage.v2`), routing tx hashes, history
-    /// indices, etc. to `RocksDB` and changesets/senders to static files.
+    /// Sets whether nodes use the v2 storage layout (`--storage.v2`), which routes tx hashes,
+    /// history indices, etc. to `RocksDB` and changesets/senders to static files.
     ///
-    /// Note that v2 storage is currently also the default for new databases.
-    pub fn with_storage_v2(self) -> Self {
-        self.with_node_config_modifier(|mut config| {
-            config.storage.v2 = true;
-            config
-        })
+    /// Defaults to the node's `--storage.v2` default. Node config modifiers run afterwards and can
+    /// still override it.
+    pub const fn with_storage_v2(mut self, storage_v2: bool) -> Self {
+        self.storage_v2 = storage_v2;
+        self
     }
 
     /// Builds and launches the test nodes.
@@ -161,12 +162,11 @@ impl<N: NodeBuilderHelper> E2ETestSetupBuilder<N> {
 
         let mut nodes = (0..self.num_nodes)
             .map(async |idx| {
-                let node_config = self
-                    .node_config_modifiers
-                    .iter()
-                    .fold(test_node_config(self.chain_spec.clone()), |config, modifier| {
-                        modifier(config)
-                    });
+                let node_config = self.node_config_modifiers.iter().fold(
+                    test_node_config(self.chain_spec.clone())
+                        .with_storage(StorageArgs { v2: self.storage_v2 }),
+                    |config, modifier| modifier(config),
+                );
                 let attributes_generator = attributes_generator.clone();
                 let node = launch_test_node::<N>(
                     node_config,
@@ -220,6 +220,7 @@ impl<N: NodeBuilderHelper> std::fmt::Debug for E2ETestSetupBuilder<N> {
             .field("connect_nodes", &self.connect_nodes)
             .field("tree_config_modifiers", &self.tree_config_modifiers.len())
             .field("node_config_modifiers", &self.node_config_modifiers.len())
+            .field("storage_v2", &self.storage_v2)
             .finish_non_exhaustive()
     }
 }

@@ -20,6 +20,7 @@ use reth_e2e_test_utils::{
 };
 use reth_node_api::TreeConfig;
 use reth_node_ethereum::{EthEngineTypes, EthereumNode};
+use reth_provider::{DatabaseProviderFactory, MetadataProvider, StorageSettings};
 use tempfile::TempDir;
 use tracing::debug;
 
@@ -295,6 +296,27 @@ async fn test_setup_builder_with_custom_tree_config() -> Result<()> {
 
     let genesis_hash = node.block_hash(0);
     assert_ne!(genesis_hash, B256::ZERO);
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_setup_builder_with_storage_v2() -> Result<()> {
+    reth_tracing::init_test_tracing();
+
+    let chain_spec = test_chain_spec(EthereumHardfork::Cancun);
+
+    for storage_v2 in [false, true] {
+        // A node config modifier set afterwards must not reset the storage mode.
+        let (node, _) = EthereumNode::test_setup(1, chain_spec.clone())
+            .with_storage_v2(storage_v2)
+            .with_node_config_modifier(|config| config.set_dev(true))
+            .build_single()
+            .await?;
+
+        let provider = node.inner.provider.database_provider_ro()?;
+        assert_eq!(provider.storage_settings()?, Some(StorageSettings { storage_v2 }));
+    }
 
     Ok(())
 }
