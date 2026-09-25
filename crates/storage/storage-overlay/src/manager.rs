@@ -1522,20 +1522,20 @@ mod tests {
     #[test]
     fn taking_sparse_trie_removes_it() {
         let manager = OverlayManager::<EthPrimitives>::default();
-        let state_root = B256::with_last_byte(1);
-        let other_state_root = B256::with_last_byte(2);
+        let block_hash = B256::with_last_byte(1);
+        let other_block_hash = B256::with_last_byte(2);
         let anchor_hash = B256::with_last_byte(3);
 
         manager.store_sparse_trie(PreservedSparseTrie::anchored(
             SparseTrie::default(),
-            state_root,
+            block_hash,
             anchor_hash,
         ));
 
         let preserved = manager.take_sparse_trie().expect("preserved trie should be available");
-        assert_eq!(preserved.state_root(), state_root);
+        assert_eq!(preserved.block_hash(), block_hash);
         assert_eq!(preserved.anchor_hash(), anchor_hash);
-        assert!(preserved.into_trie_for(other_state_root).unwrap().is_none());
+        assert!(preserved.into_trie_for(other_block_hash).unwrap().is_none());
         assert!(manager.take_sparse_trie().is_none());
     }
 
