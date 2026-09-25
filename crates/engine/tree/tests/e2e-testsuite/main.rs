@@ -257,6 +257,8 @@ impl Action<EthEngineTypes> for WaitForPersistedChain {
 }
 
 /// Creates the standard setup for engine tree e2e tests.
+///
+/// Uses the node's default storage mode.
 fn default_engine_tree_setup() -> Setup<EthEngineTypes> {
     Setup::default()
         .with_chain_spec(Arc::new(
@@ -277,11 +279,13 @@ fn default_engine_tree_setup() -> Setup<EthEngineTypes> {
 
 /// Creates a v1 storage mode setup that persists every canonical block.
 ///
+/// v1 mode keeps all data in MDBX, using plain state tables and plain-key changesets and history.
+///
 /// With a persistence threshold and memory block buffer target of zero and no state masking, the
 /// engine persists every canonical block up to the head together with its state and trie updates,
 /// so even short chains exercise the storage writes and unwinds instead of staying in memory.
 fn v1_engine_tree_setup() -> Setup<EthEngineTypes> {
-    default_engine_tree_setup().with_tree_config(
+    default_engine_tree_setup().with_storage_v2(false).with_tree_config(
         TreeConfig::default()
             .with_num_state_masking_blocks(0)
             .with_persistence_threshold(0)
@@ -295,15 +299,15 @@ fn v1_engine_tree_setup() -> Setup<EthEngineTypes> {
 /// v2 mode uses keccak256-hashed slot keys in static file changesets and rocksdb history
 /// instead of plain keys in MDBX.
 fn v2_engine_tree_setup() -> Setup<EthEngineTypes> {
-    v1_engine_tree_setup().with_storage_v2()
+    v1_engine_tree_setup().with_storage_v2(true)
 }
 
-/// Test that verifies forkchoice update and canonical chain insertion functionality.
+/// Test that verifies forkchoice update and canonical chain insertion in v1 storage mode.
 ///
 /// Every canonical block is persisted, exercising `save_blocks` with plain-key changesets and
 /// history indices in MDBX.
 #[tokio::test]
-async fn test_engine_tree_fcu_canon_chain_insertion_e2e() -> Result<()> {
+async fn test_engine_tree_fcu_canon_chain_insertion_v1_e2e() -> Result<()> {
     reth_tracing::init_test_tracing();
 
     let test = TestBuilder::new()
@@ -325,12 +329,13 @@ async fn test_engine_tree_fcu_canon_chain_insertion_e2e() -> Result<()> {
     Ok(())
 }
 
-/// Test that verifies forkchoice update with a reorg where all blocks are already available.
+/// Test that verifies forkchoice update with a reorg where all blocks are already available, in
+/// v1 storage mode.
 ///
 /// The main chain is persisted before the fork becomes canonical, so the reorg unwinds the
 /// persisted main chain blocks above the fork base and persists the fork instead.
 #[tokio::test]
-async fn test_engine_tree_fcu_reorg_with_all_blocks_e2e() -> Result<()> {
+async fn test_engine_tree_fcu_reorg_with_all_blocks_v1_e2e() -> Result<()> {
     reth_tracing::init_test_tracing();
 
     let test = TestBuilder::new()
@@ -554,14 +559,15 @@ async fn test_engine_tree_buffered_blocks_are_eventually_connected_e2e() -> Resu
     Ok(())
 }
 
-/// Test that verifies forkchoice updates can extend the canonical chain progressively.
+/// Test that verifies forkchoice updates can extend the canonical chain progressively in v1
+/// storage mode.
 ///
 /// This test creates a longer chain of blocks, then uses forkchoice updates to make
 /// different parts of the chain canonical in sequence, verifying that FCU properly
 /// advances the canonical head when all blocks are already available. Every canonical block
 /// is persisted as the head advances.
 #[tokio::test]
-async fn test_engine_tree_fcu_extends_canon_chain_e2e() -> Result<()> {
+async fn test_engine_tree_fcu_extends_canon_chain_v1_e2e() -> Result<()> {
     reth_tracing::init_test_tracing();
 
     let test = TestBuilder::new()
@@ -677,7 +683,7 @@ async fn test_engine_tree_pipeline_sync_catches_up_masked_state_e2e() -> Result<
                         .build(),
                 ))
                 .with_network(NetworkSetup::multi_node(2))
-                .with_storage_v2()
+                .with_storage_v2(true)
                 .with_tree_config(
                     TreeConfig::default()
                         .with_num_state_masking_blocks(0)
@@ -814,7 +820,7 @@ async fn test_engine_tree_fcu_extends_canon_chain_v2_e2e() -> Result<()> {
 /// block buffer, each cycle persists up to the canonical head, so the persisted ranges only depend
 /// on the chain lengths and not on how fast persistence keeps up with block production.
 fn disk_reorg_setup(storage_v2: bool) -> Setup<EthEngineTypes> {
-    let mut setup = Setup::default()
+    Setup::default()
         .with_chain_spec(Arc::new(
             ChainSpecBuilder::default()
                 .chain(MAINNET.chain)
@@ -828,17 +834,14 @@ fn disk_reorg_setup(storage_v2: bool) -> Setup<EthEngineTypes> {
                 .build(),
         ))
         .with_network(NetworkSetup::multi_node_unconnected(2))
+        .with_storage_v2(storage_v2)
         .with_tree_config(
             TreeConfig::default()
                 .with_num_state_masking_blocks(0)
                 .with_persistence_threshold(7)
                 .with_memory_block_buffer_target(0)
                 .with_has_enough_parallelism(true),
-        );
-    if storage_v2 {
-        setup = setup.with_storage_v2();
-    }
-    setup
+        )
 }
 
 /// Builds a disk-level reorg test scenario.

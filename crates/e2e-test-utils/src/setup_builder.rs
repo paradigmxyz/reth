@@ -10,7 +10,7 @@ use reth_node_builder::{
     EngineNodeLauncher, NodeBuilder, NodeConfig, NodeHandle, NodeTypes, NodeTypesWithDBAdapter,
     PayloadTypes,
 };
-use reth_node_core::args::{DiscoveryArgs, NetworkArgs, RpcServerArgs};
+use reth_node_core::args::{DiscoveryArgs, NetworkArgs, RpcServerArgs, StorageArgs};
 use reth_primitives_traits::AlloyBlockHeader;
 use reth_provider::providers::BlockchainProvider;
 use reth_rpc_server_types::RpcModuleSelection;
@@ -45,6 +45,7 @@ where
     connect_nodes: bool,
     tree_config_modifier: Option<TreeConfigModifier>,
     node_config_modifier: Option<NodeConfigModifier<N::ChainSpec>>,
+    storage_v2: bool,
 }
 
 impl<N, F> E2ETestSetupBuilder<N, F>
@@ -65,6 +66,7 @@ where
             connect_nodes: true,
             tree_config_modifier: None,
             node_config_modifier: None,
+            storage_v2: StorageArgs::default().v2,
         }
     }
 
@@ -101,13 +103,14 @@ where
         self.with_node_config_modifier(move |config| config.with_pruning(pruning.clone()))
     }
 
-    /// Enables v2 storage defaults (`--storage.v2`), routing tx hashes, history
-    /// indices, etc. to `RocksDB` and changesets/senders to static files.
-    pub fn with_storage_v2(self) -> Self {
-        self.with_node_config_modifier(|mut config| {
-            config.storage.v2 = true;
-            config
-        })
+    /// Sets whether nodes use the v2 storage layout (`--storage.v2`), which routes tx hashes,
+    /// history indices, etc. to `RocksDB` and changesets/senders to static files.
+    ///
+    /// Defaults to the node's `--storage.v2` default. The node config modifier runs afterwards
+    /// and can still override it.
+    pub const fn with_storage_v2(mut self, storage_v2: bool) -> Self {
+        self.storage_v2 = storage_v2;
+        self
     }
 
     /// Builds and launches the test nodes.
@@ -144,7 +147,8 @@ where
                             .with_unused_ports()
                             .with_http()
                             .with_http_api(RpcModuleSelection::All),
-                    );
+                    )
+                    .with_storage(StorageArgs { v2: self.storage_v2 });
 
                 // Apply node config modifier if present
                 let node_config = if let Some(modifier) = &self.node_config_modifier {
@@ -219,6 +223,7 @@ where
             .field("connect_nodes", &self.connect_nodes)
             .field("tree_config_modifier", &self.tree_config_modifier.as_ref().map(|_| "<closure>"))
             .field("node_config_modifier", &self.node_config_modifier.as_ref().map(|_| "<closure>"))
+            .field("storage_v2", &self.storage_v2)
             .finish_non_exhaustive()
     }
 }
