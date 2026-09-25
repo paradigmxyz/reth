@@ -21,7 +21,7 @@ use reth_chain_state::{
 };
 use reth_chainspec::ChainInfo;
 use reth_db_api::models::{AccountBeforeTx, BlockNumberAddress, StoredBlockBodyIndices};
-use reth_execution_types::ExecutionOutcome;
+use reth_execution_types::{ExecutionOutcome, RecoveredBlockAndExecutionOutput};
 use reth_node_types::{BlockTy, HeaderTy, NodeTypes, NodeTypesWithDB, ReceiptTy, TxTy};
 use reth_primitives_traits::{
     Account, RecoveredBlock, SealedHeader, SealedOrRecoveredBlock, StorageEntry,
@@ -521,13 +521,13 @@ impl<N: ProviderNodeTypes> BlockReader for BlockchainProvider<N> {
         self.consistent_provider()?.block(id)
     }
 
-    fn pending_block(&self) -> ProviderResult<Option<RecoveredBlock<Self::Block>>> {
+    fn pending_block(&self) -> ProviderResult<Option<Arc<RecoveredBlock<Self::Block>>>> {
         Ok(self.canonical_in_memory_state.pending_recovered_block())
     }
 
     fn pending_block_and_receipts(
         &self,
-    ) -> ProviderResult<Option<(RecoveredBlock<Self::Block>, Vec<Self::Receipt>)>> {
+    ) -> ProviderResult<Option<RecoveredBlockAndExecutionOutput<Self::Block, Self::Receipt>>> {
         Ok(self.canonical_in_memory_state.pending_block_and_receipts())
     }
 
@@ -1656,15 +1656,15 @@ mod tests {
 
         // Assertions related to the pending block
 
+        let pending_block = provider.pending_block()?.unwrap();
         assert_eq!(
-            provider.pending_block()?,
-            Some(RecoveredBlock::new_sealed(block.clone(), block.senders().unwrap()))
+            *pending_block,
+            RecoveredBlock::new_sealed(block.clone(), block.senders().unwrap())
         );
 
-        assert_eq!(
-            provider.pending_block_and_receipts()?,
-            Some((RecoveredBlock::new_sealed(block.clone(), block.senders().unwrap()), vec![]))
-        );
+        let pending = provider.pending_block_and_receipts()?.unwrap();
+        assert!(Arc::ptr_eq(&pending_block, pending.block()));
+        assert!(pending.execution_output().receipts.is_empty());
 
         Ok(())
     }
