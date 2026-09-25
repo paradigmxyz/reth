@@ -252,7 +252,7 @@ where
         let identifiers = self.identifiers.read();
         accs.into_iter()
             .filter_map(|acc| {
-                let ChangedAccount { address, nonce, balance } = acc;
+                let ChangedAccount { address, nonce, balance, .. } = acc;
                 let sender_id = identifiers.sender_id(&address)?;
                 Some((sender_id, SenderInfo { state_nonce: nonce, balance }))
             })

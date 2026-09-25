@@ -13,6 +13,11 @@ use revm::{
     state::AccountInfo,
 };
 
+#[cfg(feature = "account-ext")]
+use alloy_consensus::constants::KECCAK_EMPTY;
+#[cfg(feature = "account-ext")]
+use alloy_primitives::keccak256;
+
 /// Type used to initialize revms bundle state.
 pub type BundleStateInit = AddressMap<(Option<Account>, Option<Account>, B256Map<(U256, U256)>)>;
 
@@ -31,12 +36,23 @@ pub struct ChangedAccount {
     pub nonce: u64,
     /// Account balance.
     pub balance: U256,
+    /// Keccak-256 hash of the raw account extension bytes, or [`KECCAK_EMPTY`] if empty.
+    ///
+    /// This fingerprints the opaque payload, not any chain-specific hash encoded within it.
+    #[cfg(feature = "account-ext")]
+    pub extension_hash: B256,
 }
 
 impl ChangedAccount {
     /// Creates a new [`ChangedAccount`] with the given address and 0 balance and nonce.
     pub const fn empty(address: Address) -> Self {
-        Self { address, nonce: 0, balance: U256::ZERO }
+        Self {
+            address,
+            nonce: 0,
+            balance: U256::ZERO,
+            #[cfg(feature = "account-ext")]
+            extension_hash: KECCAK_EMPTY,
+        }
     }
 }
 
@@ -382,10 +398,16 @@ impl<T> ExecutionOutcome<T> {
     ///
     /// This method filters the accounts to return only those that have undergone changes
     /// and maps them into `ChangedAccount` instances, which include the address, nonce, and
-    /// balance.
+    /// balance, plus the hash of the raw extension bytes when `account-ext` is enabled.
     pub fn changed_accounts(&self) -> impl Iterator<Item = ChangedAccount> + '_ {
         self.accounts_iter().filter_map(|(addr, acc)| acc.map(|acc| (addr, acc))).map(
-            |(address, acc)| ChangedAccount { address, nonce: acc.nonce, balance: acc.balance },
+            |(address, acc)| ChangedAccount {
+                address,
+                nonce: acc.nonce,
+                balance: acc.balance,
+                #[cfg(feature = "account-ext")]
+                extension_hash: keccak256(&*acc.extension),
+            },
         )
     }
 }
@@ -568,6 +590,9 @@ mod tests {
     use super::*;
     use alloy_consensus::TxType;
     use alloy_primitives::{bytes, Address, LogData, B256};
+
+    #[cfg(feature = "account-ext")]
+    use revm::state::AccountExtension;
 
     #[test]
     fn test_initialization() {
@@ -1001,15 +1026,70 @@ mod tests {
         assert_eq!(changed_accounts.len(), 2);
 
         assert!(changed_accounts.contains(&ChangedAccount {
-            address: address1,
             nonce: 1,
-            balance: U256::from(100)
+            balance: U256::from(100),
+            ..ChangedAccount::empty(address1)
         }));
 
         assert!(changed_accounts.contains(&ChangedAccount {
-            address: address2,
             nonce: 2,
-            balance: U256::from(200)
+            balance: U256::from(200),
+            ..ChangedAccount::empty(address2)
         }));
+    }
+
+    #[test]
+    #[cfg(feature = "account-ext")]
+    fn changed_accounts_extension_hash() {
+        let address = Address::repeat_byte(1);
+        let first = AccountExtension::copy_from_slice(&[0x82, 0xaa, 0xbb]);
+        let second = AccountExtension::copy_from_slice(&[0x82, 0xcc, 0xdd]);
+
+        // Registration, rotation, and removal must be visible even with identical nonce/balance
+        // and no receipts (and therefore no events).
+        for (old, new) in [
+            (AccountExtension::default(), first.clone()),
+            (first, second.clone()),
+            (second, AccountExtension::default()),
+        ] {
+            let old_hash = keccak256(&*old);
+            let new_hash = keccak256(&*new);
+            let original = AccountInfo {
+                nonce: 7,
+                balance: U256::from(100),
+                extension: old,
+                ..Default::default()
+            };
+            let current = AccountInfo { extension: new, ..original.clone() };
+            let mut bundle = BundleState::default();
+            bundle.state.insert(
+                address,
+                BundleAccount {
+                    original_info: Some(original),
+                    info: Some(current),
+                    storage: Default::default(),
+                    status: Default::default(),
+                },
+            );
+            let outcome = ExecutionOutcome::new(
+                bundle,
+                vec![Vec::<reth_ethereum_primitives::Receipt>::new()],
+                0,
+                vec![],
+            );
+
+            assert_eq!(
+                outcome.changed_accounts().collect::<Vec<_>>(),
+                vec![ChangedAccount {
+                    address,
+                    nonce: 7,
+                    balance: U256::from(100),
+                    extension_hash: new_hash,
+                }]
+            );
+            assert_ne!(old_hash, new_hash);
+        }
+
+        assert_eq!(ChangedAccount::empty(address).extension_hash, keccak256([]));
     }
 }

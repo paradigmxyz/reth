@@ -41,6 +41,9 @@ use tokio::{
 };
 use tracing::{debug, error, info, trace, warn};
 
+#[cfg(feature = "account-ext")]
+use alloy_primitives::keccak256;
+
 /// Maximum amount of time non-executable transaction are queued.
 pub const MAX_QUEUED_TRANSACTION_LIFETIME: Duration = Duration::from_secs(3 * 60 * 60);
 
@@ -684,7 +687,13 @@ where
     for addr in addresses {
         if let Ok(maybe_acc) = state.basic_account(&addr) {
             let acc = maybe_acc
-                .map(|acc| ChangedAccount { address: addr, nonce: acc.nonce, balance: acc.balance })
+                .map(|acc| ChangedAccount {
+                    address: addr,
+                    nonce: acc.nonce,
+                    balance: acc.balance,
+                    #[cfg(feature = "account-ext")]
+                    extension_hash: keccak256(&*acc.extension),
+                })
                 .unwrap_or_else(|| ChangedAccount::empty(addr));
             res.accounts.push(acc)
         } else {
@@ -862,6 +871,9 @@ mod tests {
     use reth_provider::test_utils::{ExtendedAccount, MockEthProvider};
     use reth_tasks::Runtime;
 
+    #[cfg(feature = "account-ext")]
+    use reth_primitives_traits::AccountExtension;
+
     #[test]
     fn changed_acc_entry() {
         let changed_acc = ChangedAccountEntry(ChangedAccount::empty(Address::random()));
@@ -961,5 +973,41 @@ mod tests {
         let mut tracker = FinalizedBlockTracker::new(None);
         assert_eq!(tracker.update(None), None);
         assert_eq!(tracker.last_finalized_block, None);
+    }
+
+    #[test]
+    #[cfg(feature = "account-ext")]
+    fn load_accounts_extension_hash() {
+        let provider = MockEthProvider::default();
+        let address = Address::repeat_byte(1);
+        let missing = Address::repeat_byte(2);
+        let payload = [0x82, 0xaa, 0xbb];
+        provider.add_account(
+            address,
+            ExtendedAccount::new(7, U256::from(100))
+                .with_extension(AccountExtension::copy_from_slice(&payload)),
+        );
+
+        let loaded = load_accounts(provider.clone(), BlockHash::ZERO, [address, missing]).unwrap();
+        assert!(loaded.failed_to_load.is_empty());
+        assert_eq!(
+            loaded.accounts,
+            vec![
+                ChangedAccount {
+                    address,
+                    nonce: 7,
+                    balance: U256::from(100),
+                    extension_hash: keccak256(payload),
+                },
+                ChangedAccount::empty(missing),
+            ]
+        );
+
+        provider.add_account(address, ExtendedAccount::new(7, U256::from(100)));
+        let loaded = load_accounts(provider, BlockHash::ZERO, [address]).unwrap();
+        assert_eq!(
+            loaded.accounts[0].extension_hash,
+            ChangedAccount::empty(address).extension_hash
+        );
     }
 }

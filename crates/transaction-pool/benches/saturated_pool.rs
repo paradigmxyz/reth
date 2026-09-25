@@ -243,7 +243,10 @@ fn bench_update_accounts(c: &mut Criterion) {
                             if flip { U256::from(u128::MAX) } else { U256::from(u128::MAX - 1) };
                         senders[..changed_senders]
                             .iter()
-                            .map(|address| ChangedAccount { address: *address, nonce: 0, balance })
+                            .map(|address| ChangedAccount {
+                                balance,
+                                ..ChangedAccount::empty(*address)
+                            })
                             .collect::<Vec<_>>()
                     },
                     |changed| pool.update_accounts(changed),
@@ -285,9 +288,8 @@ fn bench_update_accounts_single_tx_senders(c: &mut Criterion) {
                             senders[..changed_senders]
                                 .iter()
                                 .map(|address| ChangedAccount {
-                                    address: *address,
-                                    nonce: 0,
                                     balance,
+                                    ..ChangedAccount::empty(*address)
                                 })
                                 .collect::<Vec<_>>()
                         },
@@ -331,9 +333,9 @@ fn bench_canonical_state_change(c: &mut Criterion) {
                     match changed.iter_mut().find(|acc| acc.address == tx.sender()) {
                         Some(acc) => acc.nonce = acc.nonce.max(nonce),
                         None => changed.push(ChangedAccount {
-                            address: tx.sender(),
                             nonce,
                             balance: U256::MAX,
+                            ..ChangedAccount::empty(tx.sender())
                         }),
                     }
                 }
