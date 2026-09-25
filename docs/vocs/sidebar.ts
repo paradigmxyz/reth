@@ -239,6 +239,10 @@ export const sidebar: SidebarItem[] = [
                 link: "/jsonrpc/trace"
             },
             {
+                text: "ots",
+                link: "/jsonrpc/ots"
+            },
+            {
                 text: "admin",
                 link: "/jsonrpc/admin"
             },
