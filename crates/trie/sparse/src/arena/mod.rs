@@ -14,7 +14,7 @@ use crate::{
 use alloc::{borrow::Cow, boxed::Box, collections::VecDeque, vec::Vec};
 use alloy_primitives::{keccak256, map::B256Map, B256};
 use alloy_trie::TrieMask;
-use core::{cmp::Reverse, mem};
+use core::mem;
 use reth_execution_errors::SparseTrieResult;
 use reth_trie_common::{
     BranchNodeMasks, BranchNodeRef, ExtensionNodeRef, LeafNodeRef, Nibbles, ProofTrieNodeV2,
@@ -578,10 +578,9 @@ impl Default for ArenaParallelismThresholds {
 ///
 /// Root hash computation follows a bottom-up approach:
 ///
-/// 1. **[`SparseTrie::update_subtrie_hashes`]**: Takes dirty subtries from the upper arena and
-///    hashes them in parallel (when dirty leaf count meets
-///    [`ArenaParallelismThresholds::min_dirty_leaves`]), then walks the upper trie to restore
-///    hashed subtries and inline-hash any remaining dirty nodes.
+/// 1. **[`SparseTrie::update_subtrie_hashes`]**: Hashes subtries in place in parallel (when dirty
+///    leaf count meets [`ArenaParallelismThresholds::min_dirty_leaves`]), merges their updates,
+///    then walks dirty upper branches to hash any subtries with no dirty leaves serially.
 /// 2. **[`SparseTrie::root`]**: Calls `update_subtrie_hashes`, then RLP-encodes the full upper trie
 ///    depth-first to produce the root hash.
 ///
@@ -2332,60 +2331,52 @@ impl SparseTrie for ArenaParallelSparseTrie {
 
         // Count total dirty leaves across all subtries to make one global parallelism decision.
         let mut total_dirty_leaves: u64 = 0;
-        let mut taken: Vec<(Index, Box<ArenaSparseSubtrie>)> = Vec::new();
-        for (idx, node) in &mut self.upper_arena {
-            let ArenaSparseNode::Subtrie(s) = node else { continue };
-            if s.num_dirty_leaves == 0 {
+        let mut selected = Vec::new();
+        for (_, node) in &mut self.upper_arena {
+            let ArenaSparseNode::Subtrie(subtrie) = node else { continue };
+            if subtrie.num_dirty_leaves == 0 {
                 continue;
             }
-            total_dirty_leaves += s.num_dirty_leaves;
-            let ArenaSparseNode::Subtrie(subtrie) =
-                mem::replace(node, ArenaSparseNode::TakenSubtrie)
-            else {
-                unreachable!()
-            };
-            taken.push((idx, subtrie));
+            total_dirty_leaves += subtrie.num_dirty_leaves;
+            selected.push(subtrie);
         }
 
-        // Hash taken subtries in parallel if total dirty leaves meet the threshold.
-        if !taken.is_empty() {
-            if taken.len() == 1 || total_dirty_leaves < self.parallelism_thresholds.min_dirty_leaves
+        let has_selected = !selected.is_empty();
+        if has_selected {
+            if selected.len() == 1 ||
+                total_dirty_leaves < self.parallelism_thresholds.min_dirty_leaves
             {
-                for (_, subtrie) in &mut taken {
+                for subtrie in &mut selected {
                     subtrie.update_cached_rlp(new_epoch);
                 }
             } else {
-                use rayon::iter::{IntoParallelIterator, ParallelIterator};
+                use rayon::iter::{IntoParallelRefMutIterator, ParallelIterator};
 
                 let parent_span = tracing::Span::current();
-                taken = taken
-                    .into_par_iter()
-                    .map(|(idx, mut subtrie)| {
-                        let _guard = parent_span.enter();
-                        subtrie.update_cached_rlp(new_epoch);
-                        (idx, subtrie)
-                    })
-                    .collect();
+                selected.par_iter_mut().for_each(|subtrie| {
+                    let _guard = parent_span.enter();
+                    subtrie.update_cached_rlp(new_epoch);
+                });
             }
         }
 
-        // If the root branch is already cached and nothing was taken for parallel
-        // hashing, there are no dirty subtries to process.
-        if taken.is_empty() && self.upper_arena[self.root].is_cached() {
+        // Subtries own disjoint path prefixes, so their updates can be merged in arena order.
+        // Merge before the walk, which skips these now-cached subtries.
+        for subtrie in selected {
+            Self::merge_subtrie_updates(&mut self.buffers.updates, &mut subtrie.buffers.updates);
+        }
+
+        if !has_selected && self.upper_arena[self.root].is_cached() {
             return;
         }
 
-        // Walk the upper trie depth-first, restoring hashed subtries and inline-hashing
-        // any remaining dirty subtries. Only descend into dirty branches; clean subtrees
-        // cannot contain dirty subtries since dirty state propagates upward.
-        taken.sort_unstable_by_key(|(_, b)| Reverse(b.path));
-
+        // Deleting a clean leaf can dirty a subtrie without leaving any dirty leaves.
+        // Retain the dirty-branch walk to hash these subtries serially, including their updates.
         self.buffers.cursor.reset(&self.upper_arena, self.root, Nibbles::default());
 
         loop {
             let result = self.buffers.cursor.next(&mut self.upper_arena, |_, child| match child {
                 ArenaSparseNode::Branch(_) | ArenaSparseNode::Subtrie(_) => !child.is_cached(),
-                ArenaSparseNode::TakenSubtrie => true,
                 _ => false,
             });
 
@@ -2395,19 +2386,7 @@ impl SparseTrie for ArenaParallelSparseTrie {
                 NextResult::NonBranch => {}
             }
 
-            // Head is a subtrie or taken-subtrie — process it.
             let head_idx = self.buffers.cursor.head().expect("cursor is non-empty").index;
-
-            if matches!(&self.upper_arena[head_idx], ArenaSparseNode::TakenSubtrie) {
-                let (_, subtrie) = taken.pop().expect("taken subtries must not be exhausted");
-                debug_assert_eq!(
-                    subtrie.path,
-                    self.buffers.cursor.head().expect("cursor is non-empty").path,
-                    "taken subtrie path mismatch",
-                );
-                self.upper_arena[head_idx] = ArenaSparseNode::Subtrie(subtrie);
-            }
-
             self.update_upper_subtrie(head_idx, new_epoch);
         }
     }
@@ -2988,9 +2967,27 @@ mod tests {
                 apst.reveal_nodes(&mut proof_nodes).expect("reveal_nodes should succeed");
             }
 
-            // Compute root and take updates from the APST.
+            // Precomputation must expose persistence updates and preserve repeated-root behavior
+            // under both serial and parallel hashing policies.
+            let mut variants = [u64::MAX, 0].map(|threshold| {
+                let mut trie = apst.clone();
+                trie.parallelism_thresholds.min_dirty_leaves = threshold;
+                trie
+            });
             let actual_root = apst.root(epoch(0));
             let mut actual_updates = apst.take_updates();
+            for variant in &mut variants {
+                variant.update_subtrie_hashes(epoch(0));
+                let precomputed_updates = variant.updates_ref().into_owned();
+                variant.update_subtrie_hashes(epoch(0));
+                assert_eq!(*variant.updates_ref(), precomputed_updates);
+                assert_eq!(variant.root(epoch(0)), actual_root);
+                assert_eq!(variant.root_epoch(), apst.root_epoch());
+                assert_eq!(variant.take_updates(), actual_updates);
+                assert_eq!(variant.root(epoch(1)), actual_root);
+                assert_eq!(variant.root_epoch(), apst.root_epoch());
+                assert_eq!(variant.take_updates(), Default::default());
+            }
 
             // Minimize sparse updates inline (can't use TrieTestHarness::minimize_sparse_updates
             // due to the crate's SparseTrieUpdates being a different type than reth-trie's copy).
@@ -3026,6 +3023,37 @@ mod tests {
             );
             assert_eq!(expected_root, actual_root, "storage root mismatch");
         }
+    }
+
+    #[test]
+    fn hashing_deletion_only_subtries_preserves_updates() {
+        // Several subtries, each with a branch that survives deletion without dirtying a leaf.
+        let initial: BTreeMap<_, _> = (0u8..4)
+            .flat_map(|group| {
+                (0u8..4).map(move |leaf| {
+                    let mut key = B256::ZERO;
+                    key.0[0] = group;
+                    key.0[1] = leaf * 16;
+                    (key, U256::from(leaf as u64 + 1))
+                })
+            })
+            .collect();
+        let mut harness = ArenaTrieTestHarness::new(BTreeMap::new());
+        let mut trie = ArenaParallelSparseTrie::default();
+        let root = harness.root_node();
+        trie.set_root(root.node, root.masks, true).unwrap();
+        harness.assert_changes(&mut trie, initial.clone());
+        harness.apply_changeset(initial.clone());
+
+        let deletions: BTreeMap<_, _> =
+            initial.keys().filter(|key| key.0[1] == 0).map(|key| (*key, U256::ZERO)).collect();
+        let mut updates =
+            deletions.keys().map(|key| (*key, LeafUpdate::Changed(Vec::new()))).collect();
+        trie.update_leaves(&mut updates, |_, _| panic!("all leaves are revealed")).unwrap();
+        assert!(trie.upper_arena.iter().any(|(_, node)| matches!(node,
+            super::ArenaSparseNode::Subtrie(s) if s.num_dirty_leaves == 0 && !s.arena[s.root].is_cached()
+        )));
+        harness.assert_changes(&mut trie, deletions);
     }
 
     use proptest::prelude::*;
