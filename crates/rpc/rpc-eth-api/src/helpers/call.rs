@@ -373,11 +373,12 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
                 Err(reason) => return Ok(FrameSimulationResult::invalid(max_cost, None, reason)),
             };
             let recent_root_current_slot = if let Some(verifier) = &policy.recent_root {
-                let current_slot = evm_env.block_env.slot_num.checked_add(1).ok_or_else(|| {
-                    Self::Error::from_eth_err(EthApiError::InvalidParams(
-                        "canonical slot number overflows".into(),
-                    ))
-                })?;
+                let current_slot =
+                    evm_env.block_env.slot_num().checked_add(1).ok_or_else(|| {
+                        Self::Error::from_eth_err(EthApiError::InvalidParams(
+                            "canonical slot number overflows".into(),
+                        ))
+                    })?;
                 if verifier.references.iter().any(|reference| {
                     let dependency = reference.dependency();
                     reference.slot >= current_slot || dependency.expires_at_slot <= current_slot
@@ -419,7 +420,7 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
                 // nonce checks below.
                 prefix_env.cfg_env.disable_nonce_check = true;
                 if let Some(current_slot) = recent_root_current_slot {
-                    prefix_env.block_env.slot_num = current_slot;
+                    prefix_env.block_env.inner_mut().slot_num = current_slot;
                 }
                 let prefix_tx_env = TxEnvFor::<Self::Evm>::from_recovered_tx_with_gas_params(
                     &tx,
