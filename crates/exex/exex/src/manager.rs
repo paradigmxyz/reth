@@ -437,6 +437,14 @@ where
     }
 }
 
+/// Runs blocking `f` off the worker on a multi-threaded runtime, inline otherwise.
+fn block_in_place<T>(f: impl FnOnce() -> T) -> T {
+    match tokio::runtime::Handle::try_current().map(|handle| handle.runtime_flavor()) {
+        Ok(tokio::runtime::RuntimeFlavor::MultiThread) => tokio::task::block_in_place(f),
+        _ => f(),
+    }
+}
+
 impl<P, N> Future for ExExManager<P, N>
 where
     P: HeaderProvider + Unpin + 'static,
@@ -474,7 +482,7 @@ where
             last_finalized_header = finalized_header;
         }
         if let Some(header) = last_finalized_header {
-            this.finalize_wal(header)?;
+            block_in_place(|| this.finalize_wal(header))?;
         }
 
         // Offer buffered notifications before taking each new one: taking the whole backlog first
@@ -512,7 +520,7 @@ where
             match source {
                 ExExNotificationSource::BlockchainTree => {
                     debug!(target: "exex::manager", ?committed_tip, ?reverted_tip, "Committing notification to WAL");
-                    this.wal.commit(&notification)?;
+                    block_in_place(|| this.wal.commit(&notification))?;
                 }
                 ExExNotificationSource::Pipeline => {
                     debug!(target: "exex::manager", ?committed_tip, ?reverted_tip, "Notification was sent from pipeline, skipping WAL commit");
@@ -531,7 +539,9 @@ where
             .min()
             .unwrap_or(usize::MAX);
         debug!(target: "exex::manager", %min_id, "Updating lowest notification id in buffer");
-        this.buffer.retain(|&(id, _)| id >= min_id);
+        while this.buffer.front().is_some_and(|&(id, _)| id < min_id) {
+            this.buffer.pop_front();
+        }
         this.min_id = min_id;
 
         // Update capacity
