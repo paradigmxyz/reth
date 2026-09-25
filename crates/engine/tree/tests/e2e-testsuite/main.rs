@@ -26,7 +26,11 @@ use reth_e2e_test_utils::{
 use reth_engine_tree::tree::TreeConfig;
 use reth_ethereum_engine_primitives::EthEngineTypes;
 use reth_node_ethereum::EthereumNode;
-use std::sync::Arc;
+use std::{
+    sync::Arc,
+    time::{Duration, Instant},
+};
+use tokio::time::sleep;
 
 /// Waits for in-flight persistence by resubmitting the latest built payload to a node.
 #[derive(Debug)]
@@ -150,6 +154,103 @@ impl Action<EthEngineTypes> for AssertBlockHasTransactions {
                 "Block {} contains no transactions",
                 self.block_number
             );
+            Ok(())
+        })
+    }
+}
+
+/// Waits until a node's database holds its canonical chain up to a tagged block and no further.
+///
+/// The database is read directly rather than through the in-memory canonical state, so this fails
+/// if the blocks were never persisted or if a reorged-out branch was left on disk.
+#[derive(Debug)]
+struct WaitForPersistedChain {
+    node_idx: usize,
+    tip: String,
+    unwound: Vec<String>,
+}
+
+impl WaitForPersistedChain {
+    /// How long to wait for the tagged block to become the persisted tip.
+    const TIMEOUT: Duration = Duration::from_secs(30);
+
+    fn new(node_idx: usize, tip: impl Into<String>) -> Self {
+        Self { node_idx, tip: tip.into(), unwound: Vec::new() }
+    }
+
+    /// Also requires the tagged block, which was persisted earlier, to be removed from disk.
+    fn with_unwound(mut self, tag: impl Into<String>) -> Self {
+        self.unwound.push(tag.into());
+        self
+    }
+}
+
+impl Action<EthEngineTypes> for WaitForPersistedChain {
+    fn execute<'a>(
+        &'a mut self,
+        env: &'a mut Environment<EthEngineTypes>,
+    ) -> BoxFuture<'a, Result<()>> {
+        Box::pin(async move {
+            let tagged = |tag: &String| {
+                env.block_registry
+                    .get(tag)
+                    .map(|(block, _)| *block)
+                    .ok_or_else(|| eyre::eyre!("Block tag '{tag}' not found in registry"))
+            };
+            let tip = tagged(&self.tip)?;
+            let unwound = self.unwound.iter().map(tagged).collect::<Result<Vec<_>>>()?;
+            let node = env
+                .node_clients
+                .get(self.node_idx)
+                .ok_or_else(|| eyre::eyre!("Node index {} out of bounds", self.node_idx))?;
+
+            let start = Instant::now();
+            loop {
+                let persisted = node.database_provider_ro()?.chain_info()?;
+                if persisted.best_number == tip.number && persisted.best_hash == tip.hash {
+                    break
+                }
+                eyre::ensure!(
+                    start.elapsed() < Self::TIMEOUT,
+                    "Timed out waiting for block {} ({}) to be persisted, database tip is block {} ({})",
+                    tip.number,
+                    tip.hash,
+                    persisted.best_number,
+                    persisted.best_hash
+                );
+                sleep(Duration::from_millis(50)).await;
+            }
+
+            let mut canonical = Vec::new();
+            for number in 0..=tip.number {
+                let block = node
+                    .get_block_by_number(alloy_eips::BlockNumberOrTag::Number(number))
+                    .await?
+                    .ok_or_else(|| eyre::eyre!("Canonical block {number} not found"))?;
+                canonical.push(block.header.hash);
+            }
+
+            let database = node.database_provider_ro()?;
+            let persisted = database.canonical_hashes_range(0, tip.number + 1)?;
+            eyre::ensure!(
+                persisted == canonical,
+                "Persisted chain {persisted:?} does not match canonical chain {canonical:?}"
+            );
+            // Unwinding must also prune the static file headers above the new tip.
+            let last_header = database.last_block_number()?;
+            eyre::ensure!(
+                last_header == tip.number,
+                "Static file headers end at block {last_header}, expected block {}",
+                tip.number
+            );
+            for block in unwound {
+                eyre::ensure!(
+                    database.block_number(block.hash)?.is_none(),
+                    "Block {} ({}) is still persisted",
+                    block.number,
+                    block.hash
+                );
+            }
             Ok(())
         })
     }
@@ -666,7 +767,11 @@ async fn test_engine_tree_fcu_extends_canon_chain_v2_e2e() -> Result<()> {
 ///
 /// Uses unconnected nodes so fork blocks can be produced independently on Node 1 and then
 /// sent to Node 0 via newPayload only (no FCU), keeping Node 0's persisted chain intact
-/// until the final `ReorgTo` triggers `find_disk_reorg`.
+/// until the final forkchoice update triggers `find_disk_reorg`.
+///
+/// Persistence starts once more than 7 canonical blocks are held in memory. Without a memory
+/// block buffer, each cycle persists up to the canonical head, so the persisted ranges only depend
+/// on the chain lengths and not on how fast persistence keeps up with block production.
 fn disk_reorg_setup(storage_v2: bool) -> Setup<EthEngineTypes> {
     let mut setup = Setup::default()
         .with_chain_spec(Arc::new(
@@ -686,6 +791,7 @@ fn disk_reorg_setup(storage_v2: bool) -> Setup<EthEngineTypes> {
             TreeConfig::default()
                 .with_num_state_masking_blocks(0)
                 .with_persistence_threshold(7)
+                .with_memory_block_buffer_target(0)
                 .with_has_enough_parallelism(true),
         );
     if storage_v2 {
@@ -697,18 +803,23 @@ fn disk_reorg_setup(storage_v2: bool) -> Setup<EthEngineTypes> {
 /// Builds a disk-level reorg test scenario.
 ///
 /// 1. Both nodes receive 3 shared blocks
-/// 2. Node 0 extends to 10 blocks locally (persisted to disk)
+/// 2. Node 0 extends to 8 blocks locally, which persists blocks 1-8 to its disk
 /// 3. Node 1 builds an 8-block fork from block 3 (its canonical head)
 /// 4. Fork blocks are sent to Node 0 via newPayload (no FCU, old chain stays on disk)
-/// 5. FCU to fork tip on Node 0 triggers `find_disk_reorg` → `RemoveBlocksAbove(3)`
+/// 5. FCU to the fork tip on Node 0 makes `find_disk_reorg` detect the persisted main chain blocks
+///    4-8, so `RemoveBlocksAbove(3)` unwinds them
+/// 6. Node 0 then persists fork blocks 4-11
 fn disk_reorg_test(storage_v2: bool) -> TestBuilder<EthEngineTypes> {
     TestBuilder::new()
         .with_setup(disk_reorg_setup(storage_v2))
         .with_action(SelectActiveNode::new(0))
         .with_action(ProduceBlocks::<EthEngineTypes>::new(3))
         .with_action(MakeCanonical::new())
-        .with_action(ProduceBlocksLocally::<EthEngineTypes>::new(7))
+        .with_action(ProduceBlocksLocally::<EthEngineTypes>::new(5))
         .with_action(MakeCanonical::with_active_node())
+        .with_action(CaptureBlock::new("main_tip"))
+        // the 8th in-memory canonical block triggers persistence of the whole main chain.
+        .with_action(WaitForPersistedChain::new(0, "main_tip"))
         .with_action(SelectActiveNode::new(1))
         .with_action(SetForkBase::new(3))
         .with_action(ProduceBlocksLocally::<EthEngineTypes>::new(8))
@@ -730,12 +841,15 @@ fn disk_reorg_test(storage_v2: bool) -> TestBuilder<EthEngineTypes> {
             .with_expected_status(PayloadStatusEnum::Valid)
             .with_node_idx(0),
         )
+        // the persisted main chain above the fork base is unwound and the 8 fork blocks, which
+        // exceed the persistence threshold, replace it on disk.
+        .with_action(WaitForPersistedChain::new(0, "fork_tip").with_unwound("main_tip"))
 }
 
 /// Verifies disk-level reorg in v1 (plain key) storage mode.
 ///
 /// Confirms `find_disk_reorg()` detects persisted blocks on the wrong fork and calls
-/// `RemoveBlocksAbove` to truncate, then re-persists the correct fork chain.
+/// `RemoveBlocksAbove` to truncate them from disk, then persists the new canonical fork.
 #[tokio::test]
 async fn test_engine_tree_disk_reorg_v1_e2e() -> Result<()> {
     reth_tracing::init_test_tracing();
