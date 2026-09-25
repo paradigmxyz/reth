@@ -2,7 +2,7 @@ use alloy_genesis::Genesis;
 use alloy_primitives::{b256, hex, Address};
 use futures::StreamExt;
 use reth_chainspec::ChainSpec;
-use reth_e2e_test_utils::E2ETestSetupExt;
+use reth_e2e_test_utils::{wait::poll_until, E2ETestSetupExt};
 use reth_node_api::{BlockBody, FullNodeComponents};
 use reth_node_builder::{rpc::RethRpcAddOns, FullNode};
 use reth_node_ethereum::EthereumNode;
@@ -99,13 +99,10 @@ async fn can_run_dev_node_with_block_time() -> eyre::Result<()> {
         .await?;
 
     // The local miner builds a block on every interval, even without pending transactions.
-    tokio::time::timeout(Duration::from_secs(10), async {
-        while node.inner.provider.best_block_number()? < 2 {
-            tokio::time::sleep(Duration::from_millis(50)).await;
-        }
-        eyre::Ok(())
+    poll_until("two dev blocks", || async {
+        Ok((node.inner.provider.best_block_number()? >= 2).then_some(()))
     })
-    .await??;
+    .await?;
 
     Ok(())
 }

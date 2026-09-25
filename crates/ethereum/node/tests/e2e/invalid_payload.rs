@@ -9,7 +9,7 @@ use alloy_primitives::{bytes, keccak256, Bytes, B256};
 use alloy_rpc_types_engine::{ExecutionPayloadV1, ExecutionPayloadV3, PayloadStatusEnum};
 use rand::{rngs::StdRng, Rng, SeedableRng};
 use reth_chainspec::EthereumHardfork;
-use reth_e2e_test_utils::{test_chain_spec, transaction::TransactionTestContext, E2ETestSetupExt};
+use reth_e2e_test_utils::{transaction::TransactionTestContext, E2ETestSetupExt};
 use reth_ethereum_primitives::TransactionSigned;
 use reth_node_ethereum::EthereumNode;
 use reth_primitives_traits::SignedTransaction;
@@ -31,9 +31,8 @@ async fn can_handle_invalid_payload_then_valid() -> eyre::Result<()> {
     let mut rng = StdRng::from_seed(seed);
     println!("Seed: {seed:?}");
 
-    let chain_spec = test_chain_spec(EthereumHardfork::Cancun);
-
-    let (mut nodes, wallet) = EthereumNode::test_setup(2, chain_spec.clone()).build().await?;
+    let (mut nodes, wallet) =
+        EthereumNode::test_setup_for(EthereumHardfork::Cancun).with_num_nodes(2).build().await?;
 
     let mut producer = nodes.pop().unwrap();
     let receiver = nodes.pop().unwrap();
@@ -135,9 +134,8 @@ async fn can_handle_multiple_invalid_payloads() -> eyre::Result<()> {
     let mut rng = StdRng::from_seed(seed);
     println!("Seed: {seed:?}");
 
-    let chain_spec = test_chain_spec(EthereumHardfork::Cancun);
-
-    let (mut nodes, wallet) = EthereumNode::test_setup(2, chain_spec.clone()).build().await?;
+    let (mut nodes, wallet) =
+        EthereumNode::test_setup_for(EthereumHardfork::Cancun).with_num_nodes(2).build().await?;
 
     let mut producer = nodes.pop().unwrap();
     let receiver = nodes.pop().unwrap();
@@ -223,9 +221,8 @@ async fn can_handle_invalid_payload_with_transactions() -> eyre::Result<()> {
     let mut rng = StdRng::from_seed(seed);
     println!("Seed: {seed:?}");
 
-    let chain_spec = test_chain_spec(EthereumHardfork::Cancun);
-
-    let (mut nodes, wallet) = EthereumNode::test_setup(2, chain_spec.clone()).build().await?;
+    let (mut nodes, wallet) =
+        EthereumNode::test_setup_for(EthereumHardfork::Cancun).with_num_nodes(2).build().await?;
 
     let mut producer = nodes.pop().unwrap();
     let receiver = nodes.pop().unwrap();

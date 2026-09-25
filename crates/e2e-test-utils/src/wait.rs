@@ -14,7 +14,10 @@ pub const POLL_INTERVAL: Duration = Duration::from_millis(20);
 ///
 /// Returns an error describing `what` was awaited if the condition is not met within
 /// [`WAIT_TIMEOUT`], or the first error returned by `poll`.
-pub async fn poll_until<T, F, Fut>(what: impl Display, mut poll: F) -> eyre::Result<T>
+///
+/// `what` is held across awaits, so it must be `Send` for the returned future to be `Send`. This
+/// rules out `format_args!`, use `format!` instead.
+pub async fn poll_until<T, F, Fut>(what: impl Display + Send, mut poll: F) -> eyre::Result<T>
 where
     F: FnMut() -> Fut,
     Fut: Future<Output = eyre::Result<Option<T>>>,

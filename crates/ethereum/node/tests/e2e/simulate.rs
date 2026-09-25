@@ -6,7 +6,7 @@ use alloy_rpc_types_eth::{
     BlockOverrides, TransactionRequest, TransactionTrait as _,
 };
 use reth_chainspec::EthereumHardfork;
-use reth_e2e_test_utils::{test_chain_spec, test_chain_spec_builder, E2ETestSetupExt};
+use reth_e2e_test_utils::{test_chain_spec_builder, E2ETestSetupExt};
 use reth_node_ethereum::EthereumNode;
 use std::sync::Arc;
 
@@ -298,9 +298,8 @@ async fn test_simulate_v1_explicit_gas_over_remaining_block_gas_errors() -> eyre
 async fn test_simulate_v1_with_max_fee_per_blob_gas_only() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
 
-    let chain_spec = test_chain_spec(EthereumHardfork::Cancun);
-
-    let (mut node, wallet) = EthereumNode::test_setup(1, chain_spec.clone()).build_single().await?;
+    let (mut node, wallet) =
+        EthereumNode::test_setup_for(EthereumHardfork::Cancun).build_single().await?;
     let provider = node.rpc_provider_with_wallet(wallet.signer(0));
 
     let _ = provider.send_transaction(TransactionRequest::default().to(Address::ZERO)).await?;
