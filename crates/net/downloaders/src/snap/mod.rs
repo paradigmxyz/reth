@@ -1,6 +1,3 @@
-// Accounts are only Copy when account-ext is disabled.
-#![allow(clippy::clone_on_copy)]
-
 //! Downloads and verifies snap/2 ranges against
 //! [EIP-8189](https://eips.ethereum.org/EIPS/eip-8189) pivot state roots.
 //!

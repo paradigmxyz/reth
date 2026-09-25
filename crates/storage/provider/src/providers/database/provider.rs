@@ -1,6 +1,3 @@
-// Accounts are only Copy when account-ext is disabled.
-#![allow(clippy::clone_on_copy)]
-
 use super::SaveBlocksInput;
 use crate::{
     changesets_utils::StorageRevertsIter,

@@ -1,6 +1,3 @@
-// Accounts are only Copy when account-ext is disabled.
-#![allow(clippy::clone_on_copy)]
-
 //! Sparse Trie task related functionality.
 
 use std::{

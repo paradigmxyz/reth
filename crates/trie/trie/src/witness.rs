@@ -1,6 +1,3 @@
-// Accounts are only Copy when account-ext is disabled.
-#![allow(clippy::clone_on_copy)]
-
 use crate::{
     hashed_cursor::HashedCursorFactory, prefix_set::TriePrefixSetsMut, proof::Proof, proof_v2,
     trie_cursor::TrieCursorFactory, TRIE_ACCOUNT_RLP_MAX_SIZE,

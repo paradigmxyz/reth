@@ -1,6 +1,3 @@
-// Accounts are only Copy when account-ext is disabled.
-#![allow(clippy::clone_on_copy)]
-
 //! Generators for different data structures like block headers, block bodies and ranges of those.
 
 // TODO(rand): update ::random calls after rand_09 migration

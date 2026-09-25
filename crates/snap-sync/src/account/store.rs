@@ -2,8 +2,6 @@
 //!
 //! Each range replaces its key interval, and ranges commit in key order.
 
-#![allow(clippy::clone_on_copy)]
-
 use crate::{
     common::SnapRecord, storage::persisted_storage_root, SnapAttemptStore, SnapCatchUpStore,
     SnapStorageStore, SnapSyncError, SnapWrite, StorageProgress,

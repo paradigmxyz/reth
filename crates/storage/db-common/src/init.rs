@@ -1,6 +1,3 @@
-// Accounts are only Copy when account-ext is disabled.
-#![allow(clippy::clone_on_copy)]
-
 //! Reth genesis initialization utility functions.
 
 use alloy_consensus::BlockHeader;
