@@ -107,6 +107,52 @@ and normal engine backpressure, excluding shutdown.
 Including warmup, mean validation is **136.88 / 134.45 / 233.93 ms**, and mean
 execution is **122.55 / 120.49 / 219.60 ms**.
 
+## Execution slowdown: cache-size diagnostic
+
+A follow-up replay changed only the shared RocksDB block cache from its
+**128 MiB default to 4 GiB** (`--db.rocksdb-block-cache-size 4294967296`). Both
+runs used the same binary and first 250 BAL blocks, with fresh recovery and
+Linux page-cache clearing. The first 50 blocks are excluded below. Both were
+profiled with `perf record -F 49 --call-graph dwarf,4096` during replay.
+
+| Duration (ms) | RocksDB 128 MiB | RocksDB 4 GiB | Earlier complete MDBX, same block range |
+| --- | ---: | ---: | ---: |
+| Execution p50 | 183.08 | 120.46 | 109.81 |
+| Execution mean | 193.57 | 133.43 | 120.25 |
+| Execution p90 | 216.17 | 139.80 | 135.79 |
+| Execution p99 | 579.86 | 522.03 | 323.76 |
+| Payload validation p50 | 196.41 | 132.66 | 122.45 |
+| Payload validation mean | 206.84 | 146.52 | 134.40 |
+
+The larger cache reduces median execution **34.2%** and mean execution **31.1%**.
+This demonstrates that the small shared cache accounts for much of the
+slowdown in this range. The original defaults were retained when adding the
+182 GB of complete trie tables. Those tables share the cache with existing
+RocksDB column families; proof workers and execution database misses compete
+for it. Execution still checks the BundleState overlay first. A complete-trie
+database miss uses an exact RocksDB `Get`, with no trie iterator construction.
+
+The original 600-block RocksDB runs recorded **789–792 GB of logical read bytes**
+(`io.rchar`) and **39.3–39.4 million read syscalls**, versus **75.5–75.7 GB of
+physical read bytes** (`io.read_bytes`). These process-wide counters include
+all work, not just execution; logical reads must not be mistaken for disk
+traffic. CPU samples do not establish decompression as the dominant cost.
+Repeated reads, cache work, and waiting on reads need further attribution to
+explain the remaining gap and tails.
+
+This is one diagnostic run per cache size, scoring 200 blocks each, rather than
+a replacement for the three-by-600 benchmark above. The MDBX column pools the
+same 200-block range from its earlier three runs without perf sampling. All
+500 diagnostic payloads and both restart payloads validated, the roots matched
+each other and the original runs, and the logs were error-free. Final recovery
+restored the promoted baseline. No source code or default settings changed.
+
+Raw profiles, timing results, commands, and logs are preserved under the main
+artifact directory's `execution-diagnosis/`. The first wrapper required a
+bookkeeping correction for perf's normal SIGINT exit after collecting all 250
+blocks; its checkpoint and restart were subsequently verified. An invalid CLI
+unit attempt never started the node and is excluded.
+
 ## Migration, storage, and promoted baseline
 
 After `schelk recover`, migration rebuilt **2,618,677,390 nodes** in RocksDB
