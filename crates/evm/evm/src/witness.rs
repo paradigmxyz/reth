@@ -84,7 +84,9 @@ impl<'a, DB> ExecutionWitnessRecord<'a, DB> {
             .state
             .cache
             .contracts
-            .values()
+            .iter()
+            .filter(|(code_hash, _)| !code_hash.is_zero())
+            .map(|(_, code)| code)
             .map(|code| code.original_bytes())
             .filter(|code| !mode.is_canonical() || !code.is_empty())
             .collect::<Vec<_>>();
