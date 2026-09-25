@@ -725,7 +725,9 @@ where
 
             match self.storage_trie_state_mut(address) {
                 StorageTrieState::Idle(work) => work.queue_proofs(&mut nodes),
-                StorageTrieState::InFlight(in_flight) => in_flight.proofs.append(&mut nodes),
+                StorageTrieState::InFlight(in_flight) => {
+                    append_storage_proofs(&mut in_flight.proofs, &mut nodes)
+                }
             }
         }
         self.trie.record_revealed_storage_nodes(revealed_nodes);
@@ -1369,7 +1371,7 @@ impl<S: SparseTrie + Default> StorageTrieWork<S> {
         }
 
         self.dirty = true;
-        self.proofs.append(nodes);
+        append_storage_proofs(&mut self.proofs, nodes);
     }
 
     /// Folds what arrived while a job owned this payload back into it.
@@ -1476,6 +1478,15 @@ struct StorageWorkOutput {
 impl Default for StorageWorkOutput {
     fn default() -> Self {
         Self { targets: Vec::new(), cache_hits: 0, cache_misses: 0, result: Ok(()) }
+    }
+}
+
+/// Reuses an existing proof buffer, or takes the incoming allocation when there is none.
+fn append_storage_proofs(proofs: &mut Vec<ProofTrieNodeV2>, nodes: &mut Vec<ProofTrieNodeV2>) {
+    if proofs.capacity() == 0 {
+        *proofs = core::mem::take(nodes);
+    } else {
+        proofs.append(nodes);
     }
 }
 
@@ -1675,7 +1686,9 @@ mod tests {
     use reth_db_common::init::init_genesis;
     use reth_provider::test_utils::create_test_provider_factory;
     use reth_storage_overlay::{OverlayManager, OverlayStateProviderFactory};
-    use reth_trie_common::{ExtensionNode, LeafNode, Nibbles, RlpNode, TrieNodeV2};
+    use reth_trie_common::{
+        BranchNodeV2, ExtensionNode, LeafNode, Nibbles, RlpNode, TrieMask, TrieNodeV2,
+    };
     use reth_trie_parallel::proof_task::ProofTaskCtx;
     use reth_trie_sparse::ArenaParallelSparseTrie;
 
@@ -2084,6 +2097,60 @@ mod tests {
         assert_eq!(reused.storage_root(&address, TrieNodeEpoch::new(2)), Some(expected_root));
         assert!(reused.take_trie_updates().unwrap().is_empty());
         drop(updates_tx);
+        drain_sparse_trie_tasks(&runtime);
+    }
+
+    #[test]
+    fn split_storage_proofs_arriving_during_a_job_are_revealed() {
+        let runtime = Runtime::test();
+        let (mut task, updates_tx, _cancel_guard) = test_task(&runtime, SparseStateTrie::default());
+        let address = B256::repeat_byte(0x11);
+        let slots = [B256::repeat_byte(0x20), B256::repeat_byte(0x30)];
+        let leaves = slots.map(|slot| {
+            LeafNode::new(Nibbles::unpack(slot).slice(1..), alloy_rlp::encode(U256::from(7)))
+        });
+        let root = ProofTrieNodeV2 {
+            path: Nibbles::default(),
+            node: TrieNodeV2::Branch(BranchNodeV2::new(
+                Nibbles::default(),
+                leaves.iter().map(|leaf| leaf.as_ref().rlp(&mut Vec::new())).collect(),
+                TrieMask::new((1 << 2) | (1 << 3)),
+                None,
+            )),
+            masks: None,
+        };
+        task.queue_storage_proofs(B256Map::from_iter([(address, vec![root])]));
+        let mut work = check_out_storage(&mut task, address);
+        let output = work.run(task.new_epoch, false);
+        output.result.as_ref().unwrap();
+
+        // Separate responses must be concatenated while the job owns the trie, then folded
+        // into the proof buffer retained by the job's earlier reveal.
+        for (slot, leaf) in slots.into_iter().zip(leaves) {
+            let proof = ProofTrieNodeV2 {
+                path: Nibbles::unpack(slot).slice(..1),
+                node: TrieNodeV2::Leaf(leaf),
+                masks: None,
+            };
+            task.queue_storage_proofs(B256Map::from_iter([(address, vec![proof])]));
+            task.queue_storage_proofs(B256Map::from_iter([(address, Vec::new())]));
+        }
+        task.on_storage_trie_returned(StorageTrieJobDone { address, work, output }).unwrap();
+        task.run_ready_storage_work().unwrap();
+
+        for slot in slots {
+            assert_eq!(
+                storage_slot_value(&task, &address, &slot),
+                Some(alloy_rlp::encode(U256::from(7)))
+            );
+        }
+        assert_eq!(
+            storage_root_of(&mut task, address),
+            reth_trie_common::root::storage_root_unsorted(slots.map(|slot| (slot, U256::from(7))))
+        );
+
+        drop(updates_tx);
+        drop(task);
         drain_sparse_trie_tasks(&runtime);
     }
 
