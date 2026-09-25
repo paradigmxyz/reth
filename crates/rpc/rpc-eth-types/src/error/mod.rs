@@ -875,7 +875,7 @@ impl From<HandlerError> for RpcInvalidTransactionError {
                 Self::InvalidChainId
             }
             HandlerError::IntrinsicGasTooLow { .. } => Self::GasTooLow,
-            HandlerError::InsufficientFunds | HandlerError::OutOfFunds => {
+            HandlerError::InsufficientFunds => {
                 Self::InsufficientFundsForTransfer
             }
             HandlerError::RejectCallerWithCode => Self::SenderNoEOA,
