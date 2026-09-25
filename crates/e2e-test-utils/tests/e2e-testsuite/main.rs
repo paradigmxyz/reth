@@ -1,16 +1,16 @@
 //! Example tests using the test suite framework.
 
 use alloy_primitives::{Address, B256};
-use alloy_rpc_types_engine::PayloadAttributes;
+use alloy_rpc_types_engine::{ForkchoiceState, PayloadAttributes, PayloadStatusEnum};
 use eyre::Result;
 use reth_chainspec::{ChainSpecBuilder, MAINNET};
 use reth_e2e_test_utils::{
     test_rlp_utils::{generate_test_blocks, write_blocks_to_rlp},
     testsuite::{
         actions::{
-            Action, AssertChainTip, AssertMineBlock, BlockReference, CaptureBlock,
-            CaptureBlockOnNode, CompareNodeChainTips, CreateFork, FinalizeBlock, MakeCanonical,
-            ProduceBlocks, ReorgTo, SelectActiveNode, UpdateBlockInfo,
+            expect_fcu_valid, Action, AssertChainTip, AssertMineBlock, BlockReference,
+            CaptureBlock, CaptureBlockOnNode, CompareNodeChainTips, CreateFork, FinalizeBlock,
+            MakeCanonical, ProduceBlocks, ReorgTo, SelectActiveNode, UpdateBlockInfo,
         },
         setup::{NetworkSetup, Setup},
         Environment, TestBuilder,
@@ -19,6 +19,7 @@ use reth_e2e_test_utils::{
 };
 use reth_node_api::TreeConfig;
 use reth_node_ethereum::{EthEngineTypes, EthereumNode};
+use reth_provider::{DatabaseProviderFactory, MetadataProvider, StorageSettings};
 use std::sync::Arc;
 use tempfile::TempDir;
 use tracing::debug;
@@ -71,39 +72,31 @@ async fn test_apply_with_import() -> Result<()> {
     let mut make_canonical = MakeCanonical::new();
     make_canonical.execute(&mut env).await?;
 
-    // Wait for the pipeline to finish processing all stages
-    debug!("Waiting for pipeline to finish processing imported blocks...");
-    let start = std::time::Instant::now();
-    loop {
-        // Check if we can get the block from RPC (indicates pipeline finished)
-        let client = &env.node_clients[0];
-        let block_result = reth_rpc_api::clients::EthApiClient::<
-            alloy_rpc_types_eth::TransactionRequest,
-            alloy_rpc_types_eth::Transaction,
-            alloy_rpc_types_eth::Block,
-            alloy_rpc_types_eth::Receipt,
-            alloy_rpc_types_eth::Header,
-            reth_ethereum_primitives::TransactionSigned,
-        >::block_by_number(
-            &client.rpc,
-            alloy_eips::BlockNumberOrTag::Number(10),
-            true, // Include full transaction details
-        )
-        .await;
-
-        if let Ok(Some(block)) = block_result &&
-            block.header.number == 10
-        {
-            debug!("Pipeline finished, block 10 is fully available");
-            break;
+    // Imported blocks are already readable from the database while the engine may still be
+    // syncing. Wait for the engine to accept the imported head before building on top of it.
+    let head = test_blocks.last().expect("imported blocks").hash();
+    let engine = env.node_clients[0].engine.http_client();
+    tokio::time::timeout(std::time::Duration::from_secs(10), async {
+        loop {
+            let response =
+                reth_rpc_api::clients::EngineApiClient::<EthEngineTypes>::fork_choice_updated_v3(
+                    &engine,
+                    ForkchoiceState {
+                        head_block_hash: head,
+                        safe_block_hash: head,
+                        finalized_block_hash: B256::ZERO,
+                    },
+                    None,
+                )
+                .await?;
+            if response.payload_status.status != PayloadStatusEnum::Syncing {
+                return expect_fcu_valid(&response, "imported head");
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
         }
-
-        if start.elapsed() > std::time::Duration::from_secs(10) {
-            return Err(eyre::eyre!("Timeout waiting for pipeline to finish"));
-        }
-
-        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-    }
+    })
+    .await
+    .map_err(|_| eyre::eyre!("Timeout waiting for engine to accept imported head"))??;
 
     // Update block info again after making canonical
     let mut update_block_info_2 = UpdateBlockInfo::default();
@@ -302,8 +295,10 @@ async fn test_testsuite_deep_reorg() -> Result<()> {
         .with_action(CreateFork::<EthEngineTypes>::new(1, 1))
         .with_action(CaptureBlock::new("blockA_height2"))
         .with_action(MakeCanonical::new())
-        // receive newPayload with block hash B and height 2
+        // send forkchoiceUpdated back to block 1. Building block A finalized block 1, and a
+        // canonical ancestor at the finalized block is accepted without unwinding the chain.
         .with_action(ReorgTo::<EthEngineTypes>::new_from_tag("block1"))
+        // receive newPayload with block hash B and height 2
         .with_action(CreateFork::<EthEngineTypes>::new(1, 1))
         .with_action(CaptureBlock::new("blockB_height2"))
         // receive forkchoiceUpdated with block hash B as head
@@ -395,6 +390,41 @@ async fn test_setup_builder_with_custom_tree_config() -> Result<()> {
 
     let genesis_hash = nodes[0].block_hash(0);
     assert_ne!(genesis_hash, B256::ZERO);
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_setup_builder_with_storage_v2() -> Result<()> {
+    reth_tracing::init_test_tracing();
+
+    let chain_spec = Arc::new(
+        ChainSpecBuilder::default()
+            .chain(MAINNET.chain)
+            .genesis(
+                serde_json::from_str(include_str!(
+                    "../../../../crates/e2e-test-utils/src/testsuite/assets/genesis.json"
+                ))
+                .unwrap(),
+            )
+            .cancun_activated()
+            .build(),
+    );
+
+    for storage_v2 in [false, true] {
+        // A node config modifier set afterwards must not reset the storage mode.
+        let (nodes, _wallet) =
+            E2ETestSetupBuilder::<EthereumNode, _>::new(1, chain_spec.clone(), |_| {
+                PayloadAttributes::default()
+            })
+            .with_storage_v2(storage_v2)
+            .with_node_config_modifier(|config| config.set_dev(true))
+            .build()
+            .await?;
+
+        let provider = nodes[0].inner.provider.database_provider_ro()?;
+        assert_eq!(provider.storage_settings()?, Some(StorageSettings { storage_v2 }));
+    }
 
     Ok(())
 }

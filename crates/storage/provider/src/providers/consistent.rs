@@ -15,6 +15,7 @@ use alloy_primitives::{Address, BlockHash, BlockNumber, TxHash, TxNumber, B256};
 use reth_chain_state::{BlockState, CanonicalInMemoryState};
 use reth_chainspec::ChainInfo;
 use reth_db_api::models::{AccountBeforeTx, BlockNumberAddress, StoredBlockBodyIndices};
+use reth_execution_types::RecoveredBlockAndExecutionOutput;
 use reth_node_types::{BlockTy, HeaderTy, ReceiptTy, TxTy};
 use reth_primitives_traits::{
     BlockBody, RecoveredBlock, SealedHeader, SealedOrRecoveredBlock, StorageEntry,
@@ -627,13 +628,13 @@ impl<N: ProviderNodeTypes> BlockReader for ConsistentProvider<N> {
         )
     }
 
-    fn pending_block(&self) -> ProviderResult<Option<RecoveredBlock<Self::Block>>> {
+    fn pending_block(&self) -> ProviderResult<Option<Arc<RecoveredBlock<Self::Block>>>> {
         Ok(self.canonical_in_memory_state.pending_recovered_block())
     }
 
     fn pending_block_and_receipts(
         &self,
-    ) -> ProviderResult<Option<(RecoveredBlock<Self::Block>, Vec<Self::Receipt>)>> {
+    ) -> ProviderResult<Option<RecoveredBlockAndExecutionOutput<Self::Block, Self::Receipt>>> {
         Ok(self.canonical_in_memory_state.pending_block_and_receipts())
     }
 
@@ -1825,7 +1826,7 @@ mod tests {
         let account = reth_primitives_traits::Account {
             nonce: 1,
             balance: U256::from(1000),
-            bytecode_hash: None,
+            ..Default::default()
         };
         let slot = U256::from(0x42);
         let slot_b256 = B256::from(slot);
@@ -1908,7 +1909,7 @@ mod tests {
         let account = reth_primitives_traits::Account {
             nonce: 1,
             balance: U256::from(1000),
-            bytecode_hash: None,
+            ..Default::default()
         };
         let slot = U256::from(0x42);
 
@@ -2007,7 +2008,7 @@ mod tests {
         let account = reth_primitives_traits::Account {
             nonce: 1,
             balance: U256::from(1000),
-            bytecode_hash: None,
+            ..Default::default()
         };
         let slot = U256::from(0x42);
 

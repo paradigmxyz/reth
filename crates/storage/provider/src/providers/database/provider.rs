@@ -52,7 +52,10 @@ use reth_db_api::{
     transaction::{DbTx, DbTxMut},
     BlockNumberList,
 };
-use reth_execution_types::{BlockExecutionOutput, BlockExecutionResult, Chain, ExecutionOutcome};
+use reth_execution_types::{
+    BlockExecutionOutput, BlockExecutionResult, Chain, ExecutionOutcome,
+    RecoveredBlockAndExecutionOutput,
+};
 use reth_node_types::{BlockTy, BodyTy, HeaderTy, NodeTypes, ReceiptTy, TxTy};
 use reth_primitives_traits::{
     Account, Block as _, BlockBody as _, Bytecode, FastInstant as Instant, RecoveredBlock,
@@ -1158,6 +1161,16 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> DatabaseProvider<TX, N> {
             return Ok(Vec::new())
         }
 
+        // like the single block lookups, reject ranges that reach into expired history instead
+        // of assembling blocks whose bodies are no longer available
+        let earliest_available = self.static_file_provider.earliest_history_height();
+        if *range.start() < earliest_available {
+            return Err(ProviderError::BlockExpired {
+                requested: *range.start(),
+                earliest_available,
+            })
+        }
+
         let len = range.end().saturating_sub(*range.start()) as usize + 1;
         let mut blocks = Vec::with_capacity(len);
 
@@ -1886,13 +1899,13 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> BlockReader for DatabaseProvid
         Ok(None)
     }
 
-    fn pending_block(&self) -> ProviderResult<Option<RecoveredBlock<Self::Block>>> {
+    fn pending_block(&self) -> ProviderResult<Option<Arc<RecoveredBlock<Self::Block>>>> {
         Ok(None)
     }
 
     fn pending_block_and_receipts(
         &self,
-    ) -> ProviderResult<Option<(RecoveredBlock<Self::Block>, Vec<Self::Receipt>)>> {
+    ) -> ProviderResult<Option<RecoveredBlockAndExecutionOutput<Self::Block, Self::Receipt>>> {
         Ok(None)
     }
 
@@ -5170,7 +5183,7 @@ mod tests {
                 .tx
                 .cursor_write::<tables::PlainAccountState>()
                 .unwrap()
-                .upsert(address, &Account { nonce: 0, balance: U256::ZERO, bytecode_hash: None })
+                .upsert(address, &Account::default())
                 .unwrap();
             provider_rw.commit().unwrap();
         }
@@ -5183,8 +5196,8 @@ mod tests {
         state_init.insert(
             address,
             (
-                Some(Account { nonce: 0, balance: U256::ZERO, bytecode_hash: None }),
-                Some(Account { nonce: 1, balance: U256::ZERO, bytecode_hash: None }),
+                Some(Account::default()),
+                Some(Account { nonce: 1, ..Default::default() }),
                 storage_map,
             ),
         );
@@ -5194,7 +5207,7 @@ mod tests {
         block_reverts.insert(
             address,
             (
-                Some(Some(Account { nonce: 0, balance: U256::ZERO, bytecode_hash: None })),
+                Some(Some(Account::default())),
                 vec![StorageEntry { key: slot_key, value: U256::ZERO }],
             ),
         );
@@ -5787,10 +5800,7 @@ mod tests {
                 .tx
                 .cursor_write::<tables::HashedAccounts>()
                 .unwrap()
-                .upsert(
-                    hashed_address,
-                    &Account { nonce: 0, balance: U256::ZERO, bytecode_hash: None },
-                )
+                .upsert(hashed_address, &Account::default())
                 .unwrap();
             provider_rw.commit().unwrap();
         }

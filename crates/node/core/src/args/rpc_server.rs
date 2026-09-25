@@ -613,7 +613,7 @@ pub struct RpcServerArgs {
     /// Tracing requests are generally CPU bound.
     /// Choosing a value that is higher than the available CPU cores can have a negative impact on
     /// the performance of the node and affect the node's ability to maintain sync.
-    #[arg(long = "rpc.max-tracing-requests", alias = "rpc-max-tracing-requests", value_name = "COUNT", default_value_t = DefaultRpcServerArgs::get_global().rpc_max_tracing_requests)]
+    #[arg(long = "rpc.max-tracing-requests", alias = "rpc-max-tracing-requests", value_name = "COUNT", value_parser = RangedU64ValueParser::<usize>::new().range(1..), default_value_t = DefaultRpcServerArgs::get_global().rpc_max_tracing_requests)]
     pub rpc_max_tracing_requests: usize,
 
     /// Maximum number of concurrent blocking IO requests.
@@ -621,7 +621,7 @@ pub struct RpcServerArgs {
     /// Blocking IO requests include `eth_call`, `eth_estimateGas`, and similar methods that
     /// require EVM execution. These are spawned as blocking tasks to avoid blocking the async
     /// runtime.
-    #[arg(long = "rpc.max-blocking-io-requests", alias = "rpc-max-blocking-io-requests", value_name = "COUNT", default_value_t = DefaultRpcServerArgs::get_global().rpc_max_blocking_io_requests)]
+    #[arg(long = "rpc.max-blocking-io-requests", alias = "rpc-max-blocking-io-requests", value_name = "COUNT", value_parser = RangedU64ValueParser::<usize>::new().range(1..), default_value_t = DefaultRpcServerArgs::get_global().rpc_max_blocking_io_requests)]
     pub rpc_max_blocking_io_requests: usize,
 
     /// Maximum number of blocks for `trace_filter` requests.
@@ -636,7 +636,7 @@ pub struct RpcServerArgs {
     #[arg(long = "rpc.max-logs-per-response", alias = "rpc-max-logs-per-response", value_name = "COUNT", default_value_t = DefaultRpcServerArgs::get_global().rpc_max_logs_per_response)]
     pub rpc_max_logs_per_response: ZeroAsNoneU64,
 
-    /// Maximum gas limit for `eth_call` and call tracing RPC methods.
+    /// Maximum gas limit for `eth_call`, `eth_estimateGas`, and call tracing RPC methods.
     #[arg(
         long = "rpc.gascap",
         alias = "rpc-gascap",
@@ -693,7 +693,7 @@ pub struct RpcServerArgs {
     pub rpc_eth_proof_window: u64,
 
     /// Maximum number of concurrent getproof requests.
-    #[arg(long = "rpc.proof-permits", alias = "rpc-proof-permits", value_name = "COUNT", default_value_t = DefaultRpcServerArgs::get_global().rpc_proof_permits)]
+    #[arg(long = "rpc.proof-permits", alias = "rpc-proof-permits", value_name = "COUNT", value_parser = RangedU64ValueParser::<usize>::new().range(1..), default_value_t = DefaultRpcServerArgs::get_global().rpc_proof_permits)]
     pub rpc_proof_permits: usize,
 
     /// Configures the pending block behavior for RPC responses.
@@ -1084,6 +1084,30 @@ mod tests {
     }
 
     #[test]
+    fn rpc_concurrency_limits_reject_zero() {
+        for flag in
+            ["--rpc.max-tracing-requests", "--rpc.max-blocking-io-requests", "--rpc.proof-permits"]
+        {
+            let result = CommandParser::<RpcServerArgs>::try_parse_from(["reth", flag, "0"]);
+            assert!(result.is_err(), "{flag} should reject zero");
+        }
+
+        let args = CommandParser::<RpcServerArgs>::parse_from([
+            "reth",
+            "--rpc.max-tracing-requests",
+            "1",
+            "--rpc.max-blocking-io-requests",
+            "2",
+            "--rpc.proof-permits",
+            "3",
+        ])
+        .args;
+        assert_eq!(args.rpc_max_tracing_requests, 1);
+        assert_eq!(args.rpc_max_blocking_io_requests, 2);
+        assert_eq!(args.rpc_proof_permits, 3);
+    }
+
+    #[test]
     fn http_compression_algorithms_are_optional() {
         let args = CommandParser::<RpcServerArgs>::parse_from(["reth"]).args;
         assert!(args.http_compression_algorithms.is_none());
@@ -1238,6 +1262,7 @@ mod tests {
                 prewarm_bals: Some(0),
                 max_concurrent_db_requests: 512,
                 max_cached_tx_hashes: 100_000,
+                ..Default::default()
             },
             gas_price_oracle: GasPriceOracleArgs {
                 blocks: 20,
