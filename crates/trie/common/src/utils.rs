@@ -40,6 +40,19 @@ where
     K: Ord + Clone + 'a,
     V: Clone + PartialEq + 'a,
 {
+    kway_merge_disjoint_sorted_by(left_slices, right_slices, PartialEq::eq)
+}
+
+/// Merge masked updates using a caller-defined equality for retained values.
+pub(crate) fn kway_merge_disjoint_sorted_by<'a, K, V>(
+    left_slices: impl IntoIterator<Item = &'a [(K, V)]>,
+    right_slices: impl IntoIterator<Item = &'a [(K, V)]>,
+    equal: impl Fn(&V, &V) -> bool,
+) -> impl Iterator<Item = (K, V)>
+where
+    K: Ord + Clone + 'a,
+    V: Clone + 'a,
+{
     let mut right_entries = right_slices
         .into_iter()
         .filter(|s| !s.is_empty())
@@ -71,7 +84,7 @@ where
 
                 has_mask = true;
                 if !has_equal_mask {
-                    has_equal_mask = right_value == value;
+                    has_equal_mask = equal(right_value, value);
                 }
                 right_entries.next();
             }

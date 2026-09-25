@@ -1,7 +1,7 @@
 //! Complete state trie nodes and sorted, maskable updates.
 
 use crate::{
-    utils::{kway_merge_disjoint_sorted, kway_merge_sorted},
+    utils::{kway_merge_disjoint_sorted_by, kway_merge_sorted},
     BranchNodeRef, BranchNodeV2, LeafNode, Nibbles, PackedStoredNibblesSubKey, ProofTrieNodeV2,
     RlpNode, TrieAccount, TrieMask, TrieNodeV2,
 };
@@ -124,9 +124,10 @@ impl StateTrieUpdatesSorted {
     /// Merge oldest-first updates, masking keys changed by the suffix unless a suffix value
     /// matches.
     pub fn disjointed_merge_batch(batch: &[&Self], mask: &[&Self]) -> Self {
-        let account_nodes = kway_merge_disjoint_sorted(
+        let account_nodes = kway_merge_disjoint_sorted_by(
             batch.iter().rev().map(|i| i.account_nodes.as_slice()),
             mask.iter().map(|i| i.account_nodes.as_slice()),
+            equal_mask_value,
         )
         .collect();
         let mut storage: B256Map<Vec<_>> = B256Map::default();
@@ -138,9 +139,10 @@ impl StateTrieUpdatesSorted {
         let storage_tries = storage
             .into_iter()
             .filter_map(|(address, slices)| {
-                let nodes: Vec<_> = kway_merge_disjoint_sorted(
+                let nodes: Vec<_> = kway_merge_disjoint_sorted_by(
                     slices,
                     mask.iter().filter_map(|i| i.storage_tries.get(&address).map(Vec::as_slice)),
+                    equal_mask_value,
                 )
                 .collect();
                 (!nodes.is_empty()).then_some((address, nodes))
@@ -153,6 +155,21 @@ impl StateTrieUpdatesSorted {
 impl AsRef<Self> for StateTrieUpdatesSorted {
     fn as_ref(&self) -> &Self {
         self
+    }
+}
+
+fn equal_mask_value<V: PartialEq>(
+    left: &Option<StateTrieNode<V>>,
+    right: &Option<StateTrieNode<V>>,
+) -> bool {
+    match (left, right) {
+        // Moving a leaf changes its short key without a BundleState update. Its value must
+        // reach the durable frontier because execution does not consult the trie overlay.
+        (
+            Some(StateTrieNode::Leaf { value: left, .. }),
+            Some(StateTrieNode::Leaf { value: right, .. }),
+        ) => left == right,
+        _ => left == right,
     }
 }
 
@@ -315,5 +332,13 @@ mod tests {
             StateTrieUpdatesSorted::disjointed_merge_batch(&[&old, &deleted], &[&old, &deleted]),
             deleted
         );
+        let mut moved = old.clone();
+        let Some(StateTrieNode::Leaf { short_key_len, .. }) =
+            &mut moved.storage_tries.get_mut(&address).unwrap()[0].1
+        else {
+            unreachable!()
+        };
+        *short_key_len = 62;
+        assert_eq!(StateTrieUpdatesSorted::disjointed_merge_batch(&[&old], &[&moved]), old);
     }
 }

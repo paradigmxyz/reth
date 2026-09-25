@@ -4899,74 +4899,93 @@ mod tests {
     }
 
     #[test]
-    fn save_blocks_persists_complete_state_trie_with_masked_deletions() {
+    fn save_blocks_persists_complete_state_trie_with_masked_updates() {
         use reth_trie::{
             state_trie_cursor::{StateTrieCursor, StateTrieCursorFactory},
             StateTrieNode, StateTrieUpdatesSorted, TrieAccount,
         };
         use reth_trie_db::{write_state_trie_updates, DatabaseStateTrieCursorFactory};
 
-        let factory = create_test_provider_factory();
-        let mut builder = TestBlockBuilder::eth().with_state();
-        let genesis = builder.get_executed_blocks(0..1).next().unwrap();
-        let mut blocks: Vec<_> = builder.get_executed_blocks(1..3).collect();
-        let address = B256::with_last_byte(1);
-        let path = Nibbles::unpack(address);
-        let updates = |value: Option<u64>| StateTrieUpdatesSorted {
-            account_nodes: vec![(
-                path,
-                value.map(|nonce| StateTrieNode::Leaf {
-                    short_key_len: 64,
-                    value: TrieAccount { nonce, ..Default::default() },
-                }),
-            )],
-            storage_tries: std::iter::once((
-                address,
-                vec![(
+        for move_leaf in [false, true] {
+            let factory = create_test_provider_factory();
+            let mut builder = TestBlockBuilder::eth().with_state();
+            let genesis = builder.get_executed_blocks(0..1).next().unwrap();
+            let mut blocks: Vec<_> = builder.get_executed_blocks(1..3).collect();
+            let address = B256::with_last_byte(1);
+            let path = Nibbles::unpack(address);
+            let updates = |value: Option<u64>| StateTrieUpdatesSorted {
+                account_nodes: vec![(
                     path,
-                    value.map(|value| StateTrieNode::Leaf {
+                    value.map(|nonce| StateTrieNode::Leaf {
                         short_key_len: 64,
-                        value: U256::from(value),
+                        value: TrieAccount { nonce, ..Default::default() },
                     }),
                 )],
-            ))
-            .collect(),
-        };
-        let rw = factory.provider_rw().unwrap();
-        save_genesis(&rw, &genesis).unwrap();
-        write_state_trie_updates(rw.tx_ref(), &updates(Some(1))).unwrap();
-        rw.commit().unwrap();
-        for (block, update) in blocks.iter_mut().zip([updates(Some(2)), updates(None)]) {
-            *block = ExecutedBlock::new(
-                block.recovered_block.clone(),
-                block.execution_output.clone(),
-                Default::default(),
-            );
-            block.state_trie_updates = Some(Arc::new(update));
-        }
-        // Persist block bodies, then the masked prefix, then the remaining deletion.
-        for (db_tip, partial_tip, new_partial_tip) in [(0, 0, 0), (2, 0, 1), (2, 1, 2)] {
+                storage_tries: std::iter::once((
+                    address,
+                    vec![(
+                        path,
+                        value.map(|value| StateTrieNode::Leaf {
+                            short_key_len: 64,
+                            value: U256::from(value),
+                        }),
+                    )],
+                ))
+                .collect(),
+            };
             let rw = factory.provider_rw().unwrap();
-            let input = SaveBlocksInput::new(
-                blocks[partial_tip..].to_vec(),
-                db_tip,
-                partial_tip as u64,
-                2,
-                new_partial_tip,
-            );
-            rw.save_blocks(&input).unwrap();
+            save_genesis(&rw, &genesis).unwrap();
+            write_state_trie_updates(rw.tx_ref(), &updates(Some(1))).unwrap();
             rw.commit().unwrap();
-            let ro = factory.provider().unwrap();
-            let cursors = DatabaseStateTrieCursorFactory(ro.tx_ref());
-            let expected = updates((new_partial_tip < 2).then_some(1));
-            assert_eq!(
-                cursors.state_trie_account_cursor().unwrap().get(path).unwrap(),
-                expected.account_nodes[0].1
-            );
-            assert_eq!(
-                cursors.state_trie_storage_cursor(address).unwrap().get(path).unwrap(),
-                expected.storage_tries[&address][0].1
-            );
+            let mut suffix = updates(move_leaf.then_some(2));
+            if move_leaf {
+                if let Some(StateTrieNode::Leaf { short_key_len, .. }) =
+                    &mut suffix.account_nodes[0].1
+                {
+                    *short_key_len = 62;
+                }
+                if let Some(StateTrieNode::Leaf { short_key_len, .. }) =
+                    &mut suffix.storage_tries.get_mut(&address).unwrap()[0].1
+                {
+                    *short_key_len = 62;
+                }
+            }
+            for (block, update) in blocks.iter_mut().zip([updates(Some(2)), suffix.clone()]) {
+                *block = ExecutedBlock::new(
+                    block.recovered_block.clone(),
+                    block.execution_output.clone(),
+                    Default::default(),
+                );
+                block.state_trie_updates = Some(Arc::new(update));
+            }
+            // Persist block bodies, then the masked prefix, then the suffix.
+            for (db_tip, partial_tip, new_partial_tip) in [(0, 0, 0), (2, 0, 1), (2, 1, 2)] {
+                let rw = factory.provider_rw().unwrap();
+                let input = SaveBlocksInput::new(
+                    blocks[partial_tip..].to_vec(),
+                    db_tip,
+                    partial_tip as u64,
+                    2,
+                    new_partial_tip,
+                );
+                rw.save_blocks(&input).unwrap();
+                rw.commit().unwrap();
+                let ro = factory.provider().unwrap();
+                let cursors = DatabaseStateTrieCursorFactory(ro.tx_ref());
+                let expected = match new_partial_tip {
+                    0 => updates(Some(1)),
+                    1 => updates(Some(if move_leaf { 2 } else { 1 })),
+                    _ => suffix.clone(),
+                };
+                assert_eq!(
+                    cursors.state_trie_account_cursor().unwrap().get(path).unwrap(),
+                    expected.account_nodes[0].1
+                );
+                assert_eq!(
+                    cursors.state_trie_storage_cursor(address).unwrap().get(path).unwrap(),
+                    expected.storage_tries[&address][0].1
+                );
+            }
         }
     }
 
