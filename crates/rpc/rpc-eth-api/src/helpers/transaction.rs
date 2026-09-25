@@ -616,9 +616,6 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
                     request.as_mut().signatures = Some(Vec::new());
                 }
 
-                // Frame limits are part of the canonical envelope. The request type represents
-                // each limit as a concrete value, so zero must retain its protocol meaning rather
-                // than being treated as an omitted value to estimate or overwrite.
                 if request.as_ref().eip8141_fees.is_none() {
                     if request.as_ref().max_fee_per_blob_gas().is_none() {
                         let max_fee_per_blob_gas = if request
@@ -650,6 +647,9 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
                     }
                 }
 
+                request = self
+                    .fill_frame_gas_at(request, BlockId::pending(), EvmOverrides::default())
+                    .await?;
                 let tx = self.converter().build_simulate_v1_transaction(request)?;
                 let raw = tx.encoded_2718().into();
                 return Ok(FillTransaction { raw, tx })

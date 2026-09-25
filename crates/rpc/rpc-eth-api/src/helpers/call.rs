@@ -524,8 +524,17 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
         overrides: EvmOverrides,
     ) -> impl Future<Output = Result<Bytes, Self::Error>> + Send {
         async move {
-            let res =
-                self.transact_call_at(request, block_number.unwrap_or_default(), overrides).await?;
+            let at = block_number.unwrap_or_default();
+            let request = if request.as_ref().frames.as_ref().is_some_and(|frames| {
+                frames
+                    .iter()
+                    .any(|frame| frame.execution_gas.is_none() || frame.state_gas.is_none())
+            }) {
+                self.fill_frame_gas_at(request, at, overrides.clone()).await?
+            } else {
+                request
+            };
+            let res = self.transact_call_at(request, at, overrides).await?;
 
             Self::Error::ensure_success(res.result)
         }
@@ -1070,6 +1079,7 @@ pub trait Call:
         // track whether the request has a gas limit set
         let request_has_gas_limit = request.as_ref().gas_limit().is_some();
         let is_frame = Into::<u8>::into(request.as_ref().output_tx_type()) == 0x06;
+        evm_env.cfg_env.allow_frame_signature_placeholders = is_frame;
 
         if !is_frame {
             if let Some(requested_gas) = request.as_ref().gas_limit() {
