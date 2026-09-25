@@ -1320,7 +1320,8 @@ mod tests {
             .state_present_account_info(address, account.clone())
             .state_storage(
                 address,
-                [(U256::from_be_bytes(slot.0), (U256::from(10), U256::ZERO))].into_iter().collect(),
+                std::iter::once((U256::from_be_bytes(slot.0), (U256::from(10), U256::ZERO)))
+                    .collect(),
             )
             .build();
         let manager = OverlayManager::default();
