@@ -443,7 +443,7 @@ mod tests {
         let tx_req = TransactionRequest {
             from: Some(address),
             transaction_type: Some(0x06),
-            frames: Some(vec![Frame { limits: limits.clone(), ..Default::default() }]),
+            frames: Some(vec![Frame { limits: limits.clone(), ..Default::default() }.into()]),
             ..Default::default()
         };
 
@@ -456,6 +456,138 @@ mod tests {
         assert_eq!(frame_tx.frames[0].limits, limits);
         assert!(frame_tx.signatures.is_empty());
         assert_eq!(filled.tx.gas_limit(), frame_tx.calculate_gas_limit());
+    }
+
+    #[tokio::test]
+    async fn fill_frame_transaction_preserves_signature_placeholders() {
+        let address = Address::random();
+        let nonce = 42u64;
+        let limits = FrameLimits { execution: 45_000, state: 7_000 };
+        let accounts = AddressMap::from_iter([(
+            address,
+            ExtendedAccount::new(nonce, U256::from(10_000_000_000_000_000_000u64)),
+        )]);
+        let eth_api = mock_eth_api(accounts);
+
+        let tx_req = TransactionRequest {
+            from: Some(address),
+            transaction_type: Some(0x06),
+            signatures: Some(vec![alloy_eips::eip8141::FrameSignature {
+                scheme: alloy_eips::eip8141::SignatureScheme::Secp256k1,
+                ..Default::default()
+            }]),
+            frames: Some(vec![Frame { limits: limits.clone(), ..Default::default() }.into()]),
+            ..Default::default()
+        };
+
+        let filled = eth_api.fill_transaction(tx_req).await.expect("frame fill should succeed");
+        let frame_tx = filled.tx.frame_transaction().expect("filled transaction should be a frame");
+
+        assert_eq!(frame_tx.sender, address);
+        assert_eq!(frame_tx.nonce, nonce);
+        assert_eq!(frame_tx.chain_id, 1);
+        assert_eq!(frame_tx.frames[0].limits, limits);
+        assert_eq!(frame_tx.signatures.len(), 1);
+        assert!(frame_tx.signatures[0].signature.is_empty());
+        let json = serde_json::to_value(&filled).unwrap();
+        assert_eq!(json["tx"]["signatures"][0]["scheme"], "0x1");
+        assert!(json["tx"]["signatures"][0].get("signature").is_none());
+        assert_eq!(filled.tx.gas_limit(), frame_tx.calculate_gas_limit());
+    }
+
+    #[tokio::test]
+    async fn fill_frame_transaction_estimates_missing_limits_and_preserves_zero() {
+        let address = Address::random();
+        let accounts = AddressMap::from_iter([(
+            address,
+            ExtendedAccount::new(0, U256::from(10_000_000_000_000_000_000u64)),
+        )]);
+        let api = mock_eth_api(accounts);
+        for state in [None, Some("0x0")] {
+            let mut frame = serde_json::json!({"mode":"0x1", "flags":"0x3"});
+            if let Some(state) = state {
+                frame["stateGas"] = state.into();
+            }
+            let request: TransactionRequest = serde_json::from_value(serde_json::json!({
+                "type":"0x6", "from": address, "frames":[frame], "signatures":[{"scheme":"0x1"}]
+            }))
+            .unwrap();
+            let estimated = EthCall::estimate_gas_at(
+                &api,
+                request.clone(),
+                BlockId::latest(),
+                EvmOverrides::default(),
+            )
+            .await
+            .unwrap();
+            assert!(estimated > U256::ZERO);
+            EthCall::call(&api, request.clone(), Some(BlockId::latest()), EvmOverrides::default())
+                .await
+                .unwrap();
+            let filled = api.fill_transaction(request).await.unwrap();
+            let transaction = filled.tx.frame_transaction().unwrap();
+            assert!(transaction.frames[0].limits.execution > 0);
+            assert_eq!(transaction.frames[0].limits.state, 0);
+            assert!(transaction.frames[0].limits.execution < 100_000);
+        }
+    }
+
+    #[tokio::test]
+    async fn fill_frame_transaction_preserves_state_between_frames() {
+        let sender = Address::random();
+        let target = Address::random();
+        let code = alloy_primitives::hex!("5f35156011575f546001146016575f5ffd5b60015f555b00");
+        let api = mock_eth_api(AddressMap::from_iter([
+            (sender, ExtendedAccount::new(0, U256::from(10_000_000_000_000_000_000u64))),
+            (
+                target,
+                ExtendedAccount::new(0, U256::ZERO).with_bytecode(Bytes::copy_from_slice(&code)),
+            ),
+        ]));
+        let request = serde_json::from_value(serde_json::json!({
+            "type":"0x6", "from":sender,
+            "frames":[
+                {"mode":"0x1", "flags":"0x3"},
+                {"mode":"0x2", "target":target},
+                {"mode":"0x2", "target":target, "data":"0x0000000000000000000000000000000000000000000000000000000000000001"}
+            ],
+            "signatures":[{"scheme":"0x1"}]
+        })).unwrap();
+        let filled = api.fill_transaction(request).await.unwrap();
+        let frames = &filled.tx.frame_transaction().unwrap().frames;
+        assert!(frames[1].limits.state > 0);
+        assert_eq!(frames[2].limits.state, 0);
+        assert!(frames[2].limits.execution > 0);
+    }
+
+    #[tokio::test]
+    async fn fill_frame_transaction_rejects_missing_limits_with_supplied_signature() {
+        let address = Address::random();
+        let api =
+            mock_eth_api(AddressMap::from_iter([(address, ExtendedAccount::new(0, U256::MAX))]));
+        let request = serde_json::from_value(serde_json::json!({
+            "type":"0x6", "from":address, "frames":[{"mode":"0x1", "flags":"0x3"}],
+            "signatures":[{"scheme":"0x1", "signature": "0x01"}]
+        }))
+        .unwrap();
+        assert!(api
+            .fill_transaction(request)
+            .await
+            .unwrap_err()
+            .to_string()
+            .contains("signed frame transactions"));
+    }
+
+    #[tokio::test]
+    async fn fill_frame_transaction_does_not_replace_explicit_zero_execution() {
+        let address = Address::random();
+        let api =
+            mock_eth_api(AddressMap::from_iter([(address, ExtendedAccount::new(0, U256::MAX))]));
+        let request = serde_json::from_value(serde_json::json!({
+            "type":"0x6", "from":address, "frames":[{"mode":"0x1", "flags":"0x3", "executionGas":"0x0"}],
+            "signatures":[{"scheme":"0x1"}]
+        })).unwrap();
+        assert!(api.fill_transaction(request).await.is_err());
     }
 
     #[tokio::test]
@@ -480,7 +612,8 @@ mod tests {
                 target: FrameAddress::from(address),
                 limits,
                 ..Default::default()
-            }]),
+            }
+            .into()]),
             ..Default::default()
         };
         let expected = eth_api

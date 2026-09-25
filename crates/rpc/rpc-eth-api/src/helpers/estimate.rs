@@ -77,6 +77,7 @@ pub trait EstimateCall: Call {
 
         // set nonce to None so that the correct nonce is chosen by the EVM
         let is_frame = Into::<u8>::into(request.as_ref().output_tx_type()) == 0x06;
+        evm_env.cfg_env.allow_frame_signature_placeholders = is_frame;
         if !is_frame {
             request.as_mut().take_nonce();
         } else {
@@ -347,6 +348,183 @@ pub trait EstimateCall: Call {
         Ok(U256::from(highest_gas_limit))
     }
 
+    /// Fills only omitted frame limits by probing the whole transaction at one block.
+    fn fill_frame_gas_at(
+        &self,
+        mut request: RpcTxReq<<Self::RpcConvert as RpcConvert>::Network>,
+        at: BlockId,
+        overrides: EvmOverrides,
+    ) -> impl Future<Output = Result<RpcTxReq<<Self::RpcConvert as RpcConvert>::Network>, Self::Error>>
+           + Send
+    where
+        Self: LoadPendingBlock,
+    {
+        async move {
+            let invalid = |message: &str| {
+                Self::Error::from_eth_err(EthApiError::InvalidParams(message.into()))
+            };
+            let frames =
+                request.as_ref().frames.as_ref().ok_or_else(|| invalid("missing frames"))?;
+            let missing: Vec<_> = frames
+                .iter()
+                .enumerate()
+                .flat_map(|(index, frame)| {
+                    [(index, false, frame.execution_gas), (index, true, frame.state_gas)]
+                        .into_iter()
+                        .filter_map(|(index, state, gas)| gas.is_none().then_some((index, state)))
+                })
+                .collect();
+            if missing.is_empty() {
+                return Ok(request);
+            }
+            if frames.is_empty() || frames.len() > 64 {
+                return Err(invalid("expected between 1 and 64 frames"));
+            }
+            if request.as_ref().signatures.as_ref().is_some_and(|signatures| {
+                signatures.iter().any(|signature| {
+                    u8::from(signature.scheme) != 0 && !signature.signature.is_empty()
+                })
+            }) {
+                return Err(invalid("signed frame transactions must include both frame gas limits"));
+            }
+
+            let (evm_env, at) = self.evm_env_at(at).await?;
+            let block_limit = overrides
+                .block
+                .as_ref()
+                .and_then(|block| block.gas_limit)
+                .unwrap_or_else(|| evm_env.block_env.gas_limit());
+            let mut cap = block_limit;
+            if self.call_gas_limit() != 0 {
+                cap = cap.min(self.call_gas_limit());
+            }
+            for frame in request.as_mut().frames.as_mut().unwrap() {
+                frame.execution_gas.get_or_insert(0);
+                frame.state_gas.get_or_insert(0);
+            }
+            // Reserve transaction overhead and every explicit allocation before assigning defaults.
+            let tx_env = self.converter().tx_env(request.clone(), &evm_env)?;
+            let gas_params = &evm_env.cfg_env.gas_params;
+            let signature_bytes = request
+                .as_ref()
+                .signatures
+                .as_deref()
+                .unwrap_or_default()
+                .iter()
+                .filter(|signature| signature.signature.is_empty())
+                .filter_map(|signature| signature.scheme.signature_length())
+                .try_fold(0u64, |sum, length| sum.checked_add(length as u64))
+                .ok_or_else(|| invalid("signature gas overflows"))?;
+            let signature_gas = signature_bytes
+                .checked_mul(gas_params.tx_token_non_zero_byte_multiplier())
+                .and_then(|tokens| {
+                    tokens.checked_mul(
+                        gas_params.tx_token_cost().max(gas_params.tx_floor_cost_per_token()),
+                    )
+                })
+                .ok_or_else(|| invalid("signature gas overflows"))?;
+            let reserved = tx_env
+                .gas_limit()
+                .checked_add(signature_gas)
+                .ok_or_else(|| invalid("frame gas overflows"))?;
+            let allowance = cap
+                .checked_sub(reserved)
+                .ok_or_else(|| invalid("frame transaction exceeds the gas cap"))?;
+            let state_reserved = tx_env
+                .frame_transaction()
+                .unwrap()
+                .total_frame_state_gas_limit()
+                .ok_or_else(|| invalid("state gas overflows"))?;
+            let execution_allowance = evm_env
+                .cfg_env
+                .tx_gas_limit_cap()
+                .checked_sub(reserved - state_reserved)
+                .ok_or_else(|| invalid("frame transaction exceeds the execution gas cap"))?;
+            let execution_count = missing.iter().filter(|(_, state)| !state).count() as u64;
+            let initial = allowance / missing.len() as u64;
+            let execution_initial =
+                initial.min(execution_allowance.checked_div(execution_count).unwrap_or(0));
+            for &(index, state) in &missing {
+                let frame = &mut request.as_mut().frames.as_mut().unwrap()[index];
+                if state {
+                    frame.state_gas = Some(initial);
+                } else {
+                    frame.execution_gas = Some(execution_initial);
+                }
+            }
+            let _permit = self
+                .acquire_owned_blocking_io()
+                .await
+                .map_err(|_| EthApiError::InternalEthError)?;
+            let probe = async |candidate| {
+                let env = evm_env.clone();
+                let overrides = overrides.clone();
+                let result = self
+                    .spawn_with_state_at_block(at, move |this, mut db| {
+                        let (env, tx) =
+                            this.prepare_call_env(env, candidate, &mut db, overrides)?;
+                        this.transact(&mut db, env, tx)
+                    })
+                    .await?;
+                match result.result {
+                    ExecutionResult::FrameTransaction { frame_receipts, .. } => {
+                        Ok::<_, Self::Error>(frame_receipts.iter().all(|receipt| {
+                            receipt.status == alloy_eips::eip8141::FrameStatus::Success
+                        }))
+                    }
+                    _ => Ok(false),
+                }
+            };
+            if !probe(request.clone()).await? {
+                return Err(invalid("frame transaction does not succeed within the gas cap"));
+            }
+            let mut probes = 1;
+            for (index, state) in missing {
+                let mut low = 0;
+                let mut high = if state { initial } else { execution_initial };
+                while low < high && probes < 511 {
+                    let middle = low + (high - low) / 2;
+                    let mut candidate = request.clone();
+                    let frame = &mut candidate.as_mut().frames.as_mut().unwrap()[index];
+                    if state {
+                        frame.state_gas = Some(middle);
+                    } else {
+                        frame.execution_gas = Some(middle);
+                    }
+                    probes += 1;
+                    // VERIFY out-of-gas is a transaction error, so an unsuccessful probe keeps the
+                    // known-good bound.
+                    let succeeds = match probe(candidate).await {
+                        Ok(success) => success,
+                        Err(error)
+                            if error.is_gas_too_low() ||
+                                error.is_gas_too_high() ||
+                                error.to_string().contains("EIP-8141 VERIFY frame failed") =>
+                        {
+                            false
+                        }
+                        Err(error) => return Err(error),
+                    };
+                    if succeeds {
+                        high = middle;
+                    } else {
+                        low = middle + 1;
+                    }
+                }
+                let frame = &mut request.as_mut().frames.as_mut().unwrap()[index];
+                if state {
+                    frame.state_gas = Some(high);
+                } else {
+                    frame.execution_gas = Some(high);
+                }
+            }
+            if !probe(request.clone()).await? {
+                return Err(invalid("filled frame gas limits failed validation"));
+            }
+            Ok(request)
+        }
+    }
+
     /// Estimate gas needed for execution of the `request` at the [`BlockId`].
     fn estimate_gas_at(
         &self,
@@ -358,6 +536,15 @@ pub trait EstimateCall: Call {
         Self: LoadPendingBlock,
     {
         async move {
+            let request = if request.as_ref().frames.as_ref().is_some_and(|frames| {
+                frames
+                    .iter()
+                    .any(|frame| frame.execution_gas.is_none() || frame.state_gas.is_none())
+            }) {
+                self.fill_frame_gas_at(request, at, overrides.clone()).await?
+            } else {
+                request
+            };
             let (evm_env, at) = self.evm_env_at(at).await?;
 
             self.spawn_blocking_io_fut(async move |this| {
