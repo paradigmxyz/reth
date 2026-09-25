@@ -6,7 +6,6 @@ use alloy_rpc_types_engine::ForkchoiceState;
 use eyre::{eyre, Result};
 use reth_chainspec::ChainSpec;
 use reth_ethereum_primitives::Block;
-use reth_network_p2p::sync::{NetworkSyncUpdater, SyncState};
 use reth_node_api::{EngineTypes, PayloadTypes, TreeConfig};
 use reth_node_core::{args::StorageArgs, primitives::RecoveredBlock};
 use revm::state::EvmState;
@@ -202,7 +201,6 @@ where
         let (shutdown_tx, mut shutdown_rx) = mpsc::channel(1);
         self.shutdown_tx = Some(shutdown_tx);
 
-        let is_dev = self.is_dev;
         let tree_config = self.tree_config.clone();
 
         let result = N::test_setup(
@@ -212,7 +210,7 @@ where
         .with_tree_config_modifier(move |base| {
             tree_config.clone().with_cross_block_cache_size(base.cross_block_cache_size())
         })
-        .with_dev_mode(is_dev)
+        .with_dev_mode(self.is_dev)
         .with_storage_v2(self.storage_v2)
         .with_connect_nodes(self.network.connect_nodes)
         .build()
@@ -319,15 +317,6 @@ where
             "Environment initialized with {} nodes, starting from block {} (hash: {})",
             self.network.node_count, initial_block_info.number, initial_block_info.hash
         );
-
-        // In test environments, explicitly set sync state to Idle after initialization
-        // This ensures that eth_syncing returns false as expected by tests
-        if let Some(import_result) = &self.import_result_holder {
-            for (idx, node_ctx) in import_result.nodes.iter().enumerate() {
-                debug!("Setting sync state to Idle for node {}", idx);
-                node_ctx.inner.network.update_sync_state(SyncState::Idle);
-            }
-        }
 
         Ok(())
     }

@@ -71,6 +71,10 @@ pub async fn setup_engine_with_chain_import(
     rlp_path: &Path,
 ) -> eyre::Result<ChainImportResult> {
     let runtime = Runtime::test();
+    let attributes_generator = {
+        let chain_spec = chain_spec.clone();
+        Arc::new(move |timestamp| eth_payload_attributes(&chain_spec, timestamp))
+    };
 
     // Create nodes with imported data.
     let mut nodes = Vec::with_capacity(num_nodes);
@@ -103,15 +107,12 @@ pub async fn setup_engine_with_chain_import(
         // Now launch the node with the pre-populated datadir.
         debug!(target: "e2e::import", "Launching node with datadir: {:?}", datadir);
 
-        let chain_spec_for_attributes = chain_spec.clone();
         let node = launch_test_node::<EthereumNode>(LaunchArgs {
             node_config,
             runtime: runtime.clone(),
             tree_config: tree_config.clone(),
             datadir,
-            attributes_generator: Arc::new(move |timestamp| {
-                eth_payload_attributes(&chain_spec_for_attributes, timestamp)
-            }),
+            attributes_generator: attributes_generator.clone(),
             dev_payload_attributes: None,
         })
         .instrument(span)

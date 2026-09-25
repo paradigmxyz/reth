@@ -1,8 +1,7 @@
 use alloy_eips::Decodable2718;
 use reth_chainspec::EthereumHardfork;
 use reth_e2e_test_utils::{
-    test_chain_spec, test_chain_spec_builder, transaction::TransactionTestContext, wallet::Wallet,
-    E2ETestSetupExt,
+    test_chain_spec, test_chain_spec_builder, transaction::TransactionTestContext, E2ETestSetupExt,
 };
 use reth_ethereum_engine_primitives::BlobSidecars;
 use reth_ethereum_primitives::PooledTransactionVariant;
@@ -19,14 +18,10 @@ async fn can_handle_blobs() -> eyre::Result<()> {
 
     let chain_spec = test_chain_spec(EthereumHardfork::Cancun);
     let genesis_hash = chain_spec.genesis_hash();
-    let (mut node, _) = EthereumNode::test_setup(1, chain_spec).build_single().await?;
-
-    let wallets = Wallet::new(2).wallet_gen();
-    let blob_wallet = wallets.first().unwrap();
-    let second_wallet = wallets.last().unwrap();
+    let (mut node, wallet) = EthereumNode::test_setup(1, chain_spec).build_single().await?;
 
     // inject normal tx
-    let raw_tx = TransactionTestContext::transfer_tx_bytes(1, second_wallet.clone()).await;
+    let raw_tx = TransactionTestContext::transfer_tx_bytes(1, wallet.signer(1)).await;
     let tx_hash = node.rpc.inject_tx(raw_tx).await?;
     // build payload with normal tx
     let payload = node.new_payload().await?;
@@ -35,7 +30,7 @@ async fn can_handle_blobs() -> eyre::Result<()> {
     node.inner.pool.remove_transactions(vec![tx_hash]);
 
     // build blob tx
-    let blob_tx = TransactionTestContext::tx_with_blobs_bytes(1, blob_wallet.clone()).await?;
+    let blob_tx = TransactionTestContext::tx_with_blobs_bytes(1, wallet.signer(0)).await?;
 
     // inject blob tx to the pool
     let blob_tx_hash = node.rpc.inject_tx(blob_tx).await?;
@@ -72,16 +67,13 @@ async fn can_send_legacy_sidecar_post_activation() -> eyre::Result<()> {
 
     let chain_spec = test_chain_spec(EthereumHardfork::Osaka);
     let genesis_hash = chain_spec.genesis_hash();
-    let (mut node, _) = EthereumNode::test_setup(1, chain_spec)
+    let (mut node, wallet) = EthereumNode::test_setup(1, chain_spec)
         .with_rpc_modifier(|rpc| rpc.with_force_blob_sidecar_upcasting())
         .build_single()
         .await?;
 
-    let wallets = Wallet::new(2).wallet_gen();
-    let blob_wallet = wallets.first().unwrap();
-
     // build blob tx
-    let blob_tx = TransactionTestContext::tx_with_blobs_bytes(1, blob_wallet.clone()).await?;
+    let blob_tx = TransactionTestContext::tx_with_blobs_bytes(1, wallet.signer(0)).await?;
 
     let tx = PooledTransactionVariant::decode_2718_exact(&blob_tx).unwrap();
     assert!(tx.as_eip4844().unwrap().tx().sidecar.is_eip4844());
@@ -118,24 +110,20 @@ async fn blob_conversion_at_osaka() -> eyre::Result<()> {
         test_chain_spec_builder().prague_activated().with_osaka_at(osaka_timestamp).build(),
     );
     let genesis_hash = chain_spec.genesis_hash();
-    let (mut node, _) = EthereumNode::test_setup(1, chain_spec)
+    let (mut node, wallet) = EthereumNode::test_setup(1, chain_spec)
         .with_rpc_modifier(|rpc| rpc.with_force_blob_sidecar_upcasting())
         .build_single()
         .await?;
 
-    let mut wallets = Wallet::new(3).wallet_gen();
-    let first = wallets.pop().unwrap();
-    let second = wallets.pop().unwrap();
-
     // build a dummy payload at `current_timestamp`
-    let raw_tx = TransactionTestContext::transfer_tx_bytes(1, wallets.pop().unwrap()).await;
+    let raw_tx = TransactionTestContext::transfer_tx_bytes(1, wallet.signer(0)).await;
     node.rpc.inject_tx(raw_tx).await?;
     node.payload.timestamp = current_timestamp - 1;
     node.advance_block().await?;
 
     // build blob txs
-    let first_blob = TransactionTestContext::tx_with_blobs_bytes(1, first.clone()).await?;
-    let second_blob = TransactionTestContext::tx_with_blobs_bytes(1, second.clone()).await?;
+    let first_blob = TransactionTestContext::tx_with_blobs_bytes(1, wallet.signer(1)).await?;
+    let second_blob = TransactionTestContext::tx_with_blobs_bytes(1, wallet.signer(2)).await?;
 
     // assert both txs have legacy sidecars
     assert!(PooledTransactionVariant::decode_2718_exact(&first_blob)

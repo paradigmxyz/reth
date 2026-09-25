@@ -127,7 +127,7 @@ pub(crate) async fn advance_with_random_transactions(
 }
 
 /// Header selecting the fork of fork-scoped SSZ engine API endpoints.
-pub(crate) const ENGINE_EXECUTION_VERSION_HEADER: &str = "Eth-Execution-Version";
+const ENGINE_EXECUTION_VERSION_HEADER: &str = "Eth-Execution-Version";
 
 /// Extension trait for requests against the SSZ engine API.
 pub(crate) trait EngineSszRequestExt {

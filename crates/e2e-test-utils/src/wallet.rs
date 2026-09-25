@@ -10,9 +10,6 @@ use alloy_signer_local::{coins_bip39::English, MnemonicBuilder, PrivateKeySigner
 /// Mnemonic of the test accounts funded by the [`test_genesis`](crate::test_genesis).
 pub const TEST_MNEMONIC: &str = "test test test test test test test test test test test junk";
 
-/// Default derivation path prefix of the test accounts, followed by the account index.
-const DEFAULT_DERIVATION_PATH: &str = "m/44'/60'/0'/0/";
-
 /// One of the accounts of the genesis allocations.
 #[derive(Debug)]
 pub struct Wallet {
@@ -23,24 +20,18 @@ pub struct Wallet {
     /// The chain id
     pub chain_id: u64,
     amount: usize,
-    derivation_path: Option<String>,
 }
 
 impl Wallet {
     /// Creates a new account from one of the secret/pubkeys of the genesis allocations (test.json)
     pub fn new(amount: usize) -> Self {
-        let inner = MnemonicBuilder::<English>::default().phrase(TEST_MNEMONIC).build().unwrap();
-        Self { inner, chain_id: 1, amount, derivation_path: None, inner_nonce: 0 }
+        Self { inner: test_signer(0), chain_id: 1, amount, inner_nonce: 0 }
     }
 
     /// Sets chain id
     pub const fn with_chain_id(mut self, chain_id: u64) -> Self {
         self.chain_id = chain_id;
         self
-    }
-
-    fn get_derivation_path(&self) -> &str {
-        self.derivation_path.as_deref().unwrap_or(DEFAULT_DERIVATION_PATH)
     }
 
     /// Generates a list of wallets
@@ -50,7 +41,7 @@ impl Wallet {
 
     /// Returns the signer of the test account at `index`, with the chain id of the wallet.
     pub fn signer(&self, index: u32) -> PrivateKeySigner {
-        derive_signer(self.get_derivation_path(), index).with_chain_id(Some(self.chain_id))
+        test_signer(index).with_chain_id(Some(self.chain_id))
     }
 
     /// Returns the test account at `index`, with the chain id of the wallet and nonce 0.
@@ -65,17 +56,13 @@ impl Default for Wallet {
     }
 }
 
-/// Returns the signer of the test account at `index`, derived from [`TEST_MNEMONIC`].
+/// Returns the signer of the test account at `index`, derived from [`TEST_MNEMONIC`] with the
+/// default Ethereum derivation path `m/44'/60'/0'/0/{index}`.
 pub fn test_signer(index: u32) -> PrivateKeySigner {
-    derive_signer(DEFAULT_DERIVATION_PATH, index)
-}
-
-/// Derives the signer at `index` below `derivation_path` from [`TEST_MNEMONIC`].
-fn derive_signer(derivation_path: &str, index: u32) -> PrivateKeySigner {
     MnemonicBuilder::<English>::default()
         .phrase(TEST_MNEMONIC)
-        .derivation_path(format!("{derivation_path}{index}"))
-        .expect("valid derivation path")
+        .index(index)
+        .expect("valid derivation index")
         .build()
         .expect("valid test mnemonic")
 }

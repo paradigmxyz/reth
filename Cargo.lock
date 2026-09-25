@@ -8475,7 +8475,6 @@ dependencies = [
  "reth-engine-primitives",
  "reth-ethereum-primitives",
  "reth-network-api",
- "reth-network-p2p",
  "reth-network-peers",
  "reth-node-api",
  "reth-node-builder",

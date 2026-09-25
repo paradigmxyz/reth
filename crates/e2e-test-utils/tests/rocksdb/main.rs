@@ -7,9 +7,7 @@ use eyre::{ensure, Result};
 use jsonrpsee::core::client::ClientT;
 use reth_chainspec::EthereumHardfork;
 use reth_db::tables;
-use reth_e2e_test_utils::{
-    test_chain_spec, transaction::TransactionTestContext, wait::poll_until, wallet, E2ETestSetupExt,
-};
+use reth_e2e_test_utils::{transaction::TransactionTestContext, wait::poll_until, E2ETestSetupExt};
 use reth_node_ethereum::EthereumNode;
 use reth_provider::RocksDBProviderFactory;
 use std::time::Duration;
@@ -18,7 +16,7 @@ use std::time::Duration;
 /// Prevents race conditions where `advance_block` is called before txs are in the pool.
 /// Returns the pending transaction.
 async fn wait_for_pending_tx<C: ClientT>(client: &C, tx_hash: B256) -> Result<Transaction> {
-    poll_until(format_args!("transaction {tx_hash} in the pending pool"), || async move {
+    poll_until(format!("transaction {tx_hash} in the pending pool"), || async move {
         let tx: Option<Transaction> = client.request("eth_getTransactionByHash", [tx_hash]).await?;
         if let Some(tx) = &tx {
             ensure!(
@@ -35,7 +33,7 @@ async fn wait_for_pending_tx<C: ClientT>(client: &C, tx_hash: B256) -> Result<Tr
 /// Polls `RocksDB` until the given `tx_hash` appears in `TransactionHashNumbers` and returns its
 /// `tx_number`.
 async fn poll_tx_in_rocksdb<P: RocksDBProviderFactory>(provider: &P, tx_hash: B256) -> Result<u64> {
-    poll_until(format_args!("transaction {tx_hash} in RocksDB"), || async move {
+    poll_until(format!("transaction {tx_hash} in RocksDB"), || async move {
         // Re-acquire handle each iteration to avoid stale snapshot reads
         Ok(provider.rocksdb_provider().get::<tables::TransactionHashNumbers>(tx_hash)?)
     })
@@ -47,20 +45,18 @@ async fn poll_tx_in_rocksdb<P: RocksDBProviderFactory>(provider: &P, tx_hash: B2
 async fn test_rocksdb_node_startup() -> Result<()> {
     reth_tracing::init_test_tracing();
 
-    let (nodes, _wallet) = EthereumNode::test_setup_for(EthereumHardfork::Cancun)
+    let (node, _) = EthereumNode::test_setup_for(EthereumHardfork::Cancun)
         .with_storage_v2(true)
-        .build()
+        .build_single()
         .await?;
 
-    assert_eq!(nodes.len(), 1);
-
     // Verify RocksDB provider is functional (can query without error)
-    let rocksdb = nodes[0].inner.provider.rocksdb_provider();
+    let rocksdb = node.inner.provider.rocksdb_provider();
     let missing_hash = B256::from([0xab; 32]);
     let result: Option<u64> = rocksdb.get::<tables::TransactionHashNumbers>(missing_hash)?;
     assert!(result.is_none(), "Missing hash should return None");
 
-    let genesis_hash = nodes[0].block_hash(0);
+    let genesis_hash = node.block_hash(0);
     assert_ne!(genesis_hash, B256::ZERO);
 
     Ok(())
@@ -71,31 +67,29 @@ async fn test_rocksdb_node_startup() -> Result<()> {
 async fn test_rocksdb_block_mining() -> Result<()> {
     reth_tracing::init_test_tracing();
 
-    let chain_spec = test_chain_spec(EthereumHardfork::Cancun);
-    let chain_id = chain_spec.chain().id();
+    let (mut node, wallet) = EthereumNode::test_setup_for(EthereumHardfork::Cancun)
+        .with_storage_v2(true)
+        .build_single()
+        .await?;
+    let chain_id = wallet.chain_id;
 
-    let (mut nodes, _wallet) =
-        EthereumNode::test_setup(1, chain_spec).with_storage_v2(true).build().await?;
-
-    assert_eq!(nodes.len(), 1);
-
-    let genesis_hash = nodes[0].block_hash(0);
+    let genesis_hash = node.block_hash(0);
     assert_ne!(genesis_hash, B256::ZERO);
 
     // Mine 3 blocks with transactions
-    let signer = wallet::Wallet::new(1).with_chain_id(chain_id).signer(0);
-    let client = nodes[0].rpc_client().expect("RPC client should be available");
+    let signer = wallet.signer(0);
+    let client = node.rpc_client().expect("RPC client should be available");
 
     for i in 1..=3u64 {
         let raw_tx =
             TransactionTestContext::transfer_tx_bytes_with_nonce(chain_id, signer.clone(), i - 1)
                 .await;
-        let tx_hash = nodes[0].rpc.inject_tx(raw_tx).await?;
+        let tx_hash = node.rpc.inject_tx(raw_tx).await?;
 
         // Wait for tx to enter pending pool before mining
         wait_for_pending_tx(&client, tx_hash).await?;
 
-        let payload = nodes[0].advance_block().await?;
+        let payload = node.advance_block().await?;
         let block = payload.block();
         assert_eq!(block.number(), i);
         assert_ne!(block.hash(), B256::ZERO);
@@ -109,7 +103,7 @@ async fn test_rocksdb_block_mining() -> Result<()> {
 
     // Verify all blocks are stored
     for i in 0..=3 {
-        let block_hash = nodes[0].block_hash(i);
+        let block_hash = node.block_hash(i);
         assert_ne!(block_hash, B256::ZERO);
     }
 
@@ -121,30 +115,26 @@ async fn test_rocksdb_block_mining() -> Result<()> {
 async fn test_rocksdb_transaction_queries() -> Result<()> {
     reth_tracing::init_test_tracing();
 
-    let chain_spec = test_chain_spec(EthereumHardfork::Cancun);
-    let chain_id = chain_spec.chain().id();
-
-    let (mut nodes, _) = EthereumNode::test_setup(1, chain_spec.clone())
+    let (mut node, wallet) = EthereumNode::test_setup_for(EthereumHardfork::Cancun)
         .with_storage_v2(true)
         .with_tree_config_modifier(|config| {
             config.with_persistence_threshold(0).with_memory_block_buffer_target(0)
         })
-        .build()
+        .build_single()
         .await?;
-
-    assert_eq!(nodes.len(), 1);
+    let chain_id = wallet.chain_id;
 
     // Inject and mine a transaction
-    let signer = wallet::Wallet::new(1).with_chain_id(chain_id).signer(0);
-    let client = nodes[0].rpc_client().expect("RPC client should be available");
+    let signer = wallet.signer(0);
+    let client = node.rpc_client().expect("RPC client should be available");
 
     let raw_tx = TransactionTestContext::transfer_tx_bytes(chain_id, signer).await;
-    let tx_hash = nodes[0].rpc.inject_tx(raw_tx).await?;
+    let tx_hash = node.rpc.inject_tx(raw_tx).await?;
 
     // Wait for tx to enter pending pool before mining
     wait_for_pending_tx(&client, tx_hash).await?;
 
-    let payload = nodes[0].advance_block().await?;
+    let payload = node.advance_block().await?;
     assert_eq!(payload.block().number(), 1);
 
     // Query each transaction by hash
@@ -159,12 +149,12 @@ async fn test_rocksdb_transaction_queries() -> Result<()> {
     assert!(receipt.status());
 
     // Direct RocksDB assertion - poll with timeout since persistence is async
-    let tx_number = poll_tx_in_rocksdb(&nodes[0].inner.provider, tx_hash).await?;
+    let tx_number = poll_tx_in_rocksdb(&node.inner.provider, tx_hash).await?;
     assert_eq!(tx_number, 0, "First tx should have TxNumber 0");
 
     // Verify missing hash returns None
     let missing_hash = B256::from([0xde; 32]);
-    let rocksdb = nodes[0].inner.provider.rocksdb_provider();
+    let rocksdb = node.inner.provider.rocksdb_provider();
     let missing_tx_number: Option<u64> =
         rocksdb.get::<tables::TransactionHashNumbers>(missing_hash)?;
     assert!(missing_tx_number.is_none());
@@ -185,27 +175,25 @@ async fn test_rocksdb_transaction_queries() -> Result<()> {
 async fn test_rocksdb_multi_tx_same_block() -> Result<()> {
     reth_tracing::init_test_tracing();
 
-    let chain_spec = test_chain_spec(EthereumHardfork::Cancun);
-    let chain_id = chain_spec.chain().id();
-
-    let (mut nodes, _) = EthereumNode::test_setup(1, chain_spec.clone())
+    let (mut node, wallet) = EthereumNode::test_setup_for(EthereumHardfork::Cancun)
         .with_storage_v2(true)
         .with_tree_config_modifier(|config| {
             config.with_persistence_threshold(0).with_memory_block_buffer_target(0)
         })
-        .build()
+        .build_single()
         .await?;
+    let chain_id = wallet.chain_id;
 
     // Create 3 txs from the same wallet with sequential nonces
-    let signer = wallet::Wallet::new(1).with_chain_id(chain_id).signer(0);
-    let client = nodes[0].rpc_client().expect("RPC client");
+    let signer = wallet.signer(0);
+    let client = node.rpc_client().expect("RPC client");
 
     let mut tx_hashes = Vec::new();
     for nonce in 0..3 {
         let raw_tx =
             TransactionTestContext::transfer_tx_bytes_with_nonce(chain_id, signer.clone(), nonce)
                 .await;
-        let tx_hash = nodes[0].rpc.inject_tx(raw_tx).await?;
+        let tx_hash = node.rpc.inject_tx(raw_tx).await?;
         tx_hashes.push(tx_hash);
     }
 
@@ -215,7 +203,7 @@ async fn test_rocksdb_multi_tx_same_block() -> Result<()> {
     }
 
     // Mine one block containing all 3 txs
-    let payload = nodes[0].advance_block().await?;
+    let payload = node.advance_block().await?;
     assert_eq!(payload.block().number(), 1);
 
     // Verify block contains all 3 txs
@@ -234,7 +222,7 @@ async fn test_rocksdb_multi_tx_same_block() -> Result<()> {
     // Poll RocksDB for all tx hashes and collect tx_numbers
     let mut tx_numbers = Vec::new();
     for tx_hash in &tx_hashes {
-        let n = poll_tx_in_rocksdb(&nodes[0].inner.provider, *tx_hash).await?;
+        let n = poll_tx_in_rocksdb(&node.inner.provider, *tx_hash).await?;
         tx_numbers.push(n);
     }
 
@@ -250,28 +238,26 @@ async fn test_rocksdb_multi_tx_same_block() -> Result<()> {
 async fn test_rocksdb_txs_across_blocks() -> Result<()> {
     reth_tracing::init_test_tracing();
 
-    let chain_spec = test_chain_spec(EthereumHardfork::Cancun);
-    let chain_id = chain_spec.chain().id();
-
-    let (mut nodes, _) = EthereumNode::test_setup(1, chain_spec.clone())
+    let (mut node, wallet) = EthereumNode::test_setup_for(EthereumHardfork::Cancun)
         .with_storage_v2(true)
         .with_tree_config_modifier(|config| {
             config.with_persistence_threshold(0).with_memory_block_buffer_target(0)
         })
-        .build()
+        .build_single()
         .await?;
+    let chain_id = wallet.chain_id;
 
-    let signer = wallet::Wallet::new(1).with_chain_id(chain_id).signer(0);
-    let client = nodes[0].rpc_client().expect("RPC client");
+    let signer = wallet.signer(0);
+    let client = node.rpc_client().expect("RPC client");
 
     // Block 1: 2 transactions
-    let tx_hash_0 = nodes[0]
+    let tx_hash_0 = node
         .rpc
         .inject_tx(
             TransactionTestContext::transfer_tx_bytes_with_nonce(chain_id, signer.clone(), 0).await,
         )
         .await?;
-    let tx_hash_1 = nodes[0]
+    let tx_hash_1 = node
         .rpc
         .inject_tx(
             TransactionTestContext::transfer_tx_bytes_with_nonce(chain_id, signer.clone(), 1).await,
@@ -282,11 +268,11 @@ async fn test_rocksdb_txs_across_blocks() -> Result<()> {
     wait_for_pending_tx(&client, tx_hash_0).await?;
     wait_for_pending_tx(&client, tx_hash_1).await?;
 
-    let payload1 = nodes[0].advance_block().await?;
+    let payload1 = node.advance_block().await?;
     assert_eq!(payload1.block().number(), 1);
 
     // Block 2: 1 transaction
-    let tx_hash_2 = nodes[0]
+    let tx_hash_2 = node
         .rpc
         .inject_tx(
             TransactionTestContext::transfer_tx_bytes_with_nonce(chain_id, signer.clone(), 2).await,
@@ -295,7 +281,7 @@ async fn test_rocksdb_txs_across_blocks() -> Result<()> {
 
     wait_for_pending_tx(&client, tx_hash_2).await?;
 
-    let payload2 = nodes[0].advance_block().await?;
+    let payload2 = node.advance_block().await?;
     assert_eq!(payload2.block().number(), 2);
 
     // Verify block contents via RPC
@@ -311,7 +297,7 @@ async fn test_rocksdb_txs_across_blocks() -> Result<()> {
     let all_tx_hashes = [tx_hash_0, tx_hash_1, tx_hash_2];
     let mut tx_numbers = Vec::new();
     for tx_hash in &all_tx_hashes {
-        let n = poll_tx_in_rocksdb(&nodes[0].inner.provider, *tx_hash).await?;
+        let n = poll_tx_in_rocksdb(&node.inner.provider, *tx_hash).await?;
         tx_numbers.push(n);
     }
 
@@ -332,25 +318,23 @@ async fn test_rocksdb_txs_across_blocks() -> Result<()> {
 async fn test_rocksdb_pending_tx_not_in_storage() -> Result<()> {
     reth_tracing::init_test_tracing();
 
-    let chain_spec = test_chain_spec(EthereumHardfork::Cancun);
-    let chain_id = chain_spec.chain().id();
-
-    let (mut nodes, _) = EthereumNode::test_setup(1, chain_spec.clone())
+    let (mut node, wallet) = EthereumNode::test_setup_for(EthereumHardfork::Cancun)
         .with_storage_v2(true)
         .with_tree_config_modifier(|config| {
             config.with_persistence_threshold(0).with_memory_block_buffer_target(0)
         })
-        .build()
+        .build_single()
         .await?;
+    let chain_id = wallet.chain_id;
 
-    let signer = wallet::Wallet::new(1).with_chain_id(chain_id).signer(0);
+    let signer = wallet.signer(0);
 
     // Inject tx but do NOT mine
     let raw_tx = TransactionTestContext::transfer_tx_bytes(chain_id, signer).await;
-    let tx_hash = nodes[0].rpc.inject_tx(raw_tx).await?;
+    let tx_hash = node.rpc.inject_tx(raw_tx).await?;
 
     // Verify tx is in pending pool via RPC
-    let client = nodes[0].rpc_client().expect("RPC client");
+    let client = node.rpc_client().expect("RPC client");
     wait_for_pending_tx(&client, tx_hash).await?;
 
     let pending_tx: Option<Transaction> =
@@ -359,7 +343,7 @@ async fn test_rocksdb_pending_tx_not_in_storage() -> Result<()> {
     assert!(pending_tx.unwrap().block_number.is_none(), "Pending tx should have no block_number");
 
     // Assert tx is NOT in RocksDB before mining (single check - tx is confirmed pending)
-    let rocksdb = nodes[0].inner.provider.rocksdb_provider();
+    let rocksdb = node.inner.provider.rocksdb_provider();
     let tx_number: Option<u64> = rocksdb.get::<tables::TransactionHashNumbers>(tx_hash)?;
     assert!(
         tx_number.is_none(),
@@ -368,11 +352,11 @@ async fn test_rocksdb_pending_tx_not_in_storage() -> Result<()> {
     );
 
     // Now mine the block
-    let payload = nodes[0].advance_block().await?;
+    let payload = node.advance_block().await?;
     assert_eq!(payload.block().number(), 1);
 
     // Poll until tx appears in RocksDB
-    let tx_number = poll_tx_in_rocksdb(&nodes[0].inner.provider, tx_hash).await?;
+    let tx_number = poll_tx_in_rocksdb(&node.inner.provider, tx_hash).await?;
     assert_eq!(tx_number, 0, "First tx should have tx_number 0");
 
     // Verify tx is now mined via RPC
@@ -393,80 +377,75 @@ async fn test_rocksdb_pending_tx_not_in_storage() -> Result<()> {
 async fn test_rocksdb_reorg_unwind() -> Result<()> {
     reth_tracing::init_test_tracing();
 
-    let chain_spec = test_chain_spec(EthereumHardfork::Cancun);
-    let chain_id = chain_spec.chain().id();
-
-    let (mut nodes, _) = EthereumNode::test_setup(1, chain_spec.clone())
+    let (mut node, wallet) = EthereumNode::test_setup_for(EthereumHardfork::Cancun)
         .with_storage_v2(true)
         .with_tree_config_modifier(|config| {
             config.with_persistence_threshold(0).with_memory_block_buffer_target(0)
         })
-        .build()
+        .build_single()
         .await?;
+    let chain_id = wallet.chain_id;
 
-    assert_eq!(nodes.len(), 1);
-
-    // Use two separate wallets to avoid nonce conflicts during reorg
-    let wallet = wallet::Wallet::new(2).with_chain_id(chain_id);
+    // Use two separate accounts to avoid nonce conflicts during reorg
     let (signer1, signer2) = (wallet.signer(0), wallet.signer(1));
-    let client = nodes[0].rpc_client().expect("RPC client");
+    let client = node.rpc_client().expect("RPC client");
 
     // Mine block 1 with a transaction from signer1
     let raw_tx1 =
         TransactionTestContext::transfer_tx_bytes_with_nonce(chain_id, signer1.clone(), 0).await;
-    let tx_hash1 = nodes[0].rpc.inject_tx(raw_tx1).await?;
+    let tx_hash1 = node.rpc.inject_tx(raw_tx1).await?;
     wait_for_pending_tx(&client, tx_hash1).await?;
 
-    let payload1 = nodes[0].advance_block().await?;
+    let payload1 = node.advance_block().await?;
     let block1_hash = payload1.block().hash();
     assert_eq!(payload1.block().number(), 1);
 
     // Poll until tx1 appears in RocksDB (ensures persistence happened)
-    let tx_number1 = poll_tx_in_rocksdb(&nodes[0].inner.provider, tx_hash1).await?;
+    let tx_number1 = poll_tx_in_rocksdb(&node.inner.provider, tx_hash1).await?;
     assert_eq!(tx_number1, 0, "First tx should have tx_number 0");
 
     // Mine block 2 with transaction from signer1 (nonce 1)
     let raw_tx2 =
         TransactionTestContext::transfer_tx_bytes_with_nonce(chain_id, signer1.clone(), 1).await;
-    let tx_hash2 = nodes[0].rpc.inject_tx(raw_tx2).await?;
+    let tx_hash2 = node.rpc.inject_tx(raw_tx2).await?;
     wait_for_pending_tx(&client, tx_hash2).await?;
 
-    let payload2 = nodes[0].advance_block().await?;
+    let payload2 = node.advance_block().await?;
     assert_eq!(payload2.block().number(), 2);
 
     // Poll until tx2 appears in RocksDB
-    let tx_number2 = poll_tx_in_rocksdb(&nodes[0].inner.provider, tx_hash2).await?;
+    let tx_number2 = poll_tx_in_rocksdb(&node.inner.provider, tx_hash2).await?;
     assert_eq!(tx_number2, 1, "Second tx should have tx_number 1");
 
     // Mine block 3 with transaction from signer1 (nonce 2)
     let raw_tx3 =
         TransactionTestContext::transfer_tx_bytes_with_nonce(chain_id, signer1.clone(), 2).await;
-    let tx_hash3 = nodes[0].rpc.inject_tx(raw_tx3).await?;
+    let tx_hash3 = node.rpc.inject_tx(raw_tx3).await?;
     wait_for_pending_tx(&client, tx_hash3).await?;
 
-    let payload3 = nodes[0].advance_block().await?;
+    let payload3 = node.advance_block().await?;
     assert_eq!(payload3.block().number(), 3);
 
     // Poll until tx3 appears in RocksDB
-    let tx_number3 = poll_tx_in_rocksdb(&nodes[0].inner.provider, tx_hash3).await?;
+    let tx_number3 = poll_tx_in_rocksdb(&node.inner.provider, tx_hash3).await?;
     assert_eq!(tx_number3, 2, "Third tx should have tx_number 2");
 
     // Now create an alternate block 2 using signer2 (different wallet, avoids nonce conflict)
     // Inject a tx from signer2 (nonce 0) before building the alternate block
     let raw_alt_tx =
         TransactionTestContext::transfer_tx_bytes_with_nonce(chain_id, signer2.clone(), 0).await;
-    let alt_tx_hash = nodes[0].rpc.inject_tx(raw_alt_tx).await?;
+    let alt_tx_hash = node.rpc.inject_tx(raw_alt_tx).await?;
     wait_for_pending_tx(&client, alt_tx_hash).await?;
 
     // Build an alternate payload (this builds on top of the current head, i.e., block 3)
     // But we want to reorg back to block 1, so we'll use the payload and then FCU to it
-    let alt_payload = nodes[0].new_payload().await?;
-    let alt_block_hash = nodes[0].submit_payload(alt_payload.clone()).await?;
+    let alt_payload = node.new_payload().await?;
+    let alt_block_hash = node.submit_payload(alt_payload.clone()).await?;
 
     // Trigger reorg: make the alternate chain canonical by sending FCU pointing to block 1's hash
     // as finalized, which should trigger an unwind of blocks 2 and 3
     // The alt block becomes the new head
-    nodes[0].update_forkchoice(block1_hash, alt_block_hash).await?;
+    node.update_forkchoice(block1_hash, alt_block_hash).await?;
 
     // Give time for the reorg to complete
     tokio::time::sleep(Duration::from_millis(500)).await;
@@ -487,10 +466,10 @@ async fn test_rocksdb_reorg_unwind() -> Result<()> {
     // Mine another block to verify the chain can continue
     let raw_tx_final =
         TransactionTestContext::transfer_tx_bytes_with_nonce(chain_id, signer2.clone(), 1).await;
-    let tx_hash_final = nodes[0].rpc.inject_tx(raw_tx_final).await?;
+    let tx_hash_final = node.rpc.inject_tx(raw_tx_final).await?;
     wait_for_pending_tx(&client, tx_hash_final).await?;
 
-    let final_payload = nodes[0].advance_block().await?;
+    let final_payload = node.advance_block().await?;
     assert!(final_payload.block().number() > 3, "Should be able to mine block after reorg");
 
     // Verify tx_final is included
@@ -513,22 +492,18 @@ async fn test_rocksdb_reorg_unwind() -> Result<()> {
 async fn test_rocksdb_historical_account_queries() -> Result<()> {
     reth_tracing::init_test_tracing();
 
-    let chain_spec = test_chain_spec(EthereumHardfork::Cancun);
-    let chain_id = chain_spec.chain().id();
-
-    let (mut nodes, _) = EthereumNode::test_setup(1, chain_spec.clone())
+    let (mut node, wallet) = EthereumNode::test_setup_for(EthereumHardfork::Cancun)
         .with_storage_v2(true)
         .with_tree_config_modifier(|config| {
             config.with_persistence_threshold(0).with_memory_block_buffer_target(0)
         })
-        .build()
+        .build_single()
         .await?;
+    let chain_id = wallet.chain_id;
 
-    assert_eq!(nodes.len(), 1);
-
-    let signer = wallet::Wallet::new(1).with_chain_id(chain_id).signer(0);
+    let signer = wallet.signer(0);
     let sender: Address = signer.address();
-    let client = nodes[0].rpc_client().expect("RPC client");
+    let client = node.rpc_client().expect("RPC client");
 
     // Query the sender's balance and nonce at genesis (block 0)
     let genesis_balance: U256 = client.request("eth_getBalance", (sender, "0x0")).await?;
@@ -539,12 +514,12 @@ async fn test_rocksdb_historical_account_queries() -> Result<()> {
     // Mine block 1 with a transfer (nonce 0)
     let raw_tx1 =
         TransactionTestContext::transfer_tx_bytes_with_nonce(chain_id, signer.clone(), 0).await;
-    let tx_hash1 = nodes[0].rpc.inject_tx(raw_tx1).await?;
+    let tx_hash1 = node.rpc.inject_tx(raw_tx1).await?;
     wait_for_pending_tx(&client, tx_hash1).await?;
 
-    let payload1 = nodes[0].advance_block().await?;
+    let payload1 = node.advance_block().await?;
     assert_eq!(payload1.block().number(), 1);
-    poll_tx_in_rocksdb(&nodes[0].inner.provider, tx_hash1).await?;
+    poll_tx_in_rocksdb(&node.inner.provider, tx_hash1).await?;
 
     // Record state after block 1
     let balance_at_1: U256 = client.request("eth_getBalance", (sender, "0x1")).await?;
@@ -555,12 +530,12 @@ async fn test_rocksdb_historical_account_queries() -> Result<()> {
     // Mine block 2 with another transfer (nonce 1)
     let raw_tx2 =
         TransactionTestContext::transfer_tx_bytes_with_nonce(chain_id, signer.clone(), 1).await;
-    let tx_hash2 = nodes[0].rpc.inject_tx(raw_tx2).await?;
+    let tx_hash2 = node.rpc.inject_tx(raw_tx2).await?;
     wait_for_pending_tx(&client, tx_hash2).await?;
 
-    let payload2 = nodes[0].advance_block().await?;
+    let payload2 = node.advance_block().await?;
     assert_eq!(payload2.block().number(), 2);
-    poll_tx_in_rocksdb(&nodes[0].inner.provider, tx_hash2).await?;
+    poll_tx_in_rocksdb(&node.inner.provider, tx_hash2).await?;
 
     let balance_at_2: U256 = client.request("eth_getBalance", (sender, "0x2")).await?;
     let nonce_at_2: U256 = client.request("eth_getTransactionCount", (sender, "0x2")).await?;
@@ -570,12 +545,12 @@ async fn test_rocksdb_historical_account_queries() -> Result<()> {
     // Mine block 3 with a third transfer (nonce 2)
     let raw_tx3 =
         TransactionTestContext::transfer_tx_bytes_with_nonce(chain_id, signer.clone(), 2).await;
-    let tx_hash3 = nodes[0].rpc.inject_tx(raw_tx3).await?;
+    let tx_hash3 = node.rpc.inject_tx(raw_tx3).await?;
     wait_for_pending_tx(&client, tx_hash3).await?;
 
-    let payload3 = nodes[0].advance_block().await?;
+    let payload3 = node.advance_block().await?;
     assert_eq!(payload3.block().number(), 3);
-    poll_tx_in_rocksdb(&nodes[0].inner.provider, tx_hash3).await?;
+    poll_tx_in_rocksdb(&node.inner.provider, tx_hash3).await?;
 
     let balance_at_3: U256 = client.request("eth_getBalance", (sender, "0x3")).await?;
     let nonce_at_3: U256 = client.request("eth_getTransactionCount", (sender, "0x3")).await?;
@@ -592,9 +567,9 @@ async fn test_rocksdb_historical_account_queries() -> Result<()> {
         let raw_tx =
             TransactionTestContext::transfer_tx_bytes_with_nonce(chain_id, signer.clone(), nonce)
                 .await;
-        let tx_hash = nodes[0].rpc.inject_tx(raw_tx).await?;
+        let tx_hash = node.rpc.inject_tx(raw_tx).await?;
         wait_for_pending_tx(&client, tx_hash).await?;
-        nodes[0].advance_block().await?;
+        node.advance_block().await?;
     }
     // Allow the engine loop to process the persistence completions
     tokio::time::sleep(Duration::from_millis(500)).await;
@@ -654,13 +629,10 @@ async fn test_rocksdb_historical_account_queries() -> Result<()> {
 async fn test_rocksdb_account_history_pruning() -> Result<()> {
     reth_tracing::init_test_tracing();
 
-    let chain_spec = test_chain_spec(EthereumHardfork::Cancun);
-    let chain_id = chain_spec.chain().id();
-
     const PRUNE_DISTANCE: u64 = 5;
     const TOTAL_BLOCKS: u64 = 20;
 
-    let (mut nodes, _) = EthereumNode::test_setup(1, chain_spec.clone())
+    let (mut node, wallet) = EthereumNode::test_setup_for(EthereumHardfork::Cancun)
         .with_storage_v2(true)
         .with_tree_config_modifier(|config| {
             config.with_persistence_threshold(0).with_memory_block_buffer_target(0)
@@ -671,14 +643,13 @@ async fn test_rocksdb_account_history_pruning() -> Result<()> {
             config.pruning.block_interval = Some(1);
             config
         })
-        .build()
+        .build_single()
         .await?;
+    let chain_id = wallet.chain_id;
 
-    assert_eq!(nodes.len(), 1);
-
-    let signer = wallet::Wallet::new(1).with_chain_id(chain_id).signer(0);
+    let signer = wallet.signer(0);
     let sender: Address = signer.address();
-    let client = nodes[0].rpc_client().expect("RPC client");
+    let client = node.rpc_client().expect("RPC client");
 
     // Mine blocks one at a time with a delay so each save_blocks + pruner cycle
     // completes independently. The race fires every cycle (the pruner reads stale
@@ -688,21 +659,21 @@ async fn test_rocksdb_account_history_pruning() -> Result<()> {
         let raw_tx =
             TransactionTestContext::transfer_tx_bytes_with_nonce(chain_id, signer.clone(), nonce)
                 .await;
-        let tx_hash = nodes[0].rpc.inject_tx(raw_tx).await?;
+        let tx_hash = node.rpc.inject_tx(raw_tx).await?;
         wait_for_pending_tx(&client, tx_hash).await?;
 
-        let payload = nodes[0].advance_block().await?;
+        let payload = node.advance_block().await?;
         assert_eq!(payload.block().number(), nonce + 1);
 
         // Let the persistence cycle (save_blocks → pruner → commit) complete before
         // producing the next block, so each cycle processes exactly one block. The
         // transaction becomes visible in RocksDB with the commit.
-        poll_tx_in_rocksdb(&nodes[0].inner.provider, tx_hash).await?;
+        poll_tx_in_rocksdb(&node.inner.provider, tx_hash).await?;
     }
 
     // Read the AccountsHistory shard for `sender` directly from RocksDB.
     // This is the data structure corrupted by the race.
-    let rocksdb = nodes[0].inner.provider.rocksdb_provider();
+    let rocksdb = node.inner.provider.rocksdb_provider();
     let shards = rocksdb.account_history_shards(sender).unwrap();
     let all_entries: Vec<u64> = shards.iter().flat_map(|(_, list)| list.iter()).collect();
 
@@ -744,13 +715,10 @@ async fn test_rocksdb_account_history_pruning() -> Result<()> {
 async fn test_rocksdb_storage_history_pruning() -> Result<()> {
     reth_tracing::init_test_tracing();
 
-    let chain_spec = test_chain_spec(EthereumHardfork::Cancun);
-    let chain_id = chain_spec.chain().id();
-
     const PRUNE_DISTANCE: u64 = 5;
     const TOTAL_BLOCKS: u64 = 20;
 
-    let (mut nodes, _) = EthereumNode::test_setup(1, chain_spec.clone())
+    let (mut node, wallet) = EthereumNode::test_setup_for(EthereumHardfork::Cancun)
         .with_storage_v2(true)
         .with_tree_config_modifier(|config| {
             config.with_persistence_threshold(0).with_memory_block_buffer_target(0)
@@ -761,13 +729,12 @@ async fn test_rocksdb_storage_history_pruning() -> Result<()> {
             config.pruning.block_interval = Some(1);
             config
         })
-        .build()
+        .build_single()
         .await?;
+    let chain_id = wallet.chain_id;
 
-    assert_eq!(nodes.len(), 1);
-
-    let signer = wallet::Wallet::new(1).with_chain_id(chain_id).signer(0);
-    let client = nodes[0].rpc_client().expect("RPC client");
+    let signer = wallet.signer(0);
+    let client = node.rpc_client().expect("RPC client");
 
     // Deploy a minimal contract that stores CALLDATA[0..32] into slot 0:
     //   PUSH0         ; [0]
@@ -819,13 +786,13 @@ async fn test_rocksdb_storage_history_pruning() -> Result<()> {
         ..Default::default()
     };
     let deploy_bytes = TransactionTestContext::sign_tx_bytes(signer.clone(), deploy_tx).await;
-    let deploy_hash = nodes[0].rpc.inject_tx(deploy_bytes).await?;
+    let deploy_hash = node.rpc.inject_tx(deploy_bytes).await?;
     wait_for_pending_tx(&client, deploy_hash).await?;
 
-    let payload1 = nodes[0].advance_block().await?;
+    let payload1 = node.advance_block().await?;
     assert_eq!(payload1.block().number(), 1);
     // Let the persistence cycle complete before the next block (same cadence as the loop below)
-    poll_tx_in_rocksdb(&nodes[0].inner.provider, deploy_hash).await?;
+    poll_tx_in_rocksdb(&node.inner.provider, deploy_hash).await?;
 
     // Get the deployed contract address from the receipt
     let receipt: Option<TransactionReceipt> =
@@ -866,18 +833,18 @@ async fn test_rocksdb_storage_history_pruning() -> Result<()> {
             ..Default::default()
         };
         let call_bytes = TransactionTestContext::sign_tx_bytes(signer.clone(), call_tx).await;
-        let tx_hash = nodes[0].rpc.inject_tx(call_bytes).await?;
+        let tx_hash = node.rpc.inject_tx(call_bytes).await?;
         wait_for_pending_tx(&client, tx_hash).await?;
 
-        let payload = nodes[0].advance_block().await?;
+        let payload = node.advance_block().await?;
         assert_eq!(payload.block().number(), block_num);
 
         // Let the persistence cycle complete before the next block
-        poll_tx_in_rocksdb(&nodes[0].inner.provider, tx_hash).await?;
+        poll_tx_in_rocksdb(&node.inner.provider, tx_hash).await?;
     }
 
     // Read StoragesHistory shard for (contract_address, slot 0) directly from RocksDB
-    let rocksdb = nodes[0].inner.provider.rocksdb_provider();
+    let rocksdb = node.inner.provider.rocksdb_provider();
     let shards = rocksdb.storage_history_shards(contract_address, storage_slot).unwrap();
     let all_entries: Vec<u64> = shards.iter().flat_map(|(_, list)| list.iter()).collect();
 

@@ -33,18 +33,13 @@ async fn can_run_eth_node_with_custom_genesis_number() -> eyre::Result<()> {
         );
     }
 
-    // Advance the chain (block 1001)
+    // Advance the chain (block 1001) and assert the block has been committed
     let raw_tx = TransactionTestContext::transfer_tx_bytes(1, wallet.inner).await;
-    let (tx_hash, payload) = node.inject_and_advance(raw_tx).await?;
-
-    let block_hash = payload.block().hash();
+    let (_, payload) = node.inject_and_advance(raw_tx).await?;
     let block_number = payload.block().number;
 
     // Verify we're at block 1001 (genesis + 1)
     assert_eq!(block_number, 1001, "Block number should be 1001 after advancing from genesis 1000");
-
-    // Assert the block has been committed
-    node.assert_new_block(tx_hash, block_hash, block_number).await?;
 
     Ok(())
 }
@@ -92,9 +87,8 @@ async fn can_advance_on_genesis_newer_than_payload_timestamp() -> eyre::Result<(
     let (mut node, wallet) = EthereumNode::test_setup(1, chain_spec).build_single().await?;
 
     let raw_tx = TransactionTestContext::transfer_tx_bytes(1, wallet.inner).await;
-    let (tx_hash, payload) = node.inject_and_advance(raw_tx).await?;
+    let (_, payload) = node.inject_and_advance(raw_tx).await?;
     assert!(payload.block().timestamp > genesis_timestamp);
-    node.assert_new_block(tx_hash, payload.block().hash(), payload.block().number).await?;
 
     Ok(())
 }

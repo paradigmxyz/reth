@@ -116,21 +116,17 @@ where
     {
         let mut chain = Vec::with_capacity(length as usize);
         for i in 0..length {
-            let raw_tx = tx_generator(i).await;
-            let tx_hash = self.rpc.inject_tx(raw_tx).await?;
-            let payload = self.advance_block().await?;
-            let block_hash = payload.block().hash();
-            let block_number = payload.block().number();
-            self.assert_new_block(tx_hash, block_hash, block_number).await?;
+            let (_, payload) = self.inject_and_advance(tx_generator(i).await).await?;
             chain.push(payload);
         }
         Ok(chain)
     }
 
-    /// Injects the raw transaction into the pool and advances the node one block, returning the
-    /// transaction hash and the built payload.
+    /// Injects the raw transaction into the pool, advances the node one block and waits until the
+    /// block is committed, returning the transaction hash and the built payload.
     ///
-    /// Returns an error if the transaction is not included in the block.
+    /// Returns an error if the transaction is not included in the block, see
+    /// [`Self::assert_new_block`].
     pub async fn inject_and_advance(
         &mut self,
         raw_tx: Bytes,
@@ -142,12 +138,7 @@ where
     {
         let tx_hash = self.rpc.inject_tx(raw_tx).await?;
         let payload = self.advance_block().await?;
-        let block = payload.block();
-        ensure!(
-            block.body().transactions().iter().any(|tx| *tx.tx_hash() == tx_hash),
-            "transaction {tx_hash} was not included in block {}",
-            block.number()
-        );
+        self.assert_new_block(tx_hash, payload.block().hash(), payload.block().number()).await?;
         Ok((tx_hash, payload))
     }
 
@@ -228,7 +219,7 @@ where
         wait_finish_checkpoint: bool,
     ) -> eyre::Result<()> {
         let provider = &self.inner.provider;
-        poll_until(format_args!("block {number}"), move || async move {
+        poll_until(format!("block {number}"), move || async move {
             if wait_finish_checkpoint &&
                 provider
                     .get_stage_checkpoint(StageId::Finish)?
@@ -258,7 +249,7 @@ where
     /// Returns an error if the node does not unwind within [`WAIT_TIMEOUT`].
     pub async fn wait_unwind(&self, number: BlockNumber) -> eyre::Result<()> {
         let provider = &self.inner.provider;
-        poll_until(format_args!("unwind to block {number}"), move || async move {
+        poll_until(format!("unwind to block {number}"), move || async move {
             let checkpoint = provider.get_stage_checkpoint(StageId::Headers)?;
             Ok(checkpoint.is_some_and(|checkpoint| checkpoint.block_number == number).then_some(()))
         })
@@ -291,8 +282,8 @@ where
         block_hash: B256,
         block_number: BlockNumber,
     ) -> eyre::Result<()> {
-        // get head block from notifications stream and verify the tx has been pushed to the pool is
-        // actually present in the canonical block
+        // Get the head block from the notification stream and verify the tx is included in the
+        // canonical block.
         let head = tokio::time::timeout(WAIT_TIMEOUT, self.canonical_stream.next())
             .await
             .map_err(|_| eyre!("timed out waiting for block {block_number}"))?
@@ -303,10 +294,10 @@ where
             head.tip().number()
         );
 
-        // wait for the block to commit and make sure the block hash we submitted via FCU engine
-        // api is the new latest block
+        // Wait for the block to commit and make sure the block hash we submitted via FCU engine
+        // api is the new latest block.
         let provider = &self.inner.provider;
-        poll_until(format_args!("block {block_number} to be committed"), move || async move {
+        poll_until(format!("block {block_number} to be committed"), move || async move {
             let Some(latest) = provider.block_by_number_or_tag(BlockNumberOrTag::Latest)? else {
                 return Ok(None)
             };
@@ -524,5 +515,27 @@ where
         let res: ExecutionPayloadEnvelopeV5 =
             client.request("testing_buildBlockV1", request.into_params()).await?;
         eyre::Ok(res)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::NodeHelperType;
+    use reth_node_ethereum::EthereumNode;
+
+    fn assert_send<T: Send>(_: T) {}
+
+    /// Tests of downstream nodes await these helpers in spawned tasks, so their futures must be
+    /// `Send`.
+    #[expect(dead_code)]
+    fn test_helper_futures_are_send(node: &mut NodeHelperType<EthereumNode>) {
+        assert_send(node.advance_block());
+        assert_send(node.inject_and_advance(Bytes::new()));
+        assert_send(node.wait_block(0, B256::ZERO, false));
+        assert_send(node.wait_unwind(0));
+        assert_send(node.wait_for_pool(|_| true));
+        assert_send(node.assert_new_block(B256::ZERO, B256::ZERO, 0));
+        assert_send(node.sync_to(B256::ZERO));
     }
 }

@@ -14,8 +14,7 @@ use alloy_rpc_types_engine::{
 use jsonrpsee_core::client::ClientT;
 use reth_chainspec::{EthChainSpec, EthereumHardfork};
 use reth_e2e_test_utils::{
-    eth_payload_attributes, test_chain_spec, transaction::TransactionTestContext, wallet::Wallet,
-    E2ETestSetupExt,
+    eth_payload_attributes, test_chain_spec, transaction::TransactionTestContext, E2ETestSetupExt,
 };
 use reth_node_builder::{NodeBuilder, NodeHandle};
 use reth_node_core::{
@@ -32,7 +31,6 @@ use reth_tasks::Runtime;
 use ssz::Encode;
 use std::sync::Arc;
 
-const ENGINE_PRAGUE_FORK_HEADER: &str = "prague";
 const ENGINE_PAYLOADS_ROUTE: &str = "/engine/v1/payloads";
 const ENGINE_FORKCHOICE_ROUTE: &str = "/engine/v1/forkchoice";
 const ENGINE_V1_BLOBS_ROUTE: &str = "/engine/v1/blobs/v1";
@@ -47,11 +45,8 @@ async fn can_run_eth_node() -> eyre::Result<()> {
         EthereumNode::test_setup_for(EthereumHardfork::Cancun).build_single().await?;
     let raw_tx = TransactionTestContext::transfer_tx_bytes(1, wallet.inner).await;
 
-    // make the node advance
-    let (tx_hash, payload) = node.inject_and_advance(raw_tx).await?;
-
-    // assert the block has been committed to the blockchain
-    node.assert_new_block(tx_hash, payload.block().hash(), payload.block().number).await?;
+    // make the node advance and assert the block has been committed to the blockchain
+    node.inject_and_advance(raw_tx).await?;
 
     Ok(())
 }
@@ -69,11 +64,8 @@ async fn can_run_eth_node_with_auth_engine_api_over_ipc() -> eyre::Result<()> {
     // Create dummy transfer tx
     let raw_tx = TransactionTestContext::transfer_tx_bytes(1, wallet.inner).await;
 
-    // make the node advance
-    let (tx_hash, payload) = node.inject_and_advance(raw_tx).await?;
-
-    // assert the block has been committed to the blockchain
-    node.assert_new_block(tx_hash, payload.block().hash(), payload.block().number).await?;
+    // make the node advance and assert the block has been committed to the blockchain
+    node.inject_and_advance(raw_tx).await?;
 
     Ok(())
 }
@@ -100,8 +92,7 @@ async fn test_engine_graceful_shutdown() -> eyre::Result<()> {
         EthereumNode::test_setup_for(EthereumHardfork::Cancun).build_single().await?;
 
     let raw_tx = TransactionTestContext::transfer_tx_bytes(1, wallet.inner).await;
-    let (tx_hash, payload) = node.inject_and_advance(raw_tx).await?;
-    node.assert_new_block(tx_hash, payload.block().hash(), payload.block().number).await?;
+    node.inject_and_advance(raw_tx).await?;
 
     // Get block number before shutdown
     let block_before = node.inner.provider.best_block_number()?;
@@ -186,7 +177,7 @@ async fn test_engine_ssz_proxy_can_mine_block() -> eyre::Result<()> {
 
     let chain_spec = test_chain_spec(EthereumHardfork::Prague);
     let genesis_hash = chain_spec.genesis_hash();
-    let (node, _) = EthereumNode::test_setup(1, chain_spec.clone())
+    let (node, wallet) = EthereumNode::test_setup(1, chain_spec.clone())
         .with_rpc_modifier(|rpc| {
             rpc.with_http_api(RpcModuleSelection::from([
                 RethRpcModule::Eth,
@@ -196,8 +187,7 @@ async fn test_engine_ssz_proxy_can_mine_block() -> eyre::Result<()> {
         .build_single()
         .await?;
 
-    let wallets = Wallet::new(2).wallet_gen();
-    let raw_tx = TransactionTestContext::transfer_tx_bytes(1, wallets[0].clone()).await;
+    let raw_tx = TransactionTestContext::transfer_tx_bytes(1, wallet.signer(0)).await;
 
     let envelope = node
         .testing_build_block_v1(TestingBuildBlockRequestV1 {
@@ -284,7 +274,7 @@ async fn test_engine_ssz_proxy_can_mine_block() -> eyre::Result<()> {
     let status: SszPayloadStatus = client
         .post(format!("{auth_url}{ENGINE_PAYLOADS_ROUTE}"))
         .jwt(&auth)
-        .fork(ENGINE_PRAGUE_FORK_HEADER)
+        .fork("prague")
         .header(reqwest::header::ACCEPT, "application/octet-stream")
         .ssz(&(payload, B256::ZERO, envelope.execution_requests.take()))
         .send()
@@ -296,7 +286,7 @@ async fn test_engine_ssz_proxy_can_mine_block() -> eyre::Result<()> {
     let fcu: SszForkchoiceUpdateResponse = client
         .post(format!("{auth_url}{ENGINE_FORKCHOICE_ROUTE}"))
         .jwt(&auth)
-        .fork(ENGINE_PRAGUE_FORK_HEADER)
+        .fork("prague")
         .header(reqwest::header::ACCEPT, "application/octet-stream")
         .ssz(&(
             ForkchoiceState {
@@ -312,7 +302,7 @@ async fn test_engine_ssz_proxy_can_mine_block() -> eyre::Result<()> {
         .await?;
     assert_eq!(fcu.payload_status.status, PayloadStatusKind::Valid);
 
-    let blob_tx = TransactionTestContext::tx_with_blobs_bytes(1, wallets[1].clone()).await?;
+    let blob_tx = TransactionTestContext::tx_with_blobs_bytes(1, wallet.signer(1)).await?;
     let blob_tx_hash = node.rpc.inject_tx(blob_tx).await?;
     let envelope = node.rpc.envelope_by_hash(blob_tx_hash).await?;
     let versioned_hashes = TransactionTestContext::validate_sidecar(envelope);

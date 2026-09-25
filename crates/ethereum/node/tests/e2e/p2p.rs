@@ -5,7 +5,7 @@ use alloy_network::TxSignerSync;
 use alloy_primitives::B256;
 use alloy_provider::Provider;
 use alloy_rpc_types_engine::{ForkchoiceState, PayloadStatusEnum};
-use futures::{future::JoinAll, StreamExt};
+use futures::StreamExt;
 use rand::{rngs::StdRng, seq::IndexedRandom, Rng, SeedableRng};
 use reth_chainspec::EthereumHardfork;
 use reth_e2e_test_utils::{
@@ -19,8 +19,8 @@ use reth_node_core::{args::NetworkArgs, node_config::NodeConfig};
 use reth_node_ethereum::EthereumNode;
 use reth_primitives_traits::SealedBlock;
 use reth_provider::test_utils::MockEthProvider;
-use reth_rpc_api::EthApiServer;
 use reth_tasks::Runtime;
+use reth_transaction_pool::TransactionPool;
 use std::{net::UdpSocket, sync::Arc, time::Duration};
 
 #[tokio::test]
@@ -104,9 +104,6 @@ async fn can_sync() -> eyre::Result<()> {
     // make the node advance
     let (tx_hash, payload) = first_node.inject_and_advance(raw_tx).await?;
     let block_hash = payload.block().hash();
-
-    // assert the block has been committed to the blockchain
-    first_node.assert_new_block(tx_hash, block_hash, payload.block().number).await?;
 
     // only send forkchoice update to second node
     second_node.update_forkchoice(block_hash, block_hash).await?;
@@ -202,9 +199,8 @@ async fn e2e_test_send_transactions() -> eyre::Result<()> {
     let mut rng = StdRng::from_seed(seed);
     println!("Seed: {seed:?}");
 
-    let chain_spec = test_chain_spec(EthereumHardfork::Prague);
-
-    let (mut nodes, _) = EthereumNode::test_setup(2, chain_spec.clone()).build().await?;
+    let (mut nodes, _) =
+        EthereumNode::test_setup_for(EthereumHardfork::Prague).with_num_nodes(2).build().await?;
     let mut node = nodes.pop().unwrap();
     let provider = node.rpc_provider();
 
@@ -230,9 +226,8 @@ async fn test_long_reorg() -> eyre::Result<()> {
     let mut rng = StdRng::from_seed(seed);
     println!("Seed: {seed:?}");
 
-    let chain_spec = test_chain_spec(EthereumHardfork::Prague);
-
-    let (mut nodes, _) = EthereumNode::test_setup(2, chain_spec.clone()).build().await?;
+    let (mut nodes, _) =
+        EthereumNode::test_setup_for(EthereumHardfork::Prague).with_num_nodes(2).build().await?;
 
     let mut first_node = nodes.pop().unwrap();
     let mut second_node = nodes.pop().unwrap();
@@ -274,9 +269,8 @@ async fn test_pipeline_sync_target_head_becomes_finalized() -> eyre::Result<()> 
     let mut rng = StdRng::from_seed(seed);
     println!("Seed: {seed:?}");
 
-    let chain_spec = test_chain_spec(EthereumHardfork::Prague);
-
-    let (mut nodes, _) = EthereumNode::test_setup(2, chain_spec.clone()).build().await?;
+    let (mut nodes, _) =
+        EthereumNode::test_setup_for(EthereumHardfork::Prague).with_num_nodes(2).build().await?;
 
     let mut first_node = nodes.pop().unwrap();
     let second_node = nodes.pop().unwrap();
@@ -322,9 +316,8 @@ async fn test_reorg_through_backfill() -> eyre::Result<()> {
     let mut rng = StdRng::from_seed(seed);
     println!("Seed: {seed:?}");
 
-    let chain_spec = test_chain_spec(EthereumHardfork::Prague);
-
-    let (mut nodes, _) = EthereumNode::test_setup(2, chain_spec.clone()).build().await?;
+    let (mut nodes, _) =
+        EthereumNode::test_setup_for(EthereumHardfork::Prague).with_num_nodes(2).build().await?;
 
     let mut first_node = nodes.pop().unwrap();
     let mut second_node = nodes.pop().unwrap();
@@ -375,7 +368,7 @@ async fn test_tx_propagation() -> eyre::Result<()> {
 
     // Setup 10 nodes
     let (mut nodes, _) =
-        EthereumNode::test_setup(10, chain_spec.clone()).with_connect_nodes(false).build().await?;
+        EthereumNode::test_setup(10, chain_spec).with_connect_nodes(false).build().await?;
 
     // Connect all nodes to the first one
     let (first, rest) = nodes.split_at_mut(1);
@@ -383,31 +376,14 @@ async fn test_tx_propagation() -> eyre::Result<()> {
         node.connect(&mut first[0]).await;
     }
 
-    // Advance all nodes for 1 block so that they don't consider themselves unsynced
-    let tx = build_tx();
-    let (_, payload) = nodes[0].inject_and_advance(tx.encoded_2718().into()).await?;
-    nodes[1..]
-        .iter_mut()
-        .map(|node| async {
-            node.submit_payload(payload.clone()).await.unwrap();
-            node.sync_to(payload.block().hash()).await.unwrap();
-        })
-        .collect::<JoinAll<_>>()
-        .await;
-
     // Build and send transaction to first node
     let tx = build_tx();
     let tx_hash = *tx.tx_hash();
     let _ = nodes[0].rpc.inject_tx(tx.encoded_2718().into()).await?;
 
-    tokio::time::sleep(Duration::from_millis(100)).await;
-
-    // Assert that all nodes have the transaction
-    for (i, node) in nodes.iter().enumerate() {
-        assert!(
-            node.rpc.inner.eth_api().transaction_by_hash(tx_hash).await?.is_some(),
-            "Node {i} should have the transaction"
-        );
+    // Wait until all nodes have the transaction
+    for node in &nodes {
+        node.wait_for_pool(|pool| pool.contains(&tx_hash)).await?;
     }
 
     // Build and send one more transaction to a random node
@@ -415,11 +391,9 @@ async fn test_tx_propagation() -> eyre::Result<()> {
     let tx_hash = *tx.tx_hash();
     let _ = nodes.choose(&mut rand::rng()).unwrap().rpc.inject_tx(tx.encoded_2718().into()).await?;
 
-    tokio::time::sleep(Duration::from_millis(100)).await;
-
-    // Assert that all nodes have the transaction
-    for node in nodes {
-        assert!(node.rpc.inner.eth_api().transaction_by_hash(tx_hash).await?.is_some());
+    // Wait until all nodes have the transaction
+    for node in &nodes {
+        node.wait_for_pool(|pool| pool.contains(&tx_hash)).await?;
     }
 
     Ok(())
