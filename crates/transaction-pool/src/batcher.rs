@@ -156,7 +156,7 @@ where
             }
 
             if this.in_flight.is_empty() {
-                return Poll::Pending
+                return if this.request_rx.is_closed() { Poll::Ready(()) } else { Poll::Pending }
             }
 
             ready!(this.in_flight.poll_next_unpin(cx));
@@ -252,8 +252,6 @@ mod tests {
             responses.push(response_rx);
         }
 
-        tokio::time::sleep(Duration::from_millis(10)).await;
-
         for rx in responses {
             let result = timeout(Duration::from_millis(10), rx)
                 .await
@@ -263,7 +261,10 @@ mod tests {
         }
 
         drop(request_tx);
-        handle.abort();
+        timeout(Duration::from_secs(1), handle)
+            .await
+            .expect("processor should stop after draining requests")
+            .expect("processor task should not panic");
     }
 
     #[tokio::test]
