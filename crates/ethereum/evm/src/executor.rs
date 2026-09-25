@@ -1146,6 +1146,43 @@ mod tests {
     }
 
     #[test]
+    fn pre_london_creation_preserves_legacy_ef01_code() {
+        let sender = Address::with_last_byte(1);
+        let mut database = TestDatabase::default();
+        database
+            .accounts
+            .insert(sender, AccountInfo::default().with_balance(U256::from(1_000_000)));
+        let factory = super::super::factory::EthBlockExecutorFactory::new(Arc::new(
+            ChainSpecBuilder::mainnet().berlin_activated().build(),
+        ));
+        let env = EthEvmEnv::new(
+            SpecId::BERLIN,
+            BlockEnv::<BaseEvmTypes> { gas_limit: U256::from(1_000_000), ..Default::default() },
+            1,
+        );
+        let evm = factory.evm_with_env(Db::new(database), env);
+        let mut executor = factory.create_executor(evm, segment(0, 1, B256::ZERO).ctx);
+        let tx = TransactionSigned::Legacy(
+            TxLegacy {
+                chain_id: Some(1),
+                gas_limit: 100_000,
+                gas_price: 1,
+                to: TxKind::Create,
+                // Return the two-byte runtime code 0xEF01 from initcode.
+                input: alloy_primitives::bytes!("61ef016000526002601ef3"),
+                ..Default::default()
+            }
+            .into_signed(Signature::test_signature()),
+        );
+        executor.apply_pre_execution_changes().unwrap();
+        executor.execute_transaction(Recovered::new_unchecked(tx, sender)).unwrap();
+        let (output, _) = executor.finish_with_block_access_list().unwrap();
+        let code = &output.state.contracts[&alloy_primitives::keccak256([0xef, 0x01])];
+        assert!(code.is_legacy());
+        assert_eq!(code.original_bytes().as_ref(), &[0xef, 0x01]);
+    }
+
+    #[test]
     fn executor_applies_dao_fork_balance_transfer_before_rewards() {
         let dao_account = address!("d4fe7bc31cedb7bfb8a345f31e668033056b2728");
         let beneficiary = address!("bf4ed7b27f1d666546e30d74d50d173d20bca754");

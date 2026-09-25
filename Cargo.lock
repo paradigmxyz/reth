@@ -9415,6 +9415,7 @@ dependencies = [
  "parking_lot",
  "reth-errors",
  "reth-evm",
+ "reth-execution-types",
  "reth-metrics",
  "reth-primitives-traits",
  "reth-provider",
