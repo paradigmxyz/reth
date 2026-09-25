@@ -399,10 +399,9 @@ impl ArenaSparseSubtrie {
                     self.num_dirty_leaves =
                         (self.num_dirty_leaves as i64 + deltas.num_dirty_leaves_delta) as u64;
 
-                    if let RemoveLeafResult::NeedsProof { key, proof_key, parent } = result {
+                    if let RemoveLeafResult::NeedsProof { proof_key, parent, .. } = result {
                         self.required_proofs
                             .push((idx, ArenaRequiredProof { key: proof_key, parent }));
-                        self.required_proofs.push((idx, ArenaRequiredProof { key, parent }));
                     }
                 }
                 LeafUpdate::Touched => {}
@@ -3001,6 +3000,57 @@ mod tests {
 
     const fn epoch(value: u64) -> TrieNodeEpoch {
         TrieNodeEpoch::new(value)
+    }
+
+    #[test]
+    fn subtrie_removal_only_requests_blinded_sibling() {
+        use super::{
+            ArenaSparseNode, ArenaSparseNodeBranch, ArenaSparseNodeBranchChild as Child,
+            ArenaSparseNodeState, ArenaSparseSubtrie,
+        };
+        use reth_trie_common::{BranchNodeMasks, Nibbles, StateTrieNode, TrieMask};
+
+        let key = alloy_primitives::b256!(
+            "1234a00000000000000000000000000000000000000000000000000000000000"
+        );
+        let sibling = alloy_primitives::b256!(
+            "1234f00000000000000000000000000000000000000000000000000000000000"
+        );
+        let path = Nibbles::unpack(key);
+        let sibling_path = Nibbles::unpack(sibling);
+        let leaf =
+            |path| StateTrieNode::Leaf { short_key_len: 59, value: U256::from(1) }.proof_node(path);
+        let sibling_node = leaf(sibling_path);
+        let mut subtrie = ArenaSparseSubtrie::new(false, true);
+        subtrie.path = path.slice(..2);
+        let idx = subtrie.arena.insert(ArenaSparseNode::from_proof_node(leaf(path)));
+        subtrie.arena[subtrie.root] = ArenaSparseNode::Branch(ArenaSparseNodeBranch {
+            state: ArenaSparseNodeState::Revealed,
+            children: smallvec::smallvec![
+                Child::Revealed(idx),
+                Child::Blinded(reth_trie_common::RlpNode::word_rlp(&alloy_primitives::keccak256(
+                    alloy_rlp::encode(&sibling_node.node),
+                ))),
+            ],
+            state_mask: TrieMask::new((1 << 10) | (1 << 15)),
+            short_key: path.slice(2..4),
+            branch_masks: BranchNodeMasks::default(),
+        });
+        subtrie.num_leaves = 1;
+        let updates = [(key, path, LeafUpdate::Changed(Vec::new()))];
+        subtrie.update_leaves(&updates);
+        assert_eq!(subtrie.required_proofs.len(), 1);
+        let (idx, proof) = subtrie.required_proofs.pop().unwrap();
+        assert_eq!(idx, 0);
+        assert_eq!(proof.key, sibling);
+        assert_eq!(proof.parent.path_len(), Some(4));
+        // The deletion is retried after revealing its sibling; the target is already retained.
+        subtrie.reveal_nodes(&mut [sibling_node]).unwrap();
+        subtrie.update_leaves(&updates);
+        assert!(subtrie.required_proofs.is_empty());
+        subtrie.update_cached_rlp(epoch(2));
+        assert_eq!(subtrie.num_leaves, 1);
+        assert_eq!(subtrie.buffers.state_updates.as_ref().unwrap().get(&path), Some(&None));
     }
 
     /// Test harness for proptest-based arena sparse trie testing.

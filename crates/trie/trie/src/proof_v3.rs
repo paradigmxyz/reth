@@ -53,6 +53,9 @@ where
                 }
                 continue
             };
+            if target.parent.path_len().is_some_and(|len| path.common_prefix_length(&key) <= len) {
+                continue
+            }
             loop {
                 let short_len = match &node {
                     StateTrieNode::Leaf { short_key_len, .. } |
@@ -81,7 +84,8 @@ where
                 }
                 node = self.cursor.get(path)?.ok_or_else(|| {
                     StateProofError::TrieInconsistency(format!(
-                        "missing state trie parent at {path:?}"
+                        "missing state trie parent at {path:?} for target {key:?}, known parent {:?}, child {physical:?}",
+                        target.parent,
                     ))
                 })?;
                 if !matches!(node, StateTrieNode::Branch { .. }) {
@@ -191,6 +195,20 @@ mod tests {
             }
             assert!(calculator.proof(&mut [ProofV2Target::new(key)]).is_err());
         }
+    }
+
+    #[test]
+    fn partial_absence_proof_ignores_neighbors_outside_requested_child() {
+        let key = B256::repeat_byte(0x11);
+        let path = Nibbles::unpack(key);
+        let leaf = StateTrieNode::Leaf { short_key_len: 58, value: U256::from(1) };
+        let mut calculator = ProofCalculator::new(Cursor([(path, leaf)].into()));
+        let mut absent = key;
+        absent.0[2] = 0x22;
+        let proof = calculator
+            .proof(&mut [ProofV2Target::new(absent).with_parent(ProofV2TargetParent::new(4))])
+            .unwrap();
+        assert!(proof.is_empty());
     }
 
     #[test]
