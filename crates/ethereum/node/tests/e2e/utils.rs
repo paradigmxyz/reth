@@ -8,10 +8,15 @@ use alloy_provider::{
 };
 use alloy_rpc_types_eth::TransactionRequest;
 use alloy_signer::SignerSync;
+use eyre::{ensure, eyre};
 use rand::{seq::IndexedRandom, Rng};
+use reqwest::{header, RequestBuilder, Response, StatusCode};
 use reth_e2e_test_utils::{wallet::Wallet, NodeHelperType};
 use reth_ethereum_primitives::TxType;
 use reth_node_ethereum::EthereumNode;
+use reth_rpc_builder::auth::AuthServerHandle;
+use reth_rpc_layer::secret_to_bearer_header;
+use ssz::{Decode, Encode};
 
 /// Advances node by producing blocks with random transactions.
 pub(crate) async fn advance_with_random_transactions(
@@ -119,4 +124,61 @@ pub(crate) async fn advance_with_random_transactions(
     }
 
     Ok(())
+}
+
+/// Header selecting the fork of fork-scoped SSZ engine API endpoints.
+pub(crate) const ENGINE_EXECUTION_VERSION_HEADER: &str = "Eth-Execution-Version";
+
+/// Extension trait for requests against the SSZ engine API.
+pub(crate) trait EngineSszRequestExt {
+    /// Authenticates the request with the JWT secret of the auth server.
+    fn jwt(self, auth: &AuthServerHandle) -> Self;
+
+    /// Selects the fork of a fork-scoped endpoint.
+    fn fork(self, fork: &str) -> Self;
+
+    /// Sets the SSZ encoded body.
+    fn ssz(self, body: &impl Encode) -> Self;
+}
+
+impl EngineSszRequestExt for RequestBuilder {
+    fn jwt(self, auth: &AuthServerHandle) -> Self {
+        self.header(header::AUTHORIZATION, secret_to_bearer_header(auth.jwt_secret()))
+    }
+
+    fn fork(self, fork: &str) -> Self {
+        self.header(ENGINE_EXECUTION_VERSION_HEADER, fork)
+    }
+
+    fn ssz(self, body: &impl Encode) -> Self {
+        self.header(header::CONTENT_TYPE, "application/octet-stream").body(body.as_ssz_bytes())
+    }
+}
+
+/// Extension trait for responses of the SSZ engine API.
+pub(crate) trait EngineSszResponseExt {
+    /// Decodes the SSZ body of a `200 OK` response.
+    async fn ssz<T: Decode>(self) -> eyre::Result<T>;
+
+    /// Returns the `type` of a problem details error response.
+    async fn problem_type(self) -> eyre::Result<String>;
+}
+
+impl EngineSszResponseExt for Response {
+    async fn ssz<T: Decode>(self) -> eyre::Result<T> {
+        let status = self.status();
+        let bytes = self.bytes().await?;
+        ensure!(status == StatusCode::OK, "{status}: {}", String::from_utf8_lossy(&bytes));
+        T::from_ssz_bytes(&bytes).map_err(|err| eyre!("failed to decode SSZ response: {err:?}"))
+    }
+
+    async fn problem_type(self) -> eyre::Result<String> {
+        let content_type = self.headers().get(header::CONTENT_TYPE).cloned();
+        ensure!(
+            content_type.as_ref().is_some_and(|value| value == "application/problem+json"),
+            "expected a problem details response, got {content_type:?}"
+        );
+        let problem = self.json::<serde_json::Value>().await?;
+        problem["type"].as_str().map(str::to_owned).ok_or_else(|| eyre!("missing type: {problem}"))
+    }
 }
