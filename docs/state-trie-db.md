@@ -70,6 +70,9 @@ As with the MDBX PoC, crash recovery and reorg handling are outside the supporte
 forward-validation path. After replay, recover the baseline before switching
 backends; each replay updates only the selected complete-trie backend.
 
+The three-backend migration and 600-block replay results are documented in
+[the RocksDB benchmark report](state-trie-rocksdb-benchmarks.md).
+
 ## Tables and proofs
 
 `StateTrieAccounts` maps packed paths to `StateTrieNode<TrieAccount>`.
