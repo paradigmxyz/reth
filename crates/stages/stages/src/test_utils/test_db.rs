@@ -414,7 +414,7 @@ impl TestStageDB {
                 let hashed_address = keccak256(address);
 
                 // Insert into account tables.
-                tx.put::<tables::PlainAccountState>(address, account)?;
+                tx.put::<tables::PlainAccountState>(address, account.clone())?;
                 tx.put::<tables::HashedAccounts>(hashed_address, account)?;
 
                 // Insert into storage tables.

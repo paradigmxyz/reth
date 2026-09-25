@@ -238,7 +238,9 @@ impl RangeDependencies {
     ) -> Self {
         let state = HashedPostState::default()
             .with_accounts(
-                accounts.iter().map(|(hash, account)| (*hash, Some(Account::from(*account)))),
+                accounts
+                    .iter()
+                    .map(|(hash, account)| (*hash, Some(Account::from(account.clone())))),
             )
             .with_storages(storages)
             .into_sorted();

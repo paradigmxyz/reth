@@ -979,7 +979,7 @@ impl AccountProof {
             None
         } else {
             Some(alloy_rlp::encode(
-                self.info.unwrap_or_default().into_trie_account(self.storage_root),
+                self.info.clone().unwrap_or_default().into_trie_account(self.storage_root),
             ))
         };
         let nibbles = Nibbles::unpack(keccak256(self.address));

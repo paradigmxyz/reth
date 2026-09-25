@@ -1186,8 +1186,8 @@ mod tests {
         let acc2 = address!("0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b");
         let acc2_info = Account { balance, ..Default::default() };
 
-        db_tx.put::<tables::PlainAccountState>(acc1, acc1_info).unwrap();
-        db_tx.put::<tables::PlainAccountState>(acc2, acc2_info).unwrap();
+        db_tx.put::<tables::PlainAccountState>(acc1, acc1_info.clone()).unwrap();
+        db_tx.put::<tables::PlainAccountState>(acc2, acc2_info.clone()).unwrap();
         db_tx.put::<tables::Bytecodes>(code_hash, Bytecode::new_raw(code.to_vec().into())).unwrap();
         provider.commit().unwrap();
 
@@ -1367,10 +1367,13 @@ mod tests {
 
         // set account
         let provider = test_db.factory.provider_rw().unwrap();
-        provider.tx_ref().put::<tables::PlainAccountState>(caller_address, caller_info).unwrap();
         provider
             .tx_ref()
-            .put::<tables::PlainAccountState>(destroyed_address, destroyed_info)
+            .put::<tables::PlainAccountState>(caller_address, caller_info.clone())
+            .unwrap();
+        provider
+            .tx_ref()
+            .put::<tables::PlainAccountState>(destroyed_address, destroyed_info.clone())
             .unwrap();
         provider
             .tx_ref()

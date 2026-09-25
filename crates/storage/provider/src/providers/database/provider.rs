@@ -1283,11 +1283,11 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> DatabaseProvider<TX, N> {
             match state.entry(address) {
                 hash_map::Entry::Vacant(entry) => {
                     let new_info = get_account(address)?;
-                    entry.insert((old_info, new_info, HashMap::default()));
+                    entry.insert((old_info.clone(), new_info, HashMap::default()));
                 }
                 hash_map::Entry::Occupied(mut entry) => {
                     // overwrite old account state.
-                    entry.get_mut().0 = old_info;
+                    entry.get_mut().0 = old_info.clone();
                 }
             }
             // insert old info into reverts.
@@ -1301,7 +1301,7 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> DatabaseProvider<TX, N> {
             let account_state = match state.entry(address) {
                 hash_map::Entry::Vacant(entry) => {
                     let present_info = get_account(address)?;
-                    entry.insert((present_info, present_info, HashMap::default()))
+                    entry.insert((present_info.clone(), present_info, HashMap::default()))
                 }
                 hash_map::Entry::Occupied(entry) => entry.into_mut(),
             };
@@ -3256,7 +3256,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> HashingWriter for DatabaseProvi
         // changes are applied in the correct order.
         let hashed_accounts = changesets
             .into_iter()
-            .map(|(_, e)| (keccak256(e.address), e.info))
+            .map(|(_, e)| (keccak256(e.address), e.info.clone()))
             .collect::<Vec<_>>()
             .into_iter()
             .rev()

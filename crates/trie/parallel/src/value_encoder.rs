@@ -128,7 +128,7 @@ where
                 storage_calculator,
             } => {
                 let hashed_address = *hashed_address;
-                let account = *account;
+                let account = account.clone();
                 // Take the receiver so Drop won't try to receive on it again
                 let proof_result_rx = proof_result_rx
                     .take()
@@ -169,7 +169,7 @@ where
             }
             Self::Sync { storage_calculator, hashed_address, account } => {
                 let hashed_address = *hashed_address;
-                let account = *account;
+                let account = account.clone();
                 let mut calculator = storage_calculator.borrow_mut();
                 let root_node = calculator.storage_root_node(hashed_address)?;
                 let storage_root = calculator

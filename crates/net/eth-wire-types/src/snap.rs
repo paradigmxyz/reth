@@ -123,12 +123,13 @@ impl AccountData {
     /// Returns the account the trie leaf commits to.
     ///
     /// Default storage roots and code hashes are restored when decoding the slim body.
-    pub const fn trie_account(&self) -> TrieAccount {
-        self.body.0
+    pub fn trie_account(&self) -> TrieAccount {
+        self.body.0.clone()
     }
 
     /// Consumes the wire value and returns its hashed key with the decoded trie account.
-    pub const fn into_trie_entry(self) -> (B256, TrieAccount) {
+    #[allow(clippy::missing_const_for_fn)]
+    pub fn into_trie_entry(self) -> (B256, TrieAccount) {
         (self.hash, self.body.0)
     }
 }
@@ -512,7 +513,7 @@ impl SnapProtocolMessage {
 }
 
 /// A trie account encoded with default storage and code hashes replaced by empty byte strings.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SlimAccountBody(TrieAccount);
 
 impl SlimAccountBody {
@@ -536,7 +537,7 @@ impl SlimAccountBody {
 
 impl From<&TrieAccount> for SlimAccountBody {
     fn from(account: &TrieAccount) -> Self {
-        Self(*account)
+        Self(account.clone())
     }
 }
 
@@ -977,7 +978,7 @@ mod tests {
         let hash = B256::repeat_byte(1);
         let encoded = AccountData::from_trie_account(hash, &account);
 
-        let body = alloy_rlp::encode(encoded.body);
+        let body = alloy_rlp::encode(&encoded.body);
         assert_eq!(body, alloy_primitives::hex!("c4072a8080"));
         assert_eq!(alloy_rlp::decode_exact::<SlimAccountBody>(&body).unwrap(), encoded.body);
         assert_eq!(encoded.trie_account(), account);
@@ -989,8 +990,8 @@ mod tests {
         let account = trie_account(B256::repeat_byte(2), B256::repeat_byte(3));
         let encoded = AccountData::from_trie_account(B256::repeat_byte(1), &account);
 
-        let body = alloy_rlp::encode(encoded.body);
-        assert_eq!(body, alloy_rlp::encode(account));
+        let body = alloy_rlp::encode(&encoded.body);
+        assert_eq!(body, alloy_rlp::encode(account.clone()));
         assert_eq!(alloy_rlp::decode_exact::<SlimAccountBody>(&body).unwrap(), encoded.body);
         assert_eq!(encoded.trie_account(), account);
     }

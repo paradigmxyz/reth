@@ -1053,7 +1053,7 @@ mod tests {
         let address_1 = b256!("0x1000000000000000000000000000000000000000000000000000000000000000");
         let address_path_1 = Nibbles::unpack(address_1);
         let account_1 = Account::arbitrary(&mut arbitrary::Unstructured::new(&bytes)).unwrap();
-        let mut trie_account_1 = account_1.into_trie_account(storage_root);
+        let mut trie_account_1 = account_1.clone().into_trie_account(storage_root);
         let address_2 = b256!("0x1100000000000000000000000000000000000000000000000000000000000000");
         let address_path_2 = Nibbles::unpack(address_2);
         let account_2 = Account::arbitrary(&mut arbitrary::Unstructured::new(&bytes)).unwrap();
@@ -1061,7 +1061,7 @@ mod tests {
 
         let mut hash_builder = HashBuilder::default()
             .with_proof_retainer(ProofRetainer::from_iter([address_path_1, address_path_2]));
-        hash_builder.add_leaf(address_path_1, &alloy_rlp::encode(trie_account_1));
+        hash_builder.add_leaf(address_path_1, &alloy_rlp::encode(trie_account_1.clone()));
         hash_builder.add_leaf(address_path_2, &alloy_rlp::encode(trie_account_2));
 
         let root = hash_builder.root();

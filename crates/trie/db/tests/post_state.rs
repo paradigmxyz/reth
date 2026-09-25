@@ -59,7 +59,7 @@ fn post_state_only_accounts() {
 
     let mut hashed_post_state = HashedPostState::default();
     for (hashed_address, account) in &accounts {
-        hashed_post_state.accounts.insert(*hashed_address, Some(*account));
+        hashed_post_state.accounts.insert(*hashed_address, Some(account.clone()));
     }
 
     let db = create_test_rw_db();
@@ -78,7 +78,7 @@ fn db_only_accounts() {
     let db = create_test_rw_db();
     db.update(|tx| {
         for (key, account) in &accounts {
-            tx.put::<tables::HashedAccounts>(*key, *account).unwrap();
+            tx.put::<tables::HashedAccounts>(*key, account.clone()).unwrap();
         }
     })
     .unwrap();
@@ -101,14 +101,14 @@ fn account_cursor_correct_order() {
     let db = create_test_rw_db();
     db.update(|tx| {
         for (key, account) in accounts.iter().filter(|x| x.0[31].is_multiple_of(2)) {
-            tx.put::<tables::HashedAccounts>(*key, *account).unwrap();
+            tx.put::<tables::HashedAccounts>(*key, account.clone()).unwrap();
         }
     })
     .unwrap();
 
     let mut hashed_post_state = HashedPostState::default();
     for (hashed_address, account) in accounts.iter().filter(|x| !x.0[31].is_multiple_of(2)) {
-        hashed_post_state.accounts.insert(*hashed_address, Some(*account));
+        hashed_post_state.accounts.insert(*hashed_address, Some(account.clone()));
     }
 
     let sorted = hashed_post_state.into_sorted();
@@ -128,7 +128,7 @@ fn removed_accounts_are_discarded() {
     let db = create_test_rw_db();
     db.update(|tx| {
         for (key, account) in accounts.iter().filter(|x| x.0[31].is_multiple_of(2)) {
-            tx.put::<tables::HashedAccounts>(*key, *account).unwrap();
+            tx.put::<tables::HashedAccounts>(*key, account.clone()).unwrap();
         }
     })
     .unwrap();
@@ -137,7 +137,7 @@ fn removed_accounts_are_discarded() {
     for (hashed_address, account) in accounts.iter().filter(|x| !x.0[31].is_multiple_of(2)) {
         hashed_post_state.accounts.insert(
             *hashed_address,
-            if removed_keys.contains(hashed_address) { None } else { Some(*account) },
+            if removed_keys.contains(hashed_address) { None } else { Some(account.clone()) },
         );
     }
 
@@ -165,7 +165,7 @@ fn post_state_accounts_take_precedence() {
 
     let mut hashed_post_state = HashedPostState::default();
     for (hashed_address, account) in &accounts {
-        hashed_post_state.accounts.insert(*hashed_address, Some(*account));
+        hashed_post_state.accounts.insert(*hashed_address, Some(account.clone()));
     }
 
     let sorted = hashed_post_state.into_sorted();
@@ -180,21 +180,21 @@ fn fuzz_hashed_account_cursor() {
             let db = create_test_rw_db();
             db.update(|tx| {
                 for (key, account) in &db_accounts {
-                    tx.put::<tables::HashedAccounts>(*key, *account).unwrap();
+                    tx.put::<tables::HashedAccounts>(*key, account.clone()).unwrap();
                 }
             })
             .unwrap();
 
             let mut hashed_post_state = HashedPostState::default();
             for (hashed_address, account) in &post_state_accounts {
-                hashed_post_state.accounts.insert(*hashed_address, *account);
+                hashed_post_state.accounts.insert(*hashed_address, account.clone());
             }
 
             let mut expected = db_accounts;
             // overwrite or remove accounts from the expected result
             for (key, account) in &post_state_accounts {
                 if let Some(account) = account {
-                    expected.insert(*key, *account);
+                    expected.insert(*key, account.clone());
                 } else {
                     expected.remove(key);
                 }

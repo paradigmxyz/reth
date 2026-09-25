@@ -498,7 +498,7 @@ mod tests {
         assert_eq!(sorted.accounts.len(), 2);
         let hashed_addr1 = keccak256(address1);
         let account1 = sorted.accounts.iter().find(|(addr, _)| *addr == hashed_addr1).unwrap();
-        assert_eq!(account1.1.unwrap().nonce, 1);
+        assert_eq!(account1.1.as_ref().unwrap().nonce, 1);
 
         // Ordering guarantees - accounts sorted by hashed address
         assert!(sorted.accounts.windows(2).all(|w| w[0].0 <= w[1].0));
@@ -621,7 +621,7 @@ mod tests {
         let hashed_addr2 = keccak256(address2);
 
         let account1 = sorted.accounts.iter().find(|(addr, _)| *addr == hashed_addr1).unwrap();
-        assert_eq!(account1.1.unwrap().nonce, 1);
+        assert_eq!(account1.1.as_ref().unwrap().nonce, 1);
 
         let account2 = sorted.accounts.iter().find(|(addr, _)| *addr == hashed_addr2).unwrap();
         assert!(account2.1.is_none());
@@ -714,11 +714,11 @@ mod tests {
 
         let account1 =
             sorted.accounts.iter().find(|(addr, _)| *addr == expected_hashed_addr1).unwrap();
-        assert_eq!(account1.1.unwrap().nonce, 10);
+        assert_eq!(account1.1.as_ref().unwrap().nonce, 10);
 
         let account2 =
             sorted.accounts.iter().find(|(addr, _)| *addr == expected_hashed_addr2).unwrap();
-        assert_eq!(account2.1.unwrap().nonce, 20);
+        assert_eq!(account2.1.as_ref().unwrap().nonce, 20);
 
         assert!(sorted.accounts.windows(2).all(|w| w[0].0 <= w[1].0));
 

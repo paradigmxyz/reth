@@ -1430,7 +1430,7 @@ mod tests {
 
             // PUT
             let result = env.update(|tx| {
-                tx.put::<PlainAccountState>(key, value).expect(ERROR_PUT);
+                tx.put::<PlainAccountState>(key, value.clone()).expect(ERROR_PUT);
                 200
             });
             assert_eq!(result.expect(ERROR_RETURN_VALUE), 200);

@@ -1317,7 +1317,10 @@ mod tests {
             .unwrap();
         provider_rw
             .tx_ref()
-            .put::<tables::AccountChangeSets>(2, AccountBeforeTx { address, info: Some(account) })
+            .put::<tables::AccountChangeSets>(
+                2,
+                AccountBeforeTx { address, info: Some(account.clone()) },
+            )
             .unwrap();
         provider_rw
             .tx_ref()

@@ -52,7 +52,7 @@ impl BalStateUpdate {
 }
 
 /// What the downloaded state holds for an account a list changes.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum DownloadedAccount {
     /// The account's range is not downloaded yet.
     Unknown,

@@ -194,7 +194,7 @@ impl HashedPostState {
     }
 
     fn extend_inner(&mut self, other: Cow<'_, Self>) {
-        self.accounts.extend(other.accounts.iter().map(|(&k, &v)| (k, v)));
+        self.accounts.extend(other.accounts.iter().map(|(&k, v)| (k, v.clone())));
 
         self.storages.reserve(other.storages.len());
         match other {
@@ -232,7 +232,7 @@ impl HashedPostState {
 
         // Insert accounts (Some = updated, None = destroyed)
         for (address, account) in &sorted.accounts {
-            self.accounts.insert(*address, *account);
+            self.accounts.insert(*address, account.clone());
         }
 
         // Reserve capacity for storages
@@ -270,7 +270,7 @@ impl HashedPostState {
     /// Creates a sorted copy without consuming self.
     /// More efficient than `.clone().into_sorted()` as it avoids cloning `HashMap` metadata.
     pub fn clone_into_sorted(&self) -> HashedPostStateSorted {
-        let mut accounts: Vec<_> = self.accounts.iter().map(|(&k, &v)| (k, v)).collect();
+        let mut accounts: Vec<_> = self.accounts.iter().map(|(&k, v)| (k, v.clone())).collect();
         accounts.sort_unstable_by_key(|(address, _)| *address);
 
         let storages = self
@@ -1192,7 +1192,7 @@ mod tests {
         assert_eq!(state1.accounts[0].0, B256::from([1; 32]));
         assert_eq!(state1.accounts[1].0, B256::from([2; 32]));
         assert_eq!(state1.accounts[2].0, B256::from([3; 32]));
-        assert_eq!(state1.accounts[2].1.unwrap().nonce, 1); // Should have state2's value
+        assert_eq!(state1.accounts[2].1.as_ref().unwrap().nonce, 1); // Should have state2's value
         assert_eq!(state1.accounts[3].0, B256::from([4; 32]));
         assert_eq!(state1.accounts[4].0, B256::from([5; 32]));
         assert_eq!(state1.accounts[4].1, None);

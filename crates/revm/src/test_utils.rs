@@ -48,7 +48,7 @@ impl StateProviderTest {
 
 impl AccountReader for StateProviderTest {
     fn basic_account(&self, address: &Address) -> ProviderResult<Option<Account>> {
-        Ok(self.accounts.get(address).map(|(_, acc)| *acc))
+        Ok(self.accounts.get(address).map(|(_, acc)| acc.clone()))
     }
 }
 

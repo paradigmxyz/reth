@@ -236,6 +236,7 @@ where
                 .accounts
                 .get(&hashed_address)
                 .ok_or(TrieWitnessError::MissingAccount(hashed_address))?
+                .clone()
                 .unwrap_or_default();
 
             let storage_root =

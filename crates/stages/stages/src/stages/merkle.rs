@@ -698,7 +698,7 @@ mod tests {
                 .collect::<BTreeMap<_, _>>();
 
             self.db.insert_accounts_and_storages(
-                accounts.iter().map(|(addr, acc)| (*addr, (*acc, std::iter::empty()))),
+                accounts.iter().map(|(addr, acc)| (*addr, (acc.clone(), std::iter::empty()))),
             )?;
 
             let (header, body) = random_block(

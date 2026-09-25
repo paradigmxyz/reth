@@ -587,7 +587,7 @@ mod tests {
             AccountRangeOutcome::Verified(VerifiedAccountRange {
                 state_root: root_hash,
                 origin: B256::ZERO,
-                accounts: vec![accounts[0]],
+                accounts: vec![accounts[0].clone()],
                 has_more: false,
                 next: Some(key(3)),
             })
@@ -732,7 +732,7 @@ mod tests {
             AccountRangeOutcome::Verified(VerifiedAccountRange {
                 state_root: root_hash,
                 origin: B256::ZERO,
-                accounts: vec![accounts[0]],
+                accounts: vec![accounts[0].clone()],
                 has_more: false,
                 next: Some(key(9)),
             })
@@ -760,7 +760,7 @@ mod tests {
             AccountRangeOutcome::Verified(VerifiedAccountRange {
                 state_root: root_hash,
                 origin: B256::ZERO,
-                accounts: vec![accounts[0]],
+                accounts: vec![accounts[0].clone()],
                 has_more: true,
                 next: Some(key(3)),
             })

@@ -570,16 +570,16 @@ mod tests {
         // Build changesets: blocks 0-4 have 1 storage change each, block 5 has 4 changes, block 6
         // has 1. Entries within each account must be sorted by key.
         let changesets: Vec<ChangeSet> = vec![
-            vec![(addr1, account, vec![storage_entry(1)])], // block 0
-            vec![(addr1, account, vec![storage_entry(1)])], // block 1
-            vec![(addr1, account, vec![storage_entry(1)])], // block 2
-            vec![(addr1, account, vec![storage_entry(1)])], // block 3
-            vec![(addr1, account, vec![storage_entry(1)])], // block 4
+            vec![(addr1, account.clone(), vec![storage_entry(1)])], // block 0
+            vec![(addr1, account.clone(), vec![storage_entry(1)])], // block 1
+            vec![(addr1, account.clone(), vec![storage_entry(1)])], // block 2
+            vec![(addr1, account.clone(), vec![storage_entry(1)])], // block 3
+            vec![(addr1, account.clone(), vec![storage_entry(1)])], // block 4
             // block 5: 4 different storage changes (2 addresses, each with 2 storage slots)
             // Sorted by address, then by storage key within each address
             vec![
-                (addr1, account, vec![storage_entry(1), storage_entry(2)]),
-                (addr2, account, vec![storage_entry(1), storage_entry(2)]),
+                (addr1, account.clone(), vec![storage_entry(1), storage_entry(2)]),
+                (addr2, account.clone(), vec![storage_entry(1), storage_entry(2)]),
             ],
             vec![(addr1, account, vec![storage_entry(3)])], // block 6
         ];
@@ -822,7 +822,7 @@ mod tests {
             .map(|_| {
                 vec![(
                     address,
-                    account,
+                    account.clone(),
                     keys.iter()
                         .map(|key| StorageEntry { key: *key, value: U256::from(1) })
                         .collect(),

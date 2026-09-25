@@ -656,17 +656,17 @@ mod tests {
 
         // Build changesets: blocks 0-4 have 1 change each, block 5 has 4 changes, block 6 has 1
         let changesets: Vec<ChangeSet> = vec![
-            vec![(addr1, account, vec![])], // block 0
-            vec![(addr1, account, vec![])], // block 1
-            vec![(addr1, account, vec![])], // block 2
-            vec![(addr1, account, vec![])], // block 3
-            vec![(addr1, account, vec![])], // block 4
+            vec![(addr1, account.clone(), vec![])], // block 0
+            vec![(addr1, account.clone(), vec![])], // block 1
+            vec![(addr1, account.clone(), vec![])], // block 2
+            vec![(addr1, account.clone(), vec![])], // block 3
+            vec![(addr1, account.clone(), vec![])], // block 4
             // block 5: 4 different account changes (sorted by address for consistency)
             vec![
-                (addr1, account, vec![]),
-                (addr2, account, vec![]),
-                (addr3, account, vec![]),
-                (addr4, account, vec![]),
+                (addr1, account.clone(), vec![]),
+                (addr2, account.clone(), vec![]),
+                (addr3, account.clone(), vec![]),
+                (addr4, account.clone(), vec![]),
             ],
             vec![(addr5, account, vec![])], // block 6
         ];
