@@ -2,7 +2,10 @@
 //! `WebSocket` subscription tests for `eth_subscribe` / `eth_unsubscribe`
 
 use crate::utils::{launch_ws, test_rpc_builder};
-use jsonrpsee::core::client::{Subscription, SubscriptionClientT};
+use jsonrpsee::{
+    core::client::{Error, Subscription, SubscriptionClientT},
+    types::error::ErrorCode,
+};
 use reth_rpc_server_types::RpcModuleSelection;
 use reth_tokio_util::EventSender;
 use serde_json::Value;
@@ -101,6 +104,31 @@ async fn test_eth_subscribe_invalid_kind_rejected() {
         .await;
 
     assert!(result.is_err(), "invalid subscription kind must be rejected");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_eth_subscribe_invalid_params_rejected() {
+    reth_tracing::init_test_tracing();
+
+    let handle = launch_ws_eth().await;
+    let client = handle.ws_client().await.unwrap();
+
+    for (kind, param) in [
+        ("logs", serde_json::json!(true)),
+        ("newPendingTransactions", serde_json::json!({})),
+        ("transactionReceipts", serde_json::json!(true)),
+    ] {
+        let mut rpc_params = jsonrpsee::core::params::ArrayParams::new();
+        rpc_params.insert(kind).unwrap();
+        rpc_params.insert(param).unwrap();
+
+        let result: Result<Subscription<Value>, _> =
+            client.subscribe("eth_subscribe", rpc_params, "eth_unsubscribe").await;
+        assert!(
+            matches!(&result, Err(Error::Call(error)) if error.code() == ErrorCode::InvalidParams.code()),
+            "{kind} must reject invalid params before returning a subscription ID"
+        );
+    }
 }
 
 #[tokio::test(flavor = "multi_thread")]
