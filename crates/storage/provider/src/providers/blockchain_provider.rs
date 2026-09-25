@@ -3046,7 +3046,7 @@ mod tests {
     }
 
     fn random_account(nonce: u64) -> (Address, Account) {
-        (Address::random(), Account { nonce, balance: U256::from(nonce), bytecode_hash: None })
+        (Address::random(), Account { nonce, balance: U256::from(nonce), ..Default::default() })
     }
 
     /// [`BlockchainProvider::new`] needs a genesis header to initialize its chain tracker.

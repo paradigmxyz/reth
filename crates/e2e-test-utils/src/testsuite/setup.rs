@@ -38,7 +38,7 @@ pub struct Setup<I> {
     pub is_dev: bool,
     /// Whether to use v2 storage mode (hashed keys, static file changesets, rocksdb history).
     ///
-    /// Defaults to the node's `--storage.v2` default. Not applied to chains imported from RLP.
+    /// Defaults to the node's `--storage.v2` default.
     pub storage_v2: bool,
     /// Tracks instance generic.
     _phantom: PhantomData<I>,
@@ -260,6 +260,7 @@ where
             self.network.node_count,
             chain_spec,
             self.is_dev,
+            self.storage_v2,
             self.tree_config.clone(),
             rlp_path,
         )

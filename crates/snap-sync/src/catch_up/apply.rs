@@ -189,7 +189,7 @@ mod tests {
         let update = apply(&changes, DownloadedAccount::Absent);
         assert_eq!(
             update.state.accounts[&keccak256(ACCOUNT)],
-            Some(Account { balance: U256::from(20), nonce: 0, bytecode_hash: None })
+            Some(Account { balance: U256::from(20), ..Default::default() })
         );
     }
 
