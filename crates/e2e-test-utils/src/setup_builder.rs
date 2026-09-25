@@ -16,7 +16,7 @@ use reth_node_builder::{
     NodeConfig, NodeHandle,
 };
 use reth_node_core::{
-    args::{DatadirArgs, DiscoveryArgs, NetworkArgs, PruningArgs, RpcServerArgs},
+    args::{DatadirArgs, DiscoveryArgs, NetworkArgs, PruningArgs, RpcServerArgs, StorageArgs},
     dirs::{ChainPath, DataDirPath, MaybePlatformPath},
 };
 use reth_primitives_traits::AlloyBlockHeader;
@@ -56,6 +56,7 @@ pub struct E2ETestSetupBuilder<N: NodeBuilderHelper> {
     connect_nodes: bool,
     tree_config_modifiers: Vec<TreeConfigModifier>,
     node_config_modifiers: Vec<NodeConfigModifier<N::ChainSpec>>,
+    storage_v2: bool,
     dev_launcher: Option<NodeLauncher<N>>,
     dev_payload_attributes: Option<PayloadAttributesMapper<N>>,
 }
@@ -71,6 +72,7 @@ impl<N: NodeBuilderHelper> E2ETestSetupBuilder<N> {
             connect_nodes: true,
             tree_config_modifiers: Vec::new(),
             node_config_modifiers: Vec::new(),
+            storage_v2: StorageArgs::default().v2,
             dev_launcher: None,
             dev_payload_attributes: None,
         }
@@ -146,15 +148,14 @@ impl<N: NodeBuilderHelper> E2ETestSetupBuilder<N> {
         self.with_node_config_modifier(move |config| config.with_pruning(pruning.clone()))
     }
 
-    /// Enables v2 storage defaults (`--storage.v2`), routing tx hashes, history
-    /// indices, etc. to `RocksDB` and changesets/senders to static files.
+    /// Sets whether nodes use the v2 storage layout (`--storage.v2`), which routes tx hashes,
+    /// history indices, etc. to `RocksDB` and changesets/senders to static files.
     ///
-    /// Note that v2 storage is currently also the default for new databases.
-    pub fn with_storage_v2(self) -> Self {
-        self.with_node_config_modifier(|mut config| {
-            config.storage.v2 = true;
-            config
-        })
+    /// Defaults to the node's `--storage.v2` default. Node config modifiers run afterwards and can
+    /// still override it.
+    pub const fn with_storage_v2(mut self, storage_v2: bool) -> Self {
+        self.storage_v2 = storage_v2;
+        self
     }
 
     /// Launches the node in dev mode with a local miner that builds a block every `block_time`, or
@@ -215,12 +216,11 @@ impl<N: NodeBuilderHelper> E2ETestSetupBuilder<N> {
 
         let mut nodes = (0..self.num_nodes)
             .map(async |idx| {
-                let node_config = self
-                    .node_config_modifiers
-                    .iter()
-                    .fold(test_node_config(self.chain_spec.clone()), |config, modifier| {
-                        modifier(config)
-                    });
+                let node_config = self.node_config_modifiers.iter().fold(
+                    test_node_config(self.chain_spec.clone())
+                        .with_storage(StorageArgs { v2: self.storage_v2 }),
+                    |config, modifier| modifier(config),
+                );
                 // The local miner of dev nodes drives forkchoice, unless a modifier disabled dev
                 // mode.
                 let mines = dev_mining && node_config.dev.dev;
@@ -279,6 +279,7 @@ impl<N: NodeBuilderHelper> std::fmt::Debug for E2ETestSetupBuilder<N> {
             .field("connect_nodes", &self.connect_nodes)
             .field("tree_config_modifiers", &self.tree_config_modifiers.len())
             .field("node_config_modifiers", &self.node_config_modifiers.len())
+            .field("storage_v2", &self.storage_v2)
             .field("dev_mining", &self.dev_launcher.is_some())
             .finish_non_exhaustive()
     }
