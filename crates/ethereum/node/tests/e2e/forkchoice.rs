@@ -6,7 +6,7 @@ use alloy_provider::Provider;
 use alloy_rpc_types_engine::{ForkchoiceState, PayloadStatusEnum};
 use jsonrpsee_core::client::Error;
 use reth_chainspec::EthereumHardfork;
-use reth_e2e_test_utils::{eth_payload_attributes, test_chain_spec, E2ETestSetupBuilder};
+use reth_e2e_test_utils::{eth_payload_attributes, test_chain_spec, E2ETestSetupExt};
 use reth_node_ethereum::{EthEngineTypes, EthereumNode};
 use reth_rpc_api::{EngineApiClient, TestingBuildBlockRequestV1};
 use reth_rpc_server_types::{RethRpcModule, RpcModuleSelection};
@@ -16,7 +16,7 @@ async fn invalid_forkchoice_preserves_canonical_state() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
 
     let chain_spec = test_chain_spec(EthereumHardfork::Cancun);
-    let (mut nodes, _) = E2ETestSetupBuilder::<EthereumNode>::new(2, chain_spec.clone())
+    let (mut nodes, _) = EthereumNode::test_setup(2, chain_spec.clone())
         .with_connect_nodes(false)
         .with_rpc_modifier(|rpc| {
             rpc.with_http_api(RpcModuleSelection::from([

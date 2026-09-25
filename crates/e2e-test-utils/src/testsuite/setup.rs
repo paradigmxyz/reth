@@ -1,6 +1,6 @@
 //! Test setup utilities for configuring the initial state.
 
-use crate::{testsuite::Environment, E2ETestSetupBuilder, NodeBuilderHelper};
+use crate::{testsuite::Environment, E2ETestSetupExt, NodeBuilderHelper};
 use alloy_eips::BlockNumberOrTag;
 use alloy_rpc_types_engine::ForkchoiceState;
 use eyre::{eyre, Result};
@@ -203,7 +203,7 @@ where
         let is_dev = self.is_dev;
         let tree_config = self.tree_config.clone();
 
-        let mut builder = E2ETestSetupBuilder::<N>::new(
+        let mut builder = N::test_setup(
             self.network.node_count,
             Arc::<N::ChainSpec>::new((*chain_spec).clone().into()),
         )

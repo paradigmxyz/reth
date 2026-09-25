@@ -9,7 +9,7 @@ use futures::{future::JoinAll, StreamExt};
 use rand::{rngs::StdRng, seq::IndexedRandom, Rng, SeedableRng};
 use reth_chainspec::EthereumHardfork;
 use reth_e2e_test_utils::{
-    test_chain_spec, transaction::TransactionTestContext, wallet::Wallet, E2ETestSetupBuilder,
+    test_chain_spec, transaction::TransactionTestContext, wallet::Wallet, E2ETestSetupExt,
 };
 use reth_engine_primitives::ConsensusEngineEvent;
 use reth_ethereum_primitives::EthPrimitives;
@@ -95,9 +95,7 @@ async fn can_sync() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
 
     let (mut nodes, wallet) =
-        E2ETestSetupBuilder::<EthereumNode>::new(2, test_chain_spec(EthereumHardfork::Cancun))
-            .build()
-            .await?;
+        EthereumNode::test_setup(2, test_chain_spec(EthereumHardfork::Cancun)).build().await?;
 
     let raw_tx = TransactionTestContext::transfer_tx_bytes(1, wallet.inner).await;
     let mut second_node = nodes.pop().unwrap();
@@ -130,8 +128,7 @@ async fn rejects_downloaded_block_with_invalid_bal_hash() -> eyre::Result<()> {
 
     let chain_spec = test_chain_spec(EthereumHardfork::Amsterdam);
 
-    let (mut node, wallet) =
-        E2ETestSetupBuilder::<EthereumNode>::new(1, chain_spec.clone()).build_single().await?;
+    let (mut node, wallet) = EthereumNode::test_setup(1, chain_spec.clone()).build_single().await?;
 
     // Build a valid Amsterdam block without submitting it to the engine, then change only its BAL
     // commitment so all other execution-derived header fields remain valid.
@@ -212,8 +209,7 @@ async fn e2e_test_send_transactions() -> eyre::Result<()> {
 
     let chain_spec = test_chain_spec(EthereumHardfork::Prague);
 
-    let (mut nodes, _) =
-        E2ETestSetupBuilder::<EthereumNode>::new(2, chain_spec.clone()).build().await?;
+    let (mut nodes, _) = EthereumNode::test_setup(2, chain_spec.clone()).build().await?;
     let mut node = nodes.pop().unwrap();
     let provider = node.rpc_provider();
 
@@ -241,8 +237,7 @@ async fn test_long_reorg() -> eyre::Result<()> {
 
     let chain_spec = test_chain_spec(EthereumHardfork::Prague);
 
-    let (mut nodes, _) =
-        E2ETestSetupBuilder::<EthereumNode>::new(2, chain_spec.clone()).build().await?;
+    let (mut nodes, _) = EthereumNode::test_setup(2, chain_spec.clone()).build().await?;
 
     let mut first_node = nodes.pop().unwrap();
     let mut second_node = nodes.pop().unwrap();
@@ -286,8 +281,7 @@ async fn test_pipeline_sync_target_head_becomes_finalized() -> eyre::Result<()> 
 
     let chain_spec = test_chain_spec(EthereumHardfork::Prague);
 
-    let (mut nodes, _) =
-        E2ETestSetupBuilder::<EthereumNode>::new(2, chain_spec.clone()).build().await?;
+    let (mut nodes, _) = EthereumNode::test_setup(2, chain_spec.clone()).build().await?;
 
     let mut first_node = nodes.pop().unwrap();
     let second_node = nodes.pop().unwrap();
@@ -335,8 +329,7 @@ async fn test_reorg_through_backfill() -> eyre::Result<()> {
 
     let chain_spec = test_chain_spec(EthereumHardfork::Prague);
 
-    let (mut nodes, _) =
-        E2ETestSetupBuilder::<EthereumNode>::new(2, chain_spec.clone()).build().await?;
+    let (mut nodes, _) = EthereumNode::test_setup(2, chain_spec.clone()).build().await?;
 
     let mut first_node = nodes.pop().unwrap();
     let mut second_node = nodes.pop().unwrap();
@@ -386,10 +379,8 @@ async fn test_tx_propagation() -> eyre::Result<()> {
     };
 
     // Setup 10 nodes
-    let (mut nodes, _) = E2ETestSetupBuilder::<EthereumNode>::new(10, chain_spec.clone())
-        .with_connect_nodes(false)
-        .build()
-        .await?;
+    let (mut nodes, _) =
+        EthereumNode::test_setup(10, chain_spec.clone()).with_connect_nodes(false).build().await?;
 
     // Connect all nodes to the first one
     let (first, rest) = nodes.split_at_mut(1);

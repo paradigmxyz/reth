@@ -8,7 +8,7 @@ use jsonrpsee_core::client::ClientT;
 use reth_chainspec::{EthChainSpec, EthereumHardfork};
 use reth_e2e_test_utils::{
     eth_payload_attributes, test_chain_spec, transaction::TransactionTestContext, wallet::Wallet,
-    E2ETestSetupBuilder,
+    E2ETestSetupExt,
 };
 use reth_node_builder::{NodeBuilder, NodeHandle};
 use reth_node_core::{
@@ -42,10 +42,9 @@ const ENGINE_IDENTITY_ROUTE: &str = "/engine/v1/identity";
 async fn can_run_eth_node() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
 
-    let (mut node, wallet) =
-        E2ETestSetupBuilder::<EthereumNode>::new(1, test_chain_spec(EthereumHardfork::Cancun))
-            .build_single()
-            .await?;
+    let (mut node, wallet) = EthereumNode::test_setup(1, test_chain_spec(EthereumHardfork::Cancun))
+        .build_single()
+        .await?;
     let raw_tx = TransactionTestContext::transfer_tx_bytes(1, wallet.inner).await;
 
     // make the node advance
@@ -68,11 +67,10 @@ async fn can_run_eth_node() -> eyre::Result<()> {
 async fn can_run_eth_node_with_auth_engine_api_over_ipc() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
 
-    let (mut node, wallet) =
-        E2ETestSetupBuilder::<EthereumNode>::new(1, test_chain_spec(EthereumHardfork::Cancun))
-            .with_rpc_modifier(|rpc| rpc.with_auth_ipc())
-            .build_single()
-            .await?;
+    let (mut node, wallet) = EthereumNode::test_setup(1, test_chain_spec(EthereumHardfork::Cancun))
+        .with_rpc_modifier(|rpc| rpc.with_auth_ipc())
+        .build_single()
+        .await?;
 
     // Create dummy transfer tx
     let raw_tx = TransactionTestContext::transfer_tx_bytes(1, wallet.inner).await;
@@ -97,10 +95,9 @@ async fn can_run_eth_node_with_auth_engine_api_over_ipc() -> eyre::Result<()> {
 async fn test_failed_run_eth_node_with_no_auth_engine_api_over_ipc_opts() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
 
-    let (node, _) =
-        E2ETestSetupBuilder::<EthereumNode>::new(1, test_chain_spec(EthereumHardfork::Cancun))
-            .build_single()
-            .await?;
+    let (node, _) = EthereumNode::test_setup(1, test_chain_spec(EthereumHardfork::Cancun))
+        .build_single()
+        .await?;
 
     // Ensure that the engine api client is not available
     let client = node.inner.engine_ipc_client().await;
@@ -113,10 +110,9 @@ async fn test_failed_run_eth_node_with_no_auth_engine_api_over_ipc_opts() -> eyr
 async fn test_engine_graceful_shutdown() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
 
-    let (mut node, wallet) =
-        E2ETestSetupBuilder::<EthereumNode>::new(1, test_chain_spec(EthereumHardfork::Cancun))
-            .build_single()
-            .await?;
+    let (mut node, wallet) = EthereumNode::test_setup(1, test_chain_spec(EthereumHardfork::Cancun))
+        .build_single()
+        .await?;
 
     let raw_tx = TransactionTestContext::transfer_tx_bytes(1, wallet.inner).await;
     let tx_hash = node.rpc.inject_tx(raw_tx).await?;
@@ -156,7 +152,7 @@ async fn test_testing_build_block_v1_osaka() -> eyre::Result<()> {
 
     let chain_spec = test_chain_spec(EthereumHardfork::Osaka);
     let genesis_hash = chain_spec.genesis_hash();
-    let (node, wallet) = E2ETestSetupBuilder::<EthereumNode>::new(1, chain_spec.clone())
+    let (node, wallet) = EthereumNode::test_setup(1, chain_spec.clone())
         .with_rpc_modifier(|rpc| {
             rpc.with_http_api(RpcModuleSelection::from([
                 RethRpcModule::Eth,
@@ -206,7 +202,7 @@ async fn test_engine_ssz_proxy_can_mine_block() -> eyre::Result<()> {
 
     let chain_spec = test_chain_spec(EthereumHardfork::Prague);
     let genesis_hash = chain_spec.genesis_hash();
-    let (node, _) = E2ETestSetupBuilder::<EthereumNode>::new(1, chain_spec.clone())
+    let (node, _) = EthereumNode::test_setup(1, chain_spec.clone())
         .with_rpc_modifier(|rpc| {
             rpc.with_http_api(RpcModuleSelection::from([
                 RethRpcModule::Eth,
@@ -384,10 +380,9 @@ async fn test_engine_ssz_proxy_can_mine_block() -> eyre::Result<()> {
 
 #[tokio::test]
 async fn test_engine_ssz_proxy_blob_revisions() -> eyre::Result<()> {
-    let (mut node, _) =
-        E2ETestSetupBuilder::<EthereumNode>::new(1, test_chain_spec(EthereumHardfork::Osaka))
-            .build_single()
-            .await?;
+    let (mut node, _) = EthereumNode::test_setup(1, test_chain_spec(EthereumHardfork::Osaka))
+        .build_single()
+        .await?;
     node.advance_block().await?;
     let client = reqwest::Client::new();
     let auth = node.auth_server_handle();
@@ -464,8 +459,7 @@ async fn test_engine_ssz_proxy_blob_revisions() -> eyre::Result<()> {
 async fn test_engine_ssz_proxy_returns_canonical_witness() -> eyre::Result<()> {
     let chain_spec = test_chain_spec(EthereumHardfork::Amsterdam);
     let genesis_hash = chain_spec.genesis_hash();
-    let (mut node, _) =
-        E2ETestSetupBuilder::<EthereumNode>::new(1, chain_spec).build_single().await?;
+    let (mut node, _) = EthereumNode::test_setup(1, chain_spec).build_single().await?;
     let payload = node.new_payload().await?;
     let envelope = payload.try_into_v6()?;
     let request = ExecutionPayloadEnvelopeAmsterdam {
@@ -520,15 +514,14 @@ async fn test_engine_ssz_proxy_returns_canonical_witness() -> eyre::Result<()> {
 async fn test_share_sparse_trie_with_payload_builder() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
 
-    let (mut node, _) =
-        E2ETestSetupBuilder::<EthereumNode>::new(1, test_chain_spec(EthereumHardfork::Prague))
-            .with_tree_config_modifier(|config| {
-                config
-                    .with_share_execution_cache_with_payload_builder(true)
-                    .with_share_sparse_trie_with_payload_builder(true)
-            })
-            .build_single()
-            .await?;
+    let (mut node, _) = EthereumNode::test_setup(1, test_chain_spec(EthereumHardfork::Prague))
+        .with_tree_config_modifier(|config| {
+            config
+                .with_share_execution_cache_with_payload_builder(true)
+                .with_share_sparse_trie_with_payload_builder(true)
+        })
+        .build_single()
+        .await?;
     let mut rng = rand::rng();
 
     let num_blocks = 5;
@@ -555,11 +548,10 @@ async fn test_sparse_trie_reuse_across_blocks() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
 
     // Use the state-root task with pruning enabled.
-    let (mut node, _) =
-        E2ETestSetupBuilder::<EthereumNode>::new(1, test_chain_spec(EthereumHardfork::Prague))
-            .with_tree_config_modifier(|config| config.with_sparse_trie_prune_depth(2))
-            .build_single()
-            .await?;
+    let (mut node, _) = EthereumNode::test_setup(1, test_chain_spec(EthereumHardfork::Prague))
+        .with_tree_config_modifier(|config| config.with_sparse_trie_prune_depth(2))
+        .build_single()
+        .await?;
 
     // Use a seeded RNG for reproducibility
     let mut rng = rand::rng();
@@ -586,8 +578,7 @@ async fn test_engine_ssz_request_validation() -> eyre::Result<()> {
     };
 
     let chain = test_chain_spec(EthereumHardfork::Prague);
-    let (node, _) =
-        E2ETestSetupBuilder::<EthereumNode>::new(1, chain.clone()).build_single().await?;
+    let (node, _) = EthereumNode::test_setup(1, chain.clone()).build_single().await?;
     let auth = node.auth_server_handle();
     let url = auth.http_url();
     let client = reqwest::Client::new();
@@ -727,9 +718,7 @@ async fn test_engine_ssz_custom_engine_and_middleware() -> eyre::Result<()> {
 #[tokio::test]
 async fn test_engine_ssz_witness_omitted_without_provider_parent_state() -> eyre::Result<()> {
     let (mut nodes, _) =
-        E2ETestSetupBuilder::<EthereumNode>::new(2, test_chain_spec(EthereumHardfork::Amsterdam))
-            .build()
-            .await?;
+        EthereumNode::test_setup(2, test_chain_spec(EthereumHardfork::Amsterdam)).build().await?;
     let target = nodes.pop().unwrap();
     let mut source = nodes.pop().unwrap();
     let first = source.advance_block().await?;

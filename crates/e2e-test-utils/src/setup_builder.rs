@@ -34,12 +34,13 @@ use tracing::{span, Instrument, Level};
 ///
 /// Configuration and tree configuration modifiers are applied in the order they are added.
 ///
+/// Use [`E2ETestSetupExt::test_setup`] to create the builder without naming the node type twice:
+///
 /// ```ignore
-/// let (mut node, wallet) =
-///     E2ETestSetupBuilder::<EthereumNode>::new(1, test_chain_spec(EthereumHardfork::Cancun))
-///         .with_tree_config_modifier(|config| config.with_persistence_threshold(0))
-///         .build_single()
-///         .await?;
+/// let (mut node, wallet) = EthereumNode::test_setup(1, test_chain_spec(EthereumHardfork::Cancun))
+///     .with_tree_config_modifier(|config| config.with_persistence_threshold(0))
+///     .build_single()
+///     .await?;
 /// ```
 pub struct E2ETestSetupBuilder<N: NodeBuilderHelper> {
     num_nodes: usize,
@@ -222,6 +223,16 @@ impl<N: NodeBuilderHelper> std::fmt::Debug for E2ETestSetupBuilder<N> {
             .finish_non_exhaustive()
     }
 }
+
+/// Extension trait to create an [`E2ETestSetupBuilder`] from a node type.
+pub trait E2ETestSetupExt: NodeBuilderHelper {
+    /// Returns an [`E2ETestSetupBuilder`] for `num_nodes` nodes of this type.
+    fn test_setup(num_nodes: usize, chain_spec: Arc<Self::ChainSpec>) -> E2ETestSetupBuilder<Self> {
+        E2ETestSetupBuilder::new(num_nodes, chain_spec)
+    }
+}
+
+impl<N: NodeBuilderHelper> E2ETestSetupExt for N {}
 
 /// Closure that modifies the tree configuration of the test nodes.
 type TreeConfigModifier = Box<dyn Fn(TreeConfig) -> TreeConfig + Send + Sync>;

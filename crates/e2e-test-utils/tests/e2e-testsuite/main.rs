@@ -16,7 +16,7 @@ use reth_e2e_test_utils::{
         setup::{NetworkSetup, Setup},
         Environment, TestBuilder,
     },
-    E2ETestSetupBuilder,
+    E2ETestSetupExt,
 };
 use reth_node_api::TreeConfig;
 use reth_node_ethereum::{EthEngineTypes, EthereumNode};
@@ -284,7 +284,7 @@ async fn test_setup_builder_with_custom_tree_config() -> Result<()> {
 
     let chain_spec = test_chain_spec(EthereumHardfork::Cancun);
 
-    let (node, _) = E2ETestSetupBuilder::<EthereumNode>::new(1, chain_spec)
+    let (node, _) = EthereumNode::test_setup(1, chain_spec)
         .with_tree_config_modifier(|config| {
             config.with_persistence_threshold(0).with_memory_block_buffer_target(5)
         })

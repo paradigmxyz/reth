@@ -1,6 +1,6 @@
 use alloy_primitives::B256;
 use reth_e2e_test_utils::{
-    test_chain_spec_builder, test_genesis, transaction::TransactionTestContext, E2ETestSetupBuilder,
+    test_chain_spec_builder, test_genesis, transaction::TransactionTestContext, E2ETestSetupExt,
 };
 use reth_node_ethereum::EthereumNode;
 use reth_provider::{HeaderProvider, StageCheckpointReader};
@@ -19,8 +19,7 @@ async fn can_run_eth_node_with_custom_genesis_number() -> eyre::Result<()> {
     let chain_spec =
         Arc::new(test_chain_spec_builder().genesis(genesis).cancun_activated().build());
 
-    let (mut node, wallet) =
-        E2ETestSetupBuilder::<EthereumNode>::new(1, chain_spec).build_single().await?;
+    let (mut node, wallet) = EthereumNode::test_setup(1, chain_spec).build_single().await?;
 
     // Verify stage checkpoints are initialized to genesis block number (1000)
     for stage in StageId::ALL {
@@ -64,7 +63,7 @@ async fn custom_genesis_block_query_boundaries() -> eyre::Result<()> {
     let chain_spec =
         Arc::new(test_chain_spec_builder().genesis(genesis).cancun_activated().build());
 
-    let (node, _) = E2ETestSetupBuilder::<EthereumNode>::new(1, chain_spec).build_single().await?;
+    let (node, _) = EthereumNode::test_setup(1, chain_spec).build_single().await?;
 
     // Query genesis block should succeed
     let genesis_header = node.inner.provider.header_by_number(genesis_number)?;

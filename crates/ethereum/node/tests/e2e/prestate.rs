@@ -8,7 +8,7 @@ use alloy_rpc_types_trace::geth::{
 };
 use eyre::{eyre, Result};
 use reth_chainspec::{ChainSpecBuilder, MAINNET};
-use reth_e2e_test_utils::E2ETestSetupBuilder;
+use reth_e2e_test_utils::E2ETestSetupExt;
 use reth_node_ethereum::EthereumNode;
 use serde::Deserialize;
 use std::sync::Arc;
@@ -49,7 +49,7 @@ async fn debug_trace_call_matches_geth_prestate_snapshot() -> Result<()> {
             .build(),
     );
 
-    let (node, _) = E2ETestSetupBuilder::<EthereumNode>::new(1, chain_spec).build_single().await?;
+    let (node, _) = EthereumNode::test_setup(1, chain_spec).build_single().await?;
     let provider = node.rpc_provider();
 
     // <https://etherscan.io/tx/0x391f4b6a382d3bcc3120adc2ea8c62003e604e487d97281129156fd284a1a89d>

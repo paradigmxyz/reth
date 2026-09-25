@@ -34,7 +34,7 @@ use reth_chainspec::EthereumHardfork;
 use reth_e2e_test_utils::{
     test_chain_spec,
     trie::{assert_trie_consistency, wait_for_persisted_block},
-    E2ETestSetupBuilder, NodeHelperType,
+    E2ETestSetupExt, NodeHelperType,
 };
 use reth_node_ethereum::EthereumNode;
 use reth_provider::Chain;
@@ -68,7 +68,7 @@ async fn run_selfdestruct_suite(fork: EthereumHardfork) -> eyre::Result<()> {
 
     // low persistence thresholds so the scenario blocks reach the database and the persisted
     // trie representation can be verified at the end of the suite
-    let (node, wallet) = E2ETestSetupBuilder::<EthereumNode>::new(1, test_chain_spec(fork))
+    let (node, wallet) = EthereumNode::test_setup(1, test_chain_spec(fork))
         .with_tree_config_modifier(|config| {
             config
                 .with_num_state_masking_blocks(0)

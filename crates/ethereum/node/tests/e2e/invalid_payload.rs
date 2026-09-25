@@ -9,9 +9,7 @@ use alloy_primitives::{bytes, keccak256, Bytes, B256};
 use alloy_rpc_types_engine::{ExecutionPayloadV1, ExecutionPayloadV3, PayloadStatusEnum};
 use rand::{rngs::StdRng, Rng, SeedableRng};
 use reth_chainspec::EthereumHardfork;
-use reth_e2e_test_utils::{
-    test_chain_spec, transaction::TransactionTestContext, E2ETestSetupBuilder,
-};
+use reth_e2e_test_utils::{test_chain_spec, transaction::TransactionTestContext, E2ETestSetupExt};
 use reth_ethereum_primitives::TransactionSigned;
 use reth_node_ethereum::EthereumNode;
 use reth_primitives_traits::SignedTransaction;
@@ -35,8 +33,7 @@ async fn can_handle_invalid_payload_then_valid() -> eyre::Result<()> {
 
     let chain_spec = test_chain_spec(EthereumHardfork::Cancun);
 
-    let (mut nodes, wallet) =
-        E2ETestSetupBuilder::<EthereumNode>::new(2, chain_spec.clone()).build().await?;
+    let (mut nodes, wallet) = EthereumNode::test_setup(2, chain_spec.clone()).build().await?;
 
     let mut producer = nodes.pop().unwrap();
     let receiver = nodes.pop().unwrap();
@@ -140,8 +137,7 @@ async fn can_handle_multiple_invalid_payloads() -> eyre::Result<()> {
 
     let chain_spec = test_chain_spec(EthereumHardfork::Cancun);
 
-    let (mut nodes, wallet) =
-        E2ETestSetupBuilder::<EthereumNode>::new(2, chain_spec.clone()).build().await?;
+    let (mut nodes, wallet) = EthereumNode::test_setup(2, chain_spec.clone()).build().await?;
 
     let mut producer = nodes.pop().unwrap();
     let receiver = nodes.pop().unwrap();
@@ -229,8 +225,7 @@ async fn can_handle_invalid_payload_with_transactions() -> eyre::Result<()> {
 
     let chain_spec = test_chain_spec(EthereumHardfork::Cancun);
 
-    let (mut nodes, wallet) =
-        E2ETestSetupBuilder::<EthereumNode>::new(2, chain_spec.clone()).build().await?;
+    let (mut nodes, wallet) = EthereumNode::test_setup(2, chain_spec.clone()).build().await?;
 
     let mut producer = nodes.pop().unwrap();
     let receiver = nodes.pop().unwrap();
@@ -331,8 +326,7 @@ async fn unrecoverable_signature_is_invalid_payload() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
 
     let chain_spec = test_chain_spec(EthereumHardfork::Paris);
-    let (mut node, wallet) =
-        E2ETestSetupBuilder::<EthereumNode>::new(1, chain_spec).build_single().await?;
+    let (mut node, wallet) = EthereumNode::test_setup(1, chain_spec).build_single().await?;
 
     let raw_tx = TransactionTestContext::transfer_tx_bytes(1, wallet.inner).await;
     node.rpc.inject_tx(raw_tx).await?;
@@ -386,8 +380,7 @@ async fn undecodable_bal_is_invalid_payload() -> eyre::Result<()> {
 
     let chain_spec = test_chain_spec(EthereumHardfork::Amsterdam);
 
-    let (mut node, wallet) =
-        E2ETestSetupBuilder::<EthereumNode>::new(1, chain_spec).build_single().await?;
+    let (mut node, wallet) = EthereumNode::test_setup(1, chain_spec).build_single().await?;
 
     // Build a valid Amsterdam payload without making it canonical.
     let raw_tx = TransactionTestContext::transfer_tx_bytes(1, wallet.inner).await;

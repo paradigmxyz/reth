@@ -9,7 +9,7 @@ use jsonrpsee::core::client::ClientT;
 use reth_chainspec::EthereumHardfork;
 use reth_db::tables;
 use reth_e2e_test_utils::{
-    test_chain_spec, transaction::TransactionTestContext, wallet, E2ETestSetupBuilder,
+    test_chain_spec, transaction::TransactionTestContext, wallet, E2ETestSetupExt,
 };
 use reth_node_ethereum::EthereumNode;
 use reth_provider::RocksDBProviderFactory;
@@ -77,7 +77,7 @@ async fn test_rocksdb_node_startup() -> Result<()> {
     let chain_spec = test_chain_spec(EthereumHardfork::Cancun);
 
     let (nodes, _wallet) =
-        E2ETestSetupBuilder::<EthereumNode>::new(1, chain_spec).with_storage_v2().build().await?;
+        EthereumNode::test_setup(1, chain_spec).with_storage_v2().build().await?;
 
     assert_eq!(nodes.len(), 1);
 
@@ -102,7 +102,7 @@ async fn test_rocksdb_block_mining() -> Result<()> {
     let chain_id = chain_spec.chain().id();
 
     let (mut nodes, _wallet) =
-        E2ETestSetupBuilder::<EthereumNode>::new(1, chain_spec).with_storage_v2().build().await?;
+        EthereumNode::test_setup(1, chain_spec).with_storage_v2().build().await?;
 
     assert_eq!(nodes.len(), 1);
 
@@ -152,7 +152,7 @@ async fn test_rocksdb_transaction_queries() -> Result<()> {
     let chain_spec = test_chain_spec(EthereumHardfork::Cancun);
     let chain_id = chain_spec.chain().id();
 
-    let (mut nodes, _) = E2ETestSetupBuilder::<EthereumNode>::new(1, chain_spec.clone())
+    let (mut nodes, _) = EthereumNode::test_setup(1, chain_spec.clone())
         .with_storage_v2()
         .with_tree_config_modifier(|config| {
             config.with_persistence_threshold(0).with_memory_block_buffer_target(0)
@@ -217,7 +217,7 @@ async fn test_rocksdb_multi_tx_same_block() -> Result<()> {
     let chain_spec = test_chain_spec(EthereumHardfork::Cancun);
     let chain_id = chain_spec.chain().id();
 
-    let (mut nodes, _) = E2ETestSetupBuilder::<EthereumNode>::new(1, chain_spec.clone())
+    let (mut nodes, _) = EthereumNode::test_setup(1, chain_spec.clone())
         .with_storage_v2()
         .with_tree_config_modifier(|config| {
             config.with_persistence_threshold(0).with_memory_block_buffer_target(0)
@@ -283,7 +283,7 @@ async fn test_rocksdb_txs_across_blocks() -> Result<()> {
     let chain_spec = test_chain_spec(EthereumHardfork::Cancun);
     let chain_id = chain_spec.chain().id();
 
-    let (mut nodes, _) = E2ETestSetupBuilder::<EthereumNode>::new(1, chain_spec.clone())
+    let (mut nodes, _) = EthereumNode::test_setup(1, chain_spec.clone())
         .with_storage_v2()
         .with_tree_config_modifier(|config| {
             config.with_persistence_threshold(0).with_memory_block_buffer_target(0)
@@ -366,7 +366,7 @@ async fn test_rocksdb_pending_tx_not_in_storage() -> Result<()> {
     let chain_spec = test_chain_spec(EthereumHardfork::Cancun);
     let chain_id = chain_spec.chain().id();
 
-    let (mut nodes, _) = E2ETestSetupBuilder::<EthereumNode>::new(1, chain_spec.clone())
+    let (mut nodes, _) = EthereumNode::test_setup(1, chain_spec.clone())
         .with_storage_v2()
         .with_tree_config_modifier(|config| {
             config.with_persistence_threshold(0).with_memory_block_buffer_target(0)
@@ -428,7 +428,7 @@ async fn test_rocksdb_reorg_unwind() -> Result<()> {
     let chain_spec = test_chain_spec(EthereumHardfork::Cancun);
     let chain_id = chain_spec.chain().id();
 
-    let (mut nodes, _) = E2ETestSetupBuilder::<EthereumNode>::new(1, chain_spec.clone())
+    let (mut nodes, _) = EthereumNode::test_setup(1, chain_spec.clone())
         .with_storage_v2()
         .with_tree_config_modifier(|config| {
             config.with_persistence_threshold(0).with_memory_block_buffer_target(0)
@@ -549,7 +549,7 @@ async fn test_rocksdb_historical_account_queries() -> Result<()> {
     let chain_spec = test_chain_spec(EthereumHardfork::Cancun);
     let chain_id = chain_spec.chain().id();
 
-    let (mut nodes, _) = E2ETestSetupBuilder::<EthereumNode>::new(1, chain_spec.clone())
+    let (mut nodes, _) = EthereumNode::test_setup(1, chain_spec.clone())
         .with_storage_v2()
         .with_tree_config_modifier(|config| {
             config.with_persistence_threshold(0).with_memory_block_buffer_target(0)
@@ -694,7 +694,7 @@ async fn test_rocksdb_account_history_pruning() -> Result<()> {
     const PRUNE_DISTANCE: u64 = 5;
     const TOTAL_BLOCKS: u64 = 20;
 
-    let (mut nodes, _) = E2ETestSetupBuilder::<EthereumNode>::new(1, chain_spec.clone())
+    let (mut nodes, _) = EthereumNode::test_setup(1, chain_spec.clone())
         .with_storage_v2()
         .with_tree_config_modifier(|config| {
             config.with_persistence_threshold(0).with_memory_block_buffer_target(0)
@@ -789,7 +789,7 @@ async fn test_rocksdb_storage_history_pruning() -> Result<()> {
     const PRUNE_DISTANCE: u64 = 5;
     const TOTAL_BLOCKS: u64 = 20;
 
-    let (mut nodes, _) = E2ETestSetupBuilder::<EthereumNode>::new(1, chain_spec.clone())
+    let (mut nodes, _) = EthereumNode::test_setup(1, chain_spec.clone())
         .with_storage_v2()
         .with_tree_config_modifier(|config| {
             config.with_persistence_threshold(0).with_memory_block_buffer_target(0)

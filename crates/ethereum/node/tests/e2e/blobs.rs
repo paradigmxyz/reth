@@ -2,7 +2,7 @@ use alloy_eips::Decodable2718;
 use reth_chainspec::EthereumHardfork;
 use reth_e2e_test_utils::{
     test_chain_spec, test_chain_spec_builder, transaction::TransactionTestContext, wallet::Wallet,
-    E2ETestSetupBuilder,
+    E2ETestSetupExt,
 };
 use reth_ethereum_engine_primitives::BlobSidecars;
 use reth_ethereum_primitives::PooledTransactionVariant;
@@ -19,8 +19,7 @@ async fn can_handle_blobs() -> eyre::Result<()> {
 
     let chain_spec = test_chain_spec(EthereumHardfork::Cancun);
     let genesis_hash = chain_spec.genesis_hash();
-    let (mut node, _) =
-        E2ETestSetupBuilder::<EthereumNode>::new(1, chain_spec).build_single().await?;
+    let (mut node, _) = EthereumNode::test_setup(1, chain_spec).build_single().await?;
 
     let wallets = Wallet::new(2).wallet_gen();
     let blob_wallet = wallets.first().unwrap();
@@ -73,7 +72,7 @@ async fn can_send_legacy_sidecar_post_activation() -> eyre::Result<()> {
 
     let chain_spec = test_chain_spec(EthereumHardfork::Osaka);
     let genesis_hash = chain_spec.genesis_hash();
-    let (mut node, _) = E2ETestSetupBuilder::<EthereumNode>::new(1, chain_spec)
+    let (mut node, _) = EthereumNode::test_setup(1, chain_spec)
         .with_rpc_modifier(|rpc| rpc.with_force_blob_sidecar_upcasting())
         .build_single()
         .await?;
@@ -119,7 +118,7 @@ async fn blob_conversion_at_osaka() -> eyre::Result<()> {
         test_chain_spec_builder().prague_activated().with_osaka_at(osaka_timestamp).build(),
     );
     let genesis_hash = chain_spec.genesis_hash();
-    let (mut node, _) = E2ETestSetupBuilder::<EthereumNode>::new(1, chain_spec)
+    let (mut node, _) = EthereumNode::test_setup(1, chain_spec)
         .with_rpc_modifier(|rpc| rpc.with_force_blob_sidecar_upcasting())
         .build_single()
         .await?;

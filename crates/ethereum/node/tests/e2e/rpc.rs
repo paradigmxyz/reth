@@ -27,7 +27,7 @@ use rand::{rngs::StdRng, Rng, SeedableRng};
 use reth_chainspec::{ChainSpecBuilder, EthChainSpec, EthereumHardfork};
 use reth_e2e_test_utils::{
     test_chain_spec, test_chain_spec_builder, transaction::TransactionTestContext, wallet::Wallet,
-    E2ETestSetupBuilder, NodeHelperType,
+    E2ETestSetupExt, NodeHelperType,
 };
 use reth_network::{types::NatResolver, PeersInfo};
 use reth_node_builder::{NodeBuilder, NodeHandle};
@@ -67,7 +67,7 @@ async fn test_rpc_shares_sender_recovery_cache_with_execution() -> eyre::Result<
     use reth_transaction_pool::test_utils::TransactionGenerator;
 
     let chain_spec = Arc::new(ChainSpecBuilder::mainnet().cancun_activated().build());
-    let (node, _) = E2ETestSetupBuilder::<EthereumNode>::new(1, chain_spec)
+    let (node, _) = EthereumNode::test_setup(1, chain_spec)
         .with_node_config_modifier(|mut config| {
             config.engine.sender_recovery_cache_enabled = true;
             config
@@ -107,7 +107,7 @@ async fn test_block_access_list_lookup_semantics() -> eyre::Result<()> {
 
     let chain_spec = test_chain_spec(EthereumHardfork::Cancun);
 
-    let (node, _) = E2ETestSetupBuilder::<EthereumNode>::new(1, chain_spec).build_single().await?;
+    let (node, _) = EthereumNode::test_setup(1, chain_spec).build_single().await?;
     let client = node.rpc_client().unwrap();
 
     let pending: Option<serde_json::Value> =
@@ -132,7 +132,7 @@ async fn test_block_access_list_lookup_semantics() -> eyre::Result<()> {
 async fn test_bal_prewarming_for_transaction_replay() -> eyre::Result<()> {
     for (cache_computed, prewarm) in [(false, false), (true, false), (false, true)] {
         let chain_spec = test_chain_spec(EthereumHardfork::Cancun);
-        let (mut node, wallet) = E2ETestSetupBuilder::<EthereumNode>::new(1, chain_spec)
+        let (mut node, wallet) = EthereumNode::test_setup(1, chain_spec)
             .with_node_config_modifier(move |mut config| {
                 config.rpc.rpc_state_cache.cache_computed_bals = cache_computed;
                 config.rpc.rpc_state_cache.prewarm_bals = prewarm.then_some(0);
@@ -212,8 +212,7 @@ async fn test_fee_history() -> eyre::Result<()> {
 
     let chain_spec = test_chain_spec(EthereumHardfork::Cancun);
 
-    let (mut node, wallet) =
-        E2ETestSetupBuilder::<EthereumNode>::new(1, chain_spec.clone()).build_single().await?;
+    let (mut node, wallet) = EthereumNode::test_setup(1, chain_spec.clone()).build_single().await?;
     let provider = node.rpc_provider_with_wallet(wallet.wallet_gen().swap_remove(0));
 
     let fee_history = provider.get_fee_history(10, 0_u64.into(), &[]).await?;
@@ -281,7 +280,7 @@ async fn test_debug_trace_chain_subscription() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
 
     let chain_spec = test_chain_spec(EthereumHardfork::Cancun);
-    let (mut node, wallet) = E2ETestSetupBuilder::<EthereumNode>::new(1, chain_spec)
+    let (mut node, wallet) = EthereumNode::test_setup(1, chain_spec)
         .with_rpc_modifier(|rpc| rpc.with_ws().with_ws_api(RpcModuleSelection::All))
         .build_single()
         .await?;
@@ -346,8 +345,7 @@ async fn test_debug_trace_eip8037_gas() -> eyre::Result<()> {
     let chain_spec = Arc::new(
         test_chain_spec_builder().osaka_activated().with_amsterdam_at(AMSTERDAM_TIMESTAMP).build(),
     );
-    let (mut node, wallet) =
-        E2ETestSetupBuilder::<EthereumNode>::new(1, chain_spec).build_single().await?;
+    let (mut node, wallet) = EthereumNode::test_setup(1, chain_spec).build_single().await?;
     let provider = node.rpc_provider_with_wallet(wallet.wallet_gen().swap_remove(0));
 
     let pre_amsterdam = GasWaster::deploy_builder(&provider, U256::from(1)).send().await?;
@@ -431,8 +429,7 @@ async fn test_flashbots_validate_v3() -> eyre::Result<()> {
 
     let chain_spec = test_chain_spec(EthereumHardfork::Cancun);
 
-    let (mut node, wallet) =
-        E2ETestSetupBuilder::<EthereumNode>::new(1, chain_spec.clone()).build_single().await?;
+    let (mut node, wallet) = EthereumNode::test_setup(1, chain_spec.clone()).build_single().await?;
     let provider = node.rpc_provider_with_wallet(wallet.wallet_gen().swap_remove(0));
 
     node.advance(100, |_| {
@@ -498,7 +495,7 @@ async fn test_flashbots_validate_uses_shared_sender_recovery_cache() -> eyre::Re
 
     let chain_spec = test_chain_spec(EthereumHardfork::Cancun);
 
-    let (mut node, wallet) = E2ETestSetupBuilder::<EthereumNode>::new(1, chain_spec)
+    let (mut node, wallet) = EthereumNode::test_setup(1, chain_spec)
         .with_node_config_modifier(|mut config| {
             config.engine.sender_recovery_cache_enabled = true;
             config
@@ -555,8 +552,7 @@ async fn test_flashbots_validate_v4() -> eyre::Result<()> {
 
     let chain_spec = test_chain_spec(EthereumHardfork::Prague);
 
-    let (mut node, wallet) =
-        E2ETestSetupBuilder::<EthereumNode>::new(1, chain_spec.clone()).build_single().await?;
+    let (mut node, wallet) = EthereumNode::test_setup(1, chain_spec.clone()).build_single().await?;
     let provider = node.rpc_provider_with_wallet(wallet.wallet_gen().swap_remove(0));
 
     node.advance(100, |_| {
@@ -624,7 +620,7 @@ async fn test_flashbots_validate_v5() -> eyre::Result<()> {
 
     let chain_spec = test_chain_spec(EthereumHardfork::Osaka);
 
-    let (mut node, wallet) = E2ETestSetupBuilder::<EthereumNode>::new(1, chain_spec)
+    let (mut node, wallet) = EthereumNode::test_setup(1, chain_spec)
         .with_rpc_modifier(|rpc| rpc.with_force_blob_sidecar_upcasting())
         .build_single()
         .await?;
@@ -690,7 +686,7 @@ async fn test_flashbots_validate_v6() -> eyre::Result<()> {
 
     let chain_spec = test_chain_spec(EthereumHardfork::Amsterdam);
 
-    let (mut node, wallet) = E2ETestSetupBuilder::<EthereumNode>::new(1, chain_spec)
+    let (mut node, wallet) = EthereumNode::test_setup(1, chain_spec)
         .with_rpc_modifier(|rpc| rpc.with_force_blob_sidecar_upcasting())
         .build_single()
         .await?;
@@ -799,7 +795,7 @@ async fn test_estimate_gas_basic_transfers_post_amsterdam() -> eyre::Result<()> 
 
     let chain_spec = test_chain_spec(EthereumHardfork::Amsterdam);
 
-    let (node, _) = E2ETestSetupBuilder::<EthereumNode>::new(1, chain_spec).build_single().await?;
+    let (node, _) = EthereumNode::test_setup(1, chain_spec).build_single().await?;
     let provider = node.rpc_provider();
 
     let mut signers = Wallet::new(2).wallet_gen();
@@ -902,8 +898,7 @@ async fn test_eth_config() -> eyre::Result<()> {
             .build(),
     );
 
-    let (mut node, wallet) =
-        E2ETestSetupBuilder::<EthereumNode>::new(1, chain_spec.clone()).build_single().await?;
+    let (mut node, wallet) = EthereumNode::test_setup(1, chain_spec.clone()).build_single().await?;
     let provider = node.rpc_provider_with_wallet(wallet.wallet_gen().swap_remove(0));
 
     let _ = provider.send_transaction(TransactionRequest::default().to(Address::ZERO)).await?;
