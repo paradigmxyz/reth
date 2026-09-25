@@ -25,6 +25,7 @@ reth-engine-local.workspace = true
 reth-engine-primitives.workspace = true
 reth-engine-tree.workspace = true
 reth-engine-util.workspace = true
+reth-errors.workspace = true
 reth-evm.workspace = true
 reth-exex.workspace = true
 reth-fs-util.workspace = true
@@ -46,6 +47,7 @@ reth-rpc-builder.workspace = true
 reth-rpc-engine-api.workspace = true
 reth-rpc-eth-types.workspace = true
 reth-rpc-layer.workspace = true
+reth-snap-sync.workspace = true
 reth-stages.workspace = true
 reth-static-file.workspace = true
 reth-storage-overlay = { workspace = true, features = ["rayon"] }
@@ -68,6 +70,7 @@ alloy-rpc-types-engine.workspace = true
 futures.workspace = true
 tokio = { workspace = true, features = ["sync", "macros", "time", "rt-multi-thread"] }
 tokio-stream.workspace = true
+tokio-util.workspace = true
 
 ## crypto
 secp256k1 = { workspace = true, features = ["global-context", "std", "recovery"] }
@@ -85,6 +88,8 @@ serde_json.workspace = true
 tracing.workspace = true
 
 [dev-dependencies]
+reth-stages-api = { workspace = true, features = ["test-utils"] }
+reth-storage-api.workspace = true
 tempfile.workspace = true
 reth-ethereum-engine-primitives.workspace = true
 reth-payload-builder = { workspace = true, features = ["test-utils"] }
@@ -118,6 +123,7 @@ test-utils = [
     "reth-node-ethereum/test-utils",
     "reth-primitives-traits/test-utils",
     "reth-tasks/test-utils",
+    "reth-stages-api/test-utils",
 ]
 trie-debug = [
     "reth-engine-tree/trie-debug",

@@ -1462,6 +1462,31 @@ impl<TX: DbTx, N: NodeTypes> DatabaseProvider<TX, N> {
             _ => Ok(()),
         }
     }
+
+    /// Refuses a database the selected backfill cannot serve: snap downloads the hashed state
+    /// layout, and state an unfinished attempt left behind is only ever completed by snap.
+    pub fn ensure_snap_backfill_eligible(&self, snap_enabled: bool) -> ProviderResult<()> {
+        if snap_enabled && !self.cached_storage_settings().use_hashed_state() {
+            return Err(ProviderError::SnapStorageLayoutUnsupported)
+        }
+        match self.snap_attempt()? {
+            Some(attempt) if !snap_enabled && !attempt.is_verified() => {
+                Err(ProviderError::UnverifiedSnapState { attempt: attempt.id().into() })
+            }
+            _ => Ok(()),
+        }
+    }
+
+    /// Empties the non-header static files and anchors them at `pivot`, so the next append
+    /// starts at `pivot + 1`.
+    pub fn anchor_pruned_static_files(&self, pivot: BlockNumber) -> ProviderResult<()> {
+        let static_files = self.static_file_provider();
+        for segment in StaticFileSegment::iter().filter(|segment| !segment.is_headers()) {
+            static_files.delete_segment(segment)?;
+            static_files.get_writer(pivot, segment)?.initialize_pruned_anchor(pivot)?;
+        }
+        Ok(())
+    }
 }
 
 impl<TX: DbTx, N: NodeTypes> AccountReader for DatabaseProvider<TX, N> {

@@ -258,7 +258,10 @@ where
                 CatchUpStep::Applied { progress, .. } => {
                     debug!(target: "sync::snap", applied = ?progress.applied(), pivot, "Applied block access lists");
                 }
-                CatchUpStep::Unavailable { .. } => return Ok(Some(Step::Wait)),
+                CatchUpStep::Unavailable { peer_id, .. } => {
+                    debug!(target: "sync::snap", ?peer_id, pivot, "Peer does not serve the pivot's block access lists");
+                    return Ok(Some(Step::Wait))
+                }
             }
             if self.cancel.is_cancelled() {
                 return Ok(Some(Step::Stop))
@@ -274,7 +277,10 @@ where
             }
             let range = match self.accounts.next().await? {
                 Some(AccountRangeStep::Verified(range)) => range,
-                Some(AccountRangeStep::Unavailable { .. }) => return Ok(Step::Wait),
+                Some(AccountRangeStep::Unavailable { origin, peer_id }) => {
+                    debug!(target: "sync::snap", ?peer_id, %origin, "Peer does not serve the pivot state");
+                    return Ok(Step::Wait)
+                }
                 None => return self.hand_off(write).await,
             };
             if let Some(step) = self.download_storage_and_code(&range).await? {
@@ -295,7 +301,10 @@ where
             match self.storage.next(range).await? {
                 StorageRangeStep::Complete => break,
                 StorageRangeStep::Committed(_) => {}
-                StorageRangeStep::Unavailable { .. } => return Ok(Some(Step::Wait)),
+                StorageRangeStep::Unavailable { peer_id, .. } => {
+                    debug!(target: "sync::snap", ?peer_id, "Peer does not serve the pivot's storage");
+                    return Ok(Some(Step::Wait))
+                }
             }
             // A large contract takes many responses, each committed, so any of them is a
             // resumable place to stop.
@@ -307,7 +316,10 @@ where
             match self.bytecode.next(range).await? {
                 BytecodeStep::Complete => return Ok(None),
                 BytecodeStep::Committed { .. } => {}
-                BytecodeStep::Unavailable { .. } => return Ok(Some(Step::Wait)),
+                BytecodeStep::Unavailable { peer_id, .. } => {
+                    debug!(target: "sync::snap", ?peer_id, "Peer does not serve the pivot's code");
+                    return Ok(Some(Step::Wait))
+                }
             }
             if self.cancel.is_cancelled() {
                 return Ok(Some(Step::Stop))
