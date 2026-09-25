@@ -10,7 +10,7 @@ mod tests {
     use alloy_rlp::Encodable;
 
     #[test]
-    #[allow(clippy::needless_update)] // Account fields depend on enabled dependency features.
+    #[allow(clippy::needless_update)]
     fn account_rlp_max_size() {
         let account = TrieAccount {
             nonce: u64::MAX,

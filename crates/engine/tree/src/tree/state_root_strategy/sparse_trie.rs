@@ -658,6 +658,7 @@ where
         target = "engine::tree::payload_processor::sparse_trie",
         skip_all
     )]
+    #[allow(clippy::clone_on_copy)]
     fn on_hashed_state_update(&mut self, hashed_state_update: HashedPostState) {
         for (&address, storage) in &hashed_state_update.storages {
             if !storage.storage.is_empty() {
@@ -1855,7 +1856,7 @@ mod tests {
     }
 
     #[test]
-    #[allow(clippy::needless_update)] // Account fields depend on enabled dependency features.
+    #[allow(clippy::needless_update)]
     fn test_encode_account_leaf_value_non_empty_account_is_rlp() {
         let storage_root = B256::from([0x99; 32]);
         let account = Some(Account {
@@ -1982,6 +1983,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::clone_on_copy)]
     fn in_flight_storage_updates_keep_latest_values_and_deletions() {
         let runtime = Runtime::test();
         let trie = SparseStateTrie::default()
@@ -2243,6 +2245,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::clone_on_copy)]
     fn run_waits_for_storage_tries_hashed_off_thread() {
         let runtime = Runtime::test();
         let default_trie = RevealableSparseTrie::<ArenaParallelSparseTrie>::revealed_empty();

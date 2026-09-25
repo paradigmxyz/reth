@@ -428,9 +428,8 @@ where
             // - dispatch_bal_batch_io is false
             // - execution cache is not disabled
             //
-            // we launch prewarming sequence of the BAL read set here. The BAL read-set consists
-            // of the accounts, their code if present, and declared storages (both storage_reads
-            // and storage_changes).
+            // we launch prewarming of the BAL accounts and declared storages (both storage_reads
+            // and storage_changes). Bytecode is loaded on demand during execution.
             //
             // This runs side-by-side with the parallel transaction execution reducing the time it
             // spends blocking on the data.
@@ -1172,7 +1171,7 @@ mod tests {
     }
 
     #[test]
-    #[allow(clippy::needless_update)] // Account fields depend on enabled dependency features.
+    #[allow(clippy::needless_update)]
     fn bal_account_uses_existing_fields_only_when_missing() {
         let changes = AccountChanges::new(address!("0000000000000000000000000000000000000001"))
             .with_balance_change(BalanceChange::new(BlockAccessIndex::new(1), U256::from(10)));

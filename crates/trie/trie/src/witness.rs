@@ -108,6 +108,7 @@ where
     /// # Arguments
     ///
     /// `state` - state transition containing both modified and touched accounts and storage slots.
+    #[allow(clippy::clone_on_copy)]
     pub fn compute(mut self, state: HashedPostState) -> Result<B256Map<Bytes>, TrieWitnessError> {
         let is_state_empty = state.is_empty();
         if is_state_empty && !self.always_include_root_node {

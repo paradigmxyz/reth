@@ -454,11 +454,13 @@ mod tests {
                     balance: account.balance,
                     nonce: account.nonce,
                     code_hash: account.bytecode_hash.unwrap_or_default(),
+                    code: None,
                     ..Default::default()
                 }),
                 original_info: (i == 0).then(|| AccountInfo {
                     balance: account.balance.checked_div(U256::from(2)).unwrap_or(U256::ZERO),
                     code_hash: account.bytecode_hash.unwrap_or_default(),
+                    code: None,
                     ..Default::default()
                 }),
                 storage,

@@ -1261,6 +1261,7 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> DatabaseProvider<TX, N> {
     /// Populate a [`BundleStateInit`] and [`RevertsInit`] using cursors over the
     /// [`tables::PlainAccountState`] and [`tables::PlainStorageState`] tables, based on the given
     /// storage and account changesets.
+    #[allow(clippy::clone_on_copy)]
     pub(crate) fn populate_bundle_state(
         &self,
         account_changeset: Vec<(u64, AccountBeforeTx)>,
@@ -3250,6 +3251,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> StorageTrieWriter for DatabaseP
 }
 
 impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> HashingWriter for DatabaseProvider<TX, N> {
+    #[allow(clippy::clone_on_copy)]
     fn unwind_account_hashing<'a>(
         &self,
         changesets: impl Iterator<Item = &'a (BlockNumber, AccountBeforeTx)>,

@@ -531,7 +531,7 @@ mod tests {
     }
 
     #[test]
-    #[allow(clippy::needless_update)] // Account fields depend on enabled dependency features.
+    #[allow(clippy::needless_update)]
     fn test_state_root_branch_nodes_iter_basic() {
         // Simple test with a few accounts and storage
         let mut accounts = BTreeMap::new();
@@ -601,7 +601,7 @@ mod tests {
     }
 
     #[test]
-    #[allow(clippy::needless_update)] // Account fields depend on enabled dependency features.
+    #[allow(clippy::needless_update)]
     fn test_state_root_branch_nodes_iter_multiple_accounts() {
         // Test with multiple accounts to verify ordering
         let mut accounts = BTreeMap::new();

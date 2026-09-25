@@ -7,7 +7,7 @@ use crate::{
 use alloy_consensus::Header;
 use alloy_eip7928::{compute_block_access_list_hash, AccountChanges};
 use alloy_eips::{eip7928::bal::Bal, BlockNumHash};
-use alloy_primitives::{Bytes, B256, KECCAK256_EMPTY, U256};
+use alloy_primitives::{Bytes, B256, U256};
 use futures::future::{ready, Ready};
 use reth_db_api::{
     cursor::{DbCursorRO, DbDupCursorRO},
@@ -44,7 +44,7 @@ use reth_tasks::Runtime;
 use reth_trie_common::{
     proof::ProofRetainer,
     root::{state_root_unsorted, storage_root_unsorted},
-    HashBuilder, Nibbles, TrieAccount, EMPTY_ROOT_HASH,
+    HashBuilder, Nibbles, TrieAccount,
 };
 use std::{
     collections::VecDeque,
@@ -127,12 +127,7 @@ pub(crate) fn key(value: u64) -> B256 {
 
 /// An account without storage or code, distinguished by its nonce.
 pub(crate) fn account(nonce: u64) -> TrieAccount {
-    TrieAccount {
-        nonce,
-        balance: U256::from(1),
-        storage_root: EMPTY_ROOT_HASH,
-        code_hash: KECCAK256_EMPTY,
-    }
+    TrieAccount { nonce, balance: U256::from(1), ..Default::default() }
 }
 
 /// Root of the account trie holding `accounts`.

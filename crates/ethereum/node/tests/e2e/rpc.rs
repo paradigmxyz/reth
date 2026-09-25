@@ -73,10 +73,6 @@ async fn test_rpc_shares_sender_recovery_cache_with_execution() -> eyre::Result<
     let chain_spec = Arc::new(ChainSpecBuilder::mainnet().cancun_activated().build());
     let (mut nodes, _) =
         E2ETestSetupBuilder::<EthereumNode, _>::new(1, chain_spec, eth_payload_attributes)
-            .with_node_config_modifier(|mut config| {
-                config.engine.sender_recovery_cache_enabled = true;
-                config
-            })
             .build()
             .await?;
     let node = nodes.pop().unwrap();
@@ -601,10 +597,6 @@ async fn test_flashbots_validate_uses_shared_sender_recovery_cache() -> eyre::Re
 
     let (mut nodes, wallet) =
         E2ETestSetupBuilder::<EthereumNode, _>::new(1, chain_spec, eth_payload_attributes)
-            .with_node_config_modifier(|mut config| {
-                config.engine.sender_recovery_cache_enabled = true;
-                config
-            })
             .build()
             .await?;
     let mut node = nodes.pop().unwrap();

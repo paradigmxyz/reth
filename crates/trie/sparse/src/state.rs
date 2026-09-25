@@ -1017,6 +1017,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::clone_on_copy)]
     fn take_trie_updates() {
         reth_tracing::init_test_tracing();
 

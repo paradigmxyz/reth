@@ -337,6 +337,7 @@ fn verify_proof(
 
 // Snap account ranges cannot represent account extensions.
 #[cfg(all(test, not(feature = "account-ext")))]
+#[allow(clippy::clone_on_copy)]
 mod tests {
     use super::{request::MAX_RETRIES, test_utils::TestSnapClient, *};
     use alloy_primitives::{Bytes, U256};

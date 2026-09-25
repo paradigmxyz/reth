@@ -31,7 +31,7 @@ mod tests {
     }
 
     #[test]
-    #[allow(clippy::needless_update)] // Account fields depend on enabled dependency features.
+    #[allow(clippy::needless_update)]
     fn test_from_genesis_account_with_values() {
         // Create a GenesisAccount with specific values
         let mut storage = BTreeMap::new();

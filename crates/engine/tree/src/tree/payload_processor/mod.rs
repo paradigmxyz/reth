@@ -1036,6 +1036,7 @@ mod tests {
                     balance: U256::from(1337),
                     nonce: 7,
                     code_hash: KECCAK_EMPTY,
+                    code: None,
                     ..Default::default()
                 },
             )

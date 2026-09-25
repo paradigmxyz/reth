@@ -259,6 +259,7 @@ mod tests {
             nonce: 7,
             balance: U256::from(42),
             code_hash: KECCAK_EMPTY,
+            code: None,
             ..Default::default()
         };
         let db = CountingDatabaseRef::new(address, Some(account), Bytecode::default());
@@ -271,7 +272,7 @@ mod tests {
     }
 
     #[test]
-    #[allow(clippy::needless_update)] // Account fields depend on enabled dependency features.
+    #[allow(clippy::needless_update)]
     fn database_state_provider_maps_code_hash_and_bytecode() {
         let address = Address::repeat_byte(0x01);
         let code_hash = B256::repeat_byte(0x42);
@@ -336,7 +337,7 @@ mod tests {
     }
 
     #[test]
-    #[allow(clippy::needless_update)] // Account fields depend on enabled dependency features.
+    #[allow(clippy::needless_update)]
     fn database_state_provider_uses_cached_reads() {
         let address = Address::repeat_byte(0x01);
         let code_hash = B256::repeat_byte(0x42);

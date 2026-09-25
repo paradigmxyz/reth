@@ -407,6 +407,7 @@ impl TestStageDB {
     }
 
     /// Insert collection of ([Address], [Account]) into corresponding tables.
+    #[allow(clippy::clone_on_copy)]
     pub fn insert_accounts_and_storages<I, S>(&self, accounts: I) -> ProviderResult<()>
     where
         I: IntoIterator<Item = (Address, (Account, S))>,

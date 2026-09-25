@@ -968,7 +968,7 @@ mod tests {
     }
 
     #[test]
-    #[allow(clippy::needless_update)] // Account fields depend on enabled dependency features.
+    #[allow(clippy::needless_update)]
     fn execution_overlay_extends_bundle_state_without_account_ids() {
         let address = Address::with_last_byte(1);
         let slot = U256::from(2);

@@ -618,7 +618,7 @@ mod tests {
     fn insert_funded(db: &mut CacheDB<EmptyDB>, addr: alloy_primitives::Address, balance: U256) {
         db.insert_account_info(
             addr,
-            AccountInfo { balance, code_hash: B256::ZERO, ..Default::default() },
+            AccountInfo { balance, code_hash: B256::ZERO, code: None, ..Default::default() },
         );
     }
 
@@ -730,6 +730,7 @@ mod tests {
                     AccountInfo {
                         balance: sender_balance,
                         code_hash: B256::ZERO,
+                        code: None,
                         ..Default::default()
                     },
                 );
@@ -738,6 +739,7 @@ mod tests {
                     AccountInfo {
                         balance: sender_balance,
                         code_hash: B256::ZERO,
+                        code: None,
                         ..Default::default()
                     },
                 );

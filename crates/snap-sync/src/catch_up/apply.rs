@@ -53,7 +53,6 @@ impl BalStateUpdate {
 
 /// What the downloaded state holds for an account a list changes.
 #[derive(Clone, Debug, PartialEq, Eq)]
-#[cfg_attr(not(feature = "account-ext"), derive(Copy))]
 pub enum DownloadedAccount {
     /// The account's range is not downloaded yet.
     Unknown,
@@ -190,7 +189,7 @@ mod tests {
         let update = apply(&changes, DownloadedAccount::Absent);
         assert_eq!(
             update.state.accounts[&keccak256(ACCOUNT)],
-            Some(Account { balance: U256::from(20), nonce: 0, bytecode_hash: None })
+            Some(Account { balance: U256::from(20), ..Default::default() })
         );
     }
 

@@ -1444,6 +1444,7 @@ mod tests {
                     Some(AccountInfo {
                         nonce: 1,
                         code_hash: B256::random(), // Non-empty code hash
+                        code: None,
                         ..Default::default()
                     }),
                     None, // Destroyed, so no current info
@@ -1488,6 +1489,7 @@ mod tests {
                         balance: U256::from(100),
                         nonce: 1,
                         code_hash: alloy_primitives::KECCAK256_EMPTY, // Empty code hash = EOA
+                        code: None,
                         ..Default::default()
                     }),
                     None, // Destroyed

@@ -1246,7 +1246,7 @@ mod tests {
 
     #[tokio::test]
     #[cfg(not(feature = "account-ext"))]
-    #[allow(clippy::needless_update)] // Account fields depend on enabled dependency features.
+    #[allow(clippy::needless_update)]
     async fn snap_account_range_response_encodes_accounts_and_proof() {
         let provider = MockEthProvider::default();
         let first_hash = B256::repeat_byte(0x01);

@@ -632,6 +632,7 @@ mod tests {
     /// Tests that when a limiter stops mid-block (with multiple changes for the same block),
     /// the checkpoint is set to `block_number - 1` to avoid dangling index entries.
     #[test]
+    #[allow(clippy::clone_on_copy)]
     fn prune_partial_progress_mid_block() {
         use alloy_primitives::{Address, U256};
         use reth_primitives_traits::Account;
