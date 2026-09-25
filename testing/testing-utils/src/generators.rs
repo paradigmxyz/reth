@@ -300,6 +300,7 @@ type AccountState = (Account, Vec<StorageEntry>);
 ///
 /// Returns a Vec of account and storage changes for each block,
 /// along with the final state of all accounts and storages.
+#[allow(clippy::clone_on_copy)]
 pub fn random_changeset_range<'a, R: Rng, IBlk, IAcc>(
     rng: &mut R,
     blocks: IBlk,

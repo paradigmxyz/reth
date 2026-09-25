@@ -1148,6 +1148,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[allow(clippy::clone_on_copy)]
     async fn sanity_execute_unwind() {
         let factory = create_test_provider_factory();
         let provider = factory.provider_rw().unwrap();
@@ -1327,6 +1328,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[allow(clippy::clone_on_copy)]
     async fn test_selfdestruct() {
         let test_db = TestStageDB::default();
         let provider = test_db.factory.database_provider_rw().unwrap();

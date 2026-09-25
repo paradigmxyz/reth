@@ -333,6 +333,7 @@ fn verify_proof(
 }
 
 #[cfg(test)]
+#[allow(clippy::clone_on_copy)]
 mod tests {
     use super::{request::MAX_RETRIES, test_utils::TestSnapClient, *};
     use alloy_primitives::{Bytes, U256};

@@ -123,6 +123,7 @@ impl AccountData {
     /// Returns the account the trie leaf commits to.
     ///
     /// Default storage roots and code hashes are restored when decoding the slim body.
+    #[allow(clippy::clone_on_copy)]
     pub fn trie_account(&self) -> TrieAccount {
         self.body.0.clone()
     }
@@ -536,6 +537,7 @@ impl SlimAccountBody {
 }
 
 impl From<&TrieAccount> for SlimAccountBody {
+    #[allow(clippy::clone_on_copy)]
     fn from(account: &TrieAccount) -> Self {
         Self(account.clone())
     }
@@ -986,6 +988,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::clone_on_copy)]
     fn slim_body_keeps_non_default_storage_and_code() {
         let account = trie_account(B256::repeat_byte(2), B256::repeat_byte(3));
         let encoded = AccountData::from_trie_account(B256::repeat_byte(1), &account);

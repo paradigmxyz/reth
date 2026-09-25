@@ -968,6 +968,7 @@ impl AccountProof {
     }
 
     /// Verify the storage proofs and account proof against the provided state root.
+    #[allow(clippy::clone_on_copy)]
     pub fn verify(&self, root: B256) -> Result<(), ProofVerificationError> {
         // Verify storage proofs.
         for storage_proof in &self.storage_proofs {

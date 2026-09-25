@@ -193,6 +193,7 @@ impl HashedPostState {
         self.extend_inner(Cow::Borrowed(other));
     }
 
+    #[allow(clippy::clone_on_copy)]
     fn extend_inner(&mut self, other: Cow<'_, Self>) {
         self.accounts.extend(other.accounts.iter().map(|(&k, v)| (k, v.clone())));
 
@@ -226,6 +227,7 @@ impl HashedPostState {
     /// Extend this hashed post state with sorted data, converting directly into the unsorted
     /// `HashMap` representation. This is more efficient than first converting to `HashedPostState`
     /// and then extending, as it avoids creating intermediate `HashMap` allocations.
+    #[allow(clippy::clone_on_copy)]
     pub fn extend_from_sorted(&mut self, sorted: &HashedPostStateSorted) {
         // Reserve capacity for accounts
         self.accounts.reserve(sorted.accounts.len());
@@ -269,6 +271,7 @@ impl HashedPostState {
 
     /// Creates a sorted copy without consuming self.
     /// More efficient than `.clone().into_sorted()` as it avoids cloning `HashMap` metadata.
+    #[allow(clippy::clone_on_copy)]
     pub fn clone_into_sorted(&self) -> HashedPostStateSorted {
         let mut accounts: Vec<_> = self.accounts.iter().map(|(&k, v)| (k, v.clone())).collect();
         accounts.sort_unstable_by_key(|(address, _)| *address);

@@ -1,4 +1,4 @@
-#![allow(missing_docs)]
+#![allow(missing_docs, clippy::clone_on_copy)]
 
 use alloy_consensus::EMPTY_ROOT_HASH;
 use alloy_primitives::{

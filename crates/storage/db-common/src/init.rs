@@ -973,6 +973,7 @@ where
 /// `StorageChangeSets` receive data in sorted order within each account). For `HashedAccounts`
 /// and `HashedStorages`, insertion order is unsorted (keccak scrambles address order), so we
 /// use `put`/`upsert` which do a full B-tree lookup.
+#[allow(clippy::clone_on_copy)]
 fn write_account_to_db<TX: DbTxMut>(
     tx: &TX,
     address: &Address,

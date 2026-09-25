@@ -178,8 +178,6 @@ rustdoc.all = "warn"
 borrow_as_ptr = "warn"
 branches_sharing_code = "warn"
 clear_with_drain = "warn"
-# Account types are only `Copy` without the dependencies' `account-ext` feature.
-clone_on_copy = "allow"
 cloned_instead_of_copied = "warn"
 collection_is_never_read = "warn"
 dbg_macro = "warn"

@@ -117,6 +117,7 @@ where
     TC: TrieStorageCursor,
     HC: HashedStorageCursor<Value = alloy_primitives::U256>,
 {
+    #[allow(clippy::clone_on_copy)]
     fn encode(mut self, buf: &mut Vec<u8>) -> Result<(), StateProofError> {
         let (account, root) = match &mut self {
             Self::Dispatched {

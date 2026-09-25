@@ -231,6 +231,7 @@ struct RangeDependencies {
 }
 
 impl RangeDependencies {
+    #[allow(clippy::clone_on_copy)]
     fn new(
         accounts: &[(B256, TrieAccount)],
         storages: B256Map<HashedStorage>,

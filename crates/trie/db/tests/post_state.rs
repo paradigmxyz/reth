@@ -1,4 +1,4 @@
-#![allow(missing_docs)]
+#![allow(missing_docs, clippy::clone_on_copy)]
 
 use alloy_primitives::{B256, U256};
 use proptest::prelude::*;

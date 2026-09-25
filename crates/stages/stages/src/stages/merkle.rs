@@ -672,6 +672,7 @@ mod tests {
     impl ExecuteStageTestRunner for MerkleTestRunner {
         type Seed = Vec<SealedBlock<reth_ethereum_primitives::Block>>;
 
+        #[allow(clippy::clone_on_copy)]
         fn seed_execution(&mut self, input: ExecInput) -> Result<Self::Seed, TestRunnerError> {
             let stage_progress = input.checkpoint().block_number;
             let start = stage_progress + 1;
