@@ -661,3 +661,33 @@ vergen-git2 = "10.0.1"
 
 # networking
 ipnet = "2.11"
+
+[patch.crates-io]
+# Patched by patch-alloy.sh
+alloy-consensus = { git = "https://github.com/alloy-rs/alloy", branch = "mattsse/recover-public-key" }
+alloy-contract = { git = "https://github.com/alloy-rs/alloy", branch = "mattsse/recover-public-key" }
+alloy-eips = { git = "https://github.com/alloy-rs/alloy", branch = "mattsse/recover-public-key" }
+alloy-genesis = { git = "https://github.com/alloy-rs/alloy", branch = "mattsse/recover-public-key" }
+alloy-json-rpc = { git = "https://github.com/alloy-rs/alloy", branch = "mattsse/recover-public-key" }
+alloy-network = { git = "https://github.com/alloy-rs/alloy", branch = "mattsse/recover-public-key" }
+alloy-network-primitives = { git = "https://github.com/alloy-rs/alloy", branch = "mattsse/recover-public-key" }
+alloy-provider = { git = "https://github.com/alloy-rs/alloy", branch = "mattsse/recover-public-key" }
+alloy-pubsub = { git = "https://github.com/alloy-rs/alloy", branch = "mattsse/recover-public-key" }
+alloy-rpc-client = { git = "https://github.com/alloy-rs/alloy", branch = "mattsse/recover-public-key" }
+alloy-rpc-types = { git = "https://github.com/alloy-rs/alloy", branch = "mattsse/recover-public-key" }
+alloy-rpc-types-admin = { git = "https://github.com/alloy-rs/alloy", branch = "mattsse/recover-public-key" }
+alloy-rpc-types-anvil = { git = "https://github.com/alloy-rs/alloy", branch = "mattsse/recover-public-key" }
+alloy-rpc-types-beacon = { git = "https://github.com/alloy-rs/alloy", branch = "mattsse/recover-public-key" }
+alloy-rpc-types-debug = { git = "https://github.com/alloy-rs/alloy", branch = "mattsse/recover-public-key" }
+alloy-rpc-types-engine = { git = "https://github.com/alloy-rs/alloy", branch = "mattsse/recover-public-key" }
+alloy-rpc-types-eth = { git = "https://github.com/alloy-rs/alloy", branch = "mattsse/recover-public-key" }
+alloy-rpc-types-mev = { git = "https://github.com/alloy-rs/alloy", branch = "mattsse/recover-public-key" }
+alloy-rpc-types-trace = { git = "https://github.com/alloy-rs/alloy", branch = "mattsse/recover-public-key" }
+alloy-rpc-types-txpool = { git = "https://github.com/alloy-rs/alloy", branch = "mattsse/recover-public-key" }
+alloy-serde = { git = "https://github.com/alloy-rs/alloy", branch = "mattsse/recover-public-key" }
+alloy-signer = { git = "https://github.com/alloy-rs/alloy", branch = "mattsse/recover-public-key" }
+alloy-signer-local = { git = "https://github.com/alloy-rs/alloy", branch = "mattsse/recover-public-key" }
+alloy-transport = { git = "https://github.com/alloy-rs/alloy", branch = "mattsse/recover-public-key" }
+alloy-transport-http = { git = "https://github.com/alloy-rs/alloy", branch = "mattsse/recover-public-key" }
+alloy-transport-ipc = { git = "https://github.com/alloy-rs/alloy", branch = "mattsse/recover-public-key" }
+alloy-transport-ws = { git = "https://github.com/alloy-rs/alloy", branch = "mattsse/recover-public-key" }
