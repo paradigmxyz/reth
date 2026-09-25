@@ -157,7 +157,7 @@ fn arbitrary_storage_root() {
 
 #[test]
 // This ensures we don't add empty accounts to the trie
-#[allow(clippy::needless_update)] // Account fields depend on enabled dependency features.
+#[allow(clippy::needless_update)]
 fn test_empty_account() {
     let state: State = BTreeMap::from([
         (
@@ -192,7 +192,7 @@ fn test_empty_account() {
 
 #[test]
 // This ensures we return an empty root when there are no storage entries
-#[allow(clippy::needless_update)] // Account fields depend on enabled dependency features.
+#[allow(clippy::needless_update)]
 fn test_empty_storage_root() {
     let factory = create_test_provider_factory();
     let tx = factory.provider_rw().unwrap();
@@ -361,7 +361,7 @@ fn destroyed_account_storage_emits_node_removals() {
 
 #[test]
 // This ensures that the walker goes over all the storage slots
-#[allow(clippy::needless_update)] // Account fields depend on enabled dependency features.
+#[allow(clippy::needless_update)]
 fn test_storage_root() {
     let factory = create_test_provider_factory();
     let tx = factory.provider_rw().unwrap();

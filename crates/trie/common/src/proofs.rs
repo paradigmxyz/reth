@@ -1627,7 +1627,7 @@ mod tests {
 
     #[test]
     #[cfg(feature = "eip1186")]
-    #[allow(clippy::needless_update)] // Account fields depend on enabled dependency features.
+    #[allow(clippy::needless_update)]
     fn into_eip1186_response_zero_empty_account() {
         // Non-existent account (info = None)
         let acc = AccountProof {

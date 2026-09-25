@@ -272,7 +272,7 @@ mod tests {
     }
 
     #[test]
-    #[allow(clippy::needless_update)] // Account fields depend on enabled dependency features.
+    #[allow(clippy::needless_update)]
     fn database_state_provider_maps_code_hash_and_bytecode() {
         let address = Address::repeat_byte(0x01);
         let code_hash = B256::repeat_byte(0x42);
@@ -337,7 +337,7 @@ mod tests {
     }
 
     #[test]
-    #[allow(clippy::needless_update)] // Account fields depend on enabled dependency features.
+    #[allow(clippy::needless_update)]
     fn database_state_provider_uses_cached_reads() {
         let address = Address::repeat_byte(0x01);
         let code_hash = B256::repeat_byte(0x42);

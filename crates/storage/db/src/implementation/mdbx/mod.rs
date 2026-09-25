@@ -1411,7 +1411,7 @@ mod tests {
     }
 
     #[test]
-    #[allow(clippy::needless_update)] // Account fields depend on enabled dependency features.
+    #[allow(clippy::needless_update)]
     fn db_closure_put_get() {
         let tempdir = TempDir::new().expect(ERROR_TEMPDIR);
         let path = tempdir.path();

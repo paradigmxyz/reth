@@ -1171,7 +1171,7 @@ mod tests {
     }
 
     #[test]
-    #[allow(clippy::needless_update)] // Account fields depend on enabled dependency features.
+    #[allow(clippy::needless_update)]
     fn bal_account_uses_existing_fields_only_when_missing() {
         let changes = AccountChanges::new(address!("0000000000000000000000000000000000000001"))
             .with_balance_change(BalanceChange::new(BlockAccessIndex::new(1), U256::from(10)));

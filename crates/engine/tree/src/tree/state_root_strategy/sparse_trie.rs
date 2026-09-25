@@ -1851,7 +1851,7 @@ mod tests {
     }
 
     #[test]
-    #[allow(clippy::needless_update)] // Account fields depend on enabled dependency features.
+    #[allow(clippy::needless_update)]
     fn test_encode_account_leaf_value_non_empty_account_is_rlp() {
         let storage_root = B256::from([0x99; 32]);
         let account = Some(Account {
