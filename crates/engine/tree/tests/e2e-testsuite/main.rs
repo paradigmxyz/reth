@@ -252,7 +252,15 @@ async fn test_engine_tree_valid_forks_with_older_canonical_head_e2e() -> Result<
         .with_action(ProduceBlocks::<EthEngineTypes>::new(5))
         .with_action(CaptureBlock::new("fork_point"))
         .with_action(MakeCanonical::new())
-        // revert to old head to simulate scenario where canonical head is older
+        // block production finalizes the produced blocks, so re-establish finality at the old
+        // head: an FCU below the finalized block is rejected as a too deep reorg.
+        .with_action(
+            FinalizeBlock::<EthEngineTypes>::new(BlockReference::Tag("old_head".to_string()))
+                .with_head(BlockReference::Tag("fork_point".to_string())),
+        )
+        // send an FCU back to the old head to simulate a CL with an older view of the canonical
+        // head. The old head is a canonical ancestor, so the engine accepts the FCU without
+        // unwinding the canonical chain.
         .with_action(ReorgTo::<EthEngineTypes>::new_from_tag("old_head"))
         // create first competing chain (chain A) from fork point with 10 blocks
         .with_action(CreateFork::<EthEngineTypes>::new_from_tag("fork_point", 10))
@@ -289,22 +297,31 @@ async fn test_engine_tree_valid_and_invalid_forks_with_older_canonical_head_e2e(
         .with_action(ProduceBlocks::<EthEngineTypes>::new(5))
         .with_action(CaptureBlock::new("fork_point"))
         .with_action(MakeCanonical::new())
-        // revert to old head to simulate older canonical head scenario
+        // block production finalizes the produced blocks, so re-establish finality at the old
+        // head: an FCU below the finalized block is rejected as a too deep reorg.
+        .with_action(
+            FinalizeBlock::<EthEngineTypes>::new(BlockReference::Tag("old_head".to_string()))
+                .with_head(BlockReference::Tag("fork_point".to_string())),
+        )
+        // send an FCU back to the old head to simulate a CL with an older view of the canonical
+        // head. The old head is a canonical ancestor, so the engine accepts the FCU without
+        // unwinding the canonical chain.
         .with_action(ReorgTo::<EthEngineTypes>::new_from_tag("old_head"))
         // create chain B (the valid chain) from fork point with 10 blocks
         .with_action(CreateFork::<EthEngineTypes>::new_from_tag("fork_point", 10))
         .with_action(CaptureBlock::new("chain_b_tip"))
         // make chain B canonical via FCU - this becomes the valid chain
         .with_action(ReorgTo::<EthEngineTypes>::new_from_tag("chain_b_tip"))
-        // create chain A (competing chain) - first produce valid blocks, then test invalid
-        // scenario
-        .with_action(ReorgTo::<EthEngineTypes>::new_from_tag("fork_point"))
         // producing chain B finalized its blocks, so re-establish finality at the fork point
-        // before building below it again
+        // before the FCU back to it and building below chain B again.
         .with_action(
             FinalizeBlock::<EthEngineTypes>::new(BlockReference::Tag("fork_point".to_string()))
                 .with_head(BlockReference::Tag("chain_b_tip".to_string())),
         )
+        // create chain A (competing chain) from the fork point. The fork point is a canonical
+        // ancestor of chain B, so the FCU to it is accepted without unwinding chain B. First
+        // produce valid blocks, then test invalid scenario.
+        .with_action(ReorgTo::<EthEngineTypes>::new_from_tag("fork_point"))
         .with_action(ProduceBlocks::<EthEngineTypes>::new(10))
         .with_action(CaptureBlock::new("chain_a_tip"))
         // test that FCU to chain A tip returns VALID status (it's a valid competing chain)
@@ -421,13 +438,14 @@ async fn test_engine_tree_fcu_extends_canon_chain_e2e() -> Result<()> {
         // create and make canonical a base chain with 1 block
         .with_action(ProduceBlocks::<EthEngineTypes>::new(1))
         .with_action(MakeCanonical::new())
-        // extend the chain with 10 more blocks (total 11 blocks: 0-10)
+        // extend the chain with 10 more blocks (blocks 2-11). Building each block makes its
+        // parent canonical, so the canonical head is block 10.
         .with_action(ProduceBlocks::<EthEngineTypes>::new(10))
-        // capture block 6 as our intermediate target (from 0-indexed, this is block 6)
+        // capture the chain tip (block 11) as the target.
         .with_action(CaptureBlock::new("target_block"))
-        // make the intermediate target canonical via FCU
+        // extend the canonical chain to the target via FCU.
         .with_action(ReorgTo::<EthEngineTypes>::new_from_tag("target_block"))
-        // now make the chain tip canonical via FCU
+        // repeat the FCU to the chain tip, which is already canonical.
         .with_action(MakeCanonical::new());
 
     test.run::<EthereumNode>().await?;
