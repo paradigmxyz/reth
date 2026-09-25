@@ -739,9 +739,6 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
                 let mask = ExecutedBlock::hashed_state_refs(state_trie_masking_blocks);
                 let merged_hashed_state =
                     HashedPostStateSorted::disjointed_merge_batch(&batch, &mask);
-                if !merged_hashed_state.is_empty() {
-                    self.write_hashed_state(&merged_hashed_state)?;
-                }
                 timings.write_hashed_state += start.elapsed();
 
                 let start = Instant::now();
@@ -749,8 +746,15 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
                 let mask = ExecutedBlock::trie_updates_refs(state_trie_masking_blocks);
                 let merged_trie =
                     Arc::new(TrieUpdatesSorted::disjointed_merge_batch(&batch, &mask));
-                if !merged_trie.is_empty() {
-                    self.write_trie_updates_sorted(&merged_trie)?;
+                if !merged_hashed_state.is_empty() || !merged_trie.is_empty() {
+                    reth_trie_db::with_adapter!(self, |A| {
+                        super::parallel_writes::write_parallel::<TX, A>(
+                            &self.tx,
+                            runtime,
+                            &merged_hashed_state,
+                            &merged_trie,
+                        )?;
+                    });
                 }
                 timings.write_trie_updates += start.elapsed();
             }
@@ -5468,6 +5472,103 @@ mod tests {
         let account_cs = sf.account_block_changeset(1).unwrap();
         assert!(!account_cs.is_empty());
         assert_eq!(account_cs[0].address, address);
+    }
+
+    #[test]
+    fn parallel_persistence_matches_serial_for_both_trie_encodings() {
+        use reth_trie::{BranchNodeCompact, HashedStorage};
+
+        for settings in [StorageSettings::v1(), StorageSettings::v2()] {
+            let parallel_factory = create_test_provider_factory();
+            let serial_factory = create_test_provider_factory();
+            parallel_factory.set_storage_settings_cache(settings);
+            serial_factory.set_storage_settings_cache(settings);
+
+            for round in 0..8u64 {
+                let parallel = parallel_factory.provider_rw().unwrap();
+                let serial = serial_factory.provider_rw().unwrap();
+                let mut state = HashedPostState::default();
+                let mut nodes = Vec::new();
+                let mut tries = B256Map::default();
+                for index in 0..16u8 {
+                    let address = keccak256([index]);
+                    let deleted = (round + u64::from(index)) % 3 == 2;
+                    state.accounts.insert(
+                        address,
+                        (!deleted).then_some(Account {
+                            nonce: round,
+                            balance: U256::from(round + 1),
+                            ..Default::default()
+                        }),
+                    );
+                    state.storages.insert(
+                        address,
+                        HashedStorage::from_iter((0..256u16).map(|slot| {
+                            (
+                                keccak256([index, slot as u8]),
+                                if deleted { U256::ZERO } else { U256::from(round + 1) },
+                            )
+                        })),
+                    );
+                    let node = (!deleted).then(|| BranchNodeCompact::new(0b11, 0, 0, vec![], None));
+                    let key = Nibbles::from_nibbles([index]);
+                    nodes.push((key, node.clone()));
+                    tries.insert(
+                        address,
+                        StorageTrieUpdatesSorted {
+                            storage_nodes: (0..16u8)
+                                .map(|prefix| {
+                                    (Nibbles::from_nibbles([prefix, index]), node.clone())
+                                })
+                                .collect(),
+                        },
+                    );
+                }
+                let state = state.into_sorted();
+                let trie = TrieUpdatesSorted::new(nodes, tries);
+                serial.write_hashed_state(&state).unwrap();
+                serial.write_trie_updates_sorted(&trie).unwrap();
+                reth_trie_db::with_adapter!(parallel, |A| {
+                    super::super::parallel_writes::write_parallel::<_, A>(
+                        parallel.tx_ref(),
+                        &parallel.runtime,
+                        &state,
+                        &trie,
+                    )
+                    .unwrap();
+                    macro_rules! compare_table {
+                        ($table:ty) => {
+                            assert_eq!(
+                                parallel
+                                    .tx_ref()
+                                    .cursor_read::<$table>()
+                                    .unwrap()
+                                    .walk(None)
+                                    .unwrap()
+                                    .collect::<Result<Vec<_>, _>>()
+                                    .unwrap(),
+                                serial
+                                    .tx_ref()
+                                    .cursor_read::<$table>()
+                                    .unwrap()
+                                    .walk(None)
+                                    .unwrap()
+                                    .collect::<Result<Vec<_>, _>>()
+                                    .unwrap(),
+                                "round {round}, table {}",
+                                <$table>::NAME,
+                            );
+                        };
+                    }
+                    compare_table!(tables::HashedAccounts);
+                    compare_table!(tables::HashedStorages);
+                    compare_table!(<A as TrieTableAdapter>::AccountTrieTable);
+                    compare_table!(<A as TrieTableAdapter>::StorageTrieTable);
+                });
+                parallel.commit().unwrap();
+                serial.commit().unwrap();
+            }
+        }
     }
 
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
