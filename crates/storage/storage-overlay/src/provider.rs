@@ -422,18 +422,14 @@ where
         + BlockNumReader,
 {
     fn basic_account(&self, address: &Address) -> ProviderResult<Option<Account>> {
-        if cfg!(feature = "state-trie-db") {
-            let path = Nibbles::unpack(alloy_primitives::keccak256(address));
-            return Ok(self.state_trie_account_cursor()?.get(path)?.and_then(|n| match n {
-                StateTrieNode::Leaf { value, .. } => Some(value.into()),
-                _ => None,
-            }));
-        }
         let (overlay, historical_fallback) = self.execution_overlay()?;
         if let Some(account) = overlay.accounts().get(address) {
             return Ok(account.as_ref().map(Account::from))
         }
         if let Some(historical_fallback) = historical_fallback {
+            if cfg!(feature = "state-trie-db") {
+                return Err(ProviderError::UnsupportedProvider)
+            }
             return match self.provider().account_history_info(
                 *address,
                 historical_fallback.block_number,
@@ -463,7 +459,15 @@ where
     Provider::Target: DBProvider + StorageSettingsCache,
 {
     fn basic_account_from_db(&self, address: &Address) -> ProviderResult<Option<Account>> {
-        if self.provider().cached_storage_settings().use_hashed_state() {
+        if cfg!(feature = "state-trie-db") {
+            let path = Nibbles::unpack(alloy_primitives::keccak256(address));
+            Ok(self.provider().tx().get::<tables::StateTrieAccounts>(path.into())?.and_then(
+                |node| match node {
+                    StateTrieNode::Leaf { value, .. } => Some(value.into()),
+                    _ => None,
+                },
+            ))
+        } else if self.provider().cached_storage_settings().use_hashed_state() {
             let hashed_address = alloy_primitives::keccak256(address);
             self.provider()
                 .tx()
@@ -819,21 +823,14 @@ where
         address: Address,
         storage_key: alloy_primitives::StorageKey,
     ) -> ProviderResult<Option<alloy_primitives::StorageValue>> {
-        if cfg!(feature = "state-trie-db") {
-            let path = Nibbles::unpack(alloy_primitives::keccak256(storage_key));
-            return Ok(self
-                .state_trie_storage_cursor(alloy_primitives::keccak256(address))?
-                .get(path)?
-                .and_then(|n| match n {
-                    StateTrieNode::Leaf { value, .. } => Some(value),
-                    _ => None,
-                }));
-        }
         let (overlay, historical_fallback) = self.execution_overlay()?;
         if let Some(value) = overlay.storage_value(address, U256::from_be_bytes(storage_key.0)) {
             return Ok(Some(value));
         }
         if let Some(historical_fallback) = historical_fallback {
+            if cfg!(feature = "state-trie-db") {
+                return Err(ProviderError::UnsupportedProvider)
+            }
             return match self.provider().storage_history_info(
                 address,
                 storage_key,
@@ -870,7 +867,17 @@ where
         storage_key: alloy_primitives::StorageKey,
         zero_if_missing: bool,
     ) -> ProviderResult<Option<alloy_primitives::StorageValue>> {
-        if self.provider().cached_storage_settings().use_hashed_state() {
+        if cfg!(feature = "state-trie-db") {
+            let path = Nibbles::unpack(alloy_primitives::keccak256(storage_key));
+            let value = DatabaseStateTrieCursorFactory(self.provider().tx())
+                .state_trie_storage_cursor(alloy_primitives::keccak256(address))?
+                .get(path)?
+                .and_then(|node| match node {
+                    StateTrieNode::Leaf { value, .. } => Some(value),
+                    _ => None,
+                });
+            Ok(value.or_else(|| zero_if_missing.then_some(U256::ZERO)))
+        } else if self.provider().cached_storage_settings().use_hashed_state() {
             let hashed_address = alloy_primitives::keccak256(address);
             let hashed_slot = alloy_primitives::keccak256(storage_key);
             let mut cursor = self.provider().tx().cursor_dup_read::<tables::HashedStorages>()?;
@@ -1197,7 +1204,7 @@ mod tests {
 
     #[cfg(feature = "state-trie-db")]
     #[test]
-    fn complete_state_reads_merge_cached_updates_and_deletions() {
+    fn complete_trie_cursors_merge_cached_updates_and_deletions() {
         use reth_trie::TrieAccount;
         use reth_trie_db::write_state_trie_updates;
 
@@ -1253,15 +1260,10 @@ mod tests {
                     factory.clone(),
                     manager.overlay_builder(blocks[1].recovered_block().hash()),
                 );
+                let provider = parent.database_provider_ro().unwrap();
                 assert_eq!(
-                    parent
-                        .database_provider_ro()
-                        .unwrap()
-                        .basic_account(&address)
-                        .unwrap()
-                        .unwrap()
-                        .balance,
-                    U256::from(20)
+                    provider.state_trie_account_cursor().unwrap().get(path).unwrap(),
+                    Some(account(20))
                 );
             }
             let child = OverlayStateProviderFactory::new(
@@ -1271,12 +1273,76 @@ mod tests {
                     .with_skip_overlay_for_reused_sparse_trie(blocks[0].recovered_block().hash()),
             );
             let provider = child.database_provider_ro().unwrap();
-            assert_eq!(provider.basic_account(&address).unwrap().unwrap().balance, U256::from(30));
-            assert_eq!(provider.basic_account(&removed).unwrap(), None);
-            assert_eq!(provider.storage(address, slot).unwrap(), None);
-            assert_eq!(provider.storage(address, inherited_slot).unwrap(), Some(U256::from(22)));
+            let mut accounts = provider.state_trie_account_cursor().unwrap();
+            assert_eq!(accounts.get(path).unwrap(), Some(account(30)));
+            assert_eq!(accounts.get(removed_path).unwrap(), None);
+            let mut slots = provider.state_trie_storage_cursor(hashed_address).unwrap();
+            assert_eq!(slots.get(slot_path).unwrap(), None);
+            assert_eq!(slots.get(inherited_path).unwrap(), Some(storage(22)));
             assert!(!provider.state_trie_overlay(false).unwrap().skipped_for_reused_sparse_trie());
         }
+    }
+
+    #[cfg(feature = "state-trie-db")]
+    #[test]
+    fn execution_reads_overlay_bundle_state_on_complete_tables() {
+        use reth_trie::TrieAccount;
+        use revm::database::BundleState;
+
+        let (factory, mut blocks) = setup_frontiers(0, 1);
+        let address = Address::with_last_byte(1);
+        let db_address = Address::with_last_byte(2);
+        let slot = B256::with_last_byte(1);
+        let db_slot = B256::with_last_byte(2);
+        let db_account = TrieAccount { balance: U256::from(10), ..Default::default() };
+        let rw = factory.provider_rw().unwrap();
+        for address in [address, db_address] {
+            rw.tx_ref()
+                .put::<tables::StateTrieAccounts>(
+                    Nibbles::unpack(alloy_primitives::keccak256(address)).into(),
+                    StateTrieNode::Leaf { short_key_len: 63, value: db_account },
+                )
+                .unwrap();
+        }
+        for slot in [slot, db_slot] {
+            rw.tx_ref()
+                .put::<tables::StateTrieStorages>(
+                    alloy_primitives::keccak256(address),
+                    reth_trie::StateTrieStorageEntry {
+                        nibbles: Nibbles::unpack(alloy_primitives::keccak256(slot)).into(),
+                        node: StateTrieNode::Leaf { short_key_len: 63, value: U256::from(10) },
+                    },
+                )
+                .unwrap();
+        }
+        rw.commit().unwrap();
+
+        let account = AccountInfo { balance: U256::from(20), ..Default::default() };
+        Arc::make_mut(&mut blocks[1].execution_output).state = BundleState::builder(1..=1)
+            .state_present_account_info(address, account.clone())
+            .state_storage(
+                address,
+                [(U256::from_be_bytes(slot.0), (U256::from(10), U256::ZERO))].into_iter().collect(),
+            )
+            .build();
+        let manager = OverlayManager::default();
+        manager.insert_block(blocks[1].clone());
+        let factory = OverlayStateProviderFactory::new(
+            factory,
+            manager.overlay_builder(blocks[1].recovered_block().hash()),
+        );
+        let provider = factory.database_provider_ro().unwrap();
+
+        assert_eq!(provider.basic_account(&address).unwrap(), Some(Account::from(account)));
+        assert_eq!(provider.basic_account(&db_address).unwrap(), Some(db_account.into()));
+        assert_eq!(provider.basic_account(&Address::ZERO).unwrap(), None);
+        assert_eq!(provider.storage(address, slot).unwrap(), Some(U256::ZERO));
+        assert_eq!(provider.storage(address, db_slot).unwrap(), Some(U256::from(10)));
+        assert_eq!(provider.storage(address, B256::ZERO).unwrap(), None);
+        assert!(provider.execution_overlay.get().is_some());
+        assert!(provider.state_trie_overlay.get().is_none());
+        assert!(provider.state_trie_overlay_with_trie_changesets.get().is_none());
+        assert!(factory.state_trie_overlay_cache.is_empty());
     }
 
     #[test]
@@ -1333,15 +1399,10 @@ mod tests {
         assert!(state_provider_factory.state_trie_overlay_cache.is_empty());
 
         provider.basic_account(&Address::ZERO).unwrap();
-        assert_eq!(
-            provider.state_trie_overlay_with_trie_changesets.get().is_some(),
-            cfg!(feature = "state-trie-db")
-        );
-        assert_eq!(provider.execution_overlay.get().is_some(), !cfg!(feature = "state-trie-db"));
-        assert_eq!(
-            state_provider_factory.state_trie_overlay_cache.is_empty(),
-            !cfg!(feature = "state-trie-db")
-        );
+        provider.storage(Address::ZERO, B256::ZERO).unwrap();
+        assert!(provider.state_trie_overlay_with_trie_changesets.get().is_none());
+        assert!(provider.execution_overlay.get().is_some());
+        assert!(state_provider_factory.state_trie_overlay_cache.is_empty());
 
         provider.account_trie_cursor().unwrap();
         assert_eq!(state_provider_factory.state_trie_overlay_cache.len(), 1);
@@ -1454,14 +1515,9 @@ mod tests {
             false,
         );
 
-        if !cfg!(feature = "state-trie-db") {
-            assert_eq!(
-                provider.basic_account(&address).unwrap(),
-                Some(Account::from(account_info))
-            );
-            assert!(provider.basic_account(&Address::with_last_byte(2)).unwrap().is_none());
-            assert_eq!(provider.storage(address, storage_key).unwrap(), Some(storage_value));
-        }
+        assert_eq!(provider.basic_account(&address).unwrap(), Some(Account::from(account_info)));
+        assert!(provider.basic_account(&Address::with_last_byte(2)).unwrap().is_none());
+        assert_eq!(provider.storage(address, storage_key).unwrap(), Some(storage_value));
         assert_eq!(provider.block_hash(1).unwrap(), Some(block_hash));
         assert_eq!(provider.canonical_hashes_range(1, 2).unwrap(), vec![block_hash]);
         assert_eq!(

@@ -5,6 +5,11 @@ PoC with the legacy hashed state and compact trie implementation. Both binaries
 come from commit `ea414547c90c47e3c8491b080f65c24c2d72d88f`; only the
 `state-trie-db` feature differs.
 
+These measurements precede the correction that restores BundleState-based
+execution overlay reads. The measured PoC routed execution through the trie
+overlay, adding full-overlay merge work to the execution path. These results
+do not measure the corrected implementation.
+
 ## Results
 
 The current PoC is slower overall on this workload. Median server payload

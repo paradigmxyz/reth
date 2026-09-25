@@ -57,8 +57,9 @@ No intermediate nodes are inferred from other leaves during that traversal.
 Complete sparse-trie updates include leaves, branches, and deletion tombstones.
 They are independent of compact trie update tracking. Overlays merge newest
 values first; persistence applies the same disjoint suffix masking used for the
-legacy trie updates. Execution reads retain the complete overlay even when the
-sparse trie itself is reused from cache.
+legacy trie updates. Execution reads use the BundleState-based execution overlay,
+with direct leaf lookups in the new tables on a miss. They do not construct the
+trie overlay.
 
 ## Size measurement
 
