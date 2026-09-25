@@ -1756,6 +1756,7 @@ mod tests {
                     head_hash: B256::ZERO,
                     dependencies: Default::default(),
                     expires_at: None,
+                    recent_root_dependencies: vec![],
                     exclusive_payer: false,
                 }))
             }));

@@ -372,6 +372,27 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
                 Ok(policy) => policy,
                 Err(reason) => return Ok(FrameSimulationResult::invalid(max_cost, None, reason)),
             };
+            let recent_root_current_slot = if let Some(verifier) = &policy.recent_root {
+                let current_slot =
+                    evm_env.block_env.slot_num().checked_add(1).ok_or_else(|| {
+                        Self::Error::from_eth_err(EthApiError::InvalidParams(
+                            "canonical slot number overflows".into(),
+                        ))
+                    })?;
+                if verifier.references.iter().any(|reference| {
+                    let dependency = reference.dependency();
+                    reference.slot >= current_slot || dependency.expires_at_slot <= current_slot
+                }) {
+                    return Ok(FrameSimulationResult::invalid(
+                        max_cost,
+                        None,
+                        "recent root reference is outside the usable slot window",
+                    ))
+                }
+                Some(current_slot)
+            } else {
+                None
+            };
             let prefix_shape = Some(
                 FrameSimulationPrefixShape::from_validation_prefix(
                     policy.prefix_end,
@@ -398,12 +419,15 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
                 // the same public-prefix semantics, while full execution retains the configured
                 // nonce checks below.
                 prefix_env.cfg_env.disable_nonce_check = true;
+                if let Some(current_slot) = recent_root_current_slot {
+                    prefix_env.block_env.inner_mut().slot_num = current_slot;
+                }
                 let prefix_tx_env = TxEnvFor::<Self::Evm>::from_recovered_tx_with_gas_params(
                     &tx,
                     tx.sender,
                     &prefix_env.cfg_env.gas_params,
                 );
-                let inspector = FrameValidationInspector::new(tx.sender, policy);
+                let inspector = FrameValidationInspector::new(tx.sender, policy.clone());
                 let prefix_db = State::builder()
                     .with_database(StateProviderDatabase::new(&state_provider))
                     .build();
