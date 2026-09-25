@@ -1,21 +1,22 @@
 use super::metrics::{RocksDBMetrics, RocksDBOperation, ROCKSDB_TABLES};
-use crate::providers::{compute_history_rank, needs_prev_shard_check, HistoryInfo};
+use crate::{
+    history_shards::{
+        prepare_history_shard_writes_parallel, prepare_history_shard_writes_serial,
+        ShardedHistoryTable,
+    },
+    providers::{compute_history_rank, needs_prev_shard_check, HistoryInfo},
+};
 use alloy_consensus::transaction::TxHashRef;
 use alloy_primitives::{
     map::{AddressMap, HashMap},
     Address, BlockNumber, TxNumber, B256,
 };
-use itertools::Itertools;
 use metrics::Label;
 use parking_lot::Mutex;
-use rayon::prelude::*;
 use reth_chain_state::ExecutedBlock;
 use reth_db_api::{
     database_metrics::DatabaseMetrics,
-    models::{
-        sharded_key::NUM_OF_INDICES_IN_SHARD, storage_sharded_key::StorageShardedKey, ShardedKey,
-        StorageSettings,
-    },
+    models::{storage_sharded_key::StorageShardedKey, ShardedKey, StorageSettings},
     table::{Compress, Decode, Decompress, Encode, Table},
     tables, BlockNumberList, DatabaseError,
 };
@@ -901,7 +902,7 @@ impl RocksDBProvider {
 
     /// Creates a new batch with auto-commit enabled.
     ///
-    /// When the batch size exceeds the threshold (4 GiB), the batch is automatically
+    /// When the batch size exceeds the threshold (512 MiB), the batch is automatically
     /// committed and reset. This prevents OOM during large bulk writes while maintaining
     /// crash-safety via the consistency check on startup.
     pub fn batch_with_auto_commit(&self) -> RocksDBBatch<'_> {
@@ -1505,7 +1506,6 @@ impl RocksDBProvider {
         blocks: &[ExecutedBlock<N>],
         ctx: &RocksDBWriteCtx,
     ) -> ProviderResult<()> {
-        let mut batch = self.batch();
         let mut account_history: BTreeMap<Address, Vec<u64>> = BTreeMap::new();
 
         for (block_idx, block) in blocks.iter().enumerate() {
@@ -1521,12 +1521,7 @@ impl RocksDBProvider {
             }
         }
 
-        // Write account history using proper shard append logic
-        for (address, indices) in account_history {
-            batch.append_account_history_shard(address, indices)?;
-        }
-        ctx.pending_batches.lock().push(batch.into_inner());
-        Ok(())
+        self.write_history::<tables::AccountsHistory>(account_history, ctx)
     }
 
     /// Writes storage history indices for the given blocks.
@@ -1559,68 +1554,28 @@ impl RocksDBProvider {
             }
         }
 
-        let shard_puts = storage_history
-            .into_par_iter()
-            .map(|((address, slot), indices)| {
-                self.storage_history_shards_to_put(address, slot, indices)
-            })
-            .collect::<ProviderResult<Vec<_>>>()?;
+        self.write_history::<tables::StoragesHistory>(storage_history, ctx)
+    }
+
+    /// Parallel last-shard reads, then a serial batch of prepared puts.
+    ///
+    /// Last-shard `get`s read committed state only. All of them (and Rayon workers) finish before
+    /// [`Self::batch`] is created so a key is never read after it has been put, and so parallel
+    /// gets do not overlap `write_opt`.
+    fn write_history<T: ShardedHistoryTable>(
+        &self,
+        grouped: BTreeMap<T::PartialKey, Vec<BlockNumber>>,
+        ctx: &RocksDBWriteCtx,
+    ) -> ProviderResult<()> {
+        let prepared =
+            prepare_history_shard_writes_parallel::<T, _>(grouped, |key| self.get::<T>(key))?;
 
         let mut batch = self.batch();
-        for shards in shard_puts {
-            for (key, shard) in shards {
-                batch.put::<tables::StoragesHistory>(key, &shard)?;
-            }
+        for (key, shard) in prepared.into_writes() {
+            batch.put::<T>(key, &shard)?;
         }
         ctx.pending_batches.lock().push(batch.into_inner());
         Ok(())
-    }
-
-    /// Prepares storage history shard writes by reading the current last shard and appending
-    /// indices.
-    fn storage_history_shards_to_put(
-        &self,
-        address: Address,
-        storage_key: B256,
-        indices: Vec<u64>,
-    ) -> ProviderResult<Vec<(StorageShardedKey, BlockNumberList)>> {
-        if indices.is_empty() {
-            return Ok(Vec::new());
-        }
-
-        debug_assert!(
-            indices.windows(2).all(|w| w[0] < w[1]),
-            "indices must be strictly increasing: {:?}",
-            indices
-        );
-
-        let last_key = StorageShardedKey::last(address, storage_key);
-        let last_shard_opt = self.get::<tables::StoragesHistory>(last_key.clone())?;
-        let mut last_shard = last_shard_opt.unwrap_or_else(BlockNumberList::empty);
-
-        last_shard.append(indices).map_err(ProviderError::other)?;
-
-        if last_shard.len() <= NUM_OF_INDICES_IN_SHARD as u64 {
-            return Ok(vec![(last_key, last_shard)]);
-        }
-
-        let chunks = last_shard.iter().chunks(NUM_OF_INDICES_IN_SHARD);
-        let mut chunks_peekable = chunks.into_iter().peekable();
-        let mut shards = Vec::new();
-
-        while let Some(chunk) = chunks_peekable.next() {
-            let shard = BlockNumberList::new_pre_sorted(chunk);
-            let highest_block_number = if chunks_peekable.peek().is_some() {
-                shard.iter().next_back().expect("`chunks` does not return empty list")
-            } else {
-                u64::MAX
-            };
-
-            shards
-                .push((StorageShardedKey::new(address, storage_key, highest_block_number), shard));
-        }
-
-        Ok(shards)
     }
 }
 
@@ -2091,47 +2046,13 @@ impl<'a> RocksDBBatch<'a> {
         indices: impl IntoIterator<Item = u64>,
     ) -> ProviderResult<()> {
         let indices: Vec<u64> = indices.into_iter().collect();
-
-        if indices.is_empty() {
-            return Ok(());
+        let prepared = prepare_history_shard_writes_serial::<tables::AccountsHistory, _>(
+            BTreeMap::from([(address, indices)]),
+            |key| self.provider.get::<tables::AccountsHistory>(key),
+        )?;
+        for (key, shard) in prepared.into_writes() {
+            self.put::<tables::AccountsHistory>(key, &shard)?;
         }
-
-        debug_assert!(
-            indices.windows(2).all(|w| w[0] < w[1]),
-            "indices must be strictly increasing: {:?}",
-            indices
-        );
-
-        let last_key = ShardedKey::new(address, u64::MAX);
-        let last_shard_opt = self.provider.get::<tables::AccountsHistory>(last_key.clone())?;
-        let mut last_shard = last_shard_opt.unwrap_or_else(BlockNumberList::empty);
-
-        last_shard.append(indices).map_err(ProviderError::other)?;
-
-        // Fast path: all indices fit in one shard
-        if last_shard.len() <= NUM_OF_INDICES_IN_SHARD as u64 {
-            self.put::<tables::AccountsHistory>(last_key, &last_shard)?;
-            return Ok(());
-        }
-
-        // Slow path: rechunk into multiple shards
-        let chunks = last_shard.iter().chunks(NUM_OF_INDICES_IN_SHARD);
-        let mut chunks_peekable = chunks.into_iter().peekable();
-
-        while let Some(chunk) = chunks_peekable.next() {
-            let shard = BlockNumberList::new_pre_sorted(chunk);
-            let highest_block_number = if chunks_peekable.peek().is_some() {
-                shard.iter().next_back().expect("`chunks` does not return empty list")
-            } else {
-                u64::MAX
-            };
-
-            self.put::<tables::AccountsHistory>(
-                ShardedKey::new(address, highest_block_number),
-                &shard,
-            )?;
-        }
-
         Ok(())
     }
 
@@ -2153,13 +2074,13 @@ impl<'a> RocksDBBatch<'a> {
         indices: impl IntoIterator<Item = u64>,
     ) -> ProviderResult<()> {
         let indices: Vec<u64> = indices.into_iter().collect();
-
-        for (key, shard) in
-            self.provider.storage_history_shards_to_put(address, storage_key, indices)?
-        {
+        let prepared = prepare_history_shard_writes_serial::<tables::StoragesHistory, _>(
+            BTreeMap::from([((address, storage_key), indices)]),
+            |key| self.provider.get::<tables::StoragesHistory>(key),
+        )?;
+        for (key, shard) in prepared.into_writes() {
             self.put::<tables::StoragesHistory>(key, &shard)?;
         }
-
         Ok(())
     }
 
@@ -4298,6 +4219,93 @@ mod tests {
             let value = format!("value_{i:04}").into_bytes();
             assert_eq!(provider.get::<TestTable>(i).unwrap(), Some(value));
         }
+    }
+
+    #[test]
+    fn test_history_retry_repairs_auto_commit_between_shard_puts() {
+        let temp_dir = TempDir::new().unwrap();
+        let address = Address::repeat_byte(0x42);
+        let shard_size = NUM_OF_INDICES_IN_SHARD as u64;
+        let initial = BlockNumberList::new_pre_sorted(0..shard_size);
+
+        {
+            let provider =
+                RocksDBBuilder::new(temp_dir.path()).with_default_tables().build().unwrap();
+            let mut initial_batch = provider.batch();
+            initial_batch
+                .put::<tables::AccountsHistory>(ShardedKey::last(address), &initial)
+                .unwrap();
+            initial_batch.commit().unwrap();
+
+            let prepared = prepare_history_shard_writes_serial::<tables::AccountsHistory, _>(
+                BTreeMap::from([(address, vec![shard_size])]),
+                |key| provider.get::<tables::AccountsHistory>(key),
+            )
+            .unwrap();
+            let (completed_key, completed_shard) = prepared.into_writes().next().unwrap();
+            assert_eq!(completed_key, ShardedKey::new(address, shard_size - 1));
+
+            // A one-byte threshold commits the completed shard before the new sentinel shard is
+            // written. Ending the scope simulates interruption at that exact boundary.
+            let mut interrupted_batch = RocksDBBatch {
+                provider: &provider,
+                inner: WriteBatchWithTransaction::<true>::default(),
+                buf: Vec::new(),
+                auto_commit_threshold: Some(1),
+            };
+            interrupted_batch
+                .put::<tables::AccountsHistory>(completed_key.clone(), &completed_shard)
+                .unwrap();
+            assert!(interrupted_batch.is_empty());
+            assert!(
+                provider.get::<tables::AccountsHistory>(completed_key).unwrap().is_some(),
+                "the completed shard should have auto-committed"
+            );
+            assert_eq!(
+                provider
+                    .get::<tables::AccountsHistory>(ShardedKey::last(address))
+                    .unwrap()
+                    .unwrap()
+                    .iter()
+                    .collect::<Vec<_>>(),
+                (0..shard_size).collect::<Vec<_>>()
+            );
+        }
+
+        {
+            let reopened =
+                RocksDBBuilder::new(temp_dir.path()).with_default_tables().build().unwrap();
+            let completed_key = ShardedKey::new(address, shard_size - 1);
+            assert!(reopened.get::<tables::AccountsHistory>(completed_key).unwrap().is_some());
+            assert_eq!(
+                reopened
+                    .get::<tables::AccountsHistory>(ShardedKey::last(address))
+                    .unwrap()
+                    .unwrap()
+                    .iter()
+                    .collect::<Vec<_>>(),
+                (0..shard_size).collect::<Vec<_>>()
+            );
+
+            let prepared = prepare_history_shard_writes_serial::<tables::AccountsHistory, _>(
+                BTreeMap::from([(address, vec![shard_size])]),
+                |key| reopened.get::<tables::AccountsHistory>(key),
+            )
+            .unwrap();
+            let mut retry_batch = reopened.batch();
+            for (key, shard) in prepared.into_writes() {
+                retry_batch.put::<tables::AccountsHistory>(key, &shard).unwrap();
+            }
+            retry_batch.commit().unwrap();
+        }
+
+        let repaired = RocksDBBuilder::new(temp_dir.path()).with_default_tables().build().unwrap();
+        let shards = repaired.account_history_shards(address).unwrap();
+        assert_eq!(shards.len(), 2);
+        assert_eq!(shards[0].0, ShardedKey::new(address, shard_size - 1));
+        assert_eq!(shards[0].1.iter().collect::<Vec<_>>(), (0..shard_size).collect::<Vec<_>>());
+        assert_eq!(shards[1].0, ShardedKey::last(address));
+        assert_eq!(shards[1].1.iter().collect::<Vec<_>>(), vec![shard_size]);
     }
 
     // ==================== PARAMETERIZED PRUNE TESTS ====================
