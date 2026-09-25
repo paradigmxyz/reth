@@ -1788,7 +1788,7 @@ mod tests {
         let mut hashed_state = HashedPostState::default();
         hashed_state.accounts.insert(
             address,
-            Some(Account { balance: U256::from(100), nonce: 1, bytecode_hash: None }),
+            Some(Account { balance: U256::from(100), nonce: 1, ..Default::default() }),
         );
         let mut storage = reth_trie::HashedStorage::default();
         storage.storage.insert(slot, value);
@@ -1851,12 +1851,14 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::needless_update)] // Account fields depend on enabled dependency features.
     fn test_encode_account_leaf_value_non_empty_account_is_rlp() {
         let storage_root = B256::from([0x99; 32]);
         let account = Some(Account {
             nonce: 7,
             balance: U256::from(42),
             bytecode_hash: Some(B256::from([0xAA; 32])),
+            ..Default::default()
         });
         let mut account_rlp_buf = vec![0x00, 0x01];
 
@@ -2252,7 +2254,7 @@ mod tests {
                 let account = Account {
                     nonce: u64::from(index) + 1,
                     balance: U256::from(index),
-                    bytecode_hash: None,
+                    ..Default::default()
                 };
                 let storage = (0..4u8)
                     .map(|slot| {

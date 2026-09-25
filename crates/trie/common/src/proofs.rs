@@ -1564,7 +1564,7 @@ mod tests {
             address: Address::random(),
             info: Some(
                 // non-empty account
-                Account { nonce: 100, balance: U256::ZERO, bytecode_hash: Some(KECCAK_EMPTY) },
+                Account { nonce: 100, bytecode_hash: Some(KECCAK_EMPTY), ..Default::default() },
             ),
             proof: vec![],
             storage_root: B256::ZERO,
@@ -1627,6 +1627,7 @@ mod tests {
 
     #[test]
     #[cfg(feature = "eip1186")]
+    #[allow(clippy::needless_update)] // Account fields depend on enabled dependency features.
     fn into_eip1186_response_zero_empty_account() {
         // Non-existent account (info = None)
         let acc = AccountProof {
@@ -1659,6 +1660,7 @@ mod tests {
                 nonce: 42,
                 balance: U256::from(100),
                 bytecode_hash: Some(KECCAK_EMPTY),
+                ..Default::default()
             }),
             proof: vec![],
             storage_root: B256::random(),

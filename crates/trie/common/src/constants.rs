@@ -10,12 +10,14 @@ mod tests {
     use alloy_rlp::Encodable;
 
     #[test]
+    #[allow(clippy::needless_update)] // Account fields depend on enabled dependency features.
     fn account_rlp_max_size() {
         let account = TrieAccount {
             nonce: u64::MAX,
             balance: U256::MAX,
             storage_root: B256::from_slice(&[u8::MAX; 32]),
             code_hash: B256::from_slice(&[u8::MAX; 32]),
+            ..Default::default()
         };
         let mut encoded = Vec::new();
         account.encode(&mut encoded);

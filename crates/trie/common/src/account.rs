@@ -31,6 +31,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::needless_update)] // Account fields depend on enabled dependency features.
     fn test_from_genesis_account_with_values() {
         // Create a GenesisAccount with specific values
         let mut storage = BTreeMap::new();
@@ -41,7 +42,7 @@ mod tests {
             balance: U256::from(1000),
             code: Some(Bytes::from(vec![0x60, 0x61])),
             storage: Some(storage),
-            private_key: None,
+            ..Default::default()
         };
 
         // Convert the GenesisAccount to a TrieAccount
@@ -63,7 +64,8 @@ mod tests {
             Account {
                 nonce: 10,
                 balance: U256::from(1000),
-                bytecode_hash: Some(keccak256([0x60, 0x61]))
+                bytecode_hash: Some(keccak256([0x60, 0x61])),
+                ..Default::default()
             }
             .into_trie_account(expected_storage_root),
             trie_account
@@ -78,9 +80,8 @@ mod tests {
         let genesis_account = GenesisAccount {
             nonce: Some(3),
             balance: U256::from(300),
-            code: None,
             storage: Some(storage),
-            private_key: None,
+            ..Default::default()
         };
 
         // Convert the GenesisAccount to a TrieAccount

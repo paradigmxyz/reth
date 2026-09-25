@@ -463,7 +463,7 @@ mod tests {
                         let old_acc = Account {
                             nonce: nonce - 1,
                             balance: balance - U256::from(1),
-                            bytecode_hash: None,
+                            ..Default::default()
                         };
                         let hashed_addr = keccak256(address);
                         if let Some((_, acc)) = hashed_acc_cursor.seek_exact(hashed_addr)? {

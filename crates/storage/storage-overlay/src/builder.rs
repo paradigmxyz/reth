@@ -968,6 +968,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::needless_update)] // Account fields depend on enabled dependency features.
     fn execution_overlay_extends_bundle_state_without_account_ids() {
         let address = Address::with_last_byte(1);
         let slot = U256::from(2);
@@ -980,6 +981,7 @@ mod tests {
             code_hash,
             code: Some(code.clone()),
             account_id: AccountId::new(6),
+            ..Default::default()
         };
         let state = BundleState::builder(0..=0)
             .state_present_account_info(address, account.clone())
@@ -1036,10 +1038,7 @@ mod tests {
 
         let mut overlay = ExecutionOverlay::default();
         overlay.block_hashes.push(first_block);
-        overlay.accounts.insert(
-            address,
-            Some(AccountInfo { nonce: 1, account_id: None, ..Default::default() }),
-        );
+        overlay.accounts.insert(address, Some(AccountInfo { nonce: 1, ..Default::default() }));
         overlay.accounts.insert(retained_address, Some(AccountInfo::default()));
         overlay.storage.entry(address).or_default().insert(slot, U256::from(9));
         overlay.storage.entry(address).or_default().insert(retained_slot, U256::from(10));
