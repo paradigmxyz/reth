@@ -211,7 +211,7 @@ where
             let cached_db = request_cache.as_db_mut(db);
             let cached_db_handle = cached_db.clone();
             let mut executor = self.evm_config.batch_executor(cached_db);
-            let result = executor.execute_one(&block).map_err(BlockExecutionError::other)?;
+            let result = executor.execute_one(&block)?;
             let block_access_list_hash =
                 executor.take_bal().as_ref().map(|bal| compute_block_access_list_hash(bal));
             let output = BlockExecutionOutput::new(result, executor.into_state());
@@ -1122,6 +1122,43 @@ mod tests {
         };
 
         (provider, block, message)
+    }
+
+    #[tokio::test]
+    async fn execution_invalid_submission_is_invalid_params() {
+        let (provider, parent_block, mut message) = payment_free_submission();
+        let transaction = reth_ethereum_primitives::TransactionSigned::new_unhashed(
+            reth_ethereum_primitives::Transaction::Legacy(alloy_consensus::TxLegacy {
+                gas_limit: 20_999,
+                to: alloy_primitives::TxKind::Call(Address::with_last_byte(1)),
+                ..Default::default()
+            }),
+            alloy_primitives::Signature::test_signature(),
+        );
+        let block = RecoveredBlock::new_unhashed(
+            Block {
+                header: parent_block.clone_header(),
+                body: alloy_consensus::BlockBody {
+                    transactions: vec![transaction],
+                    ..Default::default()
+                },
+            },
+            vec![Address::ZERO],
+        );
+        message.block_hash = block.hash();
+        let error = test_validation_api(provider)
+            .validate_message_against_block(block, message, parent_block.gas_limit(), None)
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(
+                error,
+                ValidationApiError::Execution(reth_errors::BlockExecutionError::Validation(_))
+            ),
+            "{error}"
+        );
+        let error = jsonrpsee::types::ErrorObjectOwned::from(error);
+        assert_eq!(error.code(), jsonrpsee::types::error::INVALID_PARAMS_CODE);
     }
 
     #[tokio::test]
