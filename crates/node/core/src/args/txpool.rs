@@ -3,7 +3,10 @@
 use crate::cli::config::RethTransactionPoolConfig;
 use alloy_eips::eip1559::{ETHEREUM_BLOCK_GAS_LIMIT_30M, MIN_PROTOCOL_BASE_FEE};
 use alloy_primitives::Address;
-use clap::{builder::Resettable, Args};
+use clap::{
+    builder::{RangedU64ValueParser, Resettable},
+    Args,
+};
 use reth_cli_util::{parse_duration_from_secs_or_ms, parsers::format_duration_as_secs_or_ms};
 use reth_transaction_pool::{
     blobstore::disk::DEFAULT_MAX_CACHED_BLOBS,
@@ -409,7 +412,7 @@ pub struct TxPoolArgs {
     pub disable_transactions_backup: bool,
 
     /// Max batch size for transaction pool insertions
-    #[arg(long = "txpool.max-batch-size", default_value_t = DefaultTxPoolValues::get_global().max_batch_size)]
+    #[arg(long = "txpool.max-batch-size", value_parser = RangedU64ValueParser::<usize>::new().range(1..), default_value_t = DefaultTxPoolValues::get_global().max_batch_size)]
     pub max_batch_size: usize,
 }
 
@@ -540,6 +543,7 @@ impl RethTransactionPoolConfig for TxPoolArgs {
             max_new_pending_txs_notifications: self.max_new_pending_txs_notifications,
             max_queued_lifetime: self.max_queued_lifetime,
             max_inflight_delegated_slot_limit: default_config.max_inflight_delegated_slot_limit,
+            enforce_tracked_nonce: default_config.enforce_tracked_nonce,
         }
     }
 
@@ -587,6 +591,17 @@ mod tests {
             CommandParser::<TxPoolArgs>::try_parse_from(["reth", "--txpool.lifetime", "invalid"]);
 
         assert!(result.is_err(), "Expected an error for invalid duration");
+    }
+
+    #[test]
+    fn txpool_max_batch_size_must_be_nonzero() {
+        let zero =
+            CommandParser::<TxPoolArgs>::try_parse_from(["reth", "--txpool.max-batch-size", "0"]);
+        assert!(zero.is_err());
+
+        let valid =
+            CommandParser::<TxPoolArgs>::parse_from(["reth", "--txpool.max-batch-size", "1"]);
+        assert_eq!(valid.args.max_batch_size, 1);
     }
 
     #[test]

@@ -6,8 +6,8 @@ use reth_trie::{
     hashed_cursor::HashedPostStateCursorFactory,
     proof::{Proof, StorageProof},
     trie_cursor::InMemoryTrieCursorFactory,
-    AccountProof, HashedPostStateSorted, HashedStorage, MultiProof, MultiProofTargets,
-    StorageMultiProof, TrieInput,
+    AccountProof, DecodedMultiProofV2, HashedPostStateSorted, HashedStorage, MultiProof,
+    MultiProofTargets, MultiProofTargetsV2, StorageMultiProof, TrieInput, TrieInputSorted,
 };
 
 /// Extends [`Proof`] with operations specific for working with a database transaction.
@@ -32,6 +32,13 @@ pub trait DatabaseProof<'a> {
         input: TrieInput,
         targets: MultiProofTargets,
     ) -> Result<MultiProof, StateProofError>;
+
+    /// Generates a V2 decoded state multiproof for target hashed accounts and storage keys.
+    fn overlay_multiproof_v2(
+        &self,
+        input: TrieInput,
+        targets: MultiProofTargetsV2,
+    ) -> Result<DecodedMultiProofV2, StateProofError>;
 }
 
 impl<'a, TX: DbTx, A: TrieTableAdapter> DatabaseProof<'a>
@@ -72,6 +79,21 @@ impl<'a, TX: DbTx, A: TrieTableAdapter> DatabaseProof<'a>
         .with_prefix_sets_mut(input.prefix_sets)
         .multiproof(targets)
     }
+
+    fn overlay_multiproof_v2(
+        &self,
+        input: TrieInput,
+        targets: MultiProofTargetsV2,
+    ) -> Result<DecodedMultiProofV2, StateProofError> {
+        let nodes_sorted = input.nodes.into_sorted();
+        let state_sorted = input.state.into_sorted();
+        Proof::new(
+            InMemoryTrieCursorFactory::new(self.trie_cursor_factory().clone(), &nodes_sorted),
+            HashedPostStateCursorFactory::new(self.hashed_cursor_factory().clone(), &state_sorted),
+        )
+        .with_prefix_sets_mut(input.prefix_sets)
+        .multiproof_v2(targets)
+    }
 }
 
 /// Extends [`StorageProof`] with operations specific for working with a database transaction.
@@ -92,7 +114,7 @@ pub trait DatabaseStorageProof<'a, TX> {
         tx: &'a TX,
         address: Address,
         slots: &[B256],
-        storage: HashedStorage,
+        input: TrieInputSorted,
     ) -> Result<StorageMultiProof, StateProofError>;
 }
 
@@ -136,21 +158,21 @@ impl<'a, TX: DbTx, A: TrieTableAdapter> DatabaseStorageProof<'a, TX>
         tx: &'a TX,
         address: Address,
         slots: &[B256],
-        storage: HashedStorage,
+        mut input: TrieInputSorted,
     ) -> Result<StorageMultiProof, StateProofError> {
         let hashed_address = keccak256(address);
         let targets = slots.iter().map(keccak256).collect();
-        let prefix_set = storage.construct_prefix_set();
-        let state_sorted = HashedPostStateSorted::new(
-            Default::default(),
-            HashMap::from_iter([(hashed_address, storage.into_sorted())]),
-        );
         StorageProof::new(
-            DatabaseTrieCursorFactory::<_, A>::new(tx),
-            HashedPostStateCursorFactory::new(DatabaseHashedCursorFactory::new(tx), &state_sorted),
+            InMemoryTrieCursorFactory::new(
+                DatabaseTrieCursorFactory::<_, A>::new(tx),
+                &input.nodes,
+            ),
+            HashedPostStateCursorFactory::new(DatabaseHashedCursorFactory::new(tx), &input.state),
             address,
         )
-        .with_prefix_set_mut(prefix_set)
+        .with_prefix_set_mut(
+            input.prefix_sets.storage_prefix_sets.remove(&hashed_address).unwrap_or_default(),
+        )
         .storage_multiproof(targets)
     }
 }

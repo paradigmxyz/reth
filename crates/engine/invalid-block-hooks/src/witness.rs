@@ -5,14 +5,17 @@ use pretty_assertions::Comparison;
 use reth_engine_primitives::InvalidBlockHook;
 use reth_evm::{execute::Executor, ConfigureEvm};
 use reth_primitives_traits::{NodePrimitives, RecoveredBlock, SealedHeader};
-use reth_provider::{BlockExecutionOutput, StateProvider, StateProviderBox, StateProviderFactory};
+use reth_provider::{
+    BlockExecutionOutput, EvmStateProviderAdapter, StateProvider, StateProviderBox,
+    StateProviderFactory,
+};
 use reth_revm::{
     database::StateProviderDatabase,
     db::{BundleState, State},
 };
 use reth_rpc_api::DebugApiClient;
 use reth_tracing::tracing::warn;
-use reth_trie::{updates::TrieUpdates, HashedStorage};
+use reth_trie::updates::TrieUpdates;
 use revm::{
     bytecode::Bytecode,
     database::{
@@ -116,7 +119,7 @@ fn sort_bundle_state_for_comparison(bundle_state: &BundleState) -> BundleStateSo
 
 /// Extracts execution data including codes, preimages, and hashed state from database
 fn collect_execution_data(
-    mut db: State<StateProviderDatabase<StateProviderBox>>,
+    mut db: State<StateProviderDatabase<EvmStateProviderAdapter<StateProviderBox>>>,
 ) -> eyre::Result<CollectionResult> {
     let bundle_state = db.take_bundle();
     let mut codes = BTreeMap::new();
@@ -138,10 +141,7 @@ fn collect_execution_data(
 
         if let Some(account_data) = account.account {
             preimages.insert(hashed_address, alloy_rlp::encode(address).into());
-            let storage = hashed_state
-                .storages
-                .entry(hashed_address)
-                .or_insert_with(|| HashedStorage::new(false));
+            let storage = hashed_state.storages.entry(hashed_address).or_default();
 
             for (slot, value) in account_data.storage {
                 let slot_bytes = B256::from(slot);
@@ -217,7 +217,7 @@ where
         block: &RecoveredBlock<N::Block>,
     ) -> eyre::Result<(ExecutionWitness, BundleState)> {
         let mut executor = self.evm_config.batch_executor(StateProviderDatabase::new(
-            self.provider.state_by_block_hash(parent_header.hash())?,
+            self.provider.state_by_block_hash(parent_header.hash())?.into_evm_state_provider(),
         ));
 
         executor.execute_one(block)?;
@@ -539,7 +539,9 @@ mod tests {
         // Create a State with StateProviderTest
         let state_provider = StateProviderTest::default();
         let mut state = State::builder()
-            .with_database(StateProviderDatabase::new(Box::new(state_provider) as StateProviderBox))
+            .with_database(StateProviderDatabase::new(
+                (Box::new(state_provider) as StateProviderBox).into_evm_state_provider(),
+            ))
             .with_bundle_update()
             .build();
 

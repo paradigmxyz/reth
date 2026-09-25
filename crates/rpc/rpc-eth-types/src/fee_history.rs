@@ -98,7 +98,7 @@ where
                 receipts,
             )
             .unwrap_or_default();
-            entries.insert(block.number(), fee_history_entry);
+            entries.insert(block.number(), Arc::new(fee_history_entry));
         }
 
         // enforce bounds by popping the oldest entries
@@ -145,7 +145,7 @@ where
         &self,
         start_block: u64,
         end_block: u64,
-    ) -> Option<Vec<FeeHistoryEntry<H>>> {
+    ) -> Option<Vec<Arc<FeeHistoryEntry<H>>>> {
         if end_block < start_block {
             // invalid range, return None
             return None
@@ -210,7 +210,7 @@ struct FeeHistoryCacheInner<H> {
     /// and max number of blocks
     config: FeeHistoryCacheConfig,
     /// Stores the entries of the cache
-    entries: tokio::sync::RwLock<BTreeMap<u64, FeeHistoryEntry<H>>>,
+    entries: tokio::sync::RwLock<BTreeMap<u64, Arc<FeeHistoryEntry<H>>>>,
 }
 
 /// Awaits for new chain events and directly inserts them into the cache so they're available
@@ -396,21 +396,14 @@ where
     ///
     /// See also [`Self::next_block_excess_blob_gas`]
     pub fn next_block_blob_fee(&self) -> Option<u128> {
-        self.next_block_excess_blob_gas()
-            .and_then(|excess_blob_gas| Some(self.blob_params?.calc_blob_fee(excess_blob_gas)))
+        self.header.maybe_next_block_blob_fee(self.blob_params)
     }
 
     /// Calculate excess blob gas for the next block according to the EIP-4844 spec.
     ///
     /// Returns a `None` if no excess blob gas is set, no EIP-4844 support
     pub fn next_block_excess_blob_gas(&self) -> Option<u64> {
-        self.header.excess_blob_gas().and_then(|excess_blob_gas| {
-            Some(self.blob_params?.next_block_excess_blob_gas_osaka(
-                excess_blob_gas,
-                self.header.blob_gas_used()?,
-                self.header.base_fee_per_gas()?,
-            ))
-        })
+        self.header.maybe_next_block_excess_blob_gas(self.blob_params)
     }
 }
 

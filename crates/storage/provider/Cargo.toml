@@ -19,7 +19,7 @@ reth-ethereum-primitives = { workspace = true, features = ["reth-codec"] }
 reth-primitives-traits = { workspace = true, features = ["reth-codec", "secp256k1", "dashmap"] }
 reth-errors.workspace = true
 reth-storage-errors.workspace = true
-reth-storage-api = { workspace = true, features = ["std", "db-api"] }
+reth-storage-api = { workspace = true, features = ["std", "db-api", "chain-state"] }
 reth-storage-overlay.workspace = true
 reth-db = { workspace = true, features = ["mdbx"] }
 reth-db-api.workspace = true
@@ -58,7 +58,6 @@ parking_lot.workspace = true
 smallvec.workspace = true
 strum.workspace = true
 eyre.workspace = true
-reth-tokio-util.workspace = true
 tokio = { workspace = true, features = ["sync"], optional = true }
 
 # test-utils
@@ -68,6 +67,9 @@ reth-ethereum-engine-primitives = { workspace = true, optional = true }
 rayon.workspace = true
 
 rocksdb.workspace = true
+
+[target.'cfg(unix)'.dependencies]
+libc.workspace = true
 
 [dev-dependencies]
 reth-db = { workspace = true, features = ["test-utils"] }
@@ -84,14 +86,9 @@ assert_matches.workspace = true
 rand.workspace = true
 
 tokio = { workspace = true, features = ["sync", "macros", "rt-multi-thread"] }
-tokio-stream = { workspace = true, features = ["sync"] }
 
 [features]
 jemalloc = ["rocksdb/jemalloc"]
-partial-persistence = [
-    "reth-stages-types/partial-persistence",
-    "reth-storage-overlay/partial-persistence",
-]
 test-utils = [
     "reth-db/test-utils",
     "reth-nippy-jar/test-utils",

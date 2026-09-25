@@ -359,7 +359,7 @@ pub struct NetworkArgs {
     #[arg(long = "pooled-tx-pack-soft-limit", value_name = "BYTES", default_value_t = DefaultNetworkArgs::get_global().soft_limit_byte_size_pooled_transactions_response_on_pack_request, verbatim_doc_comment)]
     pub soft_limit_byte_size_pooled_transactions_response_on_pack_request: usize,
 
-    /// Max capacity of cache of hashes for transactions pending fetch.
+    /// Maximum number of announced transaction hashes to track, including inflight requests.
     #[arg(long = "max-tx-pending-fetch", value_name = "COUNT", default_value_t = DefaultNetworkArgs::get_global().max_capacity_cache_txns_pending_fetch, verbatim_doc_comment)]
     pub max_capacity_cache_txns_pending_fetch: u32,
 
@@ -1081,11 +1081,7 @@ impl DiscoveryArgs {
     ///
     /// Discv5 is enabled by default and can be disabled with `--disable-discv5-discovery`.
     const fn should_enable_discv5(&self) -> bool {
-        if self.disable_discovery || self.disable_discv5_discovery {
-            return false;
-        }
-
-        true
+        !(self.disable_discovery || self.disable_discv5_discovery)
     }
 
     /// Set the discovery ports to zero, to allow the OS to assign random unused ports when

@@ -12,12 +12,13 @@ use reth_chain_state::{
 };
 use reth_errors::{RethError, RethResult};
 use reth_evm::{execute::Executor, ConfigureEvm};
-use reth_execution_types::ExecutionOutcome;
+use reth_execution_types::{Chain, ExecutionOutcome};
 use reth_primitives_traits::{NodePrimitives, SealedHeader};
 use reth_rpc_api::{RethApiServer, RethJitAction};
 use reth_rpc_eth_types::{EthApiError, EthResult};
 use reth_storage_api::{
-    BlockReader, BlockReaderIdExt, ChangeSetReader, StateProviderFactory, TransactionVariant,
+    BlockReader, BlockReaderIdExt, ChangeSetReader, StateProvider, StateProviderFactory,
+    TransactionVariant,
 };
 use reth_tasks::{pool::BlockingTaskGuard, Runtime};
 use serde::Serialize;
@@ -159,7 +160,9 @@ where
         }
 
         let state_provider = self.provider().history_by_block_number(start_block - 1)?;
-        let db = reth_revm::database::StateProviderDatabase::new(&state_provider);
+        let db = reth_revm::database::StateProviderDatabase::new(
+            (&state_provider).into_evm_state_provider(),
+        );
 
         let mut blocks = Vec::with_capacity(block_count as usize);
         for block_number in start_block..start_block + block_count {
@@ -191,12 +194,15 @@ where
     Provider: BlockReaderIdExt
         + ChangeSetReader
         + StateProviderFactory
-        + BlockReader<Block = <Provider::Primitives as NodePrimitives>::Block>
-        + CanonStateSubscriptions
-        + ForkChoiceSubscriptions<Header = <Provider::Primitives as NodePrimitives>::BlockHeader>
+        + BlockReader<
+            Block = <<Provider as CanonStateSubscriptions>::Primitives as NodePrimitives>::Block,
+        > + CanonStateSubscriptions
+        + ForkChoiceSubscriptions<
+            Header = <<Provider as CanonStateSubscriptions>::Primitives as NodePrimitives>::BlockHeader,
+        >
         + PersistedBlockSubscriptions
         + 'static,
-    EvmConfig: ConfigureEvm<Primitives = Provider::Primitives> + 'static,
+    EvmConfig: ConfigureEvm<Primitives = <Provider as CanonStateSubscriptions>::Primitives> + 'static,
 {
     /// Handler for `reth_getBalanceChangesInBlock`
     async fn reth_get_balance_changes_in_block(
@@ -338,8 +344,31 @@ async fn finalized_chain_notifications<N>(
                     CanonStateNotification::Commit { .. } => {
                         buffered.push(notification);
                     }
-                    CanonStateNotification::Reorg { .. } => {
-                        buffered.clear();
+                    CanonStateNotification::Reorg { old, new } => {
+                        let first_reverted = old.first().number();
+                        buffered.retain_mut(|notification| {
+                            let chain = notification.committed();
+                            if chain.first().number() >= first_reverted {
+                                return false
+                            }
+                            // Preserve the canonical prefix of a segment crossing the fork.
+                            if chain.tip().number() >= first_reverted {
+                                let (blocks, mut outcome, mut trie_data) = (*chain).clone().into_inner();
+                                outcome.revert_to(first_reverted - 1);
+                                trie_data.split_off(&first_reverted);
+                                *notification = CanonStateNotification::Commit {
+                                    new: Arc::new(Chain::new(
+                                        blocks.into_blocks().take_while(|b| b.number() < first_reverted),
+                                        outcome,
+                                        trie_data,
+                                    )),
+                                };
+                            }
+                            true
+                        });
+                        if !new.is_empty() {
+                            buffered.push(CanonStateNotification::Commit { new: new.clone() });
+                        }
                     }
                 }
             }

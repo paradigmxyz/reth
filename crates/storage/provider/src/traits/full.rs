@@ -10,8 +10,7 @@ use reth_chain_state::{
 };
 use reth_node_types::{BlockTy, HeaderTy, NodeTypesWithDB, ReceiptTy, TxTy};
 use reth_storage_api::{
-    NodePrimitivesProvider, StorageChangeSetReader, StorageSettingsCache,
-    TryIntoHistoricalStateProvider,
+    HistoryReader, NodePrimitivesProvider, StorageChangeSetReader, StorageSettingsCache,
 };
 use std::fmt::Debug;
 
@@ -25,7 +24,7 @@ pub trait FullProvider<N: NodeTypesWithDB>:
                       + ChangeSetReader
                       + StorageChangeSetReader
                       + StorageSettingsCache
-                      + TryIntoHistoricalStateProvider
+                      + HistoryReader
                       + 'static,
     > + NodePrimitivesProvider<Primitives = N::Primitives>
     + StaticFileProviderFactory<Primitives = N::Primitives>
@@ -36,13 +35,13 @@ pub trait FullProvider<N: NodeTypesWithDB>:
         Receipt = ReceiptTy<N>,
         Header = HeaderTy<N>,
     > + BalProvider
-    + StateProviderFactory
+    + StateProviderFactory<Primitives = N::Primitives>
     + StateRangeProviderFactory
     + StateReader
     + ChainSpecProvider<ChainSpec = N::ChainSpec>
     + ChangeSetReader
     + StorageChangeSetReader
-    + CanonStateSubscriptions
+    + CanonStateSubscriptions<Primitives = N::Primitives>
     + ForkChoiceSubscriptions<Header = HeaderTy<N>>
     + PersistedBlockSubscriptions
     + StageCheckpointReader
@@ -63,7 +62,7 @@ impl<T, N: NodeTypesWithDB> FullProvider<N> for T where
                           + ChangeSetReader
                           + StorageChangeSetReader
                           + StorageSettingsCache
-                          + TryIntoHistoricalStateProvider
+                          + HistoryReader
                           + 'static,
         > + NodePrimitivesProvider<Primitives = N::Primitives>
         + StaticFileProviderFactory<Primitives = N::Primitives>
@@ -74,13 +73,13 @@ impl<T, N: NodeTypesWithDB> FullProvider<N> for T where
             Receipt = ReceiptTy<N>,
             Header = HeaderTy<N>,
         > + BalProvider
-        + StateProviderFactory
+        + StateProviderFactory<Primitives = N::Primitives>
         + StateRangeProviderFactory
         + StateReader
         + ChainSpecProvider<ChainSpec = N::ChainSpec>
         + ChangeSetReader
         + StorageChangeSetReader
-        + CanonStateSubscriptions
+        + CanonStateSubscriptions<Primitives = N::Primitives>
         + ForkChoiceSubscriptions<Header = HeaderTy<N>>
         + PersistedBlockSubscriptions
         + StageCheckpointReader

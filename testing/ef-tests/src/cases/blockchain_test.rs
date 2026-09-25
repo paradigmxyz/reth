@@ -16,9 +16,9 @@ use reth_evm_ethereum::EthEvmConfig;
 use reth_primitives_traits::{ParallelBridgeBuffered, RecoveredBlock, SealedBlock};
 use reth_provider::{
     test_utils::create_test_provider_factory_with_chain_spec, BlockWriter, DatabaseProviderFactory,
-    ExecutionOutcome, HashedPostStateProvider, HistoryWriter, OriginalValuesKnown,
+    ExecutionOutcome, HashedPostStateProvider, HistoryWriter, OriginalValuesKnown, StateProvider,
     StateWriteConfig, StateWriter, StaticFileProviderFactory, StaticFileSegment, StaticFileWriter,
-    StorageSettingsCache,
+    StorageSettingsCache, TrieWriter,
 };
 use reth_revm::database::StateProviderDatabase;
 use reth_trie::StateRoot;
@@ -245,7 +245,7 @@ fn run_case(case: &BlockchainTest) -> Result<(), Error> {
 
         // Execute the block
         let state_provider = provider.latest();
-        let state_db = StateProviderDatabase(&state_provider);
+        let state_db = StateProviderDatabase((&state_provider).into_evm_state_provider());
         let executor = executor_provider.batch_executor(state_db);
 
         let output = executor
@@ -261,7 +261,7 @@ fn run_case(case: &BlockchainTest) -> Result<(), Error> {
             .hashed_post_state(&output.state)
             .map_err(|err| Error::block_failed(block_number, err))?;
         let sorted = hashed_state.clone_into_sorted();
-        let (computed_state_root, _) = reth_trie_db::with_adapter!(provider, |A| {
+        let (computed_state_root, trie_updates) = reth_trie_db::with_adapter!(provider, |A| {
             StateRoot::<reth_trie_db::DatabaseTrieCursorFactory<_, A>, _>::overlay_root_with_updates(
                 provider.tx_ref(),
                 &sorted,
@@ -286,6 +286,10 @@ fn run_case(case: &BlockchainTest) -> Result<(), Error> {
 
         provider
             .write_hashed_state(&hashed_state.into_sorted())
+            .map_err(|err| Error::block_failed(block_number, err))?;
+        // Persist the trie so later blocks read stored nodes.
+        provider
+            .write_trie_updates(trie_updates)
             .map_err(|err| Error::block_failed(block_number, err))?;
         provider
             .update_history_indices(block.number..=block.number)
@@ -332,7 +336,7 @@ fn decode_blocks(
             .map_err(|err| Error::block_failed(block_number, err))?;
 
         let recovered_block =
-            decoded.clone().try_recover().map_err(|err| Error::block_failed(block_number, err))?;
+            decoded.try_recover().map_err(|err| Error::block_failed(block_number, err))?;
 
         blocks.push(recovered_block);
     }

@@ -4,17 +4,28 @@
 //!
 //! Worker states run transactions speculatively. Each worker gets one fresh cache-filling database
 //! from `make_db(true)`, installs the received BAL, sets the transaction BAL index for each
-//! streamed transaction, and returns uncommitted transaction results.
+//! streamed transaction, and returns uncommitted results. Execution errors rebuild the State,
+//! EVM, and executor while retaining the worker's database.
 //!
 //! The canonical state owns block effects. It runs the normal pre/post block hooks, commits
 //! worker results in transaction order, tracks block gas admission, and builds the BAL that this
 //! execution actually produced.
 //!
+//! Recovery and speculative execution failures are deferred to their transaction slot and
+//! adjudicated in block order: block-gas admission at an earlier slot takes precedence, otherwise
+//! the first failure decides the block's verdict. Workers trust the received BAL before its hash is
+//! validated against the rebuilt BAL. An undeclared access therefore short-circuits execution
+//! at that slot, and its error may differ from serial execution against canonical state (which
+//! can instead fail nonce, balance, or later block checks). Failed transactions are not replayed.
+//!
 //! The rebuilt BAL is returned to the outer payload validator for consensus post-execution
 //! validation. This module only logs the first divergence between the received BAL and the BAL
 //! rebuilt from canonical execution.
 
-use super::{ordered_outputs::ordered_worker_outputs, worker, BalExecutionError};
+use super::{
+    ordered_outputs::{ordered_worker_outputs, OrderedWorkerOutputError},
+    worker, BalExecutionError,
+};
 use alloy_eip7928::{
     bal::{Bal as AlloyBal, DecodedBal},
     compute_block_access_list_hash, BlockAccessList,
@@ -25,6 +36,7 @@ use alloy_evm::{
 };
 use alloy_primitives::Address;
 use crossbeam_channel::{Receiver, Sender};
+use reth_engine_primitives::BlockAccessListDecodeError;
 use reth_evm::{execute::ExecutableTxFor, ConfigureEvm, Database, EvmEnvFor, ExecutionCtxFor};
 use reth_primitives_traits::ReceiptTy;
 use reth_provider::BlockExecutionOutput;
@@ -39,6 +51,12 @@ use std::sync::Arc;
 use crate::tree::payload_processor::receipt_root_task::IndexedReceipt;
 
 /// Executes one block on the BAL path using the runtime's persistent BAL worker pool.
+///
+/// The ordered commit loop applies Ethereum block-level gas admission. Executors with different
+/// admission rules, such as segment-scoped gas budgets, must align those checks before using it.
+///
+/// Returns the execution output, the recovered senders, the BAL rebuilt from this execution, and
+/// the received BAL in the revm representation the workers consumed.
 #[expect(clippy::too_many_arguments, clippy::type_complexity)]
 pub fn execute_block<'a, Evm, Tx, Err, DB, MakeDb>(
     runtime: &Runtime,
@@ -51,7 +69,7 @@ pub fn execute_block<'a, Evm, Tx, Err, DB, MakeDb>(
     txs: Receiver<(usize, Result<Tx, Err>)>,
     receipt_tx: Sender<IndexedReceipt<ReceiptTy<Evm::Primitives>>>,
 ) -> Result<
-    (BlockExecutionOutput<ReceiptTy<Evm::Primitives>>, Vec<Address>, BlockAccessList),
+    (BlockExecutionOutput<ReceiptTy<Evm::Primitives>>, Vec<Address>, BlockAccessList, Arc<RevmBal>),
     BalExecutionError,
 >
 where
@@ -94,7 +112,7 @@ fn execute_block_inner<'scope, Evm, Tx, Err, DB, MakeDb>(
     receipt_tx: Sender<IndexedReceipt<ReceiptTy<Evm::Primitives>>>,
     worker_count: usize,
 ) -> Result<
-    (BlockExecutionOutput<ReceiptTy<Evm::Primitives>>, Vec<Address>, BlockAccessList),
+    (BlockExecutionOutput<ReceiptTy<Evm::Primitives>>, Vec<Address>, BlockAccessList, Arc<RevmBal>),
     BalExecutionError,
 >
 where
@@ -116,6 +134,13 @@ where
         .with_bundle_update()
         .with_bal_builder()
         .build();
+    canonical_state
+        .bal_state
+        .bal_builder
+        .as_mut()
+        .expect("with_bal_builder set")
+        .accounts
+        .reserve(bal.len());
 
     let (block_result, senders) = {
         let (result_tx, result_rx) = crossbeam_channel::unbounded();
@@ -145,7 +170,29 @@ where
         let mut senders = Vec::with_capacity(transaction_count);
         let mut last_sent_len = 0usize;
         for output in ordered_worker_outputs(&result_rx, transaction_count) {
-            let output = output?;
+            let output = match output {
+                Ok(output) => output,
+                Err(OrderedWorkerOutputError::Worker(worker::BalWorkerError::Execution {
+                    tx_index,
+                    tx_gas_limit,
+                    source,
+                })) => {
+                    // Block-gas admission is adjudicated in transaction order and takes
+                    // precedence over the failure at this slot.
+                    gas_tracker.validate_tx_limit(tx_gas_limit)?;
+
+                    // The transaction is admitted, so its execution failure is the block's
+                    // verdict: a BAL miss proves the received BAL diverges from this execution.
+                    tracing::debug!(
+                        target: "engine::tree::payload_processor::bal",
+                        tx_index,
+                        err = %source,
+                        "Speculative BAL execution failed; rejecting block in transaction order"
+                    );
+                    return Err(BalExecutionError::Execution(source));
+                }
+                Err(err) => return Err(err.into()),
+            };
 
             gas_tracker.validate_tx_limit(output.tx_gas_limit)?;
             gas_tracker.record_result(output.result.result());
@@ -177,6 +224,7 @@ where
         BlockExecutionOutput { state: canonical_state.take_bundle(), result: block_result },
         senders,
         built_bal,
+        input_bal_revm,
     ))
 }
 
@@ -193,11 +241,8 @@ fn convert_alloy_to_revm_bal(alloy_bal: &AlloyBal) -> Result<Arc<RevmBal>, BalEx
     // is triggered then the execution is reverted, and as such no actual code change event takes
     // place. Therefore, if we do observe such a bytecode in a BAL then that means the BAL is
     // invalid as no legal execution should've led to this bytecode deployment.
-    let received_bal_revm = RevmBal::clone_from_alloy(alloy_bal.as_vec()).map_err(|e| {
-        BalExecutionError::Consensus(reth_consensus::ConsensusError::BlockAccessListInvalid(
-            format!("{e:?}"),
-        ))
-    })?;
+    let received_bal_revm =
+        RevmBal::clone_from_alloy(alloy_bal.as_vec()).map_err(BlockAccessListDecodeError::new)?;
     Ok(Arc::new(received_bal_revm))
 }
 
@@ -328,8 +373,11 @@ impl BlockGasTracker {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::tree::error::{InsertBlockErrorKind, InsertBlockValidationError};
     use alloy_consensus::{BlockHeader, Header};
-    use alloy_eip7928::{bal::Bal as AlloyBal, BlockAccessList};
+    use alloy_eip7928::{
+        bal::Bal as AlloyBal, AccountChanges, BlockAccessIndex, BlockAccessList, CodeChange,
+    };
     use alloy_eips::{
         eip2935::{HISTORY_STORAGE_ADDRESS, HISTORY_STORAGE_CODE},
         eip4788::{BEACON_ROOTS_ADDRESS, BEACON_ROOTS_CODE},
@@ -450,6 +498,28 @@ mod tests {
     }
 
     #[test]
+    fn invalid_bal_bytecode_is_validation_error() {
+        let alloy_bal = vec![AccountChanges {
+            address: Address::ZERO,
+            code_changes: vec![CodeChange::new(
+                BlockAccessIndex::new(1),
+                vec![0xef, 0x01, 0xde].into(),
+            )],
+            ..Default::default()
+        }]
+        .into();
+
+        let error = convert_alloy_to_revm_bal(&alloy_bal).unwrap_err();
+        assert!(matches!(&error, BalExecutionError::BlockAccessListDecode(_)));
+        let error = InsertBlockErrorKind::from(error);
+        assert!(matches!(&error, InsertBlockErrorKind::BlockAccessListDecode(_)));
+        assert!(matches!(
+            error.ensure_validation_error(),
+            Ok(InsertBlockValidationError::BlockAccessListDecode(_))
+        ));
+    }
+
+    #[test]
     fn empty_block_happy_path_round_trip() {
         // Two-pass end-to-end:
         //   1. Build the canonical BAL an empty Amsterdam block produces (via
@@ -542,7 +612,7 @@ mod tests {
             tx_stream(txs),
             receipt_tx,
         )
-        .map(|(output, _, built_bal)| (output, built_bal))
+        .map(|(output, _, built_bal, _)| (output, built_bal))
     }
 
     /// Inserts `AccountInfo { nonce: 0, balance }` for `addr` into the canonical DB.
@@ -947,6 +1017,268 @@ mod tests {
         }
     }
 
+    /// Two funded senders each transferring to a fresh recipient, plus the reference BAL of a
+    /// block containing only the covered subset of those transfers.
+    fn two_transfers_with_reference_bal(
+        evm_config: &EthEvmConfig,
+        tx_gas_limit: u64,
+        bal_covers_first: bool,
+    ) -> (
+        CacheDB<EmptyDB>,
+        BlockAccessList,
+        Recovered<reth_ethereum_primitives::TransactionSigned>,
+        Recovered<reth_ethereum_primitives::TransactionSigned>,
+    ) {
+        use alloy_consensus::TxLegacy;
+        use alloy_primitives::TxKind;
+        use reth_chainspec::MAINNET;
+        use reth_ethereum_primitives::Transaction;
+        use reth_primitives_traits::crypto::secp256k1::public_key_to_address;
+        use reth_testing_utils::generators::{generate_key, rng, sign_tx_with_key_pair};
+
+        let recipient = alloy_primitives::Address::from([0xCA; 20]);
+        let sender_balance = U256::from(alloy_consensus::constants::ETH_TO_WEI);
+
+        let alice_kp = generate_key(&mut rng());
+        let alice = public_key_to_address(alice_kp.public_key());
+        let bob_kp = generate_key(&mut rng());
+        let bob = public_key_to_address(bob_kp.public_key());
+
+        let mut pre_block_db = system_contracts_db();
+        insert_funded(&mut pre_block_db, alice, sender_balance);
+        insert_funded(&mut pre_block_db, bob, sender_balance);
+
+        let chain_id = MAINNET.chain.id();
+        let make_tx = |kp, value| {
+            sign_tx_with_key_pair(
+                kp,
+                Transaction::Legacy(TxLegacy {
+                    chain_id: Some(chain_id),
+                    nonce: 0,
+                    gas_price: 1,
+                    gas_limit: tx_gas_limit,
+                    to: TxKind::Call(recipient),
+                    value: U256::from(value),
+                    input: Default::default(),
+                }),
+            )
+        };
+        let tx1 = Recovered::new_unchecked(make_tx(alice_kp, 100u64), alice);
+        let tx2 = Recovered::new_unchecked(make_tx(bob_kp, 200u64), bob);
+
+        let reference_block = empty_amsterdam_block(B256::ZERO);
+        let covered = if bal_covers_first { vec![tx1.clone()] } else { vec![] };
+        let reference_bal =
+            reference_bal_for_block(evm_config, pre_block_db.clone(), &reference_block, covered);
+        (pre_block_db, reference_bal, tx1, tx2)
+    }
+
+    #[test]
+    fn propagates_bal_miss_of_admitted_transaction_as_block_verdict() {
+        // The BAL covers neither transaction: the first slot's speculative failure is
+        // adjudicated in block order and becomes the block's verdict.
+        let (pre_block_db, reference_bal, tx1, tx2) =
+            two_transfers_with_reference_bal(&EthEvmConfig::mainnet(), 100_000, false);
+        let bal_hash = alloy_eip7928::compute_block_access_list_hash(&reference_bal);
+        let block = empty_amsterdam_block(bal_hash);
+
+        let result = run_execute_block(
+            &Runtime::test(),
+            EthEvmConfig::mainnet(),
+            db_factory(pre_block_db),
+            to_arc_decoded(reference_bal),
+            &block,
+            vec![tx1, tx2],
+        );
+
+        match result {
+            Err(BalExecutionError::Execution(err)) => {
+                let msg = err.to_string();
+                assert!(msg.contains("not found in BAL"), "expected BAL miss error, got {msg}");
+            }
+            Err(err) => panic!("expected BAL execution error, got {err:?}"),
+            Ok(_) => panic!("expected BAL execution error, got Ok"),
+        }
+    }
+
+    #[test]
+    fn admission_rejects_before_speculative_worker_failure_surfaces() {
+        // tx2 exceeds the remaining block gas AND misses the BAL; block-gas admission is
+        // adjudicated first, so the verdict is the gas error, not tx2's BAL failure.
+        let (pre_block_db, reference_bal, tx1, tx2) =
+            two_transfers_with_reference_bal(&EthEvmConfig::mainnet(), 990_000, true);
+        let bal_hash = alloy_eip7928::compute_block_access_list_hash(&reference_bal);
+        let low_gas_block = empty_amsterdam_block_with_gas_limit(bal_hash, 1_000_000);
+
+        let result = run_execute_block(
+            &Runtime::test(),
+            EthEvmConfig::mainnet(),
+            db_factory(pre_block_db),
+            to_arc_decoded(reference_bal),
+            &low_gas_block,
+            vec![tx1, tx2],
+        );
+
+        match result {
+            Err(BalExecutionError::Execution(err)) => assert!(
+                matches!(
+                    err.as_validation(),
+                    Some(BlockValidationError::TransactionGasLimitMoreThanAvailableBlockGas { .. })
+                ),
+                "expected block gas validation error, got {err:?}"
+            ),
+            Err(err) => panic!("expected block gas validation error, got {err:?}"),
+            Ok(_) => panic!("expected block gas validation error, got Ok"),
+        }
+    }
+
+    #[test]
+    fn worker_reuses_provider_after_failure_and_finishes_earlier_transactions() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        let evm_config = EthEvmConfig::mainnet();
+        let (pre_block_db, reference_bal, tx1, tx2) =
+            two_transfers_with_reference_bal(&evm_config, 100_000, true);
+        let block = empty_amsterdam_block(B256::ZERO);
+        let received_bal = convert_alloy_to_revm_bal(&reference_bal.into()).unwrap();
+        let setups = AtomicUsize::new(0);
+        let make_db = |_: bool| {
+            // Reopening the provider after a speculative error must not introduce an
+            // unindexed setup failure that overtakes the remaining transaction slots.
+            if setups.fetch_add(1, Ordering::Relaxed) != 0 {
+                return Err(BalExecutionError::Provider(
+                    reth_errors::ProviderError::HeaderNotFound(B256::ZERO.into()),
+                ));
+            }
+            Ok(pre_block_db.clone())
+        };
+        let (tx_tx, tx_rx) = crossbeam_channel::unbounded();
+        // Recovery can finish out of order. A single worker must continue after both kinds
+        // of error to execute slot 0, without reusing the failed slot 1 executor.
+        tx_tx.send((2, Err(std::io::Error::other("sig fail")))).unwrap();
+        tx_tx.send((1, Ok(tx2))).unwrap();
+        tx_tx.send((0, Ok(tx1.clone()))).unwrap();
+        drop(tx_tx);
+        let (_abort_guard, abort_rx) = AbortGuard::new();
+        let (result_tx, result_rx) = crossbeam_channel::unbounded();
+        let runtime = Runtime::test();
+        runtime.bal_streaming_pool().in_place_scope(|scope| {
+            worker::spawn_worker(
+                scope,
+                tx_rx,
+                abort_rx,
+                result_tx,
+                &evm_config,
+                &make_db,
+                received_bal,
+                evm_config.evm_env(block.header()).unwrap(),
+                evm_config.context_for_block(&block).unwrap(),
+            );
+        });
+        let mut outputs = ordered_worker_outputs(&result_rx, 3);
+        let output = outputs.next().unwrap().unwrap();
+        assert_eq!(output.index, 0);
+        assert_eq!(output.signer, tx1.signer());
+        let mut state = State::builder().with_database(pre_block_db).build();
+        let mut serial = evm_config.executor_for_block(&mut state, &block).unwrap();
+        serial.apply_pre_execution_changes().unwrap();
+        let expected = serial.execute_transaction_without_commit(tx1).unwrap();
+        assert_eq!(output.result.result(), expected.result());
+        assert!(matches!(
+            outputs.next().unwrap(),
+            Err(OrderedWorkerOutputError::Worker(worker::BalWorkerError::Execution {
+                tx_index: 1,
+                ..
+            }))
+        ));
+        let error = outputs.next().unwrap().err().unwrap();
+        assert!(matches!(
+            error,
+            OrderedWorkerOutputError::Worker(worker::BalWorkerError::Transaction {
+                tx_index: 2,
+                ..
+            })
+        ));
+        assert!(matches!(
+            BalExecutionError::from(error),
+            BalExecutionError::Execution(BlockExecutionError::Validation(_))
+        ));
+        assert!(outputs.next().is_none());
+        assert_eq!(setups.load(Ordering::Relaxed), 1);
+    }
+
+    #[test]
+    fn amsterdam_state_gas_admission_matches_serial_execution() {
+        let evm_config = EthEvmConfig::new(Arc::new(
+            reth_chainspec::ChainSpecBuilder::mainnet().amsterdam_activated().build(),
+        ));
+        for (tx_gas_limit, complete_bal) in [(500_000, true), (990_000, true), (990_000, false)] {
+            let (pre_block_db, partial_bal, tx1, tx2) =
+                two_transfers_with_reference_bal(&evm_config, tx_gas_limit, true);
+            let reference_block = empty_amsterdam_block(B256::ZERO);
+            let reference_bal = if complete_bal {
+                reference_bal_for_block(
+                    &evm_config,
+                    pre_block_db.clone(),
+                    &reference_block,
+                    vec![tx1.clone(), tx2.clone()],
+                )
+            } else {
+                // State-gas admission must also precede a speculative BAL miss at this slot.
+                partial_bal
+            };
+            let block = empty_amsterdam_block_with_gas_limit(
+                compute_block_access_list_hash(&reference_bal),
+                1_000_000,
+            );
+            let mut evm_env = evm_config.evm_env(block.header()).unwrap();
+            assert!(evm_env.cfg_env.enable_amsterdam_eip8037);
+            // Both capped regular limits fit. The full limit of the second transaction
+            // must still fit the state budget consumed by the first account creation.
+            evm_env.cfg_env.tx_gas_limit_cap = Some(400_000);
+            let ctx = evm_config.context_for_block(&block).unwrap();
+            let mut state = State::builder().with_database(pre_block_db.clone()).build();
+            let evm = evm_config.evm_with_env(&mut state, evm_env.clone());
+            let mut serial = evm_config.create_executor_with_state(evm, ctx.clone());
+            serial.apply_pre_execution_changes().unwrap();
+            serial.execute_transaction(tx1.clone()).unwrap();
+            assert!(serial.block_state_gas_used > 10_000);
+            assert!(serial.block_regular_gas_used + 400_000 < 1_000_000);
+            let serial_result = serial.execute_transaction(tx2.clone());
+
+            let (receipt_tx, _receipt_rx) = crossbeam_channel::unbounded();
+            let parallel_result = execute_block(
+                &Runtime::test(),
+                &evm_config,
+                &|_: bool| Ok(pre_block_db.clone()),
+                to_arc_decoded(reference_bal),
+                evm_env,
+                ctx,
+                2,
+                tx_stream(vec![tx1, tx2]),
+                receipt_tx,
+            );
+            if tx_gas_limit == 500_000 {
+                serial_result.unwrap();
+                assert_eq!(parallel_result.unwrap().0.receipts, serial.receipts());
+            } else {
+                let serial_error = serial_result.unwrap_err();
+                let Some(BlockValidationError::TransactionGasLimitMoreThanAvailableBlockGas {
+                    block_available_gas,
+                    ..
+                }) = serial_error.as_validation()
+                else {
+                    panic!("expected serial state-gas admission error, got {serial_error:?}");
+                };
+                assert_eq!(*block_available_gas, 1_000_000 - serial.block_state_gas_used);
+                let Err(BalExecutionError::Execution(parallel_error)) = parallel_result else {
+                    panic!("expected parallel state-gas admission error");
+                };
+                assert_eq!(parallel_error.to_string(), serial_error.to_string());
+            }
+        }
+    }
+
     #[test]
     fn shadow_tx_with_revert() {
         // A tx that reverts in a deployed contract. Both paths must produce identical receipts
@@ -1136,9 +1468,9 @@ mod tests {
     }
 
     #[test]
-    fn worker_tx_recovery_error_becomes_other_error() {
+    fn worker_tx_recovery_error_becomes_validation_error() {
         // A tx recovery failure fed into the worker channel must surface as
-        // BalExecutionError::Other. Uses execute_block directly since tx_stream hardcodes
+        // a block validation error. Uses execute_block directly since tx_stream hardcodes
         // Infallible and cannot inject errors.
         let evm_config = EthEvmConfig::mainnet();
         let block = empty_amsterdam_block(B256::ZERO);
@@ -1169,8 +1501,8 @@ mod tests {
         );
 
         assert!(
-            matches!(result, Err(BalExecutionError::Other(_))),
-            "expected Other error from tx recovery failure, got {result:?}",
+            matches!(result, Err(BalExecutionError::Execution(BlockExecutionError::Validation(_)))),
+            "expected validation error from tx recovery failure, got {result:?}",
         );
     }
 
@@ -1189,7 +1521,8 @@ mod tests {
 
         let block_gas_limit = 1_000_000u64;
         let first_tx_gas = 600_000u64;
-        let second_tx_gas_limit = 500_000u64; // fits in total limit but not after cumulative deduction
+        let second_tx_gas_limit = 500_000u64; // fits in total limit but not after cumulative
+                                              // deduction
 
         let gas = ResultGas::new_with_state_gas(first_tx_gas, 0, 0, first_tx_gas / 2);
         let fake_result: ResultAndState<revm::context::result::HaltReason> =

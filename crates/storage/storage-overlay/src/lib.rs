@@ -11,5 +11,7 @@ pub(crate) use changeset_cache::ChangesetCache;
 mod manager;
 pub use manager::*;
 
+mod manager_metrics;
+
 mod provider;
 pub use provider::*;

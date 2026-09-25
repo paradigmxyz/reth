@@ -12,7 +12,7 @@ use alloy_rpc_types_eth::{Block, Header, Receipt, Transaction, TransactionReques
 use eyre::Result;
 use futures_util::future::BoxFuture;
 use reth_ethereum_primitives::TransactionSigned;
-use reth_node_api::{EngineTypes, PayloadTypes};
+use reth_node_api::{EngineTypes, PayloadKind, PayloadTypes};
 use reth_rpc_api::clients::{EngineApiClient, EthApiClient};
 use std::{collections::HashSet, marker::PhantomData, time::Duration};
 use tokio::time::sleep;
@@ -330,7 +330,18 @@ where
 
             env.active_node_state_mut()?.next_payload_id = Some(payload_id);
 
-            sleep(Duration::from_secs(1)).await;
+            if let Some(builder) = &env.node_clients[producer_idx].payload_builder {
+                // Wait for the pending build rather than racing it with an empty fallback payload.
+                tokio::time::timeout(
+                    Duration::from_secs(30),
+                    builder.resolve_kind(payload_id, PayloadKind::WaitForPending),
+                )
+                .await?
+                .ok_or_else(|| eyre::eyre!("Unknown payload {payload_id}"))??;
+            } else {
+                // RPC-only clients do not expose the local payload builder.
+                sleep(Duration::from_secs(1)).await;
+            }
 
             let built_payload_envelope = EngineApiClient::<Engine>::get_payload_v3(
                 &env.node_clients[producer_idx].engine.http_client(),

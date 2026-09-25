@@ -20,6 +20,7 @@ mod tests {
     use reth_trie::{
         test_utils::{state_root, storage_root_prehashed},
         HashedPostState, HashedStorage, StateRoot, StorageRoot, StorageRootProgress,
+        TrieInputSorted,
     };
     use reth_trie_db::{DatabaseStateRoot, DatabaseStorageRoot, LegacyKeyAdapter, PackedKeyAdapter};
     use revm::database::{
@@ -35,7 +36,7 @@ mod tests {
     use std::{collections::BTreeMap, str::FromStr};
 
     #[test]
-    fn wiped_entries_are_removed() {
+    fn zeroed_entries_are_removed() {
         let provider_factory = create_test_provider_factory();
 
         let addresses = (0..10).map(|_| Address::random()).collect::<Vec<_>>();
@@ -67,7 +68,10 @@ mod tests {
 
         let mut hashed_state = HashedPostState::default();
         hashed_state.accounts.insert(destroyed_address_hashed, None);
-        hashed_state.storages.insert(destroyed_address_hashed, HashedStorage::new(true));
+        hashed_state.storages.insert(
+            destroyed_address_hashed,
+            HashedStorage::from_iter([(hashed_slot, U256::ZERO)]),
+        );
 
         let provider_rw = provider_factory.provider_rw().unwrap();
         assert!(matches!(provider_rw.write_hashed_state(&hashed_state.into_sorted()), Ok(())));
@@ -1170,7 +1174,9 @@ mod tests {
             .into_iter()
             .map(|str| (B256::from_str(str).unwrap(), U256::from(1))),
         );
-        updated_storage.wiped = true;
+        updated_storage
+            .storage
+            .extend(init_storage.storage.keys().map(|hashed_slot| (*hashed_slot, U256::ZERO)));
         let mut state = HashedPostState::default();
         state.storages.insert(hashed_address, updated_storage.clone());
         provider_rw.write_hashed_state(&state.clone().into_sorted()).unwrap();
@@ -1181,18 +1187,25 @@ mod tests {
             reth_trie_db::DatabaseHashedCursorFactory<&'a TX>,
         >;
         let is_v2 = provider_rw.cached_storage_settings().is_v2();
+        let input = TrieInputSorted::from_state(HashedPostState::from_hashed_storage(
+            hashed_address,
+            updated_storage.clone(),
+        ).into_sorted());
         let storage_root = if is_v2 {
             TestStorageRoot::<_, _, PackedKeyAdapter>::overlay_root(
                 tx,
                 address,
-                updated_storage.clone(),
+                input,
             )
             .unwrap()
         } else {
             TestStorageRoot::<_, _, LegacyKeyAdapter>::overlay_root(
                 tx,
                 address,
-                updated_storage.clone(),
+                TrieInputSorted::from_state(HashedPostState::from_hashed_storage(
+                    hashed_address,
+                    updated_storage.clone(),
+                ).into_sorted()),
             )
             .unwrap()
         };

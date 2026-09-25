@@ -1688,6 +1688,31 @@ Post-merge hard forks (timestamp based):
                         next: sepolia::SEPOLIA_OSAKA_TIMESTAMP,
                     },
                 ),
+                (
+                    EthereumHardfork::Osaka,
+                    ForkId {
+                        hash: ForkHash(hex!("0xe2ae4999")),
+                        next: sepolia::SEPOLIA_BPO1_TIMESTAMP,
+                    },
+                ),
+                (
+                    EthereumHardfork::Bpo1,
+                    ForkId {
+                        hash: ForkHash(hex!("0x56078a1e")),
+                        next: sepolia::SEPOLIA_BPO2_TIMESTAMP,
+                    },
+                ),
+                (
+                    EthereumHardfork::Bpo2,
+                    ForkId {
+                        hash: ForkHash(hex!("0x268956b6")),
+                        next: sepolia::SEPOLIA_AMSTERDAM_TIMESTAMP,
+                    },
+                ),
+                (
+                    EthereumHardfork::Amsterdam,
+                    ForkId { hash: ForkHash(hex!("0x6c1d9423")), next: 0 },
+                ),
             ],
         );
     }
@@ -1939,6 +1964,60 @@ Post-merge hard forks (timestamp based):
                         hash: ForkHash(hex!("0xe2ae4999")),
                         next: sepolia::SEPOLIA_BPO1_TIMESTAMP,
                     },
+                ),
+                // First BPO1 block
+                (
+                    Head {
+                        number: 1735377,
+                        timestamp: sepolia::SEPOLIA_BPO1_TIMESTAMP,
+                        ..Default::default()
+                    },
+                    ForkId {
+                        hash: ForkHash(hex!("0x56078a1e")),
+                        next: sepolia::SEPOLIA_BPO2_TIMESTAMP,
+                    },
+                ),
+                // First BPO2 block
+                (
+                    Head {
+                        number: 1735377,
+                        timestamp: sepolia::SEPOLIA_BPO2_TIMESTAMP,
+                        ..Default::default()
+                    },
+                    ForkId {
+                        hash: ForkHash(hex!("0x268956b6")),
+                        next: sepolia::SEPOLIA_AMSTERDAM_TIMESTAMP,
+                    },
+                ),
+                // Last block before Amsterdam
+                (
+                    Head {
+                        number: 1735377,
+                        timestamp: sepolia::SEPOLIA_AMSTERDAM_TIMESTAMP - 1,
+                        ..Default::default()
+                    },
+                    ForkId {
+                        hash: ForkHash(hex!("0x268956b6")),
+                        next: sepolia::SEPOLIA_AMSTERDAM_TIMESTAMP,
+                    },
+                ),
+                // First Amsterdam block
+                (
+                    Head {
+                        number: 1735377,
+                        timestamp: sepolia::SEPOLIA_AMSTERDAM_TIMESTAMP,
+                        ..Default::default()
+                    },
+                    ForkId { hash: ForkHash(hex!("0x6c1d9423")), next: 0 },
+                ),
+                // After Amsterdam
+                (
+                    Head {
+                        number: 1735377,
+                        timestamp: sepolia::SEPOLIA_AMSTERDAM_TIMESTAMP + 1,
+                        ..Default::default()
+                    },
+                    ForkId { hash: ForkHash(hex!("0x6c1d9423")), next: 0 },
                 ),
             ],
         );
@@ -2798,8 +2877,8 @@ Post-merge hard forks (timestamp based):
 
     #[test]
     fn latest_sepolia_mainnet_fork_id() {
-        // BPO2
-        assert_eq!(ForkId { hash: ForkHash(hex!("0x268956b6")), next: 0 }, SEPOLIA.latest_fork_id())
+        // Amsterdam
+        assert_eq!(ForkId { hash: ForkHash(hex!("0x6c1d9423")), next: 0 }, SEPOLIA.latest_fork_id())
     }
 
     #[test]

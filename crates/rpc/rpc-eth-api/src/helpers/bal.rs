@@ -6,10 +6,9 @@ use alloy_rpc_types_eth::BlockId;
 use reth_errors::RethError;
 use reth_evm::{block::BlockExecutor, ConfigureEvm, Evm};
 use reth_revm::{database::StateProviderDatabase, State};
-use reth_rpc_eth_types::{
-    cache::db::StateProviderTraitObjWrapper, error::FromEthApiError, EthApiError,
-};
-use reth_storage_api::StateProviderFactory;
+use reth_rpc_eth_types::{error::FromEthApiError, EthApiError};
+use reth_storage_api::{StateProvider, StateProviderFactory};
+use std::sync::Arc;
 
 use crate::{
     helpers::{Call, LoadBlock, Trace},
@@ -24,6 +23,10 @@ pub trait GetBlockAccessList: Trace + Call + LoadBlock + RpcNodeCoreExt {
         block_id: BlockId,
     ) -> impl Future<Output = Result<Option<BlockAccessList>, Self::Error>> + Send {
         async move {
+            if block_id.is_pending() {
+                return Ok(None)
+            }
+
             let Some(block) = self.recovered_block(block_id).await? else {
                 return Ok(None);
             };
@@ -38,14 +41,20 @@ pub trait GetBlockAccessList: Trace + Call + LoadBlock + RpcNodeCoreExt {
                 return Ok(Some(Vec::from(bal)))
             }
 
+            let permit = self
+                .acquire_owned_blocking_io()
+                .await
+                .map_err(|_| EthApiError::InternalEthError)?;
+
             self.spawn_blocking_io(move |eth_api| {
+                let _permit = permit;
                 let state = eth_api
                     .provider()
                     .state_by_block_id(block.parent_hash().into())
                     .map_err(Self::Error::from_eth_err)?;
 
                 let mut db = State::builder()
-                    .with_database(StateProviderDatabase::new(StateProviderTraitObjWrapper(state)))
+                    .with_database(StateProviderDatabase::new(state.into_evm_state_provider()))
                     .with_bal_builder()
                     .build();
 
@@ -58,7 +67,6 @@ pub trait GetBlockAccessList: Trace + Call + LoadBlock + RpcNodeCoreExt {
                 executor.apply_pre_execution_changes().map_err(Self::Error::from_eth_err)?;
                 executor.evm_mut().db_mut().bump_bal_index();
 
-                // replay all transactions prior to the targeted transaction
                 for block_tx in block_txs {
                     executor.execute_transaction(block_tx).map_err(Self::Error::from_eth_err)?;
                     executor.evm_mut().db_mut().bump_bal_index();
@@ -68,8 +76,15 @@ pub trait GetBlockAccessList: Trace + Call + LoadBlock + RpcNodeCoreExt {
                     .apply_post_execution_changes()
                     .map_err(|err| EthApiError::Internal(err.into()))?;
 
-                let bal = db.take_built_alloy_bal();
-                Ok(bal)
+                let revm_bal = db.take_built_bal().expect("BAL builder configured");
+                if !eth_api.eth_api_settings().cache_computed_bals {
+                    return Ok(Some(revm_bal.into_alloy_bal()));
+                }
+
+                let bal = revm_bal.clone().into_alloy_bal();
+                let raw = alloy_rlp::encode(&bal).into();
+                eth_api.cache().insert_bal(block.hash(), DecodedBal::new(Arc::new(revm_bal), raw));
+                Ok(Some(bal))
             })
             .await
         }

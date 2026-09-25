@@ -249,7 +249,7 @@ Networking:
           [default: 131072]
 
       --max-tx-pending-fetch <COUNT>
-          Max capacity of cache of hashes for transactions pending fetch.
+          Maximum number of announced transaction hashes to track, including inflight requests.
 
           [default: 25600]
 
@@ -407,6 +407,11 @@ RPC:
 
           If no path is provided, a secret will be generated and stored in the datadir under `<DIR>/<CHAIN_ID>/jwt.hex`. For mainnet this would be `~/.local/share/reth/mainnet/jwt.hex` by default.
 
+      --authrpc.jwtsecret-hex <HEX>
+          Hex encoded JWT secret to use for the authenticated engine-API RPC server.
+
+          This will enforce JWT authentication for all requests coming from the consensus layer. Cannot be used together with `--authrpc.jwtsecret`.
+
       --auth-ipc
           Enable auth engine API over IPC
 
@@ -439,7 +444,7 @@ RPC:
           Set the maximum RPC response payload size for both HTTP and WS in megabytes
 
           [default: 160]
-          [aliases: --rpc.returndata.limit]
+          [alias: --rpc.returndata.limit]
 
       --rpc.max-subscriptions-per-connection <RPC_MAX_SUBSCRIPTIONS_PER_CONNECTION>
           Set the maximum concurrent subscriptions per connection
@@ -481,7 +486,7 @@ RPC:
           [default: 20000]
 
       --rpc.gascap <GAS_CAP>
-          Maximum gas limit for `eth_call` and call tracing RPC methods
+          Maximum gas limit for `eth_call`, `eth_estimateGas`, and call tracing RPC methods
 
           [default: 50000000]
 
@@ -532,22 +537,45 @@ RPC State Cache:
       --rpc-cache.max-blocks <MAX_BLOCKS>
           Max number of blocks in cache
 
-          [default: 5000]
+          [default: 1000]
 
       --rpc-cache.max-receipts <MAX_RECEIPTS>
           Max number receipts in cache
 
-          [default: 2000]
-
-      --rpc-cache.max-headers <MAX_HEADERS>
-          Max number of headers in cache
-
-          [default: 1000]
+          [default: 500]
 
       --rpc-cache.max-bals <MAX_BALS>
           Max number of block access lists in cache
 
           [default: 1000]
+
+      --rpc-cache.max-blocks-bytes <BYTES>
+          Maximum estimated block cache memory in bytes or with a unit (e.g. 1GB, 500MB). Units use powers of 1024. Zero disables caching. The entry count limit also applies
+
+          [default: 2147483648]
+
+      --rpc-cache.max-receipts-bytes <BYTES>
+          Maximum estimated receipts cache memory in bytes or with a unit (e.g. 1GB, 500MB). Units use powers of 1024. Zero disables caching. The entry count limit also applies
+
+          [default: 1073741824]
+
+      --rpc-cache.max-bals-bytes <BYTES>
+          Maximum estimated block access list cache memory in bytes or with a unit (e.g. 1GB, 500MB). Units use powers of 1024. Zero disables caching. The entry count limit also applies
+
+          [default: 524288000]
+
+      --rpc-cache.idle-timeout <DURATION>
+          Evict blocks, receipts, and block access lists after this duration without a cache hit (e.g. 5m, 30s). Zero disables expiration. Cleanup starts every 1 to 60 seconds and removes at most five entries per cache per poll
+
+          [default: 1h]
+
+      --rpc-cache.cache-computed-bals
+          Cache block access lists computed by RPC requests for transaction tracing
+
+      --rpc-cache.prewarm-bals[=<BLOCKS>]
+          Replay new canonical blocks to cache block access lists until native BAL support.
+
+          Optionally replay the latest BLOCKS blocks sequentially on startup. Without a count, only new blocks are prewarmed. Implies --rpc-cache.cache-computed-bals. Prewarming stops when a canonical block with a block access list hash is received.
 
       --rpc-cache.max-concurrent-db-requests <MAX_CONCURRENT_DB_REQUESTS>
           Max number of concurrent database requests
@@ -557,7 +585,7 @@ RPC State Cache:
       --rpc-cache.max-cached-tx-hashes <MAX_CACHED_TX_HASHES>
           Maximum number of transaction hashes to cache for transaction lookups
 
-          [default: 30000]
+          [default: 100000]
 
 Gas Price Oracle:
       --gpo.blocks <BLOCKS>
@@ -1000,21 +1028,36 @@ Engine:
       --engine.persistence-threshold <PERSISTENCE_THRESHOLD>
           Configure persistence threshold for the engine. This determines how many canonical blocks must be in-memory, ahead of the last persisted block, before flushing canonical blocks to disk again.
 
-          To persist blocks as fast as the node receives them, set this value to zero. This will cause more frequent DB writes.
+          To persist blocks as fast as the node receives them, set this value to zero. This disables state masking and causes more frequent DB writes.
 
-          [default: 7]
+          [env: RETH_ENGINE_PERSISTENCE_THRESHOLD=]
+          [default: 50]
 
       --engine.persistence-backpressure-threshold <PERSISTENCE_BACKPRESSURE_THRESHOLD>
           Configure the maximum number of blocks beyond the in-memory buffer target that may await persistence before engine API processing stalls.
 
-          If omitted, this defaults to the larger of the default backpressure threshold and twice `--engine.persistence-threshold`.
+          If omitted, this defaults to the larger of the minimum backpressure threshold and twice `--engine.persistence-threshold`.
 
           This value must be greater than `--engine.persistence-threshold`.
+
+      --engine.num-state-masking-blocks <NUM_STATE_MASKING_BLOCKS>
+          Configure how many of the blocks being persisted should only mask state/trie writes instead of durably persisting their state/trie updates in the current cycle
+
+          [env: RETH_ENGINE_NUM_STATE_MASKING_BLOCKS=]
+          [default: 30]
 
       --engine.memory-block-buffer-target <MEMORY_BLOCK_BUFFER_TARGET>
           Configure the target number of blocks to keep in memory.
 
           If omitted, this defaults to the lesser of `--engine.persistence-threshold` and the configured default memory block buffer target.
+
+      --engine.backfill-threshold <BACKFILL_RUN_THRESHOLD>
+          Configure the largest gap, in blocks, between the local head and the forkchoice head that is closed by downloading the missing blocks directly. Larger gaps trigger a full pipeline (backfill) run instead.
+
+          On chains with short block times a pipeline run may take longer than it takes the chain to produce another gap of this size, in which case raising this value lets the node catch up via live sync. Values above 1024 are clamped to the peer header response limit.
+
+          [env: RETH_ENGINE_BACKFILL_THRESHOLD=]
+          [default: 32]
 
       --engine.invalid-header-cache-hit-eviction-threshold <INVALID_HEADER_HIT_EVICTION_THRESHOLD>
           Configure how many cache hits an invalid header can accumulate before it is evicted and reprocessed.

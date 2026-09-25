@@ -6,15 +6,16 @@ use crate::{
     tree::{error::InsertPayloadError, payload_validator::TreeCtx},
 };
 use alloy_consensus::BlockHeader;
-use alloy_eips::{eip1898::BlockWithParent, merge::EPOCH_SLOTS, BlockNumHash, NumHash};
+use alloy_eips::{eip1898::BlockWithParent, BlockNumHash, NumHash};
 use alloy_primitives::{map::B256Map, B256};
 use alloy_rpc_types_engine::{
     ForkchoiceState, PayloadStatus, PayloadStatusEnum, PayloadValidationError,
 };
-use error::{InsertBlockError, InsertBlockFatalError, InsertBlockValidationError};
+use error::{
+    InsertBlockError, InsertBlockFatalError, InsertBlockProcessingError, InsertBlockValidationError,
+};
 use reth_chain_state::{
-    CanonicalInMemoryState, ExecutedBlock, ExecutionTimingStats, MemoryOverlayStateProvider,
-    NewCanonicalChain,
+    CanonicalInMemoryState, ExecutedBlock, ExecutionTimingStats, NewCanonicalChain,
 };
 use reth_consensus::{Consensus, FullConsensus};
 use reth_engine_primitives::{
@@ -23,17 +24,17 @@ use reth_engine_primitives::{
 };
 use reth_errors::{ConsensusError, ProviderResult};
 use reth_evm::ConfigureEvm;
+use reth_network_p2p::full_block::SealedBlockWithAccessList;
 use reth_payload_builder::{BuildNewPayload, PayloadBuilderHandle, PayloadBuilderLease};
 use reth_payload_primitives::{BuiltPayload, NewPayloadError, PayloadAttributes, PayloadTypes};
 use reth_primitives_traits::{
     FastInstant as Instant, NodePrimitives, RecoveredBlock, SealedBlock, SealedHeader,
 };
 use reth_provider::{
-    BalProvider, BlockExecutionOutput, BlockExecutionResult, BlockNumReader, BlockReader,
-    ChangeSetReader, DatabaseProviderFactory, LatestStateProvider, ProviderError,
-    PruneCheckpointReader, SaveBlocksInput, StageCheckpointReader, StateProviderBox,
-    StateProviderFactory, StateReader, StorageChangeSetReader, StorageSettingsCache,
-    TransactionVariant, TryIntoHistoricalStateProvider,
+    BalProvider, BlockExecutionOutput, BlockExecutionResult, BlockReader, ChangeSetReader,
+    DatabaseProviderFactory, ProviderError, PruneCheckpointReader, SaveBlocksInput,
+    StageCheckpointReader, StateProviderFactory, StateReader, StorageChangeSetReader,
+    StorageSettingsCache, TransactionVariant,
 };
 use reth_revm::database::StateProviderDatabase;
 use reth_stages_api::ControlFlow;
@@ -95,83 +96,11 @@ pub use types::{ExecutionEnv, ValidationOutcome, ValidationOutput};
 
 pub mod state;
 
-/// The largest gap for which the tree will be used to sync individual blocks by downloading them.
-///
-/// This is the default threshold, and represents the distance (gap) from the local head to a
-/// new (canonical) block, e.g. the forkchoice head block. If the block distance from the local head
-/// exceeds this threshold, the pipeline will be used to backfill the gap more efficiently.
-///
-/// E.g.: Local head `block.number` is 100 and the forkchoice head `block.number` is 133 (more than
-/// an epoch has slots), then this exceeds the threshold at which the pipeline should be used to
-/// backfill this gap.
-pub(crate) const MIN_BLOCKS_FOR_PIPELINE_RUN: u64 = EPOCH_SLOTS;
-
 /// The minimum number of blocks to retain in the changeset cache after eviction.
 ///
 /// This ensures that recent changesets are kept in memory for potential reorgs,
 /// even when the finalized block is not set (e.g., on L2s like Optimism).
 const CHANGESET_CACHE_RETENTION_BLOCKS: u64 = 64;
-
-/// A builder for creating state providers that can be used across threads.
-#[derive(Clone, Debug)]
-pub struct StateProviderBuilder<N: NodePrimitives, P> {
-    /// The provider factory used to create providers.
-    provider_factory: P,
-    /// Hash of the block whose state to provide.
-    parent_hash: B256,
-    /// Tracks the in-memory parent chain and its overlays.
-    overlay_manager: OverlayManager<N>,
-}
-
-impl<N: NodePrimitives, P> StateProviderBuilder<N, P> {
-    /// Creates a new state provider builder for `parent_hash`.
-    pub const fn new(
-        provider_factory: P,
-        parent_hash: B256,
-        overlay_manager: OverlayManager<N>,
-    ) -> Self {
-        Self { provider_factory, parent_hash, overlay_manager }
-    }
-}
-
-impl<N: NodePrimitives, P> StateProviderBuilder<N, P>
-where
-    P: DatabaseProviderFactory,
-    P::Provider: BlockNumReader
-        + PruneCheckpointReader
-        + StageCheckpointReader
-        + StorageSettingsCache
-        + TryIntoHistoricalStateProvider
-        + 'static,
-{
-    /// Creates a new state provider from this builder.
-    pub fn build(&self) -> ProviderResult<StateProviderBox> {
-        let overlay_builder = self.overlay_manager.overlay_builder(self.parent_hash);
-        let provider = self.provider_factory.database_provider_ro()?;
-        let anchor = overlay_builder.anchor_at_parent(&provider)?;
-        let (provider, overlay): (StateProviderBox, _) = match anchor {
-            reth_storage_overlay::AnchorForParent::NoReverts { anchor, overlay } => {
-                debug!(
-                    target: "engine::tree",
-                    parent_hash = %self.parent_hash,
-                    ?anchor,
-                    "creating state provider from latest state"
-                );
-                (Box::new(LatestStateProvider::new(provider)), overlay)
-            }
-            reth_storage_overlay::AnchorForParent::RevertsRequired { anchor, overlay, .. } => {
-                debug!(
-                    target: "engine::tree",
-                    parent_hash = %self.parent_hash,
-                    ?anchor,
-                    "creating state provider from historical state"
-                );
-                (provider.try_into_history_at_block(anchor.number)?, overlay)
-            }
-        };
-        Ok(Box::new(MemoryOverlayStateProvider::new(provider, overlay)))
-    }
-}
 
 /// Tracks the state of the engine api internals.
 ///
@@ -390,9 +319,6 @@ where
     payload_builds: PayloadBuildTracker,
     /// Notifies the engine when the final active payload job finishes.
     payload_build_finished: Receiver<()>,
-    /// A durable persistence completion whose destructive in-memory handoff is deferred until
-    /// payload jobs finish.
-    pending_persisted_handoff: Option<PersistenceResult>,
     /// Task runtime for spawning blocking work on named, reusable threads.
     runtime: reth_tasks::Runtime,
 }
@@ -421,7 +347,6 @@ where
             .field("evm_config", &self.evm_config)
             .field("execution_timing_stats", &self.execution_timing_stats.len())
             .field("payload_builds_active", &self.payload_builds.is_active())
-            .field("pending_persisted_handoff", &self.pending_persisted_handoff)
             .field("runtime", &self.runtime)
             .finish()
     }
@@ -443,7 +368,6 @@ where
         + ChangeSetReader
         + StorageChangeSetReader
         + StorageSettingsCache
-        + TryIntoHistoricalStateProvider
         + 'static,
     C: ConfigureEvm<Primitives = N> + 'static,
     T: PayloadTypes<BuiltPayload: BuiltPayload<Primitives = N>>,
@@ -490,7 +414,6 @@ where
             execution_timing_stats: B256Map::default(),
             payload_builds,
             payload_build_finished,
-            pending_persisted_handoff: None,
             runtime,
         }
     }
@@ -570,17 +493,14 @@ where
         self.incoming_tx.clone()
     }
 
-    /// How many blocks the canonical tip is ahead of the last persisted block. A large gap means
-    /// persistence is falling behind execution.
-    const fn persistence_gap(&self) -> u64 {
-        self.state
-            .tree_state
-            .canonical_block_number()
-            .saturating_sub(self.persistence_state.last_persisted_block.number)
+    /// How many canonical blocks are retained in memory. A large count means persistence is
+    /// falling behind execution.
+    fn persistence_gap(&self) -> u64 {
+        self.canonical_in_memory_state.canonical_chain().count() as u64
     }
 
     /// How many blocks beyond the configured in-memory buffer are awaiting persistence.
-    const fn persistence_backpressure_gap(&self) -> u64 {
+    fn persistence_backpressure_gap(&self) -> u64 {
         self.persistence_gap().saturating_sub(self.config.memory_block_buffer_target())
     }
 
@@ -588,7 +508,7 @@ where
     ///
     /// This is the case when persistence is already running and the number of blocks beyond the
     /// configured in-memory buffer has reached the configured threshold.
-    const fn should_backpressure(&self) -> bool {
+    fn should_backpressure(&self) -> bool {
         self.persistence_state.in_progress() &&
             self.persistence_backpressure_gap() >=
                 self.config.persistence_backpressure_threshold()
@@ -667,12 +587,7 @@ where
                         return
                     }
                 }
-                LoopEvent::PayloadBuildFinished => {
-                    if let Err(err) = self.on_payload_build_finished() {
-                        error!(target: "engine::tree", %err, "Payload build completion handling failed");
-                        return
-                    }
-                }
+                LoopEvent::PayloadBuildFinished => {}
                 LoopEvent::Disconnected => {
                     error!(target: "engine::tree", "Channel disconnected");
                     return
@@ -708,28 +623,11 @@ where
         }
     }
 
-    /// Blocks until the next event that can safely be processed is ready.
+    /// Blocks until the next event is ready.
     ///
-    /// A pending persisted handoff keeps processing engine messages while prioritizing the
-    /// notification that all active payload builds have finished. This keeps the engine responsive
-    /// without reclaiming the in-memory overlay while a payload job may still access it. Otherwise,
-    /// uses biased selection to prioritize persistence completion to update in-memory state and
-    /// unblock further writes.
+    /// Uses biased selection to prioritize persistence completion so in-memory state is updated and
+    /// further writes are unblocked.
     fn wait_for_event(&mut self) -> LoopEvent<T, N> {
-        if self.pending_persisted_handoff.is_some() {
-            self.metrics.engine.backpressure_active.set(0.0);
-            return crossbeam_channel::select_biased! {
-                recv(self.payload_build_finished) -> result => match result {
-                    Ok(()) => LoopEvent::PayloadBuildFinished,
-                    Err(_) => LoopEvent::Disconnected,
-                },
-                recv(self.incoming) -> msg => match msg {
-                    Ok(m) => LoopEvent::EngineMessage(m),
-                    Err(_) => LoopEvent::Disconnected,
-                },
-            }
-        }
-
         // Take ownership of persistence rx if present
         let maybe_persistence = self.persistence_state.rx.take();
 
@@ -786,7 +684,7 @@ where
     /// block request processing isn't blocked for a long time.
     fn on_downloaded(
         &mut self,
-        mut blocks: Vec<SealedBlock<N::Block>>,
+        mut blocks: Vec<SealedBlockWithAccessList<N::Block>>,
     ) -> Result<Option<TreeEvent>, InsertBlockFatalError> {
         if blocks.is_empty() {
             // nothing to execute
@@ -837,7 +735,7 @@ where
     fn on_new_payload(
         &mut self,
         payload: T::ExecutionData,
-    ) -> Result<TreeOutcome<PayloadStatus>, InsertBlockFatalError> {
+    ) -> Result<TreeOutcome<PayloadStatus>, InsertBlockProcessingError> {
         let _thread_resource_usage =
             self.metrics.engine.new_payload.measure_thread_resource_usage();
         trace!(target: "engine::tree", "invoked new payload");
@@ -913,7 +811,7 @@ where
     fn try_insert_payload(
         &mut self,
         payload: T::ExecutionData,
-    ) -> Result<TryInsertPayloadResult, InsertBlockFatalError> {
+    ) -> Result<TryInsertPayloadResult, InsertBlockProcessingError> {
         let block_hash = payload.block_hash();
         let num_hash = payload.num_hash();
         let parent_hash = payload.parent_hash();
@@ -948,9 +846,9 @@ where
             Err(error) => {
                 let status = match error {
                     InsertPayloadError::Block(error) => self.on_insert_block_error(error)?,
-                    InsertPayloadError::Payload(error) => {
-                        self.on_new_payload_error(error, num_hash, parent_hash)?
-                    }
+                    InsertPayloadError::Payload(error) => self
+                        .on_new_payload_error(error, num_hash, parent_hash)
+                        .map_err(InsertBlockFatalError::from)?,
                 };
 
                 Ok(TryInsertPayloadResult { status, already_seen: false })
@@ -969,7 +867,7 @@ where
     fn try_buffer_payload(
         &mut self,
         payload: T::ExecutionData,
-    ) -> Result<PayloadStatus, InsertBlockFatalError> {
+    ) -> Result<PayloadStatus, InsertBlockProcessingError> {
         let parent_hash = payload.parent_hash();
         let num_hash = payload.num_hash();
 
@@ -977,12 +875,14 @@ where
             // if the block is well-formed, buffer it for later
             Ok(block) => {
                 if let Err(error) = self.buffer_block(block) {
-                    Ok(self.on_insert_block_error(error)?)
+                    self.on_insert_block_error(error)
                 } else {
                     Ok(PayloadStatus::from_status(PayloadStatusEnum::Syncing))
                 }
             }
-            Err(error) => Ok(self.on_new_payload_error(error, num_hash, parent_hash)?),
+            Err(error) => Ok(self
+                .on_new_payload_error(error, num_hash, parent_hash)
+                .map_err(InsertBlockFatalError::from)?),
         }
     }
 
@@ -1341,6 +1241,10 @@ where
 
         trace!(target: "engine::tree", "fcu head hash is already canonical");
 
+        if !self.is_consistent_forkchoice_state(state, None)? {
+            return Ok(Some(TreeOutcome::new(OnForkChoiceUpdated::invalid_state())));
+        }
+
         // Update the safe and finalized blocks and ensure their values are valid
         if let Err(outcome) = self.ensure_consistent_forkchoice_state(state) {
             // safe or finalized hashes are invalid
@@ -1409,6 +1313,10 @@ where
                 return Ok(Some(TreeOutcome::new(OnForkChoiceUpdated::too_deep_reorg())));
             }
 
+            if !self.is_consistent_forkchoice_state(state, None)? {
+                return Ok(Some(TreeOutcome::new(OnForkChoiceUpdated::invalid_state())));
+            }
+
             // We need to effectively unwind the _canonical_ chain to the FCU's head, which is
             // part of the canonical chain. We need to update the latest block state to reflect
             // the canonical ancestor. This ensures that state providers and the transaction
@@ -1437,6 +1345,10 @@ where
 
         // Ensure we can apply a new chain update for the head block
         if let Some(chain_update) = self.on_new_head(state.head_block_hash)? {
+            if !self.is_consistent_forkchoice_state(state, Some(&chain_update))? {
+                return Ok(Some(TreeOutcome::new(OnForkChoiceUpdated::invalid_state())));
+            }
+
             let tip = chain_update.tip().clone_sealed_header();
             self.on_canonical_chain_update(chain_update);
 
@@ -1489,7 +1401,10 @@ where
         Ok(TreeOutcome::new(OnForkChoiceUpdated::valid(PayloadStatus::from_status(
             PayloadStatusEnum::Syncing,
         )))
-        .with_event(TreeEvent::Download(DownloadRequest::single_block(target))))
+        .with_event(TreeEvent::Download(
+            DownloadRequest::single_block(target)
+                .with_access_lists(self.should_download_access_lists()),
+        )))
     }
 
     /// Helper method to remove blocks and set the persistence state. This ensures we keep track of
@@ -1522,15 +1437,21 @@ where
     /// This checks if we need to remove blocks (disk reorg) or save new blocks to disk.
     /// Persistence completion is handled separately via the `wait_for_event` method.
     fn advance_persistence(&mut self) -> Result<(), AdvancePersistenceError> {
-        // A second persistence completion would overwrite the frontier needed by the deferred
-        // handoff. Wait until the payload jobs using the old overlay have finished.
-        if self.pending_persisted_handoff.is_some() {
-            return Ok(())
-        }
-
         if !self.persistence_state.in_progress() {
+            let payload_build_active = self.payload_builds.is_active();
             if let Some(new_tip_num) = self.find_disk_reorg()? {
                 self.remove_blocks(new_tip_num)
+            } else if self.backfill_sync_state.is_pending_revalidation() &&
+                !payload_build_active &&
+                self.persistence_state.last_state_trie_persisted_block !=
+                    self.persistence_state.last_persisted_block
+            {
+                let Some(input) = self.get_save_blocks_input(PersistTarget::Persisted) else {
+                    return Err(AdvancePersistenceError::StateTrieCatchupUnavailable)
+                };
+                self.persist_blocks(input);
+            } else if self.backfill_sync_state.is_pending_revalidation() && !payload_build_active {
+                self.revalidate_pending_backfill()?;
             } else if let Some(input) = self.get_save_blocks_input(PersistTarget::Threshold) {
                 self.persist_blocks(input);
             }
@@ -1560,7 +1481,7 @@ where
             if let Some((rx, start_time, action)) = self.persistence_state.rx.take() {
                 debug!(target: "engine::tree", ?action, "waiting for in-flight persistence");
                 let result = rx.recv().map_err(|_| AdvancePersistenceError::ChannelClosed)?;
-                self.finish_persistence(result, start_time);
+                self.on_persistence_complete(result, start_time)?;
                 continue
             }
 
@@ -1612,31 +1533,9 @@ where
         result: PersistenceResult,
         start_time: Instant,
     ) -> Result<(), AdvancePersistenceError> {
-        let handoff = self.finish_persistence(result, start_time);
-
-        if self.payload_builds.is_active() {
-            debug_assert!(
-                self.pending_persisted_handoff.is_none(),
-                "a new persistence task must not start while its predecessor handoff is pending"
-            );
-            debug!(target: "engine::tree", "Deferring persisted in-memory handoff until payload jobs finish");
-            self.pending_persisted_handoff = Some(handoff);
-            return Ok(())
-        }
-
-        self.on_persisted_handoff(handoff)
-    }
-
-    /// Records a completed persistence operation and returns its deferred in-memory handoff.
-    fn finish_persistence(
-        &mut self,
-        result: PersistenceResult,
-        start_time: Instant,
-    ) -> PersistenceResult {
         self.metrics.engine.persistence_duration.record(start_time.elapsed());
 
-        let last_block = result.last_block;
-        let last_state_trie_block = result.last_state_trie_block;
+        let PersistenceResult { last_block, last_state_trie_block, commit_duration } = result;
         debug_assert!(
             last_state_trie_block.number <= last_block.number,
             "state/trie frontier cannot exceed the last persisted block"
@@ -1645,28 +1544,6 @@ where
         debug!(target: "engine::tree", ?last_block, ?last_state_trie_block, elapsed=?start_time.elapsed(), "Finished persisting, calling finish");
         self.persistence_state.finish(last_block, last_state_trie_block);
 
-        result
-    }
-
-    /// Applies the destructive in-memory portion of a completed persistence operation.
-    fn on_persisted_handoff(
-        &mut self,
-        handoff: PersistenceResult,
-    ) -> Result<(), AdvancePersistenceError> {
-        if handoff.last_block != self.persistence_state.last_persisted_block ||
-            handoff.last_state_trie_block !=
-                self.persistence_state.last_state_trie_persisted_block
-        {
-            debug!(
-                target: "engine::tree",
-                handoff_last_block = ?handoff.last_block,
-                current_last_block = ?self.persistence_state.last_persisted_block,
-                "Discarding stale persisted handoff"
-            );
-            return Ok(())
-        }
-
-        let PersistenceResult { last_block, commit_duration, .. } = handoff;
         let last_block_number = last_block.number;
 
         // Evict cached changesets for blocks below the eviction threshold.
@@ -1693,19 +1570,6 @@ where
         self.on_new_persisted_block()?;
 
         self.purge_timing_stats(last_block_number, commit_duration);
-
-        Ok(())
-    }
-
-    /// Releases work deferred until all payload jobs have finished.
-    fn on_payload_build_finished(&mut self) -> Result<(), AdvancePersistenceError> {
-        if self.payload_builds.is_active() {
-            return Ok(())
-        }
-
-        if let Some(handoff) = self.pending_persisted_handoff.take() {
-            self.on_persisted_handoff(handoff)?;
-        }
 
         Ok(())
     }
@@ -1760,16 +1624,19 @@ where
                             }
                         };
 
-                        // if the parent is the canonical head, we can insert the block as the
-                        // pending block
-                        if self.state.tree_state.canonical_block_hash() ==
-                            block.recovered_block().parent_hash()
-                        {
+                        let is_pending = self.state.tree_state.canonical_block_hash() ==
+                            block.recovered_block().parent_hash();
+                        self.state.tree_state.insert_executed(block.clone());
+                        self.metrics
+                            .engine
+                            .executed_blocks
+                            .set(self.state.tree_state.block_count() as f64);
+
+                        if is_pending {
                             debug!(target: "engine::tree", pending=?block_num_hash, "updating pending block");
                             self.canonical_in_memory_state.set_pending_block(block.clone());
                         }
 
-                        self.state.tree_state.insert_executed(block.clone());
                         self.metrics.engine.inserted_already_executed_blocks.increment(1);
                         self.emit_event(EngineApiEvent::BeaconConsensus(
                             ConsensusEngineEvent::CanonicalBlockAdded(block, now.elapsed()),
@@ -2032,6 +1899,13 @@ where
 
             // update the tracked canonical head
             self.canonical_in_memory_state.set_canonical_head(new_head);
+
+            // If the pipeline reached the head of the syncing FCU, apply its safe and finalized
+            // blocks now that the head is canonical. An unwind must wait for a new FCU because the
+            // supplied sync target may have been invalidated.
+            if !ctrl.is_unwind() {
+                self.on_canonicalized_sync_target(backfill_num_hash.hash);
+            }
         }
 
         // check if we need to run backfill again by comparing the most recent backfill target
@@ -2088,10 +1962,10 @@ where
                     "Backfill complete, downloading remaining blocks to reach FCU target"
                 );
 
-                self.emit_event(EngineApiEvent::Download(DownloadRequest::BlockRange(
-                    lowest_buffered.parent_hash(),
-                    distance,
-                )));
+                self.emit_event(EngineApiEvent::Download(
+                    DownloadRequest::block_range(lowest_buffered.parent_hash(), distance)
+                        .with_access_lists(self.should_download_access_lists()),
+                ));
                 return Ok(());
             }
         } else {
@@ -2102,9 +1976,10 @@ where
                 head_hash = %sync_target_state.head_block_hash,
                 "Backfill complete but head block not buffered, requesting download"
             );
-            self.emit_event(EngineApiEvent::Download(DownloadRequest::single_block(
-                sync_target_state.head_block_hash,
-            )));
+            self.emit_event(EngineApiEvent::Download(
+                DownloadRequest::single_block(sync_target_state.head_block_hash)
+                    .with_access_lists(self.should_download_access_lists()),
+            ));
             return Ok(());
         }
 
@@ -2218,32 +2093,108 @@ where
         }
     }
 
+    /// Re-evaluates whether a deferred backfill is still required after persistence catches up.
+    fn revalidate_pending_backfill(&mut self) -> ProviderResult<()> {
+        debug_assert!(self.backfill_sync_state.is_pending_revalidation());
+
+        let sync_target_state = self.state.forkchoice_state_tracker.sync_target_state();
+        let backfill_target = if let Some(state) = sync_target_state {
+            let configured_target = self.backfill_target_hash(state);
+            let target_hash =
+                if configured_target.is_zero() { state.head_block_hash } else { configured_target };
+            let target_number = if let Some(block) = self.state.buffer.block(&target_hash) {
+                Some(block.number())
+            } else {
+                self.sealed_header_by_hash(target_hash)?.map(|header| header.number())
+            };
+
+            target_number.and_then(|target_number| {
+                self.backfill_sync_target(
+                    self.state.tree_state.canonical_block_number(),
+                    target_number,
+                    None,
+                )
+            })
+        } else {
+            None
+        };
+
+        if let Some(target) = backfill_target {
+            self.dispatch_backfill_action(BackfillAction::Start(target.into()));
+            return Ok(())
+        }
+
+        self.backfill_sync_state = BackfillSyncState::Idle;
+        debug!(target: "engine::tree", "dropping deferred backfill after re-evaluation");
+
+        // The target may have changed while persistence was draining. Resume the live-sync
+        // download flow so a newer target can produce a fresh backfill decision.
+        if let Some(state) = sync_target_state &&
+            state.head_block_hash != self.state.tree_state.canonical_block_hash()
+        {
+            let target = self.lowest_buffered_ancestor_or(state.head_block_hash);
+            self.send_event(EngineApiEvent::Download(DownloadRequest::single_block(target)));
+        }
+
+        Ok(())
+    }
+
     /// Emits an outgoing event to the engine.
     fn emit_event(&mut self, event: impl Into<EngineApiEvent<N>>) {
         let event = event.into();
 
-        if event.is_backfill_action() {
+        if let EngineApiEvent::BackfillAction(action) = event {
             debug_assert_eq!(
                 self.backfill_sync_state,
                 BackfillSyncState::Idle,
                 "backfill action should only be emitted when backfill is idle"
             );
 
+            let persistence_in_progress = self.persistence_state.in_progress();
+            let state_trie_needs_catchup = self.persistence_state.last_state_trie_persisted_block !=
+                self.persistence_state.last_persisted_block;
             if self.payload_builds.is_active() ||
-                self.persistence_state.in_progress() ||
-                self.pending_persisted_handoff.is_some()
+                persistence_in_progress ||
+                state_trie_needs_catchup
             {
                 // Backfill can remove the same in-memory blocks as an active payload job or a
-                // persisted handoff, so it must not start until the next sync trigger.
-                debug!(target: "engine::tree", "skipping backfill while in-memory overlay is in use");
+                // persistence task. Enter pending mode to prevent new payload jobs and
+                // re-evaluate the current sync target after all readers and writes drain.
+                debug!(
+                    target: "engine::tree",
+                    last_persisted_block = self.persistence_state.last_persisted_block.number,
+                    last_state_trie_persisted_block = self
+                        .persistence_state
+                        .last_state_trie_persisted_block
+                        .number,
+                    "deferring backfill until persistence and payload jobs drain"
+                );
+                self.backfill_sync_state = BackfillSyncState::PendingRevalidation;
                 return
             }
 
-            self.backfill_sync_state = BackfillSyncState::Pending;
-            self.metrics.engine.pipeline_runs.increment(1);
-            debug!(target: "engine::tree", "emitting backfill action event");
+            self.dispatch_backfill_action(action);
+            return
         }
 
+        self.send_event(event);
+    }
+
+    /// Dispatches a validated backfill action to the orchestrator.
+    fn dispatch_backfill_action(&mut self, action: BackfillAction) {
+        debug_assert!(
+            self.backfill_sync_state.is_idle() ||
+                self.backfill_sync_state.is_pending_revalidation(),
+            "backfill action can only be dispatched while idle or pending revalidation"
+        );
+        self.backfill_sync_state = BackfillSyncState::Pending;
+        self.metrics.engine.pipeline_runs.increment(1);
+        debug!(target: "engine::tree", "emitting backfill action event");
+        self.send_event(EngineApiEvent::BackfillAction(action));
+    }
+
+    /// Sends an event to the orchestrator.
+    fn send_event(&self, event: EngineApiEvent<N>) {
         let _ = self.outgoing.send(event).inspect_err(
             |err| error!(target: "engine::tree", "Failed to send internal event: {err:?}"),
         );
@@ -2252,8 +2203,9 @@ where
     /// Returns the blocks and frontiers for the next persistence cycle, if one should start.
     ///
     /// Threshold persistence honors the normal scheduling gates and retains the configured
-    /// in-memory block buffer. Head persistence bypasses those gates during shutdown and returns
-    /// `None` once both persistence frontiers have reached the canonical head.
+    /// in-memory block buffer. Persisted-target persistence catches the state/trie frontier up to
+    /// the existing database tip. Head persistence bypasses those gates during shutdown and
+    /// returns `None` once both persistence frontiers have reached the canonical head.
     fn get_save_blocks_input(&self, target: PersistTarget) -> Option<SaveBlocksInput<N>> {
         // We will calculate the state root using the database, so we need to be sure there are no
         // changes
@@ -2265,6 +2217,13 @@ where
 
         let (new_db_tip, new_partial_state_trie) = match target {
             PersistTarget::Head => (canonical_head_number, canonical_head_number),
+            PersistTarget::Persisted => {
+                // Catch-up persistence is the transition into pipeline sync, so it deliberately
+                // runs while backfill is pending and bypasses the normal threshold gates.
+                debug_assert!(self.backfill_sync_state.is_pending_revalidation());
+                debug_assert!(!self.payload_builds.is_active());
+                (prev_db_tip, prev_db_tip)
+            }
             PersistTarget::Threshold => {
                 if (self.config.suppress_persistence_during_build() &&
                     self.payload_builds.is_active()) ||
@@ -2273,8 +2232,9 @@ where
                     return None
                 }
 
-                if canonical_head_number.saturating_sub(prev_db_tip) <=
-                    self.config.persistence_threshold()
+                let persistence_threshold =
+                    usize::try_from(self.config.persistence_threshold()).unwrap_or(usize::MAX);
+                if self.canonical_in_memory_state.canonical_chain().count() <= persistence_threshold
                 {
                     return None
                 }
@@ -2361,10 +2321,20 @@ where
         }
 
         let finalized = self.state.forkchoice_state_tracker.last_valid_finalized();
-        self.remove_before(in_memory_persisted_block, finalized)?;
+        // Trim the canonical in-memory state first: state providers build their overlays from the
+        // canonical chain, so it must never reference blocks whose overlays the manager has
+        // already pruned. `remove_before` does not read the canonical in-memory state, so the
+        // order between the two trims is free to choose.
         self.canonical_in_memory_state.remove_persisted_blocks_until(
             self.persistence_state.last_persisted_block,
             in_memory_persisted_block.number,
+        );
+        self.remove_before(in_memory_persisted_block, finalized)?;
+        // Persistence changes the overlay anchor. Prepare the remaining canonical range before
+        // the next payload needs to read execution state against the new durable frontier.
+        self.state.tree_state.overlay_manager.precompute_execution_overlay(
+            self.state.tree_state.canonical_block_hash(),
+            in_memory_persisted_block.hash,
         );
         self.state.set_pending_sparse_trie_prune(self.should_prune_sparse_trie());
         Ok(())
@@ -2478,6 +2448,18 @@ where
             .lowest_ancestor(&hash)
             .map(|block| block.parent_hash())
             .unwrap_or_else(|| hash)
+    }
+
+    /// Returns whether block downloads should also attempt to fetch the blocks' access lists.
+    ///
+    /// This is the case once Amsterdam is active at the current canonical head, indicated by the
+    /// head header carrying a block access list hash.
+    ///
+    /// This is a coarse gate: a download issued while the head is still pre-Amsterdam won't ask
+    /// for access lists of blocks past the fork. Access list downloads are best-effort anyway, so
+    /// those blocks simply take the regular execution path.
+    fn should_download_access_lists(&self) -> bool {
+        self.canonical_in_memory_state.get_canonical_head().block_access_list_hash().is_some()
     }
 
     /// If validation fails, the response MUST contain the latest valid hash:
@@ -2717,9 +2699,10 @@ where
                 Err(err) => {
                     if let InsertPayloadError::Block(err) = err {
                         debug!(target: "engine::tree", ?err, "failed to connect buffered block to tree");
-                        if let Err(fatal) = self.on_insert_block_error(err) {
+                        if let Err(InsertBlockProcessingError::Fatal(fatal)) =
+                            self.on_insert_block_error(err)
+                        {
                             warn!(target: "engine::tree", %fatal, "fatal error occurred while connecting buffered blocks");
-                            return Err(fatal)
                         }
                     }
                 }
@@ -2738,7 +2721,7 @@ where
         if let Err(err) = self.validate_block(&block) {
             return Err(InsertBlockError::consensus_error(err, block))
         }
-        self.state.buffer.insert_block(block);
+        self.state.buffer.insert_block(block.into());
         Ok(())
     }
 
@@ -2748,7 +2731,7 @@ where
     /// If the `local_tip` is greater than the `block`, then this will return false.
     #[inline]
     const fn exceeds_backfill_run_threshold(&self, local_tip: u64, block: u64) -> bool {
-        block > local_tip && block - local_tip > MIN_BLOCKS_FOR_PIPELINE_RUN
+        block > local_tip && block - local_tip > self.config.backfill_run_threshold()
     }
 
     /// Returns how far the local tip is from the given block. If the local tip is at the same
@@ -2963,6 +2946,7 @@ where
                 self.state.tree_state.insert_executed(block);
             }
         }
+        self.metrics.engine.executed_blocks.set(self.state.tree_state.block_count() as f64);
     }
 
     /// This handles downloaded blocks that are shown to be disconnected from the canonical chain.
@@ -2996,7 +2980,7 @@ where
             self.distance_from_local_tip(head.number, missing_parent.number)
         {
             trace!(target: "engine::tree", %distance, missing=?missing_parent, "downloading missing parent block range");
-            DownloadRequest::BlockRange(missing_parent.hash, distance)
+            DownloadRequest::block_range(missing_parent.hash, distance)
         } else {
             trace!(target: "engine::tree", missing=?missing_parent, "downloading missing parent block");
             // This happens when the missing parent is on an outdated
@@ -3004,7 +2988,7 @@ where
             DownloadRequest::single_block(missing_parent.hash)
         };
 
-        Some(TreeEvent::Download(request))
+        Some(TreeEvent::Download(request.with_access_lists(self.should_download_access_lists())))
     }
 
     /// Handles a downloaded block that was successfully inserted as valid.
@@ -3042,7 +3026,10 @@ where
             if self.state.tree_state.canonical_block_hash() != sync_target.head_block_hash {
                 let target = self.lowest_buffered_ancestor_or(sync_target.head_block_hash);
                 trace!(target: "engine::tree", %target, "sync target head not yet reached, downloading head block");
-                return Ok(Some(TreeEvent::Download(DownloadRequest::single_block(target))))
+                return Ok(Some(TreeEvent::Download(
+                    DownloadRequest::single_block(target)
+                        .with_access_lists(self.should_download_access_lists()),
+                )))
             }
 
             return Ok(None)
@@ -3060,7 +3047,7 @@ where
     #[instrument(level = "debug", target = "engine::tree", skip_all, fields(block_hash = %block.hash(), block_num = %block.number()))]
     fn on_downloaded_block(
         &mut self,
-        block: SealedBlock<N::Block>,
+        block: SealedBlockWithAccessList<N::Block>,
     ) -> Result<Option<TreeEvent>, InsertBlockFatalError> {
         let block_num_hash = block.num_hash();
         let lowest_buffered_ancestor = self.lowest_buffered_ancestor_or(block_num_hash.hash);
@@ -3092,9 +3079,10 @@ where
             Err(err) => {
                 if let InsertPayloadError::Block(err) = err {
                     debug!(target: "engine::tree", err=%err.kind(), "failed to insert downloaded block");
-                    if let Err(fatal) = self.on_insert_block_error(err) {
+                    if let Err(InsertBlockProcessingError::Fatal(fatal)) =
+                        self.on_insert_block_error(err)
+                    {
                         warn!(target: "engine::tree", %fatal, "fatal error occurred while inserting downloaded block");
-                        return Err(fatal)
                     }
                 }
             }
@@ -3118,13 +3106,13 @@ where
             payload.block_with_parent(),
             payload,
             |validator, payload, ctx| validator.validate_payload(payload, ctx),
-            |this, payload| Ok(this.payload_validator.convert_payload_to_block(payload)?),
+            |this, payload| Ok(this.payload_validator.convert_payload_to_block(payload)?.into()),
         )
     }
 
     fn insert_block(
         &mut self,
-        block: SealedBlock<N::Block>,
+        block: SealedBlockWithAccessList<N::Block>,
     ) -> Result<InsertPayloadOk, InsertPayloadError<N::Block>> {
         self.insert_block_or_payload(
             block.block_with_parent(),
@@ -3156,7 +3144,10 @@ where
         block_id: BlockWithParent,
         input: Input,
         execute: impl FnOnce(&mut V, Input, TreeCtx<'_, N>) -> Result<ValidationOutput<N>, Err>,
-        convert_to_block: impl FnOnce(&mut Self, Input) -> Result<SealedBlock<N::Block>, Err>,
+        convert_to_block: impl FnOnce(
+            &mut Self,
+            Input,
+        ) -> Result<SealedBlockWithAccessList<N::Block>, Err>,
     ) -> Result<InsertPayloadOk, Err>
     where
         Err: From<InsertBlockError<N::Block>>,
@@ -3177,7 +3168,7 @@ where
             match self.provider.sealed_header_by_hash(block_num_hash.hash) {
                 Err(err) => {
                     let block = convert_to_block(self, input)?;
-                    return Err(InsertBlockError::new(block, err.into()).into());
+                    return Err(InsertBlockError::new(block.split().0, err.into()).into());
                 }
                 Ok(Some(_)) => {
                     convert_to_block(self, input)?;
@@ -3188,14 +3179,17 @@ where
         }
 
         // Ensure that the parent state is available.
-        match self.state_provider_builder(block_id.parent) {
-            Err(err) => {
-                let block = convert_to_block(self, input)?;
-                return Err(InsertBlockError::new(block, err.into()).into());
-            }
-            Ok(None) => {
-                let block = convert_to_block(self, input)?;
+        if !self.state.tree_state.contains_hash(&block_id.parent) {
+            let parent_exists = match self.provider.header(block_id.parent) {
+                Ok(header) => header.is_some(),
+                Err(err) => {
+                    let block = convert_to_block(self, input)?;
+                    return Err(InsertBlockError::new(block.split().0, err.into()).into());
+                }
+            };
 
+            if !parent_exists {
+                let block = convert_to_block(self, input)?;
                 // we don't have the state required to execute this block, buffering it and find the
                 // missing parent block
                 let missing_ancestor = self
@@ -3212,7 +3206,6 @@ where
                     missing_ancestor,
                 }))
             }
-            Ok(Some(_)) => {}
         }
 
         // determine whether we are on a fork chain by comparing the block number with the
@@ -3225,13 +3218,10 @@ where
 
         let start = Instant::now();
 
-        let ValidationOutput {
-            executed_block: executed,
-            execution_timing_stats: timing_stats,
-            raw_bal,
-        } = execute(&mut self.payload_validator, input, ctx)?;
+        let ValidationOutput { executed_block: executed, execution_timing_stats: timing_stats } =
+            execute(&mut self.payload_validator, input, ctx)?;
 
-        if let Some(raw_bal) = raw_bal {
+        if let Some(raw_bal) = executed.bal().map(|bal| bal.as_raw_bal().clone()) {
             let num_hash = executed.recovered_block().num_hash();
             if let Err(err) = self.provider.bal_store().insert(num_hash, raw_bal) {
                 warn!(
@@ -3259,14 +3249,15 @@ where
             self.execution_timing_stats.insert(executed.recovered_block().hash(), stats);
         }
 
-        // if the parent is the canonical head, we can insert the block as the pending block
-        if self.state.tree_state.canonical_block_hash() == executed.recovered_block().parent_hash()
-        {
+        let is_pending = self.state.tree_state.canonical_block_hash() ==
+            executed.recovered_block().parent_hash();
+        self.state.tree_state.insert_executed(executed.clone());
+
+        if is_pending {
             debug!(target: "engine::tree", pending=?block_num_hash, "updating pending block");
             self.canonical_in_memory_state.set_pending_block(executed.clone());
         }
 
-        self.state.tree_state.insert_executed(executed.clone());
         self.metrics.engine.executed_blocks.set(self.state.tree_state.block_count() as f64);
 
         // emit insert event
@@ -3294,11 +3285,9 @@ where
     fn on_insert_block_error(
         &mut self,
         error: InsertBlockError<N::Block>,
-    ) -> Result<PayloadStatus, InsertBlockFatalError> {
+    ) -> Result<PayloadStatus, InsertBlockProcessingError> {
         let (block, error) = error.split();
 
-        // if invalid block, we check the validation error. Otherwise return the fatal
-        // error.
         let validation_err = error.ensure_validation_error()?;
 
         // If the error was due to an invalid payload, the payload is added to the
@@ -3311,7 +3300,15 @@ where
             %validation_err,
             "Invalid block error on new payload",
         );
-        let latest_valid_hash = self.latest_valid_hash_for_invalid_payload(block.parent_hash())?;
+        // The Amsterdam Engine API requires `latestValidHash: null` for an undecodable BAL.
+        // <https://github.com/ethereum/execution-apis/blob/df75e230befef0de56ee8833322ed714bacb479c/src/engine/amsterdam.md?plain=1#L129>
+        let latest_valid_hash =
+            if matches!(&validation_err, InsertBlockValidationError::BlockAccessListDecode(_)) {
+                None
+            } else {
+                self.latest_valid_hash_for_invalid_payload(block.parent_hash())
+                    .map_err(InsertBlockFatalError::from)?
+            };
 
         // keep track of the invalid header unless the consensus impl considers it transient
         let is_transient = match &validation_err {
@@ -3365,17 +3362,81 @@ where
     }
 
     /// Attempts to find the header for the given block hash if it is canonical.
+    ///
+    /// A persisted header can still be found by hash while its disk reorg is pending, so it is
+    /// only canonical if it is not above the canonical head and matches the canonical hash at its
+    /// height. The in-memory canonical hash is preferred over the persisted one.
     pub fn find_canonical_header(
         &self,
         hash: B256,
     ) -> Result<Option<SealedHeader<N::BlockHeader>>, ProviderError> {
-        let mut canonical = self.canonical_in_memory_state.header_by_hash(hash);
-
-        if canonical.is_none() {
-            canonical = self.provider.header(hash)?.map(|header| SealedHeader::new(header, hash));
+        if let Some(header) = self.canonical_in_memory_state.header_by_hash(hash) {
+            return Ok(Some(header))
         }
 
-        Ok(canonical)
+        let Some(header) = self.provider.sealed_header_by_hash(hash)? else { return Ok(None) };
+        // Reorged-out headers remain on disk until persistence catches up, so reject old tips above
+        // the in-memory head and use in-memory hashes to reject old blocks at shared heights.
+        let number = header.number();
+        if number > self.canonical_in_memory_state.get_canonical_block_number() {
+            return Ok(None)
+        }
+        let canonical_hash =
+            if let Some(hash) = self.canonical_in_memory_state.hash_by_number(number) {
+                Some(hash)
+            } else {
+                self.provider.block_hash(number)?
+            };
+
+        Ok((canonical_hash == Some(hash)).then_some(header))
+    }
+
+    /// Checks that nonzero safe and finalized hashes belong to the chain defined by the FCU head.
+    ///
+    /// The [Engine API forkchoiceUpdated specification] requires `-38002` when a `VALID` head's
+    /// safe or finalized hash is outside that chain, and requires all forkchoice state updates to
+    /// be atomic. In direct FCU processing, this check must therefore run before canonicalizing
+    /// the head or updating either marker; checking only after canonicalization would leave an
+    /// invalid reorg applied.
+    ///
+    /// `chain_update` describes a proposed commit or reorg that has not yet been applied. Its new
+    /// blocks and the canonical prefix below its first block form the proposed chain. Without a
+    /// chain update, the proposed head is already canonical, so only canonical blocks through its
+    /// height are eligible. Canonical-prefix hashes are resolved via
+    /// [`Self::find_canonical_header`], which rejects stale persisted headers whose disk reorg
+    /// cleanup is pending. A zero safe or finalized hash leaves that marker unchanged.
+    /// Returns `Ok(false)` for an unknown or off-chain hash and propagates provider errors.
+    ///
+    /// [Engine API forkchoiceUpdated specification]: https://github.com/ethereum/execution-apis/blob/main/src/engine/paris.md#specification-1
+    fn is_consistent_forkchoice_state(
+        &self,
+        state: ForkchoiceState,
+        chain_update: Option<&NewCanonicalChain<N>>,
+    ) -> ProviderResult<bool> {
+        let canonical_head_number = match chain_update {
+            Some(chain_update) => {
+                let new = chain_update.new_blocks();
+                // Only the canonical prefix below the new branch remains on the proposed chain.
+                new.first().expect("non empty chain").block_number() - 1
+            }
+            None => {
+                let Some(head) = self.find_canonical_header(state.head_block_hash)? else {
+                    return Ok(false)
+                };
+                head.number()
+            }
+        };
+
+        for hash in [state.finalized_block_hash, state.safe_block_hash] {
+            if hash.is_zero() || chain_update.is_some_and(|update| update.contains(hash)) {
+                continue
+            }
+            let Some(header) = self.find_canonical_header(hash)? else { return Ok(false) };
+            if header.number() > canonical_head_number {
+                return Ok(false)
+            }
+        }
+        Ok(true)
     }
 
     /// Updates the tracked finalized block if we have it.
@@ -3565,30 +3626,8 @@ where
             self.persistence_state.last_persisted_block.hash,
             num,
         );
+        self.metrics.engine.executed_blocks.set(self.state.tree_state.block_count() as f64);
         Ok(())
-    }
-
-    /// Returns a builder for creating state providers for the given hash.
-    ///
-    /// This is an optimization for parallel execution contexts where we want to avoid
-    /// creating state providers in the critical path.
-    pub fn state_provider_builder(
-        &self,
-        hash: B256,
-    ) -> ProviderResult<Option<StateProviderBuilder<N, P>>>
-    where
-        P: BlockReader + StateProviderFactory + StateReader + Clone,
-    {
-        if !self.state.tree_state.contains_hash(&hash) && self.provider.header(hash)?.is_none() {
-            debug!(target: "engine::tree", %hash, "no canonical state found for block");
-            return Ok(None)
-        }
-
-        Ok(Some(StateProviderBuilder::new(
-            self.provider.clone(),
-            hash,
-            self.state.tree_state.overlay_manager.clone(),
-        )))
     }
 }
 
@@ -3608,7 +3647,7 @@ where
         /// When the persistence operation started.
         start_time: Instant,
     },
-    /// The last active payload job has finished, so deferred in-memory work may proceed.
+    /// The last active payload job has finished, so suppressed persistence may resume.
     PayloadBuildFinished,
     /// A channel was disconnected.
     Disconnected,
@@ -3704,12 +3743,14 @@ enum PersistTarget {
     Threshold,
     /// Persist all blocks up to and including the canonical head.
     Head,
+    /// Persist state/trie updates through the persisted block frontier.
+    Persisted,
 }
 
 /// Result of waiting for caches to become available.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct CacheWaitDurations {
-    /// Time spent waiting for the execution cache lock.
+    /// Time spent waiting for the execution cache lock, excluding post-unlock cache destruction.
     pub execution_cache: Duration,
     /// Time spent waiting for the sparse trie lock.
     pub sparse_trie: Duration,
@@ -3717,8 +3758,8 @@ pub struct CacheWaitDurations {
 
 /// Trait for types that can wait for caches to become available.
 ///
-/// This is used by `reth_newPayload` endpoint to ensure that payload processing
-/// waits for any ongoing operations to complete before starting.
+/// Used by `reth_newPayload` to wait for cache updates before starting payload processing.
+/// Removed execution-cache allocations may still be destroyed concurrently after unlocking.
 pub trait WaitForCaches {
     /// Waits for cache updates to complete.
     ///

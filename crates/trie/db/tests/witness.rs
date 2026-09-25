@@ -148,7 +148,10 @@ fn includes_nodes_for_destroyed_storage_nodes() {
         )
         .compute(HashedPostState {
             accounts: HashMap::from_iter([(hashed_address, Some(Account::default()))]),
-            storages: HashMap::from_iter([(hashed_address, HashedStorage::new(true))]), // destroyed
+            storages: HashMap::from_iter([(
+                hashed_address,
+                HashedStorage::from_iter([(hashed_slot, U256::ZERO)]),
+            )]),
         })
         .unwrap();
         assert!(witness.contains_key(&state_root));

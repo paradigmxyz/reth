@@ -21,6 +21,7 @@ use reth_chainspec::ChainInfo;
 use reth_db::{init_db, mdbx::DatabaseArguments, DatabaseEnv};
 use reth_db_api::{database::Database, models::StoredBlockBodyIndices};
 use reth_errors::{RethError, RethResult};
+use reth_execution_types::RecoveredBlockAndExecutionOutput;
 use reth_node_types::{
     BlockTy, HeaderTy, NodeTypesWithDB, NodeTypesWithDBAdapter, ReceiptTy, TxTy,
 };
@@ -30,7 +31,7 @@ use reth_stages_types::{PipelineTarget, StageCheckpoint, StageId};
 use reth_static_file_types::StaticFileSegment;
 use reth_storage_api::{
     BlockBodyIndicesProvider, ChainStateBlockReader, ChainStateBlockWriter, DBProvider,
-    NodePrimitivesProvider, StorageSettings, StorageSettingsCache, TryIntoHistoricalStateProvider,
+    NodePrimitivesProvider, StorageSettings, StorageSettingsCache,
 };
 use reth_storage_errors::provider::ProviderResult;
 use reth_storage_overlay::OverlayManager;
@@ -463,29 +464,6 @@ impl<N: ProviderNodeTypes> ProviderFactory<N> {
         Ok(Box::new(LatestStateProvider::new(self.database_provider_ro()?)))
     }
 
-    /// Storage provider for state at that given block
-    pub fn history_by_block_number(
-        &self,
-        block_number: BlockNumber,
-    ) -> ProviderResult<StateProviderBox> {
-        let state_provider = self.provider()?.try_into_history_at_block(block_number)?;
-        trace!(target: "providers::db", ?block_number, "Returning historical state provider for block number");
-        Ok(state_provider)
-    }
-
-    /// Storage provider for state at that given block hash
-    pub fn history_by_block_hash(&self, block_hash: BlockHash) -> ProviderResult<StateProviderBox> {
-        let provider = self.provider()?;
-
-        let block_number = provider
-            .block_number(block_hash)?
-            .ok_or(ProviderError::BlockHashNotFound(block_hash))?;
-
-        let state_provider = provider.try_into_history_at_block(block_number)?;
-        trace!(target: "providers::db", ?block_number, %block_hash, "Returning historical state provider for block hash");
-        Ok(state_provider)
-    }
-
     /// Asserts that the static files and database are consistent. If not,
     /// returns [`ProviderError::MustUnwind`] with the appropriate unwind
     /// target. May also return any [`ProviderError`] that
@@ -743,13 +721,13 @@ impl<N: ProviderNodeTypes> BlockReader for ProviderFactory<N> {
         self.provider()?.block(id)
     }
 
-    fn pending_block(&self) -> ProviderResult<Option<RecoveredBlock<Self::Block>>> {
+    fn pending_block(&self) -> ProviderResult<Option<Arc<RecoveredBlock<Self::Block>>>> {
         self.provider()?.pending_block()
     }
 
     fn pending_block_and_receipts(
         &self,
-    ) -> ProviderResult<Option<(RecoveredBlock<Self::Block>, Vec<Self::Receipt>)>> {
+    ) -> ProviderResult<Option<RecoveredBlockAndExecutionOutput<Self::Block, Self::Receipt>>> {
         self.provider()?.pending_block_and_receipts()
     }
 
@@ -1091,6 +1069,72 @@ mod tests {
         let provider_rw = factory.provider_rw().unwrap();
         provider_rw.block_hash(0).unwrap();
         provider.block_hash(0).unwrap();
+    }
+
+    #[test]
+    fn block_range_readers_reject_expired_history() {
+        use crate::BlockReader;
+        use reth_static_file_types::{SegmentHeader, SegmentRangeInclusive, StaticFileSegment};
+
+        let factory = create_test_provider_factory();
+        let mut rng = generators::rng();
+        let provider_rw = factory.provider_rw().unwrap();
+        let mut parent = None;
+        for number in 0..6 {
+            let block = random_block(
+                &mut rng,
+                number,
+                BlockParams { parent, tx_count: Some(1), ..Default::default() },
+            );
+            parent = Some(block.hash());
+            provider_rw.insert_block(&block.try_recover().unwrap()).unwrap();
+        }
+        provider_rw.commit().unwrap();
+
+        // history below block 3 has been expired
+        let static_provider = factory.static_file_provider();
+        {
+            let mut writer =
+                static_provider.latest_writer(StaticFileSegment::Transactions).unwrap();
+            let header = writer.user_header().clone();
+            *writer.user_header_mut() = SegmentHeader::new(
+                header.expected_block_range(),
+                Some(SegmentRangeInclusive::new(3, 5)),
+                header.tx_range(),
+                StaticFileSegment::Transactions,
+            );
+            writer.inner().set_dirty();
+            writer.commit().unwrap();
+        }
+        static_provider.initialize_index().unwrap();
+        assert_eq!(static_provider.earliest_history_height(), 3);
+
+        let provider = factory.provider().unwrap();
+        // single block lookups already reject expired blocks
+        assert_matches!(
+            provider.block(1.into()),
+            Err(ProviderError::BlockExpired { requested: 1, earliest_available: 3 })
+        );
+        assert_matches!(
+            provider.recovered_block(1.into(), Default::default()),
+            Err(ProviderError::BlockExpired { requested: 1, earliest_available: 3 })
+        );
+        // and so must the range readers instead of returning blocks with stripped bodies
+        assert_matches!(
+            provider.block_range(1..=4),
+            Err(ProviderError::BlockExpired { requested: 1, earliest_available: 3 })
+        );
+        assert_matches!(
+            provider.block_with_senders_range(1..=4),
+            Err(ProviderError::BlockExpired { requested: 1, earliest_available: 3 })
+        );
+        assert_matches!(
+            provider.recovered_block_range(1..=4),
+            Err(ProviderError::BlockExpired { requested: 1, earliest_available: 3 })
+        );
+        // ranges within the available history keep working
+        assert_eq!(provider.block_range(3..=5).unwrap().len(), 3);
+        assert_eq!(provider.recovered_block_range(3..=5).unwrap().len(), 3);
     }
 
     #[test]

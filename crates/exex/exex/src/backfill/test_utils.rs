@@ -14,7 +14,7 @@ use reth_node_api::NodePrimitives;
 use reth_primitives_traits::{Block as _, RecoveredBlock};
 use reth_provider::{
     providers::ProviderNodeTypes, BlockWriter as _, ExecutionOutcome, LatestStateProvider,
-    ProviderFactory,
+    ProviderFactory, StateProvider,
 };
 use reth_revm::database::StateProviderDatabase;
 use reth_testing_utils::generators::sign_tx_with_key_pair;
@@ -70,7 +70,9 @@ where
 
     // Execute the block to produce a block execution output
     let mut block_execution_output = EthEvmConfig::ethereum(chain_spec)
-        .batch_executor(StateProviderDatabase::new(LatestStateProvider::new(provider)))
+        .batch_executor(StateProviderDatabase::new(
+            LatestStateProvider::new(provider).into_evm_state_provider(),
+        ))
         .execute(block)?;
     block_execution_output.state.reverts.sort();
 
@@ -201,8 +203,9 @@ where
     let provider = provider_factory.provider()?;
 
     let evm_config = EthEvmConfig::new(chain_spec);
-    let executor =
-        evm_config.batch_executor(StateProviderDatabase::new(LatestStateProvider::new(provider)));
+    let executor = evm_config.batch_executor(StateProviderDatabase::new(
+        LatestStateProvider::new(provider).into_evm_state_provider(),
+    ));
 
     let mut execution_outcome = executor.execute_batch(vec![&block1, &block2])?;
     execution_outcome.state_mut().reverts.sort();

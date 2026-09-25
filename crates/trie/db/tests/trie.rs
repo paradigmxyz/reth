@@ -2,14 +2,18 @@
 
 use alloy_consensus::EMPTY_ROOT_HASH;
 use alloy_primitives::{
-    address, b256, hex_literal::hex, keccak256, map::HashMap, Address, B256, U256,
+    address, b256,
+    hex_literal::hex,
+    keccak256,
+    map::{B256Set, HashMap},
+    Address, B256, U256,
 };
 use alloy_rlp::Encodable;
 use proptest::{prelude::ProptestConfig, proptest};
 use proptest_arbitrary_interop::arb;
 use reth_db::{tables, test_utils::TempDatabase, DatabaseEnv};
 use reth_db_api::{
-    cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO},
+    cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO, DbDupCursorRW},
     transaction::{DbTx, DbTxMut},
 };
 use reth_primitives_traits::{Account, StorageEntry};
@@ -214,7 +218,7 @@ fn test_empty_storage_root() {
 }
 
 #[test]
-fn cleared_storage_emits_node_removals_without_deleted_flag() {
+fn cleared_storage_emits_node_removals() {
     let factory = create_test_provider_factory();
     let tx = factory.provider_rw().unwrap();
     let hashed_address = B256::random();
@@ -267,9 +271,91 @@ fn cleared_storage_emits_node_removals_without_deleted_flag() {
             .root_with_updates()
             .unwrap();
         assert_eq!(root, EMPTY_ROOT_HASH);
-        assert!(!updates.is_deleted());
         assert!(!updates.removed_nodes_ref().is_empty());
     });
+}
+
+#[test]
+fn destroyed_account_storage_emits_node_removals() {
+    let factory = create_test_provider_factory();
+    let tx = factory.provider_rw().unwrap();
+    let hashed_address = B256::random();
+    tx.tx_ref().put::<tables::HashedAccounts>(hashed_address, Account::default()).unwrap();
+    for hashed_slot in [
+        hex!("30af561000000000000000000000000000000000000000000000000000000000"),
+        hex!("30af569000000000000000000000000000000000000000000000000000000000"),
+        hex!("30af650000000000000000000000000000000000000000000000000000000000"),
+        hex!("30af6f0000000000000000000000000000000000000000000000000000000000"),
+        hex!("30af8f0000000000000000000000000000000000000000000000000000000000"),
+        hex!("3100000000000000000000000000000000000000000000000000000000000000"),
+    ] {
+        tx.tx_ref()
+            .put::<tables::HashedStorages>(
+                hashed_address,
+                StorageEntry { key: B256::new(hashed_slot), value: U256::ONE },
+            )
+            .unwrap();
+    }
+
+    let initial_updates = reth_trie_db::with_adapter!(tx, |A| {
+        DbStateRoot::<_, A>::from_tx(tx.tx_ref()).root_with_updates().unwrap().1
+    });
+    tx.write_trie_updates(initial_updates).unwrap();
+
+    let initial_storage_updates = reth_trie_db::with_adapter!(tx, |A| {
+        DbStorageRoot::<_, A>::from_tx_hashed(tx.tx_ref(), hashed_address)
+            .root_with_updates()
+            .unwrap()
+            .2
+    });
+    let mut expected_removed_nodes: Vec<_> =
+        initial_storage_updates.storage_nodes_ref().keys().copied().collect();
+    expected_removed_nodes.sort_unstable();
+    assert!(!expected_removed_nodes.is_empty());
+    let initial_storage_updates = initial_storage_updates.into_sorted();
+    tx.write_storage_trie_updates_sorted(core::iter::once((
+        &hashed_address,
+        &initial_storage_updates,
+    )))
+    .unwrap();
+
+    let mut account_cursor = tx.tx_ref().cursor_write::<tables::HashedAccounts>().unwrap();
+    account_cursor.seek_exact(hashed_address).unwrap();
+    account_cursor.delete_current().unwrap();
+    drop(account_cursor);
+
+    let mut storage_cursor = tx.tx_ref().cursor_dup_write::<tables::HashedStorages>().unwrap();
+    storage_cursor.seek_exact(hashed_address).unwrap();
+    storage_cursor.delete_current_duplicates().unwrap();
+    drop(storage_cursor);
+
+    let mut account_prefix_set = PrefixSetMut::default();
+    account_prefix_set.insert(Nibbles::unpack(hashed_address));
+    let (root, updates) = reth_trie_db::with_adapter!(tx, |A| {
+        DbStateRoot::<_, A>::from_tx(tx.tx_ref())
+            .with_prefix_sets(TriePrefixSets {
+                account_prefix_set: account_prefix_set.freeze(),
+                destroyed_accounts: B256Set::from_iter([hashed_address]),
+                ..Default::default()
+            })
+            .root_with_updates()
+            .unwrap()
+    });
+
+    assert_eq!(root, EMPTY_ROOT_HASH);
+    let storage_updates = &updates.storage_tries_ref()[&hashed_address];
+    let mut removed_nodes: Vec<_> = storage_updates.removed_nodes_ref().iter().copied().collect();
+    removed_nodes.sort_unstable();
+    assert_eq!(removed_nodes, expected_removed_nodes);
+
+    tx.write_trie_updates(updates).unwrap();
+    assert!(tx
+        .tx_ref()
+        .cursor_dup_read::<tables::StoragesTrie>()
+        .unwrap()
+        .seek_exact(hashed_address)
+        .unwrap()
+        .is_none());
 }
 
 #[test]
@@ -751,7 +837,7 @@ proptest! {
         let mut hashed_account_cursor = tx.tx_ref().cursor_write::<tables::HashedAccounts>().unwrap();
 
         let mut state = BTreeMap::default();
-        for accounts in account_changes {
+        for mut accounts in account_changes {
             let should_generate_changeset = !state.is_empty();
             let mut changes = PrefixSetMut::default();
             for (hashed_address, balance) in accounts.clone() {
@@ -768,7 +854,7 @@ proptest! {
                     .unwrap()
             });
 
-            state.append(&mut accounts.clone());
+            state.append(&mut accounts);
             let expected_root = state_root_prehashed(
                 state.iter().map(|(&key, &balance)| (key, (Account { balance, ..Default::default() }, std::iter::empty())))
             );

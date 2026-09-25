@@ -40,6 +40,8 @@ reth-config.workspace = true
 reth-consensus.workspace = true
 reth-db-common.workspace = true
 reth-primitives-traits.workspace = true
+reth-trie.workspace = true
+reth-trie-db.workspace = true
 
 revm.workspace = true
 tempfile.workspace = true

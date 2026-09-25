@@ -2,7 +2,7 @@ use super::BalExecutionError;
 use alloy_consensus::Transaction;
 use alloy_eip7928::BlockAccessIndex;
 use alloy_evm::{
-    block::{BlockExecutionError, BlockExecutor, BlockExecutorFactory},
+    block::{BlockExecutionError, BlockExecutor, BlockExecutorFactory, BlockValidationError},
     Evm,
 };
 use alloy_primitives::Address;
@@ -17,19 +17,35 @@ pub(super) enum BalWorkerError {
     #[error("BAL worker setup failed: {0}")]
     Setup(#[source] BalExecutionError),
     /// Transaction recovery or conversion failed before EVM execution.
-    #[error("BAL worker transaction conversion failed: {0}")]
-    Transaction(Box<dyn core::error::Error + Send + Sync + 'static>),
+    #[error("BAL worker transaction conversion failed for transaction {tx_index}: {source}")]
+    Transaction {
+        /// Index of the transaction that failed.
+        tx_index: usize,
+        /// The underlying recovery or conversion error.
+        #[source]
+        source: Box<dyn core::error::Error + Send + Sync + 'static>,
+    },
     /// EVM transaction execution failed.
-    #[error("BAL worker EVM execution failed: {0}")]
-    Execution(BlockExecutionError),
+    #[error("BAL worker EVM execution failed for transaction {tx_index}: {source}")]
+    Execution {
+        /// Index of the transaction that failed.
+        tx_index: usize,
+        /// Gas limit of the transaction that failed.
+        tx_gas_limit: u64,
+        /// The underlying execution error.
+        #[source]
+        source: BlockExecutionError,
+    },
 }
 
 impl From<BalWorkerError> for BalExecutionError {
     fn from(err: BalWorkerError) -> Self {
         match err {
             BalWorkerError::Setup(err) => err,
-            BalWorkerError::Transaction(err) => Self::Other(err),
-            BalWorkerError::Execution(err) => Self::Execution(err),
+            BalWorkerError::Transaction { source, .. } => {
+                Self::Execution(BlockValidationError::Other(source).into())
+            }
+            BalWorkerError::Execution { source, .. } => Self::Execution(source),
         }
     }
 }
@@ -67,39 +83,62 @@ pub(super) fn spawn_worker<'scope, Evm, Tx, Err, DB, MakeDb>(
 {
     scope.spawn(move |_| {
         let worker_result = (|| -> Result<(), BalWorkerError> {
-            // Create a database with fill_on_miss=true ensuring misses
-            // are inserted for the other workers.
-            let database = make_db(true).map_err(BalWorkerError::Setup)?;
-            let mut worker_state = State::builder()
-                .with_database(database)
-                .with_bal(received_bal_revm)
-                .with_bundle_update()
-                .build();
-            let evm = evm_config.evm_with_env(&mut worker_state, evm_env);
-            let mut executor = evm_config.create_executor_with_state(evm, ctx.clone());
+            // Keep the cache-filling database across executor resets so a speculative failure
+            // cannot introduce an unindexed provider setup error ahead of its ordered verdict.
+            let mut database = make_db(true).map_err(BalWorkerError::Setup)?;
+            'worker: loop {
+                let mut worker_state = State::builder()
+                    .with_database(&mut database)
+                    .with_bal(Arc::clone(&received_bal_revm))
+                    .with_bundle_update()
+                    .build();
+                let evm = evm_config.evm_with_env(&mut worker_state, evm_env.clone());
+                let mut executor = evm_config.create_executor_with_state(evm, ctx.clone());
 
-            loop {
-                let (index, tx) = crossbeam_channel::select_biased! {
-                    recv(abort_rx) -> _ => break,
-                    recv(tx_rx) -> msg => match msg {
-                        Ok(ix_tx) => ix_tx,
-                        Err(_) => break,
-                    },
-                };
-                let tx = tx.map_err(|e| BalWorkerError::Transaction(Box::new(e)))?;
-                let signer = *tx.signer();
-                let tx_gas_limit = tx.tx().gas_limit();
+                loop {
+                    let (tx_index, tx) = crossbeam_channel::select_biased! {
+                        recv(abort_rx) -> _ => break 'worker,
+                        recv(tx_rx) -> msg => match msg {
+                            Ok(ix_tx) => ix_tx,
+                            Err(_) => break 'worker,
+                        },
+                    };
+                    let tx = match tx {
+                        Ok(tx) => tx,
+                        Err(source) => {
+                            let error =
+                                BalWorkerError::Transaction { tx_index, source: Box::new(source) };
+                            if result_tx.send(Err(error)).is_err() {
+                                break 'worker;
+                            }
+                            continue;
+                        }
+                    };
+                    let signer = *tx.signer();
+                    let tx_gas_limit = tx.tx().gas_limit();
 
-                executor.evm_mut().db_mut().set_bal_index(BlockAccessIndex::new(index as u64 + 1));
-                let result = executor
-                    .execute_transaction_without_commit(tx)
-                    .map_err(BalWorkerError::Execution)?;
-
-                if result_tx
-                    .send(Ok(BalWorkerOutput { index, signer, tx_gas_limit, result }))
-                    .is_err()
-                {
-                    break;
+                    executor
+                        .evm_mut()
+                        .db_mut()
+                        .set_bal_index(BlockAccessIndex::from_tx_index(tx_index as u64));
+                    let message = match executor.execute_transaction_without_commit(tx) {
+                        Ok(result) => {
+                            Ok(BalWorkerOutput { index: tx_index, signer, tx_gas_limit, result })
+                        }
+                        Err(source) => {
+                            Err(BalWorkerError::Execution { tx_index, tx_gas_limit, source })
+                        }
+                    };
+                    let failed = message.is_err();
+                    if result_tx.send(message).is_err() {
+                        break 'worker;
+                    }
+                    if failed {
+                        // The executor trait does not guarantee reuse after an error. Rebuild
+                        // its EVM and state before serving more work: the queue can still contain
+                        // earlier transactions whose verdict must precede this failure.
+                        break;
+                    }
                 }
             }
 

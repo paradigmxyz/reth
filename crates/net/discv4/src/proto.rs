@@ -155,6 +155,11 @@ impl Message {
             return Err(DecodePacketError::HashMismatch)
         }
 
+        // Resolve the message type before recovering the public key: recovery is by far the most
+        // expensive step of decoding, and a packet we have no handler for is rejected either way.
+        let message_id =
+            MessageId::from_u8(packet[97]).map_err(DecodePacketError::UnknownMessage)?;
+
         let signature = &packet[32..96];
         let recovery_id = RecoveryId::try_from(packet[96] as i32)?;
         let recoverable_sig = RecoverableSignature::from_compact(signature, recovery_id)?;
@@ -165,10 +170,9 @@ impl Message {
         let pk = SECP256K1.recover_ecdsa(&msg, &recoverable_sig)?;
         let node_id = pk2id(&pk);
 
-        let msg_type = packet[97];
         let payload = &mut &packet[98..];
 
-        let msg = match MessageId::from_u8(msg_type).map_err(DecodePacketError::UnknownMessage)? {
+        let msg = match message_id {
             MessageId::Ping => Self::Ping(Ping::decode(payload)?),
             MessageId::Pong => Self::Pong(Pong::decode(payload)?),
             MessageId::FindNode => Self::FindNode(FindNode::decode(payload)?),
@@ -432,6 +436,15 @@ pub struct Ping {
 }
 
 impl Encodable for Ping {
+    fn length(&self) -> usize {
+        let mut payload_length =
+            4u32.length() + self.from.length() + self.to.length() + self.expire.length();
+        if let Some(enr_seq) = self.enr_sq {
+            payload_length += enr_seq.length();
+        }
+        payload_length + alloy_rlp::length_of_length(payload_length)
+    }
+
     fn encode(&self, out: &mut dyn BufMut) {
         #[derive(RlpEncodable)]
         struct V4PingMessage<'a> {
@@ -524,6 +537,14 @@ pub struct Pong {
 }
 
 impl Encodable for Pong {
+    fn length(&self) -> usize {
+        let mut payload_length = self.to.length() + self.echo.length() + self.expire.length();
+        if let Some(enr_seq) = self.enr_sq {
+            payload_length += enr_seq.length();
+        }
+        payload_length + alloy_rlp::length_of_length(payload_length)
+    }
+
     fn encode(&self, out: &mut dyn BufMut) {
         #[derive(RlpEncodable)]
         struct PongMessageEIP868<'a> {
@@ -644,8 +665,12 @@ mod tests {
                 enr_sq: None,
             };
 
-            let decoded = Ping::decode(&mut alloy_rlp::encode(&msg).as_slice()).unwrap();
+            let encoded = alloy_rlp::encode(&msg);
+            assert_eq!(msg.length(), encoded.len());
+            let mut buf = encoded.as_slice();
+            let decoded = Ping::decode(&mut buf).unwrap();
             assert_eq!(msg, decoded);
+            assert!(buf.is_empty());
         }
     }
 
@@ -662,8 +687,12 @@ mod tests {
                 enr_sq: Some(rng.r#gen()),
             };
 
-            let decoded = Ping::decode(&mut alloy_rlp::encode(&msg).as_slice()).unwrap();
+            let encoded = alloy_rlp::encode(&msg);
+            assert_eq!(msg.length(), encoded.len());
+            let mut buf = encoded.as_slice();
+            let decoded = Ping::decode(&mut buf).unwrap();
             assert_eq!(msg, decoded);
+            assert!(buf.is_empty());
         }
     }
 
@@ -680,8 +709,12 @@ mod tests {
                 enr_sq: None,
             };
 
-            let decoded = Pong::decode(&mut alloy_rlp::encode(&msg).as_slice()).unwrap();
+            let encoded = alloy_rlp::encode(&msg);
+            assert_eq!(msg.length(), encoded.len());
+            let mut buf = encoded.as_slice();
+            let decoded = Pong::decode(&mut buf).unwrap();
             assert_eq!(msg, decoded);
+            assert!(buf.is_empty());
         }
     }
 
@@ -698,8 +731,12 @@ mod tests {
                 enr_sq: Some(rng.r#gen()),
             };
 
-            let decoded = Pong::decode(&mut alloy_rlp::encode(&msg).as_slice()).unwrap();
+            let encoded = alloy_rlp::encode(&msg);
+            assert_eq!(msg.length(), encoded.len());
+            let mut buf = encoded.as_slice();
+            let decoded = Pong::decode(&mut buf).unwrap();
             assert_eq!(msg, decoded);
+            assert!(buf.is_empty());
         }
     }
 

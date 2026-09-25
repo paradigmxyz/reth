@@ -32,12 +32,14 @@ use alloy_provider::{ext::DebugApi, network::Network, Provider};
 use alloy_rpc_types::{AccountInfo, BlockId};
 use alloy_rpc_types_engine::ForkchoiceState;
 use dashmap::DashMap;
+use reth_chain_state::ExecutedBlock;
 use reth_chainspec::{ChainInfo, ChainSpecProvider};
 use reth_db_api::{
     mock::{DatabaseMock, TxMock},
     models::StoredBlockBodyIndices,
 };
 use reth_errors::{ProviderError, ProviderResult};
+use reth_execution_types::RecoveredBlockAndExecutionOutput;
 use reth_node_types::{
     Block, BlockBody, BlockTy, HeaderTy, NodeTypes, PrimitivesTy, ReceiptTy, TxTy,
 };
@@ -493,13 +495,13 @@ where
         Ok(Some(block))
     }
 
-    fn pending_block(&self) -> ProviderResult<Option<RecoveredBlock<Self::Block>>> {
+    fn pending_block(&self) -> ProviderResult<Option<Arc<RecoveredBlock<Self::Block>>>> {
         Err(ProviderError::UnsupportedProvider)
     }
 
     fn pending_block_and_receipts(
         &self,
-    ) -> ProviderResult<Option<(RecoveredBlock<Self::Block>, Vec<Self::Receipt>)>> {
+    ) -> ProviderResult<Option<RecoveredBlockAndExecutionOutput<Self::Block, Self::Receipt>>> {
         Err(ProviderError::UnsupportedProvider)
     }
 
@@ -737,8 +739,18 @@ where
     N: Network,
     Node: NodeTypes,
 {
+    type Primitives = PrimitivesTy<Node>;
+
     fn latest(&self) -> Result<StateProviderBox, ProviderError> {
         Ok(Box::new(self.create_state_provider(self.best_block_number()?.into())))
+    }
+
+    fn state_with_block_appended(
+        &self,
+        _parent_hash: BlockHash,
+        _block: ExecutedBlock<PrimitivesTy<Node>>,
+    ) -> ProviderResult<StateProviderBox> {
+        Err(ProviderError::UnsupportedProvider)
     }
 
     fn state_by_block_id(&self, block_id: BlockId) -> Result<StateProviderBox, ProviderError> {
@@ -879,6 +891,8 @@ where
     N: Network,
     Node: NodeTypes,
 {
+    type Primitives = PrimitivesTy<Node>;
+
     fn subscribe_to_canonical_state(&self) -> CanonStateNotifications<PrimitivesTy<Node>> {
         trace!(target: "alloy-provider", "Subscribing to canonical state notifications");
         self.canon_state_notification.subscribe()
@@ -1299,6 +1313,14 @@ where
         Err(ProviderError::UnsupportedProvider)
     }
 
+    fn multiproof_v2(
+        &self,
+        _input: TrieInput,
+        _targets: reth_trie::MultiProofTargetsV2,
+    ) -> Result<reth_trie::DecodedMultiProofV2, ProviderError> {
+        Err(ProviderError::UnsupportedProvider)
+    }
+
     fn witness(
         &self,
         _input: TrieInput,
@@ -1506,13 +1528,14 @@ where
         Err(ProviderError::UnsupportedProvider)
     }
 
-    fn pending_block(&self) -> Result<Option<RecoveredBlock<Self::Block>>, ProviderError> {
+    fn pending_block(&self) -> Result<Option<Arc<RecoveredBlock<Self::Block>>>, ProviderError> {
         Err(ProviderError::UnsupportedProvider)
     }
 
     fn pending_block_and_receipts(
         &self,
-    ) -> Result<Option<(RecoveredBlock<Self::Block>, Vec<Self::Receipt>)>, ProviderError> {
+    ) -> Result<Option<RecoveredBlockAndExecutionOutput<Self::Block, Self::Receipt>>, ProviderError>
+    {
         Err(ProviderError::UnsupportedProvider)
     }
 
@@ -1786,8 +1809,18 @@ where
     N: Network,
     Self: Clone + 'static,
 {
+    type Primitives = PrimitivesTy<Node>;
+
     fn latest(&self) -> Result<StateProviderBox, ProviderError> {
         Ok(Box::new(self.with_block_id(self.best_block_number()?.into())))
+    }
+
+    fn state_with_block_appended(
+        &self,
+        _parent_hash: BlockHash,
+        _block: ExecutedBlock<PrimitivesTy<Node>>,
+    ) -> ProviderResult<StateProviderBox> {
+        Err(ProviderError::UnsupportedProvider)
     }
 
     fn state_by_block_id(&self, block_id: BlockId) -> Result<StateProviderBox, ProviderError> {

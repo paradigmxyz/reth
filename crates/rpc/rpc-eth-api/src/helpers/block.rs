@@ -6,6 +6,7 @@ use crate::{
     RpcReceipt,
 };
 use alloy_consensus::{transaction::TxHashRef, TxReceipt};
+use alloy_eip7928::bal::DecodedBal;
 use alloy_eips::BlockId;
 use alloy_rlp::Encodable;
 use alloy_rpc_types_eth::{Block, BlockTransactions, Index};
@@ -13,8 +14,10 @@ use futures::Future;
 use reth_node_api::BlockBody;
 use reth_primitives_traits::{AlloyBlockHeader, RecoveredBlock, SealedHeader, TransactionMeta};
 use reth_rpc_convert::{transaction::ConvertReceiptInput, RpcConvert, RpcHeader};
+use reth_rpc_eth_types::block::SharedReceipts;
 use reth_storage_api::{BlockIdReader, BlockReader, ProviderHeader, ProviderReceipt, ProviderTx};
 use reth_transaction_pool::{PoolTransaction, TransactionPool};
+use revm::state::bal::Bal as RevmBal;
 use std::sync::Arc;
 
 /// Result type of the fetched block receipts.
@@ -23,7 +26,7 @@ pub type BlockReceiptsResult<N, E> = Result<Option<Vec<RpcReceipt<N>>>, E>;
 pub type BlockAndReceiptsResult<Eth> = Result<
     Option<(
         Arc<RecoveredBlock<<<Eth as RpcNodeCore>::Provider as BlockReader>::Block>>,
-        Arc<Vec<ProviderReceipt<<Eth as RpcNodeCore>::Provider>>>,
+        SharedReceipts<ProviderReceipt<<Eth as RpcNodeCore>::Provider>>,
     )>,
     <Eth as EthApiTypes>::Error,
 >;
@@ -41,8 +44,8 @@ pub trait EthBlocks: LoadBlock<RpcConvert: RpcConvert<Primitives = Self::Primiti
     {
         async move {
             let Some(block) = self.recovered_block(block_id).await? else { return Ok(None) };
-            let header =
-                self.converter().convert_header(block.clone_sealed_header(), block.rlp_length())?;
+            // Header responses omit the block size: https://github.com/ethereum/execution-apis/pull/877
+            let header = self.converter().convert_header(block.clone_sealed_header(), None)?;
             Ok(Some(header))
         }
     }
@@ -65,7 +68,7 @@ pub trait EthBlocks: LoadBlock<RpcConvert: RpcConvert<Primitives = Self::Primiti
             let block = block.clone_into_rpc_block(
                 full.into(),
                 |tx, tx_info| self.converter().fill(tx, tx_info),
-                |header, size| self.converter().convert_header(header, size),
+                |header, block_size| self.converter().convert_header(header, Some(block_size)),
             )?;
             Ok(Some(block))
         }
@@ -103,7 +106,7 @@ pub trait EthBlocks: LoadBlock<RpcConvert: RpcConvert<Primitives = Self::Primiti
 
                 let inputs = block
                     .transactions_recovered()
-                    .zip(Arc::unwrap_or_clone(receipts))
+                    .zip(receipts.into_vec())
                     .enumerate()
                     .map(|(idx, (tx, receipt))| {
                         let meta = TransactionMeta {
@@ -162,12 +165,13 @@ pub trait EthBlocks: LoadBlock<RpcConvert: RpcConvert<Primitives = Self::Primiti
 
                 // First, try to get the pending block from the provider, in case we already
                 // received the actual pending block from the CL.
-                if let Some((block, receipts)) = self
+                if let Some(pending) = self
                     .provider()
                     .pending_block_and_receipts()
                     .map_err(Self::Error::from_eth_err)?
                 {
-                    return Ok(Some((Arc::new(block), Arc::new(receipts))));
+                    let (block, output) = pending.into_parts();
+                    return Ok(Some((block, output.into())));
                 }
 
                 // If no pending block from provider, build the pending block locally.
@@ -184,7 +188,7 @@ pub trait EthBlocks: LoadBlock<RpcConvert: RpcConvert<Primitives = Self::Primiti
                     .await
                     .map_err(Self::Error::from_eth_err)?
             {
-                return Ok(Some((block, receipts)));
+                return Ok(Some((block, receipts.into())));
             }
 
             Ok(None)
@@ -234,7 +238,7 @@ pub trait EthBlocks: LoadBlock<RpcConvert: RpcConvert<Primitives = Self::Primiti
                     let size = block.length();
                     let header = self
                         .converter()
-                        .convert_header(SealedHeader::new_unhashed(block.header), size)?;
+                        .convert_header(SealedHeader::new_unhashed(block.header), Some(size))?;
                     Ok(Block {
                         uncles: vec![],
                         header,
@@ -272,7 +276,7 @@ pub trait LoadBlock: LoadPendingBlock + SpawnBlocking + RpcNodeCoreExt {
                 if let Some(pending_block) =
                     self.provider().pending_block().map_err(Self::Error::from_eth_err)?
                 {
-                    return Ok(Some(Arc::new(pending_block)));
+                    return Ok(Some(pending_block));
                 }
 
                 // If no pending block from provider, try to get local pending block
@@ -292,6 +296,45 @@ pub trait LoadBlock: LoadPendingBlock + SpawnBlocking + RpcNodeCoreExt {
             };
 
             self.cache().get_recovered_block(block_hash).await.map_err(Self::Error::from_eth_err)
+        }
+    }
+
+    /// Returns the block for the given block id, together with the block's cached block access
+    /// list, if any.
+    ///
+    /// The BAL is only returned if it is already cached, it is never fetched from the BAL store.
+    /// Pending blocks never have a BAL.
+    #[expect(clippy::type_complexity)]
+    fn recovered_block_and_maybe_bal(
+        &self,
+        block_id: BlockId,
+    ) -> impl Future<
+        Output = Result<
+            Option<(
+                Arc<RecoveredBlock<<Self::Provider as BlockReader>::Block>>,
+                Option<Arc<DecodedBal<Arc<RevmBal>>>>,
+            )>,
+            Self::Error,
+        >,
+    > + Send {
+        async move {
+            if block_id.is_pending() {
+                return Ok(self.recovered_block(block_id).await?.map(|block| (block, None)));
+            }
+
+            let block_hash = match self
+                .provider()
+                .block_hash_for_id(block_id)
+                .map_err(Self::Error::from_eth_err)?
+            {
+                Some(block_hash) => block_hash,
+                None => return Ok(None),
+            };
+
+            self.cache()
+                .get_recovered_block_and_maybe_bal(block_hash)
+                .await
+                .map_err(Self::Error::from_eth_err)
         }
     }
 }

@@ -75,7 +75,7 @@ pub trait RethRpcServerConfig {
     /// the filesystem. This file can then be used to provision the counterpart client.
     ///
     /// The `default_jwt_path` provided as an argument will be used as the default location for the
-    /// jwt secret in case the `auth_jwtsecret` argument is not provided.
+    /// jwt secret in case neither `--authrpc.jwtsecret` nor `--authrpc.jwtsecret-hex` is provided.
     fn auth_jwt_secret(&self, default_jwt_path: PathBuf) -> Result<JwtSecret, JwtError>;
 
     /// Returns the configured jwt secret key for the regular rpc servers, if any.
@@ -125,8 +125,13 @@ impl RethRpcServerConfig for RpcServerArgs {
         EthStateCacheConfig {
             max_blocks: self.rpc_state_cache.max_blocks,
             max_receipts: self.rpc_state_cache.max_receipts,
-            max_headers: self.rpc_state_cache.max_headers,
             max_bals: self.rpc_state_cache.max_bals,
+            max_blocks_bytes: self.rpc_state_cache.max_blocks_bytes,
+            max_receipts_bytes: self.rpc_state_cache.max_receipts_bytes,
+            max_bals_bytes: self.rpc_state_cache.max_bals_bytes,
+            idle_timeout: self.rpc_state_cache.idle_timeout,
+            cache_computed_bals: self.rpc_state_cache.cache_computed_bals,
+            prewarm_bals: self.rpc_state_cache.prewarm_bals,
             max_concurrent_db_requests: self.rpc_state_cache.max_concurrent_db_requests,
             max_cached_tx_hashes: self.rpc_state_cache.max_cached_tx_hashes,
         }
@@ -255,12 +260,17 @@ impl RethRpcServerConfig for RpcServerArgs {
     }
 
     fn auth_jwt_secret(&self, default_jwt_path: PathBuf) -> Result<JwtSecret, JwtError> {
-        match self.auth_jwtsecret.as_ref() {
-            Some(fpath) => {
-                debug!(target: "reth::cli", user_path=?fpath, "Reading JWT auth secret file");
-                JwtSecret::from_file(fpath)
+        if let Some(secret) = self.auth_jwtsecret_hex {
+            debug!(target: "reth::cli", "Using JWT auth secret from hex");
+            Ok(secret)
+        } else {
+            match self.auth_jwtsecret.as_ref() {
+                Some(fpath) => {
+                    debug!(target: "reth::cli", user_path=?fpath, "Reading JWT auth secret file");
+                    JwtSecret::from_file(fpath)
+                }
+                None => get_or_create_jwt_secret_from_path(&default_jwt_path),
             }
-            None => get_or_create_jwt_secret_from_path(&default_jwt_path),
         }
     }
 
@@ -273,9 +283,13 @@ impl RethRpcServerConfig for RpcServerArgs {
 mod tests {
     use clap::{Args, Parser};
     use reth_node_core::args::RpcServerArgs;
-    use reth_rpc_eth_types::RPC_DEFAULT_GAS_CAP;
+    use reth_rpc_eth_types::{EthStateCacheConfig, RPC_DEFAULT_GAS_CAP};
+    use reth_rpc_layer::JwtSecret;
     use reth_rpc_server_types::{constants, RethRpcModule, RpcModuleSelection};
-    use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
+    use std::{
+        net::{Ipv4Addr, SocketAddr, SocketAddrV4},
+        time::Duration,
+    };
 
     use crate::config::RethRpcServerConfig;
 
@@ -284,6 +298,48 @@ mod tests {
     struct CommandParser<T: Args> {
         #[command(flatten)]
         args: T,
+    }
+
+    #[test]
+    fn rpc_cache_limits_reach_eth_config() {
+        let args = CommandParser::<RpcServerArgs>::parse_from(["reth"]).args;
+        assert_eq!(args.eth_config().cache, EthStateCacheConfig::default());
+
+        for (timeout, expected_timeout) in
+            [("0s", Duration::ZERO), ("2500ms", Duration::from_millis(2500))]
+        {
+            let args = CommandParser::<RpcServerArgs>::parse_from([
+                "reth",
+                "--rpc-cache.max-blocks",
+                "10",
+                "--rpc-cache.max-receipts",
+                "20",
+                "--rpc-cache.max-bals",
+                "30",
+                "--rpc-cache.max-blocks-bytes",
+                "1024",
+                "--rpc-cache.max-receipts-bytes",
+                "0",
+                "--rpc-cache.max-bals-bytes",
+                "4096",
+                "--rpc-cache.idle-timeout",
+                timeout,
+            ])
+            .args;
+            assert_eq!(
+                args.eth_config().cache,
+                EthStateCacheConfig {
+                    max_blocks: 10,
+                    max_receipts: 20,
+                    max_bals: 30,
+                    max_blocks_bytes: 1024,
+                    max_receipts_bytes: 0,
+                    max_bals_bytes: 4096,
+                    idle_timeout: expected_timeout,
+                    ..Default::default()
+                }
+            );
+        }
     }
 
     #[test]
@@ -318,6 +374,38 @@ mod tests {
             config.ws().cloned().unwrap().into_selection(),
             RpcModuleSelection::standard_modules()
         );
+    }
+
+    #[test]
+    fn test_testing_namespace_requires_explicit_selection() {
+        let args = CommandParser::<RpcServerArgs>::parse_from([
+            "reth",
+            "--http",
+            "--http.api",
+            "all",
+            "--ws",
+            "--ws.api",
+            "all",
+        ])
+        .args;
+        let config = args.transport_rpc_module_config();
+        assert!(!config.contains_http(&RethRpcModule::Testing));
+        assert!(!config.contains_ws(&RethRpcModule::Testing));
+        assert!(!config.contains_ipc(&RethRpcModule::Testing));
+
+        let args = CommandParser::<RpcServerArgs>::parse_from([
+            "reth",
+            "--http",
+            "--http.api",
+            "eth,testing",
+            "--ws",
+            "--ws.api",
+            "eth,testing",
+        ])
+        .args;
+        let config = args.transport_rpc_module_config();
+        assert!(config.contains_http(&RethRpcModule::Testing));
+        assert!(config.contains_ws(&RethRpcModule::Testing));
     }
 
     #[test]
@@ -426,5 +514,16 @@ mod tests {
         let config = args.eth_config().filter_config();
         assert_eq!(config.max_blocks_per_filter, Some(100));
         assert_eq!(config.max_logs_per_response, Some(200));
+    }
+
+    #[test]
+    fn test_auth_jwt_secret_from_hex() {
+        let hex = "1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef";
+        let args =
+            CommandParser::<RpcServerArgs>::parse_from(["reth", "--authrpc.jwtsecret-hex", hex])
+                .args;
+
+        let secret = args.auth_jwt_secret(std::env::temp_dir().join("unused.jwt")).unwrap();
+        assert_eq!(secret, JwtSecret::from_hex(hex).unwrap());
     }
 }

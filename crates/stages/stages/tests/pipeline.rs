@@ -325,7 +325,7 @@ async fn run_pipeline_forward_and_unwind(
 
         let block_with_senders = RecoveredBlock::new_unhashed(
             Block::new(
-                temp_header.clone(),
+                temp_header,
                 BlockBody {
                     transactions: transactions.clone(),
                     ommers: Vec::new(),
@@ -338,7 +338,7 @@ async fn run_pipeline_forward_and_unwind(
         // Execute in a scope so state_provider is dropped before we use provider for writes
         let output = {
             let state_provider = provider.latest();
-            let db = StateProviderDatabase::new(&*state_provider);
+            let db = StateProviderDatabase::new((&*state_provider).into_evm_state_provider());
             let executor = evm_config.batch_executor(db);
             executor.execute(&block_with_senders)?
         };
@@ -377,7 +377,7 @@ async fn run_pipeline_forward_and_unwind(
         };
 
         let block: SealedBlock<Block> = SealedBlock::seal_parts(
-            header.clone(),
+            header,
             BlockBody { transactions, ommers: Vec::new(), withdrawals: None },
         );
 

@@ -123,7 +123,7 @@ where
             let (_, header_buf) = header?;
 
             if index > 0 && index.is_multiple_of(interval) && total_headers > 100 {
-                info!(target: "sync::stages::headers", progress = %format!("{:.2}%", (index as f64 / total_headers as f64) * 100.0), "Writing headers");
+                info!(target: "sync::stages::headers", progress = %format_args!("{:.2}%", (index as f64 / total_headers as f64) * 100.0), "Writing headers");
             }
 
             let sealed_header: SealedHeader<Downloader::Header> = SealedHeader::new_unhashed(
@@ -164,7 +164,7 @@ where
             let (hash, number) = hash_to_number?;
 
             if index > 0 && index.is_multiple_of(interval) && total_headers > 100 {
-                info!(target: "sync::stages::headers", progress = %format!("{:.2}%", (index as f64 / total_headers as f64) * 100.0), "Writing headers hash index");
+                info!(target: "sync::stages::headers", progress = %format_args!("{:.2}%", (index as f64 / total_headers as f64) * 100.0), "Writing headers hash index");
             }
 
             if first_sync {
@@ -392,7 +392,7 @@ mod tests {
     };
     use alloy_primitives::B256;
     use assert_matches::assert_matches;
-    use reth_provider::{DatabaseProviderFactory, ProviderFactory, StaticFileProviderFactory};
+    use reth_provider::{test_utils::insert_headers, ProviderFactory, StaticFileProviderFactory};
     use reth_stages_api::StageUnitCheckpoint;
     use reth_testing_utils::generators::{self, random_header, random_header_range};
     use std::sync::Arc;
@@ -611,15 +611,7 @@ mod tests {
             tip.hash(),
         );
 
-        let provider = runner.db().factory.database_provider_rw().unwrap();
-        let static_file_provider = provider.static_file_provider();
-        let mut writer = static_file_provider.latest_writer(StaticFileSegment::Headers).unwrap();
-        for header in sealed_headers {
-            writer.append_header(header.header(), &header.hash()).unwrap();
-        }
-        drop(writer);
-
-        provider.commit().unwrap();
+        insert_headers(&runner.db().factory, &sealed_headers);
 
         // now we can unwind 10 blocks
         let unwind_input = UnwindInput {

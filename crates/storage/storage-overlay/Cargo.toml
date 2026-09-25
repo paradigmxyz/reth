@@ -39,6 +39,7 @@ metrics.workspace = true
 parking_lot.workspace = true
 rayon = { workspace = true, optional = true }
 tracing.workspace = true
+revm.workspace = true
 
 [dev-dependencies]
 reth-chain-state = { workspace = true, features = ["test-utils"] }
@@ -50,5 +51,4 @@ reth-trie = { workspace = true, features = ["test-utils"] }
 alloy-consensus.workspace = true
 
 [features]
-partial-persistence = ["reth-stages-types/partial-persistence"]
 rayon = ["dep:rayon", "dep:reth-tasks"]

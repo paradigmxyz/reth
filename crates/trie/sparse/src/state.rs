@@ -1,5 +1,3 @@
-#[cfg(feature = "trie-debug")]
-use crate::debug_recorder::TrieDebugRecorder;
 use crate::{
     traits::SparseTrie as SparseTrieTrait, ArenaParallelSparseTrie, RevealableSparseTrie,
     TrieNodeEpoch,
@@ -82,6 +80,11 @@ impl<A, S> SparseStateTrie<A, S> {
         self
     }
 
+    /// Returns whether branch node updates and deletions are retained.
+    pub const fn retains_updates(&self) -> bool {
+        self.retain_updates
+    }
+
     /// Set the accounts trie to the given `RevealableSparseTrie`.
     pub fn set_accounts_trie(&mut self, trie: RevealableSparseTrie<A>) {
         self.state = trie;
@@ -119,26 +122,6 @@ impl SparseStateTrie {
     /// Create new [`SparseStateTrie`] with the default trie implementation.
     pub fn new() -> Self {
         Self::default()
-    }
-}
-
-impl<A: SparseTrieTrait, S: SparseTrieTrait> SparseStateTrie<A, S> {
-    /// Takes all debug recorders from the account trie and all revealed storage tries.
-    ///
-    /// Returns a vec of `(Option<B256>, TrieDebugRecorder)` where `None` is the account trie
-    /// key, and `Some(address)` are storage trie keys.
-    #[cfg(feature = "trie-debug")]
-    pub fn take_debug_recorders(&mut self) -> alloc::vec::Vec<(Option<B256>, TrieDebugRecorder)> {
-        let mut recorders = alloc::vec::Vec::new();
-        if let Some(trie) = self.state.as_revealed_mut() {
-            recorders.push((None, trie.take_debug_recorder()));
-        }
-        for (address, trie) in &mut self.storage.tries {
-            if let Some(trie) = trie.as_revealed_mut() {
-                recorders.push((Some(*address), trie.take_debug_recorder()));
-            }
-        }
-        recorders
     }
 }
 
@@ -341,12 +324,34 @@ where
         any_err
     }
 
-    /// Wipe the storage trie at the provided address.
-    pub fn wipe_storage(&mut self, address: B256) -> SparseStateTrieResult<()> {
-        if let Some(trie) = self.storage.tries.get_mut(&address) {
-            trie.wipe()?;
+    /// Reveals account trie proof nodes on the calling thread.
+    ///
+    /// Unlike [`Self::reveal_decoded_multiproof_v2`] this touches only the account trie, so a
+    /// caller that owns some of the storage tries itself can reveal the two halves separately.
+    pub fn reveal_account_proof_nodes(
+        &mut self,
+        mut nodes: Vec<ProofTrieNodeV2>,
+    ) -> SparseStateTrieResult<()> {
+        if nodes.is_empty() {
+            return Ok(())
         }
-        Ok(())
+
+        #[cfg(feature = "metrics")]
+        self.metrics.increment_total_account_nodes(nodes.len() as u64);
+
+        let result = self.state.reveal_v2_proof_nodes(&mut nodes, self.retain_updates);
+        self.deferred_drops.proof_nodes_bufs.push(nodes);
+
+        Ok(result?)
+    }
+
+    /// Records storage trie nodes that were revealed into a trie taken out of this state trie, so
+    /// the reveal metrics stay complete.
+    pub const fn record_revealed_storage_nodes(&mut self, nodes: usize) {
+        #[cfg(feature = "metrics")]
+        self.metrics.increment_total_storage_nodes(nodes as u64);
+        #[cfg(not(feature = "metrics"))]
+        let _ = nodes;
     }
 
     /// Calculates the hashes of subtries.
@@ -413,7 +418,6 @@ where
                 let trie = trie.as_revealed_mut().unwrap();
                 let updates = trie.take_updates();
                 let updates = StorageTrieUpdates {
-                    is_deleted: updates.wiped,
                     storage_nodes: updates.updated_nodes,
                     removed_nodes: updates.removed_nodes,
                 };
@@ -1053,7 +1057,7 @@ mod tests {
         let address_2 = b256!("0x1100000000000000000000000000000000000000000000000000000000000000");
         let address_path_2 = Nibbles::unpack(address_2);
         let account_2 = Account::arbitrary(&mut arbitrary::Unstructured::new(&bytes)).unwrap();
-        let mut trie_account_2 = account_2.into_trie_account(EMPTY_ROOT_HASH);
+        let trie_account_2 = account_2.into_trie_account(EMPTY_ROOT_HASH);
 
         let mut hash_builder = HashBuilder::default()
             .with_proof_retainer(ProofRetainer::from_iter([address_path_1, address_path_2]));
@@ -1125,14 +1129,6 @@ mod tests {
             LeafUpdate::Changed(alloy_rlp::encode(trie_account_1)),
         );
 
-        sparse.wipe_storage(address_2).unwrap();
-        trie_account_2.storage_root = sparse.storage_root(&address_2, epoch(0)).unwrap();
-        apply_account_update(
-            &mut sparse,
-            address_2,
-            LeafUpdate::Changed(alloy_rlp::encode(trie_account_2)),
-        );
-
         sparse.root(epoch(0)).unwrap();
 
         let sparse_updates = sparse.take_trie_updates().unwrap();
@@ -1141,24 +1137,13 @@ mod tests {
             sparse_updates,
             TrieUpdates {
                 account_nodes: HashMap::default(),
-                storage_tries: HashMap::from_iter([
-                    (
-                        b256!("0x1000000000000000000000000000000000000000000000000000000000000000"),
-                        StorageTrieUpdates {
-                            is_deleted: false,
-                            storage_nodes: HashMap::default(),
-                            removed_nodes: HashSet::from_iter([Nibbles::from_nibbles([0x1])])
-                        }
-                    ),
-                    (
-                        b256!("0x1100000000000000000000000000000000000000000000000000000000000000"),
-                        StorageTrieUpdates {
-                            is_deleted: true,
-                            storage_nodes: HashMap::default(),
-                            removed_nodes: HashSet::default()
-                        }
-                    )
-                ]),
+                storage_tries: HashMap::from_iter([(
+                    b256!("0x1000000000000000000000000000000000000000000000000000000000000000"),
+                    StorageTrieUpdates {
+                        storage_nodes: HashMap::default(),
+                        removed_nodes: HashSet::from_iter([Nibbles::from_nibbles([0x1])])
+                    }
+                )]),
                 removed_nodes: HashSet::default()
             }
         );
