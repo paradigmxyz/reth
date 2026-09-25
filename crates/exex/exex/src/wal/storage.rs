@@ -226,25 +226,19 @@ mod tests {
     #[test]
     #[cfg(feature = "account-ext")]
     fn test_account_extensions_roundtrip() -> eyre::Result<()> {
-        use alloy_primitives::Address;
-        use reth_revm::{
-            db::{AccountStatus, BundleAccount},
-            state::AccountInfo,
-        };
-
         let mut notification = get_test_notification_data()?;
         let ExExNotification::ChainCommitted { new } = &mut notification else { unreachable!() };
         let chain = Arc::get_mut(new).unwrap();
         for (i, payload) in [&[][..], &[0x82, 0xaa][..], &[][..]].into_iter().enumerate() {
-            let info = AccountInfo { nonce: i as u64, ..Default::default() }
+            let info = reth_revm::state::AccountInfo { nonce: i as u64, ..Default::default() }
                 .with_extension(payload.to_vec());
             chain.execution_outcome_mut().state_mut().state.insert(
-                Address::with_last_byte(i as u8),
-                BundleAccount::new(
-                    Some(AccountInfo::default()),
+                alloy_primitives::Address::with_last_byte(i as u8),
+                reth_revm::db::BundleAccount::new(
+                    Some(reth_revm::state::AccountInfo::default()),
                     Some(info),
                     Default::default(),
-                    AccountStatus::Changed,
+                    reth_revm::db::AccountStatus::Changed,
                 ),
             );
         }

@@ -1,5 +1,5 @@
 // Accounts are only Copy when account-ext is disabled.
-#![cfg_attr(not(feature = "account-ext"), allow(clippy::clone_on_copy))]
+#![allow(clippy::clone_on_copy)]
 
 use crate::{
     db_ext::DbTxPruneExt,
@@ -655,13 +655,7 @@ mod tests {
         let addr4 = Address::with_last_byte(4);
         let addr5 = Address::with_last_byte(5);
 
-        let account = Account {
-            nonce: 1,
-            balance: U256::from(100),
-            bytecode_hash: None,
-            #[cfg(feature = "account-ext")]
-            extension: Default::default(),
-        };
+        let account = Account { nonce: 1, balance: U256::from(100), ..Default::default() };
 
         // Build changesets: blocks 0-4 have 1 change each, block 5 has 4 changes, block 6 has 1
         let changesets: Vec<ChangeSet> = vec![

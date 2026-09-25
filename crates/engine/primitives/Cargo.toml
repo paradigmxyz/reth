@@ -66,9 +66,3 @@ std = [
     "reth-evm?/std",
     "alloy-rlp/std",
 ]
-account-ext = [
-    "reth-chain-state/account-ext",
-    "reth-evm?/account-ext",
-    "reth-payload-primitives/account-ext",
-    "reth-payload-builder-primitives?/account-ext",
-]

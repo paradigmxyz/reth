@@ -99,8 +99,6 @@ reth-rpc-layer.workspace = true
 [features]
 account-ext = [
     "reth-node-builder/account-ext",
-    "reth-ethereum-consensus/account-ext",
-    "reth-ethereum-payload-builder/account-ext",
 ]
 default = []
 jit = ["reth-evm-ethereum/jit"]

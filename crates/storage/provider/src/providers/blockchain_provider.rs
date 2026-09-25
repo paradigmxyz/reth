@@ -1,5 +1,5 @@
 // Accounts are only Copy when account-ext is disabled.
-#![cfg_attr(not(feature = "account-ext"), allow(clippy::clone_on_copy))]
+#![allow(clippy::clone_on_copy)]
 
 use crate::{
     providers::{
@@ -3049,16 +3049,7 @@ mod tests {
     }
 
     fn random_account(nonce: u64) -> (Address, Account) {
-        (
-            Address::random(),
-            Account {
-                nonce,
-                balance: U256::from(nonce),
-                bytecode_hash: None,
-                #[cfg(feature = "account-ext")]
-                extension: Default::default(),
-            },
-        )
+        (Address::random(), Account { nonce, balance: U256::from(nonce), ..Default::default() })
     }
 
     /// [`BlockchainProvider::new`] needs a genesis header to initialize its chain tracker.

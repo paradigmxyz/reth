@@ -1,5 +1,5 @@
 // Accounts are only Copy when account-ext is disabled.
-#![cfg_attr(not(feature = "account-ext"), allow(clippy::clone_on_copy))]
+#![allow(clippy::clone_on_copy)]
 
 use alloy_primitives::{keccak256, B256};
 use itertools::Itertools;
@@ -463,9 +463,7 @@ mod tests {
                         let old_acc = Account {
                             nonce: nonce - 1,
                             balance: balance - U256::from(1),
-                            bytecode_hash: None,
-                            #[cfg(feature = "account-ext")]
-                            extension: Default::default(),
+                            ..Default::default()
                         };
                         let hashed_addr = keccak256(address);
                         if let Some((_, acc)) = hashed_acc_cursor.seek_exact(hashed_addr)? {

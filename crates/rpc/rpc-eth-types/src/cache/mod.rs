@@ -1011,9 +1011,6 @@ mod tests {
         time::Duration,
     };
 
-    #[cfg(not(feature = "account-ext"))]
-    use reth_execution_types::ExecutionOutcome;
-
     #[derive(Default)]
     struct WakeCounter(AtomicUsize);
 
@@ -1524,7 +1521,12 @@ mod tests {
         let block_number = block.number;
         let mut chain: Chain<EthPrimitives> = Chain::new(
             [block],
-            ExecutionOutcome::new(Default::default(), vec![vec![]], block_number, vec![]),
+            reth_execution_types::ExecutionOutcome::new(
+                Default::default(),
+                vec![vec![]],
+                block_number,
+                vec![],
+            ),
             Default::default(),
         );
         chain.insert_bal(block_number, Arc::new(test_decoded_revm_bal()));

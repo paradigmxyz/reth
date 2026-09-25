@@ -24,5 +24,4 @@ serde_json.workspace = true
 tracing.workspace = true
 
 [features]
-account-ext = ["reth-ethereum/account-ext"]
 [lints]

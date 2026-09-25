@@ -24,5 +24,4 @@ alloy-network.workspace = true
 alloy-rpc-types-engine.workspace = true
 
 [features]
-account-ext = ["reth-engine-tree/account-ext", "reth-ethereum/account-ext"]
 [lints]

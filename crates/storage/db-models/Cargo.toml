@@ -78,4 +78,3 @@ reth-codec = [
     "dep:bytes",
     "reth-primitives-traits/reth-codec",
 ]
-account-ext = ["reth-codecs?/account-ext", "reth-primitives-traits/account-ext"]

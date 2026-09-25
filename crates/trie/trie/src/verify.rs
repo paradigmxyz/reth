@@ -531,6 +531,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::needless_update)] // Account fields depend on enabled dependency features.
     fn test_state_root_branch_nodes_iter_basic() {
         // Simple test with a few accounts and storage
         let mut accounts = BTreeMap::new();
@@ -544,8 +545,7 @@ mod tests {
                 nonce: 1,
                 balance: U256::from(1000),
                 bytecode_hash: Some(keccak256(b"code1")),
-                #[cfg(feature = "account-ext")]
-                extension: Default::default(),
+                ..Default::default()
             },
         );
 
@@ -601,6 +601,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::needless_update)] // Account fields depend on enabled dependency features.
     fn test_state_root_branch_nodes_iter_multiple_accounts() {
         // Test with multiple accounts to verify ordering
         let mut accounts = BTreeMap::new();
@@ -615,8 +616,7 @@ mod tests {
                     nonce: i as u64,
                     balance: U256::from(i as u64 * 1000),
                     bytecode_hash: (i == 2).then(|| keccak256([i])),
-                    #[cfg(feature = "account-ext")]
-                    extension: Default::default(),
+                    ..Default::default()
                 },
             );
 

@@ -1,5 +1,5 @@
 // Accounts are only Copy when account-ext is disabled.
-#![cfg_attr(not(feature = "account-ext"), allow(clippy::clone_on_copy))]
+#![allow(clippy::clone_on_copy)]
 
 use crate::proof_task::StorageProofResultMessage;
 use alloy_primitives::{map::B256Map, B256};

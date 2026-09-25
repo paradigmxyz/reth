@@ -1,5 +1,5 @@
 // Accounts are only Copy when account-ext is disabled.
-#![cfg_attr(not(feature = "account-ext"), allow(clippy::clone_on_copy))]
+#![allow(clippy::clone_on_copy)]
 
 use super::{DatabaseProviderRO, ProviderFactory, ProviderNodeTypes};
 use crate::{
@@ -1829,9 +1829,7 @@ mod tests {
         let account = reth_primitives_traits::Account {
             nonce: 1,
             balance: U256::from(1000),
-            bytecode_hash: None,
-            #[cfg(feature = "account-ext")]
-            extension: Default::default(),
+            ..Default::default()
         };
         let slot = U256::from(0x42);
         let slot_b256 = B256::from(slot);
@@ -1918,9 +1916,7 @@ mod tests {
         let account = reth_primitives_traits::Account {
             nonce: 1,
             balance: U256::from(1000),
-            bytecode_hash: None,
-            #[cfg(feature = "account-ext")]
-            extension: Default::default(),
+            ..Default::default()
         };
         let slot = U256::from(0x42);
 
@@ -2019,9 +2015,7 @@ mod tests {
         let account = reth_primitives_traits::Account {
             nonce: 1,
             balance: U256::from(1000),
-            bytecode_hash: None,
-            #[cfg(feature = "account-ext")]
-            extension: Default::default(),
+            ..Default::default()
         };
         let slot = U256::from(0x42);
 

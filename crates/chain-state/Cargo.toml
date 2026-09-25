@@ -81,6 +81,5 @@ test-utils = [
     "dep:revm",
 ]
 account-ext = [
-    "reth-metrics/account-ext",
     "reth-trie/account-ext",
 ]

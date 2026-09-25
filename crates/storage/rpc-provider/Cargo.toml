@@ -51,4 +51,7 @@ revm.workspace = true
 tokio = { workspace = true, features = ["rt", "macros"] }
 
 [features]
-account-ext = ["reth-provider/account-ext", "alloy-rpc-types-eth/account-ext"]
+account-ext = [
+    "alloy-rpc-types-eth/account-ext",
+    "reth-provider/account-ext",
+]

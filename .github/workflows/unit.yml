@@ -100,6 +100,11 @@ jobs:
           tool: nextest@0.9.140
           checksum: true
           fallback: none
+      - name: Check account extension entry points
+        run: |
+          cargo check -p reth --features account-ext --locked
+          cargo check -p reth-ethereum --features account-ext --locked
+          cargo check -p reth-ethereum --features account-ext,evm --locked
       - name: Run tests with account extensions
         run: |
           cargo nextest run \

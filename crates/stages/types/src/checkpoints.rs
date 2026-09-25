@@ -5,8 +5,6 @@ use alloc::{format, string::String, vec::Vec};
 use alloy_primitives::{Address, BlockNumber, B256, U256};
 use core::ops::RangeInclusive;
 use reth_primitives_traits::Account;
-#[cfg(feature = "account-ext")]
-use reth_primitives_traits::AccountExtension;
 use reth_trie_common::{hash_builder::HashBuilderState, StoredSubNode};
 
 /// Saves the progress of Merkle stage.
@@ -133,7 +131,7 @@ pub struct StorageRootMerkleCheckpoint {
     pub account_bytecode_hash: B256,
     /// Payload of the account whose storage root is in progress.
     #[cfg(feature = "account-ext")]
-    pub account_extension: AccountExtension,
+    pub account_extension: reth_primitives_traits::AccountExtension,
 }
 
 impl StorageRootMerkleCheckpoint {
@@ -225,11 +223,12 @@ impl reth_codecs::Compact for StorageRootMerkleCheckpoint {
         buf.advance(32);
         #[cfg(feature = "account-ext")]
         let (account_extension, buf) = if buf.is_empty() {
-            (AccountExtension::default(), buf)
+            (reth_primitives_traits::AccountExtension::default(), buf)
         } else {
             let account_extension_len = buf.get_u16() as usize;
-            let account_extension =
-                AccountExtension::copy_from_slice(&buf[..account_extension_len]);
+            let account_extension = reth_primitives_traits::AccountExtension::copy_from_slice(
+                &buf[..account_extension_len],
+            );
             (account_extension, &buf[account_extension_len..])
         };
 

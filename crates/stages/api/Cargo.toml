@@ -68,6 +68,5 @@ test-utils = [
 ]
 account-ext = [
     "reth-network-p2p/account-ext",
-    "reth-prune/account-ext",
-    "reth-static-file/account-ext",
+    "reth-provider/account-ext",
 ]

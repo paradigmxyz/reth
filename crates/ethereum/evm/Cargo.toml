@@ -71,4 +71,3 @@ test-utils = [
     "reth-evm/test-utils",
     "reth-primitives-traits/test-utils",
 ]
-account-ext = ["reth-evm/account-ext", "reth-metrics?/account-ext"]

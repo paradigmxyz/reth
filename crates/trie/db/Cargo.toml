@@ -73,4 +73,7 @@ test-utils = [
     "reth-trie/test-utils",
     "reth-stages-types/test-utils",
 ]
-account-ext = ["reth-db-api/account-ext", "reth-storage-api/account-ext", "reth-trie/account-ext"]
+account-ext = [
+    "reth-provider/account-ext",
+    "reth-trie/account-ext",
+]

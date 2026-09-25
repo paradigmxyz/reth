@@ -19,6 +19,3 @@ tokio = { workspace = true, features = ["macros", "rt-multi-thread", "signal"] }
 
 # misc
 tracing.workspace = true
-
-[features]
-account-ext = []

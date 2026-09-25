@@ -35,4 +35,3 @@ test-utils = [
     "reth-revm/test-utils",
     "reth-provider/test-utils",
 ]
-account-ext = ["reth-provider/account-ext", "reth-revm/account-ext"]

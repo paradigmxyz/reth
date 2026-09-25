@@ -1,5 +1,5 @@
 // Accounts are only Copy when account-ext is disabled.
-#![cfg_attr(not(feature = "account-ext"), allow(clippy::clone_on_copy))]
+#![allow(clippy::clone_on_copy)]
 
 use alloy_primitives::{keccak256, Address, BlockNumber, TxHash, TxNumber, B256};
 use reth_chainspec::MAINNET;

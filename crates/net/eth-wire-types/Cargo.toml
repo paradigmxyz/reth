@@ -100,4 +100,6 @@ serde = [
     "alloy-eip7928?/serde",
     "alloy-trie/serde",
 ]
-account-ext = ["reth-chainspec/account-ext", "reth-ethereum-primitives/account-ext"]
+account-ext = [
+    "reth-primitives-traits/account-ext",
+]

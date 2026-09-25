@@ -11,5 +11,4 @@ eyre.workspace = true
 tokio.workspace = true
 
 [features]
-account-ext = ["reth-ethereum/account-ext"]
 [lints]

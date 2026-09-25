@@ -56,6 +56,3 @@ tempfile.workspace = true
 
 [lints]
 workspace = true
-
-[features]
-account-ext = ["reth-provider/account-ext", "reth-etl/account-ext"]

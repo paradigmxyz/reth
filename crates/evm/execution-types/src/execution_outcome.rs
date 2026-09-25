@@ -940,19 +940,13 @@ mod tests {
             nonce: 1,
             balance: U256::from(100),
             code_hash: B256::ZERO,
-            code: None,
-            account_id: None,
-            #[cfg(feature = "account-ext")]
-            extension: Default::default(),
+            ..Default::default()
         };
         let account_info2 = AccountInfo {
             nonce: 2,
             balance: U256::from(200),
             code_hash: B256::ZERO,
-            code: None,
-            account_id: None,
-            #[cfg(feature = "account-ext")]
-            extension: Default::default(),
+            ..Default::default()
         };
 
         // Set up the bundle state with these accounts

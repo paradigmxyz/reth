@@ -90,4 +90,6 @@ min-trace-logs = [
     "tracing/release_max_level_trace",
     "reth-node-core/min-trace-logs",
 ]
-account-ext = ["reth-cli-commands/account-ext", "reth-node-ethereum/account-ext"]
+account-ext = [
+    "reth-node-ethereum/account-ext",
+]

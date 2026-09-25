@@ -1,5 +1,5 @@
 // Accounts are only Copy when account-ext is disabled.
-#![cfg_attr(not(feature = "account-ext"), allow(clippy::clone_on_copy))]
+#![allow(clippy::clone_on_copy)]
 
 use crate::{
     prefix_set::{PrefixSetMut, TriePrefixSetsMut},
@@ -854,9 +854,7 @@ mod tests {
             nonce: 42,
             code_hash: B256::random(),
             code: Some(Bytecode::new_raw(Bytes::from(vec![1, 2]))),
-            account_id: None,
-            #[cfg(feature = "account-ext")]
-            extension: Default::default(),
+            ..Default::default()
         };
 
         let mut storage = StorageWithOriginalValues::default();
@@ -961,10 +959,7 @@ mod tests {
             balance: U256::from(1000),
             nonce: 1,
             code_hash: B256::random(),
-            code: None,
-            account_id: None,
-            #[cfg(feature = "account-ext")]
-            extension: Default::default(),
+            ..Default::default()
         };
 
         // Create hashed accounts with addresses.
@@ -1282,13 +1277,7 @@ mod tests {
     #[test]
     fn test_hashed_post_state_sorted_disjointed_merge_batch() {
         fn account(nonce: u64) -> Account {
-            Account {
-                nonce,
-                balance: U256::ZERO,
-                bytecode_hash: None,
-                #[cfg(feature = "account-ext")]
-                extension: Default::default(),
-            }
+            Account { nonce, ..Default::default() }
         }
 
         let kept_account = B256::with_last_byte(1);
@@ -1371,13 +1360,7 @@ mod tests {
     #[test]
     fn test_hashed_post_state_sorted_disjointed_merge_batch_removes_overlapping_batch_key() {
         fn account(nonce: u64) -> Account {
-            Account {
-                nonce,
-                balance: U256::ZERO,
-                bytecode_hash: None,
-                #[cfg(feature = "account-ext")]
-                extension: Default::default(),
-            }
+            Account { nonce, ..Default::default() }
         }
 
         let overlapping_account = B256::with_last_byte(21);
@@ -1403,13 +1386,7 @@ mod tests {
     #[test]
     fn test_hashed_post_state_sorted_disjointed_merge_batch_keeps_equal_overlaps() {
         fn account(nonce: u64) -> Account {
-            Account {
-                nonce,
-                balance: U256::ZERO,
-                bytecode_hash: None,
-                #[cfg(feature = "account-ext")]
-                extension: Default::default(),
-            }
+            Account { nonce, ..Default::default() }
         }
 
         let address = B256::with_last_byte(21);
@@ -1567,16 +1544,7 @@ mod tests {
 
         let state = HashedPostState {
             accounts: B256Map::from_iter([
-                (
-                    addr1,
-                    Some(Account {
-                        nonce: 1,
-                        balance: U256::from(100),
-                        bytecode_hash: None,
-                        #[cfg(feature = "account-ext")]
-                        extension: Default::default(),
-                    }),
-                ),
+                (addr1, Some(Account { nonce: 1, balance: U256::from(100), ..Default::default() })),
                 (addr2, None),
                 (addr3, Some(Account::default())),
             ]),
@@ -1911,15 +1879,11 @@ pub mod serde_bincode_compat {
 
     #[cfg(test)]
     mod tests {
-        #[cfg(not(feature = "account-ext"))]
-        use crate::hashed_state::{HashedPostState, HashedPostStateSorted};
         use crate::{
             hashed_state::{HashedStorage, HashedStorageSorted},
             serde_bincode_compat,
         };
         use alloy_primitives::{B256, U256};
-        #[cfg(not(feature = "account-ext"))]
-        use reth_primitives_traits::Account;
         use serde::{Deserialize, Serialize};
         use serde_with::serde_as;
 
@@ -1931,15 +1895,17 @@ pub mod serde_bincode_compat {
             #[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
             struct Data {
                 #[serde_as(as = "serde_bincode_compat::hashed_state::HashedPostState")]
-                hashed_state: HashedPostState,
+                hashed_state: crate::hashed_state::HashedPostState,
             }
 
-            let mut data = Data { hashed_state: HashedPostState::default() };
+            let mut data = Data { hashed_state: crate::hashed_state::HashedPostState::default() };
             let encoded = bincode::serialize(&data).unwrap();
             let decoded: Data = bincode::deserialize(&encoded).unwrap();
             assert_eq!(decoded, data);
 
-            data.hashed_state.accounts.insert(B256::random(), Some(Account::default()));
+            data.hashed_state
+                .accounts
+                .insert(B256::random(), Some(reth_primitives_traits::Account::default()));
             let encoded = bincode::serialize(&data).unwrap();
             let decoded: Data = bincode::deserialize(&encoded).unwrap();
             assert_eq!(decoded, data);
@@ -1978,18 +1944,22 @@ pub mod serde_bincode_compat {
             #[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
             struct Data {
                 #[serde_as(as = "serde_bincode_compat::hashed_state::HashedPostStateSorted")]
-                hashed_state: HashedPostStateSorted,
+                hashed_state: crate::hashed_state::HashedPostStateSorted,
             }
 
-            let mut data = Data { hashed_state: HashedPostStateSorted::default() };
+            let mut data =
+                Data { hashed_state: crate::hashed_state::HashedPostStateSorted::default() };
             let encoded = bincode::serialize(&data).unwrap();
             let decoded: Data = bincode::deserialize(&encoded).unwrap();
             assert_eq!(decoded, data);
 
-            data.hashed_state.accounts.push((B256::random(), Some(Account::default())));
             data.hashed_state
                 .accounts
-                .push((B256::random(), Some(Account { nonce: 1, ..Default::default() })));
+                .push((B256::random(), Some(reth_primitives_traits::Account::default())));
+            data.hashed_state.accounts.push((
+                B256::random(),
+                Some(reth_primitives_traits::Account { nonce: 1, ..Default::default() }),
+            ));
             let encoded = bincode::serialize(&data).unwrap();
             let decoded: Data = bincode::deserialize(&encoded).unwrap();
             assert_eq!(decoded, data);

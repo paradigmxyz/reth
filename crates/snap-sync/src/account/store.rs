@@ -2,7 +2,7 @@
 //!
 //! Each range replaces its key interval, and ranges commit in key order.
 
-#![cfg_attr(not(feature = "account-ext"), allow(clippy::clone_on_copy))]
+#![allow(clippy::clone_on_copy)]
 
 use crate::{
     common::SnapRecord, storage::persisted_storage_root, SnapAttemptStore, SnapCatchUpStore,

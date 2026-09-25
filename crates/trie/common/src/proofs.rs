@@ -1,5 +1,5 @@
 // Accounts are only Copy when account-ext is disabled.
-#![cfg_attr(not(feature = "account-ext"), allow(clippy::clone_on_copy))]
+#![allow(clippy::clone_on_copy)]
 
 //! Merkle trie proofs.
 
@@ -7,8 +7,6 @@ use crate::{
     BranchNodeMasks, BranchNodeMasksMap, Nibbles, ProofTrieNodeV2, TrieAccount, TrieNodeV2,
 };
 use alloc::{borrow::Cow, collections::VecDeque, vec::Vec};
-#[cfg(feature = "eip1186")]
-use alloy_consensus::constants::KECCAK_EMPTY;
 use alloy_primitives::{
     keccak256,
     map::{hash_map, B256Map, B256Set},
@@ -839,8 +837,8 @@ fn normalize_eip1186_empty_trie_proof(proof: Vec<Bytes>) -> Vec<Bytes> {
 impl AccountProof {
     /// Convert into an EIP-1186 account proof response.
     ///
-    /// For non-existent accounts, this returns `KECCAK_EMPTY` for `codeHash` and
-    /// `EMPTY_ROOT_HASH` for `storageHash`, matching reth's default behavior.
+    /// For non-existent accounts, this returns `KECCAK_EMPTY` for
+    /// `codeHash` and `EMPTY_ROOT_HASH` for `storageHash`, matching reth's default behavior.
     ///
     /// Use [`Self::into_eip1186_response_with`] to customize the behavior for
     /// non-existent accounts (e.g. returning `B256::ZERO` for geth compatibility).
@@ -858,7 +856,8 @@ impl AccountProof {
     /// for both `codeHash` and `storageHash`, matching geth's behavior since v1.13.4
     /// ([go-ethereum#28357](https://github.com/ethereum/go-ethereum/pull/28357)).
     ///
-    /// When `false`, returns `KECCAK_EMPTY` / `EMPTY_ROOT_HASH` (reth default).
+    /// When `false`, returns `KECCAK_EMPTY` / `EMPTY_ROOT_HASH` (reth
+    /// default).
     ///
     /// See: <https://github.com/ethereum/go-ethereum/issues/28441>
     pub fn into_eip1186_response_with(
@@ -940,7 +939,7 @@ impl AccountProof {
         let (storage_root, info) = if nonce == 0 &&
             balance.is_zero() &&
             (storage_hash.is_zero() || storage_hash == EMPTY_ROOT_HASH) &&
-            (code_hash == KECCAK_EMPTY || code_hash.is_zero()) &&
+            (code_hash == alloy_consensus::constants::KECCAK_EMPTY || code_hash.is_zero()) &&
             !has_extension
         {
             // Account does not exist in state. Return `None` here to prevent proof
@@ -948,9 +947,9 @@ impl AccountProof {
             //
             // Note: geth (since v1.13.4, go-ethereum#28357) returns `B256::ZERO` for
             // both `codeHash` and `storageHash` in exclusion proofs, while reth
-            // returns `KECCAK_EMPTY` / `EMPTY_ROOT_HASH`. We accept both formats here
-            // so that proofs obtained from any client can be deserialized correctly.
-            // See: https://github.com/ethereum/go-ethereum/issues/28441
+            // returns `KECCAK_EMPTY` / `EMPTY_ROOT_HASH`. We accept
+            // both formats here so that proofs obtained from any client can be
+            // deserialized correctly. See: https://github.com/ethereum/go-ethereum/issues/28441
             (EMPTY_ROOT_HASH, None)
         } else {
             (
@@ -1593,10 +1592,8 @@ mod tests {
                 // non-empty account
                 Account {
                     nonce: 100,
-                    balance: U256::ZERO,
-                    bytecode_hash: Some(KECCAK_EMPTY),
-                    #[cfg(feature = "account-ext")]
-                    extension: Default::default(),
+                    bytecode_hash: Some(alloy_consensus::constants::KECCAK_EMPTY),
+                    ..Default::default()
                 },
             ),
             proof: vec![],
@@ -1622,8 +1619,8 @@ mod tests {
     fn from_eip1186_proof_accepts_geth_zero_hashes() {
         // geth (since v1.13.4) returns B256::ZERO for codeHash and storageHash
         // in exclusion proofs for non-existent accounts, instead of
-        // KECCAK_EMPTY / EMPTY_ROOT_HASH. Verify that from_eip1186_proof
-        // correctly recognizes this format as a non-existent account.
+        // KECCAK_EMPTY / EMPTY_ROOT_HASH. Verify that
+        // from_eip1186_proof correctly recognizes this format as a non-existent account.
         let geth_proof = alloy_rpc_types_eth::EIP1186AccountProofResponse {
             address: Address::random(),
             balance: U256::ZERO,
@@ -1646,7 +1643,7 @@ mod tests {
         let proof = alloy_rpc_types_eth::EIP1186AccountProofResponse {
             address: Address::random(),
             balance: U256::ZERO,
-            code_hash: KECCAK_EMPTY,
+            code_hash: alloy_consensus::constants::KECCAK_EMPTY,
             nonce: 0,
             storage_hash: EMPTY_ROOT_HASH,
             account_proof: vec![],
@@ -1660,6 +1657,7 @@ mod tests {
 
     #[test]
     #[cfg(feature = "eip1186")]
+    #[allow(clippy::needless_update)] // Account fields depend on enabled dependency features.
     fn into_eip1186_response_zero_empty_account() {
         // Non-existent account (info = None)
         let acc = AccountProof {
@@ -1672,12 +1670,12 @@ mod tests {
 
         // Default behavior: KECCAK_EMPTY / EMPTY_ROOT_HASH
         let rpc_default = acc.clone().into_eip1186_response(Vec::new());
-        assert_eq!(rpc_default.code_hash, KECCAK_EMPTY);
+        assert_eq!(rpc_default.code_hash, alloy_consensus::constants::KECCAK_EMPTY);
         assert_eq!(rpc_default.storage_hash, EMPTY_ROOT_HASH);
 
         // zero_empty_account = false: same as default
         let rpc_compat_off = acc.clone().into_eip1186_response_with(Vec::new(), false);
-        assert_eq!(rpc_compat_off.code_hash, KECCAK_EMPTY);
+        assert_eq!(rpc_compat_off.code_hash, alloy_consensus::constants::KECCAK_EMPTY);
         assert_eq!(rpc_compat_off.storage_hash, EMPTY_ROOT_HASH);
 
         // zero_empty_account = true: B256::ZERO (geth-compat)
@@ -1691,16 +1689,15 @@ mod tests {
             info: Some(Account {
                 nonce: 42,
                 balance: U256::from(100),
-                bytecode_hash: Some(KECCAK_EMPTY),
-                #[cfg(feature = "account-ext")]
-                extension: Default::default(),
+                bytecode_hash: Some(alloy_consensus::constants::KECCAK_EMPTY),
+                ..Default::default()
             }),
             proof: vec![],
             storage_root: B256::random(),
             storage_proofs: vec![],
         };
         let rpc_existing = existing_acc.clone().into_eip1186_response_with(Vec::new(), true);
-        assert_eq!(rpc_existing.code_hash, KECCAK_EMPTY);
+        assert_eq!(rpc_existing.code_hash, alloy_consensus::constants::KECCAK_EMPTY);
         assert_eq!(rpc_existing.storage_hash, existing_acc.storage_root);
     }
 

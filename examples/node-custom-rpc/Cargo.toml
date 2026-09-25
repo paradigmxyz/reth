@@ -16,5 +16,4 @@ serde_json.workspace = true
 [dev-dependencies]
 
 [features]
-account-ext = ["reth-ethereum/account-ext"]
 [lints]

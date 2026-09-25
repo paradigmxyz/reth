@@ -82,4 +82,8 @@ serde = [
     "reth-ethereum-primitives/serde",
     "reth-chain-state/serde",
 ]
-account-ext = ["reth-node-api/account-ext", "reth-stages-api/account-ext"]
+account-ext = [
+    "reth-db-common/account-ext",
+    "reth-node-core/account-ext",
+    "reth-stages-api/account-ext",
+]

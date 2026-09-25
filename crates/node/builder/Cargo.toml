@@ -96,13 +96,10 @@ reth-evm-ethereum = { workspace = true, features = ["test-utils"] }
 account-ext = [
     "reth-db-common/account-ext",
     "reth-downloaders/account-ext",
-    "reth-engine-util/account-ext",
-    "reth-invalid-block-hooks/account-ext",
-    "reth-node-ethstats/account-ext",
-    "reth-node-events/account-ext",
-    "reth-rpc-builder/account-ext",
-    "reth-consensus-debug-client/account-ext",
-    "reth-node-metrics/account-ext",
+    "reth-engine-tree/account-ext",
+    "reth-exex/account-ext",
+    "reth-node-ethereum/account-ext",
+    "reth-rpc/account-ext",
 ]
 default = []
 js-tracer = [

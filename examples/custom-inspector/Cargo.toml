@@ -15,5 +15,4 @@ alloy-primitives.workspace = true
 alloy-eips.workspace = true
 
 [features]
-account-ext = ["reth-ethereum/account-ext"]
 [lints]

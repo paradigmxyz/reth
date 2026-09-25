@@ -19,5 +19,4 @@ eyre.workspace = true
 serde_json.workspace = true
 
 [features]
-account-ext = ["reth-e2e-test-utils/account-ext", "reth-ethereum/account-ext"]
 [lints]

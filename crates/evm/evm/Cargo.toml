@@ -40,6 +40,7 @@ fixed-cache.workspace = true
 reth-ethereum-primitives.workspace = true
 
 [features]
+account-ext = ["reth-storage-api/account-ext"]
 default = ["std"]
 std = [
     "dep:rayon",
@@ -65,9 +66,4 @@ test-utils = [
     "reth-primitives-traits/test-utils",
     "reth-trie-common/test-utils",
     "reth-ethereum-primitives/test-utils",
-]
-account-ext = [
-    "reth-metrics?/account-ext",
-    "reth-storage-api/account-ext",
-    "reth-execution-errors/account-ext",
 ]

@@ -107,10 +107,9 @@ rand_08.workspace = true
 
 [features]
 account-ext = [
-    "reth-evm/account-ext",
-    "reth-payload-builder/account-ext",
-    "reth-stages?/account-ext",
+    "reth-node-ethereum/account-ext",
     "reth-stages-api/account-ext",
+    "reth-stages?/account-ext",
 ]
 test-utils = [
     "reth-chain-state/test-utils",

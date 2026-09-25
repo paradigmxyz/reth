@@ -452,7 +452,7 @@ mod tests {
         super::{request::MAX_RETRIES, test_utils::TestSnapClient, VerifiedAccountRange},
         *,
     };
-    use alloy_primitives::{Bytes, KECCAK256_EMPTY};
+    use alloy_primitives::Bytes;
     use reth_network_p2p::{error::PeerRequestResult, priority::Priority};
     use reth_network_peers::WithPeerId;
     use reth_trie_common::{
@@ -500,14 +500,7 @@ mod tests {
     }
 
     fn account(storage_root: B256) -> TrieAccount {
-        TrieAccount {
-            nonce: 1,
-            balance: U256::from(2),
-            storage_root,
-            code_hash: KECCAK256_EMPTY,
-            #[cfg(feature = "account-ext")]
-            extension: Default::default(),
-        }
+        TrieAccount { nonce: 1, balance: U256::from(2), storage_root, ..Default::default() }
     }
 
     fn wire_slots(slots: &[(B256, U256)]) -> Vec<StorageData> {

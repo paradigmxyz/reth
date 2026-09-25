@@ -51,8 +51,6 @@ test-utils = [
     "reth-trie-parallel/test-utils",
 ]
 account-ext = [
-    "reth-ethereum-engine-primitives/account-ext",
-    "reth-execution-cache/account-ext",
+    "reth-chain-state/account-ext",
     "reth-trie-parallel/account-ext",
-    "reth-payload-builder-primitives/account-ext",
 ]

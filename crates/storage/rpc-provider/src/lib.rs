@@ -1032,6 +1032,7 @@ impl<P: Clone, Node: NodeTypes, N> RpcBlockchainStateProvider<P, Node, N> {
     }
 
     /// Get account information from RPC
+    #[allow(clippy::needless_update)] // Account fields depend on enabled dependency features.
     fn get_account(&self, address: Address) -> Result<Option<Account>, ProviderError>
     where
         P: Provider<N> + Clone + 'static,
@@ -1063,8 +1064,7 @@ impl<P: Clone, Node: NodeTypes, N> RpcBlockchainStateProvider<P, Node, N> {
                 balance: balance.map_err(ProviderError::other)?,
                 nonce: nonce.map_err(ProviderError::other)?,
                 code: code.map_err(ProviderError::other)?,
-                #[cfg(feature = "account-ext")]
-                extension: Default::default(),
+                ..Default::default()
             };
 
             let code_hash = account_info.code_hash();

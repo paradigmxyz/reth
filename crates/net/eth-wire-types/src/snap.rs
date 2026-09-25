@@ -558,6 +558,7 @@ impl Encodable for SlimAccountBody {
 }
 
 impl Decodable for SlimAccountBody {
+    #[allow(clippy::needless_update)] // Account fields depend on enabled dependency features.
     fn decode(buf: &mut &[u8]) -> alloy_rlp::Result<Self> {
         ensure_no_account_extensions()
             .map_err(|_| alloy_rlp::Error::Custom("snap does not support account extensions"))?;
@@ -570,19 +571,13 @@ impl Decodable for SlimAccountBody {
         if !payload.is_empty() {
             return Err(alloy_rlp::Error::UnexpectedLength)
         }
-        Ok(Self(TrieAccount {
-            nonce,
-            balance,
-            storage_root,
-            code_hash,
-            #[cfg(feature = "account-ext")]
-            extension: Default::default(),
-        }))
+        Ok(Self(TrieAccount { nonce, balance, storage_root, code_hash, ..Default::default() }))
     }
 }
 
 #[cfg(any(test, feature = "arbitrary"))]
 impl<'a> arbitrary::Arbitrary<'a> for SlimAccountBody {
+    #[allow(clippy::needless_update)] // Account fields depend on enabled dependency features.
     fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
         let storage_root = if u.arbitrary()? { u.arbitrary()? } else { EMPTY_ROOT_HASH };
         let code_hash = if u.arbitrary()? { u.arbitrary()? } else { KECCAK256_EMPTY };
@@ -591,8 +586,7 @@ impl<'a> arbitrary::Arbitrary<'a> for SlimAccountBody {
             balance: u.arbitrary()?,
             storage_root,
             code_hash,
-            #[cfg(feature = "account-ext")]
-            extension: Default::default(),
+            ..Default::default()
         }))
     }
 }

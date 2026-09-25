@@ -46,9 +46,7 @@ mod tests {
                     info: Some(Account {
                         nonce: block_num,
                         balance: U256::from(block_num * 1000 + i as u64),
-                        bytecode_hash: None,
-                        #[cfg(feature = "account-ext")]
-                        extension: Default::default(),
+                        ..Default::default()
                     }),
                 }
             })

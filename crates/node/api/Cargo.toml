@@ -33,4 +33,6 @@ alloy-rpc-types-engine.workspace = true
 eyre.workspace = true
 
 [features]
-account-ext = ["reth-basic-payload-builder/account-ext", "reth-node-core/account-ext"]
+account-ext = [
+    "reth-node-core/account-ext",
+]

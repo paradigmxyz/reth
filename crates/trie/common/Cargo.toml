@@ -137,7 +137,7 @@ arbitrary = [
 ]
 rayon = ["dep:rayon"]
 account-ext = [
-    "alloy-trie/account-ext",
+    "alloy-rpc-types-eth?/account-ext",
     "reth-codecs?/account-ext",
     "reth-primitives-traits/account-ext",
     "revm/account-ext",

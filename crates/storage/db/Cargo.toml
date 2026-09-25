@@ -97,4 +97,6 @@ arbitrary = [
     "reth-prune-types/arbitrary",
 ]
 disable-lock = []
-account-ext = ["reth-db-api/account-ext", "reth-metrics?/account-ext"]
+account-ext = [
+    "reth-storage-errors/account-ext",
+]

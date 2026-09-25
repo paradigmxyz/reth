@@ -14,5 +14,4 @@ tracing.workspace = true
 tower.workspace = true
 
 [features]
-account-ext = ["reth-ethereum/account-ext"]
 [lints]

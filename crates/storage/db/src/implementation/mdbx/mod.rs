@@ -1,5 +1,5 @@
 // Accounts are only Copy when account-ext is disabled.
-#![cfg_attr(not(feature = "account-ext"), allow(clippy::clone_on_copy))]
+#![allow(clippy::clone_on_copy)]
 
 //! Module that interacts with MDBX.
 
@@ -1414,6 +1414,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::needless_update)] // Account fields depend on enabled dependency features.
     fn db_closure_put_get() {
         let tempdir = TempDir::new().expect(ERROR_TEMPDIR);
         let path = tempdir.path();
@@ -1422,8 +1423,7 @@ mod tests {
             nonce: 18446744073709551615,
             bytecode_hash: Some(B256::random()),
             balance: U256::MAX,
-            #[cfg(feature = "account-ext")]
-            extension: Default::default(),
+            ..Default::default()
         };
         let key = Address::from_str("0xa2c122be93b0074270ebee7f6b7292c7deb45047")
             .expect(ERROR_ETH_ADDRESS);

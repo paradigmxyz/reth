@@ -9,5 +9,4 @@ license.workspace = true
 reth-ethereum = { workspace = true, features = ["node", "cli"] }
 
 [features]
-account-ext = ["reth-ethereum/account-ext"]
 [lints]

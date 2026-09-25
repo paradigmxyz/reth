@@ -122,7 +122,7 @@ test-utils = [
     "reth-tasks/test-utils",
 ]
 account-ext = [
-    "reth-era-utils/account-ext",
+    "reth-db-common/account-ext",
+    "reth-downloaders/account-ext",
     "reth-exex/account-ext",
-    "reth-testing-utils?/account-ext",
 ]

@@ -89,11 +89,6 @@ serde = [
     "alloy-consensus/serde",
     "rand_08/serde",
 ]
-account-ext = [
-    "reth-codecs/account-ext",
-    "reth-eth-wire-types/account-ext",
-    "reth-metrics/account-ext",
-]
 
 [[test]]
 name = "fuzz_roundtrip"

@@ -1,5 +1,5 @@
 // Accounts are only Copy when account-ext is disabled.
-#![cfg_attr(not(feature = "account-ext"), allow(clippy::clone_on_copy))]
+#![allow(clippy::clone_on_copy)]
 
 use super::SaveBlocksInput;
 use crate::{
@@ -5186,16 +5186,7 @@ mod tests {
                 .tx
                 .cursor_write::<tables::PlainAccountState>()
                 .unwrap()
-                .upsert(
-                    address,
-                    &Account {
-                        nonce: 0,
-                        balance: U256::ZERO,
-                        bytecode_hash: None,
-                        #[cfg(feature = "account-ext")]
-                        extension: Default::default(),
-                    },
-                )
+                .upsert(address, &Account::default())
                 .unwrap();
             provider_rw.commit().unwrap();
         }
@@ -5208,20 +5199,8 @@ mod tests {
         state_init.insert(
             address,
             (
-                Some(Account {
-                    nonce: 0,
-                    balance: U256::ZERO,
-                    bytecode_hash: None,
-                    #[cfg(feature = "account-ext")]
-                    extension: Default::default(),
-                }),
-                Some(Account {
-                    nonce: 1,
-                    balance: U256::ZERO,
-                    bytecode_hash: None,
-                    #[cfg(feature = "account-ext")]
-                    extension: Default::default(),
-                }),
+                Some(Account::default()),
+                Some(Account { nonce: 1, ..Default::default() }),
                 storage_map,
             ),
         );
@@ -5231,13 +5210,7 @@ mod tests {
         block_reverts.insert(
             address,
             (
-                Some(Some(Account {
-                    nonce: 0,
-                    balance: U256::ZERO,
-                    bytecode_hash: None,
-                    #[cfg(feature = "account-ext")]
-                    extension: Default::default(),
-                })),
+                Some(Some(Account::default())),
                 vec![StorageEntry { key: slot_key, value: U256::ZERO }],
             ),
         );
@@ -5830,16 +5803,7 @@ mod tests {
                 .tx
                 .cursor_write::<tables::HashedAccounts>()
                 .unwrap()
-                .upsert(
-                    hashed_address,
-                    &Account {
-                        nonce: 0,
-                        balance: U256::ZERO,
-                        bytecode_hash: None,
-                        #[cfg(feature = "account-ext")]
-                        extension: Default::default(),
-                    },
-                )
+                .upsert(hashed_address, &Account::default())
                 .unwrap();
             provider_rw.commit().unwrap();
         }

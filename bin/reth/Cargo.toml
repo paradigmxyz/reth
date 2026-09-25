@@ -204,7 +204,9 @@ min-trace-logs = [
 ]
 
 trie-debug = ["reth-node-builder/trie-debug", "reth-node-core/trie-debug"]
-account-ext = ["reth-ethereum-cli/account-ext"]
+account-ext = [
+    "reth-node-ethereum/account-ext",
+]
 
 [[bin]]
 name = "reth"

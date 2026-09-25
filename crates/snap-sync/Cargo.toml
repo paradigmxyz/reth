@@ -58,4 +58,8 @@ reth-stages-api.workspace = true
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
 
 [features]
-account-ext = ["reth-storage-api/account-ext"]
+account-ext = [
+    "reth-downloaders/account-ext",
+    "reth-provider/account-ext",
+    "reth-stages/account-ext",
+]

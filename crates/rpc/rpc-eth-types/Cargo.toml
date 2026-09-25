@@ -75,7 +75,6 @@ tokio = { workspace = true, features = ["test-util"] }
 [features]
 js-tracer = ["revm-inspectors/js-tracer"]
 account-ext = [
-    "reth-revm/account-ext",
-    "reth-rpc-convert/account-ext",
+    "alloy-rpc-types-eth/account-ext",
     "reth-transaction-pool/account-ext",
 ]

@@ -1246,6 +1246,7 @@ mod tests {
 
     #[tokio::test]
     #[cfg(not(feature = "account-ext"))]
+    #[allow(clippy::needless_update)] // Account fields depend on enabled dependency features.
     async fn snap_account_range_response_encodes_accounts_and_proof() {
         let provider = MockEthProvider::default();
         let first_hash = B256::repeat_byte(0x01);
@@ -1261,20 +1262,10 @@ mod tests {
                         nonce: 1,
                         balance: U256::from(2),
                         bytecode_hash: Some(code_hash),
-                        #[cfg(feature = "account-ext")]
-                        extension: Default::default(),
+                        ..Default::default()
                     },
                 ),
-                (
-                    second_hash,
-                    Account {
-                        nonce: 3,
-                        balance: U256::from(4),
-                        bytecode_hash: None,
-                        #[cfg(feature = "account-ext")]
-                        extension: Default::default(),
-                    },
-                ),
+                (second_hash, Account { nonce: 3, balance: U256::from(4), ..Default::default() }),
             ],
             // A hash-limit stop (not an exhausted trie) so a boundary proof is still expected,
             // matching the mocked `proof` below.
@@ -1329,16 +1320,7 @@ mod tests {
         let provider = MockEthProvider::default();
         let hash = B256::repeat_byte(0x01);
         provider.set_snap_account_range(
-            vec![(
-                hash,
-                Account {
-                    nonce: 1,
-                    balance: U256::from(2),
-                    bytecode_hash: None,
-                    #[cfg(feature = "account-ext")]
-                    extension: Default::default(),
-                },
-            )],
+            vec![(hash, Account { nonce: 1, balance: U256::from(2), ..Default::default() })],
             RangeEnd::Exhausted,
         );
         provider.set_snap_storage_root(hash, EMPTY_ROOT_HASH);

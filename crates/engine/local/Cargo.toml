@@ -37,4 +37,7 @@ tracing.workspace = true
 workspace = true
 
 [features]
-account-ext = ["reth-payload-builder/account-ext", "reth-transaction-pool/account-ext"]
+account-ext = [
+    "reth-payload-builder/account-ext",
+    "reth-transaction-pool/account-ext",
+]

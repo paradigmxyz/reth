@@ -107,9 +107,6 @@ test-utils = [
     "dep:tokio",
 ]
 account-ext = [
-    "reth-db/account-ext",
-    "reth-ethereum-engine-primitives?/account-ext",
-    "reth-node-types/account-ext",
-    "reth-storage-overlay/account-ext",
-    "reth-tasks/account-ext",
+    "reth-codecs/account-ext",
+    "reth-trie-db/account-ext",
 ]
