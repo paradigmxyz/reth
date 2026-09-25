@@ -459,6 +459,43 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn fill_frame_transaction_preserves_signature_placeholders() {
+        let address = Address::random();
+        let nonce = 42u64;
+        let limits = FrameLimits { execution: 45_000, state: 7_000 };
+        let accounts = AddressMap::from_iter([(
+            address,
+            ExtendedAccount::new(nonce, U256::from(10_000_000_000_000_000_000u64)),
+        )]);
+        let eth_api = mock_eth_api(accounts);
+
+        let tx_req = TransactionRequest {
+            from: Some(address),
+            transaction_type: Some(0x06),
+            signatures: Some(vec![alloy_eips::eip8141::FrameSignature {
+                scheme: alloy_eips::eip8141::SignatureScheme::Secp256k1,
+                ..Default::default()
+            }]),
+            frames: Some(vec![Frame { limits: limits.clone(), ..Default::default() }]),
+            ..Default::default()
+        };
+
+        let filled = eth_api.fill_transaction(tx_req).await.expect("frame fill should succeed");
+        let frame_tx = filled.tx.frame_transaction().expect("filled transaction should be a frame");
+
+        assert_eq!(frame_tx.sender, address);
+        assert_eq!(frame_tx.nonce, nonce);
+        assert_eq!(frame_tx.chain_id, 1);
+        assert_eq!(frame_tx.frames[0].limits, limits);
+        assert_eq!(frame_tx.signatures.len(), 1);
+        assert!(frame_tx.signatures[0].signature.is_empty());
+        let json = serde_json::to_value(&filled).unwrap();
+        assert_eq!(json["tx"]["signatures"][0]["scheme"], "0x1");
+        assert!(json["tx"]["signatures"][0].get("signature").is_none());
+        assert_eq!(filled.tx.gas_limit(), frame_tx.calculate_gas_limit());
+    }
+
+    #[tokio::test]
     async fn estimate_frame_transaction_returns_derived_outer_limit() {
         let address = Address::random();
         let limits = FrameLimits { execution: 45_000, state: 7_000 };

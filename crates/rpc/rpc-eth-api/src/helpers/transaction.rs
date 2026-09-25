@@ -576,11 +576,12 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
                     .into())
                 }
 
-                let has_signatures = request
-                    .as_ref()
-                    .signatures
-                    .as_ref()
-                    .is_some_and(|signatures| !signatures.is_empty());
+                let has_signatures =
+                    request.as_ref().signatures.as_ref().is_some_and(|signatures| {
+                        signatures.iter().any(|signature| {
+                            u8::from(signature.scheme) != 0 && !signature.signature.is_empty()
+                        })
+                    });
                 if has_signatures &&
                     (request.as_ref().chain_id().is_none() ||
                         request.as_ref().nonce().is_none() ||
