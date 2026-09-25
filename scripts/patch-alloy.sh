@@ -46,8 +46,22 @@ fi
 
 CARGO_TOML="${CARGO_TOML:-Cargo.toml}"
 
+# Patches are appended to the end of the file, so they only land in `[patch.crates-io]` if that is
+# the last section. Add the section if it is missing, and refuse to append anywhere else.
+ADD_PATCH_SECTION=""
+if ! grep -q '^\[patch\.crates-io\]' "$CARGO_TOML"; then
+    ADD_PATCH_SECTION=1
+elif ! grep '^\[' "$CARGO_TOML" | tail -n 1 | grep -q '^\[patch\.crates-io\]'; then
+    echo "Error: [patch.crates-io] must be the last section in $CARGO_TOML"
+    exit 1
+fi
+
 echo "Patching $CARGO_TOML..."
 echo "" >> "$CARGO_TOML"
+
+if [[ -n "$ADD_PATCH_SECTION" ]]; then
+    echo "[patch.crates-io]" >> "$CARGO_TOML"
+fi
 
 if [[ -n "$ALLOY_BRANCH" ]]; then
     echo "Patching alloy-rs/alloy with branch: $ALLOY_BRANCH"
