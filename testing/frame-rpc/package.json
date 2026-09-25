@@ -1,0 +1,13 @@
+{
+  "name": "reth-frame-rpc-tests",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node test.mjs"
+  },
+  "dependencies": {
+    "ajv": "8.20.0",
+    "ethers": "6.17.0",
+    "js-yaml": "5.4.2"
+  }
+}

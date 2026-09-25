@@ -1,0 +1,5 @@
+*
+!Dockerfile.tests
+!package.json
+!package-lock.json
+!test.mjs
