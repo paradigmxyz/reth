@@ -1806,7 +1806,11 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
             StaticFileSegment::Receipts |
             StaticFileSegment::TransactionSenders => {
                 if let Some(block) = provider.block_body_indices(checkpoint_block_number)? {
-                    let number = highest_static_file_entry - block.last_tx_num();
+                    // `last_tx_num()` saturates to zero for an empty genesis block, but row zero
+                    // belongs to the first non-empty block and must be removed as well.
+                    let number = highest_static_file_entry
+                        .saturating_add(1)
+                        .saturating_sub(block.next_tx_num());
                     debug!(target: "reth::providers::static_file", prune_count = number, checkpoint_block_number, "Pruning transaction based segment");
 
                     match segment {
@@ -3147,6 +3151,44 @@ mod tests {
 
     use super::StaticFileWriter;
     use crate::{providers::StaticFileProvider, BlockHashReader, StaticFileProviderBuilder};
+
+    #[test]
+    fn recovery_prunes_transaction_zero_at_empty_genesis() -> eyre::Result<()> {
+        use crate::{
+            test_utils::create_test_provider_factory, StaticFileProviderFactory,
+            TransactionsProvider,
+        };
+        use alloy_consensus::{SignableTransaction, TxLegacy};
+        use alloy_primitives::Signature;
+        use reth_db::{tables, transaction::DbTxMut};
+
+        let factory = create_test_provider_factory();
+        let provider = factory.provider_rw()?;
+        provider.tx_ref().put::<tables::BlockBodyIndices>(0, Default::default())?;
+        provider.commit()?;
+
+        let static_files = factory.static_file_provider();
+        let segment = StaticFileSegment::Transactions;
+        let tx = TxLegacy::default().into_signed(Signature::test_signature()).into();
+        {
+            let mut writer = static_files.latest_writer(segment)?;
+            writer.increment_block(0)?;
+            writer.increment_block(1)?;
+            writer.append_transaction(0, &tx)?;
+            writer.commit()?;
+        }
+        assert!(static_files.transaction_by_id(0)?.is_some());
+
+        assert_eq!(static_files.check_consistency(&factory.provider()?)?, None);
+        assert_eq!(static_files.get_highest_static_file_block(segment), Some(0));
+        assert!(static_files.transaction_by_id(0)?.is_none());
+
+        let mut writer = static_files.latest_writer(segment)?;
+        writer.increment_block(1)?;
+        writer.append_transaction(0, &tx)?;
+        writer.commit()?;
+        Ok(())
+    }
 
     #[test]
     fn stale_cache_fill_does_not_survive_index_reinitialization() -> eyre::Result<()> {
