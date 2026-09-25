@@ -1,8 +1,7 @@
-use crate::utils::eth_payload_attributes;
-use alloy_genesis::Genesis;
 use alloy_primitives::B256;
-use reth_chainspec::{ChainSpecBuilder, MAINNET};
-use reth_e2e_test_utils::{setup, transaction::TransactionTestContext};
+use reth_e2e_test_utils::{
+    test_chain_spec_builder, test_genesis, transaction::TransactionTestContext, E2ETestSetupExt,
+};
 use reth_node_ethereum::EthereumNode;
 use reth_provider::{HeaderProvider, StageCheckpointReader};
 use reth_stages_types::StageId;
@@ -14,23 +13,13 @@ async fn can_run_eth_node_with_custom_genesis_number() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
 
     // Create genesis with custom block number (e.g., 1000)
-    let mut genesis: Genesis =
-        serde_json::from_str(include_str!("../assets/genesis.json")).unwrap();
+    let mut genesis = test_genesis();
     genesis.number = Some(1000);
     genesis.parent_hash = Some(B256::random());
+    let chain_spec =
+        Arc::new(test_chain_spec_builder().genesis(genesis).cancun_activated().build());
 
-    let chain_spec = Arc::new(
-        ChainSpecBuilder::default()
-            .chain(MAINNET.chain)
-            .genesis(genesis)
-            .cancun_activated()
-            .build(),
-    );
-
-    let (mut nodes, wallet) =
-        setup::<EthereumNode>(1, chain_spec, false, eth_payload_attributes).await?;
-
-    let mut node = nodes.pop().unwrap();
+    let (mut node, wallet) = EthereumNode::test_setup(1, chain_spec).build_single().await?;
 
     // Verify stage checkpoints are initialized to genesis block number (1000)
     for stage in StageId::ALL {
@@ -44,19 +33,13 @@ async fn can_run_eth_node_with_custom_genesis_number() -> eyre::Result<()> {
         );
     }
 
-    // Advance the chain (block 1001)
+    // Advance the chain (block 1001) and assert the block has been committed
     let raw_tx = TransactionTestContext::transfer_tx_bytes(1, wallet.inner).await;
-    let tx_hash = node.rpc.inject_tx(raw_tx).await?;
-    let payload = node.advance_block().await?;
-
-    let block_hash = payload.block().hash();
+    let (_, payload) = node.inject_and_advance(raw_tx).await?;
     let block_number = payload.block().number;
 
     // Verify we're at block 1001 (genesis + 1)
     assert_eq!(block_number, 1001, "Block number should be 1001 after advancing from genesis 1000");
-
-    // Assert the block has been committed
-    node.assert_new_block(tx_hash, block_hash, block_number).await?;
 
     Ok(())
 }
@@ -68,23 +51,13 @@ async fn custom_genesis_block_query_boundaries() -> eyre::Result<()> {
 
     let genesis_number = 5000u64;
 
-    let mut genesis: Genesis =
-        serde_json::from_str(include_str!("../assets/genesis.json")).unwrap();
+    let mut genesis = test_genesis();
     genesis.number = Some(genesis_number);
     genesis.parent_hash = Some(B256::random());
+    let chain_spec =
+        Arc::new(test_chain_spec_builder().genesis(genesis).cancun_activated().build());
 
-    let chain_spec = Arc::new(
-        ChainSpecBuilder::default()
-            .chain(MAINNET.chain)
-            .genesis(genesis)
-            .cancun_activated()
-            .build(),
-    );
-
-    let (mut nodes, _wallet) =
-        setup::<EthereumNode>(1, chain_spec, false, eth_payload_attributes).await?;
-
-    let node = nodes.pop().unwrap();
+    let (node, _) = EthereumNode::test_setup(1, chain_spec).build_single().await?;
 
     // Query genesis block should succeed
     let genesis_header = node.inner.provider.header_by_number(genesis_number)?;
@@ -95,6 +68,27 @@ async fn custom_genesis_block_query_boundaries() -> eyre::Result<()> {
         let header = node.inner.provider.header_by_number(block_num)?;
         assert!(header.is_none(), "Block {} before genesis should not exist", block_num);
     }
+
+    Ok(())
+}
+
+/// Tests that payloads are built on top of a genesis that is newer than the default payload
+/// timestamp of the test context.
+#[tokio::test]
+async fn can_advance_on_genesis_newer_than_payload_timestamp() -> eyre::Result<()> {
+    reth_tracing::init_test_tracing();
+
+    let genesis_timestamp = 2_000_000_000;
+    let mut genesis = test_genesis();
+    genesis.timestamp = genesis_timestamp;
+    let chain_spec =
+        Arc::new(test_chain_spec_builder().genesis(genesis).cancun_activated().build());
+
+    let (mut node, wallet) = EthereumNode::test_setup(1, chain_spec).build_single().await?;
+
+    let raw_tx = TransactionTestContext::transfer_tx_bytes(1, wallet.inner).await;
+    let (_, payload) = node.inject_and_advance(raw_tx).await?;
+    assert!(payload.block().timestamp > genesis_timestamp);
 
     Ok(())
 }

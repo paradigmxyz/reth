@@ -1,11 +1,14 @@
 use futures_util::StreamExt;
-use reth_e2e_test_utils::testsuite::{
-    actions::ProduceBlocks,
-    setup::{NetworkSetup, Setup},
-    TestBuilder,
+use reth_e2e_test_utils::{
+    test_chain_spec,
+    testsuite::{
+        actions::ProduceBlocks,
+        setup::{NetworkSetup, Setup},
+        TestBuilder,
+    },
 };
 use reth_ethereum::{
-    chainspec::{ChainSpecBuilder, MAINNET},
+    chainspec::EthereumHardfork,
     exex::{ExExContext, ExExEvent},
     node::{
         api::{FullNodeComponents, NodeTypes},
@@ -100,18 +103,7 @@ async fn run_exex_test() -> eyre::Result<()> {
 
     // Set up the test environment
     let setup = Setup::default()
-        .with_chain_spec(Arc::new(
-            ChainSpecBuilder::default()
-                .chain(MAINNET.chain)
-                .genesis(
-                    serde_json::from_str(include_str!(
-                        "../../../crates/e2e-test-utils/src/testsuite/assets/genesis.json"
-                    ))
-                    .unwrap(),
-                )
-                .cancun_activated()
-                .build(),
-        ))
+        .with_chain_spec(test_chain_spec(EthereumHardfork::Cancun))
         .with_network(NetworkSetup::single_node());
 
     println!("Test environment set up");

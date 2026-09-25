@@ -100,7 +100,6 @@ alloy-trie.workspace = true
 assert_matches.workspace = true
 eyre.workspace = true
 serde = { workspace = true, features = ["derive"] }
-serde_json.workspace = true
 proptest.workspace = true
 rand.workspace = true
 rand_08.workspace = true
