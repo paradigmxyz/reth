@@ -306,7 +306,7 @@ mod tests {
 
     #[test]
     fn expiry_and_suffix_rules() {
-        let mut expiry = expiry_frame();
+        let expiry = expiry_frame();
         let s = sender();
         let mut t = tx(vec![expiry, frame(FrameMode::Verify, 3, s)]);
         let p = FrameValidationPolicy::new(&t, 1).unwrap();
