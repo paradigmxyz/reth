@@ -4,12 +4,12 @@ use alloy_eips::BlockId;
 use alloy_network::{Ethereum, IntoWallet};
 use alloy_primitives::{BlockHash, BlockNumber, Bytes, Sealable, B256};
 use alloy_provider::{
-    fillers::{FillProvider, TxFiller},
+    fillers::{FillProvider, RecommendedFillers, TxFiller},
     ProviderBuilder, RootProvider,
 };
 use alloy_rpc_types_engine::{ExecutionPayloadEnvelopeV5, ForkchoiceState};
 use alloy_rpc_types_eth::BlockNumberOrTag;
-use eyre::Ok;
+use eyre::{eyre, Ok};
 use futures_util::Future;
 use jsonrpsee::{core::client::ClientT, http_client::HttpClient};
 use reth_chainspec::EthereumHardforks;
@@ -25,9 +25,13 @@ use reth_rpc_api::TestingBuildBlockRequestV1;
 use reth_rpc_builder::auth::AuthServerHandle;
 use reth_rpc_eth_api::helpers::{EthApiSpec, EthTransactions, TraceExt};
 use reth_stages_types::StageId;
-use std::pin::Pin;
+use std::{pin::Pin, time::Duration};
 use tokio_stream::StreamExt;
 use url::Url;
+
+/// Maximum time the wait helpers of [`NodeTestContext`] wait for the node, e.g. to sync to or
+/// commit a block.
+pub const WAIT_TIMEOUT: Duration = Duration::from_secs(60);
 
 /// A helper struct to handle node actions
 #[expect(missing_debug_implementations)]
@@ -57,17 +61,25 @@ where
     AddOns: RethRpcAddOns<Node>,
 {
     /// Creates a new test node
+    ///
+    /// Payload timestamps start after the default Cancun timestamp of the payload context, or after
+    /// the timestamp of the latest block if it is newer, e.g. for a custom genesis or an imported
+    /// chain.
     pub async fn new(
         node: FullNode<Node, AddOns>,
         attributes_generator: impl Fn(u64) -> Payload::PayloadAttributes + Send + Sync + 'static,
     ) -> eyre::Result<Self> {
+        let mut payload =
+            PayloadTestContext::new(node.payload_builder_handle.clone(), attributes_generator)
+                .await?;
+        if let Some(latest) =
+            node.provider.sealed_header_by_number_or_tag(BlockNumberOrTag::Latest)?
+        {
+            payload.timestamp = payload.timestamp.max(latest.timestamp());
+        }
         Ok(Self {
             inner: node.clone(),
-            payload: PayloadTestContext::new(
-                node.payload_builder_handle.clone(),
-                attributes_generator,
-            )
-            .await?,
+            payload,
             network: NetworkTestContext::new(node.network.clone()),
             rpc: RpcTestContext { inner: node.add_ons_handle.rpc_registry },
             canonical_stream: node.provider.canonical_state_stream(),
@@ -175,82 +187,111 @@ where
     }
 
     /// Waits for block to be available on node.
+    ///
+    /// Returns an error if the block is not available within [`WAIT_TIMEOUT`].
     pub async fn wait_block(
         &self,
         number: BlockNumber,
         expected_block_hash: BlockHash,
         wait_finish_checkpoint: bool,
     ) -> eyre::Result<()> {
-        let mut check = !wait_finish_checkpoint;
-        loop {
-            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        let wait = async {
+            let mut check = !wait_finish_checkpoint;
+            loop {
+                tokio::time::sleep(Duration::from_millis(20)).await;
 
-            if !check &&
-                wait_finish_checkpoint &&
-                let Some(checkpoint) =
-                    self.inner.provider.get_stage_checkpoint(StageId::Finish)? &&
-                checkpoint.block_number >= number
-            {
-                check = true
-            }
-
-            if check {
-                if let Some(latest_header) = self.inner.provider.header_by_number(number)? {
-                    assert_eq!(latest_header.hash_slow(), expected_block_hash);
-                    break
+                if !check &&
+                    wait_finish_checkpoint &&
+                    let Some(checkpoint) =
+                        self.inner.provider.get_stage_checkpoint(StageId::Finish)? &&
+                    checkpoint.block_number >= number
+                {
+                    check = true
                 }
-                assert!(
-                    !wait_finish_checkpoint,
-                    "Finish checkpoint matches, but could not fetch block."
-                );
+
+                if check {
+                    if let Some(latest_header) = self.inner.provider.header_by_number(number)? {
+                        assert_eq!(latest_header.hash_slow(), expected_block_hash);
+                        break
+                    }
+                    assert!(
+                        !wait_finish_checkpoint,
+                        "Finish checkpoint matches, but could not fetch block."
+                    );
+                }
             }
-        }
-        Ok(())
+            Ok(())
+        };
+        tokio::time::timeout(WAIT_TIMEOUT, wait)
+            .await
+            .map_err(|_| eyre!("timed out waiting for block {number}"))?
     }
 
-    /// Waits for the node to unwind to the given block number
+    /// Waits for the node to unwind to the given block number.
+    ///
+    /// Returns an error if the node does not unwind within [`WAIT_TIMEOUT`].
     pub async fn wait_unwind(&self, number: BlockNumber) -> eyre::Result<()> {
-        loop {
-            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
-            if let Some(checkpoint) = self.inner.provider.get_stage_checkpoint(StageId::Headers)? &&
-                checkpoint.block_number == number
-            {
-                break
+        let wait = async {
+            loop {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+                if let Some(checkpoint) =
+                    self.inner.provider.get_stage_checkpoint(StageId::Headers)? &&
+                    checkpoint.block_number == number
+                {
+                    break
+                }
             }
-        }
-        Ok(())
+            Ok(())
+        };
+        tokio::time::timeout(WAIT_TIMEOUT, wait)
+            .await
+            .map_err(|_| eyre!("timed out waiting for unwind to block {number}"))?
     }
 
     /// Asserts that a new block has been added to the blockchain
     /// and the tx has been included in the block.
     ///
-    /// Does NOT work for pipeline since there's no stream notification!
+    /// Does NOT work for pipeline since there's no stream notification! Returns an error if the
+    /// block is not committed within [`WAIT_TIMEOUT`].
     pub async fn assert_new_block(
         &mut self,
         tip_tx_hash: B256,
         block_hash: B256,
         block_number: BlockNumber,
     ) -> eyre::Result<()> {
-        // get head block from notifications stream and verify the tx has been pushed to the
-        // pool is actually present in the canonical block
-        let head = self.canonical_stream.next().await.unwrap();
-        let tx = head.tip().body().transactions().first();
-        assert_eq!(tx.unwrap().tx_hash().as_slice(), tip_tx_hash.as_slice());
+        let wait =
+            async {
+                // get head block from notifications stream and verify the tx has been pushed to the
+                // pool is actually present in the canonical block
+                let head = self
+                    .canonical_stream
+                    .next()
+                    .await
+                    .ok_or_else(|| eyre!("canonical state stream closed"))?;
+                let tx =
+                    head.tip().body().transactions().first().ok_or_else(|| {
+                        eyre!("block {} has no transactions", head.tip().number())
+                    })?;
+                assert_eq!(tx.tx_hash().as_slice(), tip_tx_hash.as_slice());
 
-        loop {
-            // wait for the block to commit
-            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
-            if let Some(latest_block) =
-                self.inner.provider.block_by_number_or_tag(BlockNumberOrTag::Latest)? &&
-                latest_block.header().number() == block_number
-            {
-                // make sure the block hash we submitted via FCU engine api is the new latest
-                // block using an RPC call
-                assert_eq!(latest_block.header().hash_slow(), block_hash);
-                break
-            }
-        }
-        Ok(())
+                loop {
+                    // wait for the block to commit
+                    tokio::time::sleep(Duration::from_millis(20)).await;
+                    if let Some(latest_block) =
+                        self.inner.provider.block_by_number_or_tag(BlockNumberOrTag::Latest)? &&
+                        latest_block.header().number() == block_number
+                    {
+                        // make sure the block hash we submitted via FCU engine api is the new
+                        // latest block using an RPC call
+                        assert_eq!(latest_block.header().hash_slow(), block_hash);
+                        break
+                    }
+                }
+                Ok(())
+            };
+        tokio::time::timeout(WAIT_TIMEOUT, wait)
+            .await
+            .map_err(|_| eyre!("timed out waiting for block {block_number} to be committed"))?
     }
 
     /// Gets block hash by number.
@@ -264,25 +305,29 @@ where
     }
 
     /// Sends FCU and waits for the node to sync to the given block.
+    ///
+    /// Returns an error if the node does not sync within [`WAIT_TIMEOUT`].
     pub async fn sync_to(&self, block: BlockHash) -> eyre::Result<()> {
-        let start = std::time::Instant::now();
-
-        while self
-            .inner
-            .provider
-            .sealed_header_by_id(BlockId::Number(BlockNumberOrTag::Latest))?
-            .is_none_or(|h| h.hash() != block)
-        {
-            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-            self.update_forkchoice(block, block).await?;
-
-            assert!(start.elapsed() <= std::time::Duration::from_secs(40), "timed out");
-        }
+        let sync = async {
+            while self
+                .inner
+                .provider
+                .sealed_header_by_id(BlockId::Number(BlockNumberOrTag::Latest))?
+                .is_none_or(|h| h.hash() != block)
+            {
+                tokio::time::sleep(Duration::from_millis(100)).await;
+                self.update_forkchoice(block, block).await?;
+            }
+            Ok(())
+        };
+        tokio::time::timeout(WAIT_TIMEOUT, sync)
+            .await
+            .map_err(|_| eyre!("timed out syncing to block {block}"))??;
 
         // Hack to make sure that all components have time to process canonical state update.
         // Otherwise, this might result in e.g "nonce too low" errors when advancing chain further,
         // making tests flaky.
-        tokio::time::sleep(std::time::Duration::from_millis(1000)).await;
+        tokio::time::sleep(Duration::from_millis(1000)).await;
 
         Ok(())
     }
@@ -337,7 +382,7 @@ where
     pub fn rpc_provider(
         &self,
     ) -> FillProvider<impl TxFiller<Ethereum> + use<Node, Payload, AddOns>, RootProvider> {
-        ProviderBuilder::new().connect_http(self.rpc_url())
+        self.rpc_provider_for::<Ethereum>()
     }
 
     /// Returns an alloy provider with the recommended fillers and the given wallet connected to
@@ -357,7 +402,42 @@ where
     where
         W: IntoWallet<Ethereum, NetworkWallet: Clone>,
     {
-        ProviderBuilder::new().wallet(wallet).connect_http(self.rpc_url())
+        self.rpc_provider_with_wallet_for::<Ethereum, W>(wallet)
+    }
+
+    /// Returns an alloy provider for the network `Net` with its recommended fillers connected to
+    /// the HTTP RPC server.
+    ///
+    /// This is [`Self::rpc_provider`] for nodes whose RPC types differ from Ethereum's.
+    ///
+    /// # Panics
+    ///
+    /// If the HTTP RPC server is disabled.
+    pub fn rpc_provider_for<Net: RecommendedFillers>(
+        &self,
+    ) -> FillProvider<impl TxFiller<Net> + use<Net, Node, Payload, AddOns>, RootProvider<Net>, Net>
+    {
+        ProviderBuilder::new_with_network::<Net>().connect_http(self.rpc_url())
+    }
+
+    /// Returns an alloy provider for the network `Net` with its recommended fillers and the given
+    /// wallet connected to the HTTP RPC server.
+    ///
+    /// This is [`Self::rpc_provider_with_wallet`] for nodes whose RPC types differ from
+    /// Ethereum's.
+    ///
+    /// # Panics
+    ///
+    /// If the HTTP RPC server is disabled.
+    pub fn rpc_provider_with_wallet_for<Net, W>(
+        &self,
+        wallet: W,
+    ) -> FillProvider<impl TxFiller<Net> + use<Net, W, Node, Payload, AddOns>, RootProvider<Net>, Net>
+    where
+        Net: RecommendedFillers,
+        W: IntoWallet<Net, NetworkWallet: Clone>,
+    {
+        ProviderBuilder::new_with_network::<Net>().wallet(wallet).connect_http(self.rpc_url())
     }
 
     /// Returns an Engine API client.

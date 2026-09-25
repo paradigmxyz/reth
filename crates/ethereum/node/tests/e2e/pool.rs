@@ -46,8 +46,9 @@ async fn rpc_enforces_minimum_priority_fee() -> eyre::Result<()> {
         ..Default::default()
     };
 
-    let below_minimum = TransactionTestContext::sign_tx(wallet.inner.clone(), transaction(0)).await;
-    let err = provider.send_raw_transaction(&below_minimum.encoded_2718()).await.unwrap_err();
+    let below_minimum =
+        TransactionTestContext::sign_tx_bytes(wallet.inner.clone(), transaction(0)).await;
+    let err = provider.send_raw_transaction(&below_minimum).await.unwrap_err();
     assert!(
         err.to_string().contains("transaction priority fee below minimum required priority fee 1"),
         "{err}"
@@ -55,8 +56,9 @@ async fn rpc_enforces_minimum_priority_fee() -> eyre::Result<()> {
     assert!(node.inner.pool.is_empty());
 
     let at_minimum =
-        TransactionTestContext::sign_tx(wallet.inner, transaction(MINIMUM_PRIORITY_FEE)).await;
-    let pending = provider.send_raw_transaction(&at_minimum.encoded_2718()).await?;
+        TransactionTestContext::sign_tx_bytes(wallet.inner, transaction(MINIMUM_PRIORITY_FEE))
+            .await;
+    let pending = provider.send_raw_transaction(&at_minimum).await?;
     assert_eq!(node.inner.pool.len(), 1);
     assert!(node.inner.pool.contains(pending.tx_hash()));
 

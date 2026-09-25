@@ -30,13 +30,29 @@ where
         eth_api.send_raw_transaction(raw_tx).await
     }
 
-    /// Retrieves a transaction envelope by its hash
+    /// Retrieves an Ethereum transaction envelope by its hash, including its blob sidecar if the
+    /// transaction is still pooled.
     pub async fn envelope_by_hash(
         &self,
         hash: B256,
     ) -> eyre::Result<EthereumTxEnvelope<TxEip4844Variant<BlobTransactionSidecarVariant>>> {
-        let tx = self.inner.debug_api().raw_transaction(hash).await?.unwrap();
-        let tx = tx.to_vec();
-        Ok(EthereumTxEnvelope::decode_2718(&mut tx.as_ref()).unwrap())
+        self.decoded_transaction_by_hash(hash).await
+    }
+
+    /// Retrieves the raw transaction with the given hash via `debug_getRawTransaction` and decodes
+    /// it as `T`.
+    ///
+    /// Returns an error if the node does not know the transaction.
+    pub async fn decoded_transaction_by_hash<T: Decodable2718>(
+        &self,
+        hash: B256,
+    ) -> eyre::Result<T> {
+        let tx = self
+            .inner
+            .debug_api()
+            .raw_transaction(hash)
+            .await?
+            .ok_or_else(|| eyre::eyre!("transaction {hash} not found"))?;
+        Ok(T::decode_2718_exact(&tx)?)
     }
 }

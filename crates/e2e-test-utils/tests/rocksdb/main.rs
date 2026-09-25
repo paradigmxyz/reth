@@ -1,7 +1,6 @@
 //! E2E tests for `RocksDB` provider functionality.
 
 use alloy_consensus::BlockHeader;
-use alloy_eips::eip2718::Encodable2718;
 use alloy_primitives::{Address, Bytes, TxKind, B256, U256};
 use alloy_rpc_types_eth::{Transaction, TransactionInput, TransactionReceipt, TransactionRequest};
 use eyre::Result;
@@ -858,8 +857,7 @@ async fn test_rocksdb_storage_history_pruning() -> Result<()> {
         input: TransactionInput { input: None, data: Some(init_code) },
         ..Default::default()
     };
-    let signed_deploy = TransactionTestContext::sign_tx(signer.clone(), deploy_tx).await;
-    let deploy_bytes: Bytes = signed_deploy.encoded_2718().into();
+    let deploy_bytes = TransactionTestContext::sign_tx_bytes(signer.clone(), deploy_tx).await;
     let deploy_hash = nodes[0].rpc.inject_tx(deploy_bytes).await?;
     wait_for_pending_tx(&client, deploy_hash).await;
 
@@ -909,8 +907,7 @@ async fn test_rocksdb_storage_history_pruning() -> Result<()> {
             input: TransactionInput { input: None, data: Some(Bytes::from(calldata.0)) },
             ..Default::default()
         };
-        let signed_call = TransactionTestContext::sign_tx(signer.clone(), call_tx).await;
-        let call_bytes: Bytes = signed_call.encoded_2718().into();
+        let call_bytes = TransactionTestContext::sign_tx_bytes(signer.clone(), call_tx).await;
         let tx_hash = nodes[0].rpc.inject_tx(call_bytes).await?;
         wait_for_pending_tx(&client, tx_hash).await;
 

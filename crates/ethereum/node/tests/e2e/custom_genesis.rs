@@ -77,3 +77,26 @@ async fn custom_genesis_block_query_boundaries() -> eyre::Result<()> {
 
     Ok(())
 }
+
+/// Tests that payloads are built on top of a genesis that is newer than the default payload
+/// timestamp of the test context.
+#[tokio::test]
+async fn can_advance_on_genesis_newer_than_payload_timestamp() -> eyre::Result<()> {
+    reth_tracing::init_test_tracing();
+
+    let genesis_timestamp = 2_000_000_000;
+    let mut genesis = test_genesis();
+    genesis.timestamp = genesis_timestamp;
+    let chain_spec =
+        Arc::new(test_chain_spec_builder().genesis(genesis).cancun_activated().build());
+
+    let (mut node, wallet) = EthereumNode::test_setup(1, chain_spec).build_single().await?;
+
+    let raw_tx = TransactionTestContext::transfer_tx_bytes(1, wallet.inner).await;
+    let tx_hash = node.rpc.inject_tx(raw_tx).await?;
+    let payload = node.advance_block().await?;
+    assert!(payload.block().timestamp > genesis_timestamp);
+    node.assert_new_block(tx_hash, payload.block().hash(), payload.block().number).await?;
+
+    Ok(())
+}

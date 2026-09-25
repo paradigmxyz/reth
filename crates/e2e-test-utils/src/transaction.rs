@@ -134,6 +134,12 @@ impl TransactionTestContext {
             .unwrap()
     }
 
+    /// Signs an arbitrary [`TransactionRequest`] using the provided wallet, returning the EIP-2718
+    /// encoded bytes.
+    pub async fn sign_tx_bytes(wallet: PrivateKeySigner, tx: TransactionRequest) -> Bytes {
+        Self::sign_tx(wallet, tx).await.encoded_2718().into()
+    }
+
     /// Creates a tx with blob sidecar and sign it, returning bytes
     pub async fn tx_with_blobs_bytes(
         chain_id: u64,

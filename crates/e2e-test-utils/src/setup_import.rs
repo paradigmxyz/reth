@@ -2,7 +2,7 @@
 
 use crate::{
     eth_payload_attributes,
-    setup_builder::{launch_test_node, test_node_config},
+    setup_builder::{launch_test_node, test_node_config, LaunchArgs},
     wallet::Wallet,
     NodeHelperType,
 };
@@ -92,13 +92,16 @@ pub async fn setup_engine_with_chain_import(
         debug!(target: "e2e::import", "Launching node with datadir: {:?}", datadir);
 
         let chain_spec_for_attributes = chain_spec.clone();
-        let node = launch_test_node::<EthereumNode>(
-            test_node_config(chain_spec.clone()).set_dev(is_dev),
-            runtime.clone(),
-            tree_config.clone(),
+        let node = launch_test_node::<EthereumNode>(LaunchArgs {
+            node_config: test_node_config(chain_spec.clone()).set_dev(is_dev),
+            runtime: runtime.clone(),
+            tree_config: tree_config.clone(),
             datadir,
-            move |timestamp| eth_payload_attributes(&chain_spec_for_attributes, timestamp),
-        )
+            attributes_generator: Arc::new(move |timestamp| {
+                eth_payload_attributes(&chain_spec_for_attributes, timestamp)
+            }),
+            dev_payload_attributes: None,
+        })
         .instrument(span)
         .await?;
 

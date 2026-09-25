@@ -4,20 +4,26 @@
 //! configurations through closures that modify `NodeConfig` and `TreeConfig`.
 
 use crate::{
-    eth_payload_attributes, node::NodeTestContext, wallet::Wallet, NodeBuilderHelper,
-    NodeHelperType,
+    eth_payload_attributes, node::NodeTestContext, wallet::Wallet, Adapter, NodeBuilderHelper,
+    NodeHelperType, TmpNodeAdapter,
 };
 use eyre::ensure;
-use futures_util::future::TryJoinAll;
+use futures_util::future::{BoxFuture, TryJoinAll};
 use reth_chainspec::EthChainSpec;
 use reth_node_api::{PayloadAttrTy, TreeConfig};
-use reth_node_builder::{EngineNodeLauncher, NodeBuilder, NodeConfig, NodeHandle};
-use reth_node_core::args::{DiscoveryArgs, NetworkArgs, PruningArgs, RpcServerArgs};
+use reth_node_builder::{
+    DebugNode, DebugNodeLauncher, EngineNodeLauncher, Node, NodeBuilder, NodeBuilderWithComponents,
+    NodeConfig, NodeHandle,
+};
+use reth_node_core::{
+    args::{DatadirArgs, DiscoveryArgs, NetworkArgs, PruningArgs, RpcServerArgs},
+    dirs::{ChainPath, DataDirPath, MaybePlatformPath},
+};
 use reth_primitives_traits::AlloyBlockHeader;
 use reth_provider::providers::BlockchainProvider;
 use reth_rpc_server_types::RpcModuleSelection;
 use reth_tasks::Runtime;
-use std::{path::PathBuf, sync::Arc};
+use std::{path::PathBuf, sync::Arc, time::Duration};
 use tracing::{span, Instrument, Level};
 
 /// Builder for configuring and launching test node setups.
@@ -30,7 +36,7 @@ use tracing::{span, Instrument, Level};
 /// - are connected to each other.
 ///
 /// Once launched, each node receives a forkchoice update that makes genesis the head, safe and
-/// finalized block.
+/// finalized block, unless [dev mining](Self::with_dev_mining) is enabled.
 ///
 /// Configuration and tree configuration modifiers are applied in the order they are added.
 ///
@@ -50,6 +56,8 @@ pub struct E2ETestSetupBuilder<N: NodeBuilderHelper> {
     connect_nodes: bool,
     tree_config_modifiers: Vec<TreeConfigModifier>,
     node_config_modifiers: Vec<NodeConfigModifier<N::ChainSpec>>,
+    dev_launcher: Option<NodeLauncher<N>>,
+    dev_payload_attributes: Option<PayloadAttributesMapper<N>>,
 }
 
 impl<N: NodeBuilderHelper> E2ETestSetupBuilder<N> {
@@ -63,6 +71,8 @@ impl<N: NodeBuilderHelper> E2ETestSetupBuilder<N> {
             connect_nodes: true,
             tree_config_modifiers: Vec::new(),
             node_config_modifiers: Vec::new(),
+            dev_launcher: None,
+            dev_payload_attributes: None,
         }
     }
 
@@ -147,8 +157,52 @@ impl<N: NodeBuilderHelper> E2ETestSetupBuilder<N> {
         })
     }
 
+    /// Launches the node in dev mode with a local miner that builds a block every `block_time`, or
+    /// as soon as a transaction is pending if `None`.
+    ///
+    /// Dev mining is limited to a single node, since every node would mine its own chain. The local
+    /// miner drives forkchoice and payload building, so the node does not receive the initial
+    /// forkchoice update to genesis, and the block producing helpers of [`NodeTestContext`], e.g.
+    /// [`NodeTestContext::advance_block`] and [`NodeTestContext::update_forkchoice`], must not be
+    /// used. Use [`Self::map_dev_payload_attributes`] to customize the payload attributes of the
+    /// mined blocks.
+    pub fn with_dev_mining(mut self, block_time: Option<Duration>) -> Self
+    where
+        N: DebugNode<Adapter<N>>,
+    {
+        self.dev_launcher = Some(|args| Box::pin(launch_dev_node::<N>(args)));
+        self.with_node_config_modifier(move |mut config| {
+            config.dev.dev = true;
+            config.dev.block_time = block_time;
+            config
+        })
+    }
+
+    /// Maps the payload attributes of the blocks built by the local miner of
+    /// [dev mining](Self::with_dev_mining) nodes, e.g. to set the fee recipient.
+    ///
+    /// Mappers are applied in the order they are added. Has no effect unless dev mining is
+    /// enabled.
+    pub fn map_dev_payload_attributes<G>(mut self, map: G) -> Self
+    where
+        G: Fn(PayloadAttrTy<N>) -> PayloadAttrTy<N> + Send + Sync + 'static,
+    {
+        self.dev_payload_attributes = Some(match self.dev_payload_attributes.take() {
+            Some(prev) => Arc::new(move |attributes| map(prev(attributes))),
+            None => Arc::new(map),
+        });
+        self
+    }
+
     /// Builds and launches the test nodes.
     pub async fn build(self) -> eyre::Result<(Vec<NodeHelperType<N>>, Wallet)> {
+        ensure!(
+            self.dev_launcher.is_none() || self.num_nodes == 1,
+            "dev mining requires a single node setup, got {} nodes",
+            self.num_nodes
+        );
+        let dev_mining = self.dev_launcher.is_some();
+        let launch = self.dev_launcher.unwrap_or(|args| Box::pin(launch_test_node::<N>(args)));
         let runtime = self.runtime.unwrap_or_else(Runtime::test);
         let attributes_generator = self.attributes_generator.unwrap_or_else(|| {
             let chain_spec = self.chain_spec.clone();
@@ -167,19 +221,24 @@ impl<N: NodeBuilderHelper> E2ETestSetupBuilder<N> {
                     .fold(test_node_config(self.chain_spec.clone()), |config, modifier| {
                         modifier(config)
                     });
-                let attributes_generator = attributes_generator.clone();
-                let node = launch_test_node::<N>(
+                // The local miner of dev nodes drives forkchoice, unless a modifier disabled dev
+                // mode.
+                let mines = dev_mining && node_config.dev.dev;
+                let node = launch(LaunchArgs {
                     node_config,
-                    runtime.clone(),
-                    tree_config.clone(),
-                    reth_db::test_utils::tempdir_path(),
-                    move |timestamp| attributes_generator(timestamp),
-                )
+                    runtime: runtime.clone(),
+                    tree_config: tree_config.clone(),
+                    datadir: reth_db::test_utils::tempdir_path(),
+                    attributes_generator: attributes_generator.clone(),
+                    dev_payload_attributes: self.dev_payload_attributes.clone(),
+                })
                 .instrument(span!(Level::INFO, "node", idx))
                 .await?;
 
-                let genesis = node.block_hash(self.chain_spec.genesis_header().number());
-                node.update_forkchoice(genesis, genesis).await?;
+                if !mines {
+                    let genesis = node.block_hash(self.chain_spec.genesis_header().number());
+                    node.update_forkchoice(genesis, genesis).await?;
+                }
 
                 eyre::Ok(node)
             })
@@ -220,6 +279,7 @@ impl<N: NodeBuilderHelper> std::fmt::Debug for E2ETestSetupBuilder<N> {
             .field("connect_nodes", &self.connect_nodes)
             .field("tree_config_modifiers", &self.tree_config_modifiers.len())
             .field("node_config_modifiers", &self.node_config_modifiers.len())
+            .field("dev_mining", &self.dev_launcher.is_some())
             .finish_non_exhaustive()
     }
 }
@@ -241,7 +301,36 @@ type TreeConfigModifier = Box<dyn Fn(TreeConfig) -> TreeConfig + Send + Sync>;
 type NodeConfigModifier<C> = Box<dyn Fn(NodeConfig<C>) -> NodeConfig<C> + Send + Sync>;
 
 /// Closure that generates the payload attributes for a given timestamp.
-type AttributesGenerator<N> = Arc<dyn Fn(u64) -> PayloadAttrTy<N> + Send + Sync>;
+pub(crate) type AttributesGenerator<N> = Arc<dyn Fn(u64) -> PayloadAttrTy<N> + Send + Sync>;
+
+/// Closure that maps payload attributes.
+type PayloadAttributesMapper<N> = Arc<dyn Fn(PayloadAttrTy<N>) -> PayloadAttrTy<N> + Send + Sync>;
+
+/// Builder of a test node that is ready to be launched.
+type TestNodeBuilder<N> = NodeBuilderWithComponents<
+    TmpNodeAdapter<N>,
+    <N as Node<TmpNodeAdapter<N>>>::ComponentsBuilder,
+    <N as Node<TmpNodeAdapter<N>>>::AddOns,
+>;
+
+/// Function that launches a single test node.
+type NodeLauncher<N> = fn(LaunchArgs<N>) -> BoxFuture<'static, eyre::Result<NodeHelperType<N>>>;
+
+/// Arguments for launching a single test node.
+pub(crate) struct LaunchArgs<N: NodeBuilderHelper> {
+    /// The node configuration.
+    pub(crate) node_config: NodeConfig<N::ChainSpec>,
+    /// The runtime to launch the node on.
+    pub(crate) runtime: Runtime,
+    /// The engine tree configuration.
+    pub(crate) tree_config: TreeConfig,
+    /// The datadir of the node.
+    pub(crate) datadir: PathBuf,
+    /// Generator for the payload attributes of the payloads built by the test context.
+    pub(crate) attributes_generator: AttributesGenerator<N>,
+    /// Mapper for the payload attributes of the local miner in dev mode.
+    pub(crate) dev_payload_attributes: Option<PayloadAttributesMapper<N>>,
+}
 
 /// Returns the base tree configuration of test nodes.
 pub(crate) fn test_tree_config() -> TreeConfig {
@@ -267,29 +356,64 @@ pub(crate) fn test_node_config<C>(chain_spec: Arc<C>) -> NodeConfig<C> {
         )
 }
 
-/// Launches a test node with the engine launcher on the given runtime and datadir.
+/// Launches a test node with the engine launcher.
 pub(crate) async fn launch_test_node<N: NodeBuilderHelper>(
-    node_config: NodeConfig<N::ChainSpec>,
-    runtime: Runtime,
-    tree_config: TreeConfig,
-    datadir: PathBuf,
-    attributes_generator: impl Fn(u64) -> PayloadAttrTy<N> + Send + Sync + 'static,
+    args: LaunchArgs<N>,
 ) -> eyre::Result<NodeHelperType<N>> {
+    let LaunchArgs { node_config, runtime, tree_config, datadir, attributes_generator, .. } = args;
+    let (builder, datadir) = test_node_builder::<N>(node_config, datadir);
+    let NodeHandle { node, node_exit_future: _ } =
+        builder.launch_with(EngineNodeLauncher::new(runtime, datadir, tree_config)).await?;
+
+    NodeTestContext::new(node, move |timestamp| attributes_generator(timestamp)).await
+}
+
+/// Launches a test node with the debug launcher, which runs a local miner in dev mode.
+async fn launch_dev_node<N>(args: LaunchArgs<N>) -> eyre::Result<NodeHelperType<N>>
+where
+    N: NodeBuilderHelper + DebugNode<Adapter<N>>,
+{
+    let LaunchArgs {
+        node_config,
+        runtime,
+        tree_config,
+        datadir,
+        attributes_generator,
+        dev_payload_attributes,
+    } = args;
+    let (builder, datadir) = test_node_builder::<N>(node_config, datadir);
+    let launch = builder.launch_with(DebugNodeLauncher::new(EngineNodeLauncher::new(
+        runtime,
+        datadir,
+        tree_config,
+    )));
+    let launch = match dev_payload_attributes {
+        Some(map) => launch.map_debug_payload_attributes(move |attributes| map(attributes)),
+        None => launch,
+    };
+    let NodeHandle { node, node_exit_future: _ } = launch.await?;
+
+    NodeTestContext::new(node, move |timestamp| attributes_generator(timestamp)).await
+}
+
+/// Returns the builder of a test node with a temporary database in `datadir`, and the resolved
+/// datadir of the node.
+///
+/// The datadir is removed when the node is dropped.
+fn test_node_builder<N: NodeBuilderHelper>(
+    node_config: NodeConfig<N::ChainSpec>,
+    datadir: PathBuf,
+) -> (TestNodeBuilder<N>, ChainPath<DataDirPath>) {
+    let datadir_args =
+        DatadirArgs { datadir: MaybePlatformPath::from(datadir), ..node_config.datadir.clone() };
+    let node_config = node_config.with_datadir_args(datadir_args);
+    let datadir = node_config.datadir();
+    let database = reth_db::test_utils::create_test_rw_db_with_datadir(datadir.data_dir());
     let node = N::default();
-    let NodeHandle { node, node_exit_future: _ } = NodeBuilder::new(node_config)
-        .testing_node_with_datadir(runtime, datadir)
+    let builder = NodeBuilder::new(node_config)
+        .with_database(database)
         .with_types_and_provider::<N, BlockchainProvider<_>>()
         .with_components(node.components_builder())
-        .with_add_ons(node.add_ons())
-        .launch_with_fn(|builder| {
-            let launcher = EngineNodeLauncher::new(
-                builder.task_executor().clone(),
-                builder.config().datadir(),
-                tree_config,
-            );
-            builder.launch_with(launcher)
-        })
-        .await?;
-
-    NodeTestContext::new(node, attributes_generator).await
+        .with_add_ons(node.add_ons());
+    (builder, datadir)
 }
