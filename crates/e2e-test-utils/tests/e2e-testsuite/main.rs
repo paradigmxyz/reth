@@ -226,8 +226,10 @@ async fn test_testsuite_deep_reorg() -> Result<()> {
         .with_action(CreateFork::<EthEngineTypes>::new(1, 1))
         .with_action(CaptureBlock::new("blockA_height2"))
         .with_action(MakeCanonical::new())
-        // receive newPayload with block hash B and height 2
+        // send forkchoiceUpdated back to block 1. Building block A finalized block 1, and a
+        // canonical ancestor at the finalized block is accepted without unwinding the chain.
         .with_action(ReorgTo::<EthEngineTypes>::new_from_tag("block1"))
+        // receive newPayload with block hash B and height 2
         .with_action(CreateFork::<EthEngineTypes>::new(1, 1))
         .with_action(CaptureBlock::new("blockB_height2"))
         // receive forkchoiceUpdated with block hash B as head
