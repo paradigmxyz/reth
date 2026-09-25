@@ -275,21 +275,39 @@ fn default_engine_tree_setup() -> Setup<EthEngineTypes> {
         .with_tree_config(TreeConfig::default().with_has_enough_parallelism(true))
 }
 
-/// Creates a v2 storage mode setup for engine tree e2e tests.
+/// Creates a v1 storage mode setup that persists every canonical block.
+///
+/// With a persistence threshold and memory block buffer target of zero and no state masking, the
+/// engine persists every canonical block up to the head together with its state and trie updates,
+/// so even short chains exercise the storage writes and unwinds instead of staying in memory.
+fn v1_engine_tree_setup() -> Setup<EthEngineTypes> {
+    default_engine_tree_setup().with_tree_config(
+        TreeConfig::default()
+            .with_num_state_masking_blocks(0)
+            .with_persistence_threshold(0)
+            .with_memory_block_buffer_target(0)
+            .with_has_enough_parallelism(true),
+    )
+}
+
+/// Creates a v2 storage mode setup that persists every canonical block.
 ///
 /// v2 mode uses keccak256-hashed slot keys in static file changesets and rocksdb history
 /// instead of plain keys in MDBX.
 fn v2_engine_tree_setup() -> Setup<EthEngineTypes> {
-    default_engine_tree_setup().with_storage_v2()
+    v1_engine_tree_setup().with_storage_v2()
 }
 
 /// Test that verifies forkchoice update and canonical chain insertion functionality.
+///
+/// Every canonical block is persisted, exercising `save_blocks` with plain-key changesets and
+/// history indices in MDBX.
 #[tokio::test]
 async fn test_engine_tree_fcu_canon_chain_insertion_e2e() -> Result<()> {
     reth_tracing::init_test_tracing();
 
     let test = TestBuilder::new()
-        .with_setup(default_engine_tree_setup())
+        .with_setup(v1_engine_tree_setup())
         // produce one block
         .with_action(ProduceBlocks::<EthEngineTypes>::new(1))
         // make it canonical via forkchoice update
@@ -297,7 +315,10 @@ async fn test_engine_tree_fcu_canon_chain_insertion_e2e() -> Result<()> {
         // extend with 3 more blocks
         .with_action(ProduceBlocks::<EthEngineTypes>::new(3))
         // make the latest block canonical
-        .with_action(MakeCanonical::new());
+        .with_action(MakeCanonical::new())
+        .with_action(CaptureBlock::new("canonical_tip"))
+        // every canonical block reaches disk.
+        .with_action(WaitForPersistedChain::new(0, "canonical_tip"));
 
     test.run::<EthereumNode>().await?;
 
@@ -305,29 +326,37 @@ async fn test_engine_tree_fcu_canon_chain_insertion_e2e() -> Result<()> {
 }
 
 /// Test that verifies forkchoice update with a reorg where all blocks are already available.
+///
+/// The main chain is persisted before the fork becomes canonical, so the reorg unwinds the
+/// persisted main chain blocks above the fork base and persists the fork instead.
 #[tokio::test]
 async fn test_engine_tree_fcu_reorg_with_all_blocks_e2e() -> Result<()> {
     reth_tracing::init_test_tracing();
 
     let test = TestBuilder::new()
-        .with_setup(default_engine_tree_setup())
-        // create a main chain with 5 blocks (blocks 0-4)
+        .with_setup(v1_engine_tree_setup())
+        // create a main chain with 5 blocks (blocks 1-5).
         .with_action(ProduceBlocks::<EthEngineTypes>::new(2))
         .with_action(CaptureBlock::new("fork_base"))
         .with_action(ProduceBlocks::<EthEngineTypes>::new(3))
         .with_action(CaptureBlock::new("main_tip"))
         .with_action(MakeCanonical::new())
+        // the main chain blocks above the fork base reach disk before the reorg.
+        .with_action(WaitForPersistedChain::new(0, "main_tip"))
         // block production finalizes the produced blocks, so re-establish finality at the fork
         // base: building below the finalized block is rejected as a too deep reorg
         .with_action(
             FinalizeBlock::<EthEngineTypes>::new(BlockReference::Tag("fork_base".to_string()))
                 .with_head(BlockReference::Tag("main_tip".to_string())),
         )
-        // create a fork from block 2 with 3 additional blocks
+        // create a fork from block 2 with 3 additional blocks. Building on the first fork block
+        // makes it canonical, which unwinds the persisted main chain blocks above the fork base.
         .with_action(CreateFork::<EthEngineTypes>::new_from_tag("fork_base", 3))
         .with_action(CaptureBlock::new("fork_tip"))
         // perform FCU to the fork tip - this should make the fork canonical
-        .with_action(ReorgTo::<EthEngineTypes>::new_from_tag("fork_tip"));
+        .with_action(ReorgTo::<EthEngineTypes>::new_from_tag("fork_tip"))
+        // the fork replaces the unwound main chain blocks on disk.
+        .with_action(WaitForPersistedChain::new(0, "fork_tip").with_unwound("main_tip"));
 
     test.run::<EthereumNode>().await?;
 
@@ -529,13 +558,14 @@ async fn test_engine_tree_buffered_blocks_are_eventually_connected_e2e() -> Resu
 ///
 /// This test creates a longer chain of blocks, then uses forkchoice updates to make
 /// different parts of the chain canonical in sequence, verifying that FCU properly
-/// advances the canonical head when all blocks are already available.
+/// advances the canonical head when all blocks are already available. Every canonical block
+/// is persisted as the head advances.
 #[tokio::test]
 async fn test_engine_tree_fcu_extends_canon_chain_e2e() -> Result<()> {
     reth_tracing::init_test_tracing();
 
     let test = TestBuilder::new()
-        .with_setup(default_engine_tree_setup())
+        .with_setup(v1_engine_tree_setup())
         // create and make canonical a base chain with 1 block
         .with_action(ProduceBlocks::<EthEngineTypes>::new(1))
         .with_action(MakeCanonical::new())
@@ -547,7 +577,9 @@ async fn test_engine_tree_fcu_extends_canon_chain_e2e() -> Result<()> {
         // extend the canonical chain to the target via FCU.
         .with_action(ReorgTo::<EthEngineTypes>::new_from_tag("target_block"))
         // repeat the FCU to the chain tip, which is already canonical.
-        .with_action(MakeCanonical::new());
+        .with_action(MakeCanonical::new())
+        // every canonical block reaches disk.
+        .with_action(WaitForPersistedChain::new(0, "target_block"));
 
     test.run::<EthereumNode>().await?;
 
@@ -698,7 +730,8 @@ async fn test_engine_tree_pipeline_sync_catches_up_masked_state_e2e() -> Result<
 
 /// v2 variant: Verifies forkchoice update and canonical chain insertion in v2 storage mode.
 ///
-/// Exercises the full `save_blocks` → `write_state` → static file changeset path with hashed keys.
+/// Every canonical block is persisted, exercising `save_blocks` with hashed-key changesets in
+/// static files and history indices in rocksdb.
 #[tokio::test]
 async fn test_engine_tree_fcu_canon_chain_insertion_v2_e2e() -> Result<()> {
     reth_tracing::init_test_tracing();
@@ -708,7 +741,9 @@ async fn test_engine_tree_fcu_canon_chain_insertion_v2_e2e() -> Result<()> {
         .with_action(ProduceBlocks::<EthEngineTypes>::new(1))
         .with_action(MakeCanonical::new())
         .with_action(ProduceBlocks::<EthEngineTypes>::new(3))
-        .with_action(MakeCanonical::new());
+        .with_action(MakeCanonical::new())
+        .with_action(CaptureBlock::new("canonical_tip"))
+        .with_action(WaitForPersistedChain::new(0, "canonical_tip"));
 
     test.run::<EthereumNode>().await?;
 
@@ -717,7 +752,8 @@ async fn test_engine_tree_fcu_canon_chain_insertion_v2_e2e() -> Result<()> {
 
 /// v2 variant: Verifies forkchoice update with a reorg where all blocks are already available.
 ///
-/// Exercises `write_state_reverts` path with hashed changeset keys during CL-driven reorgs.
+/// The reorg unwinds the persisted main chain blocks above the fork base from the hashed-key
+/// static file changesets and rocksdb history indices, then persists the fork instead.
 #[tokio::test]
 async fn test_engine_tree_fcu_reorg_with_all_blocks_v2_e2e() -> Result<()> {
     reth_tracing::init_test_tracing();
@@ -729,6 +765,7 @@ async fn test_engine_tree_fcu_reorg_with_all_blocks_v2_e2e() -> Result<()> {
         .with_action(ProduceBlocks::<EthEngineTypes>::new(3))
         .with_action(CaptureBlock::new("main_tip"))
         .with_action(MakeCanonical::new())
+        .with_action(WaitForPersistedChain::new(0, "main_tip"))
         // block production finalizes the produced blocks, so re-establish finality at the fork
         // base: building below the finalized block is rejected as a too deep reorg
         .with_action(
@@ -737,7 +774,8 @@ async fn test_engine_tree_fcu_reorg_with_all_blocks_v2_e2e() -> Result<()> {
         )
         .with_action(CreateFork::<EthEngineTypes>::new_from_tag("fork_base", 3))
         .with_action(CaptureBlock::new("fork_tip"))
-        .with_action(ReorgTo::<EthEngineTypes>::new_from_tag("fork_tip"));
+        .with_action(ReorgTo::<EthEngineTypes>::new_from_tag("fork_tip"))
+        .with_action(WaitForPersistedChain::new(0, "fork_tip").with_unwound("main_tip"));
 
     test.run::<EthereumNode>().await?;
 
@@ -745,6 +783,8 @@ async fn test_engine_tree_fcu_reorg_with_all_blocks_v2_e2e() -> Result<()> {
 }
 
 /// v2 variant: Verifies progressive canonical chain extension in v2 storage mode.
+///
+/// Every canonical block is persisted as the head advances.
 #[tokio::test]
 async fn test_engine_tree_fcu_extends_canon_chain_v2_e2e() -> Result<()> {
     reth_tracing::init_test_tracing();
@@ -756,7 +796,8 @@ async fn test_engine_tree_fcu_extends_canon_chain_v2_e2e() -> Result<()> {
         .with_action(ProduceBlocks::<EthEngineTypes>::new(10))
         .with_action(CaptureBlock::new("target_block"))
         .with_action(ReorgTo::<EthEngineTypes>::new_from_tag("target_block"))
-        .with_action(MakeCanonical::new());
+        .with_action(MakeCanonical::new())
+        .with_action(WaitForPersistedChain::new(0, "target_block"));
 
     test.run::<EthereumNode>().await?;
 
