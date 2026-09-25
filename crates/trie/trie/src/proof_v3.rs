@@ -74,6 +74,11 @@ where
                     break
                 }
                 path = physical.slice(..physical.len() - 1);
+                // Masked persistence may omit this ancestor because it is already retained in
+                // the sparse trie. Stop before reading the known parent from the database.
+                if target.parent.path_len().is_some_and(|len| path.len() <= len) {
+                    break
+                }
                 node = self.cursor.get(path)?.ok_or_else(|| {
                     StateProofError::TrieInconsistency(format!(
                         "missing state trie parent at {path:?}"
@@ -159,6 +164,32 @@ mod tests {
                 None => self.0.last_key_value(),
             }
             .map(|(p, n)| (*p, n.clone())))
+        }
+    }
+
+    #[test]
+    fn partial_proof_does_not_read_masked_known_parent() {
+        for parent_len in [0, 2, 62] {
+            let key = B256::repeat_byte(0x11);
+            let path = Nibbles::unpack(key);
+            let leaf = StateTrieNode::Leaf {
+                short_key_len: (63 - parent_len) as u8,
+                value: U256::from(1),
+            };
+            let expected = leaf.proof_node(path);
+            let mut calculator = ProofCalculator::new(Cursor([(path, leaf)].into()));
+            let mut absent = key;
+            absent.0[31] = 0x12;
+            for target in [key, absent] {
+                let proof = calculator
+                    .proof(&mut [ProofV2Target::new(target)
+                        .with_parent(ProofV2TargetParent::new(parent_len))])
+                    .unwrap();
+                assert_eq!(proof.len(), 1);
+                assert_eq!(proof[0].path, expected.path);
+                assert_eq!(alloy_rlp::encode(&proof[0].node), alloy_rlp::encode(&expected.node));
+            }
+            assert!(calculator.proof(&mut [ProofV2Target::new(key)]).is_err());
         }
     }
 
