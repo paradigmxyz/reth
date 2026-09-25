@@ -333,6 +333,7 @@ fn verify_proof(
 }
 
 #[cfg(test)]
+#[allow(clippy::clone_on_copy)]
 mod tests {
     use super::{request::MAX_RETRIES, test_utils::TestSnapClient, *};
     use alloy_primitives::{Bytes, U256};
@@ -587,7 +588,7 @@ mod tests {
             AccountRangeOutcome::Verified(VerifiedAccountRange {
                 state_root: root_hash,
                 origin: B256::ZERO,
-                accounts: vec![accounts[0]],
+                accounts: vec![accounts[0].clone()],
                 has_more: false,
                 next: Some(key(3)),
             })
@@ -732,7 +733,7 @@ mod tests {
             AccountRangeOutcome::Verified(VerifiedAccountRange {
                 state_root: root_hash,
                 origin: B256::ZERO,
-                accounts: vec![accounts[0]],
+                accounts: vec![accounts[0].clone()],
                 has_more: false,
                 next: Some(key(9)),
             })
@@ -760,7 +761,7 @@ mod tests {
             AccountRangeOutcome::Verified(VerifiedAccountRange {
                 state_root: root_hash,
                 origin: B256::ZERO,
-                accounts: vec![accounts[0]],
+                accounts: vec![accounts[0].clone()],
                 has_more: true,
                 next: Some(key(3)),
             })

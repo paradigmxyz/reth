@@ -404,6 +404,7 @@ impl TestStageDB {
     }
 
     /// Insert collection of ([Address], [Account]) into corresponding tables.
+    #[allow(clippy::clone_on_copy)]
     pub fn insert_accounts_and_storages<I, S>(&self, accounts: I) -> ProviderResult<()>
     where
         I: IntoIterator<Item = (Address, (Account, S))>,
@@ -414,7 +415,7 @@ impl TestStageDB {
                 let hashed_address = keccak256(address);
 
                 // Insert into account tables.
-                tx.put::<tables::PlainAccountState>(address, account)?;
+                tx.put::<tables::PlainAccountState>(address, account.clone())?;
                 tx.put::<tables::HashedAccounts>(hashed_address, account)?;
 
                 // Insert into storage tables.

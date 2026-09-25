@@ -1412,6 +1412,7 @@ mod tests {
 
     #[test]
     #[allow(clippy::needless_update)]
+    #[allow(clippy::clone_on_copy)]
     fn db_closure_put_get() {
         let tempdir = TempDir::new().expect(ERROR_TEMPDIR);
         let path = tempdir.path();
@@ -1430,7 +1431,7 @@ mod tests {
 
             // PUT
             let result = env.update(|tx| {
-                tx.put::<PlainAccountState>(key, value).expect(ERROR_PUT);
+                tx.put::<PlainAccountState>(key, value.clone()).expect(ERROR_PUT);
                 200
             });
             assert_eq!(result.expect(ERROR_RETURN_VALUE), 200);

@@ -231,6 +231,7 @@ struct RangeDependencies {
 }
 
 impl RangeDependencies {
+    #[allow(clippy::clone_on_copy)]
     fn new(
         accounts: &[(B256, TrieAccount)],
         storages: B256Map<HashedStorage>,
@@ -238,7 +239,9 @@ impl RangeDependencies {
     ) -> Self {
         let state = HashedPostState::default()
             .with_accounts(
-                accounts.iter().map(|(hash, account)| (*hash, Some(Account::from(*account)))),
+                accounts
+                    .iter()
+                    .map(|(hash, account)| (*hash, Some(Account::from(account.clone())))),
             )
             .with_storages(storages)
             .into_sorted();

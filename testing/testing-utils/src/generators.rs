@@ -300,6 +300,7 @@ type AccountState = (Account, Vec<StorageEntry>);
 ///
 /// Returns a Vec of account and storage changes for each block,
 /// along with the final state of all accounts and storages.
+#[allow(clippy::clone_on_copy)]
 pub fn random_changeset_range<'a, R: Rng, IBlk, IAcc>(
     rng: &mut R,
     blocks: IBlk,
@@ -331,7 +332,7 @@ where
 
         // extract from sending account
         let (prev_from, _) = state.get_mut(&from).unwrap();
-        changeset.push((from, *prev_from, Vec::new()));
+        changeset.push((from, prev_from.clone(), Vec::new()));
 
         transfer = max(min(transfer, prev_from.balance), U256::from(1));
         prev_from.balance = prev_from.balance.wrapping_sub(transfer);
@@ -356,7 +357,7 @@ where
             .collect();
         old_entries.sort_by_key(|entry| entry.key);
 
-        changeset.push((to, *prev_to, old_entries));
+        changeset.push((to, prev_to.clone(), old_entries));
 
         changeset.sort_by_key(|(address, _, _)| *address);
 
