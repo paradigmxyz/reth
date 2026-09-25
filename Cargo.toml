@@ -434,7 +434,7 @@ reth-zstd-compressors = { version = "0.7.0", default-features = false }
 
 # revm
 revm = { version = "43.0.0", default-features = false }
-revmc = { git = "https://github.com/Soubhik-10/revmc", rev = "8dd697f", default-features = false, features = ["llvm-prefer-static"] }
+revmc = { git = "https://github.com/Soubhik-10/revmc", branch = "fix/eip8141-dependency-identity", default-features = false, features = ["llvm-prefer-static"] }
 revm-inspectors = "0.43.0"
 
 # eth
@@ -698,7 +698,7 @@ vergen-git2 = "10.0.1"
 ipnet = "2.11"
 
 [patch.crates-io]
-revm-inspectors = { git = "https://github.com/Soubhik-10/revm-inspectors", rev = "d5dec24" }
+revm-inspectors = { git = "https://github.com/Soubhik-10/revm-inspectors", branch = "fix/eip8141-frame-result" }
 # EIP-8141 Alloy consensus, networking, RPC, signer, and transport stack.
 alloy-consensus = { git = "https://github.com/Rimeeeeee/alloy", branch = "feat/eip8141-transaction" }
 alloy-consensus-any = { git = "https://github.com/Rimeeeeee/alloy", branch = "feat/eip8141-transaction" }
@@ -733,21 +733,21 @@ alloy-transport-ws = { git = "https://github.com/Rimeeeeee/alloy", branch = "fea
 alloy-tx-macros = { git = "https://github.com/Rimeeeeee/alloy", branch = "feat/eip8141-transaction" }
 
 # EIP-8141 execution adapter and VM.
-alloy-evm = { git = "https://github.com/Soubhik-10/evm", rev = "b66ecc5" }
-reth-codecs = { git = "https://github.com/Soubhik-10/reth-core", rev = "ef0d139fdb680160813d0fc975576dc05d6e2020" }
-reth-codecs-derive = { git = "https://github.com/Soubhik-10/reth-core", rev = "ef0d139fdb680160813d0fc975576dc05d6e2020" }
-reth-primitives-traits = { git = "https://github.com/Soubhik-10/reth-core", rev = "ef0d139fdb680160813d0fc975576dc05d6e2020" }
-reth-rpc-traits = { git = "https://github.com/Soubhik-10/reth-core", rev = "ef0d139fdb680160813d0fc975576dc05d6e2020" }
-reth-zstd-compressors = { git = "https://github.com/Soubhik-10/reth-core", rev = "ef0d139fdb680160813d0fc975576dc05d6e2020" }
-revm = { git = "https://github.com/Soubhik-10/revm", branch = "feat/eip8141-latest-dependencies" }
-revm-bytecode = { git = "https://github.com/Soubhik-10/revm", branch = "feat/eip8141-latest-dependencies" }
-revm-context = { git = "https://github.com/Soubhik-10/revm", branch = "feat/eip8141-latest-dependencies" }
-revm-context-interface = { git = "https://github.com/Soubhik-10/revm", branch = "feat/eip8141-latest-dependencies" }
-revm-database = { git = "https://github.com/Soubhik-10/revm", branch = "feat/eip8141-latest-dependencies" }
-revm-database-interface = { git = "https://github.com/Soubhik-10/revm", branch = "feat/eip8141-latest-dependencies" }
-revm-handler = { git = "https://github.com/Soubhik-10/revm", branch = "feat/eip8141-latest-dependencies" }
-revm-inspector = { git = "https://github.com/Soubhik-10/revm", branch = "feat/eip8141-latest-dependencies" }
-revm-interpreter = { git = "https://github.com/Soubhik-10/revm", branch = "feat/eip8141-latest-dependencies" }
-revm-precompile = { git = "https://github.com/Soubhik-10/revm", branch = "feat/eip8141-latest-dependencies" }
-revm-primitives = { git = "https://github.com/Soubhik-10/revm", branch = "feat/eip8141-latest-dependencies" }
-revm-state = { git = "https://github.com/Soubhik-10/revm", branch = "feat/eip8141-latest-dependencies" }
+alloy-evm = { git = "https://github.com/Soubhik-10/evm", branch = "feat/eip8141" }
+reth-codecs = { git = "https://github.com/Soubhik-10/reth-core", branch = "feat/eip8141-receipt-codec-alloy" }
+reth-codecs-derive = { git = "https://github.com/Soubhik-10/reth-core", branch = "feat/eip8141-receipt-codec-alloy" }
+reth-primitives-traits = { git = "https://github.com/Soubhik-10/reth-core", branch = "feat/eip8141-receipt-codec-alloy" }
+reth-rpc-traits = { git = "https://github.com/Soubhik-10/reth-core", branch = "feat/eip8141-receipt-codec-alloy" }
+reth-zstd-compressors = { git = "https://github.com/Soubhik-10/reth-core", branch = "feat/eip8141-receipt-codec-alloy" }
+revm = { git = "https://github.com/Soubhik-10/revm", branch = "feat/eip8141-frame-transactions" }
+revm-bytecode = { git = "https://github.com/Soubhik-10/revm", branch = "feat/eip8141-frame-transactions" }
+revm-context = { git = "https://github.com/Soubhik-10/revm", branch = "feat/eip8141-frame-transactions" }
+revm-context-interface = { git = "https://github.com/Soubhik-10/revm", branch = "feat/eip8141-frame-transactions" }
+revm-database = { git = "https://github.com/Soubhik-10/revm", branch = "feat/eip8141-frame-transactions" }
+revm-database-interface = { git = "https://github.com/Soubhik-10/revm", branch = "feat/eip8141-frame-transactions" }
+revm-handler = { git = "https://github.com/Soubhik-10/revm", branch = "feat/eip8141-frame-transactions" }
+revm-inspector = { git = "https://github.com/Soubhik-10/revm", branch = "feat/eip8141-frame-transactions" }
+revm-interpreter = { git = "https://github.com/Soubhik-10/revm", branch = "feat/eip8141-frame-transactions" }
+revm-precompile = { git = "https://github.com/Soubhik-10/revm", branch = "feat/eip8141-frame-transactions" }
+revm-primitives = { git = "https://github.com/Soubhik-10/revm", branch = "feat/eip8141-frame-transactions" }
+revm-state = { git = "https://github.com/Soubhik-10/revm", branch = "feat/eip8141-frame-transactions" }
