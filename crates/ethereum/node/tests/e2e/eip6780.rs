@@ -25,18 +25,17 @@
 //! - destroy/recreate cycles at the same `CREATE2` address across transactions and blocks,
 //!   including the collision of a recreate attempt with a persisting destroyed contract.
 
-use alloy_network::{EthereumWallet, TransactionBuilder};
+use alloy_network::TransactionBuilder;
 use alloy_primitives::{Address, Bytes, TxKind, B256, U256};
-use alloy_provider::{Provider, ProviderBuilder};
+use alloy_provider::Provider;
 use alloy_rpc_types_eth::{TransactionReceipt, TransactionRequest};
 use futures::StreamExt;
-use reth_chainspec::{ChainSpec, ChainSpecBuilder, EthereumHardfork, MAINNET};
+use reth_chainspec::EthereumHardfork;
 use reth_e2e_test_utils::{
-    eth_payload_attributes_for_fork, setup_engine,
+    test_chain_spec,
     trie::{assert_trie_consistency, wait_for_persisted_block},
-    NodeHelperType,
+    E2ETestSetupBuilder, NodeHelperType,
 };
-use reth_node_api::TreeConfig;
 use reth_node_ethereum::EthereumNode;
 use reth_provider::Chain;
 use reth_revm::db::BundleAccount;
@@ -69,20 +68,17 @@ async fn run_selfdestruct_suite(fork: EthereumHardfork) -> eyre::Result<()> {
 
     // low persistence thresholds so the scenario blocks reach the database and the persisted
     // trie representation can be verified at the end of the suite
-    let tree_config = TreeConfig::default()
-        .with_num_state_masking_blocks(0)
-        .with_persistence_threshold(2)
-        .with_memory_block_buffer_target(1);
-    let (mut nodes, wallet) =
-        setup_engine::<EthereumNode>(1, fork_spec(fork), false, tree_config, move |timestamp| {
-            eth_payload_attributes_for_fork(fork, timestamp)
+    let (node, wallet) = E2ETestSetupBuilder::<EthereumNode>::new(1, test_chain_spec(fork))
+        .with_tree_config_modifier(|config| {
+            config
+                .with_num_state_masking_blocks(0)
+                .with_persistence_threshold(2)
+                .with_memory_block_buffer_target(1)
         })
+        .build_single()
         .await?;
-    let node = nodes.pop().unwrap();
     let signer = wallet.inner.clone();
-    let provider = ProviderBuilder::new()
-        .wallet(EthereumWallet::new(signer.clone()))
-        .connect_http(node.rpc_url());
+    let provider = node.rpc_provider_with_wallet(signer.clone());
 
     let mut ctx = SuiteCtx {
         node,
@@ -691,17 +687,4 @@ fn call_then_store_runtime(target: Address) -> Bytes {
     code.extend_from_slice(&[0x60, 0x01, 0x60, 0x00, 0x55]); // PUSH1 1 PUSH1 0 SSTORE
     code.push(0x00); // STOP
     code.into()
-}
-
-fn fork_spec(fork: EthereumHardfork) -> Arc<ChainSpec> {
-    let builder = ChainSpecBuilder::default()
-        .chain(MAINNET.chain)
-        .genesis(serde_json::from_str(include_str!("../assets/genesis.json")).unwrap());
-    let builder = match fork {
-        EthereumHardfork::Cancun => builder.cancun_activated(),
-        EthereumHardfork::Osaka => builder.osaka_activated(),
-        EthereumHardfork::Amsterdam => builder.amsterdam_activated(),
-        fork => unimplemented!("no activation configured for {fork}"),
-    };
-    Arc::new(builder.build())
 }

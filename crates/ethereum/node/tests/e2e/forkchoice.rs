@@ -1,45 +1,37 @@
 //! Tests for atomic forkchoice state updates via the Engine API.
 
-use crate::utils::eth_payload_attributes;
 use alloy_eips::BlockNumberOrTag;
 use alloy_primitives::B256;
-use alloy_provider::{Provider, ProviderBuilder};
+use alloy_provider::Provider;
 use alloy_rpc_types_engine::{ForkchoiceState, PayloadStatusEnum};
 use jsonrpsee_core::client::Error;
-use reth_chainspec::{ChainSpecBuilder, MAINNET};
-use reth_e2e_test_utils::E2ETestSetupBuilder;
+use reth_chainspec::EthereumHardfork;
+use reth_e2e_test_utils::{eth_payload_attributes, test_chain_spec, E2ETestSetupBuilder};
 use reth_node_ethereum::{EthEngineTypes, EthereumNode};
 use reth_rpc_api::{EngineApiClient, TestingBuildBlockRequestV1};
 use reth_rpc_server_types::{RethRpcModule, RpcModuleSelection};
-use std::sync::Arc;
 
 #[tokio::test]
 async fn invalid_forkchoice_preserves_canonical_state() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
 
-    let chain_spec = Arc::new(
-        ChainSpecBuilder::default()
-            .chain(MAINNET.chain)
-            .genesis(serde_json::from_str(include_str!("../assets/genesis.json")).unwrap())
-            .cancun_activated()
-            .build(),
-    );
-    let (mut nodes, _) =
-        E2ETestSetupBuilder::<EthereumNode, _>::new(2, chain_spec, eth_payload_attributes)
-            .with_connect_nodes(false)
-            .with_node_config_modifier(|mut config| {
-                config.rpc.http_api =
-                    Some(RpcModuleSelection::from([RethRpcModule::Eth, RethRpcModule::Testing]));
-                config
-            })
-            .build()
-            .await?;
+    let chain_spec = test_chain_spec(EthereumHardfork::Cancun);
+    let (mut nodes, _) = E2ETestSetupBuilder::<EthereumNode>::new(2, chain_spec.clone())
+        .with_connect_nodes(false)
+        .with_rpc_modifier(|rpc| {
+            rpc.with_http_api(RpcModuleSelection::from([
+                RethRpcModule::Eth,
+                RethRpcModule::Testing,
+            ]))
+        })
+        .build()
+        .await?;
     let node = nodes.pop().unwrap();
     let producer = nodes.pop().unwrap();
     let genesis = node.block_hash(0);
     let engine = node.auth_server_handle().http_client();
     let producer_engine = producer.auth_server_handle().http_client();
-    let rpc = ProviderBuilder::new().connect_http(node.rpc_url());
+    let rpc = node.rpc_provider();
 
     // Build a1 <- a2 <- a3 and b1 <- b2, both rooted at genesis. Only chain A is canonical.
     let mut chains = [vec![genesis], vec![genesis]];
@@ -48,7 +40,10 @@ async fn invalid_forkchoice_preserves_canonical_state() -> eyre::Result<()> {
             let envelope = producer
                 .testing_build_block_v1(TestingBuildBlockRequestV1 {
                     parent_block_hash: *chains[branch].last().unwrap(),
-                    payload_attributes: eth_payload_attributes(number + branch as u64 * 10),
+                    payload_attributes: eth_payload_attributes(
+                        &chain_spec,
+                        number + branch as u64 * 10,
+                    ),
                     transactions: vec![],
                     extra_data: None,
                 })
@@ -146,7 +141,7 @@ async fn invalid_forkchoice_preserves_canonical_state() -> eyre::Result<()> {
     let err = EngineApiClient::<EthEngineTypes>::fork_choice_updated_v3(
         &engine,
         ForkchoiceState::same_hash(b[2]),
-        Some(eth_payload_attributes(1)),
+        Some(eth_payload_attributes(&chain_spec, 1)),
     )
     .await
     .unwrap_err();

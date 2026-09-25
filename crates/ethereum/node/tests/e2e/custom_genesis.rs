@@ -1,8 +1,7 @@
-use crate::utils::eth_payload_attributes;
-use alloy_genesis::Genesis;
 use alloy_primitives::B256;
-use reth_chainspec::{ChainSpecBuilder, MAINNET};
-use reth_e2e_test_utils::{setup, transaction::TransactionTestContext};
+use reth_e2e_test_utils::{
+    test_chain_spec_builder, test_genesis, transaction::TransactionTestContext, E2ETestSetupBuilder,
+};
 use reth_node_ethereum::EthereumNode;
 use reth_provider::{HeaderProvider, StageCheckpointReader};
 use reth_stages_types::StageId;
@@ -14,23 +13,14 @@ async fn can_run_eth_node_with_custom_genesis_number() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
 
     // Create genesis with custom block number (e.g., 1000)
-    let mut genesis: Genesis =
-        serde_json::from_str(include_str!("../assets/genesis.json")).unwrap();
+    let mut genesis = test_genesis();
     genesis.number = Some(1000);
     genesis.parent_hash = Some(B256::random());
+    let chain_spec =
+        Arc::new(test_chain_spec_builder().genesis(genesis).cancun_activated().build());
 
-    let chain_spec = Arc::new(
-        ChainSpecBuilder::default()
-            .chain(MAINNET.chain)
-            .genesis(genesis)
-            .cancun_activated()
-            .build(),
-    );
-
-    let (mut nodes, wallet) =
-        setup::<EthereumNode>(1, chain_spec, false, eth_payload_attributes).await?;
-
-    let mut node = nodes.pop().unwrap();
+    let (mut node, wallet) =
+        E2ETestSetupBuilder::<EthereumNode>::new(1, chain_spec).build_single().await?;
 
     // Verify stage checkpoints are initialized to genesis block number (1000)
     for stage in StageId::ALL {
@@ -68,23 +58,13 @@ async fn custom_genesis_block_query_boundaries() -> eyre::Result<()> {
 
     let genesis_number = 5000u64;
 
-    let mut genesis: Genesis =
-        serde_json::from_str(include_str!("../assets/genesis.json")).unwrap();
+    let mut genesis = test_genesis();
     genesis.number = Some(genesis_number);
     genesis.parent_hash = Some(B256::random());
+    let chain_spec =
+        Arc::new(test_chain_spec_builder().genesis(genesis).cancun_activated().build());
 
-    let chain_spec = Arc::new(
-        ChainSpecBuilder::default()
-            .chain(MAINNET.chain)
-            .genesis(genesis)
-            .cancun_activated()
-            .build(),
-    );
-
-    let (mut nodes, _wallet) =
-        setup::<EthereumNode>(1, chain_spec, false, eth_payload_attributes).await?;
-
-    let node = nodes.pop().unwrap();
+    let (node, _) = E2ETestSetupBuilder::<EthereumNode>::new(1, chain_spec).build_single().await?;
 
     // Query genesis block should succeed
     let genesis_header = node.inner.provider.header_by_number(genesis_number)?;

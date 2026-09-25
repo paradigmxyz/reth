@@ -1,7 +1,12 @@
 use crate::{network::NetworkTestContext, payload::PayloadTestContext, rpc::RpcTestContext};
 use alloy_consensus::{transaction::TxHashRef, BlockHeader};
 use alloy_eips::BlockId;
+use alloy_network::{Ethereum, IntoWallet};
 use alloy_primitives::{BlockHash, BlockNumber, Bytes, Sealable, B256};
+use alloy_provider::{
+    fillers::{FillProvider, TxFiller},
+    ProviderBuilder, RootProvider,
+};
 use alloy_rpc_types_engine::{ExecutionPayloadEnvelopeV5, ForkchoiceState};
 use alloy_rpc_types_eth::BlockNumberOrTag;
 use eyre::Ok;
@@ -11,7 +16,6 @@ use reth_chainspec::EthereumHardforks;
 use reth_network_api::test_utils::PeersHandleProvider;
 use reth_node_api::{Block, BlockBody, BlockTy, FullNodeComponents, PayloadTypes, PrimitivesTy};
 use reth_node_builder::{rpc::RethRpcAddOns, FullNode, NodeTypes};
-
 use reth_payload_primitives::BuiltPayload;
 use reth_provider::{
     BlockReader, BlockReaderIdExt, CanonStateNotificationStream, CanonStateSubscriptions,
@@ -323,6 +327,37 @@ where
     /// Returns an RPC client.
     pub fn rpc_client(&self) -> Option<HttpClient> {
         self.inner.rpc_server_handle().http_client()
+    }
+
+    /// Returns an alloy provider with the recommended fillers connected to the HTTP RPC server.
+    ///
+    /// # Panics
+    ///
+    /// If the HTTP RPC server is disabled.
+    pub fn rpc_provider(
+        &self,
+    ) -> FillProvider<impl TxFiller<Ethereum> + use<Node, Payload, AddOns>, RootProvider> {
+        ProviderBuilder::new().connect_http(self.rpc_url())
+    }
+
+    /// Returns an alloy provider with the recommended fillers and the given wallet connected to
+    /// the HTTP RPC server.
+    ///
+    /// Transactions sent via the provider are signed by the wallet, e.g. a
+    /// [`PrivateKeySigner`](alloy_signer_local::PrivateKeySigner) of the test
+    /// [`Wallet`](crate::wallet::Wallet).
+    ///
+    /// # Panics
+    ///
+    /// If the HTTP RPC server is disabled.
+    pub fn rpc_provider_with_wallet<W>(
+        &self,
+        wallet: W,
+    ) -> FillProvider<impl TxFiller<Ethereum> + use<W, Node, Payload, AddOns>, RootProvider>
+    where
+        W: IntoWallet<Ethereum, NetworkWallet: Clone>,
+    {
+        ProviderBuilder::new().wallet(wallet).connect_http(self.rpc_url())
     }
 
     /// Returns an Engine API client.

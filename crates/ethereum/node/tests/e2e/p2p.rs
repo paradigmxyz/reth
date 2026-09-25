@@ -1,18 +1,15 @@
-use crate::utils::{
-    advance_with_random_transactions, eth_payload_attributes, eth_payload_attributes_amsterdam,
-};
+use crate::utils::advance_with_random_transactions;
 use alloy_consensus::{SignableTransaction, TxEip1559, TxEnvelope};
 use alloy_eips::{BlockNumberOrTag, Encodable2718};
 use alloy_network::TxSignerSync;
 use alloy_primitives::B256;
-use alloy_provider::{Provider, ProviderBuilder};
+use alloy_provider::Provider;
 use alloy_rpc_types_engine::{ForkchoiceState, PayloadStatusEnum};
 use futures::{future::JoinAll, StreamExt};
 use rand::{rngs::StdRng, seq::IndexedRandom, Rng, SeedableRng};
-use reth_chainspec::{ChainSpecBuilder, MAINNET};
+use reth_chainspec::EthereumHardfork;
 use reth_e2e_test_utils::{
-    setup, setup_engine, setup_engine_with_connection, transaction::TransactionTestContext,
-    wallet::Wallet,
+    test_chain_spec, transaction::TransactionTestContext, wallet::Wallet, E2ETestSetupBuilder,
 };
 use reth_engine_primitives::ConsensusEngineEvent;
 use reth_ethereum_primitives::EthPrimitives;
@@ -31,13 +28,7 @@ async fn can_launch_with_net_if_and_shared_discovery_port() -> eyre::Result<()> 
     reth_tracing::init_test_tracing();
 
     let runtime = Runtime::test();
-    let chain_spec = Arc::new(
-        ChainSpecBuilder::default()
-            .chain(MAINNET.chain)
-            .genesis(serde_json::from_str(include_str!("../assets/genesis.json")).unwrap())
-            .cancun_activated()
-            .build(),
-    );
+    let chain_spec = test_chain_spec(EthereumHardfork::Cancun);
 
     let discovery_port = unused_udp_port();
     let mut network = NetworkArgs::default().with_unused_p2p_port();
@@ -103,19 +94,10 @@ fn unused_udp_port() -> u16 {
 async fn can_sync() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
 
-    let (mut nodes, wallet) = setup::<EthereumNode>(
-        2,
-        Arc::new(
-            ChainSpecBuilder::default()
-                .chain(MAINNET.chain)
-                .genesis(serde_json::from_str(include_str!("../assets/genesis.json")).unwrap())
-                .cancun_activated()
-                .build(),
-        ),
-        false,
-        eth_payload_attributes,
-    )
-    .await?;
+    let (mut nodes, wallet) =
+        E2ETestSetupBuilder::<EthereumNode>::new(2, test_chain_spec(EthereumHardfork::Cancun))
+            .build()
+            .await?;
 
     let raw_tx = TransactionTestContext::transfer_tx_bytes(1, wallet.inner).await;
     let mut second_node = nodes.pop().unwrap();
@@ -146,23 +128,10 @@ async fn can_sync() -> eyre::Result<()> {
 async fn rejects_downloaded_block_with_invalid_bal_hash() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
 
-    let chain_spec = Arc::new(
-        ChainSpecBuilder::default()
-            .chain(MAINNET.chain)
-            .genesis(serde_json::from_str(include_str!("../assets/genesis.json")).unwrap())
-            .amsterdam_activated()
-            .build(),
-    );
+    let chain_spec = test_chain_spec(EthereumHardfork::Amsterdam);
 
-    let (mut nodes, wallet) = setup_engine::<EthereumNode>(
-        1,
-        chain_spec.clone(),
-        false,
-        Default::default(),
-        eth_payload_attributes_amsterdam,
-    )
-    .await?;
-    let mut node = nodes.pop().unwrap();
+    let (mut node, wallet) =
+        E2ETestSetupBuilder::<EthereumNode>::new(1, chain_spec.clone()).build_single().await?;
 
     // Build a valid Amsterdam block without submitting it to the engine, then change only its BAL
     // commitment so all other execution-derived header fields remain valid.
@@ -241,30 +210,17 @@ async fn e2e_test_send_transactions() -> eyre::Result<()> {
     let mut rng = StdRng::from_seed(seed);
     println!("Seed: {seed:?}");
 
-    let chain_spec = Arc::new(
-        ChainSpecBuilder::default()
-            .chain(MAINNET.chain)
-            .genesis(serde_json::from_str(include_str!("../assets/genesis.json")).unwrap())
-            .cancun_activated()
-            .prague_activated()
-            .build(),
-    );
+    let chain_spec = test_chain_spec(EthereumHardfork::Prague);
 
-    let (mut nodes, _) = setup_engine::<EthereumNode>(
-        2,
-        chain_spec.clone(),
-        false,
-        Default::default(),
-        eth_payload_attributes,
-    )
-    .await?;
+    let (mut nodes, _) =
+        E2ETestSetupBuilder::<EthereumNode>::new(2, chain_spec.clone()).build().await?;
     let mut node = nodes.pop().unwrap();
-    let provider = ProviderBuilder::new().connect_http(node.rpc_url());
+    let provider = node.rpc_provider();
 
     advance_with_random_transactions(&mut node, 100, &mut rng, true).await?;
 
     let second_node = nodes.pop().unwrap();
-    let second_provider = ProviderBuilder::new().connect_http(second_node.rpc_url());
+    let second_provider = second_node.rpc_provider();
 
     assert_eq!(second_provider.get_block_number().await?, 0);
 
@@ -283,28 +239,15 @@ async fn test_long_reorg() -> eyre::Result<()> {
     let mut rng = StdRng::from_seed(seed);
     println!("Seed: {seed:?}");
 
-    let chain_spec = Arc::new(
-        ChainSpecBuilder::default()
-            .chain(MAINNET.chain)
-            .genesis(serde_json::from_str(include_str!("../assets/genesis.json")).unwrap())
-            .cancun_activated()
-            .prague_activated()
-            .build(),
-    );
+    let chain_spec = test_chain_spec(EthereumHardfork::Prague);
 
-    let (mut nodes, _) = setup_engine::<EthereumNode>(
-        2,
-        chain_spec.clone(),
-        false,
-        Default::default(),
-        eth_payload_attributes,
-    )
-    .await?;
+    let (mut nodes, _) =
+        E2ETestSetupBuilder::<EthereumNode>::new(2, chain_spec.clone()).build().await?;
 
     let mut first_node = nodes.pop().unwrap();
     let mut second_node = nodes.pop().unwrap();
 
-    let first_provider = ProviderBuilder::new().connect_http(first_node.rpc_url());
+    let first_provider = first_node.rpc_provider();
 
     // Advance first node 100 blocks.
     advance_with_random_transactions(&mut first_node, 100, &mut rng, false).await?;
@@ -341,29 +284,16 @@ async fn test_pipeline_sync_target_head_becomes_finalized() -> eyre::Result<()> 
     let mut rng = StdRng::from_seed(seed);
     println!("Seed: {seed:?}");
 
-    let chain_spec = Arc::new(
-        ChainSpecBuilder::default()
-            .chain(MAINNET.chain)
-            .genesis(serde_json::from_str(include_str!("../assets/genesis.json")).unwrap())
-            .cancun_activated()
-            .prague_activated()
-            .build(),
-    );
+    let chain_spec = test_chain_spec(EthereumHardfork::Prague);
 
-    let (mut nodes, _) = setup_engine::<EthereumNode>(
-        2,
-        chain_spec.clone(),
-        false,
-        Default::default(),
-        eth_payload_attributes,
-    )
-    .await?;
+    let (mut nodes, _) =
+        E2ETestSetupBuilder::<EthereumNode>::new(2, chain_spec.clone()).build().await?;
 
     let mut first_node = nodes.pop().unwrap();
     let second_node = nodes.pop().unwrap();
 
-    let first_provider = ProviderBuilder::new().connect_http(first_node.rpc_url());
-    let second_provider = ProviderBuilder::new().connect_http(second_node.rpc_url());
+    let first_provider = first_node.rpc_provider();
+    let second_provider = second_node.rpc_provider();
 
     advance_with_random_transactions(&mut first_node, TARGET_BLOCK as usize, &mut rng, false)
         .await?;
@@ -403,28 +333,15 @@ async fn test_reorg_through_backfill() -> eyre::Result<()> {
     let mut rng = StdRng::from_seed(seed);
     println!("Seed: {seed:?}");
 
-    let chain_spec = Arc::new(
-        ChainSpecBuilder::default()
-            .chain(MAINNET.chain)
-            .genesis(serde_json::from_str(include_str!("../assets/genesis.json")).unwrap())
-            .cancun_activated()
-            .prague_activated()
-            .build(),
-    );
+    let chain_spec = test_chain_spec(EthereumHardfork::Prague);
 
-    let (mut nodes, _) = setup_engine::<EthereumNode>(
-        2,
-        chain_spec.clone(),
-        false,
-        Default::default(),
-        eth_payload_attributes,
-    )
-    .await?;
+    let (mut nodes, _) =
+        E2ETestSetupBuilder::<EthereumNode>::new(2, chain_spec.clone()).build().await?;
 
     let mut first_node = nodes.pop().unwrap();
     let mut second_node = nodes.pop().unwrap();
 
-    let first_provider = ProviderBuilder::new().connect_http(first_node.rpc_url());
+    let first_provider = first_node.rpc_provider();
 
     // Advance first node 100 blocks and finalize the chain.
     advance_with_random_transactions(&mut first_node, 100, &mut rng, true).await?;
@@ -448,14 +365,7 @@ async fn test_reorg_through_backfill() -> eyre::Result<()> {
 async fn test_tx_propagation() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
 
-    let chain_spec = Arc::new(
-        ChainSpecBuilder::default()
-            .chain(MAINNET.chain)
-            .genesis(serde_json::from_str(include_str!("../assets/genesis.json")).unwrap())
-            .cancun_activated()
-            .prague_activated()
-            .build(),
-    );
+    let chain_spec = test_chain_spec(EthereumHardfork::Prague);
 
     // Setup wallet
     let chain_id = chain_spec.chain().into();
@@ -476,15 +386,10 @@ async fn test_tx_propagation() -> eyre::Result<()> {
     };
 
     // Setup 10 nodes
-    let (mut nodes, _) = setup_engine_with_connection::<EthereumNode>(
-        10,
-        chain_spec.clone(),
-        false,
-        Default::default(),
-        eth_payload_attributes,
-        false,
-    )
-    .await?;
+    let (mut nodes, _) = E2ETestSetupBuilder::<EthereumNode>::new(10, chain_spec.clone())
+        .with_connect_nodes(false)
+        .build()
+        .await?;
 
     // Connect all nodes to the first one
     let (first, rest) = nodes.split_at_mut(1);

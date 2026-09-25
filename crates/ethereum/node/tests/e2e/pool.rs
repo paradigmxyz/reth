@@ -1,29 +1,22 @@
-use crate::utils::eth_payload_attributes;
 use alloy_consensus::{EthereumTxEnvelope, TxEip4844};
 use alloy_eips::{eip1559::ETHEREUM_BLOCK_GAS_LIMIT_30M, Encodable2718};
-use alloy_genesis::Genesis;
 use alloy_primitives::{Address, TxKind, B256, U256};
-use alloy_provider::{Provider, ProviderBuilder};
+use alloy_provider::Provider;
 use alloy_rpc_types_eth::TransactionRequest;
-use reth_chainspec::{ChainSpecBuilder, MAINNET};
+use reth_chainspec::EthereumHardfork;
 use reth_e2e_test_utils::{
-    node::NodeTestContext, transaction::TransactionTestContext, wallet::Wallet, E2ETestSetupBuilder,
+    test_chain_spec, transaction::TransactionTestContext, wallet::Wallet, E2ETestSetupBuilder,
 };
-use reth_node_builder::{NodeBuilder, NodeHandle};
-use reth_node_core::{
-    args::{RpcServerArgs, TxPoolArgs},
-    node_config::NodeConfig,
-};
+use reth_node_core::args::TxPoolArgs;
 use reth_node_ethereum::EthereumNode;
 use reth_primitives_traits::Recovered;
 use reth_provider::CanonStateSubscriptions;
-use reth_tasks::Runtime;
 use reth_transaction_pool::{
     blobstore::InMemoryBlobStore, test_utils::OkValidator, BlockInfo, CoinbaseTipOrdering,
     EthPooledTransaction, Pool, PoolTransaction, TransactionOrigin, TransactionPool,
     TransactionPoolExt,
 };
-use std::{sync::Arc, time::Duration};
+use std::time::Duration;
 
 #[tokio::test]
 async fn rpc_enforces_minimum_priority_fee() -> eyre::Result<()> {
@@ -31,26 +24,17 @@ async fn rpc_enforces_minimum_priority_fee() -> eyre::Result<()> {
 
     const MINIMUM_PRIORITY_FEE: u128 = 1;
 
-    let genesis: Genesis = serde_json::from_str(include_str!("../assets/genesis.json"))?;
-    let chain_spec = Arc::new(
-        ChainSpecBuilder::default()
-            .chain(MAINNET.chain)
-            .genesis(genesis)
-            .cancun_activated()
-            .build(),
-    );
-    let (mut nodes, wallet) =
-        E2ETestSetupBuilder::<EthereumNode, _>::new(1, chain_spec, eth_payload_attributes)
+    let (node, wallet) =
+        E2ETestSetupBuilder::<EthereumNode>::new(1, test_chain_spec(EthereumHardfork::Cancun))
             .with_node_config_modifier(|config| {
                 config.with_txpool(TxPoolArgs {
                     minimum_priority_fee: Some(MINIMUM_PRIORITY_FEE),
                     ..Default::default()
                 })
             })
-            .build()
+            .build_single()
             .await?;
-    let node = nodes.pop().unwrap();
-    let provider = ProviderBuilder::new().connect_http(node.rpc_url());
+    let provider = node.rpc_provider();
 
     let transaction = |max_priority_fee_per_gas| TransactionRequest {
         nonce: Some(0),
@@ -84,7 +68,6 @@ async fn rpc_enforces_minimum_priority_fee() -> eyre::Result<()> {
 #[tokio::test]
 async fn maintain_txpool_stale_eviction() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
-    let runtime = Runtime::test();
 
     let txpool = Pool::new(
         OkValidator::default(),
@@ -95,27 +78,10 @@ async fn maintain_txpool_stale_eviction() -> eyre::Result<()> {
 
     // Directly generate a node to simulate various traits such as `StateProviderFactory` required
     // by the pool maintenance task
-    let genesis: Genesis = serde_json::from_str(include_str!("../assets/genesis.json")).unwrap();
-    let chain_spec = Arc::new(
-        ChainSpecBuilder::default()
-            .chain(MAINNET.chain)
-            .genesis(genesis)
-            .cancun_activated()
-            .build(),
-    );
-    let node_config = NodeConfig::test()
-        .with_chain(chain_spec)
-        .with_unused_ports()
-        .with_rpc(RpcServerArgs::default().with_unused_ports().with_http());
-    let NodeHandle { node, node_exit_future: _ } = NodeBuilder::new(node_config.clone())
-        .testing_node(runtime.clone())
-        .node(EthereumNode::default())
-        .launch()
-        .await?;
-
-    let node = NodeTestContext::new(node, eth_payload_attributes).await?;
-
-    let wallet = Wallet::default();
+    let chain_spec = test_chain_spec(EthereumHardfork::Cancun);
+    let (node, wallet) =
+        E2ETestSetupBuilder::<EthereumNode>::new(1, chain_spec).build_single().await?;
+    let runtime = node.inner.task_executor.clone();
 
     let config = reth_transaction_pool::maintain::MaintainPoolConfig {
         max_tx_lifetime: Duration::from_secs(1),
@@ -157,7 +123,6 @@ async fn maintain_txpool_stale_eviction() -> eyre::Result<()> {
 #[tokio::test]
 async fn maintain_txpool_reorg() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
-    let runtime = Runtime::test();
 
     let txpool = Pool::new(
         OkValidator::default(),
@@ -168,26 +133,11 @@ async fn maintain_txpool_reorg() -> eyre::Result<()> {
 
     // Directly generate a node to simulate various traits such as `StateProviderFactory` required
     // by the pool maintenance task
-    let genesis: Genesis = serde_json::from_str(include_str!("../assets/genesis.json")).unwrap();
-    let chain_spec = Arc::new(
-        ChainSpecBuilder::default()
-            .chain(MAINNET.chain)
-            .genesis(genesis)
-            .cancun_activated()
-            .build(),
-    );
+    let chain_spec = test_chain_spec(EthereumHardfork::Cancun);
     let genesis_hash = chain_spec.genesis_hash();
-    let node_config = NodeConfig::test()
-        .with_chain(chain_spec)
-        .with_unused_ports()
-        .with_rpc(RpcServerArgs::default().with_unused_ports().with_http());
-    let NodeHandle { node, node_exit_future: _ } = NodeBuilder::new(node_config.clone())
-        .testing_node(runtime.clone())
-        .node(EthereumNode::default())
-        .launch()
-        .await?;
-
-    let mut node = NodeTestContext::new(node, eth_payload_attributes).await?;
+    let (mut node, _) =
+        E2ETestSetupBuilder::<EthereumNode>::new(1, chain_spec).build_single().await?;
+    let runtime = node.inner.task_executor.clone();
 
     let wallets = Wallet::new(2).wallet_gen();
     let w1 = wallets.first().unwrap();
@@ -289,7 +239,6 @@ async fn maintain_txpool_reorg() -> eyre::Result<()> {
 #[tokio::test]
 async fn maintain_txpool_commit() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
-    let runtime = Runtime::test();
 
     let txpool = Pool::new(
         OkValidator::default(),
@@ -300,27 +249,10 @@ async fn maintain_txpool_commit() -> eyre::Result<()> {
 
     // Directly generate a node to simulate various traits such as `StateProviderFactory` required
     // by the pool maintenance task
-    let genesis: Genesis = serde_json::from_str(include_str!("../assets/genesis.json")).unwrap();
-    let chain_spec = Arc::new(
-        ChainSpecBuilder::default()
-            .chain(MAINNET.chain)
-            .genesis(genesis)
-            .cancun_activated()
-            .build(),
-    );
-    let node_config = NodeConfig::test()
-        .with_chain(chain_spec)
-        .with_unused_ports()
-        .with_rpc(RpcServerArgs::default().with_unused_ports().with_http());
-    let NodeHandle { node, node_exit_future: _ } = NodeBuilder::new(node_config.clone())
-        .testing_node(runtime.clone())
-        .node(EthereumNode::default())
-        .launch()
-        .await?;
-
-    let mut node = NodeTestContext::new(node, eth_payload_attributes).await?;
-
-    let wallet = Wallet::default();
+    let chain_spec = test_chain_spec(EthereumHardfork::Cancun);
+    let (mut node, wallet) =
+        E2ETestSetupBuilder::<EthereumNode>::new(1, chain_spec).build_single().await?;
+    let runtime = node.inner.task_executor.clone();
 
     runtime.spawn_critical_task(
         "txpool maintenance task",

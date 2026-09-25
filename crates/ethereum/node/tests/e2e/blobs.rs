@@ -1,16 +1,12 @@
-use crate::utils::eth_payload_attributes;
 use alloy_eips::Decodable2718;
-use alloy_genesis::Genesis;
-use reth_chainspec::{ChainSpecBuilder, MAINNET};
+use reth_chainspec::EthereumHardfork;
 use reth_e2e_test_utils::{
-    node::NodeTestContext, transaction::TransactionTestContext, wallet::Wallet,
+    test_chain_spec, test_chain_spec_builder, transaction::TransactionTestContext, wallet::Wallet,
+    E2ETestSetupBuilder,
 };
 use reth_ethereum_engine_primitives::BlobSidecars;
 use reth_ethereum_primitives::PooledTransactionVariant;
-use reth_node_builder::{NodeBuilder, NodeHandle};
-use reth_node_core::{args::RpcServerArgs, node_config::NodeConfig};
 use reth_node_ethereum::EthereumNode;
-use reth_tasks::Runtime;
 use reth_transaction_pool::TransactionPool;
 use std::{
     sync::Arc,
@@ -20,28 +16,11 @@ use std::{
 #[tokio::test]
 async fn can_handle_blobs() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
-    let runtime = Runtime::test();
 
-    let genesis: Genesis = serde_json::from_str(include_str!("../assets/genesis.json")).unwrap();
-    let chain_spec = Arc::new(
-        ChainSpecBuilder::default()
-            .chain(MAINNET.chain)
-            .genesis(genesis)
-            .cancun_activated()
-            .build(),
-    );
+    let chain_spec = test_chain_spec(EthereumHardfork::Cancun);
     let genesis_hash = chain_spec.genesis_hash();
-    let node_config = NodeConfig::test()
-        .with_chain(chain_spec)
-        .with_unused_ports()
-        .with_rpc(RpcServerArgs::default().with_unused_ports().with_http());
-    let NodeHandle { node, node_exit_future: _ } = NodeBuilder::new(node_config.clone())
-        .testing_node(runtime.clone())
-        .node(EthereumNode::default())
-        .launch()
-        .await?;
-
-    let mut node = NodeTestContext::new(node, eth_payload_attributes).await?;
+    let (mut node, _) =
+        E2ETestSetupBuilder::<EthereumNode>::new(1, chain_spec).build_single().await?;
 
     let wallets = Wallet::new(2).wallet_gen();
     let blob_wallet = wallets.first().unwrap();
@@ -91,26 +70,13 @@ async fn can_handle_blobs() -> eyre::Result<()> {
 #[tokio::test]
 async fn can_send_legacy_sidecar_post_activation() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
-    let runtime = Runtime::test();
 
-    let genesis: Genesis = serde_json::from_str(include_str!("../assets/genesis.json")).unwrap();
-    let chain_spec = Arc::new(
-        ChainSpecBuilder::default().chain(MAINNET.chain).genesis(genesis).osaka_activated().build(),
-    );
+    let chain_spec = test_chain_spec(EthereumHardfork::Osaka);
     let genesis_hash = chain_spec.genesis_hash();
-    let node_config = NodeConfig::test().with_chain(chain_spec).with_unused_ports().with_rpc(
-        RpcServerArgs::default()
-            .with_unused_ports()
-            .with_http()
-            .with_force_blob_sidecar_upcasting(),
-    );
-    let NodeHandle { node, node_exit_future: _ } = NodeBuilder::new(node_config.clone())
-        .testing_node(runtime.clone())
-        .node(EthereumNode::default())
-        .launch()
+    let (mut node, _) = E2ETestSetupBuilder::<EthereumNode>::new(1, chain_spec)
+        .with_rpc_modifier(|rpc| rpc.with_force_blob_sidecar_upcasting())
+        .build_single()
         .await?;
-
-    let mut node = NodeTestContext::new(node, eth_payload_attributes).await?;
 
     let wallets = Wallet::new(2).wallet_gen();
     let blob_wallet = wallets.first().unwrap();
@@ -144,35 +110,19 @@ async fn can_send_legacy_sidecar_post_activation() -> eyre::Result<()> {
 #[tokio::test]
 async fn blob_conversion_at_osaka() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
-    let runtime = Runtime::test();
 
     let current_timestamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs();
     // Osaka activates in 2 slots
     let osaka_timestamp = current_timestamp + 24;
 
-    let genesis: Genesis = serde_json::from_str(include_str!("../assets/genesis.json")).unwrap();
     let chain_spec = Arc::new(
-        ChainSpecBuilder::default()
-            .chain(MAINNET.chain)
-            .genesis(genesis)
-            .prague_activated()
-            .with_osaka_at(osaka_timestamp)
-            .build(),
+        test_chain_spec_builder().prague_activated().with_osaka_at(osaka_timestamp).build(),
     );
     let genesis_hash = chain_spec.genesis_hash();
-    let node_config = NodeConfig::test().with_chain(chain_spec).with_unused_ports().with_rpc(
-        RpcServerArgs::default()
-            .with_unused_ports()
-            .with_http()
-            .with_force_blob_sidecar_upcasting(),
-    );
-    let NodeHandle { node, node_exit_future: _ } = NodeBuilder::new(node_config.clone())
-        .testing_node(runtime.clone())
-        .node(EthereumNode::default())
-        .launch()
+    let (mut node, _) = E2ETestSetupBuilder::<EthereumNode>::new(1, chain_spec)
+        .with_rpc_modifier(|rpc| rpc.with_force_blob_sidecar_upcasting())
+        .build_single()
         .await?;
-
-    let mut node = NodeTestContext::new(node, eth_payload_attributes).await?;
 
     let mut wallets = Wallet::new(3).wallet_gen();
     let first = wallets.pop().unwrap();

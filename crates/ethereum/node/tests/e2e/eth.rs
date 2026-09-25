@@ -1,21 +1,17 @@
-use crate::utils::{
-    advance_with_random_transactions, eth_payload_attributes, eth_payload_attributes_amsterdam,
-};
+use crate::utils::advance_with_random_transactions;
 use alloy_eips::eip7685::RequestsOrHash;
-use alloy_genesis::Genesis;
-use alloy_primitives::{Address, B256};
+use alloy_primitives::B256;
 use alloy_rpc_types_engine::{
     ClientVersionV1, ForkchoiceState, PayloadAttributes, PayloadStatusEnum,
 };
 use jsonrpsee_core::client::ClientT;
-use reth_chainspec::{ChainSpecBuilder, EthChainSpec, MAINNET};
+use reth_chainspec::{EthChainSpec, EthereumHardfork};
 use reth_e2e_test_utils::{
-    node::NodeTestContext, setup, setup_engine, transaction::TransactionTestContext, wallet::Wallet,
+    eth_payload_attributes, test_chain_spec, transaction::TransactionTestContext, wallet::Wallet,
+    E2ETestSetupBuilder,
 };
-use reth_node_api::TreeConfig;
 use reth_node_builder::{NodeBuilder, NodeHandle};
 use reth_node_core::{
-    args::RpcServerArgs,
     node_config::NodeConfig,
     version::{version_metadata, CLIENT_CODE},
 };
@@ -48,21 +44,10 @@ const ENGINE_IDENTITY_ROUTE: &str = "/engine/v1/identity";
 async fn can_run_eth_node() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
 
-    let (mut nodes, wallet) = setup::<EthereumNode>(
-        1,
-        Arc::new(
-            ChainSpecBuilder::default()
-                .chain(MAINNET.chain)
-                .genesis(serde_json::from_str(include_str!("../assets/genesis.json")).unwrap())
-                .cancun_activated()
-                .build(),
-        ),
-        false,
-        eth_payload_attributes,
-    )
-    .await?;
-
-    let mut node = nodes.pop().unwrap();
+    let (mut node, wallet) =
+        E2ETestSetupBuilder::<EthereumNode>::new(1, test_chain_spec(EthereumHardfork::Cancun))
+            .build_single()
+            .await?;
     let raw_tx = TransactionTestContext::transfer_tx_bytes(1, wallet.inner).await;
 
     // make the node advance
@@ -84,32 +69,14 @@ async fn can_run_eth_node() -> eyre::Result<()> {
 #[cfg(unix)]
 async fn can_run_eth_node_with_auth_engine_api_over_ipc() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
-    let runtime = Runtime::test();
 
-    // Chain spec with test allocs
-    let genesis: Genesis = serde_json::from_str(include_str!("../assets/genesis.json")).unwrap();
-    let chain_spec = Arc::new(
-        ChainSpecBuilder::default()
-            .chain(MAINNET.chain)
-            .genesis(genesis)
-            .cancun_activated()
-            .build(),
-    );
+    let (mut node, wallet) =
+        E2ETestSetupBuilder::<EthereumNode>::new(1, test_chain_spec(EthereumHardfork::Cancun))
+            .with_rpc_modifier(|rpc| rpc.with_auth_ipc())
+            .build_single()
+            .await?;
 
-    // Node setup
-    let node_config = NodeConfig::test()
-        .with_chain(chain_spec)
-        .with_rpc(RpcServerArgs::default().with_unused_ports().with_http().with_auth_ipc());
-
-    let NodeHandle { node, node_exit_future: _ } = NodeBuilder::new(node_config)
-        .testing_node(runtime)
-        .node(EthereumNode::default())
-        .launch()
-        .await?;
-    let mut node = NodeTestContext::new(node, eth_payload_attributes).await?;
-
-    // Configure wallet from test mnemonic and create dummy transfer tx
-    let wallet = Wallet::default();
+    // Create dummy transfer tx
     let raw_tx = TransactionTestContext::transfer_tx_bytes(1, wallet.inner).await;
 
     // make the node advance
@@ -131,27 +98,11 @@ async fn can_run_eth_node_with_auth_engine_api_over_ipc() -> eyre::Result<()> {
 #[cfg(unix)]
 async fn test_failed_run_eth_node_with_no_auth_engine_api_over_ipc_opts() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
-    let runtime = Runtime::test();
 
-    // Chain spec with test allocs
-    let genesis: Genesis = serde_json::from_str(include_str!("../assets/genesis.json")).unwrap();
-    let chain_spec = Arc::new(
-        ChainSpecBuilder::default()
-            .chain(MAINNET.chain)
-            .genesis(genesis)
-            .cancun_activated()
-            .build(),
-    );
-
-    // Node setup
-    let node_config = NodeConfig::test().with_chain(chain_spec);
-    let NodeHandle { node, node_exit_future: _ } = NodeBuilder::new(node_config)
-        .testing_node(runtime)
-        .node(EthereumNode::default())
-        .launch()
-        .await?;
-
-    let node = NodeTestContext::new(node, eth_payload_attributes).await?;
+    let (node, _) =
+        E2ETestSetupBuilder::<EthereumNode>::new(1, test_chain_spec(EthereumHardfork::Cancun))
+            .build_single()
+            .await?;
 
     // Ensure that the engine api client is not available
     let client = node.inner.engine_ipc_client().await;
@@ -164,21 +115,10 @@ async fn test_failed_run_eth_node_with_no_auth_engine_api_over_ipc_opts() -> eyr
 async fn test_engine_graceful_shutdown() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
 
-    let (mut nodes, wallet) = setup::<EthereumNode>(
-        1,
-        Arc::new(
-            ChainSpecBuilder::default()
-                .chain(MAINNET.chain)
-                .genesis(serde_json::from_str(include_str!("../assets/genesis.json")).unwrap())
-                .cancun_activated()
-                .build(),
-        ),
-        false,
-        eth_payload_attributes,
-    )
-    .await?;
-
-    let mut node = nodes.pop().unwrap();
+    let (mut node, wallet) =
+        E2ETestSetupBuilder::<EthereumNode>::new(1, test_chain_spec(EthereumHardfork::Cancun))
+            .build_single()
+            .await?;
 
     let raw_tx = TransactionTestContext::transfer_tx_bytes(1, wallet.inner).await;
     let tx_hash = node.rpc.inject_tx(raw_tx).await?;
@@ -215,45 +155,24 @@ async fn test_engine_graceful_shutdown() -> eyre::Result<()> {
 #[tokio::test]
 async fn test_testing_build_block_v1_osaka() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
-    let runtime = Runtime::test();
 
-    let genesis: Genesis = serde_json::from_str(include_str!("../assets/genesis.json")).unwrap();
-    let chain_spec = Arc::new(
-        ChainSpecBuilder::default().chain(MAINNET.chain).genesis(genesis).osaka_activated().build(),
-    );
+    let chain_spec = test_chain_spec(EthereumHardfork::Osaka);
     let genesis_hash = chain_spec.genesis_hash();
-
-    let node_config =
-        NodeConfig::test().with_chain(chain_spec.clone()).with_unused_ports().with_rpc(
-            RpcServerArgs::default().with_unused_ports().with_http().with_http_api(
-                RpcModuleSelection::from([RethRpcModule::Eth, RethRpcModule::Testing]),
-            ),
-        );
-
-    let NodeHandle { node, node_exit_future: _ } = NodeBuilder::new(node_config)
-        .testing_node(runtime)
-        .node(EthereumNode::default())
-        .launch()
+    let (node, wallet) = E2ETestSetupBuilder::<EthereumNode>::new(1, chain_spec.clone())
+        .with_rpc_modifier(|rpc| {
+            rpc.with_http_api(RpcModuleSelection::from([
+                RethRpcModule::Eth,
+                RethRpcModule::Testing,
+            ]))
+        })
+        .build_single()
         .await?;
 
-    let node = NodeTestContext::new(node, eth_payload_attributes).await?;
-
-    let wallet = Wallet::default();
     let raw_tx = TransactionTestContext::transfer_tx_bytes(1, wallet.inner).await;
-
-    let payload_attributes = PayloadAttributes {
-        timestamp: chain_spec.genesis().timestamp + 1,
-        prev_randao: B256::ZERO,
-        suggested_fee_recipient: Address::ZERO,
-        withdrawals: Some(vec![]),
-        parent_beacon_block_root: Some(B256::ZERO),
-        slot_number: None,
-        ..Default::default()
-    };
 
     let request = TestingBuildBlockRequestV1 {
         parent_block_hash: genesis_hash,
-        payload_attributes,
+        payload_attributes: eth_payload_attributes(&chain_spec, chain_spec.genesis().timestamp + 1),
         transactions: vec![raw_tx],
         extra_data: None,
     };
@@ -286,51 +205,29 @@ async fn test_testing_build_block_v1_osaka() -> eyre::Result<()> {
 #[tokio::test]
 async fn test_engine_ssz_proxy_can_mine_block() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
-    let runtime = Runtime::test();
 
-    let genesis: Genesis = serde_json::from_str(include_str!("../assets/genesis.json")).unwrap();
-    let chain_spec = Arc::new(
-        ChainSpecBuilder::default()
-            .chain(MAINNET.chain)
-            .genesis(genesis)
-            .prague_activated()
-            .build(),
-    );
+    let chain_spec = test_chain_spec(EthereumHardfork::Prague);
     let genesis_hash = chain_spec.genesis_hash();
-    let node_config =
-        NodeConfig::test().with_chain(chain_spec.clone()).with_unused_ports().with_rpc(
-            RpcServerArgs::default().with_unused_ports().with_http().with_http_api(
-                RpcModuleSelection::from([RethRpcModule::Eth, RethRpcModule::Testing]),
-            ),
-        );
-
-    let NodeHandle { node, node_exit_future: _ } = NodeBuilder::new(node_config)
-        .testing_node(runtime)
-        .with_types::<EthereumNode>()
-        .with_components(EthereumNode::components())
-        .with_add_ons(EthereumAddOns::default())
-        .launch()
+    let (node, _) = E2ETestSetupBuilder::<EthereumNode>::new(1, chain_spec.clone())
+        .with_rpc_modifier(|rpc| {
+            rpc.with_http_api(RpcModuleSelection::from([
+                RethRpcModule::Eth,
+                RethRpcModule::Testing,
+            ]))
+        })
+        .build_single()
         .await?;
-
-    let node = NodeTestContext::new(node, eth_payload_attributes).await?;
 
     let wallets = Wallet::new(2).wallet_gen();
     let raw_tx = TransactionTestContext::transfer_tx_bytes(1, wallets[0].clone()).await;
 
-    let payload_attributes = PayloadAttributes {
-        timestamp: chain_spec.genesis().timestamp + 1,
-        prev_randao: B256::ZERO,
-        suggested_fee_recipient: Address::ZERO,
-        withdrawals: Some(vec![]),
-        parent_beacon_block_root: Some(B256::ZERO),
-        slot_number: None,
-        ..Default::default()
-    };
-
     let envelope = node
         .testing_build_block_v1(TestingBuildBlockRequestV1 {
             parent_block_hash: genesis_hash,
-            payload_attributes,
+            payload_attributes: eth_payload_attributes(
+                &chain_spec,
+                chain_spec.genesis().timestamp + 1,
+            ),
             transactions: vec![raw_tx],
             extra_data: None,
         })
@@ -500,16 +397,10 @@ async fn test_engine_ssz_proxy_can_mine_block() -> eyre::Result<()> {
 
 #[tokio::test]
 async fn test_engine_ssz_proxy_blob_revisions() -> eyre::Result<()> {
-    let chain_spec = Arc::new(
-        ChainSpecBuilder::default()
-            .chain(MAINNET.chain)
-            .genesis(serde_json::from_str(include_str!("../assets/genesis.json"))?)
-            .osaka_activated()
-            .build(),
-    );
-    let (mut nodes, _) =
-        setup::<EthereumNode>(1, chain_spec, false, eth_payload_attributes).await?;
-    let mut node = nodes.pop().unwrap();
+    let (mut node, _) =
+        E2ETestSetupBuilder::<EthereumNode>::new(1, test_chain_spec(EthereumHardfork::Osaka))
+            .build_single()
+            .await?;
     node.advance_block().await?;
     let client = reqwest::Client::new();
     let auth_server = node.auth_server_handle();
@@ -591,17 +482,10 @@ async fn test_engine_ssz_proxy_blob_revisions() -> eyre::Result<()> {
 
 #[tokio::test]
 async fn test_engine_ssz_proxy_returns_canonical_witness() -> eyre::Result<()> {
-    let chain_spec = Arc::new(
-        ChainSpecBuilder::default()
-            .chain(MAINNET.chain)
-            .genesis(serde_json::from_str(include_str!("../assets/genesis.json"))?)
-            .amsterdam_activated()
-            .build(),
-    );
+    let chain_spec = test_chain_spec(EthereumHardfork::Amsterdam);
     let genesis_hash = chain_spec.genesis_hash();
-    let (mut nodes, _) =
-        setup::<EthereumNode>(1, chain_spec, false, eth_payload_attributes_amsterdam).await?;
-    let mut node = nodes.pop().unwrap();
+    let (mut node, _) =
+        E2ETestSetupBuilder::<EthereumNode>::new(1, chain_spec).build_single().await?;
     let payload = node.new_payload().await?;
     let envelope = payload.try_into_v6()?;
     let request = ExecutionPayloadEnvelopeAmsterdam {
@@ -692,27 +576,15 @@ async fn test_engine_ssz_proxy_returns_canonical_witness() -> eyre::Result<()> {
 async fn test_share_sparse_trie_with_payload_builder() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
 
-    let tree_config = TreeConfig::default()
-        .with_share_execution_cache_with_payload_builder(true)
-        .with_share_sparse_trie_with_payload_builder(true);
-
-    let (mut nodes, _wallet) = setup_engine::<EthereumNode>(
-        1,
-        Arc::new(
-            ChainSpecBuilder::default()
-                .chain(MAINNET.chain)
-                .genesis(serde_json::from_str(include_str!("../assets/genesis.json")).unwrap())
-                .cancun_activated()
-                .prague_activated()
-                .build(),
-        ),
-        false,
-        tree_config,
-        eth_payload_attributes,
-    )
-    .await?;
-
-    let mut node = nodes.pop().unwrap();
+    let (mut node, _) =
+        E2ETestSetupBuilder::<EthereumNode>::new(1, test_chain_spec(EthereumHardfork::Prague))
+            .with_tree_config_modifier(|config| {
+                config
+                    .with_share_execution_cache_with_payload_builder(true)
+                    .with_share_sparse_trie_with_payload_builder(true)
+            })
+            .build_single()
+            .await?;
     let mut rng = rand::rng();
 
     let num_blocks = 5;
@@ -739,25 +611,11 @@ async fn test_sparse_trie_reuse_across_blocks() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
 
     // Use the state-root task with pruning enabled.
-    let tree_config = TreeConfig::default().with_sparse_trie_prune_depth(2);
-
-    let (mut nodes, _wallet) = setup_engine::<EthereumNode>(
-        1,
-        Arc::new(
-            ChainSpecBuilder::default()
-                .chain(MAINNET.chain)
-                .genesis(serde_json::from_str(include_str!("../assets/genesis.json")).unwrap())
-                .cancun_activated()
-                .prague_activated()
-                .build(),
-        ),
-        false,
-        tree_config,
-        eth_payload_attributes,
-    )
-    .await?;
-
-    let mut node = nodes.pop().unwrap();
+    let (mut node, _) =
+        E2ETestSetupBuilder::<EthereumNode>::new(1, test_chain_spec(EthereumHardfork::Prague))
+            .with_tree_config_modifier(|config| config.with_sparse_trie_prune_depth(2))
+            .build_single()
+            .await?;
 
     // Use a seeded RNG for reproducibility
     let mut rng = rand::rng();
@@ -783,16 +641,9 @@ async fn test_engine_ssz_request_validation() -> eyre::Result<()> {
         ForkchoiceUpdateCancun, Optional, PayloadAttributesCancun,
     };
 
-    let chain = Arc::new(
-        ChainSpecBuilder::default()
-            .chain(MAINNET.chain)
-            .genesis(serde_json::from_str(include_str!("../assets/genesis.json"))?)
-            .prague_activated()
-            .build(),
-    );
-    let (mut nodes, _) =
-        setup::<EthereumNode>(1, chain.clone(), false, eth_payload_attributes).await?;
-    let node = nodes.pop().unwrap();
+    let chain = test_chain_spec(EthereumHardfork::Prague);
+    let (node, _) =
+        E2ETestSetupBuilder::<EthereumNode>::new(1, chain.clone()).build_single().await?;
     let auth = node.auth_server_handle();
     let url = auth.http_url();
     let jwt = secret_to_bearer_header(auth.jwt_secret());
@@ -918,7 +769,6 @@ async fn test_engine_ssz_request_validation() -> eyre::Result<()> {
 #[tokio::test]
 async fn test_engine_ssz_custom_engine_and_middleware() -> eyre::Result<()> {
     use std::sync::atomic::{AtomicUsize, Ordering};
-    let runtime = Runtime::test();
     let requests = Arc::new(AtomicUsize::new(0));
     let observed = requests.clone();
     let middleware =
@@ -928,16 +778,10 @@ async fn test_engine_ssz_custom_engine_and_middleware() -> eyre::Result<()> {
             }
             request
         });
-    let chain = Arc::new(
-        ChainSpecBuilder::default()
-            .chain(MAINNET.chain)
-            .genesis(serde_json::from_str(include_str!("../assets/genesis.json"))?)
-            .prague_activated()
-            .build(),
-    );
+    let chain = test_chain_spec(EthereumHardfork::Prague);
     let NodeHandle { node, .. } =
         NodeBuilder::new(NodeConfig::test().with_chain(chain).with_unused_ports())
-            .testing_node(runtime)
+            .testing_node(Runtime::test())
             .with_types::<EthereumNode>()
             .with_components(EthereumNode::components())
             .with_add_ons(
@@ -968,15 +812,10 @@ async fn test_engine_ssz_custom_engine_and_middleware() -> eyre::Result<()> {
 
 #[tokio::test]
 async fn test_engine_ssz_witness_omitted_without_provider_parent_state() -> eyre::Result<()> {
-    let chain = Arc::new(
-        ChainSpecBuilder::default()
-            .chain(MAINNET.chain)
-            .genesis(serde_json::from_str(include_str!("../assets/genesis.json"))?)
-            .amsterdam_activated()
-            .build(),
-    );
     let (mut nodes, _) =
-        setup::<EthereumNode>(2, chain, false, eth_payload_attributes_amsterdam).await?;
+        E2ETestSetupBuilder::<EthereumNode>::new(2, test_chain_spec(EthereumHardfork::Amsterdam))
+            .build()
+            .await?;
     let target = nodes.pop().unwrap();
     let mut source = nodes.pop().unwrap();
     let first = source.advance_block().await?;

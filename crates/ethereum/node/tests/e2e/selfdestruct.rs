@@ -7,40 +7,30 @@
 //! We disable prewarming to ensure deterministic cache behavior and verify the execution
 //! output state contains the expected account status after SELFDESTRUCT.
 
-use crate::utils::{eth_payload_attributes, eth_payload_attributes_shanghai};
-use alloy_network::{EthereumWallet, TransactionBuilder};
+use alloy_network::TransactionBuilder;
 use alloy_primitives::{bytes, Address, Bytes, TxKind, U256};
-use alloy_provider::{Provider, ProviderBuilder};
+use alloy_provider::Provider;
 use alloy_rpc_types_eth::TransactionRequest;
 use futures::StreamExt;
-use reth_chainspec::{ChainSpec, ChainSpecBuilder, MAINNET};
-use reth_e2e_test_utils::setup_engine;
-use reth_node_api::TreeConfig;
+use reth_chainspec::EthereumHardfork;
+use reth_e2e_test_utils::{test_chain_spec, wallet::Wallet, E2ETestSetupBuilder, NodeHelperType};
 use reth_node_ethereum::EthereumNode;
 use reth_revm::db::BundleAccount;
-use std::sync::Arc;
 
 const MAX_FEE_PER_GAS: u128 = 20_000_000_000;
 const MAX_PRIORITY_FEE_PER_GAS: u128 = 1_000_000_000;
 
-fn cancun_spec() -> Arc<ChainSpec> {
-    Arc::new(
-        ChainSpecBuilder::default()
-            .chain(MAINNET.chain)
-            .genesis(serde_json::from_str(include_str!("../assets/genesis.json")).unwrap())
-            .cancun_activated()
-            .build(),
-    )
-}
-
-fn shanghai_spec() -> Arc<ChainSpec> {
-    Arc::new(
-        ChainSpecBuilder::default()
-            .chain(MAINNET.chain)
-            .genesis(serde_json::from_str(include_str!("../assets/genesis.json")).unwrap())
-            .shanghai_activated()
-            .build(),
-    )
+/// Launches a node for the given hardfork with prewarming disabled, so the execution output state
+/// is deterministic.
+async fn setup_node(
+    fork: EthereumHardfork,
+) -> eyre::Result<(NodeHelperType<EthereumNode>, Wallet)> {
+    E2ETestSetupBuilder::<EthereumNode>::new(1, test_chain_spec(fork))
+        .with_tree_config_modifier(|config| {
+            config.without_prewarming(true).without_state_cache(false)
+        })
+        .build_single()
+        .await
 }
 
 fn deploy_tx(from: Address, nonce: u64, init_code: Bytes) -> TransactionRequest {
@@ -141,15 +131,9 @@ fn selfdestruct_contract_init_code() -> Bytes {
 async fn test_selfdestruct_post_dencun() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
 
-    let tree_config = TreeConfig::default().without_prewarming(true).without_state_cache(false);
-    let (mut nodes, wallet) =
-        setup_engine::<EthereumNode>(1, cancun_spec(), false, tree_config, eth_payload_attributes)
-            .await?;
-    let mut node = nodes.pop().unwrap();
+    let (mut node, wallet) = setup_node(EthereumHardfork::Cancun).await?;
     let signer = wallet.inner.clone();
-    let provider = ProviderBuilder::new()
-        .wallet(EthereumWallet::new(signer.clone()))
-        .connect_http(node.rpc_url());
+    let provider = node.rpc_provider_with_wallet(signer.clone());
 
     // Deploy contract that stores 0x42 at slot 0 and selfdestructs on any call
     let pending = provider
@@ -235,15 +219,9 @@ async fn test_selfdestruct_post_dencun() -> eyre::Result<()> {
 async fn test_selfdestruct_same_tx_post_dencun() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
 
-    let tree_config = TreeConfig::default().without_prewarming(true).without_state_cache(false);
-    let (mut nodes, wallet) =
-        setup_engine::<EthereumNode>(1, cancun_spec(), false, tree_config, eth_payload_attributes)
-            .await?;
-    let mut node = nodes.pop().unwrap();
+    let (mut node, wallet) = setup_node(EthereumHardfork::Cancun).await?;
     let signer = wallet.inner.clone();
-    let provider = ProviderBuilder::new()
-        .wallet(EthereumWallet::new(signer.clone()))
-        .connect_http(node.rpc_url());
+    let provider = node.rpc_provider_with_wallet(signer.clone());
 
     // Deploy contract that selfdestructs during its constructor
     let pending = provider
@@ -310,20 +288,9 @@ async fn test_selfdestruct_same_tx_post_dencun() -> eyre::Result<()> {
 async fn test_selfdestruct_pre_dencun() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
 
-    let tree_config = TreeConfig::default().without_prewarming(true).without_state_cache(false);
-    let (mut nodes, wallet) = setup_engine::<EthereumNode>(
-        1,
-        shanghai_spec(),
-        false,
-        tree_config,
-        eth_payload_attributes_shanghai,
-    )
-    .await?;
-    let mut node = nodes.pop().unwrap();
+    let (mut node, wallet) = setup_node(EthereumHardfork::Shanghai).await?;
     let signer = wallet.inner.clone();
-    let provider = ProviderBuilder::new()
-        .wallet(EthereumWallet::new(signer.clone()))
-        .connect_http(node.rpc_url());
+    let provider = node.rpc_provider_with_wallet(signer.clone());
 
     // Deploy contract that stores 0x42 at slot 0 and selfdestructs on any call
     let pending = provider
@@ -420,15 +387,9 @@ async fn test_selfdestruct_pre_dencun() -> eyre::Result<()> {
 async fn test_selfdestruct_same_tx_preexisting_account_post_dencun() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
 
-    let tree_config = TreeConfig::default().without_prewarming(true).without_state_cache(false);
-    let (mut nodes, wallet) =
-        setup_engine::<EthereumNode>(1, cancun_spec(), false, tree_config, eth_payload_attributes)
-            .await?;
-    let mut node = nodes.pop().unwrap();
+    let (mut node, wallet) = setup_node(EthereumHardfork::Cancun).await?;
     let signer = wallet.inner.clone();
-    let provider = ProviderBuilder::new()
-        .wallet(EthereumWallet::new(signer.clone()))
-        .connect_http(node.rpc_url());
+    let provider = node.rpc_provider_with_wallet(signer.clone());
 
     // Calculate where the contract will be deployed (CREATE uses sender + nonce)
     // We'll use nonce 1 for deployment, so first send ETH with nonce 0

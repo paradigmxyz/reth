@@ -1,20 +1,17 @@
 //! Utilities for end-to-end tests.
 
-use alloy_primitives::{Address, B256};
 use alloy_rpc_types_engine::PayloadAttributes;
 use node::NodeTestContext;
-use reth_chainspec::{ChainSpec, EthereumHardfork};
+use reth_chainspec::ChainSpec;
 use reth_db::{test_utils::TempDatabase, DatabaseEnv};
 use reth_network_api::test_utils::PeersHandleProvider;
 use reth_node_builder::{
     components::NodeComponentsBuilder,
     rpc::{EngineValidatorAddOn, RethRpcAddOns},
-    FullNodeTypesAdapter, Node, NodeAdapter, NodeComponents, NodeTypes, NodeTypesWithDBAdapter,
-    PayloadTypes,
+    FullNodeTypesAdapter, Node, NodeAdapter, NodeComponents, NodeTypesWithDBAdapter, PayloadTypes,
 };
 use reth_provider::providers::{BlockchainProvider, NodeTypesForProvider};
 use std::sync::Arc;
-use wallet::Wallet;
 
 /// Wrapper type to create test nodes
 pub mod node;
@@ -44,110 +41,14 @@ pub mod test_rlp_utils;
 /// Helpers for verifying the persisted state and trie representation
 pub mod trie;
 
+mod chain_spec;
+pub use chain_spec::{
+    eth_payload_attributes, test_chain_spec, test_chain_spec_builder, test_genesis,
+};
+
 /// Builder for configuring test node setups
 mod setup_builder;
 pub use setup_builder::E2ETestSetupBuilder;
-
-/// Creates the initial setup with `num_nodes` started and interconnected.
-pub async fn setup<N>(
-    num_nodes: usize,
-    chain_spec: Arc<N::ChainSpec>,
-    is_dev: bool,
-    attributes_generator: impl Fn(u64) -> <<N as NodeTypes>::Payload as PayloadTypes>::PayloadAttributes
-        + Send
-        + Sync
-        + Copy
-        + 'static,
-) -> eyre::Result<(Vec<NodeHelperType<N>>, Wallet)>
-where
-    N: NodeBuilderHelper,
-{
-    E2ETestSetupBuilder::new(num_nodes, chain_spec, attributes_generator)
-        .with_node_config_modifier(move |config| config.set_dev(is_dev))
-        .build()
-        .await
-}
-
-/// Creates the initial setup with `num_nodes` started and interconnected.
-pub async fn setup_engine<N>(
-    num_nodes: usize,
-    chain_spec: Arc<N::ChainSpec>,
-    is_dev: bool,
-    tree_config: reth_node_api::TreeConfig,
-    attributes_generator: impl Fn(u64) -> <<N as NodeTypes>::Payload as PayloadTypes>::PayloadAttributes
-        + Send
-        + Sync
-        + Copy
-        + 'static,
-) -> eyre::Result<(
-    Vec<NodeHelperType<N, BlockchainProvider<NodeTypesWithDBAdapter<N, TmpDB>>>>,
-    Wallet,
-)>
-where
-    N: NodeBuilderHelper,
-{
-    setup_engine_with_connection::<N>(
-        num_nodes,
-        chain_spec,
-        is_dev,
-        tree_config,
-        attributes_generator,
-        true,
-    )
-    .await
-}
-
-/// Creates the initial setup with `num_nodes` started and optionally interconnected.
-pub async fn setup_engine_with_connection<N>(
-    num_nodes: usize,
-    chain_spec: Arc<N::ChainSpec>,
-    is_dev: bool,
-    tree_config: reth_node_api::TreeConfig,
-    attributes_generator: impl Fn(u64) -> <<N as NodeTypes>::Payload as PayloadTypes>::PayloadAttributes
-        + Send
-        + Sync
-        + Copy
-        + 'static,
-    connect_nodes: bool,
-) -> eyre::Result<(
-    Vec<NodeHelperType<N, BlockchainProvider<NodeTypesWithDBAdapter<N, TmpDB>>>>,
-    Wallet,
-)>
-where
-    N: NodeBuilderHelper,
-{
-    E2ETestSetupBuilder::new(num_nodes, chain_spec, attributes_generator)
-        .with_tree_config_modifier(move |base| {
-            // Apply caller's tree_config but preserve the small cache size from base
-            tree_config.clone().with_cross_block_cache_size(base.cross_block_cache_size())
-        })
-        .with_node_config_modifier(move |config| config.set_dev(is_dev))
-        .with_connect_nodes(connect_nodes)
-        .build()
-        .await
-}
-
-/// Creates Ethereum [`PayloadAttributes`] valid for the given hardfork, allowing the same test
-/// to be run against multiple hardfork targets.
-///
-/// Withdrawals are set once Shanghai is active, the parent beacon block root once Cancun is
-/// active, and a slot number once Amsterdam is active. The payload builder requires a slot number
-/// for EIP-7843; tests use the timestamp as a deterministic dummy slot because the exact beacon
-/// slot is irrelevant for local e2e payloads.
-pub fn eth_payload_attributes_for_fork(
-    fork: EthereumHardfork,
-    timestamp: u64,
-) -> PayloadAttributes {
-    PayloadAttributes {
-        timestamp,
-        prev_randao: B256::ZERO,
-        suggested_fee_recipient: Address::ZERO,
-        withdrawals: (fork >= EthereumHardfork::Shanghai).then(Vec::new),
-        parent_beacon_block_root: (fork >= EthereumHardfork::Cancun).then_some(B256::ZERO),
-        slot_number: (fork >= EthereumHardfork::Amsterdam).then_some(timestamp),
-        ..Default::default()
-    }
-}
 
 // Type aliases
 
@@ -168,25 +69,18 @@ pub type Adapter<N, Provider = BlockchainProvider<NodeTypesWithDBAdapter<N, TmpD
 pub type NodeHelperType<N, Provider = BlockchainProvider<NodeTypesWithDBAdapter<N, TmpDB>>> =
     NodeTestContext<Adapter<N, Provider>, <N as Node<TmpNodeAdapter<N, Provider>>>::AddOns>;
 
-/// Helper trait to simplify bounds when calling setup functions.
+/// Helper trait to simplify the bounds of nodes launched by [`E2ETestSetupBuilder`].
 pub trait NodeBuilderHelper
 where
     Self: Default
         + NodeTypesForProvider<Payload: PayloadTypes<PayloadAttributes: From<PayloadAttributes>>>
         + Node<
-            TmpNodeAdapter<Self, BlockchainProvider<NodeTypesWithDBAdapter<Self, TmpDB>>>,
+            TmpNodeAdapter<Self>,
             ComponentsBuilder: NodeComponentsBuilder<
-                TmpNodeAdapter<Self, BlockchainProvider<NodeTypesWithDBAdapter<Self, TmpDB>>>,
-                Components: NodeComponents<
-                    TmpNodeAdapter<Self, BlockchainProvider<NodeTypesWithDBAdapter<Self, TmpDB>>>,
-                    Network: PeersHandleProvider,
-                >,
+                TmpNodeAdapter<Self>,
+                Components: NodeComponents<TmpNodeAdapter<Self>, Network: PeersHandleProvider>,
             >,
-            AddOns: RethRpcAddOns<
-                Adapter<Self, BlockchainProvider<NodeTypesWithDBAdapter<Self, TmpDB>>>,
-            > + EngineValidatorAddOn<
-                Adapter<Self, BlockchainProvider<NodeTypesWithDBAdapter<Self, TmpDB>>>,
-            >,
+            AddOns: RethRpcAddOns<Adapter<Self>> + EngineValidatorAddOn<Adapter<Self>>,
             ChainSpec: From<ChainSpec> + Clone,
         >,
 {
@@ -196,19 +90,12 @@ impl<T> NodeBuilderHelper for T where
     Self: Default
         + NodeTypesForProvider<Payload: PayloadTypes<PayloadAttributes: From<PayloadAttributes>>>
         + Node<
-            TmpNodeAdapter<Self, BlockchainProvider<NodeTypesWithDBAdapter<Self, TmpDB>>>,
+            TmpNodeAdapter<Self>,
             ComponentsBuilder: NodeComponentsBuilder<
-                TmpNodeAdapter<Self, BlockchainProvider<NodeTypesWithDBAdapter<Self, TmpDB>>>,
-                Components: NodeComponents<
-                    TmpNodeAdapter<Self, BlockchainProvider<NodeTypesWithDBAdapter<Self, TmpDB>>>,
-                    Network: PeersHandleProvider,
-                >,
+                TmpNodeAdapter<Self>,
+                Components: NodeComponents<TmpNodeAdapter<Self>, Network: PeersHandleProvider>,
             >,
-            AddOns: RethRpcAddOns<
-                Adapter<Self, BlockchainProvider<NodeTypesWithDBAdapter<Self, TmpDB>>>,
-            > + EngineValidatorAddOn<
-                Adapter<Self, BlockchainProvider<NodeTypesWithDBAdapter<Self, TmpDB>>>,
-            >,
+            AddOns: RethRpcAddOns<Adapter<Self>> + EngineValidatorAddOn<Adapter<Self>>,
             ChainSpec: From<ChainSpec> + Clone,
         >
 {

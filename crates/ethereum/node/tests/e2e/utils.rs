@@ -4,45 +4,23 @@ use alloy_provider::{
     network::{
         Ethereum, EthereumWallet, NetworkWallet, TransactionBuilder, TransactionBuilder7702,
     },
-    Provider, ProviderBuilder, SendableTx,
+    Provider, SendableTx,
 };
-use alloy_rpc_types_engine::PayloadAttributes;
 use alloy_rpc_types_eth::TransactionRequest;
 use alloy_signer::SignerSync;
 use rand::{seq::IndexedRandom, Rng};
-use reth_chainspec::EthereumHardfork;
-use reth_e2e_test_utils::{eth_payload_attributes_for_fork, wallet::Wallet, NodeHelperType, TmpDB};
+use reth_e2e_test_utils::{wallet::Wallet, NodeHelperType};
 use reth_ethereum_primitives::TxType;
-use reth_node_api::NodeTypesWithDBAdapter;
 use reth_node_ethereum::EthereumNode;
-use reth_provider::FullProvider;
-
-/// Helper function to create a new eth payload attributes
-pub(crate) fn eth_payload_attributes(timestamp: u64) -> PayloadAttributes {
-    eth_payload_attributes_for_fork(EthereumHardfork::Cancun, timestamp)
-}
-
-/// Helper function to create pre-Cancun (Shanghai) payload attributes.
-pub(crate) fn eth_payload_attributes_shanghai(timestamp: u64) -> PayloadAttributes {
-    eth_payload_attributes_for_fork(EthereumHardfork::Shanghai, timestamp)
-}
-
-/// Helper function to create Amsterdam payload attributes.
-pub(crate) fn eth_payload_attributes_amsterdam(timestamp: u64) -> PayloadAttributes {
-    eth_payload_attributes_for_fork(EthereumHardfork::Amsterdam, timestamp)
-}
 
 /// Advances node by producing blocks with random transactions.
-pub(crate) async fn advance_with_random_transactions<Provider>(
-    node: &mut NodeHelperType<EthereumNode, Provider>,
+pub(crate) async fn advance_with_random_transactions(
+    node: &mut NodeHelperType<EthereumNode>,
     num_blocks: usize,
     rng: &mut impl Rng,
     finalize: bool,
-) -> eyre::Result<()>
-where
-    Provider: FullProvider<NodeTypesWithDBAdapter<EthereumNode, TmpDB>>,
-{
-    let provider = ProviderBuilder::new().connect_http(node.rpc_url());
+) -> eyre::Result<()> {
+    let provider = node.rpc_provider();
     let signers = Wallet::new(1).with_chain_id(provider.get_chain_id().await?).wallet_gen();
 
     // simple contract which writes to storage on any call

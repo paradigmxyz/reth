@@ -3,16 +3,17 @@
 use alloy_consensus::BlockHeader;
 use alloy_eips::eip2718::Encodable2718;
 use alloy_primitives::{Address, Bytes, TxKind, B256, U256};
-use alloy_rpc_types_engine::PayloadAttributes;
 use alloy_rpc_types_eth::{Transaction, TransactionInput, TransactionReceipt, TransactionRequest};
 use eyre::Result;
 use jsonrpsee::core::client::ClientT;
-use reth_chainspec::{ChainSpec, ChainSpecBuilder, MAINNET};
+use reth_chainspec::EthereumHardfork;
 use reth_db::tables;
-use reth_e2e_test_utils::{transaction::TransactionTestContext, wallet, E2ETestSetupBuilder};
+use reth_e2e_test_utils::{
+    test_chain_spec, transaction::TransactionTestContext, wallet, E2ETestSetupBuilder,
+};
 use reth_node_ethereum::EthereumNode;
 use reth_provider::RocksDBProviderFactory;
-use std::{sync::Arc, time::Duration};
+use std::time::Duration;
 
 const ROCKSDB_POLL_TIMEOUT: Duration = Duration::from_secs(60);
 const ROCKSDB_POLL_INTERVAL: Duration = Duration::from_millis(50);
@@ -68,45 +69,15 @@ async fn poll_tx_in_rocksdb<P: RocksDBProviderFactory>(provider: &P, tx_hash: B2
     }
 }
 
-/// Returns the test chain spec for `RocksDB` tests.
-fn test_chain_spec() -> Arc<ChainSpec> {
-    Arc::new(
-        ChainSpecBuilder::default()
-            .chain(MAINNET.chain)
-            .genesis(
-                serde_json::from_str(include_str!("../../src/testsuite/assets/genesis.json"))
-                    .expect("failed to parse genesis.json"),
-            )
-            .cancun_activated()
-            .build(),
-    )
-}
-
-/// Returns test payload attributes for the given timestamp.
-fn test_attributes_generator(timestamp: u64) -> PayloadAttributes {
-    PayloadAttributes {
-        timestamp,
-        prev_randao: B256::ZERO,
-        suggested_fee_recipient: alloy_primitives::Address::ZERO,
-        withdrawals: Some(vec![]),
-        parent_beacon_block_root: Some(B256::ZERO),
-        slot_number: None,
-        ..Default::default()
-    }
-}
-
 /// Smoke test: node boots with `RocksDB` routing enabled.
 #[tokio::test]
 async fn test_rocksdb_node_startup() -> Result<()> {
     reth_tracing::init_test_tracing();
 
-    let chain_spec = test_chain_spec();
+    let chain_spec = test_chain_spec(EthereumHardfork::Cancun);
 
     let (nodes, _wallet) =
-        E2ETestSetupBuilder::<EthereumNode, _>::new(1, chain_spec, test_attributes_generator)
-            .with_storage_v2()
-            .build()
-            .await?;
+        E2ETestSetupBuilder::<EthereumNode>::new(1, chain_spec).with_storage_v2().build().await?;
 
     assert_eq!(nodes.len(), 1);
 
@@ -127,14 +98,11 @@ async fn test_rocksdb_node_startup() -> Result<()> {
 async fn test_rocksdb_block_mining() -> Result<()> {
     reth_tracing::init_test_tracing();
 
-    let chain_spec = test_chain_spec();
+    let chain_spec = test_chain_spec(EthereumHardfork::Cancun);
     let chain_id = chain_spec.chain().id();
 
     let (mut nodes, _wallet) =
-        E2ETestSetupBuilder::<EthereumNode, _>::new(1, chain_spec, test_attributes_generator)
-            .with_storage_v2()
-            .build()
-            .await?;
+        E2ETestSetupBuilder::<EthereumNode>::new(1, chain_spec).with_storage_v2().build().await?;
 
     assert_eq!(nodes.len(), 1);
 
@@ -181,20 +149,16 @@ async fn test_rocksdb_block_mining() -> Result<()> {
 async fn test_rocksdb_transaction_queries() -> Result<()> {
     reth_tracing::init_test_tracing();
 
-    let chain_spec = test_chain_spec();
+    let chain_spec = test_chain_spec(EthereumHardfork::Cancun);
     let chain_id = chain_spec.chain().id();
 
-    let (mut nodes, _) = E2ETestSetupBuilder::<EthereumNode, _>::new(
-        1,
-        chain_spec.clone(),
-        test_attributes_generator,
-    )
-    .with_storage_v2()
-    .with_tree_config_modifier(|config| {
-        config.with_persistence_threshold(0).with_memory_block_buffer_target(0)
-    })
-    .build()
-    .await?;
+    let (mut nodes, _) = E2ETestSetupBuilder::<EthereumNode>::new(1, chain_spec.clone())
+        .with_storage_v2()
+        .with_tree_config_modifier(|config| {
+            config.with_persistence_threshold(0).with_memory_block_buffer_target(0)
+        })
+        .build()
+        .await?;
 
     assert_eq!(nodes.len(), 1);
 
@@ -250,20 +214,16 @@ async fn test_rocksdb_transaction_queries() -> Result<()> {
 async fn test_rocksdb_multi_tx_same_block() -> Result<()> {
     reth_tracing::init_test_tracing();
 
-    let chain_spec = test_chain_spec();
+    let chain_spec = test_chain_spec(EthereumHardfork::Cancun);
     let chain_id = chain_spec.chain().id();
 
-    let (mut nodes, _) = E2ETestSetupBuilder::<EthereumNode, _>::new(
-        1,
-        chain_spec.clone(),
-        test_attributes_generator,
-    )
-    .with_storage_v2()
-    .with_tree_config_modifier(|config| {
-        config.with_persistence_threshold(0).with_memory_block_buffer_target(0)
-    })
-    .build()
-    .await?;
+    let (mut nodes, _) = E2ETestSetupBuilder::<EthereumNode>::new(1, chain_spec.clone())
+        .with_storage_v2()
+        .with_tree_config_modifier(|config| {
+            config.with_persistence_threshold(0).with_memory_block_buffer_target(0)
+        })
+        .build()
+        .await?;
 
     // Create 3 txs from the same wallet with sequential nonces
     let wallets = wallet::Wallet::new(1).with_chain_id(chain_id).wallet_gen();
@@ -320,20 +280,16 @@ async fn test_rocksdb_multi_tx_same_block() -> Result<()> {
 async fn test_rocksdb_txs_across_blocks() -> Result<()> {
     reth_tracing::init_test_tracing();
 
-    let chain_spec = test_chain_spec();
+    let chain_spec = test_chain_spec(EthereumHardfork::Cancun);
     let chain_id = chain_spec.chain().id();
 
-    let (mut nodes, _) = E2ETestSetupBuilder::<EthereumNode, _>::new(
-        1,
-        chain_spec.clone(),
-        test_attributes_generator,
-    )
-    .with_storage_v2()
-    .with_tree_config_modifier(|config| {
-        config.with_persistence_threshold(0).with_memory_block_buffer_target(0)
-    })
-    .build()
-    .await?;
+    let (mut nodes, _) = E2ETestSetupBuilder::<EthereumNode>::new(1, chain_spec.clone())
+        .with_storage_v2()
+        .with_tree_config_modifier(|config| {
+            config.with_persistence_threshold(0).with_memory_block_buffer_target(0)
+        })
+        .build()
+        .await?;
 
     let wallets = wallet::Wallet::new(1).with_chain_id(chain_id).wallet_gen();
     let signer = wallets[0].clone();
@@ -407,20 +363,16 @@ async fn test_rocksdb_txs_across_blocks() -> Result<()> {
 async fn test_rocksdb_pending_tx_not_in_storage() -> Result<()> {
     reth_tracing::init_test_tracing();
 
-    let chain_spec = test_chain_spec();
+    let chain_spec = test_chain_spec(EthereumHardfork::Cancun);
     let chain_id = chain_spec.chain().id();
 
-    let (mut nodes, _) = E2ETestSetupBuilder::<EthereumNode, _>::new(
-        1,
-        chain_spec.clone(),
-        test_attributes_generator,
-    )
-    .with_storage_v2()
-    .with_tree_config_modifier(|config| {
-        config.with_persistence_threshold(0).with_memory_block_buffer_target(0)
-    })
-    .build()
-    .await?;
+    let (mut nodes, _) = E2ETestSetupBuilder::<EthereumNode>::new(1, chain_spec.clone())
+        .with_storage_v2()
+        .with_tree_config_modifier(|config| {
+            config.with_persistence_threshold(0).with_memory_block_buffer_target(0)
+        })
+        .build()
+        .await?;
 
     let wallets = wallet::Wallet::new(1).with_chain_id(chain_id).wallet_gen();
     let signer = wallets[0].clone();
@@ -473,20 +425,16 @@ async fn test_rocksdb_pending_tx_not_in_storage() -> Result<()> {
 async fn test_rocksdb_reorg_unwind() -> Result<()> {
     reth_tracing::init_test_tracing();
 
-    let chain_spec = test_chain_spec();
+    let chain_spec = test_chain_spec(EthereumHardfork::Cancun);
     let chain_id = chain_spec.chain().id();
 
-    let (mut nodes, _) = E2ETestSetupBuilder::<EthereumNode, _>::new(
-        1,
-        chain_spec.clone(),
-        test_attributes_generator,
-    )
-    .with_storage_v2()
-    .with_tree_config_modifier(|config| {
-        config.with_persistence_threshold(0).with_memory_block_buffer_target(0)
-    })
-    .build()
-    .await?;
+    let (mut nodes, _) = E2ETestSetupBuilder::<EthereumNode>::new(1, chain_spec.clone())
+        .with_storage_v2()
+        .with_tree_config_modifier(|config| {
+            config.with_persistence_threshold(0).with_memory_block_buffer_target(0)
+        })
+        .build()
+        .await?;
 
     assert_eq!(nodes.len(), 1);
 
@@ -598,20 +546,16 @@ async fn test_rocksdb_reorg_unwind() -> Result<()> {
 async fn test_rocksdb_historical_account_queries() -> Result<()> {
     reth_tracing::init_test_tracing();
 
-    let chain_spec = test_chain_spec();
+    let chain_spec = test_chain_spec(EthereumHardfork::Cancun);
     let chain_id = chain_spec.chain().id();
 
-    let (mut nodes, _) = E2ETestSetupBuilder::<EthereumNode, _>::new(
-        1,
-        chain_spec.clone(),
-        test_attributes_generator,
-    )
-    .with_storage_v2()
-    .with_tree_config_modifier(|config| {
-        config.with_persistence_threshold(0).with_memory_block_buffer_target(0)
-    })
-    .build()
-    .await?;
+    let (mut nodes, _) = E2ETestSetupBuilder::<EthereumNode>::new(1, chain_spec.clone())
+        .with_storage_v2()
+        .with_tree_config_modifier(|config| {
+            config.with_persistence_threshold(0).with_memory_block_buffer_target(0)
+        })
+        .build()
+        .await?;
 
     assert_eq!(nodes.len(), 1);
 
@@ -744,29 +688,25 @@ async fn test_rocksdb_historical_account_queries() -> Result<()> {
 async fn test_rocksdb_account_history_pruning() -> Result<()> {
     reth_tracing::init_test_tracing();
 
-    let chain_spec = test_chain_spec();
+    let chain_spec = test_chain_spec(EthereumHardfork::Cancun);
     let chain_id = chain_spec.chain().id();
 
     const PRUNE_DISTANCE: u64 = 5;
     const TOTAL_BLOCKS: u64 = 20;
 
-    let (mut nodes, _) = E2ETestSetupBuilder::<EthereumNode, _>::new(
-        1,
-        chain_spec.clone(),
-        test_attributes_generator,
-    )
-    .with_storage_v2()
-    .with_tree_config_modifier(|config| {
-        config.with_persistence_threshold(0).with_memory_block_buffer_target(0)
-    })
-    .with_node_config_modifier(|mut config| {
-        config.pruning.account_history_distance = Some(PRUNE_DISTANCE);
-        config.pruning.minimum_distance = Some(PRUNE_DISTANCE);
-        config.pruning.block_interval = Some(1);
-        config
-    })
-    .build()
-    .await?;
+    let (mut nodes, _) = E2ETestSetupBuilder::<EthereumNode>::new(1, chain_spec.clone())
+        .with_storage_v2()
+        .with_tree_config_modifier(|config| {
+            config.with_persistence_threshold(0).with_memory_block_buffer_target(0)
+        })
+        .with_node_config_modifier(|mut config| {
+            config.pruning.account_history_distance = Some(PRUNE_DISTANCE);
+            config.pruning.minimum_distance = Some(PRUNE_DISTANCE);
+            config.pruning.block_interval = Some(1);
+            config
+        })
+        .build()
+        .await?;
 
     assert_eq!(nodes.len(), 1);
 
@@ -843,29 +783,25 @@ async fn test_rocksdb_account_history_pruning() -> Result<()> {
 async fn test_rocksdb_storage_history_pruning() -> Result<()> {
     reth_tracing::init_test_tracing();
 
-    let chain_spec = test_chain_spec();
+    let chain_spec = test_chain_spec(EthereumHardfork::Cancun);
     let chain_id = chain_spec.chain().id();
 
     const PRUNE_DISTANCE: u64 = 5;
     const TOTAL_BLOCKS: u64 = 20;
 
-    let (mut nodes, _) = E2ETestSetupBuilder::<EthereumNode, _>::new(
-        1,
-        chain_spec.clone(),
-        test_attributes_generator,
-    )
-    .with_storage_v2()
-    .with_tree_config_modifier(|config| {
-        config.with_persistence_threshold(0).with_memory_block_buffer_target(0)
-    })
-    .with_node_config_modifier(|mut config| {
-        config.pruning.storage_history_distance = Some(PRUNE_DISTANCE);
-        config.pruning.minimum_distance = Some(PRUNE_DISTANCE);
-        config.pruning.block_interval = Some(1);
-        config
-    })
-    .build()
-    .await?;
+    let (mut nodes, _) = E2ETestSetupBuilder::<EthereumNode>::new(1, chain_spec.clone())
+        .with_storage_v2()
+        .with_tree_config_modifier(|config| {
+            config.with_persistence_threshold(0).with_memory_block_buffer_target(0)
+        })
+        .with_node_config_modifier(|mut config| {
+            config.pruning.storage_history_distance = Some(PRUNE_DISTANCE);
+            config.pruning.minimum_distance = Some(PRUNE_DISTANCE);
+            config.pruning.block_interval = Some(1);
+            config
+        })
+        .build()
+        .await?;
 
     assert_eq!(nodes.len(), 1);
 

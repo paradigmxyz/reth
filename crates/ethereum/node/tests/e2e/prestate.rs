@@ -8,11 +8,8 @@ use alloy_rpc_types_trace::geth::{
 };
 use eyre::{eyre, Result};
 use reth_chainspec::{ChainSpecBuilder, MAINNET};
-use reth_node_builder::{NodeBuilder, NodeHandle};
-use reth_node_core::{args::RpcServerArgs, node_config::NodeConfig};
+use reth_e2e_test_utils::E2ETestSetupBuilder;
 use reth_node_ethereum::EthereumNode;
-use reth_rpc_server_types::RpcModuleSelection;
-use reth_tasks::Runtime;
 use serde::Deserialize;
 use std::sync::Arc;
 
@@ -28,8 +25,6 @@ async fn debug_trace_call_matches_geth_prestate_snapshot() -> Result<()> {
 
     let mut genesis: Genesis = MAINNET.genesis().clone();
     genesis.coinbase = address!("0x95222290dd7278aa3ddd389cc1e1d165cc4bafe5");
-
-    let runtime = Runtime::test();
 
     let expected_frame = expected_snapshot_frame()?;
     let prestate_mode = match &expected_frame {
@@ -54,20 +49,8 @@ async fn debug_trace_call_matches_geth_prestate_snapshot() -> Result<()> {
             .build(),
     );
 
-    let node_config = NodeConfig::test().with_chain(chain_spec).with_rpc(
-        RpcServerArgs::default()
-            .with_unused_ports()
-            .with_http()
-            .with_http_api(RpcModuleSelection::all_modules().into()),
-    );
-
-    let NodeHandle { node, node_exit_future: _ } = NodeBuilder::new(node_config)
-        .testing_node(runtime)
-        .node(EthereumNode::default())
-        .launch()
-        .await?;
-
-    let provider = node.rpc_server_handle().eth_http_provider().unwrap();
+    let (node, _) = E2ETestSetupBuilder::<EthereumNode>::new(1, chain_spec).build_single().await?;
+    let provider = node.rpc_provider();
 
     // <https://etherscan.io/tx/0x391f4b6a382d3bcc3120adc2ea8c62003e604e487d97281129156fd284a1a89d>
     let tx = r#"{

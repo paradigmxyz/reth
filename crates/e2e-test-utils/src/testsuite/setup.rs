@@ -2,13 +2,12 @@
 
 use crate::{testsuite::Environment, E2ETestSetupBuilder, NodeBuilderHelper};
 use alloy_eips::BlockNumberOrTag;
-use alloy_primitives::B256;
-use alloy_rpc_types_engine::{ForkchoiceState, PayloadAttributes};
+use alloy_rpc_types_engine::ForkchoiceState;
 use eyre::{eyre, Result};
 use reth_chainspec::ChainSpec;
 use reth_ethereum_primitives::Block;
 use reth_network_p2p::sync::{NetworkSyncUpdater, SyncState};
-use reth_node_api::{EngineTypes, NodeTypes, PayloadTypes, TreeConfig};
+use reth_node_api::{EngineTypes, PayloadTypes, TreeConfig};
 use reth_node_core::primitives::RecoveredBlock;
 use revm::state::EvmState;
 use std::{marker::PhantomData, path::Path, sync::Arc};
@@ -202,16 +201,11 @@ where
         self.shutdown_tx = Some(shutdown_tx);
 
         let is_dev = self.is_dev;
-        let storage_v2 = self.storage_v2;
-        let node_count = self.network.node_count;
         let tree_config = self.tree_config.clone();
 
-        let attributes_generator = Self::create_static_attributes_generator::<N>();
-
-        let mut builder = E2ETestSetupBuilder::<N, _>::new(
-            node_count,
+        let mut builder = E2ETestSetupBuilder::<N>::new(
+            self.network.node_count,
             Arc::<N::ChainSpec>::new((*chain_spec).clone().into()),
-            attributes_generator,
         )
         .with_tree_config_modifier(move |base| {
             tree_config.clone().with_cross_block_cache_size(base.cross_block_cache_size())
@@ -219,7 +213,7 @@ where
         .with_node_config_modifier(move |config| config.set_dev(is_dev))
         .with_connect_nodes(self.network.connect_nodes);
 
-        if storage_v2 {
+        if self.storage_v2 {
             builder = builder.with_storage_v2();
         }
 
@@ -263,45 +257,14 @@ where
         let chain_spec =
             self.chain_spec.clone().ok_or_else(|| eyre!("Chain specification is required"))?;
 
-        let attributes_generator = move |timestamp| PayloadAttributes {
-            timestamp,
-            prev_randao: B256::ZERO,
-            suggested_fee_recipient: alloy_primitives::Address::ZERO,
-            withdrawals: Some(vec![]),
-            parent_beacon_block_root: Some(B256::ZERO),
-            slot_number: None,
-            ..Default::default()
-        };
-
         crate::setup_import::setup_engine_with_chain_import(
             self.network.node_count,
             chain_spec,
             self.is_dev,
             self.tree_config.clone(),
             rlp_path,
-            attributes_generator,
         )
         .await
-    }
-
-    /// Create a static attributes generator that doesn't capture any instance data
-    fn create_static_attributes_generator<N>(
-    ) -> impl Fn(u64) -> <<N as NodeTypes>::Payload as PayloadTypes>::PayloadAttributes + Copy + use<N, I>
-    where
-        N: NodeBuilderHelper<Payload = I>,
-    {
-        move |timestamp| {
-            PayloadAttributes {
-                timestamp,
-                prev_randao: B256::ZERO,
-                suggested_fee_recipient: alloy_primitives::Address::ZERO,
-                withdrawals: Some(vec![]),
-                parent_beacon_block_root: Some(B256::ZERO),
-                slot_number: None,
-                ..Default::default()
-            }
-            .into()
-        }
     }
 
     /// Common finalization logic for both apply methods
