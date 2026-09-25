@@ -362,7 +362,10 @@ where
 
     /// Sends forkchoice update to the engine api with a zero finalized hash and returns its
     /// response.
-    pub async fn update_optimistic_forkchoice(&self, hash: B256) -> eyre::Result<ForkchoiceUpdated> {
+    pub async fn update_optimistic_forkchoice(
+        &self,
+        hash: B256,
+    ) -> eyre::Result<ForkchoiceUpdated> {
         self.update_forkchoice(B256::ZERO, hash).await
     }
 

@@ -13,7 +13,7 @@ use alloy_provider::Provider;
 use alloy_rpc_types_eth::TransactionRequest;
 use futures::StreamExt;
 use reth_chainspec::EthereumHardfork;
-use reth_e2e_test_utils::{test_chain_spec, wallet::Wallet, E2ETestSetupExt, NodeHelperType};
+use reth_e2e_test_utils::{wallet::Wallet, E2ETestSetupExt, NodeHelperType};
 use reth_node_ethereum::EthereumNode;
 use reth_revm::db::BundleAccount;
 
@@ -25,7 +25,7 @@ const MAX_PRIORITY_FEE_PER_GAS: u128 = 1_000_000_000;
 async fn setup_node(
     fork: EthereumHardfork,
 ) -> eyre::Result<(NodeHelperType<EthereumNode>, Wallet)> {
-    EthereumNode::test_setup(1, test_chain_spec(fork))
+    EthereumNode::test_setup_for(fork)
         .with_tree_config_modifier(|config| {
             config.without_prewarming(true).without_state_cache(false)
         })

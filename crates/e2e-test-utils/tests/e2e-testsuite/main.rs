@@ -285,9 +285,7 @@ async fn test_testsuite_multinode_block_production() -> Result<()> {
 async fn test_setup_builder_with_custom_tree_config() -> Result<()> {
     reth_tracing::init_test_tracing();
 
-    let chain_spec = test_chain_spec(EthereumHardfork::Cancun);
-
-    let (node, _) = EthereumNode::test_setup(1, chain_spec)
+    let (node, _) = EthereumNode::test_setup_for(EthereumHardfork::Cancun)
         .with_tree_config_modifier(|config| {
             config.with_persistence_threshold(0).with_memory_block_buffer_target(5)
         })

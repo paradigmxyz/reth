@@ -24,7 +24,7 @@ async fn rpc_enforces_minimum_priority_fee() -> eyre::Result<()> {
 
     const MINIMUM_PRIORITY_FEE: u128 = 1;
 
-    let (node, wallet) = EthereumNode::test_setup(1, test_chain_spec(EthereumHardfork::Cancun))
+    let (node, wallet) = EthereumNode::test_setup_for(EthereumHardfork::Cancun)
         .with_node_config_modifier(|config| {
             config.with_txpool(TxPoolArgs {
                 minimum_priority_fee: Some(MINIMUM_PRIORITY_FEE),
@@ -79,8 +79,8 @@ async fn maintain_txpool_stale_eviction() -> eyre::Result<()> {
 
     // Directly generate a node to simulate various traits such as `StateProviderFactory` required
     // by the pool maintenance task
-    let chain_spec = test_chain_spec(EthereumHardfork::Cancun);
-    let (node, wallet) = EthereumNode::test_setup(1, chain_spec).build_single().await?;
+    let (node, wallet) =
+        EthereumNode::test_setup_for(EthereumHardfork::Cancun).build_single().await?;
     let runtime = node.inner.task_executor.clone();
 
     let config = reth_transaction_pool::maintain::MaintainPoolConfig {
@@ -248,8 +248,8 @@ async fn maintain_txpool_commit() -> eyre::Result<()> {
 
     // Directly generate a node to simulate various traits such as `StateProviderFactory` required
     // by the pool maintenance task
-    let chain_spec = test_chain_spec(EthereumHardfork::Cancun);
-    let (mut node, wallet) = EthereumNode::test_setup(1, chain_spec).build_single().await?;
+    let (mut node, wallet) =
+        EthereumNode::test_setup_for(EthereumHardfork::Cancun).build_single().await?;
     let runtime = node.inner.task_executor.clone();
 
     runtime.spawn_critical_task(
