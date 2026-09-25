@@ -340,6 +340,7 @@ mod tests {
             prefix_end: 1,
             deploy_index: None,
             expiry_index: None,
+            recent_root: None,
             declared_execution_gas: 10_000,
             state_gas: 0,
         }
@@ -470,6 +471,7 @@ mod tests {
             let policy =
                 FrameValidationPolicy::new(&frame_tx, frame_tx.signature_verification_gas())
                     .unwrap();
+            let prefix_end = policy.prefix_end;
             let payload = FrameTransaction {
                 frames: frame_tx.frames.clone(),
                 signatures: frame_tx.signatures.clone(),
@@ -510,7 +512,7 @@ mod tests {
                 revm::context::result::EVMError<core::convert::Infallible>,
                 _,
             > = MainnetHandler::default();
-            let result = handler.inspect_validate_prefix(&mut evm, policy.prefix_end);
+            let result = handler.inspect_validate_prefix(&mut evm, prefix_end);
             assert_eq!(result.is_ok(), succeeds);
             let inspector = &evm.inspector;
             assert_eq!(inspector.error().is_none(), succeeds);
