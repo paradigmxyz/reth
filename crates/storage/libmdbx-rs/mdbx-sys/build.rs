@@ -15,7 +15,10 @@ fn main() {
     let mut cc = cc::Build::new();
     cc.flag_if_supported("-Wno-unused-parameter").flag_if_supported("-Wuninitialized");
 
-    if env::var("CARGO_CFG_TARGET_OS").unwrap() != "linux" {
+    if env::var("CARGO_CFG_TARGET_OS").unwrap() == "linux" {
+        // Prefault allocated WRITEMAP pages without paying for residency probes.
+        cc.define("MDBX_USE_MINCORE", "0");
+    } else {
         cc.flag_if_supported("-Wbad-function-cast");
     }
 
