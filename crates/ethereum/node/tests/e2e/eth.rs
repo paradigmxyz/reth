@@ -11,6 +11,7 @@ use alloy_rpc_types_engine::{
         ExecutionPayloadEnvelopeAmsterdam, ExecutionPayloadEnvelopePrague, ExecutionPayloadPrague,
         ForkchoiceUpdateCancun, ForkchoiceUpdateResponse as SszForkchoiceUpdateResponse, Optional,
         PayloadAttributesCancun, PayloadStatus as SszPayloadStatus, PayloadStatusKind,
+        PayloadStatusWithWitness,
     },
     ClientVersionV1, ForkchoiceState, PayloadAttributes, PayloadStatusEnum,
 };
@@ -26,9 +27,7 @@ use reth_node_core::{
     node_config::NodeConfig,
     version::{version_metadata, CLIENT_CODE},
 };
-use reth_node_ethereum::{
-    engine_ssz_witness::PayloadStatusWithWitness, EthereumAddOns, EthereumNode,
-};
+use reth_node_ethereum::{EthereumAddOns, EthereumNode};
 use reth_provider::{BlockNumReader, StateProviderFactory};
 use reth_rpc_api::TestingBuildBlockRequestV1;
 use reth_rpc_layer::secret_to_bearer_header;
@@ -600,11 +599,17 @@ async fn test_engine_ssz_proxy_returns_canonical_witness() -> eyre::Result<()> {
             .build(),
     );
     let genesis_hash = chain_spec.genesis_hash();
-    let (mut nodes, _) =
+    let (mut nodes, wallet) =
         setup::<EthereumNode>(1, chain_spec, false, eth_payload_attributes_amsterdam).await?;
     let mut node = nodes.pop().unwrap();
+    let sender = wallet.inner.address();
+    node.rpc.inject_tx(TransactionTestContext::transfer_tx_bytes(1, wallet.inner).await).await?;
     let payload = node.new_payload().await?;
     let envelope = payload.try_into_v6()?;
+    assert_eq!(
+        envelope.execution_payload.payload_inner.payload_inner.payload_inner.transactions.len(),
+        1
+    );
     let request = ExecutionPayloadEnvelopeAmsterdam {
         payload: envelope.execution_payload,
         parent_beacon_block_root: B256::ZERO,
@@ -647,6 +652,10 @@ async fn test_engine_ssz_proxy_returns_canonical_witness() -> eyre::Result<()> {
         assert!(witness.codes.windows(2).all(|pair| pair[0] < pair[1]));
         let parent: alloy_consensus::Header = alloy_rlp::decode_exact(&witness.headers[0])?;
         assert_eq!(parent.hash_slow(), genesis_hash);
+        let [public_key] = response.public_keys.as_slice() else {
+            panic!("expected one public key, got {}", response.public_keys.len())
+        };
+        assert_eq!(Address::from_raw_public_key(&public_key[1..]), sender);
     }
     let mut invalid = request;
     invalid.payload.payload_inner.payload_inner.payload_inner.block_hash = B256::ZERO;
@@ -662,6 +671,7 @@ async fn test_engine_ssz_proxy_returns_canonical_witness() -> eyre::Result<()> {
     let response = PayloadStatusWithWitness::from_ssz_bytes(&response.bytes().await?).unwrap();
     assert_eq!(response.payload_status.status, PayloadStatusKind::Invalid);
     assert!(response.witness.is_none());
+    assert!(response.public_keys.is_empty());
     invalid.payload.payload_inner.payload_inner.payload_inner.transactions =
         vec![alloy_primitives::Bytes::from_static(&[2])];
     let response = client
