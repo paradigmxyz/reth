@@ -1110,7 +1110,6 @@ where
         if let Some(peer) = self.peers.get_mut(&peer_id) {
             // don't serve pending transactions to peers the policy doesn't propagate to
             if !self.policies.propagation_policy().can_propagate(peer) {
-                trace!(target: "net::tx", ?peer_id, "Not serving pooled transactions: propagation policy");
                 let _ = response.send(Ok(PooledTransactions::default()));
                 return
             }
@@ -1214,8 +1213,8 @@ where
             return
         }
 
+        // skip peers we should not propagate to
         if !self.policies.propagation_policy().can_propagate(peer) {
-            trace!(target: "net::tx", ?peer_id, "Skipping transaction broadcast: propagation policy");
             return
         }
 
