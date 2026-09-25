@@ -61,6 +61,7 @@ reth-trie-common = { workspace = true, features = ["serde-bincode-compat"] }
 
 alloy-genesis.workspace = true
 
+criterion.workspace = true
 rand.workspace = true
 secp256k1.workspace = true
 tempfile.workspace = true
@@ -82,3 +83,7 @@ serde = [
     "reth-ethereum-primitives/serde",
     "reth-chain-state/serde",
 ]
+
+[[bench]]
+name = "wal"
+harness = false
