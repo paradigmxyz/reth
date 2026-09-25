@@ -429,7 +429,7 @@ reth-zstd-compressors = { version = "0.8.1", default-features = false }
 # revm
 revm = { version = "43.0.3", default-features = false }
 revmc = { git = "https://github.com/paradigmxyz/revmc", branch = "main", default-features = false, features = ["llvm-prefer-static"] }
-revm-inspectors = { git = "https://github.com/paradigmxyz/revm-inspectors", rev = "0e5ec00937cbf044ac371f257b1be3e95fba7fe4" }
+revm-inspectors = "0.44.0"
 
 # eth
 alloy-dyn-abi = "1.6.1"

@@ -459,6 +459,7 @@ mod tests {
     use super::*;
     use alloy_consensus::{constants::ETH_TO_WEI, Header};
     use alloy_primitives::{hex, TxKind};
+    use alloy_rpc_types_trace::parity::TransactionTrace;
     use reth_chainspec::MAINNET;
     use reth_evm_ethereum::EthEvmConfig;
     use reth_network_api::noop::NoopNetwork;
@@ -473,7 +474,7 @@ mod tests {
         state::{AccountInfo, Bytecode},
         Context, InspectEvm, MainBuilder, MainContext,
     };
-    use revm_inspectors::tracing::TracingInspector;
+    use revm_inspectors::tracing::{types::CallTrace, TracingInspector};
 
     #[test]
     fn block_transaction_pages_match_frontend_index_navigation() {
@@ -802,7 +803,6 @@ mod tests {
 
     #[test]
     fn selfdestructs_follow_children_and_precede_siblings() {
-        use revm_inspectors::tracing::types::CallTrace;
         let nodes = [0, 1, 2, 1]
             .into_iter()
             .enumerate()
@@ -854,7 +854,6 @@ mod tests {
 
     #[test]
     fn contract_creator_ignores_reverted_ancestors() {
-        use alloy_rpc_types_trace::parity::TransactionTrace;
         let contract = Address::repeat_byte(0x11);
         let creator = Address::repeat_byte(0x22);
         let localize = |trace, hash| LocalizedTransactionTrace {
