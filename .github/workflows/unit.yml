@@ -96,11 +96,11 @@ jobs:
       - name: Download & extract EEST fixtures (public)
         shell: bash
         env:
-          EEST_TESTS_TAG: v4.5.0
+          EEST_TESTS_TAG: tests-glamsterdam-devnet@v8.1.4
         run: |
           set -euo pipefail
           mkdir -p testing/ef-tests/execution-spec-tests
-          URL="https://github.com/ethereum/execution-spec-tests/releases/download/${EEST_TESTS_TAG}/fixtures_stable.tar.gz"
+          URL="https://github.com/ethereum/execution-specs/releases/download/${EEST_TESTS_TAG}/fixtures_glamsterdam-devnet.tar.gz"
           curl -L "$URL" | tar -xz --strip-components=1 -C testing/ef-tests/execution-spec-tests
       - uses: rui314/setup-mold@10ca16bf91dc22e05ebdc935cad9c75ea248f621 # v1
       - run: .github/scripts/install_llvm.sh ubuntu
