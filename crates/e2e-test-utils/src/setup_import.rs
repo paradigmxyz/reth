@@ -12,10 +12,11 @@ use reth_cli_commands::import_core::{import_blocks_from_file, ImportConfig, Impo
 use reth_config::Config;
 use reth_db::DatabaseEnv;
 use reth_node_api::{NodeTypesWithDBAdapter, TreeConfig};
+use reth_node_core::args::StorageArgs;
 use reth_node_ethereum::EthereumNode;
 use reth_provider::{
     providers::{RocksDBProvider, StaticFileProvider},
-    DatabaseProviderFactory, ProviderFactory, StageCheckpointReader,
+    DatabaseProviderFactory, ProviderFactory, StageCheckpointReader, StorageSettings,
 };
 use reth_stages_types::StageId;
 use reth_tasks::Runtime;
@@ -52,7 +53,8 @@ impl std::fmt::Debug for ChainImportResult {
 /// 4. Returns the running nodes ready for testing
 ///
 /// The import and all nodes share a single [`Runtime::test`] runtime, and the nodes build payloads
-/// with [`eth_payload_attributes`] for the given chain spec.
+/// with [`eth_payload_attributes`] for the given chain spec. `storage_v2` selects the storage
+/// layout (`--storage.v2`) for both the imported database and the launched nodes.
 ///
 /// Note: This function is currently specific to `EthereumNode` because the import process
 /// uses Ethereum-specific consensus and block format. It can be made generic in the future
@@ -64,6 +66,7 @@ pub async fn setup_engine_with_chain_import(
     num_nodes: usize,
     chain_spec: Arc<ChainSpec>,
     is_dev: bool,
+    storage_v2: bool,
     tree_config: TreeConfig,
     rlp_path: &Path,
 ) -> eyre::Result<ChainImportResult> {
@@ -81,19 +84,28 @@ pub async fn setup_engine_with_chain_import(
         debug!(target: "e2e::import", "Node {idx} datadir: {datadir:?}");
 
         let span = span!(Level::INFO, "node", idx);
+        let node_config = test_node_config(chain_spec.clone())
+            .set_dev(is_dev)
+            .with_storage(StorageArgs { v2: storage_v2 });
 
         // First, import the chain data into this datadir.
-        import_chain(&datadir, chain_spec.clone(), rlp_path, runtime.clone())
-            .instrument(span.clone())
-            .await
-            .wrap_err_with(|| format!("chain import failed for node {idx}"))?;
+        import_chain(
+            &datadir,
+            chain_spec.clone(),
+            node_config.storage_settings(),
+            rlp_path,
+            runtime.clone(),
+        )
+        .instrument(span.clone())
+        .await
+        .wrap_err_with(|| format!("chain import failed for node {idx}"))?;
 
         // Now launch the node with the pre-populated datadir.
         debug!(target: "e2e::import", "Launching node with datadir: {:?}", datadir);
 
         let chain_spec_for_attributes = chain_spec.clone();
         let node = launch_test_node::<EthereumNode>(LaunchArgs {
-            node_config: test_node_config(chain_spec.clone()).set_dev(is_dev),
+            node_config,
             runtime: runtime.clone(),
             tree_config: tree_config.clone(),
             datadir,
@@ -139,12 +151,15 @@ pub fn load_forkchoice_state(path: &Path) -> eyre::Result<alloy_rpc_types_engine
     })
 }
 
-/// Initializes the database in `datadir` and imports the RLP encoded chain at `rlp_path`.
+/// Initializes the database in `datadir` with the given storage settings and imports the RLP
+/// encoded chain at `rlp_path`.
 ///
-/// All database handles are released on return so the datadir can be reopened, e.g. by a node.
+/// All database handles are released on return so the datadir can be reopened, e.g. by a node,
+/// which reads the storage settings back from the database.
 async fn import_chain(
     datadir: &Path,
     chain_spec: Arc<ChainSpec>,
+    storage_settings: StorageSettings,
     rlp_path: &Path,
     runtime: Runtime,
 ) -> eyre::Result<ImportResult> {
@@ -164,8 +179,8 @@ async fn import_chain(
             runtime.clone(),
         )?;
 
-    // Initialize genesis if needed.
-    reth_db_common::init::init_genesis(&provider_factory)?;
+    // Initialize genesis with the storage settings of the node that later opens the database.
+    reth_db_common::init::init_genesis_with_settings(&provider_factory, storage_settings)?;
 
     // Use NoopConsensus to skip gas limit validation for test imports.
     let result = import_blocks_from_file(
@@ -235,7 +250,7 @@ mod tests {
     use reth_db::mdbx::DatabaseArguments;
     use reth_ethereum_primitives::Block;
     use reth_primitives_traits::SealedBlock;
-    use reth_provider::{BlockHashReader, BlockNumReader, BlockReaderIdExt};
+    use reth_provider::{BlockHashReader, BlockNumReader, BlockReaderIdExt, MetadataProvider};
     use std::path::PathBuf;
 
     /// Helper to setup test blocks and write to RLP.
@@ -293,8 +308,16 @@ mod tests {
 
         let datadir = temp_dir.path().join("datadir");
         std::fs::create_dir_all(&datadir).unwrap();
-        let result =
-            import_chain(&datadir, chain_spec.clone(), &rlp_path, runtime.clone()).await.unwrap();
+        let storage_settings = StorageSettings { storage_v2: StorageArgs::default().v2 };
+        let result = import_chain(
+            &datadir,
+            chain_spec.clone(),
+            storage_settings,
+            &rlp_path,
+            runtime.clone(),
+        )
+        .await
+        .unwrap();
         assert_eq!(result.total_decoded_blocks, 10);
         assert_eq!(result.total_imported_blocks, 10);
         assert_eq!(result.total_decoded_txns, 0);
@@ -323,37 +346,56 @@ mod tests {
         std::fs::write(&fcu_path, create_fcu_json(tip).to_string())
             .expect("Failed to write FCU data");
 
-        // Setup nodes with imported chain.
-        let result =
-            setup_engine_with_chain_import(1, chain_spec, false, TreeConfig::default(), &rlp_path)
-                .await
-                .expect("Failed to setup nodes with chain import");
-
-        // Load and apply forkchoice state.
-        let fcu_state = load_forkchoice_state(&fcu_path).expect("Failed to load forkchoice state");
-
-        let node = &result.nodes[0];
-
-        // Send forkchoice update to make the imported chain canonical.
-        node.update_forkchoice(fcu_state.finalized_block_hash, fcu_state.head_block_hash)
+        for storage_v2 in [false, true] {
+            // Setup nodes with imported chain.
+            let result = setup_engine_with_chain_import(
+                1,
+                chain_spec.clone(),
+                false,
+                storage_v2,
+                TreeConfig::default(),
+                &rlp_path,
+            )
             .await
-            .expect("Failed to update forkchoice");
+            .expect("Failed to setup nodes with chain import");
 
-        // Wait for the node to sync to the head.
-        node.sync_to(fcu_state.head_block_hash).await.expect("Failed to sync to head");
+            // Load and apply forkchoice state.
+            let fcu_state =
+                load_forkchoice_state(&fcu_path).expect("Failed to load forkchoice state");
 
-        // Verify the chain tip.
-        let latest = node
-            .inner
-            .provider
-            .sealed_header_by_id(alloy_eips::BlockId::latest())
-            .expect("Failed to get latest header")
-            .expect("No latest header found");
+            let node = &result.nodes[0];
 
-        assert_eq!(
-            latest.hash(),
-            fcu_state.head_block_hash,
-            "Chain tip does not match expected head"
-        );
+            // The imported database and the node use the requested storage layout.
+            let settings = node
+                .inner
+                .provider
+                .database_provider_ro()
+                .expect("Failed to open database provider")
+                .storage_settings()
+                .expect("Failed to read storage settings");
+            assert_eq!(settings, Some(StorageSettings { storage_v2 }));
+
+            // Send forkchoice update to make the imported chain canonical.
+            node.update_forkchoice(fcu_state.finalized_block_hash, fcu_state.head_block_hash)
+                .await
+                .expect("Failed to update forkchoice");
+
+            // Wait for the node to sync to the head.
+            node.sync_to(fcu_state.head_block_hash).await.expect("Failed to sync to head");
+
+            // Verify the chain tip.
+            let latest = node
+                .inner
+                .provider
+                .sealed_header_by_id(alloy_eips::BlockId::latest())
+                .expect("Failed to get latest header")
+                .expect("No latest header found");
+
+            assert_eq!(
+                latest.hash(),
+                fcu_state.head_block_hash,
+                "Chain tip does not match expected head"
+            );
+        }
     }
 }
