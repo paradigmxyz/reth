@@ -279,7 +279,7 @@ impl Default for DefaultEngineValues {
             state_cache_disabled: false,
             prewarming_disabled: false,
             txpool_prewarming_enabled: false,
-            sender_recovery_cache_enabled: false,
+            sender_recovery_cache_enabled: true,
             state_provider_metrics: false,
             cross_block_cache_size: DEFAULT_CROSS_BLOCK_CACHE_SIZE_MB,
             state_root_task_compare_updates: false,
@@ -405,12 +405,15 @@ pub struct EngineArgs {
     )]
     pub txpool_prewarming_enabled: bool,
 
-    /// Enable caching recovered transaction senders across transaction ingress and payload
-    /// execution.
+    /// Cache recovered transaction senders across transaction ingress and payload execution.
+    ///
+    /// Enabled by default, use `--engine.sender-recovery-cache=false` to disable it.
     #[arg(
         long = "engine.sender-recovery-cache",
         env = "RETH_ENGINE_SENDER_RECOVERY_CACHE",
-        default_value_t = DefaultEngineValues::get_global().sender_recovery_cache_enabled
+        default_value_t = DefaultEngineValues::get_global().sender_recovery_cache_enabled,
+        num_args = 0..=1,
+        default_missing_value = "true",
     )]
     pub sender_recovery_cache_enabled: bool,
 
@@ -904,14 +907,36 @@ mod tests {
     }
 
     #[test]
-    fn sender_recovery_cache_is_disabled_by_default_and_can_be_enabled() {
+    fn sender_recovery_cache_is_enabled_by_default_and_can_be_disabled() {
         let args = CommandParser::<EngineArgs>::parse_from(["reth"]).args;
-        assert!(!args.sender_recovery_cache_enabled);
+        assert!(args.sender_recovery_cache_enabled);
 
         let args =
             CommandParser::<EngineArgs>::parse_from(["reth", "--engine.sender-recovery-cache"])
                 .args;
         assert!(args.sender_recovery_cache_enabled);
+
+        let args = CommandParser::<EngineArgs>::parse_from([
+            "reth",
+            "--engine.sender-recovery-cache=true",
+        ])
+        .args;
+        assert!(args.sender_recovery_cache_enabled);
+
+        let args = CommandParser::<EngineArgs>::parse_from([
+            "reth",
+            "--engine.sender-recovery-cache=false",
+        ])
+        .args;
+        assert!(!args.sender_recovery_cache_enabled);
+
+        let args = CommandParser::<EngineArgs>::parse_from([
+            "reth",
+            "--engine.sender-recovery-cache",
+            "false",
+        ])
+        .args;
+        assert!(!args.sender_recovery_cache_enabled);
     }
 
     #[test]
