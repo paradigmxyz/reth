@@ -69,9 +69,11 @@ pub trait LoadPendingBlock:
     /// Uses the provider's pending block when available; otherwise derives the next block
     /// environment from the latest header. This method performs synchronous provider reads.
     fn pending_block_env_and_cfg(&self) -> Result<PendingBlockEnv<Self::Evm>, Self::Error> {
-        if let Some((block, receipts)) =
+        if let Some(pending) =
             self.provider().pending_block_and_receipts().map_err(Self::Error::from_eth_err)?
         {
+            let (block, output) = pending.into_parts();
+
             // Note: for the PENDING block we assume it is past the known merge block and
             // thus this will not fail when looking up the total
             // difficulty value for the blockenv.
@@ -83,7 +85,7 @@ pub trait LoadPendingBlock:
 
             return Ok(PendingBlockEnv::new(
                 evm_env,
-                PendingBlockEnvOrigin::ActualPending(Arc::new(block), Arc::new(receipts)),
+                PendingBlockEnvOrigin::ActualPending(block, output.into()),
             ));
         }
 
