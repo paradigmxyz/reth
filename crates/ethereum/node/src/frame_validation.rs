@@ -2,7 +2,7 @@
 
 use alloy_consensus::BlockHeader;
 use reth_ethereum_primitives::TransactionSigned;
-use reth_evm::{ConfigureEvm, Evm, FromRecoveredTx, TxEnvFor};
+use reth_evm::{env::BlockEnvironment, ConfigureEvm, Evm, FromRecoveredTx, TxEnvFor};
 use reth_node_api::{FullNodeTypes, NodePrimitives, NodeTypes, PrimitivesTy};
 use reth_revm::database::StateProviderDatabase;
 use reth_storage_api::{AccountReader, BlockReaderIdExt, StateProviderFactory};
@@ -101,7 +101,7 @@ where
     // prefix and must not reject a valid future nonce before the pool can do that bookkeeping.
     env.cfg_env.disable_nonce_check = true;
     if let Some(current_slot) = current_slot {
-        env.block_env.slot_num = current_slot;
+        env.block_env.inner_mut().slot_num = current_slot;
     }
     let tx = TxEnvFor::<EvmConfig>::from_recovered_tx_with_gas_params(
         transaction.transaction.inner(),
