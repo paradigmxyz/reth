@@ -379,7 +379,8 @@ where
     /// Validates the given [`BlobsBundleV2`] and returns versioned hashes for blobs.
     ///
     /// Exact blob, commitment, and cell-proof matches from recent submissions reuse KZG
-    /// validation.
+    /// validation. The resulting hashes are still checked against the block's EIP-4844
+    /// transactions during payload validation.
     pub fn validate_blobs_bundle_v2(
         &self,
         blobs_bundle: BlobsBundleV2,

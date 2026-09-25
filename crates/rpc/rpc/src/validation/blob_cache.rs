@@ -1,4 +1,14 @@
 //! Small cache of successfully validated builder-submission blobs.
+//!
+//! A blob versioned hash identifies its KZG commitment, not the blob bytes. EIP-7594 validation
+//! verifies that the blob's cells and proofs match that commitment. This check is independent of
+//! the block containing the blob, so a successful validation can be reused across submissions,
+//! even if the original submission later fails a separate block check.
+//!
+//! Cache hits require an exact match of the blob, commitment, and all cell proofs. Every submission
+//! still checks bundle lengths and derives versioned hashes in bundle order. Payload validation
+//! then compares those hashes with the EIP-4844 transactions in the submitted block; the cache
+//! only skips repeated KZG verification.
 
 use super::ValidationApiError;
 use alloy_consensus::EnvKzgSettings;
