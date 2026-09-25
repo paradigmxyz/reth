@@ -27,6 +27,3 @@
 
 # include example files
 !/examples
-
-# The standalone RPC runner is built with its own context.
-/testing/frame-rpc
