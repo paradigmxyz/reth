@@ -1562,10 +1562,20 @@ mod tests {
 
     /// Adds one block per number in `blocks`, each with a single legacy transaction whose receipt
     /// emits one log, so that a `Filter::default()` matches exactly one log per block.
+    fn add_blocks_with_log(provider: &MockEthProvider, blocks: RangeInclusive<u64>) {
+        add_blocks_with_logs(provider, blocks, 1)
+    }
+
+    /// Adds one block per number in `blocks`, each with a single legacy transaction whose receipt
+    /// emits `logs_per_block` logs that a `Filter::default()` matches.
     ///
     /// The block body indices assume the added blocks form a range anchored at 0, which is what
     /// `MockEthProvider::transaction_by_id` resolves against.
-    fn add_blocks_with_log(provider: &MockEthProvider, blocks: RangeInclusive<u64>) {
+    fn add_blocks_with_logs(
+        provider: &MockEthProvider,
+        blocks: RangeInclusive<u64>,
+        logs_per_block: usize,
+    ) {
         use alloy_consensus::TxLegacy;
         use alloy_primitives::{Address, Bloom, Bytes, Log, LogData, Signature};
         use reth_db_api::models::StoredBlockBodyIndices;
@@ -1581,13 +1591,12 @@ mod tests {
             .into(),
             Signature::test_signature(),
         );
+        let log =
+            Log { address: Address::ZERO, data: LogData::new_unchecked(vec![], Bytes::new()) };
         let receipt = Receipt {
             tx_type: TxType::Legacy,
             cumulative_gas_used: 21_000,
-            logs: vec![Log {
-                address: Address::ZERO,
-                data: LogData::new_unchecked(vec![], Bytes::new()),
-            }],
+            logs: vec![log; logs_per_block],
             success: true,
         };
 
@@ -1604,17 +1613,18 @@ mod tests {
                 logs_bloom: Bloom::from([1u8; 256]),
                 ..Default::default()
             };
-            parent_hash = header.hash_slow();
+            let hash = header.hash_slow();
             let block = Block {
                 header,
                 body: BlockBody { transactions: vec![tx.clone()], ..Default::default() },
             };
-            provider.add_block(parent_hash, block);
+            provider.add_block(hash, block);
             provider.add_receipts(number, vec![receipt.clone()]);
             provider.add_block_body_indices(
                 number,
                 StoredBlockBodyIndices { first_tx_num: number, tx_count: 1 },
             );
+            parent_hash = hash;
         }
     }
 
@@ -2580,6 +2590,27 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_filter_changes_delivers_oversized_block_whole() {
+        let provider = MockEthProvider::default();
+        add_blocks_with_log(&provider, 0..=0);
+        let eth_filter = EthFilter::new(
+            build_test_eth_api(provider.clone()),
+            EthFilterConfig::default().max_logs_per_response(1),
+            Runtime::test(),
+        );
+        let id = eth_filter.new_filter(Filter::default()).await.unwrap();
+        assert_eq!(poll_log_blocks(&eth_filter, &id).await, vec![0]);
+
+        // a block with more logs than the cap is delivered whole, as by `eth_getLogs`, instead of
+        // stalling the filter on it, and the next poll moves on
+        add_blocks_with_logs(&provider, 1..=1, 2);
+        add_blocks_with_log(&provider, 2..=2);
+        assert_eq!(poll_log_blocks(&eth_filter, &id).await, vec![1, 1]);
+        assert_eq!(poll_log_blocks(&eth_filter, &id).await, vec![2]);
+        assert_eq!(poll_log_blocks(&eth_filter, &id).await, Vec::<u64>::new());
+    }
+
+    #[tokio::test]
     async fn test_pending_transaction_filter_changes_without_new_blocks() {
         use reth_transaction_pool::{
             test_utils::MockTransaction, TransactionOrigin, TransactionPool,
@@ -2611,7 +2642,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_filter_changes_delivers_at_most_max_blocks_per_poll() {
+    async fn test_filter_changes_pages_over_block_limit() {
         let provider = MockEthProvider::default();
         add_blocks_with_log(&provider, 0..=0);
         let eth_filter = EthFilter::new(
@@ -2622,7 +2653,8 @@ mod tests {
         let id = eth_filter.new_filter(Filter::default()).await.unwrap();
 
         // a backlog wider than the block limit is delivered over successive polls instead of
-        // failing them all with `QueryExceedsMaxBlocks`
+        // failing them all with `QueryExceedsMaxBlocks`; the limit bounds `to - from` as in
+        // `eth_getLogs`, so a poll covers at most `max + 1` blocks
         add_blocks_with_log(&provider, 1..=3);
         assert_eq!(poll_log_blocks(&eth_filter, &id).await, vec![0, 1]);
         assert_eq!(poll_log_blocks(&eth_filter, &id).await, vec![2, 3]);
