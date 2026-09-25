@@ -132,6 +132,7 @@ account-ext = [
     "reth-chain-state/account-ext",
     "reth-eth-wire-types/account-ext",
     "reth-evm-ethereum/account-ext",
+    "reth-provider/account-ext",
     "reth-tasks/account-ext",
 ]
 
