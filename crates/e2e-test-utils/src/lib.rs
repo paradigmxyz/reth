@@ -2,7 +2,6 @@
 
 use alloy_rpc_types_engine::PayloadAttributes;
 use node::NodeTestContext;
-use reth_chainspec::ChainSpec;
 use reth_db::{test_utils::TempDatabase, DatabaseEnv};
 use reth_network_api::test_utils::PeersHandleProvider;
 use reth_node_builder::{
@@ -81,7 +80,6 @@ where
                 Components: NodeComponents<TmpNodeAdapter<Self>, Network: PeersHandleProvider>,
             >,
             AddOns: RethRpcAddOns<Adapter<Self>> + EngineValidatorAddOn<Adapter<Self>>,
-            ChainSpec: From<ChainSpec> + Clone,
         >,
 {
 }
@@ -96,7 +94,6 @@ impl<T> NodeBuilderHelper for T where
                 Components: NodeComponents<TmpNodeAdapter<Self>, Network: PeersHandleProvider>,
             >,
             AddOns: RethRpcAddOns<Adapter<Self>> + EngineValidatorAddOn<Adapter<Self>>,
-            ChainSpec: From<ChainSpec> + Clone,
         >
 {
 }

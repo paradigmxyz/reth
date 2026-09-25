@@ -179,7 +179,7 @@ where
     /// Apply the setup to the environment
     pub async fn apply<N>(&mut self, env: &mut Environment<I>) -> Result<()>
     where
-        N: NodeBuilderHelper<Payload = I>,
+        N: NodeBuilderHelper<Payload = I, ChainSpec: From<ChainSpec>>,
     {
         // Note: this future is quite large so we box it
         Box::pin(self.apply_::<N>(env)).await
@@ -188,7 +188,7 @@ where
     /// Apply the setup to the environment
     async fn apply_<N>(&mut self, env: &mut Environment<I>) -> Result<()>
     where
-        N: NodeBuilderHelper<Payload = I>,
+        N: NodeBuilderHelper<Payload = I, ChainSpec: From<ChainSpec>>,
     {
         // If import_rlp_path is set, use apply_with_import instead
         if let Some(rlp_path) = self.import_rlp_path.take() {
