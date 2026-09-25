@@ -65,6 +65,38 @@ alloy_sol_types::sol! {
     }
 }
 
+#[tokio::test]
+async fn test_rpc_shares_sender_recovery_cache_with_execution() -> eyre::Result<()> {
+    use reth_primitives_traits::SignedTransaction;
+    use reth_transaction_pool::test_utils::TransactionGenerator;
+
+    let chain_spec = Arc::new(ChainSpecBuilder::mainnet().cancun_activated().build());
+    let (mut nodes, _) =
+        E2ETestSetupBuilder::<EthereumNode, _>::new(1, chain_spec, eth_payload_attributes)
+            .with_node_config_modifier(|mut config| {
+                config.engine.sender_recovery_cache_enabled = true;
+                config
+            })
+            .build()
+            .await?;
+    let node = nodes.pop().unwrap();
+    let cache = node.inner.evm_config.sender_recovery_cache.as_ref().unwrap();
+    let client = node.rpc_client().unwrap();
+    let transaction =
+        TransactionGenerator::new(rand::rng()).transaction().chain_id(2).into_legacy();
+    let hash = *transaction.tx_hash();
+    let sender = transaction.try_recover()?;
+    let raw = Bytes::from(transaction.encoded_2718());
+    assert_eq!(cache.get(&hash), None);
+
+    for _ in 0..2 {
+        let result = client.request::<B256, _>("eth_sendRawTransaction", (raw.clone(),)).await;
+        assert!(result.unwrap_err().to_string().contains("chain ID"));
+        assert_eq!(cache.get(&hash), Some(sender));
+    }
+    Ok(())
+}
+
 async fn inject_blob_transaction(
     node: &NodeHelperType<EthereumNode>,
     wallet: &Wallet,
@@ -552,6 +584,72 @@ async fn test_flashbots_validate_v3() -> eyre::Result<()> {
         .raw_request::<_, ()>("flashbots_validateBuilderSubmissionV3".into(), (&request,))
         .await
         .is_err());
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_flashbots_validate_uses_shared_sender_recovery_cache() -> eyre::Result<()> {
+    reth_tracing::init_test_tracing();
+
+    let chain_spec = Arc::new(
+        ChainSpecBuilder::default()
+            .chain(MAINNET.chain)
+            .genesis(serde_json::from_str(include_str!("../assets/genesis.json")).unwrap())
+            .cancun_activated()
+            .build(),
+    );
+
+    let (mut nodes, wallet) =
+        E2ETestSetupBuilder::<EthereumNode, _>::new(1, chain_spec, eth_payload_attributes)
+            .with_node_config_modifier(|mut config| {
+                config.engine.sender_recovery_cache_enabled = true;
+                config
+            })
+            .build()
+            .await?;
+    let mut node = nodes.pop().unwrap();
+    let cache = node.inner.evm_config.sender_recovery_cache.clone().expect("cache is enabled");
+
+    let signer = wallet.wallet_gen().swap_remove(0);
+    let sender = signer.address();
+    let provider =
+        ProviderBuilder::new().wallet(EthereumWallet::new(signer)).connect_http(node.rpc_url());
+
+    let tx_hash = *provider
+        .send_transaction(TransactionRequest::default().to(Address::ZERO))
+        .await?
+        .tx_hash();
+    // Transaction ingress has already recovered the sender through the shared cache.
+    let payload = node.new_payload().await?;
+    assert!(payload.block().body().transactions.iter().any(|tx| *tx.tx_hash() == tx_hash));
+    assert_eq!(cache.get(&tx_hash), Some(sender));
+
+    let request = BuilderBlockValidationRequestV3 {
+        request: SignedBidSubmissionV3 {
+            message: BidTrace {
+                parent_hash: payload.block().parent_hash,
+                block_hash: payload.block().hash(),
+                gas_used: payload.block().gas_used,
+                gas_limit: payload.block().gas_limit,
+                ..Default::default()
+            },
+            execution_payload: ExecutionPayloadV3::from_block_unchecked(
+                payload.block().hash(),
+                &payload.block().clone().into_block(),
+            ),
+            blobs_bundle: BlobsBundleV1::new([]),
+            signature: Default::default(),
+        },
+        parent_beacon_block_root: payload.block().parent_beacon_block_root.unwrap(),
+        registered_gas_limit: payload.block().gas_limit,
+    };
+
+    provider
+        .raw_request::<_, ()>("flashbots_validateBuilderSubmissionV3".into(), (&request,))
+        .await?;
+    // Validation accepts the submission while reusing the sender cached by transaction ingress.
+    assert_eq!(cache.get(&tx_hash), Some(sender));
+
     Ok(())
 }
 

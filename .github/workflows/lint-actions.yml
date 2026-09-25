@@ -31,3 +31,8 @@ jobs:
       - name: Check workflow files
         run: SHELLCHECK_OPTS="-S error" actionlint -color
         shell: bash
+      - name: Test benchmark CI helpers
+        run: |
+          bash .github/scripts/bench-state-test.sh
+          bash .github/scripts/bench-upload-charts-test.sh
+          node --test .github/scripts/bench-job-summary-test.js

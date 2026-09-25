@@ -66,9 +66,9 @@ async fn test_discovery_addr_in_use() {
     let port = any_port_listener.local_addr().unwrap().port();
     let addr = SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, port));
     let _discovery =
-        Discovery::new(addr, addr, secret_key, Some(disc_config), None, None).await.unwrap();
+        Discovery::new(addr, addr, secret_key, Some(disc_config), None, None, None).await.unwrap();
     let disc_config = Discv4Config::default();
-    let result = Discovery::new(addr, addr, secret_key, Some(disc_config), None, None).await;
+    let result = Discovery::new(addr, addr, secret_key, Some(disc_config), None, None, None).await;
     assert!(is_addr_in_use_kind(&result.err().unwrap(), ServiceKind::Discovery(addr)));
 }
 

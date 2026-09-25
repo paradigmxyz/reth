@@ -197,7 +197,9 @@ pub trait TransactionPropagationPolicy<N: NetworkPrimitives>:
 {
     /// Filter a given peer based on the policy.
     ///
-    /// This determines whether transactions can be propagated to this peer.
+    /// This determines whether transactions can be propagated to this peer. Peers that are
+    /// filtered out also don't receive the pending pool announcement on session establishment and
+    /// are served empty responses to `GetPooledTransactions` requests.
     fn can_propagate(&self, peer: &mut PeerMetadata<N>) -> bool;
 
     /// A callback on the policy when a new peer session is established.

@@ -33,7 +33,9 @@ use reth_ethereum_primitives::{Block, EthPrimitives};
 use reth_evm_ethereum::MockEvmConfig;
 use reth_payload_builder::PayloadServiceCommand;
 use reth_primitives_traits::Block as _;
-use reth_provider::{test_utils::MockEthProvider, BalStoreHandle, InMemoryBalStore, RawBal};
+use reth_provider::{
+    test_utils::MockEthProvider, BalStoreHandle, HeaderProvider, InMemoryBalStore, RawBal,
+};
 use reth_tasks::spawn_os_thread;
 use reth_trie_common::ComputedTrieData;
 use revm::state::bal::Bal as RevmBal;
@@ -3449,4 +3451,97 @@ fn test_backfill_threshold_above_header_limit_triggers_backfill() {
             )),
         }
     }
+}
+
+/// A stale persisted hash must not count as an ancestor after an in-memory reorg.
+#[test]
+fn test_forkchoice_rejects_stale_persisted_prefix_hash() {
+    let mut test_harness = TestHarness::new(MAINNET.clone());
+    let old: Vec<_> = test_harness.block_builder.get_executed_blocks(0..3).collect();
+    test_harness = test_harness.with_blocks(old.clone());
+
+    let new: Vec<_> = test_harness
+        .block_builder
+        .create_fork(old[0].recovered_block(), 2)
+        .into_iter()
+        .map(|block| {
+            ExecutedBlock::new(
+                Arc::new(block),
+                Arc::new(BlockExecutionOutput::default()),
+                ComputedTrieData::default(),
+            )
+        })
+        .collect();
+    test_harness.tree.canonical_in_memory_state.update_chain(NewCanonicalChain::Reorg {
+        new: vec![new[0].clone()],
+        old: old[1..].to_vec(),
+    });
+
+    let state = ForkchoiceState {
+        head_block_hash: new[1].recovered_block().hash(),
+        safe_block_hash: old[1].recovered_block().hash(),
+        finalized_block_hash: old[0].recovered_block().hash(),
+    };
+    let update = NewCanonicalChain::Commit { new: vec![new[1].clone()] };
+    assert!(!test_harness.tree.is_consistent_forkchoice_state(state, Some(&update)).unwrap());
+
+    let state = ForkchoiceState { safe_block_hash: new[0].recovered_block().hash(), ..state };
+    assert!(test_harness.tree.is_consistent_forkchoice_state(state, Some(&update)).unwrap());
+}
+
+/// Reorgs from a persisted chain to a sibling branch of `sibling_len` blocks without advancing
+/// persistence, then asserts that an FCU back to the reorged-out tip makes it canonical again.
+async fn assert_fcu_back_to_reorged_out_head_with_pending_disk_reorg(sibling_len: u64) {
+    reth_tracing::init_test_tracing();
+    let mut test_harness = TestHarness::new(MAINNET.clone());
+    let old: Vec<_> = test_harness.block_builder.get_executed_blocks(0..4).collect();
+    test_harness = test_harness.with_blocks(old.clone());
+    let old_tip = old[3].recovered_block().hash();
+
+    let new: Vec<_> = test_harness
+        .block_builder
+        .create_fork(old[0].recovered_block(), sibling_len)
+        .into_iter()
+        .map(|block| {
+            ExecutedBlock::new(
+                Arc::new(block),
+                Arc::new(BlockExecutionOutput::default()),
+                ComputedTrieData::default(),
+            )
+        })
+        .collect();
+    for block in &new {
+        test_harness.tree.state.tree_state.insert_executed(block.clone());
+    }
+    let new_tip = new.last().unwrap().recovered_block().hash();
+
+    let fcu = |head_block_hash| ForkchoiceState {
+        head_block_hash,
+        safe_block_hash: B256::ZERO,
+        finalized_block_hash: B256::ZERO,
+    };
+
+    let outcome = test_harness.tree.on_forkchoice_updated(fcu(new_tip), None).unwrap();
+    assert_eq!(outcome.outcome.forkchoice_status(), ForkchoiceStatus::Valid);
+    assert_eq!(test_harness.tree.canonical_in_memory_state.get_canonical_head().hash(), new_tip);
+
+    // Persistence is not advanced, so the reorged-out blocks are still found on disk.
+    assert!(test_harness.provider.header(old_tip).unwrap().is_some());
+
+    let outcome = test_harness.tree.on_forkchoice_updated(fcu(old_tip), None).unwrap();
+    assert_eq!(outcome.outcome.forkchoice_status(), ForkchoiceStatus::Valid);
+    assert_eq!(test_harness.tree.state.tree_state.canonical_block_hash(), old_tip);
+    assert_eq!(test_harness.tree.canonical_in_memory_state.get_canonical_head().hash(), old_tip);
+}
+
+/// A reorged-out head must become canonical again while its disk reorg is still pending.
+#[tokio::test]
+async fn test_fcu_back_to_reorged_out_head_with_pending_disk_reorg() {
+    assert_fcu_back_to_reorged_out_head_with_pending_disk_reorg(3).await;
+}
+
+/// Same as above, but the reorged-out head is above the tip of the shorter sibling branch.
+#[tokio::test]
+async fn test_fcu_back_to_reorged_out_head_above_shorter_branch_with_pending_disk_reorg() {
+    assert_fcu_back_to_reorged_out_head_with_pending_disk_reorg(1).await;
 }

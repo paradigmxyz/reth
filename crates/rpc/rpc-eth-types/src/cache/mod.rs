@@ -993,8 +993,7 @@ mod tests {
     use reth_ethereum_primitives::{
         Block, BlockBody, EthPrimitives, Receipt, Transaction, TransactionSigned,
     };
-    #[cfg(not(feature = "account-ext"))]
-    use reth_execution_types::ExecutionOutcome;
+    use reth_execution_types::RecoveredBlockAndExecutionOutput;
     use reth_primitives_traits::{RecoveredBlock, SealedHeader};
     use reth_storage_api::{
         noop::NoopProvider, BalProvider, BalStore, BalStoreHandle, BlockBodyIndicesProvider,
@@ -1011,6 +1010,9 @@ mod tests {
         thread,
         time::Duration,
     };
+
+    #[cfg(not(feature = "account-ext"))]
+    use reth_execution_types::ExecutionOutcome;
 
     #[derive(Default)]
     struct WakeCounter(AtomicUsize);
@@ -1827,13 +1829,14 @@ mod tests {
             Ok(None)
         }
 
-        fn pending_block(&self) -> ProviderResult<Option<RecoveredBlock<Self::Block>>> {
+        fn pending_block(&self) -> ProviderResult<Option<Arc<RecoveredBlock<Self::Block>>>> {
             Ok(None)
         }
 
         fn pending_block_and_receipts(
             &self,
-        ) -> ProviderResult<Option<(RecoveredBlock<Self::Block>, Vec<Self::Receipt>)>> {
+        ) -> ProviderResult<Option<RecoveredBlockAndExecutionOutput<Self::Block, Self::Receipt>>>
+        {
             Ok(None)
         }
 

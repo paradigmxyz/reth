@@ -7,7 +7,7 @@ use alloy_rlp::Encodable;
 use core::cell::RefCell;
 use crossbeam_channel::Receiver as CrossbeamReceiver;
 use reth_execution_errors::trie::StateProofError;
-use reth_primitives_traits::{dashmap::DashMap, Account};
+use reth_primitives_traits::Account;
 use reth_storage_errors::db::DatabaseError;
 use reth_trie::{
     hashed_cursor::HashedStorageCursor,
@@ -17,7 +17,6 @@ use reth_trie::{
 };
 use std::{
     rc::Rc,
-    sync::Arc,
     time::{Duration, Instant},
 };
 
@@ -30,8 +29,6 @@ pub(crate) struct ValueEncoderStats {
     pub(crate) storage_wait_time: Duration,
     /// Number of times the `Dispatched` variant was used (proof pre-dispatched to workers).
     pub(crate) dispatched_count: u64,
-    /// Number of times the `FromCache` variant was used (storage root already cached).
-    pub(crate) from_cache_count: u64,
     /// Number of times the `Sync` variant was used (synchronous computation).
     pub(crate) sync_count: u64,
     /// Number of times a dispatched storage proof had no root node and fell back to sync
@@ -44,7 +41,6 @@ impl ValueEncoderStats {
     pub(crate) fn extend(&mut self, other: &Self) {
         self.storage_wait_time += other.storage_wait_time;
         self.dispatched_count += other.dispatched_count;
-        self.from_cache_count += other.from_cache_count;
         self.sync_count += other.sync_count;
         self.dispatched_missing_root_count += other.dispatched_missing_root_count;
     }
@@ -68,19 +64,13 @@ pub(crate) enum AsyncAccountDeferredValueEncoder<TC, HC> {
         /// Shared storage proof calculator for synchronous fallback when dispatched proof has no
         /// root.
         storage_calculator: Rc<RefCell<StorageProofCalculator<TC, HC>>>,
-        /// Cache to store computed storage roots for future reuse.
-        cached_storage_roots: Arc<DashMap<B256, B256>>,
     },
-    /// The storage root was found in cache.
-    FromCache { account: Account, root: B256 },
     /// Synchronous storage root computation.
     Sync {
         /// Shared storage proof calculator for computing storage roots.
         storage_calculator: Rc<RefCell<StorageProofCalculator<TC, HC>>>,
         hashed_address: B256,
         account: Account,
-        /// Cache to store computed storage roots for future reuse.
-        cached_storage_roots: Arc<DashMap<B256, B256>>,
     },
 }
 
@@ -139,7 +129,6 @@ where
                 storage_proof_results,
                 stats,
                 storage_calculator,
-                cached_storage_roots,
             } => {
                 let hashed_address = *hashed_address;
                 let account = account.clone();
@@ -173,19 +162,15 @@ where
 
                         let mut calculator = storage_calculator.borrow_mut();
                         let root_node = calculator.storage_root_node(hashed_address)?;
-                        let storage_root = calculator
+                        calculator
                             .compute_root_hash(&[root_node])?
-                            .expect("storage_root_node returns a node at empty path");
-
-                        cached_storage_roots.insert(hashed_address, storage_root);
-                        storage_root
+                            .expect("storage_root_node returns a node at empty path")
                     }
                 };
 
                 (account, root)
             }
-            Self::FromCache { account, root } => (account.clone(), *root),
-            Self::Sync { storage_calculator, hashed_address, account, cached_storage_roots } => {
+            Self::Sync { storage_calculator, hashed_address, account } => {
                 let hashed_address = *hashed_address;
                 let account = account.clone();
                 let mut calculator = storage_calculator.borrow_mut();
@@ -194,7 +179,6 @@ where
                     .compute_root_hash(&[root_node])?
                     .expect("storage_root_node returns a node at empty path");
 
-                cached_storage_roots.insert(hashed_address, storage_root);
                 (account, storage_root)
             }
         };
@@ -210,15 +194,12 @@ where
 /// Accepts a set of pre-dispatched storage proof receivers for accounts whose storage roots are
 /// being computed asynchronously by worker threads.
 ///
-/// For accounts without pre-dispatched proofs or cached roots, uses a shared
+/// For accounts without pre-dispatched proofs, uses a shared
 /// [`StorageProofCalculator`] to compute storage roots synchronously, reusing cursors across
 /// multiple accounts.
 pub(crate) struct AsyncAccountValueEncoder<TC, HC> {
     /// Storage proof jobs which were dispatched ahead of time.
     dispatched: B256Map<CrossbeamReceiver<StorageProofResultMessage>>,
-    /// Storage roots which have already been computed. This can be used only if a storage proof
-    /// wasn't dispatched for an account, otherwise we must consume the proof result.
-    cached_storage_roots: Arc<DashMap<B256, B256>>,
     /// Tracks storage proof results received from the storage workers. [`Rc`] + [`RefCell`] is
     /// required because [`DeferredValueEncoder`] cannot have a lifetime.
     storage_proof_results: Rc<RefCell<B256Map<Vec<ProofTrieNodeV2>>>>,
@@ -235,16 +216,13 @@ impl<TC, HC> AsyncAccountValueEncoder<TC, HC> {
     ///
     /// # Parameters
     /// - `dispatched`: Pre-dispatched storage proof receivers for target accounts
-    /// - `cached_storage_roots`: Shared cache of already-computed storage roots
     /// - `storage_calculator`: Shared storage proof calculator for synchronous computation
     pub(crate) fn new(
         dispatched: B256Map<CrossbeamReceiver<StorageProofResultMessage>>,
-        cached_storage_roots: Arc<DashMap<B256, B256>>,
         storage_calculator: Rc<RefCell<StorageProofCalculator<TC, HC>>>,
     ) -> Self {
         Self {
             dispatched,
-            cached_storage_roots,
             storage_proof_results: Default::default(),
             storage_calculator,
             stats: Default::default(),
@@ -316,18 +294,11 @@ where
                 storage_proof_results: self.storage_proof_results.clone(),
                 stats: self.stats.clone(),
                 storage_calculator: self.storage_calculator.clone(),
-                cached_storage_roots: self.cached_storage_roots.clone(),
             }
         }
 
         // If the address didn't have a job dispatched for it then we can assume it has no targets,
         // and we only need its root.
-
-        // If the root is already calculated then just use it directly
-        if let Some(root) = self.cached_storage_roots.get(&hashed_address) {
-            self.stats.borrow_mut().from_cache_count += 1;
-            return AsyncAccountDeferredValueEncoder::FromCache { account, root: *root }
-        }
 
         // Compute storage root synchronously using the shared calculator
         self.stats.borrow_mut().sync_count += 1;
@@ -335,7 +306,6 @@ where
             storage_calculator: self.storage_calculator.clone(),
             hashed_address,
             account,
-            cached_storage_roots: self.cached_storage_roots.clone(),
         }
     }
 }

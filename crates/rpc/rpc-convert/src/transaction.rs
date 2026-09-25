@@ -72,11 +72,11 @@ pub trait HeaderConverter<Consensus, Rpc>: Send + Sync + Unpin + Clone + 'static
     /// An associated RPC conversion error.
     type Err: error::Error;
 
-    /// Converts a consensus header into an RPC header.
+    /// Converts a consensus header into an RPC header. `block_size` is set for block responses.
     fn convert_header(
         &self,
         header: SealedHeader<Consensus>,
-        block_size: usize,
+        block_size: Option<usize>,
     ) -> Result<Rpc, Self::Err>;
 }
 
@@ -91,22 +91,22 @@ where
     fn convert_header(
         &self,
         header: SealedHeader<Consensus>,
-        block_size: usize,
+        block_size: Option<usize>,
     ) -> Result<Rpc, Self::Err> {
-        Ok(Rpc::from_consensus_header(header, Some(block_size)))
+        Ok(Rpc::from_consensus_header(header, block_size))
     }
 }
 
 impl<Consensus, Rpc, F> HeaderConverter<Consensus, Rpc> for F
 where
-    F: Fn(SealedHeader<Consensus>, usize) -> Rpc + Send + Sync + Unpin + Clone + 'static,
+    F: Fn(SealedHeader<Consensus>, Option<usize>) -> Rpc + Send + Sync + Unpin + Clone + 'static,
 {
     type Err = Infallible;
 
     fn convert_header(
         &self,
         header: SealedHeader<Consensus>,
-        block_size: usize,
+        block_size: Option<usize>,
     ) -> Result<Rpc, Self::Err> {
         Ok(self(header, block_size))
     }
@@ -197,7 +197,7 @@ pub trait RpcConvert: Send + Sync + Unpin + Debug + DynClone + 'static {
     fn convert_header(
         &self,
         header: SealedHeaderFor<Self::Primitives>,
-        block_size: usize,
+        block_size: Option<usize>,
     ) -> Result<RpcHeader<Self::Network>, Self::Error>;
 }
 
@@ -777,7 +777,7 @@ where
     fn convert_header(
         &self,
         header: SealedHeaderFor<Self::Primitives>,
-        block_size: usize,
+        block_size: Option<usize>,
     ) -> Result<RpcHeader<Self::Network>, Self::Error> {
         Ok(self.header_converter.convert_header(header, block_size)?)
     }
