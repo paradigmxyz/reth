@@ -1108,6 +1108,12 @@ where
             return
         }
         if let Some(peer) = self.peers.get_mut(&peer_id) {
+            // don't serve pending transactions to peers the policy doesn't propagate to
+            if !self.policies.propagation_policy().can_propagate(peer) {
+                let _ = response.send(Ok(PooledTransactions::default()));
+                return
+            }
+
             let transactions = self.pool.get_pooled_transaction_elements(
                 request.0,
                 GetPooledTransactionLimit::ResponseSizeSoftLimit(
@@ -1204,6 +1210,11 @@ where
         // transactions in the pool.
         if self.network.is_initially_syncing() || self.network.tx_gossip_disabled() {
             trace!(target: "net::tx", ?peer_id, "Skipping transaction broadcast: node syncing or gossip disabled");
+            return
+        }
+
+        // skip peers we should not propagate to
+        if !self.policies.propagation_policy().can_propagate(peer) {
             return
         }
 
