@@ -479,6 +479,13 @@ impl ExtendedAccount {
         }
     }
 
+    /// Set the chain-specific account payload.
+    #[cfg(feature = "account-ext")]
+    pub fn with_extension(mut self, extension: reth_primitives_traits::AccountExtension) -> Self {
+        self.account.extension = extension;
+        self
+    }
+
     /// Set bytecode and bytecode hash on the extended account
     pub fn with_bytecode(mut self, bytecode: Bytes) -> Self {
         let hash = keccak256(&bytecode);

@@ -106,3 +106,7 @@ test-utils = [
     "reth-tasks/test-utils",
     "dep:tokio",
 ]
+account-ext = [
+    "reth-codecs/account-ext",
+    "reth-trie-db/account-ext",
+]

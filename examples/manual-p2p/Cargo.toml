@@ -20,4 +20,5 @@ tokio.workspace = true
 
 eyre.workspace = true
 
+[features]
 [lints]

@@ -93,6 +93,14 @@ reth-provider = { workspace = true, features = ["test-utils"] }
 reth-evm-ethereum = { workspace = true, features = ["test-utils"] }
 
 [features]
+account-ext = [
+    "reth-db-common/account-ext",
+    "reth-downloaders/account-ext",
+    "reth-engine-tree/account-ext",
+    "reth-exex/account-ext",
+    "reth-node-ethereum/account-ext",
+    "reth-rpc/account-ext",
+]
 default = []
 js-tracer = [
     "reth-rpc/js-tracer",

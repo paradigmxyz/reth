@@ -100,3 +100,6 @@ serde = [
     "alloy-eip7928?/serde",
     "alloy-trie/serde",
 ]
+account-ext = [
+    "reth-primitives-traits/account-ext",
+]

@@ -13,4 +13,5 @@ jsonrpsee = { workspace = true, features = ["server", "macros"] }
 tracing.workspace = true
 tower.workspace = true
 
+[features]
 [lints]

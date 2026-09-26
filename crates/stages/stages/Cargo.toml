@@ -121,3 +121,8 @@ test-utils = [
     "reth-evm-ethereum/test-utils",
     "reth-tasks/test-utils",
 ]
+account-ext = [
+    "reth-db-common/account-ext",
+    "reth-downloaders/account-ext",
+    "reth-exex/account-ext",
+]

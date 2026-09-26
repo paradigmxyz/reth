@@ -17,4 +17,5 @@ tracing.workspace = true
 futures-util.workspace = true
 eyre.workspace = true
 
+[features]
 [lints]

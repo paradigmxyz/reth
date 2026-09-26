@@ -18,4 +18,5 @@ serde_json.workspace = true
 tokio = { workspace = true, features = ["time"] }
 tracing.workspace = true
 
+[features]
 [lints]

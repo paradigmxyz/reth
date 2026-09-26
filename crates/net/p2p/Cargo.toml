@@ -68,3 +68,7 @@ std = [
     "reth-storage-errors/std",
     "tracing/std",
 ]
+account-ext = [
+    "reth-eth-wire-types/account-ext",
+    "reth-storage-errors/account-ext",
+]

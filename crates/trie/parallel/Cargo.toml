@@ -70,3 +70,6 @@ test-utils = [
     "reth-chainspec/test-utils",
     "reth-ethereum-primitives/test-utils",
 ]
+account-ext = [
+    "reth-provider/account-ext",
+]

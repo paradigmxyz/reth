@@ -1881,31 +1881,32 @@ pub mod serde_bincode_compat {
     #[cfg(test)]
     mod tests {
         use crate::{
-            hashed_state::{
-                HashedPostState, HashedPostStateSorted, HashedStorage, HashedStorageSorted,
-            },
+            hashed_state::{HashedStorage, HashedStorageSorted},
             serde_bincode_compat,
         };
         use alloy_primitives::{B256, U256};
-        use reth_primitives_traits::Account;
         use serde::{Deserialize, Serialize};
         use serde_with::serde_as;
 
+        // Bincode cannot delimit an account with an omitted extension field.
+        #[cfg(not(feature = "account-ext"))]
         #[test]
         fn test_hashed_post_state_bincode_roundtrip() {
             #[serde_as]
             #[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
             struct Data {
                 #[serde_as(as = "serde_bincode_compat::hashed_state::HashedPostState")]
-                hashed_state: HashedPostState,
+                hashed_state: crate::hashed_state::HashedPostState,
             }
 
-            let mut data = Data { hashed_state: HashedPostState::default() };
+            let mut data = Data { hashed_state: crate::hashed_state::HashedPostState::default() };
             let encoded = bincode::serialize(&data).unwrap();
             let decoded: Data = bincode::deserialize(&encoded).unwrap();
             assert_eq!(decoded, data);
 
-            data.hashed_state.accounts.insert(B256::random(), Some(Account::default()));
+            data.hashed_state
+                .accounts
+                .insert(B256::random(), Some(reth_primitives_traits::Account::default()));
             let encoded = bincode::serialize(&data).unwrap();
             let decoded: Data = bincode::deserialize(&encoded).unwrap();
             assert_eq!(decoded, data);
@@ -1936,24 +1937,30 @@ pub mod serde_bincode_compat {
             assert_eq!(decoded, data);
         }
 
+        // Bincode cannot delimit an account with an omitted extension field.
+        #[cfg(not(feature = "account-ext"))]
         #[test]
         fn test_hashed_post_state_sorted_bincode_roundtrip() {
             #[serde_as]
             #[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
             struct Data {
                 #[serde_as(as = "serde_bincode_compat::hashed_state::HashedPostStateSorted")]
-                hashed_state: HashedPostStateSorted,
+                hashed_state: crate::hashed_state::HashedPostStateSorted,
             }
 
-            let mut data = Data { hashed_state: HashedPostStateSorted::default() };
+            let mut data =
+                Data { hashed_state: crate::hashed_state::HashedPostStateSorted::default() };
             let encoded = bincode::serialize(&data).unwrap();
             let decoded: Data = bincode::deserialize(&encoded).unwrap();
             assert_eq!(decoded, data);
 
-            data.hashed_state.accounts.push((B256::random(), Some(Account::default())));
             data.hashed_state
                 .accounts
-                .push((B256::random(), Some(Account { nonce: 1, ..Default::default() })));
+                .push((B256::random(), Some(reth_primitives_traits::Account::default())));
+            data.hashed_state.accounts.push((
+                B256::random(),
+                Some(reth_primitives_traits::Account { nonce: 1, ..Default::default() }),
+            ));
             let encoded = bincode::serialize(&data).unwrap();
             let decoded: Data = bincode::deserialize(&encoded).unwrap();
             assert_eq!(decoded, data);

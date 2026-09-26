@@ -21,4 +21,5 @@ serde_json.workspace = true
 serde.workspace = true
 thiserror.workspace = true
 
+[features]
 [lints]

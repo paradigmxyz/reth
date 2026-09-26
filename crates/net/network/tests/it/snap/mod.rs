@@ -1,3 +1,5 @@
+#![cfg(not(feature = "account-ext"))]
+
 //! End-to-end tests for `snap/2` (EIP-8189) request/response serving.
 //!
 //! These spin up real, connected peers and drive requests through the full path —

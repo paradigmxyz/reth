@@ -66,6 +66,7 @@ impl AccountHashingStage {
     ///
     /// Proceeds to go to the `BlockTransitionIndex` end, go back `transitions` and change the
     /// account state in the `AccountChangeSets` table.
+    #[allow(clippy::clone_on_copy)]
     pub fn seed<Tx: DbTx + DbTxMut + 'static, N: reth_provider::providers::ProviderNodeTypes>(
         provider: &reth_provider::DatabaseProvider<Tx, N>,
         opts: SeedOpts,
@@ -115,11 +116,8 @@ impl AccountHashingStage {
                 provider.tx_ref().cursor_write::<tables::AccountChangeSets>()?;
             for (t, (addr, acc)) in opts.blocks.zip(&accounts) {
                 let Account { nonce, balance, .. } = acc;
-                let prev_acc = Account {
-                    nonce: nonce - 1,
-                    balance: balance - U256::from(1),
-                    bytecode_hash: None,
-                };
+                let prev_acc =
+                    Account { nonce: nonce - 1, balance: balance - U256::from(1), ..acc.clone() };
                 let acc_before_tx = AccountBeforeTx { address: *addr, info: Some(prev_acc) };
                 acc_changeset_cursor.append(t, &acc_before_tx)?;
             }

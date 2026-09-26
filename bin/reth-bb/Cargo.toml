@@ -121,6 +121,9 @@ min-trace-logs = [
     "reth-ethereum-cli/min-trace-logs",
     "reth-node-core/min-trace-logs",
 ]
+account-ext = [
+    "reth-node-ethereum/account-ext",
+]
 
 [[bin]]
 name = "reth-bb"

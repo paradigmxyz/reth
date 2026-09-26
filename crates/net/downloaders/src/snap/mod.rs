@@ -332,7 +332,8 @@ fn verify_proof(
         })
 }
 
-#[cfg(test)]
+// Snap account ranges cannot represent account extensions.
+#[cfg(all(test, not(feature = "account-ext")))]
 #[allow(clippy::clone_on_copy)]
 mod tests {
     use super::{request::MAX_RETRIES, test_utils::TestSnapClient, *};
@@ -377,7 +378,7 @@ mod tests {
         (root, proof)
     }
 
-    fn request(root_hash: B256) -> GetAccountRangeMessage {
+    const fn request(root_hash: B256) -> GetAccountRangeMessage {
         GetAccountRangeMessage {
             request_id: 1,
             root_hash,
@@ -387,7 +388,10 @@ mod tests {
         }
     }
 
-    fn response(peer: PeerId, message: AccountRangeMessage) -> PeerRequestResult<SnapResponse> {
+    const fn response(
+        peer: PeerId,
+        message: AccountRangeMessage,
+    ) -> PeerRequestResult<SnapResponse> {
         Ok(WithPeerId::new(peer, SnapResponse::AccountRange(message)))
     }
 

@@ -10,4 +10,5 @@ reth-ethereum = { workspace = true, features = ["test-utils", "network", "pool",
 eyre.workspace = true
 tokio.workspace = true
 
+[features]
 [lints]

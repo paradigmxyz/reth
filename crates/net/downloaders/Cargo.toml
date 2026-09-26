@@ -87,3 +87,8 @@ test-utils = [
     "reth-tasks/test-utils",
     "reth-trie-common/test-utils",
 ]
+account-ext = [
+    "reth-network-p2p/account-ext",
+    "reth-provider/account-ext",
+    "reth-storage-api/account-ext",
+]

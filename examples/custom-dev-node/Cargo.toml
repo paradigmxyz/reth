@@ -16,4 +16,5 @@ serde_json.workspace = true
 alloy-genesis.workspace = true
 alloy-primitives.workspace = true
 
+[features]
 [lints]

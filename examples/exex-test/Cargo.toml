@@ -17,4 +17,5 @@ tokio = { workspace = true, features = ["full"] }
 # other dependencies
 eyre.workspace = true
 
+[features]
 [lints]

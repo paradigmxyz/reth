@@ -1744,7 +1744,8 @@ async fn prewarm_new_block_bals_task<EthApi: GetBlockAccessList, N: NodePrimitiv
     }
 }
 
-#[cfg(test)]
+// These tests exercise BAL prewarming, which account-ext builds do not support.
+#[cfg(all(test, not(feature = "account-ext")))]
 mod tests {
     use super::*;
     use alloy_consensus::{Block, BlockBody, Header};

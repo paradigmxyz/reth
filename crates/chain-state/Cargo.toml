@@ -80,3 +80,6 @@ test-utils = [
     "reth-trie-sparse/test-utils",
     "dep:revm",
 ]
+account-ext = [
+    "reth-trie/account-ext",
+]

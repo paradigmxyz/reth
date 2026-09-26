@@ -15,4 +15,5 @@ serde_json.workspace = true
 tower.workspace = true
 tracing.workspace = true
 
+[features]
 [lints]

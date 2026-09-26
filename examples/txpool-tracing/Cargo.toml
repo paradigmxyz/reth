@@ -16,4 +16,5 @@ clap = { workspace = true, features = ["derive"] }
 futures-util.workspace = true
 eyre.workspace = true
 
+[features]
 [lints]

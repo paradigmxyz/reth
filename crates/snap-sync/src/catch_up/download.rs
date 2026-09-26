@@ -204,7 +204,7 @@ fn pending_headers<P: HeaderProvider + MetadataProvider + BlockHashReader>(
     Ok(headers)
 }
 
-#[cfg(test)]
+#[cfg(all(test, not(feature = "account-ext")))]
 mod tests {
     use super::*;
     use crate::{
