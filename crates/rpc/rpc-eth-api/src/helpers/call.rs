@@ -94,6 +94,8 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
                 return Err(EthApiError::InvalidParams(String::from("calls are empty.")).into())
             }
 
+            let tracing_permit =
+                self.acquire_owned_tracing().await.map_err(|_| EthApiError::InternalEthError)?;
             let permit = self
                 .acquire_owned_blocking_io()
                 .await
@@ -108,6 +110,7 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
 
             self.spawn_with_state_at_block(block, move |this, db| {
                 let _permit = permit;
+                let _tracing_permit = tracing_permit;
                 let state_provider = db.database.into_inner();
                 let mut db = State::builder()
                     .with_database(StateProviderDatabase::new(&state_provider))
