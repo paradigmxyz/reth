@@ -122,6 +122,7 @@ impl EthConfig {
         EthFilterConfig::default()
             .max_blocks_per_filter(self.max_blocks_per_filter)
             .max_logs_per_response(self.max_logs_per_response)
+            .max_concurrent_log_scans(self.max_blocking_io_requests)
             .stale_filter_ttl(self.stale_filter_ttl)
     }
 }
@@ -277,6 +278,8 @@ pub struct EthFilterConfig {
     ///
     /// If `None` then no limit is enforced.
     pub max_logs_per_response: Option<usize>,
+    /// Maximum number of concurrent log range scans.
+    pub max_concurrent_log_scans: usize,
     /// How long a filter remains valid after the last poll.
     ///
     /// A filter is considered stale if it has not been polled for longer than this duration and
@@ -298,6 +301,12 @@ impl EthFilterConfig {
         self
     }
 
+    /// Sets the maximum number of concurrent log range scans.
+    pub const fn max_concurrent_log_scans(mut self, num: usize) -> Self {
+        self.max_concurrent_log_scans = num;
+        self
+    }
+
     /// Sets how long a filter remains valid after the last poll before it will be removed.
     pub const fn stale_filter_ttl(mut self, duration: Duration) -> Self {
         self.stale_filter_ttl = duration;
@@ -310,6 +319,7 @@ impl Default for EthFilterConfig {
         Self {
             max_blocks_per_filter: None,
             max_logs_per_response: None,
+            max_concurrent_log_scans: DEFAULT_MAX_BLOCKING_IO_REQUEST,
             // 5min
             stale_filter_ttl: DEFAULT_STALE_FILTER_TTL,
         }
