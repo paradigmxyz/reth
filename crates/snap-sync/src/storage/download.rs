@@ -1,10 +1,10 @@
 //! Downloads the storage of an account range's contracts, committing every verified response.
 
 use crate::{
-    common::DownloadContext, SnapStorageStore, SnapSyncError, StorageChunk, StorageProgress,
-    VerifiedRange, MAX_HASH,
+    common::DownloadContext, SnapAccountStore, SnapStorageStore, SnapSyncError, StorageChunk,
+    StorageProgress, VerifiedRange, MAX_HASH,
 };
-use alloy_primitives::B256;
+use alloy_primitives::{B256, U256};
 use reth_db_api::transaction::DbTxMut;
 use reth_downloaders::snap::{
     StorageRangeDownloader, StorageRangeOutcome, VerifiedAccountBatch, VerifiedStorageRanges,
@@ -112,6 +112,53 @@ where
             .await?;
         Ok(StorageRangeStep::Committed(committed))
     }
+
+    /// Fetches the pivot's values of the slots scheduled for repair at `range`'s origin, zero
+    /// where its storage holds none.
+    ///
+    /// `Ok(None)` when a peer did not serve one, leaving the account scheduled.
+    pub async fn repair_slots(
+        &mut self,
+        range: &VerifiedRange,
+    ) -> Result<Option<Vec<(B256, U256)>>, SnapSyncError> {
+        let (write, account) = (range.write(), range.origin());
+        let repairs = self.context.factory().database_provider_ro()?.snap_repairs(write)?;
+        // Only a contract the pivot holds has slots to fetch; for any other account they are zero.
+        let contracts = range.range().storage_batch();
+        let Some(batch) = contracts.range(0..1).filter(|batch| batch.accounts()[0].0 == account)
+        else {
+            return Ok(Some(Vec::new()))
+        };
+
+        let mut values = Vec::new();
+        for slot in repairs.slots(account) {
+            let request = GetStorageRangesMessage {
+                request_id: self.context.next_request_id(),
+                root_hash: batch.state_root(),
+                account_hashes: vec![account],
+                starting_hash: slot.into(),
+                limit_hash: slot.into(),
+                response_bytes: self.context.response_bytes(),
+            };
+            let downloader = StorageRangeDownloader::new(
+                self.context.client().clone(),
+                request,
+                &batch,
+                self.context.runtime().clone(),
+            )?;
+            let StorageRangeOutcome::Verified(ranges) = downloader.await? else { return Ok(None) };
+            // Proved from the slot, so one keyed past it means the storage holds none there.
+            let value = ranges
+                .into_ranges()
+                .into_iter()
+                .next()
+                .and_then(|range| range.slots.first().copied())
+                .filter(|(key, _)| *key == slot)
+                .map_or(U256::ZERO, |(_, value)| value);
+            values.push((slot, value));
+        }
+        Ok(Some(values))
+    }
 }
 
 impl<C, F> fmt::Debug for StorageRangeDownload<C, F> {
@@ -172,7 +219,7 @@ mod tests {
             account, generation, hashed_factory, insert_generation_headers, key, state_root,
             storage_ranges, storage_root_of, stored_slots, verified_range, ScriptedSnapClient,
         },
-        SnapAccountStore, SnapAttemptStore, SnapCatchUpStore,
+        SnapAccountStore, SnapAttemptStore, SnapCatchUpStore, StateRepairs,
     };
     use alloy_eips::BlockNumHash;
     use alloy_primitives::U256;
@@ -464,5 +511,47 @@ mod tests {
 
         assert!(next <= key(2));
         assert_eq!(provider.storage_progress(write, next).unwrap().resume_at(key(2)), Some(key(2)));
+    }
+
+    // `accounts`' large contract fetched on its own, with `slots` scheduled for repair.
+    fn repairing(accounts: &[(B256, TrieAccount)], slots: &[B256]) -> (Factory, VerifiedRange) {
+        let (factory, _) = started(accounts);
+        let provider = factory.database_provider_rw().unwrap();
+        let write = provider.active_snap_write().unwrap().unwrap();
+        let mut repairs = StateRepairs::default();
+        for slot in slots {
+            repairs.insert_slot(key(2), *slot);
+        }
+        provider.schedule_snap_repairs(write, repairs).unwrap();
+        provider.commit().unwrap();
+        let range = verified_range(accounts, 1..2, key(2), &[key(2)]);
+        (factory, VerifiedRange::new(write, range))
+    }
+
+    #[tokio::test]
+    async fn repair_slots_read_zero_where_the_pivot_holds_none() {
+        let accounts = accounts();
+        let (factory, range) = repairing(&accounts, &[key(1), key(5)]);
+        let large = large();
+        let responses = [
+            storage_ranges(1, &[&large[..1]], &large, &[key(1)]),
+            // Nothing is stored at key 5, which the proof shows.
+            storage_ranges(2, &[&[]], &large, &[key(5)]),
+        ];
+        let (client, mut download) = download(responses, factory);
+
+        let values = download.repair_slots(&range).await.unwrap();
+
+        assert_eq!(values, Some(vec![(key(1), U256::from(11)), (key(5), U256::ZERO)]));
+        assert_eq!(*client.storage_requests(), [(vec![key(2)], key(1)), (vec![key(2)], key(5))]);
+    }
+
+    #[tokio::test]
+    async fn an_unserved_repair_slot_fetches_nothing() {
+        let accounts = accounts();
+        let (factory, range) = repairing(&accounts, &[key(1)]);
+        let (_, mut download) = download([storage_ranges(1, &[], &[], &[])], factory);
+
+        assert_eq!(download.repair_slots(&range).await.unwrap(), None);
     }
 }

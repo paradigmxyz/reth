@@ -170,6 +170,12 @@ pub enum SnapSyncError {
         /// Hash of the supplied code.
         got: B256,
     },
+    /// Scheduled accounts remain to be fetched again at the pivot.
+    #[error("{accounts} accounts remain to be fetched again at the pivot")]
+    PendingRepairs {
+        /// Number of accounts still scheduled.
+        accounts: usize,
+    },
     /// Account ranges remain to be downloaded.
     #[error("accounts from {next} are not downloaded yet")]
     IncompleteAccounts {

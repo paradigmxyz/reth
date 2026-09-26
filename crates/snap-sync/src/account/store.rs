@@ -1,10 +1,11 @@
 //! Persists account ranges, their storage and code, and the coverage cursor in one transaction.
 //!
-//! Each range replaces its key interval, and ranges commit in key order.
+//! Each range replaces its key interval, and ranges commit in key order. Accounts scheduled for
+//! repair are fetched again on their own and replace what the state holds for them.
 
 use crate::{
-    common::SnapRecord, storage::persisted_storage_root, SnapAttemptStore, SnapCatchUpStore,
-    SnapStorageStore, SnapSyncError, SnapWrite, StorageProgress,
+    common::SnapRecord, repair::StoredRepairs, storage::persisted_storage_root, SnapAttemptStore,
+    SnapCatchUpStore, SnapStorageStore, SnapSyncError, SnapWrite, StateRepairs, StorageProgress,
 };
 use alloy_primitives::{
     map::{B256Map, B256Set},
@@ -17,7 +18,9 @@ use reth_db_api::{
 };
 use reth_downloaders::snap::VerifiedAccountRange;
 use reth_primitives_traits::Account;
-use reth_storage_api::{DBProvider, MetadataProvider, MetadataWriter, SnapAttemptId, StateWriter};
+use reth_storage_api::{
+    BlockHashReader, DBProvider, MetadataProvider, MetadataWriter, SnapAttemptId, StateWriter,
+};
 use reth_trie_common::{
     root::storage_root, HashedPostState, HashedPostStateSorted, HashedStorage, TrieAccount,
     EMPTY_ROOT_HASH,
@@ -64,6 +67,32 @@ pub trait SnapAccountStore {
     ) -> Result<(), SnapSyncError>
     where
         Self: DBProvider<Tx: DbTxMut>;
+
+    /// Returns the repairs scheduled for the attempt `write` belongs to.
+    fn snap_repairs(&self, write: SnapWrite) -> Result<StateRepairs, SnapSyncError>;
+
+    /// Adds `repairs` to those scheduled for the attempt `write` belongs to.
+    fn schedule_snap_repairs(
+        &self,
+        write: SnapWrite,
+        repairs: StateRepairs,
+    ) -> Result<(), SnapSyncError>
+    where
+        Self: MetadataWriter;
+
+    /// Writes the account at `range`'s origin with the pivot's values of `slots`, and drops what
+    /// they resolve from the scheduled repairs, returning what remains.
+    ///
+    /// Catch-up must have carried the downloaded state to the pivot `range` was proved against, so
+    /// the rest of the state is at the same block, and the account's code must be stored.
+    fn commit_account_repair(
+        &self,
+        write: SnapWrite,
+        range: &VerifiedAccountRange,
+        slots: Vec<(B256, U256)>,
+    ) -> Result<StateRepairs, SnapSyncError>
+    where
+        Self: BlockHashReader + MetadataWriter + StateWriter + DBProvider<Tx: DbTxMut>;
 }
 
 /// How far the account key space has been downloaded.
@@ -220,6 +249,84 @@ impl<T: MetadataProvider> SnapAccountStore for T {
         self.remove::<tables::HashedStorages>((start, end))?;
         Ok(())
     }
+
+    // A record left by another attempt reads as nothing scheduled.
+    fn snap_repairs(&self, write: SnapWrite) -> Result<StateRepairs, SnapSyncError> {
+        self.authorize_snap_write(write)?;
+        let Some(stored) = StoredRepairs::read(self)? else { return Ok(StateRepairs::default()) };
+        Ok(if stored.attempt == write.attempt() { stored.repairs } else { StateRepairs::default() })
+    }
+
+    fn schedule_snap_repairs(
+        &self,
+        write: SnapWrite,
+        repairs: StateRepairs,
+    ) -> Result<(), SnapSyncError>
+    where
+        Self: MetadataWriter,
+    {
+        let mut scheduled = self.snap_repairs(write)?;
+        scheduled.extend(repairs);
+        StoredRepairs::store(self, write.attempt(), scheduled)
+    }
+
+    // Every check runs before the first write, so a refused repair changes nothing.
+    fn commit_account_repair(
+        &self,
+        write: SnapWrite,
+        range: &VerifiedAccountRange,
+        slots: Vec<(B256, U256)>,
+    ) -> Result<StateRepairs, SnapSyncError>
+    where
+        Self: BlockHashReader + MetadataWriter + StateWriter + DBProvider<Tx: DbTxMut>,
+    {
+        // The repaired values belong to the pivot, so it must still be canonical.
+        let attempt = self.authorize_canonical_snap_write(write)?;
+        if range.state_root() != attempt.state_root() {
+            return Err(SnapSyncError::RootMismatch {
+                expected: attempt.state_root(),
+                got: range.state_root(),
+            })
+        }
+        let applied =
+            self.catch_up_progress(write)?.ok_or(SnapSyncError::NoCatchUpProgress)?.applied();
+        if applied != attempt.pivot() {
+            return Err(SnapSyncError::CatchUpBehindPivot {
+                applied: applied.number,
+                pivot: attempt.pivot().number,
+            })
+        }
+        let hashed_address = range.origin();
+        // The proof starts at the origin, so an account keyed past it means none is there.
+        let account = range
+            .accounts()
+            .first()
+            .filter(|(hash, _)| *hash == hashed_address)
+            .map(|(_, account)| *account);
+        if let Some(hash) = account.map(|account| account.code_hash) &&
+            hash != KECCAK256_EMPTY &&
+            self.tx_ref().get::<RawTable<tables::Bytecodes>>(RawKey::new(hash))?.is_none()
+        {
+            return Err(SnapSyncError::MissingCode { hash })
+        }
+
+        let has_storage = account.is_some_and(|account| account.storage_root != EMPTY_ROOT_HASH);
+        let mut state = HashedPostState::default()
+            .with_accounts([(hashed_address, account.map(Account::from))]);
+        if has_storage {
+            // Zero values remove their slots.
+            state = state
+                .with_storages([(hashed_address, HashedStorage::from_iter(slots.iter().copied()))]);
+        } else {
+            self.remove::<tables::HashedStorages>(hashed_address..=hashed_address)?;
+        }
+        self.write_hashed_state(&state.into_sorted())?;
+
+        let mut remaining = self.snap_repairs(write)?;
+        remaining.resolve(hashed_address, has_storage.then_some(slots.as_slice()));
+        StoredRepairs::store(self, write.attempt(), remaining.clone())?;
+        Ok(remaining)
+    }
 }
 
 // Accounts of a range with the storage and code supplied for them.
@@ -344,7 +451,10 @@ impl RangeDependencies {
 mod tests {
     use super::*;
     use crate::{
-        test_utils::{account, generation, hashed_factory, key, state_root, verified_range},
+        test_utils::{
+            account, generation, hashed_factory, insert_generation_headers, key, state_root,
+            stored_slots, verified_range,
+        },
         SnapGeneration, StorageChunk,
     };
     use alloy_primitives::{Bytes, U256};
@@ -356,6 +466,10 @@ mod tests {
 
     const FAR: B256 = B256::repeat_byte(0xaa);
     const SLOT: B256 = B256::repeat_byte(0x55);
+    // A slot the stale state holds and the pivot does not.
+    const OTHER: B256 = B256::repeat_byte(0x66);
+    // Sorts between the contract and the far account, holding nothing at the pivot.
+    const ABSENT: B256 = B256::repeat_byte(0x33);
 
     fn code() -> Bytecode {
         Bytecode::new_raw(Bytes::from_static(&[0x60, 0x00]))
@@ -743,5 +857,115 @@ mod tests {
                 Err(SnapSyncError::UnsupportedRecord { .. })
             ));
         }
+    }
+
+    // `started`, with headers so the pivot is canonical, and stale values for the contract and
+    // for `ABSENT`, both scheduled for repair.
+    fn repairing(
+        accounts: &[(B256, TrieAccount)],
+    ) -> (ProviderFactory<MockNodeTypesWithDB>, SnapWrite) {
+        let (factory, write, _) = started(accounts);
+        insert_generation_headers(&factory);
+        let provider = factory.database_provider_rw().unwrap();
+        let stale = HashedPostState::default()
+            .with_accounts([
+                (key(2), Some(Account::from(account(9)))),
+                (ABSENT, Some(Account::from(account(9)))),
+            ])
+            .with_storages([
+                (key(2), HashedStorage::from_iter([(SLOT, U256::from(1)), (OTHER, U256::from(2))])),
+                (ABSENT, HashedStorage::from_iter([(SLOT, U256::from(1))])),
+            ]);
+        provider.write_hashed_state(&stale.into_sorted()).unwrap();
+        let mut repairs = StateRepairs::default();
+        repairs.insert_slot(key(2), SLOT);
+        repairs.insert_slot(key(2), OTHER);
+        repairs.insert_account(ABSENT);
+        provider.schedule_snap_repairs(write, repairs).unwrap();
+        provider.commit().unwrap();
+        (factory, write)
+    }
+
+    fn repair(
+        factory: &ProviderFactory<MockNodeTypesWithDB>,
+        write: SnapWrite,
+        range: &VerifiedAccountRange,
+        slots: Vec<(B256, U256)>,
+    ) -> Result<StateRepairs, SnapSyncError> {
+        let provider = factory.database_provider_rw().unwrap();
+        let remaining = provider.commit_account_repair(write, range, slots)?;
+        provider.commit().unwrap();
+        Ok(remaining)
+    }
+
+    #[test]
+    fn a_repair_takes_the_pivot_account_and_scheduled_slots() {
+        let accounts = accounts();
+        let (factory, write) = repairing(&accounts);
+        let range = verified_range(&accounts, 1..2, key(2), &[key(2)]);
+        // The pivot holds 7 at `SLOT` and nothing at `OTHER`.
+        let slots = vec![(SLOT, U256::from(7)), (OTHER, U256::ZERO)];
+
+        let refused = repair(&factory, write, &range, slots.clone());
+        assert!(matches!(refused, Err(SnapSyncError::MissingCode { .. })));
+        let provider = factory.database_provider_rw().unwrap();
+        provider
+            .write_state_changes(StateChangeset {
+                contracts: vec![(code().hash_slow(), code())],
+                ..Default::default()
+            })
+            .unwrap();
+        provider.commit().unwrap();
+        let remaining = repair(&factory, write, &range, slots).unwrap();
+
+        let mut expected = StateRepairs::default();
+        expected.insert_account(ABSENT);
+        assert_eq!(remaining, expected);
+        let provider = factory.database_provider_ro().unwrap();
+        let stored = provider.tx_ref().get::<tables::HashedAccounts>(key(2)).unwrap();
+        assert_eq!(stored, Some(Account::from(accounts[1].1)));
+        assert_eq!(stored_slots(&provider, key(2)), [(SLOT, U256::from(7))]);
+    }
+
+    #[test]
+    fn an_account_the_pivot_lacks_is_removed_with_its_storage() {
+        let accounts = accounts();
+        let (factory, write) = repairing(&accounts);
+        // The first account from `ABSENT` on is the far one.
+        let range = verified_range(&accounts, 2..3, ABSENT, &[ABSENT, FAR]);
+
+        repair(&factory, write, &range, Vec::new()).unwrap();
+
+        let provider = factory.database_provider_ro().unwrap();
+        assert_eq!(provider.tx_ref().get::<tables::HashedAccounts>(ABSENT).unwrap(), None);
+        assert!(stored_slots(&provider, ABSENT).is_empty());
+        assert_eq!(provider.snap_repairs(write).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn a_repair_waits_for_catch_up_to_reach_the_pivot() {
+        let accounts = accounts();
+        let (factory, write) = repairing(&accounts);
+        let provider = factory.database_provider_rw().unwrap();
+        let write =
+            provider.advance_snap_pivot(write, generation(2, state_root(&accounts))).unwrap();
+        provider.commit().unwrap();
+        let range = verified_range(&accounts, 2..3, ABSENT, &[ABSENT, FAR]);
+
+        let refused = repair(&factory, write, &range, Vec::new());
+
+        assert!(matches!(refused, Err(SnapSyncError::CatchUpBehindPivot { applied: 1, pivot: 2 })));
+    }
+
+    #[test]
+    fn a_new_attempt_starts_without_repairs() {
+        let accounts = accounts();
+        let (factory, _) = repairing(&accounts);
+        let provider = factory.database_provider_rw().unwrap();
+
+        let restarted = provider.start_snap_attempt(generation(1, state_root(&accounts))).unwrap();
+
+        assert!(provider.snap_repairs(restarted).unwrap().is_empty());
+        assert!(StoredRepairs::read(&provider).unwrap().is_none());
     }
 }
