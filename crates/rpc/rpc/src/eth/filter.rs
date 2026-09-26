@@ -2342,4 +2342,37 @@ mod tests {
             .unwrap();
         assert!(logs.is_empty());
     }
+
+    #[tokio::test]
+    async fn test_block_hash_query_on_expired_block() {
+        let provider = MockEthProvider::default();
+
+        let header = alloy_consensus::Header {
+            number: 100,
+            logs_bloom: alloy_primitives::Bloom::from([1u8; 256]),
+            ..Default::default()
+        };
+        let hash = header.hash_slow();
+        provider
+            .add_block(hash, reth_ethereum_primitives::Block { header, body: Default::default() });
+        provider.add_receipts(100, vec![]);
+        provider.set_earliest_block_number(200);
+
+        let eth_api = build_test_eth_api(provider);
+        let eth_filter = EthFilter::new(eth_api, EthFilterConfig::default(), Runtime::test());
+
+        let err = eth_filter
+            .inner
+            .logs_for_filter(Filter::new().select(hash), QueryLimits::default())
+            .await
+            .expect_err("expired history must be reported");
+
+        assert!(
+            matches!(
+                err,
+                EthFilterError::EthAPIError(EthApiError::PrunedHistoryUnavailable { .. })
+            ),
+            "{err:?}"
+        );
+    }
 }
