@@ -3,7 +3,10 @@
 
 use core::fmt;
 
-use super::{LoadBlock, LoadPendingBlock, LoadState, LoadTransaction, SpawnBlocking, Trace};
+use super::{
+    blocking_task::is_cancelled, LoadBlock, LoadPendingBlock, LoadState, LoadTransaction,
+    SpawnBlocking, Trace,
+};
 use crate::{
     helpers::estimate::EstimateCall, FromEvmError, FullEthApiTypes, RpcBlock, RpcNodeCore,
 };
@@ -398,6 +401,10 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
 
                     // transact all transactions in the bundle
                     for (tx_index, tx) in transactions.into_iter().enumerate() {
+                        if is_cancelled() {
+                            return Err(EthApiError::InternalEthError.into())
+                        }
+
                         // Apply overrides, state overrides are only applied for the first tx in the
                         // request
                         let overrides =
@@ -760,6 +767,9 @@ pub trait Call:
                     if block_tx.tx_hash() == tx.tx_hash() {
                         break;
                     }
+                    if is_cancelled() {
+                        return Err(EthApiError::InternalEthError.into())
+                    }
                     executor.execute_transaction(block_tx).map_err(Self::Error::from_eth_err)?;
                 }
 
@@ -798,6 +808,9 @@ pub trait Call:
             if index == target_tx_index {
                 // reached the target transaction
                 break
+            }
+            if is_cancelled() {
+                return Err(EthApiError::InternalEthError.into())
             }
 
             let tx_env = self.evm_config().tx_env(tx);

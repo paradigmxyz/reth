@@ -23,7 +23,9 @@ use reth_primitives_traits::{BlockBody, BlockHeader};
 use reth_rpc_api::TraceApiServer;
 use reth_rpc_convert::RpcTxReq;
 use reth_rpc_eth_api::{
-    helpers::{Call, LoadPendingBlock, LoadTransaction, Trace, TraceExt},
+    helpers::{
+        blocking_task::is_cancelled, Call, LoadPendingBlock, LoadTransaction, Trace, TraceExt,
+    },
     FromEthApiError, RpcNodeCore,
 };
 use reth_rpc_eth_types::{error::EthApiError, EthConfig};
@@ -164,6 +166,9 @@ where
                 let mut calls = calls.into_iter().peekable();
 
                 while let Some((call, trace_types)) = calls.next() {
+                    if is_cancelled() {
+                        return Err(EthApiError::InternalEthError.into())
+                    }
                     let (evm_env, tx_env) = eth_api.prepare_call_env(
                         evm_env.clone(),
                         call,

@@ -626,6 +626,33 @@ mod tests {
         .build()
     }
 
+    #[tokio::test(flavor = "multi_thread")]
+    async fn blocking_task_observes_dropped_request() {
+        use reth_rpc_eth_api::helpers::{blocking_task::is_cancelled, SpawnBlocking};
+        use std::time::{Duration, Instant};
+
+        let api = build_test_eth_api(MockEthProvider::default());
+        let (started_tx, started_rx) = tokio::sync::oneshot::channel();
+        let (cancelled_tx, cancelled_rx) = tokio::sync::oneshot::channel();
+
+        let request = api.spawn_blocking_io(move |_| {
+            let _ = started_tx.send(());
+            let deadline = Instant::now() + Duration::from_secs(5);
+            while !is_cancelled() && Instant::now() < deadline {
+                std::thread::sleep(Duration::from_millis(1));
+            }
+            let _ = cancelled_tx.send(is_cancelled());
+            Ok(())
+        });
+        // drop the request while its blocking task is running
+        tokio::select! {
+            _ = request => panic!("blocking task completed before the request was dropped"),
+            _ = started_rx => {}
+        }
+
+        assert!(cancelled_rx.await.unwrap());
+    }
+
     #[tokio::test]
     async fn test_transaction_by_sender_and_nonce_without_sender_transaction_returns_none() {
         use reth_rpc_eth_api::helpers::EthTransactions;
