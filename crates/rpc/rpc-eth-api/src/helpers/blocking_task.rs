@@ -2,11 +2,10 @@
 //! are executed on the `tokio` runtime.
 
 use futures::Future;
-use reth_revm::cancelled::CancelOnDrop;
 use reth_rpc_eth_types::EthApiError;
 use reth_tasks::{
     pool::{BlockingTaskGuard, BlockingTaskPool},
-    Runtime,
+    CancelOnDrop, Runtime,
 };
 use std::{cell::RefCell, sync::Arc};
 use tokio::sync::{oneshot, AcquireError, OwnedSemaphorePermit, Semaphore};
