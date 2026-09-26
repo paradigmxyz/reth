@@ -122,6 +122,85 @@ async fn test_engine_graceful_shutdown() -> eyre::Result<()> {
 }
 
 #[tokio::test]
+async fn can_update_forkchoice_without_finalized_block() -> eyre::Result<()> {
+    use alloy_eips::BlockNumberOrTag;
+    use alloy_provider::{Provider, ProviderBuilder};
+    use reth_node_ethereum::EthEngineTypes;
+    use reth_rpc_api::EngineApiClient;
+
+    reth_tracing::init_test_tracing();
+    let chain_spec = Arc::new(
+        ChainSpecBuilder::default()
+            .chain(MAINNET.chain)
+            .genesis(serde_json::from_str(include_str!("../assets/genesis.json")).unwrap())
+            .cancun_activated()
+            .build(),
+    );
+    // The shared setup helper finalizes genesis, so launch without that initial FCU.
+    let config = NodeConfig::test().with_chain(chain_spec).with_unused_ports().with_rpc(
+        RpcServerArgs::default()
+            .with_unused_ports()
+            .with_http()
+            .with_http_api(reth_rpc_server_types::RpcModuleSelection::All),
+    );
+    let NodeHandle { node, .. } = NodeBuilder::new(config)
+        .testing_node(Runtime::test())
+        .node(EthereumNode::default())
+        .launch()
+        .await?;
+    let node = NodeTestContext::new(node, eth_payload_attributes).await?;
+    let engine = node.auth_server_handle().http_client();
+    let rpc = ProviderBuilder::new().connect_http(node.rpc_url());
+    let canonical = node.inner.provider.canonical_in_memory_state();
+    assert!(canonical.get_finalized_num_hash().is_none());
+
+    let mut parent = node.block_hash(0);
+    for timestamp in 1..=3 {
+        let payload = node
+            .testing_build_block_v1(TestingBuildBlockRequestV1 {
+                parent_block_hash: parent,
+                payload_attributes: eth_payload_attributes(timestamp),
+                transactions: vec![],
+                extra_data: None,
+            })
+            .await?
+            .execution_payload;
+        let hash = payload.payload_inner.payload_inner.block_hash;
+        let status =
+            EngineApiClient::<EthEngineTypes>::new_payload_v3(&engine, payload, vec![], B256::ZERO)
+                .await?;
+        assert_eq!(status.status, PayloadStatusEnum::Valid);
+
+        // Advance the head, then build on it, without ever supplying a finalized hash.
+        for attrs in [None, Some(eth_payload_attributes(timestamp + 1))] {
+            let build_requested = attrs.is_some();
+            let response = EngineApiClient::<EthEngineTypes>::fork_choice_updated_v3(
+                &engine,
+                ForkchoiceState {
+                    head_block_hash: hash,
+                    safe_block_hash: parent,
+                    finalized_block_hash: B256::ZERO,
+                },
+                attrs,
+            )
+            .await?;
+            assert_eq!(response.payload_status.status, PayloadStatusEnum::Valid);
+            assert_eq!(response.payload_status.latest_valid_hash, Some(hash));
+            assert_eq!(response.payload_id.is_some(), build_requested);
+            assert_eq!(
+                rpc.get_block_by_number(BlockNumberOrTag::Latest).await?.unwrap().header.hash,
+                hash
+            );
+            assert_eq!(canonical.get_safe_num_hash().unwrap().hash, parent);
+            assert!(canonical.get_finalized_num_hash().is_none());
+        }
+        parent = hash;
+    }
+
+    Ok(())
+}
+
+#[tokio::test]
 async fn test_testing_build_block_v1_osaka() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
 
