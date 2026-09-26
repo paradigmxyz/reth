@@ -39,6 +39,7 @@ use crate::{
 };
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
+use tokio_util::task::AbortOnDropHandle;
 use tower::layer::{util::Stack, LayerFn};
 
 mod connection;
@@ -415,7 +416,10 @@ where
         // example tracing calls are relatively CPU expensive on serde::serialize alone, moving this
         // work to a separate task takes the pressure off the connection so all concurrent responses
         // are also serialized concurrently and the connection can focus on read+write
-        let f = tokio::task::spawn(async move {
+        //
+        // The connection drops its pending calls when it closes, so the call must not outlive the
+        // returned future, otherwise it keeps running without anyone waiting for the response.
+        let f = AbortOnDropHandle::new(tokio::task::spawn(async move {
             ipc::call_with_service(
                 request,
                 rpc_service,
@@ -424,13 +428,9 @@ where
                 conn,
             )
             .await
-        });
-        // The connection drops its pending calls when it closes, so the call must not outlive the
-        // returned future, otherwise it keeps running without anyone waiting for the response.
-        let abort_on_drop = AbortOnDrop(f.abort_handle());
+        }));
 
         Box::pin(async move {
-            let _abort_on_drop = abort_on_drop;
             // Call panics are answered by the call itself. Anything left here has no request id to
             // respond to, and the connection writes errors verbatim, which would corrupt the
             // stream.
@@ -439,15 +439,6 @@ where
                 None
             }))
         })
-    }
-}
-
-/// Aborts the task when dropped.
-struct AbortOnDrop(tokio::task::AbortHandle);
-
-impl Drop for AbortOnDrop {
-    fn drop(&mut self) {
-        self.0.abort();
     }
 }
 
