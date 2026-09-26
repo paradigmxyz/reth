@@ -41,6 +41,7 @@ reth-tracing.workspace = true
 
 arbitrary.workspace = true
 alloy-rlp.workspace = true
+criterion.workspace = true
 itertools.workspace = true
 pretty_assertions.workspace = true
 proptest-arbitrary-interop.workspace = true
@@ -84,3 +85,8 @@ arbitrary = [
     "reth-trie-common/arbitrary",
     "smallvec/arbitrary",
 ]
+
+[[bench]]
+name = "arena"
+required-features = ["test-utils"]
+harness = false
