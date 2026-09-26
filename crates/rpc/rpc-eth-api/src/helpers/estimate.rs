@@ -311,9 +311,14 @@ pub trait EstimateCall: Call {
         Self: LoadPendingBlock,
     {
         async move {
+            let permit = self
+                .acquire_owned_blocking_io()
+                .await
+                .map_err(|_| EthApiError::InternalEthError)?;
             let (evm_env, at) = self.evm_env_at(at).await?;
 
             self.spawn_blocking_io_with_state(at, move |this, state| {
+                let _permit = permit;
                 EstimateCall::estimate_gas_with(
                     &this,
                     evm_env,

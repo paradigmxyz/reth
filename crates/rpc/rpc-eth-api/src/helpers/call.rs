@@ -480,41 +480,50 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
     where
         Self: Trace,
     {
-        self.spawn_with_state_at_block(at, |this, mut db| {
-            let initial = request.as_ref().access_list().cloned().unwrap_or_default();
-            let (evm_env, mut tx_env) = this.prepare_call_env(
-                evm_env,
-                request,
-                &mut db,
-                EvmOverrides::state(state_override),
-            )?;
+        async move {
+            let permit = self
+                .acquire_owned_blocking_io()
+                .await
+                .map_err(|_| EthApiError::InternalEthError)?;
 
-            let mut evm = this.evm_config().evm_with_env_and_inspector(
-                &mut db,
-                evm_env,
-                AccessListInspector::new(initial),
-            );
+            self.spawn_with_state_at_block(at, move |this, mut db| {
+                let _permit = permit;
+                let initial = request.as_ref().access_list().cloned().unwrap_or_default();
+                let (evm_env, mut tx_env) = this.prepare_call_env(
+                    evm_env,
+                    request,
+                    &mut db,
+                    EvmOverrides::state(state_override),
+                )?;
 
-            let result = evm.transact(tx_env.clone())?;
-            let access_list = core::mem::take(evm.inspector_mut()).into_access_list();
-            let gas_used = result.result.tx_gas_used();
-            tx_env.set_access_list(access_list.clone());
-            if let Err(err) = Self::Error::ensure_success(result.result) {
-                return Ok(AccessListResult {
-                    access_list,
-                    gas_used: U256::from(gas_used),
-                    error: Some(err.to_string()),
-                });
-            }
+                let mut evm = this.evm_config().evm_with_env_and_inspector(
+                    &mut db,
+                    evm_env,
+                    AccessListInspector::new(initial),
+                );
 
-            // transact again to get the exact gas used
-            evm.disable_inspector();
-            let result = evm.transact(tx_env)?;
-            let gas_used = result.result.tx_gas_used();
-            let error = Self::Error::ensure_success(result.result).err().map(|e| e.to_string());
+                let result = evm.transact(tx_env.clone())?;
+                let access_list = core::mem::take(evm.inspector_mut()).into_access_list();
+                let gas_used = result.result.tx_gas_used();
+                tx_env.set_access_list(access_list.clone());
+                if let Err(err) = Self::Error::ensure_success(result.result) {
+                    return Ok(AccessListResult {
+                        access_list,
+                        gas_used: U256::from(gas_used),
+                        error: Some(err.to_string()),
+                    });
+                }
 
-            Ok(AccessListResult { access_list, gas_used: U256::from(gas_used), error })
-        })
+                // transact again to get the exact gas used
+                evm.disable_inspector();
+                let result = evm.transact(tx_env)?;
+                let gas_used = result.result.tx_gas_used();
+                let error = Self::Error::ensure_success(result.result).err().map(|e| e.to_string());
+
+                Ok(AccessListResult { access_list, gas_used: U256::from(gas_used), error })
+            })
+            .await
+        }
     }
 }
 
