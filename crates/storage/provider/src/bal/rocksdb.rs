@@ -585,8 +585,9 @@ mod tests {
     #[test]
     fn read_only_legacy_database_has_no_persisted_bals() {
         let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("db");
         let hash = B256::with_last_byte(1);
-        let rocksdb = RocksDBBuilder::new(dir.path())
+        let rocksdb = RocksDBBuilder::new(&path)
             .with_table::<tables::TransactionHashNumbers>()
             .with_table::<tables::AccountsHistory>()
             .with_table::<tables::StoragesHistory>()
@@ -595,11 +596,8 @@ mod tests {
         rocksdb.put::<tables::TransactionHashNumbers>(hash, &42).unwrap();
         drop(rocksdb);
 
-        let rocksdb = RocksDBBuilder::new(dir.path())
-            .with_default_tables()
-            .with_read_only(true)
-            .build()
-            .unwrap();
+        let rocksdb =
+            RocksDBBuilder::new(&path).with_default_tables().with_read_only(true).build().unwrap();
         assert_eq!(rocksdb.get::<tables::TransactionHashNumbers>(hash).unwrap(), Some(42));
         let store = RocksDBBalStore::new(rocksdb);
         assert_eq!(store.get_by_hash(hash).unwrap(), None);
@@ -610,7 +608,7 @@ mod tests {
         drop(store);
 
         // The secondary open must not add tables to the primary database.
-        let rocksdb = RocksDBBuilder::new(dir.path())
+        let rocksdb = RocksDBBuilder::new(&path)
             .with_table::<tables::TransactionHashNumbers>()
             .with_table::<tables::AccountsHistory>()
             .with_table::<tables::StoragesHistory>()
@@ -622,18 +620,18 @@ mod tests {
 
     #[test]
     fn read_only_database_reads_persisted_bals() {
-        let (dir, store) = test_store();
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("db");
+        let rocksdb = RocksDBBuilder::new(&path).with_default_tables().build().unwrap();
+        let store = RocksDBBalStore::new(rocksdb);
         let block = NumHash::new(42, B256::with_last_byte(1));
         let raw = Bytes::from_static(&[0xc0]);
         store.insert(block, RawBal::from(raw.clone())).unwrap();
         store.flush(&[block]).unwrap();
         drop(store);
 
-        let rocksdb = RocksDBBuilder::new(dir.path())
-            .with_default_tables()
-            .with_read_only(true)
-            .build()
-            .unwrap();
+        let rocksdb =
+            RocksDBBuilder::new(&path).with_default_tables().with_read_only(true).build().unwrap();
         let store = RocksDBBalStore::new(rocksdb);
         assert_eq!(store.get_by_hash(block.hash).unwrap(), Some(raw));
     }
