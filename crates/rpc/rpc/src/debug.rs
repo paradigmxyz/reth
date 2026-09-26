@@ -120,8 +120,11 @@ where
         evm_env: EvmEnvFor<Eth::Evm>,
         opts: GethDebugTracingOptions,
     ) -> Result<Vec<TraceResult>, Eth::Error> {
+        let permit =
+            self.acquire_trace_permit().await.map_err(|_| EthApiError::InternalEthError)?;
         self.eth_api()
             .spawn_with_state_at_block(block.parent_hash(), move |eth_api, mut db| {
+                let _permit = permit;
                 let mut results = Vec::with_capacity(block.body().transactions().len());
 
                 eth_api.apply_pre_execution_changes(&block, &mut db)?;
@@ -316,6 +319,8 @@ where
         tx_hash: B256,
         opts: GethDebugTracingOptions,
     ) -> Result<GethTrace, Eth::Error> {
+        let permit =
+            self.acquire_trace_permit().await.map_err(|_| EthApiError::InternalEthError)?;
         let (transaction, block, bal) =
             match self.eth_api().transaction_and_block_and_maybe_bal(tx_hash).await? {
                 None => return Err(EthApiError::TracingTransactionNotFound.into()),
@@ -324,6 +329,7 @@ where
 
         self.eth_api()
             .spawn_with_state_at_block(block.parent_hash(), move |eth_api, mut db| {
+                let _permit = permit;
                 // configure env for the target transaction
                 let (tx, tx_info) = transaction.split();
 
@@ -394,9 +400,12 @@ where
                 .await;
         }
 
+        let permit =
+            self.acquire_trace_permit().await.map_err(|_| EthApiError::InternalEthError)?;
         let this = self.clone();
         self.eth_api()
             .spawn_with_call_at(call, at, overrides, move |db, evm_env, tx_env| {
+                let _permit = permit;
                 let mut inspector =
                     DebugInspector::new(tracing_options).map_err(Eth::Error::from_eth_err)?;
                 let res = this.eth_api().inspect(
@@ -431,6 +440,8 @@ where
         tracing_options: GethDebugTracingOptions,
         overrides: EvmOverrides,
     ) -> Result<GethTrace, Eth::Error> {
+        let permit =
+            self.acquire_trace_permit().await.map_err(|_| EthApiError::InternalEthError)?;
         // Get the target block to check transaction count
         let (block, bal) = self
             .eth_api()
@@ -456,6 +467,7 @@ where
 
         self.eth_api()
             .spawn_with_state_at_block(block.parent_hash(), move |eth_api, mut db| {
+                let _permit = permit;
                 // 1. position the state before the transaction at the index
                 eth_api.replay_block_until(&mut db, &block, tx_index, bal.as_deref())?;
 
@@ -489,6 +501,8 @@ where
             return Err(EthApiError::InvalidParams(String::from("bundles are empty.")).into())
         }
 
+        let permit =
+            self.acquire_trace_permit().await.map_err(|_| EthApiError::InternalEthError)?;
         let StateContext { transaction_index, block_number } = state_context.unwrap_or_default();
         let transaction_index = transaction_index.unwrap_or_default();
 
@@ -522,6 +536,7 @@ where
 
         self.eth_api()
             .spawn_with_state_at_block(at, move |eth_api, mut db| {
+                let _permit = permit;
                 // the outer vec for the bundles
                 let mut all_bundles = Vec::with_capacity(bundles.len());
 
@@ -624,9 +639,12 @@ where
         block: Arc<RecoveredBlock<ProviderBlock<Eth::Provider>>>,
         mode: ExecutionWitnessMode,
     ) -> Result<ExecutionWitness, Eth::Error> {
+        let permit =
+            self.acquire_trace_permit().await.map_err(|_| EthApiError::InternalEthError)?;
         let block_number = block.header().number();
         self.eth_api()
             .spawn_with_state_at_block(block.parent_hash(), move |eth_api, mut db| {
+                let _permit = permit;
                 let block_executor = eth_api.evm_config().executor(&mut db);
 
                 let mut witness = None;
@@ -687,6 +705,8 @@ where
         F: FnOnce(&mut StateCacheDb) -> Result<R, Eth::Error> + Send + 'static,
         R: Send + 'static,
     {
+        let permit =
+            self.acquire_trace_permit().await.map_err(|_| EthApiError::InternalEthError)?;
         let block = self
             .eth_api()
             .recovered_block(block_id)
@@ -703,6 +723,7 @@ where
 
         self.eth_api()
             .spawn_with_state_at_block(block.parent_hash(), move |eth_api, mut db| {
+                let _permit = permit;
                 let mut executor = eth_api
                     .evm_config()
                     .executor_for_block(&mut db, block.sealed_block())
@@ -807,6 +828,8 @@ where
 
     /// Executes a block and returns the state root after each transaction.
     pub async fn intermediate_roots(&self, block_hash: B256) -> Result<Vec<B256>, Eth::Error> {
+        let permit =
+            self.acquire_trace_permit().await.map_err(|_| EthApiError::InternalEthError)?;
         let block = self
             .eth_api()
             .recovered_block(block_hash.into())
@@ -816,6 +839,7 @@ where
 
         self.eth_api()
             .spawn_with_state_at_block(block.parent_hash(), move |eth_api, mut db| {
+                let _permit = permit;
                 // Enable transition tracking so that merge_transitions works
                 db.transition_state = Some(Default::default());
 
@@ -1111,7 +1135,6 @@ where
         rlp_block: Bytes,
         opts: Option<GethDebugTracingOptions>,
     ) -> RpcResult<Vec<TraceResult>> {
-        let _permit = self.acquire_trace_permit().await;
         Self::debug_trace_raw_block(self, rlp_block, opts.unwrap_or_default())
             .await
             .map_err(Into::into)
@@ -1123,7 +1146,6 @@ where
         block: B256,
         opts: Option<GethDebugTracingOptions>,
     ) -> RpcResult<Vec<TraceResult>> {
-        let _permit = self.acquire_trace_permit().await;
         Self::debug_trace_block(self, block.into(), opts.unwrap_or_default())
             .await
             .map_err(Into::into)
@@ -1135,7 +1157,6 @@ where
         block: BlockNumberOrTag,
         opts: Option<GethDebugTracingOptions>,
     ) -> RpcResult<Vec<TraceResult>> {
-        let _permit = self.acquire_trace_permit().await;
         Self::debug_trace_block(self, block.into(), opts.unwrap_or_default())
             .await
             .map_err(Into::into)
@@ -1147,7 +1168,6 @@ where
         tx_hash: B256,
         opts: Option<GethDebugTracingOptions>,
     ) -> RpcResult<GethTrace> {
-        let _permit = self.acquire_trace_permit().await;
         Self::debug_trace_transaction(self, tx_hash, opts.unwrap_or_default())
             .await
             .map_err(Into::into)
@@ -1160,7 +1180,6 @@ where
         block_id: Option<BlockId>,
         opts: Option<GethDebugTracingCallOptions>,
     ) -> RpcResult<GethTrace> {
-        let _permit = self.acquire_trace_permit().await;
         Self::debug_trace_call(self, request, block_id, opts.unwrap_or_default())
             .await
             .map_err(Into::into)
@@ -1172,7 +1191,6 @@ where
         state_context: Option<StateContext>,
         opts: Option<GethDebugTracingCallOptions>,
     ) -> RpcResult<Vec<Vec<GethTrace>>> {
-        let _permit = self.acquire_trace_permit().await;
         Self::debug_trace_call_many(self, bundles, state_context, opts).await.map_err(Into::into)
     }
 
@@ -1182,7 +1200,6 @@ where
         block: BlockId,
         mode: Option<ExecutionWitnessMode>,
     ) -> RpcResult<ExecutionWitness> {
-        let _permit = self.acquire_trace_permit().await;
         Self::debug_execution_witness(self, block, mode).await.map_err(Into::into)
     }
 
@@ -1192,7 +1209,6 @@ where
         hash: B256,
         mode: Option<ExecutionWitnessMode>,
     ) -> RpcResult<ExecutionWitness> {
-        let _permit = self.acquire_trace_permit().await;
         Self::debug_execution_witness_by_block_hash(self, hash, mode).await.map_err(Into::into)
     }
 
@@ -1203,7 +1219,6 @@ where
         tx_index: Index,
         address: Address,
     ) -> RpcResult<Option<Account>> {
-        let _permit = self.acquire_trace_permit().await;
         Self::debug_account_at(self, block_id, tx_index, address).await.map_err(Into::into)
     }
 
@@ -1214,7 +1229,6 @@ where
         tx_index: Index,
         address: Address,
     ) -> RpcResult<Option<AccountInfo>> {
-        let _permit = self.acquire_trace_permit().await;
         Self::debug_account_info_at(self, block_id, tx_index, address).await.map_err(Into::into)
     }
 
@@ -1333,7 +1347,6 @@ where
         block_hash: B256,
         _opts: Option<GethDebugTracingCallOptions>,
     ) -> RpcResult<Vec<B256>> {
-        let _permit = self.acquire_trace_permit().await;
         self.intermediate_roots(block_hash).await.map_err(Into::into)
     }
 
@@ -1405,7 +1418,6 @@ where
         block_hash: B256,
         opts: Option<GethDebugTracingCallOptions>,
     ) -> RpcResult<Vec<TraceResult>> {
-        let _permit = self.acquire_trace_permit().await;
         let entry = self
             .inner
             .bad_block_store
