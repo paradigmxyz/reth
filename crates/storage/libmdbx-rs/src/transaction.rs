@@ -918,6 +918,11 @@ impl Transaction<RW> {
         }
 
         let subtxns = self.subtxns.write();
+        // Fail before aborting any child; otherwise a live cursor on a later child
+        // leaves earlier children aborted and the parent transaction unusable.
+        if subtxns.values().any(|subtxn| subtxn.cursor_count() != 0) {
+            return Err(Error::Busy);
+        }
         for subtxn in subtxns.values() {
             subtxn.abort()?;
         }

@@ -143,3 +143,132 @@ fn parallel_updates_match_serial_and_preserve_reader_snapshot() {
         }
     }
 }
+
+#[test]
+fn seeded_parallel_mutations_match_serial_across_abort_and_reopen() {
+    let parallel_dir = tempfile::tempdir().unwrap();
+    let serial_dir = tempfile::tempdir().unwrap();
+    let mut parallel = environment(parallel_dir.path());
+    let mut serial = environment(serial_dir.path());
+    let mut parallel_dbis = Vec::new();
+    let mut serial_dbis = Vec::new();
+    for (env, dbis) in [(&parallel, &mut parallel_dbis), (&serial, &mut serial_dbis)] {
+        let tx = env.begin_rw_txn().unwrap();
+        for index in 0..4 {
+            dbis.push(
+                tx.create_db(Some(&format!("table{index}")), DatabaseFlags::empty()).unwrap().dbi(),
+            );
+        }
+        tx.commit().unwrap();
+    }
+
+    let mut seed = 0x5eed_cafe_1234_5678_u64;
+    for round in 0..48 {
+        let mut operations = vec![Vec::new(); 4];
+        for table in &mut operations {
+            for _ in 0..64 {
+                seed = seed.wrapping_mul(6364136223846793005).wrapping_add(1);
+                let key = ((seed >> 32) as u16 % 96).to_be_bytes();
+                let value = if seed & 3 == 0 {
+                    None
+                } else {
+                    Some(vec![(seed >> 24) as u8; 32 + (seed as usize % 128)])
+                };
+                table.push((key, value));
+            }
+        }
+
+        let tx = parallel.begin_rw_txn().unwrap();
+        tx.enable_parallel_writes(&parallel_dbis).unwrap();
+        std::thread::scope(|scope| {
+            for (&dbi, table) in parallel_dbis.iter().zip(&operations) {
+                let tx = &tx;
+                scope.spawn(move || {
+                    for (key, value) in table {
+                        if let Some(value) = value {
+                            tx.put_parallel(dbi, key, value, WriteFlags::empty()).unwrap();
+                        } else {
+                            tx.del_parallel(dbi, key, None).unwrap();
+                        }
+                    }
+                });
+            }
+        });
+        if round % 7 == 0 {
+            drop(tx);
+        } else {
+            tx.commit_subtxns().unwrap();
+            tx.commit().unwrap();
+        }
+
+        let tx = serial.begin_rw_txn().unwrap();
+        for (&dbi, table) in serial_dbis.iter().zip(&operations) {
+            for (key, value) in table {
+                if let Some(value) = value {
+                    tx.put(dbi, key, value, WriteFlags::empty()).unwrap();
+                } else {
+                    tx.del(dbi, key, None).unwrap();
+                }
+            }
+        }
+        if round % 7 == 0 {
+            drop(tx)
+        } else {
+            tx.commit().unwrap();
+        }
+
+        if round % 12 == 11 {
+            drop(parallel);
+            drop(serial);
+            parallel = environment(parallel_dir.path());
+            serial = environment(serial_dir.path());
+            for (env, dbis) in [(&parallel, &mut parallel_dbis), (&serial, &mut serial_dbis)] {
+                let tx = env.begin_ro_txn().unwrap();
+                for (index, dbi) in dbis.iter_mut().enumerate() {
+                    *dbi = tx.open_db(Some(&format!("table{index}"))).unwrap().dbi();
+                }
+            }
+        }
+
+        let actual = parallel.begin_ro_txn().unwrap();
+        let expected = serial.begin_ro_txn().unwrap();
+        for (&p, &s) in parallel_dbis.iter().zip(&serial_dbis) {
+            let rows = |tx: &reth_libmdbx::Transaction<reth_libmdbx::RO>, dbi| {
+                tx.cursor(dbi)
+                    .unwrap()
+                    .into_iter::<Vec<u8>, Vec<u8>>()
+                    .collect::<Result<Vec<_>, _>>()
+                    .unwrap()
+            };
+            assert_eq!(rows(&actual, p), rows(&expected, s), "round {round}");
+        }
+    }
+}
+
+#[test]
+fn abort_with_live_sibling_cursor_leaves_every_child_usable() {
+    let dir = tempfile::tempdir().unwrap();
+    let env = environment(dir.path());
+    let tx = env.begin_rw_txn().unwrap();
+    let dbis: Vec<_> = (0..4)
+        .map(|index| {
+            tx.create_db(Some(&format!("table{index}")), DatabaseFlags::empty()).unwrap().dbi()
+        })
+        .collect();
+    tx.commit().unwrap();
+
+    let mut tx = env.begin_rw_txn().unwrap();
+    tx.enable_parallel_writes(&dbis).unwrap();
+    let cursor = tx.cursor_with_dbi_parallel_owned(dbis[0]).unwrap();
+    assert!(matches!(tx.abort_subtxns(), Err(Error::Busy)));
+    for &dbi in &dbis {
+        tx.put_parallel(dbi, b"key", b"value", WriteFlags::empty()).unwrap();
+    }
+    drop(cursor);
+    tx.commit_subtxns().unwrap();
+    tx.commit().unwrap();
+    let reader = env.begin_ro_txn().unwrap();
+    for &dbi in &dbis {
+        assert_eq!(reader.get::<Vec<u8>>(dbi, b"key").unwrap().as_deref(), Some(&b"value"[..]));
+    }
+}
