@@ -136,9 +136,11 @@ The original 600-block RocksDB runs recorded **789–792 GB of logical read byte
 (`io.rchar`) and **39.3–39.4 million read syscalls**, versus **75.5–75.7 GB of
 physical read bytes** (`io.read_bytes`). These process-wide counters include
 all work, not just execution; logical reads must not be mistaken for disk
-traffic. CPU samples do not establish decompression as the dominant cost.
-Repeated reads, cache work, and waiting on reads need further attribution to
-explain the remaining gap and tails.
+traffic. The CPU profile from this initial diagnostic missed the lazily created
+BAL, prewarming, and proof threads, so it cannot attribute their costs. The
+[subsequent execution-latency investigation](state-trie-rocksdb-latency.md)
+corrects the profiling method and identifies repeated copying/decompression
+and the cross-database snapshot lock as the main causes of the regression.
 
 This is one diagnostic run per cache size, scoring 200 blocks each, rather than
 a replacement for the three-by-600 benchmark above. The MDBX column pools the
