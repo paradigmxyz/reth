@@ -76,12 +76,6 @@ where
     K: TransactionKind,
 {
     inner: Arc<TransactionInner<K>>,
-    /// Map of DBI to subtransaction pointer for parallel writes.
-    /// Only used for RW transactions with parallel writes enabled.
-    subtxns: Arc<RwLock<HashMap<ffi::MDBX_dbi, SubTransaction>>>,
-    /// Whether parallel writes mode is enabled.
-    /// Wrapped in Arc to ensure clones share the same flag state.
-    parallel_writes_enabled: Arc<AtomicBool>,
 }
 
 /// Statistics for a parallel subtransaction.
@@ -235,13 +229,11 @@ where
             committed: AtomicBool::new(false),
             env,
             _marker: Default::default(),
+            subtxns: RwLock::new(HashMap::new()),
+            parallel_writes_enabled: AtomicBool::new(false),
         };
 
-        Self {
-            inner: Arc::new(inner),
-            subtxns: Arc::new(RwLock::new(HashMap::new())),
-            parallel_writes_enabled: Arc::new(AtomicBool::new(false)),
-        }
+        Self { inner: Arc::new(inner) }
     }
 
     /// Executes the given closure once the lock on the transaction is acquired.
@@ -254,7 +246,7 @@ where
         F: FnOnce(*mut ffi::MDBX_txn) -> T,
     {
         self.inner.txn_execute(|ptr| {
-            if self.parallel_writes_enabled.load(std::sync::atomic::Ordering::SeqCst) {
+            if self.inner.parallel_writes_enabled.load(std::sync::atomic::Ordering::SeqCst) {
                 return Err(Error::Busy);
             }
             Ok(f(ptr))
@@ -333,9 +325,9 @@ where
     pub fn commit(self) -> Result<CommitLatency> {
         // Check that all subtxns are committed before allowing parent commit
         let parallel_enabled =
-            self.parallel_writes_enabled.load(std::sync::atomic::Ordering::SeqCst);
+            self.inner.parallel_writes_enabled.load(std::sync::atomic::Ordering::SeqCst);
         if parallel_enabled {
-            let subtxns = self.subtxns.read();
+            let subtxns = self.inner.subtxns.read();
             for subtxn in subtxns.values() {
                 if !subtxn.committed.load(std::sync::atomic::Ordering::SeqCst) {
                     return Err(Error::Busy);
@@ -344,7 +336,10 @@ where
         }
 
         match self.txn_execute(|txn| {
-            if K::IS_READ_ONLY {
+            if self.inner.txn.cursor_count() != 0 {
+                return Err(Error::Busy);
+            }
+            let result = if K::IS_READ_ONLY {
                 #[cfg(feature = "read-tx-timeouts")]
                 self.env().txn_manager().remove_active_read_transaction(txn);
 
@@ -357,7 +352,14 @@ where
                     .txn_manager()
                     .send_message(TxnManagerMessage::Commit { tx: TxnPtr(txn), sender });
                 rx.recv().unwrap()
-            }
+            };
+            // Invalidate every clone before releasing the transaction lock. MDBX
+            // can immediately reuse the underlying write handle for the next txn.
+            // Commit consumes a valid handle even when flushing fails. Never
+            // let a surviving clone access it or abort it again in Drop.
+            self.inner.set_committed();
+            self.inner.txn.set_invalidated();
+            result
         })? {
             //
             Ok((false, lat)) => {
@@ -449,7 +451,7 @@ where
         if K::IS_READ_ONLY {
             false
         } else {
-            self.parallel_writes_enabled.load(std::sync::atomic::Ordering::SeqCst)
+            self.inner.parallel_writes_enabled.load(std::sync::atomic::Ordering::SeqCst)
         }
     }
 
@@ -495,9 +497,9 @@ where
     /// When using `cursor_with_dbi_parallel_owned`, callers must ensure cursors are dropped
     /// before calling this method.
     pub fn commit_subtxns_with_stats(&self) -> Result<Vec<(ffi::MDBX_dbi, SubTransactionStats)>> {
-        let subtxns = self.subtxns.write();
+        let subtxns = self.inner.subtxns.write();
         if K::IS_READ_ONLY ||
-            !self.parallel_writes_enabled.load(std::sync::atomic::Ordering::SeqCst)
+            !self.inner.parallel_writes_enabled.load(std::sync::atomic::Ordering::SeqCst)
         {
             return Ok(Vec::new());
         }
@@ -512,7 +514,7 @@ where
             stats.push((subtxn.dbi(), subtxn.get_stats()?));
             subtxn.commit()?;
         }
-        self.parallel_writes_enabled.store(false, std::sync::atomic::Ordering::SeqCst);
+        self.inner.parallel_writes_enabled.store(false, std::sync::atomic::Ordering::SeqCst);
         Ok(stats)
     }
 }
@@ -522,11 +524,7 @@ where
     K: TransactionKind,
 {
     fn clone(&self) -> Self {
-        Self {
-            inner: Arc::clone(&self.inner),
-            subtxns: Arc::clone(&self.subtxns),
-            parallel_writes_enabled: Arc::clone(&self.parallel_writes_enabled),
-        }
+        Self { inner: Arc::clone(&self.inner) }
     }
 }
 
@@ -536,25 +534,6 @@ where
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("RoTransaction").finish_non_exhaustive()
-    }
-}
-
-impl<K> Drop for Transaction<K>
-where
-    K: TransactionKind,
-{
-    fn drop(&mut self) {
-        // Only abort subtxns if this is the last reference to the shared Arc.
-        // Clone shares the subtxns Arc, so we must not abort if other clones exist.
-        if Arc::strong_count(&self.subtxns) == 1 &&
-            self.parallel_writes_enabled.load(std::sync::atomic::Ordering::SeqCst)
-        {
-            let subtxns = self.subtxns.read();
-            for subtxn in subtxns.values() {
-                let _ = subtxn.abort();
-            }
-        }
-        // TransactionInner::drop will handle aborting the parent transaction
     }
 }
 
@@ -569,6 +548,9 @@ where
     committed: AtomicBool,
     env: Environment,
     _marker: std::marker::PhantomData<fn(K)>,
+    /// Owned with the parent so cleanup runs exactly once, including concurrent drops.
+    subtxns: RwLock<HashMap<ffi::MDBX_dbi, SubTransaction>>,
+    parallel_writes_enabled: AtomicBool,
 }
 
 impl<K> TransactionInner<K>
@@ -606,6 +588,14 @@ where
     K: TransactionKind,
 {
     fn drop(&mut self) {
+        // No transaction or cursor clones remain. Finish every child before
+        // releasing the parent; checking Arc::strong_count in Transaction::drop
+        // could miss cleanup when the final two clones were dropped concurrently.
+        if self.parallel_writes_enabled.load(std::sync::atomic::Ordering::SeqCst) {
+            for subtxn in self.subtxns.get_mut().values() {
+                let _ = subtxn.abort();
+            }
+        }
         // To be able to abort a timed out transaction, we need to renew it first.
         // Hence the usage of `txn_execute_renew_on_timeout` here.
         //
@@ -841,9 +831,9 @@ impl Transaction<RW> {
             return Ok(());
         }
 
-        let mut subtxns = self.subtxns.write();
+        let mut subtxns = self.inner.subtxns.write();
         // Serialize creation against other creation/commit attempts.
-        if self.parallel_writes_enabled.load(std::sync::atomic::Ordering::SeqCst) {
+        if self.inner.parallel_writes_enabled.load(std::sync::atomic::Ordering::SeqCst) {
             return Err(Error::Incompatible);
         }
 
@@ -870,7 +860,7 @@ impl Transaction<RW> {
                 subtxn_ptrs.as_mut_ptr(),
             );
             mdbx_result(rc)?;
-            self.parallel_writes_enabled.store(true, std::sync::atomic::Ordering::SeqCst);
+            self.inner.parallel_writes_enabled.store(true, std::sync::atomic::Ordering::SeqCst);
             Ok::<_, Error>(())
         });
         create_result??;
@@ -883,28 +873,28 @@ impl Transaction<RW> {
             }
         }
 
-        self.parallel_writes_enabled.store(true, std::sync::atomic::Ordering::SeqCst);
+        self.inner.parallel_writes_enabled.store(true, std::sync::atomic::Ordering::SeqCst);
         Ok(())
     }
 
-    /// Gets the subtransaction pointer for the given DBI, if parallel writes is enabled.
-    ///
-    /// Returns the subtransaction pointer if one exists for this DBI.
-    /// Returns an error if parallel writes is enabled but no subtxn exists for this DBI
-    /// (prevents accidental cross-DBI access which would bypass subtxn isolation).
-    /// Falls back to parent txn only if parallel writes is not enabled.
-    pub(crate) fn get_txn_ptr_for_dbi(&self, dbi: ffi::MDBX_dbi) -> Result<TransactionPtr> {
+    /// Keeps child creation/finalization excluded until the operation completes.
+    /// Cursor construction must register its live cursor before releasing this guard.
+    fn with_txn_ptr_for_dbi<T>(
+        &self,
+        dbi: ffi::MDBX_dbi,
+        operation: impl FnOnce(TransactionPtr) -> Result<T>,
+    ) -> Result<T> {
+        let subtxns = self.inner.subtxns.read();
         let parallel_enabled =
-            self.parallel_writes_enabled.load(std::sync::atomic::Ordering::SeqCst);
+            self.inner.parallel_writes_enabled.load(std::sync::atomic::Ordering::SeqCst);
         if parallel_enabled {
-            let subtxns = self.subtxns.read();
             if let Some(subtxn) = subtxns.get(&dbi) {
-                return Ok(subtxn.txn_ptr());
+                return operation(subtxn.txn_ptr());
             }
             // Parallel writes enabled but no subtxn for this DBI - reject to enforce isolation
             return Err(Error::Access);
         }
-        Ok(self.inner.txn.clone())
+        operation(self.inner.txn.clone())
     }
 
     /// Aborts all subtransactions.
@@ -913,11 +903,15 @@ impl Transaction<RW> {
     ///
     /// Live cursors (including owned cursors) prevent abort through a runtime check.
     pub fn abort_subtxns(&mut self) -> Result<()> {
-        if !self.parallel_writes_enabled.load(std::sync::atomic::Ordering::SeqCst) {
+        if !self.inner.parallel_writes_enabled.load(std::sync::atomic::Ordering::SeqCst) {
             return Ok(());
         }
 
-        let subtxns = self.subtxns.write();
+        let subtxns = self.inner.subtxns.write();
+        // Busy is recoverable: do not abort any sibling until all cursors close.
+        if subtxns.values().any(|subtxn| subtxn.cursor_count() != 0) {
+            return Err(Error::Busy);
+        }
         for subtxn in subtxns.values() {
             subtxn.abort()?;
         }
@@ -941,12 +935,12 @@ impl Transaction<RW> {
         let mut data_val: ffi::MDBX_val =
             ffi::MDBX_val { iov_len: data.len(), iov_base: data.as_ptr() as *mut c_void };
 
-        let txn_ptr = self.get_txn_ptr_for_dbi(dbi)?;
-        mdbx_result(txn_ptr.txn_execute_fail_on_timeout(|txn| unsafe {
-            ffi::mdbx_put(txn, dbi, &key_val, &mut data_val, flags.bits())
-        })?)?;
-
-        Ok(())
+        self.with_txn_ptr_for_dbi(dbi, |txn_ptr| {
+            mdbx_result(txn_ptr.txn_execute_fail_on_timeout(|txn| unsafe {
+                ffi::mdbx_put(txn, dbi, &key_val, &mut data_val, flags.bits())
+            })?)?;
+            Ok(())
+        })
     }
 
     /// Deletes an item from a database, using the subtransaction if parallel writes is enabled.
@@ -966,14 +960,15 @@ impl Transaction<RW> {
             iov_base: data.as_ptr() as *mut c_void,
         });
 
-        let txn_ptr = self.get_txn_ptr_for_dbi(dbi)?;
-        mdbx_result(txn_ptr.txn_execute_fail_on_timeout(|txn| {
-            if let Some(d) = data_val {
-                unsafe { ffi::mdbx_del(txn, dbi, &key_val, &d) }
-            } else {
-                unsafe { ffi::mdbx_del(txn, dbi, &key_val, ptr::null()) }
-            }
-        })?)
+        self.with_txn_ptr_for_dbi(dbi, |txn_ptr| {
+            mdbx_result(txn_ptr.txn_execute_fail_on_timeout(|txn| {
+                if let Some(d) = data_val {
+                    unsafe { ffi::mdbx_del(txn, dbi, &key_val, &d) }
+                } else {
+                    unsafe { ffi::mdbx_del(txn, dbi, &key_val, ptr::null()) }
+                }
+            })?)
+        })
         .map(|_| true)
         .or_else(|e| match e {
             Error::NotFound => Ok(false),
@@ -997,8 +992,7 @@ impl Transaction<RW> {
     /// txn.commit()?;
     /// ```
     pub fn cursor_with_dbi_parallel(&self, dbi: ffi::MDBX_dbi) -> Result<ParallelCursor<'_>> {
-        let txn_ptr = self.get_txn_ptr_for_dbi(dbi)?;
-        ParallelCursor::new(self, dbi, txn_ptr)
+        self.with_txn_ptr_for_dbi(dbi, |ptr| ParallelCursor::new(self, dbi, ptr))
     }
 
     /// Opens a cursor for parallel writes that returns `Cursor<RW>` instead of `ParallelCursor`.
@@ -1013,8 +1007,7 @@ impl Transaction<RW> {
     /// all cursors are dropped before calling `commit_subtxns()`. Unlike `ParallelCursor`,
     /// this method does not provide compile-time enforcement of this constraint.
     pub fn cursor_with_dbi_parallel_owned(&self, dbi: ffi::MDBX_dbi) -> Result<Cursor<RW>> {
-        let txn_ptr = self.get_txn_ptr_for_dbi(dbi)?;
-        Cursor::new_with_ptr(self.clone(), dbi, txn_ptr)
+        self.with_txn_ptr_for_dbi(dbi, |ptr| Cursor::new_with_ptr(self.clone(), dbi, ptr))
     }
 }
 
@@ -1136,6 +1129,10 @@ impl TransactionPtr {
         F: FnOnce(*mut ffi::MDBX_txn) -> T,
     {
         let _lck = self.lock();
+
+        if self.is_invalidated() {
+            return Err(Error::BadTxn);
+        }
 
         // To be able to do any operations on the transaction, we need to renew it first.
         #[cfg(feature = "read-tx-timeouts")]

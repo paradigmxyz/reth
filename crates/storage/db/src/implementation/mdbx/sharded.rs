@@ -393,7 +393,7 @@ impl ShardedCursor<RW> {
 
 #[cfg(test)]
 mod tests {
-    use super::migrate_storage_shards;
+    use super::*;
     use crate::{init_db, mdbx::DatabaseArguments, open_db, tables::HashedStorages, Database};
     use alloy_primitives::{B256, U256};
     use reth_db_api::{
@@ -401,9 +401,62 @@ mod tests {
         transaction::{DbTx, DbTxMut},
     };
     use reth_primitives_traits::StorageEntry;
+    use std::result::Result;
 
     fn entry(prefix: u8) -> StorageEntry {
         StorageEntry { key: B256::repeat_byte(prefix), value: U256::from(prefix as u64 + 1) }
+    }
+
+    #[test]
+    #[ignore = "known logical cursor incompatibility; run explicitly to reproduce"]
+    fn audit_interleaved_delete_insert_preserves_native_position() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = init_db(dir.path(), DatabaseArguments::test()).unwrap();
+        let raw = db.inner.begin_rw_txn().unwrap();
+        raw.create_db(Some("StorageReference"), reth_libmdbx::DatabaseFlags::DUP_SORT).unwrap();
+        raw.commit().unwrap();
+        let tx = db.tx_mut().unwrap();
+        let mut reference = tx.cursor_dup_write::<Reference>().unwrap();
+        let mut sharded = tx.cursor_dup_write::<HashedStorages>().unwrap();
+        for prefix in [0, 64, 128] {
+            reference.upsert(B256::ZERO, &entry(prefix)).unwrap();
+            sharded.upsert(B256::ZERO, &entry(prefix)).unwrap();
+        }
+        reference.first().unwrap();
+        sharded.first().unwrap();
+        let mut reference_other = tx.cursor_dup_write::<Reference>().unwrap();
+        let mut sharded_other = tx.cursor_dup_write::<HashedStorages>().unwrap();
+        reference_other.first().unwrap();
+        sharded_other.first().unwrap();
+        reference_other.delete_current().unwrap();
+        sharded_other.delete_current().unwrap();
+        reference_other.upsert(B256::ZERO, &entry(32)).unwrap();
+        sharded_other.upsert(B256::ZERO, &entry(32)).unwrap();
+        assert_eq!(sharded.next().unwrap(), reference.next().unwrap());
+    }
+
+    #[test]
+    #[ignore = "known logical cursor incompatibility; run explicitly to reproduce"]
+    fn audit_failed_duplicate_seek_preserves_native_position() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = init_db(dir.path(), DatabaseArguments::test()).unwrap();
+        let raw = db.inner.begin_rw_txn().unwrap();
+        raw.create_db(Some("StorageReference"), reth_libmdbx::DatabaseFlags::DUP_SORT).unwrap();
+        raw.commit().unwrap();
+        let tx = db.tx_mut().unwrap();
+        let mut reference = tx.cursor_dup_write::<Reference>().unwrap();
+        let mut sharded = tx.cursor_dup_write::<HashedStorages>().unwrap();
+        for prefix in [0, 64, 128] {
+            reference.upsert(B256::ZERO, &entry(prefix)).unwrap();
+            sharded.upsert(B256::ZERO, &entry(prefix)).unwrap();
+        }
+        reference.first().unwrap();
+        sharded.first().unwrap();
+        assert_eq!(
+            sharded.seek_by_key_subkey(B256::ZERO, entry(255).key).unwrap(),
+            reference.seek_by_key_subkey(B256::ZERO, entry(255).key).unwrap()
+        );
+        assert_eq!(sharded.next().unwrap(), reference.next().unwrap());
     }
 
     #[derive(Debug)]

@@ -692,7 +692,7 @@ where
                 let mut data = ffi::MDBX_val { iov_len: 0, iov_base: ptr::null_mut() };
                 let op = mem::replace(op, *next_op);
                 unsafe {
-                    let result = cursor.txn.txn_execute(|txn| {
+                    let result = cursor.execute_on_txn(|txn| {
                         match ffi::mdbx_cursor_get(cursor.cursor(), &mut key, &mut data, op) {
                             ffi::MDBX_SUCCESS => {
                                 let key = match Key::decode_val::<K>(txn, key) {
@@ -787,7 +787,7 @@ where
                 let mut data = ffi::MDBX_val { iov_len: 0, iov_base: ptr::null_mut() };
                 let op = mem::replace(op, *next_op);
                 unsafe {
-                    let result = cursor.txn.txn_execute(|txn| {
+                    let result = cursor.execute_on_txn(|txn| {
                         match ffi::mdbx_cursor_get(cursor.cursor(), &mut key, &mut data, op) {
                             ffi::MDBX_SUCCESS => {
                                 let key = match Key::decode_val::<K>(txn, key) {
@@ -888,7 +888,7 @@ where
                 let mut data = ffi::MDBX_val { iov_len: 0, iov_base: ptr::null_mut() };
                 let op = mem::replace(op, ffi::MDBX_NEXT_NODUP);
 
-                let result = cursor.txn.txn_execute(|_| {
+                let result = cursor.execute_on_txn(|_| {
                     let err_code =
                         unsafe { ffi::mdbx_cursor_get(cursor.cursor(), &mut key, &mut data, op) };
 
