@@ -33,14 +33,25 @@ pub struct Cursor<K: TransactionKind, T: Table> {
     metrics: Option<TableOperationMetrics>,
     /// Phantom data to enforce encoding/decoding.
     _dbi: PhantomData<T>,
+    /// Whether all value reads through this cursor should request read-ahead.
+    #[cfg(target_os = "linux")]
+    prefetch: bool,
 }
 
 impl<K: TransactionKind, T: Table> Cursor<K, T> {
     pub(crate) const fn new_with_metrics(
         inner: reth_libmdbx::Cursor<K>,
         metrics: Option<TableOperationMetrics>,
+        #[cfg(target_os = "linux")] prefetch: bool,
     ) -> Self {
-        Self { inner, buf: Vec::new(), metrics, _dbi: PhantomData }
+        Self {
+            inner,
+            buf: Vec::new(),
+            metrics,
+            _dbi: PhantomData,
+            #[cfg(target_os = "linux")]
+            prefetch,
+        }
     }
 
     /// If `self.metrics` is `Some(...)`, record a metric with the provided operation and value
@@ -88,38 +99,68 @@ macro_rules! compress_to_buf_or_ref {
     };
 }
 
+/// Selects the value decoder inside the existing MDBX cursor lookup.
+macro_rules! read_pair {
+    ($self:ident, $method:ident($($arg:expr),* $(,)?)) => {{
+        #[cfg(target_os = "linux")]
+        if $self.prefetch {
+            $self.inner.$method::<Cow<'_, [u8]>, super::value_prefetch::PrefetchValue<'_>>($($arg),*)
+                .map(|entry| entry.map(|(key, value)| (key, value.0)))
+        } else {
+            $self.inner.$method($($arg),*)
+        }
+        #[cfg(not(target_os = "linux"))]
+        $self.inner.$method($($arg),*)
+    }};
+}
+
+/// Selects the decoder for cursor operations returning only a value.
+macro_rules! read_value {
+    ($self:ident, $method:ident($($arg:expr),* $(,)?)) => {{
+        #[cfg(target_os = "linux")]
+        if $self.prefetch {
+            $self.inner.$method::<super::value_prefetch::PrefetchValue<'_>>($($arg),*)
+                .map(|entry| entry.map(|value| value.0))
+        } else {
+            $self.inner.$method($($arg),*)
+        }
+        #[cfg(not(target_os = "linux"))]
+        $self.inner.$method($($arg),*)
+    }};
+}
+
 impl<K: TransactionKind, T: Table> DbCursorRO<T> for Cursor<K, T> {
     fn first(&mut self) -> PairResult<T> {
-        decode::<T>(self.inner.first())
+        decode::<T>(read_pair!(self, first()))
     }
 
     fn seek_exact(&mut self, key: <T as Table>::Key) -> PairResult<T> {
-        decode::<T>(self.inner.set_key(key.encode().as_ref()))
+        decode::<T>(read_pair!(self, set_key(key.encode().as_ref())))
     }
 
     fn seek(&mut self, key: <T as Table>::Key) -> PairResult<T> {
-        decode::<T>(self.inner.set_range(key.encode().as_ref()))
+        decode::<T>(read_pair!(self, set_range(key.encode().as_ref())))
     }
 
     fn next(&mut self) -> PairResult<T> {
-        decode::<T>(self.inner.next())
+        decode::<T>(read_pair!(self, next()))
     }
 
     fn prev(&mut self) -> PairResult<T> {
-        decode::<T>(self.inner.prev())
+        decode::<T>(read_pair!(self, prev()))
     }
 
     fn last(&mut self) -> PairResult<T> {
-        decode::<T>(self.inner.last())
+        decode::<T>(read_pair!(self, last()))
     }
 
     fn current(&mut self) -> PairResult<T> {
-        decode::<T>(self.inner.get_current())
+        decode::<T>(read_pair!(self, get_current()))
     }
 
     fn walk(&mut self, start_key: Option<T::Key>) -> Result<Walker<'_, T, Self>, DatabaseError> {
         let start = if let Some(start_key) = start_key {
-            decode::<T>(self.inner.set_range(start_key.encode().as_ref())).transpose()
+            self.seek(start_key).transpose()
         } else {
             self.first().transpose()
         };
@@ -132,13 +173,13 @@ impl<K: TransactionKind, T: Table> DbCursorRO<T> for Cursor<K, T> {
         range: impl RangeBounds<T::Key>,
     ) -> Result<RangeWalker<'_, T, Self>, DatabaseError> {
         let start = match range.start_bound().cloned() {
-            Bound::Included(key) => self.inner.set_range(key.encode().as_ref()),
+            Bound::Included(key) => self.seek(key),
             Bound::Excluded(_key) => {
                 unreachable!("Rust doesn't allow for Bound::Excluded in starting bounds");
             }
-            Bound::Unbounded => self.inner.first(),
+            Bound::Unbounded => self.first(),
         };
-        let start = decode::<T>(start).transpose();
+        let start = start.transpose();
         Ok(RangeWalker::new(self, start, range.end_bound().cloned()))
     }
 
@@ -146,32 +187,34 @@ impl<K: TransactionKind, T: Table> DbCursorRO<T> for Cursor<K, T> {
         &mut self,
         start_key: Option<T::Key>,
     ) -> Result<ReverseWalker<'_, T, Self>, DatabaseError> {
-        let start = if let Some(start_key) = start_key {
-            decode::<T>(self.inner.set_range(start_key.encode().as_ref()))
-        } else {
-            self.last()
-        }
-        .transpose();
+        let start =
+            if let Some(start_key) = start_key { self.seek(start_key) } else { self.last() }
+                .transpose();
 
         Ok(ReverseWalker::new(self, start))
+    }
+
+    #[cfg(target_os = "linux")]
+    fn prefetch(&mut self, enabled: bool) -> &mut Self {
+        self.prefetch = enabled;
+        self
     }
 }
 
 impl<K: TransactionKind, T: DupSort> DbDupCursorRO<T> for Cursor<K, T> {
     /// Returns the previous `(key, value)` pair of a DUPSORT table.
     fn prev_dup(&mut self) -> PairResult<T> {
-        decode::<T>(self.inner.prev_dup())
+        decode::<T>(read_pair!(self, prev_dup()))
     }
 
     /// Returns the next `(key, value)` pair of a DUPSORT table.
     fn next_dup(&mut self) -> PairResult<T> {
-        decode::<T>(self.inner.next_dup())
+        decode::<T>(read_pair!(self, next_dup()))
     }
 
     /// Returns the last `value` of the current duplicate `key`.
     fn last_dup(&mut self) -> ValueOnlyResult<T> {
-        self.inner
-            .last_dup()
+        read_value!(self, last_dup())
             .map_err(|e| DatabaseError::Read(e.into()))?
             .map(decode_one::<T>)
             .transpose()
@@ -179,13 +222,12 @@ impl<K: TransactionKind, T: DupSort> DbDupCursorRO<T> for Cursor<K, T> {
 
     /// Returns the next `(key, value)` pair skipping the duplicates.
     fn next_no_dup(&mut self) -> PairResult<T> {
-        decode::<T>(self.inner.next_nodup())
+        decode::<T>(read_pair!(self, next_nodup()))
     }
 
     /// Returns the next `value` of a duplicate `key`.
     fn next_dup_val(&mut self) -> ValueOnlyResult<T> {
-        self.inner
-            .next_dup()
+        read_pair!(self, next_dup())
             .map_err(|e| DatabaseError::Read(e.into()))?
             .map(decode_value::<T>)
             .transpose()
@@ -196,8 +238,7 @@ impl<K: TransactionKind, T: DupSort> DbDupCursorRO<T> for Cursor<K, T> {
         key: <T as Table>::Key,
         subkey: <T as DupSort>::SubKey,
     ) -> ValueOnlyResult<T> {
-        self.inner
-            .get_both_range(key.encode().as_ref(), subkey.encode().as_ref())
+        read_value!(self, get_both_range(key.encode().as_ref(), subkey.encode().as_ref()))
             .map_err(|e| DatabaseError::Read(e.into()))?
             .map(decode_one::<T>)
             .transpose()
@@ -216,25 +257,25 @@ impl<K: TransactionKind, T: DupSort> DbDupCursorRO<T> for Cursor<K, T> {
         let start = match (key, subkey) {
             (Some(key), Some(subkey)) => {
                 let encoded_key = key.encode();
-                self.inner
-                    .get_both_range(encoded_key.as_ref(), subkey.encode().as_ref())
+                read_value!(self, get_both_range(encoded_key.as_ref(), subkey.encode().as_ref()))
                     .map_err(|e| DatabaseError::Read(e.into()))?
                     .map(|val| decoder::<T>((Cow::Borrowed(encoded_key.as_ref()), val)))
             }
             (Some(key), None) => {
                 let encoded_key = key.encode();
-                self.inner
-                    .set(encoded_key.as_ref())
+                read_value!(self, set(encoded_key.as_ref()))
                     .map_err(|e| DatabaseError::Read(e.into()))?
                     .map(|val| decoder::<T>((Cow::Borrowed(encoded_key.as_ref()), val)))
             }
             (None, Some(subkey)) => {
                 if let Some((key, _)) = self.first()? {
                     let encoded_key = key.encode();
-                    self.inner
-                        .get_both_range(encoded_key.as_ref(), subkey.encode().as_ref())
-                        .map_err(|e| DatabaseError::Read(e.into()))?
-                        .map(|val| decoder::<T>((Cow::Borrowed(encoded_key.as_ref()), val)))
+                    read_value!(
+                        self,
+                        get_both_range(encoded_key.as_ref(), subkey.encode().as_ref())
+                    )
+                    .map_err(|e| DatabaseError::Read(e.into()))?
+                    .map(|val| decoder::<T>((Cow::Borrowed(encoded_key.as_ref()), val)))
                 } else {
                     Some(Err(DatabaseError::Read(MDBXError::NotFound.into())))
                 }
