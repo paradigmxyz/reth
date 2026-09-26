@@ -433,7 +433,13 @@ where
 
         Box::pin(async move {
             let _abort_on_drop = abort_on_drop;
-            f.await.map_err(|err| err.into())
+            // Call panics are answered by the call itself. Anything left here has no request id to
+            // respond to, and the connection writes errors verbatim, which would corrupt the
+            // stream.
+            Ok(f.await.unwrap_or_else(|err| {
+                warn!(%err, "IPC call task failed");
+                None
+            }))
         })
     }
 }
@@ -795,7 +801,7 @@ mod tests {
             params::BatchRequestBuilder,
         },
         rpc_params,
-        types::Request,
+        types::{ErrorCode, Request},
         PendingSubscriptionSink, RpcModule, SubscriptionMessage,
     };
     use reth_tracing::init_test_tracing;
@@ -971,6 +977,42 @@ mod tests {
 
         let dropped = tokio::time::timeout(std::time::Duration::from_secs(5), dropped_rx).await;
         assert!(dropped.is_ok(), "call kept running after the connection closed");
+    }
+
+    #[tokio::test]
+    async fn test_panicking_call_returns_internal_error() {
+        init_test_tracing();
+
+        let endpoint = &dummy_name();
+        let server = Builder::default().build(endpoint.clone());
+        let mut module = RpcModule::new(());
+        module
+            .register_async_method("maybe_panic", |params, _, _| async move {
+                assert!(!params.one::<bool>().unwrap(), "requested panic");
+                "ok"
+            })
+            .unwrap();
+        let handle = server.start(module).await.unwrap();
+        tokio::spawn(handle.stopped());
+
+        let client = IpcClientBuilder::default().build(endpoint).await.unwrap();
+        let err = client.request::<String, _>("maybe_panic", rpc_params![true]).await.unwrap_err();
+        assert!(
+            matches!(&err, Error::Call(err) if err.code() == ErrorCode::InternalError.code()),
+            "{err:?}"
+        );
+
+        let mut batch_request_builder = BatchRequestBuilder::new();
+        let _ = batch_request_builder.insert("maybe_panic", rpc_params![true]);
+        let _ = batch_request_builder.insert("maybe_panic", rpc_params![false]);
+        let responses = client
+            .batch_request::<String>(batch_request_builder)
+            .await
+            .unwrap()
+            .into_iter()
+            .collect::<Vec<_>>();
+        assert!(matches!(&responses[0], Err(err) if err.code() == ErrorCode::InternalError.code()));
+        assert_eq!(responses[1].as_deref(), Ok("ok"));
     }
 
     #[tokio::test]
