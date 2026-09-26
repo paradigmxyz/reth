@@ -274,6 +274,74 @@ fn abort_with_live_sibling_cursor_leaves_every_child_usable() {
 }
 
 #[test]
+fn map_full_during_parallel_writes_preserves_last_commit() {
+    let dir = tempfile::tempdir().unwrap();
+    let env = Environment::builder()
+        .set_max_dbs(8)
+        .set_geometry(Geometry { size: Some(0..(1024 * 1024)), ..Default::default() })
+        .write_map()
+        .open(dir.path())
+        .unwrap();
+    let tx = env.begin_rw_txn().unwrap();
+    let dbis: Vec<_> = (0..2)
+        .map(|index| {
+            let dbi =
+                tx.create_db(Some(&format!("table{index}")), DatabaseFlags::empty()).unwrap().dbi();
+            tx.put(dbi, b"key", b"old", WriteFlags::empty()).unwrap();
+            dbi
+        })
+        .collect();
+    tx.commit().unwrap();
+
+    let tx = env.begin_rw_txn().unwrap();
+    tx.enable_parallel_writes(&dbis).unwrap();
+    tx.put_parallel(dbis[0], b"key", b"new", WriteFlags::empty()).unwrap();
+    assert!(matches!(
+        tx.put_parallel(dbis[1], b"huge", vec![7; 2 * 1024 * 1024], WriteFlags::empty()),
+        Err(Error::MapFull)
+    ));
+    drop(tx);
+    drop(env);
+
+    let env = environment(dir.path());
+    let reader = env.begin_ro_txn().unwrap();
+    for index in 0..2 {
+        let dbi = reader.open_db(Some(&format!("table{index}"))).unwrap().dbi();
+        assert_eq!(reader.get::<Vec<u8>>(dbi, b"key").unwrap().as_deref(), Some(&b"old"[..]));
+        if index == 1 {
+            assert!(reader.get::<Vec<u8>>(dbi, b"huge").unwrap().is_none());
+        }
+    }
+}
+
+#[test]
+fn worker_panic_aborts_parallel_parent() {
+    let dir = tempfile::tempdir().unwrap();
+    let env = environment(dir.path());
+    let tx = env.begin_rw_txn().unwrap();
+    let dbi = tx.create_db(Some("table"), DatabaseFlags::empty()).unwrap().dbi();
+    tx.put(dbi, b"key", b"old", WriteFlags::empty()).unwrap();
+    tx.commit().unwrap();
+
+    let tx = env.begin_rw_txn().unwrap();
+    tx.enable_parallel_writes(&[dbi]).unwrap();
+    let worker = tx.clone();
+    assert!(std::thread::spawn(move || {
+        worker.put_parallel(dbi, b"key", b"new", WriteFlags::empty()).unwrap();
+        panic!("simulated worker failure");
+    })
+    .join()
+    .is_err());
+    drop(tx);
+    drop(env);
+
+    let env = environment(dir.path());
+    let reader = env.begin_ro_txn().unwrap();
+    let dbi = reader.open_db(Some("table")).unwrap().dbi();
+    assert_eq!(reader.get::<Vec<u8>>(dbi, b"key").unwrap().as_deref(), Some(&b"old"[..]));
+}
+
+#[test]
 fn crash_recovery_worker() {
     let Ok(path) = std::env::var("MDBX_CRASH_TEST_PATH") else { return };
     let phase = std::env::var("MDBX_CRASH_TEST_PHASE").unwrap();
