@@ -2838,7 +2838,7 @@ impl<N: NodePrimitives<SignedTx: Value, Receipt: Value, BlockHeader: Value>> Tra
             // Spawn the task onto the global rayon pool
             // This task will send the cached transaction hash through the channel.
             rayon::spawn(move || {
-                let _ = manager.fetch_range_with_predicate(
+                let result = manager.fetch_range_with_predicate(
                     StaticFileSegment::Transactions,
                     chunk_range,
                     |cursor, number| {
@@ -2850,6 +2850,10 @@ impl<N: NodePrimitives<SignedTx: Value, Receipt: Value, BlockHeader: Value>> Tra
                     },
                     |_| true,
                 );
+                // surface read errors to the caller instead of silently dropping the hashes
+                if let Err(err) = result {
+                    let _ = channel_tx.send(Err(Box::new(err)));
+                }
             });
         }
 
@@ -2861,6 +2865,15 @@ impl<N: NodePrimitives<SignedTx: Value, Receipt: Value, BlockHeader: Value>> Tra
                 let (tx_hash, tx_id) = tx.map_err(|boxed| *boxed)?;
                 tx_list.push((tx_hash, tx_id));
             }
+        }
+
+        // every transaction of the range must be present, a shorter result means that the static
+        // files don't cover the requested range and would leave hashes unindexed
+        if tx_list.len() != tx_range_size {
+            return Err(ProviderError::MissingStaticFileTx(
+                StaticFileSegment::Transactions,
+                tx_range.start + tx_list.len() as u64,
+            ))
         }
 
         Ok(tx_list)

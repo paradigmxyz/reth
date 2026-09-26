@@ -1138,6 +1138,44 @@ mod tests {
     }
 
     #[test]
+    fn transaction_hashes_by_range_requires_complete_range() {
+        use reth_static_file_types::StaticFileSegment;
+        use reth_storage_api::TransactionsProviderExt;
+
+        let factory = create_test_provider_factory();
+        let mut rng = generators::rng();
+        let provider_rw = factory.provider_rw().unwrap();
+        let mut parent = None;
+        let mut expected = Vec::new();
+        for number in 0..3 {
+            let block = random_block(
+                &mut rng,
+                number,
+                BlockParams { parent, tx_count: Some(2), ..Default::default() },
+            );
+            parent = Some(block.hash());
+            expected.extend(block.body().transactions.iter().map(|tx| *tx.tx_hash()));
+            provider_rw.insert_block(&block.try_recover().unwrap()).unwrap();
+        }
+        provider_rw.commit().unwrap();
+
+        let provider = factory.provider().unwrap();
+        let hashes = provider.transaction_hashes_by_range(0..6).unwrap();
+        assert_eq!(
+            hashes.iter().map(|(_, id)| *id).collect::<Vec<_>>(),
+            (0..6).collect::<Vec<_>>()
+        );
+        assert_eq!(hashes.into_iter().map(|(hash, _)| hash).collect::<Vec<_>>(), expected);
+        assert!(provider.transaction_hashes_by_range(6..6).unwrap().is_empty());
+
+        // a range that is not fully covered by the static files must not be answered partially
+        assert_matches!(
+            provider.transaction_hashes_by_range(2..9),
+            Err(ProviderError::MissingStaticFileTx(StaticFileSegment::Transactions, 6))
+        );
+    }
+
+    #[test]
     fn insert_block_with_prune_modes() {
         let block = TEST_BLOCK.clone();
 
