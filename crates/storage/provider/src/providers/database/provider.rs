@@ -2242,6 +2242,29 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> ReceiptProvider for DatabasePr
 
         // fetch all receipts in the transaction range
         let all_receipts = self.receipts_by_tx_range(first_tx..=last_tx)?;
+
+        // Receipts can only be distributed by transaction count if the span is complete. If some
+        // of them are missing, e.g. because they were pruned, fall back to per block lookups
+        // that validate the count, like `receipts_by_block` does.
+        let expected: usize =
+            non_empty_blocks.iter().map(|indices| indices.tx_count as usize).sum();
+        if all_receipts.len() != expected {
+            return block_body_indices
+                .iter()
+                .map(|indices| {
+                    if indices.tx_count == 0 {
+                        return Ok(Vec::new())
+                    }
+                    let receipts = self.receipts_by_tx_range(indices.tx_num_range())?;
+                    Ok(if receipts.len() == indices.tx_count as usize {
+                        receipts
+                    } else {
+                        Vec::new()
+                    })
+                })
+                .collect()
+        }
+
         let mut receipts_iter = all_receipts.into_iter();
 
         // distribute receipts to their respective blocks
