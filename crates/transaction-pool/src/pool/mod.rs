@@ -327,8 +327,9 @@ where
         events
     }
 
+    /// Returns whether any listener is subscribed to the pool's transaction events.
     #[inline]
-    fn has_event_listeners(&self) -> bool {
+    pub(crate) fn has_event_listeners(&self) -> bool {
         self.has_event_listeners.load(Ordering::Relaxed)
     }
 
