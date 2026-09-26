@@ -13,6 +13,7 @@ use alloy_consensus::BlockHeader;
 use futures::{stream::FusedStream, stream_select, FutureExt, StreamExt};
 use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_db::{database_metrics::DatabaseMetrics, Database};
+use reth_downloaders::bal::BalDownloader;
 use reth_engine_tree::{
     chain::{ChainEvent, FromOrchestrator},
     engine::{EngineApiKind, EngineApiRequest, EngineRequestHandler},
@@ -35,7 +36,7 @@ use reth_node_core::{
 use reth_node_events::node;
 use reth_provider::{
     providers::{BlockchainProvider, NodeTypesForProvider},
-    BlockNumReader, StorageSettingsCache,
+    BalConfig, BalProvider, BlockNumReader, CanonStateSubscriptions, StorageSettingsCache,
 };
 use reth_storage_overlay::OverlayManager;
 use reth_tasks::TaskExecutor;
@@ -148,6 +149,23 @@ impl EngineNodeLauncher {
         let (consensus_engine_tx, consensus_engine_rx) = unbounded_channel();
 
         let node_config = ctx.node_config();
+
+        if node_config.network.bal_backfill {
+            let downloader = BalDownloader::new(
+                ctx.blockchain_db().clone(),
+                ctx.provider_factory().bal_store().clone(),
+                network_client.clone(),
+                node_config.network.max_concurrent_bal_requests,
+                node_config
+                    .db
+                    .balstore_cache_size
+                    .unwrap_or(BalConfig::DEFAULT_IN_MEMORY_RETENTION_DISTANCE),
+            );
+            // Scanning and validating BALs uses synchronous storage and CPU work.
+            ctx.task_executor().spawn_blocking_task(
+                downloader.run(ctx.blockchain_db().canonical_state_stream().map(|_| ())),
+            );
+        }
 
         // We always assume that node is syncing after a restart
         network_handle.update_sync_state(SyncState::Syncing);
