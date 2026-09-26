@@ -907,7 +907,12 @@ impl<N: ProviderNodeTypes> ReceiptProvider for ConsistentProvider<N> {
         &self,
         block_range: RangeInclusive<BlockNumber>,
     ) -> ProviderResult<Vec<Vec<Self::Receipt>>> {
-        self.storage_provider.receipts_by_block_range(block_range)
+        self.get_in_memory_or_storage_by_block_range_while(
+            block_range,
+            |db_provider, range, _| db_provider.receipts_by_block_range(range),
+            |block_state, _| Some(block_state.executed_block_receipts()),
+            |_| true,
+        )
     }
 }
 
