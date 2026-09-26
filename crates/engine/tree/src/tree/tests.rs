@@ -2787,6 +2787,77 @@ mod forkchoice_updated_tests {
         test_harness.tree.update_reorg_metrics(2, Some(NumHash::new(60, B256::random())));
     }
 
+    #[test]
+    fn test_engine_termination_releases_persistence_before_completion() {
+        #[derive(Debug)]
+        struct BlockingDropSource {
+            dropping: crossbeam_channel::Sender<()>,
+            release: crossbeam_channel::Receiver<()>,
+        }
+
+        impl TxPoolPrewarmSource<EthPrimitives> for BlockingDropSource {
+            fn best_transactions(
+                &self,
+                _: B256,
+            ) -> Option<TxPoolPrewarmTransactions<EthPrimitives>> {
+                None
+            }
+        }
+
+        impl Drop for BlockingDropSource {
+            fn drop(&mut self) {
+                self.dropping.send(()).unwrap();
+                self.release.recv_timeout(Duration::from_secs(5)).unwrap();
+            }
+        }
+
+        let mut test_harness = TestHarness::new(MAINNET.clone());
+        let genesis = test_harness.tree.state.tree_state.current_canonical_head;
+        test_harness.tree.persistence_state.last_persisted_block = genesis;
+        test_harness.tree.persistence_state.last_state_trie_persisted_block = genesis;
+        let (dropping_tx, dropping_rx) = crossbeam_channel::bounded(1);
+        let (release_tx, release_rx) = crossbeam_channel::bounded(1);
+        test_harness.tree.payload_validator =
+            test_harness.tree.payload_validator.with_txpool_prewarming(BlockingDropSource {
+                dropping: dropping_tx,
+                release: release_rx,
+            });
+        let (terminate_tx, mut terminate_rx) = oneshot::channel();
+        test_harness
+            .to_tree_tx
+            .send(FromEngine::Event(FromOrchestrator::Terminate { tx: terminate_tx }))
+            .unwrap();
+        let engine = spawn_os_thread("engine", || test_harness.tree.run());
+
+        // Hold worker cleanup open so an acknowledgement sent before teardown is observable.
+        dropping_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+        let completion_during_cleanup = terminate_rx.try_recv();
+        release_tx.send(()).unwrap();
+        engine.join().unwrap();
+
+        assert!(matches!(completion_during_cleanup, Err(oneshot::error::TryRecvError::Empty)));
+        terminate_rx.blocking_recv().unwrap();
+
+        assert!(matches!(
+            test_harness.action_rx.try_recv(),
+            Err(std::sync::mpsc::TryRecvError::Disconnected)
+        ));
+    }
+
+    #[test]
+    fn test_engine_termination_releases_persistence_on_error() {
+        let test_harness = TestHarness::new(MAINNET.clone());
+        let (terminate_tx, terminate_rx) = oneshot::channel();
+
+        // The empty mock provider cannot resolve the canonical genesis header during persistence.
+        assert!(test_harness.tree.finish_termination(terminate_tx).is_err());
+        terminate_rx.blocking_recv().unwrap();
+        assert!(matches!(
+            test_harness.action_rx.try_recv(),
+            Err(std::sync::mpsc::TryRecvError::Disconnected)
+        ));
+    }
+
     /// Test that engine termination persists all blocks and signals completion.
     #[test]
     fn test_engine_termination_with_everything_persisted() {
