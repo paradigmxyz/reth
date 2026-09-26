@@ -596,8 +596,13 @@ mod tests {
         rocksdb.put::<tables::TransactionHashNumbers>(hash, &42).unwrap();
         drop(rocksdb);
 
-        let rocksdb =
-            RocksDBBuilder::new(&path).with_default_tables().with_read_only(true).build().unwrap();
+        let rocksdb = RocksDBBuilder::new(&path)
+            .with_default_tables()
+            .with_table::<tables::BlockAccessLists>()
+            .with_table::<tables::BlockAccessListBlockNumbers>()
+            .with_read_only(true)
+            .build()
+            .unwrap();
         assert_eq!(rocksdb.get::<tables::TransactionHashNumbers>(hash).unwrap(), Some(42));
         let store = RocksDBBalStore::new(rocksdb);
         assert_eq!(store.get_by_hash(hash).unwrap(), None);
@@ -622,7 +627,12 @@ mod tests {
     fn read_only_database_reads_persisted_bals() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("db");
-        let rocksdb = RocksDBBuilder::new(&path).with_default_tables().build().unwrap();
+        let rocksdb = RocksDBBuilder::new(&path)
+            .with_default_tables()
+            .with_table::<tables::BlockAccessLists>()
+            .with_table::<tables::BlockAccessListBlockNumbers>()
+            .build()
+            .unwrap();
         let store = RocksDBBalStore::new(rocksdb);
         let block = NumHash::new(42, B256::with_last_byte(1));
         let raw = Bytes::from_static(&[0xc0]);
@@ -630,8 +640,13 @@ mod tests {
         store.flush(&[block]).unwrap();
         drop(store);
 
-        let rocksdb =
-            RocksDBBuilder::new(&path).with_default_tables().with_read_only(true).build().unwrap();
+        let rocksdb = RocksDBBuilder::new(&path)
+            .with_default_tables()
+            .with_table::<tables::BlockAccessLists>()
+            .with_table::<tables::BlockAccessListBlockNumbers>()
+            .with_read_only(true)
+            .build()
+            .unwrap();
         let store = RocksDBBalStore::new(rocksdb);
         assert_eq!(store.get_by_hash(block.hash).unwrap(), Some(raw));
     }
