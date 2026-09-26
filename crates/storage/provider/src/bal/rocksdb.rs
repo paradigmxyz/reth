@@ -105,6 +105,14 @@ impl RocksDBBalStore {
             return Ok(Some(bal))
         }
 
+        // Read-only legacy databases predate both BAL tables.
+        if self.rocksdb.is_read_only() &&
+            !self.rocksdb.has_table::<tables::BlockAccessLists>() &&
+            !self.rocksdb.has_table::<tables::BlockAccessListBlockNumbers>()
+        {
+            return Ok(None)
+        }
+
         let Some(block_number) =
             self.rocksdb.get::<tables::BlockAccessListBlockNumbers>(block_hash)?
         else {
@@ -572,5 +580,74 @@ mod tests {
             retry.iter().map(|(key, _)| NumHash::new(key.number(), key.hash())).collect::<Vec<_>>(),
             vec![first, second]
         );
+    }
+
+    #[test]
+    fn read_only_legacy_database_has_no_persisted_bals() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("db");
+        let hash = B256::with_last_byte(1);
+        let rocksdb = RocksDBBuilder::new(&path)
+            .with_table::<tables::TransactionHashNumbers>()
+            .with_table::<tables::AccountsHistory>()
+            .with_table::<tables::StoragesHistory>()
+            .build()
+            .unwrap();
+        rocksdb.put::<tables::TransactionHashNumbers>(hash, &42).unwrap();
+        drop(rocksdb);
+
+        let rocksdb = RocksDBBuilder::new(&path)
+            .with_default_tables()
+            .with_table::<tables::BlockAccessLists>()
+            .with_table::<tables::BlockAccessListBlockNumbers>()
+            .with_read_only(true)
+            .build()
+            .unwrap();
+        assert_eq!(rocksdb.get::<tables::TransactionHashNumbers>(hash).unwrap(), Some(42));
+        let store = RocksDBBalStore::new(rocksdb);
+        assert_eq!(store.get_by_hash(hash).unwrap(), None);
+
+        let raw = Bytes::from_static(&[0xc0]);
+        store.insert(NumHash::new(42, hash), RawBal::from(raw.clone())).unwrap();
+        assert_eq!(store.get_by_hash(hash).unwrap(), Some(raw));
+        drop(store);
+
+        // The secondary open must not add tables to the primary database.
+        let rocksdb = RocksDBBuilder::new(&path)
+            .with_table::<tables::TransactionHashNumbers>()
+            .with_table::<tables::AccountsHistory>()
+            .with_table::<tables::StoragesHistory>()
+            .build()
+            .unwrap();
+        assert!(!rocksdb.has_table::<tables::BlockAccessLists>());
+        assert!(!rocksdb.has_table::<tables::BlockAccessListBlockNumbers>());
+    }
+
+    #[test]
+    fn read_only_database_reads_persisted_bals() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("db");
+        let rocksdb = RocksDBBuilder::new(&path)
+            .with_default_tables()
+            .with_table::<tables::BlockAccessLists>()
+            .with_table::<tables::BlockAccessListBlockNumbers>()
+            .build()
+            .unwrap();
+        let store = RocksDBBalStore::new(rocksdb);
+        let block = NumHash::new(42, B256::with_last_byte(1));
+        let raw = Bytes::from_static(&[0xc0]);
+        store.insert(block, RawBal::from(raw.clone())).unwrap();
+        store.flush(&[block]).unwrap();
+        drop(store);
+
+        let rocksdb = RocksDBBuilder::new(&path)
+            .with_default_tables()
+            .with_table::<tables::BlockAccessLists>()
+            .with_table::<tables::BlockAccessListBlockNumbers>()
+            .with_read_only(true)
+            .build()
+            .unwrap();
+        let store = RocksDBBalStore::new(rocksdb);
+        assert_eq!(store.get_by_hash(block.hash).unwrap(), Some(raw));
     }
 }
