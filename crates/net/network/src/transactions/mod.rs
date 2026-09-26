@@ -691,9 +691,14 @@ impl<Pool: TransactionPool, N: NetworkPrimitives> TransactionsManager<Pool, N> {
         };
         let has_duplicates = announcement.len() != msg.len();
 
-        // keep track of the transactions the peer knows
-        let count_txns_already_seen_by_peer =
-            msg.iter_hashes().filter(|hash| !peer.seen_transactions.insert(**hash)).count();
+        // Account for all raw hashes before filtering; duplicate announcements need sequential
+        // insertion to preserve both cache hits and eviction order. A peer can force that path
+        // with a single duplicate, which costs it a bad announcement report.
+        let count_txns_already_seen_by_peer = if has_duplicates {
+            msg.iter_hashes().filter(|hash| !peer.seen_transactions.insert(**hash)).count()
+        } else {
+            peer.seen_transactions.insert_unique(msg.hashes())
+        };
         drop(msg);
         if count_txns_already_seen_by_peer > 0 {
             // this may occur if transactions are sent or announced to a peer, at the same time as
@@ -2385,6 +2390,46 @@ mod tests {
         CoinbaseTipOrdering<EthPooledTransaction>,
         InMemoryBlobStore,
     >;
+
+    #[tokio::test]
+    async fn large_announcements_preserve_seen_cache_and_hit_metrics() {
+        let (mut manager, _network) = new_tx_manager().await;
+        let peer_id = PeerId::new([1; 64]);
+        let hashes: Vec<_> =
+            (0..4096u64).map(|i| alloy_primitives::keccak256(i.to_be_bytes())).collect();
+        let repeated = [hashes[..3].to_vec(), vec![hashes[2]; 4093]].concat();
+        for hashes in [hashes, repeated] {
+            let (mut peer, _rx) = new_mock_session(peer_id, EthVersion::Eth68);
+            let mut reference = LruCache::<TxHash, FbBuildHasher<32>>::with_hasher(
+                DEFAULT_MAX_COUNT_TRANSACTIONS_SEEN_BY_PEER,
+                Default::default(),
+            );
+            peer.seen_transactions.insert(hashes[0]);
+            reference.insert(hashes[0]);
+            manager.peers.insert(peer_id, peer);
+            let hits = Arc::new(metrics::atomics::AtomicU64::new(0));
+            manager.metrics.occurrences_hash_already_seen_by_peer =
+                metrics::Counter::from_arc(hits.clone());
+            let mut expected_hits = 0;
+            for _ in 0..2 {
+                expected_hits += hashes.iter().filter(|hash| !reference.insert(**hash)).count();
+                manager.on_new_pooled_transaction_hashes(
+                    peer_id,
+                    NewPooledTransactionHashes68 {
+                        types: vec![2; hashes.len()],
+                        sizes: vec![100; hashes.len()],
+                        hashes: hashes.clone(),
+                    }
+                    .into(),
+                );
+                assert_eq!(hits.load(Ordering::Relaxed), expected_hits as u64);
+                assert_eq!(
+                    manager.peers[&peer_id].seen_transactions.iter().collect::<Vec<_>>(),
+                    reference.iter().collect::<Vec<_>>()
+                );
+            }
+        }
+    }
 
     #[tokio::test]
     async fn announcement_policy_preserves_order_and_skips_pending_and_bad_imports() {
