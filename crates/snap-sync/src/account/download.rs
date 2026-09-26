@@ -131,8 +131,7 @@ where
             self.context.client().clone(),
             request,
             self.context.runtime().clone(),
-        )
-        .expect("origin never exceeds the limit");
+        )?;
 
         Ok(match downloader.await? {
             AccountRangeOutcome::Verified(range) => {

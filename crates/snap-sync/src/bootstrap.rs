@@ -202,7 +202,7 @@ where
 
     // One pass over the attempt: pivot, catch-up, then up to `ranges_per_check` account ranges.
     async fn drive(&mut self, write: SnapWrite, head: u64) -> Result<Step, SnapSyncError> {
-        let (applied, covered) = {
+        let (applied, complete) = {
             let provider = self.factory.database_provider_ro()?;
             if provider.is_trie_rebuild_started(write)? {
                 return Ok(Step::HandedOff(write))
@@ -211,15 +211,14 @@ where
                 .catch_up_progress(write)?
                 .ok_or(SnapSyncError::NoCatchUpProgress)?
                 .applied();
-            let covered = provider.account_coverage(write)?.is_some_and(|c| c.is_complete());
-            (applied, covered)
+            // Repairs are fetched at the pivot, so pending ones still need it served.
+            let complete = provider.account_coverage(write)?.is_some_and(|c| c.is_complete()) &&
+                provider.snap_repairs(write)?.is_empty();
+            (applied, complete)
         };
         // Complete state carried to its pivot needs no further lists, only its trie rebuilt, so
         // neither their retention nor a newer pivot applies to it.
-        if covered && applied == self.pivot()? {
-            if let Some(step) = self.repair().await? {
-                return Ok(step)
-            }
+        if complete && applied == self.pivot()? {
             return self.hand_off(write).await
         }
         // Catch-up continues from the last applied block, not the pivot, so once that block's
@@ -467,7 +466,10 @@ mod tests {
     use alloy_eip7928::{compute_block_access_list_hash, AccountChanges};
     use alloy_eips::eip7928::bal::Bal;
     use alloy_primitives::{Bytes, B256, U256};
-    use reth_eth_wire_types::{snap::BlockAccessListsMessage, BlockAccessLists};
+    use reth_eth_wire_types::{
+        snap::{AccountRangeMessage, BlockAccessListsMessage},
+        BlockAccessLists,
+    };
     use reth_network_p2p::{
         error::{PeerRequestResult, RequestError},
         snap::client::SnapResponse,
@@ -564,6 +566,41 @@ mod tests {
         assert_eq!(*client.origins(), [B256::ZERO]);
         let provider = factory.database_provider_ro().unwrap();
         assert!(provider.is_trie_rebuild_started(write).unwrap());
+    }
+
+    #[tokio::test]
+    async fn pending_repairs_follow_the_pivot_once_the_accounts_are_complete() {
+        let accounts = accounts();
+        let root = state_root(&accounts);
+        let factory = hashed_factory();
+        insert_chain(&factory, 8, root);
+        let provider = factory.database_provider_rw().unwrap();
+        let pivot = provider.sealed_header(2).unwrap().unwrap().num_hash();
+        let write = provider.start_snap_attempt(SnapGeneration::new(pivot, root)).unwrap();
+        provider.start_account_coverage(write).unwrap();
+        let range = verified_range(&accounts, 0..3, B256::ZERO, &[]);
+        provider.commit_account_range(write, &range, Default::default(), Vec::new()).unwrap();
+        let mut repairs = StateRepairs::default();
+        repairs.insert_account(key(2));
+        provider.schedule_snap_repairs(write, repairs).unwrap();
+        provider.commit().unwrap();
+        // No peer serves the repair at pivot 2 any more.
+        let unserved =
+            AccountRangeMessage { request_id: 1, accounts: Vec::new(), proof: Vec::new() };
+        let unserved = Ok(WithPeerId::new(PeerId::random(), SnapResponse::AccountRange(unserved)));
+        let (_, mut bootstrap) = scripted(&factory, [unserved], [3]);
+        assert_eq!(bootstrap.run().await.unwrap(), SnapBootstrapOutcome::Stopped);
+
+        // Once the head moves on, the pivot advances and the repair is fetched there.
+        let responses = [empty_lists(1, 5), account_range(1, &accounts, 1..2, &[key(2)])];
+        let (client, mut bootstrap) = scripted(&factory, responses, [8]);
+        let outcome = bootstrap.run().await.unwrap();
+
+        let SnapBootstrapOutcome::TrieRebuild { pivot, .. } = outcome else {
+            panic!("the state is complete: {outcome:?}")
+        };
+        assert_eq!(pivot.number, 7);
+        assert_eq!(*client.origins(), [key(2)]);
     }
 
     #[tokio::test]

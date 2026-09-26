@@ -80,11 +80,8 @@ pub trait SnapAccountStore {
     where
         Self: MetadataWriter;
 
-    /// Writes the account at `range`'s origin with the pivot's values of `slots`, and drops what
-    /// they resolve from the scheduled repairs, returning what remains.
-    ///
-    /// Catch-up must have carried the downloaded state to the pivot `range` was proved against, so
-    /// the rest of the state is at the same block, and the account's code must be stored.
+    /// Writes the pivot's account at `range`'s origin and its `slots`, returning the repairs that
+    /// remain. Refused until catch-up reaches the pivot.
     fn commit_account_repair(
         &self,
         write: SnapWrite,
