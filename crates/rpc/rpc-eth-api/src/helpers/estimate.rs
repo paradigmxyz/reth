@@ -1,6 +1,6 @@
 //! Estimate gas needed implementation
 
-use super::{Call, LoadPendingBlock};
+use super::{blocking_task::is_cancelled, Call, LoadPendingBlock};
 use crate::{AsEthApiError, FromEthApiError, IntoEthApiError};
 use alloy_evm::overrides::{apply_block_overrides, apply_state_overrides};
 use alloy_network::TransactionBuilder;
@@ -265,6 +265,10 @@ pub trait EstimateCall: Call {
             if ratio < ESTIMATE_GAS_ERROR_RATIO {
                 break
             };
+
+            if is_cancelled() {
+                return Err(EthApiError::InternalEthError.into())
+            }
 
             let mut mid_tx_env = tx_env.clone();
             mid_tx_env.set_gas_limit(mid_gas_limit);

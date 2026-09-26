@@ -2,12 +2,13 @@
 //! are executed on the `tokio` runtime.
 
 use futures::Future;
+use reth_revm::cancelled::CancelOnDrop;
 use reth_rpc_eth_types::EthApiError;
 use reth_tasks::{
     pool::{BlockingTaskGuard, BlockingTaskPool},
     Runtime,
 };
-use std::sync::Arc;
+use std::{cell::RefCell, sync::Arc};
 use tokio::sync::{oneshot, AcquireError, OwnedSemaphorePermit, Semaphore};
 
 use crate::EthApiTypes;
@@ -163,15 +164,21 @@ pub trait SpawnBlocking: EthApiTypes + Clone + Send + Sync + 'static {
     {
         let (tx, rx) = oneshot::channel();
         let this = self.clone();
+        let cancel = CancelOnDrop::default();
+        let request = cancel.clone();
         self.io_task_spawner().spawn_blocking_task(async move {
             if tx.is_closed() {
                 return
             }
-            let res = f(this);
+            let res = with_cancel(cancel, || f(this));
             let _ = tx.send(res);
         });
 
-        async move { rx.await.map_err(|_| EthApiError::InternalEthError)? }
+        async move {
+            // cancels the blocking task once the request is dropped, see `is_cancelled`
+            let _request = request;
+            rx.await.map_err(|_| EthApiError::InternalEthError)?
+        }
     }
 
     /// Executes the future on a new blocking task.
@@ -220,4 +227,34 @@ pub trait SpawnBlocking: EthApiTypes + Clone + Send + Sync + 'static {
         let fut = self.tracing_task_pool().spawn(move || f(this));
         async move { fut.await.map_err(|_| EthApiError::InternalBlockingTaskError)? }
     }
+}
+
+/// Returns `true` if the request that spawned the current blocking task was dropped.
+///
+/// Tasks spawned with [`SpawnBlocking::spawn_blocking_io`] keep running when the request is
+/// dropped, for example because the client disconnected. Long running work should check this
+/// between units of work, such as transactions, and stop early since nobody waits for the result.
+///
+/// Always returns `false` outside of such a task.
+pub fn is_cancelled() -> bool {
+    CANCEL.with_borrow(|cancel| cancel.as_ref().is_some_and(CancelOnDrop::is_cancelled))
+}
+
+thread_local! {
+    /// Cancellation state of the request served by the blocking task on this thread.
+    static CANCEL: RefCell<Option<CancelOnDrop>> = const { RefCell::new(None) };
+}
+
+/// Runs `f` with `cancel` as the cancellation state of the current thread, see [`is_cancelled`].
+fn with_cancel<R>(cancel: CancelOnDrop, f: impl FnOnce() -> R) -> R {
+    struct Restore(Option<CancelOnDrop>);
+
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            CANCEL.set(self.0.take());
+        }
+    }
+
+    let _restore = Restore(CANCEL.replace(Some(cancel)));
+    f()
 }
