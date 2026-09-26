@@ -30,6 +30,7 @@ use tokio::{
 };
 use tracing::debug;
 
+pub mod cancel;
 pub mod lazy;
 pub mod metrics;
 pub mod runtime;
@@ -48,6 +49,7 @@ pub mod for_each_ordered;
 #[cfg(feature = "rayon")]
 pub use for_each_ordered::ForEachOrdered;
 
+pub use cancel::CancelOnDrop;
 pub use lazy::LazyHandle;
 #[cfg(feature = "rayon")]
 pub use runtime::RayonConfig;
