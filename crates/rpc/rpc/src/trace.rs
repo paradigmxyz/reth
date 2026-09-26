@@ -1,5 +1,5 @@
 use alloy_consensus::BlockHeader as _;
-use alloy_eips::BlockId;
+use alloy_eips::{BlockId, BlockNumberOrTag};
 use alloy_evm::block::calc::{base_block_reward_pre_merge, block_reward, ommer_reward};
 use alloy_primitives::{
     map::{HashMap, HashSet},
@@ -27,7 +27,7 @@ use reth_rpc_eth_api::{
     FromEthApiError, RpcNodeCore,
 };
 use reth_rpc_eth_types::{error::EthApiError, EthConfig};
-use reth_storage_api::{BlockNumReader, BlockReader};
+use reth_storage_api::{BlockIdReader, BlockNumReader, BlockReader};
 use reth_tasks::pool::BlockingTaskGuard;
 use reth_transaction_pool::{PoolPooledTx, PoolTransaction, TransactionPool};
 use revm::DatabaseCommit;
@@ -379,12 +379,26 @@ where
         let TraceFilter { from_block, to_block, mut after, count, .. } = filter;
 
         let latest_block = self.provider().best_block_number().map_err(Eth::Error::from_eth_err)?;
-        let start = from_block.unwrap_or(latest_block);
+        let resolve_block = |block: Option<BlockNumberOrTag>| -> Result<u64, Eth::Error> {
+            match block {
+                None | Some(BlockNumberOrTag::Latest) => Ok(latest_block),
+                Some(BlockNumberOrTag::Pending) => Err(EthApiError::InvalidParams(
+                    "invalid parameters: pending block is not supported".to_string(),
+                )
+                .into()),
+                Some(block) => self
+                    .provider()
+                    .convert_block_number(block)
+                    .map_err(Eth::Error::from_eth_err)?
+                    .ok_or_else(|| EthApiError::HeaderNotFound(block.into()).into()),
+            }
+        };
+        let start = resolve_block(from_block)?;
         if start > latest_block {
             // can't trace that range
             return Err(EthApiError::HeaderNotFound(start.into()).into());
         }
-        let end = to_block.unwrap_or(latest_block);
+        let end = resolve_block(to_block)?;
         if end > latest_block {
             return Err(EthApiError::HeaderNotFound(end.into()).into());
         }
@@ -981,19 +995,46 @@ mod tests {
         assert_eq!(omitted, latest);
         assert!(api.trace_filter(TraceFilter::default().from_block(1).to_block(2)).await.is_ok());
 
-        let module = api.into_rpc();
-        let request = serde_json::json!({
-            "jsonrpc": "2.0", "id": 1, "method": "trace_filter", "params": [{"toBlock": "0x1"}],
-        });
-        let (response, _) = module.raw_json_request(&request.to_string(), 1).await.unwrap();
-        let response: serde_json::Value = serde_json::from_str(response.get()).unwrap();
         assert_eq!(
-            response["error"],
-            serde_json::json!({
-                "code": -32602,
-                "message": "invalid parameters: fromBlock cannot be greater than toBlock",
-            })
+            api.trace_filter(
+                TraceFilter::default()
+                    .from_block(BlockNumberOrTag::Latest)
+                    .to_block(BlockNumberOrTag::Latest)
+            )
+            .await
+            .unwrap(),
+            latest
         );
+        let earliest = api
+            .trace_filter(TraceFilter::default().from_block(BlockNumberOrTag::Earliest).to_block(0))
+            .await
+            .unwrap();
+        assert_eq!(
+            earliest,
+            api.trace_filter(TraceFilter::default().from_block(0).to_block(0)).await.unwrap()
+        );
+
+        let module = api.into_rpc();
+        for (params, message) in [
+            (
+                serde_json::json!({"toBlock": "0x1"}),
+                "invalid parameters: fromBlock cannot be greater than toBlock",
+            ),
+            (
+                serde_json::json!({"fromBlock": "pending"}),
+                "invalid parameters: pending block is not supported",
+            ),
+        ] {
+            let request = serde_json::json!({
+                "jsonrpc": "2.0", "id": 1, "method": "trace_filter", "params": [params],
+            });
+            let (response, _) = module.raw_json_request(&request.to_string(), 1).await.unwrap();
+            let response: serde_json::Value = serde_json::from_str(response.get()).unwrap();
+            assert_eq!(
+                response["error"],
+                serde_json::json!({ "code": -32602, "message": message })
+            );
+        }
     }
 
     #[tokio::test]
@@ -1246,8 +1287,7 @@ mod tests {
             [(1, None, true)]
         );
         for (to_block, expected) in [(0, vec![]), (1, vec![(1, None, true)])] {
-            let filter =
-                TraceFilter { from_block: Some(0), to_block: Some(to_block), ..Default::default() };
+            let filter = TraceFilter::default().from_block(0).to_block(to_block);
             assert_eq!(trace_order(&api.trace_filter(filter).await.unwrap()), expected);
         }
     }
