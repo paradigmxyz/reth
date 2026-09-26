@@ -118,7 +118,11 @@ use alloy_primitives::{
     map::{AddressMap, B256Set},
     B256,
 };
+use alloy_rpc_types_debug::ExecutionWitness;
+use reth_engine_primitives::PayloadWitnessRequests;
+use reth_revm::witness::ExecutionWitnessRecord;
 use reth_tasks::LazyHandle;
+use reth_trie::ExecutionWitnessMode;
 
 use crate::tree::{
     payload_processor::receipt_root_task::{IndexedReceipt, ReceiptRootTaskHandle},
@@ -306,6 +310,8 @@ where
     txpool_prewarm: Option<txpool_prewarm::Handle<Evm::Primitives, P, Evm>>,
     /// Scratch buffer reused for BAL hash encoding across validated blocks.
     bal_hash_buf: Vec<u8>,
+    /// Outstanding RPC requests for execution witnesses.
+    witness_requests: Option<PayloadWitnessRequests>,
 }
 
 impl<N, P, Evm, V> BasicEngineValidator<P, Evm, V>
@@ -373,7 +379,15 @@ where
             state_root_strategy: Arc::new(DefaultStateRootStrategy::default()),
             txpool_prewarm: None,
             bal_hash_buf: Vec::new(),
+            witness_requests: None,
         }
+    }
+
+    /// Connects request-scoped witness capture to the Engine API.
+    pub fn with_witness_requests(mut self, requests: PayloadWitnessRequests) -> Self {
+        requests.enable();
+        self.witness_requests = Some(requests);
+        self
     }
 
     /// Sets the state-root strategy used by payload validation.
@@ -610,7 +624,12 @@ where
         // Get an iterator over the transactions in the payload
         let txs = self.tx_iterator_for(&input)?;
 
-        let parallel_bal_execution = ensure_ok!(self.bal_path_eligible(env.decoded_bal.as_deref()));
+        let witness_request = self.witness_requests.as_ref().and_then(|r| r.pending(&input.hash()));
+        let mut witness = None;
+        // The serial path retains the complete execution read set and still rebuilds and
+        // validates the supplied BAL. Choose it before preparing state-root streaming tasks.
+        let parallel_bal_execution = ensure_ok!(self.bal_path_eligible(env.decoded_bal.as_deref())) &&
+            witness_request.is_none();
 
         // Prepare the state-root job before execution so it can provide streaming hooks.
         let mut state_root_job =
@@ -736,6 +755,7 @@ where
                     &input,
                     &mut handle,
                     execution_state_hook,
+                    witness_request.as_ref().map(|_| (&mut witness, &state_provider_factory)),
                 ),
                 Err(err) => Err(err.into()),
             }
@@ -906,6 +926,30 @@ where
             .into())
         }
 
+        if let Some(request) = witness_request &&
+            let Some(witness) = witness
+        {
+            // Publish only after consensus, BAL, receipts and state-root validation. An invalid
+            // submission may claim the same hash as a concurrent valid request.
+            let witness = witness.and_then(|(mut witness, first_header)| {
+                let mut header = parent_block.clone();
+                loop {
+                    witness.headers.push(alloy_rlp::encode(header.header()).into());
+                    if header.number() <= first_header {
+                        break;
+                    }
+                    let hash = header.parent_hash();
+                    header = self
+                        .sealed_header_by_hash(hash, ctx.state())
+                        .map_err(|err| err.to_string())?
+                        .ok_or_else(|| format!("witness ancestor {hash} not found"))?;
+                }
+                witness.headers.reverse();
+                Ok(super::witness::encode_witness(witness))
+            });
+            request.publish(witness);
+        }
+
         let timing_stats = state_provider_stats.filter(|_| slow_block_enabled).map(|stats| {
             self.calculate_timing_stats(
                 &block,
@@ -1021,6 +1065,10 @@ where
         input: &BlockOrPayload<T>,
         handle: &mut PayloadHandle<impl ExecutableTxFor<Evm>, Err, N::Receipt>,
         state_hook: Option<Box<dyn OnStateHook + 'static>>,
+        witness: Option<(
+            &mut Option<Result<(ExecutionWitness, u64), String>>,
+            &OverlayStateProviderFactory<P, N>,
+        )>,
     ) -> Result<
         (BlockExecutionOutput<N::Receipt>, Vec<Address>, ReceiptRootReceiver, Option<ExecutedBal>),
         InsertBlockErrorKind,
@@ -1102,6 +1150,28 @@ where
         // Merge transitions into bundle state
         debug_span!(target: "engine::tree", "merge_transitions")
             .in_scope(|| db.merge_transitions(BundleRetention::Reverts));
+
+        if let Some((witness, state_provider_factory)) = witness {
+            let first_header = db
+                .block_hashes
+                .lowest()
+                .map(|(number, _)| number)
+                .unwrap_or_else(|| input.num_hash().number.saturating_sub(1));
+            *witness = Some(
+                // Execution uses a lightweight provider; proofs need the same parent overlay's
+                // trie cursors, which are available through its full database provider.
+                state_provider_factory
+                    .database_provider_ro()
+                    .and_then(|provider| {
+                        ExecutionWitnessRecord::new(&db).into_execution_witness_without_headers(
+                            &provider,
+                            ExecutionWitnessMode::Canonical,
+                        )
+                    })
+                    .map(|witness| (witness, first_header))
+                    .map_err(|err| err.to_string()),
+            );
+        }
 
         // The builder only exists when the block declares a BAL. The revm form is the one shared
         // with the executed block, so it must survive here; the clone only feeds the

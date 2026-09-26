@@ -75,6 +75,7 @@ mod tests;
 mod trie_updates;
 mod txpool_prewarm;
 pub mod types;
+mod witness;
 
 use crate::{persistence::PersistenceResult, tree::error::AdvancePersistenceError};
 pub use block_buffer::BlockBuffer;
