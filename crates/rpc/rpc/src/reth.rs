@@ -14,6 +14,7 @@ use reth_errors::{RethError, RethResult};
 use reth_evm::{execute::Executor, ConfigureEvm};
 use reth_execution_types::{Chain, ExecutionOutcome};
 use reth_primitives_traits::{NodePrimitives, SealedHeader};
+use reth_revm::cancelled::CancelOnDrop;
 use reth_rpc_api::{RethApiServer, RethJitAction};
 use reth_rpc_eth_types::{EthApiError, EthResult};
 use reth_storage_api::{
@@ -139,17 +140,23 @@ where
             .acquire_owned()
             .await
             .map_err(|_| EthApiError::InternalEthError)?;
-        self.on_blocking_task(async move |this| {
-            let _permit = permit;
-            this.try_block_execution_outcome(block_id, block_count)
-        })
-        .await
+        let guard = CancelOnDrop::default();
+        let cancel = guard.clone();
+        let outcome = self
+            .on_blocking_task(async move |this| {
+                let _permit = permit;
+                this.try_block_execution_outcome(block_id, block_count, &cancel)
+            })
+            .await;
+        drop(guard);
+        outcome
     }
 
     fn try_block_execution_outcome(
         &self,
         block_id: BlockId,
         block_count: u64,
+        cancel: &CancelOnDrop,
     ) -> EthResult<Option<ExecutionOutcome<N::Receipt>>> {
         let Some(start_block) = self.provider().block_number_for_id(block_id)? else {
             return Ok(None)
@@ -178,11 +185,16 @@ where
             blocks.push(block);
         }
 
-        let outcome = self.evm_config().executor(db).execute_batch(&blocks).map_err(
+        // stop between blocks once the request is dropped
+        let blocks = blocks.iter().take_while(|_| !cancel.is_cancelled());
+        let outcome = self.evm_config().executor(db).execute_batch(blocks).map_err(
             |e: reth_evm::execute::BlockExecutionError| {
                 EthApiError::Internal(reth_errors::RethError::Other(e.into()))
             },
         )?;
+        if cancel.is_cancelled() {
+            return Err(EthApiError::InternalEthError)
+        }
 
         Ok(Some(outcome))
     }
