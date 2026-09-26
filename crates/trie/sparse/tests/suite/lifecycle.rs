@@ -619,4 +619,17 @@ pub(super) fn test_prune_then_reuse_for_next_block<T: SparseTrie>(new_trie: fn()
         harness.original_root(),
         "cold path root should match reference (K1 and K5 updated)"
     );
+
+    // --- Block 3: prune a trie that already holds blinded children, then re-reveal one ---
+    let _ = trie.take_updates();
+    trie.prune(epoch(2));
+
+    let mut changeset3: BTreeMap<B256, U256> = BTreeMap::new();
+    changeset3.insert(keys[7], U256::from(777));
+    let mut leaf_updates3 = SuiteTestHarness::leaf_updates(&changeset3);
+    harness.reveal_and_update(&mut trie, &mut leaf_updates3);
+    let root3 = trie.root(epoch(3));
+
+    harness.apply_changeset(changeset3);
+    assert_eq!(root3, harness.original_root(), "block 3 root should match reference");
 }

@@ -513,7 +513,6 @@ serde = { version = "1.0", default-features = false }
 serde_json = { version = "1.0", default-features = false, features = ["alloc"] }
 serde_with = { version = "3", default-features = false, features = ["macros"] }
 sha2 = { version = "0.10", default-features = false }
-slotmap = "1"
 smallvec = "1"
 strum = { version = "0.27", default-features = false }
 thiserror = { version = "2.0.0", default-features = false }
