@@ -30,7 +30,8 @@ pub const DEFAULT_RANGES_PER_CHECK: usize = 64;
 /// Drives snap synchronization until its downloaded state is ready for the trie rebuild.
 ///
 /// Each pass moves a lagging pivot forward, applies the block access lists that carry the
-/// downloaded state to it, then downloads account ranges with their storage and code. An attempt
+/// downloaded state to it, fetches scheduled repairs again at it, then downloads account ranges
+/// with their storage and code. An attempt
 /// whose pivot leaves the canonical chain or outlives the served lists is abandoned and started
 /// over.
 pub struct SnapBootstrap<C, F, X> {
@@ -201,7 +202,7 @@ where
 
     // One pass over the attempt: pivot, catch-up, then up to `ranges_per_check` account ranges.
     async fn drive(&mut self, write: SnapWrite, head: u64) -> Result<Step, SnapSyncError> {
-        let (applied, covered) = {
+        let (applied, complete) = {
             let provider = self.factory.database_provider_ro()?;
             if provider.is_trie_rebuild_started(write)? {
                 return Ok(Step::HandedOff(write))
@@ -210,12 +211,14 @@ where
                 .catch_up_progress(write)?
                 .ok_or(SnapSyncError::NoCatchUpProgress)?
                 .applied();
-            let covered = provider.account_coverage(write)?.is_some_and(|c| c.is_complete());
-            (applied, covered)
+            // Repairs are fetched at the pivot, so pending ones still need it served.
+            let complete = provider.account_coverage(write)?.is_some_and(|c| c.is_complete()) &&
+                provider.snap_repairs(write)?.is_empty();
+            (applied, complete)
         };
         // Complete state carried to its pivot needs no further lists, only its trie rebuilt, so
         // neither their retention nor a newer pivot applies to it.
-        if covered && applied == self.pivot()? {
+        if complete && applied == self.pivot()? {
             return self.hand_off(write).await
         }
         // Catch-up continues from the last applied block, not the pivot, so once that block's
@@ -228,6 +231,11 @@ where
         // Lists only update accounts already downloaded, so coverage grows once they reach the
         // pivot.
         if let Some(step) = self.catch_up(write).await? {
+            return Ok(step)
+        }
+        // Repairs take the pivot's values, which the rest of the state holds once the lists reach
+        // it.
+        if let Some(step) = self.repair().await? {
             return Ok(step)
         }
         self.download_ranges(write).await
@@ -260,6 +268,30 @@ where
                 }
                 CatchUpStep::Unavailable { .. } => return Ok(Some(Step::Wait)),
             }
+            if self.cancel.is_cancelled() {
+                return Ok(Some(Step::Stop))
+            }
+        }
+    }
+
+    // Fetches every scheduled repair again at the pivot, with the slots and code it needs. `Some`
+    // ends the pass.
+    async fn repair(&mut self) -> Result<Option<Step>, SnapSyncError> {
+        loop {
+            let range = match self.accounts.next_repair().await? {
+                None => return Ok(None),
+                Some(AccountRangeStep::Verified(range)) => range,
+                Some(AccountRangeStep::Unavailable { .. }) => return Ok(Some(Step::Wait)),
+            };
+            let Some(slots) = self.storage.repair_slots(&range).await? else {
+                return Ok(Some(Step::Wait))
+            };
+            if let Some(step) = self.download_code(&range).await? {
+                return Ok(Some(step))
+            }
+            let hashed_address = range.origin();
+            let remaining = self.accounts.commit_repair(range, slots).await?;
+            debug!(target: "sync::snap", %hashed_address, remaining, "Repaired snap account");
             if self.cancel.is_cancelled() {
                 return Ok(Some(Step::Stop))
             }
@@ -303,6 +335,14 @@ where
                 return Ok(Some(Step::Stop))
             }
         }
+        self.download_code(range).await
+    }
+
+    // Persists the code `range` references. `Some` ends the pass.
+    async fn download_code(
+        &mut self,
+        range: &VerifiedRange,
+    ) -> Result<Option<Step>, SnapSyncError> {
         loop {
             match self.bytecode.next(range).await? {
                 BytecodeStep::Complete => return Ok(None),
@@ -416,14 +456,20 @@ enum Step {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_utils::{
-        account, account_range, hashed_factory, header, key, policy, state_root, storage_ranges,
-        storage_root_of, verified_range, ScriptedSnapClient,
+    use crate::{
+        test_utils::{
+            account, account_range, hashed_factory, header, key, policy, state_root,
+            storage_ranges, storage_root_of, verified_range, ScriptedSnapClient,
+        },
+        StateRepairs,
     };
     use alloy_eip7928::{compute_block_access_list_hash, AccountChanges};
     use alloy_eips::eip7928::bal::Bal;
     use alloy_primitives::{Bytes, B256, U256};
-    use reth_eth_wire_types::{snap::BlockAccessListsMessage, BlockAccessLists};
+    use reth_eth_wire_types::{
+        snap::{AccountRangeMessage, BlockAccessListsMessage},
+        BlockAccessLists,
+    };
     use reth_network_p2p::{
         error::{PeerRequestResult, RequestError},
         snap::client::SnapResponse,
@@ -520,6 +566,68 @@ mod tests {
         assert_eq!(*client.origins(), [B256::ZERO]);
         let provider = factory.database_provider_ro().unwrap();
         assert!(provider.is_trie_rebuild_started(write).unwrap());
+    }
+
+    #[tokio::test]
+    async fn pending_repairs_follow_the_pivot_once_the_accounts_are_complete() {
+        let accounts = accounts();
+        let root = state_root(&accounts);
+        let factory = hashed_factory();
+        insert_chain(&factory, 8, root);
+        let provider = factory.database_provider_rw().unwrap();
+        let pivot = provider.sealed_header(2).unwrap().unwrap().num_hash();
+        let write = provider.start_snap_attempt(SnapGeneration::new(pivot, root)).unwrap();
+        provider.start_account_coverage(write).unwrap();
+        let range = verified_range(&accounts, 0..3, B256::ZERO, &[]);
+        provider.commit_account_range(write, &range, Default::default(), Vec::new()).unwrap();
+        let mut repairs = StateRepairs::default();
+        repairs.insert_account(key(2));
+        provider.schedule_snap_repairs(write, repairs).unwrap();
+        provider.commit().unwrap();
+        // No peer serves the repair at pivot 2 any more.
+        let unserved =
+            AccountRangeMessage { request_id: 1, accounts: Vec::new(), proof: Vec::new() };
+        let unserved = Ok(WithPeerId::new(PeerId::random(), SnapResponse::AccountRange(unserved)));
+        let (_, mut bootstrap) = scripted(&factory, [unserved], [3]);
+        assert_eq!(bootstrap.run().await.unwrap(), SnapBootstrapOutcome::Stopped);
+
+        // Once the head moves on, the pivot advances and the repair is fetched there.
+        let responses = [empty_lists(1, 5), account_range(1, &accounts, 1..2, &[key(2)])];
+        let (client, mut bootstrap) = scripted(&factory, responses, [8]);
+        let outcome = bootstrap.run().await.unwrap();
+
+        let SnapBootstrapOutcome::TrieRebuild { pivot, .. } = outcome else {
+            panic!("the state is complete: {outcome:?}")
+        };
+        assert_eq!(pivot.number, 7);
+        assert_eq!(*client.origins(), [key(2)]);
+    }
+
+    #[tokio::test]
+    async fn scheduled_repairs_are_fetched_at_the_pivot_before_ranges() {
+        let accounts = accounts();
+        let factory = hashed_factory();
+        insert_chain(&factory, 3, state_root(&accounts));
+        let provider = factory.database_provider_rw().unwrap();
+        let pivot = provider.sealed_header(2).unwrap().unwrap().num_hash();
+        let write =
+            provider.start_snap_attempt(SnapGeneration::new(pivot, state_root(&accounts))).unwrap();
+        provider.start_account_coverage(write).unwrap();
+        let mut repairs = StateRepairs::default();
+        repairs.insert_account(key(2));
+        provider.schedule_snap_repairs(write, repairs).unwrap();
+        provider.commit().unwrap();
+        let responses =
+            // One download fetches the repair and then the ranges, numbering both requests.
+            [account_range(1, &accounts, 1..2, &[key(2)]), account_range(2, &accounts, 0..3, &[])];
+        let (client, mut bootstrap) = scripted(&factory, responses, [3]);
+
+        let outcome = bootstrap.run().await.unwrap();
+
+        assert!(matches!(outcome, SnapBootstrapOutcome::TrieRebuild { .. }), "{outcome:?}");
+        assert_eq!(*client.origins(), [key(2), B256::ZERO]);
+        let provider = factory.database_provider_ro().unwrap();
+        assert!(provider.snap_repairs(write).unwrap().is_empty());
     }
 
     #[tokio::test]
