@@ -427,8 +427,23 @@ where
             )
             .await
         });
+        // The connection drops its pending calls when it closes, so the call must not outlive the
+        // returned future, otherwise it keeps running without anyone waiting for the response.
+        let abort_on_drop = AbortOnDrop(f.abort_handle());
 
-        Box::pin(async move { f.await.map_err(|err| err.into()) })
+        Box::pin(async move {
+            let _abort_on_drop = abort_on_drop;
+            f.await.map_err(|err| err.into())
+        })
+    }
+}
+
+/// Aborts the task when dropped.
+struct AbortOnDrop(tokio::task::AbortHandle);
+
+impl Drop for AbortOnDrop {
+    fn drop(&mut self) {
+        self.0.abort();
     }
 }
 
@@ -924,6 +939,38 @@ mod tests {
         let client4 = IpcClientBuilder::default().build(endpoint).await.unwrap();
         let response4: Result<String, Error> = client4.request("anything", rpc_params![]).await;
         assert!(response4.is_ok());
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_pending_call_aborted_on_disconnect() {
+        init_test_tracing();
+
+        let endpoint = &dummy_name();
+        let server = Builder::default().build(endpoint.clone());
+        let (started_tx, started_rx) = oneshot::channel::<()>();
+        let (dropped_tx, dropped_rx) = oneshot::channel::<()>();
+        let mut module = RpcModule::new(std::sync::Mutex::new(Some((started_tx, dropped_tx))));
+        module
+            .register_async_method("hang", |_, ctx, _| async move {
+                // `dropped_tx` is dropped together with the call
+                let (started_tx, _dropped_tx) = ctx.lock().unwrap().take().unwrap();
+                let _ = started_tx.send(());
+                std::future::pending::<()>().await;
+                "unreachable"
+            })
+            .unwrap();
+        let handle = server.start(module).await.unwrap();
+        tokio::spawn(handle.stopped());
+
+        let client = IpcClientBuilder::default().build(endpoint).await.unwrap();
+        tokio::select! {
+            _ = client.request::<String, _>("hang", rpc_params![]) => panic!("call completed"),
+            _ = started_rx => {}
+        }
+        drop(client);
+
+        let dropped = tokio::time::timeout(std::time::Duration::from_secs(5), dropped_rx).await;
+        assert!(dropped.is_ok(), "call kept running after the connection closed");
     }
 
     #[tokio::test]
