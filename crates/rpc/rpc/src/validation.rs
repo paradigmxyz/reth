@@ -522,6 +522,10 @@ where
         let decoded_bal =
             DecodedBal::from_rlp_bytes(payload.as_v4().unwrap().block_access_list.clone())
                 .map_err(ValidationApiError::InvalidBlockAccessList)?;
+        decoded_bal
+            .as_bal()
+            .validate_gas_limit(payload.as_v1().gas_limit)
+            .map_err(ConsensusError::from)?;
 
         let block = self.recover_payload(ExecutionData {
             payload,
