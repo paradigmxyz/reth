@@ -1,8 +1,9 @@
 use super::{
-    branch_child_idx::{BranchChildIdx, BranchChildIter},
-    ArenaSparseNode, ArenaSparseNodeBranchChild, ArenaSparseNodeState, Index, NodeArena,
+    branch_child_idx::BranchChildIdx, ArenaSparseNode, ArenaSparseNodeBranchChild,
+    ArenaSparseNodeState, Index, NodeArena,
 };
 use alloc::vec::Vec;
+use alloy_trie::TrieMask;
 use reth_trie_common::Nibbles;
 use tracing::{instrument, trace};
 
@@ -15,9 +16,9 @@ pub(super) struct ArenaCursorStackEntry {
     pub(super) index: Index,
     /// The absolute path of this node in the trie (not including its `short_key`).
     pub(super) path: Nibbles,
-    /// The dense index at which to resume child iteration in [`ArenaCursor::next`].
-    /// Only meaningful when this entry's node is a branch.
-    pub(super) next_dense_idx: usize,
+    /// The nibble at which to resume child iteration in [`ArenaCursor::next`]. Only meaningful
+    /// when this entry's node is a branch. `16` means all children have been visited.
+    pub(super) next_nibble: u8,
 }
 
 /// Result of [`ArenaCursor::seek`] describing the state at the deepest ancestor node.
@@ -106,7 +107,7 @@ impl ArenaCursor {
     /// Pushes an entry onto the stack for the node at the given index and path.
     fn push(&mut self, arena: &NodeArena, idx: Index, path: Nibbles) {
         debug_assert!(arena.contains_key(idx), "push called with invalid arena index");
-        self.stack.push(ArenaCursorStackEntry { index: idx, path, next_dense_idx: 0 });
+        self.stack.push(ArenaCursorStackEntry { index: idx, path, next_nibble: 0 });
         trace!(target: TRACE_TARGET, entry = ?self.stack.last().expect("just pushed"), "Pushed stack entry");
     }
 
@@ -143,6 +144,20 @@ impl ArenaCursor {
                 *arena[parent.index].state_mut() = ArenaSparseNodeState::Dirty;
             }
         }
+
+        entry
+    }
+
+    /// Pops the top entry from the stack without propagating dirty state to the parent.
+    fn pop_clean(&mut self, arena: &NodeArena) -> ArenaCursorStackEntry {
+        let entry = self.stack.pop().expect("pop can't be called on empty stack");
+
+        debug_assert!(
+            !arena
+                .get(entry.index)
+                .is_some_and(|node| matches!(node.state_ref(), Some(ArenaSparseNodeState::Dirty))),
+            "pop_clean called on a dirty node: {entry:?}",
+        );
 
         entry
     }
@@ -241,52 +256,74 @@ impl ArenaCursor {
         arena: &mut NodeArena,
         should_descend: impl Fn(usize, &ArenaSparseNode) -> bool,
     ) -> NextResult {
+        self.advance::<true>(arena, should_descend)
+    }
+
+    /// Like [`Self::next`], but skips the dirty-state propagation when popping.
+    ///
+    /// Only for walks that leave every visited node clean, such as the hashing walk, which
+    /// caches each branch before the cursor pops it. Debug builds assert this.
+    pub(super) fn next_clean(
+        &mut self,
+        arena: &mut NodeArena,
+        should_descend: impl Fn(usize, &ArenaSparseNode) -> bool,
+    ) -> NextResult {
+        self.advance::<false>(arena, should_descend)
+    }
+
+    fn advance<const PROPAGATE_DIRTY: bool>(
+        &mut self,
+        arena: &mut NodeArena,
+        should_descend: impl Fn(usize, &ArenaSparseNode) -> bool,
+    ) -> NextResult {
         if self.needs_pop {
-            self.pop(arena);
+            if PROPAGATE_DIRTY {
+                self.pop(arena);
+            } else {
+                self.pop_clean(arena);
+            }
             self.needs_pop = false;
         }
 
         loop {
-            let Some(head) = self.stack.last_mut() else {
+            let Some(head) = self.stack.last() else {
                 return NextResult::Done;
             };
             let head_idx = head.index;
+            let resume_nibble = head.next_nibble;
+            let child_depth = self.stack.len();
 
             let ArenaSparseNode::Branch(branch) = &arena[head_idx] else {
                 self.needs_pop = true;
                 return NextResult::NonBranch;
             };
 
-            let state_mask = branch.state_mask;
-            let start = head.next_dense_idx;
-            let child_depth = self.stack.len();
+            // Resume the scan by masking off the children that were already visited, so a branch
+            // with many dirty children isn't rescanned from nibble 0 on every descent.
+            let state_mask = branch.state_mask.get() as u32;
+            let visited = state_mask & ((1u32 << resume_nibble) - 1);
+            let remaining = TrieMask::new((state_mask & !visited) as u16);
 
-            let mut descended = false;
-            for (branch_child_idx, nibble) in BranchChildIter::new(state_mask) {
-                if branch_child_idx.get() < start {
-                    continue;
-                }
-
-                let child_idx = match &arena[head_idx].branch_ref().children[branch_child_idx] {
-                    ArenaSparseNodeBranchChild::Revealed(child_idx) => *child_idx,
-                    ArenaSparseNodeBranchChild::Blinded(_) => continue,
-                };
-
-                if should_descend(child_depth, &arena[child_idx]) {
-                    // Record where to resume iteration when we return to this entry.
-                    self.stack.last_mut().expect("head exists").next_dense_idx =
-                        branch_child_idx.get() + 1;
-                    let path = self.child_path(arena, nibble);
-                    self.push(arena, child_idx, path);
-                    descended = true;
+            let mut descended = None;
+            for (child, nibble) in
+                branch.children[visited.count_ones() as usize..].iter().zip(remaining.iter())
+            {
+                let ArenaSparseNodeBranchChild::Revealed(child_idx) = child else { continue };
+                if should_descend(child_depth, &arena[*child_idx]) {
+                    descended = Some((nibble, *child_idx));
                     break;
                 }
             }
 
-            if !descended {
+            let Some((nibble, child_idx)) = descended else {
                 self.needs_pop = true;
                 return NextResult::Branch;
-            }
+            };
+
+            // Record where to resume iteration when we return to this entry.
+            self.stack.last_mut().expect("head exists").next_nibble = nibble + 1;
+            let path = self.child_path(arena, nibble);
+            self.push(arena, child_idx, path);
         }
     }
 
