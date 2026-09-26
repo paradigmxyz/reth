@@ -272,3 +272,95 @@ fn abort_with_live_sibling_cursor_leaves_every_child_usable() {
         assert_eq!(reader.get::<Vec<u8>>(dbi, b"key").unwrap().as_deref(), Some(&b"value"[..]));
     }
 }
+
+#[test]
+fn crash_recovery_worker() {
+    let Ok(path) = std::env::var("MDBX_CRASH_TEST_PATH") else { return };
+    let phase = std::env::var("MDBX_CRASH_TEST_PHASE").unwrap();
+    let env = environment(std::path::Path::new(&path));
+    let tx = env.begin_rw_txn().unwrap();
+    let dbis: Vec<_> =
+        (0..2).map(|index| tx.open_db(Some(&format!("table{index}"))).unwrap().dbi()).collect();
+    tx.enable_parallel_writes(&dbis).unwrap();
+    for &dbi in &dbis {
+        tx.put_parallel(dbi, b"key", b"new", WriteFlags::empty()).unwrap();
+    }
+    if phase == "before_merge" {
+        std::process::exit(86);
+    }
+    tx.commit_subtxns().unwrap();
+    if phase == "before_commit" {
+        std::process::exit(86);
+    }
+    tx.commit().unwrap();
+    if phase == "after_commit_graceful" {
+        return;
+    }
+    std::process::exit(86);
+}
+
+/// Run with `MDBX_CHK_BIN=/path/to/mdbx_chk cargo test -p reth-libmdbx --test
+/// parallel_regressions mdbx_checker_covers_parallel_commit_and_interruptions -- --ignored`.
+#[test]
+#[ignore = "parallel commit currently leaves two pages unaccounted for by mdbx_chk"]
+fn mdbx_checker_covers_parallel_commit_and_interruptions() {
+    let checker = std::env::var("MDBX_CHK_BIN").expect("set MDBX_CHK_BIN to a built mdbx_chk");
+    for phase in ["before_merge", "before_commit", "after_commit_graceful", "after_commit"] {
+        let dir = tempfile::tempdir().unwrap();
+        let env = environment(dir.path());
+        let tx = env.begin_rw_txn().unwrap();
+        for index in 0..2 {
+            let dbi =
+                tx.create_db(Some(&format!("table{index}")), DatabaseFlags::empty()).unwrap().dbi();
+            tx.put(dbi, b"key", b"old", WriteFlags::empty()).unwrap();
+        }
+        tx.commit().unwrap();
+        drop(env);
+
+        let output = std::process::Command::new(&checker).arg(dir.path()).output().unwrap();
+        assert!(
+            output.status.success(),
+            "serial baseline failed MDBX check: {} {}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+
+        let status = std::process::Command::new(std::env::current_exe().unwrap())
+            .arg("--exact")
+            .arg("crash_recovery_worker")
+            .env("MDBX_CRASH_TEST_PATH", dir.path())
+            .env("MDBX_CRASH_TEST_PHASE", phase)
+            .status()
+            .unwrap();
+        assert_eq!(
+            status.code(),
+            Some(if phase == "after_commit_graceful" { 0 } else { 86 }),
+            "worker did not reach {phase}"
+        );
+
+        let env = environment(dir.path());
+        let reader = env.begin_ro_txn().unwrap();
+        for index in 0..2 {
+            let dbi = reader.open_db(Some(&format!("table{index}"))).unwrap().dbi();
+            let value = reader.get::<Vec<u8>>(dbi, b"key").unwrap().unwrap();
+            assert_eq!(
+                value,
+                if phase.starts_with("after_commit") { b"new" } else { b"old" },
+                "{phase}, table{index}"
+            );
+        }
+        drop(reader);
+        drop(env);
+        let output = std::process::Command::new(&checker).arg(dir.path()).output().unwrap();
+        if !output.status.success() {
+            let path = dir.keep();
+            panic!(
+                "MDBX check failed after {phase} at {}: status={} stdout={} stderr={}",
+                path.display(),
+                output.status,
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr)
+            );
+        }
+    }
+}

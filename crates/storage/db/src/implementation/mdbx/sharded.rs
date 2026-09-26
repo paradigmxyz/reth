@@ -542,6 +542,35 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "logical cursor returns a different next row after another cursor mutates it"]
+    fn interleaved_cursor_mutation_matches_unsharded_mdbx() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = init_db(dir.path(), DatabaseArguments::test()).unwrap();
+        let raw = db.inner.begin_rw_txn().unwrap();
+        raw.create_db(Some("StorageReference"), reth_libmdbx::DatabaseFlags::DUP_SORT).unwrap();
+        raw.commit().unwrap();
+
+        let tx = db.tx_mut().unwrap();
+        let mut reference = tx.cursor_dup_write::<Reference>().unwrap();
+        let mut sharded = tx.cursor_dup_write::<HashedStorages>().unwrap();
+        for prefix in [0, 32, 64] {
+            reference.upsert(B256::ZERO, &entry(prefix)).unwrap();
+            sharded.upsert(B256::ZERO, &entry(prefix)).unwrap();
+        }
+        let mut reference_other = tx.cursor_dup_write::<Reference>().unwrap();
+        let mut sharded_other = tx.cursor_dup_write::<HashedStorages>().unwrap();
+        reference.seek_by_key_subkey(B256::ZERO, entry(32).key).unwrap();
+        sharded.seek_by_key_subkey(B256::ZERO, entry(32).key).unwrap();
+        reference_other.seek_by_key_subkey(B256::ZERO, entry(32).key).unwrap();
+        sharded_other.seek_by_key_subkey(B256::ZERO, entry(32).key).unwrap();
+        reference_other.delete_current().unwrap();
+        sharded_other.delete_current().unwrap();
+        reference_other.upsert(B256::ZERO, &entry(48)).unwrap();
+        sharded_other.upsert(B256::ZERO, &entry(48)).unwrap();
+        assert_eq!(sharded.next().unwrap(), reference.next().unwrap());
+    }
+
+    #[test]
     fn single_shard_point_reads_match_logical_reads() {
         let db = crate::test_utils::create_test_rw_db();
         let tx = db.tx_mut().unwrap();
