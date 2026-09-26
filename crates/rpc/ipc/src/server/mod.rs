@@ -395,9 +395,7 @@ where
         trace!("{:?}", request);
 
         let cfg = RpcServiceCfg {
-            bounded_subscriptions: BoundedSubscriptions::new(
-                self.inner.server_cfg.max_subscriptions_per_connection,
-            ),
+            bounded_subscriptions: self.inner.bounded_subscriptions.clone(),
             id_provider: self.inner.id_provider.clone(),
             sink: self.inner.method_sink.clone(),
         };
@@ -801,7 +799,7 @@ mod tests {
             params::BatchRequestBuilder,
         },
         rpc_params,
-        types::{ErrorCode, Request},
+        types::{error::TOO_MANY_SUBSCRIPTIONS_CODE, ErrorCode, Request},
         PendingSubscriptionSink, RpcModule, SubscriptionMessage,
     };
     use reth_tracing::init_test_tracing;
@@ -1103,6 +1101,38 @@ mod tests {
 
         let items = sub.take(16).collect::<Vec<_>>().await;
         assert_eq!(items.len(), 16);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_max_subscriptions_per_connection() {
+        let endpoint = &dummy_name();
+        let server = Builder::default().max_subscriptions_per_connection(1).build(endpoint.clone());
+        let mut module = RpcModule::new(());
+        module
+            .register_subscription(
+                "subscribe_hello",
+                "s_hello",
+                "unsubscribe_hello",
+                |_, pending, _, _| async move {
+                    let Ok(sink) = pending.accept().await else { return };
+                    sink.closed().await;
+                },
+            )
+            .unwrap();
+        let handle = server.start(module).await.unwrap();
+        tokio::spawn(handle.stopped());
+
+        let client = IpcClientBuilder::default().build(endpoint).await.unwrap();
+        let _sub: Subscription<usize> =
+            client.subscribe("subscribe_hello", rpc_params![], "unsubscribe_hello").await.unwrap();
+        let err = client
+            .subscribe::<usize, _>("subscribe_hello", rpc_params![], "unsubscribe_hello")
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(&err, Error::Call(err) if err.code() == TOO_MANY_SUBSCRIPTIONS_CODE),
+            "{err}"
+        );
     }
 
     #[tokio::test]
