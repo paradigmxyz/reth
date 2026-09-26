@@ -370,7 +370,7 @@ fn crash_recovery_worker() {
 /// Run with `MDBX_CHK_BIN=/path/to/mdbx_chk cargo test -p reth-libmdbx --test
 /// parallel_regressions mdbx_checker_covers_parallel_commit_and_interruptions -- --ignored`.
 #[test]
-#[ignore = "parallel commit currently leaves two pages unaccounted for by mdbx_chk"]
+#[ignore = "requires MDBX_CHK_BIN to point to a built mdbx_chk"]
 fn mdbx_checker_covers_parallel_commit_and_interruptions() {
     let checker = std::env::var("MDBX_CHK_BIN").expect("set MDBX_CHK_BIN to a built mdbx_chk");
     for phase in ["before_merge", "before_commit", "after_commit_graceful", "after_commit"] {
@@ -429,6 +429,92 @@ fn mdbx_checker_covers_parallel_commit_and_interruptions() {
                 String::from_utf8_lossy(&output.stdout),
                 String::from_utf8_lossy(&output.stderr)
             );
+        }
+    }
+}
+
+/// Exercises EOF allocation, GC reuse, overflow pages, deletion, and reopening
+/// after every parallel commit. Run with `MDBX_CHK_BIN=/path/to/mdbx_chk`.
+#[test]
+#[ignore = "requires MDBX_CHK_BIN to point to a built mdbx_chk"]
+fn mdbx_checker_covers_repeated_parallel_mutations() {
+    let checker = std::env::var("MDBX_CHK_BIN").expect("set MDBX_CHK_BIN to a built mdbx_chk");
+    let dir = tempfile::tempdir().unwrap();
+    let mut env = environment(dir.path());
+    let tx = env.begin_rw_txn().unwrap();
+    for index in 0..4 {
+        tx.create_db(Some(&format!("table{index}")), DatabaseFlags::empty()).unwrap();
+    }
+    tx.commit().unwrap();
+
+    let mut expected = vec![vec![None; 96]; 4];
+    for round in 0..16 {
+        let tx = env.begin_rw_txn().unwrap();
+        let dbis: Vec<_> =
+            (0..4).map(|index| tx.open_db(Some(&format!("table{index}"))).unwrap().dbi()).collect();
+        tx.enable_parallel_writes_with_hints(
+            &dbis
+                .iter()
+                .enumerate()
+                .map(|(i, &dbi)| (dbi, if round % 2 == 0 { i * 64 } else { 0 }))
+                .collect::<Vec<_>>(),
+        )
+        .unwrap();
+        std::thread::scope(|scope| {
+            for (index, &dbi) in dbis.iter().enumerate() {
+                let tx = &tx;
+                scope.spawn(move || {
+                    for key in 0..96u8 {
+                        if (round + usize::from(key) + index) % 5 == 0 {
+                            tx.del_parallel(dbi, [key], None).unwrap();
+                        } else {
+                            let len = if key % 17 == 0 { 5000 } else { 48 + round * 19 };
+                            tx.put_parallel(
+                                dbi,
+                                [key],
+                                vec![round as u8; len],
+                                WriteFlags::empty(),
+                            )
+                            .unwrap();
+                        }
+                    }
+                });
+            }
+        });
+        tx.commit_subtxns().unwrap();
+        tx.commit().unwrap();
+        for (index, table) in expected.iter_mut().enumerate() {
+            for (key, value) in table.iter_mut().enumerate() {
+                *value = ((round + key + index) % 5 != 0).then(|| {
+                    let len = if key % 17 == 0 { 5000 } else { 48 + round * 19 };
+                    vec![round as u8; len]
+                });
+            }
+        }
+
+        drop(env);
+        let output = std::process::Command::new(&checker).arg(dir.path()).output().unwrap();
+        if !output.status.success() {
+            let path = dir.keep();
+            panic!(
+                "MDBX check failed after round {round} at {}: status={} stdout={} stderr={}",
+                path.display(),
+                output.status,
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr)
+            );
+        }
+        env = environment(dir.path());
+        let reader = env.begin_ro_txn().unwrap();
+        for (index, table) in expected.iter().enumerate() {
+            let dbi = reader.open_db(Some(&format!("table{index}"))).unwrap().dbi();
+            for (key, value) in table.iter().enumerate() {
+                assert_eq!(
+                    reader.get::<Vec<u8>>(dbi, &[key as u8]).unwrap().as_ref(),
+                    value.as_ref(),
+                    "round {round}, table {index}, key {key}"
+                );
+            }
         }
     }
 }

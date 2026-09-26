@@ -57,5 +57,8 @@ in node throughput. Caching requires space for both layouts and migration scratc
 pages; it trades extra disk usage for avoiding repeated large conversions.
 
 This remains an experimental MDBX fork, not a production-compatible upgrade.
+The MDBX build disables EOF refund until parallel child EOF batches account for
+their refund-boundary pages; this prevents leaked pages but can retain a larger
+data file after transactions that would otherwise truncate its tail.
 Cursor/reopen/abort/migration recovery tests and successful benchmarks do not prove
 race freedom, power-loss safety, or correctness under arbitrary allocation failures.
