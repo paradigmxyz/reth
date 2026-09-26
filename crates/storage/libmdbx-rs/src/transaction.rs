@@ -349,14 +349,24 @@ where
                 self.env().txn_manager().remove_active_read_transaction(txn);
 
                 let mut latency = CommitLatency::new();
-                mdbx_result(unsafe { ffi::mdbx_txn_commit_ex(txn, latency.mdbx_commit_latency()) })
-                    .map(|v| (v, latency))
+                let result = mdbx_result(unsafe {
+                    ffi::mdbx_txn_commit_ex(txn, latency.mdbx_commit_latency())
+                })
+                .map(|v| (v, latency));
+                if result.is_ok() {
+                    self.inner.txn.set_invalidated();
+                }
+                result
             } else {
                 let (sender, rx) = sync_channel(0);
                 self.env()
                     .txn_manager()
                     .send_message(TxnManagerMessage::Commit { tx: TxnPtr(txn), sender });
-                rx.recv().unwrap()
+                let result = rx.recv().unwrap();
+                if result.is_ok() {
+                    self.inner.txn.set_invalidated();
+                }
+                result
             }
         })? {
             //
@@ -1146,6 +1156,9 @@ impl TransactionPtr {
         F: FnOnce(*mut ffi::MDBX_txn) -> T,
     {
         let _lck = self.lock();
+        if self.is_invalidated() {
+            return Err(Error::BadTxn);
+        }
 
         // To be able to do any operations on the transaction, we need to renew it first.
         #[cfg(feature = "read-tx-timeouts")]
@@ -1329,5 +1342,41 @@ mod tests {
                 Some(if abort { &b"old"[..] } else { &b"new"[..] })
             );
         }
+    }
+
+    #[test]
+    fn committed_parent_rejects_surviving_clones_and_closes_live_cursors() {
+        let dir = tempfile::tempdir().unwrap();
+        let env = Environment::builder().set_max_dbs(8).write_map().open(dir.path()).unwrap();
+        let tx = env.begin_rw_txn().unwrap();
+        let dbi = tx.create_db(Some("table"), DatabaseFlags::empty()).unwrap().dbi();
+        let retained = tx.clone();
+        let cursor = tx.cursor(dbi).unwrap();
+        tx.put(dbi, b"key", b"value", WriteFlags::empty()).unwrap();
+        tx.commit().unwrap();
+        drop(cursor);
+        assert!(matches!(retained.get::<Vec<u8>>(dbi, b"key"), Err(Error::BadTxn)));
+        assert!(matches!(
+            retained.put(dbi, b"key", b"other", WriteFlags::empty()),
+            Err(Error::BadTxn)
+        ));
+        assert!(matches!(retained.cursor(dbi), Err(Error::BadTxn)));
+
+        let reader = env.begin_ro_txn().unwrap();
+        assert_eq!(reader.get::<Vec<u8>>(dbi, b"key").unwrap().as_deref(), Some(&b"value"[..]));
+        let stale_reader = reader.clone();
+        reader.commit().unwrap();
+        assert!(matches!(stale_reader.get::<Vec<u8>>(dbi, b"key"), Err(Error::BadTxn)));
+
+        let parallel = env.begin_rw_txn().unwrap();
+        parallel.enable_parallel_writes(&[dbi]).unwrap();
+        parallel.put_parallel(dbi, b"key", b"parallel", WriteFlags::empty()).unwrap();
+        parallel.commit_subtxns().unwrap();
+        let stale_parallel = parallel.clone();
+        parallel.commit().unwrap();
+        assert!(matches!(
+            stale_parallel.put_parallel(dbi, b"key", b"late", WriteFlags::empty()),
+            Err(Error::BadTxn)
+        ));
     }
 }
