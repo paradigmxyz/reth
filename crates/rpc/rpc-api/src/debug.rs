@@ -53,7 +53,8 @@ pub trait DebugApi<TxReq: RpcObject> {
     #[subscription(
         name = "subscribe" => "subscription",
         unsubscribe = "unsubscribe",
-        item = alloy_rpc_types_trace::geth::ChainBlockTraceResult
+        item = alloy_rpc_types_trace::geth::ChainBlockTraceResult,
+        with_extensions
     )]
     async fn debug_subscribe(
         &self,
