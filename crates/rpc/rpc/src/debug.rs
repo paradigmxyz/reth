@@ -28,7 +28,7 @@ use reth_revm::{db::State, witness::ExecutionWitnessRecord};
 use reth_rpc_api::DebugApiServer;
 use reth_rpc_convert::RpcTxReq;
 use reth_rpc_eth_api::{
-    helpers::{EthTransactions, TraceExt},
+    helpers::{blocking_task::with_permit, EthTransactions, TraceExt},
     AsEthApiError, FromEthApiError, FromEvmError, RpcConvert, RpcNodeCore,
 };
 use reth_rpc_eth_types::{EthApiError, StateCacheDb};
@@ -111,6 +111,11 @@ where
     /// Acquires a permit to execute a tracing call.
     async fn acquire_trace_permit(&self) -> Result<OwnedSemaphorePermit, AcquireError> {
         self.inner.blocking_task_guard.clone().acquire_owned().await
+    }
+
+    /// Runs `fut` while holding a tracing permit, see [`with_permit`].
+    async fn with_trace_permit<F: Future>(&self, fut: F) -> F::Output {
+        with_permit(&self.inner.blocking_task_guard, fut).await
     }
 
     /// Trace the entire block asynchronously
@@ -1111,10 +1116,8 @@ where
         rlp_block: Bytes,
         opts: Option<GethDebugTracingOptions>,
     ) -> RpcResult<Vec<TraceResult>> {
-        let _permit = self.acquire_trace_permit().await;
-        Self::debug_trace_raw_block(self, rlp_block, opts.unwrap_or_default())
-            .await
-            .map_err(Into::into)
+        let fut = Self::debug_trace_raw_block(self, rlp_block, opts.unwrap_or_default());
+        self.with_trace_permit(fut).await.map_err(Into::into)
     }
 
     /// Handler for `debug_traceBlockByHash`
@@ -1123,10 +1126,8 @@ where
         block: B256,
         opts: Option<GethDebugTracingOptions>,
     ) -> RpcResult<Vec<TraceResult>> {
-        let _permit = self.acquire_trace_permit().await;
-        Self::debug_trace_block(self, block.into(), opts.unwrap_or_default())
-            .await
-            .map_err(Into::into)
+        let fut = Self::debug_trace_block(self, block.into(), opts.unwrap_or_default());
+        self.with_trace_permit(fut).await.map_err(Into::into)
     }
 
     /// Handler for `debug_traceBlockByNumber`
@@ -1135,10 +1136,8 @@ where
         block: BlockNumberOrTag,
         opts: Option<GethDebugTracingOptions>,
     ) -> RpcResult<Vec<TraceResult>> {
-        let _permit = self.acquire_trace_permit().await;
-        Self::debug_trace_block(self, block.into(), opts.unwrap_or_default())
-            .await
-            .map_err(Into::into)
+        let fut = Self::debug_trace_block(self, block.into(), opts.unwrap_or_default());
+        self.with_trace_permit(fut).await.map_err(Into::into)
     }
 
     /// Handler for `debug_traceTransaction`
@@ -1147,10 +1146,8 @@ where
         tx_hash: B256,
         opts: Option<GethDebugTracingOptions>,
     ) -> RpcResult<GethTrace> {
-        let _permit = self.acquire_trace_permit().await;
-        Self::debug_trace_transaction(self, tx_hash, opts.unwrap_or_default())
-            .await
-            .map_err(Into::into)
+        let fut = Self::debug_trace_transaction(self, tx_hash, opts.unwrap_or_default());
+        self.with_trace_permit(fut).await.map_err(Into::into)
     }
 
     /// Handler for `debug_traceCall`
@@ -1160,10 +1157,8 @@ where
         block_id: Option<BlockId>,
         opts: Option<GethDebugTracingCallOptions>,
     ) -> RpcResult<GethTrace> {
-        let _permit = self.acquire_trace_permit().await;
-        Self::debug_trace_call(self, request, block_id, opts.unwrap_or_default())
-            .await
-            .map_err(Into::into)
+        let fut = Self::debug_trace_call(self, request, block_id, opts.unwrap_or_default());
+        self.with_trace_permit(fut).await.map_err(Into::into)
     }
 
     async fn debug_trace_call_many(
@@ -1172,8 +1167,8 @@ where
         state_context: Option<StateContext>,
         opts: Option<GethDebugTracingCallOptions>,
     ) -> RpcResult<Vec<Vec<GethTrace>>> {
-        let _permit = self.acquire_trace_permit().await;
-        Self::debug_trace_call_many(self, bundles, state_context, opts).await.map_err(Into::into)
+        let fut = Self::debug_trace_call_many(self, bundles, state_context, opts);
+        self.with_trace_permit(fut).await.map_err(Into::into)
     }
 
     /// Handler for `debug_executionWitness`
@@ -1182,8 +1177,8 @@ where
         block: BlockId,
         mode: Option<ExecutionWitnessMode>,
     ) -> RpcResult<ExecutionWitness> {
-        let _permit = self.acquire_trace_permit().await;
-        Self::debug_execution_witness(self, block, mode).await.map_err(Into::into)
+        let fut = Self::debug_execution_witness(self, block, mode);
+        self.with_trace_permit(fut).await.map_err(Into::into)
     }
 
     /// Handler for `debug_executionWitnessByBlockHash`
@@ -1192,8 +1187,8 @@ where
         hash: B256,
         mode: Option<ExecutionWitnessMode>,
     ) -> RpcResult<ExecutionWitness> {
-        let _permit = self.acquire_trace_permit().await;
-        Self::debug_execution_witness_by_block_hash(self, hash, mode).await.map_err(Into::into)
+        let fut = Self::debug_execution_witness_by_block_hash(self, hash, mode);
+        self.with_trace_permit(fut).await.map_err(Into::into)
     }
 
     /// Handler for `debug_accountAt`
@@ -1203,8 +1198,8 @@ where
         tx_index: Index,
         address: Address,
     ) -> RpcResult<Option<Account>> {
-        let _permit = self.acquire_trace_permit().await;
-        Self::debug_account_at(self, block_id, tx_index, address).await.map_err(Into::into)
+        let fut = Self::debug_account_at(self, block_id, tx_index, address);
+        self.with_trace_permit(fut).await.map_err(Into::into)
     }
 
     /// Handler for `debug_accountInfoAt`
@@ -1214,8 +1209,8 @@ where
         tx_index: Index,
         address: Address,
     ) -> RpcResult<Option<AccountInfo>> {
-        let _permit = self.acquire_trace_permit().await;
-        Self::debug_account_info_at(self, block_id, tx_index, address).await.map_err(Into::into)
+        let fut = Self::debug_account_info_at(self, block_id, tx_index, address);
+        self.with_trace_permit(fut).await.map_err(Into::into)
     }
 
     async fn debug_account_range(
@@ -1333,8 +1328,7 @@ where
         block_hash: B256,
         _opts: Option<GethDebugTracingCallOptions>,
     ) -> RpcResult<Vec<B256>> {
-        let _permit = self.acquire_trace_permit().await;
-        self.intermediate_roots(block_hash).await.map_err(Into::into)
+        self.with_trace_permit(self.intermediate_roots(block_hash)).await.map_err(Into::into)
     }
 
     async fn debug_mem_stats(&self) -> RpcResult<()> {
@@ -1405,7 +1399,6 @@ where
         block_hash: B256,
         opts: Option<GethDebugTracingCallOptions>,
     ) -> RpcResult<Vec<TraceResult>> {
-        let _permit = self.acquire_trace_permit().await;
         let entry = self
             .inner
             .bad_block_store
@@ -1420,7 +1413,8 @@ where
             .to_rpc_result()?;
 
         let opts = opts.map(|o| o.tracing_options).unwrap_or_default();
-        self.trace_block(entry.block.clone(), evm_env, opts).await.map_err(Into::into)
+        let fut = self.trace_block(entry.block.clone(), evm_env, opts);
+        self.with_trace_permit(fut).await.map_err(Into::into)
     }
 }
 

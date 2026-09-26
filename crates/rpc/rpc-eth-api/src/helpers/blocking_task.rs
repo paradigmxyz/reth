@@ -163,7 +163,9 @@ pub trait SpawnBlocking: EthApiTypes + Clone + Send + Sync + 'static {
     {
         let (tx, rx) = oneshot::channel();
         let this = self.clone();
+        let permit = request_permit();
         self.io_task_spawner().spawn_blocking_task(async move {
+            let _permit = permit;
             if tx.is_closed() {
                 return
             }
@@ -189,7 +191,9 @@ pub trait SpawnBlocking: EthApiTypes + Clone + Send + Sync + 'static {
     {
         let (mut tx, rx) = oneshot::channel();
         let this = self.clone();
+        let permit = request_permit();
         self.io_task_spawner().spawn_blocking_task(async move {
+            let _permit = permit;
             let fut = f(this);
             tokio::pin!(fut);
             let res = tokio::select! {
@@ -217,7 +221,34 @@ pub trait SpawnBlocking: EthApiTypes + Clone + Send + Sync + 'static {
         R: Send + 'static,
     {
         let this = self.clone();
-        let fut = self.tracing_task_pool().spawn(move || f(this));
+        let permit = request_permit();
+        let fut = self.tracing_task_pool().spawn(move || {
+            let _permit = permit;
+            f(this)
+        });
         async move { fut.await.map_err(|_| EthApiError::InternalBlockingTaskError)? }
     }
+}
+
+/// Acquires a permit from `guard` and runs `fut` while holding it.
+///
+/// Blocking tasks spawned through [`SpawnBlocking`] while `fut` is polled hold on to the permit
+/// until they complete. They keep running if `fut` is dropped, for example because the client
+/// disconnected, so a permit held only by `fut` would be released while they are still running.
+pub async fn with_permit<F: Future>(guard: &BlockingTaskGuard, fut: F) -> F::Output {
+    match guard.clone().acquire_owned().await {
+        Ok(permit) => REQUEST_PERMIT.scope(Arc::new(permit), fut).await,
+        // the semaphore is never closed
+        Err(_) => fut.await,
+    }
+}
+
+tokio::task_local! {
+    /// Permit held by the request that is served on the current task, see [`with_permit`].
+    static REQUEST_PERMIT: Arc<OwnedSemaphorePermit>;
+}
+
+/// Returns the permit held by the request that is served on the current task, if any.
+fn request_permit() -> Option<Arc<OwnedSemaphorePermit>> {
+    REQUEST_PERMIT.try_with(Arc::clone).ok()
 }
