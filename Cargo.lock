@@ -8213,6 +8213,7 @@ dependencies = [
  "derive_more",
  "eyre",
  "libc",
+ "libloading 0.8.9",
  "metrics",
  "page_size",
  "parking_lot",

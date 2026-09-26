@@ -41,6 +41,8 @@ pub struct Tx<K: TransactionKind> {
     ///
     /// If [Some], then metrics are reported.
     metrics_handler: Option<MetricsHandler<K>>,
+    #[cfg(feature = "monad-triedb")]
+    triedb: Option<(Arc<crate::triedb::Transaction>, MDBX_dbi)>,
 }
 
 impl<K: TransactionKind> Tx<K> {
@@ -60,7 +62,13 @@ impl<K: TransactionKind> Tx<K> {
                 Ok(handler)
             })
             .transpose()?;
-        Ok(Self { inner, dbis, metrics_handler })
+        Ok(Self {
+            inner,
+            dbis,
+            metrics_handler,
+            #[cfg(feature = "monad-triedb")]
+            triedb: None,
+        })
     }
 
     /// Returns a reference to the inner libmdbx transaction.
@@ -99,10 +107,13 @@ impl<K: TransactionKind> Tx<K> {
             .cursor_with_dbi(self.get_dbi::<T>()?)
             .map_err(|e| DatabaseError::InitCursor(e.into()))?;
 
-        Ok(Cursor::new_with_metrics(
+        let cursor = Cursor::new_with_metrics(
             inner,
             self.metrics_handler.as_ref().map(|h| h.env_metrics.table_operation_metrics(T::NAME)),
-        ))
+        );
+        #[cfg(feature = "monad-triedb")]
+        let cursor = cursor.with_triedb(self.triedb.as_ref().map(|(tx, _)| tx.clone()));
+        Ok(cursor)
     }
 
     /// If `self.metrics_handler == Some(_)`, measure the time it takes to execute the closure and
@@ -170,6 +181,59 @@ impl<K: TransactionKind> Tx<K> {
         } else {
             f(&self.inner)
         }
+    }
+
+    #[cfg(feature = "monad-triedb")]
+    pub(crate) fn with_triedb(
+        mut self,
+        store: Option<&(Arc<crate::triedb::Store>, MDBX_dbi)>,
+    ) -> Result<Self, DatabaseError> {
+        if let Some((store, dbi)) = store {
+            let version = self
+                .inner
+                .get::<Vec<u8>>(*dbi, b"version")
+                .map_err(|e| DatabaseError::Read(e.into()))?
+                .ok_or(DatabaseError::Decode)?;
+            let version =
+                u64::from_be_bytes(version.try_into().map_err(|_| DatabaseError::Decode)?);
+            self.triedb = Some((
+                crate::triedb::Transaction::new(store.clone(), version, !K::IS_READ_ONLY),
+                *dbi,
+            ));
+        }
+        Ok(self)
+    }
+
+    #[cfg(feature = "monad-triedb")]
+    fn commit_triedb(&self) -> Result<(), DatabaseError> {
+        if !K::IS_READ_ONLY &&
+            let Some((tx, dbi)) = &self.triedb
+        {
+            let version = tx.commit()?.to_be_bytes();
+            let code = self
+                .inner
+                .txn_execute(|raw| {
+                    let key = reth_libmdbx::ffi::MDBX_val {
+                        iov_len: 7,
+                        iov_base: b"version".as_ptr().cast_mut().cast(),
+                    };
+                    let mut value = reth_libmdbx::ffi::MDBX_val {
+                        iov_len: version.len(),
+                        iov_base: version.as_ptr().cast_mut().cast(),
+                    };
+                    // SAFETY: K is a writable transaction, txn_execute protects its pointer, and
+                    // both buffers remain alive until MDBX has copied the new
+                    // durable TrieDB version.
+                    unsafe {
+                        reth_libmdbx::ffi::mdbx_put(raw, *dbi, &raw const key, &raw mut value, 0)
+                    }
+                })
+                .map_err(|e| DatabaseError::Commit(e.into()))?;
+            if code != 0 {
+                return Err(DatabaseError::Commit(reth_libmdbx::Error::from_err_code(code).into()));
+            }
+        }
+        Ok(())
     }
 }
 
@@ -300,6 +364,15 @@ impl<K: TransactionKind> DbTx for Tx<K> {
         &self,
         key: &<T::Key as Encode>::Encoded,
     ) -> Result<Option<T::Value>, DatabaseError> {
+        #[cfg(feature = "monad-triedb")]
+        if let Some((tx, _)) = &self.triedb &&
+            let Some(table) = crate::triedb::TableSpec::named(T::NAME)
+        {
+            return Ok(tx
+                .get(table, key.as_ref())?
+                .map(|value| <T::Value as reth_db_api::table::Decompress>::decompress(&value))
+                .transpose()?);
+        }
         self.execute_with_operation_metric::<T, _>(Operation::Get, None, |tx| {
             tx.get(self.get_dbi::<T>()?, key.as_ref())
                 .map_err(|e| DatabaseError::Read(e.into()))?
@@ -310,6 +383,8 @@ impl<K: TransactionKind> DbTx for Tx<K> {
 
     #[instrument(name = "Tx::commit", level = "debug", target = "providers::db", skip_all)]
     fn commit(self) -> Result<(), DatabaseError> {
+        #[cfg(feature = "monad-triedb")]
+        self.commit_triedb()?;
         self.execute_with_close_transaction_metric(TransactionOutcome::Commit, |this| {
             match this.inner.commit().map_err(|e| DatabaseError::Commit(e.into())) {
                 Ok(latency) => (Ok(()), Some(latency)),
@@ -336,6 +411,12 @@ impl<K: TransactionKind> DbTx for Tx<K> {
 
     /// Returns number of entries in the table using cheap DB stats invocation.
     fn entries<T: Table>(&self) -> Result<usize, DatabaseError> {
+        #[cfg(feature = "monad-triedb")]
+        if let Some((tx, _)) = &self.triedb &&
+            let Some(table) = crate::triedb::TableSpec::named(T::NAME)
+        {
+            return tx.entries(table);
+        }
         Ok(self
             .inner
             .db_stat_with_dbi(self.get_dbi::<T>()?)
@@ -387,6 +468,15 @@ impl Tx<RW> {
     ) -> Result<(), DatabaseError> {
         let key = key.encode();
         let value = value.compress();
+        #[cfg(feature = "monad-triedb")]
+        if let Some((tx, _)) = &self.triedb &&
+            let Some(table) = crate::triedb::TableSpec::named(T::NAME)
+        {
+            return match kind {
+                PutKind::Upsert => tx.put(table, key.as_ref(), value.as_ref()),
+                PutKind::Append => tx.append(table, key.as_ref(), value.as_ref()),
+            };
+        }
         let (operation, write_operation, flags) = kind.into_operation_and_flags();
         self.execute_with_operation_metric::<T, _>(operation, Some(value.as_ref().len()), |tx| {
             tx.put(self.get_dbi::<T>()?, key.as_ref(), value, flags).map_err(|e| {
@@ -419,6 +509,13 @@ impl DbTxMut for Tx<RW> {
         key: T::Key,
         value: Option<T::Value>,
     ) -> Result<bool, DatabaseError> {
+        #[cfg(feature = "monad-triedb")]
+        if let Some((tx, _)) = &self.triedb &&
+            let Some(table) = crate::triedb::TableSpec::named(T::NAME)
+        {
+            let value = value.map(Compress::compress);
+            return tx.delete(table, key.encode().as_ref(), value.as_ref().map(AsRef::as_ref));
+        }
         let mut data = None;
 
         let value = value.map(Compress::compress);
@@ -433,6 +530,12 @@ impl DbTxMut for Tx<RW> {
     }
 
     fn clear<T: Table>(&self) -> Result<(), DatabaseError> {
+        #[cfg(feature = "monad-triedb")]
+        if let Some((tx, _)) = &self.triedb &&
+            let Some(table) = crate::triedb::TableSpec::named(T::NAME)
+        {
+            return tx.clear(table);
+        }
         self.inner.clear_db(self.get_dbi::<T>()?).map_err(|e| DatabaseError::Delete(e.into()))?;
 
         Ok(())

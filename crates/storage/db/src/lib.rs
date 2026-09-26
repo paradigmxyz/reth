@@ -24,6 +24,9 @@ pub mod static_file;
 mod utils;
 pub mod version;
 
+#[cfg(feature = "monad-triedb")]
+mod triedb;
+
 #[cfg(feature = "mdbx")]
 pub mod mdbx;
 

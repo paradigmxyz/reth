@@ -42,6 +42,9 @@ rustc-hash = { workspace = true, optional = true, features = ["std"] }
 sysinfo = { workspace = true, features = ["system"] }
 parking_lot = { workspace = true, optional = true }
 
+# monad-triedb
+libloading = { version = "0.8.9", optional = true }
+
 # arbitrary utils
 strum = { workspace = true, features = ["derive"], optional = true }
 
@@ -97,3 +100,4 @@ arbitrary = [
     "reth-prune-types/arbitrary",
 ]
 disable-lock = []
+monad-triedb = ["mdbx", "dep:libloading", "parking_lot"]

@@ -256,6 +256,8 @@ pub struct DatabaseEnv {
     metrics: Option<Arc<DatabaseEnvMetrics>>,
     /// Write lock for when dealing with a read-write environment.
     _lock_file: Option<StorageLock>,
+    #[cfg(feature = "monad-triedb")]
+    triedb: Option<(Arc<crate::triedb::Store>, ffi::MDBX_dbi)>,
 }
 
 impl Database for DatabaseEnv {
@@ -263,21 +265,27 @@ impl Database for DatabaseEnv {
     type TXMut = tx::Tx<RW>;
 
     fn tx(&self) -> Result<Self::TX, DatabaseError> {
-        Tx::new(
+        let tx = Tx::new(
             self.inner.begin_ro_txn().map_err(|e| DatabaseError::InitTx(e.into()))?,
             self.dbis.clone(),
             self.metrics.clone(),
         )
-        .map_err(|e| DatabaseError::InitTx(e.into()))
+        .map_err(|e| DatabaseError::InitTx(e.into()))?;
+        #[cfg(feature = "monad-triedb")]
+        let tx = tx.with_triedb(self.triedb.as_ref())?;
+        Ok(tx)
     }
 
     fn tx_mut(&self) -> Result<Self::TXMut, DatabaseError> {
-        Tx::new(
+        let tx = Tx::new(
             self.inner.begin_rw_txn().map_err(|e| DatabaseError::InitTx(e.into()))?,
             self.dbis.clone(),
             self.metrics.clone(),
         )
-        .map_err(|e| DatabaseError::InitTx(e.into()))
+        .map_err(|e| DatabaseError::InitTx(e.into()))?;
+        #[cfg(feature = "monad-triedb")]
+        let tx = tx.with_triedb(self.triedb.as_ref())?;
+        Ok(tx)
     }
 
     fn path(&self) -> PathBuf {
@@ -538,9 +546,134 @@ impl DatabaseEnv {
             dbis: Arc::default(),
             metrics: None,
             _lock_file,
+            #[cfg(feature = "monad-triedb")]
+            triedb: None,
         };
 
+        #[cfg(feature = "monad-triedb")]
+        let env = env.open_triedb(kind)?;
+        #[cfg(not(feature = "monad-triedb"))]
+        {
+            let tx = env.inner.begin_ro_txn().map_err(|e| DatabaseError::InitTx(e.into()))?;
+            if tx.open_db(Some("RethMonadTrieDB")).is_ok() {
+                return Err(DatabaseError::Other(
+                    "This database requires the monad-triedb feature".into(),
+                ));
+            }
+        }
         Ok(env)
+    }
+
+    #[cfg(feature = "monad-triedb")]
+    fn open_triedb(mut self, kind: DatabaseEnvKind) -> Result<Self, DatabaseError> {
+        let ro = self.inner.begin_ro_txn().map_err(|e| DatabaseError::InitTx(e.into()))?;
+        let existing = match ro.open_db(Some("RethMonadTrieDB")) {
+            Ok(db) => {
+                if ro
+                    .get::<Vec<u8>>(db.dbi(), b"format")
+                    .map_err(|e| DatabaseError::Read(e.into()))?
+                    .as_deref() !=
+                    Some(b"1")
+                {
+                    return Err(DatabaseError::Other("Unsupported TrieDB adapter format".into()));
+                }
+                Some((
+                    db.dbi(),
+                    ro.get::<Vec<u8>>(db.dbi(), b"path")
+                        .map_err(|e| DatabaseError::Read(e.into()))?
+                        .ok_or_else(|| DatabaseError::Other("Missing TrieDB path".into()))?,
+                ))
+            }
+            Err(reth_libmdbx::Error::NotFound) => None,
+            Err(e) => return Err(DatabaseError::Open(e.into())),
+        };
+        ro.commit().map_err(|e| DatabaseError::Commit(e.into()))?;
+        if let Some((dbi, path)) = existing {
+            let path = PathBuf::from(
+                String::from_utf8(path).map_err(|e| DatabaseError::Other(e.to_string()))?,
+            );
+            self.triedb = Some((crate::triedb::Store::open(&path, false, !kind.is_rw())?, dbi));
+            tracing::info!(target: "reth::db::triedb", device = %path.display(), readonly = !kind.is_rw(), "Opened native Monad TrieDB state storage");
+            return Ok(self);
+        }
+        let mapping = std::env::var("RETH_TRIEDB_MAP").unwrap_or_default();
+        let device = mapping.split(';').filter_map(|entry| entry.split_once('=')).find_map(
+            |(prefix, device)| {
+                (Path::new(prefix).is_absolute() && self.path.starts_with(prefix)).then_some(device)
+            },
+        );
+        let Some(device) = device else {
+            return Ok(self);
+        };
+        if !kind.is_rw() {
+            return Err(DatabaseError::Other(
+                "Initialize TrieDB with a writable database first".into(),
+            ));
+        }
+        if std::env::var("RETH_TRIEDB_INITIALIZE").as_deref() != Ok("1") {
+            return Err(DatabaseError::Other("TrieDB initialization requires RETH_TRIEDB_INITIALIZE=1; it overwrites the configured device".into()));
+        }
+        if !Path::new(device).is_absolute() {
+            return Err(DatabaseError::Other("TrieDB device must be an absolute path".into()));
+        }
+        self.initialize_triedb(Path::new(device))
+    }
+
+    #[cfg(feature = "monad-triedb")]
+    fn initialize_triedb(mut self, device: &Path) -> Result<Self, DatabaseError> {
+        let store = crate::triedb::Store::open(device, true, false)?;
+        tracing::info!(target: "reth::db::triedb", device = %device.display(), "Migrating state tables into native Monad TrieDB");
+        let tx = self.inner.begin_rw_txn().map_err(|e| DatabaseError::InitTx(e.into()))?;
+        let mut version = u64::MAX;
+        let mut batch = crate::triedb::Transaction::new(store.clone(), version, true);
+        let mut pending = 0;
+        let mut migrated = Vec::new();
+        for name in ["PlainAccountState", "PlainStorageState", "HashedAccounts", "HashedStorages"] {
+            let db = match tx.open_db(Some(name)) {
+                Ok(db) => db,
+                Err(reth_libmdbx::Error::NotFound) => continue,
+                Err(e) => return Err(DatabaseError::Open(e.into())),
+            };
+            let spec = crate::triedb::TableSpec::named(name).expect("known state table");
+            let mut cursor =
+                tx.cursor(db.dbi()).map_err(|e| DatabaseError::InitCursor(e.into()))?;
+            let mut row =
+                cursor.first::<Vec<u8>, Vec<u8>>().map_err(|e| DatabaseError::Read(e.into()))?;
+            while let Some((key, value)) = row {
+                batch.import(spec, &key, &value)?;
+                pending += 1;
+                if pending == 50000 {
+                    version = batch.commit()?;
+                    batch = crate::triedb::Transaction::new(store.clone(), version, true);
+                    pending = 0;
+                }
+                row =
+                    cursor.next::<Vec<u8>, Vec<u8>>().map_err(|e| DatabaseError::Read(e.into()))?;
+            }
+            migrated.push(db.dbi());
+        }
+        version = batch.commit()?;
+        for dbi in migrated {
+            tx.clear_db(dbi).map_err(|e| DatabaseError::Delete(e.into()))?;
+        }
+        let db = tx
+            .create_db(Some("RethMonadTrieDB"), DatabaseFlags::default())
+            .map_err(|e| DatabaseError::CreateTable(e.into()))?;
+        tx.put(
+            db.dbi(),
+            b"path",
+            device.as_os_str().as_encoded_bytes(),
+            reth_libmdbx::WriteFlags::UPSERT,
+        )
+        .map_err(|e| DatabaseError::Other(e.to_string()))?;
+        tx.put(db.dbi(), b"version", version.to_be_bytes(), reth_libmdbx::WriteFlags::UPSERT)
+            .map_err(|e| DatabaseError::Other(e.to_string()))?;
+        tx.put(db.dbi(), b"format", b"1", reth_libmdbx::WriteFlags::UPSERT)
+            .map_err(|e| DatabaseError::Other(e.to_string()))?;
+        tx.commit().map_err(|e| DatabaseError::Commit(e.into()))?;
+        self.triedb = Some((store, db.dbi()));
+        tracing::info!(target: "reth::db::triedb", device = %device.display(), version, "Native Monad TrieDB state migration committed");
+        Ok(self)
     }
 
     /// Enables metrics on the database.
@@ -697,6 +830,9 @@ mod tests {
     use std::str::FromStr;
     use tempfile::TempDir;
 
+    #[cfg(feature = "monad-triedb")]
+    use crate::tables::{HashedAccounts, HashedStorages};
+
     /// Create database for testing. Returns the `TempDir` to prevent cleanup until test ends.
     fn create_test_db(kind: DatabaseEnvKind) -> (TempDir, DatabaseEnv) {
         let tempdir = tempfile::TempDir::new().expect(ERROR_TEMPDIR);
@@ -723,6 +859,218 @@ mod tests {
     const ERROR_RETURN_VALUE: &str = "Mismatching result.";
     const ERROR_INIT_TX: &str = "Failed to create a MDBX transaction.";
     const ERROR_ETH_ADDRESS: &str = "Invalid address.";
+
+    #[cfg(feature = "monad-triedb")]
+    #[test]
+    #[ignore = "requires the native library via RETH_TRIEDB_LIBRARY and Linux io_uring"]
+    fn native_triedb_mdbx_equivalence() {
+        let (_baseline_dir, baseline) = create_test_db(DatabaseEnvKind::RW);
+        let (candidate_dir, candidate) = create_test_db(DatabaseEnvKind::RW);
+        let native_dir = TempDir::new().unwrap();
+        let device = native_dir.path().join("state.db");
+        for db in [&baseline, &candidate] {
+            let tx = db.tx_mut().unwrap();
+            for account in 1..=64u8 {
+                let value = Account { nonce: u64::from(account), ..Default::default() };
+                tx.put::<PlainAccountState>(Address::with_last_byte(account), value).unwrap();
+                tx.put::<HashedAccounts>(B256::with_last_byte(account), value).unwrap();
+                for slot in 0..8u8 {
+                    let value = StorageEntry {
+                        key: B256::with_last_byte(slot),
+                        value: U256::from(u64::from(account) * 256 + u64::from(slot)),
+                    };
+                    tx.put::<PlainStorageState>(Address::with_last_byte(account), value).unwrap();
+                    tx.put::<HashedStorages>(B256::with_last_byte(account), value).unwrap();
+                }
+            }
+            tx.commit().unwrap();
+        }
+        let candidate = candidate.initialize_triedb(&device).unwrap();
+        assert!(candidate.triedb.is_some());
+        assert!(crate::triedb::Store::open(&device, false, false).is_err());
+        std::thread::scope(|scope| {
+            for _ in 0..8 {
+                scope.spawn(|| {
+                    for account in 1..=64u8 {
+                        let tx = candidate.tx().unwrap();
+                        assert_eq!(
+                            tx.get::<PlainAccountState>(Address::with_last_byte(account))
+                                .unwrap()
+                                .unwrap()
+                                .nonce,
+                            u64::from(account)
+                        );
+                        let value = tx
+                            .cursor_dup_read::<PlainStorageState>()
+                            .unwrap()
+                            .seek_by_key_subkey(
+                                Address::with_last_byte(account),
+                                B256::with_last_byte(7),
+                            )
+                            .unwrap()
+                            .unwrap();
+                        assert_eq!(value.value, U256::from(u64::from(account) * 256 + 7));
+                    }
+                });
+            }
+        });
+        macro_rules! compare {
+            ($left:expr, $right:expr, $table:ty) => {{
+                let left = $left
+                    .cursor_read::<$table>()
+                    .unwrap()
+                    .walk(None)
+                    .unwrap()
+                    .collect::<Result<Vec<_>, _>>()
+                    .unwrap();
+                let right = $right
+                    .cursor_read::<$table>()
+                    .unwrap()
+                    .walk(None)
+                    .unwrap()
+                    .collect::<Result<Vec<_>, _>>()
+                    .unwrap();
+                assert_eq!(left, right);
+                assert_eq!($left.entries::<$table>().unwrap(), $right.entries::<$table>().unwrap());
+                let reverse = $right
+                    .cursor_read::<$table>()
+                    .unwrap()
+                    .walk_back(None)
+                    .unwrap()
+                    .collect::<Result<Vec<_>, _>>()
+                    .unwrap();
+                assert_eq!(left.into_iter().rev().collect::<Vec<_>>(), reverse);
+            }};
+        }
+        {
+            let left = baseline.tx().unwrap();
+            let right = candidate.tx().unwrap();
+            compare!(left, right, PlainAccountState);
+            compare!(left, right, PlainStorageState);
+            compare!(left, right, HashedAccounts);
+            compare!(left, right, HashedStorages);
+            let mut cursor = right.cursor_read::<PlainAccountState>().unwrap();
+            cursor.first().unwrap();
+            assert_eq!(cursor.walk(Some(Address::with_last_byte(255))).unwrap().count(), 0);
+            let mut cursor = right.cursor_dup_read::<PlainStorageState>().unwrap();
+            cursor.first().unwrap();
+            assert_eq!(
+                cursor.walk_dup(Some(Address::with_last_byte(255)), None).unwrap().count(),
+                0
+            );
+        }
+        for round in 1..=8u8 {
+            let old = candidate.tx().unwrap();
+            let address = Address::with_last_byte(round);
+            let previous = old.get::<PlainAccountState>(address).unwrap();
+            let left = baseline.tx_mut().unwrap();
+            let right = candidate.tx_mut().unwrap();
+            for tx in [&left, &right] {
+                tx.put::<PlainAccountState>(
+                    address,
+                    Account { nonce: 1000 + u64::from(round), ..Default::default() },
+                )
+                .unwrap();
+                tx.delete::<HashedAccounts>(B256::with_last_byte(round), None).unwrap();
+                tx.delete::<HashedStorages>(B256::with_last_byte(round), None).unwrap();
+                let mut cursor = tx.cursor_dup_write::<PlainStorageState>().unwrap();
+                let value =
+                    cursor.seek_by_key_subkey(address, B256::with_last_byte(3)).unwrap().unwrap();
+                assert_eq!(value.key, B256::with_last_byte(3));
+                cursor.delete_current().unwrap();
+                cursor
+                    .upsert(address, &StorageEntry { key: value.key, value: U256::from(9999) })
+                    .unwrap();
+                // APPEND_DUP orders duplicates within one primary key, not across the table.
+                cursor
+                    .append_dup(
+                        address,
+                        StorageEntry { key: B256::with_last_byte(9), value: U256::from(1) },
+                    )
+                    .unwrap();
+            }
+            compare!(left, right, PlainAccountState);
+            compare!(left, right, PlainStorageState);
+            compare!(left, right, HashedAccounts);
+            compare!(left, right, HashedStorages);
+            let mut a = left.cursor_dup_read::<PlainStorageState>().unwrap();
+            let mut b = right.cursor_dup_read::<PlainStorageState>().unwrap();
+            for key in 0..=65u8 {
+                let key = Address::with_last_byte(key);
+                assert_eq!(a.seek_exact(key).unwrap(), b.seek_exact(key).unwrap());
+                for subkey in [0, 3, 7, 8, 9, 10, 255] {
+                    assert_eq!(
+                        a.seek_by_key_subkey(key, B256::with_last_byte(subkey)).unwrap(),
+                        b.seek_by_key_subkey(key, B256::with_last_byte(subkey)).unwrap()
+                    );
+                }
+                assert_eq!(
+                    a.walk_dup(Some(key), None).unwrap().collect::<Result<Vec<_>, _>>().unwrap(),
+                    b.walk_dup(Some(key), None).unwrap().collect::<Result<Vec<_>, _>>().unwrap()
+                );
+            }
+            drop(a);
+            drop(b);
+            left.commit().unwrap();
+            right.commit().unwrap();
+            assert_eq!(old.get::<PlainAccountState>(address).unwrap(), previous);
+        }
+        {
+            let tx = candidate.tx_mut().unwrap();
+            tx.clear::<PlainStorageState>().unwrap();
+            tx.clear::<HashedAccounts>().unwrap();
+            assert_eq!(tx.entries::<PlainStorageState>().unwrap(), 0);
+            tx.abort();
+        }
+        {
+            let left = baseline.tx().unwrap();
+            let right = candidate.tx().unwrap();
+            compare!(left, right, PlainStorageState);
+            compare!(left, right, HashedAccounts);
+        }
+        // Simulate a native commit followed by an aborted MDBX commit. Reopen must
+        // select the MDBX-referenced root, not the native library's newest root.
+        {
+            let (store, dbi) = candidate.triedb.as_ref().unwrap();
+            let tx = candidate.inner.begin_ro_txn().unwrap();
+            let version = u64::from_be_bytes(
+                tx.get::<Vec<u8>>(*dbi, b"version").unwrap().unwrap().try_into().unwrap(),
+            );
+            let orphan = crate::triedb::Transaction::new(store.clone(), version, true);
+            orphan.clear(crate::triedb::TableSpec::named("PlainStorageState").unwrap()).unwrap();
+            orphan.commit().unwrap();
+        }
+        drop(candidate);
+        let candidate = DatabaseEnv::open(
+            candidate_dir.path(),
+            DatabaseEnvKind::RO,
+            DatabaseArguments::new(ClientVersion::default()),
+        )
+        .unwrap();
+        {
+            let left = baseline.tx().unwrap();
+            let right = candidate.tx().unwrap();
+            compare!(left, right, PlainAccountState);
+            compare!(left, right, PlainStorageState);
+        }
+        drop(candidate);
+        let candidate = create_test_db_with_path(DatabaseEnvKind::RW, candidate_dir.path());
+        let left = baseline.tx_mut().unwrap();
+        let right = candidate.tx_mut().unwrap();
+        left.clear::<PlainStorageState>().unwrap();
+        right.clear::<PlainStorageState>().unwrap();
+        left.commit().unwrap();
+        right.commit().unwrap();
+        assert_eq!(candidate.tx().unwrap().entries::<PlainStorageState>().unwrap(), 0);
+        drop(candidate);
+        std::fs::rename(&device, native_dir.path().join("state.db.offline")).unwrap();
+        assert!(DatabaseEnv::open(
+            candidate_dir.path(),
+            DatabaseEnvKind::RO,
+            DatabaseArguments::new(ClientVersion::default())
+        )
+        .is_err());
+    }
 
     #[test]
     fn db_creation() {
