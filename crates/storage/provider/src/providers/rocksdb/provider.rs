@@ -417,6 +417,7 @@ impl RocksDBBuilder {
             })?;
             if self.read_only {
                 // Legacy databases have no BAL tables; secondary opens cannot create them.
+                // Keep existing BAL tables; only omit those absent from disk.
                 cf_descriptors.retain(|cf| {
                     !matches!(
                         cf.name(),
