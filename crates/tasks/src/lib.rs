@@ -49,7 +49,7 @@ pub mod for_each_ordered;
 #[cfg(feature = "rayon")]
 pub use for_each_ordered::ForEachOrdered;
 
-pub use cancel::CancelOnDrop;
+pub use cancel::{CancelOnDrop, ManualCancel};
 pub use lazy::LazyHandle;
 #[cfg(feature = "rayon")]
 pub use runtime::RayonConfig;
