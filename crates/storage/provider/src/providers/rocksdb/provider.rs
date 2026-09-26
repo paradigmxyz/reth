@@ -415,6 +415,15 @@ impl RocksDBBuilder {
                     code: -1,
                 }))
             })?;
+            if self.read_only {
+                // Legacy databases have no BAL tables; secondary opens cannot create them.
+                cf_descriptors.retain(|cf| {
+                    !matches!(
+                        cf.name(),
+                        tables::BlockAccessLists::NAME | tables::BlockAccessListBlockNumbers::NAME
+                    ) || existing_column_families.iter().any(|name| name == cf.name())
+                });
+            }
             let unknown_column_families: Vec<String> = existing_column_families
                 .into_iter()
                 .filter(|name| {
@@ -912,6 +921,14 @@ impl RocksDBProvider {
     /// Gets the column family handle for a table.
     fn get_cf_handle<T: Table>(&self) -> Result<&rocksdb::ColumnFamily, DatabaseError> {
         self.0.cf_handle::<T>()
+    }
+
+    /// Returns whether this provider opened the given table.
+    pub(crate) fn has_table<T: Table>(&self) -> bool {
+        match self.0.as_ref() {
+            RocksDBProviderInner::ReadWrite { db, .. } => db.cf_handle(T::NAME).is_some(),
+            RocksDBProviderInner::Secondary { db, .. } => db.cf_handle(T::NAME).is_some(),
+        }
     }
 
     /// Executes a function and records metrics with the given operation and table name.
