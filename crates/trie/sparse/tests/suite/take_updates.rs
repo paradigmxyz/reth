@@ -76,6 +76,48 @@ pub(super) fn test_take_updates_resets_after_take<T: SparseTrie>(new_trie: fn() 
     );
 }
 
+/// `has_updates` gates `take_updates`.
+///
+/// It must be set once a mutation was recorded and cleared by the take, so that callers
+/// holding many tries can skip the untouched ones.
+pub(super) fn test_has_updates_reports_pending_updates<T: SparseTrie>(new_trie: fn() -> T) {
+    let mut storage: BTreeMap<B256, U256> = BTreeMap::new();
+    for i in 0u8..16 {
+        let mut key = B256::ZERO;
+        key.0[0] = 0x10;
+        key.0[1] = i * 16;
+        storage.insert(key, U256::from(i as u64 + 1));
+    }
+
+    let harness = SuiteTestHarness::new(storage);
+
+    let mut untracked: T = harness.init_trie_fully_revealed(false, new_trie);
+    let mut trie: T = harness.init_trie_fully_revealed(true, new_trie);
+    assert!(!trie.has_updates(), "a revealed trie without mutations has no updates");
+
+    let mut key = B256::ZERO;
+    key.0[0] = 0x10;
+    key.0[1] = 0xFF;
+    let changeset: BTreeMap<B256, U256> = BTreeMap::from([(key, U256::from(999))]);
+
+    let mut leaf_updates = SuiteTestHarness::leaf_updates(&changeset);
+    harness.reveal_and_update(&mut untracked, &mut leaf_updates);
+    let _ = untracked.root(epoch(0));
+    assert!(!untracked.has_updates(), "a trie that does not track updates never has any");
+
+    let mut leaf_updates = SuiteTestHarness::leaf_updates(&changeset);
+    harness.reveal_and_update(&mut trie, &mut leaf_updates);
+    let _ = trie.root(epoch(0));
+    assert!(trie.has_updates(), "updating a leaf must mark the trie as having updates");
+
+    let updates = trie.take_updates();
+    assert!(
+        !updates.updated_nodes.is_empty() || !updates.removed_nodes.is_empty(),
+        "the take must return the recorded updates",
+    );
+    assert!(!trie.has_updates(), "the take must clear the pending updates");
+}
+
 /// `take_updates` contains both updated and removed nodes, mutually exclusive.
 ///
 /// Uses a 3-level branching structure so that intermediate branches are "real" DB nodes

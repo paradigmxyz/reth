@@ -460,6 +460,11 @@ pub struct RlpNodeStackItem {
 }
 
 impl SparseTrieUpdates {
+    /// Returns `true` if no nodes were updated or removed.
+    pub fn is_empty(&self) -> bool {
+        self.updated_nodes.is_empty() && self.removed_nodes.is_empty()
+    }
+
     /// Clears the updates, but keeps the backing data structures allocated.
     pub fn clear(&mut self) {
         self.updated_nodes.clear();
