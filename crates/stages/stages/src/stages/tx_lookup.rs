@@ -97,12 +97,17 @@ where
 
             // Save prune checkpoint only if we don't have one already.
             // Otherwise, pruner may skip the unpruned range of blocks.
-            if provider.get_prune_checkpoint(PruneSegment::TransactionLookup)?.is_none() {
-                let target_prunable_tx_number = provider
+            //
+            // The checkpoint records the highest pruned transaction, so it is only saved if
+            // there is a transaction up to the prunable block: `last_tx_num()` saturates to zero
+            // for an empty block, which would mark transaction zero as pruned.
+            if provider.get_prune_checkpoint(PruneSegment::TransactionLookup)?.is_none() &&
+                let Some(target_prunable_tx_number) = provider
                     .block_body_indices(target_prunable_block)?
                     .ok_or(ProviderError::BlockBodyIndicesNotFound(target_prunable_block))?
-                    .last_tx_num();
-
+                    .next_tx_num()
+                    .checked_sub(1)
+            {
                 provider.save_prune_checkpoint(
                     PruneSegment::TransactionLookup,
                     PruneCheckpoint {
@@ -394,6 +399,49 @@ mod tests {
 
         // Validate the stage execution
         assert!(runner.validate_execution(input, result.ok()).is_ok(), "execution validation");
+    }
+
+    /// The prune checkpoint marks the highest pruned transaction, so it must not be saved when
+    /// the prunable blocks contain no transaction, otherwise transaction zero is never pruned.
+    #[tokio::test]
+    async fn execute_pruned_transaction_lookup_without_transactions() {
+        let (previous_stage, prune_target) = (20, 10);
+        let mut rng = generators::rng();
+
+        let mut runner = TransactionLookupTestRunner::default();
+        let input = ExecInput { target: Some(previous_stage), checkpoint: None };
+
+        // blocks up to the prune target are empty, transaction zero lives above it
+        let seed = [
+            random_block_range(
+                &mut rng,
+                1..=prune_target,
+                BlockRangeParams { parent: Some(B256::ZERO), tx_count: 0..1, ..Default::default() },
+            ),
+            random_block_range(
+                &mut rng,
+                prune_target + 1..=previous_stage,
+                BlockRangeParams { parent: Some(B256::ZERO), tx_count: 1..2, ..Default::default() },
+            ),
+        ]
+        .concat();
+        runner
+            .db
+            .insert_blocks(seed.iter(), StorageKind::Static)
+            .expect("failed to seed execution");
+
+        runner.set_prune_mode(PruneMode::Before(prune_target + 1));
+
+        let result = runner.execute(input).await.unwrap();
+        assert_matches!(result, Ok(ExecOutput { done: true, .. }));
+
+        let provider = runner.db.factory.provider().unwrap();
+        assert_eq!(provider.get_prune_checkpoint(PruneSegment::TransactionLookup).unwrap(), None);
+        // every transaction is indexed, including transaction zero
+        assert_eq!(
+            provider.count_entries::<tables::TransactionHashNumbers>().unwrap(),
+            provider.count_entries::<tables::Transactions>().unwrap()
+        );
     }
 
     #[test]
