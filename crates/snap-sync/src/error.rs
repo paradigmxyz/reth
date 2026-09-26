@@ -1,7 +1,9 @@
 //! Failures raised while assembling a snap state generation.
 
 use alloy_primitives::B256;
-use reth_downloaders::snap::{InvalidBlockAccessListRequest, InvalidStorageRangeRequest};
+use reth_downloaders::snap::{
+    InvalidAccountRange, InvalidBlockAccessListRequest, InvalidStorageRangeRequest,
+};
 use reth_network_p2p::error::RequestError;
 use reth_storage_api::SnapAttemptId;
 use reth_storage_errors::{db::DatabaseError, provider::ProviderError};
@@ -15,6 +17,9 @@ pub enum SnapSyncError {
     /// A request for state failed.
     #[error(transparent)]
     Request(#[from] RequestError),
+    /// An account range was requested with its origin past its limit.
+    #[error(transparent)]
+    AccountRangeRequest(#[from] InvalidAccountRange),
     /// A storage request did not match the accounts it was built from.
     #[error(transparent)]
     StorageRequest(#[from] InvalidStorageRangeRequest),
