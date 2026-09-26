@@ -8,7 +8,7 @@ use crate::{
     Cursor, Error, Stat, TableObject,
 };
 use ffi::{MDBX_txn_flags_t, MDBX_TXN_RDONLY, MDBX_TXN_READWRITE};
-use parking_lot::{Mutex, MutexGuard, RwLock};
+use parking_lot::{Mutex, MutexGuard, RwLock, RwLockReadGuard};
 use std::{
     collections::HashMap,
     ffi::{c_uint, c_void},
@@ -889,22 +889,27 @@ impl Transaction<RW> {
 
     /// Gets the subtransaction pointer for the given DBI, if parallel writes is enabled.
     ///
-    /// Returns the subtransaction pointer if one exists for this DBI.
+    /// Returns the subtransaction pointer and a guard that must outlive its use.
+    /// Finishing children takes the write lock, so keeping the read guard through
+    /// the FFI operation prevents abort/merge from freeing an active child.
     /// Returns an error if parallel writes is enabled but no subtxn exists for this DBI
     /// (prevents accidental cross-DBI access which would bypass subtxn isolation).
     /// Falls back to parent txn only if parallel writes is not enabled.
-    pub(crate) fn get_txn_ptr_for_dbi(&self, dbi: ffi::MDBX_dbi) -> Result<TransactionPtr> {
+    pub(crate) fn get_txn_ptr_for_dbi(
+        &self,
+        dbi: ffi::MDBX_dbi,
+    ) -> Result<(TransactionPtr, RwLockReadGuard<'_, HashMap<ffi::MDBX_dbi, SubTransaction>>)> {
+        let subtxns = self.subtxns.read();
         let parallel_enabled =
             self.parallel_writes_enabled.load(std::sync::atomic::Ordering::SeqCst);
         if parallel_enabled {
-            let subtxns = self.subtxns.read();
             if let Some(subtxn) = subtxns.get(&dbi) {
-                return Ok(subtxn.txn_ptr());
+                return Ok((subtxn.txn_ptr(), subtxns));
             }
             // Parallel writes enabled but no subtxn for this DBI - reject to enforce isolation
             return Err(Error::Access);
         }
-        Ok(self.inner.txn.clone())
+        Ok((self.inner.txn.clone(), subtxns))
     }
 
     /// Aborts all subtransactions.
@@ -946,7 +951,7 @@ impl Transaction<RW> {
         let mut data_val: ffi::MDBX_val =
             ffi::MDBX_val { iov_len: data.len(), iov_base: data.as_ptr() as *mut c_void };
 
-        let txn_ptr = self.get_txn_ptr_for_dbi(dbi)?;
+        let (txn_ptr, _subtxns) = self.get_txn_ptr_for_dbi(dbi)?;
         mdbx_result(txn_ptr.txn_execute_fail_on_timeout(|txn| unsafe {
             ffi::mdbx_put(txn, dbi, &key_val, &mut data_val, flags.bits())
         })?)?;
@@ -971,7 +976,7 @@ impl Transaction<RW> {
             iov_base: data.as_ptr() as *mut c_void,
         });
 
-        let txn_ptr = self.get_txn_ptr_for_dbi(dbi)?;
+        let (txn_ptr, _subtxns) = self.get_txn_ptr_for_dbi(dbi)?;
         mdbx_result(txn_ptr.txn_execute_fail_on_timeout(|txn| {
             if let Some(d) = data_val {
                 unsafe { ffi::mdbx_del(txn, dbi, &key_val, &d) }
@@ -1002,7 +1007,7 @@ impl Transaction<RW> {
     /// txn.commit()?;
     /// ```
     pub fn cursor_with_dbi_parallel(&self, dbi: ffi::MDBX_dbi) -> Result<ParallelCursor<'_>> {
-        let txn_ptr = self.get_txn_ptr_for_dbi(dbi)?;
+        let (txn_ptr, _subtxns) = self.get_txn_ptr_for_dbi(dbi)?;
         ParallelCursor::new(self, dbi, txn_ptr)
     }
 
@@ -1018,7 +1023,7 @@ impl Transaction<RW> {
     /// all cursors are dropped before calling `commit_subtxns()`. Unlike `ParallelCursor`,
     /// this method does not provide compile-time enforcement of this constraint.
     pub fn cursor_with_dbi_parallel_owned(&self, dbi: ffi::MDBX_dbi) -> Result<Cursor<RW>> {
-        let txn_ptr = self.get_txn_ptr_for_dbi(dbi)?;
+        let (txn_ptr, _subtxns) = self.get_txn_ptr_for_dbi(dbi)?;
         Cursor::new_with_ptr(self.clone(), dbi, txn_ptr)
     }
 }
@@ -1240,6 +1245,7 @@ unsafe impl Sync for TransactionPtr {}
 mod tests {
     use super::*;
     use crate::flags::DatabaseFlags;
+    use std::sync::mpsc;
 
     const fn assert_send_sync<T: Send + Sync>() {}
 
@@ -1269,5 +1275,59 @@ mod tests {
 
         txn.commit_subtxns().expect("commit_subtxns should succeed after cursor is dropped");
         txn.commit().expect("parent transaction commit should succeed");
+    }
+
+    #[test]
+    fn finishing_children_waits_for_inflight_pointer_operations() {
+        for abort in [false, true] {
+            let dir = tempfile::tempdir().unwrap();
+            let env = Environment::builder().set_max_dbs(8).write_map().open(dir.path()).unwrap();
+            let tx = env.begin_rw_txn().unwrap();
+            let dbi = tx.create_db(Some("table"), DatabaseFlags::empty()).unwrap().dbi();
+            tx.put(dbi, b"key", b"old", WriteFlags::empty()).unwrap();
+            tx.commit().unwrap();
+
+            let tx = env.begin_rw_txn().unwrap();
+            tx.enable_parallel_writes(&[dbi]).unwrap();
+            tx.put_parallel(dbi, b"key", b"new", WriteFlags::empty()).unwrap();
+            let (entered_tx, entered_rx) = mpsc::channel();
+            let (release_tx, release_rx) = mpsc::channel();
+            let (started_tx, started_rx) = mpsc::channel();
+            let (finished_tx, finished_rx) = mpsc::channel();
+            std::thread::scope(|scope| {
+                let worker_tx = &tx;
+                scope.spawn(move || {
+                    let (ptr, _guard) = worker_tx.get_txn_ptr_for_dbi(dbi).unwrap();
+                    ptr.txn_execute_fail_on_timeout(|_| {
+                        entered_tx.send(()).unwrap();
+                        release_rx.recv().unwrap();
+                    })
+                    .unwrap();
+                });
+                entered_rx.recv().unwrap();
+                let mut finisher = tx.clone();
+                scope.spawn(move || {
+                    started_tx.send(()).unwrap();
+                    let result =
+                        if abort { finisher.abort_subtxns() } else { finisher.commit_subtxns() };
+                    finished_tx.send(result).unwrap();
+                });
+                started_rx.recv().unwrap();
+                let premature = finished_rx.recv_timeout(Duration::from_millis(50));
+                release_tx.send(()).unwrap();
+                assert!(matches!(premature, Err(mpsc::RecvTimeoutError::Timeout)));
+                finished_rx.recv_timeout(Duration::from_secs(5)).unwrap().unwrap();
+            });
+            if abort {
+                drop(tx);
+            } else {
+                tx.commit().unwrap();
+            }
+            let reader = env.begin_ro_txn().unwrap();
+            assert_eq!(
+                reader.get::<Vec<u8>>(dbi, b"key").unwrap().as_deref(),
+                Some(if abort { &b"old"[..] } else { &b"new"[..] })
+            );
+        }
     }
 }
