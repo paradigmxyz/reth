@@ -19,21 +19,21 @@ use tracing::instrument;
 type Notif<'a> = Notification<'a, Option<&'a JsonRawValue>>;
 
 #[derive(Debug, Clone)]
-pub(crate) struct Batch<S> {
+pub(crate) struct Batch<'a, S> {
     data: Vec<u8>,
-    rpc_service: S,
+    rpc_service: &'a S,
 }
 
-// Batch responses must be sent back as a single message so we read the results from each
-// request in the batch and read the results off of a new channel, `rx_batch`, and then send the
-// complete batch response back to the client over `tx`.
+// Batch responses must be sent back as a single message, so we call each batch entry through the
+// borrowed RPC service, collect the results in order, and return one serialized batch response
+// for the connection driver to send.
 #[instrument(name = "batch", skip(b))]
 pub(crate) async fn process_batch_request<S>(
-    b: Batch<S>,
+    b: Batch<'_, S>,
     max_response_body_size: usize,
 ) -> Option<String>
 where
-    S: RpcServiceT<MethodResponse = MethodResponse> + Send,
+    S: RpcServiceT<MethodResponse = MethodResponse> + Send + Sync,
 {
     let Batch { data, rpc_service } = b;
 
@@ -126,13 +126,13 @@ async fn catch_call_panic(
 
 pub(crate) async fn call_with_service<S>(
     request: String,
-    rpc_service: S,
+    rpc_service: &S,
     max_response_body_size: usize,
     max_request_body_size: usize,
     conn: Arc<OwnedSemaphorePermit>,
 ) -> Option<String>
 where
-    S: RpcServiceT<MethodResponse = MethodResponse> + Send,
+    S: RpcServiceT<MethodResponse = MethodResponse> + Send + Sync,
 {
     enum Kind {
         Single,
@@ -158,14 +158,14 @@ where
 
     // Single request or notification
     let res = if matches!(request_kind, Kind::Single) {
-        let response = process_single_request(data, &rpc_service).await;
+        let response = process_single_request(data, rpc_service).await;
         match response {
             Some(response) if response.is_method_call() => {
                 Some(raw_response_into_string(response.into_json()))
             }
             _ => {
-                // subscription responses are sent directly over the sink, return a response here
-                // would lead to duplicate responses for the subscription response
+                // Notifications have no response, and subscription responses are already sent
+                // through the sink, so returning them here would duplicate them.
                 None
             }
         }

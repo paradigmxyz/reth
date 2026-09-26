@@ -197,7 +197,7 @@ where
 
                     process_connection(ProcessConnection {
                         http_middleware: &self.http_middleware,
-                        rpc_middleware: self.rpc_middleware.clone(),
+                        rpc_middleware: &self.rpc_middleware,
                         conn_permit,
                         conn_id: id,
                         server_cfg: self.cfg.clone(),
@@ -221,11 +221,11 @@ where
             }
         }
 
-        // Drop the last Sender
+        // Drop the accept loop's sender so the channel closes once all connection tasks exit.
         drop(drop_on_completion);
 
-        // Once this channel is closed it is safe to assume that all connections have been
-        // gracefully shutdown
+        // Wait for all connection tasks to exit. Request tasks spawned by a connection are aborted
+        // when it closes, but their cancellation is not awaited here.
         while process_connection_awaiter.recv().await.is_some() {
             // Generally, messages should not be sent across this channel,
             // but we'll loop here to wait for `None` just to be on the safe side
@@ -269,30 +269,6 @@ pub struct IpcServerStartError {
     endpoint: String,
     #[source]
     source: io::Error,
-}
-
-/// Data required by the server to handle requests received via an IPC connection
-#[derive(Debug, Clone)]
-#[allow(dead_code)]
-pub(crate) struct ServiceData {
-    /// Registered server methods.
-    pub(crate) methods: Methods,
-    /// Subscription ID provider.
-    pub(crate) id_provider: Arc<dyn IdProvider>,
-    /// Stop handle.
-    pub(crate) stop_handle: StopHandle,
-    /// Connection ID
-    pub(crate) conn_id: u32,
-    /// Connection Permit.
-    pub(crate) conn_permit: Arc<ConnectionPermit>,
-    /// Limits the number of subscriptions for this connection
-    pub(crate) bounded_subscriptions: BoundedSubscriptions,
-    /// Sink that is used to send back responses to the connection.
-    ///
-    /// This is used for subscriptions.
-    pub(crate) method_sink: MethodSink,
-    /// `ServerConfig`
-    pub(crate) server_cfg: Settings,
 }
 
 /// Similar to [`tower::ServiceBuilder`] but doesn't
@@ -362,12 +338,44 @@ impl<L> RpcServiceBuilder<L> {
 
 /// `JsonRPSee` service compatible with `tower`.
 ///
+/// One instance serves a single IPC connection. The RPC middleware stack is built once per
+/// connection and shared by all of its requests, so connection-scoped state such as the
+/// subscription limit and per-connection middleware state spans the whole connection. Requests
+/// still in flight when the connection closes are aborted, and the middleware is dropped once
+/// their tasks have been cancelled.
+///
 /// # Note
 /// This is similar to [`hyper::service::service_fn`](https://docs.rs/hyper/latest/hyper/service/fn.service_fn.html).
-#[derive(Debug, Clone)]
-pub struct TowerServiceNoHttp<L> {
-    inner: ServiceData,
-    rpc_middleware: RpcServiceBuilder<L>,
+pub struct TowerServiceNoHttp<L: Layer<RpcService>> {
+    /// The connection's RPC service wrapped in the RPC middleware.
+    rpc_service: Arc<L::Service>,
+    /// Connection permit.
+    conn_permit: Arc<ConnectionPermit>,
+    /// Maximum size in bytes of a request.
+    max_request_body_size: usize,
+    /// Maximum size in bytes of a response.
+    max_response_body_size: usize,
+}
+
+impl<L: Layer<RpcService>> Clone for TowerServiceNoHttp<L> {
+    fn clone(&self) -> Self {
+        Self {
+            rpc_service: self.rpc_service.clone(),
+            conn_permit: self.conn_permit.clone(),
+            max_request_body_size: self.max_request_body_size,
+            max_response_body_size: self.max_response_body_size,
+        }
+    }
+}
+
+impl<L: Layer<RpcService>> std::fmt::Debug for TowerServiceNoHttp<L> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("TowerServiceNoHttp")
+            .field("conn_permit", &self.conn_permit)
+            .field("max_request_body_size", &self.max_request_body_size)
+            .field("max_response_body_size", &self.max_response_body_size)
+            .finish_non_exhaustive()
+    }
 }
 
 impl<RpcMiddleware> Service<String> for TowerServiceNoHttp<RpcMiddleware>
@@ -376,18 +384,18 @@ where
     <RpcMiddleware as Layer<RpcService>>::Service:
         Send + Sync + 'static + RpcServiceT<MethodResponse = MethodResponse>,
 {
-    /// The response of a handled RPC call
+    /// The serialized response, if the connection driver must write one.
     ///
-    /// This is an `Option` because subscriptions and call responses are handled differently.
-    /// This will be `Some` for calls, and `None` for subscriptions, because the subscription
-    /// response will be emitted via the `method_sink`.
+    /// This is `None` for notifications and for subscription responses, which are sent through
+    /// the connection's `MethodSink` instead. A subscription rejected by the subscription limit
+    /// is an ordinary error response and yields `Some`.
     type Response = Option<String>;
 
     type Error = Box<dyn core::error::Error + Send + Sync + 'static>;
 
     type Future = Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send>>;
 
-    /// Opens door for back pressure implementation.
+    /// Always ready; this service does not apply request backpressure.
     fn poll_ready(&mut self, _: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         Poll::Ready(Ok(()))
     }
@@ -395,34 +403,20 @@ where
     fn call(&mut self, request: String) -> Self::Future {
         trace!("{:?}", request);
 
-        let cfg = RpcServiceCfg {
-            bounded_subscriptions: self.inner.bounded_subscriptions.clone(),
-            id_provider: self.inner.id_provider.clone(),
-            sink: self.inner.method_sink.clone(),
-        };
-
-        let max_response_body_size = self.inner.server_cfg.max_response_body_size as usize;
-        let max_request_body_size = self.inner.server_cfg.max_request_body_size as usize;
-        let conn = self.inner.conn_permit.clone();
-        let rpc_service = self.rpc_middleware.service(RpcService::new(
-            self.inner.methods.clone(),
-            max_response_body_size,
-            self.inner.conn_id.into(),
-            cfg,
-        ));
-        // an ipc connection needs to handle read+write concurrently
-        // even if the underlying rpc handler spawns the actual work or is does a lot of async any
-        // additional overhead performed by `handle_request` can result in I/O latencies, for
-        // example tracing calls are relatively CPU expensive on serde::serialize alone, moving this
-        // work to a separate task takes the pressure off the connection so all concurrent responses
-        // are also serialized concurrently and the connection can focus on read+write
+        let max_response_body_size = self.max_response_body_size;
+        let max_request_body_size = self.max_request_body_size;
+        let conn = self.conn_permit.clone();
+        let rpc_service = self.rpc_service.clone();
+        // Run request parsing, middleware and handler execution, and response serialization in a
+        // separate task so this work does not add latency to the connection's read/write loop.
+        // Each task shares the connection's RPC service.
         //
         // The connection drops its pending calls when it closes, so the call must not outlive the
         // returned future, otherwise it keeps running without anyone waiting for the response.
         let f = AbortOnDropHandle::new(tokio::task::spawn(async move {
             ipc::call_with_service(
                 request,
-                rpc_service,
+                &*rpc_service,
                 max_response_body_size,
                 max_request_body_size,
                 conn,
@@ -444,7 +438,7 @@ where
 
 struct ProcessConnection<'a, HttpMiddleware, RpcMiddleware> {
     http_middleware: &'a tower::ServiceBuilder<HttpMiddleware>,
-    rpc_middleware: RpcServiceBuilder<RpcMiddleware>,
+    rpc_middleware: &'a RpcServiceBuilder<RpcMiddleware>,
     conn_permit: Arc<ConnectionPermit>,
     conn_id: u32,
     server_cfg: Settings,
@@ -492,20 +486,27 @@ fn process_connection<RpcMiddleware, HttpMiddleware>(
 
     let (tx, rx) = mpsc::channel::<Box<JsonRawValue>>(server_cfg.message_buffer_capacity as usize);
     let method_sink = MethodSink::new_with_limit(tx, server_cfg.max_response_body_size);
-    let tower_service = TowerServiceNoHttp {
-        inner: ServiceData {
-            methods,
-            id_provider,
-            stop_handle: stop_handle.clone(),
-            server_cfg: server_cfg.clone(),
-            conn_id,
-            conn_permit,
+    let max_response_body_size = server_cfg.max_response_body_size as usize;
+
+    // The middleware is built once per connection so that the subscription limit and any
+    // per-connection middleware state are shared by all requests on this connection.
+    let rpc_service = rpc_middleware.service(RpcService::new(
+        methods,
+        max_response_body_size,
+        conn_id.into(),
+        RpcServiceCfg {
             bounded_subscriptions: BoundedSubscriptions::new(
                 server_cfg.max_subscriptions_per_connection,
             ),
-            method_sink,
+            id_provider,
+            sink: method_sink,
         },
-        rpc_middleware,
+    ));
+    let tower_service = TowerServiceNoHttp::<RpcMiddleware> {
+        rpc_service: Arc::new(rpc_service),
+        conn_permit,
+        max_request_body_size: server_cfg.max_request_body_size as usize,
+        max_response_body_size,
     };
 
     let service = http_middleware.service(tower_service);
@@ -741,8 +742,9 @@ impl<HttpMiddleware, RpcMiddleware> Builder<HttpMiddleware, RpcMiddleware> {
     /// it has a different service trait which takes &self instead &mut self
     /// which means that you can't use built-in middleware from tower.
     ///
-    /// Another consequence of `&self` is that you must wrap any of the middleware state in
-    /// a type which is Send and provides interior mutability such `Arc<Mutex>`.
+    /// The middleware is built once per connection and shared by concurrent requests on that
+    /// connection, so it must be `Send + Sync`. State mutated through `&self` requires thread-safe
+    /// interior mutability, such as a mutex or atomics.
     ///
     /// The builder itself exposes a similar API as the [`tower::ServiceBuilder`]
     /// where it is possible to compose layers to the middleware.
@@ -794,7 +796,10 @@ mod tests {
         PendingSubscriptionSink, RpcModule, SubscriptionMessage,
     };
     use reth_tracing::init_test_tracing;
-    use std::pin::pin;
+    use std::{
+        pin::pin,
+        sync::atomic::{AtomicUsize, Ordering},
+    };
     use tokio::sync::broadcast;
     use tokio_stream::wrappers::BroadcastStream;
 
@@ -1215,5 +1220,102 @@ mod tests {
 
         assert_eq!(say_hello_response, goodbye_msg);
         assert_eq!(say_goodbye_response, hello_msg);
+    }
+
+    #[tokio::test]
+    async fn rpc_middleware_is_built_once_per_connection() {
+        /// Counts how many middleware services are built and dropped.
+        #[derive(Clone, Default)]
+        struct CountingLayer {
+            built: Arc<AtomicUsize>,
+            dropped: Arc<AtomicUsize>,
+        }
+
+        impl<S> Layer<S> for CountingLayer {
+            type Service = Counted<S>;
+
+            fn layer(&self, inner: S) -> Self::Service {
+                self.built.fetch_add(1, Ordering::SeqCst);
+                Counted { inner, dropped: self.dropped.clone() }
+            }
+        }
+
+        struct Counted<S> {
+            inner: S,
+            dropped: Arc<AtomicUsize>,
+        }
+
+        impl<S> Drop for Counted<S> {
+            fn drop(&mut self) {
+                self.dropped.fetch_add(1, Ordering::SeqCst);
+            }
+        }
+
+        impl<S> RpcServiceT for Counted<S>
+        where
+            S: Send + Sync + RpcServiceT,
+        {
+            type MethodResponse = S::MethodResponse;
+            type NotificationResponse = S::NotificationResponse;
+            type BatchResponse = S::BatchResponse;
+
+            fn call<'a>(
+                &self,
+                req: Request<'a>,
+            ) -> impl Future<Output = Self::MethodResponse> + Send + 'a {
+                self.inner.call(req)
+            }
+
+            fn batch<'a>(
+                &self,
+                batch: Batch<'a>,
+            ) -> impl Future<Output = Self::BatchResponse> + Send + 'a {
+                self.inner.batch(batch)
+            }
+
+            fn notification<'a>(
+                &self,
+                n: Notification<'a>,
+            ) -> impl Future<Output = Self::NotificationResponse> + Send + 'a {
+                self.inner.notification(n)
+            }
+        }
+
+        let endpoint = &dummy_name();
+        let layer = CountingLayer::default();
+        let server = Builder::default()
+            .set_rpc_middleware(RpcServiceBuilder::new().layer(layer.clone()))
+            .build(endpoint.clone());
+        let mut module = RpcModule::new(());
+        module.register_method("anything", |_, _, _| "ok").unwrap();
+        let handle = server.start(module).await.unwrap();
+
+        let client = IpcClientBuilder::default().build(endpoint).await.unwrap();
+        for _ in 0..3 {
+            client.request::<String, _>("anything", rpc_params![]).await.unwrap();
+        }
+        assert_eq!(layer.built.load(Ordering::SeqCst), 1);
+        assert_eq!(layer.dropped.load(Ordering::SeqCst), 0);
+
+        let other_client = IpcClientBuilder::default().build(endpoint).await.unwrap();
+        other_client.request::<String, _>("anything", rpc_params![]).await.unwrap();
+        assert_eq!(layer.built.load(Ordering::SeqCst), 2);
+
+        // With no requests in flight, closing the connection drops its middleware.
+        drop(client);
+        tokio::time::timeout(std::time::Duration::from_secs(5), async {
+            while layer.dropped.load(Ordering::SeqCst) != 1 {
+                tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("middleware was not dropped after the connection closed");
+
+        // With no requests in flight, stopping the server drops the remaining connection's
+        // middleware.
+        handle.stop().unwrap();
+        handle.stopped().await;
+        assert_eq!(layer.dropped.load(Ordering::SeqCst), 2);
+        drop(other_client);
     }
 }
