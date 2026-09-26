@@ -1,13 +1,14 @@
 //! Implements the `GetBlockHeaders`, `GetBlockBodies`, `BlockHeaders`, and `BlockBodies` message
 //! types.
 
-use crate::HeadersDirection;
+use crate::{broadcast::decode_list_with_memory_budget, HeadersDirection};
 use alloc::vec::Vec;
 use alloy_eips::BlockHashOrNumber;
 use alloy_primitives::B256;
-use alloy_rlp::{RlpDecodable, RlpDecodableWrapper, RlpEncodable, RlpEncodableWrapper};
+use alloy_rlp::{Decodable, RlpDecodable, RlpDecodableWrapper, RlpEncodable, RlpEncodableWrapper};
 use derive_more::{Deref, IntoIterator};
 use reth_codecs_derive::{add_arbitrary_tests, generate_tests};
+use reth_primitives_traits::InMemorySize;
 
 /// A request for a peer to return block headers starting at the requested block.
 /// The peer must return at most [`limit`](#structfield.limit) headers.
@@ -113,6 +114,17 @@ pub struct BlockBodies<B = reth_ethereum_primitives::BlockBody>(
 );
 
 generate_tests!(#[rlp, 16] BlockBodies<reth_ethereum_primitives::BlockBody>, EthBlockBodiesTests);
+
+impl<B: Decodable + InMemorySize> BlockBodies<B> {
+    /// Decodes block bodies until their cumulative in-memory size exceeds `memory_budget` bytes.
+    /// Any remaining bodies in the payload are skipped.
+    pub fn decode_with_memory_budget(
+        buf: &mut &[u8],
+        memory_budget: usize,
+    ) -> alloy_rlp::Result<Self> {
+        decode_list_with_memory_budget(buf, memory_budget).map(Self)
+    }
+}
 
 impl<B> From<Vec<B>> for BlockBodies<B> {
     fn from(bodies: Vec<B>) -> Self {
@@ -541,5 +553,21 @@ mod tests {
         body.encode(&mut buf);
         let decoded = BlockBodies::<BlockBody>::decode(&mut buf.as_slice()).unwrap();
         assert_eq!(body, decoded);
+    }
+
+    #[test]
+    fn decode_block_bodies_with_memory_budget() {
+        let bodies = BlockBodies(vec![BlockBody::default(); 3]);
+        let encoded = alloy_rlp::encode(&bodies);
+        let mut buf = encoded.as_slice();
+
+        let decoded = BlockBodies::<BlockBody>::decode_with_memory_budget(
+            &mut buf,
+            core::mem::size_of::<BlockBody>(),
+        )
+        .unwrap();
+
+        assert_eq!(decoded.len(), 1);
+        assert!(buf.is_empty());
     }
 }
