@@ -437,6 +437,14 @@ where
     }
 }
 
+/// Runs blocking `f` off the worker on a multi-threaded runtime, inline otherwise.
+fn block_in_place<T>(f: impl FnOnce() -> T) -> T {
+    match tokio::runtime::Handle::try_current().map(|handle| handle.runtime_flavor()) {
+        Ok(tokio::runtime::RuntimeFlavor::MultiThread) => tokio::task::block_in_place(f),
+        _ => f(),
+    }
+}
+
 impl<P, N> Future for ExExManager<P, N>
 where
     P: HeaderProvider + Unpin + 'static,
@@ -448,13 +456,12 @@ where
     /// 1. Handle incoming ExEx events. We do it before finalizing the WAL, because it depends on
     ///    the latest state of [`ExExEvent::FinishedHeight`] events.
     /// 2. Finalize the WAL with the finalized header, if necessary.
-    /// 3. Drain [`ExExManagerHandle`] notifications, push them to the internal buffer and update
-    ///    the internal buffer capacity.
-    /// 5. Send notifications from the internal buffer to those ExExes that are ready to receive new
-    ///    notifications.
-    /// 5. Remove notifications from the internal buffer that have been sent to **all** ExExes and
+    /// 3. Send notifications from the internal buffer to those ExExes that are ready to receive new
+    ///    notifications, then take the next [`ExExManagerHandle`] notification into the buffer;
+    ///    repeat until none is pending or the buffer is full.
+    /// 4. Remove notifications from the internal buffer that have been sent to **all** ExExes and
     ///    update the internal buffer capacity.
-    /// 6. Update the channel with the lowest [`FinishedExExHeight`] among all ExExes.
+    /// 5. Update the channel with the lowest [`FinishedExExHeight`] among all ExExes.
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let this = self.get_mut();
 
@@ -475,60 +482,66 @@ where
             last_finalized_header = finalized_header;
         }
         if let Some(header) = last_finalized_header {
-            this.finalize_wal(header)?;
+            block_in_place(|| this.finalize_wal(header))?;
         }
 
-        // Drain handle notifications
-        while this.buffer.len() < this.max_capacity {
-            if let Poll::Ready(Some((source, notification))) = this.handle_rx.poll_recv(cx) {
-                let committed_tip =
-                    notification.committed_chain().map(|chain| chain.tip().number());
-                let reverted_tip = notification.reverted_chain().map(|chain| chain.tip().number());
-                debug!(target: "exex::manager", ?committed_tip, ?reverted_tip, "Received new notification");
-
-                // Commit to WAL only notifications from blockchain tree. Pipeline notifications
-                // always contain only finalized blocks.
-                match source {
-                    ExExNotificationSource::BlockchainTree => {
-                        debug!(target: "exex::manager", ?committed_tip, ?reverted_tip, "Committing notification to WAL");
-                        this.wal.commit(&notification)?;
-                    }
-                    ExExNotificationSource::Pipeline => {
-                        debug!(target: "exex::manager", ?committed_tip, ?reverted_tip, "Notification was sent from pipeline, skipping WAL commit");
-                    }
+        // Offer buffered notifications before taking each new one: taking the whole backlog first
+        // spends the cooperative budget, the sends are refused and the ExExes starve.
+        loop {
+            // Advance all poll senders
+            for exex in &mut this.exex_handles {
+                // It is a logic error for this to ever underflow since the manager manages the
+                // notification IDs
+                let notification_index = exex
+                    .next_notification_id
+                    .checked_sub(this.min_id)
+                    .expect("exex expected notification ID outside the manager's range");
+                if let Some(notification) = this.buffer.get(notification_index) &&
+                    let Poll::Ready(Err(err)) = exex.send(cx, notification)
+                {
+                    // The channel was closed, which is irrecoverable for the manager
+                    return Poll::Ready(Err(err.into()))
                 }
-
-                this.push_notification(notification);
-                continue
             }
-            break
+
+            // Take the next handle notification
+            if this.buffer.len() >= this.max_capacity {
+                break
+            }
+            let Poll::Ready(Some((source, notification))) = this.handle_rx.poll_recv(cx) else {
+                break
+            };
+            let committed_tip = notification.committed_chain().map(|chain| chain.tip().number());
+            let reverted_tip = notification.reverted_chain().map(|chain| chain.tip().number());
+            debug!(target: "exex::manager", ?committed_tip, ?reverted_tip, "Received new notification");
+
+            // Commit to WAL only notifications from blockchain tree. Pipeline notifications
+            // always contain only finalized blocks.
+            match source {
+                ExExNotificationSource::BlockchainTree => {
+                    debug!(target: "exex::manager", ?committed_tip, ?reverted_tip, "Committing notification to WAL");
+                    block_in_place(|| this.wal.commit(&notification))?;
+                }
+                ExExNotificationSource::Pipeline => {
+                    debug!(target: "exex::manager", ?committed_tip, ?reverted_tip, "Notification was sent from pipeline, skipping WAL commit");
+                }
+            }
+
+            this.push_notification(notification);
         }
         let buffer_full = this.buffer.len() >= this.max_capacity;
 
-        // Advance all poll senders
-        let mut min_id = usize::MAX;
-        for idx in (0..this.exex_handles.len()).rev() {
-            let mut exex = this.exex_handles.swap_remove(idx);
-
-            // It is a logic error for this to ever underflow since the manager manages the
-            // notification IDs
-            let notification_index = exex
-                .next_notification_id
-                .checked_sub(this.min_id)
-                .expect("exex expected notification ID outside the manager's range");
-            if let Some(notification) = this.buffer.get(notification_index) &&
-                let Poll::Ready(Err(err)) = exex.send(cx, notification)
-            {
-                // The channel was closed, which is irrecoverable for the manager
-                return Poll::Ready(Err(err.into()))
-            }
-            min_id = min_id.min(exex.next_notification_id);
-            this.exex_handles.push(exex);
-        }
-
         // Remove processed buffered notifications
+        let min_id = this
+            .exex_handles
+            .iter()
+            .map(|exex| exex.next_notification_id)
+            .min()
+            .unwrap_or(usize::MAX);
         debug!(target: "exex::manager", %min_id, "Updating lowest notification id in buffer");
-        this.buffer.retain(|&(id, _)| id >= min_id);
+        while this.buffer.front().is_some_and(|&(id, _)| id < min_id) {
+            this.buffer.pop_front();
+        }
         this.min_id = min_id;
 
         // Update capacity
@@ -1055,7 +1068,7 @@ mod tests {
 
         let provider_factory = create_test_provider_factory();
 
-        let (exex_handle_1, _, _) = ExExHandle::new(
+        let (exex_handle_1, _, _notifications) = ExExHandle::new(
             "test_exex_1".to_string(),
             Default::default(),
             (),
@@ -1110,9 +1123,50 @@ mod tests {
 
         let _ = pinned_manager.as_mut().poll(&mut cx);
 
-        // After polling, the next notification ID and buffer size should be updated
+        // The first went to the ExEx, the second waits in the buffer, the third in the channel
         assert_eq!(pinned_manager.next_id, 2);
-        assert_eq!(pinned_manager.buffer.len(), 2);
+        assert_eq!(pinned_manager.buffer.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn test_backlog_past_the_budget_still_reaches_the_exex() -> eyre::Result<()> {
+        let temp_dir = tempfile::tempdir()?;
+        let wal = Wal::new(temp_dir.path())?;
+        let (exex_handle, _, _notifications) = ExExHandle::new(
+            "test_exex".to_string(),
+            Default::default(),
+            (),
+            EthEvmConfig::mainnet(),
+            wal.handle(),
+        );
+        let exex_manager = ExExManager::new(
+            create_test_provider_factory(),
+            vec![exex_handle],
+            DEFAULT_EXEX_MANAGER_CAPACITY,
+            wal,
+            empty_finalized_header_stream(),
+        );
+        let notification = ExExNotification::ChainCommitted {
+            new: Arc::new(Chain::new(
+                vec![RecoveredBlock::default()],
+                Default::default(),
+                Default::default(),
+            )),
+        };
+        // More than tokio's cooperative budget of 128
+        for _ in 0..200 {
+            exex_manager.handle().send(ExExNotificationSource::Pipeline, notification.clone())?;
+        }
+
+        let mut cx = Context::from_waker(futures::task::noop_waker_ref());
+        let mut exex_manager = std::pin::pin!(exex_manager);
+        assert!(exex_manager.as_mut().poll(&mut cx).is_pending());
+        assert!(exex_manager.next_id < 200, "the budget ran out before the backlog did");
+        assert_eq!(
+            exex_manager.exex_handles[0].next_notification_id, 1,
+            "the ExEx was handed the first"
+        );
+        Ok(())
     }
 
     #[tokio::test]
