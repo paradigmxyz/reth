@@ -524,6 +524,30 @@ impl From<BlockExecutionError> for EthApiError {
                 ))),
             },
             BlockExecutionError::Internal(internal_error) => {
+                // Execution wrappers must not hide a provider's unavailable-history error.
+                let mut source = internal_error
+                    .as_other()
+                    .or_else(|| internal_error.as_evm().map(|(_, error)| error))
+                    .map(|error| error as &(dyn std::error::Error + 'static));
+                while let Some(error) = source {
+                    // EvmDatabaseError does not expose its database error through source().
+                    let provider =
+                        error.downcast_ref::<reth_errors::ProviderError>().or_else(|| {
+                            match error
+                                .downcast_ref::<EvmDatabaseError<reth_errors::ProviderError>>()
+                            {
+                                Some(EvmDatabaseError::Database(provider)) => Some(provider),
+                                _ => None,
+                            }
+                        });
+                    if let Some(provider) = provider {
+                        let mapped = Self::from(provider.clone());
+                        if matches!(mapped, Self::PrunedHistoryUnavailable { .. }) {
+                            return mapped;
+                        }
+                    }
+                    source = error.source();
+                }
                 Self::Internal(RethError::Execution(BlockExecutionError::Internal(internal_error)))
             }
         }
@@ -1280,6 +1304,55 @@ mod tests {
             .into_rpc_err();
             assert_eq!(err.code(), -32603);
         }
+    }
+
+    #[test]
+    fn execution_errors_preserve_pruned_history() {
+        use alloy_evm::block::InternalBlockExecutionError;
+        use reth_errors::ProviderError;
+
+        #[derive(Debug, thiserror::Error)]
+        #[error("system call failed: {0}")]
+        struct SystemCallError(#[source] EVMError<EvmDatabaseError<ProviderError>>);
+
+        for provider in [
+            ProviderError::BlockExpired { requested: 1, earliest_available: 43 },
+            ProviderError::InsufficientChangesets { requested: 1, available: 43..=48 },
+            ProviderError::InsufficientChangesets { requested: 43, available: 43..=48 },
+            ProviderError::InsufficientChangesets { requested: 49, available: 43..=48 },
+            ProviderError::BestBlockNotFound,
+        ] {
+            let expected = EthApiError::from(provider.clone()).into_rpc_err();
+            let evm_error = || {
+                EVMError::<EvmDatabaseError<ProviderError>>::Database(EvmDatabaseError::Database(
+                    provider.clone(),
+                ))
+            };
+            for execution in [
+                BlockExecutionError::other(provider.clone()),
+                BlockExecutionError::other(EVMError::<ProviderError>::Database(provider.clone())),
+                BlockExecutionError::other(evm_error()),
+                BlockExecutionError::other(SystemCallError(evm_error())),
+                BlockExecutionError::Internal(InternalBlockExecutionError::EVM {
+                    hash: B256::ZERO,
+                    error: Box::new(evm_error()),
+                }),
+            ] {
+                let message = execution.to_string();
+                let actual = EthApiError::from(execution).into_rpc_err();
+                if expected.code() == 4444 {
+                    assert_eq!(actual.code(), expected.code());
+                    assert_eq!(actual.message(), expected.message());
+                } else {
+                    assert_eq!(actual.code(), -32603);
+                    assert_eq!(actual.message(), message);
+                }
+            }
+        }
+
+        let error = EthApiError::from(BlockExecutionError::msg("unrelated failure")).into_rpc_err();
+        assert_eq!(error.code(), -32603);
+        assert_eq!(error.message(), "unrelated failure");
     }
 
     #[test]
