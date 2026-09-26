@@ -333,12 +333,20 @@ struct RocksDBBalEntry {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::providers::RocksDBBuilder;
+    use crate::providers::{RocksDBBuilder, RocksDBProvider};
     use alloy_primitives::B256;
+
+    fn test_rocksdb(dir: &tempfile::TempDir) -> RocksDBProvider {
+        RocksDBBuilder::new(dir.path())
+            .with_table::<tables::BlockAccessLists>()
+            .with_table::<tables::BlockAccessListBlockNumbers>()
+            .build()
+            .unwrap()
+    }
 
     fn test_store() -> (tempfile::TempDir, RocksDBBalStore) {
         let dir = tempfile::tempdir().unwrap();
-        let rocksdb = RocksDBBuilder::new(dir.path()).with_default_tables().build().unwrap();
+        let rocksdb = test_rocksdb(&dir);
         (dir, RocksDBBalStore::new(rocksdb))
     }
 
@@ -427,7 +435,7 @@ mod tests {
     #[test]
     fn configured_buffer_retention_distance_is_used() {
         let dir = tempfile::tempdir().unwrap();
-        let rocksdb = RocksDBBuilder::new(dir.path()).with_default_tables().build().unwrap();
+        let rocksdb = test_rocksdb(&dir);
         let store = RocksDBBalStore::with_buffer_retention_distance(rocksdb, 64);
         let old = NumHash::new(1, B256::with_last_byte(1));
         let tip = NumHash::new(34, B256::with_last_byte(2));
