@@ -10,6 +10,7 @@ use alloy_consensus::{
 };
 use alloy_eips::{
     eip2718::Encodable2718,
+    eip4844::VERSIONED_HASH_VERSION_KZG,
     eip7594::{BlobTransactionSidecarEip7594, BlobTransactionSidecarVariant},
 };
 use alloy_primitives::{Address, B256, U256};
@@ -59,7 +60,7 @@ async fn next_message(stream: &mut RawEthStream) -> EthMessage<EthNetworkPrimiti
 /// cell proof metadata while the blob payloads are elided (fetched separately via `GetCells`).
 fn blob_tx_without_blobs() -> PooledTransactionVariant {
     let mut versioned_hash = B256::random();
-    versioned_hash.0[0] = 0x01;
+    versioned_hash.0[0] = VERSIONED_HASH_VERSION_KZG;
 
     let tx = TxEip4844 {
         chain_id: 1,

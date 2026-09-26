@@ -1,7 +1,7 @@
 use crate::{BlockRangeUpdate, EthVersion};
 use alloy_chains::{Chain, NamedChain};
 use alloy_hardforks::{EthereumHardfork, ForkId, Head};
-use alloy_primitives::{hex, B256, U256};
+use alloy_primitives::{B256, U256};
 use alloy_rlp::{BufMut, Encodable, RlpDecodable, RlpEncodable};
 use core::fmt::{Debug, Display};
 use reth_chainspec::{EthChainSpec, Hardforks, MAINNET};
@@ -273,16 +273,14 @@ impl Default for Status {
 
 impl Display for Status {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        let hexed_blockhash = hex::encode(self.blockhash);
-        let hexed_genesis = hex::encode(self.genesis);
         write!(
             f,
-            "Status {{ version: {}, chain: {}, total_difficulty: {}, blockhash: {}, genesis: {}, forkid: {:X?} }}",
+            "Status {{ version: {}, chain: {}, total_difficulty: {}, blockhash: {:x}, genesis: {:x}, forkid: {:X?} }}",
             self.version,
             self.chain,
             self.total_difficulty,
-            hexed_blockhash,
-            hexed_genesis,
+            self.blockhash,
+            self.genesis,
             self.forkid
         )
     }
@@ -290,28 +288,26 @@ impl Display for Status {
 
 impl Debug for Status {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        let hexed_blockhash = hex::encode(self.blockhash);
-        let hexed_genesis = hex::encode(self.genesis);
         if f.alternate() {
             write!(
                 f,
-                "Status {{\n\tversion: {:?},\n\tchain: {:?},\n\ttotal_difficulty: {:?},\n\tblockhash: {},\n\tgenesis: {},\n\tforkid: {:X?}\n}}",
+                "Status {{\n\tversion: {:?},\n\tchain: {:?},\n\ttotal_difficulty: {:?},\n\tblockhash: {:x},\n\tgenesis: {:x},\n\tforkid: {:X?}\n}}",
                 self.version,
                 self.chain,
                 self.total_difficulty,
-                hexed_blockhash,
-                hexed_genesis,
+                self.blockhash,
+                self.genesis,
                 self.forkid
             )
         } else {
             write!(
                 f,
-                "Status {{ version: {:?}, chain: {:?}, total_difficulty: {:?}, blockhash: {}, genesis: {}, forkid: {:X?} }}",
+                "Status {{ version: {:?}, chain: {:?}, total_difficulty: {:?}, blockhash: {:x}, genesis: {:x}, forkid: {:X?} }}",
                 self.version,
                 self.chain,
                 self.total_difficulty,
-                hexed_blockhash,
-                hexed_genesis,
+                self.blockhash,
+                self.genesis,
                 self.forkid
             )
         }
@@ -355,37 +351,33 @@ pub struct StatusEth69 {
 
 impl Display for StatusEth69 {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        let hexed_blockhash = hex::encode(self.blockhash);
-        let hexed_genesis = hex::encode(self.genesis);
         write!(
             f,
-            "StatusEth69 {{ version: {}, chain: {}, genesis: {}, forkid: {:X?}, earliest: {}, latest: {}, blockhash: {} }}",
+            "StatusEth69 {{ version: {}, chain: {}, genesis: {:x}, forkid: {:X?}, earliest: {}, latest: {}, blockhash: {:x} }}",
             self.version,
             self.chain,
-            hexed_genesis,
+            self.genesis,
             self.forkid,
             self.earliest,
             self.latest,
-            hexed_blockhash,
+            self.blockhash,
         )
     }
 }
 
 impl Debug for StatusEth69 {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        let hexed_blockhash = hex::encode(self.blockhash);
-        let hexed_genesis = hex::encode(self.genesis);
         if f.alternate() {
             write!(
                 f,
-                "StatusEth69 {{\n\tversion: {:?},\n\tchain: {:?},\n\tgenesis: {},\n\tforkid: {:X?},\n\tearliest: {},\n\tlatest: {},\n\tblockhash: {}\n}}",
-                self.version, self.chain, hexed_genesis, self.forkid, self.earliest, self.latest, hexed_blockhash
+                "StatusEth69 {{\n\tversion: {:?},\n\tchain: {:?},\n\tgenesis: {:x},\n\tforkid: {:X?},\n\tearliest: {},\n\tlatest: {},\n\tblockhash: {:x}\n}}",
+                self.version, self.chain, self.genesis, self.forkid, self.earliest, self.latest, self.blockhash
             )
         } else {
             write!(
                 f,
-                "StatusEth69 {{ version: {:?}, chain: {:?}, genesis: {}, forkid: {:X?}, earliest: {}, latest: {}, blockhash: {} }}",
-                self.version, self.chain, hexed_genesis, self.forkid, self.earliest, self.latest, hexed_blockhash
+                "StatusEth69 {{ version: {:?}, chain: {:?}, genesis: {:x}, forkid: {:X?}, earliest: {}, latest: {}, blockhash: {:x} }}",
+                self.version, self.chain, self.genesis, self.forkid, self.earliest, self.latest, self.blockhash
             )
         }
     }

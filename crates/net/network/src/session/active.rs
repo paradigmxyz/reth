@@ -22,7 +22,7 @@ use crate::{
         BlockRangeInfo, EthVersion, SessionId,
     },
 };
-use alloy_eips::merge::EPOCH_SLOTS;
+use alloy_eips::merge::{EPOCH_DURATION, EPOCH_SLOTS};
 use alloy_primitives::Sealable;
 use futures::{stream::Fuse, SinkExt, StreamExt};
 use metrics::{Counter, Gauge};
@@ -56,7 +56,7 @@ use tracing::{debug, trace};
 ///
 /// Updates are only sent when the block height has advanced by at least one epoch (32 blocks)
 /// since the last update. The interval is set to one epoch duration in seconds.
-pub(super) const RANGE_UPDATE_INTERVAL: Duration = Duration::from_secs(EPOCH_SLOTS * 12);
+pub(super) const RANGE_UPDATE_INTERVAL: Duration = EPOCH_DURATION;
 
 // Constants for timeout updating.
 

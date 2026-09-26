@@ -222,9 +222,7 @@ impl core::fmt::Display for AnyNode {
             Self::NodeRecord(record) => write!(f, "{record}"),
             #[cfg(feature = "secp256k1")]
             Self::Enr(enr) => write!(f, "{enr}"),
-            Self::PeerId(peer_id) => {
-                write!(f, "enode://{}", alloy_primitives::hex::encode(peer_id.as_slice()))
-            }
+            Self::PeerId(peer_id) => write!(f, "enode://{peer_id:x}"),
             Self::TrustedPeer(peer) => write!(f, "{peer}"),
         }
     }
