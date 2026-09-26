@@ -518,3 +518,78 @@ fn mdbx_checker_covers_repeated_parallel_mutations() {
         }
     }
 }
+
+/// Duplicate-value rewrites exercise MDBX subpages and subtrees as well as GC.
+#[test]
+#[ignore = "requires MDBX_CHK_BIN to point to a built mdbx_chk"]
+fn mdbx_checker_covers_concurrent_dupsort_rewrites() {
+    let checker = std::env::var("MDBX_CHK_BIN").expect("set MDBX_CHK_BIN to a built mdbx_chk");
+    let dir = tempfile::tempdir().unwrap();
+    let mut env = environment(dir.path());
+    let tx = env.begin_rw_txn().unwrap();
+    for index in 0..2 {
+        tx.create_db(Some(&format!("table{index}")), DatabaseFlags::DUP_SORT).unwrap();
+    }
+    tx.commit().unwrap();
+
+    for round in 0..8u8 {
+        let tx = env.begin_rw_txn().unwrap();
+        let dbis: Vec<_> =
+            (0..2).map(|index| tx.open_db(Some(&format!("table{index}"))).unwrap().dbi()).collect();
+        tx.enable_parallel_writes(&dbis).unwrap();
+        std::thread::scope(|scope| {
+            for &dbi in &dbis {
+                let tx = &tx;
+                scope.spawn(move || {
+                    let mut cursor = tx.cursor_with_dbi_parallel_owned(dbi).unwrap();
+                    for key in 0..16u8 {
+                        for subkey in 0..64u8 {
+                            let mut value = [0; 96];
+                            value[0] = subkey;
+                            value[1] = round;
+                            if round > 0 &&
+                                cursor
+                                    .get_both_range::<Vec<u8>>(&[key], &[subkey])
+                                    .unwrap()
+                                    .is_some_and(|old| old[0] == subkey)
+                            {
+                                cursor.del(WriteFlags::CURRENT).unwrap();
+                            }
+                            cursor.put(&[key], &value, WriteFlags::empty()).unwrap();
+                        }
+                    }
+                });
+            }
+        });
+        tx.commit_subtxns().unwrap();
+        tx.commit().unwrap();
+
+        drop(env);
+        let output = std::process::Command::new(&checker).arg(dir.path()).output().unwrap();
+        if !output.status.success() {
+            let path = dir.keep();
+            panic!(
+                "MDBX check failed after DupSort round {round} at {}: status={} stdout={} stderr={}",
+                path.display(),
+                output.status,
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr)
+            );
+        }
+        env = environment(dir.path());
+        let reader = env.begin_ro_txn().unwrap();
+        for index in 0..2 {
+            let dbi = reader.open_db(Some(&format!("table{index}"))).unwrap().dbi();
+            let rows = reader
+                .cursor(dbi)
+                .unwrap()
+                .into_iter::<Vec<u8>, Vec<u8>>()
+                .collect::<Result<Vec<_>, _>>()
+                .unwrap();
+            assert_eq!(rows.len(), 16 * 64, "round {round}, table {index}");
+            for (key, value) in rows {
+                assert_eq!(value[1], round, "round {round}, table {index}, key {key:?}");
+            }
+        }
+    }
+}
