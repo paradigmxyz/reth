@@ -333,14 +333,10 @@ impl RocksDBBuilder {
     /// - [`tables::TransactionHashNumbers`] - Transaction hash to number mapping
     /// - [`tables::AccountsHistory`] - Account history index
     /// - [`tables::StoragesHistory`] - Storage history index
-    /// - [`tables::BlockAccessLists`] - Block access list payloads
-    /// - [`tables::BlockAccessListBlockNumbers`] - Block access list hash index
     pub fn with_default_tables(self) -> Self {
         self.with_table::<tables::TransactionHashNumbers>()
             .with_table::<tables::AccountsHistory>()
             .with_table::<tables::StoragesHistory>()
-            .with_table::<tables::BlockAccessLists>()
-            .with_table::<tables::BlockAccessListBlockNumbers>()
     }
 
     /// Enables metrics.
@@ -3170,25 +3166,22 @@ mod tests {
         provider.put::<tables::StoragesHistory>(key.clone(), &value).unwrap();
         assert!(provider.get::<tables::StoragesHistory>(key).unwrap().is_some());
 
-        let bal_key =
-            reth_db_api::models::StoredBlockAccessListKey::new(1, B256::with_last_byte(1));
-        let bal_value =
-            reth_db_api::models::StoredBlockAccessList::new(Bytes::from_static(&[0xc0]));
-        provider.put::<tables::BlockAccessLists>(bal_key, &bal_value).unwrap();
-        assert_eq!(provider.get::<tables::BlockAccessLists>(bal_key).unwrap(), Some(bal_value));
-        provider
-            .put::<tables::BlockAccessListBlockNumbers>(bal_key.hash(), &bal_key.number())
-            .unwrap();
-        assert_eq!(
-            provider.get::<tables::BlockAccessListBlockNumbers>(bal_key.hash()).unwrap(),
-            Some(bal_key.number())
-        );
+        drop(provider);
+
+        let column_families = DB::list_cf(&Options::default(), temp_dir.path()).unwrap();
+        assert!(!column_families.iter().any(|name| name == tables::BlockAccessLists::NAME));
+        assert!(!column_families
+            .iter()
+            .any(|name| name == tables::BlockAccessListBlockNumbers::NAME));
     }
 
     #[test]
     fn block_access_lists_store_large_payloads_in_blob_files() {
         let temp_dir = TempDir::new().unwrap();
-        let provider = RocksDBBuilder::new(temp_dir.path()).with_default_tables().build().unwrap();
+        let provider = RocksDBBuilder::new(temp_dir.path())
+            .with_table::<tables::BlockAccessLists>()
+            .build()
+            .unwrap();
         let bal_key =
             reth_db_api::models::StoredBlockAccessListKey::new(1, B256::with_last_byte(1));
         let bal_value = reth_db_api::models::StoredBlockAccessList::new(Bytes::from(vec![
@@ -3244,7 +3237,12 @@ mod tests {
                 1
         ]));
 
-        let provider = RocksDBBuilder::new(temp_dir.path()).with_default_tables().build().unwrap();
+        let provider = RocksDBBuilder::new(temp_dir.path())
+            .with_default_tables()
+            .with_table::<tables::BlockAccessLists>()
+            .with_table::<tables::BlockAccessListBlockNumbers>()
+            .build()
+            .unwrap();
         provider.put::<tables::BlockAccessLists>(bal_key, &bal_value).unwrap();
         provider
             .put::<tables::BlockAccessListBlockNumbers>(bal_key.hash(), &bal_key.number())
@@ -3252,17 +3250,34 @@ mod tests {
         provider.flush(&[tables::BlockAccessLists::NAME]).unwrap();
         drop(provider);
 
+        let provider = RocksDBBuilder::new(temp_dir.path()).with_default_tables().build().unwrap();
+        assert_eq!(provider.get::<tables::BlockAccessLists>(bal_key).unwrap(), Some(bal_value));
+        assert_eq!(
+            provider.get::<tables::BlockAccessListBlockNumbers>(bal_key.hash()).unwrap(),
+            Some(bal_key.number())
+        );
+    }
+
+    #[test]
+    fn test_read_only_opens_legacy_database_without_bal_tables() {
+        let temp_dir = TempDir::new().unwrap();
+        let tx_hash = B256::with_last_byte(1);
         let provider = RocksDBBuilder::new(temp_dir.path())
             .with_table::<tables::TransactionHashNumbers>()
             .with_table::<tables::AccountsHistory>()
             .with_table::<tables::StoragesHistory>()
             .build()
             .unwrap();
-        assert_eq!(provider.get::<tables::BlockAccessLists>(bal_key).unwrap(), Some(bal_value));
-        assert_eq!(
-            provider.get::<tables::BlockAccessListBlockNumbers>(bal_key.hash()).unwrap(),
-            Some(bal_key.number())
-        );
+        provider.put::<tables::TransactionHashNumbers>(tx_hash, &42).unwrap();
+        drop(provider);
+
+        // Replay must open the old schema without requiring a writable upgrade first.
+        let provider = RocksDBBuilder::new(temp_dir.path())
+            .with_default_tables()
+            .with_read_only(true)
+            .build()
+            .unwrap();
+        assert_eq!(provider.get::<tables::TransactionHashNumbers>(tx_hash).unwrap(), Some(42));
     }
 
     #[test]
