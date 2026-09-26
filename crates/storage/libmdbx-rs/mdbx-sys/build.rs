@@ -22,6 +22,10 @@ fn main() {
     let flags = format!("{:?}", cc.get_compiler().cflags_env());
     cc.define("MDBX_BUILD_FLAGS", flags.as_str())
         .define("MDBX_TXN_CHECKOWNER", "0")
+        // Parallel subtransaction EOF batches reserve a refund-boundary page that is
+        // neither used nor returned to GC. Until the vendored implementation
+        // accounts for that page, disable EOF refund to prevent persistent leaks.
+        .define("MDBX_ENABLE_REFUND", "0")
         // Disable posix_fallocate() usage. On filesystems that do not support fallocate (e.g. ZFS),
         // glibc's posix_fallocate() emulates it by writing zeros, which can spuriously fail with
         // ENOSPC even when sufficient disk space is available. The fallback path uses ftruncate()
