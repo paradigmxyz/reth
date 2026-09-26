@@ -1236,37 +1236,4 @@ mod tests {
             assert_eq!(block.header.size, Some(U256::from(block_size)));
         }
     }
-
-    #[tokio::test(flavor = "multi_thread")]
-    async fn blocking_task_holds_permit_after_request_is_dropped() {
-        use reth_rpc_eth_api::helpers::{blocking_task::with_permit, SpawnBlocking};
-        use reth_tasks::pool::BlockingTaskGuard;
-        use std::time::Duration;
-
-        let api = build_test_eth_api(MockEthProvider::default());
-        let guard = BlockingTaskGuard::new(1);
-        let (started_tx, started_rx) = tokio::sync::oneshot::channel();
-        let (release_tx, release_rx) = std::sync::mpsc::channel::<()>();
-
-        let request = with_permit(&guard, async {
-            api.spawn_blocking_io(move |_| {
-                let _ = started_tx.send(());
-                let _ = release_rx.recv();
-                Ok(())
-            })
-            .await
-        });
-        // drop the request while its blocking task is running
-        tokio::select! {
-            _ = request => panic!("blocking task completed before it was released"),
-            _ = started_rx => {}
-        }
-
-        let acquire = guard.clone().acquire_owned();
-        assert!(tokio::time::timeout(Duration::from_millis(100), acquire).await.is_err());
-
-        release_tx.send(()).unwrap();
-        let acquire = guard.clone().acquire_owned();
-        let _permit = tokio::time::timeout(Duration::from_secs(5), acquire).await.unwrap().unwrap();
-    }
 }
