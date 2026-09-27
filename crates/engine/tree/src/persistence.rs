@@ -124,6 +124,9 @@ where
                 PersistenceAction::SaveSafeBlock(safe_block) => {
                     self.pending_safe_block = Some(safe_block);
                 }
+                PersistenceAction::Barrier(sender) => {
+                    let _ = sender.send(());
+                }
             }
         }
         Ok(())
@@ -277,6 +280,9 @@ pub enum PersistenceAction<N: NodePrimitives = EthPrimitives> {
 
     /// Update the persisted safe block on disk
     SaveSafeBlock(u64),
+
+    /// Acknowledge all preceding work, including post-save pruning.
+    Barrier(Sender<()>),
 }
 
 /// A handle to the persistence service
