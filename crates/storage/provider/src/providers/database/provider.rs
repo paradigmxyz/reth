@@ -212,7 +212,7 @@ pub struct DatabaseProvider<TX, N: NodeTypes> {
     rocksdb_history_snapshot: OnceLock<Option<OwnedRocksReadSnapshot>>,
     /// Pinned alongside the MDBX transaction so proofs and execution share one durable view.
     #[cfg(feature = "state-trie-rocksdb")]
-    state_trie_snapshot: OwnedRocksReadSnapshot,
+    state_trie_snapshot: Arc<OwnedRocksReadSnapshot>,
     /// Manager for state trie overlays and cached changesets.
     overlay_manager: OverlayManager<N::Primitives>,
     /// Task runtime for spawning parallel I/O work.
@@ -382,6 +382,8 @@ impl<TX: DbTxMut, N: NodeTypes> DatabaseProvider<TX, N> {
         commit_order: CommitOrder,
         metrics: Arc<DatabaseProviderMetrics>,
     ) -> Self {
+        #[cfg(feature = "state-trie-rocksdb")]
+        let state_trie_snapshot = rocksdb_provider.state_trie_snapshot().read().clone();
         Self {
             tx,
             chain_spec,
@@ -390,7 +392,7 @@ impl<TX: DbTxMut, N: NodeTypes> DatabaseProvider<TX, N> {
             storage,
             storage_settings,
             #[cfg(feature = "state-trie-rocksdb")]
-            state_trie_snapshot: rocksdb_provider.owned_snapshot(),
+            state_trie_snapshot,
             rocksdb_provider,
             overlay_manager,
             runtime,
@@ -1059,6 +1061,7 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> DatabaseProvider<TX, N> {
         runtime: reth_tasks::Runtime,
         db_path: PathBuf,
         metrics: Arc<DatabaseProviderMetrics>,
+        #[cfg(feature = "state-trie-rocksdb")] state_trie_snapshot: Arc<OwnedRocksReadSnapshot>,
     ) -> Self {
         Self {
             tx,
@@ -1068,7 +1071,7 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> DatabaseProvider<TX, N> {
             storage,
             storage_settings,
             #[cfg(feature = "state-trie-rocksdb")]
-            state_trie_snapshot: rocksdb_provider.owned_snapshot(),
+            state_trie_snapshot,
             rocksdb_provider,
             overlay_manager,
             runtime,
@@ -4053,8 +4056,6 @@ impl<TX: DbTx + 'static, N: NodeTypes + 'static> DBProvider for DatabaseProvider
             self.static_file_provider.finalize()?;
             timings.sf = start.elapsed();
 
-            #[cfg(feature = "state-trie-rocksdb")]
-            let _state_trie_commit = self.rocksdb_provider.state_trie_commit_lock().write();
             let start = Instant::now();
             let batches = std::mem::take(&mut *self.pending_rocksdb_batches.lock());
             for batch in batches {
@@ -4062,9 +4063,20 @@ impl<TX: DbTx + 'static, N: NodeTypes + 'static> DBProvider for DatabaseProvider
             }
             timings.rocksdb = start.elapsed();
 
+            #[cfg(feature = "state-trie-rocksdb")]
+            let next_snapshot = Arc::new(self.rocksdb_provider.owned_snapshot());
+            #[cfg(feature = "state-trie-rocksdb")]
+            let mut published_snapshot = self.rocksdb_provider.state_trie_snapshot().write();
             let start = Instant::now();
             self.tx.commit()?;
             timings.mdbx = start.elapsed();
+            #[cfg(feature = "state-trie-rocksdb")]
+            {
+                let retired_snapshot = std::mem::replace(&mut *published_snapshot, next_snapshot);
+                drop(published_snapshot);
+                // Snapshot destruction may acquire RocksDB's own locks.
+                drop(retired_snapshot);
+            }
 
             self.metrics.record_commit(&timings);
         }
@@ -4972,6 +4984,64 @@ mod tests {
             .unwrap();
         assert_eq!(masked_entries.len(), 1);
         assert_eq!(masked_entries[0].1.nibbles.0, masked_storage_node);
+    }
+
+    #[test]
+    #[cfg(feature = "state-trie-rocksdb")]
+    fn readers_keep_committed_state_during_rocksdb_writes() {
+        use reth_trie::{
+            state_trie_cursor::{StateTrieCursor, StateTrieCursorFactory},
+            StateTrieNode, StateTrieUpdatesSorted, TrieAccount,
+        };
+
+        let factory = create_test_provider_factory();
+        let path = Nibbles::unpack(B256::with_last_byte(1));
+        let update = |nonce| StateTrieUpdatesSorted {
+            account_nodes: vec![(
+                path,
+                Some(StateTrieNode::Leaf {
+                    short_key_len: 64,
+                    value: TrieAccount { nonce, ..Default::default() },
+                }),
+            )],
+            ..Default::default()
+        };
+        let rw = factory.provider_rw().unwrap();
+        rw.write_metadata("epoch", vec![1]).unwrap();
+        rw.write_state_trie_updates(&update(1)).unwrap();
+        rw.commit().unwrap();
+        let initial = factory.provider().unwrap();
+
+        let rw = factory.provider_rw().unwrap();
+        rw.write_metadata("epoch", vec![2]).unwrap();
+        rw.write_state_trie_updates(&update(2)).unwrap();
+        // Expose the interval after RocksDB writes but before MDBX commits.
+        rw.commit_pending_rocksdb_batches().unwrap();
+        let (send, recv) = mpsc::channel();
+        let reader_factory = factory.clone();
+        let reader = std::thread::spawn(move || {
+            let provider = reader_factory.provider().unwrap();
+            send.send((
+                provider.get_metadata("epoch").unwrap(),
+                provider.state_trie_account_cursor().unwrap().get(path).unwrap(),
+            ))
+            .unwrap();
+        });
+        let during_write = recv.recv_timeout(Duration::from_secs(5));
+        rw.commit().unwrap();
+        reader.join().unwrap();
+        assert_eq!(during_write.unwrap(), (Some(vec![1]), update(1).account_nodes[0].1.clone()));
+        assert_eq!(initial.get_metadata("epoch").unwrap(), Some(vec![1]));
+        assert_eq!(
+            initial.state_trie_account_cursor().unwrap().get(path).unwrap(),
+            update(1).account_nodes[0].1
+        );
+        let committed = factory.provider().unwrap();
+        assert_eq!(committed.get_metadata("epoch").unwrap(), Some(vec![2]));
+        assert_eq!(
+            committed.state_trie_account_cursor().unwrap().get(path).unwrap(),
+            update(2).account_nodes[0].1
+        );
     }
 
     #[test]

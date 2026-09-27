@@ -132,6 +132,8 @@ impl<N: ProviderNodeTypes> ProviderFactory<N> {
         let legacy_settings = StorageSettings::v1();
         let database_provider_metrics = Arc::new(DatabaseProviderMetrics::default());
         let overlay_manager = OverlayManager::default();
+        #[cfg(feature = "state-trie-rocksdb")]
+        let snapshot = rocksdb_provider.state_trie_snapshot().read();
         let storage_settings = DatabaseProvider::<_, N>::new(
             db.tx()?,
             chain_spec.clone(),
@@ -144,9 +146,13 @@ impl<N: ProviderNodeTypes> ProviderFactory<N> {
             runtime.clone(),
             db.path(),
             database_provider_metrics.clone(),
+            #[cfg(feature = "state-trie-rocksdb")]
+            snapshot.clone(),
         )
         .storage_settings()?
         .unwrap_or(legacy_settings);
+        #[cfg(feature = "state-trie-rocksdb")]
+        drop(snapshot);
 
         Ok(Self {
             db,
@@ -380,7 +386,11 @@ impl<N: ProviderNodeTypes> ProviderFactory<N> {
     #[track_caller]
     pub fn provider(&self) -> ProviderResult<DatabaseProviderRO<N::DB, N>> {
         #[cfg(feature = "state-trie-rocksdb")]
-        let _state_trie_read = self.rocksdb_provider.state_trie_commit_lock().read();
+        let (db_tx, state_trie_snapshot) = {
+            let snapshot = self.rocksdb_provider.state_trie_snapshot().read();
+            (self.db.tx()?, snapshot.clone())
+        };
+        #[cfg(not(feature = "state-trie-rocksdb"))]
         let db_tx = self.db.tx()?;
 
         // Sync providers after opening the database transaction to make
@@ -402,6 +412,8 @@ impl<N: ProviderNodeTypes> ProviderFactory<N> {
             self.runtime.clone(),
             self.db.path(),
             self.database_provider_metrics.clone(),
+            #[cfg(feature = "state-trie-rocksdb")]
+            state_trie_snapshot,
         )
         .with_minimum_pruning_distance(self.minimum_pruning_distance))
     }

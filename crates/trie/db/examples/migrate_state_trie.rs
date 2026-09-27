@@ -133,22 +133,26 @@ fn main() -> Result<()> {
 }
 
 fn migrate(mut args: impl Iterator<Item = String>) -> Result<()> {
-    let path = args
-        .next()
-        .ok_or("usage: migrate_state_trie DATADIR/db [--rocksdb PATH] [--check | --restart]")?;
-    let (mut check, mut restart, mut rocks_path) = (false, false, None);
+    let path = args.next().ok_or(
+        "usage: migrate_state_trie DATADIR/db [--rocksdb PATH] [--check | --restart | --rewrite]",
+    )?;
+    let (mut check, mut restart, mut rewrite, mut rocks_path) = (false, false, false, None);
     while let Some(arg) = args.next() {
         match arg.as_str() {
             "--check" => check = true,
             "--restart" => restart = true,
+            "--rewrite" => rewrite = true,
             "--rocksdb" => {
                 rocks_path = Some(args.next().ok_or("--rocksdb requires a destination path")?)
             }
             _ => return Err(format!("unknown argument: {arg}").into()),
         }
     }
-    if check && restart {
-        return Err("--check and --restart are mutually exclusive".into())
+    if u8::from(check) + u8::from(restart) + u8::from(rewrite) > 1 {
+        return Err("--check, --restart and --rewrite are mutually exclusive".into())
+    }
+    if rewrite && rocks_path.is_none() {
+        return Err("--rewrite requires --rocksdb".into())
     }
     let marker = if rocks_path.is_some() {
         "state_trie_rocksdb_migration"
@@ -185,9 +189,23 @@ fn migrate(mut args: impl Iterator<Item = String>) -> Result<()> {
     let rocksdb = rocks_path
         .as_ref()
         .map(|path| {
-            RocksDBProvider::builder(path).with_default_tables().with_read_only(check).build()
+            RocksDBProvider::builder(path)
+                .with_default_tables()
+                .with_read_only(check)
+                .with_max_subcompactions(if rewrite { 16 } else { 1 })
+                .build()
         })
         .transpose()?;
+    if rewrite {
+        let rocksdb = rocksdb.as_ref().expect("--rewrite requires --rocksdb");
+        verify_persisted_root(rocksdb.snapshot(), expected)?;
+        rocks_sizes(rocksdb);
+        println!("rewriting state trie SST files");
+        rocksdb.flush_and_compact_tables(&["StateTrieAccounts", "StateTrieStorages"], true)?;
+        verify_persisted_root(rocksdb.snapshot(), expected)?;
+        rocks_sizes(rocksdb);
+        return Ok(())
+    }
     if check {
         if let Some(rocksdb) = &rocksdb {
             verify_persisted_root(rocksdb.snapshot(), expected)?;
@@ -294,7 +312,7 @@ fn migrate(mut args: impl Iterator<Item = String>) -> Result<()> {
     assert_eq!(actual, expected, "migrated root must match the source trie");
     writer.flush()?;
     if let Some(rocksdb) = &rocksdb {
-        rocksdb.flush_and_compact_tables(&["StateTrieAccounts", "StateTrieStorages"])?;
+        rocksdb.flush_and_compact_tables(&["StateTrieAccounts", "StateTrieStorages"], false)?;
         verify_persisted_root(rocksdb.snapshot(), expected)?;
         rocks_sizes(rocksdb);
     } else {
@@ -350,6 +368,8 @@ mod tests {
         migrate([path.clone(), "--rocksdb".into(), rocks.clone()].into_iter()).unwrap();
         migrate([path.clone(), "--check".into()].into_iter()).unwrap();
         migrate([path.clone(), "--rocksdb".into(), rocks.clone(), "--check".into()].into_iter())
+            .unwrap();
+        migrate([path.clone(), "--rocksdb".into(), rocks.clone(), "--rewrite".into()].into_iter())
             .unwrap();
         let db = reth_db::open_db_read_only(&path, DatabaseArguments::test()).unwrap();
         let tx = db.tx().unwrap();

@@ -12,6 +12,13 @@ pub trait StateTrieCursor {
     type Value: Clone + std::fmt::Debug;
     /// Exact lookup. Missing nodes return `None`.
     fn get(&mut self, path: Nibbles) -> Result<Option<StateTrieNode<Self::Value>>, DatabaseError>;
+    /// Exact lookups in input order, including missing nodes.
+    fn get_batch(
+        &mut self,
+        paths: &[Nibbles],
+    ) -> Result<Vec<Option<StateTrieNode<Self::Value>>>, DatabaseError> {
+        paths.iter().map(|path| self.get(*path)).collect()
+    }
     /// First node at or after `path`.
     fn seek(&mut self, path: Nibbles) -> StateTrieCursorResult<Self::Value>;
     /// Last node strictly before `path`, or the final node when no bound is supplied.

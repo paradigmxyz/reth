@@ -36,15 +36,17 @@ first 50 blocks. Durations are milliseconds; each row has 200 samples.
 | RocksDB, 4 GiB cache | 137.85 | 121.14 | 147.59 | 530.04 |
 | RocksDB, 4 GiB cache, repeat | 133.88 | 120.89 | 144.82 | 535.73 |
 | RocksDB, 16 GiB cache | 135.92 | 121.39 | 147.20 | 564.20 |
-| RocksDB, 4 GiB, 8 account + 8 storage proof workers | 133.14 | 120.54 | 142.01 | 510.77 |
+| RocksDB, 4 GiB, repeat with ignored worker flags | 133.14 | 120.54 | 142.01 | 510.77 |
 | MDBX, persistence deferred until shutdown | 103.91 | 104.14 | 110.63 | 117.31 |
 | RocksDB, 4 GiB, persistence deferred until shutdown | 111.43 | 111.60 | 117.79 | 125.55 |
 
 The 4 GiB repeat reproduces the median and tail. Increasing to 16 GiB does not
 improve execution; it also reduces available host memory to about 6.5 GiB.
-Reducing each proof pool from 64 to 8 workers has little effect compared with
-the repeated 4 GiB run. This does not remove proof work and is not a test of
-execution with proofs disabled.
+The attempted 8-worker configuration was later found to be ignored: `reth-bb`
+constructed its custom runtime before applying the CLI worker settings. That
+row is another default-worker control, not evidence about fewer proof workers.
+The [optimization follow-up](state-trie-rocksdb-optimization.md) fixes the
+benchmark runner and verifies actual pool sizes before testing concurrency.
 
 Deferring persistence is a diagnostic, not a proposed production setting. It
 also retains a larger execution overlay and avoids background persistence
@@ -65,8 +67,8 @@ For the full 250-block windows:
 | Process logical read bytes (`rchar`, decimal GB) | 249.06 | 42.30 |
 | Process read syscall count (millions) | 11.75 | 3.74 |
 | Process physical read bytes (decimal GB) | 30.57 | 32.57 |
-| BAL execution-thread `pread64` calls | 1,110,970 | 509,122 |
-| BAL execution-thread `pread64` returned bytes (decimal GB) | 29.65 | 5.20 |
+| Shared BAL-pool `pread64` calls | 1,110,970 | 509,122 |
+| Shared BAL-pool `pread64` returned bytes (decimal GB) | 29.65 | 5.20 |
 | Summed BAL-thread `pread64` duration (seconds) | 385.16 | 180.61 |
 
 The sixfold drop in logical bytes with similar physical bytes distinguishes
@@ -82,20 +84,21 @@ the lazily spawned worker threads. At 128 MiB, the single native function
 self cycles** and **21.1% of BAL-prewarming worker self cycles**. The kernel
 copy routine `_copy_to_iter` accounts for another **13.7% and 14.4%**,
 respectively. These percentages refer to each thread group, not whole-node
-time. Zstd functions and `_copy_to_iter` also appear directly on BAL execution
-workers.
+time. Zstd functions and `_copy_to_iter` also appear on `bal-stream`
+workers, which run both transaction execution and state-root preparation.
 
 | Thread group, sampled cycles (trillions) | 128 MiB | 4 GiB |
 | --- | ---: | ---: |
-| BAL execution | 1.202 | 0.884 |
+| Shared BAL pool | 1.202 | 0.884 |
 | BAL prewarming | 1.215 | 0.396 |
 | Storage proofs | 1.059 | 0.280 |
 | Account proofs | 0.564 | 0.212 |
 | Whole node | 6.243 | 3.782 |
 
-This establishes both direct read costs on execution workers and substantial
-extra concurrent CPU work. The experiment does not isolate the wall-time
-contribution of contention from each worker group.
+This establishes read costs on the shared BAL pool and substantial extra
+concurrent CPU work. It does not isolate reads by transaction execution from
+state-root preparation on those same threads, or their wall-time contribution.
+The [follow-up](state-trie-rocksdb-optimization.md) tests separating the pools.
 
 **Correction to the initial diagnosis:** the earlier `perf record -p PID`
 capture did not include the lazily created BAL, prewarming, or proof workers.

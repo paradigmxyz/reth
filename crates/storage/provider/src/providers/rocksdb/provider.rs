@@ -27,8 +27,9 @@ use reth_storage_errors::{
     provider::{ProviderError, ProviderResult},
 };
 use rocksdb::{
-    statistics::StatsLevel, BlockBasedOptions, Cache, ColumnFamilyDescriptor, CompactionPri,
-    DBCompressionType, DBRawIteratorWithThreadMode, IteratorMode, OptimisticTransactionDB,
+    statistics::StatsLevel, BlockBasedOptions, BottommostLevelCompaction, Cache,
+    ColumnFamilyDescriptor, CompactOptions, CompactionPri, DBCompressionType,
+    DBRawIteratorWithThreadMode, DataBlockIndexType, IteratorMode, OptimisticTransactionDB,
     OptimisticTransactionOptions, Options, ReadOptions, SnapshotWithThreadMode, Transaction,
     WriteBatchWithTransaction, WriteBufferManager, WriteOptions, DB, DEFAULT_COLUMN_FAMILY_NAME,
 };
@@ -108,8 +109,9 @@ impl fmt::Debug for RocksDBWriteCtx {
     }
 }
 
-/// Default cache size for `RocksDB` block cache (128 MB).
-const DEFAULT_CACHE_SIZE: usize = 128 << 20;
+/// Complete state needs a larger shared cache than the auxiliary tables alone.
+const DEFAULT_CACHE_SIZE: usize =
+    if cfg!(feature = "state-trie-rocksdb") { 8 << 30 } else { 128 << 20 };
 
 /// Default block size for `RocksDB` tables (16 KB).
 const DEFAULT_BLOCK_SIZE: usize = 16 * 1024;
@@ -179,6 +181,8 @@ pub struct RocksDBBuilder {
     enable_statistics: bool,
     log_level: rocksdb::LogLevel,
     block_cache: Cache,
+    /// Maximum parallel workers for one compaction.
+    max_subcompactions: u32,
     read_only: bool,
 }
 
@@ -203,6 +207,7 @@ impl RocksDBBuilder {
             enable_statistics: false,
             log_level: rocksdb::LogLevel::Info,
             block_cache: cache,
+            max_subcompactions: 1,
             read_only: false,
         }
     }
@@ -297,6 +302,21 @@ impl RocksDBBuilder {
         cf_options
     }
 
+    /// Trie proofs and execution primarily perform small random point reads.
+    fn state_trie_column_family_options(cache: &Cache) -> Options {
+        let mut options = Self::default_column_family_options(cache);
+        let mut table = Self::default_table_options(cache);
+        table.set_block_size(4096);
+        table.set_block_restart_interval(4);
+        table.set_bloom_filter(10.0, false);
+        table.set_data_block_index_type(DataBlockIndexType::BinaryAndHash);
+        options.set_block_based_table_factory(&table);
+        options.set_bottommost_compression_type(DBCompressionType::Lz4);
+        options.set_memtable_prefix_bloom_ratio(0.02);
+        options.set_memtable_whole_key_filtering(true);
+        options
+    }
+
     /// Creates optimized column family options for `TransactionHashNumbers`.
     ///
     /// This table stores `B256 -> TxNumber` mappings where:
@@ -378,6 +398,12 @@ impl RocksDBBuilder {
         }
     }
 
+    /// Sets parallelism within a compaction, useful for offline table rewrites.
+    pub const fn with_max_subcompactions(mut self, count: u32) -> Self {
+        self.max_subcompactions = count;
+        self
+    }
+
     /// Sets read-only mode.
     ///
     /// Opens the database as a secondary instance, which supports catching up
@@ -392,8 +418,9 @@ impl RocksDBBuilder {
 
     /// Builds the [`RocksDBProvider`].
     pub fn build(self) -> ProviderResult<RocksDBProvider> {
-        let options =
+        let mut options =
             Self::default_options(self.log_level, &self.block_cache, self.enable_statistics);
+        options.set_max_subcompactions(self.max_subcompactions);
 
         let mut cf_descriptors: Vec<ColumnFamilyDescriptor> = self
             .column_families
@@ -403,6 +430,10 @@ impl RocksDBBuilder {
                     Self::tx_hash_numbers_column_family_options(&self.block_cache)
                 } else if name == tables::BlockAccessLists::NAME {
                     Self::block_access_lists_column_family_options(&self.block_cache)
+                } else if name == tables::StateTrieAccounts::NAME ||
+                    name == tables::RocksStateTrieStorages::NAME
+                {
+                    Self::state_trie_column_family_options(&self.block_cache)
                 } else {
                     Self::default_column_family_options(&self.block_cache)
                 };
@@ -512,7 +543,8 @@ macro_rules! compress_to_buf_or_ref {
 #[derive(Debug)]
 pub struct RocksDBProvider(
     Arc<RocksDBProviderInner>,
-    #[cfg(feature = "state-trie-rocksdb")] Arc<parking_lot::RwLock<()>>,
+    #[cfg(feature = "state-trie-rocksdb")]
+    Arc<std::sync::OnceLock<parking_lot::RwLock<Arc<OwnedRocksReadSnapshot>>>>,
 );
 
 /// Inner state for `RocksDB` provider.
@@ -819,10 +851,11 @@ impl DatabaseMetrics for RocksDBProvider {
 }
 
 impl RocksDBProvider {
-    /// Couples MDBX transaction acquisition with the `RocksDB` state snapshot.
+    /// The snapshot paired with the committed MDBX frontier. Readers retain it while the
+    /// next RocksDB batch is written; publication is synchronized with the MDBX commit.
     #[cfg(feature = "state-trie-rocksdb")]
-    pub(crate) fn state_trie_commit_lock(&self) -> &parking_lot::RwLock<()> {
-        &self.1
+    pub(crate) fn state_trie_snapshot(&self) -> &parking_lot::RwLock<Arc<OwnedRocksReadSnapshot>> {
+        self.1.get_or_init(|| parking_lot::RwLock::new(Arc::new(self.owned_snapshot())))
     }
 
     /// Creates a new `RocksDB` provider.
@@ -870,10 +903,16 @@ impl RocksDBProvider {
     ///
     /// Lighter weight than [`RocksTx`] — no write-conflict tracking, and `Send + Sync`.
     pub fn snapshot(&self) -> RocksReadSnapshot<'_> {
+        let inner = self.0.snapshot();
+        let mut read_options = ReadOptions::default();
+        if let RocksReadSnapshotInner::ReadWrite(snapshot) = &inner {
+            read_options.set_snapshot(snapshot);
+        }
         RocksReadSnapshot {
             accounts_history_iter: Mutex::new(None),
             storages_history_iter: Mutex::new(None),
-            inner: self.0.snapshot(),
+            read_options,
+            inner,
             provider: &self.0,
         }
     }
@@ -1192,21 +1231,30 @@ impl RocksDBProvider {
     /// Panics if the provider is in read-only mode.
     #[instrument(level = "debug", target = "providers::rocksdb", skip_all)]
     pub fn flush_and_compact(&self) -> ProviderResult<()> {
-        self.flush_and_compact_tables(ROCKSDB_TABLES)
+        self.flush_and_compact_tables(ROCKSDB_TABLES, false)
     }
 
     /// Flushes and compacts the selected column families.
+    /// Set `rewrite` to rewrite bottom-level files with the current table options as well.
     ///
     /// # Panics
     /// Panics if the provider is in read-only mode.
-    pub fn flush_and_compact_tables(&self, tables: &[&'static str]) -> ProviderResult<()> {
+    pub fn flush_and_compact_tables(
+        &self,
+        tables: &[&'static str],
+        rewrite: bool,
+    ) -> ProviderResult<()> {
         self.flush(tables)?;
 
         let db = self.0.db_rw();
+        let mut options = CompactOptions::default();
+        if rewrite {
+            options.set_bottommost_level_compaction(BottommostLevelCompaction::ForceOptimized);
+        }
 
         for cf_name in tables {
             if let Some(cf) = db.cf_handle(cf_name) {
-                db.compact_range_cf(&cf, None::<&[u8]>, None::<&[u8]>);
+                db.compact_range_cf_opt(&cf, None::<&[u8]>, None::<&[u8]>, &options);
             }
         }
 
@@ -1665,6 +1713,8 @@ pub struct RocksReadSnapshot<'db> {
     ///
     /// Declared before `inner` so it is dropped before the snapshot it reads from.
     storages_history_iter: Mutex<Option<RocksDBRawIterEnum<'db>>>,
+    /// Immutable point-read options, dropped before the snapshot they reference.
+    read_options: ReadOptions,
     inner: RocksReadSnapshotInner<'db>,
     provider: &'db RocksDBProviderInner,
 }
@@ -1717,8 +1767,12 @@ impl<'db> RocksReadSnapshot<'db> {
         let encoded_key = key.encode();
         let cf = self.cf_handle::<T>()?;
         let result = match &self.inner {
-            RocksReadSnapshotInner::ReadWrite(snap) => snap.get_cf(cf, encoded_key.as_ref()),
-            RocksReadSnapshotInner::Secondary(db) => db.get_cf(cf, encoded_key.as_ref()),
+            RocksReadSnapshotInner::ReadWrite(_) => {
+                self.provider.db_rw().get_cf_opt(cf, encoded_key.as_ref(), &self.read_options)
+            }
+            RocksReadSnapshotInner::Secondary(db) => {
+                db.get_cf_opt(cf, encoded_key.as_ref(), &self.read_options)
+            }
         }
         .map_err(|e| {
             ProviderError::Database(DatabaseError::Read(DatabaseErrorInfo {
@@ -1892,7 +1946,7 @@ impl<'db> RocksReadSnapshot<'db> {
     }
 }
 
-/// A [`RocksReadSnapshot`] that owns the [`RocksDBProvider`] handle it reads through.
+/// A [`RocksReadSnapshot`] that retains the database handle it reads through.
 ///
 /// [`RocksDBProvider::snapshot`] borrows the provider, so a reader that wants to keep a single
 /// snapshot alive has to keep the provider handle next to it. This type does that, which lets the
@@ -1902,7 +1956,7 @@ pub struct OwnedRocksReadSnapshot {
     /// iterators are released before the owning database handle. Boxing keeps its internal
     /// references out of the movable owner, including when the owner is passed by value.
     snapshot: Box<RocksReadSnapshot<'static>>,
-    provider: RocksDBProvider,
+    provider: Arc<RocksDBProviderInner>,
 }
 
 impl fmt::Debug for OwnedRocksReadSnapshot {
@@ -1913,8 +1967,9 @@ impl fmt::Debug for OwnedRocksReadSnapshot {
 
 impl OwnedRocksReadSnapshot {
     fn new(provider: &RocksDBProvider) -> Self {
-        let provider = provider.clone();
         let snapshot = provider.snapshot();
+        // Retain only the database, not its published snapshot, to avoid an ownership cycle.
+        let provider = provider.0.clone();
         // SAFETY: Every reference in `snapshot` points into the Arc allocation retained by
         // `provider`, not into the movable provider handle. The handle is private and never
         // replaced, and `snapshot` is dropped before it. `as_snapshot` restricts access to the
@@ -3603,6 +3658,19 @@ mod tests {
         // Last should return the largest key
         let last = provider.last::<TestTable>().unwrap();
         assert_eq!(last, Some((20, b"value_20".to_vec())));
+    }
+
+    #[test]
+    #[cfg(feature = "state-trie-rocksdb")]
+    fn published_state_snapshot_does_not_retain_its_publisher() {
+        let temp_dir = TempDir::new().unwrap();
+        let provider = RocksDBBuilder::new(temp_dir.path()).with_default_tables().build().unwrap();
+        let database = Arc::downgrade(&provider.0);
+        let snapshot = provider.state_trie_snapshot().read().clone();
+        drop(provider);
+        assert!(database.upgrade().is_some());
+        drop(snapshot);
+        assert!(database.upgrade().is_none());
     }
 
     #[test]

@@ -855,6 +855,47 @@ where
         }
         self.storage_from_db(address, storage_key, false)
     }
+
+    fn storage_batch(
+        &self,
+        address: Address,
+        storage_keys: &[alloy_primitives::StorageKey],
+    ) -> ProviderResult<Vec<Option<alloy_primitives::StorageValue>>> {
+        if !cfg!(feature = "state-trie-db") {
+            return storage_keys.iter().map(|key| self.storage(address, *key)).collect()
+        }
+        let (overlay, historical_fallback) = self.execution_overlay()?;
+        let mut missing = Vec::new();
+        let mut paths = Vec::new();
+        let mut values: Vec<_> = storage_keys
+            .iter()
+            .enumerate()
+            .map(|(index, key)| {
+                let value = overlay.storage_value(address, U256::from_be_bytes(key.0));
+                if value.is_none() {
+                    missing.push(index);
+                    paths.push(Nibbles::unpack(alloy_primitives::keccak256(key)));
+                }
+                value
+            })
+            .collect();
+        if !missing.is_empty() {
+            if historical_fallback.is_some() {
+                return Err(ProviderError::UnsupportedProvider)
+            }
+            let nodes = self
+                .provider()
+                .state_trie_storage_cursor(alloy_primitives::keccak256(address))?
+                .get_batch(&paths)?;
+            for (index, node) in missing.into_iter().zip(nodes) {
+                values[index] = node.and_then(|node| match node {
+                    StateTrieNode::Leaf { value, .. } => Some(value),
+                    _ => None,
+                });
+            }
+        }
+        Ok(values)
+    }
 }
 
 impl<Provider, N: NodePrimitives> OverlayStateProvider<Provider, N>
@@ -1333,6 +1374,10 @@ mod tests {
         assert_eq!(provider.storage(address, slot).unwrap(), Some(U256::ZERO));
         assert_eq!(provider.storage(address, db_slot).unwrap(), Some(U256::from(10)));
         assert_eq!(provider.storage(address, B256::ZERO).unwrap(), None);
+        assert_eq!(
+            provider.storage_batch(address, &[db_slot, slot, B256::ZERO, db_slot]).unwrap(),
+            vec![Some(U256::from(10)), Some(U256::ZERO), None, Some(U256::from(10))]
+        );
         assert!(provider.execution_overlay.get().is_some());
         assert!(provider.state_trie_overlay.get().is_none());
         assert!(provider.state_trie_overlay_with_trie_changesets.get().is_none());

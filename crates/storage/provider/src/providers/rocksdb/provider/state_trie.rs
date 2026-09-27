@@ -90,8 +90,14 @@ where
     fn get(&mut self, path: Nibbles) -> Result<Option<StateTrieNode<V>>, DatabaseError> {
         let (key, len) = self.key(path);
         let value = match &self.snapshot.inner {
-            RocksReadSnapshotInner::ReadWrite(snapshot) => snapshot.get_cf(self.cf, &key[..len]),
-            RocksReadSnapshotInner::Secondary(db) => db.get_cf(self.cf, &key[..len]),
+            RocksReadSnapshotInner::ReadWrite(_) => self
+                .snapshot
+                .provider
+                .db_rw()
+                .get_pinned_cf_opt(self.cf, &key[..len], &self.snapshot.read_options),
+            RocksReadSnapshotInner::Secondary(db) => {
+                db.get_pinned_cf_opt(self.cf, &key[..len], &self.snapshot.read_options)
+            }
         }
         .map_err(|e| DatabaseError::Other(e.to_string()))?;
         value
@@ -99,7 +105,46 @@ where
             .transpose()
     }
 
+    fn get_batch(
+        &mut self,
+        paths: &[Nibbles],
+    ) -> Result<Vec<Option<StateTrieNode<V>>>, DatabaseError> {
+        if paths.is_empty() {
+            return Ok(Vec::new())
+        }
+        if let [path] = paths {
+            return Ok(vec![self.get(*path)?])
+        }
+        let encoded: Vec<_> = paths.iter().map(|path| self.key(*path)).collect();
+        let keys = encoded.iter().map(|(key, len)| &key[..*len]);
+        let values = match &self.snapshot.inner {
+            RocksReadSnapshotInner::ReadWrite(_) => self
+                .snapshot
+                .provider
+                .db_rw()
+                .batched_multi_get_cf_opt(self.cf, keys, false, &self.snapshot.read_options),
+            RocksReadSnapshotInner::Secondary(db) => {
+                db.batched_multi_get_cf_opt(self.cf, keys, false, &self.snapshot.read_options)
+            }
+        };
+        values
+            .into_iter()
+            .map(|value| {
+                value
+                    .map_err(|e| DatabaseError::Other(e.to_string()))?
+                    .map(|bytes| {
+                        StateTrieNode::decompress(&bytes).map_err(|_| DatabaseError::Decode)
+                    })
+                    .transpose()
+            })
+            .collect()
+    }
+
     fn seek(&mut self, path: Nibbles) -> StateTrieCursorResult<V> {
+        // Existing proof targets can use Bloom filters and avoid merging SST iterators.
+        if let Some(node) = self.get(path)? {
+            return Ok(Some((path, node)))
+        }
         let (key, len) = self.key(path);
         self.iter().seek(&key[..len]);
         self.current()
@@ -193,6 +238,13 @@ mod tests {
         paths: impl IntoIterator<Item = Nibbles>,
     ) {
         assert_eq!(rocks.before(None).unwrap(), mdbx.before(None).unwrap());
+        let paths: Vec<_> = paths.into_iter().collect();
+        let batch: Vec<_> = paths.iter().rev().chain(paths.iter().take(2)).copied().collect();
+        assert_eq!(rocks.get_batch(&[]).unwrap(), Vec::new());
+        assert_eq!(
+            rocks.get_batch(&batch).unwrap(),
+            batch.iter().map(|path| mdbx.get(*path).unwrap()).collect::<Vec<_>>()
+        );
         for path in paths {
             assert_eq!(rocks.get(path).unwrap(), mdbx.get(path).unwrap());
             assert_eq!(rocks.seek(path).unwrap(), mdbx.seek(path).unwrap());
@@ -249,6 +301,9 @@ mod tests {
         let mut batch = rocks.batch();
         batch.write_state_trie_updates(&updates).unwrap();
         batch.commit().unwrap();
+        rocks
+            .flush(&[tables::StateTrieAccounts::NAME, tables::RocksStateTrieStorages::NAME])
+            .unwrap();
         let tx = db.tx().unwrap();
         let mdbx = DatabaseStateTrieCursorFactory(&tx);
         let snapshot = rocks.snapshot();
@@ -315,6 +370,36 @@ mod tests {
     }
 
     #[test]
+    fn state_trie_secondary_reads_follow_catch_up() {
+        let dir = tempfile::tempdir().unwrap();
+        let primary = super::super::RocksDBProvider::builder(dir.path())
+            .with_default_tables()
+            .build()
+            .unwrap();
+        let path = Nibbles::unpack(B256::ZERO);
+        let leaf = |nonce| StateTrieNode::Leaf {
+            short_key_len: 64,
+            value: TrieAccount { nonce, ..Default::default() },
+        };
+        primary.put::<tables::StateTrieAccounts>(path.into(), &leaf(1)).unwrap();
+        primary.flush(&[tables::StateTrieAccounts::NAME]).unwrap();
+        let secondary = super::super::RocksDBProvider::builder(dir.path())
+            .with_default_tables()
+            .with_read_only(true)
+            .build()
+            .unwrap();
+        let snapshot = secondary.snapshot();
+        let mut cursor = snapshot.state_trie_account_cursor().unwrap();
+        assert_eq!(cursor.get(path).unwrap(), Some(leaf(1)));
+        assert_eq!(cursor.get_batch(&[path, path]).unwrap(), vec![Some(leaf(1)), Some(leaf(1))]);
+        primary.put::<tables::StateTrieAccounts>(path.into(), &leaf(2)).unwrap();
+        primary.flush(&[tables::StateTrieAccounts::NAME]).unwrap();
+        secondary.try_catch_up_with_primary().unwrap();
+        assert_eq!(cursor.get(path).unwrap(), Some(leaf(2)));
+        assert_eq!(cursor.get_batch(&[path, path]).unwrap(), vec![Some(leaf(2)), Some(leaf(2))]);
+    }
+
+    #[test]
     fn state_trie_rocksdb_updates_snapshots_and_reopen() {
         let dir = tempfile::tempdir().unwrap();
         let path = Nibbles::unpack(B256::ZERO);
@@ -332,8 +417,14 @@ mod tests {
         let mut batch = rocks.batch();
         batch.write_state_trie_updates(&updates).unwrap();
         batch.commit().unwrap();
+        rocks
+            .flush(&[tables::StateTrieAccounts::NAME, tables::RocksStateTrieStorages::NAME])
+            .unwrap();
         let snapshot = rocks.snapshot();
         let mut cursor = snapshot.state_trie_storage_cursor(B256::ZERO).unwrap();
+        let paths = [path, Nibbles::unpack(B256::with_last_byte(1)), path];
+        let original = vec![Some(leaf.clone()), None, Some(leaf.clone())];
+        assert_eq!(cursor.get_batch(&paths).unwrap(), original);
         assert_eq!(cursor.get(path).unwrap(), Some(leaf.clone()));
         assert!(cursor.iter.is_none(), "point reads must not allocate an iterator");
         assert_eq!(cursor.seek(path).unwrap(), Some((path, leaf.clone())));
@@ -343,7 +434,25 @@ mod tests {
         let mut batch = rocks.batch();
         batch.write_state_trie_updates(&updates).unwrap();
         batch.commit().unwrap();
+        rocks
+            .flush(&[tables::StateTrieAccounts::NAME, tables::RocksStateTrieStorages::NAME])
+            .unwrap();
+        assert_eq!(rocks.snapshot().state_trie_account_cursor().unwrap().get(path).unwrap(), None);
+        assert_eq!(
+            rocks.snapshot().state_trie_storage_cursor(B256::ZERO).unwrap().get(path).unwrap(),
+            Some(replacement.clone())
+        );
         assert_eq!(cursor.get(path).unwrap(), Some(leaf.clone()));
+        assert_eq!(cursor.get_batch(&paths).unwrap(), original);
+        assert_eq!(
+            rocks
+                .snapshot()
+                .state_trie_storage_cursor(B256::ZERO)
+                .unwrap()
+                .get_batch(&paths)
+                .unwrap(),
+            vec![Some(replacement.clone()), None, Some(replacement.clone())]
+        );
         assert_eq!(cursor.seek(path).unwrap(), Some((path, leaf)));
         assert_eq!(snapshot.state_trie_account_cursor().unwrap().get(path).unwrap(), Some(account));
         drop(cursor);

@@ -38,6 +38,7 @@ reth-consensus.workspace = true
 reth-chain-state.workspace = true
 reth-errors.workspace = true
 reth-storage-errors.workspace = true
+reth-tasks = { workspace = true, features = ["rayon"] }
 
 # alloy
 alloy-rpc-types = { workspace = true, features = ["engine"] }

@@ -2,9 +2,9 @@
 
 use alloy_primitives::{Address, StorageKey};
 use reth_execution_cache::{CachedStateProvider, ExecutionCache, TxPoolPrewarmCacheSnapshot};
-use reth_provider::{
-    AccountReader, BytecodeReader, ProviderResult, StateProvider, StateProviderBox,
-};
+#[cfg(not(feature = "state-trie-rocksdb"))]
+use reth_provider::StateProvider;
+use reth_provider::{AccountReader, BytecodeReader, ProviderResult, StateProviderBox};
 use std::{
     sync::{
         atomic::{AtomicUsize, Ordering},
@@ -180,7 +180,7 @@ fn prewarm_loop(rx: crossbeam_channel::Receiver<PrewarmMsg>) {
             }
             PrewarmMsg::Warm(target) => {
                 let Some(provider) = provider.as_ref() else { continue };
-                match target {
+                let (addr, slots) = match target {
                     PrewarmTarget::Account(addr, slots) => {
                         if let Ok(Some(account)) = provider.basic_account(&addr) &&
                             let Some(code_hash) = account.bytecode_hash &&
@@ -188,15 +188,15 @@ fn prewarm_loop(rx: crossbeam_channel::Receiver<PrewarmMsg>) {
                         {
                             let _ = provider.bytecode_by_hash(&code_hash);
                         }
-                        for &slot in &slots {
-                            let _ = provider.storage(addr, slot);
-                        }
+                        (addr, slots)
                     }
-                    PrewarmTarget::Storage(addr, slots) => {
-                        for &slot in &slots {
-                            let _ = provider.storage(addr, slot);
-                        }
-                    }
+                    PrewarmTarget::Storage(addr, slots) => (addr, slots),
+                };
+                #[cfg(feature = "state-trie-rocksdb")]
+                let _ = provider.prewarm_storage_batch(addr, &slots);
+                #[cfg(not(feature = "state-trie-rocksdb"))]
+                for &slot in &slots {
+                    let _ = provider.storage(addr, slot);
                 }
             }
             PrewarmMsg::EndBlock(end_tx) => {

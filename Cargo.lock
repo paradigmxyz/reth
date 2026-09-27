@@ -7912,6 +7912,7 @@ dependencies = [
  "reth-rpc-api",
  "reth-rpc-engine-api",
  "reth-storage-errors",
+ "reth-tasks",
  "revm",
  "tokio",
  "tracing",
