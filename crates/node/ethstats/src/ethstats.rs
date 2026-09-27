@@ -12,7 +12,7 @@ use alloy_primitives::U256;
 use reth_chain_state::{CanonStateNotification, CanonStateSubscriptions};
 use reth_network_api::{NetworkInfo, Peers};
 use reth_primitives_traits::{Block, BlockBody};
-use reth_storage_api::{BlockReader, BlockReaderIdExt, NodePrimitivesProvider};
+use reth_storage_api::{BlockReader, BlockReaderIdExt};
 use reth_transaction_pool::TransactionPool;
 
 use chrono::Local;
@@ -320,7 +320,7 @@ where
     /// * `head` - Optional canonical state notification containing new block info
     async fn report_block(
         &self,
-        head: Option<CanonStateNotification<<Provider as NodePrimitivesProvider>::Primitives>>,
+        head: Option<CanonStateNotification<<Provider as CanonStateSubscriptions>::Primitives>>,
     ) -> Result<(), EthStatsError> {
         let conn = self.conn.read().await;
         let conn = conn.as_ref().ok_or(EthStatsError::NotConnected)?;

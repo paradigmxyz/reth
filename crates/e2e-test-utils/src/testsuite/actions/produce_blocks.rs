@@ -410,47 +410,7 @@ where
                 current_head_block.header.hash
             };
 
-            let fork_choice_state = ForkchoiceState {
-                head_block_hash: head_hash,
-                safe_block_hash: head_hash,
-                // Making a block canonical does not imply finality: tests advance the finalized
-                // block explicitly via `FinalizeBlock`, and a finalized tip would reject any
-                // later forkchoice update below it as a too deep reorg.
-                finalized_block_hash: B256::ZERO,
-            };
-            debug!(
-                "Broadcasting forkchoice update to {} clients. Head: {:?}",
-                env.node_clients.len(),
-                fork_choice_state.head_block_hash
-            );
-
-            for (idx, client) in env.node_clients.iter().enumerate() {
-                match EngineApiClient::<Engine>::fork_choice_updated_v3(
-                    &client.engine.http_client(),
-                    fork_choice_state,
-                    None,
-                )
-                .await
-                {
-                    Ok(resp) => {
-                        debug!(
-                            "Client {}: Forkchoice update status: {:?}",
-                            idx, resp.payload_status.status
-                        );
-                        // validate that the forkchoice update was accepted
-                        validate_fcu_response(&resp, &format!("Client {idx}"))?;
-                    }
-                    Err(err) => {
-                        return Err(eyre::eyre!(
-                            "Client {}: Failed to broadcast forkchoice: {:?}",
-                            idx,
-                            err
-                        ));
-                    }
-                }
-            }
-            debug!("Forkchoice update broadcasted successfully");
-            Ok(())
+            broadcast_forkchoice(env, head_hash).await
         })
     }
 }
@@ -1165,4 +1125,55 @@ where
             Ok(())
         })
     }
+}
+
+/// Broadcasts a forkchoice update to all clients, using `head_hash` as the head and safe block.
+pub(super) async fn broadcast_forkchoice<Engine>(
+    env: &Environment<Engine>,
+    head_hash: B256,
+) -> Result<()>
+where
+    Engine: EngineTypes,
+{
+    let fork_choice_state = ForkchoiceState {
+        head_block_hash: head_hash,
+        safe_block_hash: head_hash,
+        // Making a block canonical does not imply finality: tests advance the finalized block
+        // explicitly via `FinalizeBlock`, and a finalized tip would reject any later forkchoice
+        // update below it as a too deep reorg.
+        finalized_block_hash: B256::ZERO,
+    };
+    debug!(
+        "Broadcasting forkchoice update to {} clients. Head: {:?}",
+        env.node_clients.len(),
+        fork_choice_state.head_block_hash
+    );
+
+    for (idx, client) in env.node_clients.iter().enumerate() {
+        match EngineApiClient::<Engine>::fork_choice_updated_v3(
+            &client.engine.http_client(),
+            fork_choice_state,
+            None,
+        )
+        .await
+        {
+            Ok(resp) => {
+                debug!(
+                    "Client {}: Forkchoice update status: {:?}",
+                    idx, resp.payload_status.status
+                );
+                // validate that the forkchoice update was accepted
+                validate_fcu_response(&resp, &format!("Client {idx}"))?;
+            }
+            Err(err) => {
+                return Err(eyre::eyre!(
+                    "Client {}: Failed to broadcast forkchoice: {:?}",
+                    idx,
+                    err
+                ));
+            }
+        }
+    }
+    debug!("Forkchoice update broadcasted successfully");
+    Ok(())
 }

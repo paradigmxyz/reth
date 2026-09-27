@@ -14,15 +14,25 @@ jobs:
   actionlint:
     runs-on: ubuntu-latest
     permissions:
+      id-token: write
       contents: read
     steps:
+      - name: Secure runner
+        uses: tempoxyz/gh-actions/actions/secure-runner@117919c943b804057be733b0c4034c5542e58959 # 2026-09-23T05-09-41Z-117919c9
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - name: Download actionlint
-        id: get_actionlint
-        run: bash <(curl https://raw.githubusercontent.com/rhysd/actionlint/main/scripts/download-actionlint.bash)
-        shell: bash
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: '1.25'
+          cache: false
+      - name: Install actionlint
+        run: go install github.com/rhysd/actionlint/cmd/actionlint@v1.7.12
       - name: Check workflow files
-        run: SHELLCHECK_OPTS="-S error" ${{ steps.get_actionlint.outputs.executable }} -color
+        run: SHELLCHECK_OPTS="-S error" actionlint -color
         shell: bash
+      - name: Test benchmark CI helpers
+        run: |
+          bash .github/scripts/bench-state-test.sh
+          bash .github/scripts/bench-upload-charts-test.sh
+          node --test .github/scripts/bench-job-summary-test.js

@@ -35,8 +35,8 @@ use reth_rpc_eth_types::{utils::calculate_gas_used_and_next_log_index, EthApiErr
 use reth_rpc_server_types::{result::internal_rpc_err, ToRpcResult};
 use reth_storage_api::{
     BlockIdReader, BlockReaderIdExt, HashedPostStateProvider, HeaderProvider, ProviderBlock,
-    ReceiptProviderIdExt, StateProviderFactory, StateRootProvider, StorageRootProvider,
-    TransactionVariant,
+    ReceiptProviderIdExt, StateProviderBox, StateProviderFactory, StateRootProvider,
+    StorageRootProvider, TransactionVariant,
 };
 use reth_tasks::{pool::BlockingTaskGuard, Runtime};
 use reth_transaction_pool::TransactionPool;
@@ -649,13 +649,15 @@ where
                 let mut witness = None;
                 let _ = block_executor
                     .execute_with_state_closure(&block, |statedb: &State<_>| {
-                        witness =
-                            Some(ExecutionWitnessRecord::new(statedb).into_execution_witness(
-                                &statedb.database.database.0,
-                                eth_api.provider(),
-                                block_number,
-                                mode,
-                            ));
+                        witness = Some(
+                            ExecutionWitnessRecord::new(statedb)
+                                .into_execution_witness::<StateProviderBox, _>(
+                                    &statedb.database.database,
+                                    eth_api.provider(),
+                                    block_number,
+                                    mode,
+                                ),
+                        );
                     })
                     .map_err(|err| EthApiError::Internal(err.into()))?;
 
@@ -955,7 +957,7 @@ where
         }
 
         for entry in entries {
-            let rlp = alloy_rlp::encode(entry.block.sealed_block()).into();
+            let rlp = Bytes::from(alloy_rlp::encode(entry.block.sealed_block()));
             let hash = entry.block.hash();
 
             let block = entry
@@ -963,7 +965,9 @@ where
                 .clone_into_rpc_block(
                     BlockTransactionsKind::Full,
                     |tx, tx_info| self.eth_api().converter().fill(tx, tx_info),
-                    |header, size| self.eth_api().converter().convert_header(header, size),
+                    |header, block_size| {
+                        self.eth_api().converter().convert_header(header, Some(block_size))
+                    },
                 )
                 .map_err(|err| Eth::Error::from(err).into())?;
 

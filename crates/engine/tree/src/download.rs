@@ -127,6 +127,14 @@ where
         if count == 1 {
             self.download_full_block(hash, access_lists);
         } else {
+            if self.inflight_block_range_requests.iter().any(|request| {
+                request.start_hash() == hash &&
+                    request.count() == count &&
+                    request.access_lists() == access_lists
+            }) {
+                return
+            }
+
             trace!(
                 target: "engine::download",
                 ?hash,
@@ -371,6 +379,11 @@ where
         }
     }
 
+    /// Returns whether the request also fetches block access lists.
+    const fn access_lists(&self) -> bool {
+        matches!(self, Self::WithAccessLists(_))
+    }
+
     /// Advances the download.
     fn poll(
         &mut self,
@@ -485,6 +498,21 @@ mod tests {
                 assert_eq!(blocks[num - 1].number(), num as u64);
             }
         });
+    }
+
+    #[tokio::test]
+    async fn block_downloader_deduplicates_range_requests() {
+        let TestHarness { mut block_downloader, client } = TestHarness::new(3);
+        let hash = client.highest_block().unwrap().hash();
+        let request = || DownloadRequest::block_range(hash, 2);
+
+        block_downloader.on_action(DownloadAction::Download(request()));
+        block_downloader.on_action(DownloadAction::Download(request()));
+        assert_eq!(block_downloader.inflight_block_range_requests.len(), 1);
+
+        block_downloader.on_action(DownloadAction::Download(DownloadRequest::block_range(hash, 3)));
+        block_downloader.on_action(DownloadAction::Download(request().with_access_lists(true)));
+        assert_eq!(block_downloader.inflight_block_range_requests.len(), 3);
     }
 
     #[tokio::test]
