@@ -1,4 +1,4 @@
-use crate::{QueryError, QueryRequest, QueryResponse, QueryService};
+use crate::{QueryError, QueryHandler, QueryRequest, QueryResponse};
 use jsonrpsee::{
     core::RpcResult,
     proc_macros::rpc,
@@ -12,17 +12,17 @@ pub trait PurethApi {
 }
 
 #[derive(Debug)]
-pub struct PurethRpc {
-    service: QueryService,
+pub struct PurethRpc<S> {
+    service: S,
 }
 
-impl PurethRpc {
-    pub const fn new(service: QueryService) -> Self {
+impl<S> PurethRpc<S> {
+    pub const fn new(service: S) -> Self {
         Self { service }
     }
 }
 
-impl PurethApiServer for PurethRpc {
+impl<S: QueryHandler + Send + Sync + 'static> PurethApiServer for PurethRpc<S> {
     fn query(&self, request: QueryRequest) -> RpcResult<QueryResponse> {
         self.service.query(request).map_err(rpc_error)
     }
@@ -37,7 +37,9 @@ fn rpc_error(error: QueryError) -> ErrorObjectOwned {
         QueryError::UnsupportedPath(_) |
         QueryError::Provider(_) |
         QueryError::Proof(crate::ProofAccessError::Resolution(_)) => ErrorCode::InvalidParams,
-        QueryError::Proof(_) | QueryError::InvalidResponse(_) => ErrorCode::InternalError,
+        QueryError::Proof(_) | QueryError::InvalidResponse(_) | QueryError::Acquisition(_) => {
+            ErrorCode::InternalError
+        }
     };
 
     ErrorObjectOwned::from(code)
@@ -46,9 +48,11 @@ fn rpc_error(error: QueryError) -> ErrorObjectOwned {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::QueryService;
     use alloy_primitives::B256;
     use jsonrpsee::core::server::Methods;
-    use reth_pureth_receipt::SINGLETON_BLOCK_HASH;
+    use reth_provider::ProviderError;
+    use reth_pureth_receipt::{HistoricalAcquisitionError, SINGLETON_BLOCK_HASH};
 
     fn module() -> Methods {
         PurethRpc::new(QueryService::new().unwrap()).into_rpc().into()
@@ -140,5 +144,13 @@ mod tests {
         let response: serde_json::Value = serde_json::from_str(response.get()).unwrap();
 
         assert_eq!(response["error"]["code"], -32602);
+    }
+
+    #[test]
+    fn rpc_maps_acquisition_failures_to_internal_error() {
+        let error = QueryError::Acquisition(HistoricalAcquisitionError::BlockRead(
+            ProviderError::HeaderNotFound(B256::ZERO.into()),
+        ));
+        assert_eq!(rpc_error(error).code(), -32603);
     }
 }

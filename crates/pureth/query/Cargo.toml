@@ -9,6 +9,8 @@ repository.workspace = true
 
 [dependencies]
 alloy-primitives = { workspace = true, features = ["serde"] }
+reth-ethereum-primitives.workspace = true
+reth-provider.workspace = true
 reth-pureth-receipt.workspace = true
 serde = { workspace = true, features = ["derive"] }
 sha2.workspace = true
@@ -18,7 +20,6 @@ jsonrpsee = { workspace = true, features = ["server", "macros"] }
 
 [dev-dependencies]
 alloy-consensus.workspace = true
-reth-ethereum-primitives.workspace = true
 reth-primitives-traits.workspace = true
 reth-provider = { workspace = true, features = ["test-utils"] }
 serde_json.workspace = true

@@ -21,8 +21,8 @@ pub use proof::{
 };
 pub use proof_access::{prove_receipt_log_address, ProofAccessError, ReceiptLogAddressProof};
 pub use query_service::{
-    query_snapshot, verify_query_response, QueryError, QueryRequest, QueryResponse, QueryService,
-    ResponseVerificationError,
+    query_snapshot, verify_query_response, QueryError, QueryHandler, QueryRequest, QueryResponse,
+    QueryService, ResponseVerificationError,
 };
 pub use receipt_resolution::{resolve_receipt_log_address, ReceiptResolutionError, ReceiptsSsz};
 #[cfg(not(target_arch = "wasm32"))]
