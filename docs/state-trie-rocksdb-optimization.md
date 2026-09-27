@@ -1050,3 +1050,18 @@ all other gated-worker settings unchanged, regressed execution p50/p90/p99 to
 149.253 ms, and cumulative saves were 90.041 s. All 600 payloads, restart 601,
 persistence and recovery checks passed, but this setting was rejected.
 Artifacts use globalphaserocks-cache2g with the early0-proof64 suffix.
+
+### Larger cache with execution-gated proofs (2026-09-27)
+
+The matched RocksDB 16 GiB cache trial passed all 600 roots, persistence,
+restart 601 and recovery. Execution p50/p90/p99 were 81.093/98.234/195.643 ms,
+payload p50 was 150.613 ms, root wait p50 was 58.440 ms, and cumulative saves
+were 49.784 s. It did not improve on the 8 GiB gated control (79.461 ms execution,
+48.752 s saves), so 8 GiB remains the comparison setting.
+
+For the 2 GiB trial, process I/O counters over all 600 payloads (before shutdown)
+showed 1.677 TB of read-call bytes versus 55.071 GB with 8 GiB, while physical
+read bytes were 43.540 GB versus 46.005 GB. BAL worker CPU increased from
+700.6 to 1806.4 ms/block and prewarm CPU from 157.1 to 1646.8 ms/block. This is
+consistent with repeated reads and processing of data already in the OS cache;
+it is not evidence of a comparably large increase in physical disk I/O.
