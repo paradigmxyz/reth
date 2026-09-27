@@ -203,6 +203,7 @@ impl EngineNodeLauncher {
             beacon_engine_handle: beacon_engine_handle.clone(),
             jwt_secret,
             engine_events: event_sender.clone(),
+            sender_recovery_cache: ctx.sender_recovery_cache().cloned(),
         };
         let validator_builder = add_ons.engine_validator_builder();
 

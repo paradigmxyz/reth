@@ -11,6 +11,7 @@ use reth_chainspec::ChainInfo;
 use reth_ethereum_primitives::EthPrimitives;
 use reth_execution_types::{
     BlockExecutionOutput, BlockExecutionResult, Chain, DecodedRevmBal, ExecutionOutcome,
+    RecoveredBlockAndExecutionOutput,
 };
 use reth_metrics::{metrics::Gauge, Metrics};
 use reth_primitives_traits::{
@@ -167,9 +168,6 @@ impl<N: NodePrimitives> CanonicalInMemoryStateInner<N> {
         self.in_memory_state.update_metrics();
     }
 }
-
-type PendingBlockAndReceipts<N> =
-    (RecoveredBlock<<N as NodePrimitives>::Block>, Vec<reth_primitives_traits::ReceiptTy<N>>);
 
 /// This type is responsible for providing the blocks, receipts, and state for
 /// all canonical blocks not on disk yet and keeps track of the block range that
@@ -498,20 +496,18 @@ impl<N: NodePrimitives> CanonicalInMemoryState<N> {
     }
 
     /// Returns the `RecoveredBlock` corresponding to the pending state.
-    pub fn pending_recovered_block(&self) -> Option<RecoveredBlock<N::Block>>
-    where
-        N::SignedTx: SignedTransaction,
-    {
-        self.pending_state().map(|block_state| block_state.block_ref().recovered_block().clone())
+    pub fn pending_recovered_block(&self) -> Option<Arc<RecoveredBlock<N::Block>>> {
+        self.pending_state().map(|block_state| Arc::clone(&block_state.block_ref().recovered_block))
     }
 
-    /// Returns a tuple with the `SealedBlock` corresponding to the pending
-    /// state and a vector of its `Receipt`s.
-    pub fn pending_block_and_receipts(&self) -> Option<PendingBlockAndReceipts<N>> {
+    /// Returns the pending recovered block and its execution output, which contains the receipts.
+    pub fn pending_block_and_receipts(
+        &self,
+    ) -> Option<RecoveredBlockAndExecutionOutput<N::Block, N::Receipt>> {
         self.pending_state().map(|block_state| {
-            (
-                block_state.block_ref().recovered_block().clone(),
-                block_state.executed_block_receipts(),
+            RecoveredBlockAndExecutionOutput::new(
+                Arc::clone(&block_state.block_ref().recovered_block),
+                Arc::clone(&block_state.block_ref().execution_output),
             )
         })
     }
@@ -1012,11 +1008,21 @@ impl<N: NodePrimitives<SignedTx: SignedTransaction>> NewCanonicalChain<N> {
     /// Returns the new tip for [`Self::Reorg`] and [`Self::Commit`] variants which commit at least
     /// 1 new block.
     pub fn tip(&self) -> &RecoveredBlock<N::Block> {
+        self.new_blocks().last().expect("non empty blocks").recovered_block()
+    }
+
+    /// Returns the blocks added to the canonical chain by this update.
+    pub fn new_blocks(&self) -> &[ExecutedBlock<N>] {
         match self {
-            Self::Commit { new } | Self::Reorg { new, .. } => {
-                new.last().expect("non empty blocks").recovered_block()
-            }
+            Self::Commit { new } | Self::Reorg { new, .. } => new,
         }
+    }
+
+    /// Returns whether the newly canonicalized blocks contain the given hash.
+    ///
+    /// This does not include the unchanged canonical prefix before the first new block.
+    pub fn contains(&self, hash: B256) -> bool {
+        self.new_blocks().iter().any(|block| block.recovered_block().hash() == hash)
     }
 }
 
@@ -1244,13 +1250,13 @@ mod tests {
         );
 
         // Check the pending block with senders
-        assert_eq!(state.pending_recovered_block().unwrap(), block2.recovered_block().clone());
+        let pending_block = state.pending_recovered_block().unwrap();
+        assert!(Arc::ptr_eq(&pending_block, &block2.recovered_block));
 
         // Check the pending block and receipts
-        assert_eq!(
-            state.pending_block_and_receipts().unwrap(),
-            (block2.recovered_block().clone(), vec![])
-        );
+        let pending = state.pending_block_and_receipts().unwrap();
+        assert!(Arc::ptr_eq(pending.block(), &block2.recovered_block));
+        assert!(Arc::ptr_eq(pending.execution_output(), &block2.execution_output));
     }
 
     #[test]

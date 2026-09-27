@@ -1,6 +1,7 @@
 //! Settings for initializing and serving the `eth` RPC API.
 
 use crate::{builder::config::PendingBlockKind, RPC_DEFAULT_GAS_CAP};
+use reth_evm::SenderRecoveryCache;
 use reth_rpc_server_types::constants::{
     DEFAULT_ETH_PROOF_WINDOW, DEFAULT_MAX_BLOCKING_IO_REQUEST, DEFAULT_MAX_SIMULATE_BLOCKS,
     DEFAULT_PROOF_PERMITS, RPC_DEFAULT_SEND_RAW_TX_SYNC_TIMEOUT_SECS,
@@ -12,8 +13,10 @@ use std::time::Duration;
 /// These settings are shared by the API's helper traits so additional settings can be exposed
 /// without adding individual trait methods. Concurrency and batching limits take effect when the
 /// API is constructed.
-#[derive(Debug, Clone, Eq, PartialEq)]
+#[derive(Debug, Clone)]
 pub struct EthApiSettings {
+    /// Cache of recovered transaction senders shared with transaction ingress and execution.
+    pub sender_recovery_cache: Option<SenderRecoveryCache>,
     /// Maximum number of concurrent proof requests.
     pub proof_permits: usize,
     /// Maximum batch size for transaction insertions.
@@ -43,6 +46,7 @@ pub struct EthApiSettings {
 impl Default for EthApiSettings {
     fn default() -> Self {
         Self {
+            sender_recovery_cache: None,
             proof_permits: DEFAULT_PROOF_PERMITS,
             max_batch_size: 1,
             max_blocking_io_requests: DEFAULT_MAX_BLOCKING_IO_REQUEST,

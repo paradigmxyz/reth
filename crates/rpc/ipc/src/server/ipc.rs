@@ -1,6 +1,6 @@
 //! IPC request handling adapted from [`jsonrpsee`] http request handling
 
-use futures::{stream::FuturesOrdered, StreamExt};
+use futures::{stream::FuturesOrdered, FutureExt, StreamExt};
 use jsonrpsee::{
     batch_response_error,
     core::{server::helpers::prepare_error, JsonRawValue},
@@ -11,7 +11,7 @@ use jsonrpsee::{
     },
     BatchResponseBuilder, MethodResponse,
 };
-use std::sync::Arc;
+use std::{future::Future, panic::AssertUnwindSafe, sync::Arc};
 use tokio::sync::OwnedSemaphorePermit;
 use tokio_util::either::Either;
 use tracing::instrument;
@@ -45,7 +45,7 @@ where
             .into_iter()
             .filter_map(|v| {
                 if let Ok(req) = serde_json::from_str::<Request<'_>>(v.get()) {
-                    Some(Either::Right(rpc_service.call(req)))
+                    Some(Either::Right(catch_call_panic(req.id(), rpc_service.call(req))))
                 } else if let Ok(_notif) = serde_json::from_str::<Notif<'_>>(v.get()) {
                     // notifications should not be answered.
                     got_notif = true;
@@ -109,7 +109,19 @@ pub(crate) async fn execute_call_with_tracing<'a, S>(
 where
     S: RpcServiceT<MethodResponse = MethodResponse> + Send,
 {
-    rpc_service.call(req).await
+    catch_call_panic(req.id(), rpc_service.call(req)).await
+}
+
+/// Answers a panicking call with an internal error, otherwise the panic would only surface as a
+/// failed call task and the client would never receive a response for `id`.
+async fn catch_call_panic(
+    id: Id<'_>,
+    call: impl Future<Output = MethodResponse>,
+) -> MethodResponse {
+    AssertUnwindSafe(call)
+        .catch_unwind()
+        .await
+        .unwrap_or_else(|_| MethodResponse::error(id, ErrorObject::from(ErrorCode::InternalError)))
 }
 
 pub(crate) async fn call_with_service<S>(

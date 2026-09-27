@@ -1442,11 +1442,10 @@ mod tests {
                 Address::random(),
                 BundleAccount::new(
                     Some(AccountInfo {
-                        balance: U256::ZERO,
                         nonce: 1,
                         code_hash: B256::random(), // Non-empty code hash
                         code: None,
-                        account_id: None,
+                        ..Default::default()
                     }),
                     None, // Destroyed, so no current info
                     Default::default(),
@@ -1491,7 +1490,7 @@ mod tests {
                         nonce: 1,
                         code_hash: alloy_primitives::KECCAK256_EMPTY, // Empty code hash = EOA
                         code: None,
-                        account_id: None,
+                        ..Default::default()
                     }),
                     None, // Destroyed
                     Default::default(),
