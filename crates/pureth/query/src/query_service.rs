@@ -4,9 +4,11 @@ use crate::{
     ResolvedPath, UnsupportedPath, SCHEMA_ID,
 };
 use alloy_primitives::{Bytes, B256};
+use reth_ethereum_primitives::EthPrimitives;
+use reth_provider::providers::ProviderNodeTypes;
 use reth_pureth_receipt::{
-    CanonicalityStatus, DeterministicProvider, LookupError, ObjectKind, ProviderBuildError,
-    ProviderSnapshot, RootContext,
+    CanonicalityStatus, DeterministicProvider, HistoricalAcquisitionError, LookupError, ObjectKind,
+    ProviderBuildError, ProviderSnapshot, RethRootProvider, RethRootProviderError, RootContext,
 };
 use serde::{Deserialize, Serialize};
 
@@ -37,7 +39,7 @@ pub struct QueryResponse {
     pub block_status: String,
 }
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug)]
 pub enum QueryError {
     UnsupportedObject,
     UnsupportedSchema,
@@ -45,6 +47,7 @@ pub enum QueryError {
     InvalidPath(ParseError),
     UnsupportedPath(UnsupportedPath),
     Provider(LookupError),
+    Acquisition(HistoricalAcquisitionError),
     Proof(ProofAccessError),
     InvalidResponse(ResponseVerificationError),
 }
@@ -61,11 +64,15 @@ pub enum ResponseVerificationError {
 }
 
 #[derive(Debug)]
-pub struct QueryService {
-    provider: DeterministicProvider,
+pub struct QueryService<P = DeterministicProvider> {
+    provider: P,
 }
 
-impl QueryService {
+pub trait QueryHandler {
+    fn query(&self, request: QueryRequest) -> Result<QueryResponse, QueryError>;
+}
+
+impl QueryService<DeterministicProvider> {
     pub fn new() -> Result<Self, ProviderBuildError> {
         Ok(Self { provider: DeterministicProvider::new()? })
     }
@@ -77,6 +84,42 @@ impl QueryService {
             .lookup(request.block_hash, ObjectKind::Receipts, &request.schema_id)
             .map_err(QueryError::Provider)?;
         query_validated(request, resolved, result)
+    }
+}
+
+impl QueryHandler for QueryService<DeterministicProvider> {
+    fn query(&self, request: QueryRequest) -> Result<QueryResponse, QueryError> {
+        Self::query(self, request)
+    }
+}
+
+impl<N> QueryService<RethRootProvider<N>>
+where
+    N: ProviderNodeTypes<Primitives = EthPrimitives>,
+{
+    pub const fn from_reth(provider: RethRootProvider<N>) -> Self {
+        Self { provider }
+    }
+
+    pub fn query(&self, request: QueryRequest) -> Result<QueryResponse, QueryError> {
+        let resolved = validate_request(&request)?;
+        let snapshot = self
+            .provider
+            .lookup(request.block_hash, ObjectKind::Receipts, &request.schema_id)
+            .map_err(|error| match error {
+                RethRootProviderError::Lookup(error) => QueryError::Provider(error),
+                RethRootProviderError::Acquisition(error) => QueryError::Acquisition(error),
+            })?;
+        query_validated(request, resolved, &snapshot)
+    }
+}
+
+impl<N> QueryHandler for QueryService<RethRootProvider<N>>
+where
+    N: ProviderNodeTypes<Primitives = EthPrimitives>,
+{
+    fn query(&self, request: QueryRequest) -> Result<QueryResponse, QueryError> {
+        Self::query(self, request)
     }
 }
 
@@ -231,7 +274,7 @@ mod tests {
         }
     }
 
-    fn historical_provider() -> (BlockchainProvider<MockNodeTypesWithDB>, B256) {
+    fn historical_provider(with_receipt: bool) -> (BlockchainProvider<MockNodeTypesWithDB>, B256) {
         let factory = create_test_provider_factory();
         let provider = factory.database_provider_rw().unwrap();
         let transaction = TransactionSigned::new_unhashed(
@@ -261,17 +304,19 @@ mod tests {
             )],
         };
         provider.insert_block(&block).unwrap();
-        provider
-            .write_state(
-                &ExecutionOutcome {
-                    first_block: 0,
-                    receipts: vec![vec![receipt]],
-                    ..Default::default()
-                },
-                OriginalValuesKnown::No,
-                StateWriteConfig::default(),
-            )
-            .unwrap();
+        if with_receipt {
+            provider
+                .write_state(
+                    &ExecutionOutcome {
+                        first_block: 0,
+                        receipts: vec![vec![receipt]],
+                        ..Default::default()
+                    },
+                    OriginalValuesKnown::No,
+                    StateWriteConfig::default(),
+                )
+                .unwrap();
+        }
         provider.commit().unwrap();
 
         (BlockchainProvider::new(factory).unwrap(), block_hash)
@@ -347,13 +392,16 @@ mod tests {
             let snapshot =
                 service.provider.lookup(block_hash, ObjectKind::Receipts, SCHEMA_ID).unwrap();
 
-            assert_eq!(service.query(request.clone()), query_snapshot(request, snapshot));
+            assert_eq!(
+                service.query(request.clone()).unwrap(),
+                query_snapshot(request, snapshot).unwrap()
+            );
         }
     }
 
     #[test]
     fn reth_historical_snapshot_returns_a_verified_query_response() {
-        let (provider, block_hash) = historical_provider();
+        let (provider, block_hash) = historical_provider(true);
         assert_eq!(
             block_hash,
             alloy_primitives::b256!(
@@ -362,7 +410,8 @@ mod tests {
         );
         let snapshot = ProviderSnapshot::from_reth_historical(&provider, block_hash).unwrap();
         let request = request(block_hash, "[0].logs[0].address");
-        let response = query_snapshot(request.clone(), &snapshot).unwrap();
+        let service = QueryService::from_reth(RethRootProvider::new(provider));
+        let response = service.query(request.clone()).unwrap();
 
         assert_eq!(response.value_ssz.as_ref(), &[0x11; 20]);
         assert_eq!(response.gindex, "576");
@@ -410,6 +459,22 @@ mod tests {
         let mut changed = response;
         changed.root[0] ^= 1;
         assert!(verify_query_response(&request, &changed, &snapshot).is_err());
+
+        assert!(matches!(
+            service.query(QueryRequest { block_hash: B256::repeat_byte(0xff), ..request }),
+            Err(QueryError::Provider(LookupError::UnknownBlock))
+        ));
+    }
+
+    #[test]
+    fn reth_query_preserves_acquisition_errors() {
+        let (provider, block_hash) = historical_provider(false);
+        let service = QueryService::from_reth(RethRootProvider::new(provider));
+
+        assert!(matches!(
+            service.query(request(block_hash, "[0].logs[0].address")),
+            Err(QueryError::Acquisition(HistoricalAcquisitionError::ReceiptsUnavailable))
+        ));
     }
 
     #[test]
@@ -418,18 +483,18 @@ mod tests {
         let snapshot =
             service.provider.lookup(SINGLETON_BLOCK_HASH, ObjectKind::Receipts, SCHEMA_ID).unwrap();
 
-        assert_eq!(
+        assert!(matches!(
             query_snapshot(request(B256::repeat_byte(0xff), "[0].logs[0].address"), snapshot),
             Err(QueryError::Provider(LookupError::UnknownBlock))
-        );
+        ));
 
         let mut invalid = request(SINGLETON_BLOCK_HASH, "[0].logs[0].address");
         invalid.object = "withdrawals".to_owned();
-        assert_eq!(query_snapshot(invalid, snapshot), Err(QueryError::UnsupportedObject));
+        assert!(matches!(query_snapshot(invalid, snapshot), Err(QueryError::UnsupportedObject)));
 
         let mut invalid = request(SINGLETON_BLOCK_HASH, "[0].logs[0].address");
         invalid.schema_id = "other-schema".to_owned();
-        assert_eq!(query_snapshot(invalid, snapshot), Err(QueryError::UnsupportedSchema));
+        assert!(matches!(query_snapshot(invalid, snapshot), Err(QueryError::UnsupportedSchema)));
     }
 
     #[test]
@@ -438,15 +503,15 @@ mod tests {
 
         let mut invalid = request(SINGLETON_BLOCK_HASH, "[0].logs[0].address");
         invalid.object = "withdrawals".to_owned();
-        assert_eq!(service.query(invalid), Err(QueryError::UnsupportedObject));
+        assert!(matches!(service.query(invalid), Err(QueryError::UnsupportedObject)));
 
         let mut invalid = request(SINGLETON_BLOCK_HASH, "[0].logs[0].address");
         invalid.schema_id = "other-schema".to_owned();
-        assert_eq!(service.query(invalid), Err(QueryError::UnsupportedSchema));
+        assert!(matches!(service.query(invalid), Err(QueryError::UnsupportedSchema)));
 
         let mut invalid = request(SINGLETON_BLOCK_HASH, "[0].logs[0].address");
         invalid.include_proof = false;
-        assert_eq!(service.query(invalid), Err(QueryError::ProofRequired));
+        assert!(matches!(service.query(invalid), Err(QueryError::ProofRequired)));
 
         assert!(matches!(
             service.query(request(SINGLETON_BLOCK_HASH, "[0")),
@@ -460,10 +525,10 @@ mod tests {
             service.query(request(SINGLETON_BLOCK_HASH, "[1].logs[0].address")),
             Err(QueryError::Proof(ProofAccessError::Resolution(_)))
         ));
-        assert_eq!(
+        assert!(matches!(
             service.query(request(B256::repeat_byte(0xff), "[0].logs[0].address")),
             Err(QueryError::Provider(LookupError::UnknownBlock))
-        );
+        ));
     }
 
     #[test]

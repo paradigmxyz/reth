@@ -3901,8 +3901,15 @@ dependencies = [
 name = "example-pureth-query"
 version = "0.0.0"
 dependencies = [
+ "alloy-genesis",
+ "alloy-network",
+ "alloy-primitives",
+ "alloy-provider",
+ "alloy-rpc-types-eth",
+ "alloy-signer-local",
  "eyre",
  "jsonrpsee",
+ "reth-chainspec",
  "reth-ethereum",
  "reth-pureth-query",
  "reth-pureth-receipt",
