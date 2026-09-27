@@ -297,6 +297,8 @@ where
                         let _ = transactions
                             .into_par_iter()
                             .enumerate()
+                            // Feed the ordered commit loop before recovering distant transactions.
+                            .by_exponential_blocks()
                             .try_for_each(|(idx, tx)| {
                                 let tx = convert.convert(tx).map(WithTxEnv::new);
                                 if let (Some(prewarm_tx), Ok(tx)) = (&prewarm_tx, &tx) {
