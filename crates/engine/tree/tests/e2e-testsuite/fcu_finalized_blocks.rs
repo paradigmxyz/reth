@@ -1,35 +1,26 @@
 //! E2E tests for forkchoice updates to canonical ancestors around the finalized block.
 
 use eyre::Result;
-use reth_chainspec::{ChainSpecBuilder, MAINNET};
-use reth_e2e_test_utils::testsuite::{
-    actions::{
-        AssertChainTip, BlockReference, CaptureBlock, CreateFork, FinalizeBlock, MakeCanonical,
-        ProduceBlocks, SendForkchoiceUpdate, UpdateBlockInfo,
+use reth_chainspec::EthereumHardfork;
+use reth_e2e_test_utils::{
+    test_chain_spec,
+    testsuite::{
+        actions::{
+            AssertChainTip, BlockReference, CaptureBlock, CreateFork, FinalizeBlock, MakeCanonical,
+            ProduceBlocks, SendForkchoiceUpdate, UpdateBlockInfo,
+        },
+        setup::{NetworkSetup, Setup},
+        TestBuilder,
     },
-    setup::{NetworkSetup, Setup},
-    TestBuilder,
 };
 use reth_engine_tree::tree::TreeConfig;
 use reth_ethereum_engine_primitives::EthEngineTypes;
 use reth_node_ethereum::EthereumNode;
-use std::sync::Arc;
 
 /// Creates the standard setup for engine tree e2e tests.
 fn default_engine_tree_setup() -> Setup<EthEngineTypes> {
     Setup::default()
-        .with_chain_spec(Arc::new(
-            ChainSpecBuilder::default()
-                .chain(MAINNET.chain)
-                .genesis(
-                    serde_json::from_str(include_str!(
-                        "../../../../e2e-test-utils/src/testsuite/assets/genesis.json"
-                    ))
-                    .unwrap(),
-                )
-                .cancun_activated()
-                .build(),
-        ))
+        .with_chain_spec(test_chain_spec(EthereumHardfork::Cancun))
         .with_network(NetworkSetup::single_node())
         .with_tree_config(TreeConfig::default().with_has_enough_parallelism(true))
 }

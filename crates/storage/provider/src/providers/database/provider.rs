@@ -3,7 +3,10 @@ use crate::{
     changesets_utils::StorageRevertsIter,
     providers::{
         database::{chain::ChainStorage, metrics, DatabaseProviderMetrics},
-        rocksdb::{PendingRocksDBBatches, RocksDBProvider, RocksDBWriteCtx},
+        rocksdb::{
+            OwnedRocksReadSnapshot, PendingRocksDBBatches, RocksDBProvider, RocksDBWriteCtx,
+            RocksReadSnapshot,
+        },
         static_file::{StaticFileWriteCtx, StaticFileWriter},
         NodeTypesForProvider, StaticFileProvider,
     },
@@ -49,7 +52,10 @@ use reth_db_api::{
     transaction::{DbTx, DbTxMut},
     BlockNumberList,
 };
-use reth_execution_types::{BlockExecutionOutput, BlockExecutionResult, Chain, ExecutionOutcome};
+use reth_execution_types::{
+    BlockExecutionOutput, BlockExecutionResult, Chain, ExecutionOutcome,
+    RecoveredBlockAndExecutionOutput,
+};
 use reth_node_types::{BlockTy, BodyTy, HeaderTy, NodeTypes, ReceiptTy, TxTy};
 use reth_primitives_traits::{
     Account, Block as _, BlockBody as _, Bytecode, FastInstant as Instant, RecoveredBlock,
@@ -82,7 +88,7 @@ use std::{
     fmt::Debug,
     ops::{Deref, DerefMut, Range, RangeBounds, RangeInclusive},
     path::PathBuf,
-    sync::Arc,
+    sync::{Arc, OnceLock},
 };
 use tracing::{debug, instrument, trace};
 
@@ -201,6 +207,12 @@ pub struct DatabaseProvider<TX, N: NodeTypes> {
     storage_settings: Arc<RwLock<StorageSettings>>,
     /// `RocksDB` provider
     rocksdb_provider: RocksDBProvider,
+    /// `RocksDB` snapshot shared by all history lookups made through this provider.
+    ///
+    /// It lives as long as the provider, next to the MDBX read transaction, and pins the
+    /// `RocksDB` versions its cached iterators were created on for that long; see
+    /// [`Self::history_rocksdb_snapshot`].
+    rocksdb_history_snapshot: OnceLock<Option<OwnedRocksReadSnapshot>>,
     /// Manager for state trie overlays and cached changesets.
     overlay_manager: OverlayManager<N::Primitives>,
     /// Task runtime for spawning parallel I/O work.
@@ -381,6 +393,7 @@ impl<TX: DbTxMut, N: NodeTypes> DatabaseProvider<TX, N> {
             overlay_manager,
             runtime,
             db_path,
+            rocksdb_history_snapshot: OnceLock::new(),
             pending_rocksdb_batches: Default::default(),
             commit_order,
             minimum_pruning_distance: MINIMUM_UNWIND_SAFE_DISTANCE,
@@ -1029,6 +1042,7 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> DatabaseProvider<TX, N> {
             overlay_manager,
             runtime,
             db_path,
+            rocksdb_history_snapshot: OnceLock::new(),
             pending_rocksdb_batches: Default::default(),
             commit_order: CommitOrder::Normal,
             minimum_pruning_distance: MINIMUM_UNWIND_SAFE_DISTANCE,
@@ -1147,6 +1161,16 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> DatabaseProvider<TX, N> {
             return Ok(Vec::new())
         }
 
+        // like the single block lookups, reject ranges that reach into expired history instead
+        // of assembling blocks whose bodies are no longer available
+        let earliest_available = self.static_file_provider.earliest_history_height();
+        if *range.start() < earliest_available {
+            return Err(ProviderError::BlockExpired {
+                requested: *range.start(),
+                earliest_available,
+            })
+        }
+
         let len = range.end().saturating_sub(*range.start()) as usize + 1;
         let mut blocks = Vec::with_capacity(len);
 
@@ -1234,6 +1258,7 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> DatabaseProvider<TX, N> {
     /// Populate a [`BundleStateInit`] and [`RevertsInit`] using cursors over the
     /// [`tables::PlainAccountState`] and [`tables::PlainStorageState`] tables, based on the given
     /// storage and account changesets.
+    #[allow(clippy::clone_on_copy)]
     pub(crate) fn populate_bundle_state(
         &self,
         account_changeset: Vec<(u64, AccountBeforeTx)>,
@@ -1259,11 +1284,11 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> DatabaseProvider<TX, N> {
             match state.entry(address) {
                 hash_map::Entry::Vacant(entry) => {
                     let new_info = get_account(address)?;
-                    entry.insert((old_info, new_info, HashMap::default()));
+                    entry.insert((old_info.clone(), new_info, HashMap::default()));
                 }
                 hash_map::Entry::Occupied(mut entry) => {
                     // overwrite old account state.
-                    entry.get_mut().0 = old_info;
+                    entry.get_mut().0 = old_info.clone();
                 }
             }
             // insert old info into reverts.
@@ -1277,7 +1302,7 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> DatabaseProvider<TX, N> {
             let account_state = match state.entry(address) {
                 hash_map::Entry::Vacant(entry) => {
                     let present_info = get_account(address)?;
-                    entry.insert((present_info, present_info, HashMap::default()))
+                    entry.insert((present_info.clone(), present_info, HashMap::default()))
                 }
                 hash_map::Entry::Occupied(entry) => entry.into_mut(),
             };
@@ -1409,6 +1434,33 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> DatabaseProvider<TX, N> {
         }
 
         Ok(())
+    }
+}
+
+impl<TX: DbTx, N: NodeTypes> DatabaseProvider<TX, N> {
+    /// Rejects advances of either the Finish block number or its state/trie frontier while a
+    /// persisted snap attempt is unverified. A missing partial frontier equals the block
+    /// number, so clearing it can advance state even when the block number stays put or rewinds.
+    /// Updates that advance neither frontier are allowed.
+    fn ensure_finish_may_advance(&self, proposed: &StageCheckpoint) -> ProviderResult<()> {
+        let current = self.get_stage_checkpoint(StageId::Finish)?.unwrap_or_default();
+        let state_trie_frontier = |checkpoint: &StageCheckpoint| {
+            checkpoint
+                .finish_stage_checkpoint()
+                .and_then(|finish| finish.partial_state_trie())
+                .unwrap_or(checkpoint.block_number)
+        };
+        if proposed.block_number <= current.block_number &&
+            state_trie_frontier(proposed) <= state_trie_frontier(&current)
+        {
+            return Ok(())
+        }
+        match self.snap_attempt()? {
+            Some(attempt) if !attempt.is_verified() => {
+                Err(ProviderError::UnverifiedSnapState { attempt: attempt.id().into() })
+            }
+            _ => Ok(()),
+        }
     }
 }
 
@@ -1614,6 +1666,31 @@ impl<TX: DbTx, N: NodeTypes> ChangeSetReader for DatabaseProvider<TX, N> {
     }
 }
 
+impl<TX: DbTx + 'static, N: NodeTypes> DatabaseProvider<TX, N> {
+    /// Returns the `RocksDB` snapshot used for history lookups, creating it on first use.
+    ///
+    /// A reading provider serves a single request, so one snapshot is created for all of its
+    /// history lookups instead of one per lookup. The snapshot also caches the raw iterator of
+    /// each history column family, which is what makes repeated lookups cheap. The storage
+    /// settings are read once here as well, so a lookup does not take the settings lock.
+    ///
+    /// The snapshot and its iterators pin the `RocksDB` snapshot and the SST files and memtables
+    /// they were created on until the provider is dropped, the same way the provider's MDBX read
+    /// transaction pins its pages. Provider lifetimes are request or job scoped, and a provider
+    /// whose MDBX transaction hits the read-transaction timeout errors on every later read and is
+    /// dropped by its caller, so that timeout bounds the `RocksDB` retention as well.
+    fn history_rocksdb_snapshot(&self) -> Option<&RocksReadSnapshot<'_>> {
+        self.rocksdb_history_snapshot
+            .get_or_init(|| {
+                self.cached_storage_settings()
+                    .storage_v2
+                    .then(|| self.rocksdb_provider.owned_snapshot())
+            })
+            .as_ref()
+            .map(OwnedRocksReadSnapshot::as_snapshot)
+    }
+}
+
 impl<TX: DbTx + 'static, N: NodeTypes> HistoryReader for DatabaseProvider<TX, N> {
     fn account_history_info(
         &self,
@@ -1622,17 +1699,10 @@ impl<TX: DbTx + 'static, N: NodeTypes> HistoryReader for DatabaseProvider<TX, N>
         lowest_available_block_number: Option<BlockNumber>,
     ) -> ProviderResult<HistoryInfo> {
         let visible_tip = self.best_block_number()?;
-        self.with_rocksdb_snapshot(|rocksdb_ref| {
-            let mut reader = EitherReader::new_accounts_history(self, rocksdb_ref)?;
-            reader
-                .account_history_info(
-                    address,
-                    block_number,
-                    lowest_available_block_number,
-                    visible_tip,
-                )
-                .map(Into::into)
-        })
+        let mut reader = EitherReader::new_accounts_history(self, self.history_rocksdb_snapshot())?;
+        reader
+            .account_history_info(address, block_number, lowest_available_block_number, visible_tip)
+            .map(Into::into)
     }
 
     fn storage_history_info(
@@ -1643,18 +1713,16 @@ impl<TX: DbTx + 'static, N: NodeTypes> HistoryReader for DatabaseProvider<TX, N>
         lowest_available_block_number: Option<BlockNumber>,
     ) -> ProviderResult<HistoryInfo> {
         let visible_tip = self.best_block_number()?;
-        self.with_rocksdb_snapshot(|rocksdb_ref| {
-            let mut reader = EitherReader::new_storages_history(self, rocksdb_ref)?;
-            reader
-                .storage_history_info(
-                    address,
-                    storage_key,
-                    block_number,
-                    lowest_available_block_number,
-                    visible_tip,
-                )
-                .map(Into::into)
-        })
+        let mut reader = EitherReader::new_storages_history(self, self.history_rocksdb_snapshot())?;
+        reader
+            .storage_history_info(
+                address,
+                storage_key,
+                block_number,
+                lowest_available_block_number,
+                visible_tip,
+            )
+            .map(Into::into)
     }
 }
 
@@ -1832,13 +1900,13 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> BlockReader for DatabaseProvid
         Ok(None)
     }
 
-    fn pending_block(&self) -> ProviderResult<Option<RecoveredBlock<Self::Block>>> {
+    fn pending_block(&self) -> ProviderResult<Option<Arc<RecoveredBlock<Self::Block>>>> {
         Ok(None)
     }
 
     fn pending_block_and_receipts(
         &self,
-    ) -> ProviderResult<Option<(RecoveredBlock<Self::Block>, Vec<Self::Receipt>)>> {
+    ) -> ProviderResult<Option<RecoveredBlockAndExecutionOutput<Self::Block, Self::Receipt>>> {
         Ok(None)
     }
 
@@ -2230,13 +2298,16 @@ impl<TX: DbTx, N: NodeTypes> StageCheckpointReader for DatabaseProvider<TX, N> {
     }
 }
 
-impl<TX: DbTxMut, N: NodeTypes> StageCheckpointWriter for DatabaseProvider<TX, N> {
+impl<TX: DbTxMut + DbTx, N: NodeTypes> StageCheckpointWriter for DatabaseProvider<TX, N> {
     /// Save stage checkpoint.
     fn save_stage_checkpoint(
         &self,
         id: StageId,
         checkpoint: StageCheckpoint,
     ) -> ProviderResult<()> {
+        if id == StageId::Finish {
+            self.ensure_finish_may_advance(&checkpoint)?;
+        }
         Ok(self.tx.put::<tables::StageCheckpoints>(id.to_string(), checkpoint)?)
     }
 
@@ -2255,6 +2326,13 @@ impl<TX: DbTxMut, N: NodeTypes> StageCheckpointWriter for DatabaseProvider<TX, N
         block_number: BlockNumber,
         drop_stage_checkpoint: bool,
     ) -> ProviderResult<()> {
+        let current = self.get_stage_checkpoint(StageId::Finish)?.unwrap_or_default();
+        let proposed = StageCheckpoint {
+            block_number,
+            ..if drop_stage_checkpoint { Default::default() } else { current }
+        };
+        self.ensure_finish_may_advance(&proposed)?;
+
         // iterate over all existing stages in the table and update its progress.
         let mut cursor = self.tx.cursor_write::<tables::StageCheckpoints>()?;
         for stage_id in StageId::ALL {
@@ -3170,6 +3248,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> StorageTrieWriter for DatabaseP
 }
 
 impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> HashingWriter for DatabaseProvider<TX, N> {
+    #[allow(clippy::clone_on_copy)]
     fn unwind_account_hashing<'a>(
         &self,
         changesets: impl Iterator<Item = &'a (BlockNumber, AccountBeforeTx)>,
@@ -3179,7 +3258,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> HashingWriter for DatabaseProvi
         // changes are applied in the correct order.
         let hashed_accounts = changesets
             .into_iter()
-            .map(|(_, e)| (keccak256(e.address), e.info))
+            .map(|(_, e)| (keccak256(e.address), e.info.clone()))
             .collect::<Vec<_>>()
             .into_iter()
             .rev()
@@ -3962,7 +4041,7 @@ mod tests {
     use reth_ethereum_primitives::Receipt;
     use reth_execution_types::{AccountRevertInit, BlockExecutionOutput, BlockExecutionResult};
     use reth_primitives_traits::SealedBlock;
-    use reth_storage_api::{MetadataProvider, MetadataWriter};
+    use reth_storage_api::{DatabaseProviderFactory, MetadataProvider, MetadataWriter};
     use reth_testing_utils::generators::{self, random_block, BlockParams};
     use reth_trie::{
         HashedPostState, KeccakKeyHasher, Nibbles, SortedTrieData, StoredNibbles,
@@ -3989,6 +4068,117 @@ mod tests {
             None,
             SaveBlocksMode::Full,
         )
+    }
+
+    #[test]
+    fn snap_attempt_guards_finish_checkpoint_writers() {
+        use alloy_eips::BlockNumHash;
+        use reth_db_api::models::SnapAttempt;
+
+        let factory = create_test_provider_factory();
+        let provider = factory.database_provider_rw().unwrap();
+        provider.update_pipeline_stages(5, false).unwrap();
+        let mut attempt = SnapAttempt::start(
+            None,
+            BlockNumHash::new(10, B256::repeat_byte(1)),
+            B256::repeat_byte(2),
+        );
+        provider.write_snap_attempt(&attempt).unwrap();
+        provider.commit().unwrap();
+
+        let provider = factory.database_provider_rw().unwrap();
+        let refused = provider.save_stage_checkpoint(StageId::Finish, StageCheckpoint::new(10));
+        assert!(matches!(refused, Err(ProviderError::UnverifiedSnapState { attempt: 0 })));
+        let refused = provider.update_pipeline_stages(10, false);
+        assert!(matches!(refused, Err(ProviderError::UnverifiedSnapState { attempt: 0 })));
+        for stage in [StageId::Finish, StageId::Headers] {
+            assert_eq!(provider.get_stage_checkpoint(stage).unwrap().unwrap().block_number, 5);
+        }
+
+        // Rewinding claims nothing about the downloaded state, through either writer.
+        provider.update_pipeline_stages(4, true).unwrap();
+        provider.save_stage_checkpoint(StageId::Finish, StageCheckpoint::new(3)).unwrap();
+        assert_eq!(
+            provider.get_stage_checkpoint(StageId::Finish).unwrap().unwrap().block_number,
+            3
+        );
+
+        // Abandoned leftovers are still not complete state.
+        attempt.abandon();
+        provider.write_snap_attempt(&attempt).unwrap();
+        let refused = provider.save_stage_checkpoint(StageId::Finish, StageCheckpoint::new(10));
+        assert!(matches!(refused, Err(ProviderError::UnverifiedSnapState { attempt: 0 })));
+
+        // Header progress does not claim the downloaded state is complete.
+        provider.save_stage_checkpoint(StageId::Headers, StageCheckpoint::new(10)).unwrap();
+        attempt.verify();
+        provider.write_snap_attempt(&attempt).unwrap();
+        provider.save_stage_checkpoint(StageId::Finish, StageCheckpoint::new(10)).unwrap();
+        provider.update_pipeline_stages(11, false).unwrap();
+        provider.commit().unwrap();
+
+        let provider = factory.database_provider_ro().unwrap();
+        assert_eq!(
+            provider.get_stage_checkpoint(StageId::Finish).unwrap().unwrap().block_number,
+            11
+        );
+    }
+
+    #[test]
+    fn snap_attempt_guards_partial_state_trie_advances() {
+        use alloy_eips::BlockNumHash;
+        use reth_db_api::models::SnapAttempt;
+
+        for abandoned in [false, true] {
+            let factory = create_test_provider_factory();
+            let provider = factory.database_provider_rw().unwrap();
+            provider.update_pipeline_stages(100, false).unwrap();
+            let checkpoint = StageCheckpoint::new(100)
+                .with_finish_stage_checkpoint(FinishCheckpoint { partial_state_trie: Some(50) });
+            provider.save_stage_checkpoint(StageId::Finish, checkpoint).unwrap();
+            let mut attempt = SnapAttempt::start(None, BlockNumHash::default(), B256::ZERO);
+            if abandoned {
+                attempt.abandon();
+            }
+            provider.write_snap_attempt(&attempt).unwrap();
+
+            for block in [100, 90] {
+                let result =
+                    provider.save_stage_checkpoint(StageId::Finish, StageCheckpoint::new(block));
+                assert!(matches!(result, Err(ProviderError::UnverifiedSnapState { .. })));
+                let result = provider.update_pipeline_stages(block, true);
+                assert!(matches!(result, Err(ProviderError::UnverifiedSnapState { .. })));
+                for stage in [StageId::Finish, StageId::Headers] {
+                    assert_eq!(
+                        provider.get_stage_checkpoint(stage).unwrap().unwrap().block_number,
+                        100
+                    );
+                }
+                assert_eq!(
+                    provider.get_stage_checkpoint(StageId::Finish).unwrap(),
+                    Some(checkpoint)
+                );
+            }
+
+            let advanced = StageCheckpoint::new(100)
+                .with_finish_stage_checkpoint(FinishCheckpoint { partial_state_trie: Some(60) });
+            assert!(matches!(
+                provider.save_stage_checkpoint(StageId::Finish, advanced),
+                Err(ProviderError::UnverifiedSnapState { .. })
+            ));
+
+            // Retaining the partial frontier does not claim additional state progress.
+            provider.update_pipeline_stages(90, false).unwrap();
+            let rewind = StageCheckpoint::new(80)
+                .with_finish_stage_checkpoint(FinishCheckpoint { partial_state_trie: Some(40) });
+            provider.save_stage_checkpoint(StageId::Finish, rewind).unwrap();
+            provider.update_pipeline_stages(30, true).unwrap();
+
+            attempt.verify();
+            provider.write_snap_attempt(&attempt).unwrap();
+            provider.save_stage_checkpoint(StageId::Finish, advanced).unwrap();
+            provider.update_pipeline_stages(100, true).unwrap();
+        }
     }
 
     #[test]
@@ -4995,7 +5185,7 @@ mod tests {
                 .tx
                 .cursor_write::<tables::PlainAccountState>()
                 .unwrap()
-                .upsert(address, &Account { nonce: 0, balance: U256::ZERO, bytecode_hash: None })
+                .upsert(address, &Account::default())
                 .unwrap();
             provider_rw.commit().unwrap();
         }
@@ -5008,8 +5198,8 @@ mod tests {
         state_init.insert(
             address,
             (
-                Some(Account { nonce: 0, balance: U256::ZERO, bytecode_hash: None }),
-                Some(Account { nonce: 1, balance: U256::ZERO, bytecode_hash: None }),
+                Some(Account::default()),
+                Some(Account { nonce: 1, ..Default::default() }),
                 storage_map,
             ),
         );
@@ -5019,7 +5209,7 @@ mod tests {
         block_reverts.insert(
             address,
             (
-                Some(Some(Account { nonce: 0, balance: U256::ZERO, bytecode_hash: None })),
+                Some(Some(Account::default())),
                 vec![StorageEntry { key: slot_key, value: U256::ZERO }],
             ),
         );
@@ -5612,10 +5802,7 @@ mod tests {
                 .tx
                 .cursor_write::<tables::HashedAccounts>()
                 .unwrap()
-                .upsert(
-                    hashed_address,
-                    &Account { nonce: 0, balance: U256::ZERO, bytecode_hash: None },
-                )
+                .upsert(hashed_address, &Account::default())
                 .unwrap();
             provider_rw.commit().unwrap();
         }

@@ -389,7 +389,8 @@ where
     /// Sends a new payload message used by `reth_newPayload` endpoint.
     ///
     /// `wait_for_persistence`: waits for in-flight persistence to complete.
-    /// `wait_for_caches`: waits for execution cache and sparse trie locks.
+    /// `wait_for_caches`: waits for execution cache and sparse trie locks, excluding destruction
+    /// of removed execution-cache allocations after unlocking.
     ///
     /// Returns detailed timing breakdown alongside the payload status.
     pub async fn reth_new_payload(

@@ -4,6 +4,7 @@ use reth_cli_util::cancellation::CancellationToken;
 use std::{
     path::{Path, PathBuf},
     sync::Arc,
+    time::Duration,
 };
 
 /// Shared state for one run of `reth download`.
@@ -15,6 +16,8 @@ pub(crate) struct DownloadSession {
     request_limiter: Option<Arc<DownloadRequestLimiter>>,
     /// Cancellation token shared by the whole command.
     cancel_token: CancellationToken,
+    /// Optional fixed delay overriding the default retry backoff.
+    retry_backoff: Option<Duration>,
 }
 
 impl DownloadSession {
@@ -24,7 +27,18 @@ impl DownloadSession {
         request_limiter: Option<Arc<DownloadRequestLimiter>>,
         cancel_token: CancellationToken,
     ) -> Self {
-        Self { progress, request_limiter, cancel_token }
+        Self { progress, request_limiter, cancel_token, retry_backoff: None }
+    }
+
+    /// Overrides the delay between retry attempts for this download.
+    pub(crate) const fn with_retry_backoff(mut self, retry_backoff: Option<Duration>) -> Self {
+        self.retry_backoff = retry_backoff;
+        self
+    }
+
+    /// Returns the configured delay, preserving the caller's default when no override is set.
+    pub(crate) fn retry_delay(&self, default: Duration) -> Duration {
+        self.retry_backoff.unwrap_or(default)
     }
 
     /// Returns the shared progress tracker, if this flow uses one.
@@ -67,6 +81,8 @@ impl DownloadSession {
 pub(crate) struct ArchiveProcessContext {
     /// Directory where extracted output files are written.
     target_dir: PathBuf,
+    /// Custom location of static file outputs.
+    static_files_dir: Option<PathBuf>,
     /// Directory used for cached archive downloads, when enabled.
     cache_dir: Option<PathBuf>,
     /// Shared command-scoped download state.
@@ -77,15 +93,21 @@ impl ArchiveProcessContext {
     /// Creates the context used while processing modular archives.
     pub(crate) fn new(
         target_dir: PathBuf,
+        static_files_dir: Option<PathBuf>,
         cache_dir: Option<PathBuf>,
         session: DownloadSession,
     ) -> Self {
-        Self { target_dir, cache_dir, session }
+        Self { target_dir, static_files_dir, cache_dir, session }
     }
 
     /// Returns the directory where extracted outputs should be written.
     pub(crate) fn target_dir(&self) -> &Path {
         &self.target_dir
+    }
+
+    /// Returns the custom static files directory, if configured.
+    pub(crate) fn static_files_dir(&self) -> Option<&Path> {
+        self.static_files_dir.as_deref()
     }
 
     /// Returns the cache directory for two-phase downloads, if enabled.
@@ -96,5 +118,24 @@ impl ArchiveProcessContext {
     /// Returns the shared download session.
     pub(crate) fn session(&self) -> &DownloadSession {
         &self.session
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn retry_delay_preserves_defaults_or_uses_override() {
+        let session = DownloadSession::new(None, None, CancellationToken::new());
+        for default in [Duration::from_secs(2), Duration::from_secs(5), Duration::from_secs(40)] {
+            assert_eq!(session.retry_delay(default), default);
+            for delay in [Duration::ZERO, Duration::from_millis(250)] {
+                assert_eq!(
+                    session.clone().with_retry_backoff(Some(delay)).retry_delay(default),
+                    delay
+                );
+            }
+        }
     }
 }

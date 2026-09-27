@@ -407,11 +407,10 @@ where
     ) {
         let mut cells_response = Cells { cell_mask: request.cell_mask, ..Default::default() };
         let mut total_bytes = 0;
+        let cell_mask = request.cell_mask();
 
         for hash in request.hashes.into_iter().take(MAX_CELLS_SERVE) {
-            let Some(cells) =
-                self.blob_store.get_cells(hash, request.cell_mask).unwrap_or_default()
-            else {
+            let Some(cells) = self.blob_store.get_cells(hash, cell_mask).unwrap_or_default() else {
                 continue;
             };
 
@@ -859,7 +858,7 @@ mod tests {
     use alloy_consensus::constants::EMPTY_ROOT_HASH;
     use alloy_eips::{
         eip4844::{BlobAndProofV1, BlobAndProofV2, BlobCellsAndProofsV1},
-        eip7594::{BlobTransactionSidecarVariant, Cell},
+        eip7594::{BlobCellMask, BlobTransactionSidecarVariant, Cell},
     };
     use alloy_primitives::{keccak256, Address, TxHash, B128, U256};
     use reth_network_api::test_utils::PeersHandle;
@@ -879,6 +878,7 @@ mod tests {
     #[derive(Debug, Default)]
     struct CountingBlobStore {
         get_cells_calls: Arc<AtomicUsize>,
+        expected_cell_mask: Option<BlobCellMask>,
     }
 
     impl BlobStore for CountingBlobStore {
@@ -955,7 +955,7 @@ mod tests {
         fn get_by_versioned_hashes_v4(
             &self,
             versioned_hashes: &[B256],
-            _indices_bitarray: B128,
+            _cell_mask: BlobCellMask,
         ) -> Result<Vec<Option<BlobCellsAndProofsV1>>, BlobStoreError> {
             Ok(vec![None; versioned_hashes.len()])
         }
@@ -970,9 +970,13 @@ mod tests {
         fn get_cells(
             &self,
             _tx_hash: TxHash,
-            _indices_bitarray: B128,
+            cell_mask: BlobCellMask,
         ) -> Result<Option<Vec<Cell>>, BlobStoreError> {
             self.get_cells_calls.fetch_add(1, Ordering::Relaxed);
+            if let Some(expected) = self.expected_cell_mask {
+                assert_eq!(cell_mask, expected);
+                return Ok(Some(vec![Cell::default()]))
+            }
             Ok(None)
         }
 
@@ -990,7 +994,10 @@ mod tests {
         let (peers_tx, _) = mpsc::unbounded_channel();
         let (_incoming_tx, incoming_rx) = mpsc::channel(1);
         let get_cells_calls = Arc::new(AtomicUsize::new(0));
-        let blob_store = CountingBlobStore { get_cells_calls: Arc::clone(&get_cells_calls) };
+        let blob_store = CountingBlobStore {
+            get_cells_calls: Arc::clone(&get_cells_calls),
+            ..Default::default()
+        };
         let handler = EthRequestHandler::<NoopProvider>::new(
             NoopProvider::default(),
             PeersHandle::new(peers_tx),
@@ -1006,6 +1013,47 @@ mod tests {
         let cells = rx.await.unwrap().unwrap();
         assert!(cells.hashes.is_empty());
         assert_eq!(get_cells_calls.load(Ordering::Relaxed), MAX_CELLS_SERVE);
+    }
+
+    #[test_case(0)]
+    #[test_case(7)]
+    #[test_case(8)]
+    #[test_case(63)]
+    #[test_case(64)]
+    #[test_case(127)]
+    #[tokio::test]
+    async fn get_cells_request_uses_little_endian_wire_mask(index: u32) {
+        use alloy_rlp::{Decodable, Encodable};
+
+        let (peers_tx, _) = mpsc::unbounded_channel();
+        let (_incoming_tx, incoming_rx) = mpsc::channel(1);
+        let numeric_mask = 1u128 << index;
+        let blob_store = CountingBlobStore {
+            expected_cell_mask: Some(BlobCellMask::from_bits(numeric_mask)),
+            ..Default::default()
+        };
+        let handler = EthRequestHandler::<NoopProvider>::new(
+            NoopProvider::default(),
+            PeersHandle::new(peers_tx),
+            incoming_rx,
+        )
+        .with_blob_store(Box::new(blob_store));
+        let wire_mask = B128::from(numeric_mask.to_le_bytes());
+        let request = GetCells { hashes: vec![B256::ZERO], cell_mask: wire_mask };
+        let mut encoded = Vec::new();
+        request.encode(&mut encoded);
+        let request = GetCells::decode(&mut encoded.as_slice()).unwrap();
+        let (response, rx) = oneshot::channel();
+
+        handler.on_cells_request(PeerId::default(), request, response);
+
+        let cells = rx.await.unwrap().unwrap();
+        assert_eq!(cells.hashes, vec![B256::ZERO]);
+        assert_eq!(cells.cells, vec![vec![Cell::default()]]);
+        assert_eq!(cells.cell_mask, wire_mask);
+        encoded.clear();
+        cells.encode(&mut encoded);
+        assert_eq!(Cells::decode(&mut encoded.as_slice()).unwrap(), cells);
     }
 
     #[tokio::test]
@@ -1177,6 +1225,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[allow(clippy::needless_update)]
     async fn snap_account_range_response_encodes_accounts_and_proof() {
         let provider = MockEthProvider::default();
         let first_hash = B256::repeat_byte(0x01);
@@ -1188,9 +1237,14 @@ mod tests {
             vec![
                 (
                     first_hash,
-                    Account { nonce: 1, balance: U256::from(2), bytecode_hash: Some(code_hash) },
+                    Account {
+                        nonce: 1,
+                        balance: U256::from(2),
+                        bytecode_hash: Some(code_hash),
+                        ..Default::default()
+                    },
                 ),
-                (second_hash, Account { nonce: 3, balance: U256::from(4), bytecode_hash: None }),
+                (second_hash, Account { nonce: 3, balance: U256::from(4), ..Default::default() }),
             ],
             // A hash-limit stop (not an exhausted trie) so a boundary proof is still expected,
             // matching the mocked `proof` below.
@@ -1225,8 +1279,14 @@ mod tests {
             Ok(SnapResponse::AccountRange(AccountRangeMessage {
                 request_id: 1,
                 accounts: vec![
-                    AccountData { hash: first_hash, body: full_body.into() },
-                    AccountData { hash: second_hash, body: empty_body },
+                    AccountData {
+                        hash: first_hash,
+                        body: alloy_rlp::decode_exact(&full_body).unwrap()
+                    },
+                    AccountData {
+                        hash: second_hash,
+                        body: alloy_rlp::decode_exact(&empty_body).unwrap()
+                    },
                 ],
                 proof,
             }))
@@ -1239,7 +1299,7 @@ mod tests {
         let provider = MockEthProvider::default();
         let hash = B256::repeat_byte(0x01);
         provider.set_snap_account_range(
-            vec![(hash, Account { nonce: 1, balance: U256::from(2), bytecode_hash: None })],
+            vec![(hash, Account { nonce: 1, balance: U256::from(2), ..Default::default() })],
             RangeEnd::Exhausted,
         );
         provider.set_snap_storage_root(hash, EMPTY_ROOT_HASH);

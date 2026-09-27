@@ -411,7 +411,7 @@ impl ExecutionOutcome {
     pub fn ethereum_receipts_root(&self, block_number: BlockNumber) -> Option<B256> {
         self.generic_receipts_root_slow(
             block_number,
-            reth_ethereum_primitives::calculate_receipt_root_no_memo,
+            reth_ethereum_primitives::Receipt::calculate_receipt_root_no_memo,
         )
     }
 }
@@ -941,14 +941,14 @@ mod tests {
             balance: U256::from(100),
             code_hash: B256::ZERO,
             code: None,
-            account_id: None,
+            ..Default::default()
         };
         let account_info2 = AccountInfo {
             nonce: 2,
             balance: U256::from(200),
             code_hash: B256::ZERO,
             code: None,
-            account_id: None,
+            ..Default::default()
         };
 
         // Set up the bundle state with these accounts

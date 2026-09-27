@@ -20,8 +20,8 @@ use reth_network_p2p::{
     BlockAccessListsClient,
 };
 use reth_provider::{
-    test_utils::MockEthProvider, BalNotificationStream, BalStore, BalStoreHandle, InMemoryBalStore,
-    ProviderError, ProviderResult, RawBal,
+    test_utils::MockEthProvider, BalStore, BalStoreHandle, InMemoryBalStore, ProviderError,
+    ProviderResult, RawBal,
 };
 use reth_transaction_pool::test_utils::{TestPool, TransactionGenerator};
 use std::sync::Arc;
@@ -724,10 +724,6 @@ impl BalStore for FailingLookupBalStore {
 
     fn get_by_hashes(&self, _block_hashes: &[BlockHash]) -> ProviderResult<Vec<Option<Bytes>>> {
         Err(ProviderError::other(std::io::Error::other("BAL lookup failed")))
-    }
-
-    fn bal_stream(&self) -> BalNotificationStream {
-        BalStoreHandle::noop().bal_stream()
     }
 }
 

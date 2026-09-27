@@ -246,16 +246,16 @@ impl BlockAccessListVerifier {
             // Hashing the raw bytes settles authenticity without decoding, so a peer cannot
             // charge us the decode of a list it was never able to serve.
             let raw = RawBal::new(raw);
-            if raw.hash() != commitment {
+            raw.ensure_hash(commitment).map_err(|error| {
                 debug!(
                     target: "downloaders::snap",
                     %block_hash,
-                    expected = %commitment,
-                    got = %raw.hash(),
+                    expected = %error.expected,
+                    got = %error.computed,
                     "Block access list does not match its header commitment"
                 );
-                return Err(RequestError::BadResponse)
-            }
+                RequestError::BadResponse
+            })?;
             let decoded = DecodedBal::from_raw_bal(raw).map_err(|error| {
                 debug!(target: "downloaders::snap", %block_hash, %error, "Invalid block access list");
                 RequestError::BadResponse

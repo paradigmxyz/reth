@@ -396,21 +396,14 @@ where
     ///
     /// See also [`Self::next_block_excess_blob_gas`]
     pub fn next_block_blob_fee(&self) -> Option<u128> {
-        self.next_block_excess_blob_gas()
-            .and_then(|excess_blob_gas| Some(self.blob_params?.calc_blob_fee(excess_blob_gas)))
+        self.header.maybe_next_block_blob_fee(self.blob_params)
     }
 
     /// Calculate excess blob gas for the next block according to the EIP-4844 spec.
     ///
     /// Returns a `None` if no excess blob gas is set, no EIP-4844 support
     pub fn next_block_excess_blob_gas(&self) -> Option<u64> {
-        self.header.excess_blob_gas().and_then(|excess_blob_gas| {
-            Some(self.blob_params?.next_block_excess_blob_gas_osaka(
-                excess_blob_gas,
-                self.header.blob_gas_used()?,
-                self.header.base_fee_per_gas()?,
-            ))
-        })
+        self.header.maybe_next_block_excess_blob_gas(self.blob_params)
     }
 }
 

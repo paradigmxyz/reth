@@ -78,7 +78,14 @@ impl StorageWatcherApiServer for StorageWatcherRpc {
 
             let Ok(mut rx) = resp_rx.await else { return };
 
-            while let Some(diff) = rx.recv().await {
+            loop {
+                // diffs only arrive when the address changes, so a failed send alone would not
+                // notice that the client went away
+                let diff = tokio::select! {
+                    _ = sink.closed() => break,
+                    diff = rx.recv() => diff,
+                };
+                let Some(diff) = diff else { break };
                 let msg = SubscriptionMessage::from(
                     serde_json::value::to_raw_value(&diff).expect("serialize"),
                 );

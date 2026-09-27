@@ -312,7 +312,8 @@ let action = ValidateFork::new(fork_base_number);
 #### Reorg Actions
 
 ##### `ReorgTo`
-Performs a reorg by setting a new head block as canonical.
+Performs a reorg by broadcasting a forkchoice update with the target block as head to all nodes.
+The finalized block is left unchanged, so a target below it is rejected as a too deep reorg.
 
 ```rust
 use reth_e2e_test_utils::testsuite::actions::ReorgTo;
