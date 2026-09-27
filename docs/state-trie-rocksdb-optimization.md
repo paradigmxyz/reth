@@ -956,6 +956,23 @@ latency is substantially worse. RocksDB account/storage-proof CPU falls to
 Engine CPU remains 76.59 ms per block. Four workers therefore do not establish
 execution parity or an overall validation improvement.
 
+The same comparison with two workers per proof pool passed 600 roots, persisted
+restart, recovery, and thread audits for both backends.
+
+| Two proof workers per pool | RocksDB | MDBX |
+| --- | ---: | ---: |
+| Execution p50/p90/p99, ms | 77.31 / 94.97 / 183.38 | 75.84 / 94.05 / 336.25 |
+| Payload p50/p90/p99, ms | 342.42 / 500.77 / 757.31 | 348.50 / 545.95 / 1030.33 |
+| Root wait p50/p90/p99, ms | 252.10 / 397.14 / 646.75 | 254.09 / 432.02 / 883.44 |
+| Cumulative saves, s | 43.18 | 517.01 |
+
+The execution median gap narrows to 1.46 ms and saves remain 91.6% lower.
+However, this still misses the matched execution target and more than doubles
+RocksDB payload p50 relative to eight workers. RocksDB engine CPU falls to
+73.62 ms/block, account/storage-proof CPU to 70.02/126.78 ms/block.
+The thread snapshots show no workers appearing after the late affinity audit
+in the retained eight-worker control or the two-worker RocksDB run.
+
 ## Validation
 
 The subsequent recovery-order change passed 31 conversion, cancellation, and BAL
@@ -970,3 +987,22 @@ catch-up. All retained final configurations validate 600 roots plus restart.
 Workspace all-features nightly clippy passed, with future-compatibility notices
 in existing dependencies. Default-feature provider/overlay/engine compilation also
 passes. Formatting, dependency hygiene, and TOML checks pass.
+
+### One proof worker per pool (2026-09-27)
+
+Both matched runs passed 600 payloads, persisted-root checks, restart payload 601,
+and recovery. The first 50 payloads are excluded from latency percentiles.
+
+| Metric | RocksDB | MDBX |
+| --- | ---: | ---: |
+| Execution p50 / p90 / p99 (ms) | 76.438 / 92.019 / 175.630 | 75.842 / 97.761 / 186.354 |
+| Payload p50 / p90 / p99 (ms) | 597.678 / 844.232 / 1413.106 | 595.942 / 991.144 / 1879.664 |
+| Root wait p50 (ms) | 504.905 | 502.192 |
+| Cumulative save_blocks, including drain (s) | 41.067 | 254.004 |
+
+The execution median gap is still 0.597 ms. Persistence savings are 83.8% in
+this matched configuration; MDBX cumulative saves also decreased with the much
+slower replay. This is not execution parity, and the payload-latency penalty
+precludes treating this as an overall improvement. No default changed.
+Artifacts use the retained globallean backend binaries and the usual run-name
+suffix with proof1-chunk80-600.
