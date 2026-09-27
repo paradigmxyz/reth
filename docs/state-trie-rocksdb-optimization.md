@@ -1006,3 +1006,26 @@ slower replay. This is not execution parity, and the payload-latency penalty
 precludes treating this as an overall improvement. No default changed.
 Artifacts use the retained globallean backend binaries and the usual run-name
 suffix with proof1-chunk80-600.
+
+### Proof workers released after execution (2026-09-27)
+
+A diagnostic candidate holds both 64-worker proof pools before provider creation
+until actual BAL execution returns. Closing the gate on early job drop also
+releases every worker; 55 targeted proof/state-root/BAL tests and both backend
+builds passed, as did workspace Clippy and formatting. The BAL update-stream
+completion signal is deliberately not used because it can precede execution.
+
+| Metric | RocksDB | MDBX |
+| --- | ---: | ---: |
+| Execution p50 / p90 / p99 (ms) | 79.461 / 98.314 / 200.370 | 76.380 / 96.299 / 338.381 |
+| Payload p50 / p90 / p99 (ms) | 149.004 / 199.407 / 283.265 | 132.763 / 171.303 / 407.788 |
+| Root wait p50 (ms) | 57.867 | 45.918 |
+| Cumulative save_blocks, including drain (s) | 48.752 | 562.721 |
+
+Both runs passed 600 roots, persistence, restart payload 601, recovery, and
+worker-count audits. The 3.081 ms execution median gap remains; saving time is
+91.3% lower. This improves execution over the retained eight-worker RocksDB
+control while recovering most of the one-worker payload penalty, but does not
+establish parity. Candidate binaries, source patches, hashes, and full results
+are retained under globalphase backend names with early0-proof64-chunk80-600.
+The source was restored after building; no default changed.
