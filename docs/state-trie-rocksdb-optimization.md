@@ -839,6 +839,84 @@ retained layout. This two-iterator version was discarded. Native LOG counters
 only contain a startup dump in these short runs and cannot establish runtime
 prefix-filter usage.
 
+A coarser storage-prefix trial retained three-byte account prefixes but used
+only the 32-byte address for storage. Storage cursors then needed one bounded
+iterator, while account cursors retained a total-order fallback. Seven targeted
+tests, both migration tests, workspace checks, 600 roots, and restart passed.
+Execution was 80.81/99.51/196.77 ms, payload 153.91/227.46/331.85 ms,
+root wait 62.16/110.24/184.43 ms, and saves 48.44 s. Account/storage proof CPU
+was 85.25/166.22 ms per block. SST size was 208,544,208,478 bytes, an increase
+of 1,048,674,917 bytes (0.51%) over the retained layout, and peak anonymous
+memory was 24.00 GiB. The small single-run execution change does not establish
+parity or a repeatable improvement; this candidate remains unretained.
+
+## Refreshed matched execution trace
+
+A new 600-block pair used the retained binaries, eight proof workers, the same
+120-second idle cooldown before each node start, scheduler/provider probes, and
+499 Hz engine user-cycle samples. Both runs validated all roots, persisted
+restart, and final recovery. Perf used CLOCK_MONOTONIC with per-run start/end
+clock anchors; every block has an execution trace. These instrumented runs are
+diagnostics, not new uninstrumented acceptance results.
+
+| Execution component, median ms | RocksDB | MDBX |
+| --- | ---: | ---: |
+| Wall time | 82.128 | 77.881 |
+| Running CPU time | 59.122 | 56.012 |
+| Blocked time | 21.166 | 20.593 |
+| Runnable scheduler delay | 0.761 | 0.635 |
+| Provider creation | 0.0039 | 0.0033 |
+
+Provider-creation p99 was 0.0097/0.0056 ms (RocksDB/MDBX); RocksDB had one
+9.56 ms outlier. Provider creation does not account for the execution median
+gap. Comparing the same blocks, the median differences were +3.322 ms running,
+-0.712 ms blocked, and +0.097 ms runnable. Component medians are not additive.
+Mean differences do add: +2.380 ms running, -0.731 ms blocked, and -0.056 ms
+runnable account for +1.594 ms mean wall time; MDBX has much larger tail stalls.
+
+Estimated receive-function self cycles were 35.49/31.31 million per block;
+memcpy self cycles were 32.51/29.65 million. Copies directly called by the
+receive function were essentially equal at 5.02/5.01 million cycles per block.
+Other copy samples include state commit and iterator work, with possible
+inlining differences between callers. These sampled cycle estimates are not an
+additive explanation of latency percentiles.
+
+Engine counter-window clocks were 4.931/4.999 GHz. Replay CPU-temperature
+medians were 84.4/65.8 C, despite the identical initial cooldown. The scored
+550-block replay took 129.38/426.71 seconds; cumulative saves were
+49.25/556.78 seconds. The uninstrumented controls likewise took 128.27/429.95
+seconds. MDBX's long pauses make these different sustained loads. This does not
+establish thermal throttling or justify claiming parity by pacing RocksDB.
+
+Fresh assembly annotation confirms the empty-channel backoff spin remains the
+receive hotspot: about 85% of that function's sampled cycles for both backends.
+This annotation covers the full replay's receive samples, including warm-up;
+it is separate from the execution-window cycle totals above.
+
+A FIFO recovery-claim trial replaced exponential Rayon ranges with par_bridge.
+Claims followed input order, but completions remained out of order and were not
+bounded to the number of workers. Recovery CPU fell to 623.90 ms/block from
+672.52 ms/block (7.2%), while execution was 82.17/99.23/200.07 ms,
+payload 155.69/226.58/337.48 ms, root wait 62.83/113.05/183.04 ms,
+and cumulative saves 48.54 seconds. All 31 targeted tests, workspace checks,
+600 roots, and restart passed. Lower recovery CPU did not improve execution
+latency; the candidate was removed.
+
+Recovery-pool sizing changed only the CPU pool, leaving BAL at 32 workers,
+prewarming at 128, and account/storage proofs at eight workers each. Both trials
+passed 600 roots, persisted restart, and initial/later thread audits. Runtime
+tests, the profiling build, and full workspace checks passed.
+
+| Recovery workers | Execution p50/p90/p99, ms | Payload p50, ms | Root wait p50, ms | Saves, s |
+| --- | --- | ---: | ---: | ---: |
+| 16 | 84.97 / 105.59 / 194.45 | 149.50 | 57.68 | 47.94 |
+| 24 | 82.27 / 101.21 / 191.84 | 153.09 | 60.49 | 47.42 |
+
+Neither improved execution over the retained 32-worker controls; the temporary
+pool-size override was removed. The lower root wait at 16 workers improved
+payload latency while execution regressed, illustrating the competing work
+rather than an execution win.
+
 ## Validation
 
 The subsequent recovery-order change passed 31 conversion, cancellation, and BAL
