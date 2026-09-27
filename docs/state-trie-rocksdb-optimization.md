@@ -9,10 +9,28 @@ is retained there as `experiment-notebook.md`.
 ## Outcome so far
 
 The strict execution target remains open. The latest matched, uninstrumented
-runs use proof chunks of 80 and the same retained code and CPU settings.
-RocksDB execution p50 is 95.36 ms versus 87.78 ms for MDBX, with cumulative
-saves of 51.51 s versus 542.59 s (90.5% lower). Payload p50 is 117.26 versus
-109.87 ms. RocksDB has lower execution and payload p99 in this pair.
+600-block pair uses the retained implementation, eight global Rayon threads,
+eight account/storage proof workers, proof chunks of 80, isolated background
+work, and higher BAL/recovery-worker priority. RocksDB execution p50 is
+**81.44 ms versus 77.88 ms for MDBX**, with cumulative saves of
+**47.75 s versus 562.60 s (91.5% lower)**. Payload p50 is 155.08 versus
+145.87 ms; state-root wait is 62.69 versus 56.72 ms. Both pass all 600 reference
+roots and persisted restart at block 601. The RocksDB repeat measured
+82.21 ms execution, 153.59 ms payload, 61.09 ms root wait, and 47.74 s saves,
+and also passed all roots and restart. Reducing prewarming to 32 threads measured
+82.50 ms execution with 47.67 s saves and was rejected. These pool settings improve execution while
+substantially increasing state-root wait; they are not an overall payload win.
+
+The preceding 64-proof-worker comparison was 87.28 versus 81.71 ms, saves
+50.62 versus 551.29 s, and payload p50 131.18 versus 119.59 ms. Its MDBX median
+is not the parity target for the current eight-proof-worker comparison.
+The proof ancestor/successor and branch-mask experiments were removed because
+they did not produce useful latency improvements.
+
+Before the additional placement/pool/priority tuning, the matched pair was
+95.87 versus 88.03 ms, saves 50.60 versus 552.41 s, and payload p50 117.10
+versus 110.26 ms. The older 88.03 ms control is not a sufficient parity target
+for the newly tuned RocksDB run.
 
 A prior RocksDB trial with proof chunks of 320 reached execution p50 of
 93.37 ms and saves of 49.58 s, but increased payload p50 to 123.82 ms.
@@ -46,8 +64,12 @@ that older control is not the current parity target.
 - Return exact state-trie overlay hits before querying the underlying database.
   Neighboring entries and tombstones still require database lookup. This removes
   redundant reads but did not materially improve the measured RocksDB workload.
-- Honor existing runtime worker-count CLI settings in `reth-bb`, and allow
-  shutdown enough time to flush the large-block workload.
+- Honor existing runtime worker-count CLI settings in `reth-bb` and the standard
+  `RAYON_NUM_THREADS` environment setting for the global pool.
+- Drain queued persistence and pruning before acknowledging engine shutdown.
+  Native tracing found pruning using a destroyed RocksDB compression-context
+  cache during process exit; the FIFO shutdown barrier removes that race.
+  Normal save acknowledgements still precede pruning.
 
 `migrate_state_trie --rewrite` rewrites existing trie SSTs with the new layout
 without rebuilding the trie or modifying MDBX. It checks the Finish/partial
@@ -518,6 +540,261 @@ payload 117.26/152.80/242.61 ms, root wait 9.86/26.00/54.56 ms, and saves
 109.87/131.58/357.37 ms, root wait 12.33/24.87/35.37 ms, and saves 542.59 s.
 RocksDB proof CPU remained approximately 124/228 ms per block for account/storage
 workers, so the exact-hit shortcut does not explain or close the remaining gap.
+
+Raising both the 32 recovery workers and 32 BAL workers from nice -5 to -10
+(with unchanged affinities) measured execution 94.05/114.21/207.77 ms,
+payload 117.57/150.69/232.94 ms, root wait 12.29/31.06/50.21 ms, and saves
+50.94 s. Both initial and later thread audits confirmed the priorities. The
+small execution gain shifted time into root wait; payload mean was essentially
+unchanged. All 600 roots and restart passed.
+
+A separate load diagnostic set `bench send-blocks --wait-time 750ms`, keeping
+ordinary worker priorities and the same binary, caches, and affinities. Actual
+mean submission-completion interval was 776.47 ms, including sender overhead.
+Execution improved to 88.70/99.94/121.44 ms, payload to 109.97/126.06/154.83 ms,
+root wait was 10.27/24.02/38.97 ms, and cumulative saves fell to 39.85 s.
+All 600 roots and restart passed. This is evidence of load sensitivity, not an
+unpaced performance win: the sender deliberately reduced throughput.
+
+In that diagnostic, measured engine frequency rose from 4.941 to 5.104 GHz
+and IPC from 1.143 to 1.168. Storage cache misses fell from 316,440 to 268,510,
+code misses from 193,008 to 146,296, while account misses rose from 43,074 to
+47,203. Several factors change with pacing, including overlap with persistence
+and background tasks, so frequency alone does not explain the latency change.
+The longer metrics spool required temporarily reducing the root filesystem's
+reserved allocation from 5% to 4%; the original 11,693,260 reserved blocks
+were restored and verified after the spool was removed. The partition size,
+node settings, and promoted snapshot were unchanged.
+
+A subsequent unpaced proof-worker profile collected 23,524 user-cycle samples,
+with 84 lost samples (about 0.36%). Weighted self-cycle shares for account/storage
+workers were 8.45%/8.90% in SST index seek, 5.72%/7.40% in key comparison,
+5.52%/5.69% in mutex unlock, and 4.48%/3.15% in LRU insertion. These are CPU
+sample shares, not wall-latency contributions. All 600 roots and restart passed.
+Per-worker attribution comes from individual `perf script` samples weighted by
+period; symbol-aggregated, command-filtered reports misattributed shared symbols
+and are explicitly marked unusable in the artifacts.
+
+A hash-search SST index with account/storage prefixes of 2/33 bytes passed seven
+cursor/proof tests, two migration tests, 600 roots, and restart. Ordered neighbor
+queries explicitly crossed prefix boundaries. It did not improve performance:
+execution was 95.73/120.68/213.62 ms, payload 117.82/154.67/239.82 ms,
+root wait 9.81/27.22/52.93 ms, and saves 51.58 s. Account/storage proof CPU
+increased from 124/228 to 126/235 ms per block. Rewritten trie SSTs were
+209,538,768,966 bytes, 1.0% above the retained layout. The candidate was reverted;
+its source patch, binaries, and measurements remain in the artifacts.
+
+An independent 8 GiB HyperClock cache trial used automatic entry sizing while
+keeping the retained SST layout. Seven targeted tests, 600 roots, and restart
+passed. Execution was 95.22/122.08/210.13 ms, payload 116.50/152.02/235.58 ms,
+root wait 9.25/25.56/43.61 ms, and saves 51.13 s. Account/storage proof CPU
+fell from 124/228 to 117/213 ms per block, but execution p50 changed by only
+0.14 ms. This does not establish a material execution benefit or parity.
+
+Save-interval overlap alone also does not explain the gap: 265 of 550 scored
+RocksDB executions overlapped `save_blocks`, compared with 549 for MDBX. MDBX's
+long save intervals include substantial I/O waiting, so overlapping wall-time
+intervals are not equivalent to concurrent CPU or memory pressure. Grouped and
+matched-block comparisons are retained in `persistence-overlap-comparison.json`;
+they are observational, with different block content, positions, and outliers.
+
+A snapshot-scoped leaf cache (262,144 entries, including absent leaves) shared
+point and batch reads while bypassing mutable secondary readers. Eight targeted
+tests, 600 roots, and restart passed. It served 4,760,672 hits against 9,970,194
+misses (32.3% hits), but execution was 95.59/118.75/219.95 ms and payload
+117.34/153.37/245.51 ms. Root wait was 11.35/27.20/49.12 ms; saves were
+51.01 s. Account/storage proof CPU decreased to 120/220 ms per block, while
+BAL-prefetch CPU increased from 158 to 168 ms. The added cache did not improve
+execution p50 and was removed along with its dependency. Captured artifacts
+retain the diagnostic counters under `reth_reth_state_trie_leaf_cache_*`.
+
+The next proof-calculator candidate skips a predecessor lookup when the successor's
+physical path already covers the target. It also keys collected proof nodes by
+their stored paths, allowing later targets to reuse ancestor metadata while
+respecting each target's known-parent bound. This avoids redundant cursor reads
+and decoding without adding another cache. Nine targeted cursor/proof/provider
+tests and full workspace all-features nightly clippy and formatting passed.
+Despite those checks, the RocksDB replay stalled on block 24,979,298 after 297
+valid blocks, with a partial storage proof still pending at known-parent depth 1.
+The queued MDBX comparison was stopped, and this run is excluded from performance
+acceptance. Restoring original neighbor selection while retaining ancestor reuse then passed
+600 roots and restart. The captured target was `a59c…0484`, with known parent
+length 1. Its predecessor `a57c…3dee` had physical path `a5`; its successor
+`a66c…c688` had physical path `a`. The successor covered the target's prefix but
+could not contribute below the known parent, so choosing it produced an empty
+partial proof. The predecessor supplied the required leaf.
+
+The corrected shortcut requires the successor's physical path to be strictly
+below the known-parent bound. A regression built from the captured nodes fails
+with the old condition (empty proof versus the required leaf) and passes with
+the fix; all ten targeted tests pass. Temporary target-specific logging has been
+removed. Full workspace all-features nightly clippy and formatting pass. The
+corrected RocksDB run passes all 600 reference roots, shutdown persistence, and
+restart at block 601. Execution is 95.87/118.44/202.63 ms, payload
+117.10/152.36/236.91 ms, root wait 9.66/25.56/50.49 ms, and saves 50.60 s.
+It does not improve execution p50 over the previous 95.36 ms run. The matched
+MDBX control measures execution 88.03/104.73/315.14 ms, payload
+110.26/132.00/362.34 ms, root wait 11.30/23.97/38.51 ms, and saves 552.41 s.
+The first control attempt failed from root-filesystem artifact exhaustion and is
+excluded; the fresh repeat passes all roots and persisted restart. The harness
+now checks artifact space before startup and during replay.
+
+Engine CPU time over the counter window is 91.10 versus 84.60 ms/block, IPC is
+1.133 versus 1.219, and effective clock is 4.930 versus 5.014 GHz for RocksDB/MDBX.
+Across all 600 replay blocks, account/storage proof CPU is 123/223 versus
+65/89 ms/block; native background work is 86 versus 5 ms/block. These windows
+and overlapping thread times do not provide an additive latency decomposition.
+Moving persistence, account/storage-root, sparse-trie, trie, overlay, and drop
+workers to the smaller CPU group measured execution 93.03/113.94/209.80 ms,
+payload 120.14/159.67/247.28 ms, root wait 15.93/35.57/61.93 ms, and saves
+51.32 s. All roots and persisted restart pass. It reduces execution p50 by
+2.84 ms but raises payload p50 by 3.04 ms; this is a scheduling tradeoff, not
+a demonstrated reduction in total validation latency.
+
+Ancestor reuse alone measured execution 94.68/118.80/211.17 ms, payload
+117.21/152.66/232.22 ms, root wait 10.93/28.72/47.81 ms, and saves 51.34 s.
+Logical account/storage ancestor reads fell from 4,826,933/8,174,475 to
+4,820,683/7,676,851. Proof CPU remained approximately 125/228 ms per block.
+That diagnostic run included the narrowly targeted proof logging described above;
+it does not establish execution parity.
+
+A RocksDB cursor trial reused the preceding native Seek position for a following
+`before` query at the same key, avoiding another SeekForPrev. Ten targeted tests,
+full workspace clippy/formatting, 600 roots, and persisted restart pass. Execution
+is 95.70/117.73/206.04 ms, payload 117.14/152.92/239.33 ms, root wait
+10.25/25.21/46.42 ms, and saves 51.37 s. The 0.18 ms execution-median change
+does not establish a useful improvement; the cursor change was removed.
+
+Increasing proof chunks from 80 to 1,280, with the same proof candidate and
+original placement, measured execution 89.11/113.05/203.83 ms and saves 47.62 s.
+However, payload validation rose to 177.35/226.80/334.17 ms and root wait to
+75.71/112.93/171.93 ms. Although the 600 roots and restarted block 601 validated and the checkpoint
+advanced, the final analyzer found a restart-time pruning error:
+`ZSTD Data corruption detected`. The run is excluded from acceptance. Its
+provisional timings also show a substantial validation regression. The harness
+now preserves the restarted RocksDB LOG and rejects restart errors before
+recovering the volume. The diagnostic replay and native shutdown investigation follow below.
+
+The diagnostic repeat logged no error, but pruning stopped being logged at
+AccountHistory start. The engine acknowledged shutdown after the durable-save
+acknowledgement, while pruning continued on its OS thread. A native trace of the
+old binary then observed persistence accessing RocksDB's process-wide decompression
+cache 39 microseconds after its destructor returned, followed by ZSTD decompression.
+This establishes a shutdown use-after-destruction bug; it provides a concrete
+mechanism for the earlier corruption error without proving disk contents were damaged.
+
+A FIFO persistence barrier now waits for post-save pruning before acknowledging
+engine termination. Normal save acknowledgements remain before pruning. Both
+shutdown tests fail with the old ordering and pass with the fix; nine applicable
+RocksDB-feature tests and all ten default-feature tests pass. Full workspace
+clippy and formatting pass. The fixed binary passes 600 roots and restart,
+explicitly logs completed pruning for block 601, and the same native trace shows
+pruning complete before cache destruction with no later cache access. The fix is
+committed separately as `e7bade20a`; the post-destruction traces are retained in
+`shutdown-trace-boundrocks-end` and `shutdown-trace-drainrocks`.
+
+Including global Rayon workers in that placement measured execution
+90.74/110.44/199.74 ms, payload 125.55/172.87/251.53 ms, root wait
+24.98/50.06/77.12 ms, and cumulative saves 50.64 s. All 600 roots and
+persisted restart pass. Engine CPU time fell to 80.85 ms/block and IPC rose
+to 1.248, versus 91.10 ms and 1.133 in the original placement. This supports
+CPU/cache interference as a remaining cause, but the extra root wait prevents
+calling the placement an overall validation improvement. A smaller global Rayon
+pool was then tested to reduce oversubscription of that CPU group.
+
+Reducing the global Rayon pool from 32 to eight threads, with that placement,
+measured execution 89.09/108.80/202.02 ms, payload 126.16/173.43/250.34 ms,
+root wait 26.88/52.15/88.97 ms, and saves 49.65 s. Global-pool CPU work fell
+from 400.07 to 287.62 ms/block; engine CPU fell to 79.95 ms/block, IPC 1.257.
+The node explicitly configures the global pool, so a temporary experiment hook
+was required; simply setting `RAYON_NUM_THREADS` would not change its size.
+The actual eight-worker count was verified before the measured window.
+
+Raising both BAL and recovery workers from nice -5 to -10 in that configuration
+then measured execution 87.28/105.05/200.78 ms and saves 50.62 s. It beats the
+earlier 88.03 ms MDBX reference in this run, but the matched MDBX control
+reaches 81.71 ms, so parity is not established. Payload validation increased to 131.18/177.95/255.08 ms and root
+wait to 33.20/59.68/92.37 ms. Both eight-worker RocksDB runs pass all 600 roots
+and persisted restart. The scheduling tradeoff must be considered alongside
+the execution median; this is not an overall payload-latency improvement.
+
+With 16 account and 16 storage proof workers, RocksDB execution measured
+84.47/101.26/202.73 ms, payload 128.66/186.36/281.22 ms, root wait
+34.02/64.79/109.51 ms, and saves 49.52 s. It still exceeds the 81.71 ms
+MDBX reference, which used 64 workers per proof pool. All roots and restart pass.
+
+A further proof trial fetched the child branch directly below a known parent.
+When its mask lacked the target child, that branch proved absence without
+neighbor seeks; otherwise the normal ascent reused it. The regression fails
+without the shortcut, eleven focused tests and full workspace checks pass, and
+all 600 roots and restart pass. Storage seeks fall from 6,043,851 to 5,294,430,
+while exact storage lookups rise from 7,705,921 to 8,164,659. Storage-proof CPU
+falls from 184.97 to 178.43 ms/block, but execution p50 only changes from
+84.47 to 84.29 ms; payload is 128.76 ms and saves 49.41 s. The shortcut was
+removed because the latency benefit did not justify retaining the extra logic.
+
+The global pool now honors the standard `RAYON_NUM_THREADS` setting instead of
+explicitly overriding Rayon's thread count. Without an override the default
+still uses available parallelism. Both backend builds and full workspace checks
+pass; the shortcut experiment also validates the permanent setting at runtime.
+
+Eight workers per proof pool measured execution 81.77/99.31/194.36 ms and
+saves 48.81 s. The execution median is nearly equal to the 81.71 ms MDBX
+reference, but that control used 64 proof workers per pool. Payload validation
+increased to 153.34/226.04/341.69 ms and root wait to 62.73/115.42/178.85 ms.
+All 600 roots and persisted restart pass. The lower execution median comes
+with a substantial state-root latency tradeoff; it is not an overall payload
+latency improvement.
+
+The earlier successor-selection and ancestor-reuse proof experiments have also
+been removed because they did not improve execution latency. Their source and
+results remain in the artifacts. The retained original proof calculator passes
+seven focused proof/cursor/provider tests. The matched eight-worker
+RocksDB–MDBX–RocksDB sequence uses only retained code; seven focused tests, both
+profiling builds, and full workspace checks pass. Execution p50 is
+81.44/77.88/82.21 ms and saves are 47.75/562.60/47.74 seconds. All three runs
+pass 600 roots and persisted restart. The permanent pool-setting change is
+committed as `1e511d3c1`.
+
+Reducing BAL prewarming from 128 to 32 workers passes 12 tests, full workspace
+checks, 600 roots, and restart, but execution is 82.50/105.95/198.32 ms, payload
+153.36/223.68/337.50 ms, root wait 60.84/104.79/163.03 ms, and saves 47.67 s.
+Prewarming CPU falls from 156–157 to 116 ms/block (26%), without reducing engine
+CPU or execution latency. The change was rejected.
+
+Returning already-in-order worker results directly measured execution
+81.43/97.58/193.25 ms, payload 153.84/222.37/344.88 ms, root wait
+62.39/115.12/182.59 ms, and saves 47.85 s. All 27 BAL tests, workspace checks,
+600 roots, and restart pass. It does not establish an improvement over the
+81.44/82.21 ms references, so the change was removed.
+
+Disabling block-cache insertion only for state-trie neighbor iterators measured
+execution 81.58/98.63/195.79 ms, payload 156.10/228.48/337.21 ms, root wait
+64.20/117.73/187.05 ms, and saves 49.25 s. Seven relevant tests, workspace checks,
+600 roots, and restart pass. It was removed because it did not improve execution.
+Index/filter cache priority was also considered, but both upstream source and
+the reference RocksDB LOG show it is already enabled; no benchmark was run.
+
+The retained RocksDB/MDBX binaries have identical normalized instruction sequences
+for the result-channel receive function (1,526 bytes, 374 instructions) and nine
+related receive helpers. This rules out different generated instruction sequences
+in this hotspot, but does not rule out code-placement effects elsewhere. Assembly
+and comparison data are retained in `codegen-recv-comparison.json` and the
+`codegen-*.asm` artifacts. The receive function copies a 208-byte channel item.
+Boxing worker results makes channel messages and reorder slots pointer-sized.
+Assembly confirms that the receive function drops its 208-byte memcpy call and
+shrinks from 1,526 to 1,427 bytes. However, execution measures
+82.44/101.94/208.39 ms, payload 154.48/225.72/337.19 ms, root wait
+61.11/112.05/181.63 ms, and saves 48.18 s. All 27 BAL tests, full workspace
+checks, 600 roots, and restart pass. The allocation/copy tradeoff did not improve
+latency, so the change was removed.
+
+A per-block comparison against the mean of the two retained-code RocksDB controls
+also puts the prewarming, direct-return, and cache-insertion trials within the
+variation between those controls (`paired-execution-vs-lean-controls.json`).
+A configuration-only trial now raises prewarming workers and their dispatcher
+to nice -5, keeping 128 prewarming threads and the same retained binary.
+The matched reference settings leave these threads at nice 0.
 
 ## Validation
 
