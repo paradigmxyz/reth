@@ -2,12 +2,12 @@
 
 use alloy_eip7928::{bal::DecodedBal, BlockAccessIndex};
 use reth_revm::database::StateProviderDatabase;
-use reth_storage_api::StateProviderBox;
+use reth_storage_api::{EvmStateProviderAdapter, StateProviderBox};
 use revm::{database::State, state::bal::Bal as RevmBal, Database};
 use std::sync::Arc;
 
 /// Helper alias type for the state's [`State`]
-pub type StateCacheDb = State<StateProviderDatabase<StateProviderBox>>;
+pub type StateCacheDb = State<StateProviderDatabase<EvmStateProviderAdapter<StateProviderBox>>>;
 
 /// Attaches `bal` to the database, positioned at the state right before the transaction at
 /// `tx_index`.

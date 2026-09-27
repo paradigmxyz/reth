@@ -84,12 +84,12 @@ on:
       samply:
         description: "Enable samply profiling"
         required: false
-        default: "false"
+        default: false
         type: boolean
       tracing_chrome:
         description: "Enable Chrome trace recording"
         required: false
-        default: "false"
+        default: false
         type: boolean
       cores:
         description: "Limit reth to N CPU cores (0 = all available)"
@@ -114,12 +114,12 @@ on:
       otlp:
         description: "Export OTLP traces and logs"
         required: false
-        default: "true"
+        default: true
         type: boolean
       metrics:
         description: "Upload txgen metrics to VictoriaMetrics"
         required: false
-        default: "false"
+        default: false
         type: boolean
       call_args:
         description: "Call mode arguments as key=value pairs (corpus, class, methods, rps, duration, passes, concurrency)"
@@ -813,6 +813,39 @@ jobs:
         id: ack
         if: steps.command.outputs.command == 'bench'
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        env:
+          INPUT_ACTOR: ${{ steps.args.outputs.actor }}
+          INPUT_BAL: ${{ steps.args.outputs.bal }}
+          INPUT_BASELINE_ARGS: ${{ steps.args.outputs.baseline-args }}
+          INPUT_BASELINE_NAME: ${{ steps.args.outputs.baseline-name }}
+          INPUT_BIG_BLOCKS: ${{ steps.args.outputs.big-blocks }}
+          INPUT_BLOCK_TIME: ${{ steps.args.outputs.block-time }}
+          INPUT_BLOCKS: ${{ steps.args.outputs.blocks }}
+          INPUT_CLASS: ${{ steps.args.outputs.class }}
+          INPUT_CONCURRENCY: ${{ steps.args.outputs.concurrency }}
+          INPUT_CORES: ${{ steps.args.outputs.cores }}
+          INPUT_CORPUS: ${{ steps.args.outputs.corpus }}
+          INPUT_DURATION: ${{ steps.args.outputs.duration }}
+          INPUT_FEATURE_ARGS: ${{ steps.args.outputs.feature-args }}
+          INPUT_FEATURE_NAME: ${{ steps.args.outputs.feature-name }}
+          INPUT_METHODS: ${{ steps.args.outputs.methods }}
+          INPUT_METRICS: ${{ steps.args.outputs.metrics }}
+          INPUT_MODE: ${{ steps.args.outputs.mode }}
+          INPUT_NAMESPACE: ${{ steps.args.outputs.namespace }}
+          INPUT_OTLP: ${{ steps.args.outputs.otlp }}
+          INPUT_PASSES: ${{ steps.args.outputs.passes }}
+          INPUT_PR: ${{ steps.args.outputs.pr }}
+          INPUT_REORG: ${{ steps.args.outputs.reorg }}
+          INPUT_RPS: ${{ steps.args.outputs.rps }}
+          INPUT_RUN_ORDER: ${{ steps.args.outputs.run-order }}
+          INPUT_RUN_PAIRS: ${{ steps.args.outputs.run-pairs }}
+          INPUT_SAMPLY: ${{ steps.args.outputs.samply }}
+          INPUT_SLACK: ${{ steps.args.outputs.slack }}
+          INPUT_TOP_GAS: ${{ steps.args.outputs.top-gas }}
+          INPUT_TRACER: ${{ steps.args.outputs.tracer }}
+          INPUT_TRACING_CHROME: ${{ steps.args.outputs.tracing-chrome }}
+          INPUT_WAIT_TIME: ${{ steps.args.outputs.wait-time }}
+          INPUT_WARMUP: ${{ steps.args.outputs.warmup }}
         with:
           github-token: ${{ secrets.DEREK_PAT }}
           script: |
@@ -825,7 +858,7 @@ jobs:
               });
             }
 
-            const pr = '${{ steps.args.outputs.pr }}';
+            const pr = process.env.INPUT_PR;
             if (!pr) return;
 
             const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
@@ -860,34 +893,34 @@ jobs:
               core.info(`Skipping queue tracking: ${e.message}`);
             }
 
-            const actor = '${{ steps.args.outputs.actor }}';
-            const blocks = '${{ steps.args.outputs.blocks }}';
-            const warmup = '${{ steps.args.outputs.warmup }}';
-            const baseline = '${{ steps.args.outputs.baseline-name }}';
-            const feature = '${{ steps.args.outputs.feature-name }}';
-            const samply = '${{ steps.args.outputs.samply }}' === 'true';
-            const tracingChrome = '${{ steps.args.outputs.tracing-chrome }}' === 'true';
-            const slack = '${{ steps.args.outputs.slack }}' || 'always';
-            const bigBlocks = '${{ steps.args.outputs.big-blocks }}' === 'true';
-            const mode = '${{ steps.args.outputs.mode }}' || 'engine';
-            const reorg = '${{ steps.args.outputs.reorg }}';
-            const bal = '${{ steps.args.outputs.bal }}' || 'false';
+            const actor = process.env.INPUT_ACTOR;
+            const blocks = process.env.INPUT_BLOCKS;
+            const warmup = process.env.INPUT_WARMUP;
+            const baseline = process.env.INPUT_BASELINE_NAME;
+            const feature = process.env.INPUT_FEATURE_NAME;
+            const samply = process.env.INPUT_SAMPLY === 'true';
+            const tracingChrome = process.env.INPUT_TRACING_CHROME === 'true';
+            const slack = process.env.INPUT_SLACK || 'always';
+            const bigBlocks = process.env.INPUT_BIG_BLOCKS === 'true';
+            const mode = process.env.INPUT_MODE || 'engine';
+            const reorg = process.env.INPUT_REORG;
+            const bal = process.env.INPUT_BAL || 'false';
             const samplyNote = samply ? ', samply: `enabled`' : '';
             const tracingChromeNote = tracingChrome ? ', tracing-chrome: `enabled`' : '';
             const slackNote = slack !== 'always' ? `, slack: \`${slack}\`` : '';
             const reorgNote = reorg ? `, reorg: \`${reorg}\`` : '';
             const balNote = bal !== 'false' ? `, BAL: \`${bal}\`` : '';
             const modeNote = mode !== 'engine' ? `, mode: \`${mode}\`` : '';
-            const corpus = '${{ steps.args.outputs.corpus }}';
-            const callClass = '${{ steps.args.outputs.class }}';
-            const callMethods = '${{ steps.args.outputs.methods }}';
-            const callRps = '${{ steps.args.outputs.rps }}';
-            const callDuration = '${{ steps.args.outputs.duration }}';
-            const callPasses = '${{ steps.args.outputs.passes }}';
-            const callConcurrency = '${{ steps.args.outputs.concurrency }}';
-            const callTopGas = '${{ steps.args.outputs.top-gas }}';
-            const callNamespace = '${{ steps.args.outputs.namespace }}';
-            const callTracer = '${{ steps.args.outputs.tracer }}';
+            const corpus = process.env.INPUT_CORPUS;
+            const callClass = process.env.INPUT_CLASS;
+            const callMethods = process.env.INPUT_METHODS;
+            const callRps = process.env.INPUT_RPS;
+            const callDuration = process.env.INPUT_DURATION;
+            const callPasses = process.env.INPUT_PASSES;
+            const callConcurrency = process.env.INPUT_CONCURRENCY;
+            const callTopGas = process.env.INPUT_TOP_GAS;
+            const callNamespace = process.env.INPUT_NAMESPACE;
+            const callTracer = process.env.INPUT_TRACER;
             const callExtras = [
               callTopGas ? `top-gas: \`${callTopGas}\`` : '',
               callNamespace ? `namespace: \`${callNamespace}\`` : '',
@@ -896,22 +929,22 @@ jobs:
             const callNote = mode === 'call'
               ? `, corpus: \`${corpus}\`, class: \`${callClass}\`, methods: \`${callMethods}\`, rps: \`${callRps}\`, duration: \`${callDuration}\`, passes: \`${callPasses}\`, concurrency: \`${callConcurrency}\`${callExtras}`
               : '';
-            const cores = '${{ steps.args.outputs.cores }}';
+            const cores = process.env.INPUT_CORES;
             const coresNote = cores && cores !== '0' ? `, cores: \`${cores}\`` : '';
-            const runPairs = '${{ steps.args.outputs.run-pairs }}' || '6';
-            const runOrder = '${{ steps.args.outputs.run-order }}';
+            const runPairs = process.env.INPUT_RUN_PAIRS || '6';
+            const runOrder = process.env.INPUT_RUN_ORDER;
             const runPairsNote = `, run-pairs: \`${runPairs}\`${runOrder ? ` (${runOrder})` : ''}`;
-            const otlpEnabled = '${{ steps.args.outputs.otlp }}' !== 'false';
+            const otlpEnabled = process.env.INPUT_OTLP !== 'false';
             const otlpNote = !otlpEnabled ? ', otlp: `disabled`' : '';
-            const metricsEnabled = '${{ steps.args.outputs.metrics }}' === 'true';
+            const metricsEnabled = process.env.INPUT_METRICS === 'true';
             const metricsNote = metricsEnabled ? ', metrics: `enabled`' : '';
-            const waitTimeVal = '${{ steps.args.outputs.wait-time }}';
+            const waitTimeVal = process.env.INPUT_WAIT_TIME;
             const waitTimeNote = waitTimeVal ? `, wait-time: \`${waitTimeVal}\`` : '';
-            const blockTimeVal = '${{ steps.args.outputs.block-time }}';
+            const blockTimeVal = process.env.INPUT_BLOCK_TIME;
             const blockTimeNote = blockTimeVal ? `, block-time: \`${blockTimeVal}\`` : '';
-            const baselineArgsVal = '${{ steps.args.outputs.baseline-args }}';
+            const baselineArgsVal = process.env.INPUT_BASELINE_ARGS;
             const baselineArgsNote = baselineArgsVal ? `, baseline-args: \`${baselineArgsVal}\`` : '';
-            const featureArgsVal = '${{ steps.args.outputs.feature-args }}';
+            const featureArgsVal = process.env.INPUT_FEATURE_ARGS;
             const featureArgsNote = featureArgsVal ? `, feature-args: \`${featureArgsVal}\`` : '';
             const blocksDesc = mode === 'call'
               ? `${blocks} corpus blocks, ${warmup}s warmup`
@@ -930,39 +963,74 @@ jobs:
       - name: Poll queue position
         if: steps.ack.outputs.comment-id && steps.ack.outputs.queue-position != '0'
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        env:
+          INPUT_COMMENT_ID: ${{ steps.ack.outputs.comment-id }}
+          INPUT_QUEUE_POSITION: ${{ steps.ack.outputs.queue-position }}
+          INPUT_ACTOR: ${{ steps.args.outputs.actor }}
+          INPUT_BAL: ${{ steps.args.outputs.bal }}
+          INPUT_BASELINE_ARGS: ${{ steps.args.outputs.baseline-args }}
+          INPUT_BASELINE_NAME: ${{ steps.args.outputs.baseline-name }}
+          INPUT_BIG_BLOCKS: ${{ steps.args.outputs.big-blocks }}
+          INPUT_BLOCK_TIME: ${{ steps.args.outputs.block-time }}
+          INPUT_BLOCKS: ${{ steps.args.outputs.blocks }}
+          INPUT_CLASS: ${{ steps.args.outputs.class }}
+          INPUT_CONCURRENCY: ${{ steps.args.outputs.concurrency }}
+          INPUT_CORES: ${{ steps.args.outputs.cores }}
+          INPUT_CORPUS: ${{ steps.args.outputs.corpus }}
+          INPUT_DURATION: ${{ steps.args.outputs.duration }}
+          INPUT_FEATURE_ARGS: ${{ steps.args.outputs.feature-args }}
+          INPUT_FEATURE_NAME: ${{ steps.args.outputs.feature-name }}
+          INPUT_METHODS: ${{ steps.args.outputs.methods }}
+          INPUT_METRICS: ${{ steps.args.outputs.metrics }}
+          INPUT_MODE: ${{ steps.args.outputs.mode }}
+          INPUT_NAMESPACE: ${{ steps.args.outputs.namespace }}
+          INPUT_OTLP: ${{ steps.args.outputs.otlp }}
+          INPUT_PASSES: ${{ steps.args.outputs.passes }}
+          INPUT_PR: ${{ steps.args.outputs.pr }}
+          INPUT_REORG: ${{ steps.args.outputs.reorg }}
+          INPUT_RPS: ${{ steps.args.outputs.rps }}
+          INPUT_RUN_ORDER: ${{ steps.args.outputs.run-order }}
+          INPUT_RUN_PAIRS: ${{ steps.args.outputs.run-pairs }}
+          INPUT_SAMPLY: ${{ steps.args.outputs.samply }}
+          INPUT_SLACK: ${{ steps.args.outputs.slack }}
+          INPUT_TOP_GAS: ${{ steps.args.outputs.top-gas }}
+          INPUT_TRACER: ${{ steps.args.outputs.tracer }}
+          INPUT_TRACING_CHROME: ${{ steps.args.outputs.tracing-chrome }}
+          INPUT_WAIT_TIME: ${{ steps.args.outputs.wait-time }}
+          INPUT_WARMUP: ${{ steps.args.outputs.warmup }}
         with:
           github-token: ${{ secrets.DEREK_PAT }}
           script: |
-            const pr = '${{ steps.args.outputs.pr }}';
-            const commentId = parseInt('${{ steps.ack.outputs.comment-id }}');
-            const actor = '${{ steps.args.outputs.actor }}';
-            const blocks = '${{ steps.args.outputs.blocks }}';
-            const warmup = '${{ steps.args.outputs.warmup }}';
-            const baseline = '${{ steps.args.outputs.baseline-name }}';
-            const feature = '${{ steps.args.outputs.feature-name }}';
-            const samply = '${{ steps.args.outputs.samply }}' === 'true';
-            const tracingChrome = '${{ steps.args.outputs.tracing-chrome }}' === 'true';
-            const slack = '${{ steps.args.outputs.slack }}' || 'always';
-            const bigBlocks = '${{ steps.args.outputs.big-blocks }}' === 'true';
-            const mode = '${{ steps.args.outputs.mode }}' || 'engine';
-            const reorg = '${{ steps.args.outputs.reorg }}';
-            const bal = '${{ steps.args.outputs.bal }}' || 'false';
+            const pr = process.env.INPUT_PR;
+            const commentId = parseInt(process.env.INPUT_COMMENT_ID);
+            const actor = process.env.INPUT_ACTOR;
+            const blocks = process.env.INPUT_BLOCKS;
+            const warmup = process.env.INPUT_WARMUP;
+            const baseline = process.env.INPUT_BASELINE_NAME;
+            const feature = process.env.INPUT_FEATURE_NAME;
+            const samply = process.env.INPUT_SAMPLY === 'true';
+            const tracingChrome = process.env.INPUT_TRACING_CHROME === 'true';
+            const slack = process.env.INPUT_SLACK || 'always';
+            const bigBlocks = process.env.INPUT_BIG_BLOCKS === 'true';
+            const mode = process.env.INPUT_MODE || 'engine';
+            const reorg = process.env.INPUT_REORG;
+            const bal = process.env.INPUT_BAL || 'false';
             const samplyNote = samply ? ', samply: `enabled`' : '';
             const tracingChromeNote = tracingChrome ? ', tracing-chrome: `enabled`' : '';
             const slackNote = slack !== 'always' ? `, slack: \`${slack}\`` : '';
             const reorgNote = reorg ? `, reorg: \`${reorg}\`` : '';
             const balNote = bal !== 'false' ? `, BAL: \`${bal}\`` : '';
             const modeNote = mode !== 'engine' ? `, mode: \`${mode}\`` : '';
-            const corpus = '${{ steps.args.outputs.corpus }}';
-            const callClass = '${{ steps.args.outputs.class }}';
-            const callMethods = '${{ steps.args.outputs.methods }}';
-            const callRps = '${{ steps.args.outputs.rps }}';
-            const callDuration = '${{ steps.args.outputs.duration }}';
-            const callPasses = '${{ steps.args.outputs.passes }}';
-            const callConcurrency = '${{ steps.args.outputs.concurrency }}';
-            const callTopGas = '${{ steps.args.outputs.top-gas }}';
-            const callNamespace = '${{ steps.args.outputs.namespace }}';
-            const callTracer = '${{ steps.args.outputs.tracer }}';
+            const corpus = process.env.INPUT_CORPUS;
+            const callClass = process.env.INPUT_CLASS;
+            const callMethods = process.env.INPUT_METHODS;
+            const callRps = process.env.INPUT_RPS;
+            const callDuration = process.env.INPUT_DURATION;
+            const callPasses = process.env.INPUT_PASSES;
+            const callConcurrency = process.env.INPUT_CONCURRENCY;
+            const callTopGas = process.env.INPUT_TOP_GAS;
+            const callNamespace = process.env.INPUT_NAMESPACE;
+            const callTracer = process.env.INPUT_TRACER;
             const callExtras = [
               callTopGas ? `top-gas: \`${callTopGas}\`` : '',
               callNamespace ? `namespace: \`${callNamespace}\`` : '',
@@ -971,22 +1039,22 @@ jobs:
             const callNote = mode === 'call'
               ? `, corpus: \`${corpus}\`, class: \`${callClass}\`, methods: \`${callMethods}\`, rps: \`${callRps}\`, duration: \`${callDuration}\`, passes: \`${callPasses}\`, concurrency: \`${callConcurrency}\`${callExtras}`
               : '';
-            const cores = '${{ steps.args.outputs.cores }}';
+            const cores = process.env.INPUT_CORES;
             const coresNote = cores && cores !== '0' ? `, cores: \`${cores}\`` : '';
-            const runPairs = '${{ steps.args.outputs.run-pairs }}' || '6';
-            const runOrder = '${{ steps.args.outputs.run-order }}';
+            const runPairs = process.env.INPUT_RUN_PAIRS || '6';
+            const runOrder = process.env.INPUT_RUN_ORDER;
             const runPairsNote = `, run-pairs: \`${runPairs}\`${runOrder ? ` (${runOrder})` : ''}`;
-            const otlpEnabled = '${{ steps.args.outputs.otlp }}' !== 'false';
+            const otlpEnabled = process.env.INPUT_OTLP !== 'false';
             const otlpNote = !otlpEnabled ? ', otlp: `disabled`' : '';
-            const metricsEnabled = '${{ steps.args.outputs.metrics }}' === 'true';
+            const metricsEnabled = process.env.INPUT_METRICS === 'true';
             const metricsNote = metricsEnabled ? ', metrics: `enabled`' : '';
-            const waitTimeVal = '${{ steps.args.outputs.wait-time }}';
+            const waitTimeVal = process.env.INPUT_WAIT_TIME;
             const waitTimeNote = waitTimeVal ? `, wait-time: \`${waitTimeVal}\`` : '';
-            const blockTimeVal = '${{ steps.args.outputs.block-time }}';
+            const blockTimeVal = process.env.INPUT_BLOCK_TIME;
             const blockTimeNote = blockTimeVal ? `, block-time: \`${blockTimeVal}\`` : '';
-            const baselineArgsVal = '${{ steps.args.outputs.baseline-args }}';
+            const baselineArgsVal = process.env.INPUT_BASELINE_ARGS;
             const baselineArgsNote = baselineArgsVal ? `, baseline-args: \`${baselineArgsVal}\`` : '';
-            const featureArgsVal = '${{ steps.args.outputs.feature-args }}';
+            const featureArgsVal = process.env.INPUT_FEATURE_ARGS;
             const featureArgsNote = featureArgsVal ? `, feature-args: \`${featureArgsVal}\`` : '';
             const blocksDesc = mode === 'call'
               ? `${blocks} corpus blocks, ${warmup}s warmup`
@@ -1015,7 +1083,7 @@ jobs:
               return { ahead: Math.max(0, totalAhead - numRunners + 1), numRunners };
             }
 
-            let lastPosition = parseInt('${{ steps.ack.outputs.queue-position }}');
+            let lastPosition = parseInt(process.env.INPUT_QUEUE_POSITION);
             const sleep = ms => new Promise(r => setTimeout(r, ms));
 
             while (true) {
@@ -1046,6 +1114,7 @@ jobs:
     name: bench-txgen
     runs-on: [self-hosted, Linux, X64, available]
     permissions:
+      id-token: write
       contents: read
       pull-requests: write
     timeout-minutes: 120
@@ -1101,17 +1170,21 @@ jobs:
       BENCH_OTLP_LOGS_ENDPOINT: ${{ needs.bench-ack.outputs.otlp != 'false' && secrets.BENCH_OTLP_LOGS_ENDPOINT || '' }}
       BENCH_VICTORIAMETRICS_URL: ${{ needs.bench-ack.outputs.metrics == 'true' && secrets.BENCH_VICTORIAMETRICS_URL || '' }}
     steps:
+      - name: Secure runner
+        uses: tempoxyz/gh-actions/actions/secure-runner@117919c943b804057be733b0c4034c5542e58959 # 2026-09-23T05-09-41Z-117919c9
       - name: Clean up previous bench-work
         run: sudo rm -rf "$BENCH_WORK_DIR" 2>/dev/null || true
 
       - name: Resolve checkout ref
         id: checkout-ref
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        env:
+          INPUT_REF: ${{ github.ref }}
         with:
           script: |
             if (!process.env.BENCH_PR) {
               core.setOutput('repository', '${{ github.repository }}');
-              core.setOutput('ref', '${{ github.ref }}');
+              core.setOutput('ref', process.env.INPUT_REF);
               return;
             }
             const sha = process.env.BENCH_PR_HEAD_SHA;
@@ -1134,6 +1207,9 @@ jobs:
 
       - name: Initialize run summary and update status
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        env:
+          INPUT_BASELINE_NAME: ${{ needs.bench-ack.outputs.baseline-name }}
+          INPUT_FEATURE_NAME: ${{ needs.bench-ack.outputs.feature-name }}
         with:
           github-token: ${{ secrets.DEREK_PAT }}
           script: |
@@ -1151,8 +1227,8 @@ jobs:
 
             const blocks = process.env.BENCH_BLOCKS;
             const warmup = process.env.BENCH_WARMUP_BLOCKS;
-            const baseline = '${{ needs.bench-ack.outputs.baseline-name }}';
-            const feature = '${{ needs.bench-ack.outputs.feature-name }}';
+            const baseline = process.env.INPUT_BASELINE_NAME;
+            const feature = process.env.INPUT_FEATURE_NAME;
             const samply = process.env.BENCH_SAMPLY === 'true';
             const tracingChrome = process.env.BENCH_TRACING_CHROME === 'true';
             const slack = process.env.BENCH_SLACK || 'always';
@@ -1226,11 +1302,13 @@ jobs:
               });
             }
 
-      - uses: rui314/setup-mold@7e4f20ad28a2e8ca6fd0892ccf72e2abb706b9c3 # v1
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: rui314/setup-mold@10ca16bf91dc22e05ebdc935cad9c75ea248f621 # v1
+      - uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de # v1
+        with:
+          toolchain: stable
       - uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
         continue-on-error: true
-      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+      - uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
 
       - name: Mask OTLP endpoints
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
@@ -1261,6 +1339,7 @@ jobs:
 
           # apt packages
           sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends gh
           sudo apt-get install -y --no-install-recommends \
             python3 make jq zstd curl dmsetup m4 \
             linux-tools-"$(uname -r)" || \
@@ -1309,7 +1388,7 @@ jobs:
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
           echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
           missing=()
-          for cmd in mc schelk cpupower taskset stdbuf python3 curl make uv pzstd jq llvm-config m4; do
+          for cmd in mc schelk cpupower taskset stdbuf python3 curl make uv pzstd jq llvm-config m4 gh; do
             command -v "$cmd" &>/dev/null || missing+=("$cmd")
           done
           if [ ${#missing[@]} -gt 0 ]; then
@@ -1322,42 +1401,49 @@ jobs:
       - name: Resolve PR head branch
         id: pr-info
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        env:
+          INPUT_REF_NAME: ${{ github.ref_name }}
         with:
           script: |
             if (process.env.BENCH_PR) {
-              const ref = process.env.BENCH_PR_HEAD_REF || '${{ github.ref_name }}';
+              const ref = process.env.BENCH_PR_HEAD_REF || process.env.INPUT_REF_NAME;
               const sha = process.env.BENCH_PR_HEAD_SHA || '${{ github.sha }}';
               core.setOutput('head-ref', ref);
               core.setOutput('head-sha', sha);
             } else {
-              core.setOutput('head-ref', '${{ github.ref_name }}');
+              core.setOutput('head-ref', process.env.INPUT_REF_NAME);
               core.setOutput('head-sha', '${{ github.sha }}');
             }
 
       - name: Resolve refs
         id: refs
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        env:
+          INPUT_BASELINE: ${{ needs.bench-ack.outputs.baseline }}
+          INPUT_FEATURE: ${{ needs.bench-ack.outputs.feature }}
+          INPUT_HEAD_REF: ${{ steps.pr-info.outputs.head-ref }}
+          INPUT_HEAD_SHA: ${{ steps.pr-info.outputs.head-sha }}
         with:
           script: |
-            const { execSync } = require('child_process');
-            const run = (cmd) => execSync(cmd, { encoding: 'utf8' }).trim();
+            const { execFileSync } = require('child_process');
+            const run = (...args) => execFileSync('git', args, { encoding: 'utf8' }).trim();
 
-            const baselineArg = '${{ needs.bench-ack.outputs.baseline }}';
-            const featureArg = '${{ needs.bench-ack.outputs.feature }}';
+            const baselineArg = process.env.INPUT_BASELINE;
+            const featureArg = process.env.INPUT_FEATURE;
 
             let baselineRef, baselineName, featureRef, featureName;
 
             if (baselineArg) {
-              try { run(`git fetch origin "${baselineArg}" --quiet`); } catch {}
+              try { run('fetch', '--quiet', '--', 'origin', baselineArg); } catch {}
               try {
-                baselineRef = run(`git rev-parse "${baselineArg}"`);
+                baselineRef = run('rev-parse', '--verify', '--end-of-options', baselineArg);
               } catch {
-                baselineRef = run(`git rev-parse "origin/${baselineArg}"`);
+                baselineRef = run('rev-parse', '--verify', '--end-of-options', `origin/${baselineArg}`);
               }
               baselineName = baselineArg;
             } else {
               try {
-                baselineRef = run('git merge-base HEAD origin/main');
+                baselineRef = run('merge-base', 'HEAD', 'origin/main');
               } catch {
                 baselineRef = '${{ github.sha }}';
               }
@@ -1365,16 +1451,16 @@ jobs:
             }
 
             if (featureArg) {
-              try { run(`git fetch origin "${featureArg}" --quiet`); } catch {}
+              try { run('fetch', '--quiet', '--', 'origin', featureArg); } catch {}
               try {
-                featureRef = run(`git rev-parse "${featureArg}"`);
+                featureRef = run('rev-parse', '--verify', '--end-of-options', featureArg);
               } catch {
-                featureRef = run(`git rev-parse "origin/${featureArg}"`);
+                featureRef = run('rev-parse', '--verify', '--end-of-options', `origin/${featureArg}`);
               }
               featureName = featureArg;
             } else {
-              featureRef = '${{ steps.pr-info.outputs.head-sha }}';
-              featureName = '${{ steps.pr-info.outputs.head-ref }}';
+              featureRef = process.env.INPUT_HEAD_SHA;
+              featureName = process.env.INPUT_HEAD_REF;
             }
 
             core.setOutput('baseline-ref', baselineRef);
@@ -1383,6 +1469,9 @@ jobs:
             core.setOutput('feature-name', featureName);
 
       - name: Prepare source dirs
+        env:
+          INPUT_BASELINE_REF: ${{ steps.refs.outputs.baseline-ref }}
+          INPUT_FEATURE_REF: ${{ steps.refs.outputs.feature-ref }}
         run: |
           prepare_source_dir() {
             local dir="$1"
@@ -1399,15 +1488,17 @@ jobs:
             git -C "$dir" checkout --force "$ref"
           }
 
-          BASELINE_REF="${{ steps.refs.outputs.baseline-ref }}"
+          BASELINE_REF="${INPUT_BASELINE_REF}"
           prepare_source_dir ../reth-baseline "$BASELINE_REF"
 
-          FEATURE_REF="${{ steps.refs.outputs.feature-ref }}"
+          FEATURE_REF="${INPUT_FEATURE_REF}"
           prepare_source_dir ../reth-feature "$FEATURE_REF"
 
       - name: Build binaries
         id: build
         env:
+          INPUT_BASELINE_REF: ${{ steps.refs.outputs.baseline-ref }}
+          INPUT_FEATURE_REF: ${{ steps.refs.outputs.feature-ref }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TXGEN_DEPLOY_KEY: ${{ secrets.TXGEN_DEPLOY_KEY }}
           TXGEN_TOKEN: ${{ secrets.TXGEN_TOKEN }}
@@ -1422,9 +1513,9 @@ jobs:
 
           .github/scripts/bench-txgen-install.sh
 
-          .github/scripts/bench-txgen-build.sh baseline "${BASELINE_DIR}" "${{ steps.refs.outputs.baseline-ref }}" &
+          .github/scripts/bench-txgen-build.sh baseline "${BASELINE_DIR}" "${INPUT_BASELINE_REF}" &
           PID_BASELINE=$!
-          .github/scripts/bench-txgen-build.sh feature "${FEATURE_DIR}" "${{ steps.refs.outputs.feature-ref }}" &
+          .github/scripts/bench-txgen-build.sh feature "${FEATURE_DIR}" "${INPUT_FEATURE_REF}" &
           PID_FEATURE=$!
 
           FAIL=0
@@ -1519,6 +1610,9 @@ jobs:
           mkdir -p "$BENCH_WORK_DIR"
 
       - name: Initialize benchmark metrics labels
+        env:
+          INPUT_BASELINE_NAME: ${{ needs.bench-ack.outputs.baseline-name }}
+          INPUT_FEATURE_NAME: ${{ needs.bench-ack.outputs.feature-name }}
         run: |
           if [ -n "${BENCH_VICTORIAMETRICS_URL:-}" ]; then
             echo "::add-mask::$BENCH_VICTORIAMETRICS_URL"
@@ -1540,8 +1634,8 @@ jobs:
           derek_cmd+=(
             blocks="$BENCH_BLOCKS"
             warmup="$BENCH_WARMUP_BLOCKS"
-            baseline="${{ needs.bench-ack.outputs.baseline-name }}"
-            feature="${{ needs.bench-ack.outputs.feature-name }}"
+            baseline="${INPUT_BASELINE_NAME}"
+            feature="${INPUT_FEATURE_NAME}"
             bal="$BENCH_BAL"
             cores="$BENCH_CORES"
             run-pairs="$BENCH_RUN_PAIRS"
@@ -1751,11 +1845,13 @@ jobs:
           )"
           LOGS_URL="$(printf '%s\n' "$OBSERVABILITY_URLS" | sed -n '1p')"
           TRACES_URL="$(printf '%s\n' "$OBSERVABILITY_URLS" | sed -n '2p')"
-          echo "grafana-url=${GRAFANA_URL}" >> "$GITHUB_OUTPUT"
-          echo "logs-url=${LOGS_URL}" >> "$GITHUB_OUTPUT"
-          echo "traces-url=${TRACES_URL}" >> "$GITHUB_OUTPUT"
-          echo "observability-from-ms=${FROM_MS}" >> "$GITHUB_OUTPUT"
-          echo "observability-to-ms=${TO_MS}" >> "$GITHUB_OUTPUT"
+          {
+            echo "grafana-url=${GRAFANA_URL}"
+            echo "logs-url=${LOGS_URL}"
+            echo "traces-url=${TRACES_URL}"
+            echo "observability-from-ms=${FROM_MS}"
+            echo "observability-to-ms=${TO_MS}"
+          } >> "$GITHUB_OUTPUT"
           echo "Grafana URL: ${GRAFANA_URL}"
           echo "Logs URL: ${LOGS_URL}"
           echo "Traces URL: ${TRACES_URL}"
@@ -1780,14 +1876,18 @@ jobs:
               fi
               printf '<details><summary><b>%s</b>: %d panic(s), %d error(s)</summary>\n\n' "$run_dir" "$panics" "$errors" >> "$ERRORS_FILE"
               if [ "$panics" -gt 0 ]; then
-                printf '**Panics:**\n```\n' >> "$ERRORS_FILE"
-                grep -E 'panicked at' "$LOG" | head -10 >> "$ERRORS_FILE"
-                printf '```\n' >> "$ERRORS_FILE"
+                {
+                  printf '**Panics:**\n```\n'
+                  grep -E 'panicked at' "$LOG" | head -10
+                  printf '```\n'
+                } >> "$ERRORS_FILE"
               fi
               if [ "$errors" -gt 0 ]; then
-                printf '**Errors (first 20):**\n```\n' >> "$ERRORS_FILE"
-                grep ' ERROR ' "$LOG" | head -20 >> "$ERRORS_FILE"
-                printf '```\n' >> "$ERRORS_FILE"
+                {
+                  printf '**Errors (first 20):**\n```\n'
+                  grep ' ERROR ' "$LOG" | head -20
+                  printf '```\n'
+                } >> "$ERRORS_FILE"
               fi
               printf '\n</details>\n\n' >> "$ERRORS_FILE"
             fi
@@ -1855,6 +1955,11 @@ jobs:
         id: results
         if: success()
         env:
+          INPUT_GRAFANA_URL: ${{ steps.metrics.outputs.grafana-url }}
+          INPUT_LOGS_URL: ${{ steps.metrics.outputs.logs-url }}
+          INPUT_OBSERVABILITY_FROM_MS: ${{ steps.metrics.outputs.observability-from-ms }}
+          INPUT_OBSERVABILITY_TO_MS: ${{ steps.metrics.outputs.observability-to-ms }}
+          INPUT_TRACES_URL: ${{ steps.metrics.outputs.traces-url }}
           BASELINE_REF: ${{ steps.refs.outputs.baseline-ref }}
           BASELINE_NAME: ${{ steps.refs.outputs.baseline-name }}
           FEATURE_NAME: ${{ steps.refs.outputs.feature-name }}
@@ -1897,11 +2002,11 @@ jobs:
             if [ -n "${BENCH_ID:-}" ]; then
               CALL_ARGS="$CALL_ARGS --benchmark-id $BENCH_ID"
             fi
-            LOGS_URL='${{ steps.metrics.outputs.logs-url }}'
+            LOGS_URL="${INPUT_LOGS_URL}"
             if [ -n "$LOGS_URL" ]; then
               CALL_ARGS="$CALL_ARGS --logs-url $LOGS_URL"
             fi
-            TRACES_URL='${{ steps.metrics.outputs.traces-url }}'
+            TRACES_URL="${INPUT_TRACES_URL}"
             if [ -n "$TRACES_URL" ]; then
               CALL_ARGS="$CALL_ARGS --traces-url $TRACES_URL"
             fi
@@ -1948,20 +2053,20 @@ jobs:
           if [ -n "${BENCH_ID:-}" ]; then
             SUMMARY_ARGS="$SUMMARY_ARGS --benchmark-id $BENCH_ID"
           fi
-          GRAFANA_URL='${{ steps.metrics.outputs.grafana-url }}'
+          GRAFANA_URL="${INPUT_GRAFANA_URL}"
           if [ "${BENCH_METRICS:-false}" = "true" ] && [ -n "$GRAFANA_URL" ]; then
             SUMMARY_ARGS="$SUMMARY_ARGS --grafana-url $GRAFANA_URL"
           fi
-          LOGS_URL='${{ steps.metrics.outputs.logs-url }}'
+          LOGS_URL="${INPUT_LOGS_URL}"
           if [ -n "$LOGS_URL" ]; then
             SUMMARY_ARGS="$SUMMARY_ARGS --logs-url $LOGS_URL"
           fi
-          TRACES_URL='${{ steps.metrics.outputs.traces-url }}'
+          TRACES_URL="${INPUT_TRACES_URL}"
           if [ -n "$TRACES_URL" ]; then
             SUMMARY_ARGS="$SUMMARY_ARGS --traces-url $TRACES_URL"
           fi
-          OBSERVABILITY_FROM_MS='${{ steps.metrics.outputs.observability-from-ms }}'
-          OBSERVABILITY_TO_MS='${{ steps.metrics.outputs.observability-to-ms }}'
+          OBSERVABILITY_FROM_MS="${INPUT_OBSERVABILITY_FROM_MS}"
+          OBSERVABILITY_TO_MS="${INPUT_OBSERVABILITY_TO_MS}"
           if [ -n "$OBSERVABILITY_FROM_MS" ] && [ -n "$OBSERVABILITY_TO_MS" ]; then
             SUMMARY_ARGS="$SUMMARY_ARGS --observability-from-ms $OBSERVABILITY_FROM_MS"
             SUMMARY_ARGS="$SUMMARY_ARGS --observability-to-ms $OBSERVABILITY_TO_MS"
@@ -1993,7 +2098,15 @@ jobs:
           # shellcheck disable=SC2086
           uv run --with matplotlib python3 .github/scripts/bench-reth-charts.py $CHART_ARGS
 
+      - name: Upload chart attachments
+        id: upload-charts
+        if: success() && env.BENCH_EXECUTION_MODE != 'call'
+        env:
+          GH_TOKEN: ${{ secrets.DEREK_PAT }}
+        run: bash .github/scripts/bench-upload-charts.sh "$GITHUB_REPOSITORY" "$BENCH_WORK_DIR/charts" > "$BENCH_WORK_DIR/charts.md"
+
       - name: Upload results
+        id: upload-results
         if: "!cancelled()"
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
@@ -2005,106 +2118,11 @@ jobs:
             !${{ env.BENCH_WORK_DIR }}/txgen-payloads/corpus.jsonl
             !${{ env.BENCH_WORK_DIR }}/txgen-payloads/corpus.jsonl.gz
 
-      - name: Push benchmark artifacts
-        id: push-charts
-        if: success()
-        env:
-          DEREK_TOKEN: ${{ secrets.DEREK_TOKEN }}
-          RUN_ID: ${{ github.run_id }}
-        run: |
-          PR_NUMBER="${BENCH_PR:-0}"
-          CHART_DIR="pr/${PR_NUMBER}/${RUN_ID}"
-          CHARTS_REPO="https://x-access-token:${DEREK_TOKEN}@github.com/decofe/reth-bench-charts.git"
-
-          TMP_DIR=""
-          prepare_artifacts() {
-            if [ -n "${TMP_DIR}" ]; then
-              rm -rf "${TMP_DIR}"
-            fi
-
-            TMP_DIR=$(mktemp -d)
-            if git clone --depth 1 --filter=blob:none --sparse "${CHARTS_REPO}" "${TMP_DIR}" 2>/dev/null; then
-              git -C "${TMP_DIR}" sparse-checkout set --no-cone "${CHART_DIR}"
-              true
-            else
-              git init "${TMP_DIR}"
-              git -C "${TMP_DIR}" remote add origin "${CHARTS_REPO}"
-            fi
-            .github/scripts/configure-git-token-user.sh "${TMP_DIR}" "${DEREK_TOKEN}"
-
-            mkdir -p "${TMP_DIR}/${CHART_DIR}"
-            if compgen -G "$BENCH_WORK_DIR/charts/*.png" > /dev/null; then
-              cp "$BENCH_WORK_DIR"/charts/*.png "${TMP_DIR}/${CHART_DIR}/"
-            fi
-            if [ "${BENCH_TRACING_CHROME:-false}" = "true" ]; then
-              TRACE_DIR="${CHART_DIR}/tracing-chrome"
-              mkdir -p "${TMP_DIR}/${TRACE_DIR}"
-              mapfile -t RUN_DIRS < <(find "$BENCH_WORK_DIR" -mindepth 1 -maxdepth 1 -type d \( -name 'baseline-*' -o -name 'feature-*' \) -printf '%f\n' | sort -V)
-              for run_dir in "${RUN_DIRS[@]}"; do
-                TRACE="$BENCH_WORK_DIR/$run_dir/tracing-chrome-profile.json"
-                if [ ! -f "$TRACE" ]; then continue; fi
-
-                TRACE_SIZE=$(du -h "$TRACE" | cut -f1)
-                echo "Adding $run_dir Chrome trace (${TRACE_SIZE}) to benchmark artifacts..."
-                gzip -c "$TRACE" > "${TMP_DIR}/${TRACE_DIR}/${run_dir}.json.gz"
-              done
-            fi
-            git -C "${TMP_DIR}" add "${CHART_DIR}"
-          }
-
-          prepare_artifacts
-          if git -C "${TMP_DIR}" diff --cached --quiet; then
-            echo "Artifacts for ${CHART_DIR} are already present, skipping push"
-            PUSH_SHA="$(git -C "${TMP_DIR}" rev-parse HEAD)"
-          else
-            for attempt in 1 2 3 4 5; do
-              git -C "${TMP_DIR}" commit -m "bench artifacts for PR #${PR_NUMBER} run ${RUN_ID}"
-              if git -C "${TMP_DIR}" push origin HEAD:main; then
-                break
-              fi
-              if [ "$attempt" -eq 5 ]; then
-                echo "::error::Failed to push benchmark artifacts after ${attempt} attempts"
-                rm -rf "${TMP_DIR}"
-                exit 1
-              fi
-              sleep "$attempt"
-              prepare_artifacts
-            done
-
-            PUSH_SHA="$(git -C "${TMP_DIR}" rev-parse HEAD)"
-          fi
-
-          if [ "${BENCH_TRACING_CHROME:-false}" = "true" ]; then
-            RAW_BASE="https://raw.githubusercontent.com/decofe/reth-bench-charts/${PUSH_SHA}/${CHART_DIR}/tracing-chrome"
-            mapfile -t RUN_DIRS < <(find "$BENCH_WORK_DIR" -mindepth 1 -maxdepth 1 -type d \( -name 'baseline-*' -o -name 'feature-*' \) -printf '%f\n' | sort -V)
-            for run_dir in "${RUN_DIRS[@]}"; do
-              if [ ! -f "${TMP_DIR}/${CHART_DIR}/tracing-chrome/${run_dir}.json.gz" ]; then continue; fi
-
-              RAW_URL="${RAW_BASE}/${run_dir}.json.gz"
-              PERFETTO_URL="$(python3 - "$RAW_URL" "${run_dir}.json.gz" <<'PY'
-          import sys
-          from urllib.parse import quote
-
-          raw_url, file_name = sys.argv[1:3]
-          print(
-              "https://ui.perfetto.dev/#!/?url="
-              + quote(raw_url, safe="")
-              + "&fileName="
-              + quote(file_name, safe="")
-          )
-          PY
-          )"
-              echo "$PERFETTO_URL" > "$BENCH_WORK_DIR/$run_dir/tracing-chrome-profile-url.txt"
-              echo "Perfetto URL for $run_dir: $PERFETTO_URL"
-            done
-          fi
-
-          echo "sha=${PUSH_SHA}" >> "$GITHUB_OUTPUT"
-          rm -rf "${TMP_DIR}"
-
       - name: Compare & comment
         if: success() && env.BENCH_COMMENT_ID
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        env:
+          BENCH_RESULTS_URL: ${{ steps.upload-results.outputs.artifact-url }}
         with:
           github-token: ${{ secrets.DEREK_PAT }}
           script: |
@@ -2117,25 +2135,8 @@ jobs:
               comment = '⚠️ Benchmark completed but failed to generate comparison.';
             }
 
-            const sha = '${{ steps.push-charts.outputs.sha }}';
-            const prNumber = process.env.BENCH_PR || '0';
-            const runId = '${{ github.run_id }}';
-
-            // Call mode does not generate charts, so never link them.
-            if (sha && process.env.BENCH_EXECUTION_MODE !== 'call') {
-              const baseUrl = `https://raw.githubusercontent.com/decofe/reth-bench-charts/${sha}/pr/${prNumber}/${runId}`;
-              const charts = [
-                { file: 'latency_throughput.png', label: 'Latency, Throughput & Diff' },
-                { file: 'wait_breakdown.png', label: 'Wait Time Breakdown' },
-                { file: 'gas_vs_latency.png', label: 'Gas vs Latency' },
-              ];
-              let chartMarkdown = '\n\n### Charts\n\n';
-              for (const chart of charts) {
-                chartMarkdown += `<details><summary>${chart.label}</summary>\n\n`;
-                chartMarkdown += `![${chart.label}](${baseUrl}/${chart.file})\n\n`;
-                chartMarkdown += `</details>\n\n`;
-              }
-              comment += chartMarkdown;
+            if (process.env.BENCH_EXECUTION_MODE !== 'call') {
+              comment += fs.readFileSync(process.env.BENCH_WORK_DIR + '/charts.md', 'utf8');
             }
 
             // Samply profile links (URLs point directly to Firefox Profiler)
@@ -2152,15 +2153,7 @@ jobs:
             }
 
             if (process.env.BENCH_TRACING_CHROME === 'true') {
-              const { loadTracingChromeUrls } = require('./.github/scripts/bench-utils');
-              const tracingChromeUrls = loadTracingChromeUrls(process.env.BENCH_WORK_DIR);
-              const links = [];
-              for (const [run, url] of Object.entries(tracingChromeUrls)) {
-                links.push(`- **${run}**: [Perfetto](${url})`);
-              }
-              if (links.length > 0) {
-                comment += `\n\n### Chrome Traces\n\n${links.join('\n')}\n`;
-              }
+              comment += `\n\n### Chrome Traces\n\n[Download bench-results](${process.env.BENCH_RESULTS_URL}), extract the archive, and open each run's \`tracing-chrome-profile.json\` in [Perfetto](https://ui.perfetto.dev/). GitHub sign-in is required; downloads are available until the artifact expires.\n`;
             }
 
             // Node errors (panics / ERROR logs)
@@ -2187,15 +2180,18 @@ jobs:
       - name: Write job summary
         if: success()
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        env:
+          INPUT_LOGS_URL: ${{ steps.metrics.outputs.logs-url }}
+          INPUT_TRACES_URL: ${{ steps.metrics.outputs.traces-url }}
+          BENCH_RESULTS_URL: ${{ steps.upload-results.outputs.artifact-url }}
         with:
           script: |
             const jobSummary = require('./.github/scripts/bench-job-summary.js');
             await jobSummary({
               core,
               context,
-              chartSha: '${{ steps.push-charts.outputs.sha }}',
-              logsUrl: '${{ steps.metrics.outputs.logs-url }}',
-              tracesUrl: '${{ steps.metrics.outputs.traces-url }}',
+              logsUrl: process.env.INPUT_LOGS_URL,
+              tracesUrl: process.env.INPUT_TRACES_URL,
               runId: '${{ github.run_id }}',
             });
 
@@ -2203,6 +2199,7 @@ jobs:
         if: success() && (env.BENCH_SLACK == 'always' || env.BENCH_SLACK == 'on-win')
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         env:
+          BENCH_RESULTS_URL: ${{ steps.upload-results.outputs.artifact-url }}
           SLACK_BENCH_BOT_TOKEN: ${{ secrets.SLACK_BENCH_BOT_TOKEN }}
           SLACK_BENCH_CHANNEL: ${{ secrets.SLACK_BENCH_CHANNEL }}
         with:
@@ -2283,10 +2280,10 @@ jobs:
         run: |
           # Restore frequency scaling to full range
           for f in /sys/devices/system/cpu/cpu*/cpufreq/scaling_min_freq; do
-            cat "$(dirname "$f")/cpuinfo_min_freq" | sudo tee "$f" > /dev/null 2>&1 || true
+            printf '%s\n' "$(< "$(dirname "$f")/cpuinfo_min_freq")" | sudo tee "$f" > /dev/null 2>&1 || true
           done
           for f in /sys/devices/system/cpu/cpu*/cpufreq/scaling_max_freq; do
-            cat "$(dirname "$f")/cpuinfo_max_freq" | sudo tee "$f" > /dev/null 2>&1 || true
+            printf '%s\n' "$(< "$(dirname "$f")/cpuinfo_max_freq")" | sudo tee "$f" > /dev/null 2>&1 || true
           done
           # Restore amd-pstate to active (EPP) mode with powersave governor
           echo active | sudo tee /sys/devices/system/cpu/amd_pstate/status 2>/dev/null || true

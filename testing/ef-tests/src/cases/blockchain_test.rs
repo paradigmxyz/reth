@@ -16,7 +16,7 @@ use reth_evm_ethereum::EthEvmConfig;
 use reth_primitives_traits::{ParallelBridgeBuffered, RecoveredBlock, SealedBlock};
 use reth_provider::{
     test_utils::create_test_provider_factory_with_chain_spec, BlockWriter, DatabaseProviderFactory,
-    ExecutionOutcome, HashedPostStateProvider, HistoryWriter, OriginalValuesKnown,
+    ExecutionOutcome, HashedPostStateProvider, HistoryWriter, OriginalValuesKnown, StateProvider,
     StateWriteConfig, StateWriter, StaticFileProviderFactory, StaticFileSegment, StaticFileWriter,
     StorageSettingsCache, TrieWriter,
 };
@@ -245,7 +245,7 @@ fn run_case(case: &BlockchainTest) -> Result<(), Error> {
 
         // Execute the block
         let state_provider = provider.latest();
-        let state_db = StateProviderDatabase(&state_provider);
+        let state_db = StateProviderDatabase((&state_provider).into_evm_state_provider());
         let executor = executor_provider.batch_executor(state_db);
 
         let output = executor
