@@ -792,9 +792,52 @@ latency, so the change was removed.
 A per-block comparison against the mean of the two retained-code RocksDB controls
 also puts the prewarming, direct-return, and cache-insertion trials within the
 variation between those controls (`paired-execution-vs-lean-controls.json`).
-A configuration-only trial now raises prewarming workers and their dispatcher
-to nice -5, keeping 128 prewarming threads and the same retained binary.
-The matched reference settings leave these threads at nice 0.
+Raising all 128 prewarming workers and their dispatcher from nice 0 to -5
+measured execution 81.80/98.69/193.69 ms, payload 155.23/224.87/349.32 ms,
+root wait 63.54/114.63/184.48 ms, and saves 48.72 s. Initial and later
+thread audits confirmed the priorities. All roots and restart pass; the
+configuration was rejected because execution remained within control variation.
+
+A second native hash-index experiment used three-byte account prefixes and
+34-byte storage prefixes (account hash plus two slot-key bytes), with total-order
+neighbor iteration. The earlier rejected hash-index experiment used two and
+33 bytes. Seven cursor/proof/snapshot tests, two migration tests, full workspace
+checks, 600 roots, and restart pass. Execution measured 81.78/100.03/205.63 ms,
+payload 171.02/258.54/368.04 ms, root wait 77.23/141.51/235.73 ms, and saves
+48.81 s. Account/storage proof CPU rose to 95.57/168.43 ms per block from
+93.18/162.52 in the first retained-code control. SST size increased by
+6,400,212,549 bytes (3.1%) over the retained layout. The candidate was removed:
+it increased storage and payload latency without improving execution.
+
+A CPU-placement trial put the engine on CPU 8, signature recovery on
+9–15/25–31, and all other node workers on the 96 MiB-cache cluster
+0–7/16–23. CPU 24 was unused by the node; worker priorities were unchanged.
+Both affinity audits and all roots/restart checks passed. Execution worsened to
+91.57/115.65/198.50 ms, payload to 161.21/227.50/316.17 ms, root wait was
+55.73/102.13/160.69 ms, and saves totaled 47.22 s. Engine CPU rose to
+91.60 ms/block and IPC fell to 1.115; the placement was discarded.
+
+Disabling the node's unconditional native statistics collection was verified
+in the runtime LOG (statistics pointer null). Node metrics and durability
+settings were unchanged. Full workspace checks, 600 roots, and restart pass.
+Execution measured 81.32/99.60/193.07 ms, payload 153.64/224.56/337.87 ms,
+root wait 61.60/113.13/183.30 ms, and saves 48.13 s. Account/storage proof CPU
+fell from 93.18/162.52 to 91.08/158.32 ms/block, approximately 2.5% combined,
+but the execution change stayed within control variation. Statistics remain
+enabled in the retained implementation.
+
+Native source inspection showed that total-order iteration disables hash-index
+seeks. A follow-up used prefix-limited iterators for neighbor queries, with a
+second total-order iterator as fallback across prefix boundaries. Expanded SST
+cursor/proof tests, workspace checks, 600 roots, and restart all pass.
+Account proof CPU fell to 86.40 ms/block, but storage proof CPU rose to
+170.35 ms/block. Execution was 82.19/99.65/191.87 ms, payload
+169.55/251.45/338.92 ms, root wait 74.29/133.54/230.95 ms, and saves 49.41 s.
+The fine-grained hash metadata retains the 6.4 GB SST increase, and the preceding
+hash-index run's peak anonymous memory was 29.92 GiB versus 23.45 GiB for the
+retained layout. This two-iterator version was discarded. Native LOG counters
+only contain a startup dump in these short runs and cannot establish runtime
+prefix-filter usage.
 
 ## Validation
 
