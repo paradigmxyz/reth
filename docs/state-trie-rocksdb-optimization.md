@@ -8,8 +8,8 @@ is retained there as `experiment-notebook.md`.
 
 ## Outcome so far
 
-The strict execution target remains open. The latest matched, uninstrumented
-600-block pair uses the retained implementation, eight global Rayon threads,
+The strict execution target remains open. The matched, uninstrumented
+600-block control pair uses the retained implementation, eight global Rayon threads,
 eight account/storage proof workers, proof chunks of 80, isolated background
 work, and higher BAL/recovery-worker priority. RocksDB execution p50 is
 **81.44 ms versus 77.88 ms for MDBX**, with cumulative saves of
@@ -916,6 +916,45 @@ Neither improved execution over the retained 32-worker controls; the temporary
 pool-size override was removed. The lower root wait at 16 workers improved
 payload latency while execution regressed, illustrating the competing work
 rather than an execution win.
+
+A result-delivery trial replaced only the BAL worker-result channel with Tokio's
+unbounded MPSC channel and blocking receive. Transaction dispatch, error ordering,
+and cancellation stayed unchanged. All 31 targeted tests, both backend builds,
+workspace checks, 600 roots per backend, and both persisted restarts passed.
+
+| Parked result channel | RocksDB | MDBX |
+| --- | ---: | ---: |
+| Execution p50/p90/p99, ms | 81.79 / 97.55 / 192.86 | 78.96 / 97.62 / 353.16 |
+| Payload p50/p90/p99, ms | 154.52 / 227.45 / 346.19 | 146.57 / 205.15 / 484.95 |
+| Root wait p50/p90/p99, ms | 63.24 / 113.52 / 184.41 | 55.42 / 96.55 / 190.99 |
+| Cumulative saves, s | 48.56 | 515.88 |
+| Engine CPU, ms/block | 72.36 | 74.27 |
+| Engine context switches/block | 3,466 | 3,030 |
+
+In the retained-code first control, engine CPU was 77.76/75.80 ms per block
+and context switches were 1,858/1,564 for RocksDB/MDBX. These counters use blocks
+201–600 and include engine work outside execution; latency percentiles use
+blocks 51–600. Lower engine CPU did not improve RocksDB execution p50, and
+MDBX's measured median was also higher. The smaller backend gap therefore
+does not establish an improvement. The channel change was rejected.
+
+Halving both proof pools to four workers used the retained binaries, unchanged
+cache sizes, and the same recovery/BAL counts, CPU placement, priorities, and
+persistence settings. Both runs passed 600 roots, persisted restart, and worker
+audits.
+
+| Four proof workers per pool | RocksDB | MDBX |
+| --- | ---: | ---: |
+| Execution p50/p90/p99, ms | 80.38 / 96.96 / 190.00 | 77.19 / 96.06 / 325.26 |
+| Payload p50/p90/p99, ms | 218.07 / 314.72 / 445.54 | 214.07 / 327.37 / 612.29 |
+| Root wait p50/p90/p99, ms | 125.54 / 201.48 / 321.19 | 121.02 / 213.61 / 447.72 |
+| Cumulative saves, s | 45.65 | 568.87 |
+
+Saves remain 92.0% lower, but the execution median gap is 3.19 ms and payload
+latency is substantially worse. RocksDB account/storage-proof CPU falls to
+80.13/139.70 ms per block, from 93.18/162.52 in the first eight-worker control.
+Engine CPU remains 76.59 ms per block. Four workers therefore do not establish
+execution parity or an overall validation improvement.
 
 ## Validation
 
