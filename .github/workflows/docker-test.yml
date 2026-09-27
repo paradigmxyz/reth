@@ -2,6 +2,9 @@ name: Build test Docker image
 
 on:
   workflow_call:
+    secrets:
+      DEPOT_TOKEN:
+        required: false
     inputs:
       hive_target:
         required: true
@@ -23,6 +26,8 @@ jobs:
       id-token: write
       contents: read
     steps:
+      - name: Secure runner
+        uses: tempoxyz/gh-actions/actions/secure-runner@117919c943b804057be733b0c4034c5542e58959 # 2026-09-23T05-09-41Z-117919c9
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
@@ -31,8 +36,10 @@ jobs:
       - name: Get git info
         id: git
         run: |
-          echo "sha=${{ github.sha }}" >> "$GITHUB_OUTPUT"
-          echo "describe=$(git describe --always --tags)" >> "$GITHUB_OUTPUT"
+          {
+            echo "sha=${{ github.sha }}"
+            echo "describe=$(git describe --always --tags)"
+          } >> "$GITHUB_OUTPUT"
 
       - name: Detect fork
         id: fork
@@ -47,10 +54,19 @@ jobs:
             echo "is_fork=false" >> "$GITHUB_OUTPUT"
           fi
 
+      - uses: tempoxyz/gh-actions/vendor/dtolnay/rust-toolchain@117919c943b804057be733b0c4034c5542e58959 # 2026-09-23T05-09-41Z-117919c9
+        if: steps.fork.outputs.is_fork == 'false'
+        with:
+          toolchain: "1.95.0"
+
+      - name: Check Reth dependencies through Aegis
+        if: steps.fork.outputs.is_fork == 'false'
+        run: cargo fetch --locked --manifest-path Cargo.toml
+
       # Depot build (upstream only)
       - name: Set up Depot CLI
         if: steps.fork.outputs.is_fork == 'false'
-        uses: depot/setup-action@15c09a5f77a0840ad4bce955686522a257853461 # v1.7.1
+        uses: depot/setup-action@91bc8495a33ebfc504ffc89e5674379ccf23c29c # v1.7.2
 
       - name: Build reth image (Depot)
         if: steps.fork.outputs.is_fork == 'false'

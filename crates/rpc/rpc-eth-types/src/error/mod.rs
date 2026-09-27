@@ -14,7 +14,7 @@ use reth_primitives_traits::transaction::{error::InvalidTransactionError, signed
 use reth_revm::db::bal::EvmDatabaseError;
 use reth_rpc_convert::{CallFeesError, EthTxEnvError, TransactionConversionError};
 use reth_rpc_server_types::result::{
-    block_id_to_str, internal_rpc_err, invalid_params_rpc_err, rpc_err, rpc_error_with_code,
+    internal_rpc_err, invalid_params_rpc_err, rpc_err, rpc_error_with_code,
 };
 use reth_transaction_pool::error::{
     Eip4844PoolTransactionError, Eip7702PoolTransactionError, InvalidPoolTransactionError,
@@ -337,16 +337,12 @@ impl From<EthApiError> for jsonrpsee_types::error::ErrorObject<'static> {
             EthApiError::HeaderNotFound(id) | EthApiError::ReceiptsNotFound(id) => {
                 rpc_error_with_code(
                     EthRpcErrorCode::ResourceNotFound.code(),
-                    format!("block not found: {}", block_id_to_str(id)),
+                    format!("block not found: {id}"),
                 )
             }
             EthApiError::HeaderRangeNotFound(start_id, end_id) => rpc_error_with_code(
                 EthRpcErrorCode::ResourceNotFound.code(),
-                format!(
-                    "{error}: start block: {}, end block: {}",
-                    block_id_to_str(start_id),
-                    block_id_to_str(end_id),
-                ),
+                format!("{error}: start block: {start_id}, end block: {end_id}"),
             ),
             err @ EthApiError::TransactionConfirmationTimeout { .. } => rpc_error_with_code(
                 EthRpcErrorCode::TransactionConfirmationTimeout.code(),
@@ -548,6 +544,11 @@ impl From<reth_errors::ProviderError> for EthApiError {
             ProviderError::SafeBlockNotFound => Self::HeaderNotFound(BlockId::safe()),
             ProviderError::BlockExpired { requested, earliest_available } => {
                 Self::PrunedHistoryUnavailable { requested, earliest_available }
+            }
+            ProviderError::InsufficientChangesets { requested, available }
+                if requested < *available.start() =>
+            {
+                Self::PrunedHistoryUnavailable { requested, earliest_available: *available.start() }
             }
             err => Self::Internal(err.into()),
         }
@@ -1257,6 +1258,28 @@ mod tests {
             err.message(),
             "pruned history unavailable: requested 5, earliest available 100"
         );
+    }
+
+    #[test]
+    fn pruned_state_errors_use_history_unavailable_code() {
+        use reth_errors::ProviderError;
+
+        let err = EthApiError::from(ProviderError::InsufficientChangesets {
+            requested: 1,
+            available: 43..=48,
+        })
+        .into_rpc_err();
+        assert_eq!(err.code(), 4444);
+        assert_eq!(err.message(), "pruned history unavailable: requested 1, earliest available 43");
+
+        for requested in [43, 49] {
+            let err = EthApiError::from(ProviderError::InsufficientChangesets {
+                requested,
+                available: 43..=48,
+            })
+            .into_rpc_err();
+            assert_eq!(err.code(), -32603);
+        }
     }
 
     #[test]

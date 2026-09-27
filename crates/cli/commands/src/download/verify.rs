@@ -8,12 +8,14 @@ use std::{io::Read, path::Path};
 pub(crate) struct OutputVerifier<'a> {
     /// Directory containing the output files declared by the manifest.
     target_dir: &'a Path,
+    /// Custom location of static file outputs.
+    static_files_dir: Option<&'a Path>,
 }
 
 impl<'a> OutputVerifier<'a> {
     /// Creates a verifier for one extraction target directory.
-    pub(crate) const fn new(target_dir: &'a Path) -> Self {
-        Self { target_dir }
+    pub(crate) const fn new(target_dir: &'a Path, static_files_dir: Option<&'a Path>) -> Self {
+        Self { target_dir, static_files_dir }
     }
 
     /// Returns `true` only when every declared output file exists and matches size and BLAKE3.
@@ -34,7 +36,7 @@ impl<'a> OutputVerifier<'a> {
         }
 
         for expected in output_files {
-            let output_path = self.target_dir.join(&expected.path);
+            let output_path = self.output_path(&expected.path);
             let meta = match fs::metadata(&output_path) {
                 Ok(meta) => meta,
                 Err(_) => return Ok(false),
@@ -55,8 +57,18 @@ impl<'a> OutputVerifier<'a> {
     /// Removes any declared output files so a fresh archive attempt can restart cleanly.
     pub(crate) fn cleanup(&self, output_files: &[OutputFileChecksum]) {
         for output in output_files {
-            let _ = fs::remove_file(self.target_dir.join(&output.path));
+            let _ = fs::remove_file(self.output_path(&output.path));
         }
+    }
+
+    /// Resolves archive paths consistently for verification and retry cleanup.
+    fn output_path(&self, path: &str) -> std::path::PathBuf {
+        if let Some(static_files_dir) = self.static_files_dir &&
+            let Some(relative_path) = super::extract::static_file_relative_path(Path::new(path))
+        {
+            return static_files_dir.join(relative_path)
+        }
+        self.target_dir.join(path)
     }
 
     /// Computes the hex-encoded BLAKE3 checksum for one plain output file.
@@ -80,5 +92,32 @@ impl<'a> OutputVerifier<'a> {
         }
 
         Ok(hasher.finalize().to_hex().to_string())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn custom_static_files_verification_and_cleanup() {
+        let datadir = tempfile::tempdir().unwrap();
+        let static_dir = tempfile::tempdir().unwrap();
+        let default_file = datadir.path().join("static_files/headers");
+        fs::create_dir_all(default_file.parent().unwrap()).unwrap();
+        fs::write(&default_file, b"headers").unwrap();
+        let outputs = [OutputFileChecksum {
+            path: "./static_files/headers".into(),
+            size: 7,
+            blake3: blake3::hash(b"headers").to_hex().to_string(),
+        }];
+        let verifier = OutputVerifier::new(datadir.path(), Some(static_dir.path()));
+        assert!(!verifier.verify(&outputs).unwrap());
+        let custom_file = static_dir.path().join("headers");
+        fs::write(&custom_file, b"headers").unwrap();
+        assert!(verifier.verify(&outputs).unwrap());
+        verifier.cleanup(&outputs);
+        assert!(!custom_file.exists());
+        assert_eq!(fs::read(default_file).unwrap(), b"headers");
     }
 }

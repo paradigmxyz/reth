@@ -2,7 +2,7 @@ use super::{
     fetch::{ArchiveFetcher, DownloadedArchive},
     progress::{
         ArchiveExtractionProgress, ArchiveExtractionProgressHandle, DownloadProgress,
-        DownloadRequestLimiter, ProgressReader, SharedProgress, SharedProgressReader,
+        DownloadRequestLimiter, ProgressReader, SharedProgressReader,
     },
     session::DownloadSession,
     MAX_DOWNLOAD_RETRIES, RETRY_BACKOFF_SECS,
@@ -67,6 +67,7 @@ fn extract_archive<R: Read>(
     total_size: u64,
     format: CompressionFormat,
     target_dir: &Path,
+    static_files_dir: Option<&Path>,
     cancel_token: CancellationToken,
 ) -> Result<()> {
     let progress_reader = ProgressReader::new(reader, total_size, cancel_token);
@@ -74,11 +75,11 @@ fn extract_archive<R: Read>(
     match format {
         CompressionFormat::Lz4 => {
             let decoder = Decoder::new(progress_reader)?;
-            Archive::new(decoder).unpack(target_dir)?;
+            unpack_archive(Archive::new(decoder), target_dir, static_files_dir, None)?;
         }
         CompressionFormat::Zstd => {
             let decoder = ZstdDecoder::new(progress_reader)?;
-            Archive::new(decoder).unpack(target_dir)?;
+            unpack_archive(Archive::new(decoder), target_dir, static_files_dir, None)?;
         }
     }
 
@@ -91,14 +92,25 @@ pub(crate) fn extract_archive_raw<R: Read>(
     reader: R,
     format: CompressionFormat,
     target_dir: &Path,
+    static_files_dir: Option<&Path>,
     progress: Option<&mut ArchiveExtractionProgress>,
 ) -> Result<()> {
     match format {
         CompressionFormat::Lz4 => {
-            unpack_archive(Archive::new(Decoder::new(reader)?), target_dir, progress)?;
+            unpack_archive(
+                Archive::new(Decoder::new(reader)?),
+                target_dir,
+                static_files_dir,
+                progress,
+            )?;
         }
         CompressionFormat::Zstd => {
-            unpack_archive(Archive::new(ZstdDecoder::new(reader)?), target_dir, progress)?;
+            unpack_archive(
+                Archive::new(ZstdDecoder::new(reader)?),
+                target_dir,
+                static_files_dir,
+                progress,
+            )?;
         }
     }
 
@@ -108,8 +120,13 @@ pub(crate) fn extract_archive_raw<R: Read>(
 fn unpack_archive<R: Read>(
     mut archive: Archive<R>,
     target_dir: &Path,
+    static_files_dir: Option<&Path>,
     mut progress: Option<&mut ArchiveExtractionProgress>,
 ) -> Result<()> {
+    if static_files_dir.is_none() && progress.is_none() {
+        archive.unpack(target_dir)?;
+        return Ok(())
+    }
     let entries = archive.entries().wrap_err_with(|| {
         format!("failed to read archive entries for `{}`", target_dir.display())
     })?;
@@ -118,29 +135,105 @@ fn unpack_archive<R: Read>(
         let mut entry = entry.wrap_err_with(|| {
             format!("failed to read archive entry for `{}`", target_dir.display())
         })?;
-        extract_entry_with_progress(&mut entry, target_dir, progress.as_deref_mut())?;
+        extract_entry_with_progress(
+            &mut entry,
+            target_dir,
+            static_files_dir,
+            progress.as_deref_mut(),
+        )?;
     }
 
     Ok(())
 }
 
+/// Returns the path within the static files directory, accepting tar's optional `./` prefix.
+pub(crate) fn static_file_relative_path(path: &Path) -> Option<&Path> {
+    path.strip_prefix(".").unwrap_or(path).strip_prefix("static_files").ok()
+}
+
+/// Extracts static files beneath their configured root without allowing archive paths or links
+/// to escape it.
+fn unpack_static_file<R: Read>(
+    entry: &mut tar::Entry<'_, R>,
+    static_files_dir: &Path,
+    relative_path: &Path,
+) -> Result<()> {
+    eyre::ensure!(
+        relative_path
+            .components()
+            .all(|part| matches!(part, Component::Normal(_) | Component::CurDir)),
+        "Invalid static file archive path: {}",
+        relative_path.display()
+    );
+    let entry_type = entry.header().entry_type();
+    eyre::ensure!(
+        entry_type.is_file() || entry_type.is_dir(),
+        "Unsupported static file archive entry"
+    );
+    fs::create_dir_all(static_files_dir)?;
+    let root = static_files_dir.to_path_buf();
+    let dest = root.join(relative_path);
+    // Check each existing ancestor before creating directories or replacing an output.
+    let mut current = root.clone();
+    for part in relative_path.components() {
+        current.push(part);
+        if let Ok(metadata) = std::fs::symlink_metadata(&current) {
+            eyre::ensure!(
+                !metadata.file_type().is_symlink(),
+                "Static file archive path contains a symlink"
+            );
+        }
+    }
+    if relative_path.as_os_str().is_empty() {
+        return Ok(())
+    }
+    if let Some(parent) = dest.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    entry.unpack(dest)?;
+    Ok(())
+}
+
+fn unpack_entry<R: Read>(
+    entry: &mut tar::Entry<'_, R>,
+    target_dir: &Path,
+    static_files_dir: Option<&Path>,
+) -> Result<()> {
+    // A non-static entry could otherwise plant a symlink at a nested custom root before
+    // extraction or retry cleanup uses it.
+    eyre::ensure!(
+        static_files_dir.is_none() || !entry.header().entry_type().is_symlink(),
+        "Archive symlinks are unsupported with a custom static files directory"
+    );
+    let path = entry.path()?.into_owned();
+    if let Some(static_files_dir) = static_files_dir &&
+        let Some(relative_path) = static_file_relative_path(&path)
+    {
+        unpack_static_file(entry, static_files_dir, relative_path)
+    } else {
+        entry.unpack_in(target_dir)?;
+        Ok(())
+    }
+}
+
 fn extract_entry_with_progress<R: Read>(
     entry: &mut tar::Entry<'_, R>,
     target_dir: &Path,
+    static_files_dir: Option<&Path>,
     progress: Option<&mut ArchiveExtractionProgress>,
 ) -> Result<()> {
     let size = entry.header().entry_size().unwrap_or(0);
     let entry_type = entry.header().entry_type();
 
     if !entry_type.is_file() || size == 0 {
-        entry.unpack_in(target_dir).wrap_err_with(|| {
+        unpack_entry(entry, target_dir, static_files_dir).wrap_err_with(|| {
             format!("failed to extract archive into `{}`", target_dir.display())
         })?;
         return Ok(())
     }
 
     if size < STREAMING_EXTRACTION_PROGRESS_MIN_FILE_SIZE {
-        entry.unpack_in(target_dir).wrap_err_with(|| {
+        unpack_entry(entry, target_dir, static_files_dir).wrap_err_with(|| {
             format!("failed to extract archive into `{}`", target_dir.display())
         })?;
         if let Some(progress) = progress {
@@ -150,14 +243,14 @@ fn extract_entry_with_progress<R: Read>(
     }
 
     let Some(progress_handle) = progress.as_ref().and_then(|progress| progress.handle()) else {
-        entry.unpack_in(target_dir).wrap_err_with(|| {
+        unpack_entry(entry, target_dir, static_files_dir).wrap_err_with(|| {
             format!("failed to extract archive into `{}`", target_dir.display())
         })?;
         return Ok(())
     };
 
-    let Some(entry_path) = entry_destination_path(entry, target_dir)? else {
-        entry.unpack_in(target_dir).wrap_err_with(|| {
+    let Some(entry_path) = entry_destination_path(entry, target_dir, static_files_dir)? else {
+        unpack_entry(entry, target_dir, static_files_dir).wrap_err_with(|| {
             format!("failed to extract archive into `{}`", target_dir.display())
         })?;
         return Ok(())
@@ -165,8 +258,7 @@ fn extract_entry_with_progress<R: Read>(
 
     let stop = Arc::new(AtomicBool::new(false));
     let monitor = spawn_extraction_progress_monitor(entry_path, progress_handle, Arc::clone(&stop));
-    let unpack_result = entry
-        .unpack_in(target_dir)
+    let unpack_result = unpack_entry(entry, target_dir, static_files_dir)
         .wrap_err_with(|| format!("failed to extract archive into `{}`", target_dir.display()));
     stop.store(true, Ordering::Relaxed);
 
@@ -180,9 +272,18 @@ fn extract_entry_with_progress<R: Read>(
 fn entry_destination_path<R: Read>(
     entry: &tar::Entry<'_, R>,
     target_dir: &Path,
+    static_files_dir: Option<&Path>,
 ) -> Result<Option<PathBuf>> {
     let mut file_dst = target_dir.to_path_buf();
     let path = entry.path().wrap_err("invalid path in archive entry")?;
+    let path = if let Some(static_files_dir) = static_files_dir &&
+        let Some(relative_path) = static_file_relative_path(&path)
+    {
+        file_dst = static_files_dir.to_path_buf();
+        relative_path
+    } else {
+        path.as_ref()
+    };
 
     for part in path.components() {
         match part {
@@ -231,7 +332,12 @@ fn record_extracted_file_bytes(
 }
 
 /// Extracts a snapshot from a local file.
-fn extract_from_file(path: &Path, format: CompressionFormat, target_dir: &Path) -> Result<()> {
+fn extract_from_file(
+    path: &Path,
+    format: CompressionFormat,
+    target_dir: &Path,
+    static_files_dir: Option<&Path>,
+) -> Result<()> {
     let file = std::fs::File::open(path)?;
     let total_size = file.metadata()?.len();
     info!(target: "reth::cli",
@@ -240,7 +346,14 @@ fn extract_from_file(path: &Path, format: CompressionFormat, target_dir: &Path) 
         "Extracting local archive"
     );
     let start = Instant::now();
-    extract_archive(file, total_size, format, target_dir, CancellationToken::new())?;
+    extract_archive(
+        file,
+        total_size,
+        format,
+        target_dir,
+        static_files_dir,
+        CancellationToken::new(),
+    )?;
     info!(target: "reth::cli",
         file = %path.display(),
         elapsed = %DownloadProgress::format_duration(start.elapsed()),
@@ -256,11 +369,12 @@ pub(crate) fn streaming_download_and_extract(
     url: &str,
     format: CompressionFormat,
     target_dir: &Path,
+    static_files_dir: Option<&Path>,
     session: &DownloadSession,
 ) -> Result<()> {
     if let Some(path) = archive_file_url_path(url)? {
         let size = path.metadata()?.len();
-        extract_from_file(&path, format, target_dir)?;
+        extract_from_file(&path, format, target_dir, static_files_dir)?;
         session.record_archive_output_complete(size);
         return Ok(())
     }
@@ -318,7 +432,7 @@ pub(crate) fn streaming_download_and_extract(
 
         let result = if let Some(progress) = shared {
             let reader = SharedProgressReader { inner: response, progress: Arc::clone(progress) };
-            extract_archive_raw(reader, format, target_dir, None)
+            extract_archive_raw(reader, format, target_dir, static_files_dir, None)
         } else {
             let total_size = response.content_length().unwrap_or(0);
             extract_archive(
@@ -326,6 +440,7 @@ pub(crate) fn streaming_download_and_extract(
                 total_size,
                 format,
                 target_dir,
+                static_files_dir,
                 session.cancel_token().clone(),
             )
         };
@@ -375,6 +490,7 @@ fn download_and_extract(
     url: &str,
     format: CompressionFormat,
     target_dir: &Path,
+    static_files_dir: Option<&Path>,
     session: DownloadSession,
 ) -> Result<()> {
     let quiet = session.progress().is_some();
@@ -394,9 +510,16 @@ fn download_and_extract(
     let file = fs::open(&downloaded_path)?;
 
     if quiet {
-        extract_archive_raw(file, format, target_dir, None)?;
+        extract_archive_raw(file, format, target_dir, static_files_dir, None)?;
     } else {
-        extract_archive(file, total_size, format, target_dir, session.cancel_token().clone())?;
+        extract_archive(
+            file,
+            total_size,
+            format,
+            target_dir,
+            static_files_dir,
+            session.cancel_token().clone(),
+        )?;
         info!(target: "reth::cli",
             file = %file_name,
             "Extraction complete"
@@ -417,7 +540,7 @@ fn download_and_extract(
 fn blocking_download_and_extract(
     url: &str,
     target_dir: &Path,
-    shared: Option<Arc<SharedProgress>>,
+    static_files_dir: Option<&Path>,
     resumable: bool,
     request_limiter: Option<Arc<DownloadRequestLimiter>>,
     cancel_token: CancellationToken,
@@ -428,12 +551,12 @@ fn blocking_download_and_extract(
     if let Ok(parsed_url) = Url::parse(url) &&
         parsed_url.scheme() == "file"
     {
-        let session = DownloadSession::new(shared, request_limiter, cancel_token)
+        let session = DownloadSession::new(None, request_limiter, cancel_token)
             .with_retry_backoff(retry_backoff);
         let file_path = parsed_url
             .to_file_path()
             .map_err(|_| eyre::eyre!("Invalid file:// URL path: {}", url))?;
-        let result = extract_from_file(&file_path, format, target_dir);
+        let result = extract_from_file(&file_path, format, target_dir, static_files_dir);
         if result.is_ok() {
             session.record_archive_output_complete(file_path.metadata()?.len());
         }
@@ -443,18 +566,20 @@ fn blocking_download_and_extract(
             url,
             format,
             target_dir,
-            DownloadSession::new(shared, Some(request_limiter), cancel_token)
+            static_files_dir,
+            DownloadSession::new(None, Some(request_limiter), cancel_token)
                 .with_retry_backoff(retry_backoff),
         )
     } else if resumable {
         let session =
-            DownloadSession::new(shared, Some(DownloadRequestLimiter::new(1)), cancel_token)
+            DownloadSession::new(None, Some(DownloadRequestLimiter::new(1)), cancel_token)
                 .with_retry_backoff(retry_backoff);
-        download_and_extract(url, format, target_dir, session)
+        download_and_extract(url, format, target_dir, static_files_dir, session)
     } else {
         let session =
-            DownloadSession::new(shared, None, cancel_token).with_retry_backoff(retry_backoff);
-        let result = streaming_download_and_extract(url, format, target_dir, &session);
+            DownloadSession::new(None, None, cancel_token).with_retry_backoff(retry_backoff);
+        let result =
+            streaming_download_and_extract(url, format, target_dir, static_files_dir, &session);
         if result.is_ok() {
             session.record_archive_output_complete(0);
         }
@@ -464,25 +589,25 @@ fn blocking_download_and_extract(
 
 /// Downloads and extracts a snapshot archive asynchronously.
 ///
-/// When `shared` is provided, download progress is reported to the shared
-/// counter for aggregated display. Otherwise uses a local progress bar.
+/// Download progress is reported using a local progress bar.
 /// When `resumable` is true, uses two-phase download with `.part` files.
 pub(crate) async fn stream_and_extract(
     url: &str,
     target_dir: &Path,
-    shared: Option<Arc<SharedProgress>>,
+    static_files_dir: Option<&Path>,
     resumable: bool,
     request_limiter: Option<Arc<DownloadRequestLimiter>>,
     cancel_token: CancellationToken,
     retry_backoff: Option<Duration>,
 ) -> Result<()> {
     let target_dir = target_dir.to_path_buf();
+    let static_files_dir = static_files_dir.map(Path::to_path_buf);
     let url = url.to_string();
     task::spawn_blocking(move || {
         blocking_download_and_extract(
             &url,
             &target_dir,
-            shared,
+            static_files_dir.as_deref(),
             resumable,
             request_limiter,
             cancel_token,
@@ -497,6 +622,83 @@ pub(crate) async fn stream_and_extract(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn custom_static_root_cannot_be_redirected_by_archive_symlinks() {
+        for custom_path in ["custom", "custom/nested"] {
+            let target = tempfile::tempdir().unwrap();
+            let outside = tempfile::tempdir().unwrap();
+            fs::create_dir_all(outside.path().join("nested")).unwrap();
+            for path in ["headers", "nested/headers"] {
+                fs::write(outside.path().join(path), b"keep").unwrap();
+            }
+            let custom = target.path().join(custom_path);
+            let mut archive = tar::Builder::new(Vec::new());
+            let mut link = tar::Header::new_gnu();
+            link.set_entry_type(tar::EntryType::Symlink);
+            link.set_size(0);
+            link.set_mode(0o777);
+            archive.append_link(&mut link, "custom", outside.path()).unwrap();
+            let mut file = tar::Header::new_gnu();
+            file.set_size(4);
+            file.set_mode(0o644);
+            file.set_cksum();
+            archive.append_data(&mut file, "static_files/headers", b"data".as_slice()).unwrap();
+            let tar = archive.into_inner().unwrap();
+            let err =
+                unpack_archive(Archive::new(tar.as_slice()), target.path(), Some(&custom), None)
+                    .unwrap_err();
+            assert!(format!("{err:#}").contains("Archive symlinks are unsupported"));
+            let outputs = [super::super::manifest::OutputFileChecksum {
+                path: "static_files/headers".into(),
+                size: 4,
+                blake3: String::new(),
+            }];
+            super::super::verify::OutputVerifier::new(target.path(), Some(&custom))
+                .cleanup(&outputs);
+            for path in ["headers", "nested/headers"] {
+                assert_eq!(fs::read(outside.path().join(path)).unwrap(), b"keep");
+            }
+        }
+    }
+
+    #[test]
+    fn remap_static_files_in_both_compression_formats() {
+        let mut archive = tar::Builder::new(Vec::new());
+        let mut directory = tar::Header::new_gnu();
+        directory.set_entry_type(tar::EntryType::Directory);
+        directory.set_size(0);
+        directory.set_mode(0o755);
+        directory.set_cksum();
+        archive.append_data(&mut directory, "./static_files/", std::io::empty()).unwrap();
+        for path in ["./static_files/nested/headers", "db/data"] {
+            let mut header = tar::Header::new_gnu();
+            header.set_size(4);
+            header.set_mode(0o644);
+            header.set_cksum();
+            archive.append_data(&mut header, path, b"data".as_slice()).unwrap();
+        }
+        let tar = archive.into_inner().unwrap();
+        for format in [CompressionFormat::Lz4, CompressionFormat::Zstd] {
+            let bytes = match format {
+                CompressionFormat::Lz4 => {
+                    let mut encoder = lz4::EncoderBuilder::new().build(Vec::new()).unwrap();
+                    std::io::copy(&mut tar.as_slice(), &mut encoder).unwrap();
+                    let (bytes, result) = encoder.finish();
+                    result.unwrap();
+                    bytes
+                }
+                CompressionFormat::Zstd => zstd::encode_all(tar.as_slice(), 0).unwrap(),
+            };
+            let target = tempfile::tempdir().unwrap();
+            let custom = tempfile::tempdir().unwrap();
+            extract_archive_raw(bytes.as_slice(), format, target.path(), Some(custom.path()), None)
+                .unwrap();
+            assert_eq!(fs::read(custom.path().join("nested/headers")).unwrap(), b"data");
+            assert_eq!(fs::read(target.path().join("db/data")).unwrap(), b"data");
+            assert!(!target.path().join("static_files").exists());
+        }
+    }
 
     #[test]
     fn test_compression_format_detection() {
