@@ -1065,3 +1065,26 @@ read bytes were 43.540 GB versus 46.005 GB. BAL worker CPU increased from
 700.6 to 1806.4 ms/block and prewarm CPU from 157.1 to 1646.8 ms/block. This is
 consistent with repeated reads and processing of data already in the OS cache;
 it is not evidence of a comparably large increase in physical disk I/O.
+
+### Batching sixteen BAL results (2026-09-27)
+
+A diagnostic candidate batched worker results in groups of sixteen, flushing
+errors immediately and partial batches when workers finished. All 56 targeted
+tests, both profiling builds, workspace Clippy, formatting, both 600-payload
+runs, persistence, restart 601 and recovery passed.
+
+| Metric | RocksDB | MDBX |
+| --- | ---: | ---: |
+| Execution p50 / p90 / p99 (ms) | 84.206 / 102.135 / 190.823 | 80.861 / 102.530 / 345.865 |
+| Payload p50 (ms) | 153.116 | 137.939 |
+| Root wait p50 (ms) | 57.495 | 46.484 |
+| Cumulative saves including drain (s) | 48.425 | 551.705 |
+
+RocksDB engine CPU fell from 77.673 to 67.853 ms/block in the 400-block counter
+window, and context switches fell from 1841.445 to 448.190 per block. Execution
+p50 nevertheless increased by 4.745 ms; MDBX p50 also increased by 4.482 ms.
+These counter averages and latency percentiles use different windows and cannot
+be subtracted to derive an exact wait-time increase. Holding ready results until
+a batch fills is a plausible source of the added latency. This candidate was
+rejected; original sources were restored and artifacts retained as globalbatchout
+backend runs with early0-proof64-chunk80-600.
