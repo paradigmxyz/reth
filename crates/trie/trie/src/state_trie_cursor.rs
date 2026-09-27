@@ -89,6 +89,9 @@ impl<C: StateTrieCursor> StateTrieCursor for InMemoryStateTrieCursor<'_, C> {
         let index = self.nodes.partition_point(|(p, _)| *p < path);
         let overlay =
             self.nodes[index..].iter().find_map(|(p, n)| n.as_ref().map(|n| (*p, n.clone())));
+        if overlay.as_ref().is_some_and(|(p, _)| *p == path) {
+            return Ok(overlay)
+        }
         let mut db = self.cursor.seek(path)?;
         while let Some((p, _)) = db.as_ref() {
             if overlay.as_ref().is_some_and(|(o, _)| o <= p) {
@@ -143,3 +146,43 @@ impl<C: StateTrieStorageCursor> StateTrieStorageCursor for InMemoryStateTrieCurs
 
 /// Result of locating a complete trie node and its path.
 pub type StateTrieCursorResult<V> = Result<Option<(Nibbles, StateTrieNode<V>)>, DatabaseError>;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    struct UnavailableCursor;
+
+    impl StateTrieCursor for UnavailableCursor {
+        type Value = U256;
+
+        fn get(&mut self, _: Nibbles) -> Result<Option<StateTrieNode<U256>>, DatabaseError> {
+            Err(DatabaseError::Other("database unavailable".into()))
+        }
+
+        fn seek(&mut self, _: Nibbles) -> StateTrieCursorResult<U256> {
+            Err(DatabaseError::Other("database unavailable".into()))
+        }
+
+        fn before(&mut self, _: Option<Nibbles>) -> StateTrieCursorResult<U256> {
+            Err(DatabaseError::Other("database unavailable".into()))
+        }
+    }
+
+    #[test]
+    fn exact_overlay_seek_needs_no_database_read() {
+        let path = Nibbles::unpack(B256::repeat_byte(1));
+        let node = StateTrieNode::Leaf { short_key_len: 64, value: U256::from(1) };
+        let nodes = vec![(path, Some(node.clone()))];
+        let mut cursor = InMemoryStateTrieCursor::new(UnavailableCursor, &nodes);
+        assert_eq!(cursor.seek(path).unwrap(), Some((path, node)));
+        // A neighboring overlay entry cannot rule out a closer database node.
+        assert!(cursor.seek(Nibbles::unpack(B256::ZERO)).is_err());
+        assert!(cursor.seek(Nibbles::unpack(B256::repeat_byte(2))).is_err());
+
+        let nodes = vec![(path, None)];
+        let mut cursor = InMemoryStateTrieCursor::new(UnavailableCursor, &nodes);
+        // A tombstone still requires finding the next visible database node.
+        assert!(cursor.seek(path).is_err());
+    }
+}
