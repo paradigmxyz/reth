@@ -131,6 +131,15 @@ fn parser_rejects_invalid_syntax() {
 }
 
 #[test]
+fn parser_bounds_path_bytes_before_allocating_tokens() {
+    let accepted = format!(".{}", "a".repeat(255));
+    let too_long = format!(".{}", "a".repeat(256));
+
+    assert!(parse_path(&accepted).is_ok());
+    assert_eq!(parse_path(&too_long), Err(ParseError::PathTooLong));
+}
+
+#[test]
 fn resolver_accepts_only_the_v0_receipt_log_address_shape() {
     let resolved = resolve(&parse_path("[5].logs[12].address").unwrap());
     assert_eq!(resolved, Ok(ResolvedPath::ReceiptLogAddress { receipt_index: 5, log_index: 12 }));

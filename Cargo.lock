@@ -10036,6 +10036,7 @@ version = "2.5.2"
 dependencies = [
  "alloy-consensus",
  "alloy-primitives",
+ "alloy-rpc-types-eth",
  "jsonrpsee",
  "reth-ethereum-primitives",
  "reth-primitives-traits",
