@@ -8,11 +8,17 @@ is retained there as `experiment-notebook.md`.
 
 ## Outcome so far
 
-The current 8 GiB RocksDB configuration reduces cumulative `save_blocks` time
-by 90.9% and sustains 5.22 Ggas/s versus 1.18 Ggas/s for the fresh MDBX control.
-Execution p50 remains 6.31 ms slower: 104.88 versus 98.57 ms. It beats the earlier
-unpinned MDBX reference (108.29 ms), but that does not establish parity under
-matched CPU settings. The strict execution target remains open.
+The strict execution target remains open. The latest matched, uninstrumented
+runs use proof chunks of 80 and the same retained code and CPU settings.
+RocksDB execution p50 is 95.36 ms versus 87.78 ms for MDBX, with cumulative
+saves of 51.51 s versus 542.59 s (90.5% lower). Payload p50 is 117.26 versus
+109.87 ms. RocksDB has lower execution and payload p99 in this pair.
+
+A prior RocksDB trial with proof chunks of 320 reached execution p50 of
+93.37 ms and saves of 49.58 s, but increased payload p50 to 123.82 ms.
+The lower execution time shifted more waiting into state-root validation.
+The earlier committed baseline measured 104.88 ms against 98.57 ms for MDBX;
+that older control is not the current parity target.
 
 ## Retained changes
 
@@ -35,6 +41,11 @@ matched CPU settings. The strict execution target remains open.
   storage entries, and 2,097,152 accounts. In the matched cache experiment,
   account misses fell from 79,124 to 46,307 and code misses from 332,905 to
   155,182, with storage misses essentially unchanged.
+- Recover signatures in exponentially growing ranges to feed early transactions
+  to the ordered BAL commit loop sooner. Both backends benefit from this change.
+- Return exact state-trie overlay hits before querying the underlying database.
+  Neighboring entries and tombstones still require database lookup. This removes
+  redundant reads but did not materially improve the measured RocksDB workload.
 - Honor existing runtime worker-count CLI settings in `reth-bb`, and allow
   shutdown enough time to flush the large-block workload.
 
@@ -302,7 +313,217 @@ Choosing the shorter of two prefetch queues passed 39 BAL/prewarm tests and
 Payload was 120.65/153.02/234.15 ms and saves totaled 49.69 s. The scheduling
 change was discarded; round-robin prefetch dispatch remains.
 
+Changing the shared BAL execution/state-preparation pool from 32 workers to
+16 regressed execution to 108.86/129.01/229.61 ms, with saves of 49.50 s.
+At 64 workers, execution was 113.46/146.91/219.11 ms and saves 50.37 s.
+Both passed all roots and restart. The 64-worker run additionally sampled the
+engine's SMT sibling for 20 seconds; it is diagnostic, not a replacement for
+the primary comparison. The temporary worker-count hook was removed.
+
+A subsequent unchanged-binary test disabled only CPU 16's POLL idle state.
+Counters confirmed no POLL entries during the test. Execution nevertheless
+measured 105.62/128.44/224.97 ms, payload 120.57/153.45/242.98 ms, and saves
+50.09 s. All roots and restart passed. The original idle-state setting was
+restored. Sampled idle-stack percentages are not evidence that polling caused
+the residual latency gap.
+
+A single execution-cache retry avoided 333 account, 841 storage, and 378 code
+reads across 600 blocks (2.59 reads/block). This includes both brief bucket
+contention and concurrent fills; the counter does not distinguish them.
+All 18 cache tests, roots, and restart passed, but execution remained
+105.19/127.26/215.02 ms, payload 120.82/152.22/235.57 ms, and saves 49.52 s.
+The retry and diagnostic counters were discarded.
+
+Configuring jemalloc arenas per physical CPU was verified at startup and
+restart. Execution measured 105.49/125.61/226.11 ms, payload
+120.62/152.25/249.94 ms, and saves 51.37 s. Roots and restart passed; the
+allocator setting was discarded.
+
+Confining all background node threads to the smaller-cache CPU group while
+leaving BAL workers free to use both groups reduced engine CPU time to
+91.60 ms/block and improved IPC to 1.228. Wall execution nevertheless worsened
+to 109.84/143.57/237.28 ms, payload to 141.39/197.08/276.06 ms, and saves to
+51.21 s. Engine context switches rose from 1.13 to 1.79 million over the
+400-block measurement window. All roots and restart passed. This placement
+was discarded: lower engine CPU work did not translate into faster validation.
+
+## Worker timing comparison
+
+An additional matched 600-block diagnostic pair times each BAL worker's queue
+delay, thread CPU time, transaction execution, and lifetime. Provider instrumentation
+sits beneath the execution cache, counting misses rather than hits. All roots,
+persistence, and restart checks passed. The temporary instrumentation and its
+dependency were removed after capturing both binaries.
+
+| Median per block, ms | MDBX | RocksDB |
+| --- | ---: | ---: |
+| Execution | 98.55 | 104.65 |
+| Last worker finish, relative to its scheduling time | 57.77 | 61.31 |
+| Maximum worker queue delay | 19.18 | 17.18 |
+| Sum of worker thread CPU time | 628.88 | 627.69 |
+| Sum of worker transaction execution time | 1,021.26 | 1,014.55 |
+| Sum of worker lifetime | 1,267.57 | 1,456.36 |
+| Sum of uncached provider read time | 167.42 | 117.96 |
+
+Worker CPU per transaction was 46.04/45.47 microseconds for MDBX/RocksDB.
+Account and bytecode miss service times increased, but storage miss service
+time decreased enough to reduce total read time. Cumulative saves were
+567.37/49.26 seconds. These summed durations overlap across workers and do not
+decompose wall execution latency. Worker scheduling timestamps also differ
+slightly across the spawn loop. The extra worker lifetime primarily lies outside
+the timed EVM calls; this motivates checking transaction supply and worker
+scheduling rather than assuming slower EVM computation or aggregate database reads.
+
+Raising the CPU recovery pool and transaction iterator from nice 0 to -5, matching
+BAL workers, improved execution to 102.01/120.80/212.43 ms. Median summed worker
+lifetime fell to 1,354.70 ms, while EVM time rose to 1,109.96 ms and uncached reads
+to 173.70 ms. Payload p50 stayed at 120.60 ms as root wait rose to 6.05 ms; saves
+totaled 51.35 s. Giving the prefetch workers and coordinator the same priority
+reduced uncached reads to 124.03 ms, but execution was 102.75/121.36/219.09 ms,
+payload p50 121.29 ms, root wait 6.89 ms, and saves 50.34 s. Both passed roots and
+restart. Neither reaches the execution target; the priority changes remain
+experimental rather than retained defaults.
+
+Recovering transactions in exponentially growing parallel ranges prioritizes
+the early results needed by ordered commit. With baseline priorities, this
+candidate passed 31 conversion/cancellation/BAL tests and all replay/restart
+checks. Execution was 101.63/129.12/201.18 ms, payload
+118.92/155.52/237.18 ms, root wait 6.30/20.83/35.67 ms, and saves 49.39 s.
+The median improves while p90 worsens modestly; it remains a candidate pending
+further comparison.
+
+Combining early-range recovery with the higher recovery-pool priority measured
+98.35/119.37/210.72 ms execution, 119.63/150.98/235.68 ms payload, and
+9.98/23.32/39.07 ms root wait. Saves totaled 50.83 s; all roots and restart
+passed. This is just below the prior 98.57 ms MDBX median in one run. Repeats
+and an MDBX control with the same recovery change and priority are required
+before establishing parity. The second fresh RocksDB run measured
+98.96/121.21/202.21 ms execution and 49.93 s cumulative saves.
+
+The updated MDBX control, using the same early-range recovery and higher
+recovery-pool priority, measured **88.72/106.59/331.83 ms** execution,
+112.76/133.48/365.86 ms payload, 13.14/24.81/34.93 ms root wait, and
+542.89 s cumulative saves. All roots and restart passed. The shared pipeline
+change therefore benefits MDBX more, and RocksDB has **not** established parity
+against this updated reference.
+
+The third fresh RocksDB run measured 98.26/122.70/211.80 ms execution,
+119.22/155.27/237.54 ms payload, 10.72/24.41/44.26 ms root wait, and
+50.13 s of saves. All roots and restart passed. The mean of the three run
+medians is 98.53 ms; this is not a pooled-block median or a confidence interval.
+Average saves are 50.30 s, 90.7% below the updated MDBX control.
+
+Confining only persistence, account/storage-root, sparse-trie, trie, overlay,
+and drop workers to the smaller CPU group preserved the full CPU allocation
+for transaction recovery and BAL workers. This isolated placement test used
+the unchanged baseline binary. Execution was 103.68/124.86/211.48 ms, but
+payload worsened to 125.05/160.98/248.47 ms and root wait to
+10.93/26.63/50.94 ms. Saves totaled 51.45 s; engine CPU time stayed at
+96.64 ms/block despite IPC improving to 1.134. All roots and restart passed.
+The placement was discarded.
+
+Increasing the existing multiproof chunk size from 5 to 20, keeping the
+recovery candidate and CPU priority, measured execution
+96.96/118.87/209.45 ms, payload 117.57/153.70/232.63 ms, root wait
+9.52/24.37/46.73 ms, and saves 50.74 s. All roots and restart passed.
+Account proof jobs fell to 285,770 and storage jobs to 696,108 over the scored
+550 blocks. Job durations are not directly comparable across chunk sizes because
+each job contains different work. This improves RocksDB but remains above the
+updated MDBX execution median of 88.72 ms.
+
+An 80-target chunk measured execution 95.73/118.23/213.40 ms, payload
+117.31/151.87/239.90 ms, root wait 10.28/27.38/44.71 ms, and saves
+51.01 s. All roots and restart passed. Scored proof-job counts fell further to
+75,651 account and 563,013 storage jobs. This remains a runtime experiment;
+no default chunk-size change has been committed.
+
+A bounded cache of 65,536 decoded branches per immutable primary snapshot
+passed seven state-trie tests, all replay roots, and restart. At chunk size 20,
+execution was 96.11/116.29/210.38 ms and saves 49.60 s, but payload was
+117.92/151.82/239.50 ms and root wait 11.57/26.83/45.98 ms.
+Mean summed account proof service time rose from 2,413 to 2,528 ms per block,
+and storage from 1,244 to 1,271 ms. These are overlapping worker times. The
+small execution change did not offset higher proof time and root wait; the cache,
+its dependency, and its additional tests were removed. Its binary, patch, and
+results remain in the artifact directory.
+
+Repeating the broader background-worker placement with early-range recovery,
+higher recovery priority, and chunk size 80 still failed: execution
+107.23/148.73/206.30 ms, payload 140.44/197.72/256.33 ms, root wait
+22.11/46.42/72.71 ms, saves 51.91 s. Engine CPU time fell from 91.27 to
+86.31 ms/block and IPC rose from 1.133 to 1.300, but elapsed execution worsened.
+The placement trades lower engine CPU cost for slower worker progress. All
+roots and restart passed; this placement is not retained.
+
+Direct I/O for background SST writes (foreground reads remained buffered,
+verified in the RocksDB startup log) measured execution
+96.46/119.26/208.84 ms, payload 118.67/156.22/247.68 ms, root wait
+11.54/27.39/54.34 ms, and saves 52.96 s. This is worse than the buffered
+chunk-80 control. All roots and restart passed; the option was reverted.
+
+Raising the recovery pool from nice -5 to -10 within the tight placement
+improved execution to 100.48/133.36/221.37 ms, but payload remained
+141.45/197.47/264.30 ms and root wait worsened to 27.76/55.09/86.99 ms.
+Saves totaled 52.46 s; all roots and restart passed. It still loses to the
+original placement and is discarded. Aggregate per-thread CPU counters over
+all 600 blocks measured 695.65 ms/block for the CPU pool and 712.12 ms/block
+for BAL workers; these overlapping thread times are not wall-clock durations.
+
+Uniform 512-transaction recovery batches passed 31 conversion/cancellation/BAL
+tests and all 600 roots plus restart, but execution worsened to
+106.16/134.87/213.02 ms. Payload was 122.08/155.69/247.13 ms,
+root wait 5.00/13.03/42.01 ms, and saves 51.48 s. Exponential batches were
+restored; smaller root wait here did not compensate for slower execution.
+
+Prefetching accounts by their earliest recorded BAL change reduced account cache
+misses from 49,115 to 31,096 and storage misses from 313,852 to 208,150,
+but execution remained 95.09/120.22/204.35 ms and its mean slightly increased.
+Payload was 117.25/151.94/242.69 ms, root wait 11.23/26.31/44.66 ms,
+and saves 50.58 s. All 600 roots and restart passed. The ordering change
+was removed: the lower miss count did not translate into a material latency
+improvement. BAL change indices also do not identify the first read of an account.
+
+A matched diagnostic pair used proof chunks of 80 and temporary worker-receive,
+worker-finish, and ordered-iterator timestamps. Both passed all 600 roots and
+restart; the instrumentation was removed after capturing the binaries. Execution
+p50 was 96.75 ms for RocksDB and 88.83 ms for MDBX, with cumulative saves of
+49.96 s and 539.63 s. The mean execution difference was 6.36 ms: 2.84 ms inside
+the ordered iterator and 3.52 ms outside it. Within the iterator, the difference
+was +0.79 ms before the target worker received its transaction, +2.73 ms
+overlapping target-worker processing, and -0.67 ms after that worker finished.
+These phases include scheduling and reads; they do not isolate CPU execution.
+They argue against result delivery or reordering as the primary remaining cost.
+Mean differences add; component medians do not.
+
+Over the engine-counter window, RocksDB used 91.70 ms CPU/block versus 86.88 ms,
+with IPC 1.131 versus 1.194 and effective clock 4.944 versus 5.025 GHz.
+Full-replay thread counters (a different window, including warmup) measured
+account/storage proof CPU of 123/228 ms per block versus 65/88 ms for MDBX,
+and RocksDB background CPU of 85 versus 5 ms. These overlapping thread times
+support investigating interference from concurrent database/proof work; they
+are not an additive decomposition of block latency.
+
+Increasing proof chunks from 80 to 320 reduced execution p50 to 93.37 ms
+(p90 115.42, p99 205.99) and cumulative saves to 49.58 s. However, root-wait
+p50 increased to 18.93 ms and payload p50 to 123.82 ms, versus 10.28 and
+117.31 ms for chunk 80. Account proof jobs fell from 75,651 to 25,791;
+storage jobs only fell from 563,013 to 531,855. All roots and restart passed.
+The execution gain alone does not justify that setting's larger payload latency.
+
+The exact-overlay-hit fast path passed its focused test plus six proof, cursor,
+snapshot, reopen, and secondary tests. Both backends then passed 600 roots and
+restart with chunk size 80. RocksDB execution was 95.36/120.54/206.63 ms,
+payload 117.26/152.80/242.61 ms, root wait 9.86/26.00/54.56 ms, and saves
+51.51 s. MDBX execution was 87.78/104.64/324.86 ms, payload
+109.87/131.58/357.37 ms, root wait 12.33/24.87/35.37 ms, and saves 542.59 s.
+RocksDB proof CPU remained approximately 124/228 ms per block for account/storage
+workers, so the exact-hit shortcut does not explain or close the remaining gap.
+
 ## Validation
+
+The subsequent recovery-order change passed 31 conversion, cancellation, and BAL
+tests. The overlay-read change passed seven targeted tests; full workspace
+all-features nightly clippy and formatting checks passed again afterward.
 
 301 selected provider, overlay, and execution-cache tests passed, with eight
 known exclusions for features outside the happy-path PoC. Snapshot tests cover
