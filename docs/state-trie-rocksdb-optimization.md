@@ -1029,3 +1029,24 @@ control while recovering most of the one-worker payload penalty, but does not
 establish parity. Candidate binaries, source patches, hashes, and full results
 are retained under globalphase backend names with early0-proof64-chunk80-600.
 The source was restored after building; no default changed.
+
+### Dedicated block-cache allocator (2026-09-27)
+
+A link-time diagnostic wrapper selected RocksDB's JemallocNodumpAllocator for
+the 8 GiB cache while retaining the gated 64-worker configuration. The native
+create/destroy probe, startup capacity assertion, 600 roots, persistence,
+restart block 601, and recovery all passed. Execution p50/p90/p99 were
+79.985/98.013/187.643 ms, payload p50 was 148.631 ms, root wait p50 was 57.786 ms,
+and cumulative saves were 50.167 s. This did not improve execution over the
+79.461 ms gated control and was rejected. The C wrapper, build/probe logs,
+binary hash, and run artifacts are retained under globalarenarocks. No allocator
+or default source change was retained.
+
+### Smaller cache with execution-gated proofs (2026-09-27)
+
+Reducing the native cache from 8 GiB to 2 GiB, with the ordinary allocator and
+all other gated-worker settings unchanged, regressed execution p50/p90/p99 to
+177.167/254.971/335.899 ms. Payload p50 was 336.940 ms, root wait p50 was
+149.253 ms, and cumulative saves were 90.041 s. All 600 payloads, restart 601,
+persistence and recovery checks passed, but this setting was rejected.
+Artifacts use globalphaserocks-cache2g with the early0-proof64 suffix.
