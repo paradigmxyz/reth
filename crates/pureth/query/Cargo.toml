@@ -16,6 +16,7 @@ serde = { workspace = true, features = ["derive"] }
 sha2.workspace = true
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+alloy-rpc-types-eth.workspace = true
 jsonrpsee = { workspace = true, features = ["server", "macros"] }
 
 [dev-dependencies]

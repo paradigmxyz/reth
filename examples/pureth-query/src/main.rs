@@ -84,28 +84,29 @@ async fn run() -> eyre::Result<()> {
     let response: QueryResponse =
         client.request("pureth_query", rpc_params![request.clone()]).await?;
     eyre::ensure!(response.block_hash == block_hash);
+    eyre::ensure!(response.schema_id == request.schema_id);
+    eyre::ensure!(response.path == request.path);
     eyre::ensure!(response.value_ssz.as_ref() == contract.as_slice());
-    eyre::ensure!(response.gindex == "576");
     eyre::ensure!(response.block_status == "canonical");
     eyre::ensure!(response.root_context == "reth_experimental_unanchored");
     verify_receipt_log_address(
-        &response.schema_id,
-        &response.path,
+        &request.schema_id,
+        &request.path,
         response.value_ssz.as_ref(),
         &response.proof,
         response.root,
     )
     .map_err(|error| eyre::eyre!("{error:?}"))?;
 
-    let invalid = QueryRequest { block_hash: B256::repeat_byte(0xff), ..request };
+    let missing = QueryRequest { block_hash: B256::repeat_byte(0xff), ..request };
     let error =
-        client.request::<QueryResponse, _>("pureth_query", rpc_params![invalid]).await.unwrap_err();
+        client.request::<QueryResponse, _>("pureth_query", rpc_params![missing]).await.unwrap_err();
     let jsonrpsee::core::client::Error::Call(error) = error else {
-        eyre::bail!("expected an invalid-params response, got {error:?}")
+        eyre::bail!("expected a missing-block response, got {error:?}")
     };
-    eyre::ensure!(error.code() == -32602);
+    eyre::ensure!(error.code() == -32001);
     println!(
-        "block={block_hash} address={contract} root={} invalid_code={}",
+        "block={block_hash} address={contract} root={} missing_block_code={}",
         response.root,
         error.code()
     );

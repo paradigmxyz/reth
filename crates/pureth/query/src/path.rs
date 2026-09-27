@@ -7,6 +7,7 @@ pub enum PathToken {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ParseError {
     EmptyPath,
+    PathTooLong,
     UnexpectedByte { offset: usize, byte: u8 },
     MissingField { offset: usize },
     MissingIndex { offset: usize },
@@ -15,9 +16,14 @@ pub enum ParseError {
     IndexOverflow { offset: usize },
 }
 
+const MAX_PATH_BYTES: usize = 256;
+
 pub fn parse_path(path: &str) -> Result<Vec<PathToken>, ParseError> {
     if path.is_empty() {
         return Err(ParseError::EmptyPath);
+    }
+    if path.len() > MAX_PATH_BYTES {
+        return Err(ParseError::PathTooLong);
     }
 
     let bytes = path.as_bytes();

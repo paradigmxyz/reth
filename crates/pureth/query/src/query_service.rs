@@ -1,7 +1,6 @@
 use crate::{
-    parse_path, prove_receipt_log_address, receipt_log_address_gindex, resolve,
-    verify_receipt_log_address, EnvelopeError, GindexError, ParseError, ProofAccessError,
-    ResolvedPath, UnsupportedPath, SCHEMA_ID,
+    parse_path, prove_receipt_log_address, resolve, verify_receipt_log_address, EnvelopeError,
+    ParseError, ProofAccessError, ResolvedPath, UnsupportedPath, SCHEMA_ID,
 };
 use alloy_primitives::{Bytes, B256};
 use reth_ethereum_primitives::EthPrimitives;
@@ -27,7 +26,6 @@ pub struct QueryRequest {
 pub struct QueryResponse {
     pub value_ssz: Bytes,
     pub path: String,
-    pub gindex: String,
     pub proof: Vec<B256>,
     pub proof_format: String,
     pub schema_id: String,
@@ -56,10 +54,6 @@ pub enum QueryError {
 pub enum ResponseVerificationError {
     ContextMismatch,
     WrongProofFormat,
-    InvalidPath(ParseError),
-    UnsupportedPath(UnsupportedPath),
-    InvalidGindex(GindexError),
-    WrongGindex,
     InvalidProof(EnvelopeError),
 }
 
@@ -165,7 +159,6 @@ fn query_validated(
     let response = QueryResponse {
         value_ssz: Bytes::copy_from_slice(proof.address.as_slice()),
         path: request.path.clone(),
-        gindex: proof.gindex.to_string(),
         proof: proof.branch,
         proof_format: PROOF_FORMAT.to_owned(),
         schema_id: snapshot.schema_id().to_owned(),
@@ -202,15 +195,6 @@ pub fn verify_query_response(
     }
     if response.proof_format != PROOF_FORMAT {
         return Err(ResponseVerificationError::WrongProofFormat);
-    }
-
-    let tokens = parse_path(&response.path).map_err(ResponseVerificationError::InvalidPath)?;
-    let resolved: ResolvedPath =
-        resolve(&tokens).map_err(ResponseVerificationError::UnsupportedPath)?;
-    let gindex =
-        receipt_log_address_gindex(resolved).map_err(ResponseVerificationError::InvalidGindex)?;
-    if response.gindex != gindex.to_string() {
-        return Err(ResponseVerificationError::WrongGindex);
     }
 
     verify_receipt_log_address(
@@ -326,12 +310,11 @@ mod tests {
     fn frozen_provider_cases_return_verified_responses() {
         let service = QueryService::new().unwrap();
 
-        for (block_hash, path, address, gindex, root) in [
+        for (block_hash, path, address, root) in [
             (
                 SINGLETON_BLOCK_HASH,
                 "[0].logs[0].address",
                 0x11,
-                "576",
                 alloy_primitives::b256!(
                     "5036e5a260a45255df46094662d27826bb1f417e3dccb4b3a4fc313876cd4e33"
                 ),
@@ -340,7 +323,6 @@ mod tests {
                 MULTIPLE_LOGS_BLOCK_HASH,
                 "[0].logs[1].address",
                 0x33,
-                "4640",
                 alloy_primitives::b256!(
                     "d4e90213f6f7fa76997b8d2a3e56c1df70c7846a06e8deeead604844b0cfa43a"
                 ),
@@ -349,7 +331,6 @@ mod tests {
                 PROGRESSIVE_RECEIPTS_BLOCK_HASH,
                 "[5].logs[0].address",
                 0x16,
-                "45120",
                 alloy_primitives::b256!(
                     "a8d13e4ec4c2b516ebd5b536f94784667c0098c5e1d6017453313cea532c1830"
                 ),
@@ -359,7 +340,6 @@ mod tests {
 
             assert_eq!(response.value_ssz.as_ref(), &[address; 20]);
             assert_eq!(response.path, path);
-            assert_eq!(response.gindex, gindex);
             assert_eq!(response.root, root);
             assert_eq!(response.proof_format, PROOF_FORMAT);
             assert_eq!(response.schema_id, SCHEMA_ID);
@@ -414,7 +394,6 @@ mod tests {
         let response = service.query(request.clone()).unwrap();
 
         assert_eq!(response.value_ssz.as_ref(), &[0x11; 20]);
-        assert_eq!(response.gindex, "576");
         assert_eq!(
             response.proof,
             [
@@ -541,7 +520,7 @@ mod tests {
             .lookup(PROGRESSIVE_RECEIPTS_BLOCK_HASH, ObjectKind::Receipts, SCHEMA_ID)
             .unwrap();
 
-        let mutations: [fn(&mut QueryResponse); 14] = [
+        let mutations: [fn(&mut QueryResponse); 13] = [
             |response| {
                 let mut value = response.value_ssz.to_vec();
                 value[0] ^= 1;
@@ -552,7 +531,6 @@ mod tests {
             |response| {
                 response.proof.pop();
             },
-            |response| response.gindex = "576".to_owned(),
             |response| response.root[0] ^= 1,
             |response| response.path = "[0].logs[0].address".to_owned(),
             |response| response.schema_id = "other-schema".to_owned(),
@@ -572,14 +550,14 @@ mod tests {
     }
 
     #[test]
-    fn response_uses_decimal_string_gindex_and_hex_values() {
+    fn response_uses_hex_values_without_returning_gindex() {
         let response = QueryService::new()
             .unwrap()
             .query(request(SINGLETON_BLOCK_HASH, "[0].logs[0].address"))
             .unwrap();
         let json = serde_json::to_value(response).unwrap();
 
-        assert_eq!(json["gindex"], "576");
+        assert!(json.get("gindex").is_none());
         assert_eq!(json["value_ssz"], format!("0x{}", "11".repeat(20)));
         assert_eq!(json["proof"].as_array().unwrap().len(), 9);
     }
