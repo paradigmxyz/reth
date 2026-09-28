@@ -16,9 +16,15 @@ jobs:
   build:
     runs-on: ${{ github.repository == 'paradigmxyz/reth' && 'depot-ubuntu-latest-8' || 'ubuntu-latest' }}
     permissions:
+      id-token: write
       contents: read
     timeout-minutes: 90
+    env:
+      # Include the system trust store containing Aegis's CA for Bun and Node.
+      NODE_EXTRA_CA_CERTS: /etc/ssl/certs/ca-certificates.crt
     steps:
+      - name: Secure runner
+        uses: tempoxyz/gh-actions/actions/secure-runner@ee2960a6cc25d99bda45614135bfe1197d879bac # 2026-09-26T06-46-03Z-ee2960a6
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -39,7 +45,9 @@ jobs:
           npx playwright install --with-deps chromium
 
       - name: Install Rust nightly
-        uses: dtolnay/rust-toolchain@nightly
+        uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de # v1
+        with:
+          toolchain: nightly
 
       - name: Build docs
         run: cd docs/vocs && bash scripts/build-cargo-docs.sh

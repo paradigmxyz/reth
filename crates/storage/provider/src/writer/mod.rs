@@ -891,7 +891,8 @@ mod tests {
         type PreState = BTreeMap<Address, (Account, BTreeMap<B256, U256>)>;
         let mut prestate: PreState = (0..10)
             .map(|key| {
-                let account = Account { nonce: 1, balance: U256::from(key), bytecode_hash: None };
+                let account =
+                    Account { nonce: 1, balance: U256::from(key), ..Default::default() };
                 let storage =
                     (1..11).map(|key| (B256::with_last_byte(key), U256::from(key))).collect();
                 (Address::with_last_byte(key), (account, storage))
