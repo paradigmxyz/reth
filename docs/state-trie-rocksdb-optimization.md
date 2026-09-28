@@ -1509,3 +1509,38 @@ threads' CPU priority, while preserving the durability and persistence checks.
 Artifacts use `globallooprocks`/`globalloopmdbx` with
 `deferstate-phasediag-early0-proof64-chunk80-600`, plus
 `execution-phases-loop-comparison.json` and `loop-background-overlap.json`.
+
+## Native background CPU priority
+
+The same `globallooprocks` binary was replayed with all six native background
+threads at nice 19. Initial and end-of-replay audits confirmed the priority;
+CPU sets, other worker priorities, caches, WAL durability, and persistence
+settings were unchanged. Execution p50/p90/p99 was 75.42/91.27/177.16 ms versus
+76.03/89.93/174.43 ms for the normal-priority run. Commit-body p50 did not improve
+(35.55 versus 35.37 ms); ordered-result retrieval was 30.45 versus 31.09 ms.
+Payload p50 was 163.63 ms, root wait 77.88 ms, and cumulative saves 47.81 s.
+This does not establish parity with the 73.52 ms MDBX control; the priority change
+is not retained.
+
+A read-only post-shutdown `db stats --skip-consistency-checks` inspection reported
+2.7 GiB of estimated pending storage compaction, 2 KiB of storage memtables,
+and 244.6 MiB of account memtables. Earlier controls did not collect this
+post-drain property, so this is not a measured increase over their backlog.
+Subsequent comparisons collect the same post-drain stats on both arms.
+
+The first added inspection mistakenly used the migration verifier, which compares
+against the intentionally unchanged old source trie. It rejected the correct
+block-600 root against the original snapshot root after replay and shutdown had
+succeeded. The erroneous check and its output were retained. The harness resumed
+with the read-only stats command, verified Finish 600, passed restart 601 and
+recovery, then completed the standard, CPU, phase, sender, and thread audits.
+Artifacts use `globallooprocks-*bgnice19-600`, with `harness-inspection-note.txt`
+and `finish_bgnice.log` documenting that continuation.
+
+Offline comparisons found different generated code for the enclosing execution
+function and its canonical commit helper between diagnostic backends. The helper
+had 1,850 versus 1,846 decoded instructions; this count does not establish a
+performance cause. Address/symbol normalization does not compare referenced data,
+called helper bodies, or code placement. These artifacts are `codegen-loop-*`
+and `codegen-commit-*`; the earlier identical EVM transaction disassembly must
+not be generalized to the entire execution path.
