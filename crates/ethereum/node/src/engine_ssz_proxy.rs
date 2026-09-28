@@ -1672,11 +1672,7 @@ mod tests {
 
     #[test]
     fn decodes_forkchoice_v4_with_custody_columns() {
-        let forkchoice_state = ForkchoiceState {
-            head_block_hash: B256::ZERO,
-            safe_block_hash: B256::ZERO,
-            finalized_block_hash: B256::ZERO,
-        };
+        let forkchoice_state = ForkchoiceState::same_hash(B256::ZERO);
         let encoded = ForkchoiceUpdateAmsterdam {
             forkchoice_state,
             payload_attributes: Optional::none(),
@@ -1693,11 +1689,7 @@ mod tests {
 
     #[test]
     fn decodes_forkchoice_cancun_payload_attributes() {
-        let forkchoice_state = ForkchoiceState {
-            head_block_hash: B256::ZERO,
-            safe_block_hash: B256::ZERO,
-            finalized_block_hash: B256::ZERO,
-        };
+        let forkchoice_state = ForkchoiceState::same_hash(B256::ZERO);
         let attrs = PayloadAttributesCancun {
             timestamp: 1,
             prev_randao: B256::with_last_byte(2),
