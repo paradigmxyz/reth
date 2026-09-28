@@ -10,10 +10,10 @@ permissions: {}
 
 jobs:
   scan:
-    uses: tempoxyz/gh-actions/.github/workflows/scan-github-actions.yml@b35994a23aaf6acf4d5e2f91d18235a6e2f90e95 # 2026-09-23T08-07-21Z-b35994a2
+    uses: tempoxyz/gh-actions/.github/workflows/scan-github-actions.yml@ee2960a6cc25d99bda45614135bfe1197d879bac # 2026-09-26T06-46-03Z-ee2960a6
     permissions:
       actions: read
       contents: read
       id-token: write
     with:
-      secure-runner-fail-on-violation: false
+      ensure-secure-runner: false
