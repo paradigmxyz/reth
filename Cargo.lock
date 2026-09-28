@@ -986,6 +986,7 @@ dependencies = [
  "smallvec",
  "thiserror 2.0.20",
  "tracing",
+ "triomphe",
 ]
 
 [[package]]
@@ -8859,11 +8860,13 @@ dependencies = [
  "reth-rpc-api",
  "reth-rpc-builder",
  "reth-rpc-eth-types",
+ "reth-stages-types",
  "reth-storage-api",
  "reth-tasks",
  "reth-transaction-pool",
  "reth-trie",
  "reth-trie-db",
+ "revm",
 ]
 
 [[package]]
@@ -8883,8 +8886,10 @@ dependencies = [
  "reth-node-ethereum",
  "reth-node-metrics",
  "reth-rpc-server-types",
+ "reth-stages-types",
  "reth-tasks",
  "reth-tracing",
+ "revm",
  "tempfile",
  "tracing",
 ]
@@ -10556,6 +10561,7 @@ dependencies = [
  "proptest-arbitrary-interop",
  "rand 0.9.4",
  "reth-codecs",
+ "reth-primitives-traits",
  "reth-trie-common",
  "serde",
 ]

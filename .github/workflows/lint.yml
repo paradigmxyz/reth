@@ -78,6 +78,10 @@ jobs:
       - run: cargo clippy --workspace --lib --examples --tests --benches --all-features --locked
         env:
           RUSTFLAGS: -D warnings
+      # `--all-features` enables `account-ext`, so also lint the default account layout.
+      - run: cargo clippy --workspace --lib --examples --tests --benches --locked
+        env:
+          RUSTFLAGS: -D warnings
 
   wasm:
     runs-on: ${{ github.repository == 'paradigmxyz/reth' && 'depot-ubuntu-latest' || 'ubuntu-latest' }}

@@ -8,6 +8,12 @@
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 #![cfg_attr(docsrs, feature(doc_cfg))]
 
+// Feature-only deps: `account-ext` enables the feature on these crates.
+#[cfg(feature = "account-ext")]
+use reth_stages_types as _;
+#[cfg(feature = "account-ext")]
+use revm as _;
+
 /// A configurable App on top of the cli parser.
 pub mod app;
 /// Chain specification parser.

@@ -51,8 +51,17 @@ reth-node-ethereum = { workspace = true, optional = true }
 alloy-rpc-types-eth = { workspace = true, optional = true }
 alloy-rpc-types-engine = { workspace = true, optional = true }
 
+# account-ext
+reth-stages-types = { workspace = true, optional = true }
+revm = { workspace = true, optional = true }
+
 [features]
 default = ["std"]
+account-ext = [
+    "reth-ethereum-cli?/account-ext",
+    "reth-stages-types/account-ext",
+    "revm/account-ext",
+]
 std = [
     "reth-chainspec/std",
     "reth-ethereum-primitives/std",
@@ -67,6 +76,8 @@ std = [
     "reth-revm?/std",
     "alloy-rpc-types-engine?/std",
     "reth-codecs?/std",
+    "reth-stages-types?/std",
+    "revm?/std",
 ]
 arbitrary = [
     "std",
@@ -79,6 +90,8 @@ arbitrary = [
     "reth-eth-wire?/arbitrary",
     "alloy-rpc-types-engine?/arbitrary",
     "reth-codecs?/arbitrary",
+    "reth-stages-types?/arbitrary",
+    "revm?/arbitrary",
 ]
 keccak-cache-global = [
     "reth-node-ethereum?/keccak-cache-global",
@@ -102,6 +115,7 @@ test-utils = [
     "reth-trie-db?/test-utils",
     "reth-codecs?/test-utils",
     "reth-tasks?/test-utils",
+    "reth-stages-types?/test-utils",
 ]
 
 full = [
@@ -179,6 +193,7 @@ otlp = [
 ]
 portable = [
     "reth-revm?/portable",
+    "revm?/portable",
 ]
 gmp = [
     "reth-evm-ethereum?/gmp",

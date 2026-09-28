@@ -127,6 +127,8 @@ js-tracer = [
 
 dev = ["reth-ethereum-cli/dev"]
 
+account-ext = ["reth-ethereum-cli/account-ext"]
+
 asm-keccak = [
     "reth-node-core/asm-keccak",
     "reth-ethereum-cli/asm-keccak",

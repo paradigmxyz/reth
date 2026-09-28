@@ -31,15 +31,23 @@ clap.workspace = true
 eyre.workspace = true
 tracing.workspace = true
 
+# account-ext
+reth-stages-types = { workspace = true, optional = true }
+revm = { workspace = true, optional = true }
+
 [dev-dependencies]
 # fs
 tempfile.workspace = true
 
 [features]
+account-ext = ["reth-stages-types/account-ext", "revm/account-ext"]
 otlp = ["reth-tracing/otlp", "reth-node-core/otlp"]
 otlp-logs = ["reth-tracing/otlp-logs", "reth-node-core/otlp-logs"]
 
-dev = ["reth-cli-commands/arbitrary"]
+dev = [
+    "reth-cli-commands/arbitrary",
+    "revm?/dev",
+]
 
 jit = ["reth-node-ethereum/jit"]
 gmp = ["reth-node-ethereum/gmp"]
@@ -47,6 +55,7 @@ gmp = ["reth-node-ethereum/gmp"]
 asm-keccak = [
     "reth-node-core/asm-keccak",
     "reth-node-ethereum/asm-keccak",
+    "revm?/asm-keccak",
 ]
 
 jemalloc = [
