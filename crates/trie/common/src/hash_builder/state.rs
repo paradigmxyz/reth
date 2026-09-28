@@ -204,6 +204,7 @@ mod tests {
             };
             let mut buf = vec![];
             let len = state.to_compact(&mut buf);
+            prop_assert_eq!(len, buf.len());
             let (decoded, rest) = HashBuilderState::from_compact(&buf, len);
             prop_assert_eq!(state, decoded);
             prop_assert!(rest.is_empty());

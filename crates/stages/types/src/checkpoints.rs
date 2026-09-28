@@ -652,8 +652,10 @@ stage_unit_checkpoints!(
 mod tests {
     use super::*;
     use alloy_primitives::b256;
+    use proptest::{collection::vec, option, prelude::*};
     use rand::Rng;
     use reth_codecs::Compact;
+    use reth_trie_common::{RlpNode, TrieMask};
 
     #[test]
     fn merkle_checkpoint_roundtrip() {
@@ -771,5 +773,387 @@ mod tests {
 
         assert_eq!(decoded, checkpoint);
         assert_eq!(decoded.finish_stage_checkpoint().unwrap().partial_state_trie(), Some(21));
+    }
+
+    /// Bytes following a checkpoint record, to check that decoding stays within the record.
+    const TRAILING: [u8; 2] = [0xab, 0xcd];
+
+    /// [`StorageRootMerkleCheckpoint`] with its encoding from before account extensions.
+    #[derive(Debug, Clone, PartialEq, Eq)]
+    struct LegacyStorageRootMerkleCheckpoint {
+        last_storage_key: B256,
+        walker_stack: Vec<StoredSubNode>,
+        state: HashBuilderState,
+        account_nonce: u64,
+        account_balance: U256,
+        account_bytecode_hash: B256,
+    }
+
+    impl Compact for LegacyStorageRootMerkleCheckpoint {
+        fn to_compact<B>(&self, buf: &mut B) -> usize
+        where
+            B: bytes::BufMut + AsMut<[u8]>,
+        {
+            let mut len = 0;
+
+            buf.put_slice(self.last_storage_key.as_slice());
+            len += self.last_storage_key.len();
+
+            buf.put_u16(self.walker_stack.len() as u16);
+            len += 2;
+            for item in &self.walker_stack {
+                len += item.to_compact(buf);
+            }
+
+            len += self.state.to_compact(buf);
+
+            buf.put_u64(self.account_nonce);
+            len += 8;
+
+            let balance_len = self.account_balance.byte_len() as u8;
+            buf.put_u8(balance_len);
+            len += 1;
+            len += self.account_balance.to_compact(buf);
+
+            buf.put_slice(self.account_bytecode_hash.as_slice());
+            len += 32;
+
+            len
+        }
+
+        fn from_compact(mut buf: &[u8], _len: usize) -> (Self, &[u8]) {
+            use bytes::Buf;
+
+            let last_storage_key = B256::from_slice(&buf[..32]);
+            buf.advance(32);
+
+            let walker_stack_len = buf.get_u16() as usize;
+            let mut walker_stack = Vec::with_capacity(walker_stack_len);
+            for _ in 0..walker_stack_len {
+                let (item, rest) = StoredSubNode::from_compact(buf, 0);
+                walker_stack.push(item);
+                buf = rest;
+            }
+
+            let (state, mut buf) = HashBuilderState::from_compact(buf, 0);
+
+            let account_nonce = buf.get_u64();
+            let balance_len = buf.get_u8() as usize;
+            let (account_balance, mut buf) = U256::from_compact(buf, balance_len);
+            let account_bytecode_hash = B256::from_slice(&buf[..32]);
+            buf.advance(32);
+
+            (
+                Self {
+                    last_storage_key,
+                    walker_stack,
+                    state,
+                    account_nonce,
+                    account_balance,
+                    account_bytecode_hash,
+                },
+                buf,
+            )
+        }
+    }
+
+    impl From<LegacyStorageRootMerkleCheckpoint> for StorageRootMerkleCheckpoint {
+        fn from(legacy: LegacyStorageRootMerkleCheckpoint) -> Self {
+            Self {
+                last_storage_key: legacy.last_storage_key,
+                walker_stack: legacy.walker_stack,
+                state: legacy.state,
+                account_nonce: legacy.account_nonce,
+                account_balance: legacy.account_balance,
+                account_bytecode_hash: legacy.account_bytecode_hash,
+                #[cfg(feature = "account-ext")]
+                account_extension: Default::default(),
+            }
+        }
+    }
+
+    /// [`MerkleCheckpoint`] with its encoding from before account extensions.
+    #[derive(Debug, Clone, PartialEq, Eq)]
+    struct LegacyMerkleCheckpoint {
+        target_block: BlockNumber,
+        last_account_key: B256,
+        walker_stack: Vec<StoredSubNode>,
+        state: HashBuilderState,
+        storage_root_checkpoint: Option<LegacyStorageRootMerkleCheckpoint>,
+    }
+
+    impl Compact for LegacyMerkleCheckpoint {
+        fn to_compact<B>(&self, buf: &mut B) -> usize
+        where
+            B: bytes::BufMut + AsMut<[u8]>,
+        {
+            let mut len = 0;
+
+            buf.put_u64(self.target_block);
+            len += 8;
+
+            buf.put_slice(self.last_account_key.as_slice());
+            len += self.last_account_key.len();
+
+            buf.put_u16(self.walker_stack.len() as u16);
+            len += 2;
+            for item in &self.walker_stack {
+                len += item.to_compact(buf);
+            }
+
+            len += self.state.to_compact(buf);
+
+            match &self.storage_root_checkpoint {
+                Some(checkpoint) => {
+                    buf.put_u8(1);
+                    len += 1;
+                    len += checkpoint.to_compact(buf);
+                }
+                None => {
+                    buf.put_u8(0);
+                    len += 1;
+                }
+            }
+
+            len
+        }
+
+        fn from_compact(mut buf: &[u8], _len: usize) -> (Self, &[u8]) {
+            use bytes::Buf;
+            let target_block = buf.get_u64();
+
+            let last_account_key = B256::from_slice(&buf[..32]);
+            buf.advance(32);
+
+            let walker_stack_len = buf.get_u16() as usize;
+            let mut walker_stack = Vec::with_capacity(walker_stack_len);
+            for _ in 0..walker_stack_len {
+                let (item, rest) = StoredSubNode::from_compact(buf, 0);
+                walker_stack.push(item);
+                buf = rest;
+            }
+
+            let (state, mut buf) = HashBuilderState::from_compact(buf, 0);
+
+            let (storage_root_checkpoint, buf) = if buf.is_empty() {
+                (None, buf)
+            } else {
+                match buf.get_u8() {
+                    1 => {
+                        let (checkpoint, rest) =
+                            LegacyStorageRootMerkleCheckpoint::from_compact(buf, 0);
+                        (Some(checkpoint), rest)
+                    }
+                    _ => (None, buf),
+                }
+            };
+
+            (
+                Self {
+                    target_block,
+                    last_account_key,
+                    walker_stack,
+                    state,
+                    storage_root_checkpoint,
+                },
+                buf,
+            )
+        }
+    }
+
+    impl From<LegacyMerkleCheckpoint> for MerkleCheckpoint {
+        fn from(legacy: LegacyMerkleCheckpoint) -> Self {
+            Self {
+                target_block: legacy.target_block,
+                last_account_key: legacy.last_account_key,
+                walker_stack: legacy.walker_stack,
+                state: legacy.state,
+                storage_root_checkpoint: legacy.storage_root_checkpoint.map(Into::into),
+            }
+        }
+    }
+
+    // Walker entries carry no branch node: `StoredSubNode` decodes a branch node by consuming
+    // the rest of the buffer, so one can only round-trip at the end of a record.
+    fn stored_sub_node() -> impl Strategy<Value = StoredSubNode> {
+        (vec(0u8..16, 0..=64), option::of(0u8..16)).prop_map(|(key, nibble)| StoredSubNode {
+            key,
+            nibble,
+            node: None,
+        })
+    }
+
+    fn hash_builder_state() -> impl Strategy<Value = HashBuilderState> {
+        (
+            vec(0u8..16, 0..=64),
+            vec(any::<u8>(), 0..=64),
+            vec(vec(any::<u8>(), 0..=32), 0..=8),
+            vec(any::<u16>(), 0..=8),
+            vec(any::<u16>(), 0..=8),
+            vec(any::<u16>(), 0..=8),
+            any::<bool>(),
+        )
+            .prop_map(
+                |(key, value, stack, groups, tree_masks, hash_masks, stored_in_database)| {
+                    let mut state = HashBuilderState {
+                        key,
+                        stack: stack.iter().map(|node| RlpNode::from_raw(node).unwrap()).collect(),
+                        groups: groups.into_iter().map(TrieMask::new).collect(),
+                        tree_masks: tree_masks.into_iter().map(TrieMask::new).collect(),
+                        hash_masks: hash_masks.into_iter().map(TrieMask::new).collect(),
+                        stored_in_database,
+                        ..Default::default()
+                    };
+                    state.value.set_bytes_owned(value);
+                    state
+                },
+            )
+    }
+
+    fn legacy_storage_root_checkpoint() -> impl Strategy<Value = LegacyStorageRootMerkleCheckpoint>
+    {
+        (
+            any::<B256>(),
+            vec(stored_sub_node(), 0..=4),
+            hash_builder_state(),
+            any::<u64>(),
+            any::<U256>(),
+            any::<B256>(),
+        )
+            .prop_map(
+                |(
+                    last_storage_key,
+                    walker_stack,
+                    state,
+                    account_nonce,
+                    account_balance,
+                    account_bytecode_hash,
+                )| {
+                    LegacyStorageRootMerkleCheckpoint {
+                        last_storage_key,
+                        walker_stack,
+                        state,
+                        account_nonce,
+                        account_balance,
+                        account_bytecode_hash,
+                    }
+                },
+            )
+    }
+
+    fn legacy_merkle_checkpoint() -> impl Strategy<Value = LegacyMerkleCheckpoint> {
+        (
+            any::<BlockNumber>(),
+            any::<B256>(),
+            vec(stored_sub_node(), 0..=4),
+            hash_builder_state(),
+            option::of(legacy_storage_root_checkpoint()),
+        )
+            .prop_map(
+                |(target_block, last_account_key, walker_stack, state, storage_root_checkpoint)| {
+                    LegacyMerkleCheckpoint {
+                        target_block,
+                        last_account_key,
+                        walker_stack,
+                        state,
+                        storage_root_checkpoint,
+                    }
+                },
+            )
+    }
+
+    proptest! {
+        #[test]
+        fn storage_root_merkle_checkpoint_matches_legacy_encoding(
+            legacy in legacy_storage_root_checkpoint(),
+        ) {
+            let mut legacy_buf = Vec::new();
+            let legacy_len = legacy.to_compact(&mut legacy_buf);
+            prop_assert_eq!(legacy_len, legacy_buf.len());
+
+            // Without an extension, the encoding is the legacy one.
+            let checkpoint = StorageRootMerkleCheckpoint::from(legacy.clone());
+            let mut buf = Vec::new();
+            let len = checkpoint.to_compact(&mut buf);
+            prop_assert_eq!(len, buf.len());
+            prop_assert_eq!(&buf, &legacy_buf);
+
+            // Legacy records decode unchanged and leave the following bytes alone.
+            legacy_buf.extend_from_slice(&TRAILING);
+            let (decoded, rest) = StorageRootMerkleCheckpoint::from_compact(&legacy_buf, legacy_len);
+            prop_assert_eq!(decoded, checkpoint);
+            prop_assert_eq!(rest, &TRAILING[..]);
+
+            // The legacy decoder still reads records without an extension.
+            let (decoded, _) = LegacyStorageRootMerkleCheckpoint::from_compact(&buf, len);
+            prop_assert_eq!(decoded, legacy);
+        }
+
+        #[test]
+        fn merkle_checkpoint_matches_legacy_encoding(legacy in legacy_merkle_checkpoint()) {
+            let mut legacy_buf = Vec::new();
+            let legacy_len = legacy.to_compact(&mut legacy_buf);
+            prop_assert_eq!(legacy_len, legacy_buf.len());
+
+            let checkpoint = MerkleCheckpoint::from(legacy.clone());
+            let mut buf = Vec::new();
+            let len = checkpoint.to_compact(&mut buf);
+            prop_assert_eq!(len, buf.len());
+            prop_assert_eq!(&buf, &legacy_buf);
+
+            // The merkle stage decodes the whole stored value.
+            let (decoded, rest) = MerkleCheckpoint::from_compact(&legacy_buf, legacy_buf.len());
+            prop_assert_eq!(&decoded, &checkpoint);
+            prop_assert!(rest.is_empty());
+
+            legacy_buf.extend_from_slice(&TRAILING);
+            let (decoded, rest) = MerkleCheckpoint::from_compact(&legacy_buf, legacy_len);
+            prop_assert_eq!(decoded, checkpoint);
+            prop_assert_eq!(rest, &TRAILING[..]);
+
+            let (decoded, _) = LegacyMerkleCheckpoint::from_compact(&buf, len);
+            prop_assert_eq!(decoded, legacy);
+        }
+    }
+
+    #[cfg(feature = "account-ext")]
+    proptest! {
+        #[test]
+        fn storage_root_merkle_checkpoint_extension_roundtrip(
+            legacy in legacy_storage_root_checkpoint(),
+            extension in vec(any::<u8>(), 0..=64),
+        ) {
+            let mut expected = Vec::new();
+            legacy.to_compact(&mut expected);
+
+            let checkpoint = StorageRootMerkleCheckpoint {
+                account_extension: extension.clone().into(),
+                ..StorageRootMerkleCheckpoint::from(legacy)
+            };
+            let mut buf = Vec::new();
+            let len = checkpoint.to_compact(&mut buf);
+            prop_assert_eq!(len, buf.len());
+
+            // A nonempty extension is appended to the legacy layout behind a length prefix.
+            if !extension.is_empty() {
+                expected.extend_from_slice(&(extension.len() as u16).to_be_bytes());
+                expected.extend_from_slice(&extension);
+            }
+            prop_assert_eq!(&buf, &expected);
+
+            buf.extend_from_slice(&TRAILING);
+            let (decoded, rest) = StorageRootMerkleCheckpoint::from_compact(&buf, len);
+            prop_assert_eq!(&decoded, &checkpoint);
+            prop_assert_eq!(rest, &TRAILING[..]);
+
+            let merkle = MerkleCheckpoint {
+                storage_root_checkpoint: Some(checkpoint),
+                ..Default::default()
+            };
+            let mut buf = Vec::new();
+            merkle.to_compact(&mut buf);
+            let (decoded, _) = MerkleCheckpoint::from_compact(&buf, buf.len());
+            prop_assert_eq!(decoded, merkle);
+        }
     }
 }
