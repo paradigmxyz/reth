@@ -8,7 +8,7 @@ use crate::engine_ssz_witness::{
     EngineSszWitness, EngineSszWitnessError, PayloadStatusWithWitness,
 };
 use alloy_consensus::{Transaction, TxEnvelope};
-use alloy_eips::{eip2718::Decodable2718, eip7685::Requests};
+use alloy_eips::eip7685::Requests;
 use alloy_primitives::{Bytes, B128, B256};
 use alloy_rpc_types_engine::{
     ssz_engine_types::{
@@ -1121,7 +1121,7 @@ fn decode_new_payload_request(
         }
     }
 
-    let versioned_hashes = calculate_versioned_hashes(&inner.transactions)?;
+    let versioned_hashes = calculate_versioned_hashes(&payload)?;
     let sidecar = match parent_root {
         Some(parent_beacon_block_root) => {
             let cancun = CancunPayloadFields { parent_beacon_block_root, versioned_hashes };
@@ -1137,11 +1137,10 @@ fn decode_new_payload_request(
     Ok(ExecutionData::new(payload, sidecar))
 }
 
-fn calculate_versioned_hashes(transactions: &[Bytes]) -> Result<Vec<B256>, PayloadDecodeError> {
+fn calculate_versioned_hashes(payload: &ExecutionPayload) -> Result<Vec<B256>, PayloadDecodeError> {
     let mut versioned_hashes = Vec::new();
-    for transaction in transactions {
-        let transaction = TxEnvelope::decode_2718_exact(transaction.as_ref())
-            .map_err(PayloadDecodeError::InvalidTransaction)?;
+    for transaction in payload.decoded_transactions::<TxEnvelope>() {
+        let transaction = transaction.map_err(PayloadDecodeError::InvalidTransaction)?;
         if let Some(hashes) = transaction.blob_versioned_hashes() {
             versioned_hashes.extend_from_slice(hashes);
         }
