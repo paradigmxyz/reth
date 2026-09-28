@@ -274,10 +274,11 @@ where
         }
     }
 
-    // Fetches every scheduled repair again at the pivot, with the slots and code it needs. `Some`
-    // ends the pass.
+    // Fetches scheduled repairs again at the pivot, with the slots and code they need, committing
+    // each batch. `Some` ends the pass, at the latest after `ranges_per_check` commits so the pivot
+    // is checked again.
     async fn repair(&mut self) -> Result<Option<Step>, SnapSyncError> {
-        loop {
+        for _ in 0..self.ranges_per_check {
             let range = match self.accounts.next_repair().await? {
                 None => return Ok(None),
                 Some(AccountRangeStep::Verified(range)) => range,
@@ -296,6 +297,7 @@ where
                 return Ok(Some(Step::Stop))
             }
         }
+        Ok(Some(Step::Continue))
     }
 
     // Commits up to `ranges_per_check` account ranges, handing the state off once none remain.
@@ -628,6 +630,42 @@ mod tests {
         assert_eq!(*client.origins(), [key(2), B256::ZERO]);
         let provider = factory.database_provider_ro().unwrap();
         assert!(provider.snap_repairs(write).unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn repairs_yield_to_pivot_checks_between_batches() {
+        let accounts = accounts();
+        let root = state_root(&accounts);
+        let factory = hashed_factory();
+        insert_chain(&factory, 8, root);
+        let provider = factory.database_provider_rw().unwrap();
+        let pivot = provider.sealed_header(2).unwrap().unwrap().num_hash();
+        let write = provider.start_snap_attempt(SnapGeneration::new(pivot, root)).unwrap();
+        provider.start_account_coverage(write).unwrap();
+        let range = verified_range(&accounts, 0..3, B256::ZERO, &[]);
+        provider.commit_account_range(write, &range, Default::default(), Vec::new()).unwrap();
+        let mut repairs = StateRepairs::default();
+        repairs.insert_account(key(1));
+        repairs.insert_account(key(2));
+        provider.schedule_snap_repairs(write, repairs).unwrap();
+        provider.commit().unwrap();
+        let responses = [
+            account_range(1, &accounts, 0..1, &[key(1)]),
+            // The head moved past the advance window meanwhile, so the pivot moves to block 7.
+            empty_lists(1, 5),
+            account_range(2, &accounts, 1..2, &[key(2)]),
+        ];
+        let (client, bootstrap) = scripted(&factory, responses, [3, 8]);
+        let mut bootstrap = bootstrap.with_ranges_per_check(1);
+
+        let outcome = bootstrap.run().await.unwrap();
+
+        let SnapBootstrapOutcome::TrieRebuild { pivot, .. } = outcome else {
+            panic!("the state is repaired: {outcome:?}")
+        };
+        assert_eq!(pivot.number, 7);
+        assert_eq!(*client.origins(), [key(1), key(2)]);
+        assert_eq!(client.block_requests().len(), 1);
     }
 
     #[tokio::test]
