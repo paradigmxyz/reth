@@ -1311,3 +1311,52 @@ in those windows stay approximately 4.97–5.03 GHz for RocksDB; MDBX ranges fro
 longer persistence pauses also affect the temperature samples, so the data do
 not establish thermal throttling or quantify its contribution to execution.
 The window analysis is retained in stream-drift.json.
+
+### Execution phase timing (2026-09-28)
+
+Coarse timestamps were added around BAL conversion, canonical-state setup,
+worker spawning, pre/post execution hooks, the ordered commit loop, BAL assembly,
+and bundle merge. Two additional measurements bound scope cleanup and the outer
+execution call. There are no per-transaction timers. These are diagnostic builds,
+not a new uninstrumented acceptance result. All 78 targeted tests, both builds,
+workspace Clippy, and formatting passed; both backends passed 600 roots,
+persistence, restart 601, recovery, and worker/sender audits.
+
+| Metric | RocksDB | MDBX |
+| --- | ---: | ---: |
+| Execution p50 / p90 / p99 (ms) | 75.392 / 92.392 / 181.202 | 72.548 / 94.356 / 329.985 |
+| Payload p50 (ms) | 164.294 | 151.828 |
+| Root wait p50 (ms) | 77.667 | 70.624 |
+| Cumulative saves including drain (s) | 47.530 | 607.741 |
+
+| Execution phase p50 (ms) | RocksDB | MDBX |
+| --- | ---: | ---: |
+| Convert received BAL | 2.526 | 2.259 |
+| Canonical-state setup | 0.011 | 0.011 |
+| Spawn workers | 0.277 | 0.274 |
+| Pre-execution hooks | 0.059 | 0.050 |
+| Ordered commit loop | 66.679 | 64.500 |
+| Post-execution hooks | 0.071 | 0.069 |
+| Assemble rebuilt BAL | 2.001 | 2.000 |
+| Merge/take bundle | 2.842 | 2.827 |
+| Scope remainder | 0.166 | 0.170 |
+| Outer remainder | 0.074 | 0.071 |
+
+Phase medians are not additive. The paired per-block differences have medians
+of +1.899 ms in the ordered loop and +0.221 ms in BAL conversion. This locates
+most of the residual median difference before final bundle assembly; it does
+not distinguish worker execution, waiting for results, and canonical commits
+inside the loop. Pre-execution hooks have substantial tails: p99 is 105.024 ms
+for RocksDB and 222.713 ms for MDBX despite small medians.
+
+The proof and hashed-state gates were active in both builds. Ordinary BAL
+prefetch, recovery, and database background work still overlap execution.
+A subsequent diagnostic isolates prefetch without disabling the execution cache
+or changing cache use by the deferred hashed-state producer. The older
+`--engine.disable-bal-batch-io` experiment changed both behaviors.
+
+Artifacts use globaltiming backend names with
+senderisolated-deferstate-phasediag-early0-proof64-chunk80-600. Per-block phase
+CSVs and summaries are stored in each run directory; paired differences are in
+execution-phases-deferstate-comparison.json. Binaries are archived with verified
+SHA-256 hashes.
