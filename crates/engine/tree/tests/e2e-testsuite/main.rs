@@ -870,9 +870,41 @@ async fn test_engine_tree_disk_reorg_v2_e2e() -> Result<()> {
 /// pending blocks the reorg moved off the canonical chain: completing the trie at Finish from the
 /// canonical head instead fails, which takes the persistence service down with it and leaves the
 /// fork unpersisted.
+///
+/// Extending the fork afterwards validates every new payload against the unwound database, whose
+/// state trie is masked again, and persists the extension on top of it.
 #[tokio::test]
 async fn test_engine_tree_disk_reorg_with_masked_state_trie_e2e() -> Result<()> {
     reth_tracing::init_test_tracing();
-    disk_reorg_test(false, DISK_REORG_STATE_MASKING_BLOCKS).run::<EthereumNode>().await?;
+
+    disk_reorg_test(false, DISK_REORG_STATE_MASKING_BLOCKS)
+        // Node 1 extends the fork tip at block 11 by 8 blocks, which Node 0 must all accept as
+        // valid on top of the unwound database.
+        .with_action(SelectActiveNode::new(1))
+        .with_action(ProduceBlocksLocally::<EthEngineTypes>::new(8))
+        .with_action(MakeCanonical::with_active_node())
+        .with_action(CaptureBlock::new("extended_fork_tip"))
+        .with_action(
+            SendNewPayloads::<EthEngineTypes>::new()
+                .with_source_node(1)
+                .with_target_node(0)
+                .with_start_block(12)
+                .with_total_blocks(8),
+        )
+        .with_action(
+            SendForkchoiceUpdate::<EthEngineTypes>::new(
+                BlockReference::Tag("extended_fork_tip".into()),
+                BlockReference::Tag("extended_fork_tip".into()),
+                BlockReference::Tag("extended_fork_tip".into()),
+            )
+            .with_expected_status(PayloadStatusEnum::Valid)
+            .with_node_idx(0),
+        )
+        // the in-memory canonical chain now exceeds the persistence threshold again, so the
+        // extension is persisted after the unwound fork.
+        .with_action(WaitForPersistedChain::new(0, "extended_fork_tip"))
+        .run::<EthereumNode>()
+        .await?;
+
     Ok(())
 }
