@@ -94,7 +94,9 @@ impl<N, P, Evm> PrewarmCacheTask<N, P, Evm>
 where
     N: NodePrimitives,
     P: DatabaseProviderFactory + Clone + 'static,
-    P::Provider: reth_trie::state_trie_cursor::StateTrieCursorFactory
+    P::Provider: reth_trie::hashed_cursor::HashedCursorFactory
+        + reth_trie::trie_cursor::TrieCursorFactory
+        + reth_trie::state_trie_cursor::StateTrieCursorFactory
         + BlockNumReader
         + PruneCheckpointReader
         + StageCheckpointReader
@@ -590,7 +592,9 @@ impl<N, P, Evm> PrewarmContext<N, P, Evm>
 where
     N: NodePrimitives,
     P: DatabaseProviderFactory,
-    P::Provider: reth_trie::state_trie_cursor::StateTrieCursorFactory
+    P::Provider: reth_trie::hashed_cursor::HashedCursorFactory
+        + reth_trie::trie_cursor::TrieCursorFactory
+        + reth_trie::state_trie_cursor::StateTrieCursorFactory
         + BlockNumReader
         + PruneCheckpointReader
         + StageCheckpointReader

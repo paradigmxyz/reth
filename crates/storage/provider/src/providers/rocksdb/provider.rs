@@ -1,3 +1,4 @@
+mod legacy_trie;
 mod state_trie;
 use super::metrics::{RocksDBMetrics, RocksDBOperation, ROCKSDB_TABLES};
 use crate::providers::{compute_history_rank, needs_prev_shard_check, HistoryInfo};
@@ -7,6 +8,7 @@ use alloy_primitives::{
     Address, BlockNumber, TxNumber, B256,
 };
 use itertools::Itertools;
+pub use legacy_trie::{legacy_storage_key, RocksLegacyCursor};
 use metrics::Label;
 use parking_lot::Mutex;
 use rayon::prelude::*;
@@ -111,7 +113,11 @@ impl fmt::Debug for RocksDBWriteCtx {
 
 /// Complete state needs a larger shared cache than the auxiliary tables alone.
 const DEFAULT_CACHE_SIZE: usize =
-    if cfg!(feature = "state-trie-rocksdb") { 8 << 30 } else { 128 << 20 };
+    if cfg!(any(feature = "state-trie-rocksdb", feature = "legacy-trie-rocksdb")) {
+        8 << 30
+    } else {
+        128 << 20
+    };
 
 /// Default block size for `RocksDB` tables (16 KB).
 const DEFAULT_BLOCK_SIZE: usize = 16 * 1024;
@@ -361,6 +367,10 @@ impl RocksDBBuilder {
             .with_table::<tables::StoragesHistory>()
             .with_table::<tables::StateTrieAccounts>()
             .with_table::<tables::RocksStateTrieStorages>()
+            .with_table::<tables::HashedAccounts>()
+            .with_table::<tables::RocksHashedStorages>()
+            .with_table::<tables::RocksAccountsTrie>()
+            .with_table::<tables::RocksStoragesTrie>()
     }
 
     /// Enables metrics.
@@ -430,8 +440,15 @@ impl RocksDBBuilder {
                     Self::tx_hash_numbers_column_family_options(&self.block_cache)
                 } else if name == tables::BlockAccessLists::NAME {
                     Self::block_access_lists_column_family_options(&self.block_cache)
-                } else if name == tables::StateTrieAccounts::NAME ||
-                    name == tables::RocksStateTrieStorages::NAME
+                } else if [
+                    tables::StateTrieAccounts::NAME,
+                    tables::StateTrieStorages::NAME,
+                    tables::HashedAccounts::NAME,
+                    tables::HashedStorages::NAME,
+                    tables::AccountsTrie::NAME,
+                    tables::StoragesTrie::NAME,
+                ]
+                .contains(&name.as_str())
                 {
                     Self::state_trie_column_family_options(&self.block_cache)
                 } else {
@@ -500,7 +517,7 @@ impl RocksDBBuilder {
             })?;
             Ok(RocksDBProvider(
                 Arc::new(RocksDBProviderInner::Secondary { db, metrics, secondary_path }),
-                #[cfg(feature = "state-trie-rocksdb")]
+                #[cfg(any(feature = "state-trie-rocksdb", feature = "legacy-trie-rocksdb"))]
                 Default::default(),
             ))
         } else {
@@ -518,7 +535,7 @@ impl RocksDBBuilder {
                     })?;
             Ok(RocksDBProvider(
                 Arc::new(RocksDBProviderInner::ReadWrite { db, metrics }),
-                #[cfg(feature = "state-trie-rocksdb")]
+                #[cfg(any(feature = "state-trie-rocksdb", feature = "legacy-trie-rocksdb"))]
                 Default::default(),
             ))
         }
@@ -543,7 +560,7 @@ macro_rules! compress_to_buf_or_ref {
 #[derive(Debug)]
 pub struct RocksDBProvider(
     Arc<RocksDBProviderInner>,
-    #[cfg(feature = "state-trie-rocksdb")]
+    #[cfg(any(feature = "state-trie-rocksdb", feature = "legacy-trie-rocksdb"))]
     Arc<std::sync::OnceLock<parking_lot::RwLock<Arc<OwnedRocksReadSnapshot>>>>,
 );
 
@@ -805,7 +822,7 @@ impl Clone for RocksDBProvider {
     fn clone(&self) -> Self {
         Self(
             self.0.clone(),
-            #[cfg(feature = "state-trie-rocksdb")]
+            #[cfg(any(feature = "state-trie-rocksdb", feature = "legacy-trie-rocksdb"))]
             self.1.clone(),
         )
     }
@@ -852,8 +869,8 @@ impl DatabaseMetrics for RocksDBProvider {
 
 impl RocksDBProvider {
     /// The snapshot paired with the committed MDBX frontier. Readers retain it while the
-    /// next RocksDB batch is written; publication is synchronized with the MDBX commit.
-    #[cfg(feature = "state-trie-rocksdb")]
+    /// next `RocksDB` batch is written; publication is synchronized with the MDBX commit.
+    #[cfg(any(feature = "state-trie-rocksdb", feature = "legacy-trie-rocksdb"))]
     pub(crate) fn state_trie_snapshot(&self) -> &parking_lot::RwLock<Arc<OwnedRocksReadSnapshot>> {
         self.1.get_or_init(|| parking_lot::RwLock::new(Arc::new(self.owned_snapshot())))
     }
@@ -3661,7 +3678,7 @@ mod tests {
     }
 
     #[test]
-    #[cfg(feature = "state-trie-rocksdb")]
+    #[cfg(any(feature = "state-trie-rocksdb", feature = "legacy-trie-rocksdb"))]
     fn published_state_snapshot_does_not_retain_its_publisher() {
         let temp_dir = TempDir::new().unwrap();
         let provider = RocksDBBuilder::new(temp_dir.path()).with_default_tables().build().unwrap();

@@ -373,7 +373,9 @@ where
         + BalProvider
         + Clone
         + 'static,
-    P::Provider: BlockReader<Block = N::Block, Header = N::BlockHeader>
+    P::Provider: reth_trie::hashed_cursor::HashedCursorFactory
+        + reth_trie::trie_cursor::TrieCursorFactory
+        + BlockReader<Block = N::Block, Header = N::BlockHeader>
         + PruneCheckpointReader
         + StageCheckpointReader
         + ChangeSetReader

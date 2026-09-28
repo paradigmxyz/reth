@@ -72,6 +72,8 @@ pub(crate) fn compute_block_trie_updates<N, Provider>(
 where
     N: NodePrimitives,
     Provider: DBProvider
+        + reth_trie::hashed_cursor::HashedCursorFactory
+        + reth_trie::trie_cursor::TrieCursorFactory
         + ChangeSetReader
         + StorageChangeSetReader
         + PruneCheckpointReader
@@ -92,6 +94,8 @@ fn compute_block_trie_updates_inner<N, Provider, A>(
 where
     N: NodePrimitives,
     Provider: DBProvider
+        + reth_trie::hashed_cursor::HashedCursorFactory
+        + reth_trie::trie_cursor::TrieCursorFactory
         + ChangeSetReader
         + StorageChangeSetReader
         + PruneCheckpointReader
@@ -222,6 +226,8 @@ impl ChangesetCache {
     where
         N: NodePrimitives,
         P: DBProvider
+            + reth_trie::hashed_cursor::HashedCursorFactory
+            + reth_trie::trie_cursor::TrieCursorFactory
             + ChangeSetReader
             + StorageChangeSetReader
             + StageCheckpointReader
@@ -275,6 +281,8 @@ impl ChangesetCache {
     where
         N: NodePrimitives,
         P: DBProvider
+            + reth_trie::hashed_cursor::HashedCursorFactory
+            + reth_trie::trie_cursor::TrieCursorFactory
             + ChangeSetReader
             + StorageChangeSetReader
             + StageCheckpointReader
@@ -696,6 +704,8 @@ mod tests {
     ) -> TrieUpdatesSorted
     where
         Provider: DBProvider
+            + reth_trie::hashed_cursor::HashedCursorFactory
+            + reth_trie::trie_cursor::TrieCursorFactory
             + ChangeSetReader
             + StorageChangeSetReader
             + BlockNumReader
@@ -715,6 +725,8 @@ mod tests {
     ) -> TrieUpdatesSorted
     where
         Provider: DBProvider
+            + reth_trie::hashed_cursor::HashedCursorFactory
+            + reth_trie::trie_cursor::TrieCursorFactory
             + ChangeSetReader
             + StorageChangeSetReader
             + BlockNumReader
@@ -731,6 +743,8 @@ mod tests {
     ) -> TrieUpdatesSorted
     where
         Provider: DBProvider
+            + reth_trie::hashed_cursor::HashedCursorFactory
+            + reth_trie::trie_cursor::TrieCursorFactory
             + ChangeSetReader
             + StorageChangeSetReader
             + BlockNumReader
@@ -782,7 +796,10 @@ mod tests {
 
     fn seed_tip_trie_tables<Provider, A>(provider: &Provider)
     where
-        Provider: DBProvider + TrieWriter,
+        Provider: DBProvider
+            + reth_trie::hashed_cursor::HashedCursorFactory
+            + reth_trie::trie_cursor::TrieCursorFactory
+            + TrieWriter,
         A: TrieTableAdapter,
     {
         type DbStateRoot<'a, TX, A> =

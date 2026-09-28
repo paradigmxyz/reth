@@ -120,6 +120,8 @@ impl<N: NodePrimitives> OverlayManager<N> {
     ) -> ProviderResult<Arc<TrieUpdatesSorted>>
     where
         P: DBProvider
+            + reth_trie::hashed_cursor::HashedCursorFactory
+            + reth_trie::trie_cursor::TrieCursorFactory
             + ChangeSetReader
             + StorageChangeSetReader
             + StageCheckpointReader
@@ -145,6 +147,8 @@ impl<N: NodePrimitives> OverlayManager<N> {
     ) -> ProviderResult<Arc<TrieUpdatesSorted>>
     where
         P: DBProvider
+            + reth_trie::hashed_cursor::HashedCursorFactory
+            + reth_trie::trie_cursor::TrieCursorFactory
             + ChangeSetReader
             + StorageChangeSetReader
             + StageCheckpointReader
@@ -168,6 +172,8 @@ impl<N: NodePrimitives> OverlayManager<N> {
     ) -> ProviderResult<TrieUpdatesSorted>
     where
         P: DBProvider
+            + reth_trie::hashed_cursor::HashedCursorFactory
+            + reth_trie::trie_cursor::TrieCursorFactory
             + ChangeSetReader
             + StorageChangeSetReader
             + PruneCheckpointReader

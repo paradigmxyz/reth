@@ -315,6 +315,8 @@ where
     N: NodePrimitives,
     P: DatabaseProviderFactory<
             Provider: reth_trie::state_trie_cursor::StateTrieCursorFactory
+                          + reth_trie::hashed_cursor::HashedCursorFactory
+                          + reth_trie::trie_cursor::TrieCursorFactory
                           + BlockReader
                           + BlockHashReader
                           + StageCheckpointReader
@@ -1834,6 +1836,8 @@ impl<N, Types, P, Evm, V> EngineValidator<Types> for BasicEngineValidator<P, Evm
 where
     P: DatabaseProviderFactory<
             Provider: reth_trie::state_trie_cursor::StateTrieCursorFactory
+                          + reth_trie::hashed_cursor::HashedCursorFactory
+                          + reth_trie::trie_cursor::TrieCursorFactory
                           + BlockReader
                           + BlockHashReader
                           + StageCheckpointReader

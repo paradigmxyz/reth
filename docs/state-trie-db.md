@@ -159,3 +159,40 @@ trie/engine library tests in the new mode excluding the unsupported reorg test,
 trie update tests. Nightly formatting, all-feature workspace Clippy, `zepter`,
 TOML linting, and documentation builds passed. The workspace and feature engine
 runs each had one test pass on retry.
+
+## Legacy schema in RocksDB
+
+`legacy-trie-rocksdb` independently selects RocksDB for legacy hashed accounts,
+hashed storage, and compact trie branches. It does not enable `state-trie-db`.
+Execution's durable account/slot reads (including BAL batches) and proof-v2's
+hashed/trie cursors use the same committed RocksDB snapshot. The BundleState
+execution overlay, legacy trie overlay, sparse trie and hashed-state task keep
+their existing behavior. Masked persistence writes the four RocksDB column
+families rather than their MDBX counterparts.
+
+```sh
+cargo +stable build --profile profiling -p reth-trie-db --example migrate_legacy_trie
+target/profiling/examples/migrate_legacy_trie /schelk/reth/db /schelk/reth/rocksdb
+# Full persisted-record and root verification, before replay:
+target/profiling/examples/migrate_legacy_trie /schelk/reth/db /schelk/reth/rocksdb --check
+cargo +stable build --profile profiling -p reth-bb --features legacy-trie-rocksdb
+```
+
+Migration requires a stopped node and equal Finish/partial-state-trie frontiers.
+It preserves all existing tables and imports four independent tables in parallel
+through bounded SST files. Each table is verified with an ordered digest of every
+encoded key/value; proof-v2 must reproduce the source root before completion is
+recorded. A nonempty destination is rejected. Recover the snapshot before retrying
+an interrupted migration.
+
+The column families are `HashedAccounts`, `HashedStorages`, `AccountsTrie`, and
+`StoragesTrie`. Hash keys are 32 bytes; storage keys prefix the slot hash with the
+32-byte account hash. Branch paths use the 33-byte packed-nibble encoding, with
+the account hash prefixed for storage branches. Values retain the legacy account,
+compact U256, and compact branch encodings. There are no complete-trie nodes in
+these column families. Both old and packed MDBX trie-key formats are accepted.
+
+Choose one backend feature for a benchmark. When all features are compiled,
+`state-trie-rocksdb` takes precedence over `legacy-trie-rocksdb`. The same forward
+validation scope and cross-database commit limitations apply to both RocksDB
+backends. Recover before changing backends after replay.

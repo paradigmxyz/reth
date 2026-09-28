@@ -32,7 +32,7 @@ use alloy_eips::BlockHashOrNumber;
 use alloy_primitives::{
     keccak256,
     map::{hash_map, AddressSet, B256Map, HashMap},
-    Address, BlockHash, BlockNumber, StorageKey, StorageValue, TxHash, TxNumber, B256,
+    Address, BlockHash, BlockNumber, StorageKey, StorageValue, TxHash, TxNumber, B256, U256,
 };
 use itertools::Itertools;
 use parking_lot::RwLock;
@@ -211,7 +211,7 @@ pub struct DatabaseProvider<TX, N: NodeTypes> {
     /// [`Self::history_rocksdb_snapshot`].
     rocksdb_history_snapshot: OnceLock<Option<OwnedRocksReadSnapshot>>,
     /// Pinned alongside the MDBX transaction so proofs and execution share one durable view.
-    #[cfg(feature = "state-trie-rocksdb")]
+    #[cfg(any(feature = "state-trie-rocksdb", feature = "legacy-trie-rocksdb"))]
     state_trie_snapshot: Arc<OwnedRocksReadSnapshot>,
     /// Manager for state trie overlays and cached changesets.
     overlay_manager: OverlayManager<N::Primitives>,
@@ -382,7 +382,7 @@ impl<TX: DbTxMut, N: NodeTypes> DatabaseProvider<TX, N> {
         commit_order: CommitOrder,
         metrics: Arc<DatabaseProviderMetrics>,
     ) -> Self {
-        #[cfg(feature = "state-trie-rocksdb")]
+        #[cfg(any(feature = "state-trie-rocksdb", feature = "legacy-trie-rocksdb"))]
         let state_trie_snapshot = rocksdb_provider.state_trie_snapshot().read().clone();
         Self {
             tx,
@@ -391,7 +391,7 @@ impl<TX: DbTxMut, N: NodeTypes> DatabaseProvider<TX, N> {
             prune_modes,
             storage,
             storage_settings,
-            #[cfg(feature = "state-trie-rocksdb")]
+            #[cfg(any(feature = "state-trie-rocksdb", feature = "legacy-trie-rocksdb"))]
             state_trie_snapshot,
             rocksdb_provider,
             overlay_manager,
@@ -1061,7 +1061,8 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> DatabaseProvider<TX, N> {
         runtime: reth_tasks::Runtime,
         db_path: PathBuf,
         metrics: Arc<DatabaseProviderMetrics>,
-        #[cfg(feature = "state-trie-rocksdb")] state_trie_snapshot: Arc<OwnedRocksReadSnapshot>,
+        #[cfg(any(feature = "state-trie-rocksdb", feature = "legacy-trie-rocksdb"))]
+        state_trie_snapshot: Arc<OwnedRocksReadSnapshot>,
     ) -> Self {
         Self {
             tx,
@@ -1070,7 +1071,7 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> DatabaseProvider<TX, N> {
             prune_modes,
             storage,
             storage_settings,
-            #[cfg(feature = "state-trie-rocksdb")]
+            #[cfg(any(feature = "state-trie-rocksdb", feature = "legacy-trie-rocksdb"))]
             state_trie_snapshot,
             rocksdb_provider,
             overlay_manager,
@@ -2800,38 +2801,50 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
 
     #[instrument(level = "debug", target = "providers::db", skip_all)]
     fn write_hashed_state(&self, hashed_state: &HashedPostStateSorted) -> ProviderResult<()> {
-        // Write hashed account updates.
-        let mut hashed_accounts_cursor = self.tx_ref().cursor_write::<tables::HashedAccounts>()?;
-        for (hashed_address, account) in hashed_state.accounts() {
-            if let Some(account) = account {
-                hashed_accounts_cursor.upsert(*hashed_address, account)?;
-            } else if hashed_accounts_cursor.seek_exact(*hashed_address)?.is_some() {
-                hashed_accounts_cursor.delete_current()?;
-            }
+        #[cfg(all(feature = "legacy-trie-rocksdb", not(feature = "state-trie-rocksdb")))]
+        {
+            let mut batch = self.rocksdb_provider.batch();
+            batch.write_legacy_hashed_state(hashed_state)?;
+            self.set_pending_rocksdb_batch(batch.into_inner());
+            Ok(())
         }
-
-        // Write hashed storage changes.
-        let sorted_storages = hashed_state.account_storages().iter().sorted_by_key(|(key, _)| *key);
-        let mut hashed_storage_cursor =
-            self.tx_ref().cursor_dup_write::<tables::HashedStorages>()?;
-        for (hashed_address, storage) in sorted_storages {
-            for (hashed_slot, value) in storage.storage_slots_ref() {
-                let entry = StorageEntry { key: *hashed_slot, value: *value };
-
-                if let Some(db_entry) =
-                    hashed_storage_cursor.seek_by_key_subkey(*hashed_address, entry.key)? &&
-                    db_entry.key == entry.key
-                {
-                    hashed_storage_cursor.delete_current()?;
-                }
-
-                if !entry.value.is_zero() {
-                    hashed_storage_cursor.upsert(*hashed_address, &entry)?;
+        #[cfg(not(all(feature = "legacy-trie-rocksdb", not(feature = "state-trie-rocksdb"))))]
+        {
+            // Write hashed account updates.
+            let mut hashed_accounts_cursor =
+                self.tx_ref().cursor_write::<tables::HashedAccounts>()?;
+            for (hashed_address, account) in hashed_state.accounts() {
+                if let Some(account) = account {
+                    hashed_accounts_cursor.upsert(*hashed_address, account)?;
+                } else if hashed_accounts_cursor.seek_exact(*hashed_address)?.is_some() {
+                    hashed_accounts_cursor.delete_current()?;
                 }
             }
-        }
 
-        Ok(())
+            // Write hashed storage changes.
+            let sorted_storages =
+                hashed_state.account_storages().iter().sorted_by_key(|(key, _)| *key);
+            let mut hashed_storage_cursor =
+                self.tx_ref().cursor_dup_write::<tables::HashedStorages>()?;
+            for (hashed_address, storage) in sorted_storages {
+                for (hashed_slot, value) in storage.storage_slots_ref() {
+                    let entry = StorageEntry { key: *hashed_slot, value: *value };
+
+                    if let Some(db_entry) =
+                        hashed_storage_cursor.seek_by_key_subkey(*hashed_address, entry.key)? &&
+                        db_entry.key == entry.key
+                    {
+                        hashed_storage_cursor.delete_current()?;
+                    }
+
+                    if !entry.value.is_zero() {
+                        hashed_storage_cursor.upsert(*hashed_address, &entry)?;
+                    }
+                }
+            }
+
+            Ok(())
+        }
     }
 
     /// Remove the last N blocks of state.
@@ -3186,6 +3199,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
 }
 
 impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> DatabaseProvider<TX, N> {
+    #[cfg(not(all(feature = "legacy-trie-rocksdb", not(feature = "state-trie-rocksdb"))))]
     fn write_account_trie_updates<A: TrieTableAdapter>(
         tx: &TX,
         trie_updates: &TrieUpdatesSorted,
@@ -3242,21 +3256,35 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> TrieWriter for DatabaseProvider
     /// Returns the number of entries modified.
     #[instrument(level = "debug", target = "providers::db", skip_all)]
     fn write_trie_updates_sorted(&self, trie_updates: &TrieUpdatesSorted) -> ProviderResult<usize> {
-        if trie_updates.is_empty() {
-            return Ok(0)
+        #[cfg(all(feature = "legacy-trie-rocksdb", not(feature = "state-trie-rocksdb")))]
+        {
+            let mut batch = self.rocksdb_provider.batch();
+            let count = batch.write_legacy_trie_updates(trie_updates)?;
+            self.set_pending_rocksdb_batch(batch.into_inner());
+            Ok(count)
         }
+        #[cfg(not(all(feature = "legacy-trie-rocksdb", not(feature = "state-trie-rocksdb"))))]
+        {
+            if trie_updates.is_empty() {
+                return Ok(0)
+            }
 
-        // Track the number of inserted entries.
-        let mut num_entries = 0;
+            // Track the number of inserted entries.
+            let mut num_entries = 0;
 
-        reth_trie_db::with_adapter!(self, |A| {
-            Self::write_account_trie_updates::<A>(self.tx_ref(), trie_updates, &mut num_entries)?;
-        });
+            reth_trie_db::with_adapter!(self, |A| {
+                Self::write_account_trie_updates::<A>(
+                    self.tx_ref(),
+                    trie_updates,
+                    &mut num_entries,
+                )?;
+            });
 
-        num_entries +=
-            self.write_storage_trie_updates_sorted(trie_updates.storage_tries_ref().iter())?;
+            num_entries +=
+                self.write_storage_trie_updates_sorted(trie_updates.storage_tries_ref().iter())?;
 
-        Ok(num_entries)
+            Ok(num_entries)
+        }
     }
 }
 
@@ -3966,6 +3994,131 @@ impl<TX: DbTxMut, N: NodeTypes> ChainStateBlockWriter for DatabaseProvider<TX, N
     }
 }
 
+impl<TX: DbTx, N: NodeTypes> reth_trie::hashed_cursor::HashedCursorFactory
+    for DatabaseProvider<TX, N>
+{
+    type AccountCursor<'a>
+        = Box<dyn reth_trie::hashed_cursor::HashedCursor<Value = Account> + Send + 'a>
+    where
+        Self: 'a;
+    type StorageCursor<'a>
+        = Box<dyn reth_trie::hashed_cursor::HashedStorageCursor<Value = U256> + Send + 'a>
+    where
+        Self: 'a;
+
+    fn hashed_account_cursor(&self) -> Result<Self::AccountCursor<'_>, DatabaseError> {
+        #[cfg(all(feature = "legacy-trie-rocksdb", not(feature = "state-trie-rocksdb")))]
+        {
+            Ok(Box::new(self.state_trie_snapshot.as_snapshot().hashed_account_cursor()?))
+        }
+        #[cfg(not(all(feature = "legacy-trie-rocksdb", not(feature = "state-trie-rocksdb"))))]
+        {
+            Ok(Box::new(reth_trie_db::DatabaseHashedAccountCursor::new(
+                self.tx.cursor_read::<tables::HashedAccounts>()?,
+            )))
+        }
+    }
+    fn hashed_storage_cursor(
+        &self,
+        address: B256,
+    ) -> Result<Self::StorageCursor<'_>, DatabaseError> {
+        #[cfg(all(feature = "legacy-trie-rocksdb", not(feature = "state-trie-rocksdb")))]
+        {
+            Ok(Box::new(self.state_trie_snapshot.as_snapshot().hashed_storage_cursor(address)?))
+        }
+        #[cfg(not(all(feature = "legacy-trie-rocksdb", not(feature = "state-trie-rocksdb"))))]
+        {
+            Ok(Box::new(reth_trie_db::DatabaseHashedStorageCursor::new(
+                self.tx.cursor_dup_read::<tables::HashedStorages>()?,
+                address,
+            )))
+        }
+    }
+    fn hashed_account(&self, address: B256) -> Result<Option<Account>, DatabaseError> {
+        #[cfg(all(feature = "legacy-trie-rocksdb", not(feature = "state-trie-rocksdb")))]
+        {
+            self.state_trie_snapshot.as_snapshot().hashed_account(address)
+        }
+        #[cfg(not(all(feature = "legacy-trie-rocksdb", not(feature = "state-trie-rocksdb"))))]
+        {
+            self.tx.get::<tables::HashedAccounts>(address)
+        }
+    }
+    fn hashed_storage(&self, address: B256, slot: B256) -> Result<Option<U256>, DatabaseError> {
+        #[cfg(all(feature = "legacy-trie-rocksdb", not(feature = "state-trie-rocksdb")))]
+        {
+            self.state_trie_snapshot.as_snapshot().hashed_storage(address, slot)
+        }
+        #[cfg(not(all(feature = "legacy-trie-rocksdb", not(feature = "state-trie-rocksdb"))))]
+        {
+            Ok(self
+                .tx
+                .cursor_dup_read::<tables::HashedStorages>()?
+                .seek_by_key_subkey(address, slot)?
+                .filter(|entry| entry.key == slot)
+                .map(|entry| entry.value))
+        }
+    }
+    fn hashed_storage_batch(
+        &self,
+        address: B256,
+        slots: &[B256],
+    ) -> Result<Vec<Option<U256>>, DatabaseError> {
+        #[cfg(all(feature = "legacy-trie-rocksdb", not(feature = "state-trie-rocksdb")))]
+        {
+            self.state_trie_snapshot.as_snapshot().hashed_storage_batch(address, slots)
+        }
+        #[cfg(not(all(feature = "legacy-trie-rocksdb", not(feature = "state-trie-rocksdb"))))]
+        {
+            slots.iter().map(|slot| self.hashed_storage(address, *slot)).collect()
+        }
+    }
+}
+
+impl<TX: DbTx, N: NodeTypes> reth_trie::trie_cursor::TrieCursorFactory for DatabaseProvider<TX, N> {
+    type AccountTrieCursor<'a>
+        = Box<dyn reth_trie::trie_cursor::TrieCursor + Send + 'a>
+    where
+        Self: 'a;
+    type StorageTrieCursor<'a>
+        = Box<dyn reth_trie::trie_cursor::TrieStorageCursor + Send + 'a>
+    where
+        Self: 'a;
+    fn account_trie_cursor(&self) -> Result<Self::AccountTrieCursor<'_>, DatabaseError> {
+        #[cfg(all(feature = "legacy-trie-rocksdb", not(feature = "state-trie-rocksdb")))]
+        {
+            Ok(Box::new(self.state_trie_snapshot.as_snapshot().account_trie_cursor()?))
+        }
+        #[cfg(not(all(feature = "legacy-trie-rocksdb", not(feature = "state-trie-rocksdb"))))]
+        {
+            reth_trie_db::with_adapter!(self, |A| {
+                Ok(Box::new(
+                    reth_trie_db::DatabaseTrieCursorFactory::<_, A>::new(&self.tx)
+                        .account_trie_cursor()?,
+                ) as Self::AccountTrieCursor<'_>)
+            })
+        }
+    }
+    fn storage_trie_cursor(
+        &self,
+        address: B256,
+    ) -> Result<Self::StorageTrieCursor<'_>, DatabaseError> {
+        #[cfg(all(feature = "legacy-trie-rocksdb", not(feature = "state-trie-rocksdb")))]
+        {
+            Ok(Box::new(self.state_trie_snapshot.as_snapshot().storage_trie_cursor(address)?))
+        }
+        #[cfg(not(all(feature = "legacy-trie-rocksdb", not(feature = "state-trie-rocksdb"))))]
+        {
+            reth_trie_db::with_adapter!(self, |A| {
+                Ok(Box::new(
+                    reth_trie_db::DatabaseTrieCursorFactory::<_, A>::new(&self.tx)
+                        .storage_trie_cursor(address)?,
+                ) as Self::StorageTrieCursor<'_>)
+            })
+        }
+    }
+}
+
 impl<TX: DbTx, N: NodeTypes> reth_trie::state_trie_cursor::StateTrieCursorFactory
     for DatabaseProvider<TX, N>
 {
@@ -4063,14 +4216,14 @@ impl<TX: DbTx + 'static, N: NodeTypes + 'static> DBProvider for DatabaseProvider
             }
             timings.rocksdb = start.elapsed();
 
-            #[cfg(feature = "state-trie-rocksdb")]
+            #[cfg(any(feature = "state-trie-rocksdb", feature = "legacy-trie-rocksdb"))]
             let next_snapshot = Arc::new(self.rocksdb_provider.owned_snapshot());
-            #[cfg(feature = "state-trie-rocksdb")]
+            #[cfg(any(feature = "state-trie-rocksdb", feature = "legacy-trie-rocksdb"))]
             let mut published_snapshot = self.rocksdb_provider.state_trie_snapshot().write();
             let start = Instant::now();
             self.tx.commit()?;
             timings.mdbx = start.elapsed();
-            #[cfg(feature = "state-trie-rocksdb")]
+            #[cfg(any(feature = "state-trie-rocksdb", feature = "legacy-trie-rocksdb"))]
             {
                 let retired_snapshot = std::mem::replace(&mut *published_snapshot, next_snapshot);
                 drop(published_snapshot);
@@ -4902,7 +5055,6 @@ mod tests {
         provider_rw.commit().unwrap();
 
         let provider = factory.provider().unwrap();
-        let tx = provider.tx_ref();
         let finish_checkpoint = provider.get_stage_checkpoint(StageId::Finish).unwrap().unwrap();
         assert_eq!(finish_checkpoint.block_number, 2);
         assert_eq!(
@@ -4911,44 +5063,26 @@ mod tests {
         );
         assert!(provider.block_hash(2).unwrap().is_some());
 
-        let mut hashed_accounts = tx.cursor_read::<tables::HashedAccounts>().unwrap();
-        assert!(hashed_accounts.seek_exact(kept_account).unwrap().is_some());
-        assert!(hashed_accounts.seek_exact(masked_account).unwrap().is_none());
-
-        let mut hashed_storages = tx.cursor_dup_read::<tables::HashedStorages>().unwrap();
-        assert!(hashed_storages.seek_by_key_subkey(kept_storage, kept_slot).unwrap().is_some());
-        assert!(hashed_storages
-            .walk_dup(Some(masked_storage), None)
-            .unwrap()
-            .next()
-            .transpose()
-            .unwrap()
-            .is_none());
-
-        let mut account_trie = tx.cursor_read::<tables::AccountsTrie>().unwrap();
-        assert!(account_trie.seek_exact(StoredNibbles(kept_account_node)).unwrap().is_some());
-        assert!(account_trie.seek_exact(StoredNibbles(masked_account_node)).unwrap().is_none());
-
-        let mut storage_trie = tx.cursor_dup_read::<tables::StoragesTrie>().unwrap();
-        let kept_entries: Vec<_> = storage_trie
-            .walk_dup(Some(kept_storage), None)
-            .unwrap()
-            .collect::<Result<Vec<_>, _>>()
-            .unwrap();
-        assert_eq!(kept_entries.len(), 1);
-        assert_eq!(kept_entries[0].1.nibbles.0, kept_storage_node);
-
-        let masked_entries: Vec<_> = storage_trie
-            .walk_dup(Some(masked_storage), None)
-            .unwrap()
-            .collect::<Result<Vec<_>, _>>()
-            .unwrap();
-        assert!(masked_entries.is_empty());
-
+        use reth_trie::{
+            hashed_cursor::HashedCursorFactory,
+            trie_cursor::{TrieCursor, TrieCursorFactory},
+        };
+        assert!(provider.hashed_account(kept_account).unwrap().is_some());
+        assert!(provider.hashed_account(masked_account).unwrap().is_none());
+        assert_eq!(provider.hashed_storage(kept_storage, kept_slot).unwrap(), Some(U256::from(1)));
+        assert_eq!(provider.hashed_storage(masked_storage, masked_slot).unwrap(), None);
+        let mut account_trie = provider.account_trie_cursor().unwrap();
+        assert!(account_trie.seek_exact(kept_account_node).unwrap().is_some());
+        assert!(account_trie.seek_exact(masked_account_node).unwrap().is_none());
+        let mut storage_trie = provider.storage_trie_cursor(kept_storage).unwrap();
+        assert_eq!(storage_trie.seek(Nibbles::new()).unwrap().unwrap().0, kept_storage_node);
+        assert_eq!(storage_trie.next().unwrap(), None);
+        assert_eq!(
+            provider.storage_trie_cursor(masked_storage).unwrap().seek(Nibbles::new()).unwrap(),
+            None
+        );
         drop(storage_trie);
         drop(account_trie);
-        drop(hashed_storages);
-        drop(hashed_accounts);
         drop(provider);
 
         let provider_rw = factory.provider_rw().unwrap();
@@ -4962,28 +5096,61 @@ mod tests {
         assert_eq!(finish_checkpoint.block_number, 2);
         assert!(finish_checkpoint.finish_stage_checkpoint().is_none());
 
-        let mut hashed_accounts =
-            provider.tx_ref().cursor_read::<tables::HashedAccounts>().unwrap();
-        let (_, account) = hashed_accounts.seek_exact(masked_account).unwrap().unwrap();
-        assert_eq!(account.nonce, 3);
-
-        let mut hashed_storages =
-            provider.tx_ref().cursor_dup_read::<tables::HashedStorages>().unwrap();
-        let storage =
-            hashed_storages.seek_by_key_subkey(masked_storage, masked_slot).unwrap().unwrap();
-        assert_eq!(storage.value, U256::from(4));
-
-        let mut account_trie = provider.tx_ref().cursor_read::<tables::AccountsTrie>().unwrap();
-        assert!(account_trie.seek_exact(StoredNibbles(masked_account_node)).unwrap().is_some());
-
-        let mut storage_trie = provider.tx_ref().cursor_dup_read::<tables::StoragesTrie>().unwrap();
-        let masked_entries: Vec<_> = storage_trie
-            .walk_dup(Some(masked_storage), None)
+        assert_eq!(provider.hashed_account(masked_account).unwrap().unwrap().nonce, 3);
+        assert_eq!(
+            provider.hashed_storage(masked_storage, masked_slot).unwrap(),
+            Some(U256::from(4))
+        );
+        assert!(provider
+            .account_trie_cursor()
             .unwrap()
-            .collect::<Result<Vec<_>, _>>()
+            .seek_exact(masked_account_node)
+            .unwrap()
+            .is_some());
+        let mut storage_trie = provider.storage_trie_cursor(masked_storage).unwrap();
+        assert_eq!(storage_trie.seek(Nibbles::new()).unwrap().unwrap().0, masked_storage_node);
+        assert_eq!(storage_trie.next().unwrap(), None);
+    }
+
+    #[test]
+    #[cfg(all(feature = "legacy-trie-rocksdb", not(feature = "state-trie-rocksdb")))]
+    fn legacy_rocksdb_readers_keep_committed_frontier_during_writes() {
+        use reth_trie::hashed_cursor::HashedCursorFactory;
+        let factory = create_test_provider_factory();
+        let address = B256::with_last_byte(1);
+        let update = |nonce| {
+            HashedPostState::default()
+                .with_accounts([(address, Some(Account { nonce, ..Default::default() }))])
+                .into_sorted()
+        };
+        let rw = factory.provider_rw().unwrap();
+        rw.write_metadata("epoch", vec![1]).unwrap();
+        rw.write_hashed_state(&update(1)).unwrap();
+        rw.commit().unwrap();
+        let initial = factory.provider().unwrap();
+        let rw = factory.provider_rw().unwrap();
+        rw.write_metadata("epoch", vec![2]).unwrap();
+        rw.write_hashed_state(&update(2)).unwrap();
+        rw.commit_pending_rocksdb_batches().unwrap();
+        let (send, recv) = mpsc::channel();
+        let reader_factory = factory.clone();
+        let reader = std::thread::spawn(move || {
+            let provider = reader_factory.provider().unwrap();
+            send.send((
+                provider.get_metadata("epoch").unwrap(),
+                provider.hashed_account(address).unwrap().unwrap().nonce,
+            ))
             .unwrap();
-        assert_eq!(masked_entries.len(), 1);
-        assert_eq!(masked_entries[0].1.nibbles.0, masked_storage_node);
+        });
+        let during_write = recv.recv_timeout(Duration::from_secs(5));
+        rw.commit().unwrap();
+        reader.join().unwrap();
+        assert_eq!(during_write.unwrap(), (Some(vec![1]), 1));
+        assert_eq!(initial.get_metadata("epoch").unwrap(), Some(vec![1]));
+        assert_eq!(initial.hashed_account(address).unwrap().unwrap().nonce, 1);
+        let committed = factory.provider().unwrap();
+        assert_eq!(committed.get_metadata("epoch").unwrap(), Some(vec![2]));
+        assert_eq!(committed.hashed_account(address).unwrap().unwrap().nonce, 2);
     }
 
     #[test]

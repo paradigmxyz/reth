@@ -657,3 +657,36 @@ impl Table for RocksStateTrieStorages {
     type Key = crate::models::state_trie::StateTrieStorageKey;
     type Value = StateTrieNode<alloy_primitives::U256>;
 }
+
+/// Flattened account hash and slot hash for legacy storage in `RocksDB`.
+#[derive(Debug)]
+pub struct RocksHashedStorages;
+
+impl Table for RocksHashedStorages {
+    const NAME: &'static str = <HashedStorages as Table>::NAME;
+    const DUPSORT: bool = false;
+    type Key = alloy_primitives::B512;
+    type Value = crate::models::CompactU256;
+}
+
+/// Legacy branch nodes indexed by packed path in `RocksDB`.
+#[derive(Debug)]
+pub struct RocksAccountsTrie;
+
+impl Table for RocksAccountsTrie {
+    const NAME: &'static str = <AccountsTrie as Table>::NAME;
+    const DUPSORT: bool = false;
+    type Key = PackedStoredNibbles;
+    type Value = BranchNodeCompact;
+}
+
+/// Legacy storage branch nodes indexed by account hash and packed path.
+#[derive(Debug)]
+pub struct RocksStoragesTrie;
+
+impl Table for RocksStoragesTrie {
+    const NAME: &'static str = <StoragesTrie as Table>::NAME;
+    const DUPSORT: bool = false;
+    type Key = crate::models::state_trie::StateTrieStorageKey;
+    type Value = BranchNodeCompact;
+}

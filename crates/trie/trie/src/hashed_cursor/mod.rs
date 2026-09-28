@@ -41,10 +41,34 @@ pub trait HashedCursorFactory {
         &self,
         hashed_address: B256,
     ) -> Result<Self::StorageCursor<'_>, DatabaseError>;
+    /// Read an exact hashed account from this factory's snapshot.
+    fn hashed_account(&self, address: B256) -> Result<Option<Account>, DatabaseError> {
+        Ok(self
+            .hashed_account_cursor()?
+            .seek(address)?
+            .filter(|(key, _)| *key == address)
+            .map(|(_, value)| value))
+    }
+    /// Read an exact hashed storage slot from this factory's snapshot.
+    fn hashed_storage(&self, address: B256, slot: B256) -> Result<Option<U256>, DatabaseError> {
+        Ok(self
+            .hashed_storage_cursor(address)?
+            .seek(slot)?
+            .filter(|(key, _)| *key == slot)
+            .map(|(_, value)| value))
+    }
+    /// Batch exact storage reads, preserving input order and missing entries.
+    fn hashed_storage_batch(
+        &self,
+        address: B256,
+        slots: &[B256],
+    ) -> Result<Vec<Option<U256>>, DatabaseError> {
+        slots.iter().map(|slot| self.hashed_storage(address, *slot)).collect()
+    }
 }
 
 /// The cursor for iterating over hashed entries.
-#[auto_impl::auto_impl(&mut)]
+#[auto_impl::auto_impl(&mut, Box)]
 pub trait HashedCursor {
     /// Value returned by the cursor.
     type Value: std::fmt::Debug;
@@ -65,7 +89,7 @@ pub trait HashedCursor {
 }
 
 /// The cursor for iterating over hashed storage entries.
-#[auto_impl::auto_impl(&mut)]
+#[auto_impl::auto_impl(&mut, Box)]
 pub trait HashedStorageCursor: HashedCursor {
     /// Returns `true` if there are no entries for a given key.
     fn is_storage_empty(&mut self) -> Result<bool, DatabaseError>;

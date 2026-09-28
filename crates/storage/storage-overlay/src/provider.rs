@@ -19,26 +19,18 @@ use reth_storage_api::{
 };
 use reth_trie::{
     hashed_cursor::{
-        zero_destroyed_account_storage, HashedCursorFactory, HashedPostStateCursorFactory,
+        zero_destroyed_account_storage, HashedCursorFactory, HashedPostStateCursor,
+        HashedPostStateCursorFactory,
     },
     proof::{Proof, StorageProof as TrieStorageProof},
     state_trie_cursor::{InMemoryStateTrieCursor, StateTrieCursor, StateTrieCursorFactory},
-    trie_cursor::{
-        InMemoryTrieCursor, InMemoryTrieCursorFactory, TrieCursor, TrieCursorFactory,
-        TrieStorageCursor,
-    },
+    trie_cursor::{InMemoryTrieCursor, InMemoryTrieCursorFactory, TrieCursorFactory},
     updates::TrieUpdates,
     witness::TrieWitness,
     AccountProof, DecodedMultiProofV2, ExecutionWitnessMode, HashedPostState,
     HashedPostStateSorted, HashedStorage, KeccakKeyHasher, MultiProof, MultiProofTargets,
     MultiProofTargetsV2, Nibbles, StateRoot, StateTrieNode, StateTrieUpdatesSorted,
     StorageMultiProof, StorageProof, StorageRoot, TrieInput, TrieInputSorted,
-};
-use reth_trie_db::{
-    DatabaseAccountTrieCursor, DatabaseHashedCursorFactory, DatabaseProof, DatabaseStateRoot,
-    DatabaseStorageProof, DatabaseStorageRoot, DatabaseStorageTrieCursor,
-    DatabaseTrieCursorFactory, LegacyKeyAdapter, PackedAccountsTrie, PackedKeyAdapter,
-    PackedStoragesTrie,
 };
 use std::{cell::OnceCell, fmt, ops::Deref, sync::Arc, time::Instant};
 use tracing::instrument;
@@ -245,6 +237,8 @@ where
             + ChangeSetReader
             + StorageChangeSetReader
             + DBProvider
+            + HashedCursorFactory
+            + TrieCursorFactory
             + BlockNumReader
             + StorageSettingsCache,
     {
@@ -301,6 +295,8 @@ where
             + ChangeSetReader
             + StorageChangeSetReader
             + DBProvider
+            + HashedCursorFactory
+            + TrieCursorFactory
             + BlockNumReader
             + StorageSettingsCache,
     {
@@ -343,6 +339,8 @@ where
             + ChangeSetReader
             + StorageChangeSetReader
             + DBProvider
+            + HashedCursorFactory
+            + TrieCursorFactory
             + BlockNumReader,
     {
         if let Some(overlay) = self.execution_overlay.get() {
@@ -412,6 +410,8 @@ impl<Provider, N: NodePrimitives> AccountReader for OverlayStateProvider<Provide
 where
     Provider: Deref,
     Provider::Target: DBProvider
+        + HashedCursorFactory
+        + TrieCursorFactory
         + StateTrieCursorFactory
         + HistoryReader
         + StorageSettingsCache
@@ -427,7 +427,7 @@ where
             return Ok(account.as_ref().map(Account::from))
         }
         if let Some(historical_fallback) = historical_fallback {
-            if cfg!(feature = "state-trie-db") {
+            if cfg!(any(feature = "state-trie-db", feature = "legacy-trie-rocksdb")) {
                 return Err(ProviderError::UnsupportedProvider)
             }
             return match self.provider().account_history_info(
@@ -456,7 +456,11 @@ where
 impl<Provider, N: NodePrimitives> OverlayStateProvider<Provider, N>
 where
     Provider: Deref,
-    Provider::Target: DBProvider + StateTrieCursorFactory + StorageSettingsCache,
+    Provider::Target: DBProvider
+        + HashedCursorFactory
+        + TrieCursorFactory
+        + StateTrieCursorFactory
+        + StorageSettingsCache,
 {
     fn basic_account_from_db(&self, address: &Address) -> ProviderResult<Option<Account>> {
         if cfg!(feature = "state-trie-db") {
@@ -467,6 +471,8 @@ where
                     _ => None,
                 },
             ))
+        } else if cfg!(feature = "legacy-trie-rocksdb") {
+            self.provider().hashed_account(alloy_primitives::keccak256(address)).map_err(Into::into)
         } else if self.provider().cached_storage_settings().use_hashed_state() {
             let hashed_address = alloy_primitives::keccak256(address);
             self.provider()
@@ -487,6 +493,8 @@ where
     Provider: Deref,
     Provider::Target: BlockHashReader
         + DBProvider
+        + HashedCursorFactory
+        + TrieCursorFactory
         + Sized
         + StageCheckpointReader
         + PruneCheckpointReader
@@ -525,6 +533,8 @@ impl<Provider, N: NodePrimitives> BytecodeReader for OverlayStateProvider<Provid
 where
     Provider: Deref,
     Provider::Target: DBProvider
+        + HashedCursorFactory
+        + TrieCursorFactory
         + StageCheckpointReader
         + PruneCheckpointReader
         + ChangeSetReader
@@ -547,6 +557,8 @@ impl<Provider, N: NodePrimitives> StateRootProvider for OverlayStateProvider<Pro
 where
     Provider: Deref,
     Provider::Target: DBProvider
+        + HashedCursorFactory
+        + TrieCursorFactory
         + StageCheckpointReader
         + PruneCheckpointReader
         + ChangeSetReader
@@ -555,50 +567,51 @@ where
         + StorageSettingsCache,
 {
     fn state_root(&self, hashed_state: HashedPostState) -> ProviderResult<B256> {
-        reth_trie_db::with_adapter!(self.provider(), |A| {
-            let input =
-                self.build_overlay(TrieInputSorted::from_state(hashed_state.into_sorted()), false)?;
-            Ok(<DbStateRoot<'_, _, A>>::overlay_root_from_nodes(self.provider().tx(), input)?)
-        })
+        let input =
+            self.build_overlay(TrieInputSorted::from_state(hashed_state.into_sorted()), false)?;
+        Ok(StateRoot::new(
+            InMemoryTrieCursorFactory::new(self.provider(), input.nodes.as_ref()),
+            HashedPostStateCursorFactory::new(self.provider(), input.state.as_ref()),
+        )
+        .with_prefix_sets(input.prefix_sets.freeze())
+        .root()?)
     }
 
     fn state_root_from_nodes(&self, input: TrieInput) -> ProviderResult<B256> {
-        reth_trie_db::with_adapter!(self.provider(), |A| {
-            let input = self.build_overlay(TrieInputSorted::from_unsorted(input), false)?;
-            Ok(<DbStateRoot<'_, _, A> as DatabaseStateRoot<_>>::overlay_root_from_nodes(
-                self.provider().tx(),
-                input,
-            )?)
-        })
+        let input = self.build_overlay(TrieInputSorted::from_unsorted(input), false)?;
+        Ok(StateRoot::new(
+            InMemoryTrieCursorFactory::new(self.provider(), input.nodes.as_ref()),
+            HashedPostStateCursorFactory::new(self.provider(), input.state.as_ref()),
+        )
+        .with_prefix_sets(input.prefix_sets.freeze())
+        .root()?)
     }
 
     fn state_root_with_updates(
         &self,
         hashed_state: HashedPostState,
     ) -> ProviderResult<(B256, TrieUpdates)> {
-        reth_trie_db::with_adapter!(self.provider(), |A| {
-            let input =
-                self.build_overlay(TrieInputSorted::from_state(hashed_state.into_sorted()), true)?;
-            Ok(<DbStateRoot<'_, _, A>>::overlay_root_from_nodes_with_updates(
-                self.provider().tx(),
-                input,
-            )?)
-        })
+        let input =
+            self.build_overlay(TrieInputSorted::from_state(hashed_state.into_sorted()), true)?;
+        Ok(StateRoot::new(
+            InMemoryTrieCursorFactory::new(self.provider(), input.nodes.as_ref()),
+            HashedPostStateCursorFactory::new(self.provider(), input.state.as_ref()),
+        )
+        .with_prefix_sets(input.prefix_sets.freeze())
+        .root_with_updates()?)
     }
 
     fn state_root_from_nodes_with_updates(
         &self,
         input: TrieInput,
     ) -> ProviderResult<(B256, TrieUpdates)> {
-        reth_trie_db::with_adapter!(self.provider(), |A| {
-            let input = self.build_overlay(TrieInputSorted::from_unsorted(input), true)?;
-            Ok(
-                <DbStateRoot<'_, _, A> as DatabaseStateRoot<_>>::overlay_root_from_nodes_with_updates(
-                    self.provider().tx(),
-                    input,
-                )?,
-            )
-        })
+        let input = self.build_overlay(TrieInputSorted::from_unsorted(input), true)?;
+        Ok(StateRoot::new(
+            InMemoryTrieCursorFactory::new(self.provider(), input.nodes.as_ref()),
+            HashedPostStateCursorFactory::new(self.provider(), input.state.as_ref()),
+        )
+        .with_prefix_sets(input.prefix_sets.freeze())
+        .root_with_updates()?)
     }
 }
 
@@ -606,6 +619,8 @@ impl<Provider, N: NodePrimitives> StorageRootProvider for OverlayStateProvider<P
 where
     Provider: Deref,
     Provider::Target: DBProvider
+        + HashedCursorFactory
+        + TrieCursorFactory
         + StageCheckpointReader
         + PruneCheckpointReader
         + ChangeSetReader
@@ -618,18 +633,24 @@ where
         address: Address,
         hashed_storage: HashedStorage,
     ) -> ProviderResult<B256> {
-        reth_trie_db::with_adapter!(self.provider(), |A| {
-            let hashed_address = alloy_primitives::keccak256(address);
-            let input = self.build_overlay(
-                TrieInputSorted::from_state(
-                    HashedPostState::from_hashed_storage(hashed_address, hashed_storage)
-                        .into_sorted(),
-                ),
-                false,
-            )?;
-            <DbStorageRoot<'_, _, A>>::overlay_root(self.provider().tx(), address, input)
-                .map_err(|err| ProviderError::Database(err.into()))
-        })
+        let hashed_address = alloy_primitives::keccak256(address);
+        let mut input = self.build_overlay(
+            TrieInputSorted::from_state(
+                HashedPostState::from_hashed_storage(hashed_address, hashed_storage).into_sorted(),
+            ),
+            false,
+        )?;
+        let prefixes =
+            input.prefix_sets.storage_prefix_sets.remove(&hashed_address).unwrap_or_default();
+        StorageRoot::new(
+            InMemoryTrieCursorFactory::new(self.provider(), input.nodes.as_ref()),
+            HashedPostStateCursorFactory::new(self.provider(), input.state.as_ref()),
+            address,
+            prefixes.freeze(),
+            reth_trie::metrics::TrieRootMetrics::new(reth_trie::TrieType::Storage),
+        )
+        .root()
+        .map_err(|err| ProviderError::Database(err.into()))
     }
 
     fn storage_proof(
@@ -649,23 +670,23 @@ where
         slots: &[B256],
         hashed_storage: HashedStorage,
     ) -> ProviderResult<StorageMultiProof> {
-        reth_trie_db::with_adapter!(self.provider(), |A| {
-            let hashed_address = alloy_primitives::keccak256(address);
-            let input = self.build_overlay(
-                TrieInputSorted::from_state(
-                    HashedPostState::from_hashed_storage(hashed_address, hashed_storage)
-                        .into_sorted(),
-                ),
-                false,
-            )?;
-            <DbStorageProof<'_, _, A>>::overlay_storage_multiproof(
-                self.provider().tx(),
-                address,
-                slots,
-                input,
-            )
-            .map_err(ProviderError::from)
-        })
+        let hashed_address = alloy_primitives::keccak256(address);
+        let mut input = self.build_overlay(
+            TrieInputSorted::from_state(
+                HashedPostState::from_hashed_storage(hashed_address, hashed_storage).into_sorted(),
+            ),
+            false,
+        )?;
+        let prefixes =
+            input.prefix_sets.storage_prefix_sets.remove(&hashed_address).unwrap_or_default();
+        TrieStorageProof::new(
+            InMemoryTrieCursorFactory::new(self.provider(), input.nodes.as_ref()),
+            HashedPostStateCursorFactory::new(self.provider(), input.state.as_ref()),
+            address,
+        )
+        .with_prefix_set_mut(prefixes)
+        .storage_multiproof(slots.iter().map(alloy_primitives::keccak256).collect())
+        .map_err(ProviderError::from)
     }
 }
 
@@ -673,6 +694,8 @@ impl<Provider, N: NodePrimitives> StateProofProvider for OverlayStateProvider<Pr
 where
     Provider: Deref,
     Provider::Target: DBProvider
+        + HashedCursorFactory
+        + TrieCursorFactory
         + StageCheckpointReader
         + PruneCheckpointReader
         + ChangeSetReader
@@ -686,17 +709,14 @@ where
         address: Address,
         slots: &[B256],
     ) -> ProviderResult<AccountProof> {
-        reth_trie_db::with_adapter!(self.provider(), |A| {
-            let TrieInputSorted { nodes, state, prefix_sets, .. } =
-                self.build_overlay(TrieInputSorted::from_unsorted(input), false)?;
-            let input = TrieInput::new(
-                Arc::unwrap_or_clone(nodes).into(),
-                Arc::unwrap_or_clone(state).into(),
-                prefix_sets,
-            );
-            let proof = <DbProof<'_, _, A> as DatabaseProof>::from_tx(self.provider().tx());
-            proof.overlay_account_proof(input, address, slots).map_err(ProviderError::from)
-        })
+        let input = self.build_overlay(TrieInputSorted::from_unsorted(input), false)?;
+        Proof::new(
+            InMemoryTrieCursorFactory::new(self.provider(), input.nodes.as_ref()),
+            HashedPostStateCursorFactory::new(self.provider(), input.state.as_ref()),
+        )
+        .with_prefix_sets_mut(input.prefix_sets)
+        .account_proof(address, slots)
+        .map_err(ProviderError::from)
     }
 
     fn multiproof(
@@ -704,17 +724,14 @@ where
         input: TrieInput,
         targets: MultiProofTargets,
     ) -> ProviderResult<MultiProof> {
-        reth_trie_db::with_adapter!(self.provider(), |A| {
-            let TrieInputSorted { nodes, state, prefix_sets, .. } =
-                self.build_overlay(TrieInputSorted::from_unsorted(input), false)?;
-            let input = TrieInput::new(
-                Arc::unwrap_or_clone(nodes).into(),
-                Arc::unwrap_or_clone(state).into(),
-                prefix_sets,
-            );
-            let proof = <DbProof<'_, _, A> as DatabaseProof>::from_tx(self.provider().tx());
-            proof.overlay_multiproof(input, targets).map_err(ProviderError::from)
-        })
+        let input = self.build_overlay(TrieInputSorted::from_unsorted(input), false)?;
+        Proof::new(
+            InMemoryTrieCursorFactory::new(self.provider(), input.nodes.as_ref()),
+            HashedPostStateCursorFactory::new(self.provider(), input.state.as_ref()),
+        )
+        .with_prefix_sets_mut(input.prefix_sets)
+        .multiproof(targets)
+        .map_err(ProviderError::from)
     }
 
     fn multiproof_v2(
@@ -722,17 +739,14 @@ where
         input: TrieInput,
         targets: MultiProofTargetsV2,
     ) -> ProviderResult<DecodedMultiProofV2> {
-        reth_trie_db::with_adapter!(self.provider(), |A| {
-            let TrieInputSorted { nodes, state, prefix_sets, .. } =
-                self.build_overlay(TrieInputSorted::from_unsorted(input), false)?;
-            let input = TrieInput::new(
-                Arc::unwrap_or_clone(nodes).into(),
-                Arc::unwrap_or_clone(state).into(),
-                prefix_sets,
-            );
-            let proof = <DbProof<'_, _, A> as DatabaseProof>::from_tx(self.provider().tx());
-            proof.overlay_multiproof_v2(input, targets).map_err(ProviderError::from)
-        })
+        let input = self.build_overlay(TrieInputSorted::from_unsorted(input), false)?;
+        Proof::new(
+            InMemoryTrieCursorFactory::new(self.provider(), input.nodes.as_ref()),
+            HashedPostStateCursorFactory::new(self.provider(), input.state.as_ref()),
+        )
+        .with_prefix_sets_mut(input.prefix_sets)
+        .multiproof_v2(targets)
+        .map_err(ProviderError::from)
     }
 
     fn witness(
@@ -741,29 +755,21 @@ where
         target: HashedPostState,
         mode: ExecutionWitnessMode,
     ) -> ProviderResult<Vec<alloy_primitives::Bytes>> {
-        reth_trie_db::with_adapter!(self.provider(), |A| {
-            let TrieInputSorted { nodes, state, prefix_sets, .. } =
-                self.build_overlay(TrieInputSorted::from_unsorted(input), false)?;
-            let witness = TrieWitness::new(
-                InMemoryTrieCursorFactory::new(
-                    DatabaseTrieCursorFactory::<_, A>::new(self.provider().tx()),
-                    nodes.as_ref(),
-                ),
-                HashedPostStateCursorFactory::new(
-                    DatabaseHashedCursorFactory::new(self.provider().tx()),
-                    state.as_ref(),
-                ),
-            )
-            .with_prefix_sets_mut(prefix_sets)
-            .with_execution_witness_mode(mode);
-            let witness =
-                if mode.is_canonical() { witness } else { witness.always_include_root_node() };
-            let mut values: Vec<_> = witness.compute(target)?.into_values().collect();
-            if mode.is_canonical() {
-                values.sort_unstable();
-            }
-            Ok(values)
-        })
+        let TrieInputSorted { nodes, state, prefix_sets, .. } =
+            self.build_overlay(TrieInputSorted::from_unsorted(input), false)?;
+        let witness = TrieWitness::new(
+            InMemoryTrieCursorFactory::new(self.provider(), nodes.as_ref()),
+            HashedPostStateCursorFactory::new(self.provider(), state.as_ref()),
+        )
+        .with_prefix_sets_mut(prefix_sets)
+        .with_execution_witness_mode(mode);
+        let witness =
+            if mode.is_canonical() { witness } else { witness.always_include_root_node() };
+        let mut values: Vec<_> = witness.compute(target)?.into_values().collect();
+        if mode.is_canonical() {
+            values.sort_unstable();
+        }
+        Ok(values)
     }
 }
 
@@ -771,6 +777,8 @@ impl<Provider, N: NodePrimitives> HashedPostStateProvider for OverlayStateProvid
 where
     Provider: Deref,
     Provider::Target: DBProvider
+        + HashedCursorFactory
+        + TrieCursorFactory
         + StageCheckpointReader
         + PruneCheckpointReader
         + ChangeSetReader
@@ -794,10 +802,7 @@ where
 
         let overlay_state = self.build_overlay(TrieInputSorted::default(), false)?.state;
         zero_destroyed_account_storage(
-            &HashedPostStateCursorFactory::new(
-                DatabaseHashedCursorFactory::new(self.provider().tx()),
-                overlay_state.as_ref(),
-            ),
+            &HashedPostStateCursorFactory::new(self.provider(), overlay_state.as_ref()),
             bundle_state.state(),
             &mut hashed_state,
         )?;
@@ -809,6 +814,8 @@ impl<Provider, N: NodePrimitives> StateProvider for OverlayStateProvider<Provide
 where
     Provider: Deref,
     Provider::Target: DBProvider
+        + HashedCursorFactory
+        + TrieCursorFactory
         + StateTrieCursorFactory
         + HistoryReader
         + BlockHashReader
@@ -829,7 +836,7 @@ where
             return Ok(Some(value));
         }
         if let Some(historical_fallback) = historical_fallback {
-            if cfg!(feature = "state-trie-db") {
+            if cfg!(any(feature = "state-trie-db", feature = "legacy-trie-rocksdb")) {
                 return Err(ProviderError::UnsupportedProvider)
             }
             return match self.provider().storage_history_info(
@@ -861,12 +868,13 @@ where
         address: Address,
         storage_keys: &[alloy_primitives::StorageKey],
     ) -> ProviderResult<Vec<Option<alloy_primitives::StorageValue>>> {
-        if !cfg!(feature = "state-trie-db") {
+        if !cfg!(any(feature = "state-trie-db", feature = "legacy-trie-rocksdb")) {
             return storage_keys.iter().map(|key| self.storage(address, *key)).collect()
         }
         let (overlay, historical_fallback) = self.execution_overlay()?;
         let mut missing = Vec::new();
         let mut paths = Vec::new();
+        let mut hashed_slots = Vec::new();
         let mut values: Vec<_> = storage_keys
             .iter()
             .enumerate()
@@ -874,7 +882,12 @@ where
                 let value = overlay.storage_value(address, U256::from_be_bytes(key.0));
                 if value.is_none() {
                     missing.push(index);
-                    paths.push(Nibbles::unpack(alloy_primitives::keccak256(key)));
+                    let hash = alloy_primitives::keccak256(key);
+                    if cfg!(feature = "legacy-trie-rocksdb") && !cfg!(feature = "state-trie-db") {
+                        hashed_slots.push(hash);
+                    } else {
+                        paths.push(Nibbles::unpack(hash));
+                    }
                 }
                 value
             })
@@ -882,6 +895,15 @@ where
         if !missing.is_empty() {
             if historical_fallback.is_some() {
                 return Err(ProviderError::UnsupportedProvider)
+            }
+            if cfg!(feature = "legacy-trie-rocksdb") && !cfg!(feature = "state-trie-db") {
+                let stored = self
+                    .provider()
+                    .hashed_storage_batch(alloy_primitives::keccak256(address), &hashed_slots)?;
+                for (index, value) in missing.into_iter().zip(stored) {
+                    values[index] = value;
+                }
+                return Ok(values)
             }
             let nodes = self
                 .provider()
@@ -901,7 +923,11 @@ where
 impl<Provider, N: NodePrimitives> OverlayStateProvider<Provider, N>
 where
     Provider: Deref,
-    Provider::Target: DBProvider + StateTrieCursorFactory + StorageSettingsCache,
+    Provider::Target: DBProvider
+        + HashedCursorFactory
+        + TrieCursorFactory
+        + StateTrieCursorFactory
+        + StorageSettingsCache,
 {
     fn storage_from_db(
         &self,
@@ -919,6 +945,12 @@ where
                     StateTrieNode::Leaf { value, .. } => Some(value),
                     _ => None,
                 });
+            Ok(value.or_else(|| zero_if_missing.then_some(U256::ZERO)))
+        } else if cfg!(feature = "legacy-trie-rocksdb") {
+            let value = self.provider().hashed_storage(
+                alloy_primitives::keccak256(address),
+                alloy_primitives::keccak256(storage_key),
+            )?;
             Ok(value.or_else(|| zero_if_missing.then_some(U256::ZERO)))
         } else if self.provider().cached_storage_settings().use_hashed_state() {
             let hashed_address = alloy_primitives::keccak256(address);
@@ -945,6 +977,8 @@ impl<Provider, N: NodePrimitives> TrieCursorFactory for OverlayStateProvider<Pro
 where
     Provider: Deref,
     Provider::Target: DBProvider
+        + HashedCursorFactory
+        + TrieCursorFactory
         + StageCheckpointReader
         + PruneCheckpointReader
         + ChangeSetReader
@@ -953,26 +987,18 @@ where
         + StorageSettingsCache,
 {
     type AccountTrieCursor<'a>
-        = InMemoryTrieCursor<'a, Box<dyn TrieCursor + Send + 'a>>
+        = InMemoryTrieCursor<'a, <Provider::Target as TrieCursorFactory>::AccountTrieCursor<'a>>
     where
         Self: 'a;
 
     type StorageTrieCursor<'a>
-        = InMemoryTrieCursor<'a, Box<dyn TrieStorageCursor + Send + 'a>>
+        = InMemoryTrieCursor<'a, <Provider::Target as TrieCursorFactory>::StorageTrieCursor<'a>>
     where
         Self: 'a;
 
     fn account_trie_cursor(&self) -> Result<Self::AccountTrieCursor<'_>, DatabaseError> {
         let overlay = self.state_trie_overlay(true).map_err(into_database_error)?;
-        let cursor: Box<dyn TrieCursor + Send> = if self.is_v2 {
-            Box::new(DatabaseAccountTrieCursor::<_, PackedKeyAdapter>::new(
-                self.provider().tx().cursor_read::<PackedAccountsTrie>()?,
-            ))
-        } else {
-            Box::new(DatabaseAccountTrieCursor::<_, LegacyKeyAdapter>::new(
-                self.provider().tx().cursor_read::<tables::AccountsTrie>()?,
-            ))
-        };
+        let cursor = self.provider().account_trie_cursor()?;
         Ok(InMemoryTrieCursor::new_account(cursor, &overlay.input().nodes))
     }
 
@@ -981,17 +1007,7 @@ where
         hashed_address: B256,
     ) -> Result<Self::StorageTrieCursor<'_>, DatabaseError> {
         let overlay = self.state_trie_overlay(true).map_err(into_database_error)?;
-        let cursor: Box<dyn TrieStorageCursor + Send> = if self.is_v2 {
-            Box::new(DatabaseStorageTrieCursor::<_, PackedKeyAdapter>::new(
-                self.provider().tx().cursor_dup_read::<PackedStoragesTrie>()?,
-                hashed_address,
-            ))
-        } else {
-            Box::new(DatabaseStorageTrieCursor::<_, LegacyKeyAdapter>::new(
-                self.provider().tx().cursor_dup_read::<tables::StoragesTrie>()?,
-                hashed_address,
-            ))
-        };
+        let cursor = self.provider().storage_trie_cursor(hashed_address)?;
         Ok(InMemoryTrieCursor::new_storage(cursor, &overlay.input().nodes, hashed_address))
     }
 }
@@ -1000,6 +1016,8 @@ impl<Provider, N: NodePrimitives> HashedCursorFactory for OverlayStateProvider<P
 where
     Provider: Deref,
     Provider::Target: DBProvider
+        + HashedCursorFactory
+        + TrieCursorFactory
         + StageCheckpointReader
         + PruneCheckpointReader
         + ChangeSetReader
@@ -1009,7 +1027,7 @@ where
 {
     type AccountCursor<'a>
         = <HashedPostStateCursorFactory<
-        DatabaseHashedCursorFactory<&'a <Provider::Target as DbTxProvider>::Tx>,
+        &'a Provider::Target,
         &'a Arc<HashedPostStateSorted>,
     > as HashedCursorFactory>::AccountCursor<'a>
     where
@@ -1017,7 +1035,7 @@ where
 
     type StorageCursor<'a>
         = <HashedPostStateCursorFactory<
-        DatabaseHashedCursorFactory<&'a <Provider::Target as DbTxProvider>::Tx>,
+        &'a Provider::Target,
         &'a Arc<HashedPostStateSorted>,
     > as HashedCursorFactory>::StorageCursor<'a>
     where
@@ -1025,11 +1043,10 @@ where
 
     fn hashed_account_cursor(&self) -> Result<Self::AccountCursor<'_>, DatabaseError> {
         let overlay = self.state_trie_overlay(true).map_err(into_database_error)?;
-        HashedPostStateCursorFactory::new(
-            DatabaseHashedCursorFactory::new(self.provider().tx()),
+        Ok(HashedPostStateCursor::new_account(
+            self.provider().hashed_account_cursor()?,
             &overlay.input().state,
-        )
-        .hashed_account_cursor()
+        ))
     }
 
     fn hashed_storage_cursor(
@@ -1037,11 +1054,11 @@ where
         hashed_address: B256,
     ) -> Result<Self::StorageCursor<'_>, DatabaseError> {
         let overlay = self.state_trie_overlay(true).map_err(into_database_error)?;
-        HashedPostStateCursorFactory::new(
-            DatabaseHashedCursorFactory::new(self.provider().tx()),
+        Ok(HashedPostStateCursor::new_storage(
+            self.provider().hashed_storage_cursor(hashed_address)?,
             &overlay.input().state,
-        )
-        .hashed_storage_cursor(hashed_address)
+            hashed_address,
+        ))
     }
 }
 
@@ -1072,18 +1089,6 @@ struct HistoricalFallback {
     storage_history_block_number: Option<BlockNumber>,
 }
 
-type DbStateRoot<'a, TX, A> =
-    StateRoot<DatabaseTrieCursorFactory<&'a TX, A>, DatabaseHashedCursorFactory<&'a TX>>;
-type DbStorageRoot<'a, TX, A> =
-    StorageRoot<DatabaseTrieCursorFactory<&'a TX, A>, DatabaseHashedCursorFactory<&'a TX>>;
-type DbStorageProof<'a, TX, A> = TrieStorageProof<
-    'static,
-    DatabaseTrieCursorFactory<&'a TX, A>,
-    DatabaseHashedCursorFactory<&'a TX>,
->;
-type DbProof<'a, TX, A> =
-    Proof<DatabaseTrieCursorFactory<&'a TX, A>, DatabaseHashedCursorFactory<&'a TX>>;
-
 #[doc(hidden)]
 #[derive(Debug)]
 pub struct OwnedProvider<Provider>(Provider);
@@ -1107,6 +1112,8 @@ impl<Provider, N: NodePrimitives> StateTrieCursorFactory for OverlayStateProvide
 where
     Provider: Deref,
     Provider::Target: DBProvider
+        + HashedCursorFactory
+        + TrieCursorFactory
         + StateTrieCursorFactory
         + StageCheckpointReader
         + PruneCheckpointReader
@@ -1417,6 +1424,95 @@ mod tests {
         assert_eq!(account_keys(&second), vec![B256::with_last_byte(4)]);
         assert_eq!(account_node_paths(&second), vec![Nibbles::from_nibbles([4])]);
         assert_eq!(state_provider_factory.state_trie_overlay_cache.len(), 2);
+    }
+
+    #[cfg(all(feature = "legacy-trie-rocksdb", not(feature = "state-trie-db")))]
+    #[test]
+    fn legacy_rocksdb_execution_and_proof_cursors_share_backend() {
+        use reth_provider::{StateWriter, TrieWriter};
+        use reth_trie::{hashed_cursor::HashedCursor, trie_cursor::TrieCursor};
+        let (factory, blocks) = setup_frontiers(0, 0);
+        let address = Address::with_last_byte(7);
+        let slot = B256::with_last_byte(8);
+        let hashed_address = alloy_primitives::keccak256(address);
+        let hashed_slot = alloy_primitives::keccak256(slot);
+        let account = Account { nonce: 5, ..Default::default() };
+        let branch = BranchNodeCompact::new(3, 0, 0, vec![], None);
+        let path = Nibbles::from_nibbles([1]);
+        let rw = factory.provider_rw().unwrap();
+        rw.write_hashed_state(
+            &HashedPostState::default()
+                .with_accounts([(hashed_address, Some(account))])
+                .with_storages([(
+                    hashed_address,
+                    HashedStorage::from_iter([(hashed_slot, U256::from(42))]),
+                )])
+                .into_sorted(),
+        )
+        .unwrap();
+        rw.write_trie_updates_sorted(&TrieUpdatesSorted::new(
+            vec![(path, Some(branch.clone()))],
+            Default::default(),
+        ))
+        .unwrap();
+        // A backend mix-up must return distinguishable data, rather than pass on identical copies.
+        rw.tx().put::<tables::HashedAccounts>(hashed_address, Account::default()).unwrap();
+        rw.tx()
+            .put::<tables::HashedStorages>(
+                hashed_address,
+                reth_primitives_traits::StorageEntry { key: hashed_slot, value: U256::from(99) },
+            )
+            .unwrap();
+        rw.commit().unwrap();
+        let state_factory = OverlayStateProviderFactory::<_, EthPrimitives>::new(
+            factory.clone(),
+            OverlayManager::default().overlay_builder(blocks[0].recovered_block().hash()),
+        );
+        let old = state_factory.database_provider_ro().unwrap();
+        assert_eq!(old.basic_account(&address).unwrap(), Some(account));
+        assert_eq!(old.storage(address, slot).unwrap(), Some(U256::from(42)));
+        assert_eq!(
+            old.storage_batch(address, &[slot, B256::ZERO, slot]).unwrap(),
+            vec![Some(U256::from(42)), None, Some(U256::from(42))]
+        );
+        assert!(old.state_trie_overlay.get().is_none());
+        assert!(old.state_trie_overlay_with_trie_changesets.get().is_none());
+        assert!(state_factory.state_trie_overlay_cache.is_empty());
+        assert_eq!(
+            old.hashed_account_cursor().unwrap().seek(hashed_address).unwrap(),
+            Some((hashed_address, account))
+        );
+        assert_eq!(
+            old.hashed_storage_cursor(hashed_address).unwrap().seek(hashed_slot).unwrap(),
+            Some((hashed_slot, U256::from(42)))
+        );
+        assert_eq!(
+            old.account_trie_cursor().unwrap().seek_exact(path).unwrap(),
+            Some((path, branch))
+        );
+        let rw = factory.provider_rw().unwrap();
+        rw.write_hashed_state(
+            &HashedPostState::default()
+                .with_accounts([(hashed_address, None)])
+                .with_storages([(
+                    hashed_address,
+                    HashedStorage::from_iter([(hashed_slot, U256::ZERO)]),
+                )])
+                .into_sorted(),
+        )
+        .unwrap();
+        rw.write_trie_updates_sorted(&TrieUpdatesSorted::new(
+            vec![(path, None)],
+            Default::default(),
+        ))
+        .unwrap();
+        rw.commit().unwrap();
+        let fresh = state_factory.database_provider_ro().unwrap();
+        assert_eq!(fresh.basic_account(&address).unwrap(), None);
+        assert_eq!(fresh.storage(address, slot).unwrap(), None);
+        assert_eq!(fresh.account_trie_cursor().unwrap().seek_exact(path).unwrap(), None);
+        assert_eq!(old.basic_account(&address).unwrap(), Some(account));
+        assert_eq!(old.storage(address, slot).unwrap(), Some(U256::from(42)));
     }
 
     #[test]

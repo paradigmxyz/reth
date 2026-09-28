@@ -2,7 +2,7 @@
 
 use alloy_primitives::{Address, StorageKey};
 use reth_execution_cache::{CachedStateProvider, ExecutionCache, TxPoolPrewarmCacheSnapshot};
-#[cfg(not(feature = "state-trie-rocksdb"))]
+#[cfg(not(any(feature = "state-trie-rocksdb", feature = "legacy-trie-rocksdb")))]
 use reth_provider::StateProvider;
 use reth_provider::{AccountReader, BytecodeReader, ProviderResult, StateProviderBox};
 use std::{
@@ -192,9 +192,9 @@ fn prewarm_loop(rx: crossbeam_channel::Receiver<PrewarmMsg>) {
                     }
                     PrewarmTarget::Storage(addr, slots) => (addr, slots),
                 };
-                #[cfg(feature = "state-trie-rocksdb")]
+                #[cfg(any(feature = "state-trie-rocksdb", feature = "legacy-trie-rocksdb"))]
                 let _ = provider.prewarm_storage_batch(addr, &slots);
-                #[cfg(not(feature = "state-trie-rocksdb"))]
+                #[cfg(not(any(feature = "state-trie-rocksdb", feature = "legacy-trie-rocksdb")))]
                 for &slot in &slots {
                     let _ = provider.storage(addr, slot);
                 }

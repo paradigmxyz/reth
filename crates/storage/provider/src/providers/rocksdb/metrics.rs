@@ -10,6 +10,10 @@ pub(super) const ROCKSDB_TABLES: &[&str] = &[
     Tables::TransactionHashNumbers.name(),
     Tables::StoragesHistory.name(),
     Tables::AccountsHistory.name(),
+    Tables::HashedAccounts.name(),
+    Tables::HashedStorages.name(),
+    Tables::AccountsTrie.name(),
+    Tables::StoragesTrie.name(),
     Tables::StateTrieAccounts.name(),
     Tables::StateTrieStorages.name(),
 ];

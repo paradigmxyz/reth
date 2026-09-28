@@ -178,6 +178,8 @@ where
     where
         P: DatabaseProviderFactory + Clone + 'static,
         P::Provider: reth_trie::state_trie_cursor::StateTrieCursorFactory
+            + reth_trie::hashed_cursor::HashedCursorFactory
+            + reth_trie::trie_cursor::TrieCursorFactory
             + BlockNumReader
             + PruneCheckpointReader
             + StageCheckpointReader
@@ -399,6 +401,8 @@ where
     where
         P: DatabaseProviderFactory + Clone + 'static,
         P::Provider: reth_trie::state_trie_cursor::StateTrieCursorFactory
+            + reth_trie::hashed_cursor::HashedCursorFactory
+            + reth_trie::trie_cursor::TrieCursorFactory
             + BlockNumReader
             + PruneCheckpointReader
             + StageCheckpointReader

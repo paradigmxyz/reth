@@ -20,6 +20,8 @@ pub trait FullProvider<N: NodeTypesWithDB>:
     DatabaseProviderFactory<
         DB = N::DB,
         Provider: StateTrieCursorFactory
+                      + reth_trie::hashed_cursor::HashedCursorFactory
+                      + reth_trie::trie_cursor::TrieCursorFactory
                       + BlockReader
                       + StageCheckpointReader
                       + PruneCheckpointReader
@@ -59,6 +61,8 @@ impl<T, N: NodeTypesWithDB> FullProvider<N> for T where
     T: DatabaseProviderFactory<
             DB = N::DB,
             Provider: StateTrieCursorFactory
+                          + reth_trie::hashed_cursor::HashedCursorFactory
+                          + reth_trie::trie_cursor::TrieCursorFactory
                           + BlockReader
                           + StageCheckpointReader
                           + PruneCheckpointReader

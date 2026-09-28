@@ -105,6 +105,18 @@ impl Decode for B256 {
     }
 }
 
+impl Encode for alloy_primitives::B512 {
+    type Encoded = [u8; 64];
+    fn encode(self) -> Self::Encoded {
+        self.0
+    }
+}
+impl Decode for alloy_primitives::B512 {
+    fn decode(value: &[u8]) -> Result<Self, DatabaseError> {
+        Ok(Self::new(value.try_into().map_err(|_| DatabaseError::Decode)?))
+    }
+}
+
 impl Encode for String {
     type Encoded = Vec<u8>;
 

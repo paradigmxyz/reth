@@ -411,6 +411,8 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
             + ChangeSetReader
             + StorageChangeSetReader
             + DBProvider
+            + reth_trie::hashed_cursor::HashedCursorFactory
+            + reth_trie::trie_cursor::TrieCursorFactory
             + BlockNumReader
             + StorageSettingsCache,
     {
@@ -443,6 +445,8 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
         Provider: ChangeSetReader
             + StorageChangeSetReader
             + DBProvider
+            + reth_trie::hashed_cursor::HashedCursorFactory
+            + reth_trie::trie_cursor::TrieCursorFactory
             + BlockNumReader
             + StageCheckpointReader
             + PruneCheckpointReader

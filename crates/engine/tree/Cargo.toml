@@ -102,6 +102,7 @@ rand.workspace = true
 rand_08.workspace = true
 
 [features]
+legacy-trie-rocksdb = []
 state-trie-db = ["reth-trie-parallel/state-trie-db", "reth-storage-overlay/state-trie-db"]
 state-trie-rocksdb = ["state-trie-db"]
 test-utils = [
