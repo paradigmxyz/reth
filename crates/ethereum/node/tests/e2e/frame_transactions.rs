@@ -53,6 +53,15 @@ fn sender_frame(target: Address) -> Frame {
     }
 }
 
+fn post_tx_frame(target: Address) -> Frame {
+    Frame {
+        mode: FrameMode::PostTx,
+        target: FrameAddress::from(target),
+        limits: FrameLimits { execution: VERIFY_GAS, state: 0 },
+        ..Default::default()
+    }
+}
+
 /// Builds an EIP-8141 envelope using the `v || r || s` SEC256K1 signature encoding.
 fn frame_tx(signer: &PrivateKeySigner, nonce: u64, frames: Vec<Frame>) -> Bytes {
     let mut tx = TxEip8141 {
@@ -154,6 +163,29 @@ async fn self_verify_frame_is_admitted_and_mined() -> eyre::Result<()> {
     .await?;
     let mut node = nodes.pop().unwrap();
     let raw = frame_tx(&signer, 0, vec![self_verify_frame(), sender_frame(recipient())]);
+    let hash = node.rpc.inject_tx(raw).await?;
+
+    assert_mined_from_pool(&mut node, &[hash]).await
+}
+
+#[tokio::test]
+async fn post_tx_suffix_is_admitted_and_mined() -> eyre::Result<()> {
+    reth_tracing::init_test_tracing();
+    let signer = Wallet::default().wallet_gen().into_iter().next().unwrap();
+    let (mut nodes, _) = setup_engine::<EthereumNode>(
+        1,
+        chain_spec(),
+        false,
+        Default::default(),
+        eth_payload_attributes_amsterdam,
+    )
+    .await?;
+    let mut node = nodes.pop().unwrap();
+    let raw = frame_tx(
+        &signer,
+        0,
+        vec![self_verify_frame(), sender_frame(recipient()), post_tx_frame(recipient())],
+    );
     let hash = node.rpc.inject_tx(raw).await?;
 
     assert_mined_from_pool(&mut node, &[hash]).await
