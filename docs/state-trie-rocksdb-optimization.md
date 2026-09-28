@@ -1470,3 +1470,42 @@ All 78 focused tests, the profiling build used by both runs, full workspace nigh
 and nightly formatting passed. Artifacts are the `globalraterocks-*ratemb192-600`
 and `globalraterocks-*ratemb0-600` directories, `rate-native-summary.json`, and
 `execution-phases-rate-comparison.json` under the experiment directory.
+
+## Ordered result retrieval versus canonical commit
+
+A matched diagnostic pair added two clock reads per transaction and one record
+per block, dividing the ordered loop between obtaining the next output and
+committing that output. Retrieval includes buffering/ordering CPU work and
+blocked waiting; it is not a pure wait timer. All 600 records per backend matched
+the executed transaction counts, and their totals fit within the enclosing
+loop measurement. Both full replays, persistence, restart 601, recovery, affinity
+audits, 78 focused tests, profiling builds, workspace Clippy, and formatting passed.
+
+| Metric, ms unless noted | RocksDB | MDBX |
+| --- | ---: | ---: |
+| Execution p50 / p90 / p99 | 76.03 / 89.93 / 174.43 | 73.52 / 92.34 / 334.10 |
+| Ordered-result retrieval p50 | 31.09 | 30.50 |
+| Commit-body p50 | 35.37 | 33.93 |
+| Received BAL conversion p50 | 2.494 | 2.247 |
+| Unassigned loop remainder p50 | 0.068 | 0.065 |
+| Payload validation p50 | 163.80 | 154.22 |
+| State-root wait p50 | 77.83 | 70.65 |
+| Total saves, seconds | 47.40 | 637.98 |
+
+Pairing identical block numbers gives median RocksDB-minus-MDBX differences of
+1.332 ms in commit work, 0.188 ms in result retrieval, 0.243 ms in BAL conversion,
+and 2.058 ms for execution. These medians are not additive. The remaining median
+gap concentrates in canonical commit work more than worker-result retrieval.
+Means differ because MDBX has larger tails; this is diagnostic evidence, not a
+new acceptance benchmark or proof that commit work contains no database reads.
+
+Native flush/compaction intervals overlapped 224 of the 550 scored RocksDB blocks.
+The paired commit-body gap was 2.045 ms with overlap versus 0.822 ms without;
+result-retrieval gaps were 0.237 and 0.147 ms. Overall execution gaps were 3.437
+and 0.952 ms. Workload and time within replay can confound these observational
+groups. This motivates a same-binary trial lowering the native background
+threads' CPU priority, while preserving the durability and persistence checks.
+
+Artifacts use `globallooprocks`/`globalloopmdbx` with
+`deferstate-phasediag-early0-proof64-chunk80-600`, plus
+`execution-phases-loop-comparison.json` and `loop-background-overlap.json`.
