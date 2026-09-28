@@ -1088,3 +1088,27 @@ be subtracted to derive an exact wait-time increase. Holding ready results until
 a batch fills is a plausible source of the added latency. This candidate was
 rejected; original sources were restored and artifacts retained as globalbatchout
 backend runs with early0-proof64-chunk80-600.
+
+### Direct per-transaction result slots (2026-09-28)
+
+A diagnostic candidate published each BAL result directly into its indexed slot,
+with a capacity-one notification channel, instead of receiving and buffering
+out-of-order results on the engine thread. All 59 targeted tests, both profiling
+builds, workspace Clippy, formatting, both 600-payload runs, persistence,
+restart 601, recovery, and worker-count audits passed.
+
+| Metric | RocksDB | MDBX |
+| --- | ---: | ---: |
+| Execution p50 / p90 / p99 (ms) | 79.816 / 97.872 / 194.304 | 77.257 / 98.203 / 341.127 |
+| Payload p50 (ms) | 147.961 | 133.590 |
+| Root wait p50 (ms) | 57.541 | 46.551 |
+| Cumulative saves including drain (s) | 48.546 | 579.187 |
+
+RocksDB engine CPU was 77.948 ms/block and context switches were 1943.668/block
+in the 400-block counter window, versus 77.673 ms and 1841.445 switches for the
+gated-worker control. Direct slots did not materially improve RocksDB execution.
+The execution median gap remains 2.559 ms, while saving time is 91.6% lower.
+This form was rejected; artifacts and source patches are retained under
+globalslots backend names with early0-proof64-chunk80-600. A separate candidate
+will notify only when publishing the transaction that the consumer is waiting
+for, with setup failures always notifying.
