@@ -333,7 +333,7 @@ where
             while self
                 .inner
                 .provider
-                .sealed_header_by_id(BlockId::Number(BlockNumberOrTag::Latest))?
+                .sealed_header_by_id(BlockId::latest())?
                 .is_none_or(|h| h.hash() != block)
             {
                 tokio::time::sleep(Duration::from_millis(100)).await;
