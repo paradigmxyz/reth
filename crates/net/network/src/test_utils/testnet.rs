@@ -562,7 +562,7 @@ impl<C> PeerConfig<C> {
     }
 
     /// Launches the network and returns the [`Peer`] that manages it.
-    pub async fn launch<Pool>(self) -> Result<Peer<C, Pool>, NetworkError>
+    pub async fn launch(self) -> Result<Peer<C>, NetworkError>
     where
         C: BlockNumReader + ChainSpecProvider<ChainSpec: Hardforks> + Clone + 'static,
     {
