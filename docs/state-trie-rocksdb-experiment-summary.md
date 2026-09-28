@@ -1,5 +1,10 @@
 # RocksDB investigation: experiment inventory and retained changes
 
+Subsequent selection: restore the [overlapping RocksDB baseline](state-trie-rocksdb-selected-baseline.md)
+without its proof shortcut. The Rayon environment override listed below was
+reverted as part of that restoration. This inventory records the investigation
+at its conclusion; non-overlapping runs are excluded from future comparisons.
+
 This summarizes work after the original RocksDB implementation, commit
 `32bac3f7d`, on September 25–28, 2026. The user requested stopping after the
 512-versus-128 jemalloc-arena experiment. That final result is recorded below.

@@ -1,5 +1,9 @@
 # RocksDB state-trie optimization
 
+The current source has returned to the [selected overlapping RocksDB baseline](state-trie-rocksdb-selected-baseline.md),
+without the experimental proof shortcut. The results below are a historical
+record; non-overlapping runs are excluded from future comparisons.
+
 Measured on dev-brian on 2026-09-26–28, continuing the
 [latency investigation](state-trie-rocksdb-latency.md).
 Artifacts, captured binaries/source patches, and reproduction scripts are in
