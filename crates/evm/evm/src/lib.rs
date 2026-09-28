@@ -51,7 +51,7 @@ pub use execute::{
     RecoveredTx, WithTxEnv,
 };
 pub use reth_execution_types::EvmState;
-pub use revm::database_interface::OnStateHook;
+pub use revm::{database::BundleState, database_interface::OnStateHook};
 
 /// Transaction validation limits resolved for an EVM environment.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -429,20 +429,27 @@ pub trait ConfigureEvm: Clone + Debug + Send + Sync + Unpin {
         Ok(self.create_block_builder(evm, evm_env, parent, ctx))
     }
 
-    /// Applies block-level state changes required before transaction execution.
+    /// Applies block-level state changes required before transaction execution using the configured
+    /// block executor.
     #[cfg(feature = "std")]
     fn pre_block_state_changes<'a, DB>(
-        &self,
-        _db: DB,
-        _evm_env: EvmEnvFor<Self>,
+        &'a self,
+        db: DB,
+        evm_env: EvmEnvFor<Self>,
         _block_number: u64,
-        _ctx: ExecutionCtxFor<'a, Self>,
-    ) -> Result<revm::database::BundleState, Box<dyn Error + Send + Sync>>
+        ctx: ExecutionCtxFor<'a, Self>,
+    ) -> Result<BundleState, Box<dyn Error + Send + Sync>>
     where
         Self: 'a,
         DB: DynDatabase + 'a,
     {
-        Ok(revm::database::BundleState::default())
+        let factory = self.block_executor_factory();
+        let evm = factory.evm_with_env(db, evm_env);
+        let mut executor = factory.create_executor(evm, ctx);
+        executor
+            .apply_pre_execution_changes()
+            .map_err(|err| -> Box<dyn Error + Send + Sync> { Box::new(err) })?;
+        Ok(executor.into_state())
     }
 }
 

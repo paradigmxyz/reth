@@ -340,7 +340,8 @@ pub trait BlockExecutor: Sized {
     /// Returns the underlying EVM mutably.
     fn evm_mut(&mut self) -> &mut Self::Evm;
 
-    /// Sets a hook for transaction state updates emitted during block execution.
+    /// Sets a hook for state updates emitted during block execution, including pre-execution
+    /// block changes and transaction changes.
     ///
     /// Returns `true` if the hook was installed.
     fn set_state_hook(&mut self, _hook: impl FnMut(EvmState) + Send + 'static) -> bool {
@@ -366,6 +367,10 @@ pub trait BlockExecutor: Sized {
 
     /// Applies pre-execution block changes.
     fn apply_pre_execution_changes(&mut self) -> Result<(), BlockExecutionError>;
+
+    /// Consumes the executor and returns the state accumulated so far without applying
+    /// post-execution block changes.
+    fn into_state(self) -> BundleState;
 
     /// Executes a transaction, invokes `f` with the borrowed execution result, and commits
     /// changes when `f` returns [`CommitChanges::Yes`].

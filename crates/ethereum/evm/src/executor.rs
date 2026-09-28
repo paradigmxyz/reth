@@ -257,6 +257,10 @@ where
         )
     }
 
+    fn into_state(self) -> revm::database::BundleState {
+        self.block_state.into_bundle()
+    }
+
     fn validate_transaction_gas_limit(
         &mut self,
         transaction_gas_limit: u64,
@@ -860,6 +864,10 @@ where
             self.apply_segment_boundary()?;
         }
         Ok(())
+    }
+
+    fn into_state(self) -> revm::database::BundleState {
+        self.inner.into_state()
     }
 
     fn validate_transaction_gas_limit(

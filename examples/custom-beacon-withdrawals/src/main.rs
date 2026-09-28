@@ -16,8 +16,8 @@ use reth_ethereum::{
     evm::{
         primitives::{
             BlockExecutionError, BlockExecutionOutput, BlockExecutor, BlockExecutorFactory,
-            ConfigureEngineEvm, ConfigureEvm, EvmState, ExecutableTxIterator, ExecutorTx,
-            GasOutput, NextBlockEnvAttributes,
+            BundleState, ConfigureEngineEvm, ConfigureEvm, EvmState, ExecutableTxIterator,
+            ExecutorTx, GasOutput, NextBlockEnvAttributes,
         },
         EthBlockAssembler, EthBlockExecutionCtx, EthBlockExecutor, EthBlockExecutorFactory,
         EthEvmConfig, EthEvmEnv, RethEvmFactory, RethReceiptBuilder,
@@ -142,20 +142,6 @@ impl ConfigureEvm for CustomEvmConfig {
         let inner = self.inner.with_precompile_cache_disabled(disabled);
         let executor_factory = CustomBlockExecutorFactory::new(inner.executor_factory.clone());
         Self { inner, executor_factory }
-    }
-
-    fn pre_block_state_changes<'a, DB>(
-        &self,
-        db: DB,
-        evm_env: reth_ethereum::evm::primitives::EvmEnvFor<Self>,
-        block_number: u64,
-        ctx: reth_ethereum::evm::primitives::ExecutionCtxFor<'a, Self>,
-    ) -> Result<revm::database::BundleState, Box<dyn std::error::Error + Send + Sync>>
-    where
-        Self: 'a,
-        DB: reth_ethereum::evm::primitives::DynDatabase + 'a,
-    {
-        self.inner.pre_block_state_changes(db, evm_env, block_number, ctx)
     }
 }
 
@@ -304,6 +290,10 @@ impl<'a> BlockExecutor for CustomBlockExecutor<'a> {
 
     fn apply_pre_execution_changes(&mut self) -> Result<(), BlockExecutionError> {
         self.inner.apply_pre_execution_changes()
+    }
+
+    fn into_state(self) -> BundleState {
+        self.inner.into_state()
     }
 
     fn validate_transaction_gas_limit(
