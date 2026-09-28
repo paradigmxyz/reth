@@ -1674,3 +1674,48 @@ Artifacts use `globalpmc*-cachepmc-*`, including per-process/thread native CSVs,
 outputs. The next allocator-sharing test follows a separate concrete observation:
 the binary defaults to 128 jemalloc arenas while both replay processes have 451
 threads. This is a hypothesis for intervention, not a proven explanation.
+
+
+## Final allocator experiment and stop
+
+The final pair used the same verified, uninstrumented RocksDB binary with proof
+and hashed-state preparation deferred, changing only jemalloc's configured
+arena count from 512 to 128. Both runs passed 600 valid payloads, reference roots,
+full persistence, restart block 601, final recovery, and CPU/worker/sender audits.
+Startup and restart confirmed the requested allocator settings. This binary's
+experimental preparation gates are not retained in source.
+
+| Metric | 512 arenas | 128 arenas |
+| --- | ---: | ---: |
+| Execution p50 / p90 / p99, ms | 74.10 / 91.45 / 177.17 | 75.10 / 90.60 / 176.86 |
+| Payload p50 / p90 / p99, ms | 161.70 / 211.78 / 275.09 | 163.62 / 214.74 / 279.41 |
+| State-root wait p50 / p90 / p99, ms | 77.54 / 99.96 / 147.21 | 78.35 / 108.27 / 154.61 |
+| Total saves, seconds | 47.73 | 48.36 |
+| Per-save p50, seconds | 1.305 | 1.310 |
+| Engine CPU, mean ms/block over monitored 400 blocks | 75.68 | 77.46 |
+| Peak process RSS, GiB | 24.00 | 23.50 |
+| Allocator metadata at shutdown, bytes | 382,336,384 | 322,202,848 |
+
+Across the same 550 scored blocks, the paired execution difference (512 minus
+128) had median −0.518 ms and mean −0.151 ms. These differ from the difference
+between run medians. Execution tails did not improve. Shutdown statistics showed
+452 versus 129 initialized arenas and at most one versus three surviving bound
+threads per arena, with 268 surviving threads in each run. These are shutdown
+snapshots, not measurements of peak replay sharing.
+
+This single pair suggests a small median improvement, but does not establish
+allocator contention as the remaining cause or parity with MDBX. The previous
+matching uninstrumented MDBX median was 73.78 ms; no matched MDBX arena experiment
+was performed. No allocator default change is retained.
+
+At the user's request, experimentation stopped after this pair. The final
+recovery restored `/schelk` to block 24,979,000, with matching Finish and
+partial-state checkpoints and both complete-trie roots verified. Available space
+was 2,103,585,624,064 bytes. No further experiment is queued, no task processes
+remain, and the promoted snapshot was not changed.
+
+Artifacts include `*-arena512-600`, `*-arena128-600`, allocator startup/restart
+logs and JSON, `allocator-comparison.json`, and the final reset logs under
+`/home/ubuntu/state-trie-optimization-20260926`.
+The [complete experiment inventory and retained changes](state-trie-rocksdb-experiment-summary.md)
+summarizes the investigation since the original RocksDB implementation.
