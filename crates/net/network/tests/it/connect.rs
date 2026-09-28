@@ -450,34 +450,46 @@ async fn test_connect_peer_in_different_network_should_fail() {
 async fn test_reconnect_trusted() {
     reth_tracing::init_test_tracing();
 
-    let net = Testnet::create(2).await.spawn();
+    // A gracefully closed session is backed off for `incoming_ip_throttle_duration` (30s by
+    // default) before the peer is dialed again, so shorten it to observe the redial.
+    let peers_config = PeersConfig {
+        incoming_ip_throttle_duration: Duration::from_millis(100),
+        ..PeersConfig::test()
+    };
+    let net = Testnet::from_configs([
+        PeerConfig::default().with_peers_config(peers_config),
+        PeerConfig::default(),
+    ])
+    .await
+    .spawn();
     let [peer0, peer1] = net.peers_array();
     let mut listener0 = peer0.event_stream();
 
-    // Connect the two peers
+    // Only peer0 knows peer1's listener address, so peer0 has to dial any reconnect itself.
     peer0.add_peer(peer1);
-    peer1.add_peer(peer0);
     assert_eq!(listener0.next_session_established().await, Some(*peer1.peer_id()));
     assert_eq!(peer0.network().num_connected_peers(), 1);
 
-    // Add peer1 as a trusted peer
+    // Add peer1 as a trusted peer.
     peer0.add_trusted_peer(peer1);
 
-    // Trigger disconnect from peer0
+    // Trigger disconnect from peer0.
     peer0.network().disconnect_peer(*peer1.peer_id());
 
-    // Wait for the session to close
+    // Wait for the session to close.
     let (peer, _) = listener0.next_session_closed().await.unwrap();
     assert_eq!(peer, *peer1.peer_id());
     assert_eq!(peer0.network().num_connected_peers(), 0);
 
-    // Await that peer1 (trusted peer) reconnects automatically
+    // Await that peer0 redials its trusted peer once the backoff expired.
     let reconnected =
         tokio::time::timeout(Duration::from_secs(10), listener0.next_session_established())
             .await
-            .expect("trusted peer did not reconnect in time");
+            .expect("trusted peer was not redialed in time");
     assert_eq!(reconnected, Some(*peer1.peer_id()));
-    assert_eq!(peer0.network().num_connected_peers(), 1);
+    let peer = peer0.network().get_peer_by_id(*peer1.peer_id()).await.unwrap().unwrap();
+    assert!(peer.direction.is_outgoing());
+    assert_eq!(peer.kind, PeerKind::Trusted);
 }
 
 /// A peer that accepts at most `max_inbound` incoming connections.
