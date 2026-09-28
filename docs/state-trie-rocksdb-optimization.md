@@ -1162,3 +1162,43 @@ also close to the earlier 79.461 ms gated-worker control. No shard-count change
 was retained. Artifacts use globalshardrocks, with cache64shards identifying
 the control. The native shim and build/probe scripts are retained alongside the
 captured binary and its hash.
+
+### BAL and prefetch profiles (2026-09-28)
+
+Matched gated-worker runs sampled user cycles on all 32 BAL and 128 prefetch
+threads after the first 50 blocks. Both runs passed 600 payloads, persistence,
+restart 601, recovery, and worker-count audits. These instrumented runs are
+diagnostic: execution p50 was 80.693 ms with RocksDB and 78.214 ms with MDBX.
+Samples were weighted by their actual cycle period and grouped by thread ID.
+Reported lost samples were 449 of 52,911 events (0.849%) for RocksDB and 55 of
+50,314 (0.109%) for MDBX. Unknown prefetch self symbols accounted for 2.92% and
+9.92% of sampled cycles, respectively.
+
+| User-cycle estimate over the measured 550 blocks | RocksDB | MDBX |
+| --- | ---: | ---: |
+| Prefetch threads (billion cycles) | 151.324 | 45.929 |
+| BAL execution threads (billion cycles) | 1819.603 | 1744.580 |
+
+RocksDB prefetch self samples included the execution-cache filter (9.80%),
+SST index seek (7.31%), memcmp (4.68%), mutex unlock (4.53%), LZ4 decompression
+(3.93%), and LRU insertion (2.89%). XXH3 was only 0.88%. MDBX samples instead
+concentrated in tree search (25.31%), cached-provider storage (16.15%), and
+cursor seek (10.15%). These measurements identify extra read-path work, but
+they do not assign an exact share of the execution latency gap to each function.
+
+The all-600-block CPU counters use a different window, including expensive
+warmup. RocksDB prefetch consumed 59.36 s user plus 41.44 s system CPU; MDBX
+consumed 33.99 s user plus 56.70 s system CPU. Those totals must not be combined
+with the steady-state sample estimates to derive a latency decomposition.
+
+The profiles motivated testing hash-prefix grouping of large prefetch read sets.
+The existing messages group raw slots, whereas both new trie tables order
+storage by hashed slots. Native MultiGet already sorts each batch, but sorting
+eight unrelated keys cannot give them a common prefix. The proposed experiment
+keeps the first batch immediate and groups subsequent slots into small batches
+by the first hashed nibble. It remains experimental pending matched results.
+
+Artifacts use globalphase backend names ending in early0-proof64-chunk80-balprof-600.
+The raw profiles are losslessly compressed with hashes; per-run
+bal-profile-summary.json records weighted self/inclusive symbols and both the
+full steady-state window and trimmed engine-execution intervals.
