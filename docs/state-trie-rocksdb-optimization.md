@@ -1140,3 +1140,25 @@ The matched execution gap remains 2.426 ms, with saving time 91.0% lower.
 Sources were restored; captured binaries, patches and results remain under
 globalwake backend names with early0-proof64-chunk80-600. This candidate is not
 an established execution-latency improvement.
+
+### Native cache shard count (2026-09-28)
+
+A native diagnostic shim selected either 64 or 512 LRU shards from the same
+binary, keeping the 8 GiB capacity, allocator, cache policies, and table layout
+unchanged. Both native create/destroy probes and startup shard-count checks
+passed, as did both 600-payload runs, persistence, restart 601, recovery, and
+worker-count audits. The shim compiled with warnings treated as errors.
+
+| Metric | 512 shards | 64 shards |
+| --- | ---: | ---: |
+| Execution p50 / p90 / p99 (ms) | 80.234 / 97.919 / 193.468 | 79.575 / 96.245 / 190.456 |
+| Payload p50 (ms) | 147.706 | 148.234 |
+| Root wait p50 (ms) | 56.891 | 58.155 |
+| Cumulative saves including drain (s) | 49.094 | 50.058 |
+| Engine CPU (ms/block, 400-block window) | 77.727 | 78.089 |
+
+Increasing the shard count did not improve execution. The 64-shard control is
+also close to the earlier 79.461 ms gated-worker control. No shard-count change
+was retained. Artifacts use globalshardrocks, with cache64shards identifying
+the control. The native shim and build/probe scripts are retained alongside the
+captured binary and its hash.
