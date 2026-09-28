@@ -12,6 +12,7 @@
 #![cfg_attr(docsrs, feature(doc_cfg))]
 
 use reth_revm as _;
+use reth_stages_types as _;
 use revm as _;
 
 pub use reth_ethereum_engine_primitives::{EthEngineTypes, EthPayloadTypes};

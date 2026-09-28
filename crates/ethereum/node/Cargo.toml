@@ -41,6 +41,7 @@ reth-engine-primitives = { workspace = true, features = ["std"] }
 reth-payload-primitives.workspace = true
 reth-tasks.workspace = true
 reth-trie-common.workspace = true
+reth-stages-types.workspace = true
 # ethereum
 alloy-consensus.workspace = true
 alloy-eips.workspace = true
@@ -67,14 +68,12 @@ http-body-util.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 tower.workspace = true
-
 [dev-dependencies]
 reth-db.workspace = true
 reth-exex.workspace = true
 reth-e2e-test-utils.workspace = true
 reth-tasks.workspace = true
 reth-testing-utils.workspace = true
-reth-stages-types.workspace = true
 tempfile.workspace = true
 jsonrpsee-core.workspace = true
 
@@ -98,6 +97,13 @@ reth-rpc-layer.workspace = true
 
 [features]
 default = []
+account-ext = [
+    "reth-stages-types/account-ext",
+    "revm/account-ext",
+    "alloy-genesis/account-ext",
+    "alloy-rpc-types-eth/account-ext",
+    "reth-primitives-traits/account-ext",
+]
 jit = ["reth-evm-ethereum/jit"]
 gmp = ["reth-evm-ethereum/gmp"]
 asm-keccak = [
