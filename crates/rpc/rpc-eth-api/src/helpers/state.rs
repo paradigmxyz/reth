@@ -273,6 +273,7 @@ pub trait EthState: LoadState + SpawnBlocking {
     }
 
     /// Retrieves the account's balance, nonce, and code for a given address.
+    #[allow(clippy::needless_update)]
     fn get_account_info(
         &self,
         address: Address,
@@ -296,7 +297,8 @@ pub trait EthState: LoadState + SpawnBlocking {
                     .original_bytes()
             };
 
-            Ok(AccountInfo { balance, nonce, code })
+            // Account extensions are not returned over RPC yet.
+            Ok(AccountInfo { balance, nonce, code, ..Default::default() })
         })
     }
 }

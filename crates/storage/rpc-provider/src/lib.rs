@@ -1058,6 +1058,7 @@ impl<P: Clone, Node: NodeTypes, N> RpcBlockchainStateProvider<P, Node, N> {
                 balance: balance.map_err(ProviderError::other)?,
                 nonce: nonce.map_err(ProviderError::other)?,
                 code: code.map_err(ProviderError::other)?,
+                ..Default::default()
             };
 
             let code_hash = account_info.code_hash();
@@ -1081,7 +1082,7 @@ impl<P: Clone, Node: NodeTypes, N> RpcBlockchainStateProvider<P, Node, N> {
                 balance: account_info.balance,
                 nonce: account_info.nonce,
                 bytecode_hash,
-                // The remote account info does not carry the account extension.
+                // Remote account extensions are not carried yet.
                 ..Default::default()
             }))
         }

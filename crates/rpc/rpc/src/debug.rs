@@ -750,6 +750,7 @@ where
     }
 
     /// Retrieves the account's balance, nonce, and code from the given state.
+    #[allow(clippy::needless_update)]
     fn account_info<DB>(db: &mut DB, address: Address) -> Result<AccountInfo, Eth::Error>
     where
         DB: Database,
@@ -764,7 +765,13 @@ where
             db.code_by_hash(account.code_hash).map_err(Eth::Error::from_eth_err)?.original_bytes()
         };
 
-        Ok(AccountInfo { balance: account.balance, nonce: account.nonce, code })
+        // Account extensions are not returned over RPC yet.
+        Ok(AccountInfo {
+            balance: account.balance,
+            nonce: account.nonce,
+            code,
+            ..Default::default()
+        })
     }
 
     /// Returns the code associated with a given hash at the specified block ID. If no code is

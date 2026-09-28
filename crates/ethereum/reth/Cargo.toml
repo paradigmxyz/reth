@@ -61,6 +61,9 @@ account-ext = [
     "reth-ethereum-cli?/account-ext",
     "reth-stages-types/account-ext",
     "revm/account-ext",
+    "alloy-rpc-types-eth?/account-ext",
+    "reth-codecs?/account-ext",
+    "reth-primitives-traits/account-ext",
 ]
 std = [
     "reth-chainspec/std",
