@@ -1544,3 +1544,31 @@ performance cause. Address/symbol normalization does not compare referenced data
 called helper bodies, or code placement. These artifacts are `codegen-loop-*`
 and `codegen-commit-*`; the earlier identical EVM transaction disassembly must
 not be generalized to the entire execution path.
+
+## Prefetch concurrency with deferred state preparation
+
+A same-binary 32-versus-128 prefetch-worker pair retained the fully deferred
+proof and hashed-state preparation used in the recent diagnostics. This differs
+from the earlier 32-worker trial with concurrent proof work. All 78 focused tests,
+the profiling build, workspace Clippy, formatting, both 600-block replays,
+persistence, restart 601, recovery, and pool/sender audits passed. Native background
+threads were at nice 0 in both initial and end-of-replay audits.
+
+| Metric | 32 workers | 128 workers |
+| --- | ---: | ---: |
+| Execution p50 / p90 / p99, ms | 75.42 / 95.16 / 177.11 | 75.69 / 91.49 / 177.11 |
+| Ordered-result retrieval p50, ms | 29.84 | 31.50 |
+| Commit-body p50, ms | 36.29 | 35.47 |
+| Payload validation p50, ms | 162.91 | 163.84 |
+| State-root wait p50, ms | 76.87 | 77.41 |
+| Total saves, seconds | 47.02 | 48.48 |
+
+The small median improvement is insufficient for parity with the latest matched
+MDBX diagnostic (73.52 ms), and p90 worsened. Result retrieval improved while
+commit work became slower. The prefetch-count override is not retained.
+
+Both read-only post-shutdown stats reports show the same 2.7 GiB estimated pending
+storage compaction, 2 KiB storage memtables, and 244.6 MiB account memtables seen
+in the nice-19 trial. That backlog cannot be attributed to lowering native
+priority. Artifacts use `globalprefcountrocks-*pref32-600` and `pref128-600`, with
+`execution-phases-prefcount-comparison.json` preserving the paired phase analysis.
