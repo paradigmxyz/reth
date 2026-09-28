@@ -508,7 +508,7 @@ impl<N: NodePrimitives> OverlayManager<N> {
             return match entry {
                 OverlayCacheEntry::Ready(input) => Ok(Some(input)),
                 OverlayCacheEntry::Computing(_) if cache_config.precompute => Ok(None),
-                OverlayCacheEntry::Computing(waiter) => Ok(Some(waiter.wait())),
+                OverlayCacheEntry::Computing(waiter) => Ok(Some(waiter.wait(metrics))),
             }
         }
         span.record("cache_reused", false);
@@ -570,7 +570,7 @@ impl<N: NodePrimitives> OverlayManager<N> {
 
         match action {
             CacheAction::Ready(input) => Ok(Some(input)),
-            CacheAction::Wait(waiter) => Ok(Some(waiter.wait())),
+            CacheAction::Wait(waiter) => Ok(Some(waiter.wait(metrics))),
             CacheAction::Compute(waiter) => {
                 let parent_input = blocks.first().and_then(|block| {
                     let parent_hash = block.recovered_block().parent_hash();
@@ -825,8 +825,11 @@ impl<T> OverlayWaiter<T> {
         Self { input: OnceLock::new() }
     }
 
-    fn wait(&self) -> Arc<T> {
-        Arc::clone(self.input.wait())
+    fn wait(&self, metrics: &impl OverlayCacheMetrics) -> Arc<T> {
+        let start = Instant::now();
+        let input = self.input.wait();
+        metrics.record_wait_duration(start.elapsed());
+        Arc::clone(input)
     }
 
     fn finish(&self, computed: Arc<T>) {
@@ -1011,6 +1014,7 @@ fn compute_execution_overlay_inner<N: NodePrimitives>(
 mod tests {
     use super::*;
     use alloy_primitives::{map::HashMap, Address, U256};
+    use metrics::{Histogram, HistogramFn};
     use reth_chain_state::{test_utils::TestBlockBuilder, ExecutedBlock, SparseTrie};
     use reth_ethereum_primitives::EthPrimitives;
     use reth_primitives_traits::Account;
@@ -1606,5 +1610,82 @@ mod tests {
             .execution_overlay_for_parent(blocks[2].recovered_block().hash(), anchor_hash)
             .unwrap();
         assert_eq!(execution.accounts().len(), 1);
+    }
+
+    #[test]
+    fn records_state_trie_overlay_wait_duration() {
+        let observations = Arc::new(WaitObservations::default());
+        let metrics = StateTrieOverlayMetrics {
+            overlay_wait_duration_seconds: Histogram::from_arc(Arc::clone(&observations)),
+            ..Default::default()
+        };
+        assert_overlay_wait_duration(metrics, observations);
+    }
+
+    #[test]
+    fn records_execution_overlay_wait_duration() {
+        let observations = Arc::new(WaitObservations::default());
+        let metrics = ExecutionOverlayMetrics {
+            overlay_wait_duration_seconds: Histogram::from_arc(Arc::clone(&observations)),
+            ..Default::default()
+        };
+        assert_overlay_wait_duration(metrics, observations);
+    }
+
+    fn assert_overlay_wait_duration(
+        metrics: impl OverlayCacheMetrics + Sync,
+        observations: Arc<WaitObservations>,
+    ) {
+        let manager = OverlayManager::<EthPrimitives>::default();
+        let parent_state = BlockState::new(test_blocks().remove(0));
+        let key = OverlayCacheKey {
+            anchor_hash: parent_state.block_ref().recovered_block().parent_hash(),
+            tip_hash: parent_state.hash(),
+        };
+        let cache = OverlayCache::<()>::default();
+        let waiter = Arc::new(OverlayWaiter::new());
+        cache.entries.insert(key, OverlayCacheEntry::Computing(Arc::clone(&waiter)));
+        let lookup = |precompute| {
+            manager.get_or_compute_overlay(
+                &cache,
+                &metrics,
+                key.anchor_hash,
+                &parent_state,
+                OverlayCacheConfig { precompute, write_to_cache: true },
+                |_, _| panic!("cached overlay must not be recomputed"),
+            )
+        };
+
+        assert!(lookup(true).unwrap().is_none());
+        assert!(observations.0.lock().is_empty());
+
+        thread::scope(|scope| {
+            let (tx, rx) = mpsc::channel();
+            let lookup = &lookup;
+            scope.spawn(move || tx.send(lookup(false)).unwrap());
+            let pending = rx.recv_timeout(Duration::from_millis(50));
+            let recorded_while_waiting = observations.0.lock().clone();
+            waiter.finish(Arc::new(()));
+            assert!(matches!(pending, Err(mpsc::RecvTimeoutError::Timeout)));
+            assert!(recorded_while_waiting.is_empty());
+            assert!(rx.recv_timeout(Duration::from_secs(1)).unwrap().unwrap().is_some());
+        });
+
+        let recorded = observations.0.lock().clone();
+        assert_eq!(recorded.len(), 1);
+        assert!(recorded[0] > 0.0);
+
+        cache.entries.insert(key, OverlayCacheEntry::Ready(Arc::new(())));
+        assert!(lookup(false).unwrap().is_some());
+        assert_eq!(*observations.0.lock(), recorded);
+    }
+
+    #[derive(Default)]
+    struct WaitObservations(Mutex<Vec<f64>>);
+
+    impl HistogramFn for WaitObservations {
+        fn record(&self, value: f64) {
+            self.0.lock().push(value);
+        }
     }
 }
