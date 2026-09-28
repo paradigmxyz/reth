@@ -27,7 +27,7 @@ pub const DEFAULT_STORAGE_ACCOUNTS: usize = 128;
 /// however large a contract is, and a download resumes from the persisted progress.
 pub struct StorageRangeDownload<C, F> {
     context: DownloadContext<C, F>,
-    // Contracts asked for per request.
+    // Contracts asked for per request, and scheduled slots fetched again per repair batch.
     max_accounts: usize,
 }
 
@@ -46,7 +46,8 @@ impl<C, F> StorageRangeDownload<C, F> {
         self
     }
 
-    /// Returns this download asking for at most `max_accounts` contracts per request, at least one.
+    /// Returns this download asking for at most `max_accounts` contracts per request, at least one,
+    /// and fetching as many scheduled slots again per repair batch.
     pub const fn with_max_accounts(mut self, max_accounts: usize) -> Self {
         self.max_accounts = if max_accounts == 0 { 1 } else { max_accounts };
         self
@@ -113,10 +114,11 @@ where
         Ok(StorageRangeStep::Committed(committed))
     }
 
-    /// Fetches the pivot's values of the slots scheduled for repair at `range`'s origin, zero
-    /// where its storage holds none.
+    /// Fetches the pivot's values of the next batch of slots scheduled for repair at `range`'s
+    /// origin, zero where its storage holds none.
     ///
-    /// `Ok(None)` when a peer did not serve one, leaving the account scheduled.
+    /// The account commits with each batch, so a large repair persists its progress as it goes.
+    /// `Ok(None)` when a peer did not serve one, leaving the batch scheduled.
     pub async fn repair_slots(
         &mut self,
         range: &VerifiedRange,
@@ -131,7 +133,7 @@ where
         };
 
         let mut values = Vec::new();
-        for slot in repairs.slots(account) {
+        for slot in repairs.slots(account).take(self.max_accounts) {
             let request = GetStorageRangesMessage {
                 request_id: self.context.next_request_id(),
                 root_hash: batch.state_root(),
@@ -553,5 +555,21 @@ mod tests {
         let (_, mut download) = download([storage_ranges(1, &[], &[], &[])], factory);
 
         assert_eq!(download.repair_slots(&range).await.unwrap(), None);
+    }
+
+    #[tokio::test]
+    async fn repair_slots_are_fetched_in_bounded_batches() {
+        let accounts = accounts();
+        let (factory, range) = repairing(&accounts, &[key(1), key(5)]);
+        let large = large();
+        let responses = [storage_ranges(1, &[&large[..1]], &large, &[key(1)])];
+        let (client, download) = download(responses, factory);
+        let mut download = download.with_max_accounts(1);
+
+        let values = download.repair_slots(&range).await.unwrap();
+
+        // Key 5 waits for the next batch, after the account commits this one.
+        assert_eq!(values, Some(vec![(key(1), U256::from(11))]));
+        assert_eq!(*client.storage_requests(), [(vec![key(2)], key(1))]);
     }
 }
