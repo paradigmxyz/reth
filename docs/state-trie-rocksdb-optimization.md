@@ -1360,3 +1360,41 @@ senderisolated-deferstate-phasediag-early0-proof64-chunk80-600. Per-block phase
 CSVs and summaries are stored in each run directory; paired differences are in
 execution-phases-deferstate-comparison.json. Binaries are archived with verified
 SHA-256 hashes.
+
+### Isolating BAL read-set prefetch (2026-09-28)
+
+A dedicated experimental switch suppressed ordinary BAL read-set prefetch while
+leaving the execution cache and the deferred hashed-state producer's cache reads
+enabled. All 600 per-block diagnostic events confirmed those settings on both
+backends. Both builds, all 78 targeted tests, workspace Clippy, formatting, 600
+roots, persistence, restart 601, recovery, and worker/sender audits passed.
+
+| Metric, prefetch disabled | RocksDB | MDBX |
+| --- | ---: | ---: |
+| Execution p50 / p90 / p99 (ms) | 85.290 / 155.328 / 220.896 | 99.795 / 208.208 / 388.648 |
+| Payload p50 (ms) | 173.980 | 182.431 |
+| Root wait p50 (ms) | 77.180 | 69.735 |
+| Cumulative saves including drain (s) | 45.518 | 574.383 |
+| BAL conversion p50 (ms) | 2.134 | 1.983 |
+| Ordered commit loop p50 (ms) | 77.243 | 88.815 |
+
+Compared with the preceding instrumented controls, removing prefetch increases
+execution p50 by 9.898 ms for RocksDB and 27.247 ms for MDBX. BAL conversion gets
+faster on both, but the ordered loop regresses. Root wait remains close to the
+controls. Prefetch therefore provides a substantial net benefit; its removal is
+rejected. RocksDB's lead over the slower, prefetch-disabled MDBX run is not an
+acceptance win against the faster prefetch-enabled control.
+
+Prefetch CPU falls to zero. Across all 600 blocks, BAL-pool CPU rises from
+710.15 to 818.32 ms/block for RocksDB and from 697.85 to 772.30 ms/block for
+MDBX. These CPU totals include warmup and deferred state preparation and are
+not an execution-wall-time decomposition. The experiment establishes the net
+benefit of prefetch under the gated scheduling policy; it does not by itself
+identify how much remaining latency comes from worker reads, result waiting,
+canonical commits, or memory contention.
+
+Artifacts use globalnopref backend names with
+senderisolated-deferstate-skipbalpref-phasediag-early0-proof64-chunk80-600.
+Per-block cache-isolation checks, phase data, captured patches, and verified
+compressed binaries are retained. Paired phase differences are in
+execution-phases-nopref-comparison.json.
