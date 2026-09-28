@@ -156,7 +156,7 @@ use reth_provider::{
     BlockExecutionOutput, BlockHashReader, BlockReader, ChangeSetReader, DatabaseProviderFactory,
     DatabaseProviderROFactory, EvmStateProvider, EvmStateProviderBox, HashedPostStateProvider,
     HistoryReader, ProviderError, PruneCheckpointReader, StageCheckpointReader, StateProvider,
-    StateProviderFactory, StateReader, StateRootProvider, StorageChangeSetReader,
+    StateProviderBox, StateProviderFactory, StateReader, StateRootProvider, StorageChangeSetReader,
     StorageSettingsCache,
 };
 use reth_revm::db::{states::bundle_state::BundleRetention, BundleAccount, State};
