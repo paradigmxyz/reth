@@ -4,9 +4,9 @@
 //! state it describes, and a block whose list is still missing leaves every later one pending.
 
 use crate::{
-    common::SnapRecord, AccountCoverage, BalStateUpdate, DownloadedAccount, SnapAccountStore,
-    SnapAttemptStore, SnapBytecodeStore, SnapStorageStore, SnapSyncError, SnapWrite,
-    StorageProgress,
+    common::SnapRecord, repair::StoredRepairs, AccountCoverage, BalStateUpdate, DownloadedAccount,
+    SnapAccountStore, SnapAttemptStore, SnapBytecodeStore, SnapStorageStore, SnapSyncError,
+    SnapWrite, StorageProgress,
 };
 use alloy_eip7928::AccountChanges;
 use alloy_eips::BlockNumHash;
@@ -271,6 +271,14 @@ impl<T: MetadataProvider> SnapCatchUpStore for T {
         }
         self.commit_bytecodes(write, bytecodes.into_iter().collect())?;
         self.write_hashed_state(&state.into_sorted())?;
+        // A canonical list overwrites the stale values of the fields it changes.
+        let mut repairs = self.snap_repairs(write)?;
+        if !repairs.is_empty() {
+            for changes in bal {
+                repairs.resolve_changes(keccak256(changes.address()), changes);
+            }
+            StoredRepairs::store(self, write.attempt(), repairs)?;
+        }
         advanced.write(self, write.attempt())?;
         Ok(advanced)
     }
@@ -283,9 +291,11 @@ mod tests {
         test_utils::{
             account, hashed_factory, key, state_root, storage_root_of, BalChain, SnapStateSnapshot,
         },
-        SnapAccountStore, SnapGeneration, StorageChunk,
+        SnapAccountStore, SnapGeneration, StateRepairs, StorageChunk,
     };
-    use alloy_eip7928::{BalanceChange, BlockAccessIndex, CodeChange, SlotChanges, StorageChange};
+    use alloy_eip7928::{
+        BalanceChange, BlockAccessIndex, CodeChange, NonceChange, SlotChanges, StorageChange,
+    };
     use alloy_primitives::{bytes, keccak256, map::B256Map, Address, Bytes, U256};
     use reth_primitives_traits::Account;
     use reth_provider::{
@@ -751,5 +761,30 @@ mod tests {
                 version: Some(0)
             })
         ));
+    }
+
+    #[test]
+    fn a_list_resolves_the_repairs_it_overwrites() {
+        let accounts = accounts();
+        let (factory, write) = started(&accounts, accounts.len());
+        let provider = factory.database_provider_rw().unwrap();
+        // The orphaned branch changed the balance and the nonce.
+        let orphaned = AccountChanges::new(CHANGED)
+            .with_balance_change(BalanceChange::new(index(1), U256::from(1)))
+            .with_nonce_change(NonceChange::new(index(1), 1));
+        let mut repairs = StateRepairs::default();
+        repairs.insert_changes(keccak256(CHANGED), &orphaned);
+        provider.schedule_snap_repairs(write, repairs).unwrap();
+        let (block, parent) = block(2);
+
+        // The new branch changes the balance only.
+        provider.commit_block_access_list(write, block, parent, &credit(10)).unwrap();
+
+        let mut expected = StateRepairs::default();
+        expected.insert_changes(
+            keccak256(CHANGED),
+            &AccountChanges::new(CHANGED).with_nonce_change(NonceChange::new(index(1), 1)),
+        );
+        assert_eq!(provider.snap_repairs(write).unwrap(), expected);
     }
 }

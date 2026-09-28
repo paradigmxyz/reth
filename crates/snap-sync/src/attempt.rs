@@ -5,11 +5,14 @@
 //! refused.
 
 use crate::{
-    account::StoredCoverage, common::SnapRecord, repair::StoredRepairs, storage::StoredProgress,
-    verify::StoredRebuild, CatchUpProgress, SnapGeneration, SnapSyncError,
+    account::StoredCoverage, common::SnapRecord, reorg::StoredAncestry, repair::StoredRepairs,
+    storage::StoredProgress, verify::StoredRebuild, CatchUpProgress, SnapCatchUpStore,
+    SnapGeneration, SnapSyncError,
 };
+use alloy_eips::BlockNumHash;
 use reth_storage_api::{
-    BlockHashReader, MetadataProvider, MetadataWriter, SnapAttempt, SnapAttemptId, StorageSettings,
+    BlockHashReader, HeaderProvider, MetadataProvider, MetadataWriter, SnapAttempt, SnapAttemptId,
+    StorageSettings,
 };
 use serde::{Deserialize, Serialize};
 
@@ -22,7 +25,7 @@ pub trait SnapAttemptStore {
     /// progress it kept, with its catch-up progress at that pivot.
     fn start_snap_attempt(&self, generation: SnapGeneration) -> Result<SnapWrite, SnapSyncError>
     where
-        Self: MetadataWriter;
+        Self: MetadataWriter + HeaderProvider;
 
     /// Returns the write an unfinished attempt accepts, if one owns the persisted state.
     fn active_snap_write(&self) -> Result<Option<SnapWrite>, SnapSyncError>;
@@ -51,7 +54,7 @@ pub trait SnapAttemptStore {
         generation: SnapGeneration,
     ) -> Result<SnapWrite, SnapSyncError>
     where
-        Self: MetadataWriter + BlockHashReader;
+        Self: MetadataWriter + HeaderProvider + BlockHashReader;
 
     /// Marks the attempt's downloaded state verified.
     fn verify_snap_attempt(&self, write: SnapWrite) -> Result<(), SnapSyncError>
@@ -62,6 +65,21 @@ pub trait SnapAttemptStore {
     fn abandon_snap_attempt(&self) -> Result<(), SnapSyncError>
     where
         Self: MetadataWriter;
+
+    /// Re-anchors an attempt whose pivot a reorg orphaned to `generation`, rewinding catch-up to
+    /// `ancestor`, the last block both branches share, and refusing writes proved against the
+    /// orphaned root.
+    ///
+    /// State the orphaned blocks changed must already be scheduled for repair. Storage persisted
+    /// ahead of its range may hold their values, so it is dropped.
+    fn recover_snap_pivot(
+        &self,
+        write: SnapWrite,
+        ancestor: BlockNumHash,
+        generation: SnapGeneration,
+    ) -> Result<SnapWrite, SnapSyncError>
+    where
+        Self: MetadataWriter + HeaderProvider + BlockHashReader;
 }
 
 /// What a write presents to prove it belongs to the attempt owning the persisted state.
@@ -93,7 +111,7 @@ impl SnapWrite {
 impl<T: MetadataProvider> SnapAttemptStore for T {
     fn start_snap_attempt(&self, generation: SnapGeneration) -> Result<SnapWrite, SnapSyncError>
     where
-        Self: MetadataWriter,
+        Self: MetadataWriter + HeaderProvider,
     {
         // Absent settings mean the legacy layout.
         if !self.storage_settings()?.unwrap_or_else(StorageSettings::v1).use_hashed_state() {
@@ -111,6 +129,7 @@ impl<T: MetadataProvider> SnapAttemptStore for T {
         StoredProgress::clear(self)?;
         StoredRepairs::clear(self)?;
         StoredRebuild::clear(self)?;
+        StoredAncestry::record(self, attempt.id(), attempt.pivot())?;
         Ok(SnapWrite::of(&attempt))
     }
 
@@ -147,7 +166,7 @@ impl<T: MetadataProvider> SnapAttemptStore for T {
         generation: SnapGeneration,
     ) -> Result<SnapWrite, SnapSyncError>
     where
-        Self: MetadataWriter + BlockHashReader,
+        Self: MetadataWriter + HeaderProvider + BlockHashReader,
     {
         // Replacing an orphaned pivot would hide the fork that downloaded ranges belong to.
         let mut attempt = self.authorize_canonical_snap_write(write)?;
@@ -164,6 +183,7 @@ impl<T: MetadataProvider> SnapAttemptStore for T {
         }
         attempt.re_anchor(target, generation.state_root());
         self.write_snap_attempt(&attempt)?;
+        StoredAncestry::record(self, attempt.id(), target)?;
         Ok(SnapWrite::of(&attempt))
     }
 
@@ -188,6 +208,44 @@ impl<T: MetadataProvider> SnapAttemptStore for T {
             self.write_snap_attempt(&attempt)?;
         }
         Ok(())
+    }
+
+    fn recover_snap_pivot(
+        &self,
+        write: SnapWrite,
+        ancestor: BlockNumHash,
+        generation: SnapGeneration,
+    ) -> Result<SnapWrite, SnapSyncError>
+    where
+        Self: MetadataWriter + HeaderProvider + BlockHashReader,
+    {
+        let mut attempt = self.authorize_snap_write(write)?;
+        let target = generation.target();
+        for block in [ancestor, target] {
+            if self.block_hash(block.number)? != Some(block.hash) {
+                return Err(SnapSyncError::NonCanonicalBlock {
+                    block: block.number,
+                    hash: block.hash,
+                })
+            }
+        }
+        if target.number < ancestor.number {
+            return Err(SnapSyncError::PivotNotAdvanced {
+                pivot: ancestor.number,
+                target: target.number,
+            })
+        }
+        let applied =
+            self.catch_up_progress(write)?.ok_or(SnapSyncError::NoCatchUpProgress)?.applied();
+        // Blocks up to the ancestor are the same on both branches.
+        let applied = if applied.number <= ancestor.number { applied } else { ancestor };
+
+        attempt.re_anchor(target, generation.state_root());
+        self.write_snap_attempt(&attempt)?;
+        CatchUpProgress::at_pivot(applied).write(self, attempt.id())?;
+        StoredProgress::clear(self)?;
+        StoredAncestry::record(self, attempt.id(), target)?;
+        Ok(SnapWrite::of(&attempt))
     }
 }
 

@@ -58,15 +58,25 @@ pub(crate) fn policy() -> SnapPivotPolicy {
 }
 
 /// A header with a state root distinctive to its number, and a commitment when one is given.
+///
+/// A commitment comes with the fields of the forks before it, as real headers carry them, so the
+/// header encodes and decodes the same.
 pub(crate) fn header(
     number: u64,
     parent_hash: B256,
     block_access_list_hash: Option<B256>,
 ) -> Header {
+    let forked = block_access_list_hash.is_some();
     Header {
         number,
         parent_hash,
         state_root: B256::repeat_byte(number as u8),
+        base_fee_per_gas: forked.then_some(0),
+        withdrawals_root: forked.then_some(B256::ZERO),
+        blob_gas_used: forked.then_some(0),
+        excess_blob_gas: forked.then_some(0),
+        parent_beacon_block_root: forked.then_some(B256::ZERO),
+        requests_hash: forked.then_some(B256::ZERO),
         block_access_list_hash,
         ..Default::default()
     }
@@ -301,6 +311,15 @@ impl BalChain {
         writer.commit().unwrap();
     }
 
+    /// Replaces the canonical blocks after `ancestor` with this chain's, as a reorg to it does.
+    pub(crate) fn replace_after(
+        &self,
+        factory: &ProviderFactory<MockNodeTypesWithDB>,
+        ancestor: u64,
+    ) {
+        replace_headers_after(factory, ancestor, &self.headers[ancestor as usize + 1..]);
+    }
+
     /// The block `nth` after the pivot, which is the pivot itself at zero.
     pub(crate) fn block(&self, nth: usize) -> BlockNumHash {
         let header = &self.headers[self.pivot as usize + nth];
@@ -324,6 +343,23 @@ impl BalChain {
         };
         Ok(WithPeerId::new(PeerId::random(), SnapResponse::BlockAccessLists(message)))
     }
+}
+
+/// Replaces the canonical blocks after `ancestor` with `headers`, as a reorg to them does.
+pub(crate) fn replace_headers_after(
+    factory: &ProviderFactory<MockNodeTypesWithDB>,
+    ancestor: u64,
+    headers: &[SealedHeader<Header>],
+) {
+    let static_files = factory.static_file_provider();
+    let highest = static_files.get_highest_static_file_block(StaticFileSegment::Headers).unwrap();
+    let mut writer = static_files.latest_writer(StaticFileSegment::Headers).unwrap();
+    writer.prune_headers(highest - ancestor).unwrap();
+    writer.commit().unwrap();
+    for header in headers {
+        writer.append_header(header.header(), &header.hash()).unwrap();
+    }
+    writer.commit().unwrap();
 }
 
 /// Slots persisted for `account`, in key order.

@@ -518,6 +518,45 @@ mod tests {
         )
     }
 
+    // `started`, with headers so the pivot is canonical, and stale values for the contract and
+    // for `ABSENT`, both scheduled for repair.
+    fn repairing(
+        accounts: &[(B256, TrieAccount)],
+    ) -> (ProviderFactory<MockNodeTypesWithDB>, SnapWrite) {
+        let (factory, write, _) = started(accounts);
+        insert_generation_headers(&factory);
+        let provider = factory.database_provider_rw().unwrap();
+        let stale = HashedPostState::default()
+            .with_accounts([
+                (key(2), Some(Account::from(account(9)))),
+                (ABSENT, Some(Account::from(account(9)))),
+            ])
+            .with_storages([
+                (key(2), HashedStorage::from_iter([(SLOT, U256::from(1)), (OTHER, U256::from(2))])),
+                (ABSENT, HashedStorage::from_iter([(SLOT, U256::from(1))])),
+            ]);
+        provider.write_hashed_state(&stale.into_sorted()).unwrap();
+        let mut repairs = StateRepairs::default();
+        repairs.insert_slot(key(2), SLOT);
+        repairs.insert_slot(key(2), OTHER);
+        repairs.insert_account(ABSENT);
+        provider.schedule_snap_repairs(write, repairs).unwrap();
+        provider.commit().unwrap();
+        (factory, write)
+    }
+
+    fn repair(
+        factory: &ProviderFactory<MockNodeTypesWithDB>,
+        write: SnapWrite,
+        range: &VerifiedAccountRange,
+        slots: Vec<(B256, U256)>,
+    ) -> Result<StateRepairs, SnapSyncError> {
+        let provider = factory.database_provider_rw().unwrap();
+        let remaining = provider.commit_account_repair(write, range, slots)?;
+        provider.commit().unwrap();
+        Ok(remaining)
+    }
+
     #[test]
     fn accounts_dependencies_and_coverage_commit_together() {
         let accounts = accounts();
@@ -851,45 +890,6 @@ mod tests {
                 Err(SnapSyncError::UnsupportedRecord { .. })
             ));
         }
-    }
-
-    // `started`, with headers so the pivot is canonical, and stale values for the contract and
-    // for `ABSENT`, both scheduled for repair.
-    fn repairing(
-        accounts: &[(B256, TrieAccount)],
-    ) -> (ProviderFactory<MockNodeTypesWithDB>, SnapWrite) {
-        let (factory, write, _) = started(accounts);
-        insert_generation_headers(&factory);
-        let provider = factory.database_provider_rw().unwrap();
-        let stale = HashedPostState::default()
-            .with_accounts([
-                (key(2), Some(Account::from(account(9)))),
-                (ABSENT, Some(Account::from(account(9)))),
-            ])
-            .with_storages([
-                (key(2), HashedStorage::from_iter([(SLOT, U256::from(1)), (OTHER, U256::from(2))])),
-                (ABSENT, HashedStorage::from_iter([(SLOT, U256::from(1))])),
-            ]);
-        provider.write_hashed_state(&stale.into_sorted()).unwrap();
-        let mut repairs = StateRepairs::default();
-        repairs.insert_slot(key(2), SLOT);
-        repairs.insert_slot(key(2), OTHER);
-        repairs.insert_account(ABSENT);
-        provider.schedule_snap_repairs(write, repairs).unwrap();
-        provider.commit().unwrap();
-        (factory, write)
-    }
-
-    fn repair(
-        factory: &ProviderFactory<MockNodeTypesWithDB>,
-        write: SnapWrite,
-        range: &VerifiedAccountRange,
-        slots: Vec<(B256, U256)>,
-    ) -> Result<StateRepairs, SnapSyncError> {
-        let provider = factory.database_provider_rw().unwrap();
-        let remaining = provider.commit_account_repair(write, range, slots)?;
-        provider.commit().unwrap();
-        Ok(remaining)
     }
 
     #[test]
