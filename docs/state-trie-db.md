@@ -196,3 +196,6 @@ Choose one backend feature for a benchmark. When all features are compiled,
 `state-trie-rocksdb` takes precedence over `legacy-trie-rocksdb`. The same forward
 validation scope and cross-database commit limitations apply to both RocksDB
 backends. Recover before changing backends after replay.
+
+See [the four-backend comparison](legacy-trie-rocksdb-benchmarks.md) for the
+legacy migration and matched BAL replay measurements.
