@@ -1,6 +1,6 @@
 # RocksDB state-trie optimization
 
-Measured on dev-brian on 2026-09-26–27, continuing the
+Measured on dev-brian on 2026-09-26–28, continuing the
 [latency investigation](state-trie-rocksdb-latency.md).
 Artifacts, captured binaries/source patches, and reproduction scripts are in
 `/home/ubuntu/state-trie-optimization-20260926`. The full experiment notebook
@@ -1112,3 +1112,31 @@ This form was rejected; artifacts and source patches are retained under
 globalslots backend names with early0-proof64-chunk80-600. A separate candidate
 will notify only when publishing the transaction that the consumer is waiting
 for, with setup failures always notifying.
+
+### Notify only for the missing transaction (2026-09-28)
+
+The next candidate kept indexed slots but notified the engine only when a
+publisher supplied its next missing transaction. The consumer advertised the
+missing index under the same slot lock used by its publisher; setup failures
+always notified. All 60 targeted tests, both profiling builds, workspace
+Clippy, formatting, both 600-payload runs, persistence, restart 601, recovery,
+and worker-count audits passed.
+
+| Metric | RocksDB | MDBX |
+| --- | ---: | ---: |
+| Execution p50 / p90 / p99 (ms) | 79.547 / 96.170 / 185.989 | 77.121 / 95.022 / 347.561 |
+| Payload p50 (ms) | 147.904 | 132.572 |
+| Root wait p50 (ms) | 57.388 | 46.503 |
+| Cumulative saves including drain (s) | 48.474 | 540.056 |
+| Engine CPU (ms/block, 400-block window) | 63.588 | 64.583 |
+| Engine context switches/block (same window) | 68.408 | 54.090 |
+
+Against direct slots with notifications for every result, RocksDB engine CPU
+fell from 77.948 to 63.588 ms/block and context switches fell from 1943.668 to
+68.408. Other worker CPU totals were essentially unchanged. Execution p50
+remained close to both the direct-slot and gated-worker controls. Thus removing
+this wakeup and retry work saved CPU but did not materially shorten execution.
+The matched execution gap remains 2.426 ms, with saving time 91.0% lower.
+Sources were restored; captured binaries, patches and results remain under
+globalwake backend names with early0-proof64-chunk80-600. This candidate is not
+an established execution-latency improvement.
