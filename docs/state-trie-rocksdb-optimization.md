@@ -1602,3 +1602,39 @@ hashbrown, foldhash, or ruint features between the two backend builds. The
 changed feature lists belonged to the reth binary, engine, node, and provider.
 This rules out those dependency feature differences, not generated-code or
 memory-layout effects.
+
+## Commit-loop hardware counters
+
+A matched pair sampled thread-local user cycles and retired instructions around
+ordered-result retrieval and canonical commit, using RDPMC with fences. Both
+600-block runs had complete counter coverage and passed persistence, restart 601,
+recovery, and worker/sender audits. The diagnostic's 78 focused tests, both
+profiling builds, workspace Clippy, and formatting passed. Source instrumentation
+was restored before replay; the binary patches and native helper remain artifacts.
+
+| Metric | RocksDB | MDBX |
+| --- | ---: | ---: |
+| Execution p50 / p90 / p99, ms | 75.08 / 91.54 / 176.86 | 73.15 / 93.77 / 312.24 |
+| Commit-body p50, ms | 35.80 | 34.43 |
+| Commit retired instructions p50, millions | 172.53 | 172.15 |
+| Commit cycles p50, millions | 174.95 | 171.15 |
+| Commit cycles/instruction p50 | 1.024 | 0.995 |
+| Result retrieval p50, ms | 30.72 | 29.42 |
+| Payload validation p50, ms | 161.77 | 152.33 |
+| State-root wait p50, ms | 77.12 | 69.55 |
+| Total saves, seconds | 46.82 | 626.67 |
+
+For paired block numbers, the median commit differences are +95,179 instructions
+(about 0.06% of the typical total), +4.756 million cycles, +0.0272 cycles per
+instruction, and +1.248 ms wall time. Medians are not additive. This points to
+slower execution of comparable commit work rather than substantially more
+instructions. It does not yet distinguish cache misses, branch prediction,
+instruction delivery, or other sources of higher cycles per instruction.
+
+The first launch stopped before node startup because the artifact filesystem
+was below the harness's 4 GiB free-space threshold. Removing this task's original
+compiler-cache entries freed 2.5 GB; the resumed run reused the verified, freshly
+rewritten database. The failed launch did not execute payloads. Original and
+resumed logs, cleanup manifest, `globalpmc*` artifacts,
+`commit-counters-comparison.json`, and `execution-phases-pmc-comparison.json`
+record the complete diagnostic. No optimization from it is retained yet.
