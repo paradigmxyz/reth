@@ -290,7 +290,7 @@ impl RocksDBBatch<'_> {
     ) -> ProviderResult<usize> {
         let mut count = 0;
         for (path, node) in updates.account_nodes_ref() {
-            if path.is_empty() {
+            if path.is_empty() && node.is_some() {
                 continue
             }
             match node {
@@ -543,5 +543,25 @@ mod tests {
                 );
             }
         }
+        // Legacy MDBX ignores root inserts but still applies explicit root deletions.
+        let root_path = Nibbles::new();
+        rocks
+            .put::<tables::RocksAccountsTrie>(
+                root_path.into(),
+                &BranchNodeCompact::new(3, 0, 0, vec![], None),
+            )
+            .unwrap();
+        let mut batch = rocks.batch();
+        batch
+            .write_legacy_trie_updates(&TrieUpdatesSorted::new(
+                vec![(root_path, None)],
+                Default::default(),
+            ))
+            .unwrap();
+        batch.commit().unwrap();
+        assert_eq!(
+            rocks.snapshot().account_trie_cursor().unwrap().seek_exact(root_path).unwrap(),
+            None
+        );
     }
 }
