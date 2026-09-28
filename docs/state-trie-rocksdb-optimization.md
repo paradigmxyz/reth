@@ -8,6 +8,14 @@ is retained there as `experiment-notebook.md`.
 
 ## Outcome so far
 
+The latest scheduling experiment defers BAL state-root preparation until execution
+returns. With 64 proof workers also gated until execution ends, its matched
+execution p50 is **75.09 ms for RocksDB versus 73.78 ms for MDBX**. RocksDB saves
+remain **48.47 s**, but payload p50 increases to **163.16 ms** from the preceding
+sender-isolated control's 148.44 ms. This candidate is not retained: it narrows
+the execution gap but does not meet the strict target, and shifts work into root
+validation. The retained-code comparison below uses an earlier configuration.
+
 The strict execution target remains open. The matched, uninstrumented
 600-block control pair uses the retained implementation, eight global Rayon threads,
 eight account/storage proof workers, proof chunks of 80, isolated background
@@ -1263,3 +1271,43 @@ compare referenced data or whole-program code placement. This extends the
 earlier receive-function comparison without establishing that every EVM helper
 or indirect call is identical. Assembly and comparison data are retained as
 codegen-evm-* artifacts.
+
+### Deferring BAL state preparation (2026-09-28)
+
+The proof-worker gate alone still allows BAL-to-hashed-state preparation to run
+on a BAL execution worker. This candidate passes the same execution-completion
+receiver into that update stream. Ordinary cache prefetch continues immediately;
+after it drains, the prewarm coordinator waits for execution completion before
+spawning hashed-state preparation. The wait occupies no BAL worker. Dropping the
+execution job releases the gate, including on execution errors. State values,
+proofs, overlays, and persistence are unchanged.
+
+All 78 targeted tests passed, including a test that verifies prefetch starts,
+every BAL worker remains available before gate release, no hashed updates arrive
+early, and release produces the expected state followed by completion. Both
+profiling builds, workspace Clippy, and formatting passed. Both backends passed
+600 roots, persistence, restart 601, recovery, and worker/sender affinity audits.
+
+| Metric | RocksDB | MDBX |
+| --- | ---: | ---: |
+| Execution p50 / p90 / p99 (ms) | 75.086 / 91.457 / 177.264 | 73.779 / 94.617 / 343.677 |
+| Payload p50 (ms) | 163.162 | 154.003 |
+| Root wait p50 (ms) | 78.120 | 70.141 |
+| Cumulative saves including drain (s) | 48.468 | 617.667 |
+
+Against the preceding sender-isolated gated-worker control, RocksDB execution
+p50 falls by 4.466 ms, while payload p50 rises by 14.727 ms and root wait by
+20.215 ms. RocksDB saving time is preserved. MDBX execution also improves,
+leaving a matched median gap of 1.308 ms; comparing only against its preceding
+77.101 ms median would overstate the result. Artifacts use globalstream backend
+names with senderisolated-deferstate-early0-proof64-chunk80-600. Both binaries
+are stored as verified gzip archives with their original SHA-256 hashes.
+
+Per-block execution differences have a paired median of +0.992 ms (RocksDB minus
+MDBX); RocksDB is faster on 238 of the 550 scored blocks. Several early 50-block
+windows favor RocksDB, while most later windows favor MDBX. Engine clock rates
+in those windows stay approximately 4.97–5.03 GHz for RocksDB; MDBX ranges from
+4.98–5.10 GHz. These perf-counter windows include other engine activity. MDBX's
+longer persistence pauses also affect the temperature samples, so the data do
+not establish thermal throttling or quantify its contribution to execution.
+The window analysis is retained in stream-drift.json.
