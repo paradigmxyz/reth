@@ -1572,3 +1572,33 @@ storage compaction, 2 KiB storage memtables, and 244.6 MiB account memtables see
 in the nice-19 trial. That backlog cannot be attributed to lowering native
 priority. Artifacts use `globalprefcountrocks-*pref32-600` and `pref128-600`, with
 `execution-phases-prefcount-comparison.json` preserving the paired phase analysis.
+
+## Background SST write gating
+
+A same-binary pair used a process-local diagnostic wrapper to delay background
+`.sst` writes during execution. Foreground writes, WAL, reads, and syncs were
+unchanged. The control loaded the same wrapper and observer without delaying
+writes. Execution windows came from existing logs; observer lag p99 was
+1.49/1.37 ms (gated/control), so this does not suppress all native computation
+or already-issued I/O.
+
+Execution p50/p90/p99 was 75.23/91.56/169.95 ms gated versus
+75.40/91.73/174.26 ms in the control. Commit-body p50 was 35.77/35.88 ms,
+result retrieval 29.97/30.26 ms, payload 164.30/163.19 ms, root wait
+78.32/77.07 ms, and cumulative saves 48.31/48.05 seconds. Both post-shutdown
+backlogs matched the previous controls. The wrapper delayed 309 writes for
+22.45 aggregate thread-seconds, with zero watchdog failures; the control
+observed 5,350 eligible writes during execution. All 600-block, persistence,
+restart-601, recovery, affinity, and phase checks passed.
+
+The 0.17 ms median difference does not justify retaining the gate. The earlier
+correlation between compaction overlap and slower commits did not translate
+into a useful improvement from this intervention. Artifacts use
+`globalprefcountrocks-*pref128-sstgate1-600` and `sstgate0-600`, with
+`execution-phases-sstgate-comparison.json` preserving the paired phase analysis.
+
+An offline Cargo feature-graph comparison found no differences in revm, Alloy,
+hashbrown, foldhash, or ruint features between the two backend builds. The
+changed feature lists belonged to the reth binary, engine, node, and provider.
+This rules out those dependency feature differences, not generated-code or
+memory-layout effects.
