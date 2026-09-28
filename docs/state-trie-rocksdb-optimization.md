@@ -1638,3 +1638,39 @@ rewritten database. The failed launch did not execute payloads. Original and
 resumed logs, cleanup manifest, `globalpmc*` artifacts,
 `commit-counters-comparison.json`, and `execution-phases-pmc-comparison.json`
 record the complete diagnostic. No optimization from it is retained yet.
+
+## Expanded cache and branch counters
+
+A second same-binary pair added L1 data-cache misses, generic hardware
+`cache-misses`, and branch misses to the commit-scoped counter group. The external
+monitor used software events only to avoid oversubscribing the available PMCs;
+the host NMI watchdog stayed enabled. A standalone probe verified phase accounting
+and all five counters. Both replays had 600 balanced records matching transaction
+counts, 100% counter coverage, and passed persistence, restart, recovery, and
+worker/sender audits.
+
+| Metric | RocksDB | MDBX |
+| --- | ---: | ---: |
+| Execution p50 / p90 / p99, ms | 75.43 / 92.69 / 176.78 | 74.28 / 96.06 / 314.41 |
+| Commit-body p50, ms | 35.83 | 35.81 |
+| Commit cycles/instruction p50 | 1.009 | 1.019 |
+| Commit L1 data-cache misses p50, millions | 4.522 | 4.563 |
+| Commit generic cache misses p50, millions | 2.604 | 2.550 |
+| Commit branch misses p50, thousands | 786.3 | 780.7 |
+| Payload validation p50, ms | 162.87 | 153.94 |
+| State-root wait p50, ms | 77.80 | 70.09 |
+| Total saves, seconds | 47.59 | 638.68 |
+
+Paired commit differences were -25,002 L1 misses, +55,951 generic cache misses,
+and +7,202 branch misses. Those small miss-count differences do not establish
+a latency cause: this expanded probe did not reproduce the earlier commit CPI
+gap. The paired commit-wall difference was only +0.096 ms, while result retrieval
+was +1.333 ms. Extra probe instructions and run variation limit attribution across
+the two diagnostic pairs. Generic `cache-misses` is reported by its Linux event
+name rather than assumed to mean DRAM accesses.
+
+Artifacts use `globalpmc*-cachepmc-*`, including per-process/thread native CSVs,
+`cache-counters-comparison.json`, and preserved `*-comparison-cachepmc.json`
+outputs. The next allocator-sharing test follows a separate concrete observation:
+the binary defaults to 128 jemalloc arenas while both replay processes have 451
+threads. This is a hypothesis for intervention, not a proven explanation.
