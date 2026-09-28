@@ -307,7 +307,7 @@ use alloy_eips::{
     eip4844::{BlobAndProofV1, BlobAndProofV2, BlobCellsAndProofsV1},
     eip7594::{BlobCellMask, BlobTransactionSidecarVariant},
 };
-use alloy_primitives::{map::AddressSet, Address, Bytes, TxHash, B128, B256, U256};
+use alloy_primitives::{map::AddressSet, Address, Bytes, TxHash, B256, U256};
 use aquamarine as _;
 use reth_chainspec::{ChainSpecProvider, EthereumHardforks};
 use reth_eth_wire_types::HandleMempoolData;
@@ -619,10 +619,9 @@ where
             }
 
             let encoded = pool_tx.encoded_2718_consensus();
-            // The cap bounds the RLP encoding of the whole list, so account for each item's
-            // header and the list header rather than the raw transaction bytes.
-            let new_size = total_size + alloy_rlp::Encodable::length(&encoded);
-            if new_size + alloy_rlp::length_of_length(new_size) > max_size {
+            // Only transaction bytes count toward the cap, without additional list framing.
+            let new_size = total_size + encoded.len();
+            if new_size > max_size {
                 break
             }
 

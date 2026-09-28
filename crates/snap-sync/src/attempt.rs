@@ -4,18 +4,22 @@
 //! attempt produced it. Every write presents a [`SnapWrite`]; ones that no longer match are
 //! refused.
 
-use crate::{CatchUpProgress, SnapGeneration, SnapSyncError};
+use crate::{
+    account::StoredCoverage, common::SnapRecord, storage::StoredProgress, verify::StoredRebuild,
+    CatchUpProgress, SnapGeneration, SnapSyncError,
+};
 use reth_storage_api::{
     BlockHashReader, MetadataProvider, MetadataWriter, SnapAttempt, SnapAttemptId, StorageSettings,
 };
+use serde::{Deserialize, Serialize};
 
 /// Persistence for the attempt that owns downloaded snap state.
 ///
 /// Blanket-implemented over node metadata access, so these writes join the caller's transaction:
 /// state, bytecode and the attempt record commit together or not at all.
 pub trait SnapAttemptStore {
-    /// Starts an attempt anchored to `generation`, superseding any already recorded, with its
-    /// catch-up progress at that pivot.
+    /// Starts an attempt anchored to `generation`, superseding any already recorded and the
+    /// progress it kept, with its catch-up progress at that pivot.
     fn start_snap_attempt(&self, generation: SnapGeneration) -> Result<SnapWrite, SnapSyncError>
     where
         Self: MetadataWriter;
@@ -61,7 +65,7 @@ pub trait SnapAttemptStore {
 }
 
 /// What a write presents to prove it belongs to the attempt owning the persisted state.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct SnapWrite {
     // Attempt this write belongs to.
     attempt: SnapAttemptId,
@@ -101,6 +105,11 @@ impl<T: MetadataProvider> SnapAttemptStore for T {
         self.write_snap_attempt(&attempt)?;
         // Ranges committed at this pivot need every list after it, however far the pivot moves.
         CatchUpProgress::at_pivot(attempt.pivot()).write(self, attempt.id())?;
+        // Earlier attempts' progress never applies to this one, and a record another build wrote
+        // would fail every read of it.
+        StoredCoverage::clear(self)?;
+        StoredProgress::clear(self)?;
+        StoredRebuild::clear(self)?;
         Ok(SnapWrite::of(&attempt))
     }
 
@@ -268,6 +277,26 @@ mod tests {
             Err(SnapSyncError::UnsupportedStorage)
         ));
         assert_eq!(provider.snap_attempt().unwrap(), None);
+    }
+
+    #[test]
+    fn a_new_attempt_drops_progress_another_build_wrote() {
+        let factory = factory();
+        let provider = factory.database_provider_rw().unwrap();
+        let unreadable = br#"{"version":999}"#.to_vec();
+        for key in [StoredCoverage::KEY, StoredProgress::KEY, StoredRebuild::KEY] {
+            provider.write_metadata(key, unreadable.clone()).unwrap();
+        }
+
+        let write = provider.start_snap_attempt(generation(1)).unwrap();
+
+        assert_eq!(
+            crate::SnapAccountStore::start_account_coverage(&provider, write).unwrap(),
+            crate::AccountCoverage::START
+        );
+        for key in [StoredProgress::KEY, StoredRebuild::KEY] {
+            assert_eq!(provider.get_metadata(key).unwrap(), None);
+        }
     }
 
     #[test]

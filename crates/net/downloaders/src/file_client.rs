@@ -2,14 +2,14 @@ use alloy_consensus::BlockHeader;
 use alloy_eips::BlockHashOrNumber;
 use alloy_primitives::{BlockHash, BlockNumber, Sealable, B256};
 use async_compression::tokio::bufread::GzipDecoder;
-use futures::Future;
+use futures::{future, Future};
 use itertools::{Either, Itertools};
 use reth_consensus::{Consensus, ConsensusError};
 use reth_network_p2p::{
-    bodies::client::{BodiesClient, BodiesFut},
+    bodies::client::BodiesClient,
     download::DownloadClient,
-    error::RequestError,
-    headers::client::{HeadersClient, HeadersDirection, HeadersFut, HeadersRequest},
+    error::{PeerRequestResult, RequestError},
+    headers::client::{HeadersClient, HeadersDirection, HeadersRequest},
     priority::Priority,
     BlockClient,
 };
@@ -338,7 +338,7 @@ impl<B: FullBlock<Header: reth_primitives_traits::BlockHeader>> FromReader
 
 impl<B: FullBlock> HeadersClient for FileClient<B> {
     type Header = B::Header;
-    type Output = HeadersFut<B::Header>;
+    type Output = future::Ready<PeerRequestResult<Vec<B::Header>>>;
 
     fn get_headers_with_priority(
         &self,
@@ -354,7 +354,7 @@ impl<B: FullBlock> HeadersClient for FileClient<B> {
                 Some(num) => *num,
                 None => {
                     warn!(%hash, "Could not find starting block number for requested header hash");
-                    return Box::pin(async move { Err(RequestError::BadResponse) })
+                    return future::ready(Err(RequestError::BadResponse))
                 }
             },
             BlockHashOrNumber::Number(num) => num,
@@ -378,18 +378,18 @@ impl<B: FullBlock> HeadersClient for FileClient<B> {
                 Some(header) => headers.push(header),
                 None => {
                     warn!(number=%block_number, "Could not find header");
-                    return Box::pin(async move { Err(RequestError::BadResponse) })
+                    return future::ready(Err(RequestError::BadResponse))
                 }
             }
         }
 
-        Box::pin(async move { Ok((PeerId::default(), headers).into()) })
+        future::ready(Ok((PeerId::default(), headers).into()))
     }
 }
 
 impl<B: FullBlock> BodiesClient for FileClient<B> {
     type Body = B::Body;
-    type Output = BodiesFut<B::Body>;
+    type Output = future::Ready<PeerRequestResult<Vec<B::Body>>>;
 
     fn get_block_bodies_with_priority_and_range_hint(
         &self,
@@ -405,11 +405,11 @@ impl<B: FullBlock> BodiesClient for FileClient<B> {
         for hash in hashes {
             match self.bodies.get(&hash).cloned() {
                 Some(body) => bodies.push(body),
-                None => return Box::pin(async move { Err(RequestError::BadResponse) }),
+                None => return future::ready(Err(RequestError::BadResponse)),
             }
         }
 
-        Box::pin(async move { Ok((PeerId::default(), bodies).into()) })
+        future::ready(Ok((PeerId::default(), bodies).into()))
     }
 }
 

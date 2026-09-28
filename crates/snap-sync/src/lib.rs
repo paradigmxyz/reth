@@ -7,7 +7,7 @@
 //!
 //! This crate owns download progress only. Authenticated downloads come from
 //! `reth-downloaders`, and verified state is handed back to node integration once its trie root
-//! matches the target header.
+//! matches the target header. [`SnapBootstrap`] runs these steps as one resumable sync.
 //!
 //! Downloaded state goes into the hashed state tables, owned by an attempt record that commits
 //! with it, along with how far the account key space has been downloaded. An account range only
@@ -38,6 +38,7 @@
 
 mod account;
 mod attempt;
+mod bootstrap;
 mod bytecode;
 mod catch_up;
 mod common;
@@ -46,6 +47,7 @@ mod generation;
 mod pivot;
 mod session;
 mod storage;
+mod verify;
 
 #[cfg(test)]
 mod test_utils;
@@ -54,6 +56,9 @@ pub use account::{
     AccountCoverage, AccountRangeDownload, AccountRangeStep, SnapAccountStore, VerifiedRange,
 };
 pub use attempt::{SnapAttemptStore, SnapWrite};
+pub use bootstrap::{
+    SnapBootstrap, SnapBootstrapOutcome, SnapSyncContext, DEFAULT_RANGES_PER_CHECK,
+};
 pub use bytecode::{BytecodeDownload, BytecodeStep, SnapBytecodeStore, DEFAULT_CODE_HASHES};
 pub use catch_up::{
     BalStateUpdate, BlockAccessListCatchUp, CatchUpProgress, CatchUpStep, DownloadedAccount,
@@ -68,3 +73,4 @@ pub use storage::{
     SnapStorageStore, StorageChunk, StorageProgress, StorageRangeDownload, StorageRangeStep,
     DEFAULT_STORAGE_ACCOUNTS,
 };
+pub use verify::{SnapStateVerifier, VerifiedSnapState, DEFAULT_SCAN_CHUNK};

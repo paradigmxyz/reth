@@ -20,7 +20,7 @@ use alloy_eips::{
     eip4844::{BlobAndProofV1, BlobAndProofV2, BlobCellsAndProofsV1},
     eip7594::{BlobCellMask, BlobTransactionSidecarVariant},
 };
-use alloy_primitives::{map::AddressSet, Address, Bytes, TxHash, B128, B256, U256};
+use alloy_primitives::{map::AddressSet, Address, Bytes, TxHash, B256, U256};
 use reth_eth_wire_types::HandleMempoolData;
 use reth_primitives_traits::Recovered;
 use std::{marker::PhantomData, sync::Arc};

@@ -47,8 +47,9 @@ impl StateProviderTest {
 }
 
 impl AccountReader for StateProviderTest {
+    #[allow(clippy::clone_on_copy)]
     fn basic_account(&self, address: &Address) -> ProviderResult<Option<Account>> {
-        Ok(self.accounts.get(address).map(|(_, acc)| *acc))
+        Ok(self.accounts.get(address).map(|(_, acc)| acc.clone()))
     }
 }
 

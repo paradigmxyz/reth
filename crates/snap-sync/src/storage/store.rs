@@ -203,7 +203,7 @@ struct PartialStorage {
 
 // The progress record as persisted, tied to the write and range that recorded it.
 #[derive(Serialize, Deserialize)]
-struct StoredProgress {
+pub(crate) struct StoredProgress {
     // Encoding version, checked before the rest is decoded.
     version: u32,
     // Attempt the slots belong to.

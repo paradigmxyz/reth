@@ -415,6 +415,16 @@ impl RocksDBBuilder {
                     code: -1,
                 }))
             })?;
+            if self.read_only {
+                // Legacy databases have no BAL tables; secondary opens cannot create them.
+                // Keep existing BAL tables; only omit those absent from disk.
+                cf_descriptors.retain(|cf| {
+                    !matches!(
+                        cf.name(),
+                        tables::BlockAccessLists::NAME | tables::BlockAccessListBlockNumbers::NAME
+                    ) || existing_column_families.iter().any(|name| name == cf.name())
+                });
+            }
             let unknown_column_families: Vec<String> = existing_column_families
                 .into_iter()
                 .filter(|name| {
@@ -912,6 +922,14 @@ impl RocksDBProvider {
     /// Gets the column family handle for a table.
     fn get_cf_handle<T: Table>(&self) -> Result<&rocksdb::ColumnFamily, DatabaseError> {
         self.0.cf_handle::<T>()
+    }
+
+    /// Returns whether this provider opened the given table.
+    pub(crate) fn has_table<T: Table>(&self) -> bool {
+        match self.0.as_ref() {
+            RocksDBProviderInner::ReadWrite { db, .. } => db.cf_handle(T::NAME).is_some(),
+            RocksDBProviderInner::Secondary { db, .. } => db.cf_handle(T::NAME).is_some(),
+        }
     }
 
     /// Executes a function and records metrics with the given operation and table name.
@@ -3256,6 +3274,28 @@ mod tests {
             provider.get::<tables::BlockAccessListBlockNumbers>(bal_key.hash()).unwrap(),
             Some(bal_key.number())
         );
+    }
+
+    #[test]
+    fn test_read_only_opens_legacy_database_without_bal_tables() {
+        let temp_dir = TempDir::new().unwrap();
+        let tx_hash = B256::with_last_byte(1);
+        let provider = RocksDBBuilder::new(temp_dir.path())
+            .with_table::<tables::TransactionHashNumbers>()
+            .with_table::<tables::AccountsHistory>()
+            .with_table::<tables::StoragesHistory>()
+            .build()
+            .unwrap();
+        provider.put::<tables::TransactionHashNumbers>(tx_hash, &42).unwrap();
+        drop(provider);
+
+        // Replay must open the old schema without requiring a writable upgrade first.
+        let provider = RocksDBBuilder::new(temp_dir.path())
+            .with_default_tables()
+            .with_read_only(true)
+            .build()
+            .unwrap();
+        assert_eq!(provider.get::<tables::TransactionHashNumbers>(tx_hash).unwrap(), Some(42));
     }
 
     #[test]

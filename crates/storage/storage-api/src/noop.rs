@@ -28,12 +28,17 @@ use core::{
     marker::PhantomData,
     ops::{RangeBounds, RangeInclusive},
 };
+#[cfg(feature = "chain-state")]
+use reth_chain_state::{
+    CanonStateNotifications, CanonStateSubscriptions, ExecutedBlock, ForkChoiceNotifications,
+    ForkChoiceSubscriptions, PersistedBlockNotifications, PersistedBlockSubscriptions,
+};
 use reth_chainspec::{ChainInfo, ChainSpecProvider, EthChainSpec, MAINNET};
 #[cfg(feature = "db-api")]
 use reth_db_api::mock::{DatabaseMock, TxMock};
 use reth_db_models::{AccountBeforeTx, StoredBlockBodyIndices};
 use reth_ethereum_primitives::EthPrimitives;
-use reth_execution_types::ExecutionOutcome;
+use reth_execution_types::{ExecutionOutcome, RecoveredBlockAndExecutionOutput};
 use reth_primitives_traits::{Account, Bytecode, NodePrimitives, RecoveredBlock, SealedHeader};
 #[cfg(feature = "db-api")]
 use reth_prune_types::PruneModes;
@@ -217,13 +222,13 @@ impl<C: Send + Sync, N: NodePrimitives> BlockReader for NoopProvider<C, N> {
         Ok(None)
     }
 
-    fn pending_block(&self) -> ProviderResult<Option<RecoveredBlock<Self::Block>>> {
+    fn pending_block(&self) -> ProviderResult<Option<Arc<RecoveredBlock<Self::Block>>>> {
         Ok(None)
     }
 
     fn pending_block_and_receipts(
         &self,
-    ) -> ProviderResult<Option<(RecoveredBlock<Self::Block>, Vec<Self::Receipt>)>> {
+    ) -> ProviderResult<Option<RecoveredBlockAndExecutionOutput<Self::Block, Self::Receipt>>> {
         Ok(None)
     }
 
@@ -604,7 +609,18 @@ impl<C: Send + Sync, N: NodePrimitives> BytecodeReader for NoopProvider<C, N> {
 }
 
 impl<C: Send + Sync + 'static, N: NodePrimitives> StateProviderFactory for NoopProvider<C, N> {
+    type Primitives = N;
+
     fn latest(&self) -> ProviderResult<StateProviderBox> {
+        Ok(Box::new(self.clone()))
+    }
+
+    #[cfg(feature = "chain-state")]
+    fn state_with_block_appended(
+        &self,
+        _parent_hash: BlockHash,
+        _block: ExecutedBlock<N>,
+    ) -> ProviderResult<StateProviderBox> {
         Ok(Box::new(self.clone()))
     }
 
@@ -658,6 +674,38 @@ impl<C: Send + Sync + 'static, N: NodePrimitives> StateProviderFactory for NoopP
 
     fn maybe_pending(&self) -> ProviderResult<Option<StateProviderBox>> {
         Ok(Some(Box::new(self.clone())))
+    }
+}
+
+#[cfg(feature = "chain-state")]
+impl<C: Send + Sync, N: NodePrimitives> CanonStateSubscriptions for NoopProvider<C, N> {
+    type Primitives = N;
+
+    fn subscribe_to_canonical_state(&self) -> CanonStateNotifications<N> {
+        tokio::sync::broadcast::channel(1).1
+    }
+}
+
+#[cfg(feature = "chain-state")]
+impl<C: Send + Sync, N: NodePrimitives> ForkChoiceSubscriptions for NoopProvider<C, N> {
+    type Header = N::BlockHeader;
+
+    fn subscribe_safe_block(&self) -> ForkChoiceNotifications<N::BlockHeader> {
+        let (_, rx) = tokio::sync::watch::channel(None);
+        ForkChoiceNotifications(rx)
+    }
+
+    fn subscribe_finalized_block(&self) -> ForkChoiceNotifications<N::BlockHeader> {
+        let (_, rx) = tokio::sync::watch::channel(None);
+        ForkChoiceNotifications(rx)
+    }
+}
+
+#[cfg(feature = "chain-state")]
+impl<C: Send + Sync, N: NodePrimitives> PersistedBlockSubscriptions for NoopProvider<C, N> {
+    fn subscribe_persisted_block(&self) -> PersistedBlockNotifications {
+        let (_, rx) = tokio::sync::watch::channel(None);
+        PersistedBlockNotifications(rx)
     }
 }
 

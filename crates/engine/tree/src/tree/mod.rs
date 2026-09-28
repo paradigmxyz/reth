@@ -6,7 +6,7 @@ use crate::{
     tree::{error::InsertPayloadError, payload_validator::TreeCtx},
 };
 use alloy_consensus::BlockHeader;
-use alloy_eips::{eip1898::BlockWithParent, merge::EPOCH_SLOTS, BlockNumHash, NumHash};
+use alloy_eips::{eip1898::BlockWithParent, BlockNumHash, NumHash};
 use alloy_primitives::{map::B256Map, B256};
 use alloy_rpc_types_engine::{
     ForkchoiceState, PayloadStatus, PayloadStatusEnum, PayloadValidationError,
@@ -17,6 +17,7 @@ use error::{
 use reth_chain_state::{
     CanonicalInMemoryState, ExecutedBlock, ExecutionTimingStats, NewCanonicalChain,
 };
+use reth_chainspec::EthChainSpec;
 use reth_consensus::{Consensus, FullConsensus};
 use reth_engine_primitives::{
     BeaconEngineMessage, ConsensusEngineEvent, ExecutionPayload, ForkchoiceStateTracker,
@@ -31,18 +32,21 @@ use reth_primitives_traits::{
     FastInstant as Instant, NodePrimitives, RecoveredBlock, SealedBlock, SealedHeader,
 };
 use reth_provider::{
-    BalProvider, BlockExecutionOutput, BlockExecutionResult, BlockHashReader, BlockReader,
-    ChangeSetReader, DatabaseProviderFactory, DatabaseProviderROFactory, ProviderError,
-    PruneCheckpointReader, SaveBlocksInput, StageCheckpointReader, StateProvider, StateProviderBox,
-    StateProviderFactory, StateReader, StorageChangeSetReader, StorageSettingsCache,
-    TransactionVariant,
+    BalProvider, BlockExecutionOutput, BlockExecutionResult, BlockReader, ChainSpecProvider,
+    ChangeSetReader, DatabaseProviderFactory, HistoryReader, ProviderError, PruneCheckpointReader,
+    SaveBlocksInput, StageCheckpointReader, StateProviderFactory, StateReader,
+    StorageChangeSetReader, StorageSettingsCache, TransactionVariant,
 };
 use reth_revm::database::StateProviderDatabase;
 use reth_stages_api::ControlFlow;
 use reth_storage_overlay::{OverlayManager, OverlayStateProviderFactory};
 use reth_tasks::{spawn_os_thread, utils::increase_thread_priority};
 use reth_trie::ComputedTrieData;
-use revm::{context_interface::Cfg, interpreter::debug_unreachable, primitives::hardfork::SpecId};
+use revm::{
+    context_interface::{Block as _, Cfg},
+    interpreter::debug_unreachable,
+    primitives::hardfork::SpecId,
+};
 use state::TreeState;
 use std::{
     fmt::Debug,
@@ -98,17 +102,6 @@ pub use txpool_prewarm::{
 pub use types::{ExecutionEnv, ValidationOutcome, ValidationOutput};
 
 pub mod state;
-
-/// The largest gap for which the tree will be used to sync individual blocks by downloading them.
-///
-/// This is the default threshold, and represents the distance (gap) from the local head to a
-/// new (canonical) block, e.g. the forkchoice head block. If the block distance from the local head
-/// exceeds this threshold, the pipeline will be used to backfill the gap more efficiently.
-///
-/// E.g.: Local head `block.number` is 100 and the forkchoice head `block.number` is 133 (more than
-/// an epoch has slots), then this exceeds the threshold at which the pipeline should be used to
-/// backfill this gap.
-pub(crate) const MIN_BLOCKS_FOR_PIPELINE_RUN: u64 = EPOCH_SLOTS;
 
 /// The minimum number of blocks to retain in the changeset cache after eviction.
 ///
@@ -377,17 +370,18 @@ where
         + StateProviderFactory
         + StateReader<Receipt = N::Receipt>
         + BalProvider
+        // The EIP-7805 appendability check needs the block's blob schedule.
+        + ChainSpecProvider
         + Clone
         + 'static,
     P::Provider: BlockReader<Block = N::Block, Header = N::BlockHeader>
-        + BlockHashReader
         + PruneCheckpointReader
         + StageCheckpointReader
         + ChangeSetReader
         + StorageChangeSetReader
         + StorageSettingsCache
+        + HistoryReader
         + 'static,
-    OverlayStateProviderFactory<P, N>: DatabaseProviderROFactory<Provider: StateProvider + Send>,
     C: ConfigureEvm<Primitives = N> + 'static,
     // The EIP-7805 appendability check prices intrinsic gas, which needs a concrete revm spec.
     reth_evm::SpecFor<C>: Into<SpecId>,
@@ -1262,6 +1256,10 @@ where
 
         trace!(target: "engine::tree", "fcu head hash is already canonical");
 
+        if !self.is_consistent_forkchoice_state(state, None)? {
+            return Ok(Some(TreeOutcome::new(OnForkChoiceUpdated::invalid_state())));
+        }
+
         // Update the safe and finalized blocks and ensure their values are valid
         if let Err(outcome) = self.ensure_consistent_forkchoice_state(state) {
             // safe or finalized hashes are invalid
@@ -1330,6 +1328,10 @@ where
                 return Ok(Some(TreeOutcome::new(OnForkChoiceUpdated::too_deep_reorg())));
             }
 
+            if !self.is_consistent_forkchoice_state(state, None)? {
+                return Ok(Some(TreeOutcome::new(OnForkChoiceUpdated::invalid_state())));
+            }
+
             // We need to effectively unwind the _canonical_ chain to the FCU's head, which is
             // part of the canonical chain. We need to update the latest block state to reflect
             // the canonical ancestor. This ensures that state providers and the transaction
@@ -1358,6 +1360,10 @@ where
 
         // Ensure we can apply a new chain update for the head block
         if let Some(chain_update) = self.on_new_head(state.head_block_hash)? {
+            if !self.is_consistent_forkchoice_state(state, Some(&chain_update))? {
+                return Ok(Some(TreeOutcome::new(OnForkChoiceUpdated::invalid_state())));
+            }
+
             let tip = chain_update.tip().clone_sealed_header();
             self.on_canonical_chain_update(chain_update);
 
@@ -2349,11 +2355,15 @@ where
         }
 
         let finalized = self.state.forkchoice_state_tracker.last_valid_finalized();
-        self.remove_before(in_memory_persisted_block, finalized)?;
+        // Trim the canonical in-memory state first: state providers build their overlays from the
+        // canonical chain, so it must never reference blocks whose overlays the manager has
+        // already pruned. `remove_before` does not read the canonical in-memory state, so the
+        // order between the two trims is free to choose.
         self.canonical_in_memory_state.remove_persisted_blocks_until(
             self.persistence_state.last_persisted_block,
             in_memory_persisted_block.number,
         );
+        self.remove_before(in_memory_persisted_block, finalized)?;
         // Persistence changes the overlay anchor. Prepare the remaining canonical range before
         // the next payload needs to read execution state against the new durable frontier.
         self.state.tree_state.overlay_manager.precompute_execution_overlay(
@@ -2755,7 +2765,7 @@ where
     /// If the `local_tip` is greater than the `block`, then this will return false.
     #[inline]
     const fn exceeds_backfill_run_threshold(&self, local_tip: u64, block: u64) -> bool {
-        block > local_tip && block - local_tip > MIN_BLOCKS_FOR_PIPELINE_RUN
+        block > local_tip && block - local_tip > self.config.backfill_run_threshold()
     }
 
     /// Returns how far the local tip is from the given block. If the local tip is at the same
@@ -3386,17 +3396,81 @@ where
     }
 
     /// Attempts to find the header for the given block hash if it is canonical.
+    ///
+    /// A persisted header can still be found by hash while its disk reorg is pending, so it is
+    /// only canonical if it is not above the canonical head and matches the canonical hash at its
+    /// height. The in-memory canonical hash is preferred over the persisted one.
     pub fn find_canonical_header(
         &self,
         hash: B256,
     ) -> Result<Option<SealedHeader<N::BlockHeader>>, ProviderError> {
-        let mut canonical = self.canonical_in_memory_state.header_by_hash(hash);
-
-        if canonical.is_none() {
-            canonical = self.provider.header(hash)?.map(|header| SealedHeader::new(header, hash));
+        if let Some(header) = self.canonical_in_memory_state.header_by_hash(hash) {
+            return Ok(Some(header))
         }
 
-        Ok(canonical)
+        let Some(header) = self.provider.sealed_header_by_hash(hash)? else { return Ok(None) };
+        // Reorged-out headers remain on disk until persistence catches up, so reject old tips above
+        // the in-memory head and use in-memory hashes to reject old blocks at shared heights.
+        let number = header.number();
+        if number > self.canonical_in_memory_state.get_canonical_block_number() {
+            return Ok(None)
+        }
+        let canonical_hash =
+            if let Some(hash) = self.canonical_in_memory_state.hash_by_number(number) {
+                Some(hash)
+            } else {
+                self.provider.block_hash(number)?
+            };
+
+        Ok((canonical_hash == Some(hash)).then_some(header))
+    }
+
+    /// Checks that nonzero safe and finalized hashes belong to the chain defined by the FCU head.
+    ///
+    /// The [Engine API forkchoiceUpdated specification] requires `-38002` when a `VALID` head's
+    /// safe or finalized hash is outside that chain, and requires all forkchoice state updates to
+    /// be atomic. In direct FCU processing, this check must therefore run before canonicalizing
+    /// the head or updating either marker; checking only after canonicalization would leave an
+    /// invalid reorg applied.
+    ///
+    /// `chain_update` describes a proposed commit or reorg that has not yet been applied. Its new
+    /// blocks and the canonical prefix below its first block form the proposed chain. Without a
+    /// chain update, the proposed head is already canonical, so only canonical blocks through its
+    /// height are eligible. Canonical-prefix hashes are resolved via
+    /// [`Self::find_canonical_header`], which rejects stale persisted headers whose disk reorg
+    /// cleanup is pending. A zero safe or finalized hash leaves that marker unchanged.
+    /// Returns `Ok(false)` for an unknown or off-chain hash and propagates provider errors.
+    ///
+    /// [Engine API forkchoiceUpdated specification]: https://github.com/ethereum/execution-apis/blob/main/src/engine/paris.md#specification-1
+    fn is_consistent_forkchoice_state(
+        &self,
+        state: ForkchoiceState,
+        chain_update: Option<&NewCanonicalChain<N>>,
+    ) -> ProviderResult<bool> {
+        let canonical_head_number = match chain_update {
+            Some(chain_update) => {
+                let new = chain_update.new_blocks();
+                // Only the canonical prefix below the new branch remains on the proposed chain.
+                new.first().expect("non empty chain").block_number() - 1
+            }
+            None => {
+                let Some(head) = self.find_canonical_header(state.head_block_hash)? else {
+                    return Ok(false)
+                };
+                head.number()
+            }
+        };
+
+        for hash in [state.finalized_block_hash, state.safe_block_hash] {
+            if hash.is_zero() || chain_update.is_some_and(|update| update.contains(hash)) {
+                continue
+            }
+            let Some(header) = self.find_canonical_header(hash)? else { return Ok(false) };
+            if header.number() > canonical_head_number {
+                return Ok(false)
+            }
+        }
+        Ok(true)
     }
 
     /// Updates the tracked finalized block if we have it.
@@ -3512,17 +3586,13 @@ where
             };
             block
         };
-        if !self.state.tree_state.contains_hash(&block_hash) &&
-            self.provider.header(block_hash)?.is_none()
-        {
-            debug!(target: "engine::tree", %block_hash, "no canonical state found for block");
-            return Ok(None)
-        }
-        let state_provider_factory = OverlayStateProviderFactory::new(
+        let provider_factory = OverlayStateProviderFactory::new(
             self.provider.clone(),
             self.state.tree_state.overlay_manager.overlay_builder(block_hash),
         );
-        let state: StateProviderBox = Box::new(state_provider_factory.database_provider_ro()?);
+        let state: reth_provider::StateProviderBox = Box::new(
+            reth_provider::DatabaseProviderROFactory::database_provider_ro(&provider_factory)?,
+        );
 
         // The EVM environment supplies the chain id and the EIP-7825 gas cap the block was
         // executed under. The spec permits a null result, so a failure here reports nothing.
@@ -3533,12 +3603,23 @@ where
                 return Ok(None)
             }
         };
+        // The blob dimension is bounded by the schedule in force at the block's timestamp. A
+        // block with no schedule cannot carry blobs, so the resulting zero budget correctly
+        // leaves every blob transaction unappendable.
+        let blob_params = self.provider.chain_spec().blob_params_at_timestamp(block.timestamp());
         let ctx = InclusionListContext {
             chain_id: evm_env.cfg_env.chain_id,
             spec_id: evm_env.cfg_env.spec.into(),
             base_fee_per_gas: block.base_fee_per_gas(),
             available_gas: block.gas_limit().saturating_sub(block.gas_used()),
             tx_gas_limit_cap: evm_env.cfg_env.tx_gas_limit_cap(),
+            max_initcode_size: evm_env.cfg_env.max_initcode_size(),
+            blob_gas_available: blob_params
+                .map(|params| params.max_blob_gas_per_block())
+                .unwrap_or_default()
+                .saturating_sub(block.blob_gas_used().unwrap_or_default()),
+            blob_gas_price: evm_env.block_env.blob_gasprice().unwrap_or_default(),
+            max_blobs_per_tx: blob_params.map(|params| params.max_blobs_per_tx),
         };
 
         let result = inclusion_list_satisfied::<N>(&block, &state, &ctx, &transactions)?;

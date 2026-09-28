@@ -419,8 +419,8 @@ pub trait TransactionPool: Clone + Debug + Send + Sync {
 
     /// Builds an EIP-7805 (FOCIL) inclusion list from the pool's local view.
     ///
-    /// The returned transactions are EIP-2718 encoded and their RLP list encoding is at most
-    /// `max_size` bytes. Blob transactions are excluded, as EIP-7805 requires.
+    /// The returned transactions are EIP-2718 encoded and the sum of their byte lengths is at
+    /// most `max_size` bytes. Blob transactions are excluded, as EIP-7805 requires.
     ///
     /// At most [`MAX_INCLUSION_LIST_TXS_PER_SENDER`] transactions come from any one sender: only a
     /// sender's next nonce is appendable, so a longer run would spend the byte budget without
@@ -1381,8 +1381,7 @@ pub trait PoolTransaction:
     fn try_from_consensus(
         tx: Recovered<Self::Consensus>,
     ) -> Result<Self, Self::TryFromConsensusError> {
-        let (tx, signer) = tx.into_parts();
-        Ok(Self::from_pooled(Recovered::new_unchecked(tx.try_into()?, signer)))
+        Ok(Self::from_pooled(tx.try_convert()?))
     }
 
     /// Clone the transaction into a consensus variant.
@@ -1435,35 +1434,66 @@ pub trait PoolTransaction:
         }
     }
 
+    /// Recovers and converts a pooled transaction, using the sender recovery cache if provided.
+    ///
+    /// Delegates to [`Self::try_recover`] when no cache is configured.
+    fn try_recover_with_cache_opt(
+        pooled: Self::Pooled,
+        cache: Option<&reth_evm::SenderRecoveryCache>,
+    ) -> Result<Self, Self::Pooled> {
+        match cache {
+            Some(cache) => Self::try_recover_with_cache(pooled, cache),
+            None => Self::try_recover(pooled),
+        }
+    }
+
     /// Decodes and recovers a raw transaction into this pool transaction type.
     ///
     /// Implementations can override this to avoid constructing the pooled transaction as an
     /// intermediate value when the raw representation can be converted directly into `Self`.
+    /// RPC uses this hook when no sender recovery cache is configured. Override
+    /// [`Self::recover_raw_transaction_with_cache`] to specialize the cached path as well.
     fn recover_raw_transaction(data: &[u8]) -> Result<Self, RawPoolTransactionError> {
+        Self::try_recover(Self::decode_raw_transaction(data)?)
+            .map_err(|_| RawPoolTransactionError::InvalidTransactionSignature)
+    }
+
+    /// Decodes and recovers a raw pool transaction using the provided sender recovery cache.
+    ///
+    /// RPC uses this hook when a sender recovery cache is configured. Implementations can override
+    /// it to reuse the raw bytes or encoded length during recovery and construction. The default
+    /// implementation decodes and recovers separately; it does not call
+    /// [`Self::recover_raw_transaction`].
+    fn recover_raw_transaction_with_cache(
+        data: &[u8],
+        cache: &reth_evm::SenderRecoveryCache,
+    ) -> Result<Self, RawPoolTransactionError> {
+        Self::try_recover_with_cache(Self::decode_raw_transaction(data)?, cache)
+            .map_err(|_| RawPoolTransactionError::InvalidTransactionSignature)
+    }
+
+    /// Decodes a raw pooled transaction without recovering its sender.
+    ///
+    /// The entire input must be consumed; trailing bytes are rejected. Implementations can override
+    /// this to customize raw decoding independently of sender recovery.
+    fn decode_raw_transaction(data: &[u8]) -> Result<Self::Pooled, RawPoolTransactionError> {
         if data.is_empty() {
             return Err(RawPoolTransactionError::EmptyRawTransactionData)
         }
 
-        let transaction = Self::Pooled::decode_2718_exact(data)
-            .map_err(|_| RawPoolTransactionError::FailedToDecodeSignedTransaction)?;
-
-        Self::try_recover(transaction)
-            .map_err(|_| RawPoolTransactionError::InvalidTransactionSignature)
+        Self::Pooled::decode_2718_exact(data)
+            .map_err(|_| RawPoolTransactionError::FailedToDecodeSignedTransaction)
     }
 
     /// Tries to convert the `Consensus` type into the `Pooled` type.
     fn try_into_pooled(self) -> Result<Recovered<Self::Pooled>, Self::TryFromConsensusError> {
-        let consensus = self.into_consensus();
-        let (tx, signer) = consensus.into_parts();
-        Ok(Recovered::new_unchecked(tx.try_into()?, signer))
+        self.into_consensus().try_convert()
     }
 
     /// Clones the consensus transactions and tries to convert the `Consensus` type into the
     /// `Pooled` type.
     fn clone_into_pooled(&self) -> Result<Recovered<Self::Pooled>, Self::TryFromConsensusError> {
-        let consensus = self.clone_into_consensus();
-        let (tx, signer) = consensus.into_parts();
-        Ok(Recovered::new_unchecked(tx.try_into()?, signer))
+        self.clone_into_consensus().try_convert()
     }
 
     /// Converts the `Pooled` type into the `Consensus` type.
@@ -1682,7 +1712,7 @@ impl PoolTransaction for EthPooledTransaction {
     }
 
     fn consensus_ref(&self) -> Recovered<&Self::Consensus> {
-        Recovered::new_unchecked(&*self.transaction, self.transaction.signer())
+        self.transaction.as_recovered_ref()
     }
 
     fn into_consensus(self) -> Recovered<Self::Consensus> {
@@ -1847,11 +1877,9 @@ impl EthPoolTransaction for EthPooledTransaction {
         self,
         sidecar: Arc<BlobTransactionSidecarVariant>,
     ) -> Option<Recovered<Self::Pooled>> {
-        let (signed_transaction, signer) = self.into_consensus().into_parts();
-        let pooled_transaction =
-            signed_transaction.try_into_pooled_eip4844(Arc::unwrap_or_clone(sidecar)).ok()?;
-
-        Some(Recovered::new_unchecked(pooled_transaction, signer))
+        self.into_consensus()
+            .try_map(|tx| tx.try_into_pooled_eip4844(Arc::unwrap_or_clone(sidecar)))
+            .ok()
     }
 
     fn try_from_eip4844(
