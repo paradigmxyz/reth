@@ -520,7 +520,7 @@ jobs:
         run: .github/scripts/hive/run_simulator.sh devp2p '^snap2$'
       - name: Parse hive output
         run: |
-          find hivetests/workspace/logs -type f -name "*.json" ! -name "hive.json" | xargs -I {} python .github/scripts/hive/parse.py {} --exclusion .github/scripts/hive/expected_failures.yaml --ignored .github/scripts/hive/ignored_tests.yaml
+          find hivetests/workspace/logs -type f -name "*.json" ! -name "hive.json" -print0 | xargs -0 -I {} python .github/scripts/hive/parse.py {} --exclusion .github/scripts/hive/expected_failures.yaml --ignored .github/scripts/hive/ignored_tests.yaml
       - name: Upload Hive results
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
