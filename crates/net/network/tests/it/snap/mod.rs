@@ -26,7 +26,7 @@ use reth_eth_wire::{
 };
 use reth_network::{
     eth_requests::SOFT_RESPONSE_LIMIT,
-    test_utils::{PeerConfig, Testnet, TestnetHandle},
+    test_utils::{PeerConfig, Testnet, TestnetHandle, TestnetProvider},
     BlockDownloaderProvider,
 };
 use reth_network_p2p::snap::client::{SnapClient, SnapResponse};
@@ -36,9 +36,9 @@ use reth_provider::{
     test_utils::{
         create_test_provider_factory, ExtendedAccount, MockEthProvider, MockNodeTypesWithDB,
     },
-    BalProvider, BalStoreHandle, BlockReader, BlockWriter, ChainSpecProvider, HashingWriter,
-    HeaderProvider, InMemoryBalStore, ProviderFactory, RawBal, StageCheckpointWriter,
-    StateProviderFactory, StateRangeProviderFactory, StateRootProvider, StorageRootProvider,
+    BalStoreHandle, BlockWriter, ChainSpecProvider, HashingWriter, HeaderProvider,
+    InMemoryBalStore, ProviderFactory, RawBal, StageCheckpointWriter, StateProviderFactory,
+    StateRootProvider, StorageRootProvider,
 };
 use reth_stages_types::{StageCheckpoint, StageId};
 use reth_testing_utils::generators::{self, random_block, BlockParams};
@@ -48,69 +48,21 @@ use std::{sync::Arc, time::Duration};
 
 mod protocol;
 
-type SnapTestnetHandle<C> = TestnetHandle<C, TestPool>;
-
-/// Protocols a snap/2-capable peer advertises: `eth/71` plus `snap/2`.
-///
-/// A session only negotiates the dedicated snap-carrying connection variant for exactly this
-/// pair; anything else falls back to a satellite connection that can't serve `GetSnap`.
-fn snap_protocols() -> Vec<Protocol> {
-    vec![EthVersion::Eth71.into(), Protocol::snap_2()]
-}
-
-/// A provider usable by the snap/2 testnet helpers: real block, header, state, bal, and range
-/// access.
-trait SnapTestProvider:
-    BlockReader<
-        Block = reth_ethereum_primitives::Block,
-        Receipt = reth_ethereum_primitives::Receipt,
-        Header = alloy_consensus::Header,
-    > + HeaderProvider
-    + BalProvider
-    + StateProviderFactory
-    + StateRangeProviderFactory
-    + ChainSpecProvider<ChainSpec: Hardforks>
-    + Clone
-    + Unpin
-    + 'static
-{
-}
-
-impl<T> SnapTestProvider for T where
-    T: BlockReader<
-            Block = reth_ethereum_primitives::Block,
-            Receipt = reth_ethereum_primitives::Receipt,
-            Header = alloy_consensus::Header,
-        > + HeaderProvider
-        + BalProvider
-        + StateProviderFactory
-        + StateRangeProviderFactory
-        + ChainSpecProvider<ChainSpec: Hardforks>
-        + Clone
-        + Unpin
-        + 'static
-{
-}
-
 /// Spawns a 2-peer testnet where both peers are snap/2-capable and serve requests against
 /// `provider`.
-async fn spawn_snap_testnet<C: SnapTestProvider>(provider: C) -> SnapTestnetHandle<C> {
-    spawn_snap_testnet_with_protocols(provider, snap_protocols()).await
-}
-
-/// Like [`spawn_snap_testnet`], but with a caller-chosen protocol list.
-async fn spawn_snap_testnet_with_protocols<C: SnapTestProvider>(
-    provider: C,
-    protocols: Vec<Protocol>,
-) -> SnapTestnetHandle<C> {
-    let mut net: Testnet<C, TestPool> = Testnet::default();
-    for _ in 0..2 {
-        let peer = PeerConfig::with_protocols(provider.clone(), protocols.clone());
-        net.add_peer_with_config(peer).await.unwrap();
-    }
-    net.for_each_mut(|peer| peer.install_request_handler());
-
-    let net = net.spawn();
+///
+/// The peers advertise `eth/71` plus `snap/2`: a session only negotiates the dedicated
+/// snap-carrying connection variant for exactly this pair; anything else falls back to a satellite
+/// connection that can't serve `GetSnap`.
+async fn spawn_snap_testnet<C>(provider: C) -> TestnetHandle<C, TestPool>
+where
+    C: TestnetProvider + ChainSpecProvider<ChainSpec: Hardforks> + Clone,
+{
+    let peer = || {
+        PeerConfig::new(provider.clone())
+            .with_protocols([EthVersion::Eth71.into(), Protocol::snap_2()])
+    };
+    let net = Testnet::from_configs([peer(), peer()]).await.with_request_handlers().spawn();
     net.connect_peers().await;
     net
 }
