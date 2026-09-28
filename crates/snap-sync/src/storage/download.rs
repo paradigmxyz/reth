@@ -17,9 +17,13 @@ use reth_storage_api::{
 };
 use reth_tasks::Runtime;
 use std::fmt;
+use tokio_util::sync::CancellationToken;
 
 /// Default number of contracts asked for per storage request.
 pub const DEFAULT_STORAGE_ACCOUNTS: usize = 128;
+
+// Bounds the work repeated if a request fails before the repair batch commits.
+const MAX_REPAIR_SLOTS: usize = 64;
 
 /// Downloads the storage an account range's contracts still need, one request at a time.
 ///
@@ -113,13 +117,16 @@ where
         Ok(StorageRangeStep::Committed(committed))
     }
 
-    /// Fetches the pivot's values of the slots scheduled for repair at `range`'s origin, zero
-    /// where its storage holds none.
+    /// Fetches a bounded batch of the slots scheduled for repair at `range`'s origin, zero where
+    /// the pivot's storage holds none.
     ///
-    /// `Ok(None)` when a peer did not serve one, leaving the account scheduled.
+    /// Stops between requests when `cancel` fires. Returns the values already fetched if a later
+    /// slot is unavailable, or `Ok(None)` if the first requested slot is unavailable. Unfetched
+    /// slots stay scheduled when the caller commits the returned values.
     pub async fn repair_slots(
         &mut self,
         range: &VerifiedRange,
+        cancel: &CancellationToken,
     ) -> Result<Option<Vec<(B256, U256)>>, SnapSyncError> {
         let (write, account) = (range.write(), range.origin());
         let repairs = self.context.factory().database_provider_ro()?.snap_repairs(write)?;
@@ -131,7 +138,10 @@ where
         };
 
         let mut values = Vec::new();
-        for slot in repairs.slots(account) {
+        for slot in repairs.slots(account).take(MAX_REPAIR_SLOTS) {
+            if cancel.is_cancelled() {
+                break
+            }
             let request = GetStorageRangesMessage {
                 request_id: self.context.next_request_id(),
                 root_hash: batch.state_root(),
@@ -146,7 +156,9 @@ where
                 &batch,
                 self.context.runtime().clone(),
             )?;
-            let StorageRangeOutcome::Verified(ranges) = downloader.await? else { return Ok(None) };
+            let StorageRangeOutcome::Verified(ranges) = downloader.await? else {
+                return Ok((!values.is_empty()).then_some(values))
+            };
             // Proved from the slot, so one keyed past it means the storage holds none there.
             let value = ranges
                 .into_ranges()
@@ -540,7 +552,7 @@ mod tests {
         ];
         let (client, mut download) = download(responses, factory);
 
-        let values = download.repair_slots(&range).await.unwrap();
+        let values = download.repair_slots(&range, &CancellationToken::new()).await.unwrap();
 
         assert_eq!(values, Some(vec![(key(1), U256::from(11)), (key(5), U256::ZERO)]));
         assert_eq!(*client.storage_requests(), [(vec![key(2)], key(1)), (vec![key(2)], key(5))]);
@@ -552,6 +564,44 @@ mod tests {
         let (factory, range) = repairing(&accounts, &[key(1)]);
         let (_, mut download) = download([storage_ranges(1, &[], &[], &[])], factory);
 
-        assert_eq!(download.repair_slots(&range).await.unwrap(), None);
+        assert_eq!(download.repair_slots(&range, &CancellationToken::new()).await.unwrap(), None);
+    }
+
+    #[tokio::test]
+    async fn an_unserved_slot_preserves_the_values_fetched_before_it() {
+        let accounts = accounts();
+        let (factory, range) = repairing(&accounts, &[key(1), key(5)]);
+        let large = large();
+        let responses = [
+            storage_ranges(1, &[&large[..1]], &large, &[key(1)]),
+            storage_ranges(2, &[], &[], &[]),
+        ];
+        let (_, mut download) = download(responses, factory);
+
+        assert_eq!(
+            download.repair_slots(&range, &CancellationToken::new()).await.unwrap(),
+            Some(vec![(key(1), U256::from(11))])
+        );
+    }
+
+    #[tokio::test]
+    async fn repair_batches_bound_the_number_of_requests() {
+        let accounts = accounts();
+        let slots = (10..=10 + MAX_REPAIR_SLOTS as u64).map(key).collect::<Vec<_>>();
+        let (factory, range) = repairing(&accounts, &slots);
+        let large = large();
+        let responses = slots
+            .iter()
+            .enumerate()
+            .map(|(i, slot)| storage_ranges(i as u64 + 1, &[&[]], &large, &[*slot]));
+        let (client, mut download) = download(responses, factory);
+
+        let values =
+            download.repair_slots(&range, &CancellationToken::new()).await.unwrap().unwrap();
+
+        let expected =
+            slots[..MAX_REPAIR_SLOTS].iter().map(|slot| (*slot, U256::ZERO)).collect::<Vec<_>>();
+        assert_eq!(values, expected);
+        assert_eq!(client.storage_requests().len(), MAX_REPAIR_SLOTS);
     }
 }

@@ -313,17 +313,21 @@ where
     // ends the pass.
     async fn repair(&mut self) -> Result<Option<Step>, SnapSyncError> {
         loop {
+            if self.cancel.is_cancelled() {
+                return Ok(Some(Step::Stop))
+            }
             let range = match self.accounts.next_repair().await? {
                 None => return Ok(None),
                 Some(AccountRangeStep::Verified(range)) => range,
                 Some(AccountRangeStep::Unavailable { .. }) => return Ok(Some(Step::Wait)),
             };
-            let Some(slots) = self.storage.repair_slots(&range).await? else {
-                return Ok(Some(Step::Wait))
-            };
+            // Code must be present before even a partial storage repair can commit.
             if let Some(step) = self.download_code(&range).await? {
                 return Ok(Some(step))
             }
+            let Some(slots) = self.storage.repair_slots(&range, &self.cancel).await? else {
+                return Ok(Some(Step::Wait))
+            };
             let hashed_address = range.origin();
             let remaining = self.accounts.commit_repair(range, slots).await?;
             debug!(target: "sync::snap", %hashed_address, remaining, "Repaired snap account");
@@ -505,7 +509,8 @@ mod tests {
     use crate::{
         test_utils::{
             account, account_range, hashed_factory, header, key, policy, replace_headers_after,
-            state_root, storage_ranges, storage_root_of, verified_range, ScriptedSnapClient,
+            state_root, storage_ranges, storage_root_of, stored_slots, verified_range,
+            ScriptedSnapClient,
         },
         StateRepairs, VerifiedSnapState,
     };
@@ -1114,5 +1119,62 @@ mod tests {
         };
         assert_ne!(pivot.hash, B256::repeat_byte(0xee));
         assert_ne!(attempt_id(&factory), orphaned);
+    }
+
+    #[tokio::test]
+    async fn cancelled_storage_repairs_resume_after_the_last_committed_slot() {
+        let slots = vec![(key(1), U256::from(11)), (key(2), U256::from(12))];
+        let mut contract = account(1);
+        contract.storage_root = storage_root_of(&slots);
+        let accounts = vec![(key(1), contract)];
+        let factory = hashed_factory();
+        insert_chain(&factory, 3, state_root(&accounts));
+        let provider = factory.database_provider_rw().unwrap();
+        let pivot = provider.sealed_header(2).unwrap().unwrap().num_hash();
+        let write =
+            provider.start_snap_attempt(SnapGeneration::new(pivot, state_root(&accounts))).unwrap();
+        provider.start_account_coverage(write).unwrap();
+        let mut repairs = StateRepairs::default();
+        repairs.insert_slot(key(1), key(1));
+        repairs.insert_slot(key(1), key(2));
+        provider.schedule_snap_repairs(write, repairs).unwrap();
+        provider.commit().unwrap();
+        let cancel = CancellationToken::new();
+        let on_request = cancel.clone();
+        let client = Arc::new(
+            ScriptedSnapClient::new([
+                account_range(1, &accounts, 0..1, &[key(1)]),
+                storage_ranges(1, &[&slots[..1]], &slots, &[key(1)]),
+                storage_ranges(2, &[&slots[1..]], &slots, &[key(2)]),
+            ])
+            .on_storage_request(move || on_request.cancel()),
+        );
+        let context = TestContext { heads: RefCell::new(VecDeque::from([3])), waits: 0 };
+        let mut bootstrap =
+            SnapBootstrap::new(Arc::clone(&client), factory.clone(), Runtime::test(), context)
+                .with_policy(policy())
+                .with_cancellation(cancel);
+        assert_eq!(bootstrap.run().await.unwrap(), SnapBootstrapOutcome::Stopped);
+        assert_eq!(client.storage_requests().len(), 1);
+        let provider = factory.database_provider_ro().unwrap();
+        let pending = provider.snap_repairs(write).unwrap().slots(key(1)).collect::<Vec<_>>();
+        assert_eq!(pending, [key(2)]);
+        assert_eq!(stored_slots(&provider, key(1)), slots[..1]);
+        drop(provider);
+
+        let (client, mut resumed) = scripted(
+            &factory,
+            [
+                account_range(1, &accounts, 0..1, &[key(1)]),
+                storage_ranges(1, &[&slots[1..]], &slots, &[key(2)]),
+                Err(RequestError::UnsupportedCapability),
+            ],
+            [3],
+        );
+        assert_eq!(resumed.run().await.unwrap(), SnapBootstrapOutcome::Stopped);
+        assert_eq!(*client.storage_requests(), [(vec![key(1)], key(2))]);
+        let provider = factory.database_provider_ro().unwrap();
+        assert!(provider.snap_repairs(write).unwrap().is_empty());
+        assert_eq!(stored_slots(&provider, key(1)), slots);
     }
 }

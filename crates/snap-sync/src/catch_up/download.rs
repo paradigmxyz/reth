@@ -127,22 +127,26 @@ where
 
     /// Fetches the lists of `headers`, blocks a reorg orphaned, in order.
     ///
-    /// `Ok(None)` once a peer leaves any of them out, since repairing the state needs every one.
+    /// Continues responses cut at the byte limit. `Ok(None)` once a peer explicitly leaves a
+    /// list out, since repairing the state needs every one.
     pub async fn orphaned_lists<H: AlloyBlockHeader + Sealable>(
         &mut self,
         headers: &[SealedHeader<H>],
     ) -> Result<Option<Vec<DecodedBal>>, SnapSyncError> {
         let mut lists = Vec::with_capacity(headers.len());
-        for chunk in headers.chunks(self.max_blocks as usize) {
-            let BlockAccessListOutcome::Verified(verified) = self.request(chunk).await? else {
-                return Ok(None)
-            };
-            if !verified.missing().is_empty() {
-                return Ok(None)
+        for mut chunk in headers.chunks(self.max_blocks as usize) {
+            while !chunk.is_empty() {
+                let BlockAccessListOutcome::Verified(verified) = self.request(chunk).await? else {
+                    return Ok(None)
+                };
+                let returned = verified.into_block_access_lists();
+                // A short response leaves the suffix unanswered, not unavailable.
+                chunk = &chunk[returned.len()..];
+                for (_, list) in returned {
+                    let Some(list) = list else { return Ok(None) };
+                    lists.push(list);
+                }
             }
-            lists.extend(
-                verified.into_block_access_lists().into_iter().filter_map(|(_, list)| list),
-            );
         }
         Ok(Some(lists))
     }
@@ -755,5 +759,40 @@ mod tests {
         let (_, mut catch_up) = catch_up_with(responses, hashed_factory(), 3);
 
         assert!(catch_up.orphaned_lists(orphaned).await.unwrap().is_none());
+    }
+
+    #[tokio::test]
+    async fn orphaned_lists_resume_responses_cut_at_the_byte_limit() {
+        let chain = chain();
+        let orphaned = &chain.headers[PIVOT as usize + 1..];
+        let responses = [
+            chain.response(1, [Some(1)]),
+            chain.response(2, [Some(2)]),
+            chain.response(3, [Some(3)]),
+        ];
+        let (client, mut catch_up) = catch_up_with(responses, hashed_factory(), 3);
+
+        let lists = catch_up.orphaned_lists(orphaned).await.unwrap().unwrap();
+
+        let lists: Vec<_> = lists.iter().map(|list| list.as_bal().to_vec()).collect();
+        assert_eq!(lists, [credit(10), credit(20), credit(30)]);
+        let hashes: Vec<_> = orphaned.iter().map(SealedHeader::hash).collect();
+        assert_eq!(
+            *client.block_requests(),
+            [hashes.clone(), hashes[1..].to_vec(), hashes[2..].to_vec()]
+        );
+    }
+
+    #[tokio::test]
+    async fn an_unavailable_follow_up_ends_orphaned_list_recovery() {
+        let chain = chain();
+        let orphaned = &chain.headers[PIVOT as usize + 1..];
+        for suffix in [vec![], vec![None, Some(3)]] {
+            let responses = [chain.response(1, [Some(1)]), chain.response(2, suffix)];
+            let (client, mut catch_up) = catch_up_with(responses, hashed_factory(), 3);
+
+            assert!(catch_up.orphaned_lists(orphaned).await.unwrap().is_none());
+            assert_eq!(client.block_requests().len(), 2);
+        }
     }
 }
