@@ -177,11 +177,14 @@ impl<T: TransactionOrdering> BestTransactions<T> {
     fn pop_best(&mut self) -> Option<PendingTransaction<T>> {
         loop {
             let best = self.independent.pop()?;
+            let id = best.transaction.id();
             // The heap can hold two entries for one transaction id: if a replacement for an
             // already yielded nonce arrives over the update channel, the descendant is promoted
-            // again when that replacement is popped. Only the pop that still finds the id in
-            // `all` is live, the other is stale and must not be yielded a second time.
-            if self.all.remove(best.transaction.id()).is_some() {
+            // again when that replacement is popped. Only the pop whose entry is still the one
+            // tracked in `all` is live. A stale copy is dropped without touching `all`, since the
+            // id may by now belong to a replacement that was stashed there and must survive.
+            if self.all.get(id).is_some_and(|live| live.submission_id == best.submission_id) {
+                self.all.remove(id);
                 return Some(best)
             }
         }
@@ -971,6 +974,58 @@ mod tests {
         unique.dedup();
         assert_eq!(unique.len(), hashes.len(), "transaction yielded twice: {hashes:?}");
         assert_eq!(hashes.len(), 4, "unexpected transactions yielded: {hashes:?}");
+    }
+
+    #[test]
+    fn test_best_stale_heap_entry_does_not_consume_replacement() {
+        let mut pool = PendingPool::new(MockOrdering::default());
+        let mut f = MockTransactionFactory::default();
+
+        // one sender with three gapless transactions, nonce 0 pays the most so it is yielded first
+        let tx = MockTransaction::eip1559();
+        for (nonce, fee) in [(0u64, 100u128), (1, 10), (2, 10)] {
+            let tx =
+                tx.clone().rng_hash().with_nonce(nonce).with_priority_fee(fee).with_max_fee(fee);
+            pool.add_transaction(Arc::new(f.validated(tx)), 0);
+        }
+
+        let mut best = pool.best();
+        let first = best.next().unwrap();
+        assert_eq!(first.nonce(), 0);
+
+        // replacing the yielded nonce 0 with a cheaper transaction promotes nonce 1 into the heap
+        // a second time once the replacement is yielded
+        let replacement =
+            tx.clone().rng_hash().with_nonce(0).with_priority_fee(50).with_max_fee(50);
+        pool.remove_transaction(first.id());
+        pool.add_transaction(Arc::new(f.validated(replacement)), 0);
+        let second = best.next().unwrap();
+        assert_eq!(second.nonce(), 0);
+
+        // yield one copy of nonce 1, then replace it with a transaction that pays more than the
+        // one just yielded: the iterator stashes it in `all` without a heap entry, and the stale
+        // heap copy of nonce 1 must neither consume it nor be yielded again
+        let third = best.next().unwrap();
+        assert_eq!(third.nonce(), 1);
+        let replacement = tx.rng_hash().with_nonce(1).with_priority_fee(60).with_max_fee(60);
+        let replacement = Arc::new(f.validated(replacement));
+        let replacement_hash = *replacement.hash();
+        pool.remove_transaction(third.id());
+        pool.add_transaction(replacement, 0);
+
+        let mut hashes = vec![*first.hash(), *second.hash(), *third.hash()];
+        hashes.extend(best.by_ref().map(|tx| *tx.hash()));
+
+        let mut unique = hashes.clone();
+        unique.sort_unstable();
+        unique.dedup();
+        assert_eq!(unique.len(), hashes.len(), "transaction yielded twice: {hashes:?}");
+        assert_eq!(hashes.len(), 4, "unexpected transactions yielded: {hashes:?}");
+        assert_eq!(
+            best.all.get(third.id()).map(|tx| *tx.transaction.hash()),
+            Some(replacement_hash),
+            "stashed replacement was consumed by a stale heap entry"
+        );
     }
 
     #[test]
