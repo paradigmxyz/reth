@@ -104,7 +104,8 @@ This host has two CPU groups: CPUs 0–7/16–23 share 96 MiB L3; CPUs 8–15/24
 share 32 MiB. The matched configuration pins engine to CPU 0, leaves sibling
 CPU 16 unused by the node, and places proof, BAL-prefetch, and RocksDB background
 workers on the 32 MiB group. Other workers can use the remaining CPUs. Engine
-nice is -10 and the 32 BAL execution workers use -5. These are benchmark process
+nice is -10. Earlier placement trials used BAL nice -5; the latest trials use
+-10 for both BAL execution and recovery workers. These are benchmark process
 settings, not hard-coded application behavior. Affinity and priorities are
 verified before the scored window; the latest runs also audit all threads later.
 
@@ -1398,3 +1399,46 @@ senderisolated-deferstate-skipbalpref-phasediag-early0-proof64-chunk80-600.
 Per-block cache-isolation checks, phase data, captured patches, and verified
 compressed binaries are retained. Paired phase differences are in
 execution-phases-nopref-comparison.json.
+
+### BAL worker cap and background-job overlap (2026-09-28)
+
+With prefetch restored, a candidate limited concurrent BAL transaction workers
+to 24 while retaining the 32-thread shared pool for deferred state preparation.
+All 600 scope events confirmed 24 workers. The 78 targeted tests, profiling
+build, workspace Clippy, formatting, 600 roots, persistence, restart 601, recovery,
+and affinity audits passed. Execution p50/p90/p99 was
+75.312/90.362/173.865 ms, payload p50 163.391 ms, root wait 77.887 ms, and
+cumulative saves 47.052 s. The 0.080 ms median difference from the 32-worker
+instrumented control is not a material improvement; the cap was rejected.
+Artifacts use globalcaprocks with deferstate-cap24-phasediag-early0-proof64.
+
+A separate analysis joined the earlier globaltimingrocks native background-job
+intervals to its execution intervals, then compared each block with the same
+block in globaltimingmdbx. There were 103 completed native jobs in the captured
+log. Among the 550 scored blocks:
+
+| RocksDB execution interval | Blocks | Paired execution difference p50, RocksDB minus MDBX (ms) |
+| --- | ---: | ---: |
+| No flush or compaction overlap | 332 | 0.933 |
+| Flush or compaction overlap | 218 | 5.573 |
+
+This is observational: the groups differ in workload and position within replay.
+It supports investigating background activity but does not establish the causal
+latency contribution by subtracting those medians. Per-block data and 50-block
+subgroups are retained in background-overlap-blocks.csv and background-overlap.json.
+
+Although six background threads existed, the native event log recorded at most
+one active compaction and one active flush. Both ran concurrently for only 2.63%
+of the scored wall-time window. A proposed two-job limit was therefore cancelled
+before node startup or replay; it would not reduce the observed concurrency.
+Its fresh table rewrite, 78 tests, and build completed, then source was restored.
+No performance result is claimed for that cancelled candidate.
+
+SST file-creation events in the same 129.471-second scored window total
+19,380,250,325 bytes, equivalent to 142.754 MiB/s. That output-rate estimate
+motivates a 192 MiB/s background SST-write limit with a 10 ms refill period,
+compared with an uncapped run of the same binary. Both arms collect native
+metrics throughout replay and drain to assess pending compaction work alongside
+execution and persistence. The prepared tables from the cancelled job-count
+setup are reused only after both baseline roots and the Finish frontier are
+reverified. No node or payload had run against that prepared data.
