@@ -13,7 +13,7 @@ use reth_ethereum_forks::Hardforks;
 use reth_ethereum_primitives::{Block, EthPrimitives, TransactionSigned};
 use reth_evm::{
     BlockAssembler, BlockAssemblerInput, BlockExecutionError, ConfigureEngineEvm, ConfigureEvm,
-    DynDatabase, EvmEnvFor, ExecutableTxIterator, ExecutionCtxFor, NextBlockEnvAttributes,
+    EvmEnvFor, ExecutableTxIterator, ExecutionCtxFor, NextBlockEnvAttributes,
 };
 use reth_evm_ethereum::{
     EthBigBlockExecutorFactory, EthBigBlockPlan, EthBigBlockSegment, EthEvmConfig,
@@ -153,21 +153,6 @@ where
             Vec::new(),
             0,
         ))
-    }
-
-    fn pre_block_state_changes<'a, DB>(
-        &self,
-        db: DB,
-        evm_env: EvmEnvFor<Self>,
-        block_number: u64,
-        ctx: ExecutionCtxFor<'a, Self>,
-    ) -> Result<revm::database::BundleState, Box<dyn core::error::Error + Send + Sync>>
-    where
-        Self: 'a,
-        DB: DynDatabase + 'a,
-    {
-        let segment = ctx.segments.first().expect("big-block context has a segment");
-        self.inner.pre_block_state_changes(db, evm_env, block_number, segment.ctx.clone())
     }
 }
 
