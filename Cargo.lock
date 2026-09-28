@@ -5698,10 +5698,10 @@ dependencies = [
 
 [[package]]
 name = "keccak-asm"
-version = "0.1.6"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fa468878266ad91431012b3e5ef1bf9b170eab22883503a318d46857afa4579a"
+version = "0.1.8"
+source = "git+https://github.com/DaniPopes/keccak-asm?rev=3894b2462e6167025ec5f02a0950c1b11a912246#3894b2462e6167025ec5f02a0950c1b11a912246"
 dependencies = [
+ "cfg-if",
  "digest 0.10.7",
  "sha3-asm",
 ]
@@ -12085,9 +12085,8 @@ dependencies = [
 
 [[package]]
 name = "sha3-asm"
-version = "0.1.6"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "59cbb88c189d6352cc8ae96a39d19c7ecad8f7330b29461187f2587fdc2988d5"
+version = "0.1.8"
+source = "git+https://github.com/DaniPopes/keccak-asm?rev=3894b2462e6167025ec5f02a0950c1b11a912246#3894b2462e6167025ec5f02a0950c1b11a912246"
 dependencies = [
  "cc",
  "cfg-if",
