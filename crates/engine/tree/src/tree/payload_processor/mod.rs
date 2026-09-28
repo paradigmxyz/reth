@@ -263,6 +263,7 @@ where
         let (prewarm_tx, prewarm_rx) =
             prewarm_transactions.then(|| mpsc::sync_channel(transaction_count)).unzip();
         let (execute_tx, execute_rx) = crossbeam_channel::bounded(transaction_count);
+        let parent_span = Span::current();
 
         if transaction_count == 0 {
             // Empty block — nothing to do.
@@ -275,6 +276,7 @@ where
                 "using sequential sig recovery for small block"
             );
             self.executor.spawn_blocking_named("tx-iterator", move || {
+                let _span = parent_span.enter();
                 let (transactions, convert) = transactions.into_parts();
                 convert_serial(
                     transactions.into_iter(),
@@ -288,15 +290,18 @@ where
             // to prewarming and execution.
             let executor = self.executor.clone();
             self.executor.spawn_blocking_named("tx-iterator", move || {
+                let _span = parent_span.enter();
                 let (transactions, convert) = transactions.into_parts();
                 if parallel_bal_execution {
                     // With BALs, we don't care about the order of transactions in execution and
                     // prewarming, so we don't have to use `for_each_ordered_in`.
                     executor.cpu_pool().install(|| {
+                        let _span = parent_span.enter();
                         let _ = transactions
                             .into_par_iter()
                             .enumerate()
                             .try_for_each(|(idx, tx)| {
+                                let _span = parent_span.enter();
                                 let tx = convert.convert(tx).map(WithTxEnv::new);
                                 if let (Some(prewarm_tx), Ok(tx)) = (&prewarm_tx, &tx) {
                                     let _ = prewarm_tx.send((idx, tx.clone()));
@@ -336,7 +341,9 @@ where
 
                     // Without BALs, we need to preserve the initial order of transactions.
                     // Process exponentially increasing windows to make sure that first transactions are prioritized.
+                    let parent_span = parent_span.clone();
                     executor.cpu_pool().install(move || {
+                        let _span = parent_span.enter();
                         loop {
                             let chunk = iter
                                 .by_ref()
@@ -351,6 +358,7 @@ where
                             let chunk = chunk
                                 .into_par_iter()
                                 .map(|(i, tx)| {
+                                    let _span = parent_span.enter();
                                     let idx = i + prefetch;
                                     let tx = convert.convert(tx).map(WithTxEnv::new);
                                     (idx, tx)
