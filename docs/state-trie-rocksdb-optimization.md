@@ -1232,3 +1232,34 @@ last CPU was the engine CPU or its SMT sibling. These one-second samples show
 that the sender is unrestricted; they do not measure exact CPU runtime or
 overlap with EVM execution. A separate matched trial excludes both CPUs from
 the sender and corpus feeder while leaving node settings unchanged.
+
+### Isolating the load generator (2026-09-28)
+
+Using the existing gated-worker binaries, both the load generator and corpus
+feeder were restricted to CPUs 1–15 and 17–31. Their observed thread affinities
+excluded the engine's CPU 0 and SMT sibling 16 throughout both replays.
+Node affinities, priorities, caches, and workload were unchanged. Both backends
+passed 600 roots, persistence, restart 601, recovery, and worker-count audits.
+MDBX startup was initially rejected by the artifact-space guard before the node
+or any payload ran; the successful retry reverified the same fresh baseline.
+
+| Metric | RocksDB | MDBX |
+| --- | ---: | ---: |
+| Execution p50 / p90 / p99 (ms) | 79.552 / 98.690 / 186.381 | 77.101 / 96.656 / 346.356 |
+| Payload p50 (ms) | 148.435 | 133.980 |
+| Root wait p50 (ms) | 57.905 | 46.356 |
+| Cumulative saves including drain (s) | 48.956 | 557.982 |
+
+Sender isolation did not improve the RocksDB execution median or close the
+2.452 ms matched gap. Saving time remains 91.2% lower. Subsequent experiments
+retain this sender restriction as a benchmark control, not a client performance
+change. Artifacts use globalphase backend names with
+senderisolated-early0-proof64-chunk80-600.
+
+The hottest sampled EVM transaction function also has 2,311 identical normalized
+instructions in these backend binaries. The comparison removes relocation
+addresses, Rust/LLVM symbol disambiguators, and reference comments; it does not
+compare referenced data or whole-program code placement. This extends the
+earlier receive-function comparison without establishing that every EVM helper
+or indirect call is identical. Assembly and comparison data are retained as
+codegen-evm-* artifacts.
