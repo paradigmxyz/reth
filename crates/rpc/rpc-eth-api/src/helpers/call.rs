@@ -27,7 +27,6 @@ use reth_evm::{
 use reth_node_api::BlockBody;
 use reth_primitives_traits::Recovered;
 use reth_revm::{
-    cancelled::CancelOnDrop,
     database::StateProviderDatabase,
     db::{
         bal::{BalState, EvmDatabaseError},
@@ -42,6 +41,7 @@ use reth_rpc_eth_types::{
     EthApiError, StateCacheDb,
 };
 use reth_storage_api::{BlockIdReader, ProviderTx, StateProvider};
+use reth_tasks::CancelOnDrop;
 use revm::{
     context::Block,
     context_interface::{result::ResultAndState, Cfg, Transaction},
@@ -49,7 +49,7 @@ use revm::{
 };
 use revm_inspectors::{access_list::AccessListInspector, transfer::TransferInspector};
 use std::collections::BTreeMap;
-use tracing::{trace, warn};
+use tracing::{debug, trace};
 
 /// Result type for `eth_simulateV1` RPC method.
 pub type SimulatedBlocksResult<N, E> = Result<Vec<SimulatedBlock<RpcBlock<N>>>, E>;
@@ -858,7 +858,9 @@ pub trait Call:
         if let Some(requested_gas) = request.as_ref().gas_limit() {
             let global_gas_cap = self.call_gas_limit();
             if global_gas_cap != 0 && global_gas_cap < requested_gas {
-                warn!(target: "rpc::eth::call", ?request, ?global_gas_cap, "Capping gas limit to global gas cap");
+                // Callers routinely send gas limits above the cap, so this is not worth a warning.
+                // Log only the limits: the request carries caller calldata and addresses.
+                debug!(target: "rpc::eth::call", requested_gas, global_gas_cap, "Capping gas limit to global gas cap");
                 request.as_mut().set_gas_limit(global_gas_cap);
             }
         } else {
