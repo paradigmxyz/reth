@@ -1202,3 +1202,33 @@ Artifacts use globalphase backend names ending in early0-proof64-chunk80-balprof
 The raw profiles are losslessly compressed with hashes; per-run
 bal-profile-summary.json records weighted self/inclusive symbols and both the
 full steady-state window and trimmed engine-execution intervals.
+
+### Grouping prefetch batches by hashed prefix (2026-09-28)
+
+The candidate kept each account's first eight slots immediate, then grouped large
+remaining read sets into batches of at most eight sharing the first hashed nibble.
+Smaller read sets retained their original order. The same change ran on both
+backends. All 69 targeted tests, both profiling builds, workspace Clippy,
+formatting, 600 payload roots per backend, persistence, restart 601, recovery,
+and worker-count audits passed.
+
+| Metric | RocksDB | MDBX |
+| --- | ---: | ---: |
+| Execution p50 / p90 / p99 (ms) | 79.159 / 96.156 / 192.313 | 76.851 / 95.237 / 327.973 |
+| Payload p50 (ms) | 147.901 | 133.400 |
+| Root wait p50 (ms) | 57.913 | 46.261 |
+| Cumulative saves including drain (s) | 48.793 | 555.093 |
+
+The matched execution gap remains 2.309 ms, with saving time 91.2% lower.
+RocksDB prefetch CPU over all 600 blocks decreased from 157.050 to
+155.050 ms/block, while the prewarm coordinator increased from 8.783 to
+13.200 ms/block. MDBX showed a similar tradeoff. The extra hashing did not
+establish a useful execution improvement, so grouping was not retained.
+Captured patches, verified compressed binaries, and results use globalbucket
+backend names with bucketpref-early0-proof64-chunk80-600.
+
+A lightweight sender audit also observed active load-generator threads whose
+last CPU was the engine CPU or its SMT sibling. These one-second samples show
+that the sender is unrestricted; they do not measure exact CPU runtime or
+overlap with EVM execution. A separate matched trial excludes both CPUs from
+the sender and corpus feeder while leaving node settings unchanged.
