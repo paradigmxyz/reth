@@ -1,12 +1,13 @@
 //! Block related types for RPC API.
 
-use std::sync::Arc;
+use std::{ops::Deref, sync::Arc};
 
 use alloy_consensus::{
     transaction::{TransactionMeta, TxHashRef},
     BlockHeader, TxReceipt,
 };
 use alloy_primitives::TxHash;
+use reth_execution_types::BlockExecutionOutput;
 use reth_primitives_traits::{
     Block, BlockBody, BlockTy, IndexedTx, NodePrimitives, ReceiptTy, Recovered, RecoveredBlock,
     SealedBlock,
@@ -114,7 +115,7 @@ pub struct BlockAndReceipts<N: NodePrimitives> {
     /// The recovered block.
     pub block: Arc<RecoveredBlock<BlockTy<N>>>,
     /// The receipts for the block.
-    pub receipts: Arc<Vec<ReceiptTy<N>>>,
+    pub receipts: SharedReceipts<ReceiptTy<N>>,
 }
 
 impl<N: NodePrimitives> BlockAndReceipts<N> {
@@ -123,7 +124,7 @@ impl<N: NodePrimitives> BlockAndReceipts<N> {
         block: Arc<RecoveredBlock<BlockTy<N>>>,
         receipts: Arc<Vec<ReceiptTy<N>>>,
     ) -> Self {
-        Self { block, receipts }
+        Self { block, receipts: SharedReceipts::Receipts(receipts) }
     }
 
     /// Finds a transaction by hash and returns it along with its corresponding receipt.
@@ -156,13 +157,52 @@ impl<N: NodePrimitives> BlockAndReceipts<N> {
         C: RpcConvert<Primitives = N>,
     {
         let (tx, receipt) = self.find_transaction_and_receipt_by_hash(tx_hash)?;
-        convert_transaction_receipt(
-            self.block.as_ref(),
-            self.receipts.as_ref(),
-            tx,
-            receipt,
-            converter,
-        )
+        convert_transaction_receipt(self.block.as_ref(), &self.receipts, tx, receipt, converter)
+    }
+}
+
+/// Shared receipts, either loaded directly or held by a block's execution output.
+#[derive(Debug, Clone)]
+pub enum SharedReceipts<R> {
+    /// Receipts loaded from storage or a locally built block.
+    Receipts(Arc<Vec<R>>),
+    /// Receipts belonging to an in-memory executed block.
+    ExecutionOutput(Arc<BlockExecutionOutput<R>>),
+}
+
+impl<R> Deref for SharedReceipts<R> {
+    type Target = [R];
+
+    fn deref(&self) -> &Self::Target {
+        match self {
+            Self::Receipts(receipts) => receipts,
+            Self::ExecutionOutput(output) => &output.receipts,
+        }
+    }
+}
+
+impl<R: Clone> SharedReceipts<R> {
+    /// Returns owned receipts for consumers that need to move them into a converter.
+    pub fn into_vec(self) -> Vec<R> {
+        match self {
+            Self::Receipts(receipts) => Arc::unwrap_or_clone(receipts),
+            Self::ExecutionOutput(output) => match Arc::try_unwrap(output) {
+                Ok(output) => output.result.receipts,
+                Err(output) => output.receipts.clone(),
+            },
+        }
+    }
+}
+
+impl<R> From<Arc<Vec<R>>> for SharedReceipts<R> {
+    fn from(receipts: Arc<Vec<R>>) -> Self {
+        Self::Receipts(receipts)
+    }
+}
+
+impl<R> From<Arc<BlockExecutionOutput<R>>> for SharedReceipts<R> {
+    fn from(output: Arc<BlockExecutionOutput<R>>) -> Self {
+        Self::ExecutionOutput(output)
     }
 }
 
