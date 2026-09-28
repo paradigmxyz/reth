@@ -1,6 +1,6 @@
 use super::{
-    AccountReader, BlockHashReader, BlockIdReader, StateProofProvider, StateRootProvider,
-    StorageRootProvider,
+    AccountReader, BlockHashReader, BlockIdReader, EvmStateProviderAdapter, StateProofProvider,
+    StateRootProvider, StorageRootProvider,
 };
 use alloc::boxed::Box;
 use alloy_consensus::constants::KECCAK_EMPTY;
@@ -89,6 +89,17 @@ pub trait StateProvider:
         // Get basic account information
         // Returns None if acc doesn't exist
         self.basic_account(addr)?.map_or_else(|| Ok(None), |acc| Ok(Some(acc.nonce)))
+    }
+
+    /// Wraps this provider for EVM execution without allocating or cloning it.
+    ///
+    /// Call this on a reference to borrow the provider, or on a box to retain ownership.
+    #[auto_impl(keep_default_for(&, Arc, Box))]
+    fn into_evm_state_provider(self) -> EvmStateProviderAdapter<Self>
+    where
+        Self: Sized,
+    {
+        EvmStateProviderAdapter(self)
     }
 }
 

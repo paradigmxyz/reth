@@ -4,7 +4,6 @@ use crate::{
     BranchNodeMasks, BranchNodeMasksMap, Nibbles, ProofTrieNodeV2, TrieAccount, TrieNodeV2,
 };
 use alloc::{borrow::Cow, collections::VecDeque, vec::Vec};
-use alloy_consensus::constants::KECCAK_EMPTY;
 use alloy_primitives::{
     keccak256,
     map::{hash_map, B256Map, B256Set},
@@ -246,11 +245,7 @@ impl MultiProof {
                 nibbles.ends_with(&leaf.key)
             {
                 let account = TrieAccount::decode(&mut &leaf.value[..])?;
-                break 'info Some(Account {
-                    balance: account.balance,
-                    nonce: account.nonce,
-                    bytecode_hash: (account.code_hash != KECCAK_EMPTY).then_some(account.code_hash),
-                })
+                break 'info Some(Account::from(account))
             }
             None
         };
@@ -375,11 +370,7 @@ impl DecodedMultiProof {
                 nibbles.ends_with(&leaf.key)
             {
                 let account = TrieAccount::decode(&mut &leaf.value[..])?;
-                break 'info Some(Account {
-                    balance: account.balance,
-                    nonce: account.nonce,
-                    bytecode_hash: (account.code_hash != KECCAK_EMPTY).then_some(account.code_hash),
-                })
+                break 'info Some(Account::from(account))
             }
             None
         };
@@ -484,15 +475,8 @@ impl DecodedMultiProofV2 {
                 nibbles.ends_with(&leaf.key)
             {
                 let account = TrieAccount::decode(&mut &leaf.value[..])?;
-                break 'account (
-                    Some(Account {
-                        balance: account.balance,
-                        nonce: account.nonce,
-                        bytecode_hash: (account.code_hash != KECCAK_EMPTY)
-                            .then_some(account.code_hash),
-                    }),
-                    account.storage_root,
-                )
+                let storage_root = account.storage_root;
+                break 'account (Some(Account::from(account)), storage_root)
             }
             (None, EMPTY_ROOT_HASH)
         };
@@ -923,7 +907,7 @@ impl AccountProof {
         let (storage_root, info) = if nonce == 0 &&
             balance.is_zero() &&
             (storage_hash.is_zero() || storage_hash == EMPTY_ROOT_HASH) &&
-            (code_hash == KECCAK_EMPTY || code_hash.is_zero())
+            (code_hash == alloy_consensus::constants::KECCAK_EMPTY || code_hash.is_zero())
         {
             // Account does not exist in state. Return `None` here to prevent proof
             // verification.
@@ -968,6 +952,7 @@ impl AccountProof {
     }
 
     /// Verify the storage proofs and account proof against the provided state root.
+    #[allow(clippy::clone_on_copy)]
     pub fn verify(&self, root: B256) -> Result<(), ProofVerificationError> {
         // Verify storage proofs.
         for storage_proof in &self.storage_proofs {
@@ -979,7 +964,7 @@ impl AccountProof {
             None
         } else {
             Some(alloy_rlp::encode(
-                self.info.unwrap_or_default().into_trie_account(self.storage_root),
+                self.info.clone().unwrap_or_default().into_trie_account(self.storage_root),
             ))
         };
         let nibbles = Nibbles::unpack(keccak256(self.address));
@@ -1170,6 +1155,7 @@ pub mod triehash {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloy_consensus::constants::KECCAK_EMPTY;
     use alloy_trie::{
         nodes::{BranchNode, ExtensionNode, LeafNode, RlpNode},
         TrieMask,
@@ -1564,7 +1550,7 @@ mod tests {
             address: Address::random(),
             info: Some(
                 // non-empty account
-                Account { nonce: 100, balance: U256::ZERO, bytecode_hash: Some(KECCAK_EMPTY) },
+                Account { nonce: 100, bytecode_hash: Some(KECCAK_EMPTY), ..Default::default() },
             ),
             proof: vec![],
             storage_root: B256::ZERO,
@@ -1627,6 +1613,7 @@ mod tests {
 
     #[test]
     #[cfg(feature = "eip1186")]
+    #[allow(clippy::needless_update)]
     fn into_eip1186_response_zero_empty_account() {
         // Non-existent account (info = None)
         let acc = AccountProof {
@@ -1659,6 +1646,7 @@ mod tests {
                 nonce: 42,
                 balance: U256::from(100),
                 bytecode_hash: Some(KECCAK_EMPTY),
+                ..Default::default()
             }),
             proof: vec![],
             storage_root: B256::random(),

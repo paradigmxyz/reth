@@ -9,7 +9,7 @@ use std::{sync::Arc, time::Duration};
 use tokio::{sync::mpsc, time::interval};
 
 /// Block provider that fetches new blocks from Etherscan API.
-#[derive(derive_more::Debug, Clone)]
+#[derive(derive_more::Debug)]
 pub struct EtherscanBlockProvider<RpcBlock, ExecutionData> {
     http_client: Client,
     base_url: String,
@@ -84,6 +84,21 @@ where
         match payload {
             ResponsePayload::Success(block) => Ok((self.convert)(block)),
             ResponsePayload::Failure(err) => Err(eyre::eyre!("Failed to get block: {err}")),
+        }
+    }
+}
+
+// Implemented manually so cloning doesn't require `RpcBlock: Clone` and `ExecutionData: Clone`,
+// which are only used by the shared conversion function.
+impl<RpcBlock, ExecutionData> Clone for EtherscanBlockProvider<RpcBlock, ExecutionData> {
+    fn clone(&self) -> Self {
+        Self {
+            http_client: self.http_client.clone(),
+            base_url: self.base_url.clone(),
+            api_key: self.api_key.clone(),
+            chain_id: self.chain_id,
+            interval: self.interval,
+            convert: Arc::clone(&self.convert),
         }
     }
 }

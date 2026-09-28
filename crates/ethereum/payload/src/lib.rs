@@ -32,7 +32,7 @@ use reth_payload_builder_primitives::PayloadBuilderError;
 use reth_payload_primitives::PayloadAttributes;
 use reth_primitives_traits::transaction::error::InvalidTransactionError;
 use reth_revm::{database::StateProviderDatabase, db::State};
-use reth_storage_api::StateProviderFactory;
+use reth_storage_api::{EvmStateProvider, StateProvider, StateProviderFactory};
 use reth_transaction_pool::{
     error::{Eip4844PoolTransactionError, InvalidPoolTransactionError},
     BestTransactions, BestTransactionsAttributes, PoolTransaction, TransactionPool,
@@ -169,17 +169,23 @@ where
     let PayloadConfig { parent_header, attributes, payload_id, .. } = config;
     let skip_state_root = builder_config.skip_state_root;
 
-    let mut state_provider = client.state_by_block_hash(parent_header.hash())?;
-    if let Some(execution_cache) = execution_cache {
-        state_provider = Box::new(CachedStateProvider::new(
-            state_provider,
+    let state_provider = client.state_by_block_hash(parent_header.hash())?;
+    let evm_state_provider = (&state_provider).into_evm_state_provider();
+    let cached_state_provider = execution_cache.map(|execution_cache| {
+        CachedStateProvider::new(
+            &evm_state_provider,
             execution_cache.cache().clone(),
             // It's ok to recreate the cache every time, because it's cheap to do so for a vanilla
             // Ethereum builder every 12s.
             Some(CachedStateMetrics::zeroed(CachedStateMetricsSource::Builder)),
-        ));
-    }
-    let state = StateProviderDatabase::new(state_provider.as_ref());
+        )
+    });
+    let state = StateProviderDatabase::new(
+        cached_state_provider
+            .as_ref()
+            .map(|provider| provider as &dyn EvmStateProvider)
+            .unwrap_or(&evm_state_provider),
+    );
     let chain_spec = client.chain_spec();
     let is_amsterdam = chain_spec.is_amsterdam_active_at_timestamp(attributes.timestamp());
     let mut db = State::builder()

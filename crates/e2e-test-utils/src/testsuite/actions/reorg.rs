@@ -1,14 +1,14 @@
 //! Reorg actions for the e2e testing framework.
 
 use crate::testsuite::{
-    actions::{produce_blocks::BroadcastLatestForkchoice, Action, Sequence},
+    actions::{produce_blocks::broadcast_forkchoice, Action},
     BlockInfo, Environment,
 };
 use alloy_primitives::B256;
-use alloy_rpc_types_engine::{ForkchoiceState, PayloadAttributes};
+use alloy_rpc_types_engine::ForkchoiceState;
 use eyre::Result;
 use futures_util::future::BoxFuture;
-use reth_node_api::{EngineTypes, PayloadTypes};
+use reth_node_api::EngineTypes;
 use std::marker::PhantomData;
 use tracing::debug;
 
@@ -21,7 +21,11 @@ pub enum ReorgTarget {
     Tag(String),
 }
 
-/// Action that performs a reorg by setting a new head block as canonical
+/// Action that performs a reorg by setting a new head block as canonical.
+///
+/// Points the active node's environment at the target block and broadcasts a forkchoice update
+/// with the target as head to all clients. The update leaves the finalized block unchanged, so a
+/// target below it is rejected as a too deep reorg.
 #[derive(Debug)]
 pub struct ReorgTo<Engine> {
     /// Target for the reorg operation
@@ -44,10 +48,7 @@ impl<Engine> ReorgTo<Engine> {
 
 impl<Engine> Action<Engine> for ReorgTo<Engine>
 where
-    Engine: EngineTypes + PayloadTypes,
-    Engine::PayloadAttributes: From<PayloadAttributes> + Clone,
-    Engine::ExecutionPayloadEnvelopeV3:
-        Into<alloy_rpc_types_engine::payload::ExecutionPayloadEnvelopeV3>,
+    Engine: EngineTypes,
 {
     fn execute<'a>(&'a mut self, env: &'a mut Environment<Engine>) -> BoxFuture<'a, Result<()>> {
         Box::pin(async move {
@@ -67,12 +68,12 @@ where
                 }
             };
 
-            let mut sequence = Sequence::new(vec![
-                Box::new(SetReorgTarget::new(target_block_info)),
-                Box::new(BroadcastLatestForkchoice::default()),
-            ]);
+            let mut set_target = SetReorgTarget::new(target_block_info);
+            set_target.execute(env).await?;
 
-            sequence.execute(env).await
+            // Target the reorg block itself rather than the latest built payload, which can be a
+            // descendant of the target or belong to another fork.
+            broadcast_forkchoice(env, target_block_info.hash).await
         })
     }
 }
