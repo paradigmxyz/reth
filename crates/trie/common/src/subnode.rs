@@ -34,9 +34,14 @@ impl reth_codecs::Compact for StoredSubNode {
         }
 
         if let Some(node) = &self.node {
+            // `BranchNodeCompact` infers its number of hashes from the length of the buffer it
+            // is decoded from, so prefix it with its length to allow more data to follow it.
+            let mut node_buf = Vec::new();
+            let node_len = node.to_compact(&mut node_buf);
             buf.put_u8(1);
-            len += 1;
-            len += node.to_compact(buf);
+            buf.put_u16(node_len as u16);
+            buf.put_slice(&node_buf);
+            len += 3 + node_len;
         } else {
             len += 1;
             buf.put_u8(0);
@@ -57,8 +62,9 @@ impl reth_codecs::Compact for StoredSubNode {
 
         let node_exists = buf.get_u8() != 0;
         let node = node_exists.then(|| {
-            let (node, rest) = BranchNodeCompact::from_compact(buf, 0);
-            buf = rest;
+            let node_len = buf.get_u16() as usize;
+            let (node, _) = BranchNodeCompact::from_compact(&buf[..node_len], node_len);
+            buf.advance(node_len);
             node
         });
 
@@ -92,5 +98,32 @@ mod tests {
         let (decoded, _) = StoredSubNode::from_compact(&encoded[..], 0);
 
         assert_eq!(subnode, decoded);
+    }
+
+    #[test]
+    fn subnode_with_trailing_data_roundtrip() {
+        let trailing = [0xab; 7];
+        for root_hash in [None, Some(B256::repeat_byte(0xcc))] {
+            let subnode = StoredSubNode {
+                key: vec![0x1, 0x2],
+                nibble: Some(0x3),
+                node: Some(BranchNodeCompact::new(
+                    0b1010,
+                    0b0010,
+                    0b1000,
+                    vec![B256::repeat_byte(0xaa)],
+                    root_hash,
+                )),
+            };
+
+            let mut encoded = vec![];
+            let len = subnode.to_compact(&mut encoded);
+            assert_eq!(len, encoded.len());
+            encoded.extend_from_slice(&trailing);
+            let (decoded, rest) = StoredSubNode::from_compact(&encoded, len);
+
+            assert_eq!(decoded, subnode);
+            assert_eq!(rest, trailing);
+        }
     }
 }
