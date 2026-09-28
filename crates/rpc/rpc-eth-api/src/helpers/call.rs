@@ -470,7 +470,7 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
         &self,
         evm_env: EvmEnvFor<Self::Evm>,
         at: BlockId,
-        request: RpcTxReq<<Self::RpcConvert as RpcConvert>::Network>,
+        mut request: RpcTxReq<<Self::RpcConvert as RpcConvert>::Network>,
         state_override: Option<StateOverride>,
     ) -> impl Future<Output = Result<AccessListResult, Self::Error>> + Send
     where
@@ -480,13 +480,15 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
             let initial = request.as_ref().access_list().cloned().unwrap_or_default();
             let (evm_env, tx_env) = this.prepare_call_env(
                 evm_env,
-                request,
+                request.clone(),
                 &mut db,
                 EvmOverrides::state(state_override),
             )?;
 
-            let mut evm =
-                this.evm_config().block_executor_factory().evm_with_database(&mut db, evm_env);
+            let mut evm = this
+                .evm_config()
+                .block_executor_factory()
+                .evm_with_database(&mut db, evm_env.clone());
 
             let (inspector, result) = evm
                 .transact_with_inspector(&tx_env, AccessListInspector::new(initial))
@@ -501,7 +503,13 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
                 });
             }
 
-            // transact again to get the exact gas used
+            // Preserve the prepared nonce and gas cap when rebuilding the envelope with the list.
+            request.as_mut().set_nonce(tx_env.nonce());
+            request.as_mut().set_gas_limit(tx_env.gas_limit());
+            request.as_mut().set_access_list(access_list.clone());
+            let tx_env = this.converter().tx_env(request, &evm_env)?;
+
+            // Transact again to get the exact gas used with the returned access list.
             let result = evm.transact_result(&tx_env).map_err(Self::Error::from_evm_err)?;
             let gas_used = result.tx_gas_used();
             let error = Self::Error::ensure_success::<EvmTypesFor<Self::Evm>>(result)

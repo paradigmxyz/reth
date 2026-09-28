@@ -1374,4 +1374,56 @@ mod tests {
         assert_eq!(U256::from_be_slice(&result[32..64]), U256::from(u64::MAX));
         assert_eq!(U256::from_be_slice(&result[64..]), U256::from(u128::MAX));
     }
+
+    #[tokio::test]
+    async fn create_access_list_gas_includes_generated_list() {
+        let provider = MockEthProvider::default()
+            .with_chain_spec(ChainSpecBuilder::mainnet().berlin_activated().build());
+        provider.add_block(
+            B256::repeat_byte(0x42),
+            Block {
+                header: Header { number: 1, gas_limit: 30_000_000, ..Default::default() },
+                body: BlockBody::default(),
+            },
+        );
+        let sender = Address::repeat_byte(0x11);
+        provider.add_account(sender, ExtendedAccount::new(7, U256::MAX));
+        let contract = Address::repeat_byte(0xaa);
+        let state_override = StateOverride::from_iter([(
+            contract,
+            AccountOverride {
+                // PUSH1 0; SLOAD; STOP.
+                code: Some(Bytes::from_static(&[0x60, 0x00, 0x54, 0x00])),
+                ..Default::default()
+            },
+        )]);
+        let api = build_test_eth_api_with_gas_cap(provider, 30_000);
+        let mut request = TransactionRequest::default()
+            .with_from(sender)
+            .with_to(contract)
+            .with_gas_limit(100_000);
+        let at = BlockId::latest();
+        let result = EthCall::create_access_list_at(
+            &api,
+            request.clone(),
+            Some(at),
+            Some(state_override.clone()),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(result.error, None);
+        assert_eq!(result.access_list.0.len(), 1);
+        assert_eq!(result.access_list.0[0].address, contract);
+        assert_eq!(result.access_list.0[0].storage_keys, vec![B256::ZERO]);
+        // Intrinsic gas + address/key access-list charges + PUSH1 + warm SLOAD.
+        assert_eq!(result.gas_used, U256::from(21_000 + 2_400 + 1_900 + 3 + 100));
+
+        request.set_access_list(result.access_list.clone());
+        let repeated =
+            EthCall::create_access_list_at(&api, request, Some(at), Some(state_override))
+                .await
+                .unwrap();
+        assert_eq!(repeated, result);
+    }
 }
