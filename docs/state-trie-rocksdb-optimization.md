@@ -1442,3 +1442,31 @@ metrics throughout replay and drain to assess pending compaction work alongside
 execution and persistence. The prepared tables from the cancelled job-count
 setup are reused only after both baseline roots and the Finish frontier are
 reverified. No node or payload had run against that prepared data.
+
+## Background SST write pacing
+
+A 192 MiB/s RocksDB SST write limiter (10 ms refill, fairness 10) was compared
+with an uncapped run of the same diagnostic binary. Native background jobs
+remained at six; execution and native cache sizes, worker counts, CPU placement,
+and synced WAL writes were unchanged. Both runs completed 600 blocks, persistence,
+block 601 after restart, root checks, recovery, and thread audits.
+
+| Metric | 192 MiB/s | Uncapped |
+| --- | ---: | ---: |
+| Execution p50 / p90 / p99, ms | 76.17 / 90.47 / 168.82 | 75.59 / 94.58 / 173.91 |
+| Payload validation p50, ms | 165.50 | 164.07 |
+| State-root wait p50, ms | 79.17 | 78.01 |
+| Total `save_blocks`, seconds | 47.70 | 48.08 |
+
+The limiter did not improve execution p50 and is not retained. It is not evidence
+that native background work has no effect: pacing changes the timing and amount
+of compaction as well as contention. Native logs recorded 49 versus 61 completed
+compactions and 18.80 versus 19.99 GB of SST creation, including shutdown; both
+had 42 flushes. Each run collected 140 native-metric samples, ending just before
+shutdown. Sampled pending-compaction bytes were zero throughout, but this collector
+did **not** cover the shutdown drain and does not establish zero postponed work.
+
+All 78 focused tests, the profiling build used by both runs, full workspace nightly Clippy,
+and nightly formatting passed. Artifacts are the `globalraterocks-*ratemb192-600`
+and `globalraterocks-*ratemb0-600` directories, `rate-native-summary.json`, and
+`execution-phases-rate-comparison.json` under the experiment directory.
