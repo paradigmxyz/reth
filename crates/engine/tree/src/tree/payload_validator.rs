@@ -1138,7 +1138,7 @@ where
                         satisfied = false;
                         break
                     }
-                    Err(BlockExecutionError::Validation(_)) => continue,
+                    Err(BlockExecutionError::Validation(_)) => {}
                     Err(err) => return Err(err.into()),
                 }
             }
@@ -1308,6 +1308,7 @@ where
     /// - Collecting transaction senders for later use
     ///
     /// Returns the executor (for finalization) and the collected senders.
+    #[expect(clippy::too_many_arguments)]
     fn execute_transactions<'a, E, Tx, InnerTx, Err, DB>(
         &self,
         mut executor: E,
