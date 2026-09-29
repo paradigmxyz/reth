@@ -84,9 +84,18 @@ impl<N: NodeTypesWithDB> Clone for BlockchainProvider<N> {
 }
 
 impl<N: ProviderNodeTypes> BlockchainProvider<N> {
-    /// Create a new [`BlockchainProvider`] using only the storage, fetching the latest
-    /// header from the database to initialize the provider.
+    /// Create a new [`BlockchainProvider`] over the storage's in-memory state.
+    ///
+    /// The provider uses the [`CanonicalInMemoryState`] of the storage's overlay manager, so the
+    /// provider, the overlay manager and the engine share the node's single store. If the chain
+    /// info of that store is not initialized yet, this initializes it from the latest header in
+    /// the database, see [`Self::with_latest`]. Otherwise the provider uses the chain info as it
+    /// is: building another provider never moves it back underneath the engine.
     pub fn new(storage: ProviderFactory<N>) -> ProviderResult<Self> {
+        if storage.overlay_manager().in_memory_state().has_canonical_head() {
+            return Ok(Self::from_storage(storage))
+        }
+
         let provider = storage.provider()?;
         let best = provider.chain_info()?;
         match provider.header_by_number(best.best_number)? {
@@ -99,12 +108,13 @@ impl<N: ProviderNodeTypes> BlockchainProvider<N> {
     }
 
     /// Create new provider instance that wraps the database and the blockchain tree, using the
-    /// provided latest header to initialize the chain info tracker.
+    /// provided latest header to initialize the chain info of the storage's in-memory state.
     ///
-    /// The provider uses the in-memory state of the storage's overlay manager, so the provider,
-    /// the overlay manager and the engine share a single [`CanonicalInMemoryState`]. Every provider
-    /// built from the same storage resets the canonical, safe and finalized headers of that state,
-    /// so providers should be built before the engine starts updating it.
+    /// This is the one-time initializer of that chain info, used by [`Self::new`] and by tests:
+    /// it sets the canonical head to `latest` and the safe and finalized headers to the blocks
+    /// stored in the database, but only if the chain info was not initialized before, see
+    /// [`CanonicalInMemoryState::init_head_markers`]. Once initialized, the chain info belongs to
+    /// the engine, and `latest` is ignored.
     ///
     /// This returns a `ProviderResult` since it tries the retrieve the last finalized header from
     /// `database`.
@@ -112,27 +122,36 @@ impl<N: ProviderNodeTypes> BlockchainProvider<N> {
         storage: ProviderFactory<N>,
         latest: SealedHeader<HeaderTy<N>>,
     ) -> ProviderResult<Self> {
-        let provider = storage.provider()?;
-        let finalized_header = provider
-            .last_finalized_block_number()?
-            .map(|num| provider.sealed_header(num))
-            .transpose()?
-            .flatten();
-        let safe_header = provider
-            .last_safe_block_number()?
-            .or_else(|| {
-                // for the purpose of this we can also use the finalized block if we don't have the
-                // safe block
-                provider.last_finalized_block_number().ok().flatten()
-            })
-            .map(|num| provider.sealed_header(num))
-            .transpose()?
-            .flatten();
-        let bal_store = storage.bal_store().clone();
-        let canonical_in_memory_state = storage.overlay_manager().in_memory_state().clone();
-        canonical_in_memory_state.set_head_markers(latest, finalized_header, safe_header);
+        let in_memory_state = storage.overlay_manager().in_memory_state();
+        if !in_memory_state.has_canonical_head() {
+            let provider = storage.provider()?;
+            let finalized_header = provider
+                .last_finalized_block_number()?
+                .map(|num| provider.sealed_header(num))
+                .transpose()?
+                .flatten();
+            let safe_header = provider
+                .last_safe_block_number()?
+                .or_else(|| {
+                    // for the purpose of this we can also use the finalized block if we don't have
+                    // the safe block
+                    provider.last_finalized_block_number().ok().flatten()
+                })
+                .map(|num| provider.sealed_header(num))
+                .transpose()?
+                .flatten();
+            in_memory_state.init_head_markers(latest, finalized_header, safe_header);
+        }
 
-        Ok(Self { database: storage, canonical_in_memory_state, bal_store })
+        Ok(Self::from_storage(storage))
+    }
+
+    /// Creates a provider over the in-memory state of the storage's overlay manager, without
+    /// touching its chain info.
+    fn from_storage(storage: ProviderFactory<N>) -> Self {
+        let canonical_in_memory_state = storage.overlay_manager().in_memory_state().clone();
+        let bal_store = storage.bal_store().clone();
+        Self { database: storage, canonical_in_memory_state, bal_store }
     }
 
     /// Gets a clone of `canonical_in_memory_state`.
@@ -3058,6 +3077,35 @@ mod tests {
         provider_rw.save_stage_checkpoint(StageId::Finish, StageCheckpoint::new(0))?;
         provider_rw.commit()?;
         Ok(factory)
+    }
+
+    #[test]
+    fn only_the_first_provider_initializes_the_chain_info() -> eyre::Result<()> {
+        let factory = test_provider_factory_with_genesis()?;
+        let in_memory_state = factory.overlay_manager().in_memory_state().clone();
+        assert!(!in_memory_state.has_canonical_head());
+
+        let provider = BlockchainProvider::new(factory.clone())?;
+        let genesis = provider.canonical_in_memory_state.get_canonical_head();
+        assert_eq!(genesis.number, 0);
+        assert!(in_memory_state.has_canonical_head());
+
+        // The engine moves the head past the persisted tip.
+        let head = reth_primitives_traits::SealedHeader::seal_slow(alloy_consensus::Header {
+            number: 1,
+            parent_hash: genesis.hash(),
+            ..Default::default()
+        });
+        in_memory_state.set_canonical_head(head.clone());
+
+        // Providers built afterwards, e.g. by an ExEx or an add-on, share the chain info as is.
+        let later = BlockchainProvider::new(factory.clone())?;
+        assert_eq!(later.canonical_in_memory_state.get_canonical_head().hash(), head.hash());
+        let later = BlockchainProvider::with_latest(factory, genesis)?;
+        assert_eq!(later.canonical_in_memory_state.get_canonical_head().hash(), head.hash());
+        assert_eq!(later.chain_info()?.best_number, 1);
+
+        Ok(())
     }
 
     #[test]

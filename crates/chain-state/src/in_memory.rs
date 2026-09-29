@@ -505,8 +505,8 @@ pub(crate) struct CanonicalInMemoryStateInner<N: NodePrimitives> {
 /// instead of rebuilding it. The pending block served over RPC, see [`Self::set_pending_block`],
 /// is one of the blocks in the pending section.
 ///
-/// Clones share the same state. A node keeps a single instance that the engine, the providers
-/// and the state overlay manager all hold.
+/// Clones share the same state. A node keeps a single instance: the launcher creates it and
+/// injects it into the state overlay manager, which the providers and the engine read it from.
 #[derive(Debug, Clone)]
 pub struct CanonicalInMemoryState<N: NodePrimitives = EthPrimitives> {
     pub(crate) inner: Arc<CanonicalInMemoryStateInner<N>>,
@@ -575,20 +575,33 @@ impl<N: NodePrimitives> CanonicalInMemoryState<N> {
         Arc::ptr_eq(&self.inner, &other.inner)
     }
 
-    /// Sets the canonical head and, if they are known, the finalized and safe headers.
-    pub fn set_head_markers(
+    /// Initializes the chain info of a state created without a head, see [`Self::empty`]: sets
+    /// the canonical head and, if they are known, the finalized and safe headers.
+    ///
+    /// This does nothing if the canonical head was already set, so the chain info of a state is
+    /// initialized once and never reset underneath the engine that maintains it afterwards.
+    /// Returns `true` if the chain info was initialized.
+    pub fn init_head_markers(
         &self,
         head: SealedHeader<N::BlockHeader>,
         finalized: Option<SealedHeader<N::BlockHeader>>,
         safe: Option<SealedHeader<N::BlockHeader>>,
-    ) {
-        self.set_canonical_head(head);
+    ) -> bool {
+        if !self.inner.chain_info_tracker.init_canonical_head(head) {
+            return false
+        }
         if let Some(finalized) = finalized {
             self.set_finalized(finalized);
         }
         if let Some(safe) = safe {
             self.set_safe(safe);
         }
+        true
+    }
+
+    /// Returns `true` once the canonical head was set, see [`Self::init_head_markers`].
+    pub fn has_canonical_head(&self) -> bool {
+        self.inner.chain_info_tracker.has_canonical_head()
     }
 
     /// Returns the block hash corresponding to the given number.

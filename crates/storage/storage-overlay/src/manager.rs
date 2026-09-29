@@ -38,8 +38,9 @@ use tracing::{debug, trace};
 
 /// Manages state trie and execution overlays for in-memory blocks.
 ///
-/// The manager owns the node's [`CanonicalInMemoryState`], which tracks the in-memory blocks, the
-/// changeset cache, and overlay caches keyed by `(anchor_hash, tip_hash)`.
+/// The manager reads the in-memory blocks from the node's [`CanonicalInMemoryState`], which the
+/// launcher creates and injects, and owns the changeset cache and overlay caches keyed by
+/// `(anchor_hash, tip_hash)`.
 #[derive(Clone)]
 pub struct OverlayManager<N: NodePrimitives = EthPrimitives> {
     in_memory_state: CanonicalInMemoryState<N>,
@@ -53,6 +54,10 @@ pub struct OverlayManager<N: NodePrimitives = EthPrimitives> {
     execution_metrics: ExecutionOverlayMetrics,
 }
 
+/// Creates a manager over a new, empty [`CanonicalInMemoryState`] and without a worker pool.
+///
+/// This is test wiring: a node creates its in-memory state once and passes it to
+/// `OverlayManager::new`, so that the manager, the providers and the engine share it.
 impl<N: NodePrimitives> Default for OverlayManager<N> {
     fn default() -> Self {
         Self {
@@ -81,11 +86,12 @@ impl<N: NodePrimitives> std::fmt::Debug for OverlayManager<N> {
 }
 
 impl<N: NodePrimitives> OverlayManager<N> {
-    /// Create a new [`OverlayManager`] backed by the given worker pool.
+    /// Create a new [`OverlayManager`] over the node's in-memory state, backed by the given worker
+    /// pool.
     #[cfg(feature = "rayon")]
-    pub fn new(worker_pool: Arc<WorkerPool>) -> Self {
+    pub fn new(worker_pool: Arc<WorkerPool>, in_memory_state: CanonicalInMemoryState<N>) -> Self {
         Self {
-            in_memory_state: CanonicalInMemoryState::empty(),
+            in_memory_state,
             state_trie_overlays: Default::default(),
             execution_overlays: Default::default(),
             changeset_cache: Default::default(),
@@ -98,8 +104,8 @@ impl<N: NodePrimitives> OverlayManager<N> {
 
     /// Returns the in-memory state that tracks the blocks the overlays are built from.
     ///
-    /// This is the node's single [`CanonicalInMemoryState`], shared with the providers and the
-    /// engine.
+    /// This is the node's single [`CanonicalInMemoryState`], which the providers and the engine
+    /// read from the manager.
     pub const fn in_memory_state(&self) -> &CanonicalInMemoryState<N> {
         &self.in_memory_state
     }
@@ -1321,7 +1327,8 @@ mod tests {
     #[test]
     fn uncached_overlays_do_not_use_worker_pool() {
         let worker_pool = Arc::new(WorkerPool::new(1, "uncached-overlay-test"));
-        let manager = OverlayManager::new(Arc::clone(&worker_pool));
+        let manager =
+            OverlayManager::new(Arc::clone(&worker_pool), CanonicalInMemoryState::empty());
         let block = test_blocks().remove(0);
         let anchor_hash = block.recovered_block().parent_hash();
         let parent_state = BlockState::new(block);
@@ -1356,7 +1363,10 @@ mod tests {
     #[cfg(feature = "rayon")]
     #[test]
     fn precomputes_execution_overlay_for_cached_parent() {
-        let manager = OverlayManager::new(Arc::new(WorkerPool::new(1, "execution-overlay-test")));
+        let manager = OverlayManager::new(
+            Arc::new(WorkerPool::new(1, "execution-overlay-test")),
+            CanonicalInMemoryState::empty(),
+        );
         let blocks = test_blocks();
         let anchor_hash = blocks[0].recovered_block().parent_hash();
 
@@ -1390,7 +1400,10 @@ mod tests {
     #[cfg(feature = "rayon")]
     #[test]
     fn precomputes_execution_overlay_after_anchor_advances() {
-        let manager = OverlayManager::new(Arc::new(WorkerPool::new(1, "execution-overlay-test")));
+        let manager = OverlayManager::new(
+            Arc::new(WorkerPool::new(1, "execution-overlay-test")),
+            CanonicalInMemoryState::empty(),
+        );
         let blocks = test_blocks();
         commit(&manager, &blocks);
         let tip_hash = blocks[2].recovered_block().hash();
@@ -1436,7 +1449,8 @@ mod tests {
     #[test]
     fn execution_overlay_precompute_does_not_wait_for_pending_entry() {
         let worker_pool = Arc::new(WorkerPool::new(1, "execution-overlay-pending-test"));
-        let manager = OverlayManager::new(Arc::clone(&worker_pool));
+        let manager =
+            OverlayManager::new(Arc::clone(&worker_pool), CanonicalInMemoryState::empty());
         let block = test_blocks().remove(0);
         let anchor_hash = block.recovered_block().parent_hash();
         let tip_hash = block.recovered_block().hash();

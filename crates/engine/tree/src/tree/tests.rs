@@ -218,7 +218,10 @@ impl TestHarness {
 
         let (from_tree_tx, from_tree_rx) = unbounded_channel();
         let runtime = reth_tasks::Runtime::test();
-        let overlay_manager = OverlayManager::new(runtime.state_trie_overlay_worker_pool());
+        let overlay_manager = OverlayManager::new(
+            runtime.state_trie_overlay_worker_pool(),
+            CanonicalInMemoryState::empty(),
+        );
 
         let header = chain_spec.genesis_header().clone();
         let header = SealedHeader::seal_slow(header);

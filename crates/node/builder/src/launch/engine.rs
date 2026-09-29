@@ -11,6 +11,7 @@ use crate::{
 };
 use alloy_consensus::BlockHeader;
 use futures::{stream::FusedStream, stream_select, FutureExt, StreamExt};
+use reth_chain_state::CanonicalInMemoryState;
 use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_db::{database_metrics::DatabaseMetrics, Database};
 use reth_engine_tree::{
@@ -92,10 +93,14 @@ impl EngineNodeLauncher {
         } = target;
         let NodeHooks { on_component_initialized, on_node_started, .. } = hooks;
 
-        // Create the overlay manager that will be shared across the provider and engine. It owns
-        // the node's in-memory state, which the blockchain provider and the engine tree use too.
-        let overlay_manager = OverlayManager::<N::Primitives>::new(
+        // Create the node's in-memory state and the overlay manager that shares it with the
+        // blockchain provider and the engine tree, which read it from the manager. The state's
+        // chain info is initialized from the database by the first `BlockchainProvider` below,
+        // once the database is opened and genesis is initialized.
+        let in_memory_state = CanonicalInMemoryState::<N::Primitives>::empty();
+        let overlay_manager = OverlayManager::new(
             ctx.task_executor.state_trie_overlay_worker_pool(),
+            in_memory_state,
         );
         let disabled_stages = N::disabled_stages();
 
