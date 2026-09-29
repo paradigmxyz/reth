@@ -156,7 +156,10 @@ impl<N: NodePrimitives> NonCanonicalBlocks<N> {
 /// All executed in-memory blocks, split into the canonical and the non-canonical section.
 ///
 /// Every block lives in exactly one section. Its parent link points at the [`BlockState`] this
-/// type holds for the parent, in either section, or is `None` if the parent is not in memory.
+/// type holds for the parent, see [`Self::linked_parent`]: a canonical block only links to a
+/// canonical parent, so the parent links of the canonical chain never leave the canonical section,
+/// while a non-canonical block links to its parent in either section. Without such a parent the
+/// link is `None`.
 #[derive(Debug, Default)]
 struct Blocks<N: NodePrimitives> {
     /// The canonical chain above the persisted frontier.
@@ -208,24 +211,31 @@ impl<N: NodePrimitives> Blocks<N> {
         }
     }
 
-    /// Re-links every descendant of `parents` whose parent link no longer points at the state
-    /// this type holds for its parent.
+    /// Returns the state a block in the given section links to as its parent.
+    ///
+    /// A canonical block only links to a canonical parent. A non-canonical block links to its
+    /// parent in either section.
+    fn linked_parent(&self, parent_hash: &B256, canonical: bool) -> Option<&Arc<BlockState<N>>> {
+        if canonical {
+            self.canonical.blocks.get(parent_hash)
+        } else {
+            self.get(parent_hash)
+        }
+    }
+
+    /// Re-links every tracked block of `hashes` whose parent link does not point at the state
+    /// [`Self::linked_parent`] returns for it.
     ///
     /// This is required after a block was removed, which must not stay reachable through the
-    /// parent links of the blocks built on it, and after a block was inserted that other tracked
-    /// blocks are already built on. A re-linked block gets a new [`BlockState`], so its
-    /// descendants are re-linked as well.
-    fn relink_children<'a>(&mut self, parents: impl IntoIterator<Item = &'a Arc<BlockState<N>>>)
-    where
-        N: 'a,
-    {
-        let mut queue = parents
-            .into_iter()
-            .flat_map(|parent| self.children_of(parent))
-            .collect::<VecDeque<_>>();
+    /// parent links of the blocks built on it, after a block was inserted that other tracked
+    /// blocks are already built on, and after blocks moved between the sections. A re-linked
+    /// block gets a new [`BlockState`], so its children are re-linked as well.
+    fn relink(&mut self, hashes: impl IntoIterator<Item = B256>) {
+        let mut queue = hashes.into_iter().collect::<VecDeque<_>>();
         while let Some(hash) = queue.pop_front() {
+            let canonical = self.canonical.blocks.contains_key(&hash);
             let Some(state) = self.get(&hash) else { continue };
-            let parent = self.get(&state.parent_hash());
+            let parent = self.linked_parent(&state.parent_hash(), canonical);
             let linked = match (state.parent.as_ref(), parent) {
                 (None, None) => true,
                 (Some(linked), Some(parent)) => Arc::ptr_eq(linked, parent),
@@ -240,6 +250,14 @@ impl<N: NodePrimitives> Blocks<N> {
         }
     }
 
+    /// Re-links the tracked children of the removed `parents`, which must not stay reachable
+    /// through their parent links.
+    fn relink_children_of(&mut self, parents: &[Arc<BlockState<N>>]) {
+        let children =
+            parents.iter().flat_map(|parent| self.children_of(parent)).collect::<Vec<_>>();
+        self.relink(children);
+    }
+
     /// Inserts a block into the non-canonical section unless it is already tracked, and returns
     /// its state.
     fn insert_executed(&mut self, block: ExecutedBlock<N>) -> Arc<BlockState<N>> {
@@ -247,12 +265,14 @@ impl<N: NodePrimitives> Blocks<N> {
         if let Some(existing) = self.get(&hash) {
             return Arc::clone(existing)
         }
-        let parent = self.get(&block.recovered_block().parent_hash()).cloned();
+        let parent = self.linked_parent(&block.recovered_block().parent_hash(), false).cloned();
         let state = Arc::new(BlockState::with_parent(block, parent));
         self.non_canonical.insert(Arc::clone(&state));
         // Blocks built on this one can already be tracked if it was persisted and trimmed before,
-        // for example when a reorg brings it back into memory.
-        self.relink_children([&state]);
+        // for example when a reorg brings it back into memory. Only its non-canonical children
+        // link to it: the canonical chain does not extend into the non-canonical section.
+        let children = self.children_of(&state).collect::<Vec<_>>();
+        self.relink(children);
         state
     }
 
@@ -260,34 +280,46 @@ impl<N: NodePrimitives> Blocks<N> {
     /// section.
     ///
     /// Blocks that are already tracked keep their state, so everyone holding it keeps sharing
-    /// it. Reorged blocks that are not canonical in memory are ignored.
+    /// it, unless their parent link has to change because a block moved between the sections.
+    /// Reorged blocks that are not canonical in memory are ignored.
     fn update_chain(&mut self, new: Vec<ExecutedBlock<N>>, reorged: Vec<ExecutedBlock<N>>) {
+        // Blocks that moved between the sections or were inserted, whose own parent links and
+        // whose children's parent links may have to change.
+        let mut moved = Vec::new();
         for block in reorged {
-            if let Some(state) = self.canonical.remove(&block.recovered_block().hash()) {
+            let hash = block.recovered_block().hash();
+            if let Some(state) = self.canonical.remove(&hash) {
                 self.non_canonical.insert(state);
+                moved.push(hash);
             }
         }
 
-        let mut inserted = Vec::new();
         for block in new {
             let hash = block.recovered_block().hash();
             let state = if let Some(state) = self.non_canonical.remove(&hash) {
+                moved.push(hash);
                 state
             } else if let Some(state) = self.canonical.blocks.get(&hash) {
                 Arc::clone(state)
             } else {
-                let parent = self.get(&block.recovered_block().parent_hash()).cloned();
-                let state = Arc::new(BlockState::with_parent(block, parent));
-                inserted.push(Arc::clone(&state));
-                state
+                let parent =
+                    self.linked_parent(&block.recovered_block().parent_hash(), true).cloned();
+                moved.push(hash);
+                Arc::new(BlockState::with_parent(block, parent))
             };
             if let Some(displaced) = self.canonical.insert(state) {
+                moved.push(displaced.hash());
                 self.non_canonical.insert(displaced);
             }
         }
 
         self.pending_block = None;
-        self.relink_children(&inserted);
+        let relink = moved
+            .iter()
+            .filter_map(|hash| self.get(hash))
+            .flat_map(|state| std::iter::once(state.hash()).chain(self.children_of(state)))
+            .collect::<Vec<_>>();
+        self.relink(relink);
     }
 
     /// Removes canonical blocks up to and including `remove_until`, if `persisted_hash` is part of
@@ -315,7 +347,7 @@ impl<N: NodePrimitives> Blocks<N> {
         let removed =
             hashes.iter().filter_map(|hash| self.canonical.remove(hash)).collect::<Vec<_>>();
         self.clear_untracked_pending_block();
-        self.relink_children(&removed);
+        self.relink_children_of(&removed);
         removed
     }
 
@@ -353,7 +385,7 @@ impl<N: NodePrimitives> Blocks<N> {
         }
 
         self.clear_untracked_pending_block();
-        self.relink_children(&removed);
+        self.relink_children_of(&removed);
         removed
     }
 
@@ -506,7 +538,9 @@ pub(crate) struct CanonicalInMemoryStateInner<N: NodePrimitives> {
 ///   await a forkchoice update, fork blocks, and blocks a reorg moved off the canonical chain.
 ///
 /// Every block is tracked as one shared [`BlockState`] whose parent link points at its parent's
-/// state in either section. Making a block canonical moves that state between the sections
+/// state: a canonical block only links to a canonical parent, so walking the parent links of the
+/// canonical head never leaves the canonical section, while a non-canonical block links to its
+/// parent in either section. Making a block canonical moves that state between the sections
 /// instead of rebuilding it. The pending block served over RPC, see
 /// [`InMemoryStateWriter::set_pending_block`], is one of the tracked blocks, usually from the
 /// non-canonical section.
@@ -1440,7 +1474,8 @@ mod tests {
 
     /// Asserts that every block is tracked in exactly one section, that the number and parent
     /// indexes match the tracked blocks, that every parent link points at the state tracked for
-    /// the parent, and that the pending block is tracked.
+    /// the parent in the sections it may link to, that the parent links of the canonical head
+    /// cover the canonical section, and that the pending block is tracked.
     fn assert_consistent(state: &CanonicalInMemoryState) {
         let blocks = state.inner.in_memory_state.blocks.read();
         let Blocks { canonical, non_canonical, pending_block } = &*blocks;
@@ -1476,7 +1511,9 @@ mod tests {
             .all(|set| !set.is_empty()));
 
         for state in canonical.blocks.values().chain(non_canonical.blocks.values()) {
-            match (state.parent.as_ref(), blocks.get(&state.parent_hash())) {
+            let is_canonical = canonical.blocks.contains_key(&state.hash());
+            match (state.parent.as_ref(), blocks.linked_parent(&state.parent_hash(), is_canonical))
+            {
                 (None, None) => {}
                 (Some(linked), Some(parent)) => assert!(Arc::ptr_eq(linked, parent)),
                 (linked, parent) => panic!(
@@ -1487,6 +1524,9 @@ mod tests {
                 ),
             }
         }
+
+        // The parent links of the canonical head cover exactly the canonical section.
+        assert_eq!(canonical.head().map_or(0, |head| head.chain().count()), canonical.blocks.len());
 
         assert!(pending_block.is_none_or(|hash| blocks.contains(&hash)));
     }
@@ -1689,22 +1729,72 @@ mod tests {
     }
 
     #[test]
-    fn inserting_a_trimmed_parent_relinks_its_children() {
+    fn inserting_a_trimmed_parent_relinks_only_its_non_canonical_children() {
         let mut builder = TestBlockBuilder::eth();
         let state = CanonicalInMemoryState::empty();
+        let writer = state.writer();
         let blocks = builder.get_executed_blocks(1..4).collect::<Vec<_>>();
-        state.writer().update_chain(NewCanonicalChain::Commit { new: blocks.clone() });
+        writer.update_chain(NewCanonicalChain::Commit { new: blocks.clone() });
+        let fork = builder.get_executed_block_with_number(2, hash(&blocks[0]));
+        writer.insert_executed(fork.clone());
         let persisted = blocks[0].recovered_block().num_hash();
-        state.writer().remove_canonical_blocks_until(persisted.hash, persisted.number);
+        writer.remove_canonical_blocks_until(persisted.hash, persisted.number);
+        assert!(state.executed_state_by_hash(hash(&fork)).unwrap().parent.is_none());
         assert_eq!(state.head_state().unwrap().chain().count(), 2);
 
-        // A reorg can bring a persisted block back into memory.
-        let parent = state.writer().insert_executed(blocks[0].clone());
-        let lowest = state.state_by_hash(hash(&blocks[1])).unwrap();
-        let head = state.head_state().unwrap();
-        assert!(Arc::ptr_eq(lowest.parent.as_ref().unwrap(), &parent));
-        assert!(Arc::ptr_eq(head.parent.as_ref().unwrap(), &lowest));
-        assert_eq!(head.chain().count(), 3);
+        // A reorg can bring a persisted block back into memory, as a non-canonical block.
+        let parent = writer.insert_executed(blocks[0].clone());
+        assert_consistent(&state);
+
+        // The fork links to it, but the canonical chain must not walk into the non-canonical
+        // section.
+        let fork_state = state.executed_state_by_hash(hash(&fork)).unwrap();
+        assert!(Arc::ptr_eq(fork_state.parent.as_ref().unwrap(), &parent));
+        assert!(state.state_by_hash(hash(&blocks[1])).unwrap().parent.is_none());
+        assert_eq!(state.head_state().unwrap().chain().count(), state.canonical_block_count());
+        assert_eq!(state.canonical_chain().count(), 2);
+    }
+
+    #[test]
+    fn reinserting_disk_blocks_does_not_extend_the_canonical_chain() {
+        let mut builder = TestBlockBuilder::eth();
+        let state = CanonicalInMemoryState::empty();
+        let writer = state.writer();
+        // Blocks 1 to 3 are persisted and no longer in memory, 4 and 5 are the in-memory canonical
+        // chain.
+        let blocks = builder.get_executed_blocks(1..6).collect::<Vec<_>>();
+        writer.update_chain(NewCanonicalChain::Commit { new: blocks[3..].to_vec() });
+
+        // A reorg to a fork off block 1 loads the reorged-out blocks 2 and 3 from disk. The engine
+        // reinserts them one by one before it applies the chain update, while readers keep seeing
+        // the in-memory canonical chain unchanged.
+        for block in &blocks[1..3] {
+            writer.insert_executed(block.clone());
+            assert_consistent(&state);
+            assert_eq!(state.head_state().unwrap().chain().count(), 2);
+            assert_eq!(state.canonical_chain().count(), state.canonical_block_count());
+        }
+
+        let mut parent = hash(&blocks[0]);
+        let fork = (2..=6)
+            .map(|number| {
+                let block = builder.get_executed_block_with_number(number, parent);
+                parent = hash(&block);
+                block
+            })
+            .collect::<Vec<_>>();
+        for block in &fork {
+            writer.insert_executed(block.clone());
+        }
+        writer.update_chain(NewCanonicalChain::Reorg { new: fork, old: blocks[1..].to_vec() });
+        assert_consistent(&state);
+        assert_eq!(state.canonical_block_count(), 5);
+        assert_eq!(state.head_state().unwrap().chain().count(), 5);
+
+        // The reorged-out blocks stay fork candidates, linked to each other down to block 2.
+        let old_tip = state.executed_state_by_hash(hash(&blocks[4])).unwrap();
+        assert_eq!(old_tip.chain().count(), 4);
+        assert_eq!(old_tip.anchor(), blocks[0].recovered_block().num_hash());
     }
 
     fn create_mock_state(
