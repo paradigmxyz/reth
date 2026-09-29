@@ -128,7 +128,6 @@ use crate::tree::{
         StateRootUpdateStream,
     },
 };
-use alloy_consensus::constants::KECCAK_EMPTY;
 use alloy_primitives::Address;
 use reth_chain_state::{CanonicalInMemoryState, ExecutedBlock, ExecutionTimingStats};
 use reth_consensus::{ConsensusError, FullConsensus, ReceiptRootBloom};
@@ -165,7 +164,7 @@ use reth_trie::{
     hashed_cursor::HashedCursorFactory, trie_cursor::TrieCursorFactory, updates::TrieUpdates,
     HashedPostState, KeccakKeyHasher, LazyTrieData,
 };
-use revm::state::bal::Bal as RevmBal;
+use revm::state::{bal::Bal as RevmBal, AccountInfo};
 use std::{
     sync::{
         atomic::{AtomicUsize, Ordering},
@@ -1614,12 +1613,9 @@ where
 
         // Helper: check if account represents a new contract deployment
         let is_new_deployment = |acc: &BundleAccount| -> bool {
-            let has_code_now = acc.info.as_ref().is_some_and(|info| info.code_hash != KECCAK_EMPTY);
-            let had_no_code_before = acc
-                .original_info
-                .as_ref()
-                .map(|info| info.code_hash == KECCAK_EMPTY)
-                .unwrap_or(true);
+            let has_code_now = acc.info.as_ref().is_some_and(|info| !info.is_empty_code_hash());
+            let had_no_code_before =
+                acc.original_info.as_ref().is_none_or(AccountInfo::is_empty_code_hash);
             has_code_now && had_no_code_before
         };
 
@@ -1668,8 +1664,7 @@ where
                     .unwrap_or(false);
 
                 // Check if current code is empty (delegation cleared)
-                let code_now_empty =
-                    acc.info.as_ref().map(|info| info.code_hash == KECCAK_EMPTY).unwrap_or(false);
+                let code_now_empty = acc.info.as_ref().is_some_and(AccountInfo::is_empty_code_hash);
 
                 original_was_eip7702 && code_now_empty
             })
