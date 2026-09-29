@@ -322,7 +322,7 @@ where
             let Some(slots) = self.storage.repair_slots(&range).await? else {
                 return Ok(Some(Step::Wait))
             };
-            if let Some(step) = self.download_code(&range).await? {
+            if let Some(step) = self.download_code(&range, true).await? {
                 return Ok(Some(step))
             }
             let hashed_address = range.origin();
@@ -372,16 +372,23 @@ where
                 return Ok(Some(Step::Stop))
             }
         }
-        self.download_code(range).await
+        self.download_code(range, false).await
     }
 
-    // Persists the code `range` references. `Some` ends the pass.
+    // Persists the code `range` references, or only its repaired account's code when `repair`.
+    // `Some` ends the pass.
     async fn download_code(
         &mut self,
         range: &VerifiedRange,
+        repair: bool,
     ) -> Result<Option<Step>, SnapSyncError> {
         loop {
-            match self.bytecode.next(range).await? {
+            let step = if repair {
+                self.bytecode.next_repair(range).await?
+            } else {
+                self.bytecode.next(range).await?
+            };
+            match step {
                 BytecodeStep::Complete => return Ok(None),
                 BytecodeStep::Committed { .. } => {}
                 BytecodeStep::Unavailable { .. } => return Ok(Some(Step::Wait)),

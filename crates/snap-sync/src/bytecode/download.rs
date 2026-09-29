@@ -1,6 +1,7 @@
 //! Downloads the code an account range's contracts reference, committing every verified response.
 
 use crate::{common::DownloadContext, SnapBytecodeStore, SnapSyncError, VerifiedRange};
+use alloy_primitives::{B256, KECCAK256_EMPTY};
 use reth_db_api::transaction::DbTxMut;
 use reth_downloaders::snap::{BytecodeDownloader, BytecodeOutcome};
 use reth_eth_wire_types::snap::GetByteCodesMessage;
@@ -59,8 +60,34 @@ where
     /// [`BytecodeStep::Complete`] once every hash it references is stored, so the range can commit
     /// without supplying code. Whatever a peer leaves out stays missing for the next call.
     pub async fn next(&mut self, range: &VerifiedRange) -> Result<BytecodeStep, SnapSyncError> {
+        self.fetch(range, range.range().code_hashes()).await
+    }
+
+    /// Like [`Self::next`], but only for the code of the account a repair of `range` writes.
+    ///
+    /// A repaired account the pivot lacks is proved by the next one, whose code is not written.
+    pub async fn next_repair(
+        &mut self,
+        range: &VerifiedRange,
+    ) -> Result<BytecodeStep, SnapSyncError> {
+        let referenced = range
+            .range()
+            .accounts()
+            .first()
+            .filter(|(hash, account)| {
+                *hash == range.origin() && account.code_hash != KECCAK256_EMPTY
+            })
+            .map(|(_, account)| account.code_hash);
+        self.fetch(range, referenced.into_iter().collect()).await
+    }
+
+    // Requests whichever of `referenced` is missing for `range` and commits the response.
+    async fn fetch(
+        &mut self,
+        range: &VerifiedRange,
+        referenced: Vec<B256>,
+    ) -> Result<BytecodeStep, SnapSyncError> {
         let write = range.write();
-        let referenced = range.range().code_hashes();
         if referenced.is_empty() {
             return Ok(BytecodeStep::Complete)
         }
@@ -133,7 +160,7 @@ mod tests {
         },
         SnapAccountStore, SnapAttemptStore,
     };
-    use alloy_primitives::{keccak256, Bytes, B256};
+    use alloy_primitives::{keccak256, Bytes};
     use reth_db_api::{tables, transaction::DbTx};
     use reth_eth_wire_types::snap::ByteCodesMessage;
     use reth_network_p2p::{error::PeerRequestResult, snap::client::SnapResponse};
@@ -217,6 +244,27 @@ mod tests {
             .unwrap();
         provider.commit().unwrap();
         assert!(coverage.is_complete());
+    }
+
+    #[tokio::test]
+    async fn a_repair_requests_only_the_code_of_its_account() {
+        let accounts = accounts();
+        let (factory, range) = started(&accounts);
+        let write = range.write();
+        let (client, mut download) = download([byte_codes(1, &[code(2)])], factory);
+
+        // Key 2 holds no code, and the proof reaching key 3 does not make its code needed.
+        let plain =
+            VerifiedRange::new(write, verified_range(&accounts, 1..3, key(2), &[key(2), key(3)]));
+        assert!(matches!(download.next_repair(&plain).await.unwrap(), BytecodeStep::Complete));
+        let contract =
+            VerifiedRange::new(write, verified_range(&accounts, 3..4, key(4), &[key(4)]));
+        assert!(matches!(
+            download.next_repair(&contract).await.unwrap(),
+            BytecodeStep::Committed { persisted: 1 }
+        ));
+
+        assert_eq!(*client.code_requests(), [vec![keccak256(code(2))]]);
     }
 
     #[tokio::test]

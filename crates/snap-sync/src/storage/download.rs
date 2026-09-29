@@ -5,6 +5,7 @@ use crate::{
     StorageProgress, VerifiedRange, MAX_HASH,
 };
 use alloy_primitives::{B256, U256};
+use futures::future::join_all;
 use reth_db_api::transaction::DbTxMut;
 use reth_downloaders::snap::{
     StorageRangeDownloader, StorageRangeOutcome, VerifiedAccountBatch, VerifiedStorageRanges,
@@ -117,8 +118,9 @@ where
     /// Fetches the pivot's values of the next batch of slots scheduled for repair at `range`'s
     /// origin, zero where its storage holds none.
     ///
-    /// The account commits with each batch, so a large repair persists its progress as it goes.
-    /// `Ok(None)` when a peer did not serve one, leaving the batch scheduled.
+    /// The batch's slots are requested concurrently and the account commits with each batch, so a
+    /// large repair persists its progress as it goes. Slots a peer did not serve stay scheduled,
+    /// and `Ok(None)` when none was served.
     pub async fn repair_slots(
         &mut self,
         range: &VerifiedRange,
@@ -132,7 +134,7 @@ where
             return Ok(Some(Vec::new()))
         };
 
-        let mut values = Vec::new();
+        let mut requests = Vec::new();
         for slot in repairs.slots(account).take(self.max_accounts) {
             let request = GetStorageRangesMessage {
                 request_id: self.context.next_request_id(),
@@ -148,7 +150,12 @@ where
                 &batch,
                 self.context.runtime().clone(),
             )?;
-            let StorageRangeOutcome::Verified(ranges) = downloader.await? else { return Ok(None) };
+            requests.push(async move { downloader.await.map(|outcome| (slot, outcome)) });
+        }
+
+        let mut values = Vec::new();
+        for response in join_all(requests).await {
+            let (slot, StorageRangeOutcome::Verified(ranges)) = response? else { continue };
             // Proved from the slot, so one keyed past it means the storage holds none there.
             let value = ranges
                 .into_ranges()
@@ -159,7 +166,7 @@ where
                 .map_or(U256::ZERO, |(_, value)| value);
             values.push((slot, value));
         }
-        Ok(Some(values))
+        Ok((!values.is_empty()).then_some(values))
     }
 }
 
@@ -555,6 +562,23 @@ mod tests {
         let (_, mut download) = download([storage_ranges(1, &[], &[], &[])], factory);
 
         assert_eq!(download.repair_slots(&range).await.unwrap(), None);
+    }
+
+    #[tokio::test]
+    async fn served_repair_slots_survive_an_unserved_one() {
+        let accounts = accounts();
+        let (factory, range) = repairing(&accounts, &[key(1), key(5)]);
+        let large = large();
+        let responses = [
+            storage_ranges(1, &[&large[..1]], &large, &[key(1)]),
+            storage_ranges(2, &[], &[], &[]),
+        ];
+        let (_, mut download) = download(responses, factory);
+
+        let values = download.repair_slots(&range).await.unwrap();
+
+        // Key 5 stays scheduled for the next batch.
+        assert_eq!(values, Some(vec![(key(1), U256::from(11))]));
     }
 
     #[tokio::test]
