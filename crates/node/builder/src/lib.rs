@@ -45,6 +45,8 @@ pub mod rpc;
 
 pub mod setup;
 
+pub mod sync;
+
 /// Type aliases for traits that are often used together
 pub mod aliases;
 pub use aliases::*;
