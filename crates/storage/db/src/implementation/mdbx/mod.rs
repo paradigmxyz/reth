@@ -406,11 +406,7 @@ impl DatabaseEnv {
 
         let mode = match kind {
             DatabaseEnvKind::RO => Mode::ReadOnly,
-            DatabaseEnvKind::RW => {
-                // enable writemap mode in RW mode
-                inner_env.write_map();
-                Mode::ReadWrite { sync_mode: args.sync_mode }
-            }
+            DatabaseEnvKind::RW => Mode::ReadWrite { sync_mode: args.sync_mode },
         };
 
         // Note: We set max dbs to 256 here to allow for custom tables. This needs to be set on
@@ -727,6 +723,19 @@ mod tests {
     #[test]
     fn db_creation() {
         let _tempdir = create_test_db(DatabaseEnvKind::RW);
+    }
+
+    #[test]
+    fn rw_db_uses_default_mapping() {
+        let tempdir = tempfile::TempDir::new().expect(ERROR_TEMPDIR);
+        let env = DatabaseEnv::open(
+            tempdir.path(),
+            DatabaseEnvKind::RW,
+            DatabaseArguments::new(ClientVersion::default()),
+        )
+        .expect(ERROR_DB_CREATION);
+
+        assert!(!env.is_write_map());
     }
 
     #[test]
