@@ -348,7 +348,7 @@ pub trait EstimateCall: Call {
         Ok(U256::from(highest_gas_limit))
     }
 
-    /// Fills only omitted frame limits by probing the whole transaction at one block.
+    /// Defaults the nonce keys and fills omitted frame limits at one block.
     fn fill_frame_gas_at(
         &self,
         mut request: RpcTxReq<<Self::RpcConvert as RpcConvert>::Network>,
@@ -363,6 +363,17 @@ pub trait EstimateCall: Call {
             let invalid = |message: &str| {
                 Self::Error::from_eth_err(EthApiError::InvalidParams(message.into()))
             };
+            let (evm_env, at) = self.evm_env_at(at).await?;
+            if evm_env.cfg_env.is_eip8250_enabled() && request.as_ref().nonce_keys.is_none() {
+                if request.as_ref().signatures.as_ref().is_some_and(|signatures| {
+                    signatures.iter().any(|signature| {
+                        u8::from(signature.scheme) != 0 && !signature.signature.is_empty()
+                    })
+                }) {
+                    return Err(invalid("signed frame transactions must include nonceKeys"));
+                }
+                request.as_mut().nonce_keys = Some(vec![U256::ZERO]);
+            }
             let frames =
                 request.as_ref().frames.as_ref().ok_or_else(|| invalid("missing frames"))?;
             let missing: Vec<_> = frames
@@ -388,7 +399,6 @@ pub trait EstimateCall: Call {
                 return Err(invalid("signed frame transactions must include both frame gas limits"));
             }
 
-            let (evm_env, at) = self.evm_env_at(at).await?;
             let block_limit = overrides
                 .block
                 .as_ref()

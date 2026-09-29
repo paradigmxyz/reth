@@ -1039,6 +1039,22 @@ pub trait Call:
         mut request: RpcTxReq<<Self::RpcConvert as RpcConvert>::Network>,
         mut db: impl Database<Error: Into<EthApiError>>,
     ) -> Result<TxEnvFor<Self::Evm>, Self::Error> {
+        if Into::<u8>::into(request.as_ref().output_tx_type()) == 0x06 &&
+            evm_env.cfg_env.is_eip8250_enabled() &&
+            request.as_ref().nonce_keys.is_none()
+        {
+            if request.as_ref().signatures.as_ref().is_some_and(|signatures| {
+                signatures.iter().any(|signature| {
+                    u8::from(signature.scheme) != 0 && !signature.signature.is_empty()
+                })
+            }) {
+                return Err(EthApiError::InvalidParams(
+                    "signed frame transactions must include nonceKeys".into(),
+                )
+                .into());
+            }
+            request.as_mut().nonce_keys = Some(vec![U256::ZERO]);
+        }
         if request.as_ref().nonce().is_none() {
             let mut keyed_nonce = None;
             if let Some(keys) = request.as_ref().nonce_keys.as_ref() {
