@@ -113,4 +113,5 @@ account-ext = [
     "reth-primitives-traits/account-ext",
     "revm/account-ext",
     "reth-trie/account-ext",
+    "reth-trie-db/account-ext",
 ]
