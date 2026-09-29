@@ -9,11 +9,9 @@
 #![cfg_attr(docsrs, feature(doc_cfg))]
 #![cfg_attr(not(feature = "std"), no_std)]
 
-// Feature-only deps: `account-ext` enables the feature on these crates.
+// Feature-only dep: `account-ext` enables the feature on this crate.
 #[cfg(feature = "account-ext")]
 use reth_stages_types as _;
-#[cfg(feature = "account-ext")]
-use revm as _;
 
 /// Re-exported ethereum types
 #[doc(inline)]

@@ -53,14 +53,13 @@ alloy-rpc-types-engine = { workspace = true, optional = true }
 
 # account-ext
 reth-stages-types = { workspace = true, optional = true }
-revm = { workspace = true, optional = true }
 
 [features]
 default = ["std"]
 account-ext = [
     "reth-ethereum-cli?/account-ext",
     "reth-stages-types/account-ext",
-    "revm/account-ext",
+    "reth-revm?/account-ext",
     "alloy-rpc-types-eth?/account-ext",
     "reth-codecs?/account-ext",
     "reth-primitives-traits/account-ext",
@@ -81,7 +80,6 @@ std = [
     "alloy-rpc-types-engine?/std",
     "reth-codecs?/std",
     "reth-stages-types?/std",
-    "revm?/std",
 ]
 arbitrary = [
     "std",
@@ -95,7 +93,6 @@ arbitrary = [
     "alloy-rpc-types-engine?/arbitrary",
     "reth-codecs?/arbitrary",
     "reth-stages-types?/arbitrary",
-    "revm?/arbitrary",
 ]
 keccak-cache-global = [
     "reth-node-ethereum?/keccak-cache-global",
@@ -197,7 +194,6 @@ otlp = [
 ]
 portable = [
     "reth-revm?/portable",
-    "revm?/portable",
 ]
 gmp = [
     "reth-evm-ethereum?/gmp",

@@ -103,6 +103,7 @@ account-ext = [
     "alloy-genesis/account-ext",
     "alloy-rpc-types-eth/account-ext",
     "reth-primitives-traits/account-ext",
+    "reth-revm/account-ext",
 ]
 jit = ["reth-evm-ethereum/jit"]
 gmp = ["reth-evm-ethereum/gmp"]
