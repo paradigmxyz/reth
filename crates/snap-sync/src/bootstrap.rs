@@ -245,7 +245,7 @@ where
 
     // Repairs what a reorg across the pivot left in the downloaded state, as EIP-8189 describes:
     // the orphaned blocks' lists schedule what they changed for repair, and catch-up continues from
-    // the last block both branches share. Without those lists the attempt restarts.
+    // the last block both branches share. Unserved lists are waited for until they expire.
     async fn recover(&mut self, write: SnapWrite, head: u64) -> Result<Step, SnapSyncError> {
         let pivot = self.pivot()?;
         let Some(reorg) = self.factory.database_provider_ro()?.snap_reorg(write)? else {
@@ -253,6 +253,10 @@ where
             return Ok(Step::Restart)
         };
         let ancestor = reorg.ancestor();
+        if !self.policy.is_catchable_from(ancestor.number, head) {
+            info!(target: "sync::snap", ?pivot, ?ancestor, head, "Orphaned block access lists expired, restarting");
+            return Ok(Step::Restart)
+        }
         let generation = self.policy.select(
             &self.factory.database_provider_ro()?,
             head,
@@ -263,9 +267,10 @@ where
         let Some(generation) = generation.filter(|g| g.target().number >= ancestor.number) else {
             return Ok(Step::Wait)
         };
+        // A peer lacking side-chain lists says nothing of the others, so another is asked later.
         let Some(lists) = self.catch_up.orphaned_lists(reorg.orphaned()).await? else {
-            info!(target: "sync::snap", ?pivot, "Orphaned block access lists are unavailable, restarting");
-            return Ok(Step::Restart)
+            debug!(target: "sync::snap", ?pivot, "Orphaned block access lists are unavailable");
+            return Ok(Step::Wait)
         };
 
         // Scheduling reads every orphaned list, so it runs on the blocking pool.
@@ -1131,23 +1136,33 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn unavailable_orphaned_lists_start_the_sync_over() {
+    async fn unserved_orphaned_lists_are_waited_for() {
         let accounts = reorg_accounts();
         let factory = hashed_factory();
-        let (orphaned_attempt, _, new) = reorged(&factory, [Vec::new(), Vec::new()]);
-        let responses =
-            [lists(1, &orphaned_lists(), false), account_range(1, &accounts, 0..2, &[])];
-        let (_, mut bootstrap) = scripted(&factory, responses, [5]);
+        let (attempt, orphaned, new) = reorged(&factory, [Vec::new(), Vec::new()]);
+        let (_, mut bootstrap) = scripted(&factory, [lists(1, &orphaned_lists(), false)], [5]);
+        assert_eq!(bootstrap.run().await.unwrap(), SnapBootstrapOutcome::Stopped);
+        assert_eq!(attempt_id(&factory), attempt);
 
+        // Another peer serves them on the next run.
+        let stale_index = accounts.iter().position(|(key, _)| *key == keccak256(STALE)).unwrap();
+        let responses = [
+            lists(1, &orphaned_lists(), true),
+            lists(2, &[Vec::new(), Vec::new()], true),
+            account_range(1, &accounts, stale_index..stale_index + 1, &[keccak256(STALE)]),
+        ];
+        let (client, mut bootstrap) = scripted(&factory, responses, [5]);
         let outcome = bootstrap.run().await.unwrap();
 
-        let SnapBootstrapOutcome::TrieRebuild { write, pivot } = outcome else {
-            panic!("the new attempt downloads the state: {outcome:?}")
+        let SnapBootstrapOutcome::TrieRebuild { pivot, .. } = outcome else {
+            panic!("the state is repaired: {outcome:?}")
         };
         assert_eq!(pivot, new[1].num_hash());
-        assert_ne!(attempt_id(&factory), orphaned_attempt);
-        let verified = rebuild_and_verify(&factory, write, pivot.number);
-        assert_eq!(verified.state_root(), state_root(&accounts));
+        assert_eq!(attempt_id(&factory), attempt);
+        assert_eq!(
+            client.block_requests()[0],
+            orphaned.iter().map(SealedHeader::hash).collect::<Vec<_>>()
+        );
     }
 
     #[tokio::test]

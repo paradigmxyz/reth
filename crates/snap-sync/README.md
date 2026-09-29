@@ -72,8 +72,8 @@ find the last block both branches share and fetch the orphaned blocks' BALs:
 - Once catch-up reaches the new pivot, those entries are fetched again on their own, proved against
   its root, and the hand-off waits until none remain.
 
-A reorg reaching further back than the kept headers, or an orphaned BAL no peer serves, starts the
-attempt over instead.
+Orphaned BALs no peer serves are waited for. A reorg reaching further back than the kept headers,
+or orphaned BALs that expire before a peer serves them, starts the attempt over instead.
 
 snap/1 synchronization is not covered: this design keeps the state current with BALs, which only
 snap/2 serves, rather than with snap/1's trie-node healing.
