@@ -22,14 +22,19 @@ use std::fmt;
 /// Default number of contracts asked for per storage request.
 pub const DEFAULT_STORAGE_ACCOUNTS: usize = 128;
 
+/// Default number of scheduled slots fetched again per repair batch.
+pub const DEFAULT_REPAIR_SLOTS: usize = 128;
+
 /// Downloads the storage an account range's contracts still need, one request at a time.
 ///
 /// Every verified response is committed before the next request, so at most one response is held
 /// however large a contract is, and a download resumes from the persisted progress.
 pub struct StorageRangeDownload<C, F> {
     context: DownloadContext<C, F>,
-    // Contracts asked for per request, and scheduled slots fetched again per repair batch.
+    // Contracts asked for per request.
     max_accounts: usize,
+    // Scheduled slots fetched again per repair batch.
+    max_repair_slots: usize,
 }
 
 impl<C, F> StorageRangeDownload<C, F> {
@@ -38,6 +43,7 @@ impl<C, F> StorageRangeDownload<C, F> {
         Self {
             context: DownloadContext::new(client, factory, runtime),
             max_accounts: DEFAULT_STORAGE_ACCOUNTS,
+            max_repair_slots: DEFAULT_REPAIR_SLOTS,
         }
     }
 
@@ -47,10 +53,16 @@ impl<C, F> StorageRangeDownload<C, F> {
         self
     }
 
-    /// Returns this download asking for at most `max_accounts` contracts per request, at least one,
-    /// and fetching as many scheduled slots again per repair batch.
+    /// Returns this download asking for at most `max_accounts` contracts per request, at least one.
     pub const fn with_max_accounts(mut self, max_accounts: usize) -> Self {
         self.max_accounts = if max_accounts == 0 { 1 } else { max_accounts };
+        self
+    }
+
+    /// Returns this download fetching at most `max_repair_slots` scheduled slots again per repair
+    /// batch, at least one.
+    pub const fn with_max_repair_slots(mut self, max_repair_slots: usize) -> Self {
+        self.max_repair_slots = if max_repair_slots == 0 { 1 } else { max_repair_slots };
         self
     }
 }
@@ -116,11 +128,8 @@ where
     }
 
     /// Fetches the pivot's values of the next batch of slots scheduled for repair at `range`'s
-    /// origin, zero where its storage holds none.
-    ///
-    /// The batch's slots are requested concurrently and the account commits with each batch, so a
-    /// large repair persists its progress as it goes. Slots a peer did not serve stay scheduled,
-    /// and `Ok(None)` when none was served.
+    /// origin concurrently, zero where its storage holds none. Unserved slots stay scheduled, and
+    /// `Ok(None)` when none was served.
     pub async fn repair_slots(
         &mut self,
         range: &VerifiedRange,
@@ -135,7 +144,7 @@ where
         };
 
         let mut requests = Vec::new();
-        for slot in repairs.slots(account).take(self.max_accounts) {
+        for slot in repairs.slots(account).take(self.max_repair_slots) {
             let request = GetStorageRangesMessage {
                 request_id: self.context.next_request_id(),
                 root_hash: batch.state_root(),
@@ -175,6 +184,7 @@ impl<C, F> fmt::Debug for StorageRangeDownload<C, F> {
         f.debug_struct("StorageRangeDownload")
             .field("context", &self.context)
             .field("max_accounts", &self.max_accounts)
+            .field("max_repair_slots", &self.max_repair_slots)
             .finish()
     }
 }
@@ -588,7 +598,7 @@ mod tests {
         let large = large();
         let responses = [storage_ranges(1, &[&large[..1]], &large, &[key(1)])];
         let (client, download) = download(responses, factory);
-        let mut download = download.with_max_accounts(1);
+        let mut download = download.with_max_repair_slots(1);
 
         let values = download.repair_slots(&range).await.unwrap();
 
