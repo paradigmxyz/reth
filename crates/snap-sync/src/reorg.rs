@@ -337,6 +337,27 @@ mod tests {
     }
 
     #[test]
+    fn a_new_pivot_reorged_meanwhile_is_refused_without_scheduling() {
+        let (old, new) = branches();
+        let (factory, write) = started(&old, 4);
+        new.replace_after(&factory, ANCESTOR);
+        let (addresses, accounts) = accounts();
+        // The chain moved again, so the selected pivot is no longer canonical.
+        let generation = SnapGeneration::new(old.tip(), state_root(&accounts));
+        let lists = [list(credit(addresses[0], 5))];
+
+        let provider = factory.database_provider_rw().unwrap();
+        let refused = provider.commit_reorg_recovery(write, old.block(0), &lists, generation);
+        assert!(matches!(refused, Err(SnapSyncError::NonCanonicalBlock { block: 4, .. })));
+        drop(provider);
+
+        // The refused transaction is dropped, leaving the attempt to recover on the next pass.
+        let provider = factory.database_provider_ro().unwrap();
+        assert!(provider.snap_repairs(write).unwrap().is_empty());
+        assert_eq!(reorg(&factory, write).unwrap().ancestor(), old.block(0));
+    }
+
+    #[test]
     fn catch_up_below_the_ancestor_stays_where_it_is() {
         let (old, new) = branches();
         let (factory, write) = started(&old, 1);
