@@ -481,7 +481,6 @@ boyer-moore-magiclen = "0.2.16"
 bytes = { version = "1.11.1", default-features = false }
 blake3 = "1.8"
 brotli = "8"
-cfg-if = "1.0"
 clap = "4"
 dashmap = "6.2"
 derive_more = { version = "2", default-features = false, features = ["full"] }

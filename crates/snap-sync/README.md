@@ -24,9 +24,12 @@ This crate owns the synchronization logic and its progress. Requests and proof c
    by default the sync re-anchors to a newer block. BALs of the blocks in between carry the state
    already downloaded forward, applied strictly in block order, and the remaining ranges download at
    the new root.
-4. **Hand off.** Once every account is downloaded and the BALs reach the pivot, the state goes to
-   the merkle stage, which rebuilds the trie. It is accepted only when the root matches the pivot's
-   header.
+4. **Repair what BALs cannot.** BALs only overwrite the fields their blocks change, so entries left
+   stale for another reason are scheduled for repair. Once the BALs reach the pivot, each scheduled
+   account and slot is fetched again on its own, proved against the pivot's root.
+5. **Hand off.** Once every account is downloaded, the BALs reach the pivot and no repairs remain,
+   the state goes to the merkle stage, which rebuilds the trie. It is accepted only when the root
+   matches the pivot's header.
 
 ```rust
 use reth_snap_sync::SnapPivotPolicy;
