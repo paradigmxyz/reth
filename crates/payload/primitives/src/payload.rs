@@ -7,6 +7,7 @@ use alloy_primitives::{Bytes, B256};
 use alloy_rpc_types_engine::ExecutionData;
 use core::fmt::Debug;
 use serde::{de::DeserializeOwned, Serialize};
+use tracing::Span;
 
 /// Represents the core data structure of an execution payload.
 ///
@@ -65,6 +66,15 @@ pub trait ExecutionPayload:
     ///
     /// Returns `None` for pre-Amsterdam blocks.
     fn slot_number(&self) -> Option<u64>;
+
+    /// Returns the caller's span to use as the parent of engine payload processing.
+    ///
+    /// Implementations may capture a span before sending the payload to the engine to preserve
+    /// tracing context across the channel. This is local metadata and should not be serialized.
+    /// The default returns `None`, making the engine's `on_new_payload` span a root span.
+    fn cause(&self) -> Option<&Span> {
+        None
+    }
 }
 
 impl ExecutionPayload for ExecutionData {
@@ -223,5 +233,115 @@ where
         } else {
             None
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use alloy_consensus::{Block, TxEnvelope};
+    use alloy_rpc_types_engine::{ExecutionPayloadSidecar, ExecutionPayloadV1};
+    use tracing::{span::Id, Dispatch};
+    use tracing_subscriber::{registry::LookupSpan, Registry};
+
+    #[derive(Debug, Clone, Serialize, serde::Deserialize)]
+    struct TracedPayload {
+        inner: ExecutionData,
+        #[serde(skip)]
+        cause: Option<Span>,
+    }
+
+    // Forward the ordinary payload fields so the test only customizes tracing context.
+    macro_rules! delegate {
+        ($($name:ident -> $ret:ty),* $(,)?) => {
+            $(fn $name(&self) -> $ret { self.inner.$name() })*
+        };
+    }
+
+    impl ExecutionPayload for TracedPayload {
+        delegate! {
+            parent_hash -> B256,
+            block_hash -> B256,
+            block_number -> u64,
+            withdrawals -> Option<&Vec<Withdrawal>>,
+            block_access_list -> Option<&Bytes>,
+            parent_beacon_block_root -> Option<B256>,
+            timestamp -> u64,
+            gas_used -> u64,
+            gas_limit -> u64,
+            transaction_count -> usize,
+            slot_number -> Option<u64>,
+        }
+
+        fn cause(&self) -> Option<&Span> {
+            self.cause.as_ref()
+        }
+    }
+
+    #[tracing::instrument(
+        parent = payload.cause().and_then(Span::id),
+        target = "engine::tree",
+        skip_all,
+    )]
+    fn process_payload(payload: impl ExecutionPayload) -> Option<Id> {
+        Span::current()
+            .with_subscriber(|(id, dispatch)| {
+                dispatch
+                    .downcast_ref::<Registry>()
+                    .unwrap()
+                    .span(id)
+                    .unwrap()
+                    .parent()
+                    .map(|parent| parent.id())
+            })
+            .unwrap()
+    }
+
+    fn execution_data() -> ExecutionData {
+        ExecutionData {
+            payload: ExecutionPayloadV1::from_block_unchecked(
+                B256::ZERO,
+                &Block::<TxEnvelope>::default(),
+            )
+            .into(),
+            sidecar: ExecutionPayloadSidecar::default(),
+        }
+    }
+
+    #[test]
+    fn payload_cause_survives_channel_handoff() {
+        let dispatch = Dispatch::new(Registry::default());
+        let (tx, rx) = std::sync::mpsc::channel();
+        let cause = tracing::dispatcher::with_default(&dispatch, || {
+            let cause = tracing::info_span!("caller");
+            tx.send(TracedPayload { inner: execution_data(), cause: Some(cause.clone()) }).unwrap();
+            cause
+        });
+
+        let parent = std::thread::spawn(move || {
+            tracing::dispatcher::with_default(&dispatch, || {
+                let _unrelated = tracing::info_span!("engine").entered();
+                process_payload(rx.recv().unwrap())
+            })
+        })
+        .join()
+        .unwrap();
+        assert_eq!(parent, cause.id());
+        assert!(parent.is_some());
+    }
+
+    #[test]
+    fn default_and_deserialized_payloads_have_no_parent() {
+        tracing::subscriber::with_default(Registry::default(), || {
+            let cause = tracing::info_span!("caller");
+            let payload = TracedPayload { inner: execution_data(), cause: Some(cause) };
+            let encoded = serde_json::to_value(payload).unwrap();
+            assert!(encoded.get("cause").is_none());
+            let decoded = serde_json::from_value::<TracedPayload>(encoded).unwrap();
+
+            let _unrelated = tracing::info_span!("engine").entered();
+            assert_eq!(process_payload(execution_data()), None);
+            assert_eq!(process_payload(decoded), None);
+        });
     }
 }

@@ -8663,6 +8663,7 @@ dependencies = [
  "thiserror 2.0.20",
  "tokio",
  "tracing",
+ "tracing-subscriber",
 ]
 
 [[package]]
@@ -9861,6 +9862,8 @@ dependencies = [
  "sha2 0.10.9",
  "thiserror 2.0.20",
  "tokio",
+ "tracing",
+ "tracing-subscriber",
 ]
 
 [[package]]

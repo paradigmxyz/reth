@@ -44,11 +44,13 @@ use std::{
     str::FromStr,
     sync::{
         mpsc::{Receiver, Sender},
-        Arc,
+        Arc, Mutex,
     },
     time::Duration,
 };
 use tokio::sync::oneshot;
+use tracing::span::Id;
+use tracing_subscriber::{layer::Context, prelude::*, Layer, Registry};
 
 /// Wraps blocks as if they had been downloaded without any access list data.
 fn downloaded_blocks<B: reth_primitives_traits::Block>(
@@ -3528,4 +3530,80 @@ async fn test_fcu_back_to_reorged_out_head_with_pending_disk_reorg() {
 #[tokio::test]
 async fn test_fcu_back_to_reorged_out_head_above_shorter_branch_with_pending_disk_reorg() {
     assert_fcu_back_to_reorged_out_head_with_pending_disk_reorg(1).await;
+}
+
+/// Records causal links and checks that the source span is still alive when linked.
+#[derive(Clone, Default)]
+struct CausalLinks(Arc<Mutex<Vec<(&'static str, Id)>>>);
+
+impl Layer<Registry> for CausalLinks {
+    fn on_follows_from(&self, span: &Id, follows: &Id, ctx: Context<'_, Registry>) {
+        assert!(ctx.span(follows).is_some());
+        let name = ctx.span(span).unwrap().name();
+        self.0.lock().unwrap().push((name, follows.clone()));
+    }
+}
+
+#[test]
+fn test_buffered_redelivery_links_before_execution() {
+    let links = CausalLinks::default();
+    tracing::subscriber::with_default(Registry::default().with(links.clone()), || {
+        let mut builder = TestBlockBuilder::eth();
+        let parent = builder.get_executed_block_with_number(1, B256::ZERO);
+        let child = builder.get_executed_block_with_number(2, parent.recovered_block().hash());
+        let child_block = child.recovered_block().clone_sealed_block();
+        let mut harness = TestHarness::new(MAINNET.clone()).with_blocks(vec![parent]);
+        let cause = info_span!("on_new_payload");
+        let cause_id = cause.id().unwrap();
+        cause.in_scope(|| harness.tree.state.buffer.insert_block(child_block.clone().into()));
+        drop(cause);
+
+        // Both insert_block and insert_payload go through this path. The block is still in
+        // the buffer when its parent becomes available and it is delivered again directly.
+        let outcome = harness
+            .tree
+            .insert_block_or_payload(
+                child_block.block_with_parent(),
+                child,
+                |_, executed, _| {
+                    assert_eq!(
+                        *links.0.lock().unwrap(),
+                        vec![("insert_block_or_payload", cause_id)]
+                    );
+                    Ok::<_, InsertPayloadError<Block>>(ValidationOutput::new(executed, None))
+                },
+                |_, executed| Ok(executed.recovered_block().clone_sealed_block().into()),
+            )
+            .unwrap();
+        assert_eq!(outcome, InsertPayloadOk::Inserted(BlockStatus::Valid));
+    });
+}
+
+#[test]
+fn test_buffered_replay_links_each_block_to_its_cause() {
+    let links = CausalLinks::default();
+    tracing::subscriber::with_default(Registry::default().with(links.clone()), || {
+        let mut builder = TestBlockBuilder::eth();
+        let parent = builder.get_executed_block_with_number(1, B256::ZERO);
+        let parent_num_hash = parent.recovered_block().num_hash();
+        let child = builder.get_executed_block_with_number(2, parent_num_hash.hash);
+        let grandchild = builder.get_executed_block_with_number(3, child.recovered_block().hash());
+        let blocks = [
+            child.recovered_block().clone_sealed_block(),
+            grandchild.recovered_block().clone_sealed_block(),
+        ];
+        // Already-executed blocks isolate replay wiring from EVM validation in this test.
+        let mut harness =
+            TestHarness::new(MAINNET.clone()).with_blocks(vec![parent, child, grandchild]);
+        let mut expected = Vec::new();
+        for block in blocks {
+            let cause = info_span!("on_new_payload", block_hash = %block.hash());
+            expected.push(("execute_buffered_block", cause.id().unwrap()));
+            cause.in_scope(|| harness.tree.state.buffer.insert_block(block.into()));
+        }
+
+        harness.tree.try_connect_buffered_blocks(parent_num_hash).unwrap();
+        assert_eq!(*links.0.lock().unwrap(), expected);
+        assert!(harness.tree.state.buffer.blocks.is_empty());
+    });
 }

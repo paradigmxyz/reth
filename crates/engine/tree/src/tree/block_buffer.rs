@@ -8,6 +8,7 @@ use indexmap::IndexSet;
 use reth_network_p2p::full_block::SealedBlockWithAccessList;
 use reth_primitives_traits::{Block, SealedBlock};
 use std::collections::{BTreeMap, VecDeque};
+use tracing::Span;
 
 /// Contains the tree of pending blocks that cannot be executed due to missing parent.
 /// It allows to store unconnected blocks for potential future inclusion.
@@ -23,7 +24,7 @@ use std::collections::{BTreeMap, VecDeque};
 #[derive(Debug)]
 pub struct BlockBuffer<B: Block> {
     /// All blocks in the buffer stored by their block hash.
-    pub(crate) blocks: B256Map<SealedBlockWithAccessList<B>>,
+    pub(crate) blocks: B256Map<BufferedBlock<B>>,
     /// Map of any parent block hash (even the ones not currently in the buffer)
     /// to the buffered children.
     /// Allows connecting buffered blocks by parent.
@@ -55,34 +56,38 @@ impl<B: Block> BlockBuffer<B> {
 
     /// Return reference to the requested block.
     pub fn block(&self, hash: &BlockHash) -> Option<&SealedBlock<B>> {
-        self.blocks.get(hash).map(|block| &**block)
+        self.blocks.get(hash).map(|entry| &*entry.block)
     }
 
     /// Return a reference to the lowest ancestor of the given block in the buffer.
     pub fn lowest_ancestor(&self, hash: &BlockHash) -> Option<&SealedBlock<B>> {
         let mut current_block = self.blocks.get(hash)?;
-        while let Some(parent) = self.blocks.get(&current_block.parent_hash()) {
+        while let Some(parent) = self.blocks.get(&current_block.block.parent_hash()) {
             current_block = parent;
         }
-        Some(current_block)
+        Some(&current_block.block)
     }
 
     /// Insert a correct block inside the buffer.
+    ///
+    /// Captures the current span on first insertion and retains it until removal. Duplicate
+    /// blocks may upgrade the access list, but preserve the original cause.
     pub fn insert_block(&mut self, block: SealedBlockWithAccessList<B>) {
         let hash = block.hash();
 
         match self.blocks.entry(hash) {
             Entry::Occupied(mut entry) => {
                 // a duplicate that includes access list data is preferred over one without
-                if entry.get().data().is_none() && block.data().is_some() {
-                    entry.insert(block);
+                if entry.get().block.data().is_none() && block.data().is_some() {
+                    // Keep the original cause when upgrading a duplicate's access list.
+                    entry.get_mut().block = block;
                 }
                 return
             }
             Entry::Vacant(entry) => {
                 self.parent_to_child.entry(block.parent_hash()).or_default().insert(hash);
                 self.earliest_blocks.entry(block.number()).or_default().insert(hash);
-                entry.insert(block);
+                entry.insert(BufferedBlock { block, cause: Span::current() });
             }
         };
 
@@ -103,10 +108,8 @@ impl<B: Block> BlockBuffer<B> {
     ///
     /// Note: that order of returned blocks is important and the blocks with lower block number
     /// in the chain will come first so that they can be executed in the correct order.
-    pub fn remove_block_with_children(
-        &mut self,
-        parent_hash: &BlockHash,
-    ) -> Vec<SealedBlockWithAccessList<B>> {
+    /// Each entry retains its enqueue span so the caller can link later execution to it.
+    pub fn remove_block_with_children(&mut self, parent_hash: &BlockHash) -> Vec<BufferedBlock<B>> {
         let removed = self
             .remove_block(parent_hash)
             .into_iter()
@@ -165,19 +168,16 @@ impl<B: Block> BlockBuffer<B> {
     /// This method will only remove the block if it's present inside `self.blocks`.
     /// The block might be missing from other collections, the method will only ensure that it has
     /// been removed.
-    fn remove_block(&mut self, hash: &BlockHash) -> Option<SealedBlockWithAccessList<B>> {
+    fn remove_block(&mut self, hash: &BlockHash) -> Option<BufferedBlock<B>> {
         let block = self.blocks.remove(hash)?;
-        self.remove_from_earliest_blocks(block.number(), hash);
-        self.remove_from_parent(block.parent_hash(), hash);
+        self.remove_from_earliest_blocks(block.block.number(), hash);
+        self.remove_from_parent(block.block.parent_hash(), hash);
         self.block_queue.retain(|h| h != hash);
         Some(block)
     }
 
     /// Remove all children and their descendants for the given blocks and return them.
-    fn remove_children(
-        &mut self,
-        parent_hashes: Vec<BlockHash>,
-    ) -> Vec<SealedBlockWithAccessList<B>> {
+    fn remove_children(&mut self, parent_hashes: Vec<BlockHash>) -> Vec<BufferedBlock<B>> {
         // remove all parent child connection and all the child children blocks that are connected
         // to the discarded parent blocks.
         let mut remove_parent_children = parent_hashes;
@@ -196,6 +196,20 @@ impl<B: Block> BlockBuffer<B> {
         }
         removed_blocks
     }
+
+    /// Returns the original enqueue span for a block that is still buffered.
+    pub fn cause(&self, hash: &BlockHash) -> Option<&Span> {
+        self.blocks.get(hash).map(|entry| &entry.cause)
+    }
+}
+
+/// A pending block together with the span that caused it to be buffered.
+#[derive(Debug)]
+pub struct BufferedBlock<B: Block> {
+    /// The block and any accompanying access list.
+    pub block: SealedBlockWithAccessList<B>,
+    /// Keeps the enqueue span alive until replay can establish a causal link.
+    pub cause: Span,
 }
 
 #[cfg(test)]
@@ -206,6 +220,8 @@ mod tests {
     use alloy_primitives::{BlockHash, Bytes};
     use reth_testing_utils::generators::{self, random_block, BlockParams, Rng};
     use std::collections::HashMap;
+    use tracing::Dispatch;
+    use tracing_subscriber::{layer::Identity, prelude::*, registry::LookupSpan, Registry};
 
     /// Create random block with specified number and parent hash.
     fn create_block<R: Rng>(
@@ -279,8 +295,8 @@ mod tests {
 
         let blocks = buffer.remove_block_with_children(&parent);
         assert_eq!(blocks.len(), 1);
-        assert_eq!(&*blocks[0], &block);
-        assert_eq!(blocks[0].data().as_ref(), Some(&access_list));
+        assert_eq!(&*blocks[0].block, &block);
+        assert_eq!(blocks[0].block.data().as_ref(), Some(&access_list));
     }
 
     #[test]
@@ -298,8 +314,8 @@ mod tests {
 
         let blocks = buffer.remove_block_with_children(&parent);
         assert_eq!(blocks.len(), 1);
-        assert_eq!(&*blocks[0], &block);
-        assert_eq!(blocks[0].data().as_ref(), Some(&access_list));
+        assert_eq!(&*blocks[0].block, &block);
+        assert_eq!(blocks[0].block.data().as_ref(), Some(&access_list));
     }
 
     #[test]
@@ -332,7 +348,7 @@ mod tests {
             buffer
                 .remove_block_with_children(&main_parent_hash)
                 .into_iter()
-                .map(|b| b.split().0)
+                .map(|b| b.block.split().0)
                 .collect::<Vec<_>>(),
             vec![block1, block2, block3]
         );
@@ -361,7 +377,7 @@ mod tests {
             buffer
                 .remove_block_with_children(&main_parent_hash)
                 .into_iter()
-                .map(|b| (b.hash(), b.split().0))
+                .map(|b| (b.block.hash(), b.block.split().0))
                 .collect::<HashMap<_, _>>(),
             HashMap::from([
                 (block1.hash(), block1),
@@ -395,7 +411,7 @@ mod tests {
             buffer
                 .remove_block_with_children(&block1.hash())
                 .into_iter()
-                .map(|b| (b.hash(), b.split().0))
+                .map(|b| (b.block.hash(), b.block.split().0))
                 .collect::<HashMap<_, _>>(),
             HashMap::from([
                 (block1.hash(), block1),
@@ -608,5 +624,60 @@ mod tests {
 
         // And lowest ancestor for block2 becomes itself after its parent is evicted
         assert_eq!(buffer.lowest_ancestor(&block2.hash()), Some(&block2));
+    }
+
+    #[test]
+    fn retains_cause_through_duplicate_upgrade_and_drain() {
+        let dispatch = Dispatch::new(Registry::default().with(Identity::new()));
+        tracing::dispatcher::with_default(&dispatch, || {
+            let registry = dispatch.downcast_ref::<Registry>().unwrap();
+            let mut rng = generators::rng();
+            let parent = rng.random();
+            let block = create_block(&mut rng, 10, parent);
+            let mut buffer = BlockBuffer::new(1);
+            let cause = tracing::info_span!("enqueue");
+            let cause_id = cause.id().unwrap();
+            cause.in_scope(|| buffer.insert_block(block.clone().into()));
+            drop(cause);
+
+            // The buffer owns the last handle, even if a duplicate arrives in another span.
+            assert!(registry.span(&cause_id).is_some());
+            tracing::info_span!("duplicate").in_scope(|| {
+                buffer.insert_block(SealedBlockWithAccessList::new(block, Some(raw_bal())));
+            });
+            let entries = buffer.remove_block_with_children(&parent);
+            assert_eq!(entries.len(), 1);
+            assert_eq!(entries[0].cause.id(), Some(cause_id.clone()));
+            assert!(entries[0].block.data().is_some());
+            assert!(registry.span(&cause_id).is_some());
+            drop(entries);
+            assert!(registry.span(&cause_id).is_none());
+        });
+    }
+
+    #[test]
+    fn eviction_and_trimming_release_causes() {
+        let dispatch = Dispatch::new(Registry::default().with(Identity::new()));
+        tracing::dispatcher::with_default(&dispatch, || {
+            let registry = dispatch.downcast_ref::<Registry>().unwrap();
+            let mut rng = generators::rng();
+            let parent = rng.random();
+            let first = create_block(&mut rng, 10, parent);
+            let second = create_block(&mut rng, 11, first.hash());
+            let mut buffer = BlockBuffer::new(1);
+            let first_cause = tracing::info_span!("first");
+            let first_id = first_cause.id().unwrap();
+            first_cause.in_scope(|| buffer.insert_block(first.into()));
+            drop(first_cause);
+
+            let second_cause = tracing::info_span!("second");
+            let second_id = second_cause.id().unwrap();
+            second_cause.in_scope(|| buffer.insert_block(second.into()));
+            drop(second_cause);
+            assert!(registry.span(&first_id).is_none());
+            assert!(registry.span(&second_id).is_some());
+            buffer.remove_old_blocks(11);
+            assert!(registry.span(&second_id).is_none());
+        });
     }
 }
