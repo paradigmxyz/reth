@@ -1636,9 +1636,7 @@ where
             .collect();
         let code_bytes_written: usize = unique_new_code_hashes
             .iter()
-            .filter_map(|hash| {
-                output.state.contracts.get(hash).map(|bytecode| bytecode.original_bytes().len())
-            })
+            .filter_map(|hash| output.state.contracts.get(hash).map(|bytecode| bytecode.len()))
             .sum();
 
         // Total time spent fetching state during execution
