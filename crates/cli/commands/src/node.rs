@@ -172,7 +172,7 @@ where
             txpool,
             builder,
             debug,
-            db,
+            mut db,
             dev,
             pruning,
             engine,
@@ -184,6 +184,7 @@ where
         } = self;
 
         engine.validate()?;
+        apply_startup_sync_db_defaults(&debug, &mut db);
 
         // set up node config
         let mut node_config = NodeConfig {
@@ -211,8 +212,8 @@ where
         let db_path = data_dir.db();
 
         tracing::info!(target: "reth::cli", path = ?db_path, "Opening database");
-        let database = init_db(db_path.clone(), self.db.database_args())?
-            .with_metrics_if(self.db.metrics_enabled());
+        let database = init_db(db_path.clone(), node_config.db.database_args())?
+            .with_metrics_if(node_config.db.metrics_enabled());
 
         if with_unused_ports {
             node_config = node_config.with_unused_ports();
@@ -224,6 +225,15 @@ where
 
         launcher.entrypoint(builder, ext).await
     }
+}
+
+fn apply_startup_sync_db_defaults(debug: &DebugArgs, db: &mut DatabaseArgs) {
+    if !debug.startup_sync_state_idle {
+        return
+    }
+
+    db.exclusive.get_or_insert(true);
+    db.disable_metrics = true;
 }
 
 impl<C: ChainSpecParser, Ext: clap::Args + fmt::Debug> NodeCommand<C, Ext> {
@@ -385,6 +395,43 @@ mod tests {
 
         let db_path = data_dir.db();
         assert_eq!(db_path, Path::new("my/custom/path/db"));
+    }
+
+    #[test]
+    fn startup_sync_db_defaults_enable_lean_db_open() {
+        let mut cmd: NodeCommand<EthereumChainSpecParser> =
+            NodeCommand::try_parse_args_from(["reth", "--debug.startup-sync-state-idle"]).unwrap();
+
+        apply_startup_sync_db_defaults(&cmd.debug, &mut cmd.db);
+
+        assert_eq!(cmd.db.exclusive, Some(true));
+        assert!(!cmd.db.metrics_enabled());
+    }
+
+    #[test]
+    fn startup_sync_db_defaults_preserve_explicit_exclusive_setting() {
+        let mut cmd: NodeCommand<EthereumChainSpecParser> = NodeCommand::try_parse_args_from([
+            "reth",
+            "--debug.startup-sync-state-idle",
+            "--db.exclusive=false",
+        ])
+        .unwrap();
+
+        apply_startup_sync_db_defaults(&cmd.debug, &mut cmd.db);
+
+        assert_eq!(cmd.db.exclusive, Some(false));
+        assert!(!cmd.db.metrics_enabled());
+    }
+
+    #[test]
+    fn startup_sync_db_defaults_leave_normal_startup_unchanged() {
+        let mut cmd: NodeCommand<EthereumChainSpecParser> =
+            NodeCommand::try_parse_args_from(["reth"]).unwrap();
+
+        apply_startup_sync_db_defaults(&cmd.debug, &mut cmd.db);
+
+        assert_eq!(cmd.db.exclusive, None);
+        assert!(cmd.db.metrics_enabled());
     }
 
     #[test]
