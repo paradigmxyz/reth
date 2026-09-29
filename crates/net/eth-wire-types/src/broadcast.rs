@@ -315,23 +315,13 @@ pub type LazyEncodedTransaction = LazyEncoded<dyn BroadcastPoolTransaction>;
 /// pool transaction references directly and cache each transaction's encoded bytes across per-peer
 /// messages. Queued messages retain the pool-backed value and the shared cached bytes until they
 /// are sent.
-#[derive(Clone, Debug, Deref)]
+#[derive(Clone, Debug, Deref, RlpEncodableWrapper)]
 pub struct BroadcastPoolTransactions(pub Vec<LazyEncodedTransaction>);
 
 impl BroadcastPoolTransactions {
     /// Returns an iterator over the transaction hashes.
     pub fn iter_hashes(&self) -> impl Iterator<Item = &TxHash> + '_ {
         self.0.iter().map(TxHashRef::tx_hash)
-    }
-}
-
-impl Encodable for BroadcastPoolTransactions {
-    fn encode(&self, out: &mut dyn BufMut) {
-        self.0.encode(out);
-    }
-
-    fn length(&self) -> usize {
-        self.0.length()
     }
 }
 
