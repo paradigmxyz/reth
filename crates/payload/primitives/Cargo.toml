@@ -33,10 +33,12 @@ serde.workspace = true
 sha2.workspace = true
 thiserror.workspace = true
 tokio = { workspace = true, default-features = false, features = ["sync"] }
+tracing.workspace = true
 
 [dev-dependencies]
 assert_matches.workspace = true
 serde_json.workspace = true
+tracing-subscriber = { workspace = true, features = ["registry", "std"] }
 
 [features]
 default = ["std"]
@@ -55,4 +57,6 @@ std = [
     "alloy-rlp/std",
     "serde_json/std",
     "sha2/std",
+    "tracing/std",
+    "tracing-subscriber/std",
 ]

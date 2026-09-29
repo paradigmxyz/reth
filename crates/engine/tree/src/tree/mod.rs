@@ -730,6 +730,7 @@ where
         level = "debug",
         target = "engine::tree",
         skip_all,
+        parent = payload.cause(),
         fields(block_hash = %payload.block_hash(), block_num = %payload.block_number()),
     )]
     fn on_new_payload(
