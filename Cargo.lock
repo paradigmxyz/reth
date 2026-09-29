@@ -10704,6 +10704,7 @@ dependencies = [
  "alloy-provider",
  "alloy-rpc-types",
  "alloy-rpc-types-engine",
+ "alloy-rpc-types-eth",
  "dashmap",
  "reth-chain-state",
  "reth-chainspec",
