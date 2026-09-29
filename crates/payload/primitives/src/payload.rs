@@ -239,6 +239,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloy_consensus::{Block, TxEnvelope};
     use alloy_rpc_types_engine::{ExecutionPayloadSidecar, ExecutionPayloadV1};
     use tracing::{span::Id, Dispatch};
     use tracing_subscriber::{registry::LookupSpan, Registry};
@@ -277,7 +278,7 @@ mod tests {
         }
     }
 
-    #[tracing::instrument(skip_all, parent = payload.cause())]
+    #[tracing::instrument(skip_all, parent = payload.cause().and_then(Span::id))]
     fn process_payload(payload: impl ExecutionPayload) -> Option<Id> {
         Span::current()
             .with_subscriber(|(id, dispatch)| {
@@ -294,7 +295,11 @@ mod tests {
 
     fn execution_data() -> ExecutionData {
         ExecutionData {
-            payload: ExecutionPayloadV1::default().into(),
+            payload: ExecutionPayloadV1::from_block_unchecked(
+                B256::ZERO,
+                &Block::<TxEnvelope>::default(),
+            )
+            .into(),
             sidecar: ExecutionPayloadSidecar::default(),
         }
     }
