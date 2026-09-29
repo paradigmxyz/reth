@@ -231,11 +231,7 @@ mod tests {
     use reth_ethereum_primitives::Block;
     use reth_node_ethereum::EthEngineTypes;
     use reth_provider::ProviderError;
-    use std::{
-        future::poll_fn,
-        sync::Arc,
-        time::Duration,
-    };
+    use std::{future::poll_fn, sync::Arc, time::Duration};
 
     #[tokio::test]
     async fn can_handle_valid_block() {
