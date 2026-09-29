@@ -18,6 +18,13 @@ use reth_node_ethereum::EthereumNode;
 use tracing::info;
 
 fn main() {
+    // Ethereum does not use account extensions, so refuse to run a binary that was built with
+    // them, for example through feature unification.
+    if reth_primitives_traits::ensure_no_account_extensions().is_err() {
+        eprintln!("Error: reth was built with account extensions, which Ethereum does not use");
+        std::process::exit(1);
+    }
+
     #[cfg(feature = "jit")]
     {
         match reth_node_ethereum::node::maybe_run_jit_helper() {
