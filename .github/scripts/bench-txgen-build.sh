@@ -8,6 +8,9 @@
 # payload format.
 set -euxo pipefail
 
+# Use the runner's Git authentication configuration when fetching dependencies.
+export CARGO_NET_GIT_FETCH_WITH_CLI=true
+
 MODE="$1"
 SOURCE_DIR="$2"
 COMMIT="$3"

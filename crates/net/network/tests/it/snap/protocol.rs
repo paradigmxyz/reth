@@ -16,7 +16,6 @@ use reth_network::{
 use reth_network_api::{Direction, PeerId};
 use reth_network_p2p::{error::RequestError, snap::client::SnapClient};
 use reth_provider::test_utils::MockEthProvider;
-use reth_transaction_pool::test_utils::TestPool;
 use std::{
     net::SocketAddr,
     pin::Pin,
@@ -101,14 +100,10 @@ async fn eth_snap_and_third_satellite_protocol_fails_fast_on_snap_request() {
     let protocols = vec![EthVersion::Eth71.into(), Protocol::snap_2(), les_protocol.clone()];
 
     let provider = Arc::new(MockEthProvider::default());
-    let mut net: Testnet<_, TestPool> = Testnet::default();
-    for _ in 0..2 {
-        let peer = PeerConfig::with_protocols(provider.clone(), protocols.clone());
-        net.add_peer_with_config(peer).await.unwrap();
-    }
+    let peer = || PeerConfig::new(provider.clone()).with_protocols(protocols.clone());
+    let mut net = Testnet::from_configs([peer(), peer()]).await.with_request_handlers();
     net.for_each_mut(|peer| {
-        peer.install_request_handler();
-        peer.add_rlpx_sub_protocol(InertProtocolHandler::new(les_protocol.clone()));
+        peer.add_rlpx_sub_protocol(InertProtocolHandler::new(les_protocol.clone()))
     });
     let net = net.spawn();
     net.connect_peers().await;

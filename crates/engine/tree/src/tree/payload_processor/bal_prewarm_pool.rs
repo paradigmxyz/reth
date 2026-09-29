@@ -17,8 +17,8 @@ use tracing::trace;
 /// generic over the provider factory; each worker builds its own per block.
 pub type BuildProviderFn = dyn Fn() -> ProviderResult<EvmStateProviderBox> + Send + Sync;
 
-/// A single warm request: a whole account (basic account + its bytecode) followed by a batch of
-/// its storage slots, or a batch of storage slots on their own.
+/// A single warm request: an account and a batch of its storage slots, or a batch of storage slots
+/// on their own.
 enum PrewarmTarget {
     Account(Address, Box<[StorageKey]>),
     Storage(Address, Box<[StorageKey]>),
@@ -86,7 +86,7 @@ impl BalPrewarmPool {
         }
     }
 
-    /// Fire-and-forget: warm an account (basic account + bytecode) and its storage slots.
+    /// Fire-and-forget: warm an account and its storage slots.
     ///
     /// The slots are dispatched in `WARM_BATCH_SIZE` chunks that are distributed independently,
     /// so a single account with a large read-set does not serialize onto one worker;
@@ -180,12 +180,7 @@ fn prewarm_loop(rx: crossbeam_channel::Receiver<PrewarmMsg>) {
                 let Some(provider) = provider.as_ref() else { continue };
                 match target {
                     PrewarmTarget::Account(addr, slots) => {
-                        if let Ok(Some(account)) = provider.basic_account(&addr) &&
-                            let Some(code_hash) = account.bytecode_hash &&
-                            code_hash != alloy_consensus::constants::KECCAK_EMPTY
-                        {
-                            let _ = provider.bytecode_by_hash(&code_hash);
-                        }
+                        let _ = provider.basic_account(&addr);
                         for &slot in &slots {
                             let _ = provider.storage(addr, slot);
                         }
@@ -204,6 +199,7 @@ fn prewarm_loop(rx: crossbeam_channel::Receiver<PrewarmMsg>) {
         }
     }
 }
+
 struct SendOnDrop {
     sender: Option<oneshot::Sender<()>>,
 }
