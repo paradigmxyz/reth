@@ -77,7 +77,7 @@ where
                 tokio::select! {
                     biased;
                     outcome = &mut run => outcome,
-                    () = refresh_due(&mut targets, self.header_refresh) => {
+                    () = refresh_due(&targets, self.header_refresh) => {
                         // Stops at the next step boundary, keeping committed progress.
                         run_stop.cancel();
                         run.await
@@ -85,7 +85,14 @@ where
                 }
             };
 
-            match outcome.map_err(|error| PipelineError::Internal(RethError::other(error)))? {
+            let outcome =
+                outcome.map_err(|error| PipelineError::Internal(RethError::other(error)))?;
+            // A completed download can beat the refresh timer. Refresh headers before publishing
+            // its state so an orphaned pivot is recovered while the attempt is still unfinished.
+            if targets.has_changed().unwrap_or(false) {
+                continue
+            }
+            match outcome {
                 SnapBootstrapOutcome::Stopped if self.stop.is_cancelled() => return stopped,
                 SnapBootstrapOutcome::Stopped => {
                     debug!(target: "sync::snap", "Refreshing headers before resuming snap sync");
@@ -140,7 +147,9 @@ where
 }
 
 // Resolves once `interval` has passed and forkchoice has moved, or once the backfill is gone.
-async fn refresh_due(targets: &mut watch::Receiver<B256>, interval: Duration) {
+async fn refresh_due(targets: &watch::Receiver<B256>, interval: Duration) {
+    // Only syncing headers acknowledges a target on the run's receiver.
+    let mut targets = targets.clone();
     tokio::time::sleep(interval).await;
     let _ = targets.changed().await;
 }
@@ -321,5 +330,17 @@ mod tests {
             stop: stop.clone(),
         };
         (run, stop)
+    }
+
+    #[tokio::test]
+    async fn a_refresh_keeps_the_target_unseen_until_headers_sync() {
+        let (targets, mut receiver) = watch::channel(TARGET);
+        targets.send(NEXT_TARGET).unwrap();
+
+        refresh_due(&receiver, Duration::ZERO).await;
+
+        assert!(receiver.has_changed().unwrap());
+        assert_eq!(*receiver.borrow_and_update(), NEXT_TARGET);
+        assert!(!receiver.has_changed().unwrap());
     }
 }

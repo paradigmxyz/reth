@@ -201,13 +201,14 @@ where
     async fn drive(&mut self, write: SnapWrite, head: u64) -> Result<Step, SnapSyncError> {
         let (applied, complete) = {
             let provider = self.factory.database_provider_ro()?;
-            if provider.is_trie_rebuild_started(write)? {
-                return Ok(Step::HandedOff(write))
-            }
             let generation = self.session.target().copied().ok_or(SnapSyncError::NoAttempt)?;
             if !generation.is_canonical(&provider)? {
                 drop(provider);
                 return self.recover(write, head).await
+            }
+            // Headers can change after the download finishes but before its state is published.
+            if provider.is_trie_rebuild_started(write)? {
+                return Ok(Step::HandedOff(write))
             }
             let applied = provider
                 .catch_up_progress(write)?
@@ -1176,5 +1177,37 @@ mod tests {
         let provider = factory.database_provider_ro().unwrap();
         assert!(provider.snap_repairs(write).unwrap().is_empty());
         assert_eq!(stored_slots(&provider, key(1)), slots);
+    }
+
+    #[tokio::test]
+    async fn an_orphaned_handoff_recovers_before_publishing_state() {
+        let accounts = accounts();
+        let factory = hashed_factory();
+        let old = chain(3, state_root(&accounts));
+        insert_headers(&factory, &old);
+        let (_, mut bootstrap) = scripted(&factory, [account_range(1, &accounts, 0..3, &[])], [3]);
+        let SnapBootstrapOutcome::TrieRebuild { write: old_write, .. } =
+            bootstrap.run().await.unwrap()
+        else {
+            panic!("the first download is complete")
+        };
+
+        // Forkchoice changed during the download, and headers catch up before publication.
+        let mut canonical = accounts;
+        canonical[0].1 = account(10);
+        let root = state_root(&canonical);
+        let new = branch(&old[0], &[Vec::new(), Vec::new(), Vec::new()], root);
+        replace_headers_after(&factory, 0, &new);
+        let (_, mut resumed) =
+            scripted(&factory, [no_lists(1), account_range(1, &canonical, 0..3, &[])], [3]);
+
+        let SnapBootstrapOutcome::TrieRebuild { write, pivot } = resumed.run().await.unwrap()
+        else {
+            panic!("the replacement state is complete")
+        };
+
+        assert_ne!(write.attempt(), old_write.attempt());
+        assert_eq!(pivot, new[1].num_hash());
+        assert_eq!(rebuild_and_verify(&factory, write, pivot.number).state_root(), root);
     }
 }
