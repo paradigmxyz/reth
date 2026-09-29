@@ -58,6 +58,7 @@ fn frame_tx(signer: &PrivateKeySigner, nonce: u64, frames: Vec<Frame>) -> Bytes 
     let mut tx = TxEip8141 {
         chain_id: 1,
         nonce,
+        nonce_keys: Some(vec![U256::ZERO]),
         sender: signer.address(),
         frames,
         signatures: vec![FrameSignature {
@@ -211,7 +212,7 @@ async fn atomic_frame_body_is_admitted_and_mined() -> eyre::Result<()> {
 }
 
 #[tokio::test]
-async fn sequential_frames_share_a_payload() -> eyre::Result<()> {
+async fn sequential_frames_wait_for_the_current_sequence() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
     let signer = Wallet::default().wallet_gen().into_iter().next().unwrap();
     let (mut nodes, _) = setup_engine::<EthereumNode>(
@@ -227,12 +228,11 @@ async fn sequential_frames_share_a_payload() -> eyre::Result<()> {
         .rpc
         .inject_tx(frame_tx(&signer, 0, vec![self_verify_frame(), sender_frame(recipient())]))
         .await?;
-    let second = node
-        .rpc
-        .inject_tx(frame_tx(&signer, 1, vec![self_verify_frame(), sender_frame(recipient())]))
-        .await?;
-
-    assert_mined_from_pool(&mut node, &[first, second]).await
+    let second_raw = frame_tx(&signer, 1, vec![self_verify_frame(), sender_frame(recipient())]);
+    assert!(node.rpc.inject_tx(second_raw.clone()).await.is_err());
+    assert_mined_from_pool(&mut node, &[first]).await?;
+    let second = node.rpc.inject_tx(second_raw).await?;
+    assert_mined_from_pool(&mut node, &[second]).await
 }
 
 #[tokio::test]
@@ -243,7 +243,7 @@ async fn keyed_nonce_rpc_and_pool_roundtrip() -> eyre::Result<()> {
     };
     use serde_json::json;
     let signer = Wallet::default().wallet_gen().into_iter().next().unwrap();
-    let spec = Arc::new(ChainSpecBuilder::from(&chain_spec()).with_eip8250_at(0).build());
+    let spec = chain_spec();
     let (mut nodes, _) = setup_engine::<EthereumNode>(
         1,
         spec,
