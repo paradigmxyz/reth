@@ -661,6 +661,3 @@ vergen-git2 = "10.0.1"
 
 # networking
 ipnet = "2.11"
-
-[patch.crates-io]
-keccak-asm = { git = "https://github.com/DaniPopes/keccak-asm", rev = "3894b2462e6167025ec5f02a0950c1b11a912246" }
