@@ -765,11 +765,14 @@ where
             db.code_by_hash(account.code_hash).map_err(Eth::Error::from_eth_err)?.original_bytes()
         };
 
-        // Account extensions are not returned over RPC yet.
         Ok(AccountInfo {
             balance: account.balance,
             nonce: account.nonce,
             code,
+            #[cfg(feature = "account-ext")]
+            extension: reth_primitives_traits::AccountExtension::from_shared(
+                account.extension.into_shared(),
+            ),
             ..Default::default()
         })
     }
