@@ -501,7 +501,7 @@ where
         // do that.
         self.branch_stack.push(ProofTrieBranch {
             ext_len: common_prefix_len as u8,
-            state_mask: TrieMask::new(1 << first_child_nibble),
+            state_mask: TrieMask::from_nibble(first_child_nibble),
         });
 
         trace!(
