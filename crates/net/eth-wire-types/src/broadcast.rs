@@ -169,18 +169,14 @@ pub fn decode_list_with_memory_budget<T: Decodable + InMemorySize>(
     buf: &mut &[u8],
     memory_budget: usize,
 ) -> alloy_rlp::Result<Vec<T>> {
-    let header = Header::decode(buf)?;
-    if !header.list {
-        return Err(alloy_rlp::Error::UnexpectedString);
+    let Header { list, payload_length } = Header::decode(buf)?;
+    if !list {
+        return Err(alloy_rlp::Error::UnexpectedString)
     }
-    if buf.len() < header.payload_length {
-        return Err(alloy_rlp::Error::InputTooShort);
-    }
+    // Payload length checked by Header::decode.
+    let (mut payload, rest) = buf.split_at(payload_length);
 
-    let (payload, rest) = buf.split_at(header.payload_length);
-    let mut payload = payload;
-
-    let mut txs = Vec::with_capacity(estimated_transaction_list_capacity(header.payload_length));
+    let mut txs = Vec::with_capacity(estimated_transaction_list_capacity(payload_length));
     let mut total_size = 0usize;
 
     while !payload.is_empty() {
@@ -743,10 +739,7 @@ impl Decodable for NewPooledTransactionHashes68 {
         if !list {
             return Err(alloy_rlp::Error::UnexpectedString)
         }
-        if buf.len() < payload_length {
-            return Err(alloy_rlp::Error::InputTooShort)
-        }
-
+        // Payload length checked by Header::decode.
         let (mut payload, rest) = buf.split_at(payload_length);
         let (types, sizes, hashes) = decode_pooled_transaction_hashes_payload(&mut payload)?;
 
@@ -759,10 +752,8 @@ impl Decodable for NewPooledTransactionHashes68 {
 
         ensure_pooled_transaction_hashes_lengths(hashes.len(), types.len(), sizes.len())?;
 
-        let msg = Self { types, sizes, hashes };
-
         *buf = rest;
-        Ok(msg)
+        Ok(Self { types, sizes, hashes })
     }
 }
 
@@ -932,10 +923,7 @@ impl Decodable for NewPooledTransactionHashes72 {
         if !list {
             return Err(alloy_rlp::Error::UnexpectedString)
         }
-        if buf.len() < payload_length {
-            return Err(alloy_rlp::Error::InputTooShort)
-        }
-
+        // Payload length checked by Header::decode.
         let (mut payload, rest) = buf.split_at(payload_length);
         let (types, sizes, hashes) = decode_pooled_transaction_hashes_payload(&mut payload)?;
         let Some(first_byte) = payload.first().copied() else {
@@ -961,7 +949,6 @@ impl Decodable for NewPooledTransactionHashes72 {
         ensure_pooled_transaction_hashes_lengths(hashes.len(), types.len(), sizes.len())?;
 
         *buf = rest;
-
         Ok(Self { types, sizes, hashes, cell_mask })
     }
 }
@@ -1199,6 +1186,25 @@ mod tests {
                 prop_assert!(handrolled_buf.is_empty());
             }
         }
+    }
+
+    #[test]
+    fn decode_error_preserves_payload_position() {
+        let encoded = [0xc1, 0x80, 0xaa];
+
+        let mut input = encoded.as_slice();
+        assert!(
+            decode_list_with_memory_budget::<TransactionSigned>(&mut input, usize::MAX).is_err()
+        );
+        assert_eq!(input, &encoded[1..]);
+
+        let mut input = encoded.as_slice();
+        assert!(NewPooledTransactionHashes68::decode(&mut input).is_err());
+        assert_eq!(input, &encoded[1..]);
+
+        let mut input = encoded.as_slice();
+        assert!(NewPooledTransactionHashes72::decode(&mut input).is_err());
+        assert_eq!(input, &encoded[1..]);
     }
 
     #[test]
