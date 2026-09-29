@@ -8860,7 +8860,6 @@ dependencies = [
  "reth-rpc-api",
  "reth-rpc-builder",
  "reth-rpc-eth-types",
- "reth-stages-types",
  "reth-storage-api",
  "reth-tasks",
  "reth-transaction-pool",
