@@ -80,14 +80,14 @@ pub trait SnapAccountStore {
     where
         Self: MetadataWriter;
 
-    /// Writes the pivot's account at `range`'s origin and its `slots`, returning the repairs that
-    /// remain. Refused until catch-up reaches the pivot.
+    /// Writes the pivot's account at `range`'s origin and its `slots`, returning how many accounts
+    /// remain scheduled. Refused until catch-up reaches the pivot.
     fn commit_account_repair(
         &self,
         write: SnapWrite,
         range: &VerifiedAccountRange,
         slots: Vec<(B256, U256)>,
-    ) -> Result<StateRepairs, SnapSyncError>
+    ) -> Result<usize, SnapSyncError>
     where
         Self: BlockHashReader + MetadataWriter + StateWriter + DBProvider<Tx: DbTxMut>;
 }
@@ -273,7 +273,7 @@ impl<T: MetadataProvider> SnapAccountStore for T {
         write: SnapWrite,
         range: &VerifiedAccountRange,
         slots: Vec<(B256, U256)>,
-    ) -> Result<StateRepairs, SnapSyncError>
+    ) -> Result<usize, SnapSyncError>
     where
         Self: BlockHashReader + MetadataWriter + StateWriter + DBProvider<Tx: DbTxMut>,
     {
@@ -321,8 +321,9 @@ impl<T: MetadataProvider> SnapAccountStore for T {
 
         let mut remaining = self.snap_repairs(write)?;
         remaining.resolve(hashed_address, has_storage.then_some(slots.as_slice()));
-        StoredRepairs::store(self, write.attempt(), remaining.clone())?;
-        Ok(remaining)
+        let accounts = remaining.len();
+        StoredRepairs::store(self, write.attempt(), remaining)?;
+        Ok(accounts)
     }
 }
 
@@ -888,7 +889,7 @@ mod tests {
         write: SnapWrite,
         range: &VerifiedAccountRange,
         slots: Vec<(B256, U256)>,
-    ) -> Result<StateRepairs, SnapSyncError> {
+    ) -> Result<usize, SnapSyncError> {
         let provider = factory.database_provider_rw().unwrap();
         let remaining = provider.commit_account_repair(write, range, slots)?;
         provider.commit().unwrap();
@@ -915,10 +916,11 @@ mod tests {
         provider.commit().unwrap();
         let remaining = repair(&factory, write, &range, slots).unwrap();
 
+        assert_eq!(remaining, 1);
+        let provider = factory.database_provider_ro().unwrap();
         let mut expected = StateRepairs::default();
         expected.insert_account(ABSENT);
-        assert_eq!(remaining, expected);
-        let provider = factory.database_provider_ro().unwrap();
+        assert_eq!(provider.snap_repairs(write).unwrap(), expected);
         let stored = provider.tx_ref().get::<tables::HashedAccounts>(key(2)).unwrap();
         assert_eq!(stored, Some(Account::from(accounts[1].1)));
         assert_eq!(stored_slots(&provider, key(2)), [(SLOT, U256::from(7))]);
