@@ -278,7 +278,11 @@ mod tests {
         }
     }
 
-    #[tracing::instrument(skip_all, parent = payload.cause().and_then(Span::id))]
+    #[tracing::instrument(
+        parent = payload.cause().and_then(Span::id),
+        target = "engine::tree",
+        skip_all,
+    )]
     fn process_payload(payload: impl ExecutionPayload) -> Option<Id> {
         Span::current()
             .with_subscriber(|(id, dispatch)| {

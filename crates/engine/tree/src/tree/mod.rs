@@ -77,7 +77,7 @@ mod txpool_prewarm;
 pub mod types;
 
 use crate::{persistence::PersistenceResult, tree::error::AdvancePersistenceError};
-pub use block_buffer::BlockBuffer;
+pub use block_buffer::{BlockBuffer, BufferedBlock};
 pub use invalid_headers::InvalidHeaderCache;
 pub use metrics::EngineApiMetrics;
 pub use payload_processor::*;
@@ -728,9 +728,9 @@ where
     /// returns an error if an internal error occurred.
     #[instrument(
         level = "debug",
+        parent = payload.cause().and_then(Span::id),
         target = "engine::tree",
         skip_all,
-        parent = payload.cause().and_then(Span::id),
         fields(block_hash = %payload.block_hash(), block_num = %payload.block_number()),
     )]
     fn on_new_payload(
@@ -2684,8 +2684,11 @@ where
         let now = Instant::now();
         let block_count = blocks.len();
         for child in blocks {
-            let child_num_hash = child.num_hash();
-            match self.insert_block(child) {
+            let child_num_hash = child.block.num_hash();
+            let span = debug_span!(target: "engine::tree", "execute_buffered_block", block = ?child_num_hash);
+            span.follows_from(child.cause.id());
+            let _entered = span.enter();
+            match self.insert_block(child.block) {
                 Ok(res) => {
                     debug!(target: "engine::tree", child =?child_num_hash, ?res, "connected buffered block");
                     if self.is_any_sync_target(child_num_hash.hash) &&
@@ -3136,10 +3139,19 @@ where
     /// - Updates pending block state when appropriate
     /// - Emits consensus engine events and records metrics
     ///
+    /// Direct redelivery by download or resubmitted payload links back to the original
+    /// enqueue span if the block is still buffered.
+    ///
     /// Returns `InsertPayloadOk::Inserted(BlockStatus::Valid)` on successful execution,
     /// `InsertPayloadOk::AlreadySeen` if the block already exists, or
     /// `InsertPayloadOk::Inserted(BlockStatus::Disconnected)` if parent state is missing.
-    #[instrument(level = "debug", target = "engine::tree", skip_all, fields(?block_id))]
+    #[instrument(
+        level = "debug",
+        follows_from = self.state.buffer.cause(&block_id.block.hash).and_then(Span::id),
+        target = "engine::tree",
+        skip_all,
+        fields(?block_id),
+    )]
     fn insert_block_or_payload<Input, Err>(
         &mut self,
         block_id: BlockWithParent,
