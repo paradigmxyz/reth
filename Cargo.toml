@@ -660,3 +660,49 @@ vergen-git2 = "10.0.1"
 
 # networking
 ipnet = "2.11"
+
+[patch.crates-io]
+alloy-evm = { git = "https://github.com/Rimeeeeee/evm", rev = "bd27cd6efd8b25a63c41227213c60ce3828e975d" }
+alloy-contract = { git = "https://github.com/mattsse/alloy", rev = "6277666100f86373d80a2813d52a41f781d6a5d2" }
+alloy-consensus = { git = "https://github.com/mattsse/alloy", rev = "6277666100f86373d80a2813d52a41f781d6a5d2" }
+alloy-consensus-any = { git = "https://github.com/mattsse/alloy", rev = "6277666100f86373d80a2813d52a41f781d6a5d2" }
+alloy-eips = { git = "https://github.com/mattsse/alloy", rev = "6277666100f86373d80a2813d52a41f781d6a5d2" }
+alloy-genesis = { git = "https://github.com/mattsse/alloy", rev = "6277666100f86373d80a2813d52a41f781d6a5d2" }
+alloy-json-rpc = { git = "https://github.com/mattsse/alloy", rev = "6277666100f86373d80a2813d52a41f781d6a5d2" }
+alloy-network = { git = "https://github.com/mattsse/alloy", rev = "6277666100f86373d80a2813d52a41f781d6a5d2" }
+alloy-network-primitives = { git = "https://github.com/mattsse/alloy", rev = "6277666100f86373d80a2813d52a41f781d6a5d2" }
+alloy-provider = { git = "https://github.com/mattsse/alloy", rev = "6277666100f86373d80a2813d52a41f781d6a5d2" }
+alloy-pubsub = { git = "https://github.com/mattsse/alloy", rev = "6277666100f86373d80a2813d52a41f781d6a5d2" }
+alloy-rpc-client = { git = "https://github.com/mattsse/alloy", rev = "6277666100f86373d80a2813d52a41f781d6a5d2" }
+alloy-rpc-types = { git = "https://github.com/mattsse/alloy", rev = "6277666100f86373d80a2813d52a41f781d6a5d2" }
+alloy-rpc-types-admin = { git = "https://github.com/mattsse/alloy", rev = "6277666100f86373d80a2813d52a41f781d6a5d2" }
+alloy-rpc-types-anvil = { git = "https://github.com/mattsse/alloy", rev = "6277666100f86373d80a2813d52a41f781d6a5d2" }
+alloy-rpc-types-any = { git = "https://github.com/mattsse/alloy", rev = "6277666100f86373d80a2813d52a41f781d6a5d2" }
+alloy-rpc-types-beacon = { git = "https://github.com/mattsse/alloy", rev = "6277666100f86373d80a2813d52a41f781d6a5d2" }
+alloy-rpc-types-debug = { git = "https://github.com/mattsse/alloy", rev = "6277666100f86373d80a2813d52a41f781d6a5d2" }
+alloy-rpc-types-engine = { git = "https://github.com/mattsse/alloy", rev = "6277666100f86373d80a2813d52a41f781d6a5d2" }
+alloy-rpc-types-eth = { git = "https://github.com/mattsse/alloy", rev = "6277666100f86373d80a2813d52a41f781d6a5d2" }
+alloy-rpc-types-mev = { git = "https://github.com/mattsse/alloy", rev = "6277666100f86373d80a2813d52a41f781d6a5d2" }
+alloy-rpc-types-trace = { git = "https://github.com/mattsse/alloy", rev = "6277666100f86373d80a2813d52a41f781d6a5d2" }
+alloy-rpc-types-txpool = { git = "https://github.com/mattsse/alloy", rev = "6277666100f86373d80a2813d52a41f781d6a5d2" }
+alloy-serde = { git = "https://github.com/mattsse/alloy", rev = "6277666100f86373d80a2813d52a41f781d6a5d2" }
+alloy-signer = { git = "https://github.com/mattsse/alloy", rev = "6277666100f86373d80a2813d52a41f781d6a5d2" }
+alloy-signer-local = { git = "https://github.com/mattsse/alloy", rev = "6277666100f86373d80a2813d52a41f781d6a5d2" }
+alloy-transport = { git = "https://github.com/mattsse/alloy", rev = "6277666100f86373d80a2813d52a41f781d6a5d2" }
+alloy-transport-http = { git = "https://github.com/mattsse/alloy", rev = "6277666100f86373d80a2813d52a41f781d6a5d2" }
+alloy-transport-ipc = { git = "https://github.com/mattsse/alloy", rev = "6277666100f86373d80a2813d52a41f781d6a5d2" }
+alloy-transport-ws = { git = "https://github.com/mattsse/alloy", rev = "6277666100f86373d80a2813d52a41f781d6a5d2" }
+alloy-tx-macros = { git = "https://github.com/mattsse/alloy", rev = "6277666100f86373d80a2813d52a41f781d6a5d2" }
+
+revm = { git = "https://github.com/mattsse/revm", rev = "c265f8c6c37c8b7e502ecc7e9e28223938fbeb7e" }
+revm-bytecode = { git = "https://github.com/mattsse/revm", rev = "c265f8c6c37c8b7e502ecc7e9e28223938fbeb7e" }
+revm-context = { git = "https://github.com/mattsse/revm", rev = "c265f8c6c37c8b7e502ecc7e9e28223938fbeb7e" }
+revm-context-interface = { git = "https://github.com/mattsse/revm", rev = "c265f8c6c37c8b7e502ecc7e9e28223938fbeb7e" }
+revm-database = { git = "https://github.com/mattsse/revm", rev = "c265f8c6c37c8b7e502ecc7e9e28223938fbeb7e" }
+revm-database-interface = { git = "https://github.com/mattsse/revm", rev = "c265f8c6c37c8b7e502ecc7e9e28223938fbeb7e" }
+revm-handler = { git = "https://github.com/mattsse/revm", rev = "c265f8c6c37c8b7e502ecc7e9e28223938fbeb7e" }
+revm-inspector = { git = "https://github.com/mattsse/revm", rev = "c265f8c6c37c8b7e502ecc7e9e28223938fbeb7e" }
+revm-interpreter = { git = "https://github.com/mattsse/revm", rev = "c265f8c6c37c8b7e502ecc7e9e28223938fbeb7e" }
+revm-precompile = { git = "https://github.com/mattsse/revm", rev = "c265f8c6c37c8b7e502ecc7e9e28223938fbeb7e" }
+revm-primitives = { git = "https://github.com/mattsse/revm", rev = "c265f8c6c37c8b7e502ecc7e9e28223938fbeb7e" }
+revm-state = { git = "https://github.com/mattsse/revm", rev = "c265f8c6c37c8b7e502ecc7e9e28223938fbeb7e" }
