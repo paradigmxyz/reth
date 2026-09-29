@@ -1,12 +1,7 @@
 use alloy_primitives::{Signature, B256};
 use reth_eth_wire::{GetPooledTransactions, PooledTransactions};
 use reth_ethereum_primitives::TransactionSigned;
-use reth_network::{
-    test_utils::{NetworkEventStream, Testnet},
-    NetworkEventListenerProvider, PeerRequest,
-};
-use reth_network_api::{NetworkInfo, Peers};
-use reth_network_p2p::sync::{NetworkSyncUpdater, SyncState};
+use reth_network::{test_utils::Testnet, PeerRequest};
 use reth_primitives_traits::SignedTransaction;
 use reth_provider::test_utils::MockEthProvider;
 use reth_transaction_pool::{
@@ -14,7 +9,6 @@ use reth_transaction_pool::{
     TransactionPool,
 };
 
-use tokio::sync::oneshot;
 // peer0: `GetPooledTransactions` requester
 // peer1: `GetPooledTransactions` responder
 #[tokio::test(flavor = "multi_thread")]
@@ -36,10 +30,7 @@ async fn test_large_tx_req() {
     let txs_hashes: Vec<B256> = txs.iter().map(|tx| *tx.get_hash()).collect();
 
     // setup testnet
-    let mut net = Testnet::create_with(2, MockEthProvider::default()).await;
-
-    // install request handlers
-    net.for_each_mut(|peer| peer.install_request_handler());
+    let mut net = Testnet::create_with(2, MockEthProvider::default()).await.with_request_handlers();
 
     // insert generated txs into responding peer's pool
     let pool1 = testing_pool();
@@ -49,41 +40,22 @@ async fn test_large_tx_req() {
     net.peers_mut()[0].install_transactions_manager(testing_pool());
     net.peers_mut()[1].install_transactions_manager(pool1);
 
-    // connect peers together and check for connection existence
-    let handle0 = net.peers()[0].handle();
-    let handle1 = net.peers()[1].handle();
-    let mut events0 = NetworkEventStream::new(handle0.event_listener());
-
-    let _handle = net.spawn();
-
-    handle0.add_peer(*handle1.peer_id(), handle1.local_addr());
-    let connected = events0.next_session_established().await.unwrap();
-    assert_eq!(connected, *handle1.peer_id());
-
-    // stop syncing
-    handle0.update_sync_state(SyncState::Idle);
-    handle1.update_sync_state(SyncState::Idle);
-    assert!(!handle0.is_syncing() && !handle1.is_syncing());
+    let net = net.spawn();
+    net.connect_peers().await;
+    let [peer0, peer1] = net.peers_array();
 
     // make `GetPooledTransactions` request
-    let (send, receive) = oneshot::channel();
-    handle0.send_request(
-        *handle1.peer_id(),
-        PeerRequest::GetPooledTransactions {
-            request: GetPooledTransactions(txs_hashes.clone()),
-            response: send,
-        },
-    );
+    let request = GetPooledTransactions(txs_hashes.clone());
+    let PooledTransactions(txs) = peer0
+        .request(*peer1.peer_id(), |response| PeerRequest::GetPooledTransactions {
+            request,
+            response,
+        })
+        .await
+        .unwrap();
 
     // check all txs have been received
-    match receive.await.unwrap() {
-        Ok(PooledTransactions(txs)) => {
-            for tx in txs {
-                assert!(txs_hashes.contains(tx.hash()));
-            }
-        }
-        Err(e) => {
-            panic!("error: {e:?}");
-        }
+    for tx in txs {
+        assert!(txs_hashes.contains(tx.hash()));
     }
 }
