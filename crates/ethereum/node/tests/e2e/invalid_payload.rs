@@ -406,7 +406,7 @@ async fn undecodable_bal_is_invalid_payload() -> eyre::Result<()> {
         RequestsOrHash::Requests(envelope.execution_requests.clone()),
     )
     .await?;
-    assert!(matches!(invalid_status.status, PayloadStatusEnum::Invalid { .. }));
+    assert!(invalid_status.is_invalid());
     assert_eq!(invalid_status.latest_valid_hash, None);
 
     // The same block with well-formed block access list bytes is processed normally.
@@ -418,7 +418,7 @@ async fn undecodable_bal_is_invalid_payload() -> eyre::Result<()> {
         RequestsOrHash::Requests(envelope.execution_requests),
     )
     .await?;
-    assert!(matches!(status.status, PayloadStatusEnum::Valid));
+    assert!(status.is_valid());
 
     Ok(())
 }
