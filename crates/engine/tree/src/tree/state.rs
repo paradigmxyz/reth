@@ -128,15 +128,25 @@ impl<N: NodePrimitives> TreeState<N> {
     /// The block is added to the non-canonical section of the in-memory state until a forkchoice
     /// update makes it canonical.
     pub fn insert_executed(&mut self, executed: ExecutedBlock<N>) {
-        let hash = executed.recovered_block().hash();
-        let parent_hash = executed.recovered_block().parent_hash();
-
-        if self.contains_hash(&hash) {
-            return;
+        if let Some(state) = self.in_memory_state.insert_executed(executed) {
+            self.on_block_inserted(&state);
         }
+    }
 
-        self.in_memory_state.insert_executed(executed);
-        self.overlay_manager.on_block_inserted(hash, parent_hash);
+    /// Inserts an executed block built on the canonical head like [`Self::insert_executed`], and
+    /// makes it the pending block served over RPC, under a single write lock of the in-memory
+    /// state.
+    pub fn insert_pending_block(&mut self, executed: ExecutedBlock<N>) {
+        if let Some(state) = self.in_memory_state.set_pending_block(executed) {
+            self.on_block_inserted(&state);
+        }
+    }
+
+    /// Lets the overlay manager precompute overlays for a block inserted into the in-memory
+    /// state.
+    fn on_block_inserted(&self, state: &BlockState<N>) {
+        let block = state.block_ref().recovered_block();
+        self.overlay_manager.on_block_inserted(block.hash(), block.parent_hash());
     }
 
     /// Returns whether or not the hash is part of the canonical chain.
@@ -348,6 +358,21 @@ mod tests {
             tree_state.blocks_by_hash(blocks[2].recovered_block().hash()).unwrap();
         assert_eq!(anchor, blocks[0].recovered_block().parent_hash());
         assert_eq!(chain, blocks.iter().rev().cloned().collect::<Vec<_>>());
+    }
+
+    #[test]
+    fn insert_pending_block_tracks_and_serves_the_block() {
+        let mut tree_state = tree_state(BlockNumHash::default());
+        let blocks: Vec<_> = TestBlockBuilder::eth().get_executed_blocks(1..3).collect();
+        tree_state.insert_executed(blocks[0].clone());
+        make_canonical(&mut tree_state, &blocks[..1]);
+
+        tree_state.insert_pending_block(blocks[1].clone());
+        let pending = tree_state.in_memory_state().pending_state().unwrap();
+        assert_eq!(pending.hash(), blocks[1].recovered_block().hash());
+        assert!(Arc::ptr_eq(&pending, &tree_state.executed_state_by_hash(pending.hash()).unwrap()));
+        assert_eq!(tree_state.in_memory_state().non_canonical_block_count(), 1);
+        assert_eq!(tree_state.block_count(), 2);
     }
 
     #[tokio::test]

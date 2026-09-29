@@ -259,11 +259,10 @@ impl<N: NodePrimitives> Blocks<N> {
     }
 
     /// Inserts a block into the non-canonical section unless it is already tracked, and returns
-    /// its state.
-    fn insert_executed(&mut self, block: ExecutedBlock<N>) -> Arc<BlockState<N>> {
-        let hash = block.recovered_block().hash();
-        if let Some(existing) = self.get(&hash) {
-            return Arc::clone(existing)
+    /// the state of the inserted block.
+    fn insert_executed(&mut self, block: ExecutedBlock<N>) -> Option<Arc<BlockState<N>>> {
+        if self.contains(&block.recovered_block().hash()) {
+            return None
         }
         let parent = self.linked_parent(&block.recovered_block().parent_hash(), false).cloned();
         let state = Arc::new(BlockState::with_parent(block, parent));
@@ -273,7 +272,7 @@ impl<N: NodePrimitives> Blocks<N> {
         // link to it: the canonical chain does not extend into the non-canonical section.
         let children = self.children_of(&state).collect::<Vec<_>>();
         self.relink(children);
-        state
+        Some(state)
     }
 
     /// Makes `new` canonical and moves the canonical blocks of `reorged` to the non-canonical
@@ -541,9 +540,14 @@ pub(crate) struct CanonicalInMemoryStateInner<N: NodePrimitives> {
 /// state: a canonical block only links to a canonical parent, so walking the parent links of the
 /// canonical head never leaves the canonical section, while a non-canonical block links to its
 /// parent in either section. Making a block canonical moves that state between the sections
-/// instead of rebuilding it. The pending block served over RPC, see
-/// [`InMemoryStateWriter::set_pending_block`], is one of the tracked blocks, usually from the
-/// non-canonical section.
+/// instead of rebuilding it.
+///
+/// A [`BlockState`] handed out by this type is shared with the store until the store re-links
+/// the block. Parent links are immutable, so removing a block, e.g. when trimming the persisted
+/// part of the canonical chain, gives each of its descendants in either section a new state. States
+/// handed out before stay valid snapshots of their chain but diverge from the store. The pending
+/// block served over RPC, see [`InMemoryStateWriter::set_pending_block`], is one of the tracked
+/// blocks, usually from the non-canonical section.
 ///
 /// Clones share the same state. A node keeps a single instance: the launcher creates it and
 /// injects it into the state overlay manager, which the providers and the engine read it from.
@@ -938,24 +942,26 @@ impl<N: NodePrimitives> InMemoryStateWriter<N> {
         self.blocks().update(Blocks::demote_canonical)
     }
 
-    /// Inserts an executed block into the non-canonical section and returns its state.
+    /// Inserts an executed block into the non-canonical section, unless it is already tracked.
     ///
     /// The block is linked to its parent's state if the parent is in memory, canonical or not.
-    /// If the block is already tracked, its existing state is returned.
-    pub fn insert_executed(&self, block: ExecutedBlock<N>) -> Arc<BlockState<N>> {
+    /// Returns the state of the inserted block, or `None` if the block was already tracked.
+    pub fn insert_executed(&self, block: ExecutedBlock<N>) -> Option<Arc<BlockState<N>>> {
         self.blocks().update(|blocks| blocks.insert_executed(block))
     }
 
-    /// Updates the pending block with the given block.
+    /// Makes the given block the pending block, inserting it like [`Self::insert_executed`]
+    /// under the same write lock.
     ///
     /// The pending block is one of the tracked blocks, typically the child of the canonical head
-    /// the engine validated last. The block is inserted into the non-canonical section unless it
-    /// is already tracked.
-    pub fn set_pending_block(&self, pending: ExecutedBlock<N>) {
+    /// the engine validated last. Returns the state of the block if it was inserted, or `None` if
+    /// it was already tracked.
+    pub fn set_pending_block(&self, pending: ExecutedBlock<N>) -> Option<Arc<BlockState<N>>> {
         self.blocks().update(|blocks| {
             let hash = pending.recovered_block().hash();
-            blocks.insert_executed(pending);
+            let inserted = blocks.insert_executed(pending);
             blocks.pending_block = Some(hash);
+            inserted
         })
     }
 
@@ -979,7 +985,9 @@ impl<N: NodePrimitives> InMemoryStateWriter<N> {
     /// can happen if the persistence task takes a long time while a reorg is happening.
     ///
     /// The remaining blocks of both sections are re-linked, so that no removed block stays
-    /// reachable through their parent links.
+    /// reachable through their parent links. Parent links are immutable, so every descendant of
+    /// a removed block gets a new [`BlockState`]: states handed out before stay valid snapshots,
+    /// but no longer share their identity with the states the store holds.
     pub fn remove_canonical_blocks_until(
         &self,
         persisted_hash: B256,
@@ -1570,12 +1578,12 @@ mod tests {
         assert_eq!(state.non_canonical_block_count(), 2);
 
         // The pending block can be a canonical block, and is cleared once that block is trimmed.
-        state.writer().set_pending_block(blocks[0].clone());
+        assert!(state.writer().set_pending_block(blocks[0].clone()).is_none(), "already tracked");
         let persisted = blocks[1].recovered_block().num_hash();
         state.writer().remove_canonical_blocks_until(persisted.hash, persisted.number);
         assert_consistent(&state);
         assert!(state.pending_state().is_none());
-        state.writer().insert_executed(blocks[0].clone());
+        assert!(state.writer().insert_executed(blocks[0].clone()).is_some());
         assert!(state.pending_state().is_none(), "a trimmed pending block must not come back");
         assert_consistent(&state);
 
@@ -1605,7 +1613,7 @@ mod tests {
         let canonical = builder.get_executed_blocks(1..4).collect::<Vec<_>>();
         let inserted = canonical
             .iter()
-            .map(|block| state.writer().insert_executed(block.clone()))
+            .map(|block| state.writer().insert_executed(block.clone()).unwrap())
             .collect::<Vec<_>>();
         assert_eq!(state.non_canonical_block_count(), 3);
         assert!(state.head_state().is_none());
@@ -1621,7 +1629,7 @@ mod tests {
 
         // A fork off block 1 and the pending block on top of the head are not canonical.
         let fork = builder.get_executed_block_with_number(2, hash(&canonical[0]));
-        let fork_state = state.writer().insert_executed(fork.clone());
+        let fork_state = state.writer().insert_executed(fork.clone()).unwrap();
         let pending = builder.get_executed_block_with_number(4, hash(&canonical[2]));
         state.writer().set_pending_block(pending);
         let pending_state = state.pending_state().unwrap();
@@ -1666,7 +1674,7 @@ mod tests {
         let old_tip_state = state.state_by_hash(hash(&old_tip)).unwrap();
 
         let new_tip = builder.get_executed_block_with_number(2, hash(&base));
-        let new_tip_state = state.writer().insert_executed(new_tip.clone());
+        let new_tip_state = state.writer().insert_executed(new_tip.clone()).unwrap();
         state.writer().set_pending_block(new_tip.clone());
         state.writer().update_chain(NewCanonicalChain::Reorg {
             new: vec![new_tip.clone()],
@@ -1710,7 +1718,7 @@ mod tests {
         let fork_b_child = builder.get_executed_block_with_number(4, hash(&fork_b));
         let fork_c = builder.get_executed_block_with_number(4, hash(&canonical[2]));
         let inserted = [&fork_a, &fork_a_child, &fork_b, &fork_b_child, &fork_c]
-            .map(|block| Arc::downgrade(&state.writer().insert_executed(block.clone())));
+            .map(|block| Arc::downgrade(&state.writer().insert_executed(block.clone()).unwrap()));
         state.writer().set_pending_block(fork_b_child.clone());
 
         // With block 3 finalized, only the fork built on it can still become canonical.
@@ -1745,7 +1753,7 @@ mod tests {
         assert_eq!(state.head_state().unwrap().chain().count(), 2);
 
         // A reorg can bring a persisted block back into memory, as a non-canonical block.
-        let parent = writer.insert_executed(blocks[0].clone());
+        let parent = writer.insert_executed(blocks[0].clone()).unwrap();
         assert_consistent(&state);
 
         // The fork links to it, but the canonical chain must not walk into the non-canonical

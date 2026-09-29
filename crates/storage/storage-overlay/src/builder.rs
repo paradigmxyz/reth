@@ -219,8 +219,10 @@ pub struct OverlayBuilder<N: NodePrimitives = EthPrimitives> {
     overlay_manager: OverlayManager<N>,
     /// Snapshot of the in-memory chain ending at the requested parent.
     ///
-    /// This is the chain the in-memory state tracks, shared with every other holder, unless the
-    /// caller extended it with [`Self::with_appended_block`].
+    /// This is the chain the in-memory state tracked when the builder was created, unless the
+    /// caller extended it with [`Self::with_appended_block`]. It shares its states with the
+    /// in-memory state until the next trim re-links the store's remaining blocks, and stays a
+    /// valid snapshot afterwards.
     parent_state: Option<Arc<BlockState<N>>>,
     /// Anchor hash of the reused sparse trie, if this task reused one.
     reused_sparse_trie_anchor_hash: Option<B256>,

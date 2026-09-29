@@ -1631,18 +1631,18 @@ where
                             }
                         };
 
-                        let is_pending = self.state.tree_state.canonical_block_hash() ==
-                            block.recovered_block().parent_hash();
-                        self.state.tree_state.insert_executed(block.clone());
+                        if self.state.tree_state.canonical_block_hash() ==
+                            block.recovered_block().parent_hash()
+                        {
+                            debug!(target: "engine::tree", pending=?block_num_hash, "updating pending block");
+                            self.state.tree_state.insert_pending_block(block.clone());
+                        } else {
+                            self.state.tree_state.insert_executed(block.clone());
+                        }
                         self.metrics
                             .engine
                             .executed_blocks
                             .set(self.state.tree_state.block_count() as f64);
-
-                        if is_pending {
-                            debug!(target: "engine::tree", pending=?block_num_hash, "updating pending block");
-                            self.in_memory_state_writer.set_pending_block(block.clone());
-                        }
 
                         self.metrics.engine.inserted_already_executed_blocks.increment(1);
                         self.emit_event(EngineApiEvent::BeaconConsensus(
@@ -3244,13 +3244,12 @@ where
             self.execution_timing_stats.insert(executed.recovered_block().hash(), stats);
         }
 
-        let is_pending = self.state.tree_state.canonical_block_hash() ==
-            executed.recovered_block().parent_hash();
-        self.state.tree_state.insert_executed(executed.clone());
-
-        if is_pending {
+        if self.state.tree_state.canonical_block_hash() == executed.recovered_block().parent_hash()
+        {
             debug!(target: "engine::tree", pending=?block_num_hash, "updating pending block");
-            self.in_memory_state_writer.set_pending_block(executed.clone());
+            self.state.tree_state.insert_pending_block(executed.clone());
+        } else {
+            self.state.tree_state.insert_executed(executed.clone());
         }
 
         self.metrics.engine.executed_blocks.set(self.state.tree_state.block_count() as f64);
