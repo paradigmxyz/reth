@@ -139,6 +139,10 @@ impl<T: MetadataProvider> SnapStateVerifier for T {
                 pivot: attempt.pivot().number,
             })
         }
+        let repairs = self.snap_repairs(write)?;
+        if !repairs.is_empty() {
+            return Err(SnapSyncError::PendingRepairs { accounts: repairs.len() })
+        }
         ensure_code_present(self.tx_ref(), chunk, cancel)
     }
 
