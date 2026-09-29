@@ -710,7 +710,7 @@ where
         } else {
             None
         };
-        let account = if let Some(metadata) = frame_metadata {
+        let mut account = if let Some(metadata) = frame_metadata {
             let account = Account {
                 nonce: metadata.state_nonce,
                 balance: metadata.sender_balance,
@@ -731,6 +731,13 @@ where
                 }
             }
         };
+
+        if transaction.frame_validation().is_none() &&
+            transaction.eip8250_nonce_keys().is_some_and(|keys| keys != [U256::ZERO])
+        {
+            // Private frames are checked during execution; account nonces do not order keyed lanes.
+            account.nonce = transaction.nonce();
+        }
 
         // check for bytecode
         if !transaction.is_eip8141() {
@@ -1747,7 +1754,7 @@ mod tests {
                 Ok(Arc::new(FrameValidation {
                     sender,
                     sender_nonce: tx.nonce(),
-                    nonce_keys: vec![U256::ZERO],
+                    nonce_keys: None,
                     state_nonce,
                     sender_balance: U256::MAX,
                     sender_code_hash: None,
@@ -1766,7 +1773,7 @@ mod tests {
                 .unwrap()
                 .clone()
                 .into_inner();
-            frame.nonce_seq = tx_nonce;
+            frame.nonce = tx_nonce;
             let encoded_length = frame.eip2718_encoded_length();
             let transaction = EthPooledTransaction::new(
                 alloy_consensus::transaction::Recovered::new_unchecked(
@@ -1794,54 +1801,39 @@ mod tests {
     }
 
     #[test]
-    fn keyed_frame_uses_sender_nonce_only_as_a_pool_index() {
+    fn private_keyed_frame_does_not_use_the_legacy_nonce_lane() {
         let sender = Address::repeat_byte(0x41);
         let provider = MockEthProvider::default().with_genesis_block();
-        let mut validator =
-            EthTransactionValidatorBuilder::new(provider.clone(), test_evm_config())
-                .set_bogota(true)
-                .build(InMemoryBlobStore::default());
-        validator.set_frame_validation(Arc::new(move |_| {
-            Ok(Arc::new(FrameValidation {
-                sender,
-                sender_nonce: 7,
-                nonce_keys: vec![U256::from(5)],
-                state_nonce: 123,
-                sender_balance: U256::MAX,
-                sender_code_hash: None,
-                payer: sender,
-                max_cost: U256::ZERO,
-                payer_balance: U256::MAX,
-                head_hash: B256::ZERO,
-                dependencies: Default::default(),
-                expires_at: None,
-                exclusive_payer: false,
-            }))
-        }));
-        let mut frame = eip8141_tx(validator.chain_id(), sender)
-            .transaction
-            .as_eip8141()
-            .unwrap()
-            .clone()
-            .into_inner();
-        frame.nonce_keys = vec![U256::from(5)];
-        frame.nonce_seq = 7;
-        let transaction = EthPooledTransaction::new(
-            alloy_consensus::transaction::Recovered::new_unchecked(
-                reth_ethereum_primitives::TransactionSigned::Eip8141(frame.seal_slow()),
-                sender,
-            ),
-            0,
-        );
-        let outcome =
-            validator.validate_stateful(TransactionOrigin::External, transaction, &provider);
-        match outcome {
-            TransactionValidationOutcome::Valid { transaction, state_nonce, .. } => {
-                assert_eq!(state_nonce, 123);
-                assert_eq!(transaction.transaction().nonce(), 123);
-                assert_eq!(transaction.transaction().frame_transaction().unwrap().nonce_seq, 7);
+        provider.add_account(sender, ExtendedAccount::new(7, U256::MAX));
+        let validator = EthTransactionValidatorBuilder::new(provider.clone(), test_evm_config())
+            .set_bogota(true)
+            .build(InMemoryBlobStore::default());
+        for key in [U256::ZERO, U256::from(1)] {
+            let mut frame = eip8141_tx(validator.chain_id(), sender)
+                .transaction
+                .as_eip8141()
+                .unwrap()
+                .clone()
+                .into_inner();
+            frame.nonce_keys = Some(vec![key]);
+            let encoded_length = frame.eip2718_encoded_length();
+            let transaction = EthPooledTransaction::new(
+                alloy_consensus::transaction::Recovered::new_unchecked(
+                    reth_ethereum_primitives::TransactionSigned::Eip8141(frame.seal_slow()),
+                    sender,
+                ),
+                encoded_length,
+            );
+            let outcome =
+                validator.validate_stateful(TransactionOrigin::Private, transaction, &provider);
+            if key.is_zero() {
+                assert!(matches!(outcome, TransactionValidationOutcome::Invalid(..)));
+            } else {
+                assert!(matches!(
+                    outcome,
+                    TransactionValidationOutcome::Valid { state_nonce: 0, propagate: false, .. }
+                ));
             }
-            _ => panic!("keyed frame should not be gated by the account nonce"),
         }
     }
 

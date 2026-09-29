@@ -27,7 +27,6 @@ pub struct FrameValidationInspector {
     accounts: BTreeSet<Address>,
     code: BTreeSet<Address>,
     storage: BTreeSet<(Address, U256)>,
-    legacy_nonce_dependency: bool,
     expiry: Option<u64>,
 }
 
@@ -42,7 +41,6 @@ impl FrameValidationInspector {
             accounts: BTreeSet::new(),
             code: BTreeSet::new(),
             storage: BTreeSet::new(),
-            legacy_nonce_dependency: false,
             expiry: None,
         }
     }
@@ -60,20 +58,10 @@ impl FrameValidationInspector {
     /// Returns the state dependencies observed during prefix execution.
     pub fn dependencies(&self) -> FrameDependencies {
         FrameDependencies {
-            accounts: self
-                .accounts
-                .iter()
-                .copied()
-                .chain(self.legacy_nonce_dependency.then_some(self.sender))
-                .collect(),
+            accounts: self.accounts.iter().copied().chain([self.sender]).collect(),
             code: self.code.iter().copied().collect(),
             storage: self.storage.iter().copied().collect(),
         }
-    }
-
-    /// Tracks the sender's account nonce when key zero selects the legacy nonce domain.
-    pub fn require_legacy_nonce(&mut self) {
-        self.legacy_nonce_dependency = true;
     }
 
     fn reject(&mut self, reason: &'static str) {
@@ -172,10 +160,6 @@ where
             interp.bytecode.bytecode_slice() == EXPIRY_VERIFIER_RUNTIME;
 
         match opcode {
-            // TXPARAM(0x0D) exposes the pre-state legacy nonce even for keyed transactions.
-            0xb0 if interp.stack.data().last() == Some(&U256::from(0x0d)) => {
-                self.legacy_nonce_dependency = true;
-            }
             // Environment-dependent opcodes, arbitrary balance reads and state destruction.
             0x31 | 0x3a | 0x40 | 0x41 | 0x43..=0x45 | 0x47 | 0x48 | 0x4a | 0x4b | 0xfe | 0xff => {
                 self.reject("banned opcode in validation prefix")
@@ -292,7 +276,7 @@ where
 mod tests {
     use super::*;
     use alloy_consensus::TxEip8141;
-    use alloy_eips::eip8141::{Frame, FrameLimits, FrameMode};
+    use alloy_eips::eip8141::{Frame, FrameAddress, FrameLimits, FrameMode};
     use alloy_primitives::Bytes;
     use revm::{
         context::{transaction::FrameTransaction, Context, ContextSetters, TxEnv},
@@ -366,24 +350,6 @@ mod tests {
     }
 
     #[test]
-    fn legacy_nonce_is_only_a_dependency_when_selected_or_read() {
-        let sender = Address::repeat_byte(1);
-        let mut inspector = FrameValidationInspector::new(sender, policy());
-        assert!(!inspector.dependencies().accounts.contains(&sender));
-
-        let mut ctx = Context::mainnet();
-        let mut interp = Interpreter::default();
-        interp.bytecode = ExtBytecode::new(Bytecode::new_legacy(vec![0xb0].into()));
-        assert!(interp.stack.push(U256::from(0x0d)));
-        inspector.step(&mut interp, &mut ctx);
-        assert!(inspector.dependencies().accounts.contains(&sender));
-
-        let mut legacy = FrameValidationInspector::new(sender, policy());
-        legacy.require_legacy_nonce();
-        assert!(legacy.dependencies().accounts.contains(&sender));
-    }
-
-    #[test]
     fn transient_storage_is_not_a_persistent_state_dependency() {
         let sender = Address::repeat_byte(1);
         for address in [sender, Address::repeat_byte(2)] {
@@ -449,7 +415,7 @@ mod tests {
                     },
                     Frame {
                         mode: FrameMode::Sender,
-                        target: suffix.into(),
+                        target: FrameAddress::from(suffix),
                         limits: FrameLimits { execution: 10_000, state: 0 },
                         ..Default::default()
                     },
@@ -461,7 +427,11 @@ mod tests {
                     .unwrap();
             let payload = FrameTransaction {
                 nonce_keys: frame_tx.nonce_keys.clone(),
-                nonce_seq: frame_tx.nonce_seq,
+                nonce_calldata: frame_tx
+                    .nonce_keys
+                    .as_deref()
+                    .map(|keys| alloy_eips::eip8141::nonce_calldata(keys, frame_tx.nonce))
+                    .unwrap_or_default(),
                 frames: frame_tx.frames.clone(),
                 signatures: frame_tx.signatures.clone(),
                 signature_hash: frame_tx.signature_hash(),

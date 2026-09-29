@@ -1,7 +1,7 @@
 //! Canonical-snapshot validation of public frame transactions.
 
 use alloy_consensus::BlockHeader;
-use alloy_eips::eip8141::{nonce_manager_slot, NONCE_MANAGER};
+use alloy_eips::eip8141::{nonce_slot, NONCE_MANAGER};
 use alloy_primitives::U256;
 use reth_ethereum_primitives::TransactionSigned;
 use reth_evm::{ConfigureEvm, Evm, FromRecoveredTx, TxEnvFor};
@@ -37,7 +37,7 @@ where
         target: "reth::eip8141::pool",
         ?tx_hash,
         sender = ?frame.sender,
-        nonce = frame.nonce_seq,
+        nonce = frame.nonce,
         frame_count = frame.frames.len(),
         signature_verification_gas = frame.signature_verification_gas(),
         "validating EIP-8141 public-pool transaction"
@@ -50,7 +50,7 @@ where
                 target: "reth::eip8141::pool",
                 ?tx_hash,
                 sender = ?frame.sender,
-                nonce = frame.nonce_seq,
+                nonce = frame.nonce,
                 reason,
                 "rejected EIP-8141 public-pool transaction during structural validation"
             );
@@ -74,41 +74,17 @@ where
     let state = client
         .state_by_block_hash(head.hash())
         .map_err(|_| policy("canonical state unavailable"))?;
-    if frame.nonce_keys.as_slice() == [U256::ZERO] {
-        let sender = state
-            .basic_account(&frame.sender)
-            .map_err(|_| policy("cannot read sender nonce"))?
-            .unwrap_or_default();
-        if frame.nonce_seq < sender.nonce {
-            return Err(policy("sender nonce sequence already consumed"));
-        }
-    } else {
-        for &key in &frame.nonce_keys {
-            let slot = nonce_manager_slot(frame.sender, key);
-            let current = state
-                .storage(NONCE_MANAGER, slot)
-                .map_err(|_| policy("cannot read keyed nonce"))?
-                .unwrap_or_default();
-            if current != U256::from(frame.nonce_seq) {
-                return Err(policy("keyed nonce sequence changed"));
-            }
-        }
-    }
     let mut env =
         evm_config.evm_env(&head).map_err(|_| policy("cannot configure frame validation EVM"))?;
-    // Public-pool validation may inspect a nonce-gapped transaction. The pool queues such
-    // transactions behind their missing ancestors; this simulation only validates the frame
-    // prefix and must not reject a valid future nonce before the pool can do that bookkeeping.
-    env.cfg_env.disable_nonce_check = true;
+    // Pre-fork frames may queue behind missing nonces. Keyed frames require every selected
+    // sequence to match canonical state before admission.
+    env.cfg_env.disable_nonce_check = frame.nonce_keys.is_none();
     let tx = TxEnvFor::<EvmConfig>::from_recovered_tx_with_gas_params(
         transaction.transaction.inner(),
         frame.sender,
         &env.cfg_env.gas_params,
     );
-    let mut inspector = FrameValidationInspector::new(frame.sender, prefix);
-    if frame.nonce_keys.as_slice() == [U256::ZERO] {
-        inspector.require_legacy_nonce();
-    }
+    let inspector = FrameValidationInspector::new(frame.sender, prefix);
     let mut evm =
         evm_config.evm_with_env_and_inspector(StateProviderDatabase::new(&state), env, inspector);
     let result = match evm.validate_frame_transaction(tx, prefix.prefix_end) {
@@ -118,7 +94,7 @@ where
                 target: "reth::eip8141::pool",
                 ?tx_hash,
                 sender = ?frame.sender,
-                nonce = frame.nonce_seq,
+                nonce = frame.nonce,
                 prefix_end = prefix.prefix_end,
                 error = %error,
                 "EIP-8141 public-pool prefix execution failed"
@@ -130,7 +106,7 @@ where
                 target: "reth::eip8141::pool",
                 ?tx_hash,
                 sender = ?frame.sender,
-                nonce = frame.nonce_seq,
+                nonce = frame.nonce,
                 "EIP-8141 public-pool validation is unavailable"
             );
             return Err(Eip8141PoolTransactionError::PublicMempoolValidationUnavailable.into())
@@ -142,7 +118,7 @@ where
             target: "reth::eip8141::pool",
             ?tx_hash,
             sender = ?frame.sender,
-            nonce = frame.nonce_seq,
+            nonce = frame.nonce,
             reason,
             "rejected EIP-8141 public-pool transaction after prefix inspection"
         );
@@ -153,7 +129,7 @@ where
             target: "reth::eip8141::pool",
             ?tx_hash,
             sender = ?frame.sender,
-            nonce = frame.nonce_seq,
+            nonce = frame.nonce,
             sender_approved = result.sender_approved,
             expected_prefix_end = prefix.prefix_end,
             actual_prefix_end = result.prefix_end,
@@ -193,11 +169,6 @@ where
         return Err(policy("frame transaction expired"))
     }
     let mut dependencies = inspector.dependencies();
-    if frame.nonce_keys.as_slice() != [U256::ZERO] {
-        dependencies.storage.extend(frame.nonce_keys.iter().map(|&key| {
-            (NONCE_MANAGER, U256::from_be_bytes(nonce_manager_slot(frame.sender, key).0))
-        }));
-    }
     dependencies.accounts.push(result.payer);
     dependencies.code.push(result.payer);
     let payer = state
@@ -208,6 +179,23 @@ where
         .basic_account(&frame.sender)
         .map_err(|_| policy("cannot read sender"))?
         .unwrap_or_default();
+    let mut state_nonce = sender.nonce;
+    if let Some(keys) = &frame.nonce_keys &&
+        keys != &[U256::ZERO]
+    {
+        state_nonce = frame.nonce;
+        for key in keys {
+            let slot = nonce_slot(frame.sender, *key);
+            dependencies.storage.push((NONCE_MANAGER, slot));
+            let current = state
+                .storage(NONCE_MANAGER, slot.into())
+                .map_err(|_| policy("cannot read keyed nonce"))?
+                .unwrap_or_default();
+            if current != U256::from(frame.nonce) {
+                return Err(policy("keyed nonce sequence mismatch"));
+            }
+        }
+    }
     if result.max_cost > payer.balance {
         info!(
             target: "reth::eip8141::pool",
@@ -235,9 +223,9 @@ where
     );
     Ok(Arc::new(FrameValidation {
         sender: frame.sender,
-        sender_nonce: frame.nonce_seq,
+        sender_nonce: frame.nonce,
         nonce_keys: frame.nonce_keys.clone(),
-        state_nonce: sender.nonce,
+        state_nonce,
         sender_balance: sender.balance,
         sender_code_hash: sender.bytecode_hash,
         payer: result.payer,

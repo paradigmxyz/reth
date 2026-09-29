@@ -1,7 +1,7 @@
 //! Cancellation-aware ownership of temporarily withdrawn frame transactions.
 
 use crate::{PoolTransaction, ValidPoolTransaction};
-use alloy_primitives::{Address, B256};
+use alloy_primitives::{Address, B256, U256};
 use std::{collections::HashMap, sync::Arc};
 
 pub(super) struct FrameRevalidationQueue<T: PoolTransaction> {
@@ -43,6 +43,24 @@ impl<T: PoolTransaction> FrameRevalidationQueue<T> {
     ) -> Option<Arc<ValidPoolTransaction<T>>> {
         let hash = self.senders.remove(&sender)?;
         self.transactions.remove(&hash)
+    }
+
+    pub(super) fn contains_sender(&self, sender: Address) -> bool {
+        self.senders.contains_key(&sender)
+    }
+
+    pub(super) fn cancel_replaced(
+        &mut self,
+        sender: Address,
+        nonce: u64,
+        keys: Option<&[U256]>,
+    ) -> Option<Arc<ValidPoolTransaction<T>>> {
+        let hash = *self.senders.get(&sender)?;
+        let old = self.transactions.get(&hash)?;
+        if old.nonce() != nonce || old.transaction.eip8250_nonce_keys() != keys {
+            return None;
+        }
+        self.remove(&hash)
     }
 
     pub(super) fn snapshot(&self) -> Vec<Arc<ValidPoolTransaction<T>>> {

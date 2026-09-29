@@ -10,11 +10,11 @@ use alloy_primitives::{Address, TxHash, B256, U256};
 pub struct FrameValidation {
     /// Frame sender.
     pub sender: Address,
-    /// Transaction nonce sequence.
+    /// Transaction nonce.
     pub sender_nonce: u64,
-    /// Canonical nonce keys selected by the transaction.
-    pub nonce_keys: Vec<U256>,
-    /// Sender nonce in the canonical state used for validation.
+    /// Selected nonce domains, absent for a pre-fork frame transaction.
+    pub nonce_keys: Option<Vec<U256>>,
+    /// Selected sequence in the canonical state used for validation.
     pub state_nonce: u64,
     /// Sender balance at validation time.
     pub sender_balance: U256,
@@ -51,7 +51,7 @@ pub struct FrameDependencies {
 #[derive(Debug, Default)]
 pub struct FrameReservations {
     frames: HashMap<TxHash, Arc<FrameValidation>>,
-    sender_frames: HashMap<Address, HashSet<TxHash>>,
+    sender_nonce: HashMap<(Address, u64), TxHash>,
     payer: HashMap<Address, PayerUsage>,
     accounts: HashMap<Address, HashSet<TxHash>>,
     code: HashMap<Address, HashSet<TxHash>>,
@@ -84,7 +84,7 @@ impl FrameReservations {
         self.expiry.values().flat_map(|hashes| hashes.iter().copied())
     }
 
-    /// Atomically inserts a frame, optionally replacing its exact keyed nonce identity.
+    /// Atomically inserts a frame, optionally replacing its same-sender nonce.
     pub fn replace(
         &mut self,
         hash: TxHash,
@@ -103,24 +103,21 @@ impl FrameReservations {
         if replaces.is_some() && old.is_none() {
             return Err("replacement not found");
         }
-        // Legacy-key frames use distinct account nonces and can queue together. Keyed frames
-        // share a virtual sender nonce in the pool, so keep their one-pending policy.
         if let Some(old) = &old {
             if old.sender != metadata.sender ||
                 old.sender_nonce != metadata.sender_nonce ||
                 old.nonce_keys != metadata.nonce_keys
             {
-                return Err("replacement keyed nonce mismatch");
+                return Err("replacement sender nonce mismatch");
             }
-        } else if self.sender_frames.get(&metadata.sender).is_some_and(|hashes| {
-            hashes.iter().any(|hash| {
-                let pending = &self.frames[hash];
-                metadata.nonce_keys != [U256::ZERO] ||
-                    pending.nonce_keys != [U256::ZERO] ||
-                    pending.sender_nonce == metadata.sender_nonce
-            })
-        }) {
-            return Err("sender already has a pending frame for this nonce domain");
+        } else if self.sender_nonce.contains_key(&(metadata.sender, metadata.sender_nonce)) {
+            return Err("sender nonce already reserved");
+        }
+        if metadata.nonce_keys.is_some() &&
+            old.is_none() &&
+            self.frames.values().any(|frame| frame.sender == metadata.sender)
+        {
+            return Err("sender already has a pending frame transaction");
         }
         let usage = self.payer.get(&metadata.payer).copied().unwrap_or_default();
         let old_cost =
@@ -156,15 +153,12 @@ impl FrameReservations {
         }
         self.remove_inner(replaces);
         self.frames.insert(hash, metadata.clone());
-        self.sender_frames.entry(metadata.sender).or_default().insert(hash);
+        self.sender_nonce.insert((metadata.sender, metadata.sender_nonce), hash);
         let entry = self.payer.entry(metadata.payer).or_default();
         entry.balance = metadata.payer_balance;
         entry.frame_cost = frame_cost;
         entry.frame_count = other_count + 1;
         entry.exclusive_count = other_exclusive_count + usize::from(metadata.exclusive_payer);
-        // The pool's sender/nonce index uses the canonical account nonce as a virtual slot for
-        // keyed frames. Revalidate on sender changes so that slot is remapped without treating
-        // the account nonce as a consensus validity condition for nonzero keys.
         for a in
             metadata.dependencies.accounts.iter().copied().chain([metadata.sender, metadata.payer])
         {
@@ -193,12 +187,7 @@ impl FrameReservations {
     fn remove_inner(&mut self, hash: Option<B256>) {
         let Some(hash) = hash else { return };
         let Some(m) = self.frames.remove(&hash) else { return };
-        if let Some(hashes) = self.sender_frames.get_mut(&m.sender) {
-            hashes.remove(&hash);
-            if hashes.is_empty() {
-                self.sender_frames.remove(&m.sender);
-            }
-        }
+        self.sender_nonce.remove(&(m.sender, m.sender_nonce));
         if let Some(p) = self.payer.get_mut(&m.payer) {
             p.frame_cost = p.frame_cost.checked_sub(m.max_cost).unwrap_or(U256::ZERO);
             p.frame_count = p.frame_count.saturating_sub(1);
@@ -293,12 +282,11 @@ impl FrameReservations {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_eips::eip8141::{nonce_manager_slot, NONCE_MANAGER};
     fn m(sender: u8, nonce: u64, payer: u8, cost: u64) -> FrameValidation {
         FrameValidation {
             sender: Address::repeat_byte(sender),
             sender_nonce: nonce,
-            nonce_keys: vec![U256::ZERO],
+            nonce_keys: None,
             state_nonce: nonce,
             sender_balance: U256::MAX,
             sender_code_hash: None,
@@ -317,6 +305,48 @@ mod tests {
     }
     fn put(r: &mut FrameReservations, n: u8, m: FrameValidation) -> Result<(), &'static str> {
         r.replace(B256::repeat_byte(n), Arc::new(m), None, U256::ZERO, B256::ZERO)
+    }
+
+    #[test]
+    fn keyed_replacement_requires_exact_keys_and_sequence() {
+        let mut r = FrameReservations::default();
+        let mut original = m(1, 0, 1, 3);
+        original.nonce_keys = Some(vec![U256::from(1)]);
+        put(&mut r, 1, original.clone()).unwrap();
+        let mut disjoint = original.clone();
+        disjoint.nonce_keys = Some(vec![U256::from(2)]);
+        assert!(put(&mut r, 2, disjoint.clone()).is_err());
+        assert!(r
+            .replace(
+                B256::repeat_byte(2),
+                Arc::new(disjoint),
+                Some(B256::repeat_byte(1)),
+                U256::ZERO,
+                B256::ZERO
+            )
+            .is_err());
+        let mut future = original.clone();
+        future.sender_nonce = 1;
+        assert!(put(&mut r, 3, future.clone()).is_err());
+        assert!(r
+            .replace(
+                B256::repeat_byte(3),
+                Arc::new(future),
+                Some(B256::repeat_byte(1)),
+                U256::ZERO,
+                B256::ZERO
+            )
+            .is_err());
+        r.replace(
+            B256::repeat_byte(4),
+            Arc::new(original),
+            Some(B256::repeat_byte(1)),
+            U256::ZERO,
+            B256::ZERO,
+        )
+        .unwrap();
+        assert_eq!(r.hashes().collect::<Vec<_>>(), vec![B256::repeat_byte(4)]);
+        assert_eq!(r.payer_exposure(&Address::repeat_byte(1)), U256::from(3));
     }
 
     #[test]
@@ -339,30 +369,15 @@ mod tests {
     }
 
     #[test]
-    fn stale_head_and_conflicting_sender_frame_do_not_mutate_reservations() {
+    fn stale_head_and_different_nonce_do_not_mutate_reservations() {
         let mut r = FrameReservations::default();
         put(&mut r, 1, m(1, 0, 1, 3)).unwrap();
         let mut stale = m(2, 0, 1, 2);
         stale.head_hash = B256::repeat_byte(7);
         assert_eq!(put(&mut r, 2, stale), Err("stale head"));
-        assert_eq!(
-            put(&mut r, 3, m(1, 0, 2, 1)),
-            Err("sender already has a pending frame for this nonce domain")
-        );
+        assert!(put(&mut r, 3, m(1, 1, 2, 1)).is_ok());
         assert_eq!(r.payer_exposure(&Address::repeat_byte(1)), U256::from(3));
-        assert_eq!(r.hashes().count(), 1);
-
-        put(&mut r, 4, m(1, 1, 2, 1)).unwrap();
         assert_eq!(r.hashes().count(), 2);
-        r.remove(&B256::repeat_byte(1));
-        assert_eq!(r.hashes().collect::<Vec<_>>(), vec![B256::repeat_byte(4)]);
-
-        let mut keyed = m(1, 0, 2, 1);
-        keyed.nonce_keys = vec![U256::from(3)];
-        assert_eq!(
-            put(&mut r, 5, keyed),
-            Err("sender already has a pending frame for this nonce domain")
-        );
     }
 
     #[test]
@@ -428,10 +443,7 @@ mod tests {
         let mut second_exclusive = m(3, 0, 1, 1);
         second_exclusive.exclusive_payer = true;
         assert_eq!(put(&mut r, 3, second_exclusive), Err("exclusive payer capacity exceeded"));
-        assert_eq!(
-            put(&mut r, 3, m(1, 0, 2, 1)),
-            Err("sender already has a pending frame for this nonce domain")
-        );
+        assert_eq!(put(&mut r, 3, m(1, 0, 2, 1)), Err("sender nonce already reserved"));
     }
     #[test]
     fn replacement_rollback_and_payer_shift() {
@@ -459,67 +471,6 @@ mod tests {
         )
         .unwrap();
         assert_eq!(r.payer_exposure(&Address::repeat_byte(1)), U256::ZERO);
-    }
-
-    #[test]
-    fn replacement_requires_the_same_key_set_and_sequence() {
-        let mut reservations = FrameReservations::default();
-        let mut first = m(1, 7, 2, 1);
-        first.nonce_keys = vec![U256::from(3), U256::from(5)];
-        put(&mut reservations, 1, first.clone()).unwrap();
-
-        let mut different_keys = first.clone();
-        different_keys.nonce_keys = vec![U256::from(4)];
-        assert_eq!(
-            reservations.replace(
-                B256::repeat_byte(2),
-                Arc::new(different_keys),
-                Some(B256::repeat_byte(1)),
-                U256::ZERO,
-                B256::ZERO,
-            ),
-            Err("replacement keyed nonce mismatch")
-        );
-        let mut different_sequence = first.clone();
-        different_sequence.sender_nonce += 1;
-        assert_eq!(
-            reservations.replace(
-                B256::repeat_byte(2),
-                Arc::new(different_sequence),
-                Some(B256::repeat_byte(1)),
-                U256::ZERO,
-                B256::ZERO,
-            ),
-            Err("replacement keyed nonce mismatch")
-        );
-        assert_eq!(reservations.hashes().collect::<Vec<_>>(), vec![B256::repeat_byte(1)]);
-    }
-
-    #[test]
-    fn selected_keyed_nonce_slot_is_revalidated_on_change() {
-        let mut reservations = FrameReservations::default();
-        let sender = Address::repeat_byte(1);
-        let key = U256::from(5);
-        let slot = U256::from_be_bytes(nonce_manager_slot(sender, key).0);
-        let mut frame = m(1, 0, 2, 1);
-        frame.nonce_keys = vec![key];
-        frame.dependencies.storage.push((NONCE_MANAGER, slot));
-        put(&mut reservations, 1, frame).unwrap();
-
-        let other = FrameDependencies {
-            storage: vec![(NONCE_MANAGER, slot + U256::from(1))],
-            ..Default::default()
-        };
-        assert!(reservations.affected(&other, 0).is_empty());
-        let selected =
-            FrameDependencies { storage: vec![(NONCE_MANAGER, slot)], ..Default::default() };
-        assert_eq!(reservations.affected(&selected, 0), HashSet::from([B256::repeat_byte(1)]));
-        let changed_manager =
-            FrameDependencies { accounts: vec![NONCE_MANAGER], ..Default::default() };
-        assert_eq!(
-            reservations.affected(&changed_manager, 0),
-            HashSet::from([B256::repeat_byte(1)])
-        );
     }
     #[test]
     fn removal_and_affected_expiry() {
