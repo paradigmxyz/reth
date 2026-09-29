@@ -23,8 +23,10 @@ tower-http = { workspace = true, features = ["full"] }
 tracing.workspace = true
 
 [dev-dependencies]
+bytes.workspace = true
+http-body = "1"
 reqwest.workspace = true
-tokio = { workspace = true, features = ["macros"] }
+tokio = { workspace = true, features = ["macros", "test-util"] }
 jsonrpsee = { workspace = true, features = ["server"] }
 
 flate2.workspace = true

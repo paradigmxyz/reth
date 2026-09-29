@@ -481,7 +481,23 @@ mod tests {
     async fn cloned_executors_share_bounded_queue() {
         let (executor, task) = TransactionValidationTaskExecutor::new(NoopValidator);
         let mut submissions = tokio::task::JoinSet::new();
-        for index in 0..64 {
+
+        let first_executor = executor.clone();
+        let mut first_submission = Box::pin(async move {
+            first_executor
+                .validate_transaction(TransactionOrigin::Local, MockTransaction::legacy())
+                .await
+        });
+        // Poll once to fill the bounded queue before starting workers.
+        assert!(futures_util::poll!(first_submission.as_mut()).is_pending());
+        assert_eq!(executor.to_validation_task.tx.capacity(), 0);
+
+        submissions.spawn(async move {
+            let outcome = first_submission.await;
+            assert!(matches!(outcome, TransactionValidationOutcome::Valid { .. }));
+        });
+
+        for index in 1..64 {
             let executor = executor.clone();
             submissions.spawn(async move {
                 let transaction = MockTransaction::legacy();
@@ -507,12 +523,6 @@ mod tests {
                 assert!(matches!(outcomes[0], TransactionValidationOutcome::Valid { .. }));
             });
         }
-
-        // No worker has started: one job can be queued and the other producers
-        // must remain pending on the same bounded channel.
-        tokio::task::yield_now().await;
-        assert_eq!(executor.to_validation_task.tx.capacity(), 0);
-        assert!(submissions.try_join_next().is_none());
 
         let first_worker = tokio::spawn(task.clone().run());
         let second_worker = tokio::spawn(task.run());

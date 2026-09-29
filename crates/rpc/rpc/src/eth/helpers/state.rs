@@ -116,6 +116,34 @@ mod tests {
         assert!(account.is_none());
     }
 
+    #[cfg(feature = "account-ext")]
+    #[tokio::test]
+    async fn test_get_account_extension() {
+        let address = Address::random();
+        let extension = reth_primitives_traits::AccountExtension::copy_from_slice(&[0x01]);
+        let eth_api = mock_eth_api(AddressMap::from_iter([(
+            address,
+            ExtendedAccount::new(0, U256::ZERO).with_extension(extension.clone()),
+        )]));
+        eth_api.provider().add_block(B256::ZERO, Block::default());
+
+        // An account whose only non-default field is its extension still exists.
+        let info = eth_api.get_account_info(address, Default::default()).await.unwrap();
+        assert!(!info.is_empty());
+        assert_eq!(info.extension, extension);
+        let json = serde_json::to_value(&info).unwrap();
+        assert_eq!(json["extension"], "0x01");
+        assert_eq!(serde_json::from_value::<alloy_rpc_types_eth::AccountInfo>(json).unwrap(), info);
+
+        let account = eth_api.get_account(address, Default::default()).await.unwrap().unwrap();
+        assert_eq!(account.extension, extension);
+
+        let missing =
+            eth_api.get_account_info(Address::random(), Default::default()).await.unwrap();
+        assert!(missing.is_empty());
+        assert!(serde_json::to_value(missing).unwrap().get("extension").is_none());
+    }
+
     #[test]
     fn pending_state_and_access_list_do_not_deadlock() {
         let runtime = tokio::runtime::Builder::new_multi_thread()

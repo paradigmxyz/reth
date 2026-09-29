@@ -107,7 +107,7 @@ where
         self.context
             .commit(move |provider| {
                 let VerifiedRange { write, range } = verified;
-                Ok(provider.commit_account_repair(write, &range, slots)?.len())
+                provider.commit_account_repair(write, &range, slots)
             })
             .await
     }

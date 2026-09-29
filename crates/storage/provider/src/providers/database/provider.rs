@@ -1462,6 +1462,15 @@ impl<TX: DbTx, N: NodeTypes> DatabaseProvider<TX, N> {
             _ => Ok(()),
         }
     }
+
+    /// Refuses snap sync on a database without the hashed state layout it downloads into.
+    pub fn ensure_snap_sync_layout(&self) -> ProviderResult<()> {
+        if self.cached_storage_settings().use_hashed_state() {
+            Ok(())
+        } else {
+            Err(ProviderError::SnapStorageLayoutUnsupported)
+        }
+    }
 }
 
 impl<TX: DbTx, N: NodeTypes> AccountReader for DatabaseProvider<TX, N> {

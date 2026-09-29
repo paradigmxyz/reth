@@ -45,6 +45,10 @@ async fn can_run_eth_node() -> eyre::Result<()> {
         EthereumNode::test_setup_for(EthereumHardfork::Cancun).build_single().await?;
     let raw_tx = TransactionTestContext::transfer_tx_bytes(1, wallet.inner).await;
 
+    // mine an empty block first, so its canonical notification is still buffered when the next
+    // block is asserted
+    node.advance_block().await?;
+
     // make the node advance and assert the block has been committed to the blockchain
     node.inject_and_advance(raw_tx).await?;
 
@@ -549,11 +553,7 @@ async fn test_engine_ssz_request_validation() -> eyre::Result<()> {
     let auth = node.auth_server_handle();
     let url = auth.http_url();
     let client = reqwest::Client::new();
-    let state = ForkchoiceState {
-        head_block_hash: chain.genesis_hash(),
-        safe_block_hash: chain.genesis_hash(),
-        finalized_block_hash: chain.genesis_hash(),
-    };
+    let state = ForkchoiceState::same_hash(chain.genesis_hash());
     for (fork, withdrawals, expected_error) in [
         ("cancun", 0, Some("unsupported-fork")),
         ("osaka", 0, Some("unsupported-fork")),

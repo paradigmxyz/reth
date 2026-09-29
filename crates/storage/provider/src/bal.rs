@@ -1,14 +1,11 @@
 use alloy_eip7928::BAL_RETENTION_PERIOD_SLOTS;
 use alloy_eips::NumHash;
-use alloy_primitives::{BlockHash, BlockNumber, Bytes};
+use alloy_primitives::{map::B256Map, BlockHash, BlockNumber, Bytes};
 use parking_lot::RwLock;
 use reth_prune_types::PruneMode;
 use reth_storage_api::{BalStore, GetBlockAccessListLimit, RawBal};
 use reth_storage_errors::provider::ProviderResult;
-use std::{
-    collections::{BTreeMap, HashMap},
-    sync::Arc,
-};
+use std::{collections::BTreeMap, sync::Arc};
 
 mod rocksdb;
 pub use rocksdb::RocksDBBalStore;
@@ -68,7 +65,7 @@ impl Default for BalConfig {
 
 #[derive(Debug, Default)]
 struct InMemoryBalStoreInner {
-    entries: HashMap<BlockHash, BalEntry>,
+    entries: B256Map<BalEntry>,
     hashes_by_number: BTreeMap<BlockNumber, Vec<BlockHash>>,
     highest_block_number: Option<BlockNumber>,
 }

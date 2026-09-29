@@ -6,6 +6,7 @@ use std::{
     pin::Pin,
     sync::Arc,
     task::{Context, Poll},
+    time::Duration,
 };
 use tokio::sync::Semaphore;
 use tower::{Layer, Service};
@@ -21,6 +22,9 @@ use tracing::debug;
 /// with the default 15 MiB request size limit). Excess requests wait for a permit instead of
 /// being rejected.
 const MAX_CONCURRENT_DECOMPRESSIONS: usize = 8;
+
+/// Maximum time to read and decompress a compressed request body.
+const DECOMPRESSION_BODY_READ_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// This layer is a wrapper around [`tower_http::decompression::RequestDecompressionLayer`] that
 /// integrates with jsonrpsee's HTTP types.
@@ -140,14 +144,22 @@ where
                 .await
                 .expect("decompression semaphore is never closed");
 
-            let body = match Limited::new(body, max_body_size).collect().await {
-                Ok(body) => body,
-                Err(err) if err.is::<LengthLimitError>() => {
+            let body = match tokio::time::timeout(
+                DECOMPRESSION_BODY_READ_TIMEOUT,
+                Limited::new(body, max_body_size).collect(),
+            )
+            .await
+            {
+                Ok(Ok(body)) => body,
+                Ok(Err(err)) if err.is::<LengthLimitError>() => {
                     return Ok(err_response(StatusCode::PAYLOAD_TOO_LARGE, "Payload Too Large"));
                 }
-                Err(err) => {
+                Ok(Err(err)) => {
                     debug!(target: "rpc::decompression", %err, "Failed to decompress request body");
                     return Ok(err_response(StatusCode::BAD_REQUEST, "Invalid compressed body"));
+                }
+                Err(_) => {
+                    return Ok(err_response(StatusCode::REQUEST_TIMEOUT, "Request body timed out"));
                 }
             };
 
@@ -221,10 +233,19 @@ fn err_response(status: StatusCode, msg: &'static str) -> HttpResponse {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use bytes::Bytes;
     use http::header::CONTENT_ENCODING;
+    use http_body::{Body, Frame};
     use http_body_util::BodyExt;
     use jsonrpsee_http_client::{HttpRequest, HttpResponse};
-    use std::{convert::Infallible, future::ready, io::Write};
+    use std::{
+        convert::Infallible,
+        future::ready,
+        io::Write,
+        pin::Pin,
+        task::{Context, Poll},
+    };
+    use tokio::sync::Notify;
 
     const TEST_DATA: &str = r#"{"method":"test","params":["test data"],"id":1}"#;
     const DEFAULT_MAX_SIZE: usize = 15 * 1024 * 1024;
@@ -233,6 +254,23 @@ mod tests {
 
     #[derive(Clone)]
     struct MockEchoService;
+
+    struct PendingBody {
+        polled: Arc<Notify>,
+    }
+
+    impl Body for PendingBody {
+        type Data = Bytes;
+        type Error = Infallible;
+
+        fn poll_frame(
+            self: Pin<&mut Self>,
+            _: &mut Context<'_>,
+        ) -> Poll<Option<Result<Frame<Self::Data>, Self::Error>>> {
+            self.polled.notify_one();
+            Poll::Pending
+        }
+    }
 
     impl Service<HttpRequest> for MockEchoService {
         type Response = HttpResponse;
@@ -301,6 +339,15 @@ mod tests {
             .header(CONTENT_ENCODING, encoding)
             .body(HttpBody::from(body))
             .unwrap()
+    }
+
+    fn build_pending_compressed_request(encoding: &str) -> (HttpRequest, Arc<Notify>) {
+        let polled = Arc::new(Notify::new());
+        let request = HttpRequest::builder()
+            .header(CONTENT_ENCODING, encoding)
+            .body(HttpBody::new(PendingBody { polled: polled.clone() }))
+            .unwrap();
+        (request, polled)
     }
 
     #[tokio::test]
@@ -413,6 +460,31 @@ mod tests {
         while let Some(response) = tasks.join_next().await {
             assert_eq!(response.unwrap().status(), StatusCode::OK);
         }
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn slow_compressed_body_times_out_and_releases_permit() {
+        let mut layer = DecompressionLayer::new(&["gzip"], DEFAULT_MAX_SIZE);
+        layer.decompression_permits = Arc::new(Semaphore::new(1));
+        let permits = layer.decompression_permits.clone();
+        let service = layer.layer(MockEchoService);
+
+        let (slow_request, slow_body_polled) = build_pending_compressed_request("gzip");
+        let mut slow_service = service.clone();
+        let slow = tokio::spawn(async move { slow_service.call(slow_request).await.unwrap() });
+        slow_body_polled.notified().await;
+        assert_eq!(permits.available_permits(), 0);
+
+        tokio::time::advance(DECOMPRESSION_BODY_READ_TIMEOUT).await;
+        assert_eq!(slow.await.unwrap().status(), StatusCode::REQUEST_TIMEOUT);
+        assert_eq!(permits.available_permits(), 1);
+
+        let mut fast_service = service;
+        let response = fast_service
+            .call(build_compressed_request("gzip", compress_gzip(TEST_DATA.as_bytes())))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
     }
 
     #[tokio::test]

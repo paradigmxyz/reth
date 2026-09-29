@@ -496,6 +496,16 @@ impl ExtendedAccount {
         self.storage.extend(storage);
         self
     }
+
+    /// Sets the account extension.
+    #[cfg(feature = "account-ext")]
+    pub fn with_extension(
+        mut self,
+        extension: impl Into<reth_primitives_traits::AccountExtension>,
+    ) -> Self {
+        self.account.extension = extension.into();
+        self
+    }
 }
 
 impl<T: NodePrimitives, ChainSpec: EthChainSpec + Clone + 'static> DatabaseProviderFactory
