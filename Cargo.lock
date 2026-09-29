@@ -8509,6 +8509,7 @@ dependencies = [
  "reth-tasks",
  "reth-tokio-util",
  "reth-tracing",
+ "reth-transaction-pool",
  "reth-trie",
  "reth-trie-db",
  "revm",
@@ -10383,8 +10384,10 @@ version = "2.7.0"
 dependencies = [
  "alloy-rpc-types-engine",
  "brotli",
+ "bytes",
  "flate2",
  "http",
+ "http-body",
  "http-body-util",
  "jsonrpsee",
  "jsonrpsee-http-client",

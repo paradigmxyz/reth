@@ -363,14 +363,15 @@ impl Proof {
         let proof_type = ProofType::from_byte(proof_type_byte)
             .ok_or_else(|| E2sError::Rlp(format!("Unknown proof type: {proof_type_byte}")))?;
 
-        let ssz_bytes = alloy_primitives::Bytes::decode(&mut payload)
-            .map_err(|e| E2sError::Rlp(format!("Failed to decode proof SSZ bytes: {e}")))?;
+        let ssz_bytes = alloy_rlp::Header::decode_bytes(&mut payload, false)
+            .map_err(|e| E2sError::Rlp(format!("Failed to decode proof SSZ bytes: {e}")))?
+            .to_vec();
 
         if !payload.is_empty() {
             return Err(E2sError::Rlp("Unexpected extra items in Proof list".to_string()));
         }
 
-        Ok((proof_type, ssz_bytes.to_vec()))
+        Ok((proof_type, ssz_bytes))
     }
 
     /// Convert to an [`Entry`]
