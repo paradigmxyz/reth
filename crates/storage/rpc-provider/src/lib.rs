@@ -1078,13 +1078,8 @@ impl<P: Clone, Node: NodeTypes, N> RpcBlockchainStateProvider<P, Node, N> {
             let bytecode_hash =
                 if account_info.code.is_empty() { None } else { Some(account_info.code_hash()) };
 
-            Ok(Some(Account {
-                balance: account_info.balance,
-                nonce: account_info.nonce,
-                bytecode_hash,
-                // Remote account extensions are not carried yet.
-                ..Default::default()
-            }))
+            // Remote account extensions are not carried yet.
+            Ok(Some(Account::new(account_info.nonce, account_info.balance, bytecode_hash)))
         }
     }
 }

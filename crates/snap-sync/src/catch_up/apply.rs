@@ -175,14 +175,9 @@ mod tests {
     }
 
     #[test]
-    #[allow(clippy::clone_on_copy, clippy::needless_update)]
+    #[allow(clippy::clone_on_copy)]
     fn untouched_fields_keep_their_downloaded_values() {
-        let existing = Account {
-            balance: U256::from(9),
-            nonce: 4,
-            bytecode_hash: Some(B256::repeat_byte(1)),
-            ..Default::default()
-        };
+        let existing = Account::new(4, U256::from(9), Some(B256::repeat_byte(1)));
         let changes = AccountChanges::new(ACCOUNT)
             .with_balance_change(BalanceChange::new(index(1), U256::from(10)))
             .with_balance_change(BalanceChange::new(index(2), U256::from(20)));
@@ -202,14 +197,8 @@ mod tests {
     }
 
     #[test]
-    #[allow(clippy::needless_update)]
     fn zeroed_slots_and_cleared_code_are_written() {
-        let existing = Account {
-            balance: U256::from(1),
-            nonce: 1,
-            bytecode_hash: Some(B256::repeat_byte(1)),
-            ..Default::default()
-        };
+        let existing = Account::new(1, U256::from(1), Some(B256::repeat_byte(1)));
         let changes = AccountChanges::new(ACCOUNT)
             .with_code_change(CodeChange::new(index(1), bytes!("6001")))
             .with_code_change(CodeChange::new(index(2), Bytes::new()))

@@ -891,7 +891,6 @@ impl AccountProof {
     /// [`AccountProof`].
     ///
     /// This is the inverse of [`Self::into_eip1186_response`]
-    #[allow(clippy::needless_update)]
     pub fn from_eip1186_proof(proof: alloy_rpc_types_eth::EIP1186AccountProofResponse) -> Self {
         let alloy_rpc_types_eth::EIP1186AccountProofResponse {
             nonce,
@@ -920,16 +919,8 @@ impl AccountProof {
             // See: https://github.com/ethereum/go-ethereum/issues/28441
             (EMPTY_ROOT_HASH, None)
         } else {
-            (
-                storage_hash,
-                Some(Account {
-                    nonce,
-                    balance,
-                    bytecode_hash: code_hash.into(),
-                    // EIP-1186 responses do not carry the account extension.
-                    ..Default::default()
-                }),
-            )
+            // EIP-1186 responses do not carry the account extension.
+            (storage_hash, Some(Account::new(nonce, balance, code_hash.into())))
         };
 
         Self { address, info, proof: account_proof, storage_root, storage_proofs }

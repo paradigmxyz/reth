@@ -554,7 +554,6 @@ impl Encodable for SlimAccountBody {
 }
 
 impl Decodable for SlimAccountBody {
-    #[allow(clippy::needless_update)]
     fn decode(buf: &mut &[u8]) -> alloy_rlp::Result<Self> {
         let mut payload = Header::decode_bytes(buf, true)?;
         let nonce = u64::decode(&mut payload)?;
@@ -565,23 +564,16 @@ impl Decodable for SlimAccountBody {
         if !payload.is_empty() {
             return Err(alloy_rlp::Error::UnexpectedLength)
         }
-        Ok(Self(TrieAccount { nonce, balance, storage_root, code_hash, ..Default::default() }))
+        Ok(Self(TrieAccount::new(nonce, balance, storage_root, code_hash)))
     }
 }
 
 #[cfg(any(test, feature = "arbitrary"))]
 impl<'a> arbitrary::Arbitrary<'a> for SlimAccountBody {
-    #[allow(clippy::needless_update)]
     fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
         let storage_root = if u.arbitrary()? { u.arbitrary()? } else { EMPTY_ROOT_HASH };
         let code_hash = if u.arbitrary()? { u.arbitrary()? } else { KECCAK256_EMPTY };
-        Ok(Self(TrieAccount {
-            nonce: u.arbitrary()?,
-            balance: u.arbitrary()?,
-            storage_root,
-            code_hash,
-            ..Default::default()
-        }))
+        Ok(Self(TrieAccount::new(u.arbitrary()?, u.arbitrary()?, storage_root, code_hash)))
     }
 }
 
@@ -920,15 +912,8 @@ mod tests {
         assert_eq!(msg.limit_hash.unwrap_or(B256::repeat_byte(0xff)), B256::repeat_byte(0xff));
     }
 
-    #[allow(clippy::needless_update)]
     fn trie_account(storage_root: B256, code_hash: B256) -> TrieAccount {
-        TrieAccount {
-            nonce: 7,
-            balance: U256::from(42),
-            storage_root,
-            code_hash,
-            ..Default::default()
-        }
+        TrieAccount::new(7, U256::from(42), storage_root, code_hash)
     }
 
     #[test]
