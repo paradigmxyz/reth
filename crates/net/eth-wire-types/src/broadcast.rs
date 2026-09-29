@@ -279,9 +279,7 @@ impl<T: Encodable + ?Sized> Encodable for LazyEncoded<T> {
 
 impl<T: Encodable + ?Sized> LazyEncoded<T> {
     fn encode_uncached(&self) -> Bytes {
-        let mut out = Vec::with_capacity(self.value.length());
-        self.value.encode(&mut out);
-        out.into()
+        alloy_rlp::encode(&self.value).into()
     }
 }
 
