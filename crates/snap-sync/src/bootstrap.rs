@@ -165,8 +165,8 @@ where
         }
     }
 
-    // Resumes the recorded attempt while its pivot is canonical, otherwise starts one at the
-    // pivot under `head`. These are single-record writes, cheap enough for the async worker.
+    // Resumes the recorded attempt, even one whose pivot a reorg orphaned, otherwise starts one at
+    // the pivot under `head`. These are single-record writes, cheap enough for the async worker.
     fn resolve(&mut self, head: u64) -> Result<Resolved, SnapSyncError> {
         let provider = self.factory.database_provider_rw()?;
         let mut session = SnapSyncSession::new(self.policy);
