@@ -609,8 +609,10 @@ stage_unit_checkpoints!(
 mod tests {
     use super::*;
     use alloy_primitives::b256;
+    use proptest::{collection::vec, option, prelude::*};
     use rand::Rng;
     use reth_codecs::Compact;
+    use reth_trie_common::{hash_builder::HashBuilderValue, BranchNodeCompact, RlpNode, TrieMask};
 
     #[test]
     fn merkle_checkpoint_roundtrip() {
@@ -695,6 +697,55 @@ mod tests {
     }
 
     #[test]
+    fn merkle_checkpoint_with_walker_nodes_roundtrip() {
+        let walker_stack = vec![
+            StoredSubNode {
+                key: vec![],
+                nibble: Some(0x1),
+                node: Some(BranchNodeCompact::new(
+                    0b0110,
+                    0b0010,
+                    0b0110,
+                    vec![B256::repeat_byte(0xaa), B256::repeat_byte(0xbb)],
+                    Some(B256::repeat_byte(0xcc)),
+                )),
+            },
+            StoredSubNode {
+                key: vec![0x1],
+                nibble: Some(0x2),
+                node: Some(BranchNodeCompact::new(
+                    0b0101,
+                    0b0000,
+                    0b0100,
+                    vec![B256::repeat_byte(0xdd)],
+                    None,
+                )),
+            },
+        ];
+        let checkpoint = MerkleCheckpoint {
+            target_block: 1,
+            last_account_key: B256::repeat_byte(0x11),
+            walker_stack: walker_stack.clone(),
+            state: HashBuilderState::default(),
+            storage_root_checkpoint: Some(StorageRootMerkleCheckpoint::new(
+                B256::repeat_byte(0x22),
+                walker_stack,
+                HashBuilderState::default(),
+                1,
+                U256::from(1),
+                B256::repeat_byte(0x33),
+            )),
+        };
+
+        // Decode like `MerkleStage::get_execution_checkpoint`, with walker nodes followed by the
+        // hash builder state.
+        let mut buf = Vec::new();
+        checkpoint.to_compact(&mut buf);
+        let (decoded, _) = MerkleCheckpoint::from_compact(&buf, buf.len());
+        assert_eq!(decoded, checkpoint);
+    }
+
+    #[test]
     fn finish_checkpoint_roundtrip() {
         let finish_checkpoint = FinishCheckpoint { partial_state_trie: Some(21) };
         let checkpoint = StageCheckpoint::new(42).with_finish_stage_checkpoint(finish_checkpoint);
@@ -705,5 +756,96 @@ mod tests {
 
         assert_eq!(decoded, checkpoint);
         assert_eq!(decoded.finish_stage_checkpoint().unwrap().partial_state_trie(), Some(21));
+    }
+
+    // Generate fields directly: `BranchNodeCompact` has no `Arbitrary` impl, and its masks must
+    // match the number of hashes.
+    fn branch_node() -> impl Strategy<Value = BranchNodeCompact> {
+        (any::<u16>(), any::<u16>(), any::<u16>(), option::of(any::<B256>())).prop_flat_map(
+            |(state_mask, tree_mask, hash_mask, root_hash)| {
+                let (tree_mask, hash_mask) = (tree_mask & state_mask, hash_mask & state_mask);
+                vec(any::<B256>(), hash_mask.count_ones() as usize).prop_map(move |hashes| {
+                    BranchNodeCompact::new(state_mask, tree_mask, hash_mask, hashes, root_hash)
+                })
+            },
+        )
+    }
+
+    fn walker_stack() -> impl Strategy<Value = Vec<StoredSubNode>> {
+        vec(
+            (vec(0u8..16, 0..=64), option::of(0u8..16), option::of(branch_node()))
+                .prop_map(|(key, nibble, node)| StoredSubNode { key, nibble, node }),
+            0..=16,
+        )
+    }
+
+    fn hash_builder_state() -> impl Strategy<Value = HashBuilderState> {
+        (
+            vec(0u8..16, 0..=64),
+            any::<HashBuilderValue>(),
+            vec(any::<RlpNode>(), 0..=16),
+            vec(any::<TrieMask>(), 0..=16),
+            vec(any::<TrieMask>(), 0..=16),
+            vec(any::<TrieMask>(), 0..=16),
+            any::<bool>(),
+        )
+            .prop_map(
+                |(key, value, stack, groups, tree_masks, hash_masks, stored_in_database)| {
+                    HashBuilderState {
+                        key,
+                        value,
+                        stack,
+                        groups,
+                        tree_masks,
+                        hash_masks,
+                        stored_in_database,
+                    }
+                },
+            )
+    }
+
+    fn storage_root_checkpoint() -> impl Strategy<Value = StorageRootMerkleCheckpoint> {
+        (
+            any::<B256>(),
+            walker_stack(),
+            hash_builder_state(),
+            any::<u64>(),
+            any::<U256>(),
+            any::<B256>(),
+        )
+            .prop_map(|(key, walker_stack, state, nonce, balance, bytecode_hash)| {
+                StorageRootMerkleCheckpoint::new(
+                    key,
+                    walker_stack,
+                    state,
+                    nonce,
+                    balance,
+                    bytecode_hash,
+                )
+            })
+    }
+
+    proptest! {
+        #[test]
+        fn merkle_checkpoint_proptest_roundtrip(
+            target_block in any::<BlockNumber>(),
+            last_account_key in any::<B256>(),
+            walker_stack in walker_stack(),
+            state in hash_builder_state(),
+            storage_root_checkpoint in option::of(storage_root_checkpoint()),
+        ) {
+            let checkpoint = MerkleCheckpoint {
+                target_block,
+                last_account_key,
+                walker_stack,
+                state,
+                storage_root_checkpoint,
+            };
+            let mut buf = Vec::new();
+            checkpoint.to_compact(&mut buf);
+            let (decoded, rest) = MerkleCheckpoint::from_compact(&buf, buf.len());
+            prop_assert_eq!(decoded, checkpoint);
+            prop_assert!(rest.is_empty());
+        }
     }
 }
