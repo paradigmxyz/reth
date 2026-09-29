@@ -286,9 +286,10 @@ impl TestHarness {
         let head = blocks.last().unwrap().recovered_block();
         self.tree.state.tree_state.reset(head.num_hash());
 
-        let canonical_in_memory_state = &self.tree.canonical_in_memory_state;
-        canonical_in_memory_state.update_chain(NewCanonicalChain::Commit { new: blocks.clone() });
-        canonical_in_memory_state.set_canonical_head(head.clone_sealed_header());
+        self.tree
+            .in_memory_state_writer
+            .update_chain(NewCanonicalChain::Commit { new: blocks.clone() });
+        self.tree.canonical_in_memory_state.set_canonical_head(head.clone_sealed_header());
 
         self.blocks = blocks.clone();
 
@@ -1274,7 +1275,7 @@ async fn test_tree_state_on_new_head_reorg() {
         assert_eq!(new.len(), 2);
         assert_eq!(new[0].recovered_block().hash(), blocks[3].recovered_block().hash());
         assert_eq!(new[1].recovered_block().hash(), blocks[4].recovered_block().hash());
-        test_harness.tree.canonical_in_memory_state.update_chain(NewCanonicalChain::Commit { new });
+        test_harness.tree.in_memory_state_writer.update_chain(NewCanonicalChain::Commit { new });
     }
 
     // should be a None persistence action before we advance persistence
@@ -1546,8 +1547,12 @@ fn threshold_persistence_uses_canonical_in_memory_chain_length() {
         blocks[7].recovered_block().num_hash();
     test_harness.tree.persistence_state.last_state_trie_persisted_block =
         blocks[5].recovered_block().num_hash();
-    test_harness.tree.canonical_in_memory_state.remove_persisted_blocks_until(
-        blocks[7].recovered_block().num_hash(),
+    test_harness
+        .tree
+        .canonical_in_memory_state
+        .set_persisted(blocks[7].recovered_block().num_hash());
+    test_harness.tree.in_memory_state_writer.remove_canonical_blocks_until(
+        blocks[7].recovered_block().hash(),
         blocks[5].recovered_block().number(),
     );
 
@@ -3465,7 +3470,7 @@ fn test_forkchoice_rejects_stale_persisted_prefix_hash() {
             )
         })
         .collect();
-    test_harness.tree.canonical_in_memory_state.update_chain(NewCanonicalChain::Reorg {
+    test_harness.tree.in_memory_state_writer.update_chain(NewCanonicalChain::Reorg {
         new: vec![new[0].clone()],
         old: old[1..].to_vec(),
     });

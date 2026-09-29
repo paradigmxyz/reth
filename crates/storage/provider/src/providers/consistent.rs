@@ -1536,7 +1536,7 @@ mod tests {
                 ..Default::default()
             }],
         };
-        consistent_provider.canonical_in_memory_state.update_chain(chain);
+        consistent_provider.canonical_in_memory_state.writer().update_chain(chain);
         let consistent_provider = provider.consistent_provider()?;
 
         // Now the block should be found in memory
@@ -1593,7 +1593,7 @@ mod tests {
             .is_none());
 
         // Insert the last block into the pending state
-        provider.canonical_in_memory_state.set_pending_block(ExecutedBlock {
+        provider.canonical_in_memory_state.writer().set_pending_block(ExecutedBlock {
             recovered_block: Arc::new(RecoveredBlock::new_sealed(
                 last_in_mem_block.clone(),
                 Default::default(),
@@ -1670,7 +1670,7 @@ mod tests {
                 ..Default::default()
             }],
         };
-        consistent_provider.canonical_in_memory_state.update_chain(chain);
+        consistent_provider.canonical_in_memory_state.writer().update_chain(chain);
 
         let consistent_provider = provider.consistent_provider()?;
 
@@ -1789,7 +1789,7 @@ mod tests {
                 })
                 .unwrap()],
         };
-        provider.canonical_in_memory_state.update_chain(chain);
+        provider.canonical_in_memory_state.writer().update_chain(chain);
 
         let consistent_provider = provider.consistent_provider()?;
 
@@ -1971,7 +1971,7 @@ mod tests {
                 ..Default::default()
             }],
         };
-        provider.canonical_in_memory_state.update_chain(chain);
+        provider.canonical_in_memory_state.writer().update_chain(chain);
 
         let consistent_provider = provider.consistent_provider()?;
 
@@ -2077,7 +2077,7 @@ mod tests {
                 ..Default::default()
             }],
         };
-        provider.canonical_in_memory_state.update_chain(chain);
+        provider.canonical_in_memory_state.writer().update_chain(chain);
 
         let consistent_provider = provider.consistent_provider()?;
 

@@ -1243,7 +1243,7 @@ mod tests {
         let writer = factory.provider_rw()?;
         writer.save_blocks(&SaveBlocksInput::new(blocks[1..].to_vec(), 0, 0, 2, 1))?;
         writer.commit()?;
-        factory.overlay_manager().in_memory_state().insert_executed(blocks[2].clone());
+        factory.overlay_manager().in_memory_state().writer().insert_executed(blocks[2].clone());
         let provider = BlockchainProvider::new(factory)?;
 
         for number in [1, 2] {
@@ -1395,7 +1395,7 @@ mod tests {
                 })
                 .collect(),
         };
-        provider.canonical_in_memory_state.update_chain(chain);
+        provider.canonical_in_memory_state.writer().update_chain(chain);
 
         // Get canonical, safe, and finalized blocks
         let blocks = database_blocks.iter().chain(in_memory_blocks.iter()).collect::<Vec<_>>();
@@ -1467,7 +1467,11 @@ mod tests {
                 provider_rw.commit().unwrap();
 
                 // Remove from memory
-                hook_provider.canonical_in_memory_state.remove_persisted_blocks(num_hash);
+                hook_provider.canonical_in_memory_state.set_persisted(num_hash);
+                hook_provider
+                    .canonical_in_memory_state
+                    .writer()
+                    .remove_canonical_blocks_until(num_hash.hash, num_hash.number);
             }
         }));
     }
@@ -1528,7 +1532,7 @@ mod tests {
                 ..Default::default()
             }],
         };
-        provider.canonical_in_memory_state.update_chain(chain);
+        provider.canonical_in_memory_state.writer().update_chain(chain);
 
         // Now the block should be found in memory
         assert_eq!(
@@ -1554,7 +1558,7 @@ mod tests {
         assert_eq!(provider.find_block_by_hash(first_db_block.hash(), BlockSource::Pending)?, None);
 
         // Insert the last block into the pending state
-        provider.canonical_in_memory_state.set_pending_block(ExecutedBlock {
+        provider.canonical_in_memory_state.writer().set_pending_block(ExecutedBlock {
             recovered_block: Arc::new(RecoveredBlock::new_sealed(
                 last_in_mem_block.clone(),
                 Default::default(),
@@ -1618,7 +1622,7 @@ mod tests {
                 ..Default::default()
             }],
         };
-        provider.canonical_in_memory_state.update_chain(chain);
+        provider.canonical_in_memory_state.writer().update_chain(chain);
 
         // First in memory block should be found
         assert_eq!(
@@ -1662,7 +1666,7 @@ mod tests {
         );
 
         // Set the block as pending
-        provider.canonical_in_memory_state.set_pending_block(ExecutedBlock {
+        provider.canonical_in_memory_state.writer().set_pending_block(ExecutedBlock {
             recovered_block: Arc::new(RecoveredBlock::new_sealed(
                 block.clone(),
                 block.senders().unwrap(),
@@ -1713,7 +1717,7 @@ mod tests {
                 ..Default::default()
             }],
         };
-        provider.canonical_in_memory_state.update_chain(chain);
+        provider.canonical_in_memory_state.writer().update_chain(chain);
 
         let first_db_block = database_blocks.first().unwrap().clone();
         let first_in_mem_block = in_memory_blocks.first().unwrap().clone();
@@ -2196,7 +2200,7 @@ mod tests {
                 })
                 .unwrap()],
         };
-        provider.canonical_in_memory_state.update_chain(chain);
+        provider.canonical_in_memory_state.writer().update_chain(chain);
 
         assert_eq!(
             provider.account_block_changeset(last_database_block).unwrap(),
@@ -2310,13 +2314,15 @@ mod tests {
 
         // adding a pending block to state can test pending() and  pending_state_by_hash() function
         let pending_block = database_blocks[database_blocks.len() - 1].clone();
-        only_database_provider.canonical_in_memory_state.set_pending_block(ExecutedBlock {
-            recovered_block: Arc::new(RecoveredBlock::new_sealed(
-                pending_block.clone(),
-                Default::default(),
-            )),
-            ..Default::default()
-        });
+        only_database_provider.canonical_in_memory_state.writer().set_pending_block(
+            ExecutedBlock {
+                recovered_block: Arc::new(RecoveredBlock::new_sealed(
+                    pending_block.clone(),
+                    Default::default(),
+                )),
+                ..Default::default()
+            },
+        );
 
         assert_eq!(
             pending_block.hash(),
@@ -2402,7 +2408,7 @@ mod tests {
 
         // Set the pending block in memory
         let pending_block = in_memory_blocks.last().unwrap();
-        provider.canonical_in_memory_state.set_pending_block(ExecutedBlock {
+        provider.canonical_in_memory_state.writer().set_pending_block(ExecutedBlock {
             recovered_block: Arc::new(RecoveredBlock::new_sealed(
                 pending_block.clone(),
                 Default::default(),
@@ -3377,19 +3383,19 @@ mod tests {
         let (canonical, canonical_address, canonical_account) =
             executed_block_with_account(&mut rng, genesis.num_hash(), 1, Some(slot));
         let canonical_num_hash = canonical.recovered_block().num_hash();
-        in_memory_state.insert_executed(canonical.clone());
-        in_memory_state.update_chain(NewCanonicalChain::Commit { new: vec![canonical] });
+        in_memory_state.writer().insert_executed(canonical.clone());
+        in_memory_state.writer().update_chain(NewCanonicalChain::Commit { new: vec![canonical] });
 
         let (fork, fork_address, fork_account) =
             executed_block_with_account(&mut rng, genesis.num_hash(), 2, None);
         let fork_hash = fork.recovered_block().hash();
-        in_memory_state.insert_executed(fork);
+        in_memory_state.writer().insert_executed(fork);
 
         let (pending, pending_address, pending_account) =
             executed_block_with_account(&mut rng, canonical_num_hash, 3, None);
         let pending_hash = pending.recovered_block().hash();
-        in_memory_state.insert_executed(pending.clone());
-        in_memory_state.set_pending_block(pending);
+        in_memory_state.writer().insert_executed(pending.clone());
+        in_memory_state.writer().set_pending_block(pending);
 
         // `state_by_block_hash` only serves canonical and pending hashes; a fork is reached
         // through the overlay manager, which is what payload validation does.
@@ -3486,6 +3492,7 @@ mod tests {
         let executed = ExecutedBlock::new(Arc::new(block), Arc::new(execution_output), trie_data);
         provider
             .canonical_in_memory_state
+            .writer()
             .update_chain(NewCanonicalChain::Commit { new: vec![executed] });
 
         let state =
@@ -3534,6 +3541,7 @@ mod tests {
         let executed = ExecutedBlock::new(Arc::new(block), Arc::new(execution_output), trie_data);
         provider
             .canonical_in_memory_state
+            .writer()
             .update_chain(NewCanonicalChain::Commit { new: vec![executed] });
 
         // Persistence races ahead: a *different* block, with a *different* account, lands in

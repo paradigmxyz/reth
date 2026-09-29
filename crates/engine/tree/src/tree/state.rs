@@ -3,7 +3,9 @@
 use crate::engine::EngineApiKind;
 use alloy_eips::BlockNumHash;
 use alloy_primitives::{BlockNumber, B256};
-use reth_chain_state::{BlockState, CanonicalInMemoryState, EthPrimitives, ExecutedBlock};
+use reth_chain_state::{
+    BlockState, CanonicalInMemoryState, EthPrimitives, ExecutedBlock, InMemoryStateWriter,
+};
 use reth_primitives_traits::{AlloyBlockHeader, NodePrimitives, SealedHeader};
 use reth_storage_overlay::OverlayManager;
 use std::sync::Arc;
@@ -14,6 +16,8 @@ use tracing::debug;
 /// The executed blocks themselves are tracked by the node's [`CanonicalInMemoryState`], which this
 /// type shares with the providers and the [`OverlayManager`]: newly executed blocks go into its
 /// non-canonical section, and the engine moves them to its canonical section on forkchoice updates.
+/// This type holds the engine's [`InMemoryStateWriter`] for it, and updates the overlay manager's
+/// caches whenever it inserts or removes blocks.
 ///
 /// ## Invariants
 ///
@@ -25,6 +29,9 @@ pub struct TreeState<N: NodePrimitives = EthPrimitives> {
     pub(crate) current_canonical_head: BlockNumHash,
     /// The engine API variant of this handler
     pub(crate) engine_kind: EngineApiKind,
+    /// Write access to the in-memory state of `overlay_manager`, which tracks the executed
+    /// blocks.
+    in_memory_state: InMemoryStateWriter<N>,
     /// Manages state trie overlays for in-memory blocks, and holds the in-memory state that
     /// tracks the executed blocks.
     pub(crate) overlay_manager: OverlayManager<N>,
@@ -39,20 +46,22 @@ impl<N: NodePrimitives> Default for TreeState<N> {
 impl<N: NodePrimitives> TreeState<N> {
     /// Returns a new tree state that points to the given canonical head.
     ///
-    /// The executed blocks are tracked by the in-memory state of `overlay_manager`.
-    pub const fn new(
+    /// The executed blocks are tracked by the in-memory state of `overlay_manager`, which this
+    /// creates the engine's writer for.
+    pub fn new(
         current_canonical_head: BlockNumHash,
         engine_kind: EngineApiKind,
         overlay_manager: OverlayManager<N>,
     ) -> Self {
-        Self { current_canonical_head, engine_kind, overlay_manager }
+        let in_memory_state = InMemoryStateWriter::new(overlay_manager.in_memory_state().clone());
+        Self { current_canonical_head, engine_kind, in_memory_state, overlay_manager }
     }
 
     /// Resets the state and points to the given canonical head.
     ///
     /// This removes all executed in-memory blocks, canonical and non-canonical.
     pub fn reset(&mut self, current_canonical_head: BlockNumHash) {
-        let removed_hashes = self.in_memory_state().clear_state();
+        let removed_hashes = self.in_memory_state.clear_state();
         if !removed_hashes.is_empty() {
             self.overlay_manager.on_blocks_removed(removed_hashes);
         }
@@ -68,7 +77,12 @@ impl<N: NodePrimitives> TreeState<N> {
     ///
     /// This is the in-memory state of the [`OverlayManager`].
     pub const fn in_memory_state(&self) -> &CanonicalInMemoryState<N> {
-        self.overlay_manager.in_memory_state()
+        self.in_memory_state.state()
+    }
+
+    /// Returns the engine's writer for the in-memory state.
+    pub(crate) const fn in_memory_state_writer(&self) -> &InMemoryStateWriter<N> {
+        &self.in_memory_state
     }
 
     /// Returns the number of executed blocks stored.
@@ -122,7 +136,7 @@ impl<N: NodePrimitives> TreeState<N> {
             return;
         }
 
-        self.in_memory_state().insert_executed(executed);
+        self.in_memory_state.insert_executed(executed);
         self.overlay_manager.on_block_inserted(hash, parent_hash);
     }
 
@@ -176,12 +190,12 @@ impl<N: NodePrimitives> TreeState<N> {
         // * remove canonical blocks that are persisted
         // * remove forks whose root are below the finalized block
         let mut removed_hashes = self
-            .in_memory_state()
+            .in_memory_state
             .remove_canonical_blocks_until(last_persisted_hash, upper_bound.number);
         debug!(target: "engine::tree", ?upper_bound, ?last_persisted_hash, removed = removed_hashes.len(), "Removed canonical blocks from the tree");
 
         if let Some(finalized_num_hash) = finalized_num_hash {
-            let pruned = self.in_memory_state().prune_non_canonical_below(finalized_num_hash);
+            let pruned = self.in_memory_state.prune_non_canonical_below(finalized_num_hash);
             debug!(target: "engine::tree", ?finalized_num_hash, pruned = pruned.len(), "Removed finalized sidechain blocks");
             removed_hashes.extend(pruned);
         }
@@ -269,9 +283,7 @@ mod tests {
     /// Makes `blocks` canonical the way the engine does on a forkchoice update.
     fn make_canonical(tree_state: &mut TreeState, blocks: &[ExecutedBlock]) {
         tree_state.set_canonical_head(blocks.last().unwrap().recovered_block().num_hash());
-        tree_state
-            .in_memory_state()
-            .update_chain(NewCanonicalChain::Commit { new: blocks.to_vec() });
+        tree_state.in_memory_state.update_chain(NewCanonicalChain::Commit { new: blocks.to_vec() });
     }
 
     fn non_canonical_children(tree_state: &TreeState, parent: &ExecutedBlock) -> B256Set {
@@ -379,7 +391,7 @@ mod tests {
 
         // Reorging to the fork moves the replaced canonical blocks to the non-canonical section.
         tree_state.set_canonical_head(fork_block_5.recovered_block().num_hash());
-        tree_state.in_memory_state().update_chain(NewCanonicalChain::Reorg {
+        tree_state.in_memory_state.update_chain(NewCanonicalChain::Reorg {
             new: vec![fork_block_3.clone(), fork_block_4, fork_block_5],
             old: blocks[2..].to_vec(),
         });

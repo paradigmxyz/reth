@@ -15,7 +15,8 @@ use error::{
     InsertBlockError, InsertBlockFatalError, InsertBlockProcessingError, InsertBlockValidationError,
 };
 use reth_chain_state::{
-    CanonicalInMemoryState, ExecutedBlock, ExecutionTimingStats, NewCanonicalChain,
+    CanonicalInMemoryState, ExecutedBlock, ExecutionTimingStats, InMemoryStateWriter,
+    NewCanonicalChain,
 };
 use reth_consensus::{Consensus, FullConsensus};
 use reth_engine_primitives::{
@@ -302,6 +303,8 @@ where
     /// This is taken from the tree state, so the engine and its tree state always share the
     /// node's single store, which is also accessed from external sources, such as rpc.
     canonical_in_memory_state: CanonicalInMemoryState<N>,
+    /// The engine's write access to `canonical_in_memory_state`, taken from the tree state.
+    in_memory_state_writer: InMemoryStateWriter<N>,
     /// Handle to the payload builder that will receive payload attributes for valid forkchoice
     /// updates
     payload_builder: PayloadBuilderHandle<T>,
@@ -394,6 +397,7 @@ where
         runtime: reth_tasks::Runtime,
     ) -> Self {
         let canonical_in_memory_state = state.tree_state.in_memory_state().clone();
+        let in_memory_state_writer = state.tree_state.in_memory_state_writer().clone();
         let (incoming_tx, incoming) = crossbeam_channel::unbounded();
 
         let (payload_builds, payload_build_finished) = PayloadBuildTracker::new();
@@ -409,6 +413,7 @@ where
             backfill_sync_state: BackfillSyncState::Idle,
             state,
             canonical_in_memory_state,
+            in_memory_state_writer,
             payload_builder,
             config,
             metrics: Default::default(),
@@ -1087,7 +1092,7 @@ where
         // Load the canonical ancestor's block
         let executed_block = self.canonical_block_by_hash(new_head_hash)?;
         // Perform the reorg to properly handle the unwind
-        self.canonical_in_memory_state
+        self.in_memory_state_writer
             .update_chain(NewCanonicalChain::Reorg { new: vec![executed_block], old: old_blocks });
 
         // CRITICAL: Update the canonical head after the reorg
@@ -1127,7 +1132,7 @@ where
 
         // Load the block from storage
         let executed_block = self.canonical_block_by_hash(block_hash)?;
-        self.canonical_in_memory_state
+        self.in_memory_state_writer
             .update_chain(NewCanonicalChain::Commit { new: vec![executed_block] });
 
         debug!(
@@ -1636,7 +1641,7 @@ where
 
                         if is_pending {
                             debug!(target: "engine::tree", pending=?block_num_hash, "updating pending block");
-                            self.canonical_in_memory_state.set_pending_block(block.clone());
+                            self.in_memory_state_writer.set_pending_block(block.clone());
                         }
 
                         self.metrics.engine.inserted_already_executed_blocks.increment(1);
@@ -1891,7 +1896,7 @@ where
         self.purge_timing_stats(backfill_height, None);
         // no in-memory block is canonical anymore, because we're now synced to the backfill target
         // and consider it the canonical head
-        self.canonical_in_memory_state.demote_canonical_chain();
+        self.in_memory_state_writer.demote_canonical_chain();
 
         if let Ok(Some(new_head)) = self.provider.sealed_header(backfill_height) {
             // update the tracked chain height, after backfill sync both the canonical height and
@@ -2892,7 +2897,7 @@ where
         }
 
         // update the tracked in-memory state with the new chain
-        self.canonical_in_memory_state.update_chain(chain_update);
+        self.in_memory_state_writer.update_chain(chain_update);
         self.canonical_in_memory_state.set_canonical_head(tip.clone());
         self.payload_validator.on_canonical_head_changed(tip.hash(), &self.state);
 
@@ -3246,7 +3251,7 @@ where
 
         if is_pending {
             debug!(target: "engine::tree", pending=?block_num_hash, "updating pending block");
-            self.canonical_in_memory_state.set_pending_block(executed.clone());
+            self.in_memory_state_writer.set_pending_block(executed.clone());
         }
 
         self.metrics.engine.executed_blocks.set(self.state.tree_state.block_count() as f64);

@@ -1060,6 +1060,7 @@ mod tests {
         let manager = OverlayManager::default();
         manager
             .in_memory_state()
+            .writer()
             .update_chain(NewCanonicalChain::Commit { new: blocks[2..=4].to_vec() });
         let canonical = manager.in_memory_state();
         let provider = factory.provider().unwrap();
@@ -1120,7 +1121,7 @@ mod tests {
         let (factory, blocks) = setup_frontiers(1, 3);
         let manager = OverlayManager::default();
         for block in &blocks[2..=4] {
-            manager.in_memory_state().insert_executed(block.clone());
+            manager.in_memory_state().writer().insert_executed(block.clone());
         }
         let provider = factory.provider().unwrap();
 
@@ -1149,7 +1150,7 @@ mod tests {
     fn managed_overlay_skips_when_finish_is_the_anchor() {
         let (factory, blocks) = setup_frontiers(3, 3);
         let manager = OverlayManager::default();
-        manager.in_memory_state().insert_executed(blocks[4].clone());
+        manager.in_memory_state().writer().insert_executed(blocks[4].clone());
         let provider = factory.provider().unwrap();
 
         let overlay = manager
@@ -1277,7 +1278,7 @@ mod tests {
         let (factory, blocks) = setup_frontiers(1, 3);
         let manager = OverlayManager::default();
         for block in &blocks[2..=4] {
-            manager.in_memory_state().insert_executed(block.clone());
+            manager.in_memory_state().writer().insert_executed(block.clone());
         }
         let provider = factory.provider().unwrap();
 
@@ -1350,8 +1351,8 @@ mod tests {
         );
 
         let manager = OverlayManager::default();
-        manager.in_memory_state().insert_executed(side_block_two.clone());
-        manager.in_memory_state().insert_executed(side_block_three.clone());
+        manager.in_memory_state().writer().insert_executed(side_block_two.clone());
+        manager.in_memory_state().writer().insert_executed(side_block_three.clone());
         let provider = factory.provider().unwrap();
 
         let (overlay, fallback_block_number) = manager
@@ -1378,7 +1379,7 @@ mod tests {
         let (factory, blocks) = setup_frontiers(1, 1);
         let manager = OverlayManager::default();
         for block in &blocks[2..=3] {
-            manager.in_memory_state().insert_executed(block.clone());
+            manager.in_memory_state().writer().insert_executed(block.clone());
         }
         let provider = factory.provider().unwrap();
 
@@ -1396,7 +1397,7 @@ mod tests {
     fn managed_overlay_uses_persisted_parent_even_if_retained() {
         let (factory, blocks) = setup_frontiers(2, 3);
         let manager = OverlayManager::default();
-        manager.in_memory_state().insert_executed(blocks[1].clone());
+        manager.in_memory_state().writer().insert_executed(blocks[1].clone());
         let provider = factory.provider().unwrap();
         let builder = manager.overlay_builder(blocks[1].recovered_block().hash());
         match builder.anchor_at_parent(&provider).unwrap() {
@@ -1415,7 +1416,7 @@ mod tests {
         let manager = OverlayManager::default();
         let blocks = test_blocks();
         for block in &blocks[2..=4] {
-            manager.in_memory_state().insert_executed(block.clone());
+            manager.in_memory_state().writer().insert_executed(block.clone());
         }
 
         let block = TestBlockBuilder::eth().get_executed_block_with_number(
@@ -1499,7 +1500,7 @@ mod tests {
         let blocks = test_blocks();
         let manager = OverlayManager::default();
         for block in &blocks[2..=4] {
-            manager.in_memory_state().insert_executed(block.clone());
+            manager.in_memory_state().writer().insert_executed(block.clone());
         }
         let builder = manager
             .overlay_builder(blocks[4].recovered_block().hash())
