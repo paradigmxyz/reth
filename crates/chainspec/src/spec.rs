@@ -525,7 +525,7 @@ impl<H: BlockHeader> ChainSpec<H> {
             self.genesis.base_fee_per_gas.map(|fee| fee as u64).unwrap_or(INITIAL_BASE_FEE);
 
         // If London is activated at genesis, we set the initial base fee as per EIP-1559.
-        self.hardforks.fork(EthereumHardfork::London).active_at_block(0).then_some(genesis_base_fee)
+        self.is_london_active_at_block(0).then_some(genesis_base_fee)
     }
 
     /// Get the [`BaseFeeParams`] for the chain at the given timestamp.
