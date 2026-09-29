@@ -39,7 +39,7 @@ use tokio::{
     sync::{oneshot, Semaphore},
     time::{Interval, Sleep},
 };
-use tracing::{debug, trace, warn, Span};
+use tracing::{debug, debug_span, trace, warn, Span};
 
 mod better_payload_emitter;
 mod metrics;
@@ -432,7 +432,9 @@ where
             // acquire the permit for executing the task
             let permit = guard.acquire_owned().await;
             executor.spawn_blocking_named_or_tokio(PAYLOAD_BUILDER_THREAD_NAME, move || {
-                let _span = span.enter();
+                // Restore the parent even when the worker span is filtered out.
+                let _parent = span.enter();
+                let _span = debug_span!(target: "payload_builder", "build_payload").entered();
                 let _permit = permit;
                 let args = BuildArguments {
                     cached_reads,
@@ -601,7 +603,10 @@ where
                     self.executor.spawn_blocking_named_or_tokio(
                         PAYLOAD_BUILDER_THREAD_NAME,
                         move || {
-                            let _span = span.enter();
+                            let _parent = span.enter();
+                            let _span =
+                                debug_span!(target: "payload_builder", "build_empty_payload")
+                                    .entered();
                             let res = builder.build_empty_payload(config);
                             let _ = tx.send(res);
                         },
@@ -617,7 +622,10 @@ where
                     self.executor.spawn_blocking_named_or_tokio(
                         PAYLOAD_BUILDER_THREAD_NAME,
                         move || {
-                            let _span = span.enter();
+                            let _parent = span.enter();
+                            let _span =
+                                debug_span!(target: "payload_builder", "build_fallback_payload")
+                                    .entered();
                             let _ = tx.send(job());
                         },
                     );
