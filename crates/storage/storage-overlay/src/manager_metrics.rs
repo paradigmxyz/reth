@@ -2,6 +2,7 @@ use reth_metrics::{
     metrics::{Counter, Histogram},
     Metrics,
 };
+use std::time::Duration;
 
 /// Metrics for state trie overlay management.
 #[derive(Clone, Metrics)]
@@ -13,6 +14,8 @@ pub(crate) struct StateTrieOverlayMetrics {
     pub(crate) overlay_cache_reuses: Counter,
     /// Number of overlay cache entries populated by computing an overlay.
     pub(crate) overlay_cache_fills: Counter,
+    /// Time spent waiting for an in-progress overlay computation, in seconds.
+    pub(crate) overlay_wait_duration_seconds: Histogram,
 }
 
 /// Metrics for execution overlay management.
@@ -25,12 +28,16 @@ pub(crate) struct ExecutionOverlayMetrics {
     pub(crate) overlay_cache_reuses: Counter,
     /// Number of overlay cache entries populated by computing an overlay.
     pub(crate) overlay_cache_fills: Counter,
+    /// Time spent waiting for an in-progress overlay computation, in seconds.
+    pub(crate) overlay_wait_duration_seconds: Histogram,
 }
 
 pub(crate) trait OverlayCacheMetrics {
     fn record_cache_reuse(&self);
 
     fn record_cache_fill(&self);
+
+    fn record_wait_duration(&self, duration: Duration);
 }
 
 impl OverlayCacheMetrics for StateTrieOverlayMetrics {
@@ -41,6 +48,10 @@ impl OverlayCacheMetrics for StateTrieOverlayMetrics {
     fn record_cache_fill(&self) {
         self.overlay_cache_fills.increment(1);
     }
+
+    fn record_wait_duration(&self, duration: Duration) {
+        self.overlay_wait_duration_seconds.record(duration.as_secs_f64());
+    }
 }
 
 impl OverlayCacheMetrics for ExecutionOverlayMetrics {
@@ -50,5 +61,9 @@ impl OverlayCacheMetrics for ExecutionOverlayMetrics {
 
     fn record_cache_fill(&self) {
         self.overlay_cache_fills.increment(1);
+    }
+
+    fn record_wait_duration(&self, duration: Duration) {
+        self.overlay_wait_duration_seconds.record(duration.as_secs_f64());
     }
 }
