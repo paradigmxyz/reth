@@ -9,6 +9,7 @@ use alloy_primitives::{keccak256, Address, Bytes, B256, U256};
 use alloy_rpc_types_eth::{Account, AccountInfo, EIP1186AccountProofResponse};
 use alloy_serde::JsonStorageKey;
 use futures::Future;
+use reth_chain_state::BlockState;
 use reth_errors::RethError;
 use reth_evm::{ConfigureEvm, EvmEnvFor};
 use reth_primitives_traits::{BlockTy, RecoveredBlock, SealedHeaderFor};
@@ -23,6 +24,7 @@ use reth_storage_api::{
 };
 use reth_transaction_pool::TransactionPool;
 use reth_trie_common::{MultiProofTargetsV2, ProofV2Target};
+use revm::context_interface::Cfg as _;
 use std::{collections::HashMap, sync::Arc};
 
 /// Helper methods for `eth_` methods relating to state (accounts).
@@ -50,16 +52,56 @@ pub trait EthState: LoadState + SpawnBlocking {
         Ok(())
     }
 
-    /// Returns the number of transactions sent from an address at the given block identifier.
-    ///
-    /// If this is [`BlockNumberOrTag::Pending`](alloy_eips::BlockNumberOrTag) then this will
-    /// look up the highest transaction in pool and return the next nonce (highest + 1).
+    /// Returns the account nonce or a shared keyed nonce sequence at the selected block.
+    /// Omitted keys and `[0]` retain the legacy pending-pool nonce behavior.
     fn transaction_count(
         &self,
         address: Address,
         block_id: Option<BlockId>,
+        nonce_keys: Option<Vec<U256>>,
     ) -> impl Future<Output = Result<U256, Self::Error>> + Send {
-        LoadState::transaction_count(self, address, block_id)
+        async move {
+            let Some(keys) = nonce_keys else {
+                return LoadState::transaction_count(self, address, block_id).await;
+            };
+            alloy_eips::eip8141::validate_nonce_keys(&keys)
+                .map_err(|reason| EthApiError::InvalidParams(reason.into()))?;
+            if keys == [U256::ZERO] {
+                return LoadState::transaction_count(self, address, block_id).await;
+            }
+            self.spawn_blocking_io_fut(async move |this| {
+                let at = block_id.unwrap_or_default();
+                let pending = if at.is_pending() { this.pool_pending_block().await? } else { None };
+                let (env, state): (_, StateProviderBox) = if let Some(pending) = pending {
+                    let env =
+                        this.evm_env_for_header(pending.block().sealed_block().sealed_header())?;
+                    let parent_state = this.state_at_hash(pending.parent_hash())?;
+                    (env, Box::new(BlockState::from(pending).state_provider(parent_state)))
+                } else {
+                    let (env, at) = this.evm_env_at(at).await?;
+                    (env, this.state_at_block_id(at).await?)
+                };
+                if !env.cfg_env.is_eip8250_enabled() {
+                    return Err(EthApiError::KeyedNoncesNotActive.into());
+                }
+                let mut sequence = None;
+                for key in keys {
+                    let current = state
+                        .storage(
+                            alloy_eips::eip8141::NONCE_MANAGER,
+                            alloy_eips::eip8141::nonce_slot(address, key).into(),
+                        )
+                        .map_err(Self::Error::from_eth_err)?
+                        .unwrap_or_default();
+                    if sequence.is_some_and(|previous| previous != current) {
+                        return Err(EthApiError::NonceKeysNotSynchronized.into());
+                    }
+                    sequence = Some(current);
+                }
+                Ok(sequence.expect("validated nonempty nonce keys"))
+            })
+            .await
+        }
     }
 
     /// Returns code of given account, at given blocknumber.
