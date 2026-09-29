@@ -252,6 +252,42 @@ mod tests {
     use alloy_primitives::B256;
     use proptest::prelude::*;
 
+    #[test]
+    fn trie_node_v2_length_matches_encoding() {
+        let hash_child = RlpNode::word_rlp(&B256::repeat_byte(0x11));
+        let inline_child = RlpNode::from_rlp(&alloy_rlp::encode(LeafNode::new(
+            Nibbles::from_nibbles([0x1]),
+            vec![0x2],
+        )));
+        let stack = vec![hash_child.clone(), inline_child, hash_child.clone()];
+        let state_mask = TrieMask::new(0b1000_0000_0010_0001);
+        let branch_rlp_node =
+            RlpNode::from_rlp(&alloy_rlp::encode(BranchNodeRef::new(&stack, state_mask)));
+
+        let nodes = [
+            TrieNodeV2::EmptyRoot,
+            TrieNodeV2::Leaf(LeafNode::new(Nibbles::from_nibbles([0x1, 0x2, 0x3]), vec![0x4])),
+            TrieNodeV2::Leaf(LeafNode::new(Nibbles::from_nibbles([0xa; 64]), vec![0xbb; 100])),
+            TrieNodeV2::Branch(BranchNodeV2::new(
+                Nibbles::default(),
+                stack.clone(),
+                state_mask,
+                None,
+            )),
+            TrieNodeV2::Branch(BranchNodeV2::new(
+                Nibbles::from_nibbles([0x5, 0x6]),
+                stack,
+                state_mask,
+                Some(branch_rlp_node),
+            )),
+            TrieNodeV2::Extension(ExtensionNode::new(Nibbles::from_nibbles([0x7]), hash_child)),
+        ];
+
+        for node in nodes {
+            assert_eq!(node.length(), alloy_rlp::encode(&node).len(), "{node:?}");
+        }
+    }
+
     fn assert_roundtrip_and_length(node: TrieNodeV2) {
         let encoded = alloy_rlp::encode(&node);
         assert_eq!(node.length(), encoded.len());
