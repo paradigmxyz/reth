@@ -150,6 +150,8 @@ jobs:
   crate-checks:
     name: crate-checks (${{ matrix.partition }}/${{ matrix.total_partitions }})
     runs-on: ${{ github.repository == 'paradigmxyz/reth' && 'depot-ubuntu-latest-4' || 'ubuntu-latest' }}
+    env:
+      CARGO_INCREMENTAL: 0
     permissions:
       id-token: write
       contents: read
