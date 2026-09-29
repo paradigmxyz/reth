@@ -554,12 +554,12 @@ mod tests {
     type Bootstrap = SnapBootstrap<Arc<ScriptedSnapClient>, Factory, TestContext>;
 
     const FAR: B256 = B256::repeat_byte(0xaa);
-    // Serves heads in order, repeating the last, and ends the run at the first wait.
     // Changed on the orphaned branch, which credited it.
     const STALE: Address = Address::repeat_byte(0x51);
-    // Untouched by either branch.
+    // Untouched by the orphaned branch.
     const KEPT: Address = Address::repeat_byte(0x52);
 
+    // Serves heads in order, repeating the last, and ends the run at the first wait.
     struct TestContext {
         heads: RefCell<VecDeque<u64>>,
         waits: usize,
