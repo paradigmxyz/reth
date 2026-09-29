@@ -1031,6 +1031,7 @@ impl<P: Clone, Node: NodeTypes, N> RpcBlockchainStateProvider<P, Node, N> {
     }
 
     /// Get account information from RPC
+    #[allow(clippy::needless_update)]
     fn get_account(&self, address: Address) -> Result<Option<Account>, ProviderError>
     where
         P: Provider<N> + Clone + 'static,
@@ -1057,6 +1058,7 @@ impl<P: Clone, Node: NodeTypes, N> RpcBlockchainStateProvider<P, Node, N> {
                 balance: balance.map_err(ProviderError::other)?,
                 nonce: nonce.map_err(ProviderError::other)?,
                 code: code.map_err(ProviderError::other)?,
+                ..Default::default()
             };
 
             let code_hash = account_info.code_hash();
@@ -1076,11 +1078,8 @@ impl<P: Clone, Node: NodeTypes, N> RpcBlockchainStateProvider<P, Node, N> {
             let bytecode_hash =
                 if account_info.code.is_empty() { None } else { Some(account_info.code_hash()) };
 
-            Ok(Some(Account {
-                balance: account_info.balance,
-                nonce: account_info.nonce,
-                bytecode_hash,
-            }))
+            // Remote account extensions are not carried yet.
+            Ok(Some(Account::new(account_info.nonce, account_info.balance, bytecode_hash)))
         }
     }
 }
