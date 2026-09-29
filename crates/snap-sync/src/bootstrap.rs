@@ -29,11 +29,9 @@ pub const DEFAULT_RANGES_PER_CHECK: usize = 64;
 
 /// Drives snap synchronization until its downloaded state is ready for the trie rebuild.
 ///
-/// Each pass moves a lagging pivot forward, applies the block access lists that carry the
-/// downloaded state to it, fetches scheduled repairs again at it, then downloads account ranges
-/// with their storage and code. An attempt
-/// whose pivot leaves the canonical chain or outlives the served lists is abandoned and started
-/// over.
+/// Each pass moves a lagging pivot forward, applies the lists that carry the state to it, fetches
+/// scheduled repairs again there, then downloads account ranges with their storage and code. An
+/// attempt whose pivot leaves the canonical chain or outlives the served lists starts over.
 pub struct SnapBootstrap<C, F, X> {
     factory: F,
     // Blocking database work runs off the async worker.
