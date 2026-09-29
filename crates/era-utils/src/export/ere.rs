@@ -38,11 +38,11 @@ impl EraBlockWriter for Ere {
         // Total difficulty and the accumulator are pre-merge only: post-merge blocks have zero
         // difficulty and the accumulator is frozen at the merge. Difficulty drops to zero
         // monotonically, so the first block decides whether the file carries them at all.
-        let pre_merge = !blocks[0].header.difficulty().is_zero();
+        let pre_merge = !blocks[0].header.is_zero_difficulty();
         // Post-merge blocks are not part of any epoch accumulator, so a merge-spanning file builds
         // its accumulator from the pre-merge prefix only, while total difficulty is kept for every
         // block.
-        let pre_merge_count = blocks.partition_point(|b| !b.header.difficulty().is_zero());
+        let pre_merge_count = blocks.partition_point(|b| !b.header.is_zero_difficulty());
 
         let tuples = blocks
             .iter()

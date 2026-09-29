@@ -148,11 +148,7 @@ where
                 }
             };
 
-            let state = ForkchoiceState {
-                head_block_hash,
-                safe_block_hash: head_block_hash,
-                finalized_block_hash: head_block_hash,
-            };
+            let state = ForkchoiceState::same_hash(head_block_hash);
 
             match engine.fork_choice_updated(state, None).await {
                 Ok(response) => match response.payload_status.status {

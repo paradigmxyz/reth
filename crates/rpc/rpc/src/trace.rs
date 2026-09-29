@@ -1,6 +1,6 @@
 use alloy_consensus::BlockHeader as _;
 use alloy_eips::{BlockId, BlockNumHash};
-use alloy_evm::block::calc::{base_block_reward_pre_merge, block_reward, ommer_reward};
+use alloy_evm::block::calc::{base_block_reward, block_reward, ommer_reward};
 use alloy_primitives::{
     map::{HashMap, HashSet},
     Address, BlockHash, Bytes, B256, U256,
@@ -18,7 +18,7 @@ use alloy_rpc_types_trace::{
 use async_trait::async_trait;
 use futures::{FutureExt, StreamExt};
 use jsonrpsee::core::RpcResult;
-use reth_chainspec::{ChainSpecProvider, EthereumHardforks};
+use reth_chainspec::ChainSpecProvider;
 use reth_primitives_traits::{BlockBody, BlockHeader};
 use reth_rpc_api::TraceApiServer;
 use reth_rpc_convert::RpcTxReq;
@@ -305,17 +305,12 @@ where
     /// - the genesis block is not mined, so no block rewards are given
     /// - if Paris hardfork is activated, no block rewards are given
     /// - if Paris hardfork is not activated, calculate block rewards with block number only
-    fn calculate_base_block_reward<H: BlockHeader>(
-        &self,
-        header: &H,
-    ) -> Result<Option<u128>, Eth::Error> {
-        let chain_spec = self.provider().chain_spec();
-
-        if header.number() == 0 || chain_spec.is_paris_active_at_block(header.number()) {
-            return Ok(None)
+    fn calculate_base_block_reward<H: BlockHeader>(&self, header: &H) -> Option<u128> {
+        if header.number() == 0 {
+            return None
         }
 
-        Ok(Some(base_block_reward_pre_merge(&chain_spec, header.number())))
+        base_block_reward(self.provider().chain_spec(), header.number())
     }
 
     /// Extracts the reward traces for the given block:
@@ -474,7 +469,7 @@ where
                 let (block, traces) = block_replay?;
                 let reward_traces = if include_reward_traces {
                     if let Some(base_block_reward) =
-                        self.calculate_base_block_reward(block.header())?
+                        self.calculate_base_block_reward(block.header())
                     {
                         self.extract_reward_traces(
                             block.header(),
@@ -547,7 +542,7 @@ where
             .map(|traces| traces.into_iter().flatten().collect::<Vec<_>>());
 
         if let Some(traces) = traces.as_mut() &&
-            let Some(base_block_reward) = self.calculate_base_block_reward(block.header())?
+            let Some(base_block_reward) = self.calculate_base_block_reward(block.header())
         {
             traces.extend(self.extract_reward_traces(
                 block.header(),
