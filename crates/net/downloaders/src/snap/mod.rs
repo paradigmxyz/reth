@@ -354,7 +354,7 @@ mod tests {
     }
 
     fn root(accounts: &[(B256, TrieAccount)]) -> B256 {
-        state_root(accounts.iter().copied())
+        state_root(accounts.to_vec())
     }
 
     fn root_and_proof(accounts: &[(B256, TrieAccount)], targets: &[B256]) -> (B256, Vec<Bytes>) {
