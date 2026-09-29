@@ -10,8 +10,8 @@ use alloy_rpc_types_eth::{
     state::EvmOverrides, Account, AccountInfo, BlockError, Bundle, Index, StateContext,
 };
 use alloy_rpc_types_trace::geth::{
-    ChainBlockTraceResult, GethDebugTracingCallOptions, GethDebugTracingOptions, GethTrace,
-    TraceResult,
+    erc7562::Erc7562Config, ChainBlockTraceResult, GethDebugBuiltInTracerType, GethDebugTracerType,
+    GethDebugTracingCallOptions, GethDebugTracingOptions, GethTrace, TraceResult,
 };
 use async_trait::async_trait;
 use futures::Stream;
@@ -338,14 +338,17 @@ where
 
         // log indices are block-level, so the trace continues after the logs of the preceding
         // transactions; without receipts (pruned) numbering falls back to the transaction
-        let next_log_index = self
-            .eth_api()
-            .cache()
-            .get_receipts(block.hash())
-            .await
-            .map_err(Eth::Error::from_eth_err)?
-            .map(|receipts| calculate_gas_used_and_next_log_index(index as u64, &receipts).1)
-            .unwrap_or_default();
+        let next_log_index = if records_call_logs(&opts) {
+            self.eth_api()
+                .cache()
+                .get_receipts(block.hash())
+                .await
+                .map_err(Eth::Error::from_eth_err)?
+                .map(|receipts| calculate_gas_used_and_next_log_index(index as u64, &receipts).1)
+                .unwrap_or_default()
+        } else {
+            0
+        };
 
         self.eth_api()
             .spawn_with_state_at_block(block.parent_hash(), move |eth_api, mut db| {
@@ -1476,6 +1479,31 @@ struct DebugApiInner<Eth: RpcNodeCore> {
 struct BadBlockStore<B: BlockTrait> {
     inner: Arc<RwLock<VecDeque<BadBlockEntry<B>>>>,
     limit: usize,
+}
+
+/// Returns whether the options select a callTracer or erc7562Tracer with `withLog`, directly or
+/// as the callTracer of a muxTracer.
+fn records_call_logs(opts: &GethDebugTracingOptions) -> bool {
+    let config = opts.tracer_config.clone();
+    match &opts.tracer {
+        Some(GethDebugTracerType::BuiltInTracer(GethDebugBuiltInTracerType::CallTracer)) => {
+            config.into_call_config().is_ok_and(|config| config.with_log.unwrap_or_default())
+        }
+        Some(GethDebugTracerType::BuiltInTracer(GethDebugBuiltInTracerType::Erc7562Tracer)) => {
+            config
+                .from_value::<Erc7562Config>()
+                .is_ok_and(|config| config.with_log.unwrap_or_default())
+        }
+        Some(GethDebugTracerType::BuiltInTracer(GethDebugBuiltInTracerType::MuxTracer)) => config
+            .into_mux_config()
+            .ok()
+            .and_then(|mux| {
+                mux.0.get(&GethDebugBuiltInTracerType::CallTracer.into()).cloned().flatten()
+            })
+            .and_then(|config| config.into_call_config().ok())
+            .is_some_and(|config| config.with_log.unwrap_or_default()),
+        _ => false,
+    }
 }
 
 /// A cached bad block paired with the reason it was rejected.
