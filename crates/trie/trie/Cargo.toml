@@ -95,6 +95,12 @@ serde-bincode-compat = [
     "alloy-eips/serde-bincode-compat",
     "reth-trie-common/serde-bincode-compat",
 ]
+account-ext = [
+    "reth-stages-types/account-ext",
+    "alloy-trie/account-ext",
+    "reth-primitives-traits/account-ext",
+    "revm/account-ext",
+]
 
 [[bench]]
 name = "proof_v2"

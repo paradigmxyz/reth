@@ -1378,7 +1378,7 @@ impl ArenaParallelSparseTrie {
                 (new_leaf_nibble, new_leaf_idx, old_child_nibble, old_child_idx)
             };
 
-        let state_mask = TrieMask::from(1u16 << first_nibble | 1u16 << second_nibble);
+        let state_mask = TrieMask::from_nibble(first_nibble) | TrieMask::from_nibble(second_nibble);
         let mut children = SmallVec::with_capacity(2);
         children.push(ArenaSparseNodeBranchChild::Revealed(first_child));
         children.push(ArenaSparseNodeBranchChild::Revealed(second_child));

@@ -1463,11 +1463,20 @@ impl<TX: DbTx, N: NodeTypes> DatabaseProvider<TX, N> {
         }
     }
 
+    /// Refuses snap sync on a database without the hashed state layout it downloads into.
+    pub fn ensure_snap_sync_layout(&self) -> ProviderResult<()> {
+        if self.cached_storage_settings().use_hashed_state() {
+            Ok(())
+        } else {
+            Err(ProviderError::SnapStorageLayoutUnsupported)
+        }
+    }
+
     /// Refuses a database the selected backfill cannot serve: snap downloads the hashed state
     /// layout, and state an unfinished attempt left behind is only ever completed by snap.
     pub fn ensure_snap_backfill_eligible(&self, snap_enabled: bool) -> ProviderResult<()> {
-        if snap_enabled && !self.cached_storage_settings().use_hashed_state() {
-            return Err(ProviderError::SnapStorageLayoutUnsupported)
+        if snap_enabled {
+            self.ensure_snap_sync_layout()?;
         }
         match self.snap_attempt()? {
             Some(attempt) if !snap_enabled && !attempt.is_verified() => {

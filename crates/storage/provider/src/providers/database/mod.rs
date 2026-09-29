@@ -1237,6 +1237,20 @@ mod tests {
     }
 
     #[test]
+    fn snap_sync_requires_the_hashed_state_layout() {
+        let factory = create_test_provider_factory();
+
+        factory.set_storage_settings_cache(StorageSettings::v2());
+        assert!(factory.database_provider_ro().unwrap().ensure_snap_sync_layout().is_ok());
+
+        factory.set_storage_settings_cache(StorageSettings::v1());
+        assert_matches!(
+            factory.database_provider_ro().unwrap().ensure_snap_sync_layout(),
+            Err(ProviderError::SnapStorageLayoutUnsupported)
+        );
+    }
+
+    #[test]
     fn a_backfill_selection_the_database_cannot_serve_is_refused() {
         let factory = create_test_provider_factory();
         factory.set_storage_settings_cache(StorageSettings::v2());
@@ -1267,12 +1281,5 @@ mod tests {
             .unwrap()
             .ensure_snap_backfill_eligible(false)
             .is_ok());
-
-        // Snap downloads hashed state, which the older layout does not store.
-        factory.set_storage_settings_cache(StorageSettings::v1());
-        assert!(matches!(
-            factory.database_provider_ro().unwrap().ensure_snap_backfill_eligible(true).err(),
-            Some(ProviderError::SnapStorageLayoutUnsupported)
-        ));
     }
 }

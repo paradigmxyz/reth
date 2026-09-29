@@ -277,13 +277,7 @@ mod tests {
         let address = Address::repeat_byte(0x01);
         let code_hash = B256::repeat_byte(0x42);
         let bytecode = Bytecode::new_raw(Bytes::from_static(&[0x60, 0x00]));
-        let account = AccountInfo {
-            nonce: 7,
-            balance: U256::from(42),
-            code_hash,
-            code: Some(bytecode.clone()),
-            ..Default::default()
-        };
+        let account = AccountInfo::new(U256::from(42), 7, code_hash, bytecode.clone());
         let db = CountingDatabaseRef::new(address, Some(account), bytecode.clone());
         let provider = DatabaseStateProvider::new(db);
 
@@ -342,13 +336,7 @@ mod tests {
         let address = Address::repeat_byte(0x01);
         let code_hash = B256::repeat_byte(0x42);
         let bytecode = Bytecode::new_raw(Bytes::from_static(&[0x60, 0x00]));
-        let account = AccountInfo {
-            nonce: 7,
-            balance: U256::from(42),
-            code_hash,
-            code: Some(bytecode.clone()),
-            ..Default::default()
-        };
+        let account = AccountInfo::new(U256::from(42), 7, code_hash, bytecode.clone());
         let db = CountingDatabaseRef::new(address, Some(account), bytecode.clone());
         let account_reads = db.account_reads.clone();
         let bytecode_reads = db.bytecode_reads.clone();
