@@ -468,12 +468,55 @@ pub trait LoadState:
         Self: SpawnBlocking,
     {
         let address = request.as_ref().from;
+        let nonce_keys = request.as_ref().nonce_keys.clone();
         self.spawn_blocking_io(move |this| {
             let address = match address {
                 Some(address) => address,
                 None => return Err(SignError::NoAccount.into_eth_err()),
             };
 
+            if let Some(keys) = nonce_keys {
+                alloy_eips::eip8141::validate_nonce_keys(&keys)
+                    .map_err(|reason| EthApiError::InvalidParams(reason.into()))?;
+                if keys != [U256::ZERO] {
+                    let state = this.latest_state()?;
+                    let mut sequence = None;
+                    for key in keys {
+                        let current = state
+                            .storage(
+                                alloy_eips::eip8141::NONCE_MANAGER,
+                                alloy_eips::eip8141::nonce_slot(address, key).into(),
+                            )
+                            .map_err(Self::Error::from_eth_err)?
+                            .unwrap_or_default();
+                        if current >= U256::from(u64::MAX) {
+                            return Err(EthApiError::InvalidParams(
+                                "keyed nonce sequence exhausted".into(),
+                            )
+                            .into());
+                        }
+                        if sequence.is_some_and(|previous| previous != current) {
+                            return Err(EthApiError::InvalidParams(
+                                "nonce keys do not share one sequence".into(),
+                            )
+                            .into());
+                        }
+                        sequence = Some(current);
+                    }
+                    return Ok(sequence.expect("validated nonempty nonce keys").to::<u64>());
+                }
+                let sequence = this
+                    .latest_state()?
+                    .account_nonce(&address)
+                    .map_err(Self::Error::from_eth_err)?
+                    .unwrap_or_default();
+                if sequence == u64::MAX {
+                    return Err(
+                        EthApiError::InvalidParams("keyed nonce sequence exhausted".into()).into()
+                    );
+                }
+                return Ok(sequence);
+            }
             // first fetch the on chain nonce of the account
             let mut next_nonce = this
                 .latest_state()?

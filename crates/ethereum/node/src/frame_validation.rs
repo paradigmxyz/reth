@@ -1,11 +1,13 @@
 //! Canonical-snapshot validation of public frame transactions.
 
 use alloy_consensus::BlockHeader;
+use alloy_eips::eip8141::{nonce_slot, NONCE_MANAGER};
+use alloy_primitives::U256;
 use reth_ethereum_primitives::TransactionSigned;
 use reth_evm::{ConfigureEvm, Evm, FromRecoveredTx, TxEnvFor};
 use reth_node_api::{FullNodeTypes, NodePrimitives, NodeTypes, PrimitivesTy};
 use reth_revm::database::StateProviderDatabase;
-use reth_storage_api::{AccountReader, BlockReaderIdExt, StateProviderFactory};
+use reth_storage_api::{AccountReader, BlockReaderIdExt, StateProvider, StateProviderFactory};
 use reth_tracing::tracing::info;
 use reth_transaction_pool::{
     error::{Eip8141PoolTransactionError, InvalidPoolTransactionError},
@@ -74,10 +76,9 @@ where
         .map_err(|_| policy("canonical state unavailable"))?;
     let mut env =
         evm_config.evm_env(&head).map_err(|_| policy("cannot configure frame validation EVM"))?;
-    // Public-pool validation may inspect a nonce-gapped transaction. The pool queues such
-    // transactions behind their missing ancestors; this simulation only validates the frame
-    // prefix and must not reject a valid future nonce before the pool can do that bookkeeping.
-    env.cfg_env.disable_nonce_check = true;
+    // Pre-fork frames may queue behind missing nonces. Keyed frames require every selected
+    // sequence to match canonical state before admission.
+    env.cfg_env.disable_nonce_check = frame.nonce_keys.is_none();
     let tx = TxEnvFor::<EvmConfig>::from_recovered_tx_with_gas_params(
         transaction.transaction.inner(),
         frame.sender,
@@ -178,6 +179,23 @@ where
         .basic_account(&frame.sender)
         .map_err(|_| policy("cannot read sender"))?
         .unwrap_or_default();
+    let mut state_nonce = sender.nonce;
+    if let Some(keys) = &frame.nonce_keys &&
+        keys != &[U256::ZERO]
+    {
+        state_nonce = frame.nonce;
+        for key in keys {
+            let slot = nonce_slot(frame.sender, *key);
+            dependencies.storage.push((NONCE_MANAGER, slot));
+            let current = state
+                .storage(NONCE_MANAGER, slot.into())
+                .map_err(|_| policy("cannot read keyed nonce"))?
+                .unwrap_or_default();
+            if current != U256::from(frame.nonce) {
+                return Err(policy("keyed nonce sequence mismatch"));
+            }
+        }
+    }
     if result.max_cost > payer.balance {
         info!(
             target: "reth::eip8141::pool",
@@ -206,7 +224,8 @@ where
     Ok(Arc::new(FrameValidation {
         sender: frame.sender,
         sender_nonce: frame.nonce,
-        state_nonce: sender.nonce,
+        nonce_keys: frame.nonce_keys.clone(),
+        state_nonce,
         sender_balance: sender.balance,
         sender_code_hash: sender.bytecode_hash,
         payer: result.payer,

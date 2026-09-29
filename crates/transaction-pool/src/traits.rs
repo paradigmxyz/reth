@@ -1499,6 +1499,11 @@ pub trait PoolTransaction:
     /// The Sender of the transaction.
     fn sender(&self) -> Address;
 
+    /// Returns EIP-8250 nonce keys, or `None` for a legacy payload.
+    fn eip8250_nonce_keys(&self) -> Option<&[U256]> {
+        None
+    }
+
     /// Returns frame validation metadata when attached.
     fn frame_validation(&self) -> Option<&Arc<FrameValidation>> {
         None
@@ -1792,6 +1797,10 @@ impl PoolTransaction for EthPooledTransaction {
         self.transaction.signer_ref()
     }
 
+    fn eip8250_nonce_keys(&self) -> Option<&[U256]> {
+        self.transaction.inner().as_eip8141()?.nonce_keys.as_deref()
+    }
+
     fn frame_validation(&self) -> Option<&Arc<FrameValidation>> {
         self.frame_validation.as_ref()
     }
@@ -1800,7 +1809,10 @@ impl PoolTransaction for EthPooledTransaction {
         if !self.is_eip8141() {
             return Err("frame validation metadata requires an EIP-8141 transaction");
         }
-        if metadata.sender != self.sender() || metadata.sender_nonce != self.nonce() {
+        if metadata.sender != self.sender() ||
+            metadata.sender_nonce != self.nonce() ||
+            metadata.nonce_keys.as_deref() != self.eip8250_nonce_keys()
+        {
             return Err("frame validation metadata sender or nonce mismatch");
         }
         self.cost = metadata.max_cost;
@@ -1839,6 +1851,10 @@ impl<T: InMemorySize> InMemorySize for EthPooledTransaction<T> {
                 // Include its allocation in pool pressure accounting without changing encoded
                 // length.
                 std::mem::size_of::<FrameValidation>() +
+                    metadata
+                        .nonce_keys
+                        .as_ref()
+                        .map_or(0, |keys| keys.capacity() * std::mem::size_of::<U256>()) +
                     2 * std::mem::size_of::<usize>() +
                     metadata.dependencies.accounts.capacity() * std::mem::size_of::<Address>() +
                     metadata.dependencies.code.capacity() * std::mem::size_of::<Address>() +

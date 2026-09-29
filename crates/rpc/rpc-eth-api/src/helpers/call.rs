@@ -1040,11 +1040,41 @@ pub trait Call:
         mut db: impl Database<Error: Into<EthApiError>>,
     ) -> Result<TxEnvFor<Self::Evm>, Self::Error> {
         if request.as_ref().nonce().is_none() {
-            let nonce = db
-                .basic(request.as_ref().from().unwrap_or_default())
-                .map_err(Into::into)?
-                .map(|acc| acc.nonce)
-                .unwrap_or_default();
+            let mut keyed_nonce = None;
+            if let Some(keys) = request.as_ref().nonce_keys.as_ref() {
+                alloy_eips::eip8141::validate_nonce_keys(keys)
+                    .map_err(|reason| EthApiError::InvalidParams(reason.into()))?;
+                if keys != &[U256::ZERO] {
+                    for key in keys {
+                        let value = db
+                            .storage(
+                                alloy_eips::eip8141::NONCE_MANAGER,
+                                alloy_eips::eip8141::nonce_slot(
+                                    request.as_ref().from().unwrap_or_default(),
+                                    *key,
+                                ),
+                            )
+                            .map_err(Into::into)?;
+                        if value >= U256::from(u64::MAX) ||
+                            keyed_nonce.is_some_and(|previous| previous != value)
+                        {
+                            return Err(EthApiError::InvalidParams(
+                                "nonce keys require one non-exhausted sequence".into(),
+                            )
+                            .into());
+                        }
+                        keyed_nonce = Some(value);
+                    }
+                }
+            }
+            let nonce = if let Some(nonce) = keyed_nonce {
+                nonce.to::<u64>()
+            } else {
+                db.basic(request.as_ref().from().unwrap_or_default())
+                    .map_err(Into::into)?
+                    .map(|acc| acc.nonce)
+                    .unwrap_or_default()
+            };
             request.as_mut().set_nonce(nonce);
         }
 

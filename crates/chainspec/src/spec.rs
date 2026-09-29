@@ -313,6 +313,10 @@ pub fn create_chain_config(
         osaka_time: timestamp(EthereumHardfork::Osaka),
         amsterdam_time: timestamp(EthereumHardfork::Amsterdam),
         bogota_time: timestamp(EthereumHardfork::Bogota),
+        eip8250_time: match hardforks.fork(FrameHardfork::Eip8250) {
+            ForkCondition::Timestamp(t) => Some(t),
+            _ => None,
+        },
         bpo1_time: timestamp(EthereumHardfork::Bpo1),
         bpo2_time: timestamp(EthereumHardfork::Bpo2),
         bpo3_time: timestamp(EthereumHardfork::Bpo3),
@@ -820,7 +824,7 @@ impl<H: BlockHeader> ChainSpec<H> {
 }
 
 impl From<Genesis> for ChainSpec {
-    fn from(genesis: Genesis) -> Self {
+    fn from(mut genesis: Genesis) -> Self {
         // Block-based hardforks
         let hardfork_opts = [
             (EthereumHardfork::Frontier.boxed(), Some(0)),
@@ -903,6 +907,7 @@ impl From<Genesis> for ChainSpec {
             (EthereumHardfork::Bpo5.boxed(), genesis.config.bpo5_time),
             (EthereumHardfork::Amsterdam.boxed(), genesis.config.amsterdam_time),
             (EthereumHardfork::Bogota.boxed(), bogota_time),
+            (FrameHardfork::Eip8250.boxed(), genesis.config.eip8250_time),
         ];
 
         let mut time_hardforks = time_hardfork_opts
@@ -940,6 +945,7 @@ impl From<Genesis> for ChainSpec {
         });
 
         let hardforks = ChainHardforks::new(ordered_hardforks);
+        configure_nonce_manager(&mut genesis, &hardforks);
 
         Self {
             chain: genesis.config.chain_id.into(),
@@ -1235,12 +1241,18 @@ impl ChainSpecBuilder {
         self
     }
 
+    /// Schedules EIP-8250 keyed nonce activation independently of EIP-8141.
+    pub fn with_eip8250_at(mut self, timestamp: u64) -> Self {
+        self.hardforks.insert(FrameHardfork::Eip8250, ForkCondition::Timestamp(timestamp));
+        self
+    }
+
     /// Build the resulting [`ChainSpec`].
     ///
     /// # Panics
     ///
-    /// This function panics if the chain ID and genesis is not set ([`Self::chain`] and
-    /// [`Self::genesis`])
+    /// Panics if the chain or genesis is missing, EIP-8250 precedes EIP-8141, or the nonce-manager
+    /// address contains incompatible genesis code or storage.
     pub fn build(self) -> ChainSpec {
         let paris_block_and_final_difficulty = {
             self.hardforks.get(EthereumHardfork::Paris).and_then(|cond| {
@@ -1251,7 +1263,8 @@ impl ChainSpecBuilder {
                 }
             })
         };
-        let genesis = self.genesis.expect("The genesis is required");
+        let mut genesis = self.genesis.expect("The genesis is required");
+        configure_nonce_manager(&mut genesis, &self.hardforks);
         ChainSpec {
             chain: self.chain.expect("The chain is required"),
             genesis_header: SealedHeader::new_unhashed(make_genesis_header(
@@ -1277,7 +1290,48 @@ impl From<&Arc<ChainSpec>> for ChainSpecBuilder {
     }
 }
 
+reth_ethereum_forks::hardfork!(
+    /// Independently scheduled frame transaction upgrades.
+    FrameHardfork {
+        /// EIP-8250 keyed nonces.
+        Eip8250,
+    }
+);
+
+fn configure_nonce_manager(genesis: &mut Genesis, hardforks: &ChainHardforks) {
+    use alloy_eips::eip8141::{NONCE_MANAGER, NONCE_MANAGER_CODE};
+    let ForkCondition::Timestamp(timestamp) = hardforks.fork(FrameHardfork::Eip8250) else {
+        return;
+    };
+    assert!(
+        hardforks.fork(EthereumHardfork::Bogota).active_at_timestamp(timestamp),
+        "EIP-8250 requires EIP-8141 at or before activation"
+    );
+    if let Some(account) = genesis.alloc.get(&NONCE_MANAGER) {
+        assert!(
+            account.storage.as_ref().is_none_or(|storage| storage.values().all(B256::is_zero)),
+            "EIP-8250 nonce manager address contains storage"
+        );
+        assert!(
+            account.code.as_ref().is_none_or(|code| code.is_empty() ||
+                (genesis.timestamp >= timestamp && code.as_ref() == NONCE_MANAGER_CODE)),
+            "EIP-8250 nonce manager address contains code"
+        );
+    }
+    if genesis.timestamp >= timestamp {
+        let account = genesis.alloc.entry(NONCE_MANAGER).or_default();
+        account.code = Some(NONCE_MANAGER_CODE.into());
+        account.nonce = Some(account.nonce.unwrap_or_default().max(1));
+    }
+}
+
 impl<H: BlockHeader> EthExecutorSpec for ChainSpec<H> {
+    fn eip8250_timestamp(&self) -> Option<u64> {
+        match self.hardforks.fork(FrameHardfork::Eip8250) {
+            ForkCondition::Timestamp(t) => Some(t),
+            _ => None,
+        }
+    }
     fn deposit_contract_address(&self) -> Option<Address> {
         self.deposit_contract.map(|deposit_contract| deposit_contract.address)
     }
@@ -1347,6 +1401,49 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn keyed_nonce_activation_is_independent_and_preserves_genesis_balance() {
+        use alloy_eips::eip8141::{NONCE_MANAGER, NONCE_MANAGER_CODE};
+        let mut genesis = Genesis::default();
+        genesis.alloc.insert(
+            NONCE_MANAGER,
+            alloy_genesis::GenesisAccount {
+                balance: U256::from(19),
+                nonce: Some(7),
+                ..Default::default()
+            },
+        );
+        let builder =
+            ChainSpecBuilder::default().chain(1.into()).genesis(genesis).bogota_activated();
+        let disabled = builder.clone().build();
+        assert_eq!(disabled.eip8250_timestamp(), None);
+        assert!(disabled.genesis.alloc[&NONCE_MANAGER].code.is_none());
+        let future = builder.clone().with_eip8250_at(10).build();
+        assert_eq!(future.eip8250_timestamp(), Some(10));
+        assert!(future.genesis.alloc[&NONCE_MANAGER].code.is_none());
+        let active = builder.with_eip8250_at(0).build();
+        let account = &active.genesis.alloc[&NONCE_MANAGER];
+        assert_eq!(
+            account.code.as_ref().map(|code| code.as_ref()),
+            Some(NONCE_MANAGER_CODE.as_slice())
+        );
+        assert_eq!(account.balance, U256::from(19));
+        assert_eq!(account.nonce, Some(7));
+        assert!(account.storage.is_none());
+        assert_ne!(active.genesis_header.state_root, disabled.genesis_header.state_root);
+    }
+
+    #[test]
+    #[should_panic(expected = "requires EIP-8141")]
+    fn keyed_nonce_activation_cannot_precede_frames() {
+        ChainSpecBuilder::default()
+            .chain(1.into())
+            .genesis(Genesis::default())
+            .with_bogota_at(10)
+            .with_eip8250_at(9)
+            .build();
     }
 
     #[test]
