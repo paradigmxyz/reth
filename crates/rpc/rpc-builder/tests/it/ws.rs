@@ -208,13 +208,8 @@ async fn test_eth_subscribe_not_available_over_http() {
     assert!(handle.ws_client().await.is_none(), "WS should not be available on HTTP-only server");
 }
 
-#[tokio::test(flavor = "multi_thread")]
-async fn test_eth_subscribe_pending_transactions_receives_tx() {
-    reth_tracing::init_test_tracing();
-
-    let pool: TestPool = TestPoolBuilder::default().into();
-    let pool_clone = pool.clone();
-
+/// Launches a WS server with the standard modules, backed by the given pool.
+async fn launch_ws_with_pool(pool: TestPool) -> reth_rpc_builder::RpcServerHandle {
     let builder = RpcModuleBuilder::default()
         .with_provider(NoopProvider::default())
         .with_pool(pool)
@@ -229,12 +224,20 @@ async fn test_eth_subscribe_pending_transactions_receives_tx() {
         eth_api,
         EventSender::new(1),
     );
-    let handle = RpcServerConfig::ws(Default::default())
+    RpcServerConfig::ws(Default::default())
         .with_ws_address(crate::utils::test_address())
         .start(&server)
         .await
-        .unwrap();
+        .unwrap()
+}
 
+#[tokio::test(flavor = "multi_thread")]
+async fn test_eth_subscribe_pending_transactions_receives_tx() {
+    reth_tracing::init_test_tracing();
+
+    let pool: TestPool = TestPoolBuilder::default().into();
+    let pool_clone = pool.clone();
+    let handle = launch_ws_with_pool(pool).await;
     let client = handle.ws_client().await.unwrap();
 
     // Subscribe to pending transaction hashes
@@ -396,4 +399,51 @@ async fn test_eth_subscribe_unfiltered_logs_match_filtered_logs() {
     assert!(num_logs > 1);
     assert_eq!(received[0], received[2]);
     assert_eq!(received[1], received[2]);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_eth_subscribe_full_pending_transactions_reach_every_subscriber() {
+    reth_tracing::init_test_tracing();
+
+    let pool: TestPool = TestPoolBuilder::default().into();
+    let handle = launch_ws_with_pool(pool.clone()).await;
+    let client = handle.ws_client().await.unwrap();
+
+    let mut subs = Vec::new();
+    for _ in 0..2 {
+        let sub: Subscription<Value> = client
+            .subscribe(
+                "eth_subscribe",
+                jsonrpsee::rpc_params!["newPendingTransactions", true],
+                "eth_unsubscribe",
+            )
+            .await
+            .unwrap();
+        subs.push(sub);
+    }
+
+    // Subscription tasks join the shared feed asynchronously, so keep adding transactions until
+    // one reaches both subscriptions.
+    let mut senders = Vec::new();
+    let mut received = [Vec::new(), Vec::new()];
+    for _ in 0..50 {
+        let tx = reth_transaction_pool::test_utils::MockTransaction::eip1559();
+        senders.push(tx.sender());
+        pool.add_transaction(TransactionOrigin::External, tx).await.unwrap();
+
+        for (sub, received) in subs.iter_mut().zip(&mut received) {
+            if let Ok(Some(tx)) = tokio::time::timeout(Duration::from_millis(100), sub.next()).await
+            {
+                received.push(tx.unwrap());
+            }
+        }
+
+        if let Some(tx) = received[0].iter().find(|tx| received[1].contains(tx)) {
+            let from: alloy_primitives::Address =
+                serde_json::from_value(tx["from"].clone()).unwrap();
+            assert!(senders.contains(&from));
+            return
+        }
+    }
+    panic!("no pending transaction reached both subscriptions");
 }
