@@ -8,7 +8,8 @@ peers and verifies it against that block's state root. snap/2 keeps that state c
 field each block changes, replacing snap/1's trie-node healing.
 
 This crate owns the synchronization logic and its progress. Requests and proof checks come from
-`reth-downloaders`, and running the sync inside a node is left to node integration.
+`reth-downloaders`, and the node runs a sync as the engine's backfill when started with
+`--snap.v2`.
 
 ## How a sync runs
 
@@ -29,7 +30,8 @@ This crate owns the synchronization logic and its progress. Requests and proof c
    account and slot is fetched again on its own, proved against the pivot's root.
 5. **Hand off.** Once every account is downloaded, the BALs reach the pivot and no repairs remain,
    the state goes to the merkle stage, which rebuilds the trie. It is accepted only when the root
-   matches the pivot's header.
+   matches the pivot's header. The pivot then becomes the node's starting point: history below it
+   counts as pruned, and the staged pipeline executes the blocks above it.
 
 ```rust
 use reth_snap_sync::SnapPivotPolicy;
@@ -44,6 +46,16 @@ assert_eq!(policy.pivot_block(1_000, Some(500)), Some(936));
 // A chain shorter than the head distance has no pivot yet.
 assert_eq!(policy.pivot_block(4, None), None);
 ```
+
+## Running it
+
+Snap sync is experimental and off by default. `--snap.v2` advertises snap/2 and syncs a fresh
+database from a post-Amsterdam pivot; a database with execution progress keeps the staged pipeline.
+
+- The database must use the hashed state layout that downloads are written into.
+- Only snap finishes an interrupted attempt: without `--snap.v2`, a node refuses to start on a
+  database holding unverified snap state.
+- Blocks below the pivot have no bodies, receipts or state history.
 
 ## Design choices
 
