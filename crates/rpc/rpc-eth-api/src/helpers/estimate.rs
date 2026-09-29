@@ -78,9 +78,7 @@ pub trait EstimateCall: Call {
         // set nonce to None so that the correct nonce is chosen by the EVM
         let is_frame = Into::<u8>::into(request.as_ref().output_tx_type()) == 0x06;
         evm_env.cfg_env.allow_frame_signature_placeholders = is_frame;
-        if !is_frame {
-            request.as_mut().take_nonce();
-        } else {
+        if is_frame {
             // `eth_estimateGas` accepts unsigned frame requests. Build a structurally complete
             // envelope for simulation without changing any caller-supplied frame limits.
             // The scalar outer gas field is not part of the canonical EIP-8141 envelope; frame
@@ -100,6 +98,8 @@ pub trait EstimateCall: Call {
                     request.as_mut().set_max_fee_per_blob_gas(0);
                 }
             }
+        } else {
+            request.as_mut().take_nonce();
         }
 
         // Keep a copy of gas related request values

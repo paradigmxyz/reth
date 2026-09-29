@@ -443,7 +443,7 @@ mod tests {
         let tx_req = TransactionRequest {
             from: Some(address),
             transaction_type: Some(0x06),
-            frames: Some(vec![Frame { limits: limits.clone(), ..Default::default() }.into()]),
+            frames: Some(vec![Frame { limits, ..Default::default() }.into()]),
             ..Default::default()
         };
 
@@ -477,7 +477,7 @@ mod tests {
                 scheme: alloy_eips::eip8141::SignatureScheme::Secp256k1,
                 ..Default::default()
             }]),
-            frames: Some(vec![Frame { limits: limits.clone(), ..Default::default() }.into()]),
+            frames: Some(vec![Frame { limits, ..Default::default() }.into()]),
             ..Default::default()
         };
 
