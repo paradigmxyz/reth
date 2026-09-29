@@ -897,10 +897,12 @@ impl<N: NodePrimitives> CanonicalInMemoryState<N> {
 /// being validated.
 ///
 /// Every method takes the write lock of the in-memory state once. State derived from the tracked
-/// blocks is not updated here: after a removal ([`Self::clear_state`],
-/// [`Self::remove_canonical_blocks_until`], [`Self::prune_non_canonical_below`]) the caller must
-/// prune the state overlays that can no longer be built from the remaining blocks, and after an
-/// insertion it can precompute overlays for the new block. The engine's tree state does both.
+/// blocks, like the state overlay manager's caches, is not updated here, because the overlay
+/// manager is built on top of this crate. Updating it is a second step for the caller: after a
+/// removal ([`Self::clear_state`], [`Self::remove_canonical_blocks_until`],
+/// [`Self::prune_non_canonical_below`]) it must call the manager's `prune_unreachable_overlays`,
+/// and after an insertion it can call `on_block_inserted` to precompute overlays for the new
+/// block. The engine's tree state does both.
 #[derive(Debug, Clone)]
 pub struct InMemoryStateWriter<N: NodePrimitives = EthPrimitives> {
     state: CanonicalInMemoryState<N>,

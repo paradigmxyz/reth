@@ -1228,8 +1228,8 @@ mod tests {
         );
         let provider = state_provider_factory.database_provider_ro().unwrap();
 
-        let removed = manager.in_memory_state().writer().clear_state();
-        manager.on_blocks_removed(removed);
+        manager.in_memory_state().writer().clear_state();
+        manager.prune_unreachable_overlays();
 
         let (execution_overlay, _) = provider.execution_overlay().unwrap();
         assert_eq!(

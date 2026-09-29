@@ -61,9 +61,8 @@ impl<N: NodePrimitives> TreeState<N> {
     ///
     /// This removes all executed in-memory blocks, canonical and non-canonical.
     pub fn reset(&mut self, current_canonical_head: BlockNumHash) {
-        let removed_hashes = self.in_memory_state.clear_state();
-        if !removed_hashes.is_empty() {
-            self.overlay_manager.on_blocks_removed(removed_hashes);
+        if !self.in_memory_state.clear_state().is_empty() {
+            self.overlay_manager.prune_unreachable_overlays();
         }
         self.current_canonical_head = current_canonical_head;
     }
@@ -189,19 +188,21 @@ impl<N: NodePrimitives> TreeState<N> {
         // We want to do two things:
         // * remove canonical blocks that are persisted
         // * remove forks whose root are below the finalized block
-        let mut removed_hashes = self
+        let removed = self
             .in_memory_state
-            .remove_canonical_blocks_until(last_persisted_hash, upper_bound.number);
-        debug!(target: "engine::tree", ?upper_bound, ?last_persisted_hash, removed = removed_hashes.len(), "Removed canonical blocks from the tree");
+            .remove_canonical_blocks_until(last_persisted_hash, upper_bound.number)
+            .len();
+        debug!(target: "engine::tree", ?upper_bound, ?last_persisted_hash, removed, "Removed canonical blocks from the tree");
 
-        if let Some(finalized_num_hash) = finalized_num_hash {
-            let pruned = self.in_memory_state.prune_non_canonical_below(finalized_num_hash);
-            debug!(target: "engine::tree", ?finalized_num_hash, pruned = pruned.len(), "Removed finalized sidechain blocks");
-            removed_hashes.extend(pruned);
-        }
+        let pruned = finalized_num_hash.map_or(0, |finalized_num_hash| {
+            let pruned = self.in_memory_state.prune_non_canonical_below(finalized_num_hash).len();
+            debug!(target: "engine::tree", ?finalized_num_hash, pruned, "Removed finalized sidechain blocks");
+            pruned
+        });
 
-        if !removed_hashes.is_empty() {
-            self.overlay_manager.on_blocks_removed(removed_hashes);
+        // The overlay manager is not notified by the in-memory state.
+        if removed + pruned > 0 {
+            self.overlay_manager.prune_unreachable_overlays();
         }
     }
 

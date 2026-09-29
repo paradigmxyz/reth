@@ -309,38 +309,31 @@ impl<N: NodePrimitives> OverlayManager<N> {
         });
     }
 
-    /// Notifies the manager that blocks were removed from the in-memory state, and prunes cached
-    /// overlays that can no longer be built from the remaining blocks.
+    /// Prunes cached overlays that can no longer be built from the blocks of the in-memory state.
+    ///
+    /// The in-memory state does not notify the manager, so whoever removes blocks from it calls
+    /// this afterwards. In a node that is the engine's tree state, the only writer of the
+    /// in-memory state.
     #[tracing::instrument(
         level = "trace",
         target = "storage::overlay::manager",
         skip_all,
-        fields(removed_blocks = tracing::field::Empty, pruned_overlays = tracing::field::Empty)
+        fields(pruned_overlays = tracing::field::Empty)
     )]
-    pub fn on_blocks_removed(&self, hashes: impl IntoIterator<Item = B256>) {
-        let span = tracing::Span::current();
-
-        let removed_blocks = hashes.into_iter().count();
-        let mut pruned_overlays = 0usize;
-        span.record("removed_blocks", removed_blocks);
-
-        if removed_blocks > 0 {
-            let overlays_before = self.state_trie_overlays.len() + self.execution_overlays.len();
-            self.state_trie_overlays.retain(|key, _| {
-                self.contains_hash(key.tip_hash, key.anchor_hash, key.anchor_hash)
-            });
-            self.execution_overlays.retain(|key, _| {
-                self.contains_hash(key.tip_hash, key.anchor_hash, key.anchor_hash)
-            });
-            pruned_overlays = overlays_before
-                .saturating_sub(self.state_trie_overlays.len() + self.execution_overlays.len());
-            span.record("pruned_overlays", pruned_overlays);
-        }
+    pub fn prune_unreachable_overlays(&self) {
+        let overlays_before = self.state_trie_overlays.len() + self.execution_overlays.len();
+        self.state_trie_overlays
+            .retain(|key, _| self.contains_hash(key.tip_hash, key.anchor_hash, key.anchor_hash));
+        self.execution_overlays
+            .retain(|key, _| self.contains_hash(key.tip_hash, key.anchor_hash, key.anchor_hash));
+        let remaining_overlays = self.state_trie_overlays.len() + self.execution_overlays.len();
+        let pruned_overlays = overlays_before.saturating_sub(remaining_overlays);
+        tracing::Span::current().record("pruned_overlays", pruned_overlays);
         debug!(
             target: "storage::overlay::manager",
-            removed_blocks,
             pruned_overlays,
-            "pruned overlays for blocks removed from the in-memory state"
+            remaining_overlays,
+            "pruned overlays that can no longer be built from the in-memory state"
         );
     }
 
@@ -1100,11 +1093,11 @@ mod tests {
     /// Trims the canonical chain through `persisted` the way the engine does after persistence.
     fn trim(manager: &OverlayManager, persisted: &ExecutedBlock<EthPrimitives>) {
         let persisted = persisted.recovered_block().num_hash();
-        let removed = manager
+        manager
             .in_memory_state()
             .writer()
             .remove_canonical_blocks_until(persisted.hash, persisted.number);
-        manager.on_blocks_removed(removed);
+        manager.prune_unreachable_overlays();
     }
 
     #[test]
@@ -1638,7 +1631,7 @@ mod tests {
             .writer()
             .prune_non_canonical_below(blocks[1].recovered_block().num_hash());
         assert_eq!(removed, vec![fork_hash]);
-        manager.on_blocks_removed(removed);
+        manager.prune_unreachable_overlays();
 
         let fork_key = OverlayCacheKey { anchor_hash, tip_hash: fork_hash };
         assert!(!manager.state_trie_overlays.entries.contains_key(&fork_key));
