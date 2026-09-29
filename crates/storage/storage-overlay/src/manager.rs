@@ -78,7 +78,7 @@ impl<N: NodePrimitives> std::fmt::Debug for OverlayManager<N> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("OverlayManager")
             .field("canonical_blocks", &self.in_memory_state.canonical_block_count())
-            .field("pending_blocks", &self.in_memory_state.pending_block_count())
+            .field("non_canonical_blocks", &self.in_memory_state.non_canonical_block_count())
             .field("state_trie_overlays", &self.state_trie_overlays.len())
             .field("execution_overlays", &self.execution_overlays.len())
             .finish()
@@ -1120,7 +1120,7 @@ mod tests {
         let manager = OverlayManager::default();
         let blocks = test_blocks();
         for block in &blocks {
-            manager.in_memory_state().insert_pending(block.clone());
+            manager.in_memory_state().insert_executed(block.clone());
         }
 
         let anchor_hash = blocks[0].recovered_block().parent_hash();
@@ -1143,7 +1143,7 @@ mod tests {
         let manager = OverlayManager::default();
         let blocks = test_blocks();
         for block in &blocks {
-            manager.in_memory_state().insert_pending(block.clone());
+            manager.in_memory_state().insert_executed(block.clone());
         }
 
         let anchor_hash = blocks[0].recovered_block().parent_hash();
@@ -1188,9 +1188,9 @@ mod tests {
         let sibling_hash = sibling.recovered_block().hash();
         let first_key = OverlayCacheKey { anchor_hash, tip_hash: first.recovered_block().hash() };
 
-        manager.in_memory_state().insert_pending(parent);
-        manager.in_memory_state().insert_pending(first);
-        manager.in_memory_state().insert_pending(sibling);
+        manager.in_memory_state().insert_executed(parent);
+        manager.in_memory_state().insert_executed(first);
+        manager.in_memory_state().insert_executed(sibling);
         manager
             .state_trie_overlays
             .entries
@@ -1225,7 +1225,7 @@ mod tests {
         let manager = OverlayManager::default();
         let blocks = test_blocks();
         for block in &blocks {
-            manager.in_memory_state().insert_pending(block.clone());
+            manager.in_memory_state().insert_executed(block.clone());
         }
 
         let anchor_hash = blocks[0].recovered_block().parent_hash();
@@ -1251,7 +1251,7 @@ mod tests {
         let manager = OverlayManager::default();
         let blocks = test_blocks();
         for block in &blocks {
-            manager.in_memory_state().insert_pending(block.clone());
+            manager.in_memory_state().insert_executed(block.clone());
         }
 
         let anchor_hash = blocks[0].recovered_block().parent_hash();
@@ -1294,7 +1294,7 @@ mod tests {
         let manager = OverlayManager::default();
         let blocks = test_blocks();
         for block in &blocks[..2] {
-            manager.in_memory_state().insert_pending(block.clone());
+            manager.in_memory_state().insert_executed(block.clone());
         }
 
         let anchor_hash = blocks[0].recovered_block().parent_hash();
@@ -1370,12 +1370,12 @@ mod tests {
         let blocks = test_blocks();
         let anchor_hash = blocks[0].recovered_block().parent_hash();
 
-        manager.in_memory_state().insert_pending(blocks[0].clone());
+        manager.in_memory_state().insert_executed(blocks[0].clone());
         manager
             .execution_overlay_for_parent(blocks[0].recovered_block().hash(), anchor_hash)
             .unwrap();
 
-        manager.in_memory_state().insert_pending(blocks[1].clone());
+        manager.in_memory_state().insert_executed(blocks[1].clone());
         manager.on_block_inserted(
             blocks[1].recovered_block().hash(),
             blocks[1].recovered_block().parent_hash(),
@@ -1454,7 +1454,7 @@ mod tests {
         let block = test_blocks().remove(0);
         let anchor_hash = block.recovered_block().parent_hash();
         let tip_hash = block.recovered_block().hash();
-        manager.in_memory_state().insert_pending(block);
+        manager.in_memory_state().insert_executed(block);
 
         let waiter = Arc::new(OverlayWaiter::new());
         manager.execution_overlays.entries.insert(
@@ -1478,7 +1478,7 @@ mod tests {
         let manager = OverlayManager::default();
         let blocks = test_blocks();
         for block in &blocks {
-            manager.in_memory_state().insert_pending(block.clone());
+            manager.in_memory_state().insert_executed(block.clone());
         }
 
         let anchor_hash = blocks[0].recovered_block().parent_hash();
@@ -1500,7 +1500,7 @@ mod tests {
         let manager = OverlayManager::default();
         let blocks = test_blocks();
         for block in &blocks {
-            manager.in_memory_state().insert_pending(block.clone());
+            manager.in_memory_state().insert_executed(block.clone());
         }
 
         let parent_hash = blocks[2].recovered_block().hash();
@@ -1517,7 +1517,7 @@ mod tests {
         let manager = OverlayManager::default();
         let blocks = test_blocks();
         for block in &blocks {
-            manager.in_memory_state().insert_pending(block.clone());
+            manager.in_memory_state().insert_executed(block.clone());
         }
 
         let parent_hash = blocks[2].recovered_block().hash();
@@ -1623,14 +1623,15 @@ mod tests {
             9,
         );
         let fork_hash = fork.recovered_block().hash();
-        manager.in_memory_state().insert_pending(fork);
+        manager.in_memory_state().insert_executed(fork);
 
         overlay_for_parent(&manager, fork_hash, anchor_hash).unwrap();
         overlay_for_parent(&manager, tip_hash, anchor_hash).unwrap();
 
         // Finalizing block 2 prunes the fork at the same height, and with it its overlays.
-        let removed =
-            manager.in_memory_state().prune_pending_below(blocks[1].recovered_block().num_hash());
+        let removed = manager
+            .in_memory_state()
+            .prune_non_canonical_below(blocks[1].recovered_block().num_hash());
         assert_eq!(removed, vec![fork_hash]);
         manager.on_blocks_removed(removed);
 

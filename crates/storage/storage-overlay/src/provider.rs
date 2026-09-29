@@ -1125,7 +1125,7 @@ mod tests {
         let (factory, blocks) = setup_frontiers(1, 3);
         let manager = OverlayManager::default();
         for block in &blocks[2..=3] {
-            manager.in_memory_state().insert_pending(block.clone());
+            manager.in_memory_state().insert_executed(block.clone());
         }
         let state_provider_factory = OverlayStateProviderFactory::new(
             factory.clone(),
@@ -1160,7 +1160,7 @@ mod tests {
         let (factory, blocks) = setup_frontiers(1, 3);
         let manager = OverlayManager::default();
         for block in &blocks[2..=3] {
-            manager.in_memory_state().insert_pending(block.clone());
+            manager.in_memory_state().insert_executed(block.clone());
         }
         let state_provider_factory = OverlayStateProviderFactory::new(
             factory,
@@ -1187,7 +1187,7 @@ mod tests {
         let (factory, blocks) = setup_frontiers(1, 3);
         let manager = OverlayManager::default();
         for block in &blocks[2..=3] {
-            manager.in_memory_state().insert_pending(block.clone());
+            manager.in_memory_state().insert_executed(block.clone());
         }
         let state_provider_factory = OverlayStateProviderFactory::new(
             factory,
@@ -1220,7 +1220,7 @@ mod tests {
         let (factory, blocks) = setup_frontiers(1, 1);
         let manager = OverlayManager::default();
         for block in &blocks[2..=3] {
-            manager.in_memory_state().insert_pending(block.clone());
+            manager.in_memory_state().insert_executed(block.clone());
         }
         let state_provider_factory = OverlayStateProviderFactory::new(
             factory,
@@ -1246,7 +1246,7 @@ mod tests {
     fn skipped_state_trie_overlay_is_not_cached_or_used_for_state_roots() {
         let (factory, blocks) = setup_frontiers(3, 3);
         let manager = OverlayManager::default();
-        manager.in_memory_state().insert_pending(blocks[4].clone());
+        manager.in_memory_state().insert_executed(blocks[4].clone());
         let state_provider_factory = OverlayStateProviderFactory::new(
             factory,
             manager

@@ -13,7 +13,7 @@ use tracing::debug;
 ///
 /// The executed blocks themselves are tracked by the node's [`CanonicalInMemoryState`], which this
 /// type shares with the providers and the [`OverlayManager`]: newly executed blocks go into its
-/// pending section, and the engine moves them to its canonical section on forkchoice updates.
+/// non-canonical section, and the engine moves them to its canonical section on forkchoice updates.
 ///
 /// ## Invariants
 ///
@@ -50,7 +50,7 @@ impl<N: NodePrimitives> TreeState<N> {
 
     /// Resets the state and points to the given canonical head.
     ///
-    /// This removes all executed in-memory blocks, canonical and pending.
+    /// This removes all executed in-memory blocks, canonical and non-canonical.
     pub fn reset(&mut self, current_canonical_head: BlockNumHash) {
         let removed_hashes = self.in_memory_state().clear_state();
         if !removed_hashes.is_empty() {
@@ -74,7 +74,7 @@ impl<N: NodePrimitives> TreeState<N> {
     /// Returns the number of executed blocks stored.
     pub fn block_count(&self) -> usize {
         self.in_memory_state().canonical_block_count() +
-            self.in_memory_state().pending_block_count()
+            self.in_memory_state().non_canonical_block_count()
     }
 
     /// Returns the [`BlockState`] of the executed block with the given hash.
@@ -112,7 +112,7 @@ impl<N: NodePrimitives> TreeState<N> {
 
     /// Insert executed block into the state.
     ///
-    /// The block is added to the pending section of the in-memory state until a forkchoice
+    /// The block is added to the non-canonical section of the in-memory state until a forkchoice
     /// update makes it canonical.
     pub fn insert_executed(&mut self, executed: ExecutedBlock<N>) {
         let hash = executed.recovered_block().hash();
@@ -122,7 +122,7 @@ impl<N: NodePrimitives> TreeState<N> {
             return;
         }
 
-        self.in_memory_state().insert_pending(executed);
+        self.in_memory_state().insert_executed(executed);
         self.overlay_manager.on_block_inserted(hash, parent_hash);
     }
 
@@ -181,7 +181,7 @@ impl<N: NodePrimitives> TreeState<N> {
         debug!(target: "engine::tree", ?upper_bound, ?last_persisted_hash, removed = removed_hashes.len(), "Removed canonical blocks from the tree");
 
         if let Some(finalized_num_hash) = finalized_num_hash {
-            let pruned = self.in_memory_state().prune_pending_below(finalized_num_hash);
+            let pruned = self.in_memory_state().prune_non_canonical_below(finalized_num_hash);
             debug!(target: "engine::tree", ?finalized_num_hash, pruned = pruned.len(), "Removed finalized sidechain blocks");
             removed_hashes.extend(pruned);
         }
@@ -274,10 +274,10 @@ mod tests {
             .update_chain(NewCanonicalChain::Commit { new: blocks.to_vec() });
     }
 
-    fn pending_children(tree_state: &TreeState, parent: &ExecutedBlock) -> B256Set {
+    fn non_canonical_children(tree_state: &TreeState, parent: &ExecutedBlock) -> B256Set {
         tree_state
             .in_memory_state()
-            .pending_children(parent.recovered_block().hash())
+            .non_canonical_children(parent.recovered_block().hash())
             .iter()
             .map(|state| state.hash())
             .collect()
@@ -315,21 +315,21 @@ mod tests {
         tree_state.insert_executed(blocks[1].clone());
 
         assert_eq!(
-            pending_children(&tree_state, &blocks[0]),
+            non_canonical_children(&tree_state, &blocks[0]),
             B256Set::from_iter([blocks[1].recovered_block().hash()])
         );
-        assert!(pending_children(&tree_state, &blocks[1]).is_empty());
+        assert!(non_canonical_children(&tree_state, &blocks[1]).is_empty());
 
         tree_state.insert_executed(blocks[2].clone());
 
         assert_eq!(
-            pending_children(&tree_state, &blocks[1]),
+            non_canonical_children(&tree_state, &blocks[1]),
             B256Set::from_iter([blocks[2].recovered_block().hash()])
         );
-        assert!(pending_children(&tree_state, &blocks[2]).is_empty());
+        assert!(non_canonical_children(&tree_state, &blocks[2]).is_empty());
 
-        // Executed blocks are pending until a forkchoice update makes them canonical.
-        assert_eq!(tree_state.in_memory_state().pending_block_count(), 3);
+        // Executed blocks are not canonical until a forkchoice update makes them canonical.
+        assert_eq!(tree_state.in_memory_state().non_canonical_block_count(), 3);
         assert_eq!(tree_state.in_memory_state().canonical_block_count(), 0);
         let (anchor, chain) =
             tree_state.blocks_by_hash(blocks[2].recovered_block().hash()).unwrap();
@@ -363,21 +363,21 @@ mod tests {
         assert_eq!(tree_state.block_count(), 8);
         // two blocks at height 3 (original and fork)
         assert_eq!(tree_state.in_memory_state().blocks_at_number(3).len(), 2);
-        assert_eq!(pending_children(&tree_state, &blocks[1]).len(), 1); // the fork block
+        assert_eq!(non_canonical_children(&tree_state, &blocks[1]).len(), 1); // the fork block
 
         // verify that we can insert the same block again without issues
         tree_state.insert_executed(fork_block_4.clone());
         assert_eq!(tree_state.block_count(), 8);
 
-        assert!(pending_children(&tree_state, &fork_block_3)
+        assert!(non_canonical_children(&tree_state, &fork_block_3)
             .contains(&fork_block_4.recovered_block().hash()));
-        assert!(pending_children(&tree_state, &fork_block_4)
+        assert!(non_canonical_children(&tree_state, &fork_block_4)
             .contains(&fork_block_5.recovered_block().hash()));
 
         assert_eq!(tree_state.in_memory_state().blocks_at_number(4).len(), 2);
         assert_eq!(tree_state.in_memory_state().blocks_at_number(5).len(), 2);
 
-        // Reorging to the fork moves the replaced canonical blocks to the pending section.
+        // Reorging to the fork moves the replaced canonical blocks to the non-canonical section.
         tree_state.set_canonical_head(fork_block_5.recovered_block().num_hash());
         tree_state.in_memory_state().update_chain(NewCanonicalChain::Reorg {
             new: vec![fork_block_3.clone(), fork_block_4, fork_block_5],
@@ -389,7 +389,7 @@ mod tests {
         assert!(!tree_state.is_canonical(blocks[2].recovered_block().hash()));
         assert!(tree_state.contains_hash(&blocks[4].recovered_block().hash()));
         assert_eq!(
-            pending_children(&tree_state, &blocks[1]),
+            non_canonical_children(&tree_state, &blocks[1]),
             B256Set::from_iter([blocks[2].recovered_block().hash()])
         );
     }

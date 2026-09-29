@@ -1504,7 +1504,7 @@ fn canonicalization_moves_executed_blocks_between_sections() {
     let in_memory_state = test_harness.tree.canonical_in_memory_state.clone();
     let hash = |block: &ExecutedBlock| block.recovered_block().hash();
 
-    // Executed blocks wait in the pending section for a forkchoice update.
+    // Executed blocks wait in the non-canonical section for a forkchoice update.
     let executed = blocks[2..]
         .iter()
         .map(|block| {
@@ -1513,7 +1513,7 @@ fn canonicalization_moves_executed_blocks_between_sections() {
         })
         .collect::<Vec<_>>();
     assert!(in_memory_state.state_by_hash(hash(&blocks[3])).is_none());
-    assert_eq!(in_memory_state.pending_block_count(), 2);
+    assert_eq!(in_memory_state.non_canonical_block_count(), 2);
 
     // Making them canonical moves the same states to the canonical section.
     test_harness.tree.make_canonical(hash(&blocks[3])).unwrap();
@@ -1521,9 +1521,9 @@ fn canonicalization_moves_executed_blocks_between_sections() {
         assert!(Arc::ptr_eq(state, &in_memory_state.state_by_hash(hash(block)).unwrap()));
     }
     assert_eq!(in_memory_state.canonical_block_count(), 4);
-    assert_eq!(in_memory_state.pending_block_count(), 0);
+    assert_eq!(in_memory_state.non_canonical_block_count(), 0);
 
-    // A reorg to a fork off block 1 moves the replaced blocks back to the pending section.
+    // A reorg to a fork off block 1 moves the replaced blocks back to the non-canonical section.
     let fork = builder.get_executed_block_with_number(2, hash(&blocks[1]));
     test_harness.tree.state.tree_state.insert_executed(fork.clone());
     test_harness.tree.make_canonical(hash(&fork)).unwrap();
