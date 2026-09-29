@@ -67,6 +67,8 @@ jobs:
             ${{ matrix.exclude_args }} --workspace \
             --exclude ef-tests --no-tests=warn \
             -E "!kind(test) and not binary(e2e_testsuite)"
+      - name: Run standalone EthStats tests
+        run: cargo nextest run --no-fail-fast --locked -p reth-node-ethstats
 
   state:
     name: Ethereum state tests
