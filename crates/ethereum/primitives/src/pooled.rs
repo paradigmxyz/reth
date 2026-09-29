@@ -229,8 +229,8 @@ mod tests {
     fn eip8141_consensus_pooled_roundtrip() {
         let tx = TxEip8141 {
             sender: Address::repeat_byte(0x41),
-            nonce_keys: vec![U256::from(1), U256::from(3)],
-            nonce_seq: 7,
+            nonce: 7,
+            nonce_keys: Some(vec![U256::from(1), U256::from(3)]),
             ..Default::default()
         };
         let consensus = TransactionSigned::Eip8141(tx.seal_slow());
@@ -246,8 +246,8 @@ mod tests {
         versioned_hash[0] = 0x01;
         let tx = TxEip8141 {
             sender: Address::repeat_byte(0x41),
-            nonce_keys: vec![U256::from(42)],
-            nonce_seq: 9,
+            nonce: 9,
+            nonce_keys: Some(vec![U256::from(42)]),
             blob_versioned_hashes: vec![versioned_hash],
             ..Default::default()
         };
