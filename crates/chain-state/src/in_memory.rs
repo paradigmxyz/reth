@@ -275,21 +275,20 @@ impl<N: NodePrimitives> Blocks<N> {
         Some(state)
     }
 
-    /// Makes `new` canonical and moves the canonical blocks of `reorged` to the non-canonical
-    /// section.
+    /// Makes `new` canonical and moves the canonical blocks with the `reorged` hashes to the
+    /// non-canonical section.
     ///
     /// Blocks that are already tracked keep their state, so everyone holding it keeps sharing
     /// it, unless their parent link has to change because a block moved between the sections.
     /// Reorged blocks that are not canonical in memory are ignored.
-    fn update_chain(&mut self, new: Vec<ExecutedBlock<N>>, reorged: Vec<ExecutedBlock<N>>) {
+    fn update_chain(&mut self, new: Vec<ExecutedBlock<N>>, reorged: &[B256]) {
         // Blocks that moved between the sections or were inserted, whose own parent links and
         // whose children's parent links may have to change.
         let mut moved = Vec::new();
-        for block in reorged {
-            let hash = block.recovered_block().hash();
-            if let Some(state) = self.canonical.remove(&hash) {
+        for hash in reorged {
+            if let Some(state) = self.canonical.remove(hash) {
                 self.non_canonical.insert(state);
-                moved.push(hash);
+                moved.push(*hash);
             }
         }
 
@@ -979,9 +978,11 @@ impl<N: NodePrimitives> InMemoryStateWriter<N> {
     pub fn update_chain(&self, new_chain: NewCanonicalChain<N>) {
         let (new, reorged) = match new_chain {
             NewCanonicalChain::Commit { new } => (new, Vec::new()),
-            NewCanonicalChain::Reorg { new, old } => (new, old),
+            NewCanonicalChain::Reorg { new, old } => {
+                (new, old.iter().map(|block| block.recovered_block().hash()).collect())
+            }
         };
-        self.blocks().update(|blocks| blocks.update_chain(new, reorged))
+        self.blocks().update(|blocks| blocks.update_chain(new, &reorged))
     }
 
     /// Removes canonical blocks up to and including `remove_until` and returns their hashes.
