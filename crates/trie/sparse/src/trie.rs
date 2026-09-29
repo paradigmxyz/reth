@@ -335,10 +335,8 @@ impl SparseNode {
 
     /// Create new [`SparseNode::Branch`] with two bits set.
     pub fn new_split_branch(bit_a: u8, bit_b: u8) -> Self {
-        let state_mask = TrieMask::new(
-            // set bits for both children
-            (1u16 << bit_a) | (1u16 << bit_b),
-        );
+        // set bits for both children
+        let state_mask = TrieMask::from_nibble(bit_a) | TrieMask::from_nibble(bit_b);
         Self::Branch {
             state_mask,
             state: SparseNodeState::Dirty,

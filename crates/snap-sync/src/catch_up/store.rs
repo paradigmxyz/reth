@@ -673,6 +673,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::clone_on_copy)]
     fn skipped_storage_from_an_abandoned_attempt_is_not_reused() {
         let factory = hashed_factory();
         insert_headers(&factory, &chain().headers);
@@ -681,7 +682,7 @@ mod tests {
         let stale = (B256::ZERO, U256::from(7));
         let mut contract = account(1);
         contract.storage_root = storage_root_of(&[stale]);
-        let mut accounts = vec![(changed, contract), (later, contract)];
+        let mut accounts = vec![(changed, contract.clone()), (later, contract.clone())];
         let write = provider.start_snap_attempt(generation(1, state_root(&accounts))).unwrap();
         provider.start_account_coverage(write).unwrap();
         provider
