@@ -1202,6 +1202,10 @@ where
         }
 
         if !self.backfill_sync_state.is_idle() {
+            // Forward the head, since a long-running backfill such as snap must follow it.
+            self.send_event(EngineApiEvent::BackfillAction(BackfillAction::UpdateTarget(
+                state.head_block_hash.into(),
+            )));
             // We can only process new forkchoice updates if the pipeline is idle, since it requires
             // exclusive access to the database
             trace!(target: "engine::tree", "Pipeline is syncing, skipping forkchoice update");
