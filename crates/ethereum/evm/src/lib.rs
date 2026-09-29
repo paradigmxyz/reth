@@ -387,10 +387,6 @@ impl<ChainSpec, F: EvmFactory> EthEvmConfig<ChainSpec, F> {
         let mut version = factory.version(spec, self.chain_spec().chain_id());
         if let Some(blob_params) = blob_params {
             version.max_blobs_per_tx = blob_params.max_blobs_per_tx as usize;
-            version.blob_base_fee_update_fraction = blob_params
-                .update_fraction
-                .try_into()
-                .expect("blob base fee update fraction exceeds evm2 u64 capacity");
         }
         EthEvmEnv::new_with_version(factory.spec_id(spec), factory.block_env(block), version)
     }
@@ -616,19 +612,25 @@ mod tests {
 
     #[test]
     fn test_evm_env_for_header_uses_chain_blob_params() {
-        let chain_spec = ChainSpec::builder()
-            .chain(Chain::mainnet())
-            .genesis(Genesis::default())
-            .cancun_activated()
-            .build();
-        let blob_params = chain_spec.blob_params_at_timestamp(1).expect("cancun blob params");
-        let excess_blob_gas = 1_000_000;
-        let header =
-            Header { timestamp: 1, excess_blob_gas: Some(excess_blob_gas), ..Default::default() };
+        for update_fraction in [BlobParams::cancun().update_fraction, u128::from(u64::MAX) + 1] {
+            let mut chain_spec = ChainSpec::builder()
+                .chain(Chain::mainnet())
+                .genesis(Genesis::default())
+                .cancun_activated()
+                .build();
+            chain_spec.blob_params.cancun.update_fraction = update_fraction;
+            let blob_params = chain_spec.blob_params_at_timestamp(1).expect("cancun blob params");
+            let excess_blob_gas = 1_000_000;
+            let header = Header {
+                timestamp: 1,
+                excess_blob_gas: Some(excess_blob_gas),
+                ..Default::default()
+            };
 
-        let env = EthEvmConfig::new(Arc::new(chain_spec)).evm_env(&header).unwrap().block;
+            let env = EthEvmConfig::new(Arc::new(chain_spec)).evm_env(&header).unwrap().block;
 
-        assert_eq!(env.blob_basefee, U256::from(blob_params.calc_blob_fee(excess_blob_gas)));
+            assert_eq!(env.blob_basefee, U256::from(blob_params.calc_blob_fee(excess_blob_gas)));
+        }
     }
 
     #[cfg(feature = "jit")]
