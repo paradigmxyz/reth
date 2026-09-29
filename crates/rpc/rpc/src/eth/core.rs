@@ -1322,7 +1322,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn call_saturates_oversized_block_overrides() {
+    async fn call_preserves_block_number_and_saturates_fee_overrides() {
         let contract = Address::repeat_byte(0xaa);
         let sender = Address::repeat_byte(0x11);
         let provider = MockEthProvider::default()
@@ -1370,7 +1370,7 @@ mod tests {
         .await
         .unwrap();
         assert_eq!(result.len(), 96);
-        assert_eq!(U256::from_be_slice(&result[..32]), U256::from(u64::MAX));
+        assert_eq!(U256::from_be_slice(&result[..32]), U256::MAX);
         assert_eq!(U256::from_be_slice(&result[32..64]), U256::from(u64::MAX));
         assert_eq!(U256::from_be_slice(&result[64..]), U256::from(u128::MAX));
     }
