@@ -297,8 +297,14 @@ pub trait EthState: LoadState + SpawnBlocking {
                     .original_bytes()
             };
 
-            // Account extensions are not returned over RPC yet.
-            Ok(AccountInfo { balance, nonce, code, ..Default::default() })
+            Ok(AccountInfo {
+                balance,
+                nonce,
+                code,
+                #[cfg(feature = "account-ext")]
+                extension: account.extension,
+                ..Default::default()
+            })
         })
     }
 }
