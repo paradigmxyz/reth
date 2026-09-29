@@ -243,7 +243,7 @@ where
     .await
     .unwrap();
     EthApiClient::<TransactionRequest, Transaction, Block, Receipt, Header, TransactionSigned>::transaction_count(
-        client, address, None,
+        client, address, None, None,
     )
     .await
     .unwrap();
