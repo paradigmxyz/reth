@@ -109,7 +109,7 @@ mod tests {
         let peers = TestPeers::default();
         let (_targets, mut context) = context(&peers);
 
-        // Peers count as new only once the wait has sampled its baseline.
+        // Connect a peer while the context waits without any peers.
         let (progressed, ()) = tokio::join!(context.wait_for_progress(0), async {
             tokio::time::sleep(TEST_INTERVAL).await;
             peers.0.fetch_add(1, Ordering::Relaxed);

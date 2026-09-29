@@ -29,10 +29,9 @@ pub const DEFAULT_RANGES_PER_CHECK: usize = 64;
 
 /// Drives snap synchronization until its downloaded state is ready for the trie rebuild.
 ///
-/// Each pass moves a lagging pivot forward, applies the block access lists that carry the
-/// downloaded state to it, fetches scheduled repairs again at it, then downloads account ranges
-/// with their storage and code. A reorg across the pivot is repaired from the orphaned blocks'
-/// lists; an attempt they are unavailable for, or that outlives the served lists, starts over.
+/// Each pass moves a lagging pivot forward, applies the lists that carry the state to it, fetches
+/// scheduled repairs again there, then downloads account ranges with their storage and code. A
+/// reorg across the pivot is repaired from the orphaned lists; an expired attempt starts over.
 pub struct SnapBootstrap<C, F, X> {
     factory: F,
     // Blocking database work runs off the async worker.
@@ -165,8 +164,8 @@ where
         }
     }
 
-    // Resumes the recorded attempt while its pivot is canonical, otherwise starts one at the
-    // pivot under `head`. These are single-record writes, cheap enough for the async worker.
+    // Resumes the recorded attempt, even one whose pivot a reorg orphaned, otherwise starts one at
+    // the pivot under `head`. These are single-record writes, cheap enough for the async worker.
     fn resolve(&mut self, head: u64) -> Result<Resolved, SnapSyncError> {
         let provider = self.factory.database_provider_rw()?;
         let mut session = SnapSyncSession::new(self.policy);
@@ -246,25 +245,31 @@ where
 
     // Repairs what a reorg across the pivot left in the downloaded state, as EIP-8189 describes:
     // the orphaned blocks' lists schedule what they changed for repair, and catch-up continues from
-    // the last block both branches share. Without those lists the attempt restarts.
+    // the last block both branches share. Unserved lists are waited for until they expire.
     async fn recover(&mut self, write: SnapWrite, head: u64) -> Result<Step, SnapSyncError> {
         let pivot = self.pivot()?;
         let Some(reorg) = self.factory.database_provider_ro()?.snap_reorg(write)? else {
             info!(target: "sync::snap", ?pivot, "Snap pivot was reorged past its kept headers, restarting");
             return Ok(Step::Restart)
         };
-        let Some(lists) = self.catch_up.orphaned_lists(reorg.orphaned()).await? else {
-            info!(target: "sync::snap", ?pivot, "Orphaned block access lists are unavailable, restarting");
-            return Ok(Step::Restart)
-        };
         let ancestor = reorg.ancestor();
+        if !self.policy.is_catchable_from(ancestor.number, head) {
+            info!(target: "sync::snap", ?pivot, ?ancestor, head, "Orphaned block access lists expired, restarting");
+            return Ok(Step::Restart)
+        }
         let generation = self.policy.select(
             &self.factory.database_provider_ro()?,
             head,
             self.context.finalized(),
         )?;
         // The new pivot must descend from the ancestor, or the new branch is still too short.
+        // Checked first, so waiting for it does not fetch the orphaned lists on every pass.
         let Some(generation) = generation.filter(|g| g.target().number >= ancestor.number) else {
+            return Ok(Step::Wait)
+        };
+        // A peer lacking side-chain lists says nothing of the others, so another is asked later.
+        let Some(lists) = self.catch_up.orphaned_lists(reorg.orphaned()).await? else {
+            debug!(target: "sync::snap", ?pivot, "Orphaned block access lists are unavailable");
             return Ok(Step::Wait)
         };
 
@@ -310,25 +315,22 @@ where
         }
     }
 
-    // Fetches every scheduled repair again at the pivot, with the slots and code it needs. `Some`
-    // ends the pass.
+    // Fetches scheduled repairs again at the pivot, with the slots and code they need, committing
+    // each batch. `Some` ends the pass, at the latest after `ranges_per_check` commits so the pivot
+    // is checked again.
     async fn repair(&mut self) -> Result<Option<Step>, SnapSyncError> {
-        loop {
-            if self.cancel.is_cancelled() {
-                return Ok(Some(Step::Stop))
-            }
+        for _ in 0..self.ranges_per_check {
             let range = match self.accounts.next_repair().await? {
                 None => return Ok(None),
                 Some(AccountRangeStep::Verified(range)) => range,
                 Some(AccountRangeStep::Unavailable { .. }) => return Ok(Some(Step::Wait)),
             };
-            // Code must be present before even a partial storage repair can commit.
-            if let Some(step) = self.download_code(&range).await? {
-                return Ok(Some(step))
-            }
-            let Some(slots) = self.storage.repair_slots(&range, &self.cancel).await? else {
+            let Some(slots) = self.storage.repair_slots(&range).await? else {
                 return Ok(Some(Step::Wait))
             };
+            if let Some(step) = self.download_code(&range, true).await? {
+                return Ok(Some(step))
+            }
             let hashed_address = range.origin();
             let remaining = self.accounts.commit_repair(range, slots).await?;
             debug!(target: "sync::snap", %hashed_address, remaining, "Repaired snap account");
@@ -336,6 +338,7 @@ where
                 return Ok(Some(Step::Stop))
             }
         }
+        Ok(Some(Step::Continue))
     }
 
     // Commits up to `ranges_per_check` account ranges, handing the state off once none remain.
@@ -375,16 +378,23 @@ where
                 return Ok(Some(Step::Stop))
             }
         }
-        self.download_code(range).await
+        self.download_code(range, false).await
     }
 
-    // Persists the code `range` references. `Some` ends the pass.
+    // Persists the code `range` references, or only its repaired account's code when `repair`.
+    // `Some` ends the pass.
     async fn download_code(
         &mut self,
         range: &VerifiedRange,
+        repair: bool,
     ) -> Result<Option<Step>, SnapSyncError> {
         loop {
-            match self.bytecode.next(range).await? {
+            let step = if repair {
+                self.bytecode.next_repair(range).await?
+            } else {
+                self.bytecode.next(range).await?
+            };
+            match step {
                 BytecodeStep::Complete => return Ok(None),
                 BytecodeStep::Committed { .. } => {}
                 BytecodeStep::Unavailable { .. } => return Ok(Some(Step::Wait)),
@@ -522,7 +532,7 @@ mod tests {
     use alloy_eips::eip7928::bal::Bal;
     use alloy_primitives::{keccak256, Address, B256, U256};
     use reth_eth_wire_types::{
-        snap::{AccountRangeMessage, BlockAccessListsMessage},
+        snap::{AccountRangeMessage, BlockAccessListsMessage, StorageRangesMessage},
         BlockAccessLists,
     };
     use reth_network_p2p::{
@@ -546,12 +556,12 @@ mod tests {
     type Bootstrap = SnapBootstrap<Arc<ScriptedSnapClient>, Factory, TestContext>;
 
     const FAR: B256 = B256::repeat_byte(0xaa);
-    // Serves heads in order, repeating the last, and ends the run at the first wait.
     // Changed on the orphaned branch, which credited it.
     const STALE: Address = Address::repeat_byte(0x51);
-    // Untouched by either branch.
+    // Untouched by the orphaned branch.
     const KEPT: Address = Address::repeat_byte(0x52);
 
+    // Serves heads in order, repeating the last, and ends the run at the first wait.
     struct TestContext {
         heads: RefCell<VecDeque<u64>>,
         waits: usize,
@@ -768,6 +778,19 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn a_new_branch_too_short_for_a_pivot_waits_before_fetching_lists() {
+        let factory = hashed_factory();
+        let (attempt, _, _) = reorged(&factory, [Vec::new(), Vec::new()]);
+        // Head 2 puts the pivot at block 1, below the ancestor at block 2.
+        let (client, mut bootstrap) = scripted(&factory, [], [2]);
+
+        assert_eq!(bootstrap.run().await.unwrap(), SnapBootstrapOutcome::Stopped);
+
+        assert!(client.block_requests().is_empty());
+        assert_eq!(attempt_id(&factory), attempt);
+    }
+
+    #[tokio::test]
     async fn no_eligible_pivot_waits_without_starting_an_attempt() {
         let factory = hashed_factory();
         insert_chain(&factory, 0, state_root(&accounts()));
@@ -889,6 +912,42 @@ mod tests {
             provider.authorize_snap_write(stale),
             Err(SnapSyncError::StaleWrite { .. })
         ));
+    }
+
+    #[tokio::test]
+    async fn repairs_yield_to_pivot_checks_between_batches() {
+        let accounts = accounts();
+        let root = state_root(&accounts);
+        let factory = hashed_factory();
+        insert_chain(&factory, 8, root);
+        let provider = factory.database_provider_rw().unwrap();
+        let pivot = provider.sealed_header(2).unwrap().unwrap().num_hash();
+        let write = provider.start_snap_attempt(SnapGeneration::new(pivot, root)).unwrap();
+        provider.start_account_coverage(write).unwrap();
+        let range = verified_range(&accounts, 0..3, B256::ZERO, &[]);
+        provider.commit_account_range(write, &range, Default::default(), Vec::new()).unwrap();
+        let mut repairs = StateRepairs::default();
+        repairs.insert_account(key(1));
+        repairs.insert_account(key(2));
+        provider.schedule_snap_repairs(write, repairs).unwrap();
+        provider.commit().unwrap();
+        let responses = [
+            account_range(1, &accounts, 0..1, &[key(1)]),
+            // The head moved past the advance window meanwhile, so the pivot moves to block 7.
+            empty_lists(1, 5),
+            account_range(2, &accounts, 1..2, &[key(2)]),
+        ];
+        let (client, bootstrap) = scripted(&factory, responses, [3, 8]);
+        let mut bootstrap = bootstrap.with_ranges_per_check(1);
+
+        let outcome = bootstrap.run().await.unwrap();
+
+        let SnapBootstrapOutcome::TrieRebuild { pivot, .. } = outcome else {
+            panic!("the state is repaired: {outcome:?}")
+        };
+        assert_eq!(pivot.number, 7);
+        assert_eq!(*client.origins(), [key(1), key(2)]);
+        assert_eq!(client.block_requests().len(), 1);
     }
 
     #[tokio::test]
@@ -1078,23 +1137,79 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn unavailable_orphaned_lists_start_the_sync_over() {
+    async fn a_second_reorg_repairs_what_the_first_new_branch_changed() {
         let accounts = reorg_accounts();
         let factory = hashed_factory();
-        let (orphaned_attempt, _, new) = reorged(&factory, [Vec::new(), Vec::new()]);
-        let responses =
-            [lists(1, &orphaned_lists(), false), account_range(1, &accounts, 0..2, &[])];
+        let kept = AccountChanges::new(KEPT)
+            .with_balance_change(BalanceChange::new(BlockAccessIndex::new(1), U256::from(7)));
+        let first_lists = [vec![kept], Vec::new()];
+        let (attempt, _, first) = reorged(&factory, first_lists.clone());
+        // Catch-up applies the first new branch, then no peer serves the repair at its pivot.
+        let unserved =
+            AccountRangeMessage { request_id: 1, accounts: Vec::new(), proof: Vec::new() };
+        let unserved = Ok(WithPeerId::new(PeerId::random(), SnapResponse::AccountRange(unserved)));
+        let responses = [lists(1, &orphaned_lists(), true), lists(2, &first_lists, true), unserved];
         let (_, mut bootstrap) = scripted(&factory, responses, [5]);
+        assert_eq!(bootstrap.run().await.unwrap(), SnapBootstrapOutcome::Stopped);
+
+        // After a restart, a second reorg orphans the re-anchored pivot too.
+        let shared = factory.database_provider_ro().unwrap().sealed_header(2).unwrap().unwrap();
+        let second = branch(&shared, &[Vec::new(), Vec::new(), Vec::new()], state_root(&accounts));
+        replace_headers_after(&factory, 2, &second);
+        let mut responses =
+            vec![lists(1, &first_lists, true), lists(2, &[Vec::new(), Vec::new()], true)];
+        // Both the first orphaned branch's and the first new branch's changes are fetched again.
+        let mut repaired = [keccak256(STALE), keccak256(KEPT)];
+        repaired.sort();
+        for (id, hashed_address) in (1..).zip(repaired) {
+            let index = accounts.iter().position(|(key, _)| *key == hashed_address).unwrap();
+            responses.push(account_range(id, &accounts, index..index + 1, &[hashed_address]));
+        }
+        let (client, mut bootstrap) = scripted(&factory, responses, [5]);
 
         let outcome = bootstrap.run().await.unwrap();
 
         let SnapBootstrapOutcome::TrieRebuild { write, pivot } = outcome else {
-            panic!("the new attempt downloads the state: {outcome:?}")
+            panic!("the state is repaired: {outcome:?}")
         };
-        assert_eq!(pivot, new[1].num_hash());
-        assert_ne!(attempt_id(&factory), orphaned_attempt);
+        assert_eq!(pivot, second[1].num_hash());
+        assert_eq!(attempt_id(&factory), attempt);
+        let hashes =
+            |headers: &[SealedHeader]| headers.iter().map(SealedHeader::hash).collect::<Vec<_>>();
+        assert_eq!(client.block_requests()[0], hashes(&first[..2]));
+        assert_eq!(*client.origins(), repaired);
         let verified = rebuild_and_verify(&factory, write, pivot.number);
         assert_eq!(verified.state_root(), state_root(&accounts));
+    }
+
+    #[tokio::test]
+    async fn unserved_orphaned_lists_are_waited_for() {
+        let accounts = reorg_accounts();
+        let factory = hashed_factory();
+        let (attempt, orphaned, new) = reorged(&factory, [Vec::new(), Vec::new()]);
+        let (_, mut bootstrap) = scripted(&factory, [lists(1, &orphaned_lists(), false)], [5]);
+        assert_eq!(bootstrap.run().await.unwrap(), SnapBootstrapOutcome::Stopped);
+        assert_eq!(attempt_id(&factory), attempt);
+
+        // A restarted node resumes the orphaned attempt, and another peer serves them.
+        let stale_index = accounts.iter().position(|(key, _)| *key == keccak256(STALE)).unwrap();
+        let responses = [
+            lists(1, &orphaned_lists(), true),
+            lists(2, &[Vec::new(), Vec::new()], true),
+            account_range(1, &accounts, stale_index..stale_index + 1, &[keccak256(STALE)]),
+        ];
+        let (client, mut bootstrap) = scripted(&factory, responses, [5]);
+        let outcome = bootstrap.run().await.unwrap();
+
+        let SnapBootstrapOutcome::TrieRebuild { pivot, .. } = outcome else {
+            panic!("the state is repaired: {outcome:?}")
+        };
+        assert_eq!(pivot, new[1].num_hash());
+        assert_eq!(attempt_id(&factory), attempt);
+        assert_eq!(
+            client.block_requests()[0],
+            orphaned.iter().map(SealedHeader::hash).collect::<Vec<_>>()
+        );
     }
 
     #[tokio::test]
@@ -1146,7 +1261,14 @@ mod tests {
             ScriptedSnapClient::new([
                 account_range(1, &accounts, 0..1, &[key(1)]),
                 storage_ranges(1, &[&slots[..1]], &slots, &[key(1)]),
-                storage_ranges(2, &[&slots[1..]], &slots, &[key(2)]),
+                Ok(WithPeerId::new(
+                    PeerId::random(),
+                    SnapResponse::StorageRanges(StorageRangesMessage {
+                        request_id: 2,
+                        slots: Vec::new(),
+                        proof: Vec::new(),
+                    }),
+                )),
             ])
             .on_storage_request(move || on_request.cancel()),
         );
@@ -1156,7 +1278,7 @@ mod tests {
                 .with_policy(policy())
                 .with_cancellation(cancel);
         assert_eq!(bootstrap.run().await.unwrap(), SnapBootstrapOutcome::Stopped);
-        assert_eq!(client.storage_requests().len(), 1);
+        assert_eq!(client.storage_requests().len(), 2);
         let provider = factory.database_provider_ro().unwrap();
         let pending = provider.snap_repairs(write).unwrap().slots(key(1)).collect::<Vec<_>>();
         assert_eq!(pending, [key(2)]);
@@ -1196,10 +1318,9 @@ mod tests {
         let mut canonical = accounts;
         canonical[0].1 = account(10);
         let root = state_root(&canonical);
-        let new = branch(&old[0], &[Vec::new(), Vec::new(), Vec::new()], root);
+        let new = branch(&old[0], &vec![Vec::new(); 11], root);
         replace_headers_after(&factory, 0, &new);
-        let (_, mut resumed) =
-            scripted(&factory, [no_lists(1), account_range(1, &canonical, 0..3, &[])], [3]);
+        let (_, mut resumed) = scripted(&factory, [account_range(1, &canonical, 0..3, &[])], [11]);
 
         let SnapBootstrapOutcome::TrieRebuild { write, pivot } = resumed.run().await.unwrap()
         else {
@@ -1207,7 +1328,7 @@ mod tests {
         };
 
         assert_ne!(write.attempt(), old_write.attempt());
-        assert_eq!(pivot, new[1].num_hash());
+        assert_eq!(pivot, new[9].num_hash());
         assert_eq!(rebuild_and_verify(&factory, write, pivot.number).state_root(), root);
     }
 }
