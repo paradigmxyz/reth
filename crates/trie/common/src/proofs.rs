@@ -953,7 +953,8 @@ impl From<alloy_rpc_types_eth::EIP1186AccountProofResponse> for AccountProof {
 /// Returns the account committed by the leaf of an inclusion proof for `address`.
 ///
 /// The leaf has to lie on the full path of `address`, so an exclusion proof cannot supply another
-/// account. This does not authenticate the proof root; callers still have to verify the proof against a trusted state root.
+/// account. This does not authenticate the proof root; callers still have to verify the proof
+/// against a trusted state root.
 #[cfg(feature = "eip1186")]
 fn inclusion_proof_account(address: Address, proof: &[Bytes]) -> Option<Account> {
     let root = keccak256(proof.first()?);
