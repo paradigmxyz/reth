@@ -1462,6 +1462,17 @@ impl<TX: DbTx, N: NodeTypes> DatabaseProvider<TX, N> {
             _ => Ok(()),
         }
     }
+
+    /// Empties the non-header static files and anchors them at `pivot`, so the next append
+    /// starts at `pivot + 1`.
+    pub fn anchor_pruned_static_files(&self, pivot: BlockNumber) -> ProviderResult<()> {
+        let static_files = self.static_file_provider();
+        for segment in StaticFileSegment::iter().filter(|segment| !segment.is_headers()) {
+            static_files.delete_segment(segment)?;
+            static_files.get_writer(pivot, segment)?.initialize_pruned_anchor(pivot)?;
+        }
+        Ok(())
+    }
 }
 
 impl<TX: DbTx, N: NodeTypes> AccountReader for DatabaseProvider<TX, N> {

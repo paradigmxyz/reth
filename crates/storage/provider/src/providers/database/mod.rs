@@ -1233,4 +1233,17 @@ mod tests {
 
         assert_eq!(local_head, head);
     }
+
+    #[test]
+    fn anchored_static_files_resume_after_the_pivot() {
+        let factory = create_test_provider_factory();
+        let provider = factory.database_provider_rw().unwrap();
+        provider.anchor_pruned_static_files(10).unwrap();
+        provider.commit().unwrap();
+
+        let static_files = factory.static_file_provider();
+        for segment in StaticFileSegment::iter().filter(|segment| !segment.is_headers()) {
+            assert_eq!(static_files.get_highest_static_file_block(segment), Some(10), "{segment}");
+        }
+    }
 }
