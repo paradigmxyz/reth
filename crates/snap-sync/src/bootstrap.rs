@@ -252,10 +252,6 @@ where
             info!(target: "sync::snap", ?pivot, "Snap pivot was reorged past its kept headers, restarting");
             return Ok(Step::Restart)
         };
-        let Some(lists) = self.catch_up.orphaned_lists(reorg.orphaned()).await? else {
-            info!(target: "sync::snap", ?pivot, "Orphaned block access lists are unavailable, restarting");
-            return Ok(Step::Restart)
-        };
         let ancestor = reorg.ancestor();
         let generation = self.policy.select(
             &self.factory.database_provider_ro()?,
@@ -263,8 +259,13 @@ where
             self.context.finalized(),
         )?;
         // The new pivot must descend from the ancestor, or the new branch is still too short.
+        // Checked first, so waiting for it does not fetch the orphaned lists on every pass.
         let Some(generation) = generation.filter(|g| g.target().number >= ancestor.number) else {
             return Ok(Step::Wait)
+        };
+        let Some(lists) = self.catch_up.orphaned_lists(reorg.orphaned()).await? else {
+            info!(target: "sync::snap", ?pivot, "Orphaned block access lists are unavailable, restarting");
+            return Ok(Step::Restart)
         };
 
         // Scheduling reads every orphaned list, so it runs on the blocking pool.
@@ -768,6 +769,19 @@ mod tests {
         let verified = rebuild_and_verify(&factory, write, pivot.number);
         assert_eq!(verified.state_root(), state_root(&accounts));
         origins
+    }
+
+    #[tokio::test]
+    async fn a_new_branch_too_short_for_a_pivot_waits_before_fetching_lists() {
+        let factory = hashed_factory();
+        let (attempt, _, _) = reorged(&factory, [Vec::new(), Vec::new()]);
+        // Head 2 puts the pivot at block 1, below the ancestor at block 2.
+        let (client, mut bootstrap) = scripted(&factory, [], [2]);
+
+        assert_eq!(bootstrap.run().await.unwrap(), SnapBootstrapOutcome::Stopped);
+
+        assert!(client.block_requests().is_empty());
+        assert_eq!(attempt_id(&factory), attempt);
     }
 
     #[tokio::test]
