@@ -77,7 +77,9 @@ impl<R: Receipt> ReceiptRootTaskHandle<R> {
         )
         .entered();
 
-        let mut builder = OrderedTrieRootEncodedBuilder::new();
+        let mut builder = receipts_len
+            .map(OrderedTrieRootEncodedBuilder::with_capacity)
+            .unwrap_or_else(OrderedTrieRootEncodedBuilder::new);
         let mut aggregated_bloom = Bloom::ZERO;
         let mut encode_buf = Vec::with_capacity(RECEIPT_ENCODE_BUF_INITIAL_CAPACITY);
         let mut next = 0usize;
