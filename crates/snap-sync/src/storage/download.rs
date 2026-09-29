@@ -25,10 +25,10 @@ pub const DEFAULT_STORAGE_ACCOUNTS: usize = 128;
 /// Default number of scheduled slots fetched again per repair batch.
 pub const DEFAULT_REPAIR_SLOTS: usize = 128;
 
-/// Downloads the storage an account range's contracts still need, one request at a time.
+/// Downloads the storage an account range's contracts still need, and repaired slots again.
 ///
-/// Every verified response is committed before the next request, so at most one response is held
-/// however large a contract is, and a download resumes from the persisted progress.
+/// Each range response is committed before the next request, so at most one is held however large
+/// a contract is, and a download resumes from the persisted progress.
 pub struct StorageRangeDownload<C, F> {
     context: DownloadContext<C, F>,
     // Contracts asked for per request.
@@ -162,6 +162,7 @@ where
             requests.push(async move { downloader.await.map(|outcome| (slot, outcome)) });
         }
 
+        let requested = requests.len();
         let mut values = Vec::new();
         for response in join_all(requests).await {
             let (slot, StorageRangeOutcome::Verified(ranges)) = response? else { continue };
@@ -175,7 +176,8 @@ where
                 .map_or(U256::ZERO, |(_, value)| value);
             values.push((slot, value));
         }
-        Ok((!values.is_empty()).then_some(values))
+        // An account scheduled without slots has nothing to wait for.
+        Ok((!values.is_empty() || requested == 0).then_some(values))
     }
 }
 
@@ -563,6 +565,21 @@ mod tests {
 
         assert_eq!(values, Some(vec![(key(1), U256::from(11)), (key(5), U256::ZERO)]));
         assert_eq!(*client.storage_requests(), [(vec![key(2)], key(1)), (vec![key(2)], key(5))]);
+    }
+
+    #[tokio::test]
+    async fn a_contract_scheduled_without_slots_fetches_none() {
+        let accounts = accounts();
+        let (factory, range) = repairing(&accounts, &[]);
+        let provider = factory.database_provider_rw().unwrap();
+        let mut repairs = StateRepairs::default();
+        repairs.insert_account(key(2));
+        provider.schedule_snap_repairs(range.write(), repairs).unwrap();
+        provider.commit().unwrap();
+        let (client, mut download) = download([], factory);
+
+        assert_eq!(download.repair_slots(&range).await.unwrap(), Some(Vec::new()));
+        assert!(client.storage_requests().is_empty());
     }
 
     #[tokio::test]
