@@ -21,8 +21,15 @@ use tracing::debug;
 ///
 /// ## Invariants
 ///
-/// - This only tracks blocks that are connected to the canonical chain.
-/// - All executed blocks are valid and have been executed.
+/// - Only the engine changes the tracked blocks, through this type and the writer it takes from
+///   this type for canonical chain updates.
+/// - All tracked blocks are valid. The engine either validated them, or loaded them from disk as
+///   canonical blocks: the blocks a disk reorg moves off the canonical chain, and the canonical
+///   block the head is reset to when the engine unwinds to a block on disk.
+/// - The canonical section holds the canonical chain above the persisted state/trie frontier. The
+///   non-canonical section holds blocks that can still become canonical: payloads that await a
+///   forkchoice update, fork blocks, reorged-out blocks and blocks demoted after a backfill run.
+///   They are pruned once they are below the finalized block or fork off at its height.
 #[derive(Debug)]
 pub struct TreeState<N: NodePrimitives = EthPrimitives> {
     /// Currently tracked canonical head of the chain.
@@ -159,8 +166,11 @@ impl<N: NodePrimitives> TreeState<N> {
     /// If a finalized hash is provided, the only non-canonical blocks which will be removed are
     /// those which have a fork point at or below the finalized hash.
     ///
-    /// Canonical blocks below the upper bound will still be removed, but only if the last
-    /// persisted hash is part of the canonical chain.
+    /// Canonical blocks up to the upper bound are only removed if `last_persisted_hash` is part of
+    /// the in-memory canonical chain or the block it builds on. Otherwise canonical blocks were
+    /// not actually persisted, e.g. because a reorg happened while persisting, and they stay in
+    /// memory until the next removal that passes this check, even if they are below the finalized
+    /// block. Non-canonical blocks are pruned either way.
     ///
     /// NOTE: if the finalized block is greater than the upper bound, the only blocks that will be
     /// removed are canonical blocks and sidechains that fork below the `upper_bound`. This is the

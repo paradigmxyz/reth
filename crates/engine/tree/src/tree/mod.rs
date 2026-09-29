@@ -2332,8 +2332,9 @@ where
 
         let finalized = self.state.forkchoice_state_tracker.last_valid_finalized();
         self.canonical_in_memory_state.set_persisted(self.persistence_state.last_persisted_block);
-        // Trims the canonical chain to the state/trie frontier and prunes pending blocks below the
-        // finalized block, before the overlay manager drops the overlays of the removed blocks.
+        // Trims the canonical chain to the state/trie frontier and prunes non-canonical blocks
+        // below the finalized block, then lets the overlay manager drop the overlays that can no
+        // longer be built.
         self.remove_before(in_memory_persisted_block, finalized)?;
         // Persistence changes the overlay anchor. Prepare the remaining canonical range before
         // the next payload needs to read execution state against the new durable frontier.
@@ -3606,7 +3607,10 @@ where
     /// If a finalized hash is provided, the only non-canonical blocks which will be removed are
     /// those which have a fork point at or below the finalized hash.
     ///
-    /// Canonical blocks below the upper bound will still be removed.
+    /// Canonical blocks up to the upper bound are removed as well, but only if the last persisted
+    /// block is part of the in-memory canonical chain or the block it builds on. If a reorg
+    /// happened while persisting, they stay in memory until a later removal passes that check,
+    /// see [`TreeState::remove_until`].
     pub(crate) fn remove_before(
         &mut self,
         upper_bound: BlockNumHash,
