@@ -485,14 +485,23 @@ impl<N: NetworkPrimitives> StateFetcher<N> {
         peer_id: PeerId,
         res: RequestResult<SnapResponse>,
     ) -> Option<BlockResponseOutcome> {
-        // Catch-up cannot advance without the first requested list. Prefer another connected
-        // peer on retry without penalizing a valid unavailable response.
-        let is_likely_bad_response = res.is_err() ||
-            matches!(
-                &res,
-                Ok(SnapResponse::BlockAccessLists(response))
-                if !matches!(response.block_access_lists.0.first(), Some(Some(_)))
-            );
+        // Prefer another connected peer after a response with no usable data, without penalizing
+        // the peer. Empty responses can be valid, but repeatedly selecting the same low-latency
+        // peer can prevent progress while other peers have the requested state.
+        let is_likely_bad_response = match &res {
+            Err(_) => true,
+            Ok(SnapResponse::AccountRange(response)) => {
+                response.accounts.is_empty() && response.proof.is_empty()
+            }
+            Ok(SnapResponse::StorageRanges(response)) => {
+                response.slots.is_empty() && response.proof.is_empty()
+            }
+            Ok(SnapResponse::ByteCodes(response)) => response.codes.is_empty(),
+            // Catch-up cannot advance without the first requested list.
+            Ok(SnapResponse::BlockAccessLists(response)) => {
+                !matches!(response.block_access_lists.0.first(), Some(Some(_)))
+            }
+        };
 
         if let Some(resp) = self.inflight_snap_requests.remove(&peer_id) {
             let _ = resp.response.send(res.map(|r| (peer_id, r).into()));
@@ -859,7 +868,10 @@ mod tests {
     use alloy_primitives::B512;
     use reth_eth_wire::Capability;
     use reth_eth_wire_types::{
-        snap::{AccountRangeMessage, BlockAccessListsMessage, GetAccountRangeMessage},
+        snap::{
+            AccountRangeMessage, BlockAccessListsMessage, ByteCodesMessage, GetAccountRangeMessage,
+            StorageRangesMessage,
+        },
         BlockAccessLists,
     };
     use std::future::poll_fn;
@@ -2209,7 +2221,7 @@ mod tests {
         let resp = SnapResponse::AccountRange(AccountRangeMessage {
             request_id: 1,
             accounts: vec![],
-            proof: vec![],
+            proof: vec![vec![0x80].into()],
         });
         let outcome = fetcher.on_snap_response(peer_id, Ok(resp));
 
@@ -2271,8 +2283,32 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn unavailable_snap_lists_prefer_another_connected_peer() {
-        for lists in [vec![], vec![None, None], vec![None, Some(vec![0xc0].into())]] {
+    async fn empty_snap_responses_prefer_another_connected_peer() {
+        let responses = [
+            SnapResponse::AccountRange(AccountRangeMessage {
+                request_id: 1,
+                accounts: vec![],
+                proof: vec![],
+            }),
+            SnapResponse::StorageRanges(StorageRangesMessage {
+                request_id: 1,
+                slots: vec![],
+                proof: vec![],
+            }),
+            SnapResponse::ByteCodes(ByteCodesMessage { request_id: 1, codes: vec![] }),
+        ]
+        .into_iter()
+        .chain(
+            [vec![], vec![None, None], vec![None, Some(vec![0xc0].into())]].into_iter().map(
+                |lists| {
+                    SnapResponse::BlockAccessLists(BlockAccessListsMessage {
+                        request_id: 1,
+                        block_access_lists: BlockAccessLists(lists),
+                    })
+                },
+            ),
+        );
+        for response in responses {
             let manager = PeersManager::new(PeersConfig::default());
             let mut fetcher =
                 StateFetcher::<EthNetworkPrimitives>::new(manager.handle(), Default::default());
@@ -2293,11 +2329,6 @@ mod tests {
             let (tx, mut rx) = oneshot::channel();
             fetcher.inflight_snap_requests.insert(fast, Request { request: (), response: tx });
             fetcher.peers.get_mut(&fast).unwrap().state = PeerState::GetSnap;
-            let response = SnapResponse::BlockAccessLists(BlockAccessListsMessage {
-                request_id: 1,
-                block_access_lists: BlockAccessLists(lists),
-            });
-
             assert!(fetcher.on_snap_response(fast, Ok(response)).is_none());
             assert!(rx.try_recv().unwrap().is_ok());
             assert_eq!(fetcher.next_best_peer(BestPeerRequirements::SupportsSnap), Some(other));
