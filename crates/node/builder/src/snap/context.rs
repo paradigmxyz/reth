@@ -9,7 +9,7 @@ use reth_snap_sync::{SnapSyncContext, SnapSyncError};
 use std::time::Duration;
 use tokio::sync::watch;
 
-// Sampling well below the block time resumes a stalled step soon after new peers connect.
+// Retry transient failures even when the head and connected peer count stay unchanged.
 const DEFAULT_SAMPLE_INTERVAL: Duration = Duration::from_secs(2);
 
 /// [`SnapSyncContext`] for one bootstrap run inside the snap backfill.
@@ -52,8 +52,6 @@ where
     }
 
     async fn wait_for_progress(&mut self, _head: u64) -> bool {
-        // Peers connected before the wait already failed to serve the stalled step.
-        let peers = self.client.num_connected_peers();
         loop {
             tokio::select! {
                 // New headers need the pipeline, which only runs once this run stops. A closed
@@ -61,7 +59,7 @@ where
                 _ = self.targets.changed() => return false,
                 () = tokio::time::sleep(self.interval) => {}
             }
-            if self.client.num_connected_peers() > peers {
+            if self.client.num_connected_peers() > 0 {
                 return true
             }
         }
@@ -118,6 +116,41 @@ mod tests {
         });
 
         assert!(progressed);
+    }
+
+    #[tokio::test]
+    async fn existing_peers_are_retried_without_a_new_target() {
+        let peers = TestPeers(AtomicUsize::new(1));
+        let (_targets, mut context) = context(&peers);
+
+        assert!(tokio::time::timeout(TEST_INTERVAL * 10, context.wait_for_progress(0))
+            .await
+            .expect("an existing peer must be retried"));
+    }
+
+    #[tokio::test]
+    async fn remaining_peers_are_retried_after_a_disconnect() {
+        let peers = TestPeers(AtomicUsize::new(2));
+        let (_targets, mut context) = context(&peers);
+
+        let (progressed, ()) = tokio::join!(
+            tokio::time::timeout(TEST_INTERVAL * 10, context.wait_for_progress(0)),
+            async { peers.0.store(1, Ordering::Relaxed) }
+        );
+
+        assert!(progressed.expect("disconnecting a peer must not prevent retries"));
+    }
+
+    #[tokio::test]
+    async fn no_peers_keeps_waiting_until_the_target_changes() {
+        let peers = TestPeers::default();
+        let (targets, mut context) = context(&peers);
+
+        assert!(tokio::time::timeout(TEST_INTERVAL * 3, context.wait_for_progress(0))
+            .await
+            .is_err());
+        targets.send(B256::repeat_byte(2)).unwrap();
+        assert!(!context.wait_for_progress(0).await);
     }
 
     // A peer count the test moves between samples.

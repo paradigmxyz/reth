@@ -485,7 +485,14 @@ impl<N: NetworkPrimitives> StateFetcher<N> {
         peer_id: PeerId,
         res: RequestResult<SnapResponse>,
     ) -> Option<BlockResponseOutcome> {
-        let is_likely_bad_response = res.is_err();
+        // Catch-up cannot advance without the first requested list. Prefer another connected
+        // peer on retry without penalizing a valid unavailable response.
+        let is_likely_bad_response = res.is_err() ||
+            matches!(
+                &res,
+                Ok(SnapResponse::BlockAccessLists(response))
+                if !matches!(response.block_access_lists.0.first(), Some(Some(_)))
+            );
 
         if let Some(resp) = self.inflight_snap_requests.remove(&peer_id) {
             let _ = resp.response.send(res.map(|r| (peer_id, r).into()));
@@ -851,7 +858,10 @@ mod tests {
     use alloy_consensus::Header;
     use alloy_primitives::B512;
     use reth_eth_wire::Capability;
-    use reth_eth_wire_types::snap::{AccountRangeMessage, GetAccountRangeMessage};
+    use reth_eth_wire_types::{
+        snap::{AccountRangeMessage, BlockAccessListsMessage, GetAccountRangeMessage},
+        BlockAccessLists,
+    };
     use std::future::poll_fn;
 
     #[tokio::test(flavor = "multi_thread")]
@@ -2258,5 +2268,43 @@ mod tests {
         assert!(matches!(fetcher.poll(&mut cx), Poll::Pending));
         assert!(fetcher.queued_requests.is_empty());
         assert_eq!(rx.await.unwrap().unwrap_err(), RequestError::UnsupportedCapability);
+    }
+
+    #[tokio::test]
+    async fn unavailable_snap_lists_prefer_another_connected_peer() {
+        for lists in [vec![], vec![None, None], vec![None, Some(vec![0xc0].into())]] {
+            let manager = PeersManager::new(PeersConfig::default());
+            let mut fetcher =
+                StateFetcher::<EthNetworkPrimitives>::new(manager.handle(), Default::default());
+            let fast = B512::random();
+            let other = B512::random();
+            for (peer_id, timeout) in [(fast, 1), (other, 100)] {
+                fetcher.new_active_peer(NewPeerInfo {
+                    peer_id,
+                    best_hash: B256::random(),
+                    best_number: 100,
+                    capabilities: Arc::new(Capabilities::new(vec![])),
+                    timeout: Arc::new(AtomicU64::new(timeout)),
+                    range_info: None,
+                    supports_snap: true,
+                });
+            }
+            assert_eq!(fetcher.next_best_peer(BestPeerRequirements::SupportsSnap), Some(fast));
+            let (tx, mut rx) = oneshot::channel();
+            fetcher.inflight_snap_requests.insert(fast, Request { request: (), response: tx });
+            fetcher.peers.get_mut(&fast).unwrap().state = PeerState::GetSnap;
+            let response = SnapResponse::BlockAccessLists(BlockAccessListsMessage {
+                request_id: 1,
+                block_access_lists: BlockAccessLists(lists),
+            });
+
+            assert!(fetcher.on_snap_response(fast, Ok(response)).is_none());
+            assert!(rx.try_recv().unwrap().is_ok());
+            assert_eq!(fetcher.next_best_peer(BestPeerRequirements::SupportsSnap), Some(other));
+
+            // An unavailable response leaves the peer eligible if it is the only option.
+            fetcher.on_session_closed(&other);
+            assert_eq!(fetcher.next_best_peer(BestPeerRequirements::SupportsSnap), Some(fast));
+        }
     }
 }
