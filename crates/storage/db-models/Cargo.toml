@@ -37,6 +37,7 @@ reth-codecs = { workspace = true, features = ["alloy"] }
 
 bytes.workspace = true
 arbitrary = { workspace = true, features = ["derive"] }
+modular-bitfield.workspace = true
 
 proptest.workspace = true
 proptest-arbitrary-interop.workspace = true
