@@ -86,18 +86,12 @@ impl<N: NodePrimitives> TreeState<N> {
 
     /// Returns the number of executed blocks stored.
     pub fn block_count(&self) -> usize {
-        self.in_memory_state().canonical_block_count() +
-            self.in_memory_state().non_canonical_block_count()
+        self.in_memory_state().block_count()
     }
 
     /// Returns the [`BlockState`] of the executed block with the given hash.
     pub fn executed_state_by_hash(&self, hash: B256) -> Option<Arc<BlockState<N>>> {
         self.in_memory_state().executed_state_by_hash(hash)
-    }
-
-    /// Returns the [`ExecutedBlock`] by hash.
-    pub fn executed_block_by_hash(&self, hash: B256) -> Option<ExecutedBlock<N>> {
-        self.executed_state_by_hash(hash).map(|state| state.block())
     }
 
     /// Returns `true` if a block with the given hash exists in memory.
@@ -150,20 +144,14 @@ impl<N: NodePrimitives> TreeState<N> {
     }
 
     /// Returns whether or not the hash is part of the canonical chain.
+    ///
+    /// This is the canonical head, one of its in-memory ancestors, or the block the in-memory
+    /// chain of the canonical head builds on.
     pub fn is_canonical(&self, hash: B256) -> bool {
-        let mut current_block = self.current_canonical_head.hash;
-        if current_block == hash {
-            return true
-        }
-
-        while let Some(executed) = self.executed_state_by_hash(current_block) {
-            current_block = executed.block_ref().recovered_block().parent_hash();
-            if current_block == hash {
-                return true
-            }
-        }
-
-        false
+        let head = self.current_canonical_head.hash;
+        hash == head ||
+            self.executed_state_by_hash(head)
+                .is_some_and(|head| head.chain().any(|block| block.parent_hash() == hash))
     }
 
     /// Remove all blocks up to __and including__ the given block number.
@@ -259,25 +247,17 @@ impl<N: NodePrimitives> TreeState<N> {
             return false
         }
 
-        // iterate through parents of the second until we reach the number
-        let Some(mut current_block) = self.executed_block_by_hash(second.parent) else {
+        // walk the in-memory chain of the second block's parent until we reach the number
+        let Some(parent) = self.executed_state_by_hash(second.parent) else {
             // If we can't find its parent in the tree, we can't continue, so return false
             return false
         };
 
-        while current_block.recovered_block().number() > first.number + 1 {
-            let Some(block) =
-                self.executed_block_by_hash(current_block.recovered_block().parent_hash())
-            else {
-                // If we can't find its parent in the tree, we can't continue, so return false
-                return false
-            };
-
-            current_block = block;
-        }
-
-        // Now the block numbers should be equal, so we compare hashes.
-        current_block.recovered_block().parent_hash() == first.hash
+        // If the chain ends before the number, we can't continue, so return false
+        parent
+            .chain()
+            .find(|block| block.number() == first.number + 1)
+            .is_some_and(|block| block.parent_hash() == first.hash)
     }
 }
 

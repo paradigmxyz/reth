@@ -15,7 +15,7 @@ use error::{
     InsertBlockError, InsertBlockFatalError, InsertBlockProcessingError, InsertBlockValidationError,
 };
 use reth_chain_state::{
-    CanonicalInMemoryState, ExecutedBlock, ExecutionTimingStats, InMemoryStateWriter,
+    BlockState, CanonicalInMemoryState, ExecutedBlock, ExecutionTimingStats, InMemoryStateWriter,
     NewCanonicalChain,
 };
 use reth_consensus::{Consensus, FullConsensus};
@@ -903,28 +903,31 @@ where
     /// given head.
     fn on_new_head(&self, new_head: B256) -> ProviderResult<Option<NewCanonicalChain<N>>> {
         // get the executed new head block
-        let Some(new_head_block) = self.state.tree_state.executed_block_by_hash(new_head) else {
+        let Some(new_head_state) = self.state.tree_state.executed_state_by_hash(new_head) else {
             debug!(target: "engine::tree", new_head=?new_head, "New head block not found in inmemory tree state");
             self.metrics.engine.executed_new_block_cache_miss.increment(1);
             return Ok(None)
         };
 
-        let new_head_number = new_head_block.recovered_block().number();
+        let new_head_number = new_head_state.number();
         let mut current_canonical_number = self.state.tree_state.current_canonical_head.number;
 
-        let mut current_hash = new_head_block.recovered_block().parent_hash();
+        // The in-memory chain ending at the new head, from newest to oldest. Its parent links are
+        // walked instead of looking up every block by hash.
+        let mut new_blocks = new_head_state.chain().skip(1);
+        let mut current_hash = new_head_state.parent_hash();
         let mut current_number = new_head_number - 1;
-        let mut new_chain = vec![new_head_block];
+        let mut new_chain = vec![new_head_state.block()];
 
         // Walk back the new chain until we reach a block we know about
         //
         // This is only done for in-memory blocks, because we should not have persisted any blocks
         // that are _above_ the current canonical head.
         while current_number > current_canonical_number {
-            if let Some(block) = self.state.tree_state.executed_block_by_hash(current_hash) {
-                current_hash = block.recovered_block().parent_hash();
+            if let Some(block) = new_blocks.next() {
+                current_hash = block.parent_hash();
                 current_number -= 1;
-                new_chain.push(block);
+                new_chain.push(block.block());
             } else {
                 warn!(target: "engine::tree", current_hash=?current_hash, "Sidechain block not found in TreeState");
                 // This should never happen as we're walking back a chain that should connect to
@@ -965,9 +968,9 @@ where
             old_hash = block.recovered_block().parent_hash();
             old_chain.push(block);
 
-            if let Some(block) = self.state.tree_state.executed_block_by_hash(current_hash) {
-                current_hash = block.recovered_block().parent_hash();
-                new_chain.push(block);
+            if let Some(block) = new_blocks.next() {
+                current_hash = block.parent_hash();
+                new_chain.push(block.block());
             } else {
                 // This shouldn't happen as we've already walked this path
                 warn!(target: "engine::tree", invalid_hash=?current_hash, "New chain block not found in TreeState");
@@ -2271,8 +2274,7 @@ where
             return None
         }
 
-        let mut blocks = Vec::new();
-        let mut current_hash = self.state.tree_state.canonical_block_hash();
+        let current_hash = self.state.tree_state.canonical_block_hash();
 
         debug!(
             target: "engine::tree",
@@ -2285,16 +2287,19 @@ where
             target = ?target,
             "Returning save input"
         );
-        while let Some(block) = self.state.tree_state.executed_block_by_hash(current_hash) {
-            if block.recovered_block().number() <= prev_partial_state_trie {
-                break;
-            }
-
-            current_hash = block.recovered_block().parent_hash();
-            if block.recovered_block().number() <= new_db_tip {
-                blocks.push(block);
-            }
-        }
+        // Walk the parent links of the canonical head's in-memory chain, under a single lookup.
+        let mut blocks = self
+            .state
+            .tree_state
+            .executed_state_by_hash(current_hash)
+            .map(|head| {
+                head.chain()
+                    .take_while(|block| block.number() > prev_partial_state_trie)
+                    .filter(|block| block.number() <= new_db_tip)
+                    .map(BlockState::block)
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
 
         // Reverse the order so that the oldest block comes first
         blocks.reverse();
@@ -2355,8 +2360,8 @@ where
     fn canonical_block_by_hash(&self, hash: B256) -> ProviderResult<ExecutedBlock<N>> {
         trace!(target: "engine::tree", ?hash, "Fetching executed block by hash");
         // check memory first
-        if let Some(block) = self.state.tree_state.executed_block_by_hash(hash) {
-            return Ok(block)
+        if let Some(state) = self.state.tree_state.executed_state_by_hash(hash) {
+            return Ok(state.block())
         }
 
         let (block, senders) = self

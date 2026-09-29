@@ -1603,8 +1603,8 @@ fn test_threshold_persistence_with_state_masking_blocks() {
 
     let removed_hash = blocks[state_trie_tip.number as usize].recovered_block().hash();
     let retained_hash = blocks[(state_trie_tip.number + 1) as usize].recovered_block().hash();
-    assert!(test_harness.tree.state.tree_state.executed_block_by_hash(removed_hash).is_none());
-    assert!(test_harness.tree.state.tree_state.executed_block_by_hash(retained_hash).is_some());
+    assert!(!test_harness.tree.state.tree_state.contains_hash(&removed_hash));
+    assert!(test_harness.tree.state.tree_state.contains_hash(&retained_hash));
     assert!(test_harness.tree.canonical_in_memory_state.state_by_hash(removed_hash).is_none());
     assert!(test_harness.tree.canonical_in_memory_state.state_by_hash(retained_hash).is_some());
 }

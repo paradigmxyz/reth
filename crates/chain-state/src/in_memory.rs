@@ -693,6 +693,12 @@ impl<N: NodePrimitives> CanonicalInMemoryState<N> {
         canonical.chain(non_canonical).filter_map(|hash| blocks.get(hash)).cloned().collect()
     }
 
+    /// Returns the number of executed in-memory blocks, canonical and non-canonical.
+    pub fn block_count(&self) -> usize {
+        let blocks = self.inner.in_memory_state.blocks.read();
+        blocks.canonical.blocks.len() + blocks.non_canonical.blocks.len()
+    }
+
     /// Returns the number of blocks in the canonical section.
     pub fn canonical_block_count(&self) -> usize {
         self.inner.in_memory_state.blocks.read().canonical.blocks.len()
@@ -1049,7 +1055,7 @@ impl<N: NodePrimitives> BlockState<N> {
     }
 
     /// Returns the hash of the parent block.
-    fn parent_hash(&self) -> B256 {
+    pub fn parent_hash(&self) -> B256 {
         self.block.recovered_block().parent_hash()
     }
 
