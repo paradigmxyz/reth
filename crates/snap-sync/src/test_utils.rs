@@ -131,8 +131,9 @@ pub(crate) fn account(nonce: u64) -> TrieAccount {
 }
 
 /// Root of the account trie holding `accounts`.
+#[allow(clippy::cloned_instead_of_copied)]
 pub(crate) fn state_root(accounts: &[(B256, TrieAccount)]) -> B256 {
-    state_root_unsorted(accounts.iter().copied())
+    state_root_unsorted(accounts.iter().cloned())
 }
 
 // Root of the account trie, and the proof nodes on the paths to `targets`.

@@ -53,15 +53,12 @@ impl Encodable for BlockAccessLists {
 
 impl Decodable for BlockAccessLists {
     fn decode(buf: &mut &[u8]) -> alloy_rlp::Result<Self> {
-        let header = Header::decode(buf)?;
-        if !header.list {
+        let Header { list, payload_length } = Header::decode(buf)?;
+        if !list {
             return Err(alloy_rlp::Error::UnexpectedString)
         }
-        if buf.len() < header.payload_length {
-            return Err(alloy_rlp::Error::InputTooShort)
-        }
-
-        let (mut payload, rest) = buf.split_at(header.payload_length);
+        // Payload length checked by Header::decode.
+        let (mut payload, rest) = buf.split_at(payload_length);
         *buf = rest;
         let mut bals = Vec::new();
 
@@ -213,6 +210,14 @@ mod tests {
     fn rejects_non_list_bal_entries() {
         let err = alloy_rlp::decode_exact::<BlockAccessLists>(&[0xc1, 0x01]).unwrap_err();
         assert!(matches!(err, alloy_rlp::Error::UnexpectedString));
+    }
+
+    #[test]
+    fn decode_error_preserves_payload_position() {
+        let encoded = [0xc1, 0x01, 0xaa];
+        let mut input = encoded.as_slice();
+        assert!(BlockAccessLists::decode(&mut input).is_err());
+        assert_eq!(input, &encoded[2..]);
     }
 
     #[test]
