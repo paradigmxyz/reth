@@ -1596,7 +1596,7 @@ where
         let code_bytes_read = provider_stats.total_code_fetched_bytes();
 
         // Write stats from BundleState (final state changes)
-        let accounts_changed = output.state.state.len();
+        let accounts_changed = output.state.len();
         let accounts_deleted =
             output.state.state.values().filter(|acc| acc.was_destroyed()).count();
         let storage_slots_changed =
