@@ -5,8 +5,8 @@
 //! refused.
 
 use crate::{
-    account::StoredCoverage, common::SnapRecord, storage::StoredProgress, verify::StoredRebuild,
-    CatchUpProgress, SnapGeneration, SnapSyncError,
+    account::StoredCoverage, common::SnapRecord, repair::StoredRepairs, storage::StoredProgress,
+    verify::StoredRebuild, CatchUpProgress, SnapGeneration, SnapSyncError,
 };
 use reth_storage_api::{
     BlockHashReader, MetadataProvider, MetadataWriter, SnapAttempt, SnapAttemptId, StorageSettings,
@@ -109,6 +109,7 @@ impl<T: MetadataProvider> SnapAttemptStore for T {
         // would fail every read of it.
         StoredCoverage::clear(self)?;
         StoredProgress::clear(self)?;
+        StoredRepairs::clear(self)?;
         StoredRebuild::clear(self)?;
         Ok(SnapWrite::of(&attempt))
     }
