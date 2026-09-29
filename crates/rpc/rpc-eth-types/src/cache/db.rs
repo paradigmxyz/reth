@@ -45,7 +45,7 @@ pub fn apply_block_overrides<DB>(
 
     let block = evm_env.block_env_mut();
     if let Some(number) = number {
-        block.number = U256::from(number.saturating_to::<u64>());
+        block.number = number;
     }
     if let Some(difficulty) = difficulty {
         block.difficulty = difficulty;
