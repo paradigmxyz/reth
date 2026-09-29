@@ -268,6 +268,7 @@ impl<T: MetadataProvider> SnapAccountStore for T {
     }
 
     // Every check runs before the first write, so a refused repair changes nothing.
+    #[allow(clippy::clone_on_copy)]
     fn commit_account_repair(
         &self,
         write: SnapWrite,
@@ -299,7 +300,7 @@ impl<T: MetadataProvider> SnapAccountStore for T {
             .accounts()
             .first()
             .filter(|(hash, _)| *hash == hashed_address)
-            .map(|(_, account)| *account);
+            .map(|(_, account)| account);
         if let Some(hash) = account.map(|account| account.code_hash) &&
             hash != KECCAK256_EMPTY &&
             self.tx_ref().get::<RawTable<tables::Bytecodes>>(RawKey::new(hash))?.is_none()
@@ -308,8 +309,10 @@ impl<T: MetadataProvider> SnapAccountStore for T {
         }
 
         let has_storage = account.is_some_and(|account| account.storage_root != EMPTY_ROOT_HASH);
-        let mut state = HashedPostState::default()
-            .with_accounts([(hashed_address, account.map(Account::from))]);
+        let mut state = HashedPostState::default().with_accounts([(
+            hashed_address,
+            account.map(|account| Account::from(account.clone())),
+        )]);
         if has_storage {
             // Zero values remove their slots.
             state = state
@@ -897,6 +900,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::clone_on_copy)]
     fn a_repair_takes_the_pivot_account_and_scheduled_slots() {
         let accounts = accounts();
         let (factory, write) = repairing(&accounts);
@@ -922,7 +926,7 @@ mod tests {
         expected.insert_account(ABSENT);
         assert_eq!(provider.snap_repairs(write).unwrap(), expected);
         let stored = provider.tx_ref().get::<tables::HashedAccounts>(key(2)).unwrap();
-        assert_eq!(stored, Some(Account::from(accounts[1].1)));
+        assert_eq!(stored, Some(Account::from(accounts[1].1.clone())));
         assert_eq!(stored_slots(&provider, key(2)), [(SLOT, U256::from(7))]);
     }
 
