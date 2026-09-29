@@ -1136,6 +1136,52 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn a_second_reorg_repairs_what_the_first_new_branch_changed() {
+        let accounts = reorg_accounts();
+        let factory = hashed_factory();
+        let kept = AccountChanges::new(KEPT)
+            .with_balance_change(BalanceChange::new(BlockAccessIndex::new(1), U256::from(7)));
+        let first_lists = [vec![kept], Vec::new()];
+        let (attempt, _, first) = reorged(&factory, first_lists.clone());
+        // Catch-up applies the first new branch, then no peer serves the repair at its pivot.
+        let unserved =
+            AccountRangeMessage { request_id: 1, accounts: Vec::new(), proof: Vec::new() };
+        let unserved = Ok(WithPeerId::new(PeerId::random(), SnapResponse::AccountRange(unserved)));
+        let responses = [lists(1, &orphaned_lists(), true), lists(2, &first_lists, true), unserved];
+        let (_, mut bootstrap) = scripted(&factory, responses, [5]);
+        assert_eq!(bootstrap.run().await.unwrap(), SnapBootstrapOutcome::Stopped);
+
+        // After a restart, a second reorg orphans the re-anchored pivot too.
+        let shared = factory.database_provider_ro().unwrap().sealed_header(2).unwrap().unwrap();
+        let second = branch(&shared, &[Vec::new(), Vec::new(), Vec::new()], state_root(&accounts));
+        replace_headers_after(&factory, 2, &second);
+        let mut responses =
+            vec![lists(1, &first_lists, true), lists(2, &[Vec::new(), Vec::new()], true)];
+        // Both the first orphaned branch's and the first new branch's changes are fetched again.
+        let mut repaired = [keccak256(STALE), keccak256(KEPT)];
+        repaired.sort();
+        for (id, hashed_address) in (1..).zip(repaired) {
+            let index = accounts.iter().position(|(key, _)| *key == hashed_address).unwrap();
+            responses.push(account_range(id, &accounts, index..index + 1, &[hashed_address]));
+        }
+        let (client, mut bootstrap) = scripted(&factory, responses, [5]);
+
+        let outcome = bootstrap.run().await.unwrap();
+
+        let SnapBootstrapOutcome::TrieRebuild { write, pivot } = outcome else {
+            panic!("the state is repaired: {outcome:?}")
+        };
+        assert_eq!(pivot, second[1].num_hash());
+        assert_eq!(attempt_id(&factory), attempt);
+        let hashes =
+            |headers: &[SealedHeader]| headers.iter().map(SealedHeader::hash).collect::<Vec<_>>();
+        assert_eq!(client.block_requests()[0], hashes(&first[..2]));
+        assert_eq!(*client.origins(), repaired);
+        let verified = rebuild_and_verify(&factory, write, pivot.number);
+        assert_eq!(verified.state_root(), state_root(&accounts));
+    }
+
+    #[tokio::test]
     async fn unserved_orphaned_lists_are_waited_for() {
         let accounts = reorg_accounts();
         let factory = hashed_factory();
@@ -1144,7 +1190,7 @@ mod tests {
         assert_eq!(bootstrap.run().await.unwrap(), SnapBootstrapOutcome::Stopped);
         assert_eq!(attempt_id(&factory), attempt);
 
-        // Another peer serves them on the next run.
+        // A restarted node resumes the orphaned attempt, and another peer serves them.
         let stale_index = accounts.iter().position(|(key, _)| *key == keccak256(STALE)).unwrap();
         let responses = [
             lists(1, &orphaned_lists(), true),
