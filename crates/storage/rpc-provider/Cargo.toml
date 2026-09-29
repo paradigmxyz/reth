@@ -34,6 +34,7 @@ alloy-primitives.workspace = true
 alloy-consensus.workspace = true
 alloy-rpc-types.workspace = true
 alloy-rpc-types-engine.workspace = true
+alloy-rpc-types-eth.workspace = true
 alloy-eips.workspace = true
 
 # async
@@ -48,3 +49,13 @@ revm.workspace = true
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["rt", "macros"] }
+
+[features]
+account-ext = [
+    "alloy-rpc-types-eth/account-ext",
+    "reth-primitives-traits/account-ext",
+    "reth-provider/account-ext",
+    "reth-stages-types/account-ext",
+    "reth-trie/account-ext",
+    "revm/account-ext",
+]

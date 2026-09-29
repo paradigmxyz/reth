@@ -1125,7 +1125,7 @@ mod tests {
         let mut state_override = StateOverride::default();
         state_override.insert(contract, AccountOverride { code: Some(code), ..Default::default() });
         let overrides = EvmOverrides::state(Some(state_override));
-        let at = BlockId::Number(BlockNumberOrTag::Latest);
+        let at = BlockId::latest();
 
         for chain_spec in [
             ChainSpecBuilder::mainnet().cancun_activated().build(),
@@ -1188,7 +1188,7 @@ mod tests {
             },
         );
         let request = TransactionRequest::default().with_to(Address::repeat_byte(0xaa));
-        let at = BlockId::Number(BlockNumberOrTag::Latest);
+        let at = BlockId::latest();
 
         let capped = build_test_eth_api_with_gas_cap(provider.clone(), 20_999);
         let err = EthCall::estimate_gas_at(&capped, request.clone(), at, EvmOverrides::default())

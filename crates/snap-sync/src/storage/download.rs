@@ -238,7 +238,8 @@ mod tests {
     use crate::{
         test_utils::{
             account, generation, hashed_factory, insert_generation_headers, key, state_root,
-            storage_ranges, storage_root_of, stored_slots, verified_range, ScriptedSnapClient,
+            storage_ranges, storage_root_of, stored_slots, verified_range, verified_repair,
+            ScriptedSnapClient,
         },
         SnapAccountStore, SnapAttemptStore, SnapCatchUpStore, StateRepairs,
     };
@@ -310,21 +311,6 @@ mod tests {
 
     fn slots_of(factory: &Factory, account: B256) -> Vec<(B256, U256)> {
         stored_slots(&factory.database_provider_ro().unwrap(), account)
-    }
-
-    // `accounts`' large contract fetched on its own, with `slots` scheduled for repair.
-    fn repairing(accounts: &[(B256, TrieAccount)], slots: &[B256]) -> (Factory, VerifiedRange) {
-        let (factory, _) = started(accounts);
-        let provider = factory.database_provider_rw().unwrap();
-        let write = provider.active_snap_write().unwrap().unwrap();
-        let mut repairs = StateRepairs::default();
-        for slot in slots {
-            repairs.insert_slot(key(2), *slot);
-        }
-        provider.schedule_snap_repairs(write, repairs).unwrap();
-        provider.commit().unwrap();
-        let range = verified_range(accounts, 1..2, key(2), &[key(2)]);
-        (factory, VerifiedRange::new(write, range))
     }
 
     #[tokio::test]
@@ -547,6 +533,21 @@ mod tests {
 
         assert!(next <= key(2));
         assert_eq!(provider.storage_progress(write, next).unwrap().resume_at(key(2)), Some(key(2)));
+    }
+
+    // `accounts`' large contract fetched on its own, with `slots` scheduled for repair.
+    fn repairing(accounts: &[(B256, TrieAccount)], slots: &[B256]) -> (Factory, VerifiedRange) {
+        let (factory, _) = started(accounts);
+        let provider = factory.database_provider_rw().unwrap();
+        let write = provider.active_snap_write().unwrap().unwrap();
+        let mut repairs = StateRepairs::default();
+        for slot in slots {
+            repairs.insert_slot(key(2), *slot);
+        }
+        provider.schedule_snap_repairs(write, repairs).unwrap();
+        provider.commit().unwrap();
+        let range = verified_repair(accounts, 1..2, key(2), &[key(2)]);
+        (factory, VerifiedRange::new(write, range))
     }
 
     #[tokio::test]

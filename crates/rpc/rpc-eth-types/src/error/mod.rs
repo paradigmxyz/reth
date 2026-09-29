@@ -360,7 +360,7 @@ impl From<EthApiError> for jsonrpsee_types::error::ErrorObject<'static> {
             }
             err @ EthApiError::TransactionInputError(_) => invalid_params_rpc_err(err.to_string()),
             EthApiError::PrunedHistoryUnavailable { .. } => {
-                rpc_error_with_code(4444, error.to_string())
+                rpc_error_with_code(EthRpcErrorCode::PrunedHistory.code(), error.to_string())
             }
             EthApiError::Other(err) => err.to_rpc_error(),
             EthApiError::MuxTracerError(msg) => internal_rpc_err(msg.to_string()),
