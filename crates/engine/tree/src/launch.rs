@@ -77,6 +77,9 @@ where
     /// Provider factory handed to the persistence service.
     pub provider: ProviderFactory<N>,
     /// Blockchain provider backing the engine tree.
+    ///
+    /// It must use the in-memory state of `overlay_manager`, as providers built from a
+    /// [`ProviderFactory`] with that overlay manager do.
     pub blockchain_db: BlockchainProvider<N>,
     /// Pruner run by the persistence service.
     pub pruner: PrunerWithFactory<ProviderFactory<N>>,
@@ -84,7 +87,8 @@ where
     pub payload_builder: PayloadBuilderHandle<N::Payload>,
     /// Validator for incoming payloads.
     pub payload_validator: V,
-    /// Overlay manager for state on top of the database.
+    /// Overlay manager for state on top of the database, which holds the node's in-memory state
+    /// the engine tracks executed blocks in.
     pub overlay_manager: OverlayManager<N::Primitives>,
     /// Engine tree configuration.
     pub tree_config: TreeConfig,
@@ -129,12 +133,17 @@ where
             runtime,
         } = self;
 
+        // The engine tracks the executed blocks in the overlay manager's in-memory state, which the
+        // provider serves them from.
+        assert!(
+            blockchain_db.canonical_in_memory_state().ptr_eq(overlay_manager.in_memory_state()),
+            "the blockchain provider and the overlay manager must share the node's in-memory state"
+        );
+
         let downloader = BasicBlockDownloader::new(client, consensus.clone());
 
         let persistence_handle =
             PersistenceHandle::<N::Primitives>::spawn_service(provider, pruner, sync_metrics_tx);
-
-        let canonical_in_memory_state = blockchain_db.canonical_in_memory_state();
 
         let (to_tree_tx, from_tree) = EngineApiTreeHandler::spawn_new(
             blockchain_db,
@@ -142,7 +151,6 @@ where
             payload_validator,
             persistence_handle,
             payload_builder,
-            canonical_in_memory_state,
             overlay_manager,
             tree_config,
             engine_kind,

@@ -233,8 +233,7 @@ impl TestHarness {
             EngineApiKind::Ethereum,
             overlay_manager.clone(),
         );
-        let canonical_in_memory_state = overlay_manager.in_memory_state().clone();
-        canonical_in_memory_state.set_canonical_head(header);
+        overlay_manager.in_memory_state().set_canonical_head(header);
 
         let (to_payload_service, payload_command_rx) = unbounded_channel();
         let payload_builder = PayloadBuilderHandle::new(to_payload_service);
@@ -257,7 +256,6 @@ impl TestHarness {
             engine_validator,
             from_tree_tx,
             engine_api_tree_state,
-            canonical_in_memory_state,
             persistence_handle,
             PersistenceState {
                 last_persisted_block: BlockNumHash::default(),

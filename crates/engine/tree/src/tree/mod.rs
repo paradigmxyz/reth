@@ -297,9 +297,10 @@ where
     persistence_state: PersistenceState,
     /// Flag indicating the state of the node's backfill synchronization process.
     backfill_sync_state: BackfillSyncState,
-    /// Keeps track of the executed blocks that aren't persisted yet, canonical and pending.
-    /// This is the same instance the tree state uses, and is intended to be accessed from external
-    /// sources, such as rpc.
+    /// Keeps track of the executed blocks that aren't persisted yet, canonical and non-canonical.
+    ///
+    /// This is taken from the tree state, so the engine and its tree state always share the
+    /// node's single store, which is also accessed from external sources, such as rpc.
     canonical_in_memory_state: CanonicalInMemoryState<N>,
     /// Handle to the payload builder that will receive payload attributes for valid forkchoice
     /// updates
@@ -375,6 +376,8 @@ where
     V: EngineValidator<T> + WaitForCaches,
 {
     /// Creates a new [`EngineApiTreeHandler`].
+    ///
+    /// The engine uses the in-memory state of the tree state's overlay manager.
     #[expect(clippy::too_many_arguments)]
     pub fn new(
         provider: P,
@@ -382,7 +385,6 @@ where
         payload_validator: V,
         outgoing: UnboundedSender<EngineApiEvent<N>>,
         state: EngineApiTreeState<N>,
-        canonical_in_memory_state: CanonicalInMemoryState<N>,
         persistence: PersistenceHandle<N>,
         persistence_state: PersistenceState,
         payload_builder: PayloadBuilderHandle<T>,
@@ -391,10 +393,7 @@ where
         evm_config: C,
         runtime: reth_tasks::Runtime,
     ) -> Self {
-        debug_assert!(
-            canonical_in_memory_state.ptr_eq(state.tree_state.in_memory_state()),
-            "the engine and its tree state must share the node's in-memory state"
-        );
+        let canonical_in_memory_state = state.tree_state.in_memory_state().clone();
         let (incoming_tx, incoming) = crossbeam_channel::unbounded();
 
         let (payload_builds, payload_build_finished) = PayloadBuildTracker::new();
@@ -428,6 +427,8 @@ where
     ///
     /// Returns the sender through which incoming requests can be sent to the task and the receiver
     /// end of a [`EngineApiEvent`] unbounded channel to receive events from the engine.
+    ///
+    /// The engine tracks the executed blocks in the in-memory state of `overlay_manager`.
     #[expect(clippy::complexity)]
     pub fn spawn_new(
         provider: P,
@@ -435,7 +436,6 @@ where
         payload_validator: V,
         persistence: PersistenceHandle<N>,
         payload_builder: PayloadBuilderHandle<T>,
-        canonical_in_memory_state: CanonicalInMemoryState<N>,
         overlay_manager: OverlayManager<N>,
         config: TreeConfig,
         kind: EngineApiKind,
@@ -468,7 +468,6 @@ where
             payload_validator,
             tx,
             state,
-            canonical_in_memory_state,
             persistence,
             persistence_state,
             payload_builder,
