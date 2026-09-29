@@ -198,7 +198,8 @@ where
         Ok(Resolved::Active(write))
     }
 
-    // One pass over the attempt: pivot, catch-up, then up to `ranges_per_check` account ranges.
+    // One pass over the attempt: pivot, catch-up, repairs, then up to `ranges_per_check` account
+    // ranges.
     async fn drive(&mut self, write: SnapWrite, head: u64) -> Result<Step, SnapSyncError> {
         let (applied, complete) = {
             let provider = self.factory.database_provider_ro()?;
@@ -285,12 +286,12 @@ where
             let Some(slots) = self.storage.repair_slots(&range).await? else {
                 return Ok(Some(Step::Wait))
             };
-            if let Some(step) = self.download_code(&range, true).await? {
+            if let Some(step) = self.download_code(&range).await? {
                 return Ok(Some(step))
             }
             let hashed_address = range.origin();
             let remaining = self.accounts.commit_repair(range, slots).await?;
-            debug!(target: "sync::snap", %hashed_address, remaining, "Repaired snap account");
+            debug!(target: "sync::snap", %hashed_address, remaining, "Committed snap repair batch");
             if self.cancel.is_cancelled() {
                 return Ok(Some(Step::Stop))
             }
@@ -335,23 +336,16 @@ where
                 return Ok(Some(Step::Stop))
             }
         }
-        self.download_code(range, false).await
+        self.download_code(range).await
     }
 
-    // Persists the code `range` references, or only its repaired account's code when `repair`.
-    // `Some` ends the pass.
+    // Persists the code `range` references. `Some` ends the pass.
     async fn download_code(
         &mut self,
         range: &VerifiedRange,
-        repair: bool,
     ) -> Result<Option<Step>, SnapSyncError> {
         loop {
-            let step = if repair {
-                self.bytecode.next_repair(range).await?
-            } else {
-                self.bytecode.next(range).await?
-            };
-            match step {
+            match self.bytecode.next(range).await? {
                 BytecodeStep::Complete => return Ok(None),
                 BytecodeStep::Committed { .. } => {}
                 BytecodeStep::Unavailable { .. } => return Ok(Some(Step::Wait)),
@@ -624,8 +618,8 @@ mod tests {
         repairs.insert_account(key(2));
         provider.schedule_snap_repairs(write, repairs).unwrap();
         provider.commit().unwrap();
+        // One download fetches the repair and then the ranges, numbering both requests.
         let responses =
-            // One download fetches the repair and then the ranges, numbering both requests.
             [account_range(1, &accounts, 1..2, &[key(2)]), account_range(2, &accounts, 0..3, &[])];
         let (client, mut bootstrap) = scripted(&factory, responses, [3]);
 

@@ -238,7 +238,8 @@ mod tests {
     use crate::{
         test_utils::{
             account, generation, hashed_factory, insert_generation_headers, key, state_root,
-            storage_ranges, storage_root_of, stored_slots, verified_range, ScriptedSnapClient,
+            storage_ranges, storage_root_of, stored_slots, verified_range, verified_repair,
+            ScriptedSnapClient,
         },
         SnapAccountStore, SnapAttemptStore, SnapCatchUpStore, StateRepairs,
     };
@@ -545,7 +546,7 @@ mod tests {
         }
         provider.schedule_snap_repairs(write, repairs).unwrap();
         provider.commit().unwrap();
-        let range = verified_range(accounts, 1..2, key(2), &[key(2)]);
+        let range = verified_repair(accounts, 1..2, key(2), &[key(2)]);
         (factory, VerifiedRange::new(write, range))
     }
 

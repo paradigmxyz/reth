@@ -450,7 +450,7 @@ mod tests {
     use crate::{
         test_utils::{
             account, generation, hashed_factory, insert_generation_headers, key, state_root,
-            stored_slots, verified_range,
+            stored_slots, verified_range, verified_repair,
         },
         SnapGeneration, StorageChunk,
     };
@@ -899,7 +899,7 @@ mod tests {
     fn a_repair_takes_the_pivot_account_and_scheduled_slots() {
         let accounts = accounts();
         let (factory, write) = repairing(&accounts);
-        let range = verified_range(&accounts, 1..2, key(2), &[key(2)]);
+        let range = verified_repair(&accounts, 1..2, key(2), &[key(2)]);
         // The pivot holds 7 at `SLOT` and nothing at `OTHER`.
         let slots = vec![(SLOT, U256::from(7)), (OTHER, U256::ZERO)];
 
@@ -928,8 +928,8 @@ mod tests {
     fn an_account_the_pivot_lacks_is_removed_with_its_storage() {
         let accounts = accounts();
         let (factory, write) = repairing(&accounts);
-        // The first account from `ABSENT` on is the far one.
-        let range = verified_range(&accounts, 2..3, ABSENT, &[ABSENT, FAR]);
+        // The far account, the first past `ABSENT`, proves it absent.
+        let range = verified_repair(&accounts, 2..3, ABSENT, &[ABSENT, FAR]);
 
         repair(&factory, write, &range, Vec::new()).unwrap();
 
@@ -947,7 +947,7 @@ mod tests {
         let write =
             provider.advance_snap_pivot(write, generation(2, state_root(&accounts))).unwrap();
         provider.commit().unwrap();
-        let range = verified_range(&accounts, 2..3, ABSENT, &[ABSENT, FAR]);
+        let range = verified_repair(&accounts, 2..3, ABSENT, &[ABSENT, FAR]);
 
         let refused = repair(&factory, write, &range, Vec::new());
 
