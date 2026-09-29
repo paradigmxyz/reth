@@ -340,7 +340,7 @@ mod tests {
     use reth_eth_wire_types::snap::ByteCodesMessage;
     use reth_network_p2p::{error::PeerRequestResult, priority::Priority};
     use reth_network_peers::WithPeerId;
-    use reth_trie_common::{proof::ProofRetainer, HashBuilder, Nibbles};
+    use reth_trie_common::{proof::ProofRetainer, root::state_root, HashBuilder, Nibbles};
     use std::sync::Arc;
 
     const MAX_HASH: B256 = B256::new([0xff; B256::len_bytes()]);
@@ -354,11 +354,7 @@ mod tests {
     }
 
     fn root(accounts: &[(B256, TrieAccount)]) -> B256 {
-        let mut builder = HashBuilder::default();
-        for (key, account) in accounts {
-            builder.add_leaf(Nibbles::unpack(*key), &alloy_rlp::encode(account));
-        }
-        builder.root()
+        state_root(accounts.iter().copied())
     }
 
     fn root_and_proof(accounts: &[(B256, TrieAccount)], targets: &[B256]) -> (B256, Vec<Bytes>) {
