@@ -19,6 +19,7 @@ reth-eth-wire-types.workspace = true
 reth-network-p2p.workspace = true
 reth-network-peers.workspace = true
 reth-primitives-traits = { workspace = true, features = ["eip7928"] }
+reth-prune-types.workspace = true
 reth-storage-api = { workspace = true, features = ["db-api"] }
 reth-stages-types.workspace = true
 reth-storage-errors.workspace = true

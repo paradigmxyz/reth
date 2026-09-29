@@ -9,12 +9,18 @@ use crate::{
 };
 use alloy_eips::BlockNumHash;
 use alloy_primitives::{B256, KECCAK256_EMPTY};
-use reth_db_api::{cursor::DbCursorRO, tables, transaction::DbTx, RawKey, RawTable};
+use reth_db_api::{
+    cursor::DbCursorRO,
+    tables,
+    transaction::{DbTx, DbTxMut},
+    RawKey, RawTable,
+};
 use reth_primitives_traits::{AlloyBlockHeader, GotExpected};
+use reth_prune_types::{PruneCheckpoint, PruneMode, PruneSegment};
 use reth_stages_types::{StageCheckpoint, StageId};
 use reth_storage_api::{
-    BlockHashReader, DBProvider, HeaderProvider, MetadataProvider, MetadataWriter, SnapAttemptId,
-    StageCheckpointReader, StageCheckpointWriter,
+    BlockHashReader, DBProvider, HeaderProvider, MetadataProvider, MetadataWriter,
+    PruneCheckpointWriter, SnapAttemptId, StageCheckpointReader, StageCheckpointWriter,
 };
 use reth_storage_errors::provider::{ProviderError, RootMismatch};
 use serde::{Deserialize, Serialize};
@@ -23,6 +29,16 @@ use tokio_util::sync::CancellationToken;
 /// Accounts scanned between cancellation checks, bounding how long a cancelled session keeps
 /// running.
 pub const DEFAULT_SCAN_CHUNK: u64 = 100_000;
+
+// Stages a published pivot does not satisfy: headers were downloaded for real, era files are
+// imported separately, the merkle stage still has to rebuild the trie, and `Finish` only advances
+// once the state is verified. Every other stage is covered by the downloaded state.
+const UNPUBLISHED_STAGES: [StageId; 4] =
+    [StageId::Era, StageId::Headers, StageId::MerkleExecute, StageId::Finish];
+
+// A snap sync produced no rows below its pivot, so every segment but `ContractLogs` counts as
+// pruned there; that one only narrows `Receipts` by a log filter it is not configured with here.
+const UNPRUNED_SEGMENTS: [PruneSegment; 1] = [PruneSegment::ContractLogs];
 
 /// Decides whether downloaded state can be trusted as the node's state.
 ///
@@ -51,6 +67,14 @@ pub trait SnapStateVerifier {
     ) -> Result<(), SnapSyncError>
     where
         Self: DBProvider;
+
+    /// Records the state downloaded at `pivot` as the pipeline's starting point: the stages it
+    /// covers move to `pivot`, and the history below it counts as pruned.
+    ///
+    /// The trie is not rebuilt yet, so `Finish` and the merkle stage stay where they were.
+    fn publish_snap_state(&self, pivot: u64) -> Result<(), SnapSyncError>
+    where
+        Self: PruneCheckpointWriter + StageCheckpointWriter + DBProvider<Tx: DbTxMut>;
 
     /// Returns whether `write`'s state was handed to the merkle stage, so a resumed sync does not
     /// reset its rebuild.
@@ -114,6 +138,34 @@ impl<T: MetadataProvider> SnapStateVerifier for T {
         self.save_stage_checkpoint(StageId::MerkleExecute, StageCheckpoint::default())?;
         self.save_stage_checkpoint_progress(StageId::MerkleExecute, Vec::new())?;
         StoredRebuild::new(write).write(self)?;
+        Ok(())
+    }
+
+    fn publish_snap_state(&self, pivot: u64) -> Result<(), SnapSyncError>
+    where
+        Self: PruneCheckpointWriter + StageCheckpointWriter + DBProvider<Tx: DbTxMut>,
+    {
+        // Bodies downloaded before the pivot moved allocated transaction numbers that the emptied
+        // transaction segments no longer hold.
+        self.tx_ref().clear::<tables::BlockBodyIndices>()?;
+        self.tx_ref().clear::<tables::TransactionBlocks>()?;
+        self.tx_ref().clear::<tables::TransactionHashNumbers>()?;
+
+        let checkpoint = StageCheckpoint::new(pivot);
+        for stage in StageId::ALL.into_iter().filter(|stage| !UNPUBLISHED_STAGES.contains(stage)) {
+            self.save_stage_checkpoint(stage, checkpoint)?;
+        }
+        // `before_inclusive` keeps the pivot itself, whose state the node has.
+        let pruned = PruneCheckpoint {
+            block_number: Some(pivot),
+            tx_number: None,
+            prune_mode: PruneMode::before_inclusive(pivot),
+        };
+        for segment in
+            PruneSegment::variants().filter(|segment| !UNPRUNED_SEGMENTS.contains(segment))
+        {
+            self.save_prune_checkpoint(segment, pruned)?;
+        }
         Ok(())
     }
 
@@ -234,7 +286,7 @@ mod tests {
     use reth_primitives_traits::SealedHeader;
     use reth_provider::{
         test_utils::{insert_headers, MockNodeTypesWithDB},
-        DatabaseProviderFactory, ProviderFactory,
+        DatabaseProviderFactory, ProviderFactory, PruneCheckpointReader,
     };
     use reth_stages::stages::MerkleStage;
     use reth_stages_api::{ExecInput, Stage, StageError};
@@ -505,5 +557,37 @@ mod tests {
 
         assert!(matches!(start(&provider, write), Err(SnapSyncError::GenesisPivot)));
         assert_eq!(merkle_checkpoint(&provider), None);
+    }
+
+    #[test]
+    fn publishing_moves_the_covered_stages_while_the_trie_and_finish_wait() {
+        let factory = hashed_factory();
+        let provider = factory.database_provider_rw().unwrap();
+
+        provider.publish_snap_state(7).unwrap();
+
+        for stage in StageId::ALL.into_iter().filter(|stage| !UNPUBLISHED_STAGES.contains(stage)) {
+            let checkpoint = provider.get_stage_checkpoint(stage).unwrap();
+            assert_eq!(checkpoint.map(|it| it.block_number), Some(7), "{stage}");
+        }
+        for stage in UNPUBLISHED_STAGES {
+            assert_eq!(provider.get_stage_checkpoint(stage).unwrap(), None, "{stage}");
+        }
+    }
+
+    #[test]
+    fn publishing_records_the_history_below_the_pivot_as_pruned() {
+        let factory = hashed_factory();
+        let provider = factory.database_provider_rw().unwrap();
+
+        provider.publish_snap_state(7).unwrap();
+
+        for segment in
+            PruneSegment::variants().filter(|segment| !UNPRUNED_SEGMENTS.contains(segment))
+        {
+            let checkpoint = provider.get_prune_checkpoint(segment).unwrap().unwrap();
+            assert_eq!(checkpoint.block_number, Some(7));
+            assert_eq!(checkpoint.prune_mode, PruneMode::before_inclusive(7));
+        }
     }
 }
