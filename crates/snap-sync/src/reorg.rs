@@ -23,8 +23,8 @@ use serde::{Deserialize, Serialize};
 ///
 /// Blanket-implemented over node metadata access, so recovery joins the caller's transaction.
 pub trait SnapReorgStore {
-    /// Returns where the canonical chain left the branch the attempt `write` belongs to is
-    /// anchored on.
+    /// Returns where the canonical chain diverges from the branch the pivot of `write`'s attempt
+    /// is on.
     ///
     /// `Ok(None)` when the kept headers do not reach back to where the branches part.
     fn snap_reorg(
