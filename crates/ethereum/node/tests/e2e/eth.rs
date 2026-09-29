@@ -549,11 +549,7 @@ async fn test_engine_ssz_request_validation() -> eyre::Result<()> {
     let auth = node.auth_server_handle();
     let url = auth.http_url();
     let client = reqwest::Client::new();
-    let state = ForkchoiceState {
-        head_block_hash: chain.genesis_hash(),
-        safe_block_hash: chain.genesis_hash(),
-        finalized_block_hash: chain.genesis_hash(),
-    };
+    let state = ForkchoiceState::same_hash(chain.genesis_hash());
     for (fork, withdrawals, expected_error) in [
         ("cancun", 0, Some("unsupported-fork")),
         ("osaka", 0, Some("unsupported-fork")),
