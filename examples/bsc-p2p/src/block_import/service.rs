@@ -232,8 +232,9 @@ mod tests {
     use reth_node_ethereum::EthEngineTypes;
     use reth_provider::ProviderError;
     use std::{
+        future::poll_fn,
         sync::Arc,
-        task::{Context, Poll},
+        time::Duration,
     };
 
     #[tokio::test]
@@ -375,20 +376,18 @@ mod tests {
             let block_msg = create_test_block();
             self.handle.send_block(block_msg, PeerId::random()).unwrap();
 
-            let waker = futures::task::noop_waker();
-            let mut cx = Context::from_waker(&waker);
-            let mut outcomes = Vec::new();
-
-            // Wait for both NewPayload and FCU outcomes
-            while outcomes.len() < 2 {
-                match self.handle.poll_outcome(&mut cx) {
-                    Poll::Ready(Some(outcome)) => {
-                        outcomes.push(outcome);
-                    }
-                    Poll::Ready(None) => break,
-                    Poll::Pending => tokio::task::yield_now().await,
+            let outcomes = tokio::time::timeout(Duration::from_secs(1), async {
+                let mut outcomes = Vec::new();
+                while outcomes.len() < 2 {
+                    let outcome = poll_fn(|cx| self.handle.poll_outcome(cx))
+                        .await
+                        .expect("block import service closed before returning all outcomes");
+                    outcomes.push(outcome);
                 }
-            }
+                outcomes
+            })
+            .await
+            .expect("block import outcomes must arrive");
 
             // Assert that at least one outcome matches our criteria
             assert!(
