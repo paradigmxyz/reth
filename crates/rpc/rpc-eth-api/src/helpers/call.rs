@@ -924,7 +924,11 @@ pub trait Call:
             if tx_env.gas_price() > 0 {
                 // If gas price is specified, cap transaction gas limit with caller allowance
                 trace!(target: "rpc::eth::call", ?tx_env, "Applying gas limit cap with caller allowance");
-                let cap = self.caller_gas_allowance(db, &evm_env, &tx_env)?;
+                let mut cap = self.caller_gas_allowance(db, &evm_env, &tx_env)?;
+                // The allowance must not raise the already applied RPC gas cap.
+                if self.call_gas_limit() != 0 {
+                    cap = cap.min(tx_env.gas_limit());
+                }
                 // ensure we cap gas_limit to the block's
                 tx_env.set_gas_limit(cap.min(evm_env.block_env.gas_limit()));
             }
