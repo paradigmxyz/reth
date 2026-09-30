@@ -394,6 +394,8 @@ where
     /// Optional state-root task handle, shared with the engine.
     state_root_handle: Option<PayloadStateRootHandle>,
     /// Optional precompile cache shared with the engine.
+    ///
+    /// Cloned into every build attempt of this job, since it is not tied to a single build.
     precompile_cache: Option<SharedPrecompileCache>,
     /// Lifecycle leases shared with the payload-builder service.
     ///
@@ -958,6 +960,12 @@ pub struct BuildArguments<Attributes, Payload: BuiltPayload> {
     /// invalidated and cleared.
     pub state_root_handle: Option<PayloadStateRootHandle>,
     /// Optional precompile cache shared with the engine.
+    ///
+    /// Builders should wrap every EVM they create for this build, including prewarming EVMs, with
+    /// `reth_engine_tree::tree::precompile_cache::wrap_with_shared_precompile_cache`. The same
+    /// cache is passed to every build attempt of a payload job. `None` if the engine's
+    /// precompile cache is disabled or the job was not created by the engine, in which case
+    /// the builder runs uncached.
     pub precompile_cache: Option<SharedPrecompileCache>,
     /// How to configure the payload.
     pub config: PayloadConfig<Attributes, HeaderTy<Payload::Primitives>>,
@@ -969,6 +977,8 @@ pub struct BuildArguments<Attributes, Payload: BuiltPayload> {
 
 impl<Attributes, Payload: BuiltPayload> BuildArguments<Attributes, Payload> {
     /// Create new build arguments.
+    ///
+    /// [`Self::precompile_cache`] is left unset.
     pub const fn new(
         cached_reads: CachedReads,
         execution_cache: Option<SavedCache>,

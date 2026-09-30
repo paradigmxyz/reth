@@ -587,7 +587,8 @@ pub struct PayloadBuilderResources {
     state_root_handle: Option<PayloadStateRootHandle>,
     /// Optional precompile cache shared with the engine.
     ///
-    /// Only provided if the engine's precompile cache is enabled.
+    /// Only provided if the engine's precompile cache is enabled, independent of
+    /// `--engine.share-execution-cache-with-payload-builder`. See [`SharedPrecompileCache`].
     precompile_cache: Option<SharedPrecompileCache>,
     /// Lifecycle leases retained by the service or by detached payload build tasks.
     leases: Vec<PayloadBuilderLease>,
@@ -609,6 +610,9 @@ impl PayloadBuilderResources {
     }
 
     /// Sets the precompile cache shared with the engine.
+    ///
+    /// This should be the same cache the engine uses for block validation and prewarming, so that
+    /// results flow in both directions.
     pub fn with_precompile_cache(mut self, precompile_cache: SharedPrecompileCache) -> Self {
         self.precompile_cache = Some(precompile_cache);
         self
@@ -677,21 +681,43 @@ impl std::fmt::Debug for PayloadBuilderLease {
 /// Type-erased handle to the engine's precompile cache.
 ///
 /// The payload builder service is not generic over the EVM, so the engine erases the cache type
-/// before loaning it and the payload builder recovers it with [`Self::downcast`]. The downcast only
-/// succeeds for the exact type the engine inserted.
+/// before loaning it. The engine creates this handle with `PrecompileCacheMap::into_shared`, and
+/// payload builders recover the cache with `PrecompileCacheMap::from_shared` or wrap an EVM with
+/// `wrap_with_shared_precompile_cache`, all in `reth_engine_tree::tree::precompile_cache`.
+/// [`Self::new`] and [`Self::downcast`] are generic only because this crate cannot name the cache
+/// type.
 ///
-/// Cached results are keyed by precompile address, input and spec, so only share this with EVMs
-/// that install the same cacheable precompiles as the engine for a given spec.
+/// # Ownership
+///
+/// Clones share the same underlying cache, so this is a handle rather than an exclusive loan. The
+/// engine keeps using the cache for block validation and prewarming while payload builders use it,
+/// and results written by either side are visible to the other. Unlike the execution cache, it is
+/// not tied to a parent block and needs no exclusive access, so a payload job may keep it for its
+/// whole lifetime and use it from any thread. Nothing has to be returned to the engine.
+///
+/// # Correctness
+///
+/// The downcast only succeeds for the exact cache type the engine inserted, including its spec
+/// type. Cached results are keyed by precompile address, input and spec value, so sharing is only
+/// correct if every EVM using the cache installs the same cacheable precompiles as the engine for a
+/// given address and spec. This holds when payload builders create their EVMs with the engine's EVM
+/// configuration. Only precompiles that report `supports_caching` may be wrapped, because a cached
+/// output must depend only on the precompile input and the spec.
 #[derive(Clone)]
 pub struct SharedPrecompileCache(Arc<dyn Any + Send + Sync>);
 
 impl SharedPrecompileCache {
     /// Type-erases the given precompile cache.
+    ///
+    /// Prefer `PrecompileCacheMap::into_shared`, which fixes the cache type.
     pub fn new<T: Any + Send + Sync>(cache: T) -> Self {
         Self(Arc::new(cache))
     }
 
     /// Returns the precompile cache if it has type `T`.
+    ///
+    /// The returned value is a clone of the stored cache handle and shares its entries. Prefer
+    /// `PrecompileCacheMap::from_shared`, which fixes the cache type.
     pub fn downcast<T: Any + Clone>(&self) -> Option<T> {
         self.0.downcast_ref::<T>().cloned()
     }

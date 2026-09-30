@@ -22,6 +22,9 @@ const MAX_CACHE_SIZE: u32 = 1024 * 1024;
 const MAX_PRECOMPILE_CACHE_INPUT_SIZE: usize = 2 * 1024;
 
 /// Stores caches for each precompile.
+///
+/// Clones share the same caches. The engine uses one map for block validation and prewarming, and
+/// loans it to payload builders as a [`SharedPrecompileCache`].
 #[derive(Debug, Clone, Default)]
 pub struct PrecompileCacheMap<S>(Arc<DashMap<Address, PrecompileCache<S>, FbBuildHasher<20>>>)
 where
@@ -44,12 +47,18 @@ where
         self.0.entry(address).or_default().clone()
     }
 
-    /// Type-erases this map so it can be loaned to the payload builder.
+    /// Type-erases this map so it can be loaned to payload builders through
+    /// [`PayloadBuilderResources`](reth_payload_builder::PayloadBuilderResources).
+    ///
+    /// The returned handle shares this map's caches rather than copying them.
     pub fn into_shared(self) -> SharedPrecompileCache {
         SharedPrecompileCache::new(self)
     }
 
     /// Returns the map if `shared` was created from a [`PrecompileCacheMap`] with spec type `S`.
+    ///
+    /// The returned map shares the caches of the map `shared` was created from. Returns `None` if
+    /// `S` is not the spec type of the engine's EVM.
     pub fn from_shared(shared: &SharedPrecompileCache) -> Option<Self> {
         shared.downcast()
     }
@@ -270,12 +279,25 @@ impl CachedPrecompileMetrics {
 
 /// Wraps the cacheable precompiles of `evm` with the shared precompile cache.
 ///
-/// The cache map is recovered for the EVM's spec type and entries are tied to the EVM's current
-/// spec. Wrapped precompiles do not record metrics, so lookups from other EVMs do not skew the
-/// engine's precompile cache metrics.
+/// Intended for payload builders that receive a [`SharedPrecompileCache`] from the engine. Call
+/// this once for every EVM created for a build, after creating the EVM and before executing
+/// transactions. Wrapping the same EVM twice stacks two cache layers.
+///
+/// The cache map is recovered for the EVM's spec type. New entries are tagged with the EVM's spec
+/// at the time of wrapping, which must be the spec its precompiles were created for, so create and
+/// wrap a new EVM when the spec changes.
+///
+/// Only precompiles that report `supports_caching` are wrapped. The EVM must be created with the
+/// same EVM configuration as the engine's, so that it installs the same cacheable precompiles for a
+/// given address and spec. Otherwise it would read and write results that do not match its own
+/// precompiles.
+///
+/// Wrapped precompiles do not record metrics, so lookups from other EVMs do not skew the engine's
+/// precompile cache metrics. Their entries count towards the same per-precompile capacity as the
+/// engine's entries.
 ///
 /// Returns `false` and leaves the precompiles unchanged if `shared` was created for a different
-/// spec type.
+/// spec type, in which case the EVM runs uncached.
 pub fn wrap_with_shared_precompile_cache<E>(evm: &mut E, shared: &SharedPrecompileCache) -> bool
 where
     E: Evm<Precompiles = PrecompilesMap>,
