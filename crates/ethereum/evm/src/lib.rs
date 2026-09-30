@@ -664,5 +664,4 @@ mod tests {
         let evm_config = evm_config.with_jit_support();
         assert!(evm_config.jit_backend().is_none());
     }
-
 }
