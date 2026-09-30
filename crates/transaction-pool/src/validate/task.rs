@@ -14,10 +14,7 @@ use reth_primitives_traits::{HeaderTy, SealedBlock};
 use reth_storage_api::BlockReaderIdExt;
 use reth_tasks::Runtime;
 use std::{future::Future, pin::Pin, sync::Arc};
-use tokio::{
-    sync,
-    sync::{mpsc, oneshot},
-};
+use tokio::sync::{mpsc, oneshot};
 use tokio_stream::wrappers::ReceiverStream;
 
 /// Represents a future outputting unit type and is sendable.
@@ -90,13 +87,8 @@ impl ValidationJobSender {
         job: Pin<Box<dyn Future<Output = ()> + Send>>,
     ) -> Result<(), TransactionValidatorError> {
         self.metrics.inflight_validation_jobs.increment(1);
-        let res = self
-            .tx
-            .send(job)
-            .await
-            .map_err(|_| TransactionValidatorError::ValidationServiceUnreachable);
-        self.metrics.inflight_validation_jobs.decrement(1);
-        res
+        let _guard = DecrementPendingOnDrop(&self.metrics.inflight_validation_jobs);
+        self.tx.send(job).await.map_err(|_| TransactionValidatorError::ValidationServiceUnreachable)
     }
 }
 
@@ -106,8 +98,9 @@ impl ValidationJobSender {
 pub struct TransactionValidationTaskExecutor<V> {
     /// The validator that will validate transactions on a separate task.
     pub validator: Arc<V>,
-    /// The sender half to validation tasks that perform the actual validation.
-    pub to_validation_task: Arc<sync::Mutex<ValidationJobSender>>,
+    /// The bounded multi-producer queue supplies backpressure without serializing
+    /// producers behind an additional lock.
+    pub to_validation_task: Arc<ValidationJobSender>,
 }
 
 impl<V> Clone for TransactionValidationTaskExecutor<V> {
@@ -202,13 +195,7 @@ impl<V> TransactionValidationTaskExecutor<V> {
     /// validation tasks.
     pub fn new(validator: V) -> (Self, ValidationTask) {
         let (tx, task) = ValidationTask::new();
-        (
-            Self {
-                validator: Arc::new(validator),
-                to_validation_task: Arc::new(sync::Mutex::new(tx)),
-            },
-            task,
-        )
+        (Self { validator: Arc::new(validator), to_validation_task: Arc::new(tx) }, task)
     }
 
     /// Creates a new executor and spawns the validation tasks on the given runtime.
@@ -216,7 +203,10 @@ impl<V> TransactionValidationTaskExecutor<V> {
     /// This spawns `additional_tasks` extra blocking tasks plus one critical blocking task
     /// for the validation service.
     pub fn spawn(validator: V, tasks: &Runtime, additional_tasks: usize) -> Self {
-        let (tx, task) = ValidationTask::new();
+        // Buffer two jobs per worker so workers can dequeue without waiting for
+        // a producer to refill the channel after every handoff.
+        let (tx, task) =
+            ValidationTask::with_capacity(additional_tasks.saturating_add(1).saturating_mul(2));
 
         for _ in 0..additional_tasks {
             let task = task.clone();
@@ -229,7 +219,7 @@ impl<V> TransactionValidationTaskExecutor<V> {
             task.run().await;
         });
 
-        Self { validator: Arc::new(validator), to_validation_task: Arc::new(sync::Mutex::new(tx)) }
+        Self { validator: Arc::new(validator), to_validation_task: Arc::new(tx) }
     }
 }
 
@@ -254,7 +244,7 @@ where
                     let res = validator.validate_transaction(origin, transaction).await;
                     let _ = tx.send(res);
                 });
-                self.to_validation_task.lock().await.send(fut).await
+                self.to_validation_task.send(fut).await
             };
             if res.is_err() {
                 return TransactionValidationOutcome::Error(
@@ -288,7 +278,7 @@ where
                     let res = validator.validate_transactions(transactions).await;
                     let _ = tx.send(res);
                 });
-                self.to_validation_task.lock().await.send(fut).await
+                self.to_validation_task.send(fut).await
             };
             if res.is_err() {
                 return validation_service_error_outcomes(hashes)
@@ -314,7 +304,7 @@ where
             let _ = tx.send(res);
         });
 
-        if self.to_validation_task.lock().await.send(fut).await.is_err() {
+        if self.to_validation_task.send(fut).await.is_err() {
             return validation_service_error_outcomes(hashes)
         }
 
@@ -326,6 +316,15 @@ where
 
     fn on_new_head_block(&self, new_tip_block: &SealedBlock<Self::Block>) {
         self.validator.on_new_head_block(new_tip_block)
+    }
+}
+
+/// Decrements the pending-send count even if the send future is cancelled.
+struct DecrementPendingOnDrop<'a>(&'a metrics::Gauge);
+
+impl Drop for DecrementPendingOnDrop<'_> {
+    fn drop(&mut self) {
+        self.0.decrement(1);
     }
 }
 
@@ -353,6 +352,42 @@ mod tests {
         TransactionOrigin,
     };
     use alloy_primitives::{Address, U256};
+    use metrics::atomics::AtomicU64;
+    use std::sync::atomic::Ordering;
+
+    #[tokio::test]
+    async fn validation_send_metrics_track_cancellation_and_completion() {
+        for close_channel in [false, true] {
+            let (mut sender, task) = ValidationTask::new();
+            let gauge = Arc::new(AtomicU64::new(0));
+            sender.metrics.inflight_validation_jobs = metrics::Gauge::from_arc(gauge.clone());
+            let pending_sends = || f64::from_bits(gauge.load(Ordering::Relaxed));
+
+            sender.send(Box::pin(async {})).await.unwrap();
+            assert_eq!(pending_sends(), 0.0);
+
+            // Keep the channel full so every producer waits for capacity.
+            let mut producers =
+                (0..8).map(|_| Box::pin(sender.send(Box::pin(async {})))).collect::<Vec<_>>();
+            for producer in &mut producers {
+                assert!(futures_util::poll!(producer.as_mut()).is_pending());
+            }
+            assert_eq!(pending_sends(), 8.0);
+
+            let survivor = producers.remove(0);
+            drop(producers);
+            assert_eq!(pending_sends(), 1.0);
+
+            if close_channel {
+                drop(task);
+            } else {
+                // Free a slot for the remaining producer.
+                drop(task.validation_jobs.lock().await.next().await.unwrap());
+            }
+            assert_eq!(survivor.await.is_err(), close_channel);
+            assert_eq!(pending_sends(), 0.0);
+        }
+    }
 
     #[tokio::test]
     async fn cloned_workers_validate_while_another_job_is_blocked() {
@@ -440,6 +475,74 @@ mod tests {
         let out = executor.validate_transactions(txs).await;
         assert_eq!(out.len(), 2);
         assert!(out.iter().all(|o| matches!(o, TransactionValidationOutcome::Valid { .. })));
+    }
+
+    #[tokio::test]
+    async fn cloned_executors_share_bounded_queue() {
+        let (executor, task) = TransactionValidationTaskExecutor::new(NoopValidator);
+        let mut submissions = tokio::task::JoinSet::new();
+        for index in 0..64 {
+            let executor = executor.clone();
+            submissions.spawn(async move {
+                let transaction = MockTransaction::legacy();
+                let outcomes = match index % 3 {
+                    0 => vec![
+                        executor.validate_transaction(TransactionOrigin::Local, transaction).await,
+                    ],
+                    1 => {
+                        executor
+                            .validate_transactions(vec![(TransactionOrigin::Local, transaction)])
+                            .await
+                    }
+                    _ => {
+                        executor
+                            .validate_transactions_with_origin(
+                                TransactionOrigin::Local,
+                                vec![transaction],
+                            )
+                            .await
+                    }
+                };
+                assert_eq!(outcomes.len(), 1);
+                assert!(matches!(outcomes[0], TransactionValidationOutcome::Valid { .. }));
+            });
+        }
+
+        // No worker has started: one job can be queued and the other producers
+        // must remain pending on the same bounded channel.
+        tokio::task::yield_now().await;
+        assert_eq!(executor.to_validation_task.tx.capacity(), 0);
+        assert!(submissions.try_join_next().is_none());
+
+        let first_worker = tokio::spawn(task.clone().run());
+        let second_worker = tokio::spawn(task.run());
+        tokio::time::timeout(std::time::Duration::from_secs(5), async {
+            while let Some(result) = submissions.join_next().await {
+                result.unwrap();
+            }
+            drop(executor);
+            first_worker.await.unwrap();
+            second_worker.await.unwrap();
+        })
+        .await
+        .expect("concurrent producers and workers must drain and shut down");
+    }
+
+    #[tokio::test]
+    async fn configured_workers_have_bounded_handoff_capacity() {
+        let runtime = Runtime::test();
+        for (additional_tasks, expected_capacity) in [(0, 2), (1, 4), (8, 18)] {
+            let executor =
+                TransactionValidationTaskExecutor::spawn(NoopValidator, &runtime, additional_tasks);
+            assert_eq!(executor.to_validation_task.tx.max_capacity(), expected_capacity);
+            let outcome = tokio::time::timeout(
+                std::time::Duration::from_secs(5),
+                executor.validate_transaction(TransactionOrigin::Local, MockTransaction::legacy()),
+            )
+            .await
+            .expect("configured validation workers must process jobs");
+            assert!(matches!(outcome, TransactionValidationOutcome::Valid { .. }));
+        }
     }
 
     #[derive(Debug)]

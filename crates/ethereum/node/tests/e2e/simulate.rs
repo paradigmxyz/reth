@@ -1,38 +1,85 @@
-use crate::utils::{eth_payload_attributes, eth_payload_attributes_amsterdam};
 use alloy_primitives::{bytes, Address, U256};
-use alloy_provider::{network::EthereumWallet, Provider, ProviderBuilder};
-use alloy_rpc_types_engine::PayloadAttributes;
+use alloy_provider::Provider;
 use alloy_rpc_types_eth::{
     simulate::{SimBlock, SimulatePayload, SimulatedBlock},
     state::{AccountOverride, StateOverride, StateOverridesBuilder},
     BlockOverrides, TransactionRequest, TransactionTrait as _,
 };
-use reth_chainspec::{ChainSpec, ChainSpecBuilder, MAINNET};
-use reth_e2e_test_utils::setup_engine;
+use reth_chainspec::EthereumHardfork;
+use reth_e2e_test_utils::{test_chain_spec_builder, E2ETestSetupExt};
 use reth_node_ethereum::EthereumNode;
 use std::sync::Arc;
 
 #[tokio::test]
+async fn test_simulate_v1_transfer_logs_across_amsterdam() -> eyre::Result<()> {
+    let chain_spec =
+        Arc::new(test_chain_spec_builder().osaka_activated().with_amsterdam_at(24).build());
+    let (node, _) = EthereumNode::test_setup(1, chain_spec).build_single().await?;
+    let provider = node.rpc_provider();
+    let from = Address::with_last_byte(0x41);
+    let to = Address::with_last_byte(0x42);
+    let reverting = Address::with_last_byte(0x43);
+    let call_block = SimBlock::default()
+        .with_state_overrides(StateOverride::from_iter([
+            (from, AccountOverride::default().with_balance(U256::from(100)).with_nonce(0)),
+            (reverting, AccountOverride::default().with_code(bytes!("5f5ffd"))),
+        ]))
+        .call(TransactionRequest::default().from(from).to(to).value(U256::from(1)))
+        .call(TransactionRequest::default().from(from).to(reverting).value(U256::from(1)));
+    let mut untraced: Option<Vec<SimulatedBlock>> = None;
+    for trace_transfers in [false, true] {
+        let mut payload = SimulatePayload::default()
+            .extend(call_block.clone())
+            .extend(call_block.clone())
+            .extend(call_block.clone());
+        payload.trace_transfers = trace_transfers;
+        let result: Vec<SimulatedBlock> =
+            provider.raw_request("eth_simulateV1".into(), (&payload, "latest")).await?;
+        assert_eq!(result.len(), 3);
+        for (index, block) in result.iter().enumerate() {
+            assert_eq!(block.inner.header.timestamp, (index as u64 + 1) * 12);
+            assert!(block.calls[0].status);
+            let logs = &block.calls[0].logs;
+            if index == 0 && !trace_transfers {
+                assert!(logs.is_empty());
+            } else {
+                assert_eq!(logs.len(), 1);
+                let emitter = if index == 0 {
+                    Address::repeat_byte(0xee)
+                } else {
+                    revm::primitives::eip7708::ETH_TRANSFER_LOG_ADDRESS
+                };
+                assert_eq!(logs[0].address(), emitter);
+            }
+            assert!(!block.calls[1].status);
+            assert!(block.calls[1].logs.is_empty());
+            if index > 0 {
+                assert!(!block.inner.header.logs_bloom.is_zero());
+                if let Some(untraced) = &untraced {
+                    assert_eq!(logs[0].inner, untraced[index].calls[0].logs[0].inner);
+                    assert_eq!(
+                        block.inner.header.logs_bloom,
+                        untraced[index].inner.header.logs_bloom
+                    );
+                    assert_eq!(
+                        block.inner.header.receipts_root,
+                        untraced[index].inner.header.receipts_root
+                    );
+                }
+            }
+        }
+        untraced = Some(result);
+    }
+    Ok(())
+}
+
+#[tokio::test]
 async fn test_simulate_v1_block_access_list_hash_across_amsterdam() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
-    let chain_spec = Arc::new(
-        ChainSpecBuilder::default()
-            .chain(MAINNET.chain)
-            .genesis(serde_json::from_str(include_str!("../assets/genesis.json"))?)
-            .osaka_activated()
-            .with_amsterdam_at(24)
-            .build(),
-    );
-    let (mut nodes, _) = setup_engine::<EthereumNode>(
-        1,
-        chain_spec,
-        false,
-        Default::default(),
-        eth_payload_attributes_amsterdam,
-    )
-    .await?;
-    let node = nodes.pop().unwrap();
-    let provider = ProviderBuilder::new().connect_http(node.rpc_url());
+    let chain_spec =
+        Arc::new(test_chain_spec_builder().osaka_activated().with_amsterdam_at(24).build());
+    let (node, _) = EthereumNode::test_setup(1, chain_spec).build_single().await?;
+    let provider = node.rpc_provider();
     let from = Address::with_last_byte(0x41);
     let contract = Address::with_last_byte(0x42);
     let state_overrides = StateOverride::from_iter([
@@ -76,26 +123,9 @@ async fn test_simulate_v1_block_access_list_hash_across_amsterdam() -> eyre::Res
 async fn test_simulate_v1_explicit_gas_uses_remaining_block_gas() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
 
-    let chain_spec = Arc::new(
-        ChainSpecBuilder::default()
-            .chain(MAINNET.chain)
-            .genesis(serde_json::from_str(include_str!("../assets/genesis.json")).unwrap())
-            .cancun_activated()
-            .build(),
-    );
-
-    let (mut nodes, wallet) = setup_engine::<EthereumNode>(
-        1,
-        chain_spec,
-        false,
-        Default::default(),
-        eth_payload_attributes,
-    )
-    .await?;
-    let node = nodes.pop().unwrap();
-    let provider = ProviderBuilder::new()
-        .wallet(EthereumWallet::new(wallet.wallet_gen().swap_remove(0)))
-        .connect_http(node.rpc_url());
+    let (node, wallet) =
+        EthereumNode::test_setup_for(EthereumHardfork::Cancun).build_single().await?;
+    let provider = node.rpc_provider_with_wallet(wallet.signer(0));
 
     let tx = TransactionRequest::default().to(Address::ZERO).gas_limit(3_000_000);
     let sim_block = SimBlock::default().call(tx.clone()).call(tx);
@@ -115,26 +145,9 @@ async fn test_simulate_v1_explicit_gas_uses_remaining_block_gas() -> eyre::Resul
 async fn test_simulate_v1_no_fields_call_defaults_to_remaining_block_gas() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
 
-    let chain_spec = Arc::new(
-        ChainSpecBuilder::default()
-            .chain(MAINNET.chain)
-            .genesis(serde_json::from_str(include_str!("../assets/genesis.json")).unwrap())
-            .cancun_activated()
-            .build(),
-    );
-
-    let (mut nodes, wallet) = setup_engine::<EthereumNode>(
-        1,
-        chain_spec,
-        false,
-        Default::default(),
-        eth_payload_attributes,
-    )
-    .await?;
-    let node = nodes.pop().unwrap();
-    let provider = ProviderBuilder::new()
-        .wallet(EthereumWallet::new(wallet.wallet_gen().swap_remove(0)))
-        .connect_http(node.rpc_url());
+    let (node, wallet) =
+        EthereumNode::test_setup_for(EthereumHardfork::Cancun).build_single().await?;
+    let provider = node.rpc_provider_with_wallet(wallet.signer(0));
 
     let first_tx_gas_limit = 21_000;
     let sim_block = SimBlock::default()
@@ -160,19 +173,11 @@ async fn test_simulate_v1_no_fields_call_defaults_to_remaining_block_gas() -> ey
     Ok(())
 }
 
-async fn assert_validation_uses_remaining_gas(
-    chain_spec: Arc<ChainSpec>,
-    payload_attributes: fn(u64) -> PayloadAttributes,
-) -> eyre::Result<()> {
+async fn assert_validation_uses_remaining_gas(fork: EthereumHardfork) -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
 
-    let (mut nodes, wallet) =
-        setup_engine::<EthereumNode>(1, chain_spec, false, Default::default(), payload_attributes)
-            .await?;
-    let node = nodes.pop().unwrap();
-    let provider = ProviderBuilder::new()
-        .wallet(EthereumWallet::new(wallet.wallet_gen().swap_remove(0)))
-        .connect_http(node.rpc_url());
+    let (node, wallet) = EthereumNode::test_setup_for(fork).build_single().await?;
+    let provider = node.rpc_provider_with_wallet(wallet.signer(0));
 
     let from: Address = "0xc000000000000000000000000000000000000000".parse()?;
     let state_overrides =
@@ -211,53 +216,22 @@ async fn assert_validation_uses_remaining_gas(
 
 #[tokio::test]
 async fn test_simulate_v1_validation_omitted_gas_uses_remaining_gas_osaka() -> eyre::Result<()> {
-    let chain_spec = Arc::new(
-        ChainSpecBuilder::default()
-            .chain(MAINNET.chain)
-            .genesis(serde_json::from_str(include_str!("../assets/genesis.json")).unwrap())
-            .osaka_activated()
-            .build(),
-    );
-    assert_validation_uses_remaining_gas(chain_spec, eth_payload_attributes).await
+    assert_validation_uses_remaining_gas(EthereumHardfork::Osaka).await
 }
 
 #[tokio::test]
 async fn test_simulate_v1_validation_omitted_gas_uses_remaining_gas_amsterdam() -> eyre::Result<()>
 {
-    let chain_spec = Arc::new(
-        ChainSpecBuilder::default()
-            .chain(MAINNET.chain)
-            .genesis(serde_json::from_str(include_str!("../assets/genesis.json")).unwrap())
-            .amsterdam_activated()
-            .build(),
-    );
-    assert_validation_uses_remaining_gas(chain_spec, eth_payload_attributes_amsterdam).await
+    assert_validation_uses_remaining_gas(EthereumHardfork::Amsterdam).await
 }
 
 #[tokio::test]
 async fn test_simulate_v1_blockhash_reads_prior_simulated_block() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
 
-    let chain_spec = Arc::new(
-        ChainSpecBuilder::default()
-            .chain(MAINNET.chain)
-            .genesis(serde_json::from_str(include_str!("../assets/genesis.json")).unwrap())
-            .cancun_activated()
-            .build(),
-    );
-
-    let (mut nodes, wallet) = setup_engine::<EthereumNode>(
-        1,
-        chain_spec,
-        false,
-        Default::default(),
-        eth_payload_attributes,
-    )
-    .await?;
-    let node = nodes.pop().unwrap();
-    let provider = ProviderBuilder::new()
-        .wallet(EthereumWallet::new(wallet.wallet_gen().swap_remove(0)))
-        .connect_http(node.rpc_url());
+    let (node, wallet) =
+        EthereumNode::test_setup_for(EthereumHardfork::Cancun).build_single().await?;
+    let provider = node.rpc_provider_with_wallet(wallet.signer(0));
 
     let contract = Address::with_last_byte(0x42);
     let mut state_overrides = StateOverride::default();
@@ -293,26 +267,9 @@ async fn test_simulate_v1_blockhash_reads_prior_simulated_block() -> eyre::Resul
 async fn test_simulate_v1_explicit_gas_over_remaining_block_gas_errors() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
 
-    let chain_spec = Arc::new(
-        ChainSpecBuilder::default()
-            .chain(MAINNET.chain)
-            .genesis(serde_json::from_str(include_str!("../assets/genesis.json")).unwrap())
-            .cancun_activated()
-            .build(),
-    );
-
-    let (mut nodes, wallet) = setup_engine::<EthereumNode>(
-        1,
-        chain_spec,
-        false,
-        Default::default(),
-        eth_payload_attributes,
-    )
-    .await?;
-    let node = nodes.pop().unwrap();
-    let provider = ProviderBuilder::new()
-        .wallet(EthereumWallet::new(wallet.wallet_gen().swap_remove(0)))
-        .connect_http(node.rpc_url());
+    let (node, wallet) =
+        EthereumNode::test_setup_for(EthereumHardfork::Cancun).build_single().await?;
+    let provider = node.rpc_provider_with_wallet(wallet.signer(0));
 
     let sim_block = SimBlock::default()
         .with_block_overrides(BlockOverrides { gas_limit: Some(50_000), ..Default::default() })
@@ -341,26 +298,9 @@ async fn test_simulate_v1_explicit_gas_over_remaining_block_gas_errors() -> eyre
 async fn test_simulate_v1_with_max_fee_per_blob_gas_only() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
 
-    let chain_spec = Arc::new(
-        ChainSpecBuilder::default()
-            .chain(MAINNET.chain)
-            .genesis(serde_json::from_str(include_str!("../assets/genesis.json")).unwrap())
-            .cancun_activated()
-            .build(),
-    );
-
-    let (mut nodes, wallet) = setup_engine::<EthereumNode>(
-        1,
-        chain_spec.clone(),
-        false,
-        Default::default(),
-        eth_payload_attributes,
-    )
-    .await?;
-    let mut node = nodes.pop().unwrap();
-    let provider = ProviderBuilder::new()
-        .wallet(EthereumWallet::new(wallet.wallet_gen().swap_remove(0)))
-        .connect_http(node.rpc_url());
+    let (mut node, wallet) =
+        EthereumNode::test_setup_for(EthereumHardfork::Cancun).build_single().await?;
+    let provider = node.rpc_provider_with_wallet(wallet.signer(0));
 
     let _ = provider.send_transaction(TransactionRequest::default().to(Address::ZERO)).await?;
     node.advance_block().await?;
@@ -406,26 +346,9 @@ async fn test_simulate_v1_with_max_fee_per_blob_gas_only() -> eyre::Result<()> {
 async fn test_simulate_v1_too_many_blocks_error() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
 
-    let chain_spec = Arc::new(
-        ChainSpecBuilder::default()
-            .chain(MAINNET.chain)
-            .genesis(serde_json::from_str(include_str!("../assets/genesis.json")).unwrap())
-            .cancun_activated()
-            .build(),
-    );
-
-    let (mut nodes, wallet) = setup_engine::<EthereumNode>(
-        1,
-        chain_spec,
-        false,
-        Default::default(),
-        eth_payload_attributes,
-    )
-    .await?;
-    let node = nodes.pop().unwrap();
-    let provider = ProviderBuilder::new()
-        .wallet(EthereumWallet::new(wallet.wallet_gen().swap_remove(0)))
-        .connect_http(node.rpc_url());
+    let (node, wallet) =
+        EthereumNode::test_setup_for(EthereumHardfork::Cancun).build_single().await?;
+    let provider = node.rpc_provider_with_wallet(wallet.signer(0));
 
     let payload: SimulatePayload<TransactionRequest> =
         (0..257).fold(SimulatePayload::default(), |payload, _| payload.extend(SimBlock::default()));

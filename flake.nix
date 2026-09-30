@@ -13,6 +13,7 @@
 
   outputs =
     {
+      self,
       nixpkgs,
       nixpkgs-llvm22,
       utils,
@@ -53,6 +54,13 @@
           pkgs.libgit2
           pkgs.m4
           pkgs.perl
+        ];
+
+        buildInputs = [
+          pkgs.libffi
+          pkgs.libxml2
+          pkgs.ncurses
+          pkgs.zlib
         ];
 
         withClang = prev: {
@@ -96,11 +104,19 @@
           ];
         };
 
+        withVergenBypass = prev: {
+          preBuild = ''
+            export VERGEN_GIT_SHA=${self.rev or self.dirtyRev}
+            export VERGEN_GIT_DIRTY=${if self ? rev then "false" else "true"}
+            export VERGEN_GIT_DESCRIBE=${self.shortRev or self.dirtyRev} 
+          '';
+        };
+
         mkReth = overrides: craneLib.buildPackage (composeAttrOverrides {
           pname = "reth";
           version = packageVersion;
           src = ./.;
-          inherit nativeBuildInputs;
+          inherit nativeBuildInputs buildInputs;
           doCheck = false;
         } overrides);
 
@@ -112,6 +128,7 @@
             withClang
             withLlvm22
             withMaxPerf
+            withVergenBypass
           ] ++ pkgs.lib.optionals pkgs.stdenv.isLinux [
             withMold
           ]);

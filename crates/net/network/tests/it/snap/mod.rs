@@ -26,7 +26,7 @@ use reth_eth_wire::{
 };
 use reth_network::{
     eth_requests::SOFT_RESPONSE_LIMIT,
-    test_utils::{PeerConfig, Testnet, TestnetHandle},
+    test_utils::{PeerConfig, Testnet, TestnetHandle, TestnetProvider},
     BlockDownloaderProvider,
 };
 use reth_network_p2p::snap::client::{SnapClient, SnapResponse};
@@ -36,9 +36,9 @@ use reth_provider::{
     test_utils::{
         create_test_provider_factory, ExtendedAccount, MockEthProvider, MockNodeTypesWithDB,
     },
-    BalProvider, BalStoreHandle, BlockReader, BlockWriter, ChainSpecProvider, HashingWriter,
-    HeaderProvider, InMemoryBalStore, ProviderFactory, RawBal, StageCheckpointWriter,
-    StateProviderFactory, StateRangeProviderFactory, StateRootProvider, StorageRootProvider,
+    BalStoreHandle, BlockWriter, ChainSpecProvider, HashingWriter, HeaderProvider,
+    InMemoryBalStore, ProviderFactory, RawBal, StageCheckpointWriter, StateProviderFactory,
+    StateRootProvider, StorageRootProvider,
 };
 use reth_stages_types::{StageCheckpoint, StageId};
 use reth_testing_utils::generators::{self, random_block, BlockParams};
@@ -48,69 +48,21 @@ use std::{sync::Arc, time::Duration};
 
 mod protocol;
 
-type SnapTestnetHandle<C> = TestnetHandle<C, TestPool>;
-
-/// Protocols a snap/2-capable peer advertises: `eth/71` plus `snap/2`.
-///
-/// A session only negotiates the dedicated snap-carrying connection variant for exactly this
-/// pair; anything else falls back to a satellite connection that can't serve `GetSnap`.
-fn snap_protocols() -> Vec<Protocol> {
-    vec![EthVersion::Eth71.into(), Protocol::snap_2()]
-}
-
-/// A provider usable by the snap/2 testnet helpers: real block, header, state, bal, and range
-/// access.
-trait SnapTestProvider:
-    BlockReader<
-        Block = reth_ethereum_primitives::Block,
-        Receipt = reth_ethereum_primitives::Receipt,
-        Header = alloy_consensus::Header,
-    > + HeaderProvider
-    + BalProvider
-    + StateProviderFactory
-    + StateRangeProviderFactory
-    + ChainSpecProvider<ChainSpec: Hardforks>
-    + Clone
-    + Unpin
-    + 'static
-{
-}
-
-impl<T> SnapTestProvider for T where
-    T: BlockReader<
-            Block = reth_ethereum_primitives::Block,
-            Receipt = reth_ethereum_primitives::Receipt,
-            Header = alloy_consensus::Header,
-        > + HeaderProvider
-        + BalProvider
-        + StateProviderFactory
-        + StateRangeProviderFactory
-        + ChainSpecProvider<ChainSpec: Hardforks>
-        + Clone
-        + Unpin
-        + 'static
-{
-}
-
 /// Spawns a 2-peer testnet where both peers are snap/2-capable and serve requests against
 /// `provider`.
-async fn spawn_snap_testnet<C: SnapTestProvider>(provider: C) -> SnapTestnetHandle<C> {
-    spawn_snap_testnet_with_protocols(provider, snap_protocols()).await
-}
-
-/// Like [`spawn_snap_testnet`], but with a caller-chosen protocol list.
-async fn spawn_snap_testnet_with_protocols<C: SnapTestProvider>(
-    provider: C,
-    protocols: Vec<Protocol>,
-) -> SnapTestnetHandle<C> {
-    let mut net: Testnet<C, TestPool> = Testnet::default();
-    for _ in 0..2 {
-        let peer = PeerConfig::with_protocols(provider.clone(), protocols.clone());
-        net.add_peer_with_config(peer).await.unwrap();
-    }
-    net.for_each_mut(|peer| peer.install_request_handler());
-
-    let net = net.spawn();
+///
+/// The peers advertise `eth/71` plus `snap/2`: a session only negotiates the dedicated
+/// snap-carrying connection variant for exactly this pair; anything else falls back to a satellite
+/// connection that can't serve `GetSnap`.
+async fn spawn_snap_testnet<C>(provider: C) -> TestnetHandle<C, TestPool>
+where
+    C: TestnetProvider + ChainSpecProvider<ChainSpec: Hardforks> + Clone,
+{
+    let peer = || {
+        PeerConfig::new(provider.clone())
+            .with_protocols([EthVersion::Eth71.into(), Protocol::snap_2()])
+    };
+    let net = Testnet::from_configs([peer(), peer()]).await.with_request_handlers().spawn();
     net.connect_peers().await;
     net
 }
@@ -222,7 +174,7 @@ async fn account_range_roundtrip_carries_slim_encoding_and_proof() {
     let factory = genesis_provider_factory();
     let accounts: Vec<(Address, Account)> = (0..5u64)
         .map(|nonce| {
-            (Address::random(), Account { nonce, balance: U256::from(nonce), bytecode_hash: None })
+            (Address::random(), Account { nonce, balance: U256::from(nonce), ..Default::default() })
         })
         .collect();
 
@@ -268,7 +220,7 @@ async fn account_range_roundtrip_carries_slim_encoding_and_proof() {
     assert_eq!(returned.len(), expected.len());
     for (account, (expected_hash, expected_account)) in returned.iter().zip(&expected) {
         assert_eq!(&account.hash, expected_hash);
-        let decoded = account.trie_account().unwrap();
+        let decoded = account.trie_account();
         assert_eq!(decoded.nonce, expected_account.nonce);
         assert_eq!(decoded.balance, expected_account.balance);
         // Freshly generated EOAs have no storage/code, so the slim encoding elides both fields
@@ -296,7 +248,7 @@ async fn account_range_bounded_by_response_bytes_excludes_trailing_account() {
     let factory = genesis_provider_factory();
     let accounts: Vec<(Address, Account)> = (0..5u64)
         .map(|nonce| {
-            (Address::random(), Account { nonce, balance: U256::from(nonce), bytecode_hash: None })
+            (Address::random(), Account { nonce, balance: U256::from(nonce), ..Default::default() })
         })
         .collect();
 
@@ -360,7 +312,7 @@ async fn storage_range_roundtrip_carries_rlp_values_and_proof() {
 
     let factory = genesis_provider_factory();
     let address = Address::random();
-    let account = Account { nonce: 1, balance: U256::from(1), bytecode_hash: None };
+    let account = Account { nonce: 1, balance: U256::from(1), ..Default::default() };
     let slots: Vec<StorageEntry> = (0..6u8)
         .map(|i| StorageEntry { key: B256::with_last_byte(i), value: U256::from(i as u64 + 1) })
         .collect();
@@ -430,7 +382,7 @@ async fn storage_range_empty_window_returns_boundary_slot() {
 
     let factory = genesis_provider_factory();
     let address = Address::random();
-    let account = Account { nonce: 1, balance: U256::from(1), bytecode_hash: None };
+    let account = Account { nonce: 1, balance: U256::from(1), ..Default::default() };
     let slots: Vec<StorageEntry> = (0..4u8)
         .map(|i| StorageEntry { key: B256::with_last_byte(i), value: U256::from(i as u64 + 1) })
         .collect();
@@ -497,9 +449,9 @@ async fn storage_ranges_multi_account_bounds_only_first_account() {
 
     let factory = genesis_provider_factory();
     let (address_a, account_a) =
-        (Address::random(), Account { nonce: 1, balance: U256::from(1), bytecode_hash: None });
+        (Address::random(), Account { nonce: 1, balance: U256::from(1), ..Default::default() });
     let (address_b, account_b) =
-        (Address::random(), Account { nonce: 2, balance: U256::from(2), bytecode_hash: None });
+        (Address::random(), Account { nonce: 2, balance: U256::from(2), ..Default::default() });
     // 2 slots for A (fits fully in the byte budget below), 5 for B (doesn't).
     let slots_a: Vec<StorageEntry> = (0..2u8)
         .map(|i| StorageEntry { key: B256::with_last_byte(i), value: U256::from(i as u64 + 1) })
@@ -607,7 +559,7 @@ async fn retained_and_expired_account_range_requests_resolve_without_hanging() {
 
     // Real trie root of `expired_account` alone, committed to block 0.
     let expired_account =
-        (Address::random(), Account { nonce: 3, balance: U256::from(3), bytecode_hash: None });
+        (Address::random(), Account { nonce: 3, balance: U256::from(3), ..Default::default() });
     {
         let provider_rw = factory.provider_rw().unwrap();
         provider_rw
@@ -619,7 +571,7 @@ async fn retained_and_expired_account_range_requests_resolve_without_hanging() {
 
     // Real trie root of `expired_account` + `retained_account` together, committed to block 64.
     let retained_account =
-        (Address::random(), Account { nonce: 7, balance: U256::from(7), bytecode_hash: None });
+        (Address::random(), Account { nonce: 7, balance: U256::from(7), ..Default::default() });
     {
         let provider_rw = factory.provider_rw().unwrap();
         provider_rw

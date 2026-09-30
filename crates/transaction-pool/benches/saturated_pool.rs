@@ -4,7 +4,7 @@
 //! continuously trigger evictions, mimicking a saturated mainnet mempool.
 
 use alloy_primitives::{Address, B256, U256};
-use criterion::{criterion_group, criterion_main, BatchSize, Criterion};
+use criterion::{criterion_group, criterion_main, BatchSize, BenchmarkId, Criterion};
 use reth_execution_types::ChangedAccount;
 use reth_primitives_traits::SealedBlock;
 use reth_transaction_pool::{
@@ -13,7 +13,7 @@ use reth_transaction_pool::{
     pool::PoolInner,
     test_utils::{MockOrdering, MockTransaction},
     validate::ValidTransaction,
-    CanonicalStateUpdate, PoolConfig, PoolUpdateKind, TransactionOrigin,
+    CanonicalStateUpdate, PoolConfig, PoolUpdateKind, SubPoolLimit, TransactionOrigin,
     TransactionValidationOutcome,
 };
 
@@ -143,6 +143,44 @@ fn build_saturated_pool() -> (BenchPool, u64) {
     (pool, counter)
 }
 
+/// Builds an uncapped pending pool with one transaction per sender.
+fn build_single_tx_sender_pool(senders: usize) -> (BenchPool, u64) {
+    let pool = PoolInner::new(
+        MockTransactionValidator::default(),
+        MockOrdering::default(),
+        InMemoryBlobStore::default(),
+        PoolConfig { pending_limit: SubPoolLimit::max(), ..Default::default() },
+    );
+
+    let block = tip_block();
+    pool.on_canonical_state_change(CanonicalStateUpdate {
+        new_tip: &block,
+        pending_block_base_fee: BASE_FEE,
+        pending_block_blob_fee: None,
+        changed_accounts: Vec::new(),
+        mined_transactions: Vec::new(),
+        update_kind: PoolUpdateKind::Commit,
+    });
+
+    let mut counter = 0;
+    pool.add_transactions_with_origins(pending_batch(&mut counter, senders, 1));
+    (pool, counter)
+}
+
+/// Returns all live senders followed by an additional 25% of tracked senders without
+/// transactions.
+fn senders_for_update_bench(pool: &BenchPool, counter: &mut u64) -> (Vec<Address>, usize) {
+    let mut senders = pool.unique_senders().into_iter().collect::<Vec<_>>();
+    senders.sort_unstable();
+    let pool_senders = senders.len();
+
+    let extra_senders = (0..pool_senders / 4).map(|_| sender_address(counter)).collect::<Vec<_>>();
+    let _ = pool.get_sender_ids(extra_senders.iter().copied());
+    senders.extend(extra_senders);
+
+    (senders, pool_senders)
+}
+
 /// Benchmarks adding a batch of transactions to a pool at capacity, which forces eviction.
 fn bench_add_transactions(c: &mut Criterion) {
     let mut group = c.benchmark_group("saturated_pool");
@@ -170,6 +208,96 @@ fn bench_add_transactions(c: &mut Criterion) {
             BatchSize::PerIteration,
         )
     });
+
+    group.finish();
+}
+
+/// Benchmarks an account-only update against a pool at capacity: sender nonces and balances move
+/// without any fee change, as happens on the reorg account-reload path and via
+/// `Pool::update_accounts`.
+fn bench_update_accounts(c: &mut Criterion) {
+    let mut group = c.benchmark_group("saturated_pool");
+    group.sample_size(30);
+
+    let (pool, mut counter) = build_saturated_pool();
+    let size = pool.size();
+    assert!(size.pending >= 9_000, "pending pool not saturated: {size:?}");
+
+    let (senders, pool_senders) = senders_for_update_bench(&pool, &mut counter);
+    assert_eq!(pool_senders, 4_000);
+
+    // the reported nonce stays put so the transactions are re-evaluated rather than discarded,
+    // which keeps every iteration doing the same amount of work
+    let mut flip = false;
+    for ratio_percent in [0.25, 1.0, 10.0, 25.0, 50.0, 100.0, 125.0] {
+        let changed_senders =
+            ((pool_senders as f64 * ratio_percent / 100.0).round() as usize).max(1);
+        group.bench_with_input(
+            BenchmarkId::new("update_accounts", format!("{ratio_percent}%")),
+            &changed_senders,
+            |b, &changed_senders| {
+                b.iter_batched(
+                    || {
+                        flip = !flip;
+                        let balance =
+                            if flip { U256::from(u128::MAX) } else { U256::from(u128::MAX - 1) };
+                        senders[..changed_senders]
+                            .iter()
+                            .map(|address| ChangedAccount { address: *address, nonce: 0, balance })
+                            .collect::<Vec<_>>()
+                    },
+                    |changed| pool.update_accounts(changed),
+                    BatchSize::PerIteration,
+                )
+            },
+        );
+    }
+
+    group.finish();
+}
+
+/// Benchmarks account-only updates by changed-sender ratio in pools where every sender has a
+/// single transaction.
+fn bench_update_accounts_single_tx_senders(c: &mut Criterion) {
+    let mut group = c.benchmark_group("single_tx_sender_pool");
+    group.sample_size(30);
+
+    for pool_senders in [100, 500, 1_000, 4_000] {
+        let (pool, mut counter) = build_single_tx_sender_pool(pool_senders);
+        let (senders, actual_pool_senders) = senders_for_update_bench(&pool, &mut counter);
+        assert_eq!(actual_pool_senders, pool_senders);
+
+        let mut flip = false;
+        for ratio_percent in [25usize, 100, 125] {
+            let changed_senders = pool_senders * ratio_percent / 100;
+            group.bench_with_input(
+                BenchmarkId::new(format!("{pool_senders}_senders"), format!("{ratio_percent}%")),
+                &changed_senders,
+                |b, &changed_senders| {
+                    b.iter_batched(
+                        || {
+                            flip = !flip;
+                            let balance = if flip {
+                                U256::from(u128::MAX)
+                            } else {
+                                U256::from(u128::MAX - 1)
+                            };
+                            senders[..changed_senders]
+                                .iter()
+                                .map(|address| ChangedAccount {
+                                    address: *address,
+                                    nonce: 0,
+                                    balance,
+                                })
+                                .collect::<Vec<_>>()
+                        },
+                        |changed| pool.update_accounts(changed),
+                        BatchSize::PerIteration,
+                    )
+                },
+            );
+        }
+    }
 
     group.finish();
 }
@@ -233,5 +361,11 @@ fn bench_canonical_state_change(c: &mut Criterion) {
     group.finish();
 }
 
-criterion_group!(benches, bench_add_transactions, bench_canonical_state_change);
+criterion_group!(
+    benches,
+    bench_add_transactions,
+    bench_canonical_state_change,
+    bench_update_accounts,
+    bench_update_accounts_single_tx_senders
+);
 criterion_main!(benches);

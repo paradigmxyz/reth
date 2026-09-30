@@ -2,7 +2,6 @@
 
 use std::fmt;
 
-use alloy_eips::BlockId;
 use alloy_rpc_types_engine::PayloadError;
 use jsonrpsee_core::RpcResult;
 use reth_errors::ConsensusError;
@@ -150,20 +149,6 @@ pub fn rpc_err(
                 .expect("serializing String can't fail")
         }),
     )
-}
-
-/// Formats a [`BlockId`] into an error message.
-pub fn block_id_to_str(id: BlockId) -> String {
-    match id {
-        BlockId::Hash(h) => {
-            if h.require_canonical == Some(true) {
-                format!("canonical hash {}", h.block_hash)
-            } else {
-                format!("hash {}", h.block_hash)
-            }
-        }
-        BlockId::Number(n) => format!("{n}"),
-    }
 }
 
 #[cfg(test)]
