@@ -62,7 +62,6 @@ impl PruneMode {
             Self::Distance(distance) if *distance > tip => None, // Nothing to prune yet
             Self::Distance(distance) if *distance >= min_blocks => Some((tip - distance, *self)),
             Self::Before(n) if *n == tip + 1 && purpose.is_static_file() => Some((tip, *self)),
-            // Nothing is before genesis, or nothing to prune yet
             Self::Before(n) if *n == 0 || *n > tip => None,
             Self::Before(n) => (tip - n >= min_blocks).then(|| (*n - 1, *self)),
             _ => return Err(PruneSegmentError::Configuration(segment)),
