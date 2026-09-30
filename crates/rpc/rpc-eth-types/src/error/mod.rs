@@ -228,6 +228,12 @@ pub enum EthApiError {
     /// Error thrown when a frame transaction method targets a block before Bogota.
     #[error("frame transactions are not active at the requested block")]
     FrameTransactionsNotActive,
+    /// A keyed nonce query targets a block before EIP-8250 activation.
+    #[error("keyed nonces are not active at the requested block")]
+    KeyedNoncesNotActive,
+    /// The selected nonce domains have different sequences.
+    #[error("nonce keys do not share one sequence")]
+    NonceKeysNotSynchronized,
     /// Any other error
     #[error("{0}")]
     Other(Box<dyn ToRpcError>),
@@ -310,6 +316,9 @@ impl From<EthApiError> for jsonrpsee_types::error::ErrorObject<'static> {
             EthApiError::TransactionConversionError(_) |
             EthApiError::InvalidRewardPercentiles |
             EthApiError::InvalidBytecode(_) => invalid_params_rpc_err(error.to_string()),
+            EthApiError::KeyedNoncesNotActive | EthApiError::NonceKeysNotSynchronized => {
+                rpc_error_with_code(EthRpcErrorCode::InvalidInput.code(), error.to_string())
+            }
             EthApiError::InvalidTransaction(err) => err.into(),
             EthApiError::PoolError(err) => err.into(),
             EthApiError::PrevrandaoNotSet |

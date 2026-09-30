@@ -372,6 +372,27 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
                 Ok(policy) => policy,
                 Err(reason) => return Ok(FrameSimulationResult::invalid(max_cost, None, reason)),
             };
+            let recent_root_current_slot = if let Some(verifier) = &policy.recent_root {
+                let current_slot =
+                    evm_env.block_env.slot_num().checked_add(1).ok_or_else(|| {
+                        Self::Error::from_eth_err(EthApiError::InvalidParams(
+                            "canonical slot number overflows".into(),
+                        ))
+                    })?;
+                if verifier.references.iter().any(|reference| {
+                    let dependency = reference.dependency();
+                    reference.slot >= current_slot || dependency.expires_at_slot <= current_slot
+                }) {
+                    return Ok(FrameSimulationResult::invalid(
+                        max_cost,
+                        None,
+                        "recent root reference is outside the usable slot window",
+                    ))
+                }
+                Some(current_slot)
+            } else {
+                None
+            };
             let prefix_shape = Some(
                 FrameSimulationPrefixShape::from_validation_prefix(
                     policy.prefix_end,
@@ -398,12 +419,15 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
                 // the same public-prefix semantics, while full execution retains the configured
                 // nonce checks below.
                 prefix_env.cfg_env.disable_nonce_check = true;
+                if let Some(current_slot) = recent_root_current_slot {
+                    prefix_env.block_env.inner_mut().slot_num = current_slot;
+                }
                 let prefix_tx_env = TxEnvFor::<Self::Evm>::from_recovered_tx_with_gas_params(
                     &tx,
                     tx.sender,
                     &prefix_env.cfg_env.gas_params,
                 );
-                let inspector = FrameValidationInspector::new(tx.sender, policy);
+                let inspector = FrameValidationInspector::new(tx.sender, policy.clone());
                 let prefix_db = State::builder()
                     .with_database(StateProviderDatabase::new(&state_provider))
                     .build();
@@ -1039,12 +1063,58 @@ pub trait Call:
         mut request: RpcTxReq<<Self::RpcConvert as RpcConvert>::Network>,
         mut db: impl Database<Error: Into<EthApiError>>,
     ) -> Result<TxEnvFor<Self::Evm>, Self::Error> {
+        if Into::<u8>::into(request.as_ref().output_tx_type()) == 0x06 &&
+            evm_env.cfg_env.is_eip8250_enabled() &&
+            request.as_ref().nonce_keys.is_none()
+        {
+            if request.as_ref().signatures.as_ref().is_some_and(|signatures| {
+                signatures.iter().any(|signature| {
+                    u8::from(signature.scheme) != 0 && !signature.signature.is_empty()
+                })
+            }) {
+                return Err(EthApiError::InvalidParams(
+                    "signed frame transactions must include nonceKeys".into(),
+                )
+                .into());
+            }
+            request.as_mut().nonce_keys = Some(vec![U256::ZERO]);
+        }
         if request.as_ref().nonce().is_none() {
-            let nonce = db
-                .basic(request.as_ref().from().unwrap_or_default())
-                .map_err(Into::into)?
-                .map(|acc| acc.nonce)
-                .unwrap_or_default();
+            let mut keyed_nonce = None;
+            if let Some(keys) = request.as_ref().nonce_keys.as_ref() {
+                alloy_eips::eip8141::validate_nonce_keys(keys)
+                    .map_err(|reason| EthApiError::InvalidParams(reason.into()))?;
+                if keys != &[U256::ZERO] {
+                    for key in keys {
+                        let value = db
+                            .storage(
+                                alloy_eips::eip8141::NONCE_MANAGER,
+                                alloy_eips::eip8141::nonce_slot(
+                                    request.as_ref().from().unwrap_or_default(),
+                                    *key,
+                                ),
+                            )
+                            .map_err(Into::into)?;
+                        if value >= U256::from(u64::MAX) ||
+                            keyed_nonce.is_some_and(|previous| previous != value)
+                        {
+                            return Err(EthApiError::InvalidParams(
+                                "nonce keys require one non-exhausted sequence".into(),
+                            )
+                            .into());
+                        }
+                        keyed_nonce = Some(value);
+                    }
+                }
+            }
+            let nonce = if let Some(nonce) = keyed_nonce {
+                nonce.to::<u64>()
+            } else {
+                db.basic(request.as_ref().from().unwrap_or_default())
+                    .map_err(Into::into)?
+                    .map(|acc| acc.nonce)
+                    .unwrap_or_default()
+            };
             request.as_mut().set_nonce(nonce);
         }
 

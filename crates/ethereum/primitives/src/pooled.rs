@@ -223,11 +223,16 @@ mod tests {
         eip4844::{Blob, Bytes48},
         eip7594::{BlobTransactionSidecarEip7594, CELLS_PER_EXT_BLOB},
     };
-    use alloy_primitives::{Address, Sealable, B256};
+    use alloy_primitives::{Address, Sealable, B256, U256};
 
     #[test]
     fn eip8141_consensus_pooled_roundtrip() {
-        let tx = TxEip8141 { sender: Address::repeat_byte(0x41), ..Default::default() };
+        let tx = TxEip8141 {
+            sender: Address::repeat_byte(0x41),
+            nonce: 7,
+            nonce_keys: Some(vec![U256::from(1), U256::from(3)]),
+            ..Default::default()
+        };
         let consensus = TransactionSigned::Eip8141(tx.seal_slow());
         let pooled = PooledTransactionVariant::try_from(consensus.clone()).unwrap();
 
@@ -241,6 +246,8 @@ mod tests {
         versioned_hash[0] = 0x01;
         let tx = TxEip8141 {
             sender: Address::repeat_byte(0x41),
+            nonce: 9,
+            nonce_keys: Some(vec![U256::from(42)]),
             blob_versioned_hashes: vec![versioned_hash],
             ..Default::default()
         };

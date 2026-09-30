@@ -885,9 +885,9 @@ impl From<Genesis> for ChainSpec {
             None
         };
 
-        // Bogota shares Amsterdam's activation timestamp on the frames devnet. Keep accepting
-        // genesis files that only contain Amsterdam, as older Hive genesis mappers do not emit a
-        // separate Bogota timestamp.
+        // Bogota activates EIP-8141 and the EIP-8250 keyed-nonce schema together on this
+        // frames devnet. Keep accepting genesis files that only contain Amsterdam, as older Hive
+        // genesis mappers do not emit a separate Bogota timestamp.
         let bogota_time = genesis.config.bogota_time.or(genesis.config.amsterdam_time);
 
         // Time-based hardforks
@@ -940,6 +940,7 @@ impl From<Genesis> for ChainSpec {
         });
 
         let hardforks = ChainHardforks::new(ordered_hardforks);
+        validate_nonce_manager_genesis(&genesis, &hardforks);
 
         Self {
             chain: genesis.config.chain_id.into(),
@@ -1239,8 +1240,8 @@ impl ChainSpecBuilder {
     ///
     /// # Panics
     ///
-    /// This function panics if the chain ID and genesis is not set ([`Self::chain`] and
-    /// [`Self::genesis`])
+    /// Panics if the chain or genesis is missing, or the nonce-manager address contains
+    /// incompatible genesis code or storage.
     pub fn build(self) -> ChainSpec {
         let paris_block_and_final_difficulty = {
             self.hardforks.get(EthereumHardfork::Paris).and_then(|cond| {
@@ -1252,6 +1253,7 @@ impl ChainSpecBuilder {
             })
         };
         let genesis = self.genesis.expect("The genesis is required");
+        validate_nonce_manager_genesis(&genesis, &self.hardforks);
         ChainSpec {
             chain: self.chain.expect("The chain is required"),
             genesis_header: SealedHeader::new_unhashed(make_genesis_header(
@@ -1274,6 +1276,26 @@ impl From<&Arc<ChainSpec>> for ChainSpecBuilder {
             genesis: Some(value.genesis.clone()),
             hardforks: value.hardforks.clone(),
         }
+    }
+}
+
+// The genesis allocation is authoritative: injecting fork contracts here would change its state
+// root and hash. The nonce manager is installed during the block-execution fork transition.
+fn validate_nonce_manager_genesis(genesis: &Genesis, hardforks: &ChainHardforks) {
+    use alloy_eips::eip8141::{NONCE_MANAGER, NONCE_MANAGER_CODE};
+    let ForkCondition::Timestamp(timestamp) = hardforks.fork(EthereumHardfork::Bogota) else {
+        return;
+    };
+    if let Some(account) = genesis.alloc.get(&NONCE_MANAGER) {
+        assert!(
+            account.storage.as_ref().is_none_or(|storage| storage.values().all(B256::is_zero)),
+            "EIP-8250 nonce manager address contains storage"
+        );
+        assert!(
+            account.code.as_ref().is_none_or(|code| code.is_empty() ||
+                (genesis.timestamp >= timestamp && code.as_ref() == NONCE_MANAGER_CODE)),
+            "EIP-8250 nonce manager address contains code"
+        );
     }
 }
 
@@ -1347,6 +1369,73 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn keyed_nonce_genesis_preserves_alloc_and_hash() {
+        use alloy_eips::eip8141::{NONCE_MANAGER, NONCE_MANAGER_CODE};
+        for account in [
+            None,
+            Some(alloy_genesis::GenesisAccount {
+                balance: U256::from(19),
+                nonce: Some(7),
+                ..Default::default()
+            }),
+            Some(alloy_genesis::GenesisAccount {
+                balance: U256::from(19),
+                nonce: Some(7),
+                code: Some(NONCE_MANAGER_CODE.into()),
+                ..Default::default()
+            }),
+        ] {
+            let mut genesis = Genesis::default();
+            genesis.config.amsterdam_time = Some(0);
+            genesis.config.bogota_time = Some(0);
+            if let Some(account) = account {
+                genesis.alloc.insert(NONCE_MANAGER, account);
+            }
+            let parsed = ChainSpec::from(genesis.clone());
+            let built = ChainSpecBuilder::default()
+                .chain(genesis.config.chain_id.into())
+                .genesis(genesis.clone())
+                .bogota_activated()
+                .build();
+            let mut amsterdam_only_genesis = genesis.clone();
+            amsterdam_only_genesis.config.bogota_time = None;
+            let fallback = ChainSpec::from(amsterdam_only_genesis.clone());
+            for (spec, original) in
+                [(parsed, &genesis), (built, &genesis), (fallback, &amsterdam_only_genesis)]
+            {
+                assert_eq!(spec.genesis.alloc, original.alloc);
+                let expected = make_genesis_header(original, &spec.hardforks);
+                assert_eq!(spec.genesis_header.state_root, expected.state_root);
+                assert_eq!(spec.genesis_hash(), expected.hash_slow());
+            }
+        }
+    }
+
+    #[test]
+    fn keyed_nonce_future_activation_preserves_genesis_balance() {
+        use alloy_eips::eip8141::NONCE_MANAGER;
+        let mut genesis = Genesis::default();
+        genesis.alloc.insert(
+            NONCE_MANAGER,
+            alloy_genesis::GenesisAccount {
+                balance: U256::from(19),
+                nonce: Some(7),
+                ..Default::default()
+            },
+        );
+        let builder = ChainSpecBuilder::default().chain(1.into()).genesis(genesis);
+        let disabled = builder.clone().build();
+        assert!(disabled.genesis.alloc[&NONCE_MANAGER].code.is_none());
+        let future = builder.with_bogota_at(10).build();
+        assert!(future.genesis.alloc[&NONCE_MANAGER].code.is_none());
+        let account = &future.genesis.alloc[&NONCE_MANAGER];
+        assert_eq!(account.balance, U256::from(19));
+        assert_eq!(account.nonce, Some(7));
+        assert!(account.storage.is_none());
+        assert_eq!(future.genesis_header.state_root, disabled.genesis_header.state_root);
     }
 
     #[test]

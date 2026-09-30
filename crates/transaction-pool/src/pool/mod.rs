@@ -89,6 +89,7 @@ use crate::{
     CanonicalStateUpdate, EthPoolTransaction, PoolConfig, TransactionOrdering,
     TransactionValidator,
 };
+use alloy_consensus::Transaction;
 
 use alloy_primitives::{
     map::{AddressSet, HashSet},
@@ -551,30 +552,27 @@ where
         self.on_canonical_state_change_with_touched_accounts(update, &[]);
     }
 
-    /// Withdraws affected frames atomically with advancing the pool's canonical head.
+    /// Withdraws frames atomically with advancing the pool's canonical head.
     pub fn on_canonical_state_change_with_touched_accounts(
         &self,
         update: CanonicalStateUpdate<'_, V::Block>,
-        touched: &[Address],
+        _touched: &[Address],
     ) {
         trace!(target: "txpool", ?update, "updating pool on canonical state change");
 
         let block_info = update.block_info();
-        let timestamp = update.timestamp();
         let CanonicalStateUpdate {
             new_tip, changed_accounts, mined_transactions, update_kind, ..
         } = update;
         self.validator.on_new_head_block(new_tip);
 
-        let mut dependencies = FrameDependencies::default();
-        dependencies.accounts.extend_from_slice(touched);
-        dependencies.accounts.extend(changed_accounts.iter().map(|account| account.address));
         let changed_senders = self.changed_senders(changed_accounts.into_iter());
 
         // update the pool
         let outcome = {
             let mut pool = self.pool.write();
-            let affected = pool.affected_frame_transactions(&dependencies, timestamp);
+            // Recheck fork-dependent wire validity even when no selected nonce changed.
+            let affected = pool.frame_transaction_hashes();
             let mut queue = self.frame_revalidation.lock();
             for hash in &mined_transactions {
                 queue.cancel(hash);
@@ -653,7 +651,7 @@ where
         let changed_senders = self.changed_senders(accounts.into_iter());
         let UpdateOutcome { promoted, discarded } = {
             let mut pool = self.pool.write();
-            let affected = pool.affected_frame_transactions(&dependencies, 0);
+            let affected = pool.affected_frame_transactions(&dependencies, 0, None);
             let mut queue = self.frame_revalidation.lock();
             for tx in pool.remove_transactions(affected) {
                 queue.insert(tx);
@@ -686,9 +684,7 @@ where
                 bytecode_hash,
                 authorities,
             } => {
-                let sender_id = self.get_sender_id(transaction.sender());
-                let transaction_id = TransactionId::new(sender_id, transaction.nonce());
-
+                let sender = transaction.sender();
                 // split the valid transaction and the blob sidecar if it has any
                 let (transaction, blob_sidecar) = match transaction {
                     ValidTransaction::Valid(tx) => (tx, None),
@@ -701,6 +697,17 @@ where
                     }
                 };
 
+                let sender_id = match transaction.eip8250_nonce_keys() {
+                    Some(keys) if keys != [alloy_primitives::U256::ZERO] => {
+                        self.identifiers.write().keyed_sender_id_or_create(
+                            sender,
+                            alloy_eips::eip8141::nonce_keys_hash(keys),
+                        )
+                    }
+                    _ => self.get_sender_id(sender),
+                };
+                let transaction_id = TransactionId::new(sender_id, transaction.nonce());
+
                 let tx = ValidPoolTransaction {
                     transaction,
                     transaction_id,
@@ -710,13 +717,30 @@ where
                     authority_ids: authorities.map(|auths| self.get_sender_ids(auths)),
                 };
 
+                if tx.transaction.eip8250_nonce_keys().is_some() &&
+                    self.frame_revalidation.lock().contains_sender(sender)
+                {
+                    return (
+                        Err(PoolError::other(
+                            *tx.hash(),
+                            "sender frame transaction awaits revalidation",
+                        )),
+                        None,
+                    );
+                }
                 let tx_sender = tx.sender();
+                let tx_nonce = tx.nonce();
+                let nonce_keys = tx.transaction.eip8250_nonce_keys().map(<[_]>::to_vec);
                 let added = match pool.add_transaction(tx, balance, state_nonce, bytecode_hash) {
                     Ok(added) => added,
                     Err(err) => return (Err(err), None),
                 };
                 let hash = *added.hash();
-                let cancelled_frame = self.frame_revalidation.lock().cancel_sender(tx_sender);
+                let cancelled_frame = self.frame_revalidation.lock().cancel_replaced(
+                    tx_sender,
+                    tx_nonce,
+                    nonce_keys.as_deref(),
+                );
                 let state = added.transaction_state();
 
                 let meta = AddedTransactionMeta { added, blob_sidecar, cancelled_frame };
@@ -1246,10 +1270,11 @@ where
         &self,
         sender: Address,
     ) -> Vec<Arc<ValidPoolTransaction<T::Transaction>>> {
-        let Some(sender_id) = self.sender_id(&sender) else { return Vec::new() };
+        let lanes = self.identifiers.read().sender_lanes(sender);
         let removed = {
             let mut pool = self.pool.write();
-            let mut removed = pool.remove_transactions_by_sender(sender_id);
+            let mut removed: Vec<_> =
+                lanes.into_iter().flat_map(|id| pool.remove_transactions_by_sender(id)).collect();
             removed.extend(self.frame_revalidation.lock().cancel_sender(sender));
             removed
         };
@@ -1313,8 +1338,9 @@ where
         &self,
         sender: Address,
     ) -> Vec<Arc<ValidPoolTransaction<T::Transaction>>> {
-        let Some(sender_id) = self.sender_id(&sender) else { return Vec::new() };
-        self.get_pool_data().get_transactions_by_sender(sender_id)
+        let lanes = self.identifiers.read().sender_lanes(sender);
+        let pool = self.get_pool_data();
+        lanes.into_iter().flat_map(|id| pool.get_transactions_by_sender(id)).collect()
     }
 
     /// Returns a pending transaction sent by the given sender with the given nonce.
@@ -1332,8 +1358,9 @@ where
         &self,
         sender: Address,
     ) -> Vec<Arc<ValidPoolTransaction<T::Transaction>>> {
-        let Some(sender_id) = self.sender_id(&sender) else { return Vec::new() };
-        self.get_pool_data().queued_txs_by_sender(sender_id)
+        let lanes = self.identifiers.read().sender_lanes(sender);
+        let pool = self.get_pool_data();
+        lanes.into_iter().flat_map(|id| pool.queued_txs_by_sender(id)).collect()
     }
 
     /// Returns all pending transactions filtered by predicate
@@ -1349,8 +1376,9 @@ where
         &self,
         sender: Address,
     ) -> Vec<Arc<ValidPoolTransaction<T::Transaction>>> {
-        let Some(sender_id) = self.sender_id(&sender) else { return Vec::new() };
-        self.get_pool_data().pending_txs_by_sender(sender_id)
+        let lanes = self.identifiers.read().sender_lanes(sender);
+        let pool = self.get_pool_data();
+        lanes.into_iter().flat_map(|id| pool.pending_txs_by_sender(id)).collect()
     }
 
     /// Returns the highest transaction of the address
