@@ -201,11 +201,18 @@ where
     async fn drive(&mut self, write: SnapWrite, head: u64) -> Result<Step, SnapSyncError> {
         let (applied, complete) = {
             let provider = self.factory.database_provider_ro()?;
+            let generation = self.session.target().copied().ok_or(SnapSyncError::NoAttempt)?;
+            let canonical = generation.is_canonical(&provider)?;
             if provider.is_trie_rebuild_started(write)? {
+                // The handed-off state cannot be recovered in place, so an orphaned one restarts.
+                if !canonical {
+                    let pivot = generation.target();
+                    info!(target: "sync::snap", ?pivot, "Snap pivot was reorged during the trie rebuild, restarting");
+                    return Ok(Step::Restart)
+                }
                 return Ok(Step::HandedOff(write))
             }
-            let generation = self.session.target().copied().ok_or(SnapSyncError::NoAttempt)?;
-            if !generation.is_canonical(&provider)? {
+            if !canonical {
                 drop(provider);
                 return self.recover(write, head).await
             }
@@ -1110,6 +1117,37 @@ mod tests {
 
         assert_eq!(resumed.run().await.unwrap(), first);
         assert!(client.origins().is_empty());
+    }
+
+    #[tokio::test]
+    async fn a_handed_off_pivot_reorged_before_verification_restarts_the_attempt() {
+        let accounts = accounts();
+        let root = state_root(&accounts);
+        let factory = hashed_factory();
+        let shared = chain(3, root);
+        insert_headers(&factory, &shared);
+        let (_, mut bootstrap) = scripted(&factory, [account_range(1, &accounts, 0..3, &[])], [3]);
+        let SnapBootstrapOutcome::TrieRebuild { pivot: orphaned, .. } =
+            bootstrap.run().await.unwrap()
+        else {
+            panic!("the state is complete")
+        };
+        let attempt = attempt_id(&factory);
+        // Blocks 2 and 3 are replaced before the rebuild verifies the orphaned pivot.
+        let new = branch(&shared[1], &[vec![stale_changes()], Vec::new()], root);
+        replace_headers_after(&factory, 1, &new);
+        let (_, mut resumed) = scripted(&factory, [account_range(1, &accounts, 0..3, &[])], [3]);
+
+        let outcome = resumed.run().await.unwrap();
+
+        let SnapBootstrapOutcome::TrieRebuild { write, pivot } = outcome else {
+            panic!("the new branch's state is complete: {outcome:?}")
+        };
+        assert_ne!(pivot, orphaned);
+        assert_eq!(pivot, new[0].num_hash());
+        assert_ne!(attempt_id(&factory), attempt);
+        let verified = rebuild_and_verify(&factory, write, pivot.number);
+        assert_eq!(verified.state_root(), root);
     }
 
     #[tokio::test]
