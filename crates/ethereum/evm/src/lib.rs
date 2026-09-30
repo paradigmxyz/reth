@@ -303,7 +303,8 @@ where
             .with_chain_id(self.chain_spec().chain().id())
             .with_spec_and_mainnet_gas_params(spec);
 
-        cfg_env.enable_eip8250 = self.chain_spec().is_bogota_active_at_timestamp(timestamp);
+        cfg_env.enable_eip8250 = alloy_evm::eth::EIP8250_ENABLED &&
+            self.chain_spec().is_bogota_active_at_timestamp(timestamp);
 
         if let Some(blob_params) = &blob_params {
             cfg_env.set_max_blobs_per_tx(blob_params.max_blobs_per_tx);
@@ -413,7 +414,10 @@ mod tests {
         for timestamp in [9, 10, 11] {
             let header = Header { timestamp, ..Default::default() };
             let env = config.evm_env(&header).unwrap();
-            assert_eq!(env.cfg_env.enable_eip8250, timestamp >= 10);
+            assert_eq!(
+                env.cfg_env.enable_eip8250,
+                alloy_evm::eth::EIP8250_ENABLED && timestamp >= 10
+            );
             let env = config
                 .next_evm_env(
                     &Header::default(),
@@ -429,11 +433,17 @@ mod tests {
                     },
                 )
                 .unwrap();
-            assert_eq!(env.cfg_env.enable_eip8250, timestamp >= 10);
+            assert_eq!(
+                env.cfg_env.enable_eip8250,
+                alloy_evm::eth::EIP8250_ENABLED && timestamp >= 10
+            );
             let block = Block { header, body: Default::default() };
             let payload = ExecutionData::from_block_unchecked(Default::default(), &block);
             let env = config.evm_env_for_payload(&payload).unwrap();
-            assert_eq!(env.cfg_env.enable_eip8250, timestamp >= 10);
+            assert_eq!(
+                env.cfg_env.enable_eip8250,
+                alloy_evm::eth::EIP8250_ENABLED && timestamp >= 10
+            );
         }
     }
 

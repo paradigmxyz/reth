@@ -304,7 +304,7 @@ dependencies = [
 [[package]]
 name = "alloy-evm"
 version = "0.39.0"
-source = "git+https://github.com/Soubhik-10/evm?branch=frames-all-eips#b50062f78374a3e0b32896b0689c1188a887ae4d"
+source = "git+https://github.com/Soubhik-10/evm?branch=frames-all-eips#a88e452da134df98e60939d2ea5b73b5d2b174f2"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
