@@ -1,6 +1,6 @@
 //! Ethereum transaction validator.
 
-use super::constants::DEFAULT_MAX_TX_INPUT_BYTES;
+use super::constants::{DEFAULT_MAX_TX_INPUT_BYTES, TX_MAX_TOTAL_GAS_LIMIT};
 use crate::{
     blobstore::{BlobStore, PooledBlobSidecar},
     error::{
@@ -957,10 +957,10 @@ where
             .max_initcode_size
             .store(evm_env.cfg_env.max_initcode_size(), std::sync::atomic::Ordering::Relaxed);
         // EIP-8037: When state gas is enabled, `tx.gas` can exceed the per-tx gas limit cap
-        // because the cap only applies to regular gas (state gas uses a reservoir).
-        // Store 0 to disable the txpool-level check.
+        // because the cap only applies to regular gas (state gas uses a reservoir), and is
+        // bounded by the total gas limit cap instead.
         let tx_gas_limit_cap = if evm_env.cfg_env.is_amsterdam_eip8037_enabled() {
-            0
+            TX_MAX_TOTAL_GAS_LIMIT
         } else {
             evm_env.cfg_env.tx_gas_limit_cap()
         };
@@ -1160,9 +1160,10 @@ impl<Client, Evm> EthTransactionValidatorBuilder<Client, Evm> {
             // no custom transaction types by default
             other_tx_types: U256::ZERO,
 
-            // EIP-8037: When state gas is enabled, tx.gas can exceed the per-tx cap
+            // EIP-8037: When state gas is enabled, tx.gas can exceed the per-tx cap but not the
+            // total gas limit cap.
             tx_gas_limit_cap: if evm_env.cfg_env.is_amsterdam_eip8037_enabled() {
-                0
+                TX_MAX_TOTAL_GAS_LIMIT
             } else {
                 evm_env.cfg_env.tx_gas_limit_cap()
             },
@@ -1571,6 +1572,7 @@ mod tests {
         eip2930::{AccessList, AccessListItem},
     };
     use alloy_primitives::{hex, Address, Bytes, B256, U256};
+    use reth_chainspec::ChainSpecBuilder;
     use reth_ethereum_primitives::PooledTransactionVariant;
     use reth_evm_ethereum::EthEvmConfig;
     use reth_primitives_traits::SignedTransaction;
@@ -1656,6 +1658,27 @@ mod tests {
         assert!(
             ensure_intrinsic_gas(&eip1559_tx(recipient, sender, 1, 21_000), &amsterdam()).is_ok()
         );
+    }
+
+    /// EIP-8037: `tx.gas` may exceed the EIP-7825 cap, but not the total gas limit cap.
+    #[test]
+    fn total_gas_limit_cap_eip8037() {
+        let chain_spec = Arc::new(ChainSpecBuilder::mainnet().amsterdam_activated().build());
+        let provider =
+            MockEthProvider::default().with_chain_spec(chain_spec.clone()).with_genesis_block();
+        let validator =
+            EthTransactionValidatorBuilder::new(provider, EthEvmConfig::new(chain_spec))
+                .set_block_gas_limit(u64::MAX)
+                .build(InMemoryBlobStore::default());
+        let tx =
+            |gas_limit| eip1559_tx(Address::repeat_byte(2), Address::repeat_byte(1), 0, gas_limit);
+
+        let origin = TransactionOrigin::External;
+        assert!(validator.validate_stateless(origin, &tx(TX_MAX_TOTAL_GAS_LIMIT)).is_ok());
+        assert!(matches!(
+            validator.validate_stateless(origin, &tx(TX_MAX_TOTAL_GAS_LIMIT + 1)),
+            Err(InvalidPoolTransactionError::Consensus(InvalidTransactionError::GasLimitTooHigh))
+        ));
     }
 
     // <https://github.com/paradigmxyz/reth/issues/5178>

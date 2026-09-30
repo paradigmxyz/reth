@@ -10,3 +10,9 @@ pub const TX_SLOT_BYTE_SIZE: usize = 32 * 1024;
 /// to validate whether they fit into the pool or not. Default is 4 times [`TX_SLOT_BYTE_SIZE`],
 /// which defaults to 32 KiB, so 128 KiB.
 pub const DEFAULT_MAX_TX_INPUT_BYTES: usize = 4 * TX_SLOT_BYTE_SIZE; // 128KB
+
+/// EIP-8037 bound on the total transaction gas limit (`2^32 - 1`), covering regular and state gas.
+///
+/// With EIP-8037 the EIP-7825 cap only bounds regular gas, so this fixed bound keeps `tx.gas`
+/// bounded independently of the block gas limit.
+pub const TX_MAX_TOTAL_GAS_LIMIT: u64 = u32::MAX as u64;
