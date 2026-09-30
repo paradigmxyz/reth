@@ -592,13 +592,8 @@ mod tests {
             "signatures":[{"scheme":"0x1", "signature": Bytes::from(vec![1; 65])}]
         }))
         .unwrap();
-        if alloy_evm::eth::EIP8250_ENABLED {
-            let error = api.fill_transaction(request.clone()).await.unwrap_err();
-            assert!(error.to_string().contains("signed frame transactions must include nonceKeys"));
-        } else {
-            let filled = api.fill_transaction(request.clone()).await.unwrap();
-            assert!(filled.tx.frame_transaction().unwrap().nonce_keys.is_none());
-        }
+        let error = api.fill_transaction(request.clone()).await.unwrap_err();
+        assert!(error.to_string().contains("signed frame transactions must include nonceKeys"));
         for keys in [vec![U256::ZERO], vec![U256::from(1), U256::from(2)]] {
             let mut request = request.clone();
             request.nonce_keys = Some(keys.clone());

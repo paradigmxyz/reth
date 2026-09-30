@@ -582,15 +582,6 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
                             u8::from(signature.scheme) != 0 && !signature.signature.is_empty()
                         })
                     });
-                if alloy_evm::eth::EIP8250_ENABLED &&
-                    has_signatures &&
-                    request.as_ref().nonce_keys.is_none()
-                {
-                    return Err(EthApiError::InvalidParams(
-                        "signed frame transactions must include nonceKeys".into(),
-                    )
-                    .into())
-                }
                 if has_signatures &&
                     (request.as_ref().chain_id().is_none() ||
                         request.as_ref().nonce().is_none() ||
@@ -617,7 +608,7 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
                     request.as_mut().set_chain_id(chain_id.to());
                 }
 
-                if alloy_evm::eth::EIP8250_ENABLED && request.as_ref().nonce_keys.is_none() {
+                if request.as_ref().nonce_keys.is_none() {
                     request.as_mut().nonce_keys = Some(vec![U256::ZERO]);
                 }
                 if request.as_ref().nonce().is_none() {
