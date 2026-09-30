@@ -122,8 +122,9 @@ async fn blob_conversion_at_osaka() -> eyre::Result<()> {
     // build a dummy payload at `current_timestamp`
     let raw_tx = TransactionTestContext::transfer_tx_bytes(1, wallet.signer(0)).await;
     node.rpc.inject_tx(raw_tx).await?;
-    node.payload.timestamp = current_timestamp - 1;
-    node.advance_block().await?;
+    node.set_next_payload_timestamp(current_timestamp)?;
+    let dummy_payload = node.advance_block().await?;
+    assert_eq!(dummy_payload.block().timestamp, current_timestamp);
 
     // build blob txs
     let first_blob = TransactionTestContext::tx_with_blobs_bytes(1, wallet.signer(1)).await?;
@@ -155,8 +156,9 @@ async fn blob_conversion_at_osaka() -> eyre::Result<()> {
     TransactionTestContext::validate_sidecar(envelope);
 
     // build last Prague payload
-    node.payload.timestamp = current_timestamp + 1;
+    node.set_next_payload_timestamp(current_timestamp + 2)?;
     let prague_payload = node.new_payload().await?;
+    assert_eq!(prague_payload.block().timestamp, current_timestamp + 2);
     assert!(matches!(prague_payload.sidecars(), BlobSidecars::Eip4844(_)));
 
     // inject second blob tx to the pool
@@ -185,8 +187,9 @@ async fn blob_conversion_at_osaka() -> eyre::Result<()> {
     node.update_forkchoice(genesis_hash, node.submit_payload(prague_payload).await?).await?;
 
     // Build first Osaka payload
-    node.payload.timestamp = osaka_timestamp - 1;
+    node.set_next_payload_timestamp(osaka_timestamp)?;
     let osaka_payload = node.new_payload().await?;
+    assert_eq!(osaka_payload.block().timestamp, osaka_timestamp);
 
     // Assert that it includes the second blob tx with eip7594 sidecar
     assert!(osaka_payload.block().body().transactions().any(|tx| *tx.hash() == blob_tx_hash));
