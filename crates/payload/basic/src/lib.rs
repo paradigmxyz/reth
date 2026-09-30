@@ -14,7 +14,7 @@ use alloy_primitives::{B256, U256};
 use futures_core::ready;
 use futures_util::FutureExt;
 use reth_chain_state::CanonStateNotification;
-use reth_execution_cache::SavedCache;
+use reth_execution_cache::{precompile_cache::SharedPrecompileCache, SavedCache};
 use reth_payload_builder::{
     BuildNewPayload, KeepPayloadJobAlive, PayloadBuilderLease, PayloadId, PayloadJob,
     PayloadJobGenerator,
@@ -201,6 +201,7 @@ where
             cached_reads,
             execution_cache: resources.take_execution_cache(),
             state_root_handle: resources.take_state_root_handle(),
+            precompile_cache: resources.take_precompile_cache(),
             leases: resources.take_leases(),
             payload_task_guard: self.payload_task_guard.clone(),
             metrics: Default::default(),
@@ -392,6 +393,10 @@ where
     execution_cache: Option<SavedCache>,
     /// Optional state-root task handle, shared with the engine.
     state_root_handle: Option<PayloadStateRootHandle>,
+    /// Optional precompile cache shared with the engine.
+    ///
+    /// Cloned into every build attempt of this job, since it is not tied to a single build.
+    precompile_cache: Option<SharedPrecompileCache>,
     /// Lifecycle leases shared with the payload-builder service.
     ///
     /// Every detached build task clones these so that the loaned resources remain available until
@@ -424,6 +429,7 @@ where
         let cached_reads = self.cached_reads.take().unwrap_or_default();
         let execution_cache = self.execution_cache.clone();
         let state_root_handle = self.state_root_handle.take();
+        let precompile_cache = self.precompile_cache.clone();
         let leases = self.leases.clone();
         let builder = self.builder.clone();
         let executor = self.executor.clone();
@@ -440,6 +446,7 @@ where
                     cached_reads,
                     execution_cache,
                     state_root_handle,
+                    precompile_cache,
                     config: payload_config,
                     cancel,
                     best_payload,
@@ -581,6 +588,7 @@ where
                 cached_reads: self.cached_reads.take().unwrap_or_default(),
                 execution_cache: self.execution_cache.clone(),
                 state_root_handle: None,
+                precompile_cache: self.precompile_cache.clone(),
                 config: self.config.clone(),
                 cancel: CancelOnDrop::default(),
                 best_payload: None,
@@ -951,6 +959,13 @@ pub struct BuildArguments<Attributes, Payload: BuiltPayload> {
     /// root, so if the next `newPayload` is not on top of that block, the trie cache is
     /// invalidated and cleared.
     pub state_root_handle: Option<PayloadStateRootHandle>,
+    /// Optional precompile cache shared with the engine.
+    ///
+    /// Builders should wrap every EVM they create for this build, including prewarming EVMs, with
+    /// [`SharedPrecompileCache::wrap_evm`]. The same cache is passed to every build attempt of a
+    /// payload job. `None` if the engine's precompile cache is disabled or the job was not created
+    /// by the engine, in which case the builder runs uncached.
+    pub precompile_cache: Option<SharedPrecompileCache>,
     /// How to configure the payload.
     pub config: PayloadConfig<Attributes, HeaderTy<Payload::Primitives>>,
     /// A marker that can be used to cancel the job.
@@ -961,6 +976,8 @@ pub struct BuildArguments<Attributes, Payload: BuiltPayload> {
 
 impl<Attributes, Payload: BuiltPayload> BuildArguments<Attributes, Payload> {
     /// Create new build arguments.
+    ///
+    /// [`Self::precompile_cache`] is left unset.
     pub const fn new(
         cached_reads: CachedReads,
         execution_cache: Option<SavedCache>,
@@ -969,7 +986,15 @@ impl<Attributes, Payload: BuiltPayload> BuildArguments<Attributes, Payload> {
         cancel: CancelOnDrop,
         best_payload: Option<Payload>,
     ) -> Self {
-        Self { cached_reads, execution_cache, state_root_handle, config, cancel, best_payload }
+        Self {
+            cached_reads,
+            execution_cache,
+            state_root_handle,
+            precompile_cache: None,
+            config,
+            cancel,
+            best_payload,
+        }
     }
 }
 

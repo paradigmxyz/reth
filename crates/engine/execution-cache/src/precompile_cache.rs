@@ -5,10 +5,13 @@ use alloy_primitives::{
     Address, Bytes,
 };
 use moka::policy::EvictionPolicy;
-use reth_evm::precompiles::{DynPrecompile, Precompile, PrecompileInput};
+use reth_evm::{
+    precompiles::{DynPrecompile, Precompile, PrecompileInput, PrecompilesMap},
+    Evm,
+};
 use reth_primitives_traits::dashmap::DashMap;
 use reth_revm::precompile::{PrecompileId, PrecompileOutput, PrecompileResult};
-use std::{hash::Hash, sync::Arc};
+use std::{any::Any, hash::Hash, sync::Arc};
 use tracing::error;
 
 /// Default max cache size for [`PrecompileCache`]
@@ -18,6 +21,9 @@ const MAX_CACHE_SIZE: u32 = 1024 * 1024;
 const MAX_PRECOMPILE_CACHE_INPUT_SIZE: usize = 2 * 1024;
 
 /// Stores caches for each precompile.
+///
+/// Clones share the same caches. The engine uses one map for block validation and prewarming, and
+/// loans it to payload builders as a [`SharedPrecompileCache`].
 #[derive(Debug, Clone, Default)]
 pub struct PrecompileCacheMap<S>(Arc<DashMap<Address, PrecompileCache<S>, FbBuildHasher<20>>>)
 where
@@ -38,6 +44,14 @@ where
         // This should be very rare as caches for all precompiles will be initialized as soon as
         // first EVM is created.
         self.0.entry(address).or_default().clone()
+    }
+
+    /// Type-erases this map so it can be loaned to payload builders through
+    /// `PayloadBuilderResources`.
+    ///
+    /// The returned handle shares this map's caches rather than copying them.
+    pub fn into_shared(self) -> SharedPrecompileCache {
+        SharedPrecompileCache(Arc::new(self))
     }
 }
 
@@ -254,11 +268,89 @@ impl CachedPrecompileMetrics {
     }
 }
 
+/// Type-erased handle to the engine's [`PrecompileCacheMap`].
+///
+/// The payload builder service is not generic over the EVM, so the engine erases the map's spec
+/// type with [`PrecompileCacheMap::into_shared`] before loaning it through
+/// `PayloadBuilderResources`. Payload builders recover the map with [`Self::cache_map`] or wrap an
+/// EVM directly with [`Self::wrap_evm`].
+///
+/// # Ownership
+///
+/// Clones share the same underlying caches, so this is a handle rather than an exclusive loan. The
+/// engine keeps using the caches for block validation and prewarming while payload builders use
+/// them, and results written by either side are visible to the other. Unlike the execution cache,
+/// it is not tied to a parent block and needs no exclusive access, so a payload job may keep it for
+/// its whole lifetime and use it from any thread. Nothing has to be returned to the engine.
+///
+/// # Correctness
+///
+/// Recovering the map only succeeds for the exact spec type the engine used. Cached results are
+/// keyed by precompile address, input and spec value, so sharing is only correct if every EVM using
+/// the cache installs the same cacheable precompiles as the engine for a given address and spec.
+/// This holds when payload builders create their EVMs with the engine's EVM configuration. Only
+/// precompiles that report `supports_caching` may be wrapped, because a cached output must depend
+/// only on the precompile input and the spec.
+#[derive(Clone)]
+pub struct SharedPrecompileCache(Arc<dyn Any + Send + Sync>);
+
+impl SharedPrecompileCache {
+    /// Returns the cache map if this handle was created from a [`PrecompileCacheMap`] with spec
+    /// type `S`.
+    ///
+    /// The returned map shares the caches of the map this handle was created from. Returns `None`
+    /// if `S` is not the spec type of the engine's EVM.
+    pub fn cache_map<S>(&self) -> Option<PrecompileCacheMap<S>>
+    where
+        S: Eq + Hash + std::fmt::Debug + Send + Sync + Clone + 'static,
+    {
+        self.0.downcast_ref::<PrecompileCacheMap<S>>().cloned()
+    }
+
+    /// Wraps the cacheable precompiles of `evm` with the shared cache.
+    ///
+    /// Call this once for every EVM created for a payload build, after creating the EVM and before
+    /// executing transactions. Wrapping the same EVM twice stacks two cache layers.
+    ///
+    /// The cache map is recovered for the EVM's spec type. New entries are tagged with the EVM's
+    /// spec at the time of wrapping, which must be the spec its precompiles were created for,
+    /// so create and wrap a new EVM when the spec changes.
+    ///
+    /// Only precompiles that report `supports_caching` are wrapped. The EVM must be created with
+    /// the same EVM configuration as the engine's, so that it installs the same cacheable
+    /// precompiles for a given address and spec. Otherwise it would read and write results that
+    /// do not match its own precompiles.
+    ///
+    /// Wrapped precompiles do not record metrics, so lookups from other EVMs do not skew the
+    /// engine's precompile cache metrics. Their entries count towards the same per-precompile
+    /// capacity as the engine's entries.
+    ///
+    /// Returns `false` and leaves the precompiles unchanged if this handle was created for a
+    /// different spec type, in which case the EVM runs uncached.
+    pub fn wrap_evm<E>(&self, evm: &mut E) -> bool
+    where
+        E: Evm<Precompiles = PrecompilesMap>,
+    {
+        let Some(cache_map) = self.cache_map::<E::Spec>() else { return false };
+        let spec_id = evm.cfg_env().spec;
+        evm.precompiles_mut().map_cacheable_precompiles(|address, precompile| {
+            CachedPrecompile::wrap(precompile, cache_map.cache_for_address(*address), spec_id, None)
+        });
+        true
+    }
+}
+
+impl std::fmt::Debug for SharedPrecompileCache {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SharedPrecompileCache").finish_non_exhaustive()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use metrics_util::debugging::{DebugValue, DebuggingRecorder};
-    use reth_evm::{EthEvmFactory, Evm, EvmEnv, EvmFactory};
+    use reth_evm::{EthEvmFactory, EvmEnv, EvmFactory};
     use reth_revm::db::EmptyDB;
     use revm::{
         context::TxEnv,
@@ -464,5 +556,48 @@ mod tests {
             },
         );
         assert_eq!(error_count, Some(DebugValue::Counter(0)));
+    }
+
+    #[test]
+    fn test_shared_precompile_cache_downcast() {
+        let cache_map = PrecompileCacheMap::<SpecId>::default();
+        let shared = cache_map.clone().into_shared();
+
+        let recovered = shared.cache_map::<SpecId>().unwrap();
+        assert!(Arc::ptr_eq(&cache_map.0, &recovered.0));
+
+        // a map for a different spec type must not be recovered
+        assert!(shared.cache_map::<u8>().is_none());
+    }
+
+    #[test]
+    fn test_shared_precompile_cache_wrap_evm() {
+        let sha256 = Address::with_last_byte(2);
+        let input_data = b"shared_input";
+        let cache_map = PrecompileCacheMap::<SpecId>::default();
+        let mut evm = EthEvmFactory::default().create_evm(EmptyDB::default(), EvmEnv::default());
+        let spec_id = evm.cfg_env().spec;
+
+        // a cache for a different spec type is rejected
+        assert!(!PrecompileCacheMap::<u8>::default().into_shared().wrap_evm(&mut evm));
+
+        assert!(cache_map.clone().into_shared().wrap_evm(&mut evm));
+
+        let output = evm
+            .transact_raw(TxEnv {
+                caller: Address::ZERO,
+                gas_limit: 100_000,
+                data: input_data.into(),
+                kind: sha256.into(),
+                ..Default::default()
+            })
+            .unwrap()
+            .result
+            .into_output()
+            .unwrap();
+
+        // the result is stored in the shared map under the EVM's spec
+        let entry = cache_map.cache_for_address(sha256).get(input_data, spec_id).unwrap();
+        assert_eq!(entry.output.bytes, output);
     }
 }

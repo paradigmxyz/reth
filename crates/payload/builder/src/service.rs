@@ -12,7 +12,7 @@ use alloy_primitives::{BlockTimestamp, B256};
 use alloy_rpc_types::engine::PayloadId;
 use futures_util::{future::FutureExt, Stream, StreamExt};
 use reth_chain_state::CanonStateNotification;
-use reth_execution_cache::SavedCache;
+use reth_execution_cache::{precompile_cache::SharedPrecompileCache, SavedCache};
 use reth_payload_builder_primitives::{Events, PayloadBuilderError, PayloadEvents};
 use reth_payload_primitives::{BuiltPayload, PayloadAttributes, PayloadKind, PayloadTypes};
 use reth_primitives_traits::{FastInstant as Instant, NodePrimitives};
@@ -584,6 +584,11 @@ pub struct PayloadBuilderResources {
     execution_cache: Option<SavedCache>,
     /// Optional handle to a background state-root task.
     state_root_handle: Option<PayloadStateRootHandle>,
+    /// Optional precompile cache shared with the engine.
+    ///
+    /// Only provided if the engine's precompile cache is enabled, independent of
+    /// `--engine.share-execution-cache-with-payload-builder`. See [`SharedPrecompileCache`].
+    precompile_cache: Option<SharedPrecompileCache>,
     /// Lifecycle leases retained by the service or by detached payload build tasks.
     leases: Vec<PayloadBuilderLease>,
 }
@@ -594,12 +599,21 @@ impl PayloadBuilderResources {
         execution_cache: Option<SavedCache>,
         state_root_handle: Option<PayloadStateRootHandle>,
     ) -> Self {
-        Self { execution_cache, state_root_handle, leases: Vec::new() }
+        Self { execution_cache, state_root_handle, precompile_cache: None, leases: Vec::new() }
     }
 
     /// Adds a lease for this payload build.
     pub fn with_lease(mut self, lease: PayloadBuilderLease) -> Self {
         self.leases.push(lease);
+        self
+    }
+
+    /// Sets the precompile cache shared with the engine.
+    ///
+    /// This should be the same cache the engine uses for block validation and prewarming, so that
+    /// results flow in both directions.
+    pub fn with_precompile_cache(mut self, precompile_cache: SharedPrecompileCache) -> Self {
+        self.precompile_cache = Some(precompile_cache);
         self
     }
 
@@ -626,6 +640,16 @@ impl PayloadBuilderResources {
     /// Takes lifecycle leases for a payload job that owns detached work.
     pub fn take_leases(&mut self) -> Vec<PayloadBuilderLease> {
         std::mem::take(&mut self.leases)
+    }
+
+    /// Returns the loaned precompile cache, if any.
+    pub const fn precompile_cache(&self) -> Option<&SharedPrecompileCache> {
+        self.precompile_cache.as_ref()
+    }
+
+    /// Takes the loaned precompile cache, if any.
+    pub const fn take_precompile_cache(&mut self) -> Option<SharedPrecompileCache> {
+        self.precompile_cache.take()
     }
 
     /// Clones lifecycle leases for the payload builder service to retain.

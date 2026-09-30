@@ -1954,6 +1954,13 @@ where
             self.payload_state_root_handle_for(parent_hash, parent_header, timestamp, state);
         let mut resources = PayloadBuilderResources::new(execution_cache, state_root_handle)
             .with_lease(PayloadBuilderLease::new(JitPauseGuard::new(&self.evm_config)));
+        // The precompile cache only holds results of pure precompiles, so unlike the execution
+        // cache it is not tied to the parent block and needs no exclusive access. Share it whenever
+        // it is enabled, so the builder's results also benefit validation and prewarming.
+        if !self.config.precompile_cache_disabled() {
+            resources =
+                resources.with_precompile_cache(self.precompile_cache_map.clone().into_shared());
+        }
         // If the txpool prewarming is enabled then we should disable it for the duration
         // of the payload builder job. This is done by obtaining a lease that will release
         // the txpool prewarm when dropped.
