@@ -597,8 +597,10 @@ mod tests {
         for keys in [vec![U256::ZERO], vec![U256::from(1), U256::from(2)]] {
             let mut request = request.clone();
             request.nonce_keys = Some(keys.clone());
+            let expected = request.clone().build_8141().unwrap();
             let filled = api.fill_transaction(request).await.unwrap();
             assert_eq!(filled.tx.frame_transaction().unwrap().nonce_keys, Some(keys));
+            assert_eq!(filled.tx.frame_transaction().unwrap(), &expected);
         }
     }
 

@@ -582,6 +582,14 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
                             u8::from(signature.scheme) != 0 && !signature.signature.is_empty()
                         })
                     });
+                // Legacy completeness permits missing keys, but defaulting them
+                // here would change a signed frame transaction's payload.
+                if has_signatures && request.as_ref().nonce_keys.is_none() {
+                    return Err(EthApiError::InvalidParams(
+                        "signed frame transactions must include nonceKeys before filling".into(),
+                    )
+                    .into())
+                }
                 if has_signatures &&
                     (request.as_ref().chain_id().is_none() ||
                         request.as_ref().nonce().is_none() ||
