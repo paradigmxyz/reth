@@ -15,7 +15,7 @@ use reth_provider::{
     StorageSettingsCache,
 };
 use reth_storage_overlay::OverlayStateProviderFactory;
-use std::{fmt::Debug, sync::Arc};
+use std::{fmt::Debug, sync::Arc, thread::JoinHandle};
 
 /// Coordinates a long-lived worker and the latest completed immutable snapshot.
 pub(crate) struct Handle<N, P, Evm>
@@ -24,6 +24,8 @@ where
     Evm: ConfigureEvm<Primitives = N>,
 {
     control: Arc<Control<Job<N, P, Evm>>>,
+    /// Dropped after control disconnects the worker's command channel.
+    _worker: WorkerGuard,
 }
 
 impl<N, P, Evm> Debug for Handle<N, P, Evm>
@@ -59,10 +61,12 @@ where
     ) -> Self {
         let (control, commands) = Control::new();
         let publication = control.publication();
-        runtime.spawn_critical_os_thread("txpool-prewarm", "txpool prewarm worker", async move {
-            worker::Worker::new(commands, publication, source, evm_config).run()
-        });
-        Self { control }
+        let worker = runtime.spawn_critical_os_thread(
+            "txpool-prewarm",
+            "txpool prewarm worker",
+            async move { worker::Worker::new(commands, publication, source, evm_config).run() },
+        );
+        Self { control, _worker: WorkerGuard(Some(worker)) }
     }
 
     /// Pauses speculative work.
@@ -119,6 +123,17 @@ pub trait Source<N: NodePrimitives>: Send + Sync + Debug {
     /// publications, and validation pauses. Sources should return [`None`] if they are not yet
     /// tracking `parent_hash`.
     fn best_transactions(&self, parent_hash: B256) -> Option<Transactions<N>>;
+}
+
+/// Waits for worker resources to be released before engine shutdown completes.
+struct WorkerGuard(Option<JoinHandle<()>>);
+
+impl Drop for WorkerGuard {
+    fn drop(&mut self) {
+        if let Some(worker) = self.0.take() {
+            let _ = worker.join();
+        }
+    }
 }
 
 /// A request to warm txpool transactions against one fully validated parent state.

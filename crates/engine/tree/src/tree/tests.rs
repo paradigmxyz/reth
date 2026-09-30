@@ -2796,6 +2796,71 @@ mod forkchoice_updated_tests {
         test_harness.tree.update_reorg_metrics(2, Some(NumHash::new(60, B256::random())));
     }
 
+    #[test]
+    fn test_engine_termination_waits_for_cleanup() {
+        #[derive(Debug)]
+        struct CleanupSource {
+            started: crossbeam_channel::Sender<()>,
+            release: crossbeam_channel::Receiver<()>,
+        }
+
+        impl TxPoolPrewarmSource<EthPrimitives> for CleanupSource {
+            fn best_transactions(
+                &self,
+                _: B256,
+            ) -> Option<TxPoolPrewarmTransactions<EthPrimitives>> {
+                None
+            }
+        }
+
+        impl Drop for CleanupSource {
+            fn drop(&mut self) {
+                self.started.send(()).unwrap();
+                self.release.recv_timeout(Duration::from_secs(10)).unwrap();
+            }
+        }
+
+        for persistence_error in [false, true] {
+            let mut harness = TestHarness::new(MAINNET.clone());
+            if !persistence_error {
+                let genesis = harness.tree.state.tree_state.current_canonical_head;
+                harness.tree.persistence_state.last_persisted_block = genesis;
+                harness.tree.persistence_state.last_state_trie_persisted_block = genesis;
+            }
+            // Otherwise the empty provider fails to resolve the persisted genesis header.
+            let (started_tx, started_rx) = crossbeam_channel::bounded(1);
+            let (release_tx, release_rx) = crossbeam_channel::bounded(1);
+            harness.tree.payload_validator = harness
+                .tree
+                .payload_validator
+                .with_txpool_prewarming(CleanupSource { started: started_tx, release: release_rx });
+            let (tx, rx) = oneshot::channel();
+            harness.to_tree_tx.send(FromEngine::Event(FromOrchestrator::Terminate { tx })).unwrap();
+            let engine = spawn_os_thread("engine", || harness.tree.run());
+            let (done_tx, done_rx) = crossbeam_channel::bounded(1);
+            let completion = spawn_os_thread("completion", move || {
+                done_tx.send(rx.blocking_recv()).unwrap();
+            });
+
+            started_rx.recv_timeout(Duration::from_secs(10)).unwrap();
+            // Keep worker resources alive while allowing an early acknowledgement to arrive.
+            let early = done_rx.recv_timeout(Duration::from_millis(100));
+            release_tx.send(()).unwrap();
+            engine.join().unwrap();
+            completion.join().unwrap();
+
+            assert!(
+                matches!(early, Err(crossbeam_channel::RecvTimeoutError::Timeout)),
+                "termination acknowledged before cleanup (persistence_error={persistence_error})"
+            );
+            done_rx.recv_timeout(Duration::from_secs(10)).unwrap().unwrap();
+            assert!(matches!(
+                harness.action_rx.try_recv(),
+                Err(std::sync::mpsc::TryRecvError::Disconnected)
+            ));
+        }
+    }
+
     /// Test that engine termination persists all blocks and signals completion.
     #[test]
     fn test_engine_termination_with_everything_persisted() {
