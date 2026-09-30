@@ -145,7 +145,7 @@ impl<T: MetadataProvider> SnapReorgStore for T {
         for changes in lists.iter().flat_map(|list| list.as_bal().iter()) {
             let hashed_address = keccak256(changes.address());
             // Accounts not downloaded yet are downloaded whole at a canonical pivot later.
-            if !changes.account_info().changes_state_root(changes) ||
+            if !changes.has_changes() ||
                 self.downloaded_account(coverage, hashed_address)? == DownloadedAccount::Unknown
             {
                 continue
