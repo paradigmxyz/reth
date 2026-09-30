@@ -338,4 +338,19 @@ mod tests {
         assert_eq!(stored, U256::from(42).to_be_bytes());
         assert_eq!(U256::from_be_slice(&output), U256::from(42));
     }
+
+    #[tokio::test]
+    async fn derived_pending_block_keeps_origin_state() {
+        let eth_api = mock_eth_api(AddressMap::default());
+        let mut block = Block::default();
+        block.header.number = 1;
+        block.header.gas_limit = 30_000_000;
+        let hash = block.header.hash_slow();
+        eth_api.provider().add_block(hash, block);
+
+        let (parent, _, state) =
+            eth_api.evm_env_and_recovered_block_at(BlockId::pending()).await.unwrap();
+        assert_eq!(parent.hash(), hash);
+        assert_eq!(state, BlockId::from(hash));
+    }
 }

@@ -464,8 +464,8 @@ pub trait LoadState:
     /// Returns the recovered block, EVM environment, and state block id for the requested
     /// [`BlockId`].
     ///
-    /// For pending blocks, the recovered block is selected by its origin while state reads use the
-    /// pending tag, including when the environment is derived from latest.
+    /// For pending blocks, the block and state id come from the pending env origin: the pending tag
+    /// for an actual pending block, or the latest block hash when the env is derived from latest.
     #[expect(clippy::type_complexity)]
     fn evm_env_and_recovered_block_at(
         &self,
@@ -482,12 +482,13 @@ pub trait LoadState:
         async move {
             if at.is_pending() {
                 let PendingBlockEnv { evm_env, origin } = self.pending_block_env_and_cfg()?;
+                let block_id = origin.state_block_id();
                 let block = self
-                    .recovered_block(origin.state_block_id())
+                    .recovered_block(block_id)
                     .await?
                     .ok_or_else(|| EthApiError::HeaderNotFound(at))?;
 
-                Ok((block, evm_env, BlockId::pending()))
+                Ok((block, evm_env, block_id))
             } else {
                 let block = self
                     .recovered_block(at)
