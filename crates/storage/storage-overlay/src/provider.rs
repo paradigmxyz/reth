@@ -1337,7 +1337,7 @@ mod tests {
                 .map(|address| {
                     (
                         Nibbles::unpack(alloy_primitives::keccak256(address)),
-                        Some(StateTrieNode::Leaf { short_key_len: 63, value: db_account }),
+                        Some(StateTrieNode::Leaf { short_key_len: 63, value: db_account.clone() }),
                     )
                 })
                 .collect(),

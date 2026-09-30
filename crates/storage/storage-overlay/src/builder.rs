@@ -1111,17 +1111,11 @@ mod tests {
                 "block {index} must resolve the cached execution overlay"
             );
 
-            let (hash_nodes, hash_state) =
-                from_hash.resolve_state_trie_overlays(anchor.hash).unwrap();
-            let (state_nodes, state_state) =
-                from_state.resolve_state_trie_overlays(anchor.hash).unwrap();
+            let hash_overlay = from_hash.resolve_state_trie_overlays(anchor.hash).unwrap();
+            let state_overlay = from_state.resolve_state_trie_overlays(anchor.hash).unwrap();
             assert!(
-                Arc::ptr_eq(&hash_nodes, &state_nodes),
-                "block {index} must resolve the cached trie overlay nodes"
-            );
-            assert!(
-                Arc::ptr_eq(&hash_state, &state_state),
-                "block {index} must resolve the cached trie overlay state"
+                Arc::ptr_eq(&hash_overlay, &state_overlay),
+                "block {index} must resolve the cached trie overlay"
             );
 
             // The fully built overlay folds in database reverts for anchors below Finish, so
