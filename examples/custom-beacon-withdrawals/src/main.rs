@@ -3,7 +3,7 @@
 
 #![warn(unused_crate_dependencies)]
 
-use alloy_eips::eip4895::Withdrawal;
+use alloy_eips::{eip4788::SYSTEM_ADDRESS, eip4895::Withdrawal};
 use alloy_evm::{
     block::{BlockExecutorFactory, ExecutableTx, GasOutput},
     eth::{EthBlockExecutionCtx, EthBlockExecutor, EthTxResult},
@@ -41,7 +41,6 @@ use reth_ethereum::{
 };
 use std::{fmt::Display, sync::Arc};
 
-pub const SYSTEM_ADDRESS: Address = address!("0xfffffffffffffffffffffffffffffffffffffffe");
 pub const WITHDRAWALS_ADDRESS: Address = address!("0x4200000000000000000000000000000000000000");
 
 fn main() {

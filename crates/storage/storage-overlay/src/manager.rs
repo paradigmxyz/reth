@@ -508,7 +508,7 @@ impl<N: NodePrimitives> OverlayManager<N> {
             return match entry {
                 OverlayCacheEntry::Ready(input) => Ok(Some(input)),
                 OverlayCacheEntry::Computing(_) if cache_config.precompute => Ok(None),
-                OverlayCacheEntry::Computing(waiter) => Ok(Some(waiter.wait())),
+                OverlayCacheEntry::Computing(waiter) => Ok(Some(waiter.wait(metrics))),
             }
         }
         span.record("cache_reused", false);
@@ -570,7 +570,7 @@ impl<N: NodePrimitives> OverlayManager<N> {
 
         match action {
             CacheAction::Ready(input) => Ok(Some(input)),
-            CacheAction::Wait(waiter) => Ok(Some(waiter.wait())),
+            CacheAction::Wait(waiter) => Ok(Some(waiter.wait(metrics))),
             CacheAction::Compute(waiter) => {
                 let parent_input = blocks.first().and_then(|block| {
                     let parent_hash = block.recovered_block().parent_hash();
@@ -825,8 +825,11 @@ impl<T> OverlayWaiter<T> {
         Self { input: OnceLock::new() }
     }
 
-    fn wait(&self) -> Arc<T> {
-        Arc::clone(self.input.wait())
+    fn wait(&self, metrics: &impl OverlayCacheMetrics) -> Arc<T> {
+        let start = Instant::now();
+        let input = self.input.wait();
+        metrics.record_wait_duration(start.elapsed());
+        Arc::clone(input)
     }
 
     fn finish(&self, computed: Arc<T>) {

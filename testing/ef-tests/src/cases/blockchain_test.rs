@@ -222,6 +222,14 @@ fn run_case(case: &BlockchainTest) -> Result<(), Error> {
     insert_genesis_history(&provider, genesis_state.iter())
         .map_err(|err| Error::block_failed(0, err))?;
 
+    // Build the genesis trie, as `init_genesis` does, so block 1 reads stored nodes.
+    let (_, trie_updates) = reth_trie_db::with_adapter!(provider, |A| {
+        StateRoot::<reth_trie_db::DatabaseTrieCursorFactory<_, A>, _>::from_tx(provider.tx_ref())
+            .root_with_updates()
+    })
+    .map_err(|err| Error::block_failed(0, err))?;
+    provider.write_trie_updates(trie_updates).map_err(|err| Error::block_failed(0, err))?;
+
     // Decode blocks
     let blocks = decode_blocks(&case.blocks)?;
 

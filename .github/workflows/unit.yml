@@ -38,7 +38,7 @@ jobs:
     timeout-minutes: 30
     steps:
       - name: Secure runner
-        uses: tempoxyz/gh-actions/actions/secure-runner@117919c943b804057be733b0c4034c5542e58959 # 2026-09-23T05-09-41Z-117919c9
+        uses: tempoxyz/gh-actions/actions/secure-runner@d5402286a7abdfb7232173b3228d56473feb8a66 # 2026-09-29T02-04-45Z-d5402286
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
@@ -54,7 +54,7 @@ jobs:
           cache-bin: false
           cache-on-failure: true
       - name: Install nextest
-        uses: tempoxyz/gh-actions/vendor/taiki-e/install-action@117919c943b804057be733b0c4034c5542e58959 # 2026-09-23T05-09-41Z-117919c9
+        uses: tempoxyz/gh-actions/vendor/taiki-e/install-action@d5402286a7abdfb7232173b3228d56473feb8a66 # 2026-09-29T02-04-45Z-d5402286
         with:
           tool: nextest@0.9.140
           checksum: true
@@ -67,6 +67,8 @@ jobs:
             ${{ matrix.exclude_args }} --workspace \
             --exclude ef-tests --no-tests=warn \
             -E "!kind(test) and not binary(e2e_testsuite)"
+      - name: Run standalone EthStats tests
+        run: cargo nextest run --no-fail-fast --locked -p reth-node-ethstats
 
   state:
     name: Ethereum state tests
@@ -80,7 +82,7 @@ jobs:
     timeout-minutes: 30
     steps:
       - name: Secure runner
-        uses: tempoxyz/gh-actions/actions/secure-runner@117919c943b804057be733b0c4034c5542e58959 # 2026-09-23T05-09-41Z-117919c9
+        uses: tempoxyz/gh-actions/actions/secure-runner@d5402286a7abdfb7232173b3228d56473feb8a66 # 2026-09-29T02-04-45Z-d5402286
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
@@ -108,7 +110,7 @@ jobs:
         with:
           toolchain: stable
       - name: Install nextest
-        uses: tempoxyz/gh-actions/vendor/taiki-e/install-action@117919c943b804057be733b0c4034c5542e58959 # 2026-09-23T05-09-41Z-117919c9
+        uses: tempoxyz/gh-actions/vendor/taiki-e/install-action@d5402286a7abdfb7232173b3228d56473feb8a66 # 2026-09-29T02-04-45Z-d5402286
         with:
           tool: nextest@0.9.140
           checksum: true
@@ -127,10 +129,12 @@ jobs:
       contents: read
     env:
       RUST_BACKTRACE: 1
+      # Doctests don't need debuginfo, and dropping it keeps the cached target dir small.
+      CARGO_PROFILE_DEV_DEBUG: 0
     timeout-minutes: 30
     steps:
       - name: Secure runner
-        uses: tempoxyz/gh-actions/actions/secure-runner@117919c943b804057be733b0c4034c5542e58959 # 2026-09-23T05-09-41Z-117919c9
+        uses: tempoxyz/gh-actions/actions/secure-runner@d5402286a7abdfb7232173b3228d56473feb8a66 # 2026-09-29T02-04-45Z-d5402286
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
@@ -140,8 +144,14 @@ jobs:
         with:
           toolchain: stable
       - uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
+      # rust-cache restores the previous entry on a lockfile change and keeps stale artifacts,
+      # so the cache only grows. Rotating the key weekly starts from a clean target dir.
+      - name: Compute cache week
+        id: cache-week
+        run: echo "week=$(date -u +%G-W%V)" >> "$GITHUB_OUTPUT"
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
+          key: ${{ steps.cache-week.outputs.week }}
           cache-on-failure: true
       - name: Run doctests
         run: cargo test --doc --workspace --all-features

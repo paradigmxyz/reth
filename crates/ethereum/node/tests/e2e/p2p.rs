@@ -145,15 +145,11 @@ async fn rejects_downloaded_block_with_invalid_bal_hash() -> eyre::Result<()> {
     );
     peer_provider.add_block(invalid_hash, invalid_block.into_block());
 
-    let mut testnet = Testnet::create_with(1, peer_provider).await;
-    testnet.for_each_mut(|peer| peer.install_request_handler());
-    let peer = testnet.peers()[0].handle();
-    let peer_id = *peer.peer_id();
-    let peer_addr = peer.local_addr();
-    let _testnet = testnet.spawn();
+    let testnet = Testnet::create_with(1, peer_provider).await.with_request_handlers().spawn();
+    let [peer] = testnet.peers_array();
 
-    node.inner.network.add_peer(peer_id, peer_addr);
-    assert_eq!(node.network.next_session_established().await, Some(peer_id));
+    node.inner.network.add_peer(*peer.peer_id(), peer.local_addr());
+    assert_eq!(node.network.next_session_established().await, Some(*peer.peer_id()));
 
     let mut engine_events = node.inner.add_ons_handle.consensus_engine_events().new_listener();
     let state = ForkchoiceState {

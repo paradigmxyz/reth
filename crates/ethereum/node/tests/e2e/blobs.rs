@@ -9,7 +9,7 @@ use reth_node_ethereum::EthereumNode;
 use reth_transaction_pool::TransactionPool;
 use std::{
     sync::Arc,
-    time::{Duration, SystemTime, UNIX_EPOCH},
+    time::{SystemTime, UNIX_EPOCH},
 };
 
 #[tokio::test]
@@ -51,7 +51,11 @@ async fn can_handle_blobs() -> eyre::Result<()> {
     let block_hash = node.submit_payload(payload).await?;
     node.update_forkchoice(genesis_hash, block_hash).await?;
 
-    tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+    // wait for the pool to process the reorg, which re-injects the blob tx
+    node.wait_for_pool(|pool| {
+        pool.block_info().last_seen_block_hash == block_hash && pool.contains(&blob_tx_hash)
+    })
+    .await?;
 
     // expects the blob tx to be back in the pool
     let envelope = node.rpc.envelope_by_hash(blob_tx_hash).await?;
@@ -164,7 +168,11 @@ async fn blob_conversion_at_osaka() -> eyre::Result<()> {
     // validate sidecar
     TransactionTestContext::validate_sidecar(envelope);
 
-    tokio::time::sleep(Duration::from_secs(6)).await;
+    // wait for the pool to convert the sidecar ahead of the Osaka activation
+    node.wait_for_pool(|pool| {
+        pool.get_blob(blob_tx_hash).ok().flatten().is_some_and(|sidecar| sidecar.is_eip7594())
+    })
+    .await?;
 
     // fetch second blob tx from rpc again
     let envelope = node.rpc.envelope_by_hash(blob_tx_hash).await?;

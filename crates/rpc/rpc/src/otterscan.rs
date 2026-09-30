@@ -31,6 +31,7 @@ use revm_inspectors::{
         TracingInspectorConfig,
     },
 };
+use tokio::sync::OwnedSemaphorePermit;
 
 const API_LEVEL: u64 = 8;
 
@@ -95,6 +96,13 @@ where
         };
         Ok(BlockDetails::new(block, issuance, total_fees))
     }
+
+    /// Acquires a permit to execute a tracing call.
+    ///
+    /// The permit should be moved into the spawned trace so it is held until the trace completes.
+    async fn acquire_trace_permit(&self) -> RpcResult<OwnedSemaphorePermit> {
+        Ok(self.eth.acquire_owned_tracing().await.map_err(|_| EthApiError::InternalEthError)?)
+    }
 }
 
 #[async_trait]
@@ -132,11 +140,15 @@ where
 
     /// Handler for `ots_getInternalOperations`
     async fn get_internal_operations(&self, tx_hash: TxHash) -> RpcResult<Vec<InternalOperation>> {
+        let permit = self.acquire_trace_permit().await?;
         self.eth
             .spawn_trace_transaction_in_block_with_inspector(
                 tx_hash,
                 InternalOperationsInspector::default(),
-                |_tx_info, inspector, _, _| Ok(inspector.into_operations()),
+                move |_tx_info, inspector, _, _| {
+                    let _permit = permit;
+                    Ok(inspector.into_operations())
+                },
             )
             .await
             .map_err(Into::into)
@@ -145,19 +157,25 @@ where
 
     /// Handler for `ots_getTransactionError`
     async fn get_transaction_error(&self, tx_hash: TxHash) -> RpcResult<Option<Bytes>> {
+        let permit = self.acquire_trace_permit().await?;
         self.eth
-            .spawn_replay_transaction(tx_hash, |_tx_info, res, _| Ok(transaction_error(res.result)))
+            .spawn_replay_transaction(tx_hash, move |_tx_info, res, _| {
+                let _permit = permit;
+                Ok(transaction_error(res.result))
+            })
             .await
             .map_err(Into::into)
     }
 
     /// Handler for `ots_traceTransaction`
     async fn trace_transaction(&self, tx_hash: TxHash) -> RpcResult<Option<Vec<TraceEntry>>> {
+        let permit = self.acquire_trace_permit().await?;
         self.eth
             .spawn_trace_transaction_in_block(
                 tx_hash,
                 TracingInspectorConfig::default_parity(),
-                |_tx_info, inspector, _, _| {
+                move |_tx_info, inspector, _, _| {
+                    let _permit = permit;
                     Ok(otterscan_traces(inspector.into_traces().into_nodes()))
                 },
             )
@@ -314,6 +332,7 @@ where
             return Ok(None);
         }
 
+        let permit = self.acquire_trace_permit().await?;
         let num = binary_search::<_, _, ErrorObjectOwned>(
             1,
             self.eth.block_number()?.saturating_to(),
@@ -333,7 +352,8 @@ where
                 num.into(),
                 None,
                 TracingInspectorConfig::default_parity(),
-                |tx_info, mut ctx| {
+                move |tx_info, mut ctx| {
+                    let _permit = &permit;
                     Ok(ctx
                         .take_inspector()
                         .into_parity_builder()
@@ -684,6 +704,36 @@ mod tests {
             assert_eq!(error.code(), -32603);
             assert_eq!(error.message(), "unimplemented");
         }
+    }
+
+    #[tokio::test]
+    async fn trace_methods_wait_for_tracing_permit() {
+        use reth_rpc_eth_api::helpers::SpawnBlocking;
+        use std::time::Duration;
+
+        let api = OtterscanApi::new(
+            crate::eth::EthApiBuilder::new(
+                MockEthProvider::default(),
+                testing_pool(),
+                NoopNetwork::default(),
+                EthEvmConfig::new(MAINNET.clone()),
+            )
+            .proof_permits(1)
+            .build(),
+        );
+        let permit = api.eth.acquire_owned_tracing().await.unwrap();
+
+        let timeout = Duration::from_millis(100);
+        assert!(tokio::time::timeout(timeout, api.trace_transaction(B256::ZERO)).await.is_err());
+        assert!(tokio::time::timeout(timeout, api.get_transaction_error(B256::ZERO))
+            .await
+            .is_err());
+        assert!(tokio::time::timeout(timeout, api.get_internal_operations(B256::ZERO))
+            .await
+            .is_err());
+
+        drop(permit);
+        assert_eq!(api.trace_transaction(B256::ZERO).await.unwrap(), None);
     }
 
     #[tokio::test]

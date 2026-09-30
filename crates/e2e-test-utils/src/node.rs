@@ -30,6 +30,7 @@ use reth_rpc_api::TestingBuildBlockRequestV1;
 use reth_rpc_builder::auth::AuthServerHandle;
 use reth_rpc_eth_api::helpers::{EthApiSpec, EthTransactions, TraceExt};
 use reth_stages_types::StageId;
+use reth_transaction_pool::TransactionPool;
 use std::{pin::Pin, sync::Arc, time::Duration};
 use tokio_stream::StreamExt;
 use url::Url;
@@ -282,16 +283,30 @@ where
         block_hash: B256,
         block_number: BlockNumber,
     ) -> eyre::Result<()> {
-        // Get the head block from the notification stream and verify the tx is included in the
-        // canonical block.
-        let head = tokio::time::timeout(WAIT_TIMEOUT, self.canonical_stream.next())
+        // The stream buffers every canonical notification since the context was created, e.g. of
+        // blocks mined with `advance_block`, so skip notifications until the one that commits the
+        // block, then verify the tx is included in it.
+        let wait = async {
+            loop {
+                let notification = self
+                    .canonical_stream
+                    .next()
+                    .await
+                    .ok_or_else(|| eyre!("canonical state stream closed"))?;
+                let committed = notification.committed();
+                if let Some(block) = committed.blocks().get(&block_number) &&
+                    block.hash() == block_hash
+                {
+                    return eyre::Ok(Arc::clone(block))
+                }
+            }
+        };
+        let block = tokio::time::timeout(WAIT_TIMEOUT, wait)
             .await
-            .map_err(|_| eyre!("timed out waiting for block {block_number}"))?
-            .ok_or_else(|| eyre!("canonical state stream closed"))?;
+            .map_err(|_| eyre!("timed out waiting for block {block_number}"))??;
         ensure!(
-            head.tip().body().transactions().iter().any(|tx| *tx.tx_hash() == tip_tx_hash),
-            "transaction {tip_tx_hash} is not included in block {}",
-            head.tip().number()
+            block.body().transactions().iter().any(|tx| *tx.tx_hash() == tip_tx_hash),
+            "transaction {tip_tx_hash} is not included in block {block_number}"
         );
 
         // Wait for the block to commit and make sure the block hash we submitted via FCU engine
@@ -332,7 +347,7 @@ where
             while self
                 .inner
                 .provider
-                .sealed_header_by_id(BlockId::Number(BlockNumberOrTag::Latest))?
+                .sealed_header_by_id(BlockId::latest())?
                 .is_none_or(|h| h.hash() != block)
             {
                 tokio::time::sleep(Duration::from_millis(100)).await;
@@ -344,10 +359,14 @@ where
             .await
             .map_err(|_| eyre!("timed out syncing to block {block}"))??;
 
-        // Hack to make sure that all components have time to process canonical state update.
-        // Otherwise, this might result in e.g "nonce too low" errors when advancing chain further,
-        // making tests flaky.
-        tokio::time::sleep(Duration::from_millis(1000)).await;
+        // The transaction pool processes the canonical state update in the background, and
+        // advancing the chain before it did can fail with e.g. "nonce too low" errors. Blocks
+        // synced by backfill don't notify the pool, so wait for at most a second.
+        let _ = tokio::time::timeout(
+            Duration::from_secs(1),
+            self.wait_for_pool(|pool| pool.block_info().last_seen_block_hash == block),
+        )
+        .await;
 
         Ok(())
     }
