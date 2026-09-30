@@ -44,7 +44,7 @@ mod tests {
         ChainSpecProvider,
     };
     use reth_rpc_eth_api::{
-        helpers::{pending_block::PendingEnvBuilder, EthCall, EthState, SpawnBlocking},
+        helpers::{pending_block::PendingEnvBuilder, Call, EthCall, EthState, SpawnBlocking},
         node::{RpcNodeCoreAdapter, RpcNodeCoreExt},
         EthApiTypes,
     };
@@ -55,6 +55,7 @@ mod tests {
         Runtime,
     };
     use reth_transaction_pool::test_utils::{testing_pool, TestPool};
+    use revm::context::result::ExecutionResult;
     use std::{future::Future, sync::Arc, time::Duration};
     use tokio::sync::{Mutex, Semaphore};
 
@@ -280,6 +281,8 @@ mod tests {
 
     impl EthState for CustomPendingState {}
 
+    impl Call for CustomPendingState {}
+
     #[tokio::test]
     async fn pending_state_reads_use_existing_override() {
         let address = Address::random();
@@ -296,5 +299,43 @@ mod tests {
             U256::from(42)
         );
         assert_eq!(eth_api.balance(address, None).await.unwrap(), U256::from(1337));
+    }
+
+    #[tokio::test]
+    async fn pending_simulations_use_existing_override() {
+        let address = Address::with_last_byte(0x42);
+        let code: alloy_primitives::Bytes = "0x60005460005260206000f3".parse().unwrap();
+        let account = |value| {
+            ExtendedAccount::new(0, U256::ZERO)
+                .with_bytecode(code.clone())
+                .extend_storage([(B256::ZERO, U256::from(value))])
+        };
+        let eth_api = mock_eth_api(AddressMap::from_iter([(address, account(7))]));
+        let mut block = Block::default();
+        block.header.number = 1;
+        block.header.gas_limit = 30_000_000;
+        let hash = block.header.hash_slow();
+        eth_api.provider().add_block(hash, block);
+
+        let pending = MockEthProvider::default();
+        pending.extend_accounts([(address, account(42))]);
+        let eth_api = CustomPendingState { inner: eth_api, pending };
+
+        let stored =
+            eth_api.storage_at(address, U256::ZERO.into(), Some(BlockId::pending())).await.unwrap();
+        let simulated = eth_api
+            .transact_call_at(
+                TransactionRequest::default().to(address),
+                BlockId::pending(),
+                Default::default(),
+            )
+            .await
+            .unwrap();
+        let output = match simulated.result {
+            ExecutionResult::Success { output, .. } => output.into_data(),
+            other => panic!("pending call failed: {other:?}"),
+        };
+        assert_eq!(stored, U256::from(42).to_be_bytes());
+        assert_eq!(U256::from_be_slice(&output), U256::from(42));
     }
 }
