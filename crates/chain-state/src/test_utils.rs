@@ -19,7 +19,6 @@ use reth_primitives_traits::{
     Account, NodePrimitives, Recovered, RecoveredBlock, SealedBlock, SealedHeader,
     SignedTransaction,
 };
-use reth_storage_api::NodePrimitivesProvider;
 use reth_trie::{root::state_root_unhashed, ComputedTrieData, SortedTrieData};
 use revm::{database::BundleState, state::AccountInfo};
 use std::{
@@ -251,11 +250,8 @@ impl<N: NodePrimitives> TestBlockBuilder<N> {
         let single_cost = Self::single_tx_cost();
 
         // Look up parent's post-block state for correct revert construction.
-        let (pre_info, old_slot_value) = self
-            .post_block_state
-            .get(&parent_hash)
-            .cloned()
-            .unwrap_or_else(|| (initial_info.clone(), U256::ZERO));
+        let (pre_info, old_slot_value) =
+            self.post_block_state.get(&parent_hash).cloned().unwrap_or((initial_info, U256::ZERO));
 
         let mut final_balance = pre_info.balance;
         for _ in 0..num_txs {
@@ -265,10 +261,11 @@ impl<N: NodePrimitives> TestBlockBuilder<N> {
         let post_info =
             AccountInfo { nonce: final_nonce, balance: final_balance, ..Default::default() };
 
-        let account_revert = if pre_info.balance == initial_info.balance && pre_info.nonce == 0 {
-            Some(None)
-        } else {
+        // An empty parent creates the signer without changing its balance or nonce.
+        let account_revert = if self.post_block_state.contains_key(&parent_hash) {
             Some(Some(pre_info))
+        } else {
+            Some(None)
         };
 
         let new_slot_value = U256::from(block_number).wrapping_add(U256::from(1));
@@ -445,16 +442,44 @@ impl TestCanonStateSubscriptions {
     }
 }
 
-impl NodePrimitivesProvider for TestCanonStateSubscriptions {
-    type Primitives = EthPrimitives;
-}
-
 impl CanonStateSubscriptions for TestCanonStateSubscriptions {
+    type Primitives = EthPrimitives;
+
     /// Sets up a broadcast channel with a buffer size of 100.
     fn subscribe_to_canonical_state(&self) -> CanonStateNotifications {
         let (canon_notif_tx, canon_notif_rx) = broadcast::channel(100);
         self.canon_notif_tx.lock().as_mut().unwrap().push(canon_notif_tx);
 
         canon_notif_rx
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_revert_after_empty_parent() {
+        let mut builder = TestBlockBuilder::eth().with_state();
+        let parent_hash = B256::repeat_byte(1);
+        let initial_info = AccountInfo::from_balance(U256::from(10).pow(U256::from(18)));
+
+        // An empty parent still creates the signer with its initial balance and zero nonce.
+        // Seed that state directly so the test doesn't depend on random transaction counts.
+        builder.post_block_state.insert(parent_hash, (initial_info.clone(), U256::from(2)));
+
+        for (parent_hash, expected_account) in
+            [(parent_hash, Some(initial_info)), (B256::repeat_byte(2), None)]
+        {
+            let block = builder.get_executed_block_with_number(2, parent_hash);
+            let mut state = block.execution_outcome().state.clone();
+            state.revert(1);
+
+            assert_eq!(
+                state.state.get(&builder.signer).and_then(|account| account.info.clone()),
+                expected_account,
+                "reverting must restore the signer's existence in the specified parent"
+            );
+        }
     }
 }

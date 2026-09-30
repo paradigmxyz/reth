@@ -5,6 +5,7 @@ use alloy_eips::{
     eip1898::BlockHashOrNumber,
     eip4844::{BlobAndProofV1, BlobAndProofV2, BlobCellsAndProofsV1},
     eip4895::Withdrawals,
+    eip7594::BlobCellMask,
     eip7685::RequestsOrHash,
 };
 use alloy_primitives::{BlockHash, BlockNumber, Bytes, Sealable, B128, B256, U64};
@@ -1223,9 +1224,8 @@ where
         versioned_hashes: Vec<B256>,
         indices_bitarray: B128,
     ) -> EngineApiResult<Option<Vec<Option<BlobCellsAndProofsV1>>>> {
-        // Engine API bitvectors are little-endian, while B128 integer conversions are
-        // big-endian. The transaction pool uses the latter representation as a numeric cell mask.
-        let indices_bitarray = B128::from(u128::from_le_bytes(indices_bitarray.into()));
+        // Engine API bitvectors encode the lowest cell indices in the first byte.
+        let cell_mask = BlobCellMask::from_bits(u128::from_le_bytes(indices_bitarray.into()));
         let current_timestamp =
             SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap_or_default().as_secs();
         if !self.inner.chain_spec.is_osaka_active_at_timestamp(current_timestamp) {
@@ -1245,7 +1245,7 @@ where
 
         self.inner
             .tx_pool
-            .get_blobs_for_versioned_hashes_v4(&versioned_hashes, indices_bitarray)
+            .get_blobs_for_versioned_hashes_v4(&versioned_hashes, cell_mask)
             .map(Some)
             .map_err(|err| EngineApiError::Internal(Box::new(err)))
     }
@@ -2432,18 +2432,11 @@ mod tests {
 
     #[test]
     fn engine_bitvector_uses_little_endian_cell_indices() {
-        assert_eq!(
-            B128::from(u128::from_le_bytes(B128::from(1u128.to_le_bytes()).into())),
-            B128::from(1u128)
-        );
-        assert_eq!(
-            B128::from(u128::from_le_bytes(B128::from((1u128 << 127).to_le_bytes()).into())),
-            B128::from(1u128 << 127)
-        );
-        assert_eq!(
-            B128::from(u128::from_le_bytes(B128::from(((1u128 << 64) - 1).to_le_bytes()).into(),)),
-            B128::from((1u128 << 64) - 1)
-        );
+        for index in [0, 7, 8, 63, 64, 127] {
+            let wire_mask = B128::from((1u128 << index).to_le_bytes());
+            let mask = BlobCellMask::from_bits(u128::from_le_bytes(wire_mask.into()));
+            assert_eq!(mask.selected_indices().collect::<Vec<_>>(), vec![index]);
+        }
     }
 
     #[tokio::test]

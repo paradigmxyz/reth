@@ -359,7 +359,7 @@ pub struct NetworkArgs {
     #[arg(long = "pooled-tx-pack-soft-limit", value_name = "BYTES", default_value_t = DefaultNetworkArgs::get_global().soft_limit_byte_size_pooled_transactions_response_on_pack_request, verbatim_doc_comment)]
     pub soft_limit_byte_size_pooled_transactions_response_on_pack_request: usize,
 
-    /// Max capacity of cache of hashes for transactions pending fetch.
+    /// Maximum number of announced transaction hashes to track, including inflight requests.
     #[arg(long = "max-tx-pending-fetch", value_name = "COUNT", default_value_t = DefaultNetworkArgs::get_global().max_capacity_cache_txns_pending_fetch, verbatim_doc_comment)]
     pub max_capacity_cache_txns_pending_fetch: u32,
 

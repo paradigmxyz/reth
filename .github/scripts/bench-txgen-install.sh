@@ -4,6 +4,7 @@
 #
 # Optional env:
 #   TXGEN_REPO  – txgen repository URL (default: https://github.com/tempoxyz/txgen)
+#   TXGEN_REF   – branch or commit to install instead of the default branch
 set -euxo pipefail
 
 TXGEN_REPO="${TXGEN_REPO:-https://github.com/tempoxyz/txgen}"
@@ -31,4 +32,14 @@ elif [ -n "${TXGEN_TOKEN:-${GH_PROJECT_TOKEN:-${DEREK_PAT:-${DEREK_TOKEN:-}}}}" 
 fi
 export CARGO_NET_GIT_FETCH_WITH_CLI=true
 
-cargo install --git "$TXGEN_REPO" --locked txgen-ethereum bench-cli
+INSTALL_ARGS=()
+if [ -n "${TXGEN_REF:-}" ]; then
+  if [[ "$TXGEN_REF" =~ ^[0-9a-f]{7,40}$ ]]; then
+    INSTALL_ARGS+=(--rev "$TXGEN_REF")
+  else
+    INSTALL_ARGS+=(--branch "$TXGEN_REF")
+  fi
+  # A pinned ref must replace whatever build of the same version is installed.
+  INSTALL_ARGS+=(--force)
+fi
+cargo install --git "$TXGEN_REPO" ${INSTALL_ARGS[@]+"${INSTALL_ARGS[@]}"} --locked txgen-ethereum bench-cli
