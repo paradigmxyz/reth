@@ -65,12 +65,14 @@ impl<F, N: NodePrimitives> OverlayStateProviderFactory<F, N> {
         }
     }
 
-    /// Skips managed overlay construction when this factory is used by a task that reused a sparse
-    /// trie covering both durable frontiers through the parent.
+    /// Skips managed overlay construction for a reused sparse trie. Complete trie proofs still
+    /// need recent node updates, even when the sparse trie itself was reused.
     pub fn with_skip_overlay_for_reused_sparse_trie(mut self, anchor_hash: B256) -> Self {
-        self.overlay_builder =
-            self.overlay_builder.with_skip_overlay_for_reused_sparse_trie(anchor_hash);
-        self.state_trie_overlay_cache = Default::default();
+        if !cfg!(feature = "state-trie-db") {
+            self.overlay_builder =
+                self.overlay_builder.with_skip_overlay_for_reused_sparse_trie(anchor_hash);
+            self.state_trie_overlay_cache = Default::default();
+        }
         self
     }
 }

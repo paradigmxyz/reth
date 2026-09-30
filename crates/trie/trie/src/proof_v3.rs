@@ -38,11 +38,14 @@ where
                 let mut required_child = false;
                 loop {
                     let next = self.cursor.seek(prefix)?;
-                    let Some((path, node)) = next.filter(|(path, _)| path.starts_with(&prefix))
+                    let Some((path, mut node)) = next.filter(|(path, _)| path.starts_with(&prefix))
                     else {
                         if required_child {
                             return Err(StateProofError::TrieInconsistency(
-                                "missing state trie child".into(),
+                                format!(
+                                    "missing state trie child at {prefix:?} for target {key:?}, known parent {:?}",
+                                    target.parent
+                                ),
                             ))
                         }
                         if prefix.is_empty() {
@@ -55,9 +58,20 @@ where
                         StateTrieNode::Branch { short_key_len, .. } => *short_key_len as usize,
                     };
                     if short_len > path.len() || path.len() - short_len != prefix.len() {
-                        return Err(StateProofError::TrieInconsistency(
-                            "missing state trie subtree root".into(),
-                        ))
+                        if short_len <= path.len() && path.len() - short_len < prefix.len() {
+                            let short_key_len = match &mut node {
+                                StateTrieNode::Leaf { short_key_len, .. } |
+                                StateTrieNode::Branch { short_key_len, .. } => short_key_len,
+                            };
+                            *short_key_len = (path.len() - prefix.len()) as u8;
+                        } else {
+                            return Err(StateProofError::TrieInconsistency(
+                                format!(
+                                    "missing state trie subtree root at {prefix:?}: next {path:?}, short key {short_len}, target {key:?}, known parent {:?}",
+                                    target.parent
+                                ),
+                            ))
+                        }
                     }
                     let child = match &node {
                         StateTrieNode::Branch { state_mask, .. } if key.starts_with(&path) => {
@@ -83,8 +97,16 @@ where
                 continue
             };
             let mut path = key;
-            if target.parent.path_len().is_some_and(|len| path.common_prefix_length(&key) <= len) {
-                continue
+            if let Some(parent_len) = target.parent.path_len() {
+                let short_key_len = match &mut node {
+                    StateTrieNode::Leaf { short_key_len, .. } |
+                    StateTrieNode::Branch { short_key_len, .. } => short_key_len,
+                };
+                if *short_key_len as usize <= path.len() &&
+                    path.len() - *short_key_len as usize <= parent_len
+                {
+                    *short_key_len = (path.len() - parent_len - 1) as u8;
+                }
             }
             loop {
                 let short_len = match &node {
@@ -239,6 +261,25 @@ mod tests {
             .proof(&mut [ProofV2Target::new(absent).with_parent(ProofV2TargetParent::new(4))])
             .unwrap();
         assert!(proof.is_empty());
+    }
+
+    #[test]
+    fn partial_proof_rebases_superseded_database_leaf() {
+        let path = Nibbles::unpack(B256::repeat_byte(0x11));
+        let leaf = StateTrieNode::Leaf { short_key_len: 60, value: U256::from(1) };
+        let mut calculator = ProofCalculator::new(Cursor([(path, leaf)].into()));
+        let mut target = B256::repeat_byte(0x11);
+        target.0[2] = 0x12;
+        let expected =
+            StateTrieNode::Leaf { short_key_len: 59, value: U256::from(1) }.proof_node(path);
+        for key in [target, B256::repeat_byte(0x11)] {
+            let proof = calculator
+                .proof(&mut [ProofV2Target::new(key).with_parent(ProofV2TargetParent::new(4))])
+                .unwrap();
+            assert_eq!(proof.len(), 1);
+            assert_eq!(proof[0].path, expected.path);
+            assert_eq!(alloy_rlp::encode(&proof[0].node), alloy_rlp::encode(&expected.node));
+        }
     }
 
     #[test]

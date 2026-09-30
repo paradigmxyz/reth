@@ -1908,12 +1908,29 @@ where
             &block.execution_output.state,
         );
 
-        Ok(self.spawn_deferred_trie_task(
-            block.recovered_block,
-            block.execution_output,
-            LazyHashedPostState::ready(block.hashed_state),
-            block.trie_updates,
-        ))
+        #[cfg(feature = "state-trie-db")]
+        {
+            let mut executed = ExecutedBlock::new(
+                block.recovered_block,
+                block.execution_output,
+                Default::default(),
+            );
+            executed.state_trie_updates = Some(block.state_trie_updates.ok_or_else(|| {
+                ProviderError::other(std::io::Error::other(
+                    "locally built block is missing state-trie updates",
+                ))
+            })?);
+            Ok(executed)
+        }
+        #[cfg(not(feature = "state-trie-db"))]
+        {
+            Ok(self.spawn_deferred_trie_task(
+                block.recovered_block,
+                block.execution_output,
+                LazyHashedPostState::ready(block.hashed_state),
+                block.trie_updates,
+            ))
+        }
     }
 
     fn on_canonical_head_changed(&self, hash: B256, state: &EngineApiTreeState<N>) {
