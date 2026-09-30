@@ -14,9 +14,12 @@ pub type EthRpcConverter<ChainSpec> =
 mod tests {
     use super::*;
     use alloy_consensus::{Transaction, TxType};
+    use alloy_primitives::{Address, B256, U256};
     use alloy_rpc_types_eth::TransactionRequest;
     use evm2::evm::EmptyDB;
     use reth_chainspec::MAINNET;
+    use reth_evm_ethereum::EthEvmEnv;
+    use reth_rpc_convert::RpcConvert;
     use reth_rpc_eth_types::simulate::resolve_transaction;
 
     #[test]
@@ -79,5 +82,23 @@ mod tests {
         let result = resolve_transaction(tx, 21000, 0, 1, true, &mut db, &rpc_converter).unwrap();
 
         assert_eq!(result.nonce(), 0);
+    }
+
+    #[test]
+    fn test_blob_fee_cap_defaults_to_exact_block_fee() {
+        let converter = EthRpcConverter::new(EthReceiptConverter::new(MAINNET.clone()));
+        for blob_fee in [u128::from(u64::MAX), u128::from(u64::MAX) + 1, u128::MAX] {
+            let mut env = EthEvmEnv::default();
+            env.block.blob_basefee = U256::from(blob_fee);
+            let request = TransactionRequest {
+                to: Some(Address::repeat_byte(0xaa).into()),
+                blob_versioned_hashes: Some(vec![B256::repeat_byte(1)]),
+                ..Default::default()
+            };
+
+            let tx = converter.tx_env(request, &env).unwrap();
+
+            assert_eq!(tx.max_fee_per_blob_gas(), Some(blob_fee));
+        }
     }
 }

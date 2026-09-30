@@ -423,7 +423,7 @@ pub fn normalize_transaction_request(
         U256::from(evm_env.block_base_fee()),
         request.blob_versioned_hashes.as_deref(),
         request.max_fee_per_blob_gas.map(U256::from),
-        Some(U256::from(evm_env.block_blob_base_fee())),
+        Some(evm_env.block_env().blob_basefee),
     )?;
 
     if request.gas_price.is_none() {
