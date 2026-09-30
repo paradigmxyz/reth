@@ -126,6 +126,40 @@ async fn test_engine_graceful_shutdown() -> eyre::Result<()> {
 }
 
 #[tokio::test]
+async fn test_engine_shutdown_exits_cleanly() -> eyre::Result<()> {
+    for explicit_shutdown in [true, false] {
+        let runtime = Runtime::test();
+        let NodeHandle { node, node_exit_future } = NodeBuilder::new(
+            NodeConfig::test()
+                .with_chain(test_chain_spec(EthereumHardfork::Cancun))
+                .with_unused_ports(),
+        )
+        .testing_node(runtime.clone())
+        .with_types::<EthereumNode>()
+        .with_components(EthereumNode::components())
+        .with_add_ons(EthereumAddOns::default())
+        .launch()
+        .await?;
+
+        tokio::time::timeout(std::time::Duration::from_secs(10), async {
+            let _shutdown_guard = if explicit_shutdown {
+                node.add_ons_handle
+                    .engine_shutdown
+                    .shutdown()
+                    .expect("first shutdown request")
+                    .await?;
+                None
+            } else {
+                Some(runtime.initiate_graceful_shutdown()?.await)
+            };
+            node_exit_future.await
+        })
+        .await??;
+    }
+    Ok(())
+}
+
+#[tokio::test]
 async fn test_testing_build_block_v1_osaka() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
 

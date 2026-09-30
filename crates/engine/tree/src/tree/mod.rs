@@ -577,9 +577,9 @@ where
                             if let Err(err) = self.persist_until_complete() {
                                 error!(target: "engine::tree", %err, "Termination failed");
                             }
-                            // Shutdown may exit the process as soon as we acknowledge. Release
-                            // engine resources and join its workers first, even if persistence
-                            // failed.
+                            // The caller can proceed with shutdown once we acknowledge. Drop the
+                            // engine and join persistence and txpool prewarming first, even if
+                            // persistence failed.
                             drop(self);
                             let _ = tx.send(());
                             return
