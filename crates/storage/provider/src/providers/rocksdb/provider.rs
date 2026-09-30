@@ -365,17 +365,23 @@ impl RocksDBBuilder {
     /// - [`tables::BlockAccessLists`] - Block access list payloads
     /// - [`tables::BlockAccessListBlockNumbers`] - Block access list hash index
     pub fn with_default_tables(self) -> Self {
-        self.with_table::<tables::TransactionHashNumbers>()
+        let builder = self
+            .with_table::<tables::TransactionHashNumbers>()
             .with_table::<tables::AccountsHistory>()
             .with_table::<tables::StoragesHistory>()
             .with_table::<tables::StateTrieAccounts>()
             .with_table::<tables::RocksStateTrieStorages>()
-            .with_table::<tables::HashedAccounts>()
-            .with_table::<tables::RocksHashedStorages>()
-            .with_table::<tables::RocksAccountsTrie>()
-            .with_table::<tables::RocksStoragesTrie>()
             .with_table::<tables::BlockAccessLists>()
-            .with_table::<tables::BlockAccessListBlockNumbers>()
+            .with_table::<tables::BlockAccessListBlockNumbers>();
+        if cfg!(feature = "legacy-trie-rocksdb") {
+            builder
+                .with_table::<tables::HashedAccounts>()
+                .with_table::<tables::RocksHashedStorages>()
+                .with_table::<tables::RocksAccountsTrie>()
+                .with_table::<tables::RocksStoragesTrie>()
+        } else {
+            builder
+        }
     }
 
     /// Enables metrics.
@@ -3304,6 +3310,19 @@ mod tests {
             LIMITED_MAX_OPEN_FILES
         );
         assert_eq!(max_open_files_for_limit(None), LIMITED_MAX_OPEN_FILES);
+    }
+
+    #[cfg(not(feature = "legacy-trie-rocksdb"))]
+    #[test]
+    fn default_tables_reopen_without_legacy_trie_column_families() {
+        let dir = TempDir::new().unwrap();
+        let provider = RocksDBBuilder::new(dir.path()).with_default_tables().build().unwrap();
+        assert!(!provider.has_table::<tables::HashedAccounts>());
+        assert!(!provider.has_table::<tables::RocksHashedStorages>());
+        assert!(!provider.has_table::<tables::RocksAccountsTrie>());
+        assert!(!provider.has_table::<tables::RocksStoragesTrie>());
+        drop(provider);
+        RocksDBBuilder::new(dir.path()).with_default_tables().with_read_only(true).build().unwrap();
     }
 
     #[test]

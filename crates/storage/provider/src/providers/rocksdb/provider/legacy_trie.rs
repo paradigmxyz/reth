@@ -423,6 +423,10 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let rocks = super::super::RocksDBProvider::builder(dir.path().join("rocks"))
             .with_default_tables()
+            .with_table::<tables::HashedAccounts>()
+            .with_table::<tables::RocksHashedStorages>()
+            .with_table::<tables::RocksAccountsTrie>()
+            .with_table::<tables::RocksStoragesTrie>()
             .build()
             .unwrap();
         let db = reth_db::test_utils::create_test_rw_db();

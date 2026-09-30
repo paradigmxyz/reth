@@ -107,6 +107,10 @@ fn main() -> Result<()> {
     drop(tx);
     let rocks = RocksDBProvider::builder(&rocks_path)
         .with_default_tables()
+        .with_table::<tables::HashedAccounts>()
+        .with_table::<tables::RocksHashedStorages>()
+        .with_table::<tables::RocksAccountsTrie>()
+        .with_table::<tables::RocksStoragesTrie>()
         .with_read_only(check)
         .build()?;
     let records = if check {
