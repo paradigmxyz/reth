@@ -70,7 +70,6 @@ async fn can_send_legacy_sidecar_post_activation() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
 
     let chain_spec = test_chain_spec(EthereumHardfork::Osaka);
-    let genesis_hash = chain_spec.genesis_hash();
     let (mut node, wallet) = EthereumNode::test_setup(1, chain_spec)
         .with_rpc_modifier(|rpc| rpc.with_force_blob_sidecar_upcasting())
         .build_single()
@@ -94,10 +93,8 @@ async fn can_send_legacy_sidecar_post_activation() -> eyre::Result<()> {
     // build a payload
     let blob_payload = node.new_payload().await?;
 
-    // submit the blob payload
-    let blob_block_hash = node.submit_payload(blob_payload).await?;
-
-    node.update_forkchoice(genesis_hash, blob_block_hash).await?;
+    // import the blob payload
+    node.import_payload(blob_payload).await?;
 
     Ok(())
 }
@@ -113,7 +110,6 @@ async fn blob_conversion_at_osaka() -> eyre::Result<()> {
     let chain_spec = Arc::new(
         test_chain_spec_builder().prague_activated().with_osaka_at(osaka_timestamp).build(),
     );
-    let genesis_hash = chain_spec.genesis_hash();
     let (mut node, wallet) = EthereumNode::test_setup(1, chain_spec)
         .with_rpc_modifier(|rpc| rpc.with_force_blob_sidecar_upcasting())
         .build_single()
@@ -181,8 +177,8 @@ async fn blob_conversion_at_osaka() -> eyre::Result<()> {
     // validate sidecar
     TransactionTestContext::validate_sidecar(envelope);
 
-    // submit the Prague payload
-    node.update_forkchoice(genesis_hash, node.submit_payload(prague_payload).await?).await?;
+    // import the Prague payload
+    node.import_payload(prague_payload).await?;
 
     // Build first Osaka payload
     node.payload.timestamp = osaka_timestamp - 1;
@@ -192,7 +188,7 @@ async fn blob_conversion_at_osaka() -> eyre::Result<()> {
     assert!(osaka_payload.block().body().transactions().any(|tx| *tx.hash() == blob_tx_hash));
     assert!(matches!(osaka_payload.sidecars(), BlobSidecars::Eip7594(_)));
 
-    node.update_forkchoice(genesis_hash, node.submit_payload(osaka_payload).await?).await?;
+    node.import_payload(osaka_payload).await?;
 
     Ok(())
 }

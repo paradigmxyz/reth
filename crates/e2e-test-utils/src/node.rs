@@ -200,12 +200,12 @@ where
         Ok(payload)
     }
 
-    /// Advances the node forward one block
+    /// Advances the node forward one block by building a payload and importing it with
+    /// [`Self::import_payload`].
     pub async fn advance_block(&mut self) -> eyre::Result<Payload::BuiltPayload> {
-        let payload = self.build_and_submit_payload().await?;
+        let payload = self.new_payload().await?;
 
-        // trigger forkchoice update via engine api to commit the block to the blockchain
-        self.update_forkchoice(payload.block().hash(), payload.block().hash()).await?;
+        self.import_payload(payload.clone()).await?;
 
         Ok(payload)
     }
@@ -409,6 +409,30 @@ where
         Ok(block_hash)
     }
 
+    /// Submits a payload to the engine and makes its block the canonical head, returning the block
+    /// hash.
+    ///
+    /// The forkchoice update marks the block as head, safe, and finalized block, like
+    /// [`Self::advance_block`] does, so the node can't reorg to a chain without the block
+    /// afterwards. The engine only reports the forkchoice update valid after making the head
+    /// canonical, so the block is the latest block of the node once this returns. The transaction
+    /// pool processes the new block in the background, see [`Self::wait_for_pool`].
+    ///
+    /// The parent of the payload must be known to the node, e.g. to import a payload built by
+    /// another node into its peers. Returns an error if the engine does not report the forkchoice
+    /// update valid, e.g. because the payload is invalid.
+    pub async fn import_payload(&self, payload: Payload::BuiltPayload) -> eyre::Result<B256> {
+        let block_hash = self.submit_payload(payload).await?;
+        let updated = self.update_forkchoice(block_hash, block_hash).await?;
+        ensure!(
+            updated.is_valid(),
+            "forkchoice update to block {block_hash} is not valid: {}",
+            updated.payload_status.status
+        );
+
+        Ok(block_hash)
+    }
+
     /// Returns the RPC URL.
     pub fn rpc_url(&self) -> Url {
         let addr = self.inner.rpc_server_handle().http_local_addr().unwrap();
@@ -541,14 +565,17 @@ where
 mod tests {
     use super::*;
     use crate::NodeHelperType;
-    use reth_node_ethereum::EthereumNode;
+    use reth_node_ethereum::{EthEngineTypes, EthereumNode};
 
     fn assert_send<T: Send>(_: T) {}
 
     /// Tests of downstream nodes await these helpers in spawned tasks, so their futures must be
     /// `Send`.
     #[expect(dead_code)]
-    fn test_helper_futures_are_send(node: &mut NodeHelperType<EthereumNode>) {
+    fn test_helper_futures_are_send(
+        node: &mut NodeHelperType<EthereumNode>,
+        payload: <EthEngineTypes as PayloadTypes>::BuiltPayload,
+    ) {
         assert_send(node.advance_block());
         assert_send(node.inject_and_advance(Bytes::new()));
         assert_send(node.wait_block(0, B256::ZERO, false));
@@ -556,5 +583,6 @@ mod tests {
         assert_send(node.wait_for_pool(|_| true));
         assert_send(node.assert_new_block(B256::ZERO, B256::ZERO, 0));
         assert_send(node.sync_to(B256::ZERO));
+        assert_send(node.import_payload(payload));
     }
 }
