@@ -197,7 +197,7 @@ fn parse_recent_root_verifier(
     }
 
     let mut references = Vec::with_capacity(data.len() / RECENT_ROOT_TUPLE_BYTES);
-    for tuple in data.chunks_exact(RECENT_ROOT_TUPLE_BYTES) {
+    for tuple in data.as_chunks::<RECENT_ROOT_TUPLE_BYTES>().0 {
         let slot = u64::from_be_bytes(tuple[32..40].try_into().expect("fixed tuple width"));
         if slot.checked_add(RECENT_ROOT_LENGTH).is_none() {
             return Err("recent root slot overflows expiry")
