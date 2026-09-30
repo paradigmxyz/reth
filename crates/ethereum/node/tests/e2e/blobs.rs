@@ -51,11 +51,9 @@ async fn can_handle_blobs() -> eyre::Result<()> {
     let block_hash = node.submit_payload(payload).await?;
     node.update_forkchoice(genesis_hash, block_hash).await?;
 
-    // wait for the pool to process the reorg, which re-injects the blob tx
-    node.wait_for_pool(|pool| {
-        pool.block_info().last_seen_block_hash == block_hash && pool.contains(&blob_tx_hash)
-    })
-    .await?;
+    // wait for the pool to process the reorg, and then re-inject the blob tx
+    node.wait_for_pool_head(block_hash).await?;
+    node.wait_for_pool(|pool| pool.contains(&blob_tx_hash)).await?;
 
     // expects the blob tx to be back in the pool
     let envelope = node.rpc.envelope_by_hash(blob_tx_hash).await?;
