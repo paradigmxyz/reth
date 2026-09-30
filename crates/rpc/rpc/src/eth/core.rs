@@ -570,7 +570,7 @@ mod tests {
         PruneCheckpointReader, StageCheckpointReader,
     };
     use reth_rpc_eth_api::{
-        helpers::{EthBlocks, EthCall},
+        helpers::{EthBlocks, EthCall, SpawnBlocking},
         node::RpcNodeCoreAdapter,
         EthApiServer,
     };
@@ -578,8 +578,10 @@ mod tests {
     use reth_storage_api::{
         BalProvider, BlockReader, BlockReaderIdExt, NodePrimitivesProvider, StateProviderFactory,
     };
+    use reth_tasks::cancel::is_cancelled;
     use reth_testing_utils::generators;
     use reth_transaction_pool::test_utils::{testing_pool, TestPool};
+    use std::time::{Duration, Instant};
 
     type FakeEthApi<P = MockEthProvider> = EthApi<
         RpcNodeCoreAdapter<P, TestPool, NoopNetwork, EthEvmConfig>,
@@ -628,9 +630,6 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn blocking_task_observes_dropped_request() {
-        use reth_rpc_eth_api::helpers::{blocking_task::is_cancelled, SpawnBlocking};
-        use std::time::{Duration, Instant};
-
         let api = build_test_eth_api(MockEthProvider::default());
         let (started_tx, started_rx) = tokio::sync::oneshot::channel();
         let (cancelled_tx, cancelled_rx) = tokio::sync::oneshot::channel();

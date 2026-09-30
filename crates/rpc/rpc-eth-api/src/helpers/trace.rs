@@ -1,6 +1,6 @@
 //! Loads a pending block from database. Helper trait for `eth_` call and trace RPC methods.
 
-use super::{blocking_task::is_cancelled, Call, LoadBlock, LoadState, LoadTransaction};
+use super::{Call, LoadBlock, LoadState, LoadTransaction};
 use crate::{FromEthApiError, FromEvmError};
 use alloy_consensus::{transaction::TxHashRef, BlockHeader};
 use alloy_eip7928::bal::DecodedBal;
@@ -18,6 +18,7 @@ use reth_rpc_eth_types::{
     EthApiError,
 };
 use reth_storage_api::{ProviderBlock, ProviderTx};
+use reth_tasks::cancel::is_cancelled;
 use revm::{context::Block, context_interface::result::ResultAndState, state::bal::Bal as RevmBal};
 use revm_inspectors::tracing::{TracingInspector, TracingInspectorConfig};
 use std::sync::Arc;

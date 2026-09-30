@@ -1,6 +1,6 @@
 //! Estimate gas needed implementation
 
-use super::{blocking_task::is_cancelled, Call, LoadPendingBlock};
+use super::{Call, LoadPendingBlock};
 use crate::{AsEthApiError, FromEthApiError, IntoEthApiError};
 use alloy_evm::overrides::{apply_block_overrides, apply_state_overrides};
 use alloy_network::TransactionBuilder;
@@ -27,6 +27,7 @@ use reth_rpc_eth_types::{
 };
 use reth_rpc_server_types::constants::gas_oracle::{CALL_STIPEND_GAS, ESTIMATE_GAS_ERROR_RATIO};
 use reth_storage_api::{EvmStateProvider, StateProvider};
+use reth_tasks::cancel::is_cancelled;
 use revm::{
     context::Block,
     context_interface::{result::ExecutionResult, Cfg, Transaction},

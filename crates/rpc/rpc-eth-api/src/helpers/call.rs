@@ -3,10 +3,7 @@
 
 use core::fmt;
 
-use super::{
-    blocking_task::is_cancelled, LoadBlock, LoadPendingBlock, LoadState, LoadTransaction,
-    SpawnBlocking, Trace,
-};
+use super::{LoadBlock, LoadPendingBlock, LoadState, LoadTransaction, SpawnBlocking, Trace};
 use crate::{
     helpers::estimate::EstimateCall, FromEvmError, FullEthApiTypes, RpcBlock, RpcNodeCore,
 };
@@ -44,7 +41,7 @@ use reth_rpc_eth_types::{
     EthApiError, StateCacheDb,
 };
 use reth_storage_api::{BlockIdReader, ProviderTx, StateProvider};
-use reth_tasks::CancelOnDrop;
+use reth_tasks::{cancel::is_cancelled, CancelOnDrop};
 use revm::{
     context::Block,
     context_interface::{result::ResultAndState, Cfg, Transaction},
