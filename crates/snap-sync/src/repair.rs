@@ -23,9 +23,7 @@ impl StateRepairs {
     /// Schedules every field of the account at `hashed_address`.
     pub fn insert_account(&mut self, hashed_address: B256) {
         let account = self.accounts.entry(hashed_address).or_default();
-        account.balance = true;
-        account.nonce = true;
-        account.code = true;
+        (account.balance, account.nonce, account.code) = (true, true, true);
     }
 
     /// Schedules `hashed_slot` of the storage at `hashed_address`, along with its account.
@@ -35,12 +33,7 @@ impl StateRepairs {
 
     /// Schedules the fields and slots `changes` writes for the account at `hashed_address`.
     pub fn insert_changes(&mut self, hashed_address: B256, changes: &AccountChanges) {
-        let info = changes.account_info();
-        let account = self.accounts.entry(hashed_address).or_default();
-        account.balance |= info.balance.is_some();
-        account.nonce |= info.nonce.is_some();
-        account.code |= info.code_hash.is_some();
-        account.slots.extend(StaleAccount::slots_of(changes));
+        self.accounts.entry(hashed_address).or_default().insert_changes(changes);
     }
 
     /// Returns whether nothing is scheduled.
@@ -70,28 +63,23 @@ impl StateRepairs {
     // Adds what `other` schedules.
     pub(crate) fn extend(&mut self, other: Self) {
         for (hashed_address, stale) in other.accounts {
-            let account = self.accounts.entry(hashed_address).or_default();
-            account.balance |= stale.balance;
-            account.nonce |= stale.nonce;
-            account.code |= stale.code;
-            account.slots.extend(stale.slots);
+            self.accounts.entry(hashed_address).or_default().extend(stale);
         }
     }
 
-    // Drops the fields and slots a canonical list overwrites, as `changes` records them.
-    pub(crate) fn resolve_changes(&mut self, hashed_address: B256, changes: &AccountChanges) {
-        let Entry::Occupied(mut entry) = self.accounts.entry(hashed_address) else { return };
-        let info = changes.account_info();
-        let account = entry.get_mut();
-        account.balance &= info.balance.is_none();
-        account.nonce &= info.nonce.is_none();
-        account.code &= info.code_hash.is_none();
-        for slot in StaleAccount::slots_of(changes) {
-            account.slots.remove(&slot);
-        }
-        if account.is_resolved() {
+    // Drops the fields and slots a canonical list overwrites, as `changes` records them. Returns
+    // whether anything was dropped.
+    pub(crate) fn resolve_changes(
+        &mut self,
+        hashed_address: B256,
+        changes: &AccountChanges,
+    ) -> bool {
+        let Entry::Occupied(mut entry) = self.accounts.entry(hashed_address) else { return false };
+        let resolved = entry.get_mut().resolve_changes(changes);
+        if entry.get().is_resolved() {
             entry.remove();
         }
+        resolved
     }
 
     // Drops the account at `hashed_address`, fetched whole, with the `slots` fetched along with it,
@@ -132,6 +120,36 @@ impl StaleAccount {
     // Whether nothing about the account is stale any more.
     fn is_resolved(&self) -> bool {
         !self.balance && !self.nonce && !self.code && self.slots.is_empty()
+    }
+
+    // Marks the fields and slots `changes` writes as stale.
+    fn insert_changes(&mut self, changes: &AccountChanges) {
+        let info = changes.account_info();
+        self.balance |= info.balance.is_some();
+        self.nonce |= info.nonce.is_some();
+        self.code |= info.code_hash.is_some();
+        self.slots.extend(Self::slots_of(changes));
+    }
+
+    // Marks what `other` holds stale as stale.
+    fn extend(&mut self, other: Self) {
+        self.balance |= other.balance;
+        self.nonce |= other.nonce;
+        self.code |= other.code;
+        self.slots.extend(other.slots);
+    }
+
+    // Clears the fields and slots `changes` overwrites, returning whether any was stale.
+    fn resolve_changes(&mut self, changes: &AccountChanges) -> bool {
+        let info = changes.account_info();
+        let before = (self.balance, self.nonce, self.code, self.slots.len());
+        self.balance &= info.balance.is_none();
+        self.nonce &= info.nonce.is_none();
+        self.code &= info.code_hash.is_none();
+        for slot in Self::slots_of(changes) {
+            self.slots.remove(&slot);
+        }
+        before != (self.balance, self.nonce, self.code, self.slots.len())
     }
 
     // Hashed keys of the slots `changes` writes.

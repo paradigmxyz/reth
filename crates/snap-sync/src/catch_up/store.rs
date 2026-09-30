@@ -273,10 +273,14 @@ impl<T: MetadataProvider> SnapCatchUpStore for T {
         self.write_hashed_state(&state.into_sorted())?;
         // A canonical list overwrites the stale values of the fields it changes.
         let mut repairs = self.snap_repairs(write)?;
-        if !repairs.is_empty() {
-            for changes in bal {
-                repairs.resolve_changes(keccak256(changes.address()), changes);
+        let mut resolved = false;
+        for changes in bal {
+            if repairs.is_empty() {
+                break
             }
+            resolved |= repairs.resolve_changes(keccak256(changes.address()), changes);
+        }
+        if resolved {
             StoredRepairs::store(self, write.attempt(), repairs)?;
         }
         advanced.write(self, write.attempt())?;
