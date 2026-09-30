@@ -121,6 +121,7 @@ use alloy_primitives::{
 use reth_tasks::LazyHandle;
 
 use crate::tree::{
+    inclusion_list::blob_gas_available,
     payload_processor::receipt_root_task::{IndexedReceipt, ReceiptRootTaskHandle},
     state_root_strategy::{
         DefaultStateRootStrategy, LazyHashedPostState, PayloadStateRootHandle,
@@ -131,7 +132,7 @@ use crate::tree::{
 use alloy_consensus::{constants::KECCAK_EMPTY, Transaction as _};
 use alloy_primitives::Address;
 use reth_chain_state::{CanonicalInMemoryState, ExecutedBlock, ExecutionTimingStats};
-use reth_chainspec::MAX_TX_TOTAL_GAS_LIMIT_AMSTERDAM;
+use reth_chainspec::{EthChainSpec, MAX_TX_TOTAL_GAS_LIMIT_AMSTERDAM};
 use reth_consensus::{ConsensusError, FullConsensus, ReceiptRootBloom};
 use reth_engine_primitives::{
     ConfigureEngineEvm, ExecutableTxIterator, ExecutionPayload, InvalidBlockHook, PayloadValidator,
@@ -154,11 +155,11 @@ use reth_primitives_traits::{
     RecoveredBlock, SealedBlock, SealedHeader, SignerRecoverable,
 };
 use reth_provider::{
-    BlockExecutionOutput, BlockHashReader, BlockReader, ChangeSetReader, DatabaseProviderFactory,
-    DatabaseProviderROFactory, EvmStateProvider, EvmStateProviderBox, HashedPostStateProvider,
-    HistoryReader, ProviderError, PruneCheckpointReader, StageCheckpointReader, StateProvider,
-    StateProviderFactory, StateReader, StateRootProvider, StorageChangeSetReader,
-    StorageSettingsCache,
+    BlockExecutionOutput, BlockHashReader, BlockReader, ChainSpecProvider, ChangeSetReader,
+    DatabaseProviderFactory, DatabaseProviderROFactory, EvmStateProvider, EvmStateProviderBox,
+    HashedPostStateProvider, HistoryReader, ProviderError, PruneCheckpointReader,
+    StageCheckpointReader, StateProvider, StateProviderFactory, StateReader, StateRootProvider,
+    StorageChangeSetReader, StorageSettingsCache,
 };
 use reth_revm::db::{states::bundle_state::BundleRetention, BundleAccount, State};
 use reth_storage_overlay::{OverlayManager, OverlayStateProviderFactory};
@@ -166,7 +167,7 @@ use reth_trie::{
     hashed_cursor::HashedCursorFactory, trie_cursor::TrieCursorFactory, updates::TrieUpdates,
     HashedPostState, KeccakKeyHasher, LazyTrieData,
 };
-use revm::state::bal::Bal as RevmBal;
+use revm::{context_interface::Block as _, state::bal::Bal as RevmBal};
 use std::{
     sync::{
         atomic::{AtomicUsize, Ordering},
@@ -326,6 +327,8 @@ where
         + ChangeSetReader
         + StateProviderFactory
         + StateReader
+        // The EIP-7805 appendability check needs the block's blob schedule.
+        + ChainSpecProvider
         + Clone
         + 'static,
     OverlayStateProviderFactory<P, N>: DatabaseProviderROFactory<
@@ -1062,6 +1065,7 @@ where
                 .build()
         });
 
+        let timestamp = env.evm_env.block_env.timestamp().saturating_to();
         let (spec_id, mut executor) = {
             let _span = debug_span!(target: "engine::tree", "create_evm").entered();
             let spec_id = *env.evm_env.spec_id();
@@ -1121,6 +1125,13 @@ where
         let inclusion_list_satisfied = if let Some(transactions) =
             input.inclusion_list_transactions()
         {
+            // The executor enforces neither the EIP-8037 cap on the total gas limit nor the block's
+            // blob budget, which the spec's `check_transaction` applies. Inclusion lists only exist
+            // from Bogota on, so the Amsterdam cap is always in force here.
+            let blob_gas_available = blob_gas_available(
+                self.provider.chain_spec().blob_params_at_timestamp(timestamp),
+                input.blob_gas_used().unwrap_or_default(),
+            );
             let mut satisfied = true;
             for encoded in transactions {
                 let Ok(transaction) = N::SignedTx::decode_2718_exact(encoded) else { continue };
@@ -1131,10 +1142,9 @@ where
                 }) {
                     continue
                 }
-                // The executor does not enforce the EIP-8037 cap on the total gas limit, which the
-                // spec's `validate_transaction` applies. Inclusion lists only exist from Bogota
-                // on, so the Amsterdam cap is always in force here.
-                if transaction.gas_limit() > MAX_TX_TOTAL_GAS_LIMIT_AMSTERDAM {
+                if transaction.gas_limit() > MAX_TX_TOTAL_GAS_LIMIT_AMSTERDAM ||
+                    transaction.blob_gas_used().unwrap_or_default() > blob_gas_available
+                {
                     continue
                 }
                 let Ok(transaction) = SignerRecoverable::try_into_recovered(transaction) else {
@@ -1912,6 +1922,7 @@ where
         + StateProviderFactory
         + StateReader
         + ChangeSetReader
+        + ChainSpecProvider
         + Clone
         + 'static,
     OverlayStateProviderFactory<P, N>: DatabaseProviderROFactory<
@@ -2218,6 +2229,17 @@ impl<T: PayloadTypes> BlockOrPayload<T> {
         match self {
             Self::Payload(payload) => payload.gas_limit(),
             Self::Block(block) => block.gas_limit(),
+        }
+    }
+
+    /// Returns the total blob gas used by the block.
+    pub fn blob_gas_used(&self) -> Option<u64>
+    where
+        T::ExecutionData: ExecutionPayload,
+    {
+        match self {
+            Self::Payload(payload) => payload.blob_gas_used(),
+            Self::Block(block) => block.blob_gas_used(),
         }
     }
 }

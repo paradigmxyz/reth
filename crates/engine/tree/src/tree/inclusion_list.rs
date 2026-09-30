@@ -7,6 +7,7 @@ use alloy_consensus::{constants::KECCAK_EMPTY, Transaction};
 use alloy_eips::{
     eip2718::Decodable2718,
     eip4844::{DATA_GAS_PER_BLOB, VERSIONED_HASH_VERSION_KZG},
+    eip7840::BlobParams,
 };
 use alloy_primitives::{
     map::{AddressMap, B256Map, B256Set},
@@ -234,6 +235,18 @@ fn could_append_transaction<N: NodePrimitives>(
 /// Blob gas a transaction consumes, zero for every non-blob type.
 fn blob_gas(transaction: &impl Transaction) -> u64 {
     transaction.blob_versioned_hashes().map_or(0, |hashes| hashes.len() as u64) * DATA_GAS_PER_BLOB
+}
+
+/// Blob gas left for transactions appended to a block that used `blob_gas_used`, under the blob
+/// schedule in force at the block's timestamp.
+///
+/// A block with no schedule cannot carry blobs, so the resulting zero budget leaves every blob
+/// transaction unappendable.
+pub(super) fn blob_gas_available(blob_params: Option<BlobParams>, blob_gas_used: u64) -> u64 {
+    blob_params
+        .map(|params| params.max_blob_gas_per_block())
+        .unwrap_or_default()
+        .saturating_sub(blob_gas_used)
 }
 
 /// Upper bound on the inclusion lists retained from `engine_newPayloadV6`.
