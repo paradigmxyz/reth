@@ -577,9 +577,11 @@ where
                             if let Err(err) = self.persist_until_complete() {
                                 error!(target: "engine::tree", %err, "Termination failed");
                             }
-                            // The caller can proceed with shutdown once we acknowledge. Drop the
-                            // engine and join persistence and txpool prewarming first, even if
-                            // persistence failed.
+                            // Finishing persistence does not stop the additional tasks owned by
+                            // the engine. Drop their owners to shut down and join the persistence
+                            // service and txpool prewarmer before acknowledging shutdown, even if
+                            // persistence failed. Otherwise the caller could tear down the process
+                            // while those tasks are still running.
                             drop(self);
                             let _ = tx.send(());
                             return

@@ -227,9 +227,10 @@ pub enum FromOrchestrator {
     BackfillSyncStarted,
     /// Gracefully terminate the engine service.
     ///
-    /// When this variant is received, the engine will persist all remaining in-memory blocks
-    /// to disk before shutting down. Once persistence is complete, a signal is sent through
-    /// the oneshot channel to notify the caller.
+    /// Attempts to persist all remaining in-memory blocks, then drops the engine to release its
+    /// resources and shut down and join the persistence and txpool prewarming workers. The oneshot
+    /// signals completion only after cleanup, even if persistence failed, so the caller can
+    /// proceed with shutdown without racing these workers.
     Terminate {
         /// Channel to signal termination completion.
         tx: tokio::sync::oneshot::Sender<()>,

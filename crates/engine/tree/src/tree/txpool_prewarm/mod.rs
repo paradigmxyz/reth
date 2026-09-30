@@ -17,14 +17,19 @@ use reth_provider::{
 use reth_storage_overlay::OverlayStateProviderFactory;
 use std::{fmt::Debug, sync::Arc, thread::JoinHandle};
 
-/// Coordinates a long-lived worker and the latest completed immutable snapshot.
+/// Owns the txpool prewarming worker and its latest completed immutable snapshot.
+///
+/// Dropping this handle disconnects the command channel, telling the worker to exit, then joins
+/// its thread to wait for resource cleanup. Cancellation is cooperative: an active warming batch
+/// may finish before the worker observes disconnection. The runtime shutdown signal cannot
+/// interrupt the synchronous worker loop, so its owner must drop this handle to stop it.
 pub(crate) struct Handle<N, P, Evm>
 where
     N: NodePrimitives,
     Evm: ConfigureEvm<Primitives = N>,
 {
     control: Arc<Control<Job<N, P, Evm>>>,
-    /// Dropped after control disconnects the worker's command channel.
+    /// Must follow `control`: the command channel must disconnect before the join can complete.
     _worker: WorkerGuard,
 }
 
