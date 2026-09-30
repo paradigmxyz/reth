@@ -39,7 +39,7 @@ use std::{
         mpsc, Arc, OnceLock,
     },
 };
-use tracing::{debug, instrument, trace, warn, Span};
+use tracing::{debug, debug_span, instrument, trace, trace_span, warn, Span};
 
 pub mod bal;
 pub mod bal_prewarm_pool;
@@ -263,6 +263,7 @@ where
         let (prewarm_tx, prewarm_rx) =
             prewarm_transactions.then(|| mpsc::sync_channel(transaction_count)).unzip();
         let (execute_tx, execute_rx) = crossbeam_channel::bounded(transaction_count);
+        let parent_span = Span::current();
 
         if transaction_count == 0 {
             // Empty block — nothing to do.
@@ -275,6 +276,9 @@ where
                 "using sequential sig recovery for small block"
             );
             self.executor.spawn_blocking_named("tx-iterator", move || {
+                // Restore the parent even when the worker span is filtered out.
+                let _parent = parent_span.enter();
+                let _span = debug_span!(target: "engine::tree::payload_processor", "tx_iterator", transaction_count).entered();
                 let (transactions, convert) = transactions.into_parts();
                 convert_serial(
                     transactions.into_iter(),
@@ -288,28 +292,38 @@ where
             // to prewarming and execution.
             let executor = self.executor.clone();
             self.executor.spawn_blocking_named("tx-iterator", move || {
+                let _parent = parent_span.enter();
+                let _span = debug_span!(target: "engine::tree::payload_processor", "tx_iterator", transaction_count).entered();
                 let (transactions, convert) = transactions.into_parts();
                 if parallel_bal_execution {
                     // With BALs, we don't care about the order of transactions in execution and
                     // prewarming, so we don't have to use `for_each_ordered_in`.
+                    let parent_span = Span::current();
                     executor.cpu_pool().install(|| {
-                        transactions
+                        let _parent = parent_span.enter();
+                        let span = debug_span!(target: "engine::tree::payload_processor", "convert_transactions").or_current();
+                        let _entered = span.enter();
+                        let _ = transactions
                             .into_par_iter()
                             .enumerate()
-                            .map(|(i, tx)| {
-                                let tx = convert.convert(tx);
-                                (i, tx)
-                            })
-                            .for_each(|(idx, tx)| {
-                                let tx = tx.map(|tx| {
-                                    let tx = WithTxEnv::new(tx);
-                                    if let Some(prewarm_tx) = &prewarm_tx {
-                                        let _ = prewarm_tx.send((idx, tx.clone()));
-                                    }
-                                    tx
-                                });
-                                let _ = execute_tx.send((idx, tx));
+                            // Feed the ordered commit loop before recovering distant transactions.
+                            .by_exponential_blocks()
+                            .try_for_each(|(idx, tx)| {
+                                let _parent = span.enter();
+                                let _span = trace_span!(target: "engine::tree::payload_processor", "convert_transaction", idx).entered();
+                                let tx = convert.convert(tx).map(WithTxEnv::new);
+                                if let (Some(prewarm_tx), Ok(tx)) = (&prewarm_tx, &tx) {
+                                    let _ = prewarm_tx.send((idx, tx.clone()));
+                                }
+                                let disconnected = execute_tx.send((idx, tx)).is_err();
                                 trace!(target: "engine::tree::payload_processor", idx, "yielded transaction");
+                                // Recovery failures are adjudicated in transaction order by
+                                // the BAL commit loop. Earlier slots may still be unconverted.
+                                if disconnected {
+                                    Err(())
+                                } else {
+                                    Ok(())
+                                }
                             });
                     });
                 } else {
@@ -321,12 +335,14 @@ where
 
                     // Convert the first few transactions sequentially so execution can
                     // start immediately without waiting for rayon work-stealing.
-                    convert_serial(
+                    if !convert_serial(
                         iter.by_ref().take(prefetch),
                         &convert,
                         prewarm_tx.as_ref(),
                         &execute_tx,
-                    );
+                    ) {
+                        return
+                    }
 
                     let mut iter = iter.enumerate();
 
@@ -334,7 +350,11 @@ where
 
                     // Without BALs, we need to preserve the initial order of transactions.
                     // Process exponentially increasing windows to make sure that first transactions are prioritized.
+                    let parent_span = Span::current();
                     executor.cpu_pool().install(move || {
+                        let _parent = parent_span.enter();
+                        let span = debug_span!(target: "engine::tree::payload_processor", "convert_transactions").or_current();
+                        let _entered = span.enter();
                         loop {
                             let chunk = iter
                                 .by_ref()
@@ -350,16 +370,21 @@ where
                                 .into_par_iter()
                                 .map(|(i, tx)| {
                                     let idx = i + prefetch;
+                                    let _parent = span.enter();
+                                    let _span = trace_span!(target: "engine::tree::payload_processor", "convert_transaction", idx).entered();
                                     let tx = convert.convert(tx).map(WithTxEnv::new);
                                     (idx, tx)
                                 })
                                 .collect::<Vec<_>>();
 
                             for (idx, tx) in chunk {
+                                let failed = tx.is_err();
                                 if let (Some(prewarm_tx), Ok(tx)) = (&prewarm_tx, &tx) {
                                     let _ = prewarm_tx.send((idx, tx.clone()));
                                 }
-                                let _ = execute_tx.send((idx, tx));
+                                if execute_tx.send((idx, tx)).is_err() || failed {
+                                    return
+                                }
                                 trace!(target: "engine::tree::payload_processor", idx, "yielded transaction");
                             }
                         }
@@ -525,26 +550,34 @@ where
 }
 
 /// Converts transactions sequentially and sends them to the execute channel, and to the prewarm
-/// channel if there is one.
+/// channel if there is one. Returns false on conversion failure or disconnection.
 fn convert_serial<RawTx, Tx, TxEnv, InnerTx, Recovered, Err, C>(
     iter: impl Iterator<Item = RawTx>,
     convert: &C,
     prewarm_tx: Option<&mpsc::SyncSender<(usize, WithTxEnv<TxEnv, Recovered>)>>,
     execute_tx: &ExecuteTxSender<TxEnv, Recovered, Err>,
-) where
+) -> bool
+where
     Tx: ExecutableTxParts<TxEnv, InnerTx, Recovered = Recovered>,
     TxEnv: Clone,
     C: ConvertTx<RawTx, Tx = Tx, Error = Err>,
 {
     for (idx, raw_tx) in iter.enumerate() {
+        let _span =
+            trace_span!(target: "engine::tree::payload_processor", "convert_transaction", idx)
+                .entered();
         let tx = convert.convert(raw_tx);
-        let tx = tx.map(|tx| WithTxEnv::new(tx));
+        let failed = tx.is_err();
+        let tx = tx.map(WithTxEnv::new);
         if let (Some(prewarm_tx), Ok(tx)) = (prewarm_tx, &tx) {
             let _ = prewarm_tx.send((idx, tx.clone()));
         }
-        let _ = execute_tx.send((idx, tx));
+        if execute_tx.send((idx, tx)).is_err() || failed {
+            return false
+        }
         trace!(target: "engine::tree::payload_processor", idx, "yielded transaction");
     }
+    true
 }
 
 /// Handle to all the spawned tasks.
@@ -673,6 +706,7 @@ impl<R> Drop for CacheTaskHandle<R> {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
     use crate::tree::{
         payload_processor::PayloadProcessor, precompile_cache::PrecompileCacheMap, ExecutionCache,
         PayloadExecutionCache, SavedCache, TreeConfig,
@@ -680,12 +714,187 @@ mod tests {
     use alloy_consensus::constants::KECCAK_EMPTY;
     use alloy_eips::eip1898::{BlockNumHash, BlockWithParent};
     use alloy_primitives::{Address, B256, U256};
+    use proptest::{
+        prelude::any,
+        test_runner::{Config, TestRunner},
+    };
     use reth_chainspec::ChainSpec;
     use reth_evm_ethereum::EthEvmConfig;
     use reth_execution_cache::CachedStatus;
     use reth_revm::db::BundleState;
     use revm::state::AccountInfo;
-    use std::sync::Arc;
+    use std::{
+        collections::HashSet,
+        process::Command,
+        sync::{atomic::Ordering, Arc, Mutex},
+    };
+    use tracing_subscriber::{
+        filter::LevelFilter, layer::SubscriberExt, registry::LookupSpan, Registry,
+    };
+
+    type TestTx = reth_evm::execute::WithTxEnv<
+        reth_evm::TxEnvFor<EthEvmConfig>,
+        reth_primitives_traits::Recovered<reth_ethereum_primitives::TransactionSigned>,
+    >;
+
+    fn converted_tx() -> TestTx {
+        TestTx {
+            tx_env: Default::default(),
+            tx: Arc::new(reth_primitives_traits::Recovered::new_unchecked(
+                reth_ethereum_primitives::TransactionSigned::Legacy(
+                    alloy_consensus::Signed::new_unchecked(
+                        alloy_consensus::TxLegacy::default(),
+                        alloy_primitives::Signature::test_signature(),
+                        B256::ZERO,
+                    ),
+                ),
+                Address::ZERO,
+            )),
+        }
+    }
+
+    fn test_processor() -> PayloadProcessor<EthEvmConfig> {
+        PayloadProcessor::new(
+            reth_tasks::Runtime::test(),
+            EthEvmConfig::new(Arc::new(ChainSpec::default())),
+            &TreeConfig::default(),
+            PrecompileCacheMap::default(),
+        )
+    }
+
+    #[test]
+    fn transaction_conversion_preserves_results() {
+        for (count, bal) in [(10, false), (200, false), (200, true)] {
+            let processor = test_processor();
+            let (prewarm, receiver) = processor.spawn_tx_iterator(
+                ((0..count).collect::<Vec<_>>(), |_| Ok::<_, std::io::Error>(converted_tx())),
+                count,
+                bal,
+                true,
+            );
+            let mut indices = Vec::new();
+            for _ in 0..count {
+                let (idx, tx) = receiver.recv_timeout(std::time::Duration::from_secs(10)).unwrap();
+                assert!(tx.is_ok());
+                indices.push(idx);
+            }
+            if bal {
+                indices.sort_unstable();
+            }
+            assert_eq!(indices, (0..count).collect::<Vec<_>>());
+            assert_eq!(prewarm.unwrap().iter().count(), count);
+        }
+    }
+
+    #[test]
+    fn transaction_conversion_stops_on_error() {
+        for (count, bal, fail_at) in
+            [(10, false, 0), (10, true, 0), (200, false, 0), (200, false, 4), (200, false, 20)]
+        {
+            let processor = test_processor();
+            let (_, receiver) = processor.spawn_tx_iterator(
+                ((0..count).collect::<Vec<_>>(), move |idx| {
+                    if idx >= fail_at {
+                        Err(std::io::Error::other("invalid transaction"))
+                    } else {
+                        Ok(converted_tx())
+                    }
+                }),
+                count,
+                bal,
+                false,
+            );
+            let mut results = Vec::new();
+            loop {
+                match receiver.recv_timeout(std::time::Duration::from_secs(10)) {
+                    Ok(tx) => results.push(tx),
+                    Err(crossbeam_channel::RecvTimeoutError::Disconnected) => break,
+                    Err(err) => panic!("conversion did not terminate: {err}"),
+                }
+            }
+            assert!(results.iter().any(|(_, tx)| tx.is_err()));
+            assert!(results.len() < count);
+            if !bal {
+                assert_eq!(results.len(), fail_at + 1);
+                assert!(results.last().unwrap().1.is_err());
+            }
+        }
+    }
+
+    #[test]
+    fn bal_transaction_conversion_preserves_all_error_slots() {
+        let count = 200;
+        let processor = test_processor();
+        let (_, receiver) = processor.spawn_tx_iterator(
+            ((0..count).collect::<Vec<_>>(), |idx| {
+                if idx % 3 == 0 {
+                    Err(std::io::Error::other("invalid transaction"))
+                } else {
+                    Ok(converted_tx())
+                }
+            }),
+            count,
+            true,
+            false,
+        );
+        let mut indices = Vec::new();
+        for _ in 0..count {
+            let (idx, tx) = receiver.recv_timeout(std::time::Duration::from_secs(10)).unwrap();
+            assert_eq!(tx.is_err(), idx % 3 == 0);
+            indices.push(idx);
+        }
+        indices.sort_unstable();
+        assert_eq!(indices, (0..count).collect::<Vec<_>>());
+    }
+
+    #[test]
+    fn dropping_payload_handle_stops_transaction_conversion() {
+        for (count, bal, pause_at) in
+            [(10, false, 0), (1000, false, 0), (1000, false, 4), (1000, true, 0)]
+        {
+            let processor = test_processor();
+            let calls = Arc::new(super::AtomicUsize::new(0));
+            let converted = calls.clone();
+            let (started_tx, started_rx) = crossbeam_channel::unbounded();
+            let (release_tx, release_rx) = crossbeam_channel::bounded::<()>(0);
+            let (_, receiver) = processor.spawn_tx_iterator(
+                ((0..count).collect::<Vec<_>>(), move |idx| {
+                    converted.fetch_add(1, Ordering::Relaxed);
+                    if idx >= pause_at {
+                        started_tx.send(()).unwrap();
+                        let _ = release_rx.recv_timeout(std::time::Duration::from_secs(10));
+                    }
+                    Ok::<_, std::io::Error>(converted_tx())
+                }),
+                count,
+                bal,
+                false,
+            );
+            let handle = super::PayloadHandle {
+                prewarm_handle: super::CacheTaskHandle::<()> {
+                    saved_cache: None,
+                    to_prewarm_task: None,
+                    executed_tx_index: Default::default(),
+                    cache_metrics: None,
+                },
+                transactions: receiver,
+                _span: tracing::Span::none(),
+            };
+            started_rx.recv_timeout(std::time::Duration::from_secs(10)).unwrap();
+            drop(handle);
+            drop(release_tx);
+
+            // The converter owns the last sender, so disconnection confirms recovery exited.
+            loop {
+                match started_rx.recv_timeout(std::time::Duration::from_secs(10)) {
+                    Ok(()) => {}
+                    Err(crossbeam_channel::RecvTimeoutError::Disconnected) => break,
+                    Err(err) => panic!("conversion did not terminate: {err}"),
+                }
+            }
+            assert!(calls.load(Ordering::Relaxed) < count);
+        }
+    }
 
     fn make_saved_cache(hash: B256) -> SavedCache {
         let execution_cache = ExecutionCache::new(1_000);
@@ -863,7 +1072,7 @@ mod tests {
                     nonce: 7,
                     code_hash: KECCAK_EMPTY,
                     code: None,
-                    account_id: None,
+                    ..Default::default()
                 },
             )
             .build();
@@ -946,5 +1155,119 @@ mod tests {
             block4_hash,
             "cache must carry the canonical parent hash, not the fork parent"
         );
+    }
+
+    #[test]
+    fn transaction_conversion_has_child_spans() {
+        // Worker threads use the global subscriber. Isolate it from other tests and run each
+        // filter level in a fresh process so filtered child spans also exercise context fallback.
+        const LEVEL_ENV: &str = "RETH_TEST_CONVERSION_SPAN_LEVEL";
+        let Ok(level) = std::env::var(LEVEL_ENV) else {
+            for level in ["trace", "debug", "info"] {
+                let output = Command::new(std::env::current_exe().unwrap())
+                    .args([
+                        "--exact",
+                        "tree::payload_processor::tests::transaction_conversion_has_child_spans",
+                        "--nocapture",
+                    ])
+                    .env(LEVEL_ENV, level)
+                    .output()
+                    .unwrap();
+                assert!(
+                    output.status.success(),
+                    "{level}: {}\n{}",
+                    String::from_utf8_lossy(&output.stdout),
+                    String::from_utf8_lossy(&output.stderr),
+                );
+            }
+            return;
+        };
+        let level = level.parse::<LevelFilter>().unwrap();
+        tracing::subscriber::set_global_default(tracing_subscriber::registry().with(level))
+            .unwrap();
+        let processor = test_processor();
+
+        // Exercise both sides of the sequential cutoff and the first parallel window, as well
+        // as randomly sized blocks. BAL execution bypasses the sequential prefetch/windowing.
+        for count in [0, 1, 29, 30, 68, 69] {
+            for bal in [false, true] {
+                assert_conversion_spans(&processor, count, bal, level);
+            }
+        }
+        TestRunner::new(Config::with_cases(32))
+            .run(&(0..200usize, any::<bool>()), |(count, bal)| {
+                assert_conversion_spans(&processor, count, bal, level);
+                Ok(())
+            })
+            .unwrap();
+    }
+
+    fn assert_conversion_spans(
+        processor: &PayloadProcessor<EthEvmConfig>,
+        count: usize,
+        bal: bool,
+        level: LevelFilter,
+    ) {
+        let request = tracing::info_span!(parent: None, "request");
+        let _entered = request.enter();
+        // Retain the spans so registry IDs cannot be recycled between conversions.
+        let observed = Arc::new(Mutex::new(Vec::new()));
+        let converted = observed.clone();
+        let (_, receiver) = processor.spawn_tx_iterator(
+            ((0..count).collect::<Vec<_>>(), move |idx| {
+                converted.lock().unwrap().push((idx, Span::current()));
+                Ok::<_, std::io::Error>(converted_tx())
+            }),
+            count,
+            bal,
+            false,
+        );
+        let mut indices = Vec::new();
+        loop {
+            match receiver.recv_timeout(std::time::Duration::from_secs(10)) {
+                Ok((idx, tx)) => {
+                    assert!(tx.is_ok());
+                    indices.push(idx);
+                }
+                Err(crossbeam_channel::RecvTimeoutError::Disconnected) => break,
+                Err(err) => panic!("conversion did not terminate: {err}"),
+            }
+        }
+        if bal {
+            indices.sort_unstable();
+        }
+        assert_eq!(indices, (0..count).collect::<Vec<_>>());
+        let observed = observed.lock().unwrap();
+        assert_eq!(observed.len(), count);
+        let mut transaction_ids = HashSet::new();
+        for (idx, span) in observed.iter() {
+            let scope = span
+                .with_subscriber(|(id, dispatch)| {
+                    dispatch
+                        .downcast_ref::<Registry>()
+                        .unwrap()
+                        .span(id)
+                        .unwrap()
+                        .scope()
+                        .from_root()
+                        .map(|span| (span.id(), span.name()))
+                        .collect::<Vec<_>>()
+                })
+                .expect("conversion lost its request context");
+            assert_eq!(Some(scope[0].0.clone()), request.id());
+            let mut expected = vec!["request"];
+            if level >= LevelFilter::DEBUG {
+                expected.push("spawn_tx_iterator");
+                expected.push("tx_iterator");
+                if count >= 30 && (bal || *idx >= 4) {
+                    expected.push("convert_transactions");
+                }
+            }
+            if level == LevelFilter::TRACE {
+                expected.push("convert_transaction");
+                assert!(transaction_ids.insert(span.id().unwrap()), "reused a transaction span");
+            }
+            assert_eq!(scope.iter().map(|(_, name)| *name).collect::<Vec<_>>(), expected);
+        }
     }
 }

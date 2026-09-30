@@ -28,8 +28,9 @@ pub use consistent::ConsistentProvider;
 pub(crate) mod rocksdb;
 
 pub use rocksdb::{
-    PruneShardOutcome, PrunedIndices, RocksDBBatch, RocksDBBuilder, RocksDBIter, RocksDBProvider,
-    RocksDBRawIter, RocksDBStats, RocksDBTableStats, RocksReadSnapshot, RocksTx,
+    OwnedRocksReadSnapshot, PruneShardOutcome, PrunedIndices, RocksDBBatch, RocksDBBuilder,
+    RocksDBIter, RocksDBProvider, RocksDBRawIter, RocksDBStats, RocksDBTableStats,
+    RocksReadSnapshot, RocksTx,
 };
 
 /// Helper trait to bound [`NodeTypes`] so that combined with database they satisfy

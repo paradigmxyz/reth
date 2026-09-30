@@ -105,6 +105,7 @@ where
     /// # Arguments
     ///
     /// `state` - state transition containing both modified and touched accounts and storage slots.
+    #[allow(clippy::clone_on_copy)]
     pub fn compute(mut self, state: HashedPostState) -> Result<B256Map<Bytes>, TrieWitnessError> {
         let is_state_empty = state.is_empty();
         if is_state_empty && !self.always_include_root_node {
@@ -130,9 +131,7 @@ where
             let (root_hash, root_node) = if let Some(root_node) =
                 multiproof.account_proofs.into_iter().find(|n| n.path.is_empty())
             {
-                let mut encoded = Vec::new();
-                root_node.node.encode(&mut encoded);
-                let bytes = Bytes::from(encoded);
+                let bytes = Bytes::from(alloy_rlp::encode(&root_node.node));
                 (keccak256(&bytes), bytes)
             } else {
                 (EMPTY_ROOT_HASH, Bytes::from([EMPTY_STRING_CODE]))
@@ -236,6 +235,7 @@ where
                 .accounts
                 .get(&hashed_address)
                 .ok_or(TrieWitnessError::MissingAccount(hashed_address))?
+                .clone()
                 .unwrap_or_default();
 
             let storage_root =

@@ -67,10 +67,9 @@ where
         let initial_last_pruned_block = last_pruned_block;
 
         let mut from_tx_number = match initial_last_pruned_block {
-            Some(block) => provider
-                .block_body_indices(block)?
-                .map(|block| block.last_tx_num() + 1)
-                .unwrap_or(0),
+            Some(block) => {
+                provider.block_body_indices(block)?.map(|block| block.next_tx_num()).unwrap_or(0)
+            }
             None => 0,
         };
 
@@ -139,7 +138,7 @@ where
 
             // Calculate the transaction range from this block range
             let tx_range_end = match provider.block_body_indices(end_block)? {
-                Some(body) => body.last_tx_num(),
+                Some(body) => body.next_tx_num(),
                 None => {
                     trace!(
                         target: "pruner",
@@ -149,7 +148,12 @@ where
                     continue
                 }
             };
-            let tx_range = from_tx_number..=tx_range_end;
+            let tx_range = from_tx_number..tx_range_end;
+            if tx_range.is_empty() {
+                // Empty blocks advance the block checkpoint without consuming a transaction.
+                last_pruned_block = Some(end_block);
+                continue
+            }
 
             // Delete receipts, except the ones in the inclusion list
             let mut last_skipped_transaction = 0;
@@ -238,12 +242,114 @@ mod tests {
     use reth_db_api::{cursor::DbCursorRO, tables, transaction::DbTx};
     use reth_primitives_traits::InMemorySize;
     use reth_provider::{BlockReader, DBProvider, DatabaseProviderFactory, PruneCheckpointReader};
-    use reth_prune_types::{PruneMode, PruneSegment, ReceiptsLogPruneConfig};
+    use reth_prune_types::{
+        PruneCheckpoint, PruneMode, PruneSegment, ReceiptsLogPruneConfig,
+        MINIMUM_UNWIND_SAFE_DISTANCE,
+    };
     use reth_stages::test_utils::{StorageKind, TestStageDB};
     use reth_testing_utils::generators::{
         self, random_block_range, random_eoa_account, random_log, random_receipt, BlockRangeParams,
     };
     use std::collections::BTreeMap;
+
+    #[test]
+    fn prune_receipts_by_logs_empty_prefix() {
+        for previous_block in [None, Some(1)] {
+            for retain_first in [false, true] {
+                let db = TestStageDB::default();
+                let mut rng = generators::rng();
+                let blocks = [
+                    random_block_range(
+                        &mut rng,
+                        0..=1,
+                        BlockRangeParams { tx_count: 0..1, ..Default::default() },
+                    ),
+                    random_block_range(
+                        &mut rng,
+                        2..=2,
+                        BlockRangeParams { tx_count: 2..3, ..Default::default() },
+                    ),
+                ]
+                .concat();
+                db.insert_blocks(blocks.iter(), StorageKind::Database(None)).unwrap();
+
+                let (address, _) = random_eoa_account(&mut rng);
+                let receipts = blocks[2]
+                    .body()
+                    .transactions
+                    .iter()
+                    .enumerate()
+                    .map(|(id, tx)| {
+                        let mut receipt = random_receipt(&mut rng, tx, Some(0), None);
+                        if id == 0 && retain_first {
+                            receipt.logs.push(random_log(&mut rng, Some(address), Some(1)));
+                        }
+                        (id as u64, receipt)
+                    })
+                    .collect::<Vec<_>>();
+                db.insert_receipts(receipts.clone()).unwrap();
+
+                let provider = db.factory.database_provider_rw().unwrap();
+                let result = ReceiptsByLogs::new(ReceiptsLogPruneConfig(BTreeMap::from([(
+                    address,
+                    PruneMode::Before(2),
+                )])))
+                .prune(
+                    &provider,
+                    PruneInput {
+                        previous_checkpoint: previous_block.map(|block| PruneCheckpoint {
+                            block_number: Some(block),
+                            tx_number: None,
+                            prune_mode: PruneMode::Before(2),
+                        }),
+                        to_block: MINIMUM_UNWIND_SAFE_DISTANCE + 2,
+                        limiter: PruneLimiter::default(),
+                    },
+                )
+                .unwrap();
+                assert!(result.progress.is_finished());
+                assert_eq!(result.pruned, if retain_first { 1 } else { 2 });
+                provider.commit().unwrap();
+                let expected = if retain_first { vec![receipts[0].clone()] } else { vec![] };
+                assert_eq!(db.table::<tables::Receipts>().unwrap(), expected);
+            }
+        }
+    }
+
+    #[test]
+    fn prune_receipts_by_logs_empty_chain() {
+        let db = TestStageDB::default();
+        let blocks = random_block_range(
+            &mut generators::rng(),
+            0..=2,
+            BlockRangeParams { tx_count: 0..1, ..Default::default() },
+        );
+        db.insert_blocks(blocks.iter(), StorageKind::Database(None)).unwrap();
+        let provider = db.factory.database_provider_rw().unwrap();
+        let result = ReceiptsByLogs::new(ReceiptsLogPruneConfig(BTreeMap::from([(
+            alloy_primitives::Address::ZERO,
+            PruneMode::Before(2),
+        )])))
+        .prune(
+            &provider,
+            PruneInput {
+                previous_checkpoint: None,
+                to_block: MINIMUM_UNWIND_SAFE_DISTANCE + 2,
+                limiter: PruneLimiter::default(),
+            },
+        )
+        .unwrap();
+        assert!(result.progress.is_finished());
+        assert_eq!(result.pruned, 0);
+        assert_eq!(
+            provider.get_prune_checkpoint(PruneSegment::ContractLogs).unwrap(),
+            Some(PruneCheckpoint {
+                block_number: Some(2),
+                tx_number: None,
+                prune_mode: PruneMode::Before(2),
+            })
+        );
+    }
 
     #[test]
     fn prune_receipts_by_logs() {

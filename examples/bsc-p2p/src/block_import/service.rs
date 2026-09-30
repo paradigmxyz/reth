@@ -148,11 +148,7 @@ where
                 }
             };
 
-            let state = ForkchoiceState {
-                head_block_hash,
-                safe_block_hash: head_block_hash,
-                finalized_block_hash: head_block_hash,
-            };
+            let state = ForkchoiceState::same_hash(head_block_hash);
 
             match engine.fork_choice_updated(state, None).await {
                 Ok(response) => match response.payload_status.status {
@@ -231,10 +227,7 @@ mod tests {
     use reth_ethereum_primitives::Block;
     use reth_node_ethereum::EthEngineTypes;
     use reth_provider::ProviderError;
-    use std::{
-        sync::Arc,
-        task::{Context, Poll},
-    };
+    use std::{future::poll_fn, sync::Arc, time::Duration};
 
     #[tokio::test]
     async fn can_handle_valid_block() {
@@ -375,20 +368,18 @@ mod tests {
             let block_msg = create_test_block();
             self.handle.send_block(block_msg, PeerId::random()).unwrap();
 
-            let waker = futures::task::noop_waker();
-            let mut cx = Context::from_waker(&waker);
-            let mut outcomes = Vec::new();
-
-            // Wait for both NewPayload and FCU outcomes
-            while outcomes.len() < 2 {
-                match self.handle.poll_outcome(&mut cx) {
-                    Poll::Ready(Some(outcome)) => {
-                        outcomes.push(outcome);
-                    }
-                    Poll::Ready(None) => break,
-                    Poll::Pending => tokio::task::yield_now().await,
+            let outcomes = tokio::time::timeout(Duration::from_secs(1), async {
+                let mut outcomes = Vec::new();
+                while outcomes.len() < 2 {
+                    let outcome = poll_fn(|cx| self.handle.poll_outcome(cx))
+                        .await
+                        .expect("block import service closed before returning all outcomes");
+                    outcomes.push(outcome);
                 }
-            }
+                outcomes
+            })
+            .await
+            .expect("block import outcomes must arrive");
 
             // Assert that at least one outcome matches our criteria
             assert!(
@@ -413,11 +404,11 @@ mod tests {
         tokio::spawn(async move {
             while let Some(message) = from_engine.recv().await {
                 match message {
-                    BeaconEngineMessage::NewPayload { payload: _, tx } => {
+                    BeaconEngineMessage::NewPayload { tx, .. } => {
                         tx.send(Ok(PayloadStatus::new(responses.new_payload.clone(), None)))
                             .unwrap();
                     }
-                    BeaconEngineMessage::ForkchoiceUpdated { state: _, payload_attrs: _, tx } => {
+                    BeaconEngineMessage::ForkchoiceUpdated { tx, .. } => {
                         tx.send(Ok(OnForkChoiceUpdated::valid(PayloadStatus::new(
                             responses.fcu.clone(),
                             None,
