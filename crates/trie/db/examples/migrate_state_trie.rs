@@ -1,5 +1,4 @@
 //! Migrate a fully persisted snapshot with the `migrate_state_trie` example.
-//! See `docs/state-trie-db.md` for usage and the supported execution path.
 use alloy_primitives::{B256, U256};
 use reth_db::{mdbx::DatabaseArguments, Database, DatabaseEnv, DatabaseEnvKind};
 use reth_db_api::{
