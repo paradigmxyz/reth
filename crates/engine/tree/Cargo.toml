@@ -81,6 +81,7 @@ reth-db = { workspace = true, features = ["test-utils"] }
 reth-db-common.workspace = true
 reth-ethereum-consensus.workspace = true
 metrics-util = { workspace = true, features = ["debugging"] }
+metrics-exporter-prometheus.workspace = true
 reth-ethereum-engine-primitives.workspace = true
 reth-evm = { workspace = true, features = ["test-utils"] }
 reth-exex-types.workspace = true
