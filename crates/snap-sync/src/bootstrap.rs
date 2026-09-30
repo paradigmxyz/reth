@@ -258,6 +258,10 @@ where
             info!(target: "sync::snap", ?pivot, "Snap pivot was reorged past its kept headers, restarting");
             return Ok(Step::Restart)
         };
+        if !reorg.has_lists() {
+            info!(target: "sync::snap", ?pivot, "Orphaned blocks predate block access lists, restarting");
+            return Ok(Step::Restart)
+        }
         let ancestor = reorg.ancestor();
         if !self.policy.is_catchable_from(ancestor.number, head) {
             info!(target: "sync::snap", ?pivot, ?ancestor, head, "Orphaned block access lists expired, restarting");
@@ -1249,6 +1253,36 @@ mod tests {
             client.block_requests()[0],
             orphaned.iter().map(SealedHeader::hash).collect::<Vec<_>>()
         );
+    }
+
+    #[tokio::test]
+    async fn orphaned_blocks_before_block_access_lists_restart_the_attempt() {
+        let accounts = accounts();
+        let root = state_root(&accounts);
+        let factory = hashed_factory();
+        let shared = chain(2, root);
+        // Block 3 predates block access lists, so the orphaned branch has none to repair from.
+        let mut before = header(3, shared[2].hash(), None);
+        before.state_root = root;
+        let before = SealedHeader::seal_slow(before);
+        let orphaned = [vec![before.clone()], branch(&before, &[Vec::new()], root)].concat();
+        insert_headers(&factory, &shared);
+        insert_headers(&factory, &orphaned);
+        let provider = factory.database_provider_rw().unwrap();
+        provider.start_snap_attempt(SnapGeneration::new(orphaned[1].num_hash(), root)).unwrap();
+        provider.commit().unwrap();
+        let attempt = attempt_id(&factory);
+        let new = branch(&shared[2], &[vec![stale_changes()], Vec::new(), Vec::new()], root);
+        replace_headers_after(&factory, 2, &new);
+        let (_, mut bootstrap) = scripted(&factory, [account_range(1, &accounts, 0..3, &[])], [5]);
+
+        let outcome = bootstrap.run().await.unwrap();
+
+        let SnapBootstrapOutcome::TrieRebuild { pivot, .. } = outcome else {
+            panic!("the new branch's state is complete: {outcome:?}")
+        };
+        assert_eq!(pivot, new[1].num_hash());
+        assert_ne!(attempt_id(&factory), attempt);
     }
 
     #[tokio::test]

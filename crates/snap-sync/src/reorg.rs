@@ -68,6 +68,15 @@ impl<H> SnapReorg<H> {
     pub fn orphaned(&self) -> &[SealedHeader<H>] {
         &self.orphaned
     }
+
+    /// Whether every orphaned block commits to a list, which blocks before their activation do
+    /// not.
+    pub fn has_lists(&self) -> bool
+    where
+        H: AlloyBlockHeader,
+    {
+        self.orphaned.iter().all(|header| header.block_access_list_hash().is_some())
+    }
 }
 
 impl<T: MetadataProvider> SnapReorgStore for T {
