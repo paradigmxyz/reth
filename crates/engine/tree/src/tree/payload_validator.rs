@@ -1805,11 +1805,6 @@ pub trait EngineValidator<
         timestamp: u64,
         state: &mut EngineApiTreeState<N>,
     ) -> PayloadBuilderResources;
-
-    /// Called before the engine flushes remaining blocks during shutdown.
-    ///
-    /// Stops speculative background work and waits for it to release its database resources.
-    fn on_shutdown(&mut self) {}
 }
 
 impl<N, Types, P, Evm, V> EngineValidator<Types> for BasicEngineValidator<P, Evm, V>
@@ -1967,10 +1962,6 @@ where
             resources = resources.with_lease(txpool_lease);
         }
         resources
-    }
-
-    fn on_shutdown(&mut self) {
-        drop(self.txpool_prewarm.take());
     }
 }
 

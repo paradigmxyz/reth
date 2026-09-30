@@ -574,16 +574,14 @@ where
                     debug!(target: "engine::tree", %msg, "received new engine message");
                     match self.on_engine_message(msg) {
                         Ok(ops::ControlFlow::Break(tx)) => {
-                            // Stop speculative work and release its database resources before
-                            // flushing.
-                            self.payload_validator.on_shutdown();
                             if let Err(err) = self.persist_until_complete() {
                                 error!(target: "engine::tree", %err, "Termination failed");
                             }
-                            // Finishing persistence does not stop the remaining tasks owned by the
-                            // engine, including the persistence service. Drop their owners to shut
-                            // them down and join them before acknowledging, even if persistence
-                            // failed. Otherwise process teardown could race with their cleanup.
+                            // Finishing persistence does not stop the additional tasks owned by
+                            // the engine. Drop their owners to shut down and join the persistence
+                            // service and txpool prewarmer before acknowledging shutdown, even if
+                            // persistence failed. Otherwise the caller could tear down the process
+                            // while those tasks are still running.
                             drop(self);
                             let _ = tx.send(());
                             return
