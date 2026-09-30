@@ -610,13 +610,13 @@ impl BodiesDownloaderBuilder {
 mod tests {
     use super::*;
     use crate::{
-        bodies::test_utils::{insert_headers, zip_blocks},
+        bodies::test_utils::zip_blocks,
         test_utils::{generate_bodies, TestBodiesClient},
     };
     use alloy_primitives::{map::B256Map, B256};
     use assert_matches::assert_matches;
     use reth_consensus::test_utils::TestConsensus;
-    use reth_provider::test_utils::create_test_provider_factory;
+    use reth_provider::test_utils::{create_test_provider_factory, insert_headers};
     use reth_testing_utils::generators::{self, random_block_range, BlockRangeParams};
 
     // Check that the blocks are emitted in order of block number, not in order of

@@ -19,6 +19,7 @@ use reth_payload_builder_primitives::PayloadBuilderError;
 use reth_payload_primitives::PayloadTypes;
 use std::time::{Duration, Instant};
 use tokio::sync::{mpsc::UnboundedSender, oneshot};
+use tracing::Span;
 
 /// Type alias for backwards compat
 #[deprecated(note = "Use ConsensusEngineHandle instead")]
@@ -244,10 +245,16 @@ impl ExecutionPayload for BigBlockData<ExecutionData> {
 
 /// A message for the beacon engine from other components of the node (engine RPC API invoked by the
 /// consensus layer).
+///
+/// The `cause` span carries in-process tracing context across the engine queue. Callers
+/// constructing messages directly should capture [`Span::current`], or use [`Span::none`] when no
+/// context exists.
 #[derive(Debug)]
 pub enum BeaconEngineMessage<Payload: PayloadTypes> {
     /// Message with new payload.
     NewPayload {
+        /// The caller span that caused this message.
+        cause: Span,
         /// The execution payload received by Engine API.
         payload: Payload::ExecutionData,
         /// The sender for returning payload status result.
@@ -260,6 +267,8 @@ pub enum BeaconEngineMessage<Payload: PayloadTypes> {
     ///
     /// Returns detailed timing breakdown alongside the payload status.
     RethNewPayload {
+        /// The caller span that caused this message.
+        cause: Span,
         /// The execution payload received by Engine API.
         payload: Payload::ExecutionData,
         /// Whether to wait for in-flight persistence to complete before processing.
@@ -273,6 +282,8 @@ pub enum BeaconEngineMessage<Payload: PayloadTypes> {
     },
     /// Message with updated forkchoice state.
     ForkchoiceUpdated {
+        /// The caller span that caused this message.
+        cause: Span,
         /// The updated forkchoice state.
         state: ForkchoiceState,
         /// The payload attributes for block building.
@@ -344,14 +355,19 @@ where
         payload: Payload::ExecutionData,
     ) -> Result<PayloadStatus, BeaconOnNewPayloadError> {
         let (tx, rx) = oneshot::channel();
-        let _ = self.to_engine.send(BeaconEngineMessage::NewPayload { payload, tx });
+        let _ = self.to_engine.send(BeaconEngineMessage::NewPayload {
+            cause: Span::current(),
+            payload,
+            tx,
+        });
         rx.await.map_err(|_| BeaconOnNewPayloadError::EngineUnavailable)?
     }
 
     /// Sends a new payload message used by `reth_newPayload` endpoint.
     ///
     /// `wait_for_persistence`: waits for in-flight persistence to complete.
-    /// `wait_for_caches`: waits for execution cache and sparse trie locks.
+    /// `wait_for_caches`: waits for execution cache and sparse trie locks, excluding destruction
+    /// of removed execution-cache allocations after unlocking.
     ///
     /// Returns detailed timing breakdown alongside the payload status.
     pub async fn reth_new_payload(
@@ -362,6 +378,7 @@ where
     ) -> Result<(PayloadStatus, NewPayloadTimings), BeaconOnNewPayloadError> {
         let (tx, rx) = oneshot::channel();
         let _ = self.to_engine.send(BeaconEngineMessage::RethNewPayload {
+            cause: Span::current(),
             payload,
             wait_for_persistence,
             wait_for_caches,
@@ -396,6 +413,7 @@ where
     ) -> oneshot::Receiver<RethResult<OnForkChoiceUpdated>> {
         let (tx, rx) = oneshot::channel();
         let _ = self.to_engine.send(BeaconEngineMessage::ForkchoiceUpdated {
+            cause: Span::current(),
             state,
             payload_attrs,
             tx,

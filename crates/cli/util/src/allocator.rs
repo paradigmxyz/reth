@@ -5,12 +5,14 @@
 
 // We provide jemalloc allocator support, alongside snmalloc. If both features are enabled, jemalloc
 // is prioritized.
-cfg_if::cfg_if! {
-    if #[cfg(all(feature = "jemalloc", unix))] {
+std::cfg_select! {
+    all(feature = "jemalloc", unix) => {
         type AllocatorInner = tikv_jemallocator::Jemalloc;
-    } else if #[cfg(all(feature = "snmalloc", unix))] {
+    }
+    all(feature = "snmalloc", unix) => {
         type AllocatorInner = snmalloc_rs::SnMalloc;
-    } else {
+    }
+    _ => {
         type AllocatorInner = std::alloc::System;
     }
 }
@@ -21,19 +23,21 @@ cfg_if::cfg_if! {
 pub use tikv_jemalloc_sys;
 
 // This is to prevent clippy unused warnings when we do `--all-features`
-cfg_if::cfg_if! {
-    if #[cfg(all(feature = "snmalloc", feature = "jemalloc", unix))] {
+std::cfg_select! {
+    all(feature = "snmalloc", feature = "jemalloc", unix) => {
         use snmalloc_rs as _;
     }
+    _ => {}
 }
 
-cfg_if::cfg_if! {
-    if #[cfg(feature = "tracy-allocator")] {
+std::cfg_select! {
+    feature = "tracy-allocator" => {
         type AllocatorWrapper = tracy_client::ProfiledAllocator<AllocatorInner>;
         const fn new_allocator_wrapper() -> AllocatorWrapper {
             AllocatorWrapper::new(AllocatorInner {}, 100)
         }
-    } else {
+    }
+    _ => {
         type AllocatorWrapper = AllocatorInner;
         const fn new_allocator_wrapper() -> AllocatorWrapper {
             AllocatorInner {}

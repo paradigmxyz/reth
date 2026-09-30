@@ -15,11 +15,7 @@ use eyre::Result;
 use futures::stream::{self, StreamExt};
 use reth_cli_util::cancellation::CancellationToken;
 use reth_fs_util as fs;
-use std::{
-    path::Path,
-    sync::{atomic::Ordering, Arc},
-    time::Duration,
-};
+use std::{path::Path, sync::Arc, time::Duration};
 use tokio::task;
 use tracing::{debug, info, warn};
 
@@ -29,8 +25,10 @@ const DOWNLOAD_CACHE_DIR: &str = ".download-cache";
 pub(crate) async fn run_modular_downloads(
     planned_downloads: PlannedDownloads,
     target_dir: &Path,
+    static_files_dir: Option<&Path>,
     download_concurrency: usize,
     cancel_token: CancellationToken,
+    retry_backoff: Option<Duration>,
 ) -> Result<()> {
     let download_cache_dir = target_dir.join(DOWNLOAD_CACHE_DIR);
     fs::create_dir_all(&download_cache_dir)?;
@@ -45,9 +43,14 @@ pub(crate) async fn run_modular_downloads(
         Some(Arc::clone(&shared)),
         Some(DownloadRequestLimiter::new(download_concurrency)),
         cancel_token,
+    )
+    .with_retry_backoff(retry_backoff);
+    let ctx = ArchiveProcessContext::new(
+        target_dir.to_path_buf(),
+        static_files_dir.map(Path::to_path_buf),
+        Some(download_cache_dir),
+        session,
     );
-    let ctx =
-        ArchiveProcessContext::new(target_dir.to_path_buf(), Some(download_cache_dir), session);
 
     ModularDownloadJob::new(ctx, download_concurrency).run(planned_downloads).await
 }
@@ -82,7 +85,7 @@ impl ModularDownloadJob {
             .collect()
             .await;
 
-        shared.done.store(true, Ordering::Relaxed);
+        shared.done.notify_one();
         let _ = progress_handle.await;
 
         for result in results {
@@ -185,7 +188,9 @@ impl ArchiveProcessor {
                     if attempt >= MAX_DOWNLOAD_RETRIES {
                         state = ArchiveAttemptState::Fail;
                     } else {
-                        std::thread::sleep(Duration::from_secs(RETRY_BACKOFF_SECS));
+                        std::thread::sleep(
+                            self.ctx.session().retry_delay(Duration::from_secs(RETRY_BACKOFF_SECS)),
+                        );
                         attempt += 1;
                         state = ArchiveAttemptState::RunAttempt;
                     }
@@ -216,7 +221,7 @@ impl ArchiveProcessor {
 
     /// Returns the verifier for this archive's output files.
     fn output_verifier(&self) -> OutputVerifier<'_> {
-        OutputVerifier::new(self.ctx.target_dir())
+        OutputVerifier::new(self.ctx.target_dir(), self.ctx.static_files_dir())
     }
 
     /// Returns `true` if this archive can be reused from existing verified outputs.
@@ -300,6 +305,7 @@ impl ArchiveProcessor {
             &self.archive().url,
             format,
             self.ctx.target_dir(),
+            self.ctx.static_files_dir(),
             self.ctx.session(),
         )
     }
@@ -312,6 +318,7 @@ impl ArchiveProcessor {
             file,
             format,
             self.ctx.target_dir(),
+            self.ctx.static_files_dir(),
             Some(&mut extraction_progress),
         );
         extraction_progress.finish();

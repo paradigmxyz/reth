@@ -13,3 +13,5 @@ tokio-stream.workspace = true
 eyre.workspace = true
 tracing.workspace = true
 alloy-primitives.workspace = true
+
+[lints]

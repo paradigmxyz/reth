@@ -1,6 +1,6 @@
 //! Contains [Chain], a chain of blocks and their final state.
 
-use crate::ExecutionOutcome;
+use crate::{DecodedRevmBal, ExecutionOutcome};
 use alloc::{borrow::Cow, collections::BTreeMap, sync::Arc, vec::Vec};
 use alloy_consensus::{
     transaction::{Recovered, TxHashRef},
@@ -41,6 +41,15 @@ pub struct Chain<N: NodePrimitives = reth_ethereum_primitives::EthPrimitives> {
     ///
     /// Contains handles to lazily-initialized sorted trie updates and hashed state.
     trie_data: BTreeMap<BlockNumber, LazyTrieData>,
+    /// Block access lists prepared during block validation, keyed by block number.
+    ///
+    /// A missing entry means the BAL was not available for that block, not that the block has
+    /// none: only blocks the engine validated from a payload that carried a BAL have one, so
+    /// chains built from storage or received over the wire have no entries at all. Consumers
+    /// that need the BAL of an arbitrary block must read it from the BAL store. This is derived
+    /// cache data and not part of the serialized representation.
+    #[cfg_attr(feature = "serde", serde(skip))]
+    bals: BTreeMap<BlockNumber, Arc<DecodedRevmBal>>,
 }
 
 type ChainTxReceiptMeta<'a, N> = (
@@ -56,6 +65,7 @@ impl<N: NodePrimitives> Default for Chain<N> {
             blocks: Default::default(),
             execution_outcome: Default::default(),
             trie_data: Default::default(),
+            bals: Default::default(),
         }
     }
 }
@@ -80,7 +90,7 @@ impl<N: NodePrimitives> Chain<N> {
             .collect::<BTreeMap<_, _>>();
         debug_assert!(!blocks.is_empty(), "Chain should have at least one block");
 
-        Self { blocks, execution_outcome, trie_data }
+        Self { blocks, execution_outcome, trie_data, bals: Default::default() }
     }
 
     /// Create new Chain from a single block and its state.
@@ -122,6 +132,29 @@ impl<N: NodePrimitives> Chain<N> {
     /// Remove all trie data for this chain.
     pub fn clear_trie_data(&mut self) {
         self.trie_data.clear();
+    }
+
+    /// Get all prepared block access lists for this chain.
+    ///
+    /// Blocks without an available BAL have no entry; see the `bals` field for details.
+    pub const fn bals(&self) -> &BTreeMap<BlockNumber, Arc<DecodedRevmBal>> {
+        &self.bals
+    }
+
+    /// Get the prepared block access list for a specific block number, if one is available.
+    ///
+    /// `None` only means no BAL was attached for that block; see the `bals` field for details.
+    pub fn bal_at(&self, block_number: BlockNumber) -> Option<&Arc<DecodedRevmBal>> {
+        self.bals.get(&block_number)
+    }
+
+    /// Attach a prepared block access list to a block of this chain.
+    pub fn insert_bal(&mut self, block_number: BlockNumber, bal: Arc<DecodedRevmBal>) {
+        debug_assert!(
+            self.blocks.contains_key(&block_number),
+            "BAL must belong to a block of this chain"
+        );
+        self.bals.insert(block_number, bal);
     }
 
     /// Get execution outcome of this chain
@@ -235,6 +268,18 @@ impl<N: NodePrimitives> Chain<N> {
         &self,
     ) -> impl Iterator<Item = (&Arc<RecoveredBlock<N::Block>>, &Vec<N::Receipt>)> + '_ {
         self.blocks_iter().zip(self.block_receipts_iter())
+    }
+
+    /// Returns an iterator over the blocks of this chain that have a prepared block access list,
+    /// paired with that BAL.
+    ///
+    /// Blocks without an available BAL are skipped; see the `bals` field for details.
+    pub fn blocks_and_bals(
+        &self,
+    ) -> impl Iterator<Item = (&Arc<RecoveredBlock<N::Block>>, &Arc<DecodedRevmBal>)> + '_ {
+        self.bals
+            .iter()
+            .filter_map(|(number, bal)| self.blocks.get(number).map(|block| (block, bal)))
     }
 
     /// Finds a transaction by hash and returns it along with its corresponding receipt data.
@@ -363,6 +408,7 @@ impl<N: NodePrimitives> Chain<N> {
         self.blocks.extend(other.blocks);
         self.execution_outcome.extend(other.execution_outcome);
         self.trie_data.extend(other.trie_data);
+        self.bals.extend(other.bals);
 
         Ok(())
     }
@@ -628,7 +674,14 @@ pub(super) mod serde_bincode_compat {
                 })
                 .collect();
 
-            Self { blocks, execution_outcome: value.execution_outcome.into(), trie_data }
+            // BALs are transient cache data recovered from the BAL store, not carried over the
+            // wire.
+            Self {
+                blocks,
+                execution_outcome: value.execution_outcome.into(),
+                trie_data,
+                bals: BTreeMap::new(),
+            }
         }
     }
 

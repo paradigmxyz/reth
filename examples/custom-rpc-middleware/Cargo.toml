@@ -12,3 +12,5 @@ clap = { workspace = true, features = ["derive"] }
 jsonrpsee = { workspace = true, features = ["server", "macros"] }
 tracing.workspace = true
 tower.workspace = true
+
+[lints]

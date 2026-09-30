@@ -14,3 +14,5 @@ alloy-primitives.workspace = true
 
 eyre.workspace = true
 tokio.workspace = true
+
+[lints]
