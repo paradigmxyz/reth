@@ -335,7 +335,7 @@ impl BalChain {
         factory: &ProviderFactory<MockNodeTypesWithDB>,
         ancestor: u64,
     ) {
-        replace_headers_after(factory, ancestor, &self.headers[ancestor as usize + 1..]);
+        factory.replace_headers_after(ancestor, &self.headers[ancestor as usize + 1..]);
     }
 
     /// The block `nth` after the pivot, which is the pivot itself at zero.
@@ -363,21 +363,25 @@ impl BalChain {
     }
 }
 
-/// Replaces the canonical blocks after `ancestor` with `headers`, as a reorg to them does.
-pub(crate) fn replace_headers_after(
-    factory: &ProviderFactory<MockNodeTypesWithDB>,
-    ancestor: u64,
-    headers: &[SealedHeader<Header>],
-) {
-    let static_files = factory.static_file_provider();
-    let highest = static_files.get_highest_static_file_block(StaticFileSegment::Headers).unwrap();
-    let mut writer = static_files.latest_writer(StaticFileSegment::Headers).unwrap();
-    writer.prune_headers(highest - ancestor).unwrap();
-    writer.commit().unwrap();
-    for header in headers {
-        writer.append_header(header.header(), &header.hash()).unwrap();
+/// Reorgs of a test database's canonical headers.
+pub(crate) trait ReorgFactoryExt {
+    /// Replaces the canonical blocks after `ancestor` with `headers`, as a reorg to them does.
+    fn replace_headers_after(&self, ancestor: u64, headers: &[SealedHeader<Header>]);
+}
+
+impl ReorgFactoryExt for ProviderFactory<MockNodeTypesWithDB> {
+    fn replace_headers_after(&self, ancestor: u64, headers: &[SealedHeader<Header>]) {
+        let static_files = self.static_file_provider();
+        let highest =
+            static_files.get_highest_static_file_block(StaticFileSegment::Headers).unwrap();
+        let mut writer = static_files.latest_writer(StaticFileSegment::Headers).unwrap();
+        writer.prune_headers(highest - ancestor).unwrap();
+        writer.commit().unwrap();
+        for header in headers {
+            writer.append_header(header.header(), &header.hash()).unwrap();
+        }
+        writer.commit().unwrap();
     }
-    writer.commit().unwrap();
 }
 
 /// Slots persisted for `account`, in key order.

@@ -534,8 +534,8 @@ mod tests {
     use super::*;
     use crate::{
         test_utils::{
-            account, account_range, hashed_factory, header, key, policy, replace_headers_after,
-            state_root, storage_ranges, storage_root_of, verified_range, ScriptedSnapClient,
+            account, account_range, hashed_factory, header, key, policy, state_root,
+            storage_ranges, storage_root_of, verified_range, ReorgFactoryExt, ScriptedSnapClient,
         },
         StateRepairs, VerifiedSnapState,
     };
@@ -734,7 +734,7 @@ mod tests {
 
         let [first, second] = new_lists;
         let new = branch(&shared[2], &[first, second, Vec::new()], root);
-        replace_headers_after(factory, 2, &new);
+        factory.replace_headers_after(2, &new);
         (attempt_id(factory), orphaned, new)
     }
 
@@ -1136,7 +1136,7 @@ mod tests {
         let attempt = attempt_id(&factory);
         // Blocks 2 and 3 are replaced before the rebuild verifies the orphaned pivot.
         let new = branch(&shared[1], &[vec![stale_changes()], Vec::new()], root);
-        replace_headers_after(&factory, 1, &new);
+        factory.replace_headers_after(1, &new);
         let (_, mut resumed) = scripted(&factory, [account_range(1, &accounts, 0..3, &[])], [3]);
 
         let outcome = resumed.run().await.unwrap();
@@ -1198,7 +1198,7 @@ mod tests {
         // After a restart, a second reorg orphans the re-anchored pivot too.
         let shared = factory.database_provider_ro().unwrap().sealed_header(2).unwrap().unwrap();
         let second = branch(&shared, &[Vec::new(), Vec::new(), Vec::new()], state_root(&accounts));
-        replace_headers_after(&factory, 2, &second);
+        factory.replace_headers_after(2, &second);
         let mut responses =
             vec![lists(1, &first_lists, true), lists(2, &[Vec::new(), Vec::new()], true)];
         // Both the first orphaned branch's and the first new branch's changes are fetched again.
@@ -1273,7 +1273,7 @@ mod tests {
         provider.commit().unwrap();
         let attempt = attempt_id(&factory);
         let new = branch(&shared[2], &[vec![stale_changes()], Vec::new(), Vec::new()], root);
-        replace_headers_after(&factory, 2, &new);
+        factory.replace_headers_after(2, &new);
         let (_, mut bootstrap) = scripted(&factory, [account_range(1, &accounts, 0..3, &[])], [5]);
 
         let outcome = bootstrap.run().await.unwrap();
