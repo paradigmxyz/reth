@@ -1,4 +1,4 @@
-//! clap [Args](clap::Args) for datadir config
+//! clap [`clap::Args`] for datadir config
 
 use crate::dirs::{ChainPath, DataDirPath, MaybePlatformPath};
 use clap::Args;

@@ -564,7 +564,11 @@ where
         );
         let blob_params =
             self.chain_spec().as_ref().blob_params_at_timestamp(payload.payload.timestamp());
-        Ok(self.evm_env_from_base_spec(spec, payload_block_env(payload, blob_params), blob_params))
+        Ok(self.evm_env_from_base_spec(
+            spec,
+            payload_block_env(payload, spec, blob_params),
+            blob_params,
+        ))
     }
 
     fn context_for_payload<'a>(

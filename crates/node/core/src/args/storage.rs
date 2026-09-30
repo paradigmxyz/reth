@@ -1,4 +1,4 @@
-//! clap [Args](clap::Args) for storage configuration
+//! clap [`clap::Args`] for storage configuration
 
 use clap::Args;
 use std::sync::OnceLock;
