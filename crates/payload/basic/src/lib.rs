@@ -22,9 +22,9 @@ use reth_payload_builder::{
 use reth_payload_builder_primitives::PayloadBuilderError;
 use reth_payload_primitives::{BuiltPayload, PayloadAttributes, PayloadKind};
 use reth_primitives_traits::{AlloyBlockHeader, HeaderTy, NodePrimitives, SealedHeader};
-use reth_revm::{cached::CachedReads, cancelled::CancelOnDrop};
+use reth_revm::cached::CachedReads;
 use reth_storage_api::{BlockReaderIdExt, StateProviderFactory};
-use reth_tasks::Runtime;
+use reth_tasks::{CancelOnDrop, Runtime};
 use reth_trie_parallel::state_root_task::PayloadStateRootHandle;
 use std::{
     fmt,
@@ -39,7 +39,7 @@ use tokio::{
     sync::{oneshot, Semaphore},
     time::{Interval, Sleep},
 };
-use tracing::{debug, trace, warn};
+use tracing::{debug, debug_span, trace, warn, Span};
 
 mod better_payload_emitter;
 mod metrics;
@@ -429,10 +429,14 @@ where
         let leases = self.leases.clone();
         let builder = self.builder.clone();
         let executor = self.executor.clone();
+        let span = Span::current();
         self.executor.spawn_task(async move {
             // acquire the permit for executing the task
             let permit = guard.acquire_owned().await;
             executor.spawn_blocking_named_or_tokio(PAYLOAD_BUILDER_THREAD_NAME, move || {
+                // Restore the parent even when the worker span is filtered out.
+                let _parent = span.enter();
+                let _span = debug_span!(target: "payload_builder", "build_payload").entered();
                 let _permit = permit;
                 let args = BuildArguments {
                     cached_reads,
@@ -603,9 +607,14 @@ where
                     let (tx, rx) = oneshot::channel();
                     let config = self.config.clone();
                     let builder = self.builder.clone();
+                    let span = Span::current();
                     self.executor.spawn_blocking_named_or_tokio(
                         PAYLOAD_BUILDER_THREAD_NAME,
                         move || {
+                            let _parent = span.enter();
+                            let _span =
+                                debug_span!(target: "payload_builder", "build_empty_payload")
+                                    .entered();
                             let res = builder.build_empty_payload(config);
                             let _ = tx.send(res);
                         },
@@ -617,9 +626,14 @@ where
                     debug!(target: "payload_builder", id=%self.config.payload_id(), "racing fallback payload");
                     // race the in progress job with this job
                     let (tx, rx) = oneshot::channel();
+                    let span = Span::current();
                     self.executor.spawn_blocking_named_or_tokio(
                         PAYLOAD_BUILDER_THREAD_NAME,
                         move || {
+                            let _parent = span.enter();
+                            let _span =
+                                debug_span!(target: "payload_builder", "build_fallback_payload")
+                                    .entered();
                             let _ = tx.send(job());
                         },
                     );

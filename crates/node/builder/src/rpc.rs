@@ -1141,7 +1141,14 @@ where
         let Self { eth_api_builder, engine_api_builder, hooks, .. } = self;
 
         let engine_api = engine_api_builder.build_engine_api(&ctx).await?;
-        let AddOnsContext { node, config, beacon_engine_handle, jwt_secret, engine_events } = ctx;
+        let AddOnsContext {
+            node,
+            config,
+            beacon_engine_handle,
+            jwt_secret,
+            engine_events,
+            sender_recovery_cache,
+        } = ctx;
 
         info!(target: "reth::cli", "Engine API handler initialized");
 
@@ -1170,6 +1177,7 @@ where
             config: eth_config,
             cache,
             engine_handle: beacon_engine_handle.clone(),
+            sender_recovery_cache,
         };
         let eth_api = eth_api_builder.build_eth_api(ctx).await?;
 
@@ -1348,6 +1356,8 @@ pub struct EthApiCtx<'a, N: FullNodeTypes> {
     pub config: EthConfig,
     /// Cache for eth state
     pub cache: EthStateCache<PrimitivesTy<N::Types>>,
+    /// Cache of recovered transaction senders shared by node components, if enabled.
+    pub sender_recovery_cache: Option<reth_evm::SenderRecoveryCache>,
     /// Handle to the beacon consensus engine
     pub engine_handle: ConsensusEngineHandle<<N::Types as NodeTypes>::Payload>,
 }
@@ -1359,6 +1369,7 @@ impl<'a, N: FullNodeComponents<Types: NodeTypes<ChainSpec: Hardforks + EthereumH
     pub fn eth_api_builder(self) -> reth_rpc::EthApiBuilder<N, EthRpcConverterFor<N>> {
         reth_rpc::EthApiBuilder::new_with_components(self.components.clone())
             .eth_cache(self.cache)
+            .sender_recovery_cache(self.sender_recovery_cache)
             .eth_state_cache_config(self.config.cache)
             .task_spawner(self.components.task_executor().clone())
             .gas_cap(self.config.rpc_gas_cap.into())

@@ -1,7 +1,6 @@
 //! `Eth` Sim bundle implementation and helpers.
 
 use alloy_consensus::{transaction::TxHashRef, BlockHeader};
-use alloy_eips::BlockNumberOrTag;
 use alloy_evm::{env::BlockEnvironment, overrides::apply_block_overrides};
 use alloy_primitives::U256;
 use alloy_rpc_types_eth::{BlockId, Log};
@@ -18,7 +17,7 @@ use reth_rpc_eth_api::{
     helpers::{block::LoadBlock, Call, EthTransactions},
     FromEthApiError, FromEvmError,
 };
-use reth_rpc_eth_types::{utils::recover_raw_transaction, EthApiError};
+use reth_rpc_eth_types::EthApiError;
 use reth_storage_api::ProviderTx;
 use reth_tasks::pool::BlockingTaskGuard;
 use reth_transaction_pool::{PoolPooledTx, PoolTransaction, TransactionPool};
@@ -229,7 +228,9 @@ where
             while idx < body.len() {
                 match &body[idx] {
                     BundleItem::Tx { tx, can_revert } => {
-                        let recovered_tx = recover_raw_transaction::<PoolPooledTx<Eth::Pool>>(tx)?;
+                        let recovered_tx = self
+                            .eth_api()
+                            .recover_raw_transaction::<PoolPooledTx<Eth::Pool>>(tx)?;
                         let tx = recovered_tx.map(
                             <Eth::Pool as TransactionPool>::Transaction::pooled_into_consensus,
                         );
@@ -290,7 +291,7 @@ where
         // Also, flatten the bundle here so that its easier to process
         let flattened_bundle = self.parse_and_flatten_bundle(&request)?;
 
-        let block_id = parent_block.unwrap_or(BlockId::Number(BlockNumberOrTag::Latest));
+        let block_id = parent_block.unwrap_or(BlockId::latest());
         let (parent, _, parent_block_id) =
             self.eth_api().evm_env_and_recovered_block_at(block_id).await?;
 
@@ -576,6 +577,7 @@ pub enum EthSimBundleError {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloy_eips::BlockNumberOrTag;
     use alloy_primitives::Bytes;
     use alloy_rpc_types_mev::{Inclusion, ProtocolVersion};
 

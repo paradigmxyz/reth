@@ -23,9 +23,9 @@ pub trait TraceApi<TxReq> {
         block_overrides: Option<Box<BlockOverrides>>,
     ) -> RpcResult<TraceResults>;
 
-    /// Performs multiple call traces on top of the same block. i.e. transaction n will be executed
-    /// on top of a pending block with all n-1 transactions applied (traced) first. Allows to trace
-    /// dependent transactions.
+    /// Performs multiple call traces on top of the same block, defaulting to latest when no block
+    /// is specified. Each call is executed with the preceding calls applied first, allowing
+    /// dependent transactions to be traced.
     #[method(name = "callMany")]
     async fn trace_call_many(
         &self,
@@ -69,16 +69,15 @@ pub trait TraceApi<TxReq> {
 
     /// Returns traces matching given filter.
     ///
-    /// This is similar to `eth_getLogs` but for traces.
+    /// This is similar to `eth_getLogs` but for traces. Omitted range bounds default to latest.
     #[method(name = "filter")]
     async fn trace_filter(&self, filter: TraceFilter) -> RpcResult<Vec<LocalizedTransactionTrace>>;
 
-    /// Returns transaction trace at given index.
+    /// Returns the transaction trace at the given `traceAddress` path.
     ///
-    /// `indices` represent the index positions of the traces.
-    ///
-    /// Note: This expects a list of indices but only one is supported since this function returns a
-    /// single [`LocalizedTransactionTrace`].
+    /// An empty path selects the root, `[0]` selects its first child, and `[0, 1]` selects that
+    /// child's second child. Returns `None` if the transaction or path does not exist.
+    /// Callers requiring a flat index can index the result of `trace_transaction` instead.
     #[method(name = "get")]
     async fn trace_get(
         &self,
