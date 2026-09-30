@@ -179,6 +179,30 @@ where
         })
     }
 
+    /// Sets the timestamp of the next payload built by [`Self::new_payload`] and the methods
+    /// built on it, such as [`Self::advance_block`].
+    ///
+    /// Later payloads continue from this timestamp, one second apart. The attributes generator is
+    /// called with the new timestamp, so fork-dependent attributes follow it.
+    ///
+    /// Returns an error if the timestamp is not greater than the timestamp of the current latest
+    /// block, which is the parent of the next payload.
+    pub fn set_next_payload_timestamp(&mut self, timestamp: u64) -> eyre::Result<()> {
+        let latest = self
+            .inner
+            .provider
+            .sealed_header_by_number_or_tag(BlockNumberOrTag::Latest)?
+            .ok_or_else(|| eyre!("latest block not found"))?;
+        ensure!(
+            timestamp > latest.timestamp(),
+            "next payload timestamp {timestamp} must be greater than the latest block timestamp {}",
+            latest.timestamp()
+        );
+        // The payload context increments its timestamp before generating the next attributes.
+        self.payload.timestamp = timestamp - 1;
+        Ok(())
+    }
+
     /// Creates a new payload from given attributes generator
     /// expects a payload attribute event and waits until the payload is built.
     ///
@@ -210,13 +234,21 @@ where
         Ok(payload)
     }
 
-    /// Advances the node forward one block
+    /// Advances the node forward one block by building a payload and importing it with
+    /// [`Self::import_payload`].
     pub async fn advance_block(&mut self) -> eyre::Result<Payload::BuiltPayload> {
-        let payload = self.build_and_submit_payload().await?;
+        let payload = self.new_payload().await?;
 
-        // trigger forkchoice update via engine api to commit the block to the blockchain
-        self.update_forkchoice(payload.block().hash(), payload.block().hash()).await?;
+        self.import_payload(payload.clone()).await?;
 
+        Ok(payload)
+    }
+
+    /// Advances the node forward one block like [`Self::advance_block`] and waits until the
+    /// transaction pool processed the new block, see [`Self::wait_for_pool_head`].
+    pub async fn advance_block_synced(&mut self) -> eyre::Result<Payload::BuiltPayload> {
+        let payload = self.advance_block().await?;
+        self.wait_for_pool_head(payload.block().hash()).await?;
         Ok(payload)
     }
 
@@ -364,6 +396,29 @@ where
         .await
     }
 
+    /// Waits until the transaction pool of the node processed the canonical state update that made
+    /// the block with the given hash its head.
+    ///
+    /// The pool maintenance task processes new heads in the background, so right after e.g. a
+    /// forkchoice update the pool can still contain the transactions mined in the new block or use
+    /// outdated sender nonces and pending fees. The pool updates its last seen block together with
+    /// these, so they are up to date once this returns. Exceptions are reorgs, after which the
+    /// maintenance task re-injects the transactions of the old chain only afterwards, so wait for
+    /// them with [`Self::wait_for_pool`], and commits deeper than the maximum update depth of the
+    /// maintenance task, e.g. after a long sync, which only update the last seen block.
+    ///
+    /// Returns an error if the pool does not process the block within [`WAIT_TIMEOUT`], e.g.
+    /// because the block is not the canonical head, the pool already processed a newer head, or
+    /// the block was synced by backfill, which does not notify the pool.
+    pub async fn wait_for_pool_head(&self, hash: B256) -> eyre::Result<()> {
+        let pool = &self.inner.pool;
+        poll_until(format!("transaction pool to process block {hash}"), move || {
+            let ready = pool.block_info().last_seen_block_hash == hash;
+            async move { Ok(ready.then_some(())) }
+        })
+        .await
+    }
+
     /// Asserts that a new block has been added to the blockchain and the tx has been included in
     /// the block, at any position.
     ///
@@ -454,11 +509,7 @@ where
         // The transaction pool processes the canonical state update in the background, and
         // advancing the chain before it did can fail with e.g. "nonce too low" errors. Blocks
         // synced by backfill don't notify the pool, so wait for at most a second.
-        let _ = tokio::time::timeout(
-            Duration::from_secs(1),
-            self.wait_for_pool(|pool| pool.block_info().last_seen_block_hash == block),
-        )
-        .await;
+        let _ = tokio::time::timeout(Duration::from_secs(1), self.wait_for_pool_head(block)).await;
 
         Ok(())
     }
@@ -497,6 +548,30 @@ where
     pub async fn submit_payload(&self, payload: Payload::BuiltPayload) -> eyre::Result<B256> {
         let block_hash = payload.block().hash();
         self.inner.add_ons_handle.beacon_engine_handle.new_payload(payload.into()).await?;
+
+        Ok(block_hash)
+    }
+
+    /// Submits a payload to the engine and makes its block the canonical head, returning the block
+    /// hash.
+    ///
+    /// The forkchoice update marks the block as head, safe, and finalized block, like
+    /// [`Self::advance_block`] does, so the node can't reorg to a chain without the block
+    /// afterwards. The engine only reports the forkchoice update valid after making the head
+    /// canonical, so the block is the latest block of the node once this returns. The transaction
+    /// pool processes the new block in the background, see [`Self::wait_for_pool`].
+    ///
+    /// The parent of the payload must be known to the node, e.g. to import a payload built by
+    /// another node into its peers. Returns an error if the engine does not report the forkchoice
+    /// update valid, e.g. because the payload is invalid.
+    pub async fn import_payload(&self, payload: Payload::BuiltPayload) -> eyre::Result<B256> {
+        let block_hash = self.submit_payload(payload).await?;
+        let updated = self.update_forkchoice(block_hash, block_hash).await?;
+        ensure!(
+            updated.is_valid(),
+            "forkchoice update to block {block_hash} is not valid: {}",
+            updated.payload_status.status
+        );
 
         Ok(block_hash)
     }
@@ -633,15 +708,19 @@ where
 mod tests {
     use super::*;
     use crate::NodeHelperType;
-    use reth_node_ethereum::EthereumNode;
+    use reth_node_ethereum::{EthEngineTypes, EthereumNode};
 
     fn assert_send<T: Send>(_: T) {}
 
     /// Tests of downstream nodes await these helpers in spawned tasks, so their futures must be
     /// `Send`.
     #[expect(dead_code)]
-    fn test_helper_futures_are_send(node: &mut NodeHelperType<EthereumNode>) {
+    fn test_helper_futures_are_send(
+        node: &mut NodeHelperType<EthereumNode>,
+        payload: <EthEngineTypes as PayloadTypes>::BuiltPayload,
+    ) {
         assert_send(node.advance_block());
+        assert_send(node.advance_block_synced());
         assert_send(node.inject_and_advance(Bytes::new()));
         assert_send(node.advance_blocks(0));
         assert_send(node.advance_until_receipt(B256::ZERO));
@@ -649,7 +728,9 @@ mod tests {
         assert_send(node.wait_block(0, B256::ZERO, false));
         assert_send(node.wait_unwind(0));
         assert_send(node.wait_for_pool(|_| true));
+        assert_send(node.wait_for_pool_head(B256::ZERO));
         assert_send(node.assert_new_block(B256::ZERO, B256::ZERO, 0));
         assert_send(node.sync_to(B256::ZERO));
+        assert_send(node.import_payload(payload));
     }
 }

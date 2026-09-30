@@ -51,11 +51,9 @@ async fn can_handle_blobs() -> eyre::Result<()> {
     let block_hash = node.submit_payload(payload).await?;
     node.update_forkchoice(genesis_hash, block_hash).await?;
 
-    // wait for the pool to process the reorg, which re-injects the blob tx
-    node.wait_for_pool(|pool| {
-        pool.block_info().last_seen_block_hash == block_hash && pool.contains(&blob_tx_hash)
-    })
-    .await?;
+    // wait for the pool to process the reorg, and then re-inject the blob tx
+    node.wait_for_pool_head(block_hash).await?;
+    node.wait_for_pool(|pool| pool.contains(&blob_tx_hash)).await?;
 
     // expects the blob tx to be back in the pool
     let envelope = node.rpc.envelope_by_hash(blob_tx_hash).await?;
@@ -70,7 +68,6 @@ async fn can_send_legacy_sidecar_post_activation() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
 
     let chain_spec = test_chain_spec(EthereumHardfork::Osaka);
-    let genesis_hash = chain_spec.genesis_hash();
     let (mut node, wallet) = EthereumNode::test_setup(1, chain_spec)
         .with_rpc_modifier(|rpc| rpc.with_force_blob_sidecar_upcasting())
         .build_single()
@@ -94,10 +91,8 @@ async fn can_send_legacy_sidecar_post_activation() -> eyre::Result<()> {
     // build a payload
     let blob_payload = node.new_payload().await?;
 
-    // submit the blob payload
-    let blob_block_hash = node.submit_payload(blob_payload).await?;
-
-    node.update_forkchoice(genesis_hash, blob_block_hash).await?;
+    // import the blob payload
+    node.import_payload(blob_payload).await?;
 
     Ok(())
 }
@@ -113,7 +108,6 @@ async fn blob_conversion_at_osaka() -> eyre::Result<()> {
     let chain_spec = Arc::new(
         test_chain_spec_builder().prague_activated().with_osaka_at(osaka_timestamp).build(),
     );
-    let genesis_hash = chain_spec.genesis_hash();
     let (mut node, wallet) = EthereumNode::test_setup(1, chain_spec)
         .with_rpc_modifier(|rpc| rpc.with_force_blob_sidecar_upcasting())
         .build_single()
@@ -122,8 +116,9 @@ async fn blob_conversion_at_osaka() -> eyre::Result<()> {
     // build a dummy payload at `current_timestamp`
     let raw_tx = TransactionTestContext::transfer_tx_bytes(1, wallet.signer(0)).await;
     node.rpc.inject_tx(raw_tx).await?;
-    node.payload.timestamp = current_timestamp - 1;
-    node.advance_block().await?;
+    node.set_next_payload_timestamp(current_timestamp)?;
+    let dummy_payload = node.advance_block().await?;
+    assert_eq!(dummy_payload.block().timestamp, current_timestamp);
 
     // build blob txs
     let first_blob = TransactionTestContext::tx_with_blobs_bytes(1, wallet.signer(1)).await?;
@@ -155,8 +150,9 @@ async fn blob_conversion_at_osaka() -> eyre::Result<()> {
     TransactionTestContext::validate_sidecar(envelope);
 
     // build last Prague payload
-    node.payload.timestamp = current_timestamp + 1;
+    node.set_next_payload_timestamp(current_timestamp + 2)?;
     let prague_payload = node.new_payload().await?;
+    assert_eq!(prague_payload.block().timestamp, current_timestamp + 2);
     assert!(matches!(prague_payload.sidecars(), BlobSidecars::Eip4844(_)));
 
     // inject second blob tx to the pool
@@ -181,18 +177,19 @@ async fn blob_conversion_at_osaka() -> eyre::Result<()> {
     // validate sidecar
     TransactionTestContext::validate_sidecar(envelope);
 
-    // submit the Prague payload
-    node.update_forkchoice(genesis_hash, node.submit_payload(prague_payload).await?).await?;
+    // import the Prague payload
+    node.import_payload(prague_payload).await?;
 
     // Build first Osaka payload
-    node.payload.timestamp = osaka_timestamp - 1;
+    node.set_next_payload_timestamp(osaka_timestamp)?;
     let osaka_payload = node.new_payload().await?;
+    assert_eq!(osaka_payload.block().timestamp, osaka_timestamp);
 
     // Assert that it includes the second blob tx with eip7594 sidecar
     assert!(osaka_payload.block().body().transactions().any(|tx| *tx.hash() == blob_tx_hash));
     assert!(matches!(osaka_payload.sidecars(), BlobSidecars::Eip7594(_)));
 
-    node.update_forkchoice(genesis_hash, node.submit_payload(osaka_payload).await?).await?;
+    node.import_payload(osaka_payload).await?;
 
     Ok(())
 }
