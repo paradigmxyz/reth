@@ -333,13 +333,14 @@ fn verify_proof(
 }
 
 #[cfg(test)]
+#[allow(clippy::clone_on_copy)]
 mod tests {
     use super::{request::MAX_RETRIES, test_utils::TestSnapClient, *};
     use alloy_primitives::{Bytes, U256};
     use reth_eth_wire_types::snap::ByteCodesMessage;
     use reth_network_p2p::{error::PeerRequestResult, priority::Priority};
     use reth_network_peers::WithPeerId;
-    use reth_trie_common::{proof::ProofRetainer, HashBuilder, Nibbles};
+    use reth_trie_common::{proof::ProofRetainer, root::state_root, HashBuilder, Nibbles};
     use std::sync::Arc;
 
     const MAX_HASH: B256 = B256::new([0xff; B256::len_bytes()]);
@@ -353,11 +354,7 @@ mod tests {
     }
 
     fn root(accounts: &[(B256, TrieAccount)]) -> B256 {
-        let mut builder = HashBuilder::default();
-        for (key, account) in accounts {
-            builder.add_leaf(Nibbles::unpack(*key), &alloy_rlp::encode(account));
-        }
-        builder.root()
+        state_root(accounts.to_vec())
     }
 
     fn root_and_proof(accounts: &[(B256, TrieAccount)], targets: &[B256]) -> (B256, Vec<Bytes>) {
@@ -587,7 +584,7 @@ mod tests {
             AccountRangeOutcome::Verified(VerifiedAccountRange {
                 state_root: root_hash,
                 origin: B256::ZERO,
-                accounts: vec![accounts[0]],
+                accounts: vec![accounts[0].clone()],
                 has_more: false,
                 next: Some(key(3)),
             })
@@ -732,7 +729,7 @@ mod tests {
             AccountRangeOutcome::Verified(VerifiedAccountRange {
                 state_root: root_hash,
                 origin: B256::ZERO,
-                accounts: vec![accounts[0]],
+                accounts: vec![accounts[0].clone()],
                 has_more: false,
                 next: Some(key(9)),
             })
@@ -760,7 +757,7 @@ mod tests {
             AccountRangeOutcome::Verified(VerifiedAccountRange {
                 state_root: root_hash,
                 origin: B256::ZERO,
-                accounts: vec![accounts[0]],
+                accounts: vec![accounts[0].clone()],
                 has_more: true,
                 next: Some(key(3)),
             })

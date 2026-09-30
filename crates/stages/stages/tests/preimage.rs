@@ -496,7 +496,7 @@ fn setup_create2_selfdestruct_scenario() -> eyre::Result<Create2SelfdestructScen
     let signer_address = public_key_to_address(key_pair.public_key());
     let factory_contract = Address::new([0xaa; 20]);
     let child_init = CREATE2_SELFDESTRUCT_INIT_CODE;
-    let child_contract = create2_address(factory_contract, TEST_CREATE2_SALT, &child_init);
+    let child_contract = factory_contract.create2_from_code(TEST_CREATE2_SALT, &child_init);
     let chain_spec = Arc::new(
         ChainSpecBuilder::default()
             .chain(MAINNET.chain)
@@ -706,7 +706,7 @@ fn setup_same_address_double_wipe_scenario() -> eyre::Result<SameAddressDoubleWi
     let signer_address = public_key_to_address(key_pair.public_key());
     let factory_contract = Address::new([0xaa; 20]);
     let child_init = init_code_for_runtime(&WRITE_OR_SELFDESTRUCT_RUNTIME_CODE);
-    let child_contract = create2_address(factory_contract, TEST_CREATE2_SALT, &child_init);
+    let child_contract = factory_contract.create2_from_code(TEST_CREATE2_SALT, &child_init);
 
     let chain_spec = Arc::new(
         ChainSpecBuilder::default()
@@ -802,7 +802,7 @@ fn setup_same_address_recreate_and_write_same_block_then_wipe_scenario(
     let signer_address = public_key_to_address(key_pair.public_key());
     let factory_contract = Address::new([0xaa; 20]);
     let child_init = init_code_for_runtime(&WRITE_TWO_SLOT_SETS_OR_SELFDESTRUCT_RUNTIME_CODE);
-    let child_contract = create2_address(factory_contract, TEST_CREATE2_SALT, &child_init);
+    let child_contract = factory_contract.create2_from_code(TEST_CREATE2_SALT, &child_init);
 
     let chain_spec = Arc::new(
         ChainSpecBuilder::default()
@@ -1456,18 +1456,6 @@ const CREATE2_FACTORY_RUNTIME_CODE: Bytes = bytes!(
     "7f0000000000000000000000000000000000000000000000000000000000000042" // PUSH32 salt
     "3660006000f500" // CREATE2(0, 0, calldatasize, salt); STOP
 );
-
-fn create2_address(factory: Address, salt: B256, init_code: &Bytes) -> Address {
-    let init_hash = keccak256(init_code.as_ref());
-    let mut preimage = [0_u8; 85];
-    preimage[0] = 0xff;
-    preimage[1..21].copy_from_slice(factory.as_slice());
-    preimage[21..53].copy_from_slice(salt.as_slice());
-    preimage[53..85].copy_from_slice(init_hash.as_slice());
-
-    let hash = keccak256(preimage);
-    Address::from_slice(&hash.as_slice()[12..])
-}
 
 fn assert_preimage_rows(preimage_path: &Path, slots: &[B256]) -> eyre::Result<()> {
     let mut builder = Environment::builder();

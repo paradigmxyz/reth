@@ -52,7 +52,7 @@ impl BalStateUpdate {
 }
 
 /// What the downloaded state holds for an account a list changes.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum DownloadedAccount {
     /// The account's range is not downloaded yet.
     Unknown,
@@ -152,7 +152,10 @@ mod tests {
 
         let update = apply(&changes, DownloadedAccount::Absent);
 
-        assert_eq!(update.state.accounts[&keccak256(ACCOUNT)].unwrap().balance, U256::from(10));
+        assert_eq!(
+            update.state.accounts[&keccak256(ACCOUNT)].as_ref().unwrap().balance,
+            U256::from(10)
+        );
         assert!(update.state.storages.is_empty());
     }
 
@@ -172,14 +175,14 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::clone_on_copy)]
     fn untouched_fields_keep_their_downloaded_values() {
-        let existing =
-            Account { balance: U256::from(9), nonce: 4, bytecode_hash: Some(B256::repeat_byte(1)) };
+        let existing = Account::new(4, U256::from(9), Some(B256::repeat_byte(1)));
         let changes = AccountChanges::new(ACCOUNT)
             .with_balance_change(BalanceChange::new(index(1), U256::from(10)))
             .with_balance_change(BalanceChange::new(index(2), U256::from(20)));
 
-        let update = apply(&changes, DownloadedAccount::Present(existing));
+        let update = apply(&changes, DownloadedAccount::Present(existing.clone()));
         assert_eq!(
             update.state.accounts[&keccak256(ACCOUNT)],
             Some(Account { balance: U256::from(20), ..existing })
@@ -195,8 +198,7 @@ mod tests {
 
     #[test]
     fn zeroed_slots_and_cleared_code_are_written() {
-        let existing =
-            Account { balance: U256::from(1), nonce: 1, bytecode_hash: Some(B256::repeat_byte(1)) };
+        let existing = Account::new(1, U256::from(1), Some(B256::repeat_byte(1)));
         let changes = AccountChanges::new(ACCOUNT)
             .with_code_change(CodeChange::new(index(1), bytes!("6001")))
             .with_code_change(CodeChange::new(index(2), Bytes::new()))
@@ -211,7 +213,7 @@ mod tests {
         let update = apply(&changes, DownloadedAccount::Present(existing));
 
         let hashed_address = keccak256(ACCOUNT);
-        assert_eq!(update.state.accounts[&hashed_address].unwrap().bytecode_hash, None);
+        assert_eq!(update.state.accounts[&hashed_address].as_ref().unwrap().bytecode_hash, None);
         assert_eq!(
             update.state.storages[&hashed_address],
             HashedStorage::from_iter([(keccak256(B256::from(U256::from(1))), U256::ZERO)])
@@ -247,6 +249,7 @@ mod tests {
         state
     }
 
+    #[allow(clippy::clone_on_copy)]
     fn fold(mut state: FlatState, update: &HashedPostState) -> FlatState {
         for (hashed_address, storage) in &update.storages {
             for (slot, value) in &storage.storage {
@@ -260,7 +263,7 @@ mod tests {
         for (hashed_address, account) in &update.accounts {
             match account {
                 Some(account) => {
-                    state.0.insert(*hashed_address, *account);
+                    state.0.insert(*hashed_address, account.clone());
                 }
                 None => {
                     state.0.remove(hashed_address);
@@ -330,6 +333,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::clone_on_copy)]
     fn applying_the_list_matches_execution() {
         let contract = Address::repeat_byte(0xc0);
         let beneficiary = Address::repeat_byte(0xbe);
@@ -403,7 +407,7 @@ mod tests {
         let update = state_update(
             &bal,
             AccountCoverage::COMPLETE,
-            pre.0.iter().map(|(address, account)| (*address, *account)),
+            pre.0.iter().map(|(address, account)| (*address, account.clone())),
         );
         let executed = HashedPostState::from_bundle_state::<KeccakKeyHasher>(bundle.state());
 

@@ -15,6 +15,7 @@ pub mod setup;
 use crate::testsuite::setup::Setup;
 use alloy_provider::{Provider, ProviderBuilder};
 use alloy_rpc_types_engine::{ForkchoiceState, PayloadAttributes};
+use reth_chainspec::ChainSpec;
 use reth_engine_primitives::ConsensusEngineHandle;
 use reth_provider::{BlockNumReader, ProviderResult};
 use reth_rpc_builder::auth::AuthServerHandle;
@@ -391,7 +392,7 @@ where
     /// Run the test scenario
     pub async fn run<N>(mut self) -> Result<()>
     where
-        N: NodeBuilderHelper<Payload = I>,
+        N: NodeBuilderHelper<Payload = I, ChainSpec: From<ChainSpec>>,
     {
         let mut setup = self.setup.take();
 
