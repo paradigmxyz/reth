@@ -221,6 +221,9 @@ pub struct DatabaseProvider<TX, N: NodeTypes> {
     db_path: PathBuf,
     /// Pending `RocksDB` batches to be committed at provider commit time.
     pending_rocksdb_batches: PendingRocksDBBatches,
+    /// Sorted trie files awaiting a durable commit.
+    #[cfg(feature = "state-trie-rocksdb")]
+    pending_state_trie_ssts: parking_lot::Mutex<Vec<tempfile::TempDir>>,
     /// Commit order for database operations.
     commit_order: CommitOrder,
     /// Minimum distance from tip required for pruning
@@ -298,6 +301,10 @@ impl<TX: DbTx + 'static, N: NodeTypes> DatabaseProvider<TX, N> {
             for batch in batches {
                 self.rocksdb_provider.commit_batch(batch)?;
             }
+            #[cfg(feature = "state-trie-rocksdb")]
+            self.rocksdb_provider.ingest_state_trie_ssts(std::mem::take(
+                &mut *self.pending_state_trie_ssts.lock(),
+            ))?;
         }
 
         self.static_file_provider.commit()?;
@@ -351,6 +358,9 @@ impl<TX, N: NodeTypes> RocksDBProviderFactory for DatabaseProvider<TX, N> {
         for batch in batches {
             self.rocksdb_provider.commit_batch(batch)?;
         }
+        #[cfg(feature = "state-trie-rocksdb")]
+        self.rocksdb_provider
+            .ingest_state_trie_ssts(std::mem::take(&mut *self.pending_state_trie_ssts.lock()))?;
         Ok(())
     }
 }
@@ -399,6 +409,8 @@ impl<TX: DbTxMut, N: NodeTypes> DatabaseProvider<TX, N> {
             db_path,
             rocksdb_history_snapshot: OnceLock::new(),
             pending_rocksdb_batches: Default::default(),
+            #[cfg(feature = "state-trie-rocksdb")]
+            pending_state_trie_ssts: Default::default(),
             commit_order,
             minimum_pruning_distance: MINIMUM_UNWIND_SAFE_DISTANCE,
             metrics,
@@ -485,9 +497,8 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
         reth_trie_db::write_state_trie_updates(self.tx_ref(), updates)?;
         #[cfg(feature = "state-trie-rocksdb")]
         if !updates.is_empty() {
-            let mut batch = self.rocksdb_provider.batch();
-            batch.write_state_trie_updates(updates)?;
-            self.set_pending_rocksdb_batch(batch.into_inner());
+            let files = self.rocksdb_provider.stage_state_trie_ssts(updates)?;
+            self.pending_state_trie_ssts.lock().push(files);
         }
         Ok(())
     }
@@ -1079,6 +1090,8 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> DatabaseProvider<TX, N> {
             db_path,
             rocksdb_history_snapshot: OnceLock::new(),
             pending_rocksdb_batches: Default::default(),
+            #[cfg(feature = "state-trie-rocksdb")]
+            pending_state_trie_ssts: Default::default(),
             commit_order: CommitOrder::Normal,
             minimum_pruning_distance: MINIMUM_UNWIND_SAFE_DISTANCE,
             metrics,
@@ -4214,6 +4227,10 @@ impl<TX: DbTx + 'static, N: NodeTypes + 'static> DBProvider for DatabaseProvider
             for batch in batches {
                 self.rocksdb_provider.commit_batch(batch)?;
             }
+            #[cfg(feature = "state-trie-rocksdb")]
+            self.rocksdb_provider.ingest_state_trie_ssts(std::mem::take(
+                &mut *self.pending_state_trie_ssts.lock(),
+            ))?;
             timings.rocksdb = start.elapsed();
 
             #[cfg(any(feature = "state-trie-rocksdb", feature = "legacy-trie-rocksdb"))]

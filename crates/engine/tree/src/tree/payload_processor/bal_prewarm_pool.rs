@@ -149,7 +149,8 @@ impl BalPrewarmPool {
 /// time to finish is 312.5ms at QD=32 and 156.26ms at QD=64.
 ///
 /// This should explain why this particular value is picked.
-pub const DEFAULT_BAL_PREWARM_THREADS: usize = 128;
+pub const DEFAULT_BAL_PREWARM_THREADS: usize =
+    if cfg!(feature = "state-trie-rocksdb") { 64 } else { 128 };
 
 /// Number of storage slots carried by one warm message.
 ///

@@ -1,6 +1,10 @@
 # Selected overlapping RocksDB baseline
 
-The selected baseline is the application source at `e7bade20a`, without the
+For the latest retained implementation and BAL measurements, see the
+[complete-trie BAL optimization](state-trie-rocksdb-bal-optimization.md).
+This page records the preceding baseline.
+
+That baseline is the application source at `e7bade20a`, without the
 uncommitted proof shortcut captured in `reth-bb-drainrocks`. It retains the
 RocksDB read/cache/layout improvements, early signature recovery, exact overlay
 hits, and the persistence/pruning shutdown barrier. The later `RAYON_NUM_THREADS`

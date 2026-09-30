@@ -1,13 +1,15 @@
 use super::*;
 use reth_trie_common::{StateTrieBuilder, StateTrieNode};
 
-fn complete_nodes(storage: &BTreeMap<B256, U256>) -> BTreeMap<Nibbles, StateTrieNode<Vec<u8>>> {
+fn complete_nodes(
+    storage: &BTreeMap<B256, U256>,
+) -> BTreeMap<Nibbles, StateTrieNode<smallvec::SmallVec<[u8; 16]>>> {
     let mut builder = StateTrieBuilder::default();
     let mut nodes = BTreeMap::new();
     let mut write = |path, node| {
         let node = match node {
             StateTrieNode::Leaf { short_key_len, value } => {
-                StateTrieNode::Leaf { short_key_len, value: alloy_rlp::encode(value) }
+                StateTrieNode::Leaf { short_key_len, value: alloy_rlp::encode(value).into() }
             }
             StateTrieNode::Branch { short_key_len, state_mask, children } => {
                 StateTrieNode::Branch { short_key_len, state_mask, children }

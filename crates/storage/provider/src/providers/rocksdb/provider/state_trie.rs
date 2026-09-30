@@ -221,6 +221,122 @@ impl RocksDBBatch<'_> {
     }
 }
 
+#[cfg(feature = "state-trie-rocksdb")]
+impl super::RocksDBProvider {
+    /// Builds immutable update files without making them visible to readers.
+    pub(crate) fn stage_state_trie_ssts(
+        &self,
+        updates: &StateTrieUpdatesSorted,
+    ) -> ProviderResult<tempfile::TempDir> {
+        use reth_db_api::table::Compress;
+        use rocksdb::SstFileWriter;
+        let dir = tempfile::Builder::new()
+            .prefix("state-trie-")
+            .tempdir_in(self.0.path())
+            .map_err(reth_storage_errors::provider::ProviderError::other)?;
+        let options = super::RocksDBBuilder::state_trie_column_family_options(
+            &rocksdb::Cache::new_lru_cache(0),
+            false,
+        );
+        let (accounts, storages) = rayon::join(
+            || -> Result<(), rocksdb::Error> {
+                if updates.account_nodes.is_empty() {
+                    return Ok(())
+                }
+                let mut writer = SstFileWriter::create(&options);
+                writer.open(dir.path().join("accounts.sst"))?;
+                let mut buf = Vec::new();
+                for (path, node) in &updates.account_nodes {
+                    let key = PackedStoredNibbles(*path).encode();
+                    if let Some(node) = node {
+                        buf.clear();
+                        node.compress_to_buf(&mut buf);
+                        writer.put(key.as_ref(), &buf)?;
+                    } else {
+                        writer.delete(key.as_ref())?;
+                    }
+                }
+                writer.finish()
+            },
+            || -> Result<(), rocksdb::Error> {
+                let mut storages: Vec<_> =
+                    updates.storage_tries.iter().filter(|(_, nodes)| !nodes.is_empty()).collect();
+                if storages.is_empty() {
+                    return Ok(())
+                }
+                storages.sort_unstable_by_key(|(address, _)| **address);
+                let mut writer = SstFileWriter::create(&options);
+                writer.open(dir.path().join("storages.sst"))?;
+                let mut buf = Vec::new();
+                for (address, nodes) in storages {
+                    for (path, node) in nodes {
+                        let key = StateTrieStorageKey { address: *address, path: (*path).into() }
+                            .encode();
+                        if let Some(node) = node {
+                            buf.clear();
+                            node.compress_to_buf(&mut buf);
+                            writer.put(key.as_ref(), &buf)?;
+                        } else {
+                            writer.delete(key.as_ref())?;
+                        }
+                    }
+                }
+                writer.finish()
+            },
+        );
+        accounts.and(storages).map_err(|e| DatabaseError::Other(e.to_string()))?;
+        // SstFileWriter evicts its output from the OS page cache. These files become
+        // active state immediately, so load them before publishing the new snapshot.
+        let warm = |name| -> ProviderResult<u64> {
+            let path = dir.path().join(name);
+            if !path.try_exists().map_err(reth_storage_errors::provider::ProviderError::other)? {
+                return Ok(0)
+            }
+            let file = reth_fs_util::open(&path)
+                .map_err(reth_storage_errors::provider::ProviderError::other)?;
+            let mut reader = std::io::BufReader::with_capacity(1 << 20, file);
+            std::io::copy(&mut reader, &mut std::io::sink())
+                .map_err(reth_storage_errors::provider::ProviderError::other)
+        };
+        let (accounts, storages) = rayon::join(|| warm("accounts.sst"), || warm("storages.sst"));
+        let bytes = accounts? + storages?;
+        tracing::debug!(target: "engine::persistence", state_trie_sst_bytes = bytes, "Staged state trie SST files");
+        Ok(dir)
+    }
+
+    /// Installs durable updates before the caller publishes its MDBX checkpoint and snapshot.
+    pub(crate) fn ingest_state_trie_ssts(
+        &self,
+        files: Vec<tempfile::TempDir>,
+    ) -> ProviderResult<()> {
+        let mut options = rocksdb::IngestExternalFileOptions::default();
+        options.set_move_files(true);
+        options.set_snapshot_consistency(true);
+        options.set_allow_global_seqno(true);
+        for dir in files {
+            for (table, name) in [
+                (tables::StateTrieAccounts::NAME, "accounts.sst"),
+                (tables::RocksStateTrieStorages::NAME, "storages.sst"),
+            ] {
+                let path = dir.path().join(name);
+                if !path
+                    .try_exists()
+                    .map_err(reth_storage_errors::provider::ProviderError::other)?
+                {
+                    continue
+                }
+                let db = self.0.db_rw();
+                let cf = db
+                    .cf_handle(table)
+                    .ok_or_else(|| DatabaseError::Other(format!("missing {table}")))?;
+                db.ingest_external_file_cf_opts(cf, &options, vec![path])
+                    .map_err(|e| DatabaseError::Other(e.to_string()))?;
+            }
+        }
+        Ok(())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -250,6 +366,105 @@ mod tests {
             assert_eq!(rocks.seek(path).unwrap(), mdbx.seek(path).unwrap());
             assert_eq!(rocks.before(Some(path)).unwrap(), mdbx.before(Some(path)).unwrap());
         }
+    }
+
+    #[cfg(feature = "state-trie-rocksdb")]
+    #[test]
+    fn state_trie_sst_snapshots_abort_and_process_exit() {
+        const CHILD_PATH: &str = "RETH_STATE_TRIE_SST_TEST_PATH";
+        let path = Nibbles::unpack(B256::repeat_byte(1));
+        let removed = Nibbles::unpack(B256::repeat_byte(2));
+        let address = B256::repeat_byte(3);
+        let storage_key = StateTrieStorageKey { address, path: path.into() };
+        let old_slot = StateTrieNode::Leaf { short_key_len: 64, value: U256::from(7) };
+        let account = |nonce| StateTrieNode::Leaf {
+            short_key_len: 64,
+            value: TrieAccount { nonce, ..Default::default() },
+        };
+        if let Some(dir) = std::env::var_os(CHILD_PATH) {
+            let rocks = super::super::RocksDBProvider::builder(std::path::PathBuf::from(dir))
+                .with_default_tables()
+                .build()
+                .unwrap();
+            let mut batch = rocks.batch();
+            for key in [path, removed] {
+                batch.put::<tables::StateTrieAccounts>(key.into(), &account(1)).unwrap();
+            }
+            batch.put::<tables::RocksStateTrieStorages>(storage_key, &old_slot).unwrap();
+            batch.commit().unwrap();
+            let old = rocks.snapshot();
+            let updates = |nonce| StateTrieUpdatesSorted {
+                account_nodes: vec![(path, Some(account(nonce))), (removed, None)],
+                storage_tries: std::iter::once((
+                    address,
+                    vec![
+                        (path, None),
+                        (
+                            removed,
+                            Some(StateTrieNode::Leaf {
+                                short_key_len: 64,
+                                value: U256::from(nonce),
+                            }),
+                        ),
+                    ],
+                ))
+                .collect(),
+            };
+            let empty = rocks.stage_state_trie_ssts(&StateTrieUpdatesSorted::default()).unwrap();
+            rocks.ingest_state_trie_ssts(vec![empty]).unwrap();
+            let discarded = rocks.stage_state_trie_ssts(&updates(9)).unwrap();
+            let discarded_path = discarded.path().to_path_buf();
+            drop(discarded);
+            assert!(!discarded_path.exists());
+            let first = rocks.stage_state_trie_ssts(&updates(2)).unwrap();
+            let second = rocks.stage_state_trie_ssts(&updates(3)).unwrap();
+            assert_eq!(
+                rocks.get::<tables::StateTrieAccounts>(path.into()).unwrap(),
+                Some(account(1))
+            );
+            rocks.ingest_state_trie_ssts(vec![first, second]).unwrap();
+            assert_eq!(
+                old.state_trie_account_cursor().unwrap().get(path).unwrap(),
+                Some(account(1))
+            );
+            assert_eq!(
+                old.state_trie_account_cursor().unwrap().get(removed).unwrap(),
+                Some(account(1))
+            );
+            assert_eq!(
+                old.state_trie_storage_cursor(address).unwrap().get(path).unwrap(),
+                Some(old_slot)
+            );
+            assert_eq!(old.state_trie_storage_cursor(address).unwrap().get(removed).unwrap(), None);
+            assert_eq!(
+                rocks.get::<tables::StateTrieAccounts>(path.into()).unwrap(),
+                Some(account(3))
+            );
+            assert_eq!(rocks.get::<tables::StateTrieAccounts>(removed.into()).unwrap(), None);
+            // No provider/destructor flush: ingestion must already be durable.
+            std::process::exit(0);
+        }
+        let dir = tempfile::tempdir().unwrap();
+        let status = std::process::Command::new(std::env::current_exe().unwrap())
+            .args(["--exact", "providers::rocksdb::provider::state_trie::tests::state_trie_sst_snapshots_abort_and_process_exit"])
+            .env(CHILD_PATH, dir.path()).status().unwrap();
+        assert!(status.success());
+        let rocks = super::super::RocksDBProvider::builder(dir.path())
+            .with_default_tables()
+            .build()
+            .unwrap();
+        assert_eq!(rocks.get::<tables::StateTrieAccounts>(path.into()).unwrap(), Some(account(3)));
+        assert_eq!(rocks.get::<tables::StateTrieAccounts>(removed.into()).unwrap(), None);
+        assert_eq!(rocks.get::<tables::RocksStateTrieStorages>(storage_key).unwrap(), None);
+        assert_eq!(
+            rocks
+                .get::<tables::RocksStateTrieStorages>(StateTrieStorageKey {
+                    address,
+                    path: removed.into(),
+                })
+                .unwrap(),
+            Some(StateTrieNode::Leaf { short_key_len: 64, value: U256::from(3) })
+        );
     }
 
     #[test]

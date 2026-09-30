@@ -12,11 +12,7 @@ use crate::{
     LeafLookup, LeafLookupError, LeafUpdate, SparseTrie, SparseTrieUpdates, TrieNodeEpoch,
 };
 use alloc::{borrow::Cow, boxed::Box, collections::VecDeque, vec::Vec};
-use alloy_primitives::{
-    keccak256,
-    map::{B256Map, HashMap},
-    B256,
-};
+use alloy_primitives::{keccak256, map::B256Map, B256};
 use alloy_trie::TrieMask;
 use core::{cmp::Reverse, mem};
 use reth_execution_errors::SparseTrieResult;
@@ -87,7 +83,7 @@ fn compact_arena(arena: &mut NodeArena, root: &mut Index) {
     *root = new_root;
 }
 
-type RawStateTrieUpdates = HashMap<Nibbles, Option<StateTrieNode<Vec<u8>>>>;
+type RawStateTrieUpdates = StateTrieNodes<smallvec::SmallVec<[u8; 16]>>;
 
 /// Reusable traversal state and optional accumulators shared by
 /// [`ArenaSparseSubtrie`] and [`ArenaParallelSparseTrie`].
@@ -152,7 +148,7 @@ impl ArenaSparseSubtrie {
             arena.insert(ArenaSparseNode::EmptyRoot { state: ArenaSparseNodeState::Revealed });
         let buffers = ArenaTrieBuffers {
             updates: record_updates.then(SparseTrieUpdates::default),
-            state_updates: record_state_updates.then(HashMap::default),
+            state_updates: record_state_updates.then(Vec::new),
             ..Default::default()
         };
         Box::new(Self {
@@ -807,7 +803,7 @@ impl ArenaParallelSparseTrie {
 
             if count == 0 {
                 if let Some(updates) = &mut self.buffers.state_updates {
-                    updates.insert(cursor.head_logical_branch_path(&self.upper_arena), None);
+                    updates.push((cursor.head_logical_branch_path(&self.upper_arena), None));
                 }
                 if branch_idx == self.root {
                     self.upper_arena[branch_idx] =
@@ -910,8 +906,10 @@ impl ArenaParallelSparseTrie {
     /// stay consistent.
     fn merge_subtrie_updates(dst: &mut ArenaTrieBuffers, src: &mut ArenaTrieBuffers) {
         if let Some(dst_updates) = dst.state_updates.as_mut() {
-            dst_updates
-                .extend(src.state_updates.as_mut().expect("state updates are enabled").drain());
+            let src_updates = src.state_updates.as_mut().expect("state updates are enabled");
+            if !src_updates.is_empty() {
+                dst_updates.append(src_updates);
+            }
         }
         if let Some(dst_updates) = dst.updates.as_mut() {
             let src_updates = src.updates.as_mut().expect("updates are enabled");
@@ -1138,14 +1136,14 @@ impl ArenaParallelSparseTrie {
             }
 
             if was_dirty && let Some(updates) = state_updates.as_mut() {
-                updates.insert(
+                updates.push((
                     head_path.join(&short_key),
                     Some(StateTrieNode::Branch {
                         short_key_len: short_key.len() as u8,
                         state_mask,
                         children: rlp_node_buf.clone(),
                     }),
-                );
+                ));
             }
             rlp_buf.clear();
             let rlp_node = BranchNodeRef::new(rlp_node_buf, state_mask).rlp(rlp_buf);
@@ -1346,10 +1344,13 @@ impl ArenaParallelSparseTrie {
         if matches!(state, ArenaSparseNodeState::Dirty) &&
             let Some(updates) = state_updates
         {
-            updates.insert(
+            updates.push((
                 path.join(key),
-                Some(StateTrieNode::Leaf { short_key_len: key.len() as u8, value: value.clone() }),
-            );
+                Some(StateTrieNode::Leaf {
+                    short_key_len: key.len() as u8,
+                    value: SmallVec::from_slice(value),
+                }),
+            ));
         }
         rlp_buf.clear();
         let rlp_node = LeafNodeRef { key, value }.rlp(rlp_buf);
@@ -1644,7 +1645,7 @@ impl ArenaParallelSparseTrie {
                 }
 
                 if let Some(updates) = state_updates {
-                    updates.insert(*full_path, None);
+                    updates.push((*full_path, None));
                 }
 
                 // Check if the removed leaf was dirty before removing it.
@@ -1812,7 +1813,7 @@ impl ArenaParallelSparseTrie {
         );
 
         if let Some(updates) = state_updates {
-            updates.insert(cursor.head_logical_branch_path(arena), None);
+            updates.push((cursor.head_logical_branch_path(arena), None));
         }
 
         // Record the collapsed branch's logical path for trie update tracking if it
@@ -2221,18 +2222,23 @@ impl SparseTrie for ArenaParallelSparseTrie {
     }
 
     fn set_state_trie_updates(&mut self, retain: bool) {
-        self.buffers.state_updates = retain.then(HashMap::default);
+        self.buffers.state_updates = retain.then(Vec::new);
         for (_, node) in &mut self.upper_arena {
             if let ArenaSparseNode::Subtrie(subtrie) = node {
-                subtrie.buffers.state_updates = retain.then(HashMap::default);
+                subtrie.buffers.state_updates = retain.then(Vec::new);
             }
         }
     }
 
-    fn take_state_trie_updates(&mut self) -> StateTrieNodes<Vec<u8>> {
-        let mut updates: Vec<_> =
-            self.buffers.state_updates.as_mut().map(|u| u.drain().collect()).unwrap_or_default();
-        updates.sort_unstable_by_key(|(p, _)| *p);
+    fn take_state_trie_updates(&mut self) -> StateTrieNodes<smallvec::SmallVec<[u8; 16]>> {
+        let Some(updates) = self.buffers.state_updates.as_mut().filter(|u| !u.is_empty()) else {
+            return Vec::new()
+        };
+        let mut updates = mem::take(updates);
+        // Stable sorting preserves newest-first ordering among duplicate paths.
+        updates.reverse();
+        updates.sort_by_key(|(p, _)| *p);
+        updates.dedup_by_key(|(p, _)| *p);
         updates
     }
 
@@ -3003,6 +3009,40 @@ mod tests {
     }
 
     #[test]
+    fn inline_update_value_does_not_enlarge_records() {
+        use reth_trie_common::StateTrieNode;
+        assert_eq!(
+            std::mem::size_of::<StateTrieNode<smallvec::SmallVec<[u8; 16]>>>(),
+            std::mem::size_of::<StateTrieNode<Vec<u8>>>(),
+        );
+    }
+
+    #[test]
+    fn complete_update_appends_preserve_last_write_across_subtrie_merges() {
+        use super::ArenaTrieBuffers;
+        use reth_trie_common::{Nibbles, StateTrieNode};
+        let mut trie = ArenaParallelSparseTrie::default().with_state_trie_updates(true);
+        let mut child = ArenaTrieBuffers { state_updates: Some(Vec::new()), ..Default::default() };
+        let mut expected = BTreeMap::new();
+        for i in 0..1024u64 {
+            let path = Nibbles::unpack(alloy_primitives::keccak256((i % 37).to_be_bytes()));
+            let node = (i % 3 != 0).then(|| StateTrieNode::Leaf {
+                short_key_len: 60,
+                value: alloy_rlp::encode(U256::from(i)).into(),
+            });
+            expected.insert(path, node.clone());
+            child.state_updates.as_mut().unwrap().push((path, node));
+            if i % 11 == 0 {
+                ArenaParallelSparseTrie::merge_subtrie_updates(&mut trie.buffers, &mut child);
+            }
+        }
+        ArenaParallelSparseTrie::merge_subtrie_updates(&mut trie.buffers, &mut child);
+        assert_eq!(trie.take_state_trie_updates(), expected.into_iter().collect::<Vec<_>>());
+        assert!(trie.take_state_trie_updates().is_empty());
+        assert!(child.state_updates.unwrap().is_empty());
+    }
+
+    #[test]
     fn subtrie_removal_only_requests_blinded_sibling() {
         use super::{
             ArenaSparseNode, ArenaSparseNodeBranch, ArenaSparseNodeBranchChild as Child,
@@ -3050,7 +3090,18 @@ mod tests {
         assert!(subtrie.required_proofs.is_empty());
         subtrie.update_cached_rlp(epoch(2));
         assert_eq!(subtrie.num_leaves, 1);
-        assert_eq!(subtrie.buffers.state_updates.as_ref().unwrap().get(&path), Some(&None));
+        assert_eq!(
+            subtrie
+                .buffers
+                .state_updates
+                .as_ref()
+                .unwrap()
+                .iter()
+                .rev()
+                .find(|(p, _)| *p == path)
+                .map(|(_, node)| node),
+            Some(&None)
+        );
     }
 
     /// Test harness for proptest-based arena sparse trie testing.

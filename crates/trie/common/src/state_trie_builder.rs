@@ -18,7 +18,7 @@ impl<V> Default for StateTrieBuilder<V> {
     }
 }
 
-impl<V: Encodable> StateTrieBuilder<V> {
+impl<V: Encodable + Clone> StateTrieBuilder<V> {
     /// Add a leaf in strictly increasing hashed-key order. Emits completed nodes to `write`.
     pub fn push<E>(
         &mut self,
@@ -60,7 +60,7 @@ impl<V: Encodable> StateTrieBuilder<V> {
             StateTrieNode::Leaf { short_key_len, .. } |
             StateTrieNode::Branch { short_key_len, .. } => *short_key_len = path.len() as u8,
         }
-        let root = keccak256(alloy_rlp::encode(node.proof_node(path).node));
+        let root = keccak256(alloy_rlp::encode(node.clone().proof_node(path).node));
         write(path, node)?;
         Ok(root)
     }
@@ -77,7 +77,7 @@ impl<V: Encodable> StateTrieBuilder<V> {
             StateTrieNode::Branch { short_key_len, .. } => *short_key_len = short_len,
         }
         mask.set_bit(path.get_unchecked(parent.len()));
-        let encoded = alloy_rlp::encode(node.proof_node(path).node);
+        let encoded = alloy_rlp::encode(node.clone().proof_node(path).node);
         children.push(RlpNode::from_rlp(&encoded));
         write(path, node)
     }
@@ -116,7 +116,7 @@ mod tests {
             }
             assert_eq!(builder.finish(&mut write).unwrap(), expected);
             for (path, node) in &nodes {
-                let proof = node.proof_node(*path);
+                let proof = node.clone().proof_node(*path);
                 if !proof.path.is_empty() {
                     let parent = proof.path.slice(..proof.path.len() - 1);
                     assert!(matches!(nodes.get(&parent), Some(StateTrieNode::Branch { .. })));

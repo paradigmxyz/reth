@@ -337,6 +337,7 @@ impl super::RocksDBProvider {
         reth_fs_util::create_dir_all(directory).map_err(ProviderError::other)?;
         let options = super::RocksDBBuilder::state_trie_column_family_options(
             &Cache::new_lru_cache(64 << 20),
+            true,
         );
         let cf = self.get_cf_handle::<T>()?;
         let mut ingestion = IngestExternalFileOptions::default();

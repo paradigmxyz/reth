@@ -3,7 +3,7 @@ use crate::state_trie_cursor::{StateTrieCursor, StateTrieStorageCursor};
 use alloy_primitives::{keccak256, B256};
 use alloy_rlp::Encodable;
 use reth_execution_errors::trie::StateProofError;
-use reth_trie_common::{depth_first_cmp, Nibbles, ProofTrieNodeV2, ProofV2Target, StateTrieNode};
+use reth_trie_common::{depth_first_cmp, ProofTrieNodeV2, ProofV2Target, StateTrieNode};
 use std::collections::BTreeMap;
 
 /// Reusable proof calculator. Only the initial neighbor lookup needs an ordered seek;
@@ -31,28 +31,58 @@ where
         let mut proof = BTreeMap::new();
         for target in targets {
             let key = target.key_nibbles;
-            let next = self.cursor.seek(key)?;
-            let candidate = if next.as_ref().is_some_and(|(p, _)| *p == key) {
-                next
-            } else {
-                let prev = self.cursor.before(Some(key))?;
-                match (prev, next) {
-                    (Some(prev), Some(next)) => Some(
-                        if prev.0.common_prefix_length(&key) > next.0.common_prefix_length(&key) {
-                            prev
-                        } else {
-                            next
-                        },
-                    ),
-                    (prev, next) => prev.or(next),
-                }
-            };
-            let Some((mut path, mut node)) = candidate else {
-                if !target.parent.is_known() {
-                    proof.insert(Nibbles::new(), ProofTrieNodeV2::empty());
+            let Some(mut node) = self.cursor.get(key)? else {
+                // An absent leaf has no bottom-up starting point. Follow the stored subtree
+                // from the known parent's child, stopping at the first absence witness.
+                let mut prefix = key.slice(..target.parent.path_len().map_or(0, |len| len + 1));
+                let mut required_child = false;
+                loop {
+                    let next = self.cursor.seek(prefix)?;
+                    let Some((path, node)) = next.filter(|(path, _)| path.starts_with(&prefix))
+                    else {
+                        if required_child {
+                            return Err(StateProofError::TrieInconsistency(
+                                "missing state trie child".into(),
+                            ))
+                        }
+                        if prefix.is_empty() {
+                            proof.insert(prefix, ProofTrieNodeV2::empty());
+                        }
+                        break
+                    };
+                    let short_len = match &node {
+                        StateTrieNode::Leaf { short_key_len, .. } |
+                        StateTrieNode::Branch { short_key_len, .. } => *short_key_len as usize,
+                    };
+                    if short_len > path.len() || path.len() - short_len != prefix.len() {
+                        return Err(StateProofError::TrieInconsistency(
+                            "missing state trie subtree root".into(),
+                        ))
+                    }
+                    let child = match &node {
+                        StateTrieNode::Branch { state_mask, .. } if key.starts_with(&path) => {
+                            if path.len() >= key.len() {
+                                return Err(StateProofError::TrieInconsistency(
+                                    "branch at full leaf path".into(),
+                                ))
+                            }
+                            let nibble = key.get_unchecked(path.len());
+                            state_mask.is_bit_set(nibble).then(|| {
+                                let mut child = path;
+                                child.push_unchecked(nibble);
+                                child
+                            })
+                        }
+                        _ => None,
+                    };
+                    proof.entry(prefix).or_insert_with(|| node.proof_node(path));
+                    let Some(child) = child else { break };
+                    prefix = child;
+                    required_child = true;
                 }
                 continue
             };
+            let mut path = key;
             if target.parent.path_len().is_some_and(|len| path.common_prefix_length(&key) <= len) {
                 continue
             }
@@ -144,7 +174,7 @@ mod tests {
     use super::*;
     use alloy_primitives::U256;
     use reth_storage_errors::db::DatabaseError;
-    use reth_trie_common::{ProofV2TargetParent, StateTrieBuilder};
+    use reth_trie_common::{Nibbles, ProofV2TargetParent, StateTrieBuilder};
 
     #[derive(Debug)]
     struct Cursor(BTreeMap<Nibbles, StateTrieNode<U256>>);
@@ -180,7 +210,7 @@ mod tests {
                 short_key_len: (63 - parent_len) as u8,
                 value: U256::from(1),
             };
-            let expected = leaf.proof_node(path);
+            let expected = leaf.clone().proof_node(path);
             let mut calculator = ProofCalculator::new(Cursor([(path, leaf)].into()));
             let mut absent = key;
             absent.0[31] = 0x12;
@@ -266,12 +296,16 @@ mod tests {
                 .proof(&mut crate::proof_v2::StorageValueEncoder, &mut mixed_targets)
                 .unwrap();
             assert_eq!(canonical(actual), canonical(expected));
-            for key in storage
-                .keys()
-                .copied()
-                .chain([B256::ZERO, B256::repeat_byte(0xff)])
-                .chain((200u64..250).map(|i| keccak256(i.to_be_bytes())))
-            {
+            for key in storage.keys().copied().chain([B256::ZERO, B256::repeat_byte(0xff)]).chain(
+                (200u64..456).map(|i| {
+                    let mut key = keccak256(i.to_be_bytes());
+                    key.0[..prefix_len].fill(0);
+                    if prefix_len == 31 {
+                        key.0[31] = i as u8;
+                    }
+                    key
+                }),
+            ) {
                 for parent in [
                     ProofV2TargetParent::NONE,
                     ProofV2TargetParent::new(0),

@@ -256,12 +256,11 @@ pub(super) fn test_take_state_trie_updates_no_duplicate_updated_and_removed_node
     }
 }
 
+type RawStateTrieNode = reth_trie_common::StateTrieNode<smallvec::SmallVec<[u8; 16]>>;
+
 fn take_state_updates<T: SparseTrie>(
     trie: &mut T,
-) -> (
-    BTreeMap<Nibbles, reth_trie_common::StateTrieNode<Vec<u8>>>,
-    std::collections::BTreeSet<Nibbles>,
-) {
+) -> (BTreeMap<Nibbles, RawStateTrieNode>, std::collections::BTreeSet<Nibbles>) {
     let updates = trie.take_state_trie_updates();
     assert!(updates.windows(2).all(|w| w[0].0 < w[1].0));
     let mut inserted = BTreeMap::new();

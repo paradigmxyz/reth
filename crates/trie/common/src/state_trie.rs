@@ -33,25 +33,20 @@ pub enum StateTrieNode<V> {
 
 impl<V: Encodable> StateTrieNode<V> {
     /// Reconstructs the combined proof node at its physical path.
-    pub fn proof_node(&self, path: Nibbles) -> ProofTrieNodeV2 {
-        let short_key_len = match self {
+    pub fn proof_node(self, path: Nibbles) -> ProofTrieNodeV2 {
+        let short_key_len = match &self {
             Self::Leaf { short_key_len, .. } | Self::Branch { short_key_len, .. } => *short_key_len,
         } as usize;
         let start = path.len() - short_key_len;
         let key = path.slice(start..);
         let node = match self {
             Self::Leaf { value, .. } => {
-                TrieNodeV2::Leaf(LeafNode::new(key, alloy_rlp::encode(value)))
+                TrieNodeV2::Leaf(LeafNode::new(key, alloy_rlp::encode(&value)))
             }
             Self::Branch { state_mask, children, .. } => {
                 let branch_rlp_node = (!key.is_empty())
-                    .then(|| BranchNodeRef::new(children, *state_mask).rlp(&mut Vec::new()));
-                TrieNodeV2::Branch(BranchNodeV2::new(
-                    key,
-                    children.clone(),
-                    *state_mask,
-                    branch_rlp_node,
-                ))
+                    .then(|| BranchNodeRef::new(&children, state_mask).rlp(&mut Vec::new()));
+                TrieNodeV2::Branch(BranchNodeV2::new(key, children, state_mask, branch_rlp_node))
             }
         };
         ProofTrieNodeV2 { path: path.slice(..start), node, masks: None }
@@ -124,21 +119,49 @@ impl StateTrieUpdatesSorted {
     /// Merge oldest-first updates, masking keys changed by the suffix unless a suffix value
     /// matches.
     pub fn disjointed_merge_batch(batch: &[&Self], mask: &[&Self]) -> Self {
-        let account_nodes = kway_merge_disjoint_sorted_by(
-            batch.iter().rev().map(|i| i.account_nodes.as_slice()),
-            mask.iter().map(|i| i.account_nodes.as_slice()),
-            equal_mask_value,
-        )
-        .collect();
-        let mut storage: B256Map<Vec<_>> = B256Map::default();
-        for item in batch.iter().rev() {
-            for (address, nodes) in &item.storage_tries {
-                storage.entry(*address).or_default().push(nodes.as_slice());
-            }
+        if batch.is_empty() {
+            return Self::default()
         }
-        let storage_tries = storage
-            .into_iter()
-            .filter_map(|(address, slices)| {
+        let accounts = || {
+            let merge = |lower, upper| {
+                kway_merge_disjoint_sorted_by(
+                    batch.iter().rev().map(|i| node_range(&i.account_nodes, lower, upper)),
+                    mask.iter().map(|i| node_range(&i.account_nodes, lower, upper)),
+                    equal_mask_value,
+                )
+                .collect::<Vec<_>>()
+            };
+            #[cfg(feature = "rayon")]
+            if batch.iter().map(|i| i.account_nodes.len()).sum::<usize>() >= 4096 {
+                use rayon::iter::{IntoParallelIterator, ParallelIterator};
+                return (0u8..16)
+                    .into_par_iter()
+                    .map(|prefix| {
+                        // Include the root in the first range. A shorter prefix sorts before
+                        // its descendants, so every path belongs to exactly one range.
+                        let lower = if prefix == 0 {
+                            Nibbles::new()
+                        } else {
+                            Nibbles::from_nibbles([prefix])
+                        };
+                        let upper = (prefix < 15).then(|| Nibbles::from_nibbles([prefix + 1]));
+                        merge(lower, upper)
+                    })
+                    .collect::<Vec<_>>()
+                    .into_iter()
+                    .flatten()
+                    .collect()
+            }
+            merge(Nibbles::new(), None)
+        };
+        let storages = || {
+            let mut storage: B256Map<Vec<_>> = B256Map::default();
+            for item in batch.iter().rev() {
+                for (address, nodes) in &item.storage_tries {
+                    storage.entry(*address).or_default().push(nodes.as_slice());
+                }
+            }
+            let merge = |(address, slices)| {
                 let nodes: Vec<_> = kway_merge_disjoint_sorted_by(
                     slices,
                     mask.iter().filter_map(|i| i.storage_tries.get(&address).map(Vec::as_slice)),
@@ -146,8 +169,26 @@ impl StateTrieUpdatesSorted {
                 )
                 .collect();
                 (!nodes.is_empty()).then_some((address, nodes))
-            })
-            .collect();
+            };
+            #[cfg(feature = "rayon")]
+            {
+                use rayon::iter::{IntoParallelIterator, ParallelIterator};
+                storage
+                    .into_iter()
+                    .collect::<Vec<_>>()
+                    .into_par_iter()
+                    .filter_map(merge)
+                    .collect::<Vec<_>>()
+                    .into_iter()
+                    .collect()
+            }
+            #[cfg(not(feature = "rayon"))]
+            storage.into_iter().filter_map(merge).collect()
+        };
+        #[cfg(feature = "rayon")]
+        let (account_nodes, storage_tries) = rayon::join(accounts, storages);
+        #[cfg(not(feature = "rayon"))]
+        let (account_nodes, storage_tries) = (accounts(), storages());
         Self { account_nodes, storage_tries }
     }
 }
@@ -156,6 +197,16 @@ impl AsRef<Self> for StateTrieUpdatesSorted {
     fn as_ref(&self) -> &Self {
         self
     }
+}
+
+fn node_range<V>(
+    nodes: &StateTrieNodes<V>,
+    lower: Nibbles,
+    upper: Option<Nibbles>,
+) -> &[(Nibbles, Option<StateTrieNode<V>>)] {
+    let start = nodes.partition_point(|(path, _)| *path < lower);
+    let end = upper.map_or(nodes.len(), |upper| nodes.partition_point(|(path, _)| *path < upper));
+    &nodes[start..end]
 }
 
 fn equal_mask_value<V: PartialEq>(
@@ -274,6 +325,63 @@ mod tests {
     use super::*;
     use alloy_primitives::B256;
     use reth_codecs::{Compress, Decompress};
+
+    #[cfg(feature = "rayon")]
+    #[test]
+    fn partitioned_account_merge_matches_sequential() {
+        let groups: Vec<_> = (0u8..12)
+            .map(|epoch| {
+                let nodes: alloc::collections::BTreeMap<_, _> = (0u64..1024)
+                    .filter_map(|seed| {
+                        if epoch >= 6 && seed % 4 == 0 {
+                            return None
+                        }
+                        let path = Nibbles::unpack(alloy_primitives::keccak256(seed.to_le_bytes()))
+                            .slice(..(seed as usize % 65));
+                        let node = if (seed + u64::from(epoch)) % 7 == 0 {
+                            None
+                        } else if path.len() == 64 {
+                            Some(StateTrieNode::Leaf {
+                                short_key_len: epoch,
+                                value: TrieAccount {
+                                    balance: U256::from(epoch % 3),
+                                    ..Default::default()
+                                },
+                            })
+                        } else {
+                            Some(StateTrieNode::Branch {
+                                short_key_len: (usize::from(epoch) % (path.len() + 1)) as u8,
+                                state_mask: TrieMask::new(3),
+                                children: vec![
+                                    RlpNode::word_rlp(
+                                        &alloy_primitives::B256::repeat_byte(epoch % 5)
+                                    );
+                                    2
+                                ],
+                            })
+                        };
+                        Some((path, node))
+                    })
+                    .collect();
+                StateTrieUpdatesSorted {
+                    account_nodes: nodes.into_iter().collect(),
+                    storage_tries: Default::default(),
+                }
+            })
+            .collect();
+        let batch: Vec<_> = groups[..6].iter().collect();
+        let mask: Vec<_> = groups[6..].iter().collect();
+        assert!(batch.iter().map(|i| i.account_nodes.len()).sum::<usize>() >= 4096);
+        let expected: Vec<_> = kway_merge_disjoint_sorted_by(
+            batch.iter().rev().map(|i| i.account_nodes.as_slice()),
+            mask.iter().map(|i| i.account_nodes.as_slice()),
+            equal_mask_value,
+        )
+        .collect();
+        let actual = StateTrieUpdatesSorted::disjointed_merge_batch(&batch, &mask);
+        assert_eq!(actual.account_nodes, expected);
+        assert!(actual.storage_tries.is_empty());
+    }
 
     #[test]
     fn codec_roundtrip_and_rejects_malformed() {

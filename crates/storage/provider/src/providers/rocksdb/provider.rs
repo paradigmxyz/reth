@@ -205,7 +205,7 @@ impl fmt::Debug for RocksDBBuilder {
 impl RocksDBBuilder {
     /// Creates a new builder with optimized default options.
     pub fn new(path: impl AsRef<Path>) -> Self {
-        let cache = Cache::new_lru_cache(DEFAULT_CACHE_SIZE);
+        let cache = new_block_cache(DEFAULT_CACHE_SIZE);
         Self {
             path: path.as_ref().to_path_buf(),
             column_families: Vec::new(),
@@ -309,11 +309,12 @@ impl RocksDBBuilder {
     }
 
     /// Trie proofs and execution primarily perform small random point reads.
-    fn state_trie_column_family_options(cache: &Cache) -> Options {
+    fn state_trie_column_family_options(cache: &Cache, cache_metadata: bool) -> Options {
         let mut options = Self::default_column_family_options(cache);
         let mut table = Self::default_table_options(cache);
         table.set_block_size(4096);
         table.set_block_restart_interval(4);
+        table.set_cache_index_and_filter_blocks(cache_metadata);
         table.set_bloom_filter(10.0, false);
         table.set_data_block_index_type(DataBlockIndexType::BinaryAndHash);
         options.set_block_based_table_factory(&table);
@@ -395,7 +396,7 @@ impl RocksDBBuilder {
 
     /// Sets a custom block cache size.
     pub fn with_block_cache_size(mut self, capacity_bytes: usize) -> Self {
-        self.block_cache = Cache::new_lru_cache(capacity_bytes);
+        self.block_cache = new_block_cache(capacity_bytes);
         self
     }
 
@@ -436,7 +437,7 @@ impl RocksDBBuilder {
             .column_families
             .iter()
             .map(|name| {
-                let cf_options = if name == tables::TransactionHashNumbers::NAME {
+                let mut cf_options = if name == tables::TransactionHashNumbers::NAME {
                     Self::tx_hash_numbers_column_family_options(&self.block_cache)
                 } else if name == tables::BlockAccessLists::NAME {
                     Self::block_access_lists_column_family_options(&self.block_cache)
@@ -450,10 +451,26 @@ impl RocksDBBuilder {
                 ]
                 .contains(&name.as_str())
                 {
-                    Self::state_trie_column_family_options(&self.block_cache)
+                    Self::state_trie_column_family_options(
+                        &self.block_cache,
+                        !(cfg!(feature = "state-trie-rocksdb") &&
+                            [tables::StateTrieAccounts::NAME, tables::StateTrieStorages::NAME]
+                                .contains(&name.as_str())),
+                    )
                 } else {
                     Self::default_column_family_options(&self.block_cache)
                 };
+                if cfg!(feature = "state-trie-rocksdb") &&
+                    [tables::StateTrieAccounts::NAME, tables::StateTrieStorages::NAME]
+                        .contains(&name.as_str())
+                {
+                    cf_options.set_write_buffer_size(512 << 20);
+                    cf_options.set_target_file_size_base(256 << 20);
+                    cf_options.set_max_bytes_for_level_base(2 << 30);
+                    cf_options.set_level_zero_file_num_compaction_trigger(8);
+                    cf_options.set_compaction_style(rocksdb::DBCompactionStyle::Universal);
+                    cf_options.set_level_compaction_dynamic_level_bytes(false);
+                }
                 ColumnFamilyDescriptor::new(name.clone(), cf_options)
             })
             .collect();
@@ -3175,6 +3192,15 @@ const fn convert_log_level(level: LogLevel) -> rocksdb::LogLevel {
         LogLevel::Warn => rocksdb::LogLevel::Warn,
         LogLevel::Notice | LogLevel::Verbose => rocksdb::LogLevel::Info,
         LogLevel::Debug | LogLevel::Trace | LogLevel::Extra => rocksdb::LogLevel::Debug,
+    }
+}
+
+fn new_block_cache(capacity: usize) -> Cache {
+    if cfg!(feature = "state-trie-rocksdb") {
+        // State trie data blocks are 4 KiB; reserve the cache table for that entry size.
+        Cache::new_hyper_clock_cache(capacity, 4096)
+    } else {
+        Cache::new_lru_cache(capacity)
     }
 }
 
