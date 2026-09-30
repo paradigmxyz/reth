@@ -1,6 +1,7 @@
 //! Engine orchestrator launch helper.
 //!
-//! Provides [`EngineOrchestratorBuilder`] which wires together all engine components and builds a
+//! Provides [`EngineOrchestratorBuilder`] which wires
+//! together all engine components and builds a
 //! [`ChainOrchestrator`] ready to be polled as a `Stream`.
 
 use crate::{
