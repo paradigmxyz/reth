@@ -39,7 +39,13 @@ use reth_trie_db::{
     DatabaseTrieCursorFactory, LegacyKeyAdapter, PackedAccountsTrie, PackedKeyAdapter,
     PackedStoragesTrie,
 };
-use std::{cell::OnceCell, fmt, ops::Deref, sync::Arc, time::Instant};
+use std::{
+    cell::OnceCell,
+    fmt,
+    ops::Deref,
+    sync::{Arc, OnceLock},
+    time::Instant,
+};
 use tracing::instrument;
 
 /// Factory for creating overlay state providers with optional reverts and overlays.
@@ -132,6 +138,7 @@ pub struct OverlayStateProvider<Provider, N: NodePrimitives = EthPrimitives> {
     state_trie_overlay_with_trie_changesets: OnceCell<StateTrieOverlay>,
     execution_overlay: OnceCell<CachedExecutionOverlay>,
     is_v2: bool,
+    external_state: OnceCell<Arc<ExternalStateSnapshot>>,
 }
 
 impl<Provider, N: NodePrimitives> OverlayStateProvider<OwnedProvider<Provider>, N> {
@@ -166,6 +173,7 @@ impl<Provider, N: NodePrimitives> OverlayStateProvider<OwnedProvider<Provider>, 
             state_trie_overlay_with_trie_changesets: OnceCell::new(),
             execution_overlay: OnceCell::new(),
             is_v2,
+            external_state: OnceCell::new(),
         }
     }
 
@@ -187,6 +195,7 @@ impl<Provider, N: NodePrimitives> OverlayStateProvider<OwnedProvider<Provider>, 
                 historical_fallback: None,
             }),
             is_v2,
+            external_state: OnceCell::new(),
         }
     }
 }
@@ -207,6 +216,7 @@ impl<'a, Provider, N: NodePrimitives> OverlayStateProvider<&'a Provider, N> {
             state_trie_overlay_with_trie_changesets: OnceCell::new(),
             execution_overlay: OnceCell::new(),
             is_v2,
+            external_state: OnceCell::new(),
         }
     }
 
@@ -224,6 +234,7 @@ impl<'a, Provider, N: NodePrimitives> OverlayStateProvider<&'a Provider, N> {
             state_trie_overlay_with_trie_changesets: OnceCell::from(state_trie_overlay),
             execution_overlay: OnceCell::new(),
             is_v2,
+            external_state: OnceCell::new(),
         }
     }
 }
@@ -235,6 +246,28 @@ where
 {
     fn provider(&self) -> &Provider::Target {
         &self.provider
+    }
+
+    /// Pin external reads to this provider's requested block, not a moving canonical tip.
+    fn external_state(&self) -> ProviderResult<Option<&ExternalStateSnapshot>> {
+        self.external_state_with(EXTERNAL_STATE_SNAPSHOT.get().map(AsRef::as_ref))
+    }
+
+    fn external_state_with(
+        &self,
+        factory: Option<&ExternalStateSnapshotFactory>,
+    ) -> ProviderResult<Option<&ExternalStateSnapshot>> {
+        if let Some(state) = self.external_state.get() {
+            return Ok(Some(state));
+        }
+        if let Some(factory) = factory &&
+            let Some(builder) = &self.overlay_builder
+        {
+            let state = factory(builder.parent_hash())?;
+            let _ = self.external_state.set(state);
+            return Ok(self.external_state.get().map(AsRef::as_ref));
+        }
+        Ok(None)
     }
 
     fn state_trie_overlay(&self, trie_changesets: bool) -> ProviderResult<&StateTrieOverlay>
@@ -410,6 +443,9 @@ where
         + BlockNumReader,
 {
     fn basic_account(&self, address: &Address) -> ProviderResult<Option<Account>> {
+        if let Some(state) = self.external_state()? {
+            return (state.account)(address);
+        }
         let (overlay, historical_fallback) = self.execution_overlay()?;
         if let Some(account) = overlay.accounts().get(address) {
             return Ok(account.as_ref().map(Account::from))
@@ -800,6 +836,9 @@ where
         address: Address,
         storage_key: alloy_primitives::StorageKey,
     ) -> ProviderResult<Option<alloy_primitives::StorageValue>> {
+        if let Some(state) = self.external_state()? {
+            return (state.storage)(address, storage_key);
+        }
         let (overlay, historical_fallback) = self.execution_overlay()?;
         if let Some(value) = overlay.storage_value(address, U256::from_be_bytes(storage_key.0)) {
             return Ok(Some(value));
@@ -1024,6 +1063,36 @@ fn into_database_error(error: ProviderError) -> DatabaseError {
     }
 }
 
+/// Account point-read from an immutable external state snapshot.
+pub type ExternalAccountRead = dyn Fn(&Address) -> ProviderResult<Option<Account>> + Send + Sync;
+
+/// Storage point-read from an immutable external state snapshot.
+pub type ExternalStorageRead = dyn Fn(Address, B256) -> ProviderResult<Option<U256>> + Send + Sync;
+
+/// Point reads pinned to one block's complete post-state.
+///
+/// These replace account/storage overlays and database reads. Bytecode and block-hash reads
+/// still use the ordinary provider. Implementations must not follow a moving canonical tip.
+pub struct ExternalStateSnapshot {
+    /// Account point-read, including absence and deletion.
+    pub account: Box<ExternalAccountRead>,
+    /// Storage point-read, including absent and wiped slots.
+    pub storage: Box<ExternalStorageRead>,
+}
+
+impl fmt::Debug for ExternalStateSnapshot {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("ExternalStateSnapshot").finish_non_exhaustive()
+    }
+}
+
+/// Resolves an immutable snapshot for an exact requested block hash, or fails closed.
+pub type ExternalStateSnapshotFactory =
+    dyn Fn(B256) -> ProviderResult<Arc<ExternalStateSnapshot>> + Send + Sync;
+
+/// Optional external execution-state backend, installed once before opening state providers.
+pub static EXTERNAL_STATE_SNAPSHOT: OnceLock<Box<ExternalStateSnapshotFactory>> = OnceLock::new();
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1051,6 +1120,7 @@ mod tests {
         HashedStorage, Nibbles,
     };
     use revm::{bytecode::Bytecode as RevmBytecode, state::AccountInfo};
+    use std::sync::atomic::{AtomicUsize, Ordering};
 
     fn with_unique_trie_data(
         block: &ExecutedBlock<EthPrimitives>,
@@ -1364,5 +1434,72 @@ mod tests {
 
         assert_eq!(provider.basic_account(&address).unwrap(), Some(account));
         assert_eq!(provider.storage(address, storage_key).unwrap(), Some(storage));
+    }
+
+    #[test]
+    fn external_snapshot_overrides_stale_database_and_overlay() {
+        let factory = create_test_provider_factory();
+        let address = Address::repeat_byte(1);
+        let slot = B256::repeat_byte(2);
+        let db = factory.provider_rw().unwrap();
+        db.tx_ref()
+            .put::<tables::PlainAccountState>(address, Account { nonce: 1, ..Default::default() })
+            .unwrap();
+        db.tx_ref()
+            .put::<tables::PlainStorageState>(
+                address,
+                reth_primitives_traits::StorageEntry { key: slot, value: U256::from(1) },
+            )
+            .unwrap();
+        db.commit().unwrap();
+        let mut overlay = ExecutionOverlay::default();
+        overlay.accounts_mut().insert(address, Some(AccountInfo::default()));
+        let provider = OverlayStateProvider::<_, EthPrimitives>::new_with_execution(
+            factory.provider().unwrap(),
+            Arc::new(overlay),
+            false,
+        );
+        let account = Account { nonce: 42, ..Default::default() };
+        provider
+            .external_state
+            .set(Arc::new(ExternalStateSnapshot {
+                account: Box::new(move |key| Ok((*key == address).then_some(account))),
+                storage: Box::new(move |key, requested| {
+                    Ok((key == address && requested == slot).then_some(U256::from(99)))
+                }),
+            }))
+            .unwrap();
+        assert_eq!(provider.basic_account(&address).unwrap(), Some(account));
+        assert_eq!(provider.storage(address, slot).unwrap(), Some(U256::from(99)));
+        assert_eq!(provider.basic_account(&Address::ZERO).unwrap(), None);
+        assert_eq!(provider.storage(address, B256::ZERO).unwrap(), None);
+    }
+
+    #[test]
+    fn external_snapshot_resolves_requested_parent_once_and_fails_closed() {
+        let factory = create_test_provider_factory();
+        let hash = B256::repeat_byte(7);
+        let provider = OverlayStateProvider::<_, EthPrimitives>::new(
+            factory.provider().unwrap(),
+            OverlayManager::default().overlay_builder(hash),
+        );
+        let missing = move |_| Err(ProviderError::BlockHashNotFound(hash));
+        assert!(matches!(provider.external_state_with(Some(&missing)),
+            Err(ProviderError::BlockHashNotFound(missing)) if missing == hash));
+        let calls = Arc::new(AtomicUsize::new(0));
+        let observed = calls.clone();
+        let resolve = move |requested| {
+            assert_eq!(requested, hash);
+            observed.fetch_add(1, Ordering::Relaxed);
+            Ok(Arc::new(ExternalStateSnapshot {
+                account: Box::new(|_| Ok(None)),
+                storage: Box::new(|_, _| Ok(None)),
+            }))
+        };
+        provider.external_state_with(Some(&resolve)).unwrap();
+        provider.external_state_with(Some(&resolve)).unwrap();
+        assert_eq!(calls.load(Ordering::Relaxed), 1);
+        assert_eq!(provider.basic_account(&Address::ZERO).unwrap(), None);
+        assert_eq!(provider.storage(Address::ZERO, B256::ZERO).unwrap(), None);
     }
 }

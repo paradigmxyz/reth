@@ -277,6 +277,11 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
         self
     }
 
+    /// Returns the exact block whose post-state this provider serves.
+    pub(crate) const fn parent_hash(&self) -> B256 {
+        self.parent_hash
+    }
+
     /// Returns the durable anchor to use for this builder's parent.
     #[cfg(test)]
     fn anchor_at_parent<Provider>(&self, provider: &Provider) -> ProviderResult<AnchorForParent>

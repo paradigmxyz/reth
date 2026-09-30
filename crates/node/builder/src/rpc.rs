@@ -10,7 +10,7 @@ pub use reth_rpc_builder::{
     middleware::{RethAuthHttpMiddleware, RethRpcMiddleware},
     Identity, Stack,
 };
-use reth_storage_overlay::OverlayManager;
+pub use reth_storage_overlay::OverlayManager;
 
 use crate::{
     invalid_block_hook::InvalidBlockHookExt, txpool_prewarm, ConfigureEngineEvm,
