@@ -29,9 +29,9 @@ pub const DEFAULT_RANGES_PER_CHECK: usize = 64;
 
 /// Drives snap synchronization until its downloaded state is ready for the trie rebuild.
 ///
-/// Each pass moves a lagging pivot forward, applies the lists that carry the state to it, fetches
-/// scheduled repairs again there, then downloads account ranges with their storage and code. A
-/// reorg across the pivot is repaired from the orphaned lists; an expired attempt starts over.
+/// Each pass moves a lagging pivot forward, applies the lists carrying the state to it, refetches
+/// scheduled repairs there, then downloads account ranges with storage and code. A reorg across the
+/// pivot is repaired from the orphaned lists, while handed-off or expired state starts over.
 pub struct SnapBootstrap<C, F, X> {
     factory: F,
     // Blocking database work runs off the async worker.
@@ -128,9 +128,9 @@ where
                         debug!(target: "sync::snap", %error, "Waiting for peers or headers");
                         Step::Wait
                     }
-                    // The next pass finds the pivot orphaned and recovers from it.
+                    // The next pass finds the pivot orphaned and recovers or restarts it.
                     Err(error) if error.is_reorg() => {
-                        info!(target: "sync::snap", %error, "Snap pivot was reorged");
+                        debug!(target: "sync::snap", %error, "Snap pivot was reorged");
                         Step::Continue
                     }
                     // Progress this build cannot read is unusable, so the attempt starts over.
@@ -174,7 +174,7 @@ where
                 return Ok(Resolved::Verified(attempt.pivot()))
             }
             if let Some(write) = provider.active_snap_write()? {
-                // An orphaned pivot is resumed too, and recovered from its branch's lists.
+                // An orphaned pivot is resumed too, so the pass can recover or restart it.
                 session.resume(SnapGeneration::new(attempt.pivot(), attempt.state_root()));
                 self.session = session;
                 return Ok(Resolved::Active(write))
@@ -196,25 +196,24 @@ where
         Ok(Resolved::Active(write))
     }
 
-    // One pass over the attempt: pivot, catch-up, repairs, then up to `ranges_per_check` account
-    // ranges.
+    // One pass over the attempt: reorg recovery, pivot, catch-up, repairs, then up to
+    // `ranges_per_check` account ranges.
     async fn drive(&mut self, write: SnapWrite, head: u64) -> Result<Step, SnapSyncError> {
         let (applied, complete) = {
             let provider = self.factory.database_provider_ro()?;
             let generation = self.session.target().copied().ok_or(SnapSyncError::NoAttempt)?;
-            let canonical = generation.is_canonical(&provider)?;
-            if provider.is_trie_rebuild_started(write)? {
-                // The handed-off state cannot be recovered in place, so an orphaned one restarts.
-                if !canonical {
-                    let pivot = generation.target();
-                    info!(target: "sync::snap", ?pivot, "Snap pivot was reorged during the trie rebuild, restarting");
+            let handed_off = provider.is_trie_rebuild_started(write)?;
+            if !generation.is_canonical(&provider)? {
+                // Handed-off state may be partly rebuilt, so it cannot be repaired in place.
+                if handed_off {
+                    info!(target: "sync::snap", pivot = ?generation.target(), "Handed-off snap pivot was reorged, restarting");
                     return Ok(Step::Restart)
                 }
-                return Ok(Step::HandedOff(write))
-            }
-            if !canonical {
                 drop(provider);
                 return self.recover(write, head).await
+            }
+            if handed_off {
+                return Ok(Step::HandedOff(write))
             }
             let applied = provider
                 .catch_up_progress(write)?
@@ -470,7 +469,7 @@ impl<C, F, X> fmt::Debug for SnapBootstrap<C, F, X> {
 /// How a [`SnapBootstrap`] run ended.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum SnapBootstrapOutcome {
-    /// The downloaded state is complete and handed to the merkle stage; once the stage reaches
+    /// The downloaded state is complete and handed to the merkle stage. Once the stage reaches
     /// `pivot`, [`SnapStateVerifier::verify_state_root`] accepts it under `write`.
     TrieRebuild {
         /// Write the state was downloaded under.
@@ -516,13 +515,13 @@ enum Resolved {
 // What one pass over the attempt left to do.
 enum Step {
     HandedOff(SnapWrite),
-    // The range budget ran out; the pivot is checked again before more ranges.
+    // The range budget ran out, so the pivot is checked again before more ranges.
     Continue,
     // Peers or headers are missing until the node progresses.
     Wait,
     // The attempt's state can no longer be carried forward.
     Restart,
-    // The run was cancelled; committed progress stays for the next one.
+    // The run was cancelled, and committed progress stays for the next one.
     Stop,
 }
 
@@ -540,7 +539,6 @@ mod tests {
         compute_block_access_list_hash, AccountChanges, BalanceChange, BlockAccessIndex,
         NonceChange,
     };
-    use alloy_eips::eip7928::bal::Bal;
     use alloy_primitives::{keccak256, Address, B256, U256};
     use reth_eth_wire_types::{
         snap::{AccountRangeMessage, BlockAccessListsMessage},
@@ -641,10 +639,8 @@ mod tests {
         lists: &[Vec<AccountChanges>],
         served: bool,
     ) -> PeerRequestResult<SnapResponse> {
-        let block_access_lists = lists
-            .iter()
-            .map(|list| served.then(|| alloy_rlp::encode(Bal::from(list.clone())).into()))
-            .collect();
+        let block_access_lists =
+            lists.iter().map(|list| served.then(|| alloy_rlp::encode(list).into())).collect();
         let message = BlockAccessListsMessage {
             request_id,
             block_access_lists: BlockAccessLists(block_access_lists),
@@ -738,6 +734,7 @@ mod tests {
         (attempt_id(factory), orphaned, new)
     }
 
+    // The orphaned branch's lists for blocks 3 and 4, crediting `STALE` in each.
     fn orphaned_lists() -> Vec<Vec<AccountChanges>> {
         [999, 1_000]
             .map(|balance| {
