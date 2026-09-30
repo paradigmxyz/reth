@@ -709,7 +709,7 @@ jobs:
     needs:
       - test-amsterdam
       - test-bogota
-    if: failure()
+    if: failure() && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
     runs-on: ubuntu-latest
     steps:
       - name: Slack Webhook Action

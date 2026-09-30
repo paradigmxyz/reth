@@ -1,9 +1,6 @@
 use alloy_eips::{
     eip4895::Withdrawals,
-    eip8141::{
-        constants::FRAME_TX_TYPE, FrameAddress, FrameLimits, FrameMode, SignatureMessage,
-        SignatureScheme, TransactionFees,
-    },
+    eip8141::{constants::FRAME_TX_TYPE, FrameLimits, FrameMode, SignatureScheme, TransactionFees},
 };
 use alloy_primitives::{hex, Address, Bytes, Signature, TxKind, B256, U256};
 use alloy_rlp::{Decodable, Encodable, RlpDecodable, RlpEncodable};
@@ -276,7 +273,7 @@ where
         let len_or_identifier = identifier.unwrap_or(compact_bytes.len());
 
         match decode_legacy_frame_vector(&type_name, &compact_bytes)? {
-            Some((prefix_len, legacy)) if !legacy.is_representable() => {
+            Some((prefix_len, legacy)) => {
                 buffer.extend_from_slice(&compact_bytes[..prefix_len]);
                 legacy.encode(&mut buffer);
             }
@@ -323,16 +320,6 @@ struct LegacyFrameTransaction {
     blob_versioned_hashes: Vec<B256>,
 }
 
-impl LegacyFrameTransaction {
-    fn is_representable(&self) -> bool {
-        self.frames.iter().all(|frame| FrameAddress::try_from(frame.target.as_ref()).is_ok()) &&
-            self.signatures.iter().all(|signature| {
-                FrameAddress::try_from(signature.signer.as_ref()).is_ok() &&
-                    SignatureMessage::try_from(signature.msg.as_ref()).is_ok()
-            })
-    }
-}
-
 /// Decodes an old frame transaction vector without imposing the current typed field constraints.
 fn decode_legacy_frame_vector(
     type_name: &str,
@@ -346,17 +333,31 @@ fn decode_legacy_frame_vector(
     let Some(mut payload) = bytes.strip_prefix(prefix) else {
         return Ok(None);
     };
-    let transaction = LegacyFrameTransaction::decode(&mut payload)?;
+    let Ok(transaction) = LegacyFrameTransaction::decode(&mut payload) else {
+        return Ok(None);
+    };
     if !payload.is_empty() {
         eyre::bail!("EIP-8141 compact vector has trailing bytes");
     }
     Ok(Some((prefix.len(), transaction)))
 }
 
+/// Returns the type name for the given type.
+pub fn type_name<T>() -> String {
+    // With alloy type transition <https://github.com/paradigmxyz/reth/pull/15768> the types are renamed, we map them here to the original name so that test vector files remain consistent
+    let name = std::any::type_name::<T>();
+    match name {
+        "alloy_consensus::transaction::envelope::EthereumTypedTransaction<alloy_consensus::transaction::eip4844::TxEip4844>" => "Transaction".to_string(),
+        "alloy_consensus::transaction::envelope::EthereumTxEnvelope<alloy_consensus::transaction::eip4844::TxEip4844>" => "TransactionSigned".to_string(),
+        name => {
+            name.split("::").last().unwrap_or(std::any::type_name::<T>()).to_string()
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use reth_codecs::Compact;
 
     #[test]
     fn legacy_frame_vectors_roundtrip_with_nested_fees() {
@@ -379,44 +380,20 @@ mod tests {
             let (prefix_len, mut legacy) =
                 decode_legacy_frame_vector(type_name, &vector).unwrap().unwrap();
             assert_eq!(prefix_len, prefix.len());
-            assert!(!legacy.is_representable());
-
             let mut roundtrip = vector[..prefix_len].to_vec();
             legacy.encode(&mut roundtrip);
             assert_eq!(roundtrip, vector);
 
+            // A legacy target that is valid under the current type constraints still uses
+            // the old wire layout, so it must take the same compatibility path.
             legacy.frames[0].target = Bytes::new();
-            assert!(legacy.is_representable());
             let mut representable = prefix.to_vec();
             legacy.encode(&mut representable);
-
-            let mut decoded = Vec::new();
-            if type_name == "Transaction" {
-                let mut type_bytes = Vec::new();
-                let identifier = TxType::Eip8141.to_compact(&mut type_bytes);
-                let (tx, remaining) = Transaction::from_compact(&representable, identifier);
-                assert!(remaining.is_empty());
-                tx.to_compact(&mut decoded);
-            } else {
-                let (tx, remaining) =
-                    TransactionSigned::from_compact(&representable, representable.len());
-                assert!(remaining.is_empty());
-                tx.to_compact(&mut decoded);
-            }
-            assert_eq!(decoded, representable);
-        }
-    }
-}
-
-/// Returns the type name for the given type.
-pub fn type_name<T>() -> String {
-    // With alloy type transition <https://github.com/paradigmxyz/reth/pull/15768> the types are renamed, we map them here to the original name so that test vector files remain consistent
-    let name = std::any::type_name::<T>();
-    match name {
-        "alloy_consensus::transaction::envelope::EthereumTypedTransaction<alloy_consensus::transaction::eip4844::TxEip4844>" => "Transaction".to_string(),
-        "alloy_consensus::transaction::envelope::EthereumTxEnvelope<alloy_consensus::transaction::eip4844::TxEip4844>" => "TransactionSigned".to_string(),
-        name => {
-            name.split("::").last().unwrap_or(std::any::type_name::<T>()).to_string()
+            let (prefix_len, decoded) =
+                decode_legacy_frame_vector(type_name, &representable).unwrap().unwrap();
+            let mut decoded_bytes = representable[..prefix_len].to_vec();
+            decoded.encode(&mut decoded_bytes);
+            assert_eq!(decoded_bytes, representable);
         }
     }
 }

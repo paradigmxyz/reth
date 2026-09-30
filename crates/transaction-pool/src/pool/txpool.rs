@@ -2651,6 +2651,7 @@ mod tests {
             .set_frame_validation(Arc::new(crate::validate::FrameValidation {
                 sender,
                 sender_nonce: nonce,
+                nonce_keys: None,
                 state_nonce: nonce,
                 sender_balance: U256::from(max_cost),
                 sender_code_hash: None,

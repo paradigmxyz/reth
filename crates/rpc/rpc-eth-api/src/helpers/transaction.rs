@@ -588,7 +588,7 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
                         request.as_ref().complete_8141().is_err())
                 {
                     return Err(EthApiError::InvalidParams(
-                        "signed frame transactions must include their sender, nonce, chainId, frames, and fees before filling"
+                        "signed frame transactions must include their sender, nonce, nonceKeys, chainId, frames, and fees before filling"
                             .into(),
                     )
                     .into())
@@ -608,8 +608,21 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
                     request.as_mut().set_chain_id(chain_id.to());
                 }
 
+                if request.as_ref().nonce_keys.is_none() {
+                    request.as_mut().nonce_keys = Some(vec![U256::ZERO]);
+                }
                 if request.as_ref().nonce().is_none() {
-                    let nonce = self.next_available_nonce_for(&request).await?;
+                    if request.as_ref().nonce_keys.as_deref() != Some(&[U256::ZERO]) {
+                        return Err(EthApiError::InvalidParams(
+                            "keyed frame transactions require nonce".into(),
+                        )
+                        .into())
+                    }
+                    let nonce = if let Some(nonce) = request.as_ref().nonce() {
+                        nonce
+                    } else {
+                        self.next_available_nonce_for(&request).await?
+                    };
                     request.as_mut().set_nonce(nonce);
                 }
                 if request.as_ref().signatures.is_none() {
