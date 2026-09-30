@@ -91,7 +91,6 @@ use crate::{
 };
 use alloy_consensus::Transaction;
 
-use alloy_consensus::BlockHeader;
 use alloy_primitives::{
     map::{AddressSet, HashSet},
     Address, TxHash, B256,
