@@ -128,7 +128,6 @@ use crate::tree::{
         StateRootUpdateStream,
     },
 };
-use alloy_consensus::constants::KECCAK_EMPTY;
 use alloy_primitives::Address;
 use reth_chain_state::{CanonicalInMemoryState, ExecutedBlock, ExecutionTimingStats};
 use reth_consensus::{ConsensusError, FullConsensus, ReceiptRootBloom};
@@ -154,8 +153,8 @@ use reth_primitives_traits::{
 };
 use reth_provider::{
     BlockExecutionOutput, BlockHashReader, BlockReader, ChangeSetReader, DatabaseProviderFactory,
-    DatabaseProviderROFactory, HashedPostStateProvider, HistoryReader, ProviderError,
-    PruneCheckpointReader, StageCheckpointReader, StateProvider, StateProviderBox,
+    DatabaseProviderROFactory, EvmStateProvider, EvmStateProviderBox, HashedPostStateProvider,
+    HistoryReader, ProviderError, PruneCheckpointReader, StageCheckpointReader, StateProvider,
     StateProviderFactory, StateReader, StateRootProvider, StorageChangeSetReader,
     StorageSettingsCache,
 };
@@ -167,7 +166,7 @@ use reth_trie::{
 };
 #[cfg(not(feature = "state-trie-db"))]
 use reth_trie::{HashedPostState, KeccakKeyHasher};
-use revm::state::bal::Bal as RevmBal;
+use revm::state::{bal::Bal as RevmBal, AccountInfo};
 use std::{
     sync::{
         atomic::{AtomicUsize, Ordering},
@@ -685,41 +684,44 @@ where
         //
         // The second parameter `instrument_state_provider` controls whether we should
         // instrument the state provider with metrics.
-        let make_state_provider = |fill_on_miss: bool| -> ProviderResult<StateProviderBox> {
-            let provider = state_provider_factory.database_provider_ro()?;
-            let mut provider = if let Some((caches, cache_metrics)) = &execution_cache {
-                let fill_mode = if fill_on_miss {
-                    CacheFillMode::FillOnMiss
-                } else {
-                    CacheFillMode::LookupOnly
-                };
-                Box::new(
-                    CachedStateProvider::new_with_mode(
-                        provider,
-                        caches.clone(),
-                        fill_mode,
-                        cache_metrics.clone(),
-                        cache_stats.clone(),
+        let make_state_provider = |fill_on_miss: bool| -> ProviderResult<EvmStateProviderBox> {
+            let provider = state_provider_factory.database_provider_ro()?.into_evm_state_provider();
+            let provider: EvmStateProviderBox =
+                if let Some((caches, cache_metrics)) = &execution_cache {
+                    let fill_mode = if fill_on_miss {
+                        CacheFillMode::FillOnMiss
+                    } else {
+                        CacheFillMode::LookupOnly
+                    };
+                    Box::new(
+                        CachedStateProvider::new_with_mode(
+                            provider,
+                            caches.clone(),
+                            fill_mode,
+                            cache_metrics.clone(),
+                            cache_stats.clone(),
+                        )
+                        .with_txpool_snapshot(txpool_snapshot.clone()),
                     )
-                    .with_txpool_snapshot(txpool_snapshot.clone()),
-                ) as StateProviderBox
-            } else {
-                Box::new(provider) as StateProviderBox
-            };
+                } else {
+                    Box::new(provider)
+                };
 
-            if instrument_state_provider {
+            let provider: EvmStateProviderBox = if instrument_state_provider {
                 let stats = state_provider_stats
                     .as_ref()
                     .expect("instrumented state provider requires shared stats");
                 let metrics = state_provider_metrics
                     .as_ref()
                     .expect("instrumented state provider requires metrics");
-                provider = Box::new(InstrumentedStateProvider::with_stats(
+                Box::new(InstrumentedStateProvider::with_stats(
                     provider,
                     metrics.clone(),
                     Arc::clone(stats),
-                ));
-            }
+                ))
+            } else {
+                provider
+            };
 
             Ok(provider)
         };
@@ -773,10 +775,13 @@ where
         #[cfg(feature = "state-trie-db")]
         let mut hashed_state: LazyHashedPostState = LazyHandle::ready(Arc::default());
         #[cfg(not(feature = "state-trie-db"))]
+        let parent_span = Span::current();
+        #[cfg(not(feature = "state-trie-db"))]
         let mut hashed_state: LazyHashedPostState =
             self.runtime.spawn_blocking_named("hash-post-state", move || {
                 let _span = debug_span!(
                     target: "engine::tree::payload_validator",
+                    parent: parent_span,
                     "hashed_post_state",
                 )
                 .entered();
@@ -1046,7 +1051,7 @@ where
         InsertBlockErrorKind,
     >
     where
-        S: StateProvider + Send,
+        S: EvmStateProvider + Send,
         Err: core::error::Error + Send + Sync + 'static,
         V: PayloadValidator<T, Block = N::Block>,
         T: PayloadTypes<BuiltPayload: BuiltPayload<Primitives = N>>,
@@ -1186,7 +1191,7 @@ where
     where
         Tx: ExecutableTxFor<Evm> + Send,
         Err: core::error::Error + Send + Sync + 'static,
-        MakeStateProvider: Fn(bool) -> ProviderResult<StateProviderBox> + Sync,
+        MakeStateProvider: Fn(bool) -> ProviderResult<EvmStateProviderBox> + Sync,
         Evm: ConfigureEngineEvm<T::ExecutionData, Primitives = N>,
         T: PayloadTypes<BuiltPayload: BuiltPayload<Primitives = N>>,
         V: PayloadValidator<T, Block = N::Block>,
@@ -1617,7 +1622,7 @@ where
         let code_bytes_read = provider_stats.total_code_fetched_bytes();
 
         // Write stats from BundleState (final state changes)
-        let accounts_changed = output.state.state.len();
+        let accounts_changed = output.state.len();
         let accounts_deleted =
             output.state.state.values().filter(|acc| acc.was_destroyed()).count();
         let storage_slots_changed =
@@ -1634,12 +1639,9 @@ where
 
         // Helper: check if account represents a new contract deployment
         let is_new_deployment = |acc: &BundleAccount| -> bool {
-            let has_code_now = acc.info.as_ref().is_some_and(|info| info.code_hash != KECCAK_EMPTY);
-            let had_no_code_before = acc
-                .original_info
-                .as_ref()
-                .map(|info| info.code_hash == KECCAK_EMPTY)
-                .unwrap_or(true);
+            let has_code_now = acc.info.as_ref().is_some_and(|info| !info.is_empty_code_hash());
+            let had_no_code_before =
+                acc.original_info.as_ref().is_none_or(AccountInfo::is_empty_code_hash);
             has_code_now && had_no_code_before
         };
 
@@ -1656,9 +1658,7 @@ where
             .collect();
         let code_bytes_written: usize = unique_new_code_hashes
             .iter()
-            .filter_map(|hash| {
-                output.state.contracts.get(hash).map(|bytecode| bytecode.original_bytes().len())
-            })
+            .filter_map(|hash| output.state.contracts.get(hash).map(|bytecode| bytecode.len()))
             .sum();
 
         // Total time spent fetching state during execution
@@ -1688,8 +1688,7 @@ where
                     .unwrap_or(false);
 
                 // Check if current code is empty (delegation cleared)
-                let code_now_empty =
-                    acc.info.as_ref().map(|info| info.code_hash == KECCAK_EMPTY).unwrap_or(false);
+                let code_now_empty = acc.info.as_ref().is_some_and(AccountInfo::is_empty_code_hash);
 
                 original_was_eip7702 && code_now_empty
             })

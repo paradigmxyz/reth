@@ -89,7 +89,7 @@ use crate::{
 };
 
 use alloy_primitives::{
-    map::{AddressSet, HashSet},
+    map::{AddressSet, B256Set},
     Address, TxHash, B256,
 };
 use parking_lot::{Mutex, RwLock, RwLockReadGuard, RwLockWriteGuard};
@@ -721,7 +721,7 @@ where
             // Linear search avoids allocating a hash set for small eviction batches.
             const MAX_LINEAR_SEARCH_DISCARDS: usize = 4;
             let discarded_hashes = (discarded.len() > MAX_LINEAR_SEARCH_DISCARDS)
-                .then(|| discarded.iter().map(|tx| *tx.hash()).collect::<HashSet<_>>());
+                .then(|| discarded.iter().map(|tx| *tx.hash()).collect::<B256Set>());
             let is_discarded = |hash: &TxHash| match &discarded_hashes {
                 Some(hashes) => hashes.contains(hash),
                 None => discarded.iter().any(|tx| tx.hash() == hash),

@@ -2,9 +2,7 @@
 
 use alloy_primitives::{Address, StorageKey};
 use reth_execution_cache::{CachedStateProvider, ExecutionCache, TxPoolPrewarmCacheSnapshot};
-#[cfg(not(any(feature = "state-trie-rocksdb", feature = "legacy-trie-rocksdb")))]
-use reth_provider::StateProvider;
-use reth_provider::{AccountReader, BytecodeReader, ProviderResult, StateProviderBox};
+use reth_provider::{EvmStateProvider, EvmStateProviderBox, ProviderResult};
 use std::{
     sync::{
         atomic::{AtomicUsize, Ordering},
@@ -15,12 +13,12 @@ use std::{
 use tokio::sync::oneshot;
 use tracing::trace;
 
-/// Builds a fresh `StateProviderBox` over the block's parent state. Type-erased so the pool is not
+/// Builds a fresh EVM provider over the block's parent state. Type-erased so the pool is not
 /// generic over the provider factory; each worker builds its own per block.
-pub type BuildProviderFn = dyn Fn() -> ProviderResult<StateProviderBox> + Send + Sync;
+pub type BuildProviderFn = dyn Fn() -> ProviderResult<EvmStateProviderBox> + Send + Sync;
 
-/// A single warm request: a whole account (basic account + its bytecode) followed by a batch of
-/// its storage slots, or a batch of storage slots on their own.
+/// A single warm request: an account and a batch of its storage slots, or a batch of storage slots
+/// on their own.
 enum PrewarmTarget {
     Account(Address, Box<[StorageKey]>),
     Storage(Address, Box<[StorageKey]>),
@@ -88,7 +86,7 @@ impl BalPrewarmPool {
         }
     }
 
-    /// Fire-and-forget: warm an account (basic account + bytecode) and its storage slots.
+    /// Fire-and-forget: warm an account and its storage slots.
     ///
     /// The slots are dispatched in `WARM_BATCH_SIZE` chunks that are distributed independently,
     /// so a single account with a large read-set does not serialize onto one worker;
@@ -162,7 +160,7 @@ const WARM_BATCH_SIZE: usize = 8;
 fn prewarm_loop(rx: crossbeam_channel::Receiver<PrewarmMsg>) {
     // The provider (and its MDBX read txn) held for the current block, between `BeginBlock` and
     // `EndBlock`. `None` while idle, so no read txn is pinned across the inter-block gap.
-    let mut provider: Option<CachedStateProvider<StateProviderBox>> = None;
+    let mut provider: Option<CachedStateProvider<EvmStateProviderBox>> = None;
 
     // Blocks when idle; the channel disconnects (and the loop ends) when the pool is dropped.
     while let Ok(msg) = rx.recv() {
@@ -207,6 +205,7 @@ fn prewarm_loop(rx: crossbeam_channel::Receiver<PrewarmMsg>) {
         }
     }
 }
+
 struct SendOnDrop {
     sender: Option<oneshot::Sender<()>>,
 }

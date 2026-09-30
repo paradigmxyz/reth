@@ -7,7 +7,7 @@ use crate::{
 use alloy_consensus::Header;
 use alloy_eip7928::{compute_block_access_list_hash, AccountChanges};
 use alloy_eips::{eip7928::bal::Bal, BlockNumHash};
-use alloy_primitives::{Bytes, B256, KECCAK256_EMPTY, U256};
+use alloy_primitives::{Bytes, B256, U256};
 use futures::future::{ready, Ready};
 use reth_db_api::{
     cursor::{DbCursorRO, DbDupCursorRO},
@@ -44,7 +44,7 @@ use reth_tasks::Runtime;
 use reth_trie_common::{
     proof::ProofRetainer,
     root::{state_root_unsorted, storage_root_unsorted},
-    HashBuilder, Nibbles, TrieAccount, EMPTY_ROOT_HASH,
+    HashBuilder, Nibbles, TrieAccount,
 };
 use std::{
     collections::VecDeque,
@@ -127,17 +127,13 @@ pub(crate) fn key(value: u64) -> B256 {
 
 /// An account without storage or code, distinguished by its nonce.
 pub(crate) fn account(nonce: u64) -> TrieAccount {
-    TrieAccount {
-        nonce,
-        balance: U256::from(1),
-        storage_root: EMPTY_ROOT_HASH,
-        code_hash: KECCAK256_EMPTY,
-    }
+    TrieAccount { nonce, balance: U256::from(1), ..Default::default() }
 }
 
 /// Root of the account trie holding `accounts`.
+#[allow(clippy::cloned_instead_of_copied)]
 pub(crate) fn state_root(accounts: &[(B256, TrieAccount)]) -> B256 {
-    state_root_unsorted(accounts.iter().copied())
+    state_root_unsorted(accounts.iter().cloned())
 }
 
 // Root of the account trie, and the proof nodes on the paths to `targets`.
@@ -201,12 +197,34 @@ pub(crate) fn verified_range(
     origin: B256,
     proof_targets: &[B256],
 ) -> VerifiedAccountRange {
+    verified_accounts(accounts, served, origin, MAX_HASH, proof_targets)
+}
+
+/// Like [`verified_range`], but for a repair's request of the account at `origin` alone, so an
+/// account served past it only proves the interval and is dropped.
+pub(crate) fn verified_repair(
+    accounts: &[(B256, TrieAccount)],
+    served: Range<usize>,
+    origin: B256,
+    proof_targets: &[B256],
+) -> VerifiedAccountRange {
+    verified_accounts(accounts, served, origin, origin, proof_targets)
+}
+
+// Verifies [`account_range`]'s answer to a request from `origin` through `limit`.
+fn verified_accounts(
+    accounts: &[(B256, TrieAccount)],
+    served: Range<usize>,
+    origin: B256,
+    limit: B256,
+    proof_targets: &[B256],
+) -> VerifiedAccountRange {
     let client = ScriptedSnapClient::new([account_range(1, accounts, served, proof_targets)]);
     let request = GetAccountRangeMessage {
         request_id: 1,
         root_hash: state_root(accounts),
         starting_hash: origin,
-        limit_hash: MAX_HASH,
+        limit_hash: limit,
         response_bytes: DEFAULT_RESPONSE_BYTES,
     };
     let downloader = AccountRangeDownloader::new(client, request, Runtime::test()).unwrap();
