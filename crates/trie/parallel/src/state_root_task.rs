@@ -2,7 +2,7 @@
 //!
 //! The "state-root task" is the background multiproof and sparse-trie pipeline that computes
 //! state roots incrementally while a block executes. This module holds its boundary types:
-//! the input messages, the [`StateRootSink`](crate::state_root_task::StateRootSink) and
+//! the input messages, the [`StateRootSink`] and
 //! stream views that feed it, and the handles
 //! that await its result. The per-block strategy abstraction that decides whether and how the
 //! task runs lives in `reth-engine-tree` under `tree::state_root_strategy`.

@@ -1,4 +1,4 @@
-//! clap [Args](clap::Args) for logging configuration.
+//! clap [`clap::Args`] for logging configuration.
 
 use crate::dirs::{LogsDir, PlatformPath};
 use clap::{ArgAction, Args, ValueEnum};
