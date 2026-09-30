@@ -1568,4 +1568,63 @@ mod tests {
 
         assert_eq!(view.state_root(HashedPostState::default()).unwrap(), full_trie(&fork_state).0);
     }
+
+    #[test]
+    fn view_with_trie_changesets_ignores_nodes_removed_above_state_trie_frontier() {
+        let genesis_slots = FILLER_SLOTS.map(|slot| (slot, slot));
+        let genesis = storage_fixture_state(genesis_slots);
+        let with_branch = storage_fixture_state(
+            genesis_slots.into_iter().chain(EXTENSION_BRANCH_SLOTS.map(|slot| (slot, slot))),
+        );
+        let cleared = storage_fixture_state(EXTENSION_BRANCH_SLOTS.map(|slot| (slot, 0)));
+
+        // Block #1 adds slots that create a stored branch at `7c3` and block #2 clears them again.
+        // Only the trie of block #1 is durable, so the durable trie still stores `7c3` while the
+        // trie at Finish, completed by in-memory block #2, does not.
+        let factory = create_test_provider_factory();
+        let blocks = TestBlockBuilder::eth().get_executed_blocks(0..3).collect::<Vec<_>>();
+        persist_storage_fixture(
+            &factory,
+            &blocks,
+            &genesis,
+            &with_branch,
+            1,
+            &[
+                (1, EXTENSION_BRANCH_SLOTS.map(|slot| (slot, 0)).to_vec()),
+                (2, EXTENSION_BRANCH_SLOTS.map(|slot| (slot, slot)).to_vec()),
+            ],
+        );
+        let manager = OverlayManager::<EthPrimitives>::default();
+        manager.insert_block(with_fixture_trie_data(&blocks[2], &with_branch, &genesis, cleared));
+
+        // An in-memory fork of #1 only changes the account. Its view reverts blocks #1..=#2 to
+        // genesis, where `7c3` does not exist either, so the cached reverts never mention it.
+        let fork_account = Account { balance: U256::from(1), nonce: 1, ..Default::default() };
+        let fork_changes = HashedPostState::default()
+            .with_accounts([(keccak256(STORAGE_FIXTURE_ADDRESS), Some(fork_account))]);
+        let mut fork_state = genesis.clone();
+        fork_state.extend(fork_changes.clone());
+        let fork = with_fixture_trie_data(
+            &TestBlockBuilder::eth()
+                .get_executed_block_with_number(1, blocks[0].recovered_block().hash()),
+            &genesis,
+            &fork_state,
+            fork_changes,
+        );
+        assert_ne!(fork.recovered_block().hash(), blocks[1].recovered_block().hash());
+        manager.insert_block(fork.clone());
+
+        // Changing a slot next to `7c3` walks the storage trie through the stale durable node.
+        let changes = storage_fixture_state([(FILLER_SLOTS[0], 1_000)]);
+        let mut expected_state = fork_state;
+        expected_state.extend(changes.clone());
+
+        let provider = factory.provider().unwrap();
+        let view = OverlayStateProvider::new_ref(
+            &provider,
+            manager.overlay_builder(fork.recovered_block().hash()),
+        );
+
+        assert_eq!(view.state_root_with_updates(changes).unwrap().0, full_trie(&expected_state).0);
+    }
 }

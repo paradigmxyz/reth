@@ -113,9 +113,9 @@ where
         finish,
     )?;
 
-    // Step 2: Get the trie reverts for the state after the target block using the cache
-    let reverts = cache.get_or_compute_range(
-        overlay_manager,
+    // Step 2: Get the trie reverts for the state after the target block using the cache, layered
+    // over the in-memory trie updates that complete the durable state trie at Finish
+    let reverts = overlay_manager.get_or_compute_cached_changesets_range_at_frontiers(
         provider,
         (block_number + 1)..=finish.number,
         partial_state_trie,
