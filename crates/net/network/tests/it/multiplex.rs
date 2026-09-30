@@ -1,5 +1,5 @@
 #![allow(unreachable_pub)]
-//! Testing gossiping of transactions.
+//! Testing `RLPx` sub-protocol multiplexing.
 
 use std::{
     net::SocketAddr,
@@ -14,13 +14,10 @@ use reth_eth_wire::{
 };
 use reth_network::{
     protocol::{ConnectionHandler, OnNotSupported, ProtocolHandler},
-    test_utils::{NetworkEventStream, Testnet},
-    NetworkConfigBuilder, NetworkEventListenerProvider, NetworkManager,
+    test_utils::Testnet,
 };
-use reth_network_api::{Direction, NetworkInfo, PeerId, Peers};
-use reth_provider::{noop::NoopProvider, test_utils::MockEthProvider};
-use reth_tasks::Runtime;
-use secp256k1::SecretKey;
+use reth_network_api::{Direction, PeerId};
+use reth_provider::test_utils::MockEthProvider;
 use tokio::sync::{mpsc, oneshot};
 use tokio_stream::wrappers::UnboundedReceiverStream;
 
@@ -282,41 +279,19 @@ impl Stream for PingPongProtoConnection {
 async fn test_connect_to_non_multiplex_peer() {
     reth_tracing::init_test_tracing();
 
-    let net = Testnet::create(1).await;
-
-    let secret_key = SecretKey::new(&mut rand_08::thread_rng());
-
-    let config = NetworkConfigBuilder::eth(secret_key, Runtime::test())
-        .listener_port(0)
-        .disable_discovery()
-        .build(NoopProvider::default());
-
-    let mut network = NetworkManager::new(config).await.unwrap();
-
+    let mut net = Testnet::create(2).await;
     let (tx, _) = mpsc::unbounded_channel();
-    network.add_rlpx_sub_protocol(PingPongProtoHandler { state: ProtocolState { events: tx } });
+    net.peers_mut()[1]
+        .add_rlpx_sub_protocol(PingPongProtoHandler { state: ProtocolState { events: tx } });
+    let net = net.spawn();
+    let [peer0, peer] = net.peers_array();
+    let mut event_stream = peer.event_stream();
 
-    let handle = network.handle().clone();
-    tokio::task::spawn(network);
+    peer.add_peer(peer0);
 
-    // create networkeventstream to get the next session event easily.
-    let events = handle.event_listener();
-    let mut event_stream = NetworkEventStream::new(events);
-
-    let mut handles = net.handles();
-    let handle0 = handles.next().unwrap();
-    drop(handles);
-
-    let _handle = net.spawn();
-
-    handle.add_peer(*handle0.peer_id(), handle0.local_addr());
-
-    let added_peer_id = event_stream.peer_added().await.unwrap();
-    assert_eq!(added_peer_id, *handle0.peer_id());
-
-    // peer with mismatched capability version should fail to connect and be removed.
-    let removed_peer_id = event_stream.peer_removed().await.unwrap();
-    assert_eq!(removed_peer_id, *handle0.peer_id());
+    assert_eq!(event_stream.peer_added().await, Some(*peer0.peer_id()));
+    // peer without the multiplexed protocol should fail to connect and be removed.
+    assert_eq!(event_stream.peer_removed().await, Some(*peer0.peer_id()));
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -333,25 +308,18 @@ async fn test_proto_multiplex() {
     net.peers_mut()[1]
         .add_rlpx_sub_protocol(PingPongProtoHandler { state: ProtocolState { events: tx } });
 
-    let handle = net.spawn();
+    let net = net.spawn();
     // connect all the peers
-    handle.connect_peers().await;
+    net.connect_peers().await;
+    let [peer0, peer1] = net.peers_array();
 
-    let peer0_to_peer1 = from_peer0.recv().await.unwrap();
-    let peer0_conn = match peer0_to_peer1 {
-        ProtocolEvent::Established { direction: _, peer_id, to_connection } => {
-            assert_eq!(peer_id, *handle.peers()[1].peer_id());
-            to_connection
-        }
-    };
+    let ProtocolEvent::Established { peer_id, to_connection: peer0_conn, .. } =
+        from_peer0.recv().await.unwrap();
+    assert_eq!(peer_id, *peer1.peer_id());
 
-    let peer1_to_peer0 = from_peer1.recv().await.unwrap();
-    let peer1_conn = match peer1_to_peer0 {
-        ProtocolEvent::Established { direction: _, peer_id, to_connection } => {
-            assert_eq!(peer_id, *handle.peers()[0].peer_id());
-            to_connection
-        }
-    };
+    let ProtocolEvent::Established { peer_id, to_connection: peer1_conn, .. } =
+        from_peer1.recv().await.unwrap();
+    assert_eq!(peer_id, *peer0.peer_id());
 
     let (tx, rx) = oneshot::channel();
     // send a ping message from peer0 to peer1

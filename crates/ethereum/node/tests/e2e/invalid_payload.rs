@@ -3,17 +3,18 @@
 //! This module tests the scenario where a node receives invalid payloads (e.g., with modified
 //! state roots) before receiving valid ones, ensuring the node can recover and continue.
 
-use crate::utils::{eth_payload_attributes, eth_payload_attributes_amsterdam};
-use alloy_eips::eip7685::RequestsOrHash;
-use alloy_primitives::{keccak256, Bytes, B256};
-use alloy_rpc_types_engine::{ExecutionPayloadV3, PayloadStatusEnum};
+use alloy_consensus::proofs::calculate_transaction_root;
+use alloy_eips::{eip2718::Decodable2718, eip7685::RequestsOrHash};
+use alloy_primitives::{bytes, keccak256, Bytes, B256};
+use alloy_rpc_types_engine::{ExecutionPayloadV1, ExecutionPayloadV3, PayloadStatusEnum};
 use rand::{rngs::StdRng, Rng, SeedableRng};
-use reth_chainspec::{ChainSpecBuilder, MAINNET};
-use reth_e2e_test_utils::{setup_engine, transaction::TransactionTestContext};
+use reth_chainspec::EthereumHardfork;
+use reth_e2e_test_utils::{transaction::TransactionTestContext, E2ETestSetupExt};
+use reth_ethereum_primitives::TransactionSigned;
 use reth_node_ethereum::EthereumNode;
+use reth_primitives_traits::SignedTransaction;
 
 use reth_rpc_api::EngineApiClient;
-use std::sync::Arc;
 
 /// Tests that a node can handle receiving an invalid payload (with wrong state root)
 /// followed by the correct payload, and continue operating normally.
@@ -30,22 +31,8 @@ async fn can_handle_invalid_payload_then_valid() -> eyre::Result<()> {
     let mut rng = StdRng::from_seed(seed);
     println!("Seed: {seed:?}");
 
-    let chain_spec = Arc::new(
-        ChainSpecBuilder::default()
-            .chain(MAINNET.chain)
-            .genesis(serde_json::from_str(include_str!("../assets/genesis.json")).unwrap())
-            .cancun_activated()
-            .build(),
-    );
-
-    let (mut nodes, wallet) = setup_engine::<EthereumNode>(
-        2,
-        chain_spec.clone(),
-        false,
-        Default::default(),
-        eth_payload_attributes,
-    )
-    .await?;
+    let (mut nodes, wallet) =
+        EthereumNode::test_setup_for(EthereumHardfork::Cancun).with_num_nodes(2).build().await?;
 
     let mut producer = nodes.pop().unwrap();
     let receiver = nodes.pop().unwrap();
@@ -147,22 +134,8 @@ async fn can_handle_multiple_invalid_payloads() -> eyre::Result<()> {
     let mut rng = StdRng::from_seed(seed);
     println!("Seed: {seed:?}");
 
-    let chain_spec = Arc::new(
-        ChainSpecBuilder::default()
-            .chain(MAINNET.chain)
-            .genesis(serde_json::from_str(include_str!("../assets/genesis.json")).unwrap())
-            .cancun_activated()
-            .build(),
-    );
-
-    let (mut nodes, wallet) = setup_engine::<EthereumNode>(
-        2,
-        chain_spec.clone(),
-        false,
-        Default::default(),
-        eth_payload_attributes,
-    )
-    .await?;
+    let (mut nodes, wallet) =
+        EthereumNode::test_setup_for(EthereumHardfork::Cancun).with_num_nodes(2).build().await?;
 
     let mut producer = nodes.pop().unwrap();
     let receiver = nodes.pop().unwrap();
@@ -248,22 +221,8 @@ async fn can_handle_invalid_payload_with_transactions() -> eyre::Result<()> {
     let mut rng = StdRng::from_seed(seed);
     println!("Seed: {seed:?}");
 
-    let chain_spec = Arc::new(
-        ChainSpecBuilder::default()
-            .chain(MAINNET.chain)
-            .genesis(serde_json::from_str(include_str!("../assets/genesis.json")).unwrap())
-            .cancun_activated()
-            .build(),
-    );
-
-    let (mut nodes, wallet) = setup_engine::<EthereumNode>(
-        2,
-        chain_spec.clone(),
-        false,
-        Default::default(),
-        eth_payload_attributes,
-    )
-    .await?;
+    let (mut nodes, wallet) =
+        EthereumNode::test_setup_for(EthereumHardfork::Cancun).with_num_nodes(2).build().await?;
 
     let mut producer = nodes.pop().unwrap();
     let receiver = nodes.pop().unwrap();
@@ -357,29 +316,67 @@ async fn can_handle_invalid_payload_with_transactions() -> eyre::Result<()> {
     Ok(())
 }
 
+/// Tests that `engine_newPayloadV1` returns `INVALID` for an in-range but unrecoverable
+/// transaction signature, and still accepts the valid payload afterwards.
+#[tokio::test]
+async fn unrecoverable_signature_is_invalid_payload() -> eyre::Result<()> {
+    reth_tracing::init_test_tracing();
+
+    let (mut node, wallet) =
+        EthereumNode::test_setup_for(EthereumHardfork::Paris).build_single().await?;
+
+    let raw_tx = TransactionTestContext::transfer_tx_bytes(1, wallet.inner).await;
+    node.rpc.inject_tx(raw_tx).await?;
+    let payload = node.new_payload().await?;
+    let block = payload.block().clone();
+    let valid_payload =
+        ExecutionPayloadV1::from_block_unchecked(block.hash(), &block.clone().into_block());
+
+    // r = 5, s = 1, v = 27 are in range, but r = 5 is not a secp256k1 x-coordinate.
+    let raw_tx =
+        bytes!("e48085174876e8008252089400000000000000000000000000000000000000ee01801b0501");
+    let tx = TransactionSigned::decode_2718_exact(&raw_tx)?;
+    let recovery_error = tx.try_recover().unwrap_err();
+
+    // Recompute the transaction root and block hash so validation reaches sender recovery.
+    let mut invalid_block = block.clone().into_block();
+    invalid_block.body.transactions = vec![tx];
+    invalid_block.header.transactions_root =
+        calculate_transaction_root(&invalid_block.body.transactions);
+    let invalid_payload =
+        ExecutionPayloadV1::from_block_unchecked(invalid_block.header.hash_slow(), &invalid_block);
+
+    let engine = node.auth_server_handle().http_client();
+    let status = EngineApiClient::<reth_node_ethereum::EthEngineTypes>::new_payload_v1(
+        &engine,
+        invalid_payload,
+    )
+    .await?;
+    let PayloadStatusEnum::Invalid { validation_error } = status.status else {
+        panic!("Expected INVALID for an unrecoverable signature, got {status:?}");
+    };
+    assert!(validation_error.contains(&recovery_error.to_string()), "{validation_error}");
+    assert_eq!(status.latest_valid_hash, Some(block.parent_hash));
+
+    let status = EngineApiClient::<reth_node_ethereum::EthEngineTypes>::new_payload_v1(
+        &engine,
+        valid_payload,
+    )
+    .await?;
+    assert_eq!(status.status, PayloadStatusEnum::Valid);
+    assert_eq!(status.latest_valid_hash, Some(block.hash()));
+
+    Ok(())
+}
+
 /// Tests that `engine_newPayloadV5` returns `INVALID` with no latest valid hash for undecodable
 /// block access list bytes.
 #[tokio::test]
 async fn undecodable_bal_is_invalid_payload() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
 
-    let chain_spec = Arc::new(
-        ChainSpecBuilder::default()
-            .chain(MAINNET.chain)
-            .genesis(serde_json::from_str(include_str!("../assets/genesis.json")).unwrap())
-            .amsterdam_activated()
-            .build(),
-    );
-
-    let (mut nodes, wallet) = setup_engine::<EthereumNode>(
-        1,
-        chain_spec,
-        false,
-        Default::default(),
-        eth_payload_attributes_amsterdam,
-    )
-    .await?;
-    let mut node = nodes.pop().unwrap();
+    let (mut node, wallet) =
+        EthereumNode::test_setup_for(EthereumHardfork::Amsterdam).build_single().await?;
 
     // Build a valid Amsterdam payload without making it canonical.
     let raw_tx = TransactionTestContext::transfer_tx_bytes(1, wallet.inner).await;
@@ -409,7 +406,7 @@ async fn undecodable_bal_is_invalid_payload() -> eyre::Result<()> {
         RequestsOrHash::Requests(envelope.execution_requests.clone()),
     )
     .await?;
-    assert!(matches!(invalid_status.status, PayloadStatusEnum::Invalid { .. }));
+    assert!(invalid_status.is_invalid());
     assert_eq!(invalid_status.latest_valid_hash, None);
 
     // The same block with well-formed block access list bytes is processed normally.
@@ -421,7 +418,7 @@ async fn undecodable_bal_is_invalid_payload() -> eyre::Result<()> {
         RequestsOrHash::Requests(envelope.execution_requests),
     )
     .await?;
-    assert!(matches!(status.status, PayloadStatusEnum::Valid));
+    assert!(status.is_valid());
 
     Ok(())
 }

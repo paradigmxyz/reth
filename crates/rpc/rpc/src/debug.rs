@@ -17,7 +17,7 @@ use async_trait::async_trait;
 use futures::Stream;
 use jsonrpsee::{core::RpcResult, PendingSubscriptionSink, SubscriptionMessage};
 use parking_lot::RwLock;
-use reth_chainspec::{ChainSpecProvider, EthChainSpec, EthereumHardforks};
+use reth_chainspec::{ChainSpecProvider, EthereumHardforks};
 use reth_engine_primitives::ConsensusEngineEvent;
 use reth_errors::RethError;
 use reth_evm::{block::BlockExecutor, execute::Executor, ConfigureEvm, EvmEnvFor};
@@ -35,8 +35,8 @@ use reth_rpc_eth_types::{EthApiError, StateCacheDb};
 use reth_rpc_server_types::{result::internal_rpc_err, ToRpcResult};
 use reth_storage_api::{
     BlockIdReader, BlockReaderIdExt, HashedPostStateProvider, HeaderProvider, ProviderBlock,
-    ReceiptProviderIdExt, StateProviderFactory, StateRootProvider, StorageRootProvider,
-    TransactionVariant,
+    ReceiptProviderIdExt, StateProviderBox, StateProviderFactory, StateRootProvider,
+    StorageRootProvider, TransactionVariant,
 };
 use reth_tasks::{pool::BlockingTaskGuard, Runtime};
 use reth_transaction_pool::TransactionPool;
@@ -632,13 +632,15 @@ where
                 let mut witness = None;
                 let _ = block_executor
                     .execute_with_state_closure(&block, |statedb: &State<_>| {
-                        witness =
-                            Some(ExecutionWitnessRecord::new(statedb).into_execution_witness(
-                                &statedb.database.database.0,
-                                eth_api.provider(),
-                                block_number,
-                                mode,
-                            ));
+                        witness = Some(
+                            ExecutionWitnessRecord::new(statedb)
+                                .into_execution_witness::<StateProviderBox, _>(
+                                    &statedb.database.database,
+                                    eth_api.provider(),
+                                    block_number,
+                                    mode,
+                                ),
+                        );
                     })
                     .map_err(|err| EthApiError::Internal(err.into()))?;
 
@@ -724,9 +726,6 @@ where
         let account = db.basic(address).map_err(Eth::Error::from_eth_err)?;
         let Some(account) = account else { return Ok(None) };
 
-        let balance = account.balance;
-        let nonce = account.nonce;
-        let code_hash = account.code_hash;
         let (hashed_storage, status) = db
             .cache
             .accounts
@@ -747,10 +746,11 @@ where
             db.database.storage_root(address, hashed_storage).map_err(Eth::Error::from_eth_err)?
         };
 
-        Ok(Some(Account { balance, nonce, code_hash, storage_root }))
+        Ok(Some(reth_primitives_traits::Account::from(account).into_trie_account(storage_root)))
     }
 
     /// Retrieves the account's balance, nonce, and code from the given state.
+    #[allow(clippy::needless_update)]
     fn account_info<DB>(db: &mut DB, address: Address) -> Result<AccountInfo, Eth::Error>
     where
         DB: Database,
@@ -765,7 +765,16 @@ where
             db.code_by_hash(account.code_hash).map_err(Eth::Error::from_eth_err)?.original_bytes()
         };
 
-        Ok(AccountInfo { balance: account.balance, nonce: account.nonce, code })
+        Ok(AccountInfo {
+            balance: account.balance,
+            nonce: account.nonce,
+            code,
+            #[cfg(feature = "account-ext")]
+            extension: reth_primitives_traits::AccountExtension::from_shared(
+                account.extension.into_shared(),
+            ),
+            ..Default::default()
+        })
     }
 
     /// Returns the code associated with a given hash at the specified block ID. If no code is
@@ -938,7 +947,7 @@ where
         }
 
         for entry in entries {
-            let rlp = alloy_rlp::encode(entry.block.sealed_block()).into();
+            let rlp = Bytes::from(alloy_rlp::encode(entry.block.sealed_block()));
             let hash = entry.block.hash();
 
             let block = entry
@@ -946,7 +955,9 @@ where
                 .clone_into_rpc_block(
                     BlockTransactionsKind::Full,
                     |tx, tx_info| self.eth_api().converter().fill(tx, tx_info),
-                    |header, size| self.eth_api().converter().convert_header(header, size),
+                    |header, block_size| {
+                        self.eth_api().converter().convert_header(header, Some(block_size))
+                    },
                 )
                 .map_err(|err| Eth::Error::from(err).into())?;
 
@@ -1231,7 +1242,7 @@ where
     }
 
     async fn debug_chain_config(&self) -> RpcResult<ChainConfig> {
-        Ok(self.provider().chain_spec().genesis().config.clone())
+        Ok(crate::chain_config::chain_config(&*self.provider().chain_spec()))
     }
 
     async fn debug_chaindb_property(&self, _property: String) -> RpcResult<()> {

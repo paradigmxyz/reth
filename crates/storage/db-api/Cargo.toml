@@ -25,6 +25,7 @@ reth-trie-common.workspace = true
 # ethereum
 alloy-primitives.workspace = true
 alloy-consensus.workspace = true
+alloy-eips = { workspace = true, features = ["serde"] }
 
 # codecs
 modular-bitfield.workspace = true
@@ -80,4 +81,5 @@ arbitrary = [
     "reth-stages-types/arbitrary",
     "alloy-consensus/arbitrary",
     "reth-ethereum-primitives/arbitrary",
+    "alloy-eips/arbitrary",
 ]

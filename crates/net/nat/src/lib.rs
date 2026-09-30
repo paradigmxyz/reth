@@ -66,6 +66,11 @@ pub enum NatResolver {
 
 impl NatResolver {
     /// Attempts to produce an IP address (best effort).
+    ///
+    /// # Panics
+    ///
+    /// Network and interface resolution require an active Tokio runtime. Only
+    /// [`Self::ExternalIp`] and [`Self::None`] are guaranteed to work without one.
     pub async fn external_addr(self) -> Option<IpAddr> {
         external_addr_with(self).await
     }
@@ -73,7 +78,8 @@ impl NatResolver {
     /// Returns the fixed ip, if it is [`NatResolver::ExternalIp`] or [`NatResolver::ExternalAddr`].
     ///
     /// In the case of [`NatResolver::ExternalAddr`], it will return the first IP address found for
-    /// the domain.
+    /// the domain. This performs blocking DNS resolution; async callers should use
+    /// [`Self::external_addr`] instead.
     pub fn as_external_ip(self, port: u16) -> Option<IpAddr> {
         match self {
             Self::ExternalIp(ip) => Some(ip),
@@ -138,6 +144,8 @@ impl FromStr for NatResolver {
 }
 
 /// With this type you can resolve the external public IP address on an interval basis.
+///
+/// Keeps at most one resolution in flight and skips missed interval ticks.
 #[must_use = "Does nothing unless polled"]
 pub struct ResolveNatInterval {
     resolver: NatResolver,
@@ -156,7 +164,9 @@ impl fmt::Debug for ResolveNatInterval {
 }
 
 impl ResolveNatInterval {
-    fn with_interval(resolver: NatResolver, interval: tokio::time::Interval) -> Self {
+    fn with_interval(resolver: NatResolver, mut interval: tokio::time::Interval) -> Self {
+        // Resolving once is sufficient after a delay; do not replay missed attempts in a burst.
+        interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
         Self { resolver, future: None, interval }
     }
 
@@ -198,7 +208,8 @@ impl ResolveNatInterval {
     ///  * `Poll::Ready(Option<IpAddr>)` if the next [`IpAddr`] has been resolved. This returns
     ///    `None` if the attempt was unsuccessful.
     pub fn poll_tick(&mut self, cx: &mut Context<'_>) -> Poll<Option<IpAddr>> {
-        if self.interval.poll_tick(cx).is_ready() {
+        // Dropping a resolution future cannot cancel blocking work it has already started.
+        if self.interval.poll_tick(cx).is_ready() && self.future.is_none() {
             self.future = Some(Box::pin(self.resolver.clone().external_addr()));
         }
 
@@ -214,23 +225,39 @@ impl ResolveNatInterval {
 }
 
 /// Attempts to produce an IP address with all builtin resolvers (best effort).
+///
+/// # Panics
+///
+/// Panics if polled outside a Tokio runtime.
 pub async fn external_ip() -> Option<IpAddr> {
     external_addr_with(NatResolver::Any).await
 }
 
 /// Given a [`NatResolver`] attempts to produce an IP address (best effort).
+///
+/// # Panics
+///
+/// Network and interface resolution require an active Tokio runtime. Only
+/// [`NatResolver::ExternalIp`] and [`NatResolver::None`] are guaranteed to work without one.
 pub async fn external_addr_with(resolver: NatResolver) -> Option<IpAddr> {
     match resolver {
         NatResolver::Any | NatResolver::Upnp | NatResolver::PublicIp => resolve_external_ip().await,
         NatResolver::ExternalIp(ip) => Some(ip),
-        NatResolver::NetIf => resolve_net_if_ip(DEFAULT_NET_IF_NAME)
-            .inspect_err(|err| {
-                debug!(target: "net::nat",
-                     %err,
-                    "Failed to resolve network interface IP"
-                );
-            })
-            .ok(),
+        NatResolver::NetIf => tokio::task::spawn_blocking(|| {
+            resolve_net_if_ip(DEFAULT_NET_IF_NAME)
+        })
+        .await
+        .inspect_err(|err| {
+            debug!(target: "net::nat", %err, "Failed to join network interface resolution task");
+        })
+        .ok()?
+        .inspect_err(|err| {
+            debug!(target: "net::nat",
+                 %err,
+                "Failed to resolve network interface IP"
+            );
+        })
+        .ok(),
         NatResolver::ExternalAddr(domain) => tokio::net::lookup_host(format!("{domain}:0"))
             .await
             .inspect_err(|err| {
@@ -243,7 +270,22 @@ pub async fn external_addr_with(resolver: NatResolver) -> Option<IpAddr> {
 }
 
 async fn resolve_external_ip() -> Option<IpAddr> {
-    let futures = EXTERNAL_IP_APIS.iter().copied().map(resolve_external_ip_url_res).map(Box::pin);
+    // Client setup can read system proxy and TLS configuration. Keep it off the task polling
+    // discovery; the requests themselves use async I/O and share the same client.
+    let client = tokio::task::spawn_blocking(|| {
+        reqwest::Client::builder().timeout(Duration::from_secs(10)).build()
+    })
+    .await
+    .inspect_err(|err| {
+        debug!(target: "net::nat", %err, "Failed to join external IP client setup task");
+    })
+    .ok()?
+    .inspect_err(|err| {
+        debug!(target: "net::nat", %err, "Failed to build external IP client");
+    })
+    .ok()?;
+    let futures =
+        EXTERNAL_IP_APIS.iter().map(|url| resolve_external_ip_url_res(&client, url)).map(Box::pin);
     futures_util::future::select_ok(futures)
         .await
         .inspect_err(|err| {
@@ -256,12 +298,11 @@ async fn resolve_external_ip() -> Option<IpAddr> {
         .map(|(ip, _)| ip)
 }
 
-async fn resolve_external_ip_url_res(url: &str) -> Result<IpAddr, ()> {
-    resolve_external_ip_url(url).await.ok_or(())
+async fn resolve_external_ip_url_res(client: &reqwest::Client, url: &str) -> Result<IpAddr, ()> {
+    resolve_external_ip_url(client, url).await.ok_or(())
 }
 
-async fn resolve_external_ip_url(url: &str) -> Option<IpAddr> {
-    let client = reqwest::Client::builder().timeout(Duration::from_secs(10)).build().ok()?;
+async fn resolve_external_ip_url(client: &reqwest::Client, url: &str) -> Option<IpAddr> {
     let response = client.get(url).send().await.ok()?;
     let response = response.error_for_status().ok()?;
     let text = response.text().await.ok()?;
@@ -271,6 +312,7 @@ async fn resolve_external_ip_url(url: &str) -> Option<IpAddr> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use futures_util::FutureExt;
     use std::net::{Ipv4Addr, Ipv6Addr};
 
     #[tokio::test]
@@ -291,6 +333,67 @@ mod tests {
         dbg!(ip);
         let ip = interval.tick().await;
         dbg!(ip);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn interval_preserves_pending_resolution() {
+        let period = Duration::from_secs(5);
+        let next_ip: IpAddr = "203.0.113.7".parse().unwrap();
+        for result in [Some("203.0.113.8".parse().unwrap()), None] {
+            let mut interval =
+                ResolveNatInterval::interval(NatResolver::ExternalIp(next_ip), period);
+            assert_eq!(interval.tick().await, Some(next_ip));
+
+            let (tx, rx) = tokio::sync::oneshot::channel();
+            interval.future = Some(Box::pin(async move { rx.await.unwrap() }));
+            assert!(interval.tick().now_or_never().is_none());
+
+            tokio::time::advance(period * 3).await;
+            assert!(interval.tick().now_or_never().is_none());
+            tx.send(result).expect("the pending resolution must not be dropped");
+            assert_eq!(interval.tick().await, result);
+
+            // The next attempt waits for its interval after either success or failure.
+            assert!(interval.tick().now_or_never().is_none());
+            tokio::time::advance(period).await;
+            assert_eq!(interval.tick().await, Some(next_ip));
+        }
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn interval_skips_missed_attempts() {
+        let period = Duration::from_secs(5);
+        let ip: IpAddr = "203.0.113.7".parse().unwrap();
+        let mut interval = ResolveNatInterval::interval(NatResolver::ExternalIp(ip), period);
+        assert_eq!(interval.tick().await, Some(ip));
+
+        tokio::time::advance(period * 3).await;
+        assert_eq!(interval.tick().await, Some(ip));
+        assert!(interval.tick().now_or_never().is_none());
+        tokio::time::advance(period).await;
+        assert_eq!(interval.tick().await, Some(ip));
+    }
+
+    #[test]
+    fn netif_resolution_does_not_block_the_runtime() {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .max_blocking_threads(1)
+            .build()
+            .unwrap();
+        let (release_tx, release_rx) = std::sync::mpsc::channel();
+        // Occupy the blocking pool so a lookup must yield until the worker is released.
+        let blocker = runtime.spawn_blocking(move || {
+            release_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+        });
+        runtime.block_on(async {
+            let mut lookup = std::pin::pin!(NatResolver::NetIf.external_addr());
+            let pending = futures_util::poll!(&mut lookup).is_pending();
+            release_tx.send(()).unwrap();
+            assert!(pending, "network interface lookup must run on a blocking worker");
+            assert_eq!(lookup.await, resolve_net_if_ip(DEFAULT_NET_IF_NAME).ok());
+            blocker.await.unwrap();
+        });
     }
 
     #[test]
