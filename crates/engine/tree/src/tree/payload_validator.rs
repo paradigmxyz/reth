@@ -764,10 +764,12 @@ where
         // (keccak256 hashing of all changed addresses and storage slots).
         let hashed_state_output = output.clone();
         let mut hashed_state_rx = state_root_job.take_hashed_state_rx();
+        let parent_span = Span::current();
         let mut hashed_state: LazyHashedPostState =
             self.runtime.spawn_blocking_named("hash-post-state", move || {
                 let _span = debug_span!(
                     target: "engine::tree::payload_validator",
+                    parent: parent_span,
                     "hashed_post_state",
                 )
                 .entered();

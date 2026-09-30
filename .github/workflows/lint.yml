@@ -78,6 +78,10 @@ jobs:
       - run: cargo clippy --workspace --lib --examples --tests --benches --all-features --locked
         env:
           RUSTFLAGS: -D warnings
+      # `--all-features` enables `account-ext`, so also lint the default account layout.
+      - run: cargo clippy --workspace --lib --examples --tests --benches --locked
+        env:
+          RUSTFLAGS: -D warnings
 
   wasm:
     runs-on: ${{ github.repository == 'paradigmxyz/reth' && 'depot-ubuntu-latest' || 'ubuntu-latest' }}
@@ -146,6 +150,8 @@ jobs:
   crate-checks:
     name: crate-checks (${{ matrix.partition }}/${{ matrix.total_partitions }})
     runs-on: ${{ github.repository == 'paradigmxyz/reth' && 'depot-ubuntu-latest-4' || 'ubuntu-latest' }}
+    env:
+      CARGO_INCREMENTAL: 0
     permissions:
       id-token: write
       contents: read
@@ -172,9 +178,6 @@ jobs:
           checksum: true
           fallback: none
       - uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
-        with:
-          cache-on-failure: true
       - run: cargo hack check --workspace --partition ${{ matrix.partition }}/${{ matrix.total_partitions }}
 
   msrv:

@@ -283,16 +283,30 @@ where
         block_hash: B256,
         block_number: BlockNumber,
     ) -> eyre::Result<()> {
-        // Get the head block from the notification stream and verify the tx is included in the
-        // canonical block.
-        let head = tokio::time::timeout(WAIT_TIMEOUT, self.canonical_stream.next())
+        // The stream buffers every canonical notification since the context was created, e.g. of
+        // blocks mined with `advance_block`, so skip notifications until the one that commits the
+        // block, then verify the tx is included in it.
+        let wait = async {
+            loop {
+                let notification = self
+                    .canonical_stream
+                    .next()
+                    .await
+                    .ok_or_else(|| eyre!("canonical state stream closed"))?;
+                let committed = notification.committed();
+                if let Some(block) = committed.blocks().get(&block_number) &&
+                    block.hash() == block_hash
+                {
+                    return eyre::Ok(Arc::clone(block))
+                }
+            }
+        };
+        let block = tokio::time::timeout(WAIT_TIMEOUT, wait)
             .await
-            .map_err(|_| eyre!("timed out waiting for block {block_number}"))?
-            .ok_or_else(|| eyre!("canonical state stream closed"))?;
+            .map_err(|_| eyre!("timed out waiting for block {block_number}"))??;
         ensure!(
-            head.tip().body().transactions().iter().any(|tx| *tx.tx_hash() == tip_tx_hash),
-            "transaction {tip_tx_hash} is not included in block {}",
-            head.tip().number()
+            block.body().transactions().iter().any(|tx| *tx.tx_hash() == tip_tx_hash),
+            "transaction {tip_tx_hash} is not included in block {block_number}"
         );
 
         // Wait for the block to commit and make sure the block hash we submitted via FCU engine
