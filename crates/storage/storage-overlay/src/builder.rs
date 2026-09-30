@@ -521,12 +521,6 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
                     res
                 };
 
-                let prefix_sets = if trie_changesets {
-                    Default::default()
-                } else {
-                    hashed_state_reverts.construct_prefix_sets()
-                };
-
                 // Resolve overlays and extend reverts with them. If reverts are empty, use overlays
                 // directly to avoid cloning.
                 let (overlay_trie, overlay_state) =
@@ -549,6 +543,16 @@ impl<N: NodePrimitives> OverlayBuilder<N> {
                     Arc::new(hashed_state_reverts)
                 } else {
                     Arc::new(hashed_state_reverts)
+                };
+
+                // Without trie changesets the trie nodes still describe Finish, so every key whose
+                // value differs from Finish must be invalidated: both the reverted keys and the
+                // keys changed by the in-memory blocks replayed on top of the anchor. The overlay
+                // trie nodes are only valid relative to the anchor's trie, not Finish's.
+                let prefix_sets = if trie_changesets {
+                    Default::default()
+                } else {
+                    hashed_state_updates.construct_prefix_sets()
                 };
 
                 trie_updates_total_len = trie_updates.total_len();
