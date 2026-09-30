@@ -636,7 +636,7 @@ mod tests {
             Arc::new(ChainSpecBuilder::mainnet().cancun_activated().genesis(genesis).build());
         let factory = create_test_provider_factory_with_chain_spec(chain_spec);
         init_genesis(&factory).unwrap();
-        let provider = BlockchainProvider::new(factory).unwrap();
+        let provider = BlockchainProvider::with_database_head(factory).unwrap();
 
         let eth_api = EthApiBuilder::new(
             provider.clone(),

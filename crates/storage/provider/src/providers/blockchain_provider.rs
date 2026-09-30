@@ -1,7 +1,7 @@
 use crate::{
     providers::{
-        ConsistentProvider, ProviderNodeTypes, RocksDBProvider, StaticFileProvider,
-        StaticFileProviderRWRefMut,
+        ConsistentProvider, DatabaseProviderRO, ProviderNodeTypes, RocksDBProvider,
+        StaticFileProvider, StaticFileProviderRWRefMut,
     },
     AccountReader, BalProvider, BalStoreHandle, BlockHashReader, BlockIdReader, BlockNumReader,
     BlockReader, BlockReaderIdExt, BlockSource, CanonChainTracker, CanonStateNotifications,
@@ -87,34 +87,21 @@ impl<N: ProviderNodeTypes> BlockchainProvider<N> {
     /// Create a new [`BlockchainProvider`] over the storage's in-memory state.
     ///
     /// The provider uses the [`CanonicalInMemoryState`] of the storage's overlay manager, so the
-    /// provider, the overlay manager and the engine share the node's single store. If the chain
-    /// info of that store is not initialized yet, this initializes it from the latest header in
-    /// the database, see [`Self::with_latest`]. Otherwise the provider uses the chain info as it
-    /// is: building another provider never moves it back underneath the engine.
+    /// provider, the overlay manager and the engine share the node's single store. This does not
+    /// touch the chain info (canonical, safe and finalized headers) of that store: the node
+    /// launcher initializes it once, and tools and tests that wire a provider manually initialize
+    /// it with [`Self::with_latest`] or [`Self::with_database_head`].
     pub fn new(storage: ProviderFactory<N>) -> ProviderResult<Self> {
-        if storage.overlay_manager().in_memory_state().has_canonical_head() {
-            return Ok(Self::from_storage(storage))
-        }
-
-        let provider = storage.provider()?;
-        let best = provider.chain_info()?;
-        match provider.header_by_number(best.best_number)? {
-            Some(header) => {
-                drop(provider);
-                Ok(Self::with_latest(storage, SealedHeader::new(header, best.best_hash))?)
-            }
-            None => Err(ProviderError::HeaderNotFound(best.best_number.into())),
-        }
+        Ok(Self::from_storage(storage))
     }
 
-    /// Create new provider instance that wraps the database and the blockchain tree, using the
-    /// provided latest header to initialize the chain info of the storage's in-memory state.
+    /// Create new provider instance that wraps the database and the blockchain tree, and
+    /// initialize the chain info of the storage's in-memory state with `latest` as the canonical
+    /// head and the finalized and safe blocks stored in the database.
     ///
-    /// This is the one-time initializer of that chain info, used by [`Self::new`] and by tests:
-    /// it sets the canonical head to `latest` and the safe and finalized headers to the blocks
-    /// stored in the database, but only if the chain info was not initialized before, see
-    /// [`CanonicalInMemoryState::init_head_markers`]. Once initialized, the chain info belongs to
-    /// the engine, and `latest` is ignored.
+    /// This is the one-time initializer of the chain info for tests and for anyone wiring a
+    /// provider manually. It overwrites the chain info, so it must not be used while an engine
+    /// maintains it: the node launcher initializes the chain info itself and uses [`Self::new`].
     ///
     /// This returns a `ProviderResult` since it tries the retrieve the last finalized header from
     /// `database`.
@@ -122,28 +109,65 @@ impl<N: ProviderNodeTypes> BlockchainProvider<N> {
         storage: ProviderFactory<N>,
         latest: SealedHeader<HeaderTy<N>>,
     ) -> ProviderResult<Self> {
-        let in_memory_state = storage.overlay_manager().in_memory_state();
-        if !in_memory_state.has_canonical_head() {
-            let provider = storage.provider()?;
-            let finalized_header = provider
-                .last_finalized_block_number()?
-                .map(|num| provider.sealed_header(num))
-                .transpose()?
-                .flatten();
-            let safe_header = provider
-                .last_safe_block_number()?
-                .or_else(|| {
-                    // for the purpose of this we can also use the finalized block if we don't have
-                    // the safe block
-                    provider.last_finalized_block_number().ok().flatten()
-                })
-                .map(|num| provider.sealed_header(num))
-                .transpose()?
-                .flatten();
-            in_memory_state.init_head_markers(latest, finalized_header, safe_header);
-        }
+        let (finalized, safe) = Self::finalized_and_safe_headers(&storage.provider()?)?;
+        let this = Self::from_storage(storage);
+        this.canonical_in_memory_state.set_head_markers(latest, finalized, safe);
+        Ok(this)
+    }
 
-        Ok(Self::from_storage(storage))
+    /// Create new provider instance like [`Self::with_latest`], with the latest header stored in
+    /// the database as the canonical head, see [`Self::head_markers_from_database`].
+    pub fn with_database_head(storage: ProviderFactory<N>) -> ProviderResult<Self> {
+        let (latest, finalized, safe) = Self::head_markers_from_database(&storage)?;
+        let this = Self::from_storage(storage);
+        this.canonical_in_memory_state.set_head_markers(latest, finalized, safe);
+        Ok(this)
+    }
+
+    /// Returns the chain info a node starts with, read from the database: the latest header, and
+    /// the finalized and safe headers if they are known.
+    ///
+    /// The safe header falls back to the finalized header if no safe block is stored.
+    #[expect(clippy::type_complexity)]
+    pub fn head_markers_from_database(
+        storage: &ProviderFactory<N>,
+    ) -> ProviderResult<(
+        SealedHeader<HeaderTy<N>>,
+        Option<SealedHeader<HeaderTy<N>>>,
+        Option<SealedHeader<HeaderTy<N>>>,
+    )> {
+        let provider = storage.provider()?;
+        let best = provider.chain_info()?;
+        let latest = provider
+            .header_by_number(best.best_number)?
+            .ok_or_else(|| ProviderError::HeaderNotFound(best.best_number.into()))?;
+        let (finalized, safe) = Self::finalized_and_safe_headers(&provider)?;
+        Ok((SealedHeader::new(latest, best.best_hash), finalized, safe))
+    }
+
+    /// Returns the finalized and safe headers stored in the database. The safe header falls back
+    /// to the finalized header if no safe block is stored.
+    #[expect(clippy::type_complexity)]
+    fn finalized_and_safe_headers(
+        provider: &DatabaseProviderRO<N::DB, N>,
+    ) -> ProviderResult<(Option<SealedHeader<HeaderTy<N>>>, Option<SealedHeader<HeaderTy<N>>>)>
+    {
+        let finalized_header = provider
+            .last_finalized_block_number()?
+            .map(|num| provider.sealed_header(num))
+            .transpose()?
+            .flatten();
+        let safe_header = provider
+            .last_safe_block_number()?
+            .or_else(|| {
+                // for the purpose of this we can also use the finalized block if we don't have the
+                // safe block
+                provider.last_finalized_block_number().ok().flatten()
+            })
+            .map(|num| provider.sealed_header(num))
+            .transpose()?
+            .flatten();
+        Ok((finalized_header, safe_header))
     }
 
     /// Creates a provider over the in-memory state of the storage's overlay manager, without
@@ -3071,7 +3095,8 @@ mod tests {
         (Address::random(), Account { nonce, balance: U256::from(nonce), ..Default::default() })
     }
 
-    /// [`BlockchainProvider::new`] needs a genesis header to initialize its chain tracker.
+    /// Returns a provider factory with a genesis block, which [`BlockchainProvider::with_latest`]
+    /// can initialize the chain info with.
     fn test_provider_factory_with_genesis() -> eyre::Result<ProviderFactory<MockNodeTypesWithDB>> {
         let factory = create_test_provider_factory();
         let provider_rw = factory.provider_rw()?;
@@ -3086,15 +3111,14 @@ mod tests {
     }
 
     #[test]
-    fn only_the_first_provider_initializes_the_chain_info() -> eyre::Result<()> {
+    fn only_with_latest_initializes_the_chain_info() -> eyre::Result<()> {
         let factory = test_provider_factory_with_genesis()?;
         let in_memory_state = factory.overlay_manager().in_memory_state().clone();
-        assert!(!in_memory_state.has_canonical_head());
+        let genesis = factory.sealed_header(0)?.unwrap();
 
-        let provider = BlockchainProvider::new(factory.clone())?;
-        let genesis = provider.canonical_in_memory_state.get_canonical_head();
-        assert_eq!(genesis.number, 0);
-        assert!(in_memory_state.has_canonical_head());
+        let provider = BlockchainProvider::with_latest(factory.clone(), genesis.clone())?;
+        assert_eq!(provider.canonical_in_memory_state.get_canonical_head().hash(), genesis.hash());
+        assert_eq!(provider.chain_info()?.best_number, 0);
 
         // The engine moves the head past the persisted tip.
         let head = reth_primitives_traits::SealedHeader::seal_slow(alloy_consensus::Header {
@@ -3104,12 +3128,15 @@ mod tests {
         });
         in_memory_state.set_canonical_head(head.clone());
 
-        // Providers built afterwards, e.g. by an ExEx or an add-on, share the chain info as is.
+        // A provider built afterwards, e.g. by an ExEx or an add-on, leaves the chain info alone.
         let later = BlockchainProvider::new(factory.clone())?;
         assert_eq!(later.canonical_in_memory_state.get_canonical_head().hash(), head.hash());
-        let later = BlockchainProvider::with_latest(factory, genesis)?;
-        assert_eq!(later.canonical_in_memory_state.get_canonical_head().hash(), head.hash());
         assert_eq!(later.chain_info()?.best_number, 1);
+
+        // `with_latest` is the explicit initializer and overwrites it.
+        let reinitialized = BlockchainProvider::with_latest(factory, genesis.clone())?;
+        assert_eq!(in_memory_state.get_canonical_head().hash(), genesis.hash());
+        assert_eq!(reinitialized.chain_info()?.best_number, 0);
 
         Ok(())
     }
@@ -3369,8 +3396,8 @@ mod tests {
 
         let mut rng = generators::rng();
         let factory = test_provider_factory_with_genesis()?;
-        let provider = BlockchainProvider::new(factory)?;
-        let genesis = provider.canonical_in_memory_state.get_canonical_head();
+        let genesis = factory.sealed_header(0)?.expect("genesis header");
+        let provider = BlockchainProvider::with_latest(factory, genesis.clone())?;
         let in_memory_state = &provider.canonical_in_memory_state;
 
         // The provider, the overlay manager and the engine share one in-memory state.
@@ -3456,7 +3483,8 @@ mod tests {
     fn state_range_provider_resolves_root_from_in_memory_block() -> eyre::Result<()> {
         let mut rng = generators::rng();
         let factory = test_provider_factory_with_genesis()?;
-        let provider = BlockchainProvider::new(factory)?;
+        let genesis = factory.sealed_header(0)?.expect("genesis header");
+        let provider = BlockchainProvider::with_latest(factory, genesis)?;
 
         let (address, account) = random_account(1);
         let hashed_address = keccak256(address);
@@ -3507,8 +3535,8 @@ mod tests {
     fn state_range_provider_reverts_database_advancement_past_anchor() -> eyre::Result<()> {
         let mut rng = generators::rng();
         let factory = test_provider_factory_with_genesis()?;
-        let provider = BlockchainProvider::new(factory)?;
-        let genesis = provider.canonical_in_memory_state.get_canonical_head();
+        let genesis = factory.sealed_header(0)?.expect("genesis header");
+        let provider = BlockchainProvider::with_latest(factory, genesis.clone())?;
 
         // In-memory target block anchored on genesis, with a known account.
         let (target_address, target_account) = random_account(1);

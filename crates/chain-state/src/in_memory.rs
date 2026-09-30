@@ -621,33 +621,20 @@ impl<N: NodePrimitives> CanonicalInMemoryState<N> {
         Arc::ptr_eq(&self.inner, &other.inner)
     }
 
-    /// Initializes the chain info of a state created without a head, see [`Self::empty`]: sets
-    /// the canonical head and, if they are known, the finalized and safe headers.
-    ///
-    /// This does nothing if the canonical head was already set, so the chain info of a state is
-    /// initialized once and never reset underneath the engine that maintains it afterwards.
-    /// Returns `true` if the chain info was initialized.
-    pub fn init_head_markers(
+    /// Sets the canonical head and, if they are known, the finalized and safe headers.
+    pub fn set_head_markers(
         &self,
         head: SealedHeader<N::BlockHeader>,
         finalized: Option<SealedHeader<N::BlockHeader>>,
         safe: Option<SealedHeader<N::BlockHeader>>,
-    ) -> bool {
-        if !self.inner.chain_info_tracker.init_canonical_head(head) {
-            return false
-        }
+    ) {
+        self.set_canonical_head(head);
         if let Some(finalized) = finalized {
             self.set_finalized(finalized);
         }
         if let Some(safe) = safe {
             self.set_safe(safe);
         }
-        true
-    }
-
-    /// Returns `true` once the canonical head was set, see [`Self::init_head_markers`].
-    pub fn has_canonical_head(&self) -> bool {
-        self.inner.chain_info_tracker.has_canonical_head()
     }
 
     /// Returns the block hash corresponding to the given number.

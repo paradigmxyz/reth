@@ -104,26 +104,6 @@ where
         *self.inner.persisted_block.borrow()
     }
 
-    /// Returns `true` once the canonical head was set.
-    ///
-    /// A tracker created without a head starts with the default header, which counts as unset.
-    pub fn has_canonical_head(&self) -> bool {
-        !is_unset(&self.inner.canonical_head.read())
-    }
-
-    /// Sets the canonical head of the chain, unless it was already set.
-    ///
-    /// Returns `true` if the head was set, see [`Self::has_canonical_head`].
-    pub fn init_canonical_head(&self, header: SealedHeader<N::BlockHeader>) -> bool {
-        let mut head = self.inner.canonical_head.write();
-        if !is_unset(&head) {
-            return false
-        }
-        self.inner.canonical_head_number.store(header.number(), Ordering::Relaxed);
-        *head = header;
-        true
-    }
-
     /// Sets the canonical head of the chain.
     pub fn set_canonical_head(&self, header: SealedHeader<N::BlockHeader>) {
         let number = header.number();
@@ -185,11 +165,6 @@ where
     pub fn subscribe_persisted_block(&self) -> watch::Receiver<Option<BlockNumHash>> {
         self.inner.persisted_block.subscribe()
     }
-}
-
-/// Returns `true` if `head` is the default header a tracker without a head starts with.
-fn is_unset<H: reth_primitives_traits::BlockHeader>(head: &SealedHeader<H>) -> bool {
-    head.hash() == SealedHeader::<H>::default().hash()
 }
 
 /// Container type for all chain info fields
