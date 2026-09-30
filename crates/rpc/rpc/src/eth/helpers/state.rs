@@ -30,33 +30,61 @@ mod tests {
 
     use super::*;
     use alloy_eips::BlockId;
+    use alloy_genesis::{Genesis, GenesisAccount};
     use alloy_primitives::{
         map::{AddressMap, B256Map},
         Address, StorageKey, StorageValue, B256, U256,
     };
     use alloy_rpc_types_eth::TransactionRequest;
-    use reth_chainspec::ChainSpec;
+    use reth_chain_state::{ExecutedBlock, NewCanonicalChain};
+    use reth_chainspec::{ChainSpec, ChainSpecBuilder};
+    use reth_db_common::init::init_genesis;
     use reth_ethereum_primitives::Block;
+    use reth_evm::NextBlockEnvAttributes;
     use reth_evm_ethereum::EthEvmConfig;
     use reth_network_api::noop::NoopNetwork;
     use reth_provider::{
-        test_utils::{ExtendedAccount, MockEthProvider, NoopProvider},
+        providers::BlockchainProvider,
+        test_utils::{
+            create_test_provider_factory_with_chain_spec, ExtendedAccount, MockEthProvider,
+            MockNodeTypesWithDB, NoopProvider,
+        },
         ChainSpecProvider,
     };
     use reth_rpc_eth_api::{
-        helpers::{pending_block::PendingEnvBuilder, Call, EthCall, EthState, SpawnBlocking},
+        helpers::{
+            pending_block::{BuildPendingEnv, PendingEnvBuilder},
+            Call, EthCall, EthState, SpawnBlocking,
+        },
         node::{RpcNodeCoreAdapter, RpcNodeCoreExt},
         EthApiTypes,
     };
-    use reth_rpc_eth_types::{EthApiSettings, EthStateCache, PendingBlock};
-    use reth_storage_api::{StateProviderBox, StateProviderFactory};
+    use reth_rpc_eth_types::{
+        builder::config::PendingBlockKind, EthApiSettings, EthStateCache, PendingBlock,
+    };
+    use reth_storage_api::{BlockReaderIdExt, StateProviderBox, StateProviderFactory};
+    use reth_storage_overlay::OverlayManager;
     use reth_tasks::{
         pool::{BlockingTaskGuard, BlockingTaskPool},
         Runtime,
     };
     use reth_transaction_pool::test_utils::{testing_pool, TestPool};
-    use revm::context::result::ExecutionResult;
-    use std::{future::Future, sync::Arc, time::Duration};
+    use reth_trie_common::{ComputedTrieData, LazyTrieData};
+    use revm::{
+        context::result::ExecutionResult,
+        database::{
+            states::{AccountStatus, StorageSlot},
+            BundleAccount,
+        },
+    };
+    use std::{
+        future::Future,
+        sync::{
+            atomic::{AtomicBool, Ordering},
+            Arc,
+        },
+        time::{Duration, Instant},
+    };
     use tokio::sync::{Mutex, Semaphore};
 
     fn noop_eth_api() -> EthApi<
@@ -352,5 +380,220 @@ mod tests {
             eth_api.evm_env_and_recovered_block_at(BlockId::pending()).await.unwrap();
         assert_eq!(parent.hash(), hash);
         assert_eq!(state, BlockId::from(hash));
+    }
+
+    type SnapshotProvider = BlockchainProvider<MockNodeTypesWithDB>;
+    type SnapshotEthApi = EthApi<
+        RpcNodeCoreAdapter<SnapshotProvider, TestPool, NoopNetwork, EthEvmConfig>,
+        EthRpcConverter<ChainSpec>,
+    >;
+
+    fn snapshot_provider() -> (SnapshotProvider, OverlayManager) {
+        // Return SLOAD(0), NUMBER, TIMESTAMP, PREVRANDAO and BASEFEE as five words.
+        let code = "6000546000524360205242604052446060524860805260a06000f3".parse().unwrap();
+        let contract = Address::with_last_byte(0x42);
+        let genesis = Genesis::default()
+            .with_gas_limit(30_000_000)
+            .with_timestamp(100)
+            .with_base_fee(Some(1_000_000_000))
+            .extend_accounts([
+                (Address::ZERO, GenesisAccount::default().with_balance(U256::from(10u128.pow(18)))),
+                (
+                    contract,
+                    GenesisAccount::default().with_code(Some(code)).with_storage(Some(
+                        std::iter::once((B256::ZERO, B256::from(U256::from(7)))).collect(),
+                    )),
+                ),
+            ]);
+        let chain_spec =
+            Arc::new(ChainSpecBuilder::mainnet().cancun_activated().genesis(genesis).build());
+        let overlay = OverlayManager::default();
+        let factory = create_test_provider_factory_with_chain_spec(chain_spec)
+            .with_overlay_manager(overlay.clone());
+        init_genesis(&factory).unwrap();
+        (BlockchainProvider::new(factory).unwrap(), overlay)
+    }
+
+    fn storage_snapshot(api: &SnapshotEthApi) -> ExecutedBlock {
+        let parent = api.provider().latest_header().unwrap().unwrap();
+        let mut executed = api.build_block(&parent).unwrap();
+        let address = Address::with_last_byte(0x42);
+        let state = api.provider().latest().unwrap();
+        let info = revm::state::AccountInfo::from(state.basic_account(&address).unwrap().unwrap());
+        Arc::make_mut(&mut executed.execution_output).state.state.insert(
+            address,
+            BundleAccount::new(
+                Some(info.clone()),
+                Some(info),
+                std::iter::once((
+                    U256::ZERO,
+                    StorageSlot::new_changed(U256::from(7), U256::from(42)),
+                ))
+                .collect(),
+                AccountStatus::Changed,
+            ),
+        );
+        let hashed = state.hashed_post_state(&executed.execution_output.state).unwrap();
+        executed.trie_data = LazyTrieData::ready(ComputedTrieData::new(
+            Arc::new(hashed.into_sorted()),
+            Arc::default(),
+        ));
+        executed
+    }
+
+    async fn snapshot_call(api: &SnapshotEthApi) -> Vec<U256> {
+        let simulated = api
+            .transact_call_at(
+                TransactionRequest::default()
+                    .to(Address::with_last_byte(0x42))
+                    .gas_price(1_000_000_000),
+                BlockId::pending(),
+                Default::default(),
+            )
+            .await
+            .unwrap();
+        let output = match simulated.result {
+            ExecutionResult::Success { output, .. } => output.into_data(),
+            other => panic!("pending call failed: {other:?}"),
+        };
+        output.chunks_exact(32).map(U256::from_be_slice).collect()
+    }
+
+    #[tokio::test]
+    async fn pending_simulation_uses_cached_block_header_and_state() {
+        let (provider, _) = snapshot_provider();
+        let api = EthApi::builder(
+            provider.clone(),
+            testing_pool(),
+            NoopNetwork::default(),
+            EthEvmConfig::new(provider.chain_spec()),
+        )
+        .build();
+        let executed = storage_snapshot(&api);
+        let header = executed.recovered_block.header().clone();
+        *api.pending_block().lock().await = Some(PendingBlock::with_executed_block(
+            Instant::now() + Duration::from_secs(60),
+            executed,
+        ));
+
+        assert_eq!(
+            snapshot_call(&api).await,
+            vec![
+                U256::from(42),
+                U256::from(header.number),
+                U256::from(header.timestamp),
+                U256::from_be_bytes(header.mix_hash.0),
+                U256::from(header.base_fee_per_gas.unwrap()),
+            ]
+        );
+    }
+
+    struct AdvanceHeadEnvBuilder {
+        advanced: AtomicBool,
+        advance: Box<dyn Fn() + Send + Sync>,
+    }
+
+    impl PendingEnvBuilder<EthEvmConfig> for AdvanceHeadEnvBuilder {
+        fn pending_env_attributes(
+            &self,
+            parent: &reth_primitives_traits::SealedHeader,
+            overrides: Option<&alloy_rpc_types_eth::BlockOverrides>,
+        ) -> Result<NextBlockEnvAttributes, EthApiError> {
+            // Change the head after the environment has selected its parent, before state lookup.
+            if !self.advanced.swap(true, Ordering::SeqCst) {
+                (self.advance)();
+            }
+            Ok(NextBlockEnvAttributes::build_pending_env(parent, overrides))
+        }
+    }
+
+    async fn snapshot_during_head_change(kind: PendingBlockKind) {
+        let (provider, overlay) = snapshot_provider();
+        let api = EthApi::builder(
+            provider.clone(),
+            testing_pool(),
+            NoopNetwork::default(),
+            EthEvmConfig::new(provider.chain_spec()),
+        )
+        .build();
+        let next = storage_snapshot(&api);
+        let advance_provider = provider.clone();
+        let builder = AdvanceHeadEnvBuilder {
+            advanced: AtomicBool::new(false),
+            advance: Box::new(move || {
+                overlay.insert_block(next.clone());
+                let canonical = advance_provider.canonical_in_memory_state();
+                canonical.update_chain(NewCanonicalChain::Commit { new: vec![next.clone()] });
+                canonical.set_canonical_head(
+                    next.recovered_block.sealed_block().sealed_header().clone(),
+                );
+            }),
+        };
+        let api = EthApi::builder(
+            provider.clone(),
+            testing_pool(),
+            NoopNetwork::default(),
+            EthEvmConfig::new(provider.chain_spec()),
+        )
+        .pending_block_kind(kind)
+        .with_pending_env_builder(builder)
+        .build();
+        let words = snapshot_call(&api).await;
+        if kind.is_none() {
+            // The fallback remains pinned to genesis, despite the new canonical head.
+            assert_eq!(&words[..3], &[U256::from(7), U256::from(1), U256::from(112)]);
+        } else {
+            let pending = api.pending_block().lock().await.clone().unwrap();
+            let header = pending.block().header();
+            assert_eq!(
+                words,
+                vec![
+                    U256::from(42),
+                    U256::from(header.number),
+                    U256::from(header.timestamp),
+                    U256::from_be_bytes(header.mix_hash.0),
+                    U256::from(header.base_fee_per_gas.unwrap())
+                ]
+            );
+            assert_eq!(header.number, 2);
+        }
+    }
+
+    #[tokio::test]
+    async fn pending_simulation_keeps_snapshot_when_head_changes() {
+        snapshot_during_head_change(PendingBlockKind::Full).await;
+    }
+
+    #[tokio::test]
+    async fn pending_simulation_fallback_keeps_origin_when_head_changes() {
+        snapshot_during_head_change(PendingBlockKind::None).await;
+    }
+
+    #[tokio::test]
+    async fn pending_simulation_pins_provider_pending_block_hash() {
+        let (provider, _) = snapshot_provider();
+        let api = EthApi::builder(
+            provider.clone(),
+            testing_pool(),
+            NoopNetwork::default(),
+            EthEvmConfig::new(provider.chain_spec()),
+        )
+        .build();
+        let executed = storage_snapshot(&api);
+        let header = executed.recovered_block.header().clone();
+        let hash = executed.recovered_block.hash();
+        provider.canonical_in_memory_state().set_pending_block(executed);
+        let (_, at) = api.evm_env_at(BlockId::pending()).await.unwrap();
+        assert_eq!(at, BlockId::from(hash));
+        assert_eq!(
+            snapshot_call(&api).await,
+            vec![
+                U256::from(42),
+                U256::from(header.number),
+                U256::from(header.timestamp),
+                U256::from_be_bytes(header.mix_hash.0),
+                U256::from(header.base_fee_per_gas.unwrap())
+            ]
+        );
     }
 }

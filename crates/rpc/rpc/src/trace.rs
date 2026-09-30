@@ -129,19 +129,21 @@ where
             .recover_raw_transaction::<PoolPooledTx<Eth::Pool>>(&tx)?
             .map(<Eth::Pool as TransactionPool>::Transaction::pooled_into_consensus);
 
-        let (evm_env, at) = self.eth_api().evm_env_at(block_id.unwrap_or_default()).await?;
-
         self.eth_api()
-            .spawn_with_state_at_block(at, move |this, mut db| {
-                let mut inspector =
-                    TracingInspector::new(TracingInspectorConfig::from_parity_config(&trace_types));
-                let res = this.inspect(&mut db, evm_env, tx, &mut inspector)?;
+            .spawn_with_state_and_env_at_block(
+                block_id.unwrap_or_default(),
+                move |this, mut db, evm_env| {
+                    let mut inspector = TracingInspector::new(
+                        TracingInspectorConfig::from_parity_config(&trace_types),
+                    );
+                    let res = this.inspect(&mut db, evm_env, tx, &mut inspector)?;
 
-                inspector
-                    .into_parity_builder()
-                    .into_trace_results_with_state(&res, &trace_types, &db)
-                    .map_err(Eth::Error::from_eth_err)
-            })
+                    inspector
+                        .into_parity_builder()
+                        .into_trace_results_with_state(&res, &trace_types, &db)
+                        .map_err(Eth::Error::from_eth_err)
+                },
+            )
             .await
     }
 
@@ -155,11 +157,9 @@ where
         block_id: Option<BlockId>,
     ) -> Result<Vec<TraceResults>, Eth::Error> {
         let at = block_id.unwrap_or_default();
-        let (evm_env, at) = self.eth_api().evm_env_at(at).await?;
-
         // execute all transactions on top of each other and record the traces
         self.eth_api()
-            .spawn_with_state_at_block(at, move |eth_api, mut db| {
+            .spawn_with_state_and_env_at_block(at, move |eth_api, mut db, evm_env| {
                 let mut results = Vec::with_capacity(calls.len());
                 let mut calls = calls.into_iter().peekable();
 

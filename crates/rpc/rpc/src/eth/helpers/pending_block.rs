@@ -3,7 +3,10 @@
 use crate::EthApi;
 use reth_rpc_convert::RpcConvert;
 use reth_rpc_eth_api::{
-    helpers::{pending_block::PendingEnvBuilder, LoadPendingBlock},
+    helpers::{
+        pending_block::{PendingEnvBuilder, PendingStateSource},
+        LoadPendingBlock, SpawnBlocking,
+    },
     FromEvmError, RpcNodeCore,
 };
 use reth_rpc_eth_types::{EthApiError, PendingBlock};
@@ -13,6 +16,7 @@ where
     N: RpcNodeCore,
     EthApiError: FromEvmError<N::Evm>,
     Rpc: RpcConvert<Primitives = N::Primitives, Error = EthApiError>,
+    Self: SpawnBlocking<Error = EthApiError>,
 {
     #[inline]
     fn pending_block(&self) -> &tokio::sync::Mutex<Option<PendingBlock<Self::Primitives>>> {
@@ -22,5 +26,11 @@ where
     #[inline]
     fn pending_env_builder(&self) -> &dyn PendingEnvBuilder<Self::Evm> {
         self.inner.pending_env_builder()
+    }
+
+    async fn local_pending_block_or_state(
+        &self,
+    ) -> Result<Option<PendingStateSource<Self::Primitives>>, Self::Error> {
+        Ok(self.pool_pending_block().await?.map(PendingStateSource::Block))
     }
 }

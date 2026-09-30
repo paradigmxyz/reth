@@ -462,9 +462,10 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
     {
         async move {
             let block_id = block_number.unwrap_or_default();
-            let (evm_env, at) = self.evm_env_at(block_id).await?;
-
-            self.create_access_list_with(evm_env, at, request, state_override).await
+            self.spawn_with_state_and_env_at_block(block_id, move |this, db, evm_env| {
+                this.create_access_list_with_state(evm_env, db, request, state_override)
+            })
+            .await
         }
     }
 
@@ -480,41 +481,51 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
     where
         Self: Trace,
     {
-        self.spawn_with_state_at_block(at, |this, mut db| {
-            let initial = request.as_ref().access_list().cloned().unwrap_or_default();
-            let (evm_env, mut tx_env) = this.prepare_call_env(
-                evm_env,
-                request,
-                &mut db,
-                EvmOverrides::state(state_override),
-            )?;
-
-            let mut evm = this.evm_config().evm_with_env_and_inspector(
-                &mut db,
-                evm_env,
-                AccessListInspector::new(initial),
-            );
-
-            let result = evm.transact(tx_env.clone())?;
-            let access_list = core::mem::take(evm.inspector_mut()).into_access_list();
-            let gas_used = result.result.tx_gas_used();
-            tx_env.set_access_list(access_list.clone());
-            if let Err(err) = Self::Error::ensure_success(result.result) {
-                return Ok(AccessListResult {
-                    access_list,
-                    gas_used: U256::from(gas_used),
-                    error: Some(err.to_string()),
-                });
-            }
-
-            // transact again to get the exact gas used
-            evm.disable_inspector();
-            let result = evm.transact(tx_env)?;
-            let gas_used = result.result.tx_gas_used();
-            let error = Self::Error::ensure_success(result.result).err().map(|e| e.to_string());
-
-            Ok(AccessListResult { access_list, gas_used: U256::from(gas_used), error })
+        self.spawn_with_state_at_block(at, |this, db| {
+            this.create_access_list_with_state(evm_env, db, request, state_override)
         })
+    }
+
+    /// Creates an access list using an already selected environment and state.
+    fn create_access_list_with_state(
+        &self,
+        evm_env: EvmEnvFor<Self::Evm>,
+        mut db: StateCacheDb,
+        request: RpcTxReq<<Self::RpcConvert as RpcConvert>::Network>,
+        state_override: Option<StateOverride>,
+    ) -> Result<AccessListResult, Self::Error>
+    where
+        Self: Trace,
+    {
+        let initial = request.as_ref().access_list().cloned().unwrap_or_default();
+        let (evm_env, mut tx_env) =
+            self.prepare_call_env(evm_env, request, &mut db, EvmOverrides::state(state_override))?;
+
+        let mut evm = self.evm_config().evm_with_env_and_inspector(
+            &mut db,
+            evm_env,
+            AccessListInspector::new(initial),
+        );
+
+        let result = evm.transact(tx_env.clone())?;
+        let access_list = core::mem::take(evm.inspector_mut()).into_access_list();
+        let gas_used = result.result.tx_gas_used();
+        tx_env.set_access_list(access_list.clone());
+        if let Err(err) = Self::Error::ensure_success(result.result) {
+            return Ok(AccessListResult {
+                access_list,
+                gas_used: U256::from(gas_used),
+                error: Some(err.to_string()),
+            });
+        }
+
+        // transact again to get the exact gas used
+        evm.disable_inspector();
+        let result = evm.transact(tx_env)?;
+        let gas_used = result.result.tx_gas_used();
+        let error = Self::Error::ensure_success(result.result).err().map(|e| e.to_string());
+
+        Ok(AccessListResult { access_list, gas_used: U256::from(gas_used), error })
     }
 }
 
@@ -686,8 +697,7 @@ pub trait Call:
         R: Send + 'static,
     {
         async move {
-            let (evm_env, at) = self.evm_env_at(at).await?;
-            self.spawn_with_state_at_block(at, move |this, mut db| {
+            self.spawn_with_state_and_env_at_block(at, move |this, mut db, evm_env| {
                 let (evm_env, tx_env) =
                     this.prepare_call_env(evm_env, request, &mut db, overrides)?;
 
@@ -921,5 +931,25 @@ pub trait Call:
         }
 
         Ok((evm_env, tx_env))
+    }
+
+    /// Executes a closure with state and environment selected together for a simulation.
+    fn spawn_with_state_and_env_at_block<F, R>(
+        &self,
+        at: BlockId,
+        f: F,
+    ) -> impl Future<Output = Result<R, Self::Error>> + Send
+    where
+        F: FnOnce(Self, StateCacheDb, EvmEnvFor<Self::Evm>) -> Result<R, Self::Error>
+            + Send
+            + 'static,
+        R: Send + 'static,
+    {
+        self.spawn_blocking_io_with_state_and_env(at, move |this, state, evm_env| {
+            let db = State::builder()
+                .with_database(StateProviderDatabase::new(state.into_evm_state_provider()))
+                .build();
+            f(this, db, evm_env)
+        })
     }
 }
