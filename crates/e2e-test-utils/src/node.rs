@@ -234,6 +234,14 @@ where
         Ok(payload)
     }
 
+    /// Advances the node forward one block like [`Self::advance_block`] and waits until the
+    /// transaction pool processed the new block, see [`Self::wait_for_pool_head`].
+    pub async fn advance_block_synced(&mut self) -> eyre::Result<Payload::BuiltPayload> {
+        let payload = self.advance_block().await?;
+        self.wait_for_pool_head(payload.block().hash()).await?;
+        Ok(payload)
+    }
+
     /// Waits for block to be available on node.
     ///
     /// Returns an error if the block is not available within [`WAIT_TIMEOUT`].
@@ -291,6 +299,29 @@ where
         let pool = &self.inner.pool;
         poll_until("transaction pool condition", move || {
             let ready = condition(pool);
+            async move { Ok(ready.then_some(())) }
+        })
+        .await
+    }
+
+    /// Waits until the transaction pool of the node processed the canonical state update that made
+    /// the block with the given hash its head.
+    ///
+    /// The pool maintenance task processes new heads in the background, so right after e.g. a
+    /// forkchoice update the pool can still contain the transactions mined in the new block or use
+    /// outdated sender nonces and pending fees. The pool updates its last seen block together with
+    /// these, so they are up to date once this returns. Exceptions are reorgs, after which the
+    /// maintenance task re-injects the transactions of the old chain only afterwards, so wait for
+    /// them with [`Self::wait_for_pool`], and commits deeper than the maximum update depth of the
+    /// maintenance task, e.g. after a long sync, which only update the last seen block.
+    ///
+    /// Returns an error if the pool does not process the block within [`WAIT_TIMEOUT`], e.g.
+    /// because the block is not the canonical head, the pool already processed a newer head, or
+    /// the block was synced by backfill, which does not notify the pool.
+    pub async fn wait_for_pool_head(&self, hash: B256) -> eyre::Result<()> {
+        let pool = &self.inner.pool;
+        poll_until(format!("transaction pool to process block {hash}"), move || {
+            let ready = pool.block_info().last_seen_block_hash == hash;
             async move { Ok(ready.then_some(())) }
         })
         .await
@@ -386,11 +417,7 @@ where
         // The transaction pool processes the canonical state update in the background, and
         // advancing the chain before it did can fail with e.g. "nonce too low" errors. Blocks
         // synced by backfill don't notify the pool, so wait for at most a second.
-        let _ = tokio::time::timeout(
-            Duration::from_secs(1),
-            self.wait_for_pool(|pool| pool.block_info().last_seen_block_hash == block),
-        )
-        .await;
+        let _ = tokio::time::timeout(Duration::from_secs(1), self.wait_for_pool_head(block)).await;
 
         Ok(())
     }
@@ -574,10 +601,12 @@ mod tests {
     #[expect(dead_code)]
     fn test_helper_futures_are_send(node: &mut NodeHelperType<EthereumNode>) {
         assert_send(node.advance_block());
+        assert_send(node.advance_block_synced());
         assert_send(node.inject_and_advance(Bytes::new()));
         assert_send(node.wait_block(0, B256::ZERO, false));
         assert_send(node.wait_unwind(0));
         assert_send(node.wait_for_pool(|_| true));
+        assert_send(node.wait_for_pool_head(B256::ZERO));
         assert_send(node.assert_new_block(B256::ZERO, B256::ZERO, 0));
         assert_send(node.sync_to(B256::ZERO));
     }
