@@ -390,7 +390,11 @@ reports.
 
 A simulated crash drops a node's tasks and volatile state without running graceful shutdown, keeps
 only state designated durable by the storage model, increments the node generation, and rebuilds
-the production components. Pause and resume affect which actor tasks are runnable. Restart is a
+the production components. A graceful stop follows the production launcher's contract instead: the
+launcher releases its shutdown guard as soon as the engine acknowledges `Terminate`, after which
+the process may exit and run native destructors. The harness therefore releases its own inert
+handles before requesting termination and requires that no live handle to node storage remains
+when the acknowledgement is observed. It does not wait for the engine or persistence task first. Pause and resume affect which actor tasks are runnable. Restart is a
 logical action with a deterministic completion event.
 
 ## Snapshots and branching
@@ -448,6 +452,14 @@ execution results. After faults stop and nodes receive the same valid block grap
 sequence, they must converge within the budget. Finalized ancestry supplied by a valid simulated CL
 must remain monotonic.
 
+### Shutdown acknowledgement
+
+A component that acknowledges termination must already have released everything that can reach
+node storage: engine state, validator and prewarming workers, proof and sparse-trie workers,
+payload jobs, persistence, and pruning. The oracle counts live database handles at the moment the
+acknowledgement is observed, so it does not depend on which worker kept storage open. Any holder
+would race process-wide teardown in a native node.
+
 ### Metamorphic and progress checks
 
 Duplicate delivery, allowed message reorder, a clean restart, replay of an accepted payload, and
@@ -478,6 +490,7 @@ rediscover the failure. The required general capabilities are:
 | Update/removal cross-cancellation | Repeated generated state transitions and observations before update drain, external root and persisted-state differential. |
 | RPC proof conventions | A later RPC action boundary plus cross-client and metamorphic response checks. |
 | Provider reuse after errors | Blind typed failures at arbitrary provider operations, retry/restart, terminal-error and recovery properties. |
+| Shutdown acknowledged before cleanup | Graceful restart and final shutdown, controlled order after the acknowledgement, storage-holder oracle at the acknowledgement. |
 | Weak-memory or true simultaneous races | Native multicore lane; these are outside the cooperative simulator's proof. |
 
 Do not add an action named for a historical issue, a trie threshold profile, a database table, or a

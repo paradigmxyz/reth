@@ -6,7 +6,9 @@
 //! this profile. No pre-executed blocks are inserted into either engine.
 
 use crate::{
-    node_storage::{DatabaseFaults, DatabaseOperation, Factory, NodeStorage, NodeTypes},
+    node_storage::{
+        DatabaseFaults, DatabaseOperation, Factory, NodeStorage, NodeTypes, StorageProbe,
+    },
     node_wire::{WireBlockClient, WireEvent, WirePeer},
 };
 use abi_fuzz::{generators::RandomGenerator, Generator as AbiGenerator};
@@ -102,6 +104,7 @@ struct Node {
     stop_router: oneshot::Sender<()>,
     persistence: TaskHandle<Result<(), PersistenceError>>,
     peer: WirePeer,
+    storage: StorageProbe,
 }
 
 #[derive(Clone, Copy)]
@@ -140,6 +143,7 @@ impl Node {
         seed: u64,
         campaign_config: NodeCampaignConfig,
     ) -> Self {
+        let storage = StorageProbe::new(&factory);
         let provider = BlockchainProvider::new(factory.clone()).unwrap();
         let chain = provider.chain_spec();
         let evm = EthEvmConfig::new(chain.clone());
@@ -280,6 +284,7 @@ impl Node {
             stop_router,
             persistence: persistence_task,
             peer,
+            storage,
         }
     }
 
@@ -434,18 +439,48 @@ impl Node {
         Some(frontier)
     }
 
+    /// Stops the node under the production launcher's contract: once the engine acknowledges
+    /// termination, the process may exit and run native destructors. Nothing may still hold node
+    /// storage at that point, whichever worker, service, or pruner acquired it.
     async fn shutdown(self) {
-        self.stop_router.send(()).unwrap();
-        self.router.await.unwrap();
-        self.stop_payload_service.send(()).unwrap();
-        self.payload_service.await.unwrap();
-        drop(self.payload_builder);
+        let Self {
+            provider,
+            overlay,
+            pool,
+            tasks,
+            prewarming,
+            txpool_snapshot,
+            payload_builder,
+            payload_service,
+            stop_payload_service,
+            input,
+            to_tree,
+            engine,
+            router,
+            stop_router,
+            persistence,
+            peer,
+            storage,
+        } = self;
+        stop_router.send(()).unwrap();
+        router.await.unwrap();
+        stop_payload_service.send(()).unwrap();
+        payload_service.await.unwrap();
+        peer.shutdown().await;
+        // Process exit would also drop the harness's inert handles; only running node work may
+        // still hold storage when the acknowledgement arrives.
+        drop((provider, overlay, pool, tasks, prewarming, txpool_snapshot, payload_builder, input));
         let (tx, rx) = oneshot::channel();
-        self.to_tree.send(FromEngine::Event(FromOrchestrator::Terminate { tx })).unwrap();
+        to_tree.send(FromEngine::Event(FromOrchestrator::Terminate { tx })).unwrap();
         rx.await.unwrap();
-        self.engine.await.unwrap();
-        self.persistence.await.unwrap().unwrap();
-        self.peer.shutdown().await;
+        let holders = storage.holders();
+        assert_eq!(
+            holders, 0,
+            "engine acknowledged termination while {holders} handles still held node storage"
+        );
+        drop(to_tree);
+        engine.await.unwrap();
+        persistence.await.unwrap().unwrap();
     }
 
     async fn crash(self) {
@@ -1862,16 +1897,17 @@ async fn execute_action(
             if crash {
                 follower.take().unwrap().crash().await;
                 native.spawn_blocking_named("crash-barrier", || ()).get();
+                // Aborted tasks release their providers when the executor drops them.
+                let release_deadline = tasks.now() + Duration::from_secs(1);
+                while follower_storage.is_open() {
+                    assert!(
+                        tasks.now() < release_deadline,
+                        "crashed follower did not release its database handles"
+                    );
+                    tasks.sleep(Duration::from_millis(1)).await;
+                }
             } else {
                 follower.take().unwrap().shutdown().await;
-            }
-            let release_deadline = tasks.now() + Duration::from_secs(1);
-            while follower_storage.is_open() {
-                assert!(
-                    tasks.now() < release_deadline,
-                    "stopped follower did not release its database handles"
-                );
-                tasks.sleep(Duration::from_millis(1)).await;
             }
             let overlay = OverlayManager::new(native.state_trie_overlay_worker_pool());
             model.database_faults.suppress();

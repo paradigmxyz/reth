@@ -256,3 +256,20 @@ impl NodeStorage {
 
 pub(super) type NodeTypes = MockNodeTypesWithDB<Arc<FaultDatabase<Arc<DatabaseEnv>>>>;
 pub(super) type Factory = ProviderFactory<NodeTypes>;
+
+/// Counts live handles to one launch's database without keeping it open.
+///
+/// Every provider, cursor, and worker that can reach node storage holds this handle. Once a node
+/// acknowledges termination, the production launcher may exit and run native destructors, so a
+/// remaining holder is racing process teardown.
+pub(super) struct StorageProbe(Weak<FaultDatabase<Arc<DatabaseEnv>>>);
+
+impl StorageProbe {
+    pub(super) fn new(factory: &Factory) -> Self {
+        Self(Arc::downgrade(factory.db_ref()))
+    }
+
+    pub(super) fn holders(&self) -> usize {
+        self.0.strong_count()
+    }
+}
