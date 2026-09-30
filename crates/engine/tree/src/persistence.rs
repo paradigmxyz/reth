@@ -1,6 +1,7 @@
 use crate::metrics::PersistenceMetrics;
 use alloy_eips::BlockNumHash;
 use crossbeam_channel::Sender as CrossbeamSender;
+use reth_db_api::Database;
 use reth_errors::ProviderError;
 use reth_ethereum_primitives::EthPrimitives;
 use reth_primitives_traits::{FastInstant as Instant, NodePrimitives};
@@ -181,6 +182,17 @@ where
             .iter()
             .map(|block| block.recovered_block().num_hash())
             .collect::<Vec<_>>();
+        let preparation = self
+            .provider
+            .db_ref()
+            .prepare_persistence(
+                input
+                    .persist_rest_blocks()
+                    .iter()
+                    .map(|block| block.recovered_block.clone())
+                    .collect(),
+            )
+            .map_err(reth_provider::ProviderError::from)?;
         let provider_rw = self.provider.database_provider_rw()?;
         let last_state_trie_block = if let Some(block) = input.state_trie_blocks().last() {
             // Newly written static-file headers are not readable until commit finalizes their
@@ -211,6 +223,9 @@ where
         }
 
         provider_rw.commit()?;
+        if let Some(preparation) = preparation {
+            preparation.finish();
+        }
         // BALs live outside the main database and are intentionally flushed last.
         let _ = self.provider.bal_store().flush(&canonical_blocks).inspect_err(|err| {
             warn!(target: "engine::persistence", last=?last_block, ?err, "Failed to flush BAL store");

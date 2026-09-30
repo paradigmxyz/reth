@@ -4,7 +4,7 @@ pub use jsonrpsee::{
     core::middleware::layer::Either,
     server::middleware::rpc::{RpcService, RpcServiceBuilder},
 };
-use reth_engine_tree::tree::WaitForCaches;
+use reth_engine_tree::tree::{state_root_strategy::DefaultStateRootStrategy, WaitForCaches};
 pub use reth_engine_tree::tree::{BasicEngineValidator, EngineValidator};
 pub use reth_rpc_builder::{
     middleware::{RethAuthHttpMiddleware, RethRpcMiddleware},
@@ -18,6 +18,7 @@ use crate::{
 };
 use alloy_consensus::BlockHeader;
 use alloy_eips::BlockNumberOrTag;
+use alloy_primitives::B256;
 use alloy_rpc_types::engine::ClientVersionV1;
 use alloy_rpc_types_engine::ExecutionData;
 use futures::{Stream, StreamExt};
@@ -1492,12 +1493,20 @@ pub trait EngineValidatorBuilder<Node: FullNodeComponents>: Send + Sync + Clone 
 pub struct BasicEngineValidatorBuilder<EV> {
     /// The payload validator builder used to create the engine validator.
     payload_validator_builder: EV,
+    /// Hashed addresses excluded from sparse storage trie cache pruning.
+    retained_storage_tries: Vec<B256>,
 }
 
 impl<EV> BasicEngineValidatorBuilder<EV> {
     /// Creates a new instance with the given payload validator builder.
     pub const fn new(payload_validator_builder: EV) -> Self {
-        Self { payload_validator_builder }
+        Self { payload_validator_builder, retained_storage_tries: Vec::new() }
+    }
+
+    /// Keeps the storage tries for these hashed addresses resident during building and validation.
+    pub fn with_retained_storage_tries(mut self, addresses: Vec<B256>) -> Self {
+        self.retained_storage_tries = addresses;
+        self
     }
 }
 
@@ -1545,7 +1554,11 @@ where
             invalid_block_hook,
             overlay_manager,
             ctx.node.task_executor().clone(),
-        );
+        )
+        .with_state_root_strategy(Arc::new(
+            DefaultStateRootStrategy::default()
+                .with_retained_storage_tries(self.retained_storage_tries),
+        ));
 
         if txpool_prewarming {
             validator = validator
