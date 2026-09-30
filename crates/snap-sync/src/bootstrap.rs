@@ -12,6 +12,7 @@ use crate::{
 use alloy_eips::BlockNumHash;
 use reth_db_api::transaction::DbTxMut;
 use reth_network_p2p::snap::client::SnapClient;
+use reth_primitives_traits::AlloyBlockHeader;
 use reth_storage_api::{
     BlockHashReader, DBProvider, DatabaseProviderFactory, HeaderProvider, MetadataProvider,
     MetadataWriter, StageCheckpointWriter, StateWriter,
@@ -267,16 +268,21 @@ where
             info!(target: "sync::snap", ?pivot, ?ancestor, head, "Orphaned block access lists expired, restarting");
             return Ok(Step::Restart)
         }
-        let generation = self.policy.select(
-            &self.factory.database_provider_ro()?,
-            head,
-            self.context.finalized(),
-        )?;
+        let provider = self.factory.database_provider_ro()?;
+        let generation = self.policy.select(&provider, head, self.context.finalized())?;
         // The new pivot must descend from the ancestor, or the new branch is still too short.
         // Checked first, so waiting for it does not fetch the orphaned lists on every pass.
         let Some(generation) = generation.filter(|g| g.target().number >= ancestor.number) else {
             return Ok(Step::Wait)
         };
+        // Catch-up applies the new branch's lists from the ancestor, so none may predate them.
+        let new_branch =
+            provider.sealed_headers_range(ancestor.number + 1..=generation.target().number)?;
+        drop(provider);
+        if new_branch.iter().any(|header| header.block_access_list_hash().is_none()) {
+            info!(target: "sync::snap", ?pivot, ?ancestor, "New branch predates block access lists, restarting");
+            return Ok(Step::Restart)
+        }
         // A peer lacking side-chain lists says nothing of the others, so another is asked later.
         let Some(lists) = self.catch_up.orphaned_lists(reorg.orphaned()).await? else {
             debug!(target: "sync::snap", ?pivot, "Orphaned block access lists are unavailable");
@@ -1283,6 +1289,38 @@ mod tests {
         };
         assert_eq!(pivot, new[1].num_hash());
         assert_ne!(attempt_id(&factory), attempt);
+    }
+
+    #[tokio::test]
+    async fn a_new_branch_before_block_access_lists_restarts_the_attempt() {
+        let accounts = accounts();
+        let root = state_root(&accounts);
+        let factory = hashed_factory();
+        let shared = chain(2, root);
+        let orphaned = branch(&shared[2], &orphaned_lists(), root);
+        insert_headers(&factory, &shared);
+        insert_headers(&factory, &orphaned);
+        let provider = factory.database_provider_rw().unwrap();
+        provider.start_snap_attempt(SnapGeneration::new(orphaned[1].num_hash(), root)).unwrap();
+        provider.commit().unwrap();
+        let attempt = attempt_id(&factory);
+        // Block 3 of the new branch predates block access lists, so catch-up cannot apply it.
+        let mut before = header(3, shared[2].hash(), None);
+        before.state_root = root;
+        let before = SealedHeader::seal_slow(before);
+        let new = [vec![before.clone()], branch(&before, &[Vec::new(), Vec::new()], root)].concat();
+        factory.replace_headers_after(2, &new);
+        let (client, mut bootstrap) =
+            scripted(&factory, [account_range(1, &accounts, 0..3, &[])], [5]);
+
+        let outcome = bootstrap.run().await.unwrap();
+
+        let SnapBootstrapOutcome::TrieRebuild { pivot, .. } = outcome else {
+            panic!("the new branch's state is complete: {outcome:?}")
+        };
+        assert_eq!(pivot, new[1].num_hash());
+        assert_ne!(attempt_id(&factory), attempt);
+        assert!(client.block_requests().is_empty());
     }
 
     #[tokio::test]
