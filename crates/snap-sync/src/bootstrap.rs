@@ -6,7 +6,7 @@
 use crate::{
     AccountRangeDownload, AccountRangeStep, BlockAccessListCatchUp, BytecodeDownload, BytecodeStep,
     CatchUpStep, SnapAccountStore, SnapAttemptStore, SnapCatchUpStore, SnapGeneration,
-    SnapPivotPolicy, SnapReorgStore, SnapStateVerifier, SnapSyncError, SnapSyncSession, SnapWrite,
+    SnapPivotPolicy, SnapStateVerifier, SnapSyncError, SnapSyncSession, SnapWrite,
     StorageRangeDownload, StorageRangeStep, VerifiedRange, DEFAULT_SCAN_CHUNK,
 };
 use alloy_eips::BlockNumHash;

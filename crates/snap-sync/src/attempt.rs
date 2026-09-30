@@ -6,13 +6,14 @@
 
 use crate::{
     account::StoredCoverage, common::SnapRecord, reorg::StoredAncestry, repair::StoredRepairs,
-    storage::StoredProgress, verify::StoredRebuild, CatchUpProgress, SnapCatchUpStore,
-    SnapGeneration, SnapSyncError,
+    storage::StoredProgress, verify::StoredRebuild, CatchUpProgress, DownloadedAccount,
+    SnapAccountStore, SnapCatchUpStore, SnapGeneration, SnapReorg, SnapSyncError, StateRepairs,
 };
-use alloy_eips::BlockNumHash;
+use alloy_eips::{eip7928::bal::DecodedBal, BlockNumHash};
+use alloy_primitives::keccak256;
 use reth_storage_api::{
-    BlockHashReader, HeaderProvider, MetadataProvider, MetadataWriter, SnapAttempt, SnapAttemptId,
-    StorageSettings,
+    BlockHashReader, DBProvider, HeaderProvider, MetadataProvider, MetadataWriter, SnapAttempt,
+    SnapAttemptId, StorageSettings,
 };
 use serde::{Deserialize, Serialize};
 
@@ -80,6 +81,29 @@ pub trait SnapAttemptStore {
     ) -> Result<SnapWrite, SnapSyncError>
     where
         Self: MetadataWriter + HeaderProvider + BlockHashReader;
+
+    /// Returns where the canonical chain diverges from the branch the pivot of `write`'s attempt
+    /// is on.
+    ///
+    /// `Ok(None)` when the kept headers do not reach back to where the branches part.
+    fn snap_reorg(
+        &self,
+        write: SnapWrite,
+    ) -> Result<Option<SnapReorg<<Self as HeaderProvider>::Header>>, SnapSyncError>
+    where
+        Self: HeaderProvider + BlockHashReader;
+
+    /// Schedules what `lists`, those of the orphaned blocks, changed in the downloaded state for
+    /// repair, and moves the attempt to `generation` with catch-up back at `ancestor` at most.
+    fn commit_reorg_recovery(
+        &self,
+        write: SnapWrite,
+        ancestor: BlockNumHash,
+        lists: &[DecodedBal],
+        generation: SnapGeneration,
+    ) -> Result<SnapWrite, SnapSyncError>
+    where
+        Self: MetadataWriter + HeaderProvider + BlockHashReader + DBProvider;
 }
 
 /// What a write presents to prove it belongs to the attempt owning the persisted state.
@@ -246,6 +270,42 @@ impl<T: MetadataProvider> SnapAttemptStore for T {
         StoredProgress::clear(self)?;
         StoredAncestry::record(self, attempt.id(), target)?;
         Ok(SnapWrite::of(&attempt))
+    }
+
+    fn snap_reorg(
+        &self,
+        write: SnapWrite,
+    ) -> Result<Option<SnapReorg<<Self as HeaderProvider>::Header>>, SnapSyncError>
+    where
+        Self: HeaderProvider + BlockHashReader,
+    {
+        StoredAncestry::reorg(self, &self.authorize_snap_write(write)?)
+    }
+
+    fn commit_reorg_recovery(
+        &self,
+        write: SnapWrite,
+        ancestor: BlockNumHash,
+        lists: &[DecodedBal],
+        generation: SnapGeneration,
+    ) -> Result<SnapWrite, SnapSyncError>
+    where
+        Self: MetadataWriter + HeaderProvider + BlockHashReader + DBProvider,
+    {
+        let coverage = self.account_coverage(write)?.ok_or(SnapSyncError::NoCoverage)?;
+        let mut repairs = StateRepairs::default();
+        for changes in lists.iter().flat_map(|list| list.as_bal().iter()) {
+            let hashed_address = keccak256(changes.address());
+            // Accounts not downloaded yet are downloaded whole at a canonical pivot later.
+            if !changes.has_changes() ||
+                self.downloaded_account(coverage, hashed_address)? == DownloadedAccount::Unknown
+            {
+                continue
+            }
+            repairs.insert_changes(hashed_address, changes);
+        }
+        self.schedule_snap_repairs(write, repairs)?;
+        self.recover_snap_pivot(write, ancestor, generation)
     }
 }
 
