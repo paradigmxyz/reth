@@ -238,7 +238,7 @@ async fn test_long_reorg() -> eyre::Result<()> {
     second_node.sync_to(head.header.hash).await?;
 
     // Produce a fork chain with blocks 21..60
-    second_node.payload.timestamp = head.header.timestamp;
+    second_node.set_next_payload_timestamp(head.header.timestamp + 1)?;
     advance_with_random_transactions(&mut second_node, 40, &mut rng, true).await?;
 
     // Reorg first node from 100th block to new 60th block.
@@ -328,7 +328,7 @@ async fn test_reorg_through_backfill() -> eyre::Result<()> {
     second_node.sync_to(head.header.hash).await?;
 
     // Produce an unfinalized fork chain with 30 blocks
-    second_node.payload.timestamp = head.header.timestamp;
+    second_node.set_next_payload_timestamp(head.header.timestamp + 1)?;
     advance_with_random_transactions(&mut second_node, 30, &mut rng, false).await?;
 
     // Now reorg second node to the finalized canonical head

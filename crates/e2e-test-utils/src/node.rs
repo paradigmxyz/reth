@@ -169,6 +169,30 @@ where
         })
     }
 
+    /// Sets the timestamp of the next payload built by [`Self::new_payload`] and the methods
+    /// built on it, such as [`Self::advance_block`].
+    ///
+    /// Later payloads continue from this timestamp, one second apart. The attributes generator is
+    /// called with the new timestamp, so fork-dependent attributes follow it.
+    ///
+    /// Returns an error if the timestamp is not greater than the timestamp of the current latest
+    /// block, which is the parent of the next payload.
+    pub fn set_next_payload_timestamp(&mut self, timestamp: u64) -> eyre::Result<()> {
+        let latest = self
+            .inner
+            .provider
+            .sealed_header_by_number_or_tag(BlockNumberOrTag::Latest)?
+            .ok_or_else(|| eyre!("latest block not found"))?;
+        ensure!(
+            timestamp > latest.timestamp(),
+            "next payload timestamp {timestamp} must be greater than the latest block timestamp {}",
+            latest.timestamp()
+        );
+        // The payload context increments its timestamp before generating the next attributes.
+        self.payload.timestamp = timestamp - 1;
+        Ok(())
+    }
+
     /// Creates a new payload from given attributes generator
     /// expects a payload attribute event and waits until the payload is built.
     ///
