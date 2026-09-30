@@ -187,6 +187,9 @@ fn simulate_handoff(
                 assert!(terminate_tx.is_none(), "engine stopped before shutdown was requested");
                 assert_eq!((block_tip, state_tip), (6, 6));
                 assert_eq!(tree.incoming.len(), 1, "shutdown consumed subsequent engine input");
+                // The run loop acknowledges after releasing the handler.
+                assert!(terminate_rx.try_recv().is_err());
+                tree.pending_termination.take();
                 assert!(terminate_rx.try_recv().is_ok());
                 break
             }
@@ -364,6 +367,9 @@ fn engine_step_shutdown_drains_inflight_and_masked_state() {
         })
         .unwrap();
     assert_eq!(harness.tree.step(false), LoopStep::Shutdown);
+    // The run loop acknowledges after releasing the handler.
+    assert!(rx.try_recv().is_err());
+    harness.tree.pending_termination.take();
     assert!(rx.try_recv().is_ok());
     assert_eq!(harness.tree.incoming.len(), 1);
     for block in &blocks[..3] {
@@ -385,8 +391,10 @@ fn engine_step_shutdown_signals_after_persistence_failure() {
     };
     drop(sender);
     assert_eq!(harness.tree.step(false), LoopStep::Shutdown);
-    assert!(rx.try_recv().is_ok(), "failed persistence must still signal termination");
+    assert!(rx.try_recv().is_err(), "termination acknowledged before handler release");
     assert_eq!(harness.tree.incoming.len(), 1);
+    drop(harness);
+    assert!(rx.try_recv().is_ok(), "failed persistence must still signal termination");
 }
 
 #[test]

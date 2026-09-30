@@ -1,6 +1,7 @@
 use crate::metrics::PersistenceMetrics;
 use alloy_eips::BlockNumHash;
 use crossbeam_channel::Sender as CrossbeamSender;
+use futures::{future::Shared, FutureExt};
 use reth_errors::ProviderError;
 use reth_ethereum_primitives::EthPrimitives;
 use reth_primitives_traits::{FastInstant as Instant, NodePrimitives};
@@ -20,7 +21,10 @@ use std::{
     time::Duration,
 };
 use thiserror::Error;
-use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
+use tokio::sync::{
+    mpsc::{UnboundedReceiver, UnboundedSender},
+    oneshot,
+};
 use tracing::{debug, error, instrument, warn};
 
 /// Unified result of any persistence operation.
@@ -327,6 +331,8 @@ pub struct PersistenceHandle<N: NodePrimitives = EthPrimitives> {
     /// Guard that joins the service thread when all handles are dropped.
     /// Uses `Arc` so the handle remains `Clone`.
     _service_guard: Arc<ServiceGuard>,
+    /// Resolves after a cooperative service exits and drops its provider.
+    stopped: Option<Shared<oneshot::Receiver<()>>>,
 }
 
 impl<T: NodePrimitives> PersistenceHandle<T> {
@@ -338,6 +344,7 @@ impl<T: NodePrimitives> PersistenceHandle<T> {
         Self {
             sender: PersistenceSender::Blocking(sender),
             _service_guard: Arc::new(ServiceGuard(None)),
+            stopped: None,
         }
     }
 
@@ -369,6 +376,7 @@ impl<T: NodePrimitives> PersistenceHandle<T> {
         PersistenceHandle {
             sender: PersistenceSender::Blocking(db_service_tx),
             _service_guard: Arc::new(ServiceGuard(Some(join_handle))),
+            stopped: None,
         }
     }
 
@@ -401,13 +409,33 @@ impl<T: NodePrimitives> PersistenceHandle<T> {
             pruner,
             sync_metrics_tx,
         );
-        let task =
-            runtime.spawn_dedicated_task("persistence", service.run_cooperative(runtime.clone()));
+        let (stopped_tx, stopped) = oneshot::channel();
+        let service_runtime = runtime.clone();
+        let task = runtime.spawn_dedicated_task("persistence", async move {
+            let result = service.run_cooperative(service_runtime).await;
+            drop(stopped_tx);
+            result
+        });
         let handle = PersistenceHandle {
             sender: PersistenceSender::Cooperative(sender),
             _service_guard: Arc::new(ServiceGuard(None)),
+            stopped: Some(stopped.shared()),
         };
         (handle, task)
+    }
+
+    /// Returns a future that resolves once the service has exited and released its provider.
+    ///
+    /// The service exits after every handle is dropped and queued actions have drained. A
+    /// blocking service is joined synchronously by dropping its last handle instead, so this
+    /// resolves immediately for it.
+    pub fn stopped(&self) -> impl Future<Output = ()> + use<T> {
+        let stopped = self.stopped.clone();
+        async move {
+            if let Some(stopped) = stopped {
+                let _ = stopped.await;
+            }
+        }
     }
 
     /// Sends a specific [`PersistenceAction`] in the contained channel. The caller is responsible

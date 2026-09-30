@@ -553,6 +553,12 @@ where
     /// This will block the current thread and process incoming messages.
     pub fn run(mut self) {
         while self.step(true) != LoopStep::Shutdown {}
+        let termination = self.pending_termination.take();
+        futures::executor::block_on(self.payload_validator.wait_for_tasks());
+        // The launcher may exit as soon as termination is acknowledged. Dropping the handler
+        // joins the persistence service when this holds its last handle.
+        drop(self);
+        drop(termination);
     }
 
     /// Runs the production event loop on a cooperative task runtime.
@@ -564,7 +570,14 @@ where
         loop {
             match self.step_async(false).await {
                 LoopStep::Shutdown => {
+                    let termination = self.pending_termination.take();
                     self.payload_validator.wait_for_tasks().await;
+                    // Acknowledge only after every worker and the persistence service have
+                    // released their providers; the launcher may exit immediately afterwards.
+                    let persistence = self.persistence.stopped();
+                    drop(self);
+                    persistence.await;
+                    drop(termination);
                     return;
                 }
                 LoopStep::Idle | LoopStep::Terminating => {
@@ -1547,7 +1560,7 @@ where
             Ok(true) => {}
             Err(err) => error!(target: "engine::tree", %err, "Termination failed"),
         }
-        drop(self.pending_termination.take());
+        // The run loop acknowledges termination after releasing the handler's resources.
         LoopStep::Shutdown
     }
 
