@@ -193,10 +193,11 @@ impl<T: TransactionOrdering> TxPool<T> {
         &self,
         dependencies: &FrameDependencies,
         timestamp: u64,
+        current_slot: Option<u64>,
     ) -> Vec<TxHash> {
         self.all_transactions
             .frame_reservations
-            .affected(dependencies, timestamp)
+            .affected(dependencies, timestamp, current_slot)
             .into_iter()
             .collect()
     }
@@ -2661,6 +2662,7 @@ mod tests {
                 head_hash: B256::ZERO,
                 dependencies: Default::default(),
                 expires_at: None,
+                recent_root_dependencies: vec![],
                 exclusive_payer: false,
             }))
             .unwrap();

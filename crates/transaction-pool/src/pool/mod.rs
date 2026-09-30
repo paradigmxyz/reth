@@ -91,6 +91,7 @@ use crate::{
 };
 use alloy_consensus::Transaction;
 
+use alloy_consensus::BlockHeader;
 use alloy_primitives::{
     map::{AddressSet, HashSet},
     Address, TxHash, B256,
@@ -651,7 +652,7 @@ where
         let changed_senders = self.changed_senders(accounts.into_iter());
         let UpdateOutcome { promoted, discarded } = {
             let mut pool = self.pool.write();
-            let affected = pool.affected_frame_transactions(&dependencies, 0);
+            let affected = pool.affected_frame_transactions(&dependencies, 0, None);
             let mut queue = self.frame_revalidation.lock();
             for tx in pool.remove_transactions(affected) {
                 queue.insert(tx);

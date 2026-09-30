@@ -22,7 +22,9 @@ mod task;
 
 pub use eth::*;
 pub use frame_inspector::FrameValidationInspector;
-pub use frame_policy::FrameValidationPolicy;
+pub use frame_policy::{
+    FrameValidationPolicy, RecentRootDependency, RecentRootReference, RecentRootVerifier,
+};
 pub use frame_state::*;
 
 pub use task::{TransactionValidationTaskExecutor, ValidationTask};
