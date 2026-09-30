@@ -2,7 +2,7 @@ use crate::{
     network::NetworkTestContext,
     payload::PayloadTestContext,
     rpc::RpcTestContext,
-    wait::{poll_until, WAIT_TIMEOUT},
+    wait::{poll_until, POLL_INTERVAL, WAIT_TIMEOUT},
 };
 use alloy_consensus::{transaction::TxHashRef, BlockHeader};
 use alloy_eips::BlockId;
@@ -15,7 +15,10 @@ use alloy_provider::{
 use alloy_rpc_types_engine::{ExecutionPayloadEnvelopeV5, ForkchoiceState, ForkchoiceUpdated};
 use alloy_rpc_types_eth::BlockNumberOrTag;
 use eyre::{ensure, eyre, Ok};
-use futures_util::Future;
+use futures_util::{
+    future::{select, Either},
+    Future,
+};
 use jsonrpsee::{core::client::ClientT, http_client::HttpClient};
 use reth_chainspec::EthereumHardforks;
 use reth_network_api::test_utils::PeersHandleProvider;
@@ -28,10 +31,17 @@ use reth_provider::{
 };
 use reth_rpc_api::TestingBuildBlockRequestV1;
 use reth_rpc_builder::auth::AuthServerHandle;
-use reth_rpc_eth_api::helpers::{EthApiSpec, EthTransactions, TraceExt};
+use reth_rpc_eth_api::{
+    helpers::{EthApiSpec, EthTransactions, LoadReceipt, TraceExt},
+    EthApiTypes, RpcReceipt,
+};
 use reth_stages_types::StageId;
 use reth_transaction_pool::TransactionPool;
-use std::{pin::Pin, sync::Arc, time::Duration};
+use std::{
+    pin::{pin, Pin},
+    sync::Arc,
+    time::Duration,
+};
 use tokio_stream::StreamExt;
 use url::Url;
 
@@ -240,6 +250,88 @@ where
         let payload = self.advance_block().await?;
         self.wait_for_pool_head(payload.block().hash()).await?;
         Ok(payload)
+    }
+
+    /// Advances the chain `length` blocks, see [`Self::advance_block`].
+    ///
+    /// Unlike [`Self::advance`], this does not inject transactions, so the blocks include the
+    /// pending transactions of the pool, if any.
+    ///
+    /// Returns the built payloads.
+    pub async fn advance_blocks(
+        &mut self,
+        length: u64,
+    ) -> eyre::Result<Vec<Payload::BuiltPayload>> {
+        let mut chain = Vec::with_capacity(length as usize);
+        for _ in 0..length {
+            chain.push(self.advance_block().await?);
+        }
+        Ok(chain)
+    }
+
+    /// Advances the chain one block at a time until the transaction with the given hash is
+    /// included in a canonical block, returning its receipt.
+    ///
+    /// Returns the receipt without advancing if the transaction is already included. Returns an
+    /// error if the transaction is not included within [`WAIT_TIMEOUT`].
+    pub async fn advance_until_receipt(
+        &mut self,
+        hash: B256,
+    ) -> eyre::Result<RpcReceipt<<AddOns::EthApi as EthApiTypes>::NetworkTypes>>
+    where
+        AddOns::EthApi: EthApiSpec<Provider: BlockReader<Block = BlockTy<Node::Types>>>
+            + EthTransactions
+            + TraceExt
+            + LoadReceipt
+            + 'static,
+    {
+        let wait = async {
+            loop {
+                if let Some(receipt) = self.rpc.transaction_receipt(hash).await? {
+                    return Ok(receipt)
+                }
+                self.advance_block().await?;
+            }
+        };
+        tokio::time::timeout(WAIT_TIMEOUT, wait)
+            .await
+            .map_err(|_| eyre!("timed out waiting for the receipt of transaction {hash}"))?
+    }
+
+    /// Drives `fut` to completion while advancing the chain one block every [`POLL_INTERVAL`],
+    /// returning its output.
+    ///
+    /// This is useful for futures that only complete once their transaction is mined, e.g. an
+    /// `eth_sendRawTransactionSync` request. `fut` is also polled while a block is built, but the
+    /// block is always built to completion, so the chain may advance one more block after `fut`
+    /// completed.
+    ///
+    /// Returns an error if `fut` does not complete within [`WAIT_TIMEOUT`].
+    pub async fn advance_while<F: Future>(&mut self, fut: F) -> eyre::Result<F::Output> {
+        let wait = async {
+            let mut fut = pin!(fut);
+            loop {
+                if let Result::Ok(output) = tokio::time::timeout(POLL_INTERVAL, fut.as_mut()).await
+                {
+                    return Ok(output)
+                }
+                // Cancelling the block would leave its payload events in the stream and break the
+                // next block, so finish it even if `fut` completes first.
+                let mut advance = pin!(self.advance_block());
+                match select(advance.as_mut(), fut.as_mut()).await {
+                    Either::Left((payload, _)) => {
+                        payload?;
+                    }
+                    Either::Right((output, _)) => {
+                        advance.await?;
+                        return Ok(output)
+                    }
+                }
+            }
+        };
+        tokio::time::timeout(WAIT_TIMEOUT, wait)
+            .await
+            .map_err(|_| eyre!("timed out advancing the chain until the future completed"))?
     }
 
     /// Waits for block to be available on node.
@@ -630,6 +722,9 @@ mod tests {
         assert_send(node.advance_block());
         assert_send(node.advance_block_synced());
         assert_send(node.inject_and_advance(Bytes::new()));
+        assert_send(node.advance_blocks(0));
+        assert_send(node.advance_until_receipt(B256::ZERO));
+        assert_send(node.advance_while(async {}));
         assert_send(node.wait_block(0, B256::ZERO, false));
         assert_send(node.wait_unwind(0));
         assert_send(node.wait_for_pool(|_| true));
