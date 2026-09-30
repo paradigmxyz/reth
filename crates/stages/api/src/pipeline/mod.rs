@@ -224,7 +224,16 @@ impl<N: ProviderNodeTypes> Pipeline<N> {
         self.run_loop_until(None).await
     }
 
-    /// Runs through `last_stage`, leaving later stages untouched; errors if the stage is absent.
+    /// Runs one pipeline pass through `last_stage`, including that stage.
+    ///
+    /// Each stage in the selected prefix runs to completion; later stages are not executed.
+    /// A [`PipelineTarget::Sync`] updates the tip before running the prefix, while a
+    /// [`PipelineTarget::Unwind`] unwinds the entire pipeline and returns without executing stages.
+    /// Stage errors that request an unwind also unwind the entire pipeline. Normal static-file
+    /// migration and pruning still run.
+    ///
+    /// Returns the control flow of the partial pass, or [`PipelineError::MissingStage`] if
+    /// `last_stage` is absent from the pipeline.
     pub async fn run_until(
         &mut self,
         last_stage: StageId,
