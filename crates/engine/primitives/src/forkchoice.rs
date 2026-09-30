@@ -105,9 +105,7 @@ impl ForkchoiceStateTracker {
     /// - Or the finalized hash for the latest valid forkchoice state is zero.
     #[inline]
     pub fn last_valid_finalized(&self) -> Option<B256> {
-        self.last_valid
-            .filter(|state| !state.finalized_block_hash.is_zero())
-            .map(|state| state.finalized_block_hash)
+        self.last_valid.and_then(|state| state.state_finalized_hash())
     }
 
     /// Returns the last received `ForkchoiceState` to which we need to sync.
@@ -122,9 +120,7 @@ impl ForkchoiceStateTracker {
     /// - Or the finalized hash for the sync target forkchoice state is zero.
     #[inline]
     pub fn sync_target_finalized(&self) -> Option<B256> {
-        self.last_syncing
-            .filter(|state| !state.finalized_block_hash.is_zero())
-            .map(|state| state.finalized_block_hash)
+        self.last_syncing.and_then(|state| state.state_finalized_hash())
     }
 
     /// Returns true if no forkchoice state has been received yet.

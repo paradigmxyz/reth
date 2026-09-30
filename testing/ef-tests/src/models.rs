@@ -168,19 +168,14 @@ impl State {
                     .storage
                     .iter()
                     .filter(|(_, v)| !v.is_zero())
-                    .map(|(k, v)| {
-                        (
-                            B256::from_slice(&k.to_be_bytes::<32>()),
-                            B256::from_slice(&v.to_be_bytes::<32>()),
-                        )
-                    })
+                    .map(|(k, v)| (B256::from(*k), B256::from(*v)))
                     .collect();
                 let account = GenesisAccount {
                     balance: account.balance,
                     nonce: Some(account.nonce.try_into().unwrap()),
                     code: Some(account.code).filter(|c| !c.is_empty()),
                     storage: Some(storage),
-                    private_key: None,
+                    ..Default::default()
                 };
                 (address, account)
             })
@@ -237,9 +232,7 @@ impl Account {
 
         let mut storage_cursor = tx.cursor_dup_read::<tables::PlainStorageState>()?;
         for (slot, value) in &self.storage {
-            if let Some(entry) =
-                storage_cursor.seek_by_key_subkey(address, B256::new(slot.to_be_bytes()))?
-            {
+            if let Some(entry) = storage_cursor.seek_by_key_subkey(address, B256::from(*slot))? {
                 if U256::from_be_bytes(entry.key.0) == *slot {
                     assert_equal(
                         *value,

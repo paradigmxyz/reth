@@ -80,6 +80,11 @@ impl<A, S> SparseStateTrie<A, S> {
         self
     }
 
+    /// Returns whether branch node updates and deletions are retained.
+    pub const fn retains_updates(&self) -> bool {
+        self.retain_updates
+    }
+
     /// Set the accounts trie to the given `RevealableSparseTrie`.
     pub fn set_accounts_trie(&mut self, trie: RevealableSparseTrie<A>) {
         self.state = trie;
@@ -317,6 +322,36 @@ where
         }
 
         any_err
+    }
+
+    /// Reveals account trie proof nodes on the calling thread.
+    ///
+    /// Unlike [`Self::reveal_decoded_multiproof_v2`] this touches only the account trie, so a
+    /// caller that owns some of the storage tries itself can reveal the two halves separately.
+    pub fn reveal_account_proof_nodes(
+        &mut self,
+        mut nodes: Vec<ProofTrieNodeV2>,
+    ) -> SparseStateTrieResult<()> {
+        if nodes.is_empty() {
+            return Ok(())
+        }
+
+        #[cfg(feature = "metrics")]
+        self.metrics.increment_total_account_nodes(nodes.len() as u64);
+
+        let result = self.state.reveal_v2_proof_nodes(&mut nodes, self.retain_updates);
+        self.deferred_drops.proof_nodes_bufs.push(nodes);
+
+        Ok(result?)
+    }
+
+    /// Records storage trie nodes that were revealed into a trie taken out of this state trie, so
+    /// the reveal metrics stay complete.
+    pub const fn record_revealed_storage_nodes(&mut self, nodes: usize) {
+        #[cfg(feature = "metrics")]
+        self.metrics.increment_total_storage_nodes(nodes as u64);
+        #[cfg(not(feature = "metrics"))]
+        let _ = nodes;
     }
 
     /// Calculates the hashes of subtries.
@@ -979,6 +1014,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::clone_on_copy)]
     fn take_trie_updates() {
         reth_tracing::init_test_tracing();
 
@@ -1018,7 +1054,7 @@ mod tests {
         let address_1 = b256!("0x1000000000000000000000000000000000000000000000000000000000000000");
         let address_path_1 = Nibbles::unpack(address_1);
         let account_1 = Account::arbitrary(&mut arbitrary::Unstructured::new(&bytes)).unwrap();
-        let mut trie_account_1 = account_1.into_trie_account(storage_root);
+        let mut trie_account_1 = account_1.clone().into_trie_account(storage_root);
         let address_2 = b256!("0x1100000000000000000000000000000000000000000000000000000000000000");
         let address_path_2 = Nibbles::unpack(address_2);
         let account_2 = Account::arbitrary(&mut arbitrary::Unstructured::new(&bytes)).unwrap();
@@ -1026,7 +1062,7 @@ mod tests {
 
         let mut hash_builder = HashBuilder::default()
             .with_proof_retainer(ProofRetainer::from_iter([address_path_1, address_path_2]));
-        hash_builder.add_leaf(address_path_1, &alloy_rlp::encode(trie_account_1));
+        hash_builder.add_leaf(address_path_1, &alloy_rlp::encode(trie_account_1.clone()));
         hash_builder.add_leaf(address_path_2, &alloy_rlp::encode(trie_account_2));
 
         let root = hash_builder.root();

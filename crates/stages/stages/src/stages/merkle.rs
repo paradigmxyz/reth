@@ -1,4 +1,4 @@
-use alloy_consensus::{constants::KECCAK_EMPTY, BlockHeader};
+use alloy_consensus::BlockHeader;
 use alloy_primitives::{BlockNumber, Sealable, B256};
 use reth_codecs::Compact;
 use reth_consensus::ConsensusError;
@@ -292,9 +292,7 @@ where
                                     .map(StoredSubNode::from)
                                     .collect(),
                                 storage_state.state.hash_builder.into(),
-                                storage_state.account.nonce,
-                                storage_state.account.balance,
-                                storage_state.account.bytecode_hash.unwrap_or(KECCAK_EMPTY),
+                                storage_state.account,
                             ));
                     }
                     self.save_execution_checkpoint(provider, Some(checkpoint))?;
@@ -672,6 +670,7 @@ mod tests {
     impl ExecuteStageTestRunner for MerkleTestRunner {
         type Seed = Vec<SealedBlock<reth_ethereum_primitives::Block>>;
 
+        #[allow(clippy::clone_on_copy)]
         fn seed_execution(&mut self, input: ExecInput) -> Result<Self::Seed, TestRunnerError> {
             let stage_progress = input.checkpoint().block_number;
             let start = stage_progress + 1;
@@ -698,7 +697,7 @@ mod tests {
                 .collect::<BTreeMap<_, _>>();
 
             self.db.insert_accounts_and_storages(
-                accounts.iter().map(|(addr, acc)| (*addr, (*acc, std::iter::empty()))),
+                accounts.iter().map(|(addr, acc)| (*addr, (acc.clone(), std::iter::empty()))),
             )?;
 
             let (header, body) = random_block(

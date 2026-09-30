@@ -247,9 +247,12 @@ impl ArchiveFetcher {
                     if attempt < max_download_retries {
                         info!(target: "reth::cli",
                             file = %self.paths.file_name(),
-                            "Download failed, retrying in {RETRY_BACKOFF_SECS}s..."
+                            retry_delay = ?self.session.retry_delay(Duration::from_secs(RETRY_BACKOFF_SECS)),
+                            "Download failed, retrying"
                         );
-                        std::thread::sleep(Duration::from_secs(RETRY_BACKOFF_SECS));
+                        std::thread::sleep(
+                            self.session.retry_delay(Duration::from_secs(RETRY_BACKOFF_SECS)),
+                        );
                     }
                     continue;
                 }
@@ -328,9 +331,12 @@ impl ArchiveFetcher {
                 if attempt < max_download_retries {
                     info!(target: "reth::cli",
                         file = %self.paths.file_name(),
-                        "Download interrupted, retrying in {RETRY_BACKOFF_SECS}s..."
+                        retry_delay = ?self.session.retry_delay(Duration::from_secs(RETRY_BACKOFF_SECS)),
+                        "Download interrupted, retrying"
                     );
-                    std::thread::sleep(Duration::from_secs(RETRY_BACKOFF_SECS));
+                    std::thread::sleep(
+                        self.session.retry_delay(Duration::from_secs(RETRY_BACKOFF_SECS)),
+                    );
                 }
                 continue;
             }
@@ -550,6 +556,8 @@ struct SegmentedWorkerContext<'a> {
     request_limiter: &'a DownloadRequestLimiter,
     /// Cancellation token shared by the whole command.
     cancel_token: &'a CancellationToken,
+    /// Session carrying the retry-delay override.
+    session: &'a DownloadSession,
 }
 
 impl SegmentedDownload {
@@ -588,6 +596,7 @@ impl SegmentedDownload {
         let worker_context = SegmentedWorkerContext {
             url,
             part_path: paths.part_path(),
+            session: &session,
             shared,
             request_limiter: request_limiter.as_ref(),
             cancel_token,
@@ -669,6 +678,7 @@ impl SegmentedDownload {
                 &piece_progress_bytes,
                 context.request_limiter,
                 context.cancel_token,
+                context.session,
             ) {
                 state.note_terminal_failure();
                 terminal_failure.record(error);
@@ -691,6 +701,7 @@ impl SegmentedDownload {
         piece_progress_bytes: &AtomicU64,
         request_limiter: &DownloadRequestLimiter,
         cancel_token: &CancellationToken,
+        session: &DownloadSession,
     ) -> Result<()> {
         for attempt in 1..=SEGMENT_RETRY_ATTEMPTS {
             if cancel_token.is_cancelled() {
@@ -711,7 +722,9 @@ impl SegmentedDownload {
                 Err(PieceAttemptFailure::Retryable { error: _, throttled })
                     if attempt < SEGMENT_RETRY_ATTEMPTS =>
                 {
-                    std::thread::sleep(piece_retry_backoff(attempt, throttled));
+                    std::thread::sleep(
+                        session.retry_delay(piece_retry_backoff(attempt, throttled)),
+                    );
                 }
                 Err(PieceAttemptFailure::Retryable { error, .. }) => return Err(error),
                 Err(PieceAttemptFailure::Terminal(error)) => return Err(error),

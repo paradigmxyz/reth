@@ -1,7 +1,7 @@
 use crate::providers::RocksDBProvider;
 use alloy_eip7928::BAL_RETENTION_PERIOD_SLOTS;
 use alloy_eips::NumHash;
-use alloy_primitives::{BlockHash, BlockNumber, Bytes};
+use alloy_primitives::{map::B256Map, BlockHash, BlockNumber, Bytes};
 use parking_lot::RwLock;
 use reth_db_api::{
     models::{StoredBlockAccessList, StoredBlockAccessListKey},
@@ -9,13 +9,10 @@ use reth_db_api::{
     tables, DatabaseError,
 };
 use reth_prune_types::PruneMode;
-use reth_storage_api::{
-    BalNotification, BalNotificationStream, BalStore, GetBlockAccessListLimit, RawBal,
-};
+use reth_storage_api::{BalStore, GetBlockAccessListLimit, RawBal};
 use reth_storage_errors::provider::{ProviderError, ProviderResult};
-use reth_tokio_util::EventSender;
 use std::{
-    collections::{BTreeMap, BTreeSet, HashMap},
+    collections::{BTreeMap, BTreeSet},
     sync::Arc,
 };
 
@@ -36,8 +33,6 @@ pub struct RocksDBBalStore {
     rocksdb: RocksDBProvider,
     /// Shared recent-read cache and pending-write state.
     buffer: Arc<RwLock<RocksDBBalStoreBuffer>>,
-    /// Broadcasts BAL insert notifications.
-    notifications: EventSender<BalNotification>,
 }
 
 impl RocksDBBalStore {
@@ -54,7 +49,6 @@ impl RocksDBBalStore {
             buffer_retention_distance: blocks,
             rocksdb,
             buffer: Arc::new(RwLock::new(RocksDBBalStoreBuffer::default())),
-            notifications: EventSender::new(super::DEFAULT_BAL_NOTIFICATION_CHANNEL_SIZE),
         }
     }
 
@@ -111,6 +105,14 @@ impl RocksDBBalStore {
             return Ok(Some(bal))
         }
 
+        // Read-only legacy databases predate both BAL tables.
+        if self.rocksdb.is_read_only() &&
+            !self.rocksdb.has_table::<tables::BlockAccessLists>() &&
+            !self.rocksdb.has_table::<tables::BlockAccessListBlockNumbers>()
+        {
+            return Ok(None)
+        }
+
         let Some(block_number) =
             self.rocksdb.get::<tables::BlockAccessListBlockNumbers>(block_hash)?
         else {
@@ -131,11 +133,7 @@ impl std::fmt::Debug for RocksDBBalStore {
 
 impl BalStore for RocksDBBalStore {
     fn insert(&self, block: NumHash, bal: RawBal) -> ProviderResult<()> {
-        let mut buffer = self.buffer.write();
-        buffer.insert(block, bal.clone());
-        drop(buffer);
-
-        self.notifications.notify(BalNotification::new(block, bal));
+        self.buffer.write().insert(block, bal);
         Ok(())
     }
 
@@ -146,13 +144,8 @@ impl BalStore for RocksDBBalStore {
 
         let mut buffer = self.buffer.write();
         buffer.entries.reserve(entries.len());
-        for (block, bal) in &entries {
-            buffer.insert(*block, bal.clone());
-        }
-        drop(buffer);
-
         for (block, bal) in entries {
-            self.notifications.notify(BalNotification::new(block, bal));
+            buffer.insert(block, bal);
         }
         Ok(())
     }
@@ -210,10 +203,6 @@ impl BalStore for RocksDBBalStore {
         }
         Ok(())
     }
-
-    fn bal_stream(&self) -> BalNotificationStream {
-        self.notifications.new_listener()
-    }
 }
 
 /// Shared in-memory state for recent reads and writes awaiting canonical confirmation.
@@ -223,7 +212,7 @@ impl BalStore for RocksDBBalStore {
 #[derive(Debug, Default)]
 struct RocksDBBalStoreBuffer {
     /// Hash index for serving recent hash-only lookups.
-    entries: HashMap<BlockHash, RocksDBBalEntry>,
+    entries: B256Map<RocksDBBalEntry>,
     /// Block-number index for pruning buffered entries.
     hashes_by_number: BTreeMap<BlockNumber, Vec<BlockHash>>,
     /// Validated BALs waiting to be confirmed canonical and flushed.
@@ -352,21 +341,12 @@ struct RocksDBBalEntry {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::providers::{RocksDBBuilder, RocksDBProvider};
+    use crate::providers::RocksDBBuilder;
     use alloy_primitives::B256;
-    use tokio_stream::StreamExt;
-
-    fn test_rocksdb(dir: &tempfile::TempDir) -> RocksDBProvider {
-        RocksDBBuilder::new(dir.path())
-            .with_table::<tables::BlockAccessLists>()
-            .with_table::<tables::BlockAccessListBlockNumbers>()
-            .build()
-            .unwrap()
-    }
 
     fn test_store() -> (tempfile::TempDir, RocksDBBalStore) {
         let dir = tempfile::tempdir().unwrap();
-        let rocksdb = test_rocksdb(&dir);
+        let rocksdb = RocksDBBuilder::new(dir.path()).with_default_tables().build().unwrap();
         (dir, RocksDBBalStore::new(rocksdb))
     }
 
@@ -455,7 +435,7 @@ mod tests {
     #[test]
     fn configured_buffer_retention_distance_is_used() {
         let dir = tempfile::tempdir().unwrap();
-        let rocksdb = test_rocksdb(&dir);
+        let rocksdb = RocksDBBuilder::new(dir.path()).with_default_tables().build().unwrap();
         let store = RocksDBBalStore::with_buffer_retention_distance(rocksdb, 64);
         let old = NumHash::new(1, B256::with_last_byte(1));
         let tip = NumHash::new(34, B256::with_last_byte(2));
@@ -594,15 +574,72 @@ mod tests {
         );
     }
 
-    #[tokio::test]
-    async fn insert_notifies_subscribers() {
-        let (_dir, store) = test_store();
-        let mut stream = store.bal_stream();
-        let block = NumHash::new(1, B256::with_last_byte(1));
-        let bal = RawBal::from(Bytes::from_static(&[0xc0]));
+    #[test]
+    fn read_only_legacy_database_has_no_persisted_bals() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("db");
+        let hash = B256::with_last_byte(1);
+        let rocksdb = RocksDBBuilder::new(&path)
+            .with_table::<tables::TransactionHashNumbers>()
+            .with_table::<tables::AccountsHistory>()
+            .with_table::<tables::StoragesHistory>()
+            .build()
+            .unwrap();
+        rocksdb.put::<tables::TransactionHashNumbers>(hash, &42).unwrap();
+        drop(rocksdb);
 
-        store.insert(block, bal.clone()).unwrap();
+        let rocksdb = RocksDBBuilder::new(&path)
+            .with_default_tables()
+            .with_table::<tables::BlockAccessLists>()
+            .with_table::<tables::BlockAccessListBlockNumbers>()
+            .with_read_only(true)
+            .build()
+            .unwrap();
+        assert_eq!(rocksdb.get::<tables::TransactionHashNumbers>(hash).unwrap(), Some(42));
+        let store = RocksDBBalStore::new(rocksdb);
+        assert_eq!(store.get_by_hash(hash).unwrap(), None);
 
-        assert_eq!(stream.next().await.unwrap(), BalNotification::new(block, bal));
+        let raw = Bytes::from_static(&[0xc0]);
+        store.insert(NumHash::new(42, hash), RawBal::from(raw.clone())).unwrap();
+        assert_eq!(store.get_by_hash(hash).unwrap(), Some(raw));
+        drop(store);
+
+        // The secondary open must not add tables to the primary database.
+        let rocksdb = RocksDBBuilder::new(&path)
+            .with_table::<tables::TransactionHashNumbers>()
+            .with_table::<tables::AccountsHistory>()
+            .with_table::<tables::StoragesHistory>()
+            .build()
+            .unwrap();
+        assert!(!rocksdb.has_table::<tables::BlockAccessLists>());
+        assert!(!rocksdb.has_table::<tables::BlockAccessListBlockNumbers>());
+    }
+
+    #[test]
+    fn read_only_database_reads_persisted_bals() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("db");
+        let rocksdb = RocksDBBuilder::new(&path)
+            .with_default_tables()
+            .with_table::<tables::BlockAccessLists>()
+            .with_table::<tables::BlockAccessListBlockNumbers>()
+            .build()
+            .unwrap();
+        let store = RocksDBBalStore::new(rocksdb);
+        let block = NumHash::new(42, B256::with_last_byte(1));
+        let raw = Bytes::from_static(&[0xc0]);
+        store.insert(block, RawBal::from(raw.clone())).unwrap();
+        store.flush(&[block]).unwrap();
+        drop(store);
+
+        let rocksdb = RocksDBBuilder::new(&path)
+            .with_default_tables()
+            .with_table::<tables::BlockAccessLists>()
+            .with_table::<tables::BlockAccessListBlockNumbers>()
+            .with_read_only(true)
+            .build()
+            .unwrap();
+        let store = RocksDBBalStore::new(rocksdb);
+        assert_eq!(store.get_by_hash(block.hash).unwrap(), Some(raw));
     }
 }

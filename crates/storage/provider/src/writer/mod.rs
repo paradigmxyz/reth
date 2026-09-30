@@ -20,6 +20,7 @@ mod tests {
     use reth_trie::{
         test_utils::{state_root, storage_root_prehashed},
         HashedPostState, HashedStorage, StateRoot, StorageRoot, StorageRootProgress,
+        TrieInputSorted,
     };
     use reth_trie_db::{DatabaseStateRoot, DatabaseStorageRoot, LegacyKeyAdapter, PackedKeyAdapter};
     use revm::database::{
@@ -890,7 +891,8 @@ mod tests {
         type PreState = BTreeMap<Address, (Account, BTreeMap<B256, U256>)>;
         let mut prestate: PreState = (0..10)
             .map(|key| {
-                let account = Account { nonce: 1, balance: U256::from(key), bytecode_hash: None };
+                let account =
+                    Account { nonce: 1, balance: U256::from(key), ..Default::default() };
                 let storage =
                     (1..11).map(|key| (B256::with_last_byte(key), U256::from(key))).collect();
                 (Address::with_last_byte(key), (account, storage))
@@ -1186,18 +1188,25 @@ mod tests {
             reth_trie_db::DatabaseHashedCursorFactory<&'a TX>,
         >;
         let is_v2 = provider_rw.cached_storage_settings().is_v2();
+        let input = TrieInputSorted::from_state(HashedPostState::from_hashed_storage(
+            hashed_address,
+            updated_storage.clone(),
+        ).into_sorted());
         let storage_root = if is_v2 {
             TestStorageRoot::<_, _, PackedKeyAdapter>::overlay_root(
                 tx,
                 address,
-                updated_storage.clone(),
+                input,
             )
             .unwrap()
         } else {
             TestStorageRoot::<_, _, LegacyKeyAdapter>::overlay_root(
                 tx,
                 address,
-                updated_storage.clone(),
+                TrieInputSorted::from_state(HashedPostState::from_hashed_storage(
+                    hashed_address,
+                    updated_storage.clone(),
+                ).into_sorted()),
             )
             .unwrap()
         };

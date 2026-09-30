@@ -1,6 +1,5 @@
 use std::sync::Arc;
 
-use alloy_genesis::ChainConfig;
 use alloy_primitives::keccak256;
 use alloy_rpc_types_admin::{
     EthInfo, EthPeerInfo, EthProtocolInfo, NodeInfo, PeerInfo, PeerNetworkInfo, PeerProtocolInfo,
@@ -8,7 +7,7 @@ use alloy_rpc_types_admin::{
 };
 use async_trait::async_trait;
 use jsonrpsee::core::RpcResult;
-use reth_chainspec::{EthChainSpec, EthereumHardfork, EthereumHardforks, ForkCondition};
+use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_network_api::{NetworkInfo, Peers};
 use reth_network_peers::{AnyNode, NodeRecord};
 use reth_network_types::PeerKind;
@@ -123,56 +122,7 @@ where
     async fn node_info(&self) -> RpcResult<NodeInfo> {
         let enode = self.network.local_node_record();
         let status = self.network.network_status().await.to_rpc_result()?;
-        let mut config = ChainConfig {
-            chain_id: self.chain_spec.chain().id(),
-            terminal_total_difficulty_passed: self
-                .chain_spec
-                .final_paris_total_difficulty()
-                .is_some(),
-            terminal_total_difficulty: self
-                .chain_spec
-                .ethereum_fork_activation(EthereumHardfork::Paris)
-                .ttd(),
-            deposit_contract_address: self.chain_spec.deposit_contract().map(|dc| dc.address),
-            ..self.chain_spec.genesis().config.clone()
-        };
-
-        // helper macro to set the block or time for a hardfork if known
-        macro_rules! set_block_or_time {
-            ($config:expr, [$( $field:ident => $fork:ident,)*]) => {
-                $(
-                    // don't overwrite if already set
-                    if $config.$field.is_none() {
-                        $config.$field = match self.chain_spec.ethereum_fork_activation(EthereumHardfork::$fork) {
-                            ForkCondition::Block(block) => Some(block),
-                            ForkCondition::TTD { fork_block, .. } => fork_block,
-                            ForkCondition::Timestamp(ts) => Some(ts),
-                            ForkCondition::Never => None,
-                        };
-                    }
-                )*
-            };
-        }
-
-        set_block_or_time!(config, [
-            homestead_block => Homestead,
-            dao_fork_block => Dao,
-            eip150_block => Tangerine,
-            eip155_block => SpuriousDragon,
-            eip158_block => SpuriousDragon,
-            byzantium_block => Byzantium,
-            constantinople_block => Constantinople,
-            petersburg_block => Petersburg,
-            istanbul_block => Istanbul,
-            muir_glacier_block => MuirGlacier,
-            berlin_block => Berlin,
-            london_block => London,
-            arrow_glacier_block => ArrowGlacier,
-            gray_glacier_block => GrayGlacier,
-            shanghai_time => Shanghai,
-            cancun_time => Cancun,
-            prague_time => Prague,
-        ]);
+        let config = crate::chain_config::chain_config(&*self.chain_spec);
 
         Ok(NodeInfo {
             id: alloy_primitives::hex::encode(keccak256(enode.id.as_slice())),
