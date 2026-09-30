@@ -663,6 +663,29 @@ pub trait Call:
         })
     }
 
+    /// Executes the closure with the EVM environment and state that correspond to the given
+    /// [`BlockId`] on a new task.
+    ///
+    /// See [`LoadState::spawn_blocking_io_with_state_and_env`].
+    fn spawn_with_state_and_env_at_block<F, R>(
+        &self,
+        at: BlockId,
+        f: F,
+    ) -> impl Future<Output = Result<R, Self::Error>> + Send
+    where
+        F: FnOnce(Self, StateCacheDb, EvmEnvFor<Self::Evm>) -> Result<R, Self::Error>
+            + Send
+            + 'static,
+        R: Send + 'static,
+    {
+        self.spawn_blocking_io_with_state_and_env(at, move |this, state, evm_env| {
+            let db = State::builder()
+                .with_database(StateProviderDatabase::new(state.into_evm_state_provider()))
+                .build();
+            f(this, db, evm_env)
+        })
+    }
+
     /// Prepares the state and env for the given [`RpcTxReq`] at the given [`BlockId`] and
     /// executes the closure on a new task returning the result of the closure.
     ///
@@ -931,25 +954,5 @@ pub trait Call:
         }
 
         Ok((evm_env, tx_env))
-    }
-
-    /// Executes a closure with state and environment selected together for a simulation.
-    fn spawn_with_state_and_env_at_block<F, R>(
-        &self,
-        at: BlockId,
-        f: F,
-    ) -> impl Future<Output = Result<R, Self::Error>> + Send
-    where
-        F: FnOnce(Self, StateCacheDb, EvmEnvFor<Self::Evm>) -> Result<R, Self::Error>
-            + Send
-            + 'static,
-        R: Send + 'static,
-    {
-        self.spawn_blocking_io_with_state_and_env(at, move |this, state, evm_env| {
-            let db = State::builder()
-                .with_database(StateProviderDatabase::new(state.into_evm_state_provider()))
-                .build();
-            f(this, db, evm_env)
-        })
     }
 }

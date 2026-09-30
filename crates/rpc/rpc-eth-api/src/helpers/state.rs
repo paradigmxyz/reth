@@ -17,7 +17,7 @@ use reth_primitives_traits::{BlockTy, RecoveredBlock, SealedHeaderFor};
 use reth_rpc_convert::{RpcConvert, RpcTxReq};
 use reth_rpc_eth_types::{
     error::{FromEvmError, IntoEthApiError},
-    EthApiError, PendingBlockEnv, PendingBlockEnvOrigin, RpcInvalidTransactionError, SignError,
+    EthApiError, PendingBlockEnv, RpcInvalidTransactionError, SignError,
 };
 use reth_rpc_server_types::constants::DEFAULT_MAX_STORAGE_VALUES_SLOTS;
 use reth_storage_api::{
@@ -418,6 +418,53 @@ pub trait LoadState:
         }
     }
 
+    /// Executes `f` with the EVM environment and state at the given [`BlockId`] on a blocking IO
+    /// task.
+    ///
+    /// For `pending`, both come from one source: a local pending block supplies its header and
+    /// executed state, and otherwise the state is pinned to the block returned by
+    /// [`Self::evm_env_at`]. A chain-specific pending state without a header is paired with the
+    /// current pending environment; return [`PendingStateSource::Block`] to pin both.
+    fn spawn_blocking_io_with_state_and_env<F, R>(
+        &self,
+        at: BlockId,
+        f: F,
+    ) -> impl Future<Output = Result<R, Self::Error>> + Send
+    where
+        Self: SpawnBlocking,
+        F: FnOnce(Self, StateProviderBox, EvmEnvFor<Self::Evm>) -> Result<R, Self::Error>
+            + Send
+            + 'static,
+        R: Send + 'static,
+    {
+        async move {
+            let pending =
+                if at.is_pending() { self.local_pending_block_or_state().await? } else { None };
+            let (evm_env, at) = match &pending {
+                Some(PendingStateSource::Block(block)) => {
+                    (self.evm_env_for_header(block.block().sealed_block().sealed_header())?, at)
+                }
+                Some(PendingStateSource::State(_)) => {
+                    (self.pending_block_env_and_cfg()?.evm_env, at)
+                }
+                None => self.evm_env_at(at).await?,
+            };
+
+            self.spawn_blocking_io(move |this| {
+                let state = match pending {
+                    Some(PendingStateSource::Block(block)) => this
+                        .provider()
+                        .state_with_block_appended(block.parent_hash(), block.executed_block),
+                    Some(PendingStateSource::State(state)) => Ok(state),
+                    None => this.provider().state_by_block_id(at),
+                }
+                .map_err(Self::Error::from_eth_err)?;
+                f(this, state, evm_env)
+            })
+            .await
+        }
+    }
+
     /// Returns the EVM environment for the given sealed header.
     fn evm_env_for_header(
         &self,
@@ -431,9 +478,10 @@ pub trait LoadState:
 
     /// Returns the EVM environment for the requested [`BlockId`]
     ///
-    /// Returns a hash that pins the state to the selected header. For a pending environment
-    /// derived from latest, this is the parent hash. Simulations that need the local pool overlay
-    /// use [`Self::spawn_blocking_io_with_state_and_env`] instead.
+    /// If the [`BlockId`] this will return the [`BlockId`] of the block the env was configured
+    /// for.
+    /// If the [`BlockId`] is pending, this will return the "Pending" tag, otherwise this returns
+    /// the hash of the exact block.
     fn evm_env_at(
         &self,
         at: BlockId,
@@ -444,11 +492,7 @@ pub trait LoadState:
         async move {
             if at.is_pending() {
                 let PendingBlockEnv { evm_env, origin } = self.pending_block_env_and_cfg()?;
-                let hash = match origin {
-                    PendingBlockEnvOrigin::ActualPending(block, _) => block.hash(),
-                    PendingBlockEnvOrigin::DerivedFromLatest(parent) => parent.hash(),
-                };
-                Ok((evm_env, hash.into()))
+                Ok((evm_env, origin.state_block_id()))
             } else {
                 // we can assume that the blockid will be predominantly `Latest` (e.g. for
                 // `eth_call`) and if requested by number or hash we can quickly fetch just the
@@ -467,8 +511,9 @@ pub trait LoadState:
     /// Returns the recovered block, EVM environment, and state block id for the requested
     /// [`BlockId`].
     ///
-    /// For pending blocks, the block and state id come from the pending env origin: the pending tag
-    /// for an actual pending block, or the latest block hash when the env is derived from latest.
+    /// For pending blocks, this preserves the state id returned by [`Self::evm_env_at`], which can
+    /// be the pending tag for an actual pending block or the latest block hash when the pending env
+    /// is derived from latest.
     #[expect(clippy::type_complexity)]
     fn evm_env_and_recovered_block_at(
         &self,
@@ -484,8 +529,7 @@ pub trait LoadState:
     {
         async move {
             if at.is_pending() {
-                let PendingBlockEnv { evm_env, origin } = self.pending_block_env_and_cfg()?;
-                let block_id = origin.state_block_id();
+                let (evm_env, block_id) = self.evm_env_at(at).await?;
                 let block = self
                     .recovered_block(block_id)
                     .await?
@@ -502,63 +546,6 @@ pub trait LoadState:
 
                 Ok((block, evm_env, block_id))
             }
-        }
-    }
-
-    /// Executes `f` with an EVM environment and state from the same selected block.
-    ///
-    /// A local pending block supplies both its header and its executed state overlay. If no
-    /// local block is available, the environment's origin hash pins the provider lookup even
-    /// when the head changes before the blocking task starts. State-only chain overrides retain
-    /// their existing pending environment; chains with a pending header should return a block
-    /// from [`LoadPendingBlock::local_pending_block_or_state`].
-    fn spawn_blocking_io_with_state_and_env<F, R>(
-        &self,
-        at: BlockId,
-        f: F,
-    ) -> impl Future<Output = Result<R, Self::Error>> + Send
-    where
-        Self: SpawnBlocking,
-        F: FnOnce(Self, StateProviderBox, EvmEnvFor<Self::Evm>) -> Result<R, Self::Error>
-            + Send
-            + 'static,
-        R: Send + 'static,
-    {
-        async move {
-            let is_pending = at.is_pending();
-            let (evm_env, at) = self.evm_env_at(at).await?;
-            let pending = if is_pending {
-                self.local_pending_block_or_state().await.ok().flatten()
-            } else {
-                None
-            };
-
-            self.spawn_blocking_io(move |this| {
-                let origin_state = || {
-                    match at.as_block_hash() {
-                        Some(hash) => this.provider().state_by_block_hash(hash),
-                        None => this.provider().state_by_block_id(at),
-                    }
-                    .map_err(Self::Error::from_eth_err)
-                };
-                let (state, evm_env) = match pending {
-                    Some(PendingStateSource::Block(pending)) => {
-                        let pending_env = this
-                            .evm_env_for_header(pending.block().sealed_block().sealed_header())?;
-                        match this.provider().state_with_block_appended(
-                            pending.block().parent_hash(),
-                            pending.executed_block,
-                        ) {
-                            Ok(state) => (state, pending_env),
-                            Err(_) => (origin_state()?, evm_env),
-                        }
-                    }
-                    Some(PendingStateSource::State(state)) => (state, evm_env),
-                    None => (origin_state()?, evm_env),
-                };
-                f(this, state, evm_env)
-            })
-            .await
         }
     }
 
