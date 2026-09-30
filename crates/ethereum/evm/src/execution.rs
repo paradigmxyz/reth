@@ -20,7 +20,7 @@ use alloy_sol_types::{sol, SolEvent};
 use core::any::Any;
 use evm2::{
     evm::{
-        AccountChangeRef, AccountInfo, StateChangeSink, StateChangeSource, SystemTx,
+        AccountChangeRef, AccountInfo, StateChangeSink, StateChangeSource, SystemTx, Tee,
         BEACON_ROOTS_ADDRESS, BUILDER_DEPOSIT_REQUEST_ADDRESS, BUILDER_EXIT_REQUEST_ADDRESS,
         CONSOLIDATION_REQUEST_ADDRESS, HISTORY_STORAGE_ADDRESS, WITHDRAWAL_REQUEST_ADDRESS,
     },
@@ -211,11 +211,11 @@ pub(crate) fn commit_detached_transaction<T: EvmTypes>(
     output: TxResultWithState<T>,
 ) -> TxResult<T> {
     let TxResultWithState { result, pending_state, .. } = output;
-    accumulate_pending_state(block_state, stream_state, on_state_update, &pending_state);
-    // Reattach the finalized transaction so evm2 retains its account capacity and recycles
-    // storage maps for the next transaction instead of dropping the detached allocations.
+    commit_pending_state_to_sinks(evm, block_state, stream_state, on_state_update, &pending_state);
+    // Changes were applied to the accepted overlay through the cache sink above. Reattach the
+    // finalized transaction only to recycle its account and storage allocations.
     evm.state_mut().set_pending_state(pending_state);
-    evm.state_mut().commit_transaction();
+    evm.state_mut().clear_transaction_state();
     result
 }
 
@@ -226,11 +226,12 @@ pub(crate) fn commit_pending_state<T: EvmTypes>(
     on_state_update: &mut impl FnMut(EvmState),
     pending_state: &evm2::evm::PendingState,
 ) {
-    accumulate_pending_state(block_state, stream_state, on_state_update, pending_state);
-    evm.overlay_db_mut().commit_pending(pending_state);
+    commit_pending_state_to_sinks(evm, block_state, stream_state, on_state_update, pending_state);
 }
 
-fn accumulate_pending_state(
+/// Commits pending state to every block-level consumer in a single source traversal.
+fn commit_pending_state_to_sinks<T: EvmTypes>(
+    evm: &mut Evm<'_, T>,
     block_state: &mut BlockState,
     stream_state: bool,
     on_state_update: &mut impl FnMut(EvmState),
@@ -238,11 +239,17 @@ fn accumulate_pending_state(
 ) {
     if stream_state {
         let mut changes = TransactionChanges::default();
-        let Ok(()) = pending_state.visit(&mut changes);
-        block_state.commit(&changes);
+        {
+            let mut block_sink = block_state.transaction_sink();
+            let mut changes_and_cache = Tee::new(&mut changes, evm.overlay_db_mut());
+            let mut sink = Tee::new(&mut block_sink, &mut changes_and_cache);
+            let Ok(()) = pending_state.visit(&mut sink);
+        }
         send_state_update(changes.state, on_state_update);
     } else {
-        let Ok(()) = pending_state.visit(&mut block_state.transaction_sink());
+        let mut block_sink = block_state.transaction_sink();
+        let mut sink = Tee::new(&mut block_sink, evm.overlay_db_mut());
+        let Ok(()) = pending_state.visit(&mut sink);
     }
 }
 
