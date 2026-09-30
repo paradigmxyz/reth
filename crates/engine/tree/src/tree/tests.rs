@@ -2861,16 +2861,41 @@ mod forkchoice_updated_tests {
         }
     }
 
-    /// Test that engine termination persists all blocks and signals completion.
+    /// Shutdown stops speculative prewarming before persisting all remaining blocks.
     #[test]
-    fn test_engine_termination_with_everything_persisted() {
+    fn test_engine_termination_stops_prewarming_before_persistence() {
+        use std::sync::atomic::{AtomicBool, Ordering};
+
+        #[derive(Debug)]
+        struct PrewarmSource(Arc<AtomicBool>);
+
+        impl TxPoolPrewarmSource<EthPrimitives> for PrewarmSource {
+            fn best_transactions(
+                &self,
+                _: B256,
+            ) -> Option<TxPoolPrewarmTransactions<EthPrimitives>> {
+                None
+            }
+        }
+
+        impl Drop for PrewarmSource {
+            fn drop(&mut self) {
+                self.0.store(true, Ordering::Release);
+            }
+        }
+
         let chain_spec = MAINNET.clone();
         let mut test_block_builder = TestBlockBuilder::eth().with_chain_spec((*chain_spec).clone());
 
         // Create 10 blocks to persist
         let blocks: Vec<_> = test_block_builder.get_executed_blocks(1..11).collect();
         let canonical_tip = blocks.last().unwrap().recovered_block().number;
-        let test_harness = TestHarness::new(chain_spec).with_blocks(blocks);
+        let mut test_harness = TestHarness::new(chain_spec).with_blocks(blocks);
+        let prewarming_stopped = Arc::new(AtomicBool::new(false));
+        test_harness.tree.payload_validator = test_harness
+            .tree
+            .payload_validator
+            .with_txpool_prewarming(PrewarmSource(prewarming_stopped.clone()));
 
         // Create termination channel
         let (terminate_tx, mut terminate_rx) = oneshot::channel();
@@ -2879,7 +2904,7 @@ mod forkchoice_updated_tests {
         let action_rx = test_harness.action_rx;
 
         // Spawn tree in background thread
-        spawn_os_thread("engine", || test_harness.tree.run());
+        let engine = spawn_os_thread("engine", || test_harness.tree.run());
 
         // Send terminate request
         to_tree_tx
@@ -2888,6 +2913,7 @@ mod forkchoice_updated_tests {
 
         // Handle persistence actions until termination completes
         let mut last_persisted_number = 0;
+        let mut stopped_before_persistence = true;
         loop {
             if terminate_rx.try_recv().is_ok() {
                 break;
@@ -2896,6 +2922,7 @@ mod forkchoice_updated_tests {
             if let Ok(PersistenceAction::SaveBlocks(input, sender)) =
                 action_rx.recv_timeout(std::time::Duration::from_millis(100))
             {
+                stopped_before_persistence &= prewarming_stopped.load(Ordering::Acquire);
                 let last = input.last_block();
                 last_persisted_number = last.number;
                 sender
@@ -2908,6 +2935,8 @@ mod forkchoice_updated_tests {
             }
         }
 
+        engine.join().unwrap();
+        assert!(stopped_before_persistence, "persistence started while prewarming was still alive");
         // Ensure we persisted right to the tip
         assert_eq!(last_persisted_number, canonical_tip);
     }

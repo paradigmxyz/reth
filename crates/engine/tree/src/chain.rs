@@ -227,10 +227,11 @@ pub enum FromOrchestrator {
     BackfillSyncStarted,
     /// Gracefully terminate the engine service.
     ///
-    /// Attempts to persist all remaining in-memory blocks, then drops the engine to release its
-    /// resources and shut down and join the persistence and txpool prewarming workers. The oneshot
-    /// signals completion only after cleanup, even if persistence failed, so the caller can
-    /// proceed with shutdown without racing these workers.
+    /// Stops speculative validation work, including txpool prewarming, before attempting to
+    /// persist all remaining in-memory blocks. The engine is then dropped to release its
+    /// resources and join the persistence service. The oneshot signals completion only after
+    /// cleanup, even if persistence failed, so the caller can proceed with shutdown without
+    /// racing these workers.
     Terminate {
         /// Channel to signal termination completion.
         tx: tokio::sync::oneshot::Sender<()>,
