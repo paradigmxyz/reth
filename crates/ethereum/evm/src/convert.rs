@@ -91,6 +91,7 @@ pub(crate) fn block_env_with_blob_params<H: BlockHeader>(
 #[cfg_attr(not(feature = "std"), allow(dead_code))]
 pub(crate) fn payload_block_env(
     payload: &ExecutionData,
+    spec: SpecId,
     blob_params: Option<BlobParams>,
 ) -> BlockEnv {
     let payload = &payload.payload;
@@ -100,7 +101,12 @@ pub(crate) fn payload_block_env(
         timestamp: U256::from(payload.timestamp()),
         gas_limit: U256::from(payload.gas_limit()),
         basefee: U256::from(payload.saturated_base_fee_per_gas()),
-        difficulty: U256::ZERO,
+        // Preserve the payload randao as difficulty for custom pre-Merge configurations.
+        difficulty: if spec >= SpecId::MERGE {
+            U256::ZERO
+        } else {
+            U256::from_be_slice(payload.as_v1().prev_randao.as_slice())
+        },
         prevrandao: U256::from_be_slice(payload.as_v1().prev_randao.as_slice()),
         blob_basefee: blob_basefee(payload.excess_blob_gas(), blob_params),
         slot_num: U256::from(payload.as_v4().map(|v4| v4.slot_number).unwrap_or_default()),

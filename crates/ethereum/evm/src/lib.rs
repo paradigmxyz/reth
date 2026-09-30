@@ -564,7 +564,11 @@ where
         );
         let blob_params =
             self.chain_spec().as_ref().blob_params_at_timestamp(payload.payload.timestamp());
-        Ok(self.evm_env_from_base_spec(spec, payload_block_env(payload, blob_params), blob_params))
+        Ok(self.evm_env_from_base_spec(
+            spec,
+            payload_block_env(payload, spec, blob_params),
+            blob_params,
+        ))
     }
 
     fn context_for_payload<'a>(
@@ -609,6 +613,9 @@ mod tests {
     use alloy_genesis::Genesis;
     use alloy_primitives::U256;
     use reth_chainspec::{Chain, ChainSpec};
+
+    #[cfg(feature = "std")]
+    use alloy_rpc_types_engine::{ExecutionPayloadSidecar, ExecutionPayloadV1};
 
     #[test]
     fn test_evm_env_for_header_uses_chain_blob_params() {
@@ -659,5 +666,31 @@ mod tests {
 
         let evm_config = evm_config.with_jit_support();
         assert!(evm_config.jit_backend().is_none());
+    }
+
+    #[cfg(feature = "std")]
+    #[test]
+    fn test_payload_difficulty_across_merge() {
+        let randao = U256::from(123);
+        let mut block = alloy_consensus::Block::<TransactionSigned>::default();
+        block.header.mix_hash = randao.to_be_bytes().into();
+        let payload = ExecutionData::new(
+            ExecutionPayloadV1::from_block_slow(&block).into(),
+            ExecutionPayloadSidecar::none(),
+        );
+        let builder = ChainSpec::builder()
+            .chain(Chain::mainnet())
+            .genesis(Genesis::default())
+            .london_activated();
+        for (chain_spec, difficulty) in
+            [(builder.clone().build(), randao), (builder.paris_activated().build(), U256::ZERO)]
+        {
+            let env = EthEvmConfig::new(Arc::new(chain_spec))
+                .evm_env_for_payload(&payload)
+                .unwrap()
+                .block;
+            assert_eq!(env.difficulty, difficulty);
+            assert_eq!(env.prevrandao, randao);
+        }
     }
 }
