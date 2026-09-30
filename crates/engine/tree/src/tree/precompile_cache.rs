@@ -5,7 +5,11 @@ use alloy_primitives::{
     Address, Bytes,
 };
 use moka::policy::EvictionPolicy;
-use reth_evm::precompiles::{DynPrecompile, Precompile, PrecompileInput};
+use reth_evm::{
+    precompiles::{DynPrecompile, Precompile, PrecompileInput, PrecompilesMap},
+    Evm,
+};
+use reth_payload_builder::SharedPrecompileCache;
 use reth_primitives_traits::dashmap::DashMap;
 use revm::precompile::{PrecompileId, PrecompileOutput, PrecompileResult};
 use std::{hash::Hash, sync::Arc};
@@ -38,6 +42,16 @@ where
         // This should be very rare as caches for all precompiles will be initialized as soon as
         // first EVM is created.
         self.0.entry(address).or_default().clone()
+    }
+
+    /// Type-erases this map so it can be loaned to the payload builder.
+    pub fn into_shared(self) -> SharedPrecompileCache {
+        SharedPrecompileCache::new(self)
+    }
+
+    /// Returns the map if `shared` was created from a [`PrecompileCacheMap`] with spec type `S`.
+    pub fn from_shared(shared: &SharedPrecompileCache) -> Option<Self> {
+        shared.downcast()
     }
 }
 
@@ -254,11 +268,31 @@ impl CachedPrecompileMetrics {
     }
 }
 
+/// Wraps the cacheable precompiles of `evm` with the shared precompile cache.
+///
+/// The cache map is recovered for the EVM's spec type and entries are tied to the EVM's current
+/// spec. Wrapped precompiles do not record metrics, so lookups from other EVMs do not skew the
+/// engine's precompile cache metrics.
+///
+/// Returns `false` and leaves the precompiles unchanged if `shared` was created for a different
+/// spec type.
+pub fn wrap_with_shared_precompile_cache<E>(evm: &mut E, shared: &SharedPrecompileCache) -> bool
+where
+    E: Evm<Precompiles = PrecompilesMap>,
+{
+    let Some(cache_map) = PrecompileCacheMap::<E::Spec>::from_shared(shared) else { return false };
+    let spec_id = evm.cfg_env().spec;
+    evm.precompiles_mut().map_cacheable_precompiles(|address, precompile| {
+        CachedPrecompile::wrap(precompile, cache_map.cache_for_address(*address), spec_id, None)
+    });
+    true
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use metrics_util::debugging::{DebugValue, DebuggingRecorder};
-    use reth_evm::{EthEvmFactory, Evm, EvmEnv, EvmFactory};
+    use reth_evm::{EthEvmFactory, EvmEnv, EvmFactory};
     use reth_revm::db::EmptyDB;
     use revm::{
         context::TxEnv,
@@ -464,5 +498,51 @@ mod tests {
             },
         );
         assert_eq!(error_count, Some(DebugValue::Counter(0)));
+    }
+
+    #[test]
+    fn test_shared_precompile_cache_downcast() {
+        let cache_map = PrecompileCacheMap::<SpecId>::default();
+        let shared = cache_map.clone().into_shared();
+
+        let recovered = PrecompileCacheMap::<SpecId>::from_shared(&shared).unwrap();
+        assert!(Arc::ptr_eq(&cache_map.0, &recovered.0));
+
+        // a map for a different spec type must not be recovered
+        assert!(PrecompileCacheMap::<u8>::from_shared(&shared).is_none());
+    }
+
+    #[test]
+    fn test_wrap_with_shared_precompile_cache() {
+        let sha256 = Address::with_last_byte(2);
+        let input_data = b"shared_input";
+        let cache_map = PrecompileCacheMap::<SpecId>::default();
+        let mut evm = EthEvmFactory::default().create_evm(EmptyDB::default(), EvmEnv::default());
+        let spec_id = evm.cfg_env().spec;
+
+        // a cache for a different spec type is rejected
+        assert!(!wrap_with_shared_precompile_cache(
+            &mut evm,
+            &PrecompileCacheMap::<u8>::default().into_shared()
+        ));
+
+        assert!(wrap_with_shared_precompile_cache(&mut evm, &cache_map.clone().into_shared()));
+
+        let output = evm
+            .transact_raw(TxEnv {
+                caller: Address::ZERO,
+                gas_limit: 100_000,
+                data: input_data.into(),
+                kind: sha256.into(),
+                ..Default::default()
+            })
+            .unwrap()
+            .result
+            .into_output()
+            .unwrap();
+
+        // the result is stored in the shared map under the EVM's spec
+        let entry = cache_map.cache_for_address(sha256).get(input_data, spec_id).unwrap();
+        assert_eq!(entry.output.bytes, output);
     }
 }

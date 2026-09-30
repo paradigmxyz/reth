@@ -17,7 +17,7 @@ use reth_chain_state::CanonStateNotification;
 use reth_execution_cache::SavedCache;
 use reth_payload_builder::{
     BuildNewPayload, KeepPayloadJobAlive, PayloadBuilderLease, PayloadId, PayloadJob,
-    PayloadJobGenerator,
+    PayloadJobGenerator, SharedPrecompileCache,
 };
 use reth_payload_builder_primitives::PayloadBuilderError;
 use reth_payload_primitives::{BuiltPayload, PayloadAttributes, PayloadKind};
@@ -201,6 +201,7 @@ where
             cached_reads,
             execution_cache: resources.take_execution_cache(),
             state_root_handle: resources.take_state_root_handle(),
+            precompile_cache: resources.take_precompile_cache(),
             leases: resources.take_leases(),
             payload_task_guard: self.payload_task_guard.clone(),
             metrics: Default::default(),
@@ -392,6 +393,8 @@ where
     execution_cache: Option<SavedCache>,
     /// Optional state-root task handle, shared with the engine.
     state_root_handle: Option<PayloadStateRootHandle>,
+    /// Optional precompile cache shared with the engine.
+    precompile_cache: Option<SharedPrecompileCache>,
     /// Lifecycle leases shared with the payload-builder service.
     ///
     /// Every detached build task clones these so that the loaned resources remain available until
@@ -424,6 +427,7 @@ where
         let cached_reads = self.cached_reads.take().unwrap_or_default();
         let execution_cache = self.execution_cache.clone();
         let state_root_handle = self.state_root_handle.take();
+        let precompile_cache = self.precompile_cache.clone();
         let leases = self.leases.clone();
         let builder = self.builder.clone();
         let executor = self.executor.clone();
@@ -440,6 +444,7 @@ where
                     cached_reads,
                     execution_cache,
                     state_root_handle,
+                    precompile_cache,
                     config: payload_config,
                     cancel,
                     best_payload,
@@ -581,6 +586,7 @@ where
                 cached_reads: self.cached_reads.take().unwrap_or_default(),
                 execution_cache: self.execution_cache.clone(),
                 state_root_handle: None,
+                precompile_cache: self.precompile_cache.clone(),
                 config: self.config.clone(),
                 cancel: CancelOnDrop::default(),
                 best_payload: None,
@@ -951,6 +957,8 @@ pub struct BuildArguments<Attributes, Payload: BuiltPayload> {
     /// root, so if the next `newPayload` is not on top of that block, the trie cache is
     /// invalidated and cleared.
     pub state_root_handle: Option<PayloadStateRootHandle>,
+    /// Optional precompile cache shared with the engine.
+    pub precompile_cache: Option<SharedPrecompileCache>,
     /// How to configure the payload.
     pub config: PayloadConfig<Attributes, HeaderTy<Payload::Primitives>>,
     /// A marker that can be used to cancel the job.
@@ -969,7 +977,15 @@ impl<Attributes, Payload: BuiltPayload> BuildArguments<Attributes, Payload> {
         cancel: CancelOnDrop,
         best_payload: Option<Payload>,
     ) -> Self {
-        Self { cached_reads, execution_cache, state_root_handle, config, cancel, best_payload }
+        Self {
+            cached_reads,
+            execution_cache,
+            state_root_handle,
+            precompile_cache: None,
+            config,
+            cancel,
+            best_payload,
+        }
     }
 }
 

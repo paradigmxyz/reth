@@ -162,6 +162,7 @@ where
         mut cached_reads,
         execution_cache,
         mut state_root_handle,
+        precompile_cache: _,
         config,
         cancel,
         best_payload,

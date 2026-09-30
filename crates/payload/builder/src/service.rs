@@ -18,6 +18,7 @@ use reth_payload_primitives::{BuiltPayload, PayloadAttributes, PayloadKind, Payl
 use reth_primitives_traits::{FastInstant as Instant, NodePrimitives};
 use reth_trie_parallel::state_root_task::PayloadStateRootHandle;
 use std::{
+    any::Any,
     future::Future,
     pin::Pin,
     sync::Arc,
@@ -584,6 +585,10 @@ pub struct PayloadBuilderResources {
     execution_cache: Option<SavedCache>,
     /// Optional handle to a background state-root task.
     state_root_handle: Option<PayloadStateRootHandle>,
+    /// Optional precompile cache shared with the engine.
+    ///
+    /// Only provided if the engine's precompile cache is enabled.
+    precompile_cache: Option<SharedPrecompileCache>,
     /// Lifecycle leases retained by the service or by detached payload build tasks.
     leases: Vec<PayloadBuilderLease>,
 }
@@ -594,12 +599,18 @@ impl PayloadBuilderResources {
         execution_cache: Option<SavedCache>,
         state_root_handle: Option<PayloadStateRootHandle>,
     ) -> Self {
-        Self { execution_cache, state_root_handle, leases: Vec::new() }
+        Self { execution_cache, state_root_handle, precompile_cache: None, leases: Vec::new() }
     }
 
     /// Adds a lease for this payload build.
     pub fn with_lease(mut self, lease: PayloadBuilderLease) -> Self {
         self.leases.push(lease);
+        self
+    }
+
+    /// Sets the precompile cache shared with the engine.
+    pub fn with_precompile_cache(mut self, precompile_cache: SharedPrecompileCache) -> Self {
+        self.precompile_cache = Some(precompile_cache);
         self
     }
 
@@ -628,6 +639,16 @@ impl PayloadBuilderResources {
         std::mem::take(&mut self.leases)
     }
 
+    /// Returns the loaned precompile cache, if any.
+    pub const fn precompile_cache(&self) -> Option<&SharedPrecompileCache> {
+        self.precompile_cache.as_ref()
+    }
+
+    /// Takes the loaned precompile cache, if any.
+    pub const fn take_precompile_cache(&mut self) -> Option<SharedPrecompileCache> {
+        self.precompile_cache.take()
+    }
+
     /// Clones lifecycle leases for the payload builder service to retain.
     fn clone_leases(&self) -> Vec<PayloadBuilderLease> {
         self.leases.clone()
@@ -650,6 +671,35 @@ impl PayloadBuilderLease {
 impl std::fmt::Debug for PayloadBuilderLease {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("PayloadBuilderLease").finish_non_exhaustive()
+    }
+}
+
+/// Type-erased handle to the engine's precompile cache.
+///
+/// The payload builder service is not generic over the EVM, so the engine erases the cache type
+/// before loaning it and the payload builder recovers it with [`Self::downcast`]. The downcast only
+/// succeeds for the exact type the engine inserted.
+///
+/// Cached results are keyed by precompile address, input and spec, so only share this with EVMs
+/// that install the same cacheable precompiles as the engine for a given spec.
+#[derive(Clone)]
+pub struct SharedPrecompileCache(Arc<dyn Any + Send + Sync>);
+
+impl SharedPrecompileCache {
+    /// Type-erases the given precompile cache.
+    pub fn new<T: Any + Send + Sync>(cache: T) -> Self {
+        Self(Arc::new(cache))
+    }
+
+    /// Returns the precompile cache if it has type `T`.
+    pub fn downcast<T: Any + Clone>(&self) -> Option<T> {
+        self.0.downcast_ref::<T>().cloned()
+    }
+}
+
+impl std::fmt::Debug for SharedPrecompileCache {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SharedPrecompileCache").finish_non_exhaustive()
     }
 }
 
