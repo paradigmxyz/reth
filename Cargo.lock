@@ -11031,9 +11031,10 @@ dependencies = [
 [[package]]
 name = "revm-inspectors"
 version = "0.43.0"
-source = "git+https://github.com/Soubhik-10/revm-inspectors?branch=fix%2Feip8141-frame-result#c828a5fd1055ef24d75ee7724c79750895f86d63"
+source = "git+https://github.com/Soubhik-10/revm-inspectors?branch=fix%2Feip8141-frame-result#b2c7469ee899a55cd47620a564054822ce61a806"
 dependencies = [
  "alloy-eip2930",
+ "alloy-eip8141",
  "alloy-primitives",
  "alloy-rpc-types-eth",
  "alloy-rpc-types-trace",
