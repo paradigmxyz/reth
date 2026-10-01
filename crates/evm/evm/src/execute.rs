@@ -1,6 +1,6 @@
 //! Traits for execution.
 
-use crate::{ConfigureEvm, Database, OnStateHook, TxEnvFor};
+use crate::{ConfigureEvm, Database, EvmFor, OnStateHook, TxEnvFor};
 use alloc::{boxed::Box, sync::Arc, vec::Vec};
 use alloy_consensus::{BlockHeader, Header};
 use alloy_eip7928::{bal::DecodedBal, compute_block_access_list_hash_with_buf, BlockAccessList};
@@ -586,25 +586,25 @@ impl<F, DB: Database> BasicBlockExecutor<F, DB> {
         let db = State::builder().with_database(db).with_bundle_update().build();
         Self { strategy_factory, db }
     }
-}
 
-impl<F, DB> Executor<DB> for BasicBlockExecutor<F, DB>
-where
-    F: ConfigureEvm,
-    DB: Database,
-{
-    type Primitives = F::Primitives;
-    type Error = BlockExecutionError;
-
-    fn execute_one(
+    /// Executes a single block like [`Executor::execute_one`], calling `configure_evm` with the
+    /// block's EVM before any changes are applied.
+    ///
+    /// This can be used to modify the EVM, for example to wrap its precompiles with a cache.
+    pub fn execute_one_with_evm(
         &mut self,
-        block: &RecoveredBlock<<Self::Primitives as NodePrimitives>::Block>,
-    ) -> Result<BlockExecutionResult<<Self::Primitives as NodePrimitives>::Receipt>, Self::Error>
+        block: &RecoveredBlock<<F::Primitives as NodePrimitives>::Block>,
+        configure_evm: impl FnOnce(&mut EvmFor<F, &mut State<DB>>),
+    ) -> Result<BlockExecutionResult<ReceiptTy<F::Primitives>>, BlockExecutionError>
+    where
+        F: ConfigureEvm,
     {
         let mut executor = self
             .strategy_factory
             .executor_for_block(&mut self.db, block)
             .map_err(BlockExecutionError::other)?;
+
+        configure_evm(executor.evm_mut());
 
         let has_bal = block.header().block_access_list_hash().is_some();
 
@@ -632,6 +632,23 @@ where
         self.db.merge_transitions(BundleRetention::Reverts);
 
         Ok(result)
+    }
+}
+
+impl<F, DB> Executor<DB> for BasicBlockExecutor<F, DB>
+where
+    F: ConfigureEvm,
+    DB: Database,
+{
+    type Primitives = F::Primitives;
+    type Error = BlockExecutionError;
+
+    fn execute_one(
+        &mut self,
+        block: &RecoveredBlock<<Self::Primitives as NodePrimitives>::Block>,
+    ) -> Result<BlockExecutionResult<<Self::Primitives as NodePrimitives>::Receipt>, Self::Error>
+    {
+        self.execute_one_with_evm(block, |_| {})
     }
 
     fn execute_one_with_state_hook<H>(

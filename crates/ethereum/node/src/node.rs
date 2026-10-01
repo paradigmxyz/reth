@@ -343,6 +343,7 @@ where
             ctx.node.task_executor().clone(),
             Arc::new(EthereumEngineValidator::new(ctx.config.chain.clone())),
             ctx.sender_recovery_cache.clone(),
+            ctx.precompile_cache.clone(),
         );
 
         let eth_config =

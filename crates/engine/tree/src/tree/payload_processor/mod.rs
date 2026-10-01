@@ -157,6 +157,14 @@ where
     pub(crate) fn execution_cache(&self) -> PayloadExecutionCache {
         self.execution_cache.clone()
     }
+
+    /// Replaces the precompile cache map used by prewarming.
+    pub(crate) fn set_precompile_cache_map(
+        &mut self,
+        precompile_cache_map: PrecompileCacheMap<SpecFor<Evm>>,
+    ) {
+        self.precompile_cache_map = precompile_cache_map;
+    }
 }
 
 impl<Evm> PayloadProcessor<Evm>

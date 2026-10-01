@@ -23,7 +23,11 @@ use reth_consensus::{Consensus, FullConsensus};
 use reth_consensus_common::validation::MAX_RLP_BLOCK_SIZE;
 use reth_engine_primitives::PayloadValidator;
 use reth_errors::{BlockExecutionError, ConsensusError, ProviderError};
-use reth_evm::{execute::Executor, ConfigureEvm, SenderRecoveryCache};
+use reth_evm::{
+    execute::{BasicBlockExecutor, Executor},
+    ConfigureEvm, SenderRecoveryCache,
+};
+use reth_execution_cache::precompile_cache::SharedPrecompileCache;
 use reth_execution_types::BlockExecutionOutput;
 use reth_metrics::{
     metrics,
@@ -66,6 +70,11 @@ where
     ///
     /// If a `sender_recovery_cache` is given, the senders of submitted blocks are recovered
     /// through it, reusing senders that other node components have already recovered.
+    ///
+    /// If a `precompile_cache` is given, submitted blocks are executed with it, reusing precompile
+    /// results of the engine and of other submissions. It must be shared only with components
+    /// that use the same EVM configuration as `evm_config`.
+    #[expect(clippy::too_many_arguments)]
     pub fn new(
         provider: Provider,
         consensus: Arc<dyn FullConsensus<E::Primitives>>,
@@ -76,6 +85,7 @@ where
             dyn PayloadValidator<T, Block = <E::Primitives as NodePrimitives>::Block>,
         >,
         sender_recovery_cache: Option<SenderRecoveryCache>,
+        precompile_cache: Option<SharedPrecompileCache>,
     ) -> Self {
         let ValidationApiConfig { disallow, validation_window } = config;
 
@@ -90,6 +100,7 @@ where
             validated_blobs: Default::default(),
             task_spawner,
             sender_recovery_cache,
+            precompile_cache,
             metrics: Default::default(),
         });
 
@@ -232,9 +243,13 @@ where
         let (output, block_access_list_hash) = {
             let cached_db = request_cache
                 .as_db_mut(StateProviderDatabase::new((&state_provider).into_evm_state_provider()));
-            let mut executor = self.evm_config.batch_executor(cached_db);
+            let mut executor = BasicBlockExecutor::new(&self.evm_config, cached_db);
 
-            let result = executor.execute_one(&block)?;
+            let result = executor.execute_one_with_evm(&block, |evm| {
+                if let Some(cache) = &self.precompile_cache {
+                    cache.wrap_evm(evm);
+                }
+            })?;
 
             // The executor rebuilds the block access list whenever the block header contains a
             // BAL hash. Comparing the rebuilt hash against the header post execution also
@@ -676,6 +691,8 @@ pub struct ValidationApiInner<Provider, E: ConfigureEvm, T: PayloadTypes> {
     /// Cache of recovered transaction senders shared with transaction ingress and payload
     /// execution, if enabled.
     sender_recovery_cache: Option<SenderRecoveryCache>,
+    /// Cache of precompile results shared with the engine, if enabled.
+    precompile_cache: Option<SharedPrecompileCache>,
     /// Validation metrics
     metrics: ValidationMetrics,
 }
@@ -1045,6 +1062,7 @@ mod tests {
             Runtime::test(),
             Arc::new(SpecializedPayloadValidator),
             None,
+            None,
         );
 
         api.recover_payload(ExecutionData {
@@ -1064,6 +1082,7 @@ mod tests {
             ValidationApiConfig::default(),
             Runtime::test(),
             Arc::new(UnusedPayloadValidator),
+            None,
             None,
         )
     }

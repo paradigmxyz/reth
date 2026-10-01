@@ -14,6 +14,7 @@ use alloy_eips::eip4844::env_settings::EnvKzgSettings;
 use futures::Future;
 use reth_chainspec::{EthChainSpec, EthereumHardforks, Hardforks};
 use reth_db_api::{database::Database, database_metrics::DatabaseMetrics};
+use reth_execution_cache::precompile_cache::SharedPrecompileCache;
 use reth_exex::ExExContext;
 use reth_network::{
     transactions::{
@@ -780,6 +781,8 @@ pub struct BuilderContext<Node: FullNodeTypes> {
     pub(crate) config_container: WithConfigs<<Node::Types as NodeTypes>::ChainSpec>,
     /// Cache of recovered transaction senders shared by node components, if enabled.
     sender_recovery_cache: Option<reth_evm::SenderRecoveryCache>,
+    /// Cache of precompile results shared by node components, if enabled.
+    precompile_cache: Option<SharedPrecompileCache>,
 }
 
 impl<Node: FullNodeTypes> BuilderContext<Node> {
@@ -795,7 +798,9 @@ impl<Node: FullNodeTypes> BuilderContext<Node> {
             .engine
             .sender_recovery_cache_enabled
             .then(reth_evm::SenderRecoveryCache::default);
-        Self { head, provider, executor, config_container, sender_recovery_cache }
+        let precompile_cache = (!config_container.config.engine.precompile_cache_disabled)
+            .then(SharedPrecompileCache::default);
+        Self { head, provider, executor, config_container, sender_recovery_cache, precompile_cache }
     }
 
     /// Returns the configured provider to interact with the blockchain.
@@ -833,6 +838,11 @@ impl<Node: FullNodeTypes> BuilderContext<Node> {
     /// Returns the sender recovery cache shared by node components, if enabled.
     pub const fn sender_recovery_cache(&self) -> Option<&reth_evm::SenderRecoveryCache> {
         self.sender_recovery_cache.as_ref()
+    }
+
+    /// Returns the precompile cache shared by node components, if enabled.
+    pub const fn precompile_cache(&self) -> Option<&SharedPrecompileCache> {
+        self.precompile_cache.as_ref()
     }
 
     /// Returns the chain spec of the node.

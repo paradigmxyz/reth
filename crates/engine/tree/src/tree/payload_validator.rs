@@ -399,6 +399,19 @@ where
         self
     }
 
+    /// Sets the precompile cache map used for block execution and prewarming.
+    ///
+    /// By default the validator uses its own map. Pass a map shared with other node components,
+    /// such as the block validation API, so that precompile results are reused across them.
+    pub fn with_precompile_cache_map(
+        mut self,
+        precompile_cache_map: PrecompileCacheMap<SpecFor<Evm>>,
+    ) -> Self {
+        self.payload_processor.set_precompile_cache_map(precompile_cache_map.clone());
+        self.precompile_cache_map = precompile_cache_map;
+        self
+    }
+
     /// Converts a [`BlockOrPayload`] to a recovered block.
     #[instrument(level = "debug", target = "engine::tree::payload_validator", skip_all)]
     pub fn convert_to_block<T: PayloadTypes<BuiltPayload: BuiltPayload<Primitives = N>>>(

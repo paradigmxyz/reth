@@ -50,6 +50,7 @@ use reth_db_common::init::{
 use reth_downloaders::{bodies::noop::NoopBodiesDownloader, headers::noop::NoopHeaderDownloader};
 use reth_engine_local::MiningMode;
 use reth_evm::{noop::NoopEvmConfig, ConfigureEvm, SenderRecoveryCache};
+use reth_execution_cache::precompile_cache::SharedPrecompileCache;
 use reth_exex::ExExManagerHandle;
 use reth_fs_util as fs;
 use reth_network_p2p::headers::client::HeadersClient;
@@ -947,6 +948,7 @@ where
             node_adapter,
             head,
             sender_recovery_cache: builder_ctx.sender_recovery_cache().cloned(),
+            precompile_cache: builder_ctx.precompile_cache().cloned(),
         };
 
         let ctx = LaunchContextWith {
@@ -1012,6 +1014,11 @@ where
     /// Returns the cache of recovered transaction senders shared by node components, if enabled.
     pub const fn sender_recovery_cache(&self) -> Option<&SenderRecoveryCache> {
         self.right().sender_recovery_cache.as_ref()
+    }
+
+    /// Returns the cache of precompile results shared by node components, if enabled.
+    pub const fn precompile_cache(&self) -> Option<&SharedPrecompileCache> {
+        self.right().precompile_cache.as_ref()
     }
 
     /// Returns a reference to the blockchain provider.
@@ -1379,6 +1386,8 @@ where
     head: Head,
     /// Cache of recovered transaction senders shared by node components, if enabled.
     sender_recovery_cache: Option<SenderRecoveryCache>,
+    /// Cache of precompile results shared by node components, if enabled.
+    precompile_cache: Option<SharedPrecompileCache>,
 }
 
 /// Returns the metrics hooks for the node.

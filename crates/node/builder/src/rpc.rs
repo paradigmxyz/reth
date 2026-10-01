@@ -1148,6 +1148,7 @@ where
             jwt_secret,
             engine_events,
             sender_recovery_cache,
+            precompile_cache: _,
         } = ctx;
 
         info!(target: "reth::cli", "Engine API handler initialized");
@@ -1550,6 +1551,14 @@ where
         if txpool_prewarming {
             validator = validator
                 .with_txpool_prewarming(txpool_prewarm::Source::new(ctx.node.pool().clone()));
+        }
+
+        // Share the precompile cache with other node components, such as the block validation
+        // API, that execute with the same EVM configuration.
+        if let Some(precompile_cache_map) =
+            ctx.precompile_cache.as_ref().and_then(|cache| cache.cache_map())
+        {
+            validator = validator.with_precompile_cache_map(precompile_cache_map);
         }
 
         Ok(validator)

@@ -7,6 +7,7 @@ use reth_consensus::FullConsensus;
 use reth_db_api::{database_metrics::DatabaseMetrics, Database};
 use reth_engine_primitives::{ConsensusEngineEvent, ConsensusEngineHandle};
 use reth_evm::{ConfigureEvm, SenderRecoveryCache};
+use reth_execution_cache::precompile_cache::SharedPrecompileCache;
 use reth_network_api::FullNetwork;
 use reth_node_core::node_config::NodeConfig;
 use reth_node_types::{NodeTypes, NodeTypesWithDBAdapter, TxTy};
@@ -117,6 +118,9 @@ pub struct AddOnsContext<'a, N: FullNodeComponents> {
     pub jwt_secret: JwtSecret,
     /// Cache of recovered transaction senders shared by node components, if enabled.
     pub sender_recovery_cache: Option<SenderRecoveryCache>,
+    /// Cache of precompile results shared by the engine tree and the block validation API, if
+    /// enabled.
+    pub precompile_cache: Option<SharedPrecompileCache>,
 }
 
 /// Customizable node add-on types.
