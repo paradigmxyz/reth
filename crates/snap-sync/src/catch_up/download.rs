@@ -7,11 +7,9 @@ use crate::{
     SnapSyncError, SnapWrite,
 };
 use alloy_eips::{eip7928::bal::DecodedBal, BlockNumHash};
-use alloy_primitives::Sealable;
+use alloy_primitives::B256;
 use reth_db_api::transaction::DbTxMut;
-use reth_downloaders::snap::{
-    BlockAccessListDownloader, BlockAccessListOutcome, InvalidBlockAccessListRequest,
-};
+use reth_downloaders::snap::{BlockAccessListDownloader, BlockAccessListOutcome};
 use reth_eth_wire_types::snap::GetBlockAccessListsMessage;
 use reth_network_p2p::snap::client::SnapClient;
 use reth_network_peers::PeerId;
@@ -85,7 +83,9 @@ where
             return Ok(CatchUpStep::Complete)
         }
 
-        let verified = match self.request(&headers).await? {
+        let blocks =
+            headers.iter().map(|header| (header.hash(), header.block_access_list_hash())).collect();
+        let verified = match self.request(blocks).await? {
             BlockAccessListOutcome::Verified(verified) => verified,
             BlockAccessListOutcome::Unavailable { peer_id } => {
                 return Ok(CatchUpStep::Unavailable { peer_id })
@@ -139,8 +139,14 @@ where
         let mut lists = Vec::with_capacity(blocks.len());
         while lists.len() < blocks.len() {
             let end = blocks.len().min(lists.len() + self.max_blocks as usize);
-            let BlockAccessListOutcome::Verified(verified) =
-                self.request_kept(&blocks[lists.len()..end]).await?
+            let BlockAccessListOutcome::Verified(verified) = self
+                .request(
+                    blocks[lists.len()..end]
+                        .iter()
+                        .map(|block| (block.num_hash().hash, block.commitment()))
+                        .collect(),
+                )
+                .await?
             else {
                 return Ok(None)
             };
@@ -154,41 +160,16 @@ where
         Ok(Some(lists))
     }
 
-    // Requests the lists of `headers`, each authenticated against its header's commitment.
-    async fn request<H: AlloyBlockHeader + Sealable>(
+    // Requests the lists of `blocks`, given as hash and commitment, each authenticated against
+    // its commitment.
+    async fn request(
         &mut self,
-        headers: &[SealedHeader<H>],
+        blocks: Vec<(B256, Option<B256>)>,
     ) -> Result<BlockAccessListOutcome, SnapSyncError> {
+        let (block_hashes, commitments) = blocks.into_iter().unzip();
         let request = GetBlockAccessListsMessage {
             request_id: self.context.next_request_id(),
-            block_hashes: headers.iter().map(SealedHeader::hash).collect(),
-            response_bytes: self.context.response_bytes(),
-        };
-        let downloader = BlockAccessListDownloader::new(
-            self.context.client().clone(),
-            request,
-            headers,
-            self.context.runtime().clone(),
-        )?;
-        Ok(downloader.await?)
-    }
-
-    // Requests the lists of `blocks`, each authenticated against its kept commitment.
-    async fn request_kept(
-        &mut self,
-        blocks: &[KeptBlock],
-    ) -> Result<BlockAccessListOutcome, SnapSyncError> {
-        let mut commitments = Vec::with_capacity(blocks.len());
-        for (index, block) in blocks.iter().enumerate() {
-            let block_hash = block.num_hash().hash;
-            let commitment = block
-                .commitment()
-                .ok_or(InvalidBlockAccessListRequest::MissingCommitment { index, block_hash })?;
-            commitments.push(commitment);
-        }
-        let request = GetBlockAccessListsMessage {
-            request_id: self.context.next_request_id(),
-            block_hashes: blocks.iter().map(|block| block.num_hash().hash).collect(),
+            block_hashes,
             response_bytes: self.context.response_bytes(),
         };
         let downloader = BlockAccessListDownloader::with_commitments(

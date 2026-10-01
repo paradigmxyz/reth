@@ -47,7 +47,6 @@ impl<C: SnapClient> BlockAccessListDownloader<C> {
                 supplied: headers.len(),
             })
         }
-        let mut commitments = Vec::with_capacity(headers.len());
         for (index, (requested, header)) in request.block_hashes.iter().zip(headers).enumerate() {
             if *requested != header.hash() {
                 return Err(InvalidBlockAccessListRequest::HashMismatch {
@@ -56,23 +55,17 @@ impl<C: SnapClient> BlockAccessListDownloader<C> {
                     supplied: header.hash(),
                 })
             }
-            let Some(commitment) = header.block_access_list_hash() else {
-                return Err(InvalidBlockAccessListRequest::MissingCommitment {
-                    index,
-                    block_hash: *requested,
-                })
-            };
-            commitments.push(commitment);
         }
+        let commitments = headers.iter().map(|header| header.block_access_list_hash()).collect();
         Self::with_commitments(client, request, commitments, runtime)
     }
 
     /// Creates a downloader that verifies each requested block's list against the commitment at
-    /// the same position of `commitments`.
+    /// the same position of `commitments`, which every block must carry.
     pub fn with_commitments(
         client: C,
         request: GetBlockAccessListsMessage,
-        commitments: Vec<B256>,
+        commitments: Vec<Option<B256>>,
         runtime: Runtime,
     ) -> Result<Self, InvalidBlockAccessListRequest> {
         if request.block_hashes.is_empty() {
@@ -86,10 +79,22 @@ impl<C: SnapClient> BlockAccessListDownloader<C> {
         }
         // Only authenticated block identities cross into blocking work, so the verifier stays
         // free of the caller's header type.
+        let mut blocks = Vec::with_capacity(commitments.len());
+        for (index, (requested, commitment)) in
+            request.block_hashes.iter().zip(commitments).enumerate()
+        {
+            let Some(commitment) = commitment else {
+                return Err(InvalidBlockAccessListRequest::MissingCommitment {
+                    index,
+                    block_hash: *requested,
+                })
+            };
+            blocks.push((*requested, commitment));
+        }
         let verifier = BlockAccessListVerifier {
             request_id: request.request_id,
             response_bytes: request.response_bytes,
-            blocks: request.block_hashes.iter().copied().zip(commitments).collect(),
+            blocks,
         };
         Ok(Self(VerifyingRequest::new(client, request, verifier, runtime)))
     }
