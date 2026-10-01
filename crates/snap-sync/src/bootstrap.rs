@@ -472,7 +472,7 @@ mod tests {
     use crate::{
         test_utils::{
             account, account_range, hashed_factory, header, key, policy, state_root,
-            storage_ranges, storage_root_of, verified_range, ScriptedSnapClient,
+            storage_ranges, storage_root_of, stored_slots, verified_range, ScriptedSnapClient,
         },
         StateRepairs,
     };
@@ -480,7 +480,7 @@ mod tests {
     use alloy_eips::eip7928::bal::Bal;
     use alloy_primitives::{Bytes, B256, U256};
     use reth_eth_wire_types::{
-        snap::{AccountRangeMessage, BlockAccessListsMessage},
+        snap::{AccountRangeMessage, BlockAccessListsMessage, StorageRangesMessage},
         BlockAccessLists,
     };
     use reth_network_p2p::{
@@ -560,6 +560,25 @@ mod tests {
 
     fn attempt_id(factory: &Factory) -> SnapAttemptId {
         factory.database_provider_ro().unwrap().snap_attempt().unwrap().unwrap().id()
+    }
+
+    // Serves heads in order, repeating the last, and ends the run at the first wait.
+    struct TestContext {
+        heads: RefCell<VecDeque<u64>>,
+        waits: usize,
+    }
+
+    impl SnapSyncContext for TestContext {
+        fn head(&self) -> Result<u64, SnapSyncError> {
+            let mut heads = self.heads.borrow_mut();
+            let head = if heads.len() > 1 { heads.pop_front() } else { heads.front().copied() };
+            Ok(head.expect("the context is given at least one head"))
+        }
+
+        fn wait_for_progress(&mut self, _head: u64) -> impl Future<Output = bool> + Send {
+            self.waits += 1;
+            std::future::ready(false)
+        }
     }
 
     #[tokio::test]
@@ -916,22 +935,69 @@ mod tests {
         assert_eq!(client.storage_requests().len(), 1);
     }
 
-    // Serves heads in order, repeating the last, and ends the run at the first wait.
-    struct TestContext {
-        heads: RefCell<VecDeque<u64>>,
-        waits: usize,
-    }
+    #[tokio::test]
+    async fn a_cancelled_repair_resumes_at_its_pending_slots() {
+        let slots = vec![(key(1), U256::from(11)), (key(2), U256::from(12))];
+        let mut contract = account(1);
+        contract.storage_root = storage_root_of(&slots);
+        let accounts = vec![(key(1), contract)];
+        let factory = hashed_factory();
+        insert_chain(&factory, 3, state_root(&accounts));
+        let provider = factory.database_provider_rw().unwrap();
+        let pivot = provider.sealed_header(2).unwrap().unwrap().num_hash();
+        let write =
+            provider.start_snap_attempt(SnapGeneration::new(pivot, state_root(&accounts))).unwrap();
+        provider.start_account_coverage(write).unwrap();
+        let mut repairs = StateRepairs::default();
+        repairs.insert_slot(key(1), key(1));
+        repairs.insert_slot(key(1), key(2));
+        provider.schedule_snap_repairs(write, repairs).unwrap();
+        provider.commit().unwrap();
+        let cancel = CancellationToken::new();
+        let on_request = cancel.clone();
+        // Cancellation is checked between repair batches, so the batch ends first, with
+        // `key(2)` left pending by a peer that does not serve it.
+        let client = Arc::new(
+            ScriptedSnapClient::new([
+                account_range(1, &accounts, 0..1, &[key(1)]),
+                storage_ranges(1, &[&slots[..1]], &slots, &[key(1)]),
+                Ok(WithPeerId::new(
+                    PeerId::random(),
+                    SnapResponse::StorageRanges(StorageRangesMessage {
+                        request_id: 2,
+                        slots: Vec::new(),
+                        proof: Vec::new(),
+                    }),
+                )),
+            ])
+            .on_storage_request(move || on_request.cancel()),
+        );
+        let context = TestContext { heads: RefCell::new(VecDeque::from([3])), waits: 0 };
+        let mut bootstrap =
+            SnapBootstrap::new(Arc::clone(&client), factory.clone(), Runtime::test(), context)
+                .with_policy(policy())
+                .with_cancellation(cancel);
+        assert_eq!(bootstrap.run().await.unwrap(), SnapBootstrapOutcome::Stopped);
+        assert_eq!(client.storage_requests().len(), 2);
+        let provider = factory.database_provider_ro().unwrap();
+        let pending = provider.snap_repairs(write).unwrap().slots(key(1)).collect::<Vec<_>>();
+        assert_eq!(pending, [key(2)]);
+        assert_eq!(stored_slots(&provider, key(1)), slots[..1]);
+        drop(provider);
 
-    impl SnapSyncContext for TestContext {
-        fn head(&self) -> Result<u64, SnapSyncError> {
-            let mut heads = self.heads.borrow_mut();
-            let head = if heads.len() > 1 { heads.pop_front() } else { heads.front().copied() };
-            Ok(head.expect("the context is given at least one head"))
-        }
-
-        fn wait_for_progress(&mut self, _head: u64) -> impl Future<Output = bool> + Send {
-            self.waits += 1;
-            std::future::ready(false)
-        }
+        let (client, mut resumed) = scripted(
+            &factory,
+            [
+                account_range(1, &accounts, 0..1, &[key(1)]),
+                storage_ranges(1, &[&slots[1..]], &slots, &[key(2)]),
+                Err(RequestError::UnsupportedCapability),
+            ],
+            [3],
+        );
+        assert_eq!(resumed.run().await.unwrap(), SnapBootstrapOutcome::Stopped);
+        assert_eq!(*client.storage_requests(), [(vec![key(1)], key(2))]);
+        let provider = factory.database_provider_ro().unwrap();
+        assert!(provider.snap_repairs(write).unwrap().is_empty());
+        assert_eq!(stored_slots(&provider, key(1)), slots);
     }
 }
