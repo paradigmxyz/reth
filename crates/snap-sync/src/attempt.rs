@@ -252,8 +252,8 @@ impl<T: MetadataProvider> SnapAttemptStore for T {
             }
         }
         if target.number < ancestor.number {
-            return Err(SnapSyncError::PivotNotAdvanced {
-                pivot: ancestor.number,
+            return Err(SnapSyncError::PivotBelowAncestor {
+                ancestor: ancestor.number,
                 target: target.number,
             })
         }
@@ -272,10 +272,10 @@ impl<T: MetadataProvider> SnapAttemptStore for T {
         }
         self.schedule_snap_repairs(write, repairs)?;
 
-        let applied =
-            self.catch_up_progress(write)?.ok_or(SnapSyncError::NoCatchUpProgress)?.applied();
-        // Blocks up to the ancestor are the same on both branches.
-        let applied = if applied.number <= ancestor.number { applied } else { ancestor };
+        let applied = self
+            .catch_up_progress(write)?
+            .ok_or(SnapSyncError::NoCatchUpProgress)?
+            .resume_after(ancestor);
         attempt.re_anchor(target, generation.state_root());
         self.write_snap_attempt(&attempt)?;
         CatchUpProgress::at_pivot(applied).write(self, attempt.id())?;

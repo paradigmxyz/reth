@@ -16,7 +16,7 @@ use reth_primitives_traits::AlloyBlockHeader;
 use reth_storage_api::HeaderProvider;
 
 // EIP-8189's example anchor, matching go-ethereum's `fsMinFullBlocks`.
-pub(crate) const DEFAULT_HEAD_DISTANCE: u64 = 64;
+const DEFAULT_HEAD_DISTANCE: u64 = 64;
 
 // Blocks of state history a serving peer is assumed to still hold, mirroring reth's own
 // `SNAPSHOT_STATE_RETENTION`.

@@ -85,6 +85,16 @@ impl CatchUpProgress {
         self.applied
     }
 
+    /// Last applied block that stays canonical after a reorg back to `ancestor`, the blocks up to
+    /// which are the same on both branches.
+    pub const fn resume_after(&self, ancestor: BlockNumHash) -> BlockNumHash {
+        if self.applied.number <= ancestor.number {
+            self.applied
+        } else {
+            ancestor
+        }
+    }
+
     /// Number of the block whose list comes next.
     pub const fn next(&self) -> u64 {
         self.applied.number + 1

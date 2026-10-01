@@ -270,10 +270,11 @@ where
             info!(target: "sync::snap", ?pivot, ?ancestor, "Snap pivot was reorged across block access list activation, restarting");
             return Ok(Step::Restart)
         }
-        let applied =
-            provider.catch_up_progress(write)?.ok_or(SnapSyncError::NoCatchUpProgress)?.applied();
-        // Catch-up resumes from the ancestor, or from below it when it had not reached it yet.
-        let resume = applied.number.min(ancestor.number);
+        let resume = provider
+            .catch_up_progress(write)?
+            .ok_or(SnapSyncError::NoCatchUpProgress)?
+            .resume_after(ancestor)
+            .number;
         if !self.policy.is_catchable_from(resume, head) {
             info!(target: "sync::snap", ?pivot, ?ancestor, resume, head, "Orphaned block access lists expired, restarting");
             return Ok(Step::Restart)
@@ -443,16 +444,16 @@ where
         Ok(Step::HandedOff(write))
     }
 
-    // Runs `write` in one transaction on the blocking pool, committing only if it succeeds.
+    // Runs `apply` in one transaction on the blocking pool, committing only if it succeeds.
     async fn commit_blocking(
         &self,
-        write: impl FnOnce(&F::ProviderRW) -> Result<(), SnapSyncError> + Send + 'static,
+        apply: impl FnOnce(&F::ProviderRW) -> Result<(), SnapSyncError> + Send + 'static,
     ) -> Result<(), SnapSyncError> {
         let factory = self.factory.clone();
         self.runtime
             .spawn_blocking(move || -> Result<(), SnapSyncError> {
                 let provider = factory.database_provider_rw()?;
-                write(&provider)?;
+                apply(&provider)?;
                 provider.commit()?;
                 Ok(())
             })
@@ -659,10 +660,7 @@ mod tests {
         provider.schedule_snap_repairs(write, repairs).unwrap();
         provider.commit().unwrap();
         // No peer serves the repair at pivot 2 any more.
-        let unserved =
-            AccountRangeMessage { request_id: 1, accounts: Vec::new(), proof: Vec::new() };
-        let unserved = Ok(WithPeerId::new(PeerId::random(), SnapResponse::AccountRange(unserved)));
-        let (_, mut bootstrap) = scripted(&factory, [unserved], [3]);
+        let (_, mut bootstrap) = scripted(&factory, [unserved_range(1)], [3]);
         assert_eq!(bootstrap.run().await.unwrap(), SnapBootstrapOutcome::Stopped);
 
         // Once the head moves on, the pivot advances and the repair is fetched there.
@@ -1105,25 +1103,39 @@ mod tests {
             .to_vec()
     }
 
+    // A peer serving no account range.
+    fn unserved_range(request_id: u64) -> PeerRequestResult<SnapResponse> {
+        let message = AccountRangeMessage { request_id, accounts: Vec::new(), proof: Vec::new() };
+        Ok(WithPeerId::new(PeerId::random(), SnapResponse::AccountRange(message)))
+    }
+
+    // A peer serving the account at `hashed_address` alone.
+    fn served_account(
+        request_id: u64,
+        accounts: &[(B256, TrieAccount)],
+        hashed_address: B256,
+    ) -> PeerRequestResult<SnapResponse> {
+        let index = accounts.iter().position(|(key, _)| *key == hashed_address).unwrap();
+        account_range(request_id, accounts, index..index + 1, &[hashed_address])
+    }
+
+    fn hashes(headers: &[SealedHeader]) -> Vec<B256> {
+        headers.iter().map(SealedHeader::hash).collect()
+    }
+
     // Runs a bootstrap through a reorg to a branch whose first lists are `new_lists`, returning
     // the account ranges it fetched again.
     async fn recover(new_lists: [Vec<AccountChanges>; 2], repaired: bool) -> Vec<B256> {
         let accounts = reorg_accounts();
         let factory = hashed_factory();
         let (attempt, orphaned, new) = reorged(&factory, new_lists.clone());
-        let stale_index = accounts.iter().position(|(key, _)| *key == keccak256(STALE)).unwrap();
         let mut responses = vec![
             lists(1, &orphaned_lists(), true),
             // Blocks 3 and 4 of the new branch carry the state to its pivot.
             lists(2, &new_lists, true),
         ];
         if repaired {
-            responses.push(account_range(
-                1,
-                &accounts,
-                stale_index..stale_index + 1,
-                &[keccak256(STALE)],
-            ));
+            responses.push(served_account(1, &accounts, keccak256(STALE)));
         }
         let (client, mut bootstrap) = scripted(&factory, responses, [5]);
 
@@ -1134,8 +1146,6 @@ mod tests {
         };
         assert_eq!(pivot, new[1].num_hash());
         assert_eq!(attempt_id(&factory), attempt);
-        let hashes =
-            |headers: &[SealedHeader]| headers.iter().map(SealedHeader::hash).collect::<Vec<_>>();
         assert_eq!(*client.block_requests(), [hashes(&orphaned), hashes(&new[..2])]);
         let origins = client.origins().clone();
         // The repaired state is the new pivot's, as its header commits to.
@@ -1225,10 +1235,8 @@ mod tests {
         let first_lists = [vec![kept], Vec::new()];
         let (attempt, _, first) = reorged(&factory, first_lists.clone());
         // Catch-up applies the first new branch, then no peer serves the repair at its pivot.
-        let unserved =
-            AccountRangeMessage { request_id: 1, accounts: Vec::new(), proof: Vec::new() };
-        let unserved = Ok(WithPeerId::new(PeerId::random(), SnapResponse::AccountRange(unserved)));
-        let responses = [lists(1, &orphaned_lists(), true), lists(2, &first_lists, true), unserved];
+        let responses =
+            [lists(1, &orphaned_lists(), true), lists(2, &first_lists, true), unserved_range(1)];
         let (_, mut bootstrap) = scripted(&factory, responses, [5]);
         assert_eq!(bootstrap.run().await.unwrap(), SnapBootstrapOutcome::Stopped);
 
@@ -1242,8 +1250,7 @@ mod tests {
         let mut repaired = [keccak256(STALE), keccak256(KEPT)];
         repaired.sort();
         for (id, hashed_address) in (1..).zip(repaired) {
-            let index = accounts.iter().position(|(key, _)| *key == hashed_address).unwrap();
-            responses.push(account_range(id, &accounts, index..index + 1, &[hashed_address]));
+            responses.push(served_account(id, &accounts, hashed_address));
         }
         let (client, mut bootstrap) = scripted(&factory, responses, [5]);
 
@@ -1254,8 +1261,6 @@ mod tests {
         };
         assert_eq!(pivot, second[1].num_hash());
         assert_eq!(attempt_id(&factory), attempt);
-        let hashes =
-            |headers: &[SealedHeader]| headers.iter().map(SealedHeader::hash).collect::<Vec<_>>();
         assert_eq!(client.block_requests()[0], hashes(&first[..2]));
         assert_eq!(*client.origins(), repaired);
         let verified = rebuild_and_verify(&factory, write, pivot.number);
@@ -1272,11 +1277,10 @@ mod tests {
         assert_eq!(attempt_id(&factory), attempt);
 
         // A restarted node resumes the orphaned attempt, and another peer serves them.
-        let stale_index = accounts.iter().position(|(key, _)| *key == keccak256(STALE)).unwrap();
         let responses = [
             lists(1, &orphaned_lists(), true),
             lists(2, &[Vec::new(), Vec::new()], true),
-            account_range(1, &accounts, stale_index..stale_index + 1, &[keccak256(STALE)]),
+            served_account(1, &accounts, keccak256(STALE)),
         ];
         let (client, mut bootstrap) = scripted(&factory, responses, [5]);
         let outcome = bootstrap.run().await.unwrap();
@@ -1286,10 +1290,7 @@ mod tests {
         };
         assert_eq!(pivot, new[1].num_hash());
         assert_eq!(attempt_id(&factory), attempt);
-        assert_eq!(
-            client.block_requests()[0],
-            orphaned.iter().map(SealedHeader::hash).collect::<Vec<_>>()
-        );
+        assert_eq!(client.block_requests()[0], hashes(&orphaned));
     }
 
     #[tokio::test]

@@ -5,7 +5,7 @@
 //! new branch overwrites it first. The reorg removes that branch's headers from the canonical
 //! chain, so the attempt keeps them from the moment it anchors.
 
-use crate::{common::SnapRecord, pivot::DEFAULT_HEAD_DISTANCE, SnapSyncError};
+use crate::{common::SnapRecord, SnapSyncError};
 use alloy_eips::BlockNumHash;
 use alloy_primitives::Bytes;
 use alloy_rlp::Decodable;
@@ -15,6 +15,10 @@ use reth_storage_api::{
 };
 use reth_storage_errors::provider::ProviderError;
 use serde::{Deserialize, Serialize};
+
+// Blocks of headers an attempt keeps through its pivot, bounding how deep a recoverable reorg
+// can reach.
+const KEPT_HEADERS: u64 = 64;
 
 /// Where a reorg left an attempt: the last block both branches share and the orphaned blocks
 /// after it.
@@ -56,15 +60,14 @@ impl SnapRecord for StoredAncestry {
 }
 
 impl StoredAncestry {
-    // Keeps the canonical headers of the last `DEFAULT_HEAD_DISTANCE` blocks through `pivot` for
-    // `attempt`, bounding how deep a recoverable reorg can reach. Keeps none unless they reach the
-    // pivot, leaving a reorg unrecoverable.
+    // Keeps the canonical headers of the last `KEPT_HEADERS` blocks through `pivot` for `attempt`.
+    // Keeps none unless they reach the pivot, leaving a reorg unrecoverable.
     pub(crate) fn record<P: HeaderProvider + MetadataWriter>(
         provider: &P,
         attempt: SnapAttemptId,
         pivot: BlockNumHash,
     ) -> Result<(), SnapSyncError> {
-        let from = pivot.number.saturating_sub(DEFAULT_HEAD_DISTANCE) + 1;
+        let from = pivot.number.saturating_sub(KEPT_HEADERS) + 1;
         let headers = provider.sealed_headers_range(from..=pivot.number)?;
         let contiguous = headers.windows(2).all(|pair| pair[1].parent_hash() == pair[0].hash());
         if !contiguous || headers.last().map(SealedHeader::num_hash) != Some(pivot) {
@@ -239,7 +242,7 @@ mod tests {
     #[test]
     fn a_reorg_below_the_kept_headers_is_unrecoverable() {
         let address = Address::repeat_byte(0x11);
-        let depth = DEFAULT_HEAD_DISTANCE + 2;
+        let depth = KEPT_HEADERS + 2;
         let old = BalChain::new(1, (0..depth).map(|n| credit(address, n)));
         let new = BalChain::new(1, (0..depth).map(|n| credit(address, n + 100)));
         let (factory, write) = started(&old, 1 + depth);
